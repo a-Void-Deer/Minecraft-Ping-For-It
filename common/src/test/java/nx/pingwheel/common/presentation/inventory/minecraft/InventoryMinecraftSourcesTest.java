@@ -225,13 +225,13 @@ class InventoryMinecraftSourcesTest {
 			backend.handle(world.input.readOwner(), InventoryC2SPacket.open(host.epoch(), 100, 1, 1, world.input.target(), world.input.face()), 0, settings);
 			int period = settings.getPreview().getPeriodTicks(), visibleSlots = 2 * 27, variants = 12;
 			long now = 0;
-			InventoryS2CPacket completed = null;
-			// A frozen capture is not a consumed observation. Allow one slot and one
-			// part per period, plus the completion control, without assuming page width.
+			@org.jetbrains.annotations.Nullable InventoryS2CPacket completed = null;
+			// Allow one slot and one part per period without assuming page width.
+			// These native sources complete as stable-slot sweeps, not atomic captures.
 			for (int attempt = 0; attempt < visibleSlots + 2 * variants + 1 && completed == null; attempt++, now += period) {
 				backend.tick(now, settings);
 				completed = host.sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.completeScan()
-					&& p.entries().isEmpty() && p.status() == InventoryS2CPacket.Status.READY).findFirst().orElse(null);
+					&& p.partIndex() == p.partCount() - 1 && p.status() == InventoryS2CPacket.Status.READY).findFirst().orElse(null);
 			}
 			assertNotNull(completed, "the bounded 54-slot observation and its earlier partial cuts must finish");
 			var first = host.sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
@@ -276,11 +276,11 @@ class InventoryMinecraftSourcesTest {
 			backend.handle(world.input.readOwner(), InventoryC2SPacket.open(host.epoch(), 100, 1, 1, world.input.target(), world.input.face()), 0, settings);
 			int period = settings.getPreview().getPeriodTicks(), visibleSlots = 2 * 27, variants = 12;
 			long now = 0;
-			InventoryS2CPacket completed = null;
+			@org.jetbrains.annotations.Nullable InventoryS2CPacket completed = null;
 			for (int attempt = 0; attempt < visibleSlots + 2 * variants + 1 && completed == null; attempt++, now += period) {
 				backend.tick(now, settings);
 				completed = host.sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.completeScan()
-					&& p.entries().isEmpty() && p.status() == InventoryS2CPacket.Status.READY).findFirst().orElse(null);
+					&& p.partIndex() == p.partCount() - 1 && p.status() == InventoryS2CPacket.Status.READY).findFirst().orElse(null);
 			}
 			assertNotNull(completed, "ordinary mutation starts only after the bounded 54-slot observation completes");
 			var first = host.sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
@@ -308,7 +308,7 @@ class InventoryMinecraftSourcesTest {
 			assertEquals(java.util.stream.IntStream.range(0, cut.partCount()).boxed().toList(), parts.stream().map(InventoryS2CPacket::partIndex).sorted().toList());
 			assertTrue(parts.stream().allMatch(p -> p.completeScan() && p.status() == InventoryS2CPacket.Status.READY && p.checksum() == cut.checksum()));
 			assertTrue(host.sent.subList(replayStart, host.sent.size()).stream().filter(p -> !p.entries().isEmpty()).allMatch(belongsToCut), "ordinary mutation creates no replacement cut or new baseline/state");
-			assertTrue(host.sent.subList(replayStart, host.sent.size()).stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.entries().isEmpty()
+			assertTrue(host.sent.subList(replayStart, host.sent.size()).stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.partIndex() == p.partCount() - 1
 				&& p.baselineId() == cut.baselineId() && p.statusRevision() == cut.statusRevision() && p.watermark() == cut.watermark()
 				&& p.completeScan() && p.status() == InventoryS2CPacket.Status.READY && p.checksum() == cut.checksum()), "the completed cut reaches its matching delivery barrier");
 			assertEquals(variants, parts.stream().flatMap(p -> p.entries().stream()).count());

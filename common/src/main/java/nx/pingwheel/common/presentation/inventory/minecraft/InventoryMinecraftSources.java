@@ -10,6 +10,7 @@ import java.util.function.Function;
 import java.util.function.IntFunction;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import org.jetbrains.annotations.Nullable;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -77,10 +78,16 @@ public final class InventoryMinecraftSources {
 		}
 	}
 	private record Slot(Container container, int index) {}
-	record View(String identity, List<BlockEntity> entities, List<Slot> slots, IPlatformInventoryService.Access access,
-		InventorySnapshotLayout snapshotLayout, boolean discoverItems) {
-		View(String identity, List<BlockEntity> entities, List<Slot> slots, IPlatformInventoryService.Access access) {
-			this(identity, entities, slots, access, null, false);
+	record View(String identity, @org.jetbrains.annotations.Unmodifiable List<BlockEntity> entities,
+		@org.jetbrains.annotations.Unmodifiable List<Slot> slots, IPlatformInventoryService.@Nullable Access access,
+		@Nullable InventorySnapshotLayout snapshotLayout, boolean discoverItems,
+		@org.jetbrains.annotations.Unmodifiable List<BlockEntity> providerMembers) {
+		View(String identity, List<BlockEntity> entities, List<Slot> slots, IPlatformInventoryService.@Nullable Access access) {
+			this(identity, entities, slots, access, null, false, List.of());
+		}
+		View(String identity, List<BlockEntity> entities, List<Slot> slots, IPlatformInventoryService.@Nullable Access access,
+			@Nullable InventorySnapshotLayout snapshotLayout, boolean discoverItems) {
+			this(identity, entities, slots, access, snapshotLayout, discoverItems, List.of());
 		}
 	}
 
@@ -171,6 +178,32 @@ public final class InventoryMinecraftSources {
 	 * caller-supplied value, never a global static or client preference.
 	 */
 	public static Optional<InventorySourceAccess.Source> resolve(MinecraftServer server, InventorySourceInput input, int displayBytes) {
+		return resolve(server, input, displayBytes, new InventoryValidationBudget.Allowance(resolutionValidationCost(input)));
+	}
+	/** Explicit adapter conversion owns a catalogue only if that conversion is actually used. */
+	private static final class CompatibilityCodec implements AdmittedEntryCodec {
+		private final HolderLookup.Provider registries;
+		private int displayBytes;
+		private InventoryItemCodec.@Nullable Catalog catalog;
+		CompatibilityCodec(HolderLookup.Provider registries, int displayBytes) { this.registries = registries; this.displayBytes = displayBytes; }
+		private InventoryItemCodec.Catalog catalog() {
+			if (catalog == null) catalog = new InventoryItemCodec.Catalog(registries, displayBytes);
+			return catalog;
+		}
+		@Override public InventoryDomainCodec.@Nullable Item apply(IPlatformInventoryService.Entry entry) { return item(catalog(), entry, null); }
+		@Override public InventoryDomainCodec.@Nullable Item apply(IPlatformInventoryService.Entry entry, InventoryCatalogAdmission admission) { return item(catalog(), entry, admission); }
+		void tightenDisplay(int ceiling) { displayBytes = Math.min(displayBytes, ceiling); if (catalog != null) catalog.tightenDisplay(ceiling); }
+		InventoryReprojectionSummary summary(int ceiling) { return catalog == null ? InventoryReprojectionSummary.EMPTY : catalog.reprojectionSummary(ceiling); }
+	}
+	/** No world/provider access: admission is possible before a Source or its member/slot metadata exists. */
+	public static InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput input) {
+		String id = input.target() instanceof Target.ExternalBlockTarget external ? external.expectedBlockRegistryId()
+			: input.ordinaryTarget().orElseThrow().blockRegistryId();
+		return InventoryValidationBudget.resolution(id);
+	}
+	public static Optional<InventorySourceAccess.Source> resolve(MinecraftServer server, InventorySourceInput input, int displayBytes,
+		InventoryValidationBudget.Allowance allowance) {
+		allowance.debit(resolutionValidationCost(input));
 		if (!server.isSameThread()) return Optional.empty();
 		requireDisplayBytes(displayBytes);
 		var dimension = ResourceLocation.tryParse(input.target().dimensionId());
@@ -179,21 +212,17 @@ public final class InventoryMinecraftSources {
 		if (level == null || owner == null) return Optional.empty();
 		try {
 			Supplier<ServerPlayer> ownerSupplier = () -> server.getPlayerList().getPlayer(input.readOwner());
-			var catalog = new InventoryItemCodec.Catalog(level.registryAccess(), displayBytes);
-			Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec = new AdmittedEntryCodec() {
-				@Override public InventoryDomainCodec.Item apply(IPlatformInventoryService.Entry entry) { return item(catalog, entry, null); }
-				@Override public InventoryDomainCodec.Item apply(IPlatformInventoryService.Entry entry, InventoryCatalogAdmission admission) { return item(catalog, entry, admission); }
-			};
+			var codec = new CompatibilityCodec(level.registryAccess(), displayBytes);
 			if (input.target() instanceof Target.ExternalBlockTarget external) {
 				return resolveExternal(input, () -> bindExternal(server, ownerSupplier, external), server::isSameThread, codec,
-					displayBytes, catalog::tightenDisplay, catalog::reprojectionSummary);
+					displayBytes, codec::tightenDisplay, codec::summary, allowance, false);
 			}
 			ServerWorld world = new ServerWorld(level, ownerSupplier);
 			ProviderAccessLookup providers = (pos, face) -> IPlatformInventoryService.INSTANCE.find(level, pos, face);
 			View view = view(world, input, providers);
 			return Optional.of(new Source(input, view, server::isSameThread, () -> view(world, input,
 				new PhysicalRead(input.ordinaryTarget().orElseThrow(), input.face(), world::isLoaded), providers, view.snapshotLayout, true), codec, world, null,
-				displayBytes, catalog::tightenDisplay, catalog::reprojectionSummary));
+				displayBytes, codec::tightenDisplay, codec::summary));
 		} catch (RuntimeException | LinkageError unavailable) {
 			InventorySnapshotDiagnostics.failure("inventory-source-resolve", input, null, () -> "displayBytes=" + displayBytes, unavailable);
 			return Optional.empty();
@@ -238,6 +267,20 @@ public final class InventoryMinecraftSources {
 		ExternalBindingResolver bindings, BooleanSupplier onThread,
 		Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec,
 		int displayBytes, java.util.function.IntConsumer tightenDisplay, IntFunction<InventoryReprojectionSummary> reprojectionSummary) {
+		return resolveExternal(input, bindings, onThread, codec, displayBytes, tightenDisplay, reprojectionSummary,
+			new InventoryValidationBudget.Allowance(resolutionValidationCost(input)), true);
+	}
+	static Optional<InventorySourceAccess.Source> resolveExternal(InventorySourceInput input,
+		ExternalBindingResolver bindings, BooleanSupplier onThread, Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec,
+		int displayBytes, java.util.function.IntConsumer tightenDisplay, IntFunction<InventoryReprojectionSummary> reprojectionSummary,
+		InventoryValidationBudget.Allowance allowance) {
+		return resolveExternal(input, bindings, onThread, codec, displayBytes, tightenDisplay, reprojectionSummary, allowance, true);
+	}
+	private static Optional<InventorySourceAccess.Source> resolveExternal(InventorySourceInput input,
+		ExternalBindingResolver bindings, BooleanSupplier onThread, Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec,
+		int displayBytes, java.util.function.IntConsumer tightenDisplay, IntFunction<InventoryReprojectionSummary> reprojectionSummary,
+		InventoryValidationBudget.Allowance allowance, boolean debit) {
+		if (debit) allowance.debit(resolutionValidationCost(input));
 		if (!(input.target() instanceof Target.ExternalBlockTarget) || !onThread.getAsBoolean()) return Optional.empty();
 		requireDisplayBytes(displayBytes);
 		try {
@@ -338,15 +381,21 @@ public final class InventoryMinecraftSources {
 		}
 		String accessIdentity = access.alias().orElse(identity);
 		InventorySnapshotLayout layout = providerLayout(input, pos, access, physical::contains, false, expected, enforceShape);
-		InventorySnapshotLayout admittedLayout = layout;
+		@Nullable InventorySnapshotLayout admittedLayout = layout;
 		List<BlockEntity> admittedMembers = layout == null ? List.copyOf(entities) : precheckMembers(layout, world, physical.memberGate());
-		var admittedBlocks = new net.minecraft.world.level.block.Block[admittedMembers.size()];
-		for (int index = 0; index < admittedBlocks.length; index++) admittedBlocks[index] = admittedMembers.get(index).getBlockState().getBlock();
-		access = access.scopedResidents(new IPlatformInventoryService.ResidentScope() {
+		// Member/owner prechecks above remain eager. Only the optional resident
+		// evidence and its private scratch/mapping caches belong to this factory.
+		access = access.scopedResidents(() -> new IPlatformInventoryService.ResidentScope() {
+			private final net.minecraft.world.level.block.Block @org.jetbrains.annotations.Unmodifiable [] admittedBlocks = admittedBlocks();
 			private final InventoryContainerReads.Scratch scopeScratch = new InventoryContainerReads.Scratch();
-			private final Container[] mappedContainers = new Container[32];
-			private final List<?>[] mappedSlots = new List<?>[32];
+			private final @Nullable Container[] mappedContainers = new Container[32];
+			private final @Nullable @org.jetbrains.annotations.Unmodifiable List<?>[] mappedSlots = new List<?>[32];
 			private int mappedCount;
+			private net.minecraft.world.level.block.Block @org.jetbrains.annotations.Unmodifiable [] admittedBlocks() {
+				var blocks = new net.minecraft.world.level.block.Block[admittedMembers.size()];
+				for (int index = 0; index < blocks.length; index++) blocks[index] = admittedMembers.get(index).getBlockState().getBlock();
+				return blocks;
+			}
 			@Override public Direction face() { return face; }
 			@Override public boolean valid() {
 				try {
@@ -387,19 +436,19 @@ public final class InventoryMinecraftSources {
 			@Override public boolean audited(Container container) {
 				return InventoryContainerReads.audited(container, this::allows, scopeScratch);
 			}
-			@Override public List<Integer> slots(Container container) {
+			@Override public @Nullable @org.jetbrains.annotations.Unmodifiable List<Integer> slots(Container container) {
 				if (!valid() || admittedLayout == null) return null;
 				InventoryContainerReads.requireScope(container, this::allows, scopeScratch);
 				for (int index = 0; index < mappedCount; index++) if (mappedContainers[index] == container) {
-					@SuppressWarnings("unchecked") var mapping = (List<Integer>) mappedSlots[index];
+					@SuppressWarnings("unchecked") @Nullable @org.jetbrains.annotations.Unmodifiable List<Integer> mapping = (List<Integer>) mappedSlots[index];
 					return mapping; // immutable frozen witness, never rebuild/box all slots per read
 				}
-				var mapping = InventoryContainerReads.scopedSlots(container, this::allows, this::localSlots, scopeScratch);
+				@Nullable @org.jetbrains.annotations.Unmodifiable List<Integer> mapping = InventoryContainerReads.scopedSlots(container, this::allows, this::localSlots, scopeScratch);
 				if (mappedCount == mappedContainers.length) throw new IllegalStateException("inventory wrapper mapping bound");
 				mappedContainers[mappedCount] = container; mappedSlots[mappedCount++] = mapping;
 				return mapping;
 			}
-			private List<Integer> localSlots(Container container) {
+			private @Nullable @org.jetbrains.annotations.Unmodifiable List<Integer> localSlots(Container container) {
 				for (int i = 0; i < admittedMembers.size(); i++) if (admittedMembers.get(i) == container) {
 					var segments = admittedLayout.members().get(i).segments();
 					return segments.size() == 1 ? segments.getFirst().visibleSlots() : null;
@@ -408,7 +457,9 @@ public final class InventoryMinecraftSources {
 			}
 		});
 		if (layout != null && visibleSlots(layout) != access.slots()) throw new InventorySourceUnavailableException("provider layout changed scoped slot witness");
-		return new View(accessIdentity, List.copyOf(entities), List.of(), access, layout, false);
+		return new View(accessIdentity, List.copyOf(entities), List.of(), access, layout, false,
+			access instanceof IPlatformInventoryService.InPlaceRevalidatingAccess && input.target() instanceof Target.BlockTarget
+				? List.copyOf(admittedMembers) : List.of());
 	}
 
 	/**
@@ -505,17 +556,25 @@ public final class InventoryMinecraftSources {
 		private final java.util.function.BooleanSupplier onThread;
 		private final java.util.function.Supplier<View> liveView;
 		private final java.util.function.Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec;
-		private final SourceWorld world;
-		private final Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture;
+		private final @Nullable SourceWorld world;
+		private final @Nullable Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture;
 		private final int originalSlots;
 		private final boolean originalStableCursor;
 		private final java.util.function.IntConsumer tightenDisplay;
 		private final IntFunction<InventoryReprojectionSummary> compatibilityReprojectionSummary;
 		private int displayBytes;
-		private IPlatformInventoryService.Access liveAccess;
-		private InventoryItemCodec.Catalog residentCatalog;
-		private InventoryValidationBudget.Allowance validation;
+		private IPlatformInventoryService.@Nullable Access liveAccess;
+		private int operationDepth;
+		private InventoryItemCodec.@Nullable Catalog residentCatalog;
+		private InventoryValidationBudget.@Nullable Allowance validation;
 		private final InventoryValidationBudget.Cost validationViewCost;
+		private final InventoryValidationBudget.Cost nativeReadCost;
+		private final InventoryValidationBudget.Cost @org.jetbrains.annotations.Unmodifiable [] readCosts;
+		private final IPlatformInventoryService.@Nullable InPlaceRevalidatingAccess inPlaceAccess;
+		private final @Nullable BlockPos rootPosition;
+		private final @Nullable ResourceLocation rootBlock;
+		private final ResourceLocation @org.jetbrains.annotations.Unmodifiable [] memberBlocks, memberTypes;
+		private final long sourceRetainedBytes;
 		private boolean closed;
 		Source(InventorySourceInput input, View original, java.util.function.BooleanSupplier onThread,
 			java.util.function.Supplier<View> liveView, java.util.function.Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec) {
@@ -523,20 +582,20 @@ public final class InventoryMinecraftSources {
 		}
 		Source(InventorySourceInput input, View original, java.util.function.BooleanSupplier onThread,
 			java.util.function.Supplier<View> liveView, java.util.function.Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec,
-			Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture) {
+			@Nullable Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture) {
 			this(input, original, onThread, liveView, codec, (SourceWorld) null, testSnapshotCapture);
 		}
 		/** Test seam: the production view and capture algorithms over injected server-thread world facts. */
 		Source(InventorySourceInput input, View original, java.util.function.BooleanSupplier onThread,
 			java.util.function.Supplier<View> liveView, java.util.function.Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec,
-			SourceWorld world, Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture) {
+			@Nullable SourceWorld world, @Nullable Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture) {
 			this(input, original, onThread, liveView, codec, world, testSnapshotCapture,
 				InventoryItemCodec.MAX_DISPLAY_BYTES, ignored -> {}, ignored -> InventoryReprojectionSummary.EMPTY);
 		}
 		/** Legacy trusted hook: opaque mutating callbacks need an explicit summary before Runtime can tighten them. */
 		Source(InventorySourceInput input, View original, java.util.function.BooleanSupplier onThread,
 			java.util.function.Supplier<View> liveView, java.util.function.Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec,
-			SourceWorld world, Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture,
+			@Nullable SourceWorld world, @Nullable Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture,
 			int displayBytes, java.util.function.IntConsumer tightenDisplay) {
 			this(input, original, onThread, liveView, codec, world, testSnapshotCapture, displayBytes, tightenDisplay,
 				ignored -> InventoryReprojectionSummary.UNKNOWN);
@@ -544,20 +603,54 @@ public final class InventoryMinecraftSources {
 		/** Production seam: a pure cached summary accompanies the caller-owned compatibility catalogue hook. */
 		Source(InventorySourceInput input, View original, java.util.function.BooleanSupplier onThread,
 			java.util.function.Supplier<View> liveView, java.util.function.Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec,
-			SourceWorld world, Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture,
+			@Nullable SourceWorld world, @Nullable Supplier<Optional<InventorySourceAccess.InventorySnapshot>> testSnapshotCapture,
 			int displayBytes, java.util.function.IntConsumer tightenDisplay, IntFunction<InventoryReprojectionSummary> reprojectionSummary) {
 			this.input = input; this.original = original; this.onThread = onThread; this.liveView = liveView; this.codec = codec;
 			this.world = world; this.testSnapshotCapture = testSnapshotCapture;
-			this.validationViewCost = InventoryValidationBudget.viewValidation(original.snapshotLayout, vault(original.snapshotLayout), lockMembers(original.snapshotLayout));
+			this.inPlaceAccess = world != null && input.target() instanceof Target.BlockTarget && original.snapshotLayout != null
+				&& original.providerMembers.size() == original.snapshotLayout.members().size() && !original.entities.isEmpty()
+				&& original.access instanceof IPlatformInventoryService.InPlaceRevalidatingAccess capable ? capable : null;
+			@Nullable var target = input.ordinaryTarget().orElse(null);
+			rootPosition = inPlaceAccess == null || target == null ? null : new BlockPos(target.x(), target.y(), target.z());
+			rootBlock = inPlaceAccess == null ? null : ResourceLocation.parse(input.ordinaryTarget().orElseThrow().blockRegistryId());
+			memberBlocks = new ResourceLocation[inPlaceAccess == null ? 0 : original.providerMembers.size()];
+			memberTypes = new ResourceLocation[memberBlocks.length];
+			for (int index = 0; index < memberBlocks.length; index++) {
+				var member = original.snapshotLayout.members().get(index);
+				memberBlocks[index] = ResourceLocation.parse(member.blockId());
+				memberTypes[index] = ResourceLocation.parse(member.blockEntityId());
+			}
+			this.validationViewCost = inPlaceAccess == null
+				? InventoryValidationBudget.viewValidation(original.snapshotLayout, vault(original.snapshotLayout), lockMembers(original.snapshotLayout))
+				: inPlaceAccess.currentValidationCost().plus(InventoryValidationBudget.currentMembers(original.providerMembers));
+			this.nativeReadCost = inPlaceAccess == null
+				? original.snapshotLayout == null ? InventoryValidationBudget.classification(1, true).times(4)
+					: InventoryValidationBudget.nativeRead(original.snapshotLayout, original.access != null, vault(original.snapshotLayout))
+				: inPlaceAccess.nativeReadCost();
 			this.displayBytes = requireDisplayBytes(displayBytes);
 			this.tightenDisplay = Objects.requireNonNull(tightenDisplay, "tightenDisplay");
 			this.compatibilityReprojectionSummary = Objects.requireNonNull(reprojectionSummary, "reprojectionSummary");
-			if (world != null) residentCatalog = new InventoryItemCodec.Catalog(world.registries(), displayBytes);
 			originalSlots = original.access == null ? original.slots.size() : original.access.slots();
 			originalStableCursor = original.access == null || original.access.stableCursor();
+			readCosts = new InventoryValidationBudget.Cost[InventorySourceAccess.MAX_STEP + 1];
+			for (int count = 0; count < readCosts.length; count++) readCosts[count] = validationViewCost
+				.times(originalStableCursor ? 2L * count : count + 2L).plus(nativeReadCost.times(count));
 			liveAccess = original.access;
+			sourceRetainedBytes = InventorySourceRetention.source(original);
 		}
+		@Override public long sourceRetainedBytes() { return sourceRetainedBytes; }
 		@Override public int displayBytes() { return displayBytes; }
+		@Override public InventorySourceAccess.ReadMode readMode() {
+			return world != null && originalStableCursor && testSnapshotCapture == null ? InventorySourceAccess.ReadMode.NATIVE_INCREMENTAL : InventorySourceAccess.ReadMode.ADAPTER;
+		}
+		@Override public InventoryItemCodec.@Nullable Catalog nativeCatalog() { return residentCatalog; }
+		@Override public long nativeCatalogGrowthUpperBound() {
+			return residentCatalog == null ? InventoryItemCodec.Catalog.initialModeledBytes() + InventoryItemCodec.Catalog.firstReadGrowthUpperBound(displayBytes) : residentCatalog.retainedGrowthUpperBound();
+		}
+		private InventoryItemCodec.Catalog catalog(HolderLookup.Provider registries) {
+			if (residentCatalog == null) residentCatalog = new InventoryItemCodec.Catalog(registries, displayBytes);
+			return residentCatalog;
+		}
 		@Override public InventoryReprojectionSummary reprojectionSummary(int displayBytes) {
 			int ceiling = requireDisplayBytes(displayBytes);
 			if (ceiling >= this.displayBytes) return InventoryReprojectionSummary.EMPTY;
@@ -575,9 +668,12 @@ public final class InventoryMinecraftSources {
 		@Override public SourceKey key() { return new SourceKey(original.access == null ? "minecraft" : "pingforit", "block_inventory", original.identity, input.viewKey()); }
 		@Override public boolean valid() {
 			if (closed || !onThread.getAsBoolean()) return false;
-			if (validationViewCost != null)
-				(validation == null ? new InventoryValidationBudget.Allowance(validationViewCost) : validation).debit(validationViewCost);
+			(validation == null ? new InventoryValidationBudget.Allowance(validationViewCost) : validation).debit(validationViewCost);
 			try {
+				// The provider's old frozen evidence and its current route are independent
+				// checks. A refusal never falls through to an unreserved rebuild.
+				if (inPlaceAccess != null) return inPlaceAccess.valid() && currentMembersValid()
+					&& inPlaceAccess.revalidateCurrent(original.snapshotLayout);
 				// A freshly reacquired wrapper validates its *new* topology. Validate
 				// the admitted access's frozen evidence first, without object-identity equality.
 				if (original.access != null && (!original.access.valid() || original.access.slots() != originalSlots
@@ -589,7 +685,7 @@ public final class InventoryMinecraftSources {
 					|| current.discoverItems != original.discoverItems) return false;
 				if ((current.access == null) != (original.access == null) || current.access != null && (!current.access.valid()
 					|| current.access.slots() != originalSlots || current.access.stableCursor() != originalStableCursor)) return false;
-				liveAccess = current.access;
+				if (operationDepth != 0) liveAccess = current.access;
 				return true;
 			} catch (InventoryItemBudget.CaptureLimitException exhausted) { throw exhausted; }
 			catch (RuntimeException | LinkageError unavailable) {
@@ -598,14 +694,42 @@ public final class InventoryMinecraftSources {
 			}
 		}
 		@Override public boolean valid(InventoryValidationBudget.Allowance allowance) {
-			var previous = validation; validation = Objects.requireNonNull(allowance);
+			InventoryValidationBudget.@Nullable Allowance previous = validation; validation = Objects.requireNonNull(allowance);
 			try { return valid(); } finally { validation = previous; }
+		}
+		@Override public InventoryValidationBudget.Cost evidenceValidationCost() { return validationViewCost; }
+		@Override public InventoryValidationBudget.Cost readValidationCost(int slots) {
+			if (slots < 0 || slots > InventorySourceAccess.MAX_SLOTS) throw new IllegalArgumentException("read validation slot bound");
+			return slots < readCosts.length ? readCosts[slots] : validationViewCost.times(originalStableCursor ? 2L * slots : slots + 2L)
+				.plus(nativeReadCost.times(slots));
+		}
+		private <T> @Nullable T admitted(InventoryValidationBudget.Allowance allowance, Supplier<@Nullable T> operation) {
+			InventoryValidationBudget.@Nullable Allowance previous = validation; validation = Objects.requireNonNull(allowance);
+			try { return operation.get(); } finally { validation = previous; }
+		}
+		@Override public InventoryDomainCodec.@Nullable Item read(int slot, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) {
+			return admitted(allowance, () -> readOwned(slot, admission));
+		}
+		@Override public InventorySourceAccess.Page enumerate(int limit, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) {
+			return Objects.requireNonNull(admitted(allowance, () -> enumerateOwned(limit, admission)));
+		}
+		@Override public boolean matchesSelection(int slot, InventorySelection selection, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) {
+			return Objects.requireNonNull(admitted(allowance, () -> matchesSelectionOwned(slot, selection, admission)));
+		}
+		@Override public InventorySourceAccess.SelectionWitness observeSelection(int limit, InventorySelection selection, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) {
+			return Objects.requireNonNull(admitted(allowance, () -> observeSelectionOwned(limit, selection, admission)));
+		}
+		private void admitRead(int slots) {
+			if (validation != null) validation.debit(slots == 1 ? nativeReadCost : nativeReadCost.times(slots));
 		}
 		@Override public boolean stableCursor() { return originalStableCursor; }
 		@Override public int slots() { return originalSlots; }
 		// Reacquired capabilities do not prove stable-version ownership; conservatively eventual.
 		@Override public OptionalLong version() { return OptionalLong.empty(); }
 		@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan() {
+			return Objects.requireNonNull(withLiveAccess(this::snapshotPlanCurrent));
+		}
+		private Optional<InventorySourceAccess.SnapshotPlan> snapshotPlanCurrent() {
 			InventorySnapshotLayout layout = original.snapshotLayout;
 			if (layout == null) {
 				var grant = validation == null ? new InventoryValidationBudget.Allowance(discoveryValidationCost()) : validation;
@@ -617,7 +741,7 @@ public final class InventoryMinecraftSources {
 			var discovery = validation == null ? new InventoryValidationBudget.Allowance(InventoryValidationBudget.discovery(layout, provider, vault, lockMembers)) : validation;
 			discovery.debit(InventoryValidationBudget.bookkeeping());
 			discovery.debit(InventoryValidationBudget.fixed(layout));
-			validation = discovery;
+			InventoryValidationBudget.@Nullable Allowance previousValidation = validation; validation = discovery;
 			try {
 				if (!valid()) throw new InventorySourceUnavailableException("snapshot source invalid");
 				discovery.debit(InventoryValidationBudget.supported(layout, provider, vault));
@@ -626,12 +750,12 @@ public final class InventoryMinecraftSources {
 				var cost = InventoryValidationBudget.capture(layout, provider, vault, lockMembers);
 				return Optional.of(new InventorySourceAccess.SnapshotPlan() {
 				private int attempts;
-				private InventoryValidationBudget.Allowance allowance;
+				private long attemptedAllocation, attemptedWork;
 				@Override public long memoryUpperBoundBytes() { return upperBound; }
 				@Override public InventoryValidationBudget.Cost validationCost() { return cost; }
 				@Override public long validationAllocationUpperBoundBytes() { return cost.allocationBytes(); }
-				@Override public long attemptedValidationAllocationBytes() { return allowance == null ? 0 : allowance.attemptedAllocationBytes(); }
-				@Override public long attemptedValidationWorkUnits() { return allowance == null ? 0 : allowance.attemptedWorkUnits(); }
+				@Override public long attemptedValidationAllocationBytes() { return attemptedAllocation; }
+				@Override public long attemptedValidationWorkUnits() { return attemptedWork; }
 				@Override public int physicalReadUpperBound() { return visibleSlots(layout); }
 				@Override public long itemWorkUpperBoundUnits() {
 					return Math.addExact(
@@ -643,23 +767,29 @@ public final class InventoryMinecraftSources {
 					return capture(new InventoryValidationBudget.Allowance(cost));
 				}
 				@Override public Optional<InventorySourceAccess.InventorySnapshot> capture(InventoryValidationBudget.Allowance grant) {
-					allowance = Objects.requireNonNull(grant);
-					allowance.debit(InventoryValidationBudget.bookkeeping());
-					allowance.debit(InventoryValidationBudget.fixed(layout));
-					validation = allowance;
+					var allowance = Objects.requireNonNull(grant);
+					long beforeAllocation = allowance.attemptedAllocationBytes(), beforeWork = allowance.attemptedWorkUnits();
+					InventoryValidationBudget.@Nullable Allowance previous = validation; validation = allowance;
+					operationDepth++;
 					try {
+						allowance.debit(InventoryValidationBudget.bookkeeping());
+						allowance.debit(InventoryValidationBudget.fixed(layout));
 						if (closed || !onThread.getAsBoolean() || !valid()) throw new InventorySourceUnavailableException("capture source invalid");
 						if (testSnapshotCapture != null) return testSnapshotCapture.get();
 						if (world == null) return Optional.empty();
 						return captureObservations(input, new PhysicalRead(input.ordinaryTarget().orElseThrow(), input.face(), world::isLoaded),
 							currentView(), world, Source.this::valid, upperBound, displayBytes, () -> attempts++, allowance, lockMembers);
-					} finally { validation = null; }
+					} finally {
+						attemptedAllocation = allowance.attemptedAllocationBytes() - beforeAllocation;
+						attemptedWork = allowance.attemptedWorkUnits() - beforeWork; validation = previous;
+						if (--operationDepth == 0) liveAccess = original.access;
+					}
 				}
 			});
-			} finally { validation = null; }
+			} finally { validation = previousValidation; }
 		}
 		@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan(InventoryValidationBudget.Allowance allowance) {
-			var previous = validation; validation = Objects.requireNonNull(allowance);
+			InventoryValidationBudget.@Nullable Allowance previous = validation; validation = Objects.requireNonNull(allowance);
 			try { return snapshotPlan(); } finally { validation = previous; }
 		}
 		@Override public InventoryValidationBudget.Cost discoveryValidationCost() {
@@ -671,23 +801,50 @@ public final class InventoryMinecraftSources {
 		private View currentView() {
 			// valid() has just reacquired this operation's capability. The original
 			// wrapper remains topology evidence, never a stale capture content port.
-			return new View(original.identity, original.entities, original.slots, liveAccess, original.snapshotLayout, original.discoverItems);
+			return inPlaceAccess != null ? original : new View(original.identity, original.entities, original.slots, liveAccess,
+				original.snapshotLayout, original.discoverItems);
 		}
-		@Override public InventoryDomainCodec.Item read(int slot) {
+		private boolean currentMembersValid() {
+			if (world == null || rootPosition == null || !world.onServerThread() || !world.isLoaded(rootPosition)
+				|| world.blockEntity(rootPosition) != original.entities.getFirst()) return false;
+			if (!BuiltInRegistries.BLOCK.getKey(world.blockState(rootPosition).getBlock()).equals(rootBlock)) return false;
+			check(original.entities.getFirst(), world.heldKey());
+			for (int index = 0; index < original.providerMembers.size(); index++) {
+				var member = original.snapshotLayout.members().get(index);
+				BlockPos position = member.position();
+				if (!world.isLoaded(position) || !BuiltInRegistries.BLOCK.getKey(world.blockState(position).getBlock()).equals(memberBlocks[index])) return false;
+				@Nullable BlockEntity entity = world.blockEntity(position);
+				if (entity == null || entity != original.providerMembers.get(index)
+					|| !BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()).equals(memberTypes[index])) return false;
+				check(entity, world.heldKey());
+			}
+			return true;
+		}
+		private <T> @Nullable T withLiveAccess(Supplier<@Nullable T> operation) {
+			operationDepth++;
+			try { return operation.get(); }
+			finally { if (--operationDepth == 0) liveAccess = original.access; }
+		}
+		@Override public InventoryDomainCodec.@Nullable Item read(int slot) {
 			return readOwned(slot, null);
 		}
-		@Override public InventoryDomainCodec.Item read(int slot, InventoryCatalogAdmission admission) {
+		@Override public InventoryDomainCodec.@Nullable Item read(int slot, InventoryCatalogAdmission admission) {
 			return readOwned(slot, Objects.requireNonNull(admission));
 		}
-		private InventoryDomainCodec.Item readOwned(int slot, InventoryCatalogAdmission admission) {
+		private @org.jetbrains.annotations.Nullable InventoryDomainCodec.Item readOwned(int slot, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
+			return withLiveAccess(() -> readCurrent(slot, admission));
+		}
+		private InventoryDomainCodec.@Nullable Item readCurrent(int slot, @Nullable InventoryCatalogAdmission admission) {
 			if (!valid()) throw new InventorySourceUnavailableException("inventory view changed");
+			admitRead(1);
 			if (world == null) {
 				if (liveAccess != null) return decode(codec, liveAccess.read(slot), admission);
 				var value = readResident(original, null, slot);
 				return value.amount() == 0 ? null : decode(codec, new IPlatformInventoryService.Entry(((InventoryResidentItem.Stack) value.item()).resident(), value.amount()), admission);
 			}
-			var resident = readResident(original, liveAccess, slot);
-			var item = freezeItem(residentCatalog, world.registries(), displayBytes, resident, InventoryItemBudget.root(displayBytes), admission);
+			var registries = world.registries();
+			var budget = InventoryItemBudget.root(displayBytes);
+			@org.jetbrains.annotations.Nullable var item = readFrozen(original, liveAccess, slot, catalog(registries), registries, displayBytes, budget, admission);
 			if (!valid()) throw new InventorySourceUnavailableException("inventory authority revoked during read");
 			return item;
 		}
@@ -698,16 +855,21 @@ public final class InventoryMinecraftSources {
 			return enumerateOwned(limit, Objects.requireNonNull(admission));
 		}
 		private InventorySourceAccess.Page enumerateOwned(int limit, InventoryCatalogAdmission admission) {
+			return Objects.requireNonNull(withLiveAccess(() -> enumerateCurrent(limit, admission)));
+		}
+		private InventorySourceAccess.Page enumerateCurrent(int limit, @Nullable InventoryCatalogAdmission admission) {
 			var progress = world == null ? null : new CursorlessProgress();
 			try {
 				if (!valid()) throw new InventorySourceUnavailableException("inventory view changed");
+				admitRead(limit);
 				if (world == null) {
 					var observed = liveAccess.observe(limit);
 					List<InventoryDomainCodec.Item> values = new ArrayList<>();
 					for (var entry : observed.entries()) values.add(decode(codec, entry, admission));
 					return new InventorySourceAccess.Page(values, observed.complete());
 				}
-				return enumerateResident(liveAccess, limit, residentCatalog, world.registries(), displayBytes, this::valid, admission, progress);
+				var registries = world.registries();
+				return enumerateResident(liveAccess, limit, catalog(registries), registries, displayBytes, this::valid, admission, progress);
 			} catch (RuntimeException | LinkageError failure) {
 				if (progress != null && admission != null) progress.failed(failure);
 				throw failure;
@@ -719,11 +881,16 @@ public final class InventoryMinecraftSources {
 		@Override public boolean matchesSelection(int slot, InventorySelection selection, InventoryCatalogAdmission admission) {
 			return matchesSelectionOwned(slot, selection, Objects.requireNonNull(admission));
 		}
-		private boolean matchesSelectionOwned(int slot, InventorySelection selection, InventoryCatalogAdmission admission) {
+		private boolean matchesSelectionOwned(int slot, InventorySelection selection, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
+			return Objects.requireNonNull(withLiveAccess(() -> matchesSelectionCurrent(slot, selection, admission)));
+		}
+		private boolean matchesSelectionCurrent(int slot, InventorySelection selection, @Nullable InventoryCatalogAdmission admission) {
 			if (world == null) return matches(readOwned(slot, admission), selection);
 			if (!valid()) return false;
-			var resident = readResident(original, liveAccess, slot);
-			boolean present = witness(resident, selection, residentCatalog, world.registries(), displayBytes, InventoryItemBudget.root(displayBytes), admission);
+			admitRead(1);
+			var registries = world.registries();
+			var budget = InventoryItemBudget.root(displayBytes);
+			boolean present = witnessSlot(original, liveAccess, slot, selection, catalog(registries), registries, displayBytes, budget, admission);
 			return valid() && present;
 		}
 		@Override public InventorySourceAccess.SelectionWitness observeSelection(int limit, InventorySelection selection) {
@@ -733,6 +900,9 @@ public final class InventoryMinecraftSources {
 			return observeSelectionOwned(limit, selection, Objects.requireNonNull(admission));
 		}
 		private InventorySourceAccess.SelectionWitness observeSelectionOwned(int limit, InventorySelection selection, InventoryCatalogAdmission admission) {
+			return Objects.requireNonNull(withLiveAccess(() -> observeSelectionCurrent(limit, selection, admission)));
+		}
+		private InventorySourceAccess.SelectionWitness observeSelectionCurrent(int limit, InventorySelection selection, @Nullable InventoryCatalogAdmission admission) {
 			if (world == null) {
 				if (limit < 0) throw new IllegalArgumentException("negative observation limit");
 				var page = enumerateOwned(limit, admission);
@@ -742,7 +912,9 @@ public final class InventoryMinecraftSources {
 			var progress = new CursorlessProgress();
 			try {
 				if (!valid()) throw new InventorySourceUnavailableException("inventory view changed");
-				return witnessResident(liveAccess, limit, selection, residentCatalog, world.registries(), displayBytes, this::valid, admission, progress);
+				admitRead(limit);
+				var registries = world.registries();
+				return witnessResident(liveAccess, limit, selection, catalog(registries), registries, displayBytes, this::valid, admission, progress);
 			} catch (RuntimeException | LinkageError failure) {
 				if (admission != null) progress.failed(failure);
 				throw failure;
@@ -810,12 +982,12 @@ public final class InventoryMinecraftSources {
 		InventoryContainerReads.Scratch scratch = new InventoryContainerReads.Scratch();
 		if (!captureSupported(view, world, scratch)) throw new InventorySourceUnavailableException("resident capture graph changed");
 		BooleanSupplier authority = frozenAuthority(input, view, members, physical, world);
-		InventoryObservationSnapshot captured = InventoryObservationSnapshot.capture(layout,
+		InventoryObservationSnapshot captured = InventoryObservationSnapshot.captureResidents(layout,
 			new BlockPos(physical.position().x(), physical.position().y(), physical.position().z()), world.registries(), displayBytes, upperBound,
-			index -> {
+			(index, visitor) -> {
 				validation.debit(readCost);
 				if (!captureSupported(view, world, scratch)) throw new InventorySourceUnavailableException("resident capture graph changed before read");
-				attemptedRead.run(); return readResident(view, view.access, index);
+				attemptedRead.run(); return consumeResident(view, view.access, index, visitor);
 			}, () -> {
 				validation.debit(authorityCost);
 				if (!authority.getAsBoolean()) throw new InventorySourceUnavailableException("capture authority or topology revoked");
@@ -939,13 +1111,37 @@ public final class InventoryMinecraftSources {
 			}
 		};
 	}
-	private static IPlatformInventoryService.ResidentEntry readResident(View view, IPlatformInventoryService.Access access, int index) {
+	private static IPlatformInventoryService.ResidentEntry readResident(View view, @org.jetbrains.annotations.Nullable IPlatformInventoryService.Access access, int index) {
 		if (access != null) return access.readResident(index);
 		Slot slot = view.slots.get(index);
 		return IPlatformInventoryService.ResidentReads.stack(slot.container.getItem(slot.index));
 	}
-	private static InventoryDomainCodec.Item freezeItem(InventoryItemCodec.Catalog catalog, HolderLookup.Provider registries,
-		int displayBytes, IPlatformInventoryService.ResidentEntry resident, InventoryItemBudget budget, InventoryCatalogAdmission admission) {
+	private static boolean consumeResident(View view, @org.jetbrains.annotations.Nullable IPlatformInventoryService.Access access,
+		int index, IPlatformInventoryService.ResidentVisitor visitor) {
+		if (access != null) return access.consumeResident(index, visitor);
+		Slot slot = view.slots.get(index);
+		return visitor.visit(IPlatformInventoryService.ResidentReads.stack(slot.container.getItem(slot.index)));
+	}
+	private static @org.jetbrains.annotations.Nullable InventoryDomainCodec.Item readFrozen(View view,
+		@org.jetbrains.annotations.Nullable IPlatformInventoryService.Access access, int slot, InventoryItemCodec.Catalog catalog,
+		HolderLookup.Provider registries, int displayBytes, InventoryItemBudget budget, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
+		@org.jetbrains.annotations.Nullable InventoryDomainCodec.Item[] result = new InventoryDomainCodec.Item[1];
+		consumeResident(view, access, slot, resident -> {
+			result[0] = freezeItem(catalog, registries, displayBytes, resident, budget, admission); return true;
+		});
+		return result[0];
+	}
+	private static boolean witnessSlot(View view, @org.jetbrains.annotations.Nullable IPlatformInventoryService.Access access,
+		int slot, InventorySelection selection, InventoryItemCodec.Catalog catalog, HolderLookup.Provider registries, int displayBytes,
+		InventoryItemBudget budget, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
+		boolean[] present = {false};
+		consumeResident(view, access, slot, resident -> {
+			present[0] = witness(resident, selection, catalog, registries, displayBytes, budget, admission); return true;
+		});
+		return present[0];
+	}
+	private static @org.jetbrains.annotations.Nullable InventoryDomainCodec.Item freezeItem(InventoryItemCodec.Catalog catalog, HolderLookup.Provider registries,
+		int displayBytes, IPlatformInventoryService.ResidentEntry resident, InventoryItemBudget budget, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
 		if (resident.amount() == 0) return null;
 		var detached = InventoryItemCodec.freeze(resident.item(), registries, displayBytes, budget);
 		var encoded = admission == null ? catalog.intern(detached) : catalog.intern(detached, admission);
@@ -978,7 +1174,8 @@ public final class InventoryMinecraftSources {
 		return new InventorySourceAccess.Page(values, visited.complete());
 	}
 	private static boolean witness(IPlatformInventoryService.ResidentEntry resident, InventorySelection selection,
-		InventoryItemCodec.Catalog catalog, HolderLookup.Provider registries, int displayBytes, InventoryItemBudget budget, InventoryCatalogAdmission admission) {
+		InventoryItemCodec.Catalog catalog, HolderLookup.Provider registries, int displayBytes, InventoryItemBudget budget,
+		@org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
 		if (resident.amount() == 0) return false;
 		if (selection.aggregate()) {
 			var item = switch (resident.item()) {
@@ -988,7 +1185,7 @@ public final class InventoryMinecraftSources {
 			var id = BuiltInRegistries.ITEM.getKey(item);
 			return id != null && id.toString().equals(selection.itemId());
 		}
-		var item = freezeItem(catalog, registries, displayBytes, resident, budget, admission);
+		@org.jetbrains.annotations.Nullable var item = freezeItem(catalog, registries, displayBytes, resident, budget, admission);
 		return item != null && !item.aggregateRequired() && item.key().equals(selection.exact());
 	}
 	private static InventorySourceAccess.SelectionWitness witnessResident(IPlatformInventoryService.Access access, int limit,
@@ -1060,9 +1257,10 @@ public final class InventoryMinecraftSources {
 		private final IntFunction<InventoryReprojectionSummary> compatibilityReprojectionSummary;
 		private int displayBytes;
 		private boolean closed;
-		private InventoryItemCodec.Catalog residentCatalog;
-		private InventoryValidationBudget.Allowance validation;
+		private InventoryItemCodec.@Nullable Catalog residentCatalog;
+		private InventoryValidationBudget.@Nullable Allowance validation;
 		private final InventoryValidationBudget.Cost validationViewCost;
+		private final long sourceRetainedBytes;
 
 		ExternalSource(InventorySourceInput input, ExternalBinding first, ExternalBindingResolver bindings,
 			BooleanSupplier onThread, Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec, View view,
@@ -1089,9 +1287,18 @@ public final class InventoryMinecraftSources {
 			this.displayBytes = requireDisplayBytes(displayBytes);
 			this.tightenDisplay = Objects.requireNonNull(tightenDisplay, "tightenDisplay");
 			this.compatibilityReprojectionSummary = Objects.requireNonNull(reprojectionSummary, "reprojectionSummary");
+			this.sourceRetainedBytes = InventorySourceRetention.external(view, descriptor);
 			requireMembers(new Current(first, view));
 		}
+		@Override public long sourceRetainedBytes() { return sourceRetainedBytes; }
 		@Override public int displayBytes() { return displayBytes; }
+		@Override public InventorySourceAccess.ReadMode readMode() {
+			return stableCursor ? InventorySourceAccess.ReadMode.NATIVE_INCREMENTAL : InventorySourceAccess.ReadMode.ADAPTER;
+		}
+		@Override public InventoryItemCodec.@Nullable Catalog nativeCatalog() { return residentCatalog; }
+		@Override public long nativeCatalogGrowthUpperBound() {
+			return residentCatalog == null ? InventoryItemCodec.Catalog.initialModeledBytes() + InventoryItemCodec.Catalog.firstReadGrowthUpperBound(displayBytes) : residentCatalog.retainedGrowthUpperBound();
+		}
 		@Override public InventoryReprojectionSummary reprojectionSummary(int displayBytes) {
 			int ceiling = requireDisplayBytes(displayBytes);
 			if (ceiling >= this.displayBytes) return InventoryReprojectionSummary.EMPTY;
@@ -1123,9 +1330,34 @@ public final class InventoryMinecraftSources {
 			}
 		}
 		@Override public boolean valid(InventoryValidationBudget.Allowance allowance) {
-			var previous = validation; validation = Objects.requireNonNull(allowance);
+			InventoryValidationBudget.@Nullable Allowance previous = validation; validation = Objects.requireNonNull(allowance);
 			try { return valid(); } finally { validation = previous; }
 		}
+		@Override public InventoryValidationBudget.Cost evidenceValidationCost() { return validationViewCost; }
+		@Override public InventoryValidationBudget.Cost readValidationCost(int slots) {
+			return validationViewCost.times(stableCursor ? 2L * slots : slots + 2L).plus(readCost(slots));
+		}
+		private InventoryValidationBudget.Cost readCost(int count) {
+			return (layout == null ? InventoryValidationBudget.classification(1, true)
+				: InventoryValidationBudget.nativeRead(layout, capability, vault(layout))).times(4L * count);
+		}
+		private <T> @Nullable T admitted(InventoryValidationBudget.Allowance allowance, Supplier<@Nullable T> operation) {
+			InventoryValidationBudget.@Nullable Allowance previous = validation; validation = Objects.requireNonNull(allowance);
+			try { return operation.get(); } finally { validation = previous; }
+		}
+		@Override public InventoryDomainCodec.@Nullable Item read(int slot, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) {
+			return admitted(allowance, () -> readOwned(slot, admission));
+		}
+		@Override public InventorySourceAccess.Page enumerate(int limit, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) {
+			return Objects.requireNonNull(admitted(allowance, () -> enumerateOwned(limit, admission)));
+		}
+		@Override public boolean matchesSelection(int slot, InventorySelection selection, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) {
+			return Objects.requireNonNull(admitted(allowance, () -> matchesSelectionOwned(slot, selection, admission)));
+		}
+		@Override public InventorySourceAccess.SelectionWitness observeSelection(int limit, InventorySelection selection, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) {
+			return Objects.requireNonNull(admitted(allowance, () -> observeSelectionOwned(limit, selection, admission)));
+		}
+		private void admitRead(int count) { if (validation != null) validation.debit(readCost(count)); }
 		@Override public boolean stableCursor() { return stableCursor; }
 		@Override public int slots() { return slots; }
 		@Override public OptionalLong version() { return OptionalLong.empty(); }
@@ -1135,12 +1367,15 @@ public final class InventoryMinecraftSources {
 		@Override public InventoryDomainCodec.Item read(int slot, InventoryCatalogAdmission admission) {
 			return readOwned(slot, Objects.requireNonNull(admission));
 		}
-		private InventoryDomainCodec.Item readOwned(int slot, InventoryCatalogAdmission admission) {
+		private @org.jetbrains.annotations.Nullable InventoryDomainCodec.Item readOwned(int slot, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
 			Current live = current();
+			admitRead(1);
 			View current = live.view();
 			requireMembers(live);
-			var resident = readResident(current, current.access, slot);
-			var item = freezeItem(catalog(live), live.binding().world().registries(), displayBytes, resident, InventoryItemBudget.root(displayBytes), admission);
+			var catalog = catalog(live);
+			var registries = live.binding().world().registries();
+			var budget = InventoryItemBudget.root(displayBytes);
+			@org.jetbrains.annotations.Nullable var item = readFrozen(current, current.access, slot, catalog, registries, displayBytes, budget, admission);
 			requireMembers(live); current();
 			return item;
 		}
@@ -1154,6 +1389,7 @@ public final class InventoryMinecraftSources {
 			var progress = new CursorlessProgress();
 			try {
 				Current live = current();
+				admitRead(limit);
 				View current = live.view();
 				if (current.access == null) throw new UnsupportedOperationException("no enumeration");
 				requireMembers(live);
@@ -1174,10 +1410,13 @@ public final class InventoryMinecraftSources {
 		@Override public boolean matchesSelection(int slot, InventorySelection selection, InventoryCatalogAdmission admission) {
 			return matchesSelectionOwned(slot, selection, Objects.requireNonNull(admission));
 		}
-		private boolean matchesSelectionOwned(int slot, InventorySelection selection, InventoryCatalogAdmission admission) {
+		private boolean matchesSelectionOwned(int slot, InventorySelection selection, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
 			Current live = current(); requireMembers(live);
-			var resident = readResident(live.view(), live.view().access, slot);
-			boolean present = witness(resident, selection, catalog(live), live.binding().world().registries(), displayBytes, InventoryItemBudget.root(displayBytes), admission);
+			admitRead(1);
+			var catalog = catalog(live);
+			var registries = live.binding().world().registries();
+			var budget = InventoryItemBudget.root(displayBytes);
+			boolean present = witnessSlot(live.view(), live.view().access, slot, selection, catalog, registries, displayBytes, budget, admission);
 			requireMembers(live); current(); return present;
 		}
 		@Override public InventorySourceAccess.SelectionWitness observeSelection(int limit, InventorySelection selection) {
@@ -1190,6 +1429,7 @@ public final class InventoryMinecraftSources {
 			var progress = new CursorlessProgress();
 			try {
 				Current live = current(); requireMembers(live);
+				admitRead(limit);
 				return witnessResident(live.view().access.guardedBy(() -> membersAllowed(live)), limit, selection,
 					catalog(live), live.binding().world().registries(), displayBytes, ExternalSource.this::valid, admission, progress);
 			} catch (RuntimeException | LinkageError failure) {
@@ -1218,7 +1458,7 @@ public final class InventoryMinecraftSources {
 			var discovery = validation == null ? new InventoryValidationBudget.Allowance(InventoryValidationBudget.discovery(captured, capability, vault, lockMembers)) : validation;
 			discovery.debit(InventoryValidationBudget.bookkeeping());
 			discovery.debit(InventoryValidationBudget.fixed(captured));
-			validation = discovery;
+			InventoryValidationBudget.@Nullable Allowance previousValidation = validation; validation = discovery;
 			try {
 				Current candidate = current();
 				discovery.debit(InventoryValidationBudget.supported(captured, capability, vault));
@@ -1227,12 +1467,12 @@ public final class InventoryMinecraftSources {
 				var cost = InventoryValidationBudget.capture(captured, capability, vault, lockMembers);
 				return Optional.of(new InventorySourceAccess.SnapshotPlan() {
 				private int attempts;
-				private InventoryValidationBudget.Allowance allowance;
+				private long attemptedAllocation, attemptedWork;
 				@Override public long memoryUpperBoundBytes() { return upperBound; }
 				@Override public InventoryValidationBudget.Cost validationCost() { return cost; }
 				@Override public long validationAllocationUpperBoundBytes() { return cost.allocationBytes(); }
-				@Override public long attemptedValidationAllocationBytes() { return allowance == null ? 0 : allowance.attemptedAllocationBytes(); }
-				@Override public long attemptedValidationWorkUnits() { return allowance == null ? 0 : allowance.attemptedWorkUnits(); }
+				@Override public long attemptedValidationAllocationBytes() { return attemptedAllocation; }
+				@Override public long attemptedValidationWorkUnits() { return attemptedWork; }
 				@Override public int physicalReadUpperBound() { return visibleSlots(captured); }
 				@Override public long itemWorkUpperBoundUnits() {
 					return Math.addExact(
@@ -1244,23 +1484,27 @@ public final class InventoryMinecraftSources {
 					return capture(new InventoryValidationBudget.Allowance(cost));
 				}
 				@Override public Optional<InventorySourceAccess.InventorySnapshot> capture(InventoryValidationBudget.Allowance grant) {
-					allowance = Objects.requireNonNull(grant);
-					allowance.debit(InventoryValidationBudget.bookkeeping());
-					allowance.debit(InventoryValidationBudget.fixed(captured));
-					validation = allowance;
+					var allowance = Objects.requireNonNull(grant);
+					long beforeAllocation = allowance.attemptedAllocationBytes(), beforeWork = allowance.attemptedWorkUnits();
+					InventoryValidationBudget.@Nullable Allowance previous = validation; validation = allowance;
 					try {
+						allowance.debit(InventoryValidationBudget.bookkeeping());
+						allowance.debit(InventoryValidationBudget.fixed(captured));
 						if (closed || !onThread.getAsBoolean()) throw new InventorySourceUnavailableException("capture source invalid");
 						Current current = current();
 						BlockReadSource live = current.binding().descriptor();
 						return captureObservations(input, new PhysicalRead(live.blockTarget(), input.face(), current.binding()::contains),
 							current.view(), current.binding().world(), ExternalSource.this::valid, upperBound, displayBytes, () -> attempts++, allowance, lockMembers);
-					} finally { validation = null; }
+					} finally {
+						attemptedAllocation = allowance.attemptedAllocationBytes() - beforeAllocation;
+						attemptedWork = allowance.attemptedWorkUnits() - beforeWork; validation = previous;
+					}
 				}
 			});
-			} finally { validation = null; }
+			} finally { validation = previousValidation; }
 		}
 		@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan(InventoryValidationBudget.Allowance allowance) {
-			var previous = validation; validation = Objects.requireNonNull(allowance);
+			InventoryValidationBudget.@Nullable Allowance previous = validation; validation = Objects.requireNonNull(allowance);
 			try { return snapshotPlan(); } finally { validation = previous; }
 		}
 		@Override public InventoryValidationBudget.Cost discoveryValidationCost() {

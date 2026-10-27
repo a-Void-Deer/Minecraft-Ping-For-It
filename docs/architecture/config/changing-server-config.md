@@ -27,10 +27,12 @@ plus `inventory` administration settings catalogued by
 [server configuration](../../config/server.md#inventory-policy-object). Each
 inventory cap or multiplier that has an unlimited mode is one atomic leaf: its
 unlimited flag and its retained finite value are selected and replaced
-together, and the value is handled exactly on its confirmed grid rather than
-through binary floating-point arithmetic. The two finite display/frame size
-scalars have no unlimited flag: each is a single finite leaf selected and
-replaced as one value.
+together. Validated values are handled exactly rather than through binary
+floating-point arithmetic. Integer values are not rounded to UI-only adjustment
+stops; decimal values retain the exact grid constraints
+owned by [server configuration](../../config/server.md#inventory-policy-object).
+The two finite display/frame size scalars have no unlimited flag: each is a
+single finite leaf selected and replaced as one value.
 
 `pingDistance` is explicitly outside this transaction. It is a JSON-only
 server setting catalogued by [server configuration](../../config/server.md) and
@@ -50,10 +52,11 @@ are numbered from zero, starting at the least significant bit:
 | 2 | `msToRegenerate` |
 | 3 | `rateLimit` |
 | 4 | `syncDuration` |
-| 5–25 | The twenty-one `inventory` leaves, in their fixed [wire order](../network/protocol.md#server-configuration-routes-server-config-request-v3-server-config-update-v3-server-config-snapshot-v3). |
+| 5–25 | The twenty-one `inventory` leaves, in their fixed [wire order](../network/protocol.md#server-configuration-routes-server-config-request-v4-server-config-update-v4-server-config-snapshot-v4). |
 | 26 | `budgetDelayNotificationsEnabled` |
 
 The inventory-only mask contains exactly bits 5–25. No bit above 26 is valid.
+Bit 6 selects both the pending-memory mode and its retained finite value.
 The mask identifies which leaves the sender changed; it is not a partial
 snapshot. A missing, zero, unknown, or malformed selection, or an otherwise
 invalid update, performs no mutation. Which fields become dirty and when a plan
@@ -64,7 +67,7 @@ is produced are UI planning details owned by
 
 The per-target-type presentation field policy is read and changed through its own
 versioned route, not through this server-configuration transaction. The selector
-route never travels on the version-3 server-configuration request, snapshot, or
+route never travels on the version-4 server-configuration request, snapshot, or
 update routes and does not extend or replace the update surface; exact route
 identifiers and wire grammar are owned by
 [network protocol](../network/protocol.md). Its rule-view disclosure,
@@ -140,12 +143,8 @@ The packet-facing server path processes an update in this order:
 4. for an applied update, the selected fields are assigned, the configuration
    is validated, and a persistence write is attempted.
 
-The version-3 server-configuration payloads are fixed-shape and consumed to
-their exact end: a payload with trailing bytes, or a superseded shorter shape
-that does not supply every inventory leaf, is structurally invalid and is
-rejected in full rather than reinterpreted as a valid prefix. Exact route
-identifiers and wire grammar are owned by
-[network protocol](../network/protocol.md).
+Packet acceptance follows the [network protocol](../network/protocol.md); a
+structurally invalid frame is rejected before the transaction.
 
 User-visible admission ordering for marker creation is separate and owned by
 [target validation](../authority/target_validation.md). Rate-field semantics are

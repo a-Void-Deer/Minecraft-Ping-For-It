@@ -1,5 +1,9 @@
 package nx.pingwheel.common.config;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+
 import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.EnumMap;
@@ -7,10 +11,11 @@ import java.util.Map;
 import java.util.Optional;
 
 /** Detached inventory administration values; never shares a mutable persisted object. */
-public record InventoryConfigValues(Map<Field, Value> fields) {
+@NotNullByDefault
+public record InventoryConfigValues(@Nullable @Unmodifiable Map<Field, @Nullable Value> fields) {
 
 	/** A scalar or an atomic cap/multiplier, including its retained finite value. */
-	public record Value(boolean unlimited, BigDecimal value) {
+	public record Value(boolean unlimited, @Nullable BigDecimal value) {
 		public Value {
 			if (value != null) value = ByteMultiplierGrid.canonical(value);
 		}
@@ -30,23 +35,23 @@ public record InventoryConfigValues(Map<Field, Value> fields) {
 
 	/** Stable leaf bits; the original five administration bits remain unchanged. */
 	public enum Field {
-		PHYSICAL_SLOTS_PER_TICK(5, Kind.LIMIT, InventoryLimits.MIN_FINITE_LIMIT, Integer.MAX_VALUE),
-		PENDING_MEMORY_MIB(6, Kind.INTEGER, InventoryLimits.MIN_PENDING_MEMORY_MIB, InventoryLimits.MAX_PENDING_MEMORY_MIB),
+		PHYSICAL_SLOTS_PER_TICK(5, Kind.LIMIT, InventoryLimits.MIN_ORDINARY_COUNT, InventoryLimits.MAX_ORDINARY_COUNT),
+		PENDING_MEMORY_MIB(6, Kind.LIMIT, InventoryLimits.MIN_PENDING_MEMORY_MIB, InventoryLimits.MAX_PENDING_MEMORY_MIB),
 		PREVIEW_PERIOD_TICKS(7, Kind.INTEGER, InventoryLimits.MIN_PERIOD_TICKS, InventoryLimits.MAX_PERIOD_TICKS),
-		PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD(8, Kind.LIMIT, InventoryLimits.MIN_FINITE_LIMIT, Integer.MAX_VALUE),
-		PREVIEW_MAX_SLOTS_PER_CLIENT(9, Kind.LIMIT, InventoryLimits.MIN_FINITE_LIMIT, Integer.MAX_VALUE),
-		PREVIEW_MAX_SLOTS_SERVER(10, Kind.LIMIT, InventoryLimits.MIN_FINITE_LIMIT, Integer.MAX_VALUE),
-		PREVIEW_MAX_TARGETS_PER_CLIENT(11, Kind.LIMIT, InventoryLimits.MIN_FINITE_LIMIT, Integer.MAX_VALUE),
+		PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD(8, Kind.LIMIT, InventoryLimits.MIN_ORDINARY_COUNT, InventoryLimits.MAX_ORDINARY_COUNT),
+		PREVIEW_MAX_SLOTS_PER_CLIENT(9, Kind.LIMIT, InventoryLimits.MIN_ORDINARY_COUNT, InventoryLimits.MAX_ORDINARY_COUNT),
+		PREVIEW_MAX_SLOTS_SERVER(10, Kind.LIMIT, InventoryLimits.MIN_ORDINARY_COUNT, InventoryLimits.MAX_ORDINARY_COUNT),
+		PREVIEW_MAX_TARGETS_PER_CLIENT(11, Kind.LIMIT, InventoryLimits.MIN_FINITE_LIMIT, InventoryLimits.MAX_PREVIEW_TARGETS_PER_CLIENT),
 		PREVIEW_CLIENT_BYTE_MULTIPLIER(12, Kind.CLIENT_MULTIPLIER, 0, 0),
 		PREVIEW_GLOBAL_BYTE_MULTIPLIER(13, Kind.GLOBAL_MULTIPLIER, 0, 0),
 		TRACKING_PERIOD_TICKS(14, Kind.INTEGER, InventoryLimits.MIN_PERIOD_TICKS, InventoryLimits.MAX_PERIOD_TICKS),
-		TRACKING_MAX_VARIANTS_PER_TARGET(15, Kind.LIMIT, InventoryLimits.MIN_FINITE_LIMIT, Integer.MAX_VALUE),
-		TRACKING_MAX_SLOTS_PER_TARGET(16, Kind.LIMIT, InventoryLimits.MIN_FINITE_LIMIT, Integer.MAX_VALUE),
-		TRACKING_MAX_SLOTS_SERVER(17, Kind.LIMIT, InventoryLimits.MIN_FINITE_LIMIT, Integer.MAX_VALUE),
+		TRACKING_MAX_VARIANTS_PER_TARGET(15, Kind.LIMIT, InventoryLimits.MIN_FINITE_LIMIT, InventoryLimits.MAX_TRACKING_VARIANTS_PER_TARGET),
+		TRACKING_MAX_SLOTS_PER_TARGET(16, Kind.LIMIT, InventoryLimits.MIN_ORDINARY_COUNT, InventoryLimits.MAX_ORDINARY_COUNT),
+		TRACKING_MAX_SLOTS_SERVER(17, Kind.LIMIT, InventoryLimits.MIN_TRACKING_SLOTS_SERVER, InventoryLimits.MAX_TRACKING_SLOTS_SERVER),
 		TRACKING_STREAM_BYTE_MULTIPLIER(18, Kind.CLIENT_MULTIPLIER, 0, 0),
 		TRACKING_SNAPSHOT_BYTE_MULTIPLIER(19, Kind.CLIENT_MULTIPLIER, 0, 0),
 		TRACKING_GLOBAL_BYTE_MULTIPLIER(20, Kind.GLOBAL_MULTIPLIER, 0, 0),
-		TRACKING_RESYNC_MIN_PERIODS(21, Kind.INTEGER, InventoryLimits.MIN_RESYNC_PERIODS, Integer.MAX_VALUE),
+		TRACKING_RESYNC_MIN_PERIODS(21, Kind.INTEGER, InventoryLimits.MIN_RESYNC_PERIODS, InventoryLimits.MAX_RESYNC_PERIODS),
 		TRACKING_HEARTBEAT_PERIODS(22, Kind.INTEGER, InventoryLimits.MIN_HEARTBEAT_PERIODS, InventoryLimits.MAX_HEARTBEAT_PERIODS),
 		/** Rolling excess-byte smoothing, not the unknown-baseline buffer window. */
 		TRACKING_GRACE_PERIODS(23, Kind.INTEGER, InventoryLimits.MIN_GRACE_PERIODS, InventoryLimits.MAX_GRACE_PERIODS),
@@ -90,7 +95,7 @@ public record InventoryConfigValues(Map<Field, Value> fields) {
 		}
 
 		/** Network values must already be safe; persisted-file defaulting/clamping is separate. */
-		public boolean isSafe(Value supplied) {
+		public boolean isSafe(@Nullable Value supplied) {
 			if (supplied == null || supplied.value() == null || supplied.unlimited() && !supportsUnlimited()) return false;
 			BigDecimal value = supplied.value();
 			if (isSizeScale()) {
@@ -110,7 +115,7 @@ public record InventoryConfigValues(Map<Field, Value> fields) {
 		}
 
 		/** Draft parsing keeps malformed or out-of-range text available for correction. */
-		public Optional<Value> parse(String text, boolean unlimited) {
+		public Optional<Value> parse(@Nullable String text, boolean unlimited) {
 			if (text == null || text.isEmpty()) return Optional.empty();
 			try {
 				BigDecimal value;
@@ -130,7 +135,7 @@ public record InventoryConfigValues(Map<Field, Value> fields) {
 	}
 
 	public InventoryConfigValues {
-		var copy = new EnumMap<Field, Value>(Field.class);
+		var copy = new EnumMap<Field, @Nullable Value>(Field.class);
 		if (fields != null) copy.putAll(fields);
 		fields = Collections.unmodifiableMap(copy);
 	}
@@ -140,13 +145,13 @@ public record InventoryConfigValues(Map<Field, Value> fields) {
 	}
 
 	/** Copies exactly the configured fields without mutating or normalizing the source. */
-	public static InventoryConfigValues from(InventorySettings settings) {
+	public static @Nullable InventoryConfigValues from(@Nullable InventorySettings settings) {
 		if (settings == null || settings.getPreview() == null || settings.getTracking() == null) return null;
-		var values = new EnumMap<Field, Value>(Field.class);
+		var values = new EnumMap<Field, @Nullable Value>(Field.class);
 		var preview = settings.getPreview();
 		var tracking = settings.getTracking();
 		values.put(Field.PHYSICAL_SLOTS_PER_TICK, copy(settings.getPhysicalSlotsPerTick()));
-		values.put(Field.PENDING_MEMORY_MIB, Value.scalar(settings.getPendingMemoryMiB()));
+		values.put(Field.PENDING_MEMORY_MIB, copy(settings.getPendingMemoryMiB()));
 		values.put(Field.DISPLAY_BYTE_MULTIPLIER, new Value(false, settings.getDisplayByteMultiplier()));
 		values.put(Field.FRAME_BYTE_MULTIPLIER, new Value(false, settings.getFrameByteMultiplier()));
 		values.put(Field.PREVIEW_PERIOD_TICKS, Value.scalar(preview.getPeriodTicks()));
@@ -169,7 +174,7 @@ public record InventoryConfigValues(Map<Field, Value> fields) {
 		return new InventoryConfigValues(values);
 	}
 
-	public Value value(Field field) { return fields.get(field); }
+	public @Nullable Value value(Field field) { return fields.get(field); }
 
 	public boolean isSafe() {
 		if (fields.size() != Field.values().length) return false;
@@ -183,15 +188,15 @@ public record InventoryConfigValues(Map<Field, Value> fields) {
 	 * by silently adjusting an unselected leaf.
 	 */
 	public boolean isSizePairCompatible() {
-		Value display = value(Field.DISPLAY_BYTE_MULTIPLIER);
-		Value frame = value(Field.FRAME_BYTE_MULTIPLIER);
+		@Nullable Value display = value(Field.DISPLAY_BYTE_MULTIPLIER);
+		@Nullable Value frame = value(Field.FRAME_BYTE_MULTIPLIER);
 		return display != null && frame != null
 			&& !display.unlimited() && !frame.unlimited()
 			&& InventorySizeScale.isPairLegal(display.value(), frame.value());
 	}
 
-	public InventoryConfigValues with(Field field, Value value) {
-		var copy = new EnumMap<Field, Value>(Field.class);
+	public InventoryConfigValues with(Field field, @Nullable Value value) {
+		var copy = new EnumMap<Field, @Nullable Value>(Field.class);
 		copy.putAll(fields);
 		copy.put(field, value);
 		return new InventoryConfigValues(copy);
@@ -199,7 +204,7 @@ public record InventoryConfigValues(Map<Field, Value> fields) {
 
 	/** Every unselected leaf is retained from this current authoritative value. */
 	public InventoryConfigValues merge(int changedFields, InventoryConfigValues replacement) {
-		var merged = new EnumMap<Field, Value>(Field.class);
+		var merged = new EnumMap<Field, @Nullable Value>(Field.class);
 		merged.putAll(fields);
 		for (Field field : Field.values()) {
 			if ((changedFields & field.mask()) != 0) merged.put(field, replacement.value(field));
@@ -214,7 +219,7 @@ public record InventoryConfigValues(Map<Field, Value> fields) {
 		var preview = settings.getPreview();
 		var tracking = settings.getTracking();
 		settings.setPhysicalSlotsPerTick(limit(Field.PHYSICAL_SLOTS_PER_TICK));
-		settings.setPendingMemoryMiB(integer(Field.PENDING_MEMORY_MIB));
+		settings.setPendingMemoryMiB(limit(Field.PENDING_MEMORY_MIB));
 		settings.setDisplayByteMultiplier(value(Field.DISPLAY_BYTE_MULTIPLIER).value());
 		settings.setFrameByteMultiplier(value(Field.FRAME_BYTE_MULTIPLIER).value());
 		preview.setPeriodTicks(integer(Field.PREVIEW_PERIOD_TICKS));
@@ -252,10 +257,10 @@ public record InventoryConfigValues(Map<Field, Value> fields) {
 		multiplier.setUnlimited(value(field).unlimited());
 		return multiplier;
 	}
-	private static Value copy(IntLimit limit) {
+	private static @Nullable Value copy(@Nullable IntLimit limit) {
 		return limit == null ? null : Value.limit(limit.isUnlimited(), limit.getValue());
 	}
-	private static Value copy(ByteMultiplier multiplier) {
+	private static @Nullable Value copy(@Nullable ByteMultiplier multiplier) {
 		return multiplier == null ? null : new Value(multiplier.isUnlimited(), multiplier.getValue());
 	}
 }

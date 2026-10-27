@@ -66,6 +66,7 @@ class CreateVaultSourceWrapperTest {
 				members.put(pos, Proxy.newProxyInstance(memberPort.getClassLoader(), new Class<?>[] {memberPort}, (proxy, method, args) -> switch (method.getName()) {
 					case "blockId" -> "create:item_vault";
 					case "blockEntityId" -> "create:item_vault";
+					case "vaultBlock", "matchesIdentity" -> true;
 					case "controller" -> BlockPos.ZERO;
 					case "isController" -> pos.equals(BlockPos.ZERO);
 					case "width" -> 2;

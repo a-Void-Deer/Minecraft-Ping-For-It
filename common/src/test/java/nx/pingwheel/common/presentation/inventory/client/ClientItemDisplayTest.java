@@ -65,6 +65,7 @@ import org.junit.jupiter.api.io.TempDir;
 import nx.pingwheel.common.chat.ContentChatTemplate;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess;
+import org.jetbrains.annotations.NotNullByDefault;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -73,6 +74,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * projection: the production single-item codec, the chat naming composition,
  * the count-one icon stack and the bounded registry-scoped decode cache.
  */
+@NotNullByDefault
 class ClientItemDisplayTest {
 
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
@@ -89,9 +91,13 @@ class ClientItemDisplayTest {
 	}
 
 	private static String json(ItemStack stack, HolderLookup.Provider registryAccess) {
-		return ItemStack.SINGLE_ITEM_CODEC
+		var encoded = ItemStack.SINGLE_ITEM_CODEC
 			.encodeStart(registryAccess.createSerializationContext(JsonOps.INSTANCE), stack)
-			.result().orElseThrow().toString();
+			.result().orElseThrow().getAsJsonObject();
+		// Ordinary displays carry components even when empty; the id-only wire
+		// spelling is reserved for the server's size-terminal registry-label icon.
+		if (!encoded.has("components")) encoded.add("components", new com.google.gson.JsonObject());
+		return encoded.toString();
 	}
 
 	/**

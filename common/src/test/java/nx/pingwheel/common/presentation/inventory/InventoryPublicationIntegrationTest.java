@@ -25,6 +25,48 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Replays the production publisher's ordered wire frames, not hand-ordered status/data fixtures. */
 class InventoryPublicationIntegrationTest {
+	@Test void genericEventualEmptyAndAbsentZeroStayUncertainWhileExplicitAtomicAdapterKeepsReady() {
+		for (boolean atomic : new boolean[] {false, true}) {
+			var host = new InventoryBackendTest.Host(); var settings = InventorySettings.serverDefaults();
+			var reads = new java.util.concurrent.atomic.AtomicInteger(); boolean[] empty = {false};
+			try (var backend = new InventoryBackend(host, new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 1) {
+				@Override public InventoryDomainCodec.@org.jetbrains.annotations.Nullable Item read(int slot) {
+					reads.incrementAndGet(); return empty[0] ? null : InventoryRuntimeTest.item(7);
+				}
+				@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan() {
+					if (!atomic) return Optional.empty();
+					return Optional.of(new InventorySourceAccess.SnapshotPlan() {
+						@Override public long memoryUpperBoundBytes() { return 4096; }
+						@Override public Optional<InventorySourceAccess.InventorySnapshot> capture() {
+							boolean capturedEmpty = empty[0];
+							return Optional.of(new InventoryRuntimeTest.Snapshot() {
+								@Override public int slots() { return 1; }
+								@Override public InventoryDomainCodec.@org.jetbrains.annotations.Nullable Item read(int slot) { return capturedEmpty ? null : InventoryRuntimeTest.item(7); }
+								@Override public long retainedBytes() { return 128; }
+								@Override public InventorySourceAccess.SnapshotEvidence evidence() { return InventorySourceAccess.SnapshotEvidence.ATOMIC_DETACHED; }
+							});
+						}
+					});
+				}
+			}), settings.pendingMemoryBytes()), 1)) {
+				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.hello(), 0, settings); long epoch = host.epoch(InventoryBackendTest.A);
+				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.open(epoch, 100, 1, 1, InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH), 0, settings);
+				backend.tick(0, settings); var preview = host.packets.stream().filter(packet -> !packet.entries().isEmpty()).findFirst().orElseThrow();
+				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.select(epoch, 100, 1, 1, 1, preview.baselineId(), preview.statusRevision(), preview.entries().getFirst().key(), "danger"), 1, settings);
+				var marker = host.store.allMarkers().getFirst(); var endpoint = new Endpoint(InventoryBackendTest.A, MarkerSnapshot.from(marker));
+				empty[0] = true; backend.tick(2, settings); endpoint.drain(host);
+				var expected = atomic ? InventoryS2CPacket.Status.READY : InventoryS2CPacket.Status.UNCERTAIN;
+				var tracked = endpoint.client.tracking(marker.id()); assertTrue(tracked.complete()); assertEquals(expected, tracked.status());
+				assertEquals(0, tracked.entries().getFirst().count()); assertEquals(expected, tracked.entries().getFirst().quality());
+				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.open(epoch, 100, 1, 2, InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH), 3, settings); backend.tick(3, settings);
+				var emptyPreview = host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW && packet.requestId() == 2).reduce((a, b) -> b).orElseThrow();
+				assertEquals(expected, emptyPreview.status()); assertTrue(emptyPreview.completeScan()); assertTrue(emptyPreview.entries().isEmpty());
+				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.resync(epoch, 0, marker.id()).stamp(100, 1), 4, settings); backend.tick(4, settings); endpoint.drain(host);
+				assertEquals(expected, endpoint.client.tracking(marker.id()).status()); assertEquals(expected, endpoint.client.tracking(marker.id()).entries().getFirst().quality());
+			}
+		}
+	}
+
 	@Test void actualCanonicalRefusalRetiresExactSelectionAndKeepsTheAuthoritativeLongGroupTotal() {
 		net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
 		var catalog = new nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.Catalog(net.minecraft.core.RegistryAccess.EMPTY);
@@ -125,15 +167,16 @@ class InventoryPublicationIntegrationTest {
 				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.select(epoch, 100, 1, 1, 1, preview.baselineId(), preview.statusRevision(), preview.entries().getFirst().key(), "danger"), 1, settings);
 				var marker = host.store.allMarkers().getFirst(); var endpoint = new Endpoint(InventoryBackendTest.A, MarkerSnapshot.from(marker));
 				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.close(epoch, 1).stamp(100, 1), 1, settings);
-				phase[0] = 1; int start = host.packets.size(); backend.tick(2, settings); endpoint.drain(host);
-				var fence = host.packets.subList(start, host.packets.size()).stream().filter(packet -> marker.id().equals(packet.markerId())).findFirst().orElseThrow();
+				phase[0] = 1; InventoryPublicationTicks.withoutScanSlots(backend, 1, settings);
+				int start = host.packets.size(); backend.tick(2, settings); endpoint.drain(host);
+				var fence = host.packets.stream().filter(packet -> marker.id().equals(packet.markerId()) && packet.kind() == InventoryS2CPacket.Kind.STATUS).findFirst().orElseThrow();
 				assertEquals(InventoryS2CPacket.Status.UPDATING, fence.status()); assertEquals(0, fence.watermark());
 				assertFalse(endpoint.client.tracking(marker.id()).complete());
 				host.refuseFailureControl = false;
 				for (int tick : new int[] {3, 5, 8}) {
 					int before = host.packets.size(); backend.tick(tick, settings); endpoint.drain(host);
 					assertEquals(InventoryS2CPacket.Status.INCOMPLETE, endpoint.client.tracking(marker.id()).status());
-					assertFalse(endpoint.client.tracking(marker.id()).complete()); assertTrue(endpoint.client.tracking(marker.id()).entries().isEmpty());
+					assertFalse(endpoint.client.tracking(marker.id()).complete()); assertEquals(7, endpoint.client.tracking(marker.id()).entries().getFirst().count());
 					assertTrue(host.packets.subList(before, host.packets.size()).stream().anyMatch(packet -> marker.id().equals(packet.markerId()) && packet.status() == InventoryS2CPacket.Status.INCOMPLETE));
 				}
 				assertTrue(host.packets.subList(start, host.packets.size()).stream().filter(packet -> marker.id().equals(packet.markerId()))
@@ -141,7 +184,7 @@ class InventoryPublicationIntegrationTest {
 				phase[0] = 2; backend.tick(11, settings); endpoint.drain(host);
 				var recovered = endpoint.client.tracking(marker.id()); assertTrue(recovered.complete()); assertEquals(1, recovered.entries().size());
 				assertTrue(recovered.entries().getFirst().fallback()); assertEquals(13, recovered.entries().getFirst().count());
-				assertEquals(fence.baselineId(), recovered.baselineId()); assertEquals(fence.statusRevision(), recovered.statusRevision());
+				assertTrue(recovered.baselineId() > fence.baselineId()); assertEquals(fence.statusRevision(), recovered.statusRevision());
 				assertEquals(1, host.store.size()); assertEquals(80, marker.expiresAtTick());
 			}
 		}
@@ -243,7 +286,7 @@ class InventoryPublicationIntegrationTest {
 			refusePublication[0] = false; backend.tick(3, settings);
 			var aggregate = host.packets.stream().filter(packet -> packet.entries().stream().anyMatch(InventoryS2CPacket.Entry::fallback)).reduce((a, b) -> b).orElseThrow();
 			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.select(epoch, 100, 1, 2, 1, aggregate.baselineId(), aggregate.statusRevision(), aggregate.entries().getFirst().key(), "danger"), 4, settings);
-			assertEquals(1, host.store.size()); assertEquals(before + 1, reads.get());
+			assertEquals(1, host.store.size()); assertEquals(before, reads.get());
 		}
 	}
 	@Test void identityRefusalInEveryDiscoveryOrderAndPageWidthCountsEachLongSlotOnceAndRejectsLateExactFrames() {
@@ -321,7 +364,7 @@ class InventoryPublicationIntegrationTest {
 			var aggregate = host.packets.stream().filter(packet -> packet.entries().stream().anyMatch(InventoryS2CPacket.Entry::fallback)).reduce((a, b) -> b).orElseThrow();
 			var fresh = InventoryC2SPacket.select(epoch, 100, 1, 2, 1, aggregate.baselineId(), aggregate.statusRevision(), aggregate.entries().getFirst().key(), "danger");
 			backend.handle(InventoryBackendTest.A, fresh, 4, settings); backend.handle(InventoryBackendTest.A, fresh, 4, settings);
-			assertEquals(1, host.store.size()); assertEquals(before + 1, reads.get(), "fresh aggregate witnesses once and creates once");
+			assertEquals(1, host.store.size()); assertEquals(before, reads.get(), "fresh aggregate creates once with metadata validation only");
 		}
 	}
 
@@ -398,10 +441,11 @@ class InventoryPublicationIntegrationTest {
 	@Test void smallRecoveryFencePrecedesSnapshotAndEachRecipientReplacesGreyBaselineWithoutOldStreamResurrection() {
 		try (var f = new InventoryBackendTest.Fixture()) {
 			f.open(); f.backend.handle(InventoryBackendTest.A, f.select(1), 1, f.settings);
+			InventoryPublicationTicks.withoutScanSlots(f.backend, 1, f.settings);
 			var marker = f.host.store.allMarkers().getFirst(); var a = new Endpoint(InventoryBackendTest.A, MarkerSnapshot.from(marker)); var b = new Endpoint(InventoryBackendTest.B, MarkerSnapshot.from(marker));
 			f.backend.tick(2, f.settings); a.drain(f.host); b.drain(f.host); count(a.client, marker.id(), 7); count(b.client, marker.id(), 7);
 			f.amount = 8; f.backend.tick(5, f.settings); a.drain(f.host); b.drain(f.host);
-			var oldStreams = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.STREAM).toList(); assertEquals(2, oldStreams.size());
+			@org.jetbrains.annotations.Unmodifiable List<InventoryS2CPacket> oldStreams = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.STREAM).toList(); assertEquals(4, oldStreams.size());
 			long baselineA = a.client.tracking(marker.id()).baselineId(), baselineB = b.client.tracking(marker.id()).baselineId();
 			f.valid = false; f.backend.tick(6, f.settings); a.drain(f.host); b.drain(f.host);
 			assertTrue(a.client.tracking(marker.id()).grey()); assertEquals(8, a.client.tracking(marker.id()).entries().getFirst().count()); assertTrue(b.client.tracking(marker.id()).grey());
@@ -502,7 +546,8 @@ class InventoryPublicationIntegrationTest {
 	static Endpoint negotiated(MarkerId marker, InventorySettings settings) {
 		var snapshot = new MarkerSnapshot(marker, InventoryBackendTest.A, InventoryRuntimeTest.TARGET, "entity_block", "attention", new nx.pingwheel.common.marker.MarkerAnchor(1, 2, 3), 0, 200);
 		var endpoint = new Endpoint(InventoryBackendTest.A, snapshot);
-		endpoint.client.accept(wire(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(5, 3, 5, settings.getTracking().getHeartbeatPeriods())).stamp(100, 1)));
+		endpoint.client.accept(wire(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(settings.getPreview().getPeriodTicks(),
+			settings.getTracking().getPeriodTicks(), settings.getTracking().getResyncMinPeriods(), settings.getTracking().getHeartbeatPeriods())).stamp(100, 1)));
 		endpoint.client.accept(wire(InventoryS2CPacket.policy(7, 100, 1, Set.of("entity_block")))); return endpoint;
 	}
 	@Test void publisherAndClientCloseUnchangedCutsAndRepairWithheldStreamEvenWhenPeriodicHeartbeatIsDisabled() {
@@ -574,19 +619,25 @@ class InventoryPublicationIntegrationTest {
 		}
 	}
 	@Test void missingMultipartApplicationPartDefersFutureChecksumThenRepairsCompletedGapWithoutPartialComparison() {
-		var settings = InventorySettings.serverDefaults(); settings.getTracking().setHeartbeatPeriods(16); var transport = new InventorySyncPublisherTest.Transport(); var marker = new MarkerId(1); var endpoint = negotiated(marker, settings);
-		try (var publisher = new InventorySyncPublisher(new RetainedMemoryLedger(16000000), transport)) {
-			var context = InventorySyncPublisherTest.context("tracking/1", 1); publisher.advance(0, settings); publisher.register(context, InventorySyncPublisherTest.route(marker, "target"));
-			InventorySyncPublisherTest.publish(publisher, context, InventorySyncPublisherTest.capture(1, 2, 0)); publisher.drain(); transport.sent.forEach(p -> endpoint.client.accept(wire(p))); transport.sent.clear();
-			publisher.advance(3, settings); InventorySyncPublisherTest.publish(publisher, context, InventorySyncPublisherTest.capture(2, 2, 550)); publisher.drain();
-			var parts = transport.sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.STREAM).toList(); assertEquals(2, parts.size());
-			var retainedPart = parts.getFirst(); int[] applied = {0};
-			for (var packet : transport.sent) if (packet.kind() != InventoryS2CPacket.Kind.STREAM || applied[0]++ == 0) endpoint.client.accept(wire(packet));
-			transport.sent.clear(); assertEquals(1, endpoint.client.tracking(marker).watermark()); assertTrue(endpoint.repairs().isEmpty(), "the future completed digest cannot compare the partial live projection");
-			endpoint.tickTo(0, 15); assertEquals(1, endpoint.repairs().size(), "completed but unapplied gap repairs after the negotiated interval");
-			endpoint.client.accept(wire(parts.getLast())); assertEquals(2, endpoint.client.tracking(marker).watermark()); int repairs = endpoint.repairs().size();
-			endpoint.tickTo(15, 35); assertEquals(repairs, endpoint.repairs().size(), "receiving the missing admitted part clears the gap");
-			endpoint.client.accept(wire(retainedPart)); assertEquals(2, endpoint.client.tracking(marker).watermark());
+		for (int resyncPeriods : new int[] {0, 5}) {
+			var settings = InventorySettings.serverDefaults(); settings.getTracking().setHeartbeatPeriods(16);
+			settings.getTracking().setPeriodTicks(3); settings.getTracking().setResyncMinPeriods(resyncPeriods);
+			var transport = new InventorySyncPublisherTest.Transport(); var marker = new MarkerId(1); var endpoint = negotiated(marker, settings);
+			try (var publisher = new InventorySyncPublisher(new RetainedMemoryLedger(16000000), transport)) {
+				var context = InventorySyncPublisherTest.context("tracking/1", 1); publisher.advance(0, settings); publisher.register(context, InventorySyncPublisherTest.route(marker, "target"));
+				InventorySyncPublisherTest.publish(publisher, context, InventorySyncPublisherTest.capture(1, 2, 0)); publisher.drain(); transport.sent.forEach(p -> endpoint.client.accept(wire(p))); transport.sent.clear();
+				publisher.advance(3, settings); InventorySyncPublisherTest.publish(publisher, context, InventorySyncPublisherTest.capture(2, 2, 550)); publisher.drain();
+				var parts = transport.sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.STREAM).toList(); assertEquals(2, parts.size());
+				var retainedPart = parts.getFirst(); int[] applied = {0};
+				for (var packet : transport.sent) if (packet.kind() != InventoryS2CPacket.Kind.STREAM || applied[0]++ == 0) endpoint.client.accept(wire(packet));
+				transport.sent.clear(); assertEquals(1, endpoint.client.tracking(marker).watermark()); assertTrue(endpoint.repairs().isEmpty(), "the future completed digest cannot compare the partial live projection");
+				int deadline = resyncPeriods == 0 ? 9 : 15;
+				endpoint.tickTo(0, deadline - 1); assertTrue(endpoint.repairs().isEmpty(), "the real multipart gap retains its independent waiting window");
+				endpoint.tickTo(deadline - 1, deadline); assertEquals(1, endpoint.repairs().size(), "completed but unapplied gap repairs at the waiting boundary");
+				endpoint.client.accept(wire(parts.getLast())); assertEquals(2, endpoint.client.tracking(marker).watermark()); int repairs = endpoint.repairs().size();
+				endpoint.tickTo(deadline, 35); assertEquals(repairs, endpoint.repairs().size(), "receiving the missing admitted part clears the gap");
+				endpoint.client.accept(wire(retainedPart)); assertEquals(2, endpoint.client.tracking(marker).watermark());
+			}
 		}
 	}
 	@Test void failedRecoveryFenceTransmissionBlocksAllBaselinePartsUntilSameFenceCanBeSent() {

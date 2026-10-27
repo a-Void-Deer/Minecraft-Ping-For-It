@@ -12,6 +12,41 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PlatformInventoryResidentTest {
+	@Test void synchronousConsumerFreezesBeforeScopeMetadataReusesTheStackAndRevocationStillFails() {
+		for (boolean revoke : new boolean[] {false, true}) {
+			var stack = new ItemStack(Items.STONE, 7);
+			var name = net.minecraft.network.chat.Component.literal("getter-time");
+			stack.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, name);
+			boolean[] returned = {false}; AtomicInteger mutations = new AtomicInteger();
+			var handler = new ItemStackHandler(1) {
+				@Override public ItemStack getStackInSlot(int slot) { returned[0] = true; return stack; }
+			};
+			var scope = new nx.pingwheel.common.platform.IPlatformInventoryService.ResidentScope() {
+				@Override public net.minecraft.core.Direction face() { return net.minecraft.core.Direction.NORTH; }
+				@Override public boolean valid() {
+					if (returned[0]) { mutations.incrementAndGet(); stack.setCount(0); name.append("-mutated"); }
+					return !returned[0] || !revoke;
+				}
+				@Override public boolean allows(net.minecraft.world.Container value) { return false; }
+				@Override public boolean audited(net.minecraft.world.Container value) { return false; }
+				@Override public @org.jetbrains.annotations.Nullable java.util.List<Integer> slots(net.minecraft.world.Container value) { return null; }
+			};
+			var access = new PlatformInventoryServiceImpl.HandlerAccess(handler).scopedResidents(scope);
+			@org.jetbrains.annotations.Nullable String[] frozen = new String[1];
+			nx.pingwheel.common.platform.IPlatformInventoryService.ResidentVisitor visitor = entry -> {
+				assertEquals(0, mutations.get()); assertEquals(7L, entry.amount()); assertEquals(7, stack.getCount());
+				// Detached explicit-patch oracle; the full freezer is exercised in common.
+				frozen[0] = net.minecraft.core.component.DataComponentPatch.CODEC.encodeStart(com.mojang.serialization.JsonOps.INSTANCE,
+					((InventoryResidentItem.Stack) entry.item()).resident().getComponentsPatch()).getOrThrow().toString();
+				return false;
+			};
+			if (revoke) assertThrows(IllegalStateException.class, () -> access.consumeResident(0, visitor));
+			else assertFalse(access.consumeResident(0, visitor));
+			assertEquals(1, mutations.get()); assertEquals(0, stack.getCount()); assertEquals("getter-time-mutated", name.getString());
+			assertNotNull(frozen[0]); assertTrue(frozen[0].contains("getter-time"));
+			assertFalse(frozen[0].contains("mutated"));
+		}
+	}
 	private static final nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess RAW = new nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess() {
 		@Override public java.util.List<?> nonNullList(net.minecraft.core.NonNullList<?> value) {
 			try { var field = net.minecraft.core.NonNullList.class.getDeclaredField("list"); field.setAccessible(true); return (java.util.List<?>) field.get(value); }

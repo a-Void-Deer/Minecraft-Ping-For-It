@@ -8,6 +8,7 @@ import java.util.function.IntFunction;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import nx.pingwheel.common.platform.IPlatformInventoryService.ResidentEntry;
+import nx.pingwheel.common.platform.IPlatformInventoryService.ResidentVisitor;
 import nx.pingwheel.common.presentation.inventory.InventoryDomainCodec;
 import nx.pingwheel.common.presentation.inventory.InventoryReprojectionSummary;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
@@ -18,7 +19,11 @@ import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
  * this staged implementation is NOT a claim that native allocation is certified.
  */
 public final class InventoryObservationSnapshot implements InventorySourceAccess.InventorySnapshot {
-	private record Observation(InventoryDetachedItem item, long amount) {}
+	@FunctionalInterface
+	interface ResidentReader {
+		boolean consume(int slot, ResidentVisitor visitor);
+	}
+	private record Observation(@org.jetbrains.annotations.Nullable InventoryDetachedItem item, long amount) {}
 	private record Segment(InventorySnapshotLayout.Segment topology, Observation[] slots) {}
 	private record Member(InventorySnapshotLayout.Member topology, List<Segment> segments) {}
 	private InventorySnapshotLayout layout;
@@ -108,6 +113,13 @@ public final class InventoryObservationSnapshot implements InventorySourceAccess
 	static InventoryObservationSnapshot capture(InventorySnapshotLayout layout, BlockPos target,
 		HolderLookup.Provider registries, int displayBytes, long admittedBytes,
 		IntFunction<ResidentEntry> read, BooleanSupplier valid, InventoryValidationBudget.Allowance validation) {
+		Objects.requireNonNull(read);
+		return captureResidents(layout, target, registries, displayBytes, admittedBytes,
+			(slot, visitor) -> visitor.visit(read.apply(slot)), valid, validation);
+	}
+	static InventoryObservationSnapshot captureResidents(InventorySnapshotLayout layout, BlockPos target,
+		HolderLookup.Provider registries, int displayBytes, long admittedBytes,
+		ResidentReader read, BooleanSupplier valid, InventoryValidationBudget.Allowance validation) {
 		Objects.requireNonNull(read); Objects.requireNonNull(valid);
 		boolean containsTarget = false;
 		for (int index = 0; index < layout.members().size(); index++) if (layout.members().get(index).position().equals(target)) containsTarget = true;
@@ -122,6 +134,17 @@ public final class InventoryObservationSnapshot implements InventorySourceAccess
 		InventoryItemBudget budget = InventoryItemBudget.capture(displayBytes, Math.max(1, count), Math.max(1, retainedLimit),
 			multiply(Math.max(1, count), InventoryItemBudget.freezeWorkUpperBound(displayBytes)));
 		Envelope structure = new Envelope(envelope(layout));
+		// One reusable synchronous handoff, not a per-slot borrowed-entry buffer.
+		structure.charge(40L + 3L * 8 + 4);
+		var consumer = new ResidentVisitor() {
+			private @org.jetbrains.annotations.Nullable Observation observation;
+			@Override public boolean visit(ResidentEntry resident) {
+				@org.jetbrains.annotations.Nullable InventoryDetachedItem item = resident.amount() == 0 ? null
+					: InventoryItemCodec.freeze(resident.item(), registries, displayBytes, budget);
+				observation = new Observation(item, resident.amount());
+				return true;
+			}
+		};
 		// Fixed validation state was consumed by the dedicated allowance before
 		// scratch/witness construction; it is not spare snapshot envelope capacity.
 		structure.charge(40L + 8L * layout.members().size());
@@ -142,13 +165,14 @@ public final class InventoryObservationSnapshot implements InventorySourceAccess
 				for (int local = 0; local < values.length; local++) {
 					if (!valid.getAsBoolean()) throw new IllegalStateException("capture authority or topology revoked");
 					structure.charge(40L + 2L * 8);
-					ResidentEntry resident = Objects.requireNonNull(read.apply(index++), "resident observation");
-					InventoryDetachedItem item = resident.amount() == 0 ? null
-						: InventoryItemCodec.freeze(resident.item(), registries, displayBytes, budget);
+					consumer.observation = null;
+					read.consume(index++, consumer);
+					Observation observed = Objects.requireNonNull(consumer.observation, "resident observation");
+					@org.jetbrains.annotations.Nullable InventoryDetachedItem item = observed.item();
 					if (item != null) retained = add(retained, item.retainedBytes());
 					if (item != null) summary.input(item.display().displayJson());
 					if (retained > retainedLimit) throw new LimitException("capture retention exhausted");
-					values[local] = new Observation(item, resident.amount());
+					values[local] = observed;
 				}
 				structure.charge(40L + 2L * 8); segments.add(new Segment(topology, values));
 			}

@@ -132,20 +132,31 @@ preference, and its tooltip states that a change applies to the next hold.
 
 The Performance category begins with a plain-text, non-interactive Monitoring
 subgroup and a full-width Budget Delay Notifications server-value toggle. Its
-tooltip distinguishes administrator messages from WARN diagnostics; value
-semantics and the persisted key are owned by
+tooltip identifies administrator budget-delay notices and the effect of
+enabling or disabling them; value semantics and the persisted key are owned by
 [server configuration](../config/server.md#persisted-fields).
 
 The inventory administration controls follow in three
 plain-text, non-interactive subgroups: Shared inventory budgets, Inventory
-preview, and Inventory tracking. Each control is one atomic leaf: a numeric
-field holds the finite value, and each cap or multiplier that has an unlimited
-mode also carries a finite/unlimited mode control. The mode is independent of
-the finite text, so switching a row to unlimited never discards the finite
-value, including text that is currently invalid. The multiplier fields that
-have an unlimited mode, and the pending-memory field, offer native step buttons
-that use the confirmed grids and steps without floating-point rounding. The
-persisted keys, normalization behavior, and unlimited semantics are owned
+preview, and Inventory tracking. Each control edits one atomic leaf, and all
+twenty-one numeric inventory settings use sliders. For integer settings,
+piecewise step sizes apply only to UI adjustment, not file or server validation.
+Each integer slider uses its field's validated bounds and preserves an in-range
+integer between UI stops exactly as an additional stop. The five byte
+multipliers and two size scalars retain their
+exact grids and the size-pair constraint owned by
+[server configuration](../config/server.md#inventory-policy-object).
+Opening the page, rebuilding it, resizing, or navigating never snaps a value or
+makes a clean draft dirty. The authoritative snapshot's extra integer stop
+remains available throughout the editing session even after another value is selected,
+so selecting it again can revert the leaf to clean.
+
+Each setting that supports unlimited mode has one explicit unlimited stop after
+its maximum finite stop. Selecting that tail stop changes only the mode and
+retains the finite value; selecting a finite stop exits unlimited mode and uses
+that selected value. One step left from the unlimited stop selects the maximum
+finite value. Mode and retained value remain one atomic leaf. The persisted
+keys, normalization behavior, and unlimited semantics are owned
 by [server configuration](../config/server.md#inventory-policy-object) and
 [inventory preview and tracking](../architecture/presentation/inventory.md).
 
@@ -161,6 +172,10 @@ unlimited mode. The server's merged-pair validation, including its rejection of
 a conflicting pair without mutating an unselected member, and the
 no-acknowledgement transaction are owned by
 [changing server configuration](../architecture/config/changing-server-config.md).
+
+Each inventory tooltip briefly identifies its scope and the player-visible
+effect of reducing or increasing the setting, such as preview progress,
+tracking responsiveness, or retained item detail.
 
 These controls belong to the shared ordinary server settings session and its
 correlated snapshot, not to a separate inventory session; the draft, close, and
@@ -279,15 +294,15 @@ and [security](../architecture/security.md) own.
 The draft begins when an editable authoritative snapshot is accepted. Controls
 are inert unless `canEdit` holds. Each control recomputes dirty bits against the
 authoritative snapshot. The original numeric fields must parse as non-negative
-integers; each inventory leaf parses under its own kind, range, and grid. An
-empty, malformed, out-of-range, or off-grid draft remains dirty but makes the
-update plan unavailable. An inventory cap or multiplier that has an unlimited
-mode is one leaf: its unlimited mode is independent of its finite text, and
-toggling the mode never discards the finite text, including text that is
-currently invalid. A draft that returns every edited value to its authoritative
-value has no dirty bits and produces no update plan. Thus no-change and
-invalid-draft states do not dispatch a settings update merely because a page is
-open. The field-masked merge and the no-update-result consequence are owned by
+integers; each inventory leaf validates under its own numeric kind, bounds and,
+for decimal settings, exact grid and size-pair constraints. An empty, malformed
+or out-of-range draft, or a decimal draft outside its exact grid, remains dirty
+but makes the update plan unavailable; an in-range integer between UI-only
+adjustment stops is valid and retained exactly. A draft that returns every
+edited value to its authoritative value has no dirty bits and produces no
+update plan. Thus no-change and invalid-draft states do not dispatch a settings
+update merely because a page is open. The field-masked merge and the
+no-update-result consequence are owned by
 [changing server configuration](../architecture/config/changing-server-config.md#no-update-result).
 
 Category, scope-tab, and overview navigation neither dispatches an update nor

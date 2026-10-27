@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import org.jetbrains.annotations.Nullable;
 
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DynamicOps;
@@ -38,7 +39,7 @@ final class InventoryComponentCertificate {
 	private final InventoryResidentAccess raw;
 	private final InventoryItemNativeAccess nativeAccess;
 	private final InventoryComponentBounds bounds;
-	private final EffectCost[] effectCopies;
+	private @Nullable EffectCost @Nullable [] effectCopies;
 	private int effectCopyCount;
 	private InventoryRegistryContext context;
 	private long laterListVisits;
@@ -70,8 +71,6 @@ final class InventoryComponentCertificate {
 	InventoryComponentCertificate(InventoryItemBudget budget, InventoryResidentAccess raw,
 		InventoryItemNativeAccess nativeAccess, InventoryComponentBounds bounds) {
 		this.budget = budget; this.raw = raw; this.nativeAccess = nativeAccess; this.bounds = bounds;
-		budget.allocate(0, 0, InventoryItemBudget.MAX_NODES, 1);
-		effectCopies = new EffectCost[InventoryItemBudget.MAX_NODES];
 		budget.allocate(148, 0, 16, 3);
 		encoding = new InventoryEncodingCost(budget);
 		nativeCost = new InventoryNativeCost(budget, raw, nativeAccess, encoding);
@@ -572,9 +571,15 @@ final class InventoryComponentCertificate {
 	EffectCost effectCopy(MobEffectInstance value, int depth) {
 		exact(value, MobEffectInstance.class); budget.node(depth); holder(value.getEffect(), Registries.MOB_EFFECT);
 		if (value.getAmplifier() < 0 || value.getAmplifier() > 255) refuse();
-		if (effectCopyCount == effectCopies.length) refuse();
+		if (effectCopyCount == InventoryItemBudget.MAX_NODES) refuse();
 		budget.allocate(40, 0, 0, 1); // EffectCost's five long fields
-		Set<?> cures = nativeAccess.effectCures(value);
+		// First use only, but still before cure inspection or any native copy.
+		// The fixed cardinality and append order survive identity/display passes.
+		if (effectCopies == null) {
+			budget.allocate(0, 0, InventoryItemBudget.MAX_NODES, 1);
+			effectCopies = new EffectCost[InventoryItemBudget.MAX_NODES];
+		}
+		@Nullable Set<?> cures = nativeAccess.effectCures(value);
 		EffectCost cost;
 		if (cures != null) {
 			exact(cures, CURE_SET); if (!InventoryNativeTraversal.runtimeSupported()) refuse();
@@ -590,7 +595,7 @@ final class InventoryComponentCertificate {
 			if (size != 0) {
 				bounds.nativeTraversal(cells + size);
 				budget.allocate(8, 0, 1, 1); // resident KeyIterator on the guard pass
-				for (Object cure : cures) { String name = nativeAccess.effectCureName(cure); if (name == null) refuse(); budget.string(name); }
+				for (Object cure : cures) { @Nullable String name = nativeAccess.effectCureName(cure); if (name == null) refuse(); budget.string(name); }
 			}
 			long table = 64, growth = 64, arrays = 1;
 			while (3L * size > table) { table *= 2; growth += table; arrays++; }

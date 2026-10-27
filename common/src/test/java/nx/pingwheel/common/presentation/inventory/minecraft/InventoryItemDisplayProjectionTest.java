@@ -259,7 +259,7 @@ class InventoryItemDisplayProjectionTest {
 	}
 
 	@Test
-	void plainDefaultsTravelAsSparseNativePatchesWithoutChangingCompleteIdentity() {
+	void plainDefaultsTravelAsSparseNativePatchesWithEmptyPatchIdentity() {
 		for (Item item : List.of(Items.STONE, Items.DIAMOND_SWORD, Items.IRON_PICKAXE)) {
 			ItemStack source = new ItemStack(item);
 			InventoryDetachedItem frozen = freeze(source);
@@ -288,7 +288,7 @@ class InventoryItemDisplayProjectionTest {
 			assertEquals(1, decoded.getCount());
 			assertSameEffectiveComponentsExceptLore(source, decoded);
 
-			// The complete server-effective persistent map still supplies exact identity.
+			// Identity is the current native persistent patch, not inherited defaults.
 			assertArrayEquals(InventoryItemCodec.canonicalTag(nativePersistentMap(source)),
 				frozen.canonicalForCatalog());
 		}
@@ -413,9 +413,9 @@ class InventoryItemDisplayProjectionTest {
 	}
 
 	private static Tag nativePersistentMap(ItemStack stack, HolderLookup.Provider provider) {
-		return DataComponentMap.makeCodec(DataComponentType.PERSISTENT_CODEC)
+		return DataComponentPatch.CODEC
 			.encodeStart(provider.createSerializationContext(NbtOps.INSTANCE),
-				stack.getComponents().filter(type -> !type.isTransient()))
+				((PatchedDataComponentMap) stack.getComponents()).asPatch())
 			.result().orElseThrow();
 	}
 

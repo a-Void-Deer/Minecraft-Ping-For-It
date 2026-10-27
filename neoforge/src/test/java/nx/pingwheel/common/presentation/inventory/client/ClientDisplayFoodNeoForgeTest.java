@@ -23,6 +23,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.neoforged.neoforge.common.EffectCure;
 import net.neoforged.neoforge.common.EffectCures;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -96,10 +97,13 @@ class ClientDisplayFoodNeoForgeTest {
 			ClientItemDisplay.reset(); hook.calls = 0;
 			var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:stone", "fallback", "{\"id\":\"minecraft:stone\"}");
 			assertFalse(display.stack().isEmpty());
+			assertSame(food, display.stack().get(DataComponents.FOOD), "local defaults stay native references, unlike the explicit patch copy above");
 			var rendered = resident(display.stack().get(DataComponents.FOOD).effects().getFirst());
-			assertEquals(0, hook.calls); assertSame(source, hook.last); assertNotSame(hook.last, rendered);
+			assertEquals(0, hook.calls); assertSame(source, hook.last); assertSame(source, rendered);
 			assertCures(rendered, EffectCures.HONEY, EffectCures.PROTECTED_BY_TOTEM);
-			assertCures(new ClientDisplayFoodTestPorts().hidden(rendered), EffectCures.MILK, EffectCures.HONEY);
+			@Nullable MobEffectInstance inheritedHidden = new ClientDisplayFoodTestPorts().hidden(rendered);
+			assertSame(hidden, inheritedHidden);
+			assertCures(inheritedHidden, EffectCures.MILK, EffectCures.HONEY);
 		} finally { field.set(Items.STONE, defaults); ClientItemDisplay.reset(); }
 	}
 
@@ -233,7 +237,7 @@ class ClientDisplayFoodNeoForgeTest {
 		assertEquals(0, calls.get());
 	}
 
-	@Test void unknownNativeDefaultFallsBackWithoutChangingExactEntryCountOrSelectionReference() throws Exception {
+	@Test void unknownNativeDefaultIsInheritedWithoutChangingExactEntryCountOrSelectionReference() throws Exception {
 		var calls = new AtomicInteger(); var unknown = new FoodProperties.PossibleEffect(() -> {
 			calls.incrementAndGet(); throw new AssertionError("unknown default supplier");
 		}, 0.25F);
@@ -241,7 +245,7 @@ class ClientDisplayFoodNeoForgeTest {
 		var inventory = new ClientInventory(sent::add); inventory.presentationReset(100, 1);
 		long request = inventory.open(new nx.pingwheel.common.domain.Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest"),
 			nx.pingwheel.common.domain.BlockFace.NORTH, "entity_block");
-		inventory.accept(nx.pingwheel.common.network.InventoryS2CPacket.offer(7, new nx.pingwheel.common.network.InventoryS2CPacket.Offer(10, 20, 3, 5)).stamp(100, 1));
+		inventory.accept(nx.pingwheel.common.network.InventoryS2CPacket.offer(7, new nx.pingwheel.common.network.InventoryS2CPacket.Offer(10, 10, 3, 5)).stamp(100, 1));
 		inventory.accept(nx.pingwheel.common.network.InventoryS2CPacket.policy(7, 100, 1, java.util.Set.of("entity_block")));
 		String json = "{\"id\":\"minecraft:stone\"}";
 		var entry = new nx.pingwheel.common.network.InventoryS2CPacket.Entry("exact-food", "minecraft:stone", "fallback", json, 9007199254740993L, 1, false, null);
@@ -251,10 +255,13 @@ class ClientDisplayFoodNeoForgeTest {
 		var field = net.minecraft.world.item.Item.class.getDeclaredField("components"); field.setAccessible(true);
 		var defaults = (net.minecraft.core.component.DataComponentMap) field.get(Items.STONE);
 		try {
-			field.set(Items.STONE, net.minecraft.core.component.DataComponentMap.builder().addAll(defaults).set(DataComponents.FOOD, food(unknown)).build());
+			FoodProperties defaultFood = food(unknown);
+			field.set(Items.STONE, net.minecraft.core.component.DataComponentMap.builder().addAll(defaults).set(DataComponents.FOOD, defaultFood).build());
 			ClientItemDisplay.reset();
 			var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, entry.itemId(), entry.label(), entry.displayJson());
-			assertTrue(display.stack().isEmpty());
+			assertFalse(display.stack().isEmpty());
+			assertEquals(Items.STONE, display.stack().getItem()); assertEquals(1, display.stack().getCount());
+			assertSame(defaultFood, display.stack().get(DataComponents.FOOD));
 			assertEquals("fallback", ((net.minecraft.network.chat.contents.TranslatableContents) display.name().getContents()).getKey());
 			assertTrue(ClientItemDisplay.decodeName(RegistryAccess.EMPTY, json).isEmpty());
 			assertEquals(before, inventory.preview(request).entries().getFirst()); assertFalse(before.fallback());

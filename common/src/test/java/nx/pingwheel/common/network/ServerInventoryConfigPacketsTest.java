@@ -20,9 +20,9 @@ import static org.junit.jupiter.api.Assertions.*;
 class ServerInventoryConfigPacketsTest {
 	@Test
 	void routesVersionTheWholeAdministrationTransaction() {
-		assertEquals("pingforit-c2s:server-config-request-v3", ServerConfigRequestC2SPacket.PACKET_ID.toString());
-		assertEquals("pingforit-c2s:server-config-update-v3", ServerConfigUpdateC2SPacket.PACKET_ID.toString());
-		assertEquals("pingforit-s2c:server-config-snapshot-v3", ServerConfigSnapshotS2CPacket.PACKET_ID.toString());
+		assertEquals("pingforit-c2s:server-config-request-v4", ServerConfigRequestC2SPacket.PACKET_ID.toString());
+		assertEquals("pingforit-c2s:server-config-update-v4", ServerConfigUpdateC2SPacket.PACKET_ID.toString());
+		assertEquals("pingforit-s2c:server-config-snapshot-v4", ServerConfigSnapshotS2CPacket.PACKET_ID.toString());
 	}
 
 	@ParameterizedTest
@@ -191,7 +191,7 @@ class ServerInventoryConfigPacketsTest {
 	@Test
 	void knownFieldsRejectNonpositiveCapsAndOutOfRangeScalarsWithoutClamping() {
 		for (Field field : Field.values()) {
-			if (field == Field.TRACKING_HEARTBEAT_PERIODS) continue;
+			if (field == Field.TRACKING_HEARTBEAT_PERIODS || field == Field.TRACKING_RESYNC_MIN_PERIODS) continue;
 			var buf = updatePrefix(field.mask());
 			for (Field encoded : Field.values()) {
 				if (encoded.supportsUnlimited()) buf.writeBoolean(false);
@@ -209,6 +209,32 @@ class ServerInventoryConfigPacketsTest {
 		buf.writeBoolean(true);
 		assertTrue(ServerConfigUpdateC2SPacket.readSafe(buf).isCorrupt());
 		buf.release();
+	}
+
+	@ParameterizedTest
+	@EnumSource(value = Field.class, names = {"PHYSICAL_SLOTS_PER_TICK", "PENDING_MEMORY_MIB", "PREVIEW_PERIOD_TICKS",
+		"PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD", "PREVIEW_MAX_SLOTS_PER_CLIENT", "PREVIEW_MAX_SLOTS_SERVER",
+		"PREVIEW_MAX_TARGETS_PER_CLIENT", "TRACKING_PERIOD_TICKS", "TRACKING_MAX_VARIANTS_PER_TARGET",
+		"TRACKING_MAX_SLOTS_PER_TARGET", "TRACKING_MAX_SLOTS_SERVER", "TRACKING_RESYNC_MIN_PERIODS",
+		"TRACKING_HEARTBEAT_PERIODS", "TRACKING_GRACE_PERIODS"})
+	void integerWireBoundsAreStrictEvenForAnUnlimitedLeaf(Field selected) {
+		for (boolean unlimited : new boolean[] {false, true}) {
+			if (unlimited && !selected.supportsUnlimited()) continue;
+			for (int illegal : new int[] {selected.minimum() - 1, selected.maximum() + 1}) {
+				var buf = updatePrefix(selected.mask() | ServerConfigUpdate.RATE_LIMIT);
+				try {
+					for (Field field : Field.values()) {
+						if (field.supportsUnlimited()) buf.writeBoolean(field == selected && unlimited);
+						buf.writeVarInt(field == selected ? illegal : encodedDefault(field));
+					}
+					buf.writeBoolean(true);
+					var packet = ServerConfigUpdateC2SPacket.readSafe(buf);
+					assertTrue(packet.isCorrupt(), selected + "=" + illegal + " unlimited=" + unlimited);
+					assertFalse(packet.update().isValid());
+					assertEquals(0, buf.readableBytes());
+				} finally { buf.release(); }
+			}
+		}
 	}
 
 	private static int encodedDefault(Field field) {

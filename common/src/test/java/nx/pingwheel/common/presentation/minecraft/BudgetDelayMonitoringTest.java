@@ -8,6 +8,7 @@ import java.util.UUID;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.Nullable;
 
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
 import nx.pingwheel.common.presentation.PresentationDiagnosticCapture;
@@ -25,7 +26,6 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Production coordinator with narrow ports; never creates a Minecraft server or boots registries. */
 class BudgetDelayMonitoringTest {
 
-	private static final long SECOND = 1_000_000_000L;
 	private static final Module PRESENTATION = Module.PRESENTATION;
 
 	@Test void productionDiagnosticsReportEveryAdjacentClosedCycleWithoutAnotherWindow() {
@@ -47,7 +47,7 @@ class BudgetDelayMonitoringTest {
 		final UUID id;
 		int permission;
 		int permissionChecks, sends;
-		Throwable failure;
+		@Nullable Throwable failure;
 		final List<Set<Module>> notices = new ArrayList<>();
 		Player(UUID id, int permission) { this.id = id; this.permission = permission; }
 		Player(int permission) { this(UUID.randomUUID(), permission); }
@@ -66,28 +66,31 @@ class BudgetDelayMonitoringTest {
 
 	private static final class Server {
 		boolean enabled = true, dedicated = true;
-		UUID host;
+		@Nullable UUID host;
+		long tick;
 		int flagReads, hostReads, recipientReads;
-		Throwable flagFailure, recipientFailure;
+		@Nullable Throwable flagFailure, recipientFailure;
 		boolean failIterationAfterFirst;
 		final List<Player> players = new ArrayList<>();
 	}
 
 	private static final class Fixture {
-		long now;
-		Throwable clockFailure, warningFailure;
+		@Nullable Throwable clockFailure, warningFailure;
 		final List<String> warnings = new ArrayList<>();
 		final BudgetDelayMonitoring.Coordinator<Server> coordinator = new BudgetDelayMonitoring.Coordinator<>(
-			() -> { if (clockFailure != null) failWith(clockFailure); return now; },
 			line -> { if (warningFailure != null) failWith(warningFailure); warnings.add(line); },
 			new BudgetDelayMonitoring.ServerPort<>() {
+				@Override public long serverTick(Server server) {
+					if (clockFailure != null) failWith(clockFailure);
+					return server.tick;
+				}
 				@Override public boolean notificationsEnabled(Server server) {
 					server.flagReads++;
 					if (server.flagFailure != null) failWith(server.flagFailure);
 					return server.enabled;
 				}
 				@Override public boolean dedicated(Server server) { return server.dedicated; }
-				@Override public UUID hostId(Server server) { server.hostReads++; return server.host; }
+				@Override public @Nullable UUID hostId(Server server) { server.hostReads++; return server.host; }
 				@Override public Iterable<? extends BudgetDelayMonitoring.Recipient> recipients(Server server) {
 					server.recipientReads++;
 					if (server.recipientFailure != null) failWith(server.recipientFailure);
@@ -104,7 +107,7 @@ class BudgetDelayMonitoringTest {
 			});
 
 		void tick(Server server, long cycle, long at) {
-			now = at;
+			server.tick = at;
 			BudgetDelaySink sink = coordinator.sink(server);
 			sink.observe(event(PRESENTATION, cycle, at, "marker/adapter", Quantity.unknown(), Reason.SOURCE_WORK.bit()));
 			sink.state(PRESENTATION, cycle, at, DelayState.DELAYED);
@@ -130,7 +133,7 @@ class BudgetDelayMonitoringTest {
 		server.host = hostWithNoPermission.id;
 		server.players.addAll(List.of(hostWithNoPermission, level2, level3, level4));
 		f.tick(server, 0, 0);
-		f.tick(server, 1, 10 * SECOND);
+		f.tick(server, 1, 20);
 		assertEquals(0, hostWithNoPermission.sends, "dedicated has no host exception");
 		assertEquals(0, level2.sends);
 		assertEquals(1, level3.sends);
@@ -149,12 +152,12 @@ class BudgetDelayMonitoringTest {
 		server.host = hostId;
 		server.players.addAll(List.of(host, unrelated, operator));
 		f.tick(server, 0, 0);
-		f.tick(server, 1, 10 * SECOND);
+		f.tick(server, 1, 20);
 		assertEquals(1, host.sends);
 		assertEquals(0, unrelated.sends);
 		assertEquals(1, operator.sends);
 		host.permission = 4;
-		f.tick(server, 2, 310 * SECOND);
+		f.tick(server, 2, 220);
 		assertEquals(2, host.sends, "host plus permission is one OR predicate, not two sends");
 		assertEquals(2, operator.sends);
 		assertEquals(2, server.hostReads);
@@ -168,20 +171,20 @@ class BudgetDelayMonitoringTest {
 		server.enabled = false;
 		BudgetDelaySink first = f.coordinator.sink(server);
 		f.tick(server, 0, 0);
-		f.tick(server, 1, 10 * SECOND);
+		f.tick(server, 1, 20);
 		assertSame(first, f.coordinator.sink(server));
 		assertEquals(2, f.warnings.size());
 		assertEquals(0, server.recipientReads);
 		server.enabled = true;
-		f.tick(server, 2, 11 * SECOND);
+		f.tick(server, 2, 21);
 		assertEquals(1, operator.sends);
 		server.enabled = false;
-		f.tick(server, 3, 20 * SECOND);
+		f.tick(server, 3, 40);
 		server.enabled = true;
-		f.tick(server, 4, 21 * SECOND);
-		f.tick(server, 5, 311 * SECOND - 1);
+		f.tick(server, 4, 41);
+		f.tick(server, 5, 220);
 		assertEquals(1, operator.sends);
-		f.tick(server, 6, 311 * SECOND);
+		f.tick(server, 6, 221);
 		assertEquals(2, operator.sends);
 		assertSame(first, f.coordinator.sink(server));
 		assertEquals(7, server.flagReads, "notification flag is read live at each final flush");
@@ -196,26 +199,26 @@ class BudgetDelayMonitoringTest {
 		oldSink.observe(event(PRESENTATION, 900, 0, "old world", Quantity.unknown(), Reason.MEMORY.bit()));
 		BudgetDelaySink newSink = f.coordinator.sink(replacement);
 		assertNotSame(oldSink, newSink);
-		oldSink.endCycle(PRESENTATION, 900, 20 * SECOND);
-		oldSink.observe(event(PRESENTATION, 901, 20 * SECOND, "stale caller", Quantity.unknown(), Reason.MEMORY.bit()));
-		oldSink.endCycle(PRESENTATION, 901, 20 * SECOND);
+		oldSink.endCycle(PRESENTATION, 900, 40);
+		oldSink.observe(event(PRESENTATION, 901, 40, "stale caller", Quantity.unknown(), Reason.MEMORY.bit()));
+		oldSink.endCycle(PRESENTATION, 901, 40);
 		f.coordinator.finishTick(old);
 		assertTrue(f.warnings.isEmpty());
 		assertEquals(0, old.flagReads);
-		f.tick(replacement, 0, 20 * SECOND);
+		f.tick(replacement, 0, 40);
 		f.coordinator.stopped(old);
 		assertSame(newSink, f.coordinator.sink(replacement), "late stop for old server cannot reset a replacement");
-		f.tick(replacement, 1, 30 * SECOND);
+		f.tick(replacement, 1, 60);
 		assertEquals(1, operator.sends);
 		f.coordinator.stopped(replacement);
 		f.coordinator.finishTick(replacement);
 		BudgetDelaySink restarted = f.coordinator.sink(replacement);
 		assertNotSame(newSink, restarted);
-		newSink.observe(event(PRESENTATION, 2, 31 * SECOND, "stopped caller", Quantity.unknown(), Reason.MEMORY.bit()));
-		newSink.endCycle(PRESENTATION, 2, 31 * SECOND);
+		newSink.observe(event(PRESENTATION, 2, 61, "stopped caller", Quantity.unknown(), Reason.MEMORY.bit()));
+		newSink.endCycle(PRESENTATION, 2, 61);
 		assertEquals(2, f.warnings.size());
-		f.tick(replacement, 0, 31 * SECOND);
-		f.tick(replacement, 1, 41 * SECOND);
+		f.tick(replacement, 0, 61);
+		f.tick(replacement, 1, 81);
 		assertEquals(2, operator.sends, "stopped lifetime cooldown was discarded");
 		f.coordinator.reset();
 		assertNotSame(restarted, f.coordinator.sink(replacement));
@@ -228,16 +231,16 @@ class BudgetDelayMonitoringTest {
 		Player ineligible = new Player(2), failed = new Player(3), successful = new Player(4);
 		server.players.add(ineligible);
 		f.tick(server, 0, 0);
-		f.tick(server, 1, 10 * SECOND);
+		f.tick(server, 1, 20);
 		failed.failure = new NoClassDefFoundError("send");
 		server.players.add(failed);
-		f.tick(server, 2, 11 * SECOND);
+		f.tick(server, 2, 21);
 		assertEquals(1, failed.sends);
 		server.players.add(successful);
-		f.tick(server, 3, 12 * SECOND);
+		f.tick(server, 3, 22);
 		assertEquals(2, failed.sends);
 		assertEquals(1, successful.sends, "one failed player cannot prevent the next eligible handoff");
-		f.tick(server, 4, 13 * SECOND);
+		f.tick(server, 4, 23);
 		assertEquals(1, successful.sends, "successful recipient consumes the global cooldown");
 		assertEquals(0, ineligible.sends);
 	}
@@ -250,8 +253,8 @@ class BudgetDelayMonitoringTest {
 		BudgetDelaySink sink = f.coordinator.sink(server);
 		for (Module module : Module.values()) sink.state(module, 0, 0, DelayState.DELAYED);
 		f.coordinator.finishTick(server);
-		f.now = 10 * SECOND;
-		for (Module module : Module.values()) sink.state(module, 0, f.now, DelayState.DELAYED);
+		server.tick = 20;
+		for (Module module : Module.values()) sink.state(module, 0, server.tick, DelayState.DELAYED);
 		f.coordinator.finishTick(server);
 		assertEquals(1, operator.sends);
 		assertEquals(Set.of(PRESENTATION, Module.INVENTORY_PREVIEW, Module.INVENTORY_TRACKING), operator.notices.getFirst());
@@ -273,10 +276,10 @@ class BudgetDelayMonitoringTest {
 		server.players.add(operator);
 		server.failIterationAfterFirst = true;
 		f.tick(server, 0, 0);
-		assertDoesNotThrow(() -> f.tick(server, 1, 10 * SECOND));
+		assertDoesNotThrow(() -> f.tick(server, 1, 20));
 		assertEquals(1, operator.sends);
 		server.failIterationAfterFirst = false;
-		f.tick(server, 2, 11 * SECOND);
+		f.tick(server, 2, 21);
 		assertEquals(1, operator.sends, "the earlier successful handoff must not be erased by an iteration failure");
 	}
 
@@ -333,16 +336,16 @@ class BudgetDelayMonitoringTest {
 			assertDoesNotThrow(() -> f.tick(server, 0, 0));
 			f.warningFailure = null;
 			server.flagFailure = failure;
-			assertDoesNotThrow(() -> f.tick(server, 1, 10 * SECOND));
+			assertDoesNotThrow(() -> f.tick(server, 1, 20));
 			assertEquals(0, operator.sends);
 			server.flagFailure = null;
 			server.recipientFailure = failure;
-			assertDoesNotThrow(() -> f.tick(server, 2, 11 * SECOND));
+			assertDoesNotThrow(() -> f.tick(server, 2, 21));
 			server.recipientFailure = null;
 			f.clockFailure = failure;
-			assertDoesNotThrow(() -> f.tick(server, 3, 12 * SECOND));
+			assertDoesNotThrow(() -> f.tick(server, 3, 22));
 			f.clockFailure = null;
-			f.tick(server, 4, 13 * SECOND);
+			f.tick(server, 4, 23);
 			assertEquals(1, operator.sends, "no failed diagnostics port consumed a delivered cooldown");
 		}
 		OutOfMemoryError fatal = new OutOfMemoryError("test resource failure");
@@ -357,6 +360,6 @@ class BudgetDelayMonitoringTest {
 		Player operator = new Player(3);
 		operator.failure = fatal;
 		server.players.add(operator);
-		assertSame(fatal, assertThrows(OutOfMemoryError.class, () -> f.tick(server, 1, 10 * SECOND)));
+		assertSame(fatal, assertThrows(OutOfMemoryError.class, () -> f.tick(server, 1, 20)));
 	}
 }

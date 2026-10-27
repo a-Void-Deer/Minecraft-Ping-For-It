@@ -49,16 +49,16 @@ class InventorySettingsTest {
 	@Test
 	void unlimitedPhysicalModeIsBoundedAndKeepsTheConfiguredValue() {
 		InventorySettings settings = InventorySettings.serverDefaults();
-		settings.getPhysicalSlotsPerTick().setValue(2048);
+		settings.getPhysicalSlotsPerTick().setValue(513);
 		settings.getPhysicalSlotsPerTick().setUnlimited(true);
-		settings.setPendingMemoryMiB(2);
+		settings.setPendingMemoryMiB(65);
 		settings.validate();
 
 		assertTrue(settings.getPhysicalSlotsPerTick().isUnlimited());
-		assertEquals(2048, settings.getPhysicalSlotsPerTick().getValue());
+		assertEquals(513, settings.getPhysicalSlotsPerTick().getValue());
 		int effective = settings.effectivePhysicalSlotsPerTick();
 		assertTrue(effective > 0 && effective < Integer.MAX_VALUE, "unlimited work must stay a finite guard");
-		assertEquals(2, settings.getPendingMemoryMiB());
+		assertEquals(65, settings.getPendingMemoryMiB().getValue());
 	}
 
 	@Test
@@ -71,7 +71,7 @@ class InventorySettingsTest {
 		settings.getTracking().setResyncMinPeriods(0);
 		settings.validate();
 
-		assertEquals(InventoryLimits.MAX_PENDING_MEMORY_MIB, settings.getPendingMemoryMiB());
+		assertEquals(InventoryLimits.MAX_PENDING_MEMORY_MIB, settings.getPendingMemoryMiB().getValue());
 		assertEquals(InventoryLimits.MIN_PERIOD_TICKS, settings.getPreview().getPeriodTicks());
 		assertEquals(InventoryLimits.MIN_PERIOD_TICKS, settings.getTracking().getPeriodTicks());
 		assertEquals(InventoryLimits.MAX_GRACE_PERIODS, settings.getTracking().getGracePeriods());
@@ -253,17 +253,54 @@ class InventorySettingsTest {
 
 	@Test
 	void pendingMemoryStepsFollowTheConfirmedPiecewiseGrid() {
-		assertEquals(1, InventorySettings.pendingMemoryStepMiB(31));
-		assertEquals(2, InventorySettings.pendingMemoryStepMiB(32));
-		assertEquals(2, InventorySettings.pendingMemoryStepMiB(127));
-		assertEquals(4, InventorySettings.pendingMemoryStepMiB(128));
-		assertEquals(4, InventorySettings.pendingMemoryStepMiB(512));
+		assertEquals(4, InventorySettings.pendingMemoryStepMiB(63));
+		assertEquals(8, InventorySettings.pendingMemoryStepMiB(64));
+		assertEquals(8, InventorySettings.pendingMemoryStepMiB(255));
+		assertEquals(16, InventorySettings.pendingMemoryStepMiB(256));
+		assertEquals(16, InventorySettings.pendingMemoryStepMiB(1024));
+	}
+
+	@Test
+	void unlimitedMemoryUsesALongFiniteGuardAndIntAssignmentReturnsToFiniteMode() {
+		InventorySettings settings = InventorySettings.serverDefaults();
+		settings.setPendingMemoryMiB(IntLimit.unlimited(65));
+		settings.validate();
+		assertEquals(4294967296L, settings.pendingMemoryBytes());
+		assertEquals(65, settings.getPendingMemoryMiB().getValue());
+		assertTrue(settings.getPendingMemoryMiB().isUnlimited());
+		settings.setPendingMemoryMiB(67);
+		assertFalse(settings.getPendingMemoryMiB().isUnlimited());
+		assertEquals(70254592L, settings.pendingMemoryBytes());
+	}
+
+	@Test
+	void trackingServerUnlimitedGuardDoesNotWidenAnyOtherCountGuard() {
+		InventorySettings settings = InventorySettings.serverDefaults();
+		settings.setPhysicalSlotsPerTick(IntLimit.unlimited(17));
+		settings.getPreview().setMaxVariantsPerClientPeriod(IntLimit.unlimited(17));
+		settings.getPreview().setMaxSlotsPerClient(IntLimit.unlimited(17));
+		settings.getPreview().setMaxSlotsServer(IntLimit.unlimited(17));
+		settings.getPreview().setMaxTargetsPerClient(IntLimit.unlimited(3));
+		settings.getTracking().setMaxVariantsPerTarget(IntLimit.unlimited(9));
+		settings.getTracking().setMaxSlotsPerTarget(IntLimit.unlimited(17));
+		settings.getTracking().setMaxSlotsServer(IntLimit.unlimited(129));
+		settings.validate();
+
+		assertEquals(1073741824, settings.getTracking().effectiveMaxSlotsServer());
+		assertEquals(129, settings.getTracking().getMaxSlotsServer().getValue());
+		assertEquals(65536, settings.effectivePhysicalSlotsPerTick());
+		assertEquals(1048576, settings.getPreview().effectiveMaxVariantsPerClientPeriod());
+		assertEquals(1048576, settings.getPreview().effectiveMaxSlotsPerClient());
+		assertEquals(1048576, settings.getPreview().effectiveMaxSlotsServer());
+		assertEquals(1048576, settings.getPreview().effectiveMaxTargetsPerClient());
+		assertEquals(1048576, settings.getTracking().effectiveMaxVariantsPerTarget());
+		assertEquals(1048576, settings.getTracking().effectiveMaxSlotsPerTarget());
 	}
 
 	@Test
 	void sizePairNormalizationRepairsDisplayDownwardWithFramePriority() {
 		InventorySettings settings = InventorySettings.serverDefaults();
-		settings.setPendingMemoryMiB(7);
+		settings.setPendingMemoryMiB(67);
 		settings.setDisplayByteMultiplier(new BigDecimal("32"));
 		settings.setFrameByteMultiplier(new BigDecimal("1"));
 		settings.validate();
@@ -272,7 +309,7 @@ class InventorySettingsTest {
 		assertEquals(0, BigDecimal.ONE.compareTo(settings.getFrameByteMultiplier()));
 		assertEquals(30720, settings.effectiveDisplayBytes());
 		assertEquals(32768, settings.effectiveFrameBytes());
-		assertEquals(7, settings.getPendingMemoryMiB());
+		assertEquals(67, settings.getPendingMemoryMiB().getValue());
 	}
 
 	@Test

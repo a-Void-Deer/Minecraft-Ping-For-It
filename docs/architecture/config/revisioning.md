@@ -110,9 +110,9 @@ configuration is next serialized.
 
 Load-time normalization is separate from ordered version migration and also
 runs for a same-version or older load, composed after the ordered steps and
-before typed deserialization. It reconciles the persisted presentation shape
-and the explicitly conflicting client preference relations described below,
-failing closed on a malformed presentation shape:
+before typed deserialization. It reconciles the persisted server shapes and the
+explicitly conflicting client preference relations described below, failing
+closed on a malformed presentation shape:
 
 - A server document whose `presentation.targetTypes` map is present keeps that
   map and drops the obsolete flat `presentation.white`, `presentation.black`,
@@ -125,16 +125,24 @@ failing closed on a malformed presentation shape:
   normalizes to a global deny-all policy.
 - Unrelated server settings and every well-formed target-type rule survive
   normalization; an existing new-shape map wins over the obsolete flat members.
+- An integer numeric scalar at the server inventory's pending-memory member is
+  wrapped as a finite limit object before typed validation. The member's grammar is
+  owned by [server configuration](../../config/server.md#inventory-policy-object).
+  This compatibility normalization applies only to that member: it does not
+  reinterpret scalar forms of other limit objects. An existing object keeps its
+  mode and value, and missing or null members use normal model defaulting rather
+  than triggering a shape write by themselves. Typed validation still applies
+  the owning field's bounds.
 - A client document drops the obsolete `presentationReceive` and
   `presentationDisplay` keys.
 - The explicitly conflicting client configs are normalized under the same writeback
   guard described above; the conflict meanings and their key dependencies are
   owned by [client configuration](../../config/client.md).
 
-A document with neither an obsolete or malformed shape nor those explicit
-preference conflicts is not rewritten for normalization alone. Future-version
-protection and the changed-source pending-migration guard are unchanged;
-normalization shares the same guarded writeback.
+A document with neither a normalizable shape nor those explicit
+preference conflicts is not rewritten for normalization alone. Normalization
+shares the [guarded migration writeback](#ordered-migration-and-writeback) and
+[future-version protection](#future-version-protection).
 
 ## Invalid-file recovery differs by config type
 

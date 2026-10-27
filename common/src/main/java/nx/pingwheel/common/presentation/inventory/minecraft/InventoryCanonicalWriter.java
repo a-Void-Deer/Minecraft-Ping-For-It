@@ -2,22 +2,26 @@ package nx.pingwheel.common.presentation.inventory.minecraft;
 
 import java.util.Arrays;
 import net.minecraft.nbt.*;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
-/** Fixed-cap owned canonical output, with direct UTF-8 and bounded insertion sorting. */
+/** Bounded growable owned canonical scratch, with direct UTF-8 and insertion sorting. */
+@NotNullByDefault
 final class InventoryCanonicalWriter {
 	private static final String BYTE_BOUND_REASON = "canonical byte bound=" + InventoryItemCodec.MAX_CANONICAL_BYTES;
-	private final byte[] bytes;
-	private final InventoryItemBudget budget;
+	private byte[] bytes;
+	private final @Nullable InventoryItemBudget budget;
 	private int cursor;
 	private int nodes;
 
-	private InventoryCanonicalWriter(InventoryItemBudget budget) {
+	private InventoryCanonicalWriter(@Nullable InventoryItemBudget budget) {
 		this.budget = budget;
-		allocate(InventoryItemCodec.MAX_CANONICAL_BYTES, 0, 1);
-		bytes = new byte[InventoryItemCodec.MAX_CANONICAL_BYTES];
+		allocate(256, 0, 1);
+		bytes = new byte[256];
 	}
 
-	static byte[] write(Tag tag, InventoryItemBudget budget) {
+	static byte @Unmodifiable [] write(@Nullable Tag tag, @Nullable InventoryItemBudget budget) {
 		if (budget != null) budget.allocate(8, 0, 2, 1);
 		var writer = new InventoryCanonicalWriter(budget);
 		writer.tag(tag, 0);
@@ -26,7 +30,7 @@ final class InventoryCanonicalWriter {
 		return Arrays.copyOf(writer.bytes, writer.cursor);
 	}
 
-	private void tag(Tag tag, int depth) {
+	private void tag(@Nullable Tag tag, int depth) {
 		if (tag == null || depth > InventoryItemBudget.MAX_DEPTH || ++nodes > InventoryItemBudget.MAX_NODES) refuse();
 		Class<?> type = tag.getClass();
 		if (type != ByteTag.class && type != ShortTag.class && type != IntTag.class && type != LongTag.class
@@ -115,7 +119,20 @@ final class InventoryCanonicalWriter {
 		for (int shift = (width - 1) * 8; shift >= 0; shift -= 8) bytes[cursor++] = (byte) (value >>> shift);
 	}
 	private void room(long additional) {
-		if (additional > bytes.length - cursor) throw new InventoryItemCodec.IdentityUnavailableException(BYTE_BOUND_REASON);
+		// The logical limit is independent of physical storage. Reject before
+		// growth, including a negative/overflowed request; never allocate over-cap.
+		if (additional < 0 || additional > InventoryItemCodec.MAX_CANONICAL_BYTES - cursor)
+			throw new InventoryItemCodec.IdentityUnavailableException(BYTE_BOUND_REASON);
+		if (additional <= bytes.length - cursor) return;
+		work(128L + cursor); // at most eight doublings/control and written-byte copy
+		int capacity = bytes.length;
+		while (capacity < cursor + additional) capacity = Math.min(InventoryItemCodec.MAX_CANONICAL_BYTES, capacity * 2);
+		// Pay the entire new array, including initialization, not its delta.
+		// Skipped capacities are not allocated; discarded attempts stay paid.
+		allocate(capacity, 0, 1);
+		byte[] grown = new byte[capacity];
+		System.arraycopy(bytes, 0, grown, 0, cursor);
+		bytes = grown;
 	}
 	private void allocate(long payload, long references, long objects) {
 		if (budget != null) budget.allocate(payload, 0, references, objects);

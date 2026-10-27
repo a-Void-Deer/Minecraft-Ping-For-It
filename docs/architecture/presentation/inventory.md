@@ -1,9 +1,9 @@
 # Inventory preview and tracking
 
 This topic owns the inventory domain of the versioned presentation subsystem:
-preview, tracking, detached snapshot capture and schema, item-variant identity,
-zero and component-fallback rules, budget and sync policy, and source recovery
-deadlines. The generic mechanism —
+preview, tracking, incremental reads, detached snapshot capture and schema,
+item-variant identity, zero and component-fallback rules, budget and sync policy,
+and source recovery deadlines. The generic mechanism —
 source access, capture results, cost accounting, and sync publication — is
 owned by [shared sources](shared_sources.md). The reason a tracked inventory
 keeps the live Ping and original target identity instead of a source-instance
@@ -12,15 +12,27 @@ generation is recorded in
 trade-off for native persistent component codecs is explained by
 [D0010](../../decisions/D0010-persistent-component-codec-trust.md). The display
 default-inheritance trade-off is explained by
-[D0011](../../decisions/D0011-display-default-inheritance.md).
+[D0011](../../decisions/D0011-display-default-inheritance.md). The actual-patch
+identity and processing boundary, and the size-only default-icon exception, are
+explained by
+[D0012](../../decisions/D0012-explicit-patch-identity-and-display.md). The native
+read-cost and mixed-time accuracy boundary is explained by
+[D0013](../../decisions/D0013-native-incremental-inventory-sweeps.md). The
+preview-seeded initial display and separation of selection intent from current
+item presence are explained by
+[D0014](../../decisions/D0014-preview-seeded-inventory-tracking.md). The rationale
+for metadata reuse and bounded on-demand scratch, rather than validity or content
+caches, is recorded in
+[D0015](../../decisions/D0015-inventory-metadata-reuse-and-scratch.md).
 
 Coverage scope and pending runtime evidence for the ordinary-block and
 provider-confirmed external preview and tracking, item-choice create and native
 input/HUD seams are owned by
 [testing and verification](../../testing/verification/inventory.md). Wire routes
 and message families are owned by
-[network protocol](../network/protocol.md); persisted keys, bounds and defaults
-are owned by the configuration topics. Marker lifetime remains owned by
+[network protocol](../network/protocol.md); persisted keys and formats are owned
+by the configuration topics.
+Marker lifetime remains owned by
 [marker lifecycle](../authority/marker_lifecycle.md), target identity by
 [target model](../identity/target_model.md), and mod-specific providers by
 [Create integration](../../integrations/create.md).
@@ -70,8 +82,13 @@ Recovery probing and polling are allowed before the hard deadline. Recovery
 keeps the existing Ping ID, advances the inventory status revision, and
 establishes a new inventory snapshot identity with a clean baseline per
 Ping and recipient; the source is scanned afresh and old values and streams are
-invalidated rather than merged. A different block type is not a valid source
-while it occupies the position. If the original registry ID later returns while
+invalidated rather than merged. An initial preview seed is permanently retired
+on invalidity: queued seed data is withdrawn, and neither recovery nor repair
+can restore its publication eligibility. A quantity already received may remain
+as grey historical display through rebaseline, outside the new baseline's
+checksum and completion state, until a fresh complete scan replaces it. A
+different block type is not a valid source while it occupies the position. If
+the original registry ID later returns while
 the same Ping is still alive and before its hard deadline, the source may
 recover.
 
@@ -103,7 +120,7 @@ exist.
 
 Holding the ping key starts a bounded initial inventory preview on a new
 request path; it does not reuse the legacy subscription route. The preview is
-served from one initial snapshot capture and has no periodic capture cycle of
+served from one initial observation sweep and has no periodic capture cycle of
 its own. A preview may
 begin before the Ping exists and therefore has its own request and session
 identity, which must not be equated with a Ping or with the inventory snapshot
@@ -124,12 +141,15 @@ physical read bindings. An ordinary block must match its original identity
 exactly; an external candidate's current source and the committed source must
 resolve to the same provider, sub-level, physical root block and registry, so
 same-registry candidates and different hit roots cannot cross-bind. The
-selected item is then witnessed live against the authoritative source, the
-annotation is checked, and retained memory is admitted before the tracking
-lease is stored. Any failure releases the acquired reference and stores
-nothing. The tracking lease keeps the committed input; its first count comes
-from a fresh complete authoritative server-side capture, never the preview
-snapshot or a partial observation, and no preview Ping is invented. The
+owner's current read authority and the preview's original source/layout evidence
+are revalidated through metadata checks, the selection reference and annotation
+are checked, and retained memory is admitted before the tracking lease is
+stored. Any failure releases the acquired reference and stores nothing. No
+item-presence witness, additional item-content getter, fallback search or
+asynchronous selection deadline is part of this handoff. The tracking lease
+keeps the committed input and one detached selected value as the initial display
+seed under [Tracking](#tracking); it never retains the preview as a tracking
+observation, and no preview Ping is invented. The
 committed tracking association is installed after the marker is stored and
 before the created notification is published, so the recipient's atomic initial
 can project the inventory selection kind
@@ -142,11 +162,19 @@ never accumulated into a staged multi-item selection, and the selector release
 and stay-open timing that submits that selection is owned by
 [wheel](../picking/wheel.md#inventory-list).
 The create passes the existing marker-admission authority and gates owned by
-[target validation](../authority/target_validation.md), with the selected item
-reference validated safely and immediately against the authoritative source
-instead of trusted from preview data. That live witness is not authorized by
-the preview snapshot or by any capture observation, and captured data never
-stands in for it. The new Ping's whole-marker type is the
+[target validation](../authority/target_validation.md). The server resolves the
+opaque reference only inside the sender's still-open request and its current
+baseline/state fences. A forged, missing, retired, cross-request or
+known-invalidated reference rejects; a missing retained count is not zero.
+An exact reference takes only its exact key's current server-retained count;
+an aggregate reference takes only the current folded key's count, never a
+different item-ID subtotal or a retired exact entry. The preview may still be
+partial, and the retained count may be newer than the last row delivered to the
+client. No client-screen quantity authorizes the seed. Current target, source,
+owner/face binding, read permission, annotation, rate, channel, audience,
+selection-capacity and memory gates still apply. Item absence at the old
+observed slot does not veto an otherwise valid selection: the new scan decides
+the subsequent count. The new Ping's whole-marker type is the
 frozen Target Type's default Ping Type; the chosen Ping Type travels as a
 separate item annotation rather than as the whole-marker type. The item
 annotation's eligible Ping Type set is the target's effective
@@ -158,8 +186,8 @@ client's item menu derives its eligible set from the accepted registry's actual
 tags, while the server decides the annotation's allowance from the actual
 provider-confirmed physical block and its live tags, so a client-expected
 registry or a merely claimed tag never authorizes the annotation. The
-annotation's quantity starts unknown, and its first authoritative count follows the
-complete-observation rules in [Tracking](#tracking).
+annotation initially displays the selected server-retained count as updating;
+the first complete tracking result follows the rules in [Tracking](#tracking).
 
 The first batch is sorted by count immediately rather than after the scan
 finishes. Newly discovered batches may reorder entries only before the user has
@@ -173,6 +201,10 @@ and all data has reached the complete-scan watermark and been delivered; a
 temporarily empty send queue is not completion. Unknown or not-yet-seen data
 may be presented as missing with progress, and incompleteness that cannot be
 repaired must be presented explicitly rather than hidden.
+The final preview cut covers the cumulative retained projection, including
+unchanged aggregates and entries from earlier sparse batches. Earlier sender
+handoffs do not acknowledge recipient receipt, and withdrawing that cut cannot
+replace its data barrier with an empty completion.
 
 Preview may publish partial data. Its queue and merge behavior is bounded: a
 per-client overage sends fewer entries or delays, and an indivisible send
@@ -194,8 +226,8 @@ state fence, opaque entry keys and selection references, with a strictly newer
 publication watermark. It is not a new capture, a new `OPEN`, a repeated
 selection, or an `OFFER` renegotiation, and creates no marker or tracking state.
 
-The negotiated tracking-period resynchronization cooldown applies per open
-request, and repeated repairs coalesce into bounded waiting work. Repair does
+The resynchronization cooldown defined under [Tracking](#tracking) applies per
+open request, and repeated repairs coalesce into bounded waiting work. Repair does
 not restart an admitted publication, its completion controls, or the original
 scan cursor; the initial scan may continue while replay waits. Current
 authorization, source validity, size-cap reconciliation, pending admitted
@@ -214,19 +246,84 @@ quantities, resurrected selection references or a restarted capture.
 
 ## Tracking
 
-Tracking is a snapshot plus an absolute stream of the Ping's selected items,
-not a continuous copy of the whole inventory. Normal tracking reads whatever
+Tracking is a baseline snapshot plus an absolute stream of the Ping's selected
+items, not a continuous copy of the whole inventory. Normal tracking reads whatever
 slots its selected keys require, which may be a full sweep, and publishes only
 the selected keys; an incomplete scan must not claim a total for a selected
 key. The only full-ID exception is the component-fallback aggregate, whose
 permission and completeness rules are owned below.
 
+### Selected-preview bootstrap
+
+A successful single-item selection retains only its selected identity, bounded
+display and authoritative long count independently of the preview. Closing the
+preview releases its ownership of the catalogue, journal and unselected values
+without losing this seed. The seed is presentation history, not a
+`CaptureResult`, completed observation, native sweep evidence or tracking accumulator.
+
+The initial tracking publication carries that quantity with `UPDATING` and
+`completeScan=false`, even if the preview itself completed. An exact seed is not
+grey merely because it is updating; an aggregate keeps its independent All
+variants qualifier and grey identity quality. Publication follows the committed
+Basic notification and each recipient's current authorization and known-marker
+gate; a recipient needs no preview of its own. The owner's metadata/read gates
+are checked again after creation callbacks and before retained data sends.
+Marker storage, sidecar installation, Basic notification and the correlated
+selection outcome remain synchronous. Seed quantities wait for the next
+eligible normal publication tick and its current budgeted source validation;
+`SELECT` does not drain queued item data. An unknown, duplicate or other valid
+selection cannot release an older queued seed using an earlier same-tick
+authority approval. This adds no per-packet content getter or global authority
+refresh loop, and byte, queue or memory pressure may delay delivery further.
+Admission, replays and failures still create, materialize, rate-charge and store
+at most once under the existing correlated selection outcome; there is no
+pending-selection or cancellation state added by the bootstrap.
+
+Tracking starts at a fresh observation floor with zeroed accumulators. It cannot
+attach an older preview/shared round, continue the preview cursor or add the seed
+to a scan total. While this first scan is partial, the seed remains the displayed
+quantity, not its partial accumulator. The first complete usable scan explicitly
+supersedes the seed at a newer item revision, even when the counts are equal,
+including equal aggregates. If the selected item is absent it publishes zero;
+this does not delete the marker or change its lifetime. Completed native and
+generic results retain the quality rules in [Status presentation](#status-presentation).
+
+Transport installation of every part of a seed baseline is distinct from source
+completion. The first source-complete tracking state requires all parts of a
+complete-scan data cut; a matching checksum, heartbeat or status alone cannot
+certify it or bypass missing fresh parts. Late provisional data cannot downgrade
+an accepted completed cut.
+
+An accepted early `READY` or `UNCERTAIN` completion control remains control
+evidence, not the displayed quantity's quality. Until the first fresh data cut
+closes, the displayed count stays the last closed seed and its lifecycle stays
+updating, or preserves an existing incomplete/invalid failure. Partially applied
+fresh entries cannot replace that display or become its history if failure
+interrupts multipart delivery. A future completion checksum waits for its data
+before comparison, under the existing waiting and repair rules.
+
+Only an installed, closed projection can become historical display. Repeated
+invalidation or recovery-updating controls preserve that history when no newer
+cut has closed; they cannot adopt unfinished replacement metadata. A closed
+empty projection remains empty, distinct from having no received history.
+
+If the first readable scan ends `INCOMPLETE`, the received seed stays grey
+historical display. Obsolete queued updating cuts are withdrawn before retry
+admission; corrective repair may replay the retained seed only as incomplete,
+never restore updating or manufacture completion. Historical display does not
+itself enter a new baseline's digest or establish completion. `INVALID`
+instead permanently withdraws seed eligibility as owned by
+[source recovery](#source-identity-invalidation-and-recovery).
+
+### Completed scans and repair
+
 Tracking reuses the existing tracking period with no separate capture-cycle
-setting: it consumes the current snapshot, and the next capture follows the
-existing cycle after that snapshot is consumed. A new cycle never replaces a
-snapshot that a consumer has not finished consuming and never resets that
-consumer's progress; a slow consumer keeps its earlier snapshot instead of
-being starved by newer captures.
+setting: the next sweep becomes due at completion of the current observation
+plus that period, not at an intervening global period boundary. An unfinished
+sweep continues across ticks and periods without a reset. The last accepted
+completed totals remain displayed while a replacement is partial; partial
+replacement counts never overwrite them. A slow consumer keeps its paid
+observation and progress instead of being starved by newer sweeps.
 
 The sampling owner's container read condition is the sampling authority: the
 preview requester, or for tracking the bound Ping owner, is checked for lock,
@@ -243,12 +340,14 @@ authoritative. The owner's read condition is checked again before cached or
 queued valid inventory is published: if it no longer holds, that data is not
 sent to a recipient even when the recipient's field permission remains. This
 send-time check asks nothing of the recipient and changes no audience or
-distance rule. An already captured frozen snapshot is not rewritten by ordinary
-content changes inside the container; a new capture or the view-topology
-invalidity changes what is published.
+distance rule. Ordinary content changes do not rewrite already retained slot
+observations or invalidate the source topology; unread native slots follow
+[incremental read semantics](#native-incremental-reads), while an explicit
+detached snapshot keeps its captured contents.
 
-Only a complete scan produces a normal valid quantity update. One logical batch
-may span several periods and may contain more entries than one fragment
+Apart from the selected-preview bootstrap above, only a complete scan produces
+a normal valid quantity update. One logical batch may span several periods and
+may contain more entries than one fragment
 carries; it must not rescan the inventory once per fragment. Stream updates are
 revisioned per item key, so a late item for one key is not discarded by a
 packet-global revision for another key. A key that has not been received stays
@@ -260,22 +359,27 @@ container is one such observation. For a face-scoped source, a complete,
 successful observation that finds no items is a valid empty observation of
 that view, not a claim that the whole source is empty outside the slots the
 frozen face exposes. Partial, unknown or incomplete observations never report
-zero.
+an absence-derived zero.
 
 A periodic heartbeat carries only checksum and watermark information and never
 resends state. A positive heartbeat value selects the periodic cadence within
 the configured range, while an explicit zero disables the periodic heartbeat;
 zero is its own value, not an unlimited sentinel, and does not disable other
-repair or status messages. Abnormal resynchronization uses a bounded retry
-cooldown; the initial push for a new Ping is exempt from that cooldown but is not
-exempt from the byte budget.
+repair or status messages. Abnormal resynchronization uses the negotiated retry
+cooldown measured in tracking periods. A value of zero skips the cooldown check
+on the client and server, including an old deadline retained from a positive
+setting. Zero adds no minimum or same-tick repair limiter. Existing coalescing,
+publication fences and work, queue, memory and byte budgets still apply. The
+initial push for a new Ping is exempt from the cooldown but not the byte budget.
 
-A stream whose baseline is unknown is buffered only for the negotiated
-resynchronization interval, measured in tracking periods; no independent
-timeout setting is introduced. If the baseline is not obtained within that
-interval, the stream is dropped and resynchronization is scheduled after a
-cooldown. That interval governs only the unknown-baseline buffer: an admitted,
-stable, serviceable fragment baseline may continue beyond it and complete.
+Client waiting is separate from repair throttling. The common waiting window is
+`max(3 * trackingPeriodTicks, 8 ticks, resyncMinPeriods * trackingPeriodTicks)`.
+It governs unknown-baseline streams, completed-data gaps and future-heartbeat
+gaps, so a zero cooldown does not make these waits expire immediately. If an
+unknown baseline is not obtained within the window, its buffered stream is
+dropped and repair is scheduled subject to the cooldown. No independent timeout
+setting is introduced. The waiting window does not expire an admitted,
+stable, serviceable fragment baseline, which may continue beyond it and complete.
 Repeated requests for such a baseline must coalesce, resume, or reuse work
 rather than blindly restarting, and no new timeout value is invented.
 Scheduling must prevent unbounded restart or starvation against a stable,
@@ -288,30 +392,45 @@ as one atomic batch. Checksums are computed over the recipient's authorized
 selected projection, its identity mode, and explicit zeros; offered and
 delivered or transmitted watermarks are distinct, and a checksum must not
 compare partial fragments with a future state. A gap or mismatch schedules a
-throttled snapshot repair. Writing an update into the send queue is not proof
+snapshot repair under the cooldown and waiting rules above. Writing an update into the send queue is not proof
 that the client applied it, and a mismatch alone does not justify a TCP-loss
 conclusion.
 
 ## Item variants and component fallback
 
-Variant identity is the item ID plus its canonical persistent component bytes.
-The identity encoding covers the effective persistent component map after
-applying prototype defaults, patch additions and overrides, and explicit
-removals, under the native persistent-codec semantics. Exactness means that
-persistent encoding, including its native copy or projection semantics, not
-preservation of every raw resident field or hidden runtime chain. The same item
-ID with different persistent enchantments, damage or custom name is an
-independent entry and consumes its own quota when its identity is safe to encode.
+Variant identity is the item ID plus the canonical persistent encoding of the
+actual explicit `DataComponentPatch` supplied by the current resident item or
+provider. Persistent additions and explicit removals both contribute, including
+an addition equal to a prototype default or a removal with no effective value,
+as long as that entry still exists in the actual patch. Entries already removed
+by native normalization are not reconstructed. Prototype, default and derived
+components do not enter Ping identity, and root stack count is not part of the
+variant key. Nested saved items retain their native persistent patch and count
+semantics. Exactness means that encoding, including native copy or projection
+semantics, not preservation of every raw field or hidden runtime chain. The same
+item ID with different safely encodable persistent patches is an independent
+entry and consumes its own quota.
 
 ### Component classification and encoding trust
 
-A registered component type with a native persistent codec contributes its
-complete native persistent encoding even when Ping does not recognize the type
-or its value shape. The native codec, not a Ping-owned type catalogue or registry
-namespace, defines its persistent semantics. A native codec of `null` marks
-transient state, which is excluded from variant identity. An unregistered type
-without a reliable component registry ID is refused before its codec is called;
-neither inventing an ID nor dropping the component can produce an exact identity.
+A registered component type present in the explicit patch with a native
+persistent codec contributes its complete native persistent encoding even when
+Ping does not recognize the type or its value shape. The native codec, not a
+Ping-owned type catalogue or registry namespace, defines its persistent
+semantics. A native codec of `null` marks transient state, whose additions and
+removals are excluded from variant identity. An unregistered patch type without
+a reliable component registry ID is refused before its codec is called; neither
+inventing an ID nor dropping the component can produce an exact identity.
+
+Server capture and client display use the same patch-entry reading contract.
+Ping reads only the actual outer explicit patch and follows admitted explicit
+values, including nested items' own patches. It does not expand, inspect,
+sanitize or copy a prototype/default/derived component graph. There is no
+component-layer reader, mod-specific component-wrapper adapter or reflective
+wrapper discovery; an unsupported outer patch representation is refused rather
+than replaced with an effective-map read. Native stack construction, naming and
+rendering may inherit local defaults through Minecraft or the installed mod;
+that behavior does not make those defaults Ping-owned or Ping-certified.
 
 The audited native fast path retains its bounded, certified processing and
 refusal rules. Registered persistent types outside that fast path use their
@@ -353,20 +472,15 @@ custom-name forms, remain owned by
 [names and chat](../rendering/names_chat.md).
 
 The bounded display is deliberately separate from identity. Identity keeps the
-complete server-effective native persistent semantics described above; the
-display value is a sparse persistent patch over the recipient's local prototype
-defaults, not a second identity or a complete component copy. An unmodified
-known persistent default that needs no special display projection is omitted,
-including mutable text, custom NBT and PROFILE values, while client-side
-isolation continues to guard whatever the local default supplies. Explicit
-additions follow their native persistent JSON form, and a patch value already
-known by the same native normalization to equal the default may be omitted
-without a separate equality pass or codec comparison. An explicit removal is
-always carried as a removal, so a local default cannot restore a component that
-was deliberately removed. Generic unknown components are never inherited; they
-remain explicitly suppressed even when the component is itself a default.
-Display transport leaves the exact key, count, selection reference, identity
-mode, aggregate fold and marker lifetime unchanged.
+complete persistent explicit patch described above; the display is a sparse
+persistent patch over the recipient's local prototype defaults, not a second
+identity or a complete component copy. Defaults are absent because Ping does not
+read them, including mutable text, custom NBT, PROFILE and nested-item defaults.
+Explicit additions follow their native persistent JSON form; an equal-default
+entry still present in the actual patch is not omitted by a Ping comparison.
+An explicit removal is carried as a removal through the ordinary display
+ladder. Display transport leaves the exact key, count, selection reference,
+identity mode, aggregate fold and marker lifetime unchanged.
 
 Omitting an unmodified default means local inheritance, not that the two ends
 share a default. No default fingerprint, handshake or synchronized default
@@ -375,73 +489,81 @@ differs may therefore render its own default where another recipient would have
 received a matching value; the display still presents the same authoritative
 identity.
 
-The bounded display always filters actual Lore and the contents of shulker-box
-items, regardless of size, including those in nested items or local prototype
-defaults. That filter is intentional display stripping, not the bandwidth
-omission of an unmodified default; the client-side display guard continues to
-suppress such content when a local default materializes it. Display stripping
-does not remove data from an otherwise safe exact identity or fold its variants.
-Non-shulker container contents and bundle contents remain eligible for bounded
-display; the same filter applies to any shulker item nested inside them. This
-item-display rule does not hide the readable inventory of a placed shulker box.
+Ordinary display projection explicitly suppresses Lore and the contents of
+shulker-box items regardless of size, including nested items reached through an
+explicit patch value. Those fixed tombstones are generated without reading a
+default. Non-shulker container contents and bundle contents remain eligible for
+bounded display; the same projection applies to any explicit nested shulker
+item. Display stripping does not remove data from an otherwise safe exact
+identity or fold its variants, and this item-display rule does not hide the
+readable inventory of a placed shulker box.
 
-A default that contains nested item or conversion state requiring sanitization —
-a non-empty container or bundle, a charged projectile, or food conversion — is
-not left to plain local inheritance. The display carries a sanitized sparse
-override for the affected child so an unsafe nested value cannot be introduced
-by inheriting the default.
-
-A registered persistent component unknown to Ping remains fully represented in
-identity. Its display value is retained only when bounded deep isolation and the
-display safety rules can be established. Otherwise only that display value is
-omitted, with an explicit component removal so client prototype defaults cannot
-restore it. This does not promise preservation of every unknown icon field. If
-the required suppression cannot fit safely, the display is unavailable rather
-than an unsuppressed bare stack; exact identity remains intact.
+There is no default-nested-content sanitization or synthesized override for a
+default container, bundle, charged projectile or food conversion. Such defaults
+are inherited natively, not recursively authenticated by Ping. Likewise, a
+registered persistent component unknown to Ping contributes its complete value
+to identity only when explicitly present; its explicit display addition becomes
+a component-removal tombstone. An unknown component present only in a default is
+neither read nor suppressed by Ping. Display does not promise preservation of
+every unknown icon field or isolation of inherited defaults.
 
 After those strips, an oversized display degrades through the existing
-anti-abuse ladder — the remaining component display, then suppression of the
-custom name and item name, then explicit removal of carried component values —
-and never exceeds the per-item display ceiling. Name suppression also
-suppresses names that the patch does not carry, so a local default name does not
-appear in their place. The removal stage turns component values actually
-carried by the patch into explicit removals while preserving existing removals;
-it does not promise to clear every local default. Omitting a default for
-bandwidth is not a removal: the value inherits locally from first resolution,
-is not part of the retained patch, and is not restored by ceiling reprojection.
-If the explicit removals needed to keep the display safe exceed the ceiling,
-the display becomes unavailable rather than degrading to a bare icon that would
-inherit local defaults. Display simplification does not change exact keys,
-identity mode, counts or selection meaning. A naturally componentless item
-likewise needs no fallback.
+anti-abuse ladder — the remaining clean component display, then suppression of
+the custom name and item name, then explicit removal of carried component
+values. Name suppression also suppresses names that the patch does not carry,
+without reading a local default. The removal stage turns component values
+actually carried by the patch into explicit removals while preserving existing
+removals; it does not clear every local default.
 
-A restored icon is assembled from the transmitted patch and the local prototype
-defaults it deliberately inherits. Intentionally stripped values never reappear
-through those defaults, the identity digest or a local world-inventory read; the
-transmitted display data is the only source of component detail beyond the
-inherited defaults. Retained display state keeps only its owned serialized patch
-and does not read resident values or providers, invoke a codec, or re-expand an
-omitted value afterward.
+If that final removal patch still exceeds the per-item display ceiling, size
+exhaustion alone permits one terminal exception: the item ID with an empty
+patch, yielding the native default icon while retaining the registry-id label
+and count. It deliberately discards the previous tombstones and may inherit
+values those tombstones suppressed. The existing `displayJson` value's canonical
+form `{"id":"namespace:item"}` represents this
+terminal display; there is no new wire field, quality flag or protocol version,
+and aggregate identity is not used as a marker. The minimal ID-only form fits
+every legal display ceiling. A naturally empty source patch still follows the
+ordinary fixed-suppression rules; it is not a reason to skip the ladder.
 
-If client decoding, local prototype defaults or a working-stack hook introduces
-an unsafe opaque component value that cannot be reliably isolated, presentation
-falls back to an empty icon and the registry-id label. Omission is not a safety
-certificate: an inherited local default is subject to the same isolation and
-fail-soft rules. A display-only failure never turns into an aggregate, changes
-the exact selection identity, or discards authoritative counts.
+Display structure errors, display-codec failures and processing-budget refusals
+do not permit this size exception. They keep display unavailable (`null`), with an empty icon
+and the registry-id label. Both display outcomes preserve exact keys, identity
+mode, counts and selection meaning. The projection is completed against the
+per-item ceiling before queue admission; a shortage of period send bytes never
+changes the chosen display.
+
+A restored icon is assembled from the transmitted patch and the local defaults
+it inherits. Outside the terminal size exception, an explicit tombstone prevents
+the corresponding default from restoring that value. Retained display state
+keeps only its owned serialized patch and does not read resident values or
+providers, invoke a codec, or re-expand an omitted value afterward. Reprojection
+recognizes the canonical ID-only terminal form and keeps it unchanged without
+adding tombstones back; unavailable `null` likewise remains unavailable.
+Increasing a ceiling does not restore a discarded patch in retained state.
+
+Ping's display isolation, value checks and processing budgets cover explicit
+mutable patch values, not inherited prototype/default/derived graphs. Explicit
+outer-patch entries introduced by native construction or a working-stack hook
+remain subject to those checks before publication; the native origin does not
+exempt them. A display-only decoding or explicit-patch isolation failure falls
+back to an empty icon and the registry-id label, never an aggregate, a different
+selection identity or discarded authoritative counts. Native default inheritance
+is not a promise of default deep-copy isolation or effective-graph safety.
 
 ### Identity refusal and aggregate folding
 
-An unsafe or oversized complete persistent identity requires the grey "All
+An unsafe or oversized complete persistent patch identity requires the grey "All
 variants" aggregate; a display cap or display-only reprojection never does.
 Real component encode errors or partial results, missing reliable registration,
 and unsafe or oversized returned identity trees retain the identity-refusal
 behavior. Dropping an unknown persistent component and labelling the remainder
 exact is forbidden. A modded registry ID or unfamiliar registered persistent
 type alone does not require fallback. Unsafe or oversized nested persistent data
-affects the outer entry's identity and therefore its item-ID group. The aggregate
-still requires a trustworthy item ID and authoritative amount: a failed source
-read is unavailable, not an empty entry or an invented aggregate. The existing
+reached through the explicit patch affects the outer entry's identity and
+therefore its item-ID group; inherited defaults are not identity input. The
+aggregate still requires a trustworthy item ID and authoritative amount: a
+failed source read is unavailable, not an empty entry or an invented aggregate. The existing
 `COMPONENT_TOO_LONG` status
 identifier denotes this aggregate identity mode. Its bare-item display represents
 the group rather than any particular variant.
@@ -451,31 +573,76 @@ observed exact entries, unselected variants and variants discovered later —
 belong to one aggregate, and the fold persists until a new snapshot. Replacement
 accounts for each source entry once, retires the old exact selection references,
 and fences old exact data and queued streams. A stale exact reference is
-rejected, never reinterpreted as an aggregate selection. An exact live witness
-requires its safe complete identity; an aggregate live witness requires the same
-item ID and a positive authoritative amount. This all-ID sweep remains subject
-to permissions, and an incomplete scan must not claim an aggregate total.
+rejected, never reinterpreted as an aggregate selection. Selection resolves the
+retained exact or folded key under the [handoff rules](#preview), without a live
+item-presence witness. This all-ID sweep remains subject to permissions, and an
+incomplete scan must not claim an aggregate total.
 Preview folding is scoped to the current preview request: closing that request
 ends the fold, and a reopened preview starts a fresh scan that may choose exact
 or folded presentation for the same item ID again. A valid handoff preserves
-the selected exact or aggregate meaning under the existing fresh tracking-capture
-rules; it does not retarget retired references.
+the selected exact or aggregate meaning under the [tracking rules](#tracking);
+it does not retarget retired references. If a fresh tracking scan folds a selected
+exact item ID, the queued exact seed is retired: its exact subtotal cannot be
+relabelled an all-variants quantity. Received history may stay grey, but only a
+complete usable all-ID scan can publish the replacement aggregate total.
+
+Sharing a physical observation does not share preview folds or selection
+references between requests. A fold changes the consumer's item-ID projection,
+not the retained slot prefix or another consumer's scan cursor.
+
+## Native incremental reads
+
+Native indexed inventories use a resumable live sweep: ordinary containers,
+stable-indexed loader storage and handlers, and the supported Vault locals read
+their actual visible slots across ticks. Route selection uses the indexed
+capability and stable cursor, not atomic-capture certification. Preparing this
+route validates and retains bounded source/layout metadata only; it performs no
+item getter, full block-entity save or whole-inventory freeze, and does not
+discover an eager snapshot plan. Cursorless providers keep bounded one-pass
+enumeration rather than gaining a synthetic cross-tick continuation.
+
+Each admitted step reads the next bounded visible-slot prefix through the frozen
+face and member-local mapping. Empty slots count as visits. Required registry
+and provider metadata is acquired before the item getter; the returned resident
+item and its independent authoritative long amount are consumed and detached
+synchronously before any subsequent provider metadata callback. Post-read
+authority and topology checks still run: detachment is provisional until those
+checks succeed, and a revoked read never becomes an empty or valid observation.
+
+This is a mixed-time observation, not an atomic snapshot. Quantity consistency
+assumes item placement stays stable between slots during the sweep. A count
+change within one slot is observed when that slot is read; an already-read slot
+keeps its earlier amount while an unread slot can supply a later amount. Moving
+or reordering items between slots during a sweep is outside the guaranteed
+quantity-consistency boundary unless a future adapter supplies stronger
+evidence. A stable cursor supports addressable traversal, and topology checks
+establish mapping continuity; neither proves unchanged contents or a stable
+source version.
+
+For example, a count changed in an unread slot can contribute its new amount
+while an earlier slot retains its old amount in the same completed total. Moving
+the same items from an already-read slot into an unread slot can instead count
+them twice; completion does not certify that such movement did not occur.
+
+Preview may expose the paid prefix with updating status. A selected-preview
+bootstrap is the separate retained display policy above; fresh tracking totals,
+absence-derived zero and completion still require the complete usable sweep
+defined above. Completion quality is owned by [status presentation](#status-presentation).
 
 ## Detached snapshot capture and schema
 
-Capture uses mixed bounded extraction. Ordinary-container snapshot routes and
-the tested Vault locals use detached slot observations, not automatic full
-block-entity saves trimmed afterward. Special formats require an explicit
-bounded inventory-only extraction adapter. A source without such a snapshot
-route retains its allowed live capability route, not an automatic
-atomic-snapshot upgrade. The generic atomicity, version evidence and
+Explicit bounded inventory-only adapters may offer detached snapshots instead
+of live traversal. The native indexed route above does not use this whole-capture
+path merely because detached slot capture is supported. An adapter must not
+discover inventory by a full block-entity save trimmed afterward. A source
+without a usable snapshot route retains its allowed live capability route, not
+an automatic atomic-snapshot upgrade. Generic atomicity, version evidence and
 later consumption rules are owned by
-[shared sources](shared_sources.md#capture-results). The shared scan allowance
-charges consumption of the captured data, not this inventory capture; cost
-accounting is owned by [shared sources](shared_sources.md#cost-accounting).
+[shared sources](shared_sources.md#capture-results); slot charging and the
+fixed-work capture exception are owned by [budgets](#budgets-queues-and-memory).
 
-A Minecraft block-entity inventory is retained per member: each member keeps
-only its detached inventory observations together with a structure envelope
+A Minecraft block-entity inventory observation preserves its member structure:
+detached inventory observations retain a structure envelope
 that keeps the member positions and identity, the controller or layout
 relationship, the segments, and the frozen-face slot mapping. A multi-member
 source is never flattened into a structureless tag or a single total. The
@@ -483,6 +650,7 @@ default supported shapes are the ordinary single block and the vanilla double
 chest; additional member structure exists only through explicitly registered
 member providers, and arbitrary mod multipart discovery is not promised. Client
 presentation subjects never establish or widen the server inventory structure or permission.
+A layout descriptor alone is mapping evidence, not proof of an atomic capture.
 
 The existing NBT snapshot extension and custom `Counter` registration remain
 caller-trusted and lazy. A counter runs on consuming reads, not at capture,
@@ -505,13 +673,14 @@ example — is a distinct evidence-backed known-empty observation, not a
 substitute for a missing candidate. A recognized candidate that is present but
 malformed is a read failure and is never treated as empty.
 
-A supported snapshot capture that fails or exceeds a bound publishes no mixed
-partial data: consumers receive an explicit unavailable or incomplete state,
+A supported adapter snapshot capture that fails or exceeds a bound publishes no
+mixed partial data: consumers receive an explicit unavailable or incomplete state,
 never a partial snapshot presented as atomic. A source with no snapshot support
-keeps its existing live route, whose completed non-atomic observations may
-remain uncertain. Temporary memory pressure may defer a capture and must not be
-reported as a completed or empty snapshot. Limit and failure events keep fixed
-work, the structure guard and the finite shared memory, and are logged at low
+keeps its existing live route, whose completed observations follow their own
+evidence rules. Temporary memory pressure defers an offered snapshot capture
+without switching routes, and must not be reported as a completed or empty
+snapshot. Limit and failure events keep fixed work, the structure guard and the
+finite shared memory, and are logged at low
 frequency with the reason and the source context.
 
 ## Budgets, queues and memory
@@ -523,13 +692,19 @@ tracking, and neither is multiplied per recipient. The server-authoritative
 per-client and global send-byte multipliers scale the byte allowances; they are
 server settings, not a client display scale or UI preference.
 
+The tracking variant quota bounds the distinct active selected variant
+categories across Pings for the same target. Repeated selections of one category
+share that category's quota claim. It is a selection-set capacity, not a fresh
+variant allowance each tracking period; preview variant discovery retains its
+per-client period quota.
+
 Two finite server ceilings are separate from the five period send-byte
 multipliers, from the queue bounds and from pending memory: one bounds the
 serialized per-item display value, and one bounds the whole inventory S2C
 frame. The effective pair keeps the reserved metadata headroom. A persisted
 pair conflict is repaired on load with frame priority, while a conflicting
-merged remote pair is rejected atomically; the persisted grids, defaults,
-bounds, and the repair, merge and UI workflow are owned by
+merged remote pair is rejected atomically; the persisted form and the repair,
+merge and UI workflow are owned by
 [server configuration](../../config/server.md#inventory-policy-object),
 [changing server configuration](../../architecture/config/changing-server-config.md),
 and the
@@ -556,14 +731,30 @@ metadata, counts or revisions, and it discards an incompatible partial without
 losing the marker's existing count state. Whole-entry delivery remains subject
 to the existing independent rate, queue and memory budgets: raising a ceiling
 does not promise entry delivery, and it neither accumulates budget credit nor
-introduces a budget-dependent fallback. The size ceilings add no
-acknowledgement and no byte fragmentation.
+introduces a budget-dependent fallback. Display projection precedes queue
+admission; a frame, period, queue or memory refusal never buys a smaller display
+or an oversize send reservation. The size ceilings add no acknowledgement, byte
+fragmentation or compression scheme.
+Preview whole-entry admission uses the actual multipart index/count framing and
+current status width, not a provisional single-part size. An indivisible entry
+that cannot fit is dropped whole with explicit incompleteness rather than left
+permanently pending; other entries still obey their normal delivery budgets.
 
-The shared scan allowance is configurable and measured in slots. It is charged
-by the parse work that consumes a captured source snapshot, and a source with no
-snapshot support keeps its live route and is charged by its live slots. Snapshot
-capture, copy and freeze are bounded instead by fixed work, the structure guard,
-and the finite shared memory; capture is never a free or unbounded operation.
+The shared scan allowance is configurable and measured in slots. Native
+incremental reads charge actual live slot visits, including empty and throwing
+attempts, together with their admitted item-processing work; budgeting only a
+later decode after an eager full read does not satisfy this route. Compatible
+consumers reuse the same physical prefix but each quota subject pays its own
+logical consumption. For explicit adapter snapshots, consuming decode/parse
+work charges slots, while whole-capture copy and freeze use separate fixed work,
+the structure guard and finite shared memory. That exception does not exempt
+native live getters from the slot allowance.
+
+One caller-backed validation allowance is admitted before initial source
+resolution and follows the operation through nested discovery, validity,
+member, mapping and read checks. It is not reset at each helper or item.
+Attempted work remains paid after denial, a defer or an exception; unused
+admission is released without refunding work already attempted.
 Owned item processing and audited calls obey the pre-copy, encoding and hashing
 admission boundary owned by
 [shared accounting](shared_sources.md#cost-accounting). The explicit generic
@@ -576,15 +767,78 @@ the finite internal work and memory guard and both logical quotas survive, and
 unlimited is never implemented as a sentinel, integer overflow, unbounded array,
 or unbounded work loop.
 
-Pending memory is a single finite server-wide bound covering preview and
-tracking together, configurable to a finite hard cap; it is not a per-queue
-bound, and every finite derived queue enforces its own bound separately. The
-unlimited mode for byte budgets still uses a finite structure and memory guard.
+Pending memory is one server-wide bound covering preview and tracking together,
+with a finite configurable value or explicit unlimited mode. Unlimited mode uses
+a finite internal memory guard. It is not a per-queue bound, and every finite
+derived queue enforces its own bound separately. Count caps use their
+field-specific finite guards; the server-wide tracking-slot guard is independent
+of the other count guards. Unlimited byte budgets also retain finite structure
+and memory guards.
 The retained-cost model and the wire-byte ceiling are distinct. Dirty state,
 unsent values, snapshots and recipient progress cannot escape their ledger by
 not being encoded; shared data occupies one real memory cost while byte fan-out
 is charged per send; and the source cache, client assembly, and unknown streams
 each keep an independent finite engineering bound.
+
+The selected-preview seed and its bounded identity/display ownership have a
+retained charge independent of the preview. Its publication, repair, recipient
+indexes and historical client display obey the existing memory, queue and byte
+bounds; copying one selected value does not pin the preview source round or
+admit its unselected catalogue into tracking.
+
+Owned source metadata, including frozen views, member layouts and slot mappings,
+has a retained charge separate from fixed round state. Pre-resolution admission
+holds its construction workspace until that ownership transfers into the round
+or binding-evidence reservation. Retained-cost queries use cached metadata and
+perform no provider or world callback. Each source's bounded page-cost directory
+is retained and charged with its handle; these profiles describe metadata work
+only, not contents or a cached permission decision. Reacquired access wrappers
+remain local to the admitted operation rather than escaping its validation
+workspace. An explicit in-place provider instead keeps its admitted layout,
+member-reference and registry-key evidence inside that same handle's retained
+charge, never in a global source cache.
+
+Native resident reads and explicit whole-capture capability audits have separate
+cost profiles. A native read pays its current local classification and actual
+source, resident pre/post and held-member gates without an unrelated all-member
+capture-support audit; explicit capture retains that audit. Initial discovery
+keeps its conservative reservation even when a provider declines optional scope
+scratch. Refused admission advances no cursor and invokes no guarded operation.
+
+Item processing keeps effect-copy descriptors and encoding-planner scratch local
+to one root, allocating each group only when used. Descriptor ranges preserve
+append order across identity, display and nested planning, without retaining
+effects across roots. Canonical identity and fresh-display writers start with
+small storage and grow only inside their existing logical hard caps under the
+[shared pre-allocation rule](shared_sources.md#cost-accounting). Display ladder
+reset retains storage but clears length, byte and surrogate state. Retained-input
+display reprojection keeps fixed storage under its separate existing envelope;
+it does not replay a resident codec or rehydrate discarded display.
+
+Adaptive storage does not cache resident stacks, skip complete canonical encoding
+or digest-collision comparison, or change explicit-patch identity. Its cumulative
+growth cost can change acceptance of pathological inputs near a processing-budget
+threshold; universal acceptance equivalence at every threshold is not promised,
+and the phase budgets are not relaxed to force success.
+
+A native physical round retains one compact, chunked slot journal: each visited
+slot records an authoritative long amount and a definition index or an observed
+empty marker. One shared catalogue owns unique canonical identity and display
+payloads; repeated slots do not retain another copy, and inventory-local typed
+steps need no intermediate encoded page. Retained accounting charges actual
+unique payloads, definitions and allocated chunk capacity, plus each consumer's
+progress and publication state. No resident item roots are retained by the
+journal. Each unique definition retains one validated immutable observation;
+replay copies its count without traversing or UTF-8-encoding the shared display
+again. Display tightening separately admits validation of a replacement
+definition before later replay uses it. Only count copies of already validated
+immutable definitions use that shortcut; newly supplied observations still pass
+normal bounds and identity-mode validation.
+
+Slot capacity and catalogue variant/payload capacity are independent
+finite guards: admitting a large repeated-item inventory does not promise the
+same slot count of arbitrary distinct variants. Capacity exhaustion is explicit
+incompleteness, never a completed total or an absence-derived zero.
 
 Global wire accounting uses excess smoothing. With a period
 base `B`, actual sends `s_i` in a period, and excess
@@ -633,6 +887,22 @@ item exemplar's stack count. Certification follows the concrete read graph and
 its helpers and delegates; compatible inherited or composed implementations may
 qualify, while an interface or registry namespace alone neither certifies nor
 excludes a provider. A wrapper never widens the underlying member or face scope.
+
+Default resident-access service discovery is lazy and fixed once per defining
+class loader. The first request uses ServiceLoader's thread-context class loader
+and first-provider order, with the Mixin port only when no provider is present;
+later context-loader changes do not hot-reload it. Discovery failures remain
+visible rather than selecting an empty fallback, and failed holder initialization
+is not retried. This process-local port retains no mutable world data, and explicit
+injected ports remain independent.
+
+Optional resident-scope evidence is supplied lazily after the source's eager
+member and owner prechecks. The compatibility path invokes the supplier once and
+dispatches through the existing scope overload, preserving legacy overrides.
+Guarded access rechecks its current gate around delegation and guards the returned
+access. A provider owning complete resident validation may decline the factory,
+but cannot retain it or postpone source authority checks; mod-specific use is
+owned by [Create](../../integrations/create.md#vault-inventory-provider).
 
 Existing unverified mod-provider live support remains available under explicit
 external trust in the provider's getter and lookup internals. Its admitted call
@@ -702,9 +972,34 @@ uncertain, incomplete, unavailable, invalid, All variants, and expired
 are distinct states with their own semantics. An inventory with no stable
 cursor that cannot finish enumerating within its admitted hard budget ends as
 incomplete, and preview and HUD present that incompleteness explicitly; a
-small container without a cursor may still complete within budget. A completed
-sweep that is neither a verified detached snapshot nor backed by a stable
-version remains a grey uncertain result. Data
+small container without a cursor may still complete within budget.
+
+Tracking lifecycle labels and identity qualifiers are independent: All variants
+must not hide updating, incomplete or invalid. Bounded HUD text reserves space
+for those indicators and preserves the entire decimal quantity as one localized
+field; shortening descriptive item names or annotation wording must not cut
+digits from the count. Localized quantity and annotation grammar may place the
+count or item on either side. Initial display and grey failure history follow
+the [bootstrap policy](#selected-preview-bootstrap).
+Provisional quantities do not complete an inventory chat receipt: the existing
+[content receipt policy](../rendering/names_chat.md#content-receipt-lifecycle)
+still requires a complete, usable ready result.
+
+A complete readable native stable-slot sweep with known coverage fully
+traversed is a normal `READY` result under the mixed-time boundary above. Its
+generic `CaptureResult` consistency remains `EVENTUAL`; inventory-local
+`inventorySweepEvidence.STABLE_SLOT_SWEEP` carries the separate acceptance
+evidence. That evidence belongs to the observation and follows retained replay,
+repair and display reprojection; it is not a sticky property of a source key or
+a later replacement. Partial or short coverage cannot use it to claim ready.
+
+A complete `VERIFIED` observation, including an explicit atomic adapter snapshot,
+retains normal `READY` presentation. Generic `EVENTUAL` results with no inventory
+sweep evidence (`NONE`) stay grey `UNCERTAIN`, even for a completed empty view or an observed
+zero; unknown consistency is not promoted either. A completed native sweep can
+be ready while an item still has `COMPONENT_TOO_LONG` aggregate quality: sweep
+completion never erases component-fallback meaning. These rules reuse existing
+wire statuses and add no protocol field or configuration migration. Data
 that is unknown, or known to be missing without a complete observation, is not
 zero and is distinct from an unknown consistency state. The exact localized
 labels are resource keys; the English state names above define the semantics.

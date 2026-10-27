@@ -29,6 +29,7 @@ import net.minecraft.nbt.LongTag;
 import net.minecraft.nbt.ShortTag;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Read-only resident-shape admission primitives, not permission to invoke a
@@ -59,7 +60,7 @@ final class InventoryComponentBounds {
 	private long nativeWork;
 	private long residentMapWork;
 	private long residentListCells;
-	private InventoryEncodingCost persistentEncoding;
+	private @Nullable InventoryEncodingCost persistentEncoding;
 
 	InventoryComponentBounds(InventoryItemBudget budget, InventoryResidentAccess raw) {
 		this.budget = budget;
@@ -158,6 +159,15 @@ final class InventoryComponentBounds {
 			budget.allocate(16 + 4L * inspected.entryWork(), 0, 2L * inspected.entryWork() + 5, inspected.entryWork() + 3L);
 		}
 		return inspected.entryWork();
+	}
+
+	/** Shared patch helper already checked the exact native backing once. */
+	void patchPass(int size, int capacity) {
+		cardinality(size);
+		if (size == 0) return;
+		mapTraversal(InventoryItemBudget.add(capacity, size));
+		// Conservative ordinary native iterator and one entry wrapper per cell.
+		budget.allocate(32 + 4L * size, 0, 2L * size + 5, size + 4L);
 	}
 
 	/** Whole NBT preflight, with NO copy, encoding, hashing or SNBT formatting. */

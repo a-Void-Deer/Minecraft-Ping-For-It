@@ -8,6 +8,9 @@ import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.source.*;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.jetbrains.annotations.Unmodifiable;
 import org.apache.logging.log4j.Level;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -43,6 +46,57 @@ class InventorySyncPublisherTest {
 		assertInstanceOf(SyncPublisher.Outcome.Accepted.class, publisher.publish(result,
 			new SyncPublisher.AuthorizedProjection(SyncPublisher.PublicationForm.KEYED_ABSOLUTE, payload.entries().keySet()), context,
 			new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, 256L))));
+	}
+	@Test void scopedSweepEvidenceControlsBothEntryQualityAndCompletionWithoutChangingGenericPublication() {
+		for (var evidence : InventoryStep.SweepEvidence.values()) for (var consistency : CaptureResult.Consistency.values())
+			for (var completeness : CaptureResult.Completeness.values()) for (boolean knownCoverage : new boolean[] {false, true})
+				for (int entries : new int[] {0, 1}) {
+			var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+			try (var publisher = new InventorySyncPublisher(memory, transport)) {
+				publisher.advance(0, settings); var context = context("preview/1", 1);
+				assertTrue(publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null)));
+				var source = capture(1, entries, 0);
+				var result = new CaptureResult(source.payload(), new CaptureResult.Coverage("inventory", 1, entries,
+					knownCoverage ? OptionalLong.of(entries) : OptionalLong.empty()), source.availability(), completeness, consistency, Optional.empty(), Optional.empty());
+				var projection = new SyncPublisher.AuthorizedProjection(SyncPublisher.PublicationForm.KEYED_ABSOLUTE,
+					((CaptureResult.OpaqueKeyedFragment) result.payload().orElseThrow()).entries().keySet());
+				var ledger = new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, 256L));
+				assertInstanceOf(SyncPublisher.Outcome.Accepted.class, evidence == InventoryStep.SweepEvidence.NONE
+					? publisher.publish(result, projection, context, ledger) : publisher.publish(result, evidence, projection, context, ledger));
+				publisher.drain();
+				boolean normal = consistency == CaptureResult.Consistency.VERIFIED || consistency == CaptureResult.Consistency.EVENTUAL
+					&& evidence == InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP && completeness == CaptureResult.Completeness.COMPLETE && knownCoverage;
+				var quality = normal ? InventoryS2CPacket.Status.READY : InventoryS2CPacket.Status.UNCERTAIN;
+				assertTrue(transport.sent.stream().flatMap(packet -> packet.entries().stream()).allMatch(entry -> entry.quality() == quality));
+				assertEquals(completeness == CaptureResult.Completeness.COMPLETE ? quality : completeness == CaptureResult.Completeness.INCOMPLETE
+					? InventoryS2CPacket.Status.INCOMPLETE : InventoryS2CPacket.Status.UPDATING, transport.sent.getLast().status());
+				assertEquals(completeness == CaptureResult.Completeness.COMPLETE, transport.sent.getLast().completeScan());
+			}
+			assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+		}
+	}
+	@Test void evidenceCannotPromoteShortCoverageOrStickToLaterGenericVersionsAndAggregateQualityWins() {
+		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var context = context("preview/1", 1);
+			publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null));
+			for (int revision = 1; revision <= 4; revision++) {
+				var source = capture(revision, 1, 0);
+				var payload = revision == 4 ? Optional.<CaptureResult.CapturePayload>of(new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, Map.of("k0",
+					InventoryDomainCodec.encode(new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", ""), 9, "stone", null, true))))) : source.payload();
+				var result = new CaptureResult(payload, new CaptureResult.Coverage("inventory", revision, 1, OptionalLong.of(revision == 1 ? 2 : 1)),
+					source.availability(), source.completeness(), source.consistency(), source.sourceVersion(), source.nextCursor());
+				var projection = new SyncPublisher.AuthorizedProjection(SyncPublisher.PublicationForm.KEYED_ABSOLUTE, Set.of("k0"));
+				var ledger = new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, 256L));
+				assertInstanceOf(SyncPublisher.Outcome.Accepted.class, revision == 3 ? publisher.publish(result, projection, context, ledger)
+					: publisher.publish(result, InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP, projection, context, ledger));
+				publisher.drain(); var sent = transport.sent.getLast();
+				assertEquals(revision == 2 || revision == 4 ? InventoryS2CPacket.Status.READY : InventoryS2CPacket.Status.UNCERTAIN, sent.status());
+				var entry = transport.sent.stream().flatMap(packet -> packet.entries().stream()).reduce((a, b) -> b).orElseThrow();
+				assertEquals(revision == 4 ? InventoryS2CPacket.Status.COMPONENT_TOO_LONG : revision == 2 ? InventoryS2CPacket.Status.READY : InventoryS2CPacket.Status.UNCERTAIN, entry.quality());
+			}
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 	}
 	@Test void immutableBaselineSurvivesMoreThanFivePeriodsAndRecipientRepairIsIsolated() {
 		InventorySettings settings = InventorySettings.serverDefaults(); settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(.25)));
@@ -132,6 +186,199 @@ class InventorySyncPublisherTest {
 			assertFalse(publisher.pending(context));
 			assertEquals(InventoryS2CPacket.Status.INCOMPLETE, transport.sent.getLast().status());
 			assertFalse(transport.sent.getLast().completeScan()); assertTrue(transport.sent.getLast().entries().isEmpty());
+		}
+	}
+	private static InventoryDomainCodec.Item nativeNamedItem(int nameLength) {
+		net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
+		var stack = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.STONE);
+		stack.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, net.minecraft.network.chat.Component.literal("x".repeat(nameLength)));
+		var encoded = new nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.Catalog(net.minecraft.core.RegistryAccess.EMPTY).encode(stack);
+		assertFalse(encoded.display().aggregateRequired());
+		return new InventoryDomainCodec.Item(encoded.key(), 1, encoded.display().label(), encoded.display().displayJson(), false);
+	}
+	private static InventoryS2CPacket previewFrame(String key, InventoryDomainCodec.Item item, int index, int parts) {
+		return previewFrame(key, item, index, parts, InventoryS2CPacket.Status.READY);
+	}
+	private static InventoryS2CPacket previewFrame(String key, InventoryDomainCodec.Item item, int index, int parts, InventoryS2CPacket.Status status) {
+		var entry = new InventoryS2CPacket.Entry(key, item.key().itemId(), item.label(), item.displayJson(), item.count(), 1,
+			false, InventoryS2CPacket.Status.READY, 0, false, null);
+		return InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, 1, null, 1, 1, 1, index, parts, true,
+			status, 0, List.of(entry)).stamp(100, 1);
+	}
+	private static InventoryDomainCodec.Item nativeAtFrameBytes(String key, int index, int parts, int target) {
+		return nativeAtFrameBytes(key, index, parts, target, InventoryS2CPacket.Status.READY);
+	}
+	private static InventoryDomainCodec.Item nativeAtFrameBytes(String key, int index, int parts, int target, InventoryS2CPacket.Status status) {
+		int nameLength = 3000;
+		for (int attempt = 0; attempt < 4; attempt++) {
+			var item = nativeNamedItem(nameLength); int size = bytes(previewFrame(key, item, index, parts, status));
+			if (size == target) return item;
+			nameLength += target - size;
+		}
+		throw new AssertionError("could not calibrate actual native display frame");
+	}
+	private static @Unmodifiable List<InventoryS2CPacket> drainPreview(InventorySyncPublisher publisher, Transport transport,
+		SyncPublisher.Context context, InventorySettings settings, int from) {
+		int start = transport.sent.size();
+		for (int tick = from; tick < from + 1500 && (publisher.pending(context) || publisher.controlPending(context)); tick += settings.getPreview().getPeriodTicks()) {
+			publisher.advance(tick, settings); publisher.drain();
+		}
+		assertFalse(publisher.pending(context), "no indivisible immutable part may remain pending forever");
+		assertFalse(publisher.controlPending(context));
+		return List.copyOf(transport.sent.subList(start, transport.sent.size()));
+	}
+	@ParameterizedTest @ValueSource(ints = {127, 128, 256})
+	void finalMultipartFramingAdmitsExactCapacityAndDropsOneByteOverWholeAtEarlyAndLateIndexes(int parts) {
+		for (int index : new int[] {0, parts - 1}) for (int over : new int[] {0, 1}) {
+			var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16_000_000);
+			long allowance = settings.previewClientPeriodBytes(); int capacity = Math.toIntExact(allowance - Math.min(allowance, 128 + allowance / 16));
+			Map<String, InventoryDomainCodec.Item> items = new LinkedHashMap<>();
+			for (int i = 0; i < parts; i++) items.put("k%03d".formatted(i),
+				new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "v" + i), 1, "stone", "{\"id\":\"minecraft:stone\"}", false));
+			// Opaque fragments deliberately do not promise insertion order. Calibrate
+			// against their actual traversal, not the caller's LinkedHashMap order.
+			@Unmodifiable List<String> order = ((CaptureResult.OpaqueKeyedFragment) entries(1, items).payload().orElseThrow()).entries().keySet().stream().toList();
+			String largeKey = order.get(index); var large = nativeAtFrameBytes(largeKey, index, parts, capacity + over);
+			items.put(largeKey, large);
+			var result = entries(1, items);
+			assertEquals(order, ((CaptureResult.OpaqueKeyedFragment) result.payload().orElseThrow()).entries().keySet().stream().toList());
+			try (var publisher = new InventorySyncPublisher(memory, transport)) {
+				publisher.advance(0, settings); var context = context("preview/framing", 1);
+				assertTrue(publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null)));
+				publish(publisher, context, result);
+				@Unmodifiable List<InventoryS2CPacket> frames = drainPreview(publisher, transport, context, settings, 0);
+				@Unmodifiable List<InventoryS2CPacket> data = frames.stream().filter(packet -> !packet.entries().isEmpty()).toList();
+				assertEquals(parts - over, data.size());
+				for (int part = 0; part < data.size(); part++) {
+					var packet = data.get(part); assertEquals(part, packet.partIndex()); assertEquals(data.size(), packet.partCount());
+					assertTrue(bytes(packet) <= capacity); assertEquals(bytes(packet), packet.encodedSize(publisher.effectiveDisplayBytes(), publisher.effectiveFrameBytes()));
+					assertEquals(over == 0, packet.completeScan()); assertEquals(over == 0 ? InventoryS2CPacket.Status.READY : InventoryS2CPacket.Status.INCOMPLETE, packet.status());
+				}
+				@Unmodifiable List<InventoryS2CPacket.Entry> sentLarge = data.stream().flatMap(packet -> packet.entries().stream()).filter(entry -> entry.key().equals(largeKey)).toList();
+				assertEquals(over == 0 ? 1 : 0, sentLarge.size());
+				if (over == 0) assertEquals(large.displayJson(), sentLarge.getFirst().displayJson(), "admission never strips legitimate display metadata");
+				else assertTrue(frames.stream().anyMatch(packet -> packet.status() == InventoryS2CPacket.Status.INCOMPLETE));
+				publisher.cancel(context); publisher.advance(1505, settings); assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+			}
+			assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+		}
+	}
+	@ParameterizedTest @ValueSource(ints = {128, 256})
+	void provisionalSinglePartCapacityCannotStrandRealMultipartOrCorrectiveReplay(int parts) {
+		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16_000_000);
+		long allowance = settings.previewClientPeriodBytes(); int capacity = Math.toIntExact(allowance - Math.min(allowance, 128 + allowance / 16));
+		Map<String, InventoryDomainCodec.Item> items = new LinkedHashMap<>();
+		for (int i = 0; i < parts; i++) items.put("k%03d".formatted(i),
+			new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "v" + i), 1, "stone", null, false));
+		String key = ((CaptureResult.OpaqueKeyedFragment) entries(1, items).payload().orElseThrow()).entries().keySet().stream().toList().get(parts - 1);
+		var large = nativeAtFrameBytes(key, 0, 1, capacity); items.put(key, large);
+		assertTrue(bytes(previewFrame(key, large, parts - 1, parts)) > capacity);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var context = context("preview/provisional", 1);
+			assertTrue(publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null)));
+			for (int replay = 0; replay < 2; replay++) {
+				if (replay != 0) publisher.rebase(context, context.stateFence());
+				publish(publisher, context, entries(replay + 1, items));
+				@Unmodifiable List<InventoryS2CPacket> frames = drainPreview(publisher, transport, context, settings, replay * 1505);
+				assertEquals(parts - 1, frames.stream().flatMap(packet -> packet.entries().stream()).count());
+				assertTrue(frames.stream().allMatch(packet -> !packet.completeScan() && packet.status() == InventoryS2CPacket.Status.INCOMPLETE));
+				assertTrue(frames.stream().flatMap(packet -> packet.entries().stream()).noneMatch(entry -> entry.key().equals(key)));
+				assertTrue(frames.stream().filter(packet -> !packet.entries().isEmpty()).allMatch(packet -> packet.partCount() == parts - 1));
+				assertEquals(0, memory.reserved());
+			}
+			publisher.cancel(context); publisher.advance(3010, settings); assertEquals(0, memory.retained());
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@ParameterizedTest @ValueSource(ints = {128, 129, 256})
+	void droppingAFrameRechecksLongerIncompleteStatusAndReindexesAcrossVarIntWidthChanges(int parts) {
+		for (boolean cascadingDrop : new boolean[] {false, true}) {
+			var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16_000_000);
+			long allowance = settings.previewClientPeriodBytes(); int capacity = Math.toIntExact(allowance - Math.min(allowance, 128 + allowance / 16));
+			Map<String, InventoryDomainCodec.Item> items = new LinkedHashMap<>();
+			for (int i = 0; i < parts; i++) items.put("k%03d".formatted(i),
+				new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "v" + i), 1, "stone", null, false));
+			@Unmodifiable List<String> order = ((CaptureResult.OpaqueKeyedFragment) entries(1, items).payload().orElseThrow()).entries().keySet().stream().toList();
+			String boundaryKey = order.get(cascadingDrop ? 0 : parts - 1), droppedKey = order.get(cascadingDrop ? parts - 1 : 0);
+			var boundary = cascadingDrop ? nativeAtFrameBytes(boundaryKey, 0, parts, capacity)
+				: nativeAtFrameBytes(boundaryKey, parts - 2, parts - 1, capacity, InventoryS2CPacket.Status.INCOMPLETE);
+			items.put(boundaryKey, boundary); items.put(droppedKey, nativeAtFrameBytes(droppedKey, 0, 1, capacity + 20));
+			try (var publisher = new InventorySyncPublisher(memory, transport)) {
+				publisher.advance(0, settings); var context = context("preview/reindex", 1);
+				publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null));
+				publish(publisher, context, entries(1, items));
+				@Unmodifiable List<InventoryS2CPacket> frames = drainPreview(publisher, transport, context, settings, 0);
+				@Unmodifiable List<InventoryS2CPacket> data = frames.stream().filter(packet -> !packet.entries().isEmpty()).toList();
+				assertEquals(parts - (cascadingDrop ? 2 : 1), data.size());
+				for (int i = 0; i < data.size(); i++) {
+					assertEquals(i, data.get(i).partIndex()); assertEquals(data.size(), data.get(i).partCount());
+					assertTrue(bytes(data.get(i)) <= capacity); assertFalse(data.get(i).completeScan()); assertEquals(InventoryS2CPacket.Status.INCOMPLETE, data.get(i).status());
+				}
+				assertTrue(data.stream().flatMap(packet -> packet.entries().stream()).noneMatch(entry -> entry.key().equals(droppedKey)));
+				assertEquals(cascadingDrop ? 0 : 1, data.stream().flatMap(packet -> packet.entries().stream()).filter(entry -> entry.key().equals(boundaryKey)).count());
+				if (!cascadingDrop) assertEquals(capacity, bytes(data.stream().filter(packet -> packet.entries().getFirst().key().equals(boundaryKey)).findFirst().orElseThrow()));
+				publisher.cancel(context); publisher.advance(1505, settings); assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+			}
+		}
+	}
+	@Test void cumulativeCompletionRequeuesUnchangedEntriesIncludingEarlierSparseKeysAndPaysWireAgain() throws Exception {
+		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16_000_000);
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var context = context("preview/cumulative", 1);
+			publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null));
+			var aggregate = new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", ""), 7, "stone", null, true);
+			var exact = new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:dirt", "plain"), 9, "dirt", null, false);
+			var source = entries(1, Map.of("fold", aggregate, "exact", exact));
+			var partial = new CaptureResult(source.payload(), source.coverage(), source.availability(), CaptureResult.Completeness.CONTINUE,
+				source.consistency(), source.sourceVersion(), source.nextCursor());
+			publish(publisher, context, partial); publisher.drain();
+			assertFalse(publisher.pending(context)); int start = transport.sent.size();
+			var before = ((Number) ((Map<?, ?>) InventoryBackendTest.field(publisher, "clientBytes")).get("preview/" + context.recipient())).longValue();
+			var complete = entries(2, Map.of("fold", aggregate)); // omitted sparse exact key still belongs to the retained projection
+			publisher.gateData(context.recipient()); publish(publisher, context, complete);
+			assertTrue(publisher.pending(context)); assertTrue(((Number) InventoryBackendTest.field(publisher, "previewQueued")).longValue() > 0);
+			publisher.drain(); assertEquals(start, transport.sent.size(), "no empty COMPLETE control may bypass gated cumulative data");
+			publisher.releaseData(context.recipient()); publisher.drain();
+			@Unmodifiable List<InventoryS2CPacket> frames = transport.sent.subList(start, transport.sent.size()).stream().toList();
+			assertEquals(2, frames.size()); assertTrue(frames.stream().allMatch(packet -> packet.completeScan() && packet.partCount() == 2));
+			assertEquals(Set.of("fold", "exact"), frames.stream().flatMap(packet -> packet.entries().stream()).map(InventoryS2CPacket.Entry::key).collect(java.util.stream.Collectors.toSet()));
+			long after = ((Number) ((Map<?, ?>) InventoryBackendTest.field(publisher, "clientBytes")).get("preview/" + context.recipient())).longValue();
+			assertEquals(frames.stream().mapToLong(InventorySyncPublisherTest::bytes).sum(), after - before);
+			assertEquals(0L, InventoryBackendTest.field(publisher, "previewQueued")); assertFalse(publisher.pending(context));
+			publisher.cancel(context); publisher.advance(5, settings); assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+		}
+	}
+	@ParameterizedTest @ValueSource(ints = {127, 128, 256})
+	void finalCumulativeCutUsesItsOwnMultipartWidthEvenWhenEveryEntryIsUnchanged(int parts) {
+		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16_000_000);
+		long allowance = settings.previewClientPeriodBytes(); int capacity = Math.toIntExact(allowance - Math.min(allowance, 128 + allowance / 16));
+		Map<String, InventoryDomainCodec.Item> items = new LinkedHashMap<>();
+		for (int i = 0; i < parts; i++) items.put("k%03d".formatted(i),
+			new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "v" + i), 1, "stone", null, false));
+		String boundaryKey = ((CaptureResult.OpaqueKeyedFragment) entries(1, items).payload().orElseThrow()).entries().keySet().stream().toList().get(parts - 1);
+		items.put(boundaryKey, nativeAtFrameBytes(boundaryKey, 0, 1, capacity));
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var context = context("preview/final-width", 1);
+			publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null));
+			publisher.gateData(context.recipient());
+			// Earlier sparse offers retain their entries while delivery is gated. The
+			// final cut must use cumulative framing even when sameValue suppresses all DTO changes.
+			long watermark = 0;
+			for (var entry : items.entrySet()) {
+				var result = entries(++watermark, Map.of(entry.getKey(), entry.getValue()));
+				publish(publisher, context, new CaptureResult(result.payload(), result.coverage(), result.availability(), CaptureResult.Completeness.CONTINUE,
+					result.consistency(), result.sourceVersion(), result.nextCursor()));
+				publisher.drain(); assertTrue(transport.sent.isEmpty());
+			}
+			publish(publisher, context, entries(++watermark, Map.of()));
+			publisher.releaseData(context.recipient());
+			@Unmodifiable List<InventoryS2CPacket> frames = drainPreview(publisher, transport, context, settings, (int) watermark * 5);
+			int expected = parts == 127 ? parts : parts - 1;
+			assertEquals(expected, frames.stream().flatMap(packet -> packet.entries().stream()).count());
+			assertTrue(frames.stream().allMatch(packet -> packet.partCount() == expected && packet.completeScan() == (parts == 127)));
+			assertTrue(frames.stream().allMatch(packet -> packet.status() == (parts == 127 ? InventoryS2CPacket.Status.READY : InventoryS2CPacket.Status.INCOMPLETE)));
+			assertTrue(frames.stream().allMatch(packet -> bytes(packet) <= capacity));
+			publisher.cancel(context); publisher.advance(5000, settings); assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 		}
 	}
 	@Test void controlOfferAndSmallDataFlowUnderOneMiBAndAllWorkspacesRelease() {
@@ -324,6 +571,8 @@ class InventorySyncPublisherTest {
 			publisher.advance(3, settings); publisher.drain();
 			assertTrue(transport.sent.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && !p.entries().isEmpty()),
 				"the same retained cut sends once its independent budget allows");
+			assertEquals("d".repeat(4096), transport.sent.stream().filter(p -> !p.entries().isEmpty()).findFirst().orElseThrow()
+				.entries().getFirst().displayJson(), "period/fragment pressure queues the already projected payload, never strips it");
 			publisher.cancel(context);
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
@@ -347,6 +596,8 @@ class InventorySyncPublisherTest {
 			publisher.drain();
 			assertTrue(transport.sent.subList(before, transport.sent.size()).stream().noneMatch(p -> !p.entries().isEmpty()),
 				"a withdrawn cut is never handed off");
+			assertTrue(transport.sent.subList(before, transport.sent.size()).stream().noneMatch(InventoryS2CPacket::completeScan),
+				"a withdrawn cumulative barrier cannot be replaced by an empty completion control");
 			publisher.cancel(context);
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());

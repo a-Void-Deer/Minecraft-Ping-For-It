@@ -1,64 +1,80 @@
 # Ping For It Changelog
 
-Baseline: `0.4.2-beta1` (commit `2f2446dd0cb36a92205cae79d76577681a42a5df`)
+## 0.5.0-pfi-beta2 (local working tree)
 
-This update replaces the old ping wheel with a full spatial selection menu, adds server-backed content and inventory information to pings, reworks input and logging. It also removes the FTB Teams and Simple Voice Chat integrations.
+Compared with local `1.21.1` HEAD `16bf0257` (`0.5.0-pfi-beta1`).
+This summarizes the local working tree, not a published release. No remote refs
+were refreshed for this comparison.
 
-## Spatial selection menu
+### Item identity and display
 
-- The wheel is replaced by a spatial selection menu. Holding the ping key opens a fixed root with Danger, Content, Unping, Precise, Intent, and target-selection settings, alongside reserved slots.
-- Selecting a branch enters a submenu; a one-level return recenters the parent on the pointer, and Back is available in every submenu.
-- New visual and interaction preferences cover menu distance and size, the center deadzone, entry stroke and dwell timing, the pointer trail, wheel and target opacity, and a reduced-motion option.
-- The Precise branch keeps a live list of candidates for each target type from the current camera view while the branch is open, and shows the captured candidate's name as a preview.
-- The Content branch presents property menus and a scrollable inventory list. The selector draws its own pointer, takes over mouse input only while it is actually open, manages its own cursor, focus, and screen lifecycle, and gives clear Back and selection feedback.
+- Item variants use the item ID and explicit persistent component patch,
+  distinguishing additions from removals without expanding native defaults into
+  identity. Root stack count stays separate. Client icons and names likewise
+  apply the transmitted patch over local native defaults.
+- When display-size exhaustion leaves even the final removal patch too large,
+  display falls back to the native default icon and registry translation label,
+  preserving exact identity, quantity and selection. Codec, structure and
+  processing-budget failures do not qualify for this default-icon fallback.
 
-## Content and property markers
+### Large-container scanning
 
-- A ping can now carry property or item content. For each authorized attribute you can choose a Ping Type (for example an intent or color) independently of the marker's main type.
-- The server recaptures the actual values of the selected target when the ping is created.
-- The base attributes include the target name and custom name, entity health, item identity, block state, and other authorized fields.
-    - Mainly on blocks & entity blocks.
-- Content pings show their values in the HUD and in a dedicated localized chat message that keeps each selected entry's own phrase.
-- Client-local observations are preferred.
+- Stable-indexed native inventories read their actual slots incrementally across
+  ticks within budget, instead of freezing the entire inventory first. A complete,
+  usable sweep can reach Ready; it remains a mixed-time observation, not an atomic
+  snapshot of moving contents.
+- Compatible consumers share already-read slot prefixes. Compact slot journals
+  and shared variant definitions reduce repeated processing and retained copies.
+  Item-field access is reused after initialization, and temporary processing
+  buffers allocate on demand under the existing budgets.
+- Ordinary NeoForge Create Vault sources reuse layout, slot mapping and cost
+  metadata while rechecking current sources, permissions, members and topology.
+  This does not introduce unconditional caching for every provider.
 
-## Inventory preview and tracking
+### Selection and tracking
 
-- Inventory preview and tracking are available by default and need no separate opt-in. Selecting an inventory row creates an ordinary marker with an item annotation; its count keeps updating for the marker's lifetime.
-- Item variants are folded when an exact identity cannot be encoded, and unknown, incomplete, and unavailable states are shown explicitly.
-- Options let you enable the feature to keep the Content intent selection menus enabled or disabled, or keep inventory lists open after the first key release.(OFF by default)
-- Inventory reads use the block face you were looking at.
+- Selecting a valid preview entry creates its marker synchronously without
+  requiring the previously observed slot to still contain that item. Server
+  permissions, source bindings, selection tokens and admission checks still apply.
+- Tracking starts with the selected server-retained preview quantity shown as
+  Updating. Closing the preview preserves that value without retaining its
+  unselected catalogue. The first fresh, complete scan replaces it even when the
+  quantity is unchanged; an absent selected item becomes `0`, not a removed marker.
+- Initial quantities follow normal publication budgets and send-time authority
+  checks. Duplicate or other selections in the same tick cannot flush them early.
 
-## Input and gestures
+### Synchronization and HUD fixes
 
-- Double-click Danger: repeating a short press within a short window and without turning the view too far derives an extra Danger ping from the first capture.(ON by default)
-- An optional gesture shortcut can open the selector before the normal long-press threshold (OFF by default).
-- Long-press compatibility mode still takes priority and disables the gestures above while it is active.
+- Fixed premature completion during multipart tracking bootstrap and recovery.
+  Checksums, partial replacements and control messages cannot turn historical
+  quantities into fresh completed results. Failure and recovery preserve the last
+  fully installed historical display rather than unfinished replacement data.
+- Preview completion covers all retained entries, not just an empty or partial
+  final delta. Entry admission accounts for actual multipart framing; an
+  indivisible oversized entry is reported as incomplete instead of remaining
+  permanently pending.
+- HUD lifecycle indicators stay independent of the All variants qualifier.
+  Shortening long item names or translated wording preserves the full long
+  quantity instead of cutting off its digits.
 
-## Server administration
+### Performance settings and upgrading
 
-- The settings screen adds a Server Presentation editor that shows each target type's allow and block rules and whitelist-only mode. Players without permission can view the authoritative server settings but cannot edit them.
-- The Performance category manages the inventory preview and tracking budgets, caps, byte allowances, refresh and heartbeat cadence, and the administrator notifications.
+- All numeric server inventory performance controls use sliders, with an end stop
+  for unlimited mode where supported. Finite values and valid integers between
+  adjustment stops are preserved; opening or rebuilding the page does not dirty
+  an unchanged draft. Tooltips better explain scope and player-visible effects.
+- Pending Memory now stores a finite value and an unlimited flag instead of a
+  single integer. Existing integers migrate to finite mode while unrelated and
+  unknown configuration entries are preserved.
+- Budget defaults and validation ranges have been retuned without resetting
+  existing legal saved values. Resync Cooldown accepts `0` to skip the cooldown;
+  client waits for missing data remain separate.
+- Budget-delay administrator notices use server ticks rather than wall-clock
+  timing and include a `[ping for it]` source prefix.
+- Server-configuration request, update and snapshot routes move from v3 to v4.
+  Update clients and servers together: earlier configuration routes are not
+  compatible. The inventory and presentation wire versions are unchanged.
 
-## Diagnostics and logging
-
-- Better diagnostics cover actual failures and important degradation in capture, content & inventory handling, sending, rendering, and optional integrations.
-- Unexpected failures and important degradation produce warnings visible at an INFO log threshold.
-- Repeated reports are suppressed and counted, with independent DEBUG, WARN and ERROR capacity.
-
-## Integrations
-
-All Integrations are optional.
-
-- Create: kinetic properties such as actual RPM, network stress, capacity and available capacity, item and fluid summaries, Vault inventories, and a client-side kinetic preview. The integration is gated to a tested Create version (`6.0.10`).
-- Sable: external block content preview and tracking, provider-local hit-face reads, and a supplementary transformed ray for the Precise branch.
-- Removed: the FTB Teams and Simple Voice Chat integrations. Team context now uses vanilla scoreboard teams only.
-
-## Upgrading from 0.4.x
-
-- Releasing at the selector's center now abandons the interaction instead of cancelling your nearest marker. Cancellation moved to the root's Unping action.
-- The selector no longer times out.
-- The old wheel radius settings are retired and replaced by the new geometry preferences.
-- `passThroughTransparentBlocks` is replaced by `markTransparentBlocks` with the opposite meaning; existing values are migrated automatically.
-- The three target-selection toggles (transparent blocks, blacklisted targets, and fluids) now default to Unbound. Explicitly saved bindings for the blacklist and fluid toggles still load, but the renamed transparent-block toggle does not inherit an old custom binding and must be bound again.
-- Obsolete client presentation keys are removed during migration.
-- The network protocol was updated: the presentation, inventory, and server-configuration routes are versioned, and the older marker packet family is retained only as a registered no-op. Update the client and server together.
+Detailed behavior remains in the [inventory contract](docs/architecture/presentation/inventory.md),
+[server configuration](docs/config/server.md#inventory-policy-object) and
+[performance controls](docs/UI/settings-screen.md#server-performance-category).

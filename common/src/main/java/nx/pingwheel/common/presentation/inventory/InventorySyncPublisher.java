@@ -27,6 +27,7 @@ import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 
 /** Actual bounded dedicated publication. Queued cuts remain immutable until fully transmitted. */
 public final class InventorySyncPublisher implements SyncPublisher, AutoCloseable {
@@ -95,6 +96,8 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		long offeredWatermark, deliveredWatermark, lastHeartbeat = -1;
 		InventoryS2CPacket.Status status = InventoryS2CPacket.Status.UPDATING;
 		boolean baseline = true, complete, control, deliveryIncomplete, fencePending;
+		/** Bootstrap is retained presentation, never completed source evidence. */
+		boolean bootstrap, bootstrapClosed;
 		State(Context context, Route route, RetainedMemoryLedger.Ticket memory) {
 			this.context = context; this.route = route; this.memory = memory; fencePending = route.markerId() != null;
 			module = route.markerId() == null ? Module.INVENTORY_PREVIEW : Module.INVENTORY_TRACKING;
@@ -134,7 +137,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	long periodId(Module module) { return module == Module.INVENTORY_PREVIEW ? previewClock.period() : trackingClock.period(); }
 	private void delay(State state, InventoryBudgetDelayState stage, int reasons, String name, Unit unit, long amount) {
 		if (!state.monitored) return; // generic negotiation/result controls have no module work identity
-		stage.observe(sink, cycle(state), System.nanoTime(), reasons,
+		stage.observe(sink, cycle(state), tick, reasons,
 			() -> new WorkItem("recipient/" + state.context.recipient() + "/" + state.context.baseline() + "/" + name,
 				"Inventory " + (state.route.markerId() == null ? "request " + state.route.requestId() : "marker " + state.route.markerId().value()) + " " + name),
 			() -> unit == Unit.UNKNOWN ? Quantity.unknown() : Quantity.of(unit, amount));
@@ -271,19 +274,54 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			&& watermark <= state.offeredWatermark && !state.retirementPending && !state.rebaselineRequired;
 	}
 	@Override public Outcome publish(CaptureResult result, AuthorizedProjection projection, Context context, CostLedger ledger) {
-		State state = states.get(key(context));
+		return publish(result, InventoryStep.SweepEvidence.NONE, projection, context, ledger);
+	}
+	/** Inventory evidence belongs to this observation, never to the route or a preceding publication. */
+	public Outcome publish(CaptureResult result, InventoryStep.SweepEvidence evidence, AuthorizedProjection projection, Context context, CostLedger ledger) {
+		@Nullable State state = states.get(key(context));
 		if (state == null || !state.context.equals(context) || !transport.authorized(context)) return new Outcome.Rejected();
 		if (result.availability() != CaptureResult.Availability.READABLE) {
 			withdraw(state);
 			state.cancelDelays();
 			state.retirementPending = false; state.rebaselineRequired = false;
+			state.bootstrapClosed = true;
 			state.complete = false; state.status = InventoryS2CPacket.Status.INVALID; state.control = true; return new Outcome.Accepted();
 		}
 		if (state.route.markerId() != null && result.completeness() != CaptureResult.Completeness.COMPLETE) return rejectPublication(state);
+		if (!(result.payload().orElse(null) instanceof CaptureResult.OpaqueKeyedFragment payload)) return rejectPublication(state);
+		boolean complete = result.completeness() == CaptureResult.Completeness.COMPLETE;
+		var quality = quantityStatus(result, evidence);
+		var lifecycle = complete ? quality : result.completeness() == CaptureResult.Completeness.INCOMPLETE
+			? InventoryS2CPacket.Status.INCOMPLETE : InventoryS2CPacket.Status.UPDATING;
+		return publishPayload(state, payload, result.coverage().watermark(), complete, lifecycle, quality, false, projection, context, ledger);
+	}
+	/**
+	 * Publishes one server-retained selected preview value to a marker recipient.
+	 * This narrow path takes no capture consistency or sweep evidence: every part
+	 * is quantity-bearing but completeScan=false. Repair/reprojection may replay it
+	 * with a newer revision before the first completed publication; invalidation
+	 * permanently withdraws bootstrap eligibility for this registration, even over rebase.
+	 */
+	public Outcome publishBootstrap(CaptureResult.OpaqueKeyedFragment payload, long revision, InventoryS2CPacket.Status lifecycle,
+		AuthorizedProjection projection, Context context, CostLedger ledger) {
+		@Nullable State state = states.get(key(context));
+		if (state == null || !state.context.equals(context) || !transport.authorized(context)) return new Outcome.Rejected();
+		if (state.route.markerId() == null || state.bootstrapClosed || revision <= 0
+			|| lifecycle != InventoryS2CPacket.Status.UPDATING && lifecycle != InventoryS2CPacket.Status.INCOMPLETE
+			|| state.status == InventoryS2CPacket.Status.INCOMPLETE && lifecycle == InventoryS2CPacket.Status.UPDATING
+			|| projection.form() != PublicationForm.KEYED_ABSOLUTE || payload.entries().size() != 1
+			|| !payload.entries().keySet().equals(projection.authorizedKeys())
+			|| !state.offered.isEmpty() && !state.offered.keySet().equals(projection.authorizedKeys())) return rejectPublication(state);
+		if (state.bootstrap && lifecycle == InventoryS2CPacket.Status.INCOMPLETE && state.status != lifecycle) status(context, lifecycle);
+		return publishPayload(state, payload, revision, false, lifecycle, lifecycle, true, projection, context, ledger);
+	}
+	private Outcome publishPayload(State state, CaptureResult.OpaqueKeyedFragment payload, long revision, boolean complete,
+		InventoryS2CPacket.Status lifecycle, InventoryS2CPacket.Status quality, boolean bootstrap,
+		AuthorizedProjection projection, Context context, CostLedger ledger) {
 		// An older duplicate does not resolve a newer publication's pending refusal.
-		if (result.coverage().watermark() <= state.offeredWatermark && state.offeredWatermark != 0)
+		if (revision <= state.offeredWatermark && state.offeredWatermark != 0)
 			return state.retirementPending || state.rebaselineRequired ? new Outcome.Rejected() : new Outcome.Accepted();
-		if (!(result.payload().orElse(null) instanceof CaptureResult.OpaqueKeyedFragment payload) || !InventoryDomainCodec.ID.equals(payload.codecId()))
+		if (!InventoryDomainCodec.ID.equals(payload.codecId()))
 			return rejectPublication(state);
 		if (state.rebaselineRequired) return rejectPublication(state);
 		var admission = ledger.tryReserve(Map.of(PUBLICATIONS, (long) payload.entries().size()));
@@ -296,23 +334,24 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		List<InventoryS2CPacket.Entry> values = new ArrayList<>();
 		for (var entry : payload.entries().entrySet()) {
 			if (!projection.authorizedKeys().contains(entry.getKey())) continue;
-			var item = InventoryDomainCodec.decode(entry.getValue());
-			if (item == null) continue;
+			InventoryDomainCodec.@Nullable Item item = InventoryDomainCodec.decode(entry.getValue());
+			if (item == null) { if (bootstrap) return rejectPublication(state); else continue; }
 			if (item.aggregateRequired()) {
 				retireGroup(context, item.key().itemId());
 				values.removeIf(value -> value.itemId().equals(item.key().itemId()) && !value.fallback());
 			}
 			if (!item.aggregateRequired() && state.retiredGroups.contains(item.key().itemId())) continue;
-			long revision = result.coverage().watermark();
 			boolean aggregate = item.stripped();
 			var value = new InventoryS2CPacket.Entry(entry.getKey(), item.key().itemId(), item.label(), item.displayJson(), item.count(), revision,
-				aggregate, aggregate ? InventoryS2CPacket.Status.COMPONENT_TOO_LONG : result.consistency() == CaptureResult.Consistency.VERIFIED
-					? InventoryS2CPacket.Status.READY : InventoryS2CPacket.Status.UNCERTAIN,
+				aggregate, aggregate ? InventoryS2CPacket.Status.COMPONENT_TOO_LONG : quality,
 				aggregate ? revision : 0, aggregate, state.route.itemPingType());
-			if (!sameValue(state.offered.get(value.key()), value)) values.add(value);
+			// The first completed scan must replace even an equal aggregate seed.
+			if (bootstrap || state.bootstrap || !sameValue(state.offered.get(value.key()), value)) values.add(value);
 		}
+		if (state.bootstrap && !bootstrap && state.offered.keySet().stream().anyMatch(key -> values.stream().noneMatch(value -> value.key().equals(key))))
+			return rejectPublication(state);
 		if (state.rebaselineRequired) return rejectPublication(state);
-		if (!state.retiringGroups.isEmpty() && result.completeness() == CaptureResult.Completeness.COMPLETE) {
+		if (!state.retiringGroups.isEmpty() && complete) {
 			for (String id : state.retiringGroups) if (values.stream().noneMatch(value -> value.fallback() && value.itemId().equals(id)))
 				return rejectPublication(state);
 		}
@@ -325,7 +364,12 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		long queue = values.stream().mapToLong(InventorySyncPublisher::cost).sum();
 		boolean tracking = state.route.markerId() != null;
 		long pendingCost = values.stream().mapToLong(e -> state.pending.containsKey(e.key()) ? cost(state.pending.get(e.key())) : 0).sum();
-		if (state.restageLatest) {
+		// A completed preview certifies receipt of the cumulative projection, not
+		// just this delta. Earlier transport handoffs are not acknowledgements.
+		// Reuse owned immutable entries, but charge every repeated key to the queue
+		// and every final part to the normal wire budget and client part barrier.
+		boolean cumulative = state.restageLatest || !tracking && complete;
+		if (cumulative) {
 			// The cancelled immutable cut may contain older versions than offered.
 			// Repend the latest offered values, including keys absent from this delta.
 			pendingCost = state.pending.values().stream().mapToLong(InventorySyncPublisher::cost).sum();
@@ -350,7 +394,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		// grant. Do not clear/repend in place: allocation failure must leave latest
 		// offers, pending queue accounting and retirement dirty state retryable.
 		var offered = new LinkedHashMap<>(state.offered);
-		var pending = new LinkedHashMap<>(state.restageLatest ? state.offered : state.pending);
+		var pending = new LinkedHashMap<>(cumulative ? state.offered : state.pending);
 		for (var value : values) {
 			if (!value.replaceGroup()) continue;
 			offered.values().removeIf(old -> old.itemId().equals(value.itemId()) && !old.key().equals(value.key()));
@@ -373,11 +417,12 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		installed = true;
 		for (var value : values) if (value.replaceGroup()) state.retiringGroups.remove(value.itemId());
 		releaseUnretainedEntries(state);
-		state.offeredWatermark = Math.max(state.offeredWatermark, result.coverage().watermark());
+		state.offeredWatermark = Math.max(state.offeredWatermark, revision);
 		state.retirementPending = false;
-		state.complete = !state.deliveryIncomplete && state.retiringGroups.isEmpty() && result.completeness() == CaptureResult.Completeness.COMPLETE;
-		state.status = state.complete ? result.consistency() == CaptureResult.Consistency.VERIFIED ? InventoryS2CPacket.Status.READY : InventoryS2CPacket.Status.UNCERTAIN
-			: state.deliveryIncomplete || !state.retiringGroups.isEmpty() || result.completeness() == CaptureResult.Completeness.INCOMPLETE ? InventoryS2CPacket.Status.INCOMPLETE : InventoryS2CPacket.Status.UPDATING;
+		state.complete = !state.deliveryIncomplete && state.retiringGroups.isEmpty() && complete;
+		state.bootstrap = bootstrap;
+		if (complete) state.bootstrapClosed = true;
+		state.status = state.deliveryIncomplete || !state.retiringGroups.isEmpty() ? InventoryS2CPacket.Status.INCOMPLETE : lifecycle;
 		state.control = true;
 		state.publicationDelay.progress(cycle(state));
 		return new Outcome.Accepted();
@@ -388,6 +433,17 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			}
 		}
 		}
+	}
+	private static InventoryS2CPacket.Status quantityStatus(CaptureResult result, InventoryStep.SweepEvidence evidence) {
+		// A stable-slot sweep is an accepted mixed-tick inventory count, not an atomic snapshot or a fabricated source version.
+		boolean stableSweep = evidence == InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP
+			&& result.availability() == CaptureResult.Availability.READABLE
+			&& result.completeness() == CaptureResult.Completeness.COMPLETE
+			&& result.consistency() == CaptureResult.Consistency.EVENTUAL
+			&& result.coverage().expected().isPresent()
+			&& result.coverage().scanned() == result.coverage().expected().getAsLong();
+		return result.consistency() == CaptureResult.Consistency.VERIFIED || stableSweep
+			? InventoryS2CPacket.Status.READY : InventoryS2CPacket.Status.UNCERTAIN;
 	}
 	private static Outcome rejectPublication(State state) {
 		state.publicationDelay.cancel();
@@ -441,7 +497,15 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		if (state == null || !state.context.equals(context)) return;
 		if (status == InventoryS2CPacket.Status.INVALID || status == InventoryS2CPacket.Status.EXPIRED) {
 			withdraw(state); state.complete = false; state.retirementPending = false; state.rebaselineRequired = false;
+			state.bootstrapClosed = true;
 			state.cancelDelays();
+		}
+		// An admitted provisional frame is immutable. Do not send its obsolete
+		// UPDATING lifecycle after failure. A caller may explicitly restage the
+		// retained seed as INCOMPLETE at a newer publication revision.
+		if (status == InventoryS2CPacket.Status.INCOMPLETE && (state.bootstrap
+			|| state.route.markerId() != null && state.admitted.stream().anyMatch(packet -> !packet.completeScan()))) {
+			withdraw(state); state.complete = false;
 		}
 		state.status = status; state.control = true;
 	}
@@ -461,6 +525,11 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		State state = states.get(key(context));
 		if (state == null || !state.context.equals(context)) return;
 		withdraw(state);
+		// The caller cancelled the data barrier too. Retained offered values are
+		// not evidence of recipient delivery and cannot become an empty completion.
+		if (state.route.markerId() == null && state.complete) {
+			state.complete = false; state.control = false; state.controlDelay.cancel();
+		}
 	}
 	/**
 	 * True while this context's control frame (a marker fence or a completion
@@ -513,7 +582,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			}
 			if (incomplete) {
 				if (transport.admittedToSend(state.context) && sendControl(state, () -> InventoryS2CPacket.status(state.route.epoch(), 0,
-					state.route.markerId(), state.context.baseline(), state.context.stateFence(), 0,
+					state.route.markerId(), state.context.baseline(), state.context.stateFence(), state.bootstrap ? state.offeredWatermark : 0,
 					InventoryS2CPacket.Status.INCOMPLETE, 0).stamp(state.route.presentationEpoch(), state.route.view()))) state.control = false;
 				continue;
 			}
@@ -540,6 +609,10 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 						if (state.route.markerId() == null) previewQueued -= cost(entry); else trackingQueued -= cost(entry);
 					}
 					state.deliveredWatermark = state.admittedWatermark;
+					// Every preview part already carries this cut's status/completion.
+					// A redundant empty 0/1 control could impersonate a withheld data
+					// index zero at the client and falsely close its multipart barrier.
+					if (state.route.markerId() == null && state.admittedWatermark == state.offeredWatermark) state.control = false;
 					state.admitted = List.of(); state.part = 0; state.baseline = false;
 					if (state.batchMemory != null) { state.batchMemory.close(); state.batchMemory = null; }
 					releaseUnretainedEntries(state);
@@ -571,15 +644,31 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		if (state.route.markerId() == null) {
 			long cap = settings.previewClientPeriodBytes();
 			long capacity = cap - Math.min(cap, 128 + cap / 16);
-			var iterator = state.pending.values().iterator();
-			while (iterator.hasNext()) {
-				var entry = iterator.next();
-				long bytes;
-				try { bytes = packet(state, false, List.of(entry), 0, 1).encodedSize(displayBytes, frameBytes); }
-				catch (IllegalArgumentException oversized) { bytes = Long.MAX_VALUE; }
-				if (bytes <= capacity) continue;
-				previewQueued -= cost(entry); iterator.remove();
-				state.deliveryIncomplete = true; state.complete = false; state.status = InventoryS2CPacket.Status.INCOMPLETE; state.control = true;
+			// Measure actual multipart framing, including indexes >=128. A drop
+			// changes READY to the longer INCOMPLETE status, requiring one recheck.
+			// Within each pass, original indexes/count conservatively bound the
+			// final reindexed widths: removing keys can only shrink those VarInts.
+			// At most two passes, rather than rescanning displays after every drop.
+			for (int pass = 0; pass < 2 && !state.pending.isEmpty(); pass++) {
+				boolean removed = false, complete = state.complete;
+				InventoryS2CPacket.Status status = state.status;
+				int parts = state.pending.size(), index = 0;
+				var iterator = state.pending.values().iterator();
+				while (iterator.hasNext()) {
+					var entry = iterator.next();
+					long bytes;
+					try {
+						// Checksum has fixed wire width; do not sort/hash the projection
+						// for each candidate measurement. Actual parts get its real digest.
+						bytes = InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, state.route.epoch(), state.route.requestId(), null,
+							state.context.baseline(), state.context.stateFence(), state.offeredWatermark, index++, parts,
+							complete, status, 0, List.of(entry)).stamp(state.route.presentationEpoch(), state.route.view()).encodedSize(displayBytes, frameBytes);
+					} catch (IllegalArgumentException oversized) { bytes = Long.MAX_VALUE; }
+					if (bytes <= capacity) continue;
+					previewQueued -= cost(entry); iterator.remove(); removed = true;
+					state.deliveryIncomplete = true; state.complete = false; state.status = InventoryS2CPacket.Status.INCOMPLETE; state.control = true;
+				}
+				if (!removed || status == InventoryS2CPacket.Status.INCOMPLETE) break;
 			}
 		}
 		if (state.pending.isEmpty()) { state.batchDelay.cancel(); state.dataDelay.cancel(); return; }
@@ -718,7 +807,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		if (entry.displayJson() != null && textBytes(entry.displayJson()) > displayBytes) return false;
 		return FRAME_FIXED_BYTES + (long) ENTRY_FIXED_BYTES + entryTextBytes(entry) <= frameBytes;
 	}
-	private static boolean sameValue(InventoryS2CPacket.Entry a, InventoryS2CPacket.Entry b) {
+	private static boolean sameValue(InventoryS2CPacket.@Nullable Entry a, InventoryS2CPacket.Entry b) {
 		return a != null && a.count() == b.count() && a.fallback() == b.fallback() && a.quality() == b.quality() && a.itemId().equals(b.itemId())
 			&& a.label().equals(b.label()) && java.util.Objects.equals(a.displayJson(), b.displayJson()) && java.util.Objects.equals(a.itemPingType(), b.itemPingType());
 	}

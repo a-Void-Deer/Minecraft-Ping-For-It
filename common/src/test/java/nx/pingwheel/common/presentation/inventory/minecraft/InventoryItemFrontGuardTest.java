@@ -32,10 +32,10 @@ class InventoryItemFrontGuardTest {
 			4096, InventoryItemBudget.root(4096), new InventoryResidentAccessFields(), new InventoryTestNativeAccess());
 	}
 	private static byte[] oracle(ItemStack safe) {
-		return InventoryItemCodec.canonicalTag(DataComponentMap.CODEC.encodeStart(NbtOps.INSTANCE, safe.getComponents()).result().orElseThrow());
+		return InventoryItemCodec.canonicalTag(DataComponentPatch.CODEC.encodeStart(NbtOps.INSTANCE, ((net.minecraft.core.component.PatchedDataComponentMap) safe.getComponents()).asPatch()).result().orElseThrow());
 	}
 
-	@Test void safeEffectiveComponentsMatchIndependentUncachedVanillaMapBytes() {
+	@Test void actualPersistentPatchMatchesIndependentVanillaPatchBytes() {
 		var stack = new ItemStack(Items.STONE); stack.set(DataComponents.DAMAGE, 7);
 		stack.set(DataComponents.CUSTOM_NAME, Component.literal("safe"));
 		var detached = freeze(stack); assertEquals(InventoryIdentityMode.EXACT, detached.identityMode());
@@ -74,17 +74,18 @@ class InventoryItemFrontGuardTest {
 		assertEquals(InventoryIdentityMode.ALL_VARIANTS, detached.identityMode()); assertEquals(0, calls.get());
 	}
 
-	@Test void removalCanExcludeUnsafePrototypeAndEquivalentEffectiveMapsHaveSameBytes() {
+	@Test void removalIsIdentityEvenWhenPrototypeWouldBeUnsafe() {
 		var unsafe = CustomData.of(new CompoundTag()); unsafe.getUnsafe().putByteArray("large", new byte[100000]);
 		var prototype = DataComponentMap.builder().addAll(Items.STONE.components()).set(DataComponents.CUSTOM_DATA, unsafe).build();
 		var raw = new InventoryResidentAccessFields() {
-			@Override public DataComponentMap itemComponents(net.minecraft.world.item.Item item) { return prototype; }
+			@Override public DataComponentMap itemComponents(net.minecraft.world.item.Item item) { throw new AssertionError("Ping must not inspect defaults"); }
 		};
 		var removal = DataComponentPatch.builder().remove(DataComponents.CUSTOM_DATA).build();
 		var detached = InventoryItemCodec.freeze(new InventoryResidentItem.Patch(Items.STONE, removal), RegistryAccess.EMPTY,
 			4096, InventoryItemBudget.root(4096), raw, new InventoryTestNativeAccess());
 		assertEquals(InventoryIdentityMode.EXACT, detached.identityMode());
-		assertArrayEquals(freeze(new ItemStack(Items.STONE)).canonicalForCatalog(), detached.canonicalForCatalog());
+		assertArrayEquals(InventoryItemCodec.canonicalTag(DataComponentPatch.CODEC.encodeStart(NbtOps.INSTANCE, removal).result().orElseThrow()), detached.canonicalForCatalog());
+		assertFalse(java.util.Arrays.equals(freeze(new ItemStack(Items.STONE)).canonicalForCatalog(), detached.canonicalForCatalog()));
 	}
 
 	@Test void mutationAfterFreezeDoesNotReachOwnedIdentityDisplayOrCatalogEvidence() {

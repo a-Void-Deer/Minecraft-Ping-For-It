@@ -1,9 +1,11 @@
 package nx.pingwheel.common.presentation.inventory.minecraft;
 
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.NotNullByDefault;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Independently tabulated source-site floors, not production-counter snapshots. */
+@NotNullByDefault
 class InventoryEncodingCostOracleTest {
 	private static InventoryEncodingCost cost(boolean json, InventoryItemBudget budget) {
 		var result = new InventoryEncodingCost(budget); result.reset(json); return result;
@@ -86,6 +88,84 @@ class InventoryEncodingCostOracleTest {
 			assertThrows(InventoryItemBudget.RootLimitException.class, () -> budget.allocate(150_000, 0, 0, 0));
 			assertEquals(2_800_000, budget.rootAllocatedBytes());
 			assertThrows(IllegalStateException.class, budget::beginDisplay);
+		} finally { budget.end(); }
+	}
+
+	@Test void lazyScratchGroupsAreDirectDebitsNotNativeEventVectorsAndEmptyMapsNeedNeither() {
+		var budget = InventoryItemBudget.root(4096); budget.begin(4096);
+		try {
+			var c = cost(false, budget); assertEquals(0, budget.rootAllocatedBytes());
+			for (boolean json : new boolean[] {false, true}) {
+				c.reset(json); c.beginKeys(); c.ownedKeyMap(); assertEquals(0, budget.rootAllocatedBytes());
+			}
+			c.reset(true); c.beginKeys(); c.mapKey("Aa"); c.mapKey("BB");
+			long keys = 258L * 8 + 40; assertEquals(keys, budget.rootAllocatedBytes());
+			c.ownedKeyMap(); long jsonStorage = c.storage(), jsonOperations = c.operations();
+			assertEquals(keys, budget.rootAllocatedBytes(), "JSON needs no hash simulator");
+			c.reset(false); c.beginKeys(); c.mapKey("Aa"); c.mapKey("BB"); c.ownedKeyMap();
+			assertEquals(keys + 11280 + 5 * 40, budget.rootAllocatedBytes());
+			long nbtStorage = c.storage(), nbtOperations = c.operations();
+			for (int repeat = 0; repeat < 4; repeat++) for (boolean json : new boolean[] {true, false}) {
+				c.reset(json); c.beginKeys(); c.mapKey("Aa"); c.mapKey("BB"); c.ownedKeyMap();
+				assertEquals(json ? jsonStorage : nbtStorage, c.storage());
+				assertEquals(json ? jsonOperations : nbtOperations, c.operations());
+				assertEquals(keys + 11280 + 5 * 40, budget.rootAllocatedBytes());
+			}
+			c.beginKeys(); for (int i = 0; i < 258; i++) c.mapKey("key" + i);
+			assertThrows(InventoryItemBudget.RootLimitException.class, () -> c.mapKey("one-too-many"));
+		} finally { budget.end(); }
+	}
+
+	@Test void firstScratchGroupRefusalCommitsNoUnpaidStorageOrNativeEvents() {
+		var budget = InventoryItemBudget.capture(4096, 1, 1_000_000, 258); budget.begin(4096);
+		try {
+			var c = cost(true, budget); c.beginKeys();
+			assertThrows(InventoryItemBudget.CaptureLimitException.class, () -> c.mapKey("key"));
+			assertEquals(0, budget.rootAllocatedBytes()); assertEquals(0, c.keyCount()); assertEquals(0, c.storage());
+		} finally { budget.end(); }
+		var numeric = InventoryItemBudget.root(4096); numeric.begin(4096);
+		try {
+			var c = cost(false, numeric); c.beginKeys(); c.mapKey("key");
+			numeric.allocate(2L * 1024 * 1024 - numeric.rootAllocatedBytes() - 1024, 0, 0, 0);
+			long before = numeric.rootAllocatedBytes();
+			assertThrows(InventoryItemBudget.RootLimitException.class, c::ownedKeyMap);
+			assertEquals(before, numeric.rootAllocatedBytes(), "all five numeric arrays are admitted before any is allocated");
+		} finally { numeric.end(); }
+	}
+
+	@Test void collisionTreeSplitUntreeifyAndAlternatingEmptyMapsDoNotReuseAnOldSchedule() {
+		// Twelve keys share the low six spread-hash bits, six on either side
+		// of bit64. Fill other buckets until the native size49 resize splits
+		// that tree into two six-node lists (the JDK untreeify threshold).
+		var low = new java.util.ArrayList<String>(); var high = new java.util.ArrayList<String>();
+		for (int i = 0; low.size() < 6 || high.size() < 6; i++) {
+			String key = "collision" + i; int h = key.hashCode(); h ^= h >>> 16;
+			if ((h & 127) == 0 && low.size() < 6) low.add(key);
+			if ((h & 127) == 64 && high.size() < 6) high.add(key);
+		}
+		var keys = new java.util.ArrayList<>(low); keys.addAll(high);
+		var nativeMap = new java.util.HashMap<String, Integer>();
+		for (String key : keys) nativeMap.put(key, keys.indexOf(key));
+		for (int i = 0; keys.size() < 49; i++) {
+			String key = "filler" + i; int h = key.hashCode(); h ^= h >>> 16;
+			if ((h & 63) == 0) continue;
+			keys.add(key); nativeMap.put(key, i);
+		}
+		assertEquals(49, nativeMap.size()); for (String key : keys) assertNotNull(nativeMap.get(key));
+		var budget = InventoryItemBudget.root(4096); budget.begin(4096);
+		try {
+			var c = cost(false, budget); long storage = -1, operations = -1;
+			for (int repeat = 0; repeat < 3; repeat++) {
+				c.reset(false); c.beginKeys(); for (String key : keys) c.mapKey(key); c.ownedKeyMap();
+				// Independent native output floor: tables16+32+64+128, four
+				// headers; 48 ordinary nodes (11 early+37 fillers), twelve
+				// tree nodes (11 replacements+one insert), twelve split nodes.
+				assertTrue(c.storage() >= 4L * 60 + 5L * 12 + 8L * (240 + 3 * 60 + 9 * 12) + 40L * (4 + 60 + 12));
+				if (repeat == 0) { storage = c.storage(); operations = c.operations(); }
+				else { assertEquals(storage, c.storage()); assertEquals(operations, c.operations()); }
+				c.reset(true); c.beginKeys(); c.ownedKeyMap();
+				c.reset(false); c.beginKeys(); c.ownedKeyMap();
+			}
 		} finally { budget.end(); }
 	}
 }

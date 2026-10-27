@@ -17,6 +17,7 @@ import net.minecraft.world.Container;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentItem;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /**
@@ -117,7 +118,7 @@ public interface IPlatformInventoryService {
 	 * Never retain, compare, hash or format this record or its resident item.
 	 * The independent provider amount is not normalized to a Minecraft stack count.
 	 */
-	record ResidentEntry(InventoryResidentItem item, long amount) {
+	record ResidentEntry(@org.jetbrains.annotations.Nullable InventoryResidentItem item, long amount) {
 		public ResidentEntry {
 			if (amount < 0) throw new IllegalArgumentException("negative item amount");
 			if ((amount == 0) != (item == null))
@@ -128,7 +129,7 @@ public interface IPlatformInventoryService {
 
 	@FunctionalInterface
 	interface ResidentVisitor {
-		/** Consume/freeze this entry synchronously, before the next provider read. */
+		/** Consume/freeze synchronously; no provider metadata callback may precede this handoff. */
 		boolean visit(ResidentEntry entry);
 	}
 
@@ -146,6 +147,16 @@ public interface IPlatformInventoryService {
 	interface Access {
 		/** Source-owned evidence over an already resolved member set; never discovery. */
 		default Access scopedResidents(ResidentScope scope) { Objects.requireNonNull(scope); return this; }
+		/**
+		 * Construct fresh source-owned evidence only when this provider consumes it.
+		 * The compatibility default invokes the factory once and dispatches through
+		 * the existing overload, including unknown implementations' overrides.
+		 * A provider owning its complete resident validation may decline the factory;
+		 * it must not retain it or weaken the caller's authority/member prechecks.
+		 */
+		default Access scopedResidents(java.util.function.Supplier<? extends ResidentScope> factory) {
+			return scopedResidents(Objects.requireNonNull(factory, "factory").get());
+		}
 		/**
 		 * Synchronous member guard for this operation's reacquired access. Native
 		 * providers override to guard inside composite reads and cursorless iteration.
@@ -207,9 +218,22 @@ public interface IPlatformInventoryService {
 		 * A caller must admit and charge each attempted getter even if it throws.
 		 * Unverified implementations remain LIVE under EXTERNAL_TRUST: only their
 		 * invocation count is bounded, not their internal work or allocation.
+		 * This compatibility return can already be stale after provider postchecks;
+		 * consumers needing getter-time state use {@link #consumeResident} instead.
 		 */
 		default ResidentEntry readResident(int slot) {
 			throw new UnsupportedOperationException("provider has no resident reader");
+		}
+
+		/**
+		 * Consume the borrowed item immediately after the final content getter and
+		 * authoritative amount read, before any provider postcheck. The visitor
+		 * must detach everything it needs; its result is provisional until this
+		 * call and the caller's final authority checks succeed. Native providers
+		 * with postchecks override this compatibility default inside their read.
+		 */
+		default boolean consumeResident(int slot, ResidentVisitor visitor) {
+			return Objects.requireNonNull(visitor, "visitor").visit(readResident(slot));
 		}
 
 		/**
@@ -225,7 +249,7 @@ public interface IPlatformInventoryService {
 			if (count < 0) throw new IllegalStateException("provider reported a negative slot count");
 			int bound = Math.min(count, limit);
 			for (int slot = 0; slot < bound; slot++) {
-				if (!visitor.visit(readResident(slot))) return new ResidentVisit(slot + 1, false);
+				if (!consumeResident(slot, visitor)) return new ResidentVisit(slot + 1, false);
 			}
 			return new ResidentVisit(bound, count <= limit);
 		}
@@ -253,6 +277,24 @@ public interface IPlatformInventoryService {
 			boolean complete = visit(limit, entries::add);
 			return new Budgeted(entries, complete);
 		}
+	}
+
+	/**
+	 * Explicit opt-in for a provider that can revalidate its already admitted
+	 * route against a frozen layout without constructing a replacement view.
+	 * In addition to valid(), revalidation must freshly verify the current
+	 * provider route (including compatibility gates), original alias, ordered
+	 * membership and local boundaries. It must not discover a new mapping or read
+	 * contents. The owning source still checks current world/root/member identity
+	 * and owner read authority. Neither stableCursor nor a matching slot count
+	 * grants this capability; decorators deliberately do not inherit it.
+	 */
+	interface InPlaceRevalidatingAccess extends Access {
+		boolean revalidateCurrent(InventorySnapshotLayout originalLayout);
+		/** Pure cached bounds for valid() plus revalidateCurrent(), excluding source-owned world checks. */
+		InventoryValidationBudget.Cost currentValidationCost();
+		/** Pure cached bound for consumeResident(), not whole-snapshot capability discovery. */
+		InventoryValidationBudget.Cost nativeReadCost();
 	}
 	interface ResidentScope {
 		Direction face();
@@ -291,7 +333,16 @@ public interface IPlatformInventoryService {
 		@Override public OptionalLong version() { return checked(delegate::version); }
 		@Override public Entry read(int slot) { return checked(() -> delegate.read(slot)); }
 		@Override public ResidentEntry readResident(int slot) { return checked(() -> delegate.readResident(slot)); }
+		@Override public boolean consumeResident(int slot, ResidentVisitor visitor) {
+			Objects.requireNonNull(visitor, "visitor");
+			requireMember();
+			boolean more = delegate.consumeResident(slot, visitor);
+			requireMember(); return more;
+		}
 		@Override public Access scopedResidents(ResidentScope scope) { return checked(() -> delegate.scopedResidents(scope)).guardedBy(memberGate); }
+		@Override public Access scopedResidents(java.util.function.Supplier<? extends ResidentScope> factory) {
+			return checked(() -> delegate.scopedResidents(factory)).guardedBy(memberGate);
+		}
 		@Override public boolean supportsDetachedSlotCapture() { return checked(delegate::supportsDetachedSlotCapture); }
 		@Override public ResidentVisit observeResident(int limit, ResidentVisitor visitor) {
 			if (limit < 0) throw new IllegalArgumentException("negative observation limit");
@@ -299,7 +350,7 @@ public interface IPlatformInventoryService {
 			if (!stableCursor()) throw new UnsupportedOperationException("cursorless provider requires internal member gates");
 			// Re-enumerate through this decorator's indexed reads: delegating the
 			// whole loop could skip the gate between delegate slots/read calls.
-			ResidentVisit observed = Access.super.observeResident(limit, entry -> checked(() -> visitor.visit(entry)));
+			ResidentVisit observed = Access.super.observeResident(limit, visitor);
 			requireMember(); return observed;
 		}
 		@Override public Budgeted observe(int limit) {

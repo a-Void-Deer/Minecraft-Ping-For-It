@@ -39,7 +39,7 @@ class InventoryVanillaComponentCoverageTest {
 	}
 	private static void exactOracle(ItemStack stack) {
 		var detached = freeze(stack); assertEquals(InventoryIdentityMode.EXACT, detached.identityMode(), () -> "fixture " + stack.getItem());
-		var encoded = DataComponentMap.CODEC.encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), stack.getComponents()).result().orElseThrow();
+		var encoded = net.minecraft.core.component.DataComponentPatch.CODEC.encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), ((net.minecraft.core.component.PatchedDataComponentMap) stack.getComponents()).asPatch()).result().orElseThrow();
 		assertArrayEquals(InventoryItemCodec.canonicalTag(encoded), detached.canonicalForCatalog());
 	}
 
@@ -50,7 +50,18 @@ class InventoryVanillaComponentCoverageTest {
 			Items.FLINT_AND_STEEL, Items.SHEARS, Items.CHICKEN,
 			Items.POISONOUS_POTATO, Items.PUFFERFISH, Items.ROTTEN_FLESH, Items.SPIDER_EYE,
 			Items.GOLDEN_APPLE, Items.ENCHANTED_GOLDEN_APPLE, Items.MUSHROOM_STEW,
-			Items.POTION, Items.WRITABLE_BOOK, Items.WRITTEN_BOOK, Items.FIREWORK_ROCKET, Items.DEBUG_STICK)) exactOracle(new ItemStack(item));
+			Items.POTION, Items.WRITABLE_BOOK, Items.WRITTEN_BOOK, Items.FIREWORK_ROCKET, Items.DEBUG_STICK)) {
+			var stack = new ItemStack(item); exactOracle(stack);
+			// Preserve native value-family coverage with actual explicit entries;
+			// inherited prototype values themselves no longer enter the freezer.
+			var patch = net.minecraft.core.component.DataComponentPatch.builder();
+			for (var component : item.components()) add(patch, component);
+			((net.minecraft.core.component.PatchedDataComponentMap) stack.getComponents()).restorePatch(patch.build());
+			exactOracle(stack);
+		}
+	}
+	private static <T> void add(net.minecraft.core.component.DataComponentPatch.Builder patch, net.minecraft.core.component.TypedDataComponent<T> component) {
+		patch.set(component.type(), component.value());
 	}
 
 	@Test void nonemptyProfilePropertiesMatchNativePersistentIdentity() {

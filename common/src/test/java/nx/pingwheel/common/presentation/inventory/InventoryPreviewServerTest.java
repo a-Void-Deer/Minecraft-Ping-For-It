@@ -361,11 +361,31 @@ class InventoryPreviewServerTest {
 	}
 
 	@Test
+	void zeroResyncImmediatelySkipsPositiveCooldownAndReplaysAgainInTheSameTick() {
+		Fixture f = new Fixture(stack(STONE, 1));
+		f.settings.getTracking().setPeriodTicks(3); f.settings.getTracking().setResyncMinPeriods(5);
+		long epoch = f.open(1); f.server.tick(0, f.settings);
+		var repair = InventoryC2SPacket.resync(epoch, 1);
+		f.server.handle(PLAYER, repair, 1, f.settings); f.server.tick(1, f.settings);
+		int first = f.data().size();
+		f.server.handle(PLAYER, repair, 1, f.settings); f.server.tick(1, f.settings);
+		assertEquals(first, f.data().size(), "positive cooldown suppresses the repeat");
+		f.settings.getTracking().setResyncMinPeriods(0);
+		f.server.handle(PLAYER, repair, 1, f.settings); f.server.tick(1, f.settings);
+		assertEquals(first + 1, f.data().size(), "zero does not wait for the prior positive cooldown");
+		f.server.handle(PLAYER, repair, 1, f.settings); f.server.tick(1, f.settings);
+		assertEquals(first + 2, f.data().size(), "no implicit one-tick throttle is introduced");
+		assertEquals(1, f.host.reads, "corrective status replay leaves the completed sweep intact");
+	}
+
+	@Test
 	void resyncContinuesAnAdmittedSweepAndDisconnectReleasesIt() {
 		Fixture f = new Fixture(stack(STONE, 1), stack(DIRT, 2));
 		f.settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1));
+		f.settings.getTracking().setResyncMinPeriods(0);
 		long epoch = f.open(1);
 		f.server.tick(0, f.settings);
+		f.server.handle(PLAYER, InventoryC2SPacket.resync(epoch, 1), 1, f.settings);
 		f.server.handle(PLAYER, InventoryC2SPacket.resync(epoch, 1), 1, f.settings);
 		f.server.tick(3, f.settings);
 		assertEquals(2, f.host.reads);

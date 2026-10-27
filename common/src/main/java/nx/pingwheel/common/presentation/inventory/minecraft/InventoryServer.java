@@ -54,7 +54,15 @@ public final class InventoryServer {
 		InventoryRuntime.DisplayReprojector reprojector = (display, displayBytes) ->
 			InventoryItemCodec.reproject(display, server.registryAccess(), displayBytes);
 		var runtime = new InventoryRuntime(
-			(input, displayBytes) -> InventoryMinecraftSources.resolve(server, input, displayBytes),
+			new InventoryRuntime.SourceResolver() {
+				@Override public InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput input) { return InventoryMinecraftSources.resolutionValidationCost(input); }
+				@Override public Optional<nx.pingwheel.common.presentation.inventory.InventorySourceAccess.Source> resolve(InventorySourceInput input, int displayBytes) {
+					throw new IllegalStateException("production inventory resolution requires admission");
+				}
+				@Override public Optional<nx.pingwheel.common.presentation.inventory.InventorySourceAccess.Source> resolve(InventorySourceInput input, int displayBytes, InventoryValidationBudget.Allowance allowance) {
+					return InventoryMinecraftSources.resolve(server, input, displayBytes, allowance);
+				}
+			},
 			ServerConfig.HANDLER.getConfig().getInventory().pendingMemoryBytes(),
 			reprojector, sink);
 		backend = new InventoryBackend(new Host(server, runtime, reprojector), runtime, epochSeed, sink);

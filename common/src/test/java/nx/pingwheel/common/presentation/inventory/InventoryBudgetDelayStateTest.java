@@ -27,10 +27,10 @@ class InventoryBudgetDelayStateTest {
 		final List<DelayEvent> events = new ArrayList<>();
 
 		@Override public void observe(DelayEvent event) { events.add(event); }
-		@Override public void state(Module module, long cycleId, long nowNanos, DelayState state) {
+		@Override public void state(Module module, long cycleId, long serverTick, DelayState state) {
 			fail("final module state belongs to the caller");
 		}
-		@Override public void endCycle(Module module, long cycleId, long nowNanos) {
+		@Override public void endCycle(Module module, long cycleId, long serverTick) {
 			fail("only the backend closes inventory cycles");
 		}
 	}

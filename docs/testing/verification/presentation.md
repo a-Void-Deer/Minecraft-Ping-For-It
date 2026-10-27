@@ -562,13 +562,15 @@ store and port coverage rather than live chat evidence:
 - `PendingContentChatAcceptedStoresTest` drives the controller from real
   accepted presentation and inventory stores: accepted Basic completes exactly
   once and a known create never repeats even after a zero local visual
-  deadline, fragmented tracking waits for the committed baseline while preview
-  and status-only readiness and later stream data never produce another line,
+  deadline, fragmented tracking waits for the complete source-data barrier while
+  preview and status-only readiness and later stream data never produce another line,
   an invalidated count is grey and cannot be resurrected while a complete zero
   is authoritative, an accepted reset cancels pending and an old or known new
   view cannot restart it, and authoritative expiry cancels while the marker
   store may retain a visual record; its fixture is not production runtime
-  wiring;
+  wiring. Its encoded-publisher bootstrap case keeps both exact and aggregate
+  long quantities pending until a fresh complete ready result, then emits once
+  even when that result equals the seed;
 - `ClientPingRuntimeContentReceiptTest` drives the real packet-dispatched
   runtime, stores and composer with game effects and world/input access as
   ports: an ordinary receipt is immediate once and a replay does not repeat it,

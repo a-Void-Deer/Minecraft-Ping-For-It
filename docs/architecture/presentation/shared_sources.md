@@ -90,6 +90,15 @@ generation, or modify the world. When a consumer leaves, only its own demand is
 removed; the handle is released when the source becomes invalid or the last
 consumer leaves.
 
+An explicit provider capability may revalidate an already admitted route and
+frozen layout in place instead of constructing a replacement view. It must check
+the current route, original alias, ordered membership and local boundaries,
+without discovering a new mapping or reading contents. The source still performs
+its own current identity and authority checks and retains the original access's
+validity check. A stable cursor, equal total slot count or generic decorator does
+not grant this capability; other providers retain full re-resolution. Layout
+reuse freezes addressing, not permission, availability or content.
+
 A conservative bridge for adapters that expose no resumable or version
 capability may only perform one-shot bounded calls. It must not invent
 continuations, stable versions, or cross-Ping identity. In that bridge a `null`
@@ -155,9 +164,12 @@ The three result states are independent. Availability
 judged from evidence: a completed detached capture that was atomic by
 construction is verified-snapshot even when no source version exists, while a
 complete sweep that is neither snapshot-atomic nor backed by a stable version
-keeps its eventual quality. Decoding the snapshot later, across ticks or
-periods, does not downgrade its verification, and a missing version never
-does. A defer caused by an exhausted budget is a scheduling result, not an
+keeps its eventual quality. A domain may carry separate scoped acceptance
+evidence without changing this generic consistency; inventory's native sweep
+and ready/uncertain policy are owned by
+[inventory status presentation](inventory.md#status-presentation). Decoding the
+snapshot later, across ticks or periods, does not downgrade its verification,
+and a missing version never does. A defer caused by an exhausted budget is a scheduling result, not an
 invalid source.
 
 Coverage describes the truth of the whole sweep, not progress inside one page.
@@ -168,10 +180,11 @@ or collection value of zero is publishable under its domain's validity and
 quality rules; it is not equivalent to a zero inferred from absence. A domain
 may derive zero from absence only when a complete, usable scan validly proves
 the key missing under that domain's rules. A complete sweep that is
-neither snapshot-atomic nor backed by a stable version keeps its uncertain
-quality. Evidence that is unknown, incomplete or unavailable never synthesizes
-zero, even when it would display as grey. An unknown consistency state only
-means consistent-version metadata is missing; it does not mean the data or
+neither snapshot-atomic nor backed by a stable version keeps its eventual
+consistency; display quality remains domain policy. Evidence that is unknown,
+incomplete or unavailable never synthesizes zero, even when it would display as
+grey. An unknown consistency state only means consistent-version metadata is
+missing; it does not mean the data or
 coverage is unknown, and atomicity is not a prerequisite for producing an
 observed zero.
 
@@ -202,6 +215,13 @@ they run, including workspace and internal allocations and traversal of audited
 native or provider calls. Output-size measurement after a call is not a bound on
 that call's work or allocation.
 
+Lazy scratch and adaptive buffers obey the same boundary. Every replacement
+array's full allocation and initialization, growth control and written-prefix
+copy are admitted before allocation or copying; charging only the capacity delta
+is insufficient. Discarded attempts remain paid. Cumulative allocation is
+separate from peak simultaneous workspace, and reset or storage reuse refunds
+neither attempted work nor allocation.
+
 These guarantees cover the pipeline's owned processing and explicitly audited
 call graphs, not pre-existing resident world storage, unrelated game work, total
 JVM heap, GC or wall-clock time. Memory charges are a conservative cost model,
@@ -220,8 +240,8 @@ route are owned by
 
 Units are owned by code. A domain defines its charging unit and the logical
 progress its consumers record; no shared unit conversion is defined.
-Inventory's slot unit and its distinction between parse charging and fixed-work
-capture, copy and freeze are owned by
+Inventory's live-slot and detached-decode charging, and its explicit-adapter
+fixed-work capture exception, are owned by
 [inventory](inventory.md#budgets-queues-and-memory).
 
 Four ledgers stay separate — shared scan work, logical progress, wire bytes,
@@ -298,7 +318,10 @@ heartbeat and watermark cadence.
 
 The domain policy owns what may be published. A preview may allow partial data.
 Inventory tracking publishes a normal valid quantity update only after a
-complete scan, as owned by [inventory](inventory.md). Control information —
+complete scan; its narrow
+[selected-preview bootstrap](inventory.md#selected-preview-bootstrap) is retained
+presentation, not partial tracking capture or invented completion evidence.
+Control information —
 source invalidation, hard stop, and the corresponding status and fence — is
 independent of item quotas, takes priority, is charged to total bytes, and must
 not generate valid quantities or fake zeros. Recovered valid data still follows
@@ -378,8 +401,10 @@ monitoring performs no capture, provider or world read. Recoverable notice
 failures cannot change accounting, cadence, publication or authority; fatal
 resource failures are not swallowed.
 
-Continuous delay is evaluated from fresh server-tick evidence with monotonic
-real time, not TPS or game ticks. Outstanding resource-blocked work remains
+Continuous delay is evaluated from fresh final delayed evidence in authoritative
+server ticks, not monotonic or wall-clock real time. Low TPS lengthens its
+real-time duration; repeated requests or observations in the same server tick
+do not advance delay duration. Outstanding resource-blocked work remains
 delayed until progress clears its limiting resource, cancellation, expiry or
 revocation; a not-yet-due content capture does not hide separately delayed
 publication or control work. A healthy eligible opportunity without outstanding
@@ -392,10 +417,11 @@ work is not counted as observed delay either.
 When continuous evidenced delay reaches the notification threshold, messages
 are enabled and the global cooldown permits, the server sends one consolidated
 administrator notice for the currently qualified modules to eligible recipients.
-A global cooldown follows a successfully delivered notice,
-not separate cooldowns per module or recipient. Neither an attempt without an
+A global server-tick cooldown starts only after successful delivery to at least
+one eligible recipient, not separately per module or recipient. Its real-time
+duration likewise varies with tick speed. Neither an attempt without an
 eligible recipient nor a failed handoff consumes delivered-notice cooldown, and
-elapsed time without another observed delayed tick cannot trigger a notice. The
+elapsed ticks without fresh final delayed evidence cannot trigger a notice. The
 server-owned switch is catalogued by
 [server configuration](../../config/server.md#persisted-fields): disabling
 messages leaves WARN, accounting and delay evidence active. Live setting changes

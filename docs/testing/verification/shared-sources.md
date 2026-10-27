@@ -110,9 +110,13 @@ The [budget-delay monitoring contract](../../architecture/presentation/shared_so
 has pure monitor/coordinator and production-producer coverage.
 `BudgetDelayMonitorTest` and `BudgetDelayMonitoringTest` exercise cycle closure
 and WARN summaries, bounded detached samples, separate resource units, known
-zero versus unknown quantities, saturation, fresh monotonic-time evidence,
+zero versus unknown quantities, saturation, fresh final delay evidence,
 healthy/idle/neutral transitions, consolidated notices and delivered-notice
-cooldown. They cover disabled messages preserving diagnostics and evidence,
+cooldown. `BudgetDelayMonitorTest` checks just-before and exact server-tick
+notification-threshold and global delivered-notice cooldown boundaries, zero and
+nonzero streak origins, repeated same-tick ingress or accounting cycles not
+advancing the streak, and a late first flush not qualifying stale evidence.
+They also cover disabled messages preserving diagnostics and evidence,
 failed or recipient-less notice retry, permission and authoritative-host
 eligibility, live flag reads, server-lifetime replacement/stop, recoverable
 sink failures and fatal-error propagation through recording ports. These are
@@ -132,12 +136,19 @@ cadence/no-audience and source/transport failure exclusions, outstanding
 publication delay across not-yet-due sampling, cancellation and expiry, accepted
 preview duplicate suppression, retained repair still observing its new work,
 revoked or expired reprojection doing no delayed work, and heartbeat progress
-not resolving independently refused completion control. Presentation and
+not resolving independently refused completion control.
+`InventoryBudgetDelayIntegrationTest` also combines the real backend with the
+monitor: a fresh delayed server tick can qualify a notice within one accounting
+period, repeated same-tick ingress does not accelerate it or refund the logical
+period budget, and WARN waits for accounting-cycle closure. Presentation and
 property-preview producer cases are inventoried under
 [presentation snapshot negotiation, policy and adapters](presentation.md#presentation-snapshot-negotiation-policy-and-adapters)
 and [target content preview](presentation.md#target-content-preview).
-The recorded focused run passes the complete inventory monitoring integration
-suite; no live server, notification, heap/TPS or soak result follows from these seams.
+The earlier focused run passed the complete inventory monitoring integration
+suite. The [final combined-tree run](build-checks.md#vault-tracking-performance-combined-tree-run)
+records the later known notification-timing failures; coverage inventory is not
+an all-green claim. No live server, notification, heap/TPS or soak result follows
+from these seams.
 
 ## Known automated gaps
 
@@ -151,6 +162,8 @@ suite; no live server, notification, heap/TPS or soak result follows from these 
   here and in the [inventory foundation](inventory.md#inventory-preview-and-tracking-foundation),
   and the production runtime, source-wrapper and publisher seams
   exercise snapshot preparation, capture and cross-period decode, allocation,
+  native cross-tick physical reads and compact replay under the scoped
+  [inventory evidence inventory](inventory.md#native-incremental-sweep-coverage),
   shared scan-work and logical sharing, retained lifetime, invalidation and
   recovery through recording providers and transports. They do not establish
   live world or optional-provider behavior, real transport, GPU or multiplayer
@@ -159,8 +172,9 @@ suite; no live server, notification, heap/TPS or soak result follows from these 
   [shared-source](../../architecture/presentation/shared_sources.md) and
   [inventory](../../architecture/presentation/inventory.md) owners remain the
   contracts; source presence alone does not close these evidence gaps;
-- monitoring has pure timing, eligibility, localization and recording-producer
-  coverage, but actual closed-cycle WARN output and localized vanilla system
-  messages under live resource pressure have not been exercised. Live permission
-  or host changes, notification-switch administration, server replacement and
-  stop, and prolonged low-TPS/overload behavior remain integration scenarios;
+- monitoring has pure evidence-transition, eligibility, localization and
+  recording-producer coverage, but actual closed-cycle WARN output and localized
+  vanilla system messages under live resource pressure have not been exercised.
+  Live permission or host changes, notification-switch administration, server
+  replacement and stop, and prolonged low-TPS/overload behavior remain integration
+  scenarios;

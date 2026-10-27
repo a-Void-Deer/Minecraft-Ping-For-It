@@ -19,7 +19,8 @@ public final class InventoryItemBudget {
 	static final int MAX_ARRAY_BYTES = 49152;
 	static final int MAX_COLLECTION = 256;
 	static final long MAX_NATIVE_TRAVERSAL = 262144;
-	// Fixed-cap scratch envelope. Writers/certificates must charge into it; a
+	// Fixed cumulative scratch envelope. Writers/certificates charge every full
+	// growth array and written-prefix copy, including discarded attempts; a
 	// worst-case codec that cannot fit refuses identity rather than exceeding it.
 	private static final long IDENTITY_ALLOCATION_BYTES = 2L * 1024 * 1024;
 	private static final long DISPLAY_ALLOCATION_BYTES = 1024L * 1024;
@@ -63,6 +64,12 @@ public final class InventoryItemBudget {
 	public static long workspaceUpperBound(int displayBytes) {
 		int cap = displayCap(displayBytes);
 		// Both cumulative phase caps dominate live scratch+retained outputs;
+		// canonical growth allocates <=130816 payload bytes/9 arrays, copying
+		// <=65280 written bytes, plus its independently paid exact final array.
+		// Fresh display growth allocates <3*cap chars and copies <2*cap units,
+		// even at non-power-of-two caps. Reset retains storage, never refunds it.
+		// Old/new arrays during growth and final canonical/display overlap are
+		// therefore already inside the unchanged cumulative phase reservations.
 		// outside-phase ledger/input/refusals use <512B (94B/7R/4O).
 		// The separate sequential Catalog pass uses its own admission bound;
 		// it must not be added as simultaneous phase scratch or hidden in here.
@@ -90,7 +97,7 @@ public final class InventoryItemBudget {
 		if (retainedUtf8Bytes < 0 || retainedUtf8Bytes > InventoryLimits.MAX_DISPLAY_BYTES)
 			throw new IllegalArgumentException("retained display bound");
 		// m=floor(B/4)+1, Q<=B+1024, L<=Q. Actual vector:
-		// (25m+3L+48, B+Q+20, 12, 15), including possible compact-String
+		// (25m+3L+52, B+Q+20, 12, 15), including Output's logical cap and possible compact-String
 		// attempt and UTF-16 backing. Componentwise 25% padding fits this bound.
 		return add(8192, multiply(18, retainedUtf8Bytes));
 	}

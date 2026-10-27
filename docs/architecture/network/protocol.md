@@ -125,9 +125,11 @@ Server messages: `OFFER(epoch, previewPeriodTicks, trackingPeriodTicks,
 resyncMinPeriods, heartbeatPeriods, effectiveDisplayBytes, effectiveFrameBytes)`
 establishes the epoch, the server-selected periods, and the effective display
 and frame byte budgets, where an explicit zero heartbeat period disables the
-periodic heartbeat. The two budgets are the exact legal size-scale pair on the
-shared inventory size grids that keeps the reserved metadata relationship;
-their values, grids and reserve remain owned by
+periodic heartbeat and a zero resynchronization period disables its cooldown
+check. These values use their field-specific validated bounds; preview and
+tracking periods remain positive. The two budgets form an exact legal size-grid
+pair that keeps the reserved metadata relationship; their persisted form and
+relationship remain owned by
 [server configuration](../../config/server.md#inventory-policy-object) and
 [inventory](../presentation/inventory.md). `POLICY` carries the inventory
 target-type policy view.
@@ -145,6 +147,14 @@ counts, unknown kinds or statuses, invalid part ranges, oversized frames and
 trailing bytes are rejected. Status values are `UPDATING`, `READY`,
 `UNCERTAIN`, `INCOMPLETE`, `UNAVAILABLE`, `INVALID`, `EXPIRED` and
 `COMPONENT_TOO_LONG`.
+
+`completeScan` describes source-scan completion, not receipt of all
+`partIndex`/`partCount` fragments. A marker-scoped selected-preview bootstrap
+uses the existing quantity-bearing data frames with `completeScan=false`; its
+fully installed transport baseline is still source-incomplete. The first
+source-completion barrier, bootstrap eligibility, history and quality are owned
+by [inventory tracking](../presentation/inventory.md#tracking); this adds no
+field, status value or wire version.
 
 Byte accounting on this route counts the whole encoded inventory frame —
 including its header, kind and entry framing — and excludes compression and the
@@ -194,14 +204,14 @@ are owned by [presentation snapshot](../presentation/presentation_snapshot.md),
 and the [wheel](../picking/wheel.md) owns the branch's native presentation
 while [capture](../picking/capture.md) owns the interaction abort.
 
-## Server-configuration routes (`server-config-request-v3`, `server-config-update-v3`, `server-config-snapshot-v3`)
+## Server-configuration routes (`server-config-request-v4`, `server-config-update-v4`, `server-config-snapshot-v4`)
 
-The server-configuration surface travels on three dedicated version-three route
-IDs (`pingforit-c2s:server-config-request-v3`,
-`pingforit-c2s:server-config-update-v3`, and
-`pingforit-s2c:server-config-snapshot-v3`), separate from the presentation
-policy route and the inventory routes. The
-request and update routes are client-to-server; the snapshot route is
+The server-configuration surface travels on three dedicated version-four route
+IDs (`pingforit-c2s:server-config-request-v4`,
+`pingforit-c2s:server-config-update-v4`, and
+`pingforit-s2c:server-config-snapshot-v4`), separate from the presentation policy
+route and the inventory routes.
+The request and update routes are client-to-server; the snapshot route is
 server-to-client. A request carries one positive request identifier and asks
 for the server's current authoritative values; the snapshot echoes that
 identifier and is correlated to the still-pending request on the same
@@ -242,9 +252,11 @@ displayByteMultiplier, frameByteMultiplier
 
 Each inventory leaf that supports unlimited mode carries its strict boolean
 flag followed by a varint retaining its finite value; finite-only leaves carry
-only their varint. Integer leaves encode their integer value, send-byte
-multipliers encode exact grid quanta, and the two size scalars encode positive
-quarter-multiplier quanta. Legal forms, grids and relationships belong to
+only their varint.
+Integer leaves encode their integer value, send-byte multipliers encode exact
+grid quanta, and the two size scalars encode positive quarter-multiplier quanta.
+UI-only step sizes for integer leaves do not restrict wire values.
+Legal numeric forms and relationships belong to
 [server configuration](../../config/server.md#inventory-policy-object).
 The final strict `budgetDelayNotificationsEnabled` byte follows the complete
 inventory block in both UPDATE and SNAPSHOT; REQUEST has no added field.
@@ -254,11 +266,12 @@ The field mask and its monitoring bit are owned by
 Overflow, overlong or non-canonical numbers, invalid enum ordinals or inventory
 values, unknown mask bits, missing fields, non-boolean bytes, and trailing bytes
 are rejected in full before any value is applied. Exact-end validation follows
-the final boolean, not the inventory block. A superseded shorter UPDATE or
-SNAPSHOT without that boolean is corrupt rather than defaulted or accepted as
-a prefix; safe rejection drains the frame. The route
-IDs are version-bound: they do not decode an earlier server-configuration wire
-version, and no fallback reinterprets one. Route registration and grammar
+the final boolean, not the inventory block. A superseded UPDATE or SNAPSHOT
+without the memory mode byte or final monitoring boolean is corrupt rather than
+defaulted or accepted as a prefix; safe rejection drains the frame. All three
+route IDs are version-bound, including the otherwise unchanged request body:
+earlier server-configuration routes are not a fallback, and their payloads are
+never reinterpreted as version four. Route registration and grammar
 remain owned here; the disclosed field catalogue is owned by
 [server configuration](../../config/server.md), the transaction, correlation,
 field mask, merge and apply rules by

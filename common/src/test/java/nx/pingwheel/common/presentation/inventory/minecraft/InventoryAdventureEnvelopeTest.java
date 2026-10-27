@@ -46,7 +46,7 @@ class InventoryAdventureEnvelopeTest {
 				InventoryItemBudget.root(4096), new InventoryResidentAccessFields(), new InventoryTestNativeAccess());
 			assertEquals(InventoryIdentityMode.EXACT, frozen.identityMode());
 			var ops = registries.createSerializationContext(NbtOps.INSTANCE);
-			var original = DataComponentMap.CODEC.encodeStart(ops, stack.getComponents()).result().orElseThrow();
+			var original = net.minecraft.core.component.DataComponentPatch.CODEC.encodeStart(ops, ((net.minecraft.core.component.PatchedDataComponentMap) stack.getComponents()).asPatch()).result().orElseThrow();
 			assertArrayEquals(InventoryItemCodec.canonicalTag(original), frozen.canonicalForCatalog());
 			var nativeJson = AdventureModePredicate.CODEC.encodeStart(ops.withParent(JsonOps.INSTANCE), adventure).result().orElseThrow();
 			assertEquals(nativeJson, JsonParser.parseString(frozen.display().displayJson()).getAsJsonObject().getAsJsonObject("components").get("minecraft:can_break"));

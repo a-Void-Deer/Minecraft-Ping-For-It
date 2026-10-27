@@ -5,12 +5,15 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.Provider;
 import java.security.Security;
+import java.util.AbstractMap;
+import java.util.AbstractSet;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,13 +43,17 @@ import nx.pingwheel.common.config.InventoryLimits;
 import nx.pingwheel.common.config.InventorySizeScale;
 import nx.pingwheel.common.presentation.inventory.InventoryScanner;
 import nx.pingwheel.common.presentation.inventory.InventoryReprojectionSummary;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import org.jetbrains.annotations.UnmodifiableView;
 
 /**
  * Detached item-variant identity and bounded display projection for the vanilla
  * container source.
  *
  * <p>Variant identity is the item registry id plus the canonical persistent
- * component bytes, keyed by their SHA-256 digest. The canonical form is
+ * raw persistent patch bytes, keyed by their SHA-256 digest. The canonical form is
  * produced here rather than by {@link CompoundTag#toString()}: compound keys
  * are sorted recursively, list order and every NBT tag type are preserved, and
  * the output is bounded. A digest alone is not identity evidence, so the
@@ -63,13 +70,17 @@ import nx.pingwheel.common.presentation.inventory.InventoryReprojectionSummary;
  *
  * <p>The catalog retains canonical identity bytes once per component digest and
  * each display value once per variant key under finite entry and retained-byte
- * guards; exceeding a guard reports the source unavailable instead of
+ * guards; legacy callers report capacity exhaustion as unavailable instead of
  * truncating or emptying the catalog. A retained display never expands later:
  * lowering the effective cap reprojects the retained values, and an
  * already-known key keeps its retained projection even after a later cap
  * increase.
  */
 public final class InventoryItemCodec {
+	@org.jetbrains.annotations.NotNullByDefault
+	private static final class LockComponents {
+		private static final Class<?> SIMPLE = DataComponentMap.builder().set(DataComponents.MAX_STACK_SIZE, 1).build().getClass();
+	}
 
 	/** Internal guard for one canonical component payload; not a product value. */
 	public static final int MAX_CANONICAL_BYTES = 65536;
@@ -89,8 +100,8 @@ public final class InventoryItemCodec {
 	public static final int MAX_DISPLAY_BYTES = 4096;
 
 	/**
-	 * Smallest legal effective display cap. A particular suppression envelope
-	 * can still be unavailable at this cap without changing exact identity.
+	 * Smallest legal effective display cap. Size-only exhaustion reaches an
+	 * ID-only default icon without changing exact identity.
 	 */
 	private static final int MIN_DISPLAY_BYTES =
 		(int) InventorySizeScale.DISPLAY.bytes(InventorySizeScale.DISPLAY.minimumMultiplier());
@@ -156,7 +167,7 @@ public final class InventoryItemCodec {
 	 * UTF-8 byte bound. A null JSON is an unavailable icon projection; metadata
 	 * and exact/aggregate identity remain usable independently.
 	 */
-	public record Display(String itemId, String label, String displayJson, boolean componentsStripped) {
+	public record Display(String itemId, String label, @org.jetbrains.annotations.Nullable String displayJson, boolean componentsStripped) {
 		public Display {
 			Objects.requireNonNull(itemId, "itemId");
 			Objects.requireNonNull(label, "label");
@@ -213,11 +224,29 @@ public final class InventoryItemCodec {
 	 * observed. Callers must report the source unavailable instead of guessing
 	 * an identity or merging variants.
 	 */
-	public static final class IdentityUnavailableException extends IllegalStateException {
+	public static class IdentityUnavailableException extends IllegalStateException {
 		public IdentityUnavailableException(String message) {
 			super(message);
 		}
 		@Override public synchronized Throwable fillInStackTrace() { return this; }
+	}
+
+	/** Capacity is not identity ambiguity. The superclass and messages preserve legacy callers. */
+	public enum CatalogLimit { ENTRIES, PAYLOAD_BYTES }
+	@NotNullByDefault
+	public static final class CapacityExceededException extends IdentityUnavailableException {
+		private final CatalogLimit limit;
+		private CapacityExceededException(CatalogLimit limit) {
+			super(limit == CatalogLimit.ENTRIES ? "item catalogue entry bound reached" : "item catalogue byte bound reached");
+			this.limit = limit;
+		}
+		public CatalogLimit limit() { return limit; }
+	}
+
+	/** Conservative owned retention, separate from the canonical+UTF-8 payload cap. */
+	@NotNullByDefault
+	public record RetainedCost(long canonicalBytes, long projectionBytes, long indexBytes, long ambiguityBytes) {
+		public long totalBytes() { return Math.addExact(Math.addExact(canonicalBytes, projectionBytes), Math.addExact(indexBytes, ambiguityBytes)); }
 	}
 
 	/**
@@ -228,9 +257,9 @@ public final class InventoryItemCodec {
 	 * Canonical identity bytes are retained once per component digest and each
 	 * display value is retained and charged once per variant key. Both guards
 	 * are checked, with checked addition, before any payload is cloned or
-	 * stored; exceeding either guard raises {@link IdentityUnavailableException}
-	 * so the scanner reports the source unavailable rather than a truncated or
-	 * empty catalog.
+	 * stored; exceeding either guard raises {@link CapacityExceededException},
+	 * also an {@link IdentityUnavailableException} for legacy callers. Capacity
+	 * never truncates, empties or folds the catalogue.
 	 */
 	public static final class Catalog {
 		static {
@@ -247,10 +276,17 @@ public final class InventoryItemCodec {
 		private final long maxRetainedBytes;
 		/** Retained display ceiling; it is only ever lowered, never raised. */
 		private int displayBytes;
-		private final Map<String, byte[]> canonicalByDigest = new HashMap<>(InventoryCatalogAdmission.TABLE_CAPACITY);
+		private final Map<String, byte @Unmodifiable []> canonicalByDigest = new HashMap<>(InventoryCatalogAdmission.TABLE_CAPACITY);
 		private final Set<String> conflicts = new HashSet<>(InventoryCatalogAdmission.TABLE_CAPACITY);
-		private final Map<InventoryScanner.Key, Display> displays = new LinkedHashMap<>(InventoryCatalogAdmission.TABLE_CAPACITY);
+		private final Map<InventoryScanner.Key, Encoded> displays = new LinkedHashMap<>(InventoryCatalogAdmission.TABLE_CAPACITY);
+		private final @UnmodifiableView Map<InventoryScanner.Key, Display> displayView = Collections.unmodifiableMap(new DisplayView());
 		private long retainedBytes;
+		// Object/header allowance includes Catalog, three maps/set wrapper, view,
+		// cached summary and fields. Tables and nodes are charged when allocated.
+		private static final long BASE_MODELED_BYTES = 768;
+		private static final long TABLE_BYTES = 40 + 8L * InventoryCatalogAdmission.TABLE_CAPACITY;
+		private static final long NODE_BYTES = 128; // bounds linked and tree nodes
+		private long canonicalCost, projectionCost, indexCost = BASE_MODELED_BYTES, ambiguityCost;
 		private InventoryReprojectionSummary reprojection = InventoryReprojectionSummary.EMPTY;
 
 		/** Uses the finite default entry and retained-byte guards and the default 4 KiB display cap. */
@@ -294,12 +330,95 @@ public final class InventoryItemCodec {
 		}
 
 		/** Live read-only view; entries appear as stacks are encoded. */
-		public Map<InventoryScanner.Key, Display> displays() {
-			return Collections.unmodifiableMap(displays);
+		public @UnmodifiableView Map<InventoryScanner.Key, Display> displays() {
+			return displayView;
 		}
 
-		/** Retained canonical plus display bytes; package-visible accounting. */
-		long retainedBytes() {
+		/** Lookup without a snapshot, parser, source callback or mutable canonical-byte export. */
+		public @Nullable Display retainedDisplay(InventoryScanner.Key key) {
+			@Nullable Encoded retained = displays.get(Objects.requireNonNull(key));
+			return retained == null ? null : retained.display();
+		}
+		/** Borrowed stable first cell for compact journals; no per-slot Encoded wrapper. */
+		public @Nullable Encoded retainedEncoded(InventoryScanner.Key key) { return displays.get(Objects.requireNonNull(key)); }
+
+		/**
+		 * O(1) settlement metadata. Shared journal definitions must not charge
+		 * these objects again. Provider/native ports are borrowed, not owned here;
+		 * pre-existing returned Key/Display references must remain under the old
+		 * charge until every journal has refreshed or released them on tightening.
+		 */
+		public long modeledRetainedBytes() { return canonicalCost + projectionCost + indexCost + ambiguityCost; }
+		public static long initialModeledBytes() { return BASE_MODELED_BYTES; }
+		/** No catalogue allocation or registry lookup is needed to admit the first native read. */
+		public static long firstReadGrowthUpperBound(int displayBytes) {
+			return 3 * TABLE_BYTES + 3 * NODE_BYTES + 40L + MAX_CANONICAL_BYTES + textCost(64)
+				+ definitionCost(256, 262, requireDisplayBytes(displayBytes)) + textCost(64);
+		}
+		/** Allocates one fixed four-long metadata record; use the scalar total on hot settlement paths. */
+		public RetainedCost retainedCost() { return new RetainedCost(canonicalCost, projectionCost, indexCost, ambiguityCost); }
+
+		/**
+		 * Pure pre-read growth bound for one native observation, including lazy
+		 * tables, collision state and spare node capacity. Reserve alongside the
+		 * separately admitted transient Catalog workspace; settle the measured
+		 * modeledRetainedBytes delta, even on a sticky collision failure.
+		 */
+		public long retainedGrowthUpperBound() { return growthBound(MAX_CANONICAL_BYTES, 256, 262, displayBytes); }
+		/** Pure actual-input bound: lengths only, no hash, UTF scan, parse or provider access. */
+		public long retainedGrowthUpperBound(InventoryDetachedItem input) {
+			Objects.requireNonNull(input, "input");
+			byte @Nullable @Unmodifiable [] canonical = input.canonicalForCatalog();
+			@Nullable String json = input.display().displayJson();
+			return growthBound(canonical == null ? 0 : canonical.length, input.itemId().length(), input.display().label().length(),
+				json == null ? 0 : Math.min(displayBytes, json.length()));
+		}
+		private long growthBound(int canonical, int idUnits, int labelUnits, int jsonUnits) {
+			return tableGrowth(canonicalByDigest.size()) + tableGrowth(displays.size()) + tableGrowth(conflicts.size())
+				+ 3 * NODE_BYTES + 40L + canonical + textCost(64)
+				+ definitionCost(idUnits, labelUnits, jsonUnits) + textCost(64);
+		}
+		private static long tableGrowth(int entries) {
+			if (entries == 0) return TABLE_BYTES;
+			// Default/native guards never resize the initial table. Account the
+			// legacy larger finite guards as well, without inspecting any buckets.
+			long capacity = InventoryCatalogAdmission.TABLE_CAPACITY;
+			while (entries > capacity * 3 / 4 && capacity < (1L << 30)) capacity *= 2;
+			return entries == capacity * 3 / 4 && capacity < (1L << 30) ? 8 * capacity : 0;
+		}
+		private static long textCost(int units) { return 80L + 2L * units; }
+		private static long nullableTextCost(@Nullable String value) { return value == null ? 0 : textCost(value.length()); }
+		private static long definitionCost(int idUnits, int labelUnits, int jsonUnits) {
+			// Key, Display and stable Encoded cell; separately model potentially
+			// distinct but equal item-id Strings rather than assuming interning.
+			return 64 + 65 + 64 + 2 * textCost(idUnits) + textCost(64) + textCost(labelUnits) + textCost(jsonUnits);
+		}
+
+		/** Compatibility view is lazy; only a caller requesting entries pays entry wrappers. */
+		@NotNullByDefault
+		private final class DisplayView extends AbstractMap<InventoryScanner.Key, Display> {
+			@Override public int size() { return displays.size(); }
+			@Override public @Nullable Display get(@Nullable Object key) {
+				@Nullable Encoded value = displays.get(key); return value == null ? null : value.display();
+			}
+			@Override public Set<Map.Entry<InventoryScanner.Key, Display>> entrySet() {
+				return new AbstractSet<>() {
+					@Override public int size() { return displays.size(); }
+					@Override public Iterator<Map.Entry<InventoryScanner.Key, Display>> iterator() {
+						Iterator<Encoded> values = displays.values().iterator();
+						return new Iterator<>() {
+							@Override public boolean hasNext() { return values.hasNext(); }
+							@Override public Map.Entry<InventoryScanner.Key, Display> next() {
+								Encoded value = values.next(); return new SimpleImmutableEntry<>(value.key(), value.display());
+							}
+						};
+					}
+				};
+			}
+		}
+
+		/** Payload cap usage only: canonical bytes plus UTF-8 item-id, label and display bytes. */
+		public long retainedBytes() {
 			return retainedBytes;
 		}
 
@@ -332,14 +451,17 @@ public final class InventoryItemCodec {
 			// Only actual parser owners need replacement cells. Each nonnull
 			// input's public replacement allowance pays its cell/Display, while
 			// METADATA_BYTES pays the two iterators, Builder and final record.
-			Display[] replacements = new Display[Math.toIntExact(reprojection.parserCalls())];
+			Encoded[] replacements = new Encoded[Math.toIntExact(reprojection.parserCalls())];
 			var next = new InventoryReprojectionSummary.Builder().entries(displays.size());
 			int index = 0;
-			for (Display previous : displays.values()) {
+			long modeledRefund = 0;
+			for (Encoded value : displays.values()) {
+				Display previous = value.display();
 				if (previous.displayJson() == null) continue;
 				Display tightened = reproject(previous, registries, ceiling);
-				next.input(tightened.displayJson()); replacements[index++] = tightened;
+				next.input(tightened.displayJson()); replacements[index++] = new Encoded(value.key(), tightened);
 				refund = checkedAdd(refund, utf8Bytes(previous.displayJson()) - utf8Bytes(tightened.displayJson()));
+				modeledRefund += nullableTextCost(previous.displayJson()) - nullableTextCost(tightened.displayJson());
 			}
 			InventoryReprojectionSummary summary = next.build();
 			long nextRetained = Math.subtractExact(retainedBytes, refund);
@@ -347,10 +469,11 @@ public final class InventoryItemCodec {
 			// allocation succeeds. The native linked map's value swap cannot hash
 			// keys or call a provider; no new map nodes are allocated.
 			index = 0;
-			for (var entry : displays.entrySet()) if (entry.getValue().displayJson() != null) entry.setValue(replacements[index++]);
+			for (var entry : displays.entrySet()) if (entry.getValue().display().displayJson() != null) entry.setValue(replacements[index++]);
 			reprojection = summary;
 			this.displayBytes = ceiling;
 			retainedBytes = nextRetained;
+			projectionCost -= modeledRefund;
 		}
 
 		/** Explicit grant form of the existing actual-input tightening contract. */
@@ -383,13 +506,13 @@ public final class InventoryItemCodec {
 			return internOwned(detached, Objects.requireNonNull(admission, "admission"));
 		}
 
-		private Encoded internOwned(InventoryDetachedItem detached, InventoryCatalogAdmission admission) {
+		private Encoded internOwned(InventoryDetachedItem detached, @Nullable InventoryCatalogAdmission admission) {
 			Objects.requireNonNull(detached, "detached");
-			byte[] canonical = detached.canonicalForCatalog();
+			byte @Nullable @Unmodifiable [] canonical = detached.canonicalForCatalog();
 			if (admission != null) {
 				if (maxEntries > DEFAULT_MAX_ENTRIES || maxRetainedBytes > DEFAULT_MAX_RETAINED_BYTES)
 					throw new IllegalArgumentException("catalog guards exceed certified envelope");
-				Display input = detached.display(); String json = input.displayJson();
+				Display input = detached.display(); @Nullable String json = input.displayJson();
 				// The OLD projector refuses an overlong String before scanning or
 				// allocating scratch. It is unavailable display, never lost identity.
 				int units = json == null || json.length() > InventoryLimits.MAX_DISPLAY_BYTES ? 0 : json.length();
@@ -402,50 +525,62 @@ public final class InventoryItemCodec {
 					InventoryCatalogAdmission.operationWorkUpperBound(length, bytes, count));
 			}
 			String componentsKey = detached.identityMode() == InventoryIdentityMode.ALL_VARIANTS ? "" : digest(canonical);
-			byte[] known = null;
+			byte @Nullable @Unmodifiable [] known = null;
 			if (canonical != null) {
 				if (conflicts.contains(componentsKey)) throw new IdentityUnavailableException("component digest is ambiguous");
 				known = canonicalByDigest.get(componentsKey);
 				if (known != null && !Arrays.equals(known, canonical)) {
+					indexCost += tableGrowth(conflicts.size());
 					conflicts.add(componentsKey);
+					ambiguityCost += NODE_BYTES + textCost(componentsKey.length());
 					throw new IdentityUnavailableException("component digest collision");
 				}
 			}
 			InventoryScanner.Key key = new InventoryScanner.Key(detached.itemId(), componentsKey);
-			Display retained = displays.get(key);
+			@Nullable Encoded retained = displays.get(key);
 			if (retained != null) {
 				// A known key keeps its retained projection: a later ceiling
 				// increase never expands already-retained metadata. The digest
 				// was still checked against canonical collision evidence above.
-				return new Encoded(key, retained);
+				return retained;
 			}
 			Display display = reproject(detached.display(), registries, displayBytes);
-			retain(componentsKey, canonical, known == null, key, display);
-			return new Encoded(key, display);
+			Encoded value = new Encoded(key, display);
+			retain(componentsKey, canonical, known == null, value);
+			return value;
 		}
 
-		private void retain(String componentsKey, byte[] canonical, boolean unknownDigest, InventoryScanner.Key key, Display display) {
+		private void retain(String componentsKey, byte @Nullable @Unmodifiable [] canonical, boolean unknownDigest, Encoded value) {
+			InventoryScanner.Key key = value.key(); Display display = value.display();
 			boolean newDigest = canonical != null && unknownDigest;
 			if (newDigest && canonicalByDigest.size() >= maxEntries) {
-				throw new IdentityUnavailableException("item catalogue entry bound reached");
+				throw new CapacityExceededException(CatalogLimit.ENTRIES);
 			}
 			if (displays.size() >= maxEntries) {
-				throw new IdentityUnavailableException("item catalogue entry bound reached");
+				throw new CapacityExceededException(CatalogLimit.ENTRIES);
 			}
 
-			long charge = newDigest ? canonical.length : 0L;
+			long charge = newDigest ? Objects.requireNonNull(canonical).length : 0L;
 			charge = checkedAdd(charge, displayCharge(display));
 			long next = checkedAdd(retainedBytes, charge);
 			if (next > maxRetainedBytes) {
-				throw new IdentityUnavailableException("item catalogue byte bound reached");
+				throw new CapacityExceededException(CatalogLimit.PAYLOAD_BYTES);
 			}
 			// Checked detached summary admission precedes canonical cloning and map
 			// insertion. Duplicate keys never add a second parser invocation.
 			InventoryReprojectionSummary nextSummary = reprojection.plus(
 				new InventoryReprojectionSummary.Builder().entries(1).input(display.displayJson()).build());
 
-			if (newDigest) canonicalByDigest.put(componentsKey, canonical.clone());
-			displays.put(key, display);
+			if (newDigest) {
+				indexCost += tableGrowth(canonicalByDigest.size());
+				canonicalByDigest.put(componentsKey, Objects.requireNonNull(canonical).clone());
+				canonicalCost += 40L + canonical.length + textCost(componentsKey.length());
+				indexCost += NODE_BYTES;
+			}
+			indexCost += tableGrowth(displays.size());
+			displays.put(key, value);
+			indexCost += NODE_BYTES;
+			projectionCost += definitionCost(key.itemId().length(), display.label().length(), 0) - textCost(0) + nullableTextCost(display.displayJson());
 			reprojection = nextSummary;
 			retainedBytes = next;
 		}
@@ -531,7 +666,7 @@ public final class InventoryItemCodec {
 
 	/**
 	 * Bounded display projection at the default 4 KiB cap. Identity is computed
-	 * from the full component set before this step; display-only components may
+	 * from the actual persistent patch before this step; display-only components may
 	 * be omitted to fit the bound without changing identity.
 	 * Identity refusal, not display omission, controls the aggregate bit.
 	 */
@@ -613,7 +748,7 @@ public final class InventoryItemCodec {
 			if (size != 0) for (var entry : patch.entrySet()) if (entry.getKey() == DataComponents.CUSTOM_NAME) { name = entry.getValue().orElse(null); replaced = true; }
 			if (!replaced) {
 				var prototype = raw.prototype(patched); if (prototype == DataComponentMap.EMPTY) return false;
-				if (!InventoryItemFreezer.simpleMap(prototype)) InventoryComponentCertificate.refuse();
+				if (prototype == null || prototype.getClass() != LockComponents.SIMPLE) InventoryComponentCertificate.refuse();
 				var defaults = raw.simple(prototype); int count = bounds.mapPass(defaults);
 				if (count != 0) for (var entry : defaults.entrySet()) if (entry.getKey() == DataComponents.CUSTOM_NAME) name = entry.getValue();
 			}

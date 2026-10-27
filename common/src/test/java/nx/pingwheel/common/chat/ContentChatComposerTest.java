@@ -326,8 +326,10 @@ class ContentChatComposerTest {
 			assertEquals("9007199254740993", argText(findTranslatable(message, ContentChatTemplate.ITEM_COUNT_KEY), 1));
 
 			stack.remove(DataComponents.CUSTOM_NAME);
-			String normalJson = ItemStack.SINGLE_ITEM_CODEC.encodeStart(RegistryAccess.EMPTY.createSerializationContext(JsonOps.INSTANCE),
-				stack).result().orElseThrow().toString();
+			var normalDisplay = ItemStack.SINGLE_ITEM_CODEC.encodeStart(RegistryAccess.EMPTY.createSerializationContext(JsonOps.INSTANCE),
+				stack).result().orElseThrow().getAsJsonObject();
+			normalDisplay.add("components", new com.google.gson.JsonObject());
+			String normalJson = normalDisplay.toString();
 			assertEquals("item.minecraft.gunpowder", translatableKey(decoder.apply(normalJson).orElseThrow()),
 				"an unrenamed item keeps its localized base without quotes");
 			stack.set(DataComponents.ITEM_NAME, custom);

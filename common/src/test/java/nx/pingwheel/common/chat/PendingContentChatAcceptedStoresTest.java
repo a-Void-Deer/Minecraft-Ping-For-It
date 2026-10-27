@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.SharedConstants;
@@ -30,6 +32,15 @@ import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.client.ClientPresentation;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.presentation.inventory.InventoryDomainCodec;
+import nx.pingwheel.common.presentation.inventory.InventoryScanner;
+import nx.pingwheel.common.presentation.inventory.InventoryStep;
+import nx.pingwheel.common.presentation.inventory.InventorySyncPublisher;
+import nx.pingwheel.common.presentation.source.CaptureResult;
+import nx.pingwheel.common.presentation.source.CostLedger;
+import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
+import nx.pingwheel.common.presentation.source.SyncPublisher;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -147,6 +158,44 @@ class PendingContentChatAcceptedStoresTest {
 		assertTrue(f.controller.attempt(ID));
 		assertEquals("0", countArgument(f.sent.getFirst()));
 	}
+	@Test void encodedPublisherSeedKeepsReceiptPendingUntilFreshReadyAndThenEmitsExactlyOnce() {
+		for (boolean aggregate : new boolean[] {false, true}) {
+			Fixture f = new Fixture();
+			assertTrue(f.createdReceipt(f.created(1, PresentationReceiptContent.inventory(), basic(false))));
+			var memory = new RetainedMemoryLedger(16_000_000);
+			@NotNullByDefault
+			class Transport implements InventorySyncPublisher.Transport {
+				@Override public boolean authorized(SyncPublisher.Context context) { return true; }
+				@Override public int encodedBytes(InventoryS2CPacket packet) { return packet.encodedSize(4096, 32768); }
+				@Override public void send(UUID recipient, InventoryS2CPacket packet) {
+					var buf = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
+					try { packet.write(buf); var decoded = InventoryS2CPacket.readSafe(buf); assertFalse(decoded.isCorrupt()); f.inventory.accept(decoded); }
+					finally { buf.release(); }
+				}
+			}
+			try (var publisher = new InventorySyncPublisher(memory, new Transport())) {
+				var settings = nx.pingwheel.common.config.InventorySettings.serverDefaults(); publisher.advance(0, settings);
+				var context = new SyncPublisher.Context("tracking/42", SNAPSHOT.owner(), "81/1", 1, 4);
+				assertTrue(publisher.register(context, new InventorySyncPublisher.Route(7, 81, 1, 0, ID, "target", "take")));
+				var item = new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:gunpowder", aggregate ? "" : "exact"),
+					9_007_199_254_740_993L, "item.minecraft.gunpowder", null, aggregate);
+				var payload = new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, Map.of("selected", InventoryDomainCodec.encode(item)));
+				var projection = new SyncPublisher.AuthorizedProjection(SyncPublisher.PublicationForm.KEYED_ABSOLUTE, Set.of("selected"));
+				assertInstanceOf(SyncPublisher.Outcome.Accepted.class, publisher.publishBootstrap(payload, 1, InventoryS2CPacket.Status.UPDATING,
+					projection, context, new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, 1L)))); publisher.drain();
+				assertFalse(f.inventory.tracking(ID).complete()); assertEquals(item.count(), f.inventory.tracking(ID).entries().getFirst().count());
+				assertFalse(f.controller.attempt(ID)); assertTrue(f.sent.isEmpty());
+				var completed = new CaptureResult(Optional.of(payload), new CaptureResult.Coverage("inventory", 2, 1, OptionalLong.of(1)),
+					CaptureResult.Availability.READABLE, CaptureResult.Completeness.COMPLETE, CaptureResult.Consistency.EVENTUAL, Optional.empty(), Optional.empty());
+				publisher.advance(3, settings);
+				assertInstanceOf(SyncPublisher.Outcome.Accepted.class, publisher.publish(completed, InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP,
+					projection, context, new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, 1L)))); publisher.drain();
+				assertTrue(f.inventory.tracking(ID).complete()); assertTrue(f.controller.attempt(ID));
+				assertEquals("9007199254740993", countArgument(f.sent.getFirst())); assertFalse(f.controller.attempt(ID)); assertEquals(1, f.sent.size());
+			}
+			assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+		}
+	}
 
 	@Test void acceptedResetCancelsPendingAndOldViewOrKnownNewViewCannotRestartIt() {
 		Fixture f = new Fixture();
@@ -191,7 +240,7 @@ class PendingContentChatAcceptedStoresTest {
 				new PresentationField(PresentationBasic.MAX_HEALTH, PresentationField.Kind.NUMBER, true, 0, "Max"))), Map.of(BASIC, 1))));
 			assertTrue(presentation.reset(PresentationS2CPacket.reset(81, 1, mask())));
 			inventory.presentationReset(81, 1);
-			inventory.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(10, 20, 3, 0)).stamp(81, 1));
+			inventory.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(10, 10, 3, 0)).stamp(81, 1));
 			inventory.accept(InventoryS2CPacket.policy(7, 81, 1, Set.of("entity_block")));
 			controller = new PendingContentChatController(4, id -> {
 				ClientMarker marker = markers.marker(id).orElse(null);

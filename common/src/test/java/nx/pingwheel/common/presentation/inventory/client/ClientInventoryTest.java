@@ -66,11 +66,14 @@ class ClientInventoryTest {
 	}
 
 	private static InventoryS2CPacket.Offer settings() {
-		return new InventoryS2CPacket.Offer(10, 20, 3, 5);
+		// Delivery regressions retain a sixty-tick cooldown/window with legal periods.
+		return new InventoryS2CPacket.Offer(10, 10, 6, 5);
 	}
 
 	private static InventoryS2CPacket.Offer settings(int displayBytes, int frameBytes) {
-		return new InventoryS2CPacket.Offer(10, 20, 3, 5, displayBytes, frameBytes);
+		var periods = settings();
+		return new InventoryS2CPacket.Offer(periods.previewPeriodTicks(), periods.trackingPeriodTicks(),
+			periods.resyncMinPeriods(), periods.heartbeatPeriods(), displayBytes, frameBytes);
 	}
 
 	private void offer() {
@@ -915,6 +918,111 @@ class ClientInventoryTest {
 	}
 
 	@Test
+	void zeroCooldownImmediatelyIgnoresAnEarlierDeadlineAndAllowsSameTickRepairs() {
+		offer(new InventoryS2CPacket.Offer(5, 3, 5, 0));
+		session.accept(snapshot(0, 1, List.of(entry("a", 3L, 1L))));
+		long wrong = checksum(entry("a", 3L, 1L)) + 1L;
+		session.accept(heartbeat(wrong, WATERMARK));
+		session.accept(heartbeat(wrong, WATERMARK));
+		assertEquals(1, sent.size(), "a positive cooldown rejects the same-tick repeat");
+
+		offer(new InventoryS2CPacket.Offer(5, 3, 0, 0));
+		session.accept(heartbeat(wrong, WATERMARK));
+		session.accept(heartbeat(wrong, WATERMARK));
+		assertEquals(3, sent.size(), "zero skips the old deadline without inventing a per-tick throttle");
+		assertEquals(3L, session.stats().repairRequests());
+		assertEquals(3L, trackedEntry("a").count(), "repair requests do not mutate the accepted baseline");
+	}
+
+	@Test
+	void positiveRepairCooldownDoesNotInheritTheEightTickWaitingFloor() {
+		offer(new InventoryS2CPacket.Offer(5, 1, 1, 0));
+		session.accept(snapshot(0, 1, List.of(entry("a", 3L, 1L))));
+		session.accept(data(InventoryS2CPacket.Kind.STREAM, 9L, 2L, 0, 1, 6L, List.of(entry("future", 4L, 1L))));
+		long wrong = checksum(entry("a", 3L, 1L)) + 1L;
+		session.accept(heartbeat(wrong, WATERMARK));
+		session.accept(heartbeat(wrong, WATERMARK));
+		assertEquals(1, sent.size());
+		session.tick(true);
+		session.accept(heartbeat(wrong, WATERMARK));
+		assertEquals(2, sent.size(), "one tracking period permits repair again at tick one");
+		for (int i = 1; i < 7; i++) session.tick(true);
+		assertEquals(1, session.stats().unknownSessions(), "the future stream still waits through tick seven");
+		assertEquals(0L, session.stats().expiredUnknownSessions());
+		session.tick(true);
+		assertEquals(0, session.stats().unknownSessions());
+		assertEquals(1L, session.stats().expiredUnknownSessions(), "the independent buffer expires at tick eight");
+		assertEquals(3, sent.size());
+	}
+
+	@Test
+	void unknownBaselineWaitsForTheDominantNegotiatedWindowBeforeExpiring() {
+		assertUnknownWaitingWindow(3, 0, 9);
+		assertUnknownWaitingWindow(3, 5, 15);
+		assertUnknownWaitingWindow(1, 0, 8);
+		assertUnknownWaitingWindow(1, 1, 8);
+	}
+
+	private void assertUnknownWaitingWindow(int trackingPeriod, int resyncPeriods, int expectedTicks) {
+		session.reset(); sent.clear();
+		offer(new InventoryS2CPacket.Offer(5, trackingPeriod, resyncPeriods, 0));
+		session.accept(data(InventoryS2CPacket.Kind.STREAM, 9L, 1L, 0, 1, WATERMARK, List.of(entry("a", 1L, 1L))));
+		for (int i = 0; i < expectedTicks - 1; i++) session.tick(true);
+		assertEquals(1, session.stats().unknownSessions(), "unknown baseline is retained just before " + expectedTicks);
+		assertTrue(sent.isEmpty());
+		long expired = session.stats().expiredUnknownSessions();
+		session.tick(true);
+		assertEquals(0, session.stats().unknownSessions());
+		assertEquals(expired + 1, session.stats().expiredUnknownSessions());
+		assertEquals(1, sent.size(), "unknown baseline requests repair exactly at " + expectedTicks);
+	}
+
+	@Test
+	void completionAndHeartbeatGapsUseTheSameWaitingWindowWithoutPrematureRepair() {
+		for (boolean completion : new boolean[] {true, false}) {
+			assertGapWaitingWindow(completion, 3, 0, 9);
+			assertGapWaitingWindow(completion, 3, 5, 15);
+			assertGapWaitingWindow(completion, 1, 0, 8);
+		}
+	}
+
+	private void assertGapWaitingWindow(boolean completion, int trackingPeriod, int resyncPeriods, int expectedTicks) {
+		session.reset(); sent.clear();
+		offer(new InventoryS2CPacket.Offer(5, trackingPeriod, resyncPeriods, 0));
+		session.accept(snapshot(0, 1, List.of(entry("a", 3L, 1L))));
+		long futureChecksum = checksum(entry("a", 9L, 2L));
+		if (completion) {
+			session.accept(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 2, 6L, List.of(entry("a", 9L, 2L))));
+			session.accept(InventoryS2CPacket.status(EPOCH, 1L, markerId, BASELINE, REVISION, 6L,
+				InventoryS2CPacket.Status.READY, futureChecksum));
+		} else {
+			session.accept(heartbeat(futureChecksum, 6L));
+		}
+		for (int i = 0; i < expectedTicks - 1; i++) session.tick(true);
+		assertTrue(sent.isEmpty(), "a future digest is not a mismatch and waits until " + expectedTicks);
+		assertEquals(WATERMARK, session.tracking(markerId).watermark(), "missing data never fabricates a closed cut");
+		session.tick(true);
+		assertEquals(1, sent.size(), "the incomplete-data gap repairs exactly at " + expectedTicks);
+		if (completion) {
+			session.accept(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 1, 2, 6L, List.of()));
+			assertEquals(6L, session.tracking(markerId).watermark(), "waiting did not cancel the admitted delivery");
+			assertEquals(9L, trackedEntry("a").count());
+		}
+	}
+
+	@Test
+	void zeroCooldownWaitingWindowNeverExpiresAnAdmittedServiceableBaseline() {
+		offer(new InventoryS2CPacket.Offer(5, 3, 0, 0));
+		session.accept(snapshot(0, 2, List.of(entry("a", 3L, 1L))));
+		for (int i = 0; i < 20; i++) session.tick(true);
+		assertFalse(session.tracking(markerId).complete());
+		assertTrue(sent.isEmpty(), "the nine-tick unknown window is not a baseline assembly timeout");
+		session.accept(snapshot(1, 2, List.of(entry("b", 5L, 1L))));
+		assertTrue(session.tracking(markerId).complete());
+		assertEquals(List.of("a", "b"), trackedKeys());
+	}
+
+	@Test
 	void unknownBaselineStreamIsBufferedAndExpiresIntoRepair() {
 		offer();
 		sent.clear();
@@ -951,7 +1059,7 @@ class ClientInventoryTest {
 	}
 
 	@Test
-	void invalidStatusRetainsGreyValuesAndNewerBaselineClears() {
+	void invalidStatusRetainsGreyHistoryUntilNewBaselineCompletes() {
 		commitTwoEntries();
 
 		session.accept(InventoryS2CPacket.status(EPOCH, 1L, markerId, BASELINE, REVISION + 1L, WATERMARK,
@@ -965,8 +1073,14 @@ class ClientInventoryTest {
 			InventoryS2CPacket.Status.READY, 0L));
 
 		ClientInventory.Tracking recovered = session.tracking(markerId);
-		assertFalse(recovered.grey());
-		assertTrue(recovered.entries().isEmpty(), "a recovered baseline clears old values");
+		assertTrue(recovered.grey());
+		assertFalse(recovered.complete());
+		assertEquals(InventoryS2CPacket.Status.INVALID, recovered.status());
+		assertEquals(2, recovered.entries().size(), "history is separate from the cleared transport baseline");
+		session.accept(data(InventoryS2CPacket.Kind.SNAPSHOT, 9L, REVISION + 2L, 0, 1, WATERMARK + 1,
+			List.of(entry("a", 0, 9))));
+		assertTrue(session.tracking(markerId).complete()); assertFalse(session.tracking(markerId).grey());
+		assertEquals(0, session.tracking(markerId).entries().getFirst().count());
 	}
 
 	@Test

@@ -52,9 +52,10 @@ class InventoryObservationSnapshotTest {
 	void highOldCeilingUsesOnlyOwnedInputsAndCompletesThroughActualHandleWithoutRecapture(boolean occupied) {
 		var layout = chestLayout(); int oldCap = 96 * 1024;
 		var settings = InventorySettings.serverDefaults();
+		settings.setPendingMemoryMiB(16);
 		settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(24));
 		settings.setFrameByteMultiplier(java.math.BigDecimal.valueOf(4)); settings.validate();
-		assertEquals(oldCap, settings.effectiveDisplayBytes()); assertEquals(16, settings.getPendingMemoryMiB());
+		assertEquals(oldCap, settings.effectiveDisplayBytes());
 		var reads = new AtomicInteger(); var captures = new AtomicInteger(); var validations = new AtomicInteger(); var slotParses = new AtomicInteger();
 		long amount = 9007199254740993L;
 		var stack = new ItemStack(Items.STONE);
@@ -140,6 +141,32 @@ class InventoryObservationSnapshotTest {
 				if (i > 0) assertNotEquals(snapshot.read(i - 1).key(), item.key());
 			}
 			assertEquals(4, reads.get(), "consumption never reacquires a provider value");
+		}
+	}
+	@Test void synchronousCaptureFreezesBeforeProviderPostchecksAndNeverReturnsARevokedSnapshot() {
+		for (boolean revoke : new boolean[] {false, true}) {
+			var layout = layout(); var stack = new ItemStack(Items.STONE, 7);
+			var mutations = new AtomicInteger();
+			var allowance = new InventoryValidationBudget.Allowance(InventoryValidationBudget.capture(layout, false, false, layout.members().size()));
+			InventoryObservationSnapshot.ResidentReader reader = (index, visitor) -> {
+				stack.setCount(7); var name = Component.literal("slot-" + index); stack.set(DataComponents.CUSTOM_NAME, name);
+				boolean more = visitor.visit(new IPlatformInventoryService.ResidentEntry(new InventoryResidentItem.Stack(stack), 9007199254740993L + index));
+				stack.setCount(0); name.append("-postcheck"); mutations.incrementAndGet();
+				if (revoke) throw new InventorySourceUnavailableException("revoked after synchronous freeze");
+				return more;
+			};
+			if (revoke) {
+				assertThrows(InventorySourceUnavailableException.class, () -> InventoryObservationSnapshot.captureResidents(layout, BlockPos.ZERO,
+					RegistryAccess.EMPTY, display(), InventoryObservationSnapshot.memoryUpperBound(layout, display()), reader, () -> true, allowance));
+				assertEquals(1, mutations.get(), "a failed provider postcheck stops capture without returning partial data");
+			} else try (var snapshot = InventoryObservationSnapshot.captureResidents(layout, BlockPos.ZERO,
+				RegistryAccess.EMPTY, display(), InventoryObservationSnapshot.memoryUpperBound(layout, display()), reader, () -> true, allowance)) {
+				assertEquals(4, mutations.get()); assertEquals(0, stack.getCount());
+				for (int index = 0; index < snapshot.slots(); index++) {
+					var item = snapshot.read(index); assertEquals(9007199254740993L + index, item.count());
+					assertTrue(item.displayJson().contains("slot-" + index)); assertFalse(item.displayJson().contains("postcheck"));
+				}
+			}
 		}
 	}
 	@Test void tighteningReprojectsUnreadFrozenDisplaysSoLaterReadsNeverParseTheOldInput() {

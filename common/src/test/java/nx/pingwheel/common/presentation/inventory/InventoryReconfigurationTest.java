@@ -152,7 +152,9 @@ class InventoryReconfigurationTest {
 			backend = new InventoryBackend(host, new InventoryRuntime((i, cap) -> Optional.of(new Source(i, reads, slots, cap)), 16_000_000, port), 1);
 		}
 		void begin() {
-			settings.getPreview().setPeriodTicks(1000); settings.getTracking().setPeriodTicks(1000);
+			// A ten-tick period keeps the initial size reconciliation before the next sweep.
+			// Tests that need a partial replacement explicitly lower the tracking period.
+			settings.getPreview().setPeriodTicks(10); settings.getTracking().setPeriodTicks(10);
 			backend.handle(A, InventoryC2SPacket.hello(), now, settings);
 			backend.handle(B, InventoryC2SPacket.hello(), now, settings);
 			backend.handle(A, InventoryC2SPacket.open(host.epoch(A), 100, 1, 1, InventoryRuntimeTest.TARGET, BlockFace.NORTH), now, settings);
@@ -560,7 +562,7 @@ class InventoryReconfigurationTest {
 			var marker = f.host.store.allMarkers().getFirst();
 			f.tick();
 			var snapshot = f.host.packets.stream()
-				.filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && marker.id().equals(p.markerId()))
+				.filter(p -> p.completeScan() && !p.entries().isEmpty() && marker.id().equals(p.markerId()))
 				.reduce((a, b) -> b).orElseThrow();
 			assertEquals(5, snapshot.entries().getFirst().count());
 			assertFalse(snapshot.entries().getFirst().fallback());
@@ -638,7 +640,7 @@ class InventoryReconfigurationTest {
 			var marker = f.host.store.allMarkers().getFirst();
 			f.tick();
 			var snapshot = f.host.packets.stream()
-				.filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && marker.id().equals(p.markerId()))
+				.filter(p -> p.completeScan() && !p.entries().isEmpty() && marker.id().equals(p.markerId()))
 				.reduce((a, b) -> b).orElseThrow();
 			assertFalse(snapshot.entries().getFirst().fallback(), "the installed tracking keeps its exact selected identity");
 			assertEquals(1, snapshot.entries().getFirst().count());

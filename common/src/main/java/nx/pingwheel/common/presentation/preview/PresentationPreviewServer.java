@@ -115,10 +115,10 @@ public final class PresentationPreviewServer {
 	}
 	/** Returns consumed capture attempts; the supplied work is debited exactly once. */
 	public int drain(long tick, PresentationAdapter.CaptureBudget work, int remainingCaptures) {
-		return drain(tick, work, remainingCaptures, tick, System.nanoTime());
+		return drain(tick, work, remainingCaptures, tick);
 	}
 	/** The SECTION owner closes the shared presentation cycle after this residual drain. */
-	public int drain(long tick, PresentationAdapter.CaptureBudget work, int remainingCaptures, long cycleId, long nowNanos) {
+	public int drain(long tick, PresentationAdapter.CaptureBudget work, int remainingCaptures, long cycleId) {
 		if (tick < 0 || remainingCaptures < 0) throw new IllegalArgumentException("preview tick budget");
 		int used = 0;
 		boolean eligible = false, waiting = false, delayed = false;
@@ -148,7 +148,7 @@ public final class PresentationPreviewServer {
 			else if (configured < 3) reasons |= Reason.PER_CALL_ALLOWANCE.bit();
 			if (work.remaining() < 3) reasons |= Reason.SOURCE_WORK.bit();
 			if (reasons != 0) {
-				delayed = true; observe(entry.getValue(), player, cycleId, nowNanos, reasons); continue;
+				delayed = true; observe(entry.getValue(), player, cycleId, tick, reasons); continue;
 			}
 			work.scan(); used++;
 			state.nextAdapterTick.put(request.adapterId(), add(tick, Math.max(1, host.intervalTicks(player, request.adapterId()))));
@@ -189,7 +189,7 @@ public final class PresentationPreviewServer {
 		delayState = delayed ? DelayState.DELAYED : eligible ? DelayState.HEALTHY : waiting ? DelayState.NEUTRAL : DelayState.IDLE;
 		return used;
 	}
-	private void observe(Queued pending, UUID player, long cycle, long now, int refused) {
+	private void observe(Queued pending, UUID player, long cycle, long serverTick, int refused) {
 		if (!pending.observed || pending.reasonCycle != cycle) {
 			pending.observed = true; pending.reasonCycle = cycle; pending.reasons = 0;
 		}
@@ -197,7 +197,7 @@ public final class PresentationPreviewServer {
 		if (added == 0) return;
 		boolean first = pending.reasons == 0; pending.reasons |= added;
 		var request = pending.request();
-		try { delays.observe(new DelayEvent(Module.PRESENTATION, cycle, now,
+		try { delays.observe(new DelayEvent(Module.PRESENTATION, cycle, serverTick,
 			new WorkItem("request:" + player + ":" + request.requestId() + ":" + request.adapterId(),
 				"property preview request=" + request.requestId() + " adapter=" + request.adapterId()
 					+ " dimension=" + request.target().dimensionId()), first, added, Quantity.of(Unit.REQUEST_ADAPTER, 1))); }

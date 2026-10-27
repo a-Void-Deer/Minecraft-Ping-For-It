@@ -23,14 +23,18 @@ class ServerInventoryDraftTest {
 	@ParameterizedTest
 	@EnumSource(Field.class)
 	void eachLeafTracksDirtyRevertsAndBuildsAnIndependentPlan(Field field) {
-		var model = loaded(true, EDITABLE);
+		BigDecimal initial = field.isSizeScale() ? field.sizeScale().valueAt(0)
+			: InventoryPerformanceScale.forField(field).finiteValueAt(0);
+		var snapshot = new ServerConfigSnapshot(true, ChannelMode.AUTO, true, 1000, 5, 23,
+			EDITABLE.inventory().with(field, new Value(false, initial)));
+		var model = loaded(true, snapshot);
 		String original = model.inventoryText(field);
 		model.stepInventoryValue(field, true);
 		assertEquals(field.mask(), model.dirtyFields());
 		var plan = model.updatePlan().orElseThrow();
 		assertEquals(field.mask(), plan.changedFields());
-		assertNotEquals(EDITABLE.inventory().value(field), plan.inventory().value(field));
-		assertEquals(EDITABLE.inventory(), model.authoritative().inventory());
+		assertNotEquals(snapshot.inventory().value(field), plan.inventory().value(field));
+		assertEquals(snapshot.inventory(), model.authoritative().inventory());
 		model.setInventoryText(field, original);
 		assertEquals(0, model.dirtyFields());
 		assertEquals(0, model.invalidFieldMask());
@@ -79,11 +83,14 @@ class ServerInventoryDraftTest {
 	@EnumSource(Field.class)
 	void unlimitedLeavesRetainTheirFiniteTextAndCompareModeIndependently(Field field) {
 		if (!field.supportsUnlimited()) return;
-		var model = loaded(true, EDITABLE);
+		var initial = new Value(false, InventoryPerformanceScale.forField(field).finiteValueAt(0));
+		var snapshot = new ServerConfigSnapshot(true, ChannelMode.AUTO, true, 1000, 5, 23,
+			EDITABLE.inventory().with(field, initial));
+		var model = loaded(true, snapshot);
 		String original = model.inventoryText(field);
 		model.toggleInventoryUnlimited(field);
 		assertEquals(original, model.inventoryText(field));
-		assertEquals(new Value(true, EDITABLE.inventory().value(field).value()), model.updatePlan().orElseThrow().inventory().value(field));
+		assertEquals(new Value(true, initial.value()), model.updatePlan().orElseThrow().inventory().value(field));
 		model.stepInventoryValue(field, true);
 		String changed = model.inventoryText(field);
 		model.toggleInventoryUnlimited(field);
@@ -109,7 +116,7 @@ class ServerInventoryDraftTest {
 		assertEquals(Field.PHYSICAL_SLOTS_PER_TICK.mask(), model.invalidFieldMask());
 		model.setInventoryText(Field.PHYSICAL_SLOTS_PER_TICK, "0");
 		assertTrue(model.hasInvalidDraft());
-		model.setInventoryText(Field.PHYSICAL_SLOTS_PER_TICK, "1");
+		model.setInventoryText(Field.PHYSICAL_SLOTS_PER_TICK, "16");
 		model.setInventoryText(Field.TRACKING_HEARTBEAT_PERIODS, "0");
 		assertEquals(0, model.invalidFieldMask());
 		assertEquals(Value.scalar(0), model.updatePlan().orElseThrow().inventory().value(Field.TRACKING_HEARTBEAT_PERIODS));
@@ -128,15 +135,15 @@ class ServerInventoryDraftTest {
 		model.setInventoryText(Field.TRACKING_GLOBAL_BYTE_MULTIPLIER, "16");
 		model.stepInventoryValue(Field.TRACKING_GLOBAL_BYTE_MULTIPLIER, false);
 		assertEquals("15.5", model.inventoryText(Field.TRACKING_GLOBAL_BYTE_MULTIPLIER));
-		model.setInventoryText(Field.PENDING_MEMORY_MIB, "32");
+		model.setInventoryText(Field.PENDING_MEMORY_MIB, "64");
 		model.stepInventoryValue(Field.PENDING_MEMORY_MIB, false);
-		assertEquals("31", model.inventoryText(Field.PENDING_MEMORY_MIB));
+		assertEquals("60", model.inventoryText(Field.PENDING_MEMORY_MIB));
 		model.stepInventoryValue(Field.PENDING_MEMORY_MIB, true);
 		model.stepInventoryValue(Field.PENDING_MEMORY_MIB, true);
-		assertEquals("34", model.inventoryText(Field.PENDING_MEMORY_MIB));
-		model.setInventoryText(Field.PENDING_MEMORY_MIB, "512");
+		assertEquals("72", model.inventoryText(Field.PENDING_MEMORY_MIB));
+		model.setInventoryText(Field.PENDING_MEMORY_MIB, "1024");
 		model.stepInventoryValue(Field.PENDING_MEMORY_MIB, true);
-		assertEquals("512", model.inventoryText(Field.PENDING_MEMORY_MIB));
+		assertEquals("1024", model.inventoryText(Field.PENDING_MEMORY_MIB));
 		assertEquals("4.5", model.inventoryText(Field.PREVIEW_CLIENT_BYTE_MULTIPLIER));
 	}
 

@@ -6,6 +6,7 @@ package nx.pingwheel.common.presentation.inventory.minecraft;
  * These are modeled owned costs, not JVM heap or callback-internal measurements.
  */
 public final class InventoryValidationBudget {
+	public static final Cost NONE = new Cost(0, 0, 0);
 	private static final long O = InventoryItemBudget.OBJECT_BYTES, R = InventoryItemBudget.REFERENCE_BYTES;
 	private InventoryValidationBudget() {}
 
@@ -23,9 +24,13 @@ public final class InventoryValidationBudget {
 		public Cost times(long count) { return new Cost(mul(allocationBytes, count), workspaceBytes, mul(workUnits, count)); }
 	}
 	public static final class Allowance {
-		private final Cost limit;
+		private Cost limit;
 		private long allocation, work, peak;
 		public Allowance(Cost limit) { this.limit = java.util.Objects.requireNonNull(limit); }
+		/** Only the caller holding the additional work and workspace reservation may extend an operation. */
+		public void admitAdditional(Cost admitted) { limit = limit.plus(admitted); }
+		/** A settled synchronous stage cannot carry its refunded headroom into a later reservation. */
+		public void releaseUnusedAdmission() { limit = new Cost(allocation, 0, work); }
 		/** Call before entering the bounded sequence, including its first callback. */
 		public void debit(Cost cost) {
 			long nextAllocation, nextWork;
@@ -88,7 +93,7 @@ public final class InventoryValidationBudget {
 		return methodOwner().times(3 * locals).plus(reflection().times(locals));
 	}
 	/**
-	 * One Vault layout: 2 root/master loads, 2m member loads, m offsets,
+	 * One Vault acquisition: 2 root/master loads, 3m member loads (including the frozen DTO), m offsets,
 	 * two ArrayLists + two immutable copies + boxed counts + Layout. Each load
 	 * includes MinecraftMember/GatedMember; each local includes GatedHandler.
 	 * Reflected calls: 6 fixed (controller twice, isController,width,length,axis),
@@ -96,11 +101,40 @@ public final class InventoryValidationBudget {
 	 */
 	public static Cost vaultLayout(long members) {
 		long bytes = 2 * list(members) + 2 * copy(members) + O + members * (O + O)
-			+ (2 + 2 * members) * (2 * O + 4 * R) + members * (O + 3 * R);
-		return reflection().times(6 + 3 * members).overlap(owned(bytes, 6 + 2 + 2 * members + 3 * members + members + members));
+			+ (2 + 3 * members) * (2 * O + 4 * R) + members * (O + 3 * R);
+		return reflection().times(6 + 3 * members).overlap(owned(bytes, 8 + 10 * members));
 	}
-	/** A revoked topology can grow before equality fails; admit the provider's finite 3*3*9 bound. */
-	private static Cost vaultValidation() { return vaultLayout(81); }
+	/** In-place frozen-layout check: no positions, lists, boxed counts or snapshot DTO are rebuilt. */
+	public static Cost vaultValidation(long members) {
+		long wrappers = (2 + 2 * members) * (2 * O + 4 * R) + members * (O + 3 * R);
+		return reflection().times(6 + 3 * members).overlap(owned(wrappers, 8 + 9 * members));
+	}
+	/** Frozen ordinary member identities: fresh registry, loaded, owner and read gates, no DTO or mapping rebuild. */
+	public static Cost currentMembers(java.util.List<net.minecraft.world.level.block.entity.BlockEntity> members) {
+		long lockable = members.stream().filter(member -> member instanceof net.minecraft.world.level.block.entity.BaseContainerBlockEntity).count();
+		// The original root is checked separately and may occur anywhere in the ordered member list.
+		return owned(8 * (O + 4 * R), 16L * (members.size() + 1)).overlap(locks(lockable == 0 ? 0 : lockable + 1));
+	}
+	/** Native consumeResident: pre/post topology, one cold local classification, and two all-member held gates. No supportsDetachedSlotCapture audit. */
+	public static Cost nativeRead(@org.jetbrains.annotations.Nullable InventorySnapshotLayout layout, boolean provider, boolean vault) {
+		if (layout == null) return classification(1, true);
+		if (vault) return vaultValidation(layout.members().size()).times(2).plus(localClassification(1))
+			.plus(owned((2L * layout.members().size() + 1) * (2 * O + 4 * R), 3L * layout.members().size() + 2));
+		return read(layout, provider, false);
+	}
+	/** Pure pre-resolution profile; selection is by the detached registry ID, never by an unadmitted world getter. */
+	public static Cost resolution(String blockId) {
+		boolean chest = blockId.equals("minecraft:chest") || blockId.equals("minecraft:trapped_chest");
+		boolean vault = blockId.equals("create:item_vault");
+		long members = chest ? 2 : vault ? 81 : InventorySnapshotLayout.MAX_MEMBERS;
+		Cost structure = changedLayoutCopy(members, vault || chest ? members : members * InventorySnapshotLayout.MAX_SEGMENTS_PER_MEMBER)
+			.overlap(fixed(null)).overlap(owned(4096L * (O + 2 * R) + 16 * list(members), 4096 + 32 * members));
+		if (vault) return bookkeeping().plus(structure.overlap(vaultLayout(81).plus(vaultValidation(81).times(3))));
+		if (chest) return bookkeeping().plus(structure.overlap(locks(2)));
+		// Unknown capability internals are external-trusted. Our known wrapper graph and possible native Vault discovery remain owned.
+		return bookkeeping().plus(structure.overlap(locks(members + 1)).overlap(classification(1, true).times(4))
+			.overlap(vaultLayout(81).plus(vaultValidation(81).times(3))));
+	}
 	/** Fixed DTO rebuild: member/segment records, mappings, seen arrays, copies and position set. */
 	public static Cost layoutCopy(InventorySnapshotLayout layout) {
 		long m = layout.members().size(), bytes = list(m) + copy(m) + O + list(2 * m)
@@ -153,9 +187,12 @@ public final class InventoryValidationBudget {
 		Cost dto = vanilla || vault ? changedLayoutCopy(attemptedMembers, attemptedMembers) : layoutCopy(layout);
 		Cost cost = dto.overlap(fixed(layout))
 			.overlap(owned(n * (O + 2 * R) + 8 * list(attemptedMembers), n + 8 * attemptedMembers));
-		if (vault) return cost.overlap(vaultValidation().times(4));
+		// Retain the conservative scope/scratch bound for every provider. The
+		// short-lived scope supplier fits fixed()'s existing closure/wrapper reserve,
+		// including providers that build the scope; declining it does not narrow admission.
+		if (vault) return cost.overlap(vaultLayout(81)).overlap(vaultValidation(m).times(4));
 		return vanilla ? cost : cost.overlap(classification(1, true).times(4))
-			.overlap(changedLayoutCopy(81, 81)).overlap(vaultValidation().times(4));
+			.overlap(changedLayoutCopy(81, 81)).overlap(vaultLayout(81)).overlap(vaultValidation(81).times(4));
 	}
 	/** No layout is still an owned native wrapper/view operation, never a zero grant. */
 	public static Cost layoutlessView() {
@@ -167,7 +204,7 @@ public final class InventoryValidationBudget {
 		// before the returned-layout comparison rejects it. Unknown providers'
 		// callback internals remain external, but this native rebuild is ours.
 		return structure.overlap(classification(1, true).times(4))
-			.overlap(changedLayoutCopy(81, 81)).overlap(vaultValidation().times(4));
+			.overlap(changedLayoutCopy(81, 81)).overlap(vaultLayout(81)).overlap(vaultValidation(81).times(4));
 	}
 	/** Compare callback-returned evidence before touching its expanded members. */
 	public static void requireLayout(InventorySnapshotLayout expected, InventorySnapshotLayout current) {
@@ -179,14 +216,14 @@ public final class InventoryValidationBudget {
 	}
 	public static Cost supported(InventorySnapshotLayout layout, boolean provider, boolean vault) {
 		long m = layout.members().size();
-		if (vault) return vaultValidation().times(2).plus(localClassification(m))
+		if (vault) return vaultValidation(m).times(2).plus(localClassification(m))
 			.plus(owned(m * (3 * O + 7 * R), 2 * m)); // loaded member + gated local in the classification loop
 		return classification(provider ? 1 : m, provider);
 	}
-	/** Both the pre-read capability classification and the resident reader's own validation. */
+	/** Explicit capture only: the all-member supportsDetachedSlotCapture audit plus the resident read. */
 	public static Cost read(InventorySnapshotLayout layout, boolean provider, boolean vault) {
 		Cost cost = supported(layout, provider, vault);
-		if (vault) return cost.plus(vaultValidation()).plus(localClassification(1))
+		if (vault) return cost.plus(vaultValidation(layout.members().size()).times(2)).plus(localClassification(1))
 			.plus(owned((2L * layout.members().size() + 1) * (2 * O + 4 * R), 3L * layout.members().size() + 2));
 		// Native bridges may classify again in readResident, slots and the final
 		// resolved-delegate boundary. Four is the enumerated maximum, not work/unit conversion.

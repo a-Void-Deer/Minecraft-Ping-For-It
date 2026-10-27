@@ -17,6 +17,12 @@ empty `updating` preview is exercised by the stay-open runtime fixtures
 inventoried under [interaction](interaction.md#double-click-danger-and-inventory-stay-open);
 it adds no preview-admission evidence here.
 
+The [patch-only contract](../../architecture/presentation/inventory.md#item-variants-and-component-fallback)
+has test-source assertions inventoried below. Reading those assertions does not
+establish that they passed; the completed integration run and remaining live
+verification gaps are scoped
+[below](#patch-only-identity-and-display-verification-pending).
+
 ## Inventory preview and tracking foundation
 
 The inventory foundation has headless coverage for the preview route and its
@@ -28,11 +34,10 @@ frame rejected on the version-one route; the
 version-one `OPEN` grammar round-trips a native block or an
 uncommitted external candidate with its exact locator, classification and face,
 and rejects a committed external, entity or location target, a wrong protocol
-version, overlong or non-canonical fields, and trailing bytes; an offer's
-positive period values round-trip at their upper bounds
-including `72001` and `Integer.MAX_VALUE`, while zero, out-of-range, and raw
-overlong or noncanonical period encodings are rejected without defaults; the
-offer's effective display and frame budgets round-trip as an exact legal pair,
+version, overlong or non-canonical fields, and trailing bytes. `OFFER` period
+coverage is inventoried under
+[Resynchronization and budget policy verification](#resynchronization-and-budget-policy-verification).
+The offer's effective display and frame budgets round-trip as an exact legal pair,
 while off-grid budgets and a pair without the reserved metadata headroom are
 rejected without defaults, and an effective write rejects a display beyond the
 configured cap and an illegal pair; the whole frame budget includes its header
@@ -50,8 +55,10 @@ indices.
 `InventoryS2CPacketTest`'s sparse-display cases additionally compare a sparse
 display payload with a full-effective resident-patch baseline for stone, an
 ordinary tool and a damaged tool: a native full-map item JSON oracle round-trips
-count one and every effective component; both payloads keep the same item ID,
-label, exact catalog key and entry metadata; the production packet writer emits
+count one and every effective component. The synthetic full-map patch has a
+different native variant key; the wire-size comparison deliberately assigns
+both display payloads the same authoritative selection metadata rather than
+treating their source patches as identical. The production packet writer emits
 exactly its measured encoded size, `readSafe` consumes the complete frame
 without corruption and recovers the same packet and entries, and the sparse
 frame's actual encoded size is smaller than the full baseline. These are
@@ -59,6 +66,9 @@ headless frame-codec assertions over a limited representative sample, not a
 live network or full send-queue/byte-budget measurement; the general packet and
 live-transport boundary remains owned by
 [identity and authority](identity-authority.md#domain-identity-and-authority).
+An additional packet round trip distinguishes an ID-only terminal display from
+unavailable `null`, preserving exact long counts, revisions and selection keys
+without setting the aggregate flag.
 
 `InventoryChecksumsTest` covers the entry checksum model.
 `InventoryStrictDecodeTest` covers the strict version-one `OPEN` grammar on
@@ -78,7 +88,7 @@ accounted once and released by the last request, pending-memory pressure defers
 new client progress until room is released, departed-UUID churn returns to the
 anchored round's retained cost, and an exact long count beyond double precision
 survives publication. `InventoryRuntimeTest` covers the production runtime
-seam: one admitted slot prefix, covering snapshot decode or unsupported live
+seam: one admitted slot prefix, covering adapter snapshot decode or live
 slot reads, charged once against the shared scan allowance and shared by
 preview, duplicate-preview and tracking consumers while
 client and target logical subjects stay independent and finite; a memory defer
@@ -91,7 +101,7 @@ handles once without closing consumers and unrelated work progresses; a
 throwing read or close releases all retained and reserved memory; a live
 scan-allowance reduction preserves already-spent slots and blocks reads or
 selection past the new cap; and zero-allowance provider validation defers after
-the fixed provider-work budget is exhausted. With a snapshot-capable source,
+the fixed provider-work budget is exhausted. With an explicit snapshot adapter,
 preparation captures once and fixes the route independently of the remaining
 slot allowance; a zero remaining slot allowance cannot consume non-empty
 snapshot slots; the frozen slots decode across later periods under a low
@@ -144,7 +154,7 @@ a tighter ceiling mid-pass restarts the walk from the first retained slot, the
 still-referenced encoded page stays charged until its round is released, and
 closing a consumer during a deferred pass leaves no workspace and rejects
 later work. Additional admission tests cover refusal before resolver, lock,
-witness or content callbacks; mapped exact and aggregate witnesses; charged
+witness or content callbacks; mapped exact and aggregate witness helpers; charged
 cursorless blank visits and throwing attempts; attempted capture work remaining
 paid without spending decode-slot allowance; and discovery grants propagated
 through plan lookup and validity checks with attempted-prefix settlement on
@@ -152,7 +162,7 @@ defer or exception. Retained-input reprojection tests refuse before parsing,
 preserve the cursor and exact long count, release temporary workspace, and retry
 after work returns. These synthetic admission seams do not prove ordinary
 native-container serviceability by themselves. Separate native-read wiring tests
-exercise complete single- and double-chest preview, a live selection witness and
+exercise complete single- and double-chest preview, a direct live-witness helper and
 fresh tracking under unchanged default memory, with exact read counts and no
 outstanding reservations. Lazy-consumption tests refuse a read without fresh
 scratch after capture scratch has closed; caller-wiring tests cover shared
@@ -160,8 +170,8 @@ Catalog grants and attempted work settlement without resetting the allowance for
 each item. Exceptional cursorless-prefix tests cover actual attempted visits,
 including blank views and a throwing handoff, for both scanning and selection;
 unobserved legacy callbacks retain their conservative accounting boundary.
-`InventorySourceSnapshotTest` covers the source-access snapshot preparation and
-decode seam headlessly: capture stays lazy until preparation and the prepared
+`InventorySourceSnapshotTest` covers explicit-adapter source-access snapshot
+preparation and decode headlessly: capture stays lazy until preparation and the prepared
 route is fixed for the handle lifetime; explicit atomic-detached evidence
 stays verified across partial and later steps, unknown evidence stays
 eventual, and a real source version remains independent evidence; a zero-slot
@@ -179,8 +189,8 @@ close is idempotent and releases snapshot, source and retained memory even
 when cleanup throws, with fatal errors propagated without stranding resources.
 `InventoryAuthorityOrderTest` covers the production
 admission order before any source read: rate and channel reject first,
-authoritative target-gone precedes source admission, and the witness and
-annotation steps sit inside production dedicated admission before storage with
+authoritative target-gone precedes source admission, and source evidence and
+annotation checks sit inside production dedicated admission before storage with
 no leaked reservation. It also covers the committed lifecycle around that
 order: the tracking sidecar is installed before the first initial publication
 even with no section intents, a committed publication failure cannot retry,
@@ -203,8 +213,8 @@ assembly or the gap timer; a later shared retirement withdraws an earlier
 checked terminal preview before the publisher drains, a cached tracking
 publication defers with zero provider calls and resumes the same baseline when
 budget returns, a tracking restart keeps published completed evidence until a
-fresh accepted result and invalidity fences real frames, and positive `HELLO`
-periods round-trip exactly including their upper bounds. Request-scoped repair
+fresh accepted result and invalidity fences real frames, and legal `HELLO`
+periods round-trip exactly. Request-scoped repair
 tests withhold an earlier encoded preview part, then restore the cumulative
 retained rows at a newer watermark without recapture, renegotiation or a marker;
 cooldown coalescing, waiting for admitted parts, truthful updating/invalid/empty
@@ -215,19 +225,20 @@ encoded data into the real client without resurrecting exact variants. Queue
 refusal with repeated request repair and an independently refused publisher-work
 grant exercise separate contention seams, not live packet loss.
 `InventoryBackendTest` exercises the production
-backend orchestration headlessly: one bounded preview selection creates once
-and the first tracking observation reuses neither the preview snapshot nor its
-count; invalidation, recovery and hard expiry leave marker lifetime untouched
+backend orchestration headlessly: one bounded preview selection creates once,
+seeds the selected retained preview count, and starts a fresh tracking observation
+whose accumulators reuse neither the preview snapshot nor its count;
+invalidation, recovery and hard expiry leave marker lifetime untouched
 and stop probing after the deadline; revoked views purge recipient item queues
 while allowing current-view negotiation controls and preserving the frozen
 audience; identity aggregation is scoped to each observation, and a recipient's
-resync remains isolated from peers; a stale selected item is rejected at one
-bounded witness without an automatic retry; a
-failed prepared create releases its sidecar reservations; an invalid
-preview releases its physical round so unrelated work can progress; positive
-resync periods at the integer maximum stay exact in an existing session; and an
-actual resync at those periods rejects an immediate repeat without overflow. A
-superseded oversized preview selection during a pending cap reconciliation is
+resync remains isolated from peers; item absence does not veto an otherwise
+valid reference or add a creation-time getter, and selection replay creates
+only once; a failed prepared create releases its sidecar reservations; an invalid
+preview releases its physical round so unrelated work can progress. Cooldown
+coverage is inventoried under
+[Resynchronization and budget policy verification](#resynchronization-and-budget-policy-verification).
+A superseded oversized preview selection during a pending cap reconciliation is
 answered with the recorded bounded `REJECT` without consuming the fresh preview
 attempt, so the fresh reference after rebaseline still creates from the same
 preview. Actual identity-refusal fixtures retain the last completed all-ID total
@@ -236,8 +247,21 @@ current offer and a recorded selection outcome after capacity or transport
 returns, without repeating selection or marker creation, and fence old-view or
 disconnected outcomes. Aggregate-display work-refusal cases keep retirement and
 the retained count retryable before constructing the bounded display. Current-view
-control and aggregate-witness cases pass in the recorded focused run; they remain
+control and aggregate-selection cases pass in the recorded focused run; they remain
 headless authority and recording-transport evidence.
+`InventoryPatchIdentityFlowTest` adds backend assertions across preview,
+selected-value bootstrap and the first fresh tracking capture: two exact keys of
+one item ID remain separate rows and selecting either performs no item getter
+and tracks only its count. One key with decorated, ID-only or unavailable display
+forms remains one selectable row with summed authoritative counts; display
+variation does not change selection meaning. Supplying the raw exact key
+instead of the request-scoped opaque reference is rejected. The fixture assembles
+all parts of one completed preview cut without mixing sparse publications, then
+drives tracking to its first complete snapshot within an explicit tick bound.
+The fixture supplies
+pre-frozen stand-in keys and a recording transport that measures real packets;
+it does not exercise native patch encoding, replay frames into the real client,
+or prove a live provider-to-client path.
 `InventoryReconfigurationTest` drives the production cap-change flow headlessly
 through the real backend, publisher, wire and client endpoint: a higher configured
 cap captures and delivers the full retained display; lowering gates item data until
@@ -255,7 +279,12 @@ the default memory limit.
 `InventorySyncPublisherTest` covers the production publisher headlessly: the
 same-recipient per-period SNAPSHOT byte total spans multiple targets, revoke
 and memory defer encode and send nothing, and an indivisible oversized preview
-batch terminates incomplete instead of waiting forever. Retained entry versions
+batch terminates incomplete instead of waiting forever. Its independent
+fragment-budget case retains an admitted large display while sending is
+blocked, then asserts that the identical display payload is sent when the
+allowance rises; scheduling pressure does not strip it. This fixture supplies
+preprojected display text and does not exercise native item projection.
+Retained entry versions
 are owned by object identity and stay charged while any offered, delivered,
 pending or admitted reference remains, so a delivered version survives a gated
 replacement or a group replacement until the group commits, admitted-only
@@ -274,13 +303,13 @@ cases; these are bounded recording-transport seams.
 `InventoryMinecraftSourcesTest` composes the
 production source wrapper with a recording platform view: a same-alias topology
 change invalidates before the cursor continues, a fresh observation recovers
-all slots, snapshot-plan discovery stays lazy without capturing or saving NBT
-and without replacing the live selection witness, an aggregate alias
+all slots, explicit snapshot-plan discovery stays lazy without capturing or saving NBT
+and without replacing the direct live-witness helper, an aggregate alias
 without an explicit member layout keeps the live route, a completed
 double-chest preview withdraws its cross-period encoded batch when the original
-hit half becomes a legal single, normal content changes do not rebase or
-recapture a stable cross-period preview, and terminal evidence detects a
-same-alias same-count snapshot-layout change even when access remains
+hit half becomes a legal single, normal content changes after a completed native
+sweep do not rebase its pending cross-period preview publication, and terminal
+evidence detects a same-alias same-count snapshot-layout change even when access remains
 self-valid. A live catalogue adopts the effective display cap and tightens
 monotonically, snapshot capture adopts the source catalogue ceiling, and an
 effective display cap below the legal minimum is rejected. `SableInventorySourceTest` covers the provider-confirmed external
@@ -302,7 +331,7 @@ a same-sub-level double chest keeps the canonical alias and member-local slots
 without replacing the original external target, release during a contiguous
 capture publishes no atomic snapshot, committed evidence invalidates on point
 relocation or release while a fresh existing recovery recaptures, fresh world
-and membership closures are used across ticks, a partial snapshot rejects a
+and membership closures are used across ticks, a partial native sweep rejects a
 member topology change without a mixed tail, a committed locator refresh keeps
 the binding while a descriptor scope change or released capture is invalid,
 frozen face, lock and loot safety hold for external chest capture, a provider
@@ -312,13 +341,14 @@ metadata-denied indexed step charges its attempt without publishing a zero and
 a fresh handle recovers, an indexed enumeration re-checks each read before
 visiting content, and a mismatched detached candidate or wrong resolver
 binding is rejected before any world read.
-`InventoryMinecraftSnapshotCaptureTest` drives production view validation and
-detached slot capture against bootstrapped vanilla block entities: single- and
-double-chest capture uses resident observations with save/serialization traps,
+`InventoryMinecraftSnapshotCaptureTest` explicitly invokes the bounded capture
+plan and production view validation against bootstrapped vanilla block entities:
+single- and double-chest capture uses resident observations with save/serialization traps,
 preserves the original hit half, member-local slot zero and frozen face order,
 and gates every member before content. Topology loss or final revocation
 publishes no atomic snapshot; ordinary content changes leave an already frozen
-observation unchanged. Unsupported or layout-less providers retain their live
+observation unchanged. This is an explicit whole-capture seam, not the default
+native preview/tracking route. Unsupported or layout-less providers retain their live
 route, while malformed explicit layouts and missing members fail closed.
 `InventoryObservationSnapshotTest` covers immediate freeze before the next
 provider callback, independent authoritative long amounts, empty slots, detached
@@ -368,14 +398,14 @@ rotation invalidates before the cursor continues, and a fresh handle recovers
 the complete twelve-slot sum. `SableInventoryHandoffTest` covers the production
 preview-to-tracking handoff with recording transports: a candidate preview is
 request-scoped without allocating a marker key or provider reference, a valid
-selection materializes once, binds the current physical root, witnesses the
-live item and stores committed tracking with a fresh count, a wrong sub-level,
-root, registry or inactive source rejects before the witness with a single
+selection materializes once, binds the current physical root, seeds committed
+tracking without a content getter and then scans for a fresh count; a wrong sub-level,
+root, registry or inactive source rejects before item data with a single
 release and no store, a tampered owner or face binding rejects before
-validation, witness or annotation, same-registry candidates do not cross-bind
+validation, preview evidence or annotation, same-registry candidates do not cross-bind
 across requests, a selection replay resends the stored result without a second
-materialization, witness or reference, and an invalid source before the first
-tracking publication publishes no quantity while recovery starts a fresh
+materialization, getter or reference, and invalidity after the seed publishes no
+new quantity while recovery starts a fresh
 baseline. `InventoryPresentationTest`,
 `DedicatedDeliveryBoundaryTest` and `ClientDedicatedDeliveryTest` cover the
 dedicated-delivery boundary: the inventory adapter is negotiated and
@@ -384,16 +414,20 @@ section machinery. `InventoryItemCodecTest` and `VanillaInventorySourceTest`
 cover the ordinary-block item codec and source: canonical persistent component
 identity with sorted bounded canonical bytes and digest-collision rejection,
 partial display omission keeping identity without claiming component fallback,
-and safe exact versus unsafe-identity aggregate selection. Additional component
-fidelity and ordinary-item tests compare admitted persistent encodings against
-independent native-codec oracles, including prototype defaults, explicit
-removals, supported tools, equipment and food, nested items and potion-copy
-semantics. `InventoryVanillaComponentCoverageTest` includes eight durable-item
-defaults and a nonempty PROFILE with signed and unsigned properties in its
-native persistent-identity comparisons. `InventoryRegistryContextGuardTest`
+and safe exact versus unsafe-identity aggregate selection.
+`InventoryComponentFidelityTest`, `InventoryVanillaComponentCoverageTest` and the
+ordinary-source, adventure, encoding-admission, native-error, native-text-stack
+and primitive-argument fixtures compare canonical identity with the native
+persistent-patch codec. Native-family controls explicitly restore tool,
+equipment, food and other component values into patches, rather than relying on
+inherited defaults to exercise value encoding. The vanilla coverage also
+includes a nonempty PROFILE with signed and unsigned properties.
+`InventoryRegistryContextGuardTest`
 compares both nonempty enchantment component forms, including stored
 enchantments, with tooltip visibility enabled and disabled against the native
-codec. In the audited native fast path, registry-context and holder guards test
+codec. Its sword control explicitly carries `TOOL`, preserving direct and named
+holder-set coverage under both root and frozen registry contexts. In the audited
+native fast path, registry-context and holder guards test
 unknown providers stopping before callbacks, owner compatibility, unbound holders
 and admitted native lookup shapes; that refusal is not a blanket restriction on
 the generic external-trusted codec route. `InventoryItemFrontGuardTest`'s
@@ -405,15 +439,40 @@ and primitive argument cases cover context admission before map access, capture
 exhaustion, actual component descriptors, a large literal-name exact-identity
 control, native success/error paths and refusal before unsafe numeric callbacks.
 
+`InventoryPatchesTest` has direct assertions for the shared reader: surviving
+equal-default additions and redundant removals, no reconstruction of
+native-normalized entries, unchanged copy-on-write state and backing identity,
+no prototype traversal or value comparison, and reconstruction with independent
+backing and caller-owned mutable values. Array, open-hash and empty native
+backings exercise admission and capacity-read accounting. Unsupported outer
+maps/backings, malformed entries and invalid capacities refuse before the
+visitor; admission and visitor failures propagate unchanged.
+
+`InventoryPatchIdentityTest` compares directly supplied patches with
+`DataComponentPatch.CODEC`, including an exact empty patch whose nonempty digest
+is separate from the item ID and aggregate sentinel. Raw equal-default additions
+and redundant removals stay distinct, native-erased changes stay absent, and
+root count does not change identity. Container, bundle, projectile and food
+conversion cases compare child patch, count, slot and order semantics with the
+native codec. Raw-access traps fence prototype/default reads for both resident
+stack and standalone-patch inputs. These are native encoding seams, not live
+provider or installed-mod evidence.
+Four additional nested-family controls distinguish a truly empty child patch
+from transient-only additions or removals: independent native child and outer
+codecs preserve the present-but-empty `components` envelope, slot/list order and
+each family's native count form. Their canonical identities reflect that saved
+envelope distinction while their ordinary displays agree. Separate root controls
+keep empty and transient-only patches canonically identical.
+
 The generic compatibility, external-context and owned-return-tree cases here
 inventory assertion scope, not an execution log.
-`InventoryGenericComponentCompatibilityTest` compares registered scalar,
-record and map component identities with the full effective native persistent
-map, including a cache-wrapped codec. Its fixtures assert distinct keys for
-different values, equal identity for implicit and explicitly equal defaults,
-override/removal without encoding a shadowed prototype, transient exclusion,
-and refusal before an unregistered codec is invoked. Error-with-partial and
-oversized returned encodings assert aggregate mode without partial canonical
+`InventoryGenericComponentCompatibilityTest` compares registered scalar, record
+and map identities with native persistent-patch encoding, including a
+cache-wrapped codec. It asserts distinct implicit-empty and still-explicit
+equal-default identities, override/removal without prototype encoding, transient
+addition and removal exclusion, and refusal before an unregistered codec runs.
+Error-with-partial and oversized returned encodings assert aggregate mode
+without partial canonical
 identity; a throwing codec case asserts exception propagation and subsequent
 reuse of the capture budget. Server-side display assertions keep exact identity
 while omitting the opaque value with an explicit removal and retaining an
@@ -422,7 +481,7 @@ asserts that display tightening and reinterning retain the exact key without
 re-encoding the resident component; a native encoding-cache hit cannot mask a
 repeat call in that fixture. A real custom `Registry<Integer>` key is resolved
 through two supplied providers with different registered values: each result is
-compared with its provider's native persistent-map oracle, the resulting bytes
+compared with its provider's native encoding oracle, the resulting bytes
 differ, and returning to the first provider reproduces its bytes. These are not
 client decode, working-stack-hook, installed-mod or live tracking cases.
 
@@ -446,46 +505,43 @@ remain owned by
 exercises padding boundaries, sticky digest collisions and map treeification,
 and checks exact/one-short grants and refusal before mutation. SUN-provider
 bootstrap acceptance is exercised on the test JVM, not arbitrary providers or
-JDKs. These finite oracles and the passing named-holder comparisons are not a
+JDKs. These finite oracles and the named-holder comparisons are not a
 whole-root numerical certificate. Native JSON stack-growth tests observe actual
 writer array identities, compare equal-node depth boundaries, and exercise
 pre-call refusal versus exact-allowance native-codec controls.
-`InventoryItemDisplayProjectionTest` covers the configured display cap: a
-configured cap preserves a display beyond the default bound, partial or complete
-display omission preserves identity, and monotone tightening never re-expands
-retained displays. Fitting-envelope and malformed-input cases preserve unavailable
-projection without reconstructing defaults. `InventoryItemUnavailableDisplayTest`
-covers
-nullable projection with unchanged metadata and shared canonical bytes, malformed
-input, bounded aggregate metadata, shulker removals and name aliases.
+`InventoryItemDisplayProjectionTest` supplies configured-cap, unchanged-identity,
+monotone-tightening, fitting-envelope and malformed-input assertions.
+`InventoryPatchIdentityTest` additionally reaches the terminal display through
+actual registered removal patches, compares native identity at high and low
+caps, and retains the same key and terminal display through catalogue tightening,
+a later raise and reinterning. `InventoryItemUnavailableDisplayTest` checks
+terminal reprojection with shared canonical bytes and adjusted retained cost,
+while malformed input remains unavailable. It also covers bounded aggregate
+metadata, shulker removals and name aliases.
 `InventoryDisplayWriterTest` independently exercises retained-input syntax,
 escaped and duplicate component aliases, conflicting removals, unknown
-additions, nested opaque spans, depth and UTF boundaries, suppression overflow,
-and all projection ladder outcomes. The
+additions, nested opaque spans, depth and UTF boundaries, and the ordinary
+projection ladder. Fresh and retained suppression-size overflow assert canonical
+ID-only output. Terminal grammar cases distinguish that exact form from
+whitespace, escaped keys, mismatched or invalid IDs and an ordinary empty
+`components` object; a maximum-length legal ID fits, and repeated reprojection
+at lower or higher caps stays terminal. Nonfinite values, malformed/late invalid
+entries and work-budget refusal do not gain the size-terminal recovery. The
 [item identity and display owner](../../architecture/presentation/inventory.md#item-variants-and-component-fallback)
 defines their separation; no display-only refusal is identity-fold evidence.
 
-Sparse display-default inheritance has named headless assertions in
+Sparse display-default inheritance has headless fixture families in
 `InventoryItemDisplayProjectionTest`, `InventoryGenericComponentCompatibilityTest`
-and `InventoryDisplayWriterTest`. The projection cases assert that unmodified
-ordinary defaults are omitted while the complete server-effective native
-persistent map still supplies canonical identity through an independent oracle;
-the intentional Lore suppression remains; explicit additions and removals
-survive; a native-normalized equal default stays omitted while a source-known
-explicit patch entry that still exists remains transmitted; and one sparse patch
-inherits the server prototype when decoded with the server item defaults and the
-client's local prototype after those client-side defaults change, with the
-fixture restored afterward.
-The generic-compatibility cases assert that an unknown default keeps complete
-identity while its display value is explicitly suppressed; that unmodified
-text, custom NBT and PROFILE defaults stay omitted; that non-empty container,
-bundle, charged-projectile and food-conversion defaults carry sanitized sparse
-child overrides without leaking nested content; and that empty container/bundle
-defaults and food without conversion remain ordinary inherited omissions. The
-writer cases assert fresh and retained sparse-ladder tombstones across
-consecutive tightening, no invented removal for an ordinary uncarried default,
-a cap derived from the actual encoded payload, and suppression of absent
-custom/item names.
+and `InventoryDisplayWriterTest`. Native local-inheritance, explicit-entry and
+ordinary-tombstone assertions distinguish native-normalized omissions from
+surviving equal-default additions. Server default-read traps accompany unknown,
+mutable-text, NBT, PROFILE and nonempty nested-default fixtures: defaults supply
+neither identity input nor synthetic display overrides or unknown-component
+tombstones. Explicit nested container, bundle, projectile and food-conversion
+patches retain sanitized sparse child displays. A local-default-drift fixture
+decodes one sparse patch against different server and client defaults and
+restores the registry afterward. Execution evidence and its limits are scoped
+[below](#patch-only-identity-and-display-verification-pending).
 
 `InventoryDomainCodecTest` covers the closed code-owned inventory observation
 codec: the absolute display envelope round-trips within its bound, a display
@@ -537,9 +593,11 @@ cached render stack; same-id variants stay distinct while identical payloads
 reuse a template without aliasing; transmitted component removals survive the
 retained naming and render stacks; and real vanilla delayed and warmed-inline
 unresolved profile callbacks resolve owned working stacks without changing the
-retained transmitted outer profile, name or display. Nested Lore or shulker
-contents, including defaults materialized by native decoding, suppress unsafe
-icons while supported ordinary nested contents remain. Projectile safety tests
+retained transmitted outer profile, name or display. Explicit nested Lore and
+shulker-content fixtures exercise icon safety while supported ordinary explicit
+nested contents remain. Separate inherited-default assertions below deliberately
+retain local nested values; they do not certify or sanitize those defaults.
+Projectile safety tests
 compare with an independent native-decode callback baseline and prove the guard
 adds no post-decode copied-stack PROFILE callbacks, including repeated cache
 hits. Native nested decode may itself enqueue callbacks; the selected unresolved
@@ -547,9 +605,10 @@ head fixture runs a queued decode callback without resolving its detached
 returned head. These controls do not establish callback-free decoding or general
 asynchronous PROFILE isolation.
 
-Ordinary native-family controls keep supported tool, food, book, firework, banner
-and map icons available on initial resolution and cache reuse, independently of
-the narrower item-hover copier. Working-value mutation fixtures isolate custom
+Ordinary native-family controls exercise tool, food, book, firework, banner and
+map icons on initial resolution and cache reuse, independently of the narrower
+item-hover copier; they do not certify inherited-default isolation.
+Explicit working-value mutation fixtures isolate custom
 name text from both later cache hits and the previously composed name; container,
 bundle, projectile and food-conversion child stacks retain their native encoded
 count semantics while later hits isolate child-stack and nested-text mutations.
@@ -574,8 +633,12 @@ constructor and codec-produced capture against the native constructor's anchor,
 and exercises field-only resident access without invoking a supplier. Its direct
 copy controls isolate resident and hidden effects; unknown counting, throwing and
 other-call-site suppliers refuse with zero callbacks and without source mutation.
-An unknown-default display refusal keeps the accepted exact entry, long count
-and selection reference unchanged. Loader-local test service fixtures supply
+Accepted metadata after explicit-patch refusal is checked by the common client
+fixture below. NeoForge's inherited-FOOD fixture retains the native default
+reference without invoking its unknown supplier, while preserving the exact
+entry, long count and selection reference and using the terminal registry label.
+Loader-local test service
+fixtures supply
 fixed-field resident ports without applying Mixins; these are codec/access and
 ownership seams, not production service wiring, module-runtime or loader-launch
 evidence. They add no permission to execute foreign suppliers.
@@ -592,43 +655,65 @@ spent root allowances refuse with zero collection/hook callbacks in the selected
 fixtures. These are finite native-copy and refusal seams, not general proof of
 effect internals or live effect-icon rendering.
 
-`ClientItemDisplayOpaqueComponentsTest`'s registered opaque-component fixture
-rejects unknown JSON additions before their native value codec runs, while
-allowing an explicit registered removal to suppress a mutable prototype default.
-Decode and cache-hit cases check effective components, including a formerly safe
-cached payload whose item defaults later become opaque; refused snapshots are not
-retained. Unregistered and transient opaque defaults also fail closed. The
-fixture's traps distinguish the guard's value access from comparisons performed
-by a native item hook: the guard adds no opaque-value hashing, encoding or
-comparison in these cases.
+`ClientItemDisplayOpaqueComponentsTest` supplies registered-opaque-component,
+explicit-removal, codec-admission and hook assertions. Unknown explicit JSON
+additions refuse before their native value codec runs, including supported
+nested-item and text-hover entrances. Explicit removals suppress an unknown
+mutable default without comparisons. Conversely, registered, unregistered and
+transient opaque defaults remain inherited across cache hits without codec or
+value-comparison calls; default changes do not invalidate the transmitted-patch
+cache. A common headless default-wrapper fixture traps enumeration and counts
+value reads through resolve and copies. A selected inherited custom name takes
+one native name lookup without probing the lower name or other defaults, through
+resolve, chat and public naming; the terminal skips name lookup. These are native
+selection checks, not default-graph traversal. The fixture is not an installed owo wrapper,
+production Mixin or loader-runtime test.
+
+Inherited Lore and nested container, bundle, projectile and food-conversion
+fixtures assert native reference inheritance without sanitization, owned
+deep-copying or invented patch entries. An explicit projectile still owns its
+child patch while that child inherits an opaque default. These controls are
+specific native-construction seams, not universal default-graph safety claims.
 
 Constructor-hook injections into naming and render stacks, a naming hook that
-mutates its stack, and codec-only naming construction assert refusal after the
-effective component map becomes opaque. The display result is an empty icon and
-the registry label, without publishing the hook-derived name. Pre-decode cases
-include unknown additions inside container, bundle, charged-projectile and food
-conversion items and a custom-name `show_item` text hover; a nested-container
-opaque-default case refuses before native nested-stack hashing.
+mutates its stack, and codec-only naming construction exercise hook-written
+outer-patch refusal seams. Those checks remain required after the patch-only
+transition. The assertions reject opaque hook additions before publishing a
+derived name, check transmitted-patch precedence without losing unrelated
+constructor additions/removals, and suppress ordinary icons when construction or
+naming reintroduces explicit Lore.
 
 Known-value hook fixtures distinguish naming, retained transmission and render
 ownership: an in-place description-hook text edit affects the composed name but
 not the cached patch or render text, and a constructor-supplied mutable item name
-is detached before publication. Codec-only naming controls detach default Lore's
-raw and styled lines without changing its styling; an ordinary adventure-predicate
-control preserves the native predicate while isolating its NBT across cache hits.
-These controls do not authorize Lore in an ordinary icon.
+is detached before publication. An ordinary explicit adventure-predicate control
+preserves the native predicate while isolating its NBT across cache hits.
+The default-Lore fixture instead asserts shared native references and visible
+local mutation, without suppressing the ordinary icon merely for inheritance.
+These controls do not authorize explicit Lore in an ordinary icon.
 
-The per-call validation seam shares finite visit, depth and character allowances
-across JSON, effective component children, native text snapshots and expansion,
-name checks and icon traversal for each resolve, stack decode or name decode.
-A shared native projectile DAG with late unsafe text refuses within an independent
-fixture work envelope through both resolve and the production chat decoder,
-without reaching naming.
-A text-cycle case likewise stays within that envelope. These assertions do not
-require exhaustion of a particular production cap and do not bound native
-callback internals or elapsed time.
+Name-source assertions in `ClientDisplayTextTest` compare all 36 default and
+explicit-name addition/removal combinations with native hover-name precedence
+through resolve, cache reuse, decoded stacks and chat. Separate controls keep
+the terminal on its registry label and distinguish equal-text, different-reference
+names. Public-name and description-hook alias cases in that suite and
+`ClientItemDisplayOpaqueComponentsTest` assert that detaching explicit patch
+values preserves the native selected name's provenance: an inherited higher
+name is not quoted because a lower explicit name aliases it, and a fallback
+`getName` hook cannot retroactively quote a name it just wrote. Returned text is
+owned, caller patch backing and mutable values stay unchanged, and public naming
+adds no load hook or repeated fallback-name call. These assertions are included
+in the completed integration run below.
 
-Effective native text fixtures include custom and item names, raw and styled
+The per-call validation fixtures exercise finite visit, depth and character
+allowances across JSON, native text snapshots and expansion, name checks and icon
+traversal for resolve, stack decode and name decode. Shared native
+projectile-DAG and text-cycle fixtures inject explicit constructor-patch values
+and assert refusal inside an independent work envelope, including production
+chat, without reaching naming in the late-unsafe-DAG case. These finite envelopes
+do not bound native callback internals or elapsed time.
+
+Native text fixtures include custom and item names, raw and styled
 Lore, and raw and filtered written-book pages. They follow translation arguments,
 siblings, selector and NBT separators, `show_text`, `show_entity` names and
 `show_item` children. Hover validation observes the fixed native item descriptor
@@ -637,11 +722,14 @@ the fixtures reject a cached hover stack mutated after the first safe resolution
 a nested JSON hover whose item has an opaque-injecting constructor hook, and a
 deferred hover with an item-load hook without starting that hook. Writable-book
 fixtures reject opaque non-string page shapes without formatting them, while
-supported native text, hover and filtered book values remain available.
+supported native text, hover and filtered book values remain available. Cases
+contrast inherited text with the same value explicitly restored by a hook;
+inherited values remain native while unsafe explicit text refuses. They do not
+establish default-graph validation.
 
-Production item-chat decoder fixtures target name decoding, with immediate
-effective-graph barriers after description lookup and naming, before newly
-introduced text can be formatted or the next hook runs. They reject constructor
+Production item-chat decoder fixtures target name decoding and barriers after
+description lookup and naming, before newly introduced text can be formatted or
+the next hook runs. Explicit-hook and returned-text fixtures reject constructor
 and naming mutations, including injected root text or book pages, contain a
 naming-hook exception, and reject an unsafe returned hover or an unknown
 translation-argument object without formatting it. Normal trusted names retain
@@ -672,15 +760,18 @@ codec or hook internal resource.
 
 Embedded NBT-path controls refuse excessive structure before native path
 recompilation during resident text copying. The opaque-component fixtures exercise
-the same refusal through wire text, prototype defaults, returned names,
-description-hook text and constructor-hook text, including production chat.
+the same refusal through wire text, returned names, description-hook text and
+constructor-hook text, including production chat. The contrasting local-default
+case inherits the native value without applying that traversal to the default.
 
 Embedded-selector SNBT controls in `ClientDisplayTextTest` refuse excessive
 nesting before native selector recompilation in `SelectorContents`, selector-valued
 `ScoreContents` and `EntityDataSource`. The opaque-component fixtures exercise
-those forms through wire text, prototype defaults, returned names and text
+those forms through wire text, returned names and text
 introduced by description, name and load hooks, including resolve, decode and
-production chat entrances. Small native-parser positive controls preserve native
+production chat entrances. Contrasting local defaults retain native references
+and do not acquire Ping graph-validation guarantees.
+Small native-parser positive controls preserve native
 unresolved text for ordinary selector options, quotes/escapes and non-structural
 quoted brackets, including native-ignored trailing suffixes. Separate literal
 score-name and block-data controls retain native text and absolute, relative and
@@ -705,7 +796,12 @@ including explicit false versus inherited flags. Item-hover controls detach
 nested projectile text and Lore from source mutation while preserving native
 Lore styling. A registered mutable-prototype fixture checks that transmitted text
 equal to the prototype remains distinct through resolve and item-hover copying,
-and the hover keeps that text after prototype mutation. Item-hover coverage is
+and the hover keeps that text after prototype mutation. Additional
+`ClientDisplayTextTest` cases preserve raw equal-default additions and explicit
+removals through working and repeated item-hover copies, isolating explicit text
+from prototype, source and earlier-copy mutations. A separate empty-patch case
+keeps inherited text and Lore as native references through repeated hover copies
+and observes later local mutation. Item-hover coverage is
 limited to concrete copier-supported shapes, not deep-copy support for every
 display-supported component. The item-hover snapshot path has no admitted copier
 for nonempty container/bundle graphs, food/effect state, PROFILE and other
@@ -716,12 +812,23 @@ restrictions on supported PROFILE, food, container or bundle values.
 
 A client preview fixture keeps the accepted exact reference, long count and
 selection fences unchanged after display refusal and dispatches that same
-selection. Vanilla positive controls keep supported defaults and custom model
-data in independently owned count-one stacks across repeated resolves; ordinary
-Lore still suppresses only the icon while a safe name remains usable. These are
-finite synchronous fixtures, not a guarantee for every native hook, mod-supplied
+selection. Vanilla positive controls exercise native inherited defaults and
+explicit custom model data in count-one stacks across repeated resolves; owned
+mutable-value assertions apply to explicit patches, not the default graph.
+Explicit Lore still suppresses only the icon while a safe name remains usable.
+These are finite synchronous fixtures, not a guarantee for every native hook, mod-supplied
 text implementation or later asynchronous mutation, and do not exercise installed
 Offroad, GPU rendering or a live game session.
+
+The canonical-terminal cases in `ClientItemDisplayOpaqueComponentsTest` assert
+a count-one native default icon with the registry label, inherited local name,
+Lore and opaque values, an empty retained transmitted patch, repeated cache
+reuse, and no description/name-hook invocation. Name-only decoding and the chat
+decoder decline a terminal-derived item name. A composed inventory-message
+fixture preserves the registry label, exact long count and selection key without
+an item hover. Mismatched identity, malformed/null payloads and explicit opaque
+constructor injection still refuse. These are client resolver and chat seams,
+not a live row or GPU rendering test.
 
 `SpatialInventoryRowDisplayTest`,
 the inventory-bridge cases of `NativeSelectorContentTest`, and
@@ -848,7 +955,7 @@ catalogue guard after a successful freeze does not falsely report an identity
 aggregate. The real-Catalog refusal case in
 `InventoryPublicationIntegrationTest` additionally drives the production
 backend's preview fold: the authoritative long group total survives and the
-retired exact selection is rejected before a new witness or marker creation.
+retired exact selection is rejected before a content read or marker creation.
 That case uses a recording packet host, not client replay or live transport.
 
 `InventoryGenericComponentCompatibilityTest` checks that a codec error retains
@@ -864,13 +971,14 @@ cause of a snapshot limit failure. `ClientItemDisplayOpaqueComponentsTest`
 distinguishes silent safety suppression from a throwing name hook: repeated
 runtime hook failures retain the original cause in one warning without an
 attached throwable and keep display unavailable. Its constructor and native
-decode-context cases keep runtime-failure fallbacks, while a runtime failure
-reading cached defaults also evicts that entry. Linkage failures at those
-boundaries, the reflective render constructor and the name hook propagate to
-the caller without a local fallback report; a propagated cached-default failure
-does not run fallback eviction. These are finite headless codec, snapshot, hook
-and test-appender seams, not installed-mod codecs, live profile callbacks or
-running-loader evidence.
+decode-context cases exercise runtime-failure fallbacks and linkage propagation.
+The cached-construction failure fixture throws from the item's native
+components getter: a runtime failure uses the resolve-stage fallback and evicts
+the cached entry, while a linkage failure propagates without fallback eviction.
+It does not assert Ping traversal or revalidation of inherited defaults.
+These are finite headless codec,
+snapshot, hook and test-appender seams, not installed-mod codecs, live profile
+callbacks or running-loader evidence.
 
 `InventoryMinecraftDiagnosticsTest` checks layout callback messages, causes,
 suppressed details, frames and read context, cross-position warning suppression
@@ -914,8 +1022,14 @@ coverage and logging-deployment limitations are owned by
 `InventoryTrackingRendererTest`
 projects received tracking data into bounded renderer lines: only received tracking data supplies bounded item lines, explicit zero
 is retained, unknown or invalid counts are never synthesized as zero, status
-and grey state stay explicit, and the tracking annotation resolves the shared
-localized name policy rather than the raw label.
+and grey state stay explicit, lifecycle labels and the All variants qualifier
+remain independent even with a long item name, and the tracking annotation
+resolves the shared localized name policy rather than the raw label. Resource
+fixtures for all eight bundled locales preserve full decimal quantities for
+zero, `9007199254740993` and `Long.MAX_VALUE`, with long names, lifecycle labels
+and the aggregate qualifier inside the line bound. Reversed quantity/annotation
+grammar and oversized descriptive phrases have separate controls. These are
+CPU text/projection assertions, not HUD or GPU validation.
 
 Across this foundation, the
 [inventory list interaction](interaction.md#inventory-list-gestures-and-navigation)
@@ -935,11 +1049,488 @@ optional-provider wiring,
 [manual inventory matrix](manual-integration.md#pending-manual-and-integration-matrix)
 remain pending.
 
+## Native incremental sweep coverage
+
+The [native read contract](../../architecture/presentation/inventory.md#native-incremental-reads)
+and [D0013](../../decisions/D0013-native-incremental-inventory-sweeps.md) separate
+mixed-time traversal from explicit adapter snapshots. Earlier whole-capture and
+frozen-content assertions above apply to the explicit capture/adapter seams;
+they do not establish eager capture as the native runtime route.
+
+`InventoryCatalogNativeReadWiringTest` drives the real native source, resident
+freezer, catalogue and shared runtime with bootstrapped native items and
+recording world/provider ports. It covers:
+
+- metadata-only preparation and refusal without fresh per-step scratch, before
+  a getter or eager snapshot discovery;
+- getter-time detachment before provider metadata can reuse mutable resident
+  contents, with post-read revocation still rejecting reads and live witnesses;
+- contiguous typed and legacy steps sharing one cursor, admitted empty-view
+  completion without a getter, charged empty/throwing attempts, finite slot and
+  catalogue capacity, and explicit incomplete rather than invented totals;
+- 540- and 900-slot repeated-item sweeps under unchanged default pending memory,
+  with seven actual physical reads per tick and eleven logical slots per client
+  period, two independently charged consumers, a slower peer replaying the paid
+  prefix without getters, reverse visible/physical mapping, blank slots and
+  authoritative `9007199254740993` amounts;
+- an already-read slot retaining its earlier observation while an unread slot
+  supplies a later value, a direct live absolute-slot witness helper, and a distinct
+  complete first tracking round;
+- replacement handoff and retained completed evidence for a slow peer, memory
+  refusal without cursor advance, unique-definition display tightening without
+  rescanning, and release of retained and reserved state.
+
+The large-display slow-replay case carries more than 20 KiB of native display
+data into a later tick: one-short scratch or work grants defer without advancing
+the cursor, exact grants replay the retained immutable projection without another
+getter, and admitted tightening preserves the earlier immutable value while
+later replay uses the smaller display. The ordinary-container builder case
+constructs a real 4096-slot native view and mapping, rather than injecting an
+already constructed provider layout. It checks pre-resolution refusal, transfer
+of source ownership into retained accounting, and cleanup after read failure,
+restart and close. These are bounded headless ownership/admission fixtures, not
+live large-container or total-heap measurements.
+
+Its backend/client cases pass production-encoded frames through the real client
+session. They exercise updating partial preview followed by ready completion,
+completed empty views, provisional selected display followed by a complete
+fresh tracking result and absence-derived zero,
+retained old totals during replacement, completion-plus-period scheduling and
+hard expiry. Corrective replay and tracking resync preserve scoped sweep
+evidence without recapture; delayed parts still gate client completion, and
+display rebaseline preserves exact identity/counts without restoring stripped
+detail. Actual identity refusal retains aggregate quality through selection and
+resync; getter/capacity failures publish no tracking zero; invalidity or permission
+revocation withdraws queued ready data. Recovery through a generic eventual
+adapter stays uncertain. Default-settings 540/900-slot backend fixtures finish
+preview within their bounded reference lifetime, select without a getter and
+complete a fresh tracking sweep. These deterministic tick assertions are not throughput
+or elapsed-time benchmarks.
+
+Trailing-empty-slot cases withhold an earlier encoded exact or aggregate row,
+then require the final cumulative preview cut to repeat that unchanged row.
+Delayed or reordered earlier data cannot satisfy a missing part of the final
+client barrier, resurrect retired exact references, or cross invalidation.
+Corrective replay preserves the completed rows without recapture, while the
+separate true-empty case still completes with no item getter. These cases drive
+native reads through production bytes into the client session; they do not
+exercise a live transport.
+
+`InventoryStepTest` checks detached contiguous typed pages, absolute bounds,
+empty slots, long amounts, legacy conversion and evidence isolation: conversion
+from a generic result cannot manufacture native sweep evidence.
+`InventorySlotJournalTest` covers chunk growth, separately charged catalogue
+definitions and slot capacity, exact long boundaries, observed empty versus
+zero, hash collisions, prefix preservation on capacity refusal, and shared
+display tightening without changing identity or counts.
+Its allocation fixture retains repeated read results to prevent scalar
+replacement from hiding allocation, and checks that replay of a large display
+allocates fixed observation cells rather than display-sized UTF-8 buffers on
+the test JVM while preserving exact counts. `InventoryDomainCodecTest` retains
+rejection of invalid newly constructed observations; replay does not relax the
+public validation boundary.
+`InventoryCatalogAdmissionTest` independently checks unique retained cost,
+duplicate ownership and monotone display reuse rather than a full encoded
+observation per repeated slot.
+
+`InventorySourceRetentionTest` checks independent owned-graph lower bounds for
+multipart sided mappings and Vault auxiliary state, shared-layout accounting
+without a second descriptor charge, external evidence without retained live
+views, callback-free cached retained-cost queries, and operation-local reacquired
+access. The ordinary-builder fixture above exercises the resulting charge
+through the production runtime's round reservation; these cost-model assertions
+are not measurements of borrowed provider internals or whole-JVM retention.
+
+`InventoryValidationAdmissionTest` covers admission before initial resolution
+and metadata, one cumulative caller allowance through nested validity/read or
+selection-witness callbacks, attempted-prefix settlement on denial/throw, fresh
+operation grants and retained-evidence defer without invalidation. NeoForge's
+`CreateVaultInventoryAccessTest` checks immutable descriptor reuse, in-place
+dynamic member/local-boundary validation, empty-member offsets, a 900-slot final
+member-local address, same-total local-count redistribution, immediate resident
+handoff before metadata reuse, and final all-member revocation. These Vault
+ports do not install Create or run its lifecycle.
+
+`InventorySyncPublisherTest` varies scoped evidence, consistency, completeness,
+known coverage and empty/nonempty payloads for both entry quality and completion
+status. Short coverage and a later generic observation cannot inherit ready
+acceptance; aggregate quality remains distinct.
+Its multipart boundary cases use actual encoded frames with 127, 128 and 256
+parts, exact-cap and one-byte-over entries at early and late indices, and
+reindexing across VarInt widths. A dropped frame triggers checks with the longer
+incomplete status; indivisible oversized entries terminate incomplete rather
+than stranding admitted work. Cumulative completion repeats unchanged aggregates
+and earlier sparse keys under normal queue/wire charging, including a final cut
+with no changed entries. Corrective replay, withdrawal without false empty
+completion, display preservation for fitting entries, and retained/reserved
+release have separate assertions. These are recording-transport framing and
+accounting seams, complementary to the native encoded-client cases above.
+`InventoryPublicationIntegrationTest` separately replays encoded generic eventual
+empty/absence-zero observations as uncertain, while explicit atomic adapter
+snapshots retain ready status through resync. No generic `CaptureResult`
+consistency or wire schema is upgraded by these fixtures.
+
+The native incremental-sweep implementation's recorded full check/build run used
+Java 21, PowerShell, UTF-8, no explicit timeout and redirected stdout/stderr. It completed
+with `BUILD SUCCESSFUL` for:
+
+```powershell
+.\gradlew.bat --no-daemon --console=plain :common:check :fabric:build :forge:build :neoforge:build verifyModIdentity
+```
+
+Its JUnit XML reports record Common 4620, Fabric 24, Forge 26 and NeoForge 174
+tests, 4844 total, with zero failures, errors or skips. That is historical
+evidence for that implementation's inputs, not the later bootstrap tree; the
+[bootstrap run](build-checks.md#preview-seeded-tracking-combined-tree-run)
+records its separate results, including known failures. This documentation
+update inspected existing reports and logs; it did not rerun Gradle.
+Build/artifact evidence limits remain owned by [build checks](build-checks.md).
+Installed Create, live-world updates, multiplayer transport, TPS, GC and heap/elapsed-time
+performance remain pending in the [manual matrix](manual-integration.md#inventory).
+
+## Vault tracking performance evidence
+
+### Deterministic construction, authority and scratch coverage
+
+The earlier flat 900-slot native fixture does not model per-member Vault
+validation and reconstruction. `CreateVaultTrackingPerformanceTest` instead
+drives the real NeoForge segmented provider, common view/source validation,
+native resident freezer, catalogue and shared runtime journal over a legal
+3×3×5 shape: 45 members with 20 local slots each. The slot count represents
+Create's default per-member capacity, not evidence of the user's actual
+`vaultCapacity` setting or Vault shape. World/member ports and block entities are
+headless stand-ins, and resident field access uses a test service instead of
+production Mixins.
+
+Its deterministic assertions cover empty, repeated stone and three mixed explicit
+patch variants, native persistent-codec identity partitions, authoritative totals
+beyond signed-int range, actual physical-ledger charges, no getter during
+preparation or idle evidence checks, same-total local-boundary invalidation before
+tail reads, and zero retained/reserved charges after close. A full sweep reads
+900 slots in 29 pages with exactly one completion, only on the last page, and at
+most 32 physical visits per reading tick. Pages are not network publications.
+
+`InventoryResidentDiscoveryTest` uses isolated defining/context class loaders to
+check first-request discovery, one service across independent requests/scratch,
+first-context rather than defining-loader resources, absent-service Mixin
+fallback, no rediscovery after context changes, and visible initialization
+failure. `PlatformInventoryScopeFactoryTest` and
+`InventoryResidentScopeFactoryTest` check legacy-overload dispatch, one supplier
+invocation for a consuming access, zero invocations when declined, fresh guarded
+delegation, frozen face and dynamic authority, and source member prechecks even
+when no optional scope is constructed.
+
+`InventoryInPlaceSourceContractTest`, `VaultCurrentSourceValidationTest` and
+`VaultInPlaceAccessContractTest` add current route/root/member identity, registry,
+owner/key/lock/loot/removal/load and topology cases. They cover same-shape local
+replacement reading current contents, unsafe native backing refusal before the
+getter, callback-time revocation, immediate freeze before metadata mutation,
+invalidation and fresh-source recovery, shared-peer lifetime and memory release.
+Generic capability replacement still requires rerouting, decorators cannot grant
+the opt-in, and external bindings resolve per operation. Zero/one-short validation
+grants refuse before callbacks or cursor advance; exact native grants admit the
+local audit without a whole-capture audit, and failed attempts remain paid.
+Cached page profiles cover step sizes 0 through 64 as source metadata, not item
+observations or validity results.
+Source-owned profiles/member keys are included in the retained model; retention
+tests check shared-layout/Vault auxiliary charges and callback-free cached cost
+queries. These are finite admission and lifecycle oracles, not heap-retention
+measurements.
+
+`InventoryCanonicalWriterTest` keeps the independent all-tag, sorted-key and
+malformed-UTF byte oracle and adds geometric growth, exact logical-cap/one-over
+refusal, full replacement allocation and cumulative-copy admission.
+`InventoryDisplayWriterTest` checks exact UTF-8 caps across growth, escaped and
+surrogate boundaries, reset after a failed larger ladder pass, retained
+no-rehydration, and work/allocation refusal without a size-terminal exception.
+`InventoryEncodingCostOracleTest` checks empty/JSON/NBT lazy scratch schedules,
+direct scratch debits separate from native event vectors, first-allocation
+refusal, map cardinality, collision-tree splitting and alternating resets.
+`InventoryScratchAllocationTest` covers zero-effect laziness, first-array refusal
+before cure callbacks, ordered ranges across phases/nested planning, and multiple
+native effect families against the persistent-patch oracle. Existing native,
+explicit/default, mutation, cycle/DAG, external-codec and collision fixtures remain
+unrelaxed. These tests do not claim identical acceptance at every processing-budget
+threshold; cumulative adaptive-growth costs are part of the guarded contract.
+
+### Recorded allocation comparison
+
+The saved baseline uses production `188ae241` with harness `a8d36f89`; subsequent
+stages are `095238f8` (resident discovery/lazy scopes), `1d0886b1` (Vault current
+validation/cost profiles) and final `ea0339d2` (on-demand processing scratch).
+SHA-256 and historical Git-blob comparisons confirm that the three harness/support
+files from `a8d36f89` are unchanged at every measured stage. The final source/build
+manifest is tied to the [final combined-tree run](build-checks.md#vault-tracking-performance-combined-tree-run).
+
+All stages used JDK `21.0.12.1+1-LTS`, three warmup operations and five measured
+samples per workload. `ThreadMXBean` measures current-thread allocated bytes,
+not retained memory, total JVM heap or an allocation rate. Each sample uses a
+fresh runtime/consumer over preconstructed native residents. The measured full
+sweep starts after preparation, includes tick advances, page replay and retained
+ledger work, and excludes setup/close. Separate workloads measure fresh-runtime
+admission (not JVM cold start), the second 32-slot page and a completed-evidence
+idle probe. Counters are collected separately from timed samples.
+
+Median allocated bytes for the same prepared 900-slot sweep:
+
+| Contents | Baseline | Resident/lazy scope | Vault validation | Final scratch | Reduction from baseline |
+| --- | --- | --- | --- | --- | --- |
+| Empty | 186928368 | 96408264 | 709136 | 621392 | 99.67% |
+| Repeated | 304761648 | 214241712 | 118464184 | 5688272 | 98.13% |
+| Mixed | 305988176 | 215468072 | 119692104 | 17140424 | 94.40% |
+
+Final full-sweep distributions in allocated bytes:
+
+| Contents | Minimum | Median | Maximum |
+| --- | --- | --- | --- |
+| Empty | 621392 | 621392 | 659584 |
+| Repeated | 5688272 | 5688272 | 5689160 |
+| Mixed | 17140424 | 17140424 | 17150024 |
+
+Final second-page medians are 25688/203544/612360 bytes for empty/repeated/mixed.
+The final idle probe is 4512/4640/4640 bytes minimum/median/maximum for empty,
+and 4512/4512/4512 for repeated and mixed, with no getter. Raw five-sample byte
+and elapsed-time vectors, all workloads' distributions and the four-stage table
+remain in the external `vault-perf-*-manifest.txt`, `vault-perf-p4-final.xml`,
+`vault-perf-p4-final.measurements.log`, `vault-perf-p4-four-stage-comparison.csv`
+and fairness-hash evidence. Elapsed observations include JVM/GC variance and are
+not CPU time, game-tick duration or live throughput guarantees.
+
+For each prepared full sweep, common view/provider-factory calls change from
+1829/1829 to 0/0, and warm resident-service constructions from 2729 to zero.
+Direct adapter-loaded checks change from 1002877 to 584036, and common-loaded
+checks from 420670 to 84134. Full structure checks inferred from controller-check
+counts minus factory calls on the stable successful path change from 7287 to
+5458. Successful factory calls imply segmented/layout/descriptor construction in
+that path; constructors are not directly probed. The final scratch stage leaves
+all validation/getter counters equal to the preceding Vault stage. Reuse eliminates
+reconstruction, not all per-slot member checks; validation still scales with slots
+and members.
+
+The directly inspected feedback copy `feedback_log/pingforit.server.json`
+contains a physical allowance of 32 slots/tick, tracking period 4, target/server
+logical allowances 256/2048, pending memory 256 MiB, and display/frame multipliers
+4; the fixture explicitly reproduces those relevant settings. This ignored
+feedback copy is not automatically loaded as the server configuration, and the
+live active configuration is unknown. At 32 physical slots/tick, 900 visits need
+at least 29 reading-eligible ticks; that allowance does not cap all source-validity
+checks at 32 or prevent idle probes between sweeps. The pending-memory setting is
+not an MB/s allocation throttle, as defined by the
+[configuration owner](../../config/server.md#inventory-policy-object).
+
+The benchmark does not exercise real Create `MinecraftMember` reflection,
+`ServerLevel`/`ServerPlayer` lookups, Mixin/service/bootstrap wiring, backend
+selection, marker creation, publisher, network or a fully populated installed-mod
+registry/provider workload. The reported live 1100 MB/s allocation and 30% CPU
+case was not independently reproduced, and these results neither convert to
+those units nor prove the incident solved. Installed Create/Refined Storage with
+simultaneous import/export, paired real profiling and the remaining
+[manual inventory scenarios](manual-integration.md#inventory) remain pending.
+
+## Preview-seeded tracking coverage
+
+The [handoff and bootstrap contract](../../architecture/presentation/inventory.md#selected-preview-bootstrap)
+and [D0014](../../decisions/D0014-preview-seeded-inventory-tracking.md) have
+headless source-to-encoded-client and publication coverage:
+
+- `InventoryCatalogNativeReadWiringTest` clears the old observed slot before
+  `SELECT`, creates immediately with no additional item getter, then explicitly
+  replaces the seed with a fresh positive, equal or absent/zero result. Its
+  540/900-slot partial-preview cases preserve exact long quantities after preview
+  close while a new sweep starts at slot zero, without an old round or seeded
+  accumulator. Separate cases retain one selected value rather than the native
+  preview catalogue and release unselected payloads on close.
+- Its queued-publication regressions change an actual native chest lock after
+  withholding the seed, then deliver unknown, duplicate and other-valid-preview
+  selections in the same tick. Marker/sidecar, Basic and correlated outcomes
+  stay synchronous, no selection drains queued quantities, and the next normal
+  budgeted tick detects revocation without a content getter. A provider-backed
+  long-count case exercises the same boundary; unchanged-provider and native
+  chest controls progress on the next eligible tick. These tests pass production
+  bytes into the client, then cover seed retirement, fresh zero recovery and
+  expiry without a live world or loader launch.
+- `InventoryBackendTest` distinguishes the current retained exact-key count
+  from the last delivered row, and the current folded-key count from another
+  all-ID subtotal. Missing counts, forged/retired tokens, owner, baseline, state
+  and current-invalidity failures reject without a content read. The patch-flow,
+  authority-order and `SableInventoryHandoffTest` fixtures cover distinct exact
+  identities, current binding, rollback and one materialization/store/outcome
+  under replay. Sable alias/revocation fixtures remain scoped to recording
+  providers, not a live sub-level.
+- Native backend/client cases cover Basic-before-seed delivery, independent
+  recipient baselines without recipient previews, current owner lock/layout
+  checks, display-cap repair without recapture or restored detail, first-scan
+  incomplete history through retry and repair, permanent seed retirement on
+  invalidity through recovery, exact-to-aggregate retirement without a false
+  subtotal, and hard expiry before completion. Complete accepted native results
+  remain ready; generic eventual recovery remains uncertain.
+- `InventoryBootstrapPublicationTest` passes real writer/reader frames into the
+  client session. It separates installed seed baselines from source completion,
+  exercises long exact and aggregate seeds, equal-count explicit replacement,
+  missing/reordered data parts, matching early controls, heartbeat stability,
+  send/memory refusal and release, obsolete queued updating withdrawal, grey
+  incomplete/invalid history through rebase, and recipient isolation. An
+  admitted old seed is withdrawn even if a fresh result was offered before the
+  failure; late incomplete controls cannot downgrade a newer completed result.
+  Actual publisher `READY`/`UNCERTAIN` controls delivered before fresh data leave
+  exact and aggregate seeds visibly updating. Reverse multipart delivery keeps
+  the closed seed, incomplete/invalid history survives early controls and rebase,
+  and failure during first delivery retains the seed rather than a partially
+  applied replacement. Future checksums wait for data; completed controls still
+  refresh an already complete view. Cap reduction strips the closed provisional
+  display and a later increase cannot restore it.
+  The actual publisher's two-entry multipart regression withholds the selected
+  replacement while delivering a different fresh key, then repeats invalidation
+  and recovery controls: only the prior closed seed remains visible until all
+  recovery parts arrive. Direct cases distinguish no history, closed empty,
+  completed and zero-count seed projections; none can acquire an unclosed
+  recovery key through duplicate invalidation or rebase. Reset/removal cleanup
+  and stale invalidation after complete recovery have controls. The two-entry
+  case exercises the supported publication/client contract, not a live
+  single-selected-item incident.
+  Generic partial tracking captures, preview routes and multi-key bootstraps are
+  refused by the narrow publication path.
+- Tracking text projection is inventoried [above](#tracking-projection).
+  Encoded-publisher receipt gating and exactly-once chat coverage are owned by
+  [presentation verification](presentation.md#content-receipt-chat-and-pending-completion).
+
+Results and known baseline failures are recorded in the
+[combined-tree run](build-checks.md#preview-seeded-tracking-combined-tree-run).
+This phase inspected the existing command manifest, logs and JUnit XML rather
+than running Gradle. These runs do not establish live Create/Refined Storage
+behavior, the cause of the reported 900-slot Vault import/export failure,
+live multiplayer, GPU rendering
+or performance. Those remain [manual scenarios](manual-integration.md#inventory).
+
+## Patch-only identity and display verification pending
+
+The [inventory owner](../../architecture/presentation/inventory.md#item-variants-and-component-fallback)
+and [D0012](../../decisions/D0012-explicit-patch-identity-and-display.md) define the
+accepted boundary. The test-source inventory above includes the shared-reader,
+native patch oracle, server projection, client explicit-value/default-inheritance,
+pre-frozen-key backend flow and publisher scheduling assertions.
+
+The completed integration run used Java 21 from PowerShell with UTF-8 output and
+redirected logs. It exited zero with `BUILD SUCCESSFUL` for:
+
+```powershell
+.\gradlew.bat --no-daemon --console=plain --continue :common:test :fabric:test :forge:test :neoforge:test :fabric:build :forge:build :neoforge:build verifyModIdentity
+```
+
+All four modules' main compilation, test compilation and tests executed in that
+run. All 466 JUnit XML reports were fresh, with these results and no errors:
+
+| Module | Tests | Passed | Failed | Skipped |
+| --- | --- | --- | --- | --- |
+| Common | 4554 | 4554 | 0 | 0 |
+| Fabric | 22 | 22 | 0 | 0 |
+| Forge | 25 | 25 | 0 | 0 |
+| NeoForge | 170 | 170 | 0 | 0 |
+| Total | 4771 | 4771 | 0 | 0 |
+
+This includes all five Flow, eleven patch-identity, nine shared-reader, eight
+registry-context, fifty-two opaque-client, twenty-three client-text, eight
+NeoForge food and nineteen content-chat cases. All three loader builds and
+Javadoc tasks completed, and `verifyModIdentity` passed with three shippable jars
+produced. The non-document input manifest stayed unchanged across the run and
+report checks. Whitespace, conflict-marker, new-file and documentation
+link/anchor/fence checks also passed. Build and artifact evidence boundaries
+remain owned by [build checks](build-checks.md); pending verification here is
+the live behavior described below.
+
+Separately, an isolated `OwoDerivedComponentMapProbe` passed with the real
+`DerivedComponentMap` class: its CodeSource resolved to the installed
+`owo-lib-neoforge-0.12.15.6-beta.1+1.21.jar`. Direct `javac` and `java` invocations
+both exited zero, with `PROBE_RESULT=PASS`, using a classpath derived from the
+Gradle test worker. For stone and cooked porkchop, an exact native
+`PatchedDataComponentMap` with the real owo wrapper as its prototype produced
+the same canonical identity and display as an unwrapped same-patch control,
+matching the independent native persistent-patch codec oracle. Cases included
+explicit additions, an equal-default addition, removals and an empty patch;
+manually seeded differing wrapper name/food values stayed outside projection.
+Supplying the wrapper directly as the outer map was correctly refused.
+
+That probe passed against the final compiled Common main and test classes from
+the successful integration run. It manually
+constructed the post-Mixin map shape and seeded the wrapper delegate without
+calling `derive`; it did not apply Item/ItemStack Mixins, start FML, or exercise
+client naming, rendering or networking. It establishes the real jar class's
+prototype shape against those final classes, not automatic mod wiring or
+client behavior. No Gradle invocation or game session formed part of the
+probe.
+
+The native oracle, pre-frozen-key backend flow, wire round trip and client
+resolver fixtures are complementary seams, not one native-container-to-live-row
+test. The publisher budget fixture starts from preprojected data, and the client
+wrapper fixture models a local default map rather than installing owo; the
+separate real-jar probe has only the baseline and construction scope above.
+Automatic Mixins, live installed-mod behavior, loader lifecycle, default drift across real
+installations, delayed transport, GUI rows, tracking HUD and GPU behavior remain
+outside that source evidence. Live scenarios remain in the
+[manual matrix](manual-integration.md#inventory).
+
+## Resynchronization and budget policy verification
+
+The revised
+[resynchronization](../../architecture/presentation/inventory.md#tracking) and
+[budget policy](../../architecture/presentation/inventory.md#budgets-queues-and-memory)
+contracts have passing headless evidence in the
+[combined-tree run](build-checks.md#server-performance-combined-tree-run):
+
+- `InventoryS2CPacketTest` round-trips legal periods and zero cooldown in the
+  unchanged `OFFER` shape and rejects out-of-range, overlong or noncanonical
+  encodings without defaults. Configuration and
+  strict administration-wire evidence is inventoried in
+  [configuration verification](configuration-ui.md#server-performance-contract-verification).
+- `InventoryBackendTest` exercises positive cooldown refusing repair just before
+  its deadline and accepting it at the deadline, zero and maximum cooldown
+  negotiation/live refresh, and positive-to-zero changes for
+  preview and tracked-Ping repair. An old deadline cannot block zero, and
+  completed repair can run again in the same tick; pending requests still
+  coalesce and an admitted blocked baseline resumes rather than restarts.
+  `InventoryPreviewServerTest` separately exercises same-tick zero repair
+  without recapture and an admitted sweep continuing through resync.
+- `ClientInventoryTest` exercises the same positive-to-zero deadline bypass and
+  same-tick repair behavior. Unknown-baseline expiry, incomplete completion
+  gaps and future-heartbeat gaps wait through the tick before expiry and request
+  repair at the boundary, with separate cases for each dominant term of the
+  common waiting window (8-, 9- and 15-tick windows). A short positive retry
+  cooldown is independent of the waiting floor; an admitted serviceable multipart
+  baseline remains completable
+  beyond that window. These are finite deterministic scenarios, not a live-load
+  starvation guarantee.
+- `InventoryMemoryBudgetIntegrationTest` drives the production runtime ledger
+  with a simulated 3 GiB retained ticket under the 4 GiB unlimited guard, beyond
+  signed-int byte range. Unlimited mode retains its saved finite value, admits
+  up to its finite guard and refuses one byte more. Lowering the cap updates the
+  existing ledger without deleting
+  live charges: preview and tracking defer before resolver, validation or read
+  callbacks, and releasing the ticket lets both share one physical read without
+  raising the cap. Cleanup releases retained/reserved costs. The large tickets
+  model accounting only; no correspondingly large data is allocated or measured.
+- `InventorySettingsTest` checks that the separate server-wide tracking-slot
+  unlimited guard does not widen the other count guards and that memory mode
+  conversion retains its finite value.
+
+Earlier test/build records on this page retain their original input scope; the
+linked combined-tree run supplies evidence for these revised seams. Live timing
+and multiplayer repair remain pending in the
+[manual matrix](manual-integration.md#inventory).
+
 ## Known automated gaps
 
+- the [final performance run](build-checks.md#vault-tracking-performance-combined-tree-run)
+  is not fully green: notification-timing failures also reproduce on the
+  unmodified baseline. Focused bootstrap coverage does not resolve that mismatch
+  or prove that all reported installed-container selection failures are fixed;
+- the revised timing and memory-admission seams
+  [passed the combined-tree run](#resynchronization-and-budget-policy-verification),
+  but active selected-variant capacity across period boundaries has no dedicated
+  regression; simulated large memory tickets do not measure actual heap usage;
 - the inventory preview-foundation, production runtime and publication tests
-  cover per-client/target logical progress, snapshot preparation/capture and
-  cross-period decode, accepted barriers, the tracking closed-watermark
+  cover per-client/target logical progress, explicit snapshot preparation/capture
+  and cross-period decode, native cross-tick reads and journal replay, accepted
+  barriers, the tracking closed-watermark
   barrier, production selection admission order and publisher recovery/repair
   seams. Native input/HUD, live-world-backed provider safety, installed
   optional-provider wiring and live transport still require their own
@@ -952,10 +1543,13 @@ remain pending.
   count-overflow case, broker and legacy preview-server branches lack
   direct log-event assertions. Test appenders do not establish production
   file-appender delivery or low-frequency behavior in a prolonged live soak;
-- default-cap capture, live selection and fresh tracking have headless native
-  seam evidence. For the audited native fast path, independent review establishes
-  the composed root/native/Catalog/caller allocation and work bounds within the
-  versioned static source-event model and reviewed finite guards. Its closed
+- default-cap capture, preview-seeded selection and fresh tracking have headless native
+  seam evidence. Previously recorded independent review of the audited native
+  fast path establishes the composed root/native/Catalog/caller allocation and
+  work bounds for its reviewed inputs within the versioned static source-event
+  model and finite guards. That review must not be extended to later scratch
+  edits by inference; the final scratch-stage reviewer results are not recorded
+  by this documentation update. Its closed
   component certificates do not certify the generic external-trusted codec route.
   Cursorless attempted-prefix, symbolic lock-certificate and native JSON
   stack-boundary tests exercise those finite seams, not whole-JVM certification.
@@ -969,9 +1563,11 @@ remain pending.
   returned-tree fixtures cannot establish a universal bound on those internals;
 - generic registered-component compatibility, external-context and owned-tree
   assertions do not establish installed Offroad or other mod runtime
-  compatibility, or live preview-to-tracking identity fidelity. The client
-  opaque-default, hook and text-snapshot fixtures remain local seams, not safety
-  guarantees for arbitrary hooks or asynchronous component mutation;
+  compatibility, or live preview-to-tracking identity fidelity. The
+  [patch-only transition](#patch-only-identity-and-display-verification-pending)
+  passed the complete integration run. Client hook and explicit-value
+  text-snapshot fixtures remain local seams, not safety guarantees for arbitrary
+  hooks, inherited defaults or asynchronous component mutation;
 - isolated named-host Mixin probes cover the selected raw ports on captured
   Common, Fabric and NeoForge compiled inputs, with Forge registry/builder reads
   and all-profile exported getter-body checks; separate RGB overwrite probes
@@ -981,16 +1577,19 @@ remain pending.
   transformation ordering and shipped intermediary/SRG runtime remain outside
   that isolated-host evidence; compilation and field-port tests do not close
   those gaps;
-- inventory ordering/freezing, frozen snapshot continuity after ordinary
-  content changes, empty-snapshot completion, explicit zero versus unknown,
+- inventory ordering/freezing, explicit snapshot continuity after ordinary
+  content changes, native mixed-time sweeps, empty-view completion, explicit zero
+  versus unknown,
   per-key revisions, client barriers and publisher recovery/repair have
   headless and production-seam evidence above, not live execution.
   Per-Ping/recipient baseline and resynchronization isolation are exercised at
-  the production seam, and detached double-chest/cross-period preview,
+  the production seam, and explicit detached double-chest capture, native
+  cross-period preview,
   same-alias layout-change, restart/retirement and evidence-admission seams are
-  covered by the tests above. The unknown-baseline window has a headless
-  expiry/delete/RESYNC seam but no per-tick no-early-expiry proof or live
-  roundtrip; the publisher's cross-target period accounting is headless for
+  covered by the tests above. The unknown-baseline window has headless
+  before/at-boundary expiry and RESYNC evidence for each dominant waiting term,
+  not a live roundtrip; the publisher's cross-target period accounting is headless
+  for
   SNAPSHOT bytes only; the zero-heartbeat publication seam exercises watermark
   and repair without asserting the absence of a periodic HEARTBEAT. A maximum
   legal display value through the production server identity catalogue and its
@@ -999,8 +1598,9 @@ remain pending.
   long sums and retained request repair have encoded-frame/client seam evidence,
   not live execution. Variant quotas, a real provider resolver and
   recovery-probe expiry, the hard stop at Ping expiry, a fresh capture after
-  ordinary single- or double-chest contents change, a multi-period
-  low-consumption quota completing stably, a real mod-provided bounded
+  ordinary single- or double-chest contents change in a live world, a multi-period
+  low-consumption quota completing stably under live load, a real mod-provided
+  bounded
   multi-member extractor or installed multi-member Create Vault, live-world safety
   invalidation and recovery, live-source failure diagnostics, and real
   world, multiplayer, tick-order and GPU execution remain manual/integration
@@ -1015,21 +1615,23 @@ remain pending.
   create PROFILE callbacks before icon eligibility is known; selected detached
   nested-head and ordinary mutable-value controls do not establish callback-free
   decode or general asynchronous PROFILE isolation. Opaque-component,
-  parser-admission and text/working-stack fixtures cover specific default,
-  native-text-child, expansion/cache, isolation and hook boundaries, not arbitrary
+  parser-admission and text/working-stack fixtures cover specific explicit-value,
+  returned-text, expansion/cache, isolation and hook boundaries, not arbitrary
   mod codec/hook internals, every mod-supplied text implementation or universal
   deep copying of known component hovers. Real FML/GLFW lifecycle, GPU rendering,
   language hot reload and asynchronous mutation after validation remain outside
   these seams;
-- sparse display-default assertions are headless codec, decode, projection and
-  writer seams, with a limited representative sample of actual inventory-frame
-  wire sizes through the production writer and reader. They do not exercise a
+- sparse display-default fixture families are headless codec, decode, projection
+  and writer seams, with a limited representative sample of actual inventory-frame
+  wire sizes through the production writer and reader. Patch-only and terminal
+  assertions passed the integration run scoped above. These fixture
+  families do not exercise a
   live GUI row, an installed mod's local item defaults, client/server default
   drift across real installations, asynchronous component mutation, multiplayer
   transport or transport timing; the full send-queue and byte-budget path
   remains manual/integration evidence;
 - the provider-confirmed external inventory source against a live Sable runtime
   and world: live membership and sub-level checks, a real provider layout or
-  capability, member-gate revocation between operations, a live item witness
+  capability, member-gate revocation between operations, getter-free selection
   and the preview-to-tracking handoff, and inventory reads on the three
   supported loaders;

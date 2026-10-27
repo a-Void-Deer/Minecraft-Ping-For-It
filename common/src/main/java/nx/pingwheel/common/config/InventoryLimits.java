@@ -4,18 +4,14 @@ package nx.pingwheel.common.config;
  * Code-owned engineering bounds and wire-byte bases for the authoritative
  * inventory budget model in {@link InventorySettings}.
  *
- * <p>These constants are implementation values, not a second product
- * catalogue. Product ranges that the settings UI and documentation own are the
- * multiplier grids in {@link ByteMultiplierGrid} and the two size scales in
- * {@link InventorySizeScale}, the finite memory range and the heartbeat range;
- * the guards below exist only so an explicit unlimited mode can never become
- * {@code Integer.MAX_VALUE} arithmetic, an unbounded array or an unbounded
- * work loop.
+ * <p>Finite configured ranges apply to files and remote updates alike; UI
+ * adjustment steps do not restrict legal integers within those ranges.
+ * Unlimited guards are separate engineering bounds, never numeric sentinels.
  */
 public final class InventoryLimits {
 
 	/** Default shared physical scan allowance in slots per tick. */
-	public static final int DEFAULT_PHYSICAL_SLOTS_PER_TICK = 1024;
+	public static final int DEFAULT_PHYSICAL_SLOTS_PER_TICK = 256;
 
 	/**
 	 * Finite hard guard used when the physical scan cap is in explicit
@@ -29,6 +25,8 @@ public final class InventoryLimits {
 	 * unlimited collection never loses its finite structural bound.
 	 */
 	public static final int INTERNAL_COUNT_LIMIT_GUARD = 1_048_576;
+	/** Tracking server-wide slots have their own guard, not the shared collection guard. */
+	public static final int INTERNAL_TRACKING_SERVER_SLOT_GUARD = 1 << 30;
 
 	/**
 	 * Finite hard guard used when a send-byte multiplier is in explicit
@@ -40,17 +38,27 @@ public final class InventoryLimits {
 	/** A finite cap is always positive; zero is not a disable sentinel for these caps. */
 	public static final int MIN_FINITE_LIMIT = 1;
 
-	/** Default server-wide pending-memory bound in MiB; finite only. */
-	public static final int DEFAULT_PENDING_MEMORY_MIB = 16;
-	public static final int MIN_PENDING_MEMORY_MIB = 1;
-	public static final int MAX_PENDING_MEMORY_MIB = 512;
+	/** Finite configured slot and ordinary variant-count range. */
+	public static final int MIN_ORDINARY_COUNT = 16;
+	public static final int MAX_ORDINARY_COUNT = 1024;
+	public static final int MAX_PREVIEW_TARGETS_PER_CLIENT = 8;
+	public static final int MAX_TRACKING_VARIANTS_PER_TARGET = 32;
+	public static final int MIN_TRACKING_SLOTS_SERVER = 128;
+	public static final int MAX_TRACKING_SLOTS_SERVER = 16384;
 
-	/** Shared period bound for preview and tracking; matches the established interval bound. */
+	/** Default server-wide pending-memory bound in MiB; explicit unlimited stays finite. */
+	public static final int DEFAULT_PENDING_MEMORY_MIB = 64;
+	public static final int MIN_PENDING_MEMORY_MIB = 16;
+	public static final int MAX_PENDING_MEMORY_MIB = 1024;
+	public static final int INTERNAL_PENDING_MEMORY_MIB_GUARD = 4096;
+
+	/** Finite accounting periods shared by preview and tracking. */
 	public static final int MIN_PERIOD_TICKS = 1;
-	public static final int MAX_PERIOD_TICKS = 72000;
+	public static final int MAX_PERIOD_TICKS = 10;
 
-	/** Resynchronization cooldown stays positive and has no unlimited mode. */
-	public static final int MIN_RESYNC_PERIODS = 1;
+	/** Zero skips the resynchronization cooldown check; no unlimited mode. */
+	public static final int MIN_RESYNC_PERIODS = 0;
+	public static final int MAX_RESYNC_PERIODS = 10;
 
 	/** Heartbeat periods: zero is the explicit "disabled" value, not an unlimited sentinel. */
 	public static final int MIN_HEARTBEAT_PERIODS = 0;

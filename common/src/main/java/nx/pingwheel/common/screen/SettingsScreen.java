@@ -47,6 +47,7 @@ import nx.pingwheel.common.screen.SettingsCategoryCatalog.Setting;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Category;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Page;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Scope;
+import org.jetbrains.annotations.Nullable;
 
 import java.lang.ref.WeakReference;
 import java.math.BigDecimal;
@@ -98,7 +99,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	private boolean suppressSaveOnClose;
 	private boolean sizeSliderEditPending;
 	private final InventorySizeOption.AdjustmentState sizeSliderAdjustment = new InventorySizeOption.AdjustmentState();
-	private MutableComponent serverValidationMessage;
+	private @Nullable MutableComponent serverValidationMessage;
 
 	private final ServerPresentationPolicyState.ChangeListener presentationPolicyListener =
 		this::onPresentationPolicyChanged;
@@ -1684,46 +1685,14 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void addServerInventoryRow(Setting setting) {
-		final Field inventoryField = setting.inventoryField();
+		final Field inventoryField = java.util.Objects.requireNonNull(setting.inventoryField());
 		if (inventoryField.isSizeScale()) {
 			this.addServerSizeScaleSlider(setting);
 			return;
 		}
-		final String key = setting.id();
-		this.flushPendingHalfWidthRow();
-		final var label = new StringWidget(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH,
-			SettingsScreenLayout.ROW_HEIGHT, LanguageUtils.settings(key).get(), this.font).alignLeft();
-		label.active = false;
-		final Component tooltip = LanguageUtils.settings(key).path("tooltip").get().append("\n")
-			.append(LanguageUtils.settings("inventory.range").get(
-				inventoryField.isMultiplier() ? inventoryField.grid().minimum().toPlainString() : inventoryField.minimum(),
-				inventoryField.isMultiplier() ? inventoryField.grid().maximum().toPlainString() : inventoryField.maximum()));
-		label.setTooltip(Tooltip.create(tooltip));
-		this.settingsList.addSmall(label, null);
-
-		final EditBox field = this.createServerNumericField(this.serverSettings.inventoryText(inventoryField),
-			text -> this.serverSettings.setInventoryText(inventoryField, text), key + ".tooltip", key,
-			inventoryField.isMultiplier());
-		field.setEditable(this.serverSettings.canEdit());
-		field.active = this.serverSettings.canEdit();
-		field.setTooltip(Tooltip.create(tooltip));
-		this.addHalfWidth(key, field);
-		if (inventoryField.supportsUnlimited()) {
-			final var mode = Button.builder(this.inventoryLimitMode(inventoryField), clicked -> {
-				this.serverValidationMessage = null;
-				this.serverSettings.toggleInventoryUnlimited(inventoryField);
-				clicked.setMessage(this.inventoryLimitMode(inventoryField));
-			}).bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT).build();
-			mode.active = this.serverSettings.canEdit();
-			mode.setTooltip(Tooltip.create(LanguageUtils.settings("inventory.mode.tooltip").get()));
-			this.addHalfWidth(key + ".mode", mode);
-		} else {
-			this.flushPendingHalfWidthRow();
-		}
-		if (inventoryField.isMultiplier() || inventoryField == Field.PENDING_MEMORY_MIB) {
-			this.addInventoryStepButton(setting, field, false);
-			this.addInventoryStepButton(setting, field, true);
-		}
+		final var slider = InventoryPerformanceOption.slider(LanguageUtils.settings(setting.id()),
+			inventoryField, this.serverSettings, () -> this.serverValidationMessage = null);
+		this.addFullWidth(setting.id(), slider);
 	}
 
 	/**
@@ -1778,23 +1747,6 @@ public class SettingsScreen extends OptionsSubScreen {
 			this.font).alignLeft();
 		notice.active = false;
 		this.settingsList.addSmall(notice, null);
-	}
-
-	private Component inventoryLimitMode(Field field) {
-		return LanguageUtils.settings(this.serverSettings.inventoryUnlimited(field)
-			? "inventory.unlimited" : "inventory.finite").get();
-	}
-
-	private void addInventoryStepButton(Setting setting, EditBox field, boolean forward) {
-		String direction = forward ? "increase" : "decrease";
-		final var button = Button.builder(LanguageUtils.settings("inventory." + direction).get(), clicked -> {
-			this.serverValidationMessage = null;
-			this.serverSettings.stepInventoryValue(setting.inventoryField(), forward);
-			field.setValue(this.serverSettings.inventoryText(setting.inventoryField()));
-		}).bounds(0, 0, SettingsScreenLayout.SMALL_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT).build();
-		button.active = this.serverSettings.canEdit();
-		button.setTooltip(Tooltip.create(LanguageUtils.settings(setting.id()).get()));
-		this.addHalfWidth(setting.id() + "." + direction, button);
 	}
 
 	private void addServerStatus() {

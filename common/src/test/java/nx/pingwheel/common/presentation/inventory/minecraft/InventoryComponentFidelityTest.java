@@ -46,7 +46,7 @@ class InventoryComponentFidelityTest {
 		var frozen = freeze(stack);
 		assertEquals(InventoryIdentityMode.EXACT, frozen.identityMode());
 		var nbtOps = registries.createSerializationContext(NbtOps.INSTANCE);
-		Tag nativeMap = DataComponentMap.CODEC.encodeStart(nbtOps, stack.getComponents()).result().orElseThrow();
+		Tag nativeMap = net.minecraft.core.component.DataComponentPatch.CODEC.encodeStart(nbtOps, ((net.minecraft.core.component.PatchedDataComponentMap) stack.getComponents()).asPatch()).result().orElseThrow();
 		assertArrayEquals(InventoryItemCodec.canonicalTag(nativeMap), frozen.canonicalForCatalog());
 		var jsonOps = nbtOps.withParent(JsonOps.INSTANCE);
 		var nativeValue = originalCodec(type).encodeStart(jsonOps, value).result().orElseThrow();

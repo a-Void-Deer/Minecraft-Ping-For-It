@@ -7,20 +7,27 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
 import com.google.gson.internal.LazilyParsedNumber;
 import net.minecraft.resources.ResourceLocation;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import nx.pingwheel.common.config.InventoryLimits;
 
-/** Owned display data only. A null projection means suppression cannot be represented safely. */
+/** Owned display data only. Null is unavailable; size exhaustion has a distinct ID-only terminal. */
+@NotNullByDefault
 public final class InventoryDisplayWriter {
 
 	private static final int DEPTH = 48;
+	// A structural-work refusal remains unavailable, not a size terminal. This
+	// admits native primitive-array JSON expansions beyond the resident node cap.
+	private static final int VALIDATION_NODES = InventoryLimits.MAX_DISPLAY_BYTES;
 	private static final String LORE = "minecraft:lore";
 	private static final String CONTAINER = "minecraft:container";
 	private static final String CUSTOM_NAME = "minecraft:custom_name";
 	private static final String ITEM_NAME = "minecraft:item_name";
 	// Sorted, closed persistent component grammar. Unknown removals remain legal;
 	// an unknown addition is not permission to decode a resident component codec.
-	private static final String[] COMPONENTS = {
+	private static final String @Unmodifiable [] COMPONENTS = {
 		"attribute_modifiers", "banner_patterns", "base_color", "bees", "block_entity_data", "block_state",
 		"bucket_entity_data", "bundle_contents", "can_break", "can_place_on", "charged_projectiles", "container",
 		"container_loot", "custom_data", "custom_model_data", "custom_name", "damage", "debug_stick_state",
@@ -31,7 +38,7 @@ public final class InventoryDisplayWriter {
 		"pot_decorations", "potion_contents", "profile", "rarity", "recipes", "repair_cost", "stored_enchantments",
 		"suspicious_stew_effects", "tool", "trim", "unbreakable", "writable_book_content", "written_book_content"
 	};
-	private static final Set<String> SHULKERS = Set.of("minecraft:shulker_box", "minecraft:white_shulker_box",
+	private static final @Unmodifiable Set<String> SHULKERS = Set.of("minecraft:shulker_box", "minecraft:white_shulker_box",
 		"minecraft:orange_shulker_box", "minecraft:magenta_shulker_box", "minecraft:light_blue_shulker_box",
 		"minecraft:yellow_shulker_box", "minecraft:lime_shulker_box", "minecraft:pink_shulker_box",
 		"minecraft:gray_shulker_box", "minecraft:light_gray_shulker_box", "minecraft:cyan_shulker_box",
@@ -40,7 +47,7 @@ public final class InventoryDisplayWriter {
 
 	private InventoryDisplayWriter() {}
 	/** Closed display-addition grammar only; performs no registry or codec access. */
-	public static boolean supportsComponent(ResourceLocation id) {
+	public static boolean supportsComponent(@Nullable ResourceLocation id) {
 		return id != null && id.getNamespace().equals("minecraft") && known(id.getPath());
 	}
 	static boolean shulker(String id) { return SHULKERS.contains(id); }
@@ -48,6 +55,17 @@ public final class InventoryDisplayWriter {
 	static boolean lore(String key) { return LORE.equals(key); }
 	static boolean container(String key, String itemId) { return CONTAINER.equals(key) && shulker(itemId); }
 	static boolean forcedSuppression(String key, String itemId) { return lore(key) || container(key, itemId); }
+
+	/** Exact canonical terminal grammar; no parser, codec, stack or allocation. */
+	public static boolean isDefaultIcon(String itemId, @Nullable String displayJson) {
+		return validItemId(itemId) && displayJson != null && displayJson.length() == itemId.length() + 9
+			&& displayJson.startsWith("{\"id\":\"") && displayJson.regionMatches(7, itemId, 0, itemId.length())
+			&& displayJson.endsWith("\"}");
+	}
+
+	private static boolean validItemId(@Nullable String id) {
+		return id != null && id.length() <= 256 && id.indexOf(':') > 0 && resource(id, 0);
+	}
 
 	static long utf8(String value) {
 		long bytes = 0;
@@ -63,7 +81,7 @@ public final class InventoryDisplayWriter {
 	}
 
 	/** Only the known mandatory redactions; this does not suppress arbitrary item defaults. */
-	static String bare(String id) {
+	static @Nullable String bare(String id) {
 		return project(null, id, 1024);
 	}
 
@@ -83,15 +101,15 @@ public final class InventoryDisplayWriter {
 	}
 
 	/** Does not mutate the owned tree, and allocates a result String only after a pass fits. */
-	static String project(JsonElement owned, String id, int cap) {
+	static @Nullable String project(@Nullable JsonElement owned, String id, int cap) {
 		return project(owned, id, cap, null);
 	}
 
-	static String project(JsonElement owned, String id, int cap, InventoryItemBudget budget) {
+	static @Nullable String project(@Nullable JsonElement owned, String id, int cap, @Nullable InventoryItemBudget budget) {
 		cap(cap);
 		work(budget, 512);
-		if (id == null || id.length() > 256 || utf8(id) > 256) return null;
-		JsonObject components = null;
+		if (!validItemId(id)) return null;
+		@Nullable JsonObject components = null;
 		int count = 0;
 		if (owned != null) {
 			if (!owned.isJsonObject()) return null;
@@ -117,16 +135,16 @@ public final class InventoryDisplayWriter {
 			}
 		}
 		int members = components == null ? 0 : components.size();
-		// Even a shortest legal removal member consumes eight bytes including
-		// its separator. No pass can fit more; refuse before allocating key refs.
-		if (members > cap / 8) return null;
+		// Structural admission is independent of the requested display size. An
+		// unvalidated over-cap input must never become a successful default icon.
+		if (members > InventoryItemBudget.MAX_COLLECTION + 2) return null;
 		allocate(budget, 0, 0, members, 1); String[] keys = new String[members];
 		if (components != null) {
 			allocate(budget, 4, 0, 3, 2);
 			int index = 0;
 			for (String key : components.keySet()) {
 				work(budget, 16);
-				if (key.length() > cap) return null;
+				if (key.length() > InventoryItemBudget.MAX_UTF16) return null;
 				keys[index++] = key;
 			}
 			for (int i = members / 2 - 1; i >= 0; i--) sift(keys, i, members, budget);
@@ -137,20 +155,71 @@ public final class InventoryDisplayWriter {
 				String key = keys[i]; boolean removed = key.startsWith("!");
 				work(budget, 8L * key.length() + 256); // resource/namespace/closed-name/get checks
 				if (!resource(key, removed ? 1 : 0) || (!removed && !known(key))) return null;
-				JsonElement value = components.get(key);
+				@Nullable JsonElement value = components.get(key);
+				if (value == null) return null;
 				if (removed && (!value.isJsonObject() || value.getAsJsonObject().size() != 0)) return null;
 				if (i != 0 && compareKeys(keys[i - 1], key, budget) == 0) return null;
 			}
+		}
+		allocate(budget, 4, 0, 0, 1);
+		int[] nodes = {0};
+		if (components != null) for (String key : keys) {
+			work(budget, 32);
+			if (!validValue(components.get(key), 2, nodes, budget)) return null;
 		}
 		Output out = new Output(cap, budget);
 		for (int pass = 0; pass < 3; pass++) {
 			out.reset();
 			if (tree(out, components, keys, id, count, pass)) return out.result();
 		}
-		return null;
+		return defaultIcon(out, id);
 	}
 
-	private static boolean tree(Output out, JsonObject components, String[] keys, String id, int count, int pass) {
+	private static String defaultIcon(Output out, String id) {
+		out.reset();
+		// Valid IDs are ASCII and at most256 bytes; this is at most265 bytes,
+		// below every legal cap. Only the size terminal may discard tombstones.
+		if (!out.text("{\"id\":\"") || !out.text(id) || !out.text("\"}")) throw new IllegalStateException("inventory terminal display bound");
+		return out.result();
+	}
+
+	/** Complete legal-JSON/depth admission before any size-short-circuited pass. */
+	private static boolean validValue(@Nullable JsonElement value, int depth, int[] nodes, @Nullable InventoryItemBudget budget) {
+		work(budget, 32);
+		if (depth > DEPTH || ++nodes[0] > VALIDATION_NODES) return false;
+		if (value == null || value.isJsonNull()) return true;
+		if (value.isJsonPrimitive()) {
+			JsonPrimitive primitive = value.getAsJsonPrimitive();
+			if (primitive.isString()) { work(budget, primitive.getAsString().length()); return true; }
+			if (primitive.isBoolean()) return true;
+			Number number = primitive.getAsNumber();
+			if (number instanceof Byte || number instanceof Short || number instanceof Integer || number instanceof Long) return true;
+			if (number instanceof Float f) return Float.isFinite(f);
+			if (number instanceof Double d) return Double.isFinite(d);
+			if (number instanceof LazilyParsedNumber) {
+				String token = number.toString(); work(budget, token.length());
+				return !token.isEmpty() && number(token, 0) == token.length();
+			}
+			return false;
+		}
+		if (depth == DEPTH) return false;
+		if (value.isJsonArray()) {
+			var array = value.getAsJsonArray();
+			if (array.size() > VALIDATION_NODES - nodes[0]) return false;
+			for (int i = 0; i < array.size(); i++) if (!validValue(array.get(i), depth + 1, nodes, budget)) return false;
+			return true;
+		}
+		allocate(budget, 4, 0, 3, 2);
+		var object = value.getAsJsonObject();
+		if (object.size() > VALIDATION_NODES - nodes[0]) return false;
+		for (var entry : object.entrySet()) {
+			work(budget, entry.getKey().length() + 32L);
+			if (!validValue(entry.getValue(), depth + 1, nodes, budget)) return false;
+		}
+		return true;
+	}
+
+	private static boolean tree(Output out, @Nullable JsonObject components, String[] keys, String id, int count, int pass) {
 		if (!out.text("{\"id\":") || !out.quote(id)) return false;
 		if (count != 0 && (!out.text(",\"count\":") || !out.integer(count))) return false;
 		if (!out.text(",\"components\":{")) return false;
@@ -180,10 +249,11 @@ public final class InventoryDisplayWriter {
 	}
 
 	/** OLD bytes and complete syntax/depth are checked without allocating parser scratch. */
-	static String reproject(String ownedJson, String id, int cap) {
+	static @Nullable String reproject(@Nullable String ownedJson, String id, int cap) {
 		cap(cap);
 		if (ownedJson == null || ownedJson.length() > InventoryLimits.MAX_DISPLAY_BYTES
-			|| id == null || id.length() > 256 || utf8(id) > 256) return null;
+			|| !validItemId(id)) return null;
+		if (isDefaultIcon(id, ownedJson)) return ownedJson;
 		long bytes = utf8(ownedJson);
 		if (bytes > InventoryLimits.MAX_DISPLAY_BYTES) return null;
 		int end = scan(ownedJson, white(ownedJson, 0), 0);
@@ -197,7 +267,7 @@ public final class InventoryDisplayWriter {
 			out.reset();
 			if (spans.emit(out, id, pass)) return out.result();
 		}
-		return null;
+		return defaultIcon(out, id);
 	}
 
 	private static void cap(int cap) {
@@ -220,7 +290,7 @@ public final class InventoryDisplayWriter {
 		return key.length() - start == name.length() - nameOffset
 			&& key.regionMatches(start, name, nameOffset, name.length() - nameOffset);
 	}
-	private static int compareKeys(String a, String b, InventoryItemBudget budget) {
+	private static int compareKeys(String a, String b, @Nullable InventoryItemBudget budget) {
 		work(budget, 3L * (a.length() + b.length() + 10));
 		int startA = a.startsWith("!") ? 1 : 0, startB = b.startsWith("!") ? 1 : 0;
 		boolean prefixA = a.indexOf(':', startA) < 0, prefixB = b.indexOf(':', startB) < 0;
@@ -232,7 +302,7 @@ public final class InventoryDisplayWriter {
 		}
 		return na - nb;
 	}
-	private static void sift(String[] keys, int root, int length, InventoryItemBudget budget) {
+	private static void sift(String[] keys, int root, int length, @Nullable InventoryItemBudget budget) {
 		while (root < length / 2) {
 			int child = root * 2 + 1;
 			if (child + 1 < length && compareKeys(keys[child], keys[child + 1], budget) < 0) child++;
@@ -259,6 +329,7 @@ public final class InventoryDisplayWriter {
 	}
 
 	/** Six int arrays, one flag byte array and decoded-key char array; no object per token. */
+	@NotNullByDefault
 	private static final class Spans {
 		private final String json;
 		private final char[] keys;
@@ -441,22 +512,37 @@ public final class InventoryDisplayWriter {
 	}
 
 	/** Reused across all three attempts; UTF-8 counts exactly String.getBytes(UTF_8). */
+	@NotNullByDefault
 	private static final class Output {
-		private final InventoryItemBudget budget;
-		private final char[] buffer;
+		private final @Nullable InventoryItemBudget budget;
+		private final int cap;
+		private char[] buffer;
 		private final char[] digits;
 		private int length, bytes;
 		private boolean high;
-		Output(int cap) { this(cap, null); }
-		Output(int cap, InventoryItemBudget budget) {
-			this.budget = budget; allocate(budget, 12, cap + 20L, 3, 3);
-			buffer = new char[cap]; digits = new char[20];
+		// Retained-input reprojection keeps its old fixed independent envelope.
+		Output(int cap) { this(cap, null, cap); }
+		Output(int cap, @Nullable InventoryItemBudget budget) {
+			this(cap, budget, Math.min(256, cap));
+		}
+		Output(int cap, @Nullable InventoryItemBudget budget, int initial) {
+			this.budget = budget; this.cap = cap;
+			allocate(budget, 16, initial + 20L, 3, 3);
+			buffer = new char[initial]; digits = new char[20];
 		}
 		void reset() { length = 0; bytes = 0; high = false; }
 		boolean unit(char c) {
 			work(budget, 1);
 			int extra = c < 0x80 ? 1 : c < 0x800 ? 2 : Character.isLowSurrogate(c) && high ? 3 : Character.isSurrogate(c) ? 1 : 3;
-			if (length == buffer.length || bytes + extra > buffer.length) return false;
+			if (length == cap || bytes + extra > cap) return false;
+			if (length == buffer.length) {
+				work(budget, 32L + length); // growth control and written-unit copy
+				int capacity = (int) Math.min(cap, 2L * buffer.length);
+				allocate(budget, 0, capacity, 0, 1);
+				char[] grown = new char[capacity];
+				System.arraycopy(buffer, 0, grown, 0, length);
+				buffer = grown;
+			}
 			buffer[length++] = c; bytes += extra; high = Character.isHighSurrogate(c);
 			return true;
 		}
@@ -498,7 +584,7 @@ public final class InventoryDisplayWriter {
 			for (; cursor < digits.length; cursor++) if (!unit(digits[cursor])) return false;
 			return true;
 		}
-		boolean value(JsonElement value, int depth) {
+		boolean value(@Nullable JsonElement value, int depth) {
 			work(budget, 1);
 			if (value == null || value.isJsonNull()) return text("null");
 			if (depth > DEPTH) return false;
@@ -540,8 +626,8 @@ public final class InventoryDisplayWriter {
 		}
 	}
 
-	private static void work(InventoryItemBudget budget, long units) { if (budget != null) budget.work(units); }
-	private static void allocate(InventoryItemBudget budget, long bytes, long chars, long references, long objects) {
+	private static void work(@Nullable InventoryItemBudget budget, long units) { if (budget != null) budget.work(units); }
+	private static void allocate(@Nullable InventoryItemBudget budget, long bytes, long chars, long references, long objects) {
 		if (budget != null) budget.allocate(bytes, chars, references, objects);
 	}
 

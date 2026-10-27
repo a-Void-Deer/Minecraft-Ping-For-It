@@ -38,6 +38,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -179,8 +180,8 @@ class InventoryS2CPacketTest {
 		frame.writeLong(1L);
 		frame.writeLong(0L);
 		frame.writeLong(100L); frame.writeLong(1L);
-		frame.writeVarInt(20);
-		frame.writeVarInt(40);
+		frame.writeVarInt(5);
+		frame.writeVarInt(3);
 		frame.writeBytes(resync);
 		frame.writeVarInt(0);
 		frame.writeVarInt(InventoryLimits.DISPLAY_BASE_BYTES);
@@ -215,8 +216,8 @@ class InventoryS2CPacketTest {
 			frame.writeLong(0L);
 			frame.writeLong(100L);
 			frame.writeLong(1L);
-			frame.writeVarInt(20);
-			frame.writeVarInt(40);
+			frame.writeVarInt(5);
+			frame.writeVarInt(3);
 			frame.writeVarInt(5);
 			frame.writeVarInt(0);
 			frame.writeVarInt(InventoryLimits.DISPLAY_BASE_BYTES);
@@ -229,7 +230,7 @@ class InventoryS2CPacketTest {
 
 	@Test
 	void offerRoundTripsAndValidatesPeriods() {
-		InventoryS2CPacket.Offer offer = new InventoryS2CPacket.Offer(20, 40, 5, 0);
+		InventoryS2CPacket.Offer offer = new InventoryS2CPacket.Offer(5, 3, 5, 0);
 		InventoryS2CPacket decoded = roundTrip(InventoryS2CPacket.offer(BIG, offer));
 
 		assertEquals(InventoryS2CPacket.Kind.OFFER, decoded.kind());
@@ -242,26 +243,24 @@ class InventoryS2CPacketTest {
 		assertNull(decoded.markerId());
 		assertEquals(List.of(), decoded.entries());
 
-		InventoryS2CPacket.Offer configured = new InventoryS2CPacket.Offer(20, 40, 5, 0,
+		InventoryS2CPacket.Offer configured = new InventoryS2CPacket.Offer(5, 3, 5, 0,
 			InventoryLimits.MAX_DISPLAY_BYTES, InventoryLimits.MAX_FRAME_BYTES);
 		assertEquals(configured, roundTrip(InventoryS2CPacket.offer(BIG, configured)).offer());
 
-		InventoryS2CPacket.Offer highest = new InventoryS2CPacket.Offer(InventoryLimits.MAX_PERIOD_TICKS,
-			InventoryLimits.MAX_PERIOD_TICKS, Integer.MAX_VALUE,
-			InventoryLimits.MAX_HEARTBEAT_PERIODS);
+		InventoryS2CPacket.Offer highest = new InventoryS2CPacket.Offer(10, 10, 10, InventoryLimits.MAX_HEARTBEAT_PERIODS);
 		assertEquals(highest, roundTrip(InventoryS2CPacket.offer(BIG, highest)).offer());
-		assertEquals(72001, roundTrip(InventoryS2CPacket.offer(BIG,
-			new InventoryS2CPacket.Offer(20, 40, 72001, 0))).offer().resyncMinPeriods());
+		InventoryS2CPacket.Offer noCooldown = new InventoryS2CPacket.Offer(1, 1, 0, 0);
+		assertEquals(noCooldown, roundTrip(InventoryS2CPacket.offer(BIG, noCooldown)).offer(),
+			"zero resync is transmitted verbatim, not normalized to a positive cooldown");
 
-		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(0, 40, 5, 0));
-		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(
-			InventoryLimits.MAX_PERIOD_TICKS + 1, 40, 5, 0));
-		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(20, 0, 5, 0));
-		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(20,
-			InventoryLimits.MAX_PERIOD_TICKS + 1, 5, 0));
-		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(20, 40, 0, 0));
-		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(20, 40, 5, -1));
-		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(20, 40, 5,
+		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(0, 3, 5, 0));
+		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(11, 3, 5, 0));
+		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(5, 0, 5, 0));
+		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(5, 11, 5, 0));
+		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(5, 3, -1, 0));
+		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(5, 3, 11, 0));
+		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(5, 3, 5, -1));
+		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(5, 3, 5,
 			InventoryLimits.MAX_HEARTBEAT_PERIODS + 1));
 		assertTrue(InventoryS2CPacket.offer(BIG, null).isCorrupt());
 	}
@@ -269,19 +268,19 @@ class InventoryS2CPacketTest {
 	@Test
 	void offerRejectsOffGridBudgetsAndAPairWithoutTheMetadataReserve() {
 		// 9216 bytes (9 KiB) is not on the display scale; 4096 bytes (0.25 KiB) is below the frame scale.
-		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(20, 40, 5, 0, 9216,
+		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(5, 3, 5, 0, 9216,
 			InventoryLimits.FRAME_BASE_BYTES));
-		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(20, 40, 5, 0,
+		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(5, 3, 5, 0,
 			InventoryLimits.DISPLAY_BASE_BYTES, 4096));
 		// A legal pair still fails when display + fixed reserve exceeds the frame.
-		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(20, 40, 5, 0,
+		assertThrows(IllegalArgumentException.class, () -> new InventoryS2CPacket.Offer(5, 3, 5, 0,
 			InventoryLimits.FRAME_BASE_BYTES, InventoryLimits.FRAME_BASE_BYTES));
-		assertDoesNotThrow(() -> new InventoryS2CPacket.Offer(20, 40, 5, 0, 4096, 8192));
+		assertDoesNotThrow(() -> new InventoryS2CPacket.Offer(5, 3, 5, 0, 4096, 8192));
 	}
 
 	@Test
 	void offerDecodeRejectsOffGridBudgetsWithoutDefaults() {
-		FriendlyByteBuf buf = offerFrame(20, 40, 5, 0, 9216, InventoryLimits.FRAME_BASE_BYTES);
+		FriendlyByteBuf buf = offerFrame(5, 3, 5, 0, 9216, InventoryLimits.FRAME_BASE_BYTES);
 		try {
 			InventoryS2CPacket decoded = InventoryS2CPacket.readSafe(buf);
 			assertTrue(decoded.isCorrupt());
@@ -290,7 +289,7 @@ class InventoryS2CPacketTest {
 			buf.release();
 		}
 
-		buf = offerFrame(20, 40, 5, 0, InventoryLimits.FRAME_BASE_BYTES, InventoryLimits.FRAME_BASE_BYTES);
+		buf = offerFrame(5, 3, 5, 0, InventoryLimits.FRAME_BASE_BYTES, InventoryLimits.FRAME_BASE_BYTES);
 		try {
 			assertTrue(InventoryS2CPacket.readSafe(buf).isCorrupt());
 		} finally {
@@ -300,49 +299,24 @@ class InventoryS2CPacketTest {
 
 	@Test
 	void offerDecodeRejectsOutOfRangePeriodsWithoutDefaults() {
-		FriendlyByteBuf buf = offerFrame(Integer.MAX_VALUE, 40, 5, 0);
-		try {
-			InventoryS2CPacket decoded = InventoryS2CPacket.readSafe(buf);
-			assertTrue(decoded.isCorrupt());
-			assertNull(decoded.kind());
-			assertNull(decoded.offer());
-		} finally {
-			buf.release();
-		}
-
-		buf = offerFrame(InventoryLimits.MAX_PERIOD_TICKS + 1, 40, 5, 0);
-		try {
-			assertTrue(InventoryS2CPacket.readSafe(buf).isCorrupt());
-		} finally {
-			buf.release();
-		}
-
-		buf = offerFrame(20, InventoryLimits.MAX_PERIOD_TICKS + 1, 5, 0);
-		try {
-			assertTrue(InventoryS2CPacket.readSafe(buf).isCorrupt());
-		} finally {
-			buf.release();
-		}
-
-		buf = offerFrame(20, 40, InventoryLimits.MAX_PERIOD_TICKS + 1, 0);
-		try {
-			InventoryS2CPacket decoded = InventoryS2CPacket.readSafe(buf);
-			assertFalse(decoded.isCorrupt());
-			assertEquals(InventoryLimits.MAX_PERIOD_TICKS + 1, decoded.offer().resyncMinPeriods());
-		} finally {
-			buf.release();
-		}
-
-		buf = offerFrame(20, 40, 0, 0);
-		try {
-			assertTrue(InventoryS2CPacket.readSafe(buf).isCorrupt());
-		} finally {
-			buf.release();
+		for (int[] periods : List.of(new int[] {0, 3, 5, 0}, new int[] {11, 3, 5, 0},
+			new int[] {Integer.MAX_VALUE, 3, 5, 0}, new int[] {5, 0, 5, 0}, new int[] {5, 11, 5, 0},
+			new int[] {5, 3, -1, 0}, new int[] {5, 3, 11, 0}, new int[] {5, 3, Integer.MAX_VALUE, 0},
+			new int[] {5, 3, 5, InventoryLimits.MAX_HEARTBEAT_PERIODS + 1})) {
+			FriendlyByteBuf buf = offerFrame(periods[0], periods[1], periods[2], periods[3]);
+			try {
+				InventoryS2CPacket decoded = InventoryS2CPacket.readSafe(buf);
+				assertTrue(decoded.isCorrupt(), Arrays.toString(periods));
+				assertNull(decoded.kind());
+				assertNull(decoded.offer());
+			} finally {
+				buf.release();
+			}
 		}
 
 		for (byte[] raw : List.of(new byte[] {(byte) 0x80, (byte) 0x80, (byte) 0x80, (byte) 0x80, 0x10},
 			new byte[] {(byte) 0x85, 0})) {
-			buf = offerFrameWithRawResync(raw);
+			FriendlyByteBuf buf = offerFrameWithRawResync(raw);
 			try {
 				assertTrue(InventoryS2CPacket.readSafe(buf).isCorrupt());
 			} finally {
@@ -350,22 +324,18 @@ class InventoryS2CPacketTest {
 			}
 		}
 
-		buf = offerFrame(20, 40, 5, InventoryLimits.MAX_HEARTBEAT_PERIODS + 1);
-		try {
-			assertTrue(InventoryS2CPacket.readSafe(buf).isCorrupt());
-		} finally {
-			buf.release();
-		}
-
-		buf = offerFrame(InventoryLimits.MAX_PERIOD_TICKS, InventoryLimits.MAX_PERIOD_TICKS,
-			InventoryLimits.MAX_PERIOD_TICKS, InventoryLimits.MAX_HEARTBEAT_PERIODS);
-		try {
-			InventoryS2CPacket decoded = InventoryS2CPacket.readSafe(buf);
-			assertFalse(decoded.isCorrupt());
-			assertEquals(InventoryLimits.MAX_PERIOD_TICKS, decoded.offer().previewPeriodTicks());
-			assertEquals(InventoryLimits.MAX_HEARTBEAT_PERIODS, decoded.offer().heartbeatPeriods());
-		} finally {
-			buf.release();
+		for (int resync : new int[] {0, 10}) {
+			FriendlyByteBuf buf = offerFrame(10, 10, resync, InventoryLimits.MAX_HEARTBEAT_PERIODS);
+			try {
+				InventoryS2CPacket decoded = InventoryS2CPacket.readSafe(buf);
+				assertFalse(decoded.isCorrupt());
+				assertEquals(10, decoded.offer().previewPeriodTicks());
+				assertEquals(10, decoded.offer().trackingPeriodTicks());
+				assertEquals(resync, decoded.offer().resyncMinPeriods());
+				assertEquals(InventoryLimits.MAX_HEARTBEAT_PERIODS, decoded.offer().heartbeatPeriods());
+			} finally {
+				buf.release();
+			}
 		}
 	}
 
@@ -509,6 +479,24 @@ class InventoryS2CPacketTest {
 	}
 
 	@Test
+	void defaultIconTerminalAndUnavailableDisplayRemainDistinctWithExactLongMetadata() {
+		String terminal = "{\"id\":\"minecraft:stone\"}";
+		var exact = new InventoryS2CPacket.Entry("exact-selection", "minecraft:stone", "block.minecraft.stone",
+			terminal, BIG, BIG + 1, false, null);
+		var unavailable = new InventoryS2CPacket.Entry("unavailable-selection", "minecraft:stone", "block.minecraft.stone",
+			null, BIG, BIG + 1, false, null);
+		var packet = InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, BIG, BIG, new MarkerId(BIG),
+			1, 1, 1, 0, 1, true, InventoryS2CPacket.Status.READY, BIG + 2, List.of(exact, unavailable));
+		var decoded = roundTrip(packet);
+		assertEquals(List.of(exact, unavailable), decoded.entries());
+		assertEquals(BIG, decoded.entries().getFirst().count());
+		assertTrue(nx.pingwheel.common.presentation.inventory.minecraft.InventoryDisplayWriter.isDefaultIcon(
+			decoded.entries().getFirst().itemId(), decoded.entries().getFirst().displayJson()));
+		assertNull(decoded.entries().get(1).displayJson());
+		assertFalse(decoded.entries().getFirst().fallback());
+	}
+
+	@Test
 	void maximumDisplayRealItemPayloadRoundTripsAtTheOfferEffectiveBoundary() {
 		DisplayFixture fixture = maximumDisplayFixture(Items.STONE, InventoryS2CPacket.MAX_DISPLAY_BYTES);
 		assertEquals(InventoryS2CPacket.MAX_DISPLAY_BYTES, utf8(fixture.json()), "independent UTF-8 measurement");
@@ -523,7 +511,7 @@ class InventoryS2CPacketTest {
 		assertEquals(fixture.data(), payload.getString("data"), "the multibyte custom text is exact");
 
 		InventoryS2CPacket.Offer effective = roundTrip(InventoryS2CPacket.offer(BIG,
-			new InventoryS2CPacket.Offer(20, 40, 5, 0, InventoryS2CPacket.MAX_DISPLAY_BYTES, MAX_FRAME_FOR_MAX_DISPLAY))).offer();
+			new InventoryS2CPacket.Offer(5, 3, 5, 0, InventoryS2CPacket.MAX_DISPLAY_BYTES, MAX_FRAME_FOR_MAX_DISPLAY))).offer();
 		assertEquals(InventoryS2CPacket.MAX_DISPLAY_BYTES, effective.effectiveDisplayBytes());
 		assertEquals(MAX_FRAME_FOR_MAX_DISPLAY, effective.effectiveFrameBytes());
 
@@ -873,7 +861,7 @@ class InventoryS2CPacketTest {
 		var entries = List.of(max, entry("plain", "minecraft:stone", 0, 0),
 			new InventoryS2CPacket.Entry("surrogates", "minecraft:stone", "\ud800\ud800\udc00", "\ud800é\udc00", 1, 1, false, null));
 		var packets = List.of(
-			InventoryS2CPacket.offer(1, new InventoryS2CPacket.Offer(72000, 72000, Integer.MAX_VALUE, 0)),
+			InventoryS2CPacket.offer(1, new InventoryS2CPacket.Offer(10, 10, 10, 0)),
 			InventoryS2CPacket.policy(1, 100, 1, java.util.Set.of("location", "entity_block", "dropped_item", "block", "entity")),
 			InventoryS2CPacket.selected(1, 2, 3, new MarkerId(4), null),
 			InventoryS2CPacket.selected(1, 2, 3, null, nx.pingwheel.common.marker.MarkerRejectReason.TARGET_GONE),
@@ -955,11 +943,13 @@ class InventoryS2CPacketTest {
 		var sparseKey = catalog.intern(sparse).key();
 		var legacyKey = catalog.intern(legacy).key();
 		assertFalse(sparseKey.componentsKey().isEmpty(), fixture + ": fixture identity is exact");
-		assertEquals(sparseKey, legacyKey, fixture + ": display payload never changes the server variant identity");
+		assertNotEquals(sparseKey, legacyKey, fixture + ": a synthetic full-effective patch is a different raw patch identity");
 
 		InventoryS2CPacket.Entry sparseEntry = wireEntry(sparseKey.componentsKey(), sparse.display(),
 			sparse.display().displayJson());
-		InventoryS2CPacket.Entry legacyEntry = wireEntry(legacyKey.componentsKey(), legacy.display(),
+		// Compare transport projections for the same authoritative selection;
+		// the full-effective payload is only a synthetic display-size baseline.
+		InventoryS2CPacket.Entry legacyEntry = wireEntry(sparseKey.componentsKey(), legacy.display(),
 			legacy.display().displayJson());
 		assertSameWireIdentity(sparseEntry, legacyEntry);
 

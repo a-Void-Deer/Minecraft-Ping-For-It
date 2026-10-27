@@ -214,7 +214,7 @@ class SableInventorySourceTest {
 			var cb = runtime.attach(b, new InventoryRuntime.PreviewSubject(OWNER)).orElseThrow();
 			assertEquals(3, runtime.step(ca, 1).orElseThrow().slots().getFirst().count());
 			assertEquals(11, runtime.step(cb, 1).orElseThrow().slots().getFirst().count());
-			assertEquals(0, first.saves + second.saves); assertEquals(27, first.reads); assertEquals(27, second.reads);
+			assertEquals(0, first.saves + second.saves); assertEquals(1, first.reads); assertEquals(1, second.reads);
 			runtime.retireInvalid(a); assertTrue(ca.invalidated()); assertFalse(cb.invalidated()); assertEquals(Optional.of(true), runtime.probe(cb));
 		}
 	}
@@ -279,7 +279,7 @@ class SableInventorySourceTest {
 				assertTrue(cb.invalidated()); assertTrue(duplicate.invalidated()); assertFalse(ca.invalidated());
 				assertEquals(Optional.of(true), runtime.probe(ca), "alias input failure cannot retire the origin's completed evidence");
 				assertTrue(runtime.memory().retained() < retained, "only failed alias evidence is released");
-				assertTrue(runtime.memory().retained() > 300_000, "origin evidence stays retained");
+				assertTrue(runtime.memory().retained() > 3L * 4096 + 2L * 1024, "origin evidence stays charged beyond the three consumers and two paid target subjects");
 				assertEquals(0, runtime.memory().reserved()); assertEquals(2, fixture.capabilityReads.get());
 				ca.restart(); assertTrue(runtime.step(ca, 1).isEmpty(), "invalidation does not refund the origin's paid target quota");
 				fixture.tick = settings.getTracking().getPeriodTicks(); runtime.advance(fixture.tick, settings);
@@ -458,7 +458,7 @@ class SableInventorySourceTest {
 			assertEquals(CaptureResult.Completeness.CONTINUE, step(handle, 1).completeness());
 			fixture.tick = 1; chest.mapping = new int[] {1, 0};
 			var changed = step(handle, 1); assertEquals(CaptureResult.Availability.INVALID, changed.availability()); assertTrue(changed.payload().isEmpty());
-			assertFalse(handle.evidenceValid()); assertEquals(0, chest.saves); assertEquals(2, chest.reads);
+			assertFalse(handle.evidenceValid()); assertEquals(0, chest.saves); assertEquals(1, chest.reads);
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 		try (var fresh = open(fixture, input)) {
@@ -466,7 +466,7 @@ class SableInventorySourceTest {
 			var recovered = step(fresh, 2); assertEquals(CaptureResult.Completeness.COMPLETE, recovered.completeness());
 			var page = ((CaptureResult.OpaqueKeyedFragment) recovered.payload().orElseThrow()).entries();
 			assertNull(InventoryDomainCodec.decode(page.get("0"))); assertEquals(8, InventoryDomainCodec.decode(page.get("1")).count());
-			assertEquals(0, chest.saves); assertEquals(4, chest.reads);
+			assertEquals(0, chest.saves); assertEquals(3, chest.reads);
 		}
 	}
 

@@ -5,6 +5,7 @@ import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.ServerMarker;
@@ -55,7 +56,7 @@ final class PresentationFairSampler {
 		BiFunction<ServerMarker, PresentationAdapter, Set<String>> demands,
 		BiFunction<ServerMarker, Set<String>, PresentationSection> basicCapture,
 		Function<ServerMarker, String> ownerName, Consumer<PresentationServer.Lease> publish,
-		BudgetDelaySink sink, long nowNanos) {
+		@Nullable BudgetDelaySink sink) {
 		if (sink == null) sink = BudgetDelaySink.NONE;
 		cache.entrySet().removeIf(entry -> {
 			ServerMarker marker = store.find(new MarkerId(entry.getKey())).orElse(null);
@@ -102,7 +103,7 @@ final class PresentationFairSampler {
 				if (!cache.containsKey(currentId) && refused == 0 && !admit(cache, tick))
 					refused |= Reason.CACHE_CAPACITY.bit();
 				if (refused != 0) {
-					observe(sink, live, adapter, tick, nowNanos, refused);
+					observe(sink, live, adapter, tick, refused);
 					publish.accept(current);
 					return new Result(captures, DelayState.DELAYED);
 				}
@@ -142,13 +143,13 @@ final class PresentationFairSampler {
 	}
 	private void resetReasons() { observedCycle = false; reasons = 0; }
 	private void observe(BudgetDelaySink sink, ServerMarker marker, PresentationAdapter adapter,
-		long cycle, long now, int refused) {
-		if (!observedCycle || reasonCycle != cycle) { observedCycle = true; reasonCycle = cycle; reasons = 0; }
+		long serverTick, int refused) {
+		if (!observedCycle || reasonCycle != serverTick) { observedCycle = true; reasonCycle = serverTick; reasons = 0; }
 		int added = refused & ~reasons;
 		if (added == 0) return;
 		boolean first = reasons == 0;
 		reasons |= added;
-		try { sink.observe(new DelayEvent(Module.PRESENTATION, cycle, now,
+		try { sink.observe(new DelayEvent(Module.PRESENTATION, serverTick, serverTick,
 			context(marker, adapter.adapterId()), first, added, Quantity.of(Unit.MARKER_ADAPTER, 1))); }
 		catch (RuntimeException | LinkageError ignored) {}
 	}

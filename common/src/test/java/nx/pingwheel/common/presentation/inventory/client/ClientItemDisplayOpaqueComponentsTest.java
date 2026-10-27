@@ -21,8 +21,10 @@ import net.minecraft.core.MappedRegistry;
 import net.minecraft.core.Registry;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.component.DataComponentMap;
+import net.minecraft.core.component.DataComponentPatch;
 import net.minecraft.core.component.DataComponentType;
 import net.minecraft.core.component.DataComponents;
+import net.minecraft.core.component.PatchedDataComponentMap;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.HoverEvent;
@@ -59,10 +61,13 @@ import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Opaque values never become client display ownership merely because an item defaults or hook supplies them. */
+/** Explicit patch values are guarded; local defaults remain native inheritance. */
+@NotNullByDefault
 class ClientItemDisplayOpaqueComponentsTest {
 
 	private static final int SHARED_DAG_DEPTH = 30;
@@ -73,8 +78,8 @@ class ClientItemDisplayOpaqueComponentsTest {
 	 */
 	private static final int FIXTURE_VISIT_ENVELOPE = 1 << 16;
 
-	private RegistryEdit items;
-	private RegistryEdit components;
+	private @Nullable RegistryEdit items;
+	private @Nullable RegistryEdit components;
 	private Opaque opaque;
 	private DataComponentType<Opaque> persistent;
 	private DataComponentType<Opaque> transientType;
@@ -132,18 +137,64 @@ class ClientItemDisplayOpaqueComponentsTest {
 		assertEquals(0, opaque.comparisons, "default suppression never compares the opaque value");
 	}
 
-	@Test void missingSuppressionCannotResurrectAnOpaqueDefaultIntoTheCacheOrIcon() {
+	@Test void opaqueLocalDefaultsAreInheritedAcrossCacheHitsWithoutPingInspection() {
 		String encoded = payload("\"minecraft:custom_model_data\":3");
 		assertFalse(resolve(encoded).stack().isEmpty(), "the same payload initially has supported defaults");
 		item.defaults = DataComponentMap.builder().addAll(item.defaults).set(persistent, opaque).build();
 		for (int resolve = 0; resolve < 3; resolve++) {
-			assertUnavailable(resolve(encoded));
+			assertSame(opaque, resolve(encoded).stack().get(persistent));
 			opaque.value++;
 		}
-		assertTrue(ClientItemDisplay.decode(RegistryAccess.EMPTY, encoded).isEmpty());
-		assertEquals(0, ClientItemDisplay.cachedEntryCount(), "a previously safe hit must be checked against effective defaults");
+		assertSame(opaque, ClientItemDisplay.decode(RegistryAccess.EMPTY, encoded).orElseThrow().get(persistent));
+		assertEquals(1, ClientItemDisplay.cachedEntryCount(), "default changes do not invalidate an explicit-patch snapshot");
+		assertEquals(1, ClientItemDisplay.decodeMisses());
 		assertEquals(0, codecCalls);
 		assertEquals(0, opaque.comparisons);
+	}
+
+	@Test void nativeDefaultWrappersNeverEnterPingComponentGates() {
+		DataComponentMap defaults = DataComponentMap.builder().addAll(item.defaults).set(persistent, opaque).build();
+		DefaultWrapper wrapper = new DefaultWrapper(defaults);
+		item.defaults = wrapper;
+		String encoded = payload("\"minecraft:custom_model_data\":9");
+		for (int attempt = 0; attempt < 3; attempt++) {
+			var display = resolve(encoded);
+			assertFalse(display.stack().isEmpty());
+			assertEquals(0, wrapper.nonNameReads, "only native hover-name precedence may read the default names; Ping never scans other defaults");
+			assertSame(opaque, display.stack().get(persistent));
+			wrapper.nonNameReads = 0;
+		}
+		assertEquals(1, ClientItemDisplay.decodeMisses());
+		assertEquals(0, codecCalls); assertEquals(0, opaque.comparisons);
+	}
+
+	@Test void nativeNameSelectionReadsWrappedCustomDefaultOnceWithoutProbingOtherDefaults() {
+		MutableComponent local = Component.literal("Wrapped Local Name").withColor(0x2468AC).withStyle(style -> style.withItalic(true));
+		DefaultWrapper wrapper = new DefaultWrapper(DataComponentMap.builder().set(DataComponents.CUSTOM_NAME, local).build());
+		wrapper.rejectNonNameReads = true;
+		item.defaults = wrapper;
+		item.nameHook = stack -> { throw new AssertionError("the native custom name wins before getName"); };
+		String encoded = payload("");
+		for (int attempt = 0; attempt < 2; attempt++) {
+			wrapper.customNameReads = 0; wrapper.itemNameReads = 0;
+			var display = resolve(encoded);
+			assertFalse(display.stack().isEmpty()); assertEquals(local, display.name());
+			assertEquals(1, wrapper.customNameReads, "one native hover-name lookup, no Ping default probe");
+			assertEquals(0, wrapper.itemNameReads); assertEquals(0, wrapper.nonNameReads);
+			wrapper.customNameReads = 0;
+			assertEquals(local, ClientItemDisplay.decodeName(RegistryAccess.EMPTY, encoded).orElseThrow());
+			assertEquals(1, wrapper.customNameReads); assertEquals(0, wrapper.itemNameReads);
+		}
+		ItemStack caller = new ItemStack(item);
+		wrapper.customNameReads = 0; wrapper.itemNameReads = 0;
+		assertEquals(local, ClientItemDisplay.displayName(caller));
+		assertEquals(1, wrapper.customNameReads); assertEquals(0, wrapper.itemNameReads); assertEquals(0, wrapper.nonNameReads);
+		String terminal = "{\"id\":\"" + itemId() + "\"}";
+		wrapper.customNameReads = 0;
+		assertEquals("fallback.registry.label", translatableKey(resolve(terminal).name()));
+		assertTrue(ClientItemDisplay.decodeName(RegistryAccess.EMPTY, terminal).isEmpty());
+		assertEquals(0, wrapper.customNameReads, "the canonical terminal performs no native name lookup");
+		assertEquals(2, ClientItemDisplay.decodeMisses());
 	}
 
 	@Test void registeredUnknownAdditionsFailBeforeTheirCodecIncludingSupportedNestedItems() {
@@ -172,23 +223,27 @@ class ClientItemDisplayOpaqueComponentsTest {
 		assertEquals(0, ClientItemDisplay.cachedEntryCount());
 	}
 
-	@Test void unregisteredAndTransientDefaultsFailClosedInsteadOfBeingAssumedImmutable() {
+	@Test void unregisteredAndTransientDefaultsRemainNativeLocalInheritance() {
 		DataComponentMap original = item.defaults;
 		for (DataComponentType<Opaque> type : List.of(unregistered, transientType)) {
 			item.defaults = DataComponentMap.builder().addAll(original).set(type, opaque).build();
-			assertUnavailable(resolve(payload("")));
-			assertTrue(ClientItemDisplay.decode(RegistryAccess.EMPTY, payload("")).isEmpty());
+			assertSame(opaque, resolve(payload("")).stack().get(type));
+			assertSame(opaque, ClientItemDisplay.decode(RegistryAccess.EMPTY, payload("")).orElseThrow().get(type));
 		}
 		assertEquals(0, opaque.comparisons);
 		assertEquals(0, codecCalls);
 	}
 
-	@Test void nestedUnknownDefaultsCannotEnterThroughASupportedComponent() {
+	@Test void nestedUnknownDefaultsRemainInheritedInsideExplicitProjectiles() {
 		item.defaults = DataComponentMap.builder().addAll(item.defaults).set(persistent, opaque).build();
 		String nested = payload("");
-		String outer = "{\"id\":\"minecraft:chest\",\"components\":{\"minecraft:container\":[{\"slot\":0,\"item\":" + nested + "}]}}";
-		assertTrue(ClientItemDisplay.decode(RegistryAccess.EMPTY, outer).isEmpty(), "refuse before the native container hashes a nested opaque default");
-		assertTrue(ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:chest", "fallback.registry.label", outer).stack().isEmpty());
+		String outer = "{\"id\":\"minecraft:crossbow\",\"components\":{\"minecraft:charged_projectiles\":[" + nested + "]}}";
+		var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:crossbow", "fallback.registry.label", outer);
+		assertFalse(display.stack().isEmpty());
+		var raw = nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess.load();
+		assertSame(opaque, raw.projectiles(display.stack().get(DataComponents.CHARGED_PROJECTILES)).getFirst().get(persistent));
+		var copied = ClientDisplayWorkingCopy.overlay(display.stack().getComponents(), DataComponentPatch.EMPTY, 0, new ClientItemDisplay.Validation());
+		assertSame(opaque, raw.projectiles(copied.get(DataComponents.CHARGED_PROJECTILES).orElseThrow()).getFirst().get(persistent));
 		assertEquals(0, opaque.comparisons);
 		assertEquals(0, codecCalls);
 	}
@@ -221,12 +276,12 @@ class ClientItemDisplayOpaqueComponentsTest {
 	}
 
 	@Test void displayFailurePreservesTheAcceptedExactReferenceCountAndSelection() {
-		item.defaults = DataComponentMap.builder().addAll(item.defaults).set(persistent, opaque).build();
+		item.hook = stack -> stack.set(persistent, opaque);
 		List<nx.pingwheel.common.network.IPacket> sent = new ArrayList<>();
 		ClientInventory client = new ClientInventory(sent::add);
 		client.presentationReset(100, 1);
 		long request = client.open(new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest"), BlockFace.NORTH, "entity_block");
-		client.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(10, 20, 3, 5)).stamp(100, 1));
+		client.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(5, 3, 5, 5)).stamp(100, 1));
 		client.accept(InventoryS2CPacket.policy(7, 100, 1, java.util.Set.of("entity_block")));
 		String encoded = payload("");
 		var entry = new InventoryS2CPacket.Entry("exact-variant", itemId(), "fallback.registry.label", encoded, 9007199254740993L, 1, false, null);
@@ -281,7 +336,7 @@ class ClientItemDisplayOpaqueComponentsTest {
 		ItemStack lateUnsafe = new ItemStack(Items.STONE);
 		lateUnsafe.set(DataComponents.CUSTOM_NAME, hoverItem(unsafeNested));
 		ChargedProjectiles root = ChargedProjectiles.of(List.of(graph, lateUnsafe));
-		item.defaults = DataComponentMap.builder().addAll(item.defaults).set(DataComponents.CHARGED_PROJECTILES, root).build();
+		item.hook = stack -> stack.set(DataComponents.CHARGED_PROJECTILES, root);
 		for (int attempt = 0; attempt < 2; attempt++) {
 			assertUnavailable(resolve(payload("")));
 			// Observation only: the expectation is the independent fixture envelope,
@@ -300,14 +355,14 @@ class ClientItemDisplayOpaqueComponentsTest {
 	@Test void textCyclesFailWithinTheSameRootBound() {
 		MutableComponent cycle = Component.literal("cycle");
 		cycle.append(cycle);
-		item.defaults = DataComponentMap.builder().addAll(item.defaults).set(DataComponents.CUSTOM_NAME, cycle).build();
+		item.hook = stack -> stack.set(DataComponents.CUSTOM_NAME, cycle);
 		assertUnavailable(resolve(payload("")));
 		assertTrue(ClientItemDisplay.validationVisits() <= FIXTURE_VISIT_ENVELOPE,
 			"text cycle stays inside the independent fixture envelope");
 		assertTrue(ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(payload("")).isEmpty());
 	}
 
-	@Test void effectiveDefaultTextContainersRejectOpaqueHoverItems() {
+	@Test void explicitTextContainersRejectOpaqueHoverItemsButDefaultsStayInherited() {
 		ItemStack nested = new ItemStack(Items.STONE);
 		nested.set(persistent, opaque);
 		HoverEvent.ItemStackInfo materialized = new HoverEvent.ItemStackInfo(new ItemStack(Items.STONE));
@@ -327,8 +382,25 @@ class ClientItemDisplayOpaqueComponentsTest {
 				new WrittenBookContent(Filterable.passThrough("title"), "author", 0, List.of(new Filterable<>(Component.literal("raw"), Optional.of(unsafe))), true)).build());
 		for (DataComponentMap defaults : variants) {
 			item.defaults = defaults;
+			assertTrue(ClientItemDisplay.decode(RegistryAccess.EMPTY, payload("")).isPresent(), "default text is not part of Ping's patch graph");
+			if (defaults.has(DataComponents.CUSTOM_NAME) || defaults.has(DataComponents.ITEM_NAME)) {
+				assertUnavailable(resolve(payload("")));
+				assertTrue(ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(payload("")).isEmpty(),
+					"native hover-name lookup returns this unsafe text, whose returned snapshot must still be guarded");
+			} else {
+				assertFalse(resolve(payload("")).stack().isEmpty());
+				assertTrue(ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(payload("")).isPresent());
+			}
+			DataComponentPatch.Builder explicit = DataComponentPatch.builder();
+			for (var type : List.of(DataComponents.CUSTOM_NAME, DataComponents.ITEM_NAME, DataComponents.LORE, DataComponents.WRITTEN_BOOK_CONTENT)) {
+				if (defaults.has(type)) nx.pingwheel.common.presentation.inventory.minecraft.InventoryPatches.put(explicit, type, Optional.of(defaults.get(type)));
+			}
+			item.defaults = original;
+			DataComponentPatch patch = explicit.build();
+			item.hook = stack -> ((PatchedDataComponentMap) stack.getComponents()).restorePatch(patch);
 			assertUnavailable(resolve(payload("")));
 			assertTrue(ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(payload("")).isEmpty());
+			item.hook = stack -> {};
 		}
 		assertEquals(2, opaque.comparisons, "only fixture set() touched the opaque object; graph checks never hash or compare it");
 	}
@@ -345,9 +417,8 @@ class ClientItemDisplayOpaqueComponentsTest {
 			Component.literal("root").withStyle(style -> style.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_TEXT, unsafe))),
 			Component.literal("root").withStyle(style -> style.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_ENTITY,
 				new HoverEvent.EntityTooltipInfo(EntityType.PIG, new UUID(1, 2), unsafe)))));
-		DataComponentMap original = item.defaults;
 		for (Component position : positions) {
-			item.defaults = DataComponentMap.builder().addAll(original).set(DataComponents.ITEM_NAME, position).build();
+			item.hook = stack -> stack.set(DataComponents.ITEM_NAME, position);
 			assertUnavailable(resolve(payload("")));
 			assertTrue(ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(payload("")).isEmpty());
 		}
@@ -394,11 +465,11 @@ class ClientItemDisplayOpaqueComponentsTest {
 		assertEquals(0, codecCalls);
 	}
 
-	@Test void cachedEffectiveDefaultTextIsRecheckedAfterItsHoverStackChanges() {
+	@Test void cacheHitsRecheckExplicitConstructorTextAfterItsHoverStackChanges() {
 		HoverEvent.ItemStackInfo info = new HoverEvent.ItemStackInfo(new ItemStack(Items.STONE));
 		ItemStack cachedHover = info.getItemStack();
 		Component name = Component.literal("safe first").withStyle(style -> style.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_ITEM, info)));
-		item.defaults = DataComponentMap.builder().addAll(item.defaults).set(DataComponents.CUSTOM_NAME, name).build();
+		item.hook = stack -> stack.set(DataComponents.CUSTOM_NAME, name);
 		String json = payload("");
 		assertFalse(resolve(json).stack().isEmpty());
 		int misses = ClientItemDisplay.decodeMisses();
@@ -412,10 +483,12 @@ class ClientItemDisplayOpaqueComponentsTest {
 	@Test void deferredHoverWithAnItemLoadHookFailsWithoutStartingTheHook() {
 		ItemStack nested = new ItemStack(item);
 		Component pending = hoverItem(nested);
-		item.hook = stack -> { throw new AssertionError("validation must not materialize a deferred hover stack"); };
-		item.defaults = DataComponentMap.builder().addAll(item.defaults).set(DataComponents.CUSTOM_NAME, pending).build();
+		int[] loads = {0};
+		item.hook = stack -> loads[0]++;
+		item.nameResult = pending;
 		assertUnavailable(resolve(payload("")));
 		assertTrue(ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(payload("")).isEmpty());
+		assertEquals(2, loads[0], "only each entrance's outer naming constructor runs; the deferred hover never starts a load hook");
 	}
 
 	@Test void productionChatChecksTheEffectiveGraphAfterNamingAndContainsHookExceptions() {
@@ -483,7 +556,7 @@ class ClientItemDisplayOpaqueComponentsTest {
 		item.componentsReadHook = () -> { throw new IllegalStateException("cached defaults failed"); };
 		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
 			assertUnavailable(resolve(encoded)); assertEquals(0, ClientItemDisplay.cachedEntryCount());
-			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("operation=inventory/client-display-cache"));
+			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("operation=inventory/client-display-resolve"));
 		}
 		item.componentsReadHook = () -> {};
 		assertFalse(resolve(encoded).stack().isEmpty()); assertEquals(1, ClientItemDisplay.cachedEntryCount());
@@ -543,7 +616,7 @@ class ClientItemDisplayOpaqueComponentsTest {
 		for (boolean custom : List.of(false, true)) {
 			Component bomb = Component.empty();
 			for (int depth = 0; depth < 20; depth++) bomb = Component.translatableWithFallback("pingforit.test.missing", "%1$s%1$s%1$s%1$s", bomb);
-			if (custom) item.defaults = DataComponentMap.builder().addAll(DataComponents.COMMON_ITEM_COMPONENTS).set(DataComponents.CUSTOM_NAME, bomb).build();
+			if (custom) { Component explicit = bomb; item.hook = stack -> stack.set(DataComponents.CUSTOM_NAME, explicit); }
 			else item.nameResult = bomb;
 			assertUnavailable(resolve(payload("")));
 			assertTrue(ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(payload("")).isEmpty());
@@ -649,8 +722,9 @@ class ClientItemDisplayOpaqueComponentsTest {
 		assertTrue(ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(wire).isEmpty());
 		Component text = MutableComponent.create(new NbtContents(path, false, Optional.empty(), new BlockDataSource("~ ~ ~")));
 		item.defaults = DataComponentMap.builder().addAll(DataComponents.COMMON_ITEM_COMPONENTS).set(DataComponents.ITEM_NAME, text).build();
+		assertSame(text, ClientItemDisplay.decode(RegistryAccess.EMPTY, payload("")).orElseThrow().get(DataComponents.ITEM_NAME));
 		assertUnavailable(resolve(payload("")));
-		assertTrue(ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(payload("")).isEmpty());
+		assertTrue(ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(payload("")).isEmpty(), "native returned names still pass text snapshot safety");
 		item.defaults = DataComponents.COMMON_ITEM_COMPONENTS;
 		item.nameResult = text;
 		assertThrows(ClientItemDisplay.UnsafeDisplay.class, () -> ClientItemDisplay.displayName(new ItemStack(item)));
@@ -688,8 +762,9 @@ class ClientItemDisplayOpaqueComponentsTest {
 			assertTrue(ClientItemDisplay.decodeName(RegistryAccess.EMPTY, encoded).isEmpty());
 			assertTrue(ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(encoded).isEmpty());
 			item.defaults = DataComponentMap.builder().addAll(DataComponents.COMMON_ITEM_COMPONENTS).set(DataComponents.CUSTOM_NAME, text).build();
+			assertSame(text, ClientItemDisplay.decode(RegistryAccess.EMPTY, payload("")).orElseThrow().get(DataComponents.CUSTOM_NAME));
 			assertUnavailable(resolve(payload("")));
-			assertTrue(ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(payload("")).isEmpty());
+			assertTrue(ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(payload("")).isEmpty(), "native returned names still pass text snapshot safety");
 			item.defaults = DataComponents.COMMON_ITEM_COMPONENTS;
 			item.nameResult = text;
 			assertThrows(ClientItemDisplay.UnsafeDisplay.class, () -> ClientItemDisplay.displayName(new ItemStack(item)));
@@ -735,19 +810,178 @@ class ClientItemDisplayOpaqueComponentsTest {
 		assertEquals("hook value", hooked.stack().get(DataComponents.ITEM_NAME).getString(), "known hook values are owned, not only validated");
 	}
 
-	@Test void ordinaryWorkingCopyDetachesDefaultLoreAndRetainsNativeAdventurePredicates() {
+	@Test void descriptionHookAliasedLowerNameCannotQuoteTheInheritedCustomName() {
+		MutableComponent shared = Component.literal("Shared Local Custom").withColor(0x13579B)
+			.withStyle(style -> style.withItalic(true));
+		item.defaults = DataComponentMap.builder().addAll(item.defaults).set(DataComponents.CUSTOM_NAME, shared).build();
+		item.descriptionHook = stack -> stack.set(DataComponents.ITEM_NAME, stack.get(DataComponents.CUSTOM_NAME));
+		item.nameHook = stack -> { throw new AssertionError("native custom-name selection must not call getName"); };
+		String encoded = payload("");
+		List<Component> returnedNames = new ArrayList<>();
+		for (int attempt = 0; attempt < 2; attempt++) {
+			var display = resolve(encoded);
+			assertFalse(display.stack().isEmpty());
+			assertSame(shared, display.stack().getHoverName());
+			Component chat = ClientItemDisplay.decodeName(RegistryAccess.EMPTY, encoded).orElseThrow();
+			Component decoded = ClientItemDisplay.displayName(ClientItemDisplay.decode(RegistryAccess.EMPTY, encoded).orElseThrow());
+			for (Component name : List.of(display.name(), chat, decoded)) {
+				assertEquals(shared, name, "the selected inherited name retains style and is not quoted");
+				assertNotSame(shared, name);
+				assertNull(findTranslatable(name, ContentChatTemplate.QUOTE_KEY));
+				returnedNames.add(name);
+			}
+		}
+		assertEquals(1, ClientItemDisplay.decodeMisses()); assertEquals(0, item.nameCalls);
+		shared.append(" changed later");
+		for (Component name : returnedNames) {
+			assertEquals("Shared Local Custom", name.getString(), "returned names own their text despite local source mutation");
+			assertEquals(0x13579B, name.getStyle().getColor().getValue()); assertTrue(name.getStyle().isItalic());
+		}
+	}
+
+	@Test void fallbackNameHookCannotRetroactivelyMakeItsNewItemNameAnExplicitSelection() {
+		MutableComponent returned = Component.literal("Native Fallback Result").withColor(0x765432)
+			.withStyle(style -> style.withBold(true));
+		item.nameResult = returned;
+		item.nameHook = stack -> stack.set(DataComponents.ITEM_NAME, returned);
+		String encoded = payload("");
+		List<Component> snapshots = new ArrayList<>();
+		for (int attempt = 0; attempt < 2; attempt++) {
+			var display = resolve(encoded);
+			assertFalse(display.stack().isEmpty());
+			Component chat = ClientItemDisplay.decodeName(RegistryAccess.EMPTY, encoded).orElseThrow();
+			for (Component name : List.of(display.name(), chat)) {
+				assertEquals(returned, name, "getName returned this value before the new field could participate in selection");
+				assertNotSame(returned, name); assertNull(findTranslatable(name, ContentChatTemplate.QUOTE_KEY));
+				snapshots.add(name);
+			}
+		}
+		ItemStack caller = new ItemStack(item);
+		Component publicName = ClientItemDisplay.displayName(caller);
+		assertEquals(returned, publicName); assertNotSame(returned, publicName);
+		assertNull(findTranslatable(publicName, ContentChatTemplate.QUOTE_KEY)); snapshots.add(publicName);
+		assertNull(caller.get(DataComponents.ITEM_NAME), "public displayName never publishes the hook's mutation into its caller");
+		assertEquals(5, item.nameCalls, "each operation invokes fallback getName once, not again to infer provenance");
+		assertEquals(1, ClientItemDisplay.decodeMisses());
+		returned.append(" changed later");
+		for (Component snapshot : snapshots) {
+			assertEquals("Native Fallback Result", snapshot.getString()); assertTrue(snapshot.getStyle().isBold());
+		}
+	}
+
+	@Test void publicNameLookupUsesANoLoadWorkingCopyAndKeepsCallerExplicitValuesUntouched() {
+		MutableComponent name = Component.literal("caller name");
+		var tag = new net.minecraft.nbt.CompoundTag(); tag.putInt("x", 1);
+		var data = net.minecraft.world.item.component.CustomData.of(tag);
+		ItemStack caller = new ItemStack(item);
+		((PatchedDataComponentMap) caller.getComponents()).restorePatch(DataComponentPatch.builder()
+			.set(DataComponents.CUSTOM_NAME, name).set(DataComponents.CUSTOM_DATA, data).build());
+		var raw = nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess.load();
+		var patch = raw.patch((PatchedDataComponentMap) caller.getComponents());
+		item.hook = stack -> { throw new AssertionError("public name working-copy construction must not start a load hook"); };
+		item.descriptionHook = stack -> {
+			((MutableComponent) stack.get(DataComponents.CUSTOM_NAME)).append(" named");
+			stack.get(DataComponents.CUSTOM_DATA).getUnsafe().putInt("x", 2);
+		};
+		Component result = ClientItemDisplay.displayName(caller);
+		Component quote = findTranslatable(result, ContentChatTemplate.QUOTE_KEY);
+		assertNotNull(quote); assertEquals("caller name named", argComponent(quote, 0).getString());
+		assertSame(patch, raw.patch((PatchedDataComponentMap) caller.getComponents()));
+		assertSame(name, caller.get(DataComponents.CUSTOM_NAME)); assertEquals("caller name", name.getString());
+		assertSame(data, caller.get(DataComponents.CUSTOM_DATA)); assertEquals(1, data.getUnsafe().getInt("x"));
+		assertThrows(ClientItemDisplay.UnsafeDisplay.class,
+			() -> ClientDisplayWorkingCopy.stack(caller, 0, new ClientItemDisplay.Validation(0, 4096)),
+			"a spent root allowance refuses before working-copy construction");
+		assertSame(patch, raw.patch((PatchedDataComponentMap) caller.getComponents()));
+	}
+
+	@Test void canonicalSizeTerminalKeepsDefaultIconAndRegistryNameWithoutInvokingNameHooks() {
+		MutableComponent localName = Component.literal("local custom name");
+		ItemLore localLore = new ItemLore(List.of(Component.literal("local default lore")));
+		item.defaults = DataComponentMap.builder().addAll(item.defaults).set(DataComponents.CUSTOM_NAME, localName)
+			.set(DataComponents.LORE, localLore).set(persistent, opaque).build();
+		item.descriptionHook = stack -> { throw new AssertionError("terminal must not derive a description name"); };
+		item.nameHook = stack -> { throw new AssertionError("terminal must not derive an item name"); };
+		String terminal = "{\"id\":\"" + itemId() + "\"}";
+		for (int attempt = 0; attempt < 3; attempt++) {
+			var display = resolve(terminal);
+			assertFalse(display.stack().isEmpty());
+			assertSame(item, display.stack().getItem()); assertEquals(1, display.stack().getCount());
+			assertSame(localName, display.stack().get(DataComponents.CUSTOM_NAME));
+			assertSame(localLore, display.stack().get(DataComponents.LORE));
+			assertSame(opaque, display.stack().get(persistent));
+			assertEquals("fallback.registry.label", translatableKey(display.name()));
+			assertTrue(ClientItemDisplay.decodeName(RegistryAccess.EMPTY, terminal).isEmpty());
+			assertTrue(ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(terminal).isEmpty());
+		}
+		assertEquals(1, ClientItemDisplay.decodeMisses());
+		assertEquals(0, item.nameCalls);
+		assertTrue(ClientItemDisplay.cachedTransmittedPatch(RegistryAccess.EMPTY, itemId(), terminal).orElseThrow().isEmpty());
+		assertUnavailable(ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:stone", "fallback.registry.label", terminal));
+		for (@Nullable String unavailable : new String[] {null, "", terminal + "x", "{\"id\":\"" + itemId() + "\",\"components\":null}",
+			"{\"id\":\"" + itemId() + "\",\"unknown\":0}", "{\"id\":\"Bad ID\"}"}) {
+			assertUnavailable(resolve(unavailable));
+		}
+		item.hook = stack -> ((PatchedDataComponentMap) stack.getComponents())
+			.restorePatch(DataComponentPatch.builder().set(persistent, new Opaque()).build());
+		assertUnavailable(resolve(terminal));
+	}
+
+	@Test void terminalChatKeepsRegistryLabelExactCountAndSelectionReference() {
+		String terminal = "{\"id\":\"" + itemId() + "\"}";
+		var entry = new ClientInventory.EntryView("exact-variant", itemId(), "fallback.registry.label", terminal,
+			9007199254740993L, false, InventoryS2CPacket.Status.READY, "take");
+		item.nameHook = stack -> { throw new AssertionError("terminal chat does not call getName"); };
+		var decoder = ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY);
+		Component message = ContentChatComposer.inventoryMessage(Component.literal("Steve"), Component.literal("Chest"),
+			entry, decoder, type -> "{content}").orElseThrow();
+		Component count = findTranslatable(message, ContentChatTemplate.ITEM_COUNT_KEY);
+		assertNotNull(count);
+		assertEquals("fallback.registry.label", translatableKey(argComponent(count, 0)));
+		assertEquals("9007199254740993", argText(count, 1));
+		assertFalse(entry.fallback()); assertEquals("exact-variant", entry.key());
+		assertNoHover(message);
+	}
+
+	@Test void defaultLoreRemainsLocallyInheritedWithoutOwnedCopyOrIconSuppression() {
 		MutableComponent line = Component.literal("lore before");
 		ItemLore lore = new ItemLore(List.of(line));
 		item.defaults = DataComponentMap.builder().addAll(DataComponents.COMMON_ITEM_COMPONENTS).set(DataComponents.LORE, lore).build();
 		ItemStack naming = ClientItemDisplay.decode(RegistryAccess.EMPTY, payload("")).orElseThrow();
-		assertNotSame(lore, naming.get(DataComponents.LORE));
-		assertNotSame(line, naming.get(DataComponents.LORE).lines().getFirst());
+		assertSame(lore, naming.get(DataComponents.LORE));
+		assertSame(line, naming.get(DataComponents.LORE).lines().getFirst());
 		assertEquals(lore.styledLines().getFirst().getStyle(), naming.get(DataComponents.LORE).styledLines().getFirst().getStyle());
 		line.append(" changed");
-		assertEquals("lore before", naming.get(DataComponents.LORE).lines().getFirst().getString());
-		assertEquals("lore before", naming.get(DataComponents.LORE).styledLines().getFirst().getString());
+		assertEquals("lore before changed", naming.get(DataComponents.LORE).lines().getFirst().getString());
+		assertSame(lore, resolve(payload("")).stack().get(DataComponents.LORE));
+		assertEquals(1, ClientItemDisplay.cachedEntryCount());
+	}
 
-		item.defaults = DataComponents.COMMON_ITEM_COMPONENTS;
+	@Test void inheritedNestedAndConversionDefaultsAreNeitherSanitizedNorDeepCopied() {
+		ItemStack child = new ItemStack(Items.BLUE_SHULKER_BOX);
+		child.set(DataComponents.LORE, new ItemLore(List.of(Component.literal("local nested lore"))));
+		child.set(DataComponents.CONTAINER, net.minecraft.world.item.component.ItemContainerContents.fromItems(List.of(new ItemStack(Items.DIAMOND))));
+		var container = net.minecraft.world.item.component.ItemContainerContents.fromItems(List.of(child));
+		var bundle = new net.minecraft.world.item.component.BundleContents(List.of(child));
+		var projectiles = ChargedProjectiles.of(child);
+		var food = new net.minecraft.world.food.FoodProperties(1, 0.1F, false, 1.6F, Optional.of(child), List.of());
+		item.defaults = DataComponentMap.builder().addAll(item.defaults).set(DataComponents.CONTAINER, container)
+			.set(DataComponents.BUNDLE_CONTENTS, bundle).set(DataComponents.CHARGED_PROJECTILES, projectiles).set(DataComponents.FOOD, food).build();
+		String encoded = payload("");
+		for (int attempt = 0; attempt < 2; attempt++) {
+			var display = resolve(encoded);
+			assertFalse(display.stack().isEmpty());
+			assertSame(container, display.stack().get(DataComponents.CONTAINER));
+			assertSame(bundle, display.stack().get(DataComponents.BUNDLE_CONTENTS));
+			assertSame(projectiles, display.stack().get(DataComponents.CHARGED_PROJECTILES));
+			assertSame(food, display.stack().get(DataComponents.FOOD));
+			assertSame(child, display.stack().get(DataComponents.FOOD).usingConvertsTo().orElseThrow());
+			assertTrue(ClientItemDisplay.cachedTransmittedPatch(RegistryAccess.EMPTY, itemId(), encoded).orElseThrow().isEmpty());
+		}
+		assertEquals(1, ClientItemDisplay.decodeMisses());
+	}
+
+	@Test void explicitAdventurePredicatesRemainOwnedAcrossCacheHits() {
 		net.minecraft.nbt.CompoundTag predicateData = new net.minecraft.nbt.CompoundTag(); predicateData.putInt("x", 1);
 		ItemStack fixture = new ItemStack(item);
 		fixture.set(DataComponents.CAN_BREAK, new net.minecraft.world.item.AdventureModePredicate(List.of(
@@ -766,6 +1000,39 @@ class ClientItemDisplayOpaqueComponentsTest {
 		assertEquals(misses, ClientItemDisplay.decodeMisses());
 	}
 
+	@Test void transmittedPatchWinsOverConstructorPatchWithoutDroppingUnrelatedHookAdditionsOrRemovals() {
+		item.defaults = DataComponentMap.builder().addAll(item.defaults).set(DataComponents.ITEM_NAME, Component.literal("local default name")).build();
+		MutableComponent hookName = Component.literal("constructor name");
+		item.hook = stack -> {
+			stack.set(DataComponents.CUSTOM_NAME, hookName);
+			stack.remove(DataComponents.ITEM_NAME);
+			stack.set(DataComponents.CUSTOM_MODEL_DATA, new CustomModelData(4));
+		};
+		String encoded = payload("\"minecraft:custom_name\":\"\\\"transmitted name\\\"\"");
+		ItemStack naming = ClientItemDisplay.decode(RegistryAccess.EMPTY, encoded).orElseThrow();
+		assertEquals("transmitted name", naming.get(DataComponents.CUSTOM_NAME).getString());
+		assertNull(naming.get(DataComponents.ITEM_NAME));
+		assertEquals(new CustomModelData(4), naming.get(DataComponents.CUSTOM_MODEL_DATA));
+		assertNotSame(hookName, naming.get(DataComponents.CUSTOM_NAME));
+		hookName.append(" changed");
+		assertEquals("transmitted name", naming.get(DataComponents.CUSTOM_NAME).getString());
+	}
+
+	@Test void explicitLoreReintroducedByConstructorOrNamingHookStillSuppressesOrdinaryIcons() {
+		ItemLore lore = new ItemLore(List.of(Component.literal("explicit secret")));
+		String encoded = payload("\"!minecraft:lore\":{}");
+		item.hook = stack -> stack.set(DataComponents.LORE, lore);
+		var constructor = resolve(encoded);
+		assertTrue(constructor.stack().isEmpty(), "the real render constructor runs after transmitted removal and must be fenced");
+		assertEquals("fixture-derived name", constructor.name().getString());
+		item.hook = stack -> {};
+		item.nameHook = stack -> stack.set(DataComponents.LORE, lore);
+		var named = resolve(encoded);
+		assertTrue(named.stack().isEmpty(), "a name hook's new explicit Lore is also guarded");
+		assertEquals("fixture-derived name", named.name().getString());
+		assertEquals(1, ClientItemDisplay.decodeMisses());
+	}
+
 	private String namedPayload(JsonObject text) {
 		JsonObject stack = new JsonObject(); stack.addProperty("id", itemId());
 		JsonObject components = new JsonObject(); components.addProperty("minecraft:custom_name", text.toString()); stack.add("components", components);
@@ -782,11 +1049,28 @@ class ClientItemDisplayOpaqueComponentsTest {
 		assertTrue(ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(payload("")).isEmpty());
 	}
 
+	@Test void explicitItemNameCannotBypassSafetyOfTheNativeSelectedInheritedCustomName() {
+		ItemStack nested = new ItemStack(Items.STONE); nested.set(persistent, opaque);
+		item.defaults = DataComponentMap.builder().addAll(item.defaults).set(DataComponents.CUSTOM_NAME, hoverItem(nested)).build();
+		String shadowed = payload("\"minecraft:item_name\":\"\\\"safe explicit item name\\\"\"");
+		assertUnavailable(resolve(shadowed));
+		assertTrue(ClientItemDisplay.decodeName(RegistryAccess.EMPTY, shadowed).isEmpty(), "native selected text is guarded even when a lower-priority explicit name is safe");
+		String removed = payload("\"!minecraft:custom_name\":{},\"minecraft:item_name\":\"\\\"safe explicit item name\\\"\"");
+		for (int attempt = 0; attempt < 2; attempt++) {
+			var display = resolve(removed);
+			assertFalse(display.stack().isEmpty());
+			assertEquals("safe explicit item name", display.stack().getHoverName().getString());
+			assertEquals(ContentChatTemplate.CUSTOM_ITEM_NAME_KEY, translatableKey(display.name()));
+			assertEquals(display.name(), ClientItemDisplay.decodeName(RegistryAccess.EMPTY, removed).orElseThrow());
+		}
+		assertEquals(0, codecCalls);
+	}
+
 	@Test void writablePagesRejectUnknownValueShapesWithoutFormattingThem() {
 		@SuppressWarnings({"unchecked", "rawtypes"})
 		List<Filterable<String>> unsafePages = (List) List.of(Filterable.passThrough(opaque));
-		item.defaults = DataComponentMap.builder().addAll(item.defaults)
-			.set(DataComponents.WRITABLE_BOOK_CONTENT, new WritableBookContent(unsafePages)).build();
+		WritableBookContent book = new WritableBookContent(unsafePages);
+		item.hook = stack -> stack.set(DataComponents.WRITABLE_BOOK_CONTENT, book);
 		assertUnavailable(resolve(payload("")));
 		assertTrue(ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(payload("")).isEmpty());
 		assertEquals(0, opaque.comparisons);
@@ -856,9 +1140,12 @@ class ClientItemDisplayOpaqueComponentsTest {
 		item.defaults = DataComponentMap.builder().addAll(DataComponents.COMMON_ITEM_COMPONENTS)
 			.set(DataComponents.LORE, new ItemLore(List.of(Component.literal("redacted")))).build();
 		var lore = resolve(payload(""));
-		assertTrue(lore.stack().isEmpty(), "ordinary Lore remains icon-only refusal");
+		assertFalse(lore.stack().isEmpty(), "inherited Lore is not part of Ping's explicit-patch redaction policy");
 		assertEquals("fixture-derived name", lore.name().getString(), "safe text still survives ordinary Lore policy");
 		assertTrue(ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY).apply(payload("")).isPresent());
+		item.defaults = DataComponents.COMMON_ITEM_COMPONENTS;
+		item.hook = stack -> stack.set(DataComponents.LORE, new ItemLore(List.of(Component.literal("explicit redacted"))));
+		assertTrue(resolve(payload("")).stack().isEmpty(), "a constructor cannot restore explicitly stripped Lore");
 	}
 
 	@Test
@@ -868,7 +1155,7 @@ class ClientItemDisplayOpaqueComponentsTest {
 		client.presentationReset(100, 1);
 		long request = client.open(new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest"),
 			BlockFace.NORTH, "entity_block");
-		client.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(10, 20, 3, 5)).stamp(100, 1));
+		client.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(5, 3, 5, 5)).stamp(100, 1));
 		client.accept(InventoryS2CPacket.policy(7, 100, 1, java.util.Set.of("entity_block")));
 		String encoded = payload("");
 		var entry = new InventoryS2CPacket.Entry("exact-variant", itemId(), "fallback.registry.label", encoded,
@@ -901,7 +1188,7 @@ class ClientItemDisplayOpaqueComponentsTest {
 		return Component.literal("hover name").withStyle(style -> style.withHoverEvent(new HoverEvent(HoverEvent.Action.SHOW_ITEM, info)));
 	}
 
-	private ClientItemDisplay.Display resolve(String encoded) {
+	private ClientItemDisplay.Display resolve(@Nullable String encoded) {
 		return ClientItemDisplay.resolve(RegistryAccess.EMPTY, itemId(), "fallback.registry.label", encoded);
 	}
 	private String itemId() { return BuiltInRegistries.ITEM.getKey(item).toString(); }
@@ -911,16 +1198,16 @@ class ClientItemDisplayOpaqueComponentsTest {
 		assertEquals("fallback.registry.label", assertInstanceOf(TranslatableContents.class, display.name().getContents()).getKey());
 	}
 
-	private static Component findTranslatable(Component component, String key) {
+	private static @Nullable Component findTranslatable(Component component, String key) {
 		if (component.getContents() instanceof TranslatableContents contents && contents.getKey().equals(key)) return component;
 		for (Component sibling : component.getSiblings()) {
-			Component found = findTranslatable(sibling, key);
+			@Nullable Component found = findTranslatable(sibling, key);
 			if (found != null) return found;
 		}
 		if (component.getContents() instanceof TranslatableContents contents)
 			for (Object arg : contents.getArgs())
 				if (arg instanceof Component child) {
-					Component found = findTranslatable(child, key);
+					@Nullable Component found = findTranslatable(child, key);
 					if (found != null) return found;
 				}
 		return null;
@@ -951,12 +1238,30 @@ class ClientItemDisplayOpaqueComponentsTest {
 		int value;
 		int comparisons;
 		@Override public int hashCode() { throw new AssertionError("opaque display value must not be hashed"); }
-		@Override public boolean equals(Object other) {
+		@Override public boolean equals(@Nullable Object other) {
 			comparisons++;
 			if (other != null) throw new AssertionError("opaque display value must not be compared");
 			return false;
 		}
 		@Override public String toString() { throw new AssertionError("opaque display value must not be formatted"); }
+	}
+
+	@NotNullByDefault
+	private static final class DefaultWrapper implements DataComponentMap {
+		private final DataComponentMap source;
+		int nonNameReads, customNameReads, itemNameReads;
+		boolean rejectNonNameReads;
+		DefaultWrapper(DataComponentMap source) { this.source = source; }
+		@Override public <T> @Nullable T get(DataComponentType<? extends T> type) {
+			if (type == DataComponents.CUSTOM_NAME) customNameReads++;
+			else if (type == DataComponents.ITEM_NAME) itemNameReads++;
+			else {
+				nonNameReads++;
+				if (rejectNonNameReads) throw new AssertionError("name lookup must not read non-name defaults");
+			}
+			return source.get(type);
+		}
+		@Override public java.util.Set<DataComponentType<?>> keySet() { throw new AssertionError("Ping must not enumerate default wrappers"); }
 	}
 
 	private static final class FixtureItem extends Item {

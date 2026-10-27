@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.HexFormat;
 import java.util.Arrays;
@@ -23,16 +24,14 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ServerConfigVarNumbersTest {
-	// Independent fixed-shape v3 wire fixture: physical-only mask, safe ordinary
-	// fields, positive scalar/cap values and exact 1x multiplier quanta. The two
-	// size-scale leaves carry one quarter-multiplier quanta varint and no
-	// unlimited flag. The final strict notice byte is appended without changing any
-	// original offsets. No codec writes it.
-	private static final byte[] UPDATE = hex(
+	// Independent v4 fixture, not codec-produced: pending memory carries mode=1
+	// and finite=65; tracking server slots=128 is a two-byte varint. In-range
+	// non-step counts remain literal integers. Size leaves have no mode byte.
+	private static final byte @Unmodifiable [] UPDATE = hex(
 		"20 00 01 01 01 07 "
-			+ "00 01 01 01 00 01 00 01 00 01 00 01 00 04 00 08 "
-			+ "01 00 01 00 01 00 01 00 04 00 04 00 08 01 01 01 04 04 01");
-	private static final byte[] SNAPSHOT = concat(hex("01 01"), UPDATE, 1, UPDATE.length - 1);
+			+ "00 10 01 41 07 00 11 00 43 00 61 00 03 00 04 00 08 "
+			+ "03 00 09 00 51 00 80 01 00 04 00 04 00 08 00 01 01 04 04 01");
+	private static final byte @Unmodifiable [] SNAPSHOT = concat(hex("01 01"), UPDATE, 1, UPDATE.length - 1);
 
 	@ParameterizedTest
 	@ValueSource(strings = {"00", "01", "7f", "80 01", "ff 7f", "80 80 01", "ff ff ff ff 07"})
@@ -106,13 +105,13 @@ class ServerConfigVarNumbersTest {
 	}
 
 	@ParameterizedTest
-	@ValueSource(ints = {0, 1, 3, 4, 5, 7, 8, 9, 11, 13, 15, 17, 19, 21, 22, 24, 26, 28, 30, 32, 34, 35, 36, 37, 38, 39})
+	@ValueSource(ints = {0, 1, 3, 4, 5, 7, 9, 10, 12, 14, 16, 18, 20, 22, 23, 25, 27, 29, 32, 34, 36, 37, 38, 39, 40, 41})
 	void everyUpdateVariableIntRejectsOverflowWithoutServiceMutation(int offset) {
 		assertRejectedUpdate(replace(UPDATE, offset, hex("81 80 80 80 10")));
 	}
 
 	@ParameterizedTest
-	@ValueSource(ints = {2, 4, 5, 6, 8, 9, 10, 12, 14, 16, 18, 20, 22, 23, 25, 27, 29, 31, 33, 35, 36, 37, 38, 39, 40})
+	@ValueSource(ints = {2, 4, 5, 6, 8, 10, 11, 13, 15, 17, 19, 21, 23, 24, 26, 28, 30, 33, 35, 37, 38, 39, 40, 41, 42})
 	void everySnapshotVariableIntRejectsOverflowRatherThanPublishingAView(int offset) {
 		var buf = buffer(replace(SNAPSHOT, offset, hex("81 80 80 80 10")));
 		try {
@@ -138,24 +137,21 @@ class ServerConfigVarNumbersTest {
 
 	@Test
 	void legalMaximumRetainedCapAndOriginalIntStillDecodeExactly() {
-		byte[] cap = replace(UPDATE, 7, hex("ff ff ff ff 07"));
+		byte[] cap = replace(UPDATE, 7, hex("80 08"));
 		byte[] ms = replace(cap, 3, hex("ff ff ff ff 07"));
 		var buf = buffer(ms);
 		try {
 			var packet = ServerConfigUpdateC2SPacket.readSafe(buf);
 			assertFalse(packet.isCorrupt());
 			assertEquals(Integer.MAX_VALUE, packet.msToRegenerate());
-			assertEquals(Integer.MAX_VALUE, packet.inventory().toSettings().getPhysicalSlotsPerTick().getValue());
+			assertEquals(1024, packet.inventory().toSettings().getPhysicalSlotsPerTick().getValue());
 			assertTrue(ServerConfigUpdateService.apply(true, current(), packet.update()).applied());
 		} finally { buf.release(); }
 	}
 
 	@Test
-	void independentFixturesPinOriginalBytesPlusOneNoticeByteAndUnchangedRequest() {
-		var inventory = InventoryConfigValues.defaults();
-		for (Field field : Field.values()) {
-			inventory = inventory.with(field, new Value(false, BigDecimal.ONE));
-		}
+	void independentFixturesPinMemoryModeAndRetainedFiniteBytesAndUnchangedRequest() {
+		var inventory = fixtureInventory();
 		assertEncoding(UPDATE, new ServerConfigUpdateC2SPacket(32, ChannelMode.AUTO, true, 1, 1, 7, inventory, true));
 		assertEncoding(SNAPSHOT, new ServerConfigSnapshotS2CPacket(1L, true, ChannelMode.AUTO, true, 1, 1, 7, inventory, true));
 		assertEncoding(hex("01"), new ServerConfigRequestC2SPacket(1L));
@@ -190,6 +186,20 @@ class ServerConfigVarNumbersTest {
 		for (String invalid : new String[] {"02", "ff"}) {
 			assertRejectedUpdate(replace(UPDATE, UPDATE.length - 1, hex(invalid)));
 		}
+	}
+
+	@Test
+	void independentMemoryModeRejectsMalformedModesAndSupersededScalarShape() {
+		for (String invalid : new String[] {"02", "ff"}) {
+			assertRejectedUpdate(replace(UPDATE, 8, hex(invalid)));
+			assertCorruptAndDrained(replace(SNAPSHOT, 9, hex(invalid)), ServerConfigSnapshotS2CPacket::readSafe);
+		}
+		assertRejectedUpdate(replace(UPDATE, 8, new byte[0]));
+		assertCorruptAndDrained(replace(SNAPSHOT, 9, new byte[0]), ServerConfigSnapshotS2CPacket::readSafe);
+		// Even with unlimited selected, the retained finite memory value must be legal.
+		assertRejectedUpdate(replace(UPDATE, 9, hex("0f")));
+		assertRejectedUpdate(replace(UPDATE, 9, hex("81 08")));
+		assertRejectedUpdate(replace(UPDATE, 7, hex("81 08")));
 	}
 
 	@Test
@@ -258,6 +268,27 @@ class ServerConfigVarNumbersTest {
 	}
 	private static ServerConfigSnapshot current() {
 		return new ServerConfigSnapshot(true, ChannelMode.AUTO, true, 1000, 5, 23);
+	}
+	private static InventoryConfigValues fixtureInventory() {
+		var values = InventoryConfigValues.defaults();
+		for (Field field : Field.values()) {
+			int integer = switch (field) {
+				case PHYSICAL_SLOTS_PER_TICK -> 16;
+				case PENDING_MEMORY_MIB -> 65;
+				case PREVIEW_PERIOD_TICKS -> 7;
+				case PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD -> 17;
+				case PREVIEW_MAX_SLOTS_PER_CLIENT -> 67;
+				case PREVIEW_MAX_SLOTS_SERVER -> 97;
+				case PREVIEW_MAX_TARGETS_PER_CLIENT, TRACKING_PERIOD_TICKS -> 3;
+				case TRACKING_MAX_VARIANTS_PER_TARGET -> 9;
+				case TRACKING_MAX_SLOTS_PER_TARGET -> 81;
+				case TRACKING_MAX_SLOTS_SERVER -> 128;
+				case TRACKING_RESYNC_MIN_PERIODS -> 0;
+				default -> 1;
+			};
+			values = values.with(field, new Value(field == Field.PENDING_MEMORY_MIB, BigDecimal.valueOf(integer)));
+		}
+		return values;
 	}
 	private static FriendlyByteBuf buffer(byte[] raw) {
 		return new FriendlyByteBuf(Unpooled.wrappedBuffer(raw));

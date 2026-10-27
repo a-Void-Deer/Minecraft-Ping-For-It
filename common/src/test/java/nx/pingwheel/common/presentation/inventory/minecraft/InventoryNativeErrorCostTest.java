@@ -53,7 +53,7 @@ class InventoryNativeErrorCostTest {
 		var stack = new ItemStack(Items.STONE); stack.set(DataComponents.WRITTEN_BOOK_CONTENT, book(legal));
 		var frozen = freeze(stack, new InventoryResidentAccessFields());
 		assertEquals(InventoryIdentityMode.EXACT, frozen.identityMode());
-		var original = DataComponentMap.CODEC.encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), stack.getComponents()).result().orElseThrow();
+		var original = net.minecraft.core.component.DataComponentPatch.CODEC.encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), ((net.minecraft.core.component.PatchedDataComponentMap) stack.getComponents()).asPatch()).result().orElseThrow();
 		assertArrayEquals(InventoryItemCodec.canonicalTag(original), frozen.canonicalForCatalog());
 		stack.set(DataComponents.WRITTEN_BOOK_CONTENT, book(escaped));
 		assertEquals(InventoryIdentityMode.ALL_VARIANTS, freeze(stack, new InventoryResidentAccessFields()).identityMode());

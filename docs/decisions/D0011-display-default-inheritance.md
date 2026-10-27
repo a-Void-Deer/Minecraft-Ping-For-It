@@ -9,11 +9,12 @@ verification.
 ## Decision
 
 Inventory item display travels as a sparse persistent patch over the recipient's
-local prototype defaults, while variant identity keeps the complete
-server-effective native persistent semantics. Unmodified defaults that need no
-special display projection may be omitted; intentional strips remain explicit
-suppressions. Display inheritance uses no default fingerprint, handshake or
-synchronized default version.
+local prototype defaults, while variant identity keeps the actual explicit
+persistent patch. Defaults are inherited without being transported or traversed
+by Ping. Ordinary intentional strips use explicit suppressions; the terminal
+size-only exception is explained by
+[D0012](D0012-explicit-patch-identity-and-display.md). Display inheritance uses no
+default fingerprint, handshake or synchronized default version.
 
 [Inventory](../architecture/presentation/inventory.md#display-projection) owns
 the patch, identity separation and display ladder.
@@ -31,9 +32,11 @@ approximate without changing variant separation, counts or selection meaning.
 Local defaults are a property of each client installation rather than a
 negotiated session value. This choice accepts that two ends may render different
 defaults for the same marker and does not make display a certificate that both
-installations share a default. Intentional strips therefore still need explicit
-suppression, and an unsafe local default still uses the existing fail-soft
-display path.
+installations share a default. Ordinary intentional strips therefore still need
+explicit suppression, but inheritance does not certify or deep-copy the local
+default graph. Minecraft and installed mods own the native default behavior;
+Ping's isolation and validation boundary is the explicit patch, including
+entries introduced there by construction or hooks.
 
 ## Why not other approaches
 
@@ -42,10 +45,12 @@ display path.
 - Do not add a default fingerprint, handshake or synchronized default version:
   it would make display depend on a new cross-end negotiation without improving
   exact identity or counts.
-- Do not treat an omitted default as safe: a client's local default may be
-  unsafe, malformed or opaque, so isolation and fail-soft remain mandatory.
-- Do not express an intentional strip as omission: local prototype defaults
-  would restore the data the display was meant to hide.
+- Do not treat an omitted default as a safety certificate or require Ping to
+  authenticate the effective default graph: omission selects native inheritance,
+  not Ping-owned default isolation.
+- Do not express an ordinary intentional strip as omission: local prototype
+  defaults would restore the data the display was meant to hide. The bounded
+  terminal size exception deliberately accepts that trade-off.
 
 ## Consequences
 

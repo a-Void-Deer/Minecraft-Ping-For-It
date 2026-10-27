@@ -14,6 +14,7 @@ import nx.pingwheel.common.config.IntLimit;
 import nx.pingwheel.common.config.InventorySettings;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.presentation.budget.BudgetDelayMonitor;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink.DelayEvent;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink.DelayState;
@@ -28,30 +29,39 @@ import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.Nullable;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Production producer seams; typed diagnostics only, with no Minecraft startup. */
 class InventoryBudgetDelayIntegrationTest {
 
 	static final class RecordingSink implements BudgetDelaySink {
-		record Event(Module module, long cycleId, WorkItem item, boolean firstItemObservation,
+		record Event(Module module, long cycleId, long serverTick, WorkItem item, boolean firstItemObservation,
 			int newReasonBits, Quantity quantity) {
 			boolean hasReason(Reason reason) { return (newReasonBits & reason.bit()) != 0; }
 		}
-		record StateCall(Module module, long cycleId, DelayState state) {}
-		record EndCall(Module module, long cycleId) {}
+		record StateCall(Module module, long cycleId, long serverTick, DelayState state) {}
+		record EndCall(Module module, long cycleId, long serverTick) {}
+		final BudgetDelaySink delegate;
+		RecordingSink() { this(BudgetDelaySink.NONE); }
+		RecordingSink(BudgetDelaySink delegate) { this.delegate = delegate; }
 		final List<Event> events = new ArrayList<>();
 		final List<StateCall> states = new ArrayList<>();
 		final List<EndCall> ends = new ArrayList<>();
 		@Override public void observe(DelayEvent event) {
-			events.add(new Event(event.module(), event.cycleId(), event.item(), event.firstItemObservation(), event.newReasonBits(), event.quantity()));
+			events.add(new Event(event.module(), event.cycleId(), event.serverTick(), event.item(), event.firstItemObservation(), event.newReasonBits(), event.quantity()));
+			delegate.observe(event);
 		}
-		@Override public void state(Module module, long cycleId, long nowNanos, DelayState state) { states.add(new StateCall(module, cycleId, state)); }
-		@Override public void endCycle(Module module, long cycleId, long nowNanos) { ends.add(new EndCall(module, cycleId)); }
+		@Override public void state(Module module, long cycleId, long serverTick, DelayState state) {
+			states.add(new StateCall(module, cycleId, serverTick, state)); delegate.state(module, cycleId, serverTick, state);
+		}
+		@Override public void endCycle(Module module, long cycleId, long serverTick) {
+			ends.add(new EndCall(module, cycleId, serverTick)); delegate.endCycle(module, cycleId, serverTick);
+		}
 		boolean sawReason(Module module, Reason reason) { return events.stream().anyMatch(event -> event.module() == module && event.hasReason(reason)); }
 		long endCount(Module module, long cycleId) { return ends.stream().filter(call -> call.module() == module && call.cycleId() == cycleId).count(); }
-		DelayState lastState(Module module, long cycleId) {
-			DelayState last = null;
+		@Nullable DelayState lastState(Module module, long cycleId) {
+			@Nullable DelayState last = null;
 			for (StateCall call : states) if (call.module() == module && call.cycleId() == cycleId) last = call.state();
 			return last;
 		}
@@ -61,8 +71,8 @@ class InventoryBudgetDelayIntegrationTest {
 		ThrowingSink(boolean linkage) { this.linkage = linkage; }
 		private void fail() { if (linkage) throw new LinkageError("monitoring failure"); throw new IllegalStateException("monitoring failure"); }
 		@Override public void observe(DelayEvent event) { fail(); }
-		@Override public void state(Module module, long cycleId, long nowNanos, DelayState state) { fail(); }
-		@Override public void endCycle(Module module, long cycleId, long nowNanos) { fail(); }
+		@Override public void state(Module module, long cycleId, long serverTick, DelayState state) { fail(); }
+		@Override public void endCycle(Module module, long cycleId, long serverTick) { fail(); }
 	}
 	private record ScriptResult(int reads, List<Integer> readSlots, List<InventoryS2CPacket.Kind> kinds,
 		long retained, long reserved, long previewPeriod, long trackingPeriod) {}
@@ -116,7 +126,7 @@ class InventoryBudgetDelayIntegrationTest {
 			preview.baselineId(), preview.statusRevision(), preview.entries().getFirst().key(), "danger"), 1, settings);
 	}
 	private static ScriptResult runMonitoredScript(BudgetDelaySink sink) {
-		var host = new InventoryBackendTest.Host(); var settings = explicitSettings(20, 20);
+		var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 10);
 		settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1));
 		var reads = new AtomicInteger(); var slots = new ArrayList<Integer>();
 		var runtime = runtime((input, cap) -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 2) {
@@ -130,21 +140,22 @@ class InventoryBudgetDelayIntegrationTest {
 	}
 
 	@Test void physicalStepRefusalUsesPhysicalUnitsAndBlankRestoreProgresses() {
-		var sink = new RecordingSink(); var settings = explicitSettings(20, 20); settings.setPhysicalSlotsPerTick(IntLimit.finite(1));
+		var sink = new RecordingSink(); var settings = explicitSettings(10, 10); settings.setPhysicalSlotsPerTick(IntLimit.finite(1));
 		var owner = new UUID(41, 1); var reads = new AtomicInteger();
 		try (var runtime = runtime((input, cap) -> Optional.of(blankInclusiveSource(input, reads)), settings, sink)) {
-			runtime.advance(0, settings);
+			runtime.advance(1000, settings);
 			var consumer = runtime.attach(InventoryRuntimeTest.input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
 			var first = runtime.step(consumer).orElseThrow(); assertEquals(1, first.slots().size()); assertEquals(3, first.result().coverage().expected().orElseThrow());
 			int before = sink.events.size(); assertTrue(runtime.step(consumer).isEmpty());
 			assertTrue(sink.sawReason(Module.INVENTORY_PREVIEW, Reason.PHYSICAL_SLOTS));
+			assertTrue(sink.events.stream().allMatch(event -> event.cycleId() == 0 && event.serverTick() == 1000));
 			assertTrue(sink.events.subList(before, sink.events.size()).stream().noneMatch(event -> event.quantity().known() && event.quantity().unit() == Unit.LOGICAL_SLOT));
-			runtime.advance(1, settings); var blank = runtime.step(consumer).orElseThrow(); assertEquals(1, blank.slots().size()); assertNull(blank.slots().getFirst());
-			runtime.advance(2, settings); assertEquals(3, runtime.step(consumer).orElseThrow().slots().getFirst().count()); assertEquals(3, reads.get());
+			runtime.advance(1001, settings); var blank = runtime.step(consumer).orElseThrow(); assertEquals(1, blank.slots().size()); assertNull(blank.slots().getFirst());
+			runtime.advance(1002, settings); assertEquals(3, runtime.step(consumer).orElseThrow().slots().getFirst().count()); assertEquals(3, reads.get());
 		}
 	}
 	@Test void logicalRefusalReportsKnownBlankInclusiveRemainderAndRestoresWithoutRereads() {
-		var sink = new RecordingSink(); var settings = explicitSettings(20, 20); settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1));
+		var sink = new RecordingSink(); var settings = explicitSettings(10, 10); settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1));
 		var owner = new UUID(41, 2); var reads = new AtomicInteger();
 		try (var runtime = runtime((input, cap) -> Optional.of(blankInclusiveSource(input, reads)), settings, sink)) {
 			runtime.advance(0, settings); var consumer = runtime.attach(InventoryRuntimeTest.input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
@@ -157,7 +168,7 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void sharedPhysicalRoundRefusalIsObservedOnceForCompatibleConsumers() {
-		var sink = new RecordingSink(); var settings = explicitSettings(20, 20); settings.setPhysicalSlotsPerTick(IntLimit.finite(1));
+		var sink = new RecordingSink(); var settings = explicitSettings(10, 10); settings.setPhysicalSlotsPerTick(IntLimit.finite(1));
 		var owner = new UUID(41, 3); var reads = new AtomicInteger();
 		try (var runtime = runtime((input, cap) -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 3)), settings, sink)) {
 			runtime.advance(0, settings);
@@ -170,7 +181,7 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void sharedRoundRetainsItsFirstRefusingModuleWhenThatConsumerLeaves() {
-		var sink = new RecordingSink(); var settings = explicitSettings(20, 20); settings.setPhysicalSlotsPerTick(IntLimit.finite(1));
+		var sink = new RecordingSink(); var settings = explicitSettings(10, 10); settings.setPhysicalSlotsPerTick(IntLimit.finite(1));
 		var owner = new UUID(41, 12); var reads = new AtomicInteger();
 		try (var runtime = runtime((input, cap) -> Optional.of(blankInclusiveSource(input, reads)), settings, sink)) {
 			runtime.advance(0, settings);
@@ -188,7 +199,7 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void separateLogicalRequestsStayDistinctWithoutDuplicatingSharedPhysicalReads() {
-		var sink = new RecordingSink(); var settings = explicitSettings(20, 20);
+		var sink = new RecordingSink(); var settings = explicitSettings(10, 10);
 		settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1)); settings.getTracking().setMaxSlotsPerTarget(IntLimit.finite(1));
 		var owner = new UUID(41, 4); var reads = new AtomicInteger();
 		try (var runtime = runtime((input, cap) -> Optional.of(blankInclusiveSource(input, reads)), settings, sink)) {
@@ -204,7 +215,7 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void memoryDeferIsRetryableWhileUnavailableUnsafeEmptyAndBoundedContinuationAreNotDelayed() {
-		var settings = explicitSettings(20, 20); var sink = new RecordingSink(); var captures = new AtomicInteger(); var reads = new AtomicInteger();
+		var settings = explicitSettings(10, 10); var sink = new RecordingSink(); var captures = new AtomicInteger(); var reads = new AtomicInteger();
 		try (var runtime = runtime((input, cap) -> Optional.of(snapshotSource(input, captures, reads)), settings, sink)) {
 			runtime.advance(0, settings); var owner = new UUID(41, 5);
 			var consumer = runtime.attach(InventoryRuntimeTest.input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
@@ -233,7 +244,7 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void noAudienceAndCadenceWaitNeverClaimDelay() {
-		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 20); var reads = new AtomicInteger();
+		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 10); var reads = new AtomicInteger();
 		host.policies.put(InventoryBackendTest.A, new InventoryBackend.Policy(100, 1, Set.of("block")));
 		var runtime = runtime((input, cap) -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 2)), settings, sink);
 		try (var backend = new InventoryBackend(host, runtime, 1, sink)) {
@@ -247,23 +258,23 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void previewAndTrackingCyclesCloseOnceAcrossIngressRepeatedTicksAndSkippedPeriods() {
-		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 20);
+		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(5, 10);
 		var runtime = runtime((input, cap) -> Optional.of(new InventoryRuntimeTest.Source(input, new AtomicInteger(), 1)), settings, sink);
 		try (var backend = new InventoryBackend(host, runtime, 1, sink)) {
 			helloOpenAndSelect(backend, host, settings); long previewCycle = runtime.previewPeriodId(), trackingCycle = runtime.trackingPeriodId();
-			for (int now = 1; now <= 9; now++) { backend.handle(InventoryBackendTest.A, null, now, settings); backend.tick(now, settings); }
+			for (int now = 1; now <= 4; now++) { backend.handle(InventoryBackendTest.A, null, now, settings); backend.tick(now, settings); }
 			assertEquals(0, sink.endCount(Module.INVENTORY_PREVIEW, previewCycle)); assertEquals(0, sink.endCount(Module.INVENTORY_TRACKING, trackingCycle));
-			backend.handle(InventoryBackendTest.A, null, 10, settings); // ingress observes the real rollover first
+			backend.handle(InventoryBackendTest.A, null, 5, settings); // ingress observes the real rollover first
 			assertEquals(1, sink.endCount(Module.INVENTORY_PREVIEW, previewCycle)); assertEquals(1, runtime.previewPeriodId());
-			backend.tick(10, settings); backend.tick(10, settings); backend.tick(11, settings); assertEquals(1, sink.endCount(Module.INVENTORY_PREVIEW, previewCycle));
-			backend.tick(45, settings); assertEquals(1, sink.endCount(Module.INVENTORY_PREVIEW, 1));
+			backend.tick(5, settings); backend.tick(5, settings); backend.tick(6, settings); assertEquals(1, sink.endCount(Module.INVENTORY_PREVIEW, previewCycle));
+			backend.tick(23, settings); assertEquals(1, sink.endCount(Module.INVENTORY_PREVIEW, 1));
 			assertEquals(0, sink.endCount(Module.INVENTORY_PREVIEW, 2)); assertEquals(0, sink.endCount(Module.INVENTORY_PREVIEW, 3)); assertEquals(4, runtime.previewPeriodId());
 			assertEquals(1, sink.endCount(Module.INVENTORY_TRACKING, trackingCycle)); assertEquals(0, sink.endCount(Module.INVENTORY_TRACKING, 1)); assertEquals(2, runtime.trackingPeriodId());
-			backend.tick(45, settings); assertEquals(1, sink.endCount(Module.INVENTORY_TRACKING, trackingCycle));
+			backend.tick(23, settings); assertEquals(1, sink.endCount(Module.INVENTORY_TRACKING, trackingCycle));
 		}
 	}
 	@Test void duePreviewPublicationDelayPersistsAcrossTicksThenResolvesSameCycleWithActualFrame() {
-		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 20);
+		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 10);
 		settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1)); var reads = new AtomicInteger();
 		var runtime = runtime((input, cap) -> Optional.of(blankInclusiveSource(input, reads)), settings, sink);
 		try (var backend = new InventoryBackend(host, runtime, 1, sink)) {
@@ -280,8 +291,39 @@ class InventoryBudgetDelayIntegrationTest {
 			assertEquals(1, sink.endCount(Module.INVENTORY_PREVIEW, cycle)); assertTrue(sink.events.stream().anyMatch(event -> event.cycleId() == cycle && event.hasReason(Reason.LOGICAL_CLIENT_OR_TARGET)));
 		}
 	}
+	@Test void backendUsesServerTicksAcrossAccountingPeriodsAndIngressCannotAccelerateNotice() {
+		var notices = new ArrayList<Set<Module>>(); var warnings = new ArrayList<BudgetDelayMonitor.CycleSummary>();
+		var monitor = new BudgetDelayMonitor(warnings::add, modules -> { notices.add(Set.copyOf(modules)); return true; });
+		var sink = new RecordingSink(monitor); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 10);
+		// A forty-slot sweep under one physical visit per tick stays resource-delayed
+		// across period rollovers instead of a refilled logical quota resolving it.
+		settings.setPhysicalSlotsPerTick(IntLimit.finite(1)); var reads = new AtomicInteger();
+		var runtime = runtime((input, cap) -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 40)), settings, sink);
+		try (var backend = new InventoryBackend(host, runtime, 1, sink)) {
+			helloOpen(backend, host, settings); monitor.finishTick(0, true);
+			backend.tick(1, settings); monitor.finishTick(1, true);
+			var refusal = sink.events.stream().filter(event -> event.hasReason(Reason.PHYSICAL_SLOTS)).findFirst().orElseThrow();
+			assertEquals(0, refusal.serverTick()); assertEquals(0, refusal.cycleId());
+			for (int repeat = 0; repeat < 30; repeat++) {
+				backend.handle(InventoryBackendTest.A, null, 1, settings); backend.tick(1, settings); monitor.finishTick(1, true);
+			}
+			assertTrue(notices.isEmpty());
+			assertEquals(2, reads.get(), "same-tick ingress does not refund the spent physical allowance");
+			backend.tick(19, settings); monitor.finishTick(19, true); assertTrue(notices.isEmpty());
+			monitor.finishTick(20, true); assertTrue(notices.isEmpty(), "late flush cannot age consumed evidence");
+			backend.tick(20, settings); monitor.finishTick(20, true);
+			assertEquals(List.of(Set.of(Module.INVENTORY_PREVIEW)), notices);
+			assertEquals(2, runtime.previewPeriodId(), "twenty elapsed ticks span only two accounting periods");
+			assertEquals(20, sink.states.get(sink.states.size() - 2).serverTick());
+			assertEquals(4, reads.get(), "only the four distinct observed ticks admit physical visits");
+			assertEquals(2, warnings.size(), "WARN follows real cycle closures independently of the notice streak");
+			backend.tick(30, settings); monitor.finishTick(30, true);
+			assertEquals(3, warnings.size()); assertEquals(0, warnings.getFirst().cycleId());
+			assertEquals(19, sink.ends.getFirst().serverTick());
+		}
+	}
 	@Test void invalidityRemovesOutstandingPreviewDelayBeforeCycleClose() {
-		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 20);
+		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 10);
 		settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1)); boolean[] sourceValidity = {true}; var reads = new AtomicInteger();
 		var runtime = runtime((input, cap) -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 2) { @Override public boolean valid() { return sourceValidity[0]; } }), settings, sink);
 		try (var backend = new InventoryBackend(host, runtime, 1, sink)) {
@@ -293,8 +335,8 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void expiredTrackingLeaseRemovesOutstandingDelayBeforeCycleClose() {
-		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); host.expiry = 12;
-		var settings = explicitSettings(10, 20); settings.getTracking().setMaxSlotsPerTarget(IntLimit.finite(1)); var reads = new AtomicInteger();
+		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); host.expiry = 8;
+		var settings = explicitSettings(10, 10); settings.getTracking().setMaxSlotsPerTarget(IntLimit.finite(1)); var reads = new AtomicInteger();
 		var runtime = runtime((input, cap) -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 2)), settings, sink);
 		try (var backend = new InventoryBackend(host, runtime, 1, sink)) {
 			helloOpenAndSelect(backend, host, settings);
@@ -302,13 +344,13 @@ class InventoryBudgetDelayIntegrationTest {
 			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.close(host.epoch(InventoryBackendTest.A), 1).stamp(100, 1), 1, settings);
 			int beforeTracking = reads.get(); long cycle = runtime.trackingPeriodId(); backend.tick(1, settings); assertEquals(beforeTracking + 1, reads.get());
 			backend.tick(2, settings); assertTrue(sink.sawReason(Module.INVENTORY_TRACKING, Reason.LOGICAL_CLIENT_OR_TARGET)); assertEquals(DelayState.DELAYED, sink.lastState(Module.INVENTORY_TRACKING, cycle));
-			backend.tick(11, settings); int beforeExpiry = reads.get(); backend.tick(12, settings); backend.tick(13, settings);
+			backend.tick(7, settings); int beforeExpiry = reads.get(); backend.tick(8, settings); backend.tick(9, settings);
 			assertNotEquals(DelayState.DELAYED, sink.lastState(Module.INVENTORY_TRACKING, cycle)); assertEquals(beforeExpiry, reads.get());
-			backend.tick(20, settings); assertEquals(1, sink.endCount(Module.INVENTORY_TRACKING, cycle));
+			backend.tick(10, settings); assertEquals(1, sink.endCount(Module.INVENTORY_TRACKING, cycle));
 		}
 	}
 	@Test void requestScopedResyncRepairsWithoutRecaptureExtraOfferOrDelayClaim() {
-		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(20, 20); var reads = new AtomicInteger();
+		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 10); var reads = new AtomicInteger();
 		var runtime = runtime((input, cap) -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 1)), settings, sink);
 		try (var backend = new InventoryBackend(host, runtime, 1, sink)) {
 			helloOpen(backend, host, settings); assertEquals(1, reads.get());
@@ -322,9 +364,9 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void negotiationControlsAndTransportOnlyFailuresAreNeverBudgetDelays() {
-		var settings = explicitSettings(20, 20); var sink = new RecordingSink(); var transport = new InventorySyncPublisherTest.Transport();
+		var settings = explicitSettings(10, 10); var sink = new RecordingSink(); var transport = new InventorySyncPublisherTest.Transport();
 		try (var publisher = new InventorySyncPublisher(new RetainedMemoryLedger(16_000_000), transport, sink)) {
-			publisher.advance(0, settings); assertTrue(publisher.control(new UUID(1, 1), InventoryS2CPacket.offer(7, publisher.offer(5, 20, 5, 16)).stamp(100, 1)));
+			publisher.advance(0, settings); assertTrue(publisher.control(new UUID(1, 1), InventoryS2CPacket.offer(7, publisher.offer(5, 10, 5, 16)).stamp(100, 1)));
 			publisher.drainControls(); assertEquals(1, transport.sent.size()); assertTrue(sink.events.isEmpty()); assertTrue(sink.states.isEmpty() && sink.ends.isEmpty());
 		}
 		var failing = new InventorySyncPublisherTest.Transport() {
@@ -346,11 +388,11 @@ class InventoryBudgetDelayIntegrationTest {
 		assertEquals(baseline, assertDoesNotThrow(() -> runMonitoredScript(new ThrowingSink(true))));
 	}
 	@Test void fatalDiagnosticFailurePropagatesAfterActualPhysicalRefusal() {
-		var settings = explicitSettings(20, 20); settings.setPhysicalSlotsPerTick(IntLimit.finite(1)); var reads = new AtomicInteger();
+		var settings = explicitSettings(10, 10); settings.setPhysicalSlotsPerTick(IntLimit.finite(1)); var reads = new AtomicInteger();
 		BudgetDelaySink fatal = new BudgetDelaySink() {
 			@Override public void observe(DelayEvent event) { throw new OutOfMemoryError("diagnostic fatal failure"); }
-			@Override public void state(Module module, long cycleId, long nowNanos, DelayState state) {}
-			@Override public void endCycle(Module module, long cycleId, long nowNanos) {}
+			@Override public void state(Module module, long cycleId, long serverTick, DelayState state) {}
+			@Override public void endCycle(Module module, long cycleId, long serverTick) {}
 		};
 		try (var runtime = runtime((input, cap) -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 2)), settings, fatal)) {
 			runtime.advance(0, settings); var owner = new UUID(41, 14);
@@ -360,7 +402,7 @@ class InventoryBudgetDelayIntegrationTest {
 	}
 
 	@Test void memoryRefusalBeforeCoverageStaysUnknownAndNeverReadsForDiagnostics() {
-		var sink = new RecordingSink(); var settings = explicitSettings(20, 20); var resolves = new AtomicInteger(); var reads = new AtomicInteger(); var owner = new UUID(41, 10);
+		var sink = new RecordingSink(); var settings = explicitSettings(10, 10); var resolves = new AtomicInteger(); var reads = new AtomicInteger(); var owner = new UUID(41, 10);
 		try (var runtime = runtime((input, cap) -> { resolves.incrementAndGet(); return Optional.of(new InventoryRuntimeTest.Source(input, reads, 3)); }, settings, sink)) {
 			runtime.advance(0, settings); var consumer = runtime.attach(InventoryRuntimeTest.input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow(); runtime.memory().setCap(runtime.memory().retained());
 			assertTrue(runtime.step(consumer).isEmpty()); assertEquals(0, resolves.get()); assertEquals(0, reads.get());
@@ -369,7 +411,7 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void snapshotPlanMemoryRefusalOccursAfterResolutionBeforeCaptureAndRetries() {
-		var sink = new RecordingSink(); var settings = explicitSettings(20, 20); var captures = new AtomicInteger(); var reads = new AtomicInteger(); var resolves = new AtomicInteger(); var owner = new UUID(41, 11);
+		var sink = new RecordingSink(); var settings = explicitSettings(10, 10); var captures = new AtomicInteger(); var reads = new AtomicInteger(); var resolves = new AtomicInteger(); var owner = new UUID(41, 11);
 		try (var runtime = runtime((input, cap) -> { resolves.incrementAndGet(); return Optional.of(snapshotSource(input, captures, reads)); }, settings, sink)) {
 			runtime.advance(0, settings); var consumer = runtime.attach(InventoryRuntimeTest.input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
 			var pressure = runtime.memory().tryReserve(runtime.memory().remaining() - 3 * InventoryItemBudget.workspaceUpperBound(4096) / 2).orElseThrow();
@@ -385,20 +427,20 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void runtimeAndPublisherPeriodsAgreeAcrossRepeatedInputsSkipsAndCadenceEdits() {
-		var settings = explicitSettings(10, 20);
+		var settings = explicitSettings(10, 8);
 		try (var runtime = runtime((input, cap) -> Optional.empty(), settings, null);
 			var publisher = new InventorySyncPublisher(runtime.memory(), new InventorySyncPublisherTest.Transport(), null)) {
 			for (int now : new int[] {0, 0, 9, 10, 10, 45, 46, 50, 100}) {
-				if (now == 46) { settings.getPreview().setPeriodTicks(30); settings.getTracking().setPeriodTicks(5); }
+				if (now == 46) { settings.getPreview().setPeriodTicks(7); settings.getTracking().setPeriodTicks(5); }
 				runtime.advance(now, settings); publisher.advance(now, settings);
 				assertEquals(runtime.previewPeriodId(), publisher.periodId(Module.INVENTORY_PREVIEW));
 				assertEquals(runtime.trackingPeriodId(), publisher.periodId(Module.INVENTORY_TRACKING));
-				if (now == 50) { assertEquals(4, runtime.previewPeriodId()); assertEquals(2, runtime.trackingPeriodId()); }
+				if (now == 50) { assertEquals(4, runtime.previewPeriodId()); assertEquals(5, runtime.trackingPeriodId()); }
 			}
 		}
 	}
 	@Test void attemptedCaptureFailureIsTerminalButTheNextUnadmittedCaptureIsDelayed() {
-		var sink = new RecordingSink(); var settings = explicitSettings(20, 20); var captures = new AtomicInteger(); var reads = new AtomicInteger(); var owner = new UUID(41, 13);
+		var sink = new RecordingSink(); var settings = explicitSettings(10, 10); var captures = new AtomicInteger(); var reads = new AtomicInteger(); var owner = new UUID(41, 13);
 		try (var runtime = runtime((input, cap) -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 1) {
 			@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan() {
 				return Optional.of(new InventorySourceAccess.SnapshotPlan() {
@@ -429,21 +471,22 @@ class InventoryBudgetDelayIntegrationTest {
 			new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, work)));
 	}
 	@Test void publisherWorkAndPublicationMemoryRefusalsDeduplicateAndResolve() {
-		var sink = new RecordingSink(); var settings = explicitSettings(20, 20); var memory = new RetainedMemoryLedger(16_000_000); var transport = new InventorySyncPublisherTest.Transport();
+		var sink = new RecordingSink(); var settings = explicitSettings(10, 10); var memory = new RetainedMemoryLedger(16_000_000); var transport = new InventorySyncPublisherTest.Transport();
 		try (var publisher = new InventorySyncPublisher(memory, transport, sink)) {
-			publisher.advance(0, settings); var context = InventorySyncPublisherTest.context("preview/1", 1);
+			publisher.advance(37, settings); var context = InventorySyncPublisherTest.context("preview/1", 1);
 			assertTrue(publisher.register(context, InventorySyncPublisherTest.route(null, "target"))); var capture = InventorySyncPublisherTest.capture(1, 1, 64);
 			assertInstanceOf(SyncPublisher.Outcome.Deferred.class, offer(publisher, context, capture, 0));
 			assertInstanceOf(SyncPublisher.Outcome.Deferred.class, offer(publisher, context, capture, 0));
 			memory.setCap(memory.retained()); assertInstanceOf(SyncPublisher.Outcome.Deferred.class, offer(publisher, context, capture, 1));
 			assertEquals(1, firstObservationCount(sink, Module.INVENTORY_PREVIEW, Reason.PUBLICATION_WORK)); assertEquals(1, reasonEventCount(sink, Module.INVENTORY_PREVIEW, Reason.MEMORY));
+			assertTrue(sink.events.stream().allMatch(event -> event.cycleId() == 0 && event.serverTick() == 37), "publisher uses its advanced server tick, not its accounting period");
 			assertTrue(publisher.delayed(Module.INVENTORY_PREVIEW)); memory.setCap(16_000_000); assertInstanceOf(SyncPublisher.Outcome.Accepted.class, offer(publisher, context, capture, 1));
 			publisher.drain(); assertFalse(publisher.delayed(Module.INVENTORY_PREVIEW)); assertFalse(transport.sent.isEmpty()); assertTrue(sink.states.isEmpty() && sink.ends.isEmpty());
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 	}
 	@Test void publisherBatchMemoryDelayPersistsAcrossAdvanceAndInvalidationCancelsData() {
-		var sink = new RecordingSink(); var settings = explicitSettings(20, 20); var memory = new RetainedMemoryLedger(16_000_000); var transport = new InventorySyncPublisherTest.Transport();
+		var sink = new RecordingSink(); var settings = explicitSettings(10, 10); var memory = new RetainedMemoryLedger(16_000_000); var transport = new InventorySyncPublisherTest.Transport();
 		try (var publisher = new InventorySyncPublisher(memory, transport, sink)) {
 			publisher.advance(0, settings); var context = InventorySyncPublisherTest.context("preview/1", 1); assertTrue(publisher.register(context, InventorySyncPublisherTest.route(null, "target")));
 			InventorySyncPublisherTest.publish(publisher, context, InventorySyncPublisherTest.capture(1, 1, 64)); memory.setCap(memory.retained()); publisher.drain();
@@ -455,7 +498,7 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void publisherQueueRefusalKeepsOldCutAndRestoresWithoutNewCapture() {
-		var sink = new RecordingSink(); var settings = explicitSettings(20, 20); settings.getPreview().setGlobalByteMultiplier(ByteMultiplier.finite(new BigDecimal("0.25")));
+		var sink = new RecordingSink(); var settings = explicitSettings(10, 10); settings.getPreview().setGlobalByteMultiplier(ByteMultiplier.finite(new BigDecimal("0.25")));
 		var memory = new RetainedMemoryLedger(64_000_000); var transport = new InventorySyncPublisherTest.Transport();
 		try (var publisher = new InventorySyncPublisher(memory, transport, sink)) {
 			publisher.advance(0, settings); var context = InventorySyncPublisherTest.context("preview/1", 1); assertTrue(publisher.register(context, InventorySyncPublisherTest.route(null, "target")));
@@ -466,7 +509,7 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void publisherMeasuredWireDelayStaysSeparateFromPhysicalSlotsAndClearsOnRestore() {
-		var sink = new RecordingSink(); var settings = explicitSettings(20, 20); settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(new BigDecimal("0.25")));
+		var sink = new RecordingSink(); var settings = explicitSettings(10, 10); settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(new BigDecimal("0.25")));
 		var transport = new InventorySyncPublisherTest.Transport(); var memory = new RetainedMemoryLedger(16_000_000);
 		try (var publisher = new InventorySyncPublisher(memory, transport, sink)) {
 			publisher.advance(0, settings); var context = InventorySyncPublisherTest.context("tracking/1", 1); assertTrue(publisher.register(context, InventorySyncPublisherTest.route(new MarkerId(1), "target")));
@@ -479,7 +522,7 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void publisherGlobalWireRefusalIsMeasuredAndResolvesAfterBudgetIncrease() {
-		var sink = new RecordingSink(); var settings = explicitSettings(20, 20);
+		var sink = new RecordingSink(); var settings = explicitSettings(10, 10);
 		settings.getPreview().setClientByteMultiplier(ByteMultiplier.finite(BigDecimal.valueOf(8)));
 		settings.getPreview().setGlobalByteMultiplier(ByteMultiplier.finite(new BigDecimal("0.25")));
 		var transport = new InventorySyncPublisherTest.Transport(); var memory = new RetainedMemoryLedger(16_000_000);
@@ -494,7 +537,7 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void withdrawingDataPreservesItsIndependentlyBlockedControlUntilAdmission() {
-		var sink = new RecordingSink(); var settings = explicitSettings(20, 20); var memory = new RetainedMemoryLedger(16_000_000);
+		var sink = new RecordingSink(); var settings = explicitSettings(10, 10); var memory = new RetainedMemoryLedger(16_000_000);
 		try (var publisher = new InventorySyncPublisher(memory, new InventorySyncPublisherTest.Transport(), sink)) {
 			publisher.advance(0, settings); var context = InventorySyncPublisherTest.context("tracking/1", 1); assertTrue(publisher.register(context, InventorySyncPublisherTest.route(new MarkerId(1), "target")));
 			publisher.status(context, InventoryS2CPacket.Status.UPDATING); memory.setCap(memory.retained()); publisher.drain();
@@ -504,7 +547,7 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void olderAcceptedDuplicateDoesNotClearNewerPublicationRefusal() {
-		var sink = new RecordingSink(); var settings = explicitSettings(20, 20);
+		var sink = new RecordingSink(); var settings = explicitSettings(10, 10);
 		try (var publisher = new InventorySyncPublisher(new RetainedMemoryLedger(16_000_000), new InventorySyncPublisherTest.Transport(), sink)) {
 			publisher.advance(0, settings); var context = InventorySyncPublisherTest.context("preview/1", 1);
 			assertTrue(publisher.register(context, InventorySyncPublisherTest.route(null, "target")));
@@ -518,7 +561,7 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void revokingEveryAudienceMemberCancelsLateRegistrationDelay() {
-		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(20, 20); var reads = new AtomicInteger();
+		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 10); var reads = new AtomicInteger();
 		var runtime = runtime((input, cap) -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 1)), settings, sink);
 		try (var backend = new InventoryBackend(host, runtime, 1, sink)) {
 			helloOpenAndSelect(backend, host, settings);
@@ -538,7 +581,7 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void rejectedIncompleteTrackingPublicationCancelsItsPriorPublicationRefusal() {
-		var sink = new RecordingSink(); var settings = explicitSettings(20, 20);
+		var sink = new RecordingSink(); var settings = explicitSettings(10, 10);
 		try (var publisher = new InventorySyncPublisher(new RetainedMemoryLedger(16_000_000), new InventorySyncPublisherTest.Transport(), sink)) {
 			publisher.advance(0, settings); var context = InventorySyncPublisherTest.context("tracking/1", 1);
 			assertTrue(publisher.register(context, InventorySyncPublisherTest.route(new MarkerId(1), "target")));
@@ -552,7 +595,7 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void deliveredPreviewSkipsDuplicateEncodingButRepairStillReportsItsNewRevisionAndChecksValidity() {
-		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(100, 100);
+		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 10);
 		settings.setDisplayByteMultiplier(BigDecimal.valueOf(2));
 		settings.getPreview().setMaxVariantsPerClientPeriod(IntLimit.finite(256));
 		settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(256));
@@ -598,8 +641,12 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	private static void reconfigurationEligibilitySequence(boolean tracking, boolean cancel, boolean revoke) {
-		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(100, 100);
+		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 10);
 		settings.setDisplayByteMultiplier(BigDecimal.valueOf(2));
+		// The selected seed uses the initial snapshot; its 6 KiB complete
+		// replacement is a stream. Keep this fixture's pre-reprojection phase
+		// serviceable so it measures eligibility, not unrelated wire pressure.
+		settings.getTracking().setStreamByteMultiplier(ByteMultiplier.finite(BigDecimal.valueOf(4)));
 		settings.getPreview().getClientByteMultiplier().setUnlimited(true); settings.getPreview().getGlobalByteMultiplier().setUnlimited(true);
 		if (tracking) host.expiry = cancel && !revoke ? 3 : 80;
 		host.projector = (display, cap) -> new nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.Display(
@@ -644,6 +691,7 @@ class InventoryBudgetDelayIntegrationTest {
 					else assertEquals(0, ((Map<?, ?>) field(((Map<?, ?>) field(backend, "sessions")).get(InventoryBackendTest.A), "previews")).size());
 				} else {
 					assertTrue(sink.events.stream().anyMatch(event -> event.module() == module && event.hasReason(Reason.MEMORY) && event.item().identity().endsWith("/projection")));
+					assertTrue(sink.events.stream().filter(event -> event.item().identity().endsWith("/projection")).allMatch(event -> event.serverTick() == 3), "ingress-first backend reprojection uses the current server tick");
 					assertEquals(DelayState.DELAYED, sink.lastState(module, tracking ? runtime.trackingPeriodId() : runtime.previewPeriodId()));
 				}
 				assertEquals(beforeReads, reads.get());
@@ -664,7 +712,7 @@ class InventoryBudgetDelayIntegrationTest {
 		catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
 	}
 	@Test void heartbeatAdmissionCannotResolveCompletionStatusRefusedAtActualWireBoundary() {
-		var sink = new RecordingSink(); var settings = explicitSettings(20, 20); settings.getTracking().setHeartbeatPeriods(0);
+		var sink = new RecordingSink(); var settings = explicitSettings(10, 10); settings.getTracking().setHeartbeatPeriods(0);
 		var transport = new InventorySyncPublisherTest.Transport(); var memory = new RetainedMemoryLedger(16_000_000);
 		try (var publisher = new InventorySyncPublisher(memory, transport, sink)) {
 			publisher.advance(0, settings); var context = InventorySyncPublisherTest.context("tracking/1", 1); var marker = new MarkerId(1);
@@ -694,7 +742,7 @@ class InventoryBudgetDelayIntegrationTest {
 		}
 	}
 	@Test void acceptedWatermarkInspectionFollowsRetirementRebaseAndReplacementContext() {
-		var settings = explicitSettings(20, 20); var transport = new InventorySyncPublisherTest.Transport();
+		var settings = explicitSettings(10, 10); var transport = new InventorySyncPublisherTest.Transport();
 		try (var publisher = new InventorySyncPublisher(new RetainedMemoryLedger(16_000_000), transport)) {
 			publisher.advance(0, settings); var context = InventorySyncPublisherTest.context("preview/1", 1);
 			assertTrue(publisher.register(context, InventorySyncPublisherTest.route(null, "target")));

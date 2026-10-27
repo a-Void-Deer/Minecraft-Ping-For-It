@@ -49,7 +49,7 @@ class InventoryNativeTextStackCostTest {
 		var frozen = InventoryItemCodec.freeze(new InventoryResidentItem.Stack(stack), registries, 4096,
 			InventoryItemBudget.root(4096), new InventoryResidentAccessFields(), new InventoryTestNativeAccess());
 		assertEquals(InventoryIdentityMode.EXACT, frozen.identityMode());
-		var original = DataComponentMap.CODEC.encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), stack.getComponents()).result().orElseThrow();
+		var original = net.minecraft.core.component.DataComponentPatch.CODEC.encodeStart(registries.createSerializationContext(NbtOps.INSTANCE), ((net.minecraft.core.component.PatchedDataComponentMap) stack.getComponents()).asPatch()).result().orElseThrow();
 		assertArrayEquals(InventoryItemCodec.canonicalTag(original), frozen.canonicalForCatalog());
 	}
 	private static NativeStack nativeStack(Component name) throws IOException {

@@ -22,7 +22,7 @@ class BudgetDelayConfigPersistenceTest {
 		throws IOException {
 		Path path = directory.resolve("server.json");
 		byte[] original = ("{\"pingforit-version\":\"" + VERSION + "\",\"rateLimit\":17,"
-			+ "\"syncDuration\":23,\"inventory\":{\"pendingMemoryMiB\":9},\"unknown\":{\"retained\":true}"
+			+ "\"syncDuration\":23,\"inventory\":{\"pendingMemoryMiB\":{\"unlimited\":false,\"value\":65}},\"unknown\":{\"retained\":true}"
 			+ member + "}\n").getBytes(StandardCharsets.UTF_8);
 		Files.write(path, original);
 		var handler = new ConfigHandler<>(ServerConfig.class, path, VERSION);
@@ -31,7 +31,7 @@ class BudgetDelayConfigPersistenceTest {
 		assertTrue(handler.getConfig().isBudgetDelayNotificationsEnabled());
 		assertEquals(17, handler.getConfig().getRateLimit());
 		assertEquals(23, handler.getConfig().getSyncDuration());
-		assertEquals(9, handler.getConfig().getInventory().getPendingMemoryMiB());
+		assertEquals(65, handler.getConfig().getInventory().getPendingMemoryMiB().getValue());
 		assertArrayEquals(original, Files.readAllBytes(path));
 		assertTrue(handler.saveSafely());
 		assertArrayEquals(original, Files.readAllBytes(path));

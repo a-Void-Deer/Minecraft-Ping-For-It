@@ -102,7 +102,7 @@ class PresentationServerFairRotationTest {
 				(marker, adapter) -> demand(adapter), (marker, fields) -> {
 					int position = ((Target.BlockTarget) marker.target()).x();
 					basicReads.computeIfAbsent(position, ignored -> new ArrayList<>()).add(now); return value(PresentationBasic.ID);
-				}, marker -> "Owner", lease -> {}, BudgetDelaySink.NONE, tick);
+				}, marker -> "Owner", lease -> {}, BudgetDelaySink.NONE);
 			assertTrue(result.captures() <= 32);
 			assertTrue(cache.size() <= 1024);
 			int optionalCaptures = optional.reads.values().stream().mapToInt(reads ->
@@ -126,15 +126,16 @@ class PresentationServerFairRotationTest {
 		var sampler = new PresentationFairSampler(); var sink = new Sink(); List<Integer> basics = new ArrayList<>();
 		var first = sampler.tick(store, cache, adapters, policy, 10, new PresentationAdapter.CaptureBudget(1), 32,
 			(marker, adapter) -> demand(adapter), (marker, fields) -> { basics.add(((Target.BlockTarget) marker.target()).x()); return value(PresentationBasic.ID); },
-			marker -> "Owner", lease -> {}, sink, 10);
+			marker -> "Owner", lease -> {}, sink);
 		assertEquals(List.of(0), basics); assertEquals(1, first.captures()); assertEquals(DelayState.DELAYED, first.state());
 		assertEquals(Reason.SOURCE_WORK.bit(), sink.events.getFirst().newReasonBits());
 		assertTrue(sink.events.getFirst().item().identity().endsWith(OPTIONAL));
 		assertEquals(Unit.MARKER_ADAPTER, sink.events.getFirst().quantity().unit());
+		assertEquals(10, sink.events.getFirst().serverTick(), "refusal uses the same server tick as capture scheduling");
 		optional.tick = 11;
 		var second = sampler.tick(store, cache, adapters, policy, 11, new PresentationAdapter.CaptureBudget(20), 32,
 			(marker, adapter) -> demand(adapter), (marker, fields) -> { basics.add(((Target.BlockTarget) marker.target()).x()); return value(PresentationBasic.ID); },
-			marker -> "Owner", lease -> {}, sink, 11);
+			marker -> "Owner", lease -> {}, sink);
 		assertEquals(List.of(0, 1), basics, "Basic id 0 is not rerun when optional resumes a later tick");
 		assertEquals(1, optional.reads.get(0).size()); assertEquals(1, optional.reads.get(1).size());
 		assertEquals(3, second.captures()); assertEquals(DelayState.HEALTHY, second.state());
@@ -155,7 +156,7 @@ class PresentationServerFairRotationTest {
 		var sampler = new PresentationFairSampler(); var sink = new Sink(); List<Long> observed = new ArrayList<>();
 		var result = sampler.tick(store, cache, adapters, policy, 10, new PresentationAdapter.CaptureBudget(40), 32,
 			(marker, adapter) -> demand(adapter), (marker, fields) -> { observed.add(marker.id().value()); return value(PresentationBasic.ID); },
-			marker -> "Owner", lease -> {}, sink, 10);
+			marker -> "Owner", lease -> {}, sink);
 		assertEquals(0, result.captures()); assertEquals(DelayState.DELAYED, result.state()); assertTrue(sampler.hasParkedMiss(cache));
 		assertEquals(Reason.CACHE_CAPACITY.bit(), sink.events.getFirst().newReasonBits());
 		assertTrue(cache.values().stream().allMatch(lease -> !lease.sources.get(PresentationBasic.ID).value.stale()));
@@ -168,7 +169,7 @@ class PresentationServerFairRotationTest {
 		assertFalse(sampler.rememberInitial(cache, initial), "new creates cannot steal a parked canonical miss's vacancy");
 		sampler.tick(store, cache, adapters, policy, 11, new PresentationAdapter.CaptureBudget(40), 32,
 			(marker, adapter) -> demand(adapter), (marker, fields) -> { observed.add(marker.id().value()); return value(PresentationBasic.ID); },
-			marker -> "Owner", lease -> {}, sink, 11);
+			marker -> "Owner", lease -> {}, sink);
 		assertEquals(List.of(blocked.id().value()), observed); assertTrue(cache.containsKey(blocked.id().value()));
 		assertEquals(1024, cache.size());
 	}
@@ -206,7 +207,7 @@ class PresentationServerFairRotationTest {
 			long now = tick; optional.tick = tick;
 			sampler.tick(store, cache, adapters, policy, tick, new PresentationAdapter.CaptureBudget(10), 32,
 				(m, a) -> demand(a), (m, fields) -> { basicReads.add(now); return value(PresentationBasic.ID); },
-				m -> "Owner", lease -> {}, BudgetDelaySink.NONE, tick);
+				m -> "Owner", lease -> {}, BudgetDelaySink.NONE);
 		}
 		assertEquals(List.of(25L, 30L), basicReads); assertEquals(List.of(31L), optional.reads.get(0));
 		long latched = cache.get(marker.id().value()).sources.get(OPTIONAL).nextSample;
@@ -216,7 +217,7 @@ class PresentationServerFairRotationTest {
 			long now = tick; optional.tick = tick;
 			sampler.tick(store, cache, adapters, policy, tick, new PresentationAdapter.CaptureBudget(10), 32,
 				(m, a) -> demand(a), (m, fields) -> { basicReads.add(now); return value(PresentationBasic.ID); },
-				m -> "Owner", lease -> {}, BudgetDelaySink.NONE, tick);
+				m -> "Owner", lease -> {}, BudgetDelaySink.NONE);
 		}
 		assertEquals(List.of(31L, 42L), optional.reads.get(0));
 		assertEquals(132, cache.get(marker.id().value()).sources.get(OPTIONAL).nextSample);
@@ -232,22 +233,22 @@ class PresentationServerFairRotationTest {
 		var policy = PresentationSettings.serverDefaults(); policy.setMinUpdateIntervalTicks(1); policy.setScanBudget(0);
 		var sampler = new PresentationFairSampler(); var sink = new Sink();
 		assertEquals(DelayState.DELAYED, sampler.tick(store, cache, adapters, policy, 10,
-			new PresentationAdapter.CaptureBudget(10), 32, (m, a) -> demand(a), (m, f) -> fail("capture disabled"), m -> "Owner", l -> {}, sink, 10).state());
+			new PresentationAdapter.CaptureBudget(10), 32, (m, a) -> demand(a), (m, f) -> fail("capture disabled"), m -> "Owner", l -> {}, sink).state());
 		assertTrue(cache.isEmpty()); assertEquals(Reason.CAPTURE_DISABLED.bit(), sink.events.getFirst().newReasonBits());
 		policy.setScanBudget(1); optional.tick = 11;
 		assertEquals(32, sampler.tick(store, cache, adapters, policy, 11,
-			new PresentationAdapter.CaptureBudget(4096), 32, (m, a) -> demand(a), (m, f) -> value(PresentationBasic.ID), m -> "Owner", l -> {}, sink, 11).captures());
+			new PresentationAdapter.CaptureBudget(4096), 32, (m, a) -> demand(a), (m, f) -> value(PresentationBasic.ID), m -> "Owner", l -> {}, sink).captures());
 		assertEquals(16, optional.reads.size());
 		// No-demand discovery spans several pages and cannot establish a healthy or idle global sweep early.
 		var quiet = new PresentationFairSampler(); var quietSink = new Sink();
 		assertEquals(DelayState.NEUTRAL, quiet.tick(store, new LinkedHashMap<>(), adapters, policy, 0,
-			new PresentationAdapter.CaptureBudget(0), 0, (m, a) -> Set.of(), (m, f) -> fail("no demand"), m -> "Owner", l -> {}, quietSink, 0).state());
+			new PresentationAdapter.CaptureBudget(0), 0, (m, a) -> Set.of(), (m, f) -> fail("no demand"), m -> "Owner", l -> {}, quietSink).state());
 		assertTrue(quietSink.events.isEmpty());
 		var cadenceStore = new ServerMarkerStore(new MarkerIdSource()); create(cadenceStore, 0, 10, 10000);
 		var cadence = new PresentationFairSampler(); var cadenceSink = new Sink();
 		assertEquals(DelayState.NEUTRAL, cadence.tick(cadenceStore, new LinkedHashMap<>(), adapters, policy, 10,
 			new PresentationAdapter.CaptureBudget(0), 0, (m, a) -> a.adapterId().equals(PresentationBasic.ID) ? demand(a) : Set.of(),
-			(m, f) -> fail("arrival floor"), m -> "Owner", l -> {}, cadenceSink, 10).state());
+			(m, f) -> fail("arrival floor"), m -> "Owner", l -> {}, cadenceSink).state());
 		assertTrue(cadenceSink.events.isEmpty());
 	}
 
@@ -271,7 +272,7 @@ class PresentationServerFairRotationTest {
 			optional.tick = tick; long now = tick;
 			sampler.tick(store, cache, adapters, policy, tick, new PresentationAdapter.CaptureBudget(4096), 32,
 				(m, a) -> demand(a), (m, fields) -> { basicReads.computeIfAbsent(((Target.BlockTarget) m.target()).x(), ignored -> new ArrayList<>()).add(now); return value(PresentationBasic.ID); },
-				m -> "Owner", l -> {}, sink, tick);
+				m -> "Owner", l -> {}, sink);
 			if (tick < 18) {
 				assertFalse(cache.containsKey(first.id().value()), "an elapsed Basic floor cannot erase a retained optional seed deadline");
 				assertTrue(basicReads.isEmpty()); assertTrue(optional.reads.isEmpty());
@@ -293,12 +294,12 @@ class PresentationServerFairRotationTest {
 			adapters.register(new Adapter(PresentationBasic.ID, 1)); var policy = PresentationSettings.serverDefaults(); policy.setMinUpdateIntervalTicks(1);
 			var sampler = new PresentationFairSampler(); var sink = new Sink(); List<Long> reads = new ArrayList<>();
 			assertEquals(DelayState.DELAYED, sampler.tick(store, cache, adapters, policy, 10,
-				new PresentationAdapter.CaptureBudget(0), 0, (m, a) -> demand(a), (m, f) -> fail("blocked"), m -> "Owner", l -> {}, sink, 10).state());
+				new PresentationAdapter.CaptureBudget(0), 0, (m, a) -> demand(a), (m, f) -> fail("blocked"), m -> "Owner", l -> {}, sink).state());
 			if (exit.equals("removed")) store.removeByServer(first.id(), MarkerRemovalReason.CANCELLED);
 			long tick = exit.equals("expired") ? 12 : 11;
 			sampler.tick(store, cache, adapters, policy, tick, new PresentationAdapter.CaptureBudget(10), 32,
 				(m, a) -> exit.equals("no demand") && m.id().equals(first.id()) ? Set.of() : demand(a),
-				(m, f) -> { reads.add(m.id().value()); return value(PresentationBasic.ID); }, m -> "Owner", l -> {}, sink, tick);
+				(m, f) -> { reads.add(m.id().value()); return value(PresentationBasic.ID); }, m -> "Owner", l -> {}, sink);
 			assertEquals(List.of(1L), reads, exit + " current item cannot keep a later continuously eligible marker parked");
 		}
 	}
@@ -317,7 +318,7 @@ class PresentationServerFairRotationTest {
 		for (long tick = 51; tick <= 57; tick++) {
 			long now = tick;
 			sampler.tick(store, cache, adapters, policy, tick, new PresentationAdapter.CaptureBudget(10), 32,
-				(m, a) -> demand(a), (m, f) -> { reads.add(now); return value(PresentationBasic.ID); }, m -> "Owner", l -> {}, BudgetDelaySink.NONE, tick);
+				(m, a) -> demand(a), (m, f) -> { reads.add(now); return value(PresentationBasic.ID); }, m -> "Owner", l -> {}, BudgetDelaySink.NONE);
 		}
 		assertEquals(List.of(50L, 57L), reads);
 		// A paid initial delivered outside the heavy cache cannot be read again at arrival+1.
@@ -325,7 +326,7 @@ class PresentationServerFairRotationTest {
 		for (long tick = 51; tick <= 57; tick++) {
 			long now = tick;
 			miss.tick(store, emptyCache, adapters, policy, tick, new PresentationAdapter.CaptureBudget(10), 32,
-				(m, a) -> demand(a), (m, f) -> { reentry.add(now); return value(PresentationBasic.ID); }, m -> "Owner", l -> {}, BudgetDelaySink.NONE, tick);
+				(m, a) -> demand(a), (m, f) -> { reentry.add(now); return value(PresentationBasic.ID); }, m -> "Owner", l -> {}, BudgetDelaySink.NONE);
 		}
 		assertEquals(List.of(57L), reentry);
 	}
@@ -336,22 +337,23 @@ class PresentationServerFairRotationTest {
 		var policy = PresentationSettings.serverDefaults(); policy.setMinUpdateIntervalTicks(1); policy.setScanBudget(0);
 		var sampler = new PresentationFairSampler(); var cache = new LinkedHashMap<Long, PresentationServer.Lease>(); var sink = new Sink();
 		for (int repeat = 0; repeat < 2; repeat++) sampler.tick(store, cache, adapters, policy, 10,
-			new PresentationAdapter.CaptureBudget(10), 32, (m, a) -> demand(a), (m, f) -> fail("disabled"), m -> "Owner", l -> {}, sink, repeat);
+			new PresentationAdapter.CaptureBudget(10), 32, (m, a) -> demand(a), (m, f) -> fail("disabled"), m -> "Owner", l -> {}, sink);
 		assertEquals(1, sink.events.size());
 		sampler.tick(store, cache, adapters, policy, 10, new PresentationAdapter.CaptureBudget(0), 0,
-			(m, a) -> demand(a), (m, f) -> fail("disabled"), m -> "Owner", l -> {}, sink, 2);
+			(m, a) -> demand(a), (m, f) -> fail("disabled"), m -> "Owner", l -> {}, sink);
 		assertEquals(2, sink.events.size()); assertFalse(sink.events.getLast().firstItemObservation());
 		assertEquals(Reason.CAPTURE_COUNT.bit() | Reason.SOURCE_WORK.bit(), sink.events.getLast().newReasonBits());
+		assertTrue(sink.events.stream().allMatch(event -> event.serverTick() == 10), "repeated ingress adds no elapsed tick");
 		var throwing = new BudgetDelaySink() {
 			public void observe(DelayEvent event) { throw new LinkageError("diagnostics missing"); }
 			public void state(Module module, long cycle, long now, DelayState state) {}
 			public void endCycle(Module module, long cycle, long now) {}
 		};
 		assertDoesNotThrow(() -> sampler.tick(store, cache, adapters, policy, 11, new PresentationAdapter.CaptureBudget(0), 0,
-			(m, a) -> demand(a), (m, f) -> fail("disabled"), m -> "Owner", l -> {}, throwing, 3));
+			(m, a) -> demand(a), (m, f) -> fail("disabled"), m -> "Owner", l -> {}, throwing));
 		policy.setScanBudget(1);
 		var result = sampler.tick(store, cache, adapters, policy, 12, new PresentationAdapter.CaptureBudget(10), 32,
-			(m, a) -> demand(a), (m, f) -> value(PresentationBasic.ID), m -> "Owner", l -> {}, throwing, 4);
+			(m, a) -> demand(a), (m, f) -> value(PresentationBasic.ID), m -> "Owner", l -> {}, throwing);
 		assertEquals(1, result.captures()); assertEquals(DelayState.HEALTHY, result.state());
 	}
 

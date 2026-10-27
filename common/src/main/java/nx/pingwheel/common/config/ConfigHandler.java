@@ -346,6 +346,12 @@ public class ConfigHandler <T extends IConfig> {
 
 			var merged = rootToPreserve.getAsJsonObject().deepCopy();
 			for (var entry : serialized.getAsJsonObject().entrySet()) {
+				if (configType == ServerConfig.class && entry.getKey().equals("inventory")
+					&& merged.has("inventory") && merged.get("inventory").isJsonObject()
+					&& entry.getValue().isJsonObject()) {
+					mergeInventoryMembers(merged.getAsJsonObject("inventory"), entry.getValue().getAsJsonObject());
+					continue;
+				}
 				if (configType == ClientConfig.class && entry.getKey().equals("spatialSelector")
 					&& merged.has(entry.getKey()) && merged.get(entry.getKey()).isJsonObject()
 					&& entry.getValue().isJsonObject()) {
@@ -379,6 +385,18 @@ public class ConfigHandler <T extends IConfig> {
 		JsonElement marker = new com.google.gson.JsonPrimitive(modVersion.originalVersion());
 		serialized.getAsJsonObject().add(ConfigVersionUpdater.VERSION_KEY, marker);
 		return documentGson.toJson(serialized);
+	}
+
+	/** Inventory-local preservation for guarded shape writeback, including unknown nested members. */
+	private static void mergeInventoryMembers(JsonObject preserved, JsonObject known) {
+		for (var entry : known.entrySet()) {
+			@Nullable JsonElement previous = preserved.get(entry.getKey());
+			if (previous != null && previous.isJsonObject() && entry.getValue().isJsonObject()) {
+				mergeInventoryMembers(previous.getAsJsonObject(), entry.getValue().getAsJsonObject());
+			} else {
+				preserved.add(entry.getKey(), entry.getValue());
+			}
+		}
 	}
 
 	private boolean usesLegacyTransparentBlockToggle() {
@@ -419,7 +437,7 @@ public class ConfigHandler <T extends IConfig> {
 		PingForItVersion configVersion = PingForItVersion.parse(rawConfigVersion);
 		int comparison = configVersion.compareTo(modVersion);
 		if (comparison == 0) {
-			String shapeUpdate = normalizeRawShape(root);
+			@Nullable String shapeUpdate = normalizeRawShape(root);
 			return new VersionedConfig(
 				root,
 				configVersion,
@@ -438,7 +456,7 @@ public class ConfigHandler <T extends IConfig> {
 
 		ConfigVersionUpdater.MigrationResult migration =
 			ConfigVersionUpdater.update(root, configType, configVersion, modVersion);
-		String shapeUpdate = normalizeRawShape(migration.root());
+		@Nullable String shapeUpdate = normalizeRawShape(migration.root());
 		List<String> updates = shapeUpdate == null
 			? migration.updates()
 			: appendedUpdate(migration.updates(), shapeUpdate);
@@ -458,18 +476,23 @@ public class ConfigHandler <T extends IConfig> {
 
 	/**
 	 * Same-version raw-shape and preference reconciliation. Only exact obsolete
-	 * shapes or an explicitly conflicting client gesture pair are rewritten:
+	 * shapes or explicitly conflicting client preferences are rewritten:
 	 * the legacy flat server policy is copied to every target type
 	 * when the new map is absent, the new map wins and drops the flat keys when
-	 * present, and the removed client presentation keys are stripped. A future or
+	 * present, the old memory scalar becomes an explicit finite limit, and the
+	 * removed client presentation keys are stripped. A future or
 	 * unrecognized shape is preserved for the version guard, and no unrelated
 	 * user data is touched. Returns a non-null description only when the raw root
 	 * changed, so an untouched file is never rewritten. Client gesture
 	 * reconciliation also uses this preservation base and changed-source guard.
 	 */
-	private String normalizeRawShape(JsonObject root) {
+	private @Nullable String normalizeRawShape(JsonObject root) {
 		if (configType == ServerConfig.class) {
-			return normalizeServerPresentationShape(root);
+			@Nullable String presentationUpdate = normalizeServerPresentationShape(root);
+			boolean memoryChanged = normalizePendingMemoryShape(root);
+			if (!memoryChanged) return presentationUpdate;
+			String memoryUpdate = "inventory: scalar pending memory normalized to explicit finite limit";
+			return presentationUpdate == null ? memoryUpdate : presentationUpdate + "; " + memoryUpdate;
 		}
 
 		if (configType == ClientConfig.class) {
@@ -508,6 +531,20 @@ public class ConfigHandler <T extends IConfig> {
 		return null;
 	}
 
+	/** Only the former memory scalar is accepted; other IntLimit fields still require objects. */
+	private static boolean normalizePendingMemoryShape(JsonObject root) {
+		@Nullable JsonElement inventory = root.get("inventory");
+		if (inventory == null || !inventory.isJsonObject()) return false;
+		JsonObject settings = inventory.getAsJsonObject();
+		@Nullable JsonElement memory = settings.get("pendingMemoryMiB");
+		if (!isIntegralNumber(memory)) return false;
+		JsonObject limit = new JsonObject();
+		limit.addProperty("unlimited", false);
+		limit.add("value", memory);
+		settings.add("pendingMemoryMiB", limit);
+		return true;
+	}
+
 	private static boolean isTrue(JsonElement value) {
 		return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isBoolean() && value.getAsBoolean();
 	}
@@ -537,7 +574,7 @@ public class ConfigHandler <T extends IConfig> {
 		return null;
 	}
 
-	private static String normalizeServerPresentationShape(JsonObject root) {
+	private static @Nullable String normalizeServerPresentationShape(JsonObject root) {
 		JsonElement presentationElement = root.get("presentation");
 		if (presentationElement == null) {
 			return null;
@@ -744,7 +781,7 @@ public class ConfigHandler <T extends IConfig> {
 		return true;
 	}
 
-	private static boolean isIntegralNumber(JsonElement element) {
+	private static boolean isIntegralNumber(@Nullable JsonElement element) {
 		if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) return false;
 		BigDecimal value;
 		try {

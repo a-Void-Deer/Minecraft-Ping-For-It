@@ -25,7 +25,7 @@ public record ServerConfigSnapshotS2CPacket(
 ) implements IPacket {
 	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(
 		S2C_NAMESPACE,
-		"server-config-snapshot-v3");
+		"server-config-snapshot-v4");
 	public static final Type<ServerConfigSnapshotS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	/** Compatibility constructor for snapshots from the pre-duration settings model. */
@@ -40,14 +40,14 @@ public record ServerConfigSnapshotS2CPacket(
 			ServerConfigBounds.DEFAULT_SYNC_DURATION);
 	}
 
-	/** Source compatibility only; v3 wire snapshots always contain inventory. */
+	/** Source compatibility only; v4 wire snapshots always contain inventory. */
 	public ServerConfigSnapshotS2CPacket(long requestId, boolean canEdit, ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled, int msToRegenerate, int rateLimit, int syncDuration) {
 		this(requestId, canEdit, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
 			syncDuration, InventoryConfigValues.defaults());
 	}
 
-	/** Source compatibility only; the complete v3 wire shape includes the notice flag. */
+	/** Source compatibility only; the complete v4 wire shape includes the notice flag. */
 	public ServerConfigSnapshotS2CPacket(long requestId, boolean canEdit, ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled, int msToRegenerate, int rateLimit, int syncDuration,
 		InventoryConfigValues inventory) {

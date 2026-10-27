@@ -10,6 +10,7 @@ import java.util.Objects;
 
 import nx.pingwheel.common.config.InventoryLimits;
 import nx.pingwheel.common.presentation.source.CaptureResult;
+import org.jetbrains.annotations.Nullable;
 
 /** Code-owned detached encoding; it never uses SECTION values or doubles for counts. */
 public final class InventoryDomainCodec {
@@ -21,21 +22,47 @@ public final class InventoryDomainCodec {
 	public static final int MAX_BYTES = CODEC.bound();
 	/** Absolute display JSON bound: the largest legal display budget. */
 	public static final int MAX_DISPLAY_BYTES = InventoryLimits.MAX_DISPLAY_BYTES;
-	public record Item(InventoryScanner.Key key, long count, String label, String displayJson, boolean stripped) {
-		public Item {
+	@org.jetbrains.annotations.NotNullByDefault
+	public static final class Item {
+		private final InventoryScanner.Key key;
+		private final long count;
+		private final String label;
+		private final @Nullable String displayJson;
+		private final boolean stripped;
+		public Item(InventoryScanner.Key key, long count, String label, @Nullable String displayJson, boolean stripped) {
 			Objects.requireNonNull(key);
 			Objects.requireNonNull(label);
 			if (count < 0 || utf8(label) > 1024 || (displayJson != null && utf8(displayJson) > MAX_DISPLAY_BYTES))
 				throw new IllegalArgumentException("inventory observation bounds");
 			if (stripped != key.componentsKey().isEmpty()) throw new IllegalArgumentException("inventory identity mode/key mismatch");
+			this.key = key; this.count = count; this.label = label; this.displayJson = displayJson; this.stripped = stripped;
 		}
+		/** Only an already validated immutable Item can authorize this constant-cost copy. */
+		private Item(Item certified, long count) {
+			if (count < 0) throw new IllegalArgumentException("inventory observation bounds");
+			key = certified.key; this.count = count; label = certified.label; displayJson = certified.displayJson; stripped = certified.stripped;
+		}
+		Item withCount(long count) { return new Item(this, count); }
+		public InventoryScanner.Key key() { return key; }
+		public long count() { return count; }
+		public String label() { return label; }
+		public @Nullable String displayJson() { return displayJson; }
+		public boolean stripped() { return stripped; }
 		/** Final inventory-v1 bit: aggregate identity, never display simplification. */
 		public boolean aggregateRequired() { return stripped; }
+		@Override public boolean equals(@Nullable Object other) {
+			return this == other || other instanceof Item item && count == item.count && stripped == item.stripped
+				&& key.equals(item.key) && label.equals(item.label) && Objects.equals(displayJson, item.displayJson);
+		}
+		@Override public int hashCode() { return Objects.hash(key, count, label, displayJson, stripped); }
+		@Override public String toString() {
+			return "Item[key=" + key + ", count=" + count + ", label=" + label + ", displayJson=" + displayJson + ", stripped=" + stripped + "]";
+		}
 	}
 	private InventoryDomainCodec() {}
 
 	/** Empty bytes mean an actually observed empty slot, not an unavailable read. */
-	public static CaptureResult.OpaqueValue encode(Item item) {
+	public static CaptureResult.OpaqueValue encode(@Nullable Item item) {
 		if (item == null) return CaptureResult.OpaqueValue.forCodec(CODEC, new byte[0]);
 		try {
 			ByteArrayOutputStream bytes = new ByteArrayOutputStream(128);
@@ -53,7 +80,7 @@ public final class InventoryDomainCodec {
 		} catch (IOException impossible) { throw new IllegalStateException(impossible); }
 	}
 
-	public static Item decode(CaptureResult.OpaqueValue value) {
+	public static @Nullable Item decode(CaptureResult.OpaqueValue value) {
 		Objects.requireNonNull(value, "value");
 		int size = value.size();
 		if (size == 0) return null;
@@ -63,7 +90,7 @@ public final class InventoryDomainCodec {
 			InventoryScanner.Key key = new InventoryScanner.Key(text(in, 256), text(in, 256));
 			long count = in.readLong();
 			String label = text(in, 1024);
-			String json = in.readBoolean() ? display(in) : null;
+			@Nullable String json = in.readBoolean() ? display(in) : null;
 			Item item = new Item(key, count, label, json, in.readBoolean());
 			if (in.available() != 0) throw new IllegalArgumentException("trailing observation");
 			return item;

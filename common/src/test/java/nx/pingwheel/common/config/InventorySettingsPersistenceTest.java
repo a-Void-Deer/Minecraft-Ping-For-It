@@ -9,6 +9,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -99,6 +101,7 @@ class InventorySettingsPersistenceTest {
 
 		ServerConfig config = handler.getConfig();
 		config.getInventory().getPhysicalSlotsPerTick().setUnlimited(true);
+		config.getInventory().setPendingMemoryMiB(IntLimit.unlimited(65));
 		config.getInventory().getPreview().getClientByteMultiplier().setValue(new BigDecimal("0.5"));
 		config.getInventory().getPreview().getGlobalByteMultiplier().setValue(new BigDecimal("2"));
 		config.getInventory().getTracking().getStreamByteMultiplier().setValue(new BigDecimal("0.25"));
@@ -110,6 +113,8 @@ class InventorySettingsPersistenceTest {
 
 		JsonObject inventory = readRoot(configPath).getAsJsonObject("inventory");
 		assertTrue(inventory.getAsJsonObject("physicalSlotsPerTick").get("unlimited").getAsBoolean());
+		assertEquals(65, inventory.getAsJsonObject("pendingMemoryMiB").get("value").getAsInt());
+		assertTrue(inventory.getAsJsonObject("pendingMemoryMiB").get("unlimited").getAsBoolean());
 		JsonObject preview = inventory.getAsJsonObject("preview");
 		JsonObject tracking = inventory.getAsJsonObject("tracking");
 		assertEquals("0.5", preview.getAsJsonObject("clientByteMultiplier").get("value").getAsString());
@@ -125,6 +130,8 @@ class InventorySettingsPersistenceTest {
 		reloaded.load();
 		InventorySettings loaded = reloaded.getConfig().getInventory();
 		assertTrue(loaded.getPhysicalSlotsPerTick().isUnlimited());
+		assertEquals(IntLimit.unlimited(65), loaded.getPendingMemoryMiB());
+		assertEquals(4294967296L, loaded.pendingMemoryBytes());
 		assertTrue(loaded.getTracking().getStreamByteMultiplier().isUnlimited());
 		assertFalse(loaded.getPreview().getClientByteMultiplier().isUnlimited());
 		assertEquals(0, loaded.getTracking().getHeartbeatPeriods());
@@ -147,7 +154,7 @@ class InventorySettingsPersistenceTest {
 		Files.writeString(configPath,
 			"{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"rateLimit\":3,\"inventory\":{"
 				+ "\"physicalSlotsPerTick\":{\"unlimited\":false,\"value\":-5},"
-				+ "\"pendingMemoryMiB\":0,"
+				+ "\"pendingMemoryMiB\":{\"unlimited\":false,\"value\":0},"
 				+ "\"preview\":{\"periodTicks\":0,"
 				+ "\"clientByteMultiplier\":{\"unlimited\":false,\"value\":0.01},"
 				+ "\"globalByteMultiplier\":{\"unlimited\":false,\"value\":9999}},"
@@ -164,8 +171,8 @@ class InventorySettingsPersistenceTest {
 		InventorySettings inventory = handler.getConfig().getInventory();
 		InventorySettings.Preview preview = inventory.getPreview();
 		InventorySettings.Tracking tracking = inventory.getTracking();
-		assertEquals(InventoryLimits.MIN_FINITE_LIMIT, inventory.getPhysicalSlotsPerTick().getValue());
-		assertEquals(InventoryLimits.MIN_PENDING_MEMORY_MIB, inventory.getPendingMemoryMiB());
+		assertEquals(16, inventory.getPhysicalSlotsPerTick().getValue());
+		assertEquals(InventoryLimits.MIN_PENDING_MEMORY_MIB, inventory.getPendingMemoryMiB().getValue());
 		assertEquals(InventoryLimits.MIN_PERIOD_TICKS, preview.getPeriodTicks());
 		assertEquals(InventoryLimits.MIN_PERIOD_TICKS, tracking.getPeriodTicks());
 		assertEquals(InventoryLimits.MAX_HEARTBEAT_PERIODS, tracking.getHeartbeatPeriods());
@@ -184,8 +191,9 @@ class InventorySettingsPersistenceTest {
 		assertFalse(hasBrokenBackup(tempDir));
 	}
 
-	private static final List<NamedCap> INVENTORY_LIMITS = List.of(
+	private static final @Unmodifiable List<NamedCap> INVENTORY_LIMITS = List.of(
 		namedCap("physicalSlotsPerTick", InventorySettings::getPhysicalSlotsPerTick, "physicalSlotsPerTick"),
+		namedCap("pendingMemoryMiB", InventorySettings::getPendingMemoryMiB, "pendingMemoryMiB"),
 		namedCap("preview.maxVariantsPerClientPeriod",
 			settings -> settings.getPreview().getMaxVariantsPerClientPeriod(),
 			"preview", "maxVariantsPerClientPeriod"),
@@ -219,7 +227,7 @@ class InventorySettingsPersistenceTest {
 
 	private record NamedCap(String name, CapPath cap) {}
 
-	private record CapPath(List<String> path, Function<InventorySettings, IntLimit> read) {
+	private record CapPath(@Unmodifiable List<String> path, Function<InventorySettings, IntLimit> read) {
 
 		JsonObject inventoryHolding(JsonElement cap) {
 			JsonObject root = new JsonObject();
@@ -234,7 +242,7 @@ class InventorySettingsPersistenceTest {
 		}
 	}
 
-	private static JsonObject limitShape(boolean unlimited, Integer value) {
+	private static JsonObject limitShape(boolean unlimited, @Nullable Integer value) {
 		JsonObject shape = new JsonObject();
 		shape.addProperty("unlimited", unlimited);
 		if (value != null) shape.addProperty("value", value);
@@ -267,7 +275,7 @@ class InventorySettingsPersistenceTest {
 
 		IntLimit expected = cap.read().apply(new InventorySettings());
 		IntLimit loaded = cap.read().apply(handler.getConfig().getInventory());
-		assertTrue(expected.getValue() > InventoryLimits.MIN_FINITE_LIMIT,
+		assertTrue(expected.getValue() > minimumFor(name),
 			"the model default must be distinguishable from the explicit-minimum clamp");
 		assertFalse(loaded.isUnlimited());
 		assertEquals(expected.getValue(), loaded.getValue());
@@ -293,12 +301,13 @@ class InventorySettingsPersistenceTest {
 	void absentUnlimitedMemberDefaultsFalseAndEmptyObjectGainsTheFieldDefault(
 		String name, CapPath cap, @TempDir Path tempDir) throws IOException {
 		JsonObject explicitValue = new JsonObject();
-		explicitValue.addProperty("value", 12345);
+		int explicitFinite = cap.read().apply(new InventorySettings()).getValue();
+		explicitValue.addProperty("value", explicitFinite);
 		ConfigHandler<ServerConfig> explicitHandler = loadServer(tempDir.resolve("explicit.json"),
 			serverFile(cap.inventoryHolding(explicitValue)).getBytes(StandardCharsets.UTF_8));
 		IntLimit explicit = cap.read().apply(explicitHandler.getConfig().getInventory());
 		assertFalse(explicit.isUnlimited());
-		assertEquals(12345, explicit.getValue());
+		assertEquals(explicitFinite, explicit.getValue());
 
 		ConfigHandler<ServerConfig> emptyHandler = loadServer(tempDir.resolve("empty.json"),
 			serverFile(cap.inventoryHolding(new JsonObject())).getBytes(StandardCharsets.UTF_8));
@@ -318,8 +327,8 @@ class InventorySettingsPersistenceTest {
 			ConfigHandler<ServerConfig> handler = loadServer(configPath, original);
 			IntLimit loaded = cap.read().apply(handler.getConfig().getInventory());
 			assertFalse(loaded.isUnlimited());
-			assertTrue(cap.read().apply(new InventorySettings()).getValue() > InventoryLimits.MIN_FINITE_LIMIT);
-			assertEquals(InventoryLimits.MIN_FINITE_LIMIT, loaded.getValue());
+			assertTrue(cap.read().apply(new InventorySettings()).getValue() > minimumFor(name));
+			assertEquals(minimumFor(name), loaded.getValue());
 			assertArrayEquals(original, Files.readAllBytes(configPath));
 		}
 	}
@@ -366,7 +375,7 @@ class InventorySettingsPersistenceTest {
 		physical.addProperty("unlimited", false);
 		inventory.add("physicalSlotsPerTick", physical);
 		JsonObject preview = new JsonObject();
-		preview.add("maxSlotsPerClient", limitShape(false, 7));
+		preview.add("maxSlotsPerClient", limitShape(false, 67));
 		inventory.add("preview", preview);
 		JsonObject tracking = new JsonObject();
 		tracking.add("maxSlotsServer", limitShape(false, 0));
@@ -377,8 +386,8 @@ class InventorySettingsPersistenceTest {
 		InventorySettings loaded = handler.getConfig().getInventory();
 		int physicalDefault = new InventorySettings().getPhysicalSlotsPerTick().getValue();
 		assertEquals(physicalDefault, loaded.getPhysicalSlotsPerTick().getValue());
-		assertEquals(7, loaded.getPreview().getMaxSlotsPerClient().getValue());
-		assertEquals(InventoryLimits.MIN_FINITE_LIMIT, loaded.getTracking().getMaxSlotsServer().getValue());
+		assertEquals(67, loaded.getPreview().getMaxSlotsPerClient().getValue());
+		assertEquals(128, loaded.getTracking().getMaxSlotsServer().getValue());
 		assertArrayEquals(original, Files.readAllBytes(configPath));
 
 		handler.getConfig().setRateLimit(9);
@@ -389,15 +398,15 @@ class InventorySettingsPersistenceTest {
 		JsonObject persistedInventory = persisted.getAsJsonObject("inventory");
 		assertEquals(physicalDefault,
 			persistedInventory.getAsJsonObject("physicalSlotsPerTick").get("value").getAsInt());
-		assertEquals(7, persistedInventory.getAsJsonObject("preview")
+		assertEquals(67, persistedInventory.getAsJsonObject("preview")
 			.getAsJsonObject("maxSlotsPerClient").get("value").getAsInt());
-		assertEquals(InventoryLimits.MIN_FINITE_LIMIT, persistedInventory.getAsJsonObject("tracking")
+		assertEquals(128, persistedInventory.getAsJsonObject("tracking")
 			.getAsJsonObject("maxSlotsServer").get("value").getAsInt());
 
 		ConfigHandler<ServerConfig> reloaded = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
 		reloaded.load();
 		assertEquals(physicalDefault, reloaded.getConfig().getInventory().getPhysicalSlotsPerTick().getValue());
-		assertEquals(7, reloaded.getConfig().getInventory().getPreview().getMaxSlotsPerClient().getValue());
+		assertEquals(67, reloaded.getConfig().getInventory().getPreview().getMaxSlotsPerClient().getValue());
 	}
 
 	@Test
@@ -436,7 +445,8 @@ class InventorySettingsPersistenceTest {
 		Path configPath = tempDir.resolve("server.json");
 		Files.writeString(configPath,
 			"{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"rateLimit\":3,\"inventory\":{"
-				+ "\"displayByteMultiplier\":32,\"frameByteMultiplier\":1,\"pendingMemoryMiB\":9}}\n",
+				+ "\"displayByteMultiplier\":32,\"frameByteMultiplier\":1,"
+				+ "\"pendingMemoryMiB\":{\"unlimited\":false,\"value\":67}}}\n",
 			StandardCharsets.UTF_8);
 
 		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
@@ -445,7 +455,7 @@ class InventorySettingsPersistenceTest {
 		InventorySettings inventory = handler.getConfig().getInventory();
 		assertEquals(0, new BigDecimal("7.5").compareTo(inventory.getDisplayByteMultiplier()));
 		assertEquals(0, BigDecimal.ONE.compareTo(inventory.getFrameByteMultiplier()));
-		assertEquals(9, inventory.getPendingMemoryMiB());
+		assertEquals(67, inventory.getPendingMemoryMiB().getValue());
 		assertEquals(30720, inventory.effectiveDisplayBytes());
 		assertEquals(32768, inventory.effectiveFrameBytes());
 
@@ -618,6 +628,15 @@ class InventorySettingsPersistenceTest {
 
 	private static JsonObject readRoot(Path path) throws IOException {
 		return JsonParser.parseString(Files.readString(path, StandardCharsets.UTF_8)).getAsJsonObject();
+	}
+
+	/** Independent persisted field minima, not the implementation clamp helper. */
+	private static int minimumFor(String name) {
+		return switch (name) {
+			case "tracking.maxSlotsServer" -> 128;
+			case "preview.maxTargetsPerClient", "tracking.maxVariantsPerTarget" -> 1;
+			default -> 16;
+		};
 	}
 
 	private static boolean hasBrokenBackup(Path directory) throws IOException {
