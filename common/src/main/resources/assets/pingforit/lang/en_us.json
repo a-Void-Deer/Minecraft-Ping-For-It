@@ -18,47 +18,71 @@
 	"settings.pingforit.server_settings.confirm.discard": "Discard",
 	"settings.pingforit.server_settings.confirm.cancel": "Keep Editing",
 	"settings.pingforit.ping_volume": "Ping Volume: %s",
+	"settings.pingforit.ping_volume.tooltip": "Local ping-sound volume.\nDecrease: quieter alerts; 0 mutes them.\nIncrease: louder alerts; other players' volume is unchanged.",
 	"settings.pingforit.ping_distance": "Ping Distance: %s",
+	"settings.pingforit.ping_distance.tooltip": "Local native and Precise capture range for the next hold; native tracing also has a separate cap. Optional distant traces keep their own range.\nDecrease: select closer targets.\nIncrease: allow farther candidates; server acceptance range is unchanged.",
 	"settings.pingforit.item_icon_visible": "Item Icons",
+	"settings.pingforit.item_icon_visible.tooltip": "Item-icon presentation for markers.\nOff: use the ordinary ping icon.\nOn: show an item icon when authorized item data is available.",
 	"settings.pingforit.direction_indicator_visible": "Direction Indicator",
+	"settings.pingforit.direction_indicator_visible.tooltip": "Screen-edge guidance to off-screen markers.\nOff: hide direction indicators.\nOn: show indicators pointing toward off-screen markers.",
 	"settings.pingforit.mark_transparent_blocks": "Mark Transparent Blocks",
+	"settings.pingforit.mark_transparent_blocks.tooltip": "Block-shape selection for the next hold; not a general opacity filter.\nOff: use Minecraft's visual shapes.\nOn: use outline shapes, including selectable decorations without collision.",
 	"settings.pingforit.mark_blacklisted_targets": "Mark Blacklisted Targets",
+	"settings.pingforit.mark_blacklisted_targets.tooltip": "Entity target selection for the next hold; unrelated to block display lists.\nOff: skip blacklisted entities.\nOn: include them as candidates; spectators remain excluded.",
 	"settings.pingforit.mark_fluids": "Mark Fluids",
+	"settings.pingforit.mark_fluids.tooltip": "Fluid target selection for the next hold.\nOff: ignore fluids in the selection ray.\nOn: include fluids as selectable hits.",
 	"settings.pingforit.player_info_mode": "Player Info",
-	"settings.pingforit.player_info_mode.hold.tooltip": "Player Info is shown when the \"%s\" (%s) Key Bind is held",
+	"settings.pingforit.player_info_mode.tooltip": "Marker author information, not information about the target player.\nHold: show name and head while the player-list key is held. Always: keep them visible.\nCompact: put the head beside the distance. Disabled: hide author information.",
+	"settings.pingforit.player_info_mode.hold.tooltip": "Show the marker author's name and head while \"%s\" (%s) is held.\nRelease the key to hide the author information.",
+	"settings.pingforit.player_info_mode.disabled.tooltip": "Hide the marker author's name and head.\nThe target name and distance remain visible.",
+	"settings.pingforit.player_info_mode.always.tooltip": "Keep the marker author's name and head visible.\nUses an additional label below the marker.",
+	"settings.pingforit.player_info_mode.compact.tooltip": "Show the author's head beside the distance instead of a separate name label.",
 	"settings.pingforit.team_color_mode": "Team Color",
+	"settings.pingforit.team_color_mode.tooltip": "Team formatting of the verbose author label, not marker recoloring.\nFull and Labels Only keep team formatting; Disabled and Ping Only remove it.\nMarker colors follow Ping Type; target and distance text stay white.",
+	"settings.pingforit.team_color_mode.full.tooltip": "Full has the same effect as Labels Only: keep team formatting on the verbose author label.\nMarker colors still follow Ping Type; target and distance text stay white.",
+	"settings.pingforit.team_color_mode.disabled.tooltip": "Disabled has the same effect as Ping Only: remove team formatting from the verbose author label.\nMarker colors still follow Ping Type; target and distance text stay white.",
+	"settings.pingforit.team_color_mode.ping_only.tooltip": "Ping Only has the same effect as Disabled: remove team formatting from the verbose author label.\nIt does not recolor markers; they follow Ping Type. Target and distance text stay white.",
+	"settings.pingforit.team_color_mode.labels_only.tooltip": "Labels Only has the same effect as Full: keep team formatting on the verbose author label.\nMarker colors still follow Ping Type; target and distance text stay white.",
 	"settings.pingforit.ping_size": "Ping Size: %s",
+	"settings.pingforit.ping_size.tooltip": "Local size of markers and direction indicators.\nDecrease: smaller overlays cover less of the view.\nIncrease: larger overlays are more prominent but cover more of the view.",
 	"settings.pingforit.wheel_inner_radius": "Wheel Inner Radius: %s",
 	"settings.pingforit.wheel_outer_radius": "Wheel Outer Radius: %s",
 	"settings.pingforit.wheel_opacity": "Wheel Opacity: %s",
+	"settings.pingforit.wheel_opacity.tooltip": "Selector underlay opacity for the next hold; labels have a separate control.\nDecrease: reveal more of the world; 0 hides the underlay.\nIncrease: make the underlay more opaque.",
 	"settings.pingforit.wheel_target_opacity": "Wheel Target Opacity: %s",
+	"settings.pingforit.wheel_target_opacity.tooltip": "Opacity of text-bearing selector frames and their labels; applies to the next hold.\nDecrease: fade frames and text; 0 makes them invisible.\nIncrease: make frames and text more visible; the underlay is unchanged.",
 	"settings.pingforit.wheel_font_size": "Wheel Option Font Size: %s",
+	"settings.pingforit.wheel_font_size.tooltip": "Selector option-label text size for the next hold.\nDecrease: use smaller option text.\nIncrease: use larger option text, which needs more space.",
 	"settings.pingforit.wheel_target_font_size": "Wheel Target Font Size: %s",
+	"settings.pingforit.wheel_target_font_size.tooltip": "Selector target-label text size for the next hold.\nDecrease: use smaller target text.\nIncrease: use larger target text, which needs more space.",
 	"settings.pingforit.reset_all": "Reset All",
 	"settings.pingforit.reset_all.title": "Reset all settings?",
-	"settings.pingforit.reset_all.message": "Reset all Ping For It settings to their defaults?",
+	"settings.pingforit.reset_all.message": "Reset every client setting to its default? Server configuration is not reset.",
+	"settings.pingforit.reset_all.tooltip": "Reset every client preference, including remembered channels, after confirmation.\nDoes not reset server configuration; discards any unsent ordinary-server draft.\nProtected files may prevent persistence.",
 	"settings.pingforit.wheel_hold_millis": "Wheel Hold Time: %s",
+	"settings.pingforit.wheel_hold_millis.tooltip": "Ordinary hold required to open the selector; applies to the next press. Lowering this can also shorten the compatibility slice.\nDecrease: open sooner; short taps have less time before opening.\nIncrease: wait longer before opening; the optional gesture shortcut remains independent.",
 	"settings.pingforit.cancel_half_cone_angle_degrees": "Cancel Cone Half-Angle: %s",
+	"settings.pingforit.cancel_half_cone_angle_degrees.tooltip": "Aim cone for selecting your nearest own marker to unping; server ownership and activity checks still apply.\nDecrease: require more precise aim.\nIncrease: include markers farther from the press direction; nearest distance still wins.",
 	"settings.pingforit.channel": "Ping Channel",
-	"settings.pingforit.channel.tooltip": "You only send and receive Pings to and from players on the same channel",
+	"settings.pingforit.channel.tooltip": "Channel preference remembered for this server and sent when settings are saved.\nNon-empty: exchange pings with players using the same channel.\nEmpty: use the server's default-channel policy; the placeholder is only a hint.",
 	"settings.pingforit.channel.placeholder": "Synced to %s",
 	"settings.pingforit.open_block_shape_blacklist_config": "Save, Close & Open Block Shape Config...",
 	"settings.pingforit.open_block_shape_blacklist_config.tooltip": "Saves and closes Settings before opening the client config file. Edits to external lists take effect after restarting the client.",
 	"settings.pingforit.entity_block_render_mode": "Entity Block Geometry",
-	"settings.pingforit.entity_block_render_mode.tooltip": "Selects how entity-block geometry is rendered.",
-	"settings.pingforit.entity_block_render_mode.all.tooltip": "Use built-in and registered modded geometry sources.",
-	"settings.pingforit.entity_block_render_mode.compatible.tooltip": "Use only the built-in entity-block geometry sources.",
-	"settings.pingforit.entity_block_render_mode.voxel_shape_only.tooltip": "Skip geometry sources and use the VoxelShape outline.",
+	"settings.pingforit.entity_block_render_mode.tooltip": "Entity-block outline sources; applies on the next render attempt, not to target selection.\nAll: built-in and registered optional sources. Compatible: built-in renderers and loader-aware models only.\nVoxelShape Only: skip normal sources and use native shapes; the other modes fall back when no source renders.",
+	"settings.pingforit.entity_block_render_mode.all.tooltip": "For entity-block outlines, try built-in renderers and models plus registered optional geometry sources.\nCan include more source geometry; native shape fallback remains when none renders. Applies on the next render attempt.",
+	"settings.pingforit.entity_block_render_mode.compatible.tooltip": "For entity-block outlines, try only built-in renderers and loader-aware models; skip optional geometry sources.\nNative shape fallback remains when none renders. Applies on the next render attempt.",
+	"settings.pingforit.entity_block_render_mode.voxel_shape_only.tooltip": "For entity-block outlines, skip normal geometry sources and use the native VoxelShape route.\nThis changes outline geometry, not target selection. Applies on the next render attempt.",
 	"settings.pingforit.default_channel_mode": "Default Channel Mode",
-	"settings.pingforit.default_channel_mode.tooltip": "Controls the channel used when no channel is selected.",
+	"settings.pingforit.default_channel_mode.tooltip": "Default policy for senders with an empty channel; named channels are unchanged.\nAuto: same team context; unteamed players share a context. Global: all empty-channel players.\nTeam Only: require a team and use that context. Disabled: reject empty-channel creates.",
 	"settings.pingforit.player_tracking_enabled": "Player Tracking",
-	"settings.pingforit.player_tracking_enabled.tooltip": "Allow pings to identify and follow players.",
+	"settings.pingforit.player_tracking_enabled.tooltip": "How newly requested player targets are represented by the server.\nOff: normalize player targets to their current authoritative location.\nOn: retain player entity targets so their markers can follow movement.",
 	"settings.pingforit.ms_to_regenerate": "Regeneration Time (ms)",
-	"settings.pingforit.ms_to_regenerate.tooltip": "Milliseconds needed to regenerate one ping allowance.",
+	"settings.pingforit.ms_to_regenerate.tooltip": "Milliseconds to recover one create allowance; rate limit sets the burst allowance.\nDecrease: allowances recover sooner; 0 disables the client courtesy gate, not an unconditional server bypass.\nIncrease: allowances recover more slowly.",
 	"settings.pingforit.rate_limit": "Rate Limit",
-	"settings.pingforit.rate_limit.tooltip": "Maximum ping allowances in the regeneration window.",
+	"settings.pingforit.rate_limit.tooltip": "Per-player burst allowance for marker creates, with recovery set by Regeneration Time.\nDecrease: allow fewer burst creates; 0 disables rate checking rather than disabling pings.\nIncrease: allow more burst creates; recovery per allowance is unchanged.",
 	"settings.pingforit.sync_duration": "Sync Duration (seconds)",
-	"settings.pingforit.sync_duration.tooltip": "How long newly-created markers remain active on the server.",
+	"settings.pingforit.sync_duration.tooltip": "Server lifetime frozen for newly created markers; local display time is separate. 0 is not a disable mode.\nDecrease: new markers expire sooner on the server.\nIncrease: new markers remain active longer; existing expiry times do not change.",
 
 	"value.pingforit.vanilla_team": "Vanilla Team",
 	"value.pingforit.always": "Always",
@@ -118,11 +142,11 @@
 	"pingforit.target.here": "HERE",
 	"pingforit.target.unknown": "Unknown Target"
   ,"settings.pingforit.long_press_compatibility_mode": "Long-Press Compatibility Mode"
-  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Recognize rapid clicks as one virtual long press."
+  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Rapid-click and deferred-capture compatibility; enabling clears the gesture shortcut and Danger angle without restoring them later.\nOff: use ordinary presses and any explicitly re-enabled gestures.\nOn: closely spaced clicks can form a virtual hold; a pending capture can retain one fresh press."
   ,"settings.pingforit.long_press_compatibility_slice_millis": "Compatibility Time Slice: %s"
-  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Maximum gap between adjacent clicks when compatibility mode is enabled."
+  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Adjacent-click gap used only in compatibility mode, capped at half the hold threshold.\nDecrease: clicks must be closer together to continue a virtual hold.\nIncrease: allow wider gaps between adjacent clicks."
   ,"settings.pingforit.marker_display_duration": "Marker Display Duration: %s"
-  ,"settings.pingforit.marker_display_duration.tooltip": "How long markers remain visible locally. Follow server uses each marker's frozen server duration."
+  ,"settings.pingforit.marker_display_duration.tooltip": "Local display time for newly received markers; 0 follows each marker's frozen server duration.\nDecrease: new markers disappear locally sooner.\nIncrease: new markers stay visible longer; server lifetime and existing markers are unchanged."
   ,"value.pingforit.follow_server": "Follow server"
   ,"unit.pingforit.seconds": "%ss"
   ,"notice.pingforit.mark_transparent_blocks": "Mark transparent blocks: "
@@ -131,16 +155,17 @@
   ,"notice.pingforit.on": "On"
   ,"notice.pingforit.off": "Off"
   ,"settings.pingforit.configuration_notice_size": "Configuration notice size: %s"
-  ,"settings.pingforit.category.display": "Marker Display"
-  ,"settings.pingforit.category.display.button": "Marker Display..."
+  ,"settings.pingforit.configuration_notice_size.tooltip": "Size of local target-selection toggle notices.\nDecrease: smaller notices; 0 hides them without disabling the toggles.\nIncrease: larger notices cover more of the view."
+  ,"settings.pingforit.category.display": "Markers & Range"
+  ,"settings.pingforit.category.display.button": "Markers & Range..."
   ,"settings.pingforit.category.selection": "Target Selection"
   ,"settings.pingforit.category.selection.button": "Target Selection..."
   ,"settings.pingforit.category.wheel_appearance": "Wheel Appearance"
   ,"settings.pingforit.category.wheel_appearance.button": "Wheel Appearance..."
-  ,"settings.pingforit.category.input": "Input Interaction"
-  ,"settings.pingforit.category.input.button": "Input Interaction..."
-  ,"settings.pingforit.category.channel_notices": "Channel & Notices"
-  ,"settings.pingforit.category.channel_notices.button": "Channel & Notices..."
+  ,"settings.pingforit.category.input": "Controls & Gestures"
+  ,"settings.pingforit.category.input.button": "Controls & Gestures..."
+  ,"settings.pingforit.category.channel_notices": "Channel, Sound & Notices"
+  ,"settings.pingforit.category.channel_notices.button": "Channel, Sound & Notices..."
   ,"settings.pingforit.category.geometry_config": "Rendering & Config"
   ,"settings.pingforit.category.geometry_config.button": "Rendering & Config..."
   ,"settings.pingforit.category.channel_players": "Channel & Players"
@@ -150,7 +175,7 @@
   ,"settings.pingforit.category.marker_duration": "Marker Duration"
   ,"settings.pingforit.category.marker_duration.button": "Marker Duration..."
   ,"settings.pingforit.group.marker_display": "Marker presentation"
-  ,"settings.pingforit.group.input_timing": "Press, timeout & cancellation"
+  ,"settings.pingforit.group.input_timing": "Opening the wheel"
   ,"settings.pingforit.group.channel": "Channel"
   ,"settings.pingforit.group.geometry": "Entity-block rendering"
   ,"settings.pingforit.group.client_config_file": "Client configuration file"
@@ -165,14 +190,14 @@
   ,"settings.pingforit.server_status.read_only": "Server settings are read-only for you. The current values are shown."
   ,"settings.pingforit.reset_all.server_draft_warning": "This also discards the unsaved server-settings draft."
   ,"settings.pingforit.open_client_config": "Save, Close & Open Client Config..."
-  ,"settings.pingforit.open_client_config.tooltip": "Saves and closes Settings before opening the complete client configuration file. External edits take effect after restarting the client."
+  ,"settings.pingforit.open_client_config.tooltip": "Save local settings and send any valid ordinary-server draft, then close Settings and open the complete client file.\nIf saving or validation fails, the file is not opened.\nExternal edits require a client restart; reopening Settings does not reload the file."
 	,"settings.pingforit.category.server_presentation": "Server Presentation"
 	,"settings.pingforit.category.server_presentation.button": "Server Presentation..."
   ,"settings.pingforit.presentation.server.title": "Server Policy"
   ,"settings.pingforit.presentation.white": "White list"
   ,"settings.pingforit.presentation.black": "Black list"
   ,"settings.pingforit.presentation.whitelist_only": "Whitelist only"
-  ,"settings.pingforit.presentation.whitelist_only.tooltip": "White list wins over black list: a matching allow selector overrides a matching deny selector."
+  ,"settings.pingforit.presentation.whitelist_only.tooltip": "Fallback for fields matching neither list, for the selected target type.\nOff: use each unmatched field's manifest default.\nOn: deny unmatched fields; allow matches still beat block matches."
   ,"settings.pingforit.presentation.selector": "Selector (namespace:path)"
   ,"settings.pingforit.presentation.add": "Add"
   ,"settings.pingforit.presentation.remove": "Remove"
@@ -221,8 +246,8 @@
   ,"settings.pingforit.presentation.field.now": "Now: %s"
   ,"settings.pingforit.presentation.field.matching_white": "Matching allow rules: %s"
   ,"settings.pingforit.presentation.field.matching_black": "Matching block rules: %s"
-  ,"settings.pingforit.presentation.rule.allow.tooltip": "Adds or removes this exact field as an allow rule. Allow rules are checked before block rules, so a matching allow rule overrides a matching block rule."
-  ,"settings.pingforit.presentation.rule.block.tooltip": "Adds or removes this exact field as a block rule. A matching allow rule still overrides it."
+  ,"settings.pingforit.presentation.rule.allow.tooltip": "Toggle this exact field ID in the selected type's allow list.\nOff: remove only that exact rule; wildcard allow rules may still apply.\nOn: allow this field ahead of block rules; permissions and child restrictions still apply."
+  ,"settings.pingforit.presentation.rule.block.tooltip": "Toggle this exact field ID in the selected type's block list.\nOff: remove only that exact rule; other rules and defaults still apply.\nOn: block the field unless any allow selector matches."
   ,"settings.pingforit.presentation.field.minecraft_target_name.name": "Target name"
   ,"settings.pingforit.presentation.field.minecraft_target_name.description": "Name of the pinged target."
   ,"settings.pingforit.presentation.field.minecraft_entity_type.name": "Entity type"
@@ -291,33 +316,33 @@
   ,"presentation.pingforit.no": "No"
   ,"settings.pingforit.group.spatial_selector": "Spatial selector gestures"
   ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled": "Gesture Skips Long Press"
-  ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled.tooltip": "While holding your bound Ping key for the minimum time, move beyond the center deadzone to open early. Camera movement remains normal until opening; opening by gesture carries the recorded movement into the selector. Applies to the next hold. Enabling long-press compatibility turns this off permanently."
+  ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled.tooltip": "Optional early opening for the next hold; compatibility forces this off and does not restore it.\nOff: use ordinary long-press opening.\nOn: after holding your bound Ping key for the minimum physical time, move beyond the center deadzone to open early."
   ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis": "Minimum Gesture Hold: %s"
-  ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis.tooltip": "Minimum continuous physical hold of the Ping key before movement outside the center deadzone can open the selector early. Ordinary long press still works independently. Applies to the next hold."
+  ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis.tooltip": "Minimum continuous physical hold before the enabled gesture shortcut can open; applies to the next hold. Ordinary long press is independent.\nDecrease: movement can qualify sooner.\nIncrease: require a longer physical hold before movement can open early."
   ,"settings.pingforit.spatial_selector.deadzone": "Center Deadzone: %s"
-  ,"settings.pingforit.spatial_selector.deadzone.tooltip": "Releasing in the radial center abandons the gesture. In lists, no side focus appears at or below this GUI-pixel distance from the panel's outer side frame (screen edge fallback). Applies to the next hold."
+  ,"settings.pingforit.spatial_selector.deadzone.tooltip": "Radial cancel-center and inventory side-intent distance; applies to the next hold. List distance starts at the panel's outer side frame, with a screen-edge fallback.\nDecrease: smaller cancel center; side focus starts sooner.\nIncrease: larger cancel center; side focus requires more movement."
   ,"settings.pingforit.spatial_selector.stroke": "Entry Stroke Length: %s"
-  ,"settings.pingforit.spatial_selector.stroke.tooltip": "Minimum radial stroke before a pause or qualified turn can enter a submenu. In lists, non-hover side navigation triggers at this GUI-pixel distance from the same frame or edge origin, without adding the deadzone. Applies to the next hold."
+  ,"settings.pingforit.spatial_selector.stroke.tooltip": "Stroke before a pause or qualified turn can enter a submenu, and inventory side-navigation distance; applies to the next hold. List distance uses the same frame/edge origin without adding the deadzone.\nDecrease: less movement before entry or side navigation can qualify.\nIncrease: require a longer stroke before entry or side navigation."
   ,"settings.pingforit.spatial_selector.dwell_millis": "Entry Dwell: %s"
-  ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "How long to pause after a full stroke to enter a submenu. Applies to the next hold."
+  ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "Pause after a qualifying stroke before submenu entry; applies to the next hold.\nDecrease: enter sooner when pausing.\nIncrease: require a longer pause; qualified-turn entry is a separate path."
   ,"settings.pingforit.spatial_selector.root_distance": "Root Menu Distance: %s"
-  ,"settings.pingforit.spatial_selector.root_distance.tooltip": "Visual distance of root choices from the center; does not change the deadzone or entry stroke."
+  ,"settings.pingforit.spatial_selector.root_distance.tooltip": "Root choices' visual distance from the center; applies to the next hold. Deadzone and entry stroke are unchanged.\nDecrease: bring root choices inward.\nIncrease: spread root choices farther outward."
   ,"settings.pingforit.spatial_selector.submenu_radius_scale": "Submenu Size: %s"
-  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "Visual size multiplier for every non-root menu, including inventory item menus, relative to the viewport-derived distance; does not change the root menu distance or any gesture threshold."
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "Visual scale of every non-root radial menu, including item menus; applies to the next hold. Root distance and gesture thresholds are unchanged.\nDecrease: make submenus more compact.\nIncrease: spread submenu choices farther apart."
   ,"settings.pingforit.spatial_selector.inventory_max_width_fraction": "Inventory Max Width: %s"
-  ,"settings.pingforit.spatial_selector.inventory_max_width_fraction.tooltip": "Maximum inventory content-panel width relative to the GUI viewport width, not a fixed size. Less content naturally makes the panel smaller. On small GUIs, the readable minimum takes priority. Applies to the next hold."
+  ,"settings.pingforit.spatial_selector.inventory_max_width_fraction.tooltip": "Inventory-panel width cap relative to the GUI viewport; applies to the next hold. Content and readable minima still apply.\nDecrease: allow a narrower panel.\nIncrease: allow a wider panel; this is not a fixed width."
   ,"settings.pingforit.spatial_selector.inventory_max_height_fraction": "Inventory Max Height: %s"
-  ,"settings.pingforit.spatial_selector.inventory_max_height_fraction.tooltip": "Maximum inventory content-panel height relative to the GUI viewport height, not a fixed size. Less content naturally makes the panel smaller. On small GUIs, the readable minimum takes priority. Applies to the next hold."
+  ,"settings.pingforit.spatial_selector.inventory_max_height_fraction.tooltip": "Inventory-panel height cap relative to the GUI viewport, not a fixed height; applies to the next hold. Content and readable minima still apply.\nDecrease: allow a shorter panel, potentially showing fewer rows.\nIncrease: allow a taller panel, potentially showing more rows."
   ,"settings.pingforit.spatial_selector.hover_enabled": "Require Sustained Hover to Return"
-  ,"settings.pingforit.spatial_selector.hover_enabled.tooltip": "Require continuous Back focus to return one level instead of the ordinary return gesture."
+  ,"settings.pingforit.spatial_selector.hover_enabled.tooltip": "Back navigation for the next hold.\nOff: use the ordinary Back gesture.\nOn: require continuous Back focus for the configured dwell; leave and re-enter to return again."
   ,"settings.pingforit.spatial_selector.hover_millis": "Back-Hover Dwell: %s"
-  ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "How long Back must stay focused before it returns one level."
+  ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "Continuous Back focus required when hover return is enabled; applies to the next hold.\nDecrease: return sooner after focusing Back.\nIncrease: require longer Back focus; no effect while hover return is off."
   ,"settings.pingforit.spatial_selector.show_trail": "Show Gesture Trail"
-  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Show the shared pointer and selected-option trail without changing gesture selection."
+  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Pointer and active-option trail for the next hold; selection is unchanged.\nOff: hide both trails.\nOn: draw their shared movement trail."
   ,"settings.pingforit.spatial_selector.reduce_motion": "Reduce Selector Motion"
-  ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "Reduce selector animation without changing gesture timing or selection."
+  ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "Selector animation for the next hold; gesture timing and selection are unchanged.\nOff: use normal selector animation.\nOn: reduce selector motion."
   ,"settings.pingforit.spatial_selector.content_intent_enabled": "Enable Intent Selection for Content"
-  ,"settings.pingforit.spatial_selector.content_intent_enabled.tooltip": "Adds the extra property and item Ping Type menu under Content, including inventory items. Off by default; applies to the next hold. While off, Content and inventory selections use the direct Attention annotation."
+  ,"settings.pingforit.spatial_selector.content_intent_enabled.tooltip": "Additional property and inventory-item Ping Type menus under Content; applies to the next hold. Whole-marker Ping Type is unchanged.\nOff: selectable content commits directly as Attention.\nOn: offer an additional menu to choose the content's Ping Type."
   ,"pingforit.spatial.inventory.updating": "Updating…"
   ,"pingforit.spatial.inventory.unknown": "Unknown"
   ,"pingforit.spatial.inventory.uncertain": "Uncertain"
@@ -348,7 +373,7 @@
   ,"settings.pingforit.category.performance.button": "Performance..."
   ,"settings.pingforit.group.monitoring": "Monitoring"
   ,"settings.pingforit.budget_delay_notifications_enabled": "Budget Delay Notifications"
-  ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "Administrator notices for sustained resource delays.\nOff: fewer chat messages; delays are easier to miss.\nOn: shows which work is waiting, helping you choose a budget to adjust."
+  ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "Administrator notices for sustained resource delays; WARN diagnostics remain enabled.\nOff: fewer chat messages; delays are easier to miss.\nOn: shows which work is waiting, helping you choose a budget to adjust."
   ,"message.pingforit.budget_delay": "[ping for it] Sustained budget delays in %s. Review server performance budgets or blacklists."
   ,"message.pingforit.budget_delay.module.presentation": "presentation"
   ,"message.pingforit.budget_delay.module.inventory_preview": "inventory preview"
@@ -404,7 +429,7 @@
   ,"settings.pingforit.inventory.tracking_grace_periods": "Byte Smoothing Window (periods)"
   ,"settings.pingforit.inventory.tracking_grace_periods.tooltip": "Window for smoothing server-wide tracking traffic.\nDecrease: smaller short-term peaks; clustered updates may take longer to send.\nIncrease: clustered updates fit more easily into short bursts; traffic peaks may be larger."
   ,"settings.pingforit.spatial_selector.precise_capture_period_ticks": "Precise Selection Capture Period: %s"
-  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks.tooltip": "How often the active Precise branch captures its live candidate set. 1 captures every tick; higher values reduce updates. Applies to the next hold."
+  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks.tooltip": "Live candidate capture interval while Precise is active; applies to the next hold.\nDecrease: refresh candidates more often; 1 captures every tick and may do more capture work.\nIncrease: refresh less often; candidate changes can appear later."
   ,"settings.pingforit.group.wheel_options": "Wheel options"
   ,"unit.pingforit.kib": "%s KiB"
   ,"unit.pingforit.ticks": "%st"
@@ -422,15 +447,57 @@
   ,"presentation.pingforit.content.group.create": "Create properties..."
   ,"presentation.pingforit.content.group.stress": "Stress..."
   ,"settings.pingforit.spatial_selector.trail_length": "Trail Length: %s"
-  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "Maximum retained points in the shared pointer and selected-option trail; a longer history can draw a longer trail."
+  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "Retained trail points for the next hold.\nDecrease: retain fewer points for a shorter possible trail.\nIncrease: retain more points for a longer possible trail when movement is sufficient."
   ,"settings.pingforit.spatial_selector.trail_opacity": "Trail Opacity: %s"
-  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Opacity of the shared pointer and selected-option trail only; it does not dim the wheel, options, guides, or connector."
+  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Trail visibility only for the next hold; wheel, options, guides, and connector are unchanged.\nDecrease: make the trail fainter; 0 hides it without changing history or selection.\nIncrease: make the trail more opaque."
   ,"unit.pingforit.points": "%s points"
   ,"value.pingforit.off": "Off"
   ,"settings.pingforit.double_click_danger_window_millis": "Double-Click Danger Window: %s"
-  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "Adjacent presses within this window are treated as one double-click when deriving the danger angle. Applies to the next press."
+  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "Time between adjacent presses in a repeated Danger sequence; applies to the next press. The first tap is not delayed.\nDecrease: require faster repeated presses.\nIncrease: allow slower repeated presses; qualifying repeats reuse the first target."
   ,"settings.pingforit.double_click_danger_angle_degrees": "Double-Click Danger Angle: %s"
-  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "Danger angle derived from active mouse input for consecutive presses within the window. 0 disables double-click danger; long-press compatibility mode clears it to 0."
+  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "Allowed active-mouse turn from the first press for repeated Danger; applies to the next press. 0 disables it, and compatibility clears it to 0.\nDecrease: require steadier aim; 0 turns the gesture off.\nIncrease: allow more mouse turn; qualifying repeats still use the first target."
   ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled": "Keep Inventory Selection Open"
-  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "Keep the inventory item list open after the first release. Later taps select an item, and holding cancels the selection. Applies to the next hold."
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "Inventory-list and item-menu release behavior; applies to the next hold.\nOff: release follows ordinary commit or close behavior.\nOn: first release keeps it open; later taps commit, and holding cancels the selection without unpinging a marker."
+  ,"settings.pingforit.scope.client.tooltip": "Edit preferences on this client; server authority is unchanged."
+  ,"settings.pingforit.scope.server.tooltip": "View server settings; editing requires permission level 3. Ordinary changes are sent on final close; presentation rules use a separate immediate route."
+  ,"settings.pingforit.navigation.back.tooltip": "Return to this scope's overview without sending the ordinary-server draft."
+  ,"settings.pingforit.navigation.done.tooltip": "Save client settings, then send valid ordinary-server changes and close. Server application is not acknowledged."
+  ,"settings.pingforit.presentation.server.tooltip": "Server field rules for the selected target type; each edit is sent separately, not on Settings close.\nAllow matches beat block matches; field permissions and data availability still apply.\nEditing requires permission level 3; child restrictions are file-only."
+  ,"settings.pingforit.presentation.target_type.tooltip": "Choose which target type's rules to view and edit.\nSwitching types does not change policy or discard another list's typed text."
+  ,"settings.pingforit.presentation.selector.tooltip": "Enter a field-ID selector such as minecraft:entity.health or create:kinetic.*.\n* matches within one namespace or path part, never across ':'; adapter IDs do not select their fields.\nTyping does not apply a rule; use Add."
+  ,"settings.pingforit.presentation.add.tooltip": "Send this selector to the selected type's current list now.\nSuccessful adds clear only this list's unchanged input; errors keep the text."
+  ,"settings.pingforit.presentation.remove.tooltip": "Request removal of this selector from this list now.\nOther matching selectors, whitelist-only mode, and defaults still apply."
+  ,"settings.pingforit.presentation.refresh.tooltip": "Request a fresh server policy view without changing rules.\nRetains typed input and the last known view; retry after a request times out."
+  ,"settings.pingforit.presentation.advanced.tooltip": "Show or hide selector lists and whitelist-only mode for this target type.\nThis changes only the editor view, not server policy."
+  ,"unit.pingforit.multiplier": "%1$s×"
+  ,"settings.pingforit.format.name_value": "%1$s: %2$s"
+  ,"settings.pingforit.presentation.advanced.with_counts": "%1$s (%2$s)"
+  ,"settings.pingforit.format.truncated": "%1$s..."
+  ,"settings.pingforit.title.breadcrumb": "%1$s -> %2$s -> %3$s"
+  ,"settings.pingforit.title.scope": "%1$s -> %2$s"
+  ,"settings.pingforit.presentation.selector_separator": ", "
+  ,"settings.pingforit.group.marker_range_lifetime": "Reach & display duration"
+  ,"settings.pingforit.group.player_labels": "Player information & colors"
+  ,"settings.pingforit.group.target_selection": "Selectable targets"
+  ,"settings.pingforit.group.wheel_layout": "Wheel & inventory layout"
+  ,"settings.pingforit.group.wheel_readability": "Opacity & text"
+  ,"settings.pingforit.group.gesture_trail": "Gesture trail"
+  ,"settings.pingforit.group.selector_motion": "Selector motion"
+  ,"settings.pingforit.group.input_compatibility": "Long-press compatibility"
+  ,"settings.pingforit.group.double_click_danger": "Double-click Danger"
+  ,"settings.pingforit.group.marker_cancellation": "Marker cancellation"
+  ,"settings.pingforit.group.content_selection": "Content & inventory selection"
+  ,"settings.pingforit.group.sound_notices": "Sound & notices"
+  ,"settings.pingforit.category.client.display.tooltip": "Choose local capture reach, marker display duration, icons, size, and author information. These do not change server range or lifetime."
+  ,"settings.pingforit.category.client.selection.tooltip": "Choose whether capture includes outline-shaped blocks, blacklisted entities, and fluids. Changes apply to the next hold, not to block display lists."
+  ,"settings.pingforit.category.client.wheel_appearance.tooltip": "Adjust wheel and inventory layout, text, opacity, trails, and motion for the next hold. Appearance does not replace gesture thresholds."
+  ,"settings.pingforit.category.client.input.tooltip": "Tune opening, compatibility, repeated Danger presses, unping aim, navigation gestures, and content selection. Compatibility clears conflicting gesture choices."
+  ,"settings.pingforit.category.client.channel_notices.tooltip": "Choose a channel for this server and adjust local ping-sound volume and toggle-notice size. An empty channel uses server policy."
+  ,"settings.pingforit.category.client.geometry_config.tooltip": "Choose entity-block outline sources or save, close, and open the complete client file. External file edits require a client restart."
+  ,"settings.pingforit.category.client.performance.tooltip": "Set how often the active Precise branch captures live candidates. Shorter intervals refresh sooner but may do more capture work; applies to the next hold."
+  ,"settings.pingforit.category.server.channel_players.tooltip": "Set server behavior for empty channels and newly requested player targets. Ordinary edits remain a draft until final close."
+  ,"settings.pingforit.category.server.send_rate.tooltip": "Set each player's marker-create burst allowance and recovery interval. A zero rate limit disables rate checking, not pings."
+  ,"settings.pingforit.category.server.marker_duration.tooltip": "Set the server lifetime frozen for newly created markers. Existing expiry times and independent client display preferences do not change."
+  ,"settings.pingforit.category.server.performance.tooltip": "Control administrator delay notices and shared, preview, and tracking inventory budgets. Trade resource use against progress, delivery waits, and item detail."
+  ,"settings.pingforit.category.server.server_presentation.tooltip": "View and edit per-target-type field rules from this connection's catalog. Edits use a separate immediate server route and require permission level 3."
 }

@@ -18,41 +18,67 @@
 	"settings.pingforit.server_settings.confirm.discard": "Verwerfen",
 	"settings.pingforit.server_settings.confirm.cancel": "Weiter bearbeiten",
 	"settings.pingforit.ping_volume": "Ping-Lautstärke: %s",
+	"settings.pingforit.ping_volume.tooltip": "Lokale Lautstärke des Ping-Tons.\nVerringern: leisere Hinweise; 0 schaltet sie stumm.\nErhöhen: lautere Hinweise; die Lautstärke anderer Spieler bleibt unverändert.",
 	"settings.pingforit.ping_distance": "Ping-Entfernung: %s",
+	"settings.pingforit.ping_distance.tooltip": "Lokale Reichweite der nativen und präzisen Zielerfassung ab dem nächsten Halten; native Strahlen haben zusätzlich eine eigene Obergrenze. Optionale Fernabfragen behalten ihre eigene Reichweite.\nVerringern: nähere Ziele auswählen.\nErhöhen: weiter entfernte Kandidaten zulassen; die Annahmereichweite des Servers bleibt unverändert.",
 	"settings.pingforit.item_icon_visible": "Gegenstands-Symbole",
+	"settings.pingforit.item_icon_visible.tooltip": "Gegenstandssymbole für Marker.\nAus: das gewöhnliche Ping-Symbol verwenden.\nAn: ein Gegenstandssymbol anzeigen, wenn freigegebene Gegenstandsdaten vorliegen.",
 	"settings.pingforit.direction_indicator_visible": "Richtungsindikatoren",
+	"settings.pingforit.direction_indicator_visible.tooltip": "Wegweiser am Bildschirmrand zu Markern außerhalb des Bildes.\nAus: Richtungsindikatoren ausblenden.\nAn: die Richtung zu Markern außerhalb des Bildes anzeigen.",
 	"settings.pingforit.mark_transparent_blocks": "Transparente Blöcke markieren",
+	"settings.pingforit.mark_transparent_blocks.tooltip": "Blockform für die Zielauswahl ab dem nächsten Halten; kein allgemeiner Transparenzfilter.\nAus: Minecrafts Sichtformen verwenden.\nAn: Umrissformen verwenden, auch für auswählbare Dekoration ohne Kollision.",
 	"settings.pingforit.mark_blacklisted_targets": "Blacklist-Ziele markieren",
+	"settings.pingforit.mark_blacklisted_targets.tooltip": "Entitätsauswahl ab dem nächsten Halten; unabhängig von den Blockanzeigelisten.\nAus: Entitäten auf der Blacklist überspringen.\nAn: sie als Kandidaten berücksichtigen; Zuschauer bleiben ausgeschlossen.",
 	"settings.pingforit.mark_fluids": "Flüssigkeiten markieren",
+	"settings.pingforit.mark_fluids.tooltip": "Flüssigkeitsauswahl ab dem nächsten Halten.\nAus: Flüssigkeiten im Auswahlstrahl ignorieren.\nAn: Flüssigkeiten als auswählbare Treffer berücksichtigen.",
 	"settings.pingforit.player_info_mode": "Spieler Info",
-	"settings.pingforit.player_info_mode.hold.tooltip": "Die Spieler Info wird angezeigt, wenn ‚%s‘ (%s) Tastenbelegung gehalten wird",
+	"settings.pingforit.player_info_mode.tooltip": "Informationen zum Verfasser des Markers, nicht zum angepeilten Spieler.\nHalten: Name und Kopf beim Halten der Spielerlistentaste anzeigen. Immer: dauerhaft anzeigen.\nKompakt: Kopf neben der Entfernung anzeigen. Deaktiviert: Verfasserinformationen ausblenden.",
+	"settings.pingforit.player_info_mode.hold.tooltip": "Name und Kopf des Marker-Verfassers anzeigen, solange „%s“ (%s) gehalten wird.\nBeim Loslassen werden die Verfasserinformationen ausgeblendet.",
+	"settings.pingforit.player_info_mode.disabled.tooltip": "Name und Kopf des Marker-Verfassers ausblenden.\nZielname und Entfernung bleiben sichtbar.",
+	"settings.pingforit.player_info_mode.always.tooltip": "Name und Kopf des Marker-Verfassers dauerhaft anzeigen.\nDafür erscheint eine zusätzliche Beschriftung unter dem Marker.",
+	"settings.pingforit.player_info_mode.compact.tooltip": "Den Kopf des Verfassers neben der Entfernung statt einer eigenen Namensbeschriftung anzeigen.",
 	"settings.pingforit.team_color_mode": "Team Farbe",
+	"settings.pingforit.team_color_mode.tooltip": "Teamformatierung der ausführlichen Verfasseranzeige, keine Umfärbung von Markern.\nKomplett und Nur Labels behalten die Teamformatierung; Deaktiviert und Nur Ping entfernen sie.\nMarkerfarben richten sich nach dem Ping-Typ; Ziel- und Entfernungstext bleiben weiß.",
+	"settings.pingforit.team_color_mode.full.tooltip": "Komplett wirkt wie Nur Labels: Teamformatierung der ausführlichen Verfasseranzeige beibehalten.\nMarkerfarben richten sich weiterhin nach dem Ping-Typ; Ziel- und Entfernungstext bleiben weiß.",
+	"settings.pingforit.team_color_mode.disabled.tooltip": "Deaktiviert wirkt wie Nur Ping: Teamformatierung der ausführlichen Verfasseranzeige entfernen.\nMarkerfarben richten sich weiterhin nach dem Ping-Typ; Ziel- und Entfernungstext bleiben weiß.",
+	"settings.pingforit.team_color_mode.ping_only.tooltip": "Nur Ping wirkt wie Deaktiviert: Teamformatierung der ausführlichen Verfasseranzeige entfernen.\nMarker werden nicht umgefärbt, sondern folgen dem Ping-Typ. Ziel- und Entfernungstext bleiben weiß.",
+	"settings.pingforit.team_color_mode.labels_only.tooltip": "Nur Labels wirkt wie Komplett: Teamformatierung der ausführlichen Verfasseranzeige beibehalten.\nMarkerfarben richten sich weiterhin nach dem Ping-Typ; Ziel- und Entfernungstext bleiben weiß.",
 	"settings.pingforit.ping_size": "Ping-Größe: %s",
+	"settings.pingforit.ping_size.tooltip": "Lokale Größe von Markern und Richtungsindikatoren.\nVerringern: kleinere Anzeigen verdecken weniger vom Bild.\nErhöhen: größere Anzeigen fallen mehr auf, verdecken aber mehr vom Bild.",
 	"settings.pingforit.wheel_opacity": "Radialmenü-Deckkraft: %s",
+	"settings.pingforit.wheel_opacity.tooltip": "Deckkraft des Auswahlhintergrunds ab dem nächsten Halten; Beschriftungen haben eine eigene Einstellung.\nVerringern: mehr von der Welt sichtbar machen; 0 blendet den Hintergrund aus.\nErhöhen: den Hintergrund undurchsichtiger machen.",
 	"settings.pingforit.wheel_target_opacity": "Radialmenü-Zieldeckkraft: %s",
+	"settings.pingforit.wheel_target_opacity.tooltip": "Deckkraft der Textrahmen und ihrer Beschriftungen ab dem nächsten Halten.\nVerringern: Rahmen und Text durchsichtiger machen; 0 blendet sie aus.\nErhöhen: Rahmen und Text deutlicher anzeigen; der Hintergrund bleibt unverändert.",
 	"settings.pingforit.wheel_font_size": "Radialmenü-Optionsschrift: %s",
+	"settings.pingforit.wheel_font_size.tooltip": "Schriftgröße der Auswahloptionen ab dem nächsten Halten.\nVerringern: kleineren Optionstext verwenden.\nErhöhen: größeren Optionstext verwenden, der mehr Platz benötigt.",
 	"settings.pingforit.wheel_target_font_size": "Radialmenü-Zielschrift: %s",
+	"settings.pingforit.wheel_target_font_size.tooltip": "Schriftgröße der Zielbeschriftung ab dem nächsten Halten.\nVerringern: kleineren Zieltext verwenden.\nErhöhen: größeren Zieltext verwenden, der mehr Platz benötigt.",
 	"settings.pingforit.reset_all": "Alles zurücksetzen",
 	"settings.pingforit.reset_all.title": "Alle Einstellungen zurücksetzen?",
-	"settings.pingforit.reset_all.message": "Alle Ping For It Einstellungen auf ihre Standardwerte zurücksetzen?",
+	"settings.pingforit.reset_all.message": "Alle Client-Einstellungen auf ihre Standardwerte zurücksetzen? Die Serverkonfiguration wird nicht zurückgesetzt.",
+	"settings.pingforit.reset_all.tooltip": "Nach Bestätigung alle Client-Einstellungen einschließlich gemerkter Kanäle zurücksetzen.\nSetzt die Serverkonfiguration nicht zurück; verwirft jeden ungesendeten Entwurf gewöhnlicher Servereinstellungen.\nGeschützte Dateien können das dauerhafte Speichern verhindern.",
+	"settings.pingforit.wheel_hold_millis": "Haltezeit fürs Radialmenü: %s",
+	"settings.pingforit.wheel_hold_millis.tooltip": "Gewöhnliche Haltezeit zum Öffnen der Auswahl ab dem nächsten Tastendruck. Ein kleinerer Wert kann auch das Kompatibilitätszeitfenster verkürzen.\nVerringern: früher öffnen; für kurze Tastendrücke bleibt weniger Zeit.\nErhöhen: vor dem Öffnen länger warten; die optionale Gestenabkürzung bleibt unabhängig.",
+	"settings.pingforit.cancel_half_cone_angle_degrees": "Löschkegel-Halbwinkel: %s",
+	"settings.pingforit.cancel_half_cone_angle_degrees.tooltip": "Zielkegel zum Entfernen deines nächstgelegenen eigenen Markers; der Server prüft weiterhin Besitzer und Aktivität.\nVerringern: genaueres Zielen erfordern.\nErhöhen: Marker weiter abseits der Blickrichtung beim Tastendruck berücksichtigen; die kürzeste Entfernung entscheidet weiterhin.",
 	"settings.pingforit.channel": "Ping-Kanal",
-	"settings.pingforit.channel.tooltip": "Du sendest und empfängst Pings nur von Spielern auf demselben Kanal",
+	"settings.pingforit.channel.tooltip": "Für diesen Server gemerkter Wunschkanal, der beim Speichern der Einstellungen gesendet wird.\nNicht leer: Pings mit Spielern auf demselben Kanal austauschen.\nLeer: die Standardkanalrichtlinie des Servers verwenden; der Platzhalter ist nur ein Hinweis.",
 	"settings.pingforit.channel.placeholder": "mit %s synchron",
 	"settings.pingforit.open_block_shape_blacklist_config": "Speichern, schließen und Blockform-Konfiguration öffnen ...",
 	"settings.pingforit.open_block_shape_blacklist_config.tooltip": "Speichert und schließt die Einstellungen vor dem Öffnen der Client-Konfigurationsdatei. Änderungen an externen Listen werden nach einem Neustart des Clients wirksam.",
 	"settings.pingforit.entity_block_render_mode": "Entity-Block-Geometrie",
-	"settings.pingforit.entity_block_render_mode.tooltip": "Legt fest, wie die Geometrie von Entity-Blöcken gerendert wird.",
-	"settings.pingforit.entity_block_render_mode.all.tooltip": "Verwendet integrierte und registrierte modifizierte Geometriequellen.",
-	"settings.pingforit.entity_block_render_mode.compatible.tooltip": "Verwendet nur die integrierten Geometriequellen für Entity-Blöcke.",
-	"settings.pingforit.entity_block_render_mode.voxel_shape_only.tooltip": "Überspringt Geometriequellen und verwendet die VoxelShape-Umrandung.",
+	"settings.pingforit.entity_block_render_mode.tooltip": "Quellen für Entity-Block-Umrisse; gilt beim nächsten Renderversuch, nicht für die Zielauswahl.\nAlle: integrierte und registrierte optionale Quellen. Kompatibel: nur integrierte Renderer und loadergerechte Modelle.\nNur VoxelShape: normale Quellen überspringen und native Formen verwenden; die anderen Modi nutzen diese als Rückfall, wenn keine Quelle rendert.",
+	"settings.pingforit.entity_block_render_mode.all.tooltip": "Für Entity-Block-Umrisse integrierte Renderer und Modelle sowie registrierte optionale Geometriequellen versuchen.\nKann mehr Quellgeometrie erfassen; wenn keine Quelle rendert, bleiben native Formen als Rückfall. Gilt beim nächsten Renderversuch.",
+	"settings.pingforit.entity_block_render_mode.compatible.tooltip": "Für Entity-Block-Umrisse nur integrierte Renderer und loadergerechte Modelle versuchen; optionale Geometriequellen überspringen.\nWenn keine Quelle rendert, bleiben native Formen als Rückfall. Gilt beim nächsten Renderversuch.",
+	"settings.pingforit.entity_block_render_mode.voxel_shape_only.tooltip": "Für Entity-Block-Umrisse normale Geometriequellen überspringen und den nativen VoxelShape-Pfad verwenden.\nÄndert die Umrissgeometrie, nicht die Zielauswahl. Gilt beim nächsten Renderversuch.",
 	"settings.pingforit.default_channel_mode": "Standardkanalmodus",
-	"settings.pingforit.default_channel_mode.tooltip": "Legt den Kanal fest, der ohne ausgewählten Kanal verwendet wird.",
+	"settings.pingforit.default_channel_mode.tooltip": "Serverstandard für Absender mit leerem Kanal; benannte Kanäle bleiben unverändert.\nAuto: gleicher Teamkontext; Spieler ohne Team teilen einen Kontext. Global: alle Spieler mit leerem Kanal.\nNur Team: ein Team verlangen und dessen Kontext verwenden. Deaktiviert: neue Pings mit leerem Kanal ablehnen.",
 	"settings.pingforit.player_tracking_enabled": "Spieler-Tracking",
-	"settings.pingforit.player_tracking_enabled.tooltip": "Erlaubt Pings, Spieler zu erkennen und zu verfolgen.",
+	"settings.pingforit.player_tracking_enabled.tooltip": "Darstellung neu angefragter Spielerziele auf dem Server.\nAus: Spielerziele in ihren aktuellen, vom Server bestimmten Standort umwandeln.\nAn: Spieler als Entitätsziele behalten, damit ihre Marker der Bewegung folgen können.",
 	"settings.pingforit.ms_to_regenerate": "Regenerationszeit (ms)",
-	"settings.pingforit.ms_to_regenerate.tooltip": "Millisekunden, bis eine Ping-Nutzung regeneriert ist.",
+	"settings.pingforit.ms_to_regenerate.tooltip": "Millisekunden, bis eine Nutzung zur Marker-Erstellung wieder verfügbar ist; die Ratenbegrenzung legt den Vorrat für schnelle Folgen fest.\nVerringern: Nutzungen werden schneller verfügbar; 0 deaktiviert die vorsorgliche Clientbegrenzung, umgeht aber nicht bedingungslos die Serverprüfung.\nErhöhen: Nutzungen werden langsamer verfügbar.",
 	"settings.pingforit.rate_limit": "Ratenbegrenzung",
-	"settings.pingforit.rate_limit.tooltip": "Maximale Ping-Nutzungen im Regenerationsfenster.",
+	"settings.pingforit.rate_limit.tooltip": "Vorrat pro Spieler für schnelle Marker-Erstellungen; die Regenerationszeit bestimmt das Auffüllen.\nVerringern: weniger schnelle Erstellungen erlauben; 0 deaktiviert die Ratenprüfung, nicht die Pings.\nErhöhen: mehr schnelle Erstellungen erlauben; die Erholung pro Nutzung bleibt unverändert.",
 
 	"value.pingforit.vanilla_team": "Vanilla Team",
 	"value.pingforit.always": "Immer",
@@ -74,6 +100,8 @@
 	"unit.pingforit.meters": "%sm",
 	"unit.pingforit.percent": "%s%%",
 	"unit.pingforit.milliseconds": "%sms",
+	"unit.pingforit.degrees": "%s°",
+	"unit.pingforit.pixels": "%spx",
 
 	"command.pingforit.config.description": "Konfigurationsoberfläche öffnen",
 	"command.pingforit.channel.get.description": "Aktuellen Kanal abrufen",
@@ -111,13 +139,13 @@
 	"pingforit.target.here": "HIER",
 	"pingforit.target.unknown": "Unbekanntes Ziel"
   ,"settings.pingforit.long_press_compatibility_mode": "Langdruck-Kompatibilitätsmodus"
-  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Erkennt schnelle Klicks als einen virtuellen Langdruck."
+  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Kompatibilität für schnelle Klicks und verzögerte Zielerfassung; Aktivieren löscht Gestenabkürzung und Gefahrenwinkel, ohne sie später wiederherzustellen.\nAus: gewöhnliche Tastendrücke und ausdrücklich erneut aktivierte Gesten verwenden.\nAn: dicht aufeinanderfolgende Klicks können virtuelles Halten bilden; eine laufende Zielerfassung kann einen neuen Tastendruck vormerken."
   ,"settings.pingforit.long_press_compatibility_slice_millis": "Kompatibilitätszeitfenster: %s"
-  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Maximaler Abstand zwischen benachbarten Klicks im Kompatibilitätsmodus."
+  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Abstand benachbarter Klicks nur im Kompatibilitätsmodus, begrenzt auf die halbe Halteschwelle.\nVerringern: Klicks müssen dichter aufeinanderfolgen, um virtuelles Halten fortzusetzen.\nErhöhen: größere Abstände zwischen benachbarten Klicks erlauben."
   ,"settings.pingforit.sync_duration": "Synchronisierungsdauer (Sekunden)"
-  ,"settings.pingforit.sync_duration.tooltip": "Wie lange neu erstellte Marker auf dem Server aktiv bleiben."
+  ,"settings.pingforit.sync_duration.tooltip": "Bei der Erstellung festgehaltene Serverlebensdauer neuer Marker; die lokale Anzeigedauer ist unabhängig. 0 ist kein Ausschaltmodus.\nVerringern: neue Marker laufen auf dem Server früher ab.\nErhöhen: neue Marker bleiben länger aktiv; bestehende Ablaufzeiten ändern sich nicht."
   ,"settings.pingforit.marker_display_duration": "Markierungs-Anzeigedauer: %s"
-  ,"settings.pingforit.marker_display_duration.tooltip": "Wie lange Marker lokal sichtbar bleiben. Bei „Server folgen“ wird die eingefrorene Serverdauer jedes Markers verwendet."
+  ,"settings.pingforit.marker_display_duration.tooltip": "Lokale Anzeigedauer neu empfangener Marker; 0 folgt der festgehaltenen Serverdauer jedes Markers.\nVerringern: neue Marker verschwinden lokal früher.\nErhöhen: neue Marker bleiben länger sichtbar; Serverlebensdauer und vorhandene Marker bleiben unverändert."
   ,"value.pingforit.follow_server": "Server folgen"
   ,"unit.pingforit.seconds": "%ss"
   ,"notice.pingforit.mark_transparent_blocks": "Transparente Blöcke markieren: "
@@ -126,16 +154,17 @@
   ,"notice.pingforit.on": "An"
   ,"notice.pingforit.off": "Aus"
   ,"settings.pingforit.configuration_notice_size": "Größe der Konfigurationsmeldung: %s"
-  ,"settings.pingforit.category.display": "Marker-Anzeige"
-  ,"settings.pingforit.category.display.button": "Marker-Anzeige..."
+  ,"settings.pingforit.configuration_notice_size.tooltip": "Größe lokaler Umschalthinweise zur Zielauswahl.\nVerringern: kleinere Hinweise; 0 blendet sie aus, ohne die Schalter zu deaktivieren.\nErhöhen: größere Hinweise verdecken mehr vom Bild."
+  ,"settings.pingforit.category.display": "Marker & Reichweite"
+  ,"settings.pingforit.category.display.button": "Marker & Reichweite..."
   ,"settings.pingforit.category.selection": "Zielauswahl"
   ,"settings.pingforit.category.selection.button": "Zielauswahl..."
   ,"settings.pingforit.category.wheel_appearance": "Rad-Darstellung"
   ,"settings.pingforit.category.wheel_appearance.button": "Rad-Darstellung..."
-  ,"settings.pingforit.category.input": "Eingabeinteraktion"
-  ,"settings.pingforit.category.input.button": "Eingabeinteraktion..."
-  ,"settings.pingforit.category.channel_notices": "Kanal & Hinweise"
-  ,"settings.pingforit.category.channel_notices.button": "Kanal & Hinweise..."
+  ,"settings.pingforit.category.input": "Steuerung & Gesten"
+  ,"settings.pingforit.category.input.button": "Steuerung & Gesten..."
+  ,"settings.pingforit.category.channel_notices": "Kanal, Ton & Hinweise"
+  ,"settings.pingforit.category.channel_notices.button": "Kanal, Ton & Hinweise..."
   ,"settings.pingforit.category.geometry_config": "Darstellung & Konfiguration"
   ,"settings.pingforit.category.geometry_config.button": "Darstellung & Konfiguration..."
   ,"settings.pingforit.category.channel_players": "Kanal & Spieler"
@@ -145,7 +174,7 @@
   ,"settings.pingforit.category.marker_duration": "Marker-Dauer"
   ,"settings.pingforit.category.marker_duration.button": "Marker-Dauer..."
   ,"settings.pingforit.group.marker_display": "Marker-Darstellung"
-  ,"settings.pingforit.group.input_timing": "Drücken, Zeitlimit & Abbruch"
+  ,"settings.pingforit.group.input_timing": "Radialmenü öffnen"
   ,"settings.pingforit.group.channel": "Kanal"
   ,"settings.pingforit.group.geometry": "Entity-Block-Darstellung"
   ,"settings.pingforit.group.client_config_file": "Client-Konfigurationsdatei"
@@ -160,14 +189,14 @@
   ,"settings.pingforit.server_status.read_only": "Servereinstellungen sind für dich schreibgeschützt. Die aktuellen Werte werden angezeigt."
   ,"settings.pingforit.reset_all.server_draft_warning": "Dadurch wird auch der ungespeicherte Serverentwurf verworfen."
   ,"settings.pingforit.open_client_config": "Speichern, schließen & Client-Konfiguration öffnen..."
-  ,"settings.pingforit.open_client_config.tooltip": "Speichert und schließt die Einstellungen und öffnet dann die vollständige Client-Konfigurationsdatei. Externe Änderungen werden nach einem Neustart des Clients wirksam."
+  ,"settings.pingforit.open_client_config.tooltip": "Lokale Einstellungen speichern und einen gültigen Entwurf gewöhnlicher Servereinstellungen senden, dann die Einstellungen schließen und die vollständige Client-Datei öffnen.\nSchlägt das Speichern oder die Validierung fehl, wird die Datei nicht geöffnet.\nExterne Änderungen erfordern einen Client-Neustart; erneutes Öffnen der Einstellungen lädt die Datei nicht neu."
 	,"settings.pingforit.category.server_presentation": "Serverdarstellung"
 	,"settings.pingforit.category.server_presentation.button": "Serverdarstellung..."
   ,"settings.pingforit.presentation.server.title": "Serverrichtlinie"
   ,"settings.pingforit.presentation.white": "Whitelist"
   ,"settings.pingforit.presentation.black": "Blacklist"
   ,"settings.pingforit.presentation.whitelist_only": "Nur Whitelist"
-  ,"settings.pingforit.presentation.whitelist_only.tooltip": "Die Whitelist hat Vorrang vor der Blacklist: Ein passender Erlaubnis-Selektor überschreibt einen passenden Verbots-Selektor."
+  ,"settings.pingforit.presentation.whitelist_only.tooltip": "Verhalten bei Feldern, die zu keiner Liste des gewählten Zieltyps passen.\nAus: den im Feldkatalog festgelegten Standard des jeweiligen Feldes verwenden.\nAn: nicht passende Felder verweigern; passende Erlauben-Regeln haben weiterhin Vorrang vor Blockieren-Regeln."
   ,"settings.pingforit.presentation.selector": "Selektor (namespace:path)"
   ,"settings.pingforit.presentation.add": "Hinzufügen"
   ,"settings.pingforit.presentation.remove": "Entfernen"
@@ -216,8 +245,8 @@
   ,"settings.pingforit.presentation.field.now": "Jetzt: %s"
   ,"settings.pingforit.presentation.field.matching_white": "Passende Erlauben-Regeln: %s"
   ,"settings.pingforit.presentation.field.matching_black": "Passende Blockieren-Regeln: %s"
-  ,"settings.pingforit.presentation.rule.allow.tooltip": "Fügt dieses exakte Feld als Erlauben-Regel hinzu oder entfernt es. Erlauben-Regeln werden vor Blockieren-Regeln geprüft, daher überstimmt eine passende Erlauben-Regel eine Blockieren-Regel."
-  ,"settings.pingforit.presentation.rule.block.tooltip": "Fügt dieses exakte Feld als Blockieren-Regel hinzu oder entfernt es. Eine passende Erlauben-Regel überstimmt sie weiterhin."
+  ,"settings.pingforit.presentation.rule.allow.tooltip": "Diese exakte Feld-ID in der Erlauben-Liste des gewählten Typs umschalten.\nAus: nur diese exakte Regel entfernen; Erlauben-Regeln mit Platzhaltern können weiterhin gelten.\nAn: dieses Feld vor Blockieren-Regeln erlauben; Berechtigungen und Einschränkungen für Untereinträge gelten weiterhin."
+  ,"settings.pingforit.presentation.rule.block.tooltip": "Diese exakte Feld-ID in der Blockieren-Liste des gewählten Typs umschalten.\nAus: nur diese exakte Regel entfernen; andere Regeln und Standards gelten weiterhin.\nAn: das Feld blockieren, sofern kein Erlauben-Selektor passt."
   ,"settings.pingforit.presentation.field.minecraft_target_name.name": "Zielname"
   ,"settings.pingforit.presentation.field.minecraft_target_name.description": "Name des angepingten Ziels."
   ,"settings.pingforit.presentation.field.minecraft_entity_type.name": "Entitätstyp"
@@ -286,33 +315,33 @@
   ,"presentation.pingforit.no": "Nein"
   ,"settings.pingforit.group.spatial_selector": "Gesten der räumlichen Auswahl"
   ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled": "Geste überspringt Langdruck"
-  ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled.tooltip": "Halte die belegte Ping-Taste mindestens für die Mindestzeit und bewege die Maus aus der mittleren Totzone, um früher zu öffnen. Bis dahin bleibt die Kamera frei beweglich; beim Öffnen per Geste wird die aufgezeichnete Bewegung übernommen. Gilt ab dem nächsten Halten. Der Langdruck-Kompatibilitätsmodus schaltet diese Option dauerhaft aus."
+  ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled.tooltip": "Optionale frühere Öffnung ab dem nächsten Halten; der Kompatibilitätsmodus erzwingt Aus und stellt die Einstellung nicht wieder her.\nAus: gewöhnliches Öffnen per Langdruck verwenden.\nAn: die belegte Ping-Taste mindestens für die physische Mindestzeit halten, dann über die mittlere Totzone hinausbewegen, um früher zu öffnen."
   ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis": "Minimale Gesten-Haltezeit: %s"
-  ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis.tooltip": "Minimale ununterbrochene Haltezeit der Ping-Taste, bevor Bewegung außerhalb der Totzone früher öffnen kann. Gewöhnlicher Langdruck funktioniert unabhängig. Gilt ab dem nächsten Halten."
+  ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis.tooltip": "Physische Mindesthaltezeit, bevor die aktivierte Gestenabkürzung öffnen kann; gilt ab dem nächsten Halten. Gewöhnlicher Langdruck bleibt unabhängig.\nVerringern: Bewegung kann früher ausreichen.\nErhöhen: längeres physisches Halten erfordern, bevor Bewegung früher öffnen kann."
   ,"settings.pingforit.spatial_selector.deadzone": "Totzone in der Mitte: %s"
-  ,"settings.pingforit.spatial_selector.deadzone.tooltip": "Loslassen im Zentrum des Radialmenüs verwirft die Geste. In Listen entsteht bis einschließlich dieser GUI-Pixel-Distanz ab dem äußeren Seitenrahmen des Panels kein Seitenfokus; ersatzweise gilt der Bildschirmrand als Ursprung. Gilt ab dem nächsten Halten."
+  ,"settings.pingforit.spatial_selector.deadzone.tooltip": "Abbruchzentrum im Radialmenü und seitlicher Fokusabstand im Inventar ab dem nächsten Halten. Listenabstände beginnen am äußeren Seitenrahmen des Panels, ersatzweise am Bildschirmrand.\nVerringern: kleineres Abbruchzentrum; Seitenfokus beginnt früher.\nErhöhen: größeres Abbruchzentrum; Seitenfokus erfordert mehr Bewegung."
   ,"settings.pingforit.spatial_selector.stroke": "Länge der Eintrittsgeste: %s"
-  ,"settings.pingforit.spatial_selector.stroke.tooltip": "Radialer Mindestweg, bevor eine Pause oder deutliche Richtungsänderung ein Untermenü öffnet. In Listen löst die Seitennavigation ohne Verweilen ab dieser GUI-Pixel-Distanz vom selben Rahmen- oder Randursprung aus, ohne die Totzone zu addieren. Gilt ab dem nächsten Halten."
+  ,"settings.pingforit.spatial_selector.stroke.tooltip": "Weg vor einem Untermenüeintritt per Pause oder geeigneter Richtungsänderung sowie Abstand für die Inventar-Seitennavigation ab dem nächsten Halten. Listen messen ab demselben Rahmen oder Rand, ohne die Totzone zu addieren.\nVerringern: weniger Bewegung vor Eintritt oder Seitennavigation erfordern.\nErhöhen: einen längeren Weg vor Eintritt oder Seitennavigation erfordern."
   ,"settings.pingforit.spatial_selector.dwell_millis": "Pause zum Öffnen: %s"
-  ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "Pausendauer nach einer vollständigen Geste zum Öffnen eines Untermenüs. Gilt ab dem nächsten Halten."
+  ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "Pause nach einem ausreichenden Weg vor dem Untermenüeintritt ab dem nächsten Halten.\nVerringern: beim Pausieren früher eintreten.\nErhöhen: eine längere Pause erfordern; Eintritt per geeigneter Richtungsänderung bleibt ein eigener Weg."
   ,"settings.pingforit.spatial_selector.root_distance": "Abstand des Hauptmenüs: %s"
-  ,"settings.pingforit.spatial_selector.root_distance.tooltip": "Sichtbarer Abstand der Hauptauswahl zur Mitte; verändert weder Totzone noch Eintrittsgeste."
+  ,"settings.pingforit.spatial_selector.root_distance.tooltip": "Sichtbarer Abstand der Hauptauswahl zur Mitte ab dem nächsten Halten. Totzone und Eintrittsgeste bleiben unverändert.\nVerringern: Hauptoptionen nach innen rücken.\nErhöhen: Hauptoptionen weiter nach außen verteilen."
   ,"settings.pingforit.spatial_selector.submenu_radius_scale": "Größe der Untermenüs: %s"
-  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "Sichtbarer Größenfaktor für jedes Untermenü, einschließlich Gegenstandsmenüs im Inventar, relativ zum sichtbaren Abstand; verändert weder den Abstand des Hauptmenüs noch Gestenschwellen."
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "Sichtbare Größe aller radialen Untermenüs einschließlich Gegenstandsmenüs ab dem nächsten Halten. Hauptmenüabstand und Gestenschwellen bleiben unverändert.\nVerringern: Untermenüs kompakter machen.\nErhöhen: Untermenüoptionen weiter auseinander verteilen."
   ,"settings.pingforit.spatial_selector.inventory_max_width_fraction": "Maximale Inventarbreite: %s"
-  ,"settings.pingforit.spatial_selector.inventory_max_width_fraction.tooltip": "Maximale Breite des Inventarinhaltsbereichs relativ zur Breite des GUI-Sichtbereichs, keine feste Größe. Weniger Inhalt verkleinert den Bereich automatisch. Bei kleinen GUIs hat die lesbare Mindestgröße Vorrang. Gilt ab dem nächsten Gedrückthalten."
+  ,"settings.pingforit.spatial_selector.inventory_max_width_fraction.tooltip": "Breitenobergrenze des Inventarpanels relativ zum GUI-Sichtbereich ab dem nächsten Halten. Inhalt und lesbare Mindestgröße gelten weiterhin.\nVerringern: ein schmaleres Panel zulassen.\nErhöhen: ein breiteres Panel zulassen; dies ist keine feste Breite."
   ,"settings.pingforit.spatial_selector.inventory_max_height_fraction": "Maximale Inventarhöhe: %s"
-  ,"settings.pingforit.spatial_selector.inventory_max_height_fraction.tooltip": "Maximale Höhe des Inventarinhaltsbereichs relativ zur Höhe des GUI-Sichtbereichs, keine feste Größe. Weniger Inhalt verkleinert den Bereich automatisch. Bei kleinen GUIs hat die lesbare Mindestgröße Vorrang. Gilt ab dem nächsten Gedrückthalten."
+  ,"settings.pingforit.spatial_selector.inventory_max_height_fraction.tooltip": "Höhenobergrenze des Inventarpanels relativ zum GUI-Sichtbereich, keine feste Höhe; gilt ab dem nächsten Halten. Inhalt und lesbare Mindestgröße gelten weiterhin.\nVerringern: ein niedrigeres Panel zulassen, das eventuell weniger Zeilen zeigt.\nErhöhen: ein höheres Panel zulassen, das eventuell mehr Zeilen zeigt."
   ,"settings.pingforit.spatial_selector.hover_enabled": "Zurück erfordert anhaltenden Hover"
-  ,"settings.pingforit.spatial_selector.hover_enabled.tooltip": "Eine Ebene zurück erfordert durchgehenden Zurück-Fokus statt der gewöhnlichen Rückkehrgeste."
+  ,"settings.pingforit.spatial_selector.hover_enabled.tooltip": "Zurück-Navigation ab dem nächsten Halten.\nAus: die gewöhnliche Zurück-Geste verwenden.\nAn: durchgehenden Zurück-Fokus für die eingestellte Verweildauer verlangen; für eine weitere Rückkehr den Fokus verlassen und neu setzen."
   ,"settings.pingforit.spatial_selector.hover_millis": "Zurück-Hover-Verweildauer: %s"
-  ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "Wie lange Zurück fokussiert bleiben muss, bevor es eine Ebene zurückgeht."
+  ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "Erforderlicher durchgehender Zurück-Fokus bei aktivierter Hover-Rückkehr ab dem nächsten Halten.\nVerringern: nach Zurück-Fokus früher zurückkehren.\nErhöhen: längeren Zurück-Fokus verlangen; ohne Hover-Rückkehr wirkungslos."
   ,"settings.pingforit.spatial_selector.show_trail": "Gestenspur anzeigen"
-  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Zeigt die gemeinsame Spur von virtuellem Zeiger und gewählter Option, ohne die Auswahl zu verändern."
+  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Spur von Zeiger und aktiver Option ab dem nächsten Halten; die Auswahl bleibt unverändert.\nAus: beide Spuren ausblenden.\nAn: ihre gemeinsame Bewegungsspur zeichnen."
   ,"settings.pingforit.spatial_selector.reduce_motion": "Auswahlbewegung reduzieren"
-  ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "Reduziert Auswahlanimationen, ohne Gestenzeit oder Auswahl zu verändern."
+  ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "Auswahlanimation ab dem nächsten Halten; Gestenzeit und Auswahl bleiben unverändert.\nAus: gewöhnliche Auswahlanimation verwenden.\nAn: Auswahlbewegungen reduzieren."
   ,"settings.pingforit.spatial_selector.content_intent_enabled": "Absichtsauswahl für Inhalte aktivieren"
-  ,"settings.pingforit.spatial_selector.content_intent_enabled.tooltip": "Zeigt das zusätzliche Menü für Eigenschafts- und Gegenstands-Ping-Typen unter Inhalt, einschließlich Inventargegenständen. Standardmäßig deaktiviert; gilt ab dem nächsten Halten. Solange deaktiviert, werden Inhalts- und Inventarauswahlen direkt mit „Achtung“ angemerkt."
+  ,"settings.pingforit.spatial_selector.content_intent_enabled.tooltip": "Zusätzliche Ping-Typ-Menüs für Eigenschaften und Inventargegenstände unter Inhalt ab dem nächsten Halten. Der Ping-Typ des gesamten Markers bleibt unverändert.\nAus: auswählbare Inhalte direkt als Achtung bestätigen.\nAn: ein zusätzliches Menü zur Wahl des Ping-Typs des Inhalts anbieten."
   ,"pingforit.spatial.inventory.updating": "Aktualisierung…"
   ,"pingforit.spatial.inventory.unknown": "Unbekannt"
   ,"pingforit.spatial.inventory.uncertain": "Unsicher"
@@ -343,7 +372,7 @@
   ,"settings.pingforit.category.performance.button": "Leistung..."
   ,"settings.pingforit.group.monitoring": "Überwachung"
   ,"settings.pingforit.budget_delay_notifications_enabled": "Benachrichtigungen bei Budgetverzögerungen"
-  ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "Administratorhinweise bei anhaltendem Ressourcenmangel.\nAus: weniger Chatnachrichten; Wartezeiten fallen leichter nicht auf.\nAn: zeigt wartende Aufgaben und hilft bei der Wahl des anzupassenden Budgets."
+  ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "Administratorhinweise bei anhaltenden Ressourcenverzögerungen; WARN-Diagnosen bleiben aktiv.\nAus: weniger Chatnachrichten; Wartezeiten werden leichter übersehen.\nAn: wartende Aufgaben anzeigen und bei der Wahl des anzupassenden Budgets helfen."
   ,"message.pingforit.budget_delay": "[ping for it] Anhaltende Budgetverzögerungen bei %s. Prüfe die Leistungsbudgets oder Sperrlisten des Servers."
   ,"message.pingforit.budget_delay.module.presentation": "Informationsanzeige"
   ,"message.pingforit.budget_delay.module.inventory_preview": "Inventarvorschau"
@@ -398,9 +427,9 @@
   ,"settings.pingforit.inventory.tracking_heartbeat_periods.tooltip": "Positive Werte bestimmen den Abstand periodischer Verfolgungsprüfungen.\nVerringern: häufigere Prüfungen finden Abweichungen eventuell früher; der Aufwand kann steigen.\nErhöhen: weniger Prüfungen sparen Aufwand; Abweichungen fallen eventuell später auf."
   ,"settings.pingforit.inventory.tracking_grace_periods": "Byteglättungsfenster (Perioden)"
   ,"settings.pingforit.inventory.tracking_grace_periods.tooltip": "Glättungsfenster für serverweiten Verfolgungsverkehr.\nVerringern: kleinere kurzfristige Spitzen; gebündelte Updates brauchen eventuell länger.\nErhöhen: gebündelte Updates passen leichter in kurze Schübe; Verkehrsspitzen können größer sein."
-  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks": "Precise Selection Capture Period: %s"
-  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks.tooltip": "How often the active Precise branch captures its live candidate set. 1 captures every tick; higher values reduce updates. Applies to the next hold."
-  ,"settings.pingforit.group.wheel_options": "Wheel options"
+  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks": "Präzisions-Erfassungsintervall: %s"
+  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks.tooltip": "Intervall für Live-Kandidaten bei aktiver Präzise-Auswahl ab dem nächsten Halten.\nVerringern: Kandidaten häufiger aktualisieren; 1 erfasst jeden Tick und kann mehr Erfassungsarbeit verursachen.\nErhöhen: seltener aktualisieren; Kandidatenänderungen erscheinen eventuell später."
+  ,"settings.pingforit.group.wheel_options": "Radialmenüoptionen"
   ,"unit.pingforit.kib": "%s KiB"
   ,"unit.pingforit.ticks": "%st"
   ,"pingforit.chat.content.template": "{author} möchte {type} von {target}: {content}"
@@ -417,15 +446,57 @@
   ,"presentation.pingforit.content.group.create": "Create-Eigenschaften..."
   ,"presentation.pingforit.content.group.stress": "Belastung..."
   ,"settings.pingforit.spatial_selector.trail_length": "Spurlänge: %s"
-  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "Maximale Anzahl gespeicherter Punkte der gemeinsamen Zeiger- und Auswahlspur; mehr Punkte können eine längere Spur zeichnen."
+  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "Gespeicherte Spurpunkte ab dem nächsten Halten.\nVerringern: weniger Punkte für eine kürzere mögliche Spur speichern.\nErhöhen: mehr Punkte für eine längere mögliche Spur bei ausreichender Bewegung speichern."
   ,"settings.pingforit.spatial_selector.trail_opacity": "Spurdeckkraft: %s"
-  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Deckkraft nur der gemeinsamen Zeiger- und Auswahlspur; dimmt weder Menü, Optionen, Hilfslinien noch Verbindungslinie."
+  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Nur die Spuren-Sichtbarkeit ab dem nächsten Halten; Menü, Optionen, Hilfslinien und Verbindungslinie bleiben unverändert.\nVerringern: Spur durchsichtiger machen; 0 blendet sie aus, ohne Verlauf oder Auswahl zu verändern.\nErhöhen: Spur undurchsichtiger machen."
   ,"unit.pingforit.points": "%s Punkte"
   ,"value.pingforit.off": "Aus"
   ,"settings.pingforit.double_click_danger_window_millis": "Doppelklick-Gefahrenfenster: %s"
-  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "Aufeinanderfolgende Tastendrücke innerhalb dieses Zeitfensters gelten als ein Doppelklick, aus dem der Gefahrenwinkel abgeleitet wird. Gilt ab dem nächsten Tastendruck."
+  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "Zeit zwischen benachbarten Tastendrücken einer Gefahrenfolge ab dem nächsten Tastendruck. Der erste kurze Druck wird nicht verzögert.\nVerringern: schnellere Wiederholungen verlangen.\nErhöhen: langsamere Wiederholungen erlauben; passende Wiederholungen verwenden das erste Ziel erneut."
   ,"settings.pingforit.double_click_danger_angle_degrees": "Doppelklick-Gefahrenwinkel: %s"
-  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "Der Gefahrenwinkel eines Doppelklicks wird aus der aktiven Mausbewegung abgeleitet. 0 deaktiviert die Doppelklick-Gefahr; der Langdruck-Kompatibilitätsmodus setzt ihn auf 0."
+  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "Erlaubte aktive Mausdrehung ab dem ersten Druck für wiederholte Gefahr ab dem nächsten Tastendruck. 0 deaktiviert die Geste; der Kompatibilitätsmodus setzt den Wert auf 0.\nVerringern: ruhigeres Zielen verlangen; 0 schaltet die Geste aus.\nErhöhen: mehr Mausdrehung erlauben; passende Wiederholungen verwenden weiterhin das erste Ziel."
   ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled": "Inventarauswahl offen halten"
-  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "Hält die Inventarliste nach dem ersten Loslassen offen. Spätere Tipp-Berührungen wählen ein Objekt aus, Halten bricht die Auswahl ab. Gilt ab dem nächsten Halten."
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "Loslassverhalten von Inventarliste und Gegenstandsmenü ab dem nächsten Halten.\nAus: Loslassen bestätigt oder schließt wie gewöhnlich.\nAn: erstes Loslassen hält die Auswahl offen; spätere kurze Tastendrücke bestätigen, Halten bricht die Auswahl ab, ohne einen Marker zu entfernen."
+  ,"settings.pingforit.scope.client.tooltip": "Einstellungen auf diesem Client bearbeiten; die Serverautorität bleibt unverändert."
+  ,"settings.pingforit.scope.server.tooltip": "Servereinstellungen ansehen; Bearbeiten erfordert Berechtigungsstufe 3. Gewöhnliche Änderungen werden beim endgültigen Schließen gesendet; Darstellungsregeln nutzen einen eigenen sofortigen Weg."
+  ,"settings.pingforit.navigation.back.tooltip": "Zur Übersicht dieses Bereichs zurückkehren, ohne den Entwurf gewöhnlicher Servereinstellungen zu senden."
+  ,"settings.pingforit.navigation.done.tooltip": "Client-Einstellungen speichern, dann gültige gewöhnliche Serveränderungen senden und schließen. Die Anwendung durch den Server wird nicht bestätigt."
+  ,"settings.pingforit.presentation.server.tooltip": "Server-Feldregeln für den gewählten Zieltyp; jede Änderung wird separat gesendet, nicht erst beim Schließen der Einstellungen.\nPassende Erlauben-Regeln schlagen Blockieren-Regeln; Feldberechtigungen und Datenverfügbarkeit gelten weiterhin.\nBearbeiten erfordert Berechtigungsstufe 3; Einschränkungen für Untereinträge sind nur per Datei einstellbar."
+  ,"settings.pingforit.presentation.target_type.tooltip": "Wählen, für welchen Zieltyp Regeln angezeigt und bearbeitet werden.\nEin Typwechsel ändert keine Richtlinie und verwirft keinen in einer anderen Liste eingegebenen Text."
+  ,"settings.pingforit.presentation.selector.tooltip": "Einen Feld-ID-Selektor wie minecraft:entity.health oder create:kinetic.* eingeben.\n* passt innerhalb eines Namensraum- oder Pfadteils, nie über ':' hinweg; Adapter-IDs wählen deren Felder nicht aus.\nEingeben wendet keine Regel an; dafür Hinzufügen verwenden."
+  ,"settings.pingforit.presentation.add.tooltip": "Diesen Selektor sofort an die aktuelle Liste des gewählten Typs senden.\nBei Erfolg wird nur die unveränderte Eingabe dieser Liste geleert; bei Fehlern bleibt der Text erhalten."
+  ,"settings.pingforit.presentation.remove.tooltip": "Die Entfernung dieses Selektors aus dieser Liste sofort anfragen.\nAndere passende Selektoren, der Nur-Whitelist-Modus und Standards gelten weiterhin."
+  ,"settings.pingforit.presentation.refresh.tooltip": "Eine neue Ansicht der Serverrichtlinie anfordern, ohne Regeln zu ändern.\nEingaben und letzte bekannte Ansicht bleiben erhalten; nach einer Zeitüberschreitung erneut versuchen."
+  ,"settings.pingforit.presentation.advanced.tooltip": "Selektorlisten und Nur-Whitelist-Modus für diesen Zieltyp ein- oder ausblenden.\nÄndert nur die Editoransicht, nicht die Serverrichtlinie."
+  ,"unit.pingforit.multiplier": "%1$s×"
+  ,"settings.pingforit.format.name_value": "%1$s: %2$s"
+  ,"settings.pingforit.presentation.advanced.with_counts": "%1$s (%2$s)"
+  ,"settings.pingforit.format.truncated": "%1$s..."
+  ,"settings.pingforit.title.breadcrumb": "%1$s -> %2$s -> %3$s"
+  ,"settings.pingforit.title.scope": "%1$s -> %2$s"
+  ,"settings.pingforit.presentation.selector_separator": ", "
+  ,"settings.pingforit.group.marker_range_lifetime": "Reichweite & Anzeigedauer"
+  ,"settings.pingforit.group.player_labels": "Spielerinformationen & Farben"
+  ,"settings.pingforit.group.target_selection": "Auswählbare Ziele"
+  ,"settings.pingforit.group.wheel_layout": "Menü- & Inventaranordnung"
+  ,"settings.pingforit.group.wheel_readability": "Deckkraft & Text"
+  ,"settings.pingforit.group.gesture_trail": "Gestenspur"
+  ,"settings.pingforit.group.selector_motion": "Auswahlbewegung"
+  ,"settings.pingforit.group.input_compatibility": "Langdruck-Kompatibilität"
+  ,"settings.pingforit.group.double_click_danger": "Doppelklick-Gefahr"
+  ,"settings.pingforit.group.marker_cancellation": "Marker entfernen"
+  ,"settings.pingforit.group.content_selection": "Inhalts- & Inventarauswahl"
+  ,"settings.pingforit.group.sound_notices": "Ton & Hinweise"
+  ,"settings.pingforit.category.client.display.tooltip": "Lokale Erfassungsreichweite, Marker-Anzeigedauer, Symbole, Größe und Verfasserinformationen wählen. Ändert weder Reichweite noch Lebensdauer auf dem Server."
+  ,"settings.pingforit.category.client.selection.tooltip": "Wählen, ob die Erfassung Blockumrissformen, Entitäten auf der Blacklist und Flüssigkeiten berücksichtigt. Änderungen gelten ab dem nächsten Halten, nicht für Blockanzeigelisten."
+  ,"settings.pingforit.category.client.wheel_appearance.tooltip": "Menü- und Inventaranordnung, Text, Deckkraft, Spuren und Bewegung ab dem nächsten Halten anpassen. Die Darstellung ersetzt keine Gestenschwellen."
+  ,"settings.pingforit.category.client.input.tooltip": "Öffnen, Kompatibilität, wiederholte Gefahr-Tastendrücke, Zielkegel zum Entfernen, Navigationsgesten und Inhaltsauswahl anpassen. Kompatibilität löscht widersprechende Gesteneinstellungen."
+  ,"settings.pingforit.category.client.channel_notices.tooltip": "Einen Kanal für diesen Server wählen sowie lokale Ping-Lautstärke und Größe der Umschalthinweise anpassen. Ein leerer Kanal verwendet die Serverrichtlinie."
+  ,"settings.pingforit.category.client.geometry_config.tooltip": "Quellen für Entity-Block-Umrisse wählen oder speichern, schließen und die vollständige Client-Datei öffnen. Externe Dateiänderungen erfordern einen Client-Neustart."
+  ,"settings.pingforit.category.client.performance.tooltip": "Erfassungsintervall für Live-Kandidaten bei aktiver Präzise-Auswahl festlegen. Kürzere Intervalle aktualisieren früher, können aber mehr Erfassungsarbeit verursachen; gilt ab dem nächsten Halten."
+  ,"settings.pingforit.category.server.channel_players.tooltip": "Serververhalten für leere Kanäle und neu angefragte Spielerziele festlegen. Gewöhnliche Änderungen bleiben bis zum endgültigen Schließen ein Entwurf."
+  ,"settings.pingforit.category.server.send_rate.tooltip": "Vorrat für schnelle Marker-Erstellungen und Erholungsintervall pro Spieler festlegen. Eine Ratenbegrenzung von 0 deaktiviert die Ratenprüfung, nicht die Pings."
+  ,"settings.pingforit.category.server.marker_duration.tooltip": "Die bei der Erstellung festgehaltene Serverlebensdauer neuer Marker festlegen. Bestehende Ablaufzeiten und unabhängige Client-Anzeigeeinstellungen bleiben unverändert."
+  ,"settings.pingforit.category.server.performance.tooltip": "Administratorhinweise bei Verzögerungen sowie gemeinsame, Vorschau- und Verfolgungsbudgets für Inventare steuern. Ressourcenverbrauch gegen Fortschritt, Übertragungswartezeiten und Gegenstandsdetails abwägen."
+  ,"settings.pingforit.category.server.server_presentation.tooltip": "Feldregeln pro Zieltyp aus dem Katalog dieser Verbindung ansehen und bearbeiten. Änderungen nutzen einen eigenen sofortigen Serverweg und erfordern Berechtigungsstufe 3."
 }

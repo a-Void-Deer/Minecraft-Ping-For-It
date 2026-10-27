@@ -19,40 +19,40 @@
 	"settings.pingforit.server_settings.confirm.cancel": "Edytuj dalej",
 	"settings.pingforit.ping_volume": "Głośność pingu: %s",
 	"settings.pingforit.ping_distance": "Zasięg pingu: %s",
-	"settings.pingforit.item_icon_visible": "Ikony itemów",
+	"settings.pingforit.item_icon_visible": "Ikony przedmiotów",
 	"settings.pingforit.direction_indicator_visible": "Wskaźnik kierunku",
 	"settings.pingforit.mark_transparent_blocks": "Oznaczaj przezroczyste bloki",
 	"settings.pingforit.mark_blacklisted_targets": "Oznaczanie celów z czarnej listy",
 	"settings.pingforit.mark_fluids": "Oznaczanie płynów",
 	"settings.pingforit.ping_size": "Rozmiar pingu: %s",
 	"settings.pingforit.wheel_opacity": "Nieprzezroczystość koła: %s",
-	"settings.pingforit.wheel_target_opacity": "Przezroczystość celu koła: %s",
+	"settings.pingforit.wheel_target_opacity": "Nieprzezroczystość celu koła: %s",
 	"settings.pingforit.wheel_font_size": "Rozmiar czcionki opcji koła: %s",
 	"settings.pingforit.wheel_target_font_size": "Rozmiar czcionki celu koła: %s",
 	"settings.pingforit.reset_all": "Resetuj wszystko",
 	"settings.pingforit.reset_all.title": "Zresetować wszystkie ustawienia?",
-	"settings.pingforit.reset_all.message": "Zresetować wszystkie ustawienia Ping For It do wartości domyślnych?",
+	"settings.pingforit.reset_all.message": "Przywrócić domyślne wartości wszystkich ustawień klienta? Konfiguracja serwera nie zostanie zresetowana.",
 	"settings.pingforit.channel": "Kanał pingowania",
-	"settings.pingforit.channel.tooltip": "Wysyłasz i odbierasz pingi tylko od graczy na tym samym kanale",
+	"settings.pingforit.channel.tooltip": "Kanał zapamiętywany dla tego serwera i wysyłany przy zapisie ustawień.\nNiepusty: wymieniaj pingi z graczami na tym samym kanale.\nPusty: używaj domyślnych zasad serwera; tekst podpowiedzi jest tylko wskazówką.",
 	"settings.pingforit.channel.placeholder": "Zsynchronizowano z %s",
 	"settings.pingforit.open_block_shape_blacklist_config": "Zapisz, zamknij i otwórz konfigurację kształtów bloków...",
 	"settings.pingforit.open_block_shape_blacklist_config.tooltip": "Zapisuje i zamyka ustawienia przed otwarciem pliku konfiguracji klienta. Zmiany zewnętrznych list zaczną obowiązywać po ponownym uruchomieniu klienta.",
 	"settings.pingforit.entity_block_render_mode": "Geometria bloków z encją",
-	"settings.pingforit.entity_block_render_mode.tooltip": "Wybiera sposób renderowania geometrii bloków z encją.",
-	"settings.pingforit.entity_block_render_mode.all.tooltip": "Używa wbudowanych i zarejestrowanych przez mody źródeł geometrii.",
-	"settings.pingforit.entity_block_render_mode.compatible.tooltip": "Używa tylko wbudowanych źródeł geometrii bloków z encją.",
-	"settings.pingforit.entity_block_render_mode.voxel_shape_only.tooltip": "Pomija źródła geometrii i używa obrysu VoxelShape.",
+	"settings.pingforit.entity_block_render_mode.tooltip": "Źródła obrysów bloków z encją; działa przy następnej próbie renderowania, nie zmienia wyboru celu.\nWszystkie: źródła wbudowane i zarejestrowane opcjonalne. Zgodny: tylko wbudowane renderery i modele obsługujące dany loader.\nTylko VoxelShape: pomija zwykłe źródła i używa natywnych kształtów; pozostałe tryby używają ich awaryjnie, gdy żadne źródło nic nie narysuje.",
+	"settings.pingforit.entity_block_render_mode.all.tooltip": "Dla obrysów bloków z encją wypróbuj wbudowane renderery i modele oraz zarejestrowane opcjonalne źródła geometrii.\nMoże uwzględnić więcej geometrii; gdy żadne źródło nic nie narysuje, pozostaje natywny kształt. Działa przy następnej próbie renderowania.",
+	"settings.pingforit.entity_block_render_mode.compatible.tooltip": "Dla obrysów bloków z encją wypróbuj tylko wbudowane renderery i modele obsługujące dany loader; pomiń opcjonalne źródła geometrii.\nGdy żadne źródło nic nie narysuje, pozostaje natywny kształt. Działa przy następnej próbie renderowania.",
+	"settings.pingforit.entity_block_render_mode.voxel_shape_only.tooltip": "Dla obrysów bloków z encją pomiń zwykłe źródła geometrii i użyj natywnego VoxelShape.\nZmienia geometrię obrysu, nie wybór celu. Działa przy następnej próbie renderowania.",
 	"settings.pingforit.player_info_mode": "Informacje o graczu",
-	"settings.pingforit.player_info_mode.hold.tooltip": "Informacje o graczu są wyświetlane po przytrzymaniu klawisza \"%s\" (%s)",
+	"settings.pingforit.player_info_mode.hold.tooltip": "Pokazuj nazwę i głowę autora znacznika podczas przytrzymywania klawisza „%s” (%s).\nZwolnij klawisz, aby ukryć informacje o autorze.",
 	"settings.pingforit.team_color_mode": "Kolor drużyny",
 	"settings.pingforit.default_channel_mode": "Tryb domyślnego kanału",
-	"settings.pingforit.default_channel_mode.tooltip": "Określa kanał używany, gdy nie wybrano żadnego kanału.",
+	"settings.pingforit.default_channel_mode.tooltip": "Domyślne zasady dla nadawców z pustym kanałem; nazwane kanały pozostają bez zmian.\nAutomatyczny: ten sam kontekst drużyny; gracze bez drużyny mają wspólny kontekst. Globalny: wszyscy gracze z pustym kanałem.\nTylko drużyna: wymaga drużyny i używa jej kontekstu. Wyłączony: odrzuca tworzenie znaczników z pustym kanałem.",
 	"settings.pingforit.player_tracking_enabled": "Śledzenie graczy",
-	"settings.pingforit.player_tracking_enabled.tooltip": "Pozwala pingom rozpoznawać i śledzić graczy.",
+	"settings.pingforit.player_tracking_enabled.tooltip": "Sposób reprezentowania przez serwer nowych żądań oznaczenia gracza.\nWyłączone: zamienia cel gracza na jego bieżącą pozycję ustaloną przez serwer.\nWłączone: zachowuje gracza jako cel-encję, dzięki czemu znacznik może podążać za jego ruchem.",
 	"settings.pingforit.ms_to_regenerate": "Czas regeneracji (ms)",
-	"settings.pingforit.ms_to_regenerate.tooltip": "Liczba milisekund potrzebna do odnowienia jednego użycia pingu.",
+	"settings.pingforit.ms_to_regenerate.tooltip": "Milisekundy potrzebne do odnowienia jednego użycia tworzenia znacznika; limit częstotliwości określa wielkość serii.\nZmniejsz: szybsze odnawianie; 0 wyłącza wstępny ogranicznik klienta, ale nie daje bezwarunkowego obejścia kontroli serwera.\nZwiększ: wolniejsze odnawianie użyć.",
 	"settings.pingforit.rate_limit": "Limit częstotliwości",
-	"settings.pingforit.rate_limit.tooltip": "Maksymalna liczba użyć pingu w oknie regeneracji.",
+	"settings.pingforit.rate_limit.tooltip": "Liczba znaczników, które gracz może utworzyć w serii; odnawianie określa Czas regeneracji.\nZmniejsz: mniej znaczników w serii; 0 wyłącza kontrolę częstotliwości, a nie pingowanie.\nZwiększ: więcej znaczników w serii; czas odnowienia pojedynczego użycia pozostaje bez zmian.",
 
 	"value.pingforit.auto": "Automatyczny",
 	"value.pingforit.disabled": "Wyłączony",
@@ -105,13 +105,13 @@
 	"pingforit.target.here": "TUTAJ",
 	"pingforit.target.unknown": "Nieznany cel"
   ,"settings.pingforit.long_press_compatibility_mode": "Tryb zgodności długiego naciśnięcia"
-  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Rozpoznaje szybkie kliknięcia jako jedno wirtualne długie naciśnięcie."
+  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Zgodność z szybkimi kliknięciami i opóźnionym przechwytywaniem celu; włączenie zeruje kąt Niebezpieczeństwa i wyłącza skrót gestem, bez późniejszego przywracania.\nWyłączone: zwykłe naciśnięcia i ręcznie ponownie włączone gesty.\nWłączone: szybkie kliknięcia mogą tworzyć wirtualne przytrzymanie; oczekujące przechwycenie może zachować jedno nowe naciśnięcie."
   ,"settings.pingforit.long_press_compatibility_slice_millis": "Okno zgodności: %s"
-  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Maksymalny odstęp między kolejnymi kliknięciami w trybie zgodności."
+  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Odstęp między sąsiednimi kliknięciami tylko w trybie zgodności, ograniczony do połowy progu przytrzymania.\nZmniejsz: klikaj szybciej, aby podtrzymać wirtualne przytrzymanie.\nZwiększ: dopuszcza dłuższe odstępy między sąsiednimi kliknięciami."
   ,"settings.pingforit.sync_duration": "Czas synchronizacji (sekundy)"
-  ,"settings.pingforit.sync_duration.tooltip": "Jak długo nowo utworzone znaczniki pozostają aktywne na serwerze."
+  ,"settings.pingforit.sync_duration.tooltip": "Czas życia ustalany na serwerze przy tworzeniu nowego znacznika; lokalny czas wyświetlania jest niezależny. 0 nie oznacza wyłączenia.\nZmniejsz: nowe znaczniki szybciej wygasają na serwerze.\nZwiększ: nowe znaczniki dłużej pozostają aktywne; terminy wygaśnięcia istniejących się nie zmieniają."
   ,"settings.pingforit.marker_display_duration": "Czas wyświetlania znacznika: %s"
-  ,"settings.pingforit.marker_display_duration.tooltip": "Jak długo znaczniki są widoczne lokalnie. Opcja śledzenia serwera używa zamrożonego czasu każdego znacznika."
+  ,"settings.pingforit.marker_display_duration.tooltip": "Lokalny czas wyświetlania nowo otrzymanych znaczników; 0 używa zapisanego dla danego znacznika czasu serwera.\nZmniejsz: nowe znaczniki szybciej znikają lokalnie.\nZwiększ: nowe znaczniki są dłużej widoczne; czas życia na serwerze i istniejące znaczniki pozostają bez zmian."
   ,"value.pingforit.follow_server": "Śledź serwer"
   ,"unit.pingforit.seconds": "%ss"
   ,"notice.pingforit.mark_transparent_blocks": "Oznaczanie przezroczystych bloków: "
@@ -120,16 +120,16 @@
   ,"notice.pingforit.on": "Włączone"
   ,"notice.pingforit.off": "Wyłączone"
   ,"settings.pingforit.configuration_notice_size": "Rozmiar powiadomienia konfiguracji: %s"
-  ,"settings.pingforit.category.display": "Wyświetlanie znaczników"
-  ,"settings.pingforit.category.display.button": "Wyświetlanie znaczników..."
+  ,"settings.pingforit.category.display": "Znaczniki i zasięg"
+  ,"settings.pingforit.category.display.button": "Znaczniki i zasięg..."
   ,"settings.pingforit.category.selection": "Wybór celu"
   ,"settings.pingforit.category.selection.button": "Wybór celu..."
   ,"settings.pingforit.category.wheel_appearance": "Wygląd koła"
   ,"settings.pingforit.category.wheel_appearance.button": "Wygląd koła..."
-  ,"settings.pingforit.category.input": "Obsługa wejścia"
-  ,"settings.pingforit.category.input.button": "Obsługa wejścia..."
-  ,"settings.pingforit.category.channel_notices": "Kanał i powiadomienia"
-  ,"settings.pingforit.category.channel_notices.button": "Kanał i powiadomienia..."
+  ,"settings.pingforit.category.input": "Sterowanie i gesty"
+  ,"settings.pingforit.category.input.button": "Sterowanie i gesty..."
+  ,"settings.pingforit.category.channel_notices": "Kanał, dźwięk i powiadomienia"
+  ,"settings.pingforit.category.channel_notices.button": "Kanał, dźwięk i powiadomienia..."
   ,"settings.pingforit.category.geometry_config": "Renderowanie i konfiguracja"
   ,"settings.pingforit.category.geometry_config.button": "Renderowanie i konfiguracja..."
   ,"settings.pingforit.category.channel_players": "Kanał i gracze"
@@ -139,7 +139,7 @@
   ,"settings.pingforit.category.marker_duration": "Czas trwania znacznika"
   ,"settings.pingforit.category.marker_duration.button": "Czas trwania znacznika..."
   ,"settings.pingforit.group.marker_display": "Prezentacja znaczników"
-  ,"settings.pingforit.group.input_timing": "Naciśnięcie, limit czasu i anulowanie"
+  ,"settings.pingforit.group.input_timing": "Otwieranie koła"
   ,"settings.pingforit.group.channel": "Kanał"
   ,"settings.pingforit.group.geometry": "Renderowanie bloków encji"
   ,"settings.pingforit.group.client_config_file": "Plik konfiguracji klienta"
@@ -154,14 +154,14 @@
   ,"settings.pingforit.server_status.read_only": "Ustawienia serwera są dla Ciebie tylko do odczytu. Wyświetlane są bieżące wartości."
   ,"settings.pingforit.reset_all.server_draft_warning": "Spowoduje to także odrzucenie niezapisanego szkicu ustawień serwera."
   ,"settings.pingforit.open_client_config": "Zapisz, zamknij i otwórz konfigurację klienta..."
-  ,"settings.pingforit.open_client_config.tooltip": "Zapisuje i zamyka ustawienia przed otwarciem pełnego pliku konfiguracji klienta. Zmiany zewnętrzne zaczną działać po ponownym uruchomieniu klienta."
+  ,"settings.pingforit.open_client_config.tooltip": "Zapisz ustawienia lokalne i wyślij poprawny szkic zwykłych ustawień serwera, następnie zamknij Ustawienia i otwórz cały plik klienta.\nJeśli zapis lub sprawdzenie wartości się nie powiedzie, plik nie zostanie otwarty.\nZmiany zewnętrzne zadziałają dopiero po ponownym uruchomieniu klienta; ponowne otwarcie Ustawień nie wczytuje pliku."
 	,"settings.pingforit.category.server_presentation": "Prezentacja serwera"
 	,"settings.pingforit.category.server_presentation.button": "Prezentacja serwera..."
   ,"settings.pingforit.presentation.server.title": "Zasady serwera"
   ,"settings.pingforit.presentation.white": "Biała lista"
   ,"settings.pingforit.presentation.black": "Czarna lista"
   ,"settings.pingforit.presentation.whitelist_only": "Tylko biała lista"
-  ,"settings.pingforit.presentation.whitelist_only.tooltip": "Biała lista ma pierwszeństwo przed czarną: pasujący selektor zezwolenia unieważnia pasujący selektor odmowy."
+  ,"settings.pingforit.presentation.whitelist_only.tooltip": "Zasady dla pól wybranego typu celu, które nie pasują do żadnej listy.\nWyłączone: używaj domyślnego ustawienia pola z katalogu.\nWłączone: odrzucaj niepasujące pola; pasujące zezwolenie nadal ma pierwszeństwo przed blokadą."
   ,"settings.pingforit.presentation.selector": "Selektor (namespace:path)"
   ,"settings.pingforit.presentation.add": "Dodaj"
   ,"settings.pingforit.presentation.remove": "Usuń"
@@ -210,8 +210,8 @@
   ,"settings.pingforit.presentation.field.now": "Teraz: %s"
   ,"settings.pingforit.presentation.field.matching_white": "Pasujące reguły zezwolenia: %s"
   ,"settings.pingforit.presentation.field.matching_black": "Pasujące reguły blokowania: %s"
-  ,"settings.pingforit.presentation.rule.allow.tooltip": "Dodaje lub usuwa to dokładne pole jako regułę zezwolenia. Reguły zezwolenia są sprawdzane przed regułami blokowania, więc pasujące zezwolenie unieważnia blokadę."
-  ,"settings.pingforit.presentation.rule.block.tooltip": "Dodaje lub usuwa to dokładne pole jako regułę blokowania. Pasująca reguła zezwolenia nadal ją unieważnia."
+  ,"settings.pingforit.presentation.rule.allow.tooltip": "Przełącz dokładny identyfikator tego pola na liście zezwoleń wybranego typu.\nWyłączone: usuń tylko tę dokładną regułę; zezwolenia z symbolami wieloznacznymi mogą nadal działać.\nWłączone: zezwól na pole mimo reguł blokowania; uprawnienia i ograniczenia pól podrzędnych nadal obowiązują."
+  ,"settings.pingforit.presentation.rule.block.tooltip": "Przełącz dokładny identyfikator tego pola na liście blokad wybranego typu.\nWyłączone: usuń tylko tę dokładną regułę; pozostałe reguły i wartości domyślne nadal obowiązują.\nWłączone: blokuj pole, chyba że pasuje do dowolnego selektora zezwolenia."
   ,"settings.pingforit.presentation.field.minecraft_target_name.name": "Nazwa celu"
   ,"settings.pingforit.presentation.field.minecraft_target_name.description": "Nazwa oznaczonego celu."
   ,"settings.pingforit.presentation.field.minecraft_entity_type.name": "Typ encji"
@@ -280,33 +280,33 @@
   ,"presentation.pingforit.no": "Nie"
   ,"settings.pingforit.group.spatial_selector": "Gesty selektora przestrzennego"
   ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled": "Gest pomija długie naciśnięcie"
-  ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled.tooltip": "Przytrzymaj przypisany klawisz Ping przez minimalny czas i przesuń mysz poza martwą strefę, aby otworzyć wcześniej. Kamera porusza się normalnie do otwarcia; otwarcie gestem przenosi zapisany ruch do selektora. Działa od następnego przytrzymania. Tryb zgodności wyłącza tę opcję bez późniejszego przywracania."
+  ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled.tooltip": "Opcjonalne wcześniejsze otwieranie od następnego przytrzymania; tryb zgodności wymusza wyłączenie bez późniejszego przywracania.\nWyłączone: otwieraj zwykłym długim naciśnięciem.\nWłączone: po fizycznym przytrzymaniu przypisanego klawisza Ping przez minimalny czas wyjdź poza martwą strefę, aby otworzyć wcześniej."
   ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis": "Minimalny czas gestu: %s"
-  ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis.tooltip": "Minimalny czas ciągłego fizycznego przytrzymania Ping, zanim ruch poza martwą strefę może otworzyć wcześniej. Zwykłe długie naciśnięcie działa niezależnie. Działa od następnego przytrzymania."
+  ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis.tooltip": "Minimalne ciągłe fizyczne przytrzymanie przed otwarciem włączonym skrótem gestu; działa od następnego przytrzymania. Zwykłe długie naciśnięcie jest niezależne.\nZmniejsz: ruch może wcześniej spełnić warunki otwarcia.\nZwiększ: wymaga dłuższego fizycznego przytrzymania przed wcześniejszym otwarciem ruchem."
   ,"settings.pingforit.spatial_selector.deadzone": "Martwa strefa środka: %s"
-  ,"settings.pingforit.spatial_selector.deadzone.tooltip": "Zwolnienie w środku menu radialnego porzuca gest. Na listach fokus boczny pojawia się dopiero po przekroczeniu tej odległości w pikselach GUI od zewnętrznej ramki bocznej panelu, a zastępczo od krawędzi ekranu. Działa od następnego przytrzymania."
+  ,"settings.pingforit.spatial_selector.deadzone.tooltip": "Środkowy obszar anulowania i próg ruchu w bok na liście ekwipunku; działa od następnego przytrzymania. Na liście mierzony od zewnętrznej ramki bocznej, zastępczo od krawędzi ekranu.\nZmniejsz: mniejszy środek anulowania; wcześniejsze zaznaczenie boczne.\nZwiększ: większy środek anulowania; zaznaczenie boczne wymaga dalszego ruchu."
   ,"settings.pingforit.spatial_selector.stroke": "Długość gestu wejścia: %s"
-  ,"settings.pingforit.spatial_selector.stroke.tooltip": "Minimalna droga radialna, po której pauza lub wyraźny skręt otwiera podmenu. Na listach nawigacja boczna bez oczekiwania uruchamia się po osiągnięciu tej odległości w pikselach GUI od tej samej ramki lub krawędzi, bez dodawania martwej strefy. Działa od następnego przytrzymania."
+  ,"settings.pingforit.spatial_selector.stroke.tooltip": "Droga ruchu przed wejściem do podmenu przez pauzę lub odpowiedni skręt, a także dystans nawigacji bocznej ekwipunku; działa od następnego przytrzymania. Na liście liczona od tej samej ramki lub krawędzi, bez dodawania martwej strefy.\nZmniejsz: krótszy ruch wystarczy do wejścia lub nawigacji bocznej.\nZwiększ: wymaga dłuższego ruchu przed wejściem lub nawigacją boczną."
   ,"settings.pingforit.spatial_selector.dwell_millis": "Pauza wejścia: %s"
-  ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "Czas pauzy po pełnym geście potrzebny do otwarcia podmenu. Działa od następnego przytrzymania."
+  ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "Pauza po wystarczającym ruchu przed wejściem do podmenu; działa od następnego przytrzymania.\nZmniejsz: szybsze wejście po zatrzymaniu.\nZwiększ: wymaga dłuższej pauzy; wejście odpowiednim skrętem działa niezależnie."
   ,"settings.pingforit.spatial_selector.root_distance": "Odległość menu głównego: %s"
-  ,"settings.pingforit.spatial_selector.root_distance.tooltip": "Wizualna odległość głównych opcji od środka; nie zmienia martwej strefy ani gestu wejścia."
+  ,"settings.pingforit.spatial_selector.root_distance.tooltip": "Wizualna odległość głównych opcji od środka; działa od następnego przytrzymania. Martwa strefa i droga wejścia pozostają bez zmian.\nZmniejsz: przesuń główne opcje bliżej środka.\nZwiększ: rozsuń główne opcje dalej od środka."
   ,"settings.pingforit.spatial_selector.submenu_radius_scale": "Rozmiar podmenu: %s"
-  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "Wizualny mnożnik rozmiaru wszystkich podmenu, w tym menu przedmiotów ekwipunku, względem odległości wynikającej z widoku; nie zmienia odległości menu głównego ani progów gestów."
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "Wizualny rozmiar wszystkich podmenu radialnych, także menu przedmiotów; działa od następnego przytrzymania. Odległość menu głównego i progi gestów pozostają bez zmian.\nZmniejsz: bardziej zwarte podmenu.\nZwiększ: rozsuń opcje podmenu dalej od siebie."
   ,"settings.pingforit.spatial_selector.inventory_max_width_fraction": "Maksymalna szerokość ekwipunku: %s"
-  ,"settings.pingforit.spatial_selector.inventory_max_width_fraction.tooltip": "Maksymalna szerokość panelu zawartości ekwipunku względem szerokości obszaru widoku GUI, a nie stały rozmiar. Mniej zawartości naturalnie zmniejsza panel. W małym GUI pierwszeństwo ma minimalny czytelny rozmiar. Zmiana obowiązuje od następnego przytrzymania."
+  ,"settings.pingforit.spatial_selector.inventory_max_width_fraction.tooltip": "Limit szerokości panelu ekwipunku względem obszaru widoku GUI; działa od następnego przytrzymania. Zawartość i minimalny czytelny rozmiar nadal mają znaczenie.\nZmniejsz: dopuszcza węższy panel.\nZwiększ: dopuszcza szerszy panel; nie jest to stała szerokość."
   ,"settings.pingforit.spatial_selector.inventory_max_height_fraction": "Maksymalna wysokość ekwipunku: %s"
-  ,"settings.pingforit.spatial_selector.inventory_max_height_fraction.tooltip": "Maksymalna wysokość panelu zawartości ekwipunku względem wysokości obszaru widoku GUI, a nie stały rozmiar. Mniej zawartości naturalnie zmniejsza panel. W małym GUI pierwszeństwo ma minimalny czytelny rozmiar. Zmiana obowiązuje od następnego przytrzymania."
+  ,"settings.pingforit.spatial_selector.inventory_max_height_fraction.tooltip": "Limit wysokości panelu ekwipunku względem obszaru widoku GUI, nie stała wysokość; działa od następnego przytrzymania. Zawartość i minimalny czytelny rozmiar nadal mają znaczenie.\nZmniejsz: dopuszcza niższy panel, który może mieścić mniej wierszy.\nZwiększ: dopuszcza wyższy panel, który może mieścić więcej wierszy."
   ,"settings.pingforit.spatial_selector.hover_enabled": "Wymagaj ciągłego najechania dla powrotu"
-  ,"settings.pingforit.spatial_selector.hover_enabled.tooltip": "Powrót o poziom wymaga ciągłego zaznaczenia Wstecz zamiast zwykłego gestu powrotu."
+  ,"settings.pingforit.spatial_selector.hover_enabled.tooltip": "Nawigacja Wstecz od następnego przytrzymania.\nWyłączone: używaj zwykłego gestu powrotu.\nWłączone: wymaga ciągłego zaznaczenia Wstecz przez ustalony czas; opuść tę opcję i wróć na nią, aby ponownie się cofnąć."
   ,"settings.pingforit.spatial_selector.hover_millis": "Opóźnienie powrotu przez najechanie: %s"
-  ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "Jak długo Wstecz musi pozostać zaznaczone, zanim wróci o poziom."
+  ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "Czas ciągłego zaznaczenia Wstecz przy włączonym powrocie przez najechanie; działa od następnego przytrzymania.\nZmniejsz: szybszy powrót po zaznaczeniu Wstecz.\nZwiększ: wymaga dłuższego zaznaczenia Wstecz; bez efektu, gdy powrót przez najechanie jest wyłączony."
   ,"settings.pingforit.spatial_selector.show_trail": "Pokaż ślad gestu"
-  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Pokazuje wspólny ślad wskaźnika i wybranej opcji bez zmiany wyboru."
+  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Ślad wskaźnika i aktywnej opcji od następnego przytrzymania; wybór pozostaje bez zmian.\nWyłączone: ukryj oba ślady.\nWłączone: rysuj ich wspólny ślad ruchu."
   ,"settings.pingforit.spatial_selector.reduce_motion": "Ogranicz ruch selektora"
-  ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "Ogranicza animacje selektora bez zmiany czasu gestów ani wyboru."
+  ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "Animacje selektora od następnego przytrzymania; czas gestów i wybór pozostają bez zmian.\nWyłączone: zwykłe animacje selektora.\nWłączone: ogranicz ruch selektora."
   ,"settings.pingforit.spatial_selector.content_intent_enabled": "Włącz wybór intencji dla zawartości"
-  ,"settings.pingforit.spatial_selector.content_intent_enabled.tooltip": "Pokazuje dodatkowe menu typów pingów dla właściwości i przedmiotów w Zawartości, w tym przedmioty ekwipunku. Domyślnie wyłączone; działa od następnego przytrzymania. Gdy jest wyłączone, wybory Zawartości i ekwipunku są oznaczane bezpośrednio adnotacją Uwaga."
+  ,"settings.pingforit.spatial_selector.content_intent_enabled.tooltip": "Dodatkowe menu typów pingów dla właściwości i przedmiotów ekwipunku w Zawartości; działa od następnego przytrzymania. Typ całego znacznika pozostaje bez zmian.\nWyłączone: wybrana zawartość jest od razu oznaczana jako Uwaga.\nWłączone: dodatkowe menu pozwala wybrać typ pingu dla zawartości."
   ,"pingforit.spatial.inventory.updating": "Aktualizowanie…"
   ,"pingforit.spatial.inventory.unknown": "Nieznany"
   ,"pingforit.spatial.inventory.uncertain": "Niepewny"
@@ -337,7 +337,7 @@
   ,"settings.pingforit.category.performance.button": "Wydajność..."
   ,"settings.pingforit.group.monitoring": "Monitorowanie"
   ,"settings.pingforit.budget_delay_notifications_enabled": "Powiadomienia o opóźnieniach budżetowych"
-  ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "Powiadomienia administratora o długim oczekiwaniu na zasoby.\nWyłączone: mniej wiadomości; łatwiej przeoczyć opóźnienia.\nWłączone: wskazuje oczekujące zadania i pomaga wybrać budżet do zmiany."
+  ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "Powiadomienia administratora o długim oczekiwaniu na zasoby; diagnostyka WARN pozostaje włączona.\nWyłączone: mniej wiadomości; łatwiej przeoczyć opóźnienia.\nWłączone: wskazuje oczekujące zadania i pomaga wybrać budżet do zmiany."
   ,"message.pingforit.budget_delay": "[ping for it] Utrzymujące się opóźnienia budżetowe w modułach: %s. Sprawdź budżety wydajności lub czarne listy serwera."
   ,"message.pingforit.budget_delay.module.presentation": "prezentacja informacji"
   ,"message.pingforit.budget_delay.module.inventory_preview": "podgląd ekwipunku"
@@ -392,9 +392,9 @@
   ,"settings.pingforit.inventory.tracking_heartbeat_periods.tooltip": "Wartości dodatnie określają odstęp okresowych kontroli śledzenia.\nZmniejsz: częstsze kontrole mogą wcześniej wykrywać rozbieżności; praca może wzrosnąć.\nZwiększ: mniej kontroli ogranicza pracę; rozbieżności mogą zostać wykryte później."
   ,"settings.pingforit.inventory.tracking_grace_periods": "Okno wygładzania bajtów"
   ,"settings.pingforit.inventory.tracking_grace_periods.tooltip": "Okno wygładzania ruchu śledzenia całego serwera.\nZmniejsz: mniejsze krótkie szczyty; skupione aktualizacje mogą wysyłać się dłużej.\nZwiększ: skupione aktualizacje łatwiej mieszczą się w krótkich seriach; szczyty ruchu mogą być większe."
-  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks": "Precise Selection Capture Period: %s"
-  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks.tooltip": "How often the active Precise branch captures its live candidate set. 1 captures every tick; higher values reduce updates. Applies to the next hold."
-  ,"settings.pingforit.group.wheel_options": "Wheel options"
+  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks": "Okres przechwytywania precyzyjnego: %s"
+  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks.tooltip": "Odstęp przechwytywania bieżących kandydatów w aktywnej gałęzi Precyzyjne; działa od następnego przytrzymania.\nZmniejsz: częstsze odświeżanie; 1 przechwytuje co tick i może zwiększać nakład pracy.\nZwiększ: rzadsze odświeżanie; zmiany kandydatów mogą pojawiać się później."
+  ,"settings.pingforit.group.wheel_options": "Opcje koła"
   ,"unit.pingforit.kib": "%s KiB"
   ,"unit.pingforit.ticks": "%st"
   ,"pingforit.chat.content.template": "{author} prosi o {type} z {target}: {content}"
@@ -411,15 +411,87 @@
   ,"presentation.pingforit.content.group.create": "Właściwości Create..."
   ,"presentation.pingforit.content.group.stress": "Obciążenie..."
   ,"settings.pingforit.spatial_selector.trail_length": "Długość śladu: %s"
-  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "Maksymalna liczba zachowanych punktów wspólnego śladu wskaźnika i wybranej opcji; więcej punktów pozwala narysować dłuższy ślad."
+  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "Liczba zachowanych punktów śladu od następnego przytrzymania.\nZmniejsz: zachowuj mniej punktów, skracając możliwy ślad.\nZwiększ: zachowuj więcej punktów, wydłużając możliwy ślad przy wystarczającym ruchu."
   ,"settings.pingforit.spatial_selector.trail_opacity": "Krycie śladu: %s"
-  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Krycie tylko wspólnego śladu wskaźnika i wybranej opcji; nie przygasza menu, opcji, prowadnic ani łącznika."
+  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Widoczność samego śladu od następnego przytrzymania; koło, opcje, prowadnice i łącznik pozostają bez zmian.\nZmniejsz: bledszy ślad; 0 ukrywa go bez zmiany historii i wyboru.\nZwiększ: mocniejsze krycie śladu."
   ,"unit.pingforit.points": "%s pkt"
   ,"value.pingforit.off": "Wyłączone"
   ,"settings.pingforit.double_click_danger_window_millis": "Okno zagrożenia podwójnego kliknięcia: %s"
-  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "Kolejne naciśnięcia w tym oknie są traktowane jako jedno podwójne kliknięcie przy wyznaczaniu kąta zagrożenia. Dotyczy następnego naciśnięcia."
+  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "Odstęp między sąsiednimi naciśnięciami w serii Niebezpieczeństwo; dotyczy następnego naciśnięcia. Pierwsze krótkie naciśnięcie nie jest opóźniane.\nZmniejsz: wymaga szybszych powtórnych naciśnięć.\nZwiększ: dopuszcza wolniejsze powtórzenia; poprawne powtórzenia używają pierwszego celu."
   ,"settings.pingforit.double_click_danger_angle_degrees": "Kąt zagrożenia podwójnego kliknięcia: %s"
-  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "Kąt zagrożenia podwójnego kliknięcia jest wyznaczany na podstawie aktywnego ruchu myszy. 0 wyłącza zagrożenie podwójnego kliknięcia; tryb zgodności długiego naciśnięcia zeruje go."
+  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "Dozwolony obrót myszą od pierwszego naciśnięcia przy powtarzanym Niebezpieczeństwie; dotyczy następnego naciśnięcia. 0 wyłącza gest, a tryb zgodności zeruje tę wartość.\nZmniejsz: wymaga stabilniejszego celowania; 0 wyłącza gest.\nZwiększ: dopuszcza większy obrót myszą; poprawne powtórzenia nadal używają pierwszego celu."
   ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled": "Zostaw wybór ekwipunku otwarty"
-  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "Pozostawia listę przedmiotów ekwipunku otwartą po pierwszym zwolnieniu. Kolejne dotknięcia wybierają przedmiot, a przytrzymanie anuluje wybór. Dotyczy następnego przytrzymania."
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "Zachowanie listy ekwipunku i menu przedmiotu po zwolnieniu; działa od następnego przytrzymania.\nWyłączone: zwolnienie zwykle zatwierdza wybór lub zamyka menu.\nWłączone: pierwsze zwolnienie zostawia menu otwarte; kolejne krótkie naciśnięcia zatwierdzają, a przytrzymanie anuluje wybór bez usuwania znacznika."
+  ,"settings.pingforit.ping_volume.tooltip": "Lokalna głośność dźwięku pingu.\nZmniejsz: cichsze alerty; 0 je wycisza.\nZwiększ: głośniejsze alerty; głośność u innych graczy pozostaje bez zmian."
+  ,"settings.pingforit.ping_distance.tooltip": "Lokalny zasięg natywnego i precyzyjnego przechwytywania od następnego przytrzymania; natywne śledzenie promienia ma też osobny limit. Opcjonalne dalekie promienie mają własny zasięg.\nZmniejsz: wybieraj bliższe cele.\nZwiększ: dopuszcza dalszych kandydatów; zasięg akceptowany przez serwer się nie zmienia."
+  ,"settings.pingforit.item_icon_visible.tooltip": "Ikony przedmiotów na znacznikach.\nWyłączone: używaj zwykłej ikony pingu.\nWłączone: pokazuj ikonę przedmiotu, gdy dostępne są jego dozwolone dane."
+  ,"settings.pingforit.direction_indicator_visible.tooltip": "Wskazówki przy krawędzi ekranu prowadzące do znaczników poza widokiem.\nWyłączone: ukryj wskaźniki kierunku.\nWłączone: pokazuj wskaźniki skierowane ku znacznikom poza ekranem."
+  ,"settings.pingforit.mark_transparent_blocks.tooltip": "Wybór kształtu bloków od następnego przytrzymania; nie jest to ogólny filtr przezroczystości.\nWyłączone: używaj kształtów wizualnych Minecrafta.\nWłączone: używaj kształtów obrysu, także wybieralnych dekoracji bez kolizji."
+  ,"settings.pingforit.mark_blacklisted_targets.tooltip": "Wybór celów-encji od następnego przytrzymania; niezależny od list wyświetlania bloków.\nWyłączone: pomijaj encje z czarnej listy.\nWłączone: uwzględniaj je jako kandydatów; widzowie nadal są wykluczeni."
+  ,"settings.pingforit.mark_fluids.tooltip": "Wybór płynów jako celów od następnego przytrzymania.\nWyłączone: promień wyboru ignoruje płyny.\nWłączone: płyny mogą być trafieniami do wyboru."
+  ,"settings.pingforit.player_info_mode.tooltip": "Informacje o autorze znacznika, nie o oznaczonym graczu.\nPrzytrzymaj: nazwa i głowa podczas trzymania klawisza listy graczy. Zawsze: stale widoczne.\nSkrócone: głowa obok odległości. Wyłączony: ukryj informacje o autorze."
+  ,"settings.pingforit.player_info_mode.disabled.tooltip": "Ukryj nazwę i głowę autora znacznika.\nNazwa celu i odległość pozostają widoczne."
+  ,"settings.pingforit.player_info_mode.always.tooltip": "Stale pokazuj nazwę i głowę autora znacznika.\nUżywa dodatkowej etykiety pod znacznikiem."
+  ,"settings.pingforit.player_info_mode.compact.tooltip": "Pokazuj głowę autora obok odległości zamiast osobnej etykiety z nazwą."
+  ,"settings.pingforit.team_color_mode.tooltip": "Formatowanie drużyny na szczegółowej etykiecie autora, nie zmiana koloru znacznika.\nPełne i Tylko etykiety zachowują formatowanie; Wyłączony i Tylko ping je usuwają.\nKolor znacznika zależy od typu pingu; nazwa celu i odległość pozostają białe."
+  ,"settings.pingforit.team_color_mode.full.tooltip": "Pełne działa tak samo jak Tylko etykiety: zachowuje formatowanie drużyny na szczegółowej etykiecie autora.\nKolor znacznika nadal zależy od typu pingu; nazwa celu i odległość pozostają białe."
+  ,"settings.pingforit.team_color_mode.disabled.tooltip": "Wyłączony działa tak samo jak Tylko ping: usuwa formatowanie drużyny ze szczegółowej etykiety autora.\nKolor znacznika nadal zależy od typu pingu; nazwa celu i odległość pozostają białe."
+  ,"settings.pingforit.team_color_mode.ping_only.tooltip": "Tylko ping działa tak samo jak Wyłączony: usuwa formatowanie drużyny ze szczegółowej etykiety autora.\nNie zmienia koloru znaczników, który zależy od typu pingu. Nazwa celu i odległość pozostają białe."
+  ,"settings.pingforit.team_color_mode.labels_only.tooltip": "Tylko etykiety działa tak samo jak Pełne: zachowuje formatowanie drużyny na szczegółowej etykiecie autora.\nKolor znacznika nadal zależy od typu pingu; nazwa celu i odległość pozostają białe."
+  ,"settings.pingforit.ping_size.tooltip": "Lokalny rozmiar znaczników i wskaźników kierunku.\nZmniejsz: mniejsze nakładki zasłaniają mniej widoku.\nZwiększ: większe nakładki są lepiej widoczne, ale zasłaniają więcej."
+  ,"settings.pingforit.wheel_opacity.tooltip": "Krycie tła selektora od następnego przytrzymania; etykiety mają osobną opcję.\nZmniejsz: lepiej widać świat; 0 ukrywa tło.\nZwiększ: bardziej nieprzezroczyste tło."
+  ,"settings.pingforit.wheel_target_opacity.tooltip": "Krycie ramek selektora zawierających tekst i ich etykiet; działa od następnego przytrzymania.\nZmniejsz: bledsze ramki i tekst; 0 je ukrywa.\nZwiększ: lepiej widoczne ramki i tekst; tło pozostaje bez zmian."
+  ,"settings.pingforit.wheel_font_size.tooltip": "Rozmiar tekstu opcji selektora od następnego przytrzymania.\nZmniejsz: mniejszy tekst opcji.\nZwiększ: większy tekst opcji, wymagający więcej miejsca."
+  ,"settings.pingforit.wheel_target_font_size.tooltip": "Rozmiar tekstu celu w selektorze od następnego przytrzymania.\nZmniejsz: mniejszy tekst celu.\nZwiększ: większy tekst celu, wymagający więcej miejsca."
+  ,"settings.pingforit.reset_all.tooltip": "Po potwierdzeniu zresetuj wszystkie preferencje klienta, także zapamiętane kanały.\nNie resetuje konfiguracji serwera; odrzuca niewysłany szkic zwykłych ustawień serwera.\nOchrona plików może uniemożliwić zapis."
+  ,"settings.pingforit.wheel_hold_millis.tooltip": "Zwykły czas przytrzymania otwierającego selektor; dotyczy następnego naciśnięcia. Obniżenie może też skrócić okno zgodności.\nZmniejsz: szybsze otwarcie; mniej czasu na krótkie naciśnięcie przed otwarciem.\nZwiększ: dłuższe oczekiwanie na otwarcie; opcjonalny skrót gestem jest niezależny."
+  ,"settings.pingforit.cancel_half_cone_angle_degrees.tooltip": "Stożek celowania wybierający najbliższy własny znacznik do usunięcia; serwer nadal sprawdza właściciela i aktywność.\nZmniejsz: wymaga dokładniejszego celowania.\nZwiększ: uwzględnia znaczniki dalej od kierunku naciśnięcia; nadal wygrywa najbliższy."
+  ,"settings.pingforit.configuration_notice_size.tooltip": "Rozmiar lokalnych powiadomień o przełączaniu wyboru celów.\nZmniejsz: mniejsze powiadomienia; 0 je ukrywa, nie wyłączając przełączników.\nZwiększ: większe powiadomienia zasłaniają więcej widoku."
+  ,"settings.pingforit.scope.client.tooltip": "Edytuj preferencje tego klienta; nie zmienia to nadrzędnych zasad serwera."
+  ,"settings.pingforit.scope.server.tooltip": "Przeglądaj ustawienia serwera; edycja wymaga poziomu uprawnień 3. Zwykłe zmiany są wysyłane przy ostatecznym zamknięciu, a reguły prezentacji osobno i od razu."
+  ,"settings.pingforit.navigation.back.tooltip": "Wróć do przeglądu tego zakresu ustawień bez wysyłania szkicu zwykłych ustawień serwera."
+  ,"settings.pingforit.navigation.done.tooltip": "Zapisz ustawienia klienta, następnie wyślij poprawne zmiany zwykłych ustawień serwera i zamknij. Serwer nie potwierdza zastosowania zmian."
+  ,"settings.pingforit.presentation.server.tooltip": "Reguły pól serwera dla wybranego typu celu; każda zmiana jest wysyłana osobno, nie przy zamykaniu Ustawień.\nZezwolenia mają pierwszeństwo przed blokadami; uprawnienia do pól i dostępność danych nadal obowiązują.\nEdycja wymaga poziomu uprawnień 3; ograniczenia pól podrzędnych są dostępne tylko w pliku."
+  ,"settings.pingforit.presentation.target_type.tooltip": "Wybierz typ celu, którego reguły chcesz przeglądać i edytować.\nZmiana typu nie zmienia zasad ani nie usuwa tekstu wpisanego w innej liście."
+  ,"settings.pingforit.presentation.selector.tooltip": "Wpisz selektor identyfikatora pola, np. minecraft:entity.health lub create:kinetic.*.\n* dopasowuje tylko w obrębie przestrzeni nazw lub ścieżki, nigdy przez ':'; identyfikatory adapterów nie wybierają ich pól.\nSamo wpisanie nie stosuje reguły; użyj Dodaj."
+  ,"settings.pingforit.presentation.add.tooltip": "Wyślij ten selektor od razu do bieżącej listy wybranego typu.\nUdane dodanie czyści tylko niezmieniony od wysłania tekst tej listy; błąd zachowuje tekst."
+  ,"settings.pingforit.presentation.remove.tooltip": "Od razu poproś o usunięcie tego selektora z tej listy.\nInne pasujące selektory, tryb tylko białej listy i wartości domyślne nadal obowiązują."
+  ,"settings.pingforit.presentation.refresh.tooltip": "Poproś o aktualny widok zasad serwera bez zmieniania reguł.\nZachowuje wpisany tekst i ostatni znany widok; po przekroczeniu czasu oczekiwania możesz ponowić żądanie."
+  ,"settings.pingforit.presentation.advanced.tooltip": "Pokaż lub ukryj listy selektorów i tryb tylko białej listy dla tego typu celu.\nZmienia tylko widok edytora, nie zasady serwera."
+  ,"unit.pingforit.multiplier": "%1$s×"
+  ,"settings.pingforit.format.name_value": "%1$s: %2$s"
+  ,"settings.pingforit.presentation.advanced.with_counts": "%1$s (%2$s)"
+  ,"settings.pingforit.format.truncated": "%1$s..."
+  ,"settings.pingforit.title.breadcrumb": "%1$s -> %2$s -> %3$s"
+  ,"settings.pingforit.title.scope": "%1$s -> %2$s"
+  ,"settings.pingforit.presentation.selector_separator": ", "
+  ,"settings.pingforit.group.marker_range_lifetime": "Zasięg i czas wyświetlania"
+  ,"settings.pingforit.group.player_labels": "Informacje o graczu i kolory"
+  ,"settings.pingforit.group.target_selection": "Dostępne cele"
+  ,"settings.pingforit.group.wheel_layout": "Układ koła i ekwipunku"
+  ,"settings.pingforit.group.wheel_readability": "Krycie i tekst"
+  ,"settings.pingforit.group.gesture_trail": "Ślad gestu"
+  ,"settings.pingforit.group.selector_motion": "Ruch selektora"
+  ,"settings.pingforit.group.input_compatibility": "Zgodność długiego naciśnięcia"
+  ,"settings.pingforit.group.double_click_danger": "Niebezpieczeństwo podwójnym kliknięciem"
+  ,"settings.pingforit.group.marker_cancellation": "Usuwanie znaczników"
+  ,"settings.pingforit.group.content_selection": "Wybór zawartości i ekwipunku"
+  ,"settings.pingforit.group.sound_notices": "Dźwięk i powiadomienia"
+  ,"settings.pingforit.category.client.display.tooltip": "Ustaw lokalny zasięg przechwytywania, czas wyświetlania znaczników, ikony, rozmiar i informacje o autorze. Nie zmienia to zasięgu ani czasu życia na serwerze."
+  ,"settings.pingforit.category.client.selection.tooltip": "Wybierz, czy przechwytywanie uwzględnia kształty obrysu bloków, encje z czarnej listy i płyny. Zmiany działają od następnego przytrzymania i nie zmieniają list wyświetlania bloków."
+  ,"settings.pingforit.category.client.wheel_appearance.tooltip": "Dostosuj układ koła i ekwipunku, tekst, krycie, ślady i ruch od następnego przytrzymania. Wygląd nie zastępuje progów gestów."
+  ,"settings.pingforit.category.client.input.tooltip": "Dostosuj otwieranie, zgodność, powtarzane naciśnięcia Niebezpieczeństwa, celowanie przy usuwaniu znaczników, gesty nawigacji i wybór zawartości. Tryb zgodności usuwa kolidujące ustawienia gestów."
+  ,"settings.pingforit.category.client.channel_notices.tooltip": "Wybierz kanał dla tego serwera i dostosuj lokalną głośność pingu oraz rozmiar powiadomień przełączników. Pusty kanał korzysta z zasad serwera."
+  ,"settings.pingforit.category.client.geometry_config.tooltip": "Wybierz źródła obrysów bloków z encją albo zapisz, zamknij i otwórz cały plik klienta. Zewnętrzne zmiany pliku wymagają ponownego uruchomienia klienta."
+  ,"settings.pingforit.category.client.performance.tooltip": "Ustaw częstotliwość przechwytywania bieżących kandydatów w aktywnej gałęzi Precyzyjne. Krótszy odstęp szybciej odświeża, ale może zwiększyć nakład pracy; działa od następnego przytrzymania."
+  ,"settings.pingforit.category.server.channel_players.tooltip": "Ustaw zachowanie serwera dla pustych kanałów i nowych żądań oznaczenia graczy. Zwykłe zmiany pozostają szkicem do ostatecznego zamknięcia Ustawień."
+  ,"settings.pingforit.category.server.send_rate.tooltip": "Ustaw liczbę znaczników, które gracz może tworzyć w serii, i odstęp odnawiania użyć. Zerowy limit częstotliwości wyłącza kontrolę częstotliwości, nie pingowanie."
+  ,"settings.pingforit.category.server.marker_duration.tooltip": "Ustaw czas życia na serwerze ustalany przy tworzeniu nowych znaczników. Istniejące terminy wygaśnięcia i niezależne preferencje wyświetlania klienta pozostają bez zmian."
+  ,"settings.pingforit.category.server.performance.tooltip": "Zarządzaj powiadomieniami administratora o opóźnieniach oraz wspólnymi budżetami ekwipunku, podglądu i śledzenia. Wyważ zużycie zasobów, postęp, czas dostarczenia i szczegółowość przedmiotów."
+  ,"settings.pingforit.category.server.server_presentation.tooltip": "Przeglądaj i edytuj reguły pól dla typów celów z katalogu tego połączenia. Zmiany są wysyłane osobno i od razu; wymagany poziom uprawnień to 3."
+  ,"settings.pingforit.wheel_hold_millis": "Czas przytrzymania koła: %s"
+  ,"settings.pingforit.cancel_half_cone_angle_degrees": "Półkąt stożka usuwania: %s"
+  ,"unit.pingforit.degrees": "%s°"
+  ,"unit.pingforit.pixels": "%s px"
+  ,"value.pingforit.vanilla_team": "Drużyna Minecrafta"
 }
