@@ -6,6 +6,10 @@ import net.neoforged.fml.ModList;
 import net.neoforged.fml.loading.FMLPaths;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import nx.pingwheel.common.platform.IPlatformContextService;
+import net.minecraft.server.level.ServerLevel;
+import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.marker.TargetKey;
+import nx.pingwheel.neoforge.integration.create.CreateVaultTopology;
 
 import java.nio.file.Path;
 
@@ -40,5 +44,10 @@ public class PlatformContextServiceImpl implements IPlatformContextService {
 	@Override
 	public boolean isModLoaded(String modId) {
 		return ModList.get().isLoaded(modId);
+	}
+
+	@Override
+	public TargetKey groupVaultTarget(ServerLevel level, Target.BlockTarget target) {
+		return CreateVaultTopology.group(level, target);
 	}
 }

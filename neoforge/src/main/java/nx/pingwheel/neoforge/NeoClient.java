@@ -31,6 +31,8 @@ public class NeoClient {
 		"nx.pingwheel.neoforge.integration.create.CreateLargeWaterWheelPresentationResolver";
 	private static final String CREATE_DOOR_RESOLVER =
 		"nx.pingwheel.neoforge.integration.create.CreateDoorPresentationResolver";
+	private static final String CREATE_VAULT_RESOLVER =
+		"nx.pingwheel.neoforge.integration.create.NeoForgeCreateVaultBlockPresentationResolver";
 	private static final String SIMULATED_DOCKING_CONNECTOR_RESOLVER =
 		"nx.pingwheel.neoforge.integration.simulated.SimulatedDockingConnectorPresentationResolver";
 	private static @Nullable Boolean lastCreateDetected;
@@ -40,6 +42,7 @@ public class NeoClient {
 	private static @Nullable String lastFlywheelAdapterState;
 	private static @Nullable String lastWaterWheelResolverState;
 	private static @Nullable String lastCreateDoorResolverState;
+	private static @Nullable String lastCreateVaultResolverState;
 	private static @Nullable String lastSimulatedResolverState;
 	private static boolean entityAdapterResolved;
 	private static boolean contraptionRaycastAdapterResolved;
@@ -94,11 +97,17 @@ public class NeoClient {
 			registerOptionalContraptionRaycastAdapter();
 			registerOptionalResolver(CREATE_WATER_WHEEL_RESOLVER, "create-water-wheel-presentation");
 			registerOptionalResolver(CREATE_DOOR_RESOLVER, "create-door-presentation");
+			if (nx.pingwheel.neoforge.integration.create.presentation.CreatePresentationAvailability.available()) {
+				registerOptionalResolver(CREATE_VAULT_RESOLVER, "create-vault-presentation");
+			} else {
+				logResolverState("create-vault-presentation", "unsupported-version");
+			}
 		} else {
 			logAdapterState("create-entity", "not-detected");
 			logAdapterState("create-contraption-raycast", "not-detected");
 			logResolverState("create-water-wheel-presentation", "not-detected");
 			logResolverState("create-door-presentation", "not-detected");
+			logResolverState("create-vault-presentation", "not-detected");
 		}
 
 		if (createDetected && flywheelDetected) {
@@ -266,6 +275,7 @@ public class NeoClient {
 		switch (resolverName) {
 			case "simulated-docking-connector-presentation" -> previous = lastSimulatedResolverState;
 			case "create-door-presentation" -> previous = lastCreateDoorResolverState;
+			case "create-vault-presentation" -> previous = lastCreateVaultResolverState;
 			default -> previous = lastWaterWheelResolverState;
 		}
 		if (state.equals(previous)) {
@@ -274,6 +284,7 @@ public class NeoClient {
 		switch (resolverName) {
 			case "simulated-docking-connector-presentation" -> lastSimulatedResolverState = state;
 			case "create-door-presentation" -> lastCreateDoorResolverState = state;
+			case "create-vault-presentation" -> lastCreateVaultResolverState = state;
 			default -> lastWaterWheelResolverState = state;
 		}
 		LOGGER.info("optional presentation resolver state transition: resolver={} state={} createDetected={}",
