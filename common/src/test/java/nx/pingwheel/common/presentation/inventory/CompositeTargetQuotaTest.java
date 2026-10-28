@@ -17,12 +17,22 @@ import nx.pingwheel.common.network.*;
 import nx.pingwheel.common.presentation.source.SourceKey;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.junit.jupiter.api.BeforeAll;
+import net.minecraft.SharedConstants;
+import net.minecraft.server.Bootstrap;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.ChestBlock;
+import net.minecraft.world.level.block.state.properties.ChestType;
+import nx.pingwheel.common.topology.DoubleChestFixture;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Logical quota sharing does not grant physical read authority or share protocol baselines. */
 @NotNullByDefault
 class CompositeTargetQuotaTest {
+	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 	private static final UUID A = InventoryBackendTest.A, B = InventoryBackendTest.B;
 	private static final String DIM = "minecraft:overworld";
 	private static final Target.BlockTarget LEFT = new Target.BlockTarget(DIM, 1, 2, 3, "minecraft:chest");
@@ -30,17 +40,25 @@ class CompositeTargetQuotaTest {
 	private static final TargetKey.DoubleChestKey KEY = new TargetKey.DoubleChestKey(DIM, 1, 2, 3, 2, 2, 3, "minecraft:chest");
 	@NotNullByDefault
 	private static final class Host extends InventoryBackendTest.Host {
-		TargetGroupingResolver grouping = (owner, target) -> target instanceof Target.BlockTarget block
-			&& KEY.contains(block.x(), block.y(), block.z()) ? KEY : TargetKey.from(target);
+		final DoubleChestFixture topology = new DoubleChestFixture(Blocks.CHEST, Direction.NORTH);
+		TargetGroupingResolver grouping = new MinecraftTargetGroupingResolver(topology.server);
+		@Nullable Target committedOverride;
+		Host() {
+			topology.states.clear();
+			var left = Blocks.CHEST.defaultBlockState().setValue(ChestBlock.FACING, Direction.NORTH).setValue(ChestBlock.TYPE, ChestType.LEFT);
+			topology.states.put(new BlockPos(LEFT.x(), LEFT.y(), LEFT.z()), left);
+			topology.states.put(new BlockPos(RIGHT.x(), RIGHT.y(), RIGHT.z()), left.setValue(ChestBlock.TYPE, ChestType.RIGHT));
+		}
 		@Override public Optional<InventoryBackend.Opened> open(UUID player, Target requested) {
 			return Optional.of(new InventoryBackend.Opened(requested, "entity_block", "attention"));
 		}
 		@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
 			var type = TargetTypeCatalog.builtIn().findById(frozen.targetType()).orElseThrow();
-			TargetKey key = grouping.resolve(player, frozen.target());
-			@Nullable MarkerRejectReason rejection = admission.prepare(frozen.target(), key, type.id(), List.of(A, B));
+			Target target = committedOverride == null ? frozen.target() : committedOverride;
+			TargetKey key = grouping.resolve(player, target);
+			@Nullable MarkerRejectReason rejection = admission.prepare(target, key, type.id(), List.of(A, B));
 			if (rejection != null) return new InventoryBackend.Created(null, rejection);
-			return new InventoryBackend.Created(store.create(player, frozen.target(), key, type, type.defaultPingType(),
+			return new InventoryBackend.Created(store.create(player, target, key, type, type.defaultPingType(),
 				new MarkerAnchor(2.5, 2.5, 3.5), 1, 1000, List.of(A, B)).marker(), null);
 		}
 	}
@@ -170,6 +188,78 @@ class CompositeTargetQuotaTest {
 			runtime.advance(settings.getTracking().getPeriodTicks(), settings);
 			assertEquals(1, runtime.step(b).orElseThrow().slots().size());
 			assertEquals(new InventorySourceInput(RIGHT, B, BlockFace.SOUTH), inputs.getLast());
+		}
+	}
+
+	@Test void groupedIdentityCannotRelaxExactPreviewToCreateHitBinding() {
+		try (var f = new Fixture()) {
+			var preview = f.open(A, 1, LEFT, BlockFace.NORTH); f.host.committedOverride = RIGHT;
+			int reads = f.reads.get();
+			assertEquals(InventoryS2CPacket.Kind.REJECT, f.select(A, 1, 1, preview).kind());
+			assertEquals(0, f.host.store.size()); assertEquals(reads, f.reads.get());
+			assertEquals(KEY, f.host.grouping.resolve(A, LEFT)); assertEquals(KEY, f.host.grouping.resolve(A, RIGHT));
+		}
+	}
+
+	@Test void losingTrackingSurvivesOtherHitsCancellationAndOwnExpiryWithoutRekeying() {
+		try (var f = new Fixture()) {
+			var preview = f.open(A, 1, LEFT, BlockFace.NORTH); f.select(A, 1, 1, preview); f.close(A, 1);
+			var first = f.host.store.allMarkers().getFirst();
+			f.now = 3; preview = f.open(B, 1, RIGHT, BlockFace.SOUTH); f.select(B, 1, 1, preview); f.close(B, 1);
+			var second = f.host.store.allMarkers().getLast();
+			assertTrue(f.backend.tracksInventory(first.id())); assertTrue(f.backend.tracksInventory(second.id()));
+			f.host.store.removeOwned(B, second.id()); f.backend.remove(second.id());
+			assertTrue(f.backend.tracksInventory(first.id())); assertFalse(f.backend.tracksInventory(second.id()));
+			f.host.topology.states.put(new BlockPos(LEFT.x(), LEFT.y(), LEFT.z()), Blocks.CHEST.defaultBlockState());
+			f.now = 6; f.amount = 11; int before = f.reads.get(); f.tick();
+			assertTrue(f.reads.get() > before); assertEquals(KEY, f.host.store.find(first.id()).orElseThrow().targetKey());
+			f.now = 1000; f.tick(); assertFalse(f.backend.tracksInventory(first.id()));
+			before = f.reads.get(); f.now = 2000; f.tick(); assertEquals(before, f.reads.get());
+		}
+	}
+
+	@Test void compatibleOppositeHitsSharePhysicalRoundButNotOldObservationOrDifferentOwnerFace() {
+		var settings = InventorySettings.serverDefaults(); var reads = new AtomicInteger();
+		try (var runtime = new InventoryRuntime(i -> Optional.of(new InventoryRuntimeTest.Source(i, reads, 2)), 64_000_000)) {
+			runtime.advance(0, settings);
+			var first = runtime.attach(new InventorySourceInput(LEFT, A, BlockFace.NORTH), new InventoryRuntime.TrackingSubject(KEY)).orElseThrow();
+			var peer = runtime.attach(new InventorySourceInput(RIGHT, A, BlockFace.NORTH), new InventoryRuntime.TrackingSubject(KEY)).orElseThrow();
+			runtime.step(first, 1).orElseThrow(); runtime.step(peer, 1).orElseThrow(); assertEquals(1, reads.get(), "compatible physical aliases share post-attachment work");
+			var preview = runtime.attach(new InventorySourceInput(RIGHT, A, BlockFace.NORTH), new InventoryRuntime.PreviewSubject(A)).orElseThrow();
+			runtime.step(preview, 1).orElseThrow(); assertEquals(2, reads.get(), "new preview cannot join pre-attachment round");
+			var later = runtime.attach(new InventorySourceInput(LEFT, A, BlockFace.NORTH), new InventoryRuntime.PreviewSubject(A)).orElseThrow();
+			var after = runtime.attach(new InventorySourceInput(RIGHT, A, BlockFace.NORTH), new InventoryRuntime.PreviewSubject(A)).orElseThrow();
+			runtime.step(later, 1).orElseThrow(); runtime.step(after, 1).orElseThrow(); assertEquals(3, reads.get(), "both attached before the new round may share it");
+			var owner = runtime.attach(new InventorySourceInput(RIGHT, B, BlockFace.NORTH), new InventoryRuntime.TrackingSubject(KEY)).orElseThrow();
+			var face = runtime.attach(new InventorySourceInput(RIGHT, A, BlockFace.SOUTH), new InventoryRuntime.TrackingSubject(KEY)).orElseThrow();
+			runtime.step(owner, 1).orElseThrow(); runtime.step(face, 1).orElseThrow(); assertEquals(5, reads.get(), "logical grouping grants no owner/face physical reuse");
+		}
+	}
+
+	@Test void oppositeHitStreamRoutesActuallyEnforceOneRecipientTargetBudget() throws Exception {
+		try (var f = new Fixture()) {
+			var preview = f.open(A, 1, LEFT, BlockFace.NORTH); f.select(A, 1, 1, preview); f.close(A, 1);
+			f.now = 3; preview = f.open(B, 1, RIGHT, BlockFace.SOUTH); f.select(B, 1, 1, preview); f.close(B, 1);
+			f.now = 4; f.tick();
+			var publisher = (InventorySyncPublisher) InventoryBackendTest.field(f.backend, "publisher");
+			var states = (Map<?, ?>) InventoryBackendTest.field(publisher, "states");
+			var contexts = new ArrayList<nx.pingwheel.common.presentation.source.SyncPublisher.Context>();
+			for (Object state : states.values()) {
+				var context = (nx.pingwheel.common.presentation.source.SyncPublisher.Context) InventoryBackendTest.field(state, "context");
+				if (context.recipient().equals(A)) contexts.add(context);
+			}
+			assertEquals(2, contexts.size());
+			long cap = f.settings.trackingStreamPeriodBytesPerClientTarget();
+			int start = f.host.packets.size();
+			for (int cut = 2; cut <= 100; cut++) {
+				for (var context : contexts) InventorySyncPublisherTest.publish(publisher, context, InventorySyncPublisherTest.capture(cut, 1, cut));
+				publisher.drain();
+			}
+			long bytes = 0;
+			for (int i = start; i < f.host.packets.size(); i++) if (f.host.recipients.get(i).equals(A)
+				&& f.host.packets.get(i).kind() == InventoryS2CPacket.Kind.STREAM) bytes += f.host.encodedBytes(f.host.packets.get(i));
+			assertTrue(bytes > 0 && bytes <= cap, "actual encoded stream bytes from both markers share the cap");
+			assertTrue(contexts.stream().anyMatch(publisher::pending), "exhausted group budget defers remaining work");
 		}
 	}
 }

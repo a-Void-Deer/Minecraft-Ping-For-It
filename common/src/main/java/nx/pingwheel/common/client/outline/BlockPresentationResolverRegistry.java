@@ -21,7 +21,7 @@ import org.jetbrains.annotations.Unmodifiable;
  * direct presentation remains available.</p>
  */
 public final class BlockPresentationResolverRegistry {
-	/** The common registry with the vanilla door and bed resolvers installed. */
+	/** The common registry with the vanilla multipart resolvers installed. */
 	public static final BlockPresentationResolverRegistry INSTANCE =
 		new BlockPresentationResolverRegistry(true);
 
@@ -42,6 +42,7 @@ public final class BlockPresentationResolverRegistry {
 		if (installVanillaResolvers) {
 			register(new VanillaDoorBlockPresentationResolver());
 			register(new VanillaBedBlockPresentationResolver());
+			register(new VanillaChestBlockPresentationResolver());
 		}
 	}
 

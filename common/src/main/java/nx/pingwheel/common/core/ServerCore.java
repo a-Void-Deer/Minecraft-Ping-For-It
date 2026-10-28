@@ -29,6 +29,7 @@ import nx.pingwheel.common.marker.MarkerRemovalReason;
 import nx.pingwheel.common.marker.MarkerRequestKind;
 import nx.pingwheel.common.marker.MarkerWinnerChange;
 import nx.pingwheel.common.marker.MinecraftAuthoritativeTargetValidator;
+import nx.pingwheel.common.marker.MinecraftTargetGroupingResolver;
 import nx.pingwheel.common.marker.ServerMarker;
 import nx.pingwheel.common.marker.ServerMarkerStore;
 import nx.pingwheel.common.name.MinecraftTargetNameResolver;
@@ -202,7 +203,8 @@ public class ServerCore {
 				externalProviders),
 			MarkerCreationLogger.global(),
 			externalProviders,
-			nameResolver);
+			nameResolver,
+			new MinecraftTargetGroupingResolver(server));
 	}
 
 	public static void onChannelUpdate(ServerPlayer player, UpdateChannelC2SPacket packet) {
