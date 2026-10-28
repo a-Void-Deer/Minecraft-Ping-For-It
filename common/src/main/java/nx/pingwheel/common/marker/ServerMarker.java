@@ -10,32 +10,42 @@ import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetType;
 import nx.pingwheel.common.presentation.PresentationPropertySelection;
 import nx.pingwheel.common.presentation.PresentationCodec;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * An immutable, server-authoritative active ping.
  *
  * <p>Ownership ({@link #owner()}), target identity ({@link #target()}), resolved
  * classification ({@link #targetType()}), and selected presentation
- * ({@link #pingType()}) are all carried explicitly. The marker derives its
- * {@link TargetKey} from {@link #target()} rather than accepting one, so the
- * same-target winner comparison always operates on the authoritative target
- * identity.
+ * ({@link #pingType()}) are all carried explicitly. The server freezes the
+ * logical {@link TargetKey} separately from the original physical target.
  */
 public record ServerMarker(
 	MarkerId id,
 	UUID owner,
 	Target target,
+	TargetKey targetKey,
 	TargetType targetType,
 	PingType pingType,
 	MarkerAnchor anchor,
 	long arrivalTick,
 	long expiresAtTick,
-	List<UUID> recipients,
-	List<PresentationPropertySelection> properties
+	@Unmodifiable List<UUID> recipients,
+	@Unmodifiable List<PresentationPropertySelection> properties
 ) {
+	public ServerMarker(MarkerId id, UUID owner, Target target, TargetKey targetKey, TargetType targetType, PingType pingType,
+		MarkerAnchor anchor, long arrivalTick, long expiresAtTick, List<UUID> recipients) {
+		this(id, owner, target, targetKey, targetType, pingType, anchor, arrivalTick, expiresAtTick, recipients, List.of());
+	}
 	public ServerMarker(MarkerId id, UUID owner, Target target, TargetType targetType, PingType pingType,
 		MarkerAnchor anchor, long arrivalTick, long expiresAtTick, List<UUID> recipients) {
 		this(id, owner, target, targetType, pingType, anchor, arrivalTick, expiresAtTick, recipients, List.of());
+	}
+	/** Trusted local/fixture compatibility; production grouping uses the explicit key. */
+	public ServerMarker(MarkerId id, UUID owner, Target target, TargetType targetType, PingType pingType,
+		MarkerAnchor anchor, long arrivalTick, long expiresAtTick, List<UUID> recipients,
+		List<PresentationPropertySelection> properties) {
+		this(id, owner, target, TargetKey.from(target), targetType, pingType, anchor, arrivalTick, expiresAtTick, recipients, properties);
 	}
 
 	public ServerMarker {
@@ -47,7 +57,7 @@ public record ServerMarker(
 		Objects.requireNonNull(anchor, "anchor");
 		// Server markers are committed state; an external C2S candidate has no
 		// stable key until its provider has authoritatively resolved it.
-		TargetKey.from(target);
+		TargetKey.requireCompatible(target, targetKey);
 
 		if (arrivalTick < 0L) {
 			throw new IllegalArgumentException("arrivalTick must be non-negative: " + arrivalTick);
@@ -80,18 +90,11 @@ public record ServerMarker(
 	}
 
 	/**
-	 * The stable, complete target identity this marker refers to.
-	 */
-	public TargetKey targetKey() {
-		return TargetKey.from(target);
-	}
-
-	/**
 	 * Sorts recipients into natural {@link UUID} order and removes duplicates,
 	 * producing an immutable, non-empty list.
 	 */
-	private static List<UUID> normalizeRecipients(List<UUID> recipients) {
-		List<UUID> normalized = recipients.stream()
+	private static @Unmodifiable List<UUID> normalizeRecipients(List<UUID> recipients) {
+		@Unmodifiable List<UUID> normalized = recipients.stream()
 			.map(uuid -> Objects.requireNonNull(uuid, "recipient"))
 			.sorted()
 			.distinct()

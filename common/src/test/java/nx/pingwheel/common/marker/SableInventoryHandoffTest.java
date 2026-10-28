@@ -252,9 +252,9 @@ class SableInventoryHandoffTest {
 							TargetMatchContext.blockEntityBlock(true), new MarkerAnchor(5, 6, 7)));
 				}
 				@Override public void release(Target.ExternalBlockTarget committed) { releaseCalls.incrementAndGet(); }
-			}, player, frozen.target(), frozen.defaultPingType(), 1, 80, List.of(A, B), (target, type, owner, audience, intents) -> {
+			}, player, frozen.target(), frozen.defaultPingType(), 1, 80, List.of(A, B), (target, key, type, owner, audience) -> {
 				events.add("admission");
-				var rejection = admission.prepare(target, type, audience);
+				@org.jetbrains.annotations.Nullable var rejection = admission.prepare(target, key, type, audience);
 				return rejection == null ? MarkerCreationService.AdmissionResult.accepted(List.of(), Map.of())
 					: MarkerCreationService.AdmissionResult.rejected(rejection);
 			});

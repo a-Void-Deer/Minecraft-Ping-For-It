@@ -45,9 +45,9 @@ class InventoryAuthorityOrderTest {
 			events.add("channel"); if (channelDisabled) return new InventoryBackend.Created(null, MarkerRejectReason.CHANNEL_DISABLED);
 			events.add("audience");
 			var result = service.createDedicated(null, player, frozen.target(), frozen.defaultPingType(), 1, 80, List.of(InventoryBackendTest.A, InventoryBackendTest.B),
-				(target, type, owner, audience, intents) -> {
-					events.add("dedicated"); assertTrue(intents.isEmpty()); assertEquals(0, store.size(), "sidecar must prepare before storage even with no SECTION intents");
-					var rejected = admission.prepare(target, type, audience);
+				(target, key, type, owner, audience) -> {
+					events.add("dedicated"); assertEquals(0, store.size(), "sidecar must prepare before storage even with no SECTION intents");
+					@org.jetbrains.annotations.Nullable var rejected = admission.prepare(target, key, type, audience);
 					return rejected == null ? MarkerCreationService.AdmissionResult.accepted(List.of(), java.util.Map.of()) : MarkerCreationService.AdmissionResult.rejected(rejected);
 				});
 			if (!result.isAccepted()) return new InventoryBackend.Created(null, result.rejectReason().orElseThrow());

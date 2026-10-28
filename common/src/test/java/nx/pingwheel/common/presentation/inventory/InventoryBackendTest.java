@@ -49,7 +49,7 @@ class InventoryBackendTest {
 		}
 		@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
 			var type = TargetTypeCatalog.builtIn().findById(frozen.targetType()).orElseThrow();
-			var reject = admission.prepare(frozen.target(), type.id(), List.of(A, B));
+			@org.jetbrains.annotations.Nullable var reject = admission.prepare(frozen.target(), TargetKey.from(frozen.target()), type.id(), List.of(A, B));
 			if (reject != null) return new InventoryBackend.Created(null, reject);
 			if (failPrepared) return new InventoryBackend.Created(null, MarkerRejectReason.INVALID_REQUEST);
 			var marker = store.create(player, frozen.target(), type, type.defaultPingType(), new MarkerAnchor(1, 2, 3), 1, expiry, List.of(A, B)).marker();

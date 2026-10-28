@@ -1,6 +1,10 @@
 package nx.pingwheel.common.network;
 
 import java.util.Objects;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 
 import net.minecraft.network.FriendlyByteBuf;
 
@@ -39,6 +43,9 @@ public final class MarkerPacketCodec {
 
 	/** Explicit block target variant tag for the external provider form. */
 	public static final int BLOCK_TARGET_EXTERNAL_TAG = 1;
+	/** Server-to-client key variants only; never accepted as block Target tags. */
+	public static final int BLOCK_KEY_DOUBLE_CHEST_TAG = 2;
+	public static final int BLOCK_KEY_VAULT_TAG = 3;
 
 	private MarkerPacketCodec() {}
 
@@ -144,6 +151,17 @@ public final class MarkerPacketCodec {
 				writeIdString(buf, external.stableTargetId());
 				writeIdString(buf, external.expectedBlockRegistryId());
 			}
+			case TargetKey.DoubleChestKey chest -> {
+				buf.writeVarInt(BLOCK_KEY_DOUBLE_CHEST_TAG);
+				buf.writeInt(chest.firstX()); buf.writeInt(chest.firstY()); buf.writeInt(chest.firstZ());
+				buf.writeInt(chest.secondX()); buf.writeInt(chest.secondY()); buf.writeInt(chest.secondZ());
+				writeIdString(buf, chest.blockRegistryId());
+			}
+			case TargetKey.VaultKey vault -> {
+				buf.writeVarInt(BLOCK_KEY_VAULT_TAG);
+				buf.writeInt(vault.controllerX()); buf.writeInt(vault.controllerY()); buf.writeInt(vault.controllerZ());
+				writeIdString(buf, vault.blockRegistryId());
+			}
 			case TargetKey.LocationKey location -> {
 				buf.writeDouble(location.x());
 				buf.writeDouble(location.y());
@@ -153,11 +171,11 @@ public final class MarkerPacketCodec {
 	}
 
 	public static TargetKey readTargetKey(FriendlyByteBuf buf) {
-		TargetKind kind = readEnum(buf, TargetKind.class);
-		String dimensionId = readIdString(buf);
+		TargetKind kind = TargetKind.valueOf(readKeyIdString(buf));
+		String dimensionId = readKeyIdString(buf);
 
 		return switch (kind) {
-			case ENTITY -> new TargetKey.EntityKey(dimensionId, readEntityLocator(buf));
+			case ENTITY -> new TargetKey.EntityKey(dimensionId, readKeyEntityLocator(buf));
 			case BLOCK -> readBlockTargetKey(buf, dimensionId);
 			case LOCATION -> new TargetKey.LocationKey(
 				dimensionId, buf.readDouble(), buf.readDouble(), buf.readDouble());
@@ -204,6 +222,8 @@ public final class MarkerPacketCodec {
 		return switch (targetKey) {
 			case TargetKey.EntityKey ignored -> TargetKind.ENTITY;
 			case TargetKey.BlockKey ignored -> TargetKind.BLOCK;
+			case TargetKey.DoubleChestKey ignored -> TargetKind.BLOCK;
+			case TargetKey.VaultKey ignored -> TargetKind.BLOCK;
 			case TargetKey.ExternalBlockKey ignored -> TargetKind.BLOCK;
 			case TargetKey.LocationKey ignored -> TargetKind.LOCATION;
 		};
@@ -225,13 +245,40 @@ public final class MarkerPacketCodec {
 	}
 
 	private static TargetKey readBlockTargetKey(FriendlyByteBuf buf, String dimensionId) {
-		return switch (readBlockVariantTag(buf)) {
+		return switch (StrictPacketCodec.readVarInt(buf)) {
 			case BLOCK_TARGET_STANDARD_TAG -> new TargetKey.BlockKey(
-				dimensionId, buf.readInt(), buf.readInt(), buf.readInt(), readIdString(buf));
+				dimensionId, buf.readInt(), buf.readInt(), buf.readInt(), readKeyIdString(buf));
 			case BLOCK_TARGET_EXTERNAL_TAG -> new TargetKey.ExternalBlockKey(
-				dimensionId, readIdString(buf), readIdString(buf), readIdString(buf));
+				dimensionId, readKeyIdString(buf), readKeyIdString(buf), readKeyIdString(buf));
+			case BLOCK_KEY_DOUBLE_CHEST_TAG -> new TargetKey.DoubleChestKey(dimensionId,
+				buf.readInt(), buf.readInt(), buf.readInt(), buf.readInt(), buf.readInt(), buf.readInt(), readKeyIdString(buf));
+			case BLOCK_KEY_VAULT_TAG -> new TargetKey.VaultKey(dimensionId,
+				buf.readInt(), buf.readInt(), buf.readInt(), readKeyIdString(buf));
 			default -> throw new IllegalArgumentException("Unknown block target variant tag");
 		};
+	}
+
+	private static EntityLocator readKeyEntityLocator(FriendlyByteBuf buf) {
+		return switch (EntityLocator.kindFromWireTag(StrictPacketCodec.readVarInt(buf))) {
+			case UUID -> EntityLocator.uuid(buf.readUUID());
+			case RUNTIME_ID -> EntityLocator.runtimeId(StrictPacketCodec.readVarInt(buf));
+		};
+	}
+
+	/** Key identity is never repaired by replacement UTF characters or overlong lengths. */
+	private static String readKeyIdString(FriendlyByteBuf buf) {
+		int length = StrictPacketCodec.readVarInt(buf);
+		if (length > MAX_ID_LENGTH * 3 || length > buf.readableBytes()) throw new IllegalArgumentException("invalid key UTF length");
+		byte[] bytes = new byte[length];
+		buf.readBytes(bytes);
+		try {
+			String value = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
+				.onUnmappableCharacter(CodingErrorAction.REPORT).decode(ByteBuffer.wrap(bytes)).toString();
+			if (value.length() > MAX_ID_LENGTH) throw new IllegalArgumentException("invalid key UTF size");
+			return value;
+		} catch (CharacterCodingException malformed) {
+			throw new IllegalArgumentException("invalid key UTF bytes", malformed);
+		}
 	}
 
 	private static int readBlockVariantTag(FriendlyByteBuf buf) {
@@ -278,6 +325,7 @@ public final class MarkerPacketCodec {
 		writeMarkerId(buf, snapshot.id());
 		buf.writeUUID(snapshot.owner());
 		writeTarget(buf, snapshot.target());
+		writeTargetKey(buf, snapshot.targetKey());
 		writeIdString(buf, snapshot.targetTypeId());
 		writeIdString(buf, snapshot.pingTypeId());
 		writeMarkerAnchor(buf, snapshot.anchor());
@@ -290,6 +338,7 @@ public final class MarkerPacketCodec {
 			readMarkerId(buf),
 			buf.readUUID(),
 			readTarget(buf),
+			readTargetKey(buf),
 			readIdString(buf),
 			readIdString(buf),
 			readMarkerAnchor(buf),

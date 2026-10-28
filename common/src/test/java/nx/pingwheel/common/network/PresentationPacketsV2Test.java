@@ -31,7 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @NotNullByDefault
-class PresentationPacketsV1Test {
+class PresentationPacketsV2Test {
 	private static final String BASIC = "minecraft:basic";
 
 	private static FriendlyByteBuf buffer() {
@@ -39,13 +39,13 @@ class PresentationPacketsV1Test {
 	}
 
 	@Test
-	void versionOneHasNoSubscribeKindAndUsesV1RouteIds() {
-		assertEquals(1, PresentationC2SPacket.VERSION);
-		assertEquals(1, PresentationS2CPacket.VERSION);
+	void versionTwoHasNoSubscribeKindAndUsesV2RouteIds() {
+		assertEquals(2, PresentationC2SPacket.VERSION);
+		assertEquals(2, PresentationS2CPacket.VERSION);
 		assertEquals(PresentationC2SPacket.VERSION, PresentationS2CPacket.VERSION,
 			"both presentation directions declare one protocol version");
-		assertEquals("pingforit-c2s:presentation-v1", PresentationC2SPacket.PACKET_ID.toString());
-		assertEquals("pingforit-s2c:presentation-v1", PresentationS2CPacket.PACKET_ID.toString());
+		assertEquals("pingforit-c2s:presentation-v2", PresentationC2SPacket.PACKET_ID.toString());
+		assertEquals("pingforit-s2c:presentation-v2", PresentationS2CPacket.PACKET_ID.toString());
 		assertEquals(List.of(PresentationC2SPacket.Kind.HELLO, PresentationC2SPacket.Kind.CREATE,
 			PresentationC2SPacket.Kind.REMOVE), Arrays.asList(PresentationC2SPacket.Kind.values()));
 	}

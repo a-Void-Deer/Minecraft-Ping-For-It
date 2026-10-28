@@ -5,11 +5,13 @@ import java.util.UUID;
 
 import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.Target;
+import org.jetbrains.annotations.NotNullByDefault;
 
 /**
  * A complete, frozen identity for a concrete ping target.
  *
- * <p>This mirrors {@link Target} but is owned by the marker layer so the
+ * <p>The physical default mirrors {@link Target}; creation-only authoritative
+ * grouping can instead freeze a supported composite key. It is owned by the marker layer so the
  * server-side same-target winner comparison has one stable, self-contained key
  * type. Every variant carries the full target identity:
  * <ul>
@@ -18,6 +20,8 @@ import nx.pingwheel.common.domain.Target;
 	 *   <li>{@link BlockKey}: dimension + exact integer position + block registry
 	 *       id (so a different block type at the same position is a different
 	 *       key, while a {@code BlockState}-only change is not);</li>
+	 *   <li>{@link DoubleChestKey}: dimension + chest registry + canonical adjacent pair;</li>
+	 *   <li>{@link VaultKey}: dimension + Vault registry + verified controller position;</li>
 	 *   <li>{@link ExternalBlockKey}: dimension + provider + stable target id +
 	 *       expected block registry id, without the provider locator or
 	 *       classification;</li>
@@ -27,12 +31,14 @@ import nx.pingwheel.common.domain.Target;
  * <p>Only JDK types are used here; there are no {@code net.minecraft}
  * references, so keys can be constructed and compared in tests.
  */
-public sealed interface TargetKey permits TargetKey.EntityKey, TargetKey.BlockKey, TargetKey.ExternalBlockKey, TargetKey.LocationKey {
+@NotNullByDefault
+public sealed interface TargetKey permits TargetKey.EntityKey, TargetKey.BlockKey, TargetKey.DoubleChestKey,
+	TargetKey.VaultKey, TargetKey.ExternalBlockKey, TargetKey.LocationKey {
 
 	String dimensionId();
 
 	/**
-	 * Derives the key for a captured {@link Target}.
+	 * Derives the exact physical key for a captured {@link Target}, never grouping.
 	 */
 	static TargetKey from(Target target) {
 		Objects.requireNonNull(target, "target");
@@ -54,6 +60,57 @@ public sealed interface TargetKey permits TargetKey.EntityKey, TargetKey.BlockKe
 			case Target.LocationTarget location ->
 				new LocationKey(location.dimensionId(), location.x(), location.y(), location.z());
 		};
+	}
+
+	/**
+	 * Checks the detached carrier, not live topology. Only the creation resolver
+	 * can establish Vault membership; clients must never infer authority from it.
+	 */
+	static TargetKey requireCompatible(Target target, TargetKey key) {
+		Objects.requireNonNull(target, "target");
+		Objects.requireNonNull(key, "targetKey");
+		boolean compatible = switch (key) {
+			case DoubleChestKey chest -> target instanceof Target.BlockTarget block
+				&& chest.dimensionId().equals(block.dimensionId())
+				&& chest.blockRegistryId().equals(block.blockRegistryId())
+				&& chest.contains(block.x(), block.y(), block.z());
+			case VaultKey vault -> target instanceof Target.BlockTarget block
+				&& vault.dimensionId().equals(block.dimensionId())
+				&& vault.blockRegistryId().equals(block.blockRegistryId());
+			default -> key.equals(from(target));
+		};
+		if (!compatible) throw new IllegalArgumentException("targetKey does not match committed target");
+		return key;
+	}
+
+	/** Both members, strictly lexicographic xyz ordered; topology is creation-time evidence. */
+	@NotNullByDefault
+	record DoubleChestKey(String dimensionId, int firstX, int firstY, int firstZ,
+		int secondX, int secondY, int secondZ, String blockRegistryId) implements TargetKey {
+		public DoubleChestKey {
+			requireDimensionId(dimensionId);
+			Objects.requireNonNull(blockRegistryId, "blockRegistryId");
+			if (!blockRegistryId.equals("minecraft:chest") && !blockRegistryId.equals("minecraft:trapped_chest"))
+				throw new IllegalArgumentException("double chest requires an ordinary or trapped chest");
+			long dx = (long) secondX - firstX, dz = (long) secondZ - firstZ;
+			if (firstY != secondY || Math.abs(dx) + Math.abs(dz) != 1
+				|| !(firstX < secondX || firstX == secondX && firstZ < secondZ))
+				throw new IllegalArgumentException("double chest members must be canonical horizontal neighbors");
+		}
+		public boolean contains(int x, int y, int z) {
+			return x == firstX && y == firstY && z == firstZ || x == secondX && y == secondY && z == secondZ;
+		}
+	}
+
+	/** Verified controller identity only; extents and members are not identity. */
+	@NotNullByDefault
+	record VaultKey(String dimensionId, int controllerX, int controllerY, int controllerZ,
+		String blockRegistryId) implements TargetKey {
+		public VaultKey {
+			requireDimensionId(dimensionId);
+			if (!Objects.requireNonNull(blockRegistryId, "blockRegistryId").equals("create:item_vault"))
+				throw new IllegalArgumentException("Vault key requires create:item_vault");
+		}
 	}
 
 	record EntityKey(String dimensionId, EntityLocator locator) implements TargetKey {

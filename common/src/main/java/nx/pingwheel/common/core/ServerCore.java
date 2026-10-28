@@ -588,9 +588,9 @@ public class ServerCore {
 		List<UUID> audience = snapshotRecipients(server.getPlayerList(), player, channel, mode);
 		long now = server.getTickCount();
 		var outcome = markerService(server).createDedicated(player.serverLevel(), player.getUUID(), frozen.target(), frozen.defaultPingType(),
-			now, now + SERVER_CONFIG.getSyncDuration() * (long) TICKS_PER_SECOND, audience, (target, type, owner, recipients, intents) -> {
-				var policy = PresentationServer.inventoryPolicy(owner).orElse(null);
-				MarkerRejectReason rejection = policy == null || !policy.types().contains(type) ? MarkerRejectReason.INVALID_REQUEST : admission.prepare(target, type, recipients);
+			now, now + SERVER_CONFIG.getSyncDuration() * (long) TICKS_PER_SECOND, audience, (target, targetKey, type, owner, recipients) -> {
+				@Nullable var policy = PresentationServer.inventoryPolicy(owner).orElse(null);
+				@Nullable MarkerRejectReason rejection = policy == null || !policy.types().contains(type) ? MarkerRejectReason.INVALID_REQUEST : admission.prepare(target, targetKey, type, recipients);
 				return rejection == null ? MarkerCreationService.AdmissionResult.accepted(List.of(), Map.of()) : MarkerCreationService.AdmissionResult.rejected(rejection);
 			});
 		if (!outcome.isAccepted()) return new InventoryBackend.Created(null, outcome.rejectReason().orElseThrow());

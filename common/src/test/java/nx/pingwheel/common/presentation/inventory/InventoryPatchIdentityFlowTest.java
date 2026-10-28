@@ -225,7 +225,7 @@ class InventoryPatchIdentityFlowTest {
 		@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen,
 			InventoryBackend.Admission admission) {
 			TargetType type = TargetTypeCatalog.builtIn().findById(frozen.targetType()).orElseThrow();
-			var rejection = admission.prepare(frozen.target(), type.id(), List.of(A, B));
+			@org.jetbrains.annotations.Nullable var rejection = admission.prepare(frozen.target(), nx.pingwheel.common.marker.TargetKey.from(frozen.target()), type.id(), List.of(A, B));
 			if (rejection != null) return new InventoryBackend.Created(null, rejection);
 			ServerMarker marker = store.create(player, frozen.target(), type, type.defaultPingType(),
 				new MarkerAnchor(1, 2, 3), 1, 80, List.of(A, B)).marker();

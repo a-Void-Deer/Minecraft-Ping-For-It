@@ -23,9 +23,9 @@ import nx.pingwheel.common.marker.TargetKey;
  * unit tested without any game client.
  *
  * <ul>
- *   <li>Only {@link TargetKey.BlockKey} entries whose marker target is a
- *       {@link Target.BlockTarget} with the exact same dimension, x/y/z
- *       position, and block registry id are selected; entity, location, and
+ *   <li>Only entries matching the marker's explicit logical key whose target is a
+ *       {@link Target.BlockTarget} are selected. The source spec uses that original
+ *       physical hit, never composite canonical/controller coordinates; entity, location, and
  *       any mismatched entries are excluded even when the store already
  *       filtered them.</li>
  *   <li>Only markers whose authoritative {@code targetTypeId} is a block
@@ -75,16 +75,13 @@ public final class BlockOutlineSelection {
 			TargetKey key = entry.getKey();
 			ClientMarker marker = entry.getValue();
 
-			if (!(key instanceof TargetKey.BlockKey blockKey)
+			if (!key.equals(marker.targetKey())
 				|| !(marker.target() instanceof Target.BlockTarget blockTarget)
-				|| !blockKey.dimensionId().equals(blockTarget.dimensionId())
-				|| blockKey.x() != blockTarget.x()
-				|| blockKey.y() != blockTarget.y()
-				|| blockKey.z() != blockTarget.z()
-				|| !blockKey.blockRegistryId().equals(blockTarget.blockRegistryId())
 				|| !BlockModelOutlineRoute.acceptsForBlockRendering(marker.targetTypeId())) {
 				continue;
 			}
+			// Logical controller/canonical coordinates are never geometry or range authority.
+			TargetKey.BlockKey blockKey = (TargetKey.BlockKey) TargetKey.from(blockTarget);
 
 			int argbColor = 0xFF000000 | catalog.findById(marker.pingTypeId())
 				.map(pingType -> pingType.outlineColor())

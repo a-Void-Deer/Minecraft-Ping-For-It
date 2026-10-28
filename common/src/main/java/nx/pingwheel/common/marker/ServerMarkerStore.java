@@ -86,10 +86,22 @@ public final class ServerMarkerStore {
 		UUID owner, Target target, TargetType targetType, PingType pingType, MarkerAnchor anchor,
 		long arrivalTick, long expiresAtTick, List<UUID> recipients, List<PresentationPropertySelection> properties
 	) {
+		return create(owner, target, TargetKey.from(target), targetType, pingType, anchor, arrivalTick, expiresAtTick, recipients, properties);
+	}
+
+	public synchronized MarkerCreation create(UUID owner, Target target, TargetKey targetKey, TargetType targetType,
+		PingType pingType, MarkerAnchor anchor, long arrivalTick, long expiresAtTick, List<UUID> recipients) {
+		return create(owner, target, targetKey, targetType, pingType, anchor, arrivalTick, expiresAtTick, recipients, List.of());
+	}
+
+	public synchronized MarkerCreation create(UUID owner, Target target, TargetKey targetKey, TargetType targetType,
+		PingType pingType, MarkerAnchor anchor, long arrivalTick, long expiresAtTick, List<UUID> recipients,
+		List<PresentationPropertySelection> properties) {
 		ServerMarker marker = new ServerMarker(
 			idSource.nextId(),
 			owner,
 			target,
+			targetKey,
 			targetType,
 			pingType,
 			anchor,
@@ -294,6 +306,7 @@ public final class ServerMarkerStore {
 			current.id(),
 			current.owner(),
 			target,
+			current.targetKey(),
 			current.targetType(),
 			current.pingType(),
 			anchor,
@@ -515,6 +528,7 @@ public final class ServerMarkerStore {
 			marker.id(),
 			marker.owner(),
 			marker.target(),
+			marker.targetKey(),
 			marker.targetType(),
 			marker.pingType(),
 			marker.anchor(),

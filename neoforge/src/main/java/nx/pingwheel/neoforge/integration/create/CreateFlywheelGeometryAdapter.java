@@ -813,6 +813,8 @@ public final class CreateFlywheelGeometryAdapter {
 					+ "; expectedBlockRegistryId=" + external.expectedBlockRegistryId();
 			case TargetKey.EntityKey entity ->
 				"dimension=" + entity.dimensionId() + "; entity=" + entity.locator();
+			case TargetKey.DoubleChestKey chest -> chest.toString();
+			case TargetKey.VaultKey vault -> vault.toString();
 			case TargetKey.LocationKey location ->
 				"dimension=" + location.dimensionId() + "; position="
 					+ location.x() + "," + location.y() + "," + location.z();

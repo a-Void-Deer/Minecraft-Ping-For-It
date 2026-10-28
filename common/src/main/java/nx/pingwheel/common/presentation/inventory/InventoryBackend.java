@@ -64,7 +64,7 @@ public final class InventoryBackend implements AutoCloseable {
 		}
 	}
 	@FunctionalInterface public interface Admission {
-		MarkerRejectReason prepare(Target committed, String targetType, List<UUID> audience);
+		@Nullable MarkerRejectReason prepare(Target committed, TargetKey targetKey, String targetType, List<UUID> audience);
 	}
 	public interface Host extends InventorySyncPublisher.Transport {
 		Optional<Policy> policy(UUID player);
@@ -539,6 +539,7 @@ public final class InventoryBackend implements AutoCloseable {
 		final Opened frozen;
 		@Nullable InventorySelection selection;
 		@Nullable InventorySourceInput committedInput;
+		@Nullable TargetKey admittedKey;
 		@Nullable InventoryRuntime.Consumer consumer;
 		@Nullable RetainedMemoryLedger.Ticket memory;
 		long leaseBytes, bootstrapCount;
@@ -547,8 +548,9 @@ public final class InventoryBackend implements AutoCloseable {
 			this.preview = preview; this.reference = reference; this.token = token; this.pingType = pingType;
 			previewContext = preview.context; input = preview.input; frozen = preview.frozen;
 		}
-		@Nullable MarkerRejectReason prepare(Target committed, String type, List<UUID> audience) {
+		@Nullable MarkerRejectReason prepare(Target committed, TargetKey targetKey, String type, List<UUID> audience) {
 			// The host invokes this only after create authority and any external materialization, never at SELECT ingress.
+			TargetKey.requireCompatible(committed, targetKey);
 			if (!frozen.targetType().equals(type)) return MarkerRejectReason.INVALID_REQUEST;
 			@Nullable InventorySourceInput bound = host.bindCommitted(input, committed).orElse(null);
 			// The host-returned input must describe the exact committed target
@@ -570,8 +572,8 @@ public final class InventoryBackend implements AutoCloseable {
 			if (!runtime.preflight(() -> Optional.of(host.annotationAllowed(bound, pingType))).orElse(false))
 				return MarkerRejectReason.INVALID_PING_TYPE;
 			if (tracking.size() >= MAX_TRACKING) return MarkerRejectReason.INVALID_REQUEST;
-			Set<String> variants = new HashSet<>(); TargetKey target = TargetKey.from(committed);
-			for (Tracking lease : tracking.values()) if (lease.marker.targetKey().equals(target)) variants.add(identity(lease.selection));
+			Set<String> variants = new HashSet<>();
+			for (Tracking lease : tracking.values()) if (lease.marker.targetKey().equals(targetKey)) variants.add(identity(lease.selection));
 			variants.add(identity(reference));
 			if (variants.size() > settings.getTracking().effectiveMaxVariantsPerTarget()) return MarkerRejectReason.INVALID_REQUEST;
 			// The lease slab owns bounded identity strings, the seed and its indexes;
@@ -592,9 +594,10 @@ public final class InventoryBackend implements AutoCloseable {
 			}
 			selection = new InventorySelection(reference.exact(), reference.itemId(), reference.label(), display, reference.aggregate(), pingType);
 			bootstrapCount = retained.count();
-			consumer = runtime.attach(bound, new InventoryRuntime.TrackingSubject(target)).orElse(null);
+			consumer = runtime.attach(bound, new InventoryRuntime.TrackingSubject(targetKey)).orElse(null);
 			if (consumer == null) return MarkerRejectReason.INVALID_REQUEST;
 			committedInput = bound;
+			admittedKey = targetKey;
 			for (UUID recipient : audience) {
 				@Nullable Session recipientSession = sessions.get(recipient); @Nullable Policy policy = host.policy(recipient).orElse(null);
 				if (recipientSession == null || policy == null || !policy.types().contains(type)) continue;
@@ -607,7 +610,8 @@ public final class InventoryBackend implements AutoCloseable {
 		}
 		/** Installs the committed tracking sidecar before any CREATED is published. */
 		void commit(ServerMarker marker) {
-			if (consumer == null || memory == null || committedInput == null || selection == null) throw new IllegalStateException("dedicated admission bypass");
+			if (consumer == null || memory == null || committedInput == null || selection == null
+				|| !marker.targetKey().equals(admittedKey)) throw new IllegalStateException("dedicated admission bypass or target key changed");
 			memory.commit(leaseBytes);
 			Tracking lease = new Tracking(marker, committedInput, selection, consumer, memory, effectiveDisplayCeiling(), bootstrapCount);
 			tracking.put(marker.id(), lease); consumer = null; memory = null;
@@ -1026,7 +1030,7 @@ public final class InventoryBackend implements AutoCloseable {
 		if (session == null || session.policy == null) return true;
 		SyncPublisher.Context fresh = new SyncPublisher.Context(current.context.consumerId(), recipient,
 			current.context.sessionView(), lease.state, ++baseline);
-		if (!publisher.register(fresh, route(session, 0, lease.marker.id(), lease.input.target(), lease.selection.itemPingType()))) {
+		if (!publisher.register(fresh, route(session, 0, lease.marker.id(), lease.marker.targetKey(), lease.selection.itemPingType()))) {
 			delay(current.publicationDelay, Module.INVENTORY_TRACKING, current.context.baseline(), "registration",
 				(publisher.remainingRegistrations() == 0 ? Reason.SUBJECT_CAPACITY : Reason.MEMORY).bit()); return false;
 		}
@@ -1420,7 +1424,7 @@ public final class InventoryBackend implements AutoCloseable {
 		Session session = sessions.get(player); Policy policy = host.policy(player).orElse(null);
 		if (session == null || policy == null || !policy.types().contains(lease.marker.targetType().id()) || !host.knows(player, lease.marker.id())) { if (held != null) held.close(); return; }
 		SyncPublisher.Context context = context("tracking/" + lease.marker.id().value(), player, policy, lease.state);
-		var route = route(session, 0, lease.marker.id(), lease.input.target(), lease.selection.itemPingType());
+		var route = route(session, 0, lease.marker.id(), lease.marker.targetKey(), lease.selection.itemPingType());
 		boolean registered = held == null ? publisher.register(context, route) : publisher.register(context, route, held);
 		if (!registered) {
 			trackingDelay(lease, lease.registrationDelay, "registration", (publisher.remainingRegistrations() == 0 ? Reason.SUBJECT_CAPACITY : Reason.MEMORY).bit()); return;
@@ -1462,11 +1466,11 @@ public final class InventoryBackend implements AutoCloseable {
 		return false;
 	}
 	private SyncPublisher.Context context(String consumer, UUID recipient, Policy policy, long state) { return new SyncPublisher.Context(consumer, recipient, policy.stamp(), state, ++baseline); }
-	private InventorySyncPublisher.Route route(Session session, long request, MarkerId marker, Target target, String pingType) {
+	private InventorySyncPublisher.Route route(Session session, long request, @Nullable MarkerId marker, @Nullable TargetKey targetKey, @Nullable String pingType) {
 		// Preview carries a request-scoped internal quota token; a candidate has no
 		// marker key and its opaque locator is never a stable identity. Tracking
-		// uses the committed target's real key.
-		String quota = target == null ? "preview/" + session.epoch + "/" + request : TargetKey.from(target).toString();
+		// uses the marker's frozen authoritative key, never its physical read input.
+		String quota = targetKey == null ? "preview/" + session.epoch + "/" + request : targetKey.toString();
 		return new InventorySyncPublisher.Route(session.epoch, session.policy.epoch(), session.policy.view(), request, marker, quota, pingType);
 	}
 	private static String identity(InventorySelection selection) { return selection.itemId() + "/" + (selection.aggregate() ? "aggregate" : selection.exact().componentsKey()); }

@@ -687,6 +687,7 @@ public final class ClientMarkerStore {
 			marker.id(),
 			marker.owner(),
 			marker.target(),
+			marker.targetKey(),
 			marker.targetTypeId(),
 			marker.pingTypeId(),
 			marker.anchor(),

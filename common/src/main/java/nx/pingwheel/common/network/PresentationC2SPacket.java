@@ -29,10 +29,10 @@ public record PresentationC2SPacket(Kind kind, int protocol, long epoch,
 	Map<String, Integer> schemas, long requestId, Target target, String pingType, MarkerId markerId,
 	List<PresentationPropertyIntent> properties) implements IPacket {
 	public enum Kind { HELLO, CREATE, REMOVE }
-	public static final int VERSION = 1;
+	public static final int VERSION = 2;
 	public static final int MAX_ADAPTERS = 32;
 	public static final int MAX_FIELDS = 256;
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(C2S_NAMESPACE, "presentation-v1");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(C2S_NAMESPACE, "presentation-v2");
 	public static final Type<PresentationC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public PresentationC2SPacket {
@@ -82,6 +82,7 @@ public record PresentationC2SPacket(Kind kind, int protocol, long epoch,
 	private static PresentationC2SPacket decode(FriendlyByteBuf buf) {
 		Kind kind = buf.readEnum(Kind.class);
 		int protocol = buf.readVarInt(); long epoch = buf.readLong();
+		if (protocol != VERSION) throw new IllegalArgumentException("presentation version");
 		Map<String, Integer> schemas = new LinkedHashMap<>();
 		long request = 0; Target target = null; String ping = null; MarkerId marker = null;
 		List<PresentationPropertyIntent> properties = new ArrayList<>();

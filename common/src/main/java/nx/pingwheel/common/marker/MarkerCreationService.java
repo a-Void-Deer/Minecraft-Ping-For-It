@@ -25,6 +25,8 @@ import nx.pingwheel.common.presentation.PresentationPropertyIntent;
 import nx.pingwheel.common.presentation.PresentationPropertySelection;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.util.RateLimitedDiagnostics;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Server-side orchestration for marker creation and removal.
@@ -81,9 +83,14 @@ public final class MarkerCreationService {
 		AdmissionResult admit(Target committedTarget, String targetTypeId, UUID owner,
 			List<UUID> recipients, List<PresentationPropertyIntent> intents);
 	}
+	@FunctionalInterface
+	public interface DedicatedAdmission {
+		AdmissionResult admit(Target committedTarget, TargetKey targetKey, String targetTypeId, UUID owner,
+			@Unmodifiable List<UUID> recipients);
+	}
 
-	public record AdmissionResult(MarkerRejectReason rejection, List<PresentationPropertySelection> selections,
-		Map<String, PresentationSection> sourceSeeds) {
+	public record AdmissionResult(@Nullable MarkerRejectReason rejection, @Unmodifiable List<PresentationPropertySelection> selections,
+		@Unmodifiable Map<String, PresentationSection> sourceSeeds) {
 		public AdmissionResult {
 			selections = List.copyOf(selections);
 			sourceSeeds = Map.copyOf(sourceSeeds);
@@ -105,7 +112,8 @@ public final class MarkerCreationService {
 	private final AuthoritativeTargetValidator validator;
 	private final MarkerCreationLogger logger;
 	private final ExternalBlockServerProviderRegistry externalProviders;
-	private final AuthoritativeTargetNameResolver nameResolver;
+	private final @Nullable AuthoritativeTargetNameResolver nameResolver;
+	private final TargetGroupingResolver groupingResolver;
 
 	public MarkerCreationService(
 		ServerMarkerStore store,
@@ -147,8 +155,15 @@ public final class MarkerCreationService {
 		AuthoritativeTargetValidator validator,
 		MarkerCreationLogger logger,
 		ExternalBlockServerProviderRegistry externalProviders,
-		AuthoritativeTargetNameResolver nameResolver
+		@Nullable AuthoritativeTargetNameResolver nameResolver
 	) {
+		this(store, resolver, catalog, validator, logger, externalProviders, nameResolver, TargetGroupingResolver.exact());
+	}
+
+	public MarkerCreationService(ServerMarkerStore store, TargetResolver resolver, PingTypeCatalog catalog,
+		AuthoritativeTargetValidator validator, MarkerCreationLogger logger,
+		ExternalBlockServerProviderRegistry externalProviders, @Nullable AuthoritativeTargetNameResolver nameResolver,
+		TargetGroupingResolver groupingResolver) {
 		this.store = Objects.requireNonNull(store, "store");
 		this.resolver = Objects.requireNonNull(resolver, "resolver");
 		this.catalog = Objects.requireNonNull(catalog, "catalog");
@@ -156,6 +171,7 @@ public final class MarkerCreationService {
 		this.logger = Objects.requireNonNull(logger, "logger");
 		this.externalProviders = Objects.requireNonNull(externalProviders, "externalProviders");
 		this.nameResolver = nameResolver;
+		this.groupingResolver = Objects.requireNonNull(groupingResolver, "groupingResolver");
 	}
 
 	/**
@@ -183,7 +199,7 @@ public final class MarkerCreationService {
 	 * exactly the same pipeline as the compatibility overload above.
 	 */
 	public MarkerCreateOutcome create(
-		ServerLevel level,
+		@Nullable ServerLevel level,
 		UUID owner,
 		Target requestedTarget,
 		String pingTypeId,
@@ -195,16 +211,16 @@ public final class MarkerCreationService {
 			List.of(), null, null);
 	}
 
-	public MarkerCreateOutcome create(ServerLevel level, UUID owner, Target requestedTarget,
+	public MarkerCreateOutcome create(@Nullable ServerLevel level, UUID owner, Target requestedTarget,
 		String pingTypeId, long arrivalTick, long expiresAtTick, List<UUID> recipients,
-		List<PresentationPropertyIntent> intents, PropertyAdmission admission) {
+		List<PresentationPropertyIntent> intents, @Nullable PropertyAdmission admission) {
 		return create(level, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick,
 			recipients, intents, admission, null);
 	}
 
 	/** Dedicated admission executes even when no SECTION property observation was supplied. */
-	public MarkerCreateOutcome createDedicated(ServerLevel level, UUID owner, Target requestedTarget,
-		String pingTypeId, long arrivalTick, long expiresAtTick, List<UUID> recipients, PropertyAdmission dedicated) {
+	public MarkerCreateOutcome createDedicated(@Nullable ServerLevel level, UUID owner, Target requestedTarget,
+		String pingTypeId, long arrivalTick, long expiresAtTick, List<UUID> recipients, DedicatedAdmission dedicated) {
 		return create(level, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick,
 			recipients, List.of(), null, null, Objects.requireNonNull(dedicated));
 	}
@@ -241,13 +257,13 @@ public final class MarkerCreationService {
 	 */
 	MarkerCreateOutcome createDedicatedWithExternalTransaction(ExternalBlockTransaction transaction,
 		UUID owner, Target requestedTarget, String pingTypeId, long arrivalTick, long expiresAtTick,
-		List<UUID> recipients, PropertyAdmission dedicated) {
+		List<UUID> recipients, DedicatedAdmission dedicated) {
 		return create(null, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick,
 			recipients, List.of(), null, transaction, Objects.requireNonNull(dedicated));
 	}
 
 	private MarkerCreateOutcome create(
-		ServerLevel level,
+		@Nullable ServerLevel level,
 		UUID owner,
 		Target requestedTarget,
 		String pingTypeId,
@@ -255,16 +271,16 @@ public final class MarkerCreationService {
 		long expiresAtTick,
 		List<UUID> recipients,
 		List<PresentationPropertyIntent> intents,
-		PropertyAdmission admission,
-		ExternalBlockTransaction transaction
+		@Nullable PropertyAdmission admission,
+		@Nullable ExternalBlockTransaction transaction
 	) {
 		return create(level, owner, requestedTarget, pingTypeId, arrivalTick, expiresAtTick, recipients,
 			intents, admission, transaction, null);
 	}
 
-	private MarkerCreateOutcome create(ServerLevel level, UUID owner, Target requestedTarget, String pingTypeId,
-		long arrivalTick, long expiresAtTick, List<UUID> recipients, List<PresentationPropertyIntent> intents,
-		PropertyAdmission admission, ExternalBlockTransaction transaction, PropertyAdmission dedicated) {
+	private MarkerCreateOutcome create(@Nullable ServerLevel level, @Nullable UUID owner, @Nullable Target requestedTarget, @Nullable String pingTypeId,
+		long arrivalTick, long expiresAtTick, @Nullable List<UUID> recipients, @Nullable List<PresentationPropertyIntent> intents,
+		@Nullable PropertyAdmission admission, @Nullable ExternalBlockTransaction transaction, @Nullable DedicatedAdmission dedicated) {
 		if (owner == null || requestedTarget == null || pingTypeId == null || recipients == null || intents == null) {
 			logger.debug("create rejected: null owner, target, ping type id, or recipients");
 			return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
@@ -317,7 +333,7 @@ public final class MarkerCreationService {
 		TargetType markerTargetType = resolvedTarget.targetType();
 		MarkerAnchor markerAnchor = validated.anchor();
 		TargetNameJson markerName = validated.authoritativeName();
-		Target.ExternalBlockTarget materializedTarget = null;
+		Target.@Nullable ExternalBlockTarget materializedTarget = null;
 
 		if (requestedTarget instanceof Target.ExternalBlockTarget
 			|| resolvedTarget.target() instanceof Target.ExternalBlockTarget) {
@@ -364,13 +380,6 @@ public final class MarkerCreationService {
 
 		AdmissionResult admitted;
 		try {
-			if (dedicated != null) {
-				AdmissionResult result = dedicated.admit(markerTarget, markerTargetType.id(), owner, List.copyOf(recipients), List.of());
-				if (result == null || result.rejection() != null || !result.selections().isEmpty() || !result.sourceSeeds().isEmpty()) {
-					if (materializedTarget != null) releaseMaterialized(level, materializedTarget, transaction);
-					return MarkerCreateOutcome.rejected(result == null || result.rejection() == null ? MarkerRejectReason.INVALID_REQUEST : result.rejection());
-				}
-			}
 			admitted = intents.isEmpty() ? AdmissionResult.accepted(List.of(), Map.of())
 				: admission == null ? AdmissionResult.rejected(MarkerRejectReason.INVALID_REQUEST)
 				: admission.admit(markerTarget, markerTargetType.id(), owner, List.copyOf(recipients), List.copyOf(intents));
@@ -379,7 +388,7 @@ public final class MarkerCreationService {
 			if (materializedTarget != null) releaseMaterialized(level, materializedTarget, transaction);
 			Target failedTarget = markerTarget;
 			String failedType = markerTargetType.id();
-			RateLimitedDiagnostics.warn(dedicated == null ? "marker-property-admission" : "marker-dedicated-admission",
+			RateLimitedDiagnostics.warn("marker-property-admission",
 				failedTarget.getClass().getName(),
 				() -> "create rejected: admission failed owner=" + owner + " target=" + failedTarget
 					+ " targetType=" + failedType + " pingType=" + pingTypeId + " recipients=" + recipients
@@ -391,11 +400,40 @@ public final class MarkerCreationService {
 			return MarkerCreateOutcome.rejected(admitted.rejection());
 		}
 
+		// Resolve once, after final classification/Ping Type and property acceptance.
+		// Preview validation never groups, and admission/storage share this exact frozen value.
+		TargetKey targetKey;
+		try {
+			targetKey = TargetKey.requireCompatible(markerTarget, groupingResolver.resolve(owner, markerTarget));
+		} catch (RuntimeException | LinkageError failure) {
+			if (materializedTarget != null) releaseMaterialized(level, materializedTarget, transaction);
+			Target failedTarget = markerTarget;
+			RateLimitedDiagnostics.warn("marker-create-grouping", groupingResolver.getClass().getName(),
+				() -> "create rejected: target grouping failed owner=" + owner + " target=" + failedTarget, failure);
+			return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
+		}
+		if (dedicated != null) {
+			try {
+				@Nullable AdmissionResult result = dedicated.admit(markerTarget, targetKey, markerTargetType.id(), owner, List.copyOf(recipients));
+				if (result == null || result.rejection() != null || !result.selections().isEmpty() || !result.sourceSeeds().isEmpty()) {
+					if (materializedTarget != null) releaseMaterialized(level, materializedTarget, transaction);
+					return MarkerCreateOutcome.rejected(result == null || result.rejection() == null ? MarkerRejectReason.INVALID_REQUEST : result.rejection());
+				}
+			} catch (RuntimeException | LinkageError failure) {
+				if (materializedTarget != null) releaseMaterialized(level, materializedTarget, transaction);
+				Target failedTarget = markerTarget;
+				RateLimitedDiagnostics.warn("marker-dedicated-admission", dedicated.getClass().getName(),
+					() -> "create rejected: admission failed owner=" + owner + " target=" + failedTarget, failure);
+				return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
+			}
+		}
+
 		MarkerCreation creation;
 		try {
 			creation = store.create(
 				owner,
 				markerTarget,
+				targetKey,
 				markerTargetType,
 				pingType,
 				markerAnchor,
@@ -426,7 +464,7 @@ public final class MarkerCreationService {
 		}
 
 		try {
-			TargetNameJson resolved = nameResolver.resolveName(owner, target);
+			@Nullable TargetNameJson resolved = nameResolver.resolveName(owner, target);
 			return resolved == null ? fallback : resolved;
 		} catch (RuntimeException | LinkageError failure) {
 			Diagnostics.warn("marker-create-name-resolve", nameResolver.getClass().getName(),
@@ -436,7 +474,7 @@ public final class MarkerCreationService {
 	}
 
 	private void releaseMaterialized(
-		ServerLevel level, Target.ExternalBlockTarget target, ExternalBlockTransaction transaction
+		@Nullable ServerLevel level, Target.ExternalBlockTarget target, @Nullable ExternalBlockTransaction transaction
 	) {
 		if (transaction != null) {
 			transaction.release(target);

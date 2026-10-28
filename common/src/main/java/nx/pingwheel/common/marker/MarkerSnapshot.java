@@ -21,12 +21,18 @@ public record MarkerSnapshot(
 	MarkerId id,
 	UUID owner,
 	Target target,
+	TargetKey targetKey,
 	String targetTypeId,
 	String pingTypeId,
 	MarkerAnchor anchor,
 	long arrivalTick,
 	long expiresAtTick
 ) {
+	/** Trusted local/fixture compatibility, never used by the wire reader. */
+	public MarkerSnapshot(MarkerId id, UUID owner, Target target, String targetTypeId, String pingTypeId,
+		MarkerAnchor anchor, long arrivalTick, long expiresAtTick) {
+		this(id, owner, target, TargetKey.from(target), targetTypeId, pingTypeId, anchor, arrivalTick, expiresAtTick);
+	}
 
 	public MarkerSnapshot {
 		Objects.requireNonNull(id, "id");
@@ -37,7 +43,7 @@ public record MarkerSnapshot(
 		requireNonBlankId("pingTypeId", pingTypeId);
 		// A snapshot is committed marker state. This also rejects an external
 		// candidate whose stable target id is intentionally still empty.
-		TargetKey.from(target);
+		TargetKey.requireCompatible(target, targetKey);
 
 		if (arrivalTick < 0L) {
 			throw new IllegalArgumentException("arrivalTick must be non-negative: " + arrivalTick);
@@ -59,6 +65,7 @@ public record MarkerSnapshot(
 			marker.id(),
 			marker.owner(),
 			marker.target(),
+			marker.targetKey(),
 			marker.targetType().id(),
 			marker.pingType().id(),
 			marker.anchor(),

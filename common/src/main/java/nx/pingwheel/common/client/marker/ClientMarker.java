@@ -34,6 +34,7 @@ public record ClientMarker(
 	MarkerId id,
 	UUID owner,
 	Target target,
+	TargetKey targetKey,
 	String targetTypeId,
 	String pingTypeId,
 	MarkerAnchor anchor,
@@ -44,6 +45,13 @@ public record ClientMarker(
 	long displayExpiresAtLocalTick,
 	ClientMarkerState state
 ) {
+	/** Trusted local/fixture compatibility; received snapshots always carry their key. */
+	public ClientMarker(MarkerId id, UUID owner, Target target, String targetTypeId, String pingTypeId,
+		MarkerAnchor anchor, long arrivalTick, long expiresAtTick, long receivedAtLocalTick,
+		long fallbackExpiresAtLocalTick, long displayExpiresAtLocalTick, ClientMarkerState state) {
+		this(id, owner, target, TargetKey.from(target), targetTypeId, pingTypeId, anchor, arrivalTick, expiresAtTick,
+			receivedAtLocalTick, fallbackExpiresAtLocalTick, displayExpiresAtLocalTick, state);
+	}
 
 	/**
 	 * Compatibility constructor for callers that only supplied the original
@@ -81,6 +89,7 @@ public record ClientMarker(
 		Objects.requireNonNull(id, "id");
 		Objects.requireNonNull(owner, "owner");
 		Objects.requireNonNull(target, "target");
+		TargetKey.requireCompatible(target, targetKey);
 		Objects.requireNonNull(anchor, "anchor");
 		Objects.requireNonNull(state, "state");
 		requireNonBlankId("targetTypeId", targetTypeId);
@@ -169,6 +178,7 @@ public record ClientMarker(
 			snapshot.id(),
 			snapshot.owner(),
 			snapshot.target(),
+			snapshot.targetKey(),
 			snapshot.targetTypeId(),
 			snapshot.pingTypeId(),
 			snapshot.anchor(),
@@ -228,6 +238,7 @@ public record ClientMarker(
 			id,
 			owner,
 			target,
+			targetKey,
 			targetTypeId,
 			pingTypeId,
 			anchor,
@@ -238,13 +249,6 @@ public record ClientMarker(
 			fallbackExpiresAtLocalTick,
 			displayExpiresAtLocalTick,
 			ClientMarkerState.STALE);
-	}
-
-	/**
-	 * The frozen {@link TargetKey} identity of this marker's target.
-	 */
-	public TargetKey targetKey() {
-		return TargetKey.from(target);
 	}
 
 	/**

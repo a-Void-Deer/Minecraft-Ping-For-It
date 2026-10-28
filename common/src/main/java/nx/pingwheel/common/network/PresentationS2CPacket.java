@@ -41,7 +41,7 @@ public record PresentationS2CPacket(Kind kind, int protocol, long epoch, long vi
 	public static final int VERSION = PresentationC2SPacket.VERSION;
 	/** The shared clientbound custom-payload body bound every loader route observes. */
 	public static final int MAX_S2C_BODY_BYTES = 1048576;
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "presentation-v1");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "presentation-v2");
 	public static final Type<PresentationS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public PresentationS2CPacket {
@@ -200,7 +200,7 @@ public record PresentationS2CPacket(Kind kind, int protocol, long epoch, long vi
 			}
 			case SECTION -> { marker = MarkerPacketCodec.readMarkerId(buf); section = buf.readByteArray(PresentationCodec.MAX_SECTION_BYTES + 5); }
 			case REMOVED -> { marker = MarkerPacketCodec.readMarkerId(buf); removal = buf.readEnum(MarkerRemovalReason.class); }
-			case WINNER -> { target = MarkerPacketCodec.readTargetKey(buf); if (buf.readBoolean()) winner = Optional.of(MarkerPacketCodec.readMarkerId(buf)); }
+			case WINNER -> { target = MarkerPacketCodec.readTargetKey(buf); if (StrictPacketCodec.readBoolean(buf)) winner = Optional.of(MarkerPacketCodec.readMarkerId(buf)); }
 			case REJECT -> { request = buf.readLong(); requestKind = buf.readEnum(MarkerRequestKind.class); reject = buf.readEnum(MarkerRejectReason.class); }
 		}
 		if (buf.isReadable()) throw new IllegalArgumentException("trailing presentation response");

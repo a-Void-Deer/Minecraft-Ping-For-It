@@ -649,7 +649,7 @@ class InventoryCatalogNativeReadWiringTest {
 		@Override public boolean annotationAllowed(InventorySourceInput input, String type) { return true; }
 		@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
 			var type = nx.pingwheel.common.domain.TargetTypeCatalog.builtIn().findById(frozen.targetType()).orElseThrow();
-			var rejected = admission.prepare(frozen.target(), type.id(), audience);
+			@org.jetbrains.annotations.Nullable var rejected = admission.prepare(frozen.target(), nx.pingwheel.common.marker.TargetKey.from(frozen.target()), type.id(), audience);
 			if (rejected != null) return new InventoryBackend.Created(null, rejected);
 			return new InventoryBackend.Created(store.create(player, frozen.target(), type, type.defaultPingType(), new nx.pingwheel.common.marker.MarkerAnchor(0, 0, 0), 1, expiry, audience).marker(), null);
 		}
