@@ -22,6 +22,7 @@ import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
 import nx.pingwheel.common.marker.MarkerSnapshot;
+import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.presentation.PresentationBasic;
@@ -41,6 +42,7 @@ import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -57,6 +59,39 @@ class PendingContentChatAcceptedStoresTest {
 		new MarkerAnchor(1, 2, 3), 1, 100);
 
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
+
+	@Test void groupedReceiptMatchesClientCopiesButAnotherGroupAtTheSamePhysicalHitCannotInheritPending() {
+		for (String registry : List.of("minecraft:chest", "minecraft:trapped_chest", "create:item_vault")) {
+			var hit = new Target.BlockTarget(TARGET.dimensionId(), 1, 2, 3, registry);
+			TargetKey original = registry.equals("create:item_vault")
+				? new TargetKey.VaultKey(hit.dimensionId(), -5, 2, 3, registry)
+				: new TargetKey.DoubleChestKey(hit.dimensionId(), 1, 2, 3, 2, 2, 3, registry);
+			TargetKey changed = registry.equals("create:item_vault")
+				? new TargetKey.VaultKey(hit.dimensionId(), -4, 2, 3, registry)
+				: new TargetKey.DoubleChestKey(hit.dimensionId(), 0, 2, 3, 1, 2, 3, registry);
+			var snapshot = new MarkerSnapshot(ID, SNAPSHOT.owner(), hit, original, "entity_block", "attention", SNAPSHOT.anchor(), 1, 100);
+			Fixture f = new Fixture();
+			var content = PresentationReceiptContent.properties(List.of(HEALTH));
+			assertTrue(f.createdReceipt(PresentationS2CPacket.created(81, 1, 1, snapshot, "Owner", NAME, content, basic(false))));
+			assertEquals(1, f.controller.pendingCount(), "the accepted grouped snapshot must start its receipt");
+			ClientMarker client = f.markers.marker(ID).orElseThrow();
+			assertEquals(PendingContentChatController.MarkerIdentity.of(snapshot), PendingContentChatController.MarkerIdentity.of(client));
+			assertEquals(PendingContentChatController.MarkerIdentity.of(snapshot), PendingContentChatController.MarkerIdentity.of(client.asStale()));
+			assertFalse(f.controller.attempt(ID));
+			assertTrue(f.createdReceipt(PresentationS2CPacket.created(81, 1, 2, snapshot, "Replay", NAME, content, basic(false))));
+			assertEquals(PendingContentChatController.MarkerIdentity.of(snapshot),
+				PendingContentChatController.MarkerIdentity.of(f.markers.marker(ID).orElseThrow()), "same-ID store copies preserve the receipt identity");
+			var replacement = new MarkerSnapshot(ID, snapshot.owner(), hit, changed, snapshot.targetTypeId(), snapshot.pingTypeId(),
+				snapshot.anchor(), snapshot.arrivalTick(), snapshot.expiresAtTick());
+			assertTrue(f.createdReceipt(PresentationS2CPacket.created(81, 1, 3, replacement, "Replacement", NAME, content, basic(true))));
+			assertEquals(hit, f.markers.marker(ID).orElseThrow().target());
+			assertEquals(changed, f.markers.marker(ID).orElseThrow().targetKey());
+			assertFalse(f.controller.attempt(ID), "a changed logical group cannot consume the original pending receipt");
+			assertEquals(0, f.controller.pendingCount()); assertTrue(f.sent.isEmpty());
+			assertFalse(f.controller.begin(PresentationS2CPacket.created(81, 1, 4, snapshot, "Owner", NAME, content, basic(true)), true),
+				"even an explicit begin cannot match the wrong current group through its physical hit");
+		}
+	}
 
 	@Test void acceptedBasicCompletesExactlyOnceAndKnownCreatedNeverRepeatsEvenAfterVisualDeadline() {
 		Fixture f = new Fixture();
@@ -243,7 +278,7 @@ class PendingContentChatAcceptedStoresTest {
 			inventory.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(10, 10, 3, 0)).stamp(81, 1));
 			inventory.accept(InventoryS2CPacket.policy(7, 81, 1, Set.of("entity_block")));
 			controller = new PendingContentChatController(4, id -> {
-				ClientMarker marker = markers.marker(id).orElse(null);
+				@Nullable ClientMarker marker = markers.marker(id).orElse(null);
 				Map<String, Set<String>> allowed = new LinkedHashMap<>();
 				presentation.previewAccess("entity_block").ifPresent(access ->
 					access.adapters().forEach((adapter, descriptor) -> allowed.put(adapter, descriptor.fields().keySet())));

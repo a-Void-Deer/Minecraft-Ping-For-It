@@ -50,7 +50,7 @@ public final class PendingContentChatController {
 			Objects.requireNonNull(pingTypeId, "pingTypeId");
 		}
 		public static MarkerIdentity of(MarkerSnapshot marker) {
-			return new MarkerIdentity(marker.id(), marker.owner(), TargetKey.from(marker.target()),
+			return new MarkerIdentity(marker.id(), marker.owner(), marker.targetKey(),
 				marker.targetTypeId(), marker.pingTypeId(), marker.arrivalTick(), marker.expiresAtTick());
 		}
 		public static MarkerIdentity of(ClientMarker marker) {

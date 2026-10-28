@@ -13,6 +13,7 @@ import java.util.UUID;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.locale.Language;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.FormattedText;
 import net.minecraft.network.chat.contents.TranslatableContents;
@@ -37,6 +38,7 @@ import nx.pingwheel.common.interaction.state.TargetValidation;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
 import nx.pingwheel.common.marker.MarkerSnapshot;
+import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
@@ -57,6 +59,8 @@ import nx.pingwheel.common.testing.DiagnosticLogCapture;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Real packet-dispatched runtime/stores/composer; only game effects and world/input access are ports. */
@@ -95,6 +99,120 @@ class ClientPingRuntimeContentReceiptTest {
   assertEquals(1, f.feedback.content.size());
   assertTrue(f.runtime.store().renderMarkers().isEmpty(), "zero visual duration does not prevent receipt completion");
   f.assertNoSourceOrNetworkWork();
+ }
+
+ @ParameterizedTest
+ @ValueSource(strings = {"minecraft:chest", "minecraft:trapped_chest", "create:item_vault"})
+ void groupedInventoryWireReceiptWaitsForFreshReadyAndEmitsExactlyOnce(String registry) {
+  Fixture f = new Fixture(0);
+  MarkerSnapshot grouped = groupedSnapshot(registry);
+  f.created(1, grouped, "Owner", PresentationReceiptContent.inventory(), basic(false));
+  assertEquals(grouped.targetKey(), f.runtime.store().marker(ID).orElseThrow().targetKey());
+  assertEquals(1, f.feedback.sounds.size());
+  assertTrue(f.feedback.ordinary.isEmpty()); assertTrue(f.feedback.content.isEmpty());
+  long exact = 9_007_199_254_740_993L;
+  f.runtime.onInventoryPacket(wire(InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, 7, 0, ID,
+   4, 1, 1, 0, 1, false, InventoryS2CPacket.Status.UPDATING, 0, List.of(item(exact, 1))).stamp(81, 1)));
+  assertEquals(exact, f.inventory.tracking(ID).entries().getFirst().count());
+  assertFalse(f.inventory.tracking(ID).complete());
+  f.tick(); assertTrue(f.feedback.content.isEmpty(), "a retained preview seed cannot produce quantity chat");
+  InventoryS2CPacket fresh = wire(InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, 7, 0, ID,
+   4, 1, 2, 0, 1, true, InventoryS2CPacket.Status.READY, 0, List.of(item(exact, 2))).stamp(81, 1));
+  f.runtime.onInventoryPacket(fresh);
+  assertTrue(f.inventory.tracking(ID).complete());
+  assertEquals(1, f.feedback.content.size());
+  assertEquals(Long.toString(exact), countArgument(f.feedback.content.getFirst()));
+  f.runtime.onInventoryPacket(fresh);
+  f.created(2, grouped, "Replay", PresentationReceiptContent.inventory(), basic(false));
+  f.tick();
+  assertEquals(1, f.feedback.content.size()); assertEquals(1, f.feedback.sounds.size());
+  assertTrue(f.feedback.ordinary.isEmpty()); f.assertNoSourceOrNetworkWork();
+ }
+
+ @ParameterizedTest
+ @ValueSource(strings = {"minecraft:chest", "minecraft:trapped_chest", "create:item_vault"})
+ void groupedPropertyWireReceiptRequiresAcceptedFreshAnnotatedSection(String registry) {
+  Fixture f = new Fixture(0);
+  f.created(1, groupedSnapshot(registry), "Owner", PresentationReceiptContent.properties(List.of(EXTRA_FIRST)), basic(false));
+  assertTrue(f.feedback.content.isEmpty()); assertTrue(f.feedback.ordinary.isEmpty());
+  PresentationSection selected = extra(Map.of(FIRST, new PresentationValue.NumberValue(12)), Map.of(EXTRA_FIRST, "request"));
+  f.runtime.onPresentationPacket(wire(PresentationS2CPacket.section(82, 1, 1, ID, selected)));
+  f.section(1, ID, new PresentationSection(EXTRA, 1, selected.fields(), true, selected.annotations()));
+  f.section(2, ID, extra(selected.fields(), Map.of()));
+  assertTrue(f.feedback.content.isEmpty(), "wrong epoch, stale data and absent annotations cannot complete");
+  f.section(3, ID, selected);
+  assertEquals(1, f.feedback.content.size()); assertTrue(hasArgument(f.feedback.content.getFirst(), "12"));
+  assertEquals(1, translationCount(f.feedback.content.getFirst(), "presentation.pingforit.type.request.display"));
+  f.section(3, ID, selected); f.section(4, ID, selected); f.tick();
+  assertEquals(1, f.feedback.content.size()); assertEquals(1, f.feedback.sounds.size());
+  assertTrue(f.feedback.ordinary.isEmpty()); f.assertNoSourceOrNetworkWork();
+ }
+
+ @ParameterizedTest
+ @ValueSource(strings = {"minecraft:chest", "minecraft:trapped_chest", "create:item_vault"})
+ void groupedPendingWireReceiptsCannotCompleteAfterResetOrRemoval(String registry) {
+  for (boolean reset : new boolean[] {true, false}) {
+   Fixture f = new Fixture(200);
+   MarkerSnapshot grouped = groupedSnapshot(registry);
+   f.created(1, grouped, "Owner", PresentationReceiptContent.inventory(), basic(false));
+   f.runtime.onInventoryPacket(wire(InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, 7, 0, ID,
+    4, 1, 1, 0, 1, false, InventoryS2CPacket.Status.UPDATING, 0, List.of(item(96, 1))).stamp(81, 1)));
+   if (reset) {
+    f.reset(2, BASIC_FIELDS);
+    f.runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 81, 2, Set.of("entity_block")));
+    f.created(2, grouped, "Replay", PresentationReceiptContent.inventory(), basic(false));
+   } else {
+    f.runtime.onPresentationPacket(wire(PresentationS2CPacket.removed(81, 1, ID, MarkerRemovalReason.EXPIRED)));
+    assertTrue(f.runtime.store().marker(ID).orElseThrow().isStale());
+    assertEquals(grouped.targetKey(), f.runtime.store().marker(ID).orElseThrow().targetKey());
+   }
+   f.runtime.onInventoryPacket(wire(data(InventoryS2CPacket.Kind.SNAPSHOT, 0, 1, 2,
+    List.of(item(97, 2)), f.presentation.sessionView())));
+   f.tick();
+   if (reset) assertTrue(f.inventory.tracking(ID).complete(), "new-view accepted data still cannot restart a receipt");
+   else assertTrue(f.inventory.tracking(ID).entries().isEmpty(), "expiry fences late tracking data");
+   assertTrue(f.feedback.content.isEmpty()); assertTrue(f.feedback.ordinary.isEmpty());
+   assertEquals(1, f.feedback.sounds.size()); f.assertNoSourceOrNetworkWork();
+  }
+ }
+
+ @ParameterizedTest
+ @ValueSource(strings = {"minecraft:chest", "minecraft:trapped_chest", "create:item_vault"})
+ void groupedWholeWireReceiptRemainsImmediateAndExactlyOnce(String registry) {
+  Fixture f = new Fixture(0);
+  MarkerSnapshot grouped = groupedSnapshot(registry);
+  f.created(1, grouped, "Owner", PresentationReceiptContent.whole(), basic(false));
+  f.created(2, grouped, "Replay", PresentationReceiptContent.whole(), basic(false));
+  assertEquals(List.of(grouped), f.feedback.ordinary); assertEquals(1, f.feedback.sounds.size());
+  assertTrue(f.feedback.content.isEmpty()); f.assertNoSourceOrNetworkWork();
+ }
+
+ private static MarkerSnapshot groupedSnapshot(String registry) {
+  Target.BlockTarget hit = new Target.BlockTarget(TARGET.dimensionId(), 1, 2, 3, registry);
+  TargetKey key = registry.equals("create:item_vault")
+   ? new TargetKey.VaultKey(hit.dimensionId(), -5, 2, 3, registry)
+   : new TargetKey.DoubleChestKey(hit.dimensionId(), 1, 2, 3, 2, 2, 3, registry);
+  return new MarkerSnapshot(ID, SNAPSHOT.owner(), hit, key, "entity_block", "attention", SNAPSHOT.anchor(), 1, 100);
+ }
+
+ private static PresentationS2CPacket wire(PresentationS2CPacket packet) {
+  var buffer = new FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
+  try {
+   packet.write(buffer);
+   PresentationS2CPacket decoded = PresentationS2CPacket.readSafe(buffer);
+   assertFalse(decoded.isCorrupt()); assertFalse(buffer.isReadable());
+   return decoded;
+  } finally { buffer.release(); }
+ }
+
+ private static InventoryS2CPacket wire(InventoryS2CPacket packet) {
+  var buffer = new FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
+  try {
+   packet.write(buffer);
+   InventoryS2CPacket decoded = InventoryS2CPacket.readSafe(buffer);
+   assertFalse(decoded.isCorrupt()); assertFalse(buffer.isReadable());
+   return decoded;
+  } finally { buffer.release(); }
  }
 
  @Test void nullableSelectionStaysWholeAndMixedSelectionCarriesOnlyTheAnnotatedRef() {
@@ -515,18 +633,18 @@ class ClientPingRuntimeContentReceiptTest {
    runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 81, 1, Set.of("entity_block")));
    assertTrue(presentation.ready()); assertTrue(inventory.ready()); sent.clear();
   }
-  void reset(long view, Set<String> basicFields) {
-   runtime.onPresentationPacket(PresentationS2CPacket.reset(81, view,
-    Map.of("entity_block", Map.of(BASIC, basicFields, EXTRA, Set.of(FIRST, SECOND,
-     PresentationKineticFormat.STRESS_FIELD, PresentationKineticFormat.CAPACITY_FIELD)))));
+   void reset(long view, Set<String> basicFields) {
+    runtime.onPresentationPacket(wire(PresentationS2CPacket.reset(81, view,
+     Map.of("entity_block", Map.of(BASIC, basicFields, EXTRA, Set.of(FIRST, SECOND,
+      PresentationKineticFormat.STRESS_FIELD, PresentationKineticFormat.CAPACITY_FIELD))))));
   }
   void created(PresentationReceiptContent content, PresentationSection basic) { created(1, SNAPSHOT, "Owner", content, basic); }
   void created(long revision, MarkerSnapshot marker, String author, PresentationReceiptContent content, PresentationSection basic) {
-   runtime.onPresentationPacket(PresentationS2CPacket.created(81, presentation.sessionView(), revision, marker, author, NAME, content, basic));
+    runtime.onPresentationPacket(wire(PresentationS2CPacket.created(81, presentation.sessionView(), revision, marker, author, NAME, content, basic)));
   }
   void section(long revision, MarkerId id, PresentationSection section) { section(revision, id, section, presentation.sessionView()); }
   void section(long revision, MarkerId id, PresentationSection section, long view) {
-   runtime.onPresentationPacket(PresentationS2CPacket.section(81, view, revision, id, section));
+    runtime.onPresentationPacket(wire(PresentationS2CPacket.section(81, view, revision, id, section)));
   }
   void tick() { runtime.onTick(); }
   void assertNoSourceOrNetworkWork() { assertEquals(0, access.captures); assertTrue(sent.isEmpty(), "receipt callbacks never send commands"); }
