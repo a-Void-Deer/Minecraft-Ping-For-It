@@ -255,11 +255,47 @@ class ClientPingRuntimeContentReceiptTest {
  @Test void expiredVisualRecordRejectsLateInventoryAndCannotRestart() {
   Fixture f = new Fixture(200);
   f.created(PresentationReceiptContent.inventory(), basic(false));
+  f.runtime.onInventoryPacket(InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, 7, 0, ID,
+   4, 1, 1, 0, 1, false, InventoryS2CPacket.Status.UPDATING, 0, List.of(item(96, 1))).stamp(81, 1));
+  assertEquals(1, f.inventory.stats().trackedChannels());
+  assertEquals(1, f.inventory.tracking(ID).entries().size(), "expiry starts with a visible retained quantity");
+  assertEquals(96, f.inventory.tracking(ID).entries().getFirst().count());
+  assertEquals(InventoryS2CPacket.Status.UPDATING, f.inventory.tracking(ID).status());
+  assertFalse(f.inventory.tracking(ID).grey());
+  assertFalse(f.inventory.tracking(ID).complete(), "the provisional count keeps the content receipt pending");
+  assertTrue(f.feedback.content.isEmpty());
+  f.runtime.onInventoryPacket(InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, 7, 0, ID,
+   5, 2, 2, 0, 1, true, InventoryS2CPacket.Status.READY, 0, List.of(item(97, 2))).stamp(81, 1));
+  assertEquals(1, f.inventory.stats().unknownSessions(), "expiry also starts with a buffered future baseline");
+
   f.runtime.onPresentationPacket(PresentationS2CPacket.removed(81, 1, ID, MarkerRemovalReason.EXPIRED));
   assertTrue(f.runtime.store().marker(ID).orElseThrow().isStale());
+  assertTrue(f.runtime.store().isAuthoritativelyRemoved(ID));
+  assertTrue(f.runtime.store().renderMarkers().stream().anyMatch(marker -> marker.id().equals(ID)),
+   "authoritative expiry preserves the independent stale visual");
+  assertEquals(0, f.inventory.stats().trackedChannels());
+  assertEquals(0, f.inventory.stats().unknownSessions());
+  assertTrue(f.inventory.tracking(ID).entries().isEmpty());
+  assertFalse(f.inventory.tracking(ID).complete());
+
+  long fenced = f.inventory.stats().fencedPackets();
   f.runtime.onInventoryPacket(data(InventoryS2CPacket.Kind.SNAPSHOT, 0, 1, 1, List.of(item(96, 1)), 1));
+  f.runtime.onInventoryPacket(InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, 7, 0, ID,
+   5, 2, 2, 0, 1, true, InventoryS2CPacket.Status.READY, 0, List.of(item(97, 2))).stamp(81, 1));
+  f.runtime.onInventoryPacket(InventoryS2CPacket.status(7, 0, ID, 5, 2, 2,
+   InventoryS2CPacket.Status.READY, 0).stamp(81, 1));
+  f.runtime.onInventoryPacket(InventoryS2CPacket.heartbeat(7, 0, ID, 5, 2, 2, 0).stamp(81, 1));
+  assertEquals(fenced + 4, f.inventory.stats().fencedPackets(), "removed marker admission rejects data and controls");
   f.created(2, SNAPSHOT, "Replay", PresentationReceiptContent.inventory(), basic(false));
+  f.runtime.onInventoryPacket(data(InventoryS2CPacket.Kind.SNAPSHOT, 0, 1, 3, List.of(item(99, 3)), 1));
+  f.tick();
+  assertTrue(f.runtime.store().marker(ID).orElseThrow().isStale(), "a delayed create cannot revive the marker");
+  assertTrue(f.runtime.store().renderMarkers().stream().anyMatch(marker -> marker.id().equals(ID)));
+  assertEquals(0, f.inventory.stats().trackedChannels(), "a delayed create cannot restore inventory admission");
+  assertEquals(0, f.inventory.stats().unknownSessions());
+  assertTrue(f.inventory.tracking(ID).entries().isEmpty());
   assertTrue(f.feedback.content.isEmpty()); assertFalse(f.inventory.tracking(ID).complete());
+  assertTrue(f.feedback.ordinary.isEmpty());
   assertEquals(1, f.feedback.sounds.size()); f.assertNoSourceOrNetworkWork();
  }
 

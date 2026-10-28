@@ -1,7 +1,6 @@
 package nx.pingwheel.common.presentation.inventory.minecraft;
 
 import java.util.List;
-import java.util.Set;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.core.component.DataComponents;
@@ -14,7 +13,6 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.component.ItemLore;
 import nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture;
-import nx.pingwheel.common.presentation.inventory.InventoryScanner;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -26,7 +24,7 @@ class InventoryItemFailureDiagnosticsTest {
 
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 
-	@Test void canonicalByteRefusalProducesAggregateWithoutChangingSafeIdentityOrLongAmounts() {
+	@Test void canonicalByteRefusalProducesAggregateDiagnosticWithoutChangingSafeIdentity() {
 		var huge = new ItemStack(Items.STONE);
 		var payload = new CompoundTag(); payload.putString("data", "\u0800".repeat(23000));
 		huge.set(DataComponents.CUSTOM_DATA, CustomData.of(payload));
@@ -40,15 +38,6 @@ class InventoryItemFailureDiagnosticsTest {
 			assertTrue(logs.messages().contains("operation=inventory/item-identity"));
 			assertTrue(logs.messages().contains("canonical byte bound=65536"), logs.messages());
 			assertTrue(logs.messages().contains("minecraft:stone")); assertNull(logs.events().getFirst().getThrown());
-			long amount = 9_007_199_254_740_993L;
-			var source = new InventoryScanner.Source() {
-				@Override public int slots() { return 2; }
-				@Override public boolean stableCursor() { return true; }
-				@Override public boolean stableSnapshot() { return true; }
-				@Override public InventoryScanner.Stack read(int slot) { return new InventoryScanner.Stack(slot == 0 ? safe.key() : aggregate.key(), slot == 0 ? amount : 7); }
-			};
-			var result = new InventoryScanner(source, Set.of(), Set.of("minecraft:stone"), true, 4).step(2);
-			assertTrue(result.complete()); assertEquals(amount + 7, result.itemTotals().get("minecraft:stone"));
 		}
 	}
 

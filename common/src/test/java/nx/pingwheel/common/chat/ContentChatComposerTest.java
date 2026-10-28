@@ -462,9 +462,6 @@ class ContentChatComposerTest {
 			entry("{\"id\":\"minecraft:gunpowder\"}", 5L, false, InventoryS2CPacket.Status.INVALID),
 			json -> Optional.empty(), templates("{content}")).isEmpty(), "an invalid entry is unavailable");
 		assertTrue(ContentChatComposer.inventoryMessage(Component.literal("Steve"), Component.literal("Chest"),
-			entry("{\"id\":\"minecraft:gunpowder\"}", 5L, false, InventoryS2CPacket.Status.UNAVAILABLE),
-			json -> Optional.empty(), templates("{content}")).isEmpty(), "an unavailable entry is unavailable");
-		assertTrue(ContentChatComposer.inventoryMessage(Component.literal("Steve"), Component.literal("Chest"),
 			new ClientInventory.EntryView("key", "minecraft:gunpowder", "item.minecraft.gunpowder",
 				null, 5L, false, null, null),
 			json -> Optional.empty(), templates("{content}")).isEmpty(), "a missing annotation is unavailable");

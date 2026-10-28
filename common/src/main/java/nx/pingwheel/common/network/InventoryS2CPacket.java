@@ -39,7 +39,7 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 	Status status, long checksum, List<Entry> entries, Offer offer, long presentationEpoch, long view,
 	Set<String> allowedTypes, long commitId, MarkerRejectReason rejection) implements IPacket {
 	public enum Kind { OFFER, POLICY, SELECTED, REJECT, PREVIEW, SNAPSHOT, STREAM, STATUS, HEARTBEAT }
-	public enum Status { UPDATING, READY, UNCERTAIN, INCOMPLETE, UNAVAILABLE, INVALID, EXPIRED, COMPONENT_TOO_LONG }
+	public enum Status { UPDATING, READY, UNCERTAIN, INCOMPLETE, INVALID, COMPONENT_TOO_LONG }
 
 	public static final int VERSION = 1;
 	public static final int MAX_ENTRIES = 128;

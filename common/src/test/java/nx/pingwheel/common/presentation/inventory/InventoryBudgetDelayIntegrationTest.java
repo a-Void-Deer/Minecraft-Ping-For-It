@@ -362,20 +362,6 @@ class InventoryBudgetDelayIntegrationTest {
 			backend.tick(10, settings); assertEquals(1, sink.endCount(Module.INVENTORY_TRACKING, cycle));
 		}
 	}
-	@Test void requestScopedResyncRepairsWithoutRecaptureExtraOfferOrDelayClaim() {
-		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 10); var reads = new AtomicInteger();
-		var runtime = runtime((input, cap) -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 1)), settings, sink);
-		try (var backend = new InventoryBackend(host, runtime, 1, sink)) {
-			helloOpen(backend, host, settings); assertEquals(1, reads.get());
-			long offers = host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OFFER).count();
-			var before = host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW && !packet.entries().isEmpty()).reduce((a, b) -> b).orElseThrow();
-			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.resync(host.epoch(InventoryBackendTest.A), 1).stamp(100, 1), 1, settings); backend.tick(1, settings);
-			var repaired = host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW && !packet.entries().isEmpty()).reduce((a, b) -> b).orElseThrow();
-			assertEquals(before.baselineId(), repaired.baselineId()); assertTrue(repaired.watermark() > before.watermark());
-			assertEquals(offers, host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OFFER).count()); assertEquals(1, reads.get()); assertTrue(sink.events.isEmpty());
-			int settled = host.packets.size(); backend.tick(2, settings); assertEquals(settled, host.packets.size());
-		}
-	}
 	@Test void negotiationControlsAndTransportOnlyFailuresAreNeverBudgetDelays() {
 		var settings = explicitSettings(10, 10); var sink = new RecordingSink(); var transport = new InventorySyncPublisherTest.Transport();
 		try (var publisher = new InventorySyncPublisher(new RetainedMemoryLedger(16_000_000), transport, sink)) {
@@ -607,7 +593,7 @@ class InventoryBudgetDelayIntegrationTest {
 			assertEquals(1, reasonEventCount(sink, Module.INVENTORY_TRACKING, Reason.PUBLICATION_WORK));
 		}
 	}
-	@Test void deliveredPreviewSkipsDuplicateEncodingButRepairStillReportsItsNewRevisionAndChecksValidity() {
+	@Test void deliveredPreviewSkipsDuplicateEncodingUnderMemoryPressureAndStillChecksValidity() {
 		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 10);
 		settings.setDisplayByteMultiplier(BigDecimal.valueOf(2));
 		settings.getPreview().setMaxVariantsPerClientPeriod(IntLimit.finite(256));
@@ -626,7 +612,7 @@ class InventoryBudgetDelayIntegrationTest {
 			helloOpen(backend, host, settings);
 			for (int now = 1; now <= 8; now++) backend.tick(now, settings);
 			assertEquals(160, reads.get());
-			var complete = host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW && packet.completeScan()).reduce((a, b) -> b).orElseThrow();
+			assertTrue(host.packets.stream().anyMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW && packet.completeScan()));
 			assertEquals(160, host.packets.stream().flatMap(packet -> packet.entries().stream()).map(InventoryS2CPacket.Entry::key).distinct().count());
 			assertTrue(sink.events.isEmpty());
 			// Enough for the actual authority workspace, less than cumulative
@@ -639,15 +625,8 @@ class InventoryBudgetDelayIntegrationTest {
 				assertEquals(frames, host.packets.size()); assertEquals(160, reads.get()); assertTrue(validations.get() > checked);
 				assertTrue(sink.events.isEmpty(), "no observed delay means no delayed-cycle WARN input");
 				assertNotEquals(DelayState.DELAYED, sink.lastState(Module.INVENTORY_PREVIEW, runtime.previewPeriodId()));
-				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.resync(host.epoch(InventoryBackendTest.A), 1).stamp(100, 1), 11, settings);
-				backend.tick(11, settings);
-				assertTrue(sink.sawReason(Module.INVENTORY_PREVIEW, Reason.MEMORY));
-				assertEquals(DelayState.DELAYED, sink.lastState(Module.INVENTORY_PREVIEW, runtime.previewPeriodId()));
-				assertEquals(160, reads.get());
 			} finally { pressure.close(); }
-			backend.tick(12, settings);
-			var replay = host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW && !packet.entries().isEmpty()).reduce((a, b) -> b).orElseThrow();
-			assertTrue(replay.watermark() > complete.watermark()); assertEquals(complete.baselineId(), replay.baselineId());
+			int frames = host.packets.size(); backend.tick(12, settings); assertEquals(frames, host.packets.size());
 			assertNotEquals(DelayState.DELAYED, sink.lastState(Module.INVENTORY_PREVIEW, runtime.previewPeriodId())); assertEquals(160, reads.get());
 			sourceValidity[0] = false; backend.tick(13, settings);
 			assertEquals(InventoryS2CPacket.Status.INVALID, host.packets.getLast().status()); assertEquals(160, reads.get());

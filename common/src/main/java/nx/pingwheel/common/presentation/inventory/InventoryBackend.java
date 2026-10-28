@@ -190,9 +190,6 @@ public final class InventoryBackend implements AutoCloseable {
 		boolean terminal;
 		@Nullable PublicationObservation last;
 		long checkedTick = -1;
-		/** Request-scoped RESYNC: cooldown stamp, one coalesced intent, one-time reset marker. */
-		long resyncAt;
-		boolean repairScheduled, repairRebased;
 		Preview(long request, Opened frozen, InventorySourceInput input, InventoryRuntime.Consumer consumer,
 			RetainedMemoryLedger.Ticket memory, SyncPublisher.Context context) {
 			this.request = request; this.frozen = frozen; this.input = input; this.consumer = consumer; this.memory = memory; this.context = context;
@@ -389,7 +386,7 @@ public final class InventoryBackend implements AutoCloseable {
 			case OPEN -> open(player, session, packet);
 			case CLOSE -> closePreview(session, packet.requestId());
 			case SELECT -> select(player, session, packet);
-			case RESYNC -> { if (packet.markerId() == null) resyncPreview(session, packet.requestId()); else resync(player, packet.markerId()); }
+			case RESYNC -> resync(player, java.util.Objects.requireNonNull(packet.markerId()));
 			case HELLO -> {}
 		}
 		publisher.drainControls();
@@ -676,14 +673,13 @@ public final class InventoryBackend implements AutoCloseable {
 		for (var entry : previews) {
 			Preview preview = entry.getValue();
 			preview.checkedTick = -1;
-			if (preview.context.stateFence() > 1) { preview.checkedTick = tick; repairPreview(preview); continue; }
+			if (preview.context.stateFence() > 1) { preview.checkedTick = tick; continue; } // pending INVALID control needs no recovery probe
 			var valid = runtime.probe(preview.consumer);
 			if (valid.isEmpty()) continue;
 			preview.checkedTick = tick;
 			if (!valid.get()) invalidatePreview(sessions.get(entry.getKey()), preview);
 			else if (!preview.terminal) samplePreview(entry.getKey(), preview);
 			else if (preview.last != null) publishPreview(preview);
-			repairPreview(preview);
 		}
 		// A later shared probe/step can retire an earlier, already-checked terminal consumer.
 		// Cancel/rebase outside publisher traversal so no admitted old fragment can escape this tick.
@@ -967,9 +963,6 @@ public final class InventoryBackend implements AutoCloseable {
 		}
 		preview.projectionDelay.progress(previewCycle);
 		preview.context = fresh;
-		// A scheduled repair belongs to the new publisher context now. Its own
-		// one-time reset has not happened there; only accepted replay clears it.
-		preview.repairRebased = false;
 		preview.fencePending = true; preview.republishPending = true;
 		publisher.status(fresh, InventoryS2CPacket.Status.INCOMPLETE);
 		return true;
@@ -1179,7 +1172,6 @@ public final class InventoryBackend implements AutoCloseable {
 			if (preview.fencePending) return new SyncPublisher.Outcome.Deferred(); // the fresh empty PREVIEW fence must be handed off before replacement data
 			// Authority was checked this tick. An accepted unchanged cut needs no
 			// reconstruction; queued sends retain their own independent recorders.
-			// A repair's one-time rebase clears acceptance before its newer replay.
 			if (publisher.accepted(preview.context, preview.revision)) return new SyncPublisher.Outcome.Accepted();
 			long aggregates = 0;
 			for (var key : preview.counts.keySet()) if (preview.folded.contains(key.itemId()) && preview.totals.containsKey(key.itemId())) aggregates++;
@@ -1205,13 +1197,7 @@ public final class InventoryBackend implements AutoCloseable {
 				// Aggregate selection needs only ID/amount; do not retain a second display owner after staging closes.
 				projection.put(key, item); preview.references.put(key, new InventorySelection(null, id, item.label(), null, true, "attention"));
 			}
-			SyncPublisher.Outcome outcome = publish(preview.context, projection, preview.last, preview.revision);
-			// One accepted cumulative publication — the scheduled repair's own or a
-			// later normal one that already followed the reset — completes the intent.
-			if (preview.repairRebased && outcome instanceof SyncPublisher.Outcome.Accepted) {
-				preview.repairScheduled = false; preview.repairRebased = false;
-			}
-			return outcome;
+			return publish(preview.context, projection, preview.last, preview.revision);
 			}
 	}
 	private static InventoryDomainCodec.Item add(InventoryDomainCodec.Item previous, InventoryDomainCodec.Item item) {
@@ -1229,7 +1215,6 @@ public final class InventoryBackend implements AutoCloseable {
 		preview.terminal = true; preview.last = null; preview.references.clear(); preview.witnesses.clear(); preview.counts.clear();
 		preview.totals.clear(); preview.keys.clear(); preview.folded.clear(); preview.retired.clear(); preview.categories = 0; preview.entries.forEach(RetainedMemoryLedger.Ticket::close); preview.entries.clear();
 		preview.rebaselineNeeded = false; preview.fencePending = false; preview.republishPending = false; preview.metadataChanged = false;
-		preview.repairRebased = false; // the invalid context is cancelled/re-registered; a scheduled intent replays INVALID only
 		preview.metadataCeiling = effectiveDisplayCeiling();
 		if (preview.metadataMemory != null) { preview.metadataMemory.close(); preview.metadataMemory = null; }
 		publisher.status(preview.context, InventoryS2CPacket.Status.INVALID);
@@ -1463,53 +1448,6 @@ public final class InventoryBackend implements AutoCloseable {
 		if (lease.bootstrap != null) lease.revision++;
 		publisher.cancel(old.context); lease.recipients.remove(player); addRecipient(lease, player, null);
 		@Nullable Recipient replacement = lease.recipients.get(player); if (replacement != null) replacement.resyncAt = next;
-	}
-	/**
-	 * Request-scoped RESYNC ingress: an unknown, already-closed or stale request
-	 * is ignored, and the accepted intent only schedules work under the existing
-	 * negotiated cooldown. No source access, publication or allocation happens
-	 * here; the preview tick performs the repair once authority, cap and
-	 * pending publication are serviceable.
-	 */
-	private void resyncPreview(Session session, long request) {
-		int resyncPeriods = settings.getTracking().getResyncMinPeriods();
-		@Nullable Preview preview = session.previews.get(request); if (preview == null || resyncPeriods > 0 && tick < preview.resyncAt) return;
-		preview.resyncAt = tick + (long) resyncPeriods * settings.getTracking().getPeriodTicks();
-		preview.repairScheduled = true;
-	}
-	/**
-	 * One coalesced request repair, run only after this tick already holds
-	 * source evidence and while no cap negotiation or pending/admitted
-	 * publication is mid-flight for this context. An invalid terminal request
-	 * replays its INVALID control without touching retained references; a
-	 * request without an observation yet replays UPDATING and leaves its
-	 * initial scan alone. Retained readable data resets this same context's
-	 * delivery state exactly once, then republishes the full cumulative
-	 * projection at a strictly newer watermark under the unchanged baseline.
-	 */
-	private void repairPreview(Preview preview) {
-		if (!preview.repairScheduled) return;
-		if (preview.context.stateFence() > 1) {
-			preview.repairScheduled = false; preview.repairRebased = false;
-			publisher.status(preview.context, InventoryS2CPacket.Status.INVALID);
-			return;
-		}
-		Session session = sessions.get(preview.context.recipient());
-		if (session == null || session.reconfiguring) return;
-		if (publisher.pending(preview.context) || publisher.controlPending(preview.context)) return;
-		if (preview.last == null) {
-			preview.repairScheduled = false; preview.repairRebased = false;
-			publisher.status(preview.context, InventoryS2CPacket.Status.UPDATING);
-			return;
-		}
-		if (!preview.repairRebased) {
-			// The one-time reset releases only this publisher context's queued and
-			// retained versions; the backend projection, cursor and opaque keys stay.
-			publisher.rebase(preview.context, preview.context.stateFence());
-			preview.repairRebased = true;
-		}
-		preview.revision++;
-		publishPreview(preview);
 	}
 	private boolean publicationAllowed(SyncPublisher.Context context) {
 		Session session = sessions.get(context.recipient()); Policy policy = host.policy(context.recipient()).orElse(null);

@@ -226,34 +226,26 @@ class InventoryMinecraftSourcesTest {
 			int period = settings.getPreview().getPeriodTicks(), visibleSlots = 2 * 27, variants = 12;
 			long now = 0;
 			@org.jetbrains.annotations.Nullable InventoryS2CPacket completed = null;
-			// Allow one slot and one part per period without assuming page width.
-			// These native sources complete as stable-slot sweeps, not atomic captures.
+			// Stop as soon as the natural cumulative COMPLETE cut starts sending.
+			// Its remaining parts must still be admitted when topology changes.
 			for (int attempt = 0; attempt < visibleSlots + 2 * variants + 1 && completed == null; attempt++, now += period) {
 				backend.tick(now, settings);
 				completed = host.sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.completeScan()
-					&& p.partIndex() == p.partCount() - 1 && p.status() == InventoryS2CPacket.Status.READY).findFirst().orElse(null);
+					&& !p.entries().isEmpty() && p.status() == InventoryS2CPacket.Status.READY).findFirst().orElse(null);
 			}
-			assertNotNull(completed, "the bounded 54-slot observation and its earlier partial cuts must finish");
+			assertNotNull(completed, "the bounded 54-slot observation must start its cumulative complete cut");
+			var cut = java.util.Objects.requireNonNull(completed);
 			var first = host.sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
-			assertEquals(first.baselineId(), completed.baselineId()); assertEquals(first.statusRevision(), completed.statusRevision());
+			assertEquals(first.baselineId(), cut.baselineId()); assertEquals(first.statusRevision(), cut.statusRevision());
 			assertEquals(0, world.saves()); assertEquals(54, world.reads());
-			// Earlier partial cuts may have delivered every value before the final
-			// empty slots. A request-scoped replay gives a full, identifiable COMPLETE
-			// cut under the same baseline/state, without capturing again or raising caps.
-			int replayStart = host.sent.size();
-			backend.handle(world.input.readOwner(), InventoryC2SPacket.resync(host.epoch(), 1).stamp(100, 1), now, settings);
-			backend.tick(now, settings);
-			var cut = host.sent.subList(replayStart, host.sent.size()).stream()
-				.filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
 			assertTrue(cut.completeScan()); assertEquals(InventoryS2CPacket.Status.READY, cut.status());
-			assertEquals(completed.baselineId(), cut.baselineId()); assertEquals(completed.statusRevision(), cut.statusRevision());
-			assertTrue(cut.watermark() > completed.watermark()); assertEquals(variants, cut.partCount()); assertEquals(0, cut.partIndex());
+			assertEquals(variants, cut.partCount()); assertEquals(0, cut.partIndex());
 			java.util.function.Predicate<InventoryS2CPacket> belongsToCut = p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()
 				&& p.baselineId() == cut.baselineId() && p.statusRevision() == cut.statusRevision()
 				&& p.watermark() == cut.watermark() && p.partCount() == cut.partCount();
 			assertTrue(host.sent.stream().filter(belongsToCut).count() < cut.partCount(), "the admitted complete cut retains undelivered parts across periods");
 			assertTrue(host.sent.stream().filter(belongsToCut).flatMap(p -> p.entries().stream()).allMatch(e -> e.count() == 2));
-			assertEquals(0, world.saves()); assertEquals(54, world.reads(), "replay must reuse the one detached capture");
+			assertEquals(0, world.saves()); assertEquals(54, world.reads(), "the cumulative complete cut reuses the one native sweep");
 			world.states.remove(world.first); world.states.put(world.hit, Blocks.CHEST.defaultBlockState().setValue(ChestBlock.TYPE, ChestType.SINGLE));
 			assertTrue(runtime.validate(world.input), "a fresh wrapper admits the still-present original hit half as a legal single chest");
 			int start = host.sent.size(), resolutions = world.resolutions.get(); backend.tick(now + period, settings);
@@ -276,45 +268,40 @@ class InventoryMinecraftSourcesTest {
 			backend.handle(world.input.readOwner(), InventoryC2SPacket.open(host.epoch(), 100, 1, 1, world.input.target(), world.input.face()), 0, settings);
 			int period = settings.getPreview().getPeriodTicks(), visibleSlots = 2 * 27, variants = 12;
 			long now = 0;
+			int cutStart = host.sent.size();
 			@org.jetbrains.annotations.Nullable InventoryS2CPacket completed = null;
 			for (int attempt = 0; attempt < visibleSlots + 2 * variants + 1 && completed == null; attempt++, now += period) {
+				cutStart = host.sent.size();
 				backend.tick(now, settings);
 				completed = host.sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.completeScan()
-					&& p.partIndex() == p.partCount() - 1 && p.status() == InventoryS2CPacket.Status.READY).findFirst().orElse(null);
+					&& !p.entries().isEmpty() && p.status() == InventoryS2CPacket.Status.READY).findFirst().orElse(null);
 			}
-			assertNotNull(completed, "ordinary mutation starts only after the bounded 54-slot observation completes");
+			assertNotNull(completed, "ordinary mutation starts when the bounded 54-slot observation's cumulative complete cut begins sending");
+			var cut = java.util.Objects.requireNonNull(completed);
 			var first = host.sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
-			assertEquals(first.baselineId(), completed.baselineId()); assertEquals(first.statusRevision(), completed.statusRevision());
+			assertEquals(first.baselineId(), cut.baselineId()); assertEquals(first.statusRevision(), cut.statusRevision());
 			assertEquals(0, world.saves()); assertEquals(54, world.reads());
-			// Replay the completed retained projection so the pending multipart cut
-			// cannot depend on which earlier partial revisions already drained.
-			int replayStart = host.sent.size();
-			backend.handle(world.input.readOwner(), InventoryC2SPacket.resync(host.epoch(), 1).stamp(100, 1), now, settings);
-			backend.tick(now, settings);
-			var cut = host.sent.subList(replayStart, host.sent.size()).stream()
-				.filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
 			assertTrue(cut.completeScan()); assertEquals(InventoryS2CPacket.Status.READY, cut.status());
-			assertEquals(completed.baselineId(), cut.baselineId()); assertEquals(completed.statusRevision(), cut.statusRevision());
-			assertTrue(cut.watermark() > completed.watermark()); assertEquals(variants, cut.partCount()); assertEquals(0, cut.partIndex());
+			assertEquals(variants, cut.partCount()); assertEquals(0, cut.partIndex());
 			java.util.function.Predicate<InventoryS2CPacket> belongsToCut = p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()
 				&& p.baselineId() == cut.baselineId() && p.statusRevision() == cut.statusRevision()
 				&& p.watermark() == cut.watermark() && p.partCount() == cut.partCount();
 			assertTrue(host.sent.stream().filter(belongsToCut).count() < cut.partCount(), "live mutation occurs while the complete cut still has admitted parts");
-			assertEquals(0, world.saves()); assertEquals(54, world.reads(), "replay does not recapture the contents");
+			assertEquals(0, world.saves()); assertEquals(54, world.reads(), "the complete cut uses the paid native sweep");
 			for (Chest chest : world.chests.values()) { chest.clearContent(); chest.setItem(0, new ItemStack(Items.STONE, 31)); chest.reads = 0; }
 			for (int attempt = 0; attempt < cut.partCount() + 2; attempt++) { now += period; backend.tick(now, settings); }
 			var parts = host.sent.stream().filter(belongsToCut).toList();
 			assertEquals(cut.partCount(), parts.size(), "this immutable complete cut finishes once instead of restarting each period");
 			assertEquals(java.util.stream.IntStream.range(0, cut.partCount()).boxed().toList(), parts.stream().map(InventoryS2CPacket::partIndex).sorted().toList());
 			assertTrue(parts.stream().allMatch(p -> p.completeScan() && p.status() == InventoryS2CPacket.Status.READY && p.checksum() == cut.checksum()));
-			assertTrue(host.sent.subList(replayStart, host.sent.size()).stream().filter(p -> !p.entries().isEmpty()).allMatch(belongsToCut), "ordinary mutation creates no replacement cut or new baseline/state");
-			assertTrue(host.sent.subList(replayStart, host.sent.size()).stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.partIndex() == p.partCount() - 1
+			assertTrue(host.sent.subList(cutStart, host.sent.size()).stream().filter(p -> !p.entries().isEmpty()).allMatch(belongsToCut), "ordinary mutation creates no replacement cut or new baseline/state");
+			assertTrue(host.sent.subList(cutStart, host.sent.size()).stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.partIndex() == p.partCount() - 1
 				&& p.baselineId() == cut.baselineId() && p.statusRevision() == cut.statusRevision() && p.watermark() == cut.watermark()
 				&& p.completeScan() && p.status() == InventoryS2CPacket.Status.READY && p.checksum() == cut.checksum()), "the completed cut reaches its matching delivery barrier");
 			assertEquals(variants, parts.stream().flatMap(p -> p.entries().stream()).count());
 			assertEquals(variants, parts.stream().flatMap(p -> p.entries().stream()).map(InventoryS2CPacket.Entry::key).distinct().count());
 			assertEquals(variants, parts.stream().flatMap(p -> p.entries().stream()).map(InventoryS2CPacket.Entry::itemId).distinct().count());
-			assertTrue(parts.stream().flatMap(p -> p.entries().stream()).allMatch(e -> e.count() == 2), "the completed detached observation is unchanged by live contents");
+			assertTrue(parts.stream().flatMap(p -> p.entries().stream()).allMatch(e -> e.count() == 2), "the completed retained native sweep is unchanged by later live contents");
 			assertTrue(host.sent.stream().noneMatch(p -> p.status() == InventoryS2CPacket.Status.INVALID));
 			assertEquals(0, world.saves()); assertEquals(0, world.reads());
 		}

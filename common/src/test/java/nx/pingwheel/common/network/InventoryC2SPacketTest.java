@@ -9,6 +9,7 @@ import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.BlockFace;
 
 import java.util.Arrays;
+import java.util.HexFormat;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -114,9 +115,6 @@ class InventoryC2SPacketTest {
 		assertEquals(request, resync.requestId());
 		assertEquals(marker, resync.markerId());
 
-		InventoryC2SPacket resyncAll = roundTrip(InventoryC2SPacket.resync(epoch, request));
-		assertNull(resyncAll.markerId());
-
 		InventoryC2SPacket select = roundTrip(InventoryC2SPacket.select(epoch, 100, 3, 5, request, 9, 7, "opaque-token", "attention"));
 		assertEquals(InventoryC2SPacket.Kind.SELECT, select.kind());
 		assertEquals(request, select.requestId());
@@ -125,6 +123,113 @@ class InventoryC2SPacketTest {
 		assertEquals("attention", select.pingType());
 		assertNull(select.target());
 		assertNull(select.markerId());
+	}
+
+	/** Independent v1 fixture: UTF RESYNC, version, epoch, presentation epoch, view, request, presence, marker. */
+	private static FriendlyByteBuf literalMarkerResync() {
+		return new FriendlyByteBuf(Unpooled.wrappedBuffer(HexFormat.of().parseHex(
+			"06524553594e4301"
+				+ "0102030405060708" + "1112131415161718" + "2122232425262728"
+				+ "3132333435363738" + "01" + "4142434445464748")));
+	}
+
+	@Test
+	void literalMarkerResyncRetainsV1LayoutAndConsumesTheWholeFrame() {
+		FriendlyByteBuf buf = literalMarkerResync();
+		try {
+			InventoryC2SPacket decoded = InventoryC2SPacket.readSafe(buf);
+			assertFalse(decoded.isCorrupt());
+			assertEquals(InventoryC2SPacket.Kind.RESYNC, decoded.kind());
+			assertEquals(1, decoded.protocol());
+			assertEquals(0x0102030405060708L, decoded.epoch());
+			assertEquals(0x1112131415161718L, decoded.presentationEpoch());
+			assertEquals(0x2122232425262728L, decoded.view());
+			assertEquals(0x3132333435363738L, decoded.requestId());
+			assertEquals(new MarkerId(0x4142434445464748L), decoded.markerId());
+			assertEquals(0, buf.readableBytes());
+		} finally {
+			buf.release();
+		}
+	}
+
+	@Test
+	void markerResyncWriterMatchesIndependentV1Bytes() {
+		FriendlyByteBuf expected = literalMarkerResync();
+		FriendlyByteBuf actual = buffer();
+		try {
+			InventoryC2SPacket.resync(0x0102030405060708L, 0x3132333435363738L,
+				new MarkerId(0x4142434445464748L)).stamp(0x1112131415161718L, 0x2122232425262728L).write(actual);
+			assertEquals(expected, actual, "the retained v1 frame keeps its true presence byte and marker long");
+		} finally {
+			expected.release();
+			actual.release();
+		}
+	}
+
+	@Test
+	void markerResyncAcceptsZeroRequestAndRejectsMissingMarkerBeforeWriting() {
+		assertEquals(0, roundTrip(InventoryC2SPacket.resync(1, 0, new MarkerId(9))).requestId());
+		assertThrows(NullPointerException.class, () -> InventoryC2SPacket.resync(1, 2, null));
+		InventoryC2SPacket missing = new InventoryC2SPacket(InventoryC2SPacket.Kind.RESYNC, 1,
+			1, 2, null, null, null, null, null);
+		assertTrue(missing.isCorrupt());
+		FriendlyByteBuf buf = buffer();
+		try {
+			buf.writeByte(0x5a);
+			assertThrows(IllegalArgumentException.class, () -> missing.write(buf));
+			assertEquals(1, buf.writerIndex(), "no missing-marker frame or prefix is written");
+			assertEquals(0x5a, buf.getUnsignedByte(0));
+		} finally {
+			buf.release();
+		}
+	}
+
+	@Test
+	void literalResyncRejectsAbsentNonCanonicalMissingTruncatedAndTrailingMarker() {
+		// The independent fixture has 40 bytes before presence, then one marker long.
+		for (int presence : List.of(0, 2, 255)) {
+			FriendlyByteBuf buf = literalMarkerResync();
+			try {
+				buf.setByte(40, presence);
+				if (presence == 0) buf.writerIndex(41); // Superseded request-only RESYNC.
+				assertTrue(InventoryC2SPacket.readSafe(buf).isCorrupt(), "presence=" + presence);
+				assertEquals(0, buf.readableBytes());
+			} finally {
+				buf.release();
+			}
+		}
+		for (int length = 40; length < 49; length++) {
+			FriendlyByteBuf buf = literalMarkerResync();
+			try {
+				buf.writerIndex(length);
+				assertTrue(InventoryC2SPacket.readSafe(buf).isCorrupt(), "truncated length=" + length);
+				assertEquals(0, buf.readableBytes());
+			} finally {
+				buf.release();
+			}
+		}
+		FriendlyByteBuf trailing = buffer();
+		FriendlyByteBuf literal = literalMarkerResync();
+		try {
+			trailing.writeBytes(literal).writeByte(0);
+			assertTrue(InventoryC2SPacket.readSafe(trailing).isCorrupt());
+			assertEquals(0, trailing.readableBytes());
+		} finally {
+			literal.release();
+			trailing.release();
+		}
+	}
+
+	@Test
+	void literalMarkerResyncRejectsNegativeRequestId() {
+		FriendlyByteBuf buf = literalMarkerResync();
+		try {
+			buf.setLong(32, -1);
+			assertTrue(InventoryC2SPacket.readSafe(buf).isCorrupt());
+			assertEquals(0, buf.readableBytes());
+		} finally {
+			buf.release();
+		}
 	}
 
 	@Test

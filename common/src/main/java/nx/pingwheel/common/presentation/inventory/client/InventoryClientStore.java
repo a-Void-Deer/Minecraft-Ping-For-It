@@ -29,11 +29,10 @@ import java.util.OptionalLong;
  * baseline that stays hidden until every part arrives. Repeating an identical
  * begin keeps the running assembly and its start tick; a weaker fence never
  * replaces a stronger pending assembly, and a key may appear in only one part.
- * The bounded unknown-baseline stream queue with its five-period expiry and
- * resync outcome is a separate follow-up unit, so an update not matching the
- * committed baseline is reported as {@link Outcome#IGNORED_UNKNOWN_BASELINE}.
- * Expiry tombstones against channel recreation are also a follow-up unit. No
- * world or network call and no UI work happens here.
+ * Unknown-baseline buffering, repair and known-marker eligibility are handled by
+ * {@link ClientInventory}; an update not matching the committed baseline is
+ * reported as {@link Outcome#IGNORED_UNKNOWN_BASELINE}. No world or network call
+ * and no UI work happens here.
  */
 public final class InventoryClientStore {
 

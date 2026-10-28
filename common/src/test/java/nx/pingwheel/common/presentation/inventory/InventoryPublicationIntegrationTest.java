@@ -326,12 +326,6 @@ class InventoryPublicationIntegrationTest {
 				for (var packet : exact) client.accept(packet);
 				assertEquals(view.entries(), client.preview(request).entries(), "retired exact replay cannot reappear after group replacement");
 				assertEquals(4, reads.get());
-				long baseline = view.baselineId(); long offers = host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OFFER).count();
-				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.resync(host.epoch(InventoryBackendTest.A), request).stamp(100, 1), 9, settings);
-				backend.tick(9, settings);
-				for (; cursor < host.packets.size(); cursor++) client.accept(wire(host.packets.get(cursor)));
-				assertEquals(baseline, client.preview(request).baselineId()); assertEquals(aggregate.count(), client.preview(request).entries().stream().filter(ClientInventory.EntryView::fallback).findFirst().orElseThrow().count());
-				assertEquals(4, reads.get()); assertEquals(offers, host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OFFER).count());
 			}
 		}
 	}
@@ -411,7 +405,7 @@ class InventoryPublicationIntegrationTest {
 		}
 	}
 
-	@Test void partiallyScannedRetainedPreviewRepairKeepsPaidCursorAndTruthfulUpdatingStatus() {
+	@Test void partiallyScannedRetainedPreviewKeepsPaidCursorAndTruthfulUpdatingStatusAcrossTicks() {
 		var host = new InventoryBackendTest.Host(); var settings = InventorySettings.serverDefaults();
 		settings.getPreview().setPeriodTicks(1); settings.setPhysicalSlotsPerTick(nx.pingwheel.common.config.IntLimit.finite(1));
 		var reads = new java.util.concurrent.atomic.AtomicInteger();
@@ -425,12 +419,12 @@ class InventoryPublicationIntegrationTest {
 			int cursor = host.packets.size(); backend.tick(0, settings);
 			for (; cursor < host.packets.size(); cursor++) client.accept(wire(host.packets.get(cursor)));
 			var first = client.preview(1); assertFalse(first.completeScan());
-			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.resync(host.epoch(InventoryBackendTest.A), 1).stamp(100, 1), 1, settings);
 			backend.tick(1, settings); // the original scan continues: slot 1 is consumed exactly once
 			for (; cursor < host.packets.size(); cursor++) client.accept(wire(host.packets.get(cursor)));
-			backend.tick(1, settings); // same tick, no physical allowance; the queued repair republishes retained prefix
+			backend.tick(1, settings); // a repeated tick cannot refund the physical allowance
 			for (; cursor < host.packets.size(); cursor++) client.accept(wire(host.packets.get(cursor)));
 			var partial = client.preview(1); assertFalse(partial.completeScan()); assertEquals(InventoryS2CPacket.Status.UPDATING, partial.status());
+			assertEquals(InventoryS2CPacket.Status.UNCERTAIN, partial.entries().getFirst().quality(), "generic partial quantities cannot claim verified or complete quality");
 			assertEquals(3, partial.entries().getFirst().count()); assertEquals(first.entries().getFirst().key(), partial.entries().getFirst().key());
 			assertEquals(first.baselineId(), partial.baselineId()); assertEquals(2, reads.get());
 			for (int tick = 2; tick < 5; tick++) backend.tick(tick, settings);
@@ -715,70 +709,7 @@ class InventoryPublicationIntegrationTest {
 				.allMatch(p -> p.baselineId() == baseline), "defer neither invalidates nor resets a healthy baseline");
 		}
 	}
-	@Test void nullMarkerResyncRestoresWithheldEarlierPreviewPartAtNewerWatermarkWithSameBaselineKeyAndNoRecapture() {
-		var host = new InventoryBackendTest.Host(); var settings = InventorySettings.serverDefaults(); var reads = new java.util.concurrent.atomic.AtomicInteger();
-		try (var backend = new InventoryBackend(host, new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 2) {
-			@Override public InventoryDomainCodec.Item read(int slot) {
-				reads.incrementAndGet();
-				return slot == 0
-					? new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "plain"), 7, "stone", null, false)
-					: new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:dirt", "plain"), 3, "dirt", null, false);
-			}
-		}), 16_000_000), 1)) {
-			var requests = new ArrayList<IPacket>();
-			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.hello(), 0, settings);
-			var client = new ClientInventory(requests::add);
-			client.presentationReset(100, 1);
-			var offer = host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.OFFER).reduce((a, b) -> b).orElseThrow();
-			client.accept(wire(offer));
-			client.accept(wire(InventoryS2CPacket.policy(offer.epoch(), 100, 1, Set.of("entity_block"))));
-			long request = client.open(InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH, "entity_block");
-			backend.handle(InventoryBackendTest.A, (InventoryC2SPacket) requests.getFirst(), 0, settings);
-			int cursor = host.packets.size();
-			backend.tick(0, settings);
-			// The earlier part is omitted at the application seam; the later part arrives.
-			for (int i = cursor; i < host.packets.size(); i++) if (host.recipients.get(i).equals(InventoryBackendTest.A)) {
-				var decoded = wire(host.packets.get(i));
-				if (decoded.kind() == InventoryS2CPacket.Kind.PREVIEW && decoded.partIndex() == 0 && decoded.watermark() == 1) continue;
-				client.accept(decoded);
-			}
-			var before = client.preview(request);
-			assertFalse(before.completeScan());
-			assertEquals(1, before.entries().size(), "only the later part was applied");
-			assertEquals(1, before.receivedParts()); assertEquals(2, before.totalParts());
-			// Opaque keys and immutable payload-map order do not pin an item to a part index.
-			Map<String, Long> expectedCounts = Map.of("minecraft:stone", 7L, "minecraft:dirt", 3L);
-			String laterItem = before.entries().getFirst().itemId();
-			assertTrue(expectedCounts.containsKey(laterItem));
-			assertEquals(expectedCounts.get(laterItem).longValue(), before.entries().getFirst().count());
-			assertEquals(1, before.watermark());
-			String laterKey = before.entries().getFirst().key();
-			long baseline = before.baselineId(), statusRevision = before.statusRevision();
-			int readsBefore = reads.get(); assertEquals(2, readsBefore);
-			long offersBefore = host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.OFFER).count();
-			int start = host.packets.size();
-			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.resync(host.epoch(InventoryBackendTest.A), request).stamp(100, 1), 1, settings);
-			assertEquals(start, host.packets.size(), "ingress only schedules the request repair");
-			backend.tick(1, settings);
-			for (int i = start; i < host.packets.size(); i++) if (host.recipients.get(i).equals(InventoryBackendTest.A))
-				client.accept(wire(host.packets.get(i)));
-			var repaired = client.preview(request);
-			assertEquals(2, repaired.entries().size(), "every retained row is republished, including the omitted earlier part");
-			var counts = new java.util.HashMap<String, Long>();
-			for (var entry : repaired.entries()) counts.put(entry.itemId(), entry.count());
-			assertEquals(expectedCounts, counts);
-			assertTrue(repaired.entries().stream().anyMatch(entry -> entry.key().equals(laterKey) && entry.itemId().equals(laterItem)),
-				"the retained opaque reference is reused, not reallocated");
-			assertTrue(repaired.completeScan());
-			assertTrue(repaired.watermark() > before.watermark(), "the corrective resend uses a strictly newer publication watermark");
-			assertEquals(baseline, repaired.baselineId(), "the repair keeps the same baseline");
-			assertEquals(statusRevision, repaired.statusRevision());
-			assertEquals(readsBefore, reads.get(), "the repair republishes retained slots without a new capture");
-			assertEquals(offersBefore, host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.OFFER).count(), "no OFFER renegotiation");
-			assertEquals(0, host.store.size(), "a corrective resend never creates a Ping");
-		}
-	}
-	@Test void queuedFoldReplacementCoalescesRepeatedNullMarkerRepairsAndKeepsLatestRetainedRowsWithoutRecapture() {
+	@Test void queuedFoldReplacementRetiresExactCutAndKeepsLatestRowsThroughQueueAndTransportRecoveryWithoutRecapture() {
 		class Host extends InventoryBackendTest.Host {
 			boolean blocked;
 			final List<InventoryS2CPacket> attempts = new ArrayList<>();
@@ -791,10 +722,11 @@ class InventoryPublicationIntegrationTest {
 			}
 		}
 		var host = new Host(); var settings = InventorySettings.serverDefaults(); settings.setPendingMemoryMiB(64);
+		var delays = new InventoryBudgetDelayIntegrationTest.RecordingSink();
 		settings.getPreview().setPeriodTicks(1); settings.setPhysicalSlotsPerTick(nx.pingwheel.common.config.IntLimit.finite(1));
 		settings.getPreview().setClientByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(16)));
 		var reads = new java.util.concurrent.atomic.AtomicInteger(); var captures = new java.util.concurrent.atomic.AtomicInteger();
-		try (var backend = new InventoryBackend(host, new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 11) {
+		try (var backend = new InventoryBackend(host, new InventoryRuntime((input, cap) -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 11) {
 			@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan() {
 				return Optional.of(new InventorySourceAccess.SnapshotPlan() {
 					@Override public long memoryUpperBoundBytes() { return 0; }
@@ -810,7 +742,7 @@ class InventoryPublicationIntegrationTest {
 				return new InventoryDomainCodec.Item(new InventoryScanner.Key("test:retained_" + row, "exact"), slot == 1 ? 3 : slot == 9 ? 11 : slot + 1,
 					"r".repeat(1000), null, false);
 			}
-		}), settings.pendingMemoryBytes()), 1)) {
+		}), settings.pendingMemoryBytes(), InventoryRuntime.DisplayReprojector.none(), delays), 1, delays)) {
 			var requests = new ArrayList<IPacket>(); var client = new ClientInventory(requests::add); client.presentationReset(100, 1);
 			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.hello(), 0, settings);
 			host.packets.forEach(packet -> client.accept(wire(packet)));
@@ -827,53 +759,49 @@ class InventoryPublicationIntegrationTest {
 			assertTrue(host.attempts.stream().anyMatch(packet -> packet.entries().stream().anyMatch(entry -> entry.key().equals(retiredKey) && entry.count() == 9_007_199_254_741_000L)),
 				"the newer exact cut was admitted and attempted before identity refusal");
 			settings.getPreview().setGlobalByteMultiplier(ByteMultiplier.finite(new java.math.BigDecimal("0.125")));
-			var repair = InventoryC2SPacket.resync(host.epoch(InventoryBackendTest.A), request).stamp(100, 1); assertNull(repair.markerId());
 			int refusedPackets = host.packets.size(), retiredAttempts = host.attempts.size();
-			backend.handle(InventoryBackendTest.A, repair, 10, settings); backend.tick(10, settings);
+			backend.tick(10, settings);
 			assertEquals(11, reads.get()); assertEquals(1, captures.get());
+			assertTrue(delays.sawReason(nx.pingwheel.common.presentation.budget.BudgetDelaySink.Module.INVENTORY_PREVIEW,
+				nx.pingwheel.common.presentation.budget.BudgetDelaySink.Reason.QUEUE_CAPACITY), "the complete retained replacement must actually encounter queue admission pressure");
 			assertEquals(refusedPackets, host.packets.size()); assertEquals(retiredAttempts, host.attempts.size(), "discovery immediately fences the admitted exact cut before replacement admission");
 			long offers = host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OFFER).count();
 			for (int tick : new int[] {11, 12, 25, 26, 40}) {
-				backend.handle(InventoryBackendTest.A, repair, tick, settings); backend.tick(tick, settings);
+				backend.tick(tick, settings);
 				assertEquals(refusedPackets, host.packets.size()); assertEquals(retiredAttempts, host.attempts.size(),
 					"queue refusal neither retries retired exact parts nor sends their completion");
-				assertEquals(11, reads.get()); assertEquals(1, captures.get(), "waiting repairs keep the original capture and paid cursor");
+				assertEquals(11, reads.get()); assertEquals(1, captures.get(), "queue refusal keeps the original observation and paid cursor");
 			}
 			settings.getPreview().setGlobalByteMultiplier(ByteMultiplier.one()); backend.tick(41, settings);
 			assertTrue(host.attempts.size() > retiredAttempts, "restoring queue capacity admits the retained replacement");
 			long admittedWatermark = host.attempts.getLast().watermark();
 			for (int tick : new int[] {42, 43, 56}) {
-				backend.handle(InventoryBackendTest.A, repair, tick, settings); backend.tick(tick, settings);
-				assertEquals(admittedWatermark, host.attempts.getLast().watermark(), "repeated repairs must resume the immutable admitted cut");
+				int attempts = host.attempts.size(); backend.tick(tick, settings);
+				assertTrue(host.attempts.size() > attempts, "transport still refuses the admitted replacement");
+				assertEquals(refusedPackets, host.packets.size());
+				assertEquals(admittedWatermark, host.attempts.getLast().watermark(), "normal ticks resume the immutable admitted cut");
 			}
-			host.blocked = false; backend.tick(57, settings);
+			int deliveredStart = host.packets.size(); host.blocked = false; backend.tick(57, settings);
 			for (; cursor < host.packets.size(); cursor++) client.accept(wire(host.packets.get(cursor)));
-			var delivered = client.preview(request); assertTrue(delivered.completeScan()); assertEquals(8, delivered.entries().size());
-			Map<String, String> references = new java.util.HashMap<>();
-			for (var entry : delivered.entries()) references.put(entry.itemId(), entry.key());
-			// The repair accepted while that cut was blocked runs once after its handoff.
-			int replayStart = host.packets.size(); backend.tick(58, settings);
-			for (; cursor < host.packets.size(); cursor++) client.accept(wire(host.packets.get(cursor)));
-			var repaired = client.preview(request); assertTrue(repaired.completeScan()); assertFalse(repaired.invalid());
-			assertEquals(original.baselineId(), repaired.baselineId()); assertEquals(original.statusRevision(), repaired.statusRevision());
-			assertTrue(repaired.watermark() > admittedWatermark); assertTrue(admittedWatermark > original.watermark());
-			assertEquals(8, repaired.entries().size()); assertEquals(1, repaired.entries().stream().filter(ClientInventory.EntryView::fallback).count());
-			for (var entry : repaired.entries()) {
-				assertEquals(references.get(entry.itemId()), entry.key(), "surviving selection references stay stable across the corrective replay");
+			var delivered = client.preview(request); assertTrue(delivered.completeScan()); assertFalse(delivered.invalid());
+			assertEquals(original.baselineId(), delivered.baselineId()); assertEquals(original.statusRevision(), delivered.statusRevision());
+			assertEquals(admittedWatermark, delivered.watermark()); assertTrue(admittedWatermark > original.watermark());
+			assertEquals(8, delivered.entries().size()); assertEquals(1, delivered.entries().stream().filter(ClientInventory.EntryView::fallback).count());
+			for (var entry : delivered.entries()) {
 				if (entry.itemId().equals("minecraft:stone")) {
 					assertTrue(entry.fallback()); assertEquals(9_007_199_254_741_011L, entry.count(), "independent sum of the three authoritative long amounts");
 					assertNotEquals(retiredKey, entry.key());
 				} else {
 					int row = Integer.parseInt(entry.itemId().substring("test:retained_".length()));
 					assertFalse(entry.fallback()); assertEquals(row == 0 ? 14 : row + 3, entry.count(), "latest unrelated values survive cancelled admitted work");
-					if (row == 0) assertEquals(survivingKey, entry.key(), "folding and repair preserve the earlier unrelated selection reference");
+					if (row == 0) assertEquals(survivingKey, entry.key(), "folding preserves the earlier unrelated selection reference");
 				}
 			}
-			assertEquals(8, host.packets.subList(replayStart, host.packets.size()).stream().flatMap(packet -> packet.entries().stream()).count(), "one cumulative repair, no duplicate queued copies");
+			assertEquals(8, host.packets.subList(deliveredStart, host.packets.size()).stream().flatMap(packet -> packet.entries().stream()).count(), "one cumulative replacement, no duplicate queued copies");
 			assertTrue(host.attempts.subList(retiredAttempts, host.attempts.size()).stream().flatMap(packet -> packet.entries().stream())
 				.noneMatch(entry -> entry.itemId().equals("minecraft:stone") && !entry.fallback()));
-			client.accept(wire(oldExact)); assertEquals(repaired.entries(), client.preview(request).entries(), "retired exact replay cannot resurrect a variant");
-			int settled = host.packets.size(); backend.tick(59, settings); backend.tick(60, settings); assertEquals(settled, host.packets.size(), "coalesced repair cannot restart after acceptance");
+			client.accept(wire(oldExact)); assertEquals(delivered.entries(), client.preview(request).entries(), "retired exact replay cannot resurrect a variant");
+			int settled = host.packets.size(); backend.tick(58, settings); backend.tick(59, settings); backend.tick(60, settings); assertEquals(settled, host.packets.size(), "the accepted replacement cannot restart after handoff");
 			assertEquals(11, reads.get()); assertEquals(1, captures.get()); assertEquals(offers, host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OFFER).count());
 			assertEquals(0, host.store.size());
 		}

@@ -31,9 +31,10 @@ import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.presentation.inventory.InventoryScanner;
 import nx.pingwheel.common.presentation.source.SourceKey;
+import org.jetbrains.annotations.Nullable;
 
 /**
- * Vanilla 1.21.1 container provider for the shared inventory scanner.
+ * Vanilla 1.21.1 container provider for standalone detached inventory reads.
  *
  * <p>{@link #resolve} turns an already-validated block or entity target into a
  * detached {@link SourceKey} plus a revalidating {@link InventoryScanner.Source}.
@@ -52,10 +53,10 @@ import nx.pingwheel.common.presentation.source.SourceKey;
  * same gates; a canonical lower-lexicographic position alias makes either half
  * the same source identity.
  *
- * <p>The source holds no world object between reads: each read re-resolves the
- * container, revalidates type, loaded state, lock and loot, and only then
- * immediately freezes the resident through the bounded item seam. The display catalog is the only cache
- * and it stores detached variant identity only.
+ * <p>Each read re-resolves the container, revalidates type, loaded state, lock
+ * and loot, and only then immediately freezes the resident through the bounded
+ * item seam. The display catalog is the only cache and it stores detached
+ * variant identity only.
  */
 public final class VanillaInventorySource {
 
@@ -86,9 +87,9 @@ public final class VanillaInventorySource {
 	 * unavailable containers yield {@link Optional#empty()} rather than a guess.
 	 */
 	public static Optional<Resolved> resolve(MinecraftServer server, ServerPlayer player, Target target) {
-		return resolveOwned(server, player, target, null); // Standalone legacy scanner remains caller-trusted.
+		return resolveOwned(server, player, target, null); // Standalone reads without admission remain caller-trusted.
 	}
-	/** Caller holds scratch/work, including grant metadata, for the resolved scanner's read lifetime. */
+	/** Caller holds scratch/work, including grant metadata, for the resolved source's read lifetime. */
 	public static Optional<Resolved> resolve(MinecraftServer server, ServerPlayer player, Target target, InventoryCatalogAdmission admission) {
 		return resolveOwned(server, player, target, Objects.requireNonNull(admission));
 	}
@@ -221,8 +222,8 @@ public final class VanillaInventorySource {
 
 	/**
 	 * Server-thread-confined source that re-resolves and revalidates the
-	 * container on every read. Slot indices are stable; the snapshot is not
-	 * atomic, so the scanner keeps its uncertain consistency fact.
+	 * container on every read. Slot indices are stable, but live reads do not
+	 * provide an atomic snapshot.
 	 */
 	private static final class Source implements InventoryScanner.Source {
 
@@ -260,7 +261,7 @@ public final class VanillaInventorySource {
 		}
 
 		@Override
-		public InventoryScanner.Stack read(int slot) {
+		public InventoryScanner.@Nullable Stack read(int slot) {
 			if (slot < 0) throw new SourceUnavailableException("negative slot");
 			Container container = container();
 			if (slot >= container.getContainerSize()) {

@@ -19,6 +19,7 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.item.component.CustomData;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.Nullable;
 
 import nx.pingwheel.common.config.InventoryLimits;
 import nx.pingwheel.common.domain.MarkerId;
@@ -31,7 +32,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Optional;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -109,7 +109,7 @@ class InventoryS2CPacketTest {
 		frame.writeLong(1L);
 		frame.writeLong(1L);
 		frame.writeLong(100L); frame.writeLong(1L);
-		MarkerPacketCodec.writeOptionalMarkerId(frame, Optional.of(new MarkerId(1L)));
+		frame.writeBoolean(true); frame.writeLong(1L);
 		frame.writeLong(1L);
 		frame.writeLong(0L);
 		frame.writeLong(0L);
@@ -142,12 +142,60 @@ class InventoryS2CPacketTest {
 		frame.writeLong(1L);
 		frame.writeLong(1L);
 		frame.writeLong(100L); frame.writeLong(1L);
-		MarkerPacketCodec.writeOptionalMarkerId(frame, Optional.of(new MarkerId(1L)));
+		frame.writeBoolean(true); frame.writeLong(1L);
 		frame.writeLong(0L);
 		frame.writeLong(0L);
 		frame.writeLong(0L);
 		frame.writeUtf("NOT_A_STATUS", 256);
 		frame.writeLong(0L);
+		return frame;
+	}
+
+	/** Complete literal v1 frame, without the packet writer or production enum codec. */
+	private static FriendlyByteBuf literalStatusFrame(String kind, String status, @Nullable String quality) {
+		FriendlyByteBuf frame = buffer();
+		frame.writeUtf(kind);
+		frame.writeVarInt(1);
+		frame.writeLong(1); // inventory epoch
+		frame.writeLong(2); // request id
+		frame.writeLong(100); // presentation epoch
+		frame.writeLong(3); // view
+		frame.writeBoolean(!kind.equals("PREVIEW"));
+		if (!kind.equals("PREVIEW")) frame.writeLong(4); // marker id
+		frame.writeLong(5); // baseline
+		frame.writeLong(6); // status revision
+		frame.writeLong(7); // watermark
+		if (!kind.equals("STATUS")) {
+			frame.writeVarInt(0);
+			frame.writeVarInt(1);
+			frame.writeBoolean(true);
+		}
+		frame.writeUtf(status);
+		frame.writeLong(8); // checksum
+		if (!kind.equals("STATUS")) {
+			FriendlyByteBuf payload = buffer();
+			try {
+				payload.writeVarInt(quality == null ? 0 : 1);
+				if (quality != null) {
+					payload.writeUtf("key");
+					payload.writeUtf("minecraft:stone");
+					payload.writeUtf("Stone");
+					payload.writeBoolean(false); // no display
+					payload.writeLong(9); // count
+					payload.writeLong(10); // item revision
+					payload.writeBoolean(false); // no aggregate fallback
+					payload.writeBoolean(true);
+					payload.writeUtf(quality);
+					payload.writeLong(11); // group revision
+					payload.writeBoolean(false); // no group replacement
+					payload.writeBoolean(false); // no ping type
+				}
+				frame.writeVarInt(payload.readableBytes());
+				frame.writeBytes(payload);
+			} finally {
+				payload.release();
+			}
+		}
 		return frame;
 	}
 
@@ -201,9 +249,63 @@ class InventoryS2CPacketTest {
 			Arrays.asList(InventoryS2CPacket.Kind.values()));
 		assertEquals(List.of(InventoryS2CPacket.Status.UPDATING, InventoryS2CPacket.Status.READY,
 			InventoryS2CPacket.Status.UNCERTAIN, InventoryS2CPacket.Status.INCOMPLETE,
-			InventoryS2CPacket.Status.UNAVAILABLE, InventoryS2CPacket.Status.INVALID,
-			InventoryS2CPacket.Status.EXPIRED, InventoryS2CPacket.Status.COMPONENT_TOO_LONG),
+			InventoryS2CPacket.Status.INVALID, InventoryS2CPacket.Status.COMPONENT_TOO_LONG),
 			Arrays.asList(InventoryS2CPacket.Status.values()));
+	}
+
+	@Test
+	void retainedStatusNamesDecodeInLiteralDataAndControlFrames() {
+		for (String status : List.of("UPDATING", "READY", "UNCERTAIN", "INCOMPLETE", "INVALID", "COMPONENT_TOO_LONG")) {
+			for (String kind : List.of("PREVIEW", "SNAPSHOT", "STREAM", "STATUS")) {
+				FriendlyByteBuf frame = literalStatusFrame(kind, status, null);
+				try {
+					InventoryS2CPacket decoded = InventoryS2CPacket.readSafe(frame);
+					assertFalse(decoded.isCorrupt(), kind + ": " + status);
+					assertEquals(status, decoded.status().name());
+					assertEquals(0, frame.readableBytes());
+				} finally {
+					frame.release();
+				}
+			}
+		}
+	}
+
+	@Test
+	void retiredStatusLiteralsAreRejectedInEveryDataAndStatusControlFrame() {
+		for (String status : List.of("UNAVAILABLE", "EXPIRED")) {
+			for (String kind : List.of("PREVIEW", "SNAPSHOT", "STREAM", "STATUS")) {
+				FriendlyByteBuf frame = literalStatusFrame(kind, status, null);
+				try {
+					assertTrue(InventoryS2CPacket.readSafe(frame).isCorrupt(), kind + ": " + status);
+					assertEquals(0, frame.readableBytes());
+				} finally {
+					frame.release();
+				}
+			}
+		}
+	}
+
+	@Test
+	void literalEntryQualityAcceptsRetainedNamesAndRejectsBothRetiredNames() {
+		for (String quality : List.of("UPDATING", "READY", "UNCERTAIN", "INCOMPLETE", "INVALID", "COMPONENT_TOO_LONG",
+			"UNAVAILABLE", "EXPIRED")) {
+			for (String kind : List.of("PREVIEW", "SNAPSHOT", "STREAM")) {
+				FriendlyByteBuf frame = literalStatusFrame(kind, "READY", quality);
+				try {
+					InventoryS2CPacket decoded = InventoryS2CPacket.readSafe(frame);
+					if (quality.equals("UNAVAILABLE") || quality.equals("EXPIRED")) {
+						assertTrue(decoded.isCorrupt(), kind + ": " + quality);
+					} else {
+						assertFalse(decoded.isCorrupt(), kind + ": " + quality);
+						assertEquals(quality, decoded.entries().getFirst().quality().name());
+						assertEquals(9, decoded.entries().getFirst().count());
+					}
+					assertEquals(0, frame.readableBytes());
+				} finally {
+					frame.release();
+				}
+			}
+		}
 	}
 
 	@Test
@@ -1098,11 +1200,14 @@ class InventoryS2CPacketTest {
 				for (String type : packet.allowedTypes().stream().sorted().toList()) buf.writeUtf(type, 256);
 			}
 			case SELECTED, REJECT -> {
-				buf.writeLong(packet.commitId()); MarkerPacketCodec.writeOptionalMarkerId(buf, Optional.ofNullable(packet.markerId()));
+				buf.writeLong(packet.commitId());
+				buf.writeBoolean(packet.markerId() != null);
+				if (packet.markerId() != null) buf.writeLong(packet.markerId().value());
 				if (packet.kind() == InventoryS2CPacket.Kind.REJECT) MarkerPacketCodec.writeEnum(buf, packet.rejection());
 			}
 			case STATUS, HEARTBEAT, PREVIEW, SNAPSHOT, STREAM -> {
-				MarkerPacketCodec.writeOptionalMarkerId(buf, Optional.ofNullable(packet.markerId()));
+				buf.writeBoolean(packet.markerId() != null);
+				if (packet.markerId() != null) buf.writeLong(packet.markerId().value());
 				buf.writeLong(packet.baselineId()); buf.writeLong(packet.statusRevision()); buf.writeLong(packet.watermark());
 				boolean data = packet.kind() == InventoryS2CPacket.Kind.PREVIEW || packet.kind() == InventoryS2CPacket.Kind.SNAPSHOT || packet.kind() == InventoryS2CPacket.Kind.STREAM;
 				if (data) { buf.writeVarInt(packet.partIndex()); buf.writeVarInt(packet.partCount()); buf.writeBoolean(packet.completeScan()); }

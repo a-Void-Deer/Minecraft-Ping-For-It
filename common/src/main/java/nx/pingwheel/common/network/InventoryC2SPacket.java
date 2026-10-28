@@ -7,9 +7,10 @@ import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetKind;
 import nx.pingwheel.common.domain.BlockFace;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Optional;
+import java.util.Objects;
 
 import static nx.pingwheel.common.Global.C2S_NAMESPACE;
 
@@ -21,7 +22,7 @@ import static nx.pingwheel.common.Global.C2S_NAMESPACE;
  * native block target or an uncommitted external provider candidate carrying
  * its provider locator and block-entity classification, never a committed
  * external target, entity, or location. {@code CLOSE} releases the preview
- * request, {@code RESYNC} repairs tracking for an optional marker id, and
+ * request, {@code RESYNC} repairs tracking for a required marker id, and
  * {@code SELECT} turns one inventory entry key into a bounded query whose
  * authoritative target is derived server-side from the request. No trusted
  * item count or player identity is part of this family.
@@ -34,9 +35,9 @@ import static nx.pingwheel.common.Global.C2S_NAMESPACE;
  * rejected by decode and falls back to the corrupt no-arg instance through
  * {@link #readSafe}.
  */
-public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long requestId, Target target,
-	MarkerId markerId, String entryKey, String itemId, String pingType, long presentationEpoch, long view,
-	BlockFace face, long commitId, long baselineId, long stateRevision) implements IPacket {
+public record InventoryC2SPacket(@Nullable Kind kind, int protocol, long epoch, long requestId, @Nullable Target target,
+	@Nullable MarkerId markerId, @Nullable String entryKey, @Nullable String itemId, @Nullable String pingType, long presentationEpoch, long view,
+	@Nullable BlockFace face, long commitId, long baselineId, long stateRevision) implements IPacket {
 	public enum Kind { HELLO, OPEN, CLOSE, RESYNC, SELECT }
 
 	public static final int VERSION = 1;
@@ -53,8 +54,8 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 
 	public InventoryC2SPacket() { this(null, 0, 0, 0, null, null, null, null, null); }
 	/** Kept for constructing corrupt/legacy-shaped fixtures; runtime OPEN always requires a face and an openable target. */
-	public InventoryC2SPacket(Kind kind, int protocol, long epoch, long requestId, Target target,
-		MarkerId markerId, String entryKey, String itemId, String pingType) {
+	public InventoryC2SPacket(@Nullable Kind kind, int protocol, long epoch, long requestId, @Nullable Target target,
+		@Nullable MarkerId markerId, @Nullable String entryKey, @Nullable String itemId, @Nullable String pingType) {
 		this(kind, protocol, epoch, requestId, target, markerId, entryKey, itemId, pingType, 0, 0, null, 0, 0, 0);
 	}
 	public InventoryC2SPacket(FriendlyByteBuf buf) { this(decode(buf)); }
@@ -89,13 +90,10 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 		return new InventoryC2SPacket(Kind.CLOSE, VERSION, epoch, requestId, null, null, null, null, null);
 	}
 
-	public static InventoryC2SPacket resync(long epoch, long requestId) {
-		return resync(epoch, requestId, null);
-	}
-
-	/** {@code markerId} selects one tracked Ping; {@code null} resynchronizes the request session. */
-	public static InventoryC2SPacket resync(long epoch, long requestId, MarkerId markerId) {
-		return new InventoryC2SPacket(Kind.RESYNC, VERSION, epoch, requestId, null, markerId, null, null, null);
+	/** {@code markerId} selects one tracked Ping. */
+	public static InventoryC2SPacket resync(long epoch, long requestId, @NotNull MarkerId markerId) {
+		return new InventoryC2SPacket(Kind.RESYNC, VERSION, epoch, requestId, null,
+			Objects.requireNonNull(markerId, "inventory resync marker"), null, null, null);
 	}
 
 	/** The server resolves the authoritative target and count from the request-bound entry key. */
@@ -104,6 +102,7 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 	}
 
 	@Override public void write(FriendlyByteBuf buf) {
+		if (kind == Kind.RESYNC && markerId == null) throw new IllegalArgumentException("Missing inventory resync marker");
 		MarkerPacketCodec.writeEnum(buf, kind);
 		buf.writeVarInt(protocol);
 		buf.writeLong(epoch);
@@ -115,7 +114,8 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 			case CLOSE -> buf.writeLong(requestId);
 			case RESYNC -> {
 				buf.writeLong(requestId);
-				MarkerPacketCodec.writeOptionalMarkerId(buf, Optional.ofNullable(markerId));
+				buf.writeBoolean(true);
+				MarkerPacketCodec.writeMarkerId(buf, markerId);
 			}
 			case SELECT -> {
 				buf.writeLong(requestId);
@@ -137,18 +137,22 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 		}
 		long epoch = buf.readLong();
 		long presentationEpoch = buf.readLong(), view = buf.readLong(), commitId = 0, baselineId = 0, stateRevision = 0;
-		BlockFace face = null;
+		@Nullable BlockFace face = null;
 		long requestId = 0;
-		Target target = null;
-		MarkerId markerId = null;
-		String entryKey = null;
-		String itemId = null;
-		String pingType = null;
+		@Nullable Target target = null;
+		@Nullable MarkerId markerId = null;
+		@Nullable String entryKey = null;
+		@Nullable String itemId = null;
+		@Nullable String pingType = null;
 		switch (kind) {
 			case HELLO -> {}
 			case OPEN -> { requestId = readRequestId(buf); target = readOpenTarget(buf); face = StrictPacketCodec.readEnum(buf, BlockFace.class); }
 			case CLOSE -> requestId = readRequestId(buf);
-			case RESYNC -> { requestId = readRequestId(buf); markerId = StrictPacketCodec.readBoolean(buf) ? new MarkerId(buf.readLong()) : null; }
+			case RESYNC -> {
+				requestId = readRequestId(buf);
+				if (!StrictPacketCodec.readBoolean(buf)) throw new IllegalArgumentException("Missing inventory resync marker");
+				markerId = new MarkerId(buf.readLong());
+			}
 			case SELECT -> {
 				requestId = readRequestId(buf);
 				commitId = readRequestId(buf);
@@ -202,12 +206,12 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 	}
 
 	/** A version-one OPEN target is one native block or one uncommitted external candidate. */
-	private static boolean openTarget(Target target) {
+	private static boolean openTarget(@Nullable Target target) {
 		return target instanceof Target.BlockTarget
 			|| (target instanceof Target.ExternalBlockTarget external && external.isCandidate());
 	}
 
-	private static void validateBoundedText(String value, String name) {
+	private static void validateBoundedText(@Nullable String value, String name) {
 		if (value == null) {
 			return;
 		}
@@ -231,7 +235,7 @@ public record InventoryC2SPacket(Kind kind, int protocol, long epoch, long reque
 		return switch (kind) {
 			case OPEN -> !openTarget(target) || face == null || markerId != null || entryKey != null || itemId != null || pingType != null || commitId != 0 || baselineId != 0 || stateRevision != 0;
 			case CLOSE -> target != null || markerId != null || entryKey != null || itemId != null || pingType != null || face != null || commitId != 0 || baselineId != 0 || stateRevision != 0;
-			case RESYNC -> target != null || entryKey != null || itemId != null || pingType != null || face != null || commitId != 0 || baselineId != 0 || stateRevision != 0;
+			case RESYNC -> markerId == null || target != null || entryKey != null || itemId != null || pingType != null || face != null || commitId != 0 || baselineId != 0 || stateRevision != 0;
 			case SELECT -> target != null || markerId != null || entryKey == null || entryKey.isBlank()
 				|| itemId != null || face != null || commitId <= 0 || baselineId <= 0 || stateRevision <= 0 || pingType == null || pingType.isBlank();
 			case HELLO -> true;

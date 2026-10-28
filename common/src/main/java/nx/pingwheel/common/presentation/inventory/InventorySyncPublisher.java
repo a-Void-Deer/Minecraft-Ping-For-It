@@ -493,9 +493,9 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		return state.rebaselineRequired;
 	}
 	public void status(Context context, InventoryS2CPacket.Status status) {
-		State state = states.get(key(context));
+		@Nullable State state = states.get(key(context));
 		if (state == null || !state.context.equals(context)) return;
-		if (status == InventoryS2CPacket.Status.INVALID || status == InventoryS2CPacket.Status.EXPIRED) {
+		if (status == InventoryS2CPacket.Status.INVALID) {
 			withdraw(state); state.complete = false; state.retirementPending = false; state.rebaselineRequired = false;
 			state.bootstrapClosed = true;
 			state.cancelDelays();
@@ -575,7 +575,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 				// A completed small recovery can be ready in this same drain. Its clean
 				// fence must still precede every baseline part, and is not a completed cut.
 				if (!sendControl(state, () -> InventoryS2CPacket.status(state.route.epoch(), 0, state.route.markerId(), state.context.baseline(),
-					state.context.stateFence(), 0, state.status == InventoryS2CPacket.Status.INVALID || state.status == InventoryS2CPacket.Status.EXPIRED
+					state.context.stateFence(), 0, state.status == InventoryS2CPacket.Status.INVALID
 						? state.status : InventoryS2CPacket.Status.UPDATING, 0).stamp(state.route.presentationEpoch(), state.route.view()))) continue;
 				state.fencePending = false;
 				if (!incomplete && !state.complete && state.pending.isEmpty() && state.admitted.isEmpty()) state.control = false;

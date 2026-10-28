@@ -29,6 +29,7 @@ class InventoryBackendTest {
 		long expiry = 80;
 		boolean failPrepared;
 		boolean failResultSend;
+		boolean failInvalidPreviewSend;
 		InventoryRuntime.DisplayReprojector projector;
 		Host() { policies.put(A, new InventoryBackend.Policy(100, 1, Set.of("entity_block"))); policies.put(B, policies.get(A)); }
 		@Override public Optional<InventoryBackend.Policy> policy(UUID player) { return Optional.ofNullable(policies.get(player)); }
@@ -42,6 +43,8 @@ class InventoryBackendTest {
 			assertFalse(packet.isCorrupt(), packet.toString());
 			if (failResultSend && (packet.kind() == InventoryS2CPacket.Kind.SELECTED || packet.kind() == InventoryS2CPacket.Kind.REJECT))
 				throw new IllegalStateException("result transport refused");
+			if (failInvalidPreviewSend && packet.kind() == InventoryS2CPacket.Kind.PREVIEW && packet.status() == InventoryS2CPacket.Status.INVALID)
+				throw new IllegalStateException("invalid preview transport refused");
 			packets.add(packet); recipients.add(player);
 		}
 		@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
@@ -349,6 +352,27 @@ class InventoryBackendTest {
 			assertEquals(replacement, InventoryPublicationIntegrationTest.wire(refreshed).offer().resyncMinPeriods());
 		}
 	}
+	@Test void invalidPreviewControlRetriesOnNormalTicksWithoutProbingOrRestoringQuantities() {
+		try (Fixture f = new Fixture()) {
+			f.open(); f.host.failInvalidPreviewSend = true; f.valid = false;
+			int start = f.host.packets.size(); f.backend.tick(1, f.settings);
+			assertTrue(f.host.packets.subList(start, f.host.packets.size()).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW));
+			int validations = f.validations.get(), reads = f.reads.get();
+			f.valid = true; f.backend.tick(2, f.settings);
+			f.host.failInvalidPreviewSend = false; f.backend.tick(3, f.settings);
+			@Unmodifiable List<InventoryS2CPacket> controls = f.host.packets.subList(start, f.host.packets.size()).stream()
+				.map(InventoryPublicationIntegrationTest::wire).filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW).toList();
+			assertEquals(1, controls.size());
+			assertEquals(InventoryS2CPacket.Status.INVALID, controls.getFirst().status());
+			assertTrue(controls.getFirst().entries().isEmpty()); assertFalse(controls.getFirst().completeScan());
+			start = f.host.packets.size(); f.backend.tick(4, f.settings);
+			assertTrue(f.host.packets.subList(start, f.host.packets.size()).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW),
+				"a successful invalid control handoff retires its pending send");
+			assertEquals(validations, f.validations.get(), "an invalid terminal preview needs no recovery probe");
+			assertEquals(reads, f.reads.get()); assertEquals(0, f.host.store.size());
+			assertEquals(0, f.backend.runtime().memory().reserved());
+		}
+	}
 	@Test void positiveResyncCooldownRejectsJustBeforeItsDeadlineAndAcceptsAtTheDeadline() {
 		try (Fixture f = new Fixture()) {
 			f.host.expiry = Long.MAX_VALUE; f.settings.getTracking().setPeriodTicks(10);
@@ -473,81 +497,7 @@ class InventoryBackendTest {
 				"live frames are written under the advertised effective pair");
 		}
 	}
-	@Test void nullMarkerResyncCoalescesWithinNegotiatedCooldownAndIgnoresUnknownOrClosedRequests() {
-		try (Fixture f = new Fixture()) {
-			f.open();
-			long epoch = f.host.epoch(A);
-			int start = f.host.packets.size();
-			f.backend.handle(A, InventoryC2SPacket.resync(epoch, 1).stamp(100, 1), 1, f.settings);
-			f.backend.tick(1, f.settings);
-			var first = f.host.packets.subList(start, f.host.packets.size()).stream().map(InventoryPublicationIntegrationTest::wire)
-				.filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).toList();
-			assertEquals(1, first.size());
-			long repaired = first.getFirst().watermark();
-			start = f.host.packets.size();
-			f.backend.handle(A, InventoryC2SPacket.resync(epoch, 1).stamp(100, 1), 2, f.settings);
-			f.backend.handle(A, InventoryC2SPacket.resync(epoch, 1).stamp(100, 1), 3, f.settings);
-			f.backend.tick(4, f.settings);
-			assertTrue(f.host.packets.subList(start, f.host.packets.size()).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()),
-				"repeats inside the negotiated cooldown coalesce instead of republishing");
-			start = f.host.packets.size();
-			f.backend.handle(A, InventoryC2SPacket.resync(epoch, 1).stamp(100, 1), 16, f.settings);
-			f.backend.tick(16, f.settings);
-			var second = f.host.packets.subList(start, f.host.packets.size()).stream().map(InventoryPublicationIntegrationTest::wire)
-				.filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).toList();
-			assertEquals(1, second.size());
-			assertTrue(second.getFirst().watermark() > repaired, "the next accepted request republishes at a strictly newer watermark");
-			start = f.host.packets.size();
-			f.backend.handle(A, InventoryC2SPacket.resync(epoch, 99).stamp(100, 1), 20, f.settings);
-			f.backend.handle(A, InventoryC2SPacket.close(epoch, 1).stamp(100, 1), 20, f.settings);
-			f.backend.handle(A, InventoryC2SPacket.resync(epoch, 1).stamp(100, 1), 20, f.settings);
-			f.backend.tick(20, f.settings);
-			assertTrue(f.host.packets.subList(start, f.host.packets.size()).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()),
-				"unknown and already-closed request ids are ignored without allocating a repair");
-		}
-	}
-	@Test void zeroPreviewResyncSkipsAnOldDeadlineAndKeepsTheExistingRequestCoalescing() {
-		try (Fixture f = new Fixture()) {
-			f.settings.getTracking().setResyncMinPeriods(5); f.settings.getTracking().setPeriodTicks(3);
-			f.open(); var original = f.preview();
-			var repair = InventoryC2SPacket.resync(f.host.epoch(A), 1).stamp(100, 1);
-			f.backend.handle(A, repair, 1, f.settings); f.backend.tick(1, f.settings);
-			long first = f.preview().watermark(); assertTrue(first > original.watermark());
-			f.backend.handle(A, repair, 1, f.settings); f.backend.tick(1, f.settings);
-			assertEquals(first, f.preview().watermark(), "positive cooldown rejects another request before tick sixteen");
-			f.settings.getTracking().setResyncMinPeriods(0);
-			int start = f.host.packets.size();
-			f.backend.handle(A, repair, 1, f.settings); f.backend.handle(A, repair, 1, f.settings);
-			f.backend.tick(1, f.settings);
-			assertEquals(1, f.host.packets.subList(start, f.host.packets.size()).stream()
-				.filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).count(),
-				"multiple waiting intents still use the existing single scheduled repair");
-			long second = f.preview().watermark(); assertTrue(second > first, "zero ignores the old deadline immediately");
-			f.backend.handle(A, repair, 1, f.settings); f.backend.tick(1, f.settings);
-			assertTrue(f.preview().watermark() > second, "a completed replay permits another same-tick repair");
-			assertEquals(original.baselineId(), f.preview().baselineId());
-			assertEquals(original.entries().getFirst().key(), f.preview().entries().getFirst().key());
-			assertEquals(1, f.reads.get(), "repair does not recapture"); assertEquals(0, f.host.store.size());
-		}
-	}
-	@Test void scheduledRequestRepairReplaysInvalidWithoutProbingOrRepublishingClearedReferences() {
-		try (Fixture f = new Fixture()) {
-			f.open();
-			f.valid = false; f.backend.tick(1, f.settings);
-			assertTrue(f.host.packets.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.status() == InventoryS2CPacket.Status.INVALID));
-			int start = f.host.packets.size(), validations = f.validations.get();
-			f.backend.handle(A, InventoryC2SPacket.resync(f.host.epoch(A), 1).stamp(100, 1), 2, f.settings);
-			assertEquals(start, f.host.packets.size(), "ingress only schedules; it performs no synchronous frame or source work");
-			f.backend.tick(2, f.settings);
-			var replayed = f.host.packets.subList(start, f.host.packets.size()).stream().map(InventoryPublicationIntegrationTest::wire)
-				.filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.requestId() == 1).toList();
-			assertTrue(replayed.stream().anyMatch(p -> p.status() == InventoryS2CPacket.Status.INVALID));
-			assertTrue(replayed.stream().allMatch(p -> p.entries().isEmpty()), "an invalid terminal request replays control only, never a valid quantity");
-			assertEquals(validations, f.validations.get(), "an invalid terminal replay needs no evidence probe");
-			assertEquals(0, f.backend.runtime().memory().reserved());
-		}
-	}
-	@Test void scheduledRequestRepairReplaysUpdatingWhileTheInitialScanContinues() {
+	@Test void initialPreviewPreparationRetriesAfterMemoryDeferWithoutRecapturing() {
 		var host = new Host(); var settings = InventorySettings.serverDefaults(); var reads = new AtomicInteger();
 		var memory = new java.util.concurrent.atomic.AtomicReference<nx.pingwheel.common.presentation.source.RetainedMemoryLedger>();
 		boolean[] deferPreparation = {true}; var preparations = new AtomicInteger();
@@ -566,25 +516,27 @@ class InventoryBackendTest {
 			backend.handle(A, InventoryC2SPacket.open(epoch, 100, 1, 1, InventoryRuntimeTest.TARGET, BlockFace.NORTH), 0, settings);
 			// The source's plan exceeds the available ledger by one byte: the evidence
 			// probe succeeds, but initial preparation defers before capture or slot reads.
-			backend.handle(A, InventoryC2SPacket.resync(epoch, 1).stamp(100, 1), 0, settings);
 			int start = host.packets.size();
 			backend.tick(0, settings);
-			var replayed = host.packets.subList(start, host.packets.size()).stream().map(InventoryPublicationIntegrationTest::wire).toList();
 			assertEquals(0, reads.get(), "the memory-deferred plan leaves the first observation unadmitted");
 			assertEquals(0, preparations.get(), "capture does not run before memory admission");
-			var updating = replayed.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.entries().isEmpty()).findFirst().orElseThrow();
-			assertEquals(InventoryS2CPacket.Status.UPDATING, updating.status());
-			// The admitted plan keeps the fixture's established live route. The replay
-			// neither restarts nor brackets its initial scan when admission returns.
+			assertTrue(host.packets.subList(start, host.packets.size()).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.completeScan()),
+				"preparation pressure cannot report a completed empty observation");
+			assertEquals(0, runtime.memory().reserved());
+			// The admitted plan keeps the fixture's established live route and
+			// resumes its initial scan when memory admission returns.
 			deferPreparation[0] = false;
 			start = host.packets.size();
 			backend.tick(1, settings);
-			var observed = host.packets.subList(start, host.packets.size()).stream().map(InventoryPublicationIntegrationTest::wire)
+			@Unmodifiable List<InventoryS2CPacket> observed = host.packets.subList(start, host.packets.size()).stream().map(InventoryPublicationIntegrationTest::wire)
 				.filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).toList();
 			assertEquals(1, observed.size());
 			assertEquals(7, observed.getFirst().entries().getFirst().count());
+			assertTrue(observed.getFirst().completeScan());
+			backend.tick(2, settings);
 			assertEquals(1, reads.get(), "one physical observation, never a recapture");
 			assertEquals(1, preparations.get(), "one admitted preparation, never a recapture");
+			assertEquals(0, runtime.memory().reserved());
 		}
 	}
 	@Test void markerScopedResyncKeepsExistingRepairAndNeverFallsBackToThePreview() {
@@ -597,96 +549,49 @@ class InventoryBackendTest {
 				"a marker id selects the marker path exclusively, even when that marker is unknown");
 		}
 	}
-	@Test void scheduledRequestRepairWaitsForAdmittedPartsAndRepublishesOnlyAfterTheyComplete() {
+	@Test void previewTransportRetryPreservesTheAdmittedImmutablePartWithoutRecapturing() {
 		class BlockingHost extends Host {
 			boolean blocked = true;
+			final List<InventoryS2CPacket> attempts = new ArrayList<>();
 			@Override public void send(UUID player, InventoryS2CPacket packet) {
-				if (blocked && packet.kind() == InventoryS2CPacket.Kind.PREVIEW && !packet.entries().isEmpty())
-					throw new IllegalStateException("application seam backpressure");
+				if (packet.kind() == InventoryS2CPacket.Kind.PREVIEW && !packet.entries().isEmpty()) {
+					attempts.add(packet);
+					if (blocked) throw new IllegalStateException("application seam backpressure");
+				}
 				super.send(player, packet);
 			}
 		}
 		var host = new BlockingHost(); var settings = InventorySettings.serverDefaults(); var reads = new AtomicInteger();
-		settings.getTracking().setResyncMinPeriods(0);
 		try (var backend = new InventoryBackend(host, new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 1)), 16_000_000), 1)) {
 			backend.handle(A, InventoryC2SPacket.hello(), 0, settings);
 			long epoch = host.epoch(A);
 			backend.handle(A, InventoryC2SPacket.open(epoch, 100, 1, 1, InventoryRuntimeTest.TARGET, BlockFace.NORTH), 0, settings);
 			backend.tick(0, settings);
 			assertTrue(host.packets.stream().noneMatch(p -> !p.entries().isEmpty()), "the first admitted preview part is not delivered");
+			assertEquals(1, host.attempts.size());
+			var admitted = host.attempts.getFirst();
 			int readsBefore = reads.get();
-			backend.handle(A, InventoryC2SPacket.resync(epoch, 1).stamp(100, 1), 1, settings);
-			backend.handle(A, InventoryC2SPacket.resync(epoch, 1).stamp(100, 1), 1, settings);
 			int start = host.packets.size();
 			backend.tick(1, settings);
 			assertTrue(host.packets.subList(start, host.packets.size()).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()),
-				"a scheduled repair never discards or replaces an admitted part");
+				"transport refusal keeps the admitted part pending");
+			assertEquals(2, host.attempts.size());
+			assertSame(admitted, host.attempts.getLast(), "normal publication ticks retry the same immutable batch");
 			host.blocked = false;
 			backend.tick(2, settings);
-			var delivered = host.packets.subList(start, host.packets.size()).stream().map(InventoryPublicationIntegrationTest::wire)
+			@Unmodifiable List<InventoryS2CPacket> delivered = host.packets.subList(start, host.packets.size()).stream().map(InventoryPublicationIntegrationTest::wire)
 				.filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).toList();
 			assertEquals(1, delivered.size());
 			assertEquals(1, delivered.getFirst().watermark(), "the admitted original part is retried, not rebuilt at a newer revision");
+			assertEquals(7, delivered.getFirst().entries().getFirst().count());
+			assertEquals(3, host.attempts.size());
+			assertSame(admitted, host.attempts.getLast());
 			start = host.packets.size();
 			backend.tick(3, settings);
-			var repaired = host.packets.subList(start, host.packets.size()).stream().map(InventoryPublicationIntegrationTest::wire)
-				.filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).toList();
-			assertEquals(1, repaired.size());
-			assertEquals(2, repaired.getFirst().watermark());
-			assertEquals(7, repaired.getFirst().entries().getFirst().count());
-			assertEquals(readsBefore, reads.get(), "a corrective resend performs no new source read");
-		}
-	}
-
-	@Test void retainedRepairRebasesOnceThroughDeferredAndRejectedPublicationAndClearsOnlyOnAcceptance() throws Exception {
-		try (Fixture f = new Fixture()) {
-			f.open();
-			var sessionsField = InventoryBackend.class.getDeclaredField("sessions"); sessionsField.setAccessible(true);
-			Object session = ((Map<?, ?>) sessionsField.get(f.backend)).get(A);
-			var previewsField = session.getClass().getDeclaredField("previews"); previewsField.setAccessible(true);
-			Object preview = ((Map<?, ?>) previewsField.get(session)).get(1L);
-			var contextField = preview.getClass().getDeclaredField("context"); contextField.setAccessible(true);
-			var context = (SyncPublisher.Context) contextField.get(preview);
-			var repairField = preview.getClass().getDeclaredField("repairRebased"); repairField.setAccessible(true);
-			var scheduledField = preview.getClass().getDeclaredField("repairScheduled"); scheduledField.setAccessible(true);
-			var publisherField = InventoryBackend.class.getDeclaredField("publisher"); publisherField.setAccessible(true);
-			var publisher = (InventorySyncPublisher) publisherField.get(f.backend);
-			var repair = InventoryBackend.class.getDeclaredMethod("repairPreview", preview.getClass()); repair.setAccessible(true);
-			f.backend.handle(A, InventoryC2SPacket.resync(f.host.epoch(A), 1).stamp(100, 1), 1, f.settings);
-			var memory = f.backend.runtime().memory(); memory.setCap(0);
-			repair.invoke(f.backend, preview);
-			assertTrue(repairField.getBoolean(preview)); assertTrue(scheduledField.getBoolean(preview));
-			long retained = memory.retained();
-			// Install a sentinel offer in the equal-fence publisher context. A second
-			// reset would remove it; a rejected/deferred replacement must keep it.
-			memory.setCap(16_000_000);
-			InventorySyncPublisherTest.publish(publisher, context, InventorySyncPublisherTest.entries(1,
-				Map.of("sentinel", new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:dirt", "exact"), 3, "dirt", null, false))));
-			var checkedField = preview.getClass().getDeclaredField("checkedTick"); checkedField.setAccessible(true); checkedField.setLong(preview, 1);
-			publisher.drain();
-			long sentinel = memory.retained(); assertTrue(sentinel > retained);
-			// Clear pending traffic while retaining its offered ownership, so repair
-			// can retry. This is an explicit publisher admission fixture, no recapture.
-			publisher.withdraw(context); memory.setCap(0); repair.invoke(f.backend, preview);
-			assertEquals(sentinel, memory.retained(), "a retry cannot perform another equal-fence rebase");
-			assertTrue(repairField.getBoolean(preview)); assertTrue(scheduledField.getBoolean(preview));
-			publisher.cancel(context); memory.setCap(16_000_000); repair.invoke(f.backend, preview);
-			assertTrue(repairField.getBoolean(preview)); assertTrue(scheduledField.getBoolean(preview), "Rejected does not finish a repair");
-			assertTrue(publisher.register(context, new InventorySyncPublisher.Route(f.host.epoch(A), 100, 1, 1, null, "fixture", null)));
-			repair.invoke(f.backend, preview);
-			assertFalse(repairField.getBoolean(preview)); assertFalse(scheduledField.getBoolean(preview));
-			assertEquals(1, f.reads.get()); assertEquals(0, f.host.store.size());
-		}
-	}
-
-	@Test void completedEmptyRetainedPreviewRepairKeepsItsCompleteEmptyMeaningWithoutReads() {
-		try (Fixture f = new Fixture()) {
-			f.amount = 0; f.open(); int reads = f.reads.get();
-			int start = f.host.packets.size();
-			f.backend.handle(A, InventoryC2SPacket.resync(f.host.epoch(A), 1).stamp(100, 1), 1, f.settings); f.backend.tick(1, f.settings);
-			var replay = f.host.packets.subList(start, f.host.packets.size()).stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW).findFirst().orElseThrow();
-			assertTrue(replay.completeScan()); assertTrue(replay.entries().isEmpty()); assertTrue(replay.watermark() > 1);
-			assertEquals(reads, f.reads.get()); assertEquals(0, f.host.store.size());
+			assertTrue(host.packets.subList(start, host.packets.size()).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW),
+				"the accepted completed cut is deduplicated after transport resumes");
+			assertEquals(readsBefore, reads.get(), "transport retry performs no new source read");
+			assertEquals(0, backend.runtime().memory().reserved());
 		}
 	}
 

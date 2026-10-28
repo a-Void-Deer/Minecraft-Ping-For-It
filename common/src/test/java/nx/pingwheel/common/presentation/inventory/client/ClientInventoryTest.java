@@ -1084,18 +1084,33 @@ class ClientInventoryTest {
 	}
 
 	@Test
-	void expiredTombstoneFencesLateData() {
+	void markerRemovalClearsTrackingAndFencesLateInventory() {
 		commitTwoEntries();
+		assertEquals(2, session.tracking(markerId).entries().size());
+		assertTrue(session.tracking(markerId).complete());
+		session.accept(data(InventoryS2CPacket.Kind.STREAM, BASELINE + 1, REVISION + 1, 0, 1, WATERMARK + 1,
+			List.of(entry("a", 8L, 2L))));
+		assertEquals(1, session.stats().unknownSessions());
 
-		session.accept(InventoryS2CPacket.status(EPOCH, 1L, markerId, BASELINE, REVISION + 1L, WATERMARK,
-			InventoryS2CPacket.Status.EXPIRED, 0L));
+		session.client.markerRemoved(markerId);
+		assertEquals(0, session.stats().trackedChannels());
+		assertEquals(0, session.stats().unknownSessions());
 		assertTrue(session.tracking(markerId).entries().isEmpty());
+		assertFalse(session.tracking(markerId).complete());
 
+		long fenced = session.stats().fencedPackets();
 		session.accept(data(InventoryS2CPacket.Kind.STREAM, BASELINE, REVISION, 0, 1, WATERMARK,
 			List.of(entry("a", 99L, 9L))));
+		session.accept(data(InventoryS2CPacket.Kind.SNAPSHOT, BASELINE + 2, REVISION + 2, 0, 1, WATERMARK + 2,
+			List.of(entry("a", 99L, 9L))));
+		session.accept(InventoryS2CPacket.status(EPOCH, 1L, markerId, BASELINE + 2, REVISION + 2, WATERMARK + 2,
+			InventoryS2CPacket.Status.READY, 0L));
+		session.accept(InventoryS2CPacket.heartbeat(EPOCH, 1L, markerId, BASELINE + 2, REVISION + 2, WATERMARK + 2, 0L));
 
-		assertEquals(0, session.stats().trackedChannels(), "an expired marker is not recreated by late data");
-		assertTrue(session.stats().fencedPackets() > 0L);
+		assertEquals(0, session.stats().trackedChannels(), "late inventory cannot recreate a removed marker's tracking");
+		assertEquals(0, session.stats().unknownSessions());
+		assertTrue(session.tracking(markerId).entries().isEmpty());
+		assertEquals(fenced + 4, session.stats().fencedPackets(), "known-marker admission rejects every late inventory kind");
 	}
 
 	@Test

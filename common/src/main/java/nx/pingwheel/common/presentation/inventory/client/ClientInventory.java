@@ -36,7 +36,7 @@ import org.jetbrains.annotations.Unmodifiable;
  * {@link InventoryClientStore}; this class owns the packet-level projection:
  * preview request channels, tracked marker channels with a bounded entry
  * metadata side map, the bounded unknown-baseline stream queue, status
- * fences/tombstones, checksum comparison and throttled resync scheduling.
+ * fences, checksum comparison and throttled resync scheduling.
  *
  * <p>{@code HELLO} is attempted a bounded number of times after a connection
  * until an {@code OFFER} establishes the epoch and server periods. Every send
@@ -67,7 +67,6 @@ public final class ClientInventory {
 	public static final int MAX_UNKNOWN_BYTES = 65536;
 	public static final int MAX_METADATA_BYTES_PER_CHANNEL = 262144;
 	public static final int MAX_PREVIEW_BYTES = 262144;
-	public static final int MAX_TOMBSTONES = 64;
 
 	private static final int HELLO_RETRY_TICKS = 40;
 	private static final int MAX_HELLO_ATTEMPTS = 5;
@@ -113,7 +112,7 @@ public final class ClientInventory {
 	}
 
 	/** Public counters for diagnostics and tests; no server or world state. */
-	public record Stats(int previewChannels, int trackedChannels, int unknownSessions, int tombstones,
+	public record Stats(int previewChannels, int trackedChannels, int unknownSessions,
 		int invalidPackets, long staleEpochPackets, long fencedPackets, long boundRejects,
 		long droppedUnknownSessions, long expiredUnknownSessions, long repairRequests, long acceptedPackets,
 		long capRejectedPackets, long capFencedStates, int helloAttempts, boolean ready, long epoch) {}
@@ -247,7 +246,6 @@ public final class ClientInventory {
 	private final Map<Long, PreviewState> previews = new LinkedHashMap<>();
 	private final Map<MarkerId, TrackingState> tracking = new LinkedHashMap<>();
 	private final Map<UnknownKey, UnknownSession> unknown = new LinkedHashMap<>();
-	private final Map<MarkerId, Long> tombstones = new LinkedHashMap<>();
 
 	private InventoryS2CPacket.Offer offer;
 	/** Accepted effective byte caps of the current OFFER; zero before the first OFFER. */
@@ -304,7 +302,7 @@ public final class ClientInventory {
 	public SelectionResult selectionResult(long commitId) { return selectionResults.get(commitId); }
 	private void purgeViews() {
 		previews.clear(); for (TrackingState state : tracking.values()) store.expire(state.channel);
-		tracking.clear(); unknown.clear(); tombstones.clear(); knownMarkers.clear(); pendingCommits.clear();
+		tracking.clear(); unknown.clear(); knownMarkers.clear(); pendingCommits.clear();
 	}
 
 	public long epoch() {
@@ -343,14 +341,13 @@ public final class ClientInventory {
 		}
 	}
 
-	/** Clears every channel, metadata map, tombstone and unknown-baseline buffer. */
+	/** Clears every channel, metadata map and unknown-baseline buffer. */
 	public void reset() {
 		previews.clear();
 		for (TrackingState state : tracking.values())
 			store.expire(state.channel);
 		tracking.clear();
 		unknown.clear();
-		tombstones.clear();
 		offer = null;
 		effectiveDisplayBytes = 0;
 		effectiveFrameBytes = 0;
@@ -418,21 +415,21 @@ public final class ClientInventory {
 	public boolean select(long requestId, String entryKey, String itemId, String pingType) {
 		return false; // SELECT cannot invent a reference from client item metadata.
 	}
-	public List<PreviewEntryReference> selectable(long requestId) {
-		PreviewState state = previews.get(requestId);
+	public @Unmodifiable List<PreviewEntryReference> selectable(long requestId) {
+		@Nullable PreviewState state = previews.get(requestId);
 		if (state == null || !state.serverSeen || state.released || !ready() || !allowedTypes.contains(state.targetType)
-			|| state.status == InventoryS2CPacket.Status.INVALID || state.status == InventoryS2CPacket.Status.UNAVAILABLE) return List.of();
+			|| state.status == InventoryS2CPacket.Status.INVALID) return List.of();
 		return state.entries.keySet().stream().map(key -> new PreviewEntryReference(requestId, state.baselineId, state.statusRevision, key)).toList();
 	}
 	/** Single-use release. The injected dispatcher owns the shared courtesy limiter and transport result. */
-	public DispatchOutcome select(PreviewEntryReference reference, String itemPingType, Function<InventoryC2SPacket, DispatchOutcome> dispatch) {
+	public DispatchOutcome select(@Nullable PreviewEntryReference reference, String itemPingType, Function<InventoryC2SPacket, DispatchOutcome> dispatch) {
 		if (!ready()) return DispatchOutcome.NOT_READY;
-		PreviewState state = reference == null ? null : previews.get(reference.requestId());
+		@Nullable PreviewState state = reference == null ? null : previews.get(reference.requestId());
 		if (state == null || state.baselineId != reference.baselineId() || state.statusRevision != reference.stateRevision()
 			|| !state.entries.containsKey(reference.entryKey()) || !bounded(itemPingType) || !allowedTypes.contains(state.targetType)) return DispatchOutcome.STALE_REFERENCE;
 		if (state.released) return DispatchOutcome.ALREADY_RELEASED;
 		state.released = true;
-		if (state.status == InventoryS2CPacket.Status.INVALID || state.status == InventoryS2CPacket.Status.UNAVAILABLE || state.status == InventoryS2CPacket.Status.EXPIRED)
+		if (state.status == InventoryS2CPacket.Status.INVALID)
 			return DispatchOutcome.STALE_REFERENCE;
 		long commit = nextCommitId++;
 		var packet = InventoryC2SPacket.select(epoch, presentationEpoch, presentationView, commit, state.requestId,
@@ -504,7 +501,7 @@ public final class ClientInventory {
 	}
 
 	public Stats stats() {
-		return new Stats(previews.size(), tracking.size(), unknown.size(), tombstones.size(), invalidPackets,
+		return new Stats(previews.size(), tracking.size(), unknown.size(), invalidPackets,
 			staleEpochPackets, fencedPackets, boundRejects, droppedUnknownSessions, expiredUnknownSessions,
 			 repairRequests, acceptedPackets, capRejectedPackets, capFencedStates, helloAttempts, ready(), epoch);
 	}
@@ -775,8 +772,7 @@ public final class ClientInventory {
 			state.groupRejected = true;
 
 		if (current) {
-			if (state.groupRejected && state.status != InventoryS2CPacket.Status.INVALID
-				&& state.status != InventoryS2CPacket.Status.EXPIRED)
+			if (state.groupRejected && state.status != InventoryS2CPacket.Status.INVALID)
 				state.status = InventoryS2CPacket.Status.INCOMPLETE;
 			boolean allParts = state.receivedPartIndexes.cardinality() >= state.totalParts;
 			if (state.groupComplete && allParts && !state.groupRejected)
@@ -784,8 +780,6 @@ public final class ClientInventory {
 			if (state.groupRejected || isPreviewTerminalFailure(state.status))
 				state.completeScan = false;
 		}
-		if (state.status == InventoryS2CPacket.Status.EXPIRED)
-			previews.remove(state.requestId);
 	}
 
 	/** Merges one packet's absolute deltas per key; a rejected key makes the group incomplete. */
@@ -818,25 +812,17 @@ public final class ClientInventory {
 		return allAccepted;
 	}
 
-	private static boolean isPreviewTerminalFailure(InventoryS2CPacket.Status status) {
+	private static boolean isPreviewTerminalFailure(InventoryS2CPacket.@Nullable Status status) {
 		return status == InventoryS2CPacket.Status.INVALID
-			|| status == InventoryS2CPacket.Status.INCOMPLETE
-			|| status == InventoryS2CPacket.Status.UNAVAILABLE;
+			|| status == InventoryS2CPacket.Status.INCOMPLETE;
 	}
 
 	private void acceptTrackedData(InventoryS2CPacket packet) {
-		MarkerId markerId = packet.markerId();
-		if (fencedByTombstone(markerId, packet.statusRevision()))
-			return;
-		TrackingState state = trackingState(markerId);
+		@Nullable TrackingState state = trackingState(packet.markerId());
 		if (state == null)
 			return;
 		state.serverRequestId = packet.requestId();
-		InventoryS2CPacket.Status status = packet.status();
-		if (status == InventoryS2CPacket.Status.EXPIRED) {
-			expireTracking(state, packet.statusRevision());
-			return;
-		}
+		InventoryS2CPacket.@Nullable Status status = packet.status();
 		if (status == InventoryS2CPacket.Status.INVALID) {
 			invalidateTracking(state, packet.statusRevision());
 			return;
@@ -1200,28 +1186,12 @@ public final class ClientInventory {
 		state.committedChecksum = computeChecksum(state);
 	}
 
-	private void expireTracking(TrackingState state, long statusRevision) {
-		store.expire(state.channel);
-		tracking.remove(state.markerId);
-		long known = tombstones.getOrDefault(state.markerId, -1L);
-		tombstones.put(state.markerId, Math.max(known, statusRevision));
-		pruneTombstones();
-		removeUnknownSessions(state.markerId);
-	}
-
 	private void acceptStatus(InventoryS2CPacket packet) {
-		MarkerId markerId = packet.markerId();
-		if (fencedByTombstone(markerId, packet.statusRevision()))
-			return;
-		TrackingState state = trackingState(markerId);
+		@Nullable TrackingState state = trackingState(packet.markerId());
 		if (state == null)
 			return;
 		state.serverRequestId = packet.requestId();
-		InventoryS2CPacket.Status status = packet.status();
-		if (status == InventoryS2CPacket.Status.EXPIRED) {
-			expireTracking(state, packet.statusRevision());
-			return;
-		}
+		InventoryS2CPacket.@Nullable Status status = packet.status();
 		if (packet.statusRevision() < state.statusRevision) {
 			fencedPackets++;
 			return;
@@ -1422,10 +1392,10 @@ public final class ClientInventory {
 		unknown.keySet().removeIf(key -> key.markerId().equals(markerId));
 	}
 
-	private TrackingState trackingState(MarkerId markerId) {
+	private @Nullable TrackingState trackingState(@Nullable MarkerId markerId) {
 		if (markerId == null)
 			return null;
-		TrackingState existing = tracking.get(markerId);
+		@Nullable TrackingState existing = tracking.get(markerId);
 		if (existing != null)
 			return existing;
 		if (tracking.size() >= MAX_TRACKED_CHANNELS) {
@@ -1435,28 +1405,6 @@ public final class ClientInventory {
 		TrackingState state = new TrackingState(markerId, InventoryClientStore.Channel.tracked(markerId.value()));
 		tracking.put(markerId, state);
 		return state;
-	}
-
-	private boolean fencedByTombstone(MarkerId markerId, long statusRevision) {
-		if (markerId == null)
-			return false;
-		Long tombstone = tombstones.get(markerId);
-		if (tombstone == null)
-			return false;
-		if (statusRevision <= tombstone) {
-			fencedPackets++;
-			return true;
-		}
-		tombstones.remove(markerId);
-		return false;
-	}
-
-	private void pruneTombstones() {
-		var iterator = tombstones.keySet().iterator();
-		while (tombstones.size() > MAX_TOMBSTONES && iterator.hasNext()) {
-			iterator.next();
-			iterator.remove();
-		}
 	}
 
 	private static void clearTrackingState(TrackingState state) {

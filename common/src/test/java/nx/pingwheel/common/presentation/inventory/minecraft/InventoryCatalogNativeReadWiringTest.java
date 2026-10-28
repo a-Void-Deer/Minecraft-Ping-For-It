@@ -708,9 +708,8 @@ class InventoryCatalogNativeReadWiringTest {
 			// independently of a small source completing in that same tick.
 			InventoryPublicationTicks.withoutScanSlots(backend, tick, settings); drain();
 		}
-		void repair(InventoryBackend backend, int tick, boolean tracking) {
-			backend.handle(input().readOwner(), tracking ? InventoryC2SPacket.resync(epoch, 0, host.store.allMarkers().getFirst().id()).stamp(100, 1)
-				: InventoryC2SPacket.resync(epoch, 1).stamp(100, 1), tick, settings);
+		void repair(InventoryBackend backend, int tick) {
+			backend.handle(input().readOwner(), InventoryC2SPacket.resync(epoch, 0, host.store.allMarkers().getFirst().id()).stamp(100, 1), tick, settings);
 		}
 		@Unmodifiable List<InventoryS2CPacket> since(int start) { return List.copyOf(host.packets.subList(start, host.packets.size())); }
 	}
@@ -762,7 +761,7 @@ class InventoryCatalogNativeReadWiringTest {
 			backend.handle(input().readOwner(), InventoryC2SPacket.close(f.epoch, 1).stamp(100, 1), 2, f.settings);
 			backend.handle(input().readOwner(), InventoryC2SPacket.close(f.epoch, 2).stamp(100, 1), 2, f.settings);
 			f.settings.setPhysicalSlotsPerTick(IntLimit.finite(1)); chest.setLockCode(""); chest.clearContent();
-			f.repair(backend, 3, true); f.tick(backend, 3);
+			f.repair(backend, 3); f.tick(backend, 3);
 			for (int tick = 5; tick <= 7; tick++) f.tick(backend, tick);
 			assertTrue(f.since(start).stream().filter(p -> marker.id().equals(p.markerId())).allMatch(p -> p.entries().isEmpty()), "invalidity permanently retires the seed through repair and partial recovery");
 			for (int tick = 8; tick < 50 && !f.client.tracking(marker.id()).complete(); tick++) f.tick(backend, tick);
@@ -884,7 +883,7 @@ class InventoryCatalogNativeReadWiringTest {
 			f.tick(backend, 0); f.select(backend, 1, "minecraft:stone"); var marker = f.host.store.allMarkers().getFirst();
 			assertTrue(f.host.packets.stream().filter(p -> marker.id().equals(p.markerId())).allMatch(p -> !p.entries().isEmpty() || !p.completeScan()));
 			assertFalse(java.util.stream.IntStream.range(0, f.host.packets.size()).anyMatch(i -> f.host.deliveries.get(i).equals(other) && !f.host.packets.get(i).entries().isEmpty()));
-			f.repair(backend, 1, true); f.tick(backend, 1);
+			f.repair(backend, 1); f.tick(backend, 1);
 			assertEquals(LargeNative.LARGE_AMOUNT, f.client.tracking(marker.id()).entries().getFirst().count());
 			f.settings.setDisplayByteMultiplier(new java.math.BigDecimal("0.25")); f.tick(backend, 2); f.tick(backend, 3);
 			f.host.delayedBasic.remove(other); second.markerCreated(MarkerSnapshot.from(marker)); f.tick(backend, 4);
@@ -918,7 +917,7 @@ class InventoryCatalogNativeReadWiringTest {
 			assertEquals(queued ? 0 : 1, incomplete.entries().size());
 			if (!queued) assertEquals(seed, incomplete.entries().getFirst().count());
 			assertEquals(InventoryS2CPacket.Status.INCOMPLETE, incomplete.status());
-			int start = f.host.packets.size(); f.host.blockData = false; f.repair(backend, 10, true); f.tick(backend, 10);
+			int start = f.host.packets.size(); f.host.blockData = false; f.repair(backend, 10); f.tick(backend, 10);
 			assertEquals(seed, f.client.tracking(marker).entries().getFirst().count()); assertEquals(InventoryS2CPacket.Status.INCOMPLETE, f.client.tracking(marker).status());
 			assertTrue(f.since(start).stream().anyMatch(p -> marker.equals(p.markerId()) && !p.entries().isEmpty()
 				&& !p.completeScan() && p.status() == InventoryS2CPacket.Status.INCOMPLETE));
@@ -936,7 +935,7 @@ class InventoryCatalogNativeReadWiringTest {
 			var marker = f.host.store.allMarkers().getFirst().id(); fixture.valid = false; f.host.blockData = false;
 			int start = f.host.packets.size(); f.tick(backend, 2); assertEquals(InventoryS2CPacket.Status.INVALID, f.client.tracking(marker).status());
 			assertEquals(queued ? 0 : 1, f.client.tracking(marker).entries().size());
-			f.repair(backend, 3, true); f.tick(backend, 3); fixture.valid = true;
+			f.repair(backend, 3); f.tick(backend, 3); fixture.valid = true;
 			for (int slot = 0; slot < 4; slot++) fixture.resident.setItem(slot, ItemStack.EMPTY);
 			for (int tick = 5; tick <= 7; tick++) { f.tick(backend, tick); assertFalse(f.client.tracking(marker).complete()); }
 			assertTrue(f.since(start).stream().allMatch(p -> p.entries().isEmpty()), "recovery and repaired registration cannot resurrect the seed");
@@ -958,7 +957,7 @@ class InventoryCatalogNativeReadWiringTest {
 				var stack = new ItemStack(Items.GOLD_INGOT); stack.set(net.minecraft.core.component.DataComponents.CUSTOM_MODEL_DATA, new net.minecraft.world.item.component.CustomModelData(slot)); fixture.resident.setItem(slot, stack);
 			}
 			int start = f.host.packets.size(); for (int tick = 2; tick <= 9; tick++) f.tick(backend, tick);
-			f.repair(backend, 10, true); f.tick(backend, 10);
+			f.repair(backend, 10); f.tick(backend, 10);
 			assertTrue(f.since(start).stream().allMatch(p -> p.entries().isEmpty()), "neither exact seed nor false aggregate subtotal survives retirement");
 			assertEquals(InventoryS2CPacket.Status.INCOMPLETE, f.client.tracking(marker).status()); assertFalse(f.client.tracking(marker).complete());
 			for (int slot = 0; slot < 299; slot++) fixture.resident.setItem(slot, ItemStack.EMPTY);
@@ -1036,8 +1035,8 @@ class InventoryCatalogNativeReadWiringTest {
 			assertEquals(LargeNative.LARGE_AMOUNT + 5, preview.entries().stream().filter(entry -> entry.itemId().equals("minecraft:stone")).findFirst().orElseThrow().count());
 			assertEquals(9, preview.entries().stream().filter(entry -> entry.itemId().equals("minecraft:gold_ingot")).findFirst().orElseThrow().count());
 			assertTrue(preview.entries().stream().allMatch(entry -> entry.quality() == InventoryS2CPacket.Status.READY));
-			f.repair(backend, 4, false); f.tick(backend, 4);
-			assertEquals(InventoryS2CPacket.Status.READY, f.client.preview(1).status()); assertEquals(8, nativeSource.visibleReads.size(), "corrective replay uses retained sweep evidence");
+			f.tick(backend, 4);
+			assertEquals(InventoryS2CPacket.Status.READY, f.client.preview(1).status()); assertEquals(8, nativeSource.visibleReads.size(), "completed preview keeps retained sweep evidence without another getter");
 			f.select(backend, 5, "minecraft:stone"); assertEquals(8, nativeSource.visibleReads.size(), "SELECT validates metadata without an item getter");
 			nativeSource.firstAmount += 100;
 			var marker = f.host.store.allMarkers().getFirst();
@@ -1050,7 +1049,7 @@ class InventoryCatalogNativeReadWiringTest {
 			assertEquals(InventoryS2CPacket.Status.READY, tracked.status()); assertEquals(1, tracked.entries().size());
 			assertEquals(LargeNative.LARGE_AMOUNT + 205, tracked.entries().getFirst().count()); assertEquals(InventoryS2CPacket.Status.READY, tracked.entries().getFirst().quality());
 			assertEquals(16, nativeSource.visibleReads.size());
-			f.repair(backend, 10, true); f.tick(backend, 10); f.tick(backend, 11);
+			f.repair(backend, 10); f.tick(backend, 10); f.tick(backend, 11);
 			assertEquals(16, nativeSource.visibleReads.size(), "next physical sweep starts at completion plus existing period, not at a global period boundary");
 			assertEquals(InventoryS2CPacket.Status.READY, f.client.tracking(marker.id()).status());
 			assertNotEquals(tracked.baselineId(), f.client.tracking(marker.id()).baselineId(), "RESYNC rebaselines retained evidence, not the source");
@@ -1073,18 +1072,18 @@ class InventoryCatalogNativeReadWiringTest {
 		try (var backend = new InventoryBackend(f.host, runtime, 1)) {
 			f.open(backend); f.tick(backend, 0);
 			assertEquals(InventoryS2CPacket.Status.READY, f.client.preview(1).status()); assertTrue(f.client.preview(1).completeScan()); assertTrue(f.client.preview(1).entries().isEmpty());
-			f.repair(backend, 1, false); f.tick(backend, 1);
+			f.tick(backend, 1);
 			assertEquals(InventoryS2CPacket.Status.READY, f.client.preview(1).status()); assertTrue(f.client.preview(1).completeScan()); assertTrue(nativeSource.visibleReads.isEmpty());
 		}
 		assertEquals(0, runtime.memory().retained());
 	}
 
-	@Test void nativePartialCorrectiveReplayStaysUpdatingWithoutRestartingThePhysicalCursor() {
+	@Test void nativePartialPreviewStaysUpdatingAcrossTicksWithoutRestartingThePhysicalCursor() {
 		var f = new NativeClient(); var nativeSource = new LargeNative(4, false);
 		f.settings.setPhysicalSlotsPerTick(IntLimit.finite(1)); f.settings.getPreview().setPeriodTicks(1);
 		try (var backend = new InventoryBackend(f.host, nativeSource.runtime(f.settings), 1)) {
 			f.open(backend); f.tick(backend, 0); long baseline = f.client.preview(1).baselineId();
-			f.repair(backend, 1, false); f.tick(backend, 1);
+			f.tick(backend, 1);
 			assertEquals(InventoryS2CPacket.Status.UPDATING, f.client.preview(1).status()); assertFalse(f.client.preview(1).completeScan());
 			assertEquals(baseline, f.client.preview(1).baselineId()); assertEquals(List.of(0, 1), nativeSource.visibleReads);
 			f.tick(backend, 2); f.tick(backend, 3);
@@ -1141,16 +1140,15 @@ class InventoryCatalogNativeReadWiringTest {
 				assertEquals(aggregate ? InventoryS2CPacket.Status.COMPONENT_TOO_LONG : InventoryS2CPacket.Status.READY, complete.entries().getFirst().quality());
 				f.client.accept(early); assertEquals(complete, f.client.preview(1), "late earlier absolute data cannot overwrite the completed count or quality");
 				long offers = f.host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OFFER).count();
-				f.repair(backend, 3, false); f.tick(backend, 3);
-				var repaired = f.client.preview(1); assertTrue(repaired.completeScan()); assertEquals(complete.entries(), repaired.entries());
-				assertEquals(complete.baselineId(), repaired.baselineId()); assertTrue(repaired.watermark() > complete.watermark());
+				f.tick(backend, 3);
+				assertEquals(complete, f.client.preview(1), "a settled completed cut stays unchanged on later ticks");
 				assertEquals(3, nativeSource.visibleReads.size()); assertEquals(offers, f.host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OFFER).count());
 				nativeSource.valid = false; f.tick(backend, 4);
 				assertEquals(InventoryS2CPacket.Status.INVALID, f.client.preview(1).status()); assertFalse(f.client.preview(1).completeScan());
 				var invalid = f.client.preview(1);
 				f.client.accept(early); completion.forEach(f.client::accept);
 				assertEquals(invalid, f.client.preview(1), "old frames cannot cross the invalidation fence");
-				f.repair(backend, 5, false); f.tick(backend, 5);
+				f.tick(backend, 5);
 				assertEquals(InventoryS2CPacket.Status.INVALID, f.client.preview(1).status()); assertEquals(invalid.entries(), f.client.preview(1).entries());
 			}
 			assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
@@ -1183,7 +1181,7 @@ class InventoryCatalogNativeReadWiringTest {
 			f.client.accept(exact); f.client.accept(aggregate); assertEquals(complete, f.client.preview(1));
 			backend.handle(input().readOwner(), InventoryC2SPacket.select(f.epoch, 100, 1, 1, 1, exact.baselineId(), exact.statusRevision(), exact.entries().getFirst().key(), "danger"), 5, f.settings);
 			assertEquals(0, f.host.store.size()); assertEquals(5, nativeSource.visibleReads.size(), "a retired exact reference cannot authorize a live witness");
-			f.repair(backend, 6, false); f.tick(backend, 6);
+			f.tick(backend, 6);
 			assertTrue(f.client.preview(1).completeScan()); assertEquals(complete.entries(), f.client.preview(1).entries()); assertEquals(5, nativeSource.visibleReads.size());
 			f.client.accept(exact); assertEquals(complete.entries(), f.client.preview(1).entries());
 		}
@@ -1236,7 +1234,7 @@ class InventoryCatalogNativeReadWiringTest {
 			f.tick(backend, 2);
 			assertEquals(InventoryS2CPacket.Status.READY, f.client.tracking(marker).status()); assertTrue(f.client.tracking(marker).complete());
 			assertEquals(InventoryS2CPacket.Status.COMPONENT_TOO_LONG, f.client.tracking(marker).entries().getFirst().quality());
-			f.repair(backend, 3, true); f.tick(backend, 3);
+			f.repair(backend, 3); f.tick(backend, 3);
 			assertEquals(LargeNative.LARGE_AMOUNT + 1, f.client.tracking(marker).entries().getFirst().count());
 			assertEquals(InventoryS2CPacket.Status.COMPONENT_TOO_LONG, f.client.tracking(marker).entries().getFirst().quality());
 		}
@@ -1284,7 +1282,7 @@ class InventoryCatalogNativeReadWiringTest {
 					var recovered = f.client.tracking(marker.id()); assertTrue(recovered.complete(), () -> recovered + " packets=" + f.since(start));
 					assertEquals(0, recovered.entries().getFirst().count()); assertEquals(InventoryS2CPacket.Status.UNCERTAIN, recovered.status());
 					assertEquals(InventoryS2CPacket.Status.UNCERTAIN, recovered.entries().getFirst().quality());
-					f.repair(backend, 10, true); f.tick(backend, 10); assertEquals(InventoryS2CPacket.Status.UNCERTAIN, f.client.tracking(marker.id()).status());
+					f.repair(backend, 10); f.tick(backend, 10); assertEquals(InventoryS2CPacket.Status.UNCERTAIN, f.client.tracking(marker.id()).status());
 				}
 			}
 			assertEquals(0, runtime.memory().retained());

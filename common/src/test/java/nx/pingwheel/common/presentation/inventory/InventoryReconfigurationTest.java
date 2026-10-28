@@ -250,7 +250,6 @@ class InventoryReconfigurationTest {
 			f.host.failOffers = true;
 			int change = f.host.packets.size();
 			f.tick(); f.tick();
-			f.handle(A, InventoryC2SPacket.resync(f.host.epoch(A), 1).stamp(100, 1));
 			assertTrue(f.host.offerAttempts >= 2, "the new OFFER is retried while its transport handoff keeps failing");
 			assertTrue(f.host.after(A, change).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW
 				|| p.kind() == InventoryS2CPacket.Kind.SNAPSHOT || p.kind() == InventoryS2CPacket.Kind.STREAM),

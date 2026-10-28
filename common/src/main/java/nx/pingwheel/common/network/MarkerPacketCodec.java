@@ -1,7 +1,6 @@
 package nx.pingwheel.common.network;
 
 import java.util.Objects;
-import java.util.Optional;
 
 import net.minecraft.network.FriendlyByteBuf;
 
@@ -259,11 +258,6 @@ public final class MarkerPacketCodec {
 
 	public static MarkerId readMarkerId(FriendlyByteBuf buf) {
 		return new MarkerId(buf.readLong());
-	}
-
-	public static void writeOptionalMarkerId(FriendlyByteBuf buf, Optional<MarkerId> markerId) {
-		buf.writeBoolean(markerId.isPresent());
-		markerId.ifPresent(id -> writeMarkerId(buf, id));
 	}
 
 	// --- anchor ---
