@@ -21,15 +21,16 @@ import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.interaction.state.TargetGoneReason;
 import nx.pingwheel.common.network.IPacket;
-import nx.pingwheel.common.network.MarkerCreateC2SPacket;
-import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
+import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.presentation.PresentationField;
+import nx.pingwheel.common.presentation.PresentationBasic;
 import nx.pingwheel.common.presentation.PresentationPropertyIntent;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.client.ClientPresentation;
+import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
 import net.minecraft.network.FriendlyByteBuf;
 import io.netty.buffer.Unpooled;
 import java.util.Map;
@@ -93,6 +94,7 @@ class ClientPingActionDispatcherTest {
 		final RecordingPacketSender sender = new RecordingPacketSender();
 		final RecordingErrorSink sink = new RecordingErrorSink();
 		final RecordingLogger logger = new RecordingLogger();
+		final ClientPresentation presentation = readyPresentation();
 		final ClientPingActionDispatcher dispatcher;
 
 		Harness() {
@@ -101,7 +103,7 @@ class ClientPingActionDispatcherTest {
 				sink,
 				logger,
 				new CreateRequestTracker(),
-				new ClientCreateRateLimiter(new ManualTime(), new ClientRateLimitPolicy(0, 0)));
+				new ClientCreateRateLimiter(new ManualTime(), new ClientRateLimitPolicy(0, 0)), presentation);
 		}
 
 		Harness(ClientPingActionDispatcher dispatcher) {
@@ -133,11 +135,13 @@ class ClientPingActionDispatcherTest {
 		assertEquals(1, h.sender.sent.size());
 		assertTrue(h.sink.messages.isEmpty());
 
-		MarkerCreateC2SPacket packet = assertInstanceOf(MarkerCreateC2SPacket.class, h.sender.sent.get(0));
+		PresentationC2SPacket packet = assertInstanceOf(PresentationC2SPacket.class, h.sender.sent.get(0));
 		assertFalse(packet.isCorrupt());
+		assertEquals(PresentationC2SPacket.Kind.CREATE, packet.kind());
+		assertEquals(h.presentation.epoch(), packet.epoch());
 		assertEquals(token.sequence(), packet.requestId());
 		assertEquals(snapshot.target(), packet.target());
-		assertEquals(selected.id(), packet.pingTypeId());
+		assertEquals(selected.id(), packet.pingType());
 	}
 
 	@Test
@@ -150,7 +154,7 @@ class ClientPingActionDispatcherTest {
 			h.sink,
 			h.logger,
 			tracker,
-			new ClientCreateRateLimiter(time, ClientRateLimitPolicy.DEFAULT));
+			new ClientCreateRateLimiter(time, ClientRateLimitPolicy.DEFAULT), h.presentation);
 		ActiveInteraction interaction = new ActiveInteraction();
 		InteractionToken token = interaction.begin();
 		CapturedPingContext context = capture(TargetSnapshotFactory.location(OVERWORLD, 1, 2, 3), token);
@@ -176,7 +180,7 @@ class ClientPingActionDispatcherTest {
 			h.sink,
 			h.logger,
 			tracker,
-			new ClientCreateRateLimiter(time, new ClientRateLimitPolicy(1, 1000)));
+			new ClientCreateRateLimiter(time, new ClientRateLimitPolicy(1, 1000)), h.presentation);
 		ActiveInteraction interaction = new ActiveInteraction();
 		PingInteractionAction.CreatePing first = createAction(interaction.begin());
 		PingInteractionAction.CreatePing blocked = createAction(interaction.begin());
@@ -201,7 +205,7 @@ class ClientPingActionDispatcherTest {
 			h.sink,
 			h.logger,
 			tracker,
-			new ClientCreateRateLimiter(time, new ClientRateLimitPolicy(1, 1000)));
+			new ClientCreateRateLimiter(time, new ClientRateLimitPolicy(1, 1000)), h.presentation);
 		ActiveInteraction interaction = new ActiveInteraction();
 		PingInteractionAction.CreatePing first = createAction(interaction.begin());
 
@@ -210,7 +214,8 @@ class ClientPingActionDispatcherTest {
 		dispatcher.dispatch(new PingInteractionAction.CancelMarker(new MarkerId(8L)));
 
 		assertEquals(2, h.sender.sent.size());
-		assertInstanceOf(MarkerRemoveC2SPacket.class, h.sender.sent.get(1));
+		assertEquals(PresentationC2SPacket.Kind.REMOVE,
+			assertInstanceOf(PresentationC2SPacket.class, h.sender.sent.get(1)).kind());
 	}
 
 	@Test
@@ -230,9 +235,9 @@ class ClientPingActionDispatcherTest {
 
 		assertEquals(2, h.sender.sent.size());
 		assertEquals(firstToken.sequence(),
-			assertInstanceOf(MarkerCreateC2SPacket.class, h.sender.sent.get(0)).requestId());
+			assertInstanceOf(PresentationC2SPacket.class, h.sender.sent.get(0)).requestId());
 		assertEquals(secondToken.sequence(),
-			assertInstanceOf(MarkerCreateC2SPacket.class, h.sender.sent.get(1)).requestId());
+			assertInstanceOf(PresentationC2SPacket.class, h.sender.sent.get(1)).requestId());
 		assertEquals(firstToken.sequence() + 1, secondToken.sequence());
 	}
 
@@ -246,8 +251,10 @@ class ClientPingActionDispatcherTest {
 		assertEquals(1, h.sender.sent.size());
 		assertTrue(h.sink.messages.isEmpty());
 
-		MarkerRemoveC2SPacket packet = assertInstanceOf(MarkerRemoveC2SPacket.class, h.sender.sent.get(0));
+		PresentationC2SPacket packet = assertInstanceOf(PresentationC2SPacket.class, h.sender.sent.get(0));
 		assertFalse(packet.isCorrupt());
+		assertEquals(PresentationC2SPacket.Kind.REMOVE, packet.kind());
+		assertEquals(h.presentation.epoch(), packet.epoch());
 		assertEquals(markerId, packet.markerId());
 	}
 
@@ -320,6 +327,47 @@ class ClientPingActionDispatcherTest {
 			context, context.resolvedTarget().targetType().defaultPingType());
 	}
 
+	private static ClientPresentation readyPresentation() {
+		var presentation = new ClientPresentation(packet -> {});
+		presentation.tick(true);
+		assertTrue(presentation.offer(PresentationS2CPacket.offer(31,
+			Map.of(PresentationBasic.ID, PresentationBasic.fields()), Map.of(PresentationBasic.ID, 1))));
+		assertTrue(presentation.reset(PresentationS2CPacket.reset(31, 1, Map.of())));
+		return presentation;
+	}
+
+	@Test
+	void unreadyAndOfferOnlyBlockCreateAndRemoveWithoutConsumingTokenOrReplacingReceipt() {
+		var sender = new RecordingPacketSender();
+		var presentation = new ClientPresentation(packet -> {});
+		var tracker = new CreateRequestTracker();
+		tracker.onCreateDispatched(CreateRequestTracker.Route.INVENTORY, 91);
+		var dispatcher = new ClientPingActionDispatcher(sender, new RecordingErrorSink(), PingInteractionLogger.noop(),
+			tracker, new ClientCreateRateLimiter(new ManualTime(), new ClientRateLimitPolicy(1, 1000)), presentation);
+		var active = new ActiveInteraction();
+		assertEquals(ClientPingActionDispatcher.DispatchOutcome.NOT_READY,
+			dispatcher.dispatchOutcome(createAction(active.begin())));
+		dispatcher.dispatch(new PingInteractionAction.CancelMarker(new MarkerId(8)));
+		assertTrue(sender.sent.isEmpty());
+		assertTrue(tracker.isLatest(CreateRequestTracker.Route.INVENTORY, 91));
+
+		presentation.tick(true);
+		assertTrue(presentation.offer(PresentationS2CPacket.offer(31,
+			Map.of(PresentationBasic.ID, PresentationBasic.fields()), Map.of(PresentationBasic.ID, 1))));
+		assertEquals(ClientPingActionDispatcher.DispatchOutcome.NOT_READY,
+			dispatcher.dispatchOutcome(createAction(active.begin())));
+		dispatcher.dispatch(new PingInteractionAction.CancelMarker(new MarkerId(8)));
+		assertTrue(sender.sent.isEmpty());
+		assertTrue(tracker.isLatest(CreateRequestTracker.Route.INVENTORY, 91));
+
+		assertTrue(presentation.reset(PresentationS2CPacket.reset(31, 1, Map.of())));
+		var readyAction = createAction(active.begin());
+		assertEquals(ClientPingActionDispatcher.DispatchOutcome.CREATE_SENT, dispatcher.dispatchOutcome(readyAction),
+			"neither unready attempt may consume the first create allowance");
+		assertTrue(tracker.isLatest(readyAction.context().token().sequence()));
+		assertEquals(1, sender.sent.size());
+	}
+
 	@Test
 	void programmaticPropertyCreateUsesFrozenTargetAndActualTypedWire() {
 		Harness h = harness();
@@ -331,8 +379,9 @@ class ClientPingActionDispatcherTest {
 			Map.of(ClientPresentation.BASIC, 1))));
 		assertTrue(presentation.reset(PresentationS2CPacket.reset(31L, 1L,
 			Map.of("location", Map.of(ClientPresentation.BASIC, Set.of("minecraft:block.state"))))));
+		var tracker = new CreateRequestTracker();
 		var dispatcher = new ClientPingActionDispatcher(h.sender, h.sink, h.logger,
-			new CreateRequestTracker(), new ClientCreateRateLimiter(new ManualTime(), new ClientRateLimitPolicy(0, 0)),
+			tracker, new ClientCreateRateLimiter(new ManualTime(), new ClientRateLimitPolicy(3, 1000)),
 			presentation);
 		var action = createAction(new ActiveInteraction().begin());
 		var ref = new PresentationPropertyRef(ClientPresentation.BASIC, "minecraft:block.state",
@@ -356,8 +405,39 @@ class ClientPingActionDispatcherTest {
 		denies.put("location", List.of(ref));
 		assertTrue(presentation.reset(PresentationS2CPacket.reset(31L, 2L,
 			Map.of("location", Map.of(ClientPresentation.BASIC, Set.of("minecraft:block.state"))), denies)));
+		tracker.onCreateDispatched(CreateRequestTracker.Route.INVENTORY, 91);
 		assertEquals(ClientPingActionDispatcher.DispatchOutcome.NOT_READY, dispatcher.dispatchOutcome(action, List.of(property)));
 		assertEquals(3, h.sender.sent.size(), "revocation recheck sends no create and never silently sends a plain fallback");
+		assertTrue(tracker.isLatest(CreateRequestTracker.Route.INVENTORY, 91));
+		assertEquals(ClientPingActionDispatcher.DispatchOutcome.CREATE_SENT,
+			dispatcher.dispatchOutcome(createAction(new ActiveInteraction().begin())),
+			"denied properties must not consume the remaining create allowance");
+	}
+
+	@Test
+	void inventorySelectRequiresReadyMatchingSessionBeforeConsumingCreateAllowance() {
+		var sender = new RecordingPacketSender();
+		var presentation = new ClientPresentation(packet -> {});
+		var tracker = new CreateRequestTracker();
+		tracker.onCreateDispatched(CreateRequestTracker.Route.PRESENTATION, 42);
+		var dispatcher = new ClientPingActionDispatcher(sender, new RecordingErrorSink(), PingInteractionLogger.noop(),
+			tracker, new ClientCreateRateLimiter(new ManualTime(), new ClientRateLimitPolicy(1, 1000)), presentation);
+		var select = InventoryC2SPacket.select(7, 31, 1, 55, 3, 1, 1, "entry", "attention");
+		assertEquals(ClientInventory.DispatchOutcome.NOT_READY, dispatcher.dispatchInventory(select));
+		presentation.tick(true);
+		assertTrue(presentation.offer(PresentationS2CPacket.offer(31,
+			Map.of(PresentationBasic.ID, PresentationBasic.fields()), Map.of(PresentationBasic.ID, 1))));
+		assertEquals(ClientInventory.DispatchOutcome.NOT_READY, dispatcher.dispatchInventory(select));
+		assertTrue(presentation.reset(PresentationS2CPacket.reset(31, 1, Map.of())));
+		assertEquals(ClientInventory.DispatchOutcome.NOT_READY, dispatcher.dispatchInventory(
+			InventoryC2SPacket.select(7, 32, 1, 55, 3, 1, 1, "entry", "attention")));
+		assertEquals(ClientInventory.DispatchOutcome.NOT_READY, dispatcher.dispatchInventory(
+			InventoryC2SPacket.select(7, 31, 2, 55, 3, 1, 1, "entry", "attention")));
+		assertTrue(sender.sent.isEmpty());
+		assertTrue(tracker.isLatest(CreateRequestTracker.Route.PRESENTATION, 42));
+		assertEquals(ClientInventory.DispatchOutcome.SENT, dispatcher.dispatchInventory(select));
+		assertEquals(List.of(select), sender.sent);
+		assertTrue(tracker.isLatest(CreateRequestTracker.Route.INVENTORY, 55));
 	}
 
 	private static final class ManualTime implements InteractionTimeSource {

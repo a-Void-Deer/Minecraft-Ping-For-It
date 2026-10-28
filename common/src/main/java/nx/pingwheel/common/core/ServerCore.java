@@ -8,7 +8,6 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
-import net.minecraft.world.level.Level;
 import nx.pingwheel.common.config.ChannelMode;
 import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
@@ -28,22 +27,12 @@ import nx.pingwheel.common.marker.MarkerRejectReason;
 import nx.pingwheel.common.marker.MarkerRemoval;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
 import nx.pingwheel.common.marker.MarkerRequestKind;
-import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.MarkerWinnerChange;
 import nx.pingwheel.common.marker.MinecraftAuthoritativeTargetValidator;
 import nx.pingwheel.common.marker.ServerMarker;
 import nx.pingwheel.common.marker.ServerMarkerStore;
 import nx.pingwheel.common.name.MinecraftTargetNameResolver;
-import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.network.InventoryC2SPacket;
-import nx.pingwheel.common.network.MarkerCreateC2SPacket;
-import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
-import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
-import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
-import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
-import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
-import nx.pingwheel.common.network.PingLocationC2SPacket;
-import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
 import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
@@ -59,13 +48,13 @@ import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
-import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import nx.pingwheel.common.util.RateLimiter;
 import nx.pingwheel.common.util.RateLimitedDiagnostics;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -74,7 +63,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
-import static nx.pingwheel.common.Global.CLIENT_COMMAND_ROOT;
 import static nx.pingwheel.common.Global.LOGGER;
 import static nx.pingwheel.common.Global.MOD_PREFIX;
 import static nx.pingwheel.common.Global.MOD_VERSION;
@@ -88,7 +76,6 @@ public class ServerCore {
 	private static final ServerConfig SERVER_CONFIG = ServerConfig.HANDLER.getConfig();
 	private static final HashMap<UUID, String> PLAYER_CHANNELS = new HashMap<>();
 	private static final HashMap<UUID, RateLimiter> PLAYER_RATES = new HashMap<>();
-	private static final SyncDurationPolicyTracker SYNC_DURATION_POLICY = new SyncDurationPolicyTracker();
 
 	/**
 	 * Monotonic in-memory revision of the presentation policy rule view. It
@@ -143,7 +130,6 @@ public class ServerCore {
 
 		MARKER_STORE = new ServerMarkerStore(new MarkerIdSource());
 		ACTIVE_SERVER = null;
-		SYNC_DURATION_POLICY.reset();
 		PRESENTATION_POLICY_REVISION.set(0L);
 	}
 
@@ -167,7 +153,6 @@ public class ServerCore {
 			releaseExternalMarkers(ACTIVE_SERVER, MARKER_STORE.allMarkers());
 			MARKER_STORE.clear();
 			ExternalBlockServerProviders.close(ACTIVE_SERVER);
-			SYNC_DURATION_POLICY.reset();
 			PRESENTATION_POLICY_REVISION.set(0L);
 		}
 
@@ -232,13 +217,6 @@ public class ServerCore {
 		IPlatformNetworkService.INSTANCE.sendToClient(
 			new RateLimitPolicyS2CPacket(SERVER_CONFIG.getRateLimit(), SERVER_CONFIG.getMsToRegenerate()),
 			player);
-		if (SYNC_DURATION_POLICY.claimInitialSync(player.getUUID())) {
-			int syncDuration = SERVER_CONFIG.getSyncDuration();
-			IPlatformNetworkService.INSTANCE.sendToClient(
-				new SyncDurationPolicyS2CPacket(syncDuration),
-				player);
-			SYNC_DURATION_POLICY.recordBroadcast(syncDuration);
-		}
 		LOGGER.debug("sent rate limit policy");
 	}
 
@@ -263,33 +241,6 @@ public class ServerCore {
 		}
 
 		LOGGER.debug("broadcast rate limit policy");
-	}
-
-	/**
-	 * Broadcasts the current marker-duration policy after an effective server
-	 * configuration update.  Marker expiry timestamps are still frozen when a
-	 * marker is created; this only updates the policy used by future markers and
-	 * the client-side policy mirror.
-	 */
-	public static void broadcastSyncDurationPolicy() {
-		MinecraftServer server = ACTIVE_SERVER;
-
-		if (server == null) {
-			return;
-		}
-
-		int syncDuration = SERVER_CONFIG.getSyncDuration();
-		if (!SYNC_DURATION_POLICY.needsBroadcast(syncDuration)) {
-			return;
-		}
-
-		var packet = new SyncDurationPolicyS2CPacket(syncDuration);
-		for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-			IPlatformNetworkService.INSTANCE.sendToClient(packet, player);
-		}
-		SYNC_DURATION_POLICY.recordBroadcast(syncDuration);
-
-		LOGGER.debug("broadcast sync duration policy");
 	}
 
 	/**
@@ -512,85 +463,6 @@ public class ServerCore {
 			player);
 	}
 
-	public static void onPingLocation(MinecraftServer server, ServerPlayer player, PingLocationC2SPacket packet) {
-		if (packet.isCorrupt()) {
-			LOGGER.warn(() -> "invalid ping location from %s (%s)".formatted(player.getGameProfile().getName(), player.getUUID()));
-			player.displayClientMessage(Component.literal("§8" + MOD_PREFIX + "§cUnable to send ping\n§fMake sure your version matches the server's version: §d" + MOD_VERSION), false);
-			return;
-		}
-
-		PLAYER_RATES.putIfAbsent(player.getUUID(), new RateLimiter());
-		final var rateLimiter = PLAYER_RATES.get(player.getUUID());
-
-		if (SERVER_CONFIG.getRateLimit() > 0 && rateLimiter.checkExceeded()) {
-			return;
-		}
-		
-		final var channel = packet.channel();
-		final var defaultChannelMode = SERVER_CONFIG.getDefaultChannelMode();
-
-		if (channel.isEmpty() && defaultChannelMode == ChannelMode.DISABLED) {
-			player.displayClientMessage(Component.literal("§8" + MOD_PREFIX + "§eMust be in a channel to ping location\n§fUse §a/" + CLIENT_COMMAND_ROOT + " channel§f to switch"), false);
-			return;
-		}
-
-		if (channel.isEmpty() && defaultChannelMode == ChannelMode.TEAM_ONLY && !TeamContextHandler.hasTeam(player)) {
-			player.displayClientMessage(Component.literal("§8" + MOD_PREFIX + "§eMust be in a team or channel to ping location\n§fUse §a/" + CLIENT_COMMAND_ROOT + " channel§f to switch"), false);
-			return;
-		}
-
-		if (!channel.equals(PLAYER_CHANNELS.getOrDefault(player.getUUID(), ""))) {
-			updatePlayerChannel(player, channel);
-		}
-
-		PingLocationS2CPacket packetOut;
-		final var playerList = server.getPlayerList();
-
-		if (!SERVER_CONFIG.isPlayerTrackingEnabled() && targetEntityIsPlayer(packet, playerList)) {
-			packetOut = new PingLocationS2CPacket(packet.channel(), packet.pos(), null, packet.sequence(), packet.dimension(), player.getUUID());
-		} else {
-			packetOut = PingLocationS2CPacket.fromClientPacket(packet, player.getUUID());
-		}
-
-		for (ServerPlayer p : playerList.getPlayers()) {
-			if (!channel.equals(PLAYER_CHANNELS.getOrDefault(p.getUUID(), ""))) {
-				continue;
-			}
-
-			if (channel.isEmpty() && defaultChannelMode != ChannelMode.GLOBAL && !TeamContextHandler.inSameContext(player, p)) {
-				continue;
-			}
-
-			IPlatformNetworkService.INSTANCE.sendToClient(packetOut, p);
-		}
-	}
-
-	private static boolean targetEntityIsPlayer(PingLocationC2SPacket packet, PlayerList playerList) {
-		final var playerUUID = packet.entity();
-
-		if (playerUUID == null) {
-			return false;
-		}
-
-		return playerList.getPlayer(playerUUID) != null;
-	}
-
-	/**
-	 * Handles an authoritative marker creation request.
-	 *
-	 * <p>The packet carries no channel: the server-stored channel of the
-	 * requester is authoritative. Corrupt requests, rate-limited requests, and
-	 * requests blocked by the DISABLED/TEAM_ONLY channel modes are rejected
-	 * with the corresponding reason; the recipient list is derived with the
-	 * same channel/team filtering as the legacy location ping and snapshotted
-	 * before creation, so later channel switches cannot change the audience.
-	 * The marker lifetime uses the server tick arrival time and the configured
-	 * server-authoritative duration.
-	 */
-	public static void onMarkerCreate(MinecraftServer server, ServerPlayer player, MarkerCreateC2SPacket packet) {
-		// Marker creation now requires the new negotiated route and session epoch.
-	}
-
 	public static void onInventoryPacket(MinecraftServer server, ServerPlayer player, InventoryC2SPacket packet) {
 		if (server == null || player == null || !server.isSameThread() || player.serverLevel().getServer() != server) return;
 		ensureMarkerStore(server);
@@ -618,8 +490,20 @@ public class ServerCore {
 		PresentationServer.preview(server, player, packet);
 	}
 
+	/**
+	 * Adjudicates an authoritative create admitted by the presentation session.
+	 *
+	 * <p>The intent carries no channel: the requester's server-stored channel is
+	 * authoritative. Invalid arguments, rate-limited requests, and requests
+	 * blocked by DISABLED/TEAM_ONLY channel modes receive the corresponding
+	 * rejection. After the channel gate, recipients are snapshotted using the
+	 * stored channel and current team context before target and property
+	 * validation, so later channel switches cannot change the audience.
+	 * The marker lifetime uses the server tick arrival time and the configured
+	 * server-authoritative duration.
+	 */
 	private static void onMarkerCreate(MinecraftServer server, ServerPlayer player, long requestId,
-		Target requestedTarget, String requestedPingType, List<PresentationPropertyIntent> properties) {
+		@Nullable Target requestedTarget, @Nullable String requestedPingType, List<PresentationPropertyIntent> properties) {
 		ensureMarkerStore(server);
 
 		if (requestedTarget == null || requestedPingType == null || requestedPingType.isBlank() || requestId < 0L) {
@@ -689,16 +573,6 @@ public class ServerCore {
 		sendPresentationWinnerChanges(playerList, creation.winnerChanges(), null);
 	}
 
-	/**
-	 * Handles a marker removal request. Ownership is never trusted: the store
-	 * performs the ownership check, and only an owned, active marker is
-	 * removed (reason {@link MarkerRemovalReason#CANCELLED}). Removal is not
-	 * rate-limited, matching the established legacy convention.
-	 */
-	public static void onMarkerRemove(MinecraftServer server, ServerPlayer player, MarkerRemoveC2SPacket packet) {
-		// This legacy ingress is disabled; the negotiated presentation route calls the private adjudicator.
-	}
-
 	/** Immediate dedicated create; no queued retry, SECTION intent or client-supplied audience. */
 	public static InventoryBackend.Created createInventory(MinecraftServer server, ServerPlayer player,
 		InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
@@ -747,7 +621,12 @@ public class ServerCore {
 		}
 	}
 
-	private static void onMarkerRemove(MinecraftServer server, ServerPlayer player, MarkerId requestedMarkerId) {
+	/**
+	 * Adjudicates a marker removal admitted by the presentation session. The
+	 * store checks ownership and removes only an owned, active marker with
+	 * reason {@link MarkerRemovalReason#CANCELLED}. Removal is not rate-limited.
+	 */
+	private static void onMarkerRemove(MinecraftServer server, ServerPlayer player, @Nullable MarkerId requestedMarkerId) {
 		ensureMarkerStore(server);
 		if (requestedMarkerId == null) {
 			final long requestId = 0L;
@@ -824,7 +703,7 @@ public class ServerCore {
 	}
 
 	/**
-	 * Cleans up the disconnecting player's markers before the legacy channel
+	 * Cleans up the disconnecting player's markers before the channel
 	 * and rate-limit cleanup: owned markers are removed with reason
 	 * {@link MarkerRemovalReason#OWNER_DISCONNECTED} and synchronized to the
 	 * still online recipients, then the disconnected player is forgotten as a
@@ -865,7 +744,6 @@ public class ServerCore {
 
 		PLAYER_CHANNELS.remove(player.getUUID());
 		PLAYER_RATES.remove(player.getUUID());
-		SYNC_DURATION_POLICY.forget(player.getUUID());
 		PresentationServer.disconnect(player.getUUID());
 		InventoryServer.disconnect(player.getUUID());
 	}
@@ -968,11 +846,10 @@ public class ServerCore {
 	}
 
 	/**
-	 * Snapshots the recipient list for a marker creation using the exact
-	 * channel/team filtering of the legacy location ping, plus the creator
-	 * (who always satisfies the filtering they just passed). The returned list
-	 * is immutable, so channel switches after creation cannot change the
-	 * marker's audience.
+	 * Snapshots the recipient list for a marker creation: always the creator,
+	 * plus players with the exact same stored channel. An empty, non-GLOBAL
+	 * channel also requires the same team context. The returned list is
+	 * immutable, so channel switches after creation cannot change the audience.
 	 */
 	private static List<UUID> snapshotRecipients(
 		PlayerList playerList, ServerPlayer creator, String channel, ChannelMode defaultChannelMode
@@ -997,73 +874,6 @@ public class ServerCore {
 		return recipients.stream().distinct().toList();
 	}
 
-	/**
-	 * Sends a creation packet carrying {@code marker}'s snapshot, the
-	 * validator's authoritative target name, and the creator's authoritative
-	 * profile name to every recipient of {@code marker} that is currently
-	 * online. Recipients that logged out since the marker was created are
-	 * skipped; the stored snapshot remains authoritative.
-	 */
-	private static void sendMarkerCreated(
-		PlayerList playerList, ServerMarker marker, TargetNameJson targetName, String ownerName
-	) {
-		final var packet = new MarkerCreatedS2CPacket(MarkerSnapshot.from(marker), targetName, ownerName);
-
-		if (packet.isCorrupt()) {
-			LOGGER.debug(() -> "marker created packet skipped: markerId=%d reason=invalid_authoritative_fields"
-				.formatted(marker.id().value()));
-			return;
-		}
-
-		for (final var recipientId : marker.recipients()) {
-			final var recipient = playerList.getPlayer(recipientId);
-
-			if (recipient != null) {
-				IPlatformNetworkService.INSTANCE.sendToClient(packet, recipient);
-			}
-		}
-	}
-
-	/**
-	 * Sends a removal packet for {@code removal.marker()} to every online
-	 * recipient, skipping the optional {@code excluded} session (used during
-	 * disconnect cleanup).
-	 */
-	private static void sendMarkerRemoved(PlayerList playerList, MarkerRemoval removal, UUID excluded) {
-		final var packet = new MarkerRemovedS2CPacket(removal.marker().id(), removal.reason());
-
-		for (final var recipientId : removal.marker().recipients()) {
-			if (excluded != null && excluded.equals(recipientId)) {
-				continue;
-			}
-
-			final var recipient = playerList.getPlayer(recipientId);
-
-			if (recipient != null) {
-				IPlatformNetworkService.INSTANCE.sendToClient(packet, recipient);
-			}
-		}
-	}
-
-	/**
-	 * Sends one winner-change packet per change to the affected online
-	 * recipient, skipping the optional {@code excluded} session.
-	 */
-	private static void sendWinnerChanges(PlayerList playerList, List<MarkerWinnerChange> changes, UUID excluded) {
-		for (final var change : changes) {
-			if (excluded != null && excluded.equals(change.recipientId())) {
-				continue;
-			}
-
-			final var recipient = playerList.getPlayer(change.recipientId());
-
-			if (recipient != null) {
-				IPlatformNetworkService.INSTANCE.sendToClient(
-					new MarkerWinnerChangedS2CPacket(change.targetKey(), change.currentWinner()), recipient);
-			}
-		}
-	}
-
 	private static void sendPresentationRemoved(PlayerList playerList, MarkerRemoval removal, UUID excluded) {
 		for (UUID recipientId : removal.marker().recipients()) {
 			if (excluded != null && excluded.equals(recipientId)) continue;
@@ -1078,17 +888,6 @@ public class ServerCore {
 			ServerPlayer recipient = playerList.getPlayer(change.recipientId());
 			if (recipient != null) PresentationServer.winner(recipient, change.targetKey(), change.currentWinner());
 		}
-	}
-
-	/**
-	 * Sends a rejection for one request to its creator. The creator just sent
-	 * the request, so they are online by definition.
-	 */
-	private static void sendReject(
-		ServerPlayer player, long requestId, MarkerRequestKind requestKind, MarkerRejectReason reason
-	) {
-		IPlatformNetworkService.INSTANCE.sendToClient(
-			new MarkerRejectedS2CPacket(requestId, requestKind, reason), player);
 	}
 
 	private static void updatePlayerChannel(ServerPlayer player, String channel) {

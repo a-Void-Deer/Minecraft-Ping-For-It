@@ -9,14 +9,20 @@ import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
-import nx.pingwheel.common.interaction.state.InteractionTimeSource;
+import nx.pingwheel.common.interaction.ActiveInteraction;
+import nx.pingwheel.common.interaction.CapturedPingContext;
+import nx.pingwheel.common.interaction.TargetSnapshotFactory;
+import nx.pingwheel.common.interaction.state.PingInteractionAction;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerRejectReason;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
+import nx.pingwheel.common.marker.MarkerRequestKind;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.network.*;
 import nx.pingwheel.common.presentation.*;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.resolve.DefaultTargetResolver;
+import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -27,7 +33,7 @@ class InventoryDispatchIntegrationTest {
 		final ClientInventory inventory = new ClientInventory(sent::add);
 		final ClientPingRuntime runtime = ClientPingRuntime.create((key, color) -> errors.add(key), packet -> {
 			if (fail && packet instanceof InventoryC2SPacket) throw new IllegalStateException("transport"); sent.add(packet);
-		}, new ClientRateLimitPolicy(1, 1000), () -> 0, marker -> 100, true, new ClientPingRuntime.PresentationReceiptFeedback() {
+		}, new ClientRateLimitPolicy(1, 1000), () -> 0, marker -> 100, new ClientPingRuntime.PresentationReceiptFeedback() {
 			@Override public void play(MarkerSnapshot snapshot) {}
 			@Override public void chat(String owner, MarkerSnapshot snapshot, net.minecraft.network.chat.Component name) {}
 		});
@@ -47,6 +53,28 @@ class InventoryDispatchIntegrationTest {
 			return inventory.selectable(request).getFirst();
 		}
 		static InventoryS2CPacket.Entry entry() { return new InventoryS2CPacket.Entry("opaque", "minecraft:stone", "Stone", null, 7, 1, false, null); }
+	}
+	private static PingInteractionAction.CreatePing ordinaryCreate() {
+		var snapshot = TargetSnapshotFactory.block(TARGET.dimensionId(), TARGET.x(), TARGET.y(), TARGET.z(), TARGET.blockRegistryId(), true, BlockFace.WEST);
+		var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.noop()).resolve(snapshot.target(), snapshot.matchContext());
+		return new PingInteractionAction.CreatePing(new CapturedPingContext(new ActiveInteraction().begin(), resolved), resolved.targetType().defaultPingType());
+	}
+	@Test void ordinaryCreateConsumesTheSameSingleAllowanceAsInventorySelect() {
+		Fixture f = new Fixture(); var reference = f.preview();
+		f.runtime.dispatchPropertyPing(ordinaryCreate(), List.of());
+		assertEquals(1, f.sent.stream().filter(p -> p instanceof PresentationC2SPacket c && c.kind() == PresentationC2SPacket.Kind.CREATE).count());
+		assertEquals(ClientInventory.DispatchOutcome.THROTTLED, f.runtime.dispatchInventory(reference, "attention"));
+		assertEquals(0, f.sent.stream().filter(p -> p instanceof InventoryC2SPacket i && i.kind() == InventoryC2SPacket.Kind.SELECT).count());
+	}
+	@Test void inventorySelectConsumesTheSameSingleAllowanceAsOrdinaryCreate() {
+		Fixture f = new Fixture(); var reference = f.preview(); var create = ordinaryCreate();
+		assertEquals(ClientInventory.DispatchOutcome.SENT, f.runtime.dispatchInventory(reference, "attention"));
+		f.runtime.dispatchPropertyPing(create, List.of());
+		assertEquals(1, f.sent.stream().filter(p -> p instanceof InventoryC2SPacket i && i.kind() == InventoryC2SPacket.Kind.SELECT).count());
+		assertEquals(0, f.sent.stream().filter(p -> p instanceof PresentationC2SPacket c && c.kind() == PresentationC2SPacket.Kind.CREATE).count(),
+			"at a fixed clock the sole allowance belongs to SELECT, so the later ordinary create must be dropped");
+		f.runtime.handleRejected(create.context().token().sequence(), MarkerRequestKind.CREATE, MarkerRejectReason.TARGET_GONE);
+		assertTrue(f.errors.isEmpty(), "the throttled ordinary create must not overwrite the inventory receipt");
 	}
 	@Test void actualSendAndCourtesyLimiterAreSingleUseAndCorrelatedRejectionOnlySurfacesOnce() {
 		Fixture f = new Fixture(); var first = f.preview(); assertEquals(ClientInventory.DispatchOutcome.SENT, f.runtime.dispatchInventory(first, "danger"));

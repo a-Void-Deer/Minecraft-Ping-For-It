@@ -58,7 +58,6 @@ public class ServerConfig implements IConfig {
 	public void onUpdate() {
 		ServerCore.init();
 		ServerCore.broadcastRateLimitPolicy();
-		ServerCore.broadcastSyncDurationPolicy();
 	}
 
 	public static final ConfigHandler<ServerConfig> HANDLER = ConfigHandler.of(ServerConfig.class, ".server.json");

@@ -15,7 +15,6 @@ import java.util.Map;
 import nx.pingwheel.common.client.ClientPingRuntime;
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
 import nx.pingwheel.common.client.SelectionToggleNoticeState;
-import nx.pingwheel.common.client.duration.ClientSyncDurationPolicy;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
 import nx.pingwheel.common.client.outline.BlockModelOutlineState;
@@ -41,17 +40,11 @@ import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.interaction.MinecraftEntityTargetAdapter;
 import nx.pingwheel.common.name.ClientTargetNameDecoder;
 import nx.pingwheel.common.network.InventoryS2CPacket;
-import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
-import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
-import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
-import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
-import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
 import nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket;
-import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.presentation.ServerPresentationPolicyService.Operation;
 import nx.pingwheel.common.presentation.client.ServerPresentationPolicyState;
@@ -67,6 +60,7 @@ import nx.pingwheel.common.render.SelectionToggleNoticeRenderer;
 import nx.pingwheel.common.render.WorldRenderContext;
 import nx.pingwheel.common.screen.SettingsScreen;
 import nx.pingwheel.common.util.InputUtils;
+import org.jetbrains.annotations.Nullable;
 
 import static nx.pingwheel.common.Global.LOGGER;
 import static nx.pingwheel.common.util.InputUtils.KEY_BINDING_PING;
@@ -77,9 +71,8 @@ public class CommonClient {
 	public static final CommonClient INSTANCE = new CommonClient();
 	public static Minecraft Game = null;
 
-	private static ClientPingRuntime pingRuntime;
+	private static @Nullable ClientPingRuntime pingRuntime;
 	private static ClientRateLimitPolicy storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
-	private static ClientSyncDurationPolicy storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
 	private static final InteractionTimeSource INTERACTION_TIME_SOURCE = InteractionTimeSource.system();
 	private static final ServerPresentationPolicyState SERVER_PRESENTATION_POLICY_STATE =
 		new ServerPresentationPolicyState(
@@ -91,7 +84,7 @@ public class CommonClient {
 	 * dropped on leave so no channel, entry metadata or unknown-baseline buffer
 	 * can leak across connections; null while not connected.
 	 */
-	private static ClientInventory inventory;
+	private static @Nullable ClientInventory inventory;
 
 	/** Runs the registered entity-outline sources over the production registry. */
 	private static final EntityOutlineRunner ENTITY_OUTLINE_RUNNER =
@@ -124,7 +117,6 @@ public class CommonClient {
 		// already exists; otherwise onTickStart creates it lazily once the
 		// world is in.
 		storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
-		storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
 		pingRuntime = createPingRuntimeIfInWorld();
 		inventory = new ClientInventory(IPlatformNetworkService.INSTANCE::sendToServer);
 		if (pingRuntime != null) pingRuntime.inventory(inventory);
@@ -147,7 +139,6 @@ public class CommonClient {
 
 		pingRuntime = null;
 		storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
-		storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
 		if (inventory != null) {
 			inventory.reset();
 			inventory = null;
@@ -639,51 +630,6 @@ public class CommonClient {
 		return pingRuntime;
 	}
 
-	/**
-	 * Legacy S2C ping location handler.
-	 *
-	 * <p>Ping locations of the original protocol are no longer rendered: all
-	 * ping state now arrives as authoritative marker packets (Phase 7). The
-	 * handler stays registered so legacy servers keep receiving the channel
-	 * handshake, but valid legacy packets are ignored without touching any
-	 * client state; corrupt packets are warned about exactly like before.
-	 */
-	public void onPingLocationPacket(PingLocationS2CPacket packet) {
-		if (packet.isCorrupt()) {
-			LOGGER.warn("received invalid ping location from server");
-			return;
-		}
-
-		LOGGER.debug("ignoring legacy ping location packet");
-	}
-
-	/**
-	 * Marker S2C handlers (Phase 6/7).
-	 *
-	 * <p>The loader network services invoke every handler below on the client
-	 * main thread, so the phase-7 {@link ClientPingRuntime} applies each
-	 * authoritative mutation directly to its main-thread-confined marker
-	 * store. A corrupt packet or a runtime that does not exist (not in a
-	 * world) is dropped safely. Detailed optional-render diagnostics may carry
-	 * complete target, component, payload, and exception data under their own
-	 * rate control.
-	 */
-	public void onMarkerCreatedPacket(MarkerCreatedS2CPacket packet) {
-		// Old packet IDs cannot supply the negotiated epoch/Basic name policy.
-	}
-
-	public void onMarkerRemovedPacket(MarkerRemovedS2CPacket packet) {
-		// Legacy marker route is disabled in the upgraded protocol.
-	}
-
-	public void onMarkerRejectedPacket(MarkerRejectedS2CPacket packet) {
-		// Legacy marker route is disabled in the upgraded protocol.
-	}
-
-	public void onMarkerWinnerChangedPacket(MarkerWinnerChangedS2CPacket packet) {
-		// Legacy marker route is disabled in the upgraded protocol.
-	}
-
 	public void onPresentationPacket(PresentationS2CPacket packet) {
 		if (pingRuntime != null) pingRuntime.onPresentationPacket(packet);
 	}
@@ -735,29 +681,6 @@ public class CommonClient {
 		}
 
 		LOGGER.debug("client rate limit policy changed");
-	}
-
-	/**
-	 * Applies the latest valid server duration policy to the connection-scoped
-	 * client model. Follow-server display behavior still uses each marker's
-	 * frozen arrival/expiry payload, while custom local display durations are
-	 * selected when each marker is received.
-	 */
-	public void onSyncDurationPolicyPacket(SyncDurationPolicyS2CPacket packet) {
-		if (packet.isCorrupt()) {
-			return;
-		}
-
-		storedSyncDurationPolicy = new ClientSyncDurationPolicy(packet.syncDuration());
-	}
-
-	/**
-	 * Returns the latest valid server duration policy for client-facing state.
-	 * Marker lifetimes in follow-server mode still use each marker snapshot's
-	 * frozen duration rather than this connection-level value.
-	 */
-	public ClientSyncDurationPolicy getSyncDurationPolicy() {
-		return storedSyncDurationPolicy;
 	}
 
 	/**
@@ -846,7 +769,7 @@ public class CommonClient {
 	 * {@code null} otherwise so a menu state (including the post-leave main
 	 * menu) never creates or recreates a runtime.
 	 */
-	private static ClientPingRuntime createPingRuntimeIfInWorld() {
+	private static @Nullable ClientPingRuntime createPingRuntimeIfInWorld() {
 		if (Game == null || Game.level == null || Game.player == null) {
 			return null;
 		}
@@ -859,7 +782,6 @@ public class CommonClient {
 			new MinecraftLocalErrorSink(),
 			IPlatformNetworkService.INSTANCE::sendToServer,
 			storedRateLimitPolicy,
-			INTERACTION_TIME_SOURCE,
-			true);
+			INTERACTION_TIME_SOURCE);
 	}
 }

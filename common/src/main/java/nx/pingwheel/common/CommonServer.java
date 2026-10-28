@@ -6,11 +6,8 @@ import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.core.ServerCore;
 import nx.pingwheel.common.integration.ModContext;
 import nx.pingwheel.common.network.InventoryC2SPacket;
-import nx.pingwheel.common.network.MarkerCreateC2SPacket;
-import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
-import nx.pingwheel.common.network.PingLocationC2SPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
 import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
@@ -46,20 +43,8 @@ public class CommonServer {
 		}
 	}
 
-	public void onPingLocationPacket(MinecraftServer server, ServerPlayer player, PingLocationC2SPacket packet) {
-		ServerCore.onPingLocation(server, player, packet);
-	}
-
 	public void onChannelUpdatePacket(MinecraftServer server, ServerPlayer player, UpdateChannelC2SPacket packet) {
 		ServerCore.onChannelUpdate(player, packet);
-	}
-
-	public void onMarkerCreatePacket(MinecraftServer server, ServerPlayer player, MarkerCreateC2SPacket packet) {
-		// New authoritative marker requests require the negotiated v2 session.
-	}
-
-	public void onMarkerRemovePacket(MinecraftServer server, ServerPlayer player, MarkerRemoveC2SPacket packet) {
-		// New authoritative marker requests require the negotiated v2 session.
 	}
 
 	public void onPresentationPacket(MinecraftServer server, ServerPlayer player, PresentationC2SPacket packet) {

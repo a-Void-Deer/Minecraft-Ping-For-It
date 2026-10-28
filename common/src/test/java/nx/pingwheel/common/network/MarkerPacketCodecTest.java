@@ -5,6 +5,7 @@ import net.minecraft.network.FriendlyByteBuf;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -18,9 +19,13 @@ import nx.pingwheel.common.marker.MarkerRemovalReason;
 import nx.pingwheel.common.marker.MarkerRequestKind;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
-import nx.pingwheel.common.name.TargetNameJson;
+import nx.pingwheel.common.presentation.PresentationPropertyRef;
+import nx.pingwheel.common.presentation.PresentationSection;
+import nx.pingwheel.common.presentation.PresentationValue;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class MarkerPacketCodecTest {
@@ -123,64 +128,12 @@ class MarkerPacketCodecTest {
 	}
 
 	@Test
-	void optionalMarkerIdRoundTripsPresentAndEmpty() {
-		var present = new MarkerId(123L);
-
-		var buf = buffer();
-		MarkerPacketCodec.writeOptionalMarkerId(buf, Optional.of(present));
-		MarkerPacketCodec.writeOptionalMarkerId(buf, Optional.empty());
-
-		assertEquals(Optional.of(present), MarkerPacketCodec.readOptionalMarkerId(buf));
-		assertEquals(Optional.empty(), MarkerPacketCodec.readOptionalMarkerId(buf));
-	}
-
-	@Test
 	void anchorRoundTrips() {
 		var anchor = new MarkerAnchor(0.5, -1.25, 100_000.75);
 
 		var buf = buffer();
 		MarkerPacketCodec.writeMarkerAnchor(buf, anchor);
 		assertEquals(anchor, MarkerPacketCodec.readMarkerAnchor(buf));
-	}
-
-	@Test
-	void targetNameJsonRoundTrips() {
-		var name = new TargetNameJson("{\"translate\":\"僵尸.类型\"}");
-
-		var buf = buffer();
-		MarkerPacketCodec.writeTargetNameJson(buf, name);
-
-		assertEquals(name, MarkerPacketCodec.readTargetNameJson(buf));
-		assertEquals(0, buf.readableBytes());
-	}
-
-	@Test
-	void targetNameJsonAcceptsExactlyMaxLengthOnWriteAndRead() {
-		// {"text":" ... "} wrapper is exactly 11 characters.
-		String json = "{\"text\":\"" + "x".repeat(MarkerPacketCodec.MAX_NAME_LENGTH - 11) + "\"}";
-
-		var buf = buffer();
-		MarkerPacketCodec.writeTargetNameJson(buf, new TargetNameJson(json));
-
-		assertEquals(json, MarkerPacketCodec.readTargetNameJson(buf).value());
-	}
-
-	@Test
-	void targetNameJsonRejectsBlankOnRead() {
-		var buf = buffer();
-		buf.writeUtf(" ");
-
-		assertThrows(IllegalArgumentException.class, () -> MarkerPacketCodec.readTargetNameJson(buf));
-	}
-
-	@Test
-	void targetNameJsonRejectsOverlongOnRead() {
-		var buf = buffer();
-		String tooLong = "x".repeat(MarkerPacketCodec.MAX_NAME_LENGTH + 1);
-		buf.writeVarInt(tooLong.length());
-		buf.writeBytes(tooLong.getBytes(StandardCharsets.UTF_8));
-
-		assertThrows(RuntimeException.class, () -> MarkerPacketCodec.readTargetNameJson(buf));
 	}
 
 	@Test
@@ -325,14 +278,15 @@ class MarkerPacketCodecTest {
 	}
 
 	@Test
-	void experienceOrbLocatorSurvivesCreateCreatedAndWinnerPacketFlow() {
+	void experienceOrbLocatorSurvivesPresentationCreateCreatedAndWinnerFlow() {
 		Target orbTarget = new Target.EntityTarget(
 			"minecraft:overworld", EntityLocator.runtimeId(23));
-		MarkerCreateC2SPacket create = new MarkerCreateC2SPacket(7L, orbTarget, "attention");
+		PresentationC2SPacket create = PresentationC2SPacket.create(41L, 7L, orbTarget, "attention");
 
 		var createBuffer = buffer();
 		create.write(createBuffer);
-		assertEquals(create, MarkerCreateC2SPacket.readSafe(createBuffer));
+		assertEquals(create, PresentationC2SPacket.readSafe(createBuffer));
+		assertEquals(0, createBuffer.readableBytes());
 
 		MarkerSnapshot snapshot = new MarkerSnapshot(
 			new MarkerId(8L),
@@ -343,18 +297,36 @@ class MarkerPacketCodecTest {
 			new MarkerAnchor(1.5, 64.0, -2.5),
 			10L,
 			500L);
-		MarkerCreatedS2CPacket created = new MarkerCreatedS2CPacket(
-			snapshot, new TargetNameJson("{\"text\":\"orb\"}"), "Steve");
+		var nameRef = PresentationPropertyRef.root("minecraft:basic", "minecraft:target.name");
+		var basic = new PresentationSection("minecraft:basic", 1,
+			Map.of("minecraft:target.name", new PresentationValue.Text("{\"text\":\"orb\"}")), false);
+		PresentationS2CPacket created = PresentationS2CPacket.created(41L, 2L, 1L, snapshot, "Steve", nameRef, basic);
 
 		var createdBuffer = buffer();
 		created.write(createdBuffer);
-		assertEquals(created, MarkerCreatedS2CPacket.readSafe(createdBuffer));
+		var decodedCreated = PresentationS2CPacket.readSafe(createdBuffer);
+		assertFalse(decodedCreated.isCorrupt());
+		assertEquals(PresentationS2CPacket.Kind.CREATED, decodedCreated.kind());
+		assertEquals(snapshot, decodedCreated.snapshot());
+		assertEquals(created.epoch(), decodedCreated.epoch());
+		assertEquals(created.view(), decodedCreated.view());
+		assertEquals(created.revision(), decodedCreated.revision());
+		assertEquals("Steve", decodedCreated.ownerName());
+		assertEquals(nameRef, decodedCreated.defaultRef());
+		assertEquals(created.content(), decodedCreated.content());
+		assertArrayEquals(created.sectionBytes(), decodedCreated.sectionBytes());
+		assertEquals(0, createdBuffer.readableBytes());
 
-		MarkerWinnerChangedS2CPacket winner = new MarkerWinnerChangedS2CPacket(
-			TargetKey.from(orbTarget), Optional.of(snapshot.id()));
+		PresentationS2CPacket winner = PresentationS2CPacket.winner(
+			41L, 2L, TargetKey.from(orbTarget), Optional.of(snapshot.id()));
 		var winnerBuffer = buffer();
 		winner.write(winnerBuffer);
-		assertEquals(winner, MarkerWinnerChangedS2CPacket.readSafe(winnerBuffer));
+		var decodedWinner = PresentationS2CPacket.readSafe(winnerBuffer);
+		assertFalse(decodedWinner.isCorrupt());
+		assertEquals(PresentationS2CPacket.Kind.WINNER, decodedWinner.kind());
+		assertEquals(TargetKey.from(orbTarget), decodedWinner.targetKey());
+		assertEquals(Optional.of(snapshot.id()), decodedWinner.winnerId());
+		assertEquals(0, winnerBuffer.readableBytes());
 	}
 
 	@Test

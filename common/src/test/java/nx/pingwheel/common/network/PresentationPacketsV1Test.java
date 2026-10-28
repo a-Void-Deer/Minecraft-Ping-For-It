@@ -3,6 +3,8 @@ package nx.pingwheel.common.network;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
@@ -28,7 +30,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-class PresentationPacketsV3Test {
+@NotNullByDefault
+class PresentationPacketsV1Test {
 	private static final String BASIC = "minecraft:basic";
 
 	private static FriendlyByteBuf buffer() {
@@ -48,7 +51,7 @@ class PresentationPacketsV3Test {
 	}
 
 	@Test
-	void previousPresentationVersionFramesAreRejectedOnBothDirections() {
+	void unsupportedPresentationVersionFramesAreRejectedOnBothDirections() {
 		FriendlyByteBuf request = buffer();
 		try {
 			request.writeEnum(PresentationC2SPacket.Kind.HELLO);
@@ -56,7 +59,7 @@ class PresentationPacketsV3Test {
 			request.writeLong(0L);
 			request.writeVarInt(0);
 			assertTrue(PresentationC2SPacket.readSafe(request).isCorrupt(),
-				"the previous protocol value is rejected on the request direction");
+				"an unsupported protocol value is rejected on the request direction");
 			assertEquals(0, request.readableBytes());
 		} finally {
 			request.release();
@@ -72,7 +75,7 @@ class PresentationPacketsV3Test {
 			MarkerPacketCodec.writeMarkerId(response, new MarkerId(9L));
 			response.writeEnum(MarkerRemovalReason.EXPIRED);
 			assertTrue(PresentationS2CPacket.readSafe(response).isCorrupt(),
-				"the previous protocol value is rejected on the response direction");
+				"an unsupported protocol value is rejected on the response direction");
 			assertEquals(0, response.readableBytes());
 		} finally {
 			response.release();
@@ -102,7 +105,7 @@ class PresentationPacketsV3Test {
 		var ref = PresentationPropertyRef.root(BASIC, "minecraft:block.state");
 		var nested = new PresentationPropertyRef(BASIC, "minecraft:block.state", List.of("#counts"));
 		var icon = PresentationPropertyRef.root(BASIC, "minecraft:item.icon");
-		var properties = List.of(
+		@Unmodifiable List<PresentationPropertyIntent> properties = List.of(
 			PresentationPropertyIntent.observed(ref, new PresentationValue.RecordValue(
 				Map.of("facing", new PresentationValue.Text("north")))),
 			PresentationPropertyIntent.of(nested, new PresentationValue.NumberValue(3), "request"),
@@ -132,9 +135,21 @@ class PresentationPacketsV3Test {
 	}
 
 	@Test
-	void legacyCreateOverloadHasNoPropertiesAndDuplicateRefsAreRejected() {
+	void plainCreateHasNoPropertiesAndDuplicateRefsAreRejected() {
 		var target = new Target.LocationTarget("minecraft:overworld", 0.0, 0.0, 0.0);
-		assertEquals(List.of(), PresentationC2SPacket.create(41L, 7L, target, "attention").properties());
+		var plain = PresentationC2SPacket.create(41L, 7L, target, "attention");
+		FriendlyByteBuf buf = buffer();
+		try {
+			plain.write(buf);
+			var decoded = PresentationC2SPacket.readSafe(buf);
+			assertFalse(decoded.isCorrupt());
+			assertEquals(plain, decoded);
+			assertEquals(target, decoded.target());
+			assertEquals(List.of(), decoded.properties());
+			assertEquals(0, buf.readableBytes());
+		} finally {
+			buf.release();
+		}
 
 		var ref = PresentationPropertyRef.root(BASIC, "minecraft:block.state");
 		var intent = PresentationPropertyIntent.observed(ref, new PresentationValue.Flag(true));
@@ -181,7 +196,7 @@ class PresentationPacketsV3Test {
 
 	@Test
 	void resetCarriesTheAuthoritativeMaskAndAnEmptyMaskDeniesEverything() {
-		Map<String, Map<String, Set<String>>> mask = Map.of(
+		@Unmodifiable Map<String, @Unmodifiable Map<String, @Unmodifiable Set<String>>> mask = Map.of(
 			"block", Map.of(BASIC, Set.of("minecraft:target.name")));
 
 		FriendlyByteBuf buf = buffer();

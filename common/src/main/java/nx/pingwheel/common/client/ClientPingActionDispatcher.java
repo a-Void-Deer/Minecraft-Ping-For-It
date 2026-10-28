@@ -8,29 +8,25 @@ import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
-import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.network.IPacket;
-import nx.pingwheel.common.network.MarkerCreateC2SPacket;
-import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.presentation.client.ClientPresentation;
 import nx.pingwheel.common.presentation.PresentationPropertyIntent;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
- * The pure, phase-7 client dispatcher between {@link PingInteractionAction}s
+ * The pure client dispatcher between {@link PingInteractionAction}s
  * and the network/local-feedback boundaries.
  *
- * <p>It holds no Minecraft state and performs no validation: the frozen
- * capture produced by the phase-5 state machine is mapped 1:1 onto the phase-6
- * wire packets, and a failed local validation is surfaced through the injected
- * error sink. Neither the packets nor the debug logs carry owner identities,
- * target type ids, colors, or display names: only the request id (the
- * interaction token sequence), the frozen {@link nx.pingwheel.common.domain.Target},
- * the ping type id, the marker id, and the {@code TargetGoneReason} are safe to
- * emit.
+ * <p>It holds no Minecraft state. Frozen create intents require a ready
+ * presentation session and authorized property selections before consuming a
+ * courtesy token, recording the request, and sending. Removes require readiness
+ * but bypass the create limiter. Inventory selections share that limiter and
+ * retain their presentation epoch/view fences. Local target validation failures
+ * are surfaced through the injected error sink.
  *
  * <p>Both dependencies are injected as functional interfaces so the mapping
  * can be tested with fakes; the Minecraft adapter that shows the local error
@@ -69,17 +65,7 @@ public final class ClientPingActionDispatcher {
 	private final PingInteractionLogger logger;
 	private final CreateRequestTracker createRequestTracker;
 	private final ClientCreateRateLimiter createRateLimiter;
-	private final @Nullable ClientPresentation presentation;
-
-	public ClientPingActionDispatcher(
-		PacketSender packetSender,
-		LocalErrorSink errorSink,
-		PingInteractionLogger logger,
-		CreateRequestTracker createRequestTracker,
-		ClientCreateRateLimiter createRateLimiter
-	) {
-		this(packetSender, errorSink, logger, createRequestTracker, createRateLimiter, null);
-	}
+	private final ClientPresentation presentation;
 
 	/** The production route requires a negotiated presentation session. */
 	public ClientPingActionDispatcher(
@@ -88,31 +74,14 @@ public final class ClientPingActionDispatcher {
 		PingInteractionLogger logger,
 		CreateRequestTracker createRequestTracker,
 		ClientCreateRateLimiter createRateLimiter,
-		@Nullable ClientPresentation presentation
+		ClientPresentation presentation
 	) {
 		this.packetSender = Objects.requireNonNull(packetSender, "packetSender");
 		this.errorSink = Objects.requireNonNull(errorSink, "errorSink");
 		this.logger = Objects.requireNonNull(logger, "logger");
 		this.createRequestTracker = Objects.requireNonNull(createRequestTracker, "createRequestTracker");
 		this.createRateLimiter = Objects.requireNonNull(createRateLimiter, "createRateLimiter");
-		this.presentation = presentation;
-	}
-
-	/**
-	 * Convenience overload retaining the existing dispatcher construction shape
-	 * for callers that do not need to share the runtime-owned dependencies.
-	 */
-	public ClientPingActionDispatcher(
-		PacketSender packetSender,
-		LocalErrorSink errorSink,
-		PingInteractionLogger logger
-	) {
-		this(
-			packetSender,
-			errorSink,
-			logger,
-			new CreateRequestTracker(),
-			new ClientCreateRateLimiter(InteractionTimeSource.system()));
+		this.presentation = Objects.requireNonNull(presentation, "presentation");
 	}
 
 	/**
@@ -133,7 +102,7 @@ public final class ClientPingActionDispatcher {
 
 	public DispatchOutcome dispatchOutcome(PingInteractionAction action, List<PresentationPropertyIntent> properties) {
 		Objects.requireNonNull(action, "action");
-		List<PresentationPropertyIntent> requested = List.copyOf(properties);
+		@Unmodifiable List<PresentationPropertyIntent> requested = List.copyOf(properties);
 		return switch (action) {
 			case PingInteractionAction.CreatePing create -> dispatchCreate(create, requested);
 			case PingInteractionAction.CancelMarker cancel -> { dispatchCancel(cancel); yield DispatchOutcome.OTHER; }
@@ -142,8 +111,8 @@ public final class ClientPingActionDispatcher {
 	}
 
 	private DispatchOutcome dispatchCreate(PingInteractionAction.CreatePing create, List<PresentationPropertyIntent> properties) {
-		if (presentation != null && !presentation.ready()) return DispatchOutcome.NOT_READY;
-		if (presentation != null && properties.stream().anyMatch(property ->
+		if (!presentation.ready()) return DispatchOutcome.NOT_READY;
+		if (properties.stream().anyMatch(property ->
 			!presentation.propertyAllowed(create.context().resolvedTarget().targetType().id(), property.ref())))
 			return DispatchOutcome.NOT_READY;
 		long requestId = create.context().token().sequence();
@@ -155,9 +124,8 @@ public final class ClientPingActionDispatcher {
 		}
 		var attempt = createRequestTracker.beginDispatch(CreateRequestTracker.Route.PRESENTATION, requestId);
 		try {
-			packetSender.sendToServer(presentation == null
-				? new MarkerCreateC2SPacket(requestId, target, create.pingType().id())
-				: PresentationC2SPacket.create(presentation.epoch(), requestId, target, create.pingType().id(), properties));
+			packetSender.sendToServer(PresentationC2SPacket.create(
+				presentation.epoch(), requestId, target, create.pingType().id(), properties));
 		} catch (RuntimeException failed) {
 			createRequestTracker.failedDispatch(attempt);
 			Diagnostics.warn("client-send/create", "transport",
@@ -168,7 +136,7 @@ public final class ClientPingActionDispatcher {
 		return DispatchOutcome.CREATE_SENT;
 	}
 	public ClientInventory.DispatchOutcome dispatchInventory(@Nullable InventoryC2SPacket packet) {
-		if (packet == null || packet.isCorrupt() || packet.kind() != InventoryC2SPacket.Kind.SELECT || presentation == null || !presentation.ready()
+		if (packet == null || packet.isCorrupt() || packet.kind() != InventoryC2SPacket.Kind.SELECT || !presentation.ready()
 			|| packet.presentationEpoch() != presentation.epoch() || packet.view() != presentation.sessionView()) return ClientInventory.DispatchOutcome.NOT_READY;
 		if (!createRateLimiter.tryAcquire()) return ClientInventory.DispatchOutcome.THROTTLED;
 		try { packetSender.sendToServer(packet); }
@@ -182,14 +150,12 @@ public final class ClientPingActionDispatcher {
 	}
 
 	private void dispatchCancel(PingInteractionAction.CancelMarker cancel) {
-		if (presentation != null && !presentation.ready()) {
+		if (!presentation.ready()) {
 			return;
 		}
 		MarkerId markerId = cancel.markerId();
 
-		packetSender.sendToServer(presentation == null
-			? new MarkerRemoveC2SPacket(markerId)
-			: PresentationC2SPacket.remove(presentation.epoch(), markerId));
+		packetSender.sendToServer(PresentationC2SPacket.remove(presentation.epoch(), markerId));
 
 		logger.debug("dispatch cancel: markerId={}", markerId.value());
 	}

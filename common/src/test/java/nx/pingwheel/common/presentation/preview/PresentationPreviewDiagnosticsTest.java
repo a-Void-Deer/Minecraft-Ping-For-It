@@ -27,6 +27,7 @@ import nx.pingwheel.common.presentation.PresentationDiagnosticCapture;
 import nx.pingwheel.common.presentation.PresentationField;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationSection;
+import nx.pingwheel.common.presentation.client.ClientPresentation;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -134,9 +135,10 @@ class PresentationPreviewDiagnosticsTest {
 			accessType, nx.pingwheel.common.presentation.client.ClientPresentation.class,
 			nx.pingwheel.common.presentation.inventory.client.ClientInventory.class, ClientPresentationPreview.class);
 		create.setAccessible(true);
+		var presentation = new ClientPresentation(packet -> fail("no presentation request"));
 		return (ClientPingRuntime) create.invoke(null, (ClientPingActionDispatcher.LocalErrorSink) (key, color) -> fail("no local error"),
 			(ClientPingActionDispatcher.PacketSender) packet -> fail("no marker request"), ClientRateLimitPolicy.DEFAULT,
-			(InteractionTimeSource) () -> 0, (TargetValidator) target -> TargetValidation.valid(), access, null, null, preview);
+			(InteractionTimeSource) () -> 0, (TargetValidator) target -> TargetValidation.valid(), access, presentation, null, preview);
 	}
 	@Test void clientAccessAndContextFailuresStillPropagateWithoutInventedAbortOrLocalReport() {
 		try (var capture = new PresentationDiagnosticCapture()) {

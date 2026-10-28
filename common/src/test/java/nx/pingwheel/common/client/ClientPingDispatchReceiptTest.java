@@ -2,6 +2,7 @@ package nx.pingwheel.common.client;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
@@ -11,6 +12,9 @@ import nx.pingwheel.common.interaction.TargetSnapshotFactory;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
 import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.network.IPacket;
+import nx.pingwheel.common.network.PresentationS2CPacket;
+import nx.pingwheel.common.presentation.PresentationBasic;
+import nx.pingwheel.common.presentation.client.ClientPresentation;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import static org.junit.jupiter.api.Assertions.*;
@@ -27,7 +31,8 @@ class ClientPingDispatchReceiptTest {
 		var dispatcher = new ClientPingActionDispatcher(packet -> {
 			assertFalse(tracker.isEmpty(), "recording precedes a possible synchronous sender callback");
 			if (fail[0]) throw new IllegalStateException("transport"); sent.add(packet);
-		}, (key, color) -> {}, PingInteractionLogger.noop(), tracker, new ClientCreateRateLimiter(() -> time[0], new ClientRateLimitPolicy(1, 1000)));
+		}, (key, color) -> {}, PingInteractionLogger.noop(), tracker,
+			new ClientCreateRateLimiter(() -> time[0], new ClientRateLimitPolicy(1, 1000)), readyPresentation());
 		var first = create(active);
 		assertEquals(ClientPingActionDispatcher.DispatchOutcome.CREATE_SENT, dispatcher.dispatchOutcome(first));
 		assertEquals(ClientPingActionDispatcher.DispatchOutcome.THROTTLED, dispatcher.dispatchOutcome(create(active)));
@@ -41,7 +46,8 @@ class ClientPingDispatchReceiptTest {
 	@Test void failedFirstSenderRestoresEmptyTracker() {
 		var tracker = new CreateRequestTracker();
 		var dispatcher = new ClientPingActionDispatcher(packet -> { throw new IllegalStateException("transport"); },
-			(key, color) -> {}, PingInteractionLogger.noop(), tracker, new ClientCreateRateLimiter(() -> 0, new ClientRateLimitPolicy(0, 0)));
+			(key, color) -> {}, PingInteractionLogger.noop(), tracker,
+			new ClientCreateRateLimiter(() -> 0, new ClientRateLimitPolicy(0, 0)), readyPresentation());
 		assertEquals(ClientPingActionDispatcher.DispatchOutcome.TRANSPORT_FAILED, dispatcher.dispatchOutcome(create(new ActiveInteraction())));
 		assertTrue(tracker.isEmpty());
 	}
@@ -50,8 +56,17 @@ class ClientPingDispatchReceiptTest {
 		var dispatcher = new ClientPingActionDispatcher(packet -> {
 			tracker.onCreateDispatched(CreateRequestTracker.Route.INVENTORY, 55);
 			throw new IllegalStateException("outer transport");
-		}, (key, color) -> {}, PingInteractionLogger.noop(), tracker, new ClientCreateRateLimiter(() -> 0, new ClientRateLimitPolicy(0, 0)));
+		}, (key, color) -> {}, PingInteractionLogger.noop(), tracker,
+			new ClientCreateRateLimiter(() -> 0, new ClientRateLimitPolicy(0, 0)), readyPresentation());
 		assertEquals(ClientPingActionDispatcher.DispatchOutcome.TRANSPORT_FAILED, dispatcher.dispatchOutcome(create(new ActiveInteraction())));
 		assertTrue(tracker.isLatest(CreateRequestTracker.Route.INVENTORY, 55));
+	}
+	private static ClientPresentation readyPresentation() {
+		var presentation = new ClientPresentation(packet -> {});
+		presentation.tick(true);
+		assertTrue(presentation.offer(PresentationS2CPacket.offer(31,
+			Map.of(PresentationBasic.ID, PresentationBasic.fields()), Map.of(PresentationBasic.ID, 1))));
+		assertTrue(presentation.reset(PresentationS2CPacket.reset(31, 1, Map.of())));
+		return presentation;
 	}
 }

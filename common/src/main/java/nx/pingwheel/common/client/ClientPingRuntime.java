@@ -39,7 +39,6 @@ import nx.pingwheel.common.chat.PingChatBuilder;
 import nx.pingwheel.common.chat.ContentChatComposer;
 import nx.pingwheel.common.chat.PendingContentChatController;
 import nx.pingwheel.common.presentation.PresentationReceiptContent;
-import nx.pingwheel.common.presentation.client.PresentationView;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.domain.MarkerId;
@@ -108,7 +107,6 @@ import nx.pingwheel.common.name.ClientTargetNameStore;
 import nx.pingwheel.common.name.ClientTargetNameDecoder;
 import nx.pingwheel.common.name.TargetNameComposer;
 import nx.pingwheel.common.name.TargetNameJson;
-import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
@@ -122,7 +120,7 @@ import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
 
 /**
- * The phase-7 client runtime: the main-thread-confined composition root that
+ * The main-thread-confined client composition root that
  * wires capture, interaction, dispatch, and authoritative marker state
  * together.
  *
@@ -131,7 +129,7 @@ import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
  *   <li>the {@link ClientMarkerStore} (with the local fallback-expiry grace)
  *       applies authoritative S2C marker state;</li>
  *   <li>the {@link ClientTargetNameStore} applies the authoritative target
- *       display names carried by created-marker packets and is kept in exact
+ *       display names carried by negotiated Basic sections and is kept in exact
  *       step with the marker store (created, removed, and fallback-expired);</li>
  *   <li>the shared {@link ActiveInteraction} plus
  *       {@link PingCaptureCoordinator} freeze the key-down capture;</li>
@@ -245,7 +243,7 @@ public final class ClientPingRuntime {
 	 */
 	private CapturedRay pendingRay;
 	private InteractionAccess interactionAccess;
-	private ClientPresentationPreview contentPreview;
+	private @Nullable ClientPresentationPreview contentPreview;
 	private NativeSelectorContent selectorContent;
 	private SpatialSelectorSession<ClientInventory.PreviewEntryReference> selector;
 	private NativeSelectorInput selectorInput;
@@ -333,7 +331,7 @@ public final class ClientPingRuntime {
 		ClientCreateRateLimiter createRateLimiter,
 		InteractionTimeSource timeSource,
 		ClientPresentation presentation,
-		PresentationReceiptFeedback presentationReceiptFeedback
+		@Nullable PresentationReceiptFeedback presentationReceiptFeedback
 	) {
 		this.markerStore = Objects.requireNonNull(markerStore, "markerStore");
 		this.activeInteraction = Objects.requireNonNull(activeInteraction, "activeInteraction");
@@ -345,7 +343,7 @@ public final class ClientPingRuntime {
 		this.wheelMouseCapture = Objects.requireNonNull(wheelMouseCapture, "wheelMouseCapture");
 		this.createRequestTracker = Objects.requireNonNull(createRequestTracker, "createRequestTracker");
 		this.createRateLimiter = Objects.requireNonNull(createRateLimiter, "createRateLimiter");
-		this.presentation = presentation;
+		this.presentation = Objects.requireNonNull(presentation, "presentation");
 		this.presentationReceiptFeedback = presentationReceiptFeedback == null ? new PresentationReceiptFeedback() {
 			@Override public void play(MarkerSnapshot snapshot) { playCreatedSoundOnce(snapshot); }
 			@Override public void chat(String ownerName, MarkerSnapshot snapshot, Component targetName) {
@@ -409,17 +407,6 @@ public final class ClientPingRuntime {
 		ClientRateLimitPolicy rateLimitPolicy,
 		InteractionTimeSource timeSource
 	) {
-		return create(errorSink, packetSender, rateLimitPolicy, timeSource, false);
-	}
-
-	/** The production connection uses the versioned presentation transport exclusively. */
-	public static ClientPingRuntime create(
-		ClientPingActionDispatcher.LocalErrorSink errorSink,
-		ClientPingActionDispatcher.PacketSender packetSender,
-		ClientRateLimitPolicy rateLimitPolicy,
-		InteractionTimeSource timeSource,
-		boolean negotiatePresentation
-	) {
 		return create(
 			errorSink,
 			packetSender,
@@ -427,8 +414,7 @@ public final class ClientPingRuntime {
 			timeSource,
 			snapshot -> ClientMarkerDisplayDuration.durationTicks(
 				ClientConfig.HANDLER.getConfig().getEffectiveMarkerDisplayDuration(),
-				snapshot),
-			negotiatePresentation);
+				snapshot));
 	}
 
 	/**
@@ -443,19 +429,7 @@ public final class ClientPingRuntime {
 		InteractionTimeSource timeSource,
 		ClientMarkerStore.DisplayDurationPolicy displayDurationPolicy
 	) {
-		return create(errorSink, packetSender, rateLimitPolicy, timeSource, displayDurationPolicy, false);
-	}
-
-	private static ClientPingRuntime create(
-		ClientPingActionDispatcher.LocalErrorSink errorSink,
-		ClientPingActionDispatcher.PacketSender packetSender,
-		ClientRateLimitPolicy rateLimitPolicy,
-		InteractionTimeSource timeSource,
-		ClientMarkerStore.DisplayDurationPolicy displayDurationPolicy,
-		boolean negotiatePresentation
-	) {
-		return create(errorSink, packetSender, rateLimitPolicy, timeSource, displayDurationPolicy,
-			negotiatePresentation, null);
+		return create(errorSink, packetSender, rateLimitPolicy, timeSource, displayDurationPolicy, null);
 	}
 
 	static ClientPingRuntime create(
@@ -464,8 +438,7 @@ public final class ClientPingRuntime {
 		ClientRateLimitPolicy rateLimitPolicy,
 		InteractionTimeSource timeSource,
 		ClientMarkerStore.DisplayDurationPolicy displayDurationPolicy,
-		boolean negotiatePresentation,
-		PresentationReceiptFeedback feedback
+		@Nullable PresentationReceiptFeedback feedback
 	) {
 		Objects.requireNonNull(errorSink, "errorSink");
 		Objects.requireNonNull(packetSender, "packetSender");
@@ -490,9 +463,7 @@ public final class ClientPingRuntime {
 				() -> ClientConfig.HANDLER.getConfig().getCancelHalfConeAngleDegrees()),
 			logger,
 			() -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis());
-		ClientPresentation presentation = negotiatePresentation
-			? new ClientPresentation(packetSender::sendToServer)
-			: null;
+		ClientPresentation presentation = new ClientPresentation(packetSender::sendToServer);
 
 		ClientPingRuntime runtime = new ClientPingRuntime(
 			new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS, displayDurationPolicy),
@@ -514,7 +485,7 @@ public final class ClientPingRuntime {
 			timeSource,
 			presentation,
 			feedback);
-		if (presentation != null) runtime.contentPreview = new ClientPresentationPreview(presentation::previewAccess,
+		runtime.contentPreview = new ClientPresentationPreview(presentation::previewAccess,
 			() -> Game == null || Game.level == null ? null : new MinecraftPreviewReadContext(Game.level, runtime.localTick),
 			PreviewLocalReaders.create(), (target, type) -> Optional.empty(), packetSender::sendToServer);
 		return runtime;
@@ -524,7 +495,7 @@ public final class ClientPingRuntime {
 	static ClientPingRuntime createForInteraction(ClientPingActionDispatcher.LocalErrorSink errors,
 		ClientPingActionDispatcher.PacketSender sender, ClientRateLimitPolicy policy, InteractionTimeSource clock,
 		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
-		ClientPresentation presentation, ClientInventory inventory, ClientPresentationPreview preview) {
+		ClientPresentation presentation, @Nullable ClientInventory inventory, @Nullable ClientPresentationPreview preview) {
 		return createForInteraction(errors, sender, policy, clock, validator, access, presentation, inventory, preview,
 			ClientMarker::serverDurationTicks, new PresentationReceiptFeedback() {
 				public void play(MarkerSnapshot snapshot) {}
@@ -535,7 +506,7 @@ public final class ClientPingRuntime {
 	static ClientPingRuntime createForInteraction(ClientPingActionDispatcher.LocalErrorSink errors,
 		ClientPingActionDispatcher.PacketSender sender, ClientRateLimitPolicy policy, InteractionTimeSource clock,
 		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
-		ClientPresentation presentation, ClientInventory inventory, ClientPresentationPreview preview,
+		ClientPresentation presentation, @Nullable ClientInventory inventory, @Nullable ClientPresentationPreview preview,
 		ClientMarkerStore.DisplayDurationPolicy displayDuration, PresentationReceiptFeedback feedback) {
 		var active = new ActiveInteraction();
 		var coordinator = new PingCaptureCoordinator(DefaultTargetResolver.builtIn(TargetResolutionLogger.noop()),
@@ -561,10 +532,8 @@ public final class ClientPingRuntime {
 		var lifecycle = interactionAccess.lifecycle();
 		if (lifecycle.level() == null || !lifecycle.player()) { contentChat.clear(); return; }
 
-		if (presentation != null) {
-			presentation.tick(Game != null && Game.getConnection() != null);
-			syncPresentationNames();
-		}
+		presentation.tick(Game != null && Game.getConnection() != null);
+		syncPresentationNames();
 		localTick++;
 		synchronizePreciseBranch();
 		if (preciseRefresh != null) preciseRefresh.tick(localTick);
@@ -702,7 +671,7 @@ public final class ClientPingRuntime {
 		abort();
 		contentChat.clear();
 		markerStore.clear();
-		if (presentation != null) presentation.close();
+		presentation.close();
 		nameStore.clear();
 		MarkerOverlayState.INSTANCE.clear();
 		observedWorldIdentity = null;
@@ -1018,7 +987,7 @@ public final class ClientPingRuntime {
 			ref -> {
 				String key = "settings.pingforit.presentation.field." + ref.fieldId().replace(':', '_').replace('.', '_') + ".name";
 				if (Language.getInstance().has(key)) return Component.translatable(key);
-				String advertised = presentation == null ? ref.fieldId() : presentation.previewAccess(capture.resolvedTarget().targetType().id())
+				String advertised = presentation.previewAccess(capture.resolvedTarget().targetType().id())
 					.map(access -> access.adapters().get(ref.adapterId())).map(adapter -> adapter.fields().get(ref.fieldId()))
 					.map(nx.pingwheel.common.presentation.PresentationField::label).orElse(ref.fieldId());
 				return Component.literal(advertised.substring(0, Math.min(64, advertised.length())));
@@ -1934,7 +1903,7 @@ public final class ClientPingRuntime {
 			contentChat.cancel(marker.id());
 			nameStore.onRemoved(marker.id());
 			if (inventory != null) inventory.markerRemoved(marker.id());
-			if (presentation != null) presentation.evict(marker.id());
+			presentation.evict(marker.id());
 		}
 
 		logger.debug("marker client lifetime ended: count={} ids={}",
@@ -1942,55 +1911,9 @@ public final class ClientPingRuntime {
 			expired.stream().map(marker -> Long.toString(marker.id().value())).toList());
 	}
 
-	/**
-	 * Applies an authoritative created-marker packet on the main thread as of
-	 * the runtime's current local tick.
-	 *
-	 * <p>The marker snapshot and its authoritative target display name are
-	 * applied to their stores back to back on the main thread, so neither can
-	 * be observed without the other. The existing directional ping sound plays
-	 * exactly once per newly seen marker id whose target lives in the current
-	 * dimension; a retransmission or same-id replacement of an already known
-	 * marker never replays it.
-	 */
-	public void applyCreated(MarkerCreatedS2CPacket packet) {
-		Objects.requireNonNull(packet, "packet");
-
-		if (packet.isCorrupt()) {
-			return;
-		}
-
-		MarkerSnapshot snapshot = Objects.requireNonNull(packet.snapshot(), "snapshot");
-		TargetNameJson targetName = Objects.requireNonNull(packet.targetName(), "targetName");
-		if (markerStore.isAuthoritativelyRemoved(snapshot.id())) {
-			return;
-		}
-
-		boolean newlySeen = isNewMarkerReceipt(markerStore, snapshot.id());
-
-		List<ClientMarker> superseded = markerStore.onCreated(snapshot, localTick);
-		for (ClientMarker marker : superseded) {
-			contentChat.cancel(marker.id());
-			nameStore.onRemoved(marker.id());
-			if (presentation != null) presentation.evict(marker.id());
-		}
-		nameStore.onCreated(snapshot.id(), targetName);
-
-		if (newlySeen) {
-			playCreatedSoundOnce(snapshot);
-			sendCreatedChat(packet, snapshot, targetName);
-		}
-
-		logger.debug("marker created applied: markerId={} kind={} targetType={} pingType={}",
-			snapshot.id().value(),
-			snapshot.target().kind(),
-			snapshot.targetTypeId(),
-			snapshot.pingTypeId());
-	}
-
 	/** Sole production S2C path for versioned marker and presentation messages. */
-	public void onPresentationPacket(PresentationS2CPacket packet) {
-		if (presentation == null || packet == null || packet.isCorrupt()) return;
+	public void onPresentationPacket(@Nullable PresentationS2CPacket packet) {
+		if (packet == null || packet.isCorrupt()) return;
 		if (!presentationReceiptFeedback.ready()) contentChat.clear();
 		switch (packet.kind()) {
 			case OFFER -> presentation.offer(packet);
@@ -2041,10 +1964,10 @@ public final class ClientPingRuntime {
 	public ClientPresentation presentation() {
 		return presentation;
 	}
-	private nx.pingwheel.common.presentation.inventory.client.ClientInventory inventory;
-	public void inventory(nx.pingwheel.common.presentation.inventory.client.ClientInventory inventory) {
+	private @Nullable ClientInventory inventory;
+	public void inventory(@Nullable ClientInventory inventory) {
 		this.inventory = inventory;
-		if (inventory != null && presentation != null && presentation.ready()) {
+		if (inventory != null && presentation.ready()) {
 			inventory.presentationReset(presentation.epoch(), presentation.sessionView());
 		}
 	}
@@ -2073,9 +1996,9 @@ public final class ClientPingRuntime {
 		dispatcher.dispatch(frozenAction, properties);
 	}
 
-	/** Keep the legacy name-render facade synchronized before each world frame. */
+	/** Synchronizes the marker-name render projection from authorized presentation values. */
 	public void refreshPresentationDisplay() {
-		if (presentation != null) syncPresentationNames();
+		syncPresentationNames();
 	}
 
 	private void applyPresentationCreated(PresentationS2CPacket packet) {
@@ -2102,25 +2025,25 @@ public final class ClientPingRuntime {
 	}
 
 	private PendingContentChatController.Current currentContentReceipt(MarkerId id) {
-		ClientMarker marker = markerStore.marker(id).orElse(null);
+		@Nullable ClientMarker marker = markerStore.marker(id).orElse(null);
 		Map<String, Set<String>> fields = new LinkedHashMap<>();
-		if (presentation != null && marker != null) presentation.previewAccess(marker.targetTypeId()).ifPresent(access ->
+		if (marker != null) presentation.previewAccess(marker.targetTypeId()).ifPresent(access ->
 			access.adapters().forEach((adapter, descriptor) -> fields.put(adapter, descriptor.fields().keySet())));
-		var authorization = inventory == null || presentation == null || marker == null ? Optional.<Boolean>empty()
+		var authorization = inventory == null || marker == null ? Optional.<Boolean>empty()
 			: inventory.authorization(presentation.epoch(), presentation.sessionView(), marker.targetTypeId());
-		return new PendingContentChatController.Current(presentation == null ? 0 : presentation.epoch(),
-			presentation == null ? 0 : presentation.sessionView(), presentation != null && presentation.ready()
+		return new PendingContentChatController.Current(presentation.epoch(),
+			presentation.sessionView(), presentation.ready()
 				&& presentationReceiptFeedback.ready(), marker != null && marker.isSynchronized()
 				&& !markerStore.isAuthoritativelyRemoved(id),
 			marker == null ? null : PendingContentChatController.MarkerIdentity.of(marker), fields,
 			authorization.map(allowed -> allowed ? PendingContentChatController.Authorization.ALLOWED
 				: PendingContentChatController.Authorization.DENIED).orElse(PendingContentChatController.Authorization.UNKNOWN),
-			presentation == null ? PresentationView.empty() : presentation.view(id),
+			presentation.view(id),
 			inventory == null ? null : inventory.tracking(id));
 	}
 
 	private void attemptContentReceipt(MarkerId id) {
-		if (!presentationReceiptFeedback.ready() || presentation == null || !presentation.ready()) {
+		if (!presentationReceiptFeedback.ready() || !presentation.ready()) {
 			contentChat.clear();
 			return;
 		}
@@ -2129,7 +2052,7 @@ public final class ClientPingRuntime {
 
 	/** Tick/accepted policy housekeeping uses actual synchronized membership, never HUD visibility. */
 	private void reconcileContentReceipts() {
-		if (!presentationReceiptFeedback.ready() || presentation == null || !presentation.ready()) {
+		if (!presentationReceiptFeedback.ready() || !presentation.ready()) {
 			contentChat.clear();
 			return;
 		}
@@ -2219,16 +2142,6 @@ public final class ClientPingRuntime {
 	 * keeps its existing current-dimension eligibility, while chat is relevant
 	 * to every recipient regardless of where the target is located.
 	 */
-	private void sendCreatedChat(
-		MarkerCreatedS2CPacket packet, MarkerSnapshot snapshot, TargetNameJson targetName
-	) {
-		Minecraft game = Game;
-		Component resolvedTargetName = game == null || game.level == null
-			? TargetNameComposer.unknown()
-			: ClientTargetNameDecoder.decode(snapshot.id(), targetName, game.level.registryAccess());
-		sendCreatedChat(packet.ownerName(), snapshot, resolvedTargetName);
-	}
-
 	private void sendCreatedChat(String ownerName, MarkerSnapshot snapshot, Component resolvedTargetName) {
 		Minecraft game = Game;
 
@@ -2298,7 +2211,7 @@ public final class ClientPingRuntime {
 		for (ClientMarker removedMarker : removed) {
 			contentChat.cancel(removedMarker.id());
 			nameStore.onRemoved(removedMarker.id());
-			if (presentation != null) presentation.evict(removedMarker.id());
+			presentation.evict(removedMarker.id());
 		}
 
 		logger.debug("marker removed applied: markerId={} reason={}", markerId.value(), reason);
@@ -2315,7 +2228,7 @@ public final class ClientPingRuntime {
 		for (ClientMarker marker : superseded) {
 			contentChat.cancel(marker.id());
 			nameStore.onRemoved(marker.id());
-			if (presentation != null) presentation.evict(marker.id());
+			presentation.evict(marker.id());
 			if (inventory != null) inventory.markerRemoved(marker.id());
 		}
 
@@ -2363,9 +2276,8 @@ public final class ClientPingRuntime {
 	}
 
 	/**
-	 * The authoritative client target-name store, keyed by marker id. Exposed
-	 * for the target-name HUD rendering added in a later slice; no parsing or
-	 * rendering happens in this runtime.
+	 * The authorized target-name projection keyed by marker id, consumed by
+	 * marker HUD rendering.
 	 */
 	public ClientTargetNameStore nameStore() {
 		return nameStore;

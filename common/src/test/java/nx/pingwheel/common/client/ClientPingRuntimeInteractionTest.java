@@ -547,6 +547,26 @@ class ClientPingRuntimeInteractionTest {
 		assertEquals(1, cancel.sent.stream().filter(p -> p instanceof PresentationC2SPacket c && c.kind() == PresentationC2SPacket.Kind.REMOVE).count());
 		assertTrue(cancel.creates().isEmpty()); assertEquals(0, cancel.inventory.stats().previewChannels());
 	}
+	@ParameterizedTest @ValueSource(booleans = {false, true})
+	void cancellationBeforeResetIsDroppedAndNeverReplayedWhenReady(boolean offered) {
+		Fixture f = new Fixture(new ClientRateLimitPolicy(1, 1000), false);
+		if (offered) {
+			f.presentation.tick(true);
+			f.runtime.onPresentationPacket(PresentationS2CPacket.offer(100,
+				Map.of(PresentationBasic.ID, PresentationBasic.fields()), Map.of(PresentationBasic.ID, 1)));
+		}
+		f.press(0); f.frame(250, true); f.prime(); f.focus("cancel-marker", 260); f.release(270);
+		assertEquals(1, f.access.cancellations, "the frozen cancellation action reaches the runtime dispatch boundary");
+		assertEquals(0, f.sent.stream().filter(p -> p instanceof PresentationC2SPacket c && c.kind() == PresentationC2SPacket.Kind.REMOVE).count());
+		f.negotiate(Set.of(PresentationBasic.NAME));
+		assertTrue(f.presentation.ready());
+		assertEquals(0, f.sent.stream().filter(p -> p instanceof PresentationC2SPacket c && c.kind() == PresentationC2SPacket.Kind.REMOVE).count(),
+			"RESET must not replay a discarded cancellation");
+		f.press(300); f.frame(550, true); f.prime(); f.focus("cancel-marker", 560); f.release(570);
+		assertEquals(1, f.sent.stream().filter(p -> p instanceof PresentationC2SPacket c && c.kind() == PresentationC2SPacket.Kind.REMOVE).count());
+		f.press(600); f.release(610);
+		assertEquals(1, f.creates().size(), "neither an unready nor a ready cancellation consumes the sole create allowance");
+	}
 	@Test void listReleaseSendsSelectBeforeExactCloseAndNeverOrdinaryCreate() {
 		Fixture f = new Fixture(); f.openList(); long request = f.request(); f.release(700); f.release(701); f.frame(800, false);
 		assertEquals(1, f.selects().size()); assertEquals("opaque", f.selects().getFirst().entryKey()); assertEquals(request, f.selects().getFirst().requestId());

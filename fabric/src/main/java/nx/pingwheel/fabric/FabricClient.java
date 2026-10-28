@@ -16,17 +16,11 @@ import net.minecraft.util.profiling.ProfilerFiller;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.command.ClientCommandBuilder;
 import nx.pingwheel.common.network.InventoryS2CPacket;
-import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
-import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
-import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
-import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
-import nx.pingwheel.common.network.PingLocationS2CPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.network.PresentationPreviewS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket;
-import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.resource.ResourceReloadListener;
 import nx.pingwheel.fabric.integration.FabricWorldAwareBlockModelOutlineAdapter;
@@ -49,55 +43,17 @@ public class FabricClient implements ClientModInitializer {
 		ClientPlayNetworking.registerGlobalReceiver(
 			RateLimitPolicyS2CPacket.PACKET_TYPE,
 			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onRateLimitPolicyPacket(packet)));
-		ClientPlayNetworking.registerGlobalReceiver(
-			SyncDurationPolicyS2CPacket.PACKET_TYPE,
-			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onSyncDurationPolicyPacket(packet)));
 		CommonClient.INSTANCE.onInit();
 
 		Registry.register(BuiltInRegistries.SOUND_EVENT, PING_SOUND_ID, PING_SOUND_EVENT);
 
 		// packets
 		ClientPlayNetworking.registerGlobalReceiver(
-			PingLocationS2CPacket.PACKET_TYPE,
-			(packet, context) -> {
-				final var client = context.client();
-				client.execute(() -> CommonClient.INSTANCE.onPingLocationPacket(packet));
-			}
-		);
-		ClientPlayNetworking.registerGlobalReceiver(
 			ServerConfigSnapshotS2CPacket.PACKET_TYPE,
 			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onServerConfigSnapshotPacket(packet)));
 		ClientPlayNetworking.registerGlobalReceiver(
 			ServerPresentationPolicyS2CPacket.PACKET_TYPE,
 			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onServerPresentationPolicyPacket(packet)));
-		ClientPlayNetworking.registerGlobalReceiver(
-			MarkerCreatedS2CPacket.PACKET_TYPE,
-			(packet, context) -> {
-				final var client = context.client();
-				client.execute(() -> CommonClient.INSTANCE.onMarkerCreatedPacket(packet));
-			}
-		);
-		ClientPlayNetworking.registerGlobalReceiver(
-			MarkerRemovedS2CPacket.PACKET_TYPE,
-			(packet, context) -> {
-				final var client = context.client();
-				client.execute(() -> CommonClient.INSTANCE.onMarkerRemovedPacket(packet));
-			}
-		);
-		ClientPlayNetworking.registerGlobalReceiver(
-			MarkerRejectedS2CPacket.PACKET_TYPE,
-			(packet, context) -> {
-				final var client = context.client();
-				client.execute(() -> CommonClient.INSTANCE.onMarkerRejectedPacket(packet));
-			}
-		);
-		ClientPlayNetworking.registerGlobalReceiver(
-			MarkerWinnerChangedS2CPacket.PACKET_TYPE,
-			(packet, context) -> {
-				final var client = context.client();
-				client.execute(() -> CommonClient.INSTANCE.onMarkerWinnerChangedPacket(packet));
-			}
-		);
 		ClientPlayNetworking.registerGlobalReceiver(
 			PresentationS2CPacket.PACKET_TYPE,
 			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onPresentationPacket(packet)));

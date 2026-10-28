@@ -49,7 +49,7 @@ class ClientBusinessDiagnosticsTest {
 				attempts[0]++;
 				throw new IllegalStateException("create-transport-sentinel", new IllegalArgumentException("send-root-sentinel"));
 			}, (key, color) -> fail("no local error"), PingInteractionLogger.noop(), tracker,
-				new ClientCreateRateLimiter(() -> 0, new ClientRateLimitPolicy(1, 1000)));
+				new ClientCreateRateLimiter(() -> 0, new ClientRateLimitPolicy(1, 1000)), readyPresentation());
 			var snapshot = TargetSnapshotFactory.location("minecraft:overworld", 1, 2, 3);
 			var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.noop()).resolve(snapshot.target(), snapshot.matchContext());
 			var action = new PingInteractionAction.CreatePing(new CapturedPingContext(active.begin(), resolved), resolved.targetType().defaultPingType());
@@ -63,11 +63,7 @@ class ClientBusinessDiagnosticsTest {
 
 	@Test void selectFailureReportsOriginalCauseWithoutRecordingOrRefunding() {
 		try (var logs = new DiagnosticLogCapture()) {
-			var presentation = new ClientPresentation(packet -> {});
-			presentation.tick(true);
-			assertTrue(presentation.offer(PresentationS2CPacket.offer(31,
-				Map.of(PresentationBasic.ID, PresentationBasic.fields()), Map.of(PresentationBasic.ID, 1))));
-			assertTrue(presentation.reset(PresentationS2CPacket.reset(31, 1, Map.of())));
+			var presentation = readyPresentation();
 			var tracker = new CreateRequestTracker();
 			tracker.onCreateDispatched(CreateRequestTracker.Route.PRESENTATION, 42);
 			var dispatcher = new ClientPingActionDispatcher(packet -> {
@@ -189,6 +185,15 @@ class ClientBusinessDiagnosticsTest {
 			assertFalse(missingKey.contains("zh_cn", new Object(), null, "missing"));
 			assertTrue(logs.operation("locale/resource").isEmpty());
 		}
+	}
+
+	private static ClientPresentation readyPresentation() {
+		var presentation = new ClientPresentation(packet -> {});
+		presentation.tick(true);
+		assertTrue(presentation.offer(PresentationS2CPacket.offer(31,
+			Map.of(PresentationBasic.ID, PresentationBasic.fields()), Map.of(PresentationBasic.ID, 1))));
+		assertTrue(presentation.reset(PresentationS2CPacket.reset(31, 1, Map.of())));
+		return presentation;
 	}
 
 	private static void assertReport(DiagnosticLogCapture logs, String operation, String message, String cause) {

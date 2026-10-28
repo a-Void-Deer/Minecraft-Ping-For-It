@@ -701,7 +701,7 @@ public final class ClientInventory {
 		send(InventoryC2SPacket.open(epoch, presentationEpoch, presentationView, state.requestId, state.target, state.face));
 	}
 
-	/** A version-three OPEN target is one native block or one uncommitted external candidate. */
+	/** An inventory-v1 OPEN target is one native block or one uncommitted external candidate. */
 	private static boolean isOpenTarget(Target target) {
 		return target instanceof Target.BlockTarget
 			|| (target instanceof Target.ExternalBlockTarget external && external.isCandidate());

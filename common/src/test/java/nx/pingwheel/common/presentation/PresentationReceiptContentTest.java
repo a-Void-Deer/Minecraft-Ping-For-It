@@ -440,7 +440,7 @@ class PresentationReceiptContentTest {
 	}
 
 	/**
-	 * The v4 CREATED frame with a valid adapter and field but a one-byte invalid
+	 * The current CREATED frame with a valid adapter and field but a one-byte invalid
 	 * record-path key: the key's declared UTF length stays one and its single byte
 	 * is 0xFF.
 	 */

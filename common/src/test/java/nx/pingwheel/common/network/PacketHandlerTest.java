@@ -4,13 +4,8 @@ import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import org.junit.jupiter.api.Test;
 
-import java.util.UUID;
-
 import nx.pingwheel.common.domain.MarkerId;
-import nx.pingwheel.common.domain.Target;
-import nx.pingwheel.common.marker.MarkerAnchor;
-import nx.pingwheel.common.marker.MarkerSnapshot;
-import nx.pingwheel.common.name.TargetNameJson;
+import nx.pingwheel.common.marker.MarkerRemovalReason;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -26,35 +21,24 @@ class PacketHandlerTest {
 
 	@Test
 	void validDecodeLeavesBufferFullyConsumed() {
-		var packet = new MarkerCreatedS2CPacket(
-			new MarkerSnapshot(
-				new MarkerId(9L),
-				UUID.randomUUID(),
-				new Target.LocationTarget("minecraft:overworld", 1.0, 2.0, 3.0),
-				"entity",
-				"attention",
-				new MarkerAnchor(0.5, 64.0, -8.25),
-				10L,
-				1000L
-			),
-			new TargetNameJson("{\"translate\":\"minecraft.zombie\"}"),
-			"Steve"
-		);
+		var packet = PresentationS2CPacket.removed(41L, 2L, new MarkerId(9L), MarkerRemovalReason.CANCELLED);
 
 		var buf = buffer();
 		packet.write(buf);
 		assertTrue(buf.readableBytes() > 0);
 
-		assertFalse(MarkerCreatedS2CPacket.readSafe(buf).isCorrupt());
+		assertFalse(PresentationS2CPacket.readSafe(buf).isCorrupt());
 		assertEquals(0, buf.readableBytes());
 	}
 
 	@Test
 	void corruptDecodeLeavesBufferFullyConsumed() {
 		var buf = buffer();
-		buf.writeLong(5L); // truncated marker-create: request id only
+		buf.writeEnum(PresentationC2SPacket.Kind.CREATE);
+		buf.writeVarInt(PresentationC2SPacket.VERSION);
+		buf.writeLong(41L); // truncated presentation create: target and request id missing
 
-		assertTrue(MarkerCreateC2SPacket.readSafe(buf).isCorrupt());
+		assertTrue(PresentationC2SPacket.readSafe(buf).isCorrupt());
 		assertEquals(0, buf.readableBytes());
 	}
 

@@ -9,15 +9,11 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-import nx.pingwheel.common.network.MarkerCreateC2SPacket;
-import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
-import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
-import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
-import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
-import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
-import nx.pingwheel.common.network.PingLocationC2SPacket;
-import nx.pingwheel.common.network.PingLocationS2CPacket;
+import nx.pingwheel.common.network.InventoryC2SPacket;
+import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
+import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
+import nx.pingwheel.common.network.PresentationPreviewS2CPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
@@ -63,39 +59,35 @@ class ModIdentityTest {
 	}
 
 	@Test
-	void allFifteenPacketIdsUseNewNamespaces() {
+	void currentPacketIdsUseForkNamespaces() {
 		assertEquals(Set.of(
-			"pingforit-c2s:marker-create",
-			"pingforit-c2s:marker-remove",
-			"pingforit-c2s:ping-location",
 			"pingforit-c2s:update-channel",
+			"pingforit-c2s:presentation-v1",
+			"pingforit-c2s:presentation-preview-v1",
+			"pingforit-c2s:inventory-v1",
 			"pingforit-c2s:server-config-request-v4",
 			"pingforit-c2s:server-config-update-v4",
 			"pingforit-c2s:server-presentation-policy-v1",
-			"pingforit-s2c:marker-created",
-			"pingforit-s2c:marker-removed",
-			"pingforit-s2c:marker-rejected",
-			"pingforit-s2c:marker-winner-changed",
+			"pingforit-s2c:presentation-v1",
+			"pingforit-s2c:presentation-preview-v1",
+			"pingforit-s2c:inventory-v1",
 			"pingforit-s2c:rate-limit-policy",
 			"pingforit-s2c:server-config-snapshot-v4",
-			"pingforit-s2c:server-presentation-policy-v1",
-			"pingforit-s2c:ping-location"
+			"pingforit-s2c:server-presentation-policy-v1"
 		), Set.of(
-			MarkerCreateC2SPacket.PACKET_ID.toString(),
-			MarkerRemoveC2SPacket.PACKET_ID.toString(),
-			PingLocationC2SPacket.PACKET_ID.toString(),
 			UpdateChannelC2SPacket.PACKET_ID.toString(),
+			PresentationC2SPacket.PACKET_ID.toString(),
+			PresentationPreviewC2SPacket.PACKET_ID.toString(),
+			InventoryC2SPacket.PACKET_ID.toString(),
 			ServerConfigRequestC2SPacket.PACKET_ID.toString(),
 			ServerConfigUpdateC2SPacket.PACKET_ID.toString(),
 			ServerPresentationPolicyC2SPacket.PACKET_ID.toString(),
-			MarkerCreatedS2CPacket.PACKET_ID.toString(),
-			MarkerRemovedS2CPacket.PACKET_ID.toString(),
-			MarkerRejectedS2CPacket.PACKET_ID.toString(),
-			MarkerWinnerChangedS2CPacket.PACKET_ID.toString(),
+			PresentationS2CPacket.PACKET_ID.toString(),
+			PresentationPreviewS2CPacket.PACKET_ID.toString(),
+			InventoryS2CPacket.PACKET_ID.toString(),
 			RateLimitPolicyS2CPacket.PACKET_ID.toString(),
 			ServerConfigSnapshotS2CPacket.PACKET_ID.toString(),
-			ServerPresentationPolicyS2CPacket.PACKET_ID.toString(),
-			PingLocationS2CPacket.PACKET_ID.toString()
+			ServerPresentationPolicyS2CPacket.PACKET_ID.toString()
 		));
 	}
 

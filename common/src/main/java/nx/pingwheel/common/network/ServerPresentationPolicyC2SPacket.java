@@ -13,7 +13,7 @@ import static nx.pingwheel.common.Global.C2S_NAMESPACE;
  * Carries one presentation policy rule-view read or one bounded selector
  * mutation for exactly one selected target type. A read discloses the complete
  * per-target-type map and requires no selected type; a mutation never applies
- * to more than one type. The route is versioned independently of the five-field
+ * to more than one type. The route is versioned independently of the
  * server-config request/update routes and never travels on their packet ids.
  */
 public record ServerPresentationPolicyC2SPacket(
