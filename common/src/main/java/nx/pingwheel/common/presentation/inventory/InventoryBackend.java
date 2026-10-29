@@ -384,28 +384,73 @@ public final class InventoryBackend implements AutoCloseable {
 		InventorySharedRead.Check check;
 		try { check = grant.validate(evidence); }
 		finally { if (!protectedOpportunity) grant.close(); } // an old selected proof is released AFTER drain, never between the new proof and handoff
-		if (check == InventorySharedRead.Check.VALID) return closeRequested || deferredDisconnects.contains(context.recipient())
-			|| lease != null && (deferredRemovals.contains(lease.marker.id()) || deferredDisconnects.contains(lease.marker.owner()))
-			? InventorySyncPublisher.SendDecision.DENY : InventorySyncPublisher.SendDecision.ALLOW;
+		if (check == InventorySharedRead.Check.VALID) {
+			// Source metadata callbacks can revoke a viewer without removing the marker or calling this Backend.
+			// This recipient-only fence follows the proof and precedes all wire accounting/handoff.
+			@Nullable Session current = sessions.get(context.recipient());
+			return publicationAllowed(context) && current != null && current.epoch == packet.epoch()
+				&& !closeRequested && !deferredDisconnects.contains(context.recipient())
+				&& (lease == null || !deferredRemovals.contains(lease.marker.id()) && !deferredDisconnects.contains(lease.marker.owner()))
+				? InventorySyncPublisher.SendDecision.ALLOW : InventorySyncPublisher.SendDecision.DENY;
+		}
 		if (check == InventorySharedRead.Check.DEFERRED) return InventorySyncPublisher.SendDecision.DEFER;
 		publisher.denyEvidence(evidence, check != InventorySharedRead.Check.AUTHORITY_DENIED);
+		if (check == InventorySharedRead.Check.AUTHORITY_DENIED) {
+			@Nullable InventorySourceInput denied = lease != null ? lease.input : preview != null ? preview.input : null;
+			if (denied != null) latchAuthorityFailure(denied, evidence);
+			return InventorySyncPublisher.SendDecision.DENY;
+		}
 		if (preview != null) { preview.deniedEvidence = evidence.retain(); preview.deniedCheck = check; }
 		if (lease != null) { lease.deniedEvidence = evidence.retain(); lease.deniedCheck = check; }
 		return InventorySyncPublisher.SendDecision.DENY;
 	}
+	/** A typed owner denial fences every current proof for that exact binding, without closing anything inside drain. */
+	private void latchAuthorityFailure(InventorySourceInput input, InventoryPublicationEvidence evidence) {
+		for (Tracking affected : tracking.values()) if (affected.input.sameBinding(input)) {
+			if (affected.deniedEvidence == null) affected.deniedEvidence = evidence.retain();
+			affected.deniedCheck = InventorySharedRead.Check.AUTHORITY_DENIED;
+		}
+		for (Session session : sessions.values()) for (Preview affected : session.previews.values()) if (affected.input.sameBinding(input)) {
+			if (affected.deniedEvidence == null) affected.deniedEvidence = evidence.retain();
+			affected.deniedCheck = InventorySharedRead.Check.AUTHORITY_DENIED;
+		}
+	}
 	private void applyPublicationFailures() {
 		for (Tracking lease : List.copyOf(tracking.values())) if (lease.deniedEvidence != null) {
 			var evidence = lease.deniedEvidence; lease.deniedEvidence = null;
-			try { runtime.publicationFailed(lease.consumer, evidence, lease.deniedCheck); invalidate(lease); } finally { evidence.close(); }
+			try {
+				runtime.publicationFailed(lease.consumer, evidence, lease.deniedCheck);
+				for (Tracking affected : List.copyOf(tracking.values())) {
+					if (affected.consumer.invalidated()) { invalidate(affected); continue; }
+					if (lease.deniedCheck == InventorySharedRead.Check.AUTHORITY_DENIED) continue;
+					boolean completedFailed = matchingEvidence(affected.completedEvidence, evidence);
+					boolean bootstrapFailed = matchingEvidence(affected.bootstrapEvidence, evidence);
+					if (completedFailed) {
+						affected.completed = null;
+						if (affected.completedEvidence != null) { affected.completedEvidence.close(); affected.completedEvidence = null; }
+					}
+					if (bootstrapFailed) {
+						affected.bootstrap = null;
+						if (affected.bootstrapEvidence != null) { affected.bootstrapEvidence.close(); affected.bootstrapEvidence = null; }
+					}
+					if (completedFailed || bootstrapFailed || affected.recipients.values().stream().anyMatch(recipient -> publisher.sourceDenied(recipient.context))) {
+						// Fence historical fragments/digests, not a differently proven current scan or completion.
+						// New registration starts with an empty recovery fence and restages only retained valid evidence.
+						affected.state++; resetRecipients(affected);
+					}
+				}
+			} finally { evidence.close(); }
 		}
 		for (Session session : sessions.values()) for (Preview preview : session.previews.values()) if (preview.deniedEvidence != null) {
 			var evidence = preview.deniedEvidence; preview.deniedEvidence = null;
 			try { runtime.publicationFailed(preview.consumer, evidence, preview.deniedCheck); invalidatePreview(session, preview); } finally { evidence.close(); }
 		}
 		for (Tracking lease : tracking.values()) if (lease.consumer.invalidated() && !lease.invalid) invalidate(lease);
-		for (Tracking lease : tracking.values()) if (!lease.invalid && lease.recipients.values().stream().anyMatch(recipient -> publisher.sourceDenied(recipient.context))) invalidate(lease);
 		for (Session session : sessions.values()) for (Preview preview : session.previews.values())
 			if ((preview.consumer.invalidated() || publisher.sourceDenied(preview.context)) && preview.context.stateFence() == 1) invalidatePreview(session, preview);
+	}
+	private static boolean matchingEvidence(@Nullable InventoryPublicationEvidence held, InventoryPublicationEvidence failed) {
+		return held != null && (held.sameProof(failed) || failed.sameProof(held));
 	}
 	private void endCycle(Module module, long cycle) {
 		if (sink == BudgetDelaySink.NONE) return;
@@ -715,6 +760,7 @@ public final class InventoryBackend implements AutoCloseable {
 		}
 	}
 	public void tick(long now, InventorySettings settings) {
+		if (publishing) return; // metadata/transport callbacks cannot recursively drain or reset an outstanding grant
 		advance(now, settings);
 		for (var entry : List.copyOf(sessions.entrySet())) {
 			refreshPolicy(entry.getKey(), entry.getValue());
@@ -1563,6 +1609,7 @@ public final class InventoryBackend implements AutoCloseable {
 		for (Tracking lease : tracking.values()) {
 			Recipient recipient = lease.recipients.get(context.recipient());
 			if (recipient != null && recipient.context.equals(context)) return lease.marker.expiresAtTick() > tick
+				&& lease.marker.recipients().contains(context.recipient())
 				&& !deferredRemovals.contains(lease.marker.id()) && !deferredDisconnects.contains(lease.marker.owner())
 				&& policy.types().contains(lease.marker.targetType().id()) && host.knows(context.recipient(), lease.marker.id());
 		}

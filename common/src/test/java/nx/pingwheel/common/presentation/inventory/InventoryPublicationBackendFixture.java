@@ -44,6 +44,10 @@ public final class InventoryPublicationBackendFixture implements AutoCloseable, 
 	public final TargetKey group;
 	public java.util.function.Consumer<InventoryS2CPacket> measured = packet -> {};
 	public java.util.function.Consumer<InventoryS2CPacket> handed = packet -> {};
+	public java.util.function.Function<UUID, Optional<InventoryBackend.Policy>> currentPolicy = player -> Optional.of(new InventoryBackend.Policy(100, 1, Set.of("entity_block")));
+	public java.util.function.BiPredicate<UUID, MarkerId> known = (player, marker) -> true;
+	public java.util.function.BiConsumer<SyncPublisher.Context, InventoryS2CPacket> beforeValidation = (context, packet) -> {};
+	public java.util.function.BiPredicate<SyncPublisher.Context, InventoryS2CPacket> blocked = (context, packet) -> false;
 	public boolean holdData;
 	public int effectiveMeasurements;
 	public InventoryPublicationBackendFixture(InventoryRuntime.SourceResolver resolver, InventorySettings settings, TargetKey group) {
@@ -52,7 +56,7 @@ public final class InventoryPublicationBackendFixture implements AutoCloseable, 
 		backend = new InventoryBackend(this, runtime, 1);
 		for (UUID owner : List.of(A, B)) { var client = new ClientInventory(packet -> {}); client.presentationReset(100, 1); clients.put(owner, client); backend.handle(owner, InventoryC2SPacket.hello(), 0, settings); }
 	}
-	@Override public Optional<InventoryBackend.Policy> policy(UUID player) { return Optional.of(new InventoryBackend.Policy(100, 1, Set.of("entity_block"))); }
+	@Override public Optional<InventoryBackend.Policy> policy(UUID player) { return currentPolicy.apply(player); }
 	@Override public Optional<InventoryBackend.Opened> open(UUID player, Target requested) { return Optional.of(new InventoryBackend.Opened(requested, "entity_block", "attention")); }
 	@Override public boolean annotationAllowed(InventorySourceInput input, String pingType) { return pingType.equals("danger"); }
 	@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
@@ -62,12 +66,13 @@ public final class InventoryPublicationBackendFixture implements AutoCloseable, 
 		return new InventoryBackend.Created(markers.create(player, frozen.target(), group, type, type.defaultPingType(), new MarkerAnchor(0, 0, 0), 0, 10000, List.of(A, B)).marker(), null);
 	}
 	@Override public void publishCreated(InventoryBackend.Created created) { for (var client : clients.values()) client.markerCreated(MarkerSnapshot.from(created.marker())); }
-	@Override public boolean knows(UUID player, MarkerId marker) { return markers.allMarkers().stream().anyMatch(value -> value.id().equals(marker) && value.recipients().contains(player)); }
+	@Override public boolean knows(UUID player, MarkerId marker) { return known.test(player, marker) && markers.allMarkers().stream().anyMatch(value -> value.id().equals(marker) && value.recipients().contains(player)); }
 	@Override public boolean authorized(SyncPublisher.Context context) { return true; }
 	@Override public int encodedBytes(InventoryS2CPacket packet) { throw new AssertionError("production adapter must forward effective-budget measurement"); }
 	@Override public int encodedBytes(InventoryS2CPacket packet, int displayBytes, int frameBytes) { effectiveMeasurements++; measured.accept(packet); return packet.encodedSize(displayBytes, frameBytes); }
 	@Override public InventorySyncPublisher.SendDecision beforeSend(SyncPublisher.Context context, InventoryS2CPacket packet, @Nullable InventoryPublicationEvidence evidence) {
-		return holdData && InventorySyncPublisher.requiresSource(packet) ? InventorySyncPublisher.SendDecision.DEFER : InventorySyncPublisher.SendDecision.ALLOW;
+		beforeValidation.accept(context, packet);
+		return (holdData && InventorySyncPublisher.requiresSource(packet)) || blocked.test(context, packet) ? InventorySyncPublisher.SendDecision.DEFER : InventorySyncPublisher.SendDecision.ALLOW;
 	}
 	@Override public void send(UUID recipient, InventoryS2CPacket packet) {
 		var buffer = new FriendlyByteBuf(Unpooled.buffer());

@@ -397,14 +397,34 @@ public final class InventoryRuntime implements AutoCloseable {
 	/** Applies a latched failure only outside publication traversal. */
 	void publicationFailed(Consumer consumer, InventoryPublicationEvidence evidence, InventorySharedRead.Check check) {
 		if (check == InventorySharedRead.Check.DEFERRED || check == InventorySharedRead.Check.VALID) return;
-		if (check != InventorySharedRead.Check.AUTHORITY_DENIED && evidence.proof() != null)
-			for (Round round : List.copyOf(liveRounds)) if (round.sweep != null && round.sweep.proof.equals(evidence.proof()))
-				retire(round, unavailable(consumer.input.viewKey()));
+		if (check == InventorySharedRead.Check.AUTHORITY_DENIED) {
+			// Permission belongs to the exact owner binding, not to one historical physical proof.
+			for (Consumer peer : consumers) if (!peer.closed && peer.input.sameBinding(consumer.input)) peer.discardObservation();
+			return;
+		}
+		if (evidence.proof() != null)
+			for (Round round : List.copyOf(liveRounds)) {
+				InventorySharedRead.@Nullable Port port = round.handle == null ? null : round.handle.sharedRead();
+				InventorySharedRead.@Nullable Proof proof = round.sweep != null ? round.sweep.proof : port == null ? null : port.proof();
+				if (evidence.proof().equals(proof)) retirePublicationRound(round);
+			}
 		@Nullable InventoryPublicationEvidence primary = evidence instanceof CombinedEvidence combined ? combined.primary : evidence;
-		if (check != InventorySharedRead.Check.AUTHORITY_DENIED && primary instanceof LegacyPublicationEvidence legacy)
+		if (primary instanceof LegacyPublicationEvidence legacy)
 			for (Round round : List.copyOf(liveRounds)) if (round.source != null && round.source.metadata == legacy.owner)
-				retire(round, unavailable(consumer.input.viewKey()));
-		if (!consumer.closed) consumer.discardObservation();
+				retirePublicationRound(round);
+	}
+	/** A failed historical completion cannot retire an independently resolved newer scanning association. */
+	private void retirePublicationRound(Round round) {
+		if (round.closed) return;
+		releasePredecessors(round);
+		for (Consumer peer : consumers) {
+			if (peer.round == round || peer.round == null && peer.completedRound == round) { peer.discardObservation(); continue; }
+			if (peer.completedRound == round) {
+				if (peer.completedAssociation != null) { peer.completedAssociation.close(); peer.completedAssociation = null; }
+				peer.completedRound = null; releaseReference(round);
+			}
+			if (peer.successorEntitlement == round) releaseEntitlement(peer);
+		}
 	}
 	/** Reserved opportunity, not a cached validation result. No source callbacks run during admission. */
 	@NotNullByDefault
