@@ -116,6 +116,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		private @Nullable Round completedRound;
 		private @Nullable Association scanningAssociation, completedAssociation;
 		private @Nullable Round successorEntitlement;
+		private @Nullable Round entitlementPredecessor;
 		// A canonical source alias shares data, not the original input's lease or physical-binding authority.
 		private InventorySourceAccess.InventoryHandle bindingEvidence;
 		private RetainedMemoryLedger.Ticket bindingMemory;
@@ -202,7 +203,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		@Nullable CaptureResult last;
 		@Nullable Observation failureObservation;
 		int references;
-		int incomingEntitlements;
+		int incomingEntitlements; // included in references/scanners, but neither an actual scan nor an accepted completion
 		int scanners; // consumer scans plus bounded physical handoff leases
 		int appliedBytes; // ceiling fully walked over this round's decoded slots
 		int passCeiling; // target of the active tightening pass
@@ -1613,7 +1614,8 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (certifiedPooling && previous != null && previous != round && !previous.sealed && !previous.successorEstablished && previous.policy.equals(round.policy)) {
 			previous.successorEstablished = true;
 			for (Consumer peer : consumers) if ((peer.completedRound == previous || peer.round == previous) && peer.successorEntitlement == null && !peer.closed) {
-				peer.successorEntitlement = round; round.references++; round.scanners++; round.incomingEntitlements++;
+				peer.successorEntitlement = round; peer.entitlementPredecessor = previous;
+				round.references++; round.scanners++; round.incomingEntitlements++;
 			}
 		}
 		if (!certifiedPooling && previous != null && previous != round && previous.successor == null) {
@@ -1757,6 +1759,11 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	private void releaseReference(Round round) {
 		if (--round.references == 0) { closeRound(round); return; }
+		if (round.incomingEntitlements != 0 && round.references == round.incomingEntitlements) {
+			// Only handoff holds remain: no actual scanner or accepted-completion owner needs this replacement.
+			releaseAbandonedEntitlements(round);
+			return;
+		}
 		if (!round.predecessors.isEmpty() && round.references == round.predecessors.size()) {
 			// No consumer accepted or still scans this successor. A rejected/abandoned sweep must
 			// not pin its predecessors forever or prevent a later fresh replacement.
@@ -1799,8 +1806,20 @@ public final class InventoryRuntime implements AutoCloseable {
 		}
 		if (fatal != null) throw fatal;
 	}
+	private void releaseAbandonedEntitlements(Round round) {
+		int holds = round.incomingEntitlements;
+		// Detach the complete bounded cohort before releasing references: close/release recursion must not see stale holds.
+		for (Consumer consumer : consumers) if (consumer.successorEntitlement == round) {
+			consumer.successorEntitlement = null;
+			@Nullable Round previous = consumer.entitlementPredecessor; consumer.entitlementPredecessor = null;
+			if (previous != null) previous.successorEstablished = false; // sealed eligibility is independent and never reopened
+		}
+		round.incomingEntitlements = 0;
+		for (int hold = 0; hold < holds; hold++) releaseScanner(round, true);
+	}
 	private void releaseEntitlement(Consumer consumer) {
 		@Nullable Round entitled = consumer.successorEntitlement; consumer.successorEntitlement = null;
+		consumer.entitlementPredecessor = null;
 		if (entitled != null) { entitled.incomingEntitlements--; releaseScanner(entitled, true); }
 	}
 	private void releaseBindingEvidence(Consumer consumer) {

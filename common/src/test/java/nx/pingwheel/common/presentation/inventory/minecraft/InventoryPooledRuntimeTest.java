@@ -68,6 +68,7 @@ class InventoryPooledRuntimeTest {
 			final Port port;
 			final int cap;
 			boolean closed;
+			int closeCalls;
 			InventoryItemCodec.@Nullable Catalog legacyCatalog;
 			Source(InventorySourceInput input, int cap) {
 				this.input = input; this.cap = cap; open++;
@@ -122,7 +123,7 @@ class InventoryPooledRuntimeTest {
 				return value(slot, legacyCatalog, admission);
 			}
 			@Override public InventorySourceAccess.Page enumerate(int limit) { throw new AssertionError("indexed"); }
-			@Override public void close() { if (!closed) { closed = true; open--; } }
+			@Override public void close() { closeCalls++; if (!closed) { closed = true; open--; } }
 		}
 		InventoryRuntime runtime(InventorySettings settings) {
 			return new InventoryRuntime((input, cap) -> Optional.of(source(input, cap)), settings.pendingMemoryBytes(), InventoryRuntime.DisplayReprojector.none(), BudgetDelaySink.NONE, true);
@@ -398,5 +399,120 @@ class InventoryPooledRuntimeTest {
 			var peer = runtime.step(b, 3).orElseThrow(); assertEquals(first.slots(), peer.slots()); assertEquals(CaptureResult.Completeness.INCOMPLETE, peer.result().completeness());
 			assertEquals(3, planner.addresses.size()); assertThrows(IllegalStateException.class, a::retainCompleted);
 		} assertEquals(0, planner.open); assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
+	@ParameterizedTest @CsvSource({"false,true", "true,true", "false,false", "true,false"})
+	void thirtyTwoAbandonedReplacementsReleaseCapacityWhileIdlePeersKeepCompletedEvidence(boolean incomplete, boolean pooling) throws ReflectiveOperationException {
+		var planner = new Planner(); var settings = settings(false, true);
+		var runtime = new InventoryRuntime((input, cap) -> Optional.of(planner.source(input, cap)), settings.pendingMemoryBytes(), InventoryRuntime.DisplayReprojector.none(), BudgetDelaySink.NONE, pooling);
+		var fast = new ArrayList<InventoryRuntime.Consumer>(); var slow = new ArrayList<InventoryRuntime.Consumer>();
+		try (runtime) {
+			// Each cohort has a distinct real owner but one grouped logical target. Separate ticks restore existing budgets only.
+			for (int cohort = 0; cohort < 32; cohort++) {
+				runtime.advance(cohort * 40L, settings);
+				fast.add(attach(runtime, input(cohort + 1, BlockFace.NORTH))); slow.add(attach(runtime, input(cohort + 1, pooling ? BlockFace.SOUTH : BlockFace.NORTH)));
+				assertEquals(27_000_063L, finish(runtime, fast.getLast())); assertEquals(27_000_063L, finish(runtime, slow.getLast()));
+				fast.getLast().restart(); slow.getLast().restart(); // retain publication evidence, release original scanning ownership
+			}
+			assertEquals(32, field(runtime, "retainedRounds"));
+			for (int cohort = 0; cohort < 32; cohort++) {
+				runtime.advance((32 + cohort) * 40L, settings); var consumer = fast.get(cohort); consumer.restart();
+				assertEquals(3, runtime.step(consumer, 3).orElseThrow().slots().size());
+				if (incomplete) {
+					planner.failCapacity = true; planner.failAt = 5;
+					var rejected = runtime.step(consumer, 3).orElseThrow();
+					assertEquals(CaptureResult.Completeness.INCOMPLETE, rejected.result().completeness()); assertEquals(2, rejected.slots().size());
+					assertThrows(IllegalStateException.class, consumer::retainCompleted); planner.failAt = -1;
+				}
+			}
+			assertEquals(32, field(runtime, "scanningRounds")); assertEquals(64, field(runtime, "retainedRounds"));
+			assertTrue(runtime.memory().remaining() > 240_000_000); assertEquals(0, runtime.memory().reserved());
+			runtime.advance(5000, settings); fast.forEach(InventoryRuntime.Consumer::restart);
+			int ready = 0;
+			for (var consumer : fast) if (runtime.prepare(consumer) == InventorySourceAccess.Preparation.READY) ready++;
+			assertEquals(32, ready, "idle handoff-only owners must not strand every replacement slot");
+			for (var consumer : slow) {
+				assertFalse(consumer.invalidated());
+				if (pooling) try (var evidence = runtime.retainEvidence(consumer, InventoryRuntime.EvidenceScope.COMPLETED).orElseThrow()) {
+					assertEquals(Check.VALID, evidence.validate(new InventoryValidationBudget.Allowance(evidence.validationCost())));
+				} else assertEquals(Optional.of(true), runtime.probe(consumer));
+			}
+			assertEquals(32, field(runtime, "scanningRounds")); assertEquals(64, field(runtime, "retainedRounds"));
+			assertEquals(0, runtime.memory().reserved());
+		} assertEquals(0, planner.open); assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
+	@ParameterizedTest @CsvSource({"restart,false", "close,false", "discard,false", "restart,true", "close,true", "discard,true"})
+	void abandonedReplacementReleasesOnlyHandoffOwnersAndKeepsPaidQuota(String departure, boolean unacceptedComplete) throws ReflectiveOperationException {
+		var planner = new Planner(); var settings = settings(false, false); var runtime = planner.runtime(settings);
+		try (runtime) {
+			runtime.advance(0, settings); var fast = attach(runtime, input(1, BlockFace.NORTH)); var slow = attach(runtime, input(2, BlockFace.SOUTH));
+			finish(runtime, fast); finish(runtime, slow); fast.restart(); slow.restart();
+			InventoryRuntime.Observation result = runtime.step(fast, 3).orElseThrow();
+			if (unacceptedComplete) {
+				runtime.step(fast, 3).orElseThrow(); result = runtime.step(fast, 3).orElseThrow();
+				assertEquals(CaptureResult.Completeness.COMPLETE, result.result().completeness()); // deliberately not retained
+			}
+			Object abandoned = field(fast, "round");
+			@SuppressWarnings("unchecked") var paid = (Map<InventoryRuntime.Subject, Integer>) field(runtime, "logicalUsed");
+			int spent = paid.values().stream().mapToInt(Integer::intValue).sum();
+			int callbacks = planner.callbacks;
+			switch (departure) { case "restart" -> fast.restart(); case "close" -> fast.close(); case "discard" -> fast.discardObservation(); default -> throw new AssertionError(departure); }
+			assertEquals(callbacks, planner.callbacks, "ownership cleanup cannot invoke source/provider validation");
+			assertEquals(true, field(abandoned, "closed")); assertEquals(0, field(abandoned, "references")); assertEquals(0, field(abandoned, "scanners"));
+			assertEquals(0, field(runtime, "scanningRounds")); assertEquals(1, field(runtime, "retainedRounds"));
+			assertEquals(spent, paid.values().stream().mapToInt(Integer::intValue).sum());
+			try (var evidence = runtime.retainEvidence(slow, InventoryRuntime.EvidenceScope.COMPLETED).orElseThrow()) {
+				assertEquals(Check.VALID, evidence.validate(new InventoryValidationBudget.Allowance(evidence.validationCost())));
+			}
+			// Resetting successor-established permits a genuinely fresh replacement and a new entitlement for this idle peer.
+			runtime.advance(40, settings);
+			var next = departure.equals("restart") ? fast : attach(runtime, input(3, BlockFace.NORTH));
+			if (next != fast) { finish(runtime, next); next.restart(); }
+			assertEquals(27_000_063L, finish(runtime, next)); next.restart();
+			int reads = planner.addresses.size(); slow.restart(); assertEquals(27_000_063L, finish(runtime, slow));
+			if (next == fast) assertEquals(reads, planner.addresses.size(), "idle peer adopts the fresh accepted successor, not abandoned data");
+		} assertEquals(0, planner.open); assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
+	@ParameterizedTest @CsvSource({"true,false", "false,false", "true,true", "false,true"})
+	void lastScannerDepartureKeepsEntitlementsOnlyWhileAcceptedCompletionOwnerRemains(boolean accepted, boolean seal) throws ReflectiveOperationException {
+		var planner = new Planner(); var settings = settings(false, false); var runtime = planner.runtime(settings);
+		try (runtime) {
+			runtime.advance(0, settings); var fast = attach(runtime, input(1, BlockFace.NORTH)); var slow = attach(runtime, input(2, BlockFace.SOUTH));
+			finish(runtime, fast); finish(runtime, slow); fast.restart(); slow.restart();
+			InventoryRuntime.Observation terminal = runtime.step(fast, 3).orElseThrow();
+			while (terminal.result().completeness() == CaptureResult.Completeness.CONTINUE) terminal = runtime.step(fast, 3).orElseThrow();
+			if (accepted) fast.retainCompleted();
+			Object successor = field(fast, "round"); Object previous = field(slow, "completedRound");
+			if (seal) { settings.getTracking().setDistinguishFaces(true); settings.getTracking().setDistinguishPlayers(true); runtime.advance(0, settings); }
+			fast.restart();
+			assertEquals(!accepted, field(successor, "closed")); assertEquals(seal, field(previous, "sealed"));
+			runtime.advance(40, settings); int reads = planner.addresses.size(); slow.restart();
+			assertEquals(27_000_063L, finish(runtime, slow));
+			assertEquals(reads + (accepted ? 0 : 9), planner.addresses.size(), "accepted entitlement survives seal; abandoned one requires fresh reads");
+			if (accepted) { assertEquals(0, field(successor, "incomingEntitlements")); assertEquals(Optional.of(true), runtime.probe(fast)); }
+		} assertEquals(0, planner.open); assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
+	@Test void multipleHandoffCohortsDetachBeforeLastReleaseWithoutDroppingActualScannerOrAcceptedOwner() throws ReflectiveOperationException {
+		var planner = new Planner(); var settings = settings(false, false); var runtime = planner.runtime(settings);
+		try (runtime) {
+			runtime.advance(0, settings);
+			var first = attach(runtime, input(1, BlockFace.NORTH)); var firstSlow = attach(runtime, input(2, BlockFace.SOUTH));
+			finish(runtime, first); finish(runtime, firstSlow); first.restart(); firstSlow.restart();
+			runtime.advance(40, settings);
+			var second = attach(runtime, input(3, BlockFace.NORTH)); var secondSlow = attach(runtime, input(4, BlockFace.SOUTH));
+			finish(runtime, second); finish(runtime, secondSlow); second.restart(); secondSlow.restart();
+			runtime.advance(80, settings); runtime.step(first, 3).orElseThrow();
+			assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(second)); Object abandoned = field(first, "round");
+			assertSame(abandoned, field(second, "round")); assertEquals(2, field(abandoned, "incomingEntitlements"));
+			first.restart(); assertEquals(false, field(abandoned, "closed")); assertEquals(1, field(runtime, "scanningRounds"));
+			second.close(); // the last actual scanner leaves two different predecessor cohorts' handoff holds
+			assertEquals(true, field(abandoned, "closed")); assertEquals(0, field(abandoned, "scanners")); assertEquals(0, field(abandoned, "references"));
+			assertEquals(0, field(abandoned, "incomingEntitlements")); assertEquals(0, field(runtime, "scanningRounds"));
+			assertEquals(Optional.of(true), runtime.probe(firstSlow)); assertEquals(Optional.of(true), runtime.probe(secondSlow));
+			runtime.advance(120, settings); finish(runtime, first); first.restart();
+			int reads = planner.addresses.size(); firstSlow.restart(); finish(runtime, firstSlow); assertEquals(reads, planner.addresses.size());
+			first.close(); firstSlow.close(); firstSlow.close(); // idempotent consumer close cannot double-close the retained sources
+			secondSlow.restart(); finish(runtime, secondSlow); secondSlow.restart(); secondSlow.close();
+		} assertEquals(0, planner.open); assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+		for (var source : planner.sources) assertEquals(1, source.closeCalls, "every separately opened lease closes exactly once");
 	}
 }
