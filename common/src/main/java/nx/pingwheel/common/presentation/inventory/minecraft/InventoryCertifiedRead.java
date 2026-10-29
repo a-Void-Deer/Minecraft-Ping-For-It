@@ -107,6 +107,7 @@ final class InventoryCertifiedRead {
 			states = new BlockState[members.size()];
 			for (int index = 0; index < members.size(); index++) {
 				var member = layout.members().get(index);
+				if (!world.isLoaded(member.position())) throw new ReadFailure(Check.UNAVAILABLE);
 				canonical.add(new InventorySnapshotLayout.Member(member.position(), member.blockId(), member.blockEntityId(),
 					view.access() == null ? "member" : member.role(), member.segments()));
 				identities.add(new Witness(members.get(index)));
@@ -171,8 +172,11 @@ final class InventoryCertifiedRead {
 					|| !BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals(member.blockId())
 					|| !BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()).toString().equals(member.blockEntityId())) return Check.STRUCTURE_INVALID;
 				if (position.equals(root)) originalFound = true;
-				if (view.access() == null && (!supportedChest(entity, state, proof.graph().route() == Route.VANILLA_TRAPPED_CHEST)
-					|| !chestMapping(index, state))) return Check.STRUCTURE_INVALID;
+				if (view.access() == null) {
+					if (!supportedChest(entity, state, proof.graph().route() == Route.VANILLA_TRAPPED_CHEST)) return Check.STRUCTURE_INVALID;
+					Check mapping = chestMapping(index, state);
+					if (mapping != Check.VALID) return mapping;
+				}
 				Check readable = world.readCheck(entity, world.readOwnerKey());
 				if (readable != Check.VALID) return readable;
 			}
@@ -192,36 +196,40 @@ final class InventoryCertifiedRead {
 			for (int index = 0; index < members.size(); index++) {
 				BlockPos position = proof.graph().layout().members().get(index).position();
 				if (!world.isLoaded(position)) return Check.UNAVAILABLE;
-				if (world.blockEntity(position) != members.get(index) || world.blockState(position).getBlock() != states[index].getBlock()
-					|| view.access() == null && !chestMapping(index, world.blockState(position))) return Check.STRUCTURE_INVALID;
+				if (world.blockEntity(position) != members.get(index) || world.blockState(position).getBlock() != states[index].getBlock()) return Check.STRUCTURE_INVALID;
+				if (view.access() == null) {
+					Check mapping = chestMapping(index, world.blockState(position));
+					if (mapping != Check.VALID) return mapping;
+				}
 				if (members.get(index).isRemoved()) return Check.UNAVAILABLE;
 			}
 			return Check.VALID;
 		}
-		private boolean chestMapping(int index, BlockState state) {
+		private Check chestMapping(int index, BlockState state) {
 			ChestType type = states[index].getValue(ChestBlock.TYPE);
-			if (state.getValue(ChestBlock.TYPE) != type) return false;
-			if ((type == ChestType.SINGLE) != (members.size() == 1)) return false;
+			if (state.getValue(ChestBlock.TYPE) != type) return Check.STRUCTURE_INVALID;
+			if ((type == ChestType.SINGLE) != (members.size() == 1)) return Check.STRUCTURE_INVALID;
 			if (members.size() == 2) {
-				if (state.getValue(ChestBlock.FACING) != states[index].getValue(ChestBlock.FACING)) return false;
+				if (state.getValue(ChestBlock.FACING) != states[index].getValue(ChestBlock.FACING)) return Check.STRUCTURE_INVALID;
 				var position = proof.graph().layout().members().get(index).position();
 				var partner = proof.graph().layout().members().get(1 - index).position();
-				if (!position.relative(ChestBlock.getConnectedDirection(state)).equals(partner)) return false;
+				if (!position.relative(ChestBlock.getConnectedDirection(state)).equals(partner)) return Check.STRUCTURE_INVALID;
+				if (!world.isLoaded(partner)) return Check.UNAVAILABLE;
 				BlockState other = world.blockState(partner);
 				if (other.getBlock() != state.getBlock() || other.getValue(ChestBlock.TYPE) == type || other.getValue(ChestBlock.TYPE) == ChestType.SINGLE
 					|| other.getValue(ChestBlock.FACING) != state.getValue(ChestBlock.FACING)
-					|| !partner.relative(ChestBlock.getConnectedDirection(other)).equals(position)) return false;
+					|| !partner.relative(ChestBlock.getConnectedDirection(other)).equals(position)) return Check.STRUCTURE_INVALID;
 			}
 			var member = proof.graph().layout().members().get(index);
-			if (member.segments().size() != 1) return false;
+			if (member.segments().size() != 1) return Check.STRUCTURE_INVALID;
 			var segment = member.segments().getFirst();
 			var container = (Container) members.get(index);
-			if (segment.localSlots() != 27 || segment.visibleSlots().size() != 27 || container.getContainerSize() != 27) return false;
-			for (int slot = 0; slot < 27; slot++) if (segment.visibleSlots().get(slot) != slot) return false;
+			if (segment.localSlots() != 27 || segment.visibleSlots().size() != 27 || container.getContainerSize() != 27) return Check.STRUCTURE_INVALID;
+			for (int slot = 0; slot < 27; slot++) if (segment.visibleSlots().get(slot) != slot) return Check.STRUCTURE_INVALID;
 			int first = index * 27;
-			if (view.slots().size() != members.size() * 27) return false;
-			for (int slot = 0; slot < 27; slot++) if (view.slots().get(first + slot).container() != container || view.slots().get(first + slot).index() != slot) return false;
-			return true;
+			if (view.slots().size() != members.size() * 27) return Check.STRUCTURE_INVALID;
+			for (int slot = 0; slot < 27; slot++) if (view.slots().get(first + slot).container() != container || view.slots().get(first + slot).index() != slot) return Check.STRUCTURE_INVALID;
+			return Check.VALID;
 		}
 		@Override public InventoryItemCodec.Catalog createCatalog(int ceiling, InventoryValidationBudget.Allowance allowance) {
 			InventoryMinecraftSources.requireDisplayBytes(ceiling);

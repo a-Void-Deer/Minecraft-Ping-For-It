@@ -46,14 +46,20 @@ class InventoryCertifiedReadTest {
 		final Map<BlockPos, BlockEntity> entities = new HashMap<>();
 		final Map<BlockPos, BlockState> states = new HashMap<>();
 		final Map<BlockPos, LockCode> locks = new HashMap<>();
+		final Map<BlockPos, Boolean> loadedPositions = new HashMap<>();
 		Object identity = new Object();
 		HolderLookup.Provider registry = RegistryAccess.EMPTY;
 		boolean owner = true, loaded = true;
 		ItemStack key = ItemStack.EMPTY;
-		int metadata, audits;
+		int metadata, audits, readChecks, unloadedStateAccesses;
 		Runnable afterCheck = () -> {}, beforeAudit = () -> {};
-		@Override public boolean isLoaded(BlockPos pos) { metadata++; return loaded && entities.containsKey(pos); }
-		@Override public BlockState blockState(BlockPos pos) { metadata++; return java.util.Objects.requireNonNull(states.get(pos)); }
+		private boolean loaded(BlockPos pos) { return loaded && loadedPositions.getOrDefault(pos, false) && entities.containsKey(pos); }
+		@Override public boolean isLoaded(BlockPos pos) { metadata++; return loaded(pos); }
+		@Override public BlockState blockState(BlockPos pos) {
+			metadata++;
+			if (!loaded(pos)) { unloadedStateAccesses++; throw new AssertionError("block state queried in unloaded chunk: " + pos); }
+			return java.util.Objects.requireNonNull(states.get(pos));
+		}
 		@Override public @Nullable BlockEntity blockEntity(BlockPos pos) { metadata++; return entities.get(pos); }
 		@Override public boolean onServerThread() { return true; }
 		@Override public ItemStack heldKey() { return key; }
@@ -61,7 +67,7 @@ class InventoryCertifiedReadTest {
 		@Override public Object worldIdentity() { metadata++; return identity; }
 		@Override public HolderLookup.Provider registries() { metadata++; return registry; }
 		@Override public Check readCheck(BlockEntity entity, @Nullable ItemStack key) {
-			metadata++;
+			metadata++; readChecks++;
 			Check check = entity.isRemoved() || entity instanceof ChestBlockEntity chest && chest.getLootTable() != null
 				? Check.UNAVAILABLE : InventoryReadSafety.lockCheck(locks.getOrDefault(entity.getBlockPos(), LockCode.NO_LOCK), key);
 			afterCheck.run(); return check;
@@ -70,6 +76,7 @@ class InventoryCertifiedReadTest {
 			audits++; beforeAudit.run(); return InventoryContainerReads.audited(container, ignored -> true);
 		}
 		void put(BlockPos pos, BlockState state) {
+			loadedPositions.put(pos, true);
 			states.put(pos, state);
 			entities.put(pos, state.getBlock() == Blocks.TRAPPED_CHEST ? new TrappedChestBlockEntity(pos, state) : new ChestBlockEntity(pos, state));
 		}
@@ -84,10 +91,13 @@ class InventoryCertifiedReadTest {
 		}
 	}
 	static World pair(Block block) {
+		return pair(block, BlockPos.ZERO);
+	}
+	static World pair(Block block, BlockPos first) {
 		var world = new World();
 		var state = block.defaultBlockState().setValue(ChestBlock.FACING, Direction.NORTH).setValue(ChestBlock.TYPE, ChestType.LEFT);
-		world.put(BlockPos.ZERO, state);
-		world.put(BlockPos.ZERO.relative(ChestBlock.getConnectedDirection(state)), state.setValue(ChestBlock.TYPE, ChestType.RIGHT));
+		world.put(first, state);
+		world.put(first.relative(ChestBlock.getConnectedDirection(state)), state.setValue(ChestBlock.TYPE, ChestType.RIGHT));
 		return world;
 	}
 	static InventoryValidationBudget.Allowance validation(Port port) { return new InventoryValidationBudget.Allowance(port.validationCost()); }
@@ -175,6 +185,93 @@ class InventoryCertifiedReadTest {
 		var wrong = new InventoryMinecraftSources.View(view.identity(), view.entities(), view.slots().reversed(), null, view.snapshotLayout(), true);
 		try (var source = new InventoryMinecraftSources.Source(input, wrong, () -> true, () -> wrong, entry -> null, world, null)) {
 			assertNull(source.sharedRead());
+		}
+	}
+	@Test void crossChunkPartnerUnloadIsUnavailableBeforeStateAccessCatalogOrItemCallbacks() throws ReflectiveOperationException {
+		var first = new BlockPos(15, 64, 0); var second = new BlockPos(16, 64, 0);
+		for (Block block : List.of(Blocks.CHEST, Blocks.TRAPPED_CHEST)) for (BlockPos hit : List.of(first, second)) {
+			var world = pair(block, first); BlockPos partner = hit.equals(first) ? second : first;
+			try (var registration = new CallbackComponent(); var source = world.source(world.input(hit, BlockFace.NORTH, 1))) {
+				var port = java.util.Objects.requireNonNull(source.sharedRead());
+				assertEquals(List.of(first, second), port.proof().graph().layout().members().stream().map(InventorySnapshotLayout.Member::position).toList());
+				assertEquals(Check.VALID, port.validate(port.proof(), validation(port)));
+				var stack = new ItemStack(Items.STONE, 37); stack.set(registration.type, 1);
+				((ChestBlockEntity) world.entities.get(first)).setItem(0, stack);
+				var catalog = port.createCatalog(4096, new InventoryValidationBudget.Allowance(port.catalogCreationCost()));
+				var item = java.util.Objects.requireNonNull(port.read(0, port.proof(), catalog, catalogGrant(4096), readGrant(port)));
+				assertEquals(37, item.count());
+				registration.callback = () -> fail("unavailable member must prevent item freezing");
+				world.loadedPositions.put(partner, false); world.audits = 0; world.readChecks = 0;
+				var paid = validation(port);
+				assertEquals(Check.UNAVAILABLE, port.validate(port.proof(), paid));
+				assertEquals(port.validationCost().workUnits(), paid.attemptedWorkUnits());
+				var creation = new InventoryValidationBudget.Allowance(port.catalogCreationCost());
+				assertEquals(Check.UNAVAILABLE, assertThrows(ReadFailure.class, () -> port.createCatalog(4096, creation)).check());
+				assertEquals(port.catalogCreationCost().workUnits(), creation.attemptedWorkUnits());
+				var read = readGrant(port);
+				assertEquals(Check.UNAVAILABLE, assertThrows(ReadFailure.class,
+					() -> port.read(0, port.proof(), catalog, catalogGrant(4096), read)).check());
+				assertEquals(port.readValidationCost(1).workUnits(), read.attemptedWorkUnits());
+				assertEquals(0, world.audits); assertEquals(0, world.readChecks); assertEquals(0, world.unloadedStateAccesses);
+				world.loadedPositions.put(partner, true);
+				assertEquals(Check.VALID, port.validate(port.proof(), validation(port)));
+				world.states.put(partner, world.states.get(partner).setValue(ChestBlock.TYPE, ChestType.SINGLE));
+				assertEquals(Check.STRUCTURE_INVALID, port.validate(port.proof(), validation(port)));
+			}
+		}
+	}
+	@Test void certificateConstructionDeclinesAnUnloadedMemberBeforeItsStateAccess() {
+		var first = new BlockPos(15, 64, 0); var second = new BlockPos(16, 64, 0);
+		for (BlockPos unloaded : List.of(first, second)) {
+			var world = pair(Blocks.CHEST, first); var input = world.input(first, BlockFace.NORTH, 1);
+			var view = InventoryMinecraftSources.view(world, input, (pos, face) -> Optional.empty());
+			world.loadedPositions.put(unloaded, false);
+			assertNull(InventoryCertifiedRead.create(input, view, world, () -> false));
+			assertEquals(0, world.unloadedStateAccesses);
+		}
+	}
+	@Test void partnerUnloadAfterFirstPassIsUnavailableInFinalValidationForEveryOperation() {
+		var first = new BlockPos(15, 64, 0); var second = new BlockPos(16, 64, 0);
+		for (String operation : List.of("validate", "catalog", "read")) {
+			var world = pair(Blocks.CHEST, first);
+			try (var source = world.source(world.input(first, BlockFace.NORTH, 1))) {
+				var port = java.util.Objects.requireNonNull(source.sharedRead());
+				var catalog = port.createCatalog(4096, new InventoryValidationBudget.Allowance(port.catalogCreationCost()));
+				world.readChecks = 0;
+				world.afterCheck = () -> { if (world.readChecks == 2) world.loadedPositions.put(second, false); };
+				switch (operation) {
+					case "validate" -> assertEquals(Check.UNAVAILABLE, port.validate(port.proof(), validation(port)));
+					case "catalog" -> assertEquals(Check.UNAVAILABLE, assertThrows(ReadFailure.class,
+						() -> port.createCatalog(4096, new InventoryValidationBudget.Allowance(port.catalogCreationCost()))).check());
+					case "read" -> assertEquals(Check.UNAVAILABLE, assertThrows(ReadFailure.class,
+						() -> port.read(0, port.proof(), catalog, catalogGrant(4096), readGrant(port))).check());
+					default -> throw new AssertionError(operation);
+				}
+				assertEquals(2, world.readChecks); assertEquals(0, world.audits); assertEquals(0, world.unloadedStateAccesses);
+			}
+		}
+	}
+	@Test void partnerUnloadDuringFreezeOrPostGetterValidationNeverReturnsAPartialItem() throws ReflectiveOperationException {
+		var first = new BlockPos(15, 64, 0); var second = new BlockPos(16, 64, 0);
+		for (boolean finalPass : List.of(false, true)) {
+			var world = pair(Blocks.CHEST, first);
+			try (var registration = new CallbackComponent(); var source = world.source(world.input(first, BlockFace.NORTH, 1))) {
+				var port = java.util.Objects.requireNonNull(source.sharedRead());
+				var catalog = port.createCatalog(4096, new InventoryValidationBudget.Allowance(port.catalogCreationCost()));
+				var stack = new ItemStack(Items.STONE, 37); stack.set(registration.type, 1);
+				((ChestBlockEntity) world.entities.get(first)).setItem(0, stack);
+				int[] freezes = {0};
+				registration.callback = () -> {
+					freezes[0]++; world.readChecks = 0;
+					if (!finalPass) world.loadedPositions.put(second, false);
+				};
+				world.afterCheck = () -> { if (finalPass && freezes[0] > 0 && world.readChecks == 2) world.loadedPositions.put(second, false); };
+				assertEquals(Check.UNAVAILABLE, assertThrows(ReadFailure.class,
+					() -> port.read(0, port.proof(), catalog, catalogGrant(4096), readGrant(port))).check());
+				assertTrue(freezes[0] > 0, "real resident getter and component freeze were reached");
+				assertTrue(world.audits > 0); assertEquals(0, world.unloadedStateAccesses);
+				if (finalPass) assertEquals(2, world.readChecks);
+			}
 		}
 	}
 	@Test void singleChestAndTrappedRoutesRemainDistinctAndForeignProofIsNeverReplacedByASelfConsistentWrapper() {
