@@ -39,7 +39,7 @@ public final class InventoryRuntime implements AutoCloseable {
 	private static final int MAX_CONSUMERS = 256, MAX_ROUNDS = 32;
 	private static final int MAX_RETAINED_ROUNDS = MAX_ROUNDS * 2; // bounded replacement headroom for completed evidence leases
 	private static final long CONSUMER_MEMORY = 4096;
-	// Fixed round/handle/projection state; <=256 paid-map and tightened-set nodes
+	// Fixed round/handle/projection state (including scalar successor provenance); <=256 paid-map and tightened-set nodes
 	// (object40+five refs), paid boxed progress(object40+int4), two <=512-ref hash
 	// tables, and initial journal directories. Keys/subjects are borrowed. Source
 	// metadata, catalogue payloads and journal growth are not hidden in this slab.
@@ -117,7 +117,6 @@ public final class InventoryRuntime implements AutoCloseable {
 		private @Nullable Round completedRound;
 		private @Nullable Association scanningAssociation, completedAssociation;
 		private @Nullable Round successorEntitlement;
-		private @Nullable Round entitlementPredecessor;
 		// A canonical source alias shares data, not the original input's lease or physical-binding authority.
 		private InventorySourceAccess.InventoryHandle bindingEvidence;
 		private RetainedMemoryLedger.Ticket bindingMemory;
@@ -183,7 +182,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		final LookupKey lookupKey;
 		final InventorySharedRead.Policy policy;
 		boolean sealed;
-		boolean successorEstablished;
+		long successorSequence; // provenance only: never pins a successor or predecessor's source/journal
 		final @Nullable PooledSweep sweep;
 		final InventorySourceInput input;
 		final InventorySourceAccess.@Nullable InventoryHandle handle;
@@ -1791,7 +1790,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (round.closed || round.scanners == 0) return false;
 		if (round.sweep != null && !(consumer.subject instanceof TrackingSubject)) return false;
 		if (certifiedPooling && consumer.subject instanceof TrackingSubject && (round.sealed || !round.policy.equals(policy))) return false;
-		if (consumer.completedRound != null && (round.sequence <= consumer.completedRound.sequence || round.successor != null || round.successorEstablished
+		if (consumer.completedRound != null && (round.sequence <= consumer.completedRound.sequence || round.successor != null || round.successorSequence != 0
 			|| round.sweep == null && !round.key.equals(consumer.completedRound.key))) return false;
 		if (round.startedTick < consumer.observationFloor || round.sequence < consumer.firstRound) return false;
 		if (round.last == null || round.last.completeness() == CaptureResult.Completeness.CONTINUE) return true;
@@ -1799,10 +1798,10 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	private void join(Consumer consumer, Round round) {
 		Round previous = consumer.completedRound;
-		if (certifiedPooling && previous != null && previous != round && !previous.sealed && !previous.successorEstablished && previous.policy.equals(round.policy)) {
-			previous.successorEstablished = true;
+		if (certifiedPooling && previous != null && previous != round && !previous.sealed && previous.successorSequence == 0 && previous.policy.equals(round.policy)) {
+			previous.successorSequence = round.sequence;
 			for (Consumer peer : consumers) if ((peer.completedRound == previous || peer.round == previous) && peer.successorEntitlement == null && !peer.closed) {
-				peer.successorEntitlement = round; peer.entitlementPredecessor = previous;
+				peer.successorEntitlement = round;
 				round.references++; round.scanners++; round.incomingEntitlements++;
 			}
 		}
@@ -1996,19 +1995,23 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	private void releaseAbandonedEntitlements(Round round) {
 		int holds = round.incomingEntitlements;
+		clearSuccessorProvenance(round);
 		// Detach the complete bounded cohort before releasing references: close/release recursion must not see stale holds.
 		for (Consumer consumer : consumers) if (consumer.successorEntitlement == round) {
 			consumer.successorEntitlement = null;
-			@Nullable Round previous = consumer.entitlementPredecessor; consumer.entitlementPredecessor = null;
-			if (previous != null) previous.successorEstablished = false; // sealed eligibility is independent and never reopened
 		}
 		round.incomingEntitlements = 0;
 		for (int hold = 0; hold < holds; hold++) releaseScanner(round, true);
 	}
 	private void releaseEntitlement(Consumer consumer) {
 		@Nullable Round entitled = consumer.successorEntitlement; consumer.successorEntitlement = null;
-		consumer.entitlementPredecessor = null;
 		if (entitled != null) { entitled.incomingEntitlements--; releaseScanner(entitled, true); }
+	}
+	/** No actual scanner or accepted-completion reference remains. Adoption itself must never clear this provenance. */
+	private void clearSuccessorProvenance(Round successor) {
+		// At most MAX_RETAINED_ROUNDS scalar comparisons; no graph records or strong predecessor links escape round admission.
+		for (Round previous : liveRounds) if (previous.successorSequence == successor.sequence) previous.successorSequence = 0;
+		// A sealed predecessor stays sealed: clearing its dead successor does not authorize new old-policy entitlements.
 	}
 	private void releaseBindingEvidence(Consumer consumer) {
 		var handle = consumer.bindingEvidence; consumer.bindingEvidence = null;
@@ -2019,6 +2022,7 @@ public final class InventoryRuntime implements AutoCloseable {
 	private void closeRound(Round round) {
 		if (round.closed) return;
 		round.closed = true;
+		clearSuccessorProvenance(round); // includes the all-adopted, zero-entitlement final release
 		Error fatal = null;
 		try { if (round.handle != null) round.handle.close(); } catch (Error failure) { fatal = failure; }
 		finally {
