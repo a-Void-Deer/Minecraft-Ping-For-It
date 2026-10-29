@@ -418,36 +418,38 @@ public final class InventoryBackend implements AutoCloseable {
 	private void applyPublicationFailures() {
 		for (Tracking lease : List.copyOf(tracking.values())) if (lease.deniedEvidence != null) {
 			var evidence = lease.deniedEvidence; lease.deniedEvidence = null;
-			try {
-				runtime.publicationFailed(lease.consumer, evidence, lease.deniedCheck);
-				for (Tracking affected : List.copyOf(tracking.values())) {
-					if (affected.consumer.invalidated()) { invalidate(affected); continue; }
-					if (lease.deniedCheck == InventorySharedRead.Check.AUTHORITY_DENIED) continue;
-					boolean completedFailed = matchingEvidence(affected.completedEvidence, evidence);
-					boolean bootstrapFailed = matchingEvidence(affected.bootstrapEvidence, evidence);
-					if (completedFailed) {
-						affected.completed = null;
-						if (affected.completedEvidence != null) { affected.completedEvidence.close(); affected.completedEvidence = null; }
-					}
-					if (bootstrapFailed) {
-						affected.bootstrap = null;
-						if (affected.bootstrapEvidence != null) { affected.bootstrapEvidence.close(); affected.bootstrapEvidence = null; }
-					}
-					if (completedFailed || bootstrapFailed || affected.recipients.values().stream().anyMatch(recipient -> publisher.sourceDenied(recipient.context))) {
-						// Fence historical fragments/digests, not a differently proven current scan or completion.
-						// New registration starts with an empty recovery fence and restages only retained valid evidence.
-						affected.state++; resetRecipients(affected);
-					}
-				}
-			} finally { evidence.close(); }
+			try { applyPublicationFailure(lease.consumer, evidence, lease.deniedCheck); } finally { evidence.close(); }
 		}
 		for (Session session : sessions.values()) for (Preview preview : session.previews.values()) if (preview.deniedEvidence != null) {
 			var evidence = preview.deniedEvidence; preview.deniedEvidence = null;
-			try { runtime.publicationFailed(preview.consumer, evidence, preview.deniedCheck); invalidatePreview(session, preview); } finally { evidence.close(); }
+			try { applyPublicationFailure(preview.consumer, evidence, preview.deniedCheck); invalidatePreview(session, preview); } finally { evidence.close(); }
 		}
 		for (Tracking lease : tracking.values()) if (lease.consumer.invalidated() && !lease.invalid) invalidate(lease);
 		for (Session session : sessions.values()) for (Preview preview : session.previews.values())
 			if ((preview.consumer.invalidated() || publisher.sourceDenied(preview.context)) && preview.context.stateFence() == 1) invalidatePreview(session, preview);
+	}
+	/** Propagate a failed historical cut before its origin is withdrawn, independently of its capture domain. */
+	private void applyPublicationFailure(InventoryRuntime.Consumer consumer, InventoryPublicationEvidence evidence, InventorySharedRead.Check check) {
+		runtime.publicationFailed(consumer, evidence, check);
+		for (Tracking affected : List.copyOf(tracking.values())) {
+			if (affected.consumer.invalidated()) { invalidate(affected); continue; }
+			if (check == InventorySharedRead.Check.AUTHORITY_DENIED) continue;
+			boolean completedFailed = matchingEvidence(affected.completedEvidence, evidence);
+			boolean bootstrapFailed = matchingEvidence(affected.bootstrapEvidence, evidence);
+			if (completedFailed) {
+				affected.completed = null;
+				if (affected.completedEvidence != null) { affected.completedEvidence.close(); affected.completedEvidence = null; }
+			}
+			if (bootstrapFailed) {
+				affected.bootstrap = null;
+				if (affected.bootstrapEvidence != null) { affected.bootstrapEvidence.close(); affected.bootstrapEvidence = null; }
+			}
+			if (completedFailed || bootstrapFailed || affected.recipients.values().stream().anyMatch(recipient -> publisher.sourceDenied(recipient.context))) {
+				// Fence historical fragments/digests, not a differently proven current scan or completion.
+				// New registration starts with an empty recovery fence and restages only retained valid evidence.
+				affected.state++; resetRecipients(affected);
+			}
+		}
 	}
 	private static boolean matchingEvidence(@Nullable InventoryPublicationEvidence held, InventoryPublicationEvidence failed) {
 		return held != null && (held.sameProof(failed) || failed.sameProof(held));
