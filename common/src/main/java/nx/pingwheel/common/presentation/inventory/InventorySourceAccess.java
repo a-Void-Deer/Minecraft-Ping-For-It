@@ -107,6 +107,8 @@ public final class InventorySourceAccess implements SourceAccess {
 	 * the source offers no usable snapshot support.
 	 */
 	public interface InventoryHandle extends SourceAccess.Handle {
+		/** Independent exact metadata ownership; the caller never retains this handle's cursor or snapshot. */
+		default Optional<InventoryPublicationEvidence> publicationEvidence() { return Optional.empty(); }
 		/** Optional borrowed certification port; does not advance this handle's legacy cursor. */
 		default InventorySharedRead.@Nullable Port sharedRead() { return null; }
 		/** Cached source-owned metadata, excluding catalogues and detached captures; no callbacks or lazy allocation. */
@@ -156,6 +158,10 @@ public final class InventorySourceAccess implements SourceAccess {
 	}
 
 	public interface Source extends AutoCloseable {
+		/** Runtime-owned wrappers provide historical metadata lifetime for publication. */
+		default Optional<InventoryPublicationEvidence> publicationEvidence() { return Optional.empty(); }
+		/** Last scanning owner has left; source metadata may remain pinned by publication. */
+		default void releaseReadData() {}
 		/** Optional inventory-local sharing capability. Unknown sources retain exact isolation. */
 		default InventorySharedRead.@Nullable Port sharedRead() { return null; }
 		/** Pure cached ownership cost, bounded by the admitted resolution workspace and held until close. */
@@ -426,6 +432,7 @@ public final class InventorySourceAccess implements SourceAccess {
 			this.input = input; this.descriptor = descriptor; this.scope = scope; this.source = source;
 		}
 		@Override public Descriptor descriptor() { return descriptor; }
+		@Override public Optional<InventoryPublicationEvidence> publicationEvidence() { return closed ? Optional.empty() : source.publicationEvidence(); }
 		@Override public InventorySharedRead.@Nullable Port sharedRead() { return closed ? null : source.sharedRead(); }
 		@Override public long sourceRetainedBytes() { return source.sourceRetainedBytes(); }
 		@Override public ReadMode readMode() { return source.readMode(); }
@@ -441,7 +448,7 @@ public final class InventorySourceAccess implements SourceAccess {
 		@Override public InventoryValidationBudget.Cost stepValidationCost(int slots) {
 			return snapshot != null ? source.evidenceValidationCost() : source.evidenceValidationCost().times(readMode() == ReadMode.NATIVE_INCREMENTAL ? 2 : 1).plus(source.readValidationCost(slots));
 		}
-		@Override public void releaseCapturedData() { releaseRetained(); }
+		@Override public void releaseCapturedData() { try { releaseRetained(); } finally { source.releaseReadData(); } }
 		@Override public int displayBytes() {
 			InventorySnapshot captured = snapshot;
 			return captured != null ? captured.displayBytes() : source.displayBytes();

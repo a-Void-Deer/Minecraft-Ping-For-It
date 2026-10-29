@@ -249,10 +249,26 @@ class CompositeTargetQuotaTest {
 				if (context.recipient().equals(A)) contexts.add(context);
 			}
 			assertEquals(2, contexts.size());
+			// Synthetic wire cuts still use the route's actually retained historical
+			// source authority; production contexts no longer accept unproven bytes.
+			var evidence = new java.util.HashMap<nx.pingwheel.common.presentation.source.SyncPublisher.Context, InventoryPublicationEvidence>();
+			for (Object lease : ((Map<?, ?>) InventoryBackendTest.field(f.backend, "tracking")).values()) {
+				var proof = (InventoryPublicationEvidence) InventoryBackendTest.field(lease, "completedEvidence");
+				for (Object recipient : ((Map<?, ?>) InventoryBackendTest.field(lease, "recipients")).values()) {
+					var context = (nx.pingwheel.common.presentation.source.SyncPublisher.Context) InventoryBackendTest.field(recipient, "context");
+					if (contexts.contains(context)) evidence.put(context, proof);
+				}
+			}
 			long cap = f.settings.trackingStreamPeriodBytesPerClientTarget();
 			int start = f.host.packets.size();
 			for (int cut = 2; cut <= 100; cut++) {
-				for (var context : contexts) InventorySyncPublisherTest.publish(publisher, context, InventorySyncPublisherTest.capture(cut, 1, cut));
+				for (var context : contexts) {
+					var result = InventorySyncPublisherTest.capture(cut, 1, cut);
+					var payload = (nx.pingwheel.common.presentation.source.CaptureResult.OpaqueKeyedFragment) result.payload().orElseThrow();
+					assertInstanceOf(nx.pingwheel.common.presentation.source.SyncPublisher.Outcome.Accepted.class, publisher.publish(result, InventoryStep.SweepEvidence.NONE,
+						new nx.pingwheel.common.presentation.source.SyncPublisher.AuthorizedProjection(nx.pingwheel.common.presentation.source.SyncPublisher.PublicationForm.KEYED_ABSOLUTE, payload.entries().keySet()), context,
+						new nx.pingwheel.common.presentation.source.CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, 256L)), java.util.Objects.requireNonNull(evidence.get(context))));
+				}
 				publisher.drain();
 			}
 			long bytes = 0;

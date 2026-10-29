@@ -64,7 +64,7 @@ public final class InventoryServer {
 				}
 			},
 			ServerConfig.HANDLER.getConfig().getInventory().pendingMemoryBytes(),
-			reprojector, sink);
+			reprojector, sink, true);
 		backend = new InventoryBackend(new Host(server, runtime, reprojector), runtime, epochSeed, sink);
 	}
 

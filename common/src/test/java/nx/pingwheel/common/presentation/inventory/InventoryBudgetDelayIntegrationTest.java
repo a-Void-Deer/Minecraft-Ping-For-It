@@ -614,7 +614,10 @@ class InventoryBudgetDelayIntegrationTest {
 			assertEquals(160, reads.get());
 			assertTrue(host.packets.stream().anyMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW && packet.completeScan()));
 			assertEquals(160, host.packets.stream().flatMap(packet -> packet.entries().stream()).map(InventoryS2CPacket.Entry::key).distinct().count());
-			assertTrue(sink.events.isEmpty());
+			// Each frame now admits its own final source validation. A wide cut can
+			// legitimately record provider delay before delivery, under unchanged caps.
+			assertFalse(runtime.delayed(Module.INVENTORY_PREVIEW));
+			int deliveredEvents = sink.events.size();
 			// Enough for the actual authority workspace, less than cumulative
 			// domain encoding (160 independently serviceable 8 KiB displays).
 			long headroom = InventoryItemBudget.workspaceUpperBound((int) settings.effectiveDisplayBytes()) + 1024 * 1024;
@@ -623,7 +626,7 @@ class InventoryBudgetDelayIntegrationTest {
 				int frames = host.packets.size(), checked = validations.get();
 				backend.tick(9, settings); backend.tick(10, settings);
 				assertEquals(frames, host.packets.size()); assertEquals(160, reads.get()); assertTrue(validations.get() > checked);
-				assertTrue(sink.events.isEmpty(), "no observed delay means no delayed-cycle WARN input");
+				assertEquals(deliveredEvents, sink.events.size(), "an already delivered cut must not add encoding or final-validation delays");
 				assertNotEquals(DelayState.DELAYED, sink.lastState(Module.INVENTORY_PREVIEW, runtime.previewPeriodId()));
 			} finally { pressure.close(); }
 			int frames = host.packets.size(); backend.tick(12, settings); assertEquals(frames, host.packets.size());

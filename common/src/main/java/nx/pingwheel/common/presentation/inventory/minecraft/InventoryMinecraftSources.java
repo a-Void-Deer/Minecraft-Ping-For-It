@@ -201,6 +201,7 @@ public final class InventoryMinecraftSources {
 		@Override public InventoryDomainCodec.@Nullable Item apply(IPlatformInventoryService.Entry entry, InventoryCatalogAdmission admission) { return item(catalog(), entry, admission); }
 		void tightenDisplay(int ceiling) { displayBytes = Math.min(displayBytes, ceiling); if (catalog != null) catalog.tightenDisplay(ceiling); }
 		InventoryReprojectionSummary summary(int ceiling) { return catalog == null ? InventoryReprojectionSummary.EMPTY : catalog.reprojectionSummary(ceiling); }
+		void releaseReadData() { catalog = null; }
 	}
 	/** No world/provider access: admission is possible before a Source or its member/slot metadata exists. */
 	public static InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput input) {
@@ -659,6 +660,7 @@ public final class InventoryMinecraftSources {
 			return world != null && originalStableCursor && testSnapshotCapture == null ? InventorySourceAccess.ReadMode.NATIVE_INCREMENTAL : InventorySourceAccess.ReadMode.ADAPTER;
 		}
 		@Override public InventoryItemCodec.@Nullable Catalog nativeCatalog() { return residentCatalog; }
+		@Override public void releaseReadData() { residentCatalog = null; if (codec instanceof CompatibilityCodec compatibility) compatibility.releaseReadData(); }
 		@Override public long nativeCatalogGrowthUpperBound() {
 			return residentCatalog == null ? InventoryItemCodec.Catalog.initialModeledBytes() + InventoryItemCodec.Catalog.firstReadGrowthUpperBound(displayBytes) : residentCatalog.retainedGrowthUpperBound();
 		}
@@ -1318,6 +1320,7 @@ public final class InventoryMinecraftSources {
 			return stableCursor ? InventorySourceAccess.ReadMode.NATIVE_INCREMENTAL : InventorySourceAccess.ReadMode.ADAPTER;
 		}
 		@Override public InventoryItemCodec.@Nullable Catalog nativeCatalog() { return residentCatalog; }
+		@Override public void releaseReadData() { residentCatalog = null; if (codec instanceof CompatibilityCodec compatibility) compatibility.releaseReadData(); }
 		@Override public long nativeCatalogGrowthUpperBound() {
 			return residentCatalog == null ? InventoryItemCodec.Catalog.initialModeledBytes() + InventoryItemCodec.Catalog.firstReadGrowthUpperBound(displayBytes) : residentCatalog.retainedGrowthUpperBound();
 		}
