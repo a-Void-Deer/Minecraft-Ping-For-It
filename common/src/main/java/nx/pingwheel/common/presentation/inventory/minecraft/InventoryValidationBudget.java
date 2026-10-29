@@ -129,6 +129,15 @@ public final class InventoryValidationBudget {
 		long members = chest ? 2 : vault ? 81 : InventorySnapshotLayout.MAX_MEMBERS;
 		Cost structure = changedLayoutCopy(members, vault || chest ? members : members * InventorySnapshotLayout.MAX_SEGMENTS_PER_MEMBER)
 			.overlap(fixed(null)).overlap(owned(4096L * (O + 2 * R) + 16 * list(members), 4096 + 32 * members));
+		// Optional native certificate, canonical member DTO, identity witnesses and cached read profiles.
+		// These remain under the original resolution ownership ticket, even when certification is declined.
+		if (chest || vault) {
+			// Existing discovery already holds the conservative full-slot DTO/source
+			// workspace. Certificates reuse that envelope, not extra spendable scratch.
+			Cost certificate = owned(8192 + members * 4096 + 4096 * 128L, 131072 + members * 4096)
+				.plus(vault ? vaultValidation(members).times(3).plus(localClassification(3 * members)) : locks(2));
+			structure = structure.plus(new Cost(certificate.allocationBytes(), 0, certificate.workUnits()));
+		}
 		if (vault) return bookkeeping().plus(structure.overlap(vaultLayout(81).plus(vaultValidation(81).times(3))));
 		if (chest) return bookkeeping().plus(structure.overlap(locks(2)));
 		// Unknown capability internals are external-trusted. Our known wrapper graph and possible native Vault discovery remain owned.

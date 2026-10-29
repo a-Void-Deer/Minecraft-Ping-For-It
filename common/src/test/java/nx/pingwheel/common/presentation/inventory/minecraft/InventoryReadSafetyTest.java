@@ -42,6 +42,15 @@ class InventoryReadSafetyTest {
 		ChestBlockEntity chest = new ChestBlockEntity(BlockPos.ZERO, Blocks.CHEST.defaultBlockState());
 		assertFalse(InventoryReadSafety.readable(chest, ItemStack.EMPTY));
 	}
+	@Test void typedSafetySeparatesAuthorityFromLootAndMissingAccessWithoutContentReads() {
+		var chest = new Chest();
+		assertEquals(nx.pingwheel.common.presentation.inventory.InventorySharedRead.Check.AUTHORITY_DENIED, InventoryReadSafety.check(chest, null));
+		assertEquals(nx.pingwheel.common.presentation.inventory.InventorySharedRead.Check.AUTHORITY_DENIED, InventoryReadSafety.check(chest, ItemStack.EMPTY));
+		chest.setLootTable(net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.LOOT_TABLE,
+			net.minecraft.resources.ResourceLocation.parse("minecraft:chests/simple_dungeon")));
+		assertEquals(nx.pingwheel.common.presentation.inventory.InventorySharedRead.Check.UNAVAILABLE, InventoryReadSafety.check(chest, ItemStack.EMPTY));
+		assertEquals(0, chest.itemReads + chest.implicitReads);
+	}
 	static final class Sided extends SimpleContainer implements WorldlyContainer {
 		int[] mapping = {2, 0}; Direction received;
 		Sided() { super(3); }

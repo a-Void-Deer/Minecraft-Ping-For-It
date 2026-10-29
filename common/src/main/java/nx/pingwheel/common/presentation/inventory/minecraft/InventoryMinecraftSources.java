@@ -40,6 +40,7 @@ import nx.pingwheel.common.presentation.inventory.InventoryReprojectionSummary;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
 import nx.pingwheel.common.presentation.inventory.InventorySelection;
+import nx.pingwheel.common.presentation.inventory.InventorySharedRead;
 import nx.pingwheel.common.presentation.minecraft.MinecraftBlockReadSources;
 import nx.pingwheel.common.presentation.source.SourceKey;
 import nx.pingwheel.common.diagnostics.Diagnostics;
@@ -77,7 +78,7 @@ public final class InventoryMinecraftSources {
 				throw new InventorySourceAccess.CursorlessReadFailure(attempted, failure);
 		}
 	}
-	private record Slot(Container container, int index) {}
+	record Slot(Container container, int index) {}
 	record View(String identity, @org.jetbrains.annotations.Unmodifiable List<BlockEntity> entities,
 		@org.jetbrains.annotations.Unmodifiable List<Slot> slots, IPlatformInventoryService.@Nullable Access access,
 		@Nullable InventorySnapshotLayout snapshotLayout, boolean discoverItems,
@@ -98,6 +99,12 @@ public final class InventoryMinecraftSources {
 		BlockEntity blockEntity(BlockPos pos);
 		boolean onServerThread();
 		ItemStack heldKey();
+		/** Explicit absence; production never infers owner denial from an exception message. */
+		default @Nullable ItemStack readOwnerKey() { return heldKey(); }
+		default Object worldIdentity() { return this; }
+		default InventorySharedRead.Check readCheck(BlockEntity entity, @Nullable ItemStack key) {
+			return InventoryReadSafety.check(entity, key);
+		}
 		HolderLookup.Provider registries();
 		/** Native graph certificate by default; headless ports may audit their own fixture graph. */
 		default boolean audited(Container container) { return InventoryContainerReads.audited(container, ignored -> true); }
@@ -211,7 +218,7 @@ public final class InventoryMinecraftSources {
 		ServerPlayer owner = server.getPlayerList().getPlayer(input.readOwner());
 		if (level == null || owner == null) return Optional.empty();
 		try {
-			Supplier<ServerPlayer> ownerSupplier = () -> server.getPlayerList().getPlayer(input.readOwner());
+			Supplier<@Nullable ServerPlayer> ownerSupplier = () -> server.getPlayerList().getPlayer(input.readOwner());
 			var codec = new CompatibilityCodec(level.registryAccess(), displayBytes);
 			if (input.target() instanceof Target.ExternalBlockTarget external) {
 				return resolveExternal(input, () -> bindExternal(server, ownerSupplier, external), server::isSameThread, codec,
@@ -230,7 +237,7 @@ public final class InventoryMinecraftSources {
 	}
 
 	/** The server level is looked up per operation so no world handle is retained across ticks. */
-	private static Optional<ExternalBinding> bindExternal(MinecraftServer server, Supplier<ServerPlayer> ownerSupplier,
+	private static Optional<ExternalBinding> bindExternal(MinecraftServer server, Supplier<@Nullable ServerPlayer> ownerSupplier,
 		Target.ExternalBlockTarget external) {
 		ResourceLocation dimension = ResourceLocation.tryParse(external.dimensionId());
 		ServerLevel current = dimension == null ? null : server.getLevel(ResourceKey.create(Registries.DIMENSION, dimension));
@@ -321,7 +328,7 @@ public final class InventoryMinecraftSources {
 			throw new InventorySourceUnavailableException("inventory container kind changed");
 		if (enforceShape && (expected == null || vault(expected)) && entity instanceof net.minecraft.world.level.block.entity.BaseContainerBlockEntity)
 			throw new InventorySourceUnavailableException("inventory member lock kind changed");
-		check(entity, world.heldKey());
+		check(world, entity);
 		Direction face = Direction.valueOf(physical.face().name());
 		List<BlockEntity> entities = new ArrayList<>();
 		List<Slot> slots = new ArrayList<>();
@@ -338,7 +345,7 @@ public final class InventoryMinecraftSources {
 				throw new InventorySourceUnavailableException("invalid chest pairing");
 			if (!physical.contains(partner)) throw new InventorySourceUnavailableException("chest partner outside the read scope");
 			BlockEntity otherEntity = world.blockEntity(partner);
-			check(otherEntity, world.heldKey());
+			check(world, otherEntity);
 			if (!(entity instanceof ChestBlockEntity) || !(otherEntity instanceof ChestBlockEntity))
 				throw new InventorySourceUnavailableException("invalid chest halves");
 			boolean first = compare(pos, partner) < 0;
@@ -539,6 +546,10 @@ public final class InventoryMinecraftSources {
 	private static void check(BlockEntity entity, ItemStack heldKey) {
 		if (!InventoryReadSafety.readable(entity, heldKey)) throw new InventorySourceUnavailableException("source read denied");
 	}
+	private static void check(SourceWorld world, @Nullable BlockEntity entity) {
+		if (entity == null || world.readCheck(entity, world.readOwnerKey()) != InventorySharedRead.Check.VALID)
+			throw new InventorySourceUnavailableException("source read denied");
+	}
 	private static int visibleSlots(InventorySnapshotLayout layout) {
 		int result = 0;
 		for (var member : layout.members()) for (var segment : member.segments()) result = Math.addExact(result, segment.visibleSlots().size());
@@ -575,6 +586,7 @@ public final class InventoryMinecraftSources {
 		private final @Nullable ResourceLocation rootBlock;
 		private final ResourceLocation @org.jetbrains.annotations.Unmodifiable [] memberBlocks, memberTypes;
 		private final long sourceRetainedBytes;
+		private final InventoryCertifiedRead.@Nullable NativePort sharedRead;
 		private boolean closed;
 		Source(InventorySourceInput input, View original, java.util.function.BooleanSupplier onThread,
 			java.util.function.Supplier<View> liveView, java.util.function.Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> codec) {
@@ -636,8 +648,11 @@ public final class InventoryMinecraftSources {
 			for (int count = 0; count < readCosts.length; count++) readCosts[count] = validationViewCost
 				.times(originalStableCursor ? 2L * count : count + 2L).plus(nativeReadCost.times(count));
 			liveAccess = original.access;
-			sourceRetainedBytes = InventorySourceRetention.source(original);
+			sharedRead = world == null || testSnapshotCapture != null ? null
+				: InventoryCertifiedRead.create(input, original, world, () -> closed || !onThread.getAsBoolean());
+			sourceRetainedBytes = InventorySourceRetention.source(original) + (sharedRead == null ? 0 : sharedRead.retainedBytes());
 		}
+		@Override public InventorySharedRead.@Nullable Port sharedRead() { return closed ? null : sharedRead; }
 		@Override public long sourceRetainedBytes() { return sourceRetainedBytes; }
 		@Override public int displayBytes() { return displayBytes; }
 		@Override public InventorySourceAccess.ReadMode readMode() {
@@ -1122,13 +1137,20 @@ public final class InventoryMinecraftSources {
 		Slot slot = view.slots.get(index);
 		return visitor.visit(IPlatformInventoryService.ResidentReads.stack(slot.container.getItem(slot.index)));
 	}
-	private static @org.jetbrains.annotations.Nullable InventoryDomainCodec.Item readFrozen(View view,
+	static @org.jetbrains.annotations.Nullable InventoryDomainCodec.Item readFrozen(View view,
 		@org.jetbrains.annotations.Nullable IPlatformInventoryService.Access access, int slot, InventoryItemCodec.Catalog catalog,
 		HolderLookup.Provider registries, int displayBytes, InventoryItemBudget budget, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
+		return readFrozen(view, access, slot, catalog, registries, displayBytes, budget, admission, null);
+	}
+	static InventoryDomainCodec.@Nullable Item readFrozen(View view, IPlatformInventoryService.@Nullable Access access, int slot,
+		InventoryItemCodec.Catalog catalog, HolderLookup.Provider registries, int displayBytes, InventoryItemBudget budget,
+		@Nullable InventoryCatalogAdmission admission, @Nullable Runnable currentAuthority) {
 		@org.jetbrains.annotations.Nullable InventoryDomainCodec.Item[] result = new InventoryDomainCodec.Item[1];
-		consumeResident(view, access, slot, resident -> {
+		IPlatformInventoryService.ResidentVisitor visitor = resident -> {
 			result[0] = freezeItem(catalog, registries, displayBytes, resident, budget, admission); return true;
-		});
+		};
+		if (currentAuthority != null && access instanceof IPlatformInventoryService.CertifiedSharedAccess capable) capable.consumeSharedResident(slot, visitor, currentAuthority);
+		else consumeResident(view, access, slot, visitor);
 		return result[0];
 	}
 	private static boolean witnessSlot(View view, @org.jetbrains.annotations.Nullable IPlatformInventoryService.Access access,
@@ -1561,14 +1583,19 @@ public final class InventoryMinecraftSources {
 	/** Production world port: the same server-thread facts read from ServerLevel. */
 	private static final class ServerWorld implements SourceWorld {
 		private final ServerLevel level;
-		private final Supplier<ServerPlayer> ownerSupplier;
-		ServerWorld(ServerLevel level, Supplier<ServerPlayer> ownerSupplier) { this.level = level; this.ownerSupplier = ownerSupplier; }
+		private final Supplier<@Nullable ServerPlayer> ownerSupplier;
+		ServerWorld(ServerLevel level, Supplier<@Nullable ServerPlayer> ownerSupplier) { this.level = level; this.ownerSupplier = ownerSupplier; }
 		@Override public boolean isLoaded(BlockPos pos) { return level.isLoaded(pos); }
 		@Override public BlockState blockState(BlockPos pos) { return level.getBlockState(pos); }
 		@Override public BlockEntity blockEntity(BlockPos pos) { return level.getBlockEntity(pos); }
 		@Override public boolean onServerThread() { return level.getServer().isSameThread(); }
+		@Override public Object worldIdentity() { return level; }
+		@Override public @Nullable ItemStack readOwnerKey() {
+			@Nullable ServerPlayer owner = ownerSupplier.get();
+			return owner == null ? null : owner.getMainHandItem();
+		}
 		@Override public ItemStack heldKey() {
-			ServerPlayer owner = ownerSupplier.get();
+			@Nullable ServerPlayer owner = ownerSupplier.get();
 			if (owner == null) throw new InventorySourceUnavailableException("snapshot owner unavailable");
 			return owner.getMainHandItem();
 		}

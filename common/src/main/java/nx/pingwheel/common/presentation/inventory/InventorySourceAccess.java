@@ -107,6 +107,8 @@ public final class InventorySourceAccess implements SourceAccess {
 	 * the source offers no usable snapshot support.
 	 */
 	public interface InventoryHandle extends SourceAccess.Handle {
+		/** Optional borrowed certification port; does not advance this handle's legacy cursor. */
+		default InventorySharedRead.@Nullable Port sharedRead() { return null; }
 		/** Cached source-owned metadata, excluding catalogues and detached captures; no callbacks or lazy allocation. */
 		default long sourceRetainedBytes() { return 0; }
 		default ReadMode readMode() { return ReadMode.ADAPTER; }
@@ -154,6 +156,8 @@ public final class InventorySourceAccess implements SourceAccess {
 	}
 
 	public interface Source extends AutoCloseable {
+		/** Optional inventory-local sharing capability. Unknown sources retain exact isolation. */
+		default InventorySharedRead.@Nullable Port sharedRead() { return null; }
 		/** Pure cached ownership cost, bounded by the admitted resolution workspace and held until close. */
 		default long sourceRetainedBytes() { return 0; }
 		default ReadMode readMode() { return ReadMode.ADAPTER; }
@@ -422,6 +426,7 @@ public final class InventorySourceAccess implements SourceAccess {
 			this.input = input; this.descriptor = descriptor; this.scope = scope; this.source = source;
 		}
 		@Override public Descriptor descriptor() { return descriptor; }
+		@Override public InventorySharedRead.@Nullable Port sharedRead() { return closed ? null : source.sharedRead(); }
 		@Override public long sourceRetainedBytes() { return source.sourceRetainedBytes(); }
 		@Override public ReadMode readMode() { return source.readMode(); }
 		@Override public InventoryItemCodec.@Nullable Catalog nativeCatalog() { return source.nativeCatalog(); }

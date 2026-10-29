@@ -32,6 +32,11 @@ public final class InventoryCatalogAdmission {
 
 	public long attemptedWork() { return attemptedWork; }
 	public long peakWorkspaceBytes() { return peakWorkspace; }
+	/** Preflight a certified native read before its first provider callback. Intern still pays actual attempted work. */
+	void requireNativeRead(int displayBytes) {
+		if (workspaceBytes < workspaceUpperBound(InventoryItemCodec.MAX_CANONICAL_BYTES, displayBytes, InventoryItemCodec.DEFAULT_MAX_ENTRIES)
+			|| workUnits - attemptedWork < workUpperBound(displayBytes)) throw EXHAUSTED;
+	}
 
 	/** Checked, allocation-free metadata, before the actual UTF-8 length scan. */
 	public static long scanWorkUpperBound(int oldUtf16Units, int itemIdUnits, int labelUnits) {

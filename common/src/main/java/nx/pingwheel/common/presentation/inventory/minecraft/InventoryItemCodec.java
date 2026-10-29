@@ -270,6 +270,15 @@ public final class InventoryItemCodec {
 		}
 
 		private final HolderLookup.Provider registries;
+		private nx.pingwheel.common.presentation.inventory.InventorySharedRead.@Nullable Proof sharedReadProof;
+		/** Set once by the certified factory, never a source-private catalogue promotion. */
+		void certifySharedRead(nx.pingwheel.common.presentation.inventory.InventorySharedRead.Proof proof) {
+			if (sharedReadProof != null) throw new IllegalStateException("catalogue already certified");
+			sharedReadProof = Objects.requireNonNull(proof);
+		}
+		boolean acceptsSharedRead(nx.pingwheel.common.presentation.inventory.InventorySharedRead.Proof proof, HolderLookup.Provider current) {
+			return registries == current && proof.equals(sharedReadProof);
+		}
 		private final InventoryResidentAccess raw;
 		private final InventoryItemNativeAccess nativeAccess;
 		private final int maxEntries;

@@ -111,6 +111,7 @@ class InventoryInPlaceSourceContractTest {
 			var key = new ItemStack(Items.STICK); key.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME,
 				net.minecraft.network.chat.Component.literal("key")); world.key = key; world.chest.lock = new LockCode("key");
 			try (var source = source(world, access)) {
+				assertNull(source.sharedRead(), "in-place validity alone cannot grant equivalence certification");
 				assertTrue(source.valid());
 				Runnable revoke = () -> {
 					switch (boundary) {
@@ -151,6 +152,7 @@ class InventoryInPlaceSourceContractTest {
 		var binding = new InventoryMinecraftSources.ExternalBinding(world, descriptor, position -> member[0],
 			(position, face) -> Optional.of(access));
 		try (var source = InventoryMinecraftSources.resolveExternal(input, () -> { bindings[0]++; return Optional.of(binding); }, () -> true, entry -> null).orElseThrow()) {
+			assertNull(source.sharedRead(), "external bindings do not acquire ordinary certification");
 			int before = bindings[0]; assertTrue(source.valid()); assertTrue(source.valid()); assertEquals(before + 2, bindings[0]);
 			assertEquals(0, access.currentChecks); member[0] = false; assertFalse(source.valid()); assertEquals(0, access.reads);
 		}

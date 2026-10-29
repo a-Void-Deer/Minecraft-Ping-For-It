@@ -296,6 +296,16 @@ public interface IPlatformInventoryService {
 		/** Pure cached bound for consumeResident(), not whole-snapshot capability discovery. */
 		InventoryValidationBudget.Cost nativeReadCost();
 	}
+	/** Independent, optional audited member-local equivalence port. Generic decorators deliberately do not forward it. */
+	interface CertifiedSharedAccess extends Access {
+		/** Cached admitted address family, or null when local declarations cannot certify this route. */
+		nx.pingwheel.common.presentation.inventory.InventorySharedRead.@org.jetbrains.annotations.Nullable Route sharedReadRoute();
+		/** Metadata only: current route, topology, boundaries and local declaration ownership, never a resident audit. */
+		nx.pingwheel.common.presentation.inventory.InventorySharedRead.Check validateSharedRead(InventorySnapshotLayout expected);
+		InventoryValidationBudget.Cost sharedValidationCost();
+		/** Recheck the supported native ownership immediately before access; never fall back to external trust. */
+		boolean consumeSharedResident(int slot, ResidentVisitor visitor, Runnable currentAuthority);
+	}
 	interface ResidentScope {
 		Direction face();
 		/** Precheck every already resolved member, including lock/loot/mapping. */

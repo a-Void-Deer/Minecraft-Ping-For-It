@@ -17,6 +17,7 @@ import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLay
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotSchemas;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
+import nx.pingwheel.common.presentation.inventory.InventorySharedRead;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /** Lazy tested-shape Vault access; never asks Create to initialize its combined capability. */
@@ -106,6 +107,11 @@ public final class CreateVaultInventoryAccess {
 	private static boolean nativeLocal(IItemHandler handler) {
 		return nativeLocal(handler, nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess.load());
 	}
+	/** Declaration evidence only: no backing field read or resident list audit. */
+	private static boolean certifiedLocal(IItemHandler handler) {
+		IItemHandler local = handler instanceof GatedHandler gated ? gated.delegate() : handler;
+		return local instanceof ItemStackHandler && localOwnership.get(local.getClass());
+	}
 	static boolean nativeLocal(IItemHandler handler, nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess raw) {
 		return handler instanceof ItemStackHandler && localOwnership.get(handler.getClass())
 			&& IPlatformInventoryService.ResidentReads.nativeStacks(IPlatformInventoryService.ResidentReads.field(handler,
@@ -142,7 +148,8 @@ public final class CreateVaultInventoryAccess {
 			() -> "position=" + original + " worldClass=" + (world == null ? "none" : world.getClass().getName()) + " " + detail.get(), failure);
 	}
 	private record Layout(BlockPos controller, int width, int length, Direction.Axis axis,
-		@org.jetbrains.annotations.Unmodifiable List<BlockPos> members, @org.jetbrains.annotations.Unmodifiable List<Integer> slotCounts, int slots) {}
+		@org.jetbrains.annotations.Unmodifiable List<BlockPos> members, @org.jetbrains.annotations.Unmodifiable List<Integer> slotCounts,
+		int slots, boolean certifiedLocals) {}
 	private static Object call(BlockEntity entity, String name) throws ReflectiveOperationException {
 		IPlatformInventoryService.ResidentReads.requireReflectionShape(entity.getClass(), name);
 		return entity.getClass().getMethod(name).invoke(entity);
@@ -196,17 +203,23 @@ public final class CreateVaultInventoryAccess {
 			}
 		if (!members.contains(original)) throw new InventorySourceUnavailableException("original Vault outside controller");
 		int slots = 0;
+		boolean certified = true;
 		List<Integer> counts = new ArrayList<>(members.size());
 		for (BlockPos pos : members) {
-			int count = world.loaded(pos).local().getSlots();
+			IItemHandler local = world.loaded(pos).local();
+			certified &= certifiedLocal(local);
+			int count = local.getSlots();
 			if (count < 0 || count > 4096 - slots) throw new IllegalStateException("Vault finite slots");
 			slots += count;
 			counts.add(count);
 		}
-		return new Layout(controller, width, length, axis, List.copyOf(members), List.copyOf(counts), slots);
+		return new Layout(controller, width, length, axis, List.copyOf(members), List.copyOf(counts), slots, certified);
 	}
 	/** Compare the frozen positions and local boundaries without rebuilding lists, offsets or boxed mappings. */
 	private static boolean matches(World world, BlockPos original, Layout expected, InventorySnapshotLayout frozenLayout) throws ReflectiveOperationException {
+		return matches(world, original, expected, frozenLayout, false);
+	}
+	private static boolean matches(World world, BlockPos original, Layout expected, InventorySnapshotLayout frozenLayout, boolean certified) throws ReflectiveOperationException {
 		Member part = world.loaded(original);
 		if (!expected.controller.equals(part.controller())) return false;
 		Member master = world.loaded(expected.controller);
@@ -221,16 +234,18 @@ public final class CreateVaultInventoryAccess {
 		}
 		for (int index = 0; index < expected.members.size(); index++) {
 			Member member = world.loaded(expected.members.get(index));
-			if (member.local().getSlots() != expected.slotCounts.get(index)) return false;
+			IItemHandler local = member.local();
+			if (certified && !certifiedLocal(local)) throw new InventorySourceUnavailableException("Vault shared local declaration changed");
+			if (local.getSlots() != expected.slotCounts.get(index)) return false;
 		}
 		return true;
 	}
-	private static final class Segmented implements IPlatformInventoryService.InPlaceRevalidatingAccess {
+	private static final class Segmented implements IPlatformInventoryService.InPlaceRevalidatingAccess, IPlatformInventoryService.CertifiedSharedAccess {
 		final World world; final BlockPos original; final Layout expected;
 		final String alias;
 		final InventorySnapshotLayout frozenLayout;
 		final int @org.jetbrains.annotations.Unmodifiable [] offsets;
-		private final InventoryValidationBudget.Cost currentValidationCost, nativeReadCost;
+		private final InventoryValidationBudget.Cost currentValidationCost, nativeReadCost, sharedValidationCost;
 		Segmented(World world, BlockPos original, Layout expected) throws ReflectiveOperationException {
 			this.world = world; this.original = original; this.expected = expected;
 			alias = world.dimension() + "|vault|" + expected.controller.toShortString() + "|create:item_vault";
@@ -253,6 +268,7 @@ public final class CreateVaultInventoryAccess {
 			// current route/layout check after its own live owner/member preflight.
 			currentValidationCost = InventoryValidationBudget.vaultValidation(expected.members.size()).times(2);
 			nativeReadCost = InventoryValidationBudget.nativeRead(frozenLayout, true, true);
+			sharedValidationCost = currentValidationCost.plus(InventoryValidationBudget.localClassification(2L * expected.members.size()));
 		}
 		@Override public Optional<String> alias() { return Optional.of(alias); }
 		/** Local handlers are validated here, not through generic Container scope evidence. */
@@ -288,6 +304,19 @@ public final class CreateVaultInventoryAccess {
 		}
 		@Override public InventoryValidationBudget.Cost currentValidationCost() { return currentValidationCost; }
 		@Override public InventoryValidationBudget.Cost nativeReadCost() { return nativeReadCost; }
+		@Override public InventorySharedRead.@org.jetbrains.annotations.Nullable Route sharedReadRoute() {
+			return expected.certifiedLocals ? InventorySharedRead.Route.CREATE_VAULT_LOCAL : null;
+		}
+		@Override public InventoryValidationBudget.Cost sharedValidationCost() { return sharedValidationCost; }
+		@Override public InventorySharedRead.Check validateSharedRead(InventorySnapshotLayout originalLayout) {
+			if (!frozenLayout.equals(originalLayout)) return InventorySharedRead.Check.STRUCTURE_INVALID;
+			try {
+				if (!world.currentRoute()) return InventorySharedRead.Check.UNAVAILABLE;
+				// Preserve the original frozen access check independently of current-route evidence.
+				if (!matches(world, original, expected, frozenLayout, true) || !matches(world, original, expected, frozenLayout, true)) return InventorySharedRead.Check.STRUCTURE_INVALID;
+				return InventorySharedRead.Check.VALID;
+			} catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) { return InventorySharedRead.Check.UNAVAILABLE; }
+		}
 		@Override public boolean stableCursor() { return true; }
 		@Override public OptionalLong version() { return OptionalLong.empty(); }
 		@Override public boolean supportsDetachedSlotCapture() {
@@ -303,25 +332,36 @@ public final class CreateVaultInventoryAccess {
 			return java.util.Objects.requireNonNull(result[0]);
 		}
 		@Override public boolean consumeResident(int slot, IPlatformInventoryService.ResidentVisitor visitor) {
+			return consumeResident(slot, visitor, null);
+		}
+		@Override public boolean consumeSharedResident(int slot, IPlatformInventoryService.ResidentVisitor visitor, Runnable currentAuthority) {
+			return consumeResident(slot, visitor, java.util.Objects.requireNonNull(currentAuthority));
+		}
+		private boolean consumeResident(int slot, IPlatformInventoryService.ResidentVisitor visitor, @org.jetbrains.annotations.Nullable Runnable currentAuthority) {
 			java.util.Objects.requireNonNull(visitor, "visitor");
-			if (!valid()) throw new InventorySourceUnavailableException("Vault topology changed");
+			if (currentAuthority == null && !valid()) throw new InventorySourceUnavailableException("Vault topology changed");
 			java.util.Objects.checkIndex(slot, slots());
 			try {
+				if (currentAuthority != null && !matches(world, original, expected, frozenLayout, true)) throw new InventorySourceUnavailableException("Vault shared topology changed");
 				int index = memberIndex(slot), local = slot - offsets[index];
 				int count = expected.slotCounts.get(index);
 				BlockPos position = expected.members.get(index);
 				Member member = world.loaded(position); IItemHandler live = member.local();
+				if (currentAuthority != null && (!world.currentRoute() || !certifiedLocal(live))) throw new InventorySourceUnavailableException("Vault shared local declaration changed");
 				boolean audited = member.auditedLocal(live); // classify before getter; unknown getters remain LIVE/EXTERNAL_TRUST
 				IItemHandler backing = live instanceof GatedHandler gated ? gated.delegate() : live;
 				if (!audited && backing instanceof ItemStackHandler && localOwnership.get(backing.getClass()))
 					throw new InventorySourceUnavailableException("Vault native local backing changed");
 				if (live.getSlots() != count) throw new InventorySourceUnavailableException("Vault local mapping changed");
 				requireMembersHeld(); // the final local metadata callback cannot authorize a now-revoked sibling
+				if (currentAuthority != null) currentAuthority.run();
+				if (currentAuthority != null && !nativeLocal(backing)) throw new InventorySourceUnavailableException("Vault shared native backing changed");
 				var stack = live.getStackInSlot(local);
 				boolean more = visitor.visit(IPlatformInventoryService.ResidentReads.stack(stack));
 				// Even membership and metadata callbacks run only after synchronous detachment.
 				requireMembersHeld();
-				if (!valid()) throw new InventorySourceUnavailableException("Vault topology revoked during resident read");
+				if (currentAuthority == null ? !valid() : !matches(world, original, expected, frozenLayout, true)) throw new InventorySourceUnavailableException("Vault topology revoked during resident read");
+				if (currentAuthority != null) currentAuthority.run();
 				return more;
 			} catch (ReflectiveOperationException failure) { throw new IllegalStateException("Vault local resident read unavailable", failure); }
 		}
