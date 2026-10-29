@@ -74,7 +74,7 @@ class ServerConfigPacketsTest {
 		assertFalse(valid.isCorrupt());
 
 		assertTrue(new ServerConfigUpdateC2SPacket(0, ChannelMode.AUTO, true, 0, 0).isCorrupt());
-		assertTrue(new ServerConfigUpdateC2SPacket(1 << 27, ChannelMode.AUTO, true, 0, 0).isCorrupt());
+		assertTrue(new ServerConfigUpdateC2SPacket(1 << 29, ChannelMode.AUTO, true, 0, 0).isCorrupt());
 		assertTrue(new ServerConfigUpdateC2SPacket(1, ChannelMode.AUTO, true, -1, 0).isCorrupt());
 		assertTrue(new ServerConfigUpdateC2SPacket(1, null, true, 0, 0).isCorrupt());
 	}

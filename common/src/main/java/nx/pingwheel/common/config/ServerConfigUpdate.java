@@ -45,6 +45,8 @@ public record ServerConfigUpdate(
 	public static final int INVENTORY_TRACKING_GRACE_PERIODS = InventoryConfigValues.Field.TRACKING_GRACE_PERIODS.mask();
 	public static final int INVENTORY_DISPLAY_BYTE_MULTIPLIER = InventoryConfigValues.Field.DISPLAY_BYTE_MULTIPLIER.mask();
 	public static final int INVENTORY_FRAME_BYTE_MULTIPLIER = InventoryConfigValues.Field.FRAME_BYTE_MULTIPLIER.mask();
+	public static final int INVENTORY_TRACKING_DISTINGUISH_FACES = InventoryConfigValues.Field.TRACKING_DISTINGUISH_FACES.mask();
+	public static final int INVENTORY_TRACKING_DISTINGUISH_PLAYERS = InventoryConfigValues.Field.TRACKING_DISTINGUISH_PLAYERS.mask();
 	public static final int ALL_INVENTORY_FIELDS = InventoryConfigValues.allFieldMask();
 	public static final int BUDGET_DELAY_NOTIFICATIONS_ENABLED = 1 << 26;
 	public static final int ALL_FIELDS = DEFAULT_CHANNEL_MODE

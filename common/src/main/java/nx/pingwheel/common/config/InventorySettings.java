@@ -256,6 +256,10 @@ public final class InventorySettings {
 	public static final class Tracking {
 
 		private int periodTicks = ConfigDefaults.Inventory.Tracking.PERIOD_TICKS;
+		/** Additional tracking-view partition; never substitutes for current face exposure checks. */
+		private boolean distinguishFaces = ConfigDefaults.Inventory.Tracking.DISTINGUISH_FACES;
+		/** Additional tracking-view partition; never substitutes for current per-player permission checks. */
+		private boolean distinguishPlayers = ConfigDefaults.Inventory.Tracking.DISTINGUISH_PLAYERS;
 		private @Nullable IntLimit maxVariantsPerTarget =
 			IntLimit.finite(ConfigDefaults.Inventory.Tracking.MAX_VARIANTS_PER_TARGET);
 		private @Nullable IntLimit maxSlotsPerTarget =

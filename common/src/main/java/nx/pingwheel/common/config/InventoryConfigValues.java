@@ -27,10 +27,22 @@ public record InventoryConfigValues(@Nullable @Unmodifiable Map<Field, @Nullable
 		public static Value limit(boolean unlimited, int value) {
 			return new Value(unlimited, BigDecimal.valueOf(value));
 		}
+
+		/** Boolean leaves use only finite 0/1 internally, never numeric draft input. */
+		public static Value bool(boolean value) {
+			return scalar(value ? 1 : 0);
+		}
+
+		public boolean booleanValue() {
+			if (unlimited || value == null || !(value.equals(BigDecimal.ZERO) || value.equals(BigDecimal.ONE))) {
+				throw new IllegalStateException("not a boolean value");
+			}
+			return value.equals(BigDecimal.ONE);
+		}
 	}
 
 	public enum Kind {
-		INTEGER, LIMIT, CLIENT_MULTIPLIER, GLOBAL_MULTIPLIER, DISPLAY_SIZE_MULTIPLIER, FRAME_SIZE_MULTIPLIER
+		INTEGER, LIMIT, CLIENT_MULTIPLIER, GLOBAL_MULTIPLIER, DISPLAY_SIZE_MULTIPLIER, FRAME_SIZE_MULTIPLIER, BOOLEAN
 	}
 
 	/** Stable leaf bits; the original five administration bits remain unchanged. */
@@ -58,7 +70,10 @@ public record InventoryConfigValues(@Nullable @Unmodifiable Map<Field, @Nullable
 		/** Finite-only display budget multiplier on the display size scale. */
 		DISPLAY_BYTE_MULTIPLIER(24, Kind.DISPLAY_SIZE_MULTIPLIER, 0, 0),
 		/** Finite-only frame budget multiplier on the frame size scale. */
-		FRAME_BYTE_MULTIPLIER(25, Kind.FRAME_SIZE_MULTIPLIER, 0, 0);
+		FRAME_BYTE_MULTIPLIER(25, Kind.FRAME_SIZE_MULTIPLIER, 0, 0),
+		// Append on the wire, but skip the existing top-level monitoring bit 26.
+		TRACKING_DISTINGUISH_FACES(27, Kind.BOOLEAN, 0, 1),
+		TRACKING_DISTINGUISH_PLAYERS(28, Kind.BOOLEAN, 0, 1);
 
 		private final int mask;
 		private final Kind kind;
@@ -76,6 +91,7 @@ public record InventoryConfigValues(@Nullable @Unmodifiable Map<Field, @Nullable
 		public Kind kind() { return kind; }
 		public int minimum() { return minimum; }
 		public int maximum() { return maximum; }
+		public boolean isBoolean() { return kind == Kind.BOOLEAN; }
 		/** Only the existing cap and send-byte multiplier kinds carry an unlimited mode. */
 		public boolean supportsUnlimited() {
 			return kind == Kind.LIMIT || kind == Kind.CLIENT_MULTIPLIER || kind == Kind.GLOBAL_MULTIPLIER;
@@ -117,6 +133,10 @@ public record InventoryConfigValues(@Nullable @Unmodifiable Map<Field, @Nullable
 		/** Draft parsing keeps malformed or out-of-range text available for correction. */
 		public Optional<Value> parse(@Nullable String text, boolean unlimited) {
 			if (text == null || text.isEmpty()) return Optional.empty();
+			if (isBoolean()) {
+				if (unlimited || !(text.equals("true") || text.equals("false"))) return Optional.empty();
+				return Optional.of(Value.bool(Boolean.parseBoolean(text)));
+			}
 			try {
 				BigDecimal value;
 				if (isMultiplier() || isSizeScale()) {
@@ -171,6 +191,8 @@ public record InventoryConfigValues(@Nullable @Unmodifiable Map<Field, @Nullable
 		values.put(Field.TRACKING_RESYNC_MIN_PERIODS, Value.scalar(tracking.getResyncMinPeriods()));
 		values.put(Field.TRACKING_HEARTBEAT_PERIODS, Value.scalar(tracking.getHeartbeatPeriods()));
 		values.put(Field.TRACKING_GRACE_PERIODS, Value.scalar(tracking.getGracePeriods()));
+		values.put(Field.TRACKING_DISTINGUISH_FACES, Value.bool(tracking.isDistinguishFaces()));
+		values.put(Field.TRACKING_DISTINGUISH_PLAYERS, Value.bool(tracking.isDistinguishPlayers()));
 		return new InventoryConfigValues(values);
 	}
 
@@ -239,6 +261,8 @@ public record InventoryConfigValues(@Nullable @Unmodifiable Map<Field, @Nullable
 		tracking.setResyncMinPeriods(integer(Field.TRACKING_RESYNC_MIN_PERIODS));
 		tracking.setHeartbeatPeriods(integer(Field.TRACKING_HEARTBEAT_PERIODS));
 		tracking.setGracePeriods(integer(Field.TRACKING_GRACE_PERIODS));
+		tracking.setDistinguishFaces(value(Field.TRACKING_DISTINGUISH_FACES).booleanValue());
+		tracking.setDistinguishPlayers(value(Field.TRACKING_DISTINGUISH_PLAYERS).booleanValue());
 		return settings;
 	}
 

@@ -24,13 +24,13 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.*;
 
 class ServerConfigVarNumbersTest {
-	// Independent v4 fixture, not codec-produced: pending memory carries mode=1
+	// Independent v5 fixture, not codec-produced: pending memory carries mode=1
 	// and finite=65; tracking server slots=128 is a two-byte varint. In-range
 	// non-step counts remain literal integers. Size leaves have no mode byte.
 	private static final byte @Unmodifiable [] UPDATE = hex(
 		"20 00 01 01 01 07 "
 			+ "00 10 01 41 07 00 11 00 43 00 61 00 03 00 04 00 08 "
-			+ "03 00 09 00 51 00 80 01 00 04 00 04 00 08 00 01 01 04 04 01");
+			+ "03 00 09 00 51 00 80 01 00 04 00 04 00 08 00 01 01 04 04 01 00 01");
 	private static final byte @Unmodifiable [] SNAPSHOT = concat(hex("01 01"), UPDATE, 1, UPDATE.length - 1);
 
 	@ParameterizedTest
@@ -203,7 +203,7 @@ class ServerConfigVarNumbersTest {
 	}
 
 	@Test
-	void rawNoticeMaskBit26AppliesFalseWhileBit27RemainsUnknown() {
+	void rawNoticeMaskBit26AppliesFalseWhileBit29RemainsUnknown() {
 		byte[] raw = replace(replace(UPDATE, UPDATE.length - 1, hex("00")), 0, hex("80 80 80 20"));
 		var buf = buffer(raw);
 		try {
@@ -217,7 +217,55 @@ class ServerConfigVarNumbersTest {
 			assertEquals(current().rateLimit(), result.snapshot().rateLimit());
 			assertEquals(0, buf.readableBytes());
 		} finally { buf.release(); }
-		assertRejectedUpdate(replace(UPDATE, 0, hex("80 80 80 40")));
+		assertRejectedUpdate(replace(UPDATE, 0, hex("80 80 80 80 02")));
+	}
+
+	@Test
+	void rawV5BooleanOrderBitsAndAllIndependentValuesPreserveUnselectedAuthority() {
+		for (boolean faces : new boolean[] {false, true}) {
+			for (boolean players : new boolean[] {false, true}) {
+				byte[] raw = UPDATE.clone();
+				raw[raw.length - 3] = (byte) (faces ? 1 : 0);
+				raw[raw.length - 2] = (byte) (players ? 1 : 0);
+				var inventory = fixtureInventory().with(Field.TRACKING_DISTINGUISH_FACES, Value.bool(faces))
+					.with(Field.TRACKING_DISTINGUISH_PLAYERS, Value.bool(players));
+				assertEncoding(raw, new ServerConfigUpdateC2SPacket(32, ChannelMode.AUTO, true, 1, 1, 7, inventory, true));
+				assertEncoding(concat(hex("01 01"), raw, 1, raw.length - 1),
+					new ServerConfigSnapshotS2CPacket(1, true, ChannelMode.AUTO, true, 1, 1, 7, inventory, true));
+				for (int bit : new int[] {27, 28}) {
+					byte[] selected = replace(raw, 0, hex(bit == 27 ? "80 80 80 40" : "80 80 80 80 01"));
+					var buf = buffer(selected);
+					try {
+						var packet = ServerConfigUpdateC2SPacket.readSafe(buf);
+						assertFalse(packet.isCorrupt());
+						assertEquals(1 << bit, packet.changedFields());
+						var result = ServerConfigUpdateService.apply(true, current(), packet.update());
+						assertTrue(result.applied());
+						assertEquals(bit == 27 && faces, result.snapshot().inventory().value(Field.TRACKING_DISTINGUISH_FACES).booleanValue());
+						assertEquals(bit == 28 && players, result.snapshot().inventory().value(Field.TRACKING_DISTINGUISH_PLAYERS).booleanValue());
+						assertEquals(current().inventory().value(Field.PENDING_MEMORY_MIB), result.snapshot().inventory().value(Field.PENDING_MEMORY_MIB));
+						var denied = ServerConfigUpdateService.apply(false, current(), packet.update());
+						assertFalse(denied.applied());
+						assertEquals(current().inventory(), denied.snapshot().inventory());
+					} finally { buf.release(); }
+				}
+			}
+		}
+	}
+
+	@Test
+	void bothNewBooleanBytesRejectNonBooleanOverlongMissingAndSupersededV4Shapes() {
+		for (int fromEnd : new int[] {2, 3}) {
+			for (String invalid : new String[] {"02", "ff", "81 00"}) {
+				assertRejectedUpdate(replace(UPDATE, UPDATE.length - fromEnd, hex(invalid)));
+				assertCorruptAndDrained(replace(SNAPSHOT, SNAPSHOT.length - fromEnd, hex(invalid)), ServerConfigSnapshotS2CPacket::readSafe);
+			}
+			assertRejectedUpdate(replace(UPDATE, UPDATE.length - fromEnd, new byte[0]));
+			assertCorruptAndDrained(replace(SNAPSHOT, SNAPSHOT.length - fromEnd, new byte[0]), ServerConfigSnapshotS2CPacket::readSafe);
+		}
+		byte[] oldUpdate = replace(replace(UPDATE, UPDATE.length - 2, new byte[0]), UPDATE.length - 3, new byte[0]);
+		assertRejectedUpdate(oldUpdate);
+		assertCorruptAndDrained(concat(hex("01 01"), oldUpdate, 1, oldUpdate.length - 1), ServerConfigSnapshotS2CPacket::readSafe);
 	}
 
 	private static <T extends IPacket> void assertStrictShape(byte[] raw, Function<FriendlyByteBuf, T> reader) {
@@ -272,6 +320,10 @@ class ServerConfigVarNumbersTest {
 	private static InventoryConfigValues fixtureInventory() {
 		var values = InventoryConfigValues.defaults();
 		for (Field field : Field.values()) {
+			if (field.isBoolean()) {
+				values = values.with(field, Value.bool(field == Field.TRACKING_DISTINGUISH_FACES));
+				continue;
+			}
 			int integer = switch (field) {
 				case PHYSICAL_SLOTS_PER_TICK -> 16;
 				case PENDING_MEMORY_MIB -> 65;

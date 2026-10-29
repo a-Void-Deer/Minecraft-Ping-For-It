@@ -9,6 +9,8 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
@@ -40,6 +42,110 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class InventorySettingsPersistenceTest {
 
 	private static final String CURRENT_VERSION = "0.4.0-pfi-beta1";
+
+	@ParameterizedTest
+	@ValueSource(strings = {"", ",\"inventory\":{}", ",\"inventory\":{\"tracking\":null}",
+		",\"inventory\":{\"tracking\":{}}",
+		",\"inventory\":{\"tracking\":{\"distinguishFaces\":null,\"distinguishPlayers\":null}}"})
+	void trackingIsolationDefaultsRepairMissingShapesWithoutLoadOrNoopSaveWriteback(
+		String member, @TempDir Path directory) throws IOException {
+		Path path = directory.resolve("server.json");
+		byte[] original = ("{\"pingforit-version\":\"" + CURRENT_VERSION
+			+ "\",\"rateLimit\":17,\"syncDuration\":23,\"unknown\":{\"retained\":true}" + member + "}\n")
+			.getBytes(StandardCharsets.UTF_8);
+		Files.write(path, original);
+		var handler = new ConfigHandler<>(ServerConfig.class, path, CURRENT_VERSION);
+		handler.load();
+		assertFalse(handler.getConfig().getInventory().getTracking().isDistinguishFaces());
+		assertFalse(handler.getConfig().getInventory().getTracking().isDistinguishPlayers());
+		assertEquals(17, handler.getConfig().getRateLimit());
+		assertEquals(23, handler.getConfig().getSyncDuration());
+		assertArrayEquals(original, Files.readAllBytes(path));
+		assertTrue(handler.saveSafely());
+		assertArrayEquals(original, Files.readAllBytes(path));
+	}
+
+	@ParameterizedTest
+	@CsvSource({"false,false", "false,true", "true,false", "true,true"})
+	void independentTrackingIsolationFlagsLoadAndRoundTripWithUnrelatedValues(
+		boolean faces, boolean players, @TempDir Path directory) throws IOException {
+		Path path = directory.resolve("server.json");
+		byte[] original = ("{\"pingforit-version\":\"" + CURRENT_VERSION
+			+ "\",\"rateLimit\":17,\"inventory\":{\"pendingMemoryMiB\":{\"unlimited\":true,\"value\":65},"
+			+ "\"tracking\":{\"periodTicks\":7,\"distinguishFaces\":" + faces + ",\"distinguishPlayers\":" + players + "}}}\n")
+			.getBytes(StandardCharsets.UTF_8);
+		Files.write(path, original);
+		var handler = new ConfigHandler<>(ServerConfig.class, path, CURRENT_VERSION);
+		handler.load();
+		assertEquals(faces, handler.getConfig().getInventory().getTracking().isDistinguishFaces());
+		assertEquals(players, handler.getConfig().getInventory().getTracking().isDistinguishPlayers());
+		assertArrayEquals(original, Files.readAllBytes(path));
+		assertTrue(handler.saveSafely());
+		assertArrayEquals(original, Files.readAllBytes(path));
+		handler.getConfig().setRateLimit(19);
+		assertTrue(handler.saveSafely());
+		var tracking = readRoot(path).getAsJsonObject("inventory").getAsJsonObject("tracking");
+		assertEquals(faces, tracking.get("distinguishFaces").getAsBoolean());
+		assertEquals(players, tracking.get("distinguishPlayers").getAsBoolean());
+		assertEquals(CURRENT_VERSION, readRoot(path).get("pingforit-version").getAsString());
+		var reloaded = new ConfigHandler<>(ServerConfig.class, path, CURRENT_VERSION);
+		reloaded.load();
+		assertEquals(faces, reloaded.getConfig().getInventory().getTracking().isDistinguishFaces());
+		assertEquals(players, reloaded.getConfig().getInventory().getTracking().isDistinguishPlayers());
+		assertEquals(7, reloaded.getConfig().getInventory().getTracking().getPeriodTicks());
+		assertEquals(65, reloaded.getConfig().getInventory().getPendingMemoryMiB().getValue());
+		assertTrue(reloaded.getConfig().getInventory().getPendingMemoryMiB().isUnlimited());
+		assertEquals(19, reloaded.getConfig().getRateLimit());
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = {"\"distinguishFaces\":true", "\"distinguishFaces\":true,\"distinguishPlayers\":null",
+		"\"distinguishPlayers\":true", "\"distinguishPlayers\":true,\"distinguishFaces\":null"})
+	void missingOrNullFlagDoesNotResetExplicitTrueSibling(String members, @TempDir Path directory) throws IOException {
+		Path path = directory.resolve("server.json");
+		byte[] original = ("{\"pingforit-version\":\"" + CURRENT_VERSION
+			+ "\",\"inventory\":{\"tracking\":{\"periodTicks\":7," + members + "}}}\n").getBytes(StandardCharsets.UTF_8);
+		Files.write(path, original);
+		var handler = new ConfigHandler<>(ServerConfig.class, path, CURRENT_VERSION);
+		handler.load();
+		boolean faces = members.startsWith("\"distinguishFaces\":true");
+		assertEquals(faces, handler.getConfig().getInventory().getTracking().isDistinguishFaces());
+		assertEquals(!faces, handler.getConfig().getInventory().getTracking().isDistinguishPlayers());
+		assertEquals(7, handler.getConfig().getInventory().getTracking().getPeriodTicks());
+		assertTrue(handler.saveSafely());
+		assertArrayEquals(original, Files.readAllBytes(path));
+	}
+
+	@Test
+	void trackingIsolationFlagsSurviveExistingMigrationAndFutureVersionProtection(@TempDir Path directory) throws IOException {
+		Path path = directory.resolve("server.json");
+		Files.writeString(path, "{\"pingforit-version\":\"0.2.0-pfi-beta1\",\"pingDuration\":23,"
+			+ "\"inventory\":{\"tracking\":{\"distinguishFaces\":true,\"distinguishPlayers\":false,\"unknown\":17}},"
+			+ "\"unknown\":{\"retained\":true}}\n", StandardCharsets.UTF_8);
+		var handler = new ConfigHandler<>(ServerConfig.class, path, CURRENT_VERSION);
+		handler.load();
+		var root = readRoot(path);
+		assertEquals(23, root.get("syncDuration").getAsInt());
+		assertFalse(root.has("pingDuration"));
+		assertTrue(root.getAsJsonObject("unknown").get("retained").getAsBoolean());
+		var tracking = root.getAsJsonObject("inventory").getAsJsonObject("tracking");
+		assertTrue(tracking.get("distinguishFaces").getAsBoolean());
+		assertFalse(tracking.get("distinguishPlayers").getAsBoolean());
+		assertEquals(17, tracking.get("unknown").getAsInt());
+		byte[] future = "{\"pingforit-version\":\"9.0.0-pfi-beta1\",\"inventory\":{\"tracking\":{\"distinguishFaces\":true,\"distinguishPlayers\":true}}}\n"
+			.getBytes(StandardCharsets.UTF_8);
+		Files.write(path, future);
+		handler.load();
+		assertFalse(handler.getConfig().getInventory().getTracking().isDistinguishFaces());
+		assertFalse(handler.getConfig().getInventory().getTracking().isDistinguishPlayers());
+		handler.getConfig().getInventory().getTracking().setDistinguishFaces(true);
+		handler.getConfig().getInventory().getTracking().setDistinguishPlayers(true);
+		assertFalse(handler.saveSafely());
+		handler.resetToDefaults();
+		assertFalse(handler.getConfig().getInventory().getTracking().isDistinguishFaces());
+		assertFalse(handler.getConfig().getInventory().getTracking().isDistinguishPlayers());
+		assertArrayEquals(future, Files.readAllBytes(path));
+	}
 
 	@Test
 	void currentVersionServerFileWithoutInventoryGetsDefaultsWithoutRewrite(@TempDir Path tempDir) throws IOException {

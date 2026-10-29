@@ -134,6 +134,8 @@ public final class ConfigDefaults {
 		public static final class Tracking {
 
 			public static final int PERIOD_TICKS = 3;
+			public static final boolean DISTINGUISH_FACES = false;
+			public static final boolean DISTINGUISH_PLAYERS = false;
 			public static final int MAX_VARIANTS_PER_TARGET = 8;
 			public static final int MAX_SLOTS_PER_TARGET = 512;
 			public static final int MAX_SLOTS_SERVER = 1024;

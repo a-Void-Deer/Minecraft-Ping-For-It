@@ -11,8 +11,13 @@ import nx.pingwheel.common.config.ServerConfigUpdate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.jetbrains.annotations.Nullable;
 
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -20,9 +25,34 @@ import static org.junit.jupiter.api.Assertions.*;
 class ServerInventoryConfigPacketsTest {
 	@Test
 	void routesVersionTheWholeAdministrationTransaction() {
-		assertEquals("pingforit-c2s:server-config-request-v4", ServerConfigRequestC2SPacket.PACKET_ID.toString());
-		assertEquals("pingforit-c2s:server-config-update-v4", ServerConfigUpdateC2SPacket.PACKET_ID.toString());
-		assertEquals("pingforit-s2c:server-config-snapshot-v4", ServerConfigSnapshotS2CPacket.PACKET_ID.toString());
+		assertEquals("pingforit-c2s:server-config-request-v5", ServerConfigRequestC2SPacket.PACKET_ID.toString());
+		assertEquals("pingforit-c2s:server-config-update-v5", ServerConfigUpdateC2SPacket.PACKET_ID.toString());
+		assertEquals("pingforit-s2c:server-config-snapshot-v5", ServerConfigSnapshotS2CPacket.PACKET_ID.toString());
+	}
+
+	/** Static registration evidence, not a running-loader or mixed-peer transport test. */
+	@Test
+	void allLoaderRegistrationsUseOnlyTheVersionBoundPacketConstants() throws IOException {
+		@Nullable Path root = Path.of("").toAbsolutePath();
+		while (root != null && !Files.isDirectory(root.resolve("common/src"))) root = root.getParent();
+		assertNotNull(root);
+		String fabric = Files.readString(root.resolve("fabric/src/main/java/nx/pingwheel/fabric/FabricMain.java"));
+		String forge = Files.readString(root.resolve("forge/src/main/java/nx/pingwheel/forge/ForgeMain.java"));
+		String neo = Files.readString(root.resolve("neoforge/src/main/java/nx/pingwheel/neoforge/NeoMain.java"));
+		for (String packet : List.of("ServerConfigRequestC2SPacket", "ServerConfigUpdateC2SPacket", "ServerConfigSnapshotS2CPacket")) {
+			String direction = packet.endsWith("C2SPacket") ? "C2S" : "S2C";
+			assertTrue(java.util.regex.Pattern.compile("PayloadTypeRegistry\\.play" + direction
+				+ "\\(\\)\\.register\\(\\s*" + packet + "\\.PACKET_TYPE\\s*,").matcher(fabric).find(), packet);
+			assertTrue(java.util.regex.Pattern.compile("ChannelBuilder\\.named\\(\\s*" + packet
+				+ "\\.PACKET_ID\\s*\\)").matcher(forge).find(), packet);
+			assertTrue(java.util.regex.Pattern.compile("registrar\\.playTo" + (direction.equals("C2S") ? "Server" : "Client")
+				+ "\\(\\s*" + packet + "\\.PACKET_TYPE\\s*,").matcher(neo).find(), packet);
+		}
+		for (String source : List.of(fabric, forge, neo)) {
+			assertFalse(source.contains("server-config-request-v4"));
+			assertFalse(source.contains("server-config-update-v4"));
+			assertFalse(source.contains("server-config-snapshot-v4"));
+		}
 	}
 
 	@ParameterizedTest
@@ -181,7 +211,7 @@ class ServerInventoryConfigPacketsTest {
 		buf.writeBoolean(true);
 		assertTrue(ServerConfigUpdateC2SPacket.readSafe(buf).isCorrupt());
 		buf.release();
-		var unknown = new ServerConfigUpdateC2SPacket(1 << 27, ChannelMode.AUTO, true, 0, 0, 7);
+		var unknown = new ServerConfigUpdateC2SPacket(1 << 29, ChannelMode.AUTO, true, 0, 0, 7);
 		assertTrue(roundTrip(unknown, ServerConfigUpdateC2SPacket::readSafe).isCorrupt());
 		assertTrue(new ServerConfigSnapshotS2CPacket(1, true, ChannelMode.AUTO, true, 0, 0, 7, null).isCorrupt());
 		assertTrue(new ServerConfigUpdateC2SPacket(1, ChannelMode.AUTO, true, 0, 0, 7, null).isCorrupt());
@@ -191,7 +221,7 @@ class ServerInventoryConfigPacketsTest {
 	@Test
 	void knownFieldsRejectNonpositiveCapsAndOutOfRangeScalarsWithoutClamping() {
 		for (Field field : Field.values()) {
-			if (field == Field.TRACKING_HEARTBEAT_PERIODS || field == Field.TRACKING_RESYNC_MIN_PERIODS) continue;
+			if (field.isBoolean() || field == Field.TRACKING_HEARTBEAT_PERIODS || field == Field.TRACKING_RESYNC_MIN_PERIODS) continue;
 			var buf = updatePrefix(field.mask());
 			for (Field encoded : Field.values()) {
 				if (encoded.supportsUnlimited()) buf.writeBoolean(false);

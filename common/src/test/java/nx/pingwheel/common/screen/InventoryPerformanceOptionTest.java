@@ -22,7 +22,38 @@ import static org.junit.jupiter.api.Assertions.*;
 @NotNullByDefault
 class InventoryPerformanceOptionTest {
 	@ParameterizedTest
-	@EnumSource(value = Field.class, names = {"DISPLAY_BYTE_MULTIPLIER", "FRAME_BYTE_MULTIPLIER"}, mode = EnumSource.Mode.EXCLUDE)
+	@EnumSource(value = SettingsCategoryCatalog.Setting.class, names = {
+		"INVENTORY_TRACKING_DISTINGUISH_FACES", "INVENTORY_TRACKING_DISTINGUISH_PLAYERS"})
+	void actualBooleanFactoryUsesFullWidthNativeButtonsAndFencesStaleReadOnlyCallbacks(SettingsCategoryCatalog.Setting setting) {
+		Field field = java.util.Objects.requireNonNull(setting.inventoryField());
+		var model = loaded(field, Value.bool(false), true);
+		var button = SettingsScreen.createServerInventoryBooleanButton(setting, model);
+		assertEquals(SettingsScreenLayout.LARGE_WIDGET_WIDTH, button.getWidth());
+		assertNotNull(button.getTooltip());
+		assertTrue(button.active);
+		assertFalse(model.dirty());
+		Component off = button.getMessage();
+		button.onPress();
+		assertTrue(model.inventoryBoolean(field));
+		assertEquals(field.mask(), model.dirtyFields());
+		assertNotEquals(off, button.getMessage());
+		button.onPress();
+		assertFalse(model.dirty());
+		assertEquals(off, button.getMessage());
+		model.setClientPermission(false);
+		button.onPress();
+		assertFalse(model.inventoryBoolean(field));
+		assertFalse(model.dirty());
+		assertFalse(SettingsScreen.createServerInventoryBooleanButton(setting, model).active);
+		model.resetForDisconnect();
+		button.onPress();
+		assertTrue(model.updatePlan().isEmpty());
+		assertFalse(model.dirty());
+	}
+
+	@ParameterizedTest
+	@EnumSource(value = Field.class, names = {"DISPLAY_BYTE_MULTIPLIER", "FRAME_BYTE_MULTIPLIER",
+		"TRACKING_DISTINGUISH_FACES", "TRACKING_DISTINGUISH_PLAYERS"}, mode = EnumSource.Mode.EXCLUDE)
 	void everyReplacementSliderWritesOnlyItsSelectedLeafAndRevertsExactly(Field field) {
 		var model = loaded(field, new Value(false, InventoryPerformanceScale.forField(field).finiteValueAt(0)), true);
 		var edits = new AtomicInteger();

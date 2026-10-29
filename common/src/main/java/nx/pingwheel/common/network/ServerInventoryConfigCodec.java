@@ -9,13 +9,17 @@ import org.jetbrains.annotations.Nullable;
 import java.math.BigDecimal;
 import java.util.EnumMap;
 
-/** Fixed-shape v4 administration payload, including the pending-memory mode byte. */
+/** Fixed-shape v5 administration payload; boolean inventory leaves follow the legacy numeric block. */
 final class ServerInventoryConfigCodec {
 	private ServerInventoryConfigCodec() {}
 
 	static InventoryConfigValues read(FriendlyByteBuf buf) {
 		var values = new EnumMap<Field, Value>(Field.class);
 		for (Field field : Field.values()) {
+			if (field.isBoolean()) {
+				values.put(field, Value.bool(readBoolean(buf)));
+				continue;
+			}
 			boolean unlimited = field.supportsUnlimited() && readBoolean(buf);
 			int encoded = ServerConfigVarNumbers.readInt(buf);
 			BigDecimal value;
@@ -41,6 +45,10 @@ final class ServerInventoryConfigCodec {
 		if (inventory == null || !inventory.isSafe()) throw new IllegalArgumentException("unsafe inventory settings");
 		for (Field field : Field.values()) {
 			Value value = inventory.value(field);
+			if (field.isBoolean()) {
+				buf.writeBoolean(value.booleanValue());
+				continue;
+			}
 			if (field.supportsUnlimited()) buf.writeBoolean(value.unlimited());
 			if (field.isSizeScale()) {
 				buf.writeVarInt(field.sizeScale().quantaOf(value.value()));

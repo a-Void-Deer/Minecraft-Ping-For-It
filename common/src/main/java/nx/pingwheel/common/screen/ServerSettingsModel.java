@@ -133,6 +133,17 @@ public final class ServerSettingsModel {
 		return inventoryUnlimited.getOrDefault(field, false);
 	}
 
+	public boolean inventoryBoolean(Field field) {
+		if (!field.isBoolean()) throw new IllegalArgumentException("not a boolean: " + field);
+		return inventoryDraftValue(field).map(Value::booleanValue).orElse(false);
+	}
+
+	public void toggleInventoryBoolean(Field field) {
+		if (!canEdit() || !field.isBoolean()) return;
+		inventoryText.put(field, Boolean.toString(!inventoryBoolean(field)));
+		recomputeDirtyFields();
+	}
+
 	/** Stops live for the authoritative snapshot session, including its original off-grid finite value. */
 	InventoryPerformanceScale inventoryScale(Field field) {
 		InventoryPerformanceScale scale = inventoryScales.computeIfAbsent(field, InventoryPerformanceScale::forField);
@@ -152,13 +163,13 @@ public final class ServerSettingsModel {
 
 	/** One finite selection changes mode and value atomically; unlimited preserves the retained finite value. */
 	void selectInventoryPosition(Field field, int position) {
-		if (!canEdit() || field.isSizeScale()) return;
+		if (!canEdit() || field.isSizeScale() || field.isBoolean()) return;
 		selectInventoryPosition(field, inventoryScale(field), position);
 	}
 
 	/** A widget submits against its immutable stop list, not a later rebuilt index mapping. */
 	void selectInventoryPosition(Field field, InventoryPerformanceScale scale, int position) {
-		if (!canEdit() || field.isSizeScale() || !scale.belongsTo(field)) return;
+		if (!canEdit() || field.isSizeScale() || field.isBoolean() || !scale.belongsTo(field)) return;
 		boolean unlimited = scale.isUnlimited(position);
 		if (!unlimited) inventoryText.put(field, scale.finiteValueAt(position).toPlainString());
 		inventoryUnlimited.put(field, unlimited);
@@ -171,7 +182,7 @@ public final class ServerSettingsModel {
 	 * off-grid size text stays visible and invalid for correction.
 	 */
 	public void setInventoryText(Field field, String text) {
-		if (!canEdit()) return;
+		if (!canEdit() || field.isBoolean()) return;
 		if (field.isSizeScale()) {
 			var parsed = field.parse(text, false);
 			if (parsed.isPresent()) {
@@ -280,7 +291,7 @@ public final class ServerSettingsModel {
 
 	/** Legacy text-model seam: step to the adjacent finite stop without changing unlimited mode. */
 	public void stepInventoryValue(Field field, boolean forward) {
-		if (!canEdit()) return;
+		if (!canEdit() || field.isBoolean()) return;
 		var parsed = inventoryDraftValue(field);
 		if (parsed.isEmpty()) return;
 		BigDecimal value = parsed.orElseThrow().value();
@@ -551,7 +562,7 @@ public final class ServerSettingsModel {
 		syncDuration = Integer.toString(authoritative.syncDuration());
 		for (Field field : Field.values()) {
 			Value value = authoritative.inventory().value(field);
-			inventoryText.put(field, value.value().toPlainString());
+			inventoryText.put(field, field.isBoolean() ? Boolean.toString(value.booleanValue()) : value.value().toPlainString());
 			inventoryUnlimited.put(field, value.unlimited());
 		}
 		sizeAdjustment = null;

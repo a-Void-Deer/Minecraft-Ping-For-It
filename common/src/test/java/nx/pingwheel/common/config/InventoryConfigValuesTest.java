@@ -122,15 +122,21 @@ class InventoryConfigValuesTest {
 	}
 
 	@Test
-	void maskIsExactlyTwentyOneNewLeavesAndFiveOriginalFields() {
+	void masksPreserveLegacyLeavesAndMonitoringWhileAppendingIndependentBooleanBits() {
 		int mask = 0;
 		for (Field field : Field.values()) {
 			assertEquals(0, mask & field.mask());
 			mask |= field.mask();
 		}
-		assertEquals(21, Field.values().length);
-		assertEquals(((1 << 26) - 1) & ~31, mask);
-		assertEquals((1 << 27) - 1, ServerConfigUpdate.ALL_FIELDS);
+		assertEquals(23, Field.values().length);
+		assertEquals((((1 << 26) - 1) & ~31) | (1 << 27) | (1 << 28), mask);
+		assertEquals((1 << 29) - 1, ServerConfigUpdate.ALL_FIELDS);
+		for (Field field : Field.values()) {
+			if (!field.isBoolean()) assertEquals(1 << (field.ordinal() + 5), field.mask());
+		}
+		assertEquals(1 << 26, ServerConfigUpdate.BUDGET_DELAY_NOTIFICATIONS_ENABLED);
+		assertEquals(1 << 27, Field.TRACKING_DISTINGUISH_FACES.mask());
+		assertEquals(1 << 28, Field.TRACKING_DISTINGUISH_PLAYERS.mask());
 		assertEquals(Field.DISPLAY_BYTE_MULTIPLIER.mask(), ServerConfigUpdate.INVENTORY_DISPLAY_BYTE_MULTIPLIER);
 		assertEquals(Field.FRAME_BYTE_MULTIPLIER.mask(), ServerConfigUpdate.INVENTORY_FRAME_BYTE_MULTIPLIER);
 	}
@@ -222,8 +228,55 @@ class InventoryConfigValuesTest {
 		assertNotSame(current.inventory(), new ServerConfigSnapshot(true, ChannelMode.AUTO, true, 0, 0, 7).inventory());
 	}
 
+	@ParameterizedTest
+	@EnumSource(value = Field.class, names = {"TRACKING_DISTINGUISH_FACES", "TRACKING_DISTINGUISH_PLAYERS"})
+	void booleanLeavesRejectNumericDraftsUnlimitedAndNonBooleanInternalValues(Field field) {
+		assertEquals(InventoryConfigValues.Kind.BOOLEAN, field.kind());
+		assertFalse(field.supportsUnlimited());
+		assertTrue(field.parse("true", false).orElseThrow().booleanValue());
+		assertFalse(field.parse("false", false).orElseThrow().booleanValue());
+		for (String invalid : java.util.List.of("0", "1", "2", "TRUE", "", "0.5", "NaN")) {
+			assertTrue(field.parse(invalid, false).isEmpty(), invalid);
+		}
+		assertTrue(field.parse("true", true).isEmpty());
+		for (Value invalid : java.util.List.of(Value.scalar(-1), Value.scalar(2), Value.limit(true, 1),
+			new Value(false, new BigDecimal("0.5")), new Value(false, null))) {
+			assertFalse(field.isSafe(invalid));
+			assertThrows(IllegalStateException.class, invalid::booleanValue);
+		}
+		assertThrows(UnsupportedOperationException.class, () -> InventoryConfigValues.defaults().fields().clear());
+	}
+
+	@Test
+	void unselectedTrueFlagsSurviveNumericReconstructionAndSingleFlagMergePreservesConcurrentChanges() {
+		var current = InventoryConfigValues.defaults()
+			.with(Field.TRACKING_DISTINGUISH_FACES, Value.bool(true))
+			.with(Field.TRACKING_DISTINGUISH_PLAYERS, Value.bool(true))
+			.with(Field.PENDING_MEMORY_MIB, Value.limit(true, 65));
+		var authoritative = new ServerConfigSnapshot(true, ChannelMode.AUTO, true, 1000, 19, 23, current);
+		var stale = InventoryConfigValues.defaults().with(Field.TRACKING_PERIOD_TICKS, Value.scalar(7));
+		var numeric = new ServerConfigUpdate(Field.TRACKING_PERIOD_TICKS.mask(), ChannelMode.AUTO, true, 1, 2, 3, stale);
+		var merged = numeric.appliedTo(authoritative).orElseThrow();
+		var persisted = merged.inventory().toSettings();
+		assertTrue(persisted.getTracking().isDistinguishFaces());
+		assertTrue(persisted.getTracking().isDistinguishPlayers());
+		assertEquals(7, persisted.getTracking().getPeriodTicks());
+		assertEquals(65, persisted.getPendingMemoryMiB().getValue());
+		assertEquals(19, merged.rateLimit());
+
+		var faceOnly = new ServerConfigUpdate(Field.TRACKING_DISTINGUISH_FACES.mask(),
+			ChannelMode.DISABLED, false, 0, 0, 7, InventoryConfigValues.defaults());
+		var faceMerged = faceOnly.appliedTo(merged).orElseThrow();
+		assertFalse(faceMerged.inventory().toSettings().getTracking().isDistinguishFaces());
+		assertTrue(faceMerged.inventory().toSettings().getTracking().isDistinguishPlayers());
+		assertEquals(Value.scalar(7), faceMerged.inventory().value(Field.TRACKING_PERIOD_TICKS));
+		assertEquals(Value.limit(true, 65), faceMerged.inventory().value(Field.PENDING_MEMORY_MIB));
+		assertEquals(19, faceMerged.rateLimit());
+	}
+
 	private static Value different(InventoryConfigValues values, Field field) {
 		Value current = values.value(field);
+		if (field.isBoolean()) return Value.bool(!current.booleanValue());
 		if (field.isSizeScale()) return new Value(false, field.sizeScale().next(current.value()));
 		return field.isMultiplier() ? new Value(true, field.grid().next(current.value()))
 			: new Value(field.supportsUnlimited(), current.value().intValueExact() == field.maximum()

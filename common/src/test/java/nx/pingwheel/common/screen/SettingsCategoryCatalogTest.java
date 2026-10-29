@@ -91,7 +91,7 @@ class SettingsCategoryCatalogTest {
 
 	@Test
 	void everySettingAppearsExactlyOnceInItsApprovedCategory() {
-		assertEquals(71, Setting.values().length, "the approved catalog has 71 entries");
+		assertEquals(73, Setting.values().length, "the approved catalog has 73 entries");
 		assertEquals(EnumSet.allOf(Category.class), EnumSet.copyOf(EXPECTED_SECTIONS.keySet()),
 			"the approved section map must cover every settings category");
 
@@ -112,9 +112,9 @@ class SettingsCategoryCatalogTest {
 		}
 
 		assertEquals(EnumSet.allOf(Setting.class), all);
-		assertEquals(69L, all.stream()
+		assertEquals(71L, all.stream()
 			.filter(setting -> setting != Setting.OPEN_CLIENT_CONFIG && setting != Setting.PRESENTATION_SERVER_POLICY)
-			.count(), "only the file action and presentation editor are outside the 69 value controls");
+			.count(), "only the file action and presentation editor are outside the 71 value controls");
 	}
 
 	@Test
@@ -205,7 +205,7 @@ class SettingsCategoryCatalogTest {
 		assertEquals(PERFORMANCE_HEADINGS, sections.stream().map(Section::headingKey).toList());
 
 		var rows = sections.stream().flatMap(section -> section.rows().stream()).toList();
-		assertEquals(22, rows.size(), "Performance contains the monitoring toggle and 21 inventory leaves");
+		assertEquals(24, rows.size(), "Performance contains monitoring, 21 numeric leaves and two tracking toggles");
 		assertTrue(rows.stream().allMatch(row -> row.settings().size() == 1),
 			"server Performance controls must not be paired into shared rows");
 		assertEquals(
@@ -319,6 +319,8 @@ class SettingsCategoryCatalogTest {
 			Setting.INVENTORY_PREVIEW_CLIENT_BYTE_MULTIPLIER,
 			Setting.INVENTORY_PREVIEW_GLOBAL_BYTE_MULTIPLIER,
 			Setting.INVENTORY_TRACKING_PERIOD_TICKS,
+			Setting.INVENTORY_TRACKING_DISTINGUISH_FACES,
+			Setting.INVENTORY_TRACKING_DISTINGUISH_PLAYERS,
 			Setting.INVENTORY_TRACKING_MAX_VARIANTS_PER_TARGET,
 			Setting.INVENTORY_TRACKING_MAX_SLOTS_PER_TARGET,
 			Setting.INVENTORY_TRACKING_MAX_SLOTS_SERVER,
@@ -446,6 +448,8 @@ class SettingsCategoryCatalogTest {
 				row(Setting.INVENTORY_PREVIEW_GLOBAL_BYTE_MULTIPLIER)),
 			section(INVENTORY_TRACKING_HEADING,
 				row(Setting.INVENTORY_TRACKING_PERIOD_TICKS),
+				row(Setting.INVENTORY_TRACKING_DISTINGUISH_FACES),
+				row(Setting.INVENTORY_TRACKING_DISTINGUISH_PLAYERS),
 				row(Setting.INVENTORY_TRACKING_MAX_VARIANTS_PER_TARGET),
 				row(Setting.INVENTORY_TRACKING_MAX_SLOTS_PER_TARGET),
 				row(Setting.INVENTORY_TRACKING_MAX_SLOTS_SERVER),

@@ -1733,12 +1733,31 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	private AbstractWidget createServerInventoryWidget(Setting setting) {
 		final Field inventoryField = java.util.Objects.requireNonNull(setting.inventoryField());
+		if (inventoryField.isBoolean()) {
+			return createServerInventoryBooleanButton(setting, this.serverSettings);
+		}
 		if (inventoryField.isSizeScale()) {
 			return this.createServerSizeScaleSlider(setting);
 		}
 		final var slider = InventoryPerformanceOption.slider(LanguageUtils.settings(setting.id()),
 			inventoryField, this.serverSettings, () -> this.serverValidationMessage = null);
 		return slider;
+	}
+
+	/** The production full-width boolean factory, also exercised headlessly without a screen session. */
+	static Button createServerInventoryBooleanButton(Setting setting, ServerSettingsModel model) {
+		final Field field = java.util.Objects.requireNonNull(setting.inventoryField());
+		if (!field.isBoolean()) throw new IllegalArgumentException("not a boolean: " + setting);
+		final Supplier<Component> caption = () -> LanguageUtils.settings("inventory.value").get(
+			LanguageUtils.settings(setting.id()).get(),
+			LanguageUtils.of("value", model.inventoryBoolean(field) ? "enabled" : "disabled").get());
+		final var button = Button.builder(caption.get(), clicked -> {
+			model.toggleInventoryBoolean(field);
+			clicked.setMessage(caption.get());
+		}).bounds(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT).build();
+		button.setTooltip(Tooltip.create(LanguageUtils.settings(setting.id()).path("tooltip").get()));
+		button.active = model.canEdit();
+		return button;
 	}
 
 	/**

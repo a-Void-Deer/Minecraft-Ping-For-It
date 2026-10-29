@@ -21,7 +21,7 @@ class ServerInventoryDraftTest {
 	private static final Field FRAME = Field.FRAME_BYTE_MULTIPLIER;
 
 	@ParameterizedTest
-	@EnumSource(Field.class)
+	@EnumSource(value = Field.class, names = {"TRACKING_DISTINGUISH_FACES", "TRACKING_DISTINGUISH_PLAYERS"}, mode = EnumSource.Mode.EXCLUDE)
 	void eachLeafTracksDirtyRevertsAndBuildsAnIndependentPlan(Field field) {
 		BigDecimal initial = field.isSizeScale() ? field.sizeScale().valueAt(0)
 			: InventoryPerformanceScale.forField(field).finiteValueAt(0);
@@ -42,7 +42,7 @@ class ServerInventoryDraftTest {
 	}
 
 	@ParameterizedTest
-	@EnumSource(Field.class)
+	@EnumSource(value = Field.class, names = {"TRACKING_DISTINGUISH_FACES", "TRACKING_DISTINGUISH_PLAYERS"}, mode = EnumSource.Mode.EXCLUDE)
 	void malformedLeafDoesNotEraseOtherInvalidDraftsOrPermitPartialUpdates(Field field) {
 		var model = loaded(true, EDITABLE);
 		String original = model.inventoryText(field);
@@ -71,6 +71,7 @@ class ServerInventoryDraftTest {
 		model.setInventoryText(field, "99");
 		model.toggleInventoryUnlimited(field);
 		model.stepInventoryValue(field, true);
+		model.toggleInventoryBoolean(field);
 		assertTrue(model.canView());
 		assertFalse(model.canEdit());
 		assertEquals(original, model.inventoryText(field));
@@ -472,6 +473,70 @@ class ServerInventoryDraftTest {
 		model.setInventoryText(DISPLAY, "1");
 		assertEquals(FRAME.mask(), model.dirtyFields());
 		assertTrue(model.updatePlan().orElseThrow().inventory().isSizePairCompatible());
+	}
+
+	@ParameterizedTest
+	@EnumSource(value = Field.class, names = {"TRACKING_DISTINGUISH_FACES", "TRACKING_DISTINGUISH_PLAYERS"})
+	void booleanEditsStayIndependentRevertCleanAndRejectNumericAndUnlimitedEntrypoints(Field field) {
+		var model = loaded(true, EDITABLE);
+		model.toggleInventoryBoolean(field);
+		assertTrue(model.inventoryBoolean(field));
+		assertEquals(field.mask(), model.dirtyFields());
+		assertEquals(0, model.invalidFieldMask());
+		var plan = model.updatePlan().orElseThrow();
+		assertEquals(field.mask(), plan.changedFields());
+		assertTrue(plan.inventory().value(field).booleanValue());
+		for (Field other : Field.values()) {
+			if (other != field) assertEquals(EDITABLE.inventory().value(other), plan.inventory().value(other));
+		}
+		model.setInventoryText(field, "0");
+		model.stepInventoryValue(field, false);
+		model.selectInventoryPosition(field, 0);
+		model.toggleInventoryUnlimited(field);
+		assertTrue(model.inventoryBoolean(field));
+		assertFalse(model.inventoryUnlimited(field));
+		assertThrows(IllegalArgumentException.class, () -> InventoryPerformanceScale.forField(field));
+		model.toggleInventoryBoolean(field);
+		assertFalse(model.dirty());
+		assertTrue(model.updatePlan().isEmpty());
+	}
+
+	@ParameterizedTest
+	@EnumSource(value = Field.class, names = {"TRACKING_DISTINGUISH_FACES", "TRACKING_DISTINGUISH_PLAYERS"})
+	void booleanDraftLifecycleUsesOnlyLatestCorrelatedSnapshotAndRetainsReadOnlyTrue(Field field) {
+		var enabled = new ServerConfigSnapshot(true, ChannelMode.AUTO, true, 1000, 5, 23,
+			EDITABLE.inventory().with(field, Value.bool(true)));
+		var model = loaded(true, enabled);
+		model.toggleInventoryBoolean(field);
+		assertFalse(model.inventoryBoolean(field));
+		model.setClientPermission(false);
+		assertTrue(model.canView());
+		assertTrue(model.inventoryBoolean(field));
+		model.toggleInventoryBoolean(field);
+		assertTrue(model.inventoryBoolean(field));
+		assertFalse(model.dirty());
+		model.setClientPermission(true);
+		model.toggleInventoryBoolean(field);
+		assertEquals(field.mask(), model.dirtyFields());
+		model.resetForDisconnect();
+		assertFalse(model.canView());
+		assertFalse(model.inventoryBoolean(field));
+		model.setClientPermission(true);
+		long stale = model.beginSessionIfNeeded();
+		model.collapseAndDiscard();
+		long fresh = model.beginSessionIfNeeded();
+		assertFalse(model.applySnapshot(stale, enabled));
+		assertTrue(model.applySnapshot(fresh, enabled.withCanEdit(false)));
+		model.toggleInventoryBoolean(field);
+		assertTrue(model.inventoryBoolean(field));
+		assertTrue(model.updatePlan().isEmpty());
+		model.setClientPermission(false);
+		model.setClientPermission(true);
+		long retry = model.beginSessionIfNeeded();
+		assertFalse(model.applySnapshot(fresh, enabled));
+		assertTrue(model.applySnapshot(retry, EDITABLE));
+		assertFalse(model.inventoryBoolean(field));
+		assertFalse(model.dirty());
 	}
 
 	private static BigDecimal sizeDraft(ServerSettingsModel model, Field field) {

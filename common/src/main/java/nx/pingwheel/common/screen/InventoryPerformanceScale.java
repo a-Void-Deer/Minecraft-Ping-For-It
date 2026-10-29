@@ -23,6 +23,7 @@ final class InventoryPerformanceScale {
 	}
 
 	static InventoryPerformanceScale forField(Field field) {
+		if (field.isBoolean()) throw new IllegalArgumentException("boolean settings use toggle buttons");
 		if (field.isSizeScale()) throw new IllegalArgumentException("size sliders have their own paired scale");
 		var stops = new ArrayList<BigDecimal>();
 		if (field.isMultiplier()) {

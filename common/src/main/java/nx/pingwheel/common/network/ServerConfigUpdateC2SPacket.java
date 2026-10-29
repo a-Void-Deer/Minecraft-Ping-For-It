@@ -24,7 +24,7 @@ public record ServerConfigUpdateC2SPacket(
 ) implements IPacket {
 	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(
 		C2S_NAMESPACE,
-		"server-config-update-v4");
+		"server-config-update-v5");
 	public static final Type<ServerConfigUpdateC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	/** Compatibility constructor for callers that do not edit sync duration. */
@@ -38,14 +38,14 @@ public record ServerConfigUpdateC2SPacket(
 			ConfigDefaults.Server.SYNC_DURATION);
 	}
 
-	/** Source compatibility only; v4 wire updates always contain inventory. */
+	/** Source compatibility only; v5 wire updates always contain the complete inventory block. */
 	public ServerConfigUpdateC2SPacket(int changedFields, ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled, int msToRegenerate, int rateLimit, int syncDuration) {
 		this(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
 			syncDuration, InventoryConfigValues.defaults());
 	}
 
-	/** Source compatibility only; the complete v4 wire shape includes the notice flag. */
+	/** Source compatibility only; the complete v5 wire shape includes the notice flag. */
 	public ServerConfigUpdateC2SPacket(int changedFields, @Nullable ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled, int msToRegenerate, int rateLimit, int syncDuration,
 		@Nullable InventoryConfigValues inventory) {

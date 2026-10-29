@@ -10,7 +10,7 @@ import static nx.pingwheel.common.Global.C2S_NAMESPACE;
 public record ServerConfigRequestC2SPacket(long requestId) implements IPacket {
 	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(
 		C2S_NAMESPACE,
-		"server-config-request-v4");
+		"server-config-request-v5");
 	public static final Type<ServerConfigRequestC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	/** Invalid values are used only by safe-decoding fallback. */
