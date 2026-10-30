@@ -1111,7 +1111,8 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (consumer.closed) return InventorySourceAccess.Preparation.UNAVAILABLE;
 		if (consumer.invalidObservation != null || consumer.pendingObservation != null)
 			return InventorySourceAccess.Preparation.UNAVAILABLE;
-		@Nullable Round handoff = certifiedPooling ? consumer.successorEntitlement : consumer.completedRound == null ? null : consumer.completedRound.successor;
+		@Nullable Round handoff = certifiedPooling ? consumer.successorEntitlement
+			: consumer.subject instanceof TrackingSubject && consumer.completedRound != null ? consumer.completedRound.successor : null;
 		if (consumer.round == null && consumer.completedRound != null && !consumer.completedRound.predecessors.isEmpty())
 			return InventorySourceAccess.Preparation.DEFERRED; // finish the physical handoff before another replacement forks
 		if (certifiedPooling && consumer.round == null && consumer.completedRound != null && consumer.completedRound.incomingEntitlements != 0)
@@ -1874,13 +1875,15 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (certifiedPooling && previous != null && previous != round && !previous.sealed && previous.successorSequence == 0 && previous.policy.equals(round.policy)
 			&& (round.sweep == null || !round.sealed && (round.references == 0 || activePooledRound(round)))) {
 			previous.successorSequence = round.sequence;
-			for (Consumer peer : consumers) if ((peer.completedRound == previous || peer.round == previous) && peer.successorEntitlement == null && !peer.closed
+			// Preview owns one initial observation, not a future sweep it will never consume.
+			for (Consumer peer : consumers) if (peer.subject instanceof TrackingSubject
+				&& (peer.completedRound == previous || peer.round == previous) && peer.successorEntitlement == null && !peer.closed
 				&& round.sequence > peer.lastAssociatedSequence && round.sequence >= peer.recoveryFloor) {
 				peer.successorEntitlement = round;
 				round.references++; round.scanners++; round.incomingEntitlements++;
 			}
 		}
-		if (!certifiedPooling && previous != null && previous != round && previous.successor == null) {
+		if (!certifiedPooling && previous != null && previous != round && previous.successor == null && hasTrackingPeer(previous, consumer)) {
 			// One successor per physical observation, not one replacement allowance per consumer.
 			// The lease keeps its data serviceable after the fast peer restarts; the slow peer consumes it
 			// as its next observation without losing either its previous publication evidence or progress.
@@ -1892,6 +1895,12 @@ public final class InventoryRuntime implements AutoCloseable {
 		consumer.round = round;
 		consumer.lastAssociatedSequence = Math.max(consumer.lastAssociatedSequence, round.sequence);
 		if (consumer.successorEntitlement == round) releaseEntitlement(consumer);
+	}
+	/** Legacy shared handoffs are future Tracking demand, not one-shot Preview ownership. */
+	private boolean hasTrackingPeer(Round round, @Nullable Consumer excluded) {
+		for (Consumer peer : consumers) if (peer != excluded && !peer.closed && peer.subject instanceof TrackingSubject
+			&& (peer.round == round || peer.completedRound == round)) return true;
+		return false;
 	}
 	private boolean readPooled(Consumer consumer, int available, InventoryValidationBudget.Allowance allowance) {
 		Round round = consumer.round;
@@ -2024,6 +2033,7 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	private void releaseReference(Round round) {
 		if (--round.references == 0) { closeRound(round); return; }
+		if (round.successor != null && !hasTrackingPeer(round, null)) releaseHandoff(round);
 		if (round.incomingEntitlements != 0 && round.references == round.incomingEntitlements) {
 			// Only handoff holds remain: no actual scanner or accepted-completion owner needs this replacement.
 			releaseAbandonedEntitlements(round);

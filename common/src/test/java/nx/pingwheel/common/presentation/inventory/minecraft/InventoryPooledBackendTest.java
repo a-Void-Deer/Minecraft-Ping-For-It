@@ -187,4 +187,100 @@ class InventoryPooledBackendTest {
 			for (var endpoint : f.clients.values()) for (MarkerId id : ids) { assertTrue(endpoint.tracking(id).complete()); assertEquals(756, endpoint.tracking(id).entries().getFirst().count()); }
 		}
 	}
+	static @Nullable Object stateField(Object owner, String name) {
+		try { var field = owner.getClass().getDeclaredField(name); field.setAccessible(true); return field.get(owner); }
+		catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+	}
+	static Object state(Object owner, String name) { return java.util.Objects.requireNonNull(stateField(owner, name)); }
+	static Object previewState(InventoryPublicationBackendFixture fixture, UUID owner, long request) {
+		var session = java.util.Objects.requireNonNull(((Map<?, ?>) state(fixture.backend, "sessions")).get(owner));
+		return java.util.Objects.requireNonNull(((Map<?, ?>) state(session, "previews")).get(request));
+	}
+	static Object trackingState(InventoryPublicationBackendFixture fixture, MarkerId marker) {
+		return java.util.Objects.requireNonNull(((Map<?, ?>) state(fixture.backend, "tracking")).get(marker));
+	}
+	@ParameterizedTest @CsvSource({"3", "16"})
+	void unselectedOpenPreviewsKeepOneObservationWhileTwoPartitionedTrackingCohortsCompleteRepeatedly(int physicalSlots) throws ReflectiveOperationException {
+		var resolver = new Resolver(Blocks.CHEST); var settings = InventorySettings.serverDefaults();
+		settings.setPendingMemoryMiB(16);
+		settings.getTracking().setDistinguishFaces(false); settings.getTracking().setDistinguishPlayers(true);
+		String configured = settings.toString(); settings.validate(); assertEquals(configured, settings.toString(), "all other quotas and cadences stay at validated defaults");
+		// The reported 3-slot runtime seam deliberately constrains work below the
+		// persisted minimum;16 separately exercises the smallest validated allowance.
+		settings.setPhysicalSlotsPerTick(IntLimit.finite(physicalSlots));
+		try (var f = new InventoryPublicationBackendFixture(resolver, settings, group(Blocks.CHEST))) {
+			@Unmodifiable List<UUID> owners = List.of(InventoryPublicationBackendFixture.A, InventoryPublicationBackendFixture.B);
+			for (UUID owner : owners) {
+				assertEquals(1, f.clients.get(owner).open(target(Blocks.CHEST), BlockFace.NORTH, "entity_block"));
+				assertEquals(1, f.open(owner, target(Blocks.CHEST), BlockFace.NORTH, 0));
+			}
+			for (int tick = 1; tick <= 60; tick++) f.backend.tick(tick, settings);
+			var markers = new java.util.ArrayList<MarkerId>();
+			for (UUID owner : owners) {
+				assertTrue(f.clients.get(owner).preview(1).completeScan());
+				markers.add(f.select(owner, 1, 60)); f.closePreview(owner, 1, 60); f.clients.get(owner).close(1);
+			}
+			assertEquals(2, markers.size()); f.backend.tick(61, settings);
+			for (UUID owner : owners) {
+				assertEquals(2, f.clients.get(owner).open(target(Blocks.CHEST), BlockFace.SOUTH, "entity_block"));
+				assertEquals(2, f.open(owner, target(Blocks.CHEST), BlockFace.SOUTH, 62));
+			}
+			f.backend.tick(62, settings);
+			var originalRounds = new java.util.ArrayList<Object>();
+			for (int index = 0; index < owners.size(); index++) {
+				var preview = previewState(f, owners.get(index), 2); var tracker = trackingState(f, markers.get(index));
+				Object round = state(state(preview, "consumer"), "round"); originalRounds.add(round);
+				assertSame(round, state(state(tracker, "consumer"), "round"), "later unselected Preview joins its independently authorized active owner cohort");
+				assertEquals(1, ((Map<?, ?>) state(java.util.Objects.requireNonNull(((Map<?, ?>) state(f.backend, "sessions")).get(owners.get(index))), "previews")).size(),
+					"original selected Preview was normally closed; only the later unselected request remains");
+			}
+			assertNotSame(originalRounds.get(0), originalRounds.get(1), "player partition keeps two physical cohorts");
+			for (int tick = 63; tick <= 300; tick++) f.backend.tick(tick, settings);
+			var revisions = new java.util.ArrayList<Long>(); var previewRevisions = new java.util.ArrayList<Long>();
+			var references = new java.util.ArrayList<nx.pingwheel.common.presentation.inventory.client.ClientInventory.PreviewEntryReference>();
+			for (int index = 0; index < owners.size(); index++) {
+				UUID owner = owners.get(index); var preview = previewState(f, owner, 2);
+				assertEquals(true, state(preview, "terminal")); assertTrue(f.clients.get(owner).preview(2).completeScan());
+				assertEquals(756, f.clients.get(owner).preview(2).entries().getFirst().count());
+				previewRevisions.add((Long) state(preview, "revision")); references.add(f.clients.get(owner).selectable(2).getFirst());
+				revisions.add((Long) state(trackingState(f, markers.get(index)), "revision"));
+			}
+			// Two stable slot0 amounts change from1 to7. The old Preview must retain756;
+			// each recurring Tracking observation must independently converge to756+2*(7-1).
+			for (var entity : resolver.world.entities.values()) ((ChestBlockEntity) entity).setItem(0, new ItemStack(Items.STONE, 7));
+			for (int tick = 301; tick <= 600; tick++) f.backend.tick(tick, settings);
+			for (int index = 0; index < owners.size(); index++) {
+				var tracker = trackingState(f, markers.get(index)); var completed = state(state(tracker, "consumer"), "completedRound");
+				System.out.println("PREVIEW_LIFETIME physicalSlots=" + physicalSlots + " tick=600 owner=" + index + " count=" + f.clients.get(owners.get(index)).tracking(markers.get(index)).entries().getFirst().count()
+					+ " revisionAt300=" + revisions.get(index) + " revision=" + state(tracker, "revision") + " incoming=" + state(completed, "incomingEntitlements")
+					+ " retained=" + f.runtime.memory().retained() + " reserved=" + f.runtime.memory().reserved());
+			}
+			for (int index = 0; index < owners.size(); index++) {
+				var tracker = trackingState(f, markers.get(index));
+				for (var client : f.clients.values()) {
+					var projection = client.tracking(markers.get(index)); assertTrue(projection.complete()); assertFalse(projection.grey());
+					assertEquals(768, projection.entries().getFirst().count(), "neither open unselected Preview may strand later Tracking observations");
+				}
+				assertTrue((Long) state(tracker, "revision") >= revisions.get(index) + 3, "at least three subsequent Tracking completions without closing either Preview");
+				var preview = previewState(f, owners.get(index), 2); Object consumer = state(preview, "consumer");
+				assertSame(originalRounds.get(index), state(consumer, "round")); assertEquals(54, state(consumer, "cursor"));
+				assertEquals(previewRevisions.get(index), state(preview, "revision"), "Preview performs no second sweep");
+				assertNull(stateField(consumer, "successorEntitlement"));
+				assertEquals(List.of(references.get(index)), f.clients.get(owners.get(index)).selectable(2), "request-scoped selection stays valid");
+				assertEquals(756, f.clients.get(owners.get(index)).preview(2).entries().getFirst().count(), "Preview's initial quantity is neither recaptured nor discarded");
+			}
+			Object oldPreviewRound = originalRounds.getFirst(); long before = physical(f.runtime);
+			MarkerId selectedLater = f.select(owners.getFirst(), 2, 600);
+			assertEquals(3, f.markers.size()); assertEquals(before, physical(f.runtime), "late SELECT still has no content witness");
+			Object selected = trackingState(f, selectedLater); assertEquals(0L, state(selected, "count"));
+			@Nullable Object selectedRound = stateField(state(selected, "consumer"), "round");
+			assertNotSame(oldPreviewRound, selectedRound, "the completed initial Preview is not a new-selection cache");
+			if (selectedRound != null) assertEquals(nx.pingwheel.common.presentation.source.CaptureResult.Completeness.CONTINUE,
+				((nx.pingwheel.common.presentation.source.CaptureResult) state(selectedRound, "last")).completeness());
+			for (int tick = 601; tick <= 750; tick++) f.backend.tick(tick, settings);
+			for (var client : f.clients.values()) { assertTrue(client.tracking(selectedLater).complete()); assertEquals(768, client.tracking(selectedLater).entries().getFirst().count()); }
+			for (UUID owner : owners) assertEquals(true, state(previewState(f, owner, 2), "terminal"));
+			assertEquals(0, resolver.deniedReads); assertEquals(0, f.runtime.memory().reserved());
+		}
+	}
 }

@@ -224,4 +224,52 @@ class InventoryActiveJoinTest {
 			assertEquals(36, planner.addresses.size());
 		} assertEquals(0, planner.open);
 	}
+	@ParameterizedTest @CsvSource({"false", "true"})
+	void oneShotPreviewKeepsItsInitialReplayWhileSlowTrackingAloneReservesSuccessors(boolean seal) {
+		var planner = new Planner(); var settings = settings(false, false); var runtime = planner.runtime(settings);
+		try (runtime) {
+			runtime.advance(0, settings); var fast = attach(runtime, input(1, BlockFace.NORTH));
+			runtime.step(fast, 3).orElseThrow(); Object initial = round(fast);
+			var slow = attach(runtime, input(2, BlockFace.SOUTH)); assertEquals(InventoryRuntime.JoinResult.JOINED, runtime.tryJoinInProgress(slow));
+			var p = preview(runtime, 3, BlockFace.UP); assertEquals(InventoryRuntime.JoinResult.JOINED, runtime.tryJoinInProgress(p));
+			assertEquals(3, runtime.step(p, 3).orElseThrow().slots().size());
+			assertEquals(18_000_051L, finish(runtime, fast)); assertEquals(27_000_063L, finish(runtime, slow));
+			fast.restart(); assertEquals(3, runtime.step(fast, 3).orElseThrow().slots().size()); Object successor = round(fast);
+			assertSame(successor, fieldUnchecked(slow, "successorEntitlement"));
+			assertNull(InventoryPooledBackendTest.stateField(p, "successorEntitlement"), "one-shot Preview has no future observation to reserve");
+			assertEquals(1, fieldUnchecked(successor, "incomingEntitlements"));
+			if (seal) { settings.getTracking().setDistinguishFaces(true); runtime.advance(0, settings); }
+			int reads = planner.addresses.size(); assertEquals(18_000_051L, finish(runtime, p));
+			assertSame(initial, round(p)); assertEquals(reads, planner.addresses.size(), "Preview finishes its original paid journal even after Tracking starts a replacement");
+			assertEquals(18_000_051L, finish(runtime, fast)); fast.restart();
+			assertEquals(InventorySourceAccess.Preparation.DEFERRED, runtime.prepare(fast), "real slow Tracking successor protection is unchanged");
+			slow.restart(); assertEquals(27_000_063L, finish(runtime, slow)); assertSame(successor, round(slow));
+			assertEquals(18, planner.addresses.size(), "pregranted Tracking handoff remains usable even after policy sealing");
+			slow.close(); // its real handoff was consumed; the surviving Preview alone must never reserve another
+			for (int cycle = 1; cycle <= 3; cycle++) {
+				runtime.advance(cycle * 40L, settings); assertEquals(27_000_063L, finish(runtime, fast));
+				assertEquals(18 + cycle * 9, planner.addresses.size()); fast.restart();
+				assertSame(initial, round(p)); assertEquals(9, fieldUnchecked(p, "cursor"));
+				assertTrue(runtime.probe(p).orElseThrow());
+			}
+		} assertEquals(0, planner.open); assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
+	@Test void legacyHandoffEndsWithRecurringPeersEvenWhileOriginalPreviewRetainsItsEvidence() {
+		var planner = new Planner(); var settings = settings(false, false);
+		var runtime = new InventoryRuntime((input, cap) -> java.util.Optional.of(planner.source(input, cap)), settings.pendingMemoryBytes());
+		try (runtime) {
+			runtime.advance(0, settings); var fast = attach(runtime, input(1, BlockFace.NORTH)); var slow = attach(runtime, fast.input());
+			var p = preview(runtime, 1, BlockFace.NORTH); runtime.prepare(fast); runtime.prepare(slow); runtime.prepare(p);
+			assertEquals(27_000_063L, finish(runtime, fast)); assertEquals(27_000_063L, finish(runtime, slow));
+			Object initial = round(p); fast.restart(); assertEquals(27_000_063L, finish(runtime, fast)); fast.restart();
+			assertEquals(InventorySourceAccess.Preparation.DEFERRED, runtime.prepare(fast), "legacy slow recurring peer still has a protected handoff");
+			slow.restart(); assertEquals(27_000_063L, finish(runtime, slow)); assertEquals(18, planner.addresses.size());
+			assertEquals(27_000_063L, finish(runtime, p)); assertSame(initial, round(p)); slow.close();
+			for (int cycle = 1; cycle <= 3; cycle++) {
+				runtime.advance(cycle * 40L, settings); assertEquals(27_000_063L, finish(runtime, fast)); fast.restart();
+				assertEquals(18 + 9 * cycle, planner.addresses.size()); assertEquals(java.util.Optional.of(true), runtime.probe(p));
+				assertSame(initial, round(p)); assertEquals(9, fieldUnchecked(p, "cursor"));
+			}
+		} assertEquals(0, planner.open); assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
 }
