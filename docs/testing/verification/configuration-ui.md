@@ -255,7 +255,7 @@ snapshot retaining its frozen choice. `ClientConfigLocalizationTest` covers the
 eight bundled locales' labels and tooltips, placeholder signatures, the
 shared off value, and the pinned Chinese and English off strings.
 `SettingsCategoryCatalogTest` places the window, angle and stay-open controls
-once each in the Input Interaction category. `OptionUtilsDecimalTest` covers
+once each in the client input category. `OptionUtilsDecimalTest` covers
 every half-degree stop, out-of-range rejection, and the complete
 `<setting name>: <off value>` label at zero. These are model, handler, codec,
 catalog and resource seams, not a recorded run, live widget input, or a
@@ -388,8 +388,9 @@ contracts have passing automated evidence in the
   tests.
   Inventory `OFFER` value-bound evidence is owned by
   [inventory verification](inventory.md#resynchronization-and-budget-policy-verification).
-- Localization fixtures passed across all eight bundled locales; detailed
-  coverage is inventoried under
+- The server Performance localization fixtures passed across all eight bundled
+  locales in that recorded run; the expanded settings-resource coverage below
+  is not a claim of another passing run. Detailed coverage is inventoried under
   [Settings-screen navigation, catalog, layout and localization](#settings-screen-navigation-catalog-layout-and-localization).
 
 Live verification limits remain under [Known automated gaps](#known-automated-gaps).
@@ -397,8 +398,10 @@ Live verification limits remain under [Known automated gaps](#known-automated-ga
 ## Settings-screen navigation, catalog, layout and localization
 
 The [configuration UI](../../UI/settings-screen.md) scope, category, and page
-behavior has model, catalog, geometry, and resource seams rather than live
-screen evidence:
+behavior has model, catalog, geometry, headless native-widget/list, and resource
+seams rather than live screen evidence. The section/row catalog, responsive
+layout, native widget/list, localized-title, and expanded settings-resource cases
+below describe source-reviewed coverage rather than a recorded full-suite run:
 
 - `SettingsNavigationModelTest` covers the initial client overview, per-scope
   overview selection, each category opening its own leaf page within its scope,
@@ -417,20 +420,19 @@ screen evidence:
   invalid field, retaining a shared `ServerSettingsModel` draft across
   navigation, and keeping a server leaf open when a permission revocation
   retains a viewable snapshot while forcing the scope overview without one;
-- `SettingsCategoryCatalogTest` covers exactly-once placement of every existing
-  control in the approved category order and immutable per-category lists,
-  including the inventory width and height caps immediately after Submenu Size
-  and the trail controls in Wheel Appearance, the content-intent control
-  in the client Input Interaction spatial group, the gesture shortcut and
-  minimum-wait controls immediately after Wheel Hold Time, the input group
-  without a separate inventory mouse-sensitivity control, the client scope
-  without a presentation category, the client
-  Performance category exposing exactly the precise capture period control, the
-  server Presentation category, and the server Performance category exposing
-  the monitoring control first and every inventory leaf exactly once and only in
-  the server scope; invalid-inventory focus routing skips the monitoring control,
-  and the two size leaves follow pending memory in the shared inventory budgets
-  group; it does not cover full-width layout flags or actual widget placement;
+- `SettingsCategoryCatalogTest` covers all 71 catalog entries exactly once in
+  their approved categories, including the 69 value controls and two non-value
+  entries. Independent expectations check section headings, section/row order,
+  flattened order, the confirmed semantic pairs rather than unrelated packing,
+  and singleton rows for ordinary server controls. It checks nonempty sections,
+  defensive copies and immutable descriptor collections, and rejection of blank
+  headings, empty sections/rows, oversized rows, and duplicate members in a
+  pair. Every category has a distinct description key, including scope-distinct
+  Performance keys. Inventory leaves remain server-only, and invalid-inventory
+  routing skips the monitoring toggle and follows the owning control order.
+  This is descriptor coverage, not native placement or focus dispatch; the
+  [UI contract](../../UI/settings-screen.md#category-layout) owns the detailed
+  category and grouping rules;
 - `PresentationFieldOutcomeTest` covers the server policy role: the advertised
   manifest default, exact and wildcard allow rules winning over block rules,
   exact membership toggles mapping to single list operations, whitelist-only
@@ -441,14 +443,65 @@ screen evidence:
   coverage was removed with the client receive/display policy; it is a pure
   decision model and does not construct the settings screen or exercise widget
   state;
-- `SettingsScreenLayoutTest` covers computed root and leaf header, footer, list
-  viewport, and button geometry at representative compact, standard, and large
-  GUI sizes and clamped tiny-size viewports without negative space; it does not
-  establish row reachability or actual widget placement;
+- `SettingsScreenLayoutTest` covers responsive content-column width and
+  centering, the native maximum, scrollbar clearance, equal pair widths, and
+  eligibility to share a row based on viewport width and both supplied label
+  measurements. Footer action widths and positions clamp to the available
+  viewport. Root/leaf list and footer boundaries are checked at compact,
+  standard, large, and tiny sizes; zero-size layouts and zero/negative content
+  or action widths avoid negative geometry. These are computed bounds and
+  supplied-measurement seams, not actual font fitting, rendered rows, or row
+  reachability;
+- `SettingsRowWidgetsTest` positions real native `Button` instances as
+  full-width singletons and equal non-overlapping pairs. It checks their native
+  hit/focus rectangles move with the geometry, old positions and pair gaps stop
+  being hits, positioning and focus acquisition invoke no callback, and the
+  retained buttons still own their callbacks. Narrow-to-wide repositioning
+  retains focus. Zero-width single/pair rows become hidden and inert to native
+  hit, focus-path, mouse and keyboard probes, then recover without changing
+  editable/read-only state. Pair eligibility measures both current native
+  messages after label changes without activating either control. Measurement
+  is deterministic, not a live Minecraft font; these cases do not construct a
+  `SettingsScreen` or `OptionsList`, render controls, exercise `EditBox` dispatch,
+  or change server permissions;
+- `SettingsOptionsListTest` constructs the production native options list and
+  exercises overview and editor row reflow from wide to narrow and back, keeping
+  row-major order and the same controls without invoking callbacks. Editor
+  reflow retains selector text, caret/selection, focus, scroll and list/entry
+  dragging state without invoking the text responder. Pair eligibility is
+  reevaluated from current captions and the original untrimmed selector label;
+  label updates alone do not reflow during input. An unusable width or height
+  clears native slider focus/dragging and fences focus paths, stale focus
+  restoration, key press/release, character, mouse click/drag/release and scroll
+  routes without edits. Restoring a usable viewport reopens native keyboard
+  adjustment; resize preserves read-only flags, and an unchanged entry retains
+  slider adjustment mode through reflow. The native slider fixture demonstrates
+  why hiding a widget alone does not fence keyboard edits. These are headless
+  native-list input and retained-editor-state cases with injected text
+  measurements, not rendered font fitting, text-entry dispatch, footer traversal,
+  permission transitions, networking or persistence;
+- `SettingsEnumOptionTest` constructs native `CycleButton` controls from the
+  screen's actual Player Info, Team Color and Entity Block Geometry option
+  factories. It checks exactly one setting caption in the initial and updated
+  name/value label and native narration, with mode-specific tooltip components
+  following programmatic displayed-value changes while configuration values
+  remain unchanged. The Player Info cases cover Disabled, Always and Compact;
+  the Team Color and geometry cases cover every mode. This is headless
+  formatter, caption/narration and tooltip-component coverage with an injected
+  language, not click-driven config mutation, HOLD key-name help, live hover or
+  tooltip rendering;
+- `SettingsTitleWidgetTest` covers root-title identity and localized scope and
+  breadcrumb formats retaining every styled semantic component as an argument.
+  An injected language changes separators and argument order; scope-tab titles
+  retain their independent scope keys across model navigation. Headless layout
+  checks explicit widget bounds, wrapped title height and header reservation,
+  short-title header minima, word/code-point wrapping and space-less CJK without
+  losing text. Injected measurements and language fixtures are not live-font,
+  bundled-locale rendering or complete-screen title evidence;
 - `DeferredActionCoordinatorTest` covers the structural seam that runs a queued
   action after the native dispatch returns, waits for the outermost nested
   dispatch while keeping only the latest transition, and drops the transition
-  when the dispatch or a nested dispatch fails; and
+  when the dispatch or a nested dispatch fails;
 - `SettingsScreenFocusKeyTest` covers the shared focus-key lookup helper before
   an options list exists, resolution of a focused list's focused child,
   retention of a directly focused widget's key without a list-child lookup,
@@ -484,21 +537,39 @@ screen evidence:
   model. These are source-reviewed headless option and codec fixtures, not
   recorded test runs, mouse dragging or keyboard adjustment of a live slider;
 - `ClientConfigLocalizationTest` covers the eight bundled locale files and the
-  settings, category-navigation, server-status, entity-block-mode, and
-  target-gone resource keys, their required format placeholders, the category
-  entrance ellipsis, the exact local feedback prefix, the restart-required
-  external-list tooltips, the independent wheel and target opacity labels, the
-  retired wheel timeout key's removal, and the complete spatial-selector
-  preference key set with its wheel-options group heading, including the
-  precise capture period, trail controls and tooltips, the gesture-shortcut
-  toggle and minimum-wait labels and tooltips, the inventory width and height
-  cap labels and format-free tooltips, the content-intent label and tooltip,
-  and numeric/boolean placeholder rules; its exact preference key-set assertion
-  also excludes the obsolete inventory sensitivity label and tooltip. Point and
-  percent unit placeholders are also checked for every bundled locale. It checks required
-  key presence per locale rather than a
-  full-translation guarantee, and does not
-  render or assemble screen labels;
+  settings, all category entrances, server-status, entity-block-mode, and
+  target-gone resource keys, required format placeholders, category entrance
+  ellipses, and the exact local feedback prefix. It checks the active client-file
+  action's restart-required help, current transparent-selection label and
+  tooltip with retired selection resources absent, distinct localized title
+  segments, independent wheel/target opacity labels, and the complete
+  spatial-selector resource set with numeric/boolean and unit placeholder
+  contracts. Retired timeout and obsolete inventory-sensitivity resources stay
+  excluded. These are resource expectations rather than a translation-quality
+  guarantee or assembled/rendered screen labels;
+- `SettingsLocalizationCoverageTest` derives the 69 value controls' required
+  nonblank labels and generic help from the production catalog/key builder. It
+  checks all category descriptions and section headings, scope/navigation/action
+  and presentation-editor help, used enum/state value labels, units, and visible
+  format resources across all eight bundled locales. Eleven dynamic enum-mode
+  tooltips have explicit signatures, including two string arguments for HOLD
+  help. Label, unit, name/value, truncation and title templates retain their
+  expected argument slots and types; argument-bearing templates are validated
+  with a formatter. Zero-argument prose accepts bare or escaped literal percent
+  signs but rejects consuming placeholders, with headless translatable-component
+  fixtures distinguishing literal text from strict argument templates. The
+  locale reader rejects duplicate JSON keys. This is resource/format coverage,
+  not semantic translation review, complete tooltip assembly, actual font fit,
+  hover/focus delivery or tooltip wrapping;
+- `ConfigEnumLocalizationTest` covers locale-independent resource-key generation
+  under ROOT, US and Turkish (`tr-TR`) JVM defaults. Every `PlayerInfoMode`,
+  `TeamColorMode` and `ChannelMode` value label, and every player/team dynamic
+  mode-tooltip key, must resolve to a nonblank string in the actual English and
+  Turkish resources; the disabled player-info tooltip also retains its canonical
+  key under every tested default. The fixture locks the shared locale resource
+  and restores the default, display and format locales in a `finally` block.
+  This is source-reviewed key/resource coverage with no passing execution
+  recorded here, not UI hover, assembled tooltip or rendering evidence;
 - `InventorySettingsLocalizationTest` covers the eight bundled locale files,
   the inventory settings label/tooltip key alignment and placeholder rules, the
   performance category entrance, the inventory group headings, the shared
@@ -548,11 +619,20 @@ screen evidence:
   every bundled locale; it does not render or assemble screen labels.
 
 The production screen routes native widget input through the deferred-action
-coordinator, but these tests exercise the model, catalog, geometry, and resource
-seams rather than native widget containers, mouse dispatch, or live focus lists.
+coordinator. The native-list cases exercise headless list dispatch and reflow;
+the combined coverage does not establish a fully assembled settings screen's
+render/input lifecycle or live game focus traversal.
 
 ## Known automated gaps
 
+- native-list reflow/input and enum caption/narration/tooltip components have
+  headless coverage above, but the fully assembled settings screen and game
+  render/input lifecycle remain unexercised. Live GUI-scale/window resizing,
+  footer traversal, text-entry dispatch, actual font-driven pair stacking,
+  heading clipping/help, hover/keyboard-focus tooltip delivery and wrapping,
+  translation accuracy, and multiplayer read-only permission transitions remain
+  pending in the
+  [manual matrix](manual-integration.md#settings-and-server-performance);
 - the server Performance factory, model, handler, codec and localization seams
   [passed the combined-tree run](#server-performance-contract-verification), but
   do not establish a complete live settings screen's mouse dispatch, resizing,
@@ -576,13 +656,14 @@ seams rather than native widget containers, mouse dispatch, or live focus lists.
   [manual matrix](manual-integration.md#pending-manual-and-integration-matrix);
 - inventory administration and spatial-selector configuration have model,
   persistence, strict wire, draft, catalog and focus-helper seams; live
-  administration, native widget input/focus, permission changes, persistence,
+  administration, screen-level input/focus, permission changes, persistence,
   scheduler consumption and selector integration remain unexercised by them;
 - live server-settings UI, permission, read-only viewing below the required
   level, request/response, update, and persistence behavior;
 - the assembled settings-screen label for the local marker display duration
-  option: `ClientConfigLocalizationTest` checks resource keys, values, and the
-  `%s` placeholder, and `SettingsScreenLayoutTest` checks layout, but neither
-  checks the complete localized `<setting name>: <value>` label for the Follow
-  server sentinel or an explicit duration; the label form is owned by
+  option: `ClientConfigLocalizationTest` and `SettingsLocalizationCoverageTest`
+  check resource keys, values and placeholder contracts, and
+  `SettingsScreenLayoutTest` checks geometry, but none assembles that control's
+  complete localized label for the Follow server sentinel or an explicit
+  duration; the label form is owned by
   [configuration UI](../../UI/settings-screen.md#marker-display-duration-option);

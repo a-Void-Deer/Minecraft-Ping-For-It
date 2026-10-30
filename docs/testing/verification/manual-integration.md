@@ -20,6 +20,42 @@
 
 ### Settings and server performance
 
+- Exercise both scope overviews and every category with compact and wide
+  viewports, GUI-scale changes, and long labels in the bundled locales. Check
+  explicit related pairs stay together or stack in order when the viewport or
+  translated labels require it, while singletons stay full-width. Include
+  presentation Allow/Block and selector/action pairs, clipped headings' complete
+  hover text, scrollbar clearance, fixed-footer containment, and retained scroll
+  and keyboard focus after Back/Escape, navigation, and resize, including footer
+  traversal. These live native-screen checks remain pending; the
+  [headless list reflow/input coverage](configuration-ui.md#settings-screen-navigation-catalog-layout-and-localization)
+  does not establish game-window, font or render behavior.
+- Inspect every value control's assembled help with native hover and keyboard
+  focus, plus all category/scope, Back, Done, Reset, configuration-file, and
+  presentation-editor actions. Check numeric decrease/increase, boolean off/on,
+  each enum mode, scope, meaningful zero/unlimited states, apply timing, and
+  action consequences against the
+  [UI help contract](../../UI/settings-screen.md#contextual-help-and-localization).
+  Resource presence does not establish localized readability or actual effects.
+- Navigate ordinary server settings as an editor and a read-only viewer, through
+  pending/unavailable views, permission loss and recovery, and disconnect.
+  Exercise retained drafts across category/scope navigation and resize without
+  submission, clean opening/rebuilds, and final-close validation routing to and
+  revealing the first invalid field. Check native focus and inert controls in
+  retained read-only views against the
+  [session contract](../../UI/settings-screen.md#server-settings-session).
+- Exercise Server Presentation independently while ordinary server settings are
+  unavailable, read-only, or hold an invalid draft. Check view navigation and
+  refresh, retained selector drafts and feedback, permission/pending gates, and
+  mutation-on-activation versus ordinary settings' final-close behavior against
+  the [editor contract](../../UI/settings-screen.md#server-presentation-category).
+  A successful ordinary close is not evidence that the server applied or
+  persisted its no-acknowledgement update.
+- Compare Team Color mode help with live output across Player Info modes. The
+  known discrepancy between the
+  [client catalogue's intent](../../config/client.md#target-selection-and-entity-block-presentation)
+  and renderer behavior remains unresolved; tooltip clarification is not
+  evidence of a rendering fix.
 - Exercise all server Performance sliders and the monitoring toggle with native
   mouse and keyboard input, compact layouts, GUI-scale changes, category/scope
   navigation and read-only snapshots. Check in-range integers between UI-only
@@ -29,11 +65,10 @@
   exit and the left-adjacent maximum finite stop, plus linked display/frame
   adjustments and their notice. Model and codec coverage is tracked in
   [configuration verification](configuration-ui.md#server-performance-contract-verification).
-- Read assembled localized scope/effect tooltips in the supported locales,
-  including the notice toggle's enabled/disabled effect and the active
-  selection-set meaning of Tracking Variants per Target. Verify live notice
-  delivery when toggled and remote editing under permission changes; resource
-  presence does not establish this behavior.
+- Check the notice toggle's enabled/disabled effect and the active selection-set
+  meaning of Tracking Variants per Target in assembled localized help. Verify
+  live notice delivery when toggled and remote editing under permission changes;
+  resource presence does not establish this behavior.
 
 ### Inventory
 
