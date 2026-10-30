@@ -31,6 +31,7 @@ final class VaultOptionalHarness extends ClassLoader {
 	static final String BLOCK = "com.simibubi.create.content.logistics.vault.ItemVaultBlock";
 	private static final String TOPOLOGY = "nx.pingwheel.neoforge.integration.create.CreateVaultTopology";
 	private static final @Unmodifiable List<String> ISOLATED = List.of(TOPOLOGY,
+		"nx.pingwheel.neoforge.integration.create.presentation.CreateVaultInventoryAccess",
 		"nx.pingwheel.neoforge.integration.create.NeoForgeCreateVaultBlockPresentationResolver",
 		"nx.pingwheel.neoforge.platform.PlatformContextServiceImpl",
 		"nx.pingwheel.neoforge.NeoClient",
@@ -86,7 +87,7 @@ final class VaultOptionalHarness extends ClassLoader {
 			try (var input = zip.getInputStream(entry)) { var node = new ClassNode(); new ClassReader(input).accept(node, 0); return node; }
 		}
 	}
-	private static byte[] optional(String name) throws Exception {
+	static byte[] optional(String name) throws Exception {
 		var original = archive(name); var copy = new ClassNode(); copy.version = original.version;
 		copy.access = Opcodes.ACC_PUBLIC; copy.name = original.name;
 		if (name.equals(BLOCK)) {
@@ -108,7 +109,7 @@ final class VaultOptionalHarness extends ClassLoader {
 		} else {
 			copy.superName = SMART.replace('.', '/');
 			for (var f : original.fields) if (List.of("controller", "lastKnownPos", "radius", "length", "updateConnectivity", "inventory").contains(f.name)) copy.fields.add(f);
-			for (var m : original.methods) if (List.of("getController", "isController", "getLastKnownPos", "getWidth", "getHeight", "getMainConnectionAxis", "read", "write").contains(m.name)) {
+			for (var m : original.methods) if (List.of("getController", "isController", "getLastKnownPos", "getWidth", "getHeight", "getMainConnectionAxis", "getInventoryOfBlock", "read", "write").contains(m.name)) {
 				// Only the optional NBT position helper is replaced; clientPacket branches and inventory calls remain unchanged.
 				for (var instruction : m.instructions) if (instruction instanceof MethodInsnNode call
 					&& call.owner.equals("net/createmod/catnip/nbt/NBTHelper") && call.name.equals("readBlockPos")) call.owner = Type.getInternalName(NbtPosition.class);

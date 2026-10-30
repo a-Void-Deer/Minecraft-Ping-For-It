@@ -56,7 +56,7 @@ public final class VaultNativeFixture implements AutoCloseable {
 	final Alias<Block> blockAlias;
 	final Alias<BlockEntityType<?>> entityAlias;
 	final BlockPos root;
-	int stateReads, mapReads, chunkReads;
+	int stateReads, mapReads, chunkReads, inventoryLoaded, inventoryStates, inventoryEntities;
 	VaultNativeFixture(Axis axis, int width, int length, BlockPos root) throws Exception {
 		this.root = root;
 		// Construct one synthetic optional block without changing the registry's frozen lifetime.
@@ -126,9 +126,9 @@ public final class VaultNativeFixture implements AutoCloseable {
 		private ServerWorld() { super(null, null, null, null, null, null, null, false, 0, List.of(), false, null); }
 		@Override public ResourceKey<Level> dimension() { return Level.OVERWORLD; }
 		@Override public ServerChunkCache getChunkSource() { return cache; }
-		@Override public boolean isLoaded(BlockPos pos) { return !fixture.unloaded.contains(net.minecraft.world.level.ChunkPos.asLong(pos.getX() >> 4, pos.getZ() >> 4)); }
-		@Override public BlockState getBlockState(BlockPos pos) { return fixture.states.getOrDefault(pos, Blocks.AIR.defaultBlockState()); }
-		@Override public @Nullable BlockEntity getBlockEntity(BlockPos pos) { return fixture.entities.get(pos); }
+		@Override public boolean isLoaded(BlockPos pos) { fixture.inventoryLoaded++; return !fixture.unloaded.contains(net.minecraft.world.level.ChunkPos.asLong(pos.getX() >> 4, pos.getZ() >> 4)); }
+		@Override public BlockState getBlockState(BlockPos pos) { fixture.inventoryStates++; return fixture.states.getOrDefault(pos, Blocks.AIR.defaultBlockState()); }
+		@Override public @Nullable BlockEntity getBlockEntity(BlockPos pos) { fixture.inventoryEntities++; return fixture.entities.get(pos); }
 	}
 	@NotNullByDefault
 	public static final class ClientCache extends ClientChunkCache {
