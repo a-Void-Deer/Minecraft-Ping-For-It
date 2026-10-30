@@ -1,5 +1,8 @@
 package nx.pingwheel.neoforge.integration.create.presentation;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -19,13 +22,15 @@ import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnava
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import nx.pingwheel.common.presentation.inventory.InventorySharedRead;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 /** Lazy tested-shape Vault access; never asks Create to initialize its combined capability. */
 public final class CreateVaultInventoryAccess {
 	private static final String TYPE = "com.simibubi.create.content.logistics.vault.ItemVaultBlockEntity";
 	private static final net.minecraft.resources.ResourceLocation VAULT_ID = net.minecraft.resources.ResourceLocation.parse("create:item_vault");
 	private CreateVaultInventoryAccess() {}
-	public static boolean recognizes(BlockEntity entity) { return entity != null && TYPE.equals(entity.getClass().getName()); }
+	public static boolean recognizes(@Nullable BlockEntity entity) { return entity != null && TYPE.equals(entity.getClass().getName()); }
 	public static Optional<IPlatformInventoryService.Access> find(ServerLevel level, BlockPos original, Direction face) {
 		if (face == null || !CreatePresentationAvailability.available()) return Optional.empty();
 		return find(new MinecraftWorld(level), original, face);
@@ -54,11 +59,11 @@ public final class CreateVaultInventoryAccess {
 		default boolean matchesIdentity(InventorySnapshotLayout.Member frozen) {
 			return frozen.blockId().equals(blockId()) && frozen.blockEntityId().equals(blockEntityId());
 		}
-		BlockPos controller() throws ReflectiveOperationException;
+		@Nullable BlockPos controller() throws ReflectiveOperationException;
 		boolean isController() throws ReflectiveOperationException;
 		int width() throws ReflectiveOperationException;
 		int length() throws ReflectiveOperationException;
-		Direction.Axis axis() throws ReflectiveOperationException;
+		Direction.@Nullable Axis axis() throws ReflectiveOperationException;
 		IItemHandler local() throws ReflectiveOperationException;
 		default boolean auditedLocal(IItemHandler handler) { return nativeLocal(handler); }
 	}
@@ -79,11 +84,11 @@ public final class CreateVaultInventoryAccess {
 		@Override public String blockEntityId() { world.require(pos); return delegate.blockEntityId(); }
 		@Override public boolean vaultBlock() { world.require(pos); return delegate.vaultBlock(); }
 		@Override public boolean matchesIdentity(InventorySnapshotLayout.Member frozen) { world.require(pos); return delegate.matchesIdentity(frozen); }
-		@Override public BlockPos controller() throws ReflectiveOperationException { world.require(pos); return delegate.controller(); }
+		@Override public @Nullable BlockPos controller() throws ReflectiveOperationException { world.require(pos); return delegate.controller(); }
 		@Override public boolean isController() throws ReflectiveOperationException { world.require(pos); return delegate.isController(); }
 		@Override public int width() throws ReflectiveOperationException { world.require(pos); return delegate.width(); }
 		@Override public int length() throws ReflectiveOperationException { world.require(pos); return delegate.length(); }
-		@Override public Direction.Axis axis() throws ReflectiveOperationException { world.require(pos); return delegate.axis(); }
+		@Override public Direction.@Nullable Axis axis() throws ReflectiveOperationException { world.require(pos); return delegate.axis(); }
 		@Override public IItemHandler local() throws ReflectiveOperationException {
 			world.require(pos);
 			return new GatedHandler(world, pos, delegate.local());
@@ -113,9 +118,32 @@ public final class CreateVaultInventoryAccess {
 		return local instanceof ItemStackHandler && localOwnership.get(local.getClass());
 	}
 	static boolean nativeLocal(IItemHandler handler, nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess raw) {
-		return handler instanceof ItemStackHandler && localOwnership.get(handler.getClass())
-			&& IPlatformInventoryService.ResidentReads.nativeStacks(IPlatformInventoryService.ResidentReads.field(handler,
-				ItemStackHandler.class, "stacks", net.minecraft.core.NonNullList.class), raw);
+		return handler instanceof ItemStackHandler local && localOwnership.get(handler.getClass())
+			&& IPlatformInventoryService.ResidentReads.nativeStacks(LocalStacks.read(local), raw);
+	}
+	/** Fixed native declaration only. Never retains a handler, backing value or successful audit. */
+	@NotNullByDefault
+	private static final class LocalStacks {
+		private static final @Nullable Field FIELD = load();
+		private static @Nullable Field load() {
+			try {
+				Field field = ItemStackHandler.class.getDeclaredField("stacks");
+				if (field.getDeclaringClass() != ItemStackHandler.class || field.getType() != net.minecraft.core.NonNullList.class
+					|| field.getModifiers() != Modifier.PROTECTED || !field.trySetAccessible()) return null;
+				return field;
+			} catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
+				Diagnostics.warn("inventory-vault-stacks-field", "create:item_vault", () -> "fixed ItemStackHandler.stacks metadata unavailable", unavailable);
+				return null;
+			}
+		}
+		static @Nullable Object read(ItemStackHandler handler) {
+			if (FIELD == null) return null;
+			try { return FIELD.get(handler); }
+			catch (IllegalAccessException | RuntimeException | LinkageError unavailable) {
+				Diagnostics.warn("inventory-vault-stacks-read", "create:item_vault", () -> "current native local backing unavailable", unavailable);
+				return null;
+			}
+		}
 	}
 	/** Only declaration ownership is class-stable. Backing storage, scope and current local handler are always rechecked. */
 	private static final ClassValue<Boolean> localOwnership = new ClassValue<>() {
@@ -150,21 +178,53 @@ public final class CreateVaultInventoryAccess {
 	private record Layout(BlockPos controller, int width, int length, Direction.Axis axis,
 		@org.jetbrains.annotations.Unmodifiable List<BlockPos> members, @org.jetbrains.annotations.Unmodifiable List<Integer> slotCounts,
 		int slots, boolean certifiedLocals) {}
-	private static Object call(BlockEntity entity, String name) throws ReflectiveOperationException {
-		IPlatformInventoryService.ResidentReads.requireReflectionShape(entity.getClass(), name);
-		return entity.getClass().getMethod(name).invoke(entity);
+	/** Inventory metadata only; independent of the presentation topology and its live-state policy. */
+	@NotNullByDefault
+	private static final class Api {
+		final Class<?> vault;
+		final Method controller, isController, width, length, axis, local;
+		Api(Class<?> vault) throws ReflectiveOperationException {
+			if (!TYPE.equals(vault.getName()) || !BlockEntity.class.isAssignableFrom(vault) || !Modifier.isPublic(vault.getModifiers()))
+				throw new NoSuchMethodException("Vault inventory class shape");
+			this.vault = vault;
+			controller = method(vault, "getController", BlockPos.class);
+			// getController dispatches isController virtually; both must have the fixed owner.
+			isController = method(vault, "isController", boolean.class);
+			width = method(vault, "getWidth", int.class); length = method(vault, "getHeight", int.class);
+			axis = method(vault, "getMainConnectionAxis", Direction.Axis.class);
+			local = method(vault, "getInventoryOfBlock", ItemStackHandler.class);
+		}
+		private static Method method(Class<?> owner, String name, Class<?> returns) throws ReflectiveOperationException {
+			Method method = owner.getDeclaredMethod(name);
+			if (method.getDeclaringClass() != owner || method.getReturnType() != returns
+				|| !Modifier.isPublic(method.getModifiers()) || Modifier.isStatic(method.getModifiers()))
+				throw new NoSuchMethodException("Vault inventory metadata shape: " + name);
+			return method;
+		}
+	}
+	/** Reached only through MinecraftWorld after find's tested-mod gate, never via a TCCL provider. */
+	@NotNullByDefault
+	private static final class ApiHolder {
+		static final Api API = load();
+		private static Api load() {
+			try { return new Api(Class.forName(TYPE, false, CreateVaultInventoryAccess.class.getClassLoader())); }
+			catch (ReflectiveOperationException unavailable) { throw new ExceptionInInitializerError(unavailable); }
+		}
 	}
 	private record MinecraftWorld(ServerLevel level) implements World {
 		@Override public String dimension() { return level.dimension().location().toString(); }
 		@Override public boolean currentRoute() { return CreatePresentationAvailability.available(); }
 		@Override public Member loaded(BlockPos pos) {
 			if (!level.isLoaded(pos)) throw new InventorySourceUnavailableException("Vault member unloaded");
-			BlockEntity entity = level.getBlockEntity(pos);
+			@Nullable BlockEntity entity = level.getBlockEntity(pos);
 			if (!recognizes(entity) || entity.isRemoved()) throw new InventorySourceUnavailableException("Vault member unavailable");
-			return new MinecraftMember(entity);
+			return new MinecraftMember(entity, ApiHolder.API);
 		}
 	}
-	private record MinecraftMember(BlockEntity entity) implements Member {
+	private record MinecraftMember(BlockEntity entity, Api api) implements Member {
+		MinecraftMember {
+			if (entity.getClass() != api.vault) throw new InventorySourceUnavailableException("Vault inventory class ownership changed");
+		}
 		@Override public String blockId() { return BuiltInRegistries.BLOCK.getKey(entity.getBlockState().getBlock()).toString(); }
 		@Override public String blockEntityId() { return BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()).toString(); }
 		@Override public boolean vaultBlock() { return VAULT_ID.equals(BuiltInRegistries.BLOCK.getKey(entity.getBlockState().getBlock())); }
@@ -172,25 +232,25 @@ public final class CreateVaultInventoryAccess {
 			return "create:item_vault".equals(frozen.blockId()) && "create:item_vault".equals(frozen.blockEntityId())
 				&& vaultBlock() && VAULT_ID.equals(BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()));
 		}
-		@Override public BlockPos controller() throws ReflectiveOperationException { return (BlockPos) call(entity, "getController"); }
-		@Override public boolean isController() throws ReflectiveOperationException { return (Boolean) call(entity, "isController"); }
-		@Override public int width() throws ReflectiveOperationException { return (Integer) call(entity, "getWidth"); }
-		@Override public int length() throws ReflectiveOperationException { return (Integer) call(entity, "getHeight"); }
-		@Override public Direction.Axis axis() throws ReflectiveOperationException { return (Direction.Axis) call(entity, "getMainConnectionAxis"); }
+		@Override public @Nullable BlockPos controller() throws ReflectiveOperationException { return (BlockPos) api.controller.invoke(entity); }
+		@Override public boolean isController() throws ReflectiveOperationException { return (Boolean) api.isController.invoke(entity); }
+		@Override public int width() throws ReflectiveOperationException { return (Integer) api.width.invoke(entity); }
+		@Override public int length() throws ReflectiveOperationException { return (Integer) api.length.invoke(entity); }
+		@Override public Direction.@Nullable Axis axis() throws ReflectiveOperationException { return (Direction.Axis) api.axis.invoke(entity); }
 		@Override public IItemHandler local() throws ReflectiveOperationException {
-			Object inventory = call(entity, "getInventoryOfBlock");
+			@Nullable Object inventory = api.local.invoke(entity);
 			if (!(inventory instanceof IItemHandler handler)) throw new IllegalStateException("Vault local inventory shape");
 			return handler;
 		}
 	}
 	private static Layout layout(World world, BlockPos original) throws ReflectiveOperationException {
 		Member part = world.loaded(original);
-		BlockPos controller = part.controller();
+		@Nullable BlockPos controller = part.controller();
 		if (controller == null) throw new InventorySourceUnavailableException("Vault controller unavailable");
 		Member master = world.loaded(controller); // before any controller-BE or aggregate call
 		if (!master.isController() || !controller.equals(master.controller()) || !"create:item_vault".equals(master.blockId())) throw new InventorySourceUnavailableException("Vault controller relation");
 		int width = master.width(), length = master.length();
-		Direction.Axis axis = master.axis();
+		Direction.@Nullable Axis axis = master.axis();
 		if (width < 1 || width > 3 || length < 1 || length > 3 * width || (axis != Direction.Axis.X && axis != Direction.Axis.Z))
 			throw new InventorySourceUnavailableException("Vault bounded topology");
 		List<BlockPos> members = new ArrayList<>(width * width * length);
