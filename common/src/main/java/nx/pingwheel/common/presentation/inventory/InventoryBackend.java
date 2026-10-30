@@ -720,6 +720,9 @@ public final class InventoryBackend implements AutoCloseable {
 			consumer = runtime.attach(bound, new InventoryRuntime.TrackingSubject(targetKey)).orElse(null);
 			if (consumer == null) return MarkerRejectReason.INVALID_REQUEST;
 			consumer.requirePublicationEvidence();
+			// Pin a compatible ACTIVE observation while the Preview still owns it. This
+			// admits metadata only; no match or budget pressure cannot veto creation.
+			if (runtime.tryJoinInProgress(consumer) == InventoryRuntime.JoinResult.INVALID) return MarkerRejectReason.INVALID_REQUEST;
 			committedInput = bound;
 			admittedKey = targetKey;
 			for (UUID recipient : audience) {

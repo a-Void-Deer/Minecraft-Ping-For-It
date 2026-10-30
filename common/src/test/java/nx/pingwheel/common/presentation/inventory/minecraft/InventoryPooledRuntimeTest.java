@@ -41,6 +41,8 @@ class InventoryPooledRuntimeTest {
 	@NotNullByDefault
 	static final class Planner {
 		final Object world = new Object(), member = new Object(), registry = RegistryAccess.EMPTY;
+		final Object laterWorld = new Object();
+		boolean isolateLaterOwners;
 		final Map<InventorySourceInput, Boolean> denied = new HashMap<>();
 		final List<InventorySourceInput> samplers = new ArrayList<>();
 		final List<Integer> addresses = new ArrayList<>();
@@ -57,7 +59,8 @@ class InventoryPooledRuntimeTest {
 			var layout = new InventorySnapshotLayout("fixture", "", BlockPos.ZERO, List.of(new InventorySnapshotLayout.Member(BlockPos.ZERO,
 				"minecraft:chest", "minecraft:chest", "member", List.of(new InventorySnapshotLayout.Segment("items", "slots", 9, slots)))));
 			return new Proof(new Graph("fixture", "minecraft:overworld", "same", Route.VANILLA_CHEST, layout),
-				new Witness(differentWorlds && input.readOwner().getLeastSignificantBits() == 2 ? this : world), new Witness(registry),
+				new Witness(isolateLaterOwners && input.readOwner().getLeastSignificantBits() >= 5 ? laterWorld
+					: differentWorlds && input.readOwner().getLeastSignificantBits() == 2 ? this : world), new Witness(registry),
 				List.of(new Witness(differentMembers && input.readOwner().getLeastSignificantBits() == 2 ? this : member)),
 				List.of(new RouteEvidence(new Witness(member), null, null)));
 		}
@@ -148,6 +151,7 @@ class InventoryPooledRuntimeTest {
 		var planner = new Planner(); var settings = settings(faces, players); var runtime = planner.runtime(settings);
 		try (runtime) {
 			runtime.advance(0, settings); var consumers = four(runtime);
+			consumers.forEach(runtime::prepare);
 			for (var consumer : consumers) assertEquals(27_000_063L, finish(runtime, consumer));
 			assertEquals(getters, planner.addresses.size());
 			@SuppressWarnings("unchecked") var paid = (Map<InventoryRuntime.Subject, Integer>) field(runtime, "logicalUsed");
@@ -160,7 +164,8 @@ class InventoryPooledRuntimeTest {
 			var planner = new Planner(); planner.supported = !boundary.equals("unsupported"); planner.differentMaps = boundary.equals("mapping"); planner.differentWorlds = boundary.equals("world");
 			planner.differentMembers = boundary.equals("member");
 			var settings = settings(false, false); try (var runtime = planner.runtime(settings)) {
-				runtime.advance(0, settings); for (var consumer : four(runtime)) finish(runtime, consumer);
+				runtime.advance(0, settings); var consumers = four(runtime); consumers.forEach(runtime::prepare);
+				for (var consumer : consumers) finish(runtime, consumer);
 				assertEquals(boundary.equals("unsupported") ? 36 : 18, planner.addresses.size(), boundary);
 			}
 			assertEquals(0, planner.open);
@@ -205,7 +210,7 @@ class InventoryPooledRuntimeTest {
 			assertEquals(18, planner.addresses.size()); assertFalse(a.invalidated()); assertFalse(b.invalidated());
 		}
 	}
-	@Test void lateSameTickAttachAndPreviewNeverInheritWidenedTrackingData() {
+	@Test void completedRoundCannotAdmitNewTrackingOrPreviewEvenInItsCompletionTick() {
 		var planner = new Planner(); var settings = settings(false, false);
 		try (var runtime = planner.runtime(settings)) {
 			runtime.advance(0, settings); var a = attach(runtime, input(1, BlockFace.NORTH));
@@ -227,13 +232,13 @@ class InventoryPooledRuntimeTest {
 		var planner = new Planner(); var settings = settings(false, false); var runtime = planner.runtime(settings);
 		try (runtime) {
 			runtime.advance(0, settings); var a = attach(runtime, input(1, BlockFace.NORTH)); var b = attach(runtime, input(2, BlockFace.SOUTH));
-			finish(runtime, a); finish(runtime, b); a.restart(); assertEquals(27_000_063L, finish(runtime, a));
+			runtime.prepare(a); runtime.prepare(b); finish(runtime, a); finish(runtime, b); a.restart(); assertEquals(27_000_063L, finish(runtime, a));
 			assertEquals(18, planner.addresses.size());
 			settings.getTracking().setDistinguishFaces(true); settings.getTracking().setDistinguishPlayers(true); runtime.advance(0, settings);
 			b.restart(); assertEquals(27_000_063L, finish(runtime, b)); assertEquals(18, planner.addresses.size());
 			a.restart(); finish(runtime, a); b.restart(); finish(runtime, b); assertEquals(36, planner.addresses.size());
 			settings.getTracking().setDistinguishFaces(false); settings.getTracking().setDistinguishPlayers(false); runtime.advance(0, settings);
-			a.restart(); finish(runtime, a); b.restart(); finish(runtime, b); assertEquals(45, planner.addresses.size());
+			a.restart(); b.restart(); runtime.prepare(a); runtime.prepare(b); finish(runtime, a); finish(runtime, b); assertEquals(45, planner.addresses.size());
 		}
 		assertEquals(0, planner.open); assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
 	}
@@ -241,6 +246,7 @@ class InventoryPooledRuntimeTest {
 		var planner = new Planner(); var settings = settings(false, false); var runtime = planner.runtime(settings);
 		try (runtime) {
 			runtime.advance(0, settings); var a = attach(runtime, input(1, BlockFace.NORTH)); var b = attach(runtime, input(2, BlockFace.SOUTH));
+			runtime.prepare(a); runtime.prepare(b);
 			for (int cycle = 0; cycle < 32; cycle++) {
 				runtime.advance(cycle * 40L, settings);
 				assertEquals(27_000_063L, finish(runtime, a)); assertEquals(27_000_063L, finish(runtime, b));
@@ -283,6 +289,7 @@ class InventoryPooledRuntimeTest {
 			try (var runtime = new InventoryRuntime((input, cap) -> Optional.of(planner.source(input, cap)), settings.pendingMemoryBytes(), InventoryRuntime.DisplayReprojector.none(), BudgetDelaySink.NONE, gate)) {
 				runtime.advance(0, settings); var a = attach(runtime, input(1, BlockFace.NORTH));
 				var preview = runtime.attach(a.input(), new InventoryRuntime.PreviewSubject(a.input().readOwner())).orElseThrow();
+				runtime.prepare(a); runtime.prepare(preview);
 				finish(runtime, a); finish(runtime, preview); assertEquals(9, planner.addresses.size());
 			}
 		}
@@ -291,7 +298,7 @@ class InventoryPooledRuntimeTest {
 		var planner = new Planner(); var settings = settings(false, false); var runtime = planner.runtime(settings);
 		try (runtime) {
 			runtime.advance(0, settings); var a = attach(runtime, input(1, BlockFace.NORTH)); var b = attach(runtime, input(2, BlockFace.SOUTH));
-			finish(runtime, a); finish(runtime, b); a.restart(); finish(runtime, a);
+			runtime.prepare(a); runtime.prepare(b); finish(runtime, a); finish(runtime, b); a.restart(); finish(runtime, a);
 			a.restart(); assertEquals(InventorySourceAccess.Preparation.DEFERRED, runtime.prepare(a)); assertFalse(a.invalidated());
 			b.restart(); finish(runtime, b); finish(runtime, a); assertEquals(27, planner.addresses.size());
 			settings.getTracking().setDistinguishFaces(true); runtime.advance(0, settings);
@@ -321,6 +328,9 @@ class InventoryPooledRuntimeTest {
 		} assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
 	}
 	static Object field(Object owner, String name) throws ReflectiveOperationException { var field = owner.getClass().getDeclaredField(name); field.setAccessible(true); return java.util.Objects.requireNonNull(field.get(owner)); }
+	static Object fieldUnchecked(Object owner, String name) {
+		try { return field(owner, name); } catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+	}
 	@Test void uniqueCatalogTighteningRefreshesJournalBeforeReplayWithoutGettersAndCollisionHistorySpansSamplers() throws ReflectiveOperationException {
 		var planner = new Planner(); planner.json = InventoryDisplayWriter.project(com.google.gson.JsonParser.parseString(
 			"{\"id\":\"minecraft:stone\",\"components\":{\"minecraft:custom_name\":\"" + "x".repeat(1500) + "\"}}"), "minecraft:stone", 4096);
@@ -359,6 +369,7 @@ class InventoryPooledRuntimeTest {
 			runtime.advance(0, settings); var a = attach(runtime, input(1, BlockFace.NORTH));
 			var other = new Target.BlockTarget("minecraft:overworld", 10, 0, 0, "minecraft:chest");
 			var b = runtime.attach(input(2, BlockFace.SOUTH), new InventoryRuntime.TrackingSubject(TargetKey.from(other))).orElseThrow();
+			runtime.prepare(a); runtime.prepare(b);
 			finish(runtime, a); finish(runtime, b); assertEquals(9, planner.addresses.size());
 			@SuppressWarnings("unchecked") var paid = (Map<InventoryRuntime.Subject, Integer>) field(runtime, "logicalUsed");
 			assertEquals(2, paid.size()); assertEquals(18, paid.values().stream().mapToInt(Integer::intValue).sum());
@@ -410,6 +421,7 @@ class InventoryPooledRuntimeTest {
 			for (int cohort = 0; cohort < 32; cohort++) {
 				runtime.advance(cohort * 40L, settings);
 				fast.add(attach(runtime, input(cohort + 1, BlockFace.NORTH))); slow.add(attach(runtime, input(cohort + 1, pooling ? BlockFace.SOUTH : BlockFace.NORTH)));
+				runtime.prepare(fast.getLast()); runtime.prepare(slow.getLast());
 				assertEquals(27_000_063L, finish(runtime, fast.getLast())); assertEquals(27_000_063L, finish(runtime, slow.getLast()));
 				fast.getLast().restart(); slow.getLast().restart(); // retain publication evidence, release original scanning ownership
 			}
@@ -445,7 +457,7 @@ class InventoryPooledRuntimeTest {
 		var planner = new Planner(); var settings = settings(false, false); var runtime = planner.runtime(settings);
 		try (runtime) {
 			runtime.advance(0, settings); var fast = attach(runtime, input(1, BlockFace.NORTH)); var slow = attach(runtime, input(2, BlockFace.SOUTH));
-			finish(runtime, fast); finish(runtime, slow); fast.restart(); slow.restart();
+			runtime.prepare(fast); runtime.prepare(slow); finish(runtime, fast); finish(runtime, slow); fast.restart(); slow.restart();
 			InventoryRuntime.Observation result = runtime.step(fast, 3).orElseThrow();
 			if (unacceptedComplete) {
 				runtime.step(fast, 3).orElseThrow(); result = runtime.step(fast, 3).orElseThrow();
@@ -477,7 +489,7 @@ class InventoryPooledRuntimeTest {
 		var planner = new Planner(); var settings = settings(false, false); var runtime = planner.runtime(settings);
 		try (runtime) {
 			runtime.advance(0, settings); var fast = attach(runtime, input(1, BlockFace.NORTH)); var slow = attach(runtime, input(2, BlockFace.SOUTH));
-			finish(runtime, fast); finish(runtime, slow); fast.restart(); slow.restart();
+			runtime.prepare(fast); runtime.prepare(slow); finish(runtime, fast); finish(runtime, slow); fast.restart(); slow.restart();
 			InventoryRuntime.Observation terminal = runtime.step(fast, 3).orElseThrow();
 			while (terminal.result().completeness() == CaptureResult.Completeness.CONTINUE) terminal = runtime.step(fast, 3).orElseThrow();
 			if (accepted) fast.retainCompleted();
@@ -496,10 +508,10 @@ class InventoryPooledRuntimeTest {
 		try (runtime) {
 			runtime.advance(0, settings);
 			var first = attach(runtime, input(1, BlockFace.NORTH)); var firstSlow = attach(runtime, input(2, BlockFace.SOUTH));
-			finish(runtime, first); finish(runtime, firstSlow); first.restart(); firstSlow.restart();
+			runtime.prepare(first); runtime.prepare(firstSlow); finish(runtime, first); finish(runtime, firstSlow); first.restart(); firstSlow.restart();
 			runtime.advance(40, settings);
 			var second = attach(runtime, input(3, BlockFace.NORTH)); var secondSlow = attach(runtime, input(4, BlockFace.SOUTH));
-			finish(runtime, second); finish(runtime, secondSlow); second.restart(); secondSlow.restart();
+			runtime.prepare(second); runtime.prepare(secondSlow); finish(runtime, second); finish(runtime, secondSlow); second.restart(); secondSlow.restart();
 			runtime.advance(80, settings); runtime.step(first, 3).orElseThrow();
 			assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(second)); Object abandoned = field(first, "round");
 			assertSame(abandoned, field(second, "round")); assertEquals(2, field(abandoned, "incomingEntitlements"));
@@ -525,6 +537,7 @@ class InventoryPooledRuntimeTest {
 				runtime.advance(cohort * 40L, settings);
 				fast.add(attach(runtime, input(cohort + 1, BlockFace.NORTH)));
 				slow.add(attach(runtime, input(cohort + 1, pooling ? BlockFace.SOUTH : BlockFace.NORTH)));
+				runtime.prepare(fast.getLast()); runtime.prepare(slow.getLast());
 				assertEquals(27_000_063L, finish(runtime, fast.getLast())); assertEquals(27_000_063L, finish(runtime, slow.getLast()));
 				fast.getLast().restart(); slow.getLast().restart();
 			}
@@ -575,7 +588,7 @@ class InventoryPooledRuntimeTest {
 		var planner = new Planner(); var settings = settings(false, false); var runtime = planner.runtime(settings);
 		try (runtime) {
 			runtime.advance(0, settings); var a = attach(runtime, input(1, BlockFace.NORTH)); var b = attach(runtime, input(2, BlockFace.SOUTH));
-			finish(runtime, a); finish(runtime, b); a.restart(); b.restart();
+			runtime.prepare(a); runtime.prepare(b); finish(runtime, a); finish(runtime, b); a.restart(); b.restart();
 			Object previous = field(b, "completedRound");
 			runtime.step(a, 3).orElseThrow(); assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(b));
 			Object successor = field(a, "round"); long sequence = (long) field(successor, "sequence");
@@ -604,18 +617,19 @@ class InventoryPooledRuntimeTest {
 		try (runtime) {
 			runtime.advance(0, settings);
 			var first = attach(runtime, input(1, BlockFace.NORTH)); var firstSlow = attach(runtime, input(2, BlockFace.SOUTH));
-			finish(runtime, first); finish(runtime, firstSlow); first.restart(); firstSlow.restart(); Object predecessorA = field(first, "completedRound");
+			runtime.prepare(first); runtime.prepare(firstSlow); finish(runtime, first); finish(runtime, firstSlow); first.restart(); firstSlow.restart(); Object predecessorA = field(first, "completedRound");
 			runtime.advance(40, settings);
 			var second = attach(runtime, input(3, BlockFace.NORTH)); var secondSlow = attach(runtime, input(4, BlockFace.SOUTH));
-			finish(runtime, second); finish(runtime, secondSlow); second.restart(); secondSlow.restart(); Object predecessorB = field(second, "completedRound");
+			runtime.prepare(second); runtime.prepare(secondSlow); finish(runtime, second); finish(runtime, secondSlow); second.restart(); secondSlow.restart(); Object predecessorB = field(second, "completedRound");
 			runtime.advance(80, settings); runtime.step(first, 3).orElseThrow();
 			for (var consumer : List.of(firstSlow, second, secondSlow)) assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(consumer));
 			Object abandoned = field(first, "round");
 			assertSame(abandoned, field(second, "round")); assertEquals(0, field(abandoned, "incomingEntitlements"));
 			assertEquals(field(abandoned, "sequence"), field(predecessorA, "successorSequence")); assertEquals(field(abandoned, "sequence"), field(predecessorB, "successorSequence"));
 			// A third, unrelated predecessor and accepted successor must not be reopened by cleanup of the first two cohorts.
+			planner.isolateLaterOwners = true; // a genuinely independent proof, not a late join to the still-active first two cohorts
 			runtime.advance(120, settings); var other = attach(runtime, input(5, BlockFace.NORTH)); var otherSlow = attach(runtime, input(6, BlockFace.SOUTH));
-			finish(runtime, other); finish(runtime, otherSlow); other.restart(); otherSlow.restart(); Object independent = field(other, "completedRound");
+			runtime.prepare(other); runtime.prepare(otherSlow); finish(runtime, other); finish(runtime, otherSlow); other.restart(); otherSlow.restart(); Object independent = field(other, "completedRound");
 			runtime.advance(160, settings); finish(runtime, other); other.restart(); long independentSequence = (long) field(independent, "successorSequence");
 			assertNotEquals(0, independentSequence);
 			first.restart(); second.restart(); firstSlow.close(); assertEquals(false, field(abandoned, "closed"));
@@ -634,7 +648,7 @@ class InventoryPooledRuntimeTest {
 		var planner = new Planner(); var settings = settings(false, false); var runtime = planner.runtime(settings);
 		try (runtime) {
 			runtime.advance(0, settings); var a = attach(runtime, input(1, BlockFace.NORTH)); var b = attach(runtime, input(2, BlockFace.SOUTH));
-			finish(runtime, a); finish(runtime, b); a.restart(); b.restart(); Object previous = field(b, "completedRound");
+			runtime.prepare(a); runtime.prepare(b); finish(runtime, a); finish(runtime, b); a.restart(); b.restart(); Object previous = field(b, "completedRound");
 			runtime.step(a, 3).orElseThrow(); runtime.prepare(b); Object abandoned = field(a, "round");
 			try (var evidence = runtime.publicationEvidence(a, InventoryRuntime.EvidenceScope.SCANNING).orElseThrow()) {
 				a.restart(); b.restart();

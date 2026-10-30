@@ -89,6 +89,10 @@ class InventoryPooledBackendTest {
 		for (UUID owner : List.of(InventoryPublicationBackendFixture.A, InventoryPublicationBackendFixture.B)) for (long request = 1; request <= 2; request++) {
 			markers.add(f.select(owner, request, 20)); f.closePreview(owner, request, 20);
 		}
+		// Completed Preview is not a cache. Admit every intended Tracking peer
+		// before any of their first physical rounds can finish.
+		@SuppressWarnings("unchecked") var leases = (Map<MarkerId, ?>) InventoryPooledRuntimeTest.fieldUnchecked(f.backend, "tracking");
+		for (var marker : markers) f.runtime.prepare((InventoryRuntime.Consumer) InventoryPooledRuntimeTest.fieldUnchecked(java.util.Objects.requireNonNull(leases.get(marker)), "consumer"));
 		return List.copyOf(markers);
 	}
 	static long physical(InventoryRuntime runtime) throws ReflectiveOperationException {
