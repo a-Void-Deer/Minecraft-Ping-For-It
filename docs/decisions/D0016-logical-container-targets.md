@@ -57,5 +57,4 @@ share a winner/quota group and still require independent physical scans or
 fresh observations. This refines the identity boundary without changing the
 presentation-type rationale in [D0003](D0003-multipart-presentation-types.md),
 inventory recovery in [D0008](D0008-inventory-source-recovery.md), or the
-preview-seeded fresh-scan decision in
-[D0014](D0014-preview-seeded-inventory-tracking.md).
+[preview-seeded fresh first scan](../architecture/presentation/inventory.md#selected-preview-bootstrap).

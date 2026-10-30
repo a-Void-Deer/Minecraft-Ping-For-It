@@ -17,10 +17,7 @@ identity and processing boundary, and the size-only default-icon exception, are
 explained by
 [D0012](../../decisions/D0012-explicit-patch-identity-and-display.md). The native
 read-cost and mixed-time accuracy boundary is explained by
-[D0013](../../decisions/D0013-native-incremental-inventory-sweeps.md). The
-preview-seeded initial display and separation of selection intent from current
-item presence are explained by
-[D0014](../../decisions/D0014-preview-seeded-inventory-tracking.md). The rationale
+[D0013](../../decisions/D0013-native-incremental-inventory-sweeps.md). The rationale
 for metadata reuse and bounded on-demand scratch, rather than validity or content
 caches, is recorded in
 [D0015](../../decisions/D0015-inventory-metadata-reuse-and-scratch.md). Certified
@@ -228,12 +225,19 @@ same-registry candidates and different hit roots cannot cross-bind. The
 owner's current read authority and the preview's original source/layout evidence
 are revalidated through metadata checks, the selection reference and annotation
 are checked, and retained memory is admitted before the tracking lease is
-stored. Any failure releases the acquired reference and stores nothing. No
-item-presence witness, additional item-content getter, fallback search or
-asynchronous selection deadline is part of this handoff. The tracking lease
-keeps the committed input and one detached selected value as the initial display
-seed under [Tracking](#tracking); it never retains the preview as a tracking
-observation, and no preview Ping is invented. The
+stored. Any failure releases the acquired reference and stores nothing.
+
+Selection expresses intent to track the selected item at an authorized source,
+not proof that its previously observed slot still contains it. Ordinary input
+and output may empty that slot between preview and selection while the source,
+binding and selected identity remain valid. Searching other slots at creation
+would not turn a changing inventory into a fixed snapshot. No item-presence
+witness, additional item-content getter, fallback search or asynchronous
+selection deadline is part of this handoff.
+
+The tracking lease keeps the committed input and one detached selected value as
+the initial display seed under [Tracking](#tracking); it never retains the
+preview as a tracking observation, and no preview Ping is invented. The
 committed tracking association is installed after the marker is stored and
 before the created notification is published, so the recipient's atomic initial
 can project the inventory selection kind
@@ -314,8 +318,10 @@ permission and completeness rules are owned below.
 A successful single-item selection retains only its selected identity, bounded
 display and authoritative long count independently of the preview. Closing the
 preview releases its ownership of the catalogue, journal and unselected values
-without losing this seed. The seed is presentation history, not a
-`CaptureResult`, completed observation, native sweep evidence or tracking accumulator.
+without losing this seed. The preview subtotal reflects what the preview has
+observed, not what a fresh complete tracking scan will find. The seed is
+provisional presentation history, not a `CaptureResult`, completed observation,
+native sweep evidence or tracking accumulator.
 
 The initial tracking publication carries that quantity with `UPDATING` and
 `completeScan=false`, even if the preview itself completed. An exact seed is not

@@ -55,7 +55,8 @@ orthogonal to [D0016](D0016-logical-container-targets.md): logical winner/quota
 identity does not certify physical sharing, and shared reads do not merge
 markers, audiences, selections or lifetimes. It preserves
 [D0015](D0015-inventory-metadata-reuse-and-scratch.md)'s no-authority/content-cache
-boundary and [D0014](D0014-preview-seeded-inventory-tracking.md)'s fresh first scan.
+boundary and the inventory contract's
+[fresh first scan](../architecture/presentation/inventory.md#selected-preview-bootstrap).
 Fewer getters are not evidence of reduced total CPU, allocation rate, heap or
 latency; [verification](../testing/verification/inventory.md#certified-tracking-pool-and-publication-coverage)
 keeps those limits separate.

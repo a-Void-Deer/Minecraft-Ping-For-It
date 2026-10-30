@@ -1536,8 +1536,7 @@ simultaneous import/export, paired real profiling and the remaining
 ## Preview-seeded tracking coverage
 
 The [handoff and bootstrap contract](../../architecture/presentation/inventory.md#selected-preview-bootstrap)
-and [D0014](../../decisions/D0014-preview-seeded-inventory-tracking.md) have
-headless source-to-encoded-client and publication coverage:
+has headless source-to-encoded-client and publication coverage:
 
 - `InventoryCatalogNativeReadWiringTest` clears the old observed slot before
   `SELECT`, creates immediately with no additional item getter, then explicitly

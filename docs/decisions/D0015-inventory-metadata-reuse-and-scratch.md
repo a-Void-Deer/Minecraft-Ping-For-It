@@ -62,8 +62,8 @@ Reuse stays bounded by the owning handle or root rather than a global world
 cache. Dynamic checks still scale with visited members; this is not a constant-
 time validation promise. Explicit-patch semantics remain owned by
 [D0012](D0012-explicit-patch-identity-and-display.md), and preview-seeded display
-remains independent under
-[D0014](D0014-preview-seeded-inventory-tracking.md).
+remains independent under the
+[bootstrap contract](../architecture/presentation/inventory.md#selected-preview-bootstrap).
 
 [Inventory verification](../testing/verification/inventory.md#vault-tracking-performance-evidence)
 owns deterministic coverage, measurements and the remaining live-world gaps.
