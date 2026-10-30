@@ -2,10 +2,10 @@
 
 ## Canonical identity and presentation are orthogonal
 
-The marker retains the original captured target identity, Target Type, owner,
-and lifecycle. A presentation resolver may expand that target into several
-subjects or redirect presentation to a verified real owner/master, but it must
-not rewrite the network target or canonical marker identity.
+The marker retains the original physical target and anchor, server-frozen
+logical key, Target Type, owner, and lifecycle. A presentation resolver may expand
+that target into several subjects or redirect presentation to a verified real
+owner/master, but it must not rewrite the network target or canonical marker identity.
 
 A presentation subject is the current-frame work item consumed by geometry
 sources. It carries its own position, live state snapshot, expected registry
@@ -15,6 +15,9 @@ renders the subject. The model/source versus rendered-outcome distinction is
 owned by [D0001](../../decisions/D0001-separate-model-from-renderable.md); the
 identity and multipart-type decision is owned by
 [D0003](../../decisions/D0003-multipart-presentation-types.md).
+Server-side logical grouping is a separate creation decision under the
+[target model](../identity/target_model.md#frozen-logical-block-groups) and
+[D0016](../../decisions/D0016-logical-container-targets.md).
 
 ## Required contract and current external conformance
 
@@ -63,6 +66,24 @@ source subject rather than inventing a valid composite. A resolver may also
 return a handled empty presentation when a verified proxy relationship is no
 longer valid; that must not silently become a direct rendering of the wrong
 owner.
+
+## Vanilla chests
+
+Only the exact vanilla `minecraft:chest` and `minecraft:trapped_chest` blocks
+participate. Metadata must establish reciprocal LEFT/RIGHT halves with the same
+facing and exact block registry identity, with each half's connection pointing
+back to the other. Waterlogged values may differ. This check reads loaded block
+states only: it neither reads contents nor consults lock or loot state.
+Inventory reads remain subject to independent
+[inventory authority](../presentation/inventory.md#preview).
+
+A verified pair presents LEFT then RIGHT from either hit, preserving the source
+Target Type and original physical source. When no valid pair can be verified,
+resolution uses the direct source subject and physical grouping fallback. Each
+chest BER draws its own half; a successful half never grants whole-pair coverage.
+
+Supported Vaults use the integration-owned
+[topology and presentation contract](../../integrations/create.md#vault-logical-target-and-presentation-topology).
 
 ## Source-conditioned coverage
 

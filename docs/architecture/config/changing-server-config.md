@@ -33,6 +33,8 @@ stops; decimal values retain the exact grid constraints
 owned by [server configuration](../../config/server.md#inventory-policy-object).
 The two finite display/frame size scalars have no unlimited flag: each is a
 single finite leaf selected and replaced as one value.
+Each Tracking partition switch is a separate boolean leaf, not a numeric
+slider or an unlimited-mode pair.
 
 `pingDistance` is explicitly outside this transaction. It is a JSON-only
 server setting catalogued by [server configuration](../../config/server.md) and
@@ -52,10 +54,14 @@ are numbered from zero, starting at the least significant bit:
 | 2 | `msToRegenerate` |
 | 3 | `rateLimit` |
 | 4 | `syncDuration` |
-| 5–25 | The twenty-one `inventory` leaves, in their fixed [wire order](../network/protocol.md#server-configuration-routes-server-config-request-v4-server-config-update-v4-server-config-snapshot-v4). |
+| 5–25 | The twenty-one numeric `inventory` leaves, in their fixed [wire order](../network/protocol.md#server-configuration-routes-server-config-request-v5-server-config-update-v5-server-config-snapshot-v5). |
 | 26 | `budgetDelayNotificationsEnabled` |
+| 27 | `inventory.tracking.distinguishFaces` |
+| 28 | `inventory.tracking.distinguishPlayers` |
 
-The inventory-only mask contains exactly bits 5–25. No bit above 26 is valid.
+The inventory-only mask contains exactly bits 5–25, 27 and 28; the monitoring
+bit remains outside it. No bit above 28 is valid. Existing numeric and monitoring
+bits retain their meanings.
 Bit 6 selects both the pending-memory mode and its retained finite value.
 The mask identifies which leaves the sender changed; it is not a partial
 snapshot. A missing, zero, unknown, or malformed selection, or an otherwise
@@ -67,7 +73,7 @@ is produced are UI planning details owned by
 
 The per-target-type presentation field policy is read and changed through its own
 versioned route, not through this server-configuration transaction. The selector
-route never travels on the version-4 server-configuration request, snapshot, or
+route never travels on the server-configuration request, snapshot, or
 update routes and does not extend or replace the update surface; exact route
 identifiers and wire grammar are owned by
 [network protocol](../network/protocol.md). Its rule-view disclosure,
@@ -80,10 +86,9 @@ or mutate is owned by
 
 A snapshot request carries a positive request identifier and asks for the
 server's current authoritative values; it is not an edit, and any connected
-player may send one. The snapshot covers the complete remote surface —
-top-level fields and every inventory administration leaf, including each cap's
-or multiplier's retained finite value and the two finite size scalars — and is
-accepted or rejected as one whole. The response is bound to that identifier. A
+player may send one. The snapshot covers the complete remote surface defined in
+[Update surface](#update-surface) and is accepted or rejected as one whole.
+The response is bound to that identifier. A
 response is accepted only while the initiating request is still pending on the
 same connection, the
 snapshot is non-null and safe, and the response's positive identifier exactly
@@ -151,6 +156,9 @@ User-visible admission ordering for marker creation is separate and owned by
 owned by [rate policy](rate-limit.md), and the lifetime meaning of the
 synchronization-duration field is owned by
 [marker lifecycle](../authority/marker_lifecycle.md).
+Applied Tracking partition edits follow the inventory owner's
+[next-scan transition](../presentation/inventory.md#certified-tracking-observation-pools),
+not an immediate restart or invalidation of running scans.
 
 ## No update result
 
@@ -167,9 +175,8 @@ draft as dirty; it is not evidence that the server accepted, applied, or
 persisted the update.
 
 Applying an update can also trigger the handler's update notification
-(reinitializing server-side state and re-broadcasting rate and
-synchronization-duration policy) even when the subsequent persistence attempt
-fails. A persistence failure is not reported back to the client, and the
-already-applied assignment is not rolled back. Persisted-state recovery,
-migration, and future-version protection are owned by
+(reinitializing server-side state and re-broadcasting rate policy) even when the
+subsequent persistence attempt fails. A persistence failure is not reported back
+to the client, and the already-applied assignment is not rolled back.
+Persisted-state recovery, migration, and future-version protection are owned by
 [configuration revisioning](revisioning.md).

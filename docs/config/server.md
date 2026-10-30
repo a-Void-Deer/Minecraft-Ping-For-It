@@ -17,7 +17,7 @@ independently configure server behavior. The client file has a separate
 `pingDistance` key; the two configuration objects are distinct even where names
 match.
 
-The six top-level scalar fields other than `pingDistance`, and the twenty-one
+The six top-level scalar fields other than `pingDistance`, and the twenty-three
 `inventory` administration settings, can also be changed over the
 client/server connection through
 [changing server configuration](../architecture/config/changing-server-config.md).
@@ -42,7 +42,7 @@ exposes the remote settings and the presentation policy controls.
 | `budgetDelayNotificationsEnabled` | boolean | Enables administrator system messages for continuously resource-delayed work; disabling it does not disable WARN diagnostics. | Server-authoritative. Message eligibility, timing and lifetime behavior are owned by [shared source monitoring](../architecture/presentation/shared_sources.md#budget-delay-monitoring). |
 | `pingDistance` | number, blocks | Server acceptance range measured from the requester's eye to the authoritative target anchor. | Server-authoritative acceptance setting. It is not a client advertised capture cap; capture composition and acceptance are owned by [range](../architecture/picking/range.md). |
 | `presentation` | object | Per-target-type presentation field policy, sampling limits, and permission/interval overrides for the versioned presentation snapshot. | Server-authoritative. Projection, authorization, and demand-driven capture are owned by [presentation snapshot](../architecture/presentation/presentation_snapshot.md); the nested shape is catalogued below. |
-| `inventory` | object | Server-authoritative inventory preview and tracking budgets, caps, independent send-byte multipliers, and the finite display/frame size scalars. | Server-authoritative. Budget, unlimited-mode, multiplier, size-scalar, and tracking-deadline semantics are owned by [inventory preview and tracking](../architecture/presentation/inventory.md); the nested shape is catalogued below. |
+| `inventory` | object | Server-authoritative inventory preview and tracking budgets, caps, independent send-byte multipliers, finite display/frame size scalars, and Tracking pool partition switches. | Server-authoritative. Budget, unlimited-mode, multiplier, size-scalar, pooling and tracking-deadline semantics are owned by [inventory preview and tracking](../architecture/presentation/inventory.md); the nested shape is catalogued below. |
 
 ## Presentation policy object
 
@@ -112,8 +112,9 @@ is owned by
 ## Inventory policy object
 
 The `inventory` object persists the shared scan-work allowance, the single
-pending-memory bound, the separate preview and tracking budgets, and the two
-finite display/frame size scalars. The existing `physicalSlotsPerTick` key
+pending-memory bound, the separate preview and tracking budgets, the two
+finite display/frame size scalars, and Tracking pool partition switches. The
+existing `physicalSlotsPerTick` key
 bounds actual live slot reads and their item processing on native incremental
 routes, not just a decode after whole-inventory capture. Explicit adapter
 snapshots retain the separate fixed-work capture/copy exception and charge their
@@ -123,7 +124,8 @@ accounting contract is owned by
 and [shared source capture and sync](../architecture/presentation/shared_sources.md).
 Every cap is either a positive finite value or an explicit unlimited mode;
 periods, resynchronization cooldown and heartbeat have no unlimited mode, and
-the two display/frame size scalars are finite-only. There is no tracking-duration
+the two display/frame size scalars are finite-only. The partition switches are
+plain booleans, not cap or multiplier objects. There is no tracking-duration
 member: the tracking deadline follows the Ping's own marker lifetime, owned by
 [inventory preview and tracking](../architecture/presentation/inventory.md).
 
@@ -153,6 +155,8 @@ array or an unbounded work loop.
 | `preview.globalByteMultiplier` | multiplier object | Preview global period byte allowance. |
 | `tracking` | object | Tracking accounting; the members below. |
 | `tracking.periodTicks` | number, ticks | Tracking accounting period. |
+| `tracking.distinguishFaces` | boolean; default `false` | When true, additionally partitions certified Tracking observations by frozen face. When false, permits cross-face reuse only for provider-certified equivalent visible views; it never widens visible slots. |
+| `tracking.distinguishPlayers` | boolean; default `false` | When true, additionally partitions certified Tracking observations by read owner. When false, permits cross-player reuse only for provider-certified equivalent views with each owner's current read authority checked independently. |
 | `tracking.maxVariantsPerTarget` | limit object | Per-target active selected variant-category quota, with selection-set semantics owned by [inventory](../architecture/presentation/inventory.md#budgets-queues-and-memory). |
 | `tracking.maxSlotsPerTarget` | limit object | Per-target tracking slot quota. |
 | `tracking.maxSlotsServer` | limit object | Server-wide tracking slot quota. |
@@ -173,6 +177,15 @@ a client display preference. The snapshot multiplier is the single multiplier
 behind both the per-fragment cap and the per-client period total. The two
 display/frame size scalars are not multiplier objects: each is a finite plain
 number with no unlimited mode, normalized on its own code-defined grid.
+
+The two partition switches affect Tracking only. Supported certification routes,
+exact-isolation fallback, Preview interaction and next-scan policy transitions
+are owned by
+[inventory pools](../architecture/presentation/inventory.md#certified-tracking-observation-pools).
+Missing or explicit-null switch members use `false`; explicit boolean choices
+remain independent. These members use model defaulting rather than a versioned
+migration. Defaulting alone does not rewrite an untouched same-version file on
+load or a no-op save. External file edits are not watched or reloaded automatically.
 
 Missing nested objects and missing members receive model defaults. Finite
 values are clamped into their field-specific validated ranges. An in-range
@@ -253,6 +266,8 @@ Illustrative partial document; the values are examples, not defaults.
       "globalByteMultiplier": {"unlimited": true, "value": 1}
     },
     "tracking": {
+      "distinguishFaces": false,
+      "distinguishPlayers": false,
       "streamByteMultiplier": {"unlimited": false, "value": 0.25},
       "heartbeatPeriods": 0
     }

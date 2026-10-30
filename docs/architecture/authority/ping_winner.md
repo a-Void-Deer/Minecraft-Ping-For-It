@@ -16,9 +16,10 @@ by:
 
 Marker IDs must support deterministic larger-ID comparison. Client timestamps,
 receipt order, render order, and unordered traversal on an individual client are
-not substitutes for this ordering. Concrete target grouping follows
-[stable identity](../identity/target_model.md), not render proxy positions or
-the local constituent hit on a whole entity.
+not substitutes for this ordering. Same-target comparison uses the frozen
+logical key defined by [stable identity](../identity/target_model.md), including
+supported container groups, rather than deriving a new key from the physical
+hit, current render subjects, or the local constituent hit on a whole entity.
 
 The audience snapshot at creation is owned by
 [target validation](target_validation.md#audience-snapshot-at-create). Winner
@@ -31,7 +32,9 @@ can shrink the snapshot and is owned by [marker lifecycle](marker_lifecycle.md).
 The winner's Ping Type supplies the shared visible outline and its related
 color; [outline rendering](../rendering/outline.md) owns that consumption.
 Non-winning markers remain active: choosing a winner does not implicitly delete
-the others.
+the others. Each loser keeps its own owner, audience, selected content, tracking
+association and removal/expiry boundary. A later winner removal can therefore
+reveal a surviving marker created through a different member of the group.
 
 On cancellation, expiry, authoritative invalidation, or owner disconnect, the
 server recomputes each affected recipient's winner among the remaining active

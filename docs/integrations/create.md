@@ -277,6 +277,21 @@ cached. Generic capability sources retain full rerouting, and provider-confirmed
 external bindings still resolve their current scope per operation rather than
 using this ordinary-source shortcut.
 
+The exact ordinary tested-version Vault locals also certify their ordered
+member-local address graph for
+[Tracking pooling](../architecture/presentation/inventory.md#certified-tracking-observation-pools).
+Certification requires the known native route and declaration owners, current
+world/member object identities and unchanged ordered boundaries; an arbitrary
+handler, wrapper, decorator or equal total does not qualify. Hit-root and face
+labels do not split a proven identical graph, but each participant keeps its own
+current owner-authorized port. Provider-confirmed external Vault bindings and
+generic capabilities remain on exact isolation; this opt-in neither widens their
+scope nor certifies other Create versions or containers. Read reuse remains
+subject to common cohort freshness and budgets; the
+[headless pool evidence](../testing/verification/inventory.md#certified-tracking-pool-and-publication-coverage)
+uses tuned, budget-admitted cohorts rather than establishing default-setting
+throughput.
+
 Vault access owns its local resident validation and declines the optional generic
 resident-scope factory, avoiding unused scope scratch without bypassing the
 common source's eager member/owner prechecks. Native incremental reads,
@@ -285,6 +300,49 @@ variant semantics remain owned by
 [inventory preview and tracking](../architecture/presentation/inventory.md).
 
 ## Create block presentation resolvers
+
+### Vault logical target and presentation topology
+
+Ordinary `create:item_vault` blocks support logical grouping and whole-structure
+presentation on NeoForge under the tested Create version gate described above.
+Fabric and Forge keep the exact physical key and direct presentation until an
+explicitly supported integration exists. This metadata-only route is independent
+of the [Vault inventory provider](#vault-inventory-provider): it never resolves
+an inventory, handler, capability or item contents, and does not authorize reads.
+
+The root and all members must be the exact supported block and block-entity
+types and registry identities, in the current level and positions, nonremoved
+and nonvirtual, with matching horizontal axes and controller relationships.
+Fixed metadata methods must retain their tested declaration owners and
+signatures. A non-null last-known position must equal the current position;
+an absent last-known position is allowed. Only the controller supplies extents:
+width is 1 through 3 and longitudinal length is 1 through three times width.
+The controller anchors the positive bounded prism along X or Z, with width on
+the other horizontal axis and Y. The original hit must lie inside it.
+Noncontroller members' stale local extent fields do not invalidate an otherwise
+verified structure.
+
+Reads use existing chunks only: server `getChunkNow`, client `FULL` with
+`create=false`, and already-instantiated entries in the chunk's block-entity
+map. Pending NBT is never promoted to a block entity. The complete member set
+and its current metadata are validated before publishing a detached topology;
+no level, chunk, block entity or handler escapes into that result. A missing,
+unloaded, replaced, inconsistent or drifted member yields exact physical
+grouping/direct presentation rather than an invented box or a usable prefix.
+Absent Create, an untested version or optional linkage failure takes the same
+normal fallback. Server platform dispatch and client resolver registration are
+lazy; client registration keeps independent state from other Create routes.
+
+For presentation, each verified cell contributes one ordered COMPOSITE subject
+with a controller-relative identity and the source Target Type. The original
+physical hit remains the source. Normal sources and late shape fallback consume
+one shared per-frame subject snapshot under
+[presentation subjects](../architecture/rendering/presentation_subjects.md).
+Every Vault baked model owns its cell; controller BER or one cell's geometry
+does not cover sibling cells. Metadata is resolved within the bounded structure
+for each frame rather than caching live block entities. Client metadata may lag
+or arrive out of order, so a later frame can recover from direct fallback without
+changing the marker's frozen group or lifetime.
 
 ### EntityBlock doors
 

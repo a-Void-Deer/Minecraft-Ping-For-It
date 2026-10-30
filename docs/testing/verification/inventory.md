@@ -25,8 +25,8 @@ verification gaps are scoped
 
 ## Inventory preview and tracking foundation
 
-The inventory foundation has headless coverage for the preview route and its
-supporting models. `InventoryC2SPacketTest` and `InventoryS2CPacketTest` cover
+Headless test-source assertions cover the preview route and its supporting
+models. `InventoryC2SPacketTest` and `InventoryS2CPacketTest` cover
 the version-one request and response codec round trips, bounded text and frame
 limits, corruption rejection, part-range and duplicate-key rejection, the
 status values, and an unsupported protocol value or a previous version-four
@@ -52,6 +52,19 @@ allocates no display-sized buffers, and scales its workspace with the actual
 packet, and a failed write preserves the existing destination bytes and
 indices.
 
+`InventoryC2SPacketTest` decodes an independent golden literal `RESYNC` and
+compares the writer byte-for-byte with it, fixing the retained version-one
+header, request long, true presence byte and marker long. Zero request ID is
+accepted; a missing marker is corrupt and rejected before any write mutates the
+destination. Literal mutations reject false and noncanonical presence bytes,
+missing presence and every marker truncation, a negative request ID, and
+trailing bytes, consuming the rejected input. `InventoryS2CPacketTest` uses
+literal UTF-name frames independent of the production enum codec: every retained
+status is accepted in `PREVIEW`, `SNAPSHOT`, `STREAM` and `STATUS`, and every
+retained entry quality is accepted in the three data kinds. Both `UNAVAILABLE`
+and `EXPIRED` are rejected at each of those status and quality positions, with
+the failed frame consumed rather than reinterpreted.
+
 `InventoryS2CPacketTest`'s sparse-display cases additionally compare a sparse
 display payload with a full-effective resident-patch baseline for stone, an
 ordinary tool and a damaged tool: a native full-map item JSON oracle round-trips
@@ -75,20 +88,33 @@ without setting the aggregate flag.
 raw frames plus raw overflowing request/response frame
 numbers and strict helper rejection of overflowing or noncanonical varints and
 overflowing varlongs; it is codec coverage, not transport or admission evidence.
-`InventoryScannerTest`, `InventoryScanBrokerTest` and `InventoryWireWindowTest`
-cover bounded scanning, the shared-read broker, the wire window, and
-incomplete/unavailable outcomes. `InventoryPreviewServerTest` covers preview
-session negotiation, request binding, bounded budget admission, invalidation,
-close, and the ignored forged `SELECT`; it also covers the preview progress and
-retained-memory model headlessly: duplicate requests reuse only one client's
-paid coverage while different clients pay independent logical progress for a
-shared observation, close, reopen, disconnect, reconnect, and invalidation
-never refund already-charged period slots, a client's progress is retained and
-accounted once and released by the last request, pending-memory pressure defers
-new client progress until room is released, departed-UUID churn returns to the
-anchored round's retained cost, and an exact long count beyond double precision
-survives publication. `InventoryRuntimeTest` covers the production runtime
-seam: one admitted slot prefix, covering adapter snapshot decode or live
+`InventoryWireWindowTest` covers the wire window.
+`InventoryBackendLifecycleTest` exercises the production backend and runtime
+through public packet, tick and memory-ledger seams:
+
+- duplicate preview requests share one client's paid progress; a repeated
+  `OPEN` adds no target admission or progress allocation. Idempotent `CLOSE`
+  releases only its request, the peer continues the same sweep, and cancelled
+  data cannot escape later drains. The last close stops resolution, validation
+  and reads; paid-period tickets retire at their owning period;
+- separate per-client and server-wide slot-limit cases keep close/reopen from
+  refunding spent slots, including a different UUID trying to reuse global
+  allowance. The next period admits exactly one new slot;
+- duplicate disconnect cannot double-release ownership. Reconnect negotiates a
+  fresh epoch without refunding global usage, old-epoch `OPEN` cannot bind or
+  advance the new request fence, old `CLOSE` cannot cancel its same-ID successor,
+  and no queued old-session output crosses reconnect;
+- retained-memory pressure defers before resolution, validation or reads,
+  without an empty or terminal preview. Releasing pressure resumes the bound
+  request without another `OPEN` and completes its original sweep;
+- 300 sequential guest UUIDs with one anchored request return to the anchor's
+  retained cost after every paid period, without stranding reservations or
+  exhausting live admission. The anchor has no periodic preview recapture, its
+  source survives guest disconnects, and the final disconnect stops source work.
+  Fixture cleanup balances every resolved source and retained/reserved charge.
+
+`InventoryRuntimeTest` covers the production runtime's exact legacy/unsupported
+source seam: one admitted slot prefix, covering adapter snapshot decode or live
 slot reads, charged once against the shared scan allowance and shared by
 preview, duplicate-preview and tracking consumers while
 client and target logical subjects stay independent and finite; a memory defer
@@ -128,8 +154,8 @@ consumers enter, and closing evidence never refunds the current target's paid
 progress. Compatible aliased inputs still share one physical round when normal
 observation admission is full, because the bounded round guard counts physical
 rounds rather than a compatible consumer's references, and per-target-key
-quotas stay independent. The owner and frozen face remain part of that source
-key: one original block resolves separately for a different owner or face
+quotas stay independent. On that exact path, owner and frozen face remain part
+of the source key: one original block resolves separately for a different owner or face
 instead of reusing a same-binding shortcut, and retiring an invalid origin
 input invalidates only the handle bound to that input while a different
 owner's and a different face's handles stay active. A shared physical
@@ -214,16 +240,24 @@ checked terminal preview before the publisher drains, a cached tracking
 publication defers with zero provider calls and resumes the same baseline when
 budget returns, a tracking restart keeps published completed evidence until a
 fresh accepted result and invalidity fences real frames, and legal `HELLO`
-periods round-trip exactly. Request-scoped repair
-tests withhold an earlier encoded preview part, then restore the cumulative
-retained rows at a newer watermark without recapture, renegotiation or a marker;
-cooldown coalescing, waiting for admitted parts, truthful updating/invalid/empty
-replay and exclusive marker-bearing dispatch have dedicated cases. Same-ID
+periods round-trip exactly. Same-ID
 retirement cases vary discovery order and page width, preserve exact long sums
 and unrelated latest rows, reject retired selection references, and replay old
 encoded data into the real client without resurrecting exact variants. Queue
-refusal with repeated request repair and an independently refused publisher-work
-grant exercise separate contention seams, not live packet loss.
+and transport recovery use normal preview publication: an aggregate-required
+slot at index 10 withdraws an admitted, transport-blocked exact cut before the
+replacement encounters a recorded `QUEUE_CAPACITY` refusal. Restored queue
+capacity admits one immutable watermark while transport still refuses it;
+releasing transport delivers one cumulative eight-row cut, with the independent
+long sum `9_007_199_254_741_011`, the latest seven unrelated rows and the earlier
+unrelated selection reference intact, without rereads, another offer, marker
+creation or a second completed cut. Late old exact data cannot resurrect a
+variant. An independently refused publisher-work grant exercises a separate
+contention seam. Cross-tick partial-preview publication keeps the paid cursor,
+baseline and opaque key;
+repeating a tick cannot refund physical allowance, and generic partial quantities
+remain updating with uncertain quality until source completion. These are
+encoded-frame/client assertions, not live packet-loss tests.
 `InventoryBackendTest` exercises the production
 backend orchestration headlessly: one bounded preview selection creates once,
 seeds the selected retained preview count, and starts a fresh tracking observation
@@ -235,8 +269,14 @@ audience; identity aggregation is scoped to each observation, and a recipient's
 resync remains isolated from peers; item absence does not veto an otherwise
 valid reference or add a creation-time getter, and selection replay creates
 only once; a failed prepared create releases its sidecar reservations; an invalid
-preview releases its physical round so unrelated work can progress. Cooldown
-coverage is inventoried under
+preview releases its physical round so unrelated work can progress. A refused
+terminal `INVALID` preview control retries on normal ticks without recovery
+probes, reads or restored quantities and stops retrying after handoff. Initial
+snapshot-plan memory refusal leaves preparation and reads unperformed, leaks no
+reservation and never reports a completed empty observation; later admission
+performs one preparation and read. Transport refusal retains the same admitted
+immutable preview part at watermark one, then delivers it once without a new
+source read or a rebuilt cut. Cooldown coverage is inventoried under
 [Resynchronization and budget policy verification](#resynchronization-and-budget-policy-verification).
 A superseded oversized preview selection during a pending cap reconciliation is
 answered with the recorded bounded `REJECT` without consuming the fresh preview
@@ -249,6 +289,11 @@ disconnected outcomes. Aggregate-display work-refusal cases keep retirement and
 the retained count retryable before constructing the bounded display. Current-view
 control and aggregate-selection cases pass in the recorded focused run; they remain
 headless authority and recording-transport evidence.
+`InventoryBudgetDelayIntegrationTest` checks that a delivered completed preview
+stays deduplicated under retained-memory pressure while validity checks continue:
+normal ticks add no reads or frames and report no false delayed cycle. Restoring
+capacity emits no duplicate cut, and later source invalidity still produces
+`INVALID` without another item read.
 `InventoryPatchIdentityFlowTest` adds backend assertions across preview,
 selected-value bootstrap and the first fresh tracking capture: two exact keys of
 one item ID remain separate rows and selecting either performs no item getter
@@ -305,12 +350,14 @@ production source wrapper with a recording platform view: a same-alias topology
 change invalidates before the cursor continues, a fresh observation recovers
 all slots, explicit snapshot-plan discovery stays lazy without capturing or saving NBT
 and without replacing the direct live-witness helper, an aggregate alias
-without an explicit member layout keeps the live route, a completed
-double-chest preview withdraws its cross-period encoded batch when the original
-hit half becomes a legal single, normal content changes after a completed native
-sweep do not rebase its pending cross-period preview publication, and terminal
-evidence detects a same-alias same-count snapshot-layout change even when access remains
-self-valid. A live catalogue adopts the effective display cap and tightens
+without an explicit member layout keeps the live route, and a native double-chest
+sweep starts its normal cumulative complete cut with parts still admitted across
+periods. A topology change to a legal single at the original hit half withdraws
+those pending parts; ordinary content changes instead let the same immutable cut
+finish once with every index and checksum intact, without rebaseline, rereads or
+NBT saves. Terminal evidence detects a same-alias same-count snapshot-layout
+change even when access remains self-valid. A live catalogue adopts the effective
+display cap and tightens
 monotonically, snapshot capture adopts the source catalogue ceiling, and an
 effective display cap below the legal minimum is rejected. `SableInventorySourceTest` covers the provider-confirmed external
 inventory source headlessly with recording level, membership and provider
@@ -575,6 +622,17 @@ checksum, an increase keeps stripped state and only later accepted data adds
 detail back, a wrong-epoch offer cannot widen the accepted caps, delayed
 old-cap frames cannot mutate, and the display cap is measured in exact UTF-8
 bytes rather than characters.
+
+`ClientInventoryTest` starts marker removal with nonempty completed tracking and
+a buffered future baseline: `markerRemoved` clears tracking and the unknown
+buffer, and the known-marker gate rejects late `STREAM`, `SNAPSHOT`, `STATUS`
+and `HEARTBEAT`, including newer baselines. `ClientPingRuntimeContentReceiptTest`
+exercises the real presentation `REMOVED(EXPIRED)` dispatch with a retained
+nonempty provisional quantity and buffered future baseline. Inventory state is
+cleared while the independent stale marker visual remains; late data and
+controls and a delayed `CREATED` cannot restore inventory admission or rows.
+Content-feedback cancellation is inventoried under
+[presentation verification](presentation.md#content-receipt-chat-and-pending-completion).
 
 `ClientItemDisplayTest` covers the client item-display decode seam: transmitted
 encoded display data decodes into an owned render stack, while a malformed,
@@ -935,16 +993,14 @@ failure's log delivery.
 round and source context, the attempted prefix still paid, no capture/read and
 no retained or reserved leak. Its snapshot-discovery limit case also preserves
 the original bound in the incomplete outcome's report without a content read
-or reserved-memory leak. `InventoryScannerTest` asserts a count-overflow warning
-without an attached throwable while the scan stays incomplete and retains its
-already accumulated exact count. `InventoryCaptureDiagnosticsTest` additionally
+or reserved-memory leak. `InventoryCaptureDiagnosticsTest` additionally
 checks that its existing bound-reason gate reaches the shared backend even
 when the general warning window is full, without a second admission window.
 
 `InventoryItemFailureDiagnosticsTest` covers actual canonical-byte refusal
-producing an all-variants aggregate without changing a safe exact identity or
-lossless long totals, while intentional display stripping and ceiling
-projection stay silent. At the freezer seam, only the tested display root-limit
+producing an all-variants aggregate diagnostic without changing a safe exact
+identity, while intentional display stripping and ceiling projection stay silent.
+At the freezer seam, only the tested display root-limit
 refusal retains exact canonical identity with unavailable display; ordinary
 runtime and linkage getter failures propagate unchanged to the source owner
 without an exact result or a duplicate local report. Native snapshot and client
@@ -1049,6 +1105,168 @@ optional-provider wiring,
 [manual inventory matrix](manual-integration.md#pending-manual-and-integration-matrix)
 remain pending.
 
+## Logical container quotas and scan sharing
+
+`CompositeTargetQuotaTest` exercises the production backend, runtime and
+publisher seams: active selected categories span opposite member hits while
+repeated selection of one category shares its claim; the frozen key reaches
+tracking slot subjects and recipient/target `STREAM` routes through rebaseline.
+Different physical read views spend the same group quota independently. Group
+equality cannot cross-bind an exact preview target to another member at create.
+Losing markers keep their tracking when a sibling is cancelled and stop only
+at their own removal/expiry. These unsupported recording sources keep exact
+owner/face physical partitioning, and a new consumer cannot reuse an old
+observation; certified widening is covered separately below.
+
+`DoubleChestGroupingSafetyTest` uses actual production pair views for normal and
+trapped chests from either hit, reading each half under the existing source
+wrapper without capabilities. Metadata grouping and presentation can succeed
+while locked, loot-backed or unavailable sibling inventory remains unreadable;
+they grant no content authority.
+
+`CreateVaultComposedSharingTest` composes the real segmented Vault access,
+ordinary source authority wrapper and inventory runtime with recording native
+world/provider fixtures and different physical member hits on the exact legacy
+path. Compatible tracking consumers attached before capture with the same owner
+and frozen face each
+consume a 900-slot sweep from one 900-getter journal, with 900 logical slot
+charges for their shared `TrackingSubject(VaultKey)`. Changing owner or face
+requires two separate 900-getter rounds on that path and spends 1,800 logical
+slots against the group. A late preview cannot join an already-started round;
+it can share a compatible replacement created after attachment. A newly selected tracking
+consumer starts fresh rather than inheriting that preview prefix.
+
+Those composed cases establish exact-path conditional scan reuse, not one
+tracking record per Vault or a CPU reduction. They do not cover the separate
+certified cross-player pool below. Older synthetic fixtures that assign different
+`PreviewSubject` UUIDs while reusing one input read owner test separate logical subjects; they
+do not demonstrate reads shared by two actual players. Live Create behavior,
+packet delivery, TPS, allocation and GC remain unmeasured. Topology/client
+evidence is scoped separately under
+[Create verification](integrations.md#vault-topology-grouping-and-presentation).
+
+## Certified Tracking pool and publication coverage
+
+`InventoryCertifiedReadTest` exercises exact native chest and trapped-chest
+entities with recording world and lock ports. Opposite hits, different UUID
+owners and all frozen faces produce equal certified ordered address proofs while
+generic read scopes remain distinct. Metadata construction and validation perform
+no item getter or resident-backing audit. Subclasses, reordered mappings,
+replacement members/worlds/registries, malformed pairing, lock/loot denial and
+one-short admission are distinguished. Cross-chunk partner-unload traps cover
+construction, initial/final validation, catalogue creation and native reads,
+including revocation during a real component freeze, without an unloaded-state
+query or accepted partial item. `InventoryCertifiedVaultTest` composes the
+production segmented Vault access and common certificate with headless native
+ports: member/local-boundary/route ownership checks, same-layout local-handler
+replacement, callback revocation and external/decorator isolation have separate
+assertions. These are not installed Create or actual chunk-lifecycle tests.
+
+`InventoryPooledRuntimeTest`, `InventoryPooledChestRuntimeTest` and
+`InventoryPooledVaultRuntimeTest` cover policy cohorts and committed-prefix reuse,
+independent exact bindings and completed evidence, creator departure and
+owner-local denial, unsupported/mapping/world/member isolation, current-port
+tail reads, shared collision history and display tightening. A nine-address
+failure case records three committed reads, three failed-page attempts and six
+retry reads: twelve attempts for nine committed slots, with no failed-page
+append or attempted-work refund. Separate capacity cases retain only the
+validated incomplete prefix and cannot claim completion or zero. Admission
+refusal, fresh same-tick attachment, widened-pool Preview exclusion, exact-path
+Preview sharing, same-object/same-tick policy changes, rapid reverse changes and
+pre-established successor entitlements are exercised independently. Lagging-peer
+and repeated cleanup fixtures check bounded progress and zero retained/reserved
+charges at close.
+
+Successor regressions cover both idle and fully adopted abandoned replacements,
+each across 32 cohorts with partial and explicitly `INCOMPLETE` observations and
+exact-path controls. Every fixed variant reaches 32/32 replacement admissions;
+all-adopted slow peers consume fresh accepted values without additional getters
+while their original completed proof remains valid. Against unchanged runtime `0369f4c`,
+both pooled all-adopted negative controls reach 0/32, while both exact-path
+controls reach 32/32. Separate cases preserve actual scanners and accepted
+completions through policy sealing, multiple predecessors and independent live
+successors. Historical publication proof survives without retaining round pages;
+close releases all handles, rounds, retained and reserved memory. These finite
+schedules do not establish every overlap schedule or prolonged live-soak behavior.
+
+`InventoryPooledBackendTest` and `InventoryPooledVaultBackendTest` drive preview
+selection, four independent tracking markers, production backend/publisher,
+native sources and encoded frames into real client inventory sessions. The
+fixtures use two distinct owner UUIDs and two frozen faces, not distinct logical
+subjects sharing one input owner. They raise pending-memory and Preview/Tracking
+logical-slot allowances, change both cadences, and set a separate physical-slot
+allowance so compatible consumers can co-start and remain serviceable. These are
+tuned, budget-admitted compatible-cohort cases, not production-default
+configuration guarantees. Their Tracking-only physical slot visits are:
+
+| Separate faces | Separate players | Normal or trapped 54-slot chest | Segmented 900-slot Vault |
+| --- | --- | --- | --- |
+| On | On | 216 | 3600 |
+| On | Off | 108 | 1800 |
+| Off | On | 108 | 1800 |
+| Off | Off | 54 | 900 |
+
+Every chest marker reaches 756 and every Vault marker reaches the exact long
+count `2,700,407,250` in each recipient fixture. The Vault has 45 members with
+20 local slots each. These are headless actual-getter/ledger and encoded-client
+oracles, not live players, packet transport, default-budget throughput or a CPU,
+allocation-rate, heap, TPS or GC measurement. Per-owner metadata checks remain
+required even when getter counts fall. These totals are not a portable benchmark:
+other admission or cadence schedules can defer a first association until after a
+prior-tick round completes, requiring additional reads under the unchanged
+[attachment-freshness rules](../../architecture/presentation/inventory.md#certified-tracking-observation-pools).
+Preview remains excluded from widened pools.
+
+`InventoryPublicationAuthorizationTest` checks distinct offered/admitted/delivered
+historical evidence, old-cut and delivered-heartbeat ownership, final validation
+after effective-budget measurement, revocation between irreversible parts,
+defer without wire/watermark advance, and balanced withdrawal/rebase/cancel.
+`InventoryPublicationReservationTest` exercises one rotating new-tick validation
+opportunity before continuous capture/ingress, same-tick non-reset, one-short
+probe/provider/item/workspace refusal before callbacks, attempted-work charging,
+and historical metadata without retained round pages. The encoded backend cases
+add owner revocation by another owner's read or by measurement, metadata callback
+disconnect during final validation, and authorized-peer completion without
+leaked queued seed data. Bootstrap and running-sweep policy changes preserve
+the baseline and seed without toggle-only invalidity or content getters.
+
+`InventoryPublicationReviewTest` adds 18 regressions through certified chest
+sources, the production backend and encoded client sessions, with a separate
+typed owner-denial control. Revocation inside the final source-proof callback
+fences changed recipient policy, view, session or known-marker state before
+quantity/completion frames or heartbeats escape; denied frames spend no wire
+allowance and advance no delivery, part or heartbeat state. A no-revocation
+control remains serviceable. An obsolete admitted proof or delivered-heartbeat
+proof cannot discard a differently proven valid completion or paid partial scan:
+replacement/missing old sources, completed zero, equal-count completion and clean
+rebaseline ordering are checked without content recapture. Same-proof failure
+still invalidates, and typed owner denial remains binding-wide without denying
+another owner. Encoding refusal, expiry, exact reference release and reentrant
+tick callbacks have separate assertions. Against unchanged parent `793437ca`
+production inputs, the final negative control has ten expected failures among
+eleven cases: eight final-callback leaks and two discarded valid completions, with
+the no-revocation case passing. All 18 cases pass on the recorded final input.
+
+`InventoryPreviewFailurePublicationTest` adds seven cross-origin regressions
+through the production backend, native chest sources, packet codec and client
+sessions. A Preview's failed old proof withdraws and re-fences matching Tracking
+cuts without discarding a differently proven valid completion, partial cursor,
+revision or paid work. Clean fences precede delivery of the replacement without
+content recapture, including after origin disconnect or close and through expiry
+cleanup. Matching-proof retirement and binding-wide owner denial still apply,
+while an independent owner's valid proof remains serviceable. Preview and
+Tracking use distinct rounds: failure propagation is not widened cross-domain
+scan sharing. Four negative-control cases fail on unchanged `ffe6536b` inputs;
+all seven cases pass on the recorded final input with released references and
+zero retained/reserved memory at teardown.
+
+Execution results for these assertions and their identified code input are
+recorded in the
+[publication-stage run](build-checks.md#tracking-pool-publication-stage-run).
+Live UI, mixed config versions, installed-provider behavior and
+multiplayer/performance scenarios remain in the
+[manual matrix](manual-integration.md#inventory).
+
 ## Native incremental sweep coverage
 
 The [native read contract](../../architecture/presentation/inventory.md#native-incremental-reads)
@@ -1092,15 +1310,15 @@ restart and close. These are bounded headless ownership/admission fixtures, not
 live large-container or total-heap measurements.
 
 Its backend/client cases pass production-encoded frames through the real client
-session. They exercise updating partial preview followed by ready completion,
-completed empty views, provisional selected display followed by a complete
-fresh tracking result and absence-derived zero,
-retained old totals during replacement, completion-plus-period scheduling and
-hard expiry. Corrective replay and tracking resync preserve scoped sweep
-evidence without recapture; delayed parts still gate client completion, and
-display rebaseline preserves exact identity/counts without restoring stripped
-detail. Actual identity refusal retains aggregate quality through selection and
-resync; getter/capacity failures publish no tracking zero; invalidity or permission
+session. Cross-tick partial preview consumes each native slot once under the
+same baseline before ready completion. Other cases exercise completed empty
+views, provisional selected display followed by a complete fresh tracking result
+and absence-derived zero, retained old totals during replacement,
+completion-plus-period scheduling and hard expiry. Tracking resync preserves
+scoped sweep evidence without recapture; delayed parts still gate client
+completion, and display rebaseline preserves exact identity/counts without
+restoring stripped detail. Actual identity refusal retains aggregate quality
+through selection and resync; getter/capacity failures publish no tracking zero; invalidity or permission
 revocation withdraws queued ready data. Recovery through a generic eventual
 adapter stays uncertain. Default-settings 540/900-slot backend fixtures finish
 preview within their bounded reference lifetime, select without a getter and
@@ -1111,10 +1329,10 @@ Trailing-empty-slot cases withhold an earlier encoded exact or aggregate row,
 then require the final cumulative preview cut to repeat that unchanged row.
 Delayed or reordered earlier data cannot satisfy a missing part of the final
 client barrier, resurrect retired exact references, or cross invalidation.
-Corrective replay preserves the completed rows without recapture, while the
-separate true-empty case still completes with no item getter. These cases drive
-native reads through production bytes into the client session; they do not
-exercise a live transport.
+Settled completion stays unchanged on later ticks without another getter or
+offer, and the separate true-empty case still completes with no item getter.
+These cases drive native reads through production bytes into the client session;
+they do not exercise a live transport.
 
 `InventoryStepTest` checks detached contiguous typed pages, absolute bounds,
 empty slots, long amounts, legacy conversion and evidence isolation: conversion
@@ -1472,11 +1690,9 @@ contracts have passing headless evidence in the
 - `InventoryBackendTest` exercises positive cooldown refusing repair just before
   its deadline and accepting it at the deadline, zero and maximum cooldown
   negotiation/live refresh, and positive-to-zero changes for
-  preview and tracked-Ping repair. An old deadline cannot block zero, and
+  tracked-Ping repair. An old deadline cannot block zero, and
   completed repair can run again in the same tick; pending requests still
   coalesce and an admitted blocked baseline resumes rather than restarts.
-  `InventoryPreviewServerTest` separately exercises same-tick zero repair
-  without recapture and an admitted sweep continuing through resync.
 - `ClientInventoryTest` exercises the same positive-to-zero deadline bypass and
   same-tick repair behavior. Unknown-baseline expiry, incomplete completion
   gaps and future-heartbeat gaps wait through the tick before expiry and request
@@ -1506,6 +1722,12 @@ Live timing and multiplayer repair remain pending in the
 
 ## Known automated gaps
 
+- the passing certified-pool, successor and final-handoff fixtures above remain
+  headless evidence. Live two-owner/chunk/lock/topology changes, installed
+  tested-version Create and mixed configuration protocols still require the
+  [manual inventory scenarios](manual-integration.md#inventory); tuned getter
+  matrices do not establish default-budget throughput or CPU, allocation-rate,
+  heap, TPS or GC gains;
 - reported installed-container selection failures lack live reproduction or
   confirmation of resolution; passing headless tests and builds do not close
   those incidents. Pending scenarios are listed in the
@@ -1515,20 +1737,22 @@ Live timing and multiplayer repair remain pending in the
   but active selected-variant capacity across period boundaries has no dedicated
   regression; simulated large memory tickets do not measure actual heap usage;
 - the inventory preview-foundation, production runtime and publication tests
-  cover per-client/target logical progress, explicit snapshot preparation/capture
+  cover bounded request/session lifecycle and cancellation, presentation-driven
+  cleanup of nonempty tracking and buffered state, per-client/target logical
+  progress, explicit snapshot preparation/capture
   and cross-period decode, native cross-tick reads and journal replay, accepted
   barriers, the tracking closed-watermark
   barrier, production selection admission order and publisher recovery/repair
   seams. Native input/HUD, live-world-backed provider safety, installed
   optional-provider wiring and live transport still require their own
   evidence, and no manual world, GPU, transport or multiplayer validation is
-  recorded by those seams;
+  recorded by those seams. Finite UUID churn and ledger cleanup do not establish
+  prolonged live connection or heap-soak behavior;
 - inventory call-site logging coverage is limited to the
   [diagnostic seams above](#failure-diagnostic-seams). Other runtime
   probe/projection branches, capture-handle source-close and standalone
-  snapshot/ticket-close diagnostics, scanner branches beyond the asserted
-  count-overflow case, broker and legacy preview-server branches lack
-  direct log-event assertions. Test appenders do not establish production
+  snapshot/ticket-close diagnostics lack direct log-event assertions.
+  Test appenders do not establish production
   file-appender delivery or low-frequency behavior in a prolonged live soak;
 - default-cap capture, preview-seeded selection and fresh tracking have headless native
   seam evidence. Independent review of the audited native fast path establishes
@@ -1582,8 +1806,8 @@ Live timing and multiplayer repair remain pending in the
   legal display value through the production server identity catalogue and its
   queue and budget admission remains unproven, as do transport-asynchronous
   heap retention and a live heap soak. Same-ID aggregate retirement, checked
-  long sums and retained request repair have encoded-frame/client seam evidence,
-  not live execution. Variant quotas, a real provider resolver and
+  long sums and normal retained publication have encoded-frame/client seam
+  evidence, not live execution. Variant quotas, a real provider resolver and
   recovery-probe expiry, the hard stop at Ping expiry, a fresh capture after
   ordinary single- or double-chest contents change in a live world, a multi-period
   low-consumption quota completing stably under live load, a real mod-provided

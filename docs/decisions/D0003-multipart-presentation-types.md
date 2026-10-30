@@ -4,6 +4,12 @@
 
 Confirmed product decision represented by the linked topic contracts.
 
+This decision constrains client presentation resolution. Separately authorized
+server logical container grouping is explained by
+[D0016](D0016-logical-container-targets.md); it preserves the original physical
+target and does not make rendering an identity authority. Beds and doors retain
+their presentation-only expansion.
+
 ## Decision
 
 Resolve multipart blocks into explicit presentation subjects without rewriting

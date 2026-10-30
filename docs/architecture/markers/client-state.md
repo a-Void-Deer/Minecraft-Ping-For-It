@@ -20,6 +20,14 @@ only `SYNCHRONIZED` and `STALE`; `EXPIRED` is an authoritative removal reason,
 not a third client state. Client bookkeeping is main-thread local and retains
 enough state to tolerate packet ordering and packet loss.
 
+The client retains the server-carried logical key separately from the physical
+target and anchor, through upserts, copies, stale transitions and winner
+fallback. All same-target sibling, HUD and winner comparisons below use that
+frozen key. Client structure resolution changes presentation subjects only;
+it cannot reconstruct or replace the key from the current world. The identity
+boundary is owned by the
+[target model](../identity/target_model.md#frozen-logical-block-groups).
+
 - The record has an independent visual deadline. It is visually active only
   while local time is strictly before that deadline;
   reaching the deadline does not by itself delete a synchronized record.

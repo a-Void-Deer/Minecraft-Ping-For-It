@@ -100,14 +100,111 @@ Coverage scope is inventoried under
 The [inventory performance evidence](inventory.md#vault-tracking-performance-evidence)
 owns the deterministic Vault coverage and recorded allocation comparison.
 
+### Logical container implementation run
+
+Recorded execution date: 2026-10-29, code commit
+`735a1e8b8e4e079083d1f1d20183c120cabcb733`, including logical-key transport,
+vanilla chest, NeoForge Vault and grouped content-receipt identity. The saved PowerShell
+invocation used Temurin JDK 21, UTF-8, `--no-daemon`, no explicit timeout and
+separate redirected stdout/stderr:
+
+```powershell
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+.\gradlew.bat :common:check :fabric:build :forge:build :neoforge:build verifyModIdentity --continue --no-daemon --console=plain > $stdout 2> $stderr
+```
+
+The invocation exited zero with `BUILD SUCCESSFUL`. All four test tasks ran;
+the saved XML contains zero failures, errors or skips:
+
+| Module | Suites | Tests |
+| --- | --- | --- |
+| Common | 452 | 4858 |
+| Fabric | 5 | 24 |
+| Forge | 5 | 26 |
+| NeoForge | 33 | 208 |
+| Total | 495 | 5116 |
+
+All three loader main compilations executed; Common main/test compilation was
+`UP-TO-DATE` from the successful focused run. All loader builds and
+`verifyModIdentity` passed. The saved source input manifest matched through
+verification and the code commit. The receipt-focused regression reports
+contain 538 tests in 35 suites, with zero failures, errors or skips. Seven
+expected failures in the pre-fix negative control establish that the new cases
+detect the receipt identity mismatch; they are not failures of this final tree.
+Coverage is inventoried under
+[logical identity](identity-authority.md#logical-container-identity-and-authority),
+[wire acceptance](presentation.md#logical-target-wire-coverage),
+[content receipts](presentation.md#content-receipt-chat-and-pending-completion),
+[inventory quotas and sharing](inventory.md#logical-container-quotas-and-scan-sharing),
+[container presentation](rendering.md#container-presentation-subjects) and
+[Vault topology](integrations.md#vault-topology-grouping-and-presentation).
+
+These execution results apply to the identified code inputs, not subsequent
+source changes. Documentation-only follow-up ran no Gradle tasks. Live game, GPU,
+multiplayer, mixed-version sessions and performance profiles were not exercised;
+the [container manual matrix](manual-integration.md#logical-container-targets-and-whole-presentation)
+remains pending.
+
+### Tracking pool publication-stage run
+
+Recorded execution date: 2026-10-30, code commit
+`0c0b61c356ca97032c5cf690b250e706645ea086`. The saved final input
+manifest includes the approved partition settings/configuration-v5 surface,
+certified source and unload checks, runtime pools, successor continuity and final
+historical-proof/recipient publication authority, including Preview-origin
+proof-scoped repair. The saved PowerShell command used JDK 21, UTF-8,
+`--no-daemon`, no explicit timeout and separate stdout/stderr files:
+
+```powershell
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+.\gradlew.bat :common:check :fabric:build :forge:build :neoforge:build verifyModIdentity --continue --no-daemon --console=plain > $stdout 2> $stderr
+```
+
+The saved `full-final` invocation exited zero with `BUILD SUCCESSFUL`. Its
+inspected XML contains zero failures, errors or skips:
+
+| Module | Suites | Tests |
+| --- | --- | --- |
+| Common | 461 | 5008 |
+| Fabric | 5 | 24 |
+| Forge | 5 | 26 |
+| NeoForge | 36 | 221 |
+| Total | 507 | 5279 |
+
+All four module test tasks executed in `full-final`, as did Fabric/Forge main
+compilation, all three loader Javadocs, jar packaging, Fabric remapping and all
+three loader builds. Common/NeoForge main compilation, all test-compilation
+tasks, Javadoc-jar tasks and Fabric access-widener validation were `UP-TO-DATE`;
+those results were reused, not freshly executed. `verifyModIdentity` executed
+and passed for all three jars. The preceding `focused-final` run executed Common
+test compilation, NeoForge main compilation and both selected test tasks: 450
+Common and 58 NeoForge tests, 508 total, with zero failures, errors or skips.
+Common main and NeoForge test compilation were `UP-TO-DATE` in that focused run.
+All 1,197 tracked source/build input hashes match across focused/full verification
+and the commit, and all nine
+recorded loader artifact hashes remain unchanged through commit. Assertion scope
+is inventoried under
+[configuration](configuration-ui.md#server-settings-snapshots-and-updates) and
+[certified pool/publication coverage](inventory.md#certified-tracking-pool-and-publication-coverage).
+
+The final run retained non-fatal mapping, deprecated-API, Javadoc missing-comment
+and Gradle deprecation warnings; it is not warning-free evidence and uses no
+historical-failure allowance. This documentation-only update inspected saved
+logs/XML and hash manifests; it ran no Gradle, tests, live UI, game, multiplayer
+or profiling session.
+
 ## Verification limitations
 
-The combined invocation's stderr was empty; stdout retained the Gradle 9
+The 2026-10-27 combined invocation's stderr was empty; stdout retained the Gradle 9
 deprecation notice and Problems-report reference. The build records also contain
 deprecated-API, mapping/processor and Javadoc warnings. These are not
 warning-free results. Compiler, Javadoc/doclint and configured loader-validation
 evidence is scoped to the build/check executions that performed that work; the
-combined invocation did not freshly compile or document the loaders.
+2026-10-27 combined invocation did not freshly compile or document the loaders.
+The logical-container run retained Javadoc, deprecated-API, Mixin-option and
+Gradle deprecation warnings; its successful result is not warning-free evidence.
 
 Passing headless tests, builds and artifact-identity checks do not establish
 live loader registration, installed-provider or Create/Refined Storage behavior,

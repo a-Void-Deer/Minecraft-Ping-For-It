@@ -53,6 +53,25 @@ logging seams, not render-frame or GPU execution. Optional Flywheel and Create
 diagnostic seams are inventoried under
 [optional rendering coverage](integrations.md#optional-rendering-structural-coverage).
 
+## Container presentation subjects
+
+`VanillaChestPresentationTest` exercises production loaded-state adapters and
+the common resolver for normal/trapped chests, every horizontal facing and
+either hit. LEFT/RIGHT ordering preserves type and physical source; malformed,
+missing or single pairs fall back to the valid direct hit. An unavailable or
+registry-replaced source yields no subject, without inventory reads or chunk
+loading. Native frame preparation and the metadata port use the same resolver.
+Normal sources and late fallback consume one ordered snapshot, and geometry
+from one half leaves the other eligible for fallback. These are headless
+resolution/frame seams, not actual chest BER or GPU output.
+
+NeoForge Vault registration, archive-backed metadata and complete per-cell
+snapshot/fallback evidence are inventoried under
+[Create topology verification](integrations.md#vault-topology-grouping-and-presentation).
+The [presentation contract](../../architecture/rendering/presentation_subjects.md#vanilla-chests)
+owns source ordering and coverage; compilation and these fixtures do not verify
+live synchronization, installed models or whole-structure outline appearance.
+
 ## Selector overlay layout and frame rendering
 
 `SpatialOverlayRendererTimingTest` covers renderer timing models.

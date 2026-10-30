@@ -7,7 +7,7 @@ projection, the per-target-type server field policy, the pre-commit target
 content preview with its field authorization, provenance and bounded fallback,
 marker-owned property selections and their code-defined property Ping Type
 policy, and the session-scoped client value store. Packet
-registration as a family and the legacy route boundary are summarized by
+registration and request wire grammar are owned by
 [network protocol](../network/protocol.md); marker record state, visual
 deadlines, and winner slots remain owned by
 [client marker state](../markers/client-state.md). Persisted keys live in
@@ -22,12 +22,11 @@ value store.
 
 ## Route and negotiated session
 
-Presentation values travel on a dedicated versioned route (`presentation-v1`),
-independent of the legacy location family and of the superseded authoritative
-marker packet family. All three loaders register the route and dispatch it
-through the common handlers. Client-to-server intents are `HELLO`, `CREATE`,
-and `REMOVE`; server-to-client messages are `OFFER`, `RESET`, `CREATED`,
-`SECTION`, `REMOVED`, `WINNER`, and `REJECT`.
+Presentation values travel on a dedicated versioned route.
+All three loaders register the route and dispatch it through the common
+handlers. Client-to-server intents are `HELLO`, `CREATE`, and `REMOVE`;
+server-to-client messages are `OFFER`, `RESET`, `CREATED`, `SECTION`, `REMOVED`,
+`WINNER`, and `REJECT`.
 
 A connection reaches presentation readiness in stages:
 
@@ -48,7 +47,7 @@ A connection reaches presentation readiness in stages:
   and complete: one list per target type, carrying the exact nested references
   that are not independently selectable or annotatable. The field mask and
   complete child deny map must both pass
-  [RESET wire validation](../network/protocol.md#presentation-snapshot-route-presentation-v1)
+  [RESET wire validation](../network/protocol.md#presentation-snapshot-route-presentation-v2)
   before either replaces the previous authorization; a rejected RESET leaves
   both unchanged. There is no
   client subscription, no field acknowledgement, and no subscription
@@ -90,7 +89,8 @@ typed decoding. A whole section is replaced at a time — never merged field by
 field — and carries an explicit stale marker. Section replacements and clears
 are revisioned per adapter: an older revision cannot overwrite a newer value or
 re-create a cleared adapter section, and a section clear deletes neither the
-marker nor another adapter's section. Basic is delivered atomically: the
+marker nor another adapter's section. The negotiated Basic atomic initial is
+the sole source of marker initialization and initial chat and label names: the
 created-marker message carries the canonical marker snapshot, the Basic section,
 and the receipt content descriptor, and a message without usable Basic is
 discarded before any part is applied. The client also requires the carried
@@ -647,7 +647,7 @@ The atomic initial carries, beside the canonical marker snapshot and the Basic
 section, one per-recipient receipt content descriptor: selection metadata only,
 whose referenced content still arrives solely through the existing authorized
 stores. Its exact wire grammar and strict decoding are owned by
-[network protocol](../network/protocol.md#presentation-snapshot-route-presentation-v1);
+[network protocol](../network/protocol.md#presentation-snapshot-route-presentation-v2);
 the message composition, wait and fence rules are owned by
 [names and chat](../rendering/names_chat.md#content-receipt-lifecycle).
 
@@ -682,17 +682,6 @@ later delivery.
 Missing authorized data does not suppress the descriptor: a selected reference
 that is authorized but whose value has not yet arrived still yields its kind,
 and the receipt waits under the names-and-chat lifecycle.
-
-## Legacy and superseded routes
-
-Legacy location packets keep their existing legacy behavior and are outside this
-subsystem. The superseded marker routes are registered but inert, as specified
-by [network protocol](../network/protocol.md#registered-ingress-and-current-effects);
-because they carry no negotiated epoch or Basic section, an old marker name
-packet can never supply this client's display name or marker state. Chat and
-label values come from the Basic atomic initial described above. The
-`presentation-v1` route's ID/version binding is owned by
-[network protocol](../network/protocol.md#presentation-snapshot-route-presentation-v1).
 
 ## Evidence
 

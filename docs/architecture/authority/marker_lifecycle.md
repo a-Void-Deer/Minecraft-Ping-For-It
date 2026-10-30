@@ -18,6 +18,13 @@ recipients. A later configuration change does not reinterpret an existing
 marker's ticks. The persisted `syncDuration` setting name and format are owned
 by [server configuration](../../config/server.md).
 
+The physical target and frozen logical key travel together in server records,
+snapshots and copies. Recipient cleanup and external locator/anchor refresh
+preserve the key; neither reconstructs it from the physical target. Grouped
+records have independent lifetimes and cancellation authority. World topology
+changes do not merge, rekey or prolong them; see
+[logical group identity](../identity/target_model.md#frozen-logical-block-groups).
+
 | From | Trigger | To or result |
 | --- | --- | --- |
 | No server record | The server accepts a create after authoritative validation and audience snapshotting | One active record with a new monotonic ID. Its arrival and expiry ticks are the authoritative lifetime carried in later snapshots. |

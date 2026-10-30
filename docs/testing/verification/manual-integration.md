@@ -69,9 +69,59 @@
   meaning of Tracking Variants per Target in assembled localized help. Verify
   live notice delivery when toggled and remote editing under permission changes;
   resource presence does not establish this behavior.
+- Exercise both full-width Tracking separation toggles immediately after Tracking
+  Period with native mouse/keyboard input, all bundled locales' assembled
+  Off/On/current-authority/next-scan help, draft reversion, read-only permission
+  changes and the client-save-first root-close path. Confirm the ordinary no-ack
+  update behavior rather than treating a clean draft as persistence success.
+  Exercise matching configuration-v5 GUI endpoints and incompatible v4/v5 peers
+  over real loader connections; headless codec rejection does not establish live
+  mixed-version behavior. External server-file edits are not an automatic reload
+  mechanism.
+
+### Logical container targets and whole presentation
+
+- In live multiplayer, ping opposite halves of normal and trapped double chests
+  and different members of a supported NeoForge Create Vault. Check one visible
+  winner per recipient, independent ownership/cancellation/expiry and selected
+  item tracking, and recovery to a surviving loser. Include equal-arrival ties,
+  different frozen audiences, owner and recipient disconnects, and same-owner
+  repeated markers.
+- Split and rejoin chests and alter Vault topology after creation. Check frozen
+  logical identity and lifetime, new markers using current structure, and current
+  presentation following verified metadata without widening inventory authority.
+  Include locked and loot-backed chests, missing neighboring chunks and direct
+  fallback, and preserve original hit anchors and exact preview selection roots.
+- Exercise installed tested-version Create client synchronization: controller
+  and member packets in differing orders, stale member dimensions, chunk
+  unload/reload, missing/removed members, absent or unsupported Create, and
+  recovery on later frames. Inspect per-cell baked-model outlines and fallback
+  with GPU rendering; headless archive/metadata tests do not establish live
+  packet ordering or rendered appearance. Verify ordinary chest behavior on all
+  loaders and exact/direct Vault fallback on unsupported loaders.
+- Exercise matching presentation-v2 negotiation and incompatible v1/v2 peers
+  over real loader connections. Codec rejection is not a recorded live handshake
+  or mixed-version gameplay result. Grouped receipt completion and inventory
+  publication under real delayed/reordered delivery remain pending.
 
 ### Inventory
 
+- On normal/trapped chests and an installed tested-version NeoForge Create Vault,
+  exercise all four face/player separation combinations with two actual owners,
+  differing faces and member hits, independently selected items and audiences.
+  Verify authorized fresh-round sharing, Preview/new-selection isolation, creator
+  departure and owner-only denial without losing an authorized peer's progress.
+  Toggle during partial scans, established successor handoffs and queued multipart
+  publication, including a rapid reverse toggle, without baseline/seed/lifetime
+  changes solely from the toggle. Include stalled or abandoned successors and
+  final-frame owner/lock revocation after earlier parts.
+- Exercise partner/member chunk unload, replacement, lock/loot and topology
+  changes during certified reads and queued delivery, including cross-chunk
+  chests and a large Vault. Confirm safe invalidity, no forced chunk load or
+  stale success, recovery under existing expiry rules, and exact fallback for
+  unsupported/decorated/external providers. The
+  [headless certified-pool matrix](inventory.md#certified-tracking-pool-and-publication-coverage)
+  does not exercise installed Create lifecycle, live multiplayer or performance.
 - Exercise zero resynchronization cooldown, including changing from a positive
   value while repair is waiting, under delayed unknown-baseline streams,
   completion parts and future heartbeats. Verify the common client waiting

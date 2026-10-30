@@ -163,6 +163,41 @@ mixin/accessor, or a live Sable API.
 The common presentation evidence and its live-world limitations are recorded
 under [presentation snapshot negotiation, policy and adapters](presentation.md#presentation-snapshot-negotiation-policy-and-adapters).
 
+## Vault topology, grouping and presentation
+
+`CreateVaultTopologyTest` covers all admitted widths, lengths, axes and member
+hits with detached metadata fixtures, including the complete 81-cell maximum:
+each resolves to the same ordered structure; missing roots/interiors/ends, foreign members, bad controller
+roles or axes, bounds/overflow and replacement during callbacks publish no
+prefix. A later valid operation can recover. The behavior owner is
+[Create Vault topology](../../integrations/create.md#vault-logical-target-and-presentation-topology).
+For N members, a successful topology operation makes `2 + 2N` loaded metadata
+reads, including source/controller reads and complete member revalidation. The
+cell bound is not a bound of one getter call per member or a performance result.
+
+`CreateVaultProductionBoundaryTest` executes the compiled production topology,
+platform and resolver paths through an isolated loader. It reads the resolved
+tested Create archive as bytes and retains its actual metadata getters and
+client read/write methods, replacing initialization-heavy ancestors. Actual
+archive client-packet branches synchronize controller extents without inventory
+serialization, tolerate stale noncontroller extents and absent last-known
+position, and preserve controller-axis/member gates. Constructor-free native
+server/client level and cache fixtures reject chunk loading and block-entity
+promotion and supply only existing block-entity map entries.
+
+The same cases reach the actual server creation factory, platform ServiceLoader,
+common grouping resolver, marker store, wire codec/client winner, and lazy
+NeoClient registration/common resolver registry. They retain the original hit
+and anchor, frozen audience and lifetime, exercise absent/untested/drifted
+optional routes and recovery, and share one ordered subject snapshot between
+normal and late fallback. One rendered cell never covers siblings. A compiled
+call-route guard excludes inventory, capability, NBT and loading discovery.
+The archive is not added as a runtime dependency, and these isolated methods and
+recording fixtures do not exercise an installed Create game, live loader
+initialization, actual chunk/block-entity packet ordering, GPU rendering or
+multiplayer. Inventory sharing evidence is separately inventoried under
+[logical container quotas and scan sharing](inventory.md#logical-container-quotas-and-scan-sharing).
+
 ## Create content preview
 
 NeoForge's `CreatePreviewReceiptStateTest` covers explicit client receipt

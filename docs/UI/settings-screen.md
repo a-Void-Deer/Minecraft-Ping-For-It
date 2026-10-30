@@ -103,8 +103,9 @@ The server scope has five categories:
   preview subgroup with Preview Period, Preview Variants per Client Period,
   Preview Slots per Client, Preview Slots Server-wide, Preview Targets per
   Client, Preview Client Byte Multiplier, and Preview Global Byte Multiplier;
-  and an Inventory tracking subgroup with Tracking Period, Tracking Variants
-  per Target, Tracking Slots per Target, Tracking Slots Server-wide, Tracking
+  and an Inventory tracking subgroup with Tracking Period, Separate Tracking by
+  Face, Separate Tracking by Player, Tracking Variants per Target, Tracking Slots
+  per Target, Tracking Slots Server-wide, Tracking
   Stream Byte Multiplier, Tracking Snapshot Byte Multiplier, Tracking Global
   Byte Multiplier, Resync Cooldown, Heartbeat Cadence, and Byte Smoothing
   Window.
@@ -209,6 +210,16 @@ Opening the page, rebuilding it, resizing, or navigating never snaps a value or
 makes a clean draft dirty. The authoritative snapshot's extra integer stop
 remains available throughout the editing session even after another value is selected,
 so selecting it again can revert the leaf to clean.
+
+Separate Tracking by Face and Separate Tracking by Player are native boolean
+toggles immediately after Tracking Period, in that order, each in its own
+full-width row. Their native hover and keyboard-focus help is localized in all
+bundled locales and explains Off and On, current player permissions and
+face-visible slots, and next-scan application while running scans finish under
+the previous setting. Keys and defaults remain owned by
+[server configuration](../config/server.md#inventory-policy-object), and certified
+view reuse and transition semantics by
+[inventory pools](../architecture/presentation/inventory.md#certified-tracking-observation-pools).
 
 Each setting that supports unlimited mode has one explicit unlimited stop after
 its maximum finite stop. Selecting that tail stop changes only the mode and
@@ -321,7 +332,7 @@ so the screen does not promise that the server applied or persisted an update.
 The ordinary server settings are one shared session within the screen, not a
 per-category or per-visit section. This session covers the Channel & Players,
 Send Rate, Marker Duration, and Performance categories, including the monitoring
-toggle and the twenty-one inventory administration leaves. Entering the server
+toggle and the twenty-three inventory administration leaves. Entering the server
 scope shows its overview and requests the current server configuration when the
 client holds a live connection and the session holds no loaded or in-flight
 snapshot. The loaded snapshot, the draft, and any in-flight request are retained
@@ -352,7 +363,8 @@ and [security](../architecture/security.md) own.
 The draft begins when an editable authoritative snapshot is accepted. Controls
 are inert unless `canEdit` holds. Each control recomputes dirty bits against the
 authoritative snapshot. The original numeric fields must parse as non-negative
-integers; each inventory leaf validates under its own numeric kind, bounds and,
+integers; inventory booleans use their two toggle states, while each numeric
+inventory leaf validates under its own kind, bounds and,
 for decimal settings, exact grid and size-pair constraints. An empty, malformed
 or out-of-range draft, or a decimal draft outside its exact grid, remains dirty
 but makes the update plan unavailable; an in-range integer between UI-only

@@ -53,6 +53,18 @@ seams are covered separately in the
 [inventory foundation](inventory.md#inventory-preview-and-tracking-foundation),
 while no live Minecraft world, integrated server runtime or transport exercises it.
 
+The production inventory runtime's attachment floors, paid-prefix replay,
+retained successor handoff and owner/face partitioning are covered under the
+[inventory foundation](inventory.md#inventory-preview-and-tracking-foundation).
+The [composed Vault sharing cases](inventory.md#logical-container-quotas-and-scan-sharing)
+add actual segmented-provider/ordinary-wrapper/runtime evidence across different
+member hits on the exact legacy path, including late attachment and new-selection
+freshness. Inventory's separate
+[certified-pool coverage](inventory.md#certified-tracking-pool-and-publication-coverage)
+adds independently bound cross-owner/face reuse and historical publication
+authority. Generic exact read-scope semantics are unchanged; none of these
+headless cases is a live performance measurement.
+
 ## Shared source sync publication contract
 
 `SyncPublisherTest` covers the publication boundary declaration with a fake

@@ -66,15 +66,17 @@ property, child-deny, codec, admission, and lease-refresh/capture-budget seams:
   bounded property-intent frames with trailing safety, blank or whitespace
   record keys round-tripping without annotations, and a non-boolean annotation
   on a blank key path rejected on decode;
-- `PresentationPacketsV3Test` keeps its historical class name and covers the
-  version-one packet contract: no `SUBSCRIBE` kind and the version-one route IDs,
+- `PresentationPacketsV2Test` covers the version-two packet contract:
+  no `SUBSCRIBE` kind and the version-two presentation route IDs,
   schema-only `HELLO`, bounded typed property
-  observations on `CREATE` with duplicate-ref rejection, `REMOVE` round trips
+  observations on `CREATE` with duplicate-ref rejection, a plain modern
+  `Target.LocationTarget` create round-tripping without properties, `REMOVE`
+  round trips
   and a targetless `CREATE` being corrupt, `OFFER` manifest round trips,
   `RESET` carrying the authoritative mask with an empty mask denying
   everything, `CREATED` carrying the default ref beside the annotated section
-  (and being corrupt without one), `REMOVED`/`REJECT` round trips, and a
-  previous protocol value rejected on both directions with the frame fully
+  (and being corrupt without one), `REMOVED`/`REJECT` round trips, and an
+  unsupported protocol value rejected on both directions with the frame fully
   drained;
 - `ServerPropertyAdmissionTest` covers the production admission and recapture
   seams with a read-only capture context: a server value winning over a stale
@@ -145,7 +147,7 @@ property, child-deny, codec, admission, and lease-refresh/capture-budget seams:
   store and delivery seams for the
   [sampling and baseline contract](../../architecture/presentation/presentation_snapshot.md#server-capture-and-per-recipient-projection),
   not live-world fairness, latency or heap/TPS measurements;
-- `ClientPresentationTest` covers the version-one client session:
+- `ClientPresentationTest` covers the version-two presentation client session:
   `HELLO`/`OFFER`/`RESET`
   epoch and view guards without any client preference, a tighter reset mask
   pruning frozen fields and annotations without resurrection, accepted metadata
@@ -160,7 +162,7 @@ property, child-deny, codec, admission, and lease-refresh/capture-budget seams:
   a `CREATED` selection naming a denied child rejecting atomically with the
   marker insertion, a zero-view reset rejected without publishing authority,
   and a soft-removed tombstone exposing an empty projection;
-- `PresentationReceiptContentTest` covers the version-one receipt content
+- `PresentationReceiptContentTest` covers the receipt content
   descriptor as a strict codec: the non-property kinds carry no references, a
   property descriptor requires a non-empty sorted unique bounded reference list in a
   deterministic order and exposes it immutably, every kind round-trips, and
@@ -350,7 +352,12 @@ shared logger evidence and its limits are inventoried under
 
 `ClientPingActionDispatcherTest` covers a typed property create using the
 frozen target on the actual wire and an exact child revocation rejecting that
-create without sending and without silently falling back to a plain create;
+create without sending or a plain fallback, preserving the previous receipt
+and remaining courtesy allowance. Its inventory `SELECT` cases reject an
+unready or `OFFER`-only presentation session and a mismatched presentation
+epoch or view without sending or replacing the prior receipt; a matching ready
+request can still consume the sole allowance and establish its inventory
+receipt. These are headless dispatcher/session checks;
 `ClientPingDispatchReceiptTest` covers the
 actual-send receipt and transport-failure rollback; and
 `ClientPingRuntimeInteractionTest` drives that property create through the
@@ -373,6 +380,25 @@ read/mutation/broadcast, property upload admission against a real world,
 rendered property/chat/HUD lines, the live settings-screen draft,
 field-catalogue rendering, feedback, caret, or list-capacity behavior, a
 persistence fault during a policy mutation, or in-game Create/Sable sampling.
+
+## Logical target wire coverage
+
+`CompositeTargetPacketsTest` round-trips both chest group kinds and the Vault
+controller key through production `CREATED` and `WINNER` codecs and the real
+client presentation/store seams. A winner arriving before its record cannot
+invent one; after insertion the explicit logical key addresses the winner while
+outline selection still uses the original physical hit and anchor. Independent
+raw mutations reject malformed/noncanonical pairs, wrong registries or members,
+incompatible target/key carriers, invalid UTF-8, a missing mandatory snapshot
+key, every truncation, trailing bytes and version-one frames. Grouped key tags
+in a C2S target and an old `HELLO` are corrupt, with safe-read input consumed.
+This establishes codec and headless session acceptance, not a live mixed-version
+handshake or loader transport. The wire owner is
+[presentation-v2](../../architecture/network/protocol.md#presentation-snapshot-route-presentation-v2).
+
+Grouped pending-chat completion has separate runtime/store coverage under
+[content receipts](#content-receipt-chat-and-pending-completion); the wire tests
+above do not establish a live receipt flow.
 
 ## Target content preview
 
@@ -612,6 +638,20 @@ store and port coverage rather than live chat evidence:
   propagates without retracting the marker and consumes the receipt, so later
   updates produce neither a duplicate nor an ordinary fallback.
 
+The grouped-container cases in these two receipt fixtures match the accepted
+snapshot and stored client marker through their explicit frozen logical key for
+normal chests, trapped chests and Vaults. Client copies and stale transitions
+retain that identity; another logical group at the same physical hit cannot
+inherit the pending receipt. The runtime cases encode/decode presentation-v2
+packets and inventory frames: a source-incomplete `UPDATING` seed retains its
+exact long count without quantity chat, and a fresh usable complete `READY`
+result emits once. Property receipts require a fresh accepted annotated section;
+wrong epochs, stale data and absent annotations cannot complete them. Duplicate
+frames/creates, reset and authoritative expiry cannot repeat or revive the
+receipt, while `WHOLE` feedback stays immediate and once-only. These cases
+passed in the recorded [logical-container run](build-checks.md#logical-container-implementation-run),
+with the same headless effect/transport limits below.
+
 `ChatDiagnosticsTest` covers controlled debug events for malformed whole/content
 templates while preserving each family's fallback, and a throwing locale
 selection lookup producing a warning with the original root cause while using
@@ -645,9 +685,8 @@ Name-composition and rendering evidence is recorded under
 - live presentation policy rule-view read, selector add/remove, whitelist-only
   change, child deny disclosure and preservation, refresh, feedback, and
   unsolicited broadcast behavior;
-- direct runtime proof that valid legacy S2C locations and superseded marker S2C
-  packets are presentation no-ops, plus live loader registration/network
-  transport for the presentation snapshot and policy routes;
+- live loader registration/network transport for the presentation snapshot and
+  policy routes;
 - a live two-sided presentation session: negotiation and reset over a real
   connection, per-recipient permission projection, a reset's child deny map
   pruning retained annotations and default references, policy changes advancing

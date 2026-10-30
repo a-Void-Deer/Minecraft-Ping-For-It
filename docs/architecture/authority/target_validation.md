@@ -14,8 +14,7 @@ The authoritative marker-creation ingress routes are the negotiated presentation
 session's `CREATE` intent and the dedicated inventory session's `SELECT` intent.
 Both enter the common authority adjudication below through the network/session
 boundary owned by
-[network protocol](../network/protocol.md#registered-ingress-and-current-effects);
-the superseded `MarkerCreate` route is registered but inert and creates nothing.
+[network protocol](../network/protocol.md#registered-ingress-and-current-effects).
 The server repeats target classification from its own game state and does not
 trust client-supplied target validity or presentation/ownership data. The
 request field boundary is owned by the same network protocol contract.
@@ -33,14 +32,27 @@ The effective first-return order after a structurally valid request is:
    membership;
 6. for an explicit external target, provider materialization followed by the
    post-materialization reclassification and Ping Type check;
-7. property-selection admission and dedicated-adapter admission before
-   marker-store creation, with a failure rolling back any external-target
+7. property-selection admission, with a failure rolling back any external-target
    materialization and leaving the store untouched. Uploaded property
    selections are owned by
    [presentation snapshot](../presentation/presentation_snapshot.md#property-ping),
    and the dedicated inventory item choice by
-   [inventory](../presentation/inventory.md#preview); and
-8. marker-store creation.
+   [inventory](../presentation/inventory.md#preview);
+8. resolve the logical target key once from the final accepted target, after
+   classification, Ping Type and property acceptance;
+9. dedicated-adapter admission using that same frozen key; and
+10. marker-store creation with the accepted target and that key.
+
+The production server creation path supplies metadata-only grouping; ordinary
+validation, including inventory `OPEN` and presentation preview validation,
+does not run an additional grouping pass. Missing, unloaded or inconsistent
+group metadata for an otherwise valid hit falls back to its physical key; it
+does not reject an ordinary ping. If the resolver returns an incompatible key,
+creation is rejected as a contract violation before dedicated admission or storage.
+Dedicated inventory admission retains its independent source/read gates:
+grouping cannot authorize contents or make an unavailable inventory readable.
+The key shapes and topology ownership are defined by the
+[target model](../identity/target_model.md#frozen-logical-block-groups).
 
 Whether and how a structurally corrupt request is answered is owned by the
 network boundary ([network protocol](../network/protocol.md)); this topic

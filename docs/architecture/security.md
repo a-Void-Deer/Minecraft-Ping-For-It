@@ -2,18 +2,20 @@
 
 ## Trust boundaries
 
-For authoritative `MarkerCreate`, captured client intent is untrusted request
-data. Authoritative admission and removal are adjudicated from trusted server
-state. The request field boundary is owned by
+Client intent on presentation `CREATE`/`REMOVE` and dedicated inventory requests
+is untrusted request data. The server derives the requester from the
+authenticated connection; marker admission and removal are adjudicated from
+trusted server state. The request field boundary is owned by
 [network protocol](network/protocol.md); the admission stages and outcomes,
 including removal adjudication, are owned by
-[target validation](authority/target_validation.md).
+[target validation](authority/target_validation.md). Inventory selection resolves
+the server's retained entry reference rather than trusting a client-uploaded
+target or count, as specified by [inventory](presentation/inventory.md).
 
-This trusted-state guarantee is specific to `MarkerCreate`. It must not be
-extended to the registered legacy `PingLocationC2SPacket`, which retains an
-in-packet channel and legacy forwarding path. See
-[network protocol](network/protocol.md) for the deliberately narrow
-legacy-versus-authoritative boundary.
+The channel in `UpdateChannelC2SPacket` requests a change to the authenticated
+sender's stored channel; it is not an audience claim attached to marker
+creation. Channel establishment and marker request fields are owned by
+[network protocol](network/protocol.md#route-effects-and-channel-establishment).
 
 Presentation snapshot values come from server-side capture. Client-uploaded
 property observations are untrusted claims; accepted selections use

@@ -6,6 +6,10 @@ Confirmed technical decision represented by the linked topic contracts. This
 record explains the reuse and accounting boundary, not live performance or a
 completed review result.
 
+[D0017](D0017-certified-tracking-observation-pools.md) separately permits certified
+Tracking reuse across exact bindings; it retains this decision's prohibition on
+authority and content caches rather than making metadata reuse a pooling grant.
+
 ## Decision
 
 Reuse process-fixed resident-access discovery and explicitly admitted immutable

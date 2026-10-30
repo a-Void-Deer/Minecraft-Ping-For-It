@@ -11,8 +11,7 @@ The current suite covers:
 - optional-content fail-soft matching;
 - target identity and the captured-ray flow;
 - Marker ID and marker codec behavior;
-- `targetTypeId`, including `entity_block`, surviving marker codec round trips
-  without changing the protocol shape; and
+- `targetTypeId`, including `entity_block`, surviving marker codec round trips;
 - same-target winner selection and recomputation;
 - `ServerMarkerStoreTest` covers the active-recipient winner snapshot: expired
   markers are filtered before selection, ordering uses arrival then larger ID,
@@ -55,19 +54,56 @@ not an end-to-end packet decode or transport logging test.
 Marker-store, packet, and update tests provide recipient-scoped state and
 channel-mode transport seams, but do not establish the complete `ServerCore`
 ordering and channel/admission matrix in a live client/server path. Loader
-registration of the legacy, presentation-v1, presentation-policy, inventory-v1,
-presentation-preview-v1, server-configuration-v3, and superseded marker routes
-is confirmed by source inspection for Fabric, Forge, and NeoForge;
-`ModIdentityTest` pins the fork identity, packet-ID namespaces, and the
-versioned presentation-v1, inventory-v1, policy-v1, and server-configuration-v3
-route IDs; focused packet tests pin those families' version boundaries and
-codec shapes, and `PresentationPreviewWiringTest` statically confirms the
-preview codec registration and main-thread handoff on every loader. These
-checks do not establish server authority or live transport. There is no direct
-automated test that a valid legacy location S2C packet or a superseded marker
-S2C packet is ignored by the client, nor a live cross-loader network test.
+registration of the channel-update, rate-policy, presentation-v2,
+server-presentation-policy-v1, inventory-v1, presentation-preview-v1, and
+server-configuration-v5 routes is confirmed by source inspection for Fabric,
+Forge, and NeoForge. `ModIdentityTest` pins the fork identity and all thirteen
+registered packet IDs in the fork namespaces; focused packet tests pin the
+versioned families' version boundaries and codec shapes, and
+`PresentationPreviewWiringTest` statically confirms the preview codec registration
+and main-thread handoff on every loader. These
+checks do not establish server authority or live transport. There is no live
+cross-loader network test.
+
+## Logical container identity and authority
+
+`CompositeTargetIdentityTest` covers physical derivation versus grouped keys,
+invalid/noncanonical key carriers, recipient-scoped arrival/ID winner ordering,
+independent losing records, cancellation, expiry and audience cleanup. Client
+copy, reload, stale fallback and display-duration cases preserve the explicit
+group. Creation cases resolve once after final classification, Ping Type and
+property acceptance, pass the same key to dedicated admission and storage, and
+reject an incompatible resolver result before either. External materialization
+and refresh preserve their established identity boundary.
+
+`DoubleChestCreationTest` exercises the actual production server creation factory
+with constructor-free recording world/chunk fixtures for both vanilla chest
+kinds. Opposite hits retain their own target and anchor while sharing recipient
+winner slots; cancellation reveals the surviving record, expiry remains
+independent, and split/rejoin changes new creation and current presentation
+without rekeying old markers. Unavailable sibling metadata falls back to an
+accepted physical-key ping; external and unrelated targets perform no ordinary
+group lookup. The wrong-dimension and unsupported-platform cases retain the
+exact physical key.
+These are headless production factory/store/codec/client seams, not a live server
+or multiplayer connection. NeoForge Vault creation/platform evidence is scoped
+under [Create topology verification](integrations.md#vault-topology-grouping-and-presentation).
+
+Wire corruption and explicit-key client acceptance are inventoried under
+[presentation verification](presentation.md#logical-target-wire-coverage), and
+inventory quota/read authority under
+[grouped inventory verification](inventory.md#logical-container-quotas-and-scan-sharing).
 
 ## Client marker runtime coverage
+
+`ClientPingRuntimeTest` exercises the public runtime factory with its real
+presentation session: `HELLO`, packet-dispatched `OFFER`/`RESET`, and subsequent
+ordinary location `CREATE` share the negotiated epoch. Before readiness and
+after `OFFER` alone, create attempts send nothing, consume no courtesy allowance,
+and establish no rejection receipt; becoming ready does not replay them. At a
+fixed clock the first ready create consumes the sole allowance, while a later
+throttled create cannot replace its receipt. These are headless factory and
+recording-transport checks, not a live connection.
 
 `ClientPingRuntimeTest` covers the current-local-store membership predicate
 before and after a same-ID external-locator upsert. Through a recording receipt
@@ -84,8 +120,8 @@ create after local housekeeping deleted the record remains the separate same-ID
 keeps its slot and visual deadline. These are headless store/port assertions:
 they do not exercise a live world, network transport, Sable locator resolution,
 actual sound playback or GUI chat delivery, packet ordering over a connection,
-or client rendering. The public entry wiring of this path is source-inspected,
-not runtime-verified.
+or client rendering. The surrounding game-entry wiring is source-inspected,
+not exercised in a running client.
 
 `ClientBusinessDiagnosticsTest` covers failed create and inventory SELECT
 transport callbacks through the dispatcher: warnings retain the original message
@@ -102,6 +138,13 @@ dropping throttled committed creates without queueing or dispatch tracking,
 `MarkerRemove` and channel-update bypass, and corrupt-policy handling. This
 client coverage does not close the server and end-to-end policy
 [gaps](#known-automated-gaps).
+
+`InventoryDispatchIntegrationTest` covers shared courtesy allowance in both
+orders: an ordinary presentation `CREATE` throttles the following inventory
+`SELECT`, and a `SELECT` throttles the following ordinary `CREATE`. Each case
+uses one allowance at a fixed clock and observes only the first route's send;
+the throttled ordinary create cannot overwrite the inventory receipt. These
+are headless runtime/session and recording-transport checks.
 
 `ClientRateLimitPolicyTest` covers the initial courtesy fallback matching a
 fresh validated server configuration, an explicitly applied policy replacing

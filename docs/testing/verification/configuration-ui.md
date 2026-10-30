@@ -285,13 +285,13 @@ rejection beside an invalid inventory size pair. The independent raw packet
 fixtures cover the final strict boolean, shorter superseded shapes, truncation,
 invalid boolean bytes, trailing bytes and unknown mask bits. The
 [transaction](../../architecture/config/changing-server-config.md) and
-[wire](../../architecture/network/protocol.md#server-configuration-routes-server-config-request-v4-server-config-update-v4-server-config-snapshot-v4)
+[wire](../../architecture/network/protocol.md#server-configuration-routes-server-config-request-v5-server-config-update-v5-server-config-snapshot-v5)
 owners retain the exact field selection and grammar. These model and packet seams
 do not establish the live settings UI, permission changes over a connection,
 actual packet exchange, or persistence behavior in a running client/server
 session.
 
-`InventoryConfigValuesTest` covers the twenty-one-leaf admin inventory value
+`InventoryConfigValuesTest` covers the twenty-three-leaf admin inventory value
 model: each leaf's merge preserves every unselected current value and stays
 independent of the rate-limit, channel, sync and monitoring fields; the two
 finite size leaves are exact scalar multipliers with no unlimited mode, a
@@ -309,7 +309,7 @@ every legal grid value exact on the wire; truncation, old-prefix, and trailing
 data rejecting without throwing; an invalid encoded leaf or malformed mode
 rejecting the whole packet; and invalid zero or overflowing quanta, unknown
 masks, missing inventory, nonpositive caps, and out-of-range scalars failing
-closed without clamping. The refreshed version-four, memory mode, revised-bound
+closed without clamping. The refreshed version-five, memory mode, revised-bound
 and literal non-step integer fixtures are inventoried
 [below](#server-performance-contract-verification).
 `ServerConfigVarNumbersTest`
@@ -338,17 +338,47 @@ defaults, retained false without a same-version rewrite, explicit save/reload,
 unknown-data preservation and future-version protection for the switch
 catalogued by
 [server configuration](../../config/server.md#persisted-fields). These are headless
-model and wire seams: no `ServerCore` or live administration path exercises
-them.
+model and wire seams; the additional packet-facing `ServerCore` fixture below
+is headless rather than a live administration session.
+
+The Tracking partition additions have dedicated model, persistence, transaction,
+widget and strict-wire assertions in the
+[publication-stage input](build-checks.md#tracking-pool-publication-stage-run):
+
+- `InventorySettingsPersistenceTest` checks absent/null defaults, all four
+  independent boolean pairs, explicit sibling preservation, unchanged
+  same-version bytes on load/no-op save, real save/reload, existing migration and
+  future-version protection without a new version boundary.
+- `InventoryConfigValuesTest`, `ServerInventoryDraftTest` and
+  `ServerSettingsModelTest` cover strict boolean values, dirty/revert and
+  boolean-only plans, unselected numeric/flag preservation and read-only,
+  revocation, stale-response and disconnect gates.
+- `ServerConfigVarNumbersTest`, `ServerInventoryConfigPacketsTest` and
+  `ModIdentityTest` cover all three v5 IDs and independent literal-frame order,
+  retained original mask bits, both new bits, all four flag combinations,
+  malformed boolean bytes, truncation, trailing bytes and superseded v4 shapes.
+- `ServerCoreTrackingConfigTest` enters the real packet-facing core with
+  constructor-free server/player fixtures: a numeric-only update preserves both
+  unselected flags through settings reconstruction and persistence, a face-only
+  edit preserves the player flag, permission denial and malicious values/masks
+  leave authority unchanged, and the snapshot round-trips the actual values.
+- `InventoryPerformanceOptionTest` constructs both actual full-width native
+  toggle factories, checks help presence, exactly-own-leaf dirty/revert and stale
+  callbacks after revocation/disconnect. Catalog and eight-locale resource
+  fixtures cover placement and Off/On, current authority and next-scan help;
+  they do not establish assembled live tooltip delivery or translation quality.
 
 ## Server performance contract verification
 
 The [UI](../../UI/settings-screen.md#server-performance-category),
 [configuration](../../config/server.md#inventory-policy-object),
 [revisioning](../../architecture/config/revisioning.md#same-version-shape-normalization)
-and [wire](../../architecture/network/protocol.md#server-configuration-routes-server-config-request-v4-server-config-update-v4-server-config-snapshot-v4)
+and [wire](../../architecture/network/protocol.md#server-configuration-routes-server-config-request-v5-server-config-update-v5-server-config-snapshot-v5)
 contracts have passing automated evidence in the
-[combined-tree run](build-checks.md#automated-verification-results):
+[combined-tree run](build-checks.md#automated-verification-results) for the earlier
+numeric surface and in the
+[publication-stage run](build-checks.md#tracking-pool-publication-stage-run) for
+the v5/boolean additions:
 
 - `InventoryPerformanceOptionTest` constructs the actual replacement-slider
   factory headlessly for every replaced leaf. Construction invokes no edit
@@ -378,9 +408,11 @@ contracts have passing automated evidence in the
   preservation evidence is specific to guarded normalization/writeback, not a
   general ordinary-save guarantee.
 - `ServerInventoryConfigPacketsTest`, `ServerConfigVarNumbersTest` and
-  `ModIdentityTest` exercise the version-four IDs, leaf round trips, strict
+  `ModIdentityTest` exercise the version-five IDs, leaf round trips, strict
   field bounds, exact decimal quanta, canonical numbers and independent raw
-  fixtures for the memory mode byte, retained finite value and fixed ordering.
+  fixtures for the memory mode byte, retained finite value, Tracking partition
+  booleans and fixed ordering. The earlier combined-tree run predates these
+  boolean additions; their execution input is scoped above.
   Superseded scalar payloads, malformed modes, truncation and trailing bytes
   reject without publication or mutation. Source inspection confirms that all
   three loaders register through those packet constants; their builds compile
@@ -389,8 +421,9 @@ contracts have passing automated evidence in the
   Inventory `OFFER` value-bound evidence is owned by
   [inventory verification](inventory.md#resynchronization-and-budget-policy-verification).
 - The server Performance localization fixtures passed across all eight bundled
-  locales in that recorded run; the expanded settings-resource coverage below
-  is not a claim of another passing run. Detailed coverage is inventoried under
+  locales in the [combined-tree run](build-checks.md#automated-verification-results);
+  the expanded settings-resource coverage below is not a claim of another passing
+  run. Detailed coverage is inventoried under
   [Settings-screen navigation, catalog, layout and localization](#settings-screen-navigation-catalog-layout-and-localization).
 
 Live verification limits remain under [Known automated gaps](#known-automated-gaps).
@@ -420,8 +453,8 @@ below describe source-reviewed coverage rather than a recorded full-suite run:
   invalid field, retaining a shared `ServerSettingsModel` draft across
   navigation, and keeping a server leaf open when a permission revocation
   retains a viewable snapshot while forcing the scope overview without one;
-- `SettingsCategoryCatalogTest` covers all 71 catalog entries exactly once in
-  their approved categories, including the 69 value controls and two non-value
+- `SettingsCategoryCatalogTest` covers all 73 catalog entries exactly once in
+  their approved categories, including the 71 value controls and two non-value
   entries. Independent expectations check section headings, section/row order,
   flattened order, the confirmed semantic pairs rather than unrelated packing,
   and singleton rows for ordinary server controls. It checks nonempty sections,
@@ -545,9 +578,9 @@ below describe source-reviewed coverage rather than a recorded full-suite run:
   segments, independent wheel/target opacity labels, and the complete
   spatial-selector resource set with numeric/boolean and unit placeholder
   contracts. Retired timeout and obsolete inventory-sensitivity resources stay
-  excluded. These are resource expectations rather than a translation-quality
-  guarantee or assembled/rendered screen labels;
-- `SettingsLocalizationCoverageTest` derives the 69 value controls' required
+  excluded. These are resource expectations, not a guarantee of translation
+  quality. The fixture does not assemble or render screen labels;
+- `SettingsLocalizationCoverageTest` derives the 71 value controls' required
   nonblank labels and generic help from the production catalog/key builder. It
   checks all category descriptions and section headings, scope/navigation/action
   and presentation-editor help, used enum/state value labels, units, and visible
@@ -574,7 +607,8 @@ below describe source-reviewed coverage rather than a recorded full-suite run:
   the inventory settings label/tooltip key alignment and placeholder rules, the
   performance category entrance, the inventory group headings, the shared
   name/value label,
-  three nonblank tooltip lines with localized decrease/increase prefixes,
+  numeric tooltip lines with localized decrease/increase prefixes and separate
+  four-line boolean help for the Tracking partitions,
   distinct zero labels, removal of obsolete control resources, and the two size
   sliders' physical-KiB labels and adjustment notice; it does not render or
   assemble screen labels or establish translation semantic accuracy or live

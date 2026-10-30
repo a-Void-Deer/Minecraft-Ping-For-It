@@ -621,6 +621,11 @@ still opens with that face, its inventory selection remains enabled, and the
 release selects without a fallback create. An external-block press with a
 provider-local face opens the selector, sends that frozen face as the inventory
 preview read scope, and releases exactly its own external target.
+Its cancellation-readiness cases reach dispatch through the frozen cancel
+branch before negotiation and after `OFFER` alone: neither sends `REMOVE`, and
+`RESET` never replays the discarded cancellation. A later ready cancellation
+sends once, and the subsequent ordinary create retains the sole courtesy
+allowance. These are headless runtime-port checks.
 It also covers a native-only ownership handoff without a vanilla grab-state
 change: both runtime movement and scroll paths stop accepting selector input,
 and re-priming after reacquisition preserves the next real movement.

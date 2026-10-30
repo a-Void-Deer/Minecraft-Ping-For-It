@@ -30,10 +30,48 @@ Movement or same-dimension teleportation does not change identity. A dimension
 change, death, disappearance or absence at authoritative marker creation makes
 the target invalid.
 
-Block identity is dimension, block position and block type. A BlockState or
-property change with the same block type remains valid at marker creation;
-replacement by a different type is invalid. The state's properties are not a
-new target identity.
+The physical block target is dimension, hit block position and block type. A
+BlockState or property change with the same block type remains valid at marker
+creation; replacement by a different type is invalid. `TargetKey.from` derives
+this exact physical identity; it performs no grouping or world lookup.
+
+### Frozen logical block groups
+
+An accepted marker carries its physical `Target.BlockTarget` and anchor separately
+from its server-resolved logical `TargetKey`. Supported container groups use:
+
+| Key | Identity |
+| --- | --- |
+| `DoubleChestKey` | Dimension, exact `minecraft:chest` or `minecraft:trapped_chest` registry ID, and both horizontally adjacent member positions in strict lexicographic X/Y/Z order. |
+| `VaultKey` | Dimension, exact `create:item_vault` registry ID, and verified controller position. Extent and member list are not key fields. |
+
+A detached grouped carrier requires an ordinary block target with matching
+dimension and registry identity. A chest target must be one of the pair's two
+positions; a Vault carrier contains no member bounds, so only authoritative
+creation establishes its live membership. Other key variants must equal the
+physical derivation. Carrier compatibility never certifies current topology.
+
+The grouping resolution point is owned by
+[create adjudication](../authority/target_validation.md#create-adjudication-order).
+Vanilla chest relationship evidence is owned by
+[container presentation](../rendering/presentation_subjects.md#vanilla-chests);
+the supported Vault topology and loader gates by
+[Create](../../integrations/create.md#vault-logical-target-and-presentation-topology).
+Other ordinary blocks retain their exact physical key. Beds and doors expand
+presentation only and keep the single-hit logical key. External targets retain
+their provider-stable identity and bypass ordinary-world group lookup; this is
+not arbitrary multiblock discovery.
+
+Grouping never replaces the original hit with a controller or sibling target,
+moves its anchor, or merges marker records, including records from one owner.
+The group key is frozen at creation: later splits, joins, controller changes or
+unavailable metadata do not rekey an existing marker or resize its lifetime.
+New markers resolve the structure present at their own creation. Current client
+presentation may follow a currently verified structure without changing that
+frozen key or granting inventory authority. Rationale is recorded in
+[D0016](../../decisions/D0016-logical-container-targets.md).
+
+### Committed marker lifecycle
 
 After an ordinary entity or block marker is committed it is not continuously
 server-revalidated: it remains until normal removal or expiry. World/HUD marker
@@ -55,9 +93,9 @@ invalid-target message is owned by [ping feedback](../../UI/ping-feedback.md).
 
 Canonical marker identity, lifecycle and HUD data are separate from the
 current-frame presentation. The committed marker retains its ID, owner,
-concrete target identity, Target/Ping Types and lifecycle state, together with
-the authoritative name data used by HUD and chat, until the normal marker
-lifecycle removes or expires it. Presentation resolution may nevertheless
+concrete physical target, frozen logical key, Target/Ping Types and lifecycle
+state, together with the authoritative name data used by HUD and chat, until the
+normal marker lifecycle removes or expires it. Presentation resolution may nevertheless
 produce no current subject; that absence does not mean that the marker or its
 HUD data has been removed. The server record lifetime is owned by
 [marker lifecycle](../authority/marker_lifecycle.md); the client record and
@@ -110,10 +148,10 @@ implementation or cross-dimension tracking feature.
 
 ## Marker state and network continuity
 
-Marker data must carry or derive stable Marker ID, owner, concrete target
-identity and kind, dimension, Target Type ID, Ping Type ID, authoritative name
-data and creation/arrival/lifetime state. Marker IDs support deterministic
-larger-ID comparison. Entity-local hit detail does not change the packet shape.
+Marker data must carry stable Marker ID, owner, concrete target identity and
+kind, its separate frozen logical key, dimension, Target Type ID, Ping Type ID,
+authoritative name data and creation/arrival/lifetime state. Marker IDs support
+deterministic larger-ID comparison. Entity-local hit detail does not change the packet shape.
 Encoded identity constraints, including Target Type ID survival across codec
 round trips, are owned by the
 [network protocol](../network/protocol.md#encoded-identity-constraints).
