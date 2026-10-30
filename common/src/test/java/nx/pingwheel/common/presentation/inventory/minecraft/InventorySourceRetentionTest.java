@@ -33,8 +33,9 @@ class InventorySourceRetentionTest {
 		var vault = layout("create:item_vault", 81);
 		long auxiliary = InventorySourceRetention.provider(vault) - InventorySourceRetention.provider(ordinary);
 		// Layout record, member and count reference lists, boxed per-member counts,
-		// and int offsets. Positions are borrowed from the one paid snapshot DTO.
-		long vaultFloor = 92 + 2 * (80 + 81 * 8) + 81 * 44 + 40 + 82 * 4;
+		// and int offsets, plus the coordinated local-cost profile/reference.
+		// Positions are borrowed from the one paid snapshot DTO; no receipt is retained.
+		long vaultFloor = 92 + 2 * (80 + 81 * 8) + 81 * 44 + 40 + 82 * 4 + 8 + 40 + 3 * 8;
 		assertEquals(vaultFloor, auxiliary);
 		var view = new InventoryMinecraftSources.View("test:alias", List.of(), List.of(), null, vault, false);
 		var target = Target.ExternalBlockTarget.candidate("minecraft:overworld", "sable", "create:item_vault", "locator", true);

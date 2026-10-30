@@ -36,7 +36,8 @@ final class InventorySourceRetention {
 		long bytes = 16 * (O + 8 * R);
 		if (layout != null && layout.members().stream().anyMatch(member -> member.blockId().equals("create:item_vault")))
 			// Positions are shared with the one snapshot DTO, not owned a second time.
-			bytes += O + 5 * R + 3 * 4 + 2 * list(members) + members * (O + 4) + array(members + 1, 4);
+			bytes += O + 5 * R + 3 * 4 + 2 * list(members) + members * (O + 4) + array(members + 1, 4)
+				+ R + O + 3 * Long.BYTES; // coordinated provider profile and its reference, never a live operation
 		return bytes;
 	}
 	static long source(InventoryMinecraftSources.View view) {

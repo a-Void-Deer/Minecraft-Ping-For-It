@@ -306,6 +306,18 @@ public interface IPlatformInventoryService {
 		/** Recheck the supported native ownership immediately before access; never fall back to external trust. */
 		boolean consumeSharedResident(int slot, ResidentVisitor visitor, Runnable currentAuthority);
 	}
+	/**
+	 * Additional audited synchronous protocol, not implied by certification. Only
+	 * the ordinary Vault route opts in. The common caller creates the operation
+	 * after its fresh entry check; the provider may neither retain it nor perform
+	 * callbacks after afterResident. Generic decorators deliberately do not forward it.
+	 */
+	interface CoordinatedSharedAccess extends CertifiedSharedAccess {
+		/** Current local audits and held-member gates only; common validation is charged independently. */
+		InventoryValidationBudget.Cost coordinatedResidentCost();
+		void consumeCoordinatedResident(int slot,
+			nx.pingwheel.common.presentation.inventory.minecraft.InventoryCoordinatedRead operation);
+	}
 	interface ResidentScope {
 		Direction face();
 		/** Precheck every already resolved member, including lock/loot/mapping. */

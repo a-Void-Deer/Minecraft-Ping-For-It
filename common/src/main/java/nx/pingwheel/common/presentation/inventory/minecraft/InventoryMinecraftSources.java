@@ -1164,7 +1164,7 @@ public final class InventoryMinecraftSources {
 		});
 		return present[0];
 	}
-	private static @org.jetbrains.annotations.Nullable InventoryDomainCodec.Item freezeItem(InventoryItemCodec.Catalog catalog, HolderLookup.Provider registries,
+	static @org.jetbrains.annotations.Nullable InventoryDomainCodec.Item freezeItem(InventoryItemCodec.Catalog catalog, HolderLookup.Provider registries,
 		int displayBytes, IPlatformInventoryService.ResidentEntry resident, InventoryItemBudget budget, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
 		if (resident.amount() == 0) return null;
 		var detached = InventoryItemCodec.freeze(resident.item(), registries, displayBytes, budget);

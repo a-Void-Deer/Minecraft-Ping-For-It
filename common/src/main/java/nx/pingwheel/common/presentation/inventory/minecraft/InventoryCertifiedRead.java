@@ -96,6 +96,9 @@ final class InventoryCertifiedRead {
 		private final InventoryValidationBudget.Cost validationCost, creationCost;
 		private final InventoryValidationBudget.Cost @Unmodifiable [] readCosts;
 		private final long retainedBytes;
+		private final IPlatformInventoryService.@Nullable CoordinatedSharedAccess coordinated;
+		private @Nullable InventoryCoordinatedRead activeOperation;
+		private boolean reading, readRejected;
 		NativePort(InventorySourceInput input, InventoryMinecraftSources.View view, InventoryMinecraftSources.SourceWorld world,
 			BooleanSupplier closed, Route route) {
 			this.input = input; this.view = view; this.world = world; this.closed = closed;
@@ -126,13 +129,20 @@ final class InventoryCertifiedRead {
 				? memberCost.plus(provider.sharedValidationCost()) : memberCost;
 			creationCost = validationCost.times(2).plus(new InventoryValidationBudget.Cost(InventoryItemCodec.Catalog.initialModeledBytes(),
 				InventoryItemCodec.Catalog.initialModeledBytes(), InventoryItemCodec.Catalog.initialModeledBytes()));
+			// This protocol removes adapter-side checks, so an interface/claimed route
+			// alone is insufficient. Only the final audited Vault implementation owns it.
+			coordinated = route == Route.CREATE_VAULT_LOCAL && view.access() instanceof IPlatformInventoryService.CoordinatedSharedAccess capable
+				&& view.access().getClass().getName().equals("nx.pingwheel.neoforge.integration.create.presentation.CreateVaultInventoryAccess$Segmented")
+				? capable : null;
 			var nativeCost = InventoryValidationBudget.nativeRead(layout, view.access() != null, view.access() != null);
 			readCosts = new InventoryValidationBudget.Cost[InventorySourceAccess.MAX_STEP + 1];
 			// Final typed recheck also covers a provider/read failure before normal postchecks finish.
-			for (int slots = 0; slots < readCosts.length; slots++) readCosts[slots] = validationCost.times(6L * slots).plus(nativeCost.times(2L * slots));
+			for (int slots = 0; slots < readCosts.length; slots++) readCosts[slots] = coordinated == null
+				? validationCost.times(6L * slots).plus(nativeCost.times(2L * slots))
+				: InventoryValidationBudget.coordinatedRead(validationCost, coordinated.coordinatedResidentCost(), slots);
 			retainedBytes = InventorySourceRetention.layout(canonicalLayout) + 2048 + 3 * InventorySourceRetention.list(members.size())
 				+ members.size() * 3L * (40 + 8) + InventorySourceRetention.array(states.length, 8)
-				+ InventorySourceRetention.array(readCosts.length, 8) + (readCosts.length + 2L) * 64;
+				+ InventorySourceRetention.array(readCosts.length, 8) + (readCosts.length + 2L) * 64 + 2 * 8 + 2;
 		}
 		@Override public Proof proof() { return proof; }
 		@Override public long retainedBytes() { return retainedBytes; }
@@ -245,6 +255,21 @@ final class InventoryCertifiedRead {
 			Objects.checkIndex(slot, proof.graph().slots());
 			allowance.debit(readCosts[1]); // the entire operation is admitted before any callback/getter
 			admission.requireNativeRead(catalog.displayBytes());
+			if (coordinated == null) return readAdmitted(slot, expected, catalog, admission);
+			if (reading) {
+				readRejected = true;
+				if (activeOperation != null) activeOperation.close();
+				throw new ReadFailure(Check.UNAVAILABLE);
+			}
+			reading = true; readRejected = false;
+			try { return readAdmitted(slot, expected, catalog, admission); }
+			finally {
+				if (activeOperation != null) activeOperation.close();
+				activeOperation = null; reading = false; readRejected = false;
+			}
+		}
+		private InventoryDomainCodec.@Nullable Item readAdmitted(int slot, Proof expected, InventoryItemCodec.Catalog catalog,
+			InventoryCatalogAdmission admission) {
 			require(checked(expected));
 			try {
 				var registries = world.registries();
@@ -253,6 +278,16 @@ final class InventoryCertifiedRead {
 					if (!world.audited((Container) member)) throw new ReadFailure(Check.UNAVAILABLE);
 				// Classification/registry callbacks cannot authorize a revoked owner or member.
 				require(checked(expected));
+				if (coordinated != null) {
+					if (readRejected) throw new ReadFailure(Check.UNAVAILABLE);
+					// Only callback-free owned bookkeeping lies between that fresh check and provider entry.
+					var operation = new InventoryCoordinatedRead(this, coordinated, slot, expected, catalog, registries, admission);
+					activeOperation = operation;
+					try {
+						coordinated.consumeCoordinatedResident(slot, operation);
+						return operation.completed(this); // no callbacks: afterResident supplied the full final check
+					} finally { operation.close(); activeOperation = null; }
+				}
 				@Nullable var item = InventoryMinecraftSources.readFrozen(view, view.access(), slot, catalog, registries, catalog.displayBytes(),
 					InventoryItemBudget.root(catalog.displayBytes()), admission, () -> require(checked(expected)));
 				if (view.access() == null) for (var member : members)
@@ -270,6 +305,11 @@ final class InventoryCertifiedRead {
 				if (failure instanceof ReadFailure typed) throw typed;
 				throw new ReadFailure(Check.UNAVAILABLE, failure);
 			}
+		}
+		boolean ownsCoordinated(InventoryCoordinatedRead operation) { return reading && !readRejected && activeOperation == operation; }
+		void checkCoordinated(InventoryCoordinatedRead operation, Proof expected) {
+			if (!ownsCoordinated(operation)) throw new ReadFailure(Check.UNAVAILABLE);
+			require(checked(expected));
 		}
 		private static void require(Check check) { if (check != Check.VALID) throw new ReadFailure(check); }
 	}

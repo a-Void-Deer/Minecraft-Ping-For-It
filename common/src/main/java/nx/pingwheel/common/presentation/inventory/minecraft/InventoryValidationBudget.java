@@ -132,6 +132,21 @@ public final class InventoryValidationBudget {
 			.plus(owned((2L * layout.members().size() + 1) * (2 * O + 5 * R), 3L * layout.members().size() + 2));
 		return read(layout, provider, false);
 	}
+	/** Coordinated Vault local work: two current backing audits, selected local and both all-member held walks; no topology pass. */
+	public static Cost coordinatedVaultResident(long members) {
+		return localClassification(2).plus(owned((2 * members + 1) * (2 * O + 5 * R) + O + 3 * R,
+			3 * members + 32));
+	}
+	/** Operation's nine references, scalar state, root budget and bounded call/refusal bookkeeping stay live across checks. */
+	public static Cost coordinatedOperation() {
+		return owned(O + 9 * R + 2 * Integer.BYTES + O + 24 * Long.BYTES + 4 * (O + 8 * R), 256);
+	}
+	/** Four full successful gates and one failure reclassification, plus exactly one local operation per attempted slot. */
+	public static Cost coordinatedRead(Cost validation, Cost resident, int slots) {
+		if (slots < 0 || slots > nx.pingwheel.common.presentation.inventory.InventorySourceAccess.MAX_STEP)
+			throw new IllegalArgumentException("coordinated read page bound");
+		return validation.times(5).plus(resident).overlap(coordinatedOperation()).times(slots);
+	}
 	/** Pure pre-resolution profile; selection is by the detached registry ID, never by an unadmitted world getter. */
 	public static Cost resolution(String blockId) {
 		boolean chest = blockId.equals("minecraft:chest") || blockId.equals("minecraft:trapped_chest");

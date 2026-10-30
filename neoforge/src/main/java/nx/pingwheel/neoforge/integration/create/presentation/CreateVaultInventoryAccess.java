@@ -300,12 +300,12 @@ public final class CreateVaultInventoryAccess {
 		}
 		return true;
 	}
-	private static final class Segmented implements IPlatformInventoryService.InPlaceRevalidatingAccess, IPlatformInventoryService.CertifiedSharedAccess {
+	private static final class Segmented implements IPlatformInventoryService.InPlaceRevalidatingAccess, IPlatformInventoryService.CoordinatedSharedAccess {
 		final World world; final BlockPos original; final Layout expected;
 		final String alias;
 		final InventorySnapshotLayout frozenLayout;
 		final int @org.jetbrains.annotations.Unmodifiable [] offsets;
-		private final InventoryValidationBudget.Cost currentValidationCost, nativeReadCost, sharedValidationCost;
+		private final InventoryValidationBudget.Cost currentValidationCost, nativeReadCost, sharedValidationCost, coordinatedResidentCost;
 		Segmented(World world, BlockPos original, Layout expected) throws ReflectiveOperationException {
 			this.world = world; this.original = original; this.expected = expected;
 			alias = world.dimension() + "|vault|" + expected.controller.toShortString() + "|create:item_vault";
@@ -329,6 +329,7 @@ public final class CreateVaultInventoryAccess {
 			currentValidationCost = InventoryValidationBudget.vaultValidation(expected.members.size()).times(2);
 			nativeReadCost = InventoryValidationBudget.nativeRead(frozenLayout, true, true);
 			sharedValidationCost = currentValidationCost.plus(InventoryValidationBudget.localClassification(2L * expected.members.size()));
+			coordinatedResidentCost = InventoryValidationBudget.coordinatedVaultResident(expected.members.size());
 		}
 		@Override public Optional<String> alias() { return Optional.of(alias); }
 		/** Local handlers are validated here, not through generic Container scope evidence. */
@@ -396,6 +397,30 @@ public final class CreateVaultInventoryAccess {
 		}
 		@Override public boolean consumeSharedResident(int slot, IPlatformInventoryService.ResidentVisitor visitor, Runnable currentAuthority) {
 			return consumeResident(slot, visitor, java.util.Objects.requireNonNull(currentAuthority));
+		}
+		@Override public InventoryValidationBudget.Cost coordinatedResidentCost() { return coordinatedResidentCost; }
+		@Override public void consumeCoordinatedResident(int slot, nx.pingwheel.common.presentation.inventory.minecraft.InventoryCoordinatedRead operation) {
+			operation.enter(this, slot); // binds this exact provider/address before any metadata callback
+			java.util.Objects.checkIndex(slot, expected.slots);
+			try {
+				int index = memberIndex(slot), local = slot - offsets[index];
+				int count = expected.slotCounts.get(index);
+				Member member = world.loaded(expected.members.get(index)); IItemHandler live = member.local();
+				if (!world.currentRoute() || !certifiedLocal(live)) throw new InventorySourceUnavailableException("Vault shared local declaration changed");
+				boolean audited = member.auditedLocal(live);
+				IItemHandler backing = live instanceof GatedHandler gated ? gated.delegate() : live;
+				if (!audited) throw new InventorySourceUnavailableException("Vault native local backing changed");
+				if (live.getSlots() != count) throw new InventorySourceUnavailableException("Vault local mapping changed");
+				requireMembersHeld();
+				operation.beforeResident(this, slot);
+				if (!nativeLocal(backing)) throw new InventorySourceUnavailableException("Vault shared native backing changed");
+				var stack = live.getStackInSlot(local);
+				operation.detach(this, slot, IPlatformInventoryService.ResidentReads.stack(stack));
+				// The common handoff has detached and interned even an explicitly observed empty slot.
+				requireMembersHeld();
+				operation.afterResident(this, slot);
+				// No callback may follow this final complete common/provider/owner gate.
+			} catch (ReflectiveOperationException failure) { throw new IllegalStateException("Vault coordinated resident read unavailable", failure); }
 		}
 		private boolean consumeResident(int slot, IPlatformInventoryService.ResidentVisitor visitor, @org.jetbrains.annotations.Nullable Runnable currentAuthority) {
 			java.util.Objects.requireNonNull(visitor, "visitor");
