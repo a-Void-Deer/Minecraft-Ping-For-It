@@ -7,7 +7,7 @@ record explains the reuse and accounting boundary, not live performance or a
 completed review result.
 
 [D0017](D0017-certified-tracking-observation-pools.md) separately permits certified
-Tracking reuse across exact bindings; it retains this decision's prohibition on
+observation reuse across exact bindings; it retains this decision's prohibition on
 authority and content caches rather than making metadata reuse a pooling grant.
 
 ## Decision
@@ -16,7 +16,9 @@ Reuse process-fixed resident-access discovery and explicitly admitted immutable
 source metadata instead of reconstructing them per slot. Allocate root-local
 processing scratch on demand, admitting its complete growth cost before use.
 Neither optimization permits caching a successful authority check or resident
-item contents.
+item contents. The later fixed-Vault metadata and coordinated-read refinement
+retains that boundary: cache declaration evidence, and remove duplicate validation
+only through an audited synchronous operation whose final check cannot be reused.
 
 [Inventory](../architecture/presentation/inventory.md#provider-layer-and-safety)
 owns discovery and scope semantics; its
@@ -25,7 +27,8 @@ owns inventory processing and retained ownership.
 [Shared sources](../architecture/presentation/shared_sources.md#source-access)
 owns the explicit revalidation capability and generic accounting boundary.
 [Create](../integrations/create.md#vault-inventory-provider) owns the ordinary
-Vault opt-in and current-route checks.
+Vault opt-in, fixed reflection gates and current-route ordering; the linked
+shared source contract also owns the single-use operation's generic safety boundary.
 
 ## Rationale
 
@@ -36,6 +39,20 @@ route against that mapping, and the source must still check current world and
 owner evidence. This develops the distinction already recorded in
 [D0013](D0013-native-incremental-inventory-sweeps.md), rather than replacing its
 mixed-time read decision.
+
+Fixed reflection declarations do not change with a slot's contents, but a current
+handler, backing list or successful permission check can change inside a callback.
+Reusing only the former removes discovery without extending the lifetime of the
+latter. Cold discovery and unfamiliar replacement-local classes still need
+conservative admission rather than an assumption that every path is warm.
+
+Repeated full checks at adjacent common/provider boundaries can perform the same
+work without adding an intervening authority boundary. A single-use coordinated
+operation makes the retained before/after boundaries explicit and fails closed if
+the provider does not complete the required sequence. This is narrower than
+memoizing validity: callback-time revocation still requires full current checks,
+and detachment remains provisional until the final gate. Generic providers do not
+gain this optimization by claiming an interface.
 
 Maximum-sized scratch for every small patch pays for unused capacity. On-demand
 storage avoids that cost while keeping the same logical bounds. Growth creates
@@ -58,9 +75,12 @@ schedule accepted it.
 
 ## Consequences
 
-Reuse stays bounded by the owning handle or root rather than a global world
-cache. Dynamic checks still scale with visited members; this is not a constant-
-time validation promise. Explicit-patch semantics remain owned by
+Live source and scratch reuse stays bounded by the owning handle or root rather
+than a global world cache. Fixed declarations follow the defining-loader lifetime.
+Dynamic checks still scale with visited members; this is not a constant-
+time validation promise. Coordination adds admitted operation state and does not
+promise lower retained memory; allocation measurements and live-world costs need
+their own evidence. Explicit-patch semantics remain owned by
 [D0012](D0012-explicit-patch-identity-and-display.md), and preview-seeded display
 remains independent under the
 [bootstrap contract](../architecture/presentation/inventory.md#selected-preview-bootstrap).

@@ -1171,8 +1171,8 @@ failure case records three committed reads, three failed-page attempts and six
 retry reads: twelve attempts for nine committed slots, with no failed-page
 append or attempted-work refund. Separate capacity cases retain only the
 validated incomplete prefix and cannot claim completion or zero. Admission
-refusal, fresh same-tick attachment, widened-pool Preview exclusion, exact-path
-Preview sharing, same-object/same-tick policy changes, rapid reverse changes and
+refusal, completed-round exclusion, active certified Preview admission, exact-path
+sharing, same-object/same-tick policy changes, rapid reverse changes and
 pre-established successor entitlements are exercised independently. Lagging-peer
 and repeated cleanup fixtures check bounded progress and zero retained/reserved
 charges at close.
@@ -1213,9 +1213,10 @@ oracles, not live players, packet transport, default-budget throughput or a CPU,
 allocation-rate, heap, TPS or GC measurement. Per-owner metadata checks remain
 required even when getter counts fall. These totals are not a portable benchmark:
 other admission or cadence schedules can defer a first association until after a
-prior-tick round completes, requiring additional reads under the unchanged
-[attachment-freshness rules](../../architecture/presentation/inventory.md#certified-tracking-observation-pools).
-Preview remains excluded from widened pools.
+prior-tick round completes, requiring additional reads under the
+[active-admission rules](../../architecture/presentation/inventory.md#certified-tracking-observation-pools).
+Their Tracking-only measurement window does not measure the later sequential
+Preview/Tracking cases below.
 
 `InventoryPublicationAuthorizationTest` checks distinct offered/admitted/delivered
 historical evidence, old-cut and delivered-heartbeat ownership, final validation
@@ -1255,14 +1256,74 @@ revision or paid work. Clean fences precede delivery of the replacement without
 content recapture, including after origin disconnect or close and through expiry
 cleanup. Matching-proof retirement and binding-wide owner denial still apply,
 while an independent owner's valid proof remains serviceable. Preview and
-Tracking use distinct rounds: failure propagation is not widened cross-domain
-scan sharing. Four negative-control cases fail on unchanged `ffe6536b` inputs;
+Tracking use distinct rounds in these fixtures: failure propagation is not itself
+evidence of cross-domain scan sharing. Four negative-control cases fail on
+unchanged `ffe6536b` inputs;
 all seven cases pass on the recorded final input with released references and
 zero retained/reserved memory at teardown.
 
+### Certified active-prefix and 1620-slot coverage
+
+`InventoryActiveJoinTest` exercises pre-attachment journal replay, all four
+partition combinations, exact Preview-only sharing and rejection of widened
+Preview-only reuse after the tracker departs. It distinguishes actual installed
+associations from mere attachment, including resource defer and callback-time
+candidate completion; complete, incomplete, failed, released and catalogue-terminal
+rounds grant no new association. Independent logical high-water accounting,
+owner denial, recovery floors, changed world/member/mapping proofs, policy sealing
+and reverse toggles, unsupported legacy freshness, ordinary restart exclusions
+and staggered-cohort convergence have separate assertions. Cleanup releases all
+handles and retained/reserved charges.
+
+`CertifiedVault1620BackendTest` composes the actual backend, runtime, publisher,
+C2S/effective-budget S2C codecs and client inventory over certified native
+`ItemStackHandler` locals. The user-confirmed shape has 81 members with 20 slots
+each, 1,620 slots in all. Sequential selections use two different identities,
+plain stone and dirt, on opposite faces of the same or far member. Supplied and
+separately normalized default profiles admit the partial-preview cases without
+tuning their caps: Tracking pins its own association before normal Preview close,
+the next Preview replays the prefix, and both markers' initial round totals
+exactly 1,620 physical visits. `SELECT` adds no physical visit. Independent
+complete counts are `1,620,438,210` and `1,620,439,290`, and each marker completes
+its initial observation and four replacements before its unchanged 1,000-tick
+expiry. Completed-Preview and already-completed-Tracking controls do not grant
+the original completed round to a new consumer.
+
+Mutation cases change already-read and unread stone/dirt slots before late
+attachment, without moving identities. The journal retains the old prefix and
+includes only the unread increases, yielding `1,620,439,210` and `1,620,440,290`
+from one 1,620-visit mixed-time round. The seed is not added to either total.
+Duplicate selection, rejected store and join-budget defer cases preserve
+synchronous once-only creation and release tentative ownership without getters.
+These are native-source/encoded-client headless assertions, not live players,
+screen interaction or installed Create/Refined Storage behavior.
+
+### Open Preview and recurring Tracking lifetime
+
+`InventoryActiveJoinTest` separately checks that a one-shot Preview can finish its
+initial journal after faster Tracking moves on, without receiving future
+successor entitlements. Actual slow Tracking still protects and adopts its
+successor, including a pregranted sealed-policy handoff. The legacy control
+releases future handoff ownership when recurring peers leave even while the
+original Preview retains its evidence.
+
+`InventoryPooledBackendTest` keeps later, unselected native double-chest Previews
+open for two owner-partitioned Tracking cohorts through tick 750. It exercises
+the legal normalized physical cap of 16 and a deliberately stricter three-slot
+runtime seam, with 16 MiB pending memory and default logical quotas/cadences.
+Original selected Previews close normally; later requests join each active
+Tracking cohort and complete once. Both open requests retain their original 756,
+round, cursor, revision and opaque reference while both clients' Tracking counts
+reach 768 after stable slot updates, followed by further completion revisions.
+Late selection performs no getter and does not use the completed Preview as a
+cache. Against unchanged `9f41bf59`, both negative controls stall at 756; the
+`7e435d4f` fix passes these regressions and its independent rereview. This records
+encoded headless lifetime behavior, not a stay-open in-game UI run.
+
 Execution results for these assertions and their identified code input are
 recorded in the
-[publication-stage run](build-checks.md#tracking-pool-publication-stage-run).
+[publication-stage run](build-checks.md#tracking-pool-publication-stage-run) and
+the later [active-join and validation run](build-checks.md#certified-active-join-and-validation-run).
 Live UI, mixed config versions, installed-provider behavior and
 multiplayer/performance scenarios remain in the
 [manual matrix](manual-integration.md#inventory).
@@ -1460,6 +1521,10 @@ threshold; cumulative adaptive-growth costs are part of the guarded contract.
 
 ### Recorded allocation comparison
 
+This historical comparison uses a 900-slot forwarding `CountingHandler` fixture
+and the noncertified exact path. Its percentages do not describe the later
+certified native 1,620-slot route measured below.
+
 The saved measurements compare four conditions: baseline, resident discovery
 with lazy scopes, Vault current validation with cached cost profiles, and
 on-demand processing scratch. SHA-256 and Git-blob comparisons confirm that the
@@ -1513,12 +1578,11 @@ has the same validation/getter counters as the Vault validation condition. Reuse
 eliminates reconstruction, not all per-slot member checks; validation still
 scales with slots and members.
 
-The directly inspected feedback copy `feedback_log/pingforit.server.json`
-contains a physical allowance of 32 slots/tick, tracking period 4, target/server
-logical allowances 256/2048, pending memory 256 MiB, and display/frame multipliers
-4; the fixture explicitly reproduces those relevant settings. This ignored
-feedback copy is not automatically loaded as the server configuration, and the
-live active configuration is unknown. At 32 physical slots/tick, 900 visits need
+The historical fixture reproduces the then-recorded profile: physical allowance
+32 slots/tick, tracking period 4, target/server logical allowances 256/2048,
+pending memory 256 MiB, and display/frame multipliers 4. These are historical
+benchmark inputs, not the supplied profile for the later certified run. At 32
+physical slots/tick, 900 visits need
 at least 29 reading-eligible ticks; that allowance does not cap all source-validity
 checks at 32 or prevent idle probes between sweeps. The pending-memory setting is
 not an MB/s allocation throttle, as defined by the
@@ -1533,6 +1597,131 @@ those units nor prove the incident solved. Installed Create/Refined Storage with
 simultaneous import/export, paired real profiling and the remaining
 [manual inventory scenarios](manual-integration.md#inventory) remain pending.
 
+### Certified 1620-slot baseline and measurement boundary
+
+The test-only baseline `18b1539f` establishes a separate workload using the
+user-confirmed 81×20 Vault and exact native `ItemStackHandler` locals, without a
+getter-counting subclass or wrapper. `CertifiedVault1620BaselineTest` runs the real
+common source, certified native port, segmented provider, resident freezer,
+catalogue and runtime journal through typed world/member and resident-service
+ports. It checks ordered canonical addresses, blank visits, independent native
+persistent-patch/canonical-byte/hash oracles, exact long totals, no premature
+completion, detached results after mutation and zero retained/reserved charges
+after close. The prepared full sweep commits 1,620 addresses in 51 pages, with
+one completion and no defer or invalid result. Physical evidence is the ledger
+plus contiguous committed addresses, not direct instrumentation of native getters.
+
+The directly inspected ignored `feedback_log/pingforit.server.json` is the intended
+input supplied for this run, with user-attested local-JAR provenance matching the
+2026-10-30 06:20 baseline. Its inventory profile has physical allowance 1,024 per
+tick, pending memory 16 MiB and display/frame multipliers 1; Preview uses period
+5 and client/server slot quotas 128/1,024, Tracking period 3 and target/server
+slot quotas 512/4,096, with both partition switches off. `Profile.INCIDENT`
+validates those inputs without normalization changes; `Profile.DEFAULTS` separately
+constructs and validates the actual model defaults. Neither overwrites defaults
+or loads the feedback copy automatically. This provenance does not claim the
+earlier live incident was independently reproduced or add external-file watching.
+
+The unchanged measurement harness separates fresh-runtime admission, the second
+prepared 32-slot page, a prepared full sweep and a completed idle evidence probe.
+It uses JDK `21.0.12.1+1-LTS`, three warmups and five measured samples, with a
+separate counter pass. `ThreadMXBean` reports current-thread allocated bytes;
+`nanoTime` reports elapsed time, not CPU, allocation rate, TPS or retained heap.
+The full sweep excludes setup/close and does not time backend selection. Six
+benchmark/support source hashes, fixture/world class hashes and both normalized
+settings profiles match across the baseline, fixed-metadata and coordinated-read
+stages. The sequential backend test has separate correctness assertions and is
+not one of those six byte-identical measurement sources.
+
+The typed workload does not execute production `MinecraftMember` reflection or
+real `ServerPlayer`/world authority internals. `CertifiedVaultReflectionBaselineTest`
+is a separate metadata-only 32-validation fixture: it executes production
+`MinecraftWorld`/`MinecraftMember` against unchanged actual Create archive method
+bodies and initialized native locals, checking method signatures/bytecode with
+isolated optional ancestors and a stand-in `ServerLevel`. It is not a composed
+coordinated content read, installed-mod launch or whole-game benchmark.
+
+### Fixed metadata and coordinated-validation coverage
+
+`CreateVaultMetadataPortTest` checks lazy tested-version gating, defining-loader
+isolation and a thread-context-loader trap; fixed class/owner/signature/return
+drift, optional linkage and field-accessibility failure refuse safely. It observes
+one discovery of the six methods and native backing field, while later reads use
+current controller, extents, axis, local handler, backing and native audit.
+Replacement, null/unsafe backing, getter override, scope/route revocation and
+unloaded-member traps remain dynamic. `InventoryVaultMetadataCostTest` keeps warm
+invocation accounting separate from conservative cold acquisition and unfamiliar
+local-class costs. This stage does not reduce validation multiplicity.
+
+`InventoryCoordinatedVaultReadTest` has 14 dedicated operation, authority and
+accounting regressions over the audited certified Vault route. They exercise
+current handler replacement and explicit empty handoff, registry/local-audit/
+codec/final-callback revocation, immediate native detachment before later metadata
+mutation, wrong provider/slot, missing/duplicate/reordered stages, reentrancy,
+post-close reuse and cleared references. One-short metadata/catalogue grants and
+unsafe getter/backing or unloaded members refuse before content. An unknown
+provider claiming the interface cannot select coordination. Failed pages append
+none of their addresses, attempted work remains paid, and an authorized peer
+retries the tail. `InventoryCoordinatedCostTest` checks full allowance composition
+for page widths 1 through 64 and 1/2/45/81 members; retention tests include the
+added operation/profile ownership rather than claiming reduced retained memory.
+Independent review status is recorded in the [known gaps](#known-automated-gaps),
+separately from passing tests and measurements.
+
+### Certified validation measurements
+
+The P1 comparison is fresh pre-cache `015b37a9` versus `9f41bf59`, not a combined
+P1/P2 gain. In the actual-archive metadata-only fixture, median allocation for 32
+validations changes from 3,264,768 to 544,000 bytes (83.34% lower), with elapsed
+min/median/max 5.0993/5.2015/6.5688 ms versus 1.9190/2.2346/3.0418 ms. Dynamic
+load/entity counters are unchanged. The typed full-sweep elapsed medians in that
+same final P1 run are slower than its fresh control; reflection-only savings do
+not establish a universal speedup or live CPU improvement.
+
+The P2 comparison uses a fresh `7e435d4f` control, already containing P1 and the
+Preview lifetime fix, versus `a7fa3315`. Measured successful-path counters include
+the independent association check as well as page work:
+
+| Workload | Common current checks before → after | Provider matches before → after | Provider loaded calls before → after |
+| --- | --- | --- | --- |
+| Second 32-slot page | 163 → 131 | 390 → 262 | 69,176 → 48,184 |
+| Prepared 1,620-slot sweep | 8,253 → 6,633 | 19,746 → 13,266 | 3,502,404 → 2,439,684 |
+
+Both stages retain 1,620 physical and committed visits, 51 pages, one completion
+and no defer/invalid result; preparation and idle probes perform no physical
+visits. Validation remains Θ(slots × members), not constant time or cached validity.
+The measured retained ledger grows by 108 bytes, and every close releases all
+retained/reserved charges.
+
+Median allocated bytes for the prepared certified sweep:
+
+| Profile | Contents | Fresh P2 control | Coordinated read | Reduction |
+| --- | --- | --- | --- | --- |
+| Supplied | Empty | 87,582,720 | 70,553,448 | 19.44% |
+| Supplied | Repeated | 96,707,896 | 79,683,424 | 17.60% |
+| Supplied | Mixed | 110,517,768 | 93,424,176 | 15.47% |
+| Defaults | Empty | 87,523,960 | 70,552,224 | 19.39% |
+| Defaults | Repeated | 96,706,264 | 79,680,432 | 17.61% |
+| Defaults | Mixed | 110,495,864 | 93,418,784 | 15.46% |
+
+The original `18b1539f` supplied repeated-sweep median is 96,897,784 bytes; it is
+historical context, not P2's fresh control. Raw five-sample vectors and
+min/median/max distributions for admission, page, sweep and idle remain in the
+external evidence. Idle allocation rises slightly, and the default repeated-item
+admission elapsed median is slower after P2. P2's separate reflection-only median
+allocation is unchanged. These limitations preclude combining benchmark stages
+into one CPU claim or promising a millisecond improvement.
+
+The external evidence directories `certified-vault-1620-baseline`,
+`active-inventory-join`, `certified-vault-metadata-cache`,
+`active-join-preview-lifetime-fix` and `certified-vault-coordinated-read` retain
+their `HANDOFF.txt`, exact commands, logs, XML, hashes and raw measurements. The
+last directory's `before-after.csv`, `derived-counters.csv`,
+`measurement-hash-comparison.txt` and raw JSONL/distributions identify these
+stage controls. No live Create/Refined Storage import/export, CPU, allocation-rate,
+TPS, GC, heap or update-latency result is established; those scenarios remain
+[pending](manual-integration.md#inventory).
+
 ## Preview-seeded tracking coverage
 
 The [handoff and bootstrap contract](../../architecture/presentation/inventory.md#selected-preview-bootstrap)
@@ -1542,8 +1731,10 @@ has headless source-to-encoded-client and publication coverage:
   `SELECT`, creates immediately with no additional item getter, then explicitly
   replaces the seed with a fresh positive, equal or absent/zero result. Its
   540/900-slot partial-preview cases preserve exact long quantities after preview
-  close while a new sweep starts at slot zero, without an old round or seeded
-  accumulator. Separate cases retain one selected value rather than the native
+  close while this fixture's noncertified new sweep starts at slot zero, without
+  an old round or seeded accumulator. Certified active-prefix coverage is
+  [separate](#certified-active-prefix-and-1620-slot-coverage). Separate cases retain
+  one selected value rather than the native
   preview catalogue and release unselected payloads on close.
 - Its queued-publication regressions change an actual native chest lock after
   withholding the seed, then deliver unknown, duplicate and other-valid-preview
@@ -1602,7 +1793,7 @@ has headless source-to-encoded-client and publication coverage:
 Execution results are recorded in the
 [automated verification results](build-checks.md#automated-verification-results).
 These headless tests and builds do not establish live Create/Refined Storage
-behavior, the cause of the reported 900-slot Vault import/export failure,
+behavior, the cause of the reported Vault import/export failure,
 live multiplayer, GPU rendering
 or performance. Those remain [manual scenarios](manual-integration.md#inventory).
 
@@ -1727,6 +1918,18 @@ Live timing and multiplayer repair remain pending in the
   [manual inventory scenarios](manual-integration.md#inventory); tuned getter
   matrices do not establish default-budget throughput or CPU, allocation-rate,
   heap, TPS or GC gains;
+- certified active joins and the supplied/default 1,620-slot sequential schedules
+  have native-source/encoded-client evidence, not every admission/overlap schedule
+  or live completion guarantees. P1 fixed-metadata review and the Preview-lifetime
+  rereview passed; independent P2 authority and accounting reviews passed with no
+  findings on `a7fa3315`. Authority review exercised 11 existing coordinated-read
+  methods and six additional Java 21 probes; accounting review independently
+  checked validation envelopes, page-cost formulas, saved counters and 48 sample
+  distributions. Reviewers did not rerun full Gradle suites. This is finite
+  source/headless evidence, not live-game assurance. The scoped allocation
+  measurements do not establish whole-JVM
+  bounds, installed Create/Refined Storage behavior or resolution of the live
+  incident;
 - reported installed-container selection failures lack live reproduction or
   confirmation of resolution; passing headless tests and builds do not close
   those incidents. Pending scenarios are listed in the

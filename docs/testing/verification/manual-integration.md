@@ -109,12 +109,19 @@
 - On normal/trapped chests and an installed tested-version NeoForge Create Vault,
   exercise all four face/player separation combinations with two actual owners,
   differing faces and member hits, independently selected items and audiences.
-  Verify authorized fresh-round sharing, Preview/new-selection isolation, creator
-  departure and owner-only denial without losing an authorized peer's progress.
+  Verify independently authorized active-prefix joins, zero-based per-consumer
+  replay, Preview-only isolation and completed-round exclusion, creator departure
+  and owner-only denial without losing an authorized peer's progress.
   Toggle during partial scans, established successor handoffs and queued multipart
   publication, including a rapid reverse toggle, without baseline/seed/lifetime
   changes solely from the toggle. Include stalled or abandoned successors and
   final-frame owner/lock revocation after earlier parts.
+- Keep completed unselected Previews open while two owner-partitioned Tracking
+  cohorts update repeatedly. Verify original request rows/references remain usable
+  under their validity rules without reserving future Tracking sweeps, periodic
+  Preview recapture or forced close. The
+  [headless lifetime regression](inventory.md#open-preview-and-recurring-tracking-lifetime)
+  does not exercise the stay-open screen in game.
 - Exercise partner/member chunk unload, replacement, lock/loot and topology
   changes during certified reads and queued delivery, including cross-chunk
   chests and a large Vault. Confirm safe invalidity, no forced chunk load or
@@ -130,11 +137,11 @@
   [headless timing scenarios](inventory.md#resynchronization-and-budget-policy-verification)
   do not establish real delayed transport or multiplayer behavior.
 
-- Exercise [native incremental sweeps](../../architecture/presentation/inventory.md#native-incremental-reads) in live 540/900-slot inventories and an installed tested-version Create Vault: partial preview, immediate marker creation without a content getter, selected-preview updating display through the next eligible normal publication tick, a fresh complete first tracking result including zero, ordinary within-slot updates, completion-plus-period cadence, and old completed totals during replacement. The [headless native coverage](inventory.md#native-incremental-sweep-coverage) is not installed-provider or game-runtime evidence; cross-slot movement remains outside the accepted accuracy guarantee.
-- Reproduce the reported 900-slot Vault case with simultaneous import/export of one item, including installed Create/Refined Storage interaction and a cleared old observed slot before selection. Check the provisional-to-fresh transition, incomplete grey history, invalidity without seed resurrection, exact/aggregate qualifiers, delayed Basic/parts and no provisional chat. [Bootstrap coverage](inventory.md#preview-seeded-tracking-coverage) does not establish the original incident's cause or guarantee all selection failures are resolved; no live reproduction is recorded.
+- Exercise [native incremental sweeps](../../architecture/presentation/inventory.md#native-incremental-reads) in live 540/900-slot inventories and the user-confirmed 1,620-slot installed tested-version Create Vault: partial preview, immediate marker creation without a content getter, selected-preview updating display through the next eligible normal publication tick, a complete first tracking result including zero, ordinary within-slot updates, completion-plus-period cadence, and old completed totals during replacement. Include pre-attachment prefix values on certified active joins and fresh first rounds on unsupported routes. The [headless native coverage](inventory.md#native-incremental-sweep-coverage) is not installed-provider or game-runtime evidence; cross-slot movement remains outside the accepted accuracy guarantee.
+- Reproduce the reported Vault case with simultaneous import/export of one item, including installed Create/Refined Storage interaction and a cleared old observed slot before selection. Check the provisional-to-complete transition, incomplete grey history, invalidity without seed resurrection, exact/aggregate qualifiers, delayed Basic/parts and no provisional chat. [Bootstrap coverage](inventory.md#preview-seeded-tracking-coverage) does not establish the original incident's cause or guarantee all selection failures are resolved; no live reproduction is recorded.
 - Exercise live owner/lock/loot, face/membership, load and topology changes during a large sweep, plus permission revocation, recovery, delayed multipart delivery and recipient-isolated repair in multiplayer. Preserve the existing marker lifetime and admission/range rules.
 - Measure TPS, GC, heap retention and update latency under large-inventory and shared-consumer load on the supported loaders. Deterministic slot/work/memory admission and fixture tick bounds do not establish live performance.
-- Pair before/after profiling of the user's actual 900-slot Create Vault under
+- Pair before/after profiling of the user's confirmed 81-member Create Vault under
   simultaneous Refined Storage import/export, recording loader/mod jar versions,
   active server configuration and Vault capacity/shape. Compare real allocation,
   CPU and GC profiles to locate remaining hotspots; the

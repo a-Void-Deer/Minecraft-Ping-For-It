@@ -277,6 +277,24 @@ cached. Generic capability sources retain full rerouting, and provider-confirmed
 external bindings still resolve their current scope per operation rather than
 using this ordinary-source shortcut.
 
+Inventory reflection discovery is lazy and fixed for the adapter's defining
+class loader, behind the tested-version gate. The exact public Vault class and
+the declaration owners, public instance no-argument signatures and exact return
+types of `getController`, `isController`, `getWidth`, `getHeight`,
+`getMainConnectionAxis` and `getInventoryOfBlock` must match. The virtual
+`isController` dependency of `getController` is included. An untested version,
+foreign class or shape/linkage failure does not select a permissive fallback or
+a thread-context-loader implementation.
+
+The native `ItemStackHandler.stacks` field's exact declaration, protected instance
+shape with no final, volatile or synthetic modifier, `NonNullList` type and
+accessibility are resolved once. Every consuming
+boundary still reads the current handler's backing value and performs its native
+ownership audit; caching the field does not cache a handler, list, item or
+successful audit. Initial resolution retains conservative cold discovery costs,
+and replacement-local classification remains cold-bounded; the cached invocation
+profile applies only to this fixed Vault metadata.
+
 The exact ordinary tested-version Vault locals also certify their ordered
 member-local address graph for
 [Tracking pooling](../architecture/presentation/inventory.md#certified-tracking-observation-pools).
@@ -286,11 +304,31 @@ handler, wrapper, decorator or equal total does not qualify. Hit-root and face
 labels do not split a proven identical graph, but each participant keeps its own
 current owner-authorized port. Provider-confirmed external Vault bindings and
 generic capabilities remain on exact isolation; this opt-in neither widens their
-scope nor certifies other Create versions or containers. Read reuse remains
-subject to common cohort freshness and budgets; the
-[headless pool evidence](../testing/verification/inventory.md#certified-tracking-pool-and-publication-coverage)
-uses tuned, budget-admitted cohorts rather than establishing default-setting
-throughput.
+scope nor certifies other Create versions or containers. Preview and Tracking
+eligibility, including pre-attachment active prefixes, is owned by the linked
+inventory pool contract. The [verification inventory](../testing/verification/inventory.md#certified-tracking-pool-and-publication-coverage)
+distinguishes historical tuned cohorts from sequential certified native cases;
+neither establishes live throughput.
+
+Only this exact audited ordinary certified Vault access opts into the
+[single-use coordinated read](../architecture/presentation/shared_sources.md#source-access).
+A successful slot retains four full common checks: entry, after registry/catalogue
+context acquisition, after selected-local metadata/audit and the pre-getter
+all-member held gate, and after synchronous freeze/intern and the post-getter
+held gate. Each full check retains both original-access/current-layout provider
+matches, all-member owner checks around provider callbacks, and final current
+owner/member identity and removal checks. The selected current local still passes
+native declaration, mapping and current backing audits before the getter; the
+resident is detached immediately, before subsequent metadata callbacks. The
+provider returns without callbacks after the final full check.
+
+Coordination omits only the standalone provider pre/post matches and the extra
+outer final common check already covered by that final gate. It neither merges
+the two matches inside a full check nor reduces all-member authority to a selected
+member check. Exceptions receive fresh typed authority/structure/unavailable
+reclassification; failed pages append no partial results and capacity retains
+its existing validated-prefix semantics. Generic chests, unknown or decorated
+providers, external bindings and noncertified reads keep their existing flow.
 
 Vault access owns its local resident validation and declines the optional generic
 resident-scope factory, avoiding unused scope scratch without bypassing the

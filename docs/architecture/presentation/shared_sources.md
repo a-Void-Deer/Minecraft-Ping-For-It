@@ -106,6 +106,17 @@ validity check. A stable cursor, equal total slot count or generic decorator doe
 not grant this capability; other providers retain full re-resolution. Layout
 reuse freezes addressing, not permission, availability or content.
 
+An explicitly audited provider may coordinate a synchronous resident read with
+the common source through a single-use operation. It binds the exact read port,
+proof, provider, slot, thread, catalogue and invocation; it is not a transferable
+validity grant. Missing, duplicate, reordered, reentrant, reused or post-close
+handoffs fail closed. Detachment is provisional until the final current checks
+succeed, and operation-owned references are cleared on every exit. Merely
+implementing a capability or claiming a route does not authorize fewer checks.
+The supported opt-in and validation ordering are owned by
+[Create](../../integrations/create.md#vault-inventory-provider); admitted operation
+costs follow [inventory accounting](inventory.md#budgets-queues-and-memory).
+
 A conservative bridge for adapters that expose no resumable or version
 capability may only perform one-shot bounded calls. It must not invent
 continuations, stable versions, or cross-Ping identity. In that bridge a `null`
@@ -124,10 +135,10 @@ tracked in
 ## Observation eligibility and sharing
 
 Matching physical source identity and compatible read context are necessary,
-but not sufficient, for journal reuse. A new consumer records its attachment
-tick as its observation floor and the next round sequence as its first eligible
-round. It cannot consume a round started before attachment, even in the same
-tick, or inherit an earlier consumer's completed totals. A compatible round
+but not sufficient, for journal reuse. On the generic path, a new consumer records
+its attachment tick as its observation floor and the next round sequence as its
+first eligible round. It cannot consume a round started before attachment, even
+in the same tick, or inherit an earlier consumer's completed totals. A compatible round
 created after attachment may be shared. The observation sequence is local
 freshness bookkeeping, not source identity or a protocol baseline.
 
@@ -136,9 +147,15 @@ prefix without another physical read. Existing tracking peers can retain a
 successor handoff so a faster peer's replacement does not strand a slower one;
 this is bounded continuity for those peers, not a result cache for arbitrary
 new consumers. Restart releases the consumer's old scanning association and
-sets a fresh observation floor. Domain selection rules may require a wholly
-fresh consumer, as in
-[inventory bootstrap](inventory.md#selected-preview-bootstrap).
+sets a fresh observation floor on this path.
+
+Inventory's [certified active-observation admission](inventory.md#certified-tracking-observation-pools)
+is a narrow domain exception: independently validated consumers can replay a
+compatible in-progress prefix that predates attachment. Its association,
+restart/recovery, policy-sealing and completed-round exclusions are owned there;
+they do not relax generic source keys, scopes, unsupported-provider freshness or
+capture consistency. The [selected-preview bootstrap](inventory.md#selected-preview-bootstrap)
+remains provisional display rather than captured scan input.
 
 Each consumer still owns its aggregation, demand, completion and publication.
 Closing or invalidating one releases its references; it does not cancel another

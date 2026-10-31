@@ -195,6 +195,59 @@ historical-failure allowance. This documentation-only update inspected saved
 logs/XML and hash manifests; it ran no Gradle, tests, live UI, game, multiplayer
 or profiling session.
 
+### Certified active-join and validation run
+
+Recorded source input: `a7fa33158d9b66a8bbb78e873e9e955f67970a8c`, including the
+certified 1,620-slot baseline, active-prefix joins, fixed reflection metadata and
+the completed-open-Preview lifetime fix. The saved final P2 `09` invocation used
+Temurin `21.0.12.1+1-LTS`, PowerShell, UTF-8, `--no-daemon`, no explicit timeout
+and separate stdout/stderr files:
+
+```powershell
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+.\gradlew.bat :common:check :fabric:build :forge:build :neoforge:build verifyModIdentity --continue --no-daemon --console=plain > $stdout 2> $stderr
+```
+
+The saved command exited zero with `BUILD SUCCESSFUL`. All four test tasks
+executed; archived XML contains zero failures, errors or skips:
+
+| Module | Suites | Tests |
+| --- | --- | --- |
+| Common | 464 | 5036 |
+| Fabric | 5 | 24 |
+| Forge | 5 | 26 |
+| NeoForge | 41 | 256 |
+| Total | 515 | 5342 |
+
+Fabric and Forge main/test compilation executed; Common and NeoForge compilation
+reused successful prior output. All three loader jar, sources/Javadoc packaging,
+Javadoc and build tasks, Fabric remapping and `verifyModIdentity` executed and
+passed. Identity remains `pingforit` / `Ping For It` / `0.5.0-pfi-beta2` on
+Minecraft 1.21.1. The preceding `08` focus executed 115 NeoForge tests; its 22
+Common results were `UP-TO-DATE` from the successful `07` execution, not another
+test run. Failed intermediate fixture/oracle/bootstrap attempts and stale copied
+reports are identified in the external command/count manifest rather than
+counted as fresh successful NeoForge executions.
+
+The saved input hashes match the eleven committed P2 code/test files and six
+unchanged benchmark/support sources. Nine loader artifact hashes are retained.
+Package checks establish the operation/interface class presence in all three
+main jars, 13 normalized-EOL production-source equalities for Forge/NeoForge and
+six Fabric source-presence checks only; remapped Fabric sources are not claimed
+text-identical. These are bounded artifact-content checks, not runtime launch or
+exhaustive shipped-namespace validation.
+
+Exact commands, full logs/XML, hash manifests, stage controls and allocation
+measurements belong to the external `certified-vault-coordinated-read` evidence
+and its predecessor directories inventoried by
+[inventory verification](inventory.md#certified-1620-slot-baseline-and-measurement-boundary).
+Nonfatal Javadoc/deprecated-API/Gradle warnings remain. Independent review status
+is owned by the [inventory gaps](inventory.md#known-automated-gaps), not inferred
+from these automated results. This documentation-only reconciliation inspected
+saved evidence; it ran no Gradle, tests, performance probes, game, UI or multiplayer
+session.
+
 ## Verification limitations
 
 The 2026-10-27 combined invocation's stderr was empty; stdout retained the Gradle 9

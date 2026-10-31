@@ -7,10 +7,16 @@ the server-configuration protocol upgrade. Verification inventories own executio
 evidence and outstanding review or live-integration gaps; this decision is not a
 completion report.
 
+The subsequent active-observation extension explicitly accepts pre-attachment
+mixed-time values for certified new Tracking and Preview consumers. It supersedes
+the original fresh-only/Tracking-only eligibility subset, not its independent
+authority or completed-result-cache boundary. It authorizes no further protocol,
+configuration, version or capture-timer change.
+
 ## Decision
 
 Separate exact owner/face authority from certified equivalence of physical
-inventory addressing. Reuse a fresh Tracking observation only through an
+inventory addressing. Reuse an active native observation only through an
 explicit audited provider certificate, retaining each participant's authority
 and publication evidence independently. Freeze partition policy per round
 rather than restarting an observation when an administrator changes a switch.
@@ -43,9 +49,21 @@ caching permission or adding free work.
 
 Round-frozen policy lets a paid mixed-time sweep finish without discarding its
 progress or provisional history. Sealing old eligibility preserves that
-continuity without admitting new consumers under obsolete policy. Keeping the
-widened pool Tracking-only preserves Preview and new-selection freshness rather
-than turning completed observations into a result cache.
+continuity without admitting new consumers under obsolete policy.
+
+The original fresh-only cohort rule repeated getters when a user selected another
+item while a compatible large sweep was still running. The confirmed extension
+accepts that sweep's earlier prefix as part of the same deliberate mixed-time
+observation, instead of treating attachment as a new content instant. Independent
+zero-based replay keeps that evidence distinct from the provisional selected
+display seed. Active admission, rather than a stored complete quantity, is the
+reuse boundary; a newcomer who misses it must not acquire a completed cache.
+
+Preview may borrow a live Tracking cohort without becoming recurring demand.
+Keeping it one-shot prevents a completed open list from reserving future work
+that it will never consume, while real slow Tracking peers retain bounded
+successor continuity. Unsupported routes and Preview-only cross-binding reuse
+remain conservative.
 
 ## Consequences
 
@@ -56,7 +74,7 @@ identity does not certify physical sharing, and shared reads do not merge
 markers, audiences, selections or lifetimes. It preserves
 [D0015](D0015-inventory-metadata-reuse-and-scratch.md)'s no-authority/content-cache
 boundary and the inventory contract's
-[fresh first scan](../architecture/presentation/inventory.md#selected-preview-bootstrap).
+[independent bootstrap and complete-result semantics](../architecture/presentation/inventory.md#selected-preview-bootstrap).
 Fewer getters are not evidence of reduced total CPU, allocation rate, heap or
 latency; [verification](../testing/verification/inventory.md#certified-tracking-pool-and-publication-coverage)
 keeps those limits separate.

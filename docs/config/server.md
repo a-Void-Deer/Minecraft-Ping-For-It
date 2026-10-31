@@ -178,8 +178,10 @@ behind both the per-fragment cap and the per-client period total. The two
 display/frame size scalars are not multiplier objects: each is a finite plain
 number with no unlimited mode, normalized on its own code-defined grid.
 
-The two partition switches affect Tracking only. Supported certification routes,
-exact-isolation fallback, Preview interaction and next-scan policy transitions
+The two switches partition certified observations used by Tracking, including
+eligible Preview borrowing and selected-item active joins. They do not enable a
+general Preview-only cross-binding pool. Supported certification routes,
+exact-isolation fallback, active admission and next-scan policy transitions
 are owned by
 [inventory pools](../architecture/presentation/inventory.md#certified-tracking-observation-pools).
 Missing or explicit-null switch members use `false`; explicit boolean choices
