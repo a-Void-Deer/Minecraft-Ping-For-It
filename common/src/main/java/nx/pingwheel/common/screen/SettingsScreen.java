@@ -362,7 +362,8 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.resetAllButton.setWidth(SettingsScreenLayout.buttonWidthFor(this.width, SettingsScreenLayout.RESET_BUTTON_WIDTH));
 		this.primaryButton.visible = this.primaryButton.getWidth() > 0
 			&& screenLayout.footerBottom() - screenLayout.footerTop() >= this.primaryButton.getHeight();
-		this.resetAllButton.visible = this.resetAllButton.visible && this.resetAllButton.getWidth() > 0
+		this.resetAllButton.visible = navigation.isOverview() && navigation.scope() == Scope.CLIENT
+			&& this.resetAllButton.getWidth() > 0
 			&& screenLayout.footerBottom() - screenLayout.footerTop() >= this.resetAllButton.getHeight();
 		this.resetAllButton.active = this.resetAllButton.visible;
 		this.primaryButton.setPosition(screenLayout.doneX(), screenLayout.doneY());
@@ -550,8 +551,6 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.primaryButton.setMessage(this.primaryButtonText());
 		this.primaryButton.setTooltip(Tooltip.create(LanguageUtils.settings("navigation")
 			.path(overview ? "done" : "back", "tooltip").get()));
-		this.resetAllButton.visible = overview && navigation.scope() == Scope.CLIENT;
-		this.resetAllButton.active = this.resetAllButton.visible;
 	}
 
 	private void addOverview(Scope scope) {
@@ -701,9 +700,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			text.withStyle(ChatFormatting.BOLD),
 			this.font).alignLeft();
 		heading.active = false;
-		if (this.font.width(text) > SettingsScreenLayout.contentFor(this.width).width()) {
-			heading.setTooltip(Tooltip.create(text));
-		}
+		heading.setTooltip(Tooltip.create(text));
 		this.settingsList.addSmall(heading, null);
 		return heading;
 	}
