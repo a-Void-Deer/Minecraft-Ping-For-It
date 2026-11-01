@@ -11,6 +11,7 @@ sys.dont_write_bytecode = True
 
 from _markdown_links import (
     SYNTAX_HELP,
+    configure_cli_output,
     markdown_sources,
     normalize_destination,
     parse_links,
@@ -86,4 +87,5 @@ Exit 0 even when duplicates exist; argument/IO errors exit 2. No files change.
 
 
 if __name__ == "__main__":
+    configure_cli_output()
     raise SystemExit(main())

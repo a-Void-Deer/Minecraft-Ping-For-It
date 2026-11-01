@@ -7,9 +7,11 @@ original text, so masking code/comments does not change source line numbers.
 from __future__ import annotations
 
 import html
+import io
 import os
 import re
 import string
+import sys
 import unicodedata
 from bisect import bisect_right
 from collections.abc import Iterator
@@ -26,6 +28,8 @@ Code spans, HTML comments, top-level fenced code and ordinary indented code are
 excluded. Indentation handling preserves ordinary nested-list continuations;
 it is not a complete CommonMark list/blockquote container engine. Raw HTML
 links, autolinks and general HTML-block parsing are not supported.
+
+Standalone CLI stdout/stderr use UTF-8, including redirected output.
 """
 
 
@@ -94,6 +98,17 @@ def tsv(value: object) -> str:
     return str(value).replace("\\", "\\\\").replace("\t", "\\t").replace("\r", "\\r").replace("\n", "\\n")
 
 
+def configure_cli_output() -> None:
+    """Use lossless UTF-8 for standalone CLI output, including Windows pipes.
+
+    Keep the existing streams and error policies; imported main() callers own
+    their streams and do not invoke this entrypoint-only configuration.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8", errors=stream.errors)
+
+
 def _escaped(text: str, index: int) -> bool:
     start = index
     while start > 0 and text[start - 1] == "\\":
@@ -120,6 +135,8 @@ def _block_kind(content: str, paragraph_open: bool) -> str:
         return "fence"
     if re.fullmatch(r" {0,3}(?:(?:\*[ \t]*){3,}|(?:_[ \t]*){3,}|(?:-[ \t]*){3,})", content):
         return "thematic"
+    if re.match(r"^ {0,3}<!--", content):
+        return "comment"
     if re.match(r"^ {0,3}[-+*][ \t]+", content):
         return "list"
     ordered = re.match(r"^ {0,3}(\d{1,9})[.)][ \t]+", content)
@@ -129,49 +146,61 @@ def _block_kind(content: str, paragraph_open: bool) -> str:
     return "paragraph"
 
 
-def _inline_end(text: str, start: int) -> int:
-    """Find the current inline block's end before matching code delimiters.
+class _InlineBounds:
+    """Index inline limits once instead of rescanning a suffix for each label.
 
-    Paragraph continuations may contain newlines (and extra indentation), but
-    blank lines and supported interrupting blocks cannot be part of a code span.
-    ATX headings are single-line inline blocks; Setext text ends at its underline.
+    A continuation is classified with an open paragraph (not a fresh block):
+    Setext underlines and interrupting lists/fences/comments stop it. A query
+    starting on an ATX line ends there; other starting lines may continue into
+    subsequent paragraph lines, even when their own kind would interrupt one.
     """
-    line_start = text.rfind("\n", 0, start) + 1
-    line_end = text.find("\n", start)
-    if line_end < 0:
-        return len(text)
-    if _block_kind(text[line_start:line_end].rstrip("\r"), False) == "atx":
-        return line_end
-    while line_end < len(text):
-        next_start = line_end + 1
-        next_end = text.find("\n", next_start)
-        if next_end < 0:
-            next_end = len(text)
-        content = text[next_start:next_end].rstrip("\r")
-        if _block_kind(content, True) != "paragraph":
-            return line_end
-        line_end = next_end
-    return len(text)
+
+    def __init__(self, text: str) -> None:
+        self.starts = [0] + [match.end() for match in re.finditer("\n", text)]
+        self.ends = [len(text)] * len(self.starts)
+        continuation_end = len(text)
+        for line in range(len(self.starts) - 1, -1, -1):
+            start = self.starts[line]
+            end = self.starts[line + 1] - 1 if line + 1 < len(self.starts) else len(text)
+            kind = _block_kind(text[start:end].rstrip("\r"), True)
+            self.ends[line] = end if kind == "atx" else continuation_end
+            continuation_end = self.ends[line] if kind == "paragraph" else start - 1
+
+    def end(self, start: int) -> int:
+        return self.ends[bisect_right(self.starts, start) - 1]
 
 
-def _code_span(text: str, start: int) -> tuple[int, int] | None:
+_CODE_DELIMITERS = re.compile(r"`+")
+
+
+def _code_span(text: str, start: int, bounds: _InlineBounds) -> tuple[int, int] | None:
     end = start + 1
     while end < len(text) and text[end] == "`":
         end += 1
     delimiter = text[start:end]
-    for match in re.finditer(r"`+", text[end:_inline_end(text, start)]):
+    for match in _CODE_DELIMITERS.finditer(text, end, bounds.end(start)):
         if match.group() == delimiter:
-            close = end + match.start()
-            return close, close + len(delimiter)
+            return match.start(), match.end()
     return None
 
 
-def _block_mask(text: str) -> str:
+def _block_mask(
+    text: str, references: dict[str, str] | None = None, bounds: _InlineBounds | None = None
+) -> tuple[str, dict[str, str]]:
+    """Discover block definitions before reference-dependent inline masking.
+
+    Definitions cannot interrupt paragraphs. Code spans and inline comments
+    cannot cross inline-block boundaries, so resolving a reference cannot turn
+    a paragraph continuation into a definition or hide a later block definition.
+    """
+    bounds = _InlineBounds(text) if bounds is None else bounds
     mask = list(text)
+    definitions: dict[str, str] = {}
     fence: tuple[str, int] | None = None
     skip_until = 0
     paragraph_open = False
     list_columns: list[int] = []
+    brackets: list[int] = []
     offset = 0
     for line in text.splitlines(keepends=True):
         start, end = offset, offset + len(line)
@@ -208,6 +237,13 @@ def _block_mask(text: str) -> str:
                 marker = re.match(r"^ *(?:[-+*]|\d{1,9}[.)])[ \t]+", expanded)
                 if marker:
                     list_columns.append(marker.end())
+            if kind == "paragraph" and not paragraph_open:
+                definition = _reference_definition(text, start)
+                if definition is not None and definition[2] <= bounds.end(start):
+                    key, value, skip_until = definition
+                    definitions.setdefault(key, value)
+                    _hide(mask, start, skip_until)
+                    continue
             paragraph_open = kind in ("paragraph", "list")
         index = max(start, skip_until)
         while index < end:
@@ -215,12 +251,19 @@ def _block_mask(text: str) -> str:
                 index += 1
                 continue
             if text.startswith("<!--", index):
-                close = text.find("-->", index + 4)
+                block_comment = re.fullmatch(r" {0,3}", text[start:index]) is not None
+                limit = len(text) if block_comment else bounds.end(index)
+                close = text.find("-->", index + 4, limit)
+                if close < 0 and not block_comment:
+                    index += 4
+                    continue
                 skip_until = len(text) if close < 0 else close + 3
                 _hide(mask, index, skip_until)
+                if block_comment:
+                    paragraph_open = False
                 index = skip_until
             elif text[index] == "`":
-                span = _code_span(text, index)
+                span = _code_span(text, index, bounds)
                 if span:
                     skip_until = span[1]
                     index = skip_until
@@ -228,16 +271,58 @@ def _block_mask(text: str) -> str:
                     while index < end and text[index] == "`":
                         index += 1
             else:
-                index += 1
-    return "".join(mask)
+                payload_end = _link_payload_end(text, index, brackets, references, bounds)
+                if payload_end is not None:
+                    skip_until = payload_end
+                    index = payload_end
+                else:
+                    index += 1
+    return "".join(mask), definitions
 
 
-def _inline_mask(text: str) -> str:
+def _link_payload_end(
+    text: str, index: int, brackets: list[int], references: dict[str, str] | None, bounds: _InlineBounds
+) -> int | None:
+    """Consume literal destinations/titles only after a live link label.
+
+    Earlier code spans win, including spans inside labels. Once a label closes,
+    a valid payload wins over backticks and comments within that inline block.
+    A resolved full/collapsed reference consumes its second label, not any
+    parenthesized text that follows it.
+    """
+    if text[index] == "[":
+        brackets.append(index)
+    elif text[index] == "]" and brackets:
+        opening = brackets.pop()
+        next_index = index + 1
+        limit = bounds.end(opening)
+        if next_index >= limit:
+            return None
+        if text[next_index] == "(":
+            link = _inline_link(text, next_index)
+            if link is not None and link[1] <= limit:
+                return link[1]
+        elif text[next_index] == "[" and references:
+            close = _closing_bracket(text, next_index, limit)
+            if close >= 0:
+                label = text[next_index + 1:close] or text[opening + 1:index]
+                if _reference_key(label) in references:
+                    return close + 1
+    return None
+
+
+def _inline_mask(
+    text: str, references: dict[str, str] | None = None, bounds: _InlineBounds | None = None
+) -> str:
+    bounds = _InlineBounds(text) if bounds is None else bounds
     mask = list(text)
+    brackets: list[int] = []
     index = 0
     while index < len(text):
-        if text[index] == "`" and not _escaped(text, index):
-            span = _code_span(text, index)
+        if _escaped(text, index):
+            index += 1
+        elif text[index] == "`":
+            span = _code_span(text, index, bounds)
             if span:
                 _hide(mask, index, span[1])
                 index = span[1]
@@ -245,7 +330,8 @@ def _inline_mask(text: str) -> str:
             while index < len(text) and text[index] == "`":
                 index += 1
         else:
-            index += 1
+            payload_end = _link_payload_end(text, index, brackets, references, bounds)
+            index = payload_end if payload_end is not None else index + 1
     return "".join(mask)
 
 
@@ -344,40 +430,47 @@ def _reference_key(label: str) -> str:
     return " ".join(_unescape(label).split()).casefold()
 
 
-def _prepare(text: str) -> tuple[str, dict[str, str], str]:
-    blocks = list(_block_mask(text))
-    visible = list(_inline_mask("".join(blocks)))
-    references: dict[str, str] = {}
-    pattern = r"(?m)^ {0,3}\[((?:\\.|[^\[\]\\\r\n])+)\]:[ \t]*(?:\r?\n[ \t]*)?"
-    for match in re.finditer(pattern, "".join(visible)):
-        if visible[match.start() + match[0].index("[")] != "[":
-            continue
-        destination = _destination(text, match.end())
-        if destination is None or not destination[0]:
-            continue
-        value, end = destination
-        index = end
+_REFERENCE_START = re.compile(r"(?m)^ {0,3}\[((?:\\.|[^\[\]\\\r\n])+)\]:[ \t]*(?:\r?\n[ \t]*)?")
+
+
+def _reference_definition(text: str, start: int) -> tuple[str, str, int] | None:
+    match = _REFERENCE_START.match(text, start)
+    if match is None:
+        return None
+    destination = _destination(text, match.end())
+    # <> consumes a valid empty destination; no consumed token means failure.
+    if destination is None or destination[1] == match.end():
+        return None
+    value, end = destination
+    index = end
+    while index < len(text) and text[index] in " \t\r":
+        index += 1
+    title_start = index
+    if index < len(text) and text[index] == "\n":
+        next_line = index + 1
+        while next_line < len(text) and text[next_line] in " \t":
+            next_line += 1
+        if next_line < len(text) and text[next_line] in "\"'(":
+            title_start = next_line
+    if title_start > end and title_start < len(text) and text[title_start] in "\"'(":
+        index = _title_end(text, title_start)
+        if index < 0:
+            return None
         while index < len(text) and text[index] in " \t\r":
             index += 1
-        title_start = index
-        if index < len(text) and text[index] == "\n":
-            next_line = index + 1
-            while next_line < len(text) and text[next_line] in " \t":
-                next_line += 1
-            if next_line < len(text) and text[next_line] in "\"'(":
-                title_start = next_line
-        if title_start > end and title_start < len(text) and text[title_start] in "\"'(":
-            index = _title_end(text, title_start)
-            if index < 0:
-                continue
-            while index < len(text) and text[index] in " \t\r":
-                index += 1
-        if index < len(text) and text[index] != "\n":
-            continue
-        references.setdefault(_reference_key(text[match.start(1):match.end(1)]), value)
-        _hide(visible, match.start(), index)
-        _hide(blocks, match.start(), index)
-    return "".join(visible), references, "".join(blocks)
+    if index < len(text) and text[index] != "\n":
+        return None
+    return _reference_key(match[1]), value, index
+
+
+def _prepare(text: str) -> tuple[str, dict[str, str], str]:
+    bounds = _InlineBounds(text)
+    blocks, references = _block_mask(text, bounds=bounds)
+    if references:
+        # Block discovery is independent of reference resolution. A second pass
+        # can therefore resolve forward uses without a definition/mask fixed point.
+        blocks, references = _block_mask(text, references, bounds)
+    return _inline_mask(blocks, references), references, blocks
 
 
 def _link_uses(
@@ -451,7 +544,8 @@ def normalize_destination(destination: str, source: Path, root: Path) -> LocalTa
 
 def _display_text(text: str, references: dict[str, str]) -> str:
     # Preserve code contents while removing their delimiters and Markdown styling.
-    visible = _inline_mask(text)
+    bounds = _InlineBounds(text)
+    visible = _inline_mask(text, references, bounds)
     uses = list(_link_uses(text, visible, references))
     by_start = {use.start: use for use in uses}
     pieces: list[str] = []
@@ -464,7 +558,7 @@ def _display_text(text: str, references: dict[str, str]) -> str:
                 pieces.pop()
             pieces.append(_display_text(text[index + 1:use.label_end], references))
             index = use.end
-        elif text[index] == "`" and not _escaped(text, index) and (span := _code_span(text, index)):
+        elif text[index] == "`" and not _escaped(text, index) and (span := _code_span(text, index, bounds)):
             delimiter_end = index + 1
             while delimiter_end < len(text) and text[delimiter_end] == "`":
                 delimiter_end += 1
@@ -500,16 +594,17 @@ def heading_anchors(text: str) -> set[str]:
     headings: list[str] = []
     paragraph: list[str] = []
     for line in blocks.splitlines():
+        kind = _block_kind(line, bool(paragraph))
         atx = re.match(r"^ {0,3}#{1,6}(?:[ \t]+(.*)|[ \t]*)$", line)
         if atx:
             content = atx[1] or ""
             content = re.sub(r"[ \t]+#+[ \t]*$", "", content)
             headings.append(content)
             paragraph = []
-        elif re.fullmatch(r" {0,3}(?:=+|-+)[ \t]*", line) and paragraph:
+        elif kind == "setext":
             headings.append(" ".join(paragraph))
             paragraph = []
-        elif not line.strip() or re.match(r"^(?: {4}|\t| {0,3}(?:>|[-+*][ \t]|\d+[.)][ \t]|<|\|))", line):
+        elif kind != "paragraph" or re.match(r"^(?: {4}|\t| {0,3}(?:>|[-+*][ \t]|\d+[.)][ \t]|<|\|))", line):
             paragraph = []
         else:
             paragraph.append(line.strip())

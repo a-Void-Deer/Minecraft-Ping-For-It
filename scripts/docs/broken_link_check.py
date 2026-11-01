@@ -16,6 +16,7 @@ from _markdown_links import (
     SYNTAX_HELP,
     LocalTarget,
     MarkdownLink,
+    configure_cli_output,
     heading_anchors,
     markdown_sources,
     normalize_destination,
@@ -187,4 +188,5 @@ Exit 0: clean local check; 1: broken links; 2: argument, Git or IO/tool error.
 
 
 if __name__ == "__main__":
+    configure_cli_output()
     raise SystemExit(main())

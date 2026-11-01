@@ -10,6 +10,7 @@ repository discovery is exercised from unrelated working directories.
 
 from __future__ import annotations
 
+import io
 import os
 import shutil
 import stat
@@ -17,8 +18,10 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
+from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 
@@ -27,7 +30,10 @@ DOCS_TOOLS = REPO_ROOT / "scripts" / "docs"
 TEMP_BASE = Path(tempfile.gettempdir()) / "opencode"
 
 sys.path.insert(0, str(DOCS_TOOLS))
+import _markdown_links as markdown_links  # noqa: E402
 from _markdown_links import heading_anchors, normalize_destination, parse_links  # noqa: E402
+import broken_link_check  # noqa: E402
+import count_duplicate_links  # noqa: E402
 
 CLI_FILES = ("_markdown_links.py", "count_duplicate_links.py", "broken_link_check.py")
 
@@ -330,6 +336,227 @@ class MarkdownParsingTests(unittest.TestCase):
             [(1, "target.md"), (1, "target.md"), (1, "target.md"), (2, "target.md")],
         )
 
+    def test_literal_backticks_in_link_payloads_do_not_hide_following_links(self) -> None:
+        for payload in ('README.md "literal `"', '<README`file.md>', 'README`file.md'):
+            with self.subTest(payload=payload):
+                text = f"[ok]({payload}) [bad](missing.md) [end]({payload})\n"
+                destination = "README.md" if payload.startswith("README.md ") else "README`file.md"
+                self.assertEqual(
+                    [(link.line, link.destination) for link in parse_links(text, self.source)],
+                    [(1, destination), (1, "missing.md"), (1, destination)],
+                )
+
+    def test_link_payload_precedence_preserves_code_labels_images_and_references(self) -> None:
+        text = (
+            '`[fake](ghost.md "literal `") [real](one.md)\n'
+            '\n'
+            '[`label ]`](two.md "literal `") [after](three.md)\n'
+            '[![`alt ]`](image.png "literal `")](four.md "literal `")\n'
+            '[multi\nline](five.md\n"literal `") [after](six.md)\n'
+            '\n'
+            '[ref]: seven.md "literal `"\n'
+            '[use][ref] [ref][] [ref]\n'
+            '\n'
+            '`[still code](ghost.md)`\n'
+        )
+        self.assertEqual(
+            [(link.line, link.destination, link.is_image) for link in parse_links(text, self.source)],
+            [
+                (1, "one.md", False),
+                (3, "two.md", False),
+                (3, "three.md", False),
+                (4, "four.md", False),
+                (4, "image.png", True),
+                (5, "five.md", False),
+                (7, "six.md", False),
+                (10, "seven.md", False),
+                (10, "seven.md", False),
+                (10, "seven.md", False),
+            ],
+        )
+
+    def test_reference_payloads_do_not_start_code_spans(self) -> None:
+        for payload in ('target.md "literal `"', '<target`name.md>', 'target.md\n  "literal `"'):
+            with self.subTest(payload=payload):
+                text = f"[ref]: {payload}\n[other]: other.md \"literal `\"\n[a][ref] [b][other]\n"
+                destination = "target`name.md" if payload.startswith("<") else "target.md"
+                self.assertEqual(
+                    [link.destination for link in parse_links(text, self.source)],
+                    [destination, "other.md"],
+                )
+
+        self.assertEqual(
+            [link.destination for link in parse_links('[a `b](ghost.md "`") [c](real.md)', self.source)],
+            ["real.md"],
+        )
+
+    def test_resolved_references_do_not_protect_following_parenthesized_text(self) -> None:
+        for use in ("[full][ref]", "[ref][]", "![full][ref]", "![ref][]"):
+            with self.subTest(use=use):
+                text = (
+                    f'{use}(target.md "literal `") '
+                    '[hidden](missing-review-boundary-target.md) ` [real](README.md)\n'
+                    '\n[ref]: README.md\n'
+                )
+                self.assertEqual(
+                    [(link.destination, link.is_image) for link in parse_links(text, self.source)],
+                    [("README.md", use.startswith("!")), ("README.md", False)],
+                )
+
+    def test_unresolved_reference_label_can_start_a_real_inline_link(self) -> None:
+        text = (
+            '[full][absent](target.md "literal `") [real](one.md) '
+            '[end](two.md "literal `")\n'
+            '[![alt][ref]](outer.md "literal `") [after](three.md)\n'
+            '\n[ref]: image.png\n'
+        )
+        self.assertEqual(
+            [(link.destination, link.is_image) for link in parse_links(text, self.source)],
+            [
+                ("target.md", False), ("one.md", False), ("two.md", False),
+                ("outer.md", False), ("image.png", True), ("three.md", False),
+            ],
+        )
+
+    def test_hidden_definition_cannot_override_a_later_visible_definition(self) -> None:
+        # Markdig renders the apparent first definition as code in the first
+        # paragraph. Only the later block definition can resolve [ghost].
+        for use in ("[a][ref]", "[ref][]", "![a][ref]", "![ref][]"):
+            for forward in (False, True):
+                with self.subTest(use=use, forward=forward):
+                    prefix = "" if forward else "[ref]: README.md\n\n"
+                    suffix = "[ref]: README.md\n\n" if forward else ""
+                    text = (
+                        prefix + f'{use}(README.md "literal `")\n'
+                        '[ghost]: missing-review-reference-target.md\n'
+                        '`\n\n[ghost]\n\n' + suffix + '[ghost]: README.md\n'
+                    )
+                    self.assertEqual(
+                        [(link.line, link.destination, link.is_image) for link in parse_links(text, self.source)],
+                        [
+                            (1 if forward else 3, "README.md", use.startswith("!")),
+                            (5 if forward else 7, "README.md", False),
+                        ],
+                    )
+
+    def test_hidden_only_definition_does_not_resolve_any_reference_form(self) -> None:
+        text = (
+            '[a][ref](README.md "literal `")\n'
+            '[ghost]: missing-review-reference-target.md\n'
+            '`\n\n[ghost] [ghost][] ![alt][ghost]\n\n[ref]: README.md\n'
+        )
+        self.assertEqual(
+            [(link.line, link.destination) for link in parse_links(text, self.source)],
+            [(1, "README.md")],
+        )
+
+    def test_chained_forward_references_do_not_retain_hidden_definitions(self) -> None:
+        text = (
+            '[a][ref](README.md "literal `")\n'
+            '[ghost]: missing-review-reference-target.md\n'
+            '`\n\n'
+            '[b][ghost](README.md "literal `")\n'
+            '[phantom]: missing-chain-target.md\n'
+            '`\n\n[ghost] [phantom]\n\n'
+            '[ref]: README.md\n[ghost]: README.md\n[phantom]: README.md\n'
+        )
+        self.assertEqual(
+            [(link.line, link.destination) for link in parse_links(text, self.source)],
+            [(1, "README.md"), (5, "README.md"), (9, "README.md"), (9, "README.md")],
+        )
+
+    def test_reference_definitions_cannot_interrupt_their_own_reference_paragraph(self) -> None:
+        # Treating the paragraph continuation as a definition creates a circular
+        # dependency: resolving [ghost] would hide the definition in a code span.
+        text = '[a][ghost](README.md "literal `")\n[ghost]: wrong.md\n`\n\n[ghost]\n'
+        self.assertEqual(
+            [(link.line, link.destination) for link in parse_links(text, self.source)],
+            [(1, "README.md")],
+        )
+
+    def test_reference_and_comment_dependencies_preserve_block_definitions(self) -> None:
+        for use in ("[a][ref]", "[ref][]", "![a][ref]"):
+            with self.subTest(use=use):
+                text = (
+                    f'{use}(README.md "<!-- literal")\n'
+                    '[ghost]: missing-review-reference-target.md\n'
+                    '-->\n\n[ghost]\n\n[ref]: README.md\n\n[ghost]: README.md\n'
+                )
+                self.assertEqual(
+                    [(link.line, link.destination, link.is_image) for link in parse_links(text, self.source)],
+                    [(1, "README.md", use.startswith("!")), (5, "README.md", False)],
+                )
+
+        # An inline comment cannot cross a blank line; a standalone comment can.
+        for prefix, expected in (("Text ", [(6, "README.md")]), ("", [])):
+            with self.subTest(prefix=prefix):
+                text = f'{prefix}<!-- literal\n\n[ref]: README.md\n-->\n\n[ref]\n'
+                self.assertEqual(
+                    [(link.line, link.destination) for link in parse_links(text, self.source)],
+                    expected,
+                )
+
+    def test_multiline_titles_cannot_protect_standalone_comments(self) -> None:
+        for opening in ('[a](README.md "literal', '[ref]: README.md "literal'):
+            with self.subTest(opening=opening):
+                text = (
+                    f'{opening}\n<!--\n")\n\n[ghost]: missing.md\n-->\n\n'
+                    '[ghost]\n\n[ghost]: README.md\n'
+                )
+                # As with fence boundaries, malformed first-line recognition is
+                # out of scope; the comment must not expose its fake definition.
+                self.assertEqual(
+                    [(link.line, link.destination) for link in parse_links(text, self.source) if link.line > 1],
+                    [(8, "README.md")],
+                )
+
+    def test_visible_duplicate_definitions_preserve_titles_and_first_destination(self) -> None:
+        text = (
+            '<!--\n[ghost]: comment.md\n-->\n\n'
+            '~~~\n[ghost]: fence.md\n~~~\n\n'
+            '    [ghost]: indent.md\n\n'
+            '`[ghost]: span.md`\n\n[ghost]\n\n'
+            '[ref]: README.md "literal `"\n'
+            '[ghost]: first.md "literal `"\n'
+            '[ghost]: second.md "literal `"\n\n'
+            '[ref] [ghost][] ![image][ghost]\n'
+        )
+        self.assertEqual(
+            [(link.line, link.destination, link.is_image) for link in parse_links(text, self.source)],
+            [
+                (13, "first.md", False),
+                (19, "README.md", False),
+                (19, "first.md", False),
+                (19, "first.md", True),
+            ],
+        )
+
+    def test_speculative_multiline_payload_cannot_skip_fence_boundaries(self) -> None:
+        for opening in ('[x](<> "', '[ref]: <> "'):
+            for fence in ("~~~", "```"):
+                with self.subTest(opening=opening, fence=fence):
+                    text = (
+                        f'{opening}\n{fence}\n")\n[fenced](README.md)\n{fence}\n'
+                        '[real](missing-review-boundary-target.md)\n'
+                    )
+                    # Malformed-link recognition is outside this regression;
+                    # fence masking must not hide the valid post-fence link.
+                    self.assertEqual(
+                        [(link.line, link.destination) for link in parse_links(text, self.source) if link.line > 1],
+                        [(6, "missing-review-boundary-target.md")],
+                    )
+
+    def test_empty_reference_destinations_are_self_links_for_every_reference_form(self) -> None:
+        text = "[a]() [b][ref] [ref][] [ref] ![image][ref]\n\n[ref]: <>\n"
+        self.assertEqual(
+            [(link.line, link.destination, link.is_image) for link in parse_links(text, self.source)],
+            [(1, "", False)] * 4 + [(1, "", True)],
+        )
+        # An empty angle destination is valid, but a missing destination is not.
+        for definition in ("[ref]:", "[ref]:   ", "[ref]:\n\n"):
+            with self.subTest(definition=definition):
+                self.assertEqual(parse_links(f"[ref]\n\n{definition}\n", self.source), [])
+
     def test_images_are_distinguished_and_linked_images_keep_both_targets(self) -> None:
         text = (
             "![plain](plain.png)\n"
@@ -449,6 +676,85 @@ class MarkdownParsingTests(unittest.TestCase):
         )
 
 
+class MarkdownScanningWorkTests(unittest.TestCase):
+    source = Path("docs/page.md")
+
+    def assert_bounded_scan(self, text: str, scan, expected) -> None:
+        # Protect the concrete suffix-rescan regression without a wall-clock
+        # threshold. Count classifications, character checks and copied slices;
+        # short valid payloads/code spans must not inspect or copy every suffix.
+        work = {"classifications": 0, "characters": 0, "slices": 0}
+        classify = markdown_links._block_kind
+        escaped = markdown_links._escaped
+
+        class CountingText(str):
+            def __getitem__(self, key):
+                if isinstance(key, slice):
+                    work["slices"] += len(range(*key.indices(len(self))))
+                return super().__getitem__(key)
+
+        def count_classification(content, paragraph_open):
+            work["classifications"] += 1
+            return classify(content, paragraph_open)
+
+        def count_character(value, index):
+            work["characters"] += 1
+            return escaped(value, index)
+
+        with patch.object(markdown_links, "_block_kind", count_classification):
+            with patch.object(markdown_links, "_escaped", count_character):
+                self.assertEqual(scan(CountingText(text)), expected)
+        self.assertLessEqual(work["classifications"], 8 * (text.count("\n") + 1), work)
+        self.assertLessEqual(work["characters"], 8 * len(text), work)
+        self.assertLessEqual(work["slices"], 8 * len(text), work)
+
+    def test_reference_definition_work_scales_with_input(self) -> None:
+        for count in (100, 200, 400):
+            with self.subTest(count=count):
+                text = "".join(f"[ref{index}]: README.md\n" for index in range(count)) + "\n[ref0]\n"
+                self.assert_bounded_scan(
+                    text,
+                    lambda value: [(link.line, link.destination) for link in parse_links(value, self.source)],
+                    [(count + 2, "README.md")],
+                )
+
+    def test_repeated_inline_payload_and_code_work_scales_with_input(self) -> None:
+        for row in (
+            '[a](README.md)\n',
+            '[`code`](README.md)\n',
+            '[a](README.md "literal `")\n',
+            '[a](\nREADME.md\n"literal `")\n',
+            '`[fake](missing.md "literal `") [a](README.md)\n',
+        ):
+            for count in (100, 200, 400):
+                with self.subTest(row=row, count=count):
+                    self.assert_bounded_scan(
+                        row * count,
+                        lambda value: [(link.line, link.destination) for link in parse_links(value, self.source)],
+                        [(1 + index * row.count("\n"), "README.md") for index in range(count)],
+                    )
+
+    def test_heading_preparation_work_scales_with_input(self) -> None:
+        for definitions in (False, True):
+            for count in (100, 200, 400):
+                with self.subTest(definitions=definitions, count=count):
+                    text = (
+                        "".join(f"[ref{index}]: README.md\n" for index in range(count)) + "\n[ref0]\n"
+                        if definitions else '[`code`](README.md)\n' * count
+                    )
+                    self.assert_bounded_scan(text + "\n# Heading\n", heading_anchors, {"heading"})
+
+    def test_many_links_on_one_line_do_not_copy_the_remaining_code_suffix(self) -> None:
+        for count in (100, 200, 400):
+            with self.subTest(count=count):
+                text = '[`code`](README.md) [a](README.md "literal `") ' * count + "\n"
+                self.assert_bounded_scan(
+                    text,
+                    lambda value: [(link.line, link.destination) for link in parse_links(value, self.source)],
+                    [(1, "README.md")] * (2 * count),
+                )
+
+
 class TargetNormalizationTests(unittest.TestCase):
     def setUp(self) -> None:
         self.root = _new_temp_root("pingforit-doc-normalize-")
@@ -519,6 +825,35 @@ class TargetNormalizationTests(unittest.TestCase):
 
 
 class HeadingAnchorTests(unittest.TestCase):
+    def test_definition_like_code_remains_part_of_setext_heading_display(self) -> None:
+        text = (
+            '[a][ref](README.md "literal `")\n'
+            '[ghost]: missing-review-reference-target.md\n'
+            '`\n---\n\n[ghost]\n\n[ref]: README.md\n\n[ghost]: README.md\n'
+        )
+        self.assertEqual(
+            heading_anchors(text),
+            {"areadmemd-literal--ghost-missing-review-reference-targetmd"},
+        )
+
+    def test_speculative_multiline_title_does_not_expose_fenced_headings(self) -> None:
+        text = '[x](<> "\n~~~\n")\n# Fenced\n~~~\n# Real\n'
+        self.assertEqual(heading_anchors(text), {"real"})
+
+    def test_thematic_breaks_do_not_become_setext_heading_text(self) -> None:
+        for marker in ("***", "___", "* * *", "_ _ _", "---", "- - -"):
+            with self.subTest(marker=marker):
+                text = f"[jump](#heading)\n\n{marker}\nHeading\n-------\n"
+                self.assertEqual(heading_anchors(text), {"heading"})
+
+        self.assertEqual(heading_anchors("First\nsecond\n-------\n"), {"first-second"})
+        # An unspaced dash underline after a paragraph is Setext, not a break.
+        self.assertEqual(heading_anchors("First\n---\nHeading\n-------\n"), {"first", "heading"})
+
+    def test_heading_link_titles_keep_literal_backticks_out_of_display_text(self) -> None:
+        text = '# [one](target.md "literal `") [two](target.md "literal `")\n'
+        self.assertEqual(heading_anchors(text), {"one-two"})
+
     def test_atx_setext_display_code_and_unicode_headings(self) -> None:
         text = (
             "# Simple ATX\n"
@@ -928,6 +1263,119 @@ class BrokenLinkCliTests(_CliFixture):
 
 
 class CombinedRegressionCliTests(_CliFixture):
+    def test_hidden_reference_definition_does_not_cause_false_broken_or_duplicate_results(self) -> None:
+        self.write_target("docs/README.md")
+        self.write_doc(
+            "page.md",
+            '[a][ref](README.md "literal `")\n'
+            '[ghost]: missing-review-reference-target.md\n'
+            '`\n\n[ghost]\n\n[ref]: README.md\n\n[ghost]: README.md\n',
+        )
+        self.init_git()
+        broken = self.broken_report(expected_exit=0)
+        self.assertEqual(broken.local_links, 2)
+        self.assertEqual(broken.problems, [])
+        for arguments in ((), ("--ignore-chapter-anchors",)):
+            with self.subTest(arguments=arguments):
+                duplicates = self.duplicate_report(*arguments)
+                self.assertEqual(duplicates.document_links, 2)
+                self.assertEqual(duplicates.rows, [("docs/page.md", "docs/README.md", 2, (1, 5))])
+
+    def test_reference_parentheses_leave_code_hidden_in_both_reports(self) -> None:
+        self.write_target("docs/README.md")
+        self.init_git()
+        for use in ("[full][ref]", "[ref][]"):
+            with self.subTest(use=use):
+                self.write_doc(
+                    "page.md",
+                    f'{use}(target.md "literal `") '
+                    '[hidden](missing-review-boundary-target.md) ` [real](README.md)\n'
+                    '\n[ref]: README.md\n',
+                )
+                broken = self.broken_report(expected_exit=0)
+                self.assertEqual(broken.local_links, 2)
+                self.assertEqual(broken.problems, [])
+                duplicates = self.duplicate_report()
+                self.assertEqual(duplicates.document_links, 2)
+                self.assertEqual(duplicates.rows, [("docs/page.md", "docs/README.md", 2, (1, 1))])
+
+    def test_speculative_title_preserves_post_fence_link_and_heading_checks(self) -> None:
+        self.write_target("docs/README.md")
+        self.write_doc(
+            "page.md",
+            '[x](<> "\n~~~\n")\n[fenced](README.md)\n# Fenced\n~~~\n'
+            '[real](missing-review-boundary-target.md) [hidden-heading](#fenced) [heading](#real)\n'
+            '\n# Real\n',
+        )
+        self.init_git()
+        broken = self.broken_report(expected_exit=1)
+        self.assertEqual(
+            _problems_by_original(broken),
+            {
+                "missing-review-boundary-target.md": (
+                    "docs/page.md:7", "docs/missing-review-boundary-target.md", "missing target"
+                ),
+                "#fenced": ("docs/page.md:7", "docs/page.md#fenced", "missing anchor #fenced"),
+            },
+        )
+
+    def test_literal_backticks_in_titles_do_not_hide_missing_links_or_duplicates(self) -> None:
+        self.write_target("docs/README.md")
+        self.write_doc(
+            "page.md",
+            '[ok](README.md "literal `") [bad](missing.md) [end](README.md "literal `")\n',
+        )
+        self.init_git()
+
+        broken = self.broken_report(expected_exit=1)
+        self.assertEqual(broken.local_links, 3)
+        self.assertEqual(
+            broken.problems,
+            [("docs/page.md:1", "missing.md", "docs/missing.md", "missing target")],
+        )
+        duplicates = self.duplicate_report()
+        self.assertEqual(duplicates.document_links, 3)
+        self.assertEqual(duplicates.rows, [("docs/page.md", "docs/README.md", 2, (1, 1))])
+
+    def test_unicode_reports_are_complete_with_restricted_child_stdout_encoding(self) -> None:
+        original = "missing.md#héading-ünïcode"
+        self.write_doc("page.md", f"[a]({original}) [b]({original})\n")
+        self.init_git()
+
+        for encoding in ("cp936:strict", "ascii:strict"):
+            with self.subTest(encoding=encoding):
+                environment = {"PYTHONIOENCODING": encoding}
+                broken = self.broken_report(expected_exit=1, environment=environment)
+                self.assertEqual(broken.local_links, 2)
+                self.assertEqual(
+                    broken.problems,
+                    [("docs/page.md:1", original, f"docs/{original}", "missing target")] * 2,
+                )
+                process = self.run_cli("count_duplicate_links.py", environment=environment)
+                self.assertEqual(process.returncode, 0, process.stderr)
+                self.assertEqual(process.stderr, "")
+                duplicates = _parse_duplicate_report(self, process.stdout)
+                self.assertEqual(duplicates.document_links, 2)
+                self.assertEqual(duplicates.rows, [("docs/page.md", f"docs/{original}", 2, (1, 1))])
+
+    def test_thematic_break_before_setext_heading_accepts_valid_fragment(self) -> None:
+        self.write_doc("page.md", "[jump](#heading)\n\n***\nHeading\n-------\n")
+        self.init_git()
+        broken = self.broken_report(expected_exit=0)
+        self.assertEqual(broken.local_links, 1)
+        self.assertEqual(broken.problems, [])
+
+    def test_empty_reference_destinations_are_checked_and_grouped_as_self_links(self) -> None:
+        self.write_doc("page.md", "[a]() [b][ref] [ref][] [ref]\n\n[ref]: <>\n")
+        self.init_git()
+        broken = self.broken_report(expected_exit=0)
+        self.assertEqual(broken.local_links, 4)
+        self.assertEqual(broken.problems, [])
+        duplicates = self.duplicate_report()
+        self.assertEqual(duplicates.document_links, 4)
+        self.assertEqual(duplicates.extra_occurrences, 3)
+        self.assertEqual(duplicates.rows, [("docs/page.md", "docs/page.md", 4, (1, 1, 1, 1))])
+
     def test_code_span_and_indentation_regressions_report_only_real_links(self) -> None:
         self.write_target("docs/ok.md", "# Ok\n")
         self.write_doc(
@@ -1108,6 +1556,35 @@ class GitIgnoreTests(_CliFixture):
 
 
 class CliFailureModeTests(_CliFixture):
+    def test_imported_main_preserves_caller_owned_output_streams(self) -> None:
+        self.write_doc("page.md", "[self]()\n")
+        self.init_git()
+        for module in (count_duplicate_links, broken_link_check):
+            with self.subTest(module=module.__name__):
+                output = io.TextIOWrapper(io.BytesIO(), encoding="ascii", errors="strict")
+                self.addCleanup(output.close)
+                errors = io.StringIO()
+                with patch.object(module, "repository_root", return_value=self.root):
+                    with redirect_stdout(output), redirect_stderr(errors):
+                        self.assertEqual(module.main([]), 0)
+                        self.assertIs(sys.stdout, output)
+                        self.assertIs(sys.stderr, errors)
+                self.assertEqual(output.encoding, "ascii")
+                self.assertEqual(output.errors, "strict")
+                output.flush()
+                self.assertIn(b"ScannedFiles: 1", output.buffer.getvalue())
+                self.assertEqual(errors.getvalue(), "")
+
+    def test_unicode_argument_errors_preserve_stderr_with_restricted_encoding(self) -> None:
+        for script in ("count_duplicate_links.py", "broken_link_check.py"):
+            with self.subTest(script=script):
+                process = self.run_cli(
+                    script, "--ünïcode", environment={"PYTHONIOENCODING": "ascii:strict"}
+                )
+                self.assertEqual(process.returncode, 2)
+                self.assertEqual(process.stdout, "")
+                self.assertIn("unrecognized arguments: --ünïcode", process.stderr)
+
     def test_unknown_options_exit_two_for_both_tools(self) -> None:
         for script in ("count_duplicate_links.py", "broken_link_check.py"):
             with self.subTest(script=script):
