@@ -45,8 +45,10 @@ class InventoryPooledBackendTest {
 		java.util.function.Consumer<UUID> duringRead = owner -> {};
 		Runnable metadataCallback = () -> {};
 		int deniedReads;
-		Resolver(Block block) {
-			world = InventoryCertifiedReadTest.pair(block);
+		Resolver(Block block) { this(block, true); }
+		Resolver(Block block, boolean paired) {
+			world = paired ? InventoryCertifiedReadTest.pair(block) : new InventoryCertifiedReadTest.World();
+			if (!paired) world.put(BlockPos.ZERO, block.defaultBlockState());
 			for (var entity : world.entities.values()) for (int slot = 0; slot < 27; slot++) ((ChestBlockEntity) entity).setItem(slot, new ItemStack(Items.STONE, slot + 1));
 		}
 		@Override public InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput input) { return InventoryMinecraftSources.resolutionValidationCost(input); }
@@ -323,6 +325,108 @@ class InventoryPooledBackendTest {
 			for (var endpoint : f.clients.values()) { assertTrue(endpoint.tracking(marker).complete()); assertEquals(756, endpoint.tracking(marker).entries().getFirst().count()); }
 			assertTrue(f.clients.get(other).preview(otherRequest).completeScan()); assertEquals(819, previewStone(f.clients.get(other).preview(otherRequest)));
 			assertEquals(756, previewStone(f.clients.get(owner).preview(request))); assertEquals(108, reads);
+		}
+	}
+	private static @Unmodifiable List<MarkerId> ownerOnlyTrackingPair(InventoryPublicationBackendFixture fixture) {
+		fixture.audience = owner -> List.of(owner);
+		for (UUID owner : List.of(InventoryPublicationBackendFixture.A, InventoryPublicationBackendFixture.B)) fixture.open(owner, target(Blocks.CHEST), BlockFace.NORTH, 0);
+		for (int tick = 1; tick <= 20; tick++) fixture.backend.tick(tick, fixture.settings);
+		var markers = new java.util.ArrayList<MarkerId>();
+		for (UUID owner : List.of(InventoryPublicationBackendFixture.A, InventoryPublicationBackendFixture.B)) {
+			markers.add(fixture.select(owner, 1, 20)); fixture.closePreview(owner, 1, 20);
+		}
+		for (int tick = 21; tick <= 25; tick++) fixture.backend.tick(tick, fixture.settings);
+		for (int index = 0; index < markers.size(); index++) {
+			UUID owner = index == 0 ? InventoryPublicationBackendFixture.A : InventoryPublicationBackendFixture.B;
+			assertEquals(List.of(owner), fixture.markers.allMarkers().get(index).recipients());
+			assertTrue(fixture.clients.get(owner).tracking(markers.get(index)).complete());
+			assertEquals(378, fixture.clients.get(owner).tracking(markers.get(index)).entries().getFirst().count());
+			assertEquals(32L, state(trackingState(fixture, markers.get(index)), "nextSweep"));
+		}
+		assertSame(state(state(trackingState(fixture, markers.getFirst()), "consumer"), "completedRound"),
+			state(state(trackingState(fixture, markers.getLast()), "consumer"), "completedRound"));
+		return List.copyOf(markers);
+	}
+	@ParameterizedTest @CsvSource({"false", "true"})
+	void recipientlessRecurringPeerCannotStrandSuccessorsBeforeOrAfterGrantAndResumesOnReauthorization(boolean revokeAfterGrant) throws ReflectiveOperationException {
+		var resolver = new Resolver(Blocks.CHEST, false); var settings = settings(false, false);
+		settings.setPhysicalSlotsPerTick(IntLimit.finite(16)); settings.validate();
+		try (var f = new InventoryPublicationBackendFixture(resolver, settings, TargetKey.from(target(Blocks.CHEST)))) {
+			@Unmodifiable List<MarkerId> ids = ownerOnlyTrackingPair(f); MarkerId a = ids.getFirst(), b = ids.getLast();
+			UUID owner = InventoryPublicationBackendFixture.A, suspended = InventoryPublicationBackendFixture.B;
+			var aClient = java.util.Objects.requireNonNull(f.clients.get(owner)); var bClient = java.util.Objects.requireNonNull(f.clients.get(suspended));
+			Object bLease = trackingState(f, b), bConsumer = state(bLease, "consumer");
+			Object original = state(bConsumer, "completedRound"), evidence = state(bLease, "completedEvidence");
+			long baseline = aClient.tracking(a).baselineId(), revision = (Long) state(trackingState(f, a), "revision");
+			boolean[] permitted = {true}; int[] grants = {0};
+			// This is inventory-field permission, not source-read authority or marker removal.
+			f.currentPolicy = player -> Optional.of(new InventoryBackend.Policy(100, 1,
+				player.equals(suspended) && !permitted[0] ? java.util.Set.of() : java.util.Set.of("entity_block")));
+			int forbiddenStart = f.frames.size();
+			if (!revokeAfterGrant) permitted[0] = false;
+			f.backend.tick(26, settings); // suspension is observed while both completed trackers are waiting for cadence
+			for (int tick = 27; tick < 32; tick++) f.backend.tick(tick, settings);
+			if (revokeAfterGrant) forbiddenStart = f.frames.size();
+			((ChestBlockEntity) java.util.Objects.requireNonNull(resolver.world.entities.get(BlockPos.ZERO))).setItem(0, new ItemStack(Items.STONE, 7));
+			if (revokeAfterGrant) resolver.duringRead = reader -> {
+				if (reader.equals(owner) && permitted[0]) {
+					assertNotNull(stateField(bConsumer, "successorEntitlement"), "authorized cadence-wait peer was granted continuity before the callback");
+					grants[0]++; permitted[0] = false;
+				}
+			};
+			else resolver.duringRead = reader -> {
+				if (reader.equals(owner)) assertNull(stateField(bConsumer, "successorEntitlement"), "already-suspended peer must be excluded before its next Backend turn could release a mistaken grant");
+			};
+			var order = InventoryBackend.class.getDeclaredField("trackingCursor"); order.setAccessible(true); order.setInt(f.backend, 0);
+			f.backend.tick(32, settings); // A grants first; B observes its audience suspension later in this same pass
+			resolver.duringRead = reader -> {};
+			assertEquals(revokeAfterGrant ? 1 : 0, grants[0]);
+			Object replacement = state(state(trackingState(f, a), "consumer"), "round");
+			assertNotSame(original, replacement); assertNull(stateField(bConsumer, "successorEntitlement"));
+			assertEquals(0, state(replacement, "incomingEntitlements"));
+			assertSame(original, state(bConsumer, "completedRound")); assertSame(evidence, state(bLease, "completedEvidence"));
+			assertEquals(27, state(bConsumer, "cursor")); assertEquals(false, state(bConsumer, "scanning"));
+			assertEquals(27, ((Map<?, ?>) state(original, "paid")).get(state(bConsumer, "subject")), "suspension neither releases nor refunds the accepted prefix");
+			assertEquals(2, f.markers.size()); assertTrue(f.backend.tracksInventory(b));
+			f.backend.tick(33, settings);
+			assertTrue(aClient.tracking(a).complete()); assertEquals(384, aClient.tracking(a).entries().getFirst().count());
+			assertTrue(f.runtime.probe((InventoryRuntime.Consumer) bConsumer).orElseThrow(), "the unlocked source remains readable despite the absent inventory audience");
+			((ChestBlockEntity) java.util.Objects.requireNonNull(resolver.world.entities.get(BlockPos.ZERO))).setItem(0, new ItemStack(Items.STONE, 11));
+			for (int tick = 34; tick <= 75; tick++) f.backend.tick(tick, settings);
+			assertTrue((Long) state(trackingState(f, a), "revision") >= revision + 4, "A completes R1 and multiple later replacements while B stays suspended");
+			assertEquals(388, aClient.tracking(a).entries().getFirst().count()); assertEquals(baseline, aClient.tracking(a).baselineId());
+			assertSame(original, state(bConsumer, "completedRound")); assertSame(evidence, state(bLease, "completedEvidence"));
+			for (int index = forbiddenStart; index < f.frames.size(); index++) if (f.recipients.get(index).equals(suspended))
+				assertFalse(InventorySyncPublisher.requiresSource(f.frames.get(index)), "no quantity, success control or heartbeat reaches the unauthorized owner-only audience");
+			permitted[0] = true;
+			for (int tick = 76; tick <= 120; tick++) f.backend.tick(tick, settings);
+			assertTrue(bClient.tracking(b).complete()); assertEquals(388, bClient.tracking(b).entries().getFirst().count());
+			assertTrue((Long) state(bLease, "revision") > 1); assertEquals(baseline, aClient.tracking(a).baselineId());
+			for (int index = 0; index < f.frames.size(); index++) if (f.frames.get(index).markerId() != null)
+				assertEquals(f.frames.get(index).markerId().equals(a) ? owner : suspended, f.recipients.get(index), "physical sharing does not widen either frozen audience");
+			assertTrue(f.frames.stream().noneMatch(packet -> packet.status() == InventoryS2CPacket.Status.INVALID));
+			for (var marker : f.markers.allMarkers()) assertEquals(10000, marker.expiresAtTick());
+			int audits = resolver.world.audits; f.backend.tick(10000, settings); f.backend.tick(10001, settings);
+			assertFalse(f.backend.tracksInventory(a)); assertFalse(f.backend.tracksInventory(b)); assertEquals(audits, resolver.world.audits);
+			assertEquals(0, resolver.deniedReads); assertEquals(0, f.runtime.memory().reserved());
+		}
+	}
+	@Test void authorizedCadenceWaitPeerStillAdoptsCompletedSuccessorWithoutASecondPhysicalSweep() throws ReflectiveOperationException {
+		var resolver = new Resolver(Blocks.CHEST, false); var settings = settings(false, false);
+		settings.setPhysicalSlotsPerTick(IntLimit.finite(16)); settings.validate();
+		try (var f = new InventoryPublicationBackendFixture(resolver, settings, TargetKey.from(target(Blocks.CHEST)))) {
+			@Unmodifiable List<MarkerId> ids = ownerOnlyTrackingPair(f);
+			Object slow = trackingState(f, ids.getLast()), slowConsumer = state(slow, "consumer");
+			var due = slow.getClass().getDeclaredField("nextSweep"); due.setAccessible(true); due.setLong(slow, 37);
+			for (int tick = 26; tick <= 33; tick++) f.backend.tick(tick, settings);
+			Object successor = state(slowConsumer, "successorEntitlement");
+			assertEquals(false, state(slowConsumer, "scanning")); assertEquals(1, state(successor, "incomingEntitlements"));
+			assertEquals(CaptureResult.Completeness.COMPLETE, ((CaptureResult) state(successor, "last")).completeness());
+			int audits = resolver.world.audits;
+			for (int tick = 34; tick <= 37; tick++) f.backend.tick(tick, settings);
+			assertSame(successor, state(slowConsumer, "completedRound")); assertNull(stateField(slowConsumer, "successorEntitlement"));
+			assertEquals(audits, resolver.world.audits); assertEquals(0, physical(f.runtime));
+			assertEquals(3L, state(slow, "revision")); assertEquals(378, f.clients.get(InventoryPublicationBackendFixture.B).tracking(ids.getLast()).entries().getFirst().count());
 		}
 	}
 	@ParameterizedTest @CsvSource({"3", "16"})

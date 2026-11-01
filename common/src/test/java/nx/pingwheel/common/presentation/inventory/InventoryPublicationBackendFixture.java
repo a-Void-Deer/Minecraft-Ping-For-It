@@ -26,6 +26,7 @@ import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Real backend ingress and encoded client endpoints shared by the chest and loader-native Vault oracles. */
@@ -45,6 +46,7 @@ public final class InventoryPublicationBackendFixture implements AutoCloseable, 
 	public java.util.function.Consumer<InventoryS2CPacket> measured = packet -> {};
 	public java.util.function.Consumer<InventoryS2CPacket> handed = packet -> {};
 	public java.util.function.Function<UUID, Optional<InventoryBackend.Policy>> currentPolicy = player -> Optional.of(new InventoryBackend.Policy(100, 1, Set.of("entity_block")));
+	public java.util.function.Function<UUID, @Unmodifiable List<UUID>> audience = player -> List.of(A, B);
 	public java.util.function.BiPredicate<UUID, MarkerId> known = (player, marker) -> true;
 	public java.util.function.BiConsumer<SyncPublisher.Context, InventoryS2CPacket> beforeValidation = (context, packet) -> {};
 	public java.util.function.BiPredicate<SyncPublisher.Context, InventoryS2CPacket> blocked = (context, packet) -> false;
@@ -61,11 +63,12 @@ public final class InventoryPublicationBackendFixture implements AutoCloseable, 
 	@Override public boolean annotationAllowed(InventorySourceInput input, String pingType) { return pingType.equals("danger"); }
 	@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
 		var type = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
-		@Nullable var rejection = admission.prepare(frozen.target(), group, type.id(), List.of(A, B));
+		@Unmodifiable List<UUID> recipients = List.copyOf(audience.apply(player));
+		@Nullable var rejection = admission.prepare(frozen.target(), group, type.id(), recipients);
 		if (rejection != null) return new InventoryBackend.Created(null, rejection);
-		return new InventoryBackend.Created(markers.create(player, frozen.target(), group, type, type.defaultPingType(), new MarkerAnchor(0, 0, 0), 0, 10000, List.of(A, B)).marker(), null);
+		return new InventoryBackend.Created(markers.create(player, frozen.target(), group, type, type.defaultPingType(), new MarkerAnchor(0, 0, 0), 0, 10000, recipients).marker(), null);
 	}
-	@Override public void publishCreated(InventoryBackend.Created created) { for (var client : clients.values()) client.markerCreated(MarkerSnapshot.from(created.marker())); }
+	@Override public void publishCreated(InventoryBackend.Created created) { for (UUID recipient : created.marker().recipients()) clients.get(recipient).markerCreated(MarkerSnapshot.from(created.marker())); }
 	@Override public boolean knows(UUID player, MarkerId marker) { return known.test(player, marker) && markers.allMarkers().stream().anyMatch(value -> value.id().equals(marker) && value.recipients().contains(player)); }
 	@Override public boolean authorized(SyncPublisher.Context context) { return true; }
 	@Override public int encodedBytes(InventoryS2CPacket packet) { throw new AssertionError("production adapter must forward effective-budget measurement"); }

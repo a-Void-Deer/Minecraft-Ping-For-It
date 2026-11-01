@@ -106,7 +106,7 @@ public final class InventoryRuntime implements AutoCloseable {
 	public final class Consumer implements AutoCloseable {
 		private final long diagnosticId = ++consumerSequence;
 		private final InventoryBudgetDelayState admissionDelay, probeDelay, logicalDelay, projectionDelay;
-		private boolean monitoringActive = true;
+		private boolean serviceableDemand = true;
 		private boolean scanning = true;
 		private boolean zeroAdmissionRefused;
 		private boolean publicationRequired;
@@ -138,14 +138,14 @@ public final class InventoryRuntime implements AutoCloseable {
 		public InventorySourceInput input() { return input; }
 		void requirePublicationEvidence() { publicationRequired = true; }
 		public boolean invalidated() { return invalidObservation != null; }
-		/** No source access: audience suspension preserves replay/evidence, but contributes no live admission demand. */
-		void monitoringActive(boolean active) {
-			if (monitoringActive != active) {
+		/** No source access: suspension preserves paid replay/evidence, but cannot reserve future observations. */
+		void serviceableDemand(boolean active) {
+			if (serviceableDemand != active) {
 				removeScanDemand(this);
-				monitoringActive = active;
+				serviceableDemand = active;
 				addScanDemand(this);
 			}
-			if (!active) cancelDelays();
+			if (!active) { releaseEntitlement(this); cancelDelays(); }
 		}
 		void cancelDelays() {
 			admissionDelay.cancel(); probeDelay.cancel(); logicalDelay.cancel(); projectionDelay.cancel();
@@ -576,8 +576,10 @@ public final class InventoryRuntime implements AutoCloseable {
 		}
 		round.physicalDelay.observe(sink, cycle(round.physicalModule), tick, reasons,
 			() -> new WorkItem("round/" + round.sequence + "/physical", "Inventory round " + round.sequence + " physical capture/decode"),
-			() -> requestedSlots < 0 || round.last == null || round.last.coverage().expected().isEmpty()
-				? Quantity.unknown() : Quantity.of(Unit.PHYSICAL_SLOT, Math.max(0, round.last.coverage().expected().getAsLong() - round.size())));
+			() -> requestedSlots < 0 ? Quantity.unknown() : round.sweep != null
+				? Quantity.of(Unit.PHYSICAL_SLOT, Math.max(0, round.sweep.proof.graph().slots() - round.size()))
+				: round.last == null || round.last.coverage().expected().isEmpty() ? Quantity.unknown()
+				: Quantity.of(Unit.PHYSICAL_SLOT, Math.max(0, round.last.coverage().expected().getAsLong() - round.size())));
 	}
 	private void physicalProgress(Round round) {
 		if (round.physicalDelay != null) round.physicalDelay.progress(cycle(round.physicalModule));
@@ -592,7 +594,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			| (physical.remaining(InventorySourceAccess.PROVIDER_WORK) < work ? Reason.PROVIDER_WORK.bit() : 0);
 	}
 	boolean delayed(Module module) {
-		for (Consumer consumer : consumers) if (consumer.monitoringActive && !consumer.invalidated()) {
+		for (Consumer consumer : consumers) if (consumer.serviceableDemand && !consumer.invalidated()) {
 			if (module(consumer) == module && (consumer.admissionDelay.outstanding() || consumer.probeDelay.outstanding()
 				|| consumer.logicalDelay.outstanding() || consumer.projectionDelay.outstanding())) return true;
 			Round round = consumer.round;
@@ -601,7 +603,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		return false;
 	}
 	boolean eligible(Module module) {
-		for (Consumer consumer : consumers) if (consumer.monitoringActive && !consumer.invalidated()) {
+		for (Consumer consumer : consumers) if (consumer.serviceableDemand && !consumer.invalidated()) {
 			if (module(consumer) == module && (consumer.admissionDelay.eligible() || consumer.probeDelay.eligible()
 				|| consumer.logicalDelay.eligible() || consumer.projectionDelay.eligible())) return true;
 			Round round = consumer.round;
@@ -1325,7 +1327,7 @@ public final class InventoryRuntime implements AutoCloseable {
 	private boolean pooledCandidate(Consumer consumer, Round round, PooledKey lookup, InventorySharedRead.Proof proof, SourceKey key) {
 		if (round.sweep == null || !shareable(consumer, round) || !round.lookupKey.equals(lookup) || !round.sweep.proof.equals(proof)) return false;
 		if (consumer.subject instanceof TrackingSubject || round.activeTracking != 0) return true;
-		for (Consumer peer : consumers) if (!peer.closed && peer.scanning && peer.monitoringActive && peer.round == round && peer.scanningAssociation != null
+		for (Consumer peer : consumers) if (!peer.closed && peer.scanning && peer.serviceableDemand && peer.round == round && peer.scanningAssociation != null
 			&& peer.scanningAssociation.lease.handle.descriptor().key().equals(key)) return true;
 		return false;
 	}
@@ -1880,9 +1882,9 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (certifiedPooling && previous != null && previous != round && !previous.sealed && previous.successorSequence == 0 && previous.policy.equals(round.policy)
 			&& (round.sweep == null || !round.sealed && (round.references == 0 || activePooledRound(round)))) {
 			previous.successorSequence = round.sequence;
-			// Preview owns one initial observation, not a future sweep it will never consume.
+			// Recurring peers remain demand during cadence waits, but a suspended audience cannot consume a successor.
 			for (Consumer peer : consumers) if (peer.subject instanceof TrackingSubject
-				&& (peer.completedRound == previous || peer.round == previous) && peer.successorEntitlement == null && !peer.closed
+				&& peer.serviceableDemand && (peer.completedRound == previous || peer.round == previous) && peer.successorEntitlement == null && !peer.closed
 				&& round.sequence > peer.lastAssociatedSequence && round.sequence >= peer.recoveryFloor) {
 				peer.successorEntitlement = round;
 				round.references++; round.scanners++; round.incomingEntitlements++;
@@ -1906,7 +1908,7 @@ public final class InventoryRuntime implements AutoCloseable {
 	private static void removeScanDemand(Consumer consumer) { changeScanDemand(consumer, -1); }
 	private static void changeScanDemand(Consumer consumer, int delta) {
 		@Nullable Round round = consumer.round;
-		if (round == null || round.sweep == null || !consumer.scanning || !consumer.monitoringActive) return;
+		if (round == null || round.sweep == null || !consumer.scanning || !consumer.serviceableDemand) return;
 		round.activeScans += delta;
 		if (consumer.subject instanceof TrackingSubject) round.activeTracking += delta;
 	}
@@ -1924,12 +1926,17 @@ public final class InventoryRuntime implements AutoCloseable {
 		InventoryItemCodec.Catalog catalog = java.util.Objects.requireNonNull(nativeCatalog(round));
 		int bound = (int) Math.min(available, Math.min(physicalRemaining(), association.expected.graph().slots() - journal.endSlot()));
 		bound = Math.min(bound, InventorySourceAccess.MAX_STEP);
+		int limitingReasons = physicalRemaining() == 0 ? Reason.PHYSICAL_SLOTS.bit() : 0;
 		// Admission shrinks to a serviceable page; do not wait for a page whose metadata cost exceeds a fresh tick.
-		while (bound > 0 && (stepMemoryUpperBound(consumer, bound) > memory.remaining()
-			|| association.lease.pageCosts[bound].workUnits() + checkedMultiply(bound, InventoryItemBudget.workUpperBound(catalog.displayBytes())) > physical.remaining(ITEM_WORK)
-			|| (bound + 1L) * InventorySourceAccess.PROVIDER_CALL_WORK > physical.remaining(InventorySourceAccess.PROVIDER_WORK))) bound--;
+		while (bound > 0) {
+			int reasons = (stepMemoryUpperBound(consumer, bound) > memory.remaining() ? Reason.MEMORY.bit() : 0)
+				| (association.lease.pageCosts[bound].workUnits() + checkedMultiply(bound, InventoryItemBudget.workUpperBound(catalog.displayBytes())) > physical.remaining(ITEM_WORK)
+					|| (bound + 1L) * InventorySourceAccess.PROVIDER_CALL_WORK > physical.remaining(InventorySourceAccess.PROVIDER_WORK) ? Reason.PROVIDER_WORK.bit() : 0);
+			if (reasons == 0) break;
+			limitingReasons = reasons; bound--;
+		}
 		if (bound == 0 && journal.endSlot() != association.expected.graph().slots()) {
-			physicalDelay(consumer, Reason.MEMORY.bit() | Reason.PROVIDER_WORK.bit(), -1); return false;
+			physicalDelay(consumer, limitingReasons, available); return false;
 		}
 		var retained = memory.tryReserve(checkedAdd(nativeRetained(round), journal.batchAllocationUpperBound(bound) + checkedMultiply(bound, nativeGrowth(round))));
 		if (retained.isEmpty()) return false;

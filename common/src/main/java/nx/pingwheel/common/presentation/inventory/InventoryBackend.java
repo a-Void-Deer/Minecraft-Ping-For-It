@@ -780,7 +780,7 @@ public final class InventoryBackend implements AutoCloseable {
 		for (Tracking lease : leases) {
 			lease.checkedTick = lease.invalid ? tick : -1; // already-withdrawn INVALID control needs no recovery read grant
 			syncRecipients(lease);
-			lease.consumer.monitoringActive(!lease.recipients.isEmpty());
+			lease.consumer.serviceableDemand(!lease.recipients.isEmpty());
 			if (lease.recipients.isEmpty()) {
 				lease.projectionDelay.cancel();
 				if (!lease.audienceDemand) lease.registrationDelay.cancel();
