@@ -4,8 +4,12 @@ import java.util.OptionalLong;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
-import nx.pingwheel.common.platform.lookupfixturesegmentlookupfixturesegmentlookupfixturesegmentlookupfixturesegmentlookupfixturesegmentlookupfixturesegmentlookupfixturesegmentlookupfixturesegmentlookupfixturesegmentlookupfixturesegmentlookupfixturesegmentlookupfixturesegment.authorityfixturesegmauthorityfixturesegmauthorityfixturesegmauthorityfixturesegmauthorityfixturesegmauthorityfixturesegmauthorityfixturesegmauthorityfixturesegmauthorityfixturesegmauthorityfixturesegmauthorityfixturesegmauthorityfixturesegm.RefusalFixture;
+import nx.pingwheel.common.platform.lookup.RefusalFixture;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.Opcodes;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PlatformInventoryResidentTest {
@@ -129,7 +133,31 @@ class PlatformInventoryResidentTest {
 		@Override public String toString() { return "override"; }
 	}
 
-	@Test void methodOwnershipSeparatesProvenDeclarationsFromBoundedRefusal() {
+	@NotNullByDefault
+	private static final class RefusalFixtureLoader extends ClassLoader {
+		private RefusalFixtureLoader() { super(RefusalFixture.class.getClassLoader()); }
+
+		private RefusalFixture create() throws ReflectiveOperationException {
+			String prefix = RefusalFixture.class.getName() + "$";
+			String name = prefix + "x".repeat(IPlatformInventoryService.ResidentReads.MAX_TYPE_NAME_CHARS + 1 - prefix.length());
+			String parent = RefusalFixture.class.getName().replace('.', '/');
+			var writer = new ClassWriter(0);
+			writer.visit(Opcodes.V21, Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL | Opcodes.ACC_SUPER,
+				name.replace('.', '/'), null, parent, null);
+			var constructor = writer.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null);
+			constructor.visitCode();
+			constructor.visitVarInsn(Opcodes.ALOAD, 0);
+			constructor.visitMethodInsn(Opcodes.INVOKESPECIAL, parent, "<init>", "()V", false);
+			constructor.visitInsn(Opcodes.RETURN);
+			constructor.visitMaxs(1, 1);
+			constructor.visitEnd();
+			writer.visitEnd();
+			byte @Unmodifiable [] bytes = writer.toByteArray();
+			return defineClass(name, bytes, 0, bytes.length).asSubclass(RefusalFixture.class).getConstructor().newInstance();
+		}
+	}
+
+	@Test void methodOwnershipSeparatesProvenDeclarationsFromBoundedRefusal() throws ReflectiveOperationException {
 		assertEquals(IPlatformInventoryService.ResidentReads.MethodOwnership.PROVEN_INHERITED,
 			IPlatformInventoryService.ResidentReads.methodOwnership(new Object(), Object.class, "toString"));
 		assertEquals(IPlatformInventoryService.ResidentReads.MethodOwnership.PROVEN_INHERITED,
@@ -137,9 +165,11 @@ class PlatformInventoryResidentTest {
 		assertEquals(IPlatformInventoryService.ResidentReads.MethodOwnership.PROVEN_OVERRIDE,
 			IPlatformInventoryService.ResidentReads.methodOwnership(new Overriding(), Object.class, "toString"));
 		assertFalse(IPlatformInventoryService.ResidentReads.inherits(new Overriding(), Object.class, "toString"));
-		var overlong = new RefusalFixture();
+		var overlong = new RefusalFixtureLoader().create();
 		assertTrue(overlong.getClass().getName().length() > IPlatformInventoryService.ResidentReads.MAX_TYPE_NAME_CHARS,
 			"the fixture really exceeds the bounded lookup shape");
+		assertSame(Object.class, overlong.getClass().getMethod("toString").getDeclaringClass(),
+			"the overlong fixture inherits the original declaration without overriding it");
 		assertEquals(IPlatformInventoryService.ResidentReads.MethodOwnership.UNCLASSIFIED,
 			IPlatformInventoryService.ResidentReads.methodOwnership(overlong, Object.class, "toString"));
 		assertFalse(IPlatformInventoryService.ResidentReads.inherits(overlong, Object.class, "toString"),
