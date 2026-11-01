@@ -1194,7 +1194,7 @@ public final class InventoryBackend implements AutoCloseable {
 				invalidatePreview(sessions.get(player), preview); return;
 			}
 			preview.last = new PublicationObservation(result, observation.get().inventorySweepEvidence()); preview.terminal = true; preview.revision++;
-			preview.samplingDelay.cancel(); preview.consumer.stopMonitoringScan();
+			preview.samplingDelay.cancel(); preview.consumer.stopScanning();
 			publisher.status(preview.context, InventoryS2CPacket.Status.INCOMPLETE);
 			publishPreview(preview);
 			return;
@@ -1282,11 +1282,11 @@ public final class InventoryBackend implements AutoCloseable {
 		preview.last = new PublicationObservation(preview.terminal ? new CaptureResult(result.payload(), result.coverage(), result.availability(),
 				CaptureResult.Completeness.INCOMPLETE, result.consistency(), result.sourceVersion(), result.nextCursor()) : result,
 				observation.get().inventorySweepEvidence());
+			preview.terminal |= result.completeness() != CaptureResult.Completeness.CONTINUE;
+			if (preview.terminal) preview.consumer.stopScanning();
 			if (preview.publicationEvidence == null) preview.publicationEvidence = runtime.publicationEvidence(preview.consumer, InventoryRuntime.EvidenceScope.SCANNING).orElse(null);
 			preview.revision++;
 			publishPreview(preview);
-			preview.terminal |= result.completeness() != CaptureResult.Completeness.CONTINUE;
-			if (preview.terminal) preview.consumer.stopMonitoringScan();
 		} finally { if (!retained) held.get().close(); }
 	}
 	/** Current detached versions; old selection references may still own older JSON. */
@@ -1399,12 +1399,12 @@ public final class InventoryBackend implements AutoCloseable {
 			}
 		} catch (ArithmeticException overflow) {
 			InventoryCaptureDiagnostics.warn("tracking-count", lease.input, null, () -> "reason=count-overflow", overflow);
-			lease.consumer.stopMonitoringScan(); lease.scanning = false; lease.nextSweep = tick + settings.getTracking().getPeriodTicks();
+			lease.consumer.stopScanning(); lease.scanning = false; lease.nextSweep = tick + settings.getTracking().getPeriodTicks();
 			incompleteTracking(lease);
 			return;
 		}
 		if (result.completeness() == CaptureResult.Completeness.CONTINUE) return;
-		lease.consumer.stopMonitoringScan();
+		lease.consumer.stopScanning();
 		lease.scanning = false; lease.nextSweep = tick + settings.getTracking().getPeriodTicks();
 		if (result.completeness() != CaptureResult.Completeness.COMPLETE) {
 			incompleteTracking(lease); return;

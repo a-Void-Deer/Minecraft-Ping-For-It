@@ -107,7 +107,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		private final long diagnosticId = ++consumerSequence;
 		private final InventoryBudgetDelayState admissionDelay, probeDelay, logicalDelay, projectionDelay;
 		private boolean monitoringActive = true;
-		private boolean monitoringScan = true;
+		private boolean scanning = true;
 		private boolean zeroAdmissionRefused;
 		private boolean publicationRequired;
 		private final InventorySourceInput input;
@@ -138,15 +138,20 @@ public final class InventoryRuntime implements AutoCloseable {
 		public InventorySourceInput input() { return input; }
 		void requirePublicationEvidence() { publicationRequired = true; }
 		public boolean invalidated() { return invalidObservation != null; }
-		/** No source access: audience removal and terminal discard remove retryable scan work. */
+		/** No source access: audience suspension preserves replay/evidence, but contributes no live admission demand. */
 		void monitoringActive(boolean active) {
-			monitoringActive = active;
+			if (monitoringActive != active) {
+				removeScanDemand(this);
+				monitoringActive = active;
+				addScanDemand(this);
+			}
 			if (!active) cancelDelays();
 		}
 		void cancelDelays() {
 			admissionDelay.cancel(); probeDelay.cancel(); logicalDelay.cancel(); projectionDelay.cancel();
 		}
-		void stopMonitoringScan() { monitoringScan = false; admissionDelay.cancel(); logicalDelay.cancel(); }
+		/** Terminal projection can retain a physically unfinished round without keeping it open to new consumers. */
+		void stopScanning() { removeScanDemand(this); scanning = false; admissionDelay.cancel(); logicalDelay.cancel(); }
 		/** Pins the complete observation actually accepted for publication, not a rejected or overflowing sweep. */
 		public void retainCompleted() {
 			if (closed || invalidObservation != null || round == null || round.last == null
@@ -156,10 +161,10 @@ public final class InventoryRuntime implements AutoCloseable {
 		}
 		public void restart() {
 			cancelDelays();
-			monitoringScan = true;
 			if (invalidObservation != null || pendingObservation != null) recoveryFloor = roundSequence + 1;
 			if (round != null && round.sweep == null) rounds.remove(round.lookupKey, round); // new observation evidence, not source identity
 			releaseScanning(this); invalidObservation = null; pendingObservation = null; cursor = 0; observationFloor = tick; firstRound = 0;
+			scanning = true;
 			if (completedRound == null) releaseBindingEvidence(this);
 		}
 		/** Releases this consumer's invalid data/evidence without invalidating unrelated physical rounds. */
@@ -208,8 +213,8 @@ public final class InventoryRuntime implements AutoCloseable {
 		@Nullable Observation failureObservation;
 		int references;
 		int incomingEntitlements; // included in references/scanners, but neither an actual scan nor an accepted completion
-		int scanners; // consumer scans plus bounded physical handoff leases
-		int activeTracking; // actual scanning associations only, never historical owners or handoff holds
+		int scanners; // journal/replay owners plus bounded physical handoff leases, independent of live demand
+		int activeScans, activeTracking; // live pooled scan demand, excluding terminal/audience-paused associations and handoff holds
 		int appliedBytes; // ceiling fully walked over this round's decoded slots
 		int passCeiling; // target of the active tightening pass
 		int reprojectCursor; // bounded tightening walk position over decoded slots
@@ -591,7 +596,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			if (module(consumer) == module && (consumer.admissionDelay.outstanding() || consumer.probeDelay.outstanding()
 				|| consumer.logicalDelay.outstanding() || consumer.projectionDelay.outstanding())) return true;
 			Round round = consumer.round;
-			if (consumer.monitoringScan && round != null && round.physicalModule == module && round.physicalDelay != null && round.physicalDelay.outstanding()) return true;
+			if (consumer.scanning && round != null && round.physicalModule == module && round.physicalDelay != null && round.physicalDelay.outstanding()) return true;
 		}
 		return false;
 	}
@@ -600,7 +605,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			if (module(consumer) == module && (consumer.admissionDelay.eligible() || consumer.probeDelay.eligible()
 				|| consumer.logicalDelay.eligible() || consumer.projectionDelay.eligible())) return true;
 			Round round = consumer.round;
-			if (round != null && round.physicalModule == module && round.physicalDelay != null && round.physicalDelay.eligible()) return true;
+			if (consumer.scanning && round != null && round.physicalModule == module && round.physicalDelay != null && round.physicalDelay.eligible()) return true;
 		}
 		return false;
 	}
@@ -1320,7 +1325,7 @@ public final class InventoryRuntime implements AutoCloseable {
 	private boolean pooledCandidate(Consumer consumer, Round round, PooledKey lookup, InventorySharedRead.Proof proof, SourceKey key) {
 		if (round.sweep == null || !shareable(consumer, round) || !round.lookupKey.equals(lookup) || !round.sweep.proof.equals(proof)) return false;
 		if (consumer.subject instanceof TrackingSubject || round.activeTracking != 0) return true;
-		for (Consumer peer : consumers) if (!peer.closed && peer.round == round && peer.scanningAssociation != null
+		for (Consumer peer : consumers) if (!peer.closed && peer.scanning && peer.monitoringActive && peer.round == round && peer.scanningAssociation != null
 			&& peer.scanningAssociation.lease.handle.descriptor().key().equals(key)) return true;
 		return false;
 	}
@@ -1864,7 +1869,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		return !(consumer.subject instanceof TrackingSubject) || round.trackingObservation && round.startedTick == tick;
 	}
 	private static boolean activePooledRound(Round round) {
-		return !round.closed && round.journal != null && round.scanners > round.incomingEntitlements
+		return !round.closed && round.journal != null && round.activeScans > 0
 			&& round.failureObservation == null && !round.sourceProjectionUnsupported
 			&& (round.preparation == null || round.preparation == InventorySourceAccess.Preparation.READY)
 			&& (round.last == null || round.last.availability() == CaptureResult.Availability.READABLE
@@ -1890,11 +1895,20 @@ public final class InventoryRuntime implements AutoCloseable {
 			previous.successor = round; round.predecessors.add(previous); round.references++; round.scanners++;
 		}
 		round.scanners++;
-		if (round.sweep != null && consumer.subject instanceof TrackingSubject) round.activeTracking++;
 		if (previous != round) round.references++;
 		consumer.round = round;
+		addScanDemand(consumer);
 		consumer.lastAssociatedSequence = Math.max(consumer.lastAssociatedSequence, round.sequence);
 		if (consumer.successorEntitlement == round) releaseEntitlement(consumer);
+	}
+	/** Demand is independent of the scanner reference that keeps a journal and its exact publication evidence serviceable. */
+	private static void addScanDemand(Consumer consumer) { changeScanDemand(consumer, 1); }
+	private static void removeScanDemand(Consumer consumer) { changeScanDemand(consumer, -1); }
+	private static void changeScanDemand(Consumer consumer, int delta) {
+		@Nullable Round round = consumer.round;
+		if (round == null || round.sweep == null || !consumer.scanning || !consumer.monitoringActive) return;
+		round.activeScans += delta;
+		if (consumer.subject instanceof TrackingSubject) round.activeTracking += delta;
 	}
 	/** Legacy shared handoffs are future Tracking demand, not one-shot Preview ownership. */
 	private boolean hasTrackingPeer(Round round, @Nullable Consumer excluded) {
@@ -1991,8 +2005,8 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (previous != null && previous != round) releaseReference(previous);
 	}
 	private void releaseScanning(Consumer consumer) {
+		removeScanDemand(consumer);
 		@Nullable Round round = consumer.round; consumer.round = null;
-		if (round != null && round.sweep != null && consumer.subject instanceof TrackingSubject) round.activeTracking--;
 		if (consumer.scanningAssociation != null) { consumer.scanningAssociation.close(); consumer.scanningAssociation = null; }
 		if (round == null) return;
 		releaseScanner(round, round != consumer.completedRound);

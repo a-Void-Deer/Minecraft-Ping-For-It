@@ -23,6 +23,8 @@ import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.inventory.*;
+import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.presentation.source.CaptureResult;
 import nx.pingwheel.common.presentation.source.CostLedger;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -198,6 +200,130 @@ class InventoryPooledBackendTest {
 	}
 	static Object trackingState(InventoryPublicationBackendFixture fixture, MarkerId marker) {
 		return java.util.Objects.requireNonNull(((Map<?, ?>) state(fixture.backend, "tracking")).get(marker));
+	}
+	private static void distinctPreviewVariants(Resolver resolver) {
+		for (var entity : resolver.world.entities.values()) ((ChestBlockEntity) entity).clearContent();
+		var chest = (ChestBlockEntity) java.util.Objects.requireNonNull(resolver.world.entities.get(BlockPos.ZERO));
+		@Unmodifiable List<net.minecraft.world.item.Item> variants = List.of(Items.STONE, Items.DIRT, Items.GRANITE, Items.DIORITE, Items.ANDESITE,
+			Items.COBBLESTONE, Items.DEEPSLATE, Items.COBBLED_DEEPSLATE, Items.TUFF, Items.CALCITE,
+			Items.SAND, Items.RED_SAND, Items.GRAVEL, Items.CLAY, Items.BRICKS, Items.OBSIDIAN, Items.NETHERRACK);
+		for (int slot = 0; slot < variants.size(); slot++) chest.setItem(slot, new ItemStack(variants.get(slot), 1));
+	}
+	private static InventorySettings projectionLimitSettings() {
+		var settings = InventorySettings.serverDefaults();
+		settings.setPendingMemoryMiB(16); settings.setPhysicalSlotsPerTick(IntLimit.finite(16));
+		settings.getPreview().setPeriodTicks(5); settings.getPreview().setMaxVariantsPerClientPeriod(IntLimit.finite(16));
+		// Request-owned prefixes must reach the client before selection; wire contention is not this boundary.
+		settings.getPreview().setClientByteMultiplier(nx.pingwheel.common.config.ByteMultiplier.finite(java.math.BigDecimal.valueOf(4)));
+		settings.validate(); return settings;
+	}
+	private static long openClientPreview(InventoryPublicationBackendFixture fixture, UUID owner, long tick) {
+		long request = fixture.clients.get(owner).open(target(Blocks.CHEST), BlockFace.NORTH, "entity_block");
+		assertEquals(request, fixture.open(owner, target(Blocks.CHEST), BlockFace.NORTH, tick)); return request;
+	}
+	private static MarkerId selectStone(InventoryPublicationBackendFixture fixture, UUID owner, long request, long tick) {
+		var client = fixture.clients.get(owner);
+		String key = client.preview(request).entries().stream().filter(entry -> entry.itemId().equals("minecraft:stone")).findFirst().orElseThrow().key();
+		var reference = client.selectable(request).stream().filter(entry -> entry.entryKey().equals(key)).findFirst().orElseThrow();
+		int markers = fixture.markers.size();
+		assertEquals(ClientInventory.DispatchOutcome.SENT, client.select(reference, "danger", packet -> {
+			fixture.backend.handle(owner, packet, tick, fixture.settings); return ClientInventory.DispatchOutcome.SENT;
+		}));
+		assertEquals(markers + 1, fixture.markers.size()); return fixture.markers.allMarkers().getLast().id();
+	}
+	private static long previewStone(ClientInventory.Preview preview) {
+		return preview.entries().stream().filter(entry -> entry.itemId().equals("minecraft:stone")).findFirst().orElseThrow().count();
+	}
+	@ParameterizedTest @CsvSource({"false,64,86", "true,1,54"})
+	void projectionTerminalPreviewSelectionStartsFreshUnlessAnotherTrackerStillScans(boolean activePeer, long count, long visits) throws ReflectiveOperationException {
+		var resolver = new Resolver(Blocks.CHEST); distinctPreviewVariants(resolver); var settings = projectionLimitSettings();
+		try (var f = new InventoryPublicationBackendFixture(resolver, settings, group(Blocks.CHEST))) {
+			UUID owner = InventoryPublicationBackendFixture.A; var client = f.clients.get(owner);
+			long request = openClientPreview(f, owner, 0);
+			long peerRequest = activePeer ? openClientPreview(f, owner, 0) : 0;
+			f.backend.tick(1, settings); long reads = physical(f.runtime); assertEquals(16, reads);
+			if (activePeer) {
+				selectStone(f, owner, peerRequest, 1); f.closePreview(owner, peerRequest, 1); client.close(peerRequest);
+			}
+			f.backend.tick(2, settings); reads += physical(f.runtime); assertEquals(32, reads);
+			var preview = previewState(f, owner, request); Object original = state(state(preview, "consumer"), "round");
+			assertEquals(true, state(preview, "terminal"));
+			assertEquals(CaptureResult.Completeness.CONTINUE, ((CaptureResult) state(original, "last")).completeness(),
+				"only the Backend projection reached its variant limit; the physical journal is unfinished");
+			assertEquals(InventoryS2CPacket.Status.INCOMPLETE, client.preview(request).status());
+			assertFalse(client.preview(request).completeScan()); assertEquals(1, previewStone(client.preview(request)));
+			((ChestBlockEntity) java.util.Objects.requireNonNull(resolver.world.entities.get(BlockPos.ZERO))).setItem(0, new ItemStack(Items.STONE, 64));
+			long before = physical(f.runtime); MarkerId marker = selectStone(f, owner, request, 2);
+			assertEquals(before, physical(f.runtime), "ordinary SELECT revalidates metadata without any item-presence getter");
+			Object selected = trackingState(f, marker); assertEquals(0L, state(selected, "count"), "the retained seed is not a tracking accumulator");
+			@Nullable Object selectedRound = stateField(state(selected, "consumer"), "round");
+			f.closePreview(owner, request, 2); client.close(request);
+			for (int tick = 3; tick <= 40; tick++) {
+				f.backend.tick(tick, settings); reads += physical(f.runtime);
+				if (f.clients.values().stream().allMatch(endpoint -> endpoint.tracking(marker).complete())) break;
+			}
+			for (var endpoint : f.clients.values()) {
+				assertTrue(endpoint.tracking(marker).complete()); assertEquals(count, endpoint.tracking(marker).entries().getFirst().count());
+			}
+			if (activePeer) assertSame(original, selectedRound, "a real Tracking peer still makes the paid mixed-time prefix eligible");
+			else assertNull(selectedRound, "retaining terminal Preview evidence cannot grant a new active association");
+			assertEquals(visits, reads, "a fresh 54-slot observation is required only when no real scanning peer survives");
+			assertTrue(f.frames.stream().anyMatch(packet -> marker.equals(packet.markerId()) && !packet.completeScan()
+				&& packet.entries().stream().anyMatch(entry -> entry.count() == 1)), "the selected retained Preview count remains a provisional seed");
+			assertEquals(0, resolver.deniedReads); assertEquals(0, f.runtime.memory().reserved());
+		}
+	}
+	@Test void freshPreviewCannotUseProjectionTerminalEvidenceEvenWhenTheOldRequestStaysOpen() throws ReflectiveOperationException {
+		var resolver = new Resolver(Blocks.CHEST); distinctPreviewVariants(resolver); var settings = projectionLimitSettings();
+		try (var f = new InventoryPublicationBackendFixture(resolver, settings, group(Blocks.CHEST))) {
+			UUID owner = InventoryPublicationBackendFixture.A; var client = f.clients.get(owner);
+			long originalRequest = openClientPreview(f, owner, 0);
+			f.backend.tick(1, settings); long reads = physical(f.runtime); f.backend.tick(2, settings); reads += physical(f.runtime);
+			assertEquals(InventoryS2CPacket.Status.INCOMPLETE, client.preview(originalRequest).status());
+			Object original = state(state(previewState(f, owner, originalRequest), "consumer"), "round");
+			((ChestBlockEntity) java.util.Objects.requireNonNull(resolver.world.entities.get(BlockPos.ZERO))).setItem(0, new ItemStack(Items.STONE, 64));
+			settings.getPreview().setMaxVariantsPerClientPeriod(IntLimit.finite(32)); settings.validate();
+			long request = openClientPreview(f, owner, 5);
+			for (int tick = 6; tick <= 40; tick++) {
+				f.backend.tick(tick, settings); reads += physical(f.runtime); if (client.preview(request).completeScan()) break;
+			}
+			assertTrue(client.preview(request).completeScan()); assertEquals(64, previewStone(client.preview(request)));
+			assertNotSame(original, state(state(previewState(f, owner, request), "consumer"), "round"));
+			assertEquals(86, reads); assertEquals(0, f.markers.size());
+			assertEquals(InventoryS2CPacket.Status.INCOMPLETE, client.preview(originalRequest).status());
+			assertEquals(1, previewStone(client.preview(originalRequest))); assertFalse(client.selectable(originalRequest).isEmpty(),
+				"terminal evidence and request-owned references remain valid without becoming scanning demand");
+		}
+	}
+	@Test void audiencePausedTrackingDoesNotWidenPreviewSharingAndResumesItsOriginalPaidJournal() throws ReflectiveOperationException {
+		var resolver = new Resolver(Blocks.CHEST); var settings = settings(false, false); settings.setPhysicalSlotsPerTick(IntLimit.finite(16));
+		try (var f = new InventoryPublicationBackendFixture(resolver, settings, group(Blocks.CHEST))) {
+			UUID owner = InventoryPublicationBackendFixture.A, other = InventoryPublicationBackendFixture.B;
+			long request = openClientPreview(f, owner, 0), selected = openClientPreview(f, owner, 0);
+			f.backend.tick(1, settings); long reads = physical(f.runtime); MarkerId marker = selectStone(f, owner, selected, 1);
+			f.closePreview(owner, selected, 1); f.clients.get(owner).close(selected);
+			f.known = (player, id) -> false; f.backend.tick(2, settings); reads += physical(f.runtime);
+			Object original = state(state(previewState(f, owner, request), "consumer"), "round");
+			assertSame(original, state(state(trackingState(f, marker), "consumer"), "round"));
+			assertEquals(CaptureResult.Completeness.CONTINUE, ((CaptureResult) state(original, "last")).completeness());
+			long otherRequest = openClientPreview(f, other, 2);
+			var otherConsumer = (InventoryRuntime.Consumer) state(previewState(f, other, otherRequest), "consumer");
+			long before = physical(f.runtime);
+			assertEquals(InventoryRuntime.JoinResult.NO_MATCH, f.runtime.tryJoinInProgress(otherConsumer),
+				"only the exact Preview participant is scanning; retained audience-paused Tracking cannot widen that pool");
+			assertEquals(InventorySourceAccess.Preparation.READY, f.runtime.prepare(otherConsumer));
+			assertNotSame(original, state(otherConsumer, "round"));
+			assertEquals(before, physical(f.runtime));
+			((ChestBlockEntity) java.util.Objects.requireNonNull(resolver.world.entities.get(BlockPos.ZERO))).setItem(0, new ItemStack(Items.STONE, 64));
+			f.known = (player, id) -> true;
+			for (int tick = 3; tick <= 40; tick++) {
+				f.backend.tick(tick, settings); reads += physical(f.runtime);
+				if (f.clients.get(other).preview(otherRequest).completeScan() && f.clients.values().stream().allMatch(endpoint -> endpoint.tracking(marker).complete())) break;
+			}
+			for (var endpoint : f.clients.values()) { assertTrue(endpoint.tracking(marker).complete()); assertEquals(756, endpoint.tracking(marker).entries().getFirst().count()); }
+			assertTrue(f.clients.get(other).preview(otherRequest).completeScan()); assertEquals(819, previewStone(f.clients.get(other).preview(otherRequest)));
+			assertEquals(756, previewStone(f.clients.get(owner).preview(request))); assertEquals(108, reads);
+		}
 	}
 	@ParameterizedTest @CsvSource({"3", "16"})
 	void unselectedOpenPreviewsKeepOneObservationWhileTwoPartitionedTrackingCohortsCompleteRepeatedly(int physicalSlots) throws ReflectiveOperationException {
