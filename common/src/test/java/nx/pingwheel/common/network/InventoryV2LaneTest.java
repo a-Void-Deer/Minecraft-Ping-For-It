@@ -5,6 +5,7 @@ import java.util.Set;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.presentation.inventory.InventoryFluidDisplayCodec;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -28,7 +29,7 @@ class InventoryV2LaneTest {
 		assertEquals(InventoryResourceKind.ITEM, InventoryC2SPacket.select(11, 12, 13, 14, 15, 16, 17, "opaque", "attention").resourceKind());
 	}
 	@Test void everyFluidResponseIncludingEmptyCutsAndPolicyIsDomainHomogeneous() {
-		var entry = new InventoryS2CPacket.Entry("opaque", "minecraft:water", "block.minecraft.water", "{\"fluid\":\"water\"}",
+		var entry = new InventoryS2CPacket.Entry("opaque", "minecraft:water", "block.minecraft.water", "{\"version\":1,\"id\":\"minecraft:water\"}",
 			9007199254740993L, 1, false, null);
 		for (var packet : List.of(
 			InventoryS2CPacket.policy(InventoryResourceKind.FLUID, 1, 2, 3, Set.of("block")),
@@ -42,6 +43,31 @@ class InventoryV2LaneTest {
 			try {
 				assertEquals(packet.encodedSize(InventoryS2CPacket.MAX_DISPLAY_BYTES, InventoryS2CPacket.MAX_FRAME_BYTES), buf.readableBytes());
 				assertEquals(packet, InventoryS2CPacket.readSafe(buf)); assertFalse(buf.isReadable());
+			} finally { buf.release(); }
+		}
+	}
+	@Test void fluidDisplayDecodesAfterWireRoundTripWhileBadDisplayCannotEraseAuthoritativeEntryMetadata() {
+		String namedDisplay = InventoryFluidDisplayCodec.encode(new InventoryFluidDisplayCodec.Projection("minecraft:water", "Spring water"));
+		for (var entry : List.of(
+			new InventoryS2CPacket.Entry("opaque", "minecraft:water", "block.minecraft.water",
+				namedDisplay,
+				Long.MAX_VALUE, 7, false, null),
+			new InventoryS2CPacket.Entry("opaque", "minecraft:water", "block.minecraft.water", null, Long.MAX_VALUE, 7, false, null),
+			new InventoryS2CPacket.Entry("opaque", "minecraft:water", "block.minecraft.water", "{\"id\":\"minecraft:water\"}", Long.MAX_VALUE, 7, false, null),
+			new InventoryS2CPacket.Entry("opaque", "minecraft:water", "block.minecraft.water", "{\"version\":1,\"id\":\"minecraft:lava\"}", Long.MAX_VALUE, 7, false, null))) {
+			var packet = InventoryS2CPacket.data(InventoryResourceKind.FLUID, InventoryS2CPacket.Kind.SNAPSHOT, 1, 2, new MarkerId(3),
+				4, 5, 6, 0, 1, true, InventoryS2CPacket.Status.READY, 8, List.of(entry)).stamp(9, 10);
+			var buf = frame(packet);
+			try {
+				var decoded = InventoryS2CPacket.readSafe(buf);
+				assertEquals(packet, decoded); assertFalse(buf.isReadable());
+				var received = decoded.entries().getFirst();
+				var display = InventoryFluidDisplayCodec.decode(received.resourceId(), received.displayJson());
+				assertEquals(namedDisplay.equals(entry.displayJson()), display.isPresent());
+				if (display.isPresent()) assertEquals("Spring water", display.get().customName());
+				assertEquals("opaque", received.key()); assertEquals(Long.MAX_VALUE, received.amount());
+				assertEquals(7, received.resourceRevision()); assertFalse(received.fallback()); assertNull(received.quality());
+				assertEquals("block.minecraft.water", received.label());
 			} finally { buf.release(); }
 		}
 	}

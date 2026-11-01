@@ -105,6 +105,10 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 	 * The legacy Java item-named accessors are source migration bridges. {@code displayJson} may be absent; the
 	 * optional {@code quality} preserves the per-entry component-too-long grey
 	 * state against a packet-level uncertain or incomplete status.
+	 * In a FLUID frame, {@code label} is the registry translation fallback and {@code displayJson}
+	 * uses {@link nx.pingwheel.common.presentation.inventory.InventoryFluidDisplayCodec}, never ItemStack
+	 * JSON. Decode it against {@link Entry#resourceId()}; display refusal leaves the opaque key, exact
+	 * long amount, revisions, aggregate flag and server selection reference intact.
 	 */
 	@NotNullByDefault
 	public record Entry(String key, String itemId, String label, @Nullable String displayJson, long count, long itemRevision,

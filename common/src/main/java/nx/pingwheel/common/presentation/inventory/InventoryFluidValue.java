@@ -18,7 +18,12 @@ public record InventoryFluidValue(InventoryScanner.Key key, long amount, Display
 	@Override public @Nullable String displayJson() { return display.displayJson(); }
 	@Override public boolean aggregateRequired() { return aggregate; }
 
-	/** Bounded serialized display only; absence is not identity refusal. The JSON is not an item codec payload. */
+	/**
+	 * Bounded transport display only. {@code label} is the registry translation fallback, not a custom
+	 * name or JSON document. New display JSON uses {@link InventoryFluidDisplayCodec}; this transport
+	 * envelope also retains unavailable or unrecognized display for independent client-side refusal.
+	 * Neither absence nor display refusal is native identity refusal.
+	 */
 	@NotNullByDefault
 	public record Display(String fluidId, String label, @Nullable String displayJson) {
 		public Display {
