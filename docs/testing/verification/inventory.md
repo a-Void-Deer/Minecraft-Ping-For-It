@@ -1328,6 +1328,33 @@ Live UI, mixed config versions, installed-provider behavior and
 multiplayer/performance scenarios remain in the
 [manual matrix](manual-integration.md#inventory).
 
+### Terminal Preview evidence and active demand
+
+Additional `InventoryPooledBackendTest` cases drive the production backend,
+native double-chest source and encoded client sessions. A Preview reaches its
+16-variant projection limit after 32 getters while the 54-slot physical journal
+still reports `CONTINUE`; the already-read stone amount then changes from 1 to
+64. Ordinary client `SELECT` adds no getter and retains the old amount only as a
+provisional seed, not a Tracking accumulator.
+
+| Admission case | Assertion scope |
+| --- | --- |
+| Only the terminal Preview retains the old round | Tracking completes at 64 from a fresh observation, with 86 getters across Preview and Tracking. |
+| A real Tracking peer still scans the old round | The new tracker shares the paid prefix and completes at 1, with 54 getters in all. |
+| A new Preview opens while the terminal request stays open | The new request completes at 64 with 86 total getters; the old request keeps its incomplete count of 1 and selectable references. |
+
+A separate audience-pause case rejects widened Preview admission through a
+retained but paused tracker, without a getter during admission. Resuming that
+tracker preserves its original paid journal, while the other owner's Preview
+uses an independent observation. The active-peer result follows the existing
+[mixed-time admission boundary](../../decisions/D0017-certified-tracking-observation-pools.md),
+not a fresh-snapshot guarantee.
+
+These additions passed the focused and full Java 21 executions recorded in the
+[terminal Preview admission and settings-resize run](build-checks.md#terminal-preview-admission-and-settings-resize-run),
+which also built all three loaders. They add no live UI, window, provider-launch
+or multiplayer evidence.
+
 ## Native incremental sweep coverage
 
 The [native read contract](../../architecture/presentation/inventory.md#native-incremental-reads)

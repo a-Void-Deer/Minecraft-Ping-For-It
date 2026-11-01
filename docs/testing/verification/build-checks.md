@@ -23,8 +23,8 @@ architecture entry point. Local agent instructions, when present, are
 supplementary execution guidance rather than a public documentation prerequisite.
 
 An inventory entry or static wiring test is not a Gradle execution record.
-No separately configured lint, formatter, or static-analysis task exists; the
-automated checks are the Gradle test tasks and the loader build and
+No separately configured Java lint, formatter, or static-analysis task exists; the
+Java/build checks are the Gradle test tasks and the loader build and
 artifact-identity tasks below. Final-state evidence for an implementation
 change must identify the combined
 tree, commands and results for the affected tests and loader source sets;
@@ -50,6 +50,54 @@ not replace that record.
 | `neoforge` test source set | `:neoforge:test` | Runs the NeoForge JUnit Platform tests, including NeoForge-specific resolver coverage. |
 | Affected loader source set | `:fabric:build`, `:forge:build`, or `:neoforge:build` | Builds the affected Fabric, Forge, or NeoForge source set and its loader jar. |
 | All shippable loader artifacts | `verifyModIdentity` | Depends on all three loader `build` tasks, then inspects the expected Fabric, Forge, and NeoForge jars in their loader `build/libs` directories for fork identity. |
+
+## Documentation tooling coverage
+
+`test_documentation_links.py` covers the shared Markdown scanner and the
+`broken_link_check.py` and `count_duplicate_links.py` CLIs with parser, heading,
+target-normalization and disposable-repository process/Git fixtures. Added
+regressions distinguish literal backticks in link titles and destinations from
+real code spans across inline, reference and image forms, preserving following
+links, missing-target reports and duplicate groups. They cover thematic breaks
+before Setext headings, valid empty reference destinations, resolved reference
+labels followed by literal parentheses, and speculative multiline titles at
+fence boundaries. Hidden-definition, forward-reference and duplicate-precedence
+cases check the first visible definition without treating paragraph continuations,
+real code, comments or fences as definitions.
+
+Subprocess cases check complete UTF-8 reports under cp936 and ASCII child stdout
+encodings; imported `main` cases check that caller-owned streams remain unchanged.
+Four deterministic scanning-work tests count block classifications, copied slices
+and character checks for repeated definitions, inline payloads/code and heading
+preparation, rather than relying on timing thresholds. These finite workloads do
+not prove universal adversarial-linear complexity. The coverage is local scanner
+and CLI evidence, not complete CommonMark/GFM equivalence or validation of
+external URIs; embedded CLI help remains the syntax and output behavior reference.
+
+Recorded execution date: 2026-11-01, code input
+`6c2f1db2ed113a774d6ffc935b3dd419c3a462af`.
+`python -B scripts/docs/tests/test_documentation_links.py -v` passed all 69 tests:
+65 semantic cases and the four scanning-work cases. AST parsing and in-memory
+compilation passed for all four Python files. No separately configured Python
+lint, type-check or formatter exists. Independent final review passed its narrow
+11-test, work-count and equivalence checks; this is not a whole-branch review.
+The four source hashes matched the final test manifest before and after the code
+commit. Saved logs and manifests belong to the external
+`reference-boundary-performance` directory and its
+`commit-finalization-20261101-140729-c71af933` subdirectory.
+
+The final documentation-only corpus snapshot ran the normal CLIs from PowerShell
+against 69 Markdown source files, including the four updated verification pages:
+
+| Command | Exit | Result |
+| --- | --- | --- |
+| `python -B scripts/docs/broken_link_check.py` | 0 | 1,335 local links; zero broken links; zero external URIs. |
+| `python -B scripts/docs/count_duplicate_links.py` | 0 | 1,335 document links; 222 duplicate groups; 347 extra occurrences. |
+| `python -B scripts/docs/count_duplicate_links.py --ignore-chapter-anchors` | 0 | 1,335 document links; 272 duplicate groups; 657 extra occurrences. |
+
+These totals describe that corpus snapshot, not fixed acceptance counts or a
+requirement to remove repeated navigation links. This documentation-only follow-up
+reran the corpus commands, not the unchanged Python suite or Java builds.
 
 ## Automated verification results
 
@@ -247,6 +295,68 @@ is owned by the [inventory gaps](inventory.md#known-automated-gaps), not inferre
 from these automated results. This documentation-only reconciliation inspected
 saved evidence; it ran no Gradle, tests, performance probes, game, UI or multiplayer
 session.
+
+### Terminal Preview admission and settings-resize run
+
+Recorded execution date: 2026-11-01. The verified Java/build inputs match code
+commits `016740231ce73df3313e79b7ad9e25ef71429c7e` (terminal Preview admission)
+and `f76ce30be6a4c2b3b75eebc655f5e28094d6a2eb` (settings resize). Both saved
+PowerShell invocations used Temurin `21.0.12.1+1-LTS`, UTF-8, `--no-daemon`,
+background execution without an explicit timeout and separate stdout/stderr
+files. In the commands below, `$evidence` is the external directory
+`pfi-java-verification-b2613ada-20261101-130253-84a89e28`:
+
+```powershell
+$env:JAVA_HOME = 'E:/scoop/apps/temurin21-jdk/current'
+$env:PATH = "$env:JAVA_HOME/bin;$env:PATH"
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+.\gradlew.bat :common:test --tests '*InventoryPooledBackendTest' --tests '*InventoryActiveJoinTest' --tests '*InventoryPooledRuntimeTest' --tests '*InventoryRuntimeTest' --tests '*InventoryBackendLifecycleTest' --tests '*InventoryBootstrapPublicationTest' --tests '*InventoryPublicationAuthorizationTest' --tests '*InventoryBudgetDelayIntegrationTest' --tests '*InventoryCaptureDiagnosticsTest' --tests 'nx.pingwheel.common.screen.*' --no-daemon --console=plain > "$evidence\focus.stdout.log" 2> "$evidence\focus.stderr.log"
+.\gradlew.bat :common:check :fabric:build :forge:build :neoforge:build verifyModIdentity --continue --no-daemon --console=plain --info > "$evidence\full.stdout.log" 2> "$evidence\full.stderr.log"
+```
+
+The focused invocation exited zero with `BUILD SUCCESSFUL`. Common main/test
+compilation and tests executed freshly: 532 tests in 34 suites, with zero
+failures, errors or skips. The screen selection accounts for 307 tests in 25
+suites and the inventory selection for 225 tests in nine suites. Of 13 actionable
+tasks, three executed and ten were `UP-TO-DATE`.
+
+The full invocation also exited zero with `BUILD SUCCESSFUL`. All four test tasks
+executed and every archived XML report was fresh, with zero failures, errors or
+skips:
+
+| Module | Suites | Tests |
+| --- | --- | --- |
+| Common | 465 | 5044 |
+| Fabric | 5 | 24 |
+| Forge | 5 | 26 |
+| NeoForge | 41 | 256 |
+| Total | 516 | 5350 |
+
+Both runs discovered and passed all 15 `InventoryPooledBackendTest` cases and all
+four `SettingsScreenResizeTest` cases. Their assertion scope is owned by
+[terminal Preview evidence and active demand](inventory.md#terminal-preview-evidence-and-active-demand)
+and [assembled settings-screen resize](configuration-ui.md#assembled-settings-screen-resize).
+
+All three loader main compilations, jar/source-jar packaging, Javadocs and builds
+executed, as did Forge/NeoForge test compilation, Fabric remapping and
+`verifyModIdentity`. Common compilation reused the passing focused output;
+Fabric test compilation, all three Javadoc-jar tasks and Fabric access-widener
+validation were `UP-TO-DATE`. The full invocation had 52 actionable tasks: 25
+executed and 27 `UP-TO-DATE`. Identity verification passed for `pingforit` /
+`Ping For It` / `0.5.0-pfi-beta2` on Minecraft 1.21.1.
+
+All 1,209 Java/build input hashes and their path set matched across verification
+and the code commits; all nine recorded loader artifact hashes remained unchanged
+through commit. The external directory retains the exact commands, logs, XML,
+task reports and hash manifests. Nonfatal mapping/processor, deprecated-API,
+Javadoc and Gradle deprecation diagnostics remain; none named the five changed
+Java files. These results are not warning-free or a whole-branch review. This
+documentation update inspected saved evidence and ran no Gradle or tests. No
+live window/rendering, loader launch, multiplayer, installed-provider, manual
+gameplay or performance validation was performed; the
+[manual matrix](manual-integration.md#pending-manual-and-integration-matrix)
+remains pending.
 
 ## Verification limitations
 

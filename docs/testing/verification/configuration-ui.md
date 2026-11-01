@@ -657,13 +657,36 @@ coordinator. The native-list cases exercise headless list dispatch and reflow;
 the combined coverage does not establish a fully assembled settings screen's
 render/input lifecycle or live game focus traversal.
 
+## Assembled settings-screen resize
+
+`SettingsScreenResizeTest` assembles production screen widgets and invokes the
+native resize path headlessly. Its four cases cover:
+
+- client-overview Reset becoming hidden, inactive and unfocusable when its footer
+  cannot contain it, then recovering on the same retained page and button;
+- Reset remaining unavailable on the server overview and representative leaf
+  pages in both scopes through shrink/grow, with normal return to the client
+  overview;
+- a retained subgroup heading keeping complete-text tooltip content when it
+  starts fitting but clips after resize, without becoming interactive; and
+- the Server Presentation heading retaining its dedicated help through resize
+  rather than replacing it with generic complete-text help.
+
+An isolated Java 21 execution passed all four cases; the pre-fix bytecode control
+failed two, and a broader related headless selection passed 43 tests. These
+additions also passed the subsequent
+[combined-tree Java verification and loader builds](build-checks.md#terminal-preview-admission-and-settings-resize-run).
+Deterministic font measurements and tooltip-component assertions do not exercise a
+real window, GUI-scale event, native glyph rendering, hover/focus tooltip delivery
+or wrapping.
+
 ## Known automated gaps
 
-- native-list reflow/input and enum caption/narration/tooltip components have
-  headless coverage above, but the fully assembled settings screen and game
-  render/input lifecycle remain unexercised. Live GUI-scale/window resizing,
+- native-list reflow/input, enum caption/narration/tooltip components and assembled
+  native resize have headless coverage above, but the game render/input lifecycle
+  remains unexercised. Live GUI-scale/window resizing,
   footer traversal, text-entry dispatch, actual font-driven pair stacking,
-  heading clipping/help, hover/keyboard-focus tooltip delivery and wrapping,
+  rendered heading clipping/help, hover/keyboard-focus tooltip delivery and wrapping,
   translation accuracy, and multiplayer read-only permission transitions remain
   pending in the
   [manual matrix](manual-integration.md#settings-and-server-performance);
