@@ -4,6 +4,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,6 +25,8 @@ import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.inventory.InventoryChecksums;
+import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
@@ -53,6 +57,7 @@ import org.jetbrains.annotations.Unmodifiable;
  * deliveries do not overwrite or restart an older admitted delivery, and a
  * heartbeat for an unfinished cut is deferred rather than compared to live state.
  */
+@NotNullByDefault
 public final class ClientInventory {
 
 	/** Returned by {@link #open(Target)} when no preview channel could be created. */
@@ -76,37 +81,54 @@ public final class ClientInventory {
 	private static final int STORE_CHANNELS = 128;
 
 	/** Rendering projection of one committed entry; metadata may be absent for a fallback. */
-	public record EntryView(String key, String itemId, String label, String displayJson, long count,
-		boolean fallback, InventoryS2CPacket.Status quality, String itemPingType) {
-		public EntryView(String key, String itemId, String label, String displayJson, long count, boolean fallback, InventoryS2CPacket.Status quality) {
-			this(key, itemId, label, displayJson, count, fallback, quality, null);
+	public record EntryView(InventoryResourceKind resourceKind, String key, String itemId, String label, @Nullable String displayJson, long count,
+		boolean fallback, InventoryS2CPacket.@Nullable Status quality, @Nullable String itemPingType) {
+		public EntryView(String key, String itemId, String label, @Nullable String displayJson, long count, boolean fallback, InventoryS2CPacket.@Nullable Status quality) {
+			this(InventoryResourceKind.ITEM, key, itemId, label, displayJson, count, fallback, quality, null);
+		}
+		public EntryView(String key, String itemId, String label, @Nullable String displayJson, long count, boolean fallback, InventoryS2CPacket.@Nullable Status quality, @Nullable String itemPingType) {
+			this(InventoryResourceKind.ITEM, key, itemId, label, displayJson, count, fallback, quality, itemPingType);
+		}
+		public String resourceId() { return itemId; }
+	}
+	public record PreviewEntryReference(InventoryResourceKind resourceKind, long requestId, long baselineId, long stateRevision, String entryKey) {
+		public PreviewEntryReference(long requestId, long baselineId, long stateRevision, String entryKey) {
+			this(InventoryResourceKind.ITEM, requestId, baselineId, stateRevision, entryKey);
 		}
 	}
-	public record PreviewEntryReference(long requestId, long baselineId, long stateRevision, String entryKey) {}
 	public enum DispatchOutcome { SENT, NOT_READY, STALE_REFERENCE, ALREADY_RELEASED, THROTTLED, TRANSPORT_FAILED }
-	public record SelectionResult(long commitId, long requestId, MarkerId markerId, MarkerRejectReason rejection) {}
+	public record SelectionResult(InventoryResourceKind resourceKind, long commitId, long requestId, @Nullable MarkerId markerId, @Nullable MarkerRejectReason rejection) {}
 
 	/**
 	 * Immutable preview projection. {@code entries} may be partial and is
 	 * republished immediately; {@code receivedParts}/{@code totalParts} expose
 	 * scan progress and {@code completeScan} marks a finished sender scan.
 	 */
-	public record Preview(long requestId, InventoryS2CPacket.Status status, boolean completeScan,
+	public record Preview(InventoryResourceKind resourceKind, long requestId, InventoryS2CPacket.Status status, boolean completeScan,
 		int receivedParts, int totalParts, long baselineId, long statusRevision, long watermark,
-		boolean invalid, List<EntryView> entries) {
+		boolean invalid, @Unmodifiable List<EntryView> entries) {
+		public Preview { entries = List.copyOf(entries); }
 
 		public static Preview empty(long requestId) {
-			return new Preview(requestId, InventoryS2CPacket.Status.UPDATING, false, 0, 1, 0, 0, 0, false,
+			return empty(requestId, InventoryResourceKind.ITEM);
+		}
+		public static Preview empty(long requestId, InventoryResourceKind kind) {
+			return new Preview(kind, requestId, InventoryS2CPacket.Status.UPDATING, false, 0, 1, 0, 0, 0, false,
 				List.of());
 		}
 	}
 
 	/** Live per-key projection; {@code watermark} is the closed digest cut, not the newest live item. */
-	public record Tracking(MarkerId markerId, InventoryS2CPacket.Status status, boolean grey, boolean complete,
-		long baselineId, long statusRevision, long watermark, List<EntryView> entries) {
+	public record Tracking(@Nullable InventoryResourceKind resourceKind, @Nullable MarkerId markerId, InventoryS2CPacket.Status status, boolean grey, boolean complete,
+		long baselineId, long statusRevision, long watermark, @Unmodifiable List<EntryView> entries) {
+		public Tracking { entries = List.copyOf(entries); }
+		public Tracking(@Nullable MarkerId markerId, InventoryS2CPacket.Status status, boolean grey, boolean complete,
+			long baselineId, long statusRevision, long watermark, List<EntryView> entries) {
+			this(InventoryResourceKind.ITEM, markerId, status, grey, complete, baselineId, statusRevision, watermark, List.copyOf(entries));
+		}
 
-		public static Tracking empty(MarkerId markerId) {
-			return new Tracking(markerId, InventoryS2CPacket.Status.UPDATING, false, false,
+		public static Tracking empty(@Nullable MarkerId markerId) {
+			return new Tracking(null, markerId, InventoryS2CPacket.Status.UPDATING, false, false,
 				InventoryClientStore.NO_BASELINE, -1L, 0L, List.of());
 		}
 	}
@@ -117,13 +139,31 @@ public final class ClientInventory {
 		long droppedUnknownSessions, long expiredUnknownSessions, long repairRequests, long acceptedPackets,
 		long capRejectedPackets, long capFencedStates, int helloAttempts, boolean ready, long epoch) {}
 
+	private record PreviewKey(long requestId, InventoryResourceKind kind) {}
+	private record PendingCommit(long requestId, InventoryResourceKind kind) {}
+	/** Bounded by known-marker retention; refreshes cannot restart receipt eligibility. */
+	private static final class MarkerMetadata {
+		final String targetType;
+		final boolean sable;
+		final Set<InventoryResourceKind> receiptDenials = EnumSet.noneOf(InventoryResourceKind.class);
+
+		MarkerMetadata(MarkerSnapshot marker) {
+			targetType = marker.targetTypeId();
+			sable = marker.target() instanceof Target.ExternalBlockTarget external && external.providerId().equals("sable");
+		}
+	}
+	private static final class PreviewRequest {
+		boolean released;
+		boolean sent;
+	}
 	private static final class PreviewState {
+		final InventoryResourceKind resourceKind;
+		final PreviewRequest request;
 		final long requestId;
 		final Target target;
 		final BlockFace face;
 		final String targetType;
 		final Map<String, Long> groups = new LinkedHashMap<>();
-		boolean released;
 		final Map<String, EntryView> entries = new LinkedHashMap<>();
 		final Map<String, Long> itemRevisions = new LinkedHashMap<>();
 		InventoryS2CPacket.Status status = InventoryS2CPacket.Status.UPDATING;
@@ -136,10 +176,11 @@ public final class ClientInventory {
 		boolean groupRejected;
 		boolean completeScan;
 		boolean serverSeen;
-		boolean sent;
 		int bytes;
 
-		PreviewState(long requestId, Target target, BlockFace face, String targetType) {
+		PreviewState(InventoryResourceKind resourceKind, PreviewRequest request, long requestId, Target target, BlockFace face, String targetType) {
+			this.resourceKind = resourceKind;
+			this.request = request;
 			this.requestId = requestId;
 			this.target = target;
 			this.face = face; this.targetType = targetType;
@@ -147,6 +188,7 @@ public final class ClientInventory {
 	}
 
 	private static final class TrackingState {
+		final InventoryResourceKind resourceKind;
 		final MarkerId markerId;
 		final InventoryClientStore.Channel channel;
 		final Map<String, EntryView> metadata = new LinkedHashMap<>();
@@ -155,7 +197,7 @@ public final class ClientInventory {
 		final Map<Long, TrackingBatch> batches = new LinkedHashMap<>();
 		final Map<Long, TrackingBatch> closedBatches = new LinkedHashMap<>();
 		final Map<Long, Long> heartbeats = new LinkedHashMap<>();
-		TrackingBatch pending;
+		@Nullable TrackingBatch pending;
 		InventoryS2CPacket.Status status = InventoryS2CPacket.Status.UPDATING;
 		long serverRequestId;
 		long baselineId = InventoryClientStore.NO_BASELINE;
@@ -175,7 +217,8 @@ public final class ClientInventory {
 		InventoryS2CPacket.@Nullable Status historicalFailure;
 		boolean closedCut;
 
-		TrackingState(MarkerId markerId, InventoryClientStore.Channel channel) {
+		TrackingState(InventoryResourceKind resourceKind, MarkerId markerId, InventoryClientStore.Channel channel) {
+			this.resourceKind = resourceKind;
 			this.markerId = markerId;
 			this.channel = channel;
 		}
@@ -183,6 +226,7 @@ public final class ClientInventory {
 
 	/** A bounded logical delivery, independent of the immediately visible per-key values. */
 	private static final class TrackingBatch {
+		final InventoryResourceKind resourceKind;
 		final long requestId;
 		final long baselineId;
 		final long statusRevision;
@@ -193,6 +237,7 @@ public final class ClientInventory {
 		long bytes;
 
 		TrackingBatch(InventoryS2CPacket packet) {
+			resourceKind = packet.resourceKind();
 			requestId = packet.requestId();
 			baselineId = packet.baselineId();
 			statusRevision = packet.statusRevision();
@@ -201,7 +246,7 @@ public final class ClientInventory {
 		}
 
 		boolean matches(InventoryS2CPacket packet) {
-			return requestId == packet.requestId() && baselineId == packet.baselineId()
+			return resourceKind == packet.resourceKind() && requestId == packet.requestId() && baselineId == packet.baselineId()
 				&& statusRevision == packet.statusRevision()
 				&& watermark == packet.watermark() && totalParts == packet.partCount();
 		}
@@ -228,7 +273,7 @@ public final class ClientInventory {
 		}
 	}
 
-	private record UnknownKey(MarkerId markerId, long baselineId, long statusRevision) {}
+	private record UnknownKey(InventoryResourceKind resourceKind, MarkerId markerId, long baselineId, long statusRevision) {}
 
 	private static final class UnknownSession {
 		final long startTick;
@@ -243,11 +288,12 @@ public final class ClientInventory {
 
 	private final Consumer<IPacket> sender;
 	private final InventoryClientStore store;
-	private final Map<Long, PreviewState> previews = new LinkedHashMap<>();
+	private final Map<PreviewKey, PreviewState> previews = new LinkedHashMap<>();
+	private final Map<Long, PreviewRequest> requests = new LinkedHashMap<>();
 	private final Map<MarkerId, TrackingState> tracking = new LinkedHashMap<>();
 	private final Map<UnknownKey, UnknownSession> unknown = new LinkedHashMap<>();
 
-	private InventoryS2CPacket.Offer offer;
+	private InventoryS2CPacket.@Nullable Offer offer;
 	/** Accepted effective byte caps of the current OFFER; zero before the first OFFER. */
 	private int effectiveDisplayBytes;
 	private int effectiveFrameBytes;
@@ -256,10 +302,14 @@ public final class ClientInventory {
 	private long nextRequestId = 1L;
 	private int helloAttempts;
 	private boolean offered;
-	private long presentationEpoch, presentationView, policyView = -1, nextCommitId = 1;
-	private Set<String> allowedTypes = Set.of();
-	private final Map<MarkerId, String> knownMarkers = new LinkedHashMap<>();
-	private final Map<Long, Long> pendingCommits = new LinkedHashMap<>();
+	private long presentationEpoch, presentationView, nextCommitId = 1;
+	private final Map<InventoryResourceKind, Long> policyViews = new EnumMap<>(InventoryResourceKind.class);
+	private final Map<InventoryResourceKind, @Unmodifiable Set<String>> allowedTypes = new EnumMap<>(InventoryResourceKind.class);
+	private final Set<InventoryResourceKind> schemaDisabled = EnumSet.noneOf(InventoryResourceKind.class);
+	private final Map<MarkerId, MarkerMetadata> knownMarkers = new LinkedHashMap<>();
+	/** Retained across lane policy revocation so a marker can never change resource domain. */
+	private final Map<MarkerId, InventoryResourceKind> markerKinds = new LinkedHashMap<>();
+	private final Map<Long, PendingCommit> pendingCommits = new LinkedHashMap<>();
 	private final Map<Long, SelectionResult> selectionResults = new LinkedHashMap<>();
 	private int invalidPackets;
 	private long staleEpochPackets;
@@ -279,30 +329,75 @@ public final class ClientInventory {
 
 	/** Whether an OFFER established the epoch and server periods for this connection. */
 	public boolean ready() {
-		return offered && policyView == presentationView && presentationEpoch != 0;
+		return ready(InventoryResourceKind.ITEM) || ready(InventoryResourceKind.FLUID);
+	}
+	public boolean ready(InventoryResourceKind kind) {
+		return !schemaDisabled.contains(kind) && offered && policyViews.getOrDefault(kind, -1L) == presentationView && presentationEpoch != 0;
+	}
+	private boolean allows(InventoryResourceKind kind, @Nullable String targetType) {
+		return ready(kind) && allowedTypes.getOrDefault(kind, Set.of()).contains(targetType);
 	}
 	/** Current accepted dedicated-route policy; absence means authority is not ready, never denial. */
 	public Optional<Boolean> authorization(long currentEpoch, long currentView, String targetTypeId) {
-		if (!ready() || currentEpoch != presentationEpoch || currentView != presentationView) return Optional.empty();
-		return Optional.of(allowedTypes.contains(targetTypeId));
+		return authorization(InventoryResourceKind.ITEM, currentEpoch, currentView, targetTypeId);
 	}
+	public Optional<Boolean> authorization(InventoryResourceKind kind, long currentEpoch, long currentView, String targetTypeId) {
+		if (schemaDisabled.contains(kind)) return Optional.of(false);
+		if (!ready(kind) || currentEpoch != presentationEpoch || currentView != presentationView) return Optional.empty();
+		return Optional.of(allows(kind, targetTypeId));
+	}
+	/** Receipt-only denial survives reallow within membership; unknown kind never borrows another lane's grant. */
+	public Optional<Boolean> receiptAuthorization(MarkerId markerId, long currentEpoch, long currentView, String targetTypeId) {
+		if (currentEpoch != presentationEpoch || currentView != presentationView) return Optional.empty();
+		@Nullable InventoryResourceKind kind = markerKinds.get(markerId);
+		if (kind != null) {
+			@Nullable MarkerMetadata marker = knownMarkers.get(markerId);
+			if (marker != null && marker.receiptDenials.contains(kind)) return Optional.of(false);
+			return authorization(kind, currentEpoch, currentView, targetTypeId);
+		}
+		for (InventoryResourceKind lane : InventoryResourceKind.values()) {
+			Optional<Boolean> permitted = authorization(lane, currentEpoch, currentView, targetTypeId);
+			if (permitted.isEmpty() || permitted.get()) return Optional.empty();
+		}
+		return Optional.of(false);
+	}
+	/** Accepted presentation schema gates only inventory; incompatible lanes never remain loading. */
+	public void acceptedSchemas(Set<InventoryResourceKind> accepted) {
+		for (InventoryResourceKind kind : InventoryResourceKind.values()) {
+			if (accepted.contains(kind)) schemaDisabled.remove(kind);
+			else {
+				schemaDisabled.add(kind);
+				previews.values().removeIf(state -> state.resourceKind == kind);
+				for (TrackingState state : List.copyOf(tracking.values())) if (state.resourceKind == kind) {
+					store.expire(state.channel); tracking.remove(state.markerId); removeUnknownSessions(state.markerId);
+				}
+			}
+		}
+	}
+	public Optional<InventoryResourceKind> trackingKind(MarkerId markerId) { return Optional.ofNullable(markerKinds.get(markerId)); }
+	public boolean schemaUnavailable() { return schemaDisabled.size() == InventoryResourceKind.values().length; }
 	/** Accepted presentation RESET immediately purges old-view inventory, before POLICY arrives. */
 	public void presentationReset(long epoch, long view) {
 		if (epoch == 0 || view < 0 || (epoch == presentationEpoch && view <= presentationView)) return;
-		purgeViews(); presentationEpoch = epoch; presentationView = view; policyView = -1; allowedTypes = Set.of();
+		purgeViews(); presentationEpoch = epoch; presentationView = view; policyViews.clear(); allowedTypes.clear();
 	}
-	public void markerCreated(MarkerSnapshot marker) {
+	public void markerCreated(@Nullable MarkerSnapshot marker) {
 		if (marker == null || knownMarkers.size() >= MAX_TRACKED_CHANNELS && !knownMarkers.containsKey(marker.id())) return;
-		knownMarkers.put(marker.id(), marker.targetTypeId());
+		if (knownMarkers.containsKey(marker.id())) return;
+		MarkerMetadata metadata = new MarkerMetadata(marker);
+		knownMarkers.put(marker.id(), metadata);
+		for (InventoryResourceKind kind : InventoryResourceKind.values())
+			if (authorization(kind, presentationEpoch, presentationView, metadata.targetType).equals(Optional.of(false)))
+				metadata.receiptDenials.add(kind);
 	}
 	public void markerRemoved(MarkerId marker) {
-		knownMarkers.remove(marker); TrackingState state = tracking.remove(marker);
+		knownMarkers.remove(marker); markerKinds.remove(marker); @Nullable TrackingState state = tracking.remove(marker);
 		if (state != null) store.expire(state.channel); removeUnknownSessions(marker);
 	}
-	public SelectionResult selectionResult(long commitId) { return selectionResults.get(commitId); }
+	public @Nullable SelectionResult selectionResult(long commitId) { return selectionResults.get(commitId); }
 	private void purgeViews() {
-		previews.clear(); for (TrackingState state : tracking.values()) store.expire(state.channel);
-		tracking.clear(); unknown.clear(); knownMarkers.clear(); pendingCommits.clear();
+		previews.clear(); requests.clear(); for (TrackingState state : tracking.values()) store.expire(state.channel);
+		tracking.clear(); unknown.clear(); knownMarkers.clear(); markerKinds.clear(); pendingCommits.clear();
 	}
 
 	public long epoch() {
@@ -310,7 +405,7 @@ public final class ClientInventory {
 	}
 
 	/** Null until the first valid OFFER. */
-	public InventoryS2CPacket.Offer offer() {
+	public InventoryS2CPacket.@Nullable Offer offer() {
 		return offer;
 	}
 
@@ -344,6 +439,8 @@ public final class ClientInventory {
 	/** Clears every channel, metadata map and unknown-baseline buffer. */
 	public void reset() {
 		previews.clear();
+		requests.clear();
+		schemaDisabled.clear();
 		for (TrackingState state : tracking.values())
 			store.expire(state.channel);
 		tracking.clear();
@@ -356,8 +453,8 @@ public final class ClientInventory {
 		nextRequestId = 1L;
 		helloAttempts = 0;
 		offered = false;
-		presentationEpoch = presentationView = 0; policyView = -1; nextCommitId = 1; allowedTypes = Set.of();
-		knownMarkers.clear(); pendingCommits.clear(); selectionResults.clear();
+		presentationEpoch = presentationView = 0; policyViews.clear(); nextCommitId = 1; allowedTypes.clear();
+		knownMarkers.clear(); markerKinds.clear(); pendingCommits.clear(); selectionResults.clear();
 	}
 
 	/**
@@ -366,7 +463,7 @@ public final class ClientInventory {
 	 * and sent once the epoch is established. Returns {@link #NO_REQUEST} when
 	 * the preview channel bound is reached or the target is absent.
 	 */
-	public long open(Target target) {
+	public long open(@Nullable Target target) {
 		return NO_REQUEST; // No face is never an unsided or inferred-UP view.
 	}
 	/**
@@ -377,32 +474,37 @@ public final class ClientInventory {
 	 * coordinate is invented. A committed external target, an entity, a
 	 * location, or a missing face never opens a channel.
 	 */
-	public long open(CapturedPingContext frozen) {
+	public long open(@Nullable CapturedPingContext frozen) {
 		if (frozen == null || frozen.blockHitFace().isEmpty()) return NO_REQUEST;
 		Target target = frozen.resolvedTarget().target();
 		if (!(target instanceof Target.BlockTarget)
 			&& !(target instanceof Target.ExternalBlockTarget external && external.isCandidate())) return NO_REQUEST;
 		return open(target, frozen.blockHitFace().get(), frozen.resolvedTarget().targetType().id());
 	}
-	public long open(Target target, BlockFace face, String targetType) {
+	public long open(@Nullable Target target, @Nullable BlockFace face, String targetType) {
 		if (face == null || !isOpenTarget(target) || !nx.pingwheel.common.presentation.PresentationSettings.isKnownTargetType(targetType)
-			|| previews.size() >= MAX_PREVIEW_CHANNELS) {
+			|| schemaUnavailable() || requests.size() >= MAX_PREVIEW_CHANNELS) {
 			boundRejects++;
 			return NO_REQUEST;
 		}
 		long requestId = nextRequestId++;
-		PreviewState state = new PreviewState(requestId, target, face, targetType);
-		previews.put(requestId, state);
-		if (ready() && allowedTypes.contains(targetType)) {
-			sendOpen(state);
+		PreviewRequest request = new PreviewRequest();
+		requests.put(requestId, request);
+		for (InventoryResourceKind kind : InventoryResourceKind.values()) {
+			if (schemaDisabled.contains(kind) || ready(kind) && !allows(kind, targetType)) continue;
+			PreviewState state = new PreviewState(kind, request, requestId, target, face, targetType);
+			previews.put(new PreviewKey(requestId, kind), state);
 		}
+		for (PreviewState state : List.copyOf(previews.values()))
+			if (state.requestId == requestId && requests.containsKey(requestId) && allows(state.resourceKind, targetType)) sendOpen(state);
 		return requestId;
 	}
 
 	/** Releases a preview request and forgets its partial list. */
 	public void close(long requestId) {
-		PreviewState state = previews.remove(requestId);
-		if (state != null && state.sent && offered) {
+		@Nullable PreviewRequest request = requests.remove(requestId);
+		previews.keySet().removeIf(key -> key.requestId() == requestId);
+		if (request != null && request.sent && offered) {
 			 send(InventoryC2SPacket.close(epoch, requestId).stamp(presentationEpoch, presentationView));
 		}
 	}
@@ -416,27 +518,30 @@ public final class ClientInventory {
 		return false; // SELECT cannot invent a reference from client item metadata.
 	}
 	public @Unmodifiable List<PreviewEntryReference> selectable(long requestId) {
-		@Nullable PreviewState state = previews.get(requestId);
-		if (state == null || !state.serverSeen || state.released || !ready() || !allowedTypes.contains(state.targetType)
+		return selectable(requestId, InventoryResourceKind.ITEM);
+	}
+	public @Unmodifiable List<PreviewEntryReference> selectable(long requestId, InventoryResourceKind kind) {
+		@Nullable PreviewState state = previews.get(new PreviewKey(requestId, kind));
+		if (state == null || !state.serverSeen || state.request.released || !allows(kind, state.targetType)
 			|| state.status == InventoryS2CPacket.Status.INVALID) return List.of();
-		return state.entries.keySet().stream().map(key -> new PreviewEntryReference(requestId, state.baselineId, state.statusRevision, key)).toList();
+		return state.entries.keySet().stream().map(key -> new PreviewEntryReference(kind, requestId, state.baselineId, state.statusRevision, key)).toList();
 	}
 	/** Single-use release. The injected dispatcher owns the shared courtesy limiter and transport result. */
 	public DispatchOutcome select(@Nullable PreviewEntryReference reference, String itemPingType, Function<InventoryC2SPacket, DispatchOutcome> dispatch) {
-		if (!ready()) return DispatchOutcome.NOT_READY;
-		@Nullable PreviewState state = reference == null ? null : previews.get(reference.requestId());
+		if (reference == null || !ready(reference.resourceKind())) return DispatchOutcome.NOT_READY;
+		@Nullable PreviewState state = previews.get(new PreviewKey(reference.requestId(), reference.resourceKind()));
 		if (state == null || state.baselineId != reference.baselineId() || state.statusRevision != reference.stateRevision()
-			|| !state.entries.containsKey(reference.entryKey()) || !bounded(itemPingType) || !allowedTypes.contains(state.targetType)) return DispatchOutcome.STALE_REFERENCE;
-		if (state.released) return DispatchOutcome.ALREADY_RELEASED;
-		state.released = true;
+			|| !state.entries.containsKey(reference.entryKey()) || !bounded(itemPingType) || !allows(state.resourceKind, state.targetType)) return DispatchOutcome.STALE_REFERENCE;
+		if (state.request.released) return DispatchOutcome.ALREADY_RELEASED;
+		state.request.released = true;
 		if (state.status == InventoryS2CPacket.Status.INVALID)
 			return DispatchOutcome.STALE_REFERENCE;
 		long commit = nextCommitId++;
-		var packet = InventoryC2SPacket.select(epoch, presentationEpoch, presentationView, commit, state.requestId,
+		var packet = InventoryC2SPacket.select(state.resourceKind, epoch, presentationEpoch, presentationView, commit, state.requestId,
 			reference.baselineId(), reference.stateRevision(), reference.entryKey(), itemPingType);
 		DispatchOutcome outcome = dispatch.apply(packet);
 		if (outcome == DispatchOutcome.SENT) {
-			pendingCommits.put(commit, state.requestId);
+			pendingCommits.put(commit, new PendingCommit(state.requestId, state.resourceKind));
 			while (pendingCommits.size() > 64) pendingCommits.remove(pendingCommits.keySet().iterator().next());
 		}
 		return outcome;
@@ -448,15 +553,21 @@ public final class ClientInventory {
 	 * consumer can distinguish revocation from normal loading.
 	 */
 	public boolean hasPreview(long requestId) {
-		return previews.containsKey(requestId);
+		return previews.keySet().stream().anyMatch(key -> key.requestId() == requestId);
+	}
+	public boolean hasPreview(long requestId, InventoryResourceKind kind) {
+		return previews.containsKey(new PreviewKey(requestId, kind));
 	}
 
 	/** Immutable preview projection; an unknown request yields an empty preview. */
 	public Preview preview(long requestId) {
-		PreviewState state = previews.get(requestId);
+		return preview(requestId, InventoryResourceKind.ITEM);
+	}
+	public Preview preview(long requestId, InventoryResourceKind kind) {
+		@Nullable PreviewState state = previews.get(new PreviewKey(requestId, kind));
 		if (state == null)
-			return Preview.empty(requestId);
-		return new Preview(state.requestId, state.status, state.completeScan,
+			return Preview.empty(requestId, kind);
+		return new Preview(kind, state.requestId, state.status, state.completeScan,
 			state.receivedPartIndexes.cardinality(),
 			state.totalParts, state.baselineId, state.statusRevision, state.watermark,
 			state.status == InventoryS2CPacket.Status.INVALID, List.copyOf(state.entries.values()));
@@ -478,14 +589,14 @@ public final class ClientInventory {
 		for (EntryView view : state.metadata.values()) {
 			InventoryClientStore.@Nullable Value value = committed.get(view.key());
 			entries.add(value == null ? view
-				: new EntryView(view.key(), view.itemId(), view.label(), view.displayJson(), value.count(),
+				: new EntryView(view.resourceKind(), view.key(), view.itemId(), view.label(), view.displayJson(), value.count(),
 					view.fallback(), view.quality(), view.itemPingType()));
 		}
 		boolean history = !state.sourceComplete && state.historical != null;
 		if (!state.sourceComplete && state.committed && state.closedCut) {
 			// Fresh fragments may already be applied per key. The provisional
 			// display still belongs to the last closed seed, not that partial cut.
-			entries = state.closedEntries.values().stream().map(ClientInventory::viewOf).toList();
+			entries = state.closedEntries.values().stream().map(entry -> viewOf(state.resourceKind, entry)).toList();
 		}
 		// Keep accepted wire status for control/digest processing. A completion
 		// control cannot present the retained seed as fresh before its data cut closes.
@@ -495,13 +606,22 @@ public final class ClientInventory {
 			else if (displayStatus == InventoryS2CPacket.Status.READY || displayStatus == InventoryS2CPacket.Status.UNCERTAIN)
 				displayStatus = InventoryS2CPacket.Status.UPDATING;
 		}
-		return new Tracking(markerId, displayStatus,
-			store.isInvalid(state.channel) || history || isPreviewTerminalFailure(state.status), state.sourceComplete,
+		return new Tracking(state.resourceKind, markerId, displayStatus,
+			store.isInvalid(state.channel) || (history && !sableFluidUpdating(state, displayStatus)) || isPreviewTerminalFailure(state.status), state.sourceComplete,
 			store.baselineId(state.channel), state.statusRevision, state.watermark, history ? state.historical : List.copyOf(entries));
+	}
+	private boolean sableFluidUpdating(TrackingState state, InventoryS2CPacket.Status displayStatus) {
+		// Server UPDATING starts a fresh scope cut without declaring the old source
+		// invalid. Retained values stay display-only; real failures remain latched.
+		return sableFluid(state) && displayStatus == InventoryS2CPacket.Status.UPDATING && state.historicalFailure == null;
+	}
+	private boolean sableFluid(TrackingState state) {
+		@Nullable MarkerMetadata marker = knownMarkers.get(state.markerId);
+		return state.resourceKind == InventoryResourceKind.FLUID && marker != null && marker.sable;
 	}
 
 	public Stats stats() {
-		return new Stats(previews.size(), tracking.size(), unknown.size(), invalidPackets,
+		return new Stats(requests.size(), tracking.size(), unknown.size(), invalidPackets,
 			staleEpochPackets, fencedPackets, boundRejects, droppedUnknownSessions, expiredUnknownSessions,
 			 repairRequests, acceptedPackets, capRejectedPackets, capFencedStates, helloAttempts, ready(), epoch);
 	}
@@ -511,13 +631,11 @@ public final class ClientInventory {
 	 * epoch, and packets fenced by a newer status revision change nothing. An
 	 * OFFER is only accepted as the first offer of this connection.
 	 */
-	public void accept(InventoryS2CPacket packet) {
+	public void accept(@Nullable InventoryS2CPacket packet) {
 		if (packet == null || packet.isCorrupt()) {
 			invalidPackets++;
 			return;
 		}
-		// Until the fluid UI/store lane is installed, keep FLUID policy/data out of the item baseline.
-		if (packet.resourceKind() != nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM) { fencedPackets++; return; }
 		if (packet.kind() == InventoryS2CPacket.Kind.OFFER) {
 			acceptOffer(packet);
 			return;
@@ -528,24 +646,40 @@ public final class ClientInventory {
 		}
 		if (packet.presentationEpoch() != presentationEpoch || packet.view() != presentationView) { fencedPackets++; return; }
 		if (packet.kind() == InventoryS2CPacket.Kind.POLICY) {
-			allowedTypes = packet.allowedTypes(); policyView = packet.view();
-			for (TrackingState state : List.copyOf(tracking.values())) if (!allowedTypes.contains(knownMarkers.get(state.markerId))) {
-				store.expire(state.channel); tracking.remove(state.markerId); removeUnknownSessions(state.markerId);
+			InventoryResourceKind lane = packet.resourceKind();
+			allowedTypes.put(lane, packet.allowedTypes()); policyViews.put(lane, packet.view());
+			for (MarkerMetadata marker : knownMarkers.values())
+				if (!allows(lane, marker.targetType)) marker.receiptDenials.add(lane);
+			for (TrackingState state : List.copyOf(tracking.values())) {
+				@Nullable MarkerMetadata metadata = knownMarkers.get(state.markerId);
+				if (state.resourceKind == lane && (metadata == null || !allows(lane, metadata.targetType))) {
+					store.expire(state.channel); tracking.remove(state.markerId); removeUnknownSessions(state.markerId);
+				}
 			}
-			previews.values().removeIf(state -> !allowedTypes.contains(state.targetType));
-			for (PreviewState state : previews.values()) if (!state.sent && allowedTypes.contains(state.targetType)) sendOpen(state);
+			previews.values().removeIf(state -> state.resourceKind == lane && !allows(lane, state.targetType));
+			for (PreviewState state : List.copyOf(previews.values()))
+				if (requests.containsKey(state.requestId) && allows(state.resourceKind, state.targetType)) sendOpen(state);
 			return;
 		}
-		if (!ready()) { fencedPackets++; return; }
 		if (packet.kind() == InventoryS2CPacket.Kind.SELECTED || packet.kind() == InventoryS2CPacket.Kind.REJECT) {
-			Long request = pendingCommits.remove(packet.commitId());
-			if (request == null || request != packet.requestId()) return;
-			selectionResults.put(packet.commitId(), new SelectionResult(packet.commitId(), request, packet.markerId(), packet.rejection()));
+			@Nullable PendingCommit pending = pendingCommits.get(packet.commitId());
+			if (pending == null || pending.requestId() != packet.requestId() || pending.kind() != packet.resourceKind()) return;
+			if (packet.kind() == InventoryS2CPacket.Kind.SELECTED && packet.markerId() != null
+				&& knownMarkers.containsKey(packet.markerId())) {
+				@Nullable InventoryResourceKind previous = markerKinds.putIfAbsent(packet.markerId(), packet.resourceKind());
+				if (previous != null && previous != packet.resourceKind()) { fencedPackets++; return; }
+			}
+			pendingCommits.remove(packet.commitId());
+			selectionResults.put(packet.commitId(), new SelectionResult(packet.resourceKind(), packet.commitId(), pending.requestId(), packet.markerId(), packet.rejection()));
 			while (selectionResults.size() > 64) selectionResults.remove(selectionResults.keySet().iterator().next());
 			return;
 		}
-		if (packet.markerId() != null && (!knownMarkers.containsKey(packet.markerId()) || !allowedTypes.contains(knownMarkers.get(packet.markerId())))) { fencedPackets++; return; }
-		if (packet.kind() == InventoryS2CPacket.Kind.PREVIEW && !previews.containsKey(packet.requestId())) { fencedPackets++; return; }
+		if (!ready(packet.resourceKind())) { fencedPackets++; return; }
+		@Nullable MarkerMetadata marker = knownMarkers.get(packet.markerId());
+		if (packet.markerId() != null && (marker == null || !allows(packet.resourceKind(), marker.targetType)
+			|| markerKinds.containsKey(packet.markerId()) && markerKinds.get(packet.markerId()) != packet.resourceKind())) { fencedPackets++; return; }
+		if (packet.kind() == InventoryS2CPacket.Kind.PREVIEW
+			&& !previews.containsKey(new PreviewKey(packet.requestId(), packet.resourceKind()))) { fencedPackets++; return; }
 		if (isData(packet.kind()) && !withinEffectiveCaps(packet, effectiveDisplayBytes, effectiveFrameBytes)) { capRejectedPackets++; return; }
 		acceptedPackets++;
 		switch (packet.kind()) {
@@ -558,11 +692,11 @@ public final class ClientInventory {
 	}
 
 	private void acceptOffer(InventoryS2CPacket packet) {
-		InventoryS2CPacket.Offer next = packet.offer();
+		InventoryS2CPacket.@Nullable Offer next = packet.offer();
 		if (next == null || (offered && packet.epoch() != epoch)
 			|| presentationEpoch != 0 && (packet.presentationEpoch() != presentationEpoch || packet.view() != presentationView))
 			return;
-		InventoryS2CPacket.Offer previous = offer;
+		InventoryS2CPacket.@Nullable Offer previous = offer;
 		offered = true;
 		epoch = packet.epoch();
 		offer = next;
@@ -572,8 +706,8 @@ public final class ClientInventory {
 		} else {
 			applyEffectiveCaps(next);
 		}
-		for (PreviewState state : previews.values()) {
-			if (!state.sent && ready() && allowedTypes.contains(state.targetType))
+		for (PreviewState state : List.copyOf(previews.values())) {
+			if (requests.containsKey(state.requestId) && allows(state.resourceKind, state.targetType))
 				sendOpen(state);
 		}
 	}
@@ -658,7 +792,7 @@ public final class ClientInventory {
 			EntryView view = entry.getValue();
 			if (view.displayJson() == null || utf8Length(view.displayJson()) <= displayBytes)
 				continue;
-			entry.setValue(new EntryView(view.key(), view.itemId(), view.label(), null, view.count(),
+			entry.setValue(new EntryView(view.resourceKind(), view.key(), view.itemId(), view.label(), null, view.count(),
 				view.fallback(), view.quality(), view.itemPingType()));
 			changed = true;
 		}
@@ -696,12 +830,13 @@ public final class ClientInventory {
 	}
 
 	private void sendOpen(PreviewState state) {
-		state.sent = true;
+		if (state.request.sent) return;
+		state.request.sent = true;
 		send(InventoryC2SPacket.open(epoch, presentationEpoch, presentationView, state.requestId, state.target, state.face));
 	}
 
 	/** An inventory-v2 OPEN target is one native block or one uncommitted external candidate. */
-	private static boolean isOpenTarget(Target target) {
+	private static boolean isOpenTarget(@Nullable Target target) {
 		return target instanceof Target.BlockTarget
 			|| (target instanceof Target.ExternalBlockTarget external && external.isCandidate());
 	}
@@ -711,12 +846,14 @@ public final class ClientInventory {
 	}
 
 	private void acceptPreview(InventoryS2CPacket packet) {
-		PreviewState state = previews.get(packet.requestId());
+		@Nullable PreviewState state = previews.get(new PreviewKey(packet.requestId(), packet.resourceKind()));
 		if (state == null) {
 			fencedPackets++;
 			return;
 		}
 		if (packet.statusRevision() < state.statusRevision
+			|| state.status == InventoryS2CPacket.Status.INVALID && packet.statusRevision() == state.statusRevision
+				&& packet.status() != InventoryS2CPacket.Status.INVALID
 			|| (packet.statusRevision() == state.statusRevision && state.serverSeen
 				&& packet.baselineId() < state.baselineId)) {
 			fencedPackets++;
@@ -788,13 +925,13 @@ public final class ClientInventory {
 	private boolean applyPreviewEntries(PreviewState state, List<InventoryS2CPacket.Entry> entries) {
 		boolean allAccepted = true;
 		for (InventoryS2CPacket.Entry entry : entries) {
-			Long group = state.groups.get(entry.itemId());
+			@Nullable Long group = state.groups.get(entry.itemId());
 			if (group != null && (!entry.fallback() || entry.groupRevision() < group)) continue;
-			Long knownRevision = state.itemRevisions.get(entry.key());
+			@Nullable Long knownRevision = state.itemRevisions.get(entry.key());
 			if (knownRevision != null && entry.itemRevision() < knownRevision)
 				continue;
-			EntryView view = viewOf(entry);
-			EntryView previous = state.entries.get(entry.key());
+			EntryView view = viewOf(state.resourceKind, entry);
+			@Nullable EntryView previous = state.entries.get(entry.key());
 			int size = byteSize(view);
 			int nextBytes = state.bytes - (previous == null ? 0 : byteSize(previous)) + size;
 			List<String> removed = entry.replaceGroup() ? state.entries.values().stream().filter(old -> old.itemId().equals(entry.itemId()) && !old.key().equals(entry.key())).map(EntryView::key).toList() : List.of();
@@ -820,7 +957,7 @@ public final class ClientInventory {
 	}
 
 	private void acceptTrackedData(InventoryS2CPacket packet) {
-		@Nullable TrackingState state = trackingState(packet.markerId());
+		@Nullable TrackingState state = trackingState(packet.resourceKind(), packet.markerId());
 		if (state == null)
 			return;
 		state.serverRequestId = packet.requestId();
@@ -919,13 +1056,13 @@ public final class ClientInventory {
 
 	private void applyUpdates(TrackingState state, InventoryS2CPacket packet) {
 		List<InventoryS2CPacket.Entry> permitted = packet.entries().stream().filter(entry -> {
-			Long group = state.groups.get(entry.itemId());
+			@Nullable Long group = state.groups.get(entry.itemId());
 			return group == null || entry.fallback() && entry.groupRevision() >= group;
 		}).toList();
-		packet = InventoryS2CPacket.data(packet.kind(), packet.epoch(), packet.requestId(), packet.markerId(), packet.baselineId(), packet.statusRevision(),
+		packet = InventoryS2CPacket.data(packet.resourceKind(), packet.kind(), packet.epoch(), packet.requestId(), packet.markerId(), packet.baselineId(), packet.statusRevision(),
 			packet.watermark(), packet.partIndex(), packet.partCount(), packet.completeScan(), packet.status(), packet.checksum(), permitted).stamp(packet.presentationEpoch(), packet.view());
-		TrackingBatch batch = state.batches.get(packet.watermark());
-		TrackingBatch closed = state.closedBatches.get(packet.watermark());
+		@Nullable TrackingBatch batch = state.batches.get(packet.watermark());
+		@Nullable TrackingBatch closed = state.closedBatches.get(packet.watermark());
 		if (closed != null) {
 			// Closed deliveries retain a bounded replay guard; they never become new batches.
 			admitPart(state, closed, packet, false);
@@ -961,9 +1098,9 @@ public final class ClientInventory {
 		}
 		List<InventoryS2CPacket.Entry> cutEntries = new ArrayList<>(packet.entries().size());
 		for (InventoryS2CPacket.Entry entry : packet.entries()) {
-			InventoryClientStore.Value previous = before.get(entry.key());
+			InventoryClientStore.@Nullable Value previous = before.get(entry.key());
 			if (previous == null || entry.itemRevision() > previous.revision())
-				nextMetadata.put(entry.key(), viewOf(entry));
+				nextMetadata.put(entry.key(), viewOf(state.resourceKind, entry));
 			if (previous != null && entry.itemRevision() == previous.revision()) {
 				EntryView accepted = state.metadata.get(entry.key());
 				cutEntries.add(new InventoryS2CPacket.Entry(accepted.key(), accepted.itemId(), accepted.label(),
@@ -1018,7 +1155,7 @@ public final class ClientInventory {
 		state.metadata.clear();
 		state.groups.clear();
 		for (InventoryS2CPacket.Entry entry : batch.entries.values())
-			state.metadata.put(entry.key(), viewOf(entry));
+			state.metadata.put(entry.key(), viewOf(state.resourceKind, entry));
 		for (var entry : batch.entries.values()) if (entry.replaceGroup()) state.groups.put(entry.itemId(), entry.groupRevision());
 		state.pending = null;
 		Map<Long, Long> heartbeats = new LinkedHashMap<>(state.heartbeats);
@@ -1050,7 +1187,7 @@ public final class ClientInventory {
 			scheduleRepair(state);
 			return false;
 		}
-		InventoryS2CPacket previous = batch.parts.get(packet.partIndex());
+		@Nullable InventoryS2CPacket previous = batch.parts.get(packet.partIndex());
 		if (previous != null) {
 			if (!samePart(previous, packet)) {
 				boundRejects++;
@@ -1068,7 +1205,7 @@ public final class ClientInventory {
 			}
 		} else {
 			for (InventoryS2CPacket.Entry entry : packet.entries()) {
-				InventoryS2CPacket.Entry known = batch.entries.get(entry.key());
+				InventoryS2CPacket.@Nullable Entry known = batch.entries.get(entry.key());
 				if (known != null && known.itemRevision() == entry.itemRevision() && !known.equals(entry)) {
 					boundRejects++;
 					scheduleRepair(state);
@@ -1092,7 +1229,7 @@ public final class ClientInventory {
 		// Close admitted deliveries in watermark order. Live values can already be
 		// newer; using them here would make a valid earlier heartbeat look corrupt.
 		while (!state.batches.isEmpty()) {
-			TrackingBatch first = null;
+			@Nullable TrackingBatch first = null;
 			for (TrackingBatch batch : state.batches.values()) {
 				if (first == null || batch.watermark < first.watermark)
 					first = batch;
@@ -1148,7 +1285,7 @@ public final class ClientInventory {
 		for (InventoryS2CPacket.Entry entry : entries) {
 			if (entry.replaceGroup()) target.values().removeIf(old -> old.itemId().equals(entry.itemId()) && !old.key().equals(entry.key()) && old.groupRevision() <= entry.groupRevision());
 			if (!entry.fallback() && target.values().stream().anyMatch(old -> old.itemId().equals(entry.itemId()) && old.replaceGroup() && old.groupRevision() >= entry.groupRevision())) continue;
-			InventoryS2CPacket.Entry previous = target.get(entry.key());
+			InventoryS2CPacket.@Nullable Entry previous = target.get(entry.key());
 			if (previous == null || entry.itemRevision() > previous.itemRevision())
 				target.put(entry.key(), entry);
 		}
@@ -1189,7 +1326,7 @@ public final class ClientInventory {
 	}
 
 	private void acceptStatus(InventoryS2CPacket packet) {
-		@Nullable TrackingState state = trackingState(packet.markerId());
+		@Nullable TrackingState state = trackingState(packet.resourceKind(), packet.markerId());
 		if (state == null)
 			return;
 		state.serverRequestId = packet.requestId();
@@ -1253,7 +1390,6 @@ public final class ClientInventory {
 			}
 		}
 	}
-
 	private void compareCompletion(TrackingState state) {
 		if (state.completionWatermark < 0 || !state.committed || !state.closedCut || store.assembling(state.channel)) return;
 		if (state.completionWatermark < state.watermark) { clearCompletion(state); return; }
@@ -1284,7 +1420,7 @@ public final class ClientInventory {
 	}
 
 	private void acceptHeartbeat(InventoryS2CPacket packet) {
-		TrackingState state = tracking.get(packet.markerId());
+		@Nullable TrackingState state = tracking.get(packet.markerId());
 		if (state == null || store.isInvalid(state.channel))
 			return;
 		boolean pendingFence = state.pending != null && state.pending.baselineId == packet.baselineId()
@@ -1314,7 +1450,7 @@ public final class ClientInventory {
 			if (watermark <= state.watermark)
 				return;
 		}
-		Long checksum = state.heartbeats.remove(state.watermark);
+		@Nullable Long checksum = state.heartbeats.remove(state.watermark);
 		state.heartbeats.keySet().removeIf(watermark -> watermark < state.watermark);
 		if (checksum != null && state.committedChecksum != checksum)
 			scheduleRepair(state);
@@ -1331,13 +1467,13 @@ public final class ClientInventory {
 		if (cooldown > 0 && ticks < state.nextRepairTick)
 			return;
 		state.nextRepairTick = ticks + cooldown;
-		send(InventoryC2SPacket.resync(epoch, 0, state.markerId).stamp(presentationEpoch, presentationView));
+		send(InventoryC2SPacket.resync(state.resourceKind, epoch, 0, state.markerId).stamp(presentationEpoch, presentationView));
 		repairRequests++;
 	}
 
 	private void bufferUnknown(TrackingState state, InventoryS2CPacket packet) {
-		UnknownKey key = new UnknownKey(state.markerId, packet.baselineId(), packet.statusRevision());
-		UnknownSession session = unknown.get(key);
+		UnknownKey key = new UnknownKey(state.resourceKind, state.markerId, packet.baselineId(), packet.statusRevision());
+		@Nullable UnknownSession session = unknown.get(key);
 		if (session == null) {
 			if (unknown.size() >= MAX_UNKNOWN_SESSIONS) {
 				boundRejects++;
@@ -1369,14 +1505,14 @@ public final class ClientInventory {
 				continue;
 			iterator.remove();
 			expiredUnknownSessions++;
-			TrackingState state = tracking.get(entry.getKey().markerId());
+			@Nullable TrackingState state = tracking.get(entry.getKey().markerId());
 			if (state != null)
 				scheduleRepair(state);
 		}
 	}
 
 	private void flushUnknownIntoAssembly(TrackingState state, long baselineId, long statusRevision) {
-		UnknownSession session = unknown.remove(new UnknownKey(state.markerId, baselineId, statusRevision));
+		@Nullable UnknownSession session = unknown.remove(new UnknownKey(state.resourceKind, state.markerId, baselineId, statusRevision));
 		if (session == null)
 			return;
 		for (InventoryS2CPacket fragment : session.fragments) {
@@ -1394,22 +1530,24 @@ public final class ClientInventory {
 		unknown.keySet().removeIf(key -> key.markerId().equals(markerId));
 	}
 
-	private @Nullable TrackingState trackingState(@Nullable MarkerId markerId) {
+	private @Nullable TrackingState trackingState(InventoryResourceKind kind, @Nullable MarkerId markerId) {
 		if (markerId == null)
 			return null;
 		@Nullable TrackingState existing = tracking.get(markerId);
 		if (existing != null)
-			return existing;
+			return existing.resourceKind == kind ? existing : null;
 		if (tracking.size() >= MAX_TRACKED_CHANNELS) {
 			boundRejects++;
 			return null;
 		}
-		TrackingState state = new TrackingState(markerId, InventoryClientStore.Channel.tracked(markerId.value()));
+		if (markerKinds.containsKey(markerId) && markerKinds.get(markerId) != kind) return null;
+		markerKinds.put(markerId, kind);
+		TrackingState state = new TrackingState(kind, markerId, InventoryClientStore.Channel.tracked(markerId.value()));
 		tracking.put(markerId, state);
 		return state;
 	}
 
-	private static void clearTrackingState(TrackingState state) {
+	private void clearTrackingState(TrackingState state) {
 		retainHistory(state);
 		state.metadata.clear();
 		state.pending = null;
@@ -1419,11 +1557,14 @@ public final class ClientInventory {
 		state.committedChecksum = 0L;
 		state.watermark = 0L;
 	}
-	private static void retainHistory(TrackingState state) {
+	private void retainHistory(TrackingState state) {
 		// Only a received closed cut can replace history. Metadata may contain
 		// unfinished per-key updates even after invalidation clears the cut.
-		if (state.committed && state.closedCut)
-			state.historical = state.closedEntries.values().stream().map(ClientInventory::viewOf).toList();
+		// A Sable fluid re-scope keeps its original quantity even if a provisional
+		// replacement closes in transport before a fresh source scan completes.
+		boolean keepScopeHistory = sableFluid(state) && state.historical != null && !state.sourceComplete;
+		if (state.committed && state.closedCut && !keepScopeHistory)
+			state.historical = state.closedEntries.values().stream().map(entry -> viewOf(state.resourceKind, entry)).toList();
 		if (isPreviewTerminalFailure(state.status)) state.historicalFailure = state.status;
 	}
 
@@ -1439,7 +1580,7 @@ public final class ClientInventory {
 	}
 
 	private long computeChecksum(TrackingState state) {
-		InventoryChecksums.Builder builder = InventoryChecksums.builder();
+		InventoryChecksums.Builder builder = InventoryChecksums.builder(state.resourceKind);
 		for (InventoryS2CPacket.Entry entry : state.closedEntries.values()) {
 			builder.add(entry.key(), entry.itemId(), entry.count(), qualityToken(entry.quality()), entry.fallback());
 		}
@@ -1471,15 +1612,18 @@ public final class ClientInventory {
 	}
 
 	private static EntryView viewOf(InventoryS2CPacket.Entry entry) {
-		return new EntryView(entry.key(), entry.itemId(), entry.label(), entry.displayJson(), entry.count(),
+		return viewOf(InventoryResourceKind.ITEM, entry);
+	}
+	private static EntryView viewOf(InventoryResourceKind kind, InventoryS2CPacket.Entry entry) {
+		return new EntryView(kind, entry.key(), entry.itemId(), entry.label(), entry.displayJson(), entry.count(),
 			entry.fallback(), entry.quality(), entry.itemPingType());
 	}
 
-	private static String qualityToken(InventoryS2CPacket.Status quality) {
+	private static @Nullable String qualityToken(InventoryS2CPacket.@Nullable Status quality) {
 		return quality == null ? null : quality.name();
 	}
 
-	private static boolean bounded(String value) {
+	private static boolean bounded(@Nullable String value) {
 		return value != null && !value.isBlank()
 			&& value.getBytes(StandardCharsets.UTF_8).length <= InventoryC2SPacket.MAX_ID_BYTES;
 	}

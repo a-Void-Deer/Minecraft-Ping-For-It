@@ -1,6 +1,9 @@
 package nx.pingwheel.common.client.spatial;
 
 import java.util.ArrayList;
+import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -104,27 +107,47 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	 * {@code displayJson} is the immutable server-bounded encoded display value;
 	 * null keeps the native registry-name fallback.
 	 */
-	public record InventoryRow<R>(String key, String label, Long count, String itemId, String displayJson, Status quality, R reference) {
+	public record InventoryRow<R>(InventoryResourceKind resourceKind, String key, String label, @Nullable Long count, @Nullable String itemId,
+		@Nullable String displayJson, Status quality, R reference) {
 		public InventoryRow {
 			requireId(key); Objects.requireNonNull(label); Objects.requireNonNull(quality); Objects.requireNonNull(reference);
 			if (count != null && count < 0) throw new IllegalArgumentException("negative display count");
 		}
 
 		/** Compatibility form without encoded display data. */
-		public InventoryRow(String key, String label, Long count, String itemId, Status quality, R reference) {
-			this(key, label, count, itemId, null, quality, reference);
+		public InventoryRow(String key, String label, @Nullable Long count, @Nullable String itemId, Status quality, R reference) {
+			this(InventoryResourceKind.ITEM, key, label, count, itemId, null, quality, reference);
 		}
+		public InventoryRow(String key, String label, @Nullable Long count, @Nullable String itemId, @Nullable String displayJson, Status quality, R reference) {
+			this(InventoryResourceKind.ITEM, key, label, count, itemId, displayJson, quality, reference);
+		}
+	}
+	public record InventoryGroup(InventoryResourceKind resourceKind, String labelKey, Status status,
+		@Unmodifiable List<PingType> allowedTypes, @Nullable PingType defaultType, boolean reset) {
+		public InventoryGroup { allowedTypes = checkedTypes(allowedTypes, defaultType); }
 	}
 
 	/** Rows may be a sparse discovery/update batch; status owns completeness independently. */
-	public record InventoryPreview<R>(String labelKey, Status status, List<InventoryRow<R>> rows,
-		List<PingType> allowedItemTypes, PingType defaultItemType) {
+	public record InventoryPreview<R>(String labelKey, Status status, @Unmodifiable List<InventoryRow<R>> rows,
+		@Unmodifiable List<PingType> allowedItemTypes, @Nullable PingType defaultItemType, @Unmodifiable List<InventoryGroup> resourceGroups) {
+		public InventoryPreview(String labelKey, Status status, List<InventoryRow<R>> rows, List<PingType> allowedItemTypes, @Nullable PingType defaultItemType) {
+			this(labelKey, status, rows, allowedItemTypes, defaultItemType, List.of());
+		}
 		public InventoryPreview {
+			resourceGroups = List.copyOf(resourceGroups);
 			Objects.requireNonNull(labelKey); Objects.requireNonNull(status); rows = List.copyOf(rows);
 			allowedItemTypes = checkedTypes(allowedItemTypes, defaultItemType);
 			Set<String> seen = new HashSet<>();
 			for (InventoryRow<R> row : rows)
 				if (!seen.add(row.key())) throw new IllegalArgumentException("duplicate inventory row");
+		}
+		public @Unmodifiable List<PingType> allowed(InventoryResourceKind kind) {
+			return resourceGroups.isEmpty() ? allowedItemTypes : resourceGroups.stream().filter(group -> group.resourceKind() == kind
+				&& !unavailable(group.status())).findFirst().map(InventoryGroup::allowedTypes).orElse(List.of());
+		}
+		public @Nullable PingType defaultType(InventoryResourceKind kind) {
+			return resourceGroups.isEmpty() ? defaultItemType : resourceGroups.stream().filter(group -> group.resourceKind() == kind
+				&& !unavailable(group.status())).map(InventoryGroup::defaultType).filter(Objects::nonNull).findFirst().orElse(null);
 		}
 	}
 
@@ -371,13 +394,23 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		projection = unavailable ? new ContentProjection<>(fence, revision, true, update.status(), List.of(), null) : update;
 		preview = projection.inventory();
 		if (preview != null && !unavailable(preview.status()) && inventoryEligible()) {
+			if (!preview.resourceGroups().isEmpty()) {
+				Set<InventoryResourceKind> present = preview.resourceGroups().stream().filter(group -> !unavailable(group.status()))
+					.map(InventoryGroup::resourceKind).collect(java.util.stream.Collectors.toSet());
+				Set<InventoryResourceKind> reset = preview.resourceGroups().stream().filter(InventoryGroup::reset)
+					.map(InventoryGroup::resourceKind).collect(java.util.stream.Collectors.toSet());
+				rows.values().removeIf(row -> !present.contains(row.resourceKind()) || reset.contains(row.resourceKind()));
+				displays.keySet().retainAll(rows.keySet());
+				list.retainKeys(rows.keySet());
+				list.resetKinds(reset);
+			}
 			for (InventoryRow<R> row : preview.rows()) rows.put(row.key(), row);
 			if (list.isOpen()) list.applyBatch(listEntries(preview.rows()));
 			list.setStatus(preview.status() == Status.READY ? InventoryListModel.Status.COMPLETE : InventoryListModel.Status.UPDATING);
 		}
 		radial.replaceRoot(buildRoot(), nowMillis);
 		if (itemKey != null && itemMenu().equals(activeMenuId())) {
-			if (!rows.containsKey(itemKey) || preview == null || preview.allowedItemTypes().isEmpty()) radial.backProgrammatically(nowMillis);
+			if (!rows.containsKey(itemKey) || preview == null || allowedFor(itemKey).isEmpty()) radial.backProgrammatically(nowMillis);
 			else radial.replaceExternalMenu(buildItemMenu(itemKey), nowMillis);
 		}
 		if (previousSize != list.size() || previousIndex != list.selectedIndex()) listAlignmentPending = true;
@@ -614,7 +647,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 
 	private SelectorIntent<R> inventoryIntent(String key, PingType type) {
 		InventoryRow<R> row = rows.get(key);
-		if (row == null || preview == null || type == null || !preview.allowedItemTypes().contains(type)) return new SelectorIntent.None<>();
+		if (row == null || preview == null || type == null || !allowedFor(key).contains(type)) return new SelectorIntent.None<>();
 		return new SelectorIntent.SelectInventory<>(ordinary, fence, row.reference(),
 			ordinary.resolvedTarget().targetType().defaultPingType(), type);
 	}
@@ -622,7 +655,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	private SpatialMenu buildItemMenu(String key) {
 		List<SpatialMenu.Choice> choices = new ArrayList<>();
 		String menu = inventoryMenu + ":item:" + menuToken(key);
-		for (PingType type : preview.allowedItemTypes()) {
+		for (PingType type : allowedFor(key)) {
 			String action = menu + ":" + type.id();
 			actions.put(action, inventoryIntent(key, type));
 			choices.add(SpatialMenu.Choice.leaf(action, type.displayKey(), action).withOutlineColor(type.outlineColor()));
@@ -792,6 +825,8 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		SpatialInventoryView view = new SpatialInventoryView(listKey(), active && state.open(), paintRows(),
 			state.selectedIndex(), state.windowFirst(), geometry.visibleRows(),
 			state.direction().back() == InventoryListModel.Side.LEFT, previewStatus(), state.axisX(), state.glideBaseY());
+		if (preview != null) view = view.withResourceGroups(preview.resourceGroups().stream()
+			.map(group -> new SpatialInventoryView.ResourceGroup(group.resourceKind(), group.labelKey(), group.status())).toList());
 		boolean backFocused = isListActive() && gesture.isBackSideFocused();
 		view = view.withBackAffordance(backFocused, backFocused ? radial.snapshot().hoverProgress() : 0.0);
 		if (itemKey != null) view = view.withSelectedRowCenterY(itemAnchorY);
@@ -800,19 +835,19 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 
 	private List<SpatialInventoryView.Row> paintRows() {
 		List<SpatialInventoryView.Row> paintRows = new ArrayList<>();
-		PingType type = directItemType();
-		Integer outline = type != null && preview.allowedItemTypes().contains(type) ? type.outlineColor() : null;
 		for (InventoryListModel.Entry entry : list.snapshot().entries()) {
 			InventoryRow<R> row = rows.get(entry.key());
 			if (row == null) continue;
-			var paint = new SpatialInventoryView.Row(row.key(), row.label(), row.count(), row.itemId(), row.displayJson(), row.quality(), outline);
+			@Nullable PingType type = directItemType(row.key());
+			@Nullable Integer outline = type != null && allowedFor(row.key()).contains(type) ? type.outlineColor() : null;
+			var paint = new SpatialInventoryView.Row(row.resourceKind(), row.key(), row.label(), row.count(), row.itemId(), row.displayJson(), row.quality(), outline, null);
 			PreparedDisplay prepared = displays.get(row.key());
 			if (displayProjection != null && (prepared == null || !Objects.equals(prepared.itemId(), row.itemId())
 				|| !prepared.label().equals(row.label()) || !Objects.equals(prepared.json(), row.displayJson()))) {
 				prepared = new PreparedDisplay(row.itemId(), row.label(), row.displayJson(), displayProjection.apply(paint));
 				displays.put(row.key(), prepared);
 			}
-			paintRows.add(new SpatialInventoryView.Row(row.key(), row.label(), row.count(), row.itemId(), row.displayJson(),
+			paintRows.add(new SpatialInventoryView.Row(row.resourceKind(), row.key(), row.label(), row.count(), row.itemId(), row.displayJson(),
 				row.quality(), outline, prepared == null ? null : prepared.display()));
 		}
 		return paintRows;
@@ -840,10 +875,19 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	 * the live preview's default item type when ON, otherwise authorized Attention.
 	 * Missing authorization stays null instead of inventing one.
 	 */
-	private PingType directItemType() {
+	private @Nullable PingType directItemType() {
+		return directItemType(list.selectedKey());
+	}
+	private @Nullable PingType directItemType(@Nullable String key) {
 		if (preview == null || unavailable(preview.status())) return null;
-		if (settings.contentIntentEnabled()) return preview.defaultItemType();
-		return attentionType(preview.allowedItemTypes());
+		@Nullable InventoryRow<R> row = rows.get(key);
+		if (row == null) return null;
+		if (settings.contentIntentEnabled()) return preview.defaultType(row.resourceKind());
+		return attentionType(allowedFor(key));
+	}
+	private @Unmodifiable List<PingType> allowedFor(@Nullable String key) {
+		@Nullable InventoryRow<R> row = rows.get(key);
+		return preview == null || row == null ? List.of() : preview.allowed(row.resourceKind());
 	}
 
 	private static PingType attentionType(List<PingType> allowedTypes) {
@@ -860,7 +904,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		if (!settings.contentIntentEnabled() || !isListActive() || !list.isOpen()) return false;
 		String key = list.selectedKey();
 		if (key == null || !rows.containsKey(key) || preview == null || unavailable(preview.status())
-			|| preview.allowedItemTypes().isEmpty()) return false;
+			|| allowedFor(key).isEmpty()) return false;
 		return Double.isFinite(listLayout().rowCenterY(list.selectedIndex()));
 	}
 
@@ -874,7 +918,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		String key = list.selectedKey();
 		if (key == null || !rows.containsKey(key)) return false;
 		PingType type = directItemType();
-		return type != null && preview != null && preview.allowedItemTypes().contains(type);
+		return type != null && preview != null && allowedFor(key).contains(type);
 	}
 
 	private boolean isItemActive() {
@@ -882,7 +926,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	}
 
 	private List<InventoryListModel.Entry> listEntries(List<InventoryRow<R>> batch) {
-		return batch.stream().map(row -> new InventoryListModel.Entry(row.key(), row.label(),
+		return batch.stream().map(row -> new InventoryListModel.Entry(row.resourceKind(), row.key(), row.label(),
 			row.count() == null ? -1 : row.count(), row.quality().name())).toList();
 	}
 

@@ -1469,12 +1469,18 @@ public final class ClientPingRuntime {
 		public nx.pingwheel.common.render.SpatialInventoryView.RowDisplay inventoryDisplay(
 			nx.pingwheel.common.render.SpatialInventoryView.Row row) {
 			try {
+				if (row.resourceKind() == nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID) {
+					var fluid = nx.pingwheel.common.presentation.inventory.client.ClientFluidDisplay.resolve(row.itemId(), row.label(), row.displayJson());
+					return new nx.pingwheel.common.render.SpatialInventoryView.RowDisplay(fluid.name(), fluid.fluid());
+				}
 				var display = nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay.resolve(row.itemId(), row.label(), row.displayJson());
 				return new nx.pingwheel.common.render.SpatialInventoryView.RowDisplay(display.name(), display.stack());
 			} catch (RuntimeException | LinkageError unavailable) {
 				nx.pingwheel.common.diagnostics.Diagnostics.warn("selector/inventory-row-display", "client",
 					() -> "itemId=" + row.itemId() + " label=" + row.label(), unavailable);
-				return new nx.pingwheel.common.render.SpatialInventoryView.RowDisplay(Component.translatable(row.label()));
+				return new nx.pingwheel.common.render.SpatialInventoryView.RowDisplay(
+					row.resourceKind() == nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID
+						? nx.pingwheel.common.presentation.inventory.client.ClientFluidDisplay.fallbackName(row.label()) : Component.translatable(row.label()));
 			}
 		}
 		private SpatialSelectorSession.ListGeometry measuredListGeometry(SpatialOverlayRenderer.Style style, int width, int height) {
@@ -1916,7 +1922,9 @@ public final class ClientPingRuntime {
 		if (packet == null || packet.isCorrupt()) return;
 		if (!presentationReceiptFeedback.ready()) contentChat.clear();
 		switch (packet.kind()) {
-			case OFFER -> presentation.offer(packet);
+			case OFFER -> {
+				if (presentation.offer(packet)) syncInventorySchemas();
+			}
 			case RESET -> {
 				if (presentation.reset(packet)) {
 					contentChat.reset();
@@ -1967,6 +1975,7 @@ public final class ClientPingRuntime {
 	private @Nullable ClientInventory inventory;
 	public void inventory(@Nullable ClientInventory inventory) {
 		this.inventory = inventory;
+		syncInventorySchemas();
 		if (inventory != null && presentation.ready()) {
 			inventory.presentationReset(presentation.epoch(), presentation.sessionView());
 		}
@@ -1976,9 +1985,17 @@ public final class ClientPingRuntime {
 		return inventory == null ? nx.pingwheel.common.presentation.inventory.client.ClientInventory.DispatchOutcome.NOT_READY
 			: inventory.select(reference, itemPingType, dispatcher::dispatchInventory);
 	}
-	public void onInventoryPacket(nx.pingwheel.common.network.InventoryS2CPacket packet) {
+	private void syncInventorySchemas() {
+		if (inventory == null || !presentation.catalogOffered()) return;
+		Set<nx.pingwheel.common.presentation.inventory.InventoryResourceKind> accepted = java.util.EnumSet.noneOf(nx.pingwheel.common.presentation.inventory.InventoryResourceKind.class);
+		for (var kind : nx.pingwheel.common.presentation.inventory.InventoryResourceKind.values())
+			if (presentation.acceptedCatalog().entries().stream().anyMatch(entry -> entry.adapterId().equals(
+				nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID) && entry.field().id().equals(kind.fieldId()))) accepted.add(kind);
+		inventory.acceptedSchemas(accepted);
+	}
+	public void onInventoryPacket(nx.pingwheel.common.network.@Nullable InventoryS2CPacket packet) {
 		if (inventory == null) return;
-		var previous = packet == null ? null : inventory.selectionResult(packet.commitId());
+		ClientInventory.@Nullable SelectionResult previous = packet == null ? null : inventory.selectionResult(packet.commitId());
 		inventory.accept(packet);
 		// The packet can have been rejected: only the post-accept stores supply data.
 		if (packet != null && packet.markerId() != null) attemptContentReceipt(packet.markerId());
@@ -2018,6 +2035,8 @@ public final class ClientPingRuntime {
 			presentationReceiptFeedback.play(snapshot);
 			if (packet.content().kind() == PresentationReceiptContent.Kind.WHOLE)
 				presentationReceiptFeedback.chat(ownerName, snapshot, presentationTargetName(snapshot.id()));
+			else if (packet.content().kind() == PresentationReceiptContent.Kind.INVENTORY && inventory != null && inventory.schemaUnavailable())
+				contentChat.cancel(snapshot.id());
 			else if (contentChat.begin(packet, true)) attemptContentReceipt(snapshot.id());
 		}
 		else if (packet.content().kind() == PresentationReceiptContent.Kind.SUPPRESSED) contentChat.cancel(snapshot.id());
@@ -2030,7 +2049,7 @@ public final class ClientPingRuntime {
 		if (marker != null) presentation.previewAccess(marker.targetTypeId()).ifPresent(access ->
 			access.adapters().forEach((adapter, descriptor) -> fields.put(adapter, descriptor.fields().keySet())));
 		var authorization = inventory == null || marker == null ? Optional.<Boolean>empty()
-			: inventory.authorization(presentation.epoch(), presentation.sessionView(), marker.targetTypeId());
+			: inventory.receiptAuthorization(id, presentation.epoch(), presentation.sessionView(), marker.targetTypeId());
 		return new PendingContentChatController.Current(presentation.epoch(),
 			presentation.sessionView(), presentation.ready()
 				&& presentationReceiptFeedback.ready(), marker != null && marker.isSynchronized()

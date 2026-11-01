@@ -240,7 +240,10 @@ class ClientPingRuntimeInteractionTest {
 			runtime.onPresentationPacket(PresentationS2CPacket.offer(100, Map.of(PresentationBasic.ID, List.of(
 				new PresentationField(PresentationBasic.NAME, PresentationField.Kind.TEXT, true, 0, "Name"),
 				new PresentationField(PresentationBasic.HEALTH, PresentationField.Kind.NUMBER, true, 0, "Health"),
-				new PresentationField(PresentationBasic.MAX_HEALTH, PresentationField.Kind.NUMBER, true, 0, "Maximum health"))), Map.of(PresentationBasic.ID, 1)));
+				new PresentationField(PresentationBasic.MAX_HEALTH, PresentationField.Kind.NUMBER, true, 0, "Maximum health")),
+				nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID, nx.pingwheel.common.presentation.inventory.InventoryPresentation.INSTANCE.fields()),
+				Map.of(PresentationBasic.ID, 1, nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID,
+					nx.pingwheel.common.presentation.inventory.InventoryPresentation.INSTANCE.schema())));
 			reset(1, fields);
 			runtime.onInventoryPacket(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(5, 3, 5, 0)).stamp(100, 1));
 			runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 100, 1, Set.of("entity_block", "block", "entity")));
@@ -290,7 +293,7 @@ class ClientPingRuntimeInteractionTest {
 		void openList() {
 			press(0); inventoryRows(); frame(250, true); prime(); enter("content", 260);
 			String list = menu().choices().stream().filter(choice -> choice.id().endsWith(":inventory")).findFirst().orElseThrow().id();
-			enter(list, 460); assertTrue(snapshot().inventory().open()); assertEquals("opaque", snapshot().inventory().selectedKey());
+			enter(list, 460); assertTrue(snapshot().inventory().open()); assertEquals("ITEM:opaque", snapshot().inventory().selectedKey());
 		}
 		List<PresentationC2SPacket> creates() { return sent.stream().filter(p -> p instanceof PresentationC2SPacket c && c.kind() == PresentationC2SPacket.Kind.CREATE).map(p -> (PresentationC2SPacket) p).toList(); }
 		List<InventoryC2SPacket> selects() { return sent.stream().filter(p -> p instanceof InventoryC2SPacket c && c.kind() == InventoryC2SPacket.Kind.SELECT).map(p -> (InventoryC2SPacket) p).toList(); }
@@ -706,11 +709,28 @@ class ClientPingRuntimeInteractionTest {
 		Fixture f = new Fixture(); f.openList();
 		f.release(700);
 		f.runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 100, 1, Set.of("block", "entity")).stamp(100, 1));
+		f.runtime.onInventoryPacket(InventoryS2CPacket.policy(nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID,
+			7, 100, 1, Set.of("block", "entity")).stamp(100, 1));
 
 		assertTrue(f.runtime.selectorSnapshot().isEmpty());
 		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
 		f.release(800);
 		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
+	}
+	@Test void allInvalidPreviewLanesExitStayOpenButOneInvalidLaneKeepsTheOtherNavigable() {
+		ClientConfig.HANDLER.getConfig().getSpatialSelector().setInventorySelectionStayOpenEnabled(true);
+		Fixture f = new Fixture(); f.openList();
+		var fluid = nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID;
+		f.runtime.onInventoryPacket(InventoryS2CPacket.policy(fluid, 7, 100, 1, Set.of("entity_block")));
+		f.release(700);
+		f.runtime.onInventoryPacket(InventoryS2CPacket.data(fluid, InventoryS2CPacket.Kind.PREVIEW, 7, f.request(), null, 9, 1, 1, 0, 1,
+			false, InventoryS2CPacket.Status.INVALID, 0, List.of()).stamp(100, 1));
+		assertTrue(f.runtime.selectorSnapshot().isPresent()); assertTrue(f.snapshot().inventory().open());
+		assertEquals("ITEM:opaque", f.snapshot().inventory().selectedKey());
+		f.runtime.onInventoryPacket(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, f.request(), null, 10, 2, 2, 0, 1,
+			false, InventoryS2CPacket.Status.INVALID, 0, List.of()).stamp(100, 1));
+		assertTrue(f.runtime.selectorSnapshot().isEmpty()); assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
+		f.release(800); assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
 	}
 
 	@Test void revokingWhileAStayingTapIsHeldSwallowsItsRemainingRelease() {

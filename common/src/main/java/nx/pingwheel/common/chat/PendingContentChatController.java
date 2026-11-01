@@ -27,6 +27,7 @@ import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.client.PresentationView;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Main-thread-confined, bounded first-receipt state. Only accepted CREATED
@@ -73,9 +74,9 @@ public final class PendingContentChatController {
 	 * UNKNOWN rather than DENIED. A missing marker may have a null identity.
 	 */
 	public record Current(long epoch, long view, boolean ready, boolean live,
-		MarkerIdentity identity, Map<String, Set<String>> allowedFields,
+		@Nullable MarkerIdentity identity, Map<String, Set<String>> allowedFields,
 		Authorization inventoryAuthorization, PresentationView projection,
-		ClientInventory.Tracking tracking) {
+		ClientInventory.@Nullable Tracking tracking) {
 		public Current {
 			Map<String, Set<String>> detached = new LinkedHashMap<>();
 			Objects.requireNonNull(allowedFields, "allowedFields").forEach((adapter, fields) ->
@@ -83,7 +84,7 @@ public final class PendingContentChatController {
 			allowedFields = Map.copyOf(detached);
 			Objects.requireNonNull(inventoryAuthorization, "inventoryAuthorization");
 			Objects.requireNonNull(projection, "projection");
-			if (tracking != null) tracking = new ClientInventory.Tracking(tracking.markerId(), tracking.status(),
+			if (tracking != null) tracking = new ClientInventory.Tracking(tracking.resourceKind(), tracking.markerId(), tracking.status(),
 				tracking.grey(), tracking.complete(), tracking.baselineId(), tracking.statusRevision(),
 				tracking.watermark(), List.copyOf(tracking.entries()));
 		}
@@ -266,7 +267,8 @@ public final class PendingContentChatController {
 				|| tracking.baselineId() <= 0 || tracking.grey() || tracking.status() != InventoryS2CPacket.Status.READY
 				|| tracking.entries().size() != 1) return null;
 			ClientInventory.EntryView entry = tracking.entries().getFirst();
-			if (entry.count() < 0 || entry.itemId() == null || ResourceLocation.tryParse(entry.itemId()) == null
+			if (tracking.resourceKind() == null || tracking.resourceKind() != entry.resourceKind()
+				|| entry.count() < 0 || entry.itemId() == null || ResourceLocation.tryParse(entry.itemId()) == null
 				|| !PresentationPropertyPingTypes.isKnownPingTypeId(entry.itemPingType())
 				|| !usableQuality(entry.quality())) return null;
 		}

@@ -40,7 +40,10 @@ class InventoryDispatchIntegrationTest {
 		Fixture() {
 			runtime.presentation().tick(true);
 			runtime.onPresentationPacket(PresentationS2CPacket.offer(100, Map.of(PresentationBasic.ID,
-				List.of(new PresentationField(PresentationBasic.NAME, PresentationField.Kind.TEXT, true, 0, "Name"))), Map.of(PresentationBasic.ID, 1)));
+				List.of(new PresentationField(PresentationBasic.NAME, PresentationField.Kind.TEXT, true, 0, "Name")),
+				nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID, nx.pingwheel.common.presentation.inventory.InventoryPresentation.INSTANCE.fields()),
+				Map.of(PresentationBasic.ID, 1, nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID,
+					nx.pingwheel.common.presentation.inventory.InventoryPresentation.INSTANCE.schema())));
 			runtime.inventory(inventory);
 			runtime.onPresentationPacket(PresentationS2CPacket.reset(100, 1, Map.of("entity_block", Map.of(PresentationBasic.ID, Set.of(PresentationBasic.NAME)))));
 			runtime.onInventoryPacket(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(5, 3, 5, 0)).stamp(100, 1));

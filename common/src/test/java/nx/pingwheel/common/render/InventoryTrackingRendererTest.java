@@ -120,6 +120,65 @@ class InventoryTrackingRendererTest {
 				assertTrue(text.contains("All variants"), text); assertTrue(text.length() <= 64, text);
 			});
 	}
+	@Test void fluidListHudAndChatShareTheSameLocalizedRationalQuantityInEveryBundledLocale() throws IOException {
+		for (String locale : List.of("de_de", "en_us", "es_ar", "fr_fr", "pl_pl", "tr_tr", "zh_cn", "zh_tw")) {
+			Map<String, String> translations = new HashMap<>();
+			try (@Nullable var stream = getClass().getResourceAsStream("/assets/pingforit/lang/" + locale + ".json")) {
+				assertNotNull(stream);
+				com.google.gson.JsonParser.parseString(new String(stream.readAllBytes(), StandardCharsets.UTF_8)).getAsJsonObject()
+					.entrySet().forEach(entry -> translations.put(entry.getKey(), entry.getValue().getAsString()));
+			}
+			withLanguage(translations, () -> {
+				var kind = nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID;
+				for (long amount : new long[] {0, 1, 80, 81, 82, 81_000, 9_007_199_254_740_993L, Long.MAX_VALUE}) {
+					String quantity = nx.pingwheel.common.presentation.inventory.client.InventoryQuantityFormat.quantity(kind, amount).getString();
+					var entry = new ClientInventory.EntryView(kind, "fluid", "missing:fluid", "Water", null, amount, false, null, "attention");
+					var chat = nx.pingwheel.common.chat.ContentChatComposer.inventoryMessage(net.minecraft.network.chat.Component.literal("Author"),
+						net.minecraft.network.chat.Component.literal("Tank"), entry, json -> fail("fluid never reaches item decoder"),
+						type -> nx.pingwheel.common.chat.ContentChatTemplate.DEFAULT_TEMPLATE).orElseThrow().getString();
+					String hud = InventoryTrackingRenderer.text(new InventoryTrackingRenderer.Line(kind, "Water", amount, "attention", null, null, false)).getString();
+					String list = SpatialInventoryLayout.quantity(new SpatialInventoryView.Row(kind, "fluid", "Water", amount,
+						"missing:fluid", null, SpatialInventoryView.Status.READY, null, null)).getString();
+					assertTrue(chat.contains(quantity), locale + ": " + chat);
+					assertTrue(hud.contains(quantity), locale + ": " + hud);
+					assertEquals(quantity, list); assertTrue(hud.length() <= 64, hud);
+				}
+			});
+		}
+	}
+	@Test void recordingPainterInheritsEachRowsOwnLaneLifecycleWithoutGreyingTheOtherLane() {
+		var item = nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM;
+		var fluid = nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID;
+		var ready = SpatialInventoryView.Status.READY;
+		var view = new SpatialInventoryView("mixed", true, List.of(
+			new SpatialInventoryView.Row(item, "item", "Stone", 4L, "minecraft:stone", null, ready, null, null),
+			new SpatialInventoryView.Row(fluid, "fluid", "Water", 81L, "minecraft:water", null, ready, null, null)),
+			0, 0, 2, true, SpatialInventoryView.Status.UPDATING, 0, 0).withResourceGroups(List.of(
+				new SpatialInventoryView.ResourceGroup(item, "pingforit.inventory.group.item", SpatialInventoryView.Status.INCOMPLETE),
+				new SpatialInventoryView.ResourceGroup(fluid, "pingforit.inventory.group.fluid", SpatialInventoryView.Status.UPDATING)));
+		var painted = new java.util.ArrayList<SpatialOverlayRenderer.RowPaint>();
+		var painter = new SpatialOverlayRenderer.FramePainter() {
+			@Override public int lineHeight() { return 9; }
+			@Override public int width(FormattedText text) { return text.getString().length() * 6; }
+			@Override public net.minecraft.client.StringSplitter splitter() { return new net.minecraft.client.StringSplitter((code, style) -> 6f); }
+			@Override public boolean paint(SpatialOverlayTransitions.State<SpatialOverlayRenderer.VisualKey, SpatialOverlayRenderer.Paint> state,
+				SpatialOverlayRenderer.NodeLayout layout, SpatialOverlayRenderer.Style style) {
+				if (state.data() instanceof SpatialOverlayRenderer.RowPaint row) painted.add(row);
+				return true;
+			}
+			@Override public void connector(SpatialOverlayRenderer.GuideLine line, double alpha) {}
+		};
+		var origin = new nx.pingwheel.common.client.spatial.SpatialController.Point(0, 0);
+		var radial = new nx.pingwheel.common.client.spatial.SpatialController.Snapshot(true, origin, List.of(origin), null,
+			List.of(new nx.pingwheel.common.client.spatial.SpatialController.MenuView("mixed", origin, origin, null, List.of())), 0, 12);
+		new SpatialOverlayRenderer.Session().drawFrame(radial, view, choice -> net.minecraft.network.chat.Component.literal(choice.label()), null,
+			new SpatialOverlayRenderer.Style(100, 100, 1, 1, false, true), 0, null, 400, 300, painter);
+		assertEquals(2, painted.size());
+		assertTrue(painted.stream().filter(row -> row.row().resourceKind() == item).findFirst().orElseThrow().grey(),
+			"an earlier READY-quality row inherits a later empty INCOMPLETE control in its own lane");
+		assertFalse(painted.stream().filter(row -> row.row().resourceKind() == fluid).findFirst().orElseThrow().grey(),
+			"the healthy updating FLUID lane does not inherit ITEM's failure");
+	}
 
 	private static void withLanguage(Map<String, String> translations, ThrowingRunnable body) throws IOException {
 		Language previous = Language.getInstance();

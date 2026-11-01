@@ -71,6 +71,7 @@ public record SpatialInventoryLayout(int first, int count, double centerX, doubl
 		ToIntFunction<FormattedText> widths) {
 		double naturalWidth = 0.0;
 		if (view != null) {
+			if (!view.resourceGroups().isEmpty()) naturalWidth = widths.applyAsInt(view.groupSummary()) * textScale + 80;
 			int total = view.rows().size();
 			if (view.status().translationKey() != null)
 				naturalWidth = Math.max(naturalWidth, 8.0 + widths.applyAsInt(Component.translatable(view.status().translationKey())) * textScale);
@@ -83,7 +84,7 @@ public record SpatialInventoryLayout(int first, int count, double centerX, doubl
 				var display = row.display();
 				Component name = display == null ? Component.translatable(row.label()) : display.name();
 				double icon = display != null && display.hasIcon() ? ITEM_ICON_SIZE + 3.0 : 0.0;
-				double quantity = widths.applyAsInt(quantity(row.count())) * textScale;
+				double quantity = widths.applyAsInt(quantity(row)) * textScale;
 				double nameWidth = widths.applyAsInt(name) * textScale;
 				// The quantity slot uses at most half the row: give both complete
 				// strings their natural room before the viewport cap clips either.
@@ -93,15 +94,24 @@ public record SpatialInventoryLayout(int first, int count, double centerX, doubl
 				naturalWidth = Math.max(naturalWidth, 9.0 + icon + content);
 			}
 		}
-		return measure(guiWidth, guiHeight, fontLineHeight, textScale, maxWidthFraction, maxHeightFraction, naturalWidth);
+		int groupLines = view == null || view.resourceGroups().isEmpty() ? 2 : 1 + view.resourceGroups().size();
+		return measure(guiWidth, guiHeight, fontLineHeight, textScale, maxWidthFraction, maxHeightFraction, naturalWidth,
+			Math.max(2, groupLines));
 	}
 
 	public static Component quantity(Long count) {
 		return count == null ? Component.empty() : Component.literal("x" + count);
 	}
+	public static Component quantity(SpatialInventoryView.Row row) {
+		return nx.pingwheel.common.presentation.inventory.client.InventoryQuantityFormat.quantity(row.resourceKind(), row.count());
+	}
 
 	private static Metrics measure(double guiWidth, double guiHeight, int fontLineHeight, double textScale,
 		double maxWidthFraction, double maxHeightFraction, double contentWidth) {
+		return measure(guiWidth, guiHeight, fontLineHeight, textScale, maxWidthFraction, maxHeightFraction, contentWidth, 2);
+	}
+	private static Metrics measure(double guiWidth, double guiHeight, int fontLineHeight, double textScale,
+		double maxWidthFraction, double maxHeightFraction, double contentWidth, int headerLines) {
 		if (!Double.isFinite(guiWidth) || guiWidth < 0 || !Double.isFinite(guiHeight) || guiHeight < 0
 			|| fontLineHeight <= 0 || !Double.isFinite(textScale) || textScale <= 0
 			|| !Double.isFinite(maxWidthFraction) || maxWidthFraction <= 0
@@ -111,7 +121,7 @@ public record SpatialInventoryLayout(int first, int count, double centerX, doubl
 		// Whole-pixel chrome prevents a final rounded border from exceeding a
 		// fractional budget even when the font preference itself is fractional.
 		double rowHeight = Math.ceil(Math.max(12.0, Math.max(ITEM_ICON_SIZE + 2.0, textHeight * 2.0 + 4.0)));
-		double headerHeight = Math.ceil(textHeight * 2.0 + 8.0);
+		double headerHeight = Math.ceil(textHeight * headerLines + 8.0);
 		double footerHeight = Math.ceil(textHeight + 6.0);
 		double readableWidth = Math.ceil(5.0 + ITEM_ICON_SIZE + 3.0 + 8.0 + textHeight * 2.0);
 		double naturalWidth = Math.max(Math.ceil(contentWidth), readableWidth);

@@ -213,6 +213,24 @@ class PendingContentChatControllerTest {
 		assertFalse(f.controller.attempt(ID));
 		assertEquals(1, f.sent.size());
 	}
+	@Test void fluidReceiptWaitsForFreshReadyAndItsOwnAuthorityThenEmitsOnlyOnce() {
+		Fixture f = new Fixture();
+		assertTrue(f.begin(PresentationReceiptContent.inventory()));
+		var kind = nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID;
+		var fluid = new ClientInventory.EntryView(kind, "selected", "minecraft:water", "block.minecraft.water",
+			"{\"version\":1,\"id\":\"minecraft:water\",\"name\":\"Fresh Water\"}", 82, false, null, "attention");
+		f.tracking.put(ID, new ClientInventory.Tracking(kind, ID, InventoryS2CPacket.Status.UPDATING, false, false, 4, 1, 1, List.of(fluid)));
+		assertFalse(f.controller.attempt(ID), "the selected preview seed is not receipt evidence");
+		f.tracking.put(ID, new ClientInventory.Tracking(kind, ID, InventoryS2CPacket.Status.READY, false, true, 4, 1, 2, List.of(fluid)));
+		f.inventoryAuthorization = UNKNOWN;
+		assertFalse(f.controller.attempt(ID), "ITEM policy must not substitute for unknown FLUID policy");
+		f.inventoryAuthorization = ALLOWED;
+		assertTrue(f.controller.attempt(ID));
+		assertEquals(1, countKey(f.sent.getFirst(), "presentation.pingforit.format.fluid_amount"));
+		assertEquals(1, countKey(f.sent.getFirst(), "pingforit.inventory.quantity.approximate"));
+		assertFalse(flatten(f.sent.getFirst()).contains("\"version\""));
+		assertFalse(f.controller.attempt(ID)); assertEquals(1, f.sent.size());
+	}
 
 	@Test void readyInventoryStillWaitsForFreshNameAndNegotiationThenReadsTheLatestCount() {
 		Fixture f = new Fixture();

@@ -53,6 +53,8 @@ import nx.pingwheel.common.presentation.PresentationReceiptProjector;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.client.ClientPresentation;
+import nx.pingwheel.common.presentation.inventory.InventoryChecksums;
+import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
 import nx.pingwheel.common.render.SpatialOverlayRenderer;
 import nx.pingwheel.common.testing.DiagnosticLogCapture;
@@ -60,6 +62,7 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -146,6 +149,143 @@ class ClientPingRuntimeContentReceiptTest {
   f.section(3, ID, selected); f.section(4, ID, selected); f.tick();
   assertEquals(1, f.feedback.content.size()); assertEquals(1, f.feedback.sounds.size());
   assertTrue(f.feedback.ordinary.isEmpty()); f.assertNoSourceOrNetworkWork();
+ }
+
+ @Test void fluidWireReceiptDoesNotBorrowItemPolicyAndOnlyFreshReadyCompletesIt() {
+  Fixture f = new Fixture(0);
+  var kind = nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID;
+  f.created(PresentationReceiptContent.inventory(), basic(false));
+  var seed = new InventoryS2CPacket.Entry("fluid-token", "minecraft:water", "block.minecraft.water",
+   "{\"version\":1,\"id\":\"minecraft:water\",\"name\":\"Water\"}", 80, 1, false, null, 0, false, "attention");
+  var packet = InventoryS2CPacket.data(kind, InventoryS2CPacket.Kind.SNAPSHOT, 7, 0, ID, 4, 1, 1, 0, 1, false,
+   InventoryS2CPacket.Status.UPDATING, nx.pingwheel.common.presentation.inventory.InventoryChecksums.checksumEntries(kind, List.of(seed)), List.of(seed)).stamp(81, 1);
+  f.runtime.onInventoryPacket(wire(packet));
+  assertTrue(f.inventory.tracking(ID).entries().isEmpty(), "ITEM authorization cannot admit FLUID data");
+  assertTrue(f.feedback.content.isEmpty());
+  f.runtime.onInventoryPacket(InventoryS2CPacket.policy(kind, 7, 81, 1, Set.of("entity_block")));
+  f.runtime.onInventoryPacket(wire(packet));
+  assertEquals(80, f.inventory.tracking(ID).entries().getFirst().count());
+  assertFalse(f.inventory.tracking(ID).complete()); assertTrue(f.feedback.content.isEmpty());
+  var fresh = new InventoryS2CPacket.Entry(seed.key(), seed.itemId(), seed.label(), seed.displayJson(), 82, 2, false, null, 0, false, "attention");
+  var complete = wire(InventoryS2CPacket.data(kind, InventoryS2CPacket.Kind.STREAM, 7, 0, ID, 4, 1, 2, 0, 1, true,
+   InventoryS2CPacket.Status.READY, nx.pingwheel.common.presentation.inventory.InventoryChecksums.checksumEntries(kind, List.of(fresh)), List.of(fresh)).stamp(81, 1));
+  f.runtime.onInventoryPacket(complete);
+  assertEquals(1, f.feedback.content.size());
+  assertEquals(1, translationCount(f.feedback.content.getFirst(), "presentation.pingforit.format.fluid_amount"));
+  assertEquals(1, translationCount(f.feedback.content.getFirst(), "pingforit.inventory.quantity.approximate"));
+  f.runtime.onInventoryPacket(complete); f.tick();
+  assertEquals(1, f.feedback.content.size()); assertTrue(f.feedback.ordinary.isEmpty()); f.assertNoSourceOrNetworkWork();
+ }
+
+ @Test void allLanesDeniedBeforeFirstTrackingCancelsAnUnknownKindReceiptPermanently() {
+  Fixture f = new Fixture(200);
+  var fluid = nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID;
+  f.runtime.onInventoryPacket(InventoryS2CPacket.policy(fluid, 7, 81, 1, Set.of("entity_block")));
+  f.created(PresentationReceiptContent.inventory(), basic(false));
+  assertTrue(f.inventory.trackingKind(ID).isEmpty(), "CREATED need not be followed immediately by a budgeted seed or STATUS");
+  for (var kind : nx.pingwheel.common.presentation.inventory.InventoryResourceKind.values())
+   f.runtime.onInventoryPacket(InventoryS2CPacket.policy(kind, 7, 81, 1, Set.of()));
+  assertEquals(Optional.of(false), f.inventory.receiptAuthorization(ID, 81, 1, "entity_block"));
+  f.runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 81, 1, Set.of("entity_block")));
+  f.runtime.onInventoryPacket(data(InventoryS2CPacket.Kind.SNAPSHOT, 0, 1, 1, List.of(item(96, 1)), 1));
+  assertTrue(f.inventory.tracking(ID).complete(), "fresh tracking remains independently authorized after re-allow");
+  f.created(2, SNAPSHOT, "Replay", PresentationReceiptContent.inventory(), basic(false)); f.tick();
+  assertTrue(f.feedback.content.isEmpty(), "a receipt cancelled before the first tracking frame cannot restart on re-allow or same-ID replay");
+  assertTrue(f.feedback.ordinary.isEmpty()); assertEquals(1, f.feedback.sounds.size()); f.assertNoSourceOrNetworkWork();
+ }
+
+ @Test void unknownKindWithOnlyUnrelatedItemDenialStillWaitsForTheAuthorizedFluidLane() {
+  Fixture f = new Fixture(200);
+  var kind = nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID;
+  f.runtime.onInventoryPacket(InventoryS2CPacket.policy(kind, 7, 81, 1, Set.of("entity_block")));
+  f.created(PresentationReceiptContent.inventory(), basic(false));
+  f.runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 81, 1, Set.of()));
+  assertTrue(f.inventory.receiptAuthorization(ID, 81, 1, "entity_block").isEmpty(), "unknown kind is not a cross-lane grant or denial");
+  var entry = new InventoryS2CPacket.Entry("fluid", "minecraft:water", "block.minecraft.water", null, 81, 1, false, null, 0, false, "attention");
+  f.runtime.onInventoryPacket(wire(InventoryS2CPacket.data(kind, InventoryS2CPacket.Kind.SNAPSHOT, 7, 0, ID, 4, 1, 1, 0, 1,
+   true, InventoryS2CPacket.Status.READY, nx.pingwheel.common.presentation.inventory.InventoryChecksums.checksumEntries(kind, List.of(entry)), List.of(entry)).stamp(81, 1)));
+  assertEquals(1, f.feedback.content.size()); assertTrue(f.feedback.ordinary.isEmpty()); f.assertNoSourceOrNetworkWork();
+ }
+
+ @ParameterizedTest
+ @CsvSource({"ITEM,true", "ITEM,false", "FLUID,true", "FLUID,false"})
+ void delayedKindBindingCancelsOnlyTheLaneDeniedSinceAcceptedMembership(InventoryResourceKind kind, boolean statusFirst) {
+  Fixture f = new Fixture(200);
+  f.runtime.onInventoryPacket(InventoryS2CPacket.policy(InventoryResourceKind.FLUID, 7, 81, 1, Set.of("entity_block")));
+  f.created(PresentationReceiptContent.inventory(), basic(false));
+  f.runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 81, 1, Set.of()));
+  f.runtime.onInventoryPacket(wire(InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, 7, 0, ID, 4, 1, 1, 0, 1,
+   true, InventoryS2CPacket.Status.READY, 0, List.of(item(96, 1))).stamp(81, 1)));
+  assertTrue(f.inventory.trackingKind(ID).isEmpty(), "denied data cannot bind a kind or write entries");
+  assertTrue(f.inventory.tracking(ID).entries().isEmpty());
+  assertTrue(f.inventory.receiptAuthorization(ID, 81, 1, "entity_block").isEmpty());
+  f.runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 81, 1, Set.of("entity_block")));
+  f.created(2, SNAPSHOT, "Refresh", PresentationReceiptContent.inventory(), basic(false));
+  if (statusFirst) {
+   f.runtime.onInventoryPacket(wire(InventoryS2CPacket.status(kind, 7, 0, ID, 4, 1, 0,
+    InventoryS2CPacket.Status.UPDATING, 0).stamp(81, 1)));
+   assertEquals(kind, f.inventory.trackingKind(ID).orElseThrow());
+   assertEquals(Optional.of(kind != InventoryResourceKind.ITEM), f.inventory.receiptAuthorization(ID, 81, 1, "entity_block"));
+  }
+  var entry = kind == InventoryResourceKind.ITEM ? item(96, 1)
+   : new InventoryS2CPacket.Entry("fluid", "minecraft:water", "block.minecraft.water", null, 81, 1, false, null, 0, false, "attention");
+  var fresh = wire(InventoryS2CPacket.data(kind, InventoryS2CPacket.Kind.SNAPSHOT, 7, 0, ID, 4, 1, 1, 0, 1,
+   true, InventoryS2CPacket.Status.READY, InventoryChecksums.checksumEntries(kind, List.of(entry)), List.of(entry)).stamp(81, 1));
+  f.runtime.onInventoryPacket(fresh);
+  assertTrue(f.inventory.tracking(ID).complete(), "receipt history does not revoke currently allowed tracking");
+  assertEquals(Optional.of(kind != InventoryResourceKind.ITEM), f.inventory.receiptAuthorization(ID, 81, 1, "entity_block"));
+  assertEquals(kind == InventoryResourceKind.ITEM ? 0 : 1, f.feedback.content.size());
+  f.runtime.onInventoryPacket(fresh); f.tick();
+  f.created(3, SNAPSHOT, "Replay", PresentationReceiptContent.inventory(), basic(false));
+  assertEquals(kind == InventoryResourceKind.ITEM ? 0 : 1, f.feedback.content.size());
+  assertEquals(1, f.feedback.sounds.size()); assertTrue(f.feedback.ordinary.isEmpty()); f.assertNoSourceOrNetworkWork();
+ }
+
+ @ParameterizedTest
+ @ValueSource(booleans = {false, true})
+ void sableFluidRebaselineKeepsClosedQuantityUpdatingAndReceiptWaitsForEveryFreshPart(boolean completed) {
+  Fixture f = new Fixture(200);
+  var kind = InventoryResourceKind.FLUID;
+  f.runtime.onInventoryPacket(InventoryS2CPacket.policy(kind, 7, 81, 1, Set.of("entity_block")));
+  Target sable = Target.ExternalBlockTarget.committed("minecraft:overworld", "sable", "tracking", "minecraft:chest", "opaque", true);
+  var marker = new MarkerSnapshot(ID, SNAPSHOT.owner(), sable, "entity_block", "attention", SNAPSHOT.anchor(), 1, 100);
+  f.created(1, marker, "Owner", PresentationReceiptContent.inventory(), completed ? healthOnly() : basic(false));
+  var seed = new InventoryS2CPacket.Entry("fluid", "minecraft:water", "block.minecraft.water", null, 80, 1, false, null, 0, false, "attention");
+  f.runtime.onInventoryPacket(wire(InventoryS2CPacket.data(kind, InventoryS2CPacket.Kind.SNAPSHOT, 7, 0, ID, 4, 1, 1, 0, 1,
+   completed, completed ? InventoryS2CPacket.Status.READY : InventoryS2CPacket.Status.UPDATING,
+   InventoryChecksums.checksumEntries(kind, List.of(seed)), List.of(seed)).stamp(81, 1)));
+  assertTrue(f.feedback.content.isEmpty(), "an old complete cut still waits for the target name");
+  f.runtime.onInventoryPacket(wire(InventoryS2CPacket.status(kind, 7, 0, ID, 5, 2, 0, InventoryS2CPacket.Status.UPDATING, 0).stamp(81, 1)));
+  if (completed) f.section(2, ID, basic(false));
+  assertEquals(80, f.inventory.tracking(ID).entries().getFirst().count());
+  assertFalse(f.inventory.tracking(ID).grey()); assertFalse(f.inventory.tracking(ID).complete());
+  var fresh = new InventoryS2CPacket.Entry(seed.key(), seed.itemId(), seed.label(), null, 162, 2, false, null, 0, false, "attention");
+  long checksum = InventoryChecksums.checksumEntries(kind, List.of(fresh));
+  f.runtime.onInventoryPacket(wire(InventoryS2CPacket.status(kind, 7, 0, ID, 5, 2, 1, InventoryS2CPacket.Status.READY, checksum).stamp(81, 1)));
+  f.runtime.onInventoryPacket(wire(InventoryS2CPacket.data(kind, InventoryS2CPacket.Kind.SNAPSHOT, 7, 0, ID, 5, 2, 1, 1, 2,
+   true, InventoryS2CPacket.Status.READY, checksum, List.of(fresh)).stamp(81, 1)));
+  f.tick();
+  assertEquals(InventoryS2CPacket.Status.UPDATING, f.inventory.tracking(ID).status());
+  assertEquals(80, f.inventory.tracking(ID).entries().getFirst().count()); assertTrue(f.feedback.content.isEmpty());
+  f.runtime.onInventoryPacket(wire(InventoryS2CPacket.data(kind, InventoryS2CPacket.Kind.SNAPSHOT, 7, 0, ID, 5, 2, 1, 0, 2,
+   true, InventoryS2CPacket.Status.READY, checksum, List.of()).stamp(81, 1)));
+  assertEquals(162, f.inventory.tracking(ID).entries().getFirst().count());
+  assertTrue(f.inventory.tracking(ID).complete()); assertEquals(1, f.feedback.content.size());
+  assertTrue(f.feedback.ordinary.isEmpty()); f.assertNoSourceOrNetworkWork();
+ }
+
+ @Test void inventorySchemaMismatchSuppressesContentWithoutDisablingBasicReceipts() {
+  Fixture f = new Fixture(0, null, false);
+  f.created(PresentationReceiptContent.inventory(), basic(false));
+  assertTrue(f.inventory.schemaUnavailable()); assertFalse(f.inventory.ready());
+  assertEquals(ClientInventory.NO_REQUEST, f.inventory.open(TARGET, BlockFace.NORTH, "entity_block"));
+  f.runtime.onInventoryPacket(data(InventoryS2CPacket.Kind.SNAPSHOT, 0, 1, 1, List.of(item(96, 1)), 1));
+  assertTrue(f.feedback.content.isEmpty()); assertTrue(f.inventory.tracking(ID).entries().isEmpty());
+  MarkerSnapshot other = new MarkerSnapshot(new MarkerId(43), SNAPSHOT.owner(), TARGET, "entity_block", "attention",
+   SNAPSHOT.anchor(), 1, 100);
+  f.created(1, other, "Author", PresentationReceiptContent.whole(), basic(false));
+  assertTrue(f.presentation.ready()); assertEquals(1, f.feedback.ordinary.size());
+  assertEquals(2, f.feedback.sounds.size()); f.assertNoSourceOrNetworkWork();
  }
 
  @ParameterizedTest
@@ -478,6 +618,8 @@ class ClientPingRuntimeContentReceiptTest {
   Fixture denied = new Fixture(200);
   denied.created(PresentationReceiptContent.inventory(), basic(false));
   assertEquals(Optional.of(true), denied.inventory.authorization(81, 1, "entity_block"));
+  denied.runtime.onInventoryPacket(InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, 7, 0, ID,
+   4, 1, 0, 0, 1, false, InventoryS2CPacket.Status.UPDATING, 0, List.of(item(96, 1))).stamp(81, 1));
   denied.runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 81, 1, Set.of()));
   assertEquals(Optional.of(false), denied.inventory.authorization(81, 1, "entity_block"));
   denied.runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 81, 1, Set.of("entity_block")));
@@ -621,17 +763,23 @@ class ClientPingRuntimeContentReceiptTest {
   final ClientPingRuntime runtime;
   Fixture(long visualDuration) { this(visualDuration, null); }
   Fixture(long visualDuration, ContentChatComposer.TemplateSource templates) {
+   this(visualDuration, templates, true);
+  }
+  Fixture(long visualDuration, ContentChatComposer.TemplateSource templates, boolean compatibleInventory) {
    feedback.templates = templates;
    runtime = ClientPingRuntime.createForInteraction((key, color) -> fail("unexpected local error"), sent::add,
     ClientRateLimitPolicy.DEFAULT, () -> 0, target -> TargetValidation.valid(), access, presentation, inventory, null,
     snapshot -> visualDuration, feedback);
    presentation.tick(true);
-   runtime.onPresentationPacket(PresentationS2CPacket.offer(81, Map.of(BASIC, PresentationBasic.fields(),
-    EXTRA, new ExtraAdapter().fields()), Map.of(BASIC, 1, EXTRA, 1)));
+    runtime.onPresentationPacket(PresentationS2CPacket.offer(81, Map.of(BASIC, PresentationBasic.fields(),
+     EXTRA, new ExtraAdapter().fields(), nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID,
+     nx.pingwheel.common.presentation.inventory.InventoryPresentation.INSTANCE.fields()), Map.of(BASIC, 1, EXTRA, 1,
+     nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID,
+     nx.pingwheel.common.presentation.inventory.InventoryPresentation.INSTANCE.schema() + (compatibleInventory ? 0 : 1))));
    reset(1, BASIC_FIELDS);
    runtime.onInventoryPacket(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(10, 10, 3, 0)).stamp(81, 1));
    runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 81, 1, Set.of("entity_block")));
-   assertTrue(presentation.ready()); assertTrue(inventory.ready()); sent.clear();
+    assertTrue(presentation.ready()); assertEquals(compatibleInventory, inventory.ready()); sent.clear();
   }
    void reset(long view, Set<String> basicFields) {
     runtime.onPresentationPacket(wire(PresentationS2CPacket.reset(81, view,

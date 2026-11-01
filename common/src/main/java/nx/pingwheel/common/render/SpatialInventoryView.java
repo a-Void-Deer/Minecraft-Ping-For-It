@@ -6,6 +6,11 @@ import java.util.Objects;
 
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.material.Fluid;
+import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Immutable, domain-neutral inventory paint input. Rows retain caller order,
@@ -14,10 +19,20 @@ import net.minecraft.world.item.ItemStack;
  * packets. List keys must distinguish preview sessions/targets; row keys are
  * opaque within one list. Positions are centre-relative GUI pixels.
  */
-public record SpatialInventoryView(String listKey, boolean open, List<Row> rows,
+@NotNullByDefault
+public record SpatialInventoryView(String listKey, boolean open, @Unmodifiable List<Row> rows,
 	int selectedIndex, int windowFirst, int visibleRows, boolean backLeft, Status status,
 	double axisX, double glideBaseY, double selectedRowCenterY, BackAffordance backAffordance,
-	String retainedRowKey, boolean forwardAvailable, boolean selectedRowCommittable) {
+	@Nullable String retainedRowKey, boolean forwardAvailable, boolean selectedRowCommittable,
+	@Unmodifiable List<ResourceGroup> resourceGroups) {
+	public record ResourceGroup(InventoryResourceKind resourceKind, String labelKey, Status status) {}
+	public SpatialInventoryView(String listKey, boolean open, List<Row> rows,
+		int selectedIndex, int windowFirst, int visibleRows, boolean backLeft, Status status,
+		double axisX, double glideBaseY, double selectedRowCenterY, BackAffordance backAffordance,
+		@Nullable String retainedRowKey, boolean forwardAvailable, boolean selectedRowCommittable) {
+		this(listKey, open, List.copyOf(rows), selectedIndex, windowFirst, visibleRows, backLeft, status, axisX, glideBaseY,
+			selectedRowCenterY, backAffordance, retainedRowKey, forwardAvailable, selectedRowCommittable, List.of());
+	}
 
 	/**
 	 * Compatibility constructor for independent paint callers that predate the
@@ -51,6 +66,7 @@ public record SpatialInventoryView(String listKey, boolean open, List<Row> rows,
 	public SpatialInventoryView {
 		Objects.requireNonNull(listKey, "listKey");
 		rows = List.copyOf(rows);
+		resourceGroups = List.copyOf(resourceGroups);
 		Objects.requireNonNull(status, "status");
 		Objects.requireNonNull(backAffordance, "backAffordance");
 		if (visibleRows <= 0 || !Double.isFinite(axisX) || !Double.isFinite(glideBaseY)
@@ -67,21 +83,21 @@ public record SpatialInventoryView(String listKey, boolean open, List<Row> rows,
 	public SpatialInventoryView withSelectedRowCenterY(double centerRelativeY) {
 		return new SpatialInventoryView(listKey, open, rows, selectedIndex, windowFirst, visibleRows,
 			backLeft, status, axisX, glideBaseY, centerRelativeY, backAffordance,
-			retainedRowKey, forwardAvailable, selectedRowCommittable);
+			retainedRowKey, forwardAvailable, selectedRowCommittable, resourceGroups);
 	}
 
 	/** A non-input capacity/window relayout; every identity, permission and row anchor is retained. */
 	public SpatialInventoryView withWindow(int first, int capacity) {
 		return new SpatialInventoryView(listKey, open, rows, selectedIndex, first, capacity,
 			backLeft, status, axisX, glideBaseY, selectedRowCenterY, backAffordance,
-			retainedRowKey, forwardAvailable, selectedRowCommittable);
+			retainedRowKey, forwardAvailable, selectedRowCommittable, resourceGroups);
 	}
 
 	/** Caller supplies timer output; rendering owns no hover timer or navigation. */
 	public SpatialInventoryView withBackAffordance(boolean focused, double progress) {
 		return new SpatialInventoryView(listKey, open, rows, selectedIndex, windowFirst, visibleRows,
 			backLeft, status, axisX, glideBaseY, selectedRowCenterY, new BackAffordance(focused, progress),
-			retainedRowKey, forwardAvailable, selectedRowCommittable);
+			retainedRowKey, forwardAvailable, selectedRowCommittable, resourceGroups);
 	}
 
 	/**
@@ -90,14 +106,33 @@ public record SpatialInventoryView(String listKey, boolean open, List<Row> rows,
 	 * {@code forwardAvailable} and {@code selectedRowCommittable} are the
 	 * session's own gates and are never reconstructed from paint rows.
 	 */
-	public SpatialInventoryView withNavigation(String retainedRowKey, boolean forwardAvailable,
+	public SpatialInventoryView withNavigation(@Nullable String retainedRowKey, boolean forwardAvailable,
 		boolean selectedRowCommittable) {
 		return new SpatialInventoryView(listKey, open, rows, selectedIndex, windowFirst, visibleRows,
 			backLeft, status, axisX, glideBaseY, selectedRowCenterY, backAffordance,
-			retainedRowKey, forwardAvailable, selectedRowCommittable);
+			retainedRowKey, forwardAvailable, selectedRowCommittable, resourceGroups);
+	}
+	public SpatialInventoryView withResourceGroups(List<ResourceGroup> groups) {
+		return new SpatialInventoryView(listKey, open, rows, selectedIndex, windowFirst, visibleRows, backLeft, status,
+			axisX, glideBaseY, selectedRowCenterY, backAffordance, retainedRowKey, forwardAvailable, selectedRowCommittable, List.copyOf(groups));
+	}
+	public Component groupSummary() {
+		Component result = Component.empty();
+		for (ResourceGroup group : resourceGroups) {
+			if (!result.getString().isEmpty()) result = result.copy().append(" | ");
+			result = result.copy().append(Component.translatable(group.labelKey()));
+			if (group.status().translationKey() != null) result = result.copy().append(": ").append(Component.translatable(group.status().translationKey()));
+		}
+		return result;
+	}
+	/** A row inherits only its own lane lifecycle; an unrelated failing lane cannot grey healthy rows. */
+	public boolean rowGrey(Row row) {
+		Status lifecycle = resourceGroups.isEmpty() ? status : resourceGroups.stream()
+			.filter(group -> group.resourceKind() == row.resourceKind()).findFirst().map(ResourceGroup::status).orElse(Status.UNKNOWN);
+		return lifecycle.grey() || row.quality().grey();
 	}
 
-	private static boolean validSelectedIndex(int selectedIndex, List<Row> rows) {
+	private static boolean validSelectedIndex(int selectedIndex, @Nullable List<Row> rows) {
 		return selectedIndex >= 0 && rows != null && selectedIndex < rows.size();
 	}
 
@@ -113,11 +148,15 @@ public record SpatialInventoryView(String listKey, boolean open, List<Row> rows,
 	 * renderer. {@code displayJson} is the immutable server-bounded encoded
 	 * display value; null keeps the native registry-name fallback.
 	 */
-	public record Row(String key, String label, Long count, String itemId, String displayJson, Status quality,
-		Integer outlineColor, RowDisplay display) {
+	public record Row(InventoryResourceKind resourceKind, String key, String label, @Nullable Long count, @Nullable String itemId, @Nullable String displayJson, Status quality,
+		@Nullable Integer outlineColor, @Nullable RowDisplay display) {
+		public Row(String key, String label, @Nullable Long count, @Nullable String itemId, @Nullable String displayJson, Status quality,
+			@Nullable Integer outlineColor, @Nullable RowDisplay display) {
+			this(InventoryResourceKind.ITEM, key, label, count, itemId, displayJson, quality, outlineColor, display);
+		}
 
-		public Row(String key, String label, Long count, String itemId, String displayJson, Status quality,
-			Integer outlineColor) {
+		public Row(String key, String label, @Nullable Long count, @Nullable String itemId, @Nullable String displayJson, Status quality,
+			@Nullable Integer outlineColor) {
 			this(key, label, count, itemId, displayJson, quality, outlineColor, null);
 		}
 
@@ -130,12 +169,12 @@ public record SpatialInventoryView(String listKey, boolean open, List<Row> rows,
 		}
 
 		/** A null outline carries no direct-send capability; quality is independent of that capability. */
-		public Row(String key, String label, Long count, String itemId, String displayJson, Status quality) {
+		public Row(String key, String label, @Nullable Long count, @Nullable String itemId, @Nullable String displayJson, Status quality) {
 			this(key, label, count, itemId, displayJson, quality, null);
 		}
 
 		/** Compatibility form without encoded display data. */
-		public Row(String key, String label, Long count, String itemId, Status quality) {
+		public Row(String key, String label, @Nullable Long count, @Nullable String itemId, Status quality) {
 			this(key, label, count, itemId, null, quality);
 		}
 	}
@@ -147,17 +186,21 @@ public record SpatialInventoryView(String listKey, boolean open, List<Row> rows,
 	 */
 	public static final class RowDisplay {
 		private final Component name;
-		private final ItemStack icon;
+		private final @Nullable ItemStack icon;
+		private final @Nullable Fluid fluid;
 
 		public RowDisplay(Component name, ItemStack icon) {
 			this.name = Objects.requireNonNull(name).copy();
 			this.icon = Objects.requireNonNull(icon).copy();
+			this.fluid = null;
 		}
 		/** Text-only detached observation; no item construction is needed to measure it. */
-		public RowDisplay(Component name) { this.name = Objects.requireNonNull(name).copy(); this.icon = null; }
+		public RowDisplay(Component name) { this.name = Objects.requireNonNull(name).copy(); this.icon = null; this.fluid = null; }
+		public RowDisplay(Component name, @Nullable Fluid fluid) { this.name = Objects.requireNonNull(name).copy(); this.icon = null; this.fluid = fluid; }
 		public Component name() { return name.copy(); }
-		public boolean hasIcon() { return icon != null && !icon.isEmpty(); }
+		public boolean hasIcon() { return fluid != null || icon != null && !icon.isEmpty(); }
 		public ItemStack icon() { return icon == null ? ItemStack.EMPTY : icon.copy(); }
+		public @Nullable Fluid fluid() { return fluid; }
 	}
 
 	/** Separate view status and row quality use the same presentation vocabulary. */
@@ -172,16 +215,16 @@ public record SpatialInventoryView(String listKey, boolean open, List<Row> rows,
 		COMPONENT_TOO_LONG("all_variants", true),
 		EXPIRED("expired", true);
 
-		private final String suffix;
+		private final @Nullable String suffix;
 		private final boolean grey;
 
-		Status(String suffix, boolean grey) {
+		Status(@Nullable String suffix, boolean grey) {
 			this.suffix = suffix;
 			this.grey = grey;
 		}
 
 		/** READY has no separate status label. */
-		public String translationKey() {
+		public @Nullable String translationKey() {
 			return suffix == null ? null : "pingforit.spatial.inventory." + suffix;
 		}
 
@@ -190,7 +233,7 @@ public record SpatialInventoryView(String listKey, boolean open, List<Row> rows,
 		}
 
 		/** Name-only adapter for DTOs; an unrecognized/missing state is never READY. */
-		public static Status fromName(String name) {
+		public static Status fromName(@Nullable String name) {
 			if (name == null) {
 				return UNKNOWN;
 			}

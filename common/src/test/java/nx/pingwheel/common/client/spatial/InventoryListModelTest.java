@@ -17,6 +17,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * state. No timestamps, Minecraft classes, or configuration are involved.
  */
 class InventoryListModelTest {
+	@Test void mixedGroupsSortOnlyWithinDomainsAndKeepIndependentScrollFreeze() {
+		var model = new InventoryListModel(4);
+		var item = nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM;
+		var fluid = nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID;
+		model.open(List.of(new InventoryListModel.Entry(fluid, "f", "fluid", Long.MAX_VALUE, null),
+			new InventoryListModel.Entry(item, "i", "item", 2, null)), 0, 0, 0);
+		assertEquals(List.of("i", "f"), model.snapshot().entries().stream().map(InventoryListModel.Entry::key).toList());
+		model.markScrolled();
+		model.applyBatch(List.of(new InventoryListModel.Entry(item, "i2", "item", 99, null),
+			new InventoryListModel.Entry(fluid, "f2", "fluid", 1, null)));
+		assertEquals(List.of("i", "i2", "f", "f2"), model.snapshot().entries().stream().map(InventoryListModel.Entry::key).toList());
+		model.select("f"); model.retainKeys(java.util.Set.of("f", "f2"));
+		assertEquals("f", model.selectedKey());
+	}
 
 	private static InventoryListModel.Entry entry(String key, long count) {
 		return new InventoryListModel.Entry(key, "label-" + key, count, "common");

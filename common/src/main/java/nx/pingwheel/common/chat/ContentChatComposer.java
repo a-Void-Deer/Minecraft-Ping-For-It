@@ -232,8 +232,10 @@ public final class ContentChatComposer {
 		Component name = displayName(entry, displayDecoder);
 		if (name == null) return Optional.empty();
 
-		Component content = Component.translatable(
-			ContentChatTemplate.ITEM_COUNT_KEY, name, Long.toString(entry.count()));
+		Component content = entry.resourceKind() == nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID
+			? Component.translatable("presentation.pingforit.format.fluid_amount", name,
+				nx.pingwheel.common.presentation.inventory.client.InventoryQuantityFormat.quantity(entry.resourceKind(), entry.count()))
+			: Component.translatable(ContentChatTemplate.ITEM_COUNT_KEY, name, Long.toString(entry.count()));
 
 		InventoryS2CPacket.Status quality = entry.fallback()
 			? InventoryS2CPacket.Status.COMPONENT_TOO_LONG : entry.quality();
@@ -296,6 +298,8 @@ public final class ContentChatComposer {
 		ClientInventory.EntryView entry,
 		Function<String, Optional<Component>> displayDecoder
 	) {
+		if (entry.resourceKind() == nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID)
+			return nx.pingwheel.common.presentation.inventory.client.ClientFluidDisplay.resolve(entry.itemId(), entry.label(), entry.displayJson()).name();
 		if (entry.displayJson() != null && !entry.displayJson().isBlank()) {
 			try {
 				@Nullable Component decoded = displayDecoder.apply(entry.displayJson()).orElse(null);

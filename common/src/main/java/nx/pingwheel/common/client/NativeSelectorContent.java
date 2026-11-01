@@ -22,9 +22,12 @@ import nx.pingwheel.common.presentation.PresentationKineticFormat;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.preview.ClientPresentationPreview;
 import nx.pingwheel.common.presentation.preview.PreviewPropertyEntries;
 import nx.pingwheel.common.render.SpatialInventoryView.Status;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /** One held target's authorized observation adapter. No marker data or sender is exposed to the facade. */
 final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<ClientInventory.PreviewEntryReference> {
@@ -48,7 +51,7 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 	private final Map<String, Component> labels = new LinkedHashMap<>();
 	private long request = ClientInventory.NO_REQUEST;
 	private long revision;
-	private ClientInventory.Preview previousInventory;
+	private final Map<InventoryResourceKind, ClientInventory.Preview> previousInventory = new java.util.EnumMap<>(InventoryResourceKind.class);
 	private SpatialSelectorSession.ContentProjection<ClientInventory.PreviewEntryReference> previous;
 	private boolean closed;
 
@@ -99,7 +102,7 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 		finally {
 			ClientInventory current = inventory.get();
 			if (current != null && request != ClientInventory.NO_REQUEST) current.close(request);
-			labels.clear(); previous = null; previousInventory = null;
+			labels.clear(); previous = null; previousInventory.clear();
 		}
 	}
 
@@ -180,40 +183,50 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 			if (stressMember)
 				groups.add(new SpatialSelectorSession.ContentGroup(STRESS_GROUP_PATH, STRESS_GROUP_LABEL_KEY));
 		});
-		ClientInventory current = inventory.get();
+		@Nullable ClientInventory current = inventory.get();
 		// A purged request is absent, not an empty UPDATING preview. Keeping the
 		// distinction lets normal initial loading stay on the list while a
 		// revoked/reset authorization removes the inventory branch entirely.
-		ClientInventory.Preview state = current == null || request == ClientInventory.NO_REQUEST
-			|| !current.hasPreview(request) ? null : current.preview(request);
-		SpatialSelectorSession.InventoryPreview<ClientInventory.PreviewEntryReference> list = null;
-		boolean reset = state != null && previousInventory != null
-			&& (state.baselineId() != previousInventory.baselineId() || state.statusRevision() != previousInventory.statusRevision()
-				|| !state.entries().stream().map(ClientInventory.EntryView::key).collect(java.util.stream.Collectors.toSet())
-					.containsAll(previousInventory.entries().stream().map(ClientInventory.EntryView::key).toList()));
-		if (state != null) {
-			Map<String, ClientInventory.PreviewEntryReference> references = new LinkedHashMap<>();
-			current.selectable(request).forEach(reference -> references.put(reference.entryKey(), reference));
+		SpatialSelectorSession.@Nullable InventoryPreview<ClientInventory.PreviewEntryReference> list = null;
+		if (current != null && request != ClientInventory.NO_REQUEST && current.hasPreview(request)) {
 			List<SpatialSelectorSession.InventoryRow<ClientInventory.PreviewEntryReference>> rows = new ArrayList<>();
-			for (var entry : state.entries()) {
-				var reference = references.get(entry.key());
-				if (reference != null) rows.add(new SpatialSelectorSession.InventoryRow<>(entry.key(), entry.label(),
+			List<SpatialSelectorSession.InventoryGroup> lanes = new ArrayList<>();
+			for (InventoryResourceKind kind : InventoryResourceKind.values()) {
+				if (!current.hasPreview(request, kind)) continue;
+				ClientInventory.Preview state = current.preview(request, kind);
+				ClientInventory.@Nullable Preview prior = previousInventory.get(kind);
+				boolean laneReset = prior != null && (state.baselineId() != prior.baselineId() || state.statusRevision() != prior.statusRevision()
+					|| !state.entries().stream().map(ClientInventory.EntryView::key).collect(java.util.stream.Collectors.toSet())
+						.containsAll(prior.entries().stream().map(ClientInventory.EntryView::key).toList()));
+				Map<String, ClientInventory.PreviewEntryReference> references = new LinkedHashMap<>();
+				current.selectable(request, kind).forEach(reference -> references.put(reference.entryKey(), reference));
+				for (var entry : state.entries()) {
+					ClientInventory.@Nullable PreviewEntryReference reference = references.get(entry.key());
+					if (reference != null) rows.add(new SpatialSelectorSession.InventoryRow<>(kind, kind.name() + ":" + entry.key(), entry.label(),
 						entry.count() < 0 ? null : entry.count(), entry.itemId(), entry.displayJson(),
 						entry.fallback() ? Status.COMPONENT_TOO_LONG
 							: entry.quality() == null ? Status.READY : Status.fromName(entry.quality().name()), reference));
+				}
+				Status status = state.completeScan() && state.status() == InventoryS2CPacket.Status.READY ? Status.READY
+					: Status.fromName(state.status().name());
+				if (!state.completeScan() && status == Status.READY) status = Status.UPDATING;
+				@Unmodifiable List<PingType> itemTypes = List.copyOf(kind == InventoryResourceKind.ITEM ? inventoryTypes.apply(capture) : propertyTypes.apply(capture));
+				@Nullable PingType defaultItemType = itemTypes.isEmpty() ? null : itemTypes.getFirst();
+				lanes.add(new SpatialSelectorSession.InventoryGroup(kind, "pingforit.inventory.group." + kind.name().toLowerCase(java.util.Locale.ROOT),
+					status, itemTypes, defaultItemType, laneReset));
+				previousInventory.put(kind, state);
 			}
-			Status status = state.completeScan() && state.status() == InventoryS2CPacket.Status.READY ? Status.READY
-				: Status.fromName(state.status().name());
-			if (!state.completeScan() && status == Status.READY) status = Status.UPDATING;
-			List<PingType> itemTypes = inventoryTypes.apply(capture);
-			PingType defaultItemType = itemTypes.isEmpty() ? null : itemTypes.getFirst();
-			list = new SpatialSelectorSession.InventoryPreview<>("settings.pingforit.presentation.field.pingforit_inventory_items.name",
-				status, rows, itemTypes, defaultItemType);
+			@Unmodifiable List<SpatialSelectorSession.InventoryGroup> available = lanes.stream().filter(lane -> lane.status() != Status.INVALID
+				&& lane.status() != Status.UNAVAILABLE && lane.status() != Status.EXPIRED).toList();
+			@Unmodifiable List<PingType> allTypes = available.stream().flatMap(lane -> lane.allowedTypes().stream()).distinct().toList();
+			Status overall = available.isEmpty() ? Status.INVALID
+				: available.stream().allMatch(lane -> lane.status() == Status.READY) ? Status.READY : Status.UPDATING;
+			list = new SpatialSelectorSession.InventoryPreview<>("pingforit.inventory.group.contents", overall, rows,
+				allTypes, allTypes.isEmpty() ? null : allTypes.getFirst(), lanes);
 		}
-		previousInventory = state;
-		var next = new SpatialSelectorSession.ContentProjection<>(fence, revision + 1, reset,
+		var next = new SpatialSelectorSession.ContentProjection<>(fence, revision + 1, false,
 			Status.READY, properties, list, groups);
-		if (previous != null && !reset && Objects.equals(previous.properties(), next.properties())
+		if (previous != null && Objects.equals(previous.properties(), next.properties())
 			&& Objects.equals(previous.inventory(), next.inventory())
 			&& Objects.equals(previous.groups(), next.groups())) return null;
 		revision++;

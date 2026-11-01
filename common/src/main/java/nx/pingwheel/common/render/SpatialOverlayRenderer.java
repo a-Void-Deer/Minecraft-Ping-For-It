@@ -1529,7 +1529,7 @@ public final class SpatialOverlayRenderer {
 				? backgroundCoverage(BOX_BACKGROUND_PERCENT, selectedRowGain(view, listActive), 1.0) : 0.0;
 			add(targets, new VisualKey("row", owner, row.key()), x, rowY, 1.0, 1.0, rowCoverage, x, rowY + 6.0,
 				new RowPaint(row, layout.width(), rowHeight, selected,
-					view.status().grey() || row.quality().grey(),
+					view.rowGrey(row),
 					listActive && selected && view.selectedRowCommittable() && !view.backAffordance().focused()
 						? row.outlineColor() : null, source));
 		}
@@ -1745,7 +1745,16 @@ public final class SpatialOverlayRenderer {
 				drawInventoryText(graphics, font, Component.literal(header.position()), left, top, header.width() - 8.0,
 					style.inventoryTextScale(), TEXT_DIMMED_COLOR, alpha);
 				String key = header.status().translationKey();
-				if (key != null) {
+				if (header.geometry() != null && !header.geometry().view().resourceGroups().isEmpty()) {
+					int groupIndex = 1;
+					for (var group : header.geometry().view().resourceGroups()) {
+						Component text = Component.translatable(group.labelKey());
+						if (group.status().translationKey() != null)
+							text = text.copy().append(": ").append(Component.translatable(group.status().translationKey()));
+						drawInventoryText(graphics, font, text, left, top + groupIndex++ * font.lineHeight * style.inventoryTextScale() + 2,
+							header.width() - 8, style.inventoryTextScale(), group.status().grey() ? TEXT_DISABLED_COLOR : TEXT_DIMMED_COLOR, alpha);
+					}
+				} else if (key != null) {
 					drawInventoryText(graphics, font, Component.translatable(key), left,
 						top + font.lineHeight * style.inventoryTextScale() + 2.0, header.width() - 8.0,
 						style.inventoryTextScale(), TEXT_DIMMED_COLOR, alpha);
@@ -1784,22 +1793,43 @@ public final class SpatialOverlayRenderer {
 		int top = (int) Math.round(-paint.height() / 2.0);
 		paintRowFills(paint, style, alpha, backgroundAlpha, graphics::fill);
 		double textLeft = left + 5.0;
-		ClientItemDisplay.Display display = rowDisplay(row);
-		ItemStack stack = display.stack();
-		if (!stack.isEmpty()) {
-			float tint = paint.grey() ? 0.65f : 1.0f;
-			SpatialItemIconRenderer.draw(graphics, stack, (int) textLeft, -ITEM_ICON_SIZE / 2, tint, (float) alpha);
-			textLeft += ITEM_ICON_SIZE + 3.0;
+		Component name;
+		if (row.resourceKind() == nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID) {
+			nx.pingwheel.common.presentation.inventory.client.ClientFluidDisplay.@org.jetbrains.annotations.Nullable Display display = row.display() == null
+				? nx.pingwheel.common.presentation.inventory.client.ClientFluidDisplay.resolve(row.itemId(), row.label(), row.displayJson()) : null;
+			name = display == null ? row.display().name() : display.name();
+			net.minecraft.world.level.material.@org.jetbrains.annotations.Nullable Fluid fluid = display != null ? display.fluid()
+				: row.display().fluid();
+			if (fluid != null) {
+				SpatialFluidIconRenderer.draw(graphics, fluid, (int) textLeft, -ITEM_ICON_SIZE / 2, paint.grey() ? 0.65f : 1f, (float) alpha);
+				textLeft += ITEM_ICON_SIZE + 3.0;
+			}
+		} else {
+			ClientItemDisplay.Display display = rowDisplay(row);
+			name = display.name();
+			ItemStack stack = display.stack();
+			if (!stack.isEmpty()) {
+				float tint = paint.grey() ? 0.65f : 1.0f;
+				SpatialItemIconRenderer.draw(graphics, stack, (int) textLeft, -ITEM_ICON_SIZE / 2, tint, (float) alpha);
+				textLeft += ITEM_ICON_SIZE + 3.0;
+			}
 		}
-		Component quantity = SpatialInventoryLayout.quantity(row.count());
+		Component quantity = SpatialInventoryLayout.quantity(row);
 		double quantityWidth = Math.min(font.width(quantity) * textScale,
 			Math.max(0.0, (right - 4.0 - textLeft) / 2.0));
 		double textTop = top + 2.0;
 		int textColor = paint.grey() ? TEXT_DISABLED_COLOR : paint.selected() ? TEXT_COLOR : TEXT_DIMMED_COLOR;
-		drawInventoryText(graphics, font, display.name(), textLeft, textTop,
+		drawInventoryText(graphics, font, name, textLeft, textTop,
 			Math.max(0.0, right - 8.0 - quantityWidth - textLeft), textScale, textColor, alpha);
 		drawInventoryText(graphics, font, quantity, right - 4.0 - quantityWidth, textTop, quantityWidth, textScale, textColor, alpha);
-		String qualityKey = row.quality().translationKey();
+		@org.jetbrains.annotations.Nullable String qualityKey = row.quality().translationKey();
+		if (paint.geometry() != null && !paint.geometry().view().resourceGroups().isEmpty()) {
+			Component group = Component.translatable("pingforit.inventory.group." + row.resourceKind().name().toLowerCase(java.util.Locale.ROOT));
+			if (qualityKey != null) group = group.copy().append(" — ").append(Component.translatable(qualityKey));
+			drawInventoryText(graphics, font, group, textLeft, textTop + font.lineHeight * textScale + 1,
+				right - 4 - textLeft, textScale, TEXT_DISABLED_COLOR, alpha);
+			qualityKey = null;
+		}
 		if (qualityKey != null) {
 			drawInventoryText(graphics, font, Component.translatable(qualityKey), textLeft,
 				textTop + font.lineHeight * textScale + 1.0, right - 4.0 - textLeft,
@@ -2300,11 +2330,15 @@ public final class SpatialOverlayRenderer {
 	 */
 	static ClientItemDisplay.Display rowDisplay(SpatialInventoryView.Row row) {
 		if (row.display() != null) return new ClientItemDisplay.Display(row.display().icon(), row.display().name());
+		if (row.resourceKind() == nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID)
+			return new ClientItemDisplay.Display(ItemStack.EMPTY,
+				nx.pingwheel.common.presentation.inventory.client.ClientFluidDisplay.resolve(row.itemId(), row.label(), row.displayJson()).name());
 		return ClientItemDisplay.resolve(row.itemId(), row.label(), row.displayJson());
 	}
 
 	/** Explicit-registry form of the row display seam, used by headless tests. */
 	static ClientItemDisplay.Display rowDisplay(SpatialInventoryView.Row row, HolderLookup.Provider registryAccess) {
+		if (row.resourceKind() == nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID) return rowDisplay(row);
 		return ClientItemDisplay.resolve(registryAccess, row.itemId(), row.label(), row.displayJson());
 	}
 

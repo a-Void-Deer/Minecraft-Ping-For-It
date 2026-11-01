@@ -6,6 +6,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.EnumSet;
+import java.util.Set;
+import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Pure ordering and selection model for the streamed inventory list.
@@ -29,10 +35,14 @@ import java.util.Objects;
  * clock, reads configuration, or touches a renderer; the returned snapshot is
  * immutable.
  */
+@NotNullByDefault
 public final class InventoryListModel {
 
 	/** One discovered inventory row; {@code quality} is an opaque caller token. */
-	public record Entry(String key, String label, long count, String quality) {
+	public record Entry(InventoryResourceKind resourceKind, String key, String label, long count, @Nullable String quality) {
+		public Entry(String key, String label, long count, @Nullable String quality) {
+			this(InventoryResourceKind.ITEM, key, label, count, quality);
+		}
 
 		public Entry {
 			Objects.requireNonNull(key, "key");
@@ -64,9 +74,9 @@ public final class InventoryListModel {
 	/** Immutable read model for the list renderer. */
 	public record Snapshot(
 		boolean open,
-		List<Entry> entries,
+		@Unmodifiable List<Entry> entries,
 		int selectedIndex,
-		String selectedKey,
+		@Nullable String selectedKey,
 		int windowFirst,
 		Direction direction,
 		Status status,
@@ -75,14 +85,16 @@ public final class InventoryListModel {
 	) {}
 
 	private static final class Row {
+		final InventoryResourceKind resourceKind;
 
 		final String key;
 		final long sequence;
 		String label;
 		long count;
-		String quality;
+		@Nullable String quality;
 
 		Row(Entry entry, long sequence) {
+			this.resourceKind = entry.resourceKind();
 			this.key = entry.key();
 			this.sequence = sequence;
 			this.label = entry.label();
@@ -96,10 +108,10 @@ public final class InventoryListModel {
 	private final Map<String, Row> byKey = new HashMap<>();
 
 	private boolean open;
-	private boolean userScrolled;
+	private final Set<InventoryResourceKind> scrolledKinds = EnumSet.noneOf(InventoryResourceKind.class);
 	private boolean backHoverFocused;
 	private long nextSequence;
-	private String selectedKey;
+	private @Nullable String selectedKey;
 	private double wheelRemainder;
 	private double axisX;
 	private double glideBaseY;
@@ -137,7 +149,7 @@ public final class InventoryListModel {
 		Objects.requireNonNull(discovered, "discovered");
 
 		open = true;
-		userScrolled = false;
+		scrolledKinds.clear();
 		backHoverFocused = false;
 		nextSequence = 0L;
 		wheelRemainder = 0.0;
@@ -162,7 +174,7 @@ public final class InventoryListModel {
 	/** Ends the session; a later {@link #open} starts a fresh discovery order. */
 	public void close() {
 		open = false;
-		userScrolled = false;
+		scrolledKinds.clear();
 		backHoverFocused = false;
 		rows.clear();
 		byKey.clear();
@@ -202,7 +214,7 @@ public final class InventoryListModel {
 
 		for (Entry entry : batch) {
 			Objects.requireNonNull(entry, "entry");
-			Row existing = byKey.get(entry.key());
+			@Nullable Row existing = byKey.get(entry.key());
 
 			if (existing != null) {
 				// A pure quantity (or label/quality) update keeps its row.
@@ -223,16 +235,33 @@ public final class InventoryListModel {
 			return false;
 		}
 
-		if (userScrolled) {
-			appended.sort(byQuantity());
-			rows.addAll(appended);
-		} else {
-			rows.addAll(appended);
-			sortByQuantity();
+		for (InventoryResourceKind kind : InventoryResourceKind.values()) {
+			List<Row> additions = appended.stream().filter(row -> row.resourceKind == kind).sorted(byQuantity()).toList();
+			if (additions.isEmpty()) continue;
+			int end = 0;
+			while (end < rows.size() && rows.get(end).resourceKind.ordinal() <= kind.ordinal()) end++;
+			rows.addAll(end, additions);
+			if (!scrolledKinds.contains(kind)) {
+				List<Row> group = rows.stream().filter(row -> row.resourceKind == kind).sorted(byQuantity()).toList();
+				int index = 0;
+				for (int i = 0; i < rows.size(); i++) if (rows.get(i).resourceKind == kind) rows.set(i, group.get(index++));
+			}
 		}
 
 		selectFirstIfUnset();
 		return true;
+	}
+
+	/** Lane reset/revocation removes only its keys, retaining surviving navigation and discovery order. */
+	public void retainKeys(Set<String> retained) {
+		int oldIndex = selectedIndex();
+		rows.removeIf(row -> !retained.contains(row.key));
+		byKey.keySet().retainAll(retained);
+		if (selectedKey != null && !byKey.containsKey(selectedKey))
+			selectedKey = rows.isEmpty() ? null : rows.get(Math.min(Math.max(0, oldIndex), rows.size() - 1)).key;
+	}
+	public void resetKinds(Set<InventoryResourceKind> kinds) {
+		scrolledKinds.removeAll(kinds);
 	}
 
 	/** Updates one existing row count in place; never reorders. */
@@ -256,7 +285,7 @@ public final class InventoryListModel {
 
 		int target = Math.max(0, Math.min(index, rows.size() - 1));
 		selectedKey = rows.get(target).key;
-		userScrolled = true;
+		markScrolled();
 	}
 
 	/** Selects an existing key; returns whether it was found. */
@@ -269,7 +298,7 @@ public final class InventoryListModel {
 
 		if (!key.equals(selectedKey)) {
 			selectedKey = key;
-			userScrolled = true;
+			markScrolled();
 		}
 
 		return true;
@@ -309,7 +338,11 @@ public final class InventoryListModel {
 
 	/** A fractional or boundary-limited vertical scroll still freezes discovery positions. */
 	public void markScrolled() {
-		if (open) userScrolled = true;
+		if (open) {
+			@Nullable Row selected = byKey.get(selectedKey);
+			if (selected != null) scrolledKinds.add(selected.resourceKind);
+			else scrolledKinds.addAll(EnumSet.allOf(InventoryResourceKind.class));
+		}
 	}
 
 	public boolean isBackHoverFocused() {
@@ -342,7 +375,7 @@ public final class InventoryListModel {
 		return -1;
 	}
 
-	public String selectedKey() {
+	public @Nullable String selectedKey() {
 		return selectedKey;
 	}
 
@@ -382,7 +415,7 @@ public final class InventoryListModel {
 		List<Entry> entries = new ArrayList<>(rows.size());
 
 		for (Row row : rows) {
-			entries.add(new Entry(row.key, row.label, row.count, row.quality));
+			entries.add(new Entry(row.resourceKind, row.key, row.label, row.count, row.quality));
 		}
 
 		return new Snapshot(
@@ -409,7 +442,7 @@ public final class InventoryListModel {
 		}
 		// An attempted vertical scroll freezes positions even at an end stop or
 		// before the first partial batch arrives.
-		userScrolled = true;
+		markScrolled();
 		if (rows.isEmpty()) return 0;
 
 		int current = Math.max(0, selectedIndex());
@@ -418,7 +451,7 @@ public final class InventoryListModel {
 
 		if (moved != 0) {
 			selectedKey = rows.get(target).key;
-			userScrolled = true;
+			markScrolled();
 		}
 
 		return moved;
@@ -429,8 +462,8 @@ public final class InventoryListModel {
 	}
 
 	private static Comparator<Row> byQuantity() {
-		return Comparator.comparingLong((Row row) -> row.count)
-			.reversed()
+		return Comparator.comparing((Row row) -> row.resourceKind)
+			.thenComparing(Comparator.comparingLong((Row row) -> row.count).reversed())
 			.thenComparingLong(row -> row.sequence);
 	}
 

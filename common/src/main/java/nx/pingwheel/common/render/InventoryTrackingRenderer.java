@@ -16,8 +16,12 @@ import org.jetbrains.annotations.NotNullByDefault;
 @NotNullByDefault
 public final class InventoryTrackingRenderer {
 	private InventoryTrackingRenderer() {}
-	public record Line(String label, @Nullable Long count, @Nullable String pingType, @Nullable String statusKey,
-		@Nullable String qualifierKey, boolean grey) {}
+	public record Line(nx.pingwheel.common.presentation.inventory.InventoryResourceKind resourceKind, String label, @Nullable Long count, @Nullable String pingType, @Nullable String statusKey,
+		@Nullable String qualifierKey, boolean grey) {
+		public Line(String label, @Nullable Long count, @Nullable String pingType, @Nullable String statusKey, @Nullable String qualifierKey, boolean grey) {
+			this(nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM, label, count, pingType, statusKey, qualifierKey, grey);
+		}
+	}
 	public record MarkerLines(double x, double y, float scale, @Unmodifiable List<Line> lines) {
 		public MarkerLines { lines = List.copyOf(lines); }
 	}
@@ -29,14 +33,16 @@ public final class InventoryTrackingRenderer {
 			// The shared projection decodes the same server-bounded display value
 			// and name policy the inventory list uses; a missing or malformed
 			// value falls back to the registry translation key.
-			String name = ClientItemDisplay.resolve(entry.itemId(), entry.label(), entry.displayJson()).name().getString();
+			String name = entry.resourceKind() == nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID
+				? nx.pingwheel.common.presentation.inventory.client.ClientFluidDisplay.resolve(entry.itemId(), entry.label(), entry.displayJson()).name().getString()
+				: ClientItemDisplay.resolve(entry.itemId(), entry.label(), entry.displayJson()).name().getString();
 			if (name.isBlank()) continue;
 			InventoryS2CPacket.@Nullable Status quality = entry.fallback() ? InventoryS2CPacket.Status.COMPONENT_TOO_LONG : entry.quality();
 			var status = SpatialInventoryView.Status.fromName(tracking.status().name());
 			var rowStatus = quality == null ? SpatialInventoryView.Status.READY : SpatialInventoryView.Status.fromName(quality.name());
 			@Nullable String qualifier = rowStatus == SpatialInventoryView.Status.COMPONENT_TOO_LONG ? rowStatus.translationKey() : null;
 			String safe = name.replaceAll("[\\p{Cntrl}]", " ").strip();
-			result.add(new Line(safe.substring(0, Math.min(64, safe.length())), entry.count() < 0 ? null : entry.count(), entry.itemPingType(), status.translationKey(), qualifier,
+			result.add(new Line(entry.resourceKind(), safe.substring(0, Math.min(64, safe.length())), entry.count() < 0 ? null : entry.count(), entry.itemPingType(), status.translationKey(), qualifier,
 				tracking.grey() || status.grey() || rowStatus.grey()));
 		}
 		return List.copyOf(result);
@@ -55,11 +61,11 @@ public final class InventoryTrackingRenderer {
 		int copies = phrase.length - 1;
 		if (copies == 0) { phrase = new String[] {"", ""}; copies = 1; }
 		String suffix = suffix(lifecycle, qualifier);
-		String item = itemCount(name, line.count());
+		String item = itemCount(name, line);
 		int phraseLength = String.join("", phrase).length();
 		while (phraseLength + copies * item.length() + suffix.length() > 64 && !name.isEmpty()) {
 			name = shorten(name, name.length() - 1);
-			item = itemCount(name, line.count());
+			item = itemCount(name, line);
 		}
 		// Very long translations spend their remaining space on lifecycle and
 		// identity labels before annotation wording. Never substring the item/count.
@@ -78,8 +84,12 @@ public final class InventoryTrackingRenderer {
 		}
 		return Component.literal(String.join(item, phrase) + suffix);
 	}
-	private static String itemCount(String name, @Nullable Long count) {
-		return count == null ? name : Component.translatableWithFallback("presentation.pingforit.format.item_count", "%s × %s", name, Long.toString(count)).getString();
+	private static String itemCount(String name, Line line) {
+		if (line.count() == null) return name;
+		return line.resourceKind() == nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID
+			? Component.translatable("presentation.pingforit.format.fluid_amount", name,
+				nx.pingwheel.common.presentation.inventory.client.InventoryQuantityFormat.quantity(line.resourceKind(), line.count())).getString()
+			: Component.translatableWithFallback("presentation.pingforit.format.item_count", "%s × %s", name, Long.toString(line.count())).getString();
 	}
 	private static String suffix(String lifecycle, String qualifier) {
 		return (lifecycle.isEmpty() ? "" : " — " + lifecycle) + (qualifier.isEmpty() ? "" : " — " + qualifier);
