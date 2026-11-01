@@ -498,6 +498,8 @@ public final class InventoryBackend implements AutoCloseable {
 		if (publishing) return;
 		advance(now, settings);
 		if (packet == null || packet.isCorrupt()) return;
+		// Stage-one bridge: an unimplemented lane must never resolve through the item source or commit replay.
+		if (packet.resourceKind() != InventoryResourceKind.ITEM) return;
 		if (packet.kind() == InventoryC2SPacket.Kind.HELLO) { hello(player); publisher.drainControls(); return; }
 		Session session = sessions.get(player);
 		if (session == null) return;

@@ -53,6 +53,26 @@ class ClientDedicatedDeliveryTest {
 			.anyMatch(adapter -> adapter.adapterId().equals(InventoryPresentation.ADAPTER_ID)));
 		assertTrue(client.acceptedCatalog().contains(InventoryPresentation.ITEMS),
 			"the policy catalogue sees the negotiated dedicated field");
+		assertTrue(client.acceptedCatalog().contains(InventoryPresentation.FLUIDS));
+	}
+
+	@Test
+	void oldInventorySchemaDisablesOnlyInventoryWhileBasicStillCreatesAndUpdates() {
+		client.tick(true);
+		assertTrue(client.offer(PresentationS2CPacket.offer(EPOCH,
+			Map.of(BASIC, PresentationBasic.fields(), InventoryPresentation.ADAPTER_ID, InventoryPresentation.INSTANCE.fields()),
+			Map.of(BASIC, 1, InventoryPresentation.ADAPTER_ID, 1))));
+		assertFalse(client.acceptedCatalog().contains(InventoryPresentation.ITEMS));
+		assertFalse(client.acceptedCatalog().contains(InventoryPresentation.FLUIDS));
+		assertTrue(client.reset(PresentationS2CPacket.reset(EPOCH, 1, Map.of("entity", Map.of(BASIC, Set.of(NAME))))));
+		var snapshot = new MarkerSnapshot(ID, UUID.randomUUID(),
+			new Target.LocationTarget("minecraft:overworld", 1, 2, 3), "entity", "attention", new MarkerAnchor(1, 2, 3), 1, 100);
+		var basic = new PresentationSection(BASIC, 1, Map.of(NAME, new PresentationValue.Text("{\"text\":\"Basic\"}")), false);
+		assertTrue(client.initial(PresentationS2CPacket.created(EPOCH, 1, 1, snapshot, "Owner", DEFAULT, basic)));
+		assertEquals(basic.fields().get(NAME), client.view(ID).field(BASIC, NAME));
+		var updated = new PresentationSection(BASIC, 1, Map.of(NAME, new PresentationValue.Text("{\"text\":\"Updated\"}")), false);
+		assertTrue(client.section(PresentationS2CPacket.section(EPOCH, 1, 2, ID, updated)));
+		assertEquals(updated.fields().get(NAME), client.view(ID).field(BASIC, NAME));
 	}
 
 	@Test

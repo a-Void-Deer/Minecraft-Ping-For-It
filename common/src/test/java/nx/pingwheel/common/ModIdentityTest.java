@@ -64,13 +64,13 @@ class ModIdentityTest {
 			"pingforit-c2s:update-channel",
 			"pingforit-c2s:presentation-v2",
 			"pingforit-c2s:presentation-preview-v1",
-			"pingforit-c2s:inventory-v1",
+			"pingforit-c2s:inventory-v2",
 			"pingforit-c2s:server-config-request-v5",
 			"pingforit-c2s:server-config-update-v5",
 			"pingforit-c2s:server-presentation-policy-v1",
 			"pingforit-s2c:presentation-v2",
 			"pingforit-s2c:presentation-preview-v1",
-			"pingforit-s2c:inventory-v1",
+			"pingforit-s2c:inventory-v2",
 			"pingforit-s2c:rate-limit-policy",
 			"pingforit-s2c:server-config-snapshot-v5",
 			"pingforit-s2c:server-presentation-policy-v1"
@@ -97,8 +97,8 @@ class ModIdentityTest {
 		assertEquals("pingforit-s2c:presentation-v2", PresentationS2CPacket.PACKET_ID.toString());
 	}
 	@Test void inventoryRoutesUseIndependentV1Ids() {
-		assertEquals("pingforit-c2s:inventory-v1", nx.pingwheel.common.network.InventoryC2SPacket.PACKET_ID.toString());
-		assertEquals("pingforit-s2c:inventory-v1", nx.pingwheel.common.network.InventoryS2CPacket.PACKET_ID.toString());
+		assertEquals("pingforit-c2s:inventory-v2", nx.pingwheel.common.network.InventoryC2SPacket.PACKET_ID.toString());
+		assertEquals("pingforit-s2c:inventory-v2", nx.pingwheel.common.network.InventoryS2CPacket.PACKET_ID.toString());
 	}
 
 	@Test

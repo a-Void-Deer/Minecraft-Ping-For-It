@@ -11,14 +11,18 @@ public final class InventoryScanner {
 
 	private InventoryScanner() {}
 
-	public record Key(String itemId, String componentsKey) {
+	public record Key(InventoryResourceKind kind, String itemId, String componentsKey) {
+		/** Source migration bridge: existing item callers remain explicitly in the ITEM lane. */
+		public Key(String itemId, String componentsKey) { this(InventoryResourceKind.ITEM, itemId, componentsKey); }
 		public Key {
+			Objects.requireNonNull(kind, "kind");
 			Objects.requireNonNull(itemId, "itemId");
 			Objects.requireNonNull(componentsKey, "componentsKey");
 			if (itemId.isBlank() || itemId.length() > 256 || componentsKey.length() > 256) {
 				throw new IllegalArgumentException("invalid item identity");
 			}
 		}
+		public String resourceId() { return itemId; }
 	}
 
 	public record Stack(Key key, long count) {

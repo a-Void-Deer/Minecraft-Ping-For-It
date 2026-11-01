@@ -10,6 +10,9 @@ import nx.pingwheel.common.presentation.PresentationAuthorization;
 import nx.pingwheel.common.presentation.PresentationField;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationSettings;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Shared inventory manifest descriptor, registered unchanged on both endpoints
@@ -19,14 +22,17 @@ import nx.pingwheel.common.presentation.PresentationSettings;
  * SECTION mask, capture, publication or rendering, so its collector is never
  * reached from that machinery.
  */
+@NotNullByDefault
 public final class InventoryPresentation implements PresentationAdapter {
 	public static final String ADAPTER_ID = "pingforit:inventory";
 	public static final String ITEMS = "pingforit:inventory.items";
-	public static final int SCHEMA = 1;
+	public static final String FLUIDS = "pingforit:inventory.fluids";
+	public static final int SCHEMA = 2;
 	public static final InventoryPresentation INSTANCE = new InventoryPresentation();
 
-	private static final List<PresentationField> FIELDS = List.of(
-		new PresentationField(ITEMS, PresentationField.Kind.RECORD, true, 0, "inventory items"));
+	private static final @Unmodifiable List<PresentationField> FIELDS = List.of(
+		new PresentationField(ITEMS, PresentationField.Kind.RECORD, true, 0, "inventory items"),
+		new PresentationField(FLUIDS, PresentationField.Kind.RECORD, true, 0, "inventory fluids"));
 
 	private InventoryPresentation() {}
 
@@ -35,7 +41,7 @@ public final class InventoryPresentation implements PresentationAdapter {
 	 * shared per-field authorization rule. The dedicated inventory delivery path
 	 * uses this helper directly instead of the SECTION projection mask.
 	 */
-	public static Set<String> allowed(PresentationSettings settings, UUID recipient, int actualLevel,
+	public static @Unmodifiable Set<String> allowed(@Nullable PresentationSettings settings, UUID recipient, int actualLevel,
 		String targetTypeId) {
 		Set<String> result = new LinkedHashSet<>();
 		for (PresentationField field : FIELDS) {
@@ -49,14 +55,14 @@ public final class InventoryPresentation implements PresentationAdapter {
 	@Override public String modId() { return "pingforit"; }
 	@Override public int schema() { return SCHEMA; }
 	@Override public int minUpdateIntervalTicks() { return 20; }
-	@Override public List<PresentationField> fields() { return FIELDS; }
+	@Override public @Unmodifiable List<PresentationField> fields() { return FIELDS; }
 
 	@Override public PresentationAdapter.DeliveryMode deliveryMode() {
 		return PresentationAdapter.DeliveryMode.DEDICATED;
 	}
 
 	/** Dedicated delivery owns inventory collection; the SECTION machinery never calls this. */
-	@Override public PresentationSection collect(DetachedTarget target, Set<String> demand, CaptureBudget budget) {
+	@Override public @Nullable PresentationSection collect(DetachedTarget target, Set<String> demand, CaptureBudget budget) {
 		return null;
 	}
 }

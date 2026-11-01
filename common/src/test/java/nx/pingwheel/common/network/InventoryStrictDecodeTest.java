@@ -60,7 +60,7 @@ class InventoryStrictDecodeTest {
 		} finally { original.release(); }
 		original = frame(InventoryS2CPacket.policy(1, 100, 1, Set.of("entity_block")));
 		try {
-			original.readUtf(256); original.readVarInt(); original.skipBytes(32);
+			original.readUtf(256); original.readVarInt(); original.skipBytes(33);
 			rejectsResponse(original, original.readerIndex()); original.readVarInt(); rejectsResponse(original, original.readerIndex());
 		} finally { original.release(); }
 	}
@@ -68,7 +68,7 @@ class InventoryStrictDecodeTest {
 		var original = frame(InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, 1, 0, new MarkerId(1), 1, 1, 1,
 			0, 1, true, InventoryS2CPacket.Status.READY, 0, List.of()).stamp(100, 1));
 		try {
-			original.readUtf(256); original.readVarInt(); original.skipBytes(32 + 1 + 8 + 24);
+			original.readUtf(256); original.readVarInt(); original.skipBytes(33 + 1 + 8 + 24);
 			rejectsResponse(original, original.readerIndex()); original.readVarInt();
 			rejectsResponse(original, original.readerIndex()); original.readVarInt(); original.skipBytes(1); original.readUtf(256); original.skipBytes(8);
 			rejectsResponse(original, original.readerIndex());

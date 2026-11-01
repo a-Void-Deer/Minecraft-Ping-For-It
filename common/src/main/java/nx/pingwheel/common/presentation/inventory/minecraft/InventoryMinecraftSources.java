@@ -211,6 +211,7 @@ public final class InventoryMinecraftSources {
 	}
 	public static Optional<InventorySourceAccess.Source> resolve(MinecraftServer server, InventorySourceInput input, int displayBytes,
 		InventoryValidationBudget.Allowance allowance) {
+		if (input.resourceKind() != nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM) return Optional.empty();
 		allowance.debit(resolutionValidationCost(input));
 		if (!server.isSameThread()) return Optional.empty();
 		requireDisplayBytes(displayBytes);

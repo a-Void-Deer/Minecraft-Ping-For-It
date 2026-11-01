@@ -115,6 +115,18 @@ class ClientInventoryTest {
 		session.accept(snapshot(1, 2, List.of(entry("b", 5L, 1L))));
 	}
 
+	@Test void fluidPolicyAndDataCannotOverwriteTheStageOneItemStore() {
+		commitTwoEntries();
+		var before = session.tracking(markerId);
+		session.accept(InventoryS2CPacket.policy(nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID,
+			EPOCH, 100, 1, java.util.Set.of()));
+		session.accept(snapshot(0, 1, List.of(entry("fluid-token", 81000, 99)))
+			.withResourceKind(nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID));
+		assertEquals(before.entries(), session.tracking(markerId).entries());
+		assertEquals(List.of("a", "b"), trackedKeys());
+		assertTrue(session.ready(), "unsupported lane cannot revoke the ITEM policy");
+	}
+
 	private InventoryS2CPacket heartbeat(long checksum, long watermark) {
 		return InventoryS2CPacket.heartbeat(EPOCH, 1L, markerId, BASELINE, REVISION, watermark, checksum);
 	}

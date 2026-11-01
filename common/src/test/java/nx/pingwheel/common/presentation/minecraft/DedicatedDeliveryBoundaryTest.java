@@ -58,7 +58,7 @@ class DedicatedDeliveryBoundaryTest {
 			assertTrue(mask.get(type).get(PresentationBasic.ID).contains(PresentationBasic.NAME));
 		}
 
-		assertEquals(Set.of(InventoryPresentation.ITEMS),
+		assertEquals(Set.of(InventoryPresentation.ITEMS, InventoryPresentation.FLUIDS),
 			InventoryPresentation.allowed(settings, VIEWER, 0, "entity_block"),
 			"the dedicated route still authorizes the same subject through the shared helper");
 	}

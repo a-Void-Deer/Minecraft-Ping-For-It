@@ -8,6 +8,8 @@ import java.util.UUID;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.presentation.PresentationAdapter;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * The original target and frozen view; the owner, not a viewer, authorizes
@@ -16,12 +18,15 @@ import nx.pingwheel.common.presentation.PresentationAdapter;
  * provider-confirmed physical read binding is resolved separately and never
  * replaces the original target.
  */
-public record InventorySourceInput(Target target, UUID readOwner, BlockFace face) {
+@NotNullByDefault
+public record InventorySourceInput(Target target, UUID readOwner, BlockFace face, InventoryResourceKind resourceKind) {
+	public InventorySourceInput(Target target, UUID readOwner, BlockFace face) { this(target, readOwner, face, InventoryResourceKind.ITEM); }
 
 	public InventorySourceInput {
 		Objects.requireNonNull(target, "target");
 		Objects.requireNonNull(readOwner, "readOwner");
 		Objects.requireNonNull(face, "face");
+		Objects.requireNonNull(resourceKind, "resourceKind");
 		if (!(target instanceof Target.BlockTarget) && !(target instanceof Target.ExternalBlockTarget)) {
 			throw new IllegalArgumentException("inventory source requires a block or external block target");
 		}
@@ -33,7 +38,7 @@ public record InventorySourceInput(Target target, UUID readOwner, BlockFace face
 	}
 
 	public String viewKey() {
-		return "inventory/" + face.name().toLowerCase(Locale.ROOT) + "/" + readOwner;
+		return (resourceKind == InventoryResourceKind.ITEM ? "inventory/" : "inventory/fluid/") + face.name().toLowerCase(Locale.ROOT) + "/" + readOwner;
 	}
 
 	/** The original ordinary block target; empty for an external target. */
@@ -51,11 +56,11 @@ public record InventorySourceInput(Target target, UUID readOwner, BlockFace face
 	 * identity only, because a provider locator refresh does not create a new
 	 * binding and the read resolver follows the current tracking point.
 	 */
-	public boolean sameBinding(InventorySourceInput other) {
-		return other != null && readOwner.equals(other.readOwner) && face == other.face && sameBinding(target, other.target);
+	public boolean sameBinding(@Nullable InventorySourceInput other) {
+		return other != null && resourceKind == other.resourceKind && readOwner.equals(other.readOwner) && face == other.face && sameBinding(target, other.target);
 	}
 
-	public static boolean sameBinding(Target first, Target second) {
+	public static boolean sameBinding(@Nullable Target first, @Nullable Target second) {
 		if (first == null || second == null || !first.equals(second)) return false;
 		if (first instanceof Target.ExternalBlockTarget external
 			&& second instanceof Target.ExternalBlockTarget other) {
@@ -70,10 +75,10 @@ public record InventorySourceInput(Target target, UUID readOwner, BlockFace face
 	 * binding. External coordinates are placeholders and never physical
 	 * identity, so the detached external identity is compared instead.
 	 */
-	public boolean matchesDetached(PresentationAdapter.DetachedTarget detached) {
+	public boolean matchesDetached(PresentationAdapter.@Nullable DetachedTarget detached) {
 		if (detached == null) return false;
 		if (target instanceof Target.ExternalBlockTarget) {
-			Target.ExternalBlockTarget external = detached.externalBlock();
+			Target.@Nullable ExternalBlockTarget external = detached.externalBlock();
 			return external != null && sameBinding(target, external);
 		}
 		if (!(target instanceof Target.BlockTarget block)) return false;

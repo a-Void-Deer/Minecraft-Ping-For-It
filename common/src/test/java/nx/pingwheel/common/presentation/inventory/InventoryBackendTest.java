@@ -96,6 +96,17 @@ class InventoryBackendTest {
 			int reads = f.reads.get(); f.backend.tick(5, f.settings); assertTrue(f.reads.get() > reads, "CLOSE releases preview, not tracking");
 		}
 	}
+	@Test void unsupportedFluidLaneCannotResolveAnItemReferenceOrConsumeItsCommitFence() {
+		try (Fixture f = new Fixture()) {
+			f.open(); var preview = f.preview(); int reads = f.reads.get();
+			f.backend.handle(A, InventoryC2SPacket.select(InventoryResourceKind.FLUID, f.host.epoch(A), 100, 1, 1, 1,
+				preview.baselineId(), preview.statusRevision(), preview.entries().getFirst().key(), "attention"), 1, f.settings);
+			assertEquals(0, f.host.store.size()); assertEquals(reads, f.reads.get());
+			f.backend.handle(A, f.select(1), 1, f.settings);
+			assertEquals(1, f.host.store.size(), "the ITEM selection still owns its original commit fence");
+			assertEquals(reads, f.reads.get(), "neither selection performs a presence getter");
+		}
+	}
 	@Test void invalidityRecoveryAndHardExpiryDoNotChangeMarkerLifetimeOrProbeAfterDeadline() {
 		try (Fixture f = new Fixture()) {
 			f.host.expiry = 12; f.open(); f.backend.handle(A, f.select(1), 1, f.settings); f.backend.tick(2, f.settings);

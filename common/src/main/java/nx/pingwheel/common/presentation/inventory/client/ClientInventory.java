@@ -516,6 +516,8 @@ public final class ClientInventory {
 			invalidPackets++;
 			return;
 		}
+		// Until the fluid UI/store lane is installed, keep FLUID policy/data out of the item baseline.
+		if (packet.resourceKind() != nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM) { fencedPackets++; return; }
 		if (packet.kind() == InventoryS2CPacket.Kind.OFFER) {
 			acceptOffer(packet);
 			return;
@@ -698,7 +700,7 @@ public final class ClientInventory {
 		send(InventoryC2SPacket.open(epoch, presentationEpoch, presentationView, state.requestId, state.target, state.face));
 	}
 
-	/** An inventory-v1 OPEN target is one native block or one uncommitted external candidate. */
+	/** An inventory-v2 OPEN target is one native block or one uncommitted external candidate. */
 	private static boolean isOpenTarget(Target target) {
 		return target instanceof Target.BlockTarget
 			|| (target instanceof Target.ExternalBlockTarget external && external.isCandidate());

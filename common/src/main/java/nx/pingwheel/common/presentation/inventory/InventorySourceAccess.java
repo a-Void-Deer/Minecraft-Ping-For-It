@@ -328,8 +328,8 @@ public final class InventorySourceAccess implements SourceAccess {
 			finally { ticket.commit(Map.of(PHYSICAL, (long) used, PROBES, 1L, PROVIDER_WORK, (used + 1L) * PROVIDER_CALL_WORK)); }
 		}
 	}
-	private static boolean matchesSelection(InventoryDomainCodec.Item item, InventorySelection selection) {
-		return item != null && item.count() > 0 && (selection.aggregate() ? item.key().itemId().equals(selection.itemId())
+	private static boolean matchesSelection(InventoryDomainCodec.@Nullable Item item, InventorySelection selection) {
+		return item != null && item.key().kind() == selection.kind() && item.count() > 0 && (selection.aggregate() ? item.key().itemId().equals(selection.itemId())
 			: !item.aggregateRequired() && item.key().equals(selection.exact()));
 	}
 	/** Close once while both failures are available, before expected outcomes are filtered. */

@@ -109,6 +109,7 @@ class InventoryS2CPacketTest {
 		frame.writeLong(1L);
 		frame.writeLong(1L);
 		frame.writeLong(100L); frame.writeLong(1L);
+		frame.writeByte(0); // ITEM lane
 		frame.writeBoolean(true); frame.writeLong(1L);
 		frame.writeLong(1L);
 		frame.writeLong(0L);
@@ -142,6 +143,7 @@ class InventoryS2CPacketTest {
 		frame.writeLong(1L);
 		frame.writeLong(1L);
 		frame.writeLong(100L); frame.writeLong(1L);
+		frame.writeByte(0); // ITEM lane
 		frame.writeBoolean(true); frame.writeLong(1L);
 		frame.writeLong(0L);
 		frame.writeLong(0L);
@@ -151,15 +153,16 @@ class InventoryS2CPacketTest {
 		return frame;
 	}
 
-	/** Complete literal v1 frame, without the packet writer or production enum codec. */
+	/** Complete literal v2 frame, without the packet writer or production enum codec. */
 	private static FriendlyByteBuf literalStatusFrame(String kind, String status, @Nullable String quality) {
 		FriendlyByteBuf frame = buffer();
 		frame.writeUtf(kind);
-		frame.writeVarInt(1);
+		frame.writeVarInt(2);
 		frame.writeLong(1); // inventory epoch
 		frame.writeLong(2); // request id
 		frame.writeLong(100); // presentation epoch
 		frame.writeLong(3); // view
+		frame.writeByte(0); // ITEM lane
 		frame.writeBoolean(!kind.equals("PREVIEW"));
 		if (!kind.equals("PREVIEW")) frame.writeLong(4); // marker id
 		frame.writeLong(5); // baseline
@@ -238,11 +241,11 @@ class InventoryS2CPacketTest {
 	}
 
 	@Test
-	void routeVersionKindsAndStatusAreInventoryV1() {
-		assertEquals(1, InventoryS2CPacket.VERSION);
+	void routeVersionKindsAndStatusAreInventoryV2() {
+		assertEquals(2, InventoryS2CPacket.VERSION);
 		assertEquals(InventoryC2SPacket.VERSION, InventoryS2CPacket.VERSION,
 			"both inventory directions declare one protocol version");
-		assertEquals("pingforit-s2c:inventory-v1", InventoryS2CPacket.PACKET_ID.toString());
+		assertEquals("pingforit-s2c:inventory-v2", InventoryS2CPacket.PACKET_ID.toString());
 		assertEquals(List.of(InventoryS2CPacket.Kind.OFFER, InventoryS2CPacket.Kind.POLICY, InventoryS2CPacket.Kind.SELECTED, InventoryS2CPacket.Kind.REJECT, InventoryS2CPacket.Kind.PREVIEW,
 			InventoryS2CPacket.Kind.SNAPSHOT, InventoryS2CPacket.Kind.STREAM,
 			InventoryS2CPacket.Kind.STATUS, InventoryS2CPacket.Kind.HEARTBEAT),
@@ -1189,6 +1192,7 @@ class InventoryS2CPacketTest {
 	private static void writeVanillaFrame(FriendlyByteBuf buf, InventoryS2CPacket packet) {
 		MarkerPacketCodec.writeEnum(buf, packet.kind()); buf.writeVarInt(packet.protocol());
 		buf.writeLong(packet.epoch()); buf.writeLong(packet.requestId()); buf.writeLong(packet.presentationEpoch()); buf.writeLong(packet.view());
+		if (packet.kind() != InventoryS2CPacket.Kind.OFFER) buf.writeByte(packet.resourceKind().wireId());
 		switch (packet.kind()) {
 			case OFFER -> {
 				var offer = packet.offer(); buf.writeVarInt(offer.previewPeriodTicks()); buf.writeVarInt(offer.trackingPeriodTicks());

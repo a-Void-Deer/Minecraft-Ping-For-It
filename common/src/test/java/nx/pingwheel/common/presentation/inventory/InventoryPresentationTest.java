@@ -20,20 +20,34 @@ class InventoryPresentationTest {
 	@Test
 	void manifestDeclaresTheDedicatedInventorySubject() {
 		assertEquals("pingforit:inventory", InventoryPresentation.ADAPTER_ID);
-		assertEquals(1, InventoryPresentation.SCHEMA);
+		assertEquals(2, InventoryPresentation.SCHEMA);
 		assertEquals(PresentationAdapter.DeliveryMode.DEDICATED, InventoryPresentation.INSTANCE.deliveryMode());
 		PresentationField items = InventoryPresentation.INSTANCE.fields().stream()
 			.filter(field -> field.id().equals(InventoryPresentation.ITEMS)).findFirst().orElseThrow();
 		assertEquals(PresentationField.Kind.RECORD, items.kind());
 		assertTrue(items.enabledByDefault());
 		assertEquals(0, items.permissionLevel());
+		PresentationField fluids = InventoryPresentation.INSTANCE.fields().stream()
+			.filter(field -> field.id().equals(InventoryPresentation.FLUIDS)).findFirst().orElseThrow();
+		assertEquals(PresentationField.Kind.RECORD, fluids.kind());
+		assertTrue(fluids.enabledByDefault());
+		assertEquals(0, fluids.permissionLevel());
+	}
+
+	@Test
+	void itemAndFluidPermissionsAndSelectorsAreIndependent() {
+		PresentationSettings settings = PresentationSettings.serverDefaults();
+		settings.setPermissionLevels(Map.of(InventoryPresentation.FLUIDS, 4));
+		assertEquals(Set.of(InventoryPresentation.ITEMS), InventoryPresentation.allowed(settings, VIEWER, 0, "block"));
+		settings.setRules("block", new PresentationSettings.RuleSet(List.of(), List.of(InventoryPresentation.ITEMS), false));
+		assertEquals(Set.of(InventoryPresentation.FLUIDS), InventoryPresentation.allowed(settings, VIEWER, 4, "block"));
 	}
 
 	@Test
 	void defaultPolicyAuthorizesTheSubjectForEveryTargetType() {
 		PresentationSettings settings = PresentationSettings.serverDefaults();
 		for (String type : PresentationSettings.TARGET_TYPE_IDS)
-			assertEquals(Set.of(InventoryPresentation.ITEMS),
+			assertEquals(Set.of(InventoryPresentation.ITEMS, InventoryPresentation.FLUIDS),
 				InventoryPresentation.allowed(settings, VIEWER, 0, type));
 	}
 
@@ -42,7 +56,7 @@ class InventoryPresentationTest {
 		PresentationSettings settings = PresentationSettings.serverDefaults();
 		settings.setRules("block", new PresentationSettings.RuleSet(List.of(), List.of("pingforit:*"), false));
 		assertTrue(InventoryPresentation.allowed(settings, VIEWER, 0, "block").isEmpty());
-		assertEquals(Set.of(InventoryPresentation.ITEMS),
+		assertEquals(Set.of(InventoryPresentation.ITEMS, InventoryPresentation.FLUIDS),
 			InventoryPresentation.allowed(settings, VIEWER, 0, "entity"));
 
 		settings.setRules("entity", new PresentationSettings.RuleSet(List.of(), List.of(), true));
@@ -57,8 +71,8 @@ class InventoryPresentationTest {
 	void permissionOverrideAndReplaceableCallbackGovernTheSubject() {
 		PresentationSettings settings = PresentationSettings.serverDefaults();
 		settings.setPermissionLevels(Map.of(InventoryPresentation.ITEMS, 4));
-		assertTrue(InventoryPresentation.allowed(settings, VIEWER, 0, "block").isEmpty());
-		assertEquals(Set.of(InventoryPresentation.ITEMS),
+		assertEquals(Set.of(InventoryPresentation.FLUIDS), InventoryPresentation.allowed(settings, VIEWER, 0, "block"));
+		assertEquals(Set.of(InventoryPresentation.ITEMS, InventoryPresentation.FLUIDS),
 			InventoryPresentation.allowed(settings, VIEWER, 4, "block"));
 		try {
 			PresentationAuthorization.setProvider((recipient, field, actualLevel, requiredLevel) -> false);

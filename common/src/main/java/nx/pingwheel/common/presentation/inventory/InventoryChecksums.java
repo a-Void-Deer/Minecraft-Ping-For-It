@@ -7,6 +7,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import nx.pingwheel.common.network.InventoryS2CPacket;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Canonical, transport-free inventory digest shared by the server producer and
@@ -27,6 +30,7 @@ import nx.pingwheel.common.network.InventoryS2CPacket;
  * {@link #checksum(Collection)}; client code builds samples with
  * {@link #builder()} from committed values and their bounded metadata.
  */
+@NotNullByDefault
 public final class InventoryChecksums {
 
 	/** FNV-1a 64-bit offset basis. */
@@ -35,7 +39,8 @@ public final class InventoryChecksums {
 	/** FNV-1a 64-bit prime. */
 	public static final long FNV_PRIME = 0x100000001b3L;
 
-	private static final byte[] DOMAIN = "pingwheel.inventory.checksum.v1".getBytes(StandardCharsets.UTF_8);
+	private static final byte @Unmodifiable [] DOMAIN = "pingwheel.inventory.checksum.v1".getBytes(StandardCharsets.UTF_8);
+	private static final byte @Unmodifiable [] FLUID_DOMAIN = "pingforit.inventory.fluid.checksum.v1".getBytes(StandardCharsets.UTF_8);
 
 	private static final Comparator<Sample> BY_KEY = (left, right) ->
 		compareUnsigned(left.key().getBytes(StandardCharsets.UTF_8), right.key().getBytes(StandardCharsets.UTF_8));
@@ -48,7 +53,8 @@ public final class InventoryChecksums {
 	 *
 	 * @param quality opaque grey/quality token, {@code null} when absent
 	 */
-	public record Sample(String key, String itemId, long count, String quality, boolean fallback) {
+	@NotNullByDefault
+	public record Sample(String key, String itemId, long count, @Nullable String quality, boolean fallback) {
 		public Sample {
 			Objects.requireNonNull(key, "key");
 			if (key.isBlank())
@@ -65,11 +71,16 @@ public final class InventoryChecksums {
 
 	/** Checksum of one already-built sample list. */
 	public static long checksum(Collection<Sample> samples) {
+		return checksum(InventoryResourceKind.ITEM, samples);
+	}
+	/** Frame-level kind fences even an empty digest; the original ITEM digest remains unchanged. */
+	public static long checksum(InventoryResourceKind kind, Collection<Sample> samples) {
+		Objects.requireNonNull(kind, "kind");
 		Objects.requireNonNull(samples, "samples");
 		List<Sample> canonical = new ArrayList<>(samples);
 		canonical.sort(BY_KEY);
-		Hasher hasher = new Hasher();
-		String previousKey = null;
+		Hasher hasher = new Hasher(kind);
+		@Nullable String previousKey = null;
 		for (Sample sample : canonical) {
 			Sample checked = Objects.requireNonNull(sample, "sample");
 			if (checked.key().equals(previousKey))
@@ -82,6 +93,9 @@ public final class InventoryChecksums {
 
 	/** Convenience digest of wire entries; display-only label/JSON is not hashed. */
 	public static long checksumEntries(Collection<InventoryS2CPacket.Entry> entries) {
+		return checksumEntries(InventoryResourceKind.ITEM, entries);
+	}
+	public static long checksumEntries(InventoryResourceKind kind, Collection<InventoryS2CPacket.Entry> entries) {
 		Objects.requireNonNull(entries, "entries");
 		List<Sample> samples = new ArrayList<>(entries.size());
 		for (InventoryS2CPacket.Entry entry : entries) {
@@ -89,25 +103,28 @@ public final class InventoryChecksums {
 			samples.add(new Sample(checked.key(), checked.itemId(), checked.count(),
 				checked.quality() == null ? null : checked.quality().name(), checked.fallback()));
 		}
-		return checksum(samples);
+		return checksum(kind, samples);
 	}
 
 	/** Incremental builder; {@link Builder#checksum()} re-sorts by key like the list form. */
 	public static Builder builder() {
-		return new Builder();
+		return builder(InventoryResourceKind.ITEM);
 	}
+	public static Builder builder(InventoryResourceKind kind) { return new Builder(kind); }
 
 	/** Single convenience digest for a key, identity, count, quality and fallback. */
-	public static long checksum(String key, String itemId, long count, String quality, boolean fallback) {
+	public static long checksum(String key, String itemId, long count, @Nullable String quality, boolean fallback) {
 		return checksum(List.of(new Sample(key, itemId, count, quality, fallback)));
 	}
 
+	@NotNullByDefault
 	public static final class Builder {
 		private final List<Sample> samples = new ArrayList<>();
+		private final InventoryResourceKind kind;
 
-		private Builder() {}
+		private Builder(InventoryResourceKind kind) { this.kind = Objects.requireNonNull(kind); }
 
-		public Builder add(String key, String itemId, long count, String quality, boolean fallback) {
+		public Builder add(String key, String itemId, long count, @Nullable String quality, boolean fallback) {
 			samples.add(new Sample(key, itemId, count, quality, fallback));
 			return this;
 		}
@@ -118,16 +135,17 @@ public final class InventoryChecksums {
 		}
 
 		public long checksum() {
-			return InventoryChecksums.checksum(samples);
+			return InventoryChecksums.checksum(kind, samples);
 		}
 	}
 
 	/** Streaming FNV-1a state; samples are length-delimited and domain-tagged. */
+	@NotNullByDefault
 	private static final class Hasher {
 		private long hash = FNV_OFFSET_BASIS;
 
-		private Hasher() {
-			update(DOMAIN);
+		private Hasher(InventoryResourceKind kind) {
+			update(kind == InventoryResourceKind.ITEM ? DOMAIN : FLUID_DOMAIN);
 		}
 
 		private long checksum() {

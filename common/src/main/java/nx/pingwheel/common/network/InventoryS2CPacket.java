@@ -8,7 +8,11 @@ import nx.pingwheel.common.config.InventoryLimits;
 import nx.pingwheel.common.config.InventorySizeScale;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.marker.MarkerRejectReason;
+import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -18,7 +22,7 @@ import java.util.Set;
 import static nx.pingwheel.common.Global.S2C_NAMESPACE;
 
 /**
- * Version-one inventory preview and tracking responses. {@code OFFER} carries the
+ * Version-two inventory preview and tracking responses. {@code OFFER} carries the
  * server-selected periods plus the effective display and frame budgets and
  * nothing else; {@code PREVIEW}, {@code SNAPSHOT} and {@code STREAM} carry one
  * immutable entry fragment under an independent epoch/request/marker/baseline
@@ -34,14 +38,15 @@ import static nx.pingwheel.common.Global.S2C_NAMESPACE;
  * negative counts, trailing bytes, and oversized frames before any large
  * allocation.
  */
-public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long requestId, MarkerId markerId,
+@NotNullByDefault
+public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, long requestId, @Nullable MarkerId markerId,
 	long baselineId, long statusRevision, long watermark, int partIndex, int partCount, boolean completeScan,
-	Status status, long checksum, List<Entry> entries, Offer offer, long presentationEpoch, long view,
-	Set<String> allowedTypes, long commitId, MarkerRejectReason rejection) implements IPacket {
+	@Nullable Status status, long checksum, @Unmodifiable List<Entry> entries, @Nullable Offer offer, long presentationEpoch, long view,
+	@Unmodifiable Set<String> allowedTypes, long commitId, @Nullable MarkerRejectReason rejection, InventoryResourceKind resourceKind) implements IPacket {
 	public enum Kind { OFFER, POLICY, SELECTED, REJECT, PREVIEW, SNAPSHOT, STREAM, STATUS, HEARTBEAT }
 	public enum Status { UPDATING, READY, UNCERTAIN, INCOMPLETE, INVALID, COMPONENT_TOO_LONG }
 
-	public static final int VERSION = 1;
+	public static final int VERSION = 2;
 	public static final int MAX_ENTRIES = 128;
 	/** Absolute whole-frame guard: the largest legal server frame budget. */
 	public static final int MAX_FRAME_BYTES = InventoryLimits.MAX_FRAME_BYTES;
@@ -58,9 +63,9 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 	public static final int MAX_KEY_BYTES = 256;
 	public static final int MAX_ITEM_ID_BYTES = 256;
 	public static final int MAX_LABEL_BYTES = 1024;
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "inventory-v1");
+	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "inventory-v2");
 	public static final Type<InventoryS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
-	private static final String[] POLICY_WIRE_ORDER = { "block", "dropped_item", "entity", "entity_block", "location" };
+	private static final String @Unmodifiable [] POLICY_WIRE_ORDER = { "block", "dropped_item", "entity", "entity_block", "location" };
 
 	/**
 	 * Server-selected periods plus the effective display and frame byte budgets
@@ -70,6 +75,7 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 	 * The budget pair must be an exact legal size-scale pair that keeps the
 	 * fixed metadata reserve.
 	 */
+	@NotNullByDefault
 	public record Offer(int previewPeriodTicks, int trackingPeriodTicks, int resyncMinPeriods, int heartbeatPeriods,
 		int effectiveDisplayBytes, int effectiveFrameBytes) {
 
@@ -94,13 +100,16 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 	}
 
 	/**
-	 * One immutable inventory entry. {@code displayJson} may be absent; the
+	 * One immutable inventory entry. The containing frame alone defines its resource registry,
+	 * quantity unit (ITEM count or FLUID U), and display decoder; entry fields never override it.
+	 * The legacy Java item-named accessors are source migration bridges. {@code displayJson} may be absent; the
 	 * optional {@code quality} preserves the per-entry component-too-long grey
 	 * state against a packet-level uncertain or incomplete status.
 	 */
-	public record Entry(String key, String itemId, String label, String displayJson, long count, long itemRevision,
-		boolean fallback, Status quality, long groupRevision, boolean replaceGroup, String itemPingType) {
-		public Entry(String key, String itemId, String label, String displayJson, long count, long itemRevision, boolean fallback, Status quality) {
+	@NotNullByDefault
+	public record Entry(String key, String itemId, String label, @Nullable String displayJson, long count, long itemRevision,
+		boolean fallback, @Nullable Status quality, long groupRevision, boolean replaceGroup, @Nullable String itemPingType) {
+		public Entry(String key, String itemId, String label, @Nullable String displayJson, long count, long itemRevision, boolean fallback, @Nullable Status quality) {
 			this(key, itemId, label, displayJson, count, itemRevision, fallback, quality, 0, false, null);
 		}
 		public Entry {
@@ -118,9 +127,15 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 				throw new IllegalArgumentException("negative inventory entry count");
 			}
 		}
+		/** Registry and display interpretation come exclusively from the containing frame's resourceKind. */
+		public String resourceId() { return itemId; }
+		public long amount() { return count; }
+		public long resourceRevision() { return itemRevision; }
+		public @Nullable String resourcePingType() { return itemPingType; }
 	}
 
 	public InventoryS2CPacket {
+		java.util.Objects.requireNonNull(resourceKind, "resourceKind");
 		allowedTypes = allowedTypes == null ? Set.of() : Set.copyOf(allowedTypes);
 		if (allowedTypes.size() > 5 || !nx.pingwheel.common.presentation.PresentationSettings.TARGET_TYPE_IDS.containsAll(allowedTypes))
 			throw new IllegalArgumentException("inventory policy types");
@@ -129,12 +144,20 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 			throw new IllegalArgumentException("inventory entry count");
 		}
 	}
+	/** Source bridge only: every former full constructor is ITEM. Wire accepts v2 only. */
+	public InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, long requestId, @Nullable MarkerId markerId,
+		long baselineId, long statusRevision, long watermark, int partIndex, int partCount, boolean completeScan,
+		@Nullable Status status, long checksum, List<Entry> entries, @Nullable Offer offer, long presentationEpoch, long view,
+		Set<String> allowedTypes, long commitId, @Nullable MarkerRejectReason rejection) {
+		this(kind, protocol, epoch, requestId, markerId, baselineId, statusRevision, watermark, partIndex, partCount,
+			completeScan, status, checksum, entries, offer, presentationEpoch, view, allowedTypes, commitId, rejection, InventoryResourceKind.ITEM);
+	}
 	public InventoryS2CPacket() {
 		this(null, 0, 0, 0, null, 0, 0, 0, 0, 1, false, null, 0, List.of(), null);
 	}
-	public InventoryS2CPacket(Kind kind, int protocol, long epoch, long requestId, MarkerId markerId,
+	public InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, long requestId, @Nullable MarkerId markerId,
 		long baselineId, long statusRevision, long watermark, int partIndex, int partCount, boolean completeScan,
-		Status status, long checksum, List<Entry> entries, Offer offer) {
+		@Nullable Status status, long checksum, List<Entry> entries, @Nullable Offer offer) {
 		this(kind, protocol, epoch, requestId, markerId, baselineId, statusRevision, watermark, partIndex, partCount,
 			completeScan, status, checksum, entries, offer, 0, 0, Set.of(), 0, null);
 	}
@@ -143,19 +166,32 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 		this(packet.kind, packet.protocol, packet.epoch, packet.requestId, packet.markerId, packet.baselineId,
 			packet.statusRevision, packet.watermark, packet.partIndex, packet.partCount, packet.completeScan,
 			packet.status, packet.checksum, packet.entries, packet.offer, packet.presentationEpoch, packet.view,
-			packet.allowedTypes, packet.commitId, packet.rejection);
+			packet.allowedTypes, packet.commitId, packet.rejection, packet.resourceKind);
 	}
 	public InventoryS2CPacket stamp(long presentationEpoch, long view) {
 		return new InventoryS2CPacket(kind, protocol, epoch, requestId, markerId, baselineId, statusRevision, watermark, partIndex, partCount,
-			completeScan, status, checksum, entries, offer, presentationEpoch, view, allowedTypes, commitId, rejection);
+			completeScan, status, checksum, entries, offer, presentationEpoch, view, allowedTypes, commitId, rejection, resourceKind);
+	}
+	/** One homogeneous lane, including empty data/status and policy frames. OFFER alone is session-wide. */
+	public InventoryS2CPacket withResourceKind(InventoryResourceKind resourceKind) {
+		if (kind == Kind.OFFER && resourceKind != InventoryResourceKind.ITEM) throw new IllegalArgumentException("OFFER is session-wide");
+		return new InventoryS2CPacket(kind, protocol, epoch, requestId, markerId, baselineId, statusRevision, watermark, partIndex, partCount,
+			completeScan, status, checksum, entries, offer, presentationEpoch, view, allowedTypes, commitId, rejection, resourceKind);
+	}
+	public static InventoryS2CPacket policy(InventoryResourceKind resourceKind, long epoch, long presentationEpoch, long view, Set<String> allowedTypes) {
+		return policy(epoch, presentationEpoch, view, allowedTypes).withResourceKind(resourceKind);
 	}
 	public static InventoryS2CPacket policy(long epoch, long presentationEpoch, long view, Set<String> allowedTypes) {
 		return new InventoryS2CPacket(Kind.POLICY, VERSION, epoch, 0, null, 0, 0, 0, 0, 1, false, null, 0, List.of(), null,
 			presentationEpoch, view, allowedTypes, 0, null);
 	}
-	public static InventoryS2CPacket selected(long epoch, long requestId, long commitId, MarkerId markerId, MarkerRejectReason rejection) {
+	public static InventoryS2CPacket selected(long epoch, long requestId, long commitId, @Nullable MarkerId markerId, @Nullable MarkerRejectReason rejection) {
 		return new InventoryS2CPacket(rejection == null ? Kind.SELECTED : Kind.REJECT, VERSION, epoch, requestId, markerId, 0, 0, 0, 0, 1,
 			false, null, 0, List.of(), null, 0, 0, Set.of(), commitId, rejection);
+	}
+	public static InventoryS2CPacket selected(InventoryResourceKind resourceKind, long epoch, long requestId, long commitId,
+		@Nullable MarkerId markerId, @Nullable MarkerRejectReason rejection) {
+		return selected(epoch, requestId, commitId, markerId, rejection).withResourceKind(resourceKind);
 	}
 
 	public static InventoryS2CPacket offer(long epoch, Offer offer) {
@@ -163,7 +199,7 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 	}
 
 	/** One fragment of preview, snapshot or stream data. */
-	public static InventoryS2CPacket data(Kind kind, long epoch, long requestId, MarkerId markerId, long baselineId,
+	public static InventoryS2CPacket data(Kind kind, long epoch, long requestId, @Nullable MarkerId markerId, long baselineId,
 		long statusRevision, long watermark, int partIndex, int partCount, boolean completeScan, Status status,
 		long checksum, List<Entry> entries) {
 		if (kind != Kind.PREVIEW && kind != Kind.SNAPSHOT && kind != Kind.STREAM) {
@@ -172,19 +208,33 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 		return new InventoryS2CPacket(kind, VERSION, epoch, requestId, markerId, baselineId, statusRevision, watermark,
 			partIndex, partCount, completeScan, status, checksum, entries, null);
 	}
+	public static InventoryS2CPacket data(InventoryResourceKind resourceKind, Kind kind, long epoch, long requestId, @Nullable MarkerId markerId,
+		long baselineId, long statusRevision, long watermark, int partIndex, int partCount, boolean completeScan, Status status,
+		long checksum, List<Entry> entries) {
+		return data(kind, epoch, requestId, markerId, baselineId, statusRevision, watermark, partIndex, partCount, completeScan, status, checksum, entries)
+			.withResourceKind(resourceKind);
+	}
 
 	/** Authoritative status control without item data. */
-	public static InventoryS2CPacket status(long epoch, long requestId, MarkerId markerId, long baselineId,
+	public static InventoryS2CPacket status(long epoch, long requestId, @Nullable MarkerId markerId, long baselineId,
 		long statusRevision, long watermark, Status status, long checksum) {
 		return new InventoryS2CPacket(Kind.STATUS, VERSION, epoch, requestId, markerId, baselineId, statusRevision,
 			watermark, 0, 1, false, status, checksum, List.of(), null);
 	}
+	public static InventoryS2CPacket status(InventoryResourceKind resourceKind, long epoch, long requestId, @Nullable MarkerId markerId, long baselineId,
+		long statusRevision, long watermark, Status status, long checksum) {
+		return status(epoch, requestId, markerId, baselineId, statusRevision, watermark, status, checksum).withResourceKind(resourceKind);
+	}
 
 	/** Progress-only heartbeat; it never resends state. */
-	public static InventoryS2CPacket heartbeat(long epoch, long requestId, MarkerId markerId, long baselineId,
+	public static InventoryS2CPacket heartbeat(long epoch, long requestId, @Nullable MarkerId markerId, long baselineId,
 		long statusRevision, long watermark, long checksum) {
 		return new InventoryS2CPacket(Kind.HEARTBEAT, VERSION, epoch, requestId, markerId, baselineId, statusRevision,
 			watermark, 0, 1, false, null, checksum, List.of(), null);
+	}
+	public static InventoryS2CPacket heartbeat(InventoryResourceKind resourceKind, long epoch, long requestId, @Nullable MarkerId markerId, long baselineId,
+		long statusRevision, long watermark, long checksum) {
+		return heartbeat(epoch, requestId, markerId, baselineId, statusRevision, watermark, checksum).withResourceKind(resourceKind);
 	}
 
 	/** Legacy absolute-safe write: the absolute display and frame guards. */
@@ -219,7 +269,7 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 	 */
 	public int encodedSize(int displayBytes, int frameBytes) {
 		requireBudgets(displayBytes, frameBytes);
-		int size = enumSize(kind) + varIntSize(protocol) + 32;
+		int size = enumSize(kind) + varIntSize(protocol) + 32 + (kind == Kind.OFFER ? 0 : 1);
 		size += switch (kind) {
 			case POLICY -> {
 				int policy = varIntSize(allowedTypes.size());
@@ -309,6 +359,7 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 		buf.writeLong(requestId);
 		buf.writeLong(presentationEpoch);
 		buf.writeLong(view);
+		if (kind != Kind.OFFER) buf.writeByte(resourceKind.wireId());
 		switch (kind) {
 			case POLICY -> {
 				buf.writeVarInt(allowedTypes.size());
@@ -365,7 +416,7 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 		if (buf.readableBytes() > MAX_FRAME_BYTES) {
 			throw new IllegalArgumentException("Inventory frame exceeds budget");
 		}
-		Kind kind = StrictPacketCodec.readEnum(buf, Kind.class);
+		Kind kind = InventoryWireCodec.readEnum(buf, Kind.class);
 		int protocol = StrictPacketCodec.readVarInt(buf);
 		if (protocol != VERSION) {
 			throw new IllegalArgumentException("Unsupported inventory protocol");
@@ -373,12 +424,13 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 		long epoch = buf.readLong();
 		long requestId = buf.readLong();
 		long presentationEpoch = buf.readLong(), view = buf.readLong(), commitId = 0;
+		InventoryResourceKind resourceKind = kind == Kind.OFFER ? InventoryResourceKind.ITEM : InventoryResourceKind.fromWireId(buf.readUnsignedByte());
 		Set<String> allowedTypes = Set.of();
-		MarkerRejectReason rejection = null;
+		@Nullable MarkerRejectReason rejection = null;
 		if (requestId < 0) {
 			throw new IllegalArgumentException("Negative inventory request id");
 		}
-		MarkerId markerId = null;
+		@Nullable MarkerId markerId = null;
 		long baselineId = 0;
 		long statusRevision = 0;
 		long watermark = 0;
@@ -386,19 +438,19 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 		int partIndex = 0;
 		int partCount = 1;
 		boolean completeScan = false;
-		Status status = null;
+		@Nullable Status status = null;
 		List<Entry> entries = List.of();
-		Offer offer = null;
+		@Nullable Offer offer = null;
 		switch (kind) {
 			case POLICY -> {
 				int size = StrictPacketCodec.readVarInt(buf); if (size < 0 || size > 5) throw new IllegalArgumentException("inventory policy size");
 				Set<String> types = new HashSet<>();
-				for (int i = 0; i < size; i++) if (!types.add(StrictPacketCodec.readUtf(buf, 256))) throw new IllegalArgumentException("duplicate policy type");
+				for (int i = 0; i < size; i++) if (!types.add(InventoryWireCodec.readUtf(buf, 256))) throw new IllegalArgumentException("duplicate policy type");
 				allowedTypes = Set.copyOf(types);
 			}
 			case SELECTED, REJECT -> {
 				commitId = buf.readLong(); markerId = readMarkerId(buf);
-				if (kind == Kind.REJECT) rejection = StrictPacketCodec.readEnum(buf, MarkerRejectReason.class);
+				if (kind == Kind.REJECT) rejection = InventoryWireCodec.readEnum(buf, MarkerRejectReason.class);
 			}
 			case OFFER -> offer = readOffer(buf);
 			case PREVIEW, SNAPSHOT, STREAM -> {
@@ -412,7 +464,7 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 					throw new IllegalArgumentException("Invalid inventory part range");
 				}
 				completeScan = StrictPacketCodec.readBoolean(buf);
-				status = StrictPacketCodec.readEnum(buf, Status.class);
+				status = InventoryWireCodec.readEnum(buf, Status.class);
 				checksum = buf.readLong();
 				entries = readEntries(buf);
 			}
@@ -421,7 +473,7 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 				baselineId = buf.readLong();
 				statusRevision = buf.readLong();
 				watermark = buf.readLong();
-				status = StrictPacketCodec.readEnum(buf, Status.class);
+				status = InventoryWireCodec.readEnum(buf, Status.class);
 				checksum = buf.readLong();
 			}
 			case HEARTBEAT -> {
@@ -439,7 +491,7 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 			throw new IllegalArgumentException("Trailing inventory response");
 		}
 		return new InventoryS2CPacket(kind, protocol, epoch, requestId, markerId, baselineId, statusRevision, watermark,
-			partIndex, partCount, completeScan, status, checksum, entries, offer, presentationEpoch, view, allowedTypes, commitId, rejection);
+			partIndex, partCount, completeScan, status, checksum, entries, offer, presentationEpoch, view, allowedTypes, commitId, rejection, resourceKind);
 	}
 
 	private static Offer readOffer(FriendlyByteBuf buf) {
@@ -447,7 +499,7 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 			StrictPacketCodec.readVarInt(buf), StrictPacketCodec.readVarInt(buf),
 			StrictPacketCodec.readVarInt(buf), StrictPacketCodec.readVarInt(buf));
 	}
-	private static MarkerId readMarkerId(FriendlyByteBuf buf) {
+	private static @Nullable MarkerId readMarkerId(FriendlyByteBuf buf) {
 		return StrictPacketCodec.readBoolean(buf) ? new MarkerId(buf.readLong()) : null;
 	}
 
@@ -515,20 +567,20 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 	}
 
 	private static Entry readEntry(FriendlyByteBuf buf) {
-		String key = StrictPacketCodec.readUtf(buf, MAX_KEY_BYTES);
-		String itemId = StrictPacketCodec.readUtf(buf, MAX_ITEM_ID_BYTES);
-		String label = StrictPacketCodec.readUtf(buf, MAX_LABEL_BYTES);
-		String displayJson = StrictPacketCodec.readBoolean(buf)
-			? StrictPacketCodec.readUtf(buf, MAX_DISPLAY_BYTES, MAX_DISPLAY_BYTES) : null;
+		String key = InventoryWireCodec.readUtf(buf, MAX_KEY_BYTES);
+		String itemId = InventoryWireCodec.readUtf(buf, MAX_ITEM_ID_BYTES);
+		String label = InventoryWireCodec.readUtf(buf, MAX_LABEL_BYTES);
+		@Nullable String displayJson = StrictPacketCodec.readBoolean(buf)
+			? InventoryWireCodec.readUtf(buf, MAX_DISPLAY_BYTES, MAX_DISPLAY_BYTES) : null;
 		long count = buf.readLong();
 		long itemRevision = buf.readLong();
 		boolean fallback = StrictPacketCodec.readBoolean(buf);
-		Status quality = StrictPacketCodec.readBoolean(buf) ? StrictPacketCodec.readEnum(buf, Status.class) : null;
+		@Nullable Status quality = StrictPacketCodec.readBoolean(buf) ? InventoryWireCodec.readEnum(buf, Status.class) : null;
 		if (count < 0 || itemRevision < 0) {
 			throw new IllegalArgumentException("Negative inventory entry count");
 		}
 		long groupRevision = buf.readLong(); boolean replaceGroup = StrictPacketCodec.readBoolean(buf);
-		String itemPingType = StrictPacketCodec.readBoolean(buf) ? StrictPacketCodec.readUtf(buf, 256) : null;
+		@Nullable String itemPingType = StrictPacketCodec.readBoolean(buf) ? InventoryWireCodec.readUtf(buf, 256) : null;
 		return new Entry(key, itemId, label, displayJson, count, itemRevision, fallback, quality, groupRevision, replaceGroup, itemPingType);
 	}
 
@@ -580,6 +632,7 @@ public record InventoryS2CPacket(Kind kind, int protocol, long epoch, long reque
 	}
 
 	@Override public boolean isCorrupt() {
+		if (kind == Kind.OFFER && resourceKind != InventoryResourceKind.ITEM) return true;
 		if (kind == null || protocol != VERSION) {
 			return true;
 		}

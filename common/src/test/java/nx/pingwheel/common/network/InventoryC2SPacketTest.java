@@ -39,9 +39,9 @@ class InventoryC2SPacketTest {
 	}
 
 	@Test
-	void routeAndKindsAreVersionedInventoryV1() {
-		assertEquals(1, InventoryC2SPacket.VERSION);
-		assertEquals("pingforit-c2s:inventory-v1", InventoryC2SPacket.PACKET_ID.toString());
+	void routeAndKindsAreVersionedInventoryV2() {
+		assertEquals(2, InventoryC2SPacket.VERSION);
+		assertEquals("pingforit-c2s:inventory-v2", InventoryC2SPacket.PACKET_ID.toString());
 		assertEquals(List.of(InventoryC2SPacket.Kind.HELLO, InventoryC2SPacket.Kind.OPEN,
 			InventoryC2SPacket.Kind.CLOSE, InventoryC2SPacket.Kind.RESYNC,
 			InventoryC2SPacket.Kind.SELECT), Arrays.asList(InventoryC2SPacket.Kind.values()));
@@ -125,22 +125,22 @@ class InventoryC2SPacketTest {
 		assertNull(select.markerId());
 	}
 
-	/** Independent v1 fixture: UTF RESYNC, version, epoch, presentation epoch, view, request, presence, marker. */
+	/** Independent v2 fixture: UTF RESYNC, version, epoch, presentation epoch, view, ITEM lane, request, presence, marker. */
 	private static FriendlyByteBuf literalMarkerResync() {
 		return new FriendlyByteBuf(Unpooled.wrappedBuffer(HexFormat.of().parseHex(
-			"06524553594e4301"
+			"06524553594e4302"
 				+ "0102030405060708" + "1112131415161718" + "2122232425262728"
-				+ "3132333435363738" + "01" + "4142434445464748")));
+				+ "00" + "3132333435363738" + "01" + "4142434445464748")));
 	}
 
 	@Test
-	void literalMarkerResyncRetainsV1LayoutAndConsumesTheWholeFrame() {
+	void literalMarkerResyncHasV2LaneAndConsumesTheWholeFrame() {
 		FriendlyByteBuf buf = literalMarkerResync();
 		try {
 			InventoryC2SPacket decoded = InventoryC2SPacket.readSafe(buf);
 			assertFalse(decoded.isCorrupt());
 			assertEquals(InventoryC2SPacket.Kind.RESYNC, decoded.kind());
-			assertEquals(1, decoded.protocol());
+			assertEquals(2, decoded.protocol());
 			assertEquals(0x0102030405060708L, decoded.epoch());
 			assertEquals(0x1112131415161718L, decoded.presentationEpoch());
 			assertEquals(0x2122232425262728L, decoded.view());
@@ -153,13 +153,13 @@ class InventoryC2SPacketTest {
 	}
 
 	@Test
-	void markerResyncWriterMatchesIndependentV1Bytes() {
+	void markerResyncWriterMatchesIndependentV2Bytes() {
 		FriendlyByteBuf expected = literalMarkerResync();
 		FriendlyByteBuf actual = buffer();
 		try {
 			InventoryC2SPacket.resync(0x0102030405060708L, 0x3132333435363738L,
 				new MarkerId(0x4142434445464748L)).stamp(0x1112131415161718L, 0x2122232425262728L).write(actual);
-			assertEquals(expected, actual, "the retained v1 frame keeps its true presence byte and marker long");
+			assertEquals(expected, actual, "v2 keeps its explicit ITEM lane, true presence byte and marker long");
 		} finally {
 			expected.release();
 			actual.release();
@@ -186,19 +186,19 @@ class InventoryC2SPacketTest {
 
 	@Test
 	void literalResyncRejectsAbsentNonCanonicalMissingTruncatedAndTrailingMarker() {
-		// The independent fixture has 40 bytes before presence, then one marker long.
+		// The independent fixture has 41 bytes before presence, then one marker long.
 		for (int presence : List.of(0, 2, 255)) {
 			FriendlyByteBuf buf = literalMarkerResync();
 			try {
-				buf.setByte(40, presence);
-				if (presence == 0) buf.writerIndex(41); // Superseded request-only RESYNC.
+				buf.setByte(41, presence);
+				if (presence == 0) buf.writerIndex(42); // Superseded request-only RESYNC.
 				assertTrue(InventoryC2SPacket.readSafe(buf).isCorrupt(), "presence=" + presence);
 				assertEquals(0, buf.readableBytes());
 			} finally {
 				buf.release();
 			}
 		}
-		for (int length = 40; length < 49; length++) {
+		for (int length = 41; length < 50; length++) {
 			FriendlyByteBuf buf = literalMarkerResync();
 			try {
 				buf.writerIndex(length);
@@ -224,7 +224,7 @@ class InventoryC2SPacketTest {
 	void literalMarkerResyncRejectsNegativeRequestId() {
 		FriendlyByteBuf buf = literalMarkerResync();
 		try {
-			buf.setLong(32, -1);
+			buf.setLong(33, -1);
 			assertTrue(InventoryC2SPacket.readSafe(buf).isCorrupt());
 			assertEquals(0, buf.readableBytes());
 		} finally {
@@ -255,7 +255,7 @@ class InventoryC2SPacketTest {
 		FriendlyByteBuf buf = buffer();
 		try {
 			MarkerPacketCodec.writeEnum(buf, InventoryC2SPacket.Kind.HELLO);
-			buf.writeVarInt(2);
+			buf.writeVarInt(1);
 			buf.writeLong(0L);
 			assertTrue(InventoryC2SPacket.readSafe(buf).isCorrupt());
 		} finally {
@@ -286,7 +286,7 @@ class InventoryC2SPacketTest {
 	}
 
 	@Test
-	void previousInventoryV4FramesAreRejectedOnTheV1Route() {
+	void previousInventoryV4FramesAreRejectedOnTheV2Route() {
 		FriendlyByteBuf buf = buffer();
 		try {
 			MarkerPacketCodec.writeEnum(buf, InventoryC2SPacket.Kind.HELLO);
