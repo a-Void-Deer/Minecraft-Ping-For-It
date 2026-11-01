@@ -56,6 +56,7 @@ def project_ignored_targets(root: Path, paths: list[str]) -> dict[str, IgnoreRul
     expected = set(paths)
     seen: set[str] = set()
     ignored: dict[str, IgnoreRule] = {}
+    blank_crlf_lines: dict[Path, set[int]] = {}
     for index in range(0, len(fields), 4):
         source, number, pattern, path = [field.decode("utf-8", errors="surrogateescape") for field in fields[index:index + 4]]
         if path not in expected or path in seen:
@@ -63,12 +64,26 @@ def project_ignored_targets(root: Path, paths: list[str]) -> dict[str, IgnoreRul
         seen.add(path)
         if not source and not number and not pattern:
             continue
-        if not source or not number.isdecimal() or not pattern:
+        if not source or not number.isdecimal() or int(number) < 1:
             raise OSError("git check-ignore returned a malformed rule record")
         rule_path = Path(source)
         if not rule_path.is_absolute():
             rule_path = root / rule_path
         rule_path = rule_path.resolve()
+        if not pattern:
+            # Git 2.48.1 can parse a blank CRLF ignore line as an empty
+            # basename pattern, matching trailing-slash paths and the root.
+            # Verify that exact source line instead of accepting arbitrary
+            # empty-pattern records or removing directory-only ignore hints.
+            if path == "." or path.endswith("/"):
+                if rule_path not in blank_crlf_lines:
+                    blank_crlf_lines[rule_path] = {
+                        line for line, content in enumerate(rule_path.read_bytes().split(b"\n")[:-1], 1)
+                        if content == b"\r"
+                    }
+                if int(number) in blank_crlf_lines[rule_path]:
+                    continue
+            raise OSError("git check-ignore returned a malformed rule record")
         if pattern.startswith("!") or rule_path.name != ".gitignore" or not rule_path.is_relative_to(root.resolve()):
             continue
         ignored[path] = IgnoreRule(rule_path.relative_to(root.resolve()).as_posix(), int(number), pattern)

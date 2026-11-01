@@ -6,7 +6,6 @@ original text, so masking code/comments does not change source line numbers.
 
 from __future__ import annotations
 
-import html
 import io
 import os
 import re
@@ -16,6 +15,7 @@ import unicodedata
 from bisect import bisect_right
 from collections.abc import Iterator
 from dataclasses import dataclass
+from html.entities import html5
 from pathlib import Path
 from urllib.parse import unquote
 
@@ -335,14 +335,35 @@ def _inline_mask(
     return "".join(mask)
 
 
+_CHARACTER_REFERENCE = re.compile(r"&(?:#[0-9]{1,7}|#[xX][0-9A-Fa-f]{1,6}|[A-Za-z][A-Za-z0-9]*);")
+_ESCAPE_OR_REFERENCE = re.compile(r"\\([" + re.escape(string.punctuation) + r"])|" + _CHARACTER_REFERENCE.pattern)
+
+
+def _decode_character_reference(match: re.Match[str]) -> str:
+    token = match[0]
+    if token.startswith("&#"):
+        hexadecimal = token[2] in "xX"
+        codepoint = int(token[3:-1] if hexadecimal else token[2:-1], 16 if hexadecimal else 10)
+        if codepoint == 0 or 0xD800 <= codepoint <= 0xDFFF or codepoint > 0x10FFFF:
+            return "\uFFFD"
+        return chr(codepoint)
+    # Exact names with a semicolon only: HTML's legacy partial/semicolon-less
+    # references are not valid Markdown character references.
+    return html5.get(token[1:], token)
+
+
 def _unescape(value: str, destination: bool = False) -> str:
     def replace(match: re.Match[str]) -> str:
+        if match[1] is None:
+            return _decode_character_reference(match)
         # Preserve a Windows separator immediately before a . or .. segment.
         if destination and match[1] == "." and re.match(r"\.{1,2}(?:[\\/]|$)", value[match.start() + 1:]):
             return match[0]
         return match[1]
 
-    return html.unescape(re.sub(r"\\([" + re.escape(string.punctuation) + r"])", replace, value))
+    # Consume escapes and references together so an escaped literal ampersand
+    # cannot become a character reference in a later decoding pass.
+    return _ESCAPE_OR_REFERENCE.sub(replace, value)
 
 
 def _closing_bracket(text: str, start: int, limit: int) -> int:
@@ -430,7 +451,9 @@ def _reference_key(label: str) -> str:
     return " ".join(_unescape(label).split()).casefold()
 
 
-_REFERENCE_START = re.compile(r"(?m)^ {0,3}\[((?:\\.|[^\[\]\\\r\n])+)\]:[ \t]*(?:\r?\n[ \t]*)?")
+_REFERENCE_START = re.compile(
+    r"(?m)^ {0,3}\[((?:\\.|[^\[\]\\\r\n]|\r?\n(?![ \t]*\r?\n))+)\]:[ \t]*(?:\r?\n[ \t]*)?"
+)
 
 
 def _reference_definition(text: str, start: int) -> tuple[str, str, int] | None:
@@ -556,7 +579,10 @@ def _display_text(text: str, references: dict[str, str]) -> str:
         if use:
             if use.is_image and pieces and pieces[-1] == "!":
                 pieces.pop()
-            pieces.append(_display_text(text[index + 1:use.label_end], references))
+            # A recursively rendered label already decoded its references and
+            # restored literal escapes/code. Do not decode that display again.
+            protected.append(_display_text(text[index + 1:use.label_end], references))
+            pieces.append(f"\x00{len(protected) - 1}\x00")
             index = use.end
         elif text[index] == "`" and not _escaped(text, index) and (span := _code_span(text, index, bounds)):
             delimiter_end = index + 1
@@ -580,7 +606,7 @@ def _display_text(text: str, references: dict[str, str]) -> str:
     result = re.sub(r"(\*{1,3}|~~)(?=\S)(.+?)(?<=\S)\1", r"\2", result)
     # Underscores inside words are literal, unlike ordinary emphasis delimiters.
     result = re.sub(r"(?<!\w)(_{1,3})(?=\S)(.+?)(?<=\S)\1(?!\w)", r"\2", result)
-    result = html.unescape(result)
+    result = _CHARACTER_REFERENCE.sub(_decode_character_reference, result)
     return re.sub(r"\x00(\d+)\x00", lambda match: protected[int(match[1])], result)
 
 

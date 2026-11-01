@@ -336,6 +336,55 @@ class MarkdownParsingTests(unittest.TestCase):
             [(1, "target.md"), (1, "target.md"), (1, "target.md"), (2, "target.md")],
         )
 
+    def test_multiline_definition_labels_resolve_normalized_uses_at_opening_lines(self) -> None:
+        for newline in ("\n", "\r\n"):
+            with self.subTest(newline=repr(newline)):
+                text = (
+                    "[first][long ref] [second][long ref]\n"
+                    "[multi\nline][ LONG\tREF ] [long ref][] ![long ref]\n"
+                    "\n"
+                    "[long\nref]: missing.md\n"
+                ).replace("\n", newline)
+                self.assertEqual(
+                    [(link.line, link.destination, link.is_image) for link in parse_links(text, self.source)],
+                    [
+                        (1, "missing.md", False), (1, "missing.md", False),
+                        (2, "missing.md", False), (3, "missing.md", False),
+                        (3, "missing.md", True),
+                    ],
+                )
+
+    def test_multiline_definition_labels_preserve_visibility_precedence_and_titles(self) -> None:
+        text = (
+            "<!--\n[long\nref]: comment.md\n-->\n\n"
+            "~~~\n[long\nref]: fence.md\n~~~\n\n"
+            "    [long\n    ref]: indent.md\n\n"
+            "`[long\nref]: span.md`\n\n"
+            "[first][long ref]\n\n"
+            '[long\nref]: first.md\n  "literal ` and [fake](title.md)"\n'
+            '[LONG REF]: second.md "literal `"\n\n'
+            "[last][long ref]\n"
+        )
+        self.assertEqual(
+            [(link.line, link.destination) for link in parse_links(text, self.source)],
+            [(17, "first.md"), (24, "first.md")],
+        )
+
+    def test_blank_or_paragraph_continuation_definition_labels_do_not_resolve(self) -> None:
+        for newline in ("\n", "\r\n"):
+            for blank in ("", " \t"):
+                with self.subTest(newline=repr(newline), blank=blank):
+                    text = (
+                        "[blank][long ref] [continuation][other ref]\n\n"
+                        f"[long\n{blank}\nref]: missing-blank.md\n\n"
+                        "Paragraph\n[other\nref]: missing-continuation.md\n\n"
+                        "[real](real.md)\n"
+                    ).replace("\n", newline)
+                    self.assertEqual(
+                        [(link.line, link.destination) for link in parse_links(text, self.source)],
+                        [(11, "real.md")],
+                    )
+
     def test_literal_backticks_in_link_payloads_do_not_hide_following_links(self) -> None:
         for payload in ('README.md "literal `"', '<README`file.md>', 'README`file.md'):
             with self.subTest(payload=payload):
@@ -774,6 +823,51 @@ class TargetNormalizationTests(unittest.TestCase):
         self.assertEqual(target.key(True), ("docs/sub/a#b.md", "view=1#2", None))
         self.assertFalse(target.directory_hint)
 
+    def test_only_complete_markdown_character_references_decode_in_destinations(self) -> None:
+        # CommonMark 0.31.2 section 2.5 requires the semicolon and an exact
+        # HTML5 name, or 1-7 decimal / 1-6 hexadecimal digits. HTML's legacy
+        # semicolon-less names and partial-name matches are not Markdown.
+        cases = {
+            "notes&copy.md": "notes&copy.md",
+            "contracts&notices.md": "contracts&notices.md",
+            "notes&notit;.md": "notes&notit;.md",
+            "notes%C2%A9.md": "notes©.md",
+            "notes&copy;.md": "notes©.md",
+            "notes&#169;.md": "notes©.md",
+            "notes&#xA9;.md": "notes©.md",
+            "notes&#X0000A9;.md": "notes©.md",
+            "notes&#0000169;.md": "notes©.md",
+            "notes&AElig;.md": "notesÆ.md",
+            "notes&#0;.md": "notes�.md",
+            "notes&#xD800;.md": "notes�.md",
+            "notes&#1114112;.md": "notes�.md",
+        }
+        targets = {}
+        for destination, name in cases.items():
+            with self.subTest(destination=destination):
+                target = normalize_destination(destination, self.source, self.root)
+                self.assertIsNotNone(target)
+                assert target is not None
+                targets[destination] = target
+                self.assertEqual((target.relative, target.query, target.fragment), (f"docs/sub/{name}", None, None))
+        self.assertNotEqual(targets["notes&copy.md"].key(), targets["notes%C2%A9.md"].key())
+        self.assertEqual(targets["notes&copy;.md"].key(), targets["notes%C2%A9.md"].key())
+        self.assertEqual(targets["notes&#169;.md"].key(), targets["notes%C2%A9.md"].key())
+
+    def test_character_reference_decoding_is_single_pass_and_respects_backslash_escapes(self) -> None:
+        cases = {
+            r"notes\&copy;.md": "docs/sub/notes&copy;.md",
+            "notes%26copy;.md": "docs/sub/notes&copy;.md",
+            "notes&amp;copy;.md": "docs/sub/notes&copy;.md",
+            r"..\folder\..\notes\&copy;.md": "docs/notes&copy;.md",
+            r"folder\\&copy;.md": "docs/sub/folder/©.md",
+        }
+        for destination, relative in cases.items():
+            with self.subTest(destination=destination):
+                target = normalize_destination(destination, self.source, self.root)
+                assert target is not None
+                self.assertEqual((target.relative, target.query, target.fragment), (relative, None, None))
+
     def test_root_relative_parent_dot_segments_and_directory_hint(self) -> None:
         cases = {
             "/README.md": ("README.md", None, None, False),
@@ -825,6 +919,30 @@ class TargetNormalizationTests(unittest.TestCase):
 
 
 class HeadingAnchorTests(unittest.TestCase):
+    def test_heading_character_references_require_exact_names_and_numeric_grammar(self) -> None:
+        cases = {
+            "Contracts&notices": "contractsnotices",
+            "Notes&copy": "notescopy",
+            "Notes&copy;": "notes",
+            "Notes&#169;": "notes",
+            "Notes&#xA9;": "notes",
+            "Notes&AElig;": "notesæ",
+            "Notes&notit;": "notesnotit",
+            "Notes&#65": "notes65",
+            "Notes&#87654321;": "notes87654321",
+            "Notes&#x0000041;": "notesx0000041",
+        }
+        for heading, anchor in cases.items():
+            with self.subTest(heading=heading):
+                self.assertEqual(heading_anchors(f"# {heading}\n"), {anchor})
+
+    def test_heading_code_and_escaped_ampersands_stay_literal_including_link_labels(self) -> None:
+        for label in (r"notes\&copy;", "notes&amp;copy;", "`notes&copy;`"):
+            for content in (label, f"[{label}](target.md)"):
+                with self.subTest(content=content):
+                    self.assertEqual(heading_anchors(f"# {content}\n"), {"notescopy"})
+        self.assertEqual(heading_anchors("# [notes&copy;](target.md)\n"), {"notes"})
+
     def test_definition_like_code_remains_part_of_setext_heading_display(self) -> None:
         text = (
             '[a][ref](README.md "literal `")\n'
@@ -1263,6 +1381,115 @@ class BrokenLinkCliTests(_CliFixture):
 
 
 class CombinedRegressionCliTests(_CliFixture):
+    def test_multiline_definition_labels_report_two_missing_uses_and_one_duplicate_group(self) -> None:
+        self.init_git()
+        for newline in ("\n", "\r\n"):
+            with self.subTest(newline=repr(newline)):
+                path = self.write_doc("page.md", "")
+                path.write_bytes((
+                    "[first][long ref] [second][long ref]\n\n"
+                    "[long\nref]: missing.md\n"
+                ).replace("\n", newline).encode("utf-8"))
+                broken = self.broken_report(expected_exit=1)
+                self.assertEqual(broken.local_links, 2)
+                self.assertEqual(
+                    broken.problems,
+                    [("docs/page.md:1", "missing.md", "docs/missing.md", "missing target")] * 2,
+                )
+                for arguments in ((), ("--ignore-chapter-anchors",)):
+                    duplicates = self.duplicate_report(*arguments)
+                    self.assertEqual(duplicates.document_links, 2)
+                    self.assertEqual(duplicates.extra_occurrences, 1)
+                    self.assertEqual(duplicates.rows, [("docs/page.md", "docs/missing.md", 2, (1, 1))])
+
+    def test_multiline_definition_controls_preserve_visible_first_destination_and_use_lines(self) -> None:
+        self.write_target("docs/ok.md")
+        self.write_doc(
+            "page.md",
+            "<!--\n[long\nref]: hidden.md\n-->\n\n"
+            "[first][long ref] [blank][blank ref] [paragraph][other ref]\n\n"
+            "[blank\n\nref]: blank.md\n\n"
+            "Paragraph\n[other\nref]: continuation.md\n\n"
+            '[long\nref]: ok.md\n  "literal `"\n'
+            "[long ref]: duplicate.md\n\n"
+            "[multi\nline][ LONG\tREF ]\n",
+        )
+        self.init_git()
+        broken = self.broken_report(expected_exit=0)
+        self.assertEqual(broken.local_links, 2)
+        self.assertEqual(broken.problems, [])
+        duplicates = self.duplicate_report()
+        self.assertEqual(duplicates.document_links, 2)
+        self.assertEqual(duplicates.rows, [("docs/page.md", "docs/ok.md", 2, (6, 21))])
+
+    def test_character_references_keep_literal_files_separate_in_both_reports(self) -> None:
+        for name in (
+            "notes&copy.md", "contracts&notices.md", "notes©.md",
+            "notes&copy;.md", "missing©.md", "absent&copy.md",
+        ):
+            self.write_target(f"docs/{name}")
+        self.write_doc(
+            "page.md",
+            "[literal](notes&copy.md)\n"
+            "[literal encoded](notes%26copy.md)\n"
+            "[notices](contracts&notices.md)\n"
+            "[notices encoded](contracts%26notices.md)\n"
+            "[entity](notes&copy;.md)\n"
+            "[decimal](notes&#169;.md)\n"
+            "[hex](notes&#xA9;.md)\n"
+            "[percent](notes%C2%A9.md)\n"
+            "[escaped](notes\\&copy;.md)\n"
+            "[escaped percent](notes%26copy;.md)\n"
+            "[amp entity](notes&amp;copy;.md)\n"
+            "[missing literal](missing&copy.md)\n"
+            "[missing decoded](absent&copy;.md)\n",
+        )
+        self.init_git()
+        broken = self.broken_report(expected_exit=1)
+        self.assertEqual(broken.local_links, 13)
+        self.assertEqual(
+            broken.problems,
+            [
+                ("docs/page.md:12", "missing&copy.md", "docs/missing&copy.md", "missing target"),
+                ("docs/page.md:13", "absent&copy;.md", "docs/absent©.md", "missing target"),
+            ],
+        )
+        for arguments in ((), ("--ignore-chapter-anchors",)):
+            duplicates = self.duplicate_report(*arguments)
+            self.assertEqual(duplicates.document_links, 13)
+            self.assertEqual(duplicates.duplicate_groups, 4)
+            self.assertEqual(duplicates.extra_occurrences, 7)
+            self.assertEqual(
+                duplicates.rows,
+                [
+                    ("docs/page.md", "docs/notes©.md", 4, (5, 6, 7, 8)),
+                    ("docs/page.md", "docs/notes&copy;.md", 3, (9, 10, 11)),
+                    ("docs/page.md", "docs/contracts&notices.md", 2, (3, 4)),
+                    ("docs/page.md", "docs/notes&copy.md", 2, (1, 2)),
+                ],
+            )
+
+    def test_heading_character_reference_policy_is_used_by_fragment_checks(self) -> None:
+        self.write_target(
+            "docs/headings.md",
+            "# Contracts&notices\n# Notes&copy;\n# [notes\\&copy;](headings.md)\n# `code&copy;`\n",
+        )
+        self.write_doc(
+            "page.md",
+            "[literal](headings.md#contractsnotices)\n"
+            "[decoded](headings.md#notes)\n"
+            "[escaped](headings.md#notescopy)\n"
+            "[code](headings.md#codecopy)\n"
+            "[not-html](headings.md#contractsices)\n",
+        )
+        self.init_git()
+        broken = self.broken_report(expected_exit=1)
+        self.assertEqual(broken.local_links, 6)
+        self.assertEqual(
+            broken.problems,
+            [("docs/page.md:5", "headings.md#contractsices", "docs/headings.md#contractsices", "missing anchor #contractsices")],
+        )
+
     def test_hidden_reference_definition_does_not_cause_false_broken_or_duplicate_results(self) -> None:
         self.write_target("docs/README.md")
         self.write_doc(
@@ -1410,6 +1637,84 @@ class CombinedRegressionCliTests(_CliFixture):
 
 
 class GitIgnoreTests(_CliFixture):
+    def test_directory_and_repository_root_links_accept_blank_crlf_ignore_lines(self) -> None:
+        self.write_doc("page.md", "[directory](../docs/)\n[root](../)\n[plain](../docs)\n")
+        self.init_git()
+        for newline in (b"\n", b"\r\n"):
+            with self.subTest(newline=newline):
+                (self.root / ".gitignore").write_bytes(newline.join((b"**/build/", b"", b"# end", b"")))
+                report = self.broken_report(expected_exit=0)
+                self.assertEqual(report.local_links, 3)
+                self.assertEqual(report.problems, [])
+
+    def test_crlf_blank_lines_do_not_weaken_real_directory_only_ignores(self) -> None:
+        self.write_target("build/.keep", "")
+        self.write_target("cache/.keep", "")
+        self.write_target("docs/build", "not a directory\n")
+        (self.root / ".gitignore").write_bytes(b"**/build/\r\ncache/\r\n!cache/\r\n\r\n# end\r\n")
+        self.write_doc(
+            "page.md",
+            "[tracked directory](../build/)\n"
+            "[missing directory](../future/build/)\n"
+            "[negated directory](../cache/)\n"
+            "[file named build](build)\n"
+            "[directory](../docs/)\n[root](../)\n",
+        )
+        self.init_git()
+        self.run_git(["add", "-f", "build/.keep"])
+        report = self.broken_report(expected_exit=1)
+        self.assertEqual(report.local_links, 6)
+        self.assertEqual(
+            report.problems,
+            [
+                ("docs/page.md:1", "../build/", "build", "ignored by .gitignore:1: **/build/"),
+                ("docs/page.md:2", "../future/build/", "future/build", "ignored by .gitignore:1: **/build/; missing target"),
+            ],
+        )
+
+    def test_empty_git_rule_records_require_blank_crlf_source_provenance_and_directory_shape(self) -> None:
+        (self.root / ".gitignore").write_bytes(b"**/build/\r\n\r\n# end\r\n")
+        for path in ("docs/", "."):
+            with self.subTest(path=path):
+                process = subprocess.CompletedProcess([], 0, f".gitignore\x002\x00\x00{path}\x00".encode(), b"")
+                with patch.object(broken_link_check.subprocess, "run", return_value=process):
+                    self.assertEqual(broken_link_check.project_ignored_targets(self.root, [path]), {})
+
+        cases = (
+            (b"**/build/\r\n\r\n", b".gitignore\x001\x00\x00docs/\x00", "docs/"),
+            (b"**/build/\n\n", b".gitignore\x002\x00\x00docs/\x00", "docs/"),
+            (b"**/build/\r\n \r\n", b".gitignore\x002\x00\x00docs/\x00", "docs/"),
+            (b"**/build/\r\n\r\n", b".gitignore\x003\x00\x00docs/\x00", "docs/"),
+            (b"**/build/\r\n\r\n", b".gitignore\x002\x00\x00docs/page.md\x00", "docs/page.md"),
+            (b"**/build/\r\n\r\n", b".gitignore\x00\x00\x00docs/\x00", "docs/"),
+            (b"**/build/\r\n\r\n", b"\x002\x00\x00docs/\x00", "docs/"),
+            (b"**/build/\r\n\r\n", b".gitignore\x00NaN\x00\x00docs/\x00", "docs/"),
+            (b"**/build/\r\n\r\n", b".gitignore\x000\x00\x00docs/\x00", "docs/"),
+        )
+        for content, output, path in cases:
+            with self.subTest(content=content, output=output):
+                (self.root / ".gitignore").write_bytes(content)
+                process = subprocess.CompletedProcess([], 0, output, b"")
+                with patch.object(broken_link_check.subprocess, "run", return_value=process):
+                    with self.assertRaises(OSError):
+                        broken_link_check.project_ignored_targets(self.root, [path])
+
+    def test_git_record_framing_target_identity_and_nonempty_rule_validation_remain_strict(self) -> None:
+        cases = (
+            (["docs/"], b"\x00\x00\x00docs/"),
+            (["docs/"], b"\x00\x00\x00"),
+            (["docs/"], b"\x00\x00\x00other/\x00"),
+            (["docs/", "."], b"\x00\x00\x00docs/\x00\x00\x00\x00docs/\x00"),
+            (["docs/"], b".gitignore\x00NaN\x00docs/\x00docs/\x00"),
+            (["docs/"], b"\x001\x00docs/\x00docs/\x00"),
+        )
+        for paths, output in cases:
+            with self.subTest(paths=paths, output=output):
+                process = subprocess.CompletedProcess([], 0, output, b"")
+                with patch.object(broken_link_check.subprocess, "run", return_value=process):
+                    with self.assertRaises(OSError):
+                        broken_link_check.project_ignored_targets(self.root, paths)
+
     def test_project_gitignore_reports_existing_file_directory_and_parent_rules(self) -> None:
         self.write_target("ignored-file.md", "# Ignored\n")
         self.write_target("ignored-dir/inside.md", "# Ignored\n")
