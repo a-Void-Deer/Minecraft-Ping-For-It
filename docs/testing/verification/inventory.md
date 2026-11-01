@@ -928,6 +928,14 @@ getters without using old copy/conversion routes. Unknown overrides, foreign
 delegates and final revocation have negative controls; Vault locals have
 save/serialization traps and an all-member final gate. Saved-delegate/stateful
 metadata authority and overlong-lookup refusal have headless loader coverage.
+The Common fixture exercises overlong concrete-type refusal with an in-memory
+subclass whose actual binary name is 513 characters, beyond the unchanged
+512-character lookup bound, rather than oversized on-disk packages. Its eight
+test methods retain the normal ownership and `UNCLASSIFIED`/false-inherits
+controls; an independent reflection oracle confirms the overlong instance still
+inherits `Object.toString` without an override. No generated subclass file is
+written. Execution is recorded in the
+[Common fixture-path run](build-checks.md#common-resident-fixture-path-run).
 `InventoryExternalFieldsTest` directly exercises the production cached-field
 ports for both fastutil map capacities and PROFILE properties on ordinary,
 untransformed external-library objects, without ServiceLoader substitution.
@@ -1177,6 +1185,10 @@ pre-established successor entitlements are exercised independently. Lagging-peer
 and repeated cleanup fixtures check bounded progress and zero retained/reserved
 charges at close.
 
+The certified chest runtime's resource-refusal reasons, retained-coverage
+quantities and paid-journal replay control are inventoried under
+[shared-source delay diagnostics](shared-sources.md#certified-pool-delay-diagnostics).
+
 Successor regressions cover both idle and fully adopted abandoned replacements,
 each across 32 cohorts with partial and explicitly `INCOMPLETE` observations and
 exact-path controls. Every fixed variant reaches 32/32 replacement admissions;
@@ -1354,6 +1366,37 @@ These additions passed the focused and full Java 21 executions recorded in the
 [terminal Preview admission and settings-resize run](build-checks.md#terminal-preview-admission-and-settings-resize-run),
 which also built all three loaders. They add no live UI, window, provider-launch
 or multiplayer evidence.
+
+### Recipientless Tracking and successor continuity
+
+Three additional `InventoryPooledBackendTest` cases exercise recurring Tracking
+through the production backend, certified native source, publisher and encoded
+client sessions. Two owners share one unlocked 27-slot chest with player
+separation disabled and the legal normalized physical cap of 16. Explicit
+owner-only frozen audiences model separate private channels; the fixture does
+not exercise live channel administration. Its configurable audience preserves
+the existing two-recipient default for other cases.
+
+The two suspension orderings remove B's inventory-field permission, not B's
+source-read authority, either before successor creation or during A's read after
+B has received an entitlement. Assertions check that the serviceable-demand
+signal updated at recipient synchronization excludes an already-suspended B from
+future grants and releases an already-held grant, while retaining B's original
+completed evidence, cursor and paid prefix. A completes the replacement and
+multiple later refreshes without a baseline
+reset; B receives no quantity, success-control or heartbeat frame while denied.
+Restoring permission lets B complete fresh updates without widening either frozen
+audience, source invalidation or a marker-lifetime change. Expiry stops tracking
+and teardown releases retained/reserved memory.
+
+The authorized cadence-wait control delays B's next sweep until A's successor
+has completed. B retains and adopts that entitlement without a second physical
+sweep, distinguishing an ordinary cadence wait from absent serviceable demand.
+These assertions passed the full Java 21 execution recorded in the
+[combined Java run](build-checks.md#recipientless-tracking-diagnostics-and-caption-reflow-verification),
+which also built all three loaders; independent inventory review passed. This
+evidence is separate from the earlier terminal-Preview run, and live permission
+changes remain in the [manual matrix](manual-integration.md#inventory).
 
 ## Native incremental sweep coverage
 

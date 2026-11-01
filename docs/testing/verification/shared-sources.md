@@ -164,6 +164,30 @@ The complete Common suite passed in the recorded
 [automated verification results](build-checks.md#automated-verification-results).
 No live server, notification, heap/TPS or soak result follows from these seams.
 
+## Certified pool delay diagnostics
+
+`InventoryPooledChestRuntimeTest` adds seven source-reviewed cases across three
+methods through the production certified chest runtime and `BudgetDelayMonitor`.
+They use 27-slot chests and the legal normalized physical cap of 16, with admitted
+metadata and otherwise serviceable fixture budgets:
+
+| Refusal or control | Closed-cycle summary and progress assertions |
+| --- | --- |
+| Physical allowance exhausted before the first page or after a retained 16-slot page (two cases) | Only `PHYSICAL_SLOTS`; respectively 27 or 11 known remaining physical slots. Repeated refused steps and repeated cycle closure produce one work item and one summary, perform no content getter and keep the cursor. Fresh allowance resumes to completion. |
+| Page-memory, provider-work, item-work, or combined memory/provider-work exhaustion (four cases) | After one paid slot, exactly 26 known remaining physical slots; only `MEMORY`, `PROVIDER_WORK`, or both as applicable. Item-processing work uses the existing `PROVIDER_WORK` diagnostic category. Refusal preserves the prefix without spending physical slots or invoking a content getter, then resumes when the guard permits. |
+| Already-paid shared-journal replay (one case) | The peer replays the prefix with no remaining physical allowance and later replays the completed tail, without another content getter or duplicate same-target logical charge; cycle closure produces no budget warning. |
+
+Reason counts and quantities are checked on actual closed-cycle summaries rather
+than inferred from an empty step. The known remaining quantity comes from the
+retained certified graph and committed journal, including before any first-page
+result exists; collecting it performs no source lookup or read. Cleanup assertions
+release retained and reserved memory. These assertions passed the full Java 21
+execution recorded in the
+[combined Java run](build-checks.md#recipientless-tracking-diagnostics-and-caption-reflow-verification),
+separate from the earlier Common results. They do not capture live WARN output
+or administrator messages. The wider pool/source coverage remains owned by
+[inventory verification](inventory.md#certified-tracking-pool-and-publication-coverage).
+
 ## Known automated gaps
 
 - `SourceAccessTest` exercises a fake source, while

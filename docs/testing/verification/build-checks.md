@@ -99,6 +99,57 @@ These totals describe that corpus snapshot, not fixed acceptance counts or a
 requirement to remove repeated navigation links. This documentation-only follow-up
 reran the corpus commands, not the unchanged Python suite or Java builds.
 
+### Markdown edge-case regression run
+
+Recorded execution date: 2026-11-01, code input
+`8ef60ac7eb3bd1640a8d2b559855eafb8a710a28`. This is a separate execution from
+the historical 69-test run above. The 15 added semantic methods cover:
+
+- Git empty-pattern directory/root records accepted only with the exact source
+  line's blank-CRLF provenance, while malformed framing, target identity, line
+  numbers and nonempty rules remain strict; real directory-only ignores and
+  negations retain their effect;
+- nonblank multiline reference-definition labels under LF and CRLF, normalized
+  uses and opening-line reports, visible-first precedence, titles and hidden/code
+  controls, with blank-label and paragraph-continuation rejection; and
+- exact semicolon-terminated named/numeric character references across
+  destinations, heading anchors and both CLIs. Literal and decoded filenames stay
+  distinct; backslash escapes, percent decoding, code spans and recursively
+  rendered labels preserve the single-pass boundary.
+
+`python -B scripts/docs/tests/test_documentation_links.py -v` passed all 84 tests:
+80 semantic and four scanning-work cases. AST parsing and compilation checks
+passed for all four Python files, the scoped diff check passed, and independent
+review passed for this code input. `count_duplicate_links.py` was unchanged by
+this code commit. These results do not establish cross-Git-version compatibility
+or exhaustive CommonMark/GFM equivalence.
+
+The supplied PowerShell CLI results used the pre-documentation-edit corpus
+corresponding to `03915d4d674617834868f40e9c569b09897c0cf7`, not the subsequently
+expanded inventories:
+
+| Command | Exit | Result |
+| --- | --- | --- |
+| `python -B scripts/docs/broken_link_check.py` | 0 | 69 Markdown sources; 1,335 local links; zero broken links; zero external URIs. |
+| `python -B scripts/docs/count_duplicate_links.py` | 0 | 1,335 document links; 222 duplicate groups; 347 extra occurrences. |
+| `python -B scripts/docs/count_duplicate_links.py --ignore-chapter-anchors` | 0 | 1,335 document links; 272 duplicate groups; 657 extra occurrences. |
+
+These are snapshot-specific corpus counts, not acceptance thresholds or a claim
+that later documentation edits leave the counts unchanged.
+
+After the five verification inventories were expanded, a documentation-only
+refresh ran the same three CLIs against 69 Markdown sources: 1,347 local links,
+zero broken links and zero external URIs. Duplicate reporting found 223 groups
+and 349 extra occurrences, or 274 groups and 667 extras with
+`--ignore-chapter-anchors`; all three commands exited zero. That refresh did not
+rerun the Python suite or Gradle.
+
+The later fixture-path addendum's final corpus check covered 69 sources and
+1,349 local/document links, with zero broken links or external URIs. Duplicate
+counts were 223 groups and 349 extras, or 274 groups and 668 extras ignoring
+chapter anchors. Each CLI exited zero; no Python suite or Gradle was rerun for
+the documentation addendum.
+
 ## Automated verification results
 
 Recorded execution date: 2026-10-27. The saved JDK 21, PowerShell executions
@@ -357,6 +408,106 @@ live window/rendering, loader launch, multiplayer, installed-provider, manual
 gameplay or performance validation was performed; the
 [manual matrix](manual-integration.md#pending-manual-and-integration-matrix)
 remains pending.
+
+### Recipientless Tracking, diagnostics and caption-reflow verification
+
+Recorded execution date: 2026-11-01. Both commands ran with HEAD
+`1964901d81d6352e0d244135f2f36032b0251666` plus the two settings sources later
+committed unchanged in `7e42d3897431ff3121ad6b8858a9223b7e06c900`. The five
+inventory sources match the former commit; before/after SHA-256 manifests retain
+the two settings inputs and match the latter commit. Documentation edits during
+the run were not Java/build inputs. This identifies the corrected dialog-return
+lifecycle as well as the original caption-reflow and inventory fixes, not an
+intermediate settings input.
+
+The saved PowerShell executions used JDK 21, UTF-8, `--no-daemon`, no explicit
+timeout and separate stdout/stderr files. In these commands, `$evidence` is the
+external directory `pfi-settings-final-20261101-182340`:
+
+```powershell
+$env:JAVA_HOME = 'E:\scoop\apps\temurin21-jdk\current'
+$env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+.\gradlew.bat :common:test --tests 'nx.pingwheel.common.screen.*' --no-daemon --console=plain > "$evidence\focused.stdout.log" 2> "$evidence\focused.stderr.log"
+.\gradlew.bat :common:check :fabric:build :forge:build :neoforge:build verifyModIdentity --continue --no-daemon --console=plain --info > "$evidence\full.stdout.log" 2> "$evidence\full.stderr.log"
+```
+
+The focused command exited zero with `BUILD SUCCESSFUL` in 31 seconds. Common
+main/test compilation and tests executed: 314 tests in 26 suites, including all
+seven `SettingsScreenInputLayoutTest` cases, with zero failures, errors or skips.
+Of 13 actionable tasks, three executed and ten were `UP-TO-DATE`.
+
+The full command exited zero with `BUILD SUCCESSFUL` in 2 minutes 17 seconds.
+All four module test tasks executed freshly; the recorded XML counts contain
+zero failures, errors or skips:
+
+| Module | Suites | Tests |
+| --- | --- | --- |
+| Common | 466 | 5061 |
+| Fabric | 5 | 24 |
+| Forge | 5 | 26 |
+| NeoForge | 41 | 256 |
+| Total | 517 | 5367 |
+
+Common main/test compilation reused the focused output. All three loader main
+compilations, tests, Javadocs, jar/source-jar packaging and Fabric remapping
+executed; loader test compilation, Javadoc-jar tasks and Fabric access-widener
+validation were `UP-TO-DATE`. All three loader builds completed, and
+`verifyModIdentity` executed and passed for `pingforit` / `Ping For It` /
+`0.5.0-pfi-beta2`. Of 52 actionable tasks, 23 executed and 29 were `UP-TO-DATE`.
+
+The full run covers
+[recipientless Tracking successor continuity](inventory.md#recipientless-tracking-and-successor-continuity),
+[certified pool delay diagnostics](shared-sources.md#certified-pool-delay-diagnostics)
+and [assembled caption-change and dialog-return input](configuration-ui.md#assembled-settings-screen-caption-reflow).
+Independent inventory and final settings reviews passed. The external evidence
+directory retains the logs, count summaries, source hashes and revision/status
+records. Existing nonfatal `LevelRendererMixin` mapping, Javadoc missing-parameter,
+deprecated-API and Gradle deprecation diagnostics and a MixinGradle integration
+skip remain; none names the changed settings sources. This is not warning-free
+evidence. No live GUI/font/rendering, multiplayer, installed-provider, manual
+gameplay or performance validation follows from these executions.
+
+The subsequent Common-test-only long-fixture-path repair was not part of this
+verified input. Its [separate execution record](#common-resident-fixture-path-run)
+does not extend the counts or loader-build claims above.
+
+### Common resident fixture-path run
+
+Recorded execution date: 2026-11-01, source input
+`7e42d3897431ff3121ad6b8858a9223b7e06c900` plus the Common test-only patch
+committed unchanged in `6e1facb74849f0c491ccfc35ce5c0aa1cca90869`. The saved
+source-manifest hashes match the two retained source files; the committed patch
+also removes the old fixture. Independent review passed; no production,
+dependency or loader source changed.
+The saved path checks record the shortened fixture source at 120 absolute-path
+characters, its compiled class at 131 and its loader class at 160; old oversized
+Common source/output paths are absent.
+
+Both PowerShell commands used JDK 21, UTF-8, `--no-daemon`, no explicit timeout
+and separate stdout/stderr files. Here `$evidence` is the external directory
+`pfi-common-fixture-path-20261101-746d51b2`:
+
+```powershell
+$env:JAVA_HOME = 'E:\scoop\apps\temurin21-jdk\current'
+$env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+.\gradlew.bat --no-daemon :common:test --tests 'nx.pingwheel.common.platform.PlatformInventoryResidentTest' --console=plain > "$evidence\focused.stdout.log" 2> "$evidence\focused.stderr.log"
+.\gradlew.bat --no-daemon :common:check --console=plain > "$evidence\common-check.stdout.log" 2> "$evidence\common-check.stderr.log"
+```
+
+Both commands exited zero with `BUILD SUCCESSFUL`. The focused run freshly
+compiled the Common tests and passed eight tests in one suite, with zero
+failures, errors or skips; two tasks executed and eleven were `UP-TO-DATE`.
+The Common check freshly passed 5,061 tests in 466 suites, also with zero
+failures, errors or skips. It reused the focused compilation; one task executed
+and twelve were `UP-TO-DATE`. Both stderr files were empty; stdout retained the
+Gradle deprecation notice. The evidence directory retains exact commands, XML,
+summaries, path checks and source hashes. No extra loader build was required or
+run for this Common-test-only patch, and no manual gameplay or live-runtime
+validation was performed.
 
 ## Verification limitations
 

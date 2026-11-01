@@ -653,9 +653,56 @@ below describe source-reviewed coverage rather than a recorded full-suite run:
   every bundled locale; it does not render or assemble screen labels.
 
 The production screen routes native widget input through the deferred-action
-coordinator. The native-list cases exercise headless list dispatch and reflow;
-the combined coverage does not establish a fully assembled settings screen's
-render/input lifecycle or live game focus traversal.
+coordinator. Assembled input and resize seams are inventoried separately below;
+none establishes a live game render/input lifecycle or focus traversal.
+
+## Assembled settings-screen caption reflow
+
+`SettingsScreenInputLayoutTest` assembles the production screen's widgets and
+dispatches native mouse, keyboard, wheel and slider-drag input headlessly. Its
+seven cases use bundled Turkish captions with supplied deterministic text
+measurements, not a live font or window:
+
+- a Team Color caption crossing the half-width fit threshold stays paired during
+  its native callback and held mouse gesture, stacks in declared order after
+  release, and pairs again after cycling back, without resize. The same list and
+  widgets retain focus, viewport and exactly one setting edit/save callback per
+  activation; re-pairing may clamp scroll to the shorter list rather than reset it;
+- keyboard activation reflows only after the outermost dispatch, including a
+  nested key dispatch inside a save callback, retaining focus and scroll without
+  replaying an edit;
+- completed wheel dispatch reevaluates programmatically changed captions while
+  preserving native list scrolling, without turning the wheel or display-only
+  value changes into enum edits;
+- a caption change waits through a native slider click/drag and intervening key
+  dispatch until mouse release. Reflow retains the unchanged slider entry,
+  focus and dragged value without repeating a save callback;
+- clicking Reset, releasing on its confirmation screen and cancelling with
+  Escape returns the retained list/widgets and focus. Subsequent native Tab and
+  keyboard enum input still stack and re-pair captions, retain scroll and make
+  exactly one edit/save callback per activation;
+- the same Reset cancellation leaves keyboard size-slider edits able to refresh
+  both dependent controls, reconcile the display/frame draft and show the
+  adjustment notice. Focus and keyboard adjustment mode survive replacement
+  without an ordinary server-draft save; and
+- suspending a pending size-slider drag for a confirmation screen cancels the
+  retained screen/list/entry gesture flags without rebuilding the hidden page or
+  discarding focus. After release on the confirmation and Escape return, the next
+  dispatch completes the pending refresh without another edit; stale dragging
+  cannot resume, and both draft texts and dirty fields remain unchanged.
+
+The fixture preserves native screen removal, addition and retained-instance
+initialization while bypassing the GPU, mouse/window and title work of the game
+screen switch. Server-size cases inject accepted snapshot and permission state,
+not a connection or remote transaction.
+
+All seven cases passed the focused screen suite and subsequent full Java 21
+verification recorded in the
+[combined Java run](build-checks.md#recipientless-tracking-diagnostics-and-caption-reflow-verification),
+which also built all three loaders. Final settings review passed on the corrected
+dialog-return input. These headless assertions do not exercise native glyph
+rendering, real GLFW input, hover/focus tooltip delivery, screen-close persistence
+or live translation readability.
 
 ## Assembled settings-screen resize
 
@@ -682,9 +729,10 @@ or wrapping.
 
 ## Known automated gaps
 
-- native-list reflow/input, enum caption/narration/tooltip components and assembled
-  native resize have headless coverage above, but the game render/input lifecycle
-  remains unexercised. Live GUI-scale/window resizing,
+- native-list reflow/input, enum caption/narration/tooltip components, assembled
+  caption-change/dialog-return input and native resize have headless assertion
+  coverage above, with execution evidence scoped separately; the game render/input
+  lifecycle remains unexercised. Live GUI-scale/window resizing,
   footer traversal, text-entry dispatch, actual font-driven pair stacking,
   rendered heading clipping/help, hover/keyboard-focus tooltip delivery and wrapping,
   translation accuracy, and multiplayer read-only permission transitions remain

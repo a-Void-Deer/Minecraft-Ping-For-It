@@ -30,6 +30,17 @@
   traversal. These live native-screen checks remain pending; the
   [headless list reflow/input coverage](configuration-ui.md#settings-screen-navigation-catalog-layout-and-localization)
   does not establish game-window, font or render behavior.
+- Without resizing, cycle a localized enum from a caption that fits a related
+  half-width pair to one that requires stacking, then back. Check the pair's
+  declared order, retained widgets, keyboard focus, scroll and one edit per
+  activation after the native gesture completes. Include nested callback-driven
+  changes, wheel scrolling and a caption change during slider drag that waits for
+  release. Click Reset, release on its confirmation, cancel with Escape, then use
+  Tab/keyboard to change captions and server size sliders. Also suspend a pending
+  size-slider drag for a dialog and return; check retained focus/drafts, deferred
+  dependent-control refresh and no stale drag or edit replay. The
+  [assembled headless input assertions](configuration-ui.md#assembled-settings-screen-caption-reflow)
+  use supplied measurements, not live font fitting or rendering.
 - Inspect every value control's assembled help with native hover and keyboard
   focus, plus all category/scope, Back, Done, Reset, configuration-file, and
   presentation-editor actions. Check numeric decrease/increase, boolean off/on,
@@ -116,6 +127,25 @@
   publication, including a rapid reverse toggle, without baseline/seed/lifetime
   changes solely from the toggle. Include stalled or abandoned successors and
   final-frame owner/lock revocation after earlier parts.
+- With two connected owners on separate private channels, disable player
+  separation and track the same unlocked 27-slot chest under the legal physical
+  cap of 16 and a permission-gated inventory field policy. Remove B's field
+  permission by de-op without disconnecting or making the source unreadable,
+  both before a successor grant and after one has been established. Confirm A
+  completes multiple later refreshes, B receives
+  no forbidden quantity/success frames or heartbeats, and re-op restores B's
+  updates without changing frozen audiences or marker lifetime. Include an
+  authorized peer waiting only for cadence as the continuity control. The
+  [headless successor assertions](inventory.md#recipientless-tracking-and-successor-continuity)
+  do not exercise live permission or channel changes.
+- Under the legal physical cap of 16, capture certified first-page and
+  retained-prefix budget-delay WARN output. Check that exhausted physical slots
+  report only that reason with known remaining coverage; separately force actual
+  memory/provider/item-processing pressure and check only the observed limiting
+  categories, deduplicated quantities and resumed progress. Include paid-journal
+  replay with no new physical allowance and no false delay. The
+  [closed-cycle summary assertions](shared-sources.md#certified-pool-delay-diagnostics)
+  do not establish live log output or administrator-message delivery.
 - Keep completed unselected Previews open while two owner-partitioned Tracking
   cohorts update repeatedly. Verify original request rows/references remain usable
   under their validity rules without reserving future Tracking sweeps, periodic
