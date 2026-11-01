@@ -45,13 +45,16 @@ reference information, evidence, or navigation. Omit generic assurances and
 statements about unaffected subsystems unless they specify a requirement or
 resolve a plausible ambiguity in the page.
 
-Preserve negative statements that exclude a plausible implementation, clarify
-authority or side effects, define failure behavior, or limit an evidence claim.
+Where a positive rule can state the same contract more directly, prefer explicit
+scope, triggers, and state effects over an enumeration of excluded alternatives.
+Preserve a negative clarification when it adds a necessary boundary not already
+clear from the surrounding rules. A plausible excluded implementation alone does
+not justify restating an already established boundary.
 
-After drafting or during reviewing, ask: "What useful information or connection would the reader
-lose if this sentence were removed?" Delete sentences with no defensible
-contribution. Keep editorial explanations and deletion justifications outside
-the finished document.
+After drafting or during reviewing, ask: "What useful information or connection
+would the reader lose if this sentence were removed?" Delete sentences with no
+defensible contribution. Keep editorial explanations and deletion justifications
+outside the finished document.
 
 ## When to update
 
