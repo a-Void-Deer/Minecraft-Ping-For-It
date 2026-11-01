@@ -187,7 +187,7 @@ normalization, validation and its own stricter encoding bounds. The opaque form
 lets a domain carry lossless values, such as an exact integer count or a display
 string beyond the presentation text bound, without widening the existing
 presentation-value or section bounds. The larger tagged allowance is still one
-finite, bounded, detached value: it is not a generic unbounded escape hatch.
+finite, bounded, detached value.
 No payload form carries live components, item stacks, or raw NBT, and none
 enlarges the existing global record-value bounds. A `SnapshotRecord` may carry
 scalar or record replacement for related units, but this introduces no general

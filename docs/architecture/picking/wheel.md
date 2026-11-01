@@ -66,11 +66,8 @@ selection.
 Circular sector underlays and the inventory list's Back semicircle fade
 smoothly outward from their center coverage to transparency at their outer
 edge. The existing focus, transition and opacity layers still determine that
-center coverage. This radial fade affects only those underlay backgrounds:
-text, icons, borders, Back progress and interaction chrome retain their own
-appearance, and rectangular title and inventory-panel backgrounds do not fade
-radially. It is not a glow or bloom effect and introduces no appearance
-preference.
+center coverage. This radial fade affects only those underlay backgrounds and
+introduces no appearance preference.
 
 Each radial menu also draws center guides at its own origin: one closed circle
 of the frozen center deadzone's radius — the deadzone's actual boundary,

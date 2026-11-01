@@ -2,8 +2,7 @@
 
 This page is an explanatory overview of the client presentation pipeline. It
 summarizes stages and boundaries and links to the focused architecture contracts
-that normatively own the behavior; it is not a second owner of eligibility,
-failure, cache, or placement rules. The canonical target identity remains
+that normatively own the behavior. The canonical target identity remains
 unchanged across every presentation stage: the pipeline may choose different
 positions or a verified owner/master for rendering, but those choices do not
 rewrite marker ownership, network identity, or lifecycle.

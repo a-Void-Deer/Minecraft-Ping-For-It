@@ -43,17 +43,10 @@ by its integration contract.
   system, datapack format, user-definition mechanism, plugin API or generalized
   scripting layer for them in this iteration. Client display settings and the
   internal optional-source registry do not relax this boundary.
-- No backward original-mod protocol compatibility, cross-dimension entity
-  tracking or Immersive Portals integration.
-- No hard dependency created by absent optional content.
+- No cross-dimension entity tracking or Immersive Portals integration.
 - Native shape-based block outlines are sufficient where the shape route
-  applies; pixel/model-silhouette outlines are not required there. This does not
-  authorize replacing an eligible glow path with shapes or approximating native
-  shapes with full cubes.
-- Existing ping range, lifetime, cooldown and comparable mechanics remain
-  unchanged unless a requirement explicitly changes them.
-- Unrelated refactors, formatting sweeps, dependency upgrades, loader migrations
-  and architecture rewrites remain outside the scope of this work.
+  applies. Route eligibility and native-shape requirements are owned by
+  [VoxelShape geometry](architecture/geometry/voxel_shape.md).
 
 Future Create constituent-marker ideas in the
 [raycast supplement](integrations/create-contraption-raycast.md) are design

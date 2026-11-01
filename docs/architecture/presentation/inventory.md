@@ -1046,8 +1046,7 @@ provider over the tested Vault structure; it preserves per-member segmentation,
 variant identity and a canonical controller alias rather than aggregating by
 registry ID, and its version, loaded-member, controller-alias and
 per-member-layout rules are owned by
-[Create integration](../../integrations/create.md#vault-inventory-provider). It
-is not a general container solution and does not cover every container.
+[Create integration](../../integrations/create.md#vault-inventory-provider).
 
 Audited adapters preserve the selected face, ordered member and segment-local
 slot layout, and the provider's authoritative long amount independently of an

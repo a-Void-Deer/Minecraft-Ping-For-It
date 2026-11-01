@@ -35,7 +35,7 @@ client-configurable.
 Applying a synchronized policy at runtime changes the effective limit and
 regeneration interval while preserving the limiter's existing history: an
 already-consumed allowance is not replayed, dropped, or reset by the policy
-update. The client token bucket is a courtesy mirror, not a second authority.
+update.
 
 ## Boundary-specific zero handling
 
@@ -65,10 +65,8 @@ owned by [marker lifecycle](../authority/marker_lifecycle.md).
 
 ## Create-only dispatch boundary
 
-Immediately before sending `MarkerCreate`, the client mirrors the synchronized
-policy with a token bucket as a courtesy gate only. The gate exists only for
-that dispatch: `MarkerRemove` and channel-update behavior, including
-server-policy updates, remain unchanged and are never gated. If the gate
+The client applies the synchronized policy through a token-bucket courtesy gate
+only to `MarkerCreate` dispatch, immediately before sending it. If the gate
 rejects a committed create:
 
 - drop it;

@@ -131,10 +131,9 @@ state below:
 | Submission | Late composite submission, after normal outline-source success is known |
 | Visibility | Through all occluding blocks and from arbitrary camera angles |
 
-Do not reintroduce depth-tested occlusion. Do not change the route to polygons,
-quads, a full cube, or another shape substitute. Late submission is part of the
-contract: it allows successful normal geometry to suppress only the matching
-subject while uncovered subjects still contribute their native edges.
+Late submission is part of the contract: it allows successful normal geometry
+to suppress only the matching subject while uncovered subjects still contribute
+their native edges.
 
 The GPU contract combines with the live `BlockState#getShape` and
 `VoxelShape#forAllEdges` requirements in

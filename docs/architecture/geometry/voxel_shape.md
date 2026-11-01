@@ -18,14 +18,11 @@ substitute for an eligible existing glow path.
 For each uncovered subject, obtain Minecraft 1.21.1's native `VoxelShape` from
 the current live `BlockState#getShape` call and enumerate that exact shape with
 `VoxelShape#forAllEdges`. Use the live state and collision context for the
-current frame rather than a captured full-cube proxy or reconstructed model
-silhouette.
+current frame.
 
 The shape may already contain its native positional offset. Do not add a model
-placement offset to this route, flatten it to bounding boxes, replace it with a
-full cube, rebuild it as polygons or quads, or substitute a merely
-shape-equivalent representation. Shape-based outlines are sufficient where
-this route applies; pixel-accurate model silhouettes are not required.
+placement offset to this route. Shape-based outlines are sufficient where this
+route applies; pixel-accurate model silhouettes are not required.
 
 ## Distinct from picking geometry
 

@@ -43,8 +43,7 @@ selection and authorization rules are owned by
 
 ## Presentation
 
-The invalid-target feedback is a local **chat** line. It is not an action-bar
-message, an on-screen overlay, or a toast.
+The invalid-target feedback appears in the local player's **chat**.
 
 The confirmed product color is RGB `#FF5555` (the production raw integer is
 `0xFF5555`).

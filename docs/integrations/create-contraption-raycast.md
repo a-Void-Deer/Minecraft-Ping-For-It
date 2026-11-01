@@ -19,7 +19,7 @@ On Minecraft 1.21.1, the NeoForge integration refines ping targeting for these C
 
 The adapter is compiled against Create `6.0.10-281`. Create remains optional. The adapter is independent of Flywheel and of the outline-rendering backend.
 
-A successful hit still creates a marker for the exact contraption entity. It does not combine carriages into a train target, replace a mounted contraption with its minecart, or enable constituent-block markers.
+A successful hit creates a marker for the exact contraption entity.
 
 ## Existing target-selection settings
 
@@ -33,7 +33,11 @@ shape selection and competition follow [local geometry](../architecture/picking/
 Fluid hits retain the hosting block's registry ID and the fluid's registry ID
 separately.
 
-Only fluid state represented by captured contraption block states is available, including represented waterlogged states or fluid blocks. The integration does not invent missing fluid cells, change Create assembly/disassembly, or alter Minecraft fluid-shape caches. Neighbor-sensitive fluid queries use the captured local view. Native `getHeight` and cached `getShape` may differ after a canonical fluid state has already had its shape computed; targeting follows the native shape returned for the request.
+Only fluid state represented by captured contraption block states is available,
+including represented waterlogged states or fluid blocks. Neighbor-sensitive
+fluid queries use the captured local view. Native `getHeight` and cached
+`getShape` may differ after a canonical fluid state has already had its shape
+computed; targeting follows the native shape returned for the request.
 
 ## Selection pipeline
 

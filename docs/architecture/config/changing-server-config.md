@@ -165,9 +165,7 @@ not an immediate restart or invalidation of running scans.
 There is no update-result or acknowledgement packet. Before dispatching a valid
 plan, the client marks its draft clean and sends the update through a void send;
 it does not wait for a success response, reload a snapshot, or retry a send
-that could not be delivered. An update that selects only inventory leaves
-follows the same path, with no acknowledgement, retry, confirmation, or
-persistence rollback. The separate policy selector route has its own
+that could not be delivered. The separate policy selector route has its own
 correlated response, owned by
 [presentation snapshot](../presentation/presentation_snapshot.md). A clean
 client state therefore means only that the client stopped tracking the local

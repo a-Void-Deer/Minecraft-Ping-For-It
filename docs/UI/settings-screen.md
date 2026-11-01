@@ -304,9 +304,6 @@ The Marker Display Duration option displays the complete localized label
 Its value semantics are owned by
 [client configuration](../config/client.md); this page owns its displayed label.
 
-This label contract covers that option; it does not define a general label rule
-for other client options or for the server-settings fields.
-
 ## Client configuration loading, edits, and close
 
 The client configuration loads at client initialization. Opening or reopening
@@ -397,19 +394,17 @@ requirement itself is owned by
 ## File action and reset
 
 The configuration-file action saves and closes the screen before opening the
-client configuration file; it is not a GUI list editor. Its label and tooltip
-may name the block-shape context it is offered from, and it always opens the
-complete client file rather than a block-shape-only editor. It first runs the
+complete client configuration file. Its label and tooltip may name the
+block-shape context it is offered from. It first runs the
 persistence sequence used on final root close; if that sequence fails, it
 returns without opening the file. On success it suppresses a stale close-save,
 closes the screen, and asks the platform file opener to open the client
 configuration file.
 
-Reset is a client-only action on the client scope overview; it is not offered
-inside a category and does not reset server settings. It confirms resetting
-every client setting rather than only the visible category. A confirmed reset
-suppresses a stale screen save, resets the in-memory configuration to its
-defaults, and recreates the screen session; recreating the session discards any
+Reset is available only on the client scope overview and confirms resetting
+all client settings. A confirmed reset suppresses a stale screen save, resets
+the in-memory configuration to its defaults, and recreates the screen session;
+recreating the session discards any
 server-settings draft. When a draft exists, the reset confirmation explicitly
 warns that the unsaved server changes are discarded. The configuration handler
 determines the reset result;
