@@ -1,0 +1,148 @@
+package nx.pingwheel.neoforge.integration.create;
+
+import java.io.InputStream;
+import java.lang.reflect.InvocationTargetException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import net.minecraft.SharedConstants;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.Bootstrap;
+import net.neoforged.neoforge.fluids.capability.IFluidHandler;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.neoforge.platform.FluidCapabilityAccess;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.tree.ClassNode;
+import static nx.pingwheel.neoforge.integration.create.VaultOptionalHarness.*;
+import static org.junit.jupiter.api.Assertions.*;
+
+/** Executes the real fixed reflective metadata port against archive getter bodies, with inert ancestors. */
+@NotNullByDefault
+class CreateFluidTankMetadataTest {
+	private static final String ACCESS = "nx.pingwheel.neoforge.integration.create.presentation.CreateFluidTankAccess";
+	private static final String TANK = "com.simibubi.create.content.fluids.tank.FluidTankBlockEntity";
+	private static final String BLOCK = "com.simibubi.create.content.fluids.tank.FluidTankBlock";
+	private static final String BOILER = "com.simibubi.create.content.fluids.tank.BoilerData";
+	private static final String STORED = "com.simibubi.create.foundation.fluid.SmartFluidTank";
+	private static final @Unmodifiable List<String> METHODS = List.of("getController", "isController", "getWidth", "getHeight", "getMainConnectionAxis", "getLastKnownPos", "getTankInventory");
+	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
+
+	@Test void archiveGettersExecuteThroughTheActualReflectionPortAndRejectStaleControllerCaches() throws Exception {
+		var loader = new Loader(""); var world = new World(loader);
+		var route = route(loader, world); var access = FluidCapabilityAccess.find(route).orElseThrow();
+		assertEquals(2, access.layout().members().size()); assertEquals(1, access.slots()); assertTrue(access.valid());
+		var bean = (com.sun.management.ThreadMXBean) java.lang.management.ManagementFactory.getThreadMXBean();
+		bean.setThreadAllocatedMemoryEnabled(true);
+		for (int warm = 0; warm < 8; warm++) assertTrue(access.consume(0, entry -> true));
+		world.requireCalls = 0; long before = bean.getThreadAllocatedBytes(Thread.currentThread().threadId());
+		assertTrue(access.consume(0, entry -> true));
+		long allocation = bean.getThreadAllocatedBytes(Thread.currentThread().threadId()) - before;
+		assertTrue(allocation <= access.readCost().allocationBytes(), "actual warmed fixed-reflection allocation fits its prepaid bound");
+		System.out.println("NEOFORGE archive Create members=2 actualAllocation=" + allocation + " read=" + access.readCost()
+			+ " requireCalls=" + world.requireCalls);
+		var stale = (IFluidHandler) loader.loadClass(STORED).getConstructor(int.class, java.util.function.Consumer.class).newInstance(1000, (java.util.function.Consumer<Object>) ignored -> {});
+		world.handler = stale;
+		assertFalse(access.valid());
+		// Fresh find must also refuse a same-class capability retained from an old controller.
+		assertThrows(InventorySourceUnavailableException.class, () -> FluidCapabilityAccess.find(route(loader, world)));
+		world.handler = world.ownTank; field(world.controller.getClass(), "height").setInt(world.controller, 3);
+		assertFalse(access.valid(), "controller extent is read currently, not retained as a permission result");
+	}
+
+	@Test void exactArchiveMethodOwnershipFailsClosedOnDriftAndNoContextLoaderCanSupplyAFallback() throws Exception {
+		@Nullable ClassLoader previous = Thread.currentThread().getContextClassLoader();
+		Thread.currentThread().setContextClassLoader(new ClassLoader(null) {
+			@Override public Class<?> loadClass(String name) { throw new AssertionError("fixed metadata must not use TCCL"); }
+		});
+		try {
+			for (String method : METHODS) {
+				var loader = new Loader(method); var world = new World(loader);
+				var failure = assertThrows(InvocationTargetException.class, () -> route(loader, world), method);
+				assertInstanceOf(ExceptionInInitializerError.class, failure.getCause());
+			}
+			var good = new Loader(""); assertNotNull(route(good, new World(good)));
+		} finally { Thread.currentThread().setContextClassLoader(previous); }
+	}
+
+	private static FluidCapabilityAccess.Route route(Loader loader, World world) throws Exception {
+		return (FluidCapabilityAccess.Route) loader.loadClass(ACCESS).getMethod("resolve", FluidCapabilityAccess.World.class,
+			BlockPos.class, Direction.class, FluidCapabilityAccess.Block.class).invoke(null, world, BlockPos.ZERO.above(), Direction.WEST, world.blocks.get(BlockPos.ZERO.above()));
+	}
+
+	@NotNullByDefault
+	private static final class World implements FluidCapabilityAccess.World {
+		private final Map<BlockPos, FluidCapabilityAccess.Block> blocks = new HashMap<>();
+		private final Object controller;
+		private final IFluidHandler ownTank;
+		private IFluidHandler handler;
+		private int requireCalls;
+		private World(Loader loader) throws Exception {
+			Object block = allocate(loader.loadClass(BLOCK));
+			ownTank = (IFluidHandler) loader.loadClass(STORED).getConstructor(int.class, java.util.function.Consumer.class).newInstance(1000, (java.util.function.Consumer<Object>) ignored -> {});
+			handler = ownTank;
+			controller = entity(loader, BlockPos.ZERO, null);
+			var member = entity(loader, BlockPos.ZERO.above(), BlockPos.ZERO);
+			blocks.put(BlockPos.ZERO, new FluidCapabilityAccess.Block(block, controller, "create:fluid_tank", "create:fluid_tank"));
+			blocks.put(BlockPos.ZERO.above(), new FluidCapabilityAccess.Block(block, member, "create:fluid_tank", "create:fluid_tank"));
+		}
+		private Object entity(Loader loader, BlockPos position, @Nullable BlockPos parent) throws Exception {
+			Object entity = allocate(loader.loadClass(TANK));
+			field(net.minecraft.world.level.block.entity.BlockEntity.class, "worldPosition").set(entity, position);
+			field(entity.getClass(), "controller").set(entity, parent);
+			field(entity.getClass(), "width").setInt(entity, 1); field(entity.getClass(), "height").setInt(entity, 2);
+			field(entity.getClass(), "boiler").set(entity, allocate(loader.loadClass(BOILER)));
+			field(entity.getClass(), "tankInventory").set(entity, ownTank); return entity;
+		}
+		@Override public void require(BlockPos position) { requireCalls++; if (!blocks.containsKey(position)) throw new InventorySourceUnavailableException("unknown member"); }
+		@Override public FluidCapabilityAccess.Block block(BlockPos position) { require(position); return blocks.get(position); }
+		@Override public @Nullable IFluidHandler capability(BlockPos position, Direction face) { require(position); assertEquals(BlockPos.ZERO, position); assertEquals(Direction.WEST, face); return handler; }
+		@Override public String dimension() { return "minecraft:overworld"; }
+		@Override public boolean createAvailable() { return true; }
+	}
+
+	@NotNullByDefault
+	private static final class Loader extends ClassLoader {
+		private final String drift;
+		private Loader(String drift) { super(CreateFluidTankMetadataTest.class.getClassLoader()); this.drift = drift; }
+		@Override protected synchronized Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+			boolean optional = List.of(TANK, BLOCK, BOILER, SMART, STORED).contains(name);
+			if (!optional && !name.equals(ACCESS) && !name.startsWith(ACCESS + "$")) return super.loadClass(name, resolve);
+			@Nullable Class<?> loaded = findLoadedClass(name);
+			if (loaded == null) {
+				try {
+					byte[] bytes;
+					if (optional) bytes = optional(name);
+					else try (@Nullable InputStream input = getParent().getResourceAsStream(name.replace('.', '/') + ".class")) {
+						if (input == null) throw new ClassNotFoundException(name); bytes = input.readAllBytes();
+					}
+					loaded = defineClass(name, bytes, 0, bytes.length);
+				} catch (Exception failure) { throw new ClassNotFoundException(name, failure); }
+			}
+			if (resolve) resolveClass(loaded); return loaded;
+		}
+		private byte[] optional(String name) throws Exception {
+			var original = archive(name);
+			if (name.equals(STORED)) { var writer = new ClassWriter(0); original.accept(writer); return writer.toByteArray(); }
+			var copy = new ClassNode(); copy.version = original.version; copy.access = original.access; copy.name = original.name;
+			copy.superName = name.equals(TANK) ? SMART.replace('.', '/') : name.equals(SMART)
+				? "net/minecraft/world/level/block/entity/BlockEntity" : name.equals(BLOCK) ? "net/minecraft/world/level/block/Block" : "java/lang/Object";
+			if (name.equals(TANK)) {
+				for (var field : original.fields) if (List.of("controller", "lastKnownPos", "width", "height", "boiler", "tankInventory").contains(field.name)) copy.fields.add(field);
+				for (var method : original.methods) if (METHODS.contains(method.name) && !method.name.equals(drift)) copy.methods.add(method);
+			} else if (name.equals(SMART)) {
+				copy.fields.add(original.fields.stream().filter(field -> field.name.equals("virtualMode")).findFirst().orElseThrow());
+				copy.methods.add(original.methods.stream().filter(method -> method.name.equals("isVirtual")).findFirst().orElseThrow());
+			} else if (name.equals(BOILER)) {
+				for (var field : original.fields) if (List.of("attachedEngines", "attachedWhistles").contains(field.name)) copy.fields.add(field);
+				copy.methods.add(original.methods.stream().filter(method -> method.name.equals("isActive")).findFirst().orElseThrow());
+			}
+			var writer = new ClassWriter(0); copy.accept(writer); return writer.toByteArray();
+		}
+	}
+}
