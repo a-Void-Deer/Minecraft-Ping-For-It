@@ -105,6 +105,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	private boolean syncingScopeTab;
 	private boolean resetConfirmationHandled;
 	private boolean suppressSaveOnClose;
+	private boolean dispatchingInput;
 	private boolean sizeSliderEditPending;
 	private final InventorySizeOption.AdjustmentState sizeSliderAdjustment = new InventorySizeOption.AdjustmentState();
 	private @Nullable MutableComponent serverValidationMessage;
@@ -238,16 +239,12 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	@Override
 	public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-		final boolean handled = this.inputActions.dispatch(() -> this.dispatchKeyPressed(keyCode, scanCode, modifiers));
-		this.rebuildAfterSizeSliderEdit();
-		return handled;
+		return this.dispatchInput(() -> this.dispatchKeyPressed(keyCode, scanCode, modifiers));
 	}
 
 	@Override
 	public boolean mouseReleased(double mouseX, double mouseY, int button) {
-		final boolean handled = this.inputActions.dispatch(() -> super.mouseReleased(mouseX, mouseY, button));
-		this.rebuildAfterSizeSliderEdit();
-		return handled;
+		return this.dispatchInput(() -> super.mouseReleased(mouseX, mouseY, button));
 	}
 
 	private boolean dispatchKeyPressed(int keyCode, int scanCode, int modifiers) {
@@ -263,7 +260,30 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	@Override
 	public boolean mouseClicked(double mouseX, double mouseY, int button) {
-		return this.inputActions.dispatch(() -> super.mouseClicked(mouseX, mouseY, button));
+		return this.dispatchInput(() -> super.mouseClicked(mouseX, mouseY, button));
+	}
+
+	@Override
+	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+		return this.dispatchInput(() -> super.mouseScrolled(mouseX, mouseY, scrollX, scrollY));
+	}
+
+	/** Complete native focus/callback dispatch before changing row membership, and never move a live drag. */
+	private boolean dispatchInput(Supplier<Boolean> callback) {
+		final boolean outermost = !this.dispatchingInput;
+		this.dispatchingInput = true;
+		try {
+			final boolean handled = this.inputActions.dispatch(callback);
+			// Keep the coordinator's queued navigation/rebuild separate from this
+			// geometry-only completion; neither may replace the other's action.
+			if (outermost && !this.isDragging() && this.minecraft != null && this.minecraft.screen == this) {
+				this.rebuildAfterSizeSliderEdit();
+				if (this.settingsList != null) this.settingsList.reflowRowsIfNeeded();
+			}
+			return handled;
+		} finally {
+			this.dispatchingInput = !outermost;
+		}
 	}
 
 	@Override
@@ -307,6 +327,10 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	@Override
 	public void removed() {
+		// A dialog receives the release that ends its opener's click. Cancel
+		// every retained gesture owner, but keep focus and draft/widget state.
+		this.setDragging(false);
+		if (this.settingsList != null) this.settingsList.cancelMouseGesture();
 		if (this.presentationPolicyState != null) {
 			this.presentationPolicyState.removeListener(this.presentationPolicyListener);
 		}
@@ -2777,6 +2801,15 @@ public class SettingsScreen extends OptionsSubScreen {
 			this.setClampedScrollAmount(scroll);
 		}
 
+		/** Current native captions can cross a pair's threshold without a viewport change. */
+		private void reflowRowsIfNeeded() {
+			final @Unmodifiable List<@Unmodifiable List<AbstractWidget>> physicalRows = SettingsRowWidgets.rowsFor(
+				SettingsScreenLayout.contentFor(this.getWidth()), this.declaredRows, this::textWidth);
+			if (!physicalRows.equals(this.children().stream().map(OptionsList.Entry::children).toList())) {
+				this.updateSizeAndPosition(this.getWidth(), this.getHeight(), this.getY());
+			}
+		}
+
 		boolean hasUsableViewport() {
 			return this.getRowWidth() > 8 && this.getHeight() >= SettingsScreenLayout.ROW_HEIGHT;
 		}
@@ -2785,11 +2818,15 @@ public class SettingsScreen extends OptionsSubScreen {
 		private void suspendInput() {
 			for (var entry : this.children()) {
 				entry.setFocused((GuiEventListener) null);
-				entry.setDragging(false);
 				for (var child : entry.children()) child.setFocused(false);
 			}
 			super.setFocused((GuiEventListener) null);
+			this.cancelMouseGesture();
+		}
+
+		private void cancelMouseGesture() {
 			this.setDragging(false);
+			for (var entry : this.children()) entry.setDragging(false);
 			this.updateScrollingState(0, 0, -1);
 		}
 
