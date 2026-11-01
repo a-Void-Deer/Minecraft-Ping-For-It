@@ -1,80 +1,92 @@
 # Ping For It Changelog
 
-## 0.5.0-pfi-beta2 (local working tree)
+## Unreleased
 
-Compared with local `1.21.1` HEAD `16bf0257` (`0.5.0-pfi-beta1`).
-This summarizes the local working tree, not a published release. No remote refs
-were refreshed for this comparison.
+Changes between local `1.21.1` HEAD `3abf2c5d` (`0.5.0-pfi-beta2`) and this
+branch's HEAD, compared directly. This is an unreleased branch summary, not a
+new published version.
 
-### Item identity and display
+### Grouped containers
 
-- Item variants use the item ID and explicit persistent component patch,
-  distinguishing additions from removals without expanding native defaults into
-  identity. Root stack count stays separate. Client icons and names likewise
-  apply the transmitted patch over local native defaults.
-- When display-size exhaustion leaves even the final removal patch too large,
-  display falls back to the native default icon and registry translation label,
-  preserving exact identity, quantity and selection. Codec, structure and
-  processing-budget failures do not qualify for this default-icon fallback.
+- Either half of a vanilla normal or trapped double chest now addresses one
+  logical target. Supported [Create item vaults on NeoForge](docs/integrations/create.md#vault-logical-target-and-presentation-topology)
+  group by their verified controller under the existing tested-version gate;
+  this does not add general multiblock support or Vault grouping on other loaders.
+- Same-target winner selection and HUD grouping use that logical container.
+  Markers still keep their original physical hit, anchor, owner, cancellation
+  rights and independent expiry. Splitting or rebuilding a container does not
+  reassign existing markers; new markers use the structure verified at creation.
+- Container presentation covers both verified chest halves or each verified
+  Vault cell. Missing, unloaded or inconsistent grouping metadata falls back to
+  the exact hit block rather than inventing a larger container. See the
+  [logical target model](docs/architecture/identity/target_model.md#frozen-logical-block-groups).
 
-### Large-container scanning
+### Inventory preview and tracking
 
-- Stable-indexed native inventories read their actual slots incrementally across
-  ticks within budget, instead of freezing the entire inventory first. A complete,
-  usable sweep can reach Ready; it remains a mixed-time observation, not an atomic
-  snapshot of moving contents.
-- Compatible consumers share already-read slot prefixes. Compact slot journals
-  and shared variant definitions reduce repeated processing and retained copies.
-  Item-field access is reused after initialization, and temporary processing
-  buffers allocate on demand under the existing budgets.
-- Ordinary NeoForge Create Vault sources reuse layout, slot mapping and cost
-  metadata while rechecking current sources, permissions, members and topology.
-  This does not introduce unconditional caching for every provider.
+- Certified native chest and ordinary NeoForge Create Vault views can reuse
+  physical inventory reads across independently authorized players and faces
+  when the provider proves their visible slots equivalent. Unsupported,
+  decorated and external sources retain exact player/face isolation.
+- New Tracking consumers can join an eligible, still-active Preview or Tracking
+  scan while physical scanning demand remains. Each replays its earlier slot
+  journal from the beginning with independent totals and publication. Completed
+  results are not a cache for new consumers; shared sweeps remain mixed-time
+  observations, not atomic snapshots.
+- Eligible Previews can borrow active Tracking scans, without enabling general
+  Preview-only cross-player or cross-face pooling. A completed Preview left open
+  no longer blocks later Tracking sweeps and does not periodically rescan itself.
+- Strengthened final send-time checks for current owner permissions, source,
+  session, recipient and marker validity. Revocation or failure withdraws queued
+  valid frames; an owner-only denial does not reset authorized sharing peers.
+- Marker removal or expiry clears local inventory state and rejects delayed
+  updates, preventing stale tracking data from returning. Detailed sharing and
+  publication boundaries remain in the [inventory contract](docs/architecture/presentation/inventory.md#certified-tracking-observation-pools).
 
-### Selection and tracking
+### Server controls and Create optimizations
 
-- Selecting a valid preview entry creates its marker synchronously without
-  requiring the previously observed slot to still contain that item. Server
-  permissions, source bindings, selection tokens and admission checks still apply.
-- Tracking starts with the selected server-retained preview quantity shown as
-  Updating. Closing the preview preserves that value without retaining its
-  unselected catalogue. The first fresh, complete scan replaces it even when the
-  quantity is unchanged; an absent selected item becomes `0`, not a removed marker.
-- Initial quantities follow normal publication budgets and send-time authority
-  checks. Duplicate or other selections in the same tick cannot flush them early.
+- Added `inventory.tracking.distinguishFaces` and
+  `inventory.tracking.distinguishPlayers`, both defaulting to `false`, with
+  **Separate Tracking by Face** and **Separate Tracking by Player** toggles on
+  the server Performance page. Enable either to partition certified scan sharing
+  by that context; disabling them never widens visible slots or grants access.
+- Changes to these switches affect subsequent scans. Running scans finish under
+  their previous policy without restarting or changing marker lifetimes. See
+  [server configuration](docs/config/server.md#inventory-policy-object).
+- Tracking's per-target quotas now span the frozen logical container group,
+  rather than granting separate allowances for different member hits.
+- Optimized supported Create Vault reads by reusing fixed reflection metadata
+  and removing duplicate validation work on the audited ordinary path. Current
+  handlers, topology and owner authority still require checks; contents and
+  successful permission checks are not cached. No live performance gain is claimed.
 
-### Synchronization and HUD fixes
+### Settings and help
 
-- Fixed premature completion during multipart tracking bootstrap and recovery.
-  Checksums, partial replacements and control messages cannot turn historical
-  quantities into fresh completed results. Failure and recovery preserve the last
-  fully installed historical display rather than unfinished replacement data.
-- Preview completion covers all retained entries, not just an empty or partial
-  final delta. Entry admission accounts for actual multipart framing; an
-  indivisible oversized entry is reported as incomplete instead of remaining
-  permanently pending.
-- HUD lifecycle indicators stay independent of the All variants qualifier.
-  Shortening long item names or translated wording preserves the full long
-  quantity instead of cutting off its digits.
+- Renamed three client categories to **Markers & Range**, **Controls & Gestures**,
+  and **Channel, Sound & Notices**.
+- Reorganized pages into semantic sections: related controls share rows and
+  singletons use full-width rows. Pairs stack vertically in order when the
+  viewport or translated labels require it, retaining scrollbar clearance and
+  a fixed footer. Presentation-editor pairs follow the same layout rules.
+- Added native hover and keyboard-focus help across value controls, categories,
+  navigation and actions. Help explains enum modes, Off/On effects, numeric
+  direction, scope and application timing. Action help distinguishes Server
+  Policy mutations sent on activation from ordinary server drafts submitted on
+  final close; typing a selector alone sends no mutation.
+- Updated labels, headings, help and assembled UI messages in all eight bundled
+  locales. See the [settings UI contract](docs/UI/settings-screen.md#contextual-help-and-localization).
 
-### Performance settings and upgrading
+### Network compatibility
 
-- All numeric server inventory performance controls use sliders, with an end stop
-  for unlimited mode where supported. Finite values and valid integers between
-  adjustment stops are preserved; opening or rebuilding the page does not dirty
-  an unchanged draft. Tooltips better explain scope and player-visible effects.
-- Pending Memory now stores a finite value and an unlimited flag instead of a
-  single integer. Existing integers migrate to finite mode while unrelated and
-  unknown configuration entries are preserved.
-- Budget defaults and validation ranges have been retuned without resetting
-  existing legal saved values. Resync Cooldown accepts `0` to skip the cooldown;
-  client waits for missing data remain separate.
-- Budget-delay administrator notices use server ticks rather than wall-clock
-  timing and include a `[ping for it]` source prefix.
-- Server-configuration request, update and snapshot routes move from v3 to v4.
-  Update clients and servers together: earlier configuration routes are not
-  compatible. The inventory and presentation wire versions are unchanged.
-
-Detailed behavior remains in the [inventory contract](docs/architecture/presentation/inventory.md),
-[server configuration](docs/config/server.md#inventory-policy-object) and
-[performance controls](docs/UI/settings-screen.md#server-performance-category).
+- **Update clients and servers together.** Presentation moves from
+  `presentation-v1` to `presentation-v2`; server-configuration request, update
+  and snapshot routes move from v4 to v5. Earlier routes have no fallback.
+  The server derives and transmits logical target keys; configuration v5 carries
+  both new Tracking switches.
+- Removed inactive legacy ping, marker and duration-policy routes. Unavailable
+  inventory sources use `INVALID`; inventory `UNAVAILABLE` and `EXPIRED` statuses
+  are removed, with expiry handled by marker lifecycle. Inventory `RESYNC` now
+  requires a marker ID; the unused request-only form is removed.
+- The Basic adapter schema, `inventory-v1` route version, persisted configuration
+  format and mod version remain unchanged. Existing configurations need no
+  versioned migration; missing new switches default to `false`. See the
+  [network protocol](docs/architecture/network/protocol.md) for compatibility details.
