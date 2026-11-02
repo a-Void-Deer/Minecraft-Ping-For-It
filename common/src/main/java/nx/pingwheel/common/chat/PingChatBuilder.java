@@ -90,7 +90,8 @@ public final class PingChatBuilder {
 		return Component.translatable(
 			LEGACY_KEY,
 			Component.literal(playerName),
-			Component.translatable(pingType.phraseKey()).withColor(pingType.textColor()),
+			Component.translatable(pingType.phraseKey())
+				.withStyle(style -> style.withColor(pingType.textColor())),
 			targetName);
 	}
 
@@ -149,7 +150,8 @@ public final class PingChatBuilder {
 							hasPlayerName = true;
 						}
 						case PING_TYPE_PLACEHOLDER -> {
-							message.append(Component.translatable(pingType.phraseKey()).withColor(pingType.textColor()));
+							message.append(Component.translatable(pingType.phraseKey())
+								.withStyle(style -> style.withColor(pingType.textColor())));
 							hasPingType = true;
 						}
 						case TARGET_NAME_PLACEHOLDER -> {

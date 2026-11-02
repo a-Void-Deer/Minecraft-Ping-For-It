@@ -6,7 +6,6 @@ import java.util.Optional;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.Nameable;
@@ -80,18 +79,22 @@ public final class ClientTargetNameResolver {
 		Objects.requireNonNull(lookup, "lookup");
 
 		try {
-			return switch (target) {
-				case Target.LocationTarget ignored -> TargetNameComposer.here();
-				case Target.EntityTarget entity -> lookup.entity(entity)
+			if (target instanceof Target.LocationTarget) {
+				return TargetNameComposer.here();
+			}
+			if (target instanceof Target.EntityTarget entity) {
+				return lookup.entity(entity)
 					.map(Objects::requireNonNull)
 					.orElseGet(TargetNameComposer::unknown);
-				case Target.BlockTarget block -> lookup.block(block)
+			}
+			if (target instanceof Target.BlockTarget block) {
+				return lookup.block(block)
 					.map(Objects::requireNonNull)
 					.orElseGet(TargetNameComposer::unknown);
-				case Target.ExternalBlockTarget external -> lookup.externalBlock(external)
-					.map(Objects::requireNonNull)
-					.orElseGet(TargetNameComposer::unknown);
-			};
+			}
+			return lookup.externalBlock((Target.ExternalBlockTarget) target)
+				.map(Objects::requireNonNull)
+				.orElseGet(TargetNameComposer::unknown);
 		} catch (RuntimeException unavailable) {
 			// Rendering must remain safe when a client-side registry/entity is
 			// changing during a frame.  Do not include names or target identity in
@@ -121,7 +124,7 @@ public final class ClientTargetNameResolver {
 
 			if (entity instanceof ItemEntity itemEntity) {
 				ItemStack stack = itemEntity.getItem();
-				Component customName = stack.get(DataComponents.CUSTOM_NAME);
+				Component customName = stack.hasCustomHoverName() ? stack.getHoverName() : null;
 				Component baseName = Component.translatable(stack.getDescriptionId());
 
 				return Optional.of(customName == null

@@ -2,7 +2,6 @@ package nx.pingwheel.common.network;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
-import org.jetbrains.annotations.NotNull;
 
 import static nx.pingwheel.common.Global.S2C_NAMESPACE;
 
@@ -11,8 +10,7 @@ import static nx.pingwheel.common.Global.S2C_NAMESPACE;
  */
 public record RateLimitPolicyS2CPacket(int rateLimit, int msToRegenerate) implements IPacket {
 
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "rate-limit-policy");
-	public static final Type<RateLimitPolicyS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
+	public static final ResourceLocation PACKET_ID = new ResourceLocation(S2C_NAMESPACE, "rate-limit-policy");
 
 	/**
 	 * A negative field is the intentionally corrupt fallback used by safe
@@ -44,10 +42,5 @@ public record RateLimitPolicyS2CPacket(int rateLimit, int msToRegenerate) implem
 
 	public static RateLimitPolicyS2CPacket readSafe(FriendlyByteBuf buf) {
 		return PacketHandler.readSafe(buf, RateLimitPolicyS2CPacket.class);
-	}
-
-	@Override
-	public @NotNull Type<RateLimitPolicyS2CPacket> type() {
-		return PACKET_TYPE;
 	}
 }

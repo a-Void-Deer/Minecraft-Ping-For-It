@@ -87,28 +87,26 @@ public final class MarkerPacketCodec {
 		writeEnum(buf, target.kind());
 		writeIdString(buf, target.dimensionId());
 
-		switch (target) {
-			case Target.EntityTarget entity -> writeEntityLocator(buf, entity.locator());
-			case Target.BlockTarget block -> {
-				buf.writeVarInt(BLOCK_TARGET_STANDARD_TAG);
-				buf.writeInt(block.x());
-				buf.writeInt(block.y());
-				buf.writeInt(block.z());
-				writeIdString(buf, block.blockRegistryId());
-			}
-			case Target.ExternalBlockTarget external -> {
-				buf.writeVarInt(BLOCK_TARGET_EXTERNAL_TAG);
-				writeIdString(buf, external.providerId());
-				writeIdString(buf, external.stableTargetId());
-				writeIdString(buf, external.expectedBlockRegistryId());
-				buf.writeUtf(external.providerLocator(), MAX_EXTERNAL_PROVIDER_LOCATOR_LENGTH);
-				writeStrictBoolean(buf, external.hasBlockEntity());
-			}
-			case Target.LocationTarget location -> {
-				buf.writeDouble(location.x());
-				buf.writeDouble(location.y());
-				buf.writeDouble(location.z());
-			}
+		if (target instanceof Target.EntityTarget entity) {
+			writeEntityLocator(buf, entity.locator());
+		} else if (target instanceof Target.BlockTarget block) {
+			buf.writeVarInt(BLOCK_TARGET_STANDARD_TAG);
+			buf.writeInt(block.x());
+			buf.writeInt(block.y());
+			buf.writeInt(block.z());
+			writeIdString(buf, block.blockRegistryId());
+		} else if (target instanceof Target.ExternalBlockTarget external) {
+			buf.writeVarInt(BLOCK_TARGET_EXTERNAL_TAG);
+			writeIdString(buf, external.providerId());
+			writeIdString(buf, external.stableTargetId());
+			writeIdString(buf, external.expectedBlockRegistryId());
+			buf.writeUtf(external.providerLocator(), MAX_EXTERNAL_PROVIDER_LOCATOR_LENGTH);
+			writeStrictBoolean(buf, external.hasBlockEntity());
+		} else {
+			Target.LocationTarget location = (Target.LocationTarget) target;
+			buf.writeDouble(location.x());
+			buf.writeDouble(location.y());
+			buf.writeDouble(location.z());
 		}
 	}
 
@@ -131,26 +129,24 @@ public final class MarkerPacketCodec {
 		writeEnum(buf, kindOf(targetKey));
 		writeIdString(buf, targetKey.dimensionId());
 
-		switch (targetKey) {
-			case TargetKey.EntityKey entity -> writeEntityLocator(buf, entity.locator());
-			case TargetKey.BlockKey block -> {
-				buf.writeVarInt(BLOCK_TARGET_STANDARD_TAG);
-				buf.writeInt(block.x());
-				buf.writeInt(block.y());
-				buf.writeInt(block.z());
-				writeIdString(buf, block.blockRegistryId());
-			}
-			case TargetKey.ExternalBlockKey external -> {
-				buf.writeVarInt(BLOCK_TARGET_EXTERNAL_TAG);
-				writeIdString(buf, external.providerId());
-				writeIdString(buf, external.stableTargetId());
-				writeIdString(buf, external.expectedBlockRegistryId());
-			}
-			case TargetKey.LocationKey location -> {
-				buf.writeDouble(location.x());
-				buf.writeDouble(location.y());
-				buf.writeDouble(location.z());
-			}
+		if (targetKey instanceof TargetKey.EntityKey entity) {
+			writeEntityLocator(buf, entity.locator());
+		} else if (targetKey instanceof TargetKey.BlockKey block) {
+			buf.writeVarInt(BLOCK_TARGET_STANDARD_TAG);
+			buf.writeInt(block.x());
+			buf.writeInt(block.y());
+			buf.writeInt(block.z());
+			writeIdString(buf, block.blockRegistryId());
+		} else if (targetKey instanceof TargetKey.ExternalBlockKey external) {
+			buf.writeVarInt(BLOCK_TARGET_EXTERNAL_TAG);
+			writeIdString(buf, external.providerId());
+			writeIdString(buf, external.stableTargetId());
+			writeIdString(buf, external.expectedBlockRegistryId());
+		} else {
+			TargetKey.LocationKey location = (TargetKey.LocationKey) targetKey;
+			buf.writeDouble(location.x());
+			buf.writeDouble(location.y());
+			buf.writeDouble(location.z());
 		}
 	}
 
@@ -174,9 +170,10 @@ public final class MarkerPacketCodec {
 		Objects.requireNonNull(locator, "locator");
 		buf.writeVarInt(locator.wireTag());
 
-		switch (locator) {
-			case EntityLocator.UUID uuid -> buf.writeUUID(uuid.value());
-			case EntityLocator.RuntimeId runtimeId -> buf.writeVarInt(runtimeId.value());
+		if (locator instanceof EntityLocator.UUID uuid) {
+			buf.writeUUID(uuid.value());
+		} else {
+			buf.writeVarInt(((EntityLocator.RuntimeId) locator).value());
 		}
 	}
 
@@ -203,12 +200,13 @@ public final class MarkerPacketCodec {
 	}
 
 	private static TargetKind kindOf(TargetKey targetKey) {
-		return switch (targetKey) {
-			case TargetKey.EntityKey ignored -> TargetKind.ENTITY;
-			case TargetKey.BlockKey ignored -> TargetKind.BLOCK;
-			case TargetKey.ExternalBlockKey ignored -> TargetKind.BLOCK;
-			case TargetKey.LocationKey ignored -> TargetKind.LOCATION;
-		};
+		if (targetKey instanceof TargetKey.EntityKey) {
+			return TargetKind.ENTITY;
+		}
+		if (targetKey instanceof TargetKey.BlockKey || targetKey instanceof TargetKey.ExternalBlockKey) {
+			return TargetKind.BLOCK;
+		}
+		return TargetKind.LOCATION;
 	}
 
 	private static Target readBlockTarget(FriendlyByteBuf buf, String dimensionId) {
