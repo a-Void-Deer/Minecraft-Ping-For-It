@@ -15,6 +15,7 @@ public interface InventoryPublicationEvidence extends AutoCloseable {
 	int probeCalls();
 	InventorySharedRead.Check validate(InventoryValidationBudget.Allowance allowance);
 	InventoryPublicationEvidence retain();
+	default boolean scopeTransition() { return false; }
 	/** Equal certified physical proof, not equal owner authority or a current policy. */
 	default InventorySharedRead.@Nullable Proof proof() { return null; }
 	default boolean sameProof(InventoryPublicationEvidence other) {

@@ -17,6 +17,7 @@ public record InventoryFluidValue(InventoryScanner.Key key, long amount, Display
 	@Override public String label() { return display.label(); }
 	@Override public @Nullable String displayJson() { return display.displayJson(); }
 	@Override public boolean aggregateRequired() { return aggregate; }
+	@Override public InventoryFluidValue withAmount(long amount) { return new InventoryFluidValue(key, amount, display, aggregate); }
 
 	/**
 	 * Bounded transport display only. {@code label} is the registry translation fallback, not a custom

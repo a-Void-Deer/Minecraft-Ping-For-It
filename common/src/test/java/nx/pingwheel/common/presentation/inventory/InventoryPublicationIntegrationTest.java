@@ -216,7 +216,7 @@ class InventoryPublicationIntegrationTest {
 			var sessionsField = InventoryBackend.class.getDeclaredField("sessions"); sessionsField.setAccessible(true);
 			Object session = ((Map<?, ?>) sessionsField.get(backend)).get(InventoryBackendTest.A);
 			var previewsField = session.getClass().getDeclaredField("previews"); previewsField.setAccessible(true);
-			Object preview = ((Map<?, ?>) previewsField.get(session)).get(1L);
+			Object preview = ((Map<?, ?>) previewsField.get(session)).values().iterator().next();
 			var categories = preview.getClass().getDeclaredField("categories"); categories.setAccessible(true); assertEquals(256, categories.getInt(preview));
 			var keys = preview.getClass().getDeclaredField("keys"); keys.setAccessible(true); assertEquals(256, ((Map<?, ?>) keys.get(preview)).size());
 			var retired = preview.getClass().getDeclaredField("retired"); retired.setAccessible(true); assertEquals(128, ((Set<?>) retired.get(preview)).size());

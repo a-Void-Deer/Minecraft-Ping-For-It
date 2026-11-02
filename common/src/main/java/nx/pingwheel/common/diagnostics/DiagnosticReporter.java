@@ -61,7 +61,9 @@ final class DiagnosticReporter {
 		@Nullable Supplier<@Nullable String> context, @Nullable Throwable failure, boolean event, boolean limited) {
 		try {
 			@Nullable Window window = window(level);
-			if (window == null || !sink.isEnabled(level)) {
+			// INFO status notices may have domain-owned once-only admission, but never enter
+			// or add capacity to the general DEBUG/WARN/ERROR diagnostic windows.
+			if ((window == null && (limited || !event || level != Level.INFO)) || !sink.isEnabled(level)) {
 				return;
 			}
 
@@ -75,7 +77,7 @@ final class DiagnosticReporter {
 					event ? "" : firstFrame(failure));
 				// Throwable accessors stay outside the lock. Read the monotonic clock
 				// inside admission so a paused caller cannot install a stale window.
-				admission = window.admit(fingerprint, clock);
+				admission = Objects.requireNonNull(window).admit(fingerprint, clock);
 			}
 
 			if (admission.overflowSummary) {

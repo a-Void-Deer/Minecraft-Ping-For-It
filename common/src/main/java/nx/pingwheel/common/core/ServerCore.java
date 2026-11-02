@@ -578,6 +578,11 @@ public class ServerCore {
 	/** Immediate dedicated create; no queued retry, SECTION intent or client-supplied audience. */
 	public static InventoryBackend.Created createInventory(MinecraftServer server, ServerPlayer player,
 		InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
+		return createInventory(server, player, frozen, nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM, admission);
+	}
+	public static InventoryBackend.Created createInventory(MinecraftServer server, ServerPlayer player,
+		InventoryBackend.Opened frozen, nx.pingwheel.common.presentation.inventory.InventoryResourceKind kind, InventoryBackend.Admission admission) {
+		java.util.Objects.requireNonNull(kind);
 		if (player == null || !server.isSameThread()) return new InventoryBackend.Created(null, MarkerRejectReason.INVALID_REQUEST);
 		ensureMarkerStore(server);
 		PLAYER_RATES.putIfAbsent(player.getUUID(), new RateLimiter());
@@ -592,7 +597,7 @@ public class ServerCore {
 		var outcome = markerService(server).createDedicated(player.serverLevel(), player.getUUID(), frozen.target(), frozen.defaultPingType(),
 			now, now + SERVER_CONFIG.getSyncDuration() * (long) TICKS_PER_SECOND, audience, (target, targetKey, type, owner, recipients) -> {
 				@Nullable var policy = PresentationServer.inventoryPolicy(owner).orElse(null);
-				@Nullable MarkerRejectReason rejection = policy == null || !policy.types().contains(type) ? MarkerRejectReason.INVALID_REQUEST : admission.prepare(target, targetKey, type, recipients);
+				@Nullable MarkerRejectReason rejection = policy == null || !policy.types(kind).contains(type) ? MarkerRejectReason.INVALID_REQUEST : admission.prepare(target, targetKey, type, recipients);
 				return rejection == null ? MarkerCreationService.AdmissionResult.accepted(List.of(), Map.of()) : MarkerCreationService.AdmissionResult.rejected(rejection);
 			});
 		if (!outcome.isAccepted()) return new InventoryBackend.Created(null, outcome.rejectReason().orElseThrow());

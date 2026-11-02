@@ -131,7 +131,7 @@ class InventoryBackendTest {
 			// Revocation fences the purged view with its POLICY first and only then
 			// re-advertises the current view's negotiation OFFER; no revoked inventory
 			// data frame may follow and the frozen marker audience stays untouched.
-			assertEquals(List.of(InventoryS2CPacket.Kind.POLICY, InventoryS2CPacket.Kind.OFFER),
+			assertEquals(List.of(InventoryS2CPacket.Kind.POLICY, InventoryS2CPacket.Kind.POLICY, InventoryS2CPacket.Kind.OFFER),
 				revoked.stream().map(InventoryS2CPacket::kind).toList());
 			assertEquals(Set.of(), revoked.getFirst().allowedTypes());
 			for (var packet : revoked) {
@@ -614,7 +614,7 @@ class InventoryBackendTest {
 	}
 	static Object retainedPreview(InventoryBackend backend) throws Exception {
 		Object session = ((Map<?, ?>) field(backend, "sessions")).get(A);
-		return ((Map<?, ?>) field(session, "previews")).get(1L);
+		return ((Map<?, ?>) field(session, "previews")).values().iterator().next();
 	}
 	@SuppressWarnings("unchecked")
 	@Test void metadataOldInputAdmissionDefersBeforeParserAndRetriesTheSameTokensWithoutReading() throws Exception {
@@ -808,7 +808,7 @@ class InventoryBackendTest {
 			f.open(); f.backend.handle(A, f.select(1), 1, f.settings); f.backend.tick(2, f.settings);
 			Object lease = ((Map<?, ?>) field(f.backend, "tracking")).values().iterator().next();
 			Object selection = field(lease, "selection"); long count = (long) field(lease, "completedCount");
-			var retained = new nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.Display("minecraft:stone", "stone", "x".repeat(30_000), false);
+			var retained = new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "plain"), 0, "stone", "x".repeat(30_000), false);
 			field(lease, "selectionPresentation", retained); field(lease, "presentationCeiling", 32768);
 			Object ticket = field(lease, "presentationMemory"); int reads = f.reads.get();
 			var parses = new AtomicInteger(); f.host.projector = (display, cap) -> {
@@ -823,7 +823,7 @@ class InventoryBackendTest {
 			assertEquals(count, field(lease, "completedCount")); assertEquals(0, runtime.memory().reserved());
 			runtime.advance(2L + f.settings.getTracking().getPeriodTicks(), f.settings);
 			assertEquals(true, reproject.invoke(f.backend, lease, 1024)); assertEquals(1, parses.get());
-			assertNull(((nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.Display) field(lease, "selectionPresentation")).displayJson());
+			assertNull(((InventoryResourceValue) field(lease, "selectionPresentation")).displayJson());
 			assertSame(selection, field(lease, "selection")); assertEquals(count, field(lease, "completedCount")); assertEquals(reads, f.reads.get()); assertEquals(0, runtime.memory().reserved());
 		}
 	}
@@ -838,7 +838,7 @@ class InventoryBackendTest {
 			Object recipient = ((Map<?, ?>) field(lease, "recipients")).get(A);
 			Object selection = field(lease, "selection");
 			String json = "{\"id\":\"minecraft:stone\",\"components\":{\"minecraft:custom_data\":{\"text\":\"" + "x".repeat(5000) + "\"}}}";
-			field(lease, "selectionPresentation", new nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.Display("minecraft:stone", "stone", json, false));
+			field(lease, "selectionPresentation", new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "plain"), 0, "stone", json, false));
 			field(lease, "revision", (long) field(lease, "revision") + 1);
 			var publish = InventoryBackend.class.getDeclaredMethod("publishTracking", lease.getClass(), recipient.getClass()); publish.setAccessible(true);
 			var publisher = (InventorySyncPublisher) field(f.backend, "publisher");

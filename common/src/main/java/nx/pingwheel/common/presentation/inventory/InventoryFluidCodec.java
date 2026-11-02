@@ -30,6 +30,11 @@ public final class InventoryFluidCodec {
 	public static final int MAX_BYTES = CODEC.bound(), MAX_CANONICAL_BYTES = 65536;
 	public static final int MAX_DISPLAY_BYTES = InventoryLimits.MAX_DISPLAY_BYTES, MAX_LABEL_BYTES = 1024;
 	private InventoryFluidCodec() {}
+	@NotNullByDefault
+	public static final class CapacityException extends IllegalStateException {
+		private CapacityException() { super("fluid catalogue capacity reached"); }
+		@Override public synchronized Throwable fillInStackTrace() { return this; }
+	}
 
 	/**
 	 * Complete native persistent identity, already safely encoded by an admitted native freezer.
@@ -59,6 +64,16 @@ public final class InventoryFluidCodec {
 		private final Map<String, byte @Unmodifiable []> identities = new HashMap<>();
 		private long retainedBytes;
 		public long retainedBytes() { return retainedBytes; }
+		public long modeledRetainedBytes() { return 512L + retainedBytes + 4096L * identities.size(); }
+		public static long retainedGrowthUpperBound() {
+			return 32768L + MAX_CANONICAL_BYTES + 4L * InventoryFluidDisplayCodec.MAX_BYTES + 2L * MAX_LABEL_BYTES;
+		}
+		public InventoryFluidValue intern(String fluidId, long amount, Identity identity, InventoryFluidValue.Display display,
+			nx.pingwheel.common.presentation.inventory.minecraft.InventoryCatalogAdmission admission) {
+			admission.admitFluid(identity.canonical == null ? 0 : identity.canonical.length, fluidId.length(), display.label().length(),
+				display.displayJson() == null ? 0 : display.displayJson().length());
+			return intern(fluidId, amount, identity, display);
+		}
 		public InventoryFluidValue intern(String fluidId, long amount, Identity identity, InventoryFluidValue.Display display) {
 			requireId(fluidId); InventoryQuantities.require(amount); Objects.requireNonNull(identity); Objects.requireNonNull(display);
 			if (!fluidId.equals(display.fluidId())) throw new IllegalArgumentException("fluid display identity");
@@ -70,10 +85,13 @@ public final class InventoryFluidCodec {
 				if (previous != null && !Arrays.equals(previous, canonical)) throw new IllegalStateException("ambiguous fluid identity digest");
 				if (previous == null) {
 					long next = Math.addExact(retainedBytes, 256L + canonical.length);
-					if (identities.size() == 256 || next > 262144) throw new IllegalStateException("fluid identity catalogue capacity");
+					if (identities.size() == 256 || next > 262144) throw new CapacityException();
 					identities.put(digest, canonical); retainedBytes = next;
 				}
 			}
+			// Canonical equality does not license replacing this observation's
+			// independent display with an earlier version. The journal owns/charges
+			// its first detached projection; temporary observations stay caller-paid.
 			return new InventoryFluidValue(new InventoryScanner.Key(InventoryResourceKind.FLUID, fluidId, digest), amount, display, canonical == null);
 		}
 	}

@@ -107,6 +107,8 @@ public final class InventorySourceAccess implements SourceAccess {
 	 * the source offers no usable snapshot support.
 	 */
 	public interface InventoryHandle extends SourceAccess.Handle {
+		default boolean scopeTransition() { return false; }
+		default int remainingSlots() { return MAX_SLOTS; }
 		/** Independent exact metadata ownership; the caller never retains this handle's cursor or snapshot. */
 		default Optional<InventoryPublicationEvidence> publicationEvidence() { return Optional.empty(); }
 		/** Optional borrowed certification port; does not advance this handle's legacy cursor. */
@@ -116,6 +118,8 @@ public final class InventorySourceAccess implements SourceAccess {
 		default ReadMode readMode() { return ReadMode.ADAPTER; }
 		default InventoryItemCodec.@Nullable Catalog nativeCatalog() { return null; }
 		default long nativeCatalogGrowthUpperBound() { return 0; }
+		default long nativeResourceRetainedBytes() { var catalog = nativeCatalog(); return catalog == null ? 0 : catalog.modeledRetainedBytes(); }
+		default boolean certifiedResourceSharing() { return true; }
 		default InventoryValidationBudget.Cost evidenceValidationCost() { return InventoryValidationBudget.NONE; }
 		default InventoryValidationBudget.Cost stepValidationCost(int slots) { return InventoryValidationBudget.NONE; }
 		default boolean evidenceValid(InventoryValidationBudget.Allowance allowance) { return evidenceValid(); }
@@ -158,6 +162,8 @@ public final class InventorySourceAccess implements SourceAccess {
 	}
 
 	public interface Source extends AutoCloseable {
+		/** Narrow Sable FLUID same-lease scope transition, not a permission or topology failure. */
+		default boolean scopeTransition() { return false; }
 		/** Runtime-owned wrappers provide historical metadata lifetime for publication. */
 		default Optional<InventoryPublicationEvidence> publicationEvidence() { return Optional.empty(); }
 		/** Last scanning owner has left; source metadata may remain pinned by publication. */
@@ -170,6 +176,17 @@ public final class InventorySourceAccess implements SourceAccess {
 		/** Borrowed metadata only: never creates a catalogue or performs a provider callback. */
 		default InventoryItemCodec.@Nullable Catalog nativeCatalog() { return null; }
 		default long nativeCatalogGrowthUpperBound() { return 0; }
+		default long nativeResourceRetainedBytes() { var catalog = nativeCatalog(); return catalog == null ? 0 : catalog.modeledRetainedBytes(); }
+		default boolean certifiedResourceSharing() { return true; }
+		/** Independent resource seam; ITEM implementations retain their existing native/certified route. */
+		default @Nullable InventoryResourceValue readResource(int slot) { return read(slot); }
+		default @Nullable InventoryResourceValue readResource(int slot, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) {
+			return read(slot, admission, allowance);
+		}
+		default ResourcePage enumerateResources(int limit, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) {
+			Page page = enumerate(limit, admission, allowance);
+			return new ResourcePage(page.slots(), page.complete());
+		}
 		default InventoryValidationBudget.Cost evidenceValidationCost() { return InventoryValidationBudget.NONE; }
 		/** Includes nested validity, member, mapping and provider metadata callbacks for the whole operation. */
 		default InventoryValidationBudget.Cost readValidationCost(int slots) { return InventoryValidationBudget.NONE; }
@@ -248,6 +265,10 @@ public final class InventorySourceAccess implements SourceAccess {
 	}
 	public record Page(java.util.List<InventoryDomainCodec.Item> slots, boolean complete) {
 		public Page { slots = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(slots)); }
+	}
+	@org.jetbrains.annotations.NotNullByDefault
+	public record ResourcePage(java.util.@org.jetbrains.annotations.Unmodifiable List<? extends @Nullable InventoryResourceValue> slots, boolean complete) {
+		public ResourcePage { slots = java.util.Collections.unmodifiableList(new java.util.ArrayList<>(slots)); }
 	}
 	public interface Resolver {
 		Optional<Source> resolve(InventorySourceInput input);
@@ -435,11 +456,16 @@ public final class InventorySourceAccess implements SourceAccess {
 		@Override public Optional<InventoryPublicationEvidence> publicationEvidence() { return closed ? Optional.empty() : source.publicationEvidence(); }
 		@Override public InventorySharedRead.@Nullable Port sharedRead() { return closed ? null : source.sharedRead(); }
 		@Override public long sourceRetainedBytes() { return source.sourceRetainedBytes(); }
+		@Override public boolean scopeTransition() { return source.scopeTransition(); }
+		@Override public int remainingSlots() { return source.stableCursor() ? Math.max(0, source.slots() - cursor) : MAX_SLOTS; }
 		@Override public ReadMode readMode() { return source.readMode(); }
 		@Override public InventoryItemCodec.@Nullable Catalog nativeCatalog() { return source.nativeCatalog(); }
 		@Override public long nativeCatalogGrowthUpperBound() { return source.nativeCatalogGrowthUpperBound(); }
+		@Override public long nativeResourceRetainedBytes() { return source.nativeResourceRetainedBytes(); }
+		@Override public boolean certifiedResourceSharing() { return input.resourceKind() == InventoryResourceKind.ITEM && source.certifiedResourceSharing(); }
 		@Override public InventoryValidationBudget.Cost discoveryValidationCost() {
-			return readMode() == ReadMode.NATIVE_INCREMENTAL ? source.evidenceValidationCost() : source.discoveryValidationCost();
+			return readMode() == ReadMode.NATIVE_INCREMENTAL ? source.evidenceValidationCost() : input.resourceKind() == InventoryResourceKind.FLUID
+				? source.evidenceValidationCost().plus(source.discoveryValidationCost()) : source.discoveryValidationCost();
 		}
 		@Override public java.util.Set<String> demand() { return scope.demand(); }
 		@Override public boolean evidenceValid() { return !closed && source.valid(); }
@@ -527,6 +553,9 @@ public final class InventorySourceAccess implements SourceAccess {
 				this.preparation = Preparation.READY;
 				this.planDeferred = false;
 				return Preparation.READY;
+			} catch (nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission.Deferred deferred) {
+				planDeferred = true;
+				return Preparation.DEFERRED;
 			} catch (nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.CaptureLimitException
 				| nx.pingwheel.common.presentation.inventory.minecraft.InventoryObservationSnapshot.LimitException failure) {
 				preparationFailure = failure;
@@ -578,7 +607,7 @@ public final class InventorySourceAccess implements SourceAccess {
 			if (readMode() == ReadMode.NATIVE_INCREMENTAL) {
 				// Generic callers request encoding explicitly; the typed route advances the cursor only once.
 				var outcome = nativeStep(ledger, catalog, validation);
-				return outcome instanceof InventoryStep.Outcome.Captured captured ? new StepOutcome.Captured(captured.step().toLegacy()) : new StepOutcome.Deferred();
+				return outcome instanceof InventoryStep.Outcome.Captured captured ? new StepOutcome.Captured(captured.step().toLegacy(input.resourceKind())) : new StepOutcome.Deferred();
 			}
 			if (closed || terminal) return new StepOutcome.Deferred();
 			if (preparation != null && preparation != Preparation.READY) {
@@ -597,12 +626,12 @@ public final class InventorySourceAccess implements SourceAccess {
 			}
 			// Native source slots() is frozen resolution metadata. Generic extension routes keep their legacy semantics.
 			int slots = source.slots();
-			int bound = slots == 0 ? 0 : (int) Math.min(MAX_STEP, Math.min(ledger.remaining(PHYSICAL), Math.max(0, ledger.remaining(PROVIDER_WORK) / PROVIDER_CALL_WORK - 1)));
+			int bound = (int) Math.min(Math.max(0, slots - cursor), Math.min(MAX_STEP, Math.min(ledger.remaining(PHYSICAL), Math.max(0, ledger.remaining(PROVIDER_WORK) / PROVIDER_CALL_WORK - 1))));
 			if (slots != 0 && bound == 0) return new InventoryStep.Outcome.Deferred();
 			var admission = ledger.tryReserve(Map.of(PHYSICAL, (long) bound, PROBES, 1L, PROVIDER_WORK, (bound + 1L) * PROVIDER_CALL_WORK));
 			if (admission.isEmpty()) return new InventoryStep.Outcome.Deferred();
 			int used = 0, first = cursor;
-			var items = new java.util.ArrayList<InventoryDomainCodec.@Nullable Item>(bound);
+			var items = new java.util.ArrayList<@Nullable InventoryResourceValue>(bound);
 			try (var ticket = admission.get()) {
 				try {
 					if (!(validation == null ? source.valid() : source.valid(validation))) {
@@ -614,13 +643,22 @@ public final class InventorySourceAccess implements SourceAccess {
 					}
 					while (cursor < Math.min(expected, MAX_SLOTS) && used < bound) {
 						used++; // Getter exceptions are attempts, but never commit a journal slot.
-						items.add(validation == null ? catalog == null ? source.read(cursor) : source.read(cursor, catalog) : source.read(cursor, catalog, validation));
+						@Nullable InventoryResourceValue value = source.readResource(cursor, catalog, validation == null
+							? new InventoryValidationBudget.Allowance(source.readValidationCost(1)) : validation);
+						if (value != null && value.resourceKind() != input.resourceKind()) throw new IllegalStateException("source observation lane");
+						items.add(value);
 						cursor++;
+					}
+					if (input.resourceKind() == InventoryResourceKind.FLUID && !(validation == null ? source.valid() : source.valid(validation))) {
+						terminal = true; return nativeCaptured(cursor, java.util.List.of(), CaptureResult.Availability.INVALID, CaptureResult.Completeness.INCOMPLETE);
 					}
 					terminal = cursor == expected || cursor == MAX_SLOTS;
 					return nativeCaptured(first, items, CaptureResult.Availability.READABLE,
 						cursor == expected ? CaptureResult.Completeness.COMPLETE : terminal ? CaptureResult.Completeness.INCOMPLETE : CaptureResult.Completeness.CONTINUE);
-				} catch (InventoryItemCodec.CapacityExceededException | InventoryItemBudget.CaptureLimitException exhausted) {
+				} catch (nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission.Deferred deferred) {
+					return items.isEmpty() ? new InventoryStep.Outcome.Deferred()
+						: nativeCaptured(first, items, CaptureResult.Availability.READABLE, CaptureResult.Completeness.CONTINUE);
+				} catch (InventoryItemCodec.CapacityExceededException | InventoryFluidCodec.CapacityException | InventoryItemBudget.CaptureLimitException exhausted) {
 					terminal = true;
 					InventoryCaptureDiagnostics.boundExceeded(input, "native-catalog-capacity-or-work", exhausted);
 					// Capacity/work refusal is not a certificate that a provider's reentrant callback kept authority.
@@ -634,7 +672,7 @@ public final class InventorySourceAccess implements SourceAccess {
 				} finally { ticket.commit(Map.of(PHYSICAL, (long) used, PROBES, 1L, PROVIDER_WORK, (used + 1L) * PROVIDER_CALL_WORK)); }
 			}
 		}
-		private InventoryStep.Outcome nativeCaptured(int first, java.util.List<InventoryDomainCodec.@Nullable Item> items,
+		private InventoryStep.Outcome nativeCaptured(int first, java.util.List<? extends @Nullable InventoryResourceValue> items,
 			CaptureResult.Availability availability, CaptureResult.Completeness completeness) {
 			var metadata = new CaptureResult(Optional.empty(), new CaptureResult.Coverage(scope.viewKey(), cursor, cursor,
 				expected < 0 ? OptionalLong.empty() : OptionalLong.of(expected)), availability, completeness, CaptureResult.Consistency.EVENTUAL, Optional.empty(), Optional.empty());
@@ -735,11 +773,11 @@ public final class InventorySourceAccess implements SourceAccess {
 					boolean complete;
 					if (!source.stableCursor()) {
 						used = allowance; // throwing enumeration may have traversed its whole grant
-						Page enumerated = validation != null ? source.enumerate(allowance, catalog, validation)
-							: catalog == null ? source.enumerate(allowance) : source.enumerate(allowance, catalog);
+						ResourcePage enumerated = source.enumerateResources(allowance, catalog, validation == null
+							? new InventoryValidationBudget.Allowance(source.readValidationCost(allowance)) : validation);
 						if (enumerated.slots().size() > allowance) throw new IllegalStateException("provider exceeded admitted enumeration");
 						used = enumerated.slots().size();
-						for (var item : enumerated.slots()) page.put(Integer.toString(cursor++), InventoryDomainCodec.encode(item));
+						for (var item : enumerated.slots()) page.put(Integer.toString(cursor++), InventoryResourceCodec.encode(input.resourceKind(), item));
 						complete = enumerated.complete();
 						expected = complete ? cursor : -1;
 						terminal = true;
@@ -751,15 +789,15 @@ public final class InventorySourceAccess implements SourceAccess {
 						}
 						while (cursor < Math.min(expected, MAX_SLOTS) && used < allowance) {
 							used++; // An attempted throwing read still consumes its admission.
-							var item = validation != null ? source.read(cursor, catalog, validation)
-								: catalog == null ? source.read(cursor) : source.read(cursor, catalog);
-							page.put(Integer.toString(cursor++), InventoryDomainCodec.encode(item));
+							var item = source.readResource(cursor, catalog, validation == null
+								? new InventoryValidationBudget.Allowance(source.readValidationCost(1)) : validation);
+							page.put(Integer.toString(cursor++), InventoryResourceCodec.encode(input.resourceKind(), item));
 						}
 						complete = cursor == expected;
 						terminal = complete || cursor == MAX_SLOTS;
 					}
 					versionStable &= firstVersion.isPresent() && source.version().equals(firstVersion);
-					return captured(new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, page), CaptureResult.Availability.READABLE,
+					return captured(new CaptureResult.OpaqueKeyedFragment(InventoryResourceCodec.id(input.resourceKind()), page), CaptureResult.Availability.READABLE,
 						complete ? CaptureResult.Completeness.COMPLETE : terminal ? CaptureResult.Completeness.INCOMPLETE : CaptureResult.Completeness.CONTINUE);
 				} catch (CursorlessReadFailure failure) {
 					used = Math.min(allowance, failure.attemptedVisits());
@@ -770,7 +808,9 @@ public final class InventorySourceAccess implements SourceAccess {
 					}
 					InventoryCaptureDiagnostics.warn("live-step", input, descriptor.key(), () -> "cursor=" + cursor + " expected=" + expected, failure);
 					return captured(null, CaptureResult.Availability.UNAVAILABLE, CaptureResult.Completeness.INCOMPLETE);
-				} catch (InventoryItemBudget.CaptureLimitException | InventoryItemCodec.CapacityExceededException exhausted) {
+				} catch (nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission.Deferred deferred) {
+					return new StepOutcome.Deferred();
+				} catch (InventoryItemBudget.CaptureLimitException | InventoryItemCodec.CapacityExceededException | InventoryFluidCodec.CapacityException exhausted) {
 					InventoryCaptureDiagnostics.boundExceeded(input, "catalog-work-or-workspace", exhausted);
 					terminal = true;
 					return captured(null, CaptureResult.Availability.READABLE, CaptureResult.Completeness.INCOMPLETE);

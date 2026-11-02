@@ -132,6 +132,20 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	public String providerId() {
 		return PROVIDER_ID;
 	}
+	@Override public nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Cost membershipCost() {
+		// Cold two-class/three-member discovery plus one containing/id query. Native Sable internals are external-trusted.
+		return new nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Cost(65536, 65536, 16384);
+	}
+	@Override public synchronized Membership membership(ServerLevel level, BlockPos position,
+		nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Allowance allowance) {
+		allowance.debit(membershipCost());
+		if (!contentUsable(level)) return Membership.UNKNOWN;
+		try {
+			return queryMembership(level, position, contentAccess());
+		} catch (ReflectiveOperationException | RuntimeException | LinkageError failure) {
+			contentFailure(failure); return Membership.UNKNOWN;
+		}
+	}
 
 	@Override
 	public synchronized ValidationResult validate(ServerLevel level, Target.ExternalBlockTarget candidate) {
@@ -749,10 +763,14 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	interface ContentAccess {
 		Object subLevel(Object parent, UUID id) throws ReflectiveOperationException;
 		boolean current(Object parent, Object subLevel, UUID id) throws ReflectiveOperationException;
-		UUID containing(Object parent, BlockPos position) throws ReflectiveOperationException;
+		@Nullable UUID containing(Object parent, BlockPos position) throws ReflectiveOperationException;
 		boolean loaded(Object parent, BlockPos position);
 		BlockState state(Object parent, BlockPos position);
 		MarkerAnchor anchor(Object subLevel, BlockPos position) throws ReflectiveOperationException;
+	}
+	static Membership queryMembership(Object parent, BlockPos position, ContentAccess access) throws ReflectiveOperationException {
+		@Nullable UUID id = access.containing(parent, position);
+		return id == null ? Membership.OUTSIDE : Membership.inside(id.toString());
 	}
 
 	static Optional<BlockReadSource> resolvePreviewDescriptor(Object parent, String dimension,
@@ -803,11 +821,13 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				return Boolean.FALSE.equals(invoke(api.isRemoved, subLevel)) && invoke(api.getLevel, subLevel) == parent
 					&& id.equals(invoke(membership.getUniqueId, subLevel));
 			}
-			@Override public UUID containing(Object parent, BlockPos pos) throws ReflectiveOperationException {
-				Object containing = invoke(membership.getContaining, membership.companion, parent,
+			@Override public @Nullable UUID containing(Object parent, BlockPos pos) throws ReflectiveOperationException {
+				@Nullable Object containing = invoke(membership.getContaining, membership.companion, parent,
 					new Vec3(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5));
-				Object id = containing == null ? null : invoke(membership.getUniqueId, containing);
-				return id instanceof UUID value ? value : null;
+				if (containing == null) return null;
+				@Nullable Object id = invoke(membership.getUniqueId, containing);
+				if (!(id instanceof UUID value)) throw new ReflectiveOperationException("Sable containing sub-level has no valid id");
+				return value;
 			}
 			@Override public boolean loaded(Object parent, BlockPos pos) {
 				return parent instanceof ServerLevel level && !level.isOutsideBuildHeight(pos) && level.isLoaded(pos);

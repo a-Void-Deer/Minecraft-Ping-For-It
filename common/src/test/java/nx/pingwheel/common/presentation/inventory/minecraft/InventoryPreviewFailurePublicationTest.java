@@ -37,7 +37,9 @@ class InventoryPreviewFailurePublicationTest {
 	}
 	static Object preview(InventoryPublicationBackendFixture f, UUID owner, long request) throws ReflectiveOperationException {
 		Object session = java.util.Objects.requireNonNull(((Map<?, ?>) field(f.backend, "sessions")).get(owner));
-		return java.util.Objects.requireNonNull(((Map<?, ?>) field(session, "previews")).get(request));
+		for (Object candidate : ((Map<?, ?>) field(session, "previews")).values())
+			if (Long.valueOf(request).equals(field(candidate, "request"))) return candidate;
+		throw new AssertionError("missing preview request " + request);
 	}
 	static @Unmodifiable List<Object> trackingStates(InventoryPublicationBackendFixture f, MarkerId marker) throws ReflectiveOperationException {
 		var states = new java.util.ArrayList<Object>();

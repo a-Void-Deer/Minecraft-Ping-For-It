@@ -198,7 +198,8 @@ class InventoryPooledBackendTest {
 	static Object state(Object owner, String name) { return java.util.Objects.requireNonNull(stateField(owner, name)); }
 	static Object previewState(InventoryPublicationBackendFixture fixture, UUID owner, long request) {
 		var session = java.util.Objects.requireNonNull(((Map<?, ?>) state(fixture.backend, "sessions")).get(owner));
-		return java.util.Objects.requireNonNull(((Map<?, ?>) state(session, "previews")).get(request));
+		return ((Map<?, ?>) state(session, "previews")).values().stream()
+			.filter(preview -> Long.valueOf(request).equals(state(preview, "request"))).findFirst().orElseThrow();
 	}
 	static Object trackingState(InventoryPublicationBackendFixture fixture, MarkerId marker) {
 		return java.util.Objects.requireNonNull(((Map<?, ?>) state(fixture.backend, "tracking")).get(marker));

@@ -14,6 +14,7 @@ final class InventoryCanonicalWriter {
 	private final @Nullable InventoryItemBudget budget;
 	private int cursor;
 	private int nodes;
+	private boolean strictUtf;
 
 	private InventoryCanonicalWriter(@Nullable InventoryItemBudget budget) {
 		this.budget = budget;
@@ -22,8 +23,14 @@ final class InventoryCanonicalWriter {
 	}
 
 	static byte @Unmodifiable [] write(@Nullable Tag tag, @Nullable InventoryItemBudget budget) {
+		return write(tag, budget, false);
+	}
+	/** Fluid identity cannot collapse malformed UTF-16 to the same replacement byte. ITEM remains unchanged. */
+	static byte @Unmodifiable [] writeFluid(Tag tag, InventoryItemBudget budget) { return write(tag, budget, true); }
+	private static byte @Unmodifiable [] write(@Nullable Tag tag, @Nullable InventoryItemBudget budget, boolean strictUtf) {
 		if (budget != null) budget.allocate(8, 0, 2, 1);
 		var writer = new InventoryCanonicalWriter(budget);
+		writer.strictUtf = strictUtf;
 		writer.tag(tag, 0);
 		writer.allocate(writer.cursor, 0, 1);
 		writer.work(writer.cursor);
@@ -109,7 +116,7 @@ final class InventoryCanonicalWriter {
 				int code = Character.toCodePoint(c, value.charAt(++index));
 				number(0xF0 | code >> 18, 1); number(0x80 | code >> 12 & 63, 1);
 				number(0x80 | code >> 6 & 63, 1); number(0x80 | code & 63, 1);
-			} else if (Character.isSurrogate(c)) number('?', 1);
+			} else if (Character.isSurrogate(c)) { if (strictUtf) refuse(); number('?', 1); }
 			else { number(0xE0 | c >> 12, 1); number(0x80 | c >> 6 & 63, 1); number(0x80 | c & 63, 1); }
 		}
 	}

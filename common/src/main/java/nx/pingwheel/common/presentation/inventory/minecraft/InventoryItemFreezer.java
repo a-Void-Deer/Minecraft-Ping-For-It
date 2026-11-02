@@ -92,6 +92,21 @@ final class InventoryItemFreezer {
 		budget.retain(retained);
 		return new InventoryDetachedItem(itemId, InventoryIdentityMode.EXACT, display, canonical, retained);
 	}
+	/** Shared persistent-component engine; no ItemStack, item defaults or item display participates. */
+	static byte @org.jetbrains.annotations.Unmodifiable [] fluidPatch(DataComponentPatch patch, HolderLookup.Provider registries,
+		int displayBytes, InventoryItemBudget budget, InventoryResidentAccess raw, InventoryItemNativeAccess nativeAccess) {
+		var freezer = new InventoryItemFreezer(registries, displayBytes, budget, raw, nativeAccess);
+		InventoryRegistryContext context = InventoryRegistryContext.prepare(registries, raw, freezer.bounds, budget);
+		freezer.certificates.context(context);
+		var collector = freezer.new PatchPlan(0);
+		try { InventoryPatches.forEach(patch, raw, collector, collector); }
+		catch (InventoryPatches.UnsupportedPatchException unsupported) { InventoryComponentCertificate.refuse(); }
+		if (!freezer.certificates.hasExternalComponents()) context.requireAudited();
+		var plan = new Plan("", 1, true, collector.additions(), collector.removals(), freezer.certificates);
+		budget.allocate(0, 0, 2, 1);
+		Tag encoded = plan.patch(RegistryOps.create(NbtOps.INSTANCE, context), false);
+		return InventoryCanonicalWriter.writeFluid(encoded, budget);
+	}
 
 	private InventoryDetachedItem aggregate(String itemId, String label) {
 		// Root-local rejection is not empty and must not create a truncated digest.

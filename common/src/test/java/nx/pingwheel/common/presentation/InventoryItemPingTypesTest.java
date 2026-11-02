@@ -37,4 +37,10 @@ class InventoryItemPingTypesTest {
 		assertFalse(properties.allows("take", CHEST, Set.of("c:chests")),
 			"take is inventory-only and stays out of the regular property policy");
 	}
+	@Test void fluidUsesOrdinaryPropertyPolicyEvenWhenItsContainerIsChestTagged() {
+		var policy = InventoryItemPingTypes.builtIn();
+		assertEquals(List.of("attention", "request"), policy.effective(nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID, CHEST, Set.of("c:chests")));
+		assertFalse(policy.allows(nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID, "take", CHEST, Set.of("c:chests")));
+		assertTrue(policy.allows(nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM, "take", CHEST, Set.of("c:chests")));
+	}
 }

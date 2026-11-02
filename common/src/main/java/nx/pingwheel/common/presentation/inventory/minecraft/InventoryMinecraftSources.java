@@ -205,13 +205,14 @@ public final class InventoryMinecraftSources {
 	}
 	/** No world/provider access: admission is possible before a Source or its member/slot metadata exists. */
 	public static InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput input) {
+		if (input.resourceKind() == nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID) return InventoryFluidSources.resolutionValidationCost(input);
 		String id = input.target() instanceof Target.ExternalBlockTarget external ? external.expectedBlockRegistryId()
 			: input.ordinaryTarget().orElseThrow().blockRegistryId();
 		return InventoryValidationBudget.resolution(id);
 	}
 	public static Optional<InventorySourceAccess.Source> resolve(MinecraftServer server, InventorySourceInput input, int displayBytes,
 		InventoryValidationBudget.Allowance allowance) {
-		if (input.resourceKind() != nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM) return Optional.empty();
+		if (input.resourceKind() == nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID) return InventoryFluidSources.resolve(server, input, displayBytes, allowance);
 		allowance.debit(resolutionValidationCost(input));
 		if (!server.isSameThread()) return Optional.empty();
 		requireDisplayBytes(displayBytes);

@@ -10,6 +10,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.world.level.material.Fluids;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.capability.IFluidHandler;
+import nx.pingwheel.common.platform.FluidAddressWitness;
 import nx.pingwheel.common.platform.IPlatformFluidService;
 import nx.pingwheel.common.platform.IPlatformFluidService.Operation;
 import nx.pingwheel.common.platform.IPlatformFluidService.OperationProfile;
@@ -83,6 +84,9 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 	public static final OperationProfile PROBE_PROFILE = profile(65536, 32768, 8192, 192, 0);
 	private static final OperationProfile COUNT = profile(64, 64, 8, 0, 0);
 	private static final OperationProfile CAPACITY = profile(64, 64, 16, 0, 0);
+	// Only handler identity crosses operations here; ordered capacities and members remain in layout.
+	private static final OperationProfile CAPTURE_WITNESS = FluidAddressWitness.profile(IPlatformFluidService.WitnessUse.CAPTURE, 1);
+	private static final OperationProfile COMPARE_WITNESS = FluidAddressWitness.profile(IPlatformFluidService.WitnessUse.COMPARE, 1);
 	private static final InventoryValidationBudget.Cost RESIDENT_HANDOFF =
 		new InventoryValidationBudget.Cost(256, 256, 32);
 
@@ -212,6 +216,22 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 	@Override public boolean stableCursor() { return true; }
 	@Override public int slots() { return count; }
 	@Override public IPlatformFluidService.RouteInfo routeInfo() { return routeInfo; }
+	@Override public OperationProfile witnessProfile(IPlatformFluidService.WitnessUse use) {
+		return Objects.requireNonNull(use) == IPlatformFluidService.WitnessUse.CAPTURE ? CAPTURE_WITNESS : COMPARE_WITNESS;
+	}
+	@Override public FluidAddressWitness captureWitness(Operation operation) {
+		liveRoute();
+		var current = Objects.requireNonNull(handler);
+		// Preflight precedes the temporary strong vector; the helper performs the single owned debit.
+		operation.allowance().requireAvailable(CAPTURE_WITNESS.ownedCost());
+		return FluidAddressWitness.capture(FluidAddressWitness.Schema.NEOFORGE_CAPABILITY_V1, new Object[] {current}, operation);
+	}
+	@Override public IPlatformFluidService.WitnessMatch compareWitness(FluidAddressWitness expected, Operation operation) {
+		Objects.requireNonNull(expected); liveRoute();
+		var current = Objects.requireNonNull(handler);
+		operation.allowance().requireAvailable(COMPARE_WITNESS.ownedCost());
+		return expected.compare(FluidAddressWitness.Schema.NEOFORGE_CAPABILITY_V1, new Object[] {current}, operation);
+	}
 	@Override public OperationProfile validationProfile() { return validationProfile; }
 	@Override public OperationProfile readProfile() { return readProfile; }
 	@Override public OperationProfile observationProfile(int limit) {

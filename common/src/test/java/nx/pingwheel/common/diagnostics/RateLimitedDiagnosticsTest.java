@@ -276,6 +276,24 @@ class RateLimitedDiagnosticsTest {
 	}
 
 	@Test
+	void domainApprovedInfoStatusHasNoGeneralWindowButKeepsLazyLevelAndOutputIsolation() {
+		RecordingSink sink = new RecordingSink();
+		DiagnosticReporter diagnostics = new DiagnosticReporter(() -> {
+			throw new AssertionError("domain INFO must not read a diagnostic-window clock");
+		}, sink);
+		AtomicInteger contextReads = new AtomicInteger();
+		for (int index = 0; index < DiagnosticReporter.CAPACITY + 2; index++)
+			diagnostics.domainApprovedEvent(Level.INFO, "fluid-route", "provider", "public-address",
+				() -> "notice=" + contextReads.incrementAndGet());
+		assertEquals(DiagnosticReporter.CAPACITY + 2, sink.events.size());
+		assertEquals(sink.events.size(), contextReads.get()); assertEquals(0, diagnostics.bucketCount());
+		diagnostics.event(Level.INFO, "ungated", "provider", "status", () -> { throw new AssertionError("ungated INFO"); });
+		sink.enabled = false;
+		diagnostics.domainApprovedEvent(Level.INFO, "fluid-route", "provider", "public-address", () -> { throw new AssertionError("disabled INFO"); });
+		assertEquals(DiagnosticReporter.CAPACITY + 2, contextReads.get());
+	}
+
+	@Test
 	void disabledEventsAndDomainApprovedPathsReadNeitherContextClockNorThrowable() {
 		RecordingSink sink = new RecordingSink();
 		sink.enabled = false;

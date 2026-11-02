@@ -35,6 +35,10 @@ public final class MinecraftBlockReadSources {
 
 	/** Client callers additionally apply their prediction/receipt guard before reading content. */
 	public static Optional<ResolvedBlockReadSource> resolveOrdinary(Level level, Target.BlockTarget target) {
+		return resolveOrdinary(level, target, null);
+	}
+	public static Optional<ResolvedBlockReadSource> resolveOrdinary(Level level, Target.BlockTarget target,
+		nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.@org.jetbrains.annotations.Nullable Allowance allowance) {
 		if (level == null || target == null || !target.dimensionId().equals(level.dimension().location().toString())) {
 			return Optional.empty();
 		}
@@ -43,6 +47,8 @@ public final class MinecraftBlockReadSources {
 		try {
 			BlockPos pos = new BlockPos(target.x(), target.y(), target.z());
 			if (level.isOutsideBuildHeight(pos) || !level.isLoaded(pos)) return Optional.empty();
+			if (allowance != null && level instanceof ServerLevel server && ExternalBlockServerProviders.registry().membership(server, pos, allowance).state()
+				!= nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider.MembershipState.OUTSIDE) return Optional.empty();
 			var state = level.getBlockState(pos);
 			var id = state == null ? null : BuiltInRegistries.BLOCK.getKey(state.getBlock());
 			if (state == null || state.isAir() || id == null || !target.blockRegistryId().equals(id.toString())) {
@@ -52,6 +58,7 @@ public final class MinecraftBlockReadSources {
 				new MarkerAnchor(target.x() + 0.5, target.y() + 0.5, target.z() + 0.5));
 			return Optional.of(new ResolvedBlockReadSource(level, descriptor,
 				member -> !level.isOutsideBuildHeight(member) && level.isLoaded(member)));
+		} catch (nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.CaptureLimitException deferred) { throw deferred;
 		} catch (RuntimeException | LinkageError unavailable) {
 			Diagnostics.warn("presentation/block-read-source", "minecraft", () -> "target=" + target, unavailable);
 			return Optional.empty();

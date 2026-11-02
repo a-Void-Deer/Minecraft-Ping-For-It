@@ -193,7 +193,7 @@ class InventoryCatalogNativeReadWiringTest {
 		}, settings.pendingMemoryBytes())) {
 			runtime.advance(0, settings);
 			var preview = runtime.attach(input, new InventoryRuntime.PreviewSubject(input.readOwner())).orElseThrow();
-			var observed = new ArrayList<InventoryDomainCodec.Item>(); InventoryRuntime.Observation last = null;
+			var observed = new ArrayList<nx.pingwheel.common.presentation.inventory.@Nullable InventoryResourceValue>(); InventoryRuntime.@Nullable Observation last = null;
 			for (int call = 0; observed.size() < slots && call < slots; call++) {
 				last = runtime.step(preview).orElseThrow(); observed.addAll(last.slots());
 			}
@@ -580,8 +580,8 @@ class InventoryCatalogNativeReadWiringTest {
 			assertEquals(CaptureResult.Completeness.CONTINUE, first.result().completeness());
 			fixture.resident.setItem(slots - 1, new ItemStack(Items.DIAMOND)); // retained earlier slot must stay stone
 			fixture.resident.setItem(slots - 8, new ItemStack(Items.GOLD_INGOT, 9)); // next unread visible slot 7
-			var fastItems = new ArrayList<InventoryDomainCodec.@Nullable Item>(first.slots());
-			var slowItems = new ArrayList<InventoryDomainCodec.@Nullable Item>();
+			var fastItems = new ArrayList<nx.pingwheel.common.presentation.inventory.@Nullable InventoryResourceValue>(first.slots());
+			var slowItems = new ArrayList<nx.pingwheel.common.presentation.inventory.@Nullable InventoryResourceValue>();
 			long tick = 0; InventoryRuntime.@Nullable Observation last = first;
 			for (; tick < 900 && (fastItems.size() < slots || slowItems.size() < slots); tick++) {
 				runtime.advance(tick, settings); int before = fixture.visibleReads.size();

@@ -32,6 +32,16 @@ public final class InventoryCatalogAdmission {
 
 	public long attemptedWork() { return attemptedWork; }
 	public long peakWorkspaceBytes() { return peakWorkspace; }
+	/** Fluid canonical/hash/index processing uses the same caller-owned global grant, never a second ledger. */
+	public void admitFluid(int canonicalBytes, int idUnits, int labelUnits, int displayUnits) {
+		// Length metadata admits the subsequent scans and UTF allocation. Three
+		// bytes per UTF-16 unit also dominates surrogate pairs; malformed input is
+		// refused by the detached display contract, never silently canonicalized.
+		if (displayUnits < 0 || displayUnits > InventoryLimits.MAX_DISPLAY_BYTES) throw new IllegalArgumentException("fluid display span");
+		int bytes = (int) Math.min(InventoryLimits.MAX_DISPLAY_BYTES, 3L * displayUnits);
+		admit(workspaceUpperBound(canonicalBytes, bytes, InventoryItemCodec.DEFAULT_MAX_ENTRIES),
+			scanWorkUpperBound(displayUnits, idUnits, labelUnits) + operationWorkUpperBound(canonicalBytes, bytes, InventoryItemCodec.DEFAULT_MAX_ENTRIES));
+	}
 	/** Preflight a certified native read before its first provider callback. Intern still pays actual attempted work. */
 	void requireNativeRead(int displayBytes) {
 		if (workspaceBytes < workspaceUpperBound(InventoryItemCodec.MAX_CANONICAL_BYTES, displayBytes, InventoryItemCodec.DEFAULT_MAX_ENTRIES)

@@ -73,6 +73,7 @@ public final class PresentationServer {
 		Map<String, Map<String, Set<String>>> mask = Map.of();
 		Map<String, List<PresentationPropertyRef>> childBlack = Map.of();
 		Set<String> inventoryTypes = Set.of();
+		Set<String> fluidTypes = Set.of();
 		long view;
 		long revision;
 		long authorizationCut = -1;
@@ -191,6 +192,7 @@ public final class PresentationServer {
 		session.mask = mask(player, session);
 		session.childBlack = childBlackFor(settings());
 		session.inventoryTypes = inventoryTypes(player, session);
+		session.fluidTypes = inventoryTypes(player, session, nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID);
 		session.view++;
 		session.ready = true;
 		send(player, PresentationS2CPacket.reset(session.epoch, session.view, session.mask, session.childBlack));
@@ -302,7 +304,7 @@ public final class PresentationServer {
 				if (sourceSeeds.isEmpty()) sendInitial(player, session, lease);
 				else sendBaseline(session, lease, registry,
 					adapter -> allowed(player, session, adapter, marker.targetType().id()),
-					packet -> send(player, packet), InventoryServer.tracksInventory(marker.id()), effectiveInventoryTypes(player, session));
+					packet -> send(player, packet), InventoryServer.tracksInventory(marker.id()), effectiveInventoryTypes(player, session, marker.id()));
 			}
 		}
 	}
@@ -324,7 +326,7 @@ public final class PresentationServer {
 			recipient -> adapter -> allowed(server.getPlayerList().getPlayer(recipient),
 				SESSIONS.get(recipient), adapter, targetType),
 			recipient -> effectiveInventoryTypes(server.getPlayerList().getPlayer(recipient),
-				SESSIONS.get(recipient)),
+				SESSIONS.get(recipient), marker.id()),
 			(recipient, packet) -> send(server.getPlayerList().getPlayer(recipient), packet));
 	}
 
@@ -412,11 +414,13 @@ public final class PresentationServer {
 			Map<String, Map<String, Set<String>>> effective = mask(player, session);
 			Map<String, List<PresentationPropertyRef>> effectiveChildBlack = childBlackFor(settings());
 			Set<String> dedicated = inventoryTypes(player, session);
+			Set<String> fluids = inventoryTypes(player, session, nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID);
 			if (!policyChanged && effective.equals(session.mask)
-				&& effectiveChildBlack.equals(session.childBlack) && dedicated.equals(session.inventoryTypes)) continue;
+				&& effectiveChildBlack.equals(session.childBlack) && dedicated.equals(session.inventoryTypes) && fluids.equals(session.fluidTypes)) continue;
 			session.mask = effective;
 			session.childBlack = effectiveChildBlack;
 			session.inventoryTypes = dedicated;
+			session.fluidTypes = fluids;
 			session.view++;
 			session.authorizationCut = observationSerial;
 			pruneSession(session, store, registry::get, (marker, adapter) ->
@@ -434,7 +438,7 @@ public final class PresentationServer {
 				else lease.marker = marker;
 				sendBaseline(session, lease, registry,
 					adapter -> allowed(player, session, adapter, marker.targetType().id()),
-					packet -> send(player, packet), InventoryServer.tracksInventory(marker.id()), effectiveInventoryTypes(player, session));
+					packet -> send(player, packet), InventoryServer.tracksInventory(marker.id()), effectiveInventoryTypes(player, session, marker.id()));
 			});
 		PresentationAdapter.CaptureBudget work = new PresentationAdapter.CaptureBudget(MAX_CAPTURE_WORK_PER_TICK);
 		PresentationFairSampler.Result sampled = sampler.tick(store, LEASES, registry, settings(), tick, work,
@@ -796,7 +800,7 @@ public final class PresentationServer {
 		sendInitial(session, lease, basic,
 			allowed(player, session, basic, targetType), packet -> send(player, packet),
 			adapter -> allowed(player, session, adapter, targetType),
-			InventoryServer.tracksInventory(lease.marker.id()), effectiveInventoryTypes(player, session));
+			InventoryServer.tracksInventory(lease.marker.id()), effectiveInventoryTypes(player, session, lease.marker.id()));
 	}
 
 	/** Test seam: no fresh non-Basic policy port, so content refs project conservatively. */
@@ -1060,15 +1064,19 @@ public final class PresentationServer {
 	static PresentationSettings previewSettings() { return settings(); }
 
 	/** Dedicated delivery shares the presentation fence, but never widens the SECTION mask. */
-	public record InventoryPolicy(long epoch, long view, Set<String> types) {
-		public InventoryPolicy { types = Set.copyOf(types); }
+	public record InventoryPolicy(long epoch, long view, Set<String> types, Set<String> fluidTypes) {
+		public InventoryPolicy(long epoch, long view, Set<String> types) { this(epoch, view, types, Set.of()); }
+		public InventoryPolicy { types = Set.copyOf(types); fluidTypes = Set.copyOf(fluidTypes); }
+		public Set<String> types(nx.pingwheel.common.presentation.inventory.InventoryResourceKind kind) {
+			return kind == nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM ? types : fluidTypes;
+		}
 	}
 	public static Optional<InventoryPolicy> inventoryPolicy(UUID playerId) {
 		Session session = SESSIONS.get(playerId);
 		ServerPlayer player = activeServer == null ? null : activeServer.getPlayerList().getPlayer(playerId);
 		if (session == null || !session.ready || player == null) return Optional.empty();
 		return Optional.of(new InventoryPolicy(session.epoch, session.view,
-			effectiveInventoryTypes(player, session)));
+			effectiveInventoryTypes(player, session), effectiveInventoryTypes(player, session, nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID)));
 	}
 
 	/**
@@ -1079,8 +1087,14 @@ public final class PresentationServer {
 	 * receipt share this one gate.
 	 */
 	private static Set<String> effectiveInventoryTypes(ServerPlayer player, Session session) {
-		Set<String> fresh = new HashSet<>(inventoryTypes(player, session));
-		fresh.retainAll(session.inventoryTypes);
+		return effectiveInventoryTypes(player, session, nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM);
+	}
+	private static Set<String> effectiveInventoryTypes(ServerPlayer player, Session session, MarkerId marker) {
+		return InventoryServer.trackedKind(marker).map(kind -> effectiveInventoryTypes(player, session, kind)).orElse(Set.of());
+	}
+	private static Set<String> effectiveInventoryTypes(ServerPlayer player, Session session, nx.pingwheel.common.presentation.inventory.InventoryResourceKind kind) {
+		Set<String> fresh = new HashSet<>(inventoryTypes(player, session, kind));
+		fresh.retainAll(kind == nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM ? session.inventoryTypes : session.fluidTypes);
 		return Set.copyOf(fresh);
 	}
 	public static boolean inventoryKnows(UUID player, MarkerId marker) {
@@ -1092,10 +1106,13 @@ public final class PresentationServer {
 		return session != null && session.ready && sent != null && sent.deliveredView == session.view;
 	}
 	private static Set<String> inventoryTypes(ServerPlayer player, Session session) {
+		return inventoryTypes(player, session, nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM);
+	}
+	private static Set<String> inventoryTypes(ServerPlayer player, Session session, nx.pingwheel.common.presentation.inventory.InventoryResourceKind kind) {
 		if (!Objects.equals(session.schemas.get(InventoryPresentation.ADAPTER_ID), InventoryPresentation.SCHEMA)) return Set.of();
 		Set<String> result = new HashSet<>();
 		for (String type : PresentationSettings.TARGET_TYPE_IDS)
-			if (allowed(player, session, InventoryPresentation.INSTANCE, type).contains(InventoryPresentation.ITEMS)) result.add(type);
+			if (allowed(player, session, InventoryPresentation.INSTANCE, type).contains(kind.fieldId())) result.add(type);
 		return Set.copyOf(result);
 	}
 	public static void winner(ServerPlayer player, TargetKey key, Optional<MarkerId> winner) {

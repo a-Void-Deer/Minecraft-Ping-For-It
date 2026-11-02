@@ -10,6 +10,8 @@ import net.minecraft.server.level.ServerLevel;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetMatchContext;
 import nx.pingwheel.common.marker.MarkerAnchor;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
+import org.jetbrains.annotations.NotNullByDefault;
 
 /**
  * Server-side seam for providers which expose blocks outside the ordinary
@@ -17,9 +19,33 @@ import nx.pingwheel.common.marker.MarkerAnchor;
  * the canonical target returned by this interface; provider state remains in
  * the provider implementation.
  */
+@NotNullByDefault
 public interface ExternalBlockServerProvider {
 
 	String providerId();
+	/** Pure upper bound, including cold/failed containing-query discovery; no world/provider callback. */
+	default InventoryValidationBudget.Cost membershipCost() { return InventoryValidationBudget.NONE; }
+	/** Positive physical membership, independent of target classification or lease materialization. */
+	default Membership membership(ServerLevel level, BlockPos position, InventoryValidationBudget.Allowance allowance) {
+		java.util.Objects.requireNonNull(level); java.util.Objects.requireNonNull(position);
+		java.util.Objects.requireNonNull(allowance).debit(membershipCost()); return Membership.UNKNOWN;
+	}
+	@NotNullByDefault
+	enum MembershipState { OUTSIDE, INSIDE, UNKNOWN }
+	@NotNullByDefault
+	record Membership(MembershipState state, Optional<String> subLevelId) {
+		public static final Membership OUTSIDE = new Membership(MembershipState.OUTSIDE, Optional.empty());
+		public static final Membership UNKNOWN = new Membership(MembershipState.UNKNOWN, Optional.empty());
+		public Membership {
+			java.util.Objects.requireNonNull(state); java.util.Objects.requireNonNull(subLevelId);
+			if ((state == MembershipState.INSIDE) != subLevelId.isPresent()) throw new IllegalArgumentException("physical membership evidence");
+			subLevelId.ifPresent(id -> {
+				if (id.isBlank() || id.length() > 256 || id.chars().anyMatch(Character::isISOControl))
+					throw new IllegalArgumentException("physical membership id bound");
+			});
+		}
+		public static Membership inside(String id) { return new Membership(MembershipState.INSIDE, Optional.of(id)); }
+	}
 
 	/**
 	 * Checks a candidate against live provider state without allocating

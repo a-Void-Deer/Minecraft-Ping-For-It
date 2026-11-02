@@ -25,6 +25,27 @@ import org.jetbrains.annotations.Unmodifiable;
 public final class ExternalBlockServerProviderRegistry {
 
 	private final Map<String, ExternalBlockServerProvider> providers = new LinkedHashMap<>();
+	/** Empty registry positively has no external storage; unsupported registered providers remain UNKNOWN. */
+	public synchronized nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Cost membershipCost() {
+		var cost = nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.NONE;
+		for (var provider : providers.values()) cost = cost.plus(provider.membershipCost()); return cost;
+	}
+	public synchronized ExternalBlockServerProvider.Membership membership(ServerLevel level, BlockPos position,
+		nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Allowance allowance) {
+		boolean unknown = false; ExternalBlockServerProvider.Membership found = ExternalBlockServerProvider.Membership.OUTSIDE;
+		for (var provider : providers.values()) {
+			ExternalBlockServerProvider.Membership value;
+			try { value = provider.membership(level, position, allowance); }
+			catch (nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.CaptureLimitException deferred) { throw deferred; }
+			catch (RuntimeException | LinkageError failure) { value = ExternalBlockServerProvider.Membership.UNKNOWN; }
+			if (value == null || value.state() == ExternalBlockServerProvider.MembershipState.UNKNOWN) unknown = true;
+			else if (value.state() == ExternalBlockServerProvider.MembershipState.INSIDE) {
+				if (found.state() == ExternalBlockServerProvider.MembershipState.INSIDE && !found.equals(value)) return ExternalBlockServerProvider.Membership.UNKNOWN;
+				found = value;
+			}
+		}
+		return found.state() == ExternalBlockServerProvider.MembershipState.INSIDE ? found : unknown ? ExternalBlockServerProvider.Membership.UNKNOWN : found;
+	}
 
 	/**
 	 * Registers a provider. A duplicate id is ignored, which makes optional

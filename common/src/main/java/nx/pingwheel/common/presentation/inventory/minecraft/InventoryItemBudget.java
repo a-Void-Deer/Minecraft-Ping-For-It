@@ -250,7 +250,7 @@ public final class InventoryItemBudget {
 	}
 
 	/** Caller must abandon the complete capture, never publish a mixed partial payload. */
-	public static final class CaptureLimitException extends IllegalStateException {
+	public static class CaptureLimitException extends IllegalStateException {
 		CaptureLimitException(String reason) { super(reason); }
 		@Override public synchronized Throwable fillInStackTrace() { return this; }
 	}

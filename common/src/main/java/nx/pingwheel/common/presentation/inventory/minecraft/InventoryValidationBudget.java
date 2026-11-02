@@ -5,11 +5,13 @@ package nx.pingwheel.common.presentation.inventory.minecraft;
  * allocation, workspace is peak overlap, and work is never refunded on failure.
  * These are modeled owned costs, not JVM heap or callback-internal measurements.
  */
+@org.jetbrains.annotations.NotNullByDefault
 public final class InventoryValidationBudget {
 	public static final Cost NONE = new Cost(0, 0, 0);
 	private static final long O = InventoryItemBudget.OBJECT_BYTES, R = InventoryItemBudget.REFERENCE_BYTES;
 	private InventoryValidationBudget() {}
 
+	@org.jetbrains.annotations.NotNullByDefault
 	public record Cost(long allocationBytes, long workspaceBytes, long workUnits) {
 		public Cost {
 			if (allocationBytes < 0 || workspaceBytes < 0 || workUnits < 0) throw new IllegalArgumentException("negative validation cost");
@@ -23,26 +25,112 @@ public final class InventoryValidationBudget {
 		}
 		public Cost times(long count) { return new Cost(mul(allocationBytes, count), workspaceBytes, mul(workUnits, count)); }
 	}
+	@org.jetbrains.annotations.NotNullByDefault
 	public static final class Allowance {
 		private Cost limit;
-		private long allocation, work, peak;
+		private long allocation, work, peak, outerWork;
+		private long independentlyChargedWork;
+		private @org.jetbrains.annotations.Nullable FluidScope fluidScope;
+		private long fluidAllocationAdmitted, fluidWorkAdmitted;
+		private boolean fluidSettlementFailed;
+		private @org.jetbrains.annotations.Nullable FluidGrants fluidGrants;
 		public Allowance(Cost limit) { this.limit = java.util.Objects.requireNonNull(limit); }
+		/** Pure preflight; does not create a grant or change attempted use. */
+		public void checkAdditional(Cost admitted) {
+			requireFluidAccounting(); java.util.Objects.requireNonNull(admitted);
+			if (fluidScope == null) limit.plus(admitted);
+			else {
+				fluidScope.limit.plus(admitted);
+				// Include all live owners before accepting a grant, so later settlement cannot overflow.
+				add(limit.allocationBytes, add(fluidAllocationAdmitted, admitted.allocationBytes));
+				add(limit.workUnits, add(fluidWorkAdmitted, admitted.workUnits));
+			}
+		}
 		/** Only the caller holding the additional work and workspace reservation may extend an operation. */
-		public void admitAdditional(Cost admitted) { limit = limit.plus(admitted); }
+		public void admitAdditional(Cost admitted) {
+			checkAdditional(admitted);
+			if (fluidScope == null) limit = limit.plus(admitted);
+			else {
+				fluidScope.limit = fluidScope.limit.plus(admitted);
+				fluidAllocationAdmitted = add(fluidAllocationAdmitted, admitted.allocationBytes);
+				fluidWorkAdmitted = add(fluidWorkAdmitted, admitted.workUnits);
+			}
+		}
 		/** A settled synchronous stage cannot carry its refunded headroom into a later reservation. */
-		public void releaseUnusedAdmission() { limit = new Cost(allocation, 0, work); }
+		public void releaseUnusedAdmission() {
+			if (fluidScope != null) { fluidSettlementFailed = true; throw new IllegalStateException("outer validation closed with live fluid admission"); }
+			limit = new Cost(allocation, 0, work);
+		}
 		/** Call before entering the bounded sequence, including its first callback. */
 		public void debit(Cost cost) {
+			requireAvailable(cost);
+			allocation = add(allocation, cost.allocationBytes); work = add(work, cost.workUnits); peak = Math.max(peak, cost.workspaceBytes);
+			if (fluidScope != null) { fluidScope.allocation = add(fluidScope.allocation, cost.allocationBytes); fluidScope.work = add(fluidScope.work, cost.workUnits); }
+			else outerWork = add(outerWork, cost.workUnits);
+		}
+		/** Check an existing caller grant without spending it or resetting cumulative use. */
+		public void requireAvailable(Cost cost) {
+			requireFluidAccounting(); java.util.Objects.requireNonNull(cost);
 			long nextAllocation, nextWork;
-			try { nextAllocation = add(allocation, cost.allocationBytes); nextWork = add(work, cost.workUnits); }
+			Cost available = fluidScope == null ? limit : fluidScope.limit;
+			try { nextAllocation = add(fluidScope == null ? allocation : fluidScope.allocation, cost.allocationBytes);
+				nextWork = add(fluidScope == null ? work : fluidScope.work, cost.workUnits); }
 			catch (ArithmeticException overflow) { throw new InventoryItemBudget.CaptureLimitException("inventory validation accounting overflow"); }
-			if (nextAllocation > limit.allocationBytes || nextWork > limit.workUnits || cost.workspaceBytes > limit.workspaceBytes)
+			if (nextAllocation > available.allocationBytes || nextWork > available.workUnits || cost.workspaceBytes > available.workspaceBytes)
 				throw new InventoryItemBudget.CaptureLimitException("inventory validation allowance exhausted");
-			allocation = nextAllocation; work = nextWork; peak = Math.max(peak, cost.workspaceBytes);
 		}
 		public long attemptedAllocationBytes() { return allocation; }
 		public long attemptedWorkUnits() { return work; }
+		/** Caller-owned attempts exclude all fluid owners, including owners whose tickets are still live. */
+		public long attemptedOuterWorkUnits() { return outerWork; }
 		public long peakWorkspaceBytes() { return peak; }
+		/** Runtime installs this capability; sources cannot manufacture an additional ledger. */
+		public void fluidGrants(FluidGrants grants) { fluidGrants = java.util.Objects.requireNonNull(grants); }
+		public FluidGrants fluidGrants() {
+			if (fluidGrants == null) throw new IllegalStateException("fluid source requires Runtime grants"); return fluidGrants;
+		}
+		private void requireFluidAccounting() {
+			if (fluidSettlementFailed) throw new IllegalStateException("fluid admission settlement order violated");
+		}
+		/** Internal ownership token; it records only this Admission's grant and attempted debit. */
+		FluidScope beginFluid() {
+			requireFluidAccounting(); var scope = new FluidScope(fluidScope); fluidScope = scope; return scope;
+		}
+		void requireFluidScope(FluidScope scope) {
+			requireFluidAccounting();
+			if (scope.closed || fluidScope != scope) throw new IllegalStateException("fluid admission is not current owner");
+		}
+		/**
+		 * Remove only this owner's incremental grant, never restore a historical total-limit snapshot.
+		 * A non-LIFO close freezes further spending before tickets are released; every owner can still
+		 * drain its own tickets exactly once. A child can neither reintroduce nor pay its parent's grant.
+		 */
+		boolean settleFluid(FluidScope scope) {
+			if (scope.closed) throw new IllegalStateException("fluid admission already settled");
+			boolean ordered = fluidScope == scope && !fluidSettlementFailed;
+			if (!ordered) fluidSettlementFailed = true;
+			scope.closed = true;
+			fluidAllocationAdmitted -= scope.limit.allocationBytes; fluidWorkAdmitted -= scope.limit.workUnits;
+			independentlyChargedWork = add(independentlyChargedWork, scope.work);
+			limit = new Cost(add(limit.allocationBytes, scope.allocation), limit.workspaceBytes, add(limit.workUnits, scope.work));
+			while (fluidScope != null && fluidScope.closed) fluidScope = fluidScope.parent;
+			return ordered;
+		}
+		public long independentlyChargedWork() { return independentlyChargedWork; }
+	}
+	@org.jetbrains.annotations.NotNullByDefault
+	static final class FluidScope {
+		private final @org.jetbrains.annotations.Nullable FluidScope parent;
+		private Cost limit = NONE;
+		private long allocation, work;
+		private boolean closed;
+		private FluidScope(@org.jetbrains.annotations.Nullable FluidScope parent) { this.parent = parent; }
+		long attemptedWorkUnits() { return work; }
+	}
+	@org.jetbrains.annotations.NotNullByDefault
+	@FunctionalInterface
+	public interface FluidGrants {
+		InventoryFluidAdmission open(Allowance allowance, Cost memberGate, Cost authority);
 	}
 	private static Cost owned(long bytes, long work) { return new Cost(bytes, bytes, work); }
 	private static long array(long cells) { return add(O, mul(cells, R)); }
@@ -52,7 +140,7 @@ public final class InventoryValidationBudget {
 	public static Cost bookkeeping() { return owned(32 * 128 * (O + 3 * Long.BYTES), 32 * 128); }
 
 	/** Scratch, closure, four frozen witness arrays, partner positions and ledger/callback state. */
-	public static Cost fixed(InventorySnapshotLayout layout) {
+	public static Cost fixed(@org.jetbrains.annotations.Nullable InventorySnapshotLayout layout) {
 		long m = layout == null ? 1 : layout.members().size();
 		long scratch = add(O + R, add(mul(2, array(16)), mul(2, array(1))));
 		long witnesses = add(mul(4, array(m)), mul(m, O));
@@ -201,7 +289,7 @@ public final class InventoryValidationBudget {
 		return new Cost(add(bytes, segments * array(slots)), add(bytes, array(slots)),
 			members + segments * slots + slots + 65536 + 3 * 256);
 	}
-	private static boolean vanilla(InventorySnapshotLayout layout) {
+	private static boolean vanilla(@org.jetbrains.annotations.Nullable InventorySnapshotLayout layout) {
 		return layout != null && (layout.layoutId().equals("minecraft:container") || layout.layoutId().equals("minecraft:double_chest"));
 	}
 	/** A failed native single-to-double rebuild still checks two independent locks. */
@@ -210,7 +298,7 @@ public final class InventoryValidationBudget {
 		return vanilla(layout) ? Math.max(2, frozenLocks) : add(frozenLocks, 1); // provider root check precedes member precheck
 	}
 	/** One complete source.valid/current reacquisition, before the first world/provider callback. */
-	public static Cost view(InventorySnapshotLayout layout, boolean vault) {
+	public static Cost view(@org.jetbrains.annotations.Nullable InventorySnapshotLayout layout, boolean vault) {
 		if (layout == null) return layoutlessView();
 		long m = layout.members().size(), n = InventoryObservationSnapshot.visibleSlots(layout);
 		boolean vanilla = vanilla(layout);
@@ -245,7 +333,7 @@ public final class InventoryValidationBudget {
 		if (!java.util.Objects.equals(expected, current)) throw new InventorySourceUnavailableException("inventory provider layout changed");
 	}
 	public static Cost layoutlessDiscovery() { return bookkeeping().plus(fixed(null)).plus(layoutlessView().times(3)); }
-	public static Cost viewValidation(InventorySnapshotLayout layout, boolean vault, long frozenLocks) {
+	public static Cost viewValidation(@org.jetbrains.annotations.Nullable InventorySnapshotLayout layout, boolean vault, long frozenLocks) {
 		return view(layout, vault).overlap(layout == null ? locks(frozenLocks) : members(layout, viewLockMembers(layout, frozenLocks)));
 	}
 	public static Cost supported(InventorySnapshotLayout layout, boolean provider, boolean vault) {
@@ -279,7 +367,7 @@ public final class InventoryValidationBudget {
 			InventoryObservationSnapshot.visibleSlots(layout)));
 	}
 	/** Discovery: one view validation and one capability classification. */
-	public static Cost discovery(InventorySnapshotLayout layout, boolean provider, boolean vault, long locks) {
+	public static Cost discovery(@org.jetbrains.annotations.Nullable InventorySnapshotLayout layout, boolean provider, boolean vault, long locks) {
 		if (layout == null) return layoutlessDiscovery();
 		return fixed(layout).overlap(bookkeeping().plus(viewValidation(layout, vault, locks)).plus(supported(layout, provider, vault)));
 	}

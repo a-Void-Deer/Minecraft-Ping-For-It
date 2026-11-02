@@ -96,8 +96,8 @@ class InventoryObservationSnapshotTest {
 		})) {
 			runtime.advance(0, settings);
 			var consumer = runtime.attach(input, new InventoryRuntime.PreviewSubject(input.readOwner())).orElseThrow();
-			var all = new java.util.ArrayList<nx.pingwheel.common.presentation.inventory.InventoryDomainCodec.Item>();
-			InventoryRuntime.Observation page = null;
+			var all = new java.util.ArrayList<nx.pingwheel.common.presentation.inventory.@org.jetbrains.annotations.Nullable InventoryResourceValue>();
+			InventoryRuntime.@org.jetbrains.annotations.Nullable Observation page = null;
 			for (int call = 0; all.size() < 27 && call < 27; call++) { page = runtime.step(consumer).orElseThrow(); all.addAll(page.slots()); }
 			assertNotNull(page);
 			var original = new InventoryRuntime.Observation(page.result(), all);

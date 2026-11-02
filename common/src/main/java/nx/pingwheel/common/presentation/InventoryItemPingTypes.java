@@ -31,4 +31,11 @@ public final class InventoryItemPingTypes {
 	public boolean allows(String pingTypeId, String registryId, Set<String> tagIds) {
 		return effective(registryId, tagIds).contains(pingTypeId);
 	}
+	public List<String> effective(nx.pingwheel.common.presentation.inventory.InventoryResourceKind kind, String registryId, Set<String> tagIds) {
+		return kind == nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM ? effective(registryId, tagIds)
+			: PresentationPropertyPingTypes.builtIn().effective(registryId, tagIds);
+	}
+	public boolean allows(nx.pingwheel.common.presentation.inventory.InventoryResourceKind kind, String pingTypeId, String registryId, Set<String> tagIds) {
+		return effective(kind, registryId, tagIds).contains(pingTypeId);
+	}
 }

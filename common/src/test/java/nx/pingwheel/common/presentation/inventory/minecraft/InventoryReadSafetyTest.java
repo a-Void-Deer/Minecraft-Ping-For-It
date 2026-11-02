@@ -51,6 +51,20 @@ class InventoryReadSafetyTest {
 		assertEquals(nx.pingwheel.common.presentation.inventory.InventorySharedRead.Check.UNAVAILABLE, InventoryReadSafety.check(chest, ItemStack.EMPTY));
 		assertEquals(0, chest.itemReads + chest.implicitReads);
 	}
+	@Test void fluidCumulativeLockBudgetRechecksEveryCurrentKeyInsteadOfCachingAuthority() {
+		var chest = new Chest(); var key = new ItemStack(Items.STICK);
+		key.set(DataComponents.CUSTOM_NAME, Component.literal("owner-key"));
+		var budget = InventoryItemBudget.capture(InventoryItemCodec.minimumDisplayBytes(), 4096, 1,
+			InventoryItemBudget.workUpperBound(InventoryItemCodec.minimumDisplayBytes()));
+		for (int gate = 0; gate < 1000; gate++) assertEquals(nx.pingwheel.common.presentation.inventory.InventorySharedRead.Check.VALID,
+			InventoryReadSafety.check(chest, key, budget));
+		key.set(DataComponents.CUSTOM_NAME, Component.literal("revoked-key"));
+		assertEquals(nx.pingwheel.common.presentation.inventory.InventorySharedRead.Check.AUTHORITY_DENIED, InventoryReadSafety.check(chest, key, budget));
+		chest.lock = new LockCode("revoked-key");
+		assertEquals(nx.pingwheel.common.presentation.inventory.InventorySharedRead.Check.VALID, InventoryReadSafety.check(chest, key, budget));
+		assertEquals(0, chest.itemReads + chest.implicitReads);
+		assertTrue(budget.attemptedWork() < InventoryItemBudget.workUpperBound(InventoryItemCodec.minimumDisplayBytes()));
+	}
 	static final class Sided extends SimpleContainer implements WorldlyContainer {
 		int[] mapping = {2, 0}; Direction received;
 		Sided() { super(3); }

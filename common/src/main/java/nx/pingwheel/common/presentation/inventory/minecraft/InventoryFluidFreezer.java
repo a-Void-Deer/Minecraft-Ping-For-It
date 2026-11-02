@@ -1,0 +1,71 @@
+package nx.pingwheel.common.presentation.inventory.minecraft;
+
+import java.util.Objects;
+import net.minecraft.core.HolderLookup;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.world.level.material.Fluids;
+import nx.pingwheel.common.platform.IPlatformFluidService;
+import nx.pingwheel.common.presentation.inventory.InventoryFluidCodec;
+import nx.pingwheel.common.presentation.inventory.InventoryFluidDisplayCodec;
+import nx.pingwheel.common.presentation.inventory.InventoryFluidValue;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+
+/** Synchronous borrowed-fluid transaction. Only complete bounded canonical bytes and detached display escape. */
+@NotNullByDefault
+public final class InventoryFluidFreezer {
+	private InventoryFluidFreezer() {}
+	private static final InventoryResidentAccess RAW = InventoryResidentAccess.load();
+	private static final InventoryItemNativeAccess NATIVE = InventoryItemNativeAccess.load();
+
+	public static @Nullable InventoryFluidValue freeze(IPlatformFluidService.Entry entry, HolderLookup.Provider registries,
+		int displayBytes, InventoryFluidCodec.Catalog catalog, InventoryCatalogAdmission admission) {
+		Objects.requireNonNull(entry); Objects.requireNonNull(registries); Objects.requireNonNull(catalog); Objects.requireNonNull(admission);
+		if (entry.amount() == 0) return null;
+		IPlatformFluidService.Resident resident = Objects.requireNonNull(entry.resident());
+		var budget = InventoryItemBudget.root(displayBytes);
+		InventoryRegistryShapes.initialize(); InventoryItemFreezer.initialize(); InventoryComponentCertificate.initialize();
+		budget.begin(displayBytes);
+		try {
+			// Reliable registration and amount precede the identity-refusal boundary.
+			budget.work(InventoryRegistryContext.valueWork(BuiltInRegistries.FLUID, RAW));
+			@Nullable var location = BuiltInRegistries.FLUID.getKey(resident.fluid());
+			if (location == null || resident.fluid() == Fluids.EMPTY || BuiltInRegistries.FLUID.get(location) != resident.fluid())
+				throw new InventoryItemBudget.InvalidInputException("unregistered or empty fluid");
+			int length = location.getNamespace().length() + location.getPath().length() + 1;
+			if (length > 256) throw new InventoryItemBudget.InvalidInputException("fluid registry id bound");
+			budget.allocate(1024 + 16L * length, 0, 16, 16); budget.work(8192 + 64L * length);
+			String id = location.toString();
+			String label = "block." + id.replace(':', '.').replace('/', '.');
+			InventoryFluidCodec.Identity identity;
+			try {
+				byte @Unmodifiable [] canonical;
+				if (resident instanceof IPlatformFluidService.Components components) {
+					canonical = InventoryItemFreezer.fluidPatch(components.patch(), registries, displayBytes, budget, RAW, NATIVE);
+				} else {
+					var nbt = (IPlatformFluidService.Nbt) resident;
+					if (nbt.tag() == null) canonical = new byte[] {0}; // native absent tag remains distinct from an empty compound
+					else {
+						var bounds = new InventoryComponentBounds(budget, RAW);
+						canonical = InventoryCanonicalWriter.writeFluid(bounds.ownedPersistentTag(nbt.tag(), 0), budget);
+					}
+				}
+				budget.allocate(canonical.length, 0, 1, 2); budget.work(canonical.length);
+				identity = InventoryFluidCodec.Identity.exact(canonical);
+			} catch (InventoryItemBudget.CaptureLimitException exhausted) {
+				throw exhausted;
+			} catch (RuntimeException refused) {
+				// Only this identity transaction is inside the fallback boundary. Reliable
+				// registry/amount and later display/catalogue/admission failures are not.
+				identity = InventoryFluidCodec.Identity.refused();
+			}
+			// The ID-only A0 projection fits the legal minimum display ceiling. Native names are optional;
+			// this route never expands a component/NBT text graph merely to obtain display.
+			budget.beginDisplay(); budget.allocate(8192, 0, 24, 24); budget.work(16384);
+			String json = InventoryFluidDisplayCodec.encode(new InventoryFluidDisplayCodec.Projection(id));
+			var display = new InventoryFluidValue.Display(id, label, json);
+			return catalog.intern(id, entry.amount(), identity, display, admission);
+		} finally { budget.end(); }
+	}
+}

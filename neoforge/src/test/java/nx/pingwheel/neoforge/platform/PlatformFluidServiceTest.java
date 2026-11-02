@@ -16,9 +16,12 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.material.Fluids;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.capability.IFluidHandler;
+import nx.pingwheel.common.platform.FluidAddressWitness;
 import nx.pingwheel.common.platform.IPlatformFluidService;
 import nx.pingwheel.common.platform.IPlatformFluidService.Operation;
 import nx.pingwheel.common.platform.IPlatformFluidService.OperationProfile;
+import nx.pingwheel.common.platform.IPlatformFluidService.WitnessMatch;
+import nx.pingwheel.common.platform.IPlatformFluidService.WitnessUse;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission;
 import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
@@ -30,6 +33,11 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.MethodInsnNode;
+import org.objectweb.asm.tree.TypeInsnNode;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Executed capability seam; no Create classes, loader launch, live world or native copying is assumed. */
@@ -52,6 +60,13 @@ public class PlatformFluidServiceTest {
 		public java.util.Optional<String> alias() { return delegate.alias(); }
 		public boolean stableCursor() { return delegate.stableCursor(); }
 		public int slots() { return delegate.slots(); }
+		public OperationProfile witnessProfile(WitnessUse use) { return delegate.witnessProfile(use); }
+		public FluidAddressWitness captureWitness() {
+			try (var a = admission(); var op = a.enter(witnessProfile(WitnessUse.CAPTURE))) { return delegate.captureWitness(op); }
+		}
+		public WitnessMatch compareWitness(FluidAddressWitness expected) {
+			try (var a = admission(); var op = a.enter(witnessProfile(WitnessUse.COMPARE))) { return delegate.compareWitness(expected, op); }
+		}
 		public OperationProfile validationProfile() { return delegate.validationProfile(); }
 		public OperationProfile readProfile() { return delegate.readProfile(); }
 		public InventoryValidationBudget.Cost validationCost() { return validationProfile().cost(GATE, GATE); }
@@ -495,6 +510,212 @@ public class PlatformFluidServiceTest {
 			assertEquals(0, memory.reserved()); assertEquals(0, memory.retained());
 		}
 	}
+
+	@Test void detachedWitnessSurvivesAccessCloseAndFreshSameHandlerWithIndependentRetainedOwnership() throws Exception {
+		var world = new World(); var old = resolve(world, BlockPos.ZERO, Direction.NORTH).orElseThrow();
+		var layout = old.layout(); var memory = new RetainedMemoryLedger(1_000_000);
+		var ledger = new CostLedger(Map.of(WORK, 1_000_000L));
+		FluidAddressWitness expected; InventoryFluidAdmission.Ownership ownership;
+		try (var a = new InventoryFluidAdmission(ledger, WORK, memory, GATE, GATE);
+			var op = a.enter(old.witnessProfile(WitnessUse.CAPTURE))) {
+			expected = old.delegate.captureWitness(op); ownership = a.retain();
+			assertEquals(368 + 512, ownership.bytes(), "witness plus caller's retained-ticket bookkeeping");
+		}
+		try (ownership) {
+			assertEquals(0, memory.reserved()); assertEquals(ownership.bytes(), memory.retained());
+			old.close(); old.close(); assertReleasedAccess(old.delegate);
+			assertEquals(ownership.bytes(), memory.retained(), "Access does not own the detached witness ticket");
+			try (var fresh = resolve(world, BlockPos.ZERO, Direction.NORTH).orElseThrow();
+				var a = new InventoryFluidAdmission(ledger, WORK, memory, GATE, GATE);
+				var op = a.enter(fresh.witnessProfile(WitnessUse.COMPARE))) {
+				assertEquals(layout, fresh.layout()); assertNotSame(old.delegate, fresh.delegate);
+				assertEquals(IPlatformFluidService.TopologyEvidence.PUBLIC_ADDRESS_ONLY, fresh.delegate.routeInfo().topology());
+				assertEquals(WitnessMatch.SAME, fresh.delegate.compareWitness(expected, op));
+				try (var schema = a.enter(fresh.witnessProfile(WitnessUse.COMPARE))) {
+					assertEquals(WitnessMatch.SAME, expected.compare(FluidAddressWitness.Schema.NEOFORGE_CAPABILITY_V1,
+						new Object[] {world.handler()}, schema), "schema is exactly the handler-only NeoForge vector");
+				}
+				assertEquals(0, world.handler().reads);
+			}
+			assertEquals(ownership.bytes(), memory.retained(), "comparison adds no retained ownership");
+			assertEquals(0, memory.reserved());
+		}
+		ownership.close(); assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+		assertEquals(3 * (72 + 128), ledger.used(WORK), "helper work is debited once per operation");
+	}
+
+	@Test void sameLayoutFreshHandlerIsChangedBeforeAnyContentRead() {
+		var world = new World(); var original = world.handler();
+		var old = resolve(world, BlockPos.ZERO, Direction.WEST).orElseThrow();
+		var expected = old.captureWitness(); var layout = old.layout(); old.close();
+		world.handler = new Handler();
+		try (var fresh = resolve(world, BlockPos.ZERO, Direction.WEST).orElseThrow()) {
+			assertEquals(layout, fresh.layout()); assertTrue(fresh.valid());
+			assertEquals(WitnessMatch.CHANGED, fresh.compareWitness(expected));
+			assertEquals(0, original.reads); assertEquals(0, world.handler().reads);
+		}
+	}
+
+	@Test void orderedCapacityChangeAcrossAcquisitionsAlreadyChangesDetachedLayoutWithoutWideningTheWitness() {
+		var world = new World(); var old = resolve(world, BlockPos.ZERO, Direction.UP).orElseThrow();
+		var expected = old.captureWitness(); var layout = old.layout(); old.close();
+		world.handler().capacities = new int[] {2000, 1000}; // Same count and total, different ordered addresses.
+		try (var fresh = resolve(world, BlockPos.ZERO, Direction.UP).orElseThrow()) {
+			assertNotEquals(layout.layoutData(), fresh.layout().layoutData()); assertNotEquals(layout, fresh.layout());
+			assertEquals(WitnessMatch.SAME, fresh.compareWitness(expected), "capacity evidence stays in layout, not the K=1 identity vector");
+			assertEquals(0, world.handler().reads);
+		}
+	}
+
+	@Test void deterministicallyClearedHistoricalHandlerIsUnverifiableNotSameOrChanged() throws Exception {
+		var world = new World(); var old = resolve(world, BlockPos.ZERO, Direction.NORTH).orElseThrow();
+		var expected = old.captureWitness(); old.close(); assertReleasedAccess(old.delegate);
+		try (var fresh = resolve(world, BlockPos.ZERO, Direction.NORTH).orElseThrow()) {
+			assertEquals(WitnessMatch.SAME, fresh.compareWitness(expected), "closing Access does not clear historical evidence");
+			var clear = FluidAddressWitness.class.getDeclaredMethod("clearForTesting", int.class); clear.setAccessible(true); clear.invoke(expected, 0);
+			assertEquals(WitnessMatch.UNVERIFIABLE, fresh.compareWitness(expected));
+			assertEquals(0, world.handler().reads);
+		}
+	}
+
+	@Test void cachedK1WitnessProfilesDebitExactlyOnceAndInvokeNoNativeMemberOrAuthorityCallbacks() {
+		for (int count : new int[] {0, 2, 4096}) {
+			var world = new World(); var handler = world.handler(); handler.count = count; handler.capacities = new int[count];
+			try (var access = resolve(world, BlockPos.ZERO, Direction.NORTH).orElseThrow(); var a = admission()) {
+				var capture = access.witnessProfile(WitnessUse.CAPTURE); var compare = access.witnessProfile(WitnessUse.COMPARE);
+				assertSame(capture, access.witnessProfile(WitnessUse.CAPTURE)); assertSame(compare, access.witnessProfile(WitnessUse.COMPARE));
+				assertEquals(new OperationProfile(new InventoryValidationBudget.Cost(896, 896, 72), 0, 0, 368), capture);
+				assertEquals(new OperationProfile(new InventoryValidationBudget.Cost(264, 264, 72), 0, 0, 0), compare);
+				int calls = world.callbacks, queries = world.faces.size(), counts = handler.countReads, capacities = handler.capacityReads;
+				world.allowed = false; // Witness identity is not authorization and must not call the denied gates.
+				FluidAddressWitness expected;
+				try (var op = a.enter(capture)) {
+					long allocation = op.allowance().attemptedAllocationBytes(), work = op.allowance().attemptedWorkUnits();
+					expected = access.delegate.captureWitness(op);
+					assertEquals(896, op.allowance().attemptedAllocationBytes() - allocation);
+					assertEquals(72, op.allowance().attemptedWorkUnits() - work);
+				}
+				try (var op = a.enter(compare)) {
+					long allocation = op.allowance().attemptedAllocationBytes(), work = op.allowance().attemptedWorkUnits();
+					assertEquals(WitnessMatch.SAME, access.delegate.compareWitness(expected, op));
+					assertEquals(264, op.allowance().attemptedAllocationBytes() - allocation);
+					assertEquals(72, op.allowance().attemptedWorkUnits() - work);
+					assertThrows(InventoryItemBudget.CaptureLimitException.class, () -> access.delegate.compareWitness(expected, op), "no grant refill");
+				}
+				assertEquals(calls, world.callbacks); assertEquals(queries, world.faces.size());
+				assertEquals(counts, handler.countReads); assertEquals(capacities, handler.capacityReads); assertEquals(0, handler.reads);
+				assertFalse(access.valid(), "a matching witness cannot replace current authority validation");
+			}
+		}
+	}
+
+	@Test void oneShortWitnessWorkAndMemoryAdmissionRefuseBeforeExecutionAndExactGrantsReleaseAllTickets() {
+		var world = new World();
+		try (var access = resolve(world, BlockPos.ZERO, Direction.NORTH).orElseThrow()) {
+			var expected = access.captureWitness();
+			for (WitnessUse use : WitnessUse.values()) for (boolean memoryShort : new boolean[] {false, true}) for (boolean oneShort : new boolean[] {true, false}) {
+				var profile = access.witnessProfile(use);
+				long work = profile.ownedCost().workUnits() + 128;
+				long bytes = profile.ownedCost().workspaceBytes() + 2048 + (profile.retainedBytes() == 0 ? 0 : profile.retainedBytes() + 512);
+				var ledger = new CostLedger(Map.of(WORK, work - (oneShort && !memoryShort ? 1 : 0)));
+				var memory = new RetainedMemoryLedger(bytes - (oneShort && memoryShort ? 1 : 0));
+				boolean[] entered = {false}; int calls = world.callbacks, counts = world.handler().countReads, capacities = world.handler().capacityReads;
+				try (var a = new InventoryFluidAdmission(ledger, WORK, memory, GATE, GATE)) {
+					Runnable execute = () -> {
+						try (var op = a.enter(profile)) {
+							entered[0] = true;
+							if (use == WitnessUse.CAPTURE) assertNotNull(access.delegate.captureWitness(op));
+							else assertEquals(WitnessMatch.SAME, access.delegate.compareWitness(expected, op));
+						}
+					};
+					if (oneShort) assertThrows(InventoryItemBudget.CaptureLimitException.class, execute::run); else execute.run();
+				}
+				assertEquals(!oneShort, entered[0]); assertEquals(oneShort ? 0 : work, ledger.used(WORK));
+				assertEquals(0, memory.reserved()); assertEquals(0, memory.retained());
+				assertEquals(calls, world.callbacks); assertEquals(counts, world.handler().countReads);
+				assertEquals(capacities, world.handler().capacityReads); assertEquals(0, world.handler().reads);
+			}
+		}
+	}
+
+	@Test void productionGuardedWitnessDelegatesWithoutMemberOrAuthorityCallsAndHonorsWrapperClosure() {
+		var world = new World(); var level = allocate(NativeWorld.class); level.server = allocate(NativeServer.class);
+		var calls = new AtomicInteger();
+		var context = new IPlatformFluidService.Context(level, BlockPos.ZERO, Direction.NORTH, UUID.randomUUID(),
+			(position, op) -> { calls.incrementAndGet(); throw new AssertionError("witness member callback"); },
+			op -> { calls.incrementAndGet(); throw new AssertionError("witness authority callback"); });
+		try (var access = resolve(world, BlockPos.ZERO, Direction.NORTH).orElseThrow();
+			var guarded = IPlatformFluidService.guarded(context, access.delegate); var a = admission()) {
+			assertSame(access.witnessProfile(WitnessUse.CAPTURE), guarded.witnessProfile(WitnessUse.CAPTURE));
+			assertSame(access.witnessProfile(WitnessUse.COMPARE), guarded.witnessProfile(WitnessUse.COMPARE));
+			int before = world.callbacks; FluidAddressWitness expected;
+			try (var op = a.enter(guarded.witnessProfile(WitnessUse.CAPTURE))) { expected = guarded.captureWitness(op); }
+			try (var op = a.enter(guarded.witnessProfile(WitnessUse.COMPARE))) {
+				assertEquals(WitnessMatch.SAME, guarded.compareWitness(expected, op)); guarded.close();
+				assertThrows(IllegalStateException.class, () -> guarded.captureWitness(op));
+				assertThrows(IllegalStateException.class, () -> guarded.compareWitness(expected, op));
+			}
+			assertEquals(0, calls.get()); assertEquals(before, world.callbacks); assertEquals(0, world.handler().reads);
+		}
+	}
+
+	@Test void underfundedAllocationWorkspaceOrWorkRefusesWitnessWithoutSpendingTheCallerAllowance() {
+		var world = new World();
+		try (var access = resolve(world, BlockPos.ZERO, Direction.NORTH).orElseThrow()) {
+			var expected = access.captureWitness();
+			for (WitnessUse use : WitnessUse.values()) for (String dimension : List.of("allocation", "workspace", "work")) {
+				var cost = access.witnessProfile(use).ownedCost();
+				var allowance = new InventoryValidationBudget.Allowance(new InventoryValidationBudget.Cost(
+					cost.allocationBytes() - (dimension.equals("allocation") ? 1 : 0),
+					cost.workspaceBytes() - (dimension.equals("workspace") ? 1 : 0), cost.workUnits() - (dimension.equals("work") ? 1 : 0)));
+				int calls = world.callbacks;
+				try (var op = operation(OperationProfile.NONE, allowance)) {
+					if (use == WitnessUse.CAPTURE) assertThrows(InventoryItemBudget.CaptureLimitException.class, () -> access.delegate.captureWitness(op));
+					else assertThrows(InventoryItemBudget.CaptureLimitException.class, () -> access.delegate.compareWitness(expected, op));
+				}
+				assertEquals(0, allowance.attemptedAllocationBytes()); assertEquals(0, allowance.attemptedWorkUnits());
+				assertEquals(0, allowance.peakWorkspaceBytes()); assertEquals(calls, world.callbacks); assertEquals(0, world.handler().reads);
+			}
+		}
+	}
+
+	@Test void witnessHeadroomCheckPrecedesTheTemporaryStrongArrayInBothAdapterOperations() throws Exception {
+		// A refused temporary allocation is invisible to Allowance's counters. Audit this ordering
+		// boundary in the executed adapter bytecode as well as exercising the refused operations.
+		var node = new ClassNode();
+		try (var input = java.util.Objects.requireNonNull(FluidCapabilityAccess.class.getResourceAsStream("FluidCapabilityAccess.class"))) {
+			new ClassReader(input).accept(node, 0);
+		}
+		for (String name : List.of("captureWitness", "compareWitness")) {
+			var method = node.methods.stream().filter(candidate -> candidate.name.equals(name)).findFirst().orElseThrow();
+			boolean checked = false; int arrays = 0;
+			for (var instruction : method.instructions) {
+				if (instruction instanceof MethodInsnNode call && call.owner.equals(InventoryValidationBudget.Allowance.class.getName().replace('.', '/'))
+					&& call.name.equals("requireAvailable")) checked = true;
+				if (instruction instanceof TypeInsnNode array && array.getOpcode() == Opcodes.ANEWARRAY && array.desc.equals("java/lang/Object")) {
+					assertTrue(checked, name + " must preflight before allocating its strong identity vector"); arrays++;
+				}
+			}
+			assertEquals(1, arrays, "only the temporary K=1 handler vector is adapter-owned");
+		}
+	}
+
+	@Test void closedAccessAndExpiredOperationCannotCaptureOrCompareAndDoNotSpendOrCallAnything() throws Exception {
+		for (WitnessUse use : WitnessUse.values()) for (boolean closeAccess : new boolean[] {true, false}) {
+			var world = new World();
+			try (var access = resolve(world, BlockPos.ZERO, Direction.NORTH).orElseThrow(); var a = admission();
+				var op = a.enter(access.witnessProfile(use))) {
+				var expected = access.captureWitness(); var allowance = op.allowance();
+				long allocation = allowance.attemptedAllocationBytes(), work = allowance.attemptedWorkUnits(); int calls = world.callbacks;
+				if (closeAccess) { access.close(); assertReleasedAccess(access.delegate); } else op.close();
+				if (use == WitnessUse.CAPTURE) assertThrows(IllegalStateException.class, () -> access.delegate.captureWitness(op));
+				else assertThrows(IllegalStateException.class, () -> access.delegate.compareWitness(expected, op));
+				assertEquals(allocation, allowance.attemptedAllocationBytes()); assertEquals(work, allowance.attemptedWorkUnits());
+				assertEquals(calls, world.callbacks); assertEquals(0, world.handler().reads);
+			}
+		}
+	}
+
 	public static void assertReleasedProbe(IPlatformFluidService.Probe probe) throws Exception {
 		for (var field : probe.getClass().getDeclaredFields()) if (List.of("route", "handler", "discovery", "origin").contains(field.getName())) {
 			field.setAccessible(true); assertNull(field.get(probe), "closed probe releases " + field.getName());
@@ -622,6 +843,9 @@ public class PlatformFluidServiceTest {
 		private FluidStack stack = FluidStack.EMPTY;
 		private @Nullable RuntimeException failure;
 		private boolean nullStack;
+		@Override public boolean equals(@Nullable Object other) { throw new AssertionError("native handler equals"); }
+		@Override public int hashCode() { throw new AssertionError("native handler hashCode"); }
+		@Override public String toString() { throw new AssertionError("native handler formatting"); }
 		@Override public int getTanks() { countReads++; return count; }
 		@Override public @Nullable FluidStack getFluidInTank(int tank) {
 			reads++;

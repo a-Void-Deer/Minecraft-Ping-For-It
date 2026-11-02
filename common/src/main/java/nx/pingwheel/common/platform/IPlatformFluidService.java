@@ -2,10 +2,9 @@ package nx.pingwheel.common.platform;
 
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.ServiceLoader;
 import java.util.UUID;
-import java.util.function.BooleanSupplier;
-import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -26,8 +25,8 @@ import org.jetbrains.annotations.Nullable;
  * loader FluidStack, maps fluid to ItemStack, mutates storage, opens a transaction, loads a chunk or
  * triggers loot. Missing registration is a normal unavailable route, not a startup failure.
  *
- * <p>Caller sequence: reserve ONE Runtime's work/workspace; find(context, allowance); retain the
- * detached layout and source-owned world/member witnesses; reserve validation/read profiles; validate;
+ * <p>Caller sequence: admit probeProfile; probe(context, operation); admit the discovered shape through
+ * Probe.finish; retain detached layout and source-owned witnesses; admit validation/read profiles; validate;
  * consume an address (or one bounded cursorless pass); synchronously freeze in the visitor; validate
  * original root/member objects, current route/controller/mode and owner again before committing data.
  * Revalidate the exact historical evidence again before publication. No successful check is cached.
@@ -47,31 +46,108 @@ public interface IPlatformFluidService {
 	/** Layout segments describe tank/view addresses, not item slots or an NBT save path. */
 	String ADDRESS_SCHEMA = "pingforit:fluid.address.v1";
 	IPlatformFluidService NONE = new IPlatformFluidService() {
-		@Override public InventoryValidationBudget.Cost resolutionCost() { return InventoryValidationBudget.NONE; }
-		@Override public Optional<Access> resolve(Context context) { return Optional.empty(); }
-		@Override public Optional<Access> find(Context context, InventoryValidationBudget.Allowance allowance) {
-			Objects.requireNonNull(context); Objects.requireNonNull(allowance); return Optional.empty();
+		@Override public OperationProfile probeProfile() { return OperationProfile.NONE; }
+		@Override public Optional<Probe> probe(Context context, Operation operation) {
+			Objects.requireNonNull(context); Objects.requireNonNull(operation).allowance(); return Optional.empty();
 		}
 	};
 	IPlatformFluidService INSTANCE = ServiceLoader.load(IPlatformFluidService.class).findFirst().orElse(NONE);
 
 	/**
-	 * Pure cached upper bound including find's wrapper/bookkeeping and all owned resolution work,
-	 * before any callback. Source-owned authority callback costs are admitted separately by the source.
+	 * Pure upper bounds include cold, denied, exceptional and closing paths; visitor work is separate.
+	 * Provider execution debits only its ownedCost. Context callbacks debit their own composed cost.
+	 * retainedBytes is incremental newly owned metadata, not the total repeated at each nested stage.
 	 */
-	InventoryValidationBudget.Cost resolutionCost();
-	/**
-	 * Implementation hook entered only under resolutionCost admission. Metadata only: no fluid getter,
-	 * full save or eager snapshot. Bounded indexed addressing must not be implemented by a full scan.
-	 * Exceptions propagate so budget deferral cannot be confused with source absence.
-	 */
-	Optional<Access> resolve(Context context);
-	default Optional<Access> find(Context context, InventoryValidationBudget.Allowance allowance) {
-		Objects.requireNonNull(context); Objects.requireNonNull(allowance).debit(resolutionCost());
-		context.require(context.root());
-		Optional<Access> result = resolve(context);
-		context.require(context.root());
-		return result.map(access -> new GuardedAccess(context, access));
+	@NotNullByDefault
+	record OperationProfile(InventoryValidationBudget.Cost ownedCost, long memberGateCalls,
+		long currentAuthorityCalls, long retainedBytes) {
+		public static final OperationProfile NONE = new OperationProfile(InventoryValidationBudget.NONE, 0, 0, 0);
+		public OperationProfile {
+			Objects.requireNonNull(ownedCost);
+			if (memberGateCalls < 0 || currentAuthorityCalls < 0 || retainedBytes < 0)
+				throw new IllegalArgumentException("negative fluid operation profile");
+		}
+		public OperationProfile plus(OperationProfile other) {
+			Objects.requireNonNull(other);
+			return new OperationProfile(ownedCost.plus(other.ownedCost), Math.addExact(memberGateCalls, other.memberGateCalls),
+				Math.addExact(currentAuthorityCalls, other.currentAuthorityCalls), Math.addExact(retainedBytes, other.retainedBytes));
+		}
+		public OperationProfile times(long count) {
+			if (count < 0) throw new IllegalArgumentException("negative fluid operation count");
+			return count == 0 ? NONE : new OperationProfile(ownedCost.times(count), Math.multiplyExact(memberGateCalls, count),
+				Math.multiplyExact(currentAuthorityCalls, count), Math.multiplyExact(retainedBytes, count));
+		}
+		/** Source callbacks are independent; neither is hidden inside the provider's owned cost. */
+		public InventoryValidationBudget.Cost cost(InventoryValidationBudget.Cost memberGate, InventoryValidationBudget.Cost authority) {
+			Objects.requireNonNull(memberGate); Objects.requireNonNull(authority);
+			var callbacks = (memberGateCalls == 0 ? InventoryValidationBudget.NONE : memberGate.times(memberGateCalls))
+				.plus(currentAuthorityCalls == 0 ? InventoryValidationBudget.NONE : authority.times(currentAuthorityCalls));
+			return ownedCost.overlap(callbacks);
+		}
+	}
+	/** Probe metadata only. A stable route may not know N until finish has gated all M members. */
+	@NotNullByDefault
+	record Shape(int members, OptionalInt indexedSlots, boolean stableCursor) {
+		public Shape {
+			Objects.requireNonNull(indexedSlots);
+			if (members < 1 || members > InventorySnapshotLayout.MAX_MEMBERS || indexedSlots.isPresent()
+				&& (indexedSlots.getAsInt() < 0 || indexedSlots.getAsInt() > InventorySourceAccess.MAX_SLOTS
+					|| !stableCursor && indexedSlots.getAsInt() != 0)) throw new IllegalArgumentException("fluid probe shape bound");
+		}
+	}
+	@NotNullByDefault
+	enum TopologyEvidence { PUBLIC_ADDRESS_ONLY, EXPLICIT_STRUCTURE }
+	@NotNullByDefault
+	enum WitnessUse { CAPTURE, COMPARE }
+	@NotNullByDefault
+	enum WitnessMatch { SAME, CHANGED, UNVERIFIABLE }
+	@NotNullByDefault
+	record RouteInfo(TopologyEvidence topology, String providerClass) {
+		public RouteInfo {
+			Objects.requireNonNull(topology); Objects.requireNonNull(providerClass);
+			if (providerClass.isBlank() || providerClass.length() > 1024 || providerClass.chars().anyMatch(Character::isISOControl))
+				throw new IllegalArgumentException("fluid provider class bound");
+		}
+	}
+	@NotNullByDefault
+	@FunctionalInterface
+	interface Admission {
+		/** Reserve before callbacks/allocation. Execution debits ownedCost once; source gates debit their own work. */
+		Operation enter(OperationProfile profile);
+	}
+	@NotNullByDefault
+	interface Operation extends AutoCloseable {
+		/** Same cumulative caller allowance across nested stages; never a refill or a new per-member allowance. */
+		InventoryValidationBudget.Allowance allowance();
+		/** Additional owned work must get a genuine caller grant BEFORE execution/debit, or throw budget deferral. */
+		void requireAdditional(InventoryValidationBudget.Cost cost);
+		@Override void close();
+	}
+	@NotNullByDefault
+	@FunctionalInterface
+	interface MemberGate { boolean test(BlockPos member, Operation operation); }
+	@NotNullByDefault
+	@FunctionalInterface
+	interface AuthorityGate { boolean test(Operation operation); }
+	/** Pure cached profile, before the first provider/world callback. */
+	OperationProfile probeProfile();
+	/** Root/controller/count/size only: no full-member allocation, iterator/content getter or layout construction. */
+	Optional<Probe> probe(Context context, Operation operation);
+	@NotNullByDefault
+	interface Probe extends AutoCloseable {
+		/** Pure frozen metadata, with no gate, capability lookup or allocation proportional to M/N. */
+		Shape shape();
+		/** Pure incremental finish bound for the known shape, excluding separately admitted later N growth. */
+		OperationProfile finishProfile();
+		/**
+		 * Single use, synchronous and never tick-retained. Enter finishProfile before work. Gate all M members
+		 * before a controller capability; when N is then known, enter its incremental profile BEFORE allocating
+		 * layout/underlying/capacity arrays. Share Admission/allowance, including failure/closing callbacks.
+		 * Close partial state on every failure; successful Access owns its metadata, never the probe ticket.
+		 */
+		Optional<Access> finish(Admission admission);
+		/** Idempotent release only; any provider closing callbacks run inside the admitted probe/finish operation. */
+		@Override void close();
 	}
 
 	/**
@@ -81,14 +157,15 @@ public interface IPlatformFluidService {
 	 */
 	@NotNullByDefault
 	record Context(ServerLevel level, BlockPos root, Direction face, UUID readOwner,
-		Predicate<BlockPos> memberGate, BooleanSupplier currentAuthority) {
+		MemberGate memberGate, AuthorityGate currentAuthority) {
 		public Context {
 			Objects.requireNonNull(level); root = Objects.requireNonNull(root).immutable();
 			Objects.requireNonNull(face); Objects.requireNonNull(readOwner);
 			Objects.requireNonNull(memberGate); Objects.requireNonNull(currentAuthority);
 		}
-		public void require(BlockPos member) {
-			if (!level.getServer().isSameThread() || !memberGate.test(member) || !currentAuthority.getAsBoolean())
+		public void require(BlockPos member, Operation operation) {
+			Objects.requireNonNull(member); Objects.requireNonNull(operation).allowance();
+			if (!level.getServer().isSameThread() || !memberGate.test(member, operation) || !currentAuthority.test(operation))
 				throw new InventorySourceUnavailableException("fluid access outside current owner/member scope");
 		}
 	}
@@ -127,13 +204,13 @@ public interface IPlatformFluidService {
 	}
 
 	@NotNullByDefault
-	interface Access {
+	interface Access extends AutoCloseable {
 		/**
 		 * Immutable bounded member/controller and ordered member-local address mapping; no contents.
 		 * Segment schemaId is ADDRESS_SCHEMA, fieldPath is a provider-local segment identifier, localSlots
 		 * and visibleSlots describe native tanks/views. Cursorless segments have zero indexed addresses;
 		 * each bounded observe call still charges every visited view. This DTO alone proves no atomicity.
-		 * Resolved once and retained unchanged; valid() compares current topology against THIS layout.
+		 * Pure frozen metadata, without gates or callbacks; valid(operation) compares against THIS layout.
 		 */
 		InventorySnapshotLayout layout();
 		/** Provider-established physical alias; empty retains exact physical root identity. */
@@ -142,76 +219,117 @@ public interface IPlatformFluidService {
 		boolean stableCursor();
 		/** Stable visible address count; zero for cursorless. Empty addresses still cost visits. */
 		int slots();
+		/** Pure frozen classification; public-address evidence does not promise hidden equal-capacity remap detection. */
+		RouteInfo routeInfo();
+		/**
+		 * Pure bound for an operation-local weak-identity vector, including the helper's owned cost.
+		 * CAPTURE pays independent retained witness ownership; COMPARE retains nothing and constructs
+		 * no new weak vector. Neither operation invokes a native/provider callback or replaces valid,
+		 * member, authority or pre/post read checks. Local strong vectors die with the invocation.
+		 * The default is migration-only unsupported, never empty successful evidence.
+		 */
+		default OperationProfile witnessProfile(WitnessUse use) {
+			Objects.requireNonNull(use); throw new UnsupportedOperationException("fluid address witness unsupported");
+		}
+		/** Capture frozen current address identities, never this Access/context or a live resolution. */
+		default FluidAddressWitness captureWitness(Operation operation) {
+			Objects.requireNonNull(operation).allowance(); throw new UnsupportedOperationException("fluid address witness unsupported");
+		}
+		/** Compare the historical witness against this freshly acquired/validated access's current vector. */
+		default WitnessMatch compareWitness(FluidAddressWitness expected, Operation operation) {
+			Objects.requireNonNull(expected); Objects.requireNonNull(operation).allowance();
+			throw new UnsupportedOperationException("fluid address witness unsupported");
+		}
 		/** Pure cached profile: current route/mode, original ordered layout and dynamic member checks. */
-		InventoryValidationBudget.Cost validationCost();
+		OperationProfile validationProfile();
 		/** Pure cached profile for ONE attempted getter plus provider pre/post/member gates, excluding visitor. */
-		InventoryValidationBudget.Cost readCost();
+		OperationProfile readProfile();
 		/** Includes bounded iterator/metadata entry and closure even for a zero-entry pass. Pure cached arithmetic. */
-		default InventoryValidationBudget.Cost observationCost(int limit) {
+		default OperationProfile observationProfile(int limit) {
 			if (limit < 0 || limit > InventorySourceAccess.MAX_SLOTS) throw new IllegalArgumentException("fluid observation limit");
-			return validationCost().plus(readCost().times(limit));
+			return readProfile().times(limit).plus(new OperationProfile(observationLoopCost(limit), 0, 0, 0));
 		}
 		/**
 		 * Fresh metadata-only check against original alias/member/controller/address topology and current
 		 * provider/mode gates; equal totals alone are insufficient. Source also checks world/member object
 		 * identity, registry and owner lock/loot permissions. A changed layout invalidates, never remaps.
 		 */
-		boolean valid();
-		default boolean valid(InventoryValidationBudget.Allowance allowance) {
-			Objects.requireNonNull(allowance).debit(validationCost()); return valid();
-		}
+		boolean valid(Operation operation);
 		/**
 		 * Exactly one indexed content getter, with synchronous visitor before any later provider callback.
 		 * Visitor output is provisional until provider AND source postchecks pass. The caller charges an
 		 * attempted physical visit even on throw; overflow/failure throws, never empty/All variants.
 		 */
-		boolean consume(int slot, Visitor visitor);
-		default boolean consume(int slot, Visitor visitor, InventoryValidationBudget.Allowance allowance) {
-			Objects.requireNonNull(allowance).debit(readCost()); return consume(slot, visitor);
-		}
+		boolean consume(int slot, Visitor visitor, Operation operation);
 		/**
 		 * Cursorless implementations gate iterator/hasNext/next internally and visit at most limit views,
 		 * including empties. Each later call starts at zero. No retained iterator, snapshot-backed pseudo
-		 * incrementality or hidden full scan. Caller admits observationCost(limit) and charges attempted prefixes;
+		 * incrementality or hidden full scan. Caller admits observationProfile(limit) and charges attempted prefixes;
 		 * an opaque exception conservatively spends the whole grant. Visitor refusal is not completion.
 		 */
-		default Visit observe(int limit, Visitor visitor) {
+		default Visit observe(int limit, Visitor visitor, Operation operation) {
 			if (limit < 0 || limit > InventorySourceAccess.MAX_SLOTS) throw new IllegalArgumentException("fluid observation limit");
-			Objects.requireNonNull(visitor);
+			Objects.requireNonNull(visitor); Objects.requireNonNull(operation).allowance().debit(observationLoopCost(limit));
 			if (!stableCursor()) throw new UnsupportedOperationException("cursorless fluid provider needs a bounded observer");
 			int count = slots();
 			if (count < 0 || count > InventorySourceAccess.MAX_SLOTS) throw new IllegalStateException("fluid address bound");
-			for (int slot = 0; slot < Math.min(count, limit); slot++) if (!consume(slot, visitor)) return new Visit(slot + 1, false);
+			for (int slot = 0; slot < Math.min(count, limit); slot++) if (!consume(slot, visitor, operation)) return new Visit(slot + 1, false);
 			return new Visit(Math.min(count, limit), count <= limit);
 		}
-		default Visit observe(int limit, Visitor visitor, InventoryValidationBudget.Allowance allowance) {
-			Objects.requireNonNull(allowance).debit(observationCost(limit)); return observe(limit, visitor);
-		}
+		/** Release only, idempotent; no new provider callbacks or unadmitted traversal. */
+		@Override void close();
 	}
-
-	/** Default wrapper does not forward certification or invent cursorless internal member gates. */
+	private static InventoryValidationBudget.Cost observationLoopCost(int limit) {
+		return new InventoryValidationBudget.Cost(256, 256, 8L + limit);
+	}
+	/** Keeps the former root entry/exit fences; metadata accessors are now pure, not authorization boundaries. */
+	static Access guarded(Context context, Access delegate) { return new GuardedAccess(context, delegate); }
 	@NotNullByDefault
 	final class GuardedAccess implements Access {
+		private static final OperationProfile WRAPPER = new OperationProfile(new InventoryValidationBudget.Cost(256, 256, 16), 2, 2, 0);
 		private final Context context;
 		private final Access delegate;
-		private GuardedAccess(Context context, Access delegate) { this.context = context; this.delegate = Objects.requireNonNull(delegate); }
-		private void gate() { context.require(context.root()); }
-		@Override public InventorySnapshotLayout layout() { gate(); var value = delegate.layout(); gate(); return value; }
-		@Override public Optional<String> alias() { gate(); var value = delegate.alias(); gate(); return value; }
-		@Override public boolean stableCursor() { gate(); boolean value = delegate.stableCursor(); gate(); return value; }
-		@Override public int slots() { gate(); int value = delegate.slots(); gate(); return value; }
-		@Override public InventoryValidationBudget.Cost validationCost() { return delegate.validationCost(); }
-		@Override public InventoryValidationBudget.Cost readCost() { return delegate.readCost(); }
-		@Override public InventoryValidationBudget.Cost observationCost(int limit) { return delegate.observationCost(limit); }
-		@Override public boolean valid() { gate(); boolean value = delegate.valid(); gate(); return value; }
-		@Override public boolean consume(int slot, Visitor visitor) { gate(); boolean more = delegate.consume(slot, visitor); gate(); return more; }
-		@Override public Visit observe(int limit, Visitor visitor) {
-			gate();
-			if (limit < 0 || limit > InventorySourceAccess.MAX_SLOTS) throw new IllegalArgumentException("fluid observation limit");
-			// Providers already own per-member/per-iterator gates through the original Context.
-			Visit result = delegate.observe(limit, Objects.requireNonNull(visitor)); gate();
-			if (result.visited() > limit) throw new IllegalStateException("fluid provider exceeded observation bound");
-			return result;
+		private boolean closed;
+		private GuardedAccess(Context context, Access delegate) {
+			this.context = Objects.requireNonNull(context); this.delegate = Objects.requireNonNull(delegate);
 		}
+		private void before(Operation operation) {
+			if (closed) throw new IllegalStateException("fluid access closed");
+			operation.allowance().debit(WRAPPER.ownedCost()); context.require(context.root(), operation);
+		}
+		@Override public InventorySnapshotLayout layout() { return delegate.layout(); }
+		@Override public Optional<String> alias() { return delegate.alias(); }
+		@Override public boolean stableCursor() { return delegate.stableCursor(); }
+		@Override public int slots() { return delegate.slots(); }
+		@Override public RouteInfo routeInfo() { return delegate.routeInfo(); }
+		@Override public OperationProfile witnessProfile(WitnessUse use) { return delegate.witnessProfile(use); }
+		private void witnessOperation(Operation operation) {
+			if (closed) throw new IllegalStateException("fluid access closed");
+			Objects.requireNonNull(operation).allowance();
+		}
+		@Override public FluidAddressWitness captureWitness(Operation operation) {
+			witnessOperation(operation); return delegate.captureWitness(operation);
+		}
+		@Override public WitnessMatch compareWitness(FluidAddressWitness expected, Operation operation) {
+			Objects.requireNonNull(expected); witnessOperation(operation); return delegate.compareWitness(expected, operation);
+		}
+		@Override public OperationProfile validationProfile() { return WRAPPER.plus(delegate.validationProfile()); }
+		@Override public OperationProfile readProfile() { return WRAPPER.plus(delegate.readProfile()); }
+		@Override public OperationProfile observationProfile(int limit) { return WRAPPER.plus(delegate.observationProfile(limit)); }
+		@Override public boolean valid(Operation operation) {
+			before(operation); boolean value = delegate.valid(operation); context.require(context.root(), operation); return value;
+		}
+		@Override public boolean consume(int slot, Visitor visitor, Operation operation) {
+			Objects.checkIndex(slot, slots()); Objects.requireNonNull(visitor);
+			before(operation); boolean value = delegate.consume(slot, visitor, operation); context.require(context.root(), operation); return value;
+		}
+		@Override public Visit observe(int limit, Visitor visitor, Operation operation) {
+			if (limit < 0 || limit > InventorySourceAccess.MAX_SLOTS) throw new IllegalArgumentException("fluid observation limit");
+			Objects.requireNonNull(visitor); before(operation);
+			Visit value = delegate.observe(limit, visitor, operation); context.require(context.root(), operation);
+			if (value.visited() > limit) throw new IllegalStateException("fluid provider exceeded observation bound");
+			return value;
+		}
+		@Override public void close() { if (!closed) { closed = true; delegate.close(); } }
 	}
 }

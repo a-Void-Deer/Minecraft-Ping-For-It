@@ -16,6 +16,8 @@ import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.capability.IFluidHandler;
 import nx.pingwheel.common.platform.IPlatformFluidService;
 import nx.pingwheel.common.platform.IPlatformFluidService.Operation;
+import nx.pingwheel.common.platform.IPlatformFluidService.WitnessMatch;
+import nx.pingwheel.common.platform.IPlatformFluidService.WitnessUse;
 import nx.pingwheel.neoforge.platform.PlatformFluidServiceTest.PaidAccess;
 import static nx.pingwheel.neoforge.platform.PlatformFluidServiceTest.*;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
@@ -365,6 +367,48 @@ class CreateFluidTankAccessTest {
 		}
 	}
 
+	@Test void sameStructureAndHandlerAcrossFreshScopeContextsKeepWitnessContinuityButStillRequireCurrentCreateGates() throws Exception {
+		var previous = new World(2, 1); BlockPos hit = new BlockPos(1, 0, 1);
+		var old = access(previous, hit, Direction.NORTH); var layout = old.layout(); var alias = old.alias();
+		var expected = old.captureWitness(); old.close(); assertReleasedAccess(old.delegate);
+		// Reacquire a different scope-bound World with the SAME physical members/handler. No external
+		// scope classification is implemented here; common owns that decision independently of identity.
+		var current = new World(previous); previous.allowed.clear(); previous.available = false;
+		try (var fresh = access(current, hit, Direction.NORTH); var a = admission();
+			var op = a.enter(fresh.witnessProfile(WitnessUse.COMPARE))) {
+			assertEquals(layout, fresh.layout()); assertEquals(alias, fresh.alias()); assertTrue(fresh.valid());
+			assertEquals(IPlatformFluidService.TopologyEvidence.EXPLICIT_STRUCTURE, fresh.delegate.routeInfo().topology());
+			int gates = current.requireCalls, metadata = current.metadataCalls, queries = current.queryPositions.size();
+			int counts = current.handler.countReads, capacities = current.handler.capacityReads;
+			assertEquals(WitnessMatch.SAME, fresh.delegate.compareWitness(expected, op));
+			assertEquals(gates, current.requireCalls); assertEquals(metadata, current.metadataCalls);
+			assertEquals(queries, current.queryPositions.size()); assertEquals(counts, current.handler.countReads);
+			assertEquals(capacities, current.handler.capacityReads); assertEquals(0, current.handler.reads);
+			current.entities.get(BlockPos.ZERO).active = true;
+			assertFalse(fresh.valid(), "SAME does not cache or replace the current boiler/mode check");
+			assertThrows(InventorySourceUnavailableException.class, () -> fresh.consume(0, entry -> fail("mode change cannot read")));
+			assertEquals(0, current.handler.reads);
+			assertTrue(current.queryFaces.stream().allMatch(face -> face == Direction.NORTH));
+			assertTrue(current.queryPositions.stream().allMatch(BlockPos.ZERO::equals));
+		}
+	}
+
+	@Test void actualHandlerReplacementAcrossFreshScopeContextsIsChangedIndependentlyOfScopeClassification() {
+		var previous = new World(2, 1); BlockPos hit = new BlockPos(1, 0, 1);
+		var old = access(previous, hit, Direction.EAST); var layout = old.layout(); var alias = old.alias();
+		var expected = old.captureWitness(); old.close();
+		var current = new World(previous); current.handler = new Handler();
+		try (var fresh = access(current, hit, Direction.EAST)) {
+			assertEquals(layout, fresh.layout()); assertEquals(alias, fresh.alias()); assertTrue(fresh.valid());
+			assertEquals(IPlatformFluidService.TopologyEvidence.EXPLICIT_STRUCTURE, fresh.delegate.routeInfo().topology());
+			assertEquals(WitnessMatch.CHANGED, fresh.compareWitness(expected), "moving scope cannot hide actual address replacement");
+			var held = current.handler; current.handler = new Handler();
+			assertFalse(fresh.valid(), "operation-local replacement checks also remain intact");
+			assertThrows(InventorySourceUnavailableException.class, () -> fresh.consume(0, entry -> fail("replaced handler cannot read")));
+			assertEquals(0, held.reads); assertEquals(0, current.handler.reads); assertEquals(0, previous.handler.reads);
+		}
+	}
+
 	private static IPlatformFluidService.Probe probe(World world, BlockPos root, Direction face, Operation op) {
 		op.allowance().debit(FluidCapabilityAccess.PROBE_PROFILE.ownedCost()); world.require(root, op);
 		return CreateFluidTankAccess.probe(world, root, face, world.block(root, op), world, op);
@@ -408,19 +452,25 @@ class CreateFluidTankAccessTest {
 		private final Set<BlockPos> allowed = new HashSet<>(), loaded = new HashSet<>();
 		private final List<BlockPos> blockReads = new ArrayList<>(), queryPositions = new ArrayList<>();
 		private final List<Direction> queryFaces = new ArrayList<>();
-		private final Object blockType = new Object();
-		private final Handler handler = new Handler();
+		private final Object blockType;
+		private Handler handler = new Handler();
 		private boolean available = true, handlerStored = true, missingCapability, requireAllBeforeCapability;
 		private int metadataCalls, requireCalls;
 		private Runnable afterCapability = () -> {};
 		private @Nullable BlockPos throwAt;
 		private InventoryValidationBudget.Cost memberCost = GATE, authorityCost = GATE;
 		private World(int width, int height) {
+			blockType = new Object();
 			for (int x = 0; x < width; x++) for (int y = 0; y < height; y++) for (int z = 0; z < width; z++) {
 				BlockPos pos = new BlockPos(x, y, z); var member = new Member(); member.width = width; member.height = height; member.master = pos.equals(BlockPos.ZERO);
 				entities.put(pos, member); blocks.put(pos, new FluidCapabilityAccess.Block(blockType, member, "create:fluid_tank", "create:fluid_tank"));
 				allowed.add(pos); loaded.add(pos);
 			}
+		}
+		private World(World previous) {
+			blockType = previous.blockType; handler = previous.handler;
+			blocks.putAll(previous.blocks); entities.putAll(previous.entities);
+			allowed.addAll(previous.allowed); loaded.addAll(previous.loaded);
 		}
 		@Override public void require(BlockPos position, Operation operation) {
 			operation.allowance().debit(memberCost); operation.allowance().debit(authorityCost);

@@ -44,6 +44,7 @@ public final class InventoryDomainCodec {
 			key = certified.key; this.count = count; label = certified.label; displayJson = certified.displayJson; stripped = certified.stripped;
 		}
 		Item withCount(long count) { return new Item(this, count); }
+		@Override public Item withAmount(long amount) { return withCount(amount); }
 		public InventoryScanner.Key key() { return key; }
 		public long count() { return count; }
 		@Override public long amount() { return count; }

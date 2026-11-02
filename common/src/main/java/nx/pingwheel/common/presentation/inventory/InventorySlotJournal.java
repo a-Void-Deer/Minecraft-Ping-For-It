@@ -11,7 +11,8 @@ import org.jetbrains.annotations.Nullable;
 /**
  * One append-only, server-local sweep journal. The caller reserves growth before
  * append. Only ordinals and authoritative longs are stored per slot; catalogues
- * own the shared Key/Display strings and canonical evidence, not this journal.
+ * own ITEM Key/Display strings and canonical evidence. FLUID definitions own
+ * their first detached key/display, independently of the canonical catalogue.
  * No resident root, detached root, canonical buffer or encoded page is retained.
  */
 @NotNullByDefault
@@ -26,6 +27,7 @@ public final class InventorySlotJournal implements AutoCloseable {
 	private @Nullable Chunk @Nullable [] chunks = new Chunk[4];
 	private @Nullable Definition @Nullable [] definitions = new Definition[8];
 	private int length, chunkCount, definitionCount;
+	private long resourcePayloadBytes;
 	private boolean closed;
 
 	@NotNullByDefault
@@ -38,17 +40,18 @@ public final class InventorySlotJournal implements AutoCloseable {
 	@NotNullByDefault
 	public static final class Definition {
 		private final InventoryScanner.Key key;
-		private InventoryItemCodec.Display display;
-		private InventoryDomainCodec.Item certified;
+		private InventoryItemCodec.@Nullable Display display;
+		private InventoryResourceValue certified;
 		private Definition(InventoryItemCodec.Encoded encoded, InventoryDomainCodec.@Nullable Item observed) {
 			key = encoded.key(); display = encoded.display();
 			certified = observed == null ? certify(display) : observed;
 		}
+		private Definition(InventoryResourceValue observed) { key = observed.key(); certified = observed; }
 		private InventoryDomainCodec.Item certify(InventoryItemCodec.Display projection) {
 			return new InventoryDomainCodec.Item(key, 0, projection.label(), projection.displayJson(), projection.aggregateRequired());
 		}
 		public InventoryScanner.Key key() { return key; }
-		public InventoryItemCodec.Display display() { return display; }
+		public InventoryItemCodec.Display display() { return Objects.requireNonNull(display); }
 	}
 
 	@NotNullByDefault
@@ -67,7 +70,7 @@ public final class InventorySlotJournal implements AutoCloseable {
 	public long modeledRetainedBytes() {
 		if (closed) return 0;
 		return METADATA_BYTES + arrayBytes(INDEX_CAPACITY, 2) + arrayBytes(chunks.length, 8) + arrayBytes(definitions.length, 8)
-			+ chunkCount * CHUNK_BYTES + definitionCount * DEFINITION_BYTES;
+			+ chunkCount * CHUNK_BYTES + definitionCount * DEFINITION_BYTES + resourcePayloadBytes;
 	}
 	public static long initialRetainedBytes() {
 		return METADATA_BYTES + arrayBytes(INDEX_CAPACITY, 2) + arrayBytes(4, 8) + arrayBytes(8, 8);
@@ -113,16 +116,21 @@ public final class InventorySlotJournal implements AutoCloseable {
 	}
 	/** Native reads already validated this exact immutable catalogue projection under their item grant. */
 	void append(int absoluteSlot, @Nullable InventoryItemCodec.Encoded encoded, long amount, InventoryDomainCodec.@Nullable Item observed) {
+		appendResource(absoluteSlot, encoded, amount, observed);
+	}
+	void appendResource(int absoluteSlot, @Nullable InventoryItemCodec.Encoded encoded, long amount, @Nullable InventoryResourceValue observed) {
 		requireOpen();
-		if (absoluteSlot != endSlot() || absoluteSlot >= InventorySourceAccess.MAX_SLOTS || amount < 0 || (encoded == null && amount != 0))
+		boolean present = encoded != null || observed != null;
+		if (absoluteSlot != endSlot() || absoluteSlot >= InventorySourceAccess.MAX_SLOTS || amount < 0 || (!present && amount != 0))
 			throw new IllegalArgumentException("journal append bounds");
-		int bucket = encoded == null ? -1 : bucket(encoded.key());
+		@Nullable InventoryScanner.Key key = encoded != null ? encoded.key() : observed == null ? null : observed.key();
+		int bucket = key == null ? -1 : bucket(key);
 		int ordinal = bucket < 0 ? -1 : index[bucket] - 1;
-		boolean newDefinition = encoded != null && ordinal < 0;
+		boolean newDefinition = present && ordinal < 0;
 		if (newDefinition && definitionCount == MAX_DEFINITIONS) throw new CapacityException();
-		if (newDefinition && (encoded.display().aggregateRequired() != encoded.key().componentsKey().isEmpty()
+		if (newDefinition && encoded != null && (encoded.display().aggregateRequired() != encoded.key().componentsKey().isEmpty()
 			|| !encoded.display().itemId().equals(encoded.key().itemId()))) throw new IllegalArgumentException("journal identity mode");
-		if (newDefinition && observed != null && (observed.key() != encoded.key() || observed.label() != encoded.display().label()
+		if (newDefinition && encoded != null && observed != null && (observed.key() != encoded.key() || observed.label() != encoded.display().label()
 			|| observed.displayJson() != encoded.display().displayJson() || observed.aggregateRequired() != encoded.display().aggregateRequired()))
 			throw new IllegalArgumentException("journal certified projection mismatch");
 		if (length % CHUNK_SLOTS == 0) {
@@ -132,7 +140,13 @@ public final class InventorySlotJournal implements AutoCloseable {
 		if (newDefinition) {
 			if (definitionCount == definitions.length) definitions = Arrays.copyOf(definitions, definitions.length * 2);
 			ordinal = definitionCount;
-			definitions[definitionCount++] = new Definition(Objects.requireNonNull(encoded), observed);
+			definitions[definitionCount++] = encoded == null ? new Definition(Objects.requireNonNull(observed))
+				: new Definition(encoded, (InventoryDomainCodec.@Nullable Item) observed);
+			if (encoded == null) {
+				InventoryResourceValue value = Objects.requireNonNull(observed);
+				resourcePayloadBytes = Math.addExact(resourcePayloadBytes, 4096L + 2L * (value.resourceId().length()
+					+ value.key().componentsKey().length() + value.label().length() + (value.displayJson() == null ? 0 : value.displayJson().length())));
+			}
 			index[bucket] = (short) (ordinal + 1);
 		}
 		Chunk chunk = Objects.requireNonNull(chunks[length / CHUNK_SLOTS]);
@@ -155,15 +169,18 @@ public final class InventorySlotJournal implements AutoCloseable {
 		return Objects.requireNonNull(chunks[offset / CHUNK_SLOTS]).amounts[offset % CHUNK_SLOTS];
 	}
 	public @Nullable InventoryDomainCodec.Item read(int absoluteSlot) {
+		return (InventoryDomainCodec.@Nullable Item) readResource(absoluteSlot);
+	}
+	public @Nullable InventoryResourceValue readResource(int absoluteSlot) {
 		int ordinal = definitionOrdinal(absoluteSlot);
 		if (ordinal < 0) return null;
-		return definition(ordinal).certified.withCount(amount(absoluteSlot));
+		return definition(ordinal).certified.withAmount(amount(absoluteSlot));
 	}
 	/** No text traversal; pays new certified cells and one sequential UTF8 conversion at refresh, not replay. */
 	public long refreshWorkspaceUpperBound() {
 		requireOpen(); long maximum = 1024;
 		for (int ordinal = 0; ordinal < definitionCount; ordinal++) {
-			@Nullable String json = definition(ordinal).display.displayJson();
+			@Nullable String json = definition(ordinal).certified.displayJson();
 			if (json != null) maximum = Math.max(maximum, 6L * json.length()); // encoder buffer plus final trimmed array
 		}
 		return 4096 + maximum + definitionCount * 80L;
@@ -171,7 +188,7 @@ public final class InventorySlotJournal implements AutoCloseable {
 	public long refreshWorkUpperBound() {
 		requireOpen(); long work = 4096;
 		for (int ordinal = 0; ordinal < definitionCount; ordinal++) {
-			var display = definition(ordinal).display;
+			var display = definition(ordinal).certified;
 			work += 2048 + 8L * display.label().length() + (display.displayJson() == null ? 0 : 8L * display.displayJson().length());
 		}
 		return work;
@@ -187,7 +204,7 @@ public final class InventorySlotJournal implements AutoCloseable {
 		for (int ordinal = 0; ordinal < definitionCount; ordinal++) {
 			Definition definition = definition(ordinal);
 			InventoryItemCodec.Display next = Objects.requireNonNull(catalog.retainedDisplay(definition.key), "journal catalogue definition missing");
-			InventoryItemCodec.Display old = definition.display;
+			InventoryItemCodec.Display old = Objects.requireNonNull(definition.display);
 			if (next == old) continue;
 			if (old.displayJson() == null || InventoryDisplayWriter.isDefaultIcon(old.itemId(), old.displayJson())) continue;
 			if (next.displayJson() != null && next.displayJson().length() > old.displayJson().length())
