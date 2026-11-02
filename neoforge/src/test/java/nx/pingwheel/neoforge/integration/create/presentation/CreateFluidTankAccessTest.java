@@ -15,9 +15,15 @@ import net.minecraft.world.level.material.Fluids;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.capability.IFluidHandler;
 import nx.pingwheel.common.platform.IPlatformFluidService;
+import nx.pingwheel.common.platform.IPlatformFluidService.Operation;
+import nx.pingwheel.neoforge.platform.PlatformFluidServiceTest.PaidAccess;
+import static nx.pingwheel.neoforge.platform.PlatformFluidServiceTest.*;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission;
+import nx.pingwheel.common.presentation.source.CostLedger;
+import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.neoforge.platform.FluidCapabilityAccess;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -89,7 +95,7 @@ class CreateFluidTankAccessTest {
 		var world = new World(1, 1); var controller = world.entities.get(BlockPos.ZERO);
 		controller.width = 3; controller.height = Integer.MAX_VALUE;
 		assertThrows(InventorySourceUnavailableException.class, () -> access(world, BlockPos.ZERO, Direction.UP));
-		assertEquals(List.of(BlockPos.ZERO), world.blockReads, "only already-known controller is acquired before finite shape preflight");
+		assertTrue(world.blockReads.stream().allMatch(BlockPos.ZERO::equals), "only root/controller before finite shape preflight");
 		assertTrue(world.queryPositions.isEmpty());
 	}
 
@@ -162,7 +168,7 @@ class CreateFluidTankAccessTest {
 		var paid = new InventoryValidationBudget.Allowance(access.readCost());
 		world.handler.failure = new IllegalStateException("Create capability failed");
 		assertSame(world.handler.failure, assertThrows(IllegalStateException.class, () -> access.consume(0, entry -> fail("exception is not empty"), paid)));
-		assertEquals(access.readCost().workUnits(), paid.attemptedWorkUnits()); assertEquals(1, world.handler.reads);
+		assertTrue(paid.attemptedWorkUnits() >= access.readProfile().ownedCost().workUnits()); assertEquals(1, world.handler.reads);
 	}
 
 	@Test void oneTankMetadataAndFreshReadCostsAreBoundedWithNoMemberTimesTankRescan() {
@@ -172,7 +178,7 @@ class CreateFluidTankAccessTest {
 			var paid = new InventoryValidationBudget.Allowance(access.readCost());
 			assertTrue(access.consume(0, entry -> true, paid));
 			assertEquals(4, world.handler.capacityReads, "two ordered capacity checks per pre/post validation, independent of member count");
-			assertEquals(1, world.handler.reads); assertEquals(access.readCost().workUnits(), paid.attemptedWorkUnits());
+			assertEquals(1, world.handler.reads); assertTrue(paid.attemptedWorkUnits() <= access.readCost().workUnits());
 			assertTrue(world.requireCalls <= 128 + 128 * width * width);
 			System.out.println("NEOFORGE Create members=" + width * width + " tanks=1 requireCalls=" + world.requireCalls
 				+ " metadataCalls=" + world.metadataCalls + " capacityReads=" + world.handler.capacityReads
@@ -185,13 +191,183 @@ class CreateFluidTankAccessTest {
 		var world = new World(1, 1); var access = access(world, BlockPos.ZERO, Direction.NORTH);
 		var settings = nx.pingwheel.common.config.InventorySettings.serverDefaults();
 		var memory = new nx.pingwheel.common.presentation.source.RetainedMemoryLedger(settings.pendingMemoryBytes());
-		var held = memory.tryReserve(settings.pendingMemoryBytes() - access.readCost().workspaceBytes()).orElseThrow();
-		var scratch = memory.tryReserve(access.readCost().workspaceBytes()).orElseThrow();
-		assertTrue(access.consume(0, entry -> true, new InventoryValidationBudget.Allowance(access.readCost())));
-		assertEquals(1, world.handler.reads); scratch.close(); held.close();
+		long needed = access.readCost().workspaceBytes() + 2048;
+		try (var held = memory.tryReserve(settings.pendingMemoryBytes() - needed).orElseThrow();
+			var a = admission(10_000_000, memory); var op = a.enter(access.readProfile())) {
+			assertTrue(access.delegate.consume(0, entry -> true, op)); assertEquals(1, world.handler.reads);
+		}
 		assertEquals(settings.pendingMemoryBytes(), memory.remaining());
 		System.out.println("NEOFORGE Create one-tank modeled scratch=" + access.readCost().workspaceBytes()
-			+ " defaultMemory=" + settings.pendingMemoryBytes());
+			+ " admissionHeadroom=" + needed + " defaultMemory=" + settings.pendingMemoryBytes());
+	}
+
+	@Test void staged108MemberControllerTraversalReallyFinishesReadsAndReleasesCallerOwnership() throws Exception {
+		var world = new World(3, 12); BlockPos hit = new BlockPos(2, 11, 2);
+		world.requireAllBeforeCapability = true;
+		// Ordinary source callback envelopes (before optional external membership work), with
+		// independent execution debits rather than charging the provider's composed profile twice.
+		world.memberCost = new InventoryValidationBudget.Cost(1024, 1024, 528);
+		world.authorityCost = new InventoryValidationBudget.Cost(9216, 9216, 2560);
+		var profiles = new ArrayList<IPlatformFluidService.OperationProfile>();
+		var memory = new RetainedMemoryLedger(64L << 20);
+		// Same engineering work ledger used by Runtime, not the unrelated provider-call counter.
+		long work = 4096L * InventoryItemBudget.workUpperBound(4096);
+		var ledger = new CostLedger(Map.of(WORK, work));
+		InventoryFluidAdmission.Ownership ownership; IPlatformFluidService.Access access;
+		try (var a = new InventoryFluidAdmission(ledger, WORK, memory, world.memberCost, world.authorityCost);
+			var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE); var probe = probe(world, hit, Direction.SOUTH, op)) {
+			assertEquals(108, probe.shape().members()); assertTrue(probe.shape().indexedSlots().isEmpty());
+			assertTrue(world.blockReads.stream().allMatch(pos -> pos.equals(hit) || pos.equals(BlockPos.ZERO)));
+			assertEquals(0, world.handler.capacityReads); assertEquals(0, world.handler.countReads); assertTrue(world.queryPositions.isEmpty());
+			int calls = world.requireCalls; probe.shape(); probe.finishProfile(); assertEquals(calls, world.requireCalls);
+			access = probe.finish(profile -> {
+				profiles.add(profile);
+				if (profiles.size() == 1) { assertTrue(world.queryPositions.isEmpty()); assertEquals(0, world.handler.countReads); }
+				else { assertEquals(1, world.handler.countReads); assertEquals(0, world.handler.capacityReads); assertEquals(108, new HashSet<>(world.blockReads).size()); }
+				return a.enter(profile);
+			}).orElseThrow();
+			assertEquals(2, profiles.size()); assertEquals(probe.finishProfile(), profiles.getFirst()); assertReleasedProbe(probe);
+			assertThrows(IllegalStateException.class, () -> probe.finish(a));
+			assertEquals(108, access.layout().members().size()); assertEquals(1, access.slots());
+			assertEquals(IPlatformFluidService.TopologyEvidence.EXPLICIT_STRUCTURE, access.routeInfo().topology());
+			assertTrue(world.queryPositions.stream().allMatch(BlockPos.ZERO::equals)); assertEquals(0, world.handler.reads);
+			world.requireCalls = 0; world.metadataCalls = 0; int capacities = world.handler.capacityReads;
+			try (var read = a.enter(access.readProfile())) {
+				assertSame(op.allowance(), read.allowance()); long before = read.allowance().attemptedWorkUnits();
+				assertTrue(access.consume(0, entry -> { assertEquals(81_000, entry.amount()); return true; }, read));
+				assertEquals(access.readProfile().ownedCost().workUnits()
+					+ (world.memberCost.workUnits() + world.authorityCost.workUnits()) * world.requireCalls,
+					read.allowance().attemptedWorkUnits() - before);
+			}
+			assertEquals(1, world.handler.reads); assertEquals(4, world.handler.capacityReads - capacities);
+			assertTrue(world.requireCalls <= access.readProfile().memberGateCalls());
+			ownership = a.retain();
+			assertEquals(profiles.stream().mapToLong(IPlatformFluidService.OperationProfile::retainedBytes).sum() + 768, ownership.bytes());
+			System.out.println("NEOFORGE staged Create M=108 N=1 structure=" + profiles.getFirst() + " address=" + profiles.getLast()
+				+ " read=" + access.readProfile() + " retained=" + ownership.bytes() + " actualRequires=" + world.requireCalls
+				+ " actualMetadata=" + world.metadataCalls + " composedRead=" + access.readProfile().cost(world.memberCost, world.authorityCost)
+				+ " attemptedWork=" + op.allowance().attemptedWorkUnits() + " reservedScratch=" + memory.reserved() + " workLimit=" + work);
+		}
+		assertTrue(ledger.used(WORK) > 0); assertEquals(0, memory.reserved()); assertEquals(ownership.bytes(), memory.retained());
+		int calls = world.requireCalls; access.close(); access.close(); assertEquals(calls, world.requireCalls); assertReleasedAccess(access);
+		ownership.close(); ownership.close(); assertEquals(0, memory.retained());
+	}
+
+	@Test void oneShortStructureAndAddressAdmissionNeverRunTheNextStagesCallbacks() throws Exception {
+		for (boolean refuseStructure : new boolean[] {true, false}) {
+			var world = new World(2, 1); var memory = new RetainedMemoryLedger(1_000_000);
+			var ledger = new CostLedger(Map.of(WORK, 1_000_000L)); var profiles = new ArrayList<IPlatformFluidService.OperationProfile>();
+			try (var a = new InventoryFluidAdmission(ledger, WORK, memory, GATE, GATE); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE);
+				var probe = probe(world, BlockPos.ZERO, Direction.UP, op)) {
+				int blockReads = world.blockReads.size(), calls = world.requireCalls;
+				assertThrows(InventoryItemBudget.CaptureLimitException.class, () -> probe.finish(profile -> {
+					profiles.add(profile);
+					if (refuseStructure || profiles.size() == 2) {
+						long oneShort = profile.cost(GATE, GATE).workUnits() + 128 - 1;
+						// Withhold the remaining headroom on THIS ledger: no new allowance or refund.
+						var withheld = ledger.tryReserve(Map.of(WORK, ledger.remaining(WORK) - oneShort)).orElseThrow();
+						try { return a.enter(profile); } finally { withheld.close(); }
+					}
+					return a.enter(profile);
+				}));
+				if (refuseStructure) { assertEquals(blockReads, world.blockReads.size()); assertEquals(calls, world.requireCalls); assertTrue(world.queryPositions.isEmpty()); }
+				else { assertEquals(1, world.handler.countReads); assertEquals(4, new HashSet<>(world.blockReads).size()); }
+				assertEquals(0, world.handler.capacityReads); assertEquals(0, world.handler.reads); assertReleasedProbe(probe);
+				assertThrows(IllegalStateException.class, () -> probe.finish(a));
+			}
+			assertTrue(ledger.used(WORK) > 0); assertEquals(0, memory.reserved()); assertEquals(0, memory.retained());
+		}
+	}
+
+	@Test void changedProbeShapeFailsBeforeNewPrismReadsOrControllerCapabilityAndFailureRetainsPaidPrefix() throws Exception {
+		for (String change : List.of("dimensions", "controller", "entity", "boiler", "version", "denied-member", "throw-member")) {
+			var world = new World(2, 1); BlockPos hit = new BlockPos(1, 0, 1);
+			var memory = new RetainedMemoryLedger(1_000_000); var ledger = new CostLedger(Map.of(WORK, 1_000_000L));
+			try (var a = new InventoryFluidAdmission(ledger, WORK, memory, GATE, GATE); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE);
+				var probe = probe(world, hit, Direction.NORTH, op)) {
+				long prefix = op.allowance().attemptedWorkUnits(); world.blockReads.clear();
+				if (change.equals("denied-member")) world.allowed.remove(new BlockPos(1, 0, 0));
+				else if (change.equals("throw-member")) world.throwAt = new BlockPos(1, 0, 0);
+				else change(world, change);
+				assertThrows(RuntimeException.class, () -> probe.finish(a), change);
+				assertTrue(op.allowance().attemptedWorkUnits() > prefix); assertTrue(world.queryPositions.isEmpty());
+				assertEquals(0, world.handler.countReads); assertEquals(0, world.handler.capacityReads); assertReleasedProbe(probe);
+				if (!change.endsWith("member")) assertTrue(world.blockReads.stream().allMatch(pos -> pos.equals(hit) || pos.equals(BlockPos.ZERO)));
+			}
+			assertTrue(ledger.used(WORK) > 0); assertEquals(0, memory.reserved()); assertEquals(0, memory.retained());
+		}
+	}
+	@Test void createProbeCannotFinishAfterOriginClosesOrReenterOrSwitchAnIncrementalAllowance() throws Exception {
+		for (String fault : List.of("closed", "first-caller", "address-caller", "expire-first", "expire-address", "reenter")) {
+			var world = new World(1, 1);
+			try (var a = admission(); var other = admission(); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE);
+				var probe = probe(world, BlockPos.ZERO, Direction.NORTH, op)) {
+				int calls = world.requireCalls;
+				if (fault.equals("closed")) {
+					op.close(); assertThrows(IllegalStateException.class, () -> probe.finish(a)); assertEquals(calls, world.requireCalls);
+				} else {
+					var stages = new AtomicInteger();
+					IPlatformFluidService.Admission admission = profile -> {
+						int stage = stages.incrementAndGet();
+						assertThrows(IllegalStateException.class, () -> probe.finish(a), "reentrant finish is consumed before Admission callback");
+						var next = fault.equals("first-caller") || fault.equals("address-caller") && stage == 2 ? other.enter(profile) : a.enter(profile);
+						if (fault.equals("expire-first") || fault.equals("expire-address") && stage == 2) op.close();
+						return next;
+					};
+					if (fault.equals("reenter")) probe.finish(admission).orElseThrow().close();
+					else assertThrows(IllegalStateException.class, () -> probe.finish(admission));
+					if (fault.equals("first-caller")) assertEquals(calls, world.requireCalls);
+					if (fault.equals("expire-first")) assertEquals(calls, world.requireCalls);
+					if (fault.equals("address-caller")) { assertEquals(1, world.handler.countReads); assertEquals(0, world.handler.capacityReads); }
+				}
+				assertReleasedProbe(probe);
+			}
+		}
+	}
+
+	@Test void countCallbackClosingOriginRejectsBeforeAddressAdmissionAndReleasesFailedMetadata() throws Exception {
+		var world = new World(1, 1); var memory = new RetainedMemoryLedger(1_000_000);
+		var ledger = new CostLedger(Map.of(WORK, 1_000_000L)); var stages = new AtomicInteger();
+		long attempted;
+		try (var a = new InventoryFluidAdmission(ledger, WORK, memory, GATE, GATE); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE);
+			var probe = probe(world, BlockPos.ZERO, Direction.NORTH, op)) {
+			var allowance = op.allowance(); long prefix = allowance.attemptedWorkUnits();
+			world.handler.afterMetadata = op::close;
+			assertThrows(IllegalStateException.class, () -> probe.finish(profile -> {
+				stages.incrementAndGet(); return a.enter(profile);
+			}));
+			assertEquals(1, stages.get(), "expired origin must not invoke address admission");
+			assertEquals(1, world.handler.countReads); assertEquals(0, world.handler.capacityReads); assertEquals(0, world.handler.reads);
+			assertThrows(IllegalStateException.class, op::allowance); assertReleasedProbe(probe);
+			assertThrows(IllegalStateException.class, () -> probe.finish(a), "failed finish remains single-use");
+			attempted = allowance.attemptedWorkUnits(); assertTrue(attempted > prefix); assertTrue(memory.reserved() > 0);
+		}
+		assertEquals(attempted, ledger.used(WORK), "failed metadata prefix stays paid");
+		assertEquals(0, memory.reserved()); assertEquals(0, memory.retained());
+	}
+
+	@Test void addressStageShapeMutationIsRejectedBeforeCapacityAndNullCapabilityReleasesStructureOwnership() throws Exception {
+		for (String fault : List.of("dimensions", "controller", "boiler", "version", "null-capability")) {
+			var world = new World(2, 1); var memory = new RetainedMemoryLedger(1_000_000);
+			try (var a = admission(1_000_000, memory); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE);
+				var probe = probe(world, new BlockPos(1, 0, 1), Direction.NORTH, op)) {
+				if (fault.equals("null-capability")) {
+					world.missingCapability = true; assertTrue(probe.finish(a).isEmpty());
+				} else {
+					var stages = new AtomicInteger();
+					assertThrows(InventorySourceUnavailableException.class, () -> probe.finish(profile -> {
+						var next = a.enter(profile); if (stages.incrementAndGet() == 2) change(world, fault); return next;
+					}));
+				}
+				assertEquals(0, world.handler.capacityReads); assertEquals(0, world.handler.reads); assertReleasedProbe(probe);
+			}
+			assertEquals(0, memory.reserved()); assertEquals(0, memory.retained());
+		}
+	}
+
+	private static IPlatformFluidService.Probe probe(World world, BlockPos root, Direction face, Operation op) {
+		op.allowance().debit(FluidCapabilityAccess.PROBE_PROFILE.ownedCost()); world.require(root, op);
+		return CreateFluidTankAccess.probe(world, root, face, world.block(root, op), world, op);
 	}
 
 	private static void change(World world, String fault) {
@@ -207,10 +383,14 @@ class CreateFluidTankAccessTest {
 			default -> fail(fault);
 		}
 	}
-	private static IPlatformFluidService.Access access(World world, BlockPos root, Direction face) {
-		world.require(root);
-		var route = CreateFluidTankAccess.resolve(world, root, face, world.blocks.get(root), world);
-		return FluidCapabilityAccess.find(route).orElseThrow();
+	private static PaidAccess access(World world, BlockPos root, Direction face) {
+		try (var a = admission(); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE)) {
+			op.allowance().debit(FluidCapabilityAccess.PROBE_PROFILE.ownedCost());
+			world.require(root, op);
+			try (var probe = CreateFluidTankAccess.probe(world, root, face, world.block(root, op), world, op)) {
+				return new PaidAccess(probe.finish(a).orElseThrow());
+			}
+		}
 	}
 
 	@NotNullByDefault
@@ -230,9 +410,11 @@ class CreateFluidTankAccessTest {
 		private final List<Direction> queryFaces = new ArrayList<>();
 		private final Object blockType = new Object();
 		private final Handler handler = new Handler();
-		private boolean available = true, handlerStored = true;
+		private boolean available = true, handlerStored = true, missingCapability, requireAllBeforeCapability;
 		private int metadataCalls, requireCalls;
 		private Runnable afterCapability = () -> {};
+		private @Nullable BlockPos throwAt;
+		private InventoryValidationBudget.Cost memberCost = GATE, authorityCost = GATE;
 		private World(int width, int height) {
 			for (int x = 0; x < width; x++) for (int y = 0; y < height; y++) for (int z = 0; z < width; z++) {
 				BlockPos pos = new BlockPos(x, y, z); var member = new Member(); member.width = width; member.height = height; member.master = pos.equals(BlockPos.ZERO);
@@ -240,21 +422,25 @@ class CreateFluidTankAccessTest {
 				allowed.add(pos); loaded.add(pos);
 			}
 		}
-		@Override public void require(BlockPos position) {
+		@Override public void require(BlockPos position, Operation operation) {
+			operation.allowance().debit(memberCost); operation.allowance().debit(authorityCost);
 			requireCalls++;
 			if (!allowed.contains(position) || !loaded.contains(position)) throw new InventorySourceUnavailableException("denied/unloaded tank member");
 		}
-		@Override public FluidCapabilityAccess.Block block(BlockPos position) {
-			require(position); blockReads.add(position); var block = blocks.get(position);
+		@Override public FluidCapabilityAccess.Block block(BlockPos position, Operation operation) {
+			require(position, operation); blockReads.add(position); @Nullable var block = blocks.get(position);
+			if (position.equals(throwAt)) throw new IllegalStateException("member metadata failure");
 			if (block == null) throw new InventorySourceUnavailableException("missing tank member"); return block;
 		}
-		@Override public @Nullable IFluidHandler capability(BlockPos position, Direction face) {
-			require(position); queryPositions.add(position); queryFaces.add(face); afterCapability.run(); return handler;
+		@Override public @Nullable IFluidHandler capability(BlockPos position, Direction face, Operation operation) {
+			require(position, operation);
+			if (requireAllBeforeCapability) assertEquals(blocks.keySet(), new HashSet<>(blockReads), "ALL members precede the controller capability callback");
+			queryPositions.add(position); queryFaces.add(face); afterCapability.run(); return missingCapability ? null : handler;
 		}
-		@Override public String dimension() { return "minecraft:overworld"; }
+		@Override public String dimension(Operation operation) { return "minecraft:overworld"; }
 		@Override public boolean createAvailable() { return available; }
-		@Override public boolean held(FluidCapabilityAccess.Member member) {
-			require(member.position()); @Nullable FluidCapabilityAccess.Block current = blocks.get(member.position());
+		@Override public boolean held(FluidCapabilityAccess.Member member, Operation operation) {
+			require(member.position(), operation); @Nullable FluidCapabilityAccess.Block current = blocks.get(member.position());
 			return current != null && member.block().same(current);
 		}
 		@Override public boolean ordinary(FluidCapabilityAccess.Block block) { metadataCalls++; return block.entity() instanceof Member member && member.ordinary; }
@@ -272,10 +458,10 @@ class CreateFluidTankAccessTest {
 
 	@NotNullByDefault
 	private static final class Handler implements IFluidHandler {
-		private int reads, capacityReads;
+		private int reads, capacityReads, countReads;
 		private Runnable afterMetadata = () -> {};
 		private @Nullable RuntimeException failure;
-		@Override public int getTanks() { afterMetadata.run(); return 1; }
+		@Override public int getTanks() { countReads++; afterMetadata.run(); return 1; }
 		@Override public FluidStack getFluidInTank(int index) { assertEquals(0, index); reads++; if (failure != null) throw failure; return new FluidStack(Fluids.WATER, 1000); }
 		@Override public int getTankCapacity(int index) { assertEquals(0, index); capacityReads++; return 8000; }
 		@Override public boolean isFluidValid(int index, FluidStack stack) { throw new AssertionError("no simulation"); }

@@ -10,8 +10,12 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
 import net.neoforged.neoforge.fluids.capability.IFluidHandler;
+import nx.pingwheel.common.platform.IPlatformFluidService;
+import nx.pingwheel.common.platform.IPlatformFluidService.Operation;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.neoforge.platform.FluidCapabilityAccess;
+import nx.pingwheel.neoforge.platform.PlatformFluidServiceTest.PaidAccess;
+import static nx.pingwheel.neoforge.platform.PlatformFluidServiceTest.*;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -35,7 +39,7 @@ class CreateFluidTankMetadataTest {
 
 	@Test void archiveGettersExecuteThroughTheActualReflectionPortAndRejectStaleControllerCaches() throws Exception {
 		var loader = new Loader(""); var world = new World(loader);
-		var route = route(loader, world); var access = FluidCapabilityAccess.find(route).orElseThrow();
+		var access = access(loader, world);
 		assertEquals(2, access.layout().members().size()); assertEquals(1, access.slots()); assertTrue(access.valid());
 		var bean = (com.sun.management.ThreadMXBean) java.lang.management.ManagementFactory.getThreadMXBean();
 		bean.setThreadAllocatedMemoryEnabled(true);
@@ -50,7 +54,7 @@ class CreateFluidTankMetadataTest {
 		world.handler = stale;
 		assertFalse(access.valid());
 		// Fresh find must also refuse a same-class capability retained from an old controller.
-		assertThrows(InventorySourceUnavailableException.class, () -> FluidCapabilityAccess.find(route(loader, world)));
+		assertThrows(InventorySourceUnavailableException.class, () -> access(loader, world));
 		world.handler = world.ownTank; field(world.controller.getClass(), "height").setInt(world.controller, 3);
 		assertFalse(access.valid(), "controller extent is read currently, not retained as a permission result");
 	}
@@ -63,16 +67,22 @@ class CreateFluidTankMetadataTest {
 		try {
 			for (String method : METHODS) {
 				var loader = new Loader(method); var world = new World(loader);
-				var failure = assertThrows(InvocationTargetException.class, () -> route(loader, world), method);
+				var failure = assertThrows(InvocationTargetException.class, () -> access(loader, world), method);
 				assertInstanceOf(ExceptionInInitializerError.class, failure.getCause());
 			}
-			var good = new Loader(""); assertNotNull(route(good, new World(good)));
+			var good = new Loader(""); assertNotNull(access(good, new World(good)));
 		} finally { Thread.currentThread().setContextClassLoader(previous); }
 	}
 
-	private static FluidCapabilityAccess.Route route(Loader loader, World world) throws Exception {
-		return (FluidCapabilityAccess.Route) loader.loadClass(ACCESS).getMethod("resolve", FluidCapabilityAccess.World.class,
-			BlockPos.class, Direction.class, FluidCapabilityAccess.Block.class).invoke(null, world, BlockPos.ZERO.above(), Direction.WEST, world.blocks.get(BlockPos.ZERO.above()));
+	private static PaidAccess access(Loader loader, World world) throws Exception {
+		try (var a = admission(); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE)) {
+			op.allowance().debit(FluidCapabilityAccess.PROBE_PROFILE.ownedCost());
+			try (var probe = (IPlatformFluidService.Probe) loader.loadClass(ACCESS).getMethod("probe", FluidCapabilityAccess.World.class,
+				BlockPos.class, Direction.class, FluidCapabilityAccess.Block.class, Operation.class)
+				.invoke(null, world, BlockPos.ZERO.above(), Direction.WEST, world.blocks.get(BlockPos.ZERO.above()), op)) {
+				return new PaidAccess(probe.finish(a).orElseThrow());
+			}
+		}
 	}
 
 	@NotNullByDefault
@@ -99,10 +109,10 @@ class CreateFluidTankMetadataTest {
 			field(entity.getClass(), "boiler").set(entity, allocate(loader.loadClass(BOILER)));
 			field(entity.getClass(), "tankInventory").set(entity, ownTank); return entity;
 		}
-		@Override public void require(BlockPos position) { requireCalls++; if (!blocks.containsKey(position)) throw new InventorySourceUnavailableException("unknown member"); }
-		@Override public FluidCapabilityAccess.Block block(BlockPos position) { require(position); return blocks.get(position); }
-		@Override public @Nullable IFluidHandler capability(BlockPos position, Direction face) { require(position); assertEquals(BlockPos.ZERO, position); assertEquals(Direction.WEST, face); return handler; }
-		@Override public String dimension() { return "minecraft:overworld"; }
+		@Override public void require(BlockPos position, Operation operation) { gate(operation); requireCalls++; if (!blocks.containsKey(position)) throw new InventorySourceUnavailableException("unknown member"); }
+		@Override public FluidCapabilityAccess.Block block(BlockPos position, Operation operation) { require(position, operation); return java.util.Objects.requireNonNull(blocks.get(position)); }
+		@Override public @Nullable IFluidHandler capability(BlockPos position, Direction face, Operation operation) { require(position, operation); assertEquals(BlockPos.ZERO, position); assertEquals(Direction.WEST, face); return handler; }
+		@Override public String dimension(Operation operation) { return "minecraft:overworld"; }
 		@Override public boolean createAvailable() { return true; }
 	}
 
