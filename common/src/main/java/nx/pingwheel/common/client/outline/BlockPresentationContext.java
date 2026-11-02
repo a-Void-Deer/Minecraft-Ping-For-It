@@ -39,7 +39,8 @@ public record BlockPresentationContext(
 	/** Reads the current source state; callers should not retain it across frames. */
 	public BlockState sourceState() {
 		if (VanillaDoubleChestTopology.supports(sourceSpec.blockKey().blockRegistryId())
-			|| "create:item_vault".equals(sourceSpec.blockKey().blockRegistryId())) {
+			|| "create:item_vault".equals(sourceSpec.blockKey().blockRegistryId())
+			|| "create:fluid_tank".equals(sourceSpec.blockKey().blockRegistryId())) {
 			@Nullable BlockState loaded = loadedState(sourcePos());
 			return loaded == null ? Blocks.AIR.defaultBlockState() : loaded;
 		}

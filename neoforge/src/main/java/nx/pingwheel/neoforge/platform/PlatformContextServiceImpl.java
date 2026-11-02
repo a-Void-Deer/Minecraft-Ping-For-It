@@ -10,6 +10,7 @@ import net.minecraft.server.level.ServerLevel;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.neoforge.integration.create.CreateVaultTopology;
+import nx.pingwheel.neoforge.integration.create.CreateFluidTankTopology;
 
 import java.nio.file.Path;
 
@@ -47,7 +48,11 @@ public class PlatformContextServiceImpl implements IPlatformContextService {
 	}
 
 	@Override
-	public TargetKey groupVaultTarget(ServerLevel level, Target.BlockTarget target) {
-		return CreateVaultTopology.group(level, target);
+	public TargetKey groupBlockTarget(ServerLevel level, Target.BlockTarget target) {
+		return switch (target.blockRegistryId()) {
+			case CreateVaultTopology.VAULT_ID -> CreateVaultTopology.group(level, target);
+			case CreateFluidTankTopology.TANK_ID -> CreateFluidTankTopology.group(level, target);
+			default -> TargetKey.from(target);
+		};
 	}
 }

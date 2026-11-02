@@ -29,8 +29,13 @@ final class VaultOptionalHarness extends ClassLoader {
 	static final String VAULT = "com.simibubi.create.content.logistics.vault.ItemVaultBlockEntity";
 	static final String SMART = "com.simibubi.create.foundation.blockEntity.SmartBlockEntity";
 	static final String BLOCK = "com.simibubi.create.content.logistics.vault.ItemVaultBlock";
+	static final String TANK = "com.simibubi.create.content.fluids.tank.FluidTankBlockEntity";
+	static final String TANK_BLOCK = "com.simibubi.create.content.fluids.tank.FluidTankBlock";
+	static final String BOILER = "com.simibubi.create.content.fluids.tank.BoilerData";
 	private static final String TOPOLOGY = "nx.pingwheel.neoforge.integration.create.CreateVaultTopology";
 	private static final @Unmodifiable List<String> ISOLATED = List.of(TOPOLOGY,
+		"nx.pingwheel.neoforge.integration.create.CreateFluidTankTopology",
+		"nx.pingwheel.neoforge.integration.create.NeoForgeCreateFluidTankBlockPresentationResolver",
 		"nx.pingwheel.neoforge.integration.create.presentation.CreateVaultInventoryAccess",
 		"nx.pingwheel.neoforge.integration.create.NeoForgeCreateVaultBlockPresentationResolver",
 		"nx.pingwheel.neoforge.platform.PlatformContextServiceImpl",
@@ -43,11 +48,11 @@ final class VaultOptionalHarness extends ClassLoader {
 	@Override protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
 		synchronized (getClassLoadingLock(name)) {
 			@Nullable Class<?> found = findLoadedClass(name);
-			if (found == null && (name.equals(VAULT) || name.equals(SMART) || name.equals(BLOCK))) {
+			if (found == null && List.of(VAULT, SMART, BLOCK, TANK, TANK_BLOCK, BOILER).contains(name)) {
 				optionalLoads++;
 				try {
 					byte[] bytes = optional(name);
-					if (driftedApi && name.equals(VAULT)) {
+					if (driftedApi && (name.equals(VAULT) || name.equals(TANK))) {
 						var node = new ClassNode(); new ClassReader(bytes).accept(node, 0); node.methods.removeIf(m -> m.name.equals("getHeight"));
 						var writer = new ClassWriter(0); node.accept(writer); bytes = writer.toByteArray();
 					}
@@ -90,8 +95,8 @@ final class VaultOptionalHarness extends ClassLoader {
 	static byte[] optional(String name) throws Exception {
 		var original = archive(name); var copy = new ClassNode(); copy.version = original.version;
 		copy.access = Opcodes.ACC_PUBLIC; copy.name = original.name;
-		if (name.equals(BLOCK)) {
-			copy.superName = Type.getInternalName(VaultNativeFixture.VaultBlock.class);
+		if (name.equals(BLOCK) || name.equals(TANK_BLOCK)) {
+			copy.superName = Type.getInternalName(name.equals(BLOCK) ? VaultNativeFixture.VaultBlock.class : TankNativeFixture.TankBlock.class);
 			var constructor = new MethodNode(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null);
 			constructor.visitVarInsn(Opcodes.ALOAD, 0);
 			constructor.visitMethodInsn(Opcodes.INVOKESPECIAL, copy.superName, "<init>", "()V", false);
@@ -106,6 +111,21 @@ final class VaultOptionalHarness extends ClassLoader {
 				var empty = new MethodNode(Opcodes.ACC_PROTECTED, method, "(Lnet/minecraft/nbt/CompoundTag;Lnet/minecraft/core/HolderLookup$Provider;Z)V", null, null);
 				empty.visitInsn(Opcodes.RETURN); empty.visitMaxs(0, 4); copy.methods.add(empty);
 			}
+		} else if (name.equals(TANK)) {
+			copy.superName = SMART.replace('.', '/');
+			for (var f : original.fields) if (List.of("controller", "lastKnownPos", "width", "height", "boiler").contains(f.name)) copy.fields.add(f);
+			for (var m : original.methods) if (List.of("getController", "isController", "getLastKnownPos", "getWidth", "getHeight", "getMainConnectionAxis").contains(m.name)) copy.methods.add(m);
+			for (var m : original.methods) if (List.of("getControllerBE", "getTankInventory", "handlerForCapability").contains(m.name)) {
+				var forbidden = new MethodNode(m.access, m.name, m.desc, null, null);
+				forbidden.visitTypeInsn(Opcodes.NEW, "java/lang/AssertionError"); forbidden.visitInsn(Opcodes.DUP);
+				forbidden.visitLdcInsn("metadata must not read controller entities, fluid handlers or contents");
+				forbidden.visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/AssertionError", "<init>", "(Ljava/lang/Object;)V", false);
+				forbidden.visitInsn(Opcodes.ATHROW); forbidden.visitMaxs(3, 1); copy.methods.add(forbidden);
+			}
+		} else if (name.equals(BOILER)) {
+			copy.superName = "java/lang/Object";
+			for (var f : original.fields) if (List.of("attachedEngines", "attachedWhistles").contains(f.name)) copy.fields.add(f);
+			for (var m : original.methods) if (m.name.equals("isActive")) copy.methods.add(m);
 		} else {
 			copy.superName = SMART.replace('.', '/');
 			for (var f : original.fields) if (List.of("controller", "lastKnownPos", "radius", "length", "updateConnectivity", "inventory").contains(f.name)) copy.fields.add(f);
@@ -132,6 +152,16 @@ final class VaultOptionalHarness extends ClassLoader {
 		field(entity.getClass(), "controller").set(entity, controller);
 		field(entity.getClass(), "radius").setInt(entity, width);
 		field(entity.getClass(), "length").setInt(entity, length);
+		return entity;
+	}
+	BlockEntity tankMember(BlockPos position, BlockState state, @Nullable BlockPos controller, int width, int height) throws Exception {
+		var entity = (BlockEntity) allocate(loadClass(TANK));
+		field(BlockEntity.class, "worldPosition").set(entity, position);
+		field(BlockEntity.class, "blockState").set(entity, state);
+		field(BlockEntity.class, "type").set(entity, BlockEntityType.BEEHIVE);
+		field(entity.getClass(), "controller").set(entity, controller);
+		field(entity.getClass(), "width").setInt(entity, width);
+		field(entity.getClass(), "height").setInt(entity, height);
 		return entity;
 	}
 	static Field field(Class<?> owner, String name) throws Exception { var field = owner.getDeclaredField(name); field.setAccessible(true); return field; }

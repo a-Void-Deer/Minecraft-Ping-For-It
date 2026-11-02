@@ -61,14 +61,18 @@ class PendingContentChatAcceptedStoresTest {
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 
 	@Test void groupedReceiptMatchesClientCopiesButAnotherGroupAtTheSamePhysicalHitCannotInheritPending() {
-		for (String registry : List.of("minecraft:chest", "minecraft:trapped_chest", "create:item_vault")) {
+		for (String registry : List.of("minecraft:chest", "minecraft:trapped_chest", "create:item_vault", "create:fluid_tank")) {
 			var hit = new Target.BlockTarget(TARGET.dimensionId(), 1, 2, 3, registry);
-			TargetKey original = registry.equals("create:item_vault")
-				? new TargetKey.VaultKey(hit.dimensionId(), -5, 2, 3, registry)
-				: new TargetKey.DoubleChestKey(hit.dimensionId(), 1, 2, 3, 2, 2, 3, registry);
-			TargetKey changed = registry.equals("create:item_vault")
-				? new TargetKey.VaultKey(hit.dimensionId(), -4, 2, 3, registry)
-				: new TargetKey.DoubleChestKey(hit.dimensionId(), 0, 2, 3, 1, 2, 3, registry);
+			TargetKey original = switch (registry) {
+				case "create:item_vault" -> new TargetKey.VaultKey(hit.dimensionId(), -5, 2, 3, registry);
+				case "create:fluid_tank" -> new TargetKey.CreateTankKey(hit.dimensionId(), -5, 2, 3, registry);
+				default -> new TargetKey.DoubleChestKey(hit.dimensionId(), 1, 2, 3, 2, 2, 3, registry);
+			};
+			TargetKey changed = switch (registry) {
+				case "create:item_vault" -> new TargetKey.VaultKey(hit.dimensionId(), -4, 2, 3, registry);
+				case "create:fluid_tank" -> new TargetKey.CreateTankKey(hit.dimensionId(), -4, 2, 3, registry);
+				default -> new TargetKey.DoubleChestKey(hit.dimensionId(), 0, 2, 3, 1, 2, 3, registry);
+			};
 			var snapshot = new MarkerSnapshot(ID, SNAPSHOT.owner(), hit, original, "entity_block", "attention", SNAPSHOT.anchor(), 1, 100);
 			Fixture f = new Fixture();
 			var content = PresentationReceiptContent.properties(List.of(HEALTH));

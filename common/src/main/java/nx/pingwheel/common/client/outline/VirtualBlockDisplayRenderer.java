@@ -967,6 +967,7 @@ public final class VirtualBlockDisplayRenderer {
 					+ "; expectedBlockRegistryId=" + external.expectedBlockRegistryId();
 			case TargetKey.DoubleChestKey chest -> chest.toString();
 			case TargetKey.VaultKey vault -> vault.toString();
+			case TargetKey.CreateTankKey tank -> tank.toString();
 			case TargetKey.EntityKey entity ->
 				"dimension=" + entity.dimensionId() + "; entity=" + entity.locator();
 			case TargetKey.LocationKey location ->

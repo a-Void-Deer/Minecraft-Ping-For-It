@@ -57,6 +57,83 @@ class CompositeTargetIdentityTest {
 		assertThrows(NullPointerException.class, () -> snapshot(LEFT, null));
 	}
 
+	@Test void tankControllerIdentityKeepsRawHitsPhysicalAndCannotCollideWithVaults() {
+		var tank = new TargetKey.CreateTankKey(DIM, -5, 2, 3, "create:fluid_tank");
+		var hit = new Target.BlockTarget(DIM, -4, 2, 3, "create:fluid_tank");
+		var other = new Target.BlockTarget(DIM, -3, 3, 3, "create:fluid_tank");
+		assertEquals(tank, new TargetKey.CreateTankKey(DIM, -5, 2, 3, "create:fluid_tank"));
+		assertNotEquals(tank, new TargetKey.CreateTankKey(DIM, -4, 2, 3, "create:fluid_tank"));
+		assertNotEquals(tank, new TargetKey.CreateTankKey("minecraft:the_nether", -5, 2, 3, "create:fluid_tank"));
+		assertNotEquals(tank, new TargetKey.VaultKey(DIM, -5, 2, 3, "create:item_vault"));
+		assertEquals(new TargetKey.BlockKey(DIM, -4, 2, 3, "create:fluid_tank"), TargetKey.from(hit));
+		assertNotEquals(TargetKey.from(hit), TargetKey.from(other));
+		assertNotEquals(tank, TargetKey.from(hit));
+		assertSame(tank, TargetKey.requireCompatible(hit, tank));
+		assertSame(tank, TargetKey.requireCompatible(other, tank), "the detached key carries no live member bounds");
+		assertThrows(IllegalArgumentException.class, () -> new TargetKey.CreateTankKey(DIM, -5, 2, 3, "create:creative_fluid_tank"));
+		assertThrows(IllegalArgumentException.class, () -> new TargetKey.CreateTankKey(DIM, -5, 2, 3, "create:item_vault"));
+		assertThrows(IllegalArgumentException.class, () -> new TargetKey.CreateTankKey(" ", -5, 2, 3, "create:fluid_tank"));
+		for (Target incompatible : List.of(LEFT, new Target.BlockTarget("minecraft:the_nether", -4, 2, 3, "create:fluid_tank"),
+			new Target.LocationTarget(DIM, -4, 2, 3), new Target.EntityTarget(DIM, A),
+			Target.ExternalBlockTarget.committed(DIM, "provider:test", "tank", "create:fluid_tank", "locator", true))) {
+			assertThrows(IllegalArgumentException.class, () -> snapshot(incompatible, tank));
+		}
+	}
+
+	@Test void tankCreationFreezesOnceWhileIndependentRecordsRetainHitAnchorOwnerAudienceAndLifetime() {
+		var key = new TargetKey.CreateTankKey(DIM, -5, 2, 3, "create:fluid_tank");
+		var firstHit = new Target.BlockTarget(DIM, -4, 2, 3, "create:fluid_tank");
+		var otherHit = new Target.BlockTarget(DIM, -3, 3, 3, "create:fluid_tank");
+		var events = new ArrayList<String>(); var calls = new AtomicInteger();
+		var store = new ServerMarkerStore(new MarkerIdSource());
+		var service = service(store, (owner, target) -> {
+			events.add("group");
+			return calls.incrementAndGet() <= 2 ? key : TargetKey.from(target);
+		}, events);
+		var first = service.createDedicated(null, A, firstHit, "attention", 1, 20, List.of(A, B, C), (target, group, type, owner, audience) -> {
+			events.add("dedicated"); assertSame(key, group); assertEquals(firstHit, target); assertEquals(A, owner);
+			assertEquals(List.of(A, B, C), audience); assertEquals(0, store.size());
+			return MarkerCreationService.AdmissionResult.accepted(List.of(), Map.of());
+		}).creation().orElseThrow().marker();
+		assertEquals(List.of("validate", "classify", "group", "dedicated"), events);
+		var second = service.create(B, otherHit, "danger", 2, 30, List.of(A, B)).creation().orElseThrow().marker();
+		assertEquals(2, calls.get()); assertEquals(2, store.size());
+		assertEquals(second.id(), store.winnerFor(key, A).orElseThrow().id());
+		assertEquals(first.id(), store.winnerFor(key, C).orElseThrow().id());
+		assertEquals(firstHit, first.target()); assertEquals(otherHit, second.target());
+		assertEquals(ANCHOR, first.anchor()); assertEquals(ANCHOR, second.anchor());
+		var changedTopology = service.create(A, firstHit, "attention", 3, 40, List.of(A)).creation().orElseThrow().marker();
+		assertEquals(TargetKey.from(firstHit), changedTopology.targetKey());
+		assertSame(key, store.find(first.id()).orElseThrow().targetKey());
+		assertSame(key, store.find(second.id()).orElseThrow().targetKey());
+		assertEquals(MarkerRemovalResult.Status.NOT_OWNER, store.removeOwned(A, second.id()).status());
+		var removed = store.removeOwned(B, second.id());
+		assertTrue(removed.winnerChanges().stream().allMatch(change -> change.targetKey().equals(key)
+			&& change.currentWinner().equals(java.util.Optional.of(first.id()))));
+		store.forgetRecipient(B);
+		assertSame(key, store.find(first.id()).orElseThrow().targetKey());
+		assertEquals(List.of(A, C), store.find(first.id()).orElseThrow().recipients());
+		assertEquals(List.of(first.id()), store.expire(20).removals().stream().map(removal -> removal.marker().id()).toList());
+		assertTrue(store.find(changedTopology.id()).isPresent()); assertEquals(3, calls.get());
+	}
+
+	@Test void tankClientRefreshAndStaleCopiesKeepFrozenKeyAndDoNotRestartDisplayLifetime() {
+		var key = new TargetKey.CreateTankKey(DIM, -5, 2, 3, "create:fluid_tank");
+		var hit = new Target.BlockTarget(DIM, -4, 2, 3, "create:fluid_tank");
+		var snapshot = new MarkerSnapshot(new MarkerId(1), A, hit, key, TYPE.id(), "attention", ANCHOR, 1, 20);
+		var client = new ClientMarkerStore(0, 100); client.onCreated(snapshot, 0);
+		client.onWinnerChanged(key, java.util.Optional.of(snapshot.id()));
+		client.onCreated(snapshot, 10);
+		assertSame(key, client.winnerMarker(key).orElseThrow().targetKey());
+		assertEquals(hit, client.winnerMarker(key).orElseThrow().target());
+		assertEquals(ANCHOR, client.winnerMarker(key).orElseThrow().anchor());
+		assertEquals(100, client.winnerMarker(key).orElseThrow().displayExpiresAtLocalTick());
+		client.onRemoved(snapshot.id(), MarkerRemovalReason.EXPIRED, 19);
+		var stale = client.marker(snapshot.id()).orElseThrow();
+		assertTrue(stale.isStale()); assertSame(key, stale.targetKey());
+		assertEquals(100, stale.displayExpiresAtLocalTick());
+	}
+
 	private static MarkerSnapshot snapshot(Target target, @Nullable TargetKey key) {
 		return new MarkerSnapshot(new MarkerId(1), A, target, key, TYPE.id(), "attention", ANCHOR, 1, 20);
 	}

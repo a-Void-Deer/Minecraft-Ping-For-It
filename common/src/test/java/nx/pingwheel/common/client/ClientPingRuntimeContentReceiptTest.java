@@ -133,7 +133,7 @@ class ClientPingRuntimeContentReceiptTest {
  }
 
  @ParameterizedTest
- @ValueSource(strings = {"minecraft:chest", "minecraft:trapped_chest", "create:item_vault"})
+ @ValueSource(strings = {"minecraft:chest", "minecraft:trapped_chest", "create:item_vault", "create:fluid_tank"})
  void groupedPropertyWireReceiptRequiresAcceptedFreshAnnotatedSection(String registry) {
   Fixture f = new Fixture(0);
   f.created(1, groupedSnapshot(registry), "Owner", PresentationReceiptContent.properties(List.of(EXTRA_FIRST)), basic(false));
@@ -151,10 +151,14 @@ class ClientPingRuntimeContentReceiptTest {
   assertTrue(f.feedback.ordinary.isEmpty()); f.assertNoSourceOrNetworkWork();
  }
 
- @Test void fluidWireReceiptDoesNotBorrowItemPolicyAndOnlyFreshReadyCompletesIt() {
+ @ParameterizedTest
+ @ValueSource(booleans = {false, true})
+ void fluidWireReceiptDoesNotBorrowItemPolicyAndOnlyFreshReadyCompletesIt(boolean groupedTank) {
   Fixture f = new Fixture(0);
   var kind = nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID;
-  f.created(PresentationReceiptContent.inventory(), basic(false));
+  MarkerSnapshot snapshot = groupedTank ? groupedSnapshot("create:fluid_tank") : SNAPSHOT;
+  f.created(1, snapshot, "Owner", PresentationReceiptContent.inventory(), basic(false));
+  assertEquals(snapshot.targetKey(), f.runtime.store().marker(ID).orElseThrow().targetKey());
   var seed = new InventoryS2CPacket.Entry("fluid-token", "minecraft:water", "block.minecraft.water",
    "{\"version\":1,\"id\":\"minecraft:water\",\"name\":\"Water\"}", 80, 1, false, null, 0, false, "attention");
   var packet = InventoryS2CPacket.data(kind, InventoryS2CPacket.Kind.SNAPSHOT, 7, 0, ID, 4, 1, 1, 0, 1, false,
@@ -173,7 +177,9 @@ class ClientPingRuntimeContentReceiptTest {
   assertEquals(1, f.feedback.content.size());
   assertEquals(1, translationCount(f.feedback.content.getFirst(), "presentation.pingforit.format.fluid_amount"));
   assertEquals(1, translationCount(f.feedback.content.getFirst(), "pingforit.inventory.quantity.approximate"));
-  f.runtime.onInventoryPacket(complete); f.tick();
+  f.runtime.onInventoryPacket(complete);
+  f.created(2, snapshot, "Replay", PresentationReceiptContent.inventory(), basic(false)); f.tick();
+  assertEquals(snapshot.targetKey(), f.runtime.store().marker(ID).orElseThrow().targetKey());
   assertEquals(1, f.feedback.content.size()); assertTrue(f.feedback.ordinary.isEmpty()); f.assertNoSourceOrNetworkWork();
  }
 
@@ -317,7 +323,7 @@ class ClientPingRuntimeContentReceiptTest {
  }
 
  @ParameterizedTest
- @ValueSource(strings = {"minecraft:chest", "minecraft:trapped_chest", "create:item_vault"})
+ @ValueSource(strings = {"minecraft:chest", "minecraft:trapped_chest", "create:item_vault", "create:fluid_tank"})
  void groupedWholeWireReceiptRemainsImmediateAndExactlyOnce(String registry) {
   Fixture f = new Fixture(0);
   MarkerSnapshot grouped = groupedSnapshot(registry);
@@ -327,11 +333,52 @@ class ClientPingRuntimeContentReceiptTest {
   assertTrue(f.feedback.content.isEmpty()); f.assertNoSourceOrNetworkWork();
  }
 
+ @ParameterizedTest
+ @ValueSource(booleans = {false, true})
+ void tankWinnerBeforeCreatedConvergesAndIndependentRemovalRevealsOriginalOtherHit(boolean lostRemoval) {
+  Fixture f = new Fixture(200);
+  MarkerSnapshot first = groupedSnapshot("create:fluid_tank");
+  var otherHit = new Target.BlockTarget(first.target().dimensionId(), 2, 3, 3, "create:fluid_tank");
+  var second = new MarkerSnapshot(new MarkerId(43), new UUID(3, 4), otherHit, first.targetKey(), "entity_block", "danger",
+   new MarkerAnchor(2.5, 3.5, 3.5), 2, 10);
+  f.runtime.onPresentationPacket(wire(PresentationS2CPacket.winner(81, 1, first.targetKey(), Optional.of(second.id()))));
+  assertTrue(f.runtime.store().allMarkers().isEmpty());
+  assertTrue(f.runtime.store().visibleWinnersInDimension(TARGET.dimensionId()).isEmpty());
+  f.created(1, first, "First owner", PresentationReceiptContent.whole(), basic(false));
+  assertTrue(f.runtime.store().winnerMarker(first.targetKey()).isEmpty(), "an unknown winner does not expose a losing record");
+  f.created(1, second, "Second owner", PresentationReceiptContent.whole(), basic(false));
+  assertEquals(second.id(), f.runtime.store().winnerMarker(first.targetKey()).orElseThrow().id());
+  assertEquals(otherHit, f.runtime.store().winnerMarker(first.targetKey()).orElseThrow().target());
+  assertEquals(second.anchor(), f.runtime.store().winnerMarker(first.targetKey()).orElseThrow().anchor());
+  f.runtime.onPresentationPacket(wire(PresentationS2CPacket.winner(82, 1, first.targetKey(), Optional.of(first.id()))));
+  assertEquals(second.id(), f.runtime.store().winnerMarker(first.targetKey()).orElseThrow().id(), "a stale session cannot change the tank winner");
+  long deadline = f.runtime.store().marker(second.id()).orElseThrow().displayExpiresAtLocalTick();
+  f.created(2, second, "Replay", PresentationReceiptContent.whole(), basic(false));
+  assertEquals(deadline, f.runtime.store().marker(second.id()).orElseThrow().displayExpiresAtLocalTick());
+  if (lostRemoval) {
+   for (int tick = 0; tick < 48; tick++) f.tick();
+  } else {
+   f.runtime.onPresentationPacket(wire(PresentationS2CPacket.removed(81, 1, second.id(), MarkerRemovalReason.CANCELLED)));
+  }
+  assertTrue(f.runtime.store().marker(second.id()).isEmpty());
+  var survivor = f.runtime.store().marker(first.id()).orElseThrow();
+  assertEquals(first.id(), survivor.id()); assertEquals(first.target(), survivor.target());
+  assertEquals(first.anchor(), survivor.anchor()); assertEquals(first.targetKey(), survivor.targetKey());
+  if (lostRemoval) assertEquals(first.id(), f.runtime.store().winnerMarker(first.targetKey()).orElseThrow().id());
+  else assertTrue(f.runtime.store().winnerMarker(first.targetKey()).isEmpty(), "explicit removal waits for the server's separate winner update");
+  f.runtime.onPresentationPacket(wire(PresentationS2CPacket.winner(81, 1, first.targetKey(), Optional.of(first.id()))));
+  assertEquals(first.id(), f.runtime.store().winnerMarker(first.targetKey()).orElseThrow().id());
+  assertEquals(2, f.feedback.sounds.size()); assertEquals(2, f.feedback.ordinary.size());
+  assertTrue(f.feedback.content.isEmpty()); f.assertNoSourceOrNetworkWork();
+ }
+
  private static MarkerSnapshot groupedSnapshot(String registry) {
   Target.BlockTarget hit = new Target.BlockTarget(TARGET.dimensionId(), 1, 2, 3, registry);
-  TargetKey key = registry.equals("create:item_vault")
-   ? new TargetKey.VaultKey(hit.dimensionId(), -5, 2, 3, registry)
-   : new TargetKey.DoubleChestKey(hit.dimensionId(), 1, 2, 3, 2, 2, 3, registry);
+  TargetKey key = switch (registry) {
+   case "create:item_vault" -> new TargetKey.VaultKey(hit.dimensionId(), -5, 2, 3, registry);
+   case "create:fluid_tank" -> new TargetKey.CreateTankKey(hit.dimensionId(), -5, 2, 3, registry);
+   default -> new TargetKey.DoubleChestKey(hit.dimensionId(), 1, 2, 3, 2, 2, 3, registry);
+  };
   return new MarkerSnapshot(ID, SNAPSHOT.owner(), hit, key, "entity_block", "attention", SNAPSHOT.anchor(), 1, 100);
  }
 

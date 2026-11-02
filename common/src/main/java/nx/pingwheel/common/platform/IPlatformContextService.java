@@ -21,12 +21,12 @@ public interface IPlatformContextService {
 	boolean isModLoaded(String modId);
 
 	/**
-	 * Creation-only, metadata-only optional Vault grouping. The common caller has
+	 * Creation-only, metadata-only optional block grouping. The common caller has
 	 * checked the loaded original registry; implementations must verify loaded
 	 * controller membership without inventory/capability access or chunk loading.
 	 * Unsupported or unavailable integrations retain the exact physical key.
 	 */
-	default TargetKey groupVaultTarget(ServerLevel level, Target.BlockTarget target) {
+	default TargetKey groupBlockTarget(ServerLevel level, Target.BlockTarget target) {
 		return TargetKey.from(target);
 	}
 }

@@ -2384,6 +2384,7 @@ public final class ClientPingRuntime {
 			case TargetKey.BlockKey ignored -> TargetKind.BLOCK;
 			case TargetKey.DoubleChestKey ignored -> TargetKind.BLOCK;
 			case TargetKey.VaultKey ignored -> TargetKind.BLOCK;
+			case TargetKey.CreateTankKey ignored -> TargetKind.BLOCK;
 			case TargetKey.ExternalBlockKey ignored -> TargetKind.BLOCK;
 			case TargetKey.LocationKey ignored -> TargetKind.LOCATION;
 		};

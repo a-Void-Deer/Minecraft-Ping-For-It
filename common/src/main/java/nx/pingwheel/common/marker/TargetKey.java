@@ -22,6 +22,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 	 *       key, while a {@code BlockState}-only change is not);</li>
 	 *   <li>{@link DoubleChestKey}: dimension + chest registry + canonical adjacent pair;</li>
 	 *   <li>{@link VaultKey}: dimension + Vault registry + verified controller position;</li>
+	 *   <li>{@link CreateTankKey}: dimension + fluid tank registry + verified controller position;</li>
 	 *   <li>{@link ExternalBlockKey}: dimension + provider + stable target id +
 	 *       expected block registry id, without the provider locator or
 	 *       classification;</li>
@@ -33,7 +34,7 @@ import org.jetbrains.annotations.NotNullByDefault;
  */
 @NotNullByDefault
 public sealed interface TargetKey permits TargetKey.EntityKey, TargetKey.BlockKey, TargetKey.DoubleChestKey,
-	TargetKey.VaultKey, TargetKey.ExternalBlockKey, TargetKey.LocationKey {
+	TargetKey.VaultKey, TargetKey.CreateTankKey, TargetKey.ExternalBlockKey, TargetKey.LocationKey {
 
 	String dimensionId();
 
@@ -64,7 +65,7 @@ public sealed interface TargetKey permits TargetKey.EntityKey, TargetKey.BlockKe
 
 	/**
 	 * Checks the detached carrier, not live topology. Only the creation resolver
-	 * can establish Vault membership; clients must never infer authority from it.
+	 * can establish Vault or tank membership; clients must never infer authority from it.
 	 */
 	static TargetKey requireCompatible(Target target, TargetKey key) {
 		Objects.requireNonNull(target, "target");
@@ -77,6 +78,9 @@ public sealed interface TargetKey permits TargetKey.EntityKey, TargetKey.BlockKe
 			case VaultKey vault -> target instanceof Target.BlockTarget block
 				&& vault.dimensionId().equals(block.dimensionId())
 				&& vault.blockRegistryId().equals(block.blockRegistryId());
+			case CreateTankKey tank -> target instanceof Target.BlockTarget block
+				&& tank.dimensionId().equals(block.dimensionId())
+				&& tank.blockRegistryId().equals(block.blockRegistryId());
 			default -> key.equals(from(target));
 		};
 		if (!compatible) throw new IllegalArgumentException("targetKey does not match committed target");
@@ -110,6 +114,17 @@ public sealed interface TargetKey permits TargetKey.EntityKey, TargetKey.BlockKe
 			requireDimensionId(dimensionId);
 			if (!Objects.requireNonNull(blockRegistryId, "blockRegistryId").equals("create:item_vault"))
 				throw new IllegalArgumentException("Vault key requires create:item_vault");
+		}
+	}
+
+	/** Verified fluid tank controller identity only; extents and members are not identity. */
+	@NotNullByDefault
+	record CreateTankKey(String dimensionId, int controllerX, int controllerY, int controllerZ,
+		String blockRegistryId) implements TargetKey {
+		public CreateTankKey {
+			requireDimensionId(dimensionId);
+			if (!Objects.requireNonNull(blockRegistryId, "blockRegistryId").equals("create:fluid_tank"))
+				throw new IllegalArgumentException("Create tank key requires create:fluid_tank");
 		}
 	}
 

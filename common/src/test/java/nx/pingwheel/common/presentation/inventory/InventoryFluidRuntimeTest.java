@@ -85,6 +85,30 @@ class InventoryFluidRuntimeTest {
 			assertEquals(3, reads.get());
 		}
 	}
+	@Test void tankLogicalSlotQuotaSpansPhysicalMembersWithoutReplacingTheirOwnerOrFace() {
+		var settings = InventorySettings.serverDefaults(); settings.getTracking().setMaxSlotsPerTarget(IntLimit.finite(1));
+		settings.getTracking().setDistinguishFaces(false); settings.getTracking().setDistinguishPlayers(false);
+		var key = new TargetKey.CreateTankKey("minecraft:overworld", 0, 64, 0, "create:fluid_tank");
+		var first = new InventorySourceInput(new nx.pingwheel.common.domain.Target.BlockTarget("minecraft:overworld", 1, 64, 0, "create:fluid_tank"),
+			new UUID(18, 1), BlockFace.NORTH, InventoryResourceKind.FLUID);
+		var second = new InventorySourceInput(new nx.pingwheel.common.domain.Target.BlockTarget("minecraft:overworld", 1, 65, 0, "create:fluid_tank"),
+			new UUID(18, 2), BlockFace.SOUTH, InventoryResourceKind.FLUID);
+		var opened = new ArrayList<InventorySourceInput>(); var reads = new AtomicInteger();
+		try (var runtime = new InventoryRuntime((request, cap) -> {
+			opened.add(request); return Optional.of(new Source(request, reads, 2));
+		}, settings.pendingMemoryBytes(), InventoryRuntime.DisplayReprojector.none(),
+			nx.pingwheel.common.presentation.budget.BudgetDelaySink.NONE, true)) {
+			runtime.advance(0, settings);
+			var a = runtime.attach(first, new InventoryRuntime.TrackingSubject(key)).orElseThrow();
+			var b = runtime.attach(second, new InventoryRuntime.TrackingSubject(key)).orElseThrow();
+			assertEquals(1, runtime.step(a).orElseThrow().slots().size());
+			assertTrue(runtime.step(b).isEmpty(), "another member cannot claim another logical target's allowance");
+			assertEquals(1, reads.get());
+			runtime.advance(settings.getTracking().getPeriodTicks(), settings);
+			assertEquals(1, runtime.step(b).orElseThrow().slots().size());
+			assertEquals(2, reads.get()); assertTrue(opened.contains(first)); assertTrue(opened.contains(second));
+		}
+	}
 	@Test void nativeCatalogCapacityKeepsOnlyValidatedPrefixAndPaysFailingVisitAndRetainedEvidence() {
 		var settings = InventorySettings.serverDefaults(); var reads = new AtomicInteger();
 		try (var runtime = new InventoryRuntime((request, cap) -> {

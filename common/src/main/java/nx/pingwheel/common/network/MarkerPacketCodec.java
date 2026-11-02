@@ -46,6 +46,7 @@ public final class MarkerPacketCodec {
 	/** Server-to-client key variants only; never accepted as block Target tags. */
 	public static final int BLOCK_KEY_DOUBLE_CHEST_TAG = 2;
 	public static final int BLOCK_KEY_VAULT_TAG = 3;
+	public static final int BLOCK_KEY_CREATE_TANK_TAG = 4;
 
 	private MarkerPacketCodec() {}
 
@@ -162,6 +163,11 @@ public final class MarkerPacketCodec {
 				buf.writeInt(vault.controllerX()); buf.writeInt(vault.controllerY()); buf.writeInt(vault.controllerZ());
 				writeIdString(buf, vault.blockRegistryId());
 			}
+			case TargetKey.CreateTankKey tank -> {
+				buf.writeVarInt(BLOCK_KEY_CREATE_TANK_TAG);
+				buf.writeInt(tank.controllerX()); buf.writeInt(tank.controllerY()); buf.writeInt(tank.controllerZ());
+				writeIdString(buf, tank.blockRegistryId());
+			}
 			case TargetKey.LocationKey location -> {
 				buf.writeDouble(location.x());
 				buf.writeDouble(location.y());
@@ -224,6 +230,7 @@ public final class MarkerPacketCodec {
 			case TargetKey.BlockKey ignored -> TargetKind.BLOCK;
 			case TargetKey.DoubleChestKey ignored -> TargetKind.BLOCK;
 			case TargetKey.VaultKey ignored -> TargetKind.BLOCK;
+			case TargetKey.CreateTankKey ignored -> TargetKind.BLOCK;
 			case TargetKey.ExternalBlockKey ignored -> TargetKind.BLOCK;
 			case TargetKey.LocationKey ignored -> TargetKind.LOCATION;
 		};
@@ -253,6 +260,8 @@ public final class MarkerPacketCodec {
 			case BLOCK_KEY_DOUBLE_CHEST_TAG -> new TargetKey.DoubleChestKey(dimensionId,
 				buf.readInt(), buf.readInt(), buf.readInt(), buf.readInt(), buf.readInt(), buf.readInt(), readKeyIdString(buf));
 			case BLOCK_KEY_VAULT_TAG -> new TargetKey.VaultKey(dimensionId,
+				buf.readInt(), buf.readInt(), buf.readInt(), readKeyIdString(buf));
+			case BLOCK_KEY_CREATE_TANK_TAG -> new TargetKey.CreateTankKey(dimensionId,
 				buf.readInt(), buf.readInt(), buf.readInt(), readKeyIdString(buf));
 			default -> throw new IllegalArgumentException("Unknown block target variant tag");
 		};

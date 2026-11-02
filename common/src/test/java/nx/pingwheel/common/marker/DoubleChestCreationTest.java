@@ -109,6 +109,21 @@ class DoubleChestCreationTest {
 		assertEquals(TargetKey.from(wrong), resolver.resolve(DoubleChestFixture.OWNER, wrong)); assertEquals(0, f.chunkLookups);
 		var vault = new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "create:item_vault");
 		var platform = new nx.pingwheel.common.config.TestPlatformContextService();
-		assertEquals(TargetKey.from(vault), platform.groupVaultTarget(f.world, vault));
+		assertEquals(TargetKey.from(vault), platform.groupBlockTarget(f.world, vault));
+		var tank = new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "create:fluid_tank");
+		assertEquals(TargetKey.from(tank), platform.groupBlockTarget(f.world, tank));
+	}
+	@Test void tankGroupingRejectsUnloadedAndReplacedSourcesBeforeOptionalPlatformMetadata() {
+		var f = new DoubleChestFixture(Blocks.CHEST, Direction.NORTH); var resolver = new MinecraftTargetGroupingResolver(f.server);
+		var target = new Target.BlockTarget("minecraft:overworld", f.left.getX(), f.left.getY(), f.left.getZ(), "create:fluid_tank");
+		var wrongDimension = new Target.BlockTarget("minecraft:the_nether", target.x(), target.y(), target.z(), target.blockRegistryId());
+		assertEquals(TargetKey.from(wrongDimension), resolver.resolve(DoubleChestFixture.OWNER, wrongDimension));
+		assertEquals(0, f.chunkLookups);
+		f.unavailable.add(f.left);
+		assertEquals(TargetKey.from(target), resolver.resolve(DoubleChestFixture.OWNER, target));
+		assertEquals(1, f.chunkLookups); assertTrue(f.reads.isEmpty());
+		f.unavailable.clear();
+		assertEquals(TargetKey.from(target), resolver.resolve(DoubleChestFixture.OWNER, target));
+		assertEquals(List.of(f.left), f.reads); assertEquals(0, f.blockEntities);
 	}
 }

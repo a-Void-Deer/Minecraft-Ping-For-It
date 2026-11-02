@@ -28,12 +28,14 @@ class CompositeTargetPacketsTest {
 	private static final @Unmodifiable List<TargetKey> GROUPS = List.of(
 		new TargetKey.DoubleChestKey(DIM, 1, 2, 3, 2, 2, 3, "minecraft:chest"),
 		new TargetKey.DoubleChestKey(DIM, 1, 2, 3, 1, 2, 4, "minecraft:trapped_chest"),
-		new TargetKey.VaultKey(DIM, -10, 2, 3, "create:item_vault"));
+		new TargetKey.VaultKey(DIM, -10, 2, 3, "create:item_vault"),
+		new TargetKey.CreateTankKey(DIM, -10, 2, 3, "create:fluid_tank"));
 
 	private static Target.BlockTarget hit(TargetKey key) {
 		return switch (key) {
 			case TargetKey.DoubleChestKey chest -> new Target.BlockTarget(DIM, chest.secondX(), chest.secondY(), chest.secondZ(), chest.blockRegistryId());
 			case TargetKey.VaultKey vault -> new Target.BlockTarget(DIM, 2, 2, 3, vault.blockRegistryId());
+			case TargetKey.CreateTankKey tank -> new Target.BlockTarget(DIM, 2, 2, 3, tank.blockRegistryId());
 			default -> throw new AssertionError(key);
 		};
 	}
@@ -98,8 +100,39 @@ class CompositeTargetPacketsTest {
 		try { PresentationCodec.write(section, SECTION); buf.writeVarInt(section.readableBytes()); buf.writeBytes(section); }
 		finally { section.release(); }
 	}
+	@Test void tankKeyTagFourUsesStrictV2ControllerGrammarAndRejectsWrongCarriers() {
+		var key = GROUPS.getLast();
+		var buf = new FriendlyByteBuf(Unpooled.buffer());
+		try {
+			MarkerPacketCodec.writeTargetKey(buf, key);
+			assertEquals("BLOCK", buf.readUtf()); assertEquals(DIM, buf.readUtf());
+			assertEquals(4, buf.readVarInt());
+			assertEquals(-10, buf.readInt()); assertEquals(2, buf.readInt()); assertEquals(3, buf.readInt());
+			assertEquals("create:fluid_tank", buf.readUtf()); assertFalse(buf.isReadable());
+		} finally { buf.release(); }
+		for (String registry : List.of("create:item_vault", "create:creative_fluid_tank", "minecraft:water", "mod:fluid_tank", "")) {
+			corrupt(frame -> { header(frame, PresentationS2CPacket.Kind.WINNER); rawTankKey(frame, registry); frame.writeByte(0); });
+		}
+		for (Target wrong : List.of(new Target.BlockTarget("minecraft:the_nether", 2, 2, 3, "create:fluid_tank"),
+			new Target.BlockTarget(DIM, 2, 2, 3, "create:item_vault"), new Target.LocationTarget(DIM, 2, 2, 3),
+			new Target.EntityTarget(DIM, OWNER), Target.ExternalBlockTarget.committed(DIM, "provider:test", "tank", "create:fluid_tank", "locator", true))) {
+			corrupt(frame -> { header(frame, PresentationS2CPacket.Kind.CREATED); frame.writeLong(9); frame.writeUUID(OWNER);
+				MarkerPacketCodec.writeTarget(frame, wrong); rawTankKey(frame, "create:fluid_tank"); snapshotTail(frame); });
+		}
+		for (int tag : List.of(5, 127, 256)) {
+			corrupt(frame -> { header(frame, PresentationS2CPacket.Kind.WINNER); MarkerPacketCodec.writeEnum(frame, TargetKind.BLOCK);
+				frame.writeUtf(DIM); frame.writeVarInt(tag); frame.writeZero(12); frame.writeUtf("create:fluid_tank"); frame.writeByte(0); });
+		}
+		corrupt(frame -> { header(frame, PresentationS2CPacket.Kind.WINNER); MarkerPacketCodec.writeEnum(frame, TargetKind.BLOCK);
+			frame.writeUtf(DIM); frame.writeByte(0x84); frame.writeByte(0); frame.writeZero(12); frame.writeUtf("create:fluid_tank"); frame.writeByte(0); });
+	}
+	private static void rawTankKey(FriendlyByteBuf buf, String registry) {
+		MarkerPacketCodec.writeEnum(buf, TargetKind.BLOCK); buf.writeUtf(DIM); buf.writeVarInt(4);
+		buf.writeInt(-10); buf.writeInt(2); buf.writeInt(3); buf.writeUtf(registry);
+	}
 	@Test void missingMandatoryKeyOldVersionEveryTruncationAndTrailingFramesAreRejected() {
-		corrupt(buf -> { header(buf, PresentationS2CPacket.Kind.CREATED); buf.writeLong(9); buf.writeUUID(OWNER); MarkerPacketCodec.writeTarget(buf, hit(GROUPS.getFirst())); snapshotTail(buf); });
+		for (TargetKey key : GROUPS)
+			corrupt(buf -> { header(buf, PresentationS2CPacket.Kind.CREATED); buf.writeLong(9); buf.writeUUID(OWNER); MarkerPacketCodec.writeTarget(buf, hit(key)); snapshotTail(buf); });
 		for (TargetKey key : GROUPS) for (PresentationS2CPacket packet : List.of(PresentationS2CPacket.created(41, 2, 1, snapshot(key), "Owner", REF, SECTION), PresentationS2CPacket.winner(41, 2, key, Optional.of(new MarkerId(9))))) {
 			var source = new FriendlyByteBuf(Unpooled.buffer());
 			try {
@@ -112,8 +145,8 @@ class CompositeTargetPacketsTest {
 			} finally { source.release(); }
 		}
 	}
-	@Test void c2sTargetCannotAssertEitherGroupedVariantAndOldHelloCannotNegotiate() {
-		for (int tag : List.of(2, 3)) {
+	@Test void c2sTargetCannotAssertGroupedVariantsAndOldHelloCannotNegotiate() {
+		for (int tag : List.of(2, 3, 4)) {
 			var buf = new FriendlyByteBuf(Unpooled.buffer());
 			try {
 				buf.writeEnum(PresentationC2SPacket.Kind.CREATE); buf.writeVarInt(2); buf.writeLong(41); buf.writeLong(1);

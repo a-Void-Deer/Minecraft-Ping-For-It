@@ -40,7 +40,7 @@ class CreateVaultProductionBoundaryTest {
 		ClassLoader previous = Thread.currentThread().getContextClassLoader(); Thread.currentThread().setContextClassLoader(f.loader);
 		try {
 			var platform = f.loader.loadClass("nx.pingwheel.neoforge.platform.PlatformContextServiceImpl").getConstructor().newInstance();
-			return (TargetKey) platform.getClass().getMethod("groupVaultTarget", net.minecraft.server.level.ServerLevel.class, Target.BlockTarget.class).invoke(platform, f.serverWorld, target);
+			return (TargetKey) platform.getClass().getMethod("groupBlockTarget", net.minecraft.server.level.ServerLevel.class, Target.BlockTarget.class).invoke(platform, f.serverWorld, target);
 		} finally { Thread.currentThread().setContextClassLoader(previous); }
 	}
 	private static BlockPresentationResolver resolver(VaultNativeFixture f) throws Exception {
@@ -108,7 +108,7 @@ class CreateVaultProductionBoundaryTest {
 			ClassLoader previous = Thread.currentThread().getContextClassLoader(); Thread.currentThread().setContextClassLoader(loader);
 			try {
 				var platform = loader.loadClass("nx.pingwheel.neoforge.platform.PlatformContextServiceImpl").getConstructor().newInstance();
-				assertEquals(TargetKey.from(target), platform.getClass().getMethod("groupVaultTarget", net.minecraft.server.level.ServerLevel.class, Target.BlockTarget.class).invoke(platform, level, target));
+				assertEquals(TargetKey.from(target), platform.getClass().getMethod("groupBlockTarget", net.minecraft.server.level.ServerLevel.class, Target.BlockTarget.class).invoke(platform, level, target));
 			} finally { Thread.currentThread().setContextClassLoader(previous); }
 			var resolver = loader.loadClass("nx.pingwheel.neoforge.integration.create.NeoForgeCreateVaultBlockPresentationResolver"); resolver.getMethod("register").invoke(null);
 			assertEquals("not-registered", resolver.getMethod("registrationState").invoke(null)); assertEquals(0, loader.optionalLoads);
@@ -165,7 +165,7 @@ class CreateVaultProductionBoundaryTest {
 			ClassLoader previous = Thread.currentThread().getContextClassLoader(); Thread.currentThread().setContextClassLoader(loader);
 			try {
 				var platform = loader.loadClass("nx.pingwheel.neoforge.platform.PlatformContextServiceImpl").getConstructor().newInstance();
-				assertEquals(TargetKey.from(f.target(f.root)), platform.getClass().getMethod("groupVaultTarget", net.minecraft.server.level.ServerLevel.class, Target.BlockTarget.class).invoke(platform, f.serverWorld, f.target(f.root)));
+				assertEquals(TargetKey.from(f.target(f.root)), platform.getClass().getMethod("groupBlockTarget", net.minecraft.server.level.ServerLevel.class, Target.BlockTarget.class).invoke(platform, f.serverWorld, f.target(f.root)));
 			} finally { Thread.currentThread().setContextClassLoader(previous); }
 			f.clientEntities(); var registry = new BlockPresentationResolverRegistry(false);
 			registry.register((BlockPresentationResolver) loader.loadClass("nx.pingwheel.neoforge.integration.create.NeoForgeCreateVaultBlockPresentationResolver").getConstructor().newInstance());
@@ -187,6 +187,9 @@ class CreateVaultProductionBoundaryTest {
 			} finally {
 				((BlockPresentationResolverRegistry.Registration) field(resolver, "registration").get(null)).close();
 				field(resolver, "registration").set(null, null);
+				var tankResolver = f.loader.loadClass("nx.pingwheel.neoforge.integration.create.NeoForgeCreateFluidTankBlockPresentationResolver");
+				((BlockPresentationResolverRegistry.Registration) field(tankResolver, "registration").get(null)).close();
+				field(tankResolver, "registration").set(null, null);
 			}
 		}
 	}

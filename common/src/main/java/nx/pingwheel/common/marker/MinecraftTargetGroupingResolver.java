@@ -32,7 +32,8 @@ public final class MinecraftTargetGroupingResolver implements TargetGroupingReso
 		// External/provider positions must never be interpreted as ordinary-world coordinates.
 		if (!(committedTarget instanceof Target.BlockTarget block)) return exact;
 		if (!VanillaDoubleChestTopology.supports(block.blockRegistryId())
-			&& !block.blockRegistryId().equals("create:item_vault")) return exact;
+			&& !block.blockRegistryId().equals("create:item_vault")
+			&& !block.blockRegistryId().equals("create:fluid_tank")) return exact;
 		try {
 			@Nullable ServerPlayer player = server.getPlayerList().getPlayer(owner);
 			if (player == null) return exact;
@@ -45,7 +46,7 @@ public final class MinecraftTargetGroupingResolver implements TargetGroupingReso
 			}
 			@Nullable BlockState state = readLoaded(level, pos);
 			if (state == null || !BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals(block.blockRegistryId())) return exact;
-			return TargetKey.requireCompatible(block, IPlatformContextService.INSTANCE.groupVaultTarget(level, block));
+			return TargetKey.requireCompatible(block, IPlatformContextService.INSTANCE.groupBlockTarget(level, block));
 		} catch (RuntimeException | LinkageError | AssertionError unavailable) {
 			Diagnostics.warn("target-grouping", "minecraft", () -> "target=" + block + "; using exact hit", unavailable);
 			return exact;
