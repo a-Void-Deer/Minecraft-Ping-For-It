@@ -114,7 +114,10 @@ class CertifiedVault1620BackendTest {
 		long revision(MarkerId marker) { return (Long) java.util.Objects.requireNonNull(get(java.util.Objects.requireNonNull(leases().get(marker)), "revision")); }
 		InventoryRuntime.Consumer previewConsumer(long request) {
 			var session = java.util.Objects.requireNonNull(((Map<?, ?>) get(backend, "sessions")).get(OWNER));
-			var preview = java.util.Objects.requireNonNull(((Map<?, ?>) get(session, "previews")).get(request));
+			var previews = (Map<?, ?>) java.util.Objects.requireNonNull(get(session, "previews"));
+			var preview = previews.values().stream().filter(value -> Long.valueOf(request).equals(get(value, "request"))
+				&& ((InventorySourceInput) java.util.Objects.requireNonNull(get(value, "input"))).resourceKind() == InventoryResourceKind.ITEM)
+				.findFirst().orElseThrow();
 			return (InventoryRuntime.Consumer) java.util.Objects.requireNonNull(get(preview, "consumer"));
 		}
 		void stage(String label) {

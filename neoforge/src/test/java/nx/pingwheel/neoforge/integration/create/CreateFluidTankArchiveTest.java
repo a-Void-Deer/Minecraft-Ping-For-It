@@ -7,7 +7,9 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
@@ -22,11 +24,12 @@ class CreateFluidTankArchiveTest {
 	private static final String BOILER = "com.simibubi.create.content.fluids.tank.BoilerData";
 
 	@Test void actualModMetadataGateDeclinesMissingAndUntestedCreateAndAcceptsTheTestedVersion() throws Exception {
+		var containers = new Containers();
 		for (@Nullable String version : new String[] {null, "6.0.11", "6.0.10-282", "6.0.10", "6.0.10-281"}) {
 			try (var mods = new Mods(version)) {
 				if (version != null) {
-					var info = net.neoforged.fml.ModList.get().getMods().getFirst();
-					field(net.neoforged.fml.ModList.class, "indexedMods").set(net.neoforged.fml.ModList.get(), Map.of("create", new Container(info)));
+					var list = modList();
+					field(list.getClass(), "indexedMods").set(list, Map.of("create", containers.create(firstMod(list))));
 				}
 				assertEquals("6.0.10".equals(version) || "6.0.10-281".equals(version), CreateFluidTankAccess.available());
 			}
@@ -34,37 +37,67 @@ class CreateFluidTankArchiveTest {
 	}
 
 	@Test void indexedAvailabilityDoesNotEnumerate512UnrelatedModsAndStillObservesVersionChanges() throws Exception {
+		var containers = new Containers();
 		try (var mods = new Mods("6.0.10")) {
-			var list = net.neoforged.fml.ModList.get(); var original = list.getMods().getFirst();
-			var unrelated = new java.util.ArrayList<net.neoforged.neoforgespi.language.IModInfo>();
-			var indexed = new java.util.HashMap<String, net.neoforged.fml.ModContainer>();
+			var list = modList(); var original = firstMod(list);
+			var unrelated = new java.util.ArrayList<Object>();
+			var indexed = new java.util.HashMap<String, Object>();
 			var callbacks = new java.util.concurrent.atomic.AtomicInteger();
 			for (int index = 0; index < 512; index++) {
 				String id = "unrelated_" + index;
-				var info = (net.neoforged.neoforgespi.language.IModInfo) java.lang.reflect.Proxy.newProxyInstance(getClass().getClassLoader(),
-					new Class<?>[] {net.neoforged.neoforgespi.language.IModInfo.class}, (proxy, method, arguments) -> {
+				var info = java.lang.reflect.Proxy.newProxyInstance(containers.infoType.getClassLoader(),
+					new Class<?>[] {containers.infoType}, (proxy, method, arguments) -> {
 						if (method.getName().equals("getModId")) { callbacks.incrementAndGet(); return id; }
 						throw new AssertionError("unrelated mod metadata inspected: " + method.getName());
 					});
-				unrelated.add(info); indexed.put(id, new Container(info));
+				unrelated.add(info); indexed.put(id, containers.create(info));
 			}
-			unrelated.add(original); indexed.put("create", new Container(original));
-			field(net.neoforged.fml.ModList.class, "sortedList").set(list, List.copyOf(unrelated));
-			field(net.neoforged.fml.ModList.class, "indexedMods").set(list, indexed); callbacks.set(0);
+			unrelated.add(original); indexed.put("create", containers.create(original));
+			field(list.getClass(), "sortedList").set(list, List.copyOf(unrelated));
+			field(list.getClass(), "indexedMods").set(list, indexed); callbacks.set(0);
 			for (int check = 0; check < 16; check++) assertTrue(CreateFluidTankAccess.available());
 			assertEquals(0, callbacks.get(), "bounded ID lookup cannot spend one callback per installed mod");
 			try (var wrong = new Mods("6.0.11")) {
-				var info = net.neoforged.fml.ModList.get().getMods().getFirst(); indexed.put("create", new Container(info));
+				indexed.put("create", containers.create(firstMod(modList())));
 			}
 			assertFalse(CreateFluidTankAccess.available(), "no successful availability/authority cache");
 			indexed.remove("create"); assertFalse(CreateFluidTankAccess.available()); assertEquals(0, callbacks.get());
 		}
 	}
 
+	private static Object modList() throws ReflectiveOperationException {
+		return java.util.Objects.requireNonNull(Class.forName("net.neoforged.fml.ModList").getMethod("get").invoke(null));
+	}
+	private static Object firstMod(Object list) throws ReflectiveOperationException {
+		return ((List<?>) list.getClass().getMethod("getMods").invoke(list)).getFirst();
+	}
+
+	/** Like Mods, link loader types only at test runtime. Keep the real ModList, constructor and
+	 * getModInfo implementation; generate only the concrete event-bus-free fixture subclass. */
 	@NotNullByDefault
-	private static final class Container extends net.neoforged.fml.ModContainer {
-		private Container(net.neoforged.neoforgespi.language.IModInfo info) { super(info); }
-		@Override public @Nullable net.neoforged.bus.api.IEventBus getEventBus() { return null; }
+	private static final class Containers extends ClassLoader {
+		private final Class<?> infoType, containerType;
+		private Containers() throws ReflectiveOperationException {
+			super(CreateFluidTankArchiveTest.class.getClassLoader());
+			infoType = Class.forName("net.neoforged.neoforgespi.language.IModInfo", false, getParent());
+			Class<?> base = Class.forName("net.neoforged.fml.ModContainer", false, getParent());
+			String name = CreateFluidTankArchiveTest.class.getName() + "$GeneratedContainer";
+			var writer = new ClassWriter(0);
+			writer.visit(Opcodes.V21, Opcodes.ACC_PUBLIC | Opcodes.ACC_FINAL, name.replace('.', '/'), null, Type.getInternalName(base), null);
+			writer.visitAnnotation(Type.getDescriptor(NotNullByDefault.class), false).visitEnd();
+			String constructor = "(" + Type.getDescriptor(infoType) + ")V";
+			var init = writer.visitMethod(Opcodes.ACC_PUBLIC, "<init>", constructor, null, null);
+			init.visitCode(); init.visitVarInsn(Opcodes.ALOAD, 0); init.visitVarInsn(Opcodes.ALOAD, 1);
+			init.visitMethodInsn(Opcodes.INVOKESPECIAL, Type.getInternalName(base), "<init>", constructor, false);
+			init.visitInsn(Opcodes.RETURN); init.visitMaxs(2, 2); init.visitEnd();
+			var bus = writer.visitMethod(Opcodes.ACC_PUBLIC, "getEventBus", Type.getMethodDescriptor(base.getMethod("getEventBus")), null, null);
+			bus.visitAnnotation(Type.getDescriptor(Nullable.class), false).visitEnd();
+			bus.visitCode(); bus.visitInsn(Opcodes.ACONST_NULL); bus.visitInsn(Opcodes.ARETURN); bus.visitMaxs(1, 1); bus.visitEnd();
+			writer.visitEnd(); byte[] bytes = writer.toByteArray(); containerType = defineClass(name, bytes, 0, bytes.length);
+		}
+		private Object create(Object info) throws ReflectiveOperationException {
+			return containerType.getConstructor(infoType).newInstance(info);
+		}
 	}
 
 	@Test void archiveMetadataHasExactOwnersAndNoHiddenControllerLookupOrContentAccess() throws Exception {
