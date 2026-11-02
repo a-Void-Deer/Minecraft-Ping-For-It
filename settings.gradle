@@ -48,4 +48,3 @@ rootProject.name = "Ping-For-It"
 include("common")
 include("fabric")
 include("forge")
-include("neoforge")
