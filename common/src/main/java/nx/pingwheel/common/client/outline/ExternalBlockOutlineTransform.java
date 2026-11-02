@@ -39,7 +39,7 @@ public final class ExternalBlockOutlineTransform {
 			worldBlockOrigin.x - cameraPosition.x,
 			worldBlockOrigin.y - cameraPosition.y,
 			worldBlockOrigin.z - cameraPosition.z);
-		poseStack.mulPose(orientationScale);
+		poseStack.mulPoseMatrix(orientationScale);
 	}
 
 	/**

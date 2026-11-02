@@ -111,12 +111,13 @@ public final class BlockOutlineFrameState {
 
 		@Override
 		public void pushModelView() {
-			RenderSystem.getModelViewStack().pushMatrix();
+			RenderSystem.getModelViewStack().pushPose();
 		}
 
 		@Override
 		public void setModelView(Matrix4f matrix) {
-			RenderSystem.getModelViewStack().set(matrix);
+			RenderSystem.getModelViewStack().setIdentity();
+			RenderSystem.getModelViewStack().mulPoseMatrix(matrix);
 		}
 
 		@Override
@@ -126,7 +127,7 @@ public final class BlockOutlineFrameState {
 
 		@Override
 		public void popModelView() {
-			RenderSystem.getModelViewStack().popMatrix();
+			RenderSystem.getModelViewStack().popPose();
 		}
 
 		@Override

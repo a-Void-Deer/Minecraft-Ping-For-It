@@ -11,7 +11,6 @@ import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
-import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
@@ -85,7 +84,7 @@ import static nx.pingwheel.common.Global.LOGGER;
  *
 	 * <p>Built-in BER/baked attempts write exclusively through an
 	 * {@link OutlineOnlyBufferSource} backed by a fresh transient
-	 * {@link ByteBufferBuilder}, so a recoverable failure discards the complete
+	 * {@link BufferBuilder}, so a recoverable failure discards the complete
 	 * attempt-local buffer. Optional sources may use a different strategy: the
 	 * Flywheel mask stages fixed per-texture batches first and only then commits
 	 * them to vanilla's shared {@code OutlineBufferSource}. That shared source
@@ -539,8 +538,8 @@ public final class VirtualBlockDisplayRenderer {
 				poseStack = context.transform().createPoseStack(pos, context.cameraPosition(), null);
 			}
 
-			try (ByteBufferBuilder builder = new ByteBufferBuilder(RenderType.TRANSIENT_BUFFER_SIZE)) {
-				MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder);
+			try (AttemptBuffer builder = new AttemptBuffer(RenderType.TRANSIENT_BUFFER_SIZE)) {
+				MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder.builder());
 				OutlineOnlyBufferSource buffer = new OutlineOnlyBufferSource(localSource, context.argbColor());
 
 				renderer.render(
@@ -637,8 +636,8 @@ public final class VirtualBlockDisplayRenderer {
 		EntityBlockGeometryContext context
 	) {
 		FailureStage stage = FailureStage.RENDER;
-		try (ByteBufferBuilder builder = new ByteBufferBuilder(RenderType.TRANSIENT_BUFFER_SIZE)) {
-			MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder);
+		try (AttemptBuffer builder = new AttemptBuffer(RenderType.TRANSIENT_BUFFER_SIZE)) {
+			MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder.builder());
 			OutlineOnlyBufferSource buffer = new OutlineOnlyBufferSource(localSource, context.argbColor());
 
 			adapter.render(context, buffer);
@@ -751,8 +750,8 @@ public final class VirtualBlockDisplayRenderer {
 		// any point — even after an incomplete vertex — is discarded together
 		// with the builder instead of corrupting a shared vanilla buffer that
 		// some other code path will later flush.
-		try (ByteBufferBuilder builder = new ByteBufferBuilder(RenderType.TRANSIENT_BUFFER_SIZE)) {
-			MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder);
+		try (AttemptBuffer builder = new AttemptBuffer(RenderType.TRANSIENT_BUFFER_SIZE)) {
+			MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder.builder());
 			OutlineOnlyBufferSource buffer = new OutlineOnlyBufferSource(localSource, argbColor);
 
 			display.setPos(pos.getX(), pos.getY(), pos.getZ());
@@ -951,22 +950,23 @@ public final class VirtualBlockDisplayRenderer {
 			return "<unknown>";
 		}
 
-		return switch (targetKey) {
-			case TargetKey.BlockKey block ->
-				"dimension=" + block.dimensionId()
-					+ "; position=" + block.x() + "," + block.y() + "," + block.z()
-					+ "; blockRegistryId=" + block.blockRegistryId();
-			case TargetKey.ExternalBlockKey external ->
-				"dimension=" + external.dimensionId()
-					+ "; provider=" + external.providerId()
-					+ "; stableTargetId=" + external.stableTargetId()
-					+ "; expectedBlockRegistryId=" + external.expectedBlockRegistryId();
-			case TargetKey.EntityKey entity ->
-				"dimension=" + entity.dimensionId() + "; entity=" + entity.locator();
-			case TargetKey.LocationKey location ->
-				"dimension=" + location.dimensionId()
-					+ "; position=" + location.x() + "," + location.y() + "," + location.z();
-		};
+		if (targetKey instanceof TargetKey.BlockKey block) {
+			return "dimension=" + block.dimensionId()
+				+ "; position=" + block.x() + "," + block.y() + "," + block.z()
+				+ "; blockRegistryId=" + block.blockRegistryId();
+		}
+		if (targetKey instanceof TargetKey.ExternalBlockKey external) {
+			return "dimension=" + external.dimensionId()
+				+ "; provider=" + external.providerId()
+				+ "; stableTargetId=" + external.stableTargetId()
+				+ "; expectedBlockRegistryId=" + external.expectedBlockRegistryId();
+		}
+		if (targetKey instanceof TargetKey.EntityKey entity) {
+			return "dimension=" + entity.dimensionId() + "; entity=" + entity.locator();
+		}
+		TargetKey.LocationKey location = (TargetKey.LocationKey) targetKey;
+		return "dimension=" + location.dimensionId()
+			+ "; position=" + location.x() + "," + location.y() + "," + location.z();
 	}
 
 	private static String failureRegistryId(EntityBlockGeometryContext context) {

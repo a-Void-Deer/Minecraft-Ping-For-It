@@ -1,7 +1,6 @@
 package nx.pingwheel.common.mixin;
 
 import net.minecraft.client.Camera;
-import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.LevelRenderer;
@@ -9,6 +8,7 @@ import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.PostChain;
 import net.minecraft.client.renderer.RenderBuffers;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.world.entity.Entity;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.client.outline.BlockOutlineFrameState;
@@ -52,10 +52,10 @@ public abstract class LevelRendererMixin {
 	@Shadow
 	protected abstract boolean shouldShowEntityOutlines();
 
-	@Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/systems/RenderSystem;applyModelViewMatrix()V", ordinal = 0, shift = At.Shift.AFTER))
-	private void onStartRenderLevel(DeltaTracker deltaTracker, boolean bl, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f modelViewMatrix, Matrix4f projectionMatrix, CallbackInfo ci) {
+	@Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/systems/RenderSystem;applyModelViewMatrix()V", ordinal = 1, shift = At.Shift.AFTER))
+	private void onStartRenderLevel(PoseStack poseStack, float partialTick, long finishNanoTime, boolean renderBlockOutline, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f projectionMatrix, CallbackInfo ci) {
 		// Prepares the overlay, entity outline, and block outline state for
-		// this frame. Runs right after the ordinal-0 applyModelViewMatrix
+		// this frame. Runs right after the ordinal-1 applyModelViewMatrix
 		// anchor: the camera-relative model-view matrix is applied and the
 		// call happens before the entity loop below, so the entity outline
 		// state is already prepared when the outline redirects fire. Also
@@ -69,8 +69,8 @@ public abstract class LevelRendererMixin {
 			RenderSystem.getProjectionMatrix(),
 			RenderSystem.getVertexSorting(),
 			camera.getPosition(),
-			deltaTracker.getGameTimeDeltaPartialTick(true));
-		CommonClient.INSTANCE.onRenderWorld(WorldRenderContext.of(modelViewMatrix, projectionMatrix, deltaTracker.getGameTimeDeltaPartialTick(true), camera));
+			partialTick);
+		CommonClient.INSTANCE.onRenderWorld(WorldRenderContext.of(RenderSystem.getModelViewMatrix(), RenderSystem.getProjectionMatrix(), partialTick, camera));
 	}
 
 	/**
@@ -87,21 +87,21 @@ public abstract class LevelRendererMixin {
 	 * model source can establish the outline pipeline too.
 	 */
 	@Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/OutlineBufferSource;endOutlineBatch()V"))
-	private void pingForItRenderBlockModels(DeltaTracker deltaTracker, boolean bl, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f modelViewMatrix, Matrix4f projectionMatrix, CallbackInfo ci) {
+	private void pingForItRenderBlockModels(PoseStack poseStack, float partialTick, long finishNanoTime, boolean renderBlockOutline, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f projectionMatrix, CallbackInfo ci) {
 		boolean outlinePipelineAvailable = this.shouldShowEntityOutlines()
 			|| CommonClient.INSTANCE.entityOutlineRequestSucceededThisFrame();
 
 		if (outlinePipelineAvailable) {
 			CommonClient.INSTANCE.renderModelOutlines(
 				camera,
-				deltaTracker.getGameTimeDeltaPartialTick(true),
-				deltaTracker.getGameTimeDeltaPartialTick(false));
+				partialTick,
+				partialTick);
 		}
 
 		if (outlinePipelineAvailable) {
 			CommonClient.INSTANCE.renderEntityOutlines(
 				camera,
-				deltaTracker.getGameTimeDeltaPartialTick(true),
+				partialTick,
 				this.renderBuffers.outlineBufferSource());
 		}
 	}
@@ -115,7 +115,7 @@ public abstract class LevelRendererMixin {
 	 * silently disappearing.
 	 */
 	@Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/OutlineBufferSource;endOutlineBatch()V", shift = At.Shift.AFTER))
-	private void pingForItProcessBlockModelOutlines(DeltaTracker deltaTracker, boolean bl, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f modelViewMatrix, Matrix4f projectionMatrix, CallbackInfo ci) {
+	private void pingForItProcessBlockModelOutlines(PoseStack poseStack, float partialTick, long finishNanoTime, boolean renderBlockOutline, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f projectionMatrix, CallbackInfo ci) {
 		if (!CommonClient.INSTANCE.modelOutlinesEmittedThisFrame()) {
 			return;
 		}
@@ -125,7 +125,7 @@ public abstract class LevelRendererMixin {
 			return;
 		}
 
-		this.entityEffect.process(deltaTracker.getGameTimeDeltaTicks());
+		this.entityEffect.process(partialTick);
 		this.minecraft.getMainRenderTarget().bindWrite(false);
 		this.modelOutlinesProcessed = true;
 	}

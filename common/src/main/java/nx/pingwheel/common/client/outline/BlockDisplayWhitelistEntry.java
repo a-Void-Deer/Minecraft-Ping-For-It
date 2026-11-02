@@ -125,12 +125,12 @@ public sealed interface BlockDisplayWhitelistEntry permits BlockDisplayWhitelist
 		String path = tag.substring(colon + 1);
 
 		// No wildcard form exists for tags; '*' is also not a valid path char.
-		if (path.isEmpty() || path.equals("*") || !ResourceLocation.isValidNamespace(namespace)
-			|| !ResourceLocation.isValidPath(path)) {
+		if (path.isEmpty() || path.equals("*") || !isValidNamespace(namespace)
+			|| !isValidPath(path)) {
 			return Optional.empty();
 		}
 
-		return Optional.of(new Tag(TagKey.create(Registries.BLOCK, ResourceLocation.fromNamespaceAndPath(namespace, path))));
+		return Optional.of(new Tag(TagKey.create(Registries.BLOCK, new ResourceLocation(namespace, path))));
 	}
 
 	private static Optional<BlockDisplayWhitelistEntry> parseBlockId(String raw) {
@@ -147,7 +147,7 @@ public sealed interface BlockDisplayWhitelistEntry permits BlockDisplayWhitelist
 		String namespace = raw.substring(0, colon);
 		String path = raw.substring(colon + 1);
 
-		if (!ResourceLocation.isValidNamespace(namespace)) {
+		if (!isValidNamespace(namespace)) {
 			return Optional.empty();
 		}
 
@@ -156,10 +156,35 @@ public sealed interface BlockDisplayWhitelistEntry permits BlockDisplayWhitelist
 		}
 
 		// '*' anywhere else in the path is invalid grammar.
-		if (path.isEmpty() || path.indexOf('*') >= 0 || !ResourceLocation.isValidPath(path)) {
+		if (path.isEmpty() || path.indexOf('*') >= 0 || !isValidPath(path)) {
 			return Optional.empty();
 		}
 
-		return Optional.of(new Exact(ResourceLocation.fromNamespaceAndPath(namespace, path)));
+		return Optional.of(new Exact(new ResourceLocation(namespace, path)));
+	}
+
+	/** 1.20.1 keeps the ResourceLocation grammar helpers private. */
+	private static boolean isValidNamespace(String namespace) {
+		if (namespace == null || namespace.isEmpty()) {
+			return false;
+		}
+		try {
+			new ResourceLocation(namespace, "probe");
+			return true;
+		} catch (RuntimeException invalid) {
+			return false;
+		}
+	}
+
+	private static boolean isValidPath(String path) {
+		if (path == null || path.isEmpty()) {
+			return false;
+		}
+		try {
+			new ResourceLocation("minecraft", path);
+			return true;
+		} catch (RuntimeException invalid) {
+			return false;
+		}
 	}
 }
