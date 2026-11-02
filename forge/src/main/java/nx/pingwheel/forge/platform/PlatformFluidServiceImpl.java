@@ -20,6 +20,7 @@ import net.minecraftforge.common.capabilities.ForgeCapabilities;
 import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.IFluidHandler;
+import nx.pingwheel.common.platform.FluidAddressWitness;
 import nx.pingwheel.common.platform.IPlatformFluidService;
 import nx.pingwheel.common.presentation.inventory.InventoryQuantities;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
@@ -39,6 +40,16 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 	private static final OperationProfile PROBE = profile(new InventoryValidationBudget.Cost(8192, 8192, 1024), 8, 0);
 	private static final InventoryValidationBudget.Cost READ_OVERHEAD = new InventoryValidationBudget.Cost(1024, 1024, 128);
 	private static final int MAX_REGISTRY_ID_CHARS = 256;
+	private static final OperationProfile WITNESS_CAPTURE = FluidAddressWitness.profile(WitnessUse.CAPTURE, 3);
+	private static final OperationProfile WITNESS_COMPARE = FluidAddressWitness.profile(WitnessUse.COMPARE, 3);
+
+	/** Face/punctuation headroom plus at most ten nonnegative decimal digits and a comma per tank. */
+	private static int capacityDescriptionBound(int tanks) { return Math.addExact(32, Math.multiplyExact(11, tanks)); }
+	private static InventoryValidationBudget.Cost capacityDescriptionCost(int tanks) {
+		long chars = capacityDescriptionBound(tanks);
+		// Builder/storage, decimal append, exact output String/copy and conservative coder overlap.
+		return new InventoryValidationBudget.Cost(512 + 6 * chars, 512 + 6 * chars, 128 + 8 * chars);
+	}
 
 	@Override public OperationProfile probeProfile() { return PROBE; }
 	@Override public Optional<Probe> probe(Context context, Operation operation) {
@@ -113,8 +124,9 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 			// capacities, ordered boxed mapping/copies/seen-array, bounded strings, DTOs and cached access
 			// profiles. Only the known N contributes; no whole-slot-limit reservation or eager contents.
 			long bytes = 8192L + 256L * tanks;
-			finishProfile = profile(new InventoryValidationBudget.Cost(bytes, bytes, 4096L + 64L * tanks),
-				27L + 4L * tanks, 8192L + 64L * tanks);
+			finishProfile = profile(new InventoryValidationBudget.Cost(bytes, bytes, 4096L + 64L * tanks)
+				.overlap(capacityDescriptionCost(tanks)), 27L + 4L * tanks,
+				8192L + 64L * tanks + 128L + 2L * capacityDescriptionBound(tanks));
 		}
 		@Override public Shape shape() { return shape; }
 		@Override public OperationProfile finishProfile() { return finishProfile; }
@@ -131,11 +143,15 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 				if (!held.current(operation)) throw new InventorySourceUnavailableException("fluid capability route changed before finish");
 				int count = held.handler().getTanks(); held.gate(operation);
 				if (count != tanks) throw new InventorySourceUnavailableException("fluid tank count changed before finish");
+				int descriptionBound = capacityDescriptionBound(tanks);
+				if (descriptionBound > 65536) throw new InventorySourceUnavailableException("fluid capacity description bound");
+				var description = new StringBuilder(descriptionBound).append(held.context().face().getName()).append(";capacities=");
 				int[] capacities = new int[tanks];
 				var addresses = new ArrayList<Integer>(tanks);
 				for (int tank = 0; tank < tanks; tank++) {
 					held.gate(operation); capacities[tank] = capacity(held.handler(), tank); held.gate(operation);
 					addresses.add(tank);
+					description.append(capacities[tank]).append(',');
 				}
 				held.gate(operation);
 				String blockId = boundedRegistryId(BuiltInRegistries.BLOCK.getKey(held.state().getBlock()));
@@ -148,7 +164,7 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 				if (provider.length() > 1024) throw new InventorySourceUnavailableException("fluid provider class length bound");
 				var routeInfo = new RouteInfo(TopologyEvidence.PUBLIC_ADDRESS_ONLY, provider);
 				@Unmodifiable List<Integer> mapping = List.copyOf(addresses);
-				var layout = new InventorySnapshotLayout("forge:fluid_handler", held.context().face().getName(), null, List.of(
+				var layout = new InventorySnapshotLayout("forge:fluid_handler", description.toString(), null, List.of(
 					new InventorySnapshotLayout.Member(held.context().root(), blockId, blockEntityId, "root", List.of(
 						new InventorySnapshotLayout.Segment("tanks", ADDRESS_SCHEMA, tanks, mapping)))));
 				var access = new HandlerAccess(held, capacities, layout, routeInfo);
@@ -239,6 +255,21 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 		@Override public boolean stableCursor() { return true; }
 		@Override public int slots() { return capacities.length; }
 		@Override public RouteInfo routeInfo() { return routeInfo; }
+		@Override public OperationProfile witnessProfile(WitnessUse use) {
+			return Objects.requireNonNull(use) == WitnessUse.CAPTURE ? WITNESS_CAPTURE : WITNESS_COMPARE;
+		}
+		@Override public FluidAddressWitness captureWitness(Operation operation) {
+			Route held = requireOpen();
+			Objects.requireNonNull(operation).allowance().requireAvailable(WITNESS_CAPTURE.ownedCost());
+			return FluidAddressWitness.capture(FluidAddressWitness.Schema.FORGE_CAPABILITY_V1,
+				new Object[] {held.state(), held.capability(), held.handler()}, operation);
+		}
+		@Override public WitnessMatch compareWitness(FluidAddressWitness expected, Operation operation) {
+			Objects.requireNonNull(expected); Route held = requireOpen();
+			Objects.requireNonNull(operation).allowance().requireAvailable(WITNESS_COMPARE.ownedCost());
+			return expected.compare(FluidAddressWitness.Schema.FORGE_CAPABILITY_V1,
+				new Object[] {held.state(), held.capability(), held.handler()}, operation);
+		}
 		@Override public OperationProfile validationProfile() { return validationProfile; }
 		@Override public OperationProfile readProfile() { return readProfile; }
 		@Override public OperationProfile observationProfile(int limit) {

@@ -1,5 +1,6 @@
 package nx.pingwheel.fabric.platform;
 
+import java.lang.ref.Reference;
 import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -31,6 +32,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.ChestBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluids;
+import nx.pingwheel.common.platform.FluidAddressWitness;
 import nx.pingwheel.common.platform.IPlatformFluidService;
 import nx.pingwheel.common.platform.IPlatformFluidService.Components;
 import nx.pingwheel.common.platform.IPlatformFluidService.Context;
@@ -39,6 +41,8 @@ import nx.pingwheel.common.platform.IPlatformFluidService.OperationProfile;
 import nx.pingwheel.common.platform.IPlatformFluidService.Probe;
 import nx.pingwheel.common.platform.IPlatformFluidService.Visitor;
 import nx.pingwheel.common.platform.IPlatformFluidService.Visit;
+import nx.pingwheel.common.platform.IPlatformFluidService.WitnessMatch;
+import nx.pingwheel.common.platform.IPlatformFluidService.WitnessUse;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.CaptureLimitException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
@@ -219,6 +223,25 @@ class PlatformFluidServiceTest {
 		return new InventoryValidationBudget.Allowance(cost);
 	}
 	private static Operation operation(InventoryValidationBudget.Cost cost) { return new TestOperation(allowance(cost)); }
+	private static FluidAddressWitness captureWitness(IPlatformFluidService.Access access) {
+		try (var operation = operation(access.witnessProfile(WitnessUse.CAPTURE).ownedCost())) { return access.captureWitness(operation); }
+	}
+	private static WitnessMatch compareWitness(IPlatformFluidService.Access access, FluidAddressWitness expected) {
+		try (var operation = operation(access.witnessProfile(WitnessUse.COMPARE).ownedCost())) { return access.compareWitness(expected, operation); }
+	}
+	private static void clearWitnessIdentity(FluidAddressWitness witness, int index) {
+		try {
+			var method = FluidAddressWitness.class.getDeclaredMethod("clearForTesting", int.class); method.setAccessible(true);
+			method.invoke(witness, index);
+		} catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+	}
+	private static void assertAccessReferencesReleased(IPlatformFluidService.Access access) {
+		try {
+			var binding = access.getClass().getDeclaredField("binding"); binding.setAccessible(true); assertNull(binding.get(access));
+			var addresses = access.getClass().getDeclaredField("underlyingAddresses"); addresses.setAccessible(true);
+			assertTrue(((List<?>) Objects.requireNonNull(addresses.get(access))).isEmpty());
+		} catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+	}
 	/** Test stand-in for a separately granted stage; real-ledger integration cases use InventoryFluidAdmission. */
 	private static Operation nextStage(Operation origin, OperationProfile profile) {
 		var allowance = origin.allowance(); allowance.admitAdditional(profile.ownedCost()); return new TestOperation(allowance);
@@ -1033,6 +1056,231 @@ class PlatformFluidServiceTest {
 				assertTrue(memory.reserved() < 64L << 20); assertTrue(ledger.remaining(WORK) > 0);
 			}
 			assertTrue(ledger.used(WORK) > 0); assertEquals(0, memory.reserved()); assertEquals(0, memory.retained());
+		}
+	}
+
+	@Test void closedAccessWitnessMatchesFreshWrappersAtTheMaximumTerminalDepthAcrossOperations() {
+		var fixture = new Fixture(true); fixture.freshWrappers = true;
+		var terminal = fixture.views.getFirst();
+		for (int depth = 2; depth < PlatformFluidServiceImpl.MAX_UNDERLYING_VIEWS; depth++) {
+			var next = new View(fixture); terminal.underlying = next.nativeView; terminal = next;
+		}
+		Access old = fixture.open(); var layout = old.layout(); var oldWrapper = Objects.requireNonNull(fixture.lastWrapper);
+		FluidAddressWitness witness = captureWitness(old.delegate);
+		old.close(); old.close(); assertAccessReferencesReleased(old.delegate);
+		fixture.server.tick++;
+		try (Access current = fixture.open()) {
+			assertEquals(layout, current.layout()); assertNotSame(oldWrapper, fixture.lastWrapper);
+			fixture.clear();
+			assertEquals(WitnessMatch.SAME, compareWitness(current.delegate, witness));
+			try (var operation = operation(current.delegate.witnessProfile(WitnessUse.COMPARE).ownedCost())) {
+				assertEquals(WitnessMatch.SAME, witness.compare(FluidAddressWitness.Schema.FABRIC_TRANSFER_V1,
+					new Object[] {Objects.requireNonNull(fixture.route), terminal.nativeView, fixture.views.get(1).nativeView}, operation));
+			}
+			assertTrue(fixture.calls.isEmpty()); assertEquals(0, fixture.memberChecks); assertEquals(0, fixture.authorityChecks);
+			assertTrue(current.consume(0, entry -> { assertEquals(81_001, entry.amount()); return true; }));
+			assertTrue(fixture.called("wrapperContent") > 0, "contents still use the current admitted wrapper, not the terminal address");
+		}
+	}
+
+	@Test void reacquiredWitnessDetectsOrderedAddressRouteAndCountChangesBeforeContents() {
+		for (String change : List.of("order", "route", "address", "count")) {
+			var fixture = new Fixture(true); fixture.freshWrappers = true;
+			var originalStorage = Objects.requireNonNull(fixture.route); var first = fixture.views.getFirst(); var second = fixture.views.get(1);
+			Access old = fixture.open(); var layout = old.layout(); var witness = captureWitness(old.delegate); old.close();
+			switch (change) {
+				case "order" -> { fixture.views.set(0, second); fixture.views.set(1, first); }
+				case "route" -> fixture.route = fixture.storage(true);
+				case "address" -> first.underlying = new View(fixture).nativeView;
+				case "count" -> fixture.count = 1;
+			}
+			try (Access current = fixture.open()) {
+				if (!change.equals("count")) assertEquals(layout, current.layout(), "detached layout alone cannot detect " + change);
+				assertEquals(0, fixture.called("amount")); assertEquals(0, fixture.called("blank")); assertEquals(0, fixture.called("resource"));
+				fixture.clear();
+				assertEquals(WitnessMatch.CHANGED, compareWitness(current.delegate, witness), change);
+				assertTrue(fixture.calls.isEmpty()); assertEquals(0, fixture.memberChecks); assertEquals(0, fixture.authorityChecks);
+			}
+			Reference.reachabilityFence(originalStorage); Reference.reachabilityFence(first); Reference.reachabilityFence(second);
+		}
+	}
+
+	@Test void deterministicallyClearedHistoricalIdentityIsUnverifiableRatherThanADeferralOrSame() {
+		for (int index : List.of(0, 1, 2)) {
+			var fixture = new Fixture(true); Access old = fixture.open(); var witness = captureWitness(old.delegate); old.close();
+			clearWitnessIdentity(witness, index);
+			try (Access current = fixture.open()) {
+				fixture.clear();
+				assertEquals(WitnessMatch.UNVERIFIABLE, compareWitness(current.delegate, witness));
+				assertEquals(WitnessMatch.UNVERIFIABLE, compareWitness(current.delegate, witness));
+				assertTrue(fixture.calls.isEmpty()); assertEquals(0, fixture.memberChecks); assertEquals(0, fixture.authorityChecks);
+			}
+			// A different, still-live address proves change even when some historical evidence was cleared.
+			int changedSlot = index == 1 ? 1 : 0;
+			var oldAddress = fixture.views.get(changedSlot); fixture.views.set(changedSlot, new View(fixture));
+			try (Access changed = fixture.open()) { assertEquals(WitnessMatch.CHANGED, compareWitness(changed.delegate, witness)); }
+			Reference.reachabilityFence(oldAddress);
+		}
+	}
+
+	@Test void cursorlessWitnessContainsOnlyThePublicStorageRouteAndDoesNotCertifyEnumerationMapping() {
+		var fixture = new Fixture(false); var originalStorage = Objects.requireNonNull(fixture.route);
+		Access old = fixture.open(); assertEquals(FluidAddressWitness.profile(WitnessUse.CAPTURE, 1), old.delegate.witnessProfile(WitnessUse.CAPTURE));
+		var witness = captureWitness(old.delegate); old.close();
+		fixture.views.set(0, new View(fixture)); fixture.count = 1;
+		try (Access current = fixture.open()) {
+			assertFalse(current.stableCursor()); fixture.clear();
+			assertEquals(WitnessMatch.SAME, compareWitness(current.delegate, witness));
+			try (var operation = operation(current.delegate.witnessProfile(WitnessUse.COMPARE).ownedCost())) {
+				assertEquals(WitnessMatch.SAME, witness.compare(FluidAddressWitness.Schema.FABRIC_TRANSFER_V1, new Object[] {originalStorage}, operation));
+			}
+			assertTrue(fixture.calls.isEmpty()); assertEquals(0, fixture.memberChecks); assertEquals(0, fixture.authorityChecks);
+		}
+		fixture.route = fixture.storage(false);
+		try (Access changed = fixture.open()) {
+			fixture.clear(); assertEquals(WitnessMatch.CHANGED, compareWitness(changed.delegate, witness)); assertTrue(fixture.calls.isEmpty());
+		}
+		Reference.reachabilityFence(originalStorage);
+	}
+
+	@Test void guardedWitnessMetadataInvokesNoCallbacksEvenWhenCurrentAuthorityAndLoadedScopeAreDenied() {
+		for (boolean indexed : List.of(true, false)) {
+			var fixture = new Fixture(indexed);
+			try (Access raw = fixture.open(); var guarded = IPlatformFluidService.guarded(fixture.context, raw.delegate)) {
+				fixture.clear(); fixture.membership = false; fixture.authority = false; fixture.loaded = false; fixture.server.sameThread = false;
+				for (WitnessUse use : WitnessUse.values()) {
+					assertEquals(FluidAddressWitness.profile(use, indexed ? 3 : 1), guarded.witnessProfile(use));
+					assertEquals(0, guarded.witnessProfile(use).memberGateCalls()); assertEquals(0, guarded.witnessProfile(use).currentAuthorityCalls());
+				}
+				var witness = captureWitness(guarded); assertEquals(WitnessMatch.SAME, compareWitness(guarded, witness));
+				assertTrue(fixture.calls.isEmpty()); assertEquals(0, fixture.memberChecks); assertEquals(0, fixture.authorityChecks);
+				try (var operation = operation(guarded.validationProfile().ownedCost())) {
+					assertThrows(InventorySourceUnavailableException.class, () -> guarded.valid(operation), "witness is not a permission/validation grant");
+				}
+				assertTrue(fixture.calls.isEmpty());
+			}
+		}
+	}
+
+	@Test void witnessOneShortRefusesEveryCostDimensionWithoutOwnedDebitOrCallbacksAndCannotRefill() {
+		for (boolean indexed : List.of(true, false)) {
+			var fixture = new Fixture(indexed);
+			try (Access raw = fixture.open()) {
+				var witness = captureWitness(raw.delegate); fixture.clear();
+				for (WitnessUse use : WitnessUse.values()) {
+					var required = raw.delegate.witnessProfile(use).ownedCost();
+					for (var insufficient : List.of(
+						new InventoryValidationBudget.Cost(required.allocationBytes() - 1, required.workspaceBytes(), required.workUnits()),
+						new InventoryValidationBudget.Cost(required.allocationBytes(), required.workspaceBytes() - 1, required.workUnits()),
+						new InventoryValidationBudget.Cost(required.allocationBytes(), required.workspaceBytes(), required.workUnits() - 1))) {
+						try (var operation = operation(insufficient)) {
+							assertThrows(CaptureLimitException.class, () -> {
+								if (use == WitnessUse.CAPTURE) raw.delegate.captureWitness(operation); else raw.delegate.compareWitness(witness, operation);
+							});
+							assertEquals(0, operation.allowance().attemptedAllocationBytes()); assertEquals(0, operation.allowance().attemptedWorkUnits());
+							assertEquals(0, operation.allowance().peakWorkspaceBytes());
+						}
+					}
+					try (var operation = operation(required)) {
+						if (use == WitnessUse.CAPTURE) raw.delegate.captureWitness(operation); else assertEquals(WitnessMatch.SAME, raw.delegate.compareWitness(witness, operation));
+						assertThrows(CaptureLimitException.class, () -> {
+							if (use == WitnessUse.CAPTURE) raw.delegate.captureWitness(operation); else raw.delegate.compareWitness(witness, operation);
+						});
+						assertEquals(required.allocationBytes(), operation.allowance().attemptedAllocationBytes());
+						assertEquals(required.workUnits(), operation.allowance().attemptedWorkUnits());
+					}
+				}
+				assertTrue(fixture.calls.isEmpty()); assertEquals(0, fixture.memberChecks); assertEquals(0, fixture.authorityChecks);
+			}
+		}
+	}
+
+	@Test void witnessOperationsRejectClosedOperationsAndAccessWithoutClearingHistoricalEvidence() {
+		for (boolean guard : List.of(true, false)) {
+			var fixture = new Fixture(true); Access raw = fixture.open();
+			var access = guard ? IPlatformFluidService.guarded(fixture.context, raw.delegate) : raw.delegate;
+			var capture = access.witnessProfile(WitnessUse.CAPTURE); var compare = access.witnessProfile(WitnessUse.COMPARE);
+			var witness = captureWitness(access); fixture.clear();
+			var closed = operation(capture.ownedCost()); closed.close();
+			assertThrows(IllegalStateException.class, () -> access.captureWitness(closed));
+			assertThrows(IllegalStateException.class, () -> access.compareWitness(witness, closed));
+			try (var operation = operation(compare.ownedCost())) {
+				assertThrows(NullPointerException.class, () -> access.compareWitness(null, operation));
+				assertEquals(0, operation.allowance().attemptedWorkUnits());
+			}
+			access.close(); access.close(); assertAccessReferencesReleased(raw.delegate);
+			assertEquals(capture, access.witnessProfile(WitnessUse.CAPTURE));
+			try (var operation = operation(capture.ownedCost())) {
+				assertThrows(IllegalStateException.class, () -> access.captureWitness(operation));
+				assertThrows(IllegalStateException.class, () -> access.compareWitness(witness, operation));
+				assertEquals(0, operation.allowance().attemptedAllocationBytes()); assertEquals(0, operation.allowance().attemptedWorkUnits());
+			}
+			assertTrue(fixture.calls.isEmpty()); assertEquals(0, fixture.memberChecks); assertEquals(0, fixture.authorityChecks);
+			try (Access current = fixture.open()) { assertEquals(WitnessMatch.SAME, compareWitness(current.delegate, witness)); }
+		}
+	}
+
+	@Test void realWitnessGrantsPayExactlyOnceAtMinimumAndMaximumKAndTransferOnlyWeakEvidenceOwnership() {
+		for (int count : List.of(0, 1, 8, InventorySourceAccess.MAX_SLOTS)) {
+			var fixture = new Fixture(true); fixture.count = count; fixture.freshWrappers = true;
+			while (fixture.views.size() < count) fixture.views.add(new View(fixture));
+			Access raw = fixture.open(); var access = IPlatformFluidService.guarded(fixture.context, raw.delegate);
+			int references = count + 1; var capture = access.witnessProfile(WitnessUse.CAPTURE); var compare = access.witnessProfile(WitnessUse.COMPARE);
+			assertEquals(new InventoryValidationBudget.Cost(768L + 128L * references, 768L + 128L * references, 64L + 8L * references), capture.ownedCost());
+			assertEquals(new InventoryValidationBudget.Cost(256L + 8L * references, 256L + 8L * references, 64L + 8L * references), compare.ownedCost());
+			assertEquals(256L + 112L * references, capture.retainedBytes()); assertEquals(0, compare.retainedBytes());
+			var ledger = new CostLedger(Map.of(WORK, 1_000_000L)); var memory = new RetainedMemoryLedger(4_000_000);
+			FluidAddressWitness witness; InventoryFluidAdmission.Ownership ownership;
+			fixture.clear();
+			try (var admission = new InventoryFluidAdmission(ledger, WORK, memory, fixture.memberCost, fixture.authorityCost)) {
+				try (var operation = admission.enter(capture)) {
+					long allocation = operation.allowance().attemptedAllocationBytes(), work = operation.allowance().attemptedWorkUnits();
+					witness = access.captureWitness(operation);
+					assertEquals(capture.ownedCost().allocationBytes(), operation.allowance().attemptedAllocationBytes() - allocation);
+					assertEquals(capture.ownedCost().workUnits(), operation.allowance().attemptedWorkUnits() - work);
+				}
+				ownership = admission.retain(); assertEquals(capture.retainedBytes() + 512, ownership.bytes());
+			}
+			assertEquals(128 + capture.ownedCost().workUnits(), ledger.used(WORK));
+			assertEquals(0, memory.reserved()); assertEquals(ownership.bytes(), memory.retained());
+			access.close(); assertAccessReferencesReleased(raw.delegate);
+			assertEquals(ownership.bytes(), memory.retained(), "live access closure must not release independent witness ownership");
+			assertTrue(fixture.calls.isEmpty()); assertEquals(0, fixture.memberChecks); assertEquals(0, fixture.authorityChecks);
+			try (ownership; Access current = fixture.open()) {
+				fixture.clear(); long workBefore = ledger.used(WORK);
+				try (var admission = new InventoryFluidAdmission(ledger, WORK, memory, fixture.memberCost, fixture.authorityCost);
+					var operation = admission.enter(compare)) {
+					long allocation = operation.allowance().attemptedAllocationBytes(), work = operation.allowance().attemptedWorkUnits();
+					assertEquals(WitnessMatch.SAME, current.delegate.compareWitness(witness, operation));
+					assertEquals(compare.ownedCost().allocationBytes(), operation.allowance().attemptedAllocationBytes() - allocation);
+					assertEquals(compare.ownedCost().workUnits(), operation.allowance().attemptedWorkUnits() - work);
+				}
+				assertEquals(128 + compare.ownedCost().workUnits(), ledger.used(WORK) - workBefore);
+				assertEquals(0, memory.reserved()); assertEquals(ownership.bytes(), memory.retained(), "comparison retains no evidence");
+				assertTrue(fixture.calls.isEmpty()); assertEquals(0, fixture.memberChecks); assertEquals(0, fixture.authorityChecks);
+			}
+			ownership.close(); assertEquals(0, memory.reserved()); assertEquals(0, memory.retained());
+			assertEquals(ledger.limit(WORK) - ledger.used(WORK), ledger.remaining(WORK));
+		}
+	}
+
+	@Test void realWitnessWorkOrRetainedMemoryRefusalLeavesNoCallbacksPaidWorkOrTickets() {
+		for (boolean refuseMemory : List.of(true, false)) {
+			var fixture = new Fixture(true);
+			try (Access access = fixture.open()) {
+				var profile = access.delegate.witnessProfile(WitnessUse.CAPTURE);
+				var ledger = new CostLedger(Map.of(WORK, refuseMemory ? 1_000_000L : 128 + profile.ownedCost().workUnits() - 1));
+				var memory = new RetainedMemoryLedger(refuseMemory
+					? profile.ownedCost().workspaceBytes() + 2048 + profile.retainedBytes() + 512 - 1 : 1_000_000);
+				fixture.clear();
+				try (var admission = new InventoryFluidAdmission(ledger, WORK, memory, fixture.memberCost, fixture.authorityCost)) {
+					assertThrows(CaptureLimitException.class, () -> {
+						try (var operation = admission.enter(profile)) { access.delegate.captureWitness(operation); }
+					});
+				}
+				assertEquals(0, ledger.used(WORK)); assertEquals(0, memory.reserved()); assertEquals(0, memory.retained());
+				assertTrue(fixture.calls.isEmpty()); assertEquals(0, fixture.memberChecks); assertEquals(0, fixture.authorityChecks);
+			}
 		}
 	}
 }

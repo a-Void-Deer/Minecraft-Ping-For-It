@@ -22,6 +22,7 @@ import net.minecraft.world.level.block.AbstractCauldronBlock;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluids;
+import nx.pingwheel.common.platform.FluidAddressWitness;
 import nx.pingwheel.common.platform.IPlatformFluidService;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
@@ -204,6 +205,23 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 		@Override public boolean stableCursor() { return shape.stableCursor(); }
 		@Override public int slots() { return shape.indexedSlots().orElse(0); }
 		@Override public RouteInfo routeInfo() { return route; }
+		@Override public OperationProfile witnessProfile(WitnessUse use) { return FluidAddressWitness.profile(use, slots() + 1); }
+		private Object[] witnessVector(WitnessUse use, Operation operation) {
+			Binding held = held(operation);
+			// The helper pays for this temporary vector too, and performs the single owned debit.
+			operation.allowance().requireAvailable(witnessProfile(use).ownedCost());
+			Object[] current = new Object[slots() + 1];
+			current[0] = held.storage();
+			for (int slot = 0; slot < slots(); slot++) current[slot + 1] = underlyingAddresses.get(slot);
+			return current;
+		}
+		@Override public FluidAddressWitness captureWitness(Operation operation) {
+			return FluidAddressWitness.capture(FluidAddressWitness.Schema.FABRIC_TRANSFER_V1, witnessVector(WitnessUse.CAPTURE, operation), operation);
+		}
+		@Override public WitnessMatch compareWitness(FluidAddressWitness expected, Operation operation) {
+			Objects.requireNonNull(expected);
+			return expected.compare(FluidAddressWitness.Schema.FABRIC_TRANSFER_V1, witnessVector(WitnessUse.COMPARE, operation), operation);
+		}
 		@Override public OperationProfile validationProfile() { return validation; }
 		@Override public OperationProfile readProfile() { return read; }
 		@Override public OperationProfile observationProfile(int limit) {

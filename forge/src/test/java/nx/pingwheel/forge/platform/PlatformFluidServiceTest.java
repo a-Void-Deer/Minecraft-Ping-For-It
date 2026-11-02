@@ -31,6 +31,7 @@ import net.minecraftforge.common.util.LazyOptional;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.capability.IFluidHandler;
 import nx.pingwheel.common.platform.IPlatformFluidService;
+import nx.pingwheel.common.platform.FluidAddressWitness;
 import nx.pingwheel.common.config.InventorySettings;
 import nx.pingwheel.common.presentation.inventory.InventoryQuantities;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
@@ -76,7 +77,7 @@ class PlatformFluidServiceTest {
 			fixture.calls.clear();
 			assertTrue(access.stableCursor()); assertEquals(2, access.slots()); assertTrue(access.alias().isEmpty());
 			var layout = access.layout();
-			assertNull(layout.controller()); assertEquals(face.getName(), layout.layoutData());
+			assertNull(layout.controller()); assertEquals(face.getName() + ";capacities=1000,2000,", layout.layoutData());
 			assertEquals(1, layout.members().size()); assertEquals(BlockPos.ZERO, layout.members().getFirst().position());
 			assertEquals("minecraft:beehive", layout.members().getFirst().blockId());
 			var segment = layout.members().getFirst().segments().getFirst();
@@ -378,12 +379,14 @@ class PlatformFluidServiceTest {
 				assertEquals(new IPlatformFluidService.Shape(1, OptionalInt.of(tanks), true), probe.shape());
 				var finish = probe.finishProfile(); assertSame(finish, probe.finishProfile());
 				assertTrue(fixture.calls.isEmpty()); assertEquals(gates, fixture.authorityChecks);
-				assertEquals(8192 + 256L * tanks, finish.ownedCost().allocationBytes());
-				assertEquals(8192 + 64L * tanks, finish.retainedBytes());
+				assertEquals(8896 + 322L * tanks, finish.ownedCost().allocationBytes());
+				assertEquals(8896 + 322L * tanks, finish.ownedCost().workspaceBytes());
+				assertEquals(4480 + 152L * tanks, finish.ownedCost().workUnits());
+				assertEquals(8384 + 86L * tanks, finish.retainedBytes());
 				assertEquals(27 + 4L * tanks, finish.memberGateCalls());
 				if (first != null) {
-					assertEquals(7 * 256L, finish.ownedCost().allocationBytes() - first.ownedCost().allocationBytes());
-					assertEquals(7 * 64L, finish.retainedBytes() - first.retainedBytes());
+					assertEquals(7 * 322L, finish.ownedCost().allocationBytes() - first.ownedCost().allocationBytes());
+					assertEquals(7 * 86L, finish.retainedBytes() - first.retainedBytes());
 				}
 				first = finish;
 				var access = probe.finish(admission).orElseThrow();
@@ -401,7 +404,7 @@ class PlatformFluidServiceTest {
 		try (var admission = fixture.admission(10_000_000); var operation = admission.enter(fixture.service.probeProfile());
 			var probe = fixture.service.probe(fixture.context, operation).orElseThrow()) {
 			int before = fixture.authorityChecks; var profile = probe.finishProfile();
-			assertEquals(1_056_768, profile.ownedCost().allocationBytes()); assertEquals(270_336, profile.retainedBytes());
+			assertEquals(1_327_808, profile.ownedCost().allocationBytes()); assertEquals(360_640, profile.retainedBytes());
 			var access = probe.finish(admission).orElseThrow();
 			assertEquals(profile.currentAuthorityCalls(), fixture.authorityChecks - before);
 			assertEquals(2L * tanks, fixture.calls.stream().filter("capacity"::equals).count());
@@ -567,6 +570,117 @@ class PlatformFluidServiceTest {
 		}
 	}
 
+	@Test void historicalWeakWitnessSurvivesOldAccessCloseAndMatchesReacquiredSameRoute() {
+		var fixture = new Fixture(Direction.NORTH); var old = fixture.open();
+		var expected = old.capture(); var layout = old.layout(); old.delegate.close(); old.delegate.close();
+		var current = fixture.open(); assertEquals(layout, current.layout()); fixture.calls.clear();
+		int members = fixture.memberChecks, authorities = fixture.authorityChecks;
+		assertEquals(IPlatformFluidService.WitnessMatch.SAME, current.compare(expected));
+		assertTrue(fixture.calls.isEmpty()); assertEquals(members, fixture.memberChecks); assertEquals(authorities, fixture.authorityChecks);
+		assertEquals(0, fixture.reads);
+		try (var admission = fixture.admission(1_000_000); var operation = admission.enter(old.delegate.witnessProfile(IPlatformFluidService.WitnessUse.CAPTURE))) {
+			assertThrows(IllegalStateException.class, () -> old.delegate.captureWitness(operation));
+		}
+		current.delegate.close();
+	}
+
+	@Test void freshLayoutCarriesCompleteOrderedCapacityEvidenceWithoutAContentGetter() {
+		var fixture = new Fixture(Direction.EAST); var old = fixture.open(); var expected = old.capture();
+		var layout = old.layout(); old.delegate.close(); fixture.capacities = new int[] {2000, 1000};
+		var current = fixture.open();
+		assertEquals("east;capacities=1000,2000,", layout.layoutData());
+		assertEquals("east;capacities=2000,1000,", current.layout().layoutData());
+		assertNotEquals(layout, current.layout()); assertEquals(0, fixture.reads);
+		// Identity and detached public metadata are independent evidence, neither replaces the other.
+		assertEquals(IPlatformFluidService.WitnessMatch.SAME, current.compare(expected));
+		current.delegate.close();
+	}
+
+	@Test void sameDetachedLayoutWithChangedCapabilityHandlerOrStateHasChangedWeakIdentity() {
+		for (int change = 0; change < 3; change++) {
+			var fixture = new Fixture(Direction.NORTH); var old = fixture.open(); var expected = old.capture(); var layout = old.layout();
+			Object[] liveOriginalIdentities = {fixture.state, fixture.capability, fixture.handler};
+			old.delegate.close();
+			if (change == 0) fixture.capability = LazyOptional.of(() -> fixture.handler);
+			else if (change == 1) { fixture.handler = fixture.newHandler(); fixture.capability = LazyOptional.of(() -> fixture.handler); }
+			else fixture.state = fixture.state.setValue(net.minecraft.world.level.block.BeehiveBlock.HONEY_LEVEL, 1);
+			var current = fixture.open(); assertEquals(layout, current.layout());
+			assertEquals(IPlatformFluidService.WitnessMatch.CHANGED, current.compare(expected));
+			assertEquals(0, fixture.reads); current.delegate.close();
+			java.lang.ref.Reference.reachabilityFence(liveOriginalIdentities);
+		}
+	}
+
+	@Test void deterministicallyClearedWeakIdentityIsUnverifiableNeverSameOrInventedRemapping() throws ReflectiveOperationException {
+		var fixture = new Fixture(Direction.NORTH); var old = fixture.open(); var expected = old.capture(); old.delegate.close();
+		var clear = FluidAddressWitness.class.getDeclaredMethod("clearForTesting", int.class); clear.setAccessible(true); clear.invoke(expected, 1);
+		var current = fixture.open(); fixture.calls.clear();
+		assertEquals(IPlatformFluidService.WitnessMatch.UNVERIFIABLE, current.compare(expected));
+		assertTrue(fixture.calls.isEmpty()); assertEquals(0, fixture.reads); current.delegate.close();
+	}
+
+	@Test void witnessProfilesHaveZeroCallbacksDebitHelperOnceAndRefuseOneShortBeforeOwnedAllocation() {
+		var fixture = new Fixture(Direction.NORTH); var access = fixture.open(); fixture.calls.clear();
+		int members = fixture.memberChecks, authorities = fixture.authorityChecks;
+		for (var use : IPlatformFluidService.WitnessUse.values()) {
+			var profile = access.delegate.witnessProfile(use);
+			assertEquals(FluidAddressWitness.profile(use, 3), profile);
+			assertEquals(0, profile.memberGateCalls()); assertEquals(0, profile.currentAuthorityCalls());
+			assertEquals(use == IPlatformFluidService.WitnessUse.CAPTURE ? 592 : 0, profile.retainedBytes());
+		}
+		FluidAddressWitness expected;
+		try (var admission = fixture.admission(1_000_000); var operation = admission.enter(access.delegate.witnessProfile(IPlatformFluidService.WitnessUse.CAPTURE))) {
+			long before = operation.allowance().attemptedWorkUnits();
+			expected = access.delegate.captureWitness(operation);
+			assertEquals(88, operation.allowance().attemptedWorkUnits() - before);
+		}
+		for (var use : IPlatformFluidService.WitnessUse.values()) {
+			var profile = access.delegate.witnessProfile(use);
+			try (var admission = fixture.admission(1_000_000); var operation = admission.enter(profile)) {
+				// Consume exactly one unit of the real grant, retaining all allocation/work headroom otherwise.
+				operation.allowance().debit(new InventoryValidationBudget.Cost(0, 0, 1));
+				long before = operation.allowance().attemptedAllocationBytes();
+				if (use == IPlatformFluidService.WitnessUse.CAPTURE)
+					assertThrows(InventoryItemBudget.CaptureLimitException.class, () -> access.delegate.captureWitness(operation));
+				else assertThrows(InventoryItemBudget.CaptureLimitException.class, () -> access.delegate.compareWitness(expected, operation));
+				assertEquals(before, operation.allowance().attemptedAllocationBytes());
+				assertEquals(129, operation.allowance().attemptedWorkUnits(), "only admission bookkeeping and the consumed unit remain paid");
+			}
+		}
+		try (var admission = fixture.admission(1_000_000); var operation = admission.enter(access.delegate.witnessProfile(IPlatformFluidService.WitnessUse.COMPARE))) {
+			long before = operation.allowance().attemptedWorkUnits();
+			assertEquals(IPlatformFluidService.WitnessMatch.SAME, access.delegate.compareWitness(expected, operation));
+			assertEquals(88, operation.allowance().attemptedWorkUnits() - before);
+		}
+		assertTrue(fixture.calls.isEmpty()); assertEquals(members, fixture.memberChecks); assertEquals(authorities, fixture.authorityChecks);
+		access.delegate.close();
+	}
+
+	@Test void maximumCapacityDescriptionIsBoundedAndTransferredStringAndWitnessOwnershipReleaseTogether() {
+		var fixture = new Fixture(Direction.NORTH); fixture.capacities = new int[InventorySourceAccess.MAX_SLOTS];
+		java.util.Arrays.fill(fixture.capacities, Integer.MAX_VALUE);
+		var ledger = new CostLedger(Map.of(WORK, 10_000_000L)); var memory = new RetainedMemoryLedger(8_000_000);
+		InventoryFluidAdmission.Ownership ownership; FluidAddressWitness expected;
+		IPlatformFluidService.Access access;
+		try (var admission = new InventoryFluidAdmission(ledger, WORK, memory, MEMBER, AUTHORITY)) {
+			IPlatformFluidService.OperationProfile finish;
+			try (var operation = admission.enter(fixture.service.probeProfile()); var probe = fixture.service.probe(fixture.context, operation).orElseThrow()) {
+				finish = probe.finishProfile(); access = probe.finish(admission).orElseThrow();
+			}
+			String description = access.layout().layoutData();
+			assertEquals("north;capacities=".length() + 11 * InventorySourceAccess.MAX_SLOTS, description.length());
+			assertTrue(description.length() < 65536); assertTrue(description.startsWith("north;capacities=2147483647,"));
+			assertTrue(description.endsWith("2147483647,"));
+			assertEquals(2L * InventorySourceAccess.MAX_SLOTS, fixture.calls.stream().filter("capacity"::equals).count());
+			assertEquals(1_327_808, finish.ownedCost().allocationBytes()); assertEquals(627_072, finish.ownedCost().workUnits());
+			try (var operation = admission.enter(access.witnessProfile(IPlatformFluidService.WitnessUse.CAPTURE))) { expected = access.captureWitness(operation); }
+			ownership = admission.retain(); assertEquals(finish.retainedBytes() + 592 + 512 + 256, ownership.bytes());
+		}
+		assertEquals(0, memory.reserved()); assertEquals(ownership.bytes(), memory.retained());
+		access.close(); var current = fixture.open(); assertEquals(IPlatformFluidService.WitnessMatch.SAME, current.compare(expected));
+		ownership.close(); ownership.close(); current.delegate.close(); assertEquals(0, memory.retained()); assertEquals(0, fixture.reads);
+	}
+
 	@Test void postReadRouteChangeAndProviderMutationAreOnlySeenAfterResidentHasDetached() {
 		for (boolean changeRoute : new boolean[] {false, true}) {
 			var fixture = new Fixture(Direction.NORTH); fixture.tag.putString("name", "original"); var access = fixture.open();
@@ -702,6 +816,10 @@ class PlatformFluidServiceTest {
 		private Optional<String> alias() { return delegate.alias(); }
 		private boolean stableCursor() { return delegate.stableCursor(); }
 		private int slots() { return delegate.slots(); }
+		private FluidAddressWitness capture() { return run(delegate.witnessProfile(IPlatformFluidService.WitnessUse.CAPTURE), delegate::captureWitness); }
+		private IPlatformFluidService.WitnessMatch compare(FluidAddressWitness expected) {
+			return run(delegate.witnessProfile(IPlatformFluidService.WitnessUse.COMPARE), operation -> delegate.compareWitness(expected, operation));
+		}
 	}
 
 	private static <T> T allocate(Class<T> type) {
