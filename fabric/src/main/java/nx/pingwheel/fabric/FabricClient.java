@@ -37,59 +37,52 @@ import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_ID;
 @Environment(EnvType.CLIENT)
 public class FabricClient implements ClientModInitializer {
 
-	public static final ResourceLocation RELOAD_LISTENER_ID = ResourceLocation.fromNamespaceAndPath(MOD_ID, "reload-listener");
+	public static final ResourceLocation RELOAD_LISTENER_ID = new ResourceLocation(MOD_ID, "reload-listener");
 
 	@Override
 	public void onInitializeClient() {
 		FabricWorldAwareBlockModelOutlineAdapter.register();
 		ClientPlayNetworking.registerGlobalReceiver(
-			RateLimitPolicyS2CPacket.PACKET_TYPE,
-			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onRateLimitPolicyPacket(packet)));
+			RateLimitPolicyS2CPacket.PACKET_ID,
+			(client, handler, buf, responseSender)
+				-> CommonClient.INSTANCE.onRateLimitPolicyPacket(RateLimitPolicyS2CPacket.readSafe(buf)));
 		ClientPlayNetworking.registerGlobalReceiver(
-			SyncDurationPolicyS2CPacket.PACKET_TYPE,
-			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onSyncDurationPolicyPacket(packet)));
+			SyncDurationPolicyS2CPacket.PACKET_ID,
+			(client, handler, buf, responseSender)
+				-> CommonClient.INSTANCE.onSyncDurationPolicyPacket(SyncDurationPolicyS2CPacket.readSafe(buf)));
 		CommonClient.INSTANCE.onInit();
 
 		Registry.register(BuiltInRegistries.SOUND_EVENT, PING_SOUND_ID, PING_SOUND_EVENT);
 
 		// packets
 		ClientPlayNetworking.registerGlobalReceiver(
-			PingLocationS2CPacket.PACKET_TYPE,
-			(packet, context) -> {
-				final var client = context.client();
-				client.execute(() -> CommonClient.INSTANCE.onPingLocationPacket(packet));
-			}
+			PingLocationS2CPacket.PACKET_ID,
+			(client, handler, buf, responseSender)
+				-> CommonClient.INSTANCE.onPingLocationPacket(PingLocationS2CPacket.readSafe(buf))
 		);
 		ClientPlayNetworking.registerGlobalReceiver(
-			ServerConfigSnapshotS2CPacket.PACKET_TYPE,
-			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onServerConfigSnapshotPacket(packet)));
+			ServerConfigSnapshotS2CPacket.PACKET_ID,
+			(client, handler, buf, responseSender)
+				-> CommonClient.INSTANCE.onServerConfigSnapshotPacket(ServerConfigSnapshotS2CPacket.readSafe(buf)));
 		ClientPlayNetworking.registerGlobalReceiver(
-			MarkerCreatedS2CPacket.PACKET_TYPE,
-			(packet, context) -> {
-				final var client = context.client();
-				client.execute(() -> CommonClient.INSTANCE.onMarkerCreatedPacket(packet));
-			}
+			MarkerCreatedS2CPacket.PACKET_ID,
+			(client, handler, buf, responseSender)
+				-> CommonClient.INSTANCE.onMarkerCreatedPacket(MarkerCreatedS2CPacket.readSafe(buf))
 		);
 		ClientPlayNetworking.registerGlobalReceiver(
-			MarkerRemovedS2CPacket.PACKET_TYPE,
-			(packet, context) -> {
-				final var client = context.client();
-				client.execute(() -> CommonClient.INSTANCE.onMarkerRemovedPacket(packet));
-			}
+			MarkerRemovedS2CPacket.PACKET_ID,
+			(client, handler, buf, responseSender)
+				-> CommonClient.INSTANCE.onMarkerRemovedPacket(MarkerRemovedS2CPacket.readSafe(buf))
 		);
 		ClientPlayNetworking.registerGlobalReceiver(
-			MarkerRejectedS2CPacket.PACKET_TYPE,
-			(packet, context) -> {
-				final var client = context.client();
-				client.execute(() -> CommonClient.INSTANCE.onMarkerRejectedPacket(packet));
-			}
+			MarkerRejectedS2CPacket.PACKET_ID,
+			(client, handler, buf, responseSender)
+				-> CommonClient.INSTANCE.onMarkerRejectedPacket(MarkerRejectedS2CPacket.readSafe(buf))
 		);
 		ClientPlayNetworking.registerGlobalReceiver(
-			MarkerWinnerChangedS2CPacket.PACKET_TYPE,
-			(packet, context) -> {
-				final var client = context.client();
-				client.execute(() -> CommonClient.INSTANCE.onMarkerWinnerChangedPacket(packet));
-			}
+			MarkerWinnerChangedS2CPacket.PACKET_ID,
+			(client, handler, buf, responseSender)
+				-> CommonClient.INSTANCE.onMarkerWinnerChangedPacket(MarkerWinnerChangedS2CPacket.readSafe(buf))
 		);
 
 		// resource reload
