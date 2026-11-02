@@ -36,19 +36,19 @@ class EntityLocalGeometryRegistryTest {
 	void lowerPriorityWinsIndependentOfRegistrationOrderAndDuplicateCannotReplaceIt() {
 		EntityLocalGeometryRegistry registry = new EntityLocalGeometryRegistry();
 		AtomicInteger winnerCalls = new AtomicInteger();
-		ResourceLocation pig = ResourceLocation.withDefaultNamespace("pig");
+		ResourceLocation pig = new ResourceLocation("minecraft", "pig");
 
 		EntityLocalGeometryRegistry.Registration later = registry.register(
-			ResourceLocation.fromNamespaceAndPath("test", "later"), 200, List.of(pig),
+			new ResourceLocation("test", "later"), 200, List.of(pig),
 			(entity, request) -> EntityLocalGeometryResult.hit(hit(0.2)));
 		EntityLocalGeometryRegistry.Registration earlier = registry.register(
-			ResourceLocation.fromNamespaceAndPath("test", "earlier"), 100, List.of(pig),
+			new ResourceLocation("test", "earlier"), 100, List.of(pig),
 			(entity, request) -> {
 				winnerCalls.incrementAndGet();
 				return EntityLocalGeometryResult.hit(hit(0.1));
 			});
 		EntityLocalGeometryRegistry.Registration duplicate = registry.register(
-			ResourceLocation.fromNamespaceAndPath("test", "earlier"), 0, List.of(pig),
+			new ResourceLocation("test", "earlier"), 0, List.of(pig),
 			(entity, request) -> EntityLocalGeometryResult.hit(hit(0.0)));
 
 		TestEntity pigEntity = new TestEntity(EntityType.PIG, null);
@@ -71,14 +71,14 @@ class EntityLocalGeometryRegistryTest {
 	@Test
 	void recoverableCallbackFailureBecomesFailedWithoutTryingAnotherOwner() {
 		EntityLocalGeometryRegistry registry = new EntityLocalGeometryRegistry();
-		ResourceLocation pig = ResourceLocation.withDefaultNamespace("pig");
+		ResourceLocation pig = new ResourceLocation("minecraft", "pig");
 		AtomicInteger fallbackCalls = new AtomicInteger();
 
-		registry.register(ResourceLocation.fromNamespaceAndPath("test", "broken"), 1, List.of(pig),
+		registry.register(new ResourceLocation("test", "broken"), 1, List.of(pig),
 			(entity, request) -> {
 				throw new AssertionError("recoverable test failure");
 			});
-		registry.register(ResourceLocation.fromNamespaceAndPath("test", "fallback"), 2, List.of(pig),
+		registry.register(new ResourceLocation("test", "fallback"), 2, List.of(pig),
 			(entity, request) -> {
 				fallbackCalls.incrementAndGet();
 				return EntityLocalGeometryResult.hit(hit(0.1));
@@ -94,10 +94,10 @@ class EntityLocalGeometryRegistryTest {
 	@Test
 	void invalidFluidHitIsContainedAsFailedAtTheOwnerBoundary() {
 		EntityLocalGeometryRegistry registry = new EntityLocalGeometryRegistry();
-		ResourceLocation pig = ResourceLocation.withDefaultNamespace("pig");
+		ResourceLocation pig = new ResourceLocation("minecraft", "pig");
 		TestEntity pigEntity = new TestEntity(EntityType.PIG, null);
 
-		registry.register(ResourceLocation.fromNamespaceAndPath("test", "invalid-fluid"), 1, List.of(pig),
+		registry.register(new ResourceLocation("test", "invalid-fluid"), 1, List.of(pig),
 			(entity, request) -> EntityLocalGeometryResult.hit(new LocalGeometryHit(
 				0.2, BlockPos.ZERO, LocalGeometryKind.FLUID, Blocks.STONE.defaultBlockState(),
 				"minecraft:stone", Optional.empty(), new Vec3(2, 0, 0))));
@@ -138,7 +138,7 @@ class EntityLocalGeometryRegistryTest {
 		}
 
 		@Override
-		protected void defineSynchedData(SynchedEntityData.Builder builder) {
+		protected void defineSynchedData() {
 			// no entity data is needed by these ownership tests
 		}
 

@@ -137,23 +137,18 @@ class VoxelShapeRenderUtilTest {
 		private float normalZ;
 
 		@Override
-		public VertexConsumer addVertex(float x, float y, float z) {
+		public VertexConsumer vertex(double x, double y, double z) {
 			commitCurrent();
 
-			this.x = x;
-			this.y = y;
-			this.z = z;
+			this.x = (float) x;
+			this.y = (float) y;
+			this.z = (float) z;
 			started = true;
 			return this;
 		}
 
 		@Override
-		public VertexConsumer addVertex(PoseStack.Pose pose, float x, float y, float z) {
-			return addVertex(x, y, z);
-		}
-
-		@Override
-		public VertexConsumer setColor(int red, int green, int blue, int alpha) {
+		public VertexConsumer color(int red, int green, int blue, int alpha) {
 			this.red = red;
 			this.green = green;
 			this.blue = blue;
@@ -162,36 +157,40 @@ class VoxelShapeRenderUtilTest {
 		}
 
 		@Override
-		public VertexConsumer setUv(float u, float v) {
+		public VertexConsumer uv(float u, float v) {
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setUv1(int u, int v) {
+		public VertexConsumer overlayCoords(int u, int v) {
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setUv2(int u, int v) {
+		public VertexConsumer uv2(int u, int v) {
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setOverlay(int overlayCoords) {
-			return this;
-		}
-
-		@Override
-		public VertexConsumer setLight(int packedLight) {
-			return this;
-		}
-
-		@Override
-		public VertexConsumer setNormal(float normalX, float normalY, float normalZ) {
+		public VertexConsumer normal(float normalX, float normalY, float normalZ) {
 			this.normalX = normalX;
 			this.normalY = normalY;
 			this.normalZ = normalZ;
 			return this;
+		}
+
+		@Override
+		public void endVertex() {
+			commitCurrent();
+			started = false;
+		}
+
+		@Override
+		public void defaultColor(int red, int green, int blue, int alpha) {
+		}
+
+		@Override
+		public void unsetDefaultColor() {
 		}
 
 		private void commitCurrent() {

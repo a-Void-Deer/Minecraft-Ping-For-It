@@ -216,11 +216,11 @@ class RaycastCandidateFlowTest {
 	}
 
 	private static ResourceLocation id(String path) {
-		return ResourceLocation.fromNamespaceAndPath("test", path);
+		return new ResourceLocation("test", path);
 	}
 
 	private static ResourceLocation vanilla(String path) {
-		return ResourceLocation.withDefaultNamespace(path);
+		return new ResourceLocation("minecraft", path);
 	}
 
 	private static final class TestEntity extends Entity {
@@ -230,7 +230,7 @@ class RaycastCandidateFlowTest {
 		}
 
 		@Override
-		protected void defineSynchedData(SynchedEntityData.Builder builder) {}
+		protected void defineSynchedData() {}
 
 		@Override
 		protected void readAdditionalSaveData(CompoundTag tag) {}

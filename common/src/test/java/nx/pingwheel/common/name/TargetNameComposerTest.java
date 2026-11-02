@@ -3,7 +3,7 @@ package nx.pingwheel.common.name;
 import java.util.List;
 
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.contents.PlainTextContents;
+import net.minecraft.network.chat.contents.LiteralContents;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import org.junit.jupiter.api.Test;
 
@@ -31,9 +31,9 @@ class TargetNameComposerTest {
 	 * no game language state is required).
 	 */
 	private static String literalText(Component component) {
-		assertTrue(component.getContents() instanceof PlainTextContents.LiteralContents,
+		assertTrue(component.getContents() instanceof LiteralContents,
 			() -> "expected literal contents, got: " + component.getContents().getClass());
-		return ((PlainTextContents.LiteralContents) component.getContents()).text();
+		return ((LiteralContents) component.getContents()).text();
 	}
 
 	// --- compose ---
@@ -57,7 +57,7 @@ class TargetNameComposerTest {
 	@Test
 	void composeStripsCustomStyleAndEvents() {
 		Component styledCustom = Component.literal("Bob")
-			.withColor(0xFF0000)
+			.withStyle(style -> style.withColor(0xFF0000))
 			.withStyle(style -> style.withItalic(true));
 
 		Component result = TargetNameComposer.compose(

@@ -29,9 +29,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class BlockDisplayWhitelistTest {
 
-	private static final ResourceLocation STONE = ResourceLocation.fromNamespaceAndPath("minecraft", "stone");
-	private static final ResourceLocation DIRT = ResourceLocation.fromNamespaceAndPath("minecraft", "dirt");
-	private static final ResourceLocation CHEST = ResourceLocation.fromNamespaceAndPath("minecraft", "chest");
+	private static final ResourceLocation STONE = new ResourceLocation("minecraft", "stone");
+	private static final ResourceLocation DIRT = new ResourceLocation("minecraft", "dirt");
+	private static final ResourceLocation CHEST = new ResourceLocation("minecraft", "chest");
 
 	private static boolean matches(BlockDisplayWhitelist whitelist, ResourceLocation key) {
 		return whitelist.matches(key, false, RenderShape.MODEL, (tag, k) -> false);
@@ -51,7 +51,7 @@ class BlockDisplayWhitelistTest {
 		assertEquals(1, whitelist.parsedEntries().size());
 		assertTrue(matches(whitelist, STONE));
 		assertTrue(matches(whitelist, DIRT));
-		assertTrue(matches(whitelist, ResourceLocation.fromNamespaceAndPath("optional_mod", "special_block")));
+		assertTrue(matches(whitelist, new ResourceLocation("optional_mod", "special_block")));
 	}
 
 	// --- parsing ---
@@ -78,7 +78,7 @@ class BlockDisplayWhitelistTest {
 
 		assertTrue(entry instanceof BlockDisplayWhitelistEntry.Any);
 		assertTrue(entry.matches(STONE, (tag, key) -> false));
-		assertTrue(entry.matches(ResourceLocation.fromNamespaceAndPath("optional_mod", "special_block"), (tag, key) -> false));
+		assertTrue(entry.matches(new ResourceLocation("optional_mod", "special_block"), (tag, key) -> false));
 	}
 
 	@Test
@@ -149,7 +149,7 @@ class BlockDisplayWhitelistTest {
 
 		assertTrue(matches(whitelist, STONE));
 		assertTrue(matches(whitelist, DIRT));
-		assertFalse(matches(whitelist, ResourceLocation.fromNamespaceAndPath("modded", "anything")));
+		assertFalse(matches(whitelist, new ResourceLocation("modded", "anything")));
 	}
 
 	@Test

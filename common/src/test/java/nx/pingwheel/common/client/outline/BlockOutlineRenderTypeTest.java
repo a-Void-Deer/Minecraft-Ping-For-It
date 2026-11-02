@@ -159,13 +159,14 @@ class BlockOutlineRenderTypeTest {
 		List<Object> injectionValues = annotationValues(
 			"nx.pingwheel.common.mixin.GameRendererMixin", "pingforit$renderBlockOutlines",
 			"Lorg/spongepowered/asm/mixin/injection/Inject;");
-		assertTrue(injectionValues.contains("renderLevel(Lnet/minecraft/client/DeltaTracker;)V"));
+		assertTrue(injectionValues.contains("renderLevel(FJLcom/mojang/blaze3d/vertex/PoseStack;)V"));
 		assertTrue(injectionValues.contains(
 			"Lnet/minecraft/client/renderer/LevelRenderer;renderLevel("
-				+ "Lnet/minecraft/client/DeltaTracker;ZLnet/minecraft/client/Camera;"
+				+ "Lcom/mojang/blaze3d/vertex/PoseStack;FJZ"
+				+ "Lnet/minecraft/client/Camera;"
 				+ "Lnet/minecraft/client/renderer/GameRenderer;"
 				+ "Lnet/minecraft/client/renderer/LightTexture;"
-				+ "Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;)V"));
+				+ "Lorg/joml/Matrix4f;)V"));
 		assertTrue(injectionValues.contains("AFTER"));
 		assertTrue(injectionValues.contains(1), "post-world injection must require its exact anchor");
 
