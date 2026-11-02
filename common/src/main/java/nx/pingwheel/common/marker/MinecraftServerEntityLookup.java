@@ -25,10 +25,9 @@ public final class MinecraftServerEntityLookup {
 		Objects.requireNonNull(level, "level");
 		Objects.requireNonNull(requested, "requested");
 
-		Entity entity = switch (requested) {
-			case EntityLocator.UUID uuid -> level.getEntity(uuid.value());
-			case EntityLocator.RuntimeId runtimeId -> level.getEntity(runtimeId.value());
-		};
+		Entity entity = requested instanceof EntityLocator.UUID uuid
+			? level.getEntity(uuid.value())
+			: level.getEntity(((EntityLocator.RuntimeId) requested).value());
 
 		boolean present = entity != null;
 		boolean experienceOrb = entity instanceof ExperienceOrb;

@@ -97,10 +97,12 @@ public final class ClientPingActionDispatcher {
 	public void dispatch(PingInteractionAction action) {
 		Objects.requireNonNull(action, "action");
 
-		switch (action) {
-			case PingInteractionAction.CreatePing create -> dispatchCreate(create);
-			case PingInteractionAction.CancelMarker cancel -> dispatchCancel(cancel);
-			case PingInteractionAction.TargetGone gone -> dispatchTargetGone(gone);
+		if (action instanceof PingInteractionAction.CreatePing create) {
+			dispatchCreate(create);
+		} else if (action instanceof PingInteractionAction.CancelMarker cancel) {
+			dispatchCancel(cancel);
+		} else if (action instanceof PingInteractionAction.TargetGone gone) {
+			dispatchTargetGone(gone);
 		}
 	}
 

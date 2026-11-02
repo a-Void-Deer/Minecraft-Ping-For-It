@@ -37,23 +37,23 @@ public sealed interface TargetKey permits TargetKey.EntityKey, TargetKey.BlockKe
 	static TargetKey from(Target target) {
 		Objects.requireNonNull(target, "target");
 
-		return switch (target) {
-			case Target.EntityTarget entity ->
-				new EntityKey(entity.dimensionId(), entity.locator());
-			case Target.BlockTarget block ->
-				new BlockKey(block.dimensionId(), block.x(), block.y(), block.z(), block.blockRegistryId());
-			case Target.ExternalBlockTarget external -> {
-				if (!external.isCommitted()) {
-					throw new IllegalArgumentException("an uncommitted external target has no marker key");
-				}
-
-				yield new ExternalBlockKey(
-					external.dimensionId(),
-					external.providerId(), external.stableTargetId(), external.expectedBlockRegistryId());
+		if (target instanceof Target.EntityTarget entity) {
+			return new EntityKey(entity.dimensionId(), entity.locator());
+		}
+		if (target instanceof Target.BlockTarget block) {
+			return new BlockKey(block.dimensionId(), block.x(), block.y(), block.z(), block.blockRegistryId());
+		}
+		if (target instanceof Target.ExternalBlockTarget external) {
+			if (!external.isCommitted()) {
+				throw new IllegalArgumentException("an uncommitted external target has no marker key");
 			}
-			case Target.LocationTarget location ->
-				new LocationKey(location.dimensionId(), location.x(), location.y(), location.z());
-		};
+
+			return new ExternalBlockKey(
+				external.dimensionId(),
+				external.providerId(), external.stableTargetId(), external.expectedBlockRegistryId());
+		}
+		Target.LocationTarget location = (Target.LocationTarget) target;
+		return new LocationKey(location.dimensionId(), location.x(), location.y(), location.z());
 	}
 
 	record EntityKey(String dimensionId, EntityLocator locator) implements TargetKey {

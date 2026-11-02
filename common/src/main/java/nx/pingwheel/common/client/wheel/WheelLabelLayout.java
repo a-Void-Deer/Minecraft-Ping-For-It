@@ -1,5 +1,7 @@
 package nx.pingwheel.common.client.wheel;
 
+import net.minecraft.util.Mth;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -587,11 +589,11 @@ public final class WheelLabelLayout {
 		double renderedHeight = lineHeight * scale;
 		double x = centerX - renderedWidth * 0.5;
 		double maxX = Math.max(0.0, guiWidth - renderedWidth);
-		x = Math.clamp(x, 0.0, maxX);
+		x = Mth.clamp(x, 0.0, maxX);
 
 		double topY = centerY - outerRadius - TARGET_LABEL_GAP - renderedHeight;
 		double maxY = Math.max(0.0, guiHeight - renderedHeight);
-		topY = Math.clamp(topY, 0.0, maxY);
+		topY = Mth.clamp(topY, 0.0, maxY);
 
 		return new TargetLabelPlacement(x, topY, scale, renderedWidth, renderedHeight);
 	}

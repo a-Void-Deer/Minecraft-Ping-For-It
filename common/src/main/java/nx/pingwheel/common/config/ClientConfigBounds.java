@@ -1,5 +1,7 @@
 package nx.pingwheel.common.config;
 
+import net.minecraft.util.Mth;
+
 /**
  * Pure bounds and clamps for client-side interaction settings.
  *
@@ -73,7 +75,7 @@ public final class ClientConfigBounds {
 	public record WheelRadii(int innerRadius, int outerRadius) {}
 
 	public static int clampWheelHoldMillis(int value) {
-		return Math.clamp(value, MIN_WHEEL_HOLD_MILLIS, MAX_WHEEL_HOLD_MILLIS);
+		return Mth.clamp(value, MIN_WHEEL_HOLD_MILLIS, MAX_WHEEL_HOLD_MILLIS);
 	}
 
 	/**
@@ -91,36 +93,36 @@ public final class ClientConfigBounds {
 
 		// Keep the range valid even if the wheel-hold lower bound changes in a
 		// future version.  The current bounds produce a maximum of at least 50.
-		return Math.clamp(
+		return Mth.clamp(
 			Math.max(MIN_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS, steppedMaximum),
 			MIN_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS,
 			MAX_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS);
 	}
 
 	public static int clampLongPressCompatibilitySliceMillis(int value, int wheelHoldMillis) {
-		return Math.clamp(
+		return Mth.clamp(
 			value,
 			MIN_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS,
 			effectiveLongPressCompatibilitySliceMaxMillis(wheelHoldMillis));
 	}
 
 	public static int clampWheelTimeoutMillis(int value) {
-		return Math.clamp(value, MIN_WHEEL_TIMEOUT_MILLIS, MAX_WHEEL_TIMEOUT_MILLIS);
+		return Mth.clamp(value, MIN_WHEEL_TIMEOUT_MILLIS, MAX_WHEEL_TIMEOUT_MILLIS);
 	}
 
 	public static int clampCancelHalfConeAngleDegrees(int value) {
-		return Math.clamp(
+		return Mth.clamp(
 			value,
 			MIN_CANCEL_HALF_CONE_ANGLE_DEGREES,
 			MAX_CANCEL_HALF_CONE_ANGLE_DEGREES);
 	}
 
 	public static int clampWheelInnerRadius(int value) {
-		return Math.clamp(value, MIN_WHEEL_INNER_RADIUS, MAX_WHEEL_INNER_RADIUS);
+		return Mth.clamp(value, MIN_WHEEL_INNER_RADIUS, MAX_WHEEL_INNER_RADIUS);
 	}
 
 	public static int clampWheelOuterRadius(int value) {
-		return Math.clamp(value, MIN_WHEEL_OUTER_RADIUS, MAX_WHEEL_OUTER_RADIUS);
+		return Mth.clamp(value, MIN_WHEEL_OUTER_RADIUS, MAX_WHEEL_OUTER_RADIUS);
 	}
 
 	/**
@@ -134,7 +136,7 @@ public final class ClientConfigBounds {
 		int maximumInnerRadius = Math.min(
 			MAX_WHEEL_INNER_RADIUS,
 			clampedOuterRadius - MIN_WHEEL_ANNULUS_THICKNESS);
-		int clampedInnerRadius = Math.clamp(
+		int clampedInnerRadius = Mth.clamp(
 			innerRadius,
 			MIN_WHEEL_INNER_RADIUS,
 			maximumInnerRadius);
@@ -143,19 +145,19 @@ public final class ClientConfigBounds {
 	}
 
 	public static int clampWheelOpacity(int value) {
-		return Math.clamp(value, MIN_WHEEL_OPACITY, MAX_WHEEL_OPACITY);
+		return Mth.clamp(value, MIN_WHEEL_OPACITY, MAX_WHEEL_OPACITY);
 	}
 
 	public static int clampWheelFontSize(int value) {
-		return Math.clamp(value, MIN_WHEEL_FONT_SIZE, MAX_WHEEL_FONT_SIZE);
+		return Mth.clamp(value, MIN_WHEEL_FONT_SIZE, MAX_WHEEL_FONT_SIZE);
 	}
 
 	public static int clampWheelTargetFontSize(int value) {
-		return Math.clamp(value, MIN_WHEEL_TARGET_FONT_SIZE, MAX_WHEEL_TARGET_FONT_SIZE);
+		return Mth.clamp(value, MIN_WHEEL_TARGET_FONT_SIZE, MAX_WHEEL_TARGET_FONT_SIZE);
 	}
 
 	public static int clampConfigurationNoticeSize(int value) {
-		return Math.clamp(value, MIN_CONFIGURATION_NOTICE_SIZE, MAX_CONFIGURATION_NOTICE_SIZE);
+		return Mth.clamp(value, MIN_CONFIGURATION_NOTICE_SIZE, MAX_CONFIGURATION_NOTICE_SIZE);
 	}
 
 	/**
@@ -163,7 +165,7 @@ public final class ClientConfigBounds {
 	 * follow-server sentinel and constraining custom values to one minute.
 	 */
 	public static int clampMarkerDisplayDuration(int value) {
-		return Math.clamp(
+		return Mth.clamp(
 			value,
 			FOLLOW_SERVER_MARKER_DISPLAY_DURATION,
 			MAX_MARKER_DISPLAY_DURATION);

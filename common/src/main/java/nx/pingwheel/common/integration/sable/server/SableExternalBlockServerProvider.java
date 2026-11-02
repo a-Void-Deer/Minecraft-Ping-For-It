@@ -11,7 +11,6 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
-import dev.ryanhcode.sable.companion.math.Pose3dc;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
@@ -1003,13 +1002,22 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		}
 
 		Object poseObject = invoke(api.logicalPose, subLevel);
-		if (!(poseObject instanceof Pose3dc pose)) {
+		if (poseObject == null) {
 			return new LiveResult.Invalid("logical-pose-missing", null);
 		}
 
-		Vector3d globalCenter = pose.transformPosition(
-			new Vector3d(position.getX() + 0.5, position.getY() + 0.5, position.getZ() + 0.5),
-			new Vector3d());
+		final Vector3d globalCenter;
+		try {
+			java.lang.reflect.Method transform = poseObject.getClass().getMethod(
+				"transformPosition", Vector3dc.class, Vector3dc.class);
+			Vector3dc transformed = (Vector3dc) transform.invoke(
+				poseObject,
+				new Vector3d(position.getX() + 0.5, position.getY() + 0.5, position.getZ() + 0.5),
+				new Vector3d());
+			globalCenter = new Vector3d(transformed);
+		} catch (ReflectiveOperationException | RuntimeException failure) {
+			return new LiveResult.Invalid("logical-pose-transform-failed", failure);
+		}
 
 		if (!finite(globalCenter)) {
 			return new LiveResult.Invalid("non-finite-anchor", null);
@@ -1274,13 +1282,14 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			Class<?> serverSubLevelClass = loadClass(SERVER_SUB_LEVEL_CLASS, diagnostics);
 			Class<?> trackingDataClass = loadClass(TRACKING_DATA_CLASS, diagnostics);
 			Class<?> trackingPointClass = loadClass(TRACKING_POINT_CLASS, diagnostics);
+			Class<?> poseClass = loadClass("dev.ryanhcode.sable.companion.math.Pose3dc", diagnostics);
 
 			return new ReflectiveApi(
 				containerLookup(containerClass, diagnostics),
 				discovered(containerClass, "getSubLevel", Object.class, false, diagnostics, UUID.class),
 				discovered(serverSubLevelClass, "getLevel", Level.class, false, diagnostics),
 				discovered(serverSubLevelClass, "isRemoved", boolean.class, false, diagnostics),
-				discovered(serverSubLevelClass, "logicalPose", Pose3dc.class, false, diagnostics),
+				discovered(serverSubLevelClass, "logicalPose", poseClass, false, diagnostics),
 				discovered(trackingDataClass, "getOrLoad", trackingDataClass, true, diagnostics, ServerLevel.class),
 				discovered(trackingDataClass, "generateTrackingPoint", UUID.class, false, diagnostics, Vec3.class, serverSubLevelClass),
 				discovered(trackingDataClass, "getTrackingPoint", trackingPointClass, false, diagnostics, UUID.class),

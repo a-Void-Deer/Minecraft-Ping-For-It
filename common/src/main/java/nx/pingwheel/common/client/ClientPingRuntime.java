@@ -1261,11 +1261,12 @@ public final class ClientPingRuntime {
 	}
 
 	private static TargetKind targetKindOf(TargetKey targetKey) {
-		return switch (targetKey) {
-			case TargetKey.EntityKey ignored -> TargetKind.ENTITY;
-			case TargetKey.BlockKey ignored -> TargetKind.BLOCK;
-			case TargetKey.ExternalBlockKey ignored -> TargetKind.BLOCK;
-			case TargetKey.LocationKey ignored -> TargetKind.LOCATION;
-		};
+		if (targetKey instanceof TargetKey.EntityKey) {
+			return TargetKind.ENTITY;
+		}
+		if (targetKey instanceof TargetKey.BlockKey || targetKey instanceof TargetKey.ExternalBlockKey) {
+			return TargetKind.BLOCK;
+		}
+		return TargetKind.LOCATION;
 	}
 }

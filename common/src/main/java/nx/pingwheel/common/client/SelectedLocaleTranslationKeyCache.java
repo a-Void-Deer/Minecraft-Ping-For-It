@@ -134,7 +134,7 @@ public final class SelectedLocaleTranslationKeyCache {
 
 		List<Resource> resources;
 		try {
-			ResourceLocation languageId = ResourceLocation.fromNamespaceAndPath(
+			ResourceLocation languageId = new ResourceLocation(
 				Global.MOD_ID, "lang/" + selectedLanguageCode + ".json");
 			resources = resourceManager.getResourceStack(languageId);
 		} catch (RuntimeException exception) {
