@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -33,20 +34,20 @@ import org.jetbrains.annotations.Unmodifiable;
 @NotNullByDefault
 public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 
-	// One member, bounded identity strings, native-index mapping/boxing, capacity witnesses,
-	// DTO validation/copies, access/wrapper and cached profiles, including a closing route check.
-	// Native capability/stack getter internals are external-trusted, not modeled owned allocation.
-	private static final InventoryValidationBudget.Cost RESOLUTION = new InventoryValidationBudget.Cost(
-		65536L + 512L * InventorySourceAccess.MAX_SLOTS,
-		65536L + 512L * InventorySourceAccess.MAX_SLOTS,
-		32768L + 64L * InventorySourceAccess.MAX_SLOTS);
+	// Probe owns fixed wrappers/witnesses/profiles only. Native capability/stack getter and VM class
+	// metadata internals are external-trusted; source callback work is composed separately.
+	private static final OperationProfile PROBE = profile(new InventoryValidationBudget.Cost(8192, 8192, 1024), 8, 0);
 	private static final InventoryValidationBudget.Cost READ_OVERHEAD = new InventoryValidationBudget.Cost(1024, 1024, 128);
 	private static final int MAX_REGISTRY_ID_CHARS = 256;
 
-	@Override public InventoryValidationBudget.Cost resolutionCost() { return RESOLUTION; }
-	@Override public Optional<Access> resolve(Context context) {
+	@Override public OperationProfile probeProfile() { return PROBE; }
+	@Override public Optional<Probe> probe(Context context, Operation operation) {
 		Objects.requireNonNull(context);
-		return resolve(context, new MinecraftWorld(context.level()));
+		Objects.requireNonNull(operation).allowance().debit(PROBE.ownedCost());
+		return probeAdmitted(context, new MinecraftWorld(context.level()), operation);
+	}
+	private static OperationProfile profile(InventoryValidationBudget.Cost cost, long gates, long retained) {
+		return new OperationProfile(cost, gates, gates, retained);
 	}
 
 	/** The production lookup sequence, replaceable without replacing its current Context gates. */
@@ -70,52 +71,92 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 		}
 	}
 
-	/** Enter only under resolutionCost admission, just like the public resolve hook. */
-	static Optional<Access> resolve(Context context, World world) {
+	/** Same gated production probe, with replaceable native lookup for headless tests. */
+	static Optional<Probe> probe(Context context, World world, Operation operation) {
 		Objects.requireNonNull(context); Objects.requireNonNull(world);
+		Objects.requireNonNull(operation).allowance().debit(PROBE.ownedCost());
+		return probeAdmitted(context, world, operation);
+	}
+	private static Optional<Probe> probeAdmitted(Context context, World world, Operation operation) {
 		BlockPos root = context.root();
-		context.require(root);
+		context.require(root, operation);
 		boolean loaded = world.loaded(root);
-		context.require(root);
+		context.require(root, operation);
 		if (!loaded) return Optional.empty();
 		BlockState state = world.state(root);
-		context.require(root);
+		context.require(root, operation);
 		@Nullable BlockEntity entity = world.blockEntity(root);
-		context.require(root);
+		context.require(root, operation);
 		if (entity == null || entity.isRemoved()) return Optional.empty();
-		context.require(root);
+		context.require(root, operation);
 		LazyOptional<IFluidHandler> capability = Objects.requireNonNull(world.capability(entity, context.face()));
-		context.require(root);
+		context.require(root, operation);
 		Optional<IFluidHandler> resolved = capability.resolve();
-		context.require(root);
+		context.require(root, operation);
 		if (resolved.isEmpty()) return Optional.empty();
 		IFluidHandler handler = resolved.orElseThrow();
 		int tanks = handler.getTanks();
-		context.require(root);
+		context.require(root, operation);
 		if (tanks < 0 || tanks > InventorySourceAccess.MAX_SLOTS)
 			throw new IllegalStateException("fluid tank address bound");
-		int[] capacities = new int[tanks];
-		var addresses = new ArrayList<Integer>(tanks);
-		for (int tank = 0; tank < tanks; tank++) {
-			context.require(root);
-			capacities[tank] = capacity(handler, tank);
-			context.require(root);
-			addresses.add(tank);
+		return Optional.of(new HandlerProbe(new Route(context, world, state, entity, capability, handler), tanks, operation));
+	}
+
+	@NotNullByDefault
+	private static final class HandlerProbe implements Probe {
+		private @Nullable Route route;
+		private @Nullable Operation origin;
+		private final Shape shape;
+		private final OperationProfile finishProfile;
+		private HandlerProbe(Route route, int tanks, Operation origin) {
+			this.route = route; this.origin = origin; shape = new Shape(1, OptionalInt.of(tanks), true);
+			// capacities, ordered boxed mapping/copies/seen-array, bounded strings, DTOs and cached access
+			// profiles. Only the known N contributes; no whole-slot-limit reservation or eager contents.
+			long bytes = 8192L + 256L * tanks;
+			finishProfile = profile(new InventoryValidationBudget.Cost(bytes, bytes, 4096L + 64L * tanks),
+				27L + 4L * tanks, 8192L + 64L * tanks);
 		}
-		context.require(root);
-		String blockId = boundedRegistryId(BuiltInRegistries.BLOCK.getKey(state.getBlock()));
-		context.require(root);
-		@Nullable ResourceLocation entityId = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType());
-		context.require(root);
-		if (entityId == null) throw new InventorySourceUnavailableException("unregistered fluid block entity");
-		String blockEntityId = boundedRegistryId(entityId);
-		@Unmodifiable List<Integer> mapping = List.copyOf(addresses);
-		var layout = new InventorySnapshotLayout("forge:fluid_handler", context.face().getName(), null, List.of(
-			new InventorySnapshotLayout.Member(root, blockId, blockEntityId, "root", List.of(
-				new InventorySnapshotLayout.Segment("tanks", ADDRESS_SCHEMA, tanks, mapping)))));
-		var access = new HandlerAccess(context, world, state, entity, capability, handler, capacities, layout);
-		access.requireCurrent();
-		return Optional.of(access);
+		@Override public Shape shape() { return shape; }
+		@Override public OperationProfile finishProfile() { return finishProfile; }
+		@Override public Optional<Access> finish(Admission admission) {
+			if (route == null || origin == null) throw new IllegalStateException("fluid probe closed or consumed");
+			Route held = route;
+			Operation original = origin;
+			route = null; origin = null; // single use even when admission or a callback fails
+			var allowance = original.allowance(); // probe must finish while its operation is still live
+			try (var operation = Objects.requireNonNull(admission).enter(finishProfile)) {
+				if (operation.allowance() != allowance) throw new IllegalStateException("fluid probe changed caller allowance");
+				operation.allowance().debit(finishProfile.ownedCost());
+				int tanks = shape.indexedSlots().orElseThrow();
+				if (!held.current(operation)) throw new InventorySourceUnavailableException("fluid capability route changed before finish");
+				int count = held.handler().getTanks(); held.gate(operation);
+				if (count != tanks) throw new InventorySourceUnavailableException("fluid tank count changed before finish");
+				int[] capacities = new int[tanks];
+				var addresses = new ArrayList<Integer>(tanks);
+				for (int tank = 0; tank < tanks; tank++) {
+					held.gate(operation); capacities[tank] = capacity(held.handler(), tank); held.gate(operation);
+					addresses.add(tank);
+				}
+				held.gate(operation);
+				String blockId = boundedRegistryId(BuiltInRegistries.BLOCK.getKey(held.state().getBlock()));
+				held.gate(operation);
+				@Nullable ResourceLocation entityId = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(held.entity().getType());
+				held.gate(operation);
+				if (entityId == null) throw new InventorySourceUnavailableException("unregistered fluid block entity");
+				String blockEntityId = boundedRegistryId(entityId);
+				String provider = held.handler().getClass().getName();
+				if (provider.length() > 1024) throw new InventorySourceUnavailableException("fluid provider class length bound");
+				var routeInfo = new RouteInfo(TopologyEvidence.PUBLIC_ADDRESS_ONLY, provider);
+				@Unmodifiable List<Integer> mapping = List.copyOf(addresses);
+				var layout = new InventorySnapshotLayout("forge:fluid_handler", held.context().face().getName(), null, List.of(
+					new InventorySnapshotLayout.Member(held.context().root(), blockId, blockEntityId, "root", List.of(
+						new InventorySnapshotLayout.Segment("tanks", ADDRESS_SCHEMA, tanks, mapping)))));
+				var access = new HandlerAccess(held, capacities, layout, routeInfo);
+				access.requireCurrent(held, operation);
+				return Optional.of(access);
+			}
+		}
+		@Override public void close() { route = null; origin = null; }
 	}
 
 	/** Inspect existing strings before ResourceLocation.toString allocates a combined ID. */
@@ -158,82 +199,96 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 	 * the native mixed-time placement limitation, not a certificate of atomicity or pooling.
 	 */
 	@NotNullByDefault
-	private static final class HandlerAccess implements Access {
-		private final Context context;
-		private final World world;
-		private final BlockState state;
-		private final BlockEntity entity;
-		private final LazyOptional<IFluidHandler> capability;
-		private final IFluidHandler handler;
-		private final int @Unmodifiable [] capacities;
-		private final InventorySnapshotLayout layout;
-		private final InventoryValidationBudget.Cost validationCost, readCost;
-
-		/** capacities is exclusively transferred from resolve; it is never exposed or written again. */
-		private HandlerAccess(Context context, World world, BlockState state, BlockEntity entity,
-			LazyOptional<IFluidHandler> capability, IFluidHandler handler, int @Unmodifiable [] capacities,
-			InventorySnapshotLayout layout) {
-			this.context = context; this.world = world; this.state = state; this.entity = entity;
-			this.capability = capability; this.handler = handler; this.capacities = capacities; this.layout = layout;
-			// One current root/route and all ordered metadata addresses, with no descriptor rebuild.
-			validationCost = new InventoryValidationBudget.Cost(2048, 2048, 272L + 16L * capacities.length);
-			readCost = validationCost.times(2).plus(READ_OVERHEAD);
-		}
-		private void gate() { context.require(context.root()); }
-		@Override public InventorySnapshotLayout layout() { gate(); return layout; }
-		@Override public Optional<String> alias() { gate(); return Optional.empty(); }
-		@Override public boolean stableCursor() { gate(); return true; }
-		@Override public int slots() { gate(); return capacities.length; }
-		@Override public InventoryValidationBudget.Cost validationCost() { return validationCost; }
-		@Override public InventoryValidationBudget.Cost readCost() { return readCost; }
-
-		private boolean currentRoute() {
+	private record Route(Context context, World world, BlockState state, BlockEntity entity,
+		LazyOptional<IFluidHandler> capability, IFluidHandler handler) {
+		private void gate(Operation operation) { context.require(context.root(), operation); }
+		private boolean current(Operation operation) {
 			BlockPos root = context.root();
-			gate(); boolean loaded = world.loaded(root); gate();
+			gate(operation); boolean loaded = world.loaded(root); gate(operation);
 			if (!loaded) return false;
-			BlockState currentState = world.state(root); gate();
+			BlockState currentState = world.state(root); gate(operation);
 			if (currentState != state) return false;
-			@Nullable BlockEntity currentEntity = world.blockEntity(root); gate();
+			@Nullable BlockEntity currentEntity = world.blockEntity(root); gate(operation);
 			if (currentEntity != entity || entity.isRemoved()) return false;
-			gate(); LazyOptional<IFluidHandler> currentCapability = world.capability(entity, context.face()); gate();
+			gate(operation); LazyOptional<IFluidHandler> currentCapability = world.capability(entity, context.face()); gate(operation);
 			if (currentCapability != capability) return false;
-			Optional<IFluidHandler> currentHandler = capability.resolve(); gate();
+			Optional<IFluidHandler> currentHandler = capability.resolve(); gate(operation);
 			return currentHandler.orElse(null) == handler;
 		}
-		@Override public boolean valid() {
-			if (!currentRoute()) return false;
-			int count = handler.getTanks(); gate();
+	}
+
+	@NotNullByDefault
+	private static final class HandlerAccess implements Access {
+		private @Nullable Route route;
+		private final int @Unmodifiable [] capacities;
+		private final InventorySnapshotLayout layout;
+		private final RouteInfo routeInfo;
+		private final OperationProfile validationProfile, readProfile;
+		private final InventoryValidationBudget.Cost validationCost;
+
+		/** capacities is exclusively transferred from finish; never exposed or written again. */
+		private HandlerAccess(Route route, int @Unmodifiable [] capacities, InventorySnapshotLayout layout, RouteInfo routeInfo) {
+			this.route = route; this.capacities = capacities; this.layout = layout; this.routeInfo = routeInfo;
+			// One current root/route and all ordered metadata addresses, with no descriptor rebuild.
+			validationCost = new InventoryValidationBudget.Cost(2048, 2048, 272L + 16L * capacities.length);
+			validationProfile = profile(validationCost, 16L + 2L * capacities.length, 0);
+			readProfile = profile(validationCost.times(2).plus(READ_OVERHEAD), 33L + 4L * capacities.length, 0);
+		}
+		@Override public InventorySnapshotLayout layout() { return layout; }
+		@Override public Optional<String> alias() { return Optional.empty(); }
+		@Override public boolean stableCursor() { return true; }
+		@Override public int slots() { return capacities.length; }
+		@Override public RouteInfo routeInfo() { return routeInfo; }
+		@Override public OperationProfile validationProfile() { return validationProfile; }
+		@Override public OperationProfile readProfile() { return readProfile; }
+		@Override public OperationProfile observationProfile(int limit) {
+			return validationProfile.plus(Access.super.observationProfile(limit));
+		}
+		private Route requireOpen() {
+			if (route == null) throw new IllegalStateException("fluid access closed");
+			return route;
+		}
+		@Override public boolean valid(Operation operation) {
+			Route held = requireOpen(); operation.allowance().debit(validationCost);
+			boolean valid = current(held, operation);
+			return route == held && valid;
+		}
+		private boolean current(Route held, Operation operation) {
+			if (!held.current(operation)) return false;
+			int count = held.handler().getTanks(); held.gate(operation);
 			if (count != capacities.length) return false;
 			for (int tank = 0; tank < capacities.length; tank++) {
-				gate(); int currentCapacity = capacity(handler, tank); gate();
+				held.gate(operation); int currentCapacity = capacity(held.handler(), tank); held.gate(operation);
 				if (currentCapacity != capacities[tank]) return false;
 			}
-			if (!currentRoute()) return false; // A metadata callback may have replaced the public route too.
+			if (!held.current(operation)) return false; // A metadata callback may have replaced the public route too.
 			// Capacity and closing-route callbacks can change the count without changing earlier values.
 			// Recheck once, not another capacity walk, before accepting this frozen address graph.
-			int closingCount = handler.getTanks(); gate();
+			int closingCount = held.handler().getTanks(); held.gate(operation);
 			return closingCount == capacities.length;
 		}
-		private void requireCurrent() {
-			if (!valid()) throw new InventorySourceUnavailableException("fluid capability route/layout changed");
+		private void requireCurrent(Route held, Operation operation) {
+			if (route != held || !current(held, operation) || route != held)
+				throw new InventorySourceUnavailableException("fluid capability route/layout changed");
 		}
 
-		@Override public boolean consume(int slot, Visitor visitor) {
+		@Override public boolean consume(int slot, Visitor visitor, Operation operation) {
 			Objects.requireNonNull(visitor); Objects.checkIndex(slot, capacities.length);
-			requireCurrent(); gate();
+			Route held = requireOpen(); operation.allowance().debit(readProfile.ownedCost());
+			requireCurrent(held, operation); held.gate(operation);
+			if (route != held) throw new InventorySourceUnavailableException("fluid access closed during read");
 			// No authority or provider metadata callback may reuse the borrowed resident before this.
-			boolean more = visitor.visit(world.content(handler, slot));
-			requireCurrent();
+			boolean more = visitor.visit(held.world().content(held.handler(), slot));
+			requireCurrent(held, operation);
 			return more;
 		}
 
-		@Override public Visit observe(int limit, Visitor visitor) {
+		@Override public Visit observe(int limit, Visitor visitor, Operation operation) {
 			if (limit < 0 || limit > InventorySourceAccess.MAX_SLOTS) throw new IllegalArgumentException("fluid observation limit");
 			Objects.requireNonNull(visitor);
-			requireCurrent(); // Even a zero-tank/zero-limit pass needs fresh admitted evidence.
-			int bound = Math.min(capacities.length, limit);
-			for (int tank = 0; tank < bound; tank++) if (!consume(tank, visitor)) return new Visit(tank + 1, false);
-			return new Visit(bound, capacities.length <= limit);
+			if (!valid(operation)) throw new InventorySourceUnavailableException("fluid capability route/layout changed");
+			return Access.super.observe(limit, visitor, operation);
 		}
+		@Override public void close() { route = null; }
 	}
 }

@@ -4,8 +4,10 @@ import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.ServiceLoader;
 import java.util.UUID;
 import java.util.function.Consumer;
@@ -30,14 +32,20 @@ import net.minecraft.world.level.block.entity.ChestBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluids;
 import nx.pingwheel.common.platform.IPlatformFluidService;
-import nx.pingwheel.common.platform.IPlatformFluidService.Access;
 import nx.pingwheel.common.platform.IPlatformFluidService.Components;
 import nx.pingwheel.common.platform.IPlatformFluidService.Context;
+import nx.pingwheel.common.platform.IPlatformFluidService.Operation;
+import nx.pingwheel.common.platform.IPlatformFluidService.OperationProfile;
+import nx.pingwheel.common.platform.IPlatformFluidService.Probe;
+import nx.pingwheel.common.platform.IPlatformFluidService.Visitor;
 import nx.pingwheel.common.platform.IPlatformFluidService.Visit;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.CaptureLimitException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission;
+import nx.pingwheel.common.presentation.source.CostLedger;
+import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
@@ -48,6 +56,7 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Headless production lookup/gating/layout/visitor seams; no transaction, mixin or game launch. */
 @NotNullByDefault
 class PlatformFluidServiceTest {
+	private static final CostLedger.Counter WORK = new CostLedger.Counter("fabric-fluid-test", CostLedger.Unit.WORK);
 
 	@BeforeAll static void bootstrap() {
 		net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
@@ -80,9 +89,9 @@ class PlatformFluidServiceTest {
 				assertSame(level, world); assertEquals(BlockPos.ZERO, position); assertSame(face, side);
 				nativeCall("lookup"); return route;
 			});
-			context = new Context(level, BlockPos.ZERO, face, new UUID(11, 17), position -> {
-				assertEquals(BlockPos.ZERO, position); memberChecks++; return membership;
-			}, () -> { authorityChecks++; return authority; });
+			context = new Context(level, BlockPos.ZERO, face, new UUID(11, 17), (position, operation) -> {
+				operation.allowance().debit(memberCost); assertEquals(BlockPos.ZERO, position); memberChecks++; return membership;
+			}, operation -> { operation.allowance().debit(authorityCost); authorityChecks++; return authority; });
 		}
 
 		void nativeCall(String operation) {
@@ -91,8 +100,18 @@ class PlatformFluidServiceTest {
 		}
 
 		Access open() {
-			return service.find(context, allowance(service.resolutionCost())).orElseThrow();
+			return find().orElseThrow();
 		}
+		Optional<Access> find() {
+			try (Operation operation = operation(service.probeProfile().ownedCost())) {
+				Optional<Probe> found = service.probe(context, operation);
+				if (found.isEmpty()) return Optional.empty();
+				try (Probe probe = found.get()) {
+					return probe.finish(profile -> nextStage(operation, profile)).map(Access::new);
+				}
+			}
+		}
+		InventoryValidationBudget.Cost memberCost = InventoryValidationBudget.NONE, authorityCost = InventoryValidationBudget.NONE;
 
 		@SuppressWarnings("unchecked")
 		Storage<FluidVariant> storage(boolean indexed) {
@@ -172,8 +191,10 @@ class PlatformFluidServiceTest {
 	@NotNullByDefault
 	private static final class Server extends DedicatedServer {
 		boolean sameThread;
+		int tick;
 		private Server() { super(null, null, null, null, null, null, null, null); }
 		@Override public boolean isSameThread() { return sameThread; }
+		@Override public int getTickCount() { return tick; }
 	}
 
 	@NotNullByDefault
@@ -196,6 +217,49 @@ class PlatformFluidServiceTest {
 
 	private static InventoryValidationBudget.Allowance allowance(InventoryValidationBudget.Cost cost) {
 		return new InventoryValidationBudget.Allowance(cost);
+	}
+	private static Operation operation(InventoryValidationBudget.Cost cost) { return new TestOperation(allowance(cost)); }
+	/** Test stand-in for a separately granted stage; real-ledger integration cases use InventoryFluidAdmission. */
+	private static Operation nextStage(Operation origin, OperationProfile profile) {
+		var allowance = origin.allowance(); allowance.admitAdditional(profile.ownedCost()); return new TestOperation(allowance);
+	}
+	@NotNullByDefault
+	private static final class TestOperation implements Operation {
+		private final InventoryValidationBudget.Allowance allowance;
+		private boolean closed;
+		TestOperation(InventoryValidationBudget.Allowance allowance) { this.allowance = allowance; }
+		@Override public InventoryValidationBudget.Allowance allowance() {
+			if (closed) throw new IllegalStateException("test operation closed"); return allowance;
+		}
+		@Override public void requireAdditional(InventoryValidationBudget.Cost cost) { allowance().requireAvailable(cost); }
+		@Override public void close() { closed = true; }
+	}
+	/** Test-only admission helpers keep all pre-migration behavioral cases on the new execution API. */
+	@NotNullByDefault
+	private static final class Access implements AutoCloseable {
+		final IPlatformFluidService.Access delegate;
+		Access(IPlatformFluidService.Access delegate) { this.delegate = delegate; }
+		boolean stableCursor() { return delegate.stableCursor(); }
+		int slots() { return delegate.slots(); }
+		Optional<String> alias() { return delegate.alias(); }
+		nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout layout() { return delegate.layout(); }
+		InventoryValidationBudget.Cost validationCost() { return delegate.validationProfile().ownedCost(); }
+		InventoryValidationBudget.Cost readCost() { return delegate.readProfile().ownedCost(); }
+		InventoryValidationBudget.Cost observationCost(int limit) { return delegate.observationProfile(limit).ownedCost(); }
+		boolean valid() { return valid(allowance(validationCost())); }
+		boolean valid(InventoryValidationBudget.Allowance allowance) {
+			try (var operation = new TestOperation(allowance)) { return delegate.valid(operation); }
+		}
+		boolean consume(int slot, Visitor visitor) { return consume(slot, visitor, allowance(readCost())); }
+		boolean consume(int slot, Visitor visitor, InventoryValidationBudget.Allowance allowance) {
+			try (var operation = new TestOperation(allowance)) { return delegate.consume(slot, visitor, operation); }
+		}
+		Visit observe(int limit, Visitor visitor) { return observe(limit, visitor, allowance(observationCost(limit))); }
+		Visit observe(int limit, Visitor visitor, InventoryValidationBudget.Allowance allowance) {
+			allowance.requireAvailable(observationCost(limit));
+			try (var operation = new TestOperation(allowance)) { return delegate.observe(limit, visitor, operation); }
+		}
+		@Override public void close() { delegate.close(); }
 	}
 
 	@Test void serviceRegistrationSelectsTheRealFabricPort() {
@@ -220,7 +284,9 @@ class PlatformFluidServiceTest {
 
 	@Test void deniedAllowancesReachNoNativeOrAuthorityCallback() {
 		var fixture = new Fixture(true);
-		assertThrows(CaptureLimitException.class, () -> fixture.service.find(fixture.context, allowance(InventoryValidationBudget.NONE)));
+		try (var operation = operation(InventoryValidationBudget.NONE)) {
+			assertThrows(CaptureLimitException.class, () -> fixture.service.probe(fixture.context, operation));
+		}
 		assertTrue(fixture.calls.isEmpty()); assertEquals(0, fixture.memberChecks); assertEquals(0, fixture.authorityChecks);
 		Access access = fixture.open(); fixture.clear();
 		var required = access.readCost();
@@ -241,20 +307,20 @@ class PlatformFluidServiceTest {
 
 	@Test void unavailableRootsNeverFallThroughToCapabilityLookup() {
 		var unloaded = new Fixture(true); unloaded.loaded = false;
-		assertTrue(unloaded.service.find(unloaded.context, allowance(unloaded.service.resolutionCost())).isEmpty());
+		assertTrue(unloaded.find().isEmpty());
 		assertEquals(List.of("loaded"), unloaded.calls);
 		var missing = new Fixture(true); missing.entity = null;
-		assertTrue(missing.service.find(missing.context, allowance(missing.service.resolutionCost())).isEmpty());
+		assertTrue(missing.find().isEmpty());
 		assertEquals(0, missing.called("lookup"));
 		var cauldron = new Fixture(true); cauldron.state = Blocks.WATER_CAULDRON.defaultBlockState();
-		assertTrue(cauldron.service.find(cauldron.context, allowance(cauldron.service.resolutionCost())).isEmpty());
+		assertTrue(cauldron.find().isEmpty());
 		assertEquals(0, cauldron.called("lookup")); assertEquals(0, cauldron.called("entity"));
 		var loot = new Fixture(true); var chest = new ChestBlockEntity(BlockPos.ZERO, Blocks.CHEST.defaultBlockState());
 		chest.setLootTable(net.minecraft.world.level.storage.loot.BuiltInLootTables.SIMPLE_DUNGEON); loot.entity = chest;
-		assertTrue(loot.service.find(loot.context, allowance(loot.service.resolutionCost())).isEmpty());
+		assertTrue(loot.find().isEmpty());
 		assertEquals(0, loot.called("lookup"));
 		var absent = new Fixture(true); absent.route = null;
-		assertTrue(absent.service.find(absent.context, allowance(absent.service.resolutionCost())).isEmpty());
+		assertTrue(absent.find().isEmpty());
 		assertEquals(1, absent.called("lookup"));
 	}
 
@@ -534,16 +600,16 @@ class PlatformFluidServiceTest {
 			assertTrue(access.valid(allowance(access.validationCost())));
 			int depth = fresh ? 2 : 1;
 			assertEquals(2, fixture.called("slot")); assertEquals(2L * depth, fixture.called("underlying"));
-			assertEquals(13 + 4 + 4 * depth, fixture.memberChecks);
+			assertEquals(11 + 4 + 4 * depth, fixture.memberChecks);
 			assertEquals(fixture.memberChecks, fixture.authorityChecks);
 			fixture.clear();
 			assertTrue(access.consume(0, entry -> true, allowance(access.readCost())));
 			assertEquals(4, fixture.called("slot")); assertEquals((fresh ? 5L : 4L) * depth, fixture.called("underlying"));
-			assertEquals(fresh ? 37 + 10 * depth : 37 + 8 * depth, fixture.memberChecks);
+			assertEquals(fresh ? 35 + 10 * depth : 35 + 8 * depth, fixture.memberChecks);
 			fixture.clear();
 			assertEquals(new Visit(2, true), access.observe(2, entry -> true, allowance(access.observationCost(2))));
 			assertEquals(8, fixture.called("slot")); assertEquals((fresh ? 10L : 8L) * depth, fixture.called("underlying"));
-			assertEquals(fresh ? 72 + 20 * depth : 72 + 16 * depth, fixture.memberChecks);
+			assertEquals(fresh ? 70 + 20 * depth : 70 + 16 * depth, fixture.memberChecks);
 		}
 	}
 
@@ -555,8 +621,8 @@ class PlatformFluidServiceTest {
 		long defaultMemory = 1024L * 1024 * nx.pingwheel.common.config.InventoryLimits.DEFAULT_PENDING_MEMORY_MIB;
 		long tickWork = InventorySourceAccess.MAX_SLOTS * nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.workUpperBound(
 			nx.pingwheel.common.config.InventoryLimits.DISPLAY_BASE_BYTES);
-		assertTrue(fixture.service.resolutionCost().workspaceBytes() < defaultMemory);
-		assertTrue(fixture.service.resolutionCost().workUnits() < tickWork);
+		assertTrue(fixture.service.probeProfile().ownedCost().workspaceBytes() < defaultMemory);
+		assertTrue(fixture.service.probeProfile().ownedCost().workUnits() < tickWork);
 		assertTrue(access.readCost().workspaceBytes() < defaultMemory);
 		assertTrue(access.readCost().workUnits() < tickWork);
 		fixture.clear();
@@ -639,7 +705,7 @@ class PlatformFluidServiceTest {
 			var next = new View(fixture); tail.underlying = next.nativeView; tail = next;
 		}
 		Access access = fixture.open(); fixture.clear();
-		access.validationCost(); access.readCost(); access.observationCost(1); fixture.service.resolutionCost();
+		access.validationCost(); access.readCost(); access.observationCost(1); fixture.service.probeProfile();
 		assertTrue(fixture.calls.isEmpty()); assertEquals(0, fixture.authorityChecks);
 		var required = access.validationCost();
 		var denied = allowance(new InventoryValidationBudget.Cost(required.allocationBytes(), required.workspaceBytes(), required.workUnits() - 1));
@@ -716,7 +782,257 @@ class PlatformFluidServiceTest {
 		assertThrows(IndexOutOfBoundsException.class, () -> access.consume(2, entry -> true));
 		assertThrows(IllegalArgumentException.class, () -> access.observe(-1, entry -> true));
 		assertThrows(IllegalArgumentException.class, () -> access.observationCost(InventorySourceAccess.MAX_SLOTS + 1));
-		access.validationCost(); access.readCost(); access.observationCost(2); fixture.service.resolutionCost();
+		access.validationCost(); access.readCost(); access.observationCost(2); fixture.service.probeProfile();
 		assertTrue(fixture.calls.isEmpty());
+	}
+
+	@Test void smallProbeDiscoversOnlyTheActualShapeBeforeFullMetadataAdmission() {
+		long previousAllocation = 0;
+		for (int count : List.of(1, 8, 4096)) {
+			var fixture = new Fixture(true); fixture.count = count;
+			try (var operation = operation(fixture.service.probeProfile().ownedCost());
+				var probe = fixture.service.probe(fixture.context, operation).orElseThrow()) {
+				assertEquals(1, probe.shape().members()); assertTrue(probe.shape().stableCursor());
+				assertEquals(count, probe.shape().indexedSlots().orElseThrow());
+				assertEquals(1, fixture.called("count")); assertEquals(0, fixture.called("slot"));
+				assertEquals(0, fixture.called("underlying")); assertEquals(0, fixture.called("amount"));
+				var profile = probe.finishProfile();
+				assertEquals(8192L + 192L * count, profile.ownedCost().allocationBytes());
+				assertEquals(4096L + 56L * count, profile.retainedBytes());
+				assertTrue(profile.ownedCost().allocationBytes() > previousAllocation); previousAllocation = profile.ownedCost().allocationBytes();
+				fixture.clear(); probe.shape(); probe.finishProfile(); assertTrue(fixture.calls.isEmpty());
+			}
+		}
+		var cursorless = new Fixture(false);
+		try (var operation = operation(cursorless.service.probeProfile().ownedCost());
+			var probe = cursorless.service.probe(cursorless.context, operation).orElseThrow()) {
+			assertFalse(probe.shape().stableCursor()); assertTrue(probe.shape().indexedSlots().isEmpty());
+			assertEquals(0, cursorless.called("iterator")); assertEquals(0, cursorless.called("count"));
+		}
+	}
+
+	@Test void operationProfilesCoverBothIndependentSourceCallbacksAtTheMaximumNativeDepth() {
+		var fixture = new Fixture(true); fixture.count = 1; fixture.freshWrappers = true;
+		fixture.memberCost = new InventoryValidationBudget.Cost(32, 16, 3);
+		fixture.authorityCost = new InventoryValidationBudget.Cost(64, 32, 5);
+		var tail = fixture.views.getFirst();
+		for (int depth = 2; depth < PlatformFluidServiceImpl.MAX_UNDERLYING_VIEWS; depth++) {
+			var next = new View(fixture); tail.underlying = next.nativeView; tail = next;
+		}
+		var ledger = new CostLedger(Map.of(WORK, 1_000_000L)); var memory = new RetainedMemoryLedger(64L << 20);
+		try (var admission = new InventoryFluidAdmission(ledger, WORK, memory, fixture.memberCost, fixture.authorityCost);
+			var operation = admission.enter(fixture.service.probeProfile());
+			var probe = fixture.service.probe(fixture.context, operation).orElseThrow()) {
+			assertEquals(12, fixture.memberChecks); assertEquals(fixture.memberChecks, fixture.authorityChecks);
+			fixture.clear();
+			try (var access = probe.finish(admission).orElseThrow()) {
+				assertEquals(probe.finishProfile().memberGateCalls(), fixture.memberChecks);
+				assertEquals(probe.finishProfile().currentAuthorityCalls(), fixture.authorityChecks);
+				fixture.clear();
+				try (var validation = admission.enter(access.validationProfile())) { assertTrue(access.valid(validation)); }
+				assertEquals(access.validationProfile().memberGateCalls(), fixture.memberChecks);
+				fixture.clear();
+				try (var read = admission.enter(access.readProfile())) { assertTrue(access.consume(0, entry -> true, read)); }
+				assertEquals(access.readProfile().memberGateCalls(), fixture.memberChecks);
+				assertEquals(fixture.memberChecks, fixture.authorityChecks);
+			}
+		}
+		assertEquals(0, memory.reserved()); assertEquals(0, memory.retained());
+	}
+
+	@Test void cursorlessProfileCoversIteratorPeeksAndEverySourceGateWithoutAnUnpaidTail() {
+		for (int limit : List.of(0, 1, 2, 3)) {
+			var fixture = new Fixture(false); fixture.peek = true;
+			fixture.memberCost = new InventoryValidationBudget.Cost(32, 16, 3);
+			fixture.authorityCost = new InventoryValidationBudget.Cost(64, 32, 5);
+			var ledger = new CostLedger(Map.of(WORK, 1_000_000L)); var memory = new RetainedMemoryLedger(64L << 20);
+			try (var admission = new InventoryFluidAdmission(ledger, WORK, memory, fixture.memberCost, fixture.authorityCost);
+				var operation = admission.enter(fixture.service.probeProfile());
+				var probe = fixture.service.probe(fixture.context, operation).orElseThrow();
+				var access = probe.finish(admission).orElseThrow()) {
+				fixture.clear(); var profile = access.observationProfile(limit);
+				try (var observe = admission.enter(profile)) {
+					assertEquals(new Visit(Math.min(2, limit), limit > 2), access.observe(limit, entry -> true, observe));
+				}
+				assertTrue(fixture.memberChecks <= profile.memberGateCalls());
+				assertTrue(fixture.authorityChecks <= profile.currentAuthorityCalls());
+				assertEquals(limit == 0 ? 0 : Math.min(limit, 3), fixture.called("hasNext"));
+			}
+			assertEquals(0, memory.reserved()); assertEquals(0, memory.retained());
+		}
+	}
+
+	@Test void finishOneShortRefusesBeforeConstructionAndTheProbeCannotBeRetried() {
+		var fixture = new Fixture(true);
+		try (var operation = operation(fixture.service.probeProfile().ownedCost());
+			var probe = fixture.service.probe(fixture.context, operation).orElseThrow()) {
+			var profile = probe.finishProfile(); fixture.clear();
+			var ledger = new CostLedger(Map.of(WORK, profile.ownedCost().workUnits() + 127));
+			var memory = new RetainedMemoryLedger(64L << 20);
+			try (var admission = new InventoryFluidAdmission(ledger, WORK, memory, InventoryValidationBudget.NONE, InventoryValidationBudget.NONE)) {
+				assertThrows(CaptureLimitException.class, () -> probe.finish(admission));
+			}
+			assertTrue(fixture.calls.isEmpty()); assertEquals(0, fixture.memberChecks); assertEquals(0, fixture.authorityChecks);
+			assertEquals(0, memory.reserved()); assertEquals(0, memory.retained()); assertEquals(0, ledger.used(WORK));
+			assertThrows(IllegalStateException.class, () -> probe.finish(ignored -> fail("single-use probe")));
+		}
+	}
+
+	@Test void finishMemoryRefusalAndCallbackFailureLeaveNoUnchargedMetadataOrTickets() {
+		for (boolean memoryRefusal : List.of(true, false)) {
+			var fixture = new Fixture(true); fixture.count = 8;
+			while (fixture.views.size() < fixture.count) fixture.views.add(new View(fixture));
+			var ledger = new CostLedger(Map.of(WORK, 1_000_000L)); var memory = new RetainedMemoryLedger(64L << 20);
+			try (var admission = new InventoryFluidAdmission(ledger, WORK, memory, InventoryValidationBudget.NONE, InventoryValidationBudget.NONE);
+				var operation = admission.enter(fixture.service.probeProfile());
+				var probe = fixture.service.probe(fixture.context, operation).orElseThrow()) {
+				fixture.clear();
+				if (memoryRefusal) {
+					memory.setCap(memory.reserved());
+					assertThrows(CaptureLimitException.class, () -> probe.finish(admission)); assertTrue(fixture.calls.isEmpty());
+				} else {
+					fixture.after = callback -> { if (callback.equals("underlying")) fixture.membership = false; };
+					assertThrows(InventorySourceUnavailableException.class, () -> probe.finish(admission));
+					assertEquals("underlying", fixture.calls.getLast()); assertEquals(1, fixture.called("underlying"));
+				}
+			}
+			assertTrue(ledger.used(WORK) >= fixture.service.probeProfile().ownedCost().workUnits());
+			assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+		}
+	}
+
+	@Test void changedProbeShapeOrRouteCannotBuildOrRebindTheFinishLayout() {
+		for (String change : List.of("count", "route", "entity", "state", "unloaded", "authority", "tick")) {
+			var fixture = new Fixture(true);
+			try (var operation = operation(fixture.service.probeProfile().ownedCost());
+				var probe = fixture.service.probe(fixture.context, operation).orElseThrow()) {
+				switch (change) {
+					case "count" -> fixture.count = 1;
+					case "route" -> fixture.route = fixture.storage(true);
+					case "entity" -> fixture.entity = new BeehiveBlockEntity(BlockPos.ZERO, fixture.state);
+					case "state" -> fixture.state = Blocks.STONE.defaultBlockState();
+					case "unloaded" -> fixture.loaded = false;
+					case "authority" -> fixture.authority = false;
+					case "tick" -> fixture.server.tick++;
+				}
+				fixture.clear();
+				assertThrows(InventorySourceUnavailableException.class, () -> probe.finish(profile -> nextStage(operation, profile)), change);
+				assertEquals(0, fixture.called("slot")); assertEquals(0, fixture.called("underlying")); assertEquals(0, fixture.called("amount"));
+			}
+		}
+	}
+
+	@Test void closedOperationProbeAndAccessRejectReuseWithoutProviderCallbacks() {
+		var fixture = new Fixture(true); var closed = operation(fixture.service.probeProfile().ownedCost()); closed.close();
+		assertThrows(IllegalStateException.class, () -> fixture.service.probe(fixture.context, closed)); assertTrue(fixture.calls.isEmpty());
+		var operation = operation(fixture.service.probeProfile().ownedCost());
+		var probe = fixture.service.probe(fixture.context, operation).orElseThrow(); operation.close(); fixture.clear();
+		assertThrows(IllegalStateException.class, () -> probe.finish(profile -> fail("closed origin")));
+		assertThrows(IllegalStateException.class, () -> probe.finish(profile -> fail("closed probe")));
+		Access access = fixture.open(); fixture.clear();
+		assertThrows(IllegalStateException.class, () -> access.delegate.valid(closed));
+		assertThrows(IllegalStateException.class, () -> access.delegate.consume(0, entry -> fail("closed operation"), closed));
+		access.close(); access.close();
+		try (var active = operation(access.validationCost())) { assertThrows(IllegalStateException.class, () -> access.delegate.valid(active)); }
+		assertTrue(fixture.calls.isEmpty());
+	}
+
+	@Test void finishCannotSpliceAnIndependentAllowanceIntoTheProbeOperation() {
+		var fixture = new Fixture(true);
+		try (var operation = operation(fixture.service.probeProfile().ownedCost());
+			var probe = fixture.service.probe(fixture.context, operation).orElseThrow()) {
+			fixture.clear();
+			assertThrows(IllegalStateException.class, () -> probe.finish(profile -> operation(profile.ownedCost())));
+			assertTrue(fixture.calls.isEmpty()); assertEquals(0, fixture.authorityChecks);
+			assertThrows(IllegalStateException.class, () -> probe.finish(profile -> fail("already consumed")));
+		}
+	}
+
+	@Test void routeInfoUsesTheConcreteProviderAndFrozenAccessorsNeverRunAuthorityOrNativeCallbacks() {
+		var fixture = new Fixture(true); Access access = fixture.open(); fixture.clear();
+		fixture.authority = false;
+		assertEquals(IPlatformFluidService.TopologyEvidence.PUBLIC_ADDRESS_ONLY, access.delegate.routeInfo().topology());
+		assertEquals(Objects.requireNonNull(fixture.route).getClass().getName(), access.delegate.routeInfo().providerClass());
+		access.layout(); access.alias(); access.slots(); access.stableCursor(); access.validationCost(); access.readCost(); access.observationCost(2);
+		assertTrue(fixture.calls.isEmpty()); assertEquals(0, fixture.authorityChecks); assertEquals(0, fixture.memberChecks);
+		access.close(); assertTrue(fixture.calls.isEmpty());
+	}
+
+	@Test void realCallerAdmissionComposesCallbacksForSmallAndFullNativeShapesAndCleansOwnership() {
+		for (int count : List.of(1, 8, 4096)) {
+			var fixture = new Fixture(true); fixture.count = count; fixture.freshWrappers = true;
+			while (fixture.views.size() < count) fixture.views.add(new View(fixture));
+			fixture.memberCost = new InventoryValidationBudget.Cost(32, 16, 3);
+			fixture.authorityCost = new InventoryValidationBudget.Cost(64, 32, 5);
+			long workLimit = InventorySourceAccess.MAX_SLOTS * nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.workUpperBound(4096);
+			var ledger = new CostLedger(Map.of(WORK, workLimit)); var memory = new RetainedMemoryLedger(64L << 20);
+			InventoryFluidAdmission.Ownership ownership;
+			IPlatformFluidService.Access access;
+			long expectedResolutionWork;
+			try (var admission = new InventoryFluidAdmission(ledger, WORK, memory, fixture.memberCost, fixture.authorityCost)) {
+				OperationProfile finish;
+				try (var operation = admission.enter(fixture.service.probeProfile());
+					var probe = fixture.service.probe(fixture.context, operation).orElseThrow()) {
+					assertEquals(0, fixture.called("slot")); finish = probe.finishProfile(); access = probe.finish(admission).orElseThrow();
+				}
+				expectedResolutionWork = 256 + fixture.service.probeProfile().ownedCost().workUnits() + finish.ownedCost().workUnits()
+					+ 3L * fixture.memberChecks + 5L * fixture.authorityChecks;
+				ownership = admission.retain();
+				assertEquals(fixture.service.probeProfile().retainedBytes() + finish.retainedBytes() + 768, ownership.bytes());
+			}
+			assertEquals(expectedResolutionWork, ledger.used(WORK)); assertEquals(0, memory.reserved()); assertTrue(memory.retained() > 0);
+			try (access; ownership) {
+				var guarded = IPlatformFluidService.guarded(fixture.context, access);
+				fixture.clear(); long before = ledger.used(WORK);
+				try (var admission = new InventoryFluidAdmission(ledger, WORK, memory, fixture.memberCost, fixture.authorityCost);
+					var operation = admission.enter(guarded.validationProfile())) { assertTrue(guarded.valid(operation)); }
+				assertEquals(128 + guarded.validationProfile().ownedCost().workUnits() + 3L * fixture.memberChecks + 5L * fixture.authorityChecks,
+					ledger.used(WORK) - before);
+				fixture.clear(); before = ledger.used(WORK);
+				try (var admission = new InventoryFluidAdmission(ledger, WORK, memory, fixture.memberCost, fixture.authorityCost);
+					var operation = admission.enter(guarded.readProfile())) {
+					assertTrue(guarded.consume(count - 1, entry -> { assertEquals(81_001, entry.amount()); return true; }, operation));
+				}
+				assertEquals(128 + guarded.readProfile().ownedCost().workUnits() + 3L * fixture.memberChecks + 5L * fixture.authorityChecks,
+					ledger.used(WORK) - before);
+				assertEquals(0, memory.reserved()); assertEquals(ownership.bytes(), memory.retained());
+			}
+			assertEquals(0, memory.reserved()); assertEquals(0, memory.retained());
+			assertEquals(workLimit - ledger.used(WORK), ledger.remaining(WORK));
+		}
+	}
+
+	@Test void realCallerFinishFailureKeepsPaidProbeAndAttemptedMetadataButReleasesEveryTicket() {
+		var fixture = new Fixture(true); fixture.nullSlot = true;
+		var ledger = new CostLedger(Map.of(WORK, 1_000_000L)); var memory = new RetainedMemoryLedger(64L << 20);
+		try (var admission = new InventoryFluidAdmission(ledger, WORK, memory, InventoryValidationBudget.NONE, InventoryValidationBudget.NONE);
+			var operation = admission.enter(fixture.service.probeProfile());
+			var probe = fixture.service.probe(fixture.context, operation).orElseThrow()) {
+			assertThrows(InventorySourceUnavailableException.class, () -> probe.finish(admission));
+		}
+		assertEquals(1, fixture.called("slot")); assertEquals(0, fixture.called("amount"));
+		assertTrue(ledger.used(WORK) > fixture.service.probeProfile().ownedCost().workUnits());
+		assertEquals(0, memory.reserved()); assertEquals(0, memory.retained());
+	}
+
+	@Test void currentSourceGateCostFitsDefaultCallerBudgetsAtN1N8AndN4096() {
+		for (int count : List.of(1, 8, 4096)) {
+			var fixture = new Fixture(true); fixture.count = count; fixture.freshWrappers = true;
+			while (fixture.views.size() < count) fixture.views.add(new View(fixture));
+			fixture.memberCost = new InventoryValidationBudget.Cost(8192, 8192, 16384);
+			fixture.authorityCost = fixture.memberCost;
+			long work = InventorySourceAccess.MAX_SLOTS * nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.workUpperBound(4096);
+			var ledger = new CostLedger(Map.of(WORK, work)); var memory = new RetainedMemoryLedger(64L << 20);
+			try (var admission = new InventoryFluidAdmission(ledger, WORK, memory, fixture.memberCost, fixture.authorityCost);
+				var operation = admission.enter(fixture.service.probeProfile());
+				var probe = fixture.service.probe(fixture.context, operation).orElseThrow();
+				var access = probe.finish(admission).orElseThrow()) {
+				var guarded = IPlatformFluidService.guarded(fixture.context, access);
+				try (var validation = admission.enter(guarded.validationProfile())) { assertTrue(guarded.valid(validation)); }
+				try (var read = admission.enter(guarded.readProfile())) { assertTrue(guarded.consume(count - 1, entry -> true, read)); }
+				assertTrue(memory.reserved() < 64L << 20); assertTrue(ledger.remaining(WORK) > 0);
+			}
+			assertTrue(ledger.used(WORK) > 0); assertEquals(0, memory.reserved()); assertEquals(0, memory.retained());
+		}
 	}
 }
