@@ -2,9 +2,9 @@
 
 This topic owns the inventory domain of the versioned presentation subsystem:
 preview, tracking, incremental reads, detached snapshot capture and schema,
-item-variant identity, zero and component-fallback rules, budget and sync policy,
-and source recovery deadlines. The generic mechanism —
-source access, capture results, cost accounting, and sync publication — is
+item and fluid variant identity, exact quantities, zero and identity-fallback
+rules, budget and sync policy, and source recovery deadlines. The generic
+mechanism — source access, capture results, cost accounting, and sync publication — is
 owned by [shared sources](shared_sources.md). The reason a tracked inventory
 keeps the live Ping and original target identity instead of a source-instance
 generation is recorded in
@@ -28,7 +28,8 @@ explained by
 Coverage scope and pending runtime evidence for the ordinary-block and
 provider-confirmed external preview and tracking, item-choice create and native
 input/HUD seams are owned by
-[testing and verification](../../testing/verification/inventory.md). Wire routes
+[testing and verification](../../testing/verification/inventory.md), including
+[fluid inventory coverage](../../testing/verification/inventory.md#fluid-inventory-coverage). Wire routes
 and message families are owned by
 [network protocol](../network/protocol.md); persisted keys and formats are owned
 by the configuration topics.
@@ -36,6 +37,36 @@ Marker lifetime remains owned by
 [marker lifecycle](../authority/marker_lifecycle.md), target identity by
 [target model](../identity/target_model.md), and mod-specific providers by
 [Create integration](../../integrations/create.md).
+
+## Resource lanes and scope
+
+The inventory domain has two closed resource lanes, `ITEM` and `FLUID`. One
+preview request opens both authorized lanes for the same frozen target and face;
+it does not open a second target or session for fluid. Each lane has its own
+field authorization, source binding, status, baseline, revisions, checksum,
+completion barrier and historical publication proof. Equal registry IDs, opaque
+entry keys or baseline numbers in different lanes never identify the same data.
+Revoking, invalidating or repairing one lane cannot clear or complete the other.
+The shared request, commit replay and close boundary is owned by
+[network protocol](../network/protocol.md#inventory-previewtracking-route-inventory-v2),
+and field declarations by
+[presentation snapshot](presentation_snapshot.md#dedicated-delivery-adapters).
+
+A selection creates one marker tracking one resource identity, not a marker
+containing both lanes or a staged selection set. The common preview, handoff,
+bootstrap, complete-only absence-zero, publication and recovery rules below
+apply independently to either lane. The item component and display sections
+remain item-specific; fluid identity and display are owned by
+[fluid variants and quantities](#fluid-variants-and-quantities). Certified
+observation pools are item-only; fluid keeps exact owner/face isolation and
+fresh observation eligibility under [shared sources](shared_sources.md#observation-eligibility-and-sharing).
+
+Fluid access covers static block storage through the supported loader storage
+or handler route. It adds no cauldron reader, moving-structure storage reader,
+entity/private-inventory context or new Target Type. A provider-confirmed
+external block remains eligible only in the already supported target contexts;
+the [Sable binding](../../integrations/sable.md#server-information-sampling)
+does not enable moving or otherwise unsupported storage by itself.
 
 ## Source identity, invalidation and recovery
 
@@ -90,6 +121,8 @@ and a later observation starts afresh under the clean baseline and revision
 fences rather than the changed view completing as if continuous. Invalidity is
 separate from the ordinary marker lifetime and never removes, shortens or
 extends it.
+The external-provider paragraph below identifies the narrow updating transition
+that does not take this invalidation path.
 
 Recovery probing and polling are allowed before the hard deadline. Recovery
 keeps the existing Ping ID, advances the inventory status revision, and
@@ -119,14 +152,17 @@ External providers keep their established stable target IDs, leases and removal
 rules. The ordinary-block replacement tolerance neither extends nor revives an
 expired external lease, and it does not rewrite target identity globally. A
 committed source whose tracking point moved or whose member topology changed
-invalidates the old observation; recovery re-resolves the provider scope and a
-wrong sub-level or tracking point is rejected rather than adopted, and the
-fresh baseline preserves the marker, its hard expiry and the current lease.
+invalidates the old observation, except for the separately owned
+[Sable fluid sub-level transition](../../integrations/sable.md#fluid-sub-level-transition).
+Recovery re-resolves and reauthorizes the current provider-confirmed binding;
+an arbitrary wrong sub-level or tracking point is rejected rather than adopted.
+Ordinary recovery uses a fresh baseline and complete observation, never the old cut or
+retired seed, and preserves the marker, its hard expiry and the current lease.
 Entity and private-inventory contexts require their own owning contract.
 
 ## Certified Tracking observation pools
 
-Certified native Preview and Tracking use independently authorized associations
+Certified item Preview and Tracking use independently authorized associations
 to a shared physical observation from its creation, under every partition-policy
 combination. They may pool across exact bindings only when
 the provider certifies an identical ordered read graph. The initial supported
@@ -243,7 +279,8 @@ identity, which must not be equated with a Ping or with the inventory snapshot
 identity. A preview request binds to one bounded server target at open time and
 never changes that target; the authoritative target is derived server-side, and
 no player identity or client-selected item count travels on the request. The
-server assigns bounded opaque entry keys scoped to the request, not item IDs.
+server assigns bounded opaque entry keys scoped to the request and resource lane,
+not resource registry IDs.
 Opening the request runs the existing authority gates plus nonallocating
 provider validation for an external candidate; it creates no marker identity,
 provider reference or tracking state and resolves no marker group key. The
@@ -262,12 +299,12 @@ are revalidated through metadata checks, the selection reference and annotation
 are checked, and retained memory is admitted before the tracking lease is
 stored. Any failure releases the acquired reference and stores nothing.
 
-Selection expresses intent to track the selected item at an authorized source,
+Selection expresses intent to track the selected resource at an authorized source,
 not proof that its previously observed slot still contains it. Ordinary input
 and output may empty that slot between preview and selection while the source,
 binding and selected identity remain valid. Searching other slots at creation
-would not turn a changing inventory into a fixed snapshot. No item-presence
-witness, additional item-content getter, fallback search or asynchronous
+would not turn a changing inventory into a fixed snapshot. No resource-presence
+witness, additional content getter, fallback search or asynchronous
 selection deadline is part of this handoff.
 
 The tracking lease keeps the committed input and one detached selected value as
@@ -286,9 +323,9 @@ can project the inventory selection kind
 from this existing tracking association rather than a second chat metadata
 cache.
 
-A submitted single-item selection creates a new Ping immediately; items are
-never accumulated into a staged multi-item selection, and the selector release
-and stay-open timing that submits that selection is owned by
+A submitted single-resource selection creates a new Ping immediately; resources
+are never accumulated into a staged multi-resource selection, and the selector
+release and stay-open timing that submits that selection is owned by
 [wheel](../picking/wheel.md#inventory-list).
 The create passes the existing marker-admission authority and gates owned by
 [target validation](../authority/target_validation.md). The server resolves the
@@ -297,15 +334,15 @@ baseline/state fences. A forged, missing, retired, cross-request or
 known-invalidated reference rejects; a missing retained count is not zero.
 An exact reference takes only its exact key's current server-retained count;
 an aggregate reference takes only the current folded key's count, never a
-different item-ID subtotal or a retired exact entry. The preview may still be
+different resource-ID subtotal or a retired exact entry. The preview may still be
 partial, and the retained count may be newer than the last row delivered to the
 client. No client-screen quantity authorizes the seed. Current target, source,
 owner/face binding, read permission, annotation, rate, channel, audience,
-selection-capacity and memory gates still apply. Item absence at the old
+selection-capacity and memory gates still apply. Resource absence at the old
 observed slot does not veto an otherwise valid selection: the complete tracking
 observation decides the subsequent count. The new Ping's whole-marker type is the
 frozen Target Type's default Ping Type; the chosen Ping Type travels as a
-separate item annotation rather than as the whole-marker type. The item
+separate resource annotation rather than as the whole-marker type. The item
 annotation's eligible Ping Type set is the target's effective
 [property Ping Type policy](presentation_snapshot.md#property-ping) plus one
 known [`take`](../identity/catalogs.md#ping-type-values) entry when the target's
@@ -314,13 +351,15 @@ selection, keeps the property policy unchanged and never acquires `take`. The
 client's item menu derives its eligible set from the accepted registry's actual
 tags, while the server decides the annotation's allowance from the actual
 provider-confirmed physical block and its live tags, so a client-expected
-registry or a merely claimed tag never authorizes the annotation. The
-annotation initially displays the selected server-retained count as updating;
+registry or a merely claimed tag never authorizes the annotation.
+Fluid annotations use only that ordinary property Ping Type policy, with no
+chest-only `take` addition. The resource annotation initially displays the
+selected server-retained quantity as updating;
 the first complete tracking result follows the rules in [Tracking](#tracking).
 
-The first batch is sorted by count immediately rather than after the scan
-finishes. Newly discovered batches may reorder entries only before the user has
-scrolled vertically; once scrolling has occurred, existing rows stay fixed and
+Within each resource group, the first batch is sorted by quantity immediately
+rather than after the scan finishes. Newly discovered batches may reorder
+entries only before the user has scrolled vertically; once scrolling has occurred, existing rows stay fixed and
 new batches are appended after being sorted internally. A pure count change
 never reorders an open list; reopening sorts the discovered data. Rows with
 count zero are not removed.
@@ -348,17 +387,17 @@ component identity must work in both.
 ## Tracking
 
 Tracking is a baseline snapshot plus an absolute stream of the Ping's selected
-items, not a continuous copy of the whole inventory. Normal tracking reads whatever
-slots its selected keys require, which may be a full sweep, and publishes only
-the selected keys; an incomplete scan must not claim a total for a selected
-key. The only full-ID exception is the component-fallback aggregate, whose
+resource, not a continuous copy of the whole inventory. Normal tracking reads
+whatever slots its selected keys require, which may be a full sweep, and
+publishes only the selected keys; an incomplete scan must not claim a total for a selected
+key. The only full-ID exception is the identity-fallback aggregate, whose
 permission and completeness rules are owned below.
 
 ### Selected-preview bootstrap
 
-A successful single-item selection retains only its selected identity, bounded
-display and authoritative long count independently of the preview. Closing the
-preview releases its ownership of the catalogue, journal and unselected values
+A successful single-resource selection retains only its selected identity,
+bounded display and authoritative long quantity independently of the preview.
+Closing the preview releases its ownership of the catalogue, journal and unselected values
 without losing this seed. The preview subtotal reflects what the preview has
 observed, not what the complete tracking observation will find. The seed is
 provisional presentation history, not a `CaptureResult`, completed observation,
@@ -374,7 +413,7 @@ are checked again after creation callbacks and before retained data sends.
 Marker storage, sidecar installation, Basic notification and the correlated
 selection outcome remain synchronous. Seed quantities wait for the next
 eligible normal publication tick and its current budgeted source validation;
-`SELECT` does not drain queued item data. An unknown, duplicate or other valid
+`SELECT` does not drain queued resource data. An unknown, duplicate or other valid
 selection cannot release an older queued seed using an earlier same-tick
 authority approval. This adds no per-packet content getter or global authority
 refresh loop, and byte, queue or memory pressure may delay delivery further.
@@ -385,13 +424,14 @@ pending-selection or cancellation state added by the bootstrap.
 Tracking starts with its own zeroed cursor and accumulators. Certified active
 admission follows the [pool rules](#certified-tracking-observation-pools), so the
 first complete result may legitimately include pre-creation slot observations.
-Other routes retain their fresh observation floor. Neither route continues the
-Preview consumer's cursor, adds the seed to a scan total, or fabricates capture
-evidence from it. While this first scan is partial, the seed remains the displayed
+Fluid and other noncertified routes retain their fresh observation floor.
+Neither route continues the Preview consumer's cursor, adds the seed to a scan
+total, or fabricates capture evidence from it. While this first scan is partial,
+the seed remains the displayed
 quantity, not its partial accumulator. The first complete usable scan explicitly
-supersedes the seed at a newer item revision, even when the counts are equal,
-including equal aggregates. If the selected item is absent it publishes zero;
-this does not delete the marker or change its lifetime. Completed native and
+supersedes the seed at a newer resource revision, even when the quantities are
+equal, including equal aggregates. If the selected resource is absent it
+publishes zero; this does not delete the marker or change its lifetime. Completed native and
 generic results retain the quality rules in [Status presentation](#status-presentation).
 
 Transport installation of every part of a seed baseline is distinct from source
@@ -510,6 +550,17 @@ admitted cut; a heartbeat uses delivered evidence rather than the latest offer.
 This ownership pins source metadata, not the shared journal or catalogue. The
 bootstrap uses its own admitted metadata evidence without another item getter
 or retained preview round.
+
+Fluid proofs use the bounded
+[weak identity evidence](shared_sources.md#weak-historical-identity-evidence)
+without retaining external live access. `SAME` permits continuation only through
+the normal current validation gates. `CHANGED` within the same scope takes the
+ordinary [invalidation and recovery path](#source-identity-invalidation-and-recovery).
+`UNVERIFIABLE` makes the old proof unusable and requires proof reconstruction
+before it can support success; it is neither a permanent defer nor an empty
+result. Only an actual budget shortage may defer that work. Scope transitions
+follow the provider's separate continuity contract rather than a weak match
+authorizing a new scope.
 
 Every quantity-bearing frame, including a provisional seed, and every
 success-bearing completion, checksum or heartbeat receives a fresh owner/source
@@ -769,6 +820,75 @@ bootstrap is the separate retained display policy above; tracking totals,
 absence-derived zero and completion still require the complete usable sweep
 defined above. Completion quality is owned by [status presentation](#status-presentation).
 
+## Fluid variants and quantities
+
+### Native identity and exact amount
+
+Fluid identity is the fluid registry ID and the complete bounded native
+persistent variant encoding, excluding its amount. Fabric and NeoForge use the
+actual explicit persistent component patch, preserving persistent additions and
+removals rather than substituting an effective/default map. Forge 52.0.2 uses
+its native variant NBT. Native normalization is respected; exact identity does
+not promise preservation of hidden runtime state outside that persistent form.
+Canonicalization and collision checks operate on an owned, guarded copy, not on
+a truncated tree or a provider-supplied digest.
+
+The common authoritative unit is a non-negative signed `long` quantity `U`,
+where `1 U = 1/81,000 bucket`. Fabric Transfer fluid storage uses that unit
+directly. Forge and NeoForge handler millibuckets convert with checked
+`mB × 81`; Forge's native amount is an integer millibucket value. All sums are
+checked as well. Negative amounts, a failed getter, conversion overflow or sum
+overflow cannot produce an exact published quantity, saturation, wraparound,
+zero or an All variants substitute. A complete total that cannot be represented
+remains unusable rather than becoming a completed quantity.
+
+Only refusal of complete safe identity encoding, after a trustworthy fluid ID
+and amount are available, permits grey All variants mode. Unfamiliar registered
+persistent types alone do not require folding. Display refusal does not change
+exactness. Fluid applies the existing
+[aggregate-fold lifecycle](#identity-refusal-and-aggregate-folding) to its own
+fluid-ID group: folds, retired references and replacement totals remain
+lane-local. It never combines an item-ID group with an equal fluid ID. A
+capacity or resource refusal is not permission to claim a completed aggregate.
+
+### Fluid display projection
+
+The server sends a bounded display projection separate from native identity:
+`{"version":1,"id":"namespace:fluid","name":"literal name"}`, with optional
+`name`. The required integer `version` token is exactly `1`, and `id` must equal
+the containing fluid entry's registry ID. Unknown or duplicate fields, wrong
+types, unsupported versions, malformed Unicode, nested values and trailing
+input are refused. `name` is bounded nonblank plain text, without controls or
+formatting codes; a string resembling JSON stays literal and is never reparsed
+as a component. Unsupported native naming data may be omitted independently of
+identity. The whole projection and its optional name retain finite UTF-8 byte
+bounds and the negotiated per-entry display ceiling.
+
+No native component/NBT payload, rich-text document, texture instruction or
+variant tint is a display capability. The client resolves a base-fluid icon
+through its own fluid registry/render facilities, never through an ItemStack or
+a bucket-item substitution. This does not promise a variant-specific icon.
+Missing, malformed, mismatched or unknown display data uses safe fallback text
+and an empty icon without changing the exact identity, amount, aggregate mode,
+revisions or selection reference. Localized names and content-message
+composition are owned by [names and chat](../rendering/names_chat.md#content-message-family).
+
+### Quantity presentation
+
+The inventory list, tracking HUD and content chat use the same fluid formatter.
+Small amounts prefer integer `mB`: `81 U` is `1 mB`, and zero is `0 mB`.
+A positive amount below `81 U` is shown as `<1 mB`, not rounded to zero.
+For other amounts, units switch automatically between millibuckets and buckets
+for readability. A conversion, rounding or abbreviation that loses information
+is marked approximate; display precision never replaces the authoritative
+`long U` value or enters a selection, checksum or sum as a `double`.
+
+Larger quantities retain at least six significant digits where available and
+use locale-appropriate `K`/`M`/`B` or `万`/`亿`/`万亿` abbreviations. The Latin `B`
+means billion and is disambiguated from the bucket unit. Descriptive names and
+annotation text yield space before the quantity or its exact/approximate and
+sub-millibucket indicators are truncated.
+
 ## Detached snapshot capture and schema
 
 Explicit bounded inventory-only adapters may offer detached snapshots instead
@@ -831,6 +951,14 @@ accounting. Quota identity is preview-client for preview and target for
 tracking, and neither is multiplied per recipient. The server-authoritative
 per-client and global send-byte multipliers scale the byte allowances; they are
 server settings, not a client display scale or UI preference.
+
+Both resource lanes run inside one inventory runtime and share its global
+physical-address, provider-work, processing, memory, queue and wire ledgers.
+Opening fluid does not duplicate any global allowance. Existing slot and variant
+settings count the corresponding fluid address visits and variant categories as
+well; resource kind distinguishes categories, but does not create a second
+per-client, per-target or server quota. An empty or throwing fluid address visit
+is paid, and sharing physical work does not waive logical consumption.
 
 For tracking, target means the marker's frozen logical key. Active selected
 variant capacity, logical slot consumption (`TrackingSubject`) and each
@@ -907,6 +1035,12 @@ resolution and follows the operation through nested discovery, validity,
 member, mapping and read checks. It is not reset at each helper or item.
 Attempted work remains paid after denial, a defer or an exception; unused
 admission is released without refunding work already attempted.
+Staged fluid-port admission follows
+[shared operation accounting](shared_sources.md#cost-accounting), rather than
+reserving one opaque worst-case provider cost for every operation. Page size is
+also limited by the source work remaining in the actual caller grant, not only
+by the physical-address allowance. Refusal preserves the paid cursor and cannot
+be repaired by creating a second runtime or resetting an inner allowance.
 Owned item processing and audited calls obey the pre-copy, encoding and hashing
 admission boundary owned by
 [shared accounting](shared_sources.md#cost-accounting). The explicit generic
@@ -1039,7 +1173,7 @@ semantics are owned by
 
 ## Provider layer and safety
 
-The provider layer covers the vanilla container and worldly-container contracts,
+The item provider layer covers the vanilla container and worldly-container contracts,
 Fabric Transfer item storage and inventory storage, the Forge item handler, and
 the NeoForge item handler. Create's Vault is a separate NeoForge-only member
 provider over the tested Vault structure; it preserves per-member segmentation,
@@ -1047,6 +1181,38 @@ variant identity and a canonical controller alias rather than aggregating by
 registry ID, and its version, loaded-member, controller-alias and
 per-member-layout rules are owned by
 [Create integration](../../integrations/create.md#vault-inventory-provider).
+
+Fluid providers use Fabric Transfer `FluidStorage` or the Forge/NeoForge
+`IFluidHandler` capability through a common read-only boundary. Resolution is
+metadata-only: no full block-entity save, content getter, eager snapshot or
+mutation transaction discovers a fluid route. Bounded indexed routes traverse
+current native tank/view addresses incrementally; cursorless providers use a
+bounded one-pass enumeration and cannot invent cross-tick continuation. Borrowed
+native fluid data is frozen synchronously before another metadata callback,
+then source and provider postchecks must pass before it becomes usable evidence.
+The native [mixed-time sweep boundary](#native-incremental-reads) applies to
+movement between fluid addresses as it does to item slots.
+
+Every fluid lookup, held-handler read and publication rechecks the original
+root/member identities, expected registry, current route and topology, owner
+authority, loaded scope and frozen real face. Historical identity evidence is
+non-owning; it does not preserve an old handler as a content-read route. Equal
+count or capacity is not a certificate of unchanged addressing. Generic opaque
+providers can detect only changes exposed by their public native identities,
+route, address count and capacity metadata. A matching weak witness does not
+make a hidden same-identity, same-capacity remap detectable. Generic
+compatibility remains available under that explicit limitation, with an
+accurate INFO notice deduplicated per server lifetime and provider class; it is
+not certified pooling or atomicity. Notice content and failure isolation follow
+[diagnostics and logging](../logging.md).
+
+Fabric may reacquire a new public wrapper for the same stable native underlying
+storage when bounded validation establishes that continuity. Reads use the
+current wrapper, not a retained old view, and this grants no new face, member
+scope or permission. A merge, detachment or changed underlying mapping
+invalidates the old observation. Create's specialized tank gates and controller
+quantity ownership are owned by
+[Create](../../integrations/create.md#fluid-tank-inventory-provider).
 
 Audited adapters preserve the selected face, ordered member and segment-local
 slot layout, and the provider's authoritative long amount independently of an
@@ -1102,8 +1268,9 @@ empty result.
 A provider-confirmed external candidate uses the same frozen local face, one of
 the six block directions, and never an unsided or look-inferred direction. Its
 membership scope is resolved fresh for each operation and is never retained
-across ticks; a stale or cross-tick predicate, a moved source or a changed
-member topology makes the source invalid rather than read. Every supported
+across ticks; a stale or cross-tick predicate never authorizes a read. Source
+movement and topology transitions follow the
+[recovery contract](#source-identity-invalidation-and-recovery). Every supported
 loader's capability route is entered only under that same frozen local face,
 and a capability read is re-checked against the current membership scope, so a
 revoked member or handler is unavailable rather than read.
@@ -1137,7 +1304,7 @@ The same safety rules apply to recovery probing.
 
 ## Status presentation
 
-Inventory status is presented separately from item data: updating, unknown,
+Inventory status is presented separately from resource data: updating, unknown,
 uncertain, incomplete, unavailable, invalid, All variants, and expired
 are distinct states with their own semantics. An inventory with no stable
 cursor that cannot finish enumerating within its admitted hard budget ends as
@@ -1147,9 +1314,11 @@ small container without a cursor may still complete within budget.
 Tracking lifecycle labels and identity qualifiers are independent: All variants
 must not hide updating, incomplete or invalid. Bounded HUD text reserves space
 for those indicators and preserves the entire decimal quantity as one localized
-field; shortening descriptive item names or annotation wording must not cut
-digits from the count. Localized quantity and annotation grammar may place the
-count or item on either side. Initial display and grey failure history follow
+field for items; shortening descriptive names or annotation wording must not cut
+digits from the item count. Fluids follow the shared
+[quantity presentation](#quantity-presentation) contract instead of the full
+decimal item-count rule. Localized quantity and annotation grammar may place the
+quantity or resource on either side. Initial display and grey failure history follow
 the [bootstrap policy](#selected-preview-bootstrap).
 Provisional quantities do not complete an inventory chat receipt: the existing
 [content receipt policy](../rendering/names_chat.md#content-receipt-lifecycle)

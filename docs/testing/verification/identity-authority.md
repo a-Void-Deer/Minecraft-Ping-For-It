@@ -55,7 +55,7 @@ Marker-store, packet, and update tests provide recipient-scoped state and
 channel-mode transport seams, but do not establish the complete `ServerCore`
 ordering and channel/admission matrix in a live client/server path. Loader
 registration of the channel-update, rate-policy, presentation-v2,
-server-presentation-policy-v1, inventory-v1, presentation-preview-v1, and
+server-presentation-policy-v1, inventory-v2, presentation-preview-v1, and
 server-configuration-v5 routes is confirmed by source inspection for Fabric,
 Forge, and NeoForge. `ModIdentityTest` pins the fork identity and all thirteen
 registered packet IDs in the fork namespaces; focused packet tests pin the

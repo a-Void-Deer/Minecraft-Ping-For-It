@@ -23,15 +23,80 @@ establish that they passed; the completed integration run and remaining live
 verification gaps are scoped
 [below](#patch-only-identity-and-display-verification-pending).
 
+## Fluid inventory coverage
+
+The confirmed [resource-lane contract](../../architecture/presentation/inventory.md#resource-lanes-and-scope),
+[fluid identity/display/quantity contract](../../architecture/presentation/inventory.md#fluid-variants-and-quantities),
+[staged operation accounting](../../architecture/presentation/shared_sources.md#cost-accounting),
+[Create tank gates](../../integrations/create.md#fluid-tank-inventory-provider)
+and [Sable fluid transition](../../integrations/sable.md#fluid-sub-level-transition)
+have passing headless coverage in code input `628c033b`, including the approved
+[weak historical evidence](../../architecture/presentation/shared_sources.md#weak-historical-identity-evidence).
+The 2026-11-02 [final combined-tree record](build-checks.md#fluid-inventory-final-combined-tree-verification)
+owns the exact input, command, fresh/reused task results, counts and expected
+Common-only skips. Pending live checks are listed in the
+[fluid inventory manual scenarios](manual-integration.md#fluid-inventory).
+
+Committed foundation assertions in `InventoryResourceFoundationTest` cover
+exact unit conversion and checked arithmetic, lane/owner/face identity
+separation, amount/display independence from exact identity, identity refusal
+and checksum domain separation including empty cuts. `InventoryFluidCodecTest`
+uses an independent binary literal above double precision, truncation and
+malformed-input cases, detached display bounds and codec isolation.
+`InventoryV2LaneTest`, `InventoryC2SPacketTest`, `InventoryS2CPacketTest` and
+`InventoryPresentationTest` exercise resource tags, strict route/grammar
+boundaries and independently authorized fields. `ClientDedicatedDeliveryTest`
+additionally covers schema-two advertisement, both accepted catalogue fields
+and old-inventory-schema exclusion while Basic creates and updates still work.
+`PlatformFluidServiceContractTest` exercises the absent-service fallback,
+indexed blank visits, bounded observer completion, pre-callback refusal and
+nonrefundable attempts; it does not execute native loader capabilities.
+
+`InventoryFluidDisplayCodecTest` has nine committed methods for the independent
+versioned literal, writer/reader agreement, expected-fluid fence, optional name,
+UTF-8/Unicode and complete-document bounds, unknown/duplicate fields, wrong
+types/versions, malformed/deep/trailing input and forbidden native/rich-text/icon
+instructions. Its identity and selection controls preserve exact long amounts
+and keys through display refusal. These are native-free grammar/codec assertions,
+not server native-name extraction, installed fluid rendering or end-to-end
+receipt evidence.
+
+The matrix records automated coverage on that final input.
+
+| Acceptance surface | Passing automated evidence and boundary |
+| --- | --- |
+| Shared request and independent lanes | `InventoryResourceLanesTest`, `InventoryResourcePublisherTest`, `InventoryV2LaneTest` and `ClientInventoryLanesTest`: shared open/close/replay, independent policy/baseline/completion/checksums, cross-lane token/control rejection, lane-local denial/recovery and sibling continuity. |
+| Runtime and quota composition | `InventoryFluidRuntimeTest` and `InventoryResourceLanesTest`: one journal/runtime/global ledger, shared physical/logical consumption, paid failed visits, bounded catalogue/retained evidence, exact owner/face isolation, cursorless incompleteness and cleanup; no fluid pool. |
+| Fluid port and shared admission | `FluidPortLifecycleTest`, `InventoryFluidAdmissionTest`, `InventoryValidationAdmissionTest` and `InventoryFluidWorldTest`: staged admission and real caller grants, source-remaining limits, no double boundary charge, normal/nested/sequential and abnormal close orders, each owner's attempted work settled once, refusal/overflow and ticket/workspace cleanup. `InventoryFluidRouteDiagnosticsTest` covers INFO deduplication. |
+| Weak cross-acquisition proof and history | `FluidAddressWitnessTest`, `InventoryFluidWorldTest` and `InventoryFluidScopeFramesTest`: hostile native equality/hash callbacks, schema/order/length differences, deterministic clearing, admitted initial capture, comparison without recapture/content reads, closed external access and original-proof ownership through retained publication. Changed/cleared evidence rejects old cuts; fresh scans recover without permanent defer, false zero or old-proof revival. |
+| Non-owning server context | All five `InventoryFluidServerContextTest` cases: a stable source-owned non-native facade, no owning graph path to server/level/member/Access/Context/closures, deterministic server-reference clearing, current-level loss, post-getter failure, fresh-source recovery and authorized scope-only recomputation. This is deterministic headless ownership evidence, not live GC measurement. |
+| Native provider safety | Each loader's `PlatformFluidServiceTest` covers current native metadata/witnesses, face/member/owner gates and provisional getter postchecks. `InventoryFluidLoaderIntegrationTest` crosses actual loader adapters/APIs with recording fixtures: equal detached layout cannot hide replacement routes or Fabric address reordering; cleared original witnesses retire and a fresh scan recovers. The same scenarios run on each loader classpath, not a loader launch. |
+| Identity, amount and selection | `InventoryResourceFoundationTest`, `InventoryFluidCodecTest`, `InventoryFluidFreezerTest` and `InventoryResourceLanesTest`: persistent variant identity, exact checked long amounts, identity/display refusal separation, overflow/getter failure without completed zero, provisional selected seed and permanent retirement on real invalidity. |
+| Publication, client and receipt | `InventoryFluidScopeFramesTest`, `ClientInventoryLanesTest`, `PendingContentChatControllerTest` and `ClientPingRuntimeContentReceiptTest`: final source checks, multipart barriers/repair, history-only quantities, complete-only receipt and exactly-once emission. Unknown-kind denial/history coverage is detailed below; it is no longer a pending implementation item. |
+| Fluid presentation | `ClientFluidDisplayTest`, `InventoryFluidDisplayCodecTest`, `InventoryQuantityFormatTest`, `InventoryListModelTest` and content-receipt fixtures cover literal/base-fluid projection, display refusal isolation, grouped ordering, exact quantity/approximation boundaries and composed content. GPU icons, native font fitting and narrow-window layout remain unverified. |
+| Create | `CreateFluidTankArchiveTest`, `CreateFluidTankMetadataTest` and `CreateFluidTankAccessTest`: tested-version/archive gates, controller/member/scope/mode checks, controller-only frozen-face reads, denied creative/boiler/virtual routes without fallback, shape/capacity admission, topology/handler replacement and postchecks. These are archive/headless seams, not installed Create gameplay. |
+| Sable membership and fluid-only transition | `ExternalBlockMembershipTest` and `SablePhysicalMembershipTest` cover positive/negative/unknown physical membership. `InventoryFluidWorldTest`, `InventoryFluidScopeFramesTest`, `InventoryFluidServerContextTest` and `ClientInventoryLanesTest` cover continuous scope-only `UPDATING` with retained quantity, fresh complete replacement, old-cut/seed/partial fencing, and real failure/expiry controls. Simultaneous scope/identity/layout change still invalidates. Installed Sable remains pending. |
+| Formal regression/build | Completed on the identified final input; exact execution and loader-native skip handling belong to the linked build record. |
+
+The unknown receipt-kind gap is closed by
+`ClientInventoryLanesTest.unknownKindReceiptDenialRequiresEveryLaneToBeExplicitlyDeniedInTheCurrentView`
+and `denialHistoryStartsAtMembershipAndCannotBeClearedByRefreshOrReallow`, plus
+`ClientPingRuntimeContentReceiptTest.allLanesDeniedBeforeFirstTrackingCancelsAnUnknownKindReceiptPermanently`,
+`unknownKindWithOnlyUnrelatedItemDenialStillWaitsForTheAuthorizedFluidLane` and
+`delayedKindBindingCancelsOnlyTheLaneDeniedSinceAcceptedMembership`.
+They exercise all-lane versus unrelated-lane denial before kind discovery,
+membership/view-scoped denial history, refresh/reallow non-resurrection and
+authorized fluid completion through the packet-dispatched runtime.
+
 ## Inventory preview and tracking foundation
 
 Headless test-source assertions cover the preview route and its supporting
 models. `InventoryC2SPacketTest` and `InventoryS2CPacketTest` cover
-the version-one request and response codec round trips, bounded text and frame
+the version-two request and response codec round trips, bounded text and frame
 limits, corruption rejection, part-range and duplicate-key rejection, the
 status values, and an unsupported protocol value or a previous version-four
-frame rejected on the version-one route; the
-version-one `OPEN` grammar round-trips a native block or an
+frame rejected on the version-two route; the
+version-two `OPEN` grammar round-trips a native block or an
 uncommitted external candidate with its exact locator, classification and face,
 and rejects a committed external, entity or location target, a wrong protocol
 version, overlong or non-canonical fields, and trailing bytes. `OFFER` period
@@ -53,8 +118,8 @@ packet, and a failed write preserves the existing destination bytes and
 indices.
 
 `InventoryC2SPacketTest` decodes an independent golden literal `RESYNC` and
-compares the writer byte-for-byte with it, fixing the retained version-one
-header, request long, true presence byte and marker long. Zero request ID is
+compares the writer byte-for-byte with it, fixing the version-two
+header, explicit ITEM lane, request long, true presence byte and marker long. Zero request ID is
 accepted; a missing marker is corrupt and rejected before any write mutates the
 destination. Literal mutations reject false and noncanonical presence bytes,
 missing presence and every marker truncation, a negative request ID, and
@@ -84,7 +149,7 @@ unavailable `null`, preserving exact long counts, revisions and selection keys
 without setting the aggregate flag.
 
 `InventoryChecksumsTest` covers the entry checksum model.
-`InventoryStrictDecodeTest` covers the strict version-one `OPEN` grammar on
+`InventoryStrictDecodeTest` covers the strict version-two `OPEN` grammar on
 raw frames plus raw overflowing request/response frame
 numbers and strict helper rejection of overflowing or noncanonical varints and
 overflowing varlongs; it is codec coverage, not transport or admission evidence.
@@ -596,8 +661,8 @@ beyond the absolute bound is rejected before encoding, a wide display length is
 checked against the bound and the remaining input before allocation, the
 empty/null/trailing rules are unchanged, and inventory values stay isolated to
 the adopted version-one codec identity while a differently versioned
-descriptor is rejected. `ClientInventoryV2Test` keeps
-its historical class name and covers the version-one client preview channel:
+descriptor is rejected. `ClientInventoryV2Test` covers the version-two client
+preview channel:
 an external candidate captured with a real press-time face is sent verbatim
 with its provider locator and classification and no physical block is invented,
 a capture without a real face or a committed external, entity or location
@@ -1982,6 +2047,10 @@ Live timing and multiplayer repair remain pending in the
 
 ## Known automated gaps
 
+- live loader/Mixin application, GPU/font/UI and narrow-window rendering,
+  multiplayer/mixed-version handshakes, installed Create/Sable/Refined Storage,
+  manual gameplay and CPU/TPS/GC/allocation measurements remain pending in the
+  [fluid inventory manual scenarios](manual-integration.md#fluid-inventory);
 - the passing certified-pool, successor and final-handoff fixtures above remain
   headless evidence. Live two-owner/chunk/lock/topology changes, installed
   tested-version Create and mixed configuration protocols still require the

@@ -337,6 +337,32 @@ explicit snapshot capture, recovery, budget and
 variant semantics remain owned by
 [inventory preview and tracking](../architecture/presentation/inventory.md).
 
+## Fluid tank inventory provider
+
+The NeoForge fluid inventory route is independent of the disabled-by-default
+registry-ID `create:fluid.summary` field. It uses the ordinary NeoForge block
+fluid-handler capability only after the Create-specific tested-version and
+metadata gates, and shares the
+[inventory fluid contract](../architecture/presentation/inventory.md#fluid-variants-and-quantities).
+The existing NeoForge and tested Create version strategy remains the gate;
+this route adds no Fabric/Forge Create integration or version upgrade.
+
+Before capability or content access, verify the loaded root, controller and
+every member, their current objects and controller relationships, positive
+physical scope membership, and the supported static, nonvirtual tank mode.
+The original hit must belong to the verified structure. Creative tanks and
+active-boiler input handlers are unavailable; a rejected Create route cannot
+fall through to a generic handler. Recheck current controller, member, mode,
+owner and loaded-scope authority during reads and publication. Structure
+merge, split, detachment or controller/mode changes retire old observations
+under [inventory recovery](../architecture/presentation/inventory.md#source-identity-invalidation-and-recovery).
+
+Read only the verified controller's fluid-handler quantity. Members establish
+topology and authority, not additional copies to sum. Every capability lookup
+uses the frozen real face; the summary adapter's unsided sampling semantics do
+not authorize this route. This provider supplies no fluid observation-pool
+certificate or atomic snapshot promise.
+
 ## Create block presentation resolvers
 
 ### Vault logical target and presentation topology

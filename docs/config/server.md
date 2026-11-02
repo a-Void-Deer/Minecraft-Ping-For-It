@@ -70,6 +70,18 @@ letters, digits, `_`, `-`, `.`, and `*`; the path part may also contain `/`. A
 separator. For example, `create:kinetic.*`, `*:target.name`, and `*:*` are valid
 selectors.
 
+The dedicated inventory fields use these same selectors and permission
+overrides independently. For example, a block rule's
+`"black": ["pingforit:inventory.fluids"]` denies fluid while leaving item
+authorization to its own rule, and
+`"permissionLevels": {"pingforit:inventory.fluids": 2}` replaces only the fluid
+field's required permission. `pingforit:inventory.*` matches both resource
+fields; naming the adapter `pingforit:inventory` does not. Field defaults and
+schema negotiation are owned by
+[presentation snapshot](../architecture/presentation/presentation_snapshot.md#dedicated-delivery-adapters).
+These entries use the existing file grammar, not a fluid-specific toggle or
+configuration version.
+
 A child reference is one `childBlack` entry: an object with `adapterId`,
 `fieldId`, and a nonempty `recordPath` array of literal record keys. It identifies
 one record child by the exact complete tuple; there is no prefix, wildcard,
@@ -111,11 +123,12 @@ is owned by
 
 ## Inventory policy object
 
-The `inventory` object persists the shared scan-work allowance, the single
-pending-memory bound, the separate preview and tracking budgets, the two
+The `inventory` object applies to item and fluid work together and persists the
+shared scan-work allowance, the single pending-memory bound, the separate
+preview and tracking budgets, the two
 finite display/frame size scalars, and Tracking pool partition switches. The
 existing `physicalSlotsPerTick` key
-bounds actual live slot reads and their item processing on native incremental
+bounds actual live slot/address reads and their resource processing on native incremental
 routes, not just a decode after whole-inventory capture. Explicit adapter
 snapshots retain the separate fixed-work capture/copy exception and charge their
 consuming decode/parse slots. The source-specific
@@ -141,9 +154,9 @@ array or an unbounded work loop.
 
 | Member | JSON form | Meaning |
 | --- | --- | --- |
-| `physicalSlotsPerTick` | limit object | Shared slot-scan allowance per tick for live reads/item processing and detached decode/parsing, with the explicit-adapter capture exception defined by the [inventory budget contract](../architecture/presentation/inventory.md#budgets-queues-and-memory). Unlimited removes only the configurable cap; finite work and memory guards and both logical quotas remain in force. |
+| `physicalSlotsPerTick` | limit object | Shared slot/address-scan allowance per tick for live resource reads/processing and detached decode/parsing, with the explicit-adapter capture exception defined by the [inventory budget contract](../architecture/presentation/inventory.md#budgets-queues-and-memory). Unlimited removes only the configurable cap; finite work and memory guards and both logical quotas remain in force. |
 | `pendingMemoryMiB` | limit object, MiB | Single server-wide pending-memory bound covering preview and tracking together. It is a retained/reserved-memory cost bound, not an allocation-rate limit per second or a per-queue bound; accounting is owned by [shared sources](../architecture/presentation/shared_sources.md#cost-accounting). |
-| `displayByteMultiplier` | number, multiplier | Finite scalar scaling one item's serialized display payload from its existing display base. It has no unlimited mode and is not one of the five send-byte multipliers. |
+| `displayByteMultiplier` | number, multiplier | Finite scalar scaling one resource entry's serialized display payload from its existing display base. It has no unlimited mode and is not one of the five send-byte multipliers. |
 | `frameByteMultiplier` | number, multiplier | Finite scalar scaling the whole encoded inventory S2C frame from its existing frame base. It has no unlimited mode and is not one of the five send-byte multipliers. |
 | `preview` | object | Preview accounting; the members below. |
 | `preview.periodTicks` | number, ticks | Preview accounting period. |

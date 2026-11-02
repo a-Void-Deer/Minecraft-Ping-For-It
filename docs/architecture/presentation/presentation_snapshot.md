@@ -126,14 +126,20 @@ An adapter's delivery mode is either the legacy framed `SECTION` route or
 a dedicated adapter owns its own request, collection and publication path and
 is never sampled, masked, published or rendered by the section machinery — it
 is not charged or sent as an empty section, and its collector is never reached
-from that route. The inventory adapter (`pingforit:inventory`, schema 1) is
-dedicated: it declares one record field,
-`pingforit:inventory.items`, enabled by default at permission level zero, and
-its values travel only on the dedicated inventory route owned by
+from that route. The inventory adapter (`pingforit:inventory`, schema 2) is
+dedicated: it declares two record fields, `pingforit:inventory.items` and
+`pingforit:inventory.fluids`, each enabled by default at permission level zero.
+Their values travel only on the dedicated inventory route owned by
 [network protocol](../network/protocol.md). Dedicated adapters share the same
 per-field authorization rule as section fields: the target type's selector
 policy decides the manifest default, then the recipient permission callback
 decides the effective level; a missing setting, field or target type denies.
+The fields are authorized independently: allowing items does not authorize
+fluids, and revoking either field does not grant or revoke the other. An
+incompatible inventory schema excludes that dedicated adapter under the
+ordinary manifest rule; it does not negotiate a schema-one inventory fallback.
+Inventory lane state, grouping and recovery remain owned by
+[inventory](inventory.md#resource-lanes-and-scope).
 
 ## Basic target fields
 
@@ -654,9 +660,10 @@ the message composition, wait and fence rules are owned by
 Projection uses the recipient's current fresh authorization: the accepted
 manifest and schema kind, the advertised mask, the exact child deny predicate,
 and the recipient's fresh permission must all include a selected reference, and
-the accepted dedicated inventory route view must include the marker's target
-type for the inventory kind. A recomputed initial for a replayed or refreshed
-marker applies the same current authorization, so a revocation suppresses a
+the accepted dedicated inventory route view must authorize the committed
+selection's resource field for the marker's target type for the inventory kind.
+A recomputed initial for a replayed or refreshed marker applies the same current
+authorization, so a revocation suppresses a
 later delivery.
 
 - No admitted non-null property Ping selection — including a create whose

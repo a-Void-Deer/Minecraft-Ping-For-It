@@ -168,9 +168,9 @@ The inventory source uses these same bindings. A preview request reads a
 candidate's members only under its provider-confirmed scope, and a tracking
 lease follows the committed tracking point; every member position is gated
 before its state, block entity, capability or content is read. A moved source
-or a changed member topology invalidates the old observation and the next
-successful read starts a fresh baseline, and an expired or released external
-lease is never resurrected by ordinary-block recovery tolerance. Inventory
+or a changed member topology follows ordinary invalidation and fresh-baseline
+recovery, except for the narrow fluid transition below. An expired or released
+external lease is never resurrected by ordinary-block recovery tolerance. Inventory
 identity, read-scope and recovery rules are owned by
 [inventory](../architecture/presentation/inventory.md).
 
@@ -185,6 +185,29 @@ persist, or create provider tracking state, and it cannot create a new target
 from a sample. Provider failures remain fail-soft. The generic Basic capture,
 demand, atomic failure, and stale-retention rules remain owned by the linked
 presentation snapshot contract.
+
+### Fluid sub-level transition
+
+When the same live lease still follows the same target, only its Sable sub-level
+changes and all other source identity and layout remain continuous, fluid
+tracking enters `UPDATING` and keeps the quantity already displayed while
+recomputing. That transition alone sends no `INVALID`, does not clear the
+retained quantity and does not repeat a content receipt.
+It preserves the marker and its original expiry; item tracking and ordinary
+multiblock topology invalidation do not acquire this exception.
+Simultaneous scope and structural changes still take ordinary invalidation;
+scope smoothing cannot conceal a changed source or layout.
+
+The new scope must be resolved and authorized afresh, with new physical source
+evidence and an independent zero-based accumulator. Old queued success data is
+fenced from the new scope. The retained quantity is presentation history only:
+neither the old cut, preview seed, historical proof nor old partial accumulator
+can establish new-scope completion or absence-derived zero. A fresh usable
+complete observation, with its delivery barrier satisfied, atomically replaces
+the displayed quantity. Actual revocation, an unreadable or missing source,
+lease release, removal and expiry still follow the ordinary
+[inventory failure and lifetime rules](../architecture/presentation/inventory.md#source-identity-invalidation-and-recovery).
+The transition authorizes no new target or storage context.
 
 ## Names, permissions and diagnostics
 

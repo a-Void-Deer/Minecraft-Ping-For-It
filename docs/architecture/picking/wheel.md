@@ -477,7 +477,18 @@ returns one level.
 ### Inventory list
 
 The content branch's inventory preview opens a rectangular list surface. Its
-content panel, including the header and footer, grows with the presented
+single panel groups item and fluid rows under distinct localized resource
+headings from one shared preview request. Group headings are navigation-free
+labels, not selectable resource entries. Each row retains its resource lane in
+selection, submenu and dispatch identity; equal opaque keys in different groups
+cannot select each other. Each group's authorization and status come from its
+own inventory lane, so an unavailable or updating group does not complete or
+erase the other. Resource lifecycle, ordering and quantities remain owned by
+[inventory](../presentation/inventory.md#resource-lanes-and-scope).
+The existing item-menu gestures below apply to a fluid row's resource menu as
+well; the lane's annotation policy still decides its allowed choices.
+
+The content panel, including the header and footer, grows with the presented
 content up to viewport-relative width and height maxima from the held
 [preferences](../../config/client.md#spatial-selector-interaction), measured
 against the current GUI-scaled viewport; these are maxima, not forced dimensions.
@@ -520,10 +531,10 @@ disabled ([Content](#content)). Back uses the stroke when hover is disabled and
 the shared Back-hover timer when enabled; either returns one level.
 Once the [inventory selection stay-open](#inventory-selection-stay-open)
 handling leaves it to the ordinary result, a release with a selected row commits
-through the inventory owner's single-item create path under the frozen
+through the inventory owner's single-resource create path under the frozen
 content-intent mode; a release while the Back side is focused leaves without
-committing. Count, ordering, folding and
-item-selection semantics are owned by
+committing. Quantity, ordering, folding and
+resource-selection semantics are owned by
 [inventory preview and tracking](../presentation/inventory.md#preview).
 
 While the list is the active surface, the inventory panel and its existing

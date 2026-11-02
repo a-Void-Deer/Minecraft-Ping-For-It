@@ -179,3 +179,53 @@
   does not reproduce the reported live allocation rate or CPU percentage.
 - Exercise the [patch-only identity and display boundary](../../architecture/presentation/inventory.md#item-variants-and-component-fallback) with installed modded containers and component wrappers, including owo-backed items, through live preview, item selection and tracking on the supported loaders. This remains pending; headless fixtures are not installed-mod evidence.
 - Exercise client/server local-default differences and the terminal size-only default icon in the live inventory list and tracking HUD, including retained reprojection after a ceiling change and delivery delayed by period-byte pressure. Automated transition evidence is tracked in [inventory verification](inventory.md#patch-only-identity-and-display-verification-pending).
+
+### Fluid inventory
+
+All scenarios here are pending. The
+[fluid inventory automated coverage](inventory.md#fluid-inventory-coverage)
+records the final headless coverage separately from these unperformed live checks.
+
+- On Minecraft 1.21.1 Fabric, Forge 52.0.2 and the supported NeoForge setup,
+  open a static block that exposes both items and fluids. Check one panel's
+  resource groups, independent field authorization/status/completion, shared
+  request close, one-resource selection, replay and ordinary annotation policy.
+  Deny and restore only one field while the other remains usable; include
+  multipart repair, delayed controls and known-marker removal.
+- Exercise Fabric component variants and sub-millibucket amounts, Forge NBT
+  variants, and NeoForge component variants through actual capabilities. Include
+  same-ID distinct variants, identity-only refusal, display-only refusal,
+  checked conversion/sum limits, true empty views and selected-resource absence
+  only after complete scanning. Confirm frozen-face and owner/member/load gates,
+  no forced load, mutation or creation-time presence getter, and no stale
+  success after revocation or topology loss.
+- Replace a Fabric public wrapper while preserving its stable native underlying
+  storage, then merge or detach that underlying storage. Check current-wrapper
+  reads, bounded validation, invalidation only where continuity is lost and
+  fresh complete recovery. On a generic opaque provider, exercise exposed
+  route/count/capacity changes and the accurate per-server/provider-class INFO
+  notice; do not treat unchanged public metadata as proof against a hidden remap.
+- In an installed tested-version NeoForge Create tank, target different members
+  and faces, including cross-chunk load changes, controller replacement, merge,
+  split, creative tanks and active boilers. Confirm controller-only quantity
+  without member duplication, fixed-face capability access, mode denial without
+  generic fallback and fresh recovery under the original marker expiry.
+- With an installed Sable provider and an otherwise supported fluid target,
+  move the same target under the same live lease to another sub-level. Check
+  `UPDATING` retains the displayed quantity without transition-only `INVALID`
+  or duplicate chat, new-scope permission/physical evidence is established and
+  only a fresh complete delivered result replaces the quantity, including zero.
+  Withhold final parts and inject real denial, unreadability, release and expiry;
+  old cuts/seeds/partial sums must not complete the new scope. Keep item and
+  ordinary multiblock invalidity as independent controls.
+- Compare list, HUD and exactly-once content chat in bundled locales for zero,
+  integer mB, positive sub-mB, exact buckets and very large quantities. Inspect
+  approximate indicators, six-significant-digit large forms, Latin billion
+  versus bucket labels, CJK units, long custom names and safe empty icons for
+  unknown/malformed display data. Exercise native font fitting and GPU output,
+  not only localized resource presence.
+- Exercise mixed inventory-v1/v2 peers on real loader connections and matching
+  v2 peers with delayed multipart delivery. Confirm the dedicated route has no
+  v1 reinterpretation, while unrelated presentation/configuration behavior stays
+  on its established version contracts. Measure combined item/fluid work under
+  low shared budgets before making throughput, TPS, allocation or GC claims.

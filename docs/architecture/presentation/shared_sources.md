@@ -5,8 +5,8 @@ sources: source access, capture results, cost accounting, and sync publication.
 Coverage scope and pending runtime evidence are owned by
 [testing and verification](../../testing/verification/shared-sources.md).
 
-Inventory domain policy — item identity, preview and tracking behavior, zero and
-component-fallback rules, and recovery deadlines — is owned by
+Inventory domain policy — resource identity, preview and tracking behavior, zero
+and identity-fallback rules, and recovery deadlines — is owned by
 [inventory](inventory.md). Negotiation, field policy, adapters, and the session
 value store remain owned by
 [presentation snapshot](presentation_snapshot.md). Route IDs, message families
@@ -131,6 +131,36 @@ migrated observation uses its exclusive provider path; unmigrated paths are
 unchanged and no cross-path deduplication is claimed. Evidence limitations are
 tracked in
 [known automated gaps](../../testing/verification/shared-sources.md#known-automated-gaps).
+
+### Weak historical identity evidence
+
+Fluid historical source proofs may retain bounded, non-owning identity evidence
+after live access closes. External `Access` remains operation-local and closes
+on every exit; the exception retains only a fixed code-owned schema and an
+ordered vector of `WeakReference` identities. It exposes no public referent
+dereference and cannot read old content or keep a native object graph alive.
+The proof retains no `Context`, `Access`, world or callback/closure, and no strong
+external member block-entity reference. Common external member identity follows
+the same weak boundary as native provider identity.
+
+Identity comparison uses `Reference.refersTo`, not native `equals`, `hashCode`
+or a global identity registry. Capture occurs only during initial proof
+construction, after admission of owned work, allocation/workspace and retained
+ownership under [cost accounting](#cost-accounting). Comparison uses the current
+operation's identities in O(K) for K evidence entries, without constructing
+another weak vector or invoking native content getters. It remains admitted
+under the actual caller grant, with current owner/scope authority and every
+original pre/post validation intact.
+
+| Comparison result | Evidence meaning |
+| --- | --- |
+| `SAME` | The schema, vector length/order and all live identities match. |
+| `CHANGED` | An exposed identity, schema, vector length or order is positively different. |
+| `UNVERIFIABLE` | Cleared weak evidence prevents establishing continuity; clearing alone proves no remapping. |
+
+These results concern historical evidence, not permission or content freshness.
+Their inventory lifecycle effects are owned by
+[publication authority](inventory.md#publication-authority-and-progress).
 
 ## Observation eligibility and sharing
 
@@ -264,6 +294,25 @@ access. Owned copying, conversion, encoding and hashing require admission before
 they run, including workspace and internal allocations and traversal of audited
 native or provider calls. Output-size measurement after a call is not a bound on
 that call's work or allocation.
+
+For the inventory fluid port, an operation profile separates owned work and
+workspace from member checks, current-authority callback counts and retained
+ownership. The source composes those responsibilities with the caller's actual
+remaining grant; a provider profile cannot hide source authority cost, retain a
+successful permission result or replace the grant with a fresh inner allowance.
+One caller-owned operation carries that real grant through metadata and content
+work, with attempted prefixes remaining paid on defer, denial or failure.
+
+Resolution admits a bounded probe before discovering route shape, then admits
+the discovered shape before finishing metadata construction. A shape change
+cannot run the larger finish under the smaller probe reservation. The paid
+member index reuses admitted membership bookkeeping, not permission or content.
+Physical membership distinguishes positive `INSIDE`, positive `OUTSIDE` and
+`UNKNOWN`; only positive inside evidence can authorize the physical read.
+Unknown evidence is never silently promoted to inside. These are admission and
+evidence boundaries, not authorization to merge repeated validation checks or
+to extend the existing audited
+[coordinated-read opt-in](#source-access) to another route.
 
 Lazy scratch and adaptive buffers obey the same boundary. Every replacement
 array's full allocation and initialization, growth control and written-prefix

@@ -91,11 +91,11 @@ the [wheel contract](../picking/wheel.md), not this phrase-only text-color rule.
 ## Content message family
 
 A marker created from a wheel content selection — a property selection or an
-inventory item selection — replaces its ordinary first-receipt chat line with a
+inventory item or fluid selection — replaces its ordinary first-receipt chat line with a
 content message. The message retains the author and reports the composed target
 name and, for each selected entry, that entry's own annotation phrase (the
-property's or item's annotation Ping Type phrase) and selected content: a
-property field and value, or an inventory item and count. Each explicit
+property's or resource's annotation Ping Type phrase) and selected content: a
+property field and value, or an inventory resource and quantity. Each explicit
 property selection is annotated independently, so one message preserves every
 selected entry's own phrase and action rather than applying one phrase to the
 whole set. The whole-marker Ping Type remains marker identity, and the ordinary
@@ -103,12 +103,12 @@ whole-message formats are unchanged.
 
 Content messages come from full localized templates with their connectives and
 quoting, never from concatenated language fragments. For a single selected
-entry — a single explicit property selection or the current single-item
+entry — a single explicit property selection or a single-resource
 inventory case — the common form is
 `author: 请求 {contentType} {targetName} 的 {content}`, where `author` is the
 retained player name, the request and possessive connectives belong to the
 localized template, `{contentType}` is that entry's annotation phrase, and
-`{content}` is that entry's field/value or item/count. Untrusted plain text,
+`{content}` is that entry's field/value or resource/quantity. Untrusted plain text,
 such as a custom name, is quoted as regular text; the quoting belongs to the
 localized template. The whole-marker main Ping Type phrase is not prepended:
 each annotated entry's phrase appears exactly once for that entry, so a chest
@@ -135,6 +135,15 @@ long, an unknown count is not zero, and the component-fallback presentation
 quality owned by
 [inventory](../presentation/inventory.md#item-variants-and-component-fallback)
 is preserved.
+
+Fluid content uses the localized base-fluid name and, when present, the
+server-projected plain custom name in the same quoted custom/base composition.
+The name is literal display text, never native component/NBT or another rich
+text decoding entrance. A missing or refused display uses the safe registry
+fallback; coincident names do not merge variants. Fluid quantities and their
+approximate/sub-millibucket qualifiers follow the same
+[formatter contract](../presentation/inventory.md#quantity-presentation) as the
+list and HUD, independently of All variants identity quality.
 
 ## New-marker feedback and dimension behavior
 
@@ -171,7 +180,7 @@ content marker instead waits for its complete content: the client derives the
 selection kind and reference hint from the accepted server-authorized atomic
 initial, never from a preview observation or a client-uploaded claim, and emits
 exactly one content message when every selected property value has arrived or
-the inventory's complete authoritative count has arrived. There is no
+the selected inventory lane's complete authoritative quantity has arrived. There is no
 ordinary-line fallback and no repeated chat as inventory updates stream in.
 
 The pending receipt is bounded client state. It exists only while its marker is
