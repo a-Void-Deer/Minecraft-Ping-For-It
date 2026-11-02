@@ -8,10 +8,15 @@ hold the ping key when a choice is needed, and show friends what you mean.
 ## Release
 
 - Version: `0.4.2-pfi-beta1`
-- Minecraft: `1.21.1`
-- Java: `21`
-- Loaders: Fabric, Forge, and NeoForge
+- Minecraft: `1.20.1`
+- Java: `17`
+- Loaders: Fabric and Forge
 - Mod ID: `pingforit`
+
+> NeoForge 1.20.1 and the optional NeoForge Create/Flywheel outline
+> integration are intentionally out of scope for this branch. They depend on
+> the pre-1.20.2 Forge fork toolchain and the 1.21.1 Create/Flywheel internals,
+> and are tracked as follow-up work rather than silently degraded at runtime.
 
 ## Pinging
 
@@ -42,11 +47,9 @@ grammar, list defaults, and entity-block geometry modes are owned by the
 [client configuration](docs/config/client.md) and
 [VoxelShape geometry](docs/architecture/geometry/voxel_shape.md) contracts.
 
-On NeoForge, optional Create support can render an entity-block silhouette mask.
-It loads lazily and is a soft, compile-only integration; missing Create or
-Flywheel does not disable ordinary pings. Current optional-version gates and
-routes are owned by the [Create integration](docs/integrations/create.md) and
-[compatibility](docs/compatibility.md).
+The optional Create/Flywheel entity-block silhouette integration is not part of
+the 1.20.1 branch yet. Ordinary entity and block pings remain fully
+loader-independent.
 
 ## Languages
 
@@ -84,10 +87,10 @@ are owned by the [client configuration](docs/config/client.md),
 
 ## Install, build, and verify
 
-Install the jar for your loader and Minecraft `1.21.1`; Fabric also requires
+Install the jar for your loader and Minecraft `1.20.1`; Fabric also requires
 Fabric API. Optional mods and registry content are soft dependencies.
 
-From the repository root with JDK 21, build and verify the three loader jars:
+From the repository root with JDK 17, build and verify the two loader jars:
 
 ```powershell
 $env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'

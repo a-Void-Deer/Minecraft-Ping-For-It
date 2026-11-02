@@ -1,5 +1,11 @@
 # Ping For It Changelog
 
+## 1.20.1 Port
+
+- Ported the 0.4.2-pfi-beta1 feature set to Minecraft 1.20.1, Java 17, Fabric, and Forge.
+- Adapted networking to the pre-1.20.2 channel API, rendering mixins to the 1.20.1 render pipeline, and the settings screen to the 1.20.1 widget/list APIs.
+- NeoForge 1.20.1 and the optional NeoForge Create/Flywheel integration are out of scope for this branch.
+
 Unreleased changes accumulated since `76da69e40d4d2b55688ee0dee46d01b07a9ad3d7`.
 
 ## UI Update
