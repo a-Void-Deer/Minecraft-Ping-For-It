@@ -3,20 +3,21 @@ package nx.pingwheel.common.screen;
 import net.minecraft.ChatFormatting;
 import net.minecraft.Util;
 import net.minecraft.client.OptionInstance;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.ContainerObjectSelectionList;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.components.OptionsList;
 import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.components.tabs.Tab;
 import net.minecraft.client.gui.components.tabs.TabManager;
 import net.minecraft.client.gui.components.tabs.TabNavigationBar;
+import net.minecraft.client.gui.layouts.HeaderAndFooterLayout;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.options.OptionsSubScreen;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -51,7 +52,7 @@ import static nx.pingwheel.common.config.ClientConfig.*;
 import static nx.pingwheel.common.config.ClientConfigBounds.*;
 import static nx.pingwheel.common.Global.warnException;
 
-public class SettingsScreen extends OptionsSubScreen {
+public class SettingsScreen extends Screen {
 	private static final long NO_REQUEST = -1L;
 	private static WeakReference<SettingsScreen> currentSettingsScreen = new WeakReference<>(null);
 
@@ -63,6 +64,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	private final TabManager tabManager;
 	private final DeferredActionCoordinator inputActions = new DeferredActionCoordinator();
 
+	private final HeaderAndFooterLayout layout;
 	private Screen parent;
 	private SettingsOptionsList settingsList;
 	private TabNavigationBar scopeTabBar;
@@ -109,8 +111,9 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	public SettingsScreen() {
-		super(null, null, LanguageUtils.settings("title").get());
+		super(LanguageUtils.settings("title").get());
 		this.config = ClientConfig.HANDLER.getConfig();
+		this.layout = new HeaderAndFooterLayout(this);
 		this.tabManager = new NavigationTabManager(this::addRenderableWidget, this::removeWidget);
 	}
 
@@ -131,8 +134,13 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.pageTitle.setMessage(this.currentPageTitle());
 		this.addRenderableOnly(this.pageTitle);
 
-		this.settingsList = new SettingsOptionsList(this.minecraft, this.width, this);
-		this.list = this.settingsList;
+		this.settingsList = new SettingsOptionsList(
+			this.minecraft,
+			this.width,
+			this.height,
+			SettingsScreenLayout.ROOT_HEADER_HEIGHT,
+			this.height - SettingsScreenLayout.ROOT_FOOTER_HEIGHT,
+			25);
 		this.addRenderableWidget(this.settingsList);
 
 		this.resetAllButton = Button.builder(
@@ -148,9 +156,9 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.addRenderableWidget(this.primaryButton);
 
 		this.rebuildPage(false);
+		this.applyInitialFocus();
 	}
 
-	@Override
 	protected void addOptions() {
 		// Pages are built by rebuildPage so navigation can retain viewport state.
 	}
@@ -265,10 +273,11 @@ public class SettingsScreen extends OptionsSubScreen {
 			this.layout.getHeaderHeight(),
 			navigation.isLeaf()));
 
-		this.settingsList.updateSizeAndPosition(
+		this.settingsList.updateSize(
 			this.width,
-			Math.max(0, this.height - this.layout.getHeaderHeight() - this.layout.getFooterHeight()),
-			this.layout.getHeaderHeight());
+			this.height,
+			this.layout.getHeaderHeight(),
+			this.height - this.layout.getFooterHeight());
 		this.tabManager.setTabArea(new ScreenRectangle(
 			0,
 			this.layout.getHeaderHeight(),
@@ -276,8 +285,10 @@ public class SettingsScreen extends OptionsSubScreen {
 			Math.max(0, this.height - this.layout.getHeaderHeight() - this.layout.getFooterHeight())));
 
 		final var screenLayout = this.getScreenLayout();
-		this.primaryButton.setPosition(screenLayout.doneX(), screenLayout.doneY());
-		this.resetAllButton.setPosition(screenLayout.resetX(), screenLayout.resetY());
+		this.primaryButton.setX(screenLayout.doneX());
+		this.primaryButton.setY(screenLayout.doneY());
+		this.resetAllButton.setX(screenLayout.resetX());
+		this.resetAllButton.setY(screenLayout.resetY());
 	}
 
 	@Override
@@ -365,7 +376,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		}
 		this.flushOptionWidgets();
 
-		this.clearFocus();
+		this.setFocused((GuiEventListener) null);
 		this.settingsList.setFocused((GuiEventListener) null);
 		this.settingsList.resetEntries();
 		this.keyedWidgets.clear();
@@ -738,7 +749,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		if (target == null) {
 			return;
 		}
-		this.clearFocus();
+		this.setFocused((GuiEventListener) null);
 		this.settingsList.focusWidget(target);
 		this.setFocused(this.settingsList);
 		// ContainerObjectSelectionList may scroll while it restores a child focus;
@@ -746,8 +757,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.settingsList.setClampedScrollAmount(navigation.scrollAmount());
 	}
 
-	@Override
-	protected void setInitialFocus() {
+	private void applyInitialFocus() {
 		if (navigation.focusKey() != null) {
 			this.restoreCurrentViewState();
 			return;
@@ -769,7 +779,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			target = this.serverSyncDurationField;
 		}
 		if (target != null) {
-			this.clearFocus();
+			this.setFocused((GuiEventListener) null);
 			this.settingsList.focusWidget(target);
 			this.setFocused(this.settingsList);
 		}
@@ -1314,30 +1324,102 @@ public class SettingsScreen extends OptionsSubScreen {
 		}
 	}
 
-	private static final class SettingsOptionsList extends OptionsList {
-		private SettingsOptionsList(net.minecraft.client.Minecraft minecraft, int width, SettingsScreen screen) {
-			super(minecraft, width, screen);
+	private static final class SettingsOptionsList extends ContainerObjectSelectionList<SettingsOptionsList.Row> {
+		private SettingsOptionsList(
+			net.minecraft.client.Minecraft minecraft,
+			int width,
+			int height,
+			int top,
+			int bottom,
+			int itemHeight
+		) {
+			super(minecraft, width, height, top, bottom, itemHeight);
+		}
+
+		@Override
+		public int getRowWidth() {
+			return SettingsScreenLayout.LARGE_WIDGET_WIDTH;
+		}
+
+		private void addSmall(AbstractWidget first, AbstractWidget second) {
+			this.addEntry(new Row(first, second));
 		}
 
 		private void resetEntries() {
 			this.clearEntries();
 		}
 
+		private void setClampedScrollAmount(double amount) {
+			this.setScrollAmount(Math.max(0.0D, Math.min(amount, this.getMaxScroll())));
+		}
+
+		private void applyUnsavedChanges() {
+			// OptionInstance buttons commit on interaction; nothing is staged.
+		}
+
 		private AbstractWidget focusedWidget() {
 			final GuiEventListener focusedEntry = this.getFocused();
-			if (focusedEntry instanceof OptionsList.Entry entry && entry.getFocused() instanceof AbstractWidget widget) {
+			if (focusedEntry instanceof Row row && row.getFocused() instanceof AbstractWidget widget) {
 				return widget;
 			}
 			return null;
 		}
 
 		private void focusWidget(AbstractWidget widget) {
-			for (OptionsList.Entry entry : this.children()) {
+			for (Row entry : this.children()) {
 				if (entry.children().contains(widget)) {
 					entry.setFocused(widget);
 					this.setFocused(entry);
 					return;
 				}
+			}
+		}
+
+		private static final class Row extends ContainerObjectSelectionList.Entry<Row> {
+			private final AbstractWidget first;
+			private final AbstractWidget second;
+
+			private Row(AbstractWidget first, AbstractWidget second) {
+				this.first = first;
+				this.second = second;
+			}
+
+			@Override
+			public void render(
+				GuiGraphics graphics,
+				int index,
+				int top,
+				int left,
+				int width,
+				int height,
+				int mouseX,
+				int mouseY,
+				boolean hovered,
+				float partialTick
+			) {
+				final int gap = 8;
+				final int halfWidth = Math.max(0, (width - gap) / 2);
+				this.first.setX(left);
+				this.first.setY(top);
+				this.first.setWidth(this.second == null ? width : halfWidth);
+				this.first.render(graphics, mouseX, mouseY, partialTick);
+
+				if (this.second != null) {
+					this.second.setX(left + halfWidth + gap);
+					this.second.setY(top);
+					this.second.setWidth(halfWidth);
+					this.second.render(graphics, mouseX, mouseY, partialTick);
+				}
+			}
+
+			@Override
+			public List<? extends GuiEventListener> children() {
+				return this.second == null ? List.of(this.first) : List.of(this.first, this.second);
+			}
+
+			@Override
+			public List<? extends net.minecraft.client.gui.narration.NarratableEntry> narratables() {
+				return this.second == null ? List.of(this.first) : List.of(this.first, this.second);
 			}
 		}
 	}
