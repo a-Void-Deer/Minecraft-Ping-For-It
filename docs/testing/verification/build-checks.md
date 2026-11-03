@@ -573,6 +573,153 @@ diagnostics. Live loader launch/Mixin application, GPU/font/UI and narrow-window
 multiplayer/mixed-version handshakes, installed Create/Sable/Refined Storage,
 manual gameplay and CPU/TPS/GC/allocation measurements remain pending.
 
+### Fluid tank grouping and presentation verification
+
+Recorded execution date: 2026-11-03, code input `e281aaa4`. The saved formal
+input manifest matches all 1,281 non-documentation inputs in that commit.
+The external evidence directory
+`pfi-tank-formal-20261103-051330-2e7f2627` retains the command, logs, JUnit XML,
+task results, input manifests and scoped artifact checks.
+
+The PowerShell execution used Temurin 21.0.12.1+1-LTS, UTF-8, `--no-daemon`,
+no explicit timeout and separate stdout/stderr files. Here `$evidence` is that
+external directory:
+
+```powershell
+$env:JAVA_HOME = 'E:\scoop\apps\temurin21-jdk\current'
+$env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+& .\gradlew.bat --no-daemon --continue :common:check :common:javadoc :fabric:build :forge:build :neoforge:build verifyModIdentity :fabric:fluidSourceIntegration :forge:fluidSourceIntegration :neoforge:fluidSourceIntegration --init-script "$evidence/formal.init.gradle" --console=plain --info > "$evidence/formal.stdout.log" 2> "$evidence/formal.stderr.log"
+```
+
+The external init forces fresh Test execution and supplies the existing native
+fluid-source seam on each loader's test classpath. The invocation exited zero
+with `BUILD SUCCESSFUL`. All test tasks ran freshly:
+
+| Module / task | Suites | Tests | Passed | Skipped |
+| --- | --- | --- | --- | --- |
+| Common test | 491 | 5,258 | 5,256 | 2 |
+| Fabric test | 6 | 80 | 80 | 0 |
+| Forge test | 6 | 60 | 60 | 0 |
+| NeoForge test | 47 | 332 | 332 | 0 |
+| Fabric fluidSourceIntegration | 1 | 2 | 2 | 0 |
+| Forge fluidSourceIntegration | 1 | 2 | 2 | 0 |
+| NeoForge fluidSourceIntegration | 1 | 2 | 2 | 0 |
+| Total | 553 | 5,736 | 5,734 | 2 |
+
+Every row has zero failures and errors. The two Common skips are the
+`InventoryFluidLoaderIntegrationTest` methods requiring loader-native classes;
+both passed without skips in each loader's dedicated task. Those are the same
+two scenario definitions on three loader classpaths.
+
+All four main compilations and Common/Forge/NeoForge test compilation executed;
+Fabric test compilation was `UP-TO-DATE`. Common check/Javadoc, all three loader
+checks/Javadocs/packaging/builds, Fabric remapping and `verifyModIdentity`
+executed successfully. Of 56 actionable tasks, 34 executed and 22 were
+`UP-TO-DATE`. Artifact checks confirmed the common tank key on all loaders,
+NeoForge-only tank topology/resolver classes, expected metadata and absence of
+the checked test fixtures. The verified identity is `pingforit` / `Ping For It` /
+`0.5.0-pfi-beta2` on Minecraft 1.21.1.
+
+Assertion scope belongs to [identity](identity-authority.md#logical-container-identity-and-authority),
+[wire and receipts](presentation.md#logical-target-wire-coverage),
+[source gates](rendering.md#container-presentation-subjects),
+[tank topology and dispatch](integrations.md#fluid-tank-topology-grouping-and-presentation)
+and [inventory quotas](inventory.md#logical-container-quotas-and-scan-sharing).
+
+Nonfatal diagnostics include 400 Javadoc missing-tag warnings across four groups,
+deprecated APIs, Mixin mapping, Forge processor options, skipped Eclipse
+integration and Gradle deprecation. No independent formatter, lint or
+static-analysis task is configured. Installed Create/gameplay, live loader/Mixin
+application, BER/GPU output, multiplayer/mixed-version transport and performance
+measurements remain pending in the
+[manual matrix](manual-integration.md#logical-container-targets-and-whole-presentation).
+
+### Native fluid boundary and presentation verification
+
+Recorded execution date: 2026-11-03. The tested non-documentation inputs match
+commit `b30c0f1e107a232c73b38e17c50766816d2e163f`: all 1,310 inputs were hashed,
+with none missing, and stayed unchanged through verification. The external
+evidence directory below retains the commands, logs, fresh JUnit results, input
+manifest and scoped artifact checks.
+
+Both commands ran from PowerShell 7 on Windows with Temurin 21.0.12.1+1-LTS,
+UTF-8, `--no-daemon`, no explicit timeout and separate stdout/stderr files:
+
+```powershell
+$evidence = 'C:\Users\Void_Deer\AppData\Local\Temp\opencode\pfi-six-fluid-latest-formal-20261103-132444-71588440'
+$env:JAVA_HOME = 'E:\scoop\apps\temurin21-jdk\current'
+$env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+& .\gradlew.bat --no-daemon --continue :common:check :common:javadoc :fabric:build :forge:build :neoforge:build verifyModIdentity :fabric:fluidSourceIntegration :forge:fluidSourceIntegration :neoforge:fluidSourceIntegration :forge:fluidPresentationIntegration :common:fluidPresentationClassSafetyIntegration --init-script "$evidence/formal.init.gradle" --init-script "$evidence/class-safety.init.gradle" --console=plain --info > "$evidence/formal.stdout.log" 2> "$evidence/formal.stderr.log"
+& .\gradlew.bat --no-daemon --continue :common:fluidPresentationClassSafetyIntegration --init-script "$evidence/class-safety.init.gradle" --console=plain --info > "$evidence/class-safety-completion.stdout.log" 2> "$evidence/class-safety-completion.stderr.log"
+```
+
+The full command exited 1 solely because the external class-safety Test task
+lacked an explicit dependency on Forge `processResources`; Gradle rejected that
+task before test execution. All other required tests, compilation, Javadocs,
+builds and artifact-identity checks succeeded. After correcting only the external
+init dependency, the focused command exited 0 with `BUILD SUCCESSFUL` and freshly
+completed the remaining task. Together they complete the required automated
+checks for this input.
+
+All nine Test tasks ran freshly:
+
+| Module / task | Suites | Test executions | Passed | Skipped |
+| --- | --- | --- | --- | --- |
+| Common test | 496 | 5,318 | 5,316 | 2 |
+| Fabric test | 7 | 83 | 83 | 0 |
+| Forge test | 7 | 62 | 61 | 1 |
+| NeoForge test | 48 | 335 | 335 | 0 |
+| Fabric fluidSourceIntegration | 1 | 2 | 2 | 0 |
+| Forge fluidSourceIntegration | 1 | 2 | 2 | 0 |
+| NeoForge fluidSourceIntegration | 1 | 2 | 2 | 0 |
+| Forge fluidPresentationIntegration | 1 | 2 | 2 | 0 |
+| Common fluidPresentationClassSafetyIntegration | 1 | 6 | 6 | 0 |
+| Total | 563 | 5,812 | 5,809 | 3 |
+
+Every row has zero failures and errors. The two Common skips are
+`InventoryFluidLoaderIntegrationTest` methods requiring loader-native APIs; the
+same methods passed in each loader's dedicated fluid-source task. Forge's ordinary
+`FluidPresentationServiceTest` skips its native FluidType case because that
+classpath lacks patched `getFluidType`; the identical method passed in the
+patched-first presentation task. Repeated methods across classpaths count as
+executions, not independent scenarios.
+
+All four main compilations, Common test compilation and all four Javadocs
+executed; the three loader test compilations were `UP-TO-DATE`. Loader jar/source
+packaging, Fabric remapping and `verifyModIdentity` executed successfully, with
+all loader check/build lifecycle tasks completed. Loader Javadoc jars, resources,
+Minecraft preparation and Fabric access-widener validation reused outputs. The
+focused completion reused compilation/resources. No independent Java lint,
+formatter or static-analysis task is configured.
+
+Scoped jar checks found each loader's own production description/render service
+registrations and provider classes, with no checked test fixtures or foreign
+loader packages. Main/source/Javadoc jars passed the checked fixture-leak
+boundaries. These package checks are separate from `verifyModIdentity`, not an
+exhaustive archive certification. Mod identity/version and shipped presentation
+and inventory protocol constants retained their established values.
+
+Passing assertion scope belongs to the
+[fluid definition, completion and naming assertions](inventory.md#native-fluid-boundary-regressions),
+[mixed-lane selection](interaction.md#inventory-list-gestures-and-navigation),
+[quantity fitting](rendering.md#selector-overlay-layout-and-frame-rendering),
+[sprite dispatch](rendering.md#base-fluid-icon-presentation) and
+[loader/Create presentation](integrations.md#native-fluid-presentation).
+
+Nonfatal diagnostics include 400 Javadoc missing-tag warnings, deprecated APIs,
+Mixin mapping, Forge processor options, skipped Eclipse integration, Gradle
+deprecation and Log4j diagnostics; some Javadoc locale output is garbled. The
+headless tea atlas fixture emits an ERROR-level `Sheets loaded too early`
+diagnostic despite passing assertions, not evidence of live client initialization.
+Live game/GPU/native-font fitting, actual resource reload, dedicated-server and
+loader/Mixin launch, installed Create/Sable, multiplayer/mixed-version transport
+and performance remain pending in the
+[fluid manual matrix](manual-integration.md#fluid-inventory).
+
 ## Verification limitations
 
 The 2026-10-27 combined invocation's stderr was empty; stdout retained the Gradle 9

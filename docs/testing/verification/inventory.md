@@ -88,6 +88,28 @@ They exercise all-lane versus unrelated-lane denial before kind discovery,
 membership/view-scoped denial history, refresh/reallow non-resurrection and
 authorized fluid completion through the packet-dispatched runtime.
 
+### Native fluid boundary regressions
+
+The following regressions passed on the
+[native fluid combined-tree input](build-checks.md#native-fluid-boundary-and-presentation-verification),
+extending the earlier final-input matrix.
+
+| Boundary | Passing automated evidence |
+| --- | --- |
+| Complete fluid definitions | `InventoryFluidCodecTest` counts full lane/registry/variant keys against the 256-definition guard, including equal canonical bytes across IDs and exact/aggregate definitions. Repeated keys remain usable at capacity; refusal leaves retained collision evidence untouched, while collision and canonical-payload guards remain independent. |
+| Paid-prefix capacity exhaustion | `InventoryNativeFluidBoundaryTest` covers 257 complete keys from 129 encodings, aggregate-only and extension-journal exhaustion, a refusal inside one paid page, explicit readable `INCOMPLETE`, charged attempts and unrelated item progress. `InventoryFluidWorldTest` repeats the 257-key/129-NBT case through the native source/freezer. No completed total or absence-zero replaces the selected historical seed. |
+| Pending final validation | `InventoryNativeFluidBoundaryTest` keeps the paid cursor through repeated final-check budget defers, retries metadata with both logical and physical address allowance exhausted, and publishes the accumulated total without another getter. Current revocation or an exception still invalidates; a deferred final check cannot turn capacity exhaustion into completion. Empty-source completion and ticket/retained cleanup have separate controls. |
+| Bounded native names | `FluidDescriptionsTest` covers detached translation/literal leaves, discarded styles/events, Unicode/byte bounds, complex/cyclic/opaque refusals without flattening and optional callback failures. Capture-admission and fatal failures propagate through standard native wrappers; cyclic/deep wrapper chains fail closed without opaque cause callbacks. `InventoryFluidFreezerTest` checks native translation labels versus literal registry fallback, no base-name/custom-name conflation and independent exact/aggregate identity and long amounts through name failure. Native first-initialization refusal installs no observation; an independent retry keeps the exact identity and amount. |
+| Strict client display | `ClientFluidDisplayTest` covers local native translation/literal/fallback precedence, locally verified server labels, literal registry fallback rather than invented block keys, literal custom-name composition, and optional naming failures with a validated fluid icon identity. Refused/mismatched projections and unknown local fluids never invoke native naming or restore the icon. |
+| Server/client separation | `FluidPresentationClassSafetyTest` executes absent/broken name-service discovery with client/render classes forbidden. Actual SPI constructors propagate capture-limit subclasses, sentinel `OutOfMemoryError` and `ThreadDeath` without poisoning discovery; repeated attempts and bounded reentry have controls, while ordinary/linkage failures remain optional. Its installed-payload integration requires current adapters for every loader before checking client-free naming and atlas-free render-service construction. This is classloading/compiled-boundary evidence, not a dedicated-server launch. |
+
+Mixed-lane selection assertions belong to
+[interaction verification](interaction.md#inventory-list-gestures-and-navigation),
+quantity fitting and sprite dispatch to
+[rendering verification](rendering.md#base-fluid-icon-presentation), and actual
+loader APIs and the Create tea archive to
+[integration verification](integrations.md#native-fluid-presentation).
+
 ## Inventory preview and tracking foundation
 
 Headless test-source assertions cover the preview route and its supporting
@@ -1179,6 +1201,13 @@ optional-provider wiring,
 remain pending.
 
 ## Logical container quotas and scan sharing
+
+`InventoryFluidRuntimeTest` covers different physical tank members spending one
+`CreateTankKey` tracking-slot allowance while each source opens with its original
+owner and frozen face, even with both separation settings disabled. Recording
+sources remain independently read; this is logical-quota evidence, not fluid-pool
+certification. Passing execution belongs to the
+[tank combined-tree run](build-checks.md#fluid-tank-grouping-and-presentation-verification).
 
 `CompositeTargetQuotaTest` exercises the production backend, runtime and
 publisher seams: active selected categories span opposite member hits while

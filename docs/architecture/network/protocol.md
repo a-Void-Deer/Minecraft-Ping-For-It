@@ -58,12 +58,16 @@ owns the wire grammar.
 The marker snapshot in `CREATED` carries a mandatory logical `targetKey`
 immediately after its physical `target`. `WINNER` addresses that same key shape.
 Within a BLOCK key, tag `0` is an exact ordinary key, `1` an external stable
-key, `2` a double-chest pair and `3` a Vault controller. Grouped key tags are
-distinct from BLOCK target tags: C2S targets still permit only ordinary `0`
-and external `1` and cannot claim a group. Key identity and target compatibility
-are owned by the [target model](../identity/target_model.md#frozen-logical-block-groups).
+key, `2` a double-chest pair, `3` a Vault controller and `4` a Create fluid-tank
+controller. Tags `3` and `4` each carry controller X, Y and Z as three fixed-width
+32-bit integers followed by the block registry ID; tag `4` requires exactly
+`create:fluid_tank`. Grouped key tags are distinct from BLOCK target tags: C2S
+targets still permit only ordinary `0` and external `1` and cannot claim a group.
+Key identity and target compatibility are owned by the
+[target model](../identity/target_model.md#frozen-logical-block-groups).
 Unknown tags, noncanonical encodings, malformed pairs, incompatible target/key
-carriers, missing keys, truncation and trailing bytes reject the whole frame;
+carriers (including wrong target kind, dimension or expected registry identity),
+missing keys, truncation and trailing bytes reject the whole frame;
 the decoder does not normalize a pair or derive a missing key from the target.
 Live membership is established by server creation, not rediscovered by the decoder.
 

@@ -80,7 +80,7 @@ conflicts rather than silently choosing or dropping a requirement.
 | Change source order, adapter outcomes, failure handling or registration | [Geometry sources](architecture/geometry/geometry_sources.md) | Presentation subjects and the affected integration |
 | Change native block-shape acquisition or edge generation | [VoxelShape geometry](architecture/geometry/voxel_shape.md) | Outline render state and D0002 |
 | Change GPU outline routing, shared render-entity lookup, or production render state | [Outline rendering](architecture/rendering/outline.md) | VoxelShape geometry, source outcomes and model placement |
-| Change multipart owner/master resolution, chests, beds or doors | [Presentation subjects](architecture/rendering/presentation_subjects.md) | [Target model](architecture/identity/target_model.md), geometry sources, D0003, D0016 and the affected integration |
+| Change multipart owner/master resolution, chests, beds, doors or container multiblocks | [Presentation subjects](architecture/rendering/presentation_subjects.md) | [Target model](architecture/identity/target_model.md), geometry sources, D0003, D0016 and the affected integration |
 | Change model offset, placement or seeded variants | [Model placement](architecture/rendering/model_placement.md) | Outline routing and [verification limitations](testing/verification/rendering.md) |
 | Change target names, marker receipt feedback, chat templates or phrase emphasis | [Names and chat](architecture/rendering/names_chat.md) | Catalogs and authoritative validation |
 | Change Create/Flywheel support | [Create integration](integrations/create.md) | [Create raycast supplement](integrations/create-contraption-raycast.md), local geometry and geometry sources |

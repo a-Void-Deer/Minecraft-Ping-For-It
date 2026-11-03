@@ -72,6 +72,27 @@ The [presentation contract](../../architecture/rendering/presentation_subjects.m
 owns source ordering and coverage; compilation and these fixtures do not verify
 live synchronization, installed models or whole-structure outline appearance.
 
+`BlockPresentationContextTest` covers loaded-state source gates for known
+containers without ordinary block-entity lookup, and an unavailable or replaced
+tank source stopping before optional resolution or direct replacement rendering.
+Tank per-cell dispatch, shared frame snapshot and exact native-edge fallback
+assertions are inventoried under
+[tank topology verification](integrations.md#fluid-tank-topology-grouping-and-presentation).
+
+## Base-fluid icon presentation
+
+`SpatialFluidIconRendererTest` records the production draw dispatch without a
+GPU: a fluid whose legacy block is air still uses its native still sprite;
+null, missing, wrong-atlas and throwing native routes try only a non-air legacy
+particle sprite before text-only fallback. The recorded draw preserves existing
+alpha/tint composition. Replacing supplied sprite resources is observed on the
+next draw, and a failed lookup does not prevent later recovery. This simulates
+resource replacement, not a live client reload. Loader API and actual tea-asset
+assertions are inventoried under
+[native fluid presentation](integrations.md#native-fluid-presentation);
+[combined-tree execution](build-checks.md#native-fluid-boundary-and-presentation-verification)
+records the passing headless results.
+
 ## Selector overlay layout and frame rendering
 
 `SpatialOverlayRendererTimingTest` covers renderer timing models.
@@ -189,6 +210,17 @@ quantities, header/status text, Forward and tiny slots: configured scale stays
 fixed, fitting text stays whole, and an ellipsis must itself fit the available
 slot. These are layout, display-projection and clipping-plan seams, not native
 text or scissor submission evidence.
+
+`SpatialInventoryQuantityPriorityTest` records production row-text submission
+with supplied font metrics. At a 320×240 GUI, the complete `12.345 B` quantity
+takes width before the Water name. Approximate/sub-mB indicators and localized
+large units survive across scales; exact fits at 1.7 and the eight tested
+text scales stay whole, while a genuinely smaller slot remains bounded.
+An overfull quantity receives the full text slot after the name yields, without
+font shrinking or panel expansion, and item rows retain their own allocation.
+These assertions passed in the
+[combined-tree execution](build-checks.md#native-fluid-boundary-and-presentation-verification)
+and do not establish native font fitting.
 
 The mirrored-side cases in `SpatialInventoryBackTest` record a complete Back
 title frame outside the panel's actual parent-facing edge at its vertical

@@ -864,14 +864,38 @@ as a component. Unsupported native naming data may be omitted independently of
 identity. The whole projection and its optional name retain finite UTF-8 byte
 bounds and the negotiated per-entry display ceiling.
 
-No native component/NBT payload, rich-text document, texture instruction or
-variant tint is a display capability. The client resolves a base-fluid icon
-through its own fluid registry/render facilities, never through an ItemStack or
-a bucket-item substitution. This does not promise a variant-specific icon.
-Missing, malformed, mismatched or unknown display data uses safe fallback text
-and an empty icon without changing the exact identity, amount, aggregate mode,
-revisions or selection reference. Localized names and content-message
-composition are owned by [names and chat](../rendering/names_chat.md#content-message-family).
+Base-fluid naming uses a server-safe native description boundary, separate from
+client-only sprite lookup. It copies only a bounded plain-text leaf or an
+argument-free translation leaf with an optional bounded plain-text fallback into
+detached strings. Native styling and events are not retained; composite or
+opaque components are not traversed or flattened. Unsupported text and optional
+native-service failures leave the base name unavailable. Native callbacks and
+admission refusals follow the
+[shared admission and external-trust boundary](shared_sources.md#cost-accounting).
+The server label carries an available native translation key; a native literal
+or unavailable description instead uses the fluid registry ID. A block
+translation key is not synthesized from that ID, and a native base name is not
+the projection's custom `name`.
+
+For a valid matching projection and a locally registered fluid, the client first
+uses its local native base description, resolving a translation only when it
+exists locally or supplies a bounded literal fallback. It then falls back to a
+locally available server-label translation, the literal registry ID, and the
+unknown-fluid name in that order. An untranslated key is not shown as a name.
+Native naming failure leaves the validated fluid eligible for an icon. Missing,
+malformed or mismatched display data, or an unknown local fluid, uses only safe
+fallback text without native naming or an icon.
+
+Icons use the client-only native still-sprite route, then a usable particle
+sprite from a non-air legacy block, then text-only display. An air legacy block
+does not imply that the native still sprite is unavailable. Sprite resolution
+uses current resources without retaining sprites or failed lookups across
+resource reloads. No native component/NBT payload, rich-text document, texture
+instruction or variant tint is a display capability, and no ItemStack or
+bucket-item substitution supplies the icon. This does not promise a
+variant-specific icon. Name and texture availability leave exact identity,
+amount, aggregate mode, revisions and selection reference intact. Custom/base
+composition is owned by [names and chat](../rendering/names_chat.md#content-message-family).
 
 ### Quantity presentation
 

@@ -44,29 +44,32 @@ from its server-resolved logical `TargetKey`. Supported container groups use:
 | --- | --- |
 | `DoubleChestKey` | Dimension, exact `minecraft:chest` or `minecraft:trapped_chest` registry ID, and both horizontally adjacent member positions in strict lexicographic X/Y/Z order. |
 | `VaultKey` | Dimension, exact `create:item_vault` registry ID, and verified controller position. Extent and member list are not key fields. |
+| `CreateTankKey` | Dimension, exact `create:fluid_tank` registry ID, and verified controller position. Shape, width, height and member list are not key fields. |
 
 A detached grouped carrier requires an ordinary block target with matching
 dimension and registry identity. A chest target must be one of the pair's two
-positions; a Vault carrier contains no member bounds, so only authoritative
-creation establishes its live membership. Other key variants must equal the
-physical derivation. Carrier compatibility never certifies current topology.
+positions; Vault and tank carriers contain no member bounds, so only
+authoritative creation establishes their live membership. Other key variants
+must equal the physical derivation. Carrier compatibility never certifies
+current topology.
 
 The grouping resolution point is owned by
 [create adjudication](../authority/target_validation.md#create-adjudication-order).
 Vanilla chest relationship evidence is owned by
 [container presentation](../rendering/presentation_subjects.md#vanilla-chests);
-the supported Vault topology and loader gates by
-[Create](../../integrations/create.md#vault-logical-target-and-presentation-topology).
+the supported Vault and tank topology and loader gates by
+[Create](../../integrations/create.md#metadata-only-topology-access).
 Other ordinary blocks retain their exact physical key. Beds and doors expand
 presentation only and keep the single-hit logical key. External targets retain
 their provider-stable identity and bypass ordinary-world group lookup; this is
 not arbitrary multiblock discovery.
 
 Grouping never replaces the original hit with a controller or sibling target,
-moves its anchor, or merges marker records, including records from one owner.
-The group key is frozen at creation: later splits, joins, controller changes or
-unavailable metadata do not rekey an existing marker or resize its lifetime.
-New markers resolve the structure present at their own creation. Current client
+moves its anchor, changes its captured face, or merges marker records, including
+records from one owner. The group key is frozen at creation: later splits,
+joins, controller changes or unavailable metadata do not rekey an existing
+marker or resize its lifetime. New markers resolve the structure present at
+their own creation. Current client
 presentation may follow a currently verified structure without changing that
 frozen key or granting inventory authority. Rationale is recorded in
 [D0016](../../decisions/D0016-logical-container-targets.md).

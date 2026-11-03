@@ -532,7 +532,7 @@ exercised.
 
 `NativeSelectorContentTest` additionally exercises the production content bridge
 against a real headless client inventory session: opaque selectable references,
-explicit zero and row quality, folded-row replacement resetting the list, close
+explicit zero and row quality, lane-local folded-row replacement, close
 cleanup, reentrant abort during open without reviving the request, and safe
 conversion of a null label to an empty component while unknown non-empty keys
 keep their translation fallback. It also covers the kinetic stress/capacity
@@ -755,6 +755,17 @@ remainder, and non-finite deltas are inert. Capacity relayout keeps the selected
 key visible without changing discovery order or the fractional wheel remainder.
 These are row-model checks; they do not independently establish pointer
 mapping, side gestures or input ownership.
+
+`NativeSelectorContentTest` feeds mixed-lane packets through the production
+content bridge and selector session. An unrelated item fold or lane-baseline
+replacement retains a selected lane-qualified key that remains selectable in
+the final projection, including equal opaque keys in both lanes. Lane-local
+scroll/discovery state survives sibling replacement. Removed or invalid selected
+rows use the surviving fallback, while whole-content revocation clears release
+eligibility. Real release intents dispatch the correct lane and opaque reference
+exactly once before `CLOSE`. The
+[combined-tree execution record](build-checks.md#native-fluid-boundary-and-presentation-verification)
+records their passing headless execution.
 
 `SpatialInventoryNavigationIntegrationTest` drives the headless native-input
 adapter and a real selector session through production inventory layout,

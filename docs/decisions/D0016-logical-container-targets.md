@@ -22,7 +22,7 @@ The [target model](../architecture/identity/target_model.md#frozen-logical-block
 owns key identity, [creation authority](../architecture/authority/target_validation.md#create-adjudication-order)
 owns the freeze point, and the [network protocol](../architecture/network/protocol.md#presentation-snapshot-route-presentation-v2)
 owns versioned transport. [Presentation subjects](../architecture/rendering/presentation_subjects.md#vanilla-chests)
-and [Create](../integrations/create.md#vault-logical-target-and-presentation-topology)
+and [Create](../integrations/create.md#metadata-only-topology-access)
 own structure evidence. [Inventory](../architecture/presentation/inventory.md)
 and [shared sources](../architecture/presentation/shared_sources.md#observation-eligibility-and-sharing)
 own read binding, quotas and observation reuse.

@@ -136,12 +136,12 @@ quality owned by
 [inventory](../presentation/inventory.md#item-variants-and-component-fallback)
 is preserved.
 
-Fluid content uses the localized base-fluid name and, when present, the
-server-projected plain custom name in the same quoted custom/base composition.
-The name is literal display text, never native component/NBT or another rich
-text decoding entrance. A missing or refused display uses the safe registry
-fallback; coincident names do not merge variants. Fluid quantities and their
-approximate/sub-millibucket qualifiers follow the same
+Fluid content uses the
+[base-name resolution and display-refusal rules](../presentation/inventory.md#fluid-display-projection)
+and, when present, the server-projected plain custom name in the same quoted
+custom/base composition. That custom name is literal display text, never another
+rich-text decoding entrance; coincident names do not merge variants. Fluid
+quantities and their approximate/sub-millibucket qualifiers follow the same
 [formatter contract](../presentation/inventory.md#quantity-presentation) as the
 list and HUD, independently of All variants identity quality.
 

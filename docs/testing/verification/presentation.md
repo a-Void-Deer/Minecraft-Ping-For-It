@@ -400,6 +400,14 @@ Grouped pending-chat completion has separate runtime/store coverage under
 [content receipts](#content-receipt-chat-and-pending-completion); the wire tests
 above do not establish a live receipt flow.
 
+`CompositeTargetPacketsTest` includes tank controller-key `CREATED`/`WINNER`
+round trips and explicit-key client acceptance. An independently read tag `4`
+payload checks controller-coordinate and registry ordering; raw mutations reject
+wrong registries, dimensions or target kinds, unknown and noncanonical tags,
+missing mandatory keys, every truncation and trailing bytes. C2S rejects the
+grouped tag. Passing execution is recorded in the
+[tank combined-tree run](build-checks.md#fluid-tank-grouping-and-presentation-verification).
+
 ## Target content preview
 
 The [content-preview owner](../../architecture/presentation/presentation_snapshot.md#target-content-preview)
@@ -640,7 +648,7 @@ store and port coverage rather than live chat evidence:
 
 The grouped-container cases in these two receipt fixtures match the accepted
 snapshot and stored client marker through their explicit frozen logical key for
-normal chests, trapped chests and Vaults. Client copies and stale transitions
+normal chests, trapped chests, Vaults and fluid tanks. Client copies and stale transitions
 retain that identity; another logical group at the same physical hit cannot
 inherit the pending receipt. The runtime cases encode/decode presentation-v2
 packets and inventory frames: a source-incomplete `UPDATING` seed retains its
@@ -649,7 +657,9 @@ result emits once. Property receipts require a fresh accepted annotated section;
 wrong epochs, stale data and absent annotations cannot complete them. Duplicate
 frames/creates, reset and authoritative expiry cannot repeat or revive the
 receipt, while `WHOLE` feedback stays immediate and once-only. These cases
-passed in the recorded [logical-container run](build-checks.md#logical-container-implementation-run),
+include the grouped tank fluid receipt's independent lane authorization and
+fresh-complete-only completion. They passed in the recorded
+[tank combined-tree run](build-checks.md#fluid-tank-grouping-and-presentation-verification),
 with the same headless effect/transport limits below.
 
 `ChatDiagnosticsTest` covers controlled debug events for malformed whole/content

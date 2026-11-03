@@ -93,15 +93,15 @@
 ### Logical container targets and whole presentation
 
 - In live multiplayer, ping opposite halves of normal and trapped double chests
-  and different members of a supported NeoForge Create Vault. Check one visible
-  winner per recipient, independent ownership/cancellation/expiry and selected
-  item tracking, and recovery to a surviving loser. Include equal-arrival ties,
-  different frozen audiences, owner and recipient disconnects, and same-owner
-  repeated markers.
-- Split and rejoin chests and alter Vault topology after creation. Check frozen
-  logical identity and lifetime, new markers using current structure, and current
-  presentation following verified metadata without widening inventory authority.
-  Include locked and loot-backed chests, missing neighboring chunks and direct
+  and different members of supported NeoForge Create Vaults and fluid tanks.
+  Check one visible winner per recipient, independent ownership/cancellation/expiry
+  and selected-resource tracking, and recovery to a surviving loser. Include
+  equal-arrival ties, different frozen audiences, owner and recipient disconnects,
+  and same-owner repeated markers.
+- Split and rejoin chests and alter Vault or tank topology after creation. Check
+  frozen logical identity and lifetime, new markers using current structure, and
+  current presentation following verified metadata without widening inventory
+  authority. Include locked and loot-backed chests, missing neighboring chunks and direct
   fallback, and preserve original hit anchors and exact preview selection roots.
 - Exercise installed tested-version Create client synchronization: controller
   and member packets in differing orders, stale member dimensions, chunk
@@ -109,7 +109,10 @@
   recovery on later frames. Inspect per-cell baked-model outlines and fallback
   with GPU rendering; headless archive/metadata tests do not establish live
   packet ordering or rendered appearance. Verify ordinary chest behavior on all
-  loaders and exact/direct Vault fallback on unsupported loaders.
+  loaders and exact/direct Vault and tank fallback on unsupported loaders.
+- On an ordinary static tank, toggle boiler activity and check complete per-cell
+  presentation while its fluid read route remains independently gated. Include
+  creative tanks as a different-registry control.
 - Exercise matching presentation-v2 negotiation and incompatible v1/v2 peers
   over real loader connections. Codec rejection is not a recorded live handshake
   or mixed-version gameplay result. Grouped receipt completion and inventory
@@ -192,6 +195,11 @@ records the final headless coverage separately from these unperformed live check
   request close, one-resource selection, replay and ordinary annotation policy.
   Deny and restore only one field while the other remains usable; include
   multipart repair, delayed controls and known-marker removal.
+- Keep a selected row stationary while an unrelated variant folds or either
+  lane replaces its baseline, including equal opaque keys in both groups and a
+  scrolled list. Check that a still-selectable lane-qualified key survives and
+  release submits its intended resource, with fallback only when that row is
+  actually removed or invalid.
 - Exercise Fabric component variants and sub-millibucket amounts, Forge NBT
   variants, and NeoForge component variants through actual capabilities. Include
   same-ID distinct variants, identity-only refusal, display-only refusal,
@@ -222,8 +230,14 @@ records the final headless coverage separately from these unperformed live check
   integer mB, positive sub-mB, exact buckets and very large quantities. Inspect
   approximate indicators, six-significant-digit large forms, Latin billion
   versus bucket labels, CJK units, long custom names and safe empty icons for
-  unknown/malformed display data. Exercise native font fitting and GPU output,
-  not only localized resource presence.
+  unknown/malformed display data. Exercise narrow viewports, fractional text
+  scales, native font fitting and GPU output, not only localized resource presence.
+- With installed native fluid handlers, include a non-placeable fluid such as
+  supported Create tea. Check localized base names, missing-translation fallback,
+  literal custom names, native still sprites and text-only failure. Reload client
+  resources after both a successful and a failed lookup. Launch a dedicated
+  server with the loader name service present and confirm no client render
+  initialization is required.
 - Exercise mixed inventory-v1/v2 peers on real loader connections and matching
   v2 peers with delayed multipart delivery. Confirm the dedicated route has no
   v1 reinterpretation, while unrelated presentation/configuration behavior stays

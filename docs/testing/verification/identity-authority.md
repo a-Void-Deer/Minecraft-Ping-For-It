@@ -94,6 +94,21 @@ Wire corruption and explicit-key client acceptance are inventoried under
 inventory quota/read authority under
 [grouped inventory verification](inventory.md#logical-container-quotas-and-scan-sharing).
 
+`CompositeTargetIdentityTest` covers tank controller-key equality, separation
+from physical and Vault keys, incompatible carrier rejection, once-only creation
+resolution, independent hits, anchors, owners, audiences, cancellation and
+expiry, and frozen keys/display deadlines through changed resolver results and
+client stale copies. `DoubleChestCreationTest` also covers tank source load,
+registry and dimension gates before optional platform dispatch, and the exact-key
+unsupported-platform default. NeoForge topology and creation evidence belongs under
+[tank topology verification](integrations.md#fluid-tank-topology-grouping-and-presentation).
+
+`ClientPingRuntimeContentReceiptTest` drives packet-dispatched tank winner
+delivery before `CREATED`, stale-session rejection, replay without deadline
+restart, explicit cancellation and lost-removal expiry fallback. The surviving
+record keeps its original hit and anchor; explicit removal waits for the
+separate authoritative winner update. These are headless runtime/store seams.
+
 ## Client marker runtime coverage
 
 `ClientPingRuntimeTest` exercises the public runtime factory with its real

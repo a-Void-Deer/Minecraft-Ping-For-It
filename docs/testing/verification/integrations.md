@@ -198,6 +198,58 @@ initialization, actual chunk/block-entity packet ordering, GPU rendering or
 multiplayer. Inventory sharing evidence is separately inventoried under
 [logical container quotas and scan sharing](inventory.md#logical-container-quotas-and-scan-sharing).
 
+## Fluid tank topology, grouping and presentation
+
+The [tank topology contract](../../integrations/create.md#fluid-tank-logical-target-and-presentation-topology)
+has passing headless coverage in `CreateFluidTankTopologyTest` and
+`CreateFluidTankProductionBoundaryTest`:
+
+| Boundary | Passing automated evidence |
+| --- | --- |
+| Complete metadata topology | All widths, sampled tall structures and every member hit produce canonical detached cells; extents stay outside key identity. Invalid dimensions, overflow, missing or inconsistent members and callback replacement publish no prefix; later reads recover. |
+| Production optional route | Actual tested-archive metadata, NeoForge server creation/platform dispatch and lazy client registration; absent/untested/drifted routes, wrong dimensions and member identity/load/controller gates; existing chunks and instantiated block entities only. |
+| Geometry/read separation | Active-boiler metadata retains complete geometry; creative and foreign registry identities retain physical keys. Throwing content ports and compiled-call guards exclude capability, inventory, fluid, NBT and loading discovery. |
+| Presentation and fallback | Every verified cell retains `entity_block` and the original physical source. The production dispatcher visits every cell after simulated controller BER success; an unrendered cell emits its own native edges. Normal and late fallback retain one frame snapshot, then incomplete metadata falls back directly and later frames recover. |
+
+The production-boundary harness retains archive metadata methods while replacing
+initialization-heavy ancestors and per-cell geometry submission with recording
+callbacks. It establishes coverage organization and native-edge output, not
+actual BER, baked-model or GPU submission. `CreateVaultProductionBoundaryTest`
+also passed as the neighboring topology/registration regression. Exact execution
+and affected-loader builds are recorded in the
+[tank combined-tree run](build-checks.md#fluid-tank-grouping-and-presentation-verification).
+
+Common identity, wire and source-gate coverage is inventoried under
+[identity authority](identity-authority.md#logical-container-identity-and-authority),
+[presentation transport](presentation.md#logical-target-wire-coverage) and
+[container rendering](rendering.md#container-presentation-subjects). Installed
+Create synchronization, GPU appearance, multiplayer and performance remain in the
+[pending manual matrix](manual-integration.md#logical-container-targets-and-whole-presentation).
+
+## Native fluid presentation
+
+Fabric's `FluidPresentationServiceTest` crosses actual native attribute and
+render-handler APIs for base descriptions and still sprites, including literal
+overrides, absent/throwing handlers, service discovery and replaced sprite
+resources. Forge's `FluidPresentationServiceTest` covers discovery and
+atlas-independent construction; its native FluidType description and base
+still-texture case passed on the patched integration classpath. The
+[combined-tree and native-classpath execution](build-checks.md#native-fluid-boundary-and-presentation-verification)
+records these passing results and ordinary-classpath skips.
+
+NeoForge's passing `CreateFluidPresentationArchiveTest` inspects the tested
+Create/embedded Registrate tea-registration bytecode chain to the native
+`fluid.create.tea` description and still-texture assignment, checking the
+archive's English/Chinese names, actual tea PNG and block-atlas inclusion. A
+factory-result fixture supplies description properties and temporarily registers
+the fluid, then crosses production loader ports, the server freezer and strict
+localized client projection with an exact long amount and no invented custom
+name. It executes the archive's virtual-fluid air legacy-block and native
+description/client-extension bodies; a recording atlas observes sprite
+replacement. Initialization-heavy ancestors and game/atlas setup are substituted.
+This is not full `AllFluids` registration, installed Create, GPU, live
+resource-reload or dedicated-server launch evidence.
+
 ## Create content preview
 
 NeoForge's `CreatePreviewReceiptStateTest` covers explicit client receipt
