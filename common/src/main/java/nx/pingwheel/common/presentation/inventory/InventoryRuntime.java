@@ -1566,6 +1566,13 @@ public final class InventoryRuntime implements AutoCloseable {
 		int paid = round.paid.getOrDefault(consumer.subject, 0);
 		int available = Math.min(slotBound, Math.max(0, paid - consumer.cursor) + Math.max(0, allowance));
 		if (available == 0) {
+			if (round.journal != null && round.sweep == null && consumer.cursor == round.size() && round.handle.pendingNativeValidation()
+				&& (round.last == null || round.last.completeness() == CaptureResult.Completeness.CONTINUE)) {
+				if (!readNative(consumer, 0, operationAllowance)) return Optional.empty();
+				if (consumer.invalidObservation != null) return Optional.of(consumer.invalidObservation);
+				consumer.logicalDelay.progress(cycle(consumer));
+				return Optional.of(new Observation(java.util.Objects.requireNonNull(round.last), List.of(), round.sweepEvidence));
+			}
 			if (round.empty() && round.last != null && zeroCostEmptyCompletion(round.last)) {
 				consumer.logicalDelay.progress(cycle(consumer));
 				return Optional.of(new Observation(round.last, List.of(), round.sweepEvidence));
@@ -1767,7 +1774,8 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (round.sweep != null) return readPooled(consumer, available, allowance);
 		InventorySlotJournal journal = java.util.Objects.requireNonNull(round.journal);
 		int bound = (int) Math.min(Math.min(available, physicalRemaining()), Math.max(0, physical.remaining(InventorySourceAccess.PROVIDER_WORK) / InventorySourceAccess.PROVIDER_CALL_WORK - 1));
-		bound = Math.min(bound, Math.min(round.handle.remainingSlots(), InventorySourceAccess.MAX_SLOTS - journal.endSlot()));
+		bound = round.handle.pendingNativeValidation() ? 0
+			: Math.min(bound, Math.min(round.handle.remainingSlots(), InventorySourceAccess.MAX_SLOTS - journal.endSlot()));
 		if (bound == 0) {
 			var outcome = zeroAllowanceStep(consumer, allowance);
 			if (outcome instanceof SourceAccess.StepOutcome.Deferred) { physicalDelay(consumer, scanReasons(available, round.handle.displayBytes()), available); return false; }
@@ -1812,9 +1820,20 @@ public final class InventoryRuntime implements AutoCloseable {
 					}
 					if (result.firstSlot() != journal.endSlot()) throw new IllegalStateException("native journal prefix mismatch");
 					InventoryItemCodec.@Nullable Catalog catalog = round.handle.nativeCatalog();
-				for (@Nullable InventoryResourceValue item : result.slots()) {
-						InventoryItemCodec.@Nullable Encoded encoded = item == null || item.resourceKind() != InventoryResourceKind.ITEM ? null : java.util.Objects.requireNonNull(java.util.Objects.requireNonNull(catalog).retainedEncoded(item.key()));
-						journal.appendResource(journal.endSlot(), encoded, item == null ? 0 : item.amount(), item);
+					try {
+						for (@Nullable InventoryResourceValue item : result.slots()) {
+							InventoryItemCodec.@Nullable Encoded encoded = item == null || item.resourceKind() != InventoryResourceKind.ITEM ? null : java.util.Objects.requireNonNull(java.util.Objects.requireNonNull(catalog).retainedEncoded(item.key()));
+							journal.appendResource(journal.endSlot(), encoded, item == null ? 0 : item.amount(), item);
+						}
+					} catch (InventorySlotJournal.CapacityException exhausted) {
+						// Extension sources may not use the native catalogue's complete-key guard.
+						// Keep the append-only validated prefix and all paid attempts, never retry
+						// the source cursor or certify the unretained tail as a complete total.
+						InventoryCaptureDiagnostics.boundExceeded(round.input, "native-journal-capacity", exhausted);
+						CaptureResult prior = round.last;
+						round.last = new CaptureResult(Optional.empty(), new CaptureResult.Coverage(prior.coverage().demandStamp(),
+							journal.endSlot(), journal.endSlot(), prior.coverage().expected()), prior.availability(),
+							CaptureResult.Completeness.INCOMPLETE, prior.consistency(), prior.sourceVersion(), Optional.empty());
 					}
 				}
 			}

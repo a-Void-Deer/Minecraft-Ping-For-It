@@ -65,6 +65,7 @@ public class InventoryFluidWorldTest {
 		public ItemStack held = ItemStack.EMPTY;
 		public int reads, probes, closes, liveAccess, maxLiveAccess, binds, notices, witnessCaptures, witnessCompares;
 		public long amount = 81;
+		public java.util.function.IntFunction<Entry> entryAt = slot -> amount == 0 ? Entry.empty() : new Entry(new Nbt(Fluids.WATER, null), amount);
 		public Runnable afterRead = () -> {};
 		public InventorySourceAccess.@Nullable Source lastSource;
 		public Fixture(int tanks, int members, boolean external) {
@@ -157,7 +158,7 @@ public class InventoryFluidWorldTest {
 							}
 							@Override public boolean consume(int slot, Visitor visitor, Operation operation) {
 								operation.allowance().debit(readProfile().ownedCost()); context.require(root, operation); reads++;
-								boolean more = visitor.visit(amount == 0 ? Entry.empty() : new Entry(new Nbt(Fluids.WATER, null), amount));
+								boolean more = visitor.visit(entryAt.apply(slot));
 								afterRead.run(); context.require(root, operation); return more;
 							}
 							@Override public Visit observe(int limit, Visitor visitor, Operation operation) {
@@ -180,6 +181,31 @@ public class InventoryFluidWorldTest {
 		public void replaceMember(BlockPos pos) { var chest = new Chest(pos); chest.setLevel(level); entities.put(pos, chest); }
 		public void clearMemberWitness() { clearWitness((FluidAddressWitness) field(Objects.requireNonNull(lastSource), "memberWitness"), 0); }
 		@Override public void close() { runtime.close(); assertEquals(0, liveAccess); assertEquals(0, runtime.memory().reserved()); assertEquals(0, runtime.memory().retained()); }
+	}
+	@Test void stableNativeHandlerWith257CompleteFluidKeysAnd129NbtEncodingsEndsExplicitlyIncomplete() {
+		try (var f = new Fixture(257, 1, false)) {
+			f.entryAt = slot -> {
+				var tag = new net.minecraft.nbt.CompoundTag(); tag.putInt("variant", slot / 2);
+				return new IPlatformFluidService.Entry(new IPlatformFluidService.Nbt((slot & 1) == 0 ? Fluids.WATER : Fluids.LAVA, tag), slot + 1L);
+			};
+			var consumer = f.attach(); var values = new ArrayList<@Nullable InventoryResourceValue>();
+			InventoryRuntime.@Nullable Observation terminal = null;
+			for (int tick = 0; tick < 100; tick++) {
+				f.runtime.advance(tick, f.settings);
+				var next = assertDoesNotThrow(() -> f.runtime.step(consumer));
+				if (next.isEmpty()) continue;
+				values.addAll(next.get().slots());
+				if (next.get().result().completeness() != CaptureResult.Completeness.CONTINUE) { terminal = next.get(); break; }
+			}
+			assertNotNull(terminal); assertEquals(CaptureResult.Availability.READABLE, terminal.result().availability());
+			assertEquals(CaptureResult.Completeness.INCOMPLETE, terminal.result().completeness());
+			assertEquals(257, f.reads); assertEquals(256, values.size()); assertEquals(256, terminal.result().coverage().scanned());
+			assertEquals(257, terminal.result().coverage().expected().orElseThrow());
+			assertEquals(32_896, values.stream().mapToLong(value -> java.util.Objects.requireNonNull(value).amount()).sum());
+			assertTrue(values.stream().allMatch(value -> value != null && !value.aggregateRequired()));
+			assertThrows(IllegalStateException.class, consumer::retainCompleted);
+			assertEquals(0, f.runtime.memory().reserved());
+		}
 	}
 	@Test void defaultOneEightAndCreate108MemberSourcesFinishWithActualShapeAndSingleSlotAdmission() {
 		for (int[] shape : new int[][] {{1, 1}, {8, 1}, {1, 108}}) try (var f = new Fixture(shape[0], shape[1], false)) {

@@ -13,9 +13,11 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -61,10 +63,16 @@ public final class InventoryFluidCodec {
 	 */
 	@NotNullByDefault
 	public static final class Catalog {
-		private final Map<String, byte @Unmodifiable []> identities = new HashMap<>();
+		// Both tables stay within the caller's existing fixed catalogue admission envelope;
+		// no sequence of intermediate resize allocations is hidden by a capacity refusal.
+		private final Map<String, byte @Unmodifiable []> identities = new HashMap<>(512);
+		private final Set<InventoryScanner.Key> definitions = new HashSet<>(512);
 		private long retainedBytes;
 		public long retainedBytes() { return retainedBytes; }
-		public long modeledRetainedBytes() { return 512L + retainedBytes + 4096L * identities.size(); }
+		public long modeledRetainedBytes() {
+			long tables = (identities.isEmpty() ? 0 : 40L + 512L * 8) + (definitions.isEmpty() ? 0 : 40L + 512L * 8);
+			return 512L + tables + retainedBytes + 4096L * definitions.size();
+		}
 		public static long retainedGrowthUpperBound() {
 			return 32768L + MAX_CANONICAL_BYTES + 4L * InventoryFluidDisplayCodec.MAX_BYTES + 2L * MAX_LABEL_BYTES;
 		}
@@ -79,20 +87,26 @@ public final class InventoryFluidCodec {
 			if (!fluidId.equals(display.fluidId())) throw new IllegalArgumentException("fluid display identity");
 			byte @Nullable @Unmodifiable [] canonical = identity.canonical;
 			String digest = "";
+			byte @Nullable @Unmodifiable [] previous = null;
 			if (canonical != null) {
 				digest = digest(canonical);
-				byte @Nullable @Unmodifiable [] previous = identities.get(digest);
+				previous = identities.get(digest);
 				if (previous != null && !Arrays.equals(previous, canonical)) throw new IllegalStateException("ambiguous fluid identity digest");
-				if (previous == null) {
-					long next = Math.addExact(retainedBytes, 256L + canonical.length);
-					if (identities.size() == 256 || next > 262144) throw new CapacityException();
-					identities.put(digest, canonical); retainedBytes = next;
-				}
 			}
+			var key = new InventoryScanner.Key(InventoryResourceKind.FLUID, fluidId, digest);
+			boolean newDefinition = !definitions.contains(key);
+			// The journal indexes complete keys, not canonical encodings. Different fluid IDs
+			// and refused-identity aggregates each consume a definition, even with shared bytes.
+			// Admit both independent guards before retaining any part of a new definition.
+			if (newDefinition && definitions.size() == 256) throw new CapacityException();
+			long next = canonical == null || previous != null ? retainedBytes : Math.addExact(retainedBytes, 256L + canonical.length);
+			if (next > 262144) throw new CapacityException();
+			if (canonical != null && previous == null) { identities.put(digest, canonical); retainedBytes = next; }
+			if (newDefinition) definitions.add(key);
 			// Canonical equality does not license replacing this observation's
 			// independent display with an earlier version. The journal owns/charges
 			// its first detached projection; temporary observations stay caller-paid.
-			return new InventoryFluidValue(new InventoryScanner.Key(InventoryResourceKind.FLUID, fluidId, digest), amount, display, canonical == null);
+			return new InventoryFluidValue(key, amount, display, canonical == null);
 		}
 	}
 	private static String digest(byte[] canonical) {

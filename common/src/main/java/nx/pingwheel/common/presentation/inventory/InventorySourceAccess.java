@@ -109,6 +109,8 @@ public final class InventorySourceAccess implements SourceAccess {
 	public interface InventoryHandle extends SourceAccess.Handle {
 		default boolean scopeTransition() { return false; }
 		default int remainingSlots() { return MAX_SLOTS; }
+		/** Paid native addresses await a current postcheck; retry needs metadata admission, not another slot. */
+		default boolean pendingNativeValidation() { return false; }
 		/** Independent exact metadata ownership; the caller never retains this handle's cursor or snapshot. */
 		default Optional<InventoryPublicationEvidence> publicationEvidence() { return Optional.empty(); }
 		/** Optional borrowed certification port; does not advance this handle's legacy cursor. */
@@ -441,6 +443,7 @@ public final class InventorySourceAccess implements SourceAccess {
 		private final InventoryDisplayProjection snapshotProjection = new InventoryDisplayProjection();
 		private int cursor, expected = -1;
 		private boolean closed, terminal, versionStable = true;
+		private CaptureResult.@Nullable Completeness nativePendingCompletion;
 		private OptionalLong firstVersion = OptionalLong.empty();
 		private Preparation preparation;
 		private boolean planDeferred;
@@ -458,6 +461,7 @@ public final class InventorySourceAccess implements SourceAccess {
 		@Override public long sourceRetainedBytes() { return source.sourceRetainedBytes(); }
 		@Override public boolean scopeTransition() { return source.scopeTransition(); }
 		@Override public int remainingSlots() { return source.stableCursor() ? Math.max(0, source.slots() - cursor) : MAX_SLOTS; }
+		@Override public boolean pendingNativeValidation() { return nativePendingCompletion != null; }
 		@Override public ReadMode readMode() { return source.readMode(); }
 		@Override public InventoryItemCodec.@Nullable Catalog nativeCatalog() { return source.nativeCatalog(); }
 		@Override public long nativeCatalogGrowthUpperBound() { return source.nativeCatalogGrowthUpperBound(); }
@@ -472,6 +476,7 @@ public final class InventorySourceAccess implements SourceAccess {
 		@Override public boolean evidenceValid(InventoryValidationBudget.Allowance allowance) { return !closed && source.valid(allowance); }
 		@Override public InventoryValidationBudget.Cost evidenceValidationCost() { return source.evidenceValidationCost(); }
 		@Override public InventoryValidationBudget.Cost stepValidationCost(int slots) {
+			if (nativePendingCompletion != null) return source.evidenceValidationCost();
 			return snapshot != null ? source.evidenceValidationCost() : source.evidenceValidationCost().times(readMode() == ReadMode.NATIVE_INCREMENTAL ? 2 : 1).plus(source.readValidationCost(slots));
 		}
 		@Override public void releaseCapturedData() { try { releaseRetained(); } finally { source.releaseReadData(); } }
@@ -626,8 +631,8 @@ public final class InventorySourceAccess implements SourceAccess {
 			}
 			// Native source slots() is frozen resolution metadata. Generic extension routes keep their legacy semantics.
 			int slots = source.slots();
-			int bound = (int) Math.min(Math.max(0, slots - cursor), Math.min(MAX_STEP, Math.min(ledger.remaining(PHYSICAL), Math.max(0, ledger.remaining(PROVIDER_WORK) / PROVIDER_CALL_WORK - 1))));
-			if (slots != 0 && bound == 0) return new InventoryStep.Outcome.Deferred();
+			int bound = nativePendingCompletion != null ? 0 : (int) Math.min(Math.max(0, slots - cursor), Math.min(MAX_STEP, Math.min(ledger.remaining(PHYSICAL), Math.max(0, ledger.remaining(PROVIDER_WORK) / PROVIDER_CALL_WORK - 1))));
+			if (slots != 0 && bound == 0 && nativePendingCompletion == null) return new InventoryStep.Outcome.Deferred();
 			var admission = ledger.tryReserve(Map.of(PHYSICAL, (long) bound, PROBES, 1L, PROVIDER_WORK, (bound + 1L) * PROVIDER_CALL_WORK));
 			if (admission.isEmpty()) return new InventoryStep.Outcome.Deferred();
 			int used = 0, first = cursor;
@@ -641,30 +646,43 @@ public final class InventorySourceAccess implements SourceAccess {
 					if (slots < 0 || slots != expected) {
 						terminal = true; return nativeCaptured(cursor, java.util.List.of(), CaptureResult.Availability.UNAVAILABLE, CaptureResult.Completeness.INCOMPLETE);
 					}
-					while (cursor < Math.min(expected, MAX_SLOTS) && used < bound) {
-						used++; // Getter exceptions are attempts, but never commit a journal slot.
-						@Nullable InventoryResourceValue value = source.readResource(cursor, catalog, validation == null
-							? new InventoryValidationBudget.Allowance(source.readValidationCost(1)) : validation);
-						if (value != null && value.resourceKind() != input.resourceKind()) throw new IllegalStateException("source observation lane");
-						items.add(value);
-						cursor++;
+					if (nativePendingCompletion != null) {
+						var completion = nativePendingCompletion; nativePendingCompletion = null;
+						terminal = completion != CaptureResult.Completeness.CONTINUE;
+						return nativeCaptured(cursor, items, CaptureResult.Availability.READABLE, completion);
 					}
-					if (input.resourceKind() == InventoryResourceKind.FLUID && !(validation == null ? source.valid() : source.valid(validation))) {
-						terminal = true; return nativeCaptured(cursor, java.util.List.of(), CaptureResult.Availability.INVALID, CaptureResult.Completeness.INCOMPLETE);
+					CaptureResult.Completeness completion;
+					try {
+						while (cursor < Math.min(expected, MAX_SLOTS) && used < bound) {
+							used++; // Getter exceptions are attempts, but never commit a journal slot.
+							@Nullable InventoryResourceValue value = source.readResource(cursor, catalog, validation == null
+								? new InventoryValidationBudget.Allowance(source.readValidationCost(1)) : validation);
+							if (value != null && value.resourceKind() != input.resourceKind()) throw new IllegalStateException("source observation lane");
+							items.add(value);
+							cursor++;
+						}
+						completion = cursor == expected ? CaptureResult.Completeness.COMPLETE : cursor == MAX_SLOTS
+							? CaptureResult.Completeness.INCOMPLETE : CaptureResult.Completeness.CONTINUE;
+					} catch (InventoryItemCodec.CapacityExceededException | InventoryFluidCodec.CapacityException | InventoryItemBudget.CaptureLimitException exhausted) {
+						// A staged read defer is retryable, unlike catalogue/processing exhaustion.
+						if (exhausted instanceof nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission.Deferred deferred) throw deferred;
+						InventoryCaptureDiagnostics.boundExceeded(input, "native-catalog-capacity-or-work", exhausted);
+						completion = CaptureResult.Completeness.INCOMPLETE;
 					}
-					terminal = cursor == expected || cursor == MAX_SLOTS;
-					return nativeCaptured(first, items, CaptureResult.Availability.READABLE,
-						cursor == expected ? CaptureResult.Completeness.COMPLETE : terminal ? CaptureResult.Completeness.INCOMPLETE : CaptureResult.Completeness.CONTINUE);
+					if (input.resourceKind() == InventoryResourceKind.FLUID || completion == CaptureResult.Completeness.INCOMPLETE) {
+						// A paid prefix can be replayed while its final authority check is deferred,
+						// but neither full coverage nor capacity refusal can manufacture completion.
+						nativePendingCompletion = completion;
+						if (!(validation == null ? source.valid() : source.valid(validation))) {
+							terminal = true; return nativeCaptured(cursor, java.util.List.of(), CaptureResult.Availability.INVALID, CaptureResult.Completeness.INCOMPLETE);
+						}
+						nativePendingCompletion = null;
+					}
+					terminal = completion != CaptureResult.Completeness.CONTINUE;
+					return nativeCaptured(first, items, CaptureResult.Availability.READABLE, completion);
 				} catch (nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission.Deferred deferred) {
 					return items.isEmpty() ? new InventoryStep.Outcome.Deferred()
 						: nativeCaptured(first, items, CaptureResult.Availability.READABLE, CaptureResult.Completeness.CONTINUE);
-				} catch (InventoryItemCodec.CapacityExceededException | InventoryFluidCodec.CapacityException | InventoryItemBudget.CaptureLimitException exhausted) {
-					terminal = true;
-					InventoryCaptureDiagnostics.boundExceeded(input, "native-catalog-capacity-or-work", exhausted);
-					// Capacity/work refusal is not a certificate that a provider's reentrant callback kept authority.
-					if (!(validation == null ? source.valid() : source.valid(validation)))
-						return nativeCaptured(cursor, java.util.List.of(), CaptureResult.Availability.INVALID, CaptureResult.Completeness.INCOMPLETE);
-					return nativeCaptured(first, items, CaptureResult.Availability.READABLE, CaptureResult.Completeness.INCOMPLETE);
 				} catch (RuntimeException | LinkageError unavailable) {
 					terminal = true;
 					InventoryCaptureDiagnostics.warn("native-step", input, descriptor.key(), () -> "cursor=" + cursor + " expected=" + expected, unavailable);
