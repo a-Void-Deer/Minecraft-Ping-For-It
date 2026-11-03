@@ -1,5 +1,7 @@
 package nx.pingwheel.neoforge.platform;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -87,6 +89,8 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 	// Only handler identity crosses operations here; ordered capacities and members remain in layout.
 	private static final OperationProfile CAPTURE_WITNESS = FluidAddressWitness.profile(IPlatformFluidService.WitnessUse.CAPTURE, 1);
 	private static final OperationProfile COMPARE_WITNESS = FluidAddressWitness.profile(IPlatformFluidService.WitnessUse.COMPARE, 1);
+	// Includes cold fixed-field metadata bookkeeping, primitive amount access and failure wrapping.
+	// VM reflection internals, like the native getter internals, remain external-trusted.
 	private static final InventoryValidationBudget.Cost RESIDENT_HANDOFF =
 		new InventoryValidationBudget.Cost(256, 256, 32);
 
@@ -317,10 +321,38 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 
 	private static IPlatformFluidService.Entry borrow(@Nullable FluidStack stack) {
 		if (stack == null) throw new InventorySourceUnavailableException("fluid capability returned null");
+		// Constructors/setAmount retain negatives even though the public getter normalizes them to zero.
+		InventoryQuantities.require(retainedAmount(stack));
 		long amount = InventoryQuantities.fromMillibuckets(stack.getAmount());
 		if (amount == 0) return IPlatformFluidService.Entry.empty();
 		var fluid = Objects.requireNonNull(stack.getFluid(), "fluid capability identity");
 		if (fluid == Fluids.EMPTY) throw new InventorySourceUnavailableException("positive fluid amount without identity");
 		return new IPlatformFluidService.Entry(new IPlatformFluidService.Components(fluid, stack.getComponentsPatch()), amount);
+	}
+
+	private static int retainedAmount(FluidStack stack) {
+		var metadata = RetainedAmount.METADATA;
+		@Nullable Field field = metadata.field();
+		if (field == null) throw new IllegalStateException("native fluid amount field unavailable", metadata.failure());
+		try { return field.getInt(stack); }
+		catch (IllegalAccessException | RuntimeException | LinkageError unavailable) {
+			throw new IllegalStateException("native fluid amount read unavailable", unavailable);
+		}
+	}
+	/** One fixed native declaration/failure per loader; no stack, handler, world or amount is cached. */
+	@NotNullByDefault
+	private record RetainedAmount(@Nullable Field field, @Nullable Throwable failure) {
+		private static final RetainedAmount METADATA = load();
+		private static RetainedAmount load() {
+			try {
+				Field field = FluidStack.class.getDeclaredField("amount");
+				if (field.getType() != int.class || Modifier.isStatic(field.getModifiers()) || !field.trySetAccessible())
+					throw new IllegalStateException("unsupported native fluid amount declaration");
+				return new RetainedAmount(field, null);
+			} catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
+				// Do not poison class initialization or retry metadata discovery at every address.
+				return new RetainedAmount(null, unavailable);
+			}
+		}
 	}
 }

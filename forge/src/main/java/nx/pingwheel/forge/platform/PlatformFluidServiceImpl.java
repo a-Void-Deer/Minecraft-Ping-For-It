@@ -1,5 +1,7 @@
 package nx.pingwheel.forge.platform;
 
+import java.lang.reflect.Field;
+import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -38,6 +40,8 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 	// Probe owns fixed wrappers/witnesses/profiles only. Native capability/stack getter and VM class
 	// metadata internals are external-trusted; source callback work is composed separately.
 	private static final OperationProfile PROBE = profile(new InventoryValidationBudget.Cost(8192, 8192, 1024), 8, 0);
+	// Includes cold fixed-field metadata bookkeeping, primitive amount access and failure wrapping.
+	// VM reflection internals, like the native getter internals, remain external-trusted.
 	private static final InventoryValidationBudget.Cost READ_OVERHEAD = new InventoryValidationBudget.Cost(1024, 1024, 128);
 	private static final int MAX_REGISTRY_ID_CHARS = 256;
 	private static final OperationProfile WITNESS_CAPTURE = FluidAddressWitness.profile(WitnessUse.CAPTURE, 3);
@@ -193,11 +197,39 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 	private static Entry nativeEntry(IFluidHandler handler, int tank) {
 		@Nullable FluidStack stack = handler.getFluidInTank(tank);
 		if (stack == null) throw new IllegalStateException("null native fluid stack");
-		// Do not call isEmpty first: an invalid negative authoritative getter must fail, not vanish.
+		// Native constructors/NBT/setAmount retain negatives, but getAmount normalizes them to zero.
+		InventoryQuantities.require(retainedAmount(stack));
+		// Keep public getter overrides and native empty normalization for otherwise valid amounts.
 		int amount = stack.getAmount();
 		InventoryQuantities.require(amount);
 		if (amount == 0) return Entry.empty();
 		return borrowed(stack.getFluid(), stack.getTag(), amount);
+	}
+
+	private static int retainedAmount(FluidStack stack) {
+		var metadata = RetainedAmount.METADATA;
+		@Nullable Field field = metadata.field();
+		if (field == null) throw new IllegalStateException("native fluid amount field unavailable", metadata.failure());
+		try { return field.getInt(stack); }
+		catch (IllegalAccessException | RuntimeException | LinkageError unavailable) {
+			throw new IllegalStateException("native fluid amount read unavailable", unavailable);
+		}
+	}
+	/** One fixed native declaration/failure per loader; no stack, handler, world or amount is cached. */
+	@NotNullByDefault
+	private record RetainedAmount(@Nullable Field field, @Nullable Throwable failure) {
+		private static final RetainedAmount METADATA = load();
+		private static RetainedAmount load() {
+			try {
+				Field field = FluidStack.class.getDeclaredField("amount");
+				if (field.getType() != int.class || Modifier.isStatic(field.getModifiers()) || !field.trySetAccessible())
+					throw new IllegalStateException("unsupported native fluid amount declaration");
+				return new RetainedAmount(field, null);
+			} catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
+				// Do not poison class initialization or retry metadata discovery at every address.
+				return new RetainedAmount(null, unavailable);
+			}
+		}
 	}
 
 	/** Only the scalar is converted here. The native tag is neither copied nor pruned before freezing. */
