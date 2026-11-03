@@ -89,6 +89,7 @@ public final class CreateFluidTankAccess {
 		world.require(controller, operation);
 		if (!metadata.isController(entity(master)) || !controller.equals(controller(world, metadata, master, operation)))
 			throw unavailable("Create fluid controller relation");
+		requireStoredFluids(world, metadata, master, operation);
 		world.require(controller, operation); int width = metadata.width(entity(master));
 		world.require(controller, operation); int height = metadata.height(entity(master));
 		world.require(controller, operation); Direction.@Nullable Axis axis = metadata.axis(entity(master));
@@ -131,7 +132,9 @@ public final class CreateFluidTankAccess {
 			if (!master.block().same(world.block(master.position(), operation))) throw unavailable("Create fluid probe controller replaced");
 			requireStatic(world, metadata, master, operation);
 			world.require(master.position(), operation);
-			if (!metadata.isController(entity(master))) throw unavailable("Create fluid probe controller role changed");
+			if (!metadata.isController(entity(master)) || !master.position().equals(controller(world, metadata, master, operation)))
+				throw unavailable("Create fluid probe controller role changed");
+			requireStoredFluids(world, metadata, master, operation);
 			world.require(master.position(), operation);
 			if (metadata.width(entity(master)) != width) throw unavailable("Create fluid probe width changed");
 			world.require(master.position(), operation);
@@ -213,8 +216,12 @@ public final class CreateFluidTankAccess {
 		world.require(member.position(), operation);
 		@Nullable BlockPos last = metadata.lastPosition(entity(member));
 		if (last != null && !last.equals(member.position())) throw unavailable("Create moved fluid tank");
-		world.require(member.position(), operation);
-		if (metadata.activeBoiler(entity(member))) throw unavailable("Create active boiler is not stored fluid");
+	}
+	private static void requireStoredFluids(FluidCapabilityAccess.World world, Metadata metadata, FluidCapabilityAccess.Member master, Operation operation) {
+		// Only the verified current controller selects the capability mode. Former controllers can
+		// keep stale active BoilerData after becoming members; Create does not clear it on that path.
+		world.require(master.position(), operation);
+		if (metadata.activeBoiler(entity(master))) throw unavailable("Create active boiler is not stored fluid");
 	}
 	private static InventorySourceUnavailableException unavailable(String message) { return new InventorySourceUnavailableException(message); }
 	private static InventorySourceUnavailableException unavailable(String message, Throwable cause) {
@@ -253,6 +260,7 @@ public final class CreateFluidTankAccess {
 				if (member.position().equals(capabilityPosition)) {
 					world.require(member.position(), operation); if (metadata.width(entity(member)) != width) return false;
 					world.require(member.position(), operation); if (metadata.height(entity(member)) != height) return false;
+					requireStoredFluids(world, metadata, member, operation);
 				}
 			}
 			return true;

@@ -156,6 +156,59 @@ class CreateFluidTankArchiveTest {
 			if (instruction instanceof org.objectweb.asm.tree.VarInsnNode variable) assertNotEquals(1, variable.var, "Create capability became face-dependent");
 	}
 
+	@Test void singletonMergeAndMemberUpdatesCanLeaveFormerControllerBoilerStateStale() throws Exception {
+		var tank = archive(TANK); var boiler = archive(BOILER);
+		var connectivity = archive("com.simibubi.create.api.connectivity.ConnectivityHandler");
+		var split = connectivity.methods.stream().filter(method -> method.name.equals("splitMultiAndInvalidate")).findFirst().orElseThrow();
+		// A 1x1 singleton returns before removeController/boiler.clear. This exact short circuit
+		// is why promoting a new lower controller need not reset the previous singleton's boiler.
+		var width = calls(split).stream().filter(call -> call.name.equals("getWidth")).findFirst().orElseThrow();
+		var widthStore = nextCode(width); assertEquals(Opcodes.ISTORE, widthStore.getOpcode());
+		var widthLoad = nextCode(widthStore); assertEquals(Opcodes.ILOAD, widthLoad.getOpcode());
+		var widthOne = nextCode(widthLoad); assertEquals(Opcodes.ICONST_1, widthOne.getOpcode());
+		var widthJump = nextCode(widthOne); assertEquals(Opcodes.IF_ICMPNE, widthJump.getOpcode());
+		var heightLoad = nextCode(widthJump); assertEquals(Opcodes.ILOAD, heightLoad.getOpcode());
+		var heightOne = nextCode(heightLoad); assertEquals(Opcodes.ICONST_1, heightOne.getOpcode());
+		var heightJump = nextCode(heightOne); assertEquals(Opcodes.IF_ICMPNE, heightJump.getOpcode());
+		assertEquals(Opcodes.RETURN, nextCode(heightJump).getOpcode());
+		assertTrue(calls(split).stream().anyMatch(call -> call.name.equals("removeController")), "nonsingleton splitting has a different reset path");
+		var remove = tank.methods.stream().filter(method -> method.name.equals("removeController")).findFirst().orElseThrow();
+		assertTrue(calls(remove).stream().anyMatch(call -> call.owner.equals(boiler.name) && call.name.equals("clear")));
+		var merge = connectivity.methods.stream().filter(method -> method.name.equals("tryToFormNewMultiOfWidth")).findFirst().orElseThrow();
+		@Unmodifiable List<String> changes = calls(merge).stream().map(call -> call.name)
+			.filter(name -> List.of("splitMultiAndInvalidate", "setController", "notifyMultiUpdated").contains(name)).toList();
+		assertEquals(List.of("splitMultiAndInvalidate", "setController", "notifyMultiUpdated"), changes);
+		var setController = tank.methods.stream().filter(method -> method.name.equals("setController")).findFirst().orElseThrow();
+		for (AbstractInsnNode instruction : setController.instructions) {
+			if (instruction instanceof FieldInsnNode field) assertFalse(field.name.equals("boiler"));
+			if (instruction instanceof MethodInsnNode call) assertFalse(call.owner.equals(boiler.name), "member assignment does not clear/evaluate the old boiler");
+		}
+		var notify = tank.methods.stream().filter(method -> method.name.equals("notifyMultiUpdated")).findFirst().orElseThrow();
+		assertTrue(calls(notify).stream().anyMatch(call -> call.name.equals("updateBoilerState")));
+		var update = tank.methods.stream().filter(method -> method.name.equals("updateBoilerState")).findFirst().orElseThrow();
+		assertEquals("isController", calls(update).getFirst().name);
+		assertEquals(Opcodes.IFNE, nextCode(calls(update).getFirst()).getOpcode());
+		assertEquals(Opcodes.RETURN, nextCode(nextCode(calls(update).getFirst())).getOpcode());
+		assertTrue(calls(update).stream().anyMatch(call -> call.owner.equals(boiler.name) && call.name.equals("evaluate")));
+		var engine = archive("com.simibubi.create.content.kinetics.steamEngine.SteamEngineBlock");
+		for (String name : List.of("onPlace", "onRemove")) {
+			var callback = engine.methods.stream().filter(method -> method.name.equals(name)).findFirst().orElseThrow();
+			assertTrue(calls(callback).stream().anyMatch(call -> call.owner.equals("com/simibubi/create/content/fluids/tank/FluidTankBlock")
+				&& call.name.equals("updateBoilerState")), name);
+		}
+		var block = archive(TANK_BLOCK);
+		var forward = block.methods.stream().filter(method -> method.name.equals("updateBoilerState")).findFirst().orElseThrow();
+		@Unmodifiable List<String> route = calls(forward).stream().map(call -> call.name)
+			.filter(name -> List.of("getControllerBE", "updateBoilerState").contains(name)).toList();
+		assertEquals(List.of("getControllerBE", "updateBoilerState"), route, "engine removal updates the current controller, not the former controller's local boiler");
+	}
+
+	private static AbstractInsnNode nextCode(AbstractInsnNode instruction) {
+		@Nullable AbstractInsnNode next = instruction.getNext();
+		while (next != null && next.getOpcode() < 0) next = next.getNext();
+		return java.util.Objects.requireNonNull(next, "missing archive instruction");
+	}
+
 	private static @Unmodifiable List<MethodInsnNode> calls(MethodNode method) {
 		var result = new java.util.ArrayList<MethodInsnNode>();
 		for (AbstractInsnNode instruction : method.instructions) if (instruction instanceof MethodInsnNode call) result.add(call);

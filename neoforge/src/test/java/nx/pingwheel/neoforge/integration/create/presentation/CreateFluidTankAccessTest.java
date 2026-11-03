@@ -31,6 +31,8 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Real safety-route algorithm with detached metadata ports; not a live Create/capability launch. */
@@ -67,13 +69,13 @@ class CreateFluidTankAccessTest {
 		}
 	}
 
-	@Test void creativeBoilerVirtualAndMovedStructuresFailBeforeCapabilityWithoutAContentFallback() {
-		for (String fault : List.of("creative", "boiler-root", "boiler-controller", "boiler-member", "virtual", "moved", "wrong-axis", "wrong-controller")) {
-			var world = new World(2, 1); BlockPos hit = new BlockPos(1, 0, 1), other = new BlockPos(1, 0, 0);
-			var member = world.entities.get(fault.equals("boiler-controller") ? BlockPos.ZERO : fault.equals("boiler-member") ? other : hit);
+	@Test void creativeCurrentBoilerVirtualAndMovedStructuresFailBeforeCapabilityWithoutAContentFallback() {
+		for (String fault : List.of("creative", "boiler-controller", "virtual", "moved", "wrong-axis", "wrong-controller")) {
+			var world = new World(2, 1); BlockPos hit = new BlockPos(1, 0, 1);
+			var member = world.entities.get(fault.equals("boiler-controller") ? BlockPos.ZERO : hit);
 			switch (fault) {
 				case "creative" -> member.ordinary = false;
-				case "boiler-root", "boiler-controller", "boiler-member" -> member.active = true;
+				case "boiler-controller" -> member.active = true;
 				case "virtual" -> member.virtual = true;
 				case "moved" -> member.last = hit.above();
 				case "wrong-axis" -> member.axis = Direction.Axis.X;
@@ -83,6 +85,42 @@ class CreateFluidTankAccessTest {
 			assertThrows(InventorySourceUnavailableException.class, () -> access(world, hit, Direction.NORTH), fault);
 			assertTrue(world.queryPositions.isEmpty(), fault); assertEquals(0, world.handler.reads);
 		}
+	}
+
+	@ParameterizedTest @ValueSource(ints = {0, 1, 2})
+	void inactiveCurrentControllerAcceptsStaleFormerControllerBoilerWithoutProbingMemberBoilers(int hitY) {
+		var world = new World(1, 3); BlockPos former = BlockPos.ZERO.above();
+		world.entities.get(former).active = true;
+		try (var access = access(world, BlockPos.ZERO.above(hitY), Direction.NORTH)) {
+			assertTrue(access.valid()); assertEquals(3, access.layout().members().size());
+			var paid = new InventoryValidationBudget.Allowance(access.readCost());
+			assertTrue(access.consume(0, entry -> { assertEquals(81_000, entry.amount()); return true; }, paid));
+			assertTrue(paid.attemptedWorkUnits() > 0); assertTrue(paid.attemptedWorkUnits() <= access.readCost().workUnits());
+			assertFalse(world.boilerReads.isEmpty());
+			assertTrue(world.boilerReads.stream().allMatch(entity -> entity == world.entities.get(BlockPos.ZERO)),
+				"local boiler data is meaningful only on the verified current controller");
+			assertTrue(world.queryPositions.stream().allMatch(BlockPos.ZERO::equals));
+			assertTrue(world.queryFaces.stream().allMatch(face -> face == Direction.NORTH));
+		}
+		assertTrue(world.entities.get(former).active, "read validation must not clear Create's stale member state");
+		assertEquals(1, world.handler.reads, "one owned controller quantity per hit, not a member sum");
+	}
+
+	@Test void activeCurrentControllerRejectsEveryHitEvenWithAnOrdinaryStoredHandlerAndStaleActiveFormerController() {
+		for (BlockPos hit : List.of(BlockPos.ZERO, BlockPos.ZERO.above(), BlockPos.ZERO.above(2))) {
+			var world = new World(1, 3);
+			world.entities.get(BlockPos.ZERO).active = true; world.entities.get(BlockPos.ZERO.above()).active = true;
+			assertThrows(InventorySourceUnavailableException.class, () -> access(world, hit, Direction.NORTH));
+			assertTrue(world.queryPositions.isEmpty()); assertEquals(0, world.handler.reads);
+		}
+	}
+
+	@Test void controllerChangeDuringModeValidationCannotBorrowTheFormerMastersCapability() {
+		var world = new World(1, 3); var master = world.entities.get(BlockPos.ZERO);
+		world.entities.get(BlockPos.ZERO.above()).active = true;
+		world.afterBoiler = () -> { master.master = false; master.controller = BlockPos.ZERO.above(); };
+		assertThrows(InventorySourceUnavailableException.class, () -> access(world, BlockPos.ZERO.above(2), Direction.NORTH));
+		assertTrue(world.queryPositions.isEmpty()); assertEquals(0, world.handler.reads);
 	}
 
 	@Test void absentOrUntestedRouteIsRejectedBeforeMetadataAndNoCapabilityCanBeBorrowed() {
@@ -452,11 +490,13 @@ class CreateFluidTankAccessTest {
 		private final Set<BlockPos> allowed = new HashSet<>(), loaded = new HashSet<>();
 		private final List<BlockPos> blockReads = new ArrayList<>(), queryPositions = new ArrayList<>();
 		private final List<Direction> queryFaces = new ArrayList<>();
+		private final List<Object> boilerReads = new ArrayList<>();
 		private final Object blockType;
 		private Handler handler = new Handler();
 		private boolean available = true, handlerStored = true, missingCapability, requireAllBeforeCapability;
 		private int metadataCalls, requireCalls;
 		private Runnable afterCapability = () -> {};
+		private Runnable afterBoiler = () -> {};
 		private @Nullable BlockPos throwAt;
 		private InventoryValidationBudget.Cost memberCost = GATE, authorityCost = GATE;
 		private World(int width, int height) {
@@ -497,7 +537,7 @@ class CreateFluidTankAccessTest {
 		private Member member(Object object) { metadataCalls++; return (Member) object; }
 		@Override public boolean virtual(Object entity) { return member(entity).virtual; }
 		@Override public @Nullable BlockPos lastPosition(Object entity) { return member(entity).last; }
-		@Override public boolean activeBoiler(Object entity) { return member(entity).active; }
+		@Override public boolean activeBoiler(Object entity) { boilerReads.add(entity); boolean active = member(entity).active; afterBoiler.run(); return active; }
 		@Override public @Nullable BlockPos controller(Object entity) { return member(entity).controller; }
 		@Override public boolean isController(Object entity) { return member(entity).master; }
 		@Override public int width(Object entity) { return member(entity).width; }

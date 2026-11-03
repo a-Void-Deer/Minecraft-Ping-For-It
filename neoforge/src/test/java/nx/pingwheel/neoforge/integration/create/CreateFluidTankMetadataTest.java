@@ -9,6 +9,8 @@ import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.level.material.Fluids;
+import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.capability.IFluidHandler;
 import nx.pingwheel.common.platform.IPlatformFluidService;
 import nx.pingwheel.common.platform.IPlatformFluidService.Operation;
@@ -21,6 +23,8 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.tree.ClassNode;
 import static nx.pingwheel.neoforge.integration.create.VaultOptionalHarness.*;
@@ -74,12 +78,90 @@ class CreateFluidTankMetadataTest {
 		} finally { Thread.currentThread().setContextClassLoader(previous); }
 	}
 
+	@ParameterizedTest @ValueSource(ints = {0, 1, 2})
+	void formerControllerRetainsRealArchiveActiveBoilerButInactiveMasterOwnsTheOnlyReadableTank(int hitY) throws Exception {
+		var loader = new Loader(""); var world = new World(loader, 3);
+		Object former = java.util.Objects.requireNonNull(world.blocks.get(BlockPos.ZERO.above()).entity());
+		Object staleBoiler = java.util.Objects.requireNonNull(field(former.getClass(), "boiler").get(former));
+		field(staleBoiler.getClass(), "attachedEngines").setInt(staleBoiler, 1);
+		assertEquals(true, staleBoiler.getClass().getMethod("isActive").invoke(staleBoiler));
+		// This is the actual archive early-return body, not a fixture boolean. A normal member
+		// update does not evaluate or clear the boiler that belonged to its previous controller role.
+		former.getClass().getMethod("updateBoilerState").invoke(former);
+		assertEquals(1, field(staleBoiler.getClass(), "attachedEngines").getInt(staleBoiler));
+		((net.neoforged.neoforge.fluids.capability.templates.FluidTank) world.ownTank).setFluid(new FluidStack(Fluids.WATER, 1000));
+		try (var access = access(loader, world, BlockPos.ZERO.above(hitY))) {
+			assertTrue(access.valid()); assertEquals(3, access.layout().members().size());
+			assertTrue(access.consume(0, entry -> { assertEquals(81_000, entry.amount()); return true; }));
+		}
+		assertEquals(1, field(staleBoiler.getClass(), "attachedEngines").getInt(staleBoiler), "access is read-only even for ignored local state");
+		assertEquals(true, staleBoiler.getClass().getMethod("isActive").invoke(staleBoiler));
+	}
+
+	@Test void actualActiveControllerRejectsAllHitsEvenWhenCapabilityStillNamesItsOrdinarySmartTank() throws Exception {
+		var loader = new Loader(""); var world = new World(loader, 3);
+		for (BlockPos position : List.of(BlockPos.ZERO, BlockPos.ZERO.above())) {
+			Object entity = java.util.Objects.requireNonNull(world.blocks.get(position).entity());
+			Object boiler = java.util.Objects.requireNonNull(field(entity.getClass(), "boiler").get(entity));
+			field(boiler.getClass(), "attachedEngines").setInt(boiler, 1);
+			assertEquals(true, boiler.getClass().getMethod("isActive").invoke(boiler));
+		}
+		for (BlockPos hit : List.of(BlockPos.ZERO, BlockPos.ZERO.above(), BlockPos.ZERO.above(2))) {
+			var failure = assertThrows(InvocationTargetException.class, () -> access(loader, world, hit));
+			assertInstanceOf(InventorySourceUnavailableException.class, failure.getCause());
+		}
+		assertEquals(0, world.capabilityCalls, "mode rejection must not depend on a returned SmartFluidTank type");
+	}
+
+	@Test void staleMemberBoilerDoesNotAuthorizeForeignHandlerOrMismatchedMemberController() throws Exception {
+		for (boolean foreignHandler : new boolean[] {true, false}) {
+			var loader = new Loader(""); var world = new World(loader, 3);
+			Object former = java.util.Objects.requireNonNull(world.blocks.get(BlockPos.ZERO.above()).entity());
+			Object boiler = java.util.Objects.requireNonNull(field(former.getClass(), "boiler").get(former));
+			field(boiler.getClass(), "attachedEngines").setInt(boiler, 1);
+			if (foreignHandler) world.handler = (IFluidHandler) loader.loadClass(STORED).getConstructor(int.class, java.util.function.Consumer.class)
+				.newInstance(1000, (java.util.function.Consumer<Object>) ignored -> {});
+			else field(former.getClass(), "controller").set(former, BlockPos.ZERO.above(2));
+			assertThrows(InventorySourceUnavailableException.class, () -> access(loader, world, BlockPos.ZERO.above(2)));
+			assertEquals(foreignHandler ? 1 : 0, world.capabilityCalls);
+		}
+	}
+
+	@Test void realControllerModeOrRelationChangesRetireStaleMemberRoutesBeforeReadingOrAcceptingBorrowedContents() throws Exception {
+		for (String change : List.of("before-read-mode", "during-read-mode", "during-read-controller")) {
+			var loader = new Loader(""); var world = new World(loader, 3);
+			Object former = java.util.Objects.requireNonNull(world.blocks.get(BlockPos.ZERO.above()).entity());
+			Object oldBoiler = java.util.Objects.requireNonNull(field(former.getClass(), "boiler").get(former));
+			field(oldBoiler.getClass(), "attachedEngines").setInt(oldBoiler, 1);
+			Object currentBoiler = java.util.Objects.requireNonNull(field(world.controller.getClass(), "boiler").get(world.controller));
+			try (var access = access(loader, world, BlockPos.ZERO.above())) {
+				if (change.equals("before-read-mode")) {
+					field(currentBoiler.getClass(), "attachedWhistles").setInt(currentBoiler, 1);
+					assertFalse(access.valid());
+					assertThrows(InventorySourceUnavailableException.class, () -> access.consume(0, entry -> fail("active controller cannot read")));
+				} else {
+					assertThrows(InventorySourceUnavailableException.class, () -> access.consume(0, entry -> {
+						try {
+							if (change.equals("during-read-mode")) field(currentBoiler.getClass(), "attachedEngines").setInt(currentBoiler, 1);
+							else field(world.controller.getClass(), "controller").set(world.controller, BlockPos.ZERO.above());
+						} catch (Exception failure) { throw new AssertionError(failure); }
+						return true;
+					}));
+				}
+			}
+			assertEquals(1, field(oldBoiler.getClass(), "attachedEngines").getInt(oldBoiler));
+		}
+	}
+
 	private static PaidAccess access(Loader loader, World world) throws Exception {
+		return access(loader, world, BlockPos.ZERO.above());
+	}
+	private static PaidAccess access(Loader loader, World world, BlockPos hit) throws Exception {
 		try (var a = admission(); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE)) {
 			op.allowance().debit(FluidCapabilityAccess.PROBE_PROFILE.ownedCost());
 			try (var probe = (IPlatformFluidService.Probe) loader.loadClass(ACCESS).getMethod("probe", FluidCapabilityAccess.World.class,
 				BlockPos.class, Direction.class, FluidCapabilityAccess.Block.class, Operation.class)
-				.invoke(null, world, BlockPos.ZERO.above(), Direction.WEST, world.blocks.get(BlockPos.ZERO.above()), op)) {
+				.invoke(null, world, hit, Direction.WEST, java.util.Objects.requireNonNull(world.blocks.get(hit)), op)) {
 				return new PaidAccess(probe.finish(a).orElseThrow());
 			}
 		}
@@ -91,27 +173,30 @@ class CreateFluidTankMetadataTest {
 		private final Object controller;
 		private final IFluidHandler ownTank;
 		private IFluidHandler handler;
-		private int requireCalls;
-		private World(Loader loader) throws Exception {
+		private int requireCalls, capabilityCalls;
+		private final int height;
+		private World(Loader loader) throws Exception { this(loader, 2); }
+		private World(Loader loader, int height) throws Exception {
+			this.height = height;
 			Object block = allocate(loader.loadClass(BLOCK));
 			ownTank = (IFluidHandler) loader.loadClass(STORED).getConstructor(int.class, java.util.function.Consumer.class).newInstance(1000, (java.util.function.Consumer<Object>) ignored -> {});
 			handler = ownTank;
 			controller = entity(loader, BlockPos.ZERO, null);
-			var member = entity(loader, BlockPos.ZERO.above(), BlockPos.ZERO);
 			blocks.put(BlockPos.ZERO, new FluidCapabilityAccess.Block(block, controller, "create:fluid_tank", "create:fluid_tank"));
-			blocks.put(BlockPos.ZERO.above(), new FluidCapabilityAccess.Block(block, member, "create:fluid_tank", "create:fluid_tank"));
+			for (int y = 1; y < height; y++) blocks.put(BlockPos.ZERO.above(y),
+				new FluidCapabilityAccess.Block(block, entity(loader, BlockPos.ZERO.above(y), BlockPos.ZERO), "create:fluid_tank", "create:fluid_tank"));
 		}
 		private Object entity(Loader loader, BlockPos position, @Nullable BlockPos parent) throws Exception {
 			Object entity = allocate(loader.loadClass(TANK));
 			field(net.minecraft.world.level.block.entity.BlockEntity.class, "worldPosition").set(entity, position);
 			field(entity.getClass(), "controller").set(entity, parent);
-			field(entity.getClass(), "width").setInt(entity, 1); field(entity.getClass(), "height").setInt(entity, 2);
+			field(entity.getClass(), "width").setInt(entity, 1); field(entity.getClass(), "height").setInt(entity, height);
 			field(entity.getClass(), "boiler").set(entity, allocate(loader.loadClass(BOILER)));
 			field(entity.getClass(), "tankInventory").set(entity, ownTank); return entity;
 		}
 		@Override public void require(BlockPos position, Operation operation) { gate(operation); requireCalls++; if (!blocks.containsKey(position)) throw new InventorySourceUnavailableException("unknown member"); }
 		@Override public FluidCapabilityAccess.Block block(BlockPos position, Operation operation) { require(position, operation); return java.util.Objects.requireNonNull(blocks.get(position)); }
-		@Override public @Nullable IFluidHandler capability(BlockPos position, Direction face, Operation operation) { require(position, operation); assertEquals(BlockPos.ZERO, position); assertEquals(Direction.WEST, face); return handler; }
+		@Override public @Nullable IFluidHandler capability(BlockPos position, Direction face, Operation operation) { require(position, operation); capabilityCalls++; assertEquals(BlockPos.ZERO, position); assertEquals(Direction.WEST, face); return handler; }
 		@Override public String dimension(Operation operation) { return "minecraft:overworld"; }
 		@Override public boolean createAvailable() { return true; }
 	}
@@ -144,7 +229,7 @@ class CreateFluidTankMetadataTest {
 				? "net/minecraft/world/level/block/entity/BlockEntity" : name.equals(BLOCK) ? "net/minecraft/world/level/block/Block" : "java/lang/Object";
 			if (name.equals(TANK)) {
 				for (var field : original.fields) if (List.of("controller", "lastKnownPos", "width", "height", "boiler", "tankInventory").contains(field.name)) copy.fields.add(field);
-				for (var method : original.methods) if (METHODS.contains(method.name) && !method.name.equals(drift)) copy.methods.add(method);
+				for (var method : original.methods) if ((METHODS.contains(method.name) || method.name.equals("updateBoilerState")) && !method.name.equals(drift)) copy.methods.add(method);
 			} else if (name.equals(SMART)) {
 				copy.fields.add(original.fields.stream().filter(field -> field.name.equals("virtualMode")).findFirst().orElseThrow());
 				copy.methods.add(original.methods.stream().filter(method -> method.name.equals("isVirtual")).findFirst().orElseThrow());
