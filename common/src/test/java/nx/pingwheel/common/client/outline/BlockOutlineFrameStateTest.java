@@ -101,6 +101,44 @@ class BlockOutlineFrameStateTest {
 	}
 
 	@Test
+	void modelFlushAppliesOnlyTheCameraRotationAndRestoresStateOnFailure() {
+		Matrix4f cameraRotation = new Matrix4f().rotateY(0.6F).rotateX(-0.2F);
+		FakeRenderState renderState = new FakeRenderState(
+			new Matrix4f().translation(1.0F, 2.0F, 3.0F),
+			new Matrix4f().scaling(2.0F),
+			VertexSorting.byDistance(4.0F, 5.0F, 6.0F));
+		Matrix4f ambientModelView = new Matrix4f(renderState.modelView);
+		Matrix4f ambientProjection = new Matrix4f(renderState.projection);
+		VertexSorting ambientSorting = renderState.sorting;
+		Matrix4f observed = new Matrix4f();
+
+		// The attempt vertices are camera-relative and carry no rotation, so
+		// the flush must see exactly the camera-rotation view and nothing else.
+		BlockOutlineFrameState.withCameraRotation(
+			cameraRotation, renderState, () -> observed.set(renderState.modelView));
+
+		assertTrue(observed.equals(cameraRotation));
+		assertTrue(renderState.modelView.equals(ambientModelView));
+		assertTrue(renderState.projection.equals(ambientProjection));
+		assertSame(ambientSorting, renderState.sorting,
+			"a model flush must not touch the ambient projection or sorting");
+		assertEquals(1, renderState.pushes);
+		assertEquals(1, renderState.pops);
+		assertEquals(2, renderState.applies);
+
+		assertThrows(IllegalStateException.class, () ->
+			BlockOutlineFrameState.withCameraRotation(cameraRotation, renderState, () -> {
+				throw new IllegalStateException("simulated model flush failure");
+			}));
+
+		assertTrue(renderState.modelView.equals(ambientModelView),
+			"a failed flush must not leak the rotated view into the vanilla outline batch");
+		assertEquals(2, renderState.pushes);
+		assertEquals(2, renderState.pops);
+		assertEquals(4, renderState.applies);
+	}
+
+	@Test
 	void snapshotsAreDefensiveConsumedOnceAndRestoreStateAfterFailure() {
 		Matrix4f modelView = new Matrix4f().rotateY(0.35F);
 		Matrix4f projection = new Matrix4f().scaling(0.7F);

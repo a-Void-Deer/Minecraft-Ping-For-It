@@ -372,18 +372,19 @@ public class CommonClient {
 	 * pass consults to avoid doubling.
 	 */
 	public void renderModelOutlines(
+		org.joml.Matrix4f cameraPose,
 		Camera camera,
 		float builtInPartialTick,
 		float flywheelPartialTick
 	) {
 		Minecraft game = Game;
 
-		if (game == null || game.level == null) {
+		if (game == null || game.level == null || cameraPose == null) {
 			return;
 		}
 
 		VirtualBlockDisplayRenderer.INSTANCE.render(
-			game.level, camera, builtInPartialTick, flywheelPartialTick,
+			cameraPose, game.level, camera, builtInPartialTick, flywheelPartialTick,
 			BlockOutlineState.INSTANCE, BlockModelOutlineState.INSTANCE);
 	}
 

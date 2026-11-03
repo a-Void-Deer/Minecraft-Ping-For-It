@@ -62,15 +62,23 @@ public abstract class LevelRendererMixin {
 		// resets the per-frame model-outline processed flag and the model
 		// outline success record.
 		this.modelOutlinesProcessed = false;
-		// The late VoxelShape pass must use this exact applied world transform,
-		// not mutable camera or RenderSystem state from a later render hook.
+
+		// 1.20.1 GameRenderer has already applied the camera X/Y rotation to
+		// this PoseStack before calling renderLevel; it is rotation-only and
+		// never contains the camera translation. That is exactly the view
+		// matrix camera-relative geometry needs, and it is the same matrix
+		// vanilla uses for clouds and billboards. Do not use the ambient
+		// RenderSystem model view: it does not carry this rotation.
+		Matrix4f cameraPose = new Matrix4f(poseStack.last().pose());
+
 		BlockOutlineFrameState.INSTANCE.capture(
-			RenderSystem.getModelViewMatrix(),
-			RenderSystem.getProjectionMatrix(),
+			cameraPose,
+			projectionMatrix,
 			RenderSystem.getVertexSorting(),
 			camera.getPosition(),
 			partialTick);
-		CommonClient.INSTANCE.onRenderWorld(WorldRenderContext.of(RenderSystem.getModelViewMatrix(), RenderSystem.getProjectionMatrix(), partialTick, camera));
+		CommonClient.INSTANCE.onRenderWorld(
+			WorldRenderContext.of(cameraPose, projectionMatrix, partialTick, camera));
 	}
 
 	/**
@@ -92,7 +100,12 @@ public abstract class LevelRendererMixin {
 			|| CommonClient.INSTANCE.entityOutlineRequestSucceededThisFrame();
 
 		if (outlinePipelineAvailable) {
+			// The model pass writes camera-relative vertices, so its local
+			// buffer flushes must add the same camera rotation used for the
+			// late VoxelShape pass. The pose stack base pose is unchanged at
+			// this anchor (vanilla verifies it with checkPoseStack()).
 			CommonClient.INSTANCE.renderModelOutlines(
+				new Matrix4f(poseStack.last().pose()),
 				camera,
 				partialTick,
 				partialTick);

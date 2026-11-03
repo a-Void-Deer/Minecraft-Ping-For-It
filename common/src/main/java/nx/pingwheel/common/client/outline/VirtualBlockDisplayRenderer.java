@@ -13,6 +13,7 @@ import java.util.function.Supplier;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Camera;
+import org.joml.Matrix4f;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.LevelRenderer;
@@ -151,6 +152,17 @@ public final class VirtualBlockDisplayRenderer {
 	private Display.BlockDisplay cachedDisplay;
 	private final EntityBlockGeometryRunner entityBlockGeometryRunner;
 
+	/**
+	 * Camera-rotation view matrix for the model pass currently executing.
+	 *
+	 * <p>1.20.1 world geometry is camera-relative on the CPU and the ambient
+	 * model view carries no camera rotation, so every attempt-local flush must
+	 * add it explicitly. The field is set only for the duration of
+	 * {@link #render} and is render-thread confined, which lets the geometry
+	 * sources keep their fixed {@code EntityBlockGeometryContext} signatures.</p>
+	 */
+	private Matrix4f cameraPose;
+
 	private VirtualBlockDisplayRenderer() {
 		// These built-ins are owned by the runner and intentionally never enter
 		// the optional/modded registry.
@@ -176,6 +188,26 @@ public final class VirtualBlockDisplayRenderer {
 	 * subjects. Main thread only.
 	 */
 	public void render(
+		Matrix4f cameraPose,
+		ClientLevel level,
+		Camera camera,
+		float builtInPartialTick,
+		float flywheelPartialTick,
+		BlockOutlineState state,
+		BlockModelOutlineState frameState
+	) {
+		Objects.requireNonNull(cameraPose, "cameraPose");
+
+		this.cameraPose = new Matrix4f(cameraPose);
+
+		try {
+			renderPass(level, camera, builtInPartialTick, flywheelPartialTick, state, frameState);
+		} finally {
+			this.cameraPose = null;
+		}
+	}
+
+	private void renderPass(
 		ClientLevel level,
 		Camera camera,
 		float builtInPartialTick,
@@ -242,6 +274,25 @@ public final class VirtualBlockDisplayRenderer {
 				"block outline model pass: %d attempts failed across %d block types; voxel fallback applied"
 					.formatted(attempts, frameFailures.size()));
 		}
+	}
+
+	/**
+	 * Flushes one attempt-local buffer with the camera-rotation view matrix.
+	 *
+	 * <p>The attempt vertices are camera-relative and carry no rotation, so the
+	 * camera rotation is applied to the global model view only for this flush
+	 * and restored immediately afterwards. The shared vanilla outline buffer is
+	 * never touched: it is flushed by vanilla with its own state.</p>
+	 */
+	private void flushAttempt(MultiBufferSource.BufferSource localSource) {
+		Matrix4f pose = this.cameraPose;
+
+		if (pose == null) {
+			localSource.endBatch();
+			return;
+		}
+
+		BlockOutlineFrameState.withCameraRotation(pose, localSource::endBatch);
 	}
 
 	private void renderPresentationSubjects(
@@ -553,7 +604,7 @@ public final class VirtualBlockDisplayRenderer {
 				}
 
 				stage = FailureStage.FLUSH;
-				localSource.endBatch();
+				flushAttempt(localSource);
 				return outcome;
 			}
 		} catch (Exception | LinkageError | AssertionError throwable) {
@@ -649,7 +700,7 @@ public final class VirtualBlockDisplayRenderer {
 			}
 
 			stage = FailureStage.FLUSH;
-			localSource.endBatch();
+			flushAttempt(localSource);
 			return outcome;
 		} catch (Exception | LinkageError | AssertionError failure) {
 			recordFailure(
@@ -822,7 +873,7 @@ public final class VirtualBlockDisplayRenderer {
 			}
 
 			stage = FailureStage.FLUSH;
-			localSource.endBatch();
+			flushAttempt(localSource);
 			return outcome;
 		} catch (Exception | LinkageError | AssertionError throwable) {
 			// Setup and render share one fail-soft path. A partially mutated

@@ -56,6 +56,48 @@ public final class BlockOutlineFrameState {
 		renderWithFrame(frame, RenderSystemAccess.INSTANCE, renderer);
 	}
 
+	/**
+	 * Runs a camera-relative draw with the given camera-rotation view matrix as
+	 * the global model view. The ambient projection is deliberately left
+	 * untouched: during the world pass the projection is already the world
+	 * projection, and the model-outline flushes must only add the missing
+	 * camera rotation.
+	 *
+	 * <p>The previous model view is restored on every exit path, including an
+	 * exceptional one, so a failed attempt can never leak a rotated view into
+	 * the vanilla outline flush that follows.</p>
+	 */
+	public static void withCameraRotation(Matrix4f cameraRotation, Runnable renderer) {
+		withCameraRotation(cameraRotation, RenderSystemAccess.INSTANCE, renderer);
+	}
+
+	/** Visible to focused package tests through a small render-state seam. */
+	static void withCameraRotation(
+		Matrix4f cameraRotation, RenderStateAccess renderState, Runnable renderer
+	) {
+		Objects.requireNonNull(cameraRotation, "cameraRotation");
+		Objects.requireNonNull(renderState, "renderState");
+		Objects.requireNonNull(renderer, "renderer");
+
+		boolean modelViewPushed = false;
+
+		try {
+			renderState.pushModelView();
+			modelViewPushed = true;
+			renderState.setModelView(cameraRotation);
+			renderState.applyModelView();
+			renderer.run();
+		} finally {
+			if (modelViewPushed) {
+				try {
+					renderState.popModelView();
+				} finally {
+					renderState.applyModelView();
+				}
+			}
+		}
+	}
+
 	/** Visible to focused package tests through a small render-state seam. */
 	static void renderWithFrame(
 		FrameTransform frame, RenderStateAccess renderState, Runnable renderer
