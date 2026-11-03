@@ -15,6 +15,7 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.material.Fluids;
 import nx.pingwheel.common.platform.IPlatformFluidService;
+import nx.pingwheel.common.platform.IPlatformFluidDescriptionService;
 import nx.pingwheel.common.presentation.inventory.InventoryFluidCodec;
 import nx.pingwheel.common.presentation.inventory.InventoryFluidDisplayCodec;
 import nx.pingwheel.common.presentation.inventory.InventoryFluidValue;
@@ -34,6 +35,88 @@ class InventoryFluidFreezerTest {
 	private static InventoryFluidValue nbt(@Nullable CompoundTag tag, long amount) {
 		return java.util.Objects.requireNonNull(InventoryFluidFreezer.freeze(new IPlatformFluidService.Entry(new IPlatformFluidService.Nbt(Fluids.WATER, tag), amount),
 			RegistryAccess.EMPTY, 1024, new InventoryFluidCodec.Catalog(), admission()));
+	}
+	@Test void unavailableNativeDescriptionUsesLiteralRegistryIdentityNotAnInventedBlockKey() {
+		var frozen = freezeName(fluid -> null, 9007199254740993L);
+		assertEquals("minecraft:water", frozen.display().label());
+		assertEquals(9007199254740993L, frozen.amount()); assertFalse(frozen.aggregateRequired());
+	}
+	private static InventoryFluidValue freezeName(IPlatformFluidDescriptionService descriptions, long amount) {
+		return java.util.Objects.requireNonNull(InventoryFluidFreezer.freeze(
+			new IPlatformFluidService.Entry(new IPlatformFluidService.Nbt(Fluids.WATER, null), amount),
+			RegistryAccess.EMPTY, 1024, new InventoryFluidCodec.Catalog(), admission(), descriptions));
+	}
+	@Test void nativeTranslationLabelIsDiscoveredAfterIdentityWithoutBecomingCustomName() {
+		int[] calls = {0};
+		var exact = freezeName(fluid -> { calls[0]++; assertSame(Fluids.WATER, fluid);
+			return new IPlatformFluidDescriptionService.Translation("fluid.create.tea", "Builder's Tea"); }, Long.MAX_VALUE);
+		assertEquals(1, calls[0]); assertEquals("fluid.create.tea", exact.display().label());
+		assertNull(InventoryFluidDisplayCodec.decodeStrict(exact.displayJson()).customName());
+		var literal = freezeName(fluid -> new IPlatformFluidDescriptionService.Literal("Base literal"), 81);
+		assertEquals("minecraft:water", literal.display().label()); assertNull(InventoryFluidDisplayCodec.decodeStrict(literal.displayJson()).customName());
+		assertEquals(exact.key(), literal.key()); assertFalse(exact.aggregateRequired()); assertFalse(literal.aggregateRequired());
+		assertEquals(Long.MAX_VALUE, exact.amount()); assertEquals(81, literal.amount());
+	}
+	@Test void nameHookFailuresCannotFoldOrChangeAmountAndActualCaptureRefusalStillEscapes() {
+		var before = freezeName(fluid -> null, 9007199254740993L);
+		for (Throwable failure : new Throwable[] {new IllegalStateException("name"), new NoClassDefFoundError("optional"), new java.util.ServiceConfigurationError("service")}) {
+			var after = freezeName(fluid -> { if (failure instanceof RuntimeException runtime) throw runtime; throw (Error) failure; }, before.amount());
+			assertEquals(before.key(), after.key()); assertEquals(before.amount(), after.amount());
+			assertEquals(before.aggregateRequired(), after.aggregateRequired()); assertEquals(before.display(), after.display());
+		}
+		assertThrows(InventoryItemBudget.CaptureLimitException.class, () -> freezeName(fluid -> { throw new InventoryItemBudget.CaptureLimitException("grant"); }, 81));
+	}
+	@Test void nativeFirstInitializationCaptureFailureEscapesFreezerWithoutInstallingSuccessfulObservation() throws Exception {
+		var initializer = new ClassLoader(getClass().getClassLoader()) {
+			@Override protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+				if (!name.equals(InitializingNameProvider.class.getName()) && !name.equals(LazyNativeName.class.getName())) return super.loadClass(name, resolve);
+				synchronized (getClassLoadingLock(name)) {
+					@Nullable Class<?> found = findLoadedClass(name);
+					if (found == null) try (var input = getParent().getResourceAsStream(name.replace('.', '/') + ".class")) {
+						if (input == null) throw new ClassNotFoundException(name);
+						byte[] bytes = input.readAllBytes(); found = defineClass(name, bytes, 0, bytes.length);
+					} catch (java.io.IOException failure) { throw new ClassNotFoundException(name, failure); }
+					if (resolve) resolveClass(found); return found;
+				}
+			}
+		};
+		var provider = (IPlatformFluidDescriptionService) initializer.loadClass(InitializingNameProvider.class.getName()).getConstructor().newInstance();
+		var catalog = new InventoryFluidCodec.Catalog();
+		var entry = new IPlatformFluidService.Entry(new IPlatformFluidService.Nbt(Fluids.WATER, null), 9007199254740993L);
+		NameInitialization.calls = 0;
+		assertSame(NameInitialization.FAILURE, assertThrows(NameAdmissionFailure.class,
+			() -> InventoryFluidFreezer.freeze(entry, RegistryAccess.EMPTY, 1024, catalog, admission(), provider)));
+		assertEquals(1, NameInitialization.calls); assertEquals(0, catalog.retainedBytes(), "refused name initialization cannot install an observation");
+		var retry = InventoryFluidFreezer.freeze(entry, RegistryAccess.EMPTY, 1024, catalog, admission(), fluid -> null);
+		assertNotNull(retry); assertEquals(entry.amount(), retry.amount()); assertFalse(retry.aggregateRequired());
+		assertEquals(freezeName(fluid -> null, entry.amount()).key(), retry.key(), "normal upper-layer retry keeps exact identity and quantity");
+	}
+	@NotNullByDefault
+	public static final class NameAdmissionFailure extends InventoryItemBudget.CaptureLimitException {
+		public NameAdmissionFailure() { super("native name admission refused"); }
+	}
+	@NotNullByDefault
+	public static final class NameInitialization {
+		public static final NameAdmissionFailure FAILURE = new NameAdmissionFailure();
+		public static int calls;
+		public static IPlatformFluidDescriptionService.Description initialize() { calls++; throw FAILURE; }
+	}
+	@NotNullByDefault
+	public static final class LazyNativeName {
+		public static final IPlatformFluidDescriptionService.Description NAME = NameInitialization.initialize();
+	}
+	@NotNullByDefault
+	public static final class InitializingNameProvider implements IPlatformFluidDescriptionService {
+		@Override public Description describeBase(net.minecraft.world.level.material.Fluid fluid) { return LazyNativeName.NAME; }
+	}
+	@Test void independentlyRefusedIdentityKeepsTheSameAggregateWhenNameFails() {
+		var tag = new CompoundTag(); tag.putString("native", "x".repeat(InventoryFluidCodec.MAX_CANONICAL_BYTES + 1));
+		var entry = new IPlatformFluidService.Entry(new IPlatformFluidService.Nbt(Fluids.WATER, tag), Long.MAX_VALUE);
+		var before = InventoryFluidFreezer.freeze(entry, RegistryAccess.EMPTY, 1024, new InventoryFluidCodec.Catalog(), admission(),
+			fluid -> new IPlatformFluidDescriptionService.Translation("fluid.test.water", null));
+		var after = InventoryFluidFreezer.freeze(entry, RegistryAccess.EMPTY, 1024, new InventoryFluidCodec.Catalog(), admission(), fluid -> { throw new IllegalStateException("name"); });
+		assertNotNull(before); assertNotNull(after); assertTrue(before.aggregateRequired()); assertTrue(after.aggregateRequired());
+		assertEquals(before.key(), after.key()); assertEquals(before.amount(), after.amount());
 	}
 	@Test void nbtOrderNormalizesButNativeTypeListOrderAndAbsentTagRemainDistinct() {
 		var first = new CompoundTag(); first.putInt("a", 1); first.putString("b", "water");

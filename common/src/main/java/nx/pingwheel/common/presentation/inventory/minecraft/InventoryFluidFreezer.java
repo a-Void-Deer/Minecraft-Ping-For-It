@@ -4,6 +4,8 @@ import java.util.Objects;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.material.Fluids;
+import nx.pingwheel.common.platform.FluidDescriptions;
+import nx.pingwheel.common.platform.IPlatformFluidDescriptionService;
 import nx.pingwheel.common.platform.IPlatformFluidService;
 import nx.pingwheel.common.presentation.inventory.InventoryFluidCodec;
 import nx.pingwheel.common.presentation.inventory.InventoryFluidDisplayCodec;
@@ -18,9 +20,14 @@ public final class InventoryFluidFreezer {
 	private InventoryFluidFreezer() {}
 	private static final InventoryResidentAccess RAW = InventoryResidentAccess.load();
 	private static final InventoryItemNativeAccess NATIVE = InventoryItemNativeAccess.load();
+	private static final IPlatformFluidDescriptionService DESCRIPTION = FluidDescriptions::describeBase;
 
 	public static @Nullable InventoryFluidValue freeze(IPlatformFluidService.Entry entry, HolderLookup.Provider registries,
 		int displayBytes, InventoryFluidCodec.Catalog catalog, InventoryCatalogAdmission admission) {
+		return freeze(entry, registries, displayBytes, catalog, admission, DESCRIPTION);
+	}
+	static @Nullable InventoryFluidValue freeze(IPlatformFluidService.Entry entry, HolderLookup.Provider registries,
+		int displayBytes, InventoryFluidCodec.Catalog catalog, InventoryCatalogAdmission admission, IPlatformFluidDescriptionService descriptions) {
 		Objects.requireNonNull(entry); Objects.requireNonNull(registries); Objects.requireNonNull(catalog); Objects.requireNonNull(admission);
 		if (entry.amount() == 0) return null;
 		IPlatformFluidService.Resident resident = Objects.requireNonNull(entry.resident());
@@ -37,7 +44,6 @@ public final class InventoryFluidFreezer {
 			if (length > 256) throw new InventoryItemBudget.InvalidInputException("fluid registry id bound");
 			budget.allocate(1024 + 16L * length, 0, 16, 16); budget.work(8192 + 64L * length);
 			String id = location.toString();
-			String label = "block." + id.replace(':', '.').replace('/', '.');
 			InventoryFluidCodec.Identity identity;
 			try {
 				byte @Unmodifiable [] canonical;
@@ -60,9 +66,15 @@ public final class InventoryFluidFreezer {
 				// registry/amount and later display/catalogue/admission failures are not.
 				identity = InventoryFluidCodec.Identity.refused();
 			}
-			// The ID-only A0 projection fits the legal minimum display ceiling. Native names are optional;
-			// this route never expands a component/NBT text graph merely to obtain display.
-			budget.beginDisplay(); budget.allocate(8192, 0, 24, 24); budget.work(16384);
+			budget.beginDisplay();
+			// Prepay one external base-name call plus the closed projection's bounded key/plain-text
+			// checks and DTO/fallback storage, inside the existing admitted display phase. Native
+			// callback internals remain external-trusted, not an unbounded Ping component traversal.
+			budget.allocate(16384, 0, 32, 32); budget.work(32768);
+			@Nullable var base = FluidDescriptions.describeBase(resident.fluid(), descriptions);
+			String label = base instanceof IPlatformFluidDescriptionService.Translation translation ? translation.key() : id;
+			// A native base literal is not a custom name. Keep the ID-only projection and wire grammar.
+			budget.allocate(8192, 0, 24, 24); budget.work(16384);
 			String json = InventoryFluidDisplayCodec.encode(new InventoryFluidDisplayCodec.Projection(id));
 			var display = new InventoryFluidValue.Display(id, label, json);
 			return catalog.intern(id, entry.amount(), identity, display, admission);
