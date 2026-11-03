@@ -16,18 +16,28 @@ final class SpatialFluidIconRenderer {
 
 	private SpatialFluidIconRenderer() {}
 	static void draw(GuiGraphics graphics, @Nullable Fluid fluid, int x, int y, float tint, float alpha) {
+		draw(graphics, fluid, x, y, tint, alpha, SpatialFluidIconQuad::draw);
+	}
+
+	/** Production dispatch with only the final GPU submission replaceable for headless tests. */
+	static void draw(GuiGraphics graphics, @Nullable Fluid fluid, int x, int y, float tint, float alpha, SpriteDraw draw) {
 		if (fluid == null || alpha <= 0) return;
 		try {
 			@Nullable var sprite = resolve(fluid, FluidSprites::stillSprite, state ->
 				Minecraft.getInstance().getModelManager().getBlockModelShaper().getBlockModel(state).getParticleIcon());
 			if (sprite == null) return;
 			int color = fluid.defaultFluidState().is(FluidTags.WATER) ? 0x3F76E4 : 0xFFFFFF;
-			graphics.blit(x, y, 0, 16, 16, sprite, ((color >> 16) & 255) / 255f * tint,
+			draw.draw(graphics, sprite, x, y, ((color >> 16) & 255) / 255f * tint,
 				((color >> 8) & 255) / 255f * tint, (color & 255) / 255f * tint, alpha);
 		} catch (RuntimeException | LinkageError | java.util.ServiceConfigurationError unavailable) {
 			nx.pingwheel.common.diagnostics.Diagnostics.warn("selector/fluid-icon", "client",
 				() -> "base fluid sprite unavailable; retaining text display", unavailable);
 		}
+	}
+
+	@NotNullByDefault
+	interface SpriteDraw {
+		void draw(GuiGraphics graphics, TextureAtlasSprite sprite, int x, int y, float red, float green, float blue, float alpha);
 	}
 
 	@NotNullByDefault

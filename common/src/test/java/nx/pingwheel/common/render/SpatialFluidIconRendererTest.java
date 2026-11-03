@@ -20,7 +20,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
-/** Real draw dispatch into recording GuiGraphics, without a GPU or Minecraft singleton. */
+/** Production sprite dispatch with only final quad submission replaced; no GPU or Minecraft singleton. */
 @NotNullByDefault
 class SpatialFluidIconRendererTest {
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
@@ -32,7 +32,7 @@ class SpatialFluidIconRendererTest {
 			var graphics = allocate(RecordingGraphics.class);
 			NativeSprites.sprite = sprite; NativeSprites.calls = 0;
 			try {
-				SpatialFluidIconRenderer.draw(graphics, Fluids.EMPTY, 4, 7, .65f, .37f);
+				SpatialFluidIconRenderer.draw(graphics, Fluids.EMPTY, 4, 7, .65f, .37f, graphics::record);
 				assertEquals(1, NativeSprites.calls, "legacy AIR cannot bypass the native base-fluid renderer");
 				assertSame(sprite, graphics.painted); assertEquals(.37f, graphics.alpha); assertEquals(.65f, graphics.red);
 			} finally { NativeSprites.sprite = null; }
@@ -61,14 +61,34 @@ class SpatialFluidIconRendererTest {
 			var first = new Sprite(oldContents); var replacement = new Sprite(newContents);
 			var graphics = allocate(RecordingGraphics.class); NativeSprites.calls = 0;
 			try {
-				NativeSprites.sprite = null; SpatialFluidIconRenderer.draw(graphics, Fluids.EMPTY, 0, 0, 1, 1); assertNull(graphics.painted);
-				NativeSprites.sprite = first; SpatialFluidIconRenderer.draw(graphics, Fluids.EMPTY, 0, 0, 1, 1); assertSame(first, graphics.painted);
-				NativeSprites.sprite = replacement; SpatialFluidIconRenderer.draw(graphics, Fluids.EMPTY, 0, 0, 1, 1); assertSame(replacement, graphics.painted);
+				NativeSprites.sprite = null; SpatialFluidIconRenderer.draw(graphics, Fluids.EMPTY, 0, 0, 1, 1, graphics::record); assertNull(graphics.painted);
+				NativeSprites.sprite = first; SpatialFluidIconRenderer.draw(graphics, Fluids.EMPTY, 0, 0, 1, 1, graphics::record); assertSame(first, graphics.painted);
+				NativeSprites.sprite = replacement; SpatialFluidIconRenderer.draw(graphics, Fluids.EMPTY, 0, 0, 1, 1, graphics::record); assertSame(replacement, graphics.painted);
 				assertEquals(3, NativeSprites.calls);
 				SpatialFluidIconRenderer.draw(graphics, null, 0, 0, 1, 1); SpatialFluidIconRenderer.draw(graphics, Fluids.EMPTY, 0, 0, 1, 0);
 				assertEquals(3, NativeSprites.calls, "hidden icon has no native callback");
 			} finally { NativeSprites.sprite = null; }
 		}
+	}
+	@Test void waterKeepsExistingTintAndFailedSubmissionLeavesTextOnlyThenRecovers() throws Exception {
+		var holder = Fluids.WATER.builtInRegistryHolder();
+		var tags = holder.getClass().getDeclaredField("tags"); tags.setAccessible(true);
+		@Nullable Object previousTags = tags.get(holder);
+		try (var contents = contents("test:water")) {
+			tags.set(holder, java.util.Set.of(net.minecraft.tags.FluidTags.WATER));
+			var graphics = allocate(RecordingGraphics.class);
+			NativeSprites.sprite = new Sprite(contents);
+			try {
+				SpatialFluidIconRenderer.draw(graphics, Fluids.WATER, 2, 3, .65f, .05f, (gui, sprite, x, y, r, g, b, a) -> {
+					throw new IllegalStateException("submission unavailable");
+				});
+				assertNull(graphics.painted);
+				SpatialFluidIconRenderer.draw(graphics, Fluids.WATER, 2, 3, .65f, .05f, graphics::record);
+				assertSame(NativeSprites.sprite, graphics.painted);
+				assertEquals(63 / 255f * .65f, graphics.red);
+				assertEquals(.05f, graphics.alpha);
+			} finally { NativeSprites.sprite = null; }
+		} finally { tags.set(holder, previousTags); }
 	}
 
 	private static SpriteContents contents(String id) {
@@ -90,7 +110,7 @@ class SpatialFluidIconRendererTest {
 		private @Nullable TextureAtlasSprite painted;
 		private float red, alpha;
 		private RecordingGraphics() { super(null, null); }
-		@Override public void blit(int x, int y, int z, int width, int height, TextureAtlasSprite sprite, float red, float green, float blue, float alpha) {
+		private void record(GuiGraphics graphics, TextureAtlasSprite sprite, int x, int y, float red, float green, float blue, float alpha) {
 			this.painted = sprite; this.red = red; this.alpha = alpha;
 		}
 	}
