@@ -127,8 +127,6 @@ public class SettingsScreen extends Screen {
 		registerCurrent(this);
 		this.updatePermissionState(false);
 		this.createScopeTabs();
-		this.addRenderableWidget(this.scopeTabBar);
-		this.tabBarRegistered = true;
 
 		this.pageTitle = new SettingsTitleWidget(this.font);
 		this.pageTitle.setMessage(this.currentPageTitle());
@@ -142,6 +140,14 @@ public class SettingsScreen extends Screen {
 			this.height - SettingsScreenLayout.ROOT_FOOTER_HEIGHT,
 			25);
 		this.addRenderableWidget(this.settingsList);
+
+		// 1.20.1 Screen renders in insertion order. Registering the list first
+		// guarantees the tab graphics and their selection underline are never
+		// covered by the list background, independent of header height or the
+		// first-open/resize layout pass. children() still puts the tab bar
+		// first for input dispatch.
+		this.addRenderableWidget(this.scopeTabBar);
+		this.tabBarRegistered = true;
 
 		this.resetAllButton = Button.builder(
 			LanguageUtils.settings("reset_all").get(),
@@ -1334,11 +1340,22 @@ public class SettingsScreen extends Screen {
 			int itemHeight
 		) {
 			super(minecraft, width, height, top, bottom, itemHeight);
+			// 1.20.1 defaults this to true and draws an opaque top/bottom
+			// gradient inside the list bounds. The screen already owns the
+			// header, so the overlay can cover the scope tabs and their
+			// selected underline on the first open or after a resize.
+			this.setRenderTopAndBottom(false);
 		}
 
 		@Override
 		public int getRowWidth() {
-			return SettingsScreenLayout.LARGE_WIDGET_WIDTH;
+			return SettingsListGeometry.rowWidth(this.width);
+		}
+
+		@Override
+		protected int getScrollbarPosition() {
+			return SettingsListGeometry.scrollbarX(
+				this.getRowRight(), this.width, this.getMaxScroll());
 		}
 
 		private void addSmall(AbstractWidget first, AbstractWidget second) {
