@@ -394,18 +394,20 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		projection = unavailable ? new ContentProjection<>(fence, revision, true, update.status(), List.of(), null) : update;
 		preview = projection.inventory();
 		if (preview != null && !unavailable(preview.status()) && inventoryEligible()) {
+			@Unmodifiable Set<InventoryResourceKind> reset = Set.of();
 			if (!preview.resourceGroups().isEmpty()) {
 				Set<InventoryResourceKind> present = preview.resourceGroups().stream().filter(group -> !unavailable(group.status()))
 					.map(InventoryGroup::resourceKind).collect(java.util.stream.Collectors.toSet());
-				Set<InventoryResourceKind> reset = preview.resourceGroups().stream().filter(InventoryGroup::reset)
-					.map(InventoryGroup::resourceKind).collect(java.util.stream.Collectors.toSet());
-				rows.values().removeIf(row -> !present.contains(row.resourceKind()) || reset.contains(row.resourceKind()));
-				displays.keySet().retainAll(rows.keySet());
-				list.retainKeys(rows.keySet());
-				list.resetKinds(reset);
+				reset = preview.resourceGroups().stream().filter(InventoryGroup::reset)
+					.map(InventoryGroup::resourceKind).collect(java.util.stream.Collectors.toUnmodifiableSet());
+				for (var iterator = rows.values().iterator(); iterator.hasNext();) {
+					InventoryRow<R> row = iterator.next();
+					if (!present.contains(row.resourceKind()) || reset.contains(row.resourceKind())) iterator.remove();
+				}
 			}
 			for (InventoryRow<R> row : preview.rows()) rows.put(row.key(), row);
-			if (list.isOpen()) list.applyBatch(listEntries(preview.rows()));
+			displays.keySet().retainAll(rows.keySet());
+			list.applyProjection(listEntries(preview.rows()), rows.keySet(), reset);
 			list.setStatus(preview.status() == Status.READY ? InventoryListModel.Status.COMPLETE : InventoryListModel.Status.UPDATING);
 		}
 		radial.replaceRoot(buildRoot(), nowMillis);

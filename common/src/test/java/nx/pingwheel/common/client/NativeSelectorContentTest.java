@@ -43,6 +43,7 @@ import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.preview.ClientPresentationPreview;
 import nx.pingwheel.common.presentation.preview.PreviewFieldAccess;
 import nx.pingwheel.common.presentation.preview.PreviewObservation;
@@ -113,6 +114,167 @@ class NativeSelectorContentTest {
 		Component unknown = content.label("pingforit.selector.unknown.key");
 		assertInstanceOf(TranslatableContents.class, unknown.getContents(), "an unknown non-empty key keeps the translation fallback");
 		assertEquals("pingforit.selector.unknown.key", ((TranslatableContents) unknown.getContents()).getKey());
+	}
+	@Test void unrelatedItemFoldRetainsSelectedOpaqueItemThroughNativeProjectionAndDispatch() {
+		var fixture = new MixedInventorySession();
+		var before = fixture.session.snapshot();
+		fixture.publish(InventoryResourceKind.ITEM, 9, 1, 2, InventoryS2CPacket.Status.UNCERTAIN,
+			List.of(new InventoryS2CPacket.Entry("folded:B", "minecraft:diamond", "Diamond", null, 30, 2,
+				true, InventoryS2CPacket.Status.COMPONENT_TOO_LONG, 2, true, null)));
+		fixture.session.tick(280);
+		var after = fixture.session.snapshot();
+		assertEquals(List.of("ITEM:opaque:A", "ITEM:folded:B", "FLUID:opaque:A"),
+			after.inventory().entries().stream().map(nx.pingwheel.common.client.spatial.InventoryListModel.Entry::key).toList());
+		assertEquals("ITEM:opaque:A", after.inventory().selectedKey(), "a different item's fold cannot retarget a stationary release to water");
+		assertEquals(before.radial().pointer(), after.radial().pointer());
+		assertEquals(before.inventory().direction(), after.inventory().direction());
+		assertEquals(before.inventory().axisX(), after.inventory().axisX());
+		fixture.releaseAndDispatch(InventoryResourceKind.ITEM, "opaque:A", 281);
+	}
+
+	@Test void removedOrInvalidSelectedItemFallsBackToSurvivingWaterRatherThanRestoringStaleKey() {
+		for (var status : List.of(InventoryS2CPacket.Status.READY, InventoryS2CPacket.Status.INVALID)) {
+			var fixture = new MixedInventorySession();
+			fixture.publish(InventoryResourceKind.ITEM, 10, 2, 2, status, List.of());
+			fixture.session.tick(280);
+			assertEquals("FLUID:opaque:A", fixture.session.snapshot().inventory().selectedKey());
+			fixture.releaseAndDispatch(InventoryResourceKind.FLUID, "opaque:A", 281);
+		}
+	}
+
+	@Test void removedSelectedItemDoesNotStealTheEstablishedSurvivingFallbackWhenReplacementRowsArrive() {
+		var fixture = new MixedInventorySession();
+		fixture.publish(InventoryResourceKind.ITEM, 10, 2, 2, InventoryS2CPacket.Status.UNCERTAIN,
+			List.of(new InventoryS2CPacket.Entry("folded:B", "minecraft:diamond", "Diamond", null, 30, 2,
+				true, InventoryS2CPacket.Status.COMPONENT_TOO_LONG, 2, true, null)));
+		fixture.session.tick(280);
+		assertEquals(List.of("ITEM:folded:B", "FLUID:opaque:A"), fixture.session.snapshot().inventory().entries().stream()
+			.map(nx.pingwheel.common.client.spatial.InventoryListModel.Entry::key).toList());
+		assertEquals("FLUID:opaque:A", fixture.session.snapshot().inventory().selectedKey());
+		fixture.releaseAndDispatch(InventoryResourceKind.FLUID, "opaque:A", 281);
+	}
+
+	@Test void fluidResetPreservesItemSelectionAndItsScrolledDiscoveryOrder() {
+		var fixture = new MixedInventorySession();
+		fixture.session.scrollRows(0.25, 275); // A fractional wheel input freezes only ITEM discovery.
+		fixture.publish(InventoryResourceKind.FLUID, 10, 2, 2, InventoryS2CPacket.Status.READY,
+			List.of(MixedInventorySession.water()));
+		fixture.session.tick(280);
+		assertEquals("ITEM:opaque:A", fixture.session.snapshot().inventory().selectedKey());
+		fixture.publish(InventoryResourceKind.ITEM, 9, 1, 2, InventoryS2CPacket.Status.READY,
+			List.of(new InventoryS2CPacket.Entry("new", "minecraft:gold_ingot", "Gold", null, 1000, 1, false, null)));
+		fixture.session.tick(290);
+		assertEquals(List.of("ITEM:opaque:A", "ITEM:opaque:B", "ITEM:new", "FLUID:opaque:A"),
+			fixture.session.snapshot().inventory().entries().stream().map(nx.pingwheel.common.client.spatial.InventoryListModel.Entry::key).toList(),
+			"resetting FLUID cannot unfreeze or globally re-sort ITEM");
+		fixture.releaseAndDispatch(InventoryResourceKind.ITEM, "opaque:A", 291);
+	}
+
+	@Test void emptyLaneResetAndWholeProjectionResetKeepTheirDistinctLifecycles() {
+		var fixture = new MixedInventorySession();
+		fixture.publish(InventoryResourceKind.FLUID, 10, 2, 2, InventoryS2CPacket.Status.READY, List.of());
+		fixture.session.tick(280);
+		assertEquals("ITEM:opaque:A", fixture.session.snapshot().inventory().selectedKey());
+		fixture.publish(InventoryResourceKind.ITEM, 10, 2, 2, InventoryS2CPacket.Status.READY, List.of());
+		fixture.session.tick(290);
+		assertTrue(fixture.session.snapshot().inventory().open(), "empty complete lanes still have a list surface");
+		assertNull(fixture.session.snapshot().inventory().selectedKey());
+		fixture.publish(InventoryResourceKind.FLUID, 11, 3, 3, InventoryS2CPacket.Status.READY,
+			List.of(MixedInventorySession.water()));
+		fixture.session.tick(300);
+		assertEquals("FLUID:opaque:A", fixture.session.snapshot().inventory().selectedKey());
+		assertTrue(fixture.session.updateContent(new SpatialSelectorSession.ContentProjection<>(previewFence(fixture.content),
+			100, true, Status.UNAVAILABLE, List.of(), null), 310));
+		assertFalse(fixture.session.snapshot().inventory().open());
+		assertNull(fixture.session.snapshot().inventory().selectedKey());
+		assertInstanceOf(SelectorIntent.None.class, fixture.session.releaseIntent(311));
+		fixture.content.close();
+	}
+
+	@Test void itemFoldPreservesTheOtherLanesSelectedKeyAndDiscoveryFreeze() {
+		var fixture = new MixedInventorySession();
+		fixture.session.scrollRows(2, 275);
+		var before = fixture.session.snapshot();
+		assertEquals("FLUID:opaque:A", before.inventory().selectedKey());
+		fixture.publish(InventoryResourceKind.ITEM, 9, 1, 2, InventoryS2CPacket.Status.UNCERTAIN,
+			List.of(new InventoryS2CPacket.Entry("folded:B", "minecraft:diamond", "Diamond", null, 30, 2,
+				true, InventoryS2CPacket.Status.COMPONENT_TOO_LONG, 2, true, null)));
+		fixture.session.tick(280);
+		assertEquals(before.radial().pointer(), fixture.session.snapshot().radial().pointer());
+		fixture.publish(InventoryResourceKind.FLUID, 9, 1, 2, InventoryS2CPacket.Status.READY,
+			List.of(new InventoryS2CPacket.Entry("new", "minecraft:lava", "Lava", null, 2000000, 1, false, null)));
+		fixture.session.tick(290);
+		assertEquals(List.of("ITEM:opaque:A", "ITEM:folded:B", "FLUID:opaque:A", "FLUID:new"),
+			fixture.session.snapshot().inventory().entries().stream().map(nx.pingwheel.common.client.spatial.InventoryListModel.Entry::key).toList());
+		assertEquals("FLUID:opaque:A", fixture.session.snapshot().inventory().selectedKey());
+		fixture.releaseAndDispatch(InventoryResourceKind.FLUID, "opaque:A", 291);
+	}
+
+	@Test void selectedFluidSurvivesItsOwnBaselineReplacementWhenItsQualifiedKeyRemainsSelectable() {
+		var fixture = new MixedInventorySession();
+		fixture.session.scrollRows(2, 275);
+		fixture.publish(InventoryResourceKind.FLUID, 10, 2, 2, InventoryS2CPacket.Status.READY,
+			List.of(MixedInventorySession.water()));
+		fixture.session.tick(280);
+		assertEquals("FLUID:opaque:A", fixture.session.snapshot().inventory().selectedKey());
+		fixture.releaseAndDispatch(InventoryResourceKind.FLUID, "opaque:A", 281);
+	}
+
+	@org.jetbrains.annotations.NotNullByDefault
+	private static final class MixedInventorySession {
+		final List<IPacket> sent = new ArrayList<>();
+		final ClientInventory inventory = new ClientInventory(sent::add);
+		final CapturedPingContext capture = capture();
+		final NativeSelectorContent content;
+		final SpatialSelectorSession<ClientInventory.PreviewEntryReference> session;
+
+		MixedInventorySession() {
+			ready(inventory);
+			inventory.accept(InventoryS2CPacket.policy(InventoryResourceKind.FLUID, 7, 100, 1, Set.of("entity_block")));
+			content = new NativeSelectorContent(capture, null, () -> inventory, ignored -> List.of(ping("attention")),
+				ref -> Component.literal(ref.fieldId()), json -> Component.literal("Chest"));
+			content.begin(new Object());
+			publish(InventoryResourceKind.ITEM, 9, 1, 1, InventoryS2CPacket.Status.READY, List.of(
+				new InventoryS2CPacket.Entry("opaque:A", "minecraft:stone", "Stone", null, 50, 1, false, null),
+				new InventoryS2CPacket.Entry("opaque:B", "minecraft:diamond", "Diamond", null, 30, 1, false, null)));
+			publish(InventoryResourceKind.FLUID, 9, 1, 1, InventoryS2CPacket.Status.READY, List.of(water()));
+			session = new SpatialSelectorSession<>(previewTarget(capture), Map.of(), intentSettings(),
+				previewFence(content), content, SELECTOR_GEOMETRY);
+			session.open(0); enter(session, "content", 10);
+			enter(session, firstNonBack(session), 150);
+			var origin = session.snapshot().radial().menus().getLast().origin();
+			session.constrainPointer(new SpatialController.Viewport(1200, 201, -origin.x(), -0.5), 271);
+			assertEquals("ITEM:opaque:A", session.snapshot().inventory().selectedKey());
+		}
+
+		static InventoryS2CPacket.Entry water() {
+			return new InventoryS2CPacket.Entry("opaque:A", "minecraft:water", "Water", null, 999945, 1, false, null);
+		}
+		void publish(InventoryResourceKind kind, long baseline, long stateRevision, long watermark,
+			InventoryS2CPacket.Status status, List<InventoryS2CPacket.Entry> entries) {
+			inventory.accept(InventoryS2CPacket.data(kind, InventoryS2CPacket.Kind.PREVIEW, 7, content.requestId(), null,
+				baseline, stateRevision, watermark, 0, 1, true, status, 0, entries).stamp(100, 1));
+		}
+		void releaseAndDispatch(InventoryResourceKind kind, String opaqueKey, long now) {
+			var intent = session.releaseIntent(now);
+			assertInstanceOf(SelectorIntent.SelectInventory.class, intent);
+			if (intent instanceof SelectorIntent.SelectInventory<ClientInventory.PreviewEntryReference> selection) {
+				assertEquals(kind, selection.reference().resourceKind());
+				assertEquals(opaqueKey, selection.reference().entryKey());
+				assertEquals(ClientInventory.DispatchOutcome.SENT, inventory.select(selection.reference(), selection.itemType().id(), packet -> {
+					sent.add(packet); return ClientInventory.DispatchOutcome.SENT;
+				}));
+			}
+			content.close();
+			@org.jetbrains.annotations.Unmodifiable List<InventoryC2SPacket> selected = sent.stream().filter(packet -> packet instanceof InventoryC2SPacket p
+				&& p.kind() == InventoryC2SPacket.Kind.SELECT).map(InventoryC2SPacket.class::cast).toList();
+			assertEquals(1, selected.size());
+			assertEquals(kind, selected.getFirst().resourceKind());
+			assertEquals(opaqueKey, selected.getFirst().entryKey());
+			int selectIndex = sent.indexOf(selected.getFirst());
+			assertTrue(sent.subList(selectIndex + 1, sent.size()).stream().anyMatch(packet -> packet instanceof InventoryC2SPacket p
+				&& p.kind() == InventoryC2SPacket.Kind.CLOSE), "the selected opaque reference is sent before CLOSE");
+		}
 	}
 	@Test void mixedInventorySharesOnePanelButKeepsLaneAnnotationAndResetNavigationIndependent() {
 		List<IPacket> sent = new ArrayList<>();

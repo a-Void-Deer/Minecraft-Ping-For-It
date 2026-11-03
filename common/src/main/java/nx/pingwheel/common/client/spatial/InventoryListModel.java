@@ -257,6 +257,30 @@ public final class InventoryListModel {
 		int oldIndex = selectedIndex();
 		rows.removeIf(row -> !retained.contains(row.key));
 		byKey.keySet().retainAll(retained);
+		retainSelection(oldIndex);
+	}
+
+	/** Apply a final lane projection before adjudicating selection; intermediate removal is not discovery. */
+	public void applyProjection(List<Entry> batch, Set<String> retained, Set<InventoryResourceKind> reset) {
+		if (!open) return;
+		int oldIndex = selectedIndex();
+		@Nullable String fallbackKey = null;
+		int survivingIndex = 0;
+		for (Row row : rows) {
+			if (retained.contains(row.key) && !reset.contains(row.resourceKind)
+				&& survivingIndex++ <= Math.max(0, oldIndex)) fallbackKey = row.key;
+		}
+		rows.removeIf(row -> !retained.contains(row.key) || reset.contains(row.resourceKind));
+		byKey.values().removeIf(row -> !retained.contains(row.key) || reset.contains(row.resourceKind));
+		resetKinds(reset);
+		applyBatch(batch);
+		// Only a genuinely lost key uses the established surviving-row fallback.
+		// A key reintroduced by the final reset batch never leaves selection.
+		if (selectedKey != null && !byKey.containsKey(selectedKey) && fallbackKey != null) selectedKey = fallbackKey;
+		retainSelection(oldIndex);
+	}
+
+	private void retainSelection(int oldIndex) {
 		if (selectedKey != null && !byKey.containsKey(selectedKey))
 			selectedKey = rows.isEmpty() ? null : rows.get(Math.min(Math.max(0, oldIndex), rows.size() - 1)).key;
 	}
