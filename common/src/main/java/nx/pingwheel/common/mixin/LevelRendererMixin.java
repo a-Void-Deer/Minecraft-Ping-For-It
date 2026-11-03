@@ -52,15 +52,21 @@ public abstract class LevelRendererMixin {
 	@Shadow
 	protected abstract boolean shouldShowEntityOutlines();
 
-	@Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/systems/RenderSystem;applyModelViewMatrix()V", ordinal = 1, shift = At.Shift.AFTER))
+	/**
+	 * Prepares the overlay, entity outline, block outline, and model-outline
+	 * success state for this frame.
+	 *
+	 * <p>This must run at {@code HEAD}, before the entity loop and the later
+	 * {@code endOutlineBatch()} model pass. In 1.20.1 the
+	 * {@code applyModelViewMatrix()} calls occur after {@code endOutlineBatch},
+	 * so anchoring here previously ran {@link
+	 * nx.pingwheel.common.client.outline.BlockModelOutlineState#beginFrame()}
+	 * after the model pass: the success record generated this frame was cleared
+	 * immediately, the VoxelShape fallback was never suppressed, and entity
+	 * outline state was one frame late.</p>
+	 */
+	@Inject(method = "renderLevel", at = @At("HEAD"), require = 1)
 	private void onStartRenderLevel(PoseStack poseStack, float partialTick, long finishNanoTime, boolean renderBlockOutline, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f projectionMatrix, CallbackInfo ci) {
-		// Prepares the overlay, entity outline, and block outline state for
-		// this frame. Runs right after the ordinal-1 applyModelViewMatrix
-		// anchor: the camera-relative model-view matrix is applied and the
-		// call happens before the entity loop below, so the entity outline
-		// state is already prepared when the outline redirects fire. Also
-		// resets the per-frame model-outline processed flag and the model
-		// outline success record.
 		this.modelOutlinesProcessed = false;
 
 		// 1.20.1 GameRenderer has already applied the camera X/Y rotation to
