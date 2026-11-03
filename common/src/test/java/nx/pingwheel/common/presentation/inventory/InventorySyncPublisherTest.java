@@ -684,7 +684,10 @@ class InventorySyncPublisherTest {
 			var old = InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 0)).stamp(100, 1);
 			var latest = InventoryS2CPacket.offer(7, publisher.offer(5, 9, 5, 0)).stamp(100, 1);
 			assertTrue(publisher.control(recipient, old));
+			assertTrue(publisher.controlQueued(recipient, old));
+			assertFalse(publisher.controlQueued(recipient, old.stamp(100, 1)), "equal packet values do not own the queued send");
 			memory.setCap(0); assertFalse(publisher.control(recipient, latest));
+			assertFalse(publisher.controlQueued(recipient, old)); assertFalse(publisher.controlQueued(recipient, latest));
 			assertEquals(0, memory.retained(), "a refused refresh leaves no superseded queued OFFER");
 			memory.setCap(16000000); publisher.drainControls();
 			assertTrue(transport.sent.isEmpty()); assertTrue(publisher.dataGated(recipient));
@@ -693,7 +696,9 @@ class InventorySyncPublisherTest {
 			var retired = InventoryS2CPacket.selected(7, 1, 1, null, nx.pingwheel.common.marker.MarkerRejectReason.INVALID_REQUEST).stamp(100, 1);
 			var replacement = retired.stamp(100, 2);
 			assertTrue(publisher.control(recipient, retired)); assertTrue(publisher.control(recipient, replacement));
+			assertFalse(publisher.controlQueued(recipient, retired)); assertTrue(publisher.controlQueued(recipient, replacement));
 			publisher.cancelControl(recipient, retired); publisher.drainControls();
+			assertFalse(publisher.controlQueued(recipient, replacement));
 			assertEquals(List.of(latest, replacement), transport.sent, "cancellation uses the exact bounded result owner");
 			assertTrue(publisher.control(recipient, retired)); publisher.cancelControl(recipient, retired); publisher.drainControls();
 			assertEquals(2, transport.sent.size()); assertEquals(0, memory.reserved());
@@ -706,19 +711,23 @@ class InventorySyncPublisherTest {
 			try (var publisher = new InventorySyncPublisher(memory, transport)) {
 				publisher.advance(0, settings); var recipient = context("control", 1).recipient();
 				assertTrue(publisher.control(recipient, InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 0)).stamp(100, 1)));
-				assertTrue(publisher.control(recipient, InventoryS2CPacket.policy(7, 100, 1, Set.of("block"))));
+				var policy = InventoryS2CPacket.policy(7, 100, 1, Set.of("block"));
+				assertTrue(publisher.control(recipient, policy)); assertTrue(publisher.controlQueued(recipient, policy));
 				int[] callbacks = {0};
 				publisher.setControlHandoff((player, packet) -> {
 					callbacks[0]++; if (close) publisher.close(); else publisher.cancelControls(player); return false;
 				});
 				assertDoesNotThrow(publisher::drainControls);
 				assertEquals(1, transport.sent.size()); assertEquals(1, callbacks[0]);
+				assertFalse(publisher.controlQueued(recipient, policy));
 				assertEquals(close ? 0 : 1024, memory.retained(), "accepted/cancelled controls refund exactly once");
 			}
 			assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 		}
 	}
-	@Test void callbackAddedControlsWaitForNextDrainAndCallbackFailureDoesNotRetryAcceptedWork() {
+	@ParameterizedTest
+	@ValueSource(booleans = {false, true})
+	void callbackAddedControlsWaitForNextDrainAndCallbackFailureDoesNotRetryAcceptedWork(boolean linkage) {
 		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
 		try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var publisher = new InventorySyncPublisher(memory, transport)) {
 			publisher.advance(0, settings); var recipient = context("control", 1).recipient(); publisher.gateData(recipient);
@@ -728,11 +737,13 @@ class InventorySyncPublisherTest {
 			int[] callbacks = {0};
 			publisher.setControlHandoff((player, packet) -> {
 				callbacks[0]++; if (packet.kind() == InventoryS2CPacket.Kind.OFFER) assertTrue(publisher.control(player, offer));
+				if (linkage) throw new LinkageError("callback failed after transport accepted");
 				throw new IllegalStateException("callback failed after transport accepted");
 			});
 			assertDoesNotThrow(publisher::drainControls);
 			assertEquals(List.of(offer, policy), transport.sent, "new callback work cannot extend the current drain");
 			assertEquals(2, callbacks[0]); assertTrue(publisher.dataGated(recipient));
+			assertFalse(publisher.controlQueued(recipient, policy)); assertTrue(publisher.controlQueued(recipient, offer));
 			var failures = logs.events.stream().filter(e -> e.getMessage().getFormattedMessage().contains("operation=inventory/publisher/control-handoff ")).toList();
 			assertEquals(2, failures.size(), "OFFER and POLICY are independently scoped failures");
 			for (var event : failures) {
@@ -759,8 +770,45 @@ class InventorySyncPublisherTest {
 				assertTrue(publisher.control(player, replacement)); publisher.drainControls(); return false;
 			});
 			publisher.drainControls(); assertEquals(List.of(offer), transport.sent, "replaced/callback-added controls wait even under recursion");
+			assertFalse(publisher.controlQueued(recipient, policy)); assertTrue(publisher.controlQueued(recipient, replacement));
+			publisher.setControlHandoff((player, packet) -> {
+				assertTrue(publisher.control(player, replacement)); publisher.drainControls(); return false;
+			});
+			for (int i = 0; i < 40; i++) {
+				int sent = transport.sent.size(); publisher.drainControls();
+				assertEquals(sent + 1, transport.sent.size(), "recursive drain cannot consume callback-added work");
+				assertTrue(publisher.controlQueued(recipient, replacement)); assertEquals(1024 + 4096, memory.retained());
+			}
 			publisher.setControlHandoff(null); publisher.drainControls();
-			assertEquals(List.of(offer, replacement), transport.sent); assertEquals(1024, memory.retained());
+			assertEquals(42, transport.sent.size()); assertSame(replacement, transport.sent.getLast());
+			assertFalse(publisher.controlQueued(recipient, replacement)); assertEquals(1024, memory.retained());
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+	@Test void policyAuthorityDiscardHasNoHandoffAndADeferredExactOwnerCanRetryOnce() {
+		var settings = InventorySettings.serverDefaults(); var memory = new RetainedMemoryLedger(16000000);
+		boolean[] authority = {true};
+		var transport = new Transport() {
+			@Override public boolean authorizedControl(UUID recipient, InventoryS2CPacket packet) { return authority[0]; }
+		};
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var recipient = context("control", 1).recipient();
+			var policy = InventoryS2CPacket.policy(InventoryResourceKind.FLUID, 7, 100, 1, Set.of("block"));
+			int[] handoffs = {0}; publisher.setControlHandoff((player, packet) -> { handoffs[0]++; return false; });
+			assertTrue(publisher.control(recipient, policy)); authority[0] = false;
+			publisher.drainControls(); assertFalse(publisher.controlQueued(recipient, policy));
+			assertTrue(transport.sent.isEmpty()); assertEquals(0, handoffs[0]); assertEquals(0, memory.retained());
+			authority[0] = true; assertTrue(publisher.control(recipient, policy)); memory.setCap(memory.retained());
+			for (int i = 0; i < 40; i++) {
+				publisher.drainControls(); assertTrue(publisher.controlQueued(recipient, policy)); assertEquals(4096, memory.retained());
+			}
+			assertEquals(0, handoffs[0]); assertTrue(transport.sent.isEmpty());
+			memory.setCap(16000000); transport.failNextSend = true; publisher.drainControls();
+			assertTrue(publisher.controlQueued(recipient, policy)); assertEquals(0, handoffs[0]);
+			publisher.drainControls(); assertFalse(publisher.controlQueued(recipient, policy));
+			assertEquals(List.of(policy), transport.sent); assertEquals(1, handoffs[0]);
+			for (int i = 0; i < 40; i++) publisher.drainControls();
+			assertEquals(1, handoffs[0]); assertEquals(1, transport.sent.size());
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 	}

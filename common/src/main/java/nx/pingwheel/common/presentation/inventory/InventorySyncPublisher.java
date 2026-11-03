@@ -142,7 +142,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	private final Map<String, RetainedMemoryLedger.Ticket> wireSubjects = new LinkedHashMap<>();
 	/** Recipients whose item-data handoff stays blocked until a successful control handoff releases them. */
 	private final Set<UUID> dataGates = new LinkedHashSet<>();
-	private ControlHandoff controlHandoff;
+	private @Nullable ControlHandoff controlHandoff;
 	private boolean drainingControls;
 	private InventorySettings settings;
 	private InventoryWireWindow window;
@@ -193,6 +193,11 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		state.monitored = false;
 		controls.put(key, new Control(state, packet)); return true;
 	}
+	/** Exact queued owner only: admission is not a successful transport handoff. */
+	public boolean controlQueued(UUID recipient, InventoryS2CPacket packet) {
+		@Nullable Control control = controls.get(recipient + "/" + packet.kind() + "/" + packet.resourceKind() + "/" + packet.commitId());
+		return control != null && control.packet == packet;
+	}
 	public void drainControls() {
 		if (drainingControls) return;
 		drainingControls = true;
@@ -210,11 +215,11 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 				// Remove/refund accepted work BEFORE calling external code, even
 				// when that code cancels, closes, replaces or throws.
 				if (controls.remove(entry.getKey(), control)) control.state.memory.close();
-				ControlHandoff handoff = controlHandoff;
+				@Nullable ControlHandoff handoff = controlHandoff;
 				if (handoff != null) {
 					boolean accepted;
 					try { accepted = handoff.accepted(control.state.context.recipient(), control.packet); }
-					catch (RuntimeException callbackFailure) { warn("control-handoff", control.state, control.packet, callbackFailure); accepted = false; }
+					catch (RuntimeException | LinkageError callbackFailure) { warn("control-handoff", control.state, control.packet, callbackFailure); accepted = false; }
 					if (accepted) dataGates.remove(control.state.context.recipient());
 				}
 			}
@@ -239,7 +244,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	public void gateData(UUID recipient) { dataGates.add(Objects.requireNonNull(recipient, "recipient")); }
 	public void releaseData(UUID recipient) { dataGates.remove(recipient); }
 	public boolean dataGated(UUID recipient) { return dataGates.contains(recipient); }
-	public void setControlHandoff(ControlHandoff handoff) { this.controlHandoff = handoff; }
+	public void setControlHandoff(@Nullable ControlHandoff handoff) { this.controlHandoff = handoff; }
 	/** The exact effective display byte budget currently enforced by this publisher. */
 	public int effectiveDisplayBytes() { return displayBytes; }
 	/** The exact effective frame byte budget currently enforced by this publisher. */

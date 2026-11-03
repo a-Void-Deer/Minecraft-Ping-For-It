@@ -230,13 +230,14 @@ class InventoryResourceLanesTest {
 			assertEquals(1, f.host.store.size(), "retired-token rejection does not consume the replacement cut's attempt");
 		}
 	}
-	@Test void sameViewFieldRevocationPreservesSiblingButReallowNeedsNewOpen() {
+	@Test void sameViewFieldRevocationPreservesSiblingAndReallowFreshlyAdmitsOnlyItsLane() {
 		try (var f = new Fixture()) {
 			f.open(); var item = f.preview(InventoryResourceKind.ITEM);
 			f.host.policies.put(InventoryBackendTest.A, new InventoryBackend.Policy(100, 1, Set.of("entity_block"), Set.of()));
 			f.backend.tick(1, f.settings);
 			f.host.policies.put(InventoryBackendTest.A, new InventoryBackend.Policy(100, 1, Set.of("entity_block"), Set.of("entity_block")));
-			f.backend.tick(2, f.settings); assertEquals(1, f.states.get(InventoryResourceKind.FLUID).reads.get());
+			f.backend.tick(2, f.settings); assertEquals(2, f.states.get(InventoryResourceKind.FLUID).reads.get());
+			assertEquals(1, f.states.get(InventoryResourceKind.ITEM).reads.get());
 			f.backend.handle(InventoryBackendTest.A, f.select(InventoryResourceKind.ITEM, 1, item), 2, f.settings);
 			assertEquals(1, f.host.store.size());
 		}

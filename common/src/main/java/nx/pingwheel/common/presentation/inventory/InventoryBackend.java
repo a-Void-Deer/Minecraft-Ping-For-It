@@ -1,6 +1,7 @@
 package nx.pingwheel.common.presentation.inventory;
 
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -157,12 +158,14 @@ public final class InventoryBackend implements AutoCloseable {
 		final Map<LaneKey, Preview> previews = new LinkedHashMap<>();
 		final Map<Long, PreviewRequest> requests = new LinkedHashMap<>();
 		final Map<Long, CommitResult> commits = new LinkedHashMap<>();
+		/** At most one immutable desired policy per lane until successful handoff, paid by the session slab. */
+		final Map<InventoryResourceKind, InventoryS2CPacket> pendingPolicies = new EnumMap<>(InventoryResourceKind.class);
 		InventoryS2CPacket.Offer offer;
 		/** Current requested cap generation; a handoff must match it, never a stale earlier OFFER. */
 		long offerGeneration, handoffGeneration;
 		/** The exact offer whose handoff is awaited; null until that generation is enqueued. */
 		InventoryS2CPacket.Offer handoffOffer;
-		Policy policy;
+		@Nullable Policy policy;
 		long lastRequest, lastCommit;
 		boolean reconfiguring, offerHandedOff, workReady;
 		Session(long epoch, Policy policy, RetainedMemoryLedger.Ticket memory) { this.epoch = epoch; this.policy = policy; this.memory = memory; }
@@ -306,9 +309,10 @@ public final class InventoryBackend implements AutoCloseable {
 		publisher = new InventorySyncPublisher(runtime.memory(), new InventorySyncPublisher.Transport() {
 			@Override public boolean authorized(SyncPublisher.Context context) { return publicationAllowed(context); }
 			@Override public boolean authorizedControl(UUID recipient, InventoryS2CPacket packet) {
-				Session session = sessions.get(recipient); Policy policy = host.policy(recipient).orElse(null);
+				@Nullable Session session = sessions.get(recipient); @Nullable Policy policy = host.policy(recipient).orElse(null);
 				return session != null && policy != null && session.epoch == packet.epoch()
-					&& policy.epoch() == packet.presentationEpoch() && policy.view() == packet.view();
+					&& policy.epoch() == packet.presentationEpoch() && policy.view() == packet.view()
+					&& (packet.kind() != InventoryS2CPacket.Kind.POLICY || packet.allowedTypes().equals(policy.types(packet.resourceKind())));
 			}
 			@Override public boolean admittedToSend(SyncPublisher.Context context) {
 				return publicationAllowed(context); // checkedTick is sampling eligibility, never a send permit
@@ -387,6 +391,7 @@ public final class InventoryBackend implements AutoCloseable {
 			@Nullable Session session = sessions.get(context.recipient()); @Nullable Policy policy = host.policy(context.recipient()).orElse(null);
 			return session != null && policy != null && !closeRequested && !deferredDisconnects.contains(context.recipient())
 				&& session.epoch == packet.epoch() && policy.epoch() == packet.presentationEpoch() && policy.view() == packet.view()
+				&& (packet.kind() != InventoryS2CPacket.Kind.POLICY || packet.allowedTypes().equals(policy.types(packet.resourceKind())))
 				? InventorySyncPublisher.SendDecision.ALLOW : InventorySyncPublisher.SendDecision.DENY;
 		}
 		if (!publicationAllowed(context)) return InventorySyncPublisher.SendDecision.DENY;
@@ -557,27 +562,44 @@ public final class InventoryBackend implements AutoCloseable {
 		}
 		enqueueOffer(player, session);
 		refreshPolicy(player, session);
-		for (var kind : InventoryResourceKind.values()) publisher.control(player, InventoryS2CPacket.policy(kind, session.epoch, policy.epoch(), policy.view(), policy.types(kind)));
+		for (var kind : InventoryResourceKind.values()) queuePolicy(player, session, kind);
+	}
+	private void queuePolicy(UUID player, Session session, InventoryResourceKind kind) {
+		Policy policy = java.util.Objects.requireNonNull(session.policy);
+		InventoryS2CPacket packet = InventoryS2CPacket.policy(kind, session.epoch, policy.epoch(), policy.view(), policy.types(kind));
+		if (packet.equals(session.pendingPolicies.get(kind))) return;
+		session.pendingPolicies.put(kind, packet);
+		// Admission can later be fresh-fenced away. Only this exact desired packet's
+		// successful, still-current transport handoff completes the lane update.
+		publisher.control(player, packet);
 	}
 	private void refreshPolicy(UUID player, Session session) {
-		Policy next = host.policy(player).orElse(null);
+		@Nullable Policy next = host.policy(player).orElse(null);
 		if (java.util.Objects.equals(next, session.policy)) return;
 		if (next != null && session.policy != null && next.stamp().equals(session.policy.stamp())) {
-			// A fresh field revocation need not retire a still-authorized sibling.
-			// Reallowing cannot restart the removed lane under the old OPEN.
+			// Same-view grants belong to the lane, not the parent request, offer
+			// handoff or committed selection outcome. In particular, a sibling's
+			// revocation cannot swallow an already-committed pending SELECTED.
 			for (PreviewRequest parent : session.requests.values()) for (var kind : InventoryResourceKind.values())
 				if (!next.types(kind).contains(parent.frozen.targetType())) {
 					parent.enabledLanes &= ~(1 << kind.wireId()); closeLane(session, new LaneKey(parent.request, kind));
-				}
+				} else if (parent.attempted == 0 && !session.policy.types(kind).contains(parent.frozen.targetType()))
+					parent.enabledLanes |= 1 << kind.wireId(); // fresh attach only; the old consumer, tokens and cut are gone
+			Policy previous = session.policy;
+			session.policy = next;
+			for (var kind : InventoryResourceKind.values()) if (!previous.types(kind).equals(next.types(kind)))
+				queuePolicy(player, session, kind);
+			return;
 		} else for (long request : List.copyOf(session.requests.keySet())) closePreview(session, request);
 		publisher.cancelControls(player);
+		session.pendingPolicies.clear();
 		for (CommitResult result : session.commits.values()) { result.pending = false; result.queued = false; }
 		session.policy = next;
 		// A queued OFFER stamped with the old presentation view is dropped by the
 		// control authorization fence without a handoff callback; re-arm it so a
 		// pending reconfiguration can never wait on a control that was discarded.
 		session.offer = null; session.handoffOffer = null; session.offerHandedOff = false;
-		if (next != null) for (var kind : InventoryResourceKind.values()) publisher.control(player, InventoryS2CPacket.policy(kind, session.epoch, next.epoch(), next.view(), next.types(kind)));
+		if (next != null) for (var kind : InventoryResourceKind.values()) queuePolicy(player, session, kind);
 	}
 	private void open(UUID player, Session session, InventoryC2SPacket packet) {
 		if (packet.requestId() <= session.lastRequest || session.requests.size() >= settings.getPreview().effectiveMaxTargetsPerClient()) return;
@@ -820,6 +842,8 @@ public final class InventoryBackend implements AutoCloseable {
 			var offer = publisher.offer(settings.getPreview().getPeriodTicks(), settings.getTracking().getPeriodTicks(),
 				settings.getTracking().getResyncMinPeriods(), settings.getTracking().getHeartbeatPeriods());
 			if (session.policy != null && !offer.equals(session.offer)) enqueueOffer(entry.getKey(), session);
+			for (InventoryS2CPacket packet : List.copyOf(session.pendingPolicies.values()))
+				if (!publisher.controlQueued(entry.getKey(), packet)) publisher.control(entry.getKey(), packet);
 			for (CommitResult result : session.commits.values()) enqueueResult(entry.getKey(), session, result);
 		}
 		var leases = new ArrayList<>(tracking.values());
@@ -984,15 +1008,31 @@ public final class InventoryBackend implements AutoCloseable {
 		return queued;
 	}
 	/**
-	 * Control-handoff callback. Only a same-epoch, same-presentation-view OFFER
+	 * Control-handoff callback. POLICY completes only its exact current desired
+	 * owner under current authority; admission and stale completions do not count.
+	 * Only a same-epoch, same-presentation-view OFFER
 	 * whose exact caps are the current generation's requested caps counts as a
 	 * successful handoff; a stale OFFER, an unrelated control or an unknown
 	 * recipient never clears a gate. Returning true releases the gate only when
 	 * the required work is already ready.
 	 */
 	private boolean controlHandoffAccepted(UUID recipient, InventoryS2CPacket packet) {
-		Session session = sessions.get(recipient);
+		@Nullable Session session = sessions.get(recipient);
 		if (session == null) return false;
+		if (packet.kind() == InventoryS2CPacket.Kind.POLICY) {
+			@Nullable Policy current = host.policy(recipient).orElse(null);
+			if (sessions.get(recipient) == session && !closeRequested && !deferredDisconnects.contains(recipient)
+				&& current != null && session.policy != null && session.epoch == packet.epoch()
+				&& session.policy.epoch() == packet.presentationEpoch() && session.policy.view() == packet.view()
+				&& session.policy.types(packet.resourceKind()).equals(packet.allowedTypes())
+				&& current.epoch() == packet.presentationEpoch() && current.view() == packet.view()
+				&& current.types(packet.resourceKind()).equals(packet.allowedTypes())
+				&& session.pendingPolicies.get(packet.resourceKind()) == packet) {
+				session.pendingPolicies.remove(packet.resourceKind());
+				return !session.reconfiguring;
+			}
+			return false;
+		}
 		if (packet.kind() == InventoryS2CPacket.Kind.SELECTED || packet.kind() == InventoryS2CPacket.Kind.REJECT) {
 			CommitResult result = session.commits.get(packet.commitId());
 			if (result != null && result.packet == packet) { result.pending = false; result.queued = false; }

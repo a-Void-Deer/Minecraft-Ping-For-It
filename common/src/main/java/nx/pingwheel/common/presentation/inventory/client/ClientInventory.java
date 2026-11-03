@@ -146,6 +146,7 @@ public final class ClientInventory {
 		final String targetType;
 		final boolean sable;
 		final Set<InventoryResourceKind> receiptDenials = EnumSet.noneOf(InventoryResourceKind.class);
+		final Map<InventoryResourceKind, Long> retiredBaselines = new EnumMap<>(InventoryResourceKind.class);
 
 		MarkerMetadata(MarkerSnapshot marker) {
 			targetType = marker.targetTypeId();
@@ -153,8 +154,13 @@ public final class ClientInventory {
 		}
 	}
 	private static final class PreviewRequest {
+		final Target target;
+		final BlockFace face;
+		final String targetType;
+		final Map<InventoryResourceKind, Long> retiredBaselines = new EnumMap<>(InventoryResourceKind.class);
 		boolean released;
 		boolean sent;
+		PreviewRequest(Target target, BlockFace face, String targetType) { this.target = target; this.face = face; this.targetType = targetType; }
 	}
 	private static final class PreviewState {
 		final InventoryResourceKind resourceKind;
@@ -488,7 +494,7 @@ public final class ClientInventory {
 			return NO_REQUEST;
 		}
 		long requestId = nextRequestId++;
-		PreviewRequest request = new PreviewRequest();
+		PreviewRequest request = new PreviewRequest(Objects.requireNonNull(target), face, targetType);
 		requests.put(requestId, request);
 		for (InventoryResourceKind kind : InventoryResourceKind.values()) {
 			if (schemaDisabled.contains(kind) || ready(kind) && !allows(kind, targetType)) continue;
@@ -653,10 +659,23 @@ public final class ClientInventory {
 			for (TrackingState state : List.copyOf(tracking.values())) {
 				@Nullable MarkerMetadata metadata = knownMarkers.get(state.markerId);
 				if (state.resourceKind == lane && (metadata == null || !allows(lane, metadata.targetType))) {
+					if (metadata != null) {
+						long retired = Math.max(state.baselineId, state.pending == null ? state.baselineId : state.pending.baselineId);
+						for (UnknownKey key : unknown.keySet()) if (key.resourceKind() == lane && key.markerId().equals(state.markerId)) retired = Math.max(retired, key.baselineId());
+						metadata.retiredBaselines.merge(lane, retired, Math::max);
+					}
 					store.expire(state.channel); tracking.remove(state.markerId); removeUnknownSessions(state.markerId);
 				}
 			}
-			previews.values().removeIf(state -> state.resourceKind == lane && !allows(lane, state.targetType));
+			for (PreviewState state : List.copyOf(previews.values())) if (state.resourceKind == lane && !allows(lane, state.targetType)) {
+				state.request.retiredBaselines.merge(lane, state.baselineId, Math::max);
+				previews.remove(new PreviewKey(state.requestId, lane));
+			}
+			for (var entry : requests.entrySet()) {
+				PreviewRequest request = entry.getValue();
+				if (!request.released && allows(lane, request.targetType)) previews.computeIfAbsent(new PreviewKey(entry.getKey(), lane),
+					key -> new PreviewState(lane, request, key.requestId(), request.target, request.face, request.targetType));
+			}
 			for (PreviewState state : List.copyOf(previews.values()))
 				if (requests.containsKey(state.requestId) && allows(state.resourceKind, state.targetType)) sendOpen(state);
 			return;
@@ -678,6 +697,7 @@ public final class ClientInventory {
 		@Nullable MarkerMetadata marker = knownMarkers.get(packet.markerId());
 		if (packet.markerId() != null && (marker == null || !allows(packet.resourceKind(), marker.targetType)
 			|| markerKinds.containsKey(packet.markerId()) && markerKinds.get(packet.markerId()) != packet.resourceKind())) { fencedPackets++; return; }
+		if (marker != null && packet.baselineId() <= marker.retiredBaselines.getOrDefault(packet.resourceKind(), -1L)) { fencedPackets++; return; }
 		if (packet.kind() == InventoryS2CPacket.Kind.PREVIEW
 			&& !previews.containsKey(new PreviewKey(packet.requestId(), packet.resourceKind()))) { fencedPackets++; return; }
 		if (isData(packet.kind()) && !withinEffectiveCaps(packet, effectiveDisplayBytes, effectiveFrameBytes)) { capRejectedPackets++; return; }
@@ -851,6 +871,7 @@ public final class ClientInventory {
 			fencedPackets++;
 			return;
 		}
+		if (packet.baselineId() <= state.request.retiredBaselines.getOrDefault(state.resourceKind, -1L)) { fencedPackets++; return; }
 		if (packet.statusRevision() < state.statusRevision
 			|| state.status == InventoryS2CPacket.Status.INVALID && packet.statusRevision() == state.statusRevision
 				&& packet.status() != InventoryS2CPacket.Status.INVALID

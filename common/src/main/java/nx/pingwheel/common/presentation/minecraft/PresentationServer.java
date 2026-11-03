@@ -411,16 +411,19 @@ public final class PresentationServer {
 			if (!session.ready || session.view == Long.MAX_VALUE) continue;
 			ServerPlayer player = server.getPlayerList().getPlayer(entry.getKey());
 			if (player == null) continue;
-			Map<String, Map<String, Set<String>>> effective = mask(player, session);
-			Map<String, List<PresentationPropertyRef>> effectiveChildBlack = childBlackFor(settings());
-			Set<String> dedicated = inventoryTypes(player, session);
-			Set<String> fluids = inventoryTypes(player, session, nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID);
-			if (!policyChanged && effective.equals(session.mask)
-				&& effectiveChildBlack.equals(session.childBlack) && dedicated.equals(session.inventoryTypes) && fluids.equals(session.fluidTypes)) continue;
-			session.mask = effective;
-			session.childBlack = effectiveChildBlack;
+			@org.jetbrains.annotations.Unmodifiable Map<String, Map<String, Set<String>>> effective = mask(player, session);
+			@org.jetbrains.annotations.Unmodifiable Map<String, List<PresentationPropertyRef>> effectiveChildBlack = childBlackFor(settings());
+			@org.jetbrains.annotations.Unmodifiable Set<String> dedicated = inventoryTypes(player, session);
+			@org.jetbrains.annotations.Unmodifiable Set<String> fluids = inventoryTypes(player, session, nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID);
+			// Dedicated delivery owns its lane policy, baselines and revocation.
+			// Updating those grants must not turn an unrelated SECTION generation
+			// (or the still-authorized inventory sibling) into a new view.
 			session.inventoryTypes = dedicated;
 			session.fluidTypes = fluids;
+			if (!policyChanged && effective.equals(session.mask)
+				&& effectiveChildBlack.equals(session.childBlack)) continue;
+			session.mask = effective;
+			session.childBlack = effectiveChildBlack;
 			session.view++;
 			session.authorizationCut = observationSerial;
 			pruneSession(session, store, registry::get, (marker, adapter) ->
@@ -1082,7 +1085,7 @@ public final class PresentationServer {
 	/**
 	 * The recipient's single fresh dedicated-inventory authorization: current
 	 * permission/policy intersected with the already-advertised route/session
-	 * view, so a newly allowed type is not promoted before RESET and a revoked
+	 * view, so a newly allowed type is not promoted before the policy tick and a revoked
 	 * type is denied immediately. The dedicated policy and every initial
 	 * receipt share this one gate.
 	 */
