@@ -16,6 +16,9 @@ compared directly.
   Vault cell. Missing, unloaded or inconsistent grouping metadata falls back to
   the exact hit block. See the
   [logical target model](docs/architecture/identity/target_model.md#frozen-logical-block-groups).
+- Extended logical grouping and whole-structure outlines to supported static
+  [Create fluid tanks on NeoForge](docs/integrations/create.md#fluid-tank-logical-target-and-presentation-topology),
+  with exact-hit fallback when the complete structure cannot be verified.
 
 ### Inventory preview and tracking
 
@@ -33,6 +36,33 @@ compared directly.
 - Marker removal or expiry clears local inventory state and rejects delayed
   updates, preventing stale tracking data from returning. Detailed sharing and
   publication boundaries remain in the [inventory contract](docs/architecture/presentation/inventory.md#certified-tracking-observation-pools).
+- Inventory-list updates preserve the selected row while its resource remains
+  available.
+- Revoking or restoring item or fluid permissions preserves the other resource's
+  still-authorized preview and tracking state. Permission updates delayed by
+  send budgets or discarded after a permission change are retried, allowing
+  restored access to synchronize without resetting the other resource.
+
+### Fluid preview and tracking
+
+- Added fluid preview, selection and marker tracking for static block storage
+  through Fabric Transfer and Forge/NeoForge fluid handlers, including supported
+  ordinary Create tanks on NeoForge. Items and fluids share one grouped preview
+  with independent permissions and state.
+- Fluid quantities use consistent millibucket and bucket formatting in the list,
+  tracking HUD and content chat, with approximate and sub-millibucket indicators.
+  Quantity text takes priority over names and retains exact fits at fractional
+  font scales.
+- Fluid names and still-texture icons use native loader support, including for
+  non-placeable fluids. Unavailable icons fall back to text-only display.
+- Scans can finish after final validation is delayed by processing budgets,
+  without rereading storage. Capacity-limited previews remain explicitly
+  incomplete rather than claiming complete totals.
+- Fixed negative native fluid amounts on Forge and NeoForge being mistaken for
+  empty tanks and replacing tracking results with zero; such reads are now
+  unavailable.
+- Fluid icons fade smoothly when the interface opens or closes and when opacity
+  changes, instead of disappearing abruptly at low opacity.
 
 ### Server controls and Create optimizations
 
