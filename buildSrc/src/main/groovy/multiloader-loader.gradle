@@ -1,59 +1,10 @@
+// 加载器模块共享约定（与上游 fork 的 buildSrc/multiloader-loader.gradle 对应）。
+// 现在只有 fabric/ 一个加载器；forge/neoforge 预留。加载器模块都需要 common 的类与资源。
 plugins {
-    id "multiloader-common"
-}
-
-configurations {
-    commonJava{
-        canBeResolved = true
-    }
-    commonResources{
-        canBeResolved = true
-    }
+	id 'multiloader-common'
 }
 
 dependencies {
-    compileOnly(project(":common")) {
-        capabilities {
-            requireCapability "$group:$mod_id"
-        }
-    }
-    commonJava project(path: ":common", configuration: "commonJava")
-    commonResources project(path: ":common", configuration: "commonResources")
-}
-
-tasks.named("compileJava", JavaCompile) {
-    dependsOn(configurations.commonJava)
-    source(configurations.commonJava)
-}
-
-processResources {
-    dependsOn(configurations.commonResources)
-    // Fabric uses Loom's generated intermediary refmap from the common
-    // mixin config. Forge and NeoForge use their loader-local official-Mojmap
-    // config instead, so do not copy the common config into those jars.
-    from(configurations.commonResources) {
-        if (project.name != "fabric") {
-            exclude("${mod_id}.mixins.json")
-        }
-    }
-}
-
-tasks.named("javadoc", Javadoc).configure {
-    dependsOn(configurations.commonJava)
-    source(configurations.commonJava)
-    // The mixin annotation processor must not run during javadoc generation:
-    // it cannot resolve injection-point mappings from the javadoc classpath and
-    // fails the build with "Unable to locate method mapping".
-    options.addStringOption('-proc:none')
-}
-
-tasks.named("sourcesJar", Jar) {
-    dependsOn(configurations.commonJava)
-    from(configurations.commonJava)
-    dependsOn(configurations.commonResources)
-    from(configurations.commonResources) {
-        if (project.name != "fabric") {
-            exclude("${mod_id}.mixins.json")
-        }
-    }
+	// 直接依赖 common 子项目：编译期拿类，运行期由 jar 任务合并进最终产物（见 fabric/build.gradle）。
+	implementation project(':common')
 }

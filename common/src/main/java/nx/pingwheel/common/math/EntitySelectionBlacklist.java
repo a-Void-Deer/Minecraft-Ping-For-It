@@ -6,7 +6,7 @@ import java.util.Objects;
 import java.util.function.Predicate;
 
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.Entity;
 
 /**
@@ -19,8 +19,8 @@ import net.minecraft.world.entity.Entity;
  */
 public final class EntitySelectionBlacklist {
 
-	private static final ResourceLocation SIMULATED_HONEY_GLUE_ID =
-		ResourceLocation.fromNamespaceAndPath("simulated", "honey_glue");
+	private static final Identifier SIMULATED_HONEY_GLUE_ID =
+		Identifier.fromNamespaceAndPath("simulated", "honey_glue");
 	private static final Predicate<Entity> DEFAULT_SIMULATED_HONEY_GLUE_RULE =
 		EntitySelectionBlacklist::isSimulatedHoneyGlue;
 
@@ -85,7 +85,7 @@ public final class EntitySelectionBlacklist {
 		snapshot = List.copyOf(predicates);
 	}
 
-	static boolean isDefaultIgnoredEntityId(ResourceLocation entityTypeId) {
+	static boolean isDefaultIgnoredEntityId(Identifier entityTypeId) {
 		return SIMULATED_HONEY_GLUE_ID.equals(entityTypeId);
 	}
 

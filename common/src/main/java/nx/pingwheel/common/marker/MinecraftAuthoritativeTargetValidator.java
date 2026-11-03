@@ -5,7 +5,7 @@ import java.util.UUID;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -33,7 +33,7 @@ import static nx.pingwheel.common.Global.LOGGER;
  * <ul>
  *   <li>the requester UUID must resolve to an online {@link ServerPlayer};</li>
  *   <li>the requested dimension id must exactly equal the requester's current
- *       {@code ServerLevel#dimension().location()} string; there is no
+ *       {@code ServerLevel#dimension().identifier()} string; there is no
  *       cross-dimension tracking;</li>
  *   <li>an entity target must exist, be alive, and not be removed in the
  *       requester's level; its entity type id is derived from
@@ -130,8 +130,8 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.INVALID_REQUEST);
 		}
 
-		ServerLevel level = requesterPlayer.serverLevel();
-		String dimensionId = level.dimension().location().toString();
+		ServerLevel level = requesterPlayer.level();
+		String dimensionId = level.dimension().identifier().toString();
 
 		if (!dimensionId.equals(requestedTarget.dimensionId())) {
 			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.TARGET_GONE);
@@ -208,7 +208,7 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 				new Target.LocationTarget(dimensionId, position.x, position.y, position.z));
 		}
 
-		ResourceLocation typeKey = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
+		Identifier typeKey = BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType());
 
 		if (typeKey == null) {
 			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.INVALID_REQUEST);
@@ -238,7 +238,7 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 	private AuthoritativeTargetValidation validateBlock(
 		ServerPlayer requester, ServerLevel level, String dimensionId, Target.BlockTarget requested
 	) {
-		ResourceLocation capturedId = ResourceLocation.tryParse(requested.blockRegistryId());
+		Identifier capturedId = Identifier.tryParse(requested.blockRegistryId());
 
 		if (capturedId == null) {
 			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.INVALID_REQUEST);
@@ -251,7 +251,7 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 		}
 
 		BlockState state = level.getBlockState(position);
-		ResourceLocation currentId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+		Identifier currentId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
 
 		if (currentId == null || !currentId.equals(capturedId)) {
 			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.TARGET_GONE);

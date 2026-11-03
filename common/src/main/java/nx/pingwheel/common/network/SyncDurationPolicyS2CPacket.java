@@ -1,7 +1,7 @@
 package nx.pingwheel.common.network;
 
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import org.jetbrains.annotations.NotNull;
 import nx.pingwheel.common.config.ServerConfigBounds;
 
@@ -13,8 +13,8 @@ import static nx.pingwheel.common.Global.S2C_NAMESPACE;
  * not request admission.
  */
 public record SyncDurationPolicyS2CPacket(int syncDuration) implements IPacket {
-	public static final ResourceLocation PACKET_ID =
-		ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "sync-duration-policy");
+	public static final Identifier PACKET_ID =
+		Identifier.fromNamespaceAndPath(S2C_NAMESPACE, "sync-duration-policy");
 	public static final Type<SyncDurationPolicyS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	/** A negative duration is the intentionally corrupt decode fallback. */
@@ -38,7 +38,7 @@ public record SyncDurationPolicyS2CPacket(int syncDuration) implements IPacket {
 	}
 
 	@Override
-	public ResourceLocation getId() {
+	public Identifier getId() {
 		return PACKET_ID;
 	}
 

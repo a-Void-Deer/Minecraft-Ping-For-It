@@ -7,7 +7,7 @@ import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
@@ -293,12 +293,12 @@ public final class NativeLocalShapeRaycaster {
 	}
 
 	private static String blockRegistryId(BlockState state) {
-		ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+		Identifier id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
 		return id == null ? null : id.toString();
 	}
 
 	private static Optional<String> fluidRegistryId(FluidState state) {
-		ResourceLocation id = BuiltInRegistries.FLUID.getKey(state.getType());
+		Identifier id = BuiltInRegistries.FLUID.getKey(state.getType());
 		return id == null ? Optional.empty() : Optional.of(id.toString());
 	}
 

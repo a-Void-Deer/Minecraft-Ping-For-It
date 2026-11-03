@@ -1,46 +1,85 @@
 plugins {
-    id "multiloader-loader"
-    id "fabric-loom" version "${loom_version}"
-}
-
-repositories {
-    maven { url "https://maven.terraformersmc.com/releases" }
-}
-
-dependencies {
-    minecraft "com.mojang:minecraft:${minecraft_version}"
-
-    mappings loom.layered {
-        officialMojangMappings()
-        parchment("org.parchmentmc.data:parchment-${parchment_minecraft}:${parchment_version}@zip")
-    }
-
-    modImplementation "net.fabricmc:fabric-loader:${fabric_loader_version}"
-    modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
-
-    // ModMenu
-    modCompileOnly("com.terraformersmc:modmenu:4.1.2") {
-        exclude(group: "net.fabricmc.fabric-api")
-    }
+	id 'multiloader-loader'
+	id 'net.fabricmc.fabric-loom'
 }
 
 loom {
-    runs {
-        client {
-            client()
-            setConfigName("Fabric Client")
-            ideConfigGenerated(true)
-            runDir("runs/client")
-        }
-        server {
-            server()
-            setConfigName("Fabric Server")
-            ideConfigGenerated(true)
-            runDir("runs/server")
-        }
-    }
+	splitEnvironmentSourceSets()
+
+	mods {
+		'pingforit' {
+			sourceSet sourceSets.main
+			sourceSet sourceSets.client
+		}
+	}
+
+	// 开发运行目录保留在仓库根 run/：run/mods 既是离线编译 jar 目录，也是 dev 运行时的
+	// mods 目录，现有日志/世界也在那里。Loom 默认按“模块目录”解析 runDir，所以这里显式
+	// 指回根目录，保证 ./gradlew runClient 的行为与迁移前完全一致。
+	runs {
+		client {
+			client()
+			setConfigName('Fabric Client')
+			// fabric 不是 root project，Loom 默认只在 root 生成 IDE run 配置；这里显式打开。
+			ideConfigGenerated(true)
+			runDir(rootProject.file('run').absolutePath)
+		}
+		server {
+			server()
+			setConfigName('Fabric Server')
+			ideConfigGenerated(true)
+			runDir(rootProject.file('run').absolutePath)
+		}
+	}
 }
 
-tasks.named("remapJar") {
-    archiveClassifier = "${project.name}-${minecraft_version}"
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	compileOnly integrationJars
+}
+
+// M9-1 Mod Menu：ModMenuIntegration 在 client 源集里。
+attachIntegrationJarCheck('compileClientJava', 'modmenu-',
+	'Missing compile-only jar for the Mod Menu integration: put ' +
+		'modmenu-21.0.0.jar into run/mods/ ' +
+		'(https://maven.terraformersmc.com/releases/com/terraformersmc/modmenu/21.0.0/modmenu-21.0.0.jar)')
+
+// fabric.mod.json 由模板生成（保留移植前的 generateModMetadata 做法：不在 processResources
+// 里用 filesMatching + expand，避免 IDEA 的 Gradle 资源过滤告警）。
+def generateModMetadata = tasks.register('generateModMetadata', Sync) {
+	from 'src/main/templates/fabric.mod.json'
+	into layout.buildDirectory.dir('generated/modMetadata')
+	inputs.property 'version', project.version
+	expand 'version': project.version
+}
+sourceSets.main.resources.srcDir(generateModMetadata.flatMap { it.destinationDirectory })
+tasks.named('processResources') {
+	dependsOn generateModMetadata
+
+	// 把 common 的资源（assets/pingforit/**、icon.png）合并进本模块的资源根。
+	// 机制：Fabric 的资源包只按「mod root」建索引 —— 只有**根目录含 fabric.mod.json 的
+	// classpath 条目**才是 mod root（见 fabric-resource-loader 的 ModNioPackResources）。
+	// dev 的 runClient 里 :common 是以 jar 形式出现在 classpath 上的（jar 根没有
+	// fabric.mod.json），所以它的 assets 物理上在 classpath 却不会被资源包索引到 ——
+	// 表现为游戏里未翻译的 key（pingforit.chat.pingmsg 等）、Missing sound for event、
+	// Mod Menu 图标丢失；而发布 jar 里 assets 是齐的（两个环境表现不一致，很容易误判）。
+	// 上游 fork 也是在 loader 模块的 processResources 里合并 common 资源。
+	from project(':common').sourceSets.main.resources
+}
+
+// 最终可发布 jar = fabric 的 main+client 源集（含已合并的 common 资源）+ common 的 class。
+// common 的 class 用 from(...) 直接合并进来，所以 mod 仍是单个 jar，不引入 JiJ；
+// 资源只经由 processResources 进入一次，避免 jar 里出现重复条目。
+jar {
+	// 本项目使用 fabric-loom 的 no-remap 分支，没有 remapJar，产物直接来自 jar（决策 D4）。
+	archiveClassifier = 'fabric-26.3'
+
+	dependsOn project(':common').tasks.named('classes')
+	from project(':common').sourceSets.main.output.classesDirs
+
+	from(rootProject.file('LICENSE')) {
+		rename { it + '_pingforit' }
+	}
 }

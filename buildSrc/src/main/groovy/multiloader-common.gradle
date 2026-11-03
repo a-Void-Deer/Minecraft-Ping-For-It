@@ -1,152 +1,77 @@
+// 所有模块共享的约定（与上游 fork 的 buildSrc/multiloader-common.gradle 对应）。
+// 只保留 Fabric-only 移植真正需要的东西：Java 25、产物名、公共编译依赖、
+// 以及 run/mods 离线集成 jar 的公共助手。工具链刻意用 release 而不是 toolchain，
+// 避免 Gradle 在本机找不到 JDK 25 时去下载工具链（本机网络不可用）。
 plugins {
-    id "java-library"
+	id 'java-library'
 }
 
 base {
-    archivesName = archive_name
-    version = mod_version
+	archivesName = 'Ping-For-It'
 }
 
 java {
-    toolchain.languageVersion = JavaLanguageVersion.of(java_version)
-    withSourcesJar()
-    withJavadocJar()
+	sourceCompatibility = JavaVersion.VERSION_25
+	targetCompatibility = JavaVersion.VERSION_25
+	withSourcesJar()
+}
+
+tasks.withType(JavaCompile).configureEach {
+	options.release = 25
+	options.encoding = 'UTF-8'
 }
 
 repositories {
-    mavenCentral()
-    // https://docs.gradle.org/current/userguide/declaring_repositories.html#declaring_content_exclusively_found_in_one_repository
-    exclusiveContent {
-        forRepository {
-            maven {
-                name = "Sponge"
-                url = "https://repo.spongepowered.org/repository/maven-public"
-            }
-        }
-        filter { includeGroupAndSubgroups("org.spongepowered") }
-    }
-    exclusiveContent {
-        forRepositories(
-                maven {
-                    name = "ParchmentMC"
-                    url = "https://maven.parchmentmc.org/"
-                },
-                maven {
-                    name = "NeoForge"
-                    url = "https://maven.neoforged.net/releases"
-                }
-        )
-        filter { includeGroup("org.parchmentmc.data") }
-    }
-    exclusiveContent {
-        forRepository {
-            maven {
-                name "Cursemaven"
-                url "https://cursemaven.com"
-            }
-        }
-        filter {
-            includeGroup "curse.maven"
-        }
-    }
-    maven {
-        name = "BlameJared"
-        url = "https://maven.blamejared.com"
-    }
-    maven {
-        name = "Modrinth"
-        url = "https://api.modrinth.com/maven"
-    }
-    maven {
-        name = "Simple Voice Chat"
-        url = "https://maven.maxhenkel.de/repository/public"
-    }
-    maven {
-        name = "RyanHCode Maven"
-        url = "https://maven.ryanhcode.dev/releases"
-    }
+	mavenCentral()
 }
 
 dependencies {
-    implementation "org.jetbrains:annotations:24.1.0"
-
-    // Lombok
-    compileOnly "org.projectlombok:lombok:1.18.32"
-    annotationProcessor "org.projectlombok:lombok:1.18.32"
-
-    // Distant Horizons
-    // https://modrinth.com/mod/distanthorizonsapi
-    compileOnly "maven.modrinth:DistantHorizonsApi:${distanthorizons_api_version}"
-
-    // Simple Voice Chat
-    // https://modrepo.de/minecraft/voicechat/api/getting_started
-    compileOnly "de.maxhenkel.voicechat:voicechat-api:${voicechat_api_version}"
-
-    // FTB Teams
-    // https://www.curseforge.com/minecraft/mc-mods/ftb-teams-forge
-    compileOnly "curse.maven:ftbteams-404468:${ftbteams_version}"
-
-    // Sable
-    // https://github.com/ryanhcode/sable-companion
-    compileOnly "dev.ryanhcode.sable-companion:sable-companion-common-${minecraft_version}:${sable_version}"
+	// 上游源码使用 org.jetbrains.annotations（Nullable/NotNull）。
+	compileOnly 'org.jetbrains:annotations:26.0.2'
 }
 
-// Declare capabilities on the outgoing configurations.
-// Read more about capabilities here: https://docs.gradle.org/current/userguide/component_capabilities.html#sec:declaring-additional-capabilities-for-a-local-component
-["apiElements", "runtimeElements", "sourcesElements", "javadocElements"].each { variant ->
-    configurations."$variant".outgoing {
-        capability("$group:$mod_id-${project.name}-${minecraft_version}:$version")
-        capability("$group:$mod_id:$version")
-    }
-}
+// --- M9 可选集成：编译期依赖来自本地 run/mods -----------------------------------
+// 本机 Gradle 没有可用网络，所以 Mod Menu / Simple Voice Chat / Distant Horizons
+// 不在 maven 里声明，而是直接用 run/mods 下的 jar 做 compileOnly。
+// 这里的 glob 与排除规则必须和 tools/compile-check.sh|.ps1 保持一致，否则两边会漂移。
+def projectRef = project
+def loggerRef = logger
+def tasksRef = tasks
+def integrationModsDir = rootProject.file('run/mods')
+def integrationJarPattern = ~/(modmenu|voicechat-api|voicechat|DistantHorizons|DistantHorizonsApi)-.*\.jar/
 
-jar {
-    manifest {
-        attributes([
-                "Specification-Title"   : mod_name,
-                "Specification-Vendor"  : mod_author,
-                "Specification-Version" : project.jar.archiveVersion,
-                "Implementation-Title"  : project.name,
-                "Implementation-Version": project.jar.archiveVersion,
-                "Implementation-Vendor" : mod_author,
-                "Built-On-Minecraft"    : minecraft_version,
-                "MixinConfigs"          : "${mod_id}.mixins.json"
-        ])
-    }
-}
-def expandProps = [
-        "mod_author"             : mod_author,
-        "mod_name"               : mod_name,
-        "mod_id"                 : mod_id,
-        "archive_name"           : archive_name,
-        "contributors"           : contributors,
-        "license"                : license,
-        "description"            : description,
-        "link_home"              : link_home,
-        "link_src"               : link_src,
-        "link_issues"            : link_issues,
+ext.integrationJars = rootProject.fileTree(
+	dir: rootProject.file('run/mods'),
+	include: [
+		'modmenu-*.jar',
+		'voicechat-api-*.jar',
+		'voicechat-*.jar',
+		'DistantHorizons-*.jar',
+		'DistantHorizonsApi-*.jar',
+	],
+	// 与 tools 脚本同一条排除规则：sources/javadoc jar 绝不能混进编译类路径。
+	exclude: ['*-sources.jar', '*-javadoc.jar'],
+)
 
-        "version"                : version,
-        "java_version"           : java_version,
-        "minecraft_version"      : minecraft_version,
+// 在“真正需要该集成”的编译任务上做存在性检查：检查放在 doFirst（编译期），
+// 不在配置期解析 classpath，所以没有 jar 的 checkout 里 tasks / clean / IDE sync 照常可用。
+// 缺 jar 时给一行可操作的报错，而不是一屏 package does not exist。
+ext.attachIntegrationJarCheck = { String taskName, String requiredPrefix, String message ->
+	tasksRef.matching { it.name == taskName }.configureEach {
+		doFirst {
+			def allJars = integrationModsDir.isDirectory()
+				? (integrationModsDir.listFiles() ?: new File[0]).findAll {
+					it.isFile() && it.name.endsWith('.jar') &&
+						!it.name.endsWith('-sources.jar') && !it.name.endsWith('-javadoc.jar')
+				}.collect { it.name }.sort()
+				: []
+			def integrationJarNames = allJars.findAll { it ==~ integrationJarPattern }
+			loggerRef.lifecycle("compileOnly integration jars (" + taskName + "): " + integrationJarNames)
 
-        "fabric_version"         : fabric_version,
-        "fabric_loader_version"  : fabric_loader_version,
-        "fabric_compatible_range": fabric_compatible_range,
-
-        "forge_version"          : forge_version,
-        "forge_loader_version"   : forge_loader_version,
-        "forge_compatible_range" : forge_compatible_range,
-
-        "neoforge_version"          : neoforge_version,
-        "neoforge_loader_version"   : neoforge_loader_version,
-        "neoforge_compatible_range" : neoforge_compatible_range,
-]
-
-processResources {
-
-    filesMatching(["pack.mcmeta", "fabric.mod.json", "META-INF/mods.toml", "META-INF/neoforge.mods.toml", "*.mixins.json"]) {
-        expand expandProps
-    }
-    inputs.properties(expandProps)
+			if (!integrationJarNames.any { it.startsWith(requiredPrefix) }) {
+				throw new GradleException(message)
+			}
+		}
+	}
+	projectRef.logger.debug("integration jar check attached: " + taskName + " (prefix " + requiredPrefix + ")")
 }

@@ -6,8 +6,6 @@ import com.google.gson.JsonIOException;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
-import lombok.Getter;
-import lombok.SneakyThrows;
 import nx.pingwheel.common.util.SafeExceptionReport;
 import nx.pingwheel.common.platform.IPlatformContextService;
 
@@ -40,8 +38,11 @@ public class ConfigHandler <T extends IConfig> {
 	private SaveProtection saveProtection;
 	private PendingMigration pendingMigration;
 
-	@Getter
 	private T config;
+
+	public T getConfig() {
+		return config;
+	}
 	private int configHash;
 
 	public static <T extends IConfig> ConfigHandler<T> of(Class<T> configType, String configExtension) {
@@ -163,7 +164,6 @@ public class ConfigHandler <T extends IConfig> {
 		return true;
 	}
 
-	@SneakyThrows
 	public synchronized void load() {
 		pendingMigration = null;
 		if (!Files.exists(configPath)) {

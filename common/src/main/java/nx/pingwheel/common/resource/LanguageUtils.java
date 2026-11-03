@@ -1,6 +1,5 @@
 package nx.pingwheel.common.resource;
 
-import lombok.Getter;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -32,8 +31,11 @@ public class LanguageUtils {
 		return LanguageUtils.of(category, path).getKey();
 	}
 
-	@Getter
 	private String key;
+
+	public String getKey() {
+		return key;
+	}
 
 	public static LanguageUtils of(String category, String... path) {
 		return new LanguageUtils(String.join(".", category, MOD_ID, String.join(".", path)));

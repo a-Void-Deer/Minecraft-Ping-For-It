@@ -2,8 +2,6 @@ package nx.pingwheel.common.integration;
 
 import net.minecraft.world.entity.player.Player;
 
-import static nx.pingwheel.common.CommonClient.Game;
-
 public class TeamContextHandler {
 	private TeamContextHandler() {}
 
@@ -21,18 +19,6 @@ public class TeamContextHandler {
 		if (ftbTeamId.isPresent()) return TeamContext.FTB_TEAMS;
 
 		if (player.getTeam() != null) return TeamContext.VANILLA_TEAM;
-
-		return TeamContext.NONE;
-	}
-
-	public static TeamContext getSelfContext() {
-		final var voiceChatId = VoiceChatWrapper.getSelfGroupId();
-		if (voiceChatId.isPresent()) return TeamContext.VOICE_CHAT;
-
-		final var ftbTeamId = FTBTeamsWrapper.getSelfTeamId();
-		if (ftbTeamId.isPresent()) return TeamContext.FTB_TEAMS;
-
-		if (Game.player != null && Game.player.getTeam() != null) return TeamContext.VANILLA_TEAM;
 
 		return TeamContext.NONE;
 	}

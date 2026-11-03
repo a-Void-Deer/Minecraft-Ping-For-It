@@ -1,0 +1,30 @@
+{
+	"schemaVersion": 1,
+	"id": "pingforit",
+	"version": "${version}",
+	"name": "Ping For It",
+	"description": "Server-authoritative ping system with a ping-type wheel. Fabric port for Minecraft 26.3.",
+	"authors": ["isharmla"],
+	"contact": {},
+	"license": "MIT",
+	"icon": "icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": ["nx.pingwheel.fabric.FabricMain"],
+		"client": ["nx.pingwheel.fabric.FabricClient"],
+		"modmenu": ["nx.pingwheel.fabric.integration.ModMenuIntegration"],
+		"voicechat": ["nx.pingwheel.common.integration.VoiceChatIntegration"]
+	},
+	"mixins": [
+		{
+			"config": "pingforit.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

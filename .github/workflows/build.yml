@@ -1,0 +1,62 @@
+# Ping For It (MC 26.3 / Fabric) — build and upload the shippable jar
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: checkout repository
+        uses: actions/checkout@v6
+
+      - name: validate gradle wrapper
+        uses: gradle/actions/wrapper-validation@v6
+
+      - name: setup jdk 25
+        uses: actions/setup-java@v5
+        with:
+          java-version: '25'
+          distribution: 'microsoft'
+
+      - name: make gradle wrapper executable
+        run: chmod +x ./gradlew
+
+      # M9 optional integrations are compile-only: the modules compile against jars in
+      # run/mods (the dev machine has no usable gradle network). run/ is gitignored, so a
+      # fresh checkout has no jars and the integration classes cannot compile -- this step
+      # supplies them from their official mavens/CDN. Keep this list in sync with
+      # ext.integrationJars in buildSrc/src/main/groovy/multiloader-common.gradle and its
+      # per-integration existence checks (common/ -> voicechat-, fabric/ -> modmenu-);
+      # the build therefore needs network here (or pre-placed run/mods jars) to succeed.
+      - name: fetch optional integration jars (compile-only)
+        run: |
+          mkdir -p run/mods
+          curl -fsSL --retry 3 -o run/mods/modmenu-21.0.0.jar \
+            "https://maven.terraformersmc.com/releases/com/terraformersmc/modmenu/21.0.0/modmenu-21.0.0.jar"
+          # Same artifact the dev runtime loads (the full Simple Voice Chat mod bundles the
+          # de.maxhenkel.voicechat.api classes), so CI and local compile against one class
+          # surface instead of an api-only jar that can drift.
+          curl -fsSL --retry 3 -o "run/mods/voicechat-fabric-2.6.27+26.3.jar" \
+            "https://cdn.modrinth.com/data/9eGKb6K1/versions/x9jLR94Q/voicechat-fabric-2.6.27%2B26.3.jar"
+          # Deliberately the same DH artifact the dev runtime loads (it bundles the DH API
+          # classes), so CI and local compile against an identical class surface. The
+          # API-only jar is smaller but would silently drift from run/mods.
+          curl -fsSL --retry 3 -o run/mods/DistantHorizons-3.3.4-26.3-fabric-neoforge.jar \
+            "https://cdn.modrinth.com/data/uCdwusMi/versions/TGgEbP9A/DistantHorizons-3.3.4-26.3-fabric-neoforge.jar"
+          ls -l run/mods
+
+      - name: build
+        run: ./gradlew build
+
+      - name: upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: Ping-For-It
+          # The shippable jar is produced by the fabric module (common/ classes and
+          # resources are merged into it by fabric/build.gradle's jar task).
+          # Narrowed to the classifier so the sources jar is not uploaded as well.
+          path: fabric/build/libs/Ping-For-It-*-fabric-26.3.jar
+          if-no-files-found: error

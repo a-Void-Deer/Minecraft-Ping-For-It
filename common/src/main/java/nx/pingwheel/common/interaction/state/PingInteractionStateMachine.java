@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 import nx.pingwheel.common.config.ClientConfigBounds;
 import nx.pingwheel.common.domain.PingType;
@@ -64,6 +65,7 @@ public final class PingInteractionStateMachine {
 	private final PingInteractionLogger logger;
 	private final LongSupplier wheelHoldMillisSupplier;
 	private final LongSupplier wheelTimeoutMillisSupplier;
+	private final Supplier<WheelSelectionDiagnostics> selectionDiagnosticsSupplier;
 	private final boolean supplierValuesUseClientConfigBounds;
 	private long longPressMillis = LONG_PRESS_MILLIS;
 	private long wheelTimeoutMillis = WHEEL_TIMEOUT_MILLIS;
@@ -125,6 +127,39 @@ public final class PingInteractionStateMachine {
 			logger,
 			wheelHoldMillisSupplier,
 			wheelTimeoutMillisSupplier,
+			() -> null);
+	}
+
+	/**
+	 * Creates a state machine that also receives client-side presentation
+	 * diagnostics for the INFO {@code wheel select} line (M6.5).
+	 *
+	 * <p>The supplier is only consulted when a wheel sector is committed, never
+	 * per frame or per interaction step, and may return {@code null} when the
+	 * client cannot supply the values. It must not throw: a failing diagnostics
+	 * lookup is swallowed so it can never break the commit it describes.
+	 */
+	public PingInteractionStateMachine(
+		PingCaptureCoordinator coordinator,
+		ActiveInteraction activeInteraction,
+		InteractionTimeSource timeSource,
+		TargetValidator targetValidator,
+		CancelCandidatePicker cancelCandidatePicker,
+		PingInteractionLogger logger,
+		LongSupplier wheelHoldMillisSupplier,
+		LongSupplier wheelTimeoutMillisSupplier,
+		Supplier<WheelSelectionDiagnostics> selectionDiagnosticsSupplier
+	) {
+		this(
+			coordinator,
+			activeInteraction,
+			timeSource,
+			targetValidator,
+			cancelCandidatePicker,
+			logger,
+			wheelHoldMillisSupplier,
+			wheelTimeoutMillisSupplier,
+			selectionDiagnosticsSupplier,
 			true);
 	}
 
@@ -153,6 +188,7 @@ public final class PingInteractionStateMachine {
 			logger,
 			constantThresholdSupplier("longPressMillis", longPressMillis),
 			constantThresholdSupplier("wheelTimeoutMillis", wheelTimeoutMillis),
+			() -> null,
 			false);
 	}
 
@@ -165,6 +201,7 @@ public final class PingInteractionStateMachine {
 		PingInteractionLogger logger,
 		LongSupplier wheelHoldMillisSupplier,
 		LongSupplier wheelTimeoutMillisSupplier,
+		Supplier<WheelSelectionDiagnostics> selectionDiagnosticsSupplier,
 		boolean supplierValuesUseClientConfigBounds
 	) {
 		this.coordinator = Objects.requireNonNull(coordinator, "coordinator");
@@ -175,6 +212,7 @@ public final class PingInteractionStateMachine {
 		this.logger = Objects.requireNonNull(logger, "logger");
 		this.wheelHoldMillisSupplier = Objects.requireNonNull(wheelHoldMillisSupplier, "wheelHoldMillisSupplier");
 		this.wheelTimeoutMillisSupplier = Objects.requireNonNull(wheelTimeoutMillisSupplier, "wheelTimeoutMillisSupplier");
+		this.selectionDiagnosticsSupplier = Objects.requireNonNull(selectionDiagnosticsSupplier, "selectionDiagnosticsSupplier");
 		this.supplierValuesUseClientConfigBounds = supplierValuesUseClientConfigBounds;
 	}
 
@@ -388,6 +426,7 @@ public final class PingInteractionStateMachine {
 
 			if (openDuration >= wheelTimeoutMillis) {
 				logger.debug("wheel timeout: token={} openMillis={}", token.sequence(), openDuration);
+				logger.info("wheel timeout reason=duration-exceeded openMillis=" + openDuration);
 				resetMachineState();
 			}
 
@@ -482,6 +521,7 @@ public final class PingInteractionStateMachine {
 
 		if (openDuration >= wheelTimeoutMillis) {
 			logger.debug("wheel timeout: token={} openMillis={}", token.sequence(), openDuration);
+			logger.info("wheel timeout reason=duration-exceeded openMillis=" + openDuration);
 			resetMachineState();
 			return Optional.empty();
 		}
@@ -504,6 +544,14 @@ public final class PingInteractionStateMachine {
 		WheelSelection committed = selection;
 
 		if (committed instanceof WheelSelection.Sector sector) {
+			// M6 verification line: the wheel committed this sector's ping type.
+			// M6.5 appends the HiDPI self-check fields (GUI scale and GUI-space
+			// cursor position) plus the committed sector index; the prefix and
+			// the existing select fields are unchanged and no per-frame line is
+			// added.
+			logger.info("wheel select pingType=" + sector.pingType().id()
+				+ describeSelectionDiagnostics()
+				+ " sector=" + wheelPingTypes.indexOf(sector.pingType()));
 			return commitPing(capturedContext, sector.pingType());
 		}
 
@@ -513,17 +561,22 @@ public final class PingInteractionStateMachine {
 			if (candidate.isPresent()) {
 				logger.debug("cancel selected: token={} candidateCount={} markerId={}",
 					token.sequence(), cancellationContext.candidates().size(), candidate.get().markerId().value());
+				logger.info("wheel cancel reason=marker markerId=" + candidate.get().markerId().value());
 				resetMachineState();
 				return Optional.of(new PingInteractionAction.CancelMarker(candidate.get().markerId()));
 			}
 
 			logger.debug("cancel empty: token={} candidateCount={}",
 				token.sequence(), cancellationContext.candidates().size());
+			logger.info("wheel cancel reason=no-locally-owned-marker");
 			resetMachineState();
 			return Optional.empty();
 		}
 
 		// No selection (or an invalid sector normalised to None): no action.
+		// Distinct from the timeout and center-cancel reasons, so a released
+		// wheel with the cursor outside the ring is verifiable on its own.
+		logger.info("wheel close reason=no-selection");
 		resetMachineState();
 		return Optional.empty();
 	}
@@ -559,6 +612,10 @@ public final class PingInteractionStateMachine {
 		this.selection = WheelSelection.NONE;
 		this.phase = PingInteractionPhase.WHEEL_OPEN;
 		logger.debug("wheel open: token={} pingTypeCount={}", token.sequence(), wheelPingTypes.size());
+		// M6 verification line: a normal launch proves the long press opened the
+		// wheel and froze exactly the target type's available ping types. Only
+		// stable ping type ids are emitted (see the logger contract).
+		logger.info("wheel open types=" + wheelPingTypes.stream().map(PingType::id).toList());
 	}
 
 	private WheelSelection normalizeSelection(WheelSelection wheelSelection) {
@@ -576,6 +633,32 @@ public final class PingInteractionStateMachine {
 		}
 
 		return selection.toString();
+	}
+
+	/**
+	 * The optional client-supplied fields appended to the INFO select line as
+	 * {@code " scale=<guiScale> mouse=<x>,<y>"}, or an empty string when the
+	 * client cannot supply them.
+	 *
+	 * <p>Only consulted for a committed wheel sector, never per frame. The
+	 * supplier is allowed to return {@code null} and a failing supplier is
+	 * swallowed, because diagnostics must never break the ping they describe.
+	 */
+	private String describeSelectionDiagnostics() {
+		WheelSelectionDiagnostics diagnostics;
+
+		try {
+			diagnostics = selectionDiagnosticsSupplier.get();
+		} catch (RuntimeException unavailable) {
+			return "";
+		}
+
+		if (diagnostics == null) {
+			return "";
+		}
+
+		return " scale=" + diagnostics.guiScale()
+			+ " mouse=" + Math.round(diagnostics.mouseX()) + "," + Math.round(diagnostics.mouseY());
 	}
 
 	private long observeTime() {

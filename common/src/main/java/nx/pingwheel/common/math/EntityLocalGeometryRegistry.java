@@ -10,7 +10,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.Entity;
 import nx.pingwheel.common.Global;
 
@@ -44,16 +44,16 @@ public final class EntityLocalGeometryRegistry {
 	 * idempotently closeable handle and never removes the existing owner.</p>
 	 */
 	public Registration register(
-		ResourceLocation sourceId,
+		Identifier sourceId,
 		int priority,
-		Collection<ResourceLocation> entityTypeIds,
+		Collection<Identifier> entityTypeIds,
 		EntityLocalGeometryResolver resolver
 	) {
 		Objects.requireNonNull(sourceId, "sourceId");
 		Objects.requireNonNull(entityTypeIds, "entityTypeIds");
 		Objects.requireNonNull(resolver, "resolver");
 
-		Set<ResourceLocation> exactTypeIds = copyExactTypeIds(entityTypeIds);
+		Set<Identifier> exactTypeIds = copyExactTypeIds(entityTypeIds);
 
 		if (exactTypeIds.isEmpty()) {
 			throw new IllegalArgumentException("entityTypeIds must not be empty");
@@ -75,10 +75,10 @@ public final class EntityLocalGeometryRegistry {
 		}
 	}
 
-	private static Set<ResourceLocation> copyExactTypeIds(Collection<ResourceLocation> entityTypeIds) {
-		var copied = new LinkedHashSet<ResourceLocation>();
+	private static Set<Identifier> copyExactTypeIds(Collection<Identifier> entityTypeIds) {
+		var copied = new LinkedHashSet<Identifier>();
 
-		for (ResourceLocation entityTypeId : entityTypeIds) {
+		for (Identifier entityTypeId : entityTypeIds) {
 			copied.add(Objects.requireNonNull(entityTypeId, "entityTypeIds contains null"));
 		}
 
@@ -121,7 +121,7 @@ public final class EntityLocalGeometryRegistry {
 		return new Snapshot(this, snapshot);
 	}
 
-	private void warnCallbackFailure(ResourceLocation sourceId, Throwable failure) {
+	private void warnCallbackFailure(Identifier sourceId, Throwable failure) {
 		warnOnce(
 			"callback:" + sourceId + ':' + failure.getClass().getName(),
 			"entity local geometry source failed; id=" + sourceId + "; category=callback",
@@ -146,7 +146,7 @@ public final class EntityLocalGeometryRegistry {
 
 		Claim firstOwner(Entity candidate) {
 			Objects.requireNonNull(candidate, "candidate");
-			ResourceLocation entityTypeId = BuiltInRegistries.ENTITY_TYPE.getKey(candidate.getType());
+			Identifier entityTypeId = BuiltInRegistries.ENTITY_TYPE.getKey(candidate.getType());
 
 			if (entityTypeId == null) {
 				return null;
@@ -188,9 +188,9 @@ public final class EntityLocalGeometryRegistry {
 	}
 
 	private record Entry(
-		ResourceLocation sourceId,
+		Identifier sourceId,
 		int priority,
-		Set<ResourceLocation> entityTypeIds,
+		Set<Identifier> entityTypeIds,
 		EntityLocalGeometryResolver resolver
 	) {}
 
@@ -198,18 +198,18 @@ public final class EntityLocalGeometryRegistry {
 	public static final class Registration implements AutoCloseable {
 
 		private final EntityLocalGeometryRegistry registry;
-		private final ResourceLocation sourceId;
+		private final Identifier sourceId;
 		private final int priority;
-		private final Set<ResourceLocation> entityTypeIds;
+		private final Set<Identifier> entityTypeIds;
 		private final EntityLocalGeometryResolver resolver;
 		private final boolean accepted;
 		private boolean closed;
 
 		private Registration(
 			EntityLocalGeometryRegistry registry,
-			ResourceLocation sourceId,
+			Identifier sourceId,
 			int priority,
-			Set<ResourceLocation> entityTypeIds,
+			Set<Identifier> entityTypeIds,
 			EntityLocalGeometryResolver resolver,
 			boolean accepted
 		) {
@@ -221,7 +221,7 @@ public final class EntityLocalGeometryRegistry {
 			this.accepted = accepted;
 		}
 
-		private static Registration rejected(EntityLocalGeometryRegistry registry, ResourceLocation sourceId) {
+		private static Registration rejected(EntityLocalGeometryRegistry registry, Identifier sourceId) {
 			return new Registration(registry, sourceId, 0, Set.of(), null, false);
 		}
 

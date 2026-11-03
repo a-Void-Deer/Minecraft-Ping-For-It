@@ -1,16 +1,20 @@
 package nx.pingwheel.common.name;
 
+import com.google.gson.JsonParser;
+import com.mojang.serialization.JsonOps;
 import java.util.Objects;
 
 import net.minecraft.core.HolderLookup;
+import net.minecraft.resources.RegistryOps;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.ComponentSerialization;
 
 /**
  * Wire-ready JSON (de)serialization of authoritative target display names.
  *
  * <p>{@link #encode} serializes a server-derived {@link Component} into the
- * compact JSON text carried by {@link TargetNameJson}, using the 1.21.1
- * {@code Component.Serializer} together with the server registry access. The
+ * compact JSON text carried by {@link TargetNameJson}, using the vanilla
+ * {@code ComponentSerialization.CODEC} together with the server registry access. The
  * reverse operation, {@link #decode}, parses that JSON back into a component.
  * Both directions use the exact same vanilla codec, so a name round-trips
  * losslessly.
@@ -47,7 +51,10 @@ public final class TargetNameJsonCodec {
 		Objects.requireNonNull(component, "component");
 		Objects.requireNonNull(registryAccess, "registryAccess");
 
-		return new TargetNameJson(Component.Serializer.toJson(component, registryAccess));
+		return new TargetNameJson(ComponentSerialization.CODEC
+			.encodeStart(RegistryOps.create(JsonOps.INSTANCE, registryAccess), component)
+			.getOrThrow()
+			.toString());
 	}
 
 	/**
@@ -64,6 +71,8 @@ public final class TargetNameJsonCodec {
 		Objects.requireNonNull(json, "json");
 		Objects.requireNonNull(registryAccess, "registryAccess");
 
-		return Component.Serializer.fromJson(json.value(), registryAccess);
+		return ComponentSerialization.CODEC
+			.parse(RegistryOps.create(JsonOps.INSTANCE, registryAccess), JsonParser.parseString(json.value()))
+			.getOrThrow();
 	}
 }
