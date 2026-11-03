@@ -93,6 +93,28 @@ assertions are inventoried under
 [combined-tree execution](build-checks.md#native-fluid-boundary-and-presentation-verification)
 records the passing headless results.
 
+### Low-opacity quad regressions
+
+`SpatialFluidIconQuadTest` checks the actual Minecraft shader assets and
+GameRenderer binding for the stock entity-translucent-emissive shader with
+`NEW_ENTITY`. Texture-alpha discard precedes transition opacity; a CPU oracle
+using production vertex/uniform values retains a nonzero contribution from an
+opaque texel at 5% opacity. Production mesh assertions preserve pose, UVs, tint
+and vertex attributes, while submission-order checks keep shader-local opacity
+after default uniforms.
+
+Recording submission and fake GL-state seams cover flush/submission failures,
+resource disposal, caller-state and explicitly overridden uniform restoration,
+and subsequent-icon recovery. A missing shader cannot produce an opaque fallback.
+`SpatialFluidIconRendererTest` also records water tint, zero-opacity lookup
+suppression and text-only fallback with later recovery after submission failure.
+The
+[combined-tree execution](build-checks.md#lane-policy-native-amount-and-icon-opacity-verification)
+records their passing headless results. The separate
+[stock-GUI GPU probe](build-checks.md#stock-gui-gpu-probe)
+records native framebuffer, following-draw and focused JUnit results, distinct
+from these repository CPU/fake-state seams.
+
 ## Selector overlay layout and frame rendering
 
 `SpatialOverlayRendererTimingTest` covers renderer timing models.

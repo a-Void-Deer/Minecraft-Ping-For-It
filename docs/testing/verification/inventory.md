@@ -110,6 +110,57 @@ quantity fitting and sprite dispatch to
 loader APIs and the Create tea archive to
 [integration verification](integrations.md#native-fluid-presentation).
 
+### Production lane policy and native amount regressions
+
+These regressions passed in the
+[lane-policy, native-amount and icon-opacity execution](build-checks.md#lane-policy-native-amount-and-icon-opacity-verification),
+extending the earlier fluid coverage.
+
+`InventoryProductionPolicyTest` drives actual `PresentationServer.tick`
+permission derivation and backend ticks through a recording network service.
+ITEM/FLUID deop and reop keep the presentation epoch, view and SECTION mask,
+without a shared `RESET`. Assertions preserve the sibling's accepted preview,
+tracking recipient and baseline, paid cursor, publication watermarks and admitted
+queue. The revoked lane retires queued data, baselines and tokens; reallow admits a
+fresh scan and baseline under the same parent request. `InventoryResourceLanesTest`
+also checks fresh lane-local admission without rereading the sibling.
+
+`InventoryProductionPolicyTest` and `InventorySyncPublisherTest` cover retaining
+each lane's exact desired `POLICY` packet until `transport.send` returns normally
+under the current session, epoch, view and authority. Queue admission is not
+completion or a client ACK. Admission refusal, budget defer, transport failure
+and authority discard leave bounded retry work; packet-identity deduplication
+prevents duplicate queue entries. Old equal-valued completions cannot clear a newer
+desired packet, and authority changes before send returns keep it retryable.
+View/epoch changes, close, session replacement and disconnect fence retired
+callbacks. Recursive drains defer callback-added work, callback runtime/linkage
+failures remain isolated, and cancellation/cleanup release retained memory.
+Production server/client ticks check eventual authorization convergence, sibling
+continuity and no repeated policy sends after successful handoff.
+
+Controls cover the shared target quota and close boundary, exactly-once delivery
+of a pending `SELECTED`, all-lane denial retaining the Basic known marker,
+control-admission retry and fresh marker receipt authorization. SECTION permission
+and child-policy configuration changes retain shared `RESET` controls. Native
+content, world setup and transport are fixtures, not a server or multiplayer
+launch.
+
+Forge and NeoForge `NativeFluidAmountTest` use real native stacks through the
+production handler adapters; Forge requires the patched-first integration
+classpath. Retained negative constructor/setter amounts are rejected before an
+empty visitor, even when the public getter reports zero.
+Forge also tests negative native NBT; NeoForge distinguishes its native parser's
+rejection to legitimate `FluidStack.EMPTY` from adapter rejection of a retained
+negative value. Controls cover zero/empty and positive/max amounts, Forge public
+getter overrides, paid single null/throwing getter attempts, and amount-access
+failure followed by recovery.
+
+The runtime replacement assertions keep prior complete quantity evidence when a
+negative native read yields `UNAVAILABLE`, non-complete output with no slots and
+cannot be retained as completed. They do not replace it with exact zero. These
+seams use fixture identity bytes and world binding, not full native identity-codec
+integration.
+
 ## Inventory preview and tracking foundation
 
 Headless test-source assertions cover the preview route and its supporting

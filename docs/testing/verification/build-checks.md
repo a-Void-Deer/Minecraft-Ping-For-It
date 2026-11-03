@@ -720,6 +720,99 @@ loader/Mixin launch, installed Create/Sable, multiplayer/mixed-version transport
 and performance remain pending in the
 [fluid manual matrix](manual-integration.md#fluid-inventory).
 
+### Lane policy, native amount and icon opacity verification
+
+Recorded execution date: 2026-11-03. All 1,316 tested non-documentation inputs
+match commit `27bbb83d89b762961f2f3bece994cfdc8f914ca2`, with none missing or
+changed through verification. The external evidence directory below retains the
+command, logs, fresh JUnit results, input checks and artifact checks.
+
+The single full invocation ran from PowerShell on Windows with Temurin
+21.0.12.1+1-LTS, UTF-8, `--no-daemon`, no explicit timeout and separate
+stdout/stderr files:
+
+```powershell
+$evidence = 'C:\Users\Void_Deer\AppData\Local\Temp\opencode\pfi-policy-handoff-formal-20261103-182113-1d164ce3'
+$env:JAVA_HOME = 'E:\scoop\apps\temurin21-jdk\current'
+$env:PATH = "$env:JAVA_HOME\bin;$env:PATH"
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+& .\gradlew.bat --no-daemon --continue :common:check :common:javadoc :fabric:build :forge:build :neoforge:build verifyModIdentity :fabric:fluidSourceIntegration :forge:fluidSourceIntegration :neoforge:fluidSourceIntegration :forge:fluidPresentationIntegration :forge:nativeFluidAmountIntegration :common:fluidPresentationClassSafetyIntegration --init-script "$evidence/formal.init.gradle" --init-script "$evidence/class-safety.init.gradle" --console=plain --info > "$evidence/formal.stdout.log" 2> "$evidence/formal.stderr.log"
+```
+
+Result: exit 0, `BUILD SUCCESSFUL`. All ten Test tasks ran freshly:
+
+| Module / task | Suites | Test executions | Passed | Skipped |
+| --- | --- | --- | --- | --- |
+| Common test | 498 | 5,370 | 5,368 | 2 |
+| Fabric test | 7 | 83 | 83 | 0 |
+| Forge test | 8 | 67 | 61 | 6 |
+| NeoForge test | 49 | 341 | 341 | 0 |
+| Fabric fluidSourceIntegration | 1 | 2 | 2 | 0 |
+| Forge fluidSourceIntegration | 1 | 2 | 2 | 0 |
+| NeoForge fluidSourceIntegration | 1 | 2 | 2 | 0 |
+| Forge fluidPresentationIntegration | 1 | 2 | 2 | 0 |
+| Forge nativeFluidAmountIntegration | 1 | 5 | 5 | 0 |
+| Common fluidPresentationClassSafetyIntegration | 1 | 6 | 6 | 0 |
+| Total | 568 | 5,880 | 5,872 | 8 |
+
+Every row has zero failures and errors. The two Common
+`InventoryFluidLoaderIntegrationTest` skips require loader-native fixtures;
+the same methods passed in all three fluid-source integration tasks. Forge's
+ordinary vanilla-first classpath skips one `FluidPresentationServiceTest` method
+and all five `NativeFluidAmountTest` methods; the same methods passed in their
+patched-first presentation and native-amount tasks. The amount skip reason comes
+from the class's `BeforeAll` assumption and classpath, while its XML contains
+bare skipped entries. Repeated methods across tasks count as executions, not
+independent scenarios.
+
+All four main compilations and Common/Forge/NeoForge test compilations executed;
+Fabric test compilation was `UP-TO-DATE`. Javadocs, loader main/source/Javadoc
+jars, Fabric remapping, all three builds and `verifyModIdentity` completed.
+Resource processing and Fabric access-widener validation reused outputs.
+Gradle reported 59 actionable tasks: 37 executed, 22 up-to-date.
+No independent Java lint, formatter or static-analysis task is configured.
+
+Scoped artifact checks passed for all loader main jars' production service
+providers and fixture/package boundaries. The new test network SPI stayed in
+Common test output; all nine main/source/Javadoc artifacts passed its leak check.
+These checks supplement artifact identity verification, not exhaustive archive
+certification.
+
+Passing assertions are inventoried under
+[production lane policy, handoff and native amounts](inventory.md#production-lane-policy-and-native-amount-regressions)
+and [low-opacity quads](rendering.md#low-opacity-quad-regressions). This formal run
+uses headless tests; the separate GPU evidence below is not part of its counts.
+
+Nonfatal diagnostics include 400 Javadoc warnings, deprecated APIs, mapping,
+processor/Mixin options, skipped Eclipse integration and Gradle 9 deprecation.
+Some localized Javadoc output is garbled. The NeoForge headless Create fixture
+emits `Sheets loaded too early` despite passing assertions; it is not a live
+client initialization result.
+
+#### Stock-GUI GPU probe
+
+Recorded 2026-11-03 in
+`C:\Users\Void_Deer\AppData\Local\Temp\opencode\pfi-opacity-review-20261103`:
+the independent review's `verify-review.ps1` compiled the production icon sources
+with `javac` and passed 14 focused JUnit tests (no skips or failures); its hidden
+GLFW probe used stock Minecraft 1.21.1 assets, real `ShaderInstance`,
+`GuiGraphics.flush` and unmodified production quad submission on NVIDIA GeForce
+RTX 4060 Laptop OpenGL 3.2. Framebuffer opacity/tint and texture cutoff,
+queued/following GUI draws, nondefault caller-state/cache preservation and
+injected-failure recovery passed with no GL errors.
+
+The four render source/test inputs match this formal input. The GPU probe and
+its focused JUnit run were not rerun or added to the formal Gradle counts.
+
+Only explicitly overridden uniforms are restored, not the whole shader object;
+normal subsequent stock draws re-establish default model/projection and samplers.
+This stock-GUI result does not verify full-game/native-font rendering, actual
+resource reload, third-party shaders, installed Create, full loader/FML/server
+launch, multiplayer or long-run
+native-heap/performance; live scenarios remain in the
+[fluid manual matrix](manual-integration.md#fluid-inventory).
+
 ## Verification limitations
 
 The 2026-10-27 combined invocation's stderr was empty; stdout retained the Gradle 9

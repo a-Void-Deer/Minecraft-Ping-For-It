@@ -37,7 +37,7 @@ their limitations and gaps, not those product contracts.
 | Page | Evidence responsibility |
 | --- | --- |
 | [Testing and verification](README.md) | Global evidence rules, check selection, topic routing, and recording future evidence. |
-| [Build checks](build-checks.md#build-source-set-and-artifact-verification) | Source-set, build-task and artifact-identity evidence and its limits; [final fluid combined-tree execution](build-checks.md#fluid-inventory-final-combined-tree-verification); [tank grouping and presentation execution](build-checks.md#fluid-tank-grouping-and-presentation-verification); [native fluid boundary/presentation execution](build-checks.md#native-fluid-boundary-and-presentation-verification); [standalone documentation tooling](build-checks.md#documentation-tooling-coverage). |
+| [Build checks](build-checks.md#build-source-set-and-artifact-verification) | Source-set, build-task and artifact-identity evidence and its limits; [final fluid combined-tree execution](build-checks.md#fluid-inventory-final-combined-tree-verification); [tank grouping and presentation execution](build-checks.md#fluid-tank-grouping-and-presentation-verification); [native fluid boundary/presentation execution](build-checks.md#native-fluid-boundary-and-presentation-verification); [lane policy/native amount/icon opacity execution](build-checks.md#lane-policy-native-amount-and-icon-opacity-verification); [standalone documentation tooling](build-checks.md#documentation-tooling-coverage). |
 | [Manual and integration verification](manual-integration.md#pending-manual-and-integration-matrix) | Pending manual/integration scenarios; listing a scenario does not record a completed run. |
 
 ## Existing automated coverage inventory
