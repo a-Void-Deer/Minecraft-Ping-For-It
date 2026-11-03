@@ -7,16 +7,22 @@ import com.mojang.blaze3d.vertex.BufferBuilder;
  *
  * <p>1.21.1 exposes {@code ByteBufferBuilder}, which owns its storage and is
  * {@link AutoCloseable}. The 1.20.1 equivalent is a plain {@link BufferBuilder}
- * whose contents are discarded by {@link BufferBuilder#discard()}; this small
- * wrapper preserves the attempt-scoped try-with-resources ownership used by
- * the outline renderer.</p>
+ * whose storage is not released by {@link BufferBuilder#discard()}. This wrapper
+ * preserves the attempt-scoped try-with-resources ownership used by the
+ * outline renderer while leasing the builder from a bounded pool, so a
+ * continuous outline pass reuses one direct allocation instead of creating a
+ * new one per attempt.</p>
+ *
+ * <p>The pool reset runs in {@link #close()} on success, failure, and
+ * exceptional exit, and {@link #close()} is idempotent.</p>
  */
 final class AttemptBuffer implements AutoCloseable {
 
 	private final BufferBuilder builder;
+	private boolean closed;
 
 	AttemptBuffer(int initialCapacity) {
-		this.builder = new BufferBuilder(initialCapacity);
+		this.builder = AttemptBufferPool.INSTANCE.acquire(initialCapacity);
 	}
 
 	BufferBuilder builder() {
@@ -25,6 +31,11 @@ final class AttemptBuffer implements AutoCloseable {
 
 	@Override
 	public void close() {
-		this.builder.discard();
+		if (this.closed) {
+			return;
+		}
+
+		this.closed = true;
+		AttemptBufferPool.INSTANCE.release(this.builder);
 	}
 }
