@@ -446,6 +446,17 @@ public final class ClientPingRuntime {
 		return compatibilityController.hasPendingState();
 	}
 
+	/**
+	 * Whether the current interaction already owns a frozen capture.
+	 *
+	 * <p>Diagnostics only: a long press can never open the wheel without a
+	 * completed capture, so this distinguishes "frame path is not advancing"
+	 * from "capture never completed" in a single log line.</p>
+	 */
+	public boolean hasFrozenCapture() {
+		return this.activeInteraction.currentContext().isPresent() || this.pendingRay != null;
+	}
+
 	private void observeWorldContinuity(Minecraft game) {
 		ClientLevel currentLevel = game.level;
 		String currentDimension = currentLevel.dimension().location().toString();

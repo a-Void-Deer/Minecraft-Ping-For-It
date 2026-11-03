@@ -15,6 +15,7 @@ import java.util.Map;
 import nx.pingwheel.common.client.ClientPingRuntime;
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
 import nx.pingwheel.common.client.SelectionToggleNoticeState;
+import nx.pingwheel.common.client.WheelDiagnostics;
 import nx.pingwheel.common.client.duration.ClientSyncDurationPolicy;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
@@ -554,7 +555,14 @@ public class CommonClient {
 		}
 
 		if (pingRuntime != null) {
-			pingRuntime.onRenderFrame(InputUtils.isPingHotkeyDown());
+			boolean pingHeld = InputUtils.isPingHotkeyDown();
+			pingRuntime.onRenderFrame(pingHeld);
+			WheelDiagnostics.INSTANCE.note(
+				pingHeld,
+				pingRuntime.phase(),
+				pingRuntime.hasFrozenCapture(),
+				pingRuntime.wheelPresentation().isPresent(),
+				Game);
 		}
 
 		if (Game.level == null || Game.player == null) {

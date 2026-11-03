@@ -4,6 +4,8 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.client.ConfigScreenHandler;
 import net.minecraftforge.client.event.RegisterClientCommandsEvent;
 import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
+import net.minecraftforge.client.event.RenderGuiOverlayEvent;
+import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModLoadingContext;
@@ -79,6 +81,29 @@ public class ForgeClient {
 
 			ctx.setPacketHandled(true);
 		});
+	}
+
+	/**
+	 * Late HUD entry point for Forge.
+	 *
+	 * <p>Forge 1.20.1 does not use the common {@code GuiMixin} any more: the
+	 * proven upstream path is a vanilla overlay event. {@code VIGNETTE} runs
+	 * late in the HUD pass, so the marker overlay and the wheel are drawn above
+	 * the regular HUD without depending on Mixin application order.</p>
+	 */
+	@SubscribeEvent
+	public void onRenderGuiPre(RenderGuiOverlayEvent.Pre event) {
+		if (event.getOverlay() == VanillaGuiOverlay.VIGNETTE.type()) {
+			CommonClient.INSTANCE.onRenderGUI(event.getGuiGraphics(), event.getPartialTick());
+		}
+	}
+
+	/** Draws the selection toggle notice after the same late HUD layer. */
+	@SubscribeEvent
+	public void onRenderGuiPost(RenderGuiOverlayEvent.Post event) {
+		if (event.getOverlay() == VanillaGuiOverlay.VIGNETTE.type()) {
+			CommonClient.INSTANCE.onRenderToggleNotice(event.getGuiGraphics());
+		}
 	}
 
 	@SubscribeEvent

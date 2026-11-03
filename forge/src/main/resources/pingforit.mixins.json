@@ -7,7 +7,6 @@
 		"KeyMappingMixin",
 		"MinecraftMixin",
 		"GameRendererMixin",
-		"GuiMixin",
 		"LevelRendererMixin",
 		"DisplayBlockDisplayAccessor",
 		"ModelBlockRendererMixin"
