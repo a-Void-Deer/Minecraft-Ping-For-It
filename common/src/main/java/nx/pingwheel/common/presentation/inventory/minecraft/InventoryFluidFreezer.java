@@ -2,9 +2,9 @@ package nx.pingwheel.common.presentation.inventory.minecraft;
 
 import java.util.Objects;
 import net.minecraft.core.HolderLookup;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.material.Fluids;
 import nx.pingwheel.common.platform.FluidDescriptions;
+import nx.pingwheel.common.platform.FluidRegistries;
 import nx.pingwheel.common.platform.IPlatformFluidDescriptionService;
 import nx.pingwheel.common.platform.IPlatformFluidService;
 import nx.pingwheel.common.presentation.inventory.InventoryFluidCodec;
@@ -36,9 +36,11 @@ public final class InventoryFluidFreezer {
 		budget.begin(displayBytes);
 		try {
 			// Reliable registration and amount precede the identity-refusal boundary.
-			budget.work(InventoryRegistryContext.valueWork(BuiltInRegistries.FLUID, RAW));
-			@Nullable var location = BuiltInRegistries.FLUID.getKey(resident.fluid());
-			if (location == null || resident.fluid() == Fluids.EMPTY || BuiltInRegistries.FLUID.get(location) != resident.fluid())
+			budget.allocate(0, 0, 1, 1); // root-bound admission callback; it cannot escape the synchronous lookup
+			@Nullable var location = FluidRegistries.registeredKey(resident.fluid(), (work, allocation) -> {
+				budget.work(work); budget.allocate(allocation, 0, 0, 0);
+			});
+			if (location == null || resident.fluid() == Fluids.EMPTY)
 				throw new InventoryItemBudget.InvalidInputException("unregistered or empty fluid");
 			int length = location.getNamespace().length() + location.getPath().length() + 1;
 			if (length > 256) throw new InventoryItemBudget.InvalidInputException("fluid registry id bound");
