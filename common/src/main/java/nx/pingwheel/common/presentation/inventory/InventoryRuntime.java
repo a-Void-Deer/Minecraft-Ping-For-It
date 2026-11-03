@@ -468,8 +468,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			if (!forEvidence(value)) throw new IllegalArgumentException("publication evidence exceeds reserved opportunity");
 			attempted = true;
 			var allowance = new InventoryValidationBudget.Allowance(cost);
-			allowance.fluidGrants((caller, member, authority) -> new nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission(
-				physical, ITEM_WORK, memory, member, authority, caller));
+			installFluidGrants(allowance);
 			try { return value.validate(allowance); }
 			catch (InventoryItemBudget.CaptureLimitException deferred) { return InventorySharedRead.Check.DEFERRED; }
 			catch (RuntimeException | LinkageError unavailable) { return InventorySharedRead.Check.UNAVAILABLE; }
@@ -731,8 +730,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		final long before;
 		ValidationOperation(InventoryValidationBudget.Cost cost, RetainedMemoryLedger.Ticket workspace, CostLedger.Ticket work, InventoryValidationBudget.Allowance allowance) {
 			this.allowance = allowance; before = allowance.attemptedOuterWorkUnits();
-			allowance.fluidGrants((caller, member, authority) -> new nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission(
-				physical, ITEM_WORK, memory, member, authority, caller));
+			installFluidGrants(allowance);
 			allowance.admitAdditional(cost); this.workspace = workspace; this.work = work;
 		}
 		@Override public void close() {
@@ -742,6 +740,11 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	private Optional<ValidationOperation> validation(InventoryValidationBudget.Cost cost) {
 		return validation(cost, new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE));
+	}
+	/** Installs the capability only; each fluid operation still admits and settles its own actual ledger costs. */
+	private void installFluidGrants(InventoryValidationBudget.Allowance allowance) {
+		allowance.fluidGrants((caller, member, authority) -> new nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission(
+			physical, ITEM_WORK, memory, member, authority, caller));
 	}
 	/** Staged FLUID port helper; uses this Runtime's current global work and retained-memory ledgers. */
 	public nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission fluidAdmission(
@@ -1146,6 +1149,8 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (consumer.closed) return InventorySourceAccess.Preparation.UNAVAILABLE;
 		if (consumer.invalidObservation != null || consumer.pendingObservation != null)
 			return InventorySourceAccess.Preparation.UNAVAILABLE;
+		// Retained unprepared rounds skip resolution (and its ValidationOperation) on a later attempt.
+		installFluidGrants(allowance);
 		@Nullable Round handoff = pooled ? consumer.successorEntitlement
 			: consumer.subject instanceof TrackingSubject && consumer.completedRound != null ? consumer.completedRound.successor : null;
 		if (consumer.round == null && consumer.completedRound != null && !consumer.completedRound.predecessors.isEmpty())
