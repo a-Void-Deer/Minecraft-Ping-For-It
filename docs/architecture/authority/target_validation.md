@@ -38,8 +38,7 @@ validation begins, target/range validation precedes the initial authoritative
 Target Type classification and Ping Type check, and the initial classification
 precedes any external-target materialization. The later materialization
 transaction and the post-materialization reclassification, cleanup, and release
-rules are owned by
-[Sable](../../integrations/sable.md#server-validation-and-materialization). The
+rules are owned by the external-block protocol. The
 first returning gate is the reported rejection; no later reason is inferred.
 
 Rate accounting and the client-side courtesy token bucket are owned by
@@ -77,14 +76,14 @@ local constituent. Packet-supplied fields are limited by the request boundary in
 | Entity | Stable identity in the requester's current dimension, present and alive, and authoritative entity anchor within range; movement/same-dimension teleport keeps identity |
 | Block | Loaded position in the requester's current dimension, same block type, and block-center anchor within range; same-type state/property changes are valid |
 | Location | Finite captured coordinates in the requester's current dimension and exact location anchor within range |
-| Explicit external target | Provider validates a normalized candidate and provider-derived validation anchor, then range checks that anchor; see [Sable's two-phase materialization](../../integrations/sable.md#server-validation-and-materialization) for the later committed target/anchor transaction |
+| Explicit external target | Provider validates a normalized candidate and provider-derived validation anchor, then range checks that anchor; see the external-block protocol for the later committed target/anchor transaction |
 
 Ordinary post-commit entity and block behavior, current block-state
 presentation, world/HUD dimension filtering, and the established external
 periodic refresh/invalidation exception are owned by
 [target identity](../identity/target_model.md) and
 [names and chat](../rendering/names_chat.md), with the external exception
-detailed by [Sable](../../integrations/sable.md); they are not part of
+detailed by the external-block protocol; they are not part of
 create-time validation. Entity locator form and server canonicalization,
 including the Experience Orb runtime-ID exception, are defined by
 [target identity](../identity/target_model.md).
@@ -99,11 +98,10 @@ replay the client ray or add an obstruction test.
 For an explicit external target, nonallocating provider validation establishes a
 provider-derived validation anchor for that range check. Initial classification
 and Ping Type membership pass before provider materialization; the later
-materialization/reclassification transaction, including Sable's acquired
-tracking-reference release, is owned by
-[Sable](../../integrations/sable.md#server-validation-and-materialization). It
-does not add a post-materialization range check; the range rule for the
-validation anchor is owned by [range](../picking/range.md).
+materialization/reclassification transaction, including the external-block
+protocol's acquired tracking-reference release, is owned by the external-block
+protocol. It does not add a post-materialization range check; the range rule for
+the validation anchor is owned by [range](../picking/range.md).
 
 When server player tracking is disabled, a player entity request is normalized
 to a location at the player's authoritative current position.

@@ -45,6 +45,8 @@ tasks.named("javadoc", Javadoc).configure {
     // it cannot resolve injection-point mappings from the javadoc classpath and
     // fails the build with "Unable to locate method mapping".
     options.addStringOption('-proc:none')
+    options.encoding = 'UTF-8'
+    options.addStringOption('Xdoclint:none', '-quiet')
 }
 
 tasks.named("sourcesJar", Jar) {

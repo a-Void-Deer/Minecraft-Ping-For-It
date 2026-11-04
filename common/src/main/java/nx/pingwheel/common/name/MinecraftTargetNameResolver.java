@@ -4,7 +4,6 @@ import java.util.Objects;
 import java.util.UUID;
 
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -122,12 +121,16 @@ public final class MinecraftTargetNameResolver implements AuthoritativeTargetNam
 			return Resolution.unavailable(FallbackReason.DIMENSION_MISMATCH);
 		}
 
-		return switch (normalizedTarget) {
-			case Target.EntityTarget entity -> resolveEntity(level, entity);
-			case Target.BlockTarget block -> resolveBlock(level, block);
-			case Target.ExternalBlockTarget external -> resolveExternalBlock(level, external);
-			case Target.LocationTarget ignored -> Resolution.of(TargetNameComposer.here());
-		};
+		if (normalizedTarget instanceof Target.EntityTarget entity) {
+			return resolveEntity(level, entity);
+		}
+		if (normalizedTarget instanceof Target.BlockTarget block) {
+			return resolveBlock(level, block);
+		}
+		if (normalizedTarget instanceof Target.ExternalBlockTarget external) {
+			return resolveExternalBlock(level, external);
+		}
+		return Resolution.of(TargetNameComposer.here());
 	}
 
 	private Resolution resolveExternalBlock(ServerLevel level, Target.ExternalBlockTarget target) {
@@ -161,7 +164,7 @@ public final class MinecraftTargetNameResolver implements AuthoritativeTargetNam
 
 		if (entity instanceof ItemEntity itemEntity) {
 			ItemStack stack = itemEntity.getItem();
-			Component customName = stack.get(DataComponents.CUSTOM_NAME);
+			Component customName = stack.hasCustomHoverName() ? stack.getHoverName() : null;
 			Component baseName = Component.translatable(stack.getDescriptionId());
 
 			return Resolution.of(customName != null

@@ -2,7 +2,7 @@ package nx.pingwheel.common.name;
 
 import java.util.Objects;
 
-import net.minecraft.core.HolderLookup;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.chat.Component;
 
 import nx.pingwheel.common.domain.MarkerId;
@@ -72,13 +72,24 @@ public final class ClientTargetNameDecoder {
 	 * <p>A parse failure falls back to the unknown display name; it never
 	 * propagates to the caller.
 	 */
-	public static Component decode(MarkerId markerId, TargetNameJson json, HolderLookup.Provider registryAccess) {
+	public static Component decode(MarkerId markerId, TargetNameJson json, RegistryAccess registryAccess) {
 		Objects.requireNonNull(markerId, "markerId");
 		Objects.requireNonNull(json, "json");
 		Objects.requireNonNull(registryAccess, "registryAccess");
 
 		try {
-			return Component.Serializer.fromJson(json.value(), registryAccess);
+			Component decoded = Component.Serializer.fromJson(json.value());
+
+			// 1.20.1 returns Java null for JSON "null" and "[]" instead of
+			// throwing. Returning it would reach MarkerView and fail during
+			// rendering, so the unknown-name fallback must also cover null.
+			if (decoded == null) {
+				logger.debug("target name decode failed: markerId={} reason={}",
+					markerId.value(), "NullComponent");
+				return TargetNameComposer.unknown();
+			}
+
+			return decoded;
 		} catch (RuntimeException e) {
 			logger.debug("target name decode failed: markerId={} reason={}",
 				markerId.value(), e.getClass().getSimpleName());

@@ -69,10 +69,9 @@ Coverage and remaining input-lifecycle scenarios are inventoried in
 
 Each ray uses one immutable [entity-local geometry](local_geometry.md) owner
 snapshot. Exact Create results remain `EntityHitResult`, preserving the existing
-Sable/block and Distant Horizons/miss branching. Sable's external-block capture
-is described in [its integration contract](../../integrations/sable.md). The
-separate capture and server-acceptance limits, including native and optional
-integration paths, are owned by [capture range](range.md).
+block and Distant Horizons/miss branching. The separate capture and
+server-acceptance limits, including native and optional integration paths, are
+owned by [capture range](range.md).
 
 Captured local detail is copied metadata attached only to its matching entity.
 It is not a server-authoritative constituent identity. Creation still obeys

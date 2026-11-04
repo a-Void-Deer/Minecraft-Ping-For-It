@@ -46,7 +46,7 @@ class EntityBlockGeometryRunnerTest {
 		List<EntityBlockGeometryContext> contexts = new ArrayList<>();
 		AtomicInteger liveBlockEntityLookups = new AtomicInteger();
 		TargetKey.ExternalBlockKey externalKey = new TargetKey.ExternalBlockKey(
-			"minecraft:overworld", "sable", "plot-1", "minecraft:chest");
+			"minecraft:overworld", "external-test", "plot-1", "minecraft:chest");
 		EntityBlockGeometryTransform transform =
 			new EntityBlockGeometryTransform(new Matrix4d().translation(20_000_000.0D, 0.0D, 0.0D));
 

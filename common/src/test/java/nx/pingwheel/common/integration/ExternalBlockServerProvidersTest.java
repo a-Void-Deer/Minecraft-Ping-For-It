@@ -14,12 +14,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ExternalBlockServerProvidersTest {
 
 	private final ExternalBlockServerProviderRegistry registry = ExternalBlockServerProviders.registry();
-	private boolean previousHasSable;
 	private List<ExternalBlockServerProvider> previousProviders;
 
 	@BeforeEach
 	void saveGlobalProviderState() {
-		previousHasSable = ModContext.HasSable;
 		previousProviders = registry.providers();
 	}
 
@@ -27,14 +25,11 @@ class ExternalBlockServerProvidersTest {
 	void restoreGlobalProviderState() {
 		registry.clear();
 		previousProviders.forEach(registry::register);
-		ModContext.HasSable = previousHasSable;
 	}
 
 	@Test
-	void disabledOptionalIntegrationDoesNotRegisterOrLoadAProvider() {
-		ModContext.HasSable = false;
-		ExternalBlockServerProviders.configure(false);
-
-		assertTrue(registry.isEmpty());
+	void noProviderIsRegisteredOnThisBranch() {
+		assertTrue(registry.isEmpty(),
+			"1.20.1 ships no external-block provider; the generic protocol stays available");
 	}
 }

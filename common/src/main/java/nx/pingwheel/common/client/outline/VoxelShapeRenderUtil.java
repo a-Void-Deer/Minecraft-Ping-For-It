@@ -101,13 +101,15 @@ public final class VoxelShapeRenderUtil {
 			float normalZ = (float) (deltaZ / length);
 
 			vertexConsumer
-				.addVertex(pose, (float) (minX + offsetX), (float) (minY + offsetY), (float) (minZ + offsetZ))
-				.setColor(red, green, blue, alpha)
-				.setNormal(pose, normalX, normalY, normalZ);
+				.vertex(pose.pose(), (float) (minX + offsetX), (float) (minY + offsetY), (float) (minZ + offsetZ))
+				.color(red, green, blue, alpha)
+				.normal(pose.normal(), normalX, normalY, normalZ)
+				.endVertex();
 			vertexConsumer
-				.addVertex(pose, (float) (maxX + offsetX), (float) (maxY + offsetY), (float) (maxZ + offsetZ))
-				.setColor(red, green, blue, alpha)
-				.setNormal(pose, normalX, normalY, normalZ);
+				.vertex(pose.pose(), (float) (maxX + offsetX), (float) (maxY + offsetY), (float) (maxZ + offsetZ))
+				.color(red, green, blue, alpha)
+				.normal(pose.normal(), normalX, normalY, normalZ)
+				.endVertex();
 		});
 	}
 

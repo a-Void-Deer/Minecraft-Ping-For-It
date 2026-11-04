@@ -20,7 +20,7 @@ import net.minecraft.world.entity.Entity;
 public final class EntitySelectionBlacklist {
 
 	private static final ResourceLocation SIMULATED_HONEY_GLUE_ID =
-		ResourceLocation.fromNamespaceAndPath("simulated", "honey_glue");
+		new ResourceLocation("simulated", "honey_glue");
 	private static final Predicate<Entity> DEFAULT_SIMULATED_HONEY_GLUE_RULE =
 		EntitySelectionBlacklist::isSimulatedHoneyGlue;
 

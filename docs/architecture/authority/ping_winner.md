@@ -43,8 +43,7 @@ owned by [marker lifecycle](marker_lifecycle.md).
 
 An external locator/anchor refresh preserves the committed identity and does not
 manufacture a new arrival or winner event; see
-[target identity](../identity/target_model.md) and
-[Sable](../../integrations/sable.md). On the client, an authoritative winner
+[target identity](../identity/target_model.md). On the client, an authoritative winner
 slot is distinct from the collection of locally display-active records, and
 loss-recovery fallback is overwritten by a later authoritative update; see
 [client marker state and display](../markers/client-state.md).

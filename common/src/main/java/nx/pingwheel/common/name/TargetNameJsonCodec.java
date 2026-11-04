@@ -2,7 +2,8 @@ package nx.pingwheel.common.name;
 
 import java.util.Objects;
 
-import net.minecraft.core.HolderLookup;
+import com.google.gson.JsonParseException;
+import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.chat.Component;
 
 /**
@@ -43,11 +44,11 @@ public final class TargetNameJsonCodec {
 	 *                                  (contract failure; callers fall back to
 	 *                                  the unknown name)
 	 */
-	public static TargetNameJson encode(Component component, HolderLookup.Provider registryAccess) {
+	public static TargetNameJson encode(Component component, RegistryAccess registryAccess) {
 		Objects.requireNonNull(component, "component");
 		Objects.requireNonNull(registryAccess, "registryAccess");
 
-		return new TargetNameJson(Component.Serializer.toJson(component, registryAccess));
+		return new TargetNameJson(Component.Serializer.toJson(component));
 	}
 
 	/**
@@ -60,10 +61,19 @@ public final class TargetNameJsonCodec {
 	 *                                  controlled failure mode and callers
 	 *                                  fall back to the unknown name
 	 */
-	public static Component decode(TargetNameJson json, HolderLookup.Provider registryAccess) {
+	public static Component decode(TargetNameJson json, RegistryAccess registryAccess) {
 		Objects.requireNonNull(json, "json");
 		Objects.requireNonNull(registryAccess, "registryAccess");
 
-		return Component.Serializer.fromJson(json.value(), registryAccess);
+		Component decoded = Component.Serializer.fromJson(json.value());
+
+		if (decoded == null) {
+			// 1.20.1 returns Java null for JSON "null" and "[]". Keep the same
+			// controlled failure mode as malformed JSON so callers can fall
+			// back to the unknown name.
+			throw new JsonParseException("component JSON produced a null component");
+		}
+
+		return decoded;
 	}
 }

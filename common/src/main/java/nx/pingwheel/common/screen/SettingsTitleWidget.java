@@ -68,8 +68,10 @@ final class SettingsTitleWidget extends AbstractWidget {
 		this.lines = wrapLines(this.getMessage().getString(), unscaledMaxWidth, measure);
 		this.lineHeight = scaledLineHeight(fontLineHeight);
 		final int blockHeight = titleBlockHeight(this.lines.size(), this.lineHeight);
-		this.setSize(safeWidth, blockHeight);
-		this.setPosition(0, topY);
+		this.setWidth(safeWidth);
+		this.height = blockHeight;
+		this.setX(0);
+		this.setY(topY);
 		return blockHeight;
 	}
 

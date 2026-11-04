@@ -73,14 +73,15 @@ public final class MinecraftClientTargetValidator implements TargetValidator {
 			return TargetValidation.gone(TargetGoneReason.DIMENSION_CHANGED);
 		}
 
-		return switch (target) {
-			case Target.EntityTarget entity -> validateEntity(entity);
-			case Target.BlockTarget block -> validateBlock(level, block);
-			// Provider-specific validation is intentionally deferred to the later
-			// integration. The server remains authoritative for this opaque target.
-			case Target.ExternalBlockTarget ignored -> TargetValidation.valid();
-			case Target.LocationTarget ignored -> TargetValidation.valid();
-		};
+		if (target instanceof Target.EntityTarget entity) {
+			return validateEntity(entity);
+		}
+		if (target instanceof Target.BlockTarget block) {
+			return validateBlock(level, block);
+		}
+		// Provider-specific validation is intentionally deferred to the later
+		// integration. The server remains authoritative for this opaque target.
+		return TargetValidation.valid();
 	}
 
 	private TargetValidation validateEntity(Target.EntityTarget entityTarget) {

@@ -11,9 +11,10 @@ import java.util.function.Function;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
-import com.mojang.blaze3d.vertex.ByteBufferBuilder;
+import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.client.Camera;
+import org.joml.Matrix4f;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.LevelRenderer;
@@ -37,7 +38,6 @@ import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.mixin.DisplayBlockDisplayAccessor;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.config.EntityBlockRenderMode;
-import nx.pingwheel.common.integration.sable.client.SableClientProvider;
 
 import static nx.pingwheel.common.Global.LOGGER;
 
@@ -74,7 +74,7 @@ import static nx.pingwheel.common.Global.LOGGER;
  *       vanilla model offset ({@code getOffset}, computed once per frame after
  *       the current-state validation), so short-grass/flower/bamboo-style
  *       shifted models glow exactly where they appear in the world.</li>
- *   <li>provider-owned Sable {@code block} targets use the same cached virtual
+ *   <li>provider-owned {@code block} targets use the same cached virtual
  *       display and baked-model outline route when the live local state is a
  *       compatible {@link RenderShape#MODEL}; provider-owned
  *       {@code entity_block} targets use the shared entity-block geometry
@@ -85,7 +85,7 @@ import static nx.pingwheel.common.Global.LOGGER;
  *
 	 * <p>Built-in BER/baked attempts write exclusively through an
 	 * {@link OutlineOnlyBufferSource} backed by a fresh transient
-	 * {@link ByteBufferBuilder}, so a recoverable failure discards the complete
+	 * {@link BufferBuilder}, so a recoverable failure discards the complete
 	 * attempt-local buffer. Optional sources may use a different strategy: the
 	 * Flywheel mask stages fixed per-texture batches first and only then commits
 	 * them to vanilla's shared {@code OutlineBufferSource}. That shared source
@@ -152,6 +152,17 @@ public final class VirtualBlockDisplayRenderer {
 	private Display.BlockDisplay cachedDisplay;
 	private final EntityBlockGeometryRunner entityBlockGeometryRunner;
 
+	/**
+	 * Camera-rotation view matrix for the model pass currently executing.
+	 *
+	 * <p>1.20.1 world geometry is camera-relative on the CPU and the ambient
+	 * model view carries no camera rotation, so every attempt-local flush must
+	 * add it explicitly. The field is set only for the duration of
+	 * {@link #render} and is render-thread confined, which lets the geometry
+	 * sources keep their fixed {@code EntityBlockGeometryContext} signatures.</p>
+	 */
+	private Matrix4f cameraPose;
+
 	private VirtualBlockDisplayRenderer() {
 		// These built-ins are owned by the runner and intentionally never enter
 		// the optional/modded registry.
@@ -177,25 +188,39 @@ public final class VirtualBlockDisplayRenderer {
 	 * subjects. Main thread only.
 	 */
 	public void render(
+		Matrix4f cameraPose,
 		ClientLevel level,
 		Camera camera,
 		float builtInPartialTick,
 		float flywheelPartialTick,
-		BlockOutlineState state,
+		BlockModelOutlineState frameState
+	) {
+		Objects.requireNonNull(cameraPose, "cameraPose");
+
+		this.cameraPose = new Matrix4f(cameraPose);
+
+		try {
+			renderPass(level, camera, builtInPartialTick, flywheelPartialTick, frameState);
+		} finally {
+			this.cameraPose = null;
+		}
+	}
+
+	private void renderPass(
+		ClientLevel level,
+		Camera camera,
+		float builtInPartialTick,
+		float flywheelPartialTick,
 		BlockModelOutlineState frameState
 	) {
 		Objects.requireNonNull(level, "level");
 		Objects.requireNonNull(camera, "camera");
-		Objects.requireNonNull(state, "state");
 		Objects.requireNonNull(frameState, "frameState");
 
 		frameFailures.clear();
 
 		String dimensionId = level.dimension().location().toString();
 		Vec3 cameraPosition = camera.getPosition();
-		Entity cameraEntity = camera.getEntity();
-		CollisionContext collisionContext = cameraEntity == null
-			? CollisionContext.empty() : CollisionContext.of(cameraEntity);
 		Minecraft minecraft = Minecraft.getInstance();
 		EntityRenderDispatcher entityDispatcher = minecraft.getEntityRenderDispatcher();
 		BlockEntityRenderDispatcher blockEntityDispatcher = minecraft.getBlockEntityRenderDispatcher();
@@ -221,28 +246,26 @@ public final class VirtualBlockDisplayRenderer {
 				frameState);
 		}
 
-		for (Map.Entry<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> entry
-			: state.externalSnapshot().entrySet()) {
-			TargetKey.ExternalBlockKey blockKey = entry.getKey();
-			ExternalBlockOutlineSpec spec = entry.getValue();
-
-			if (!blockKey.dimensionId().equals(dimensionId)) {
-				continue;
-			}
-
-			if (renderExternalBlockModel(
-				level, cameraPosition, collisionContext, builtInPartialTick, flywheelPartialTick,
-				entityDispatcher, blockEntityDispatcher, blockKey, spec) == EntityBlockGeometryOutcome.RENDERED) {
-				frameState.addExternalSuccess(blockKey);
-			}
-		}
-
 		if (!frameFailures.isEmpty()) {
 			int attempts = frameFailures.values().stream().mapToInt(Integer::intValue).sum();
 			LOGGER.debug(
 				"block outline model pass: %d attempts failed across %d block types; voxel fallback applied"
 					.formatted(attempts, frameFailures.size()));
 		}
+	}
+
+	/**
+	 * Opens the camera-rotation scope for one attempt.
+	 *
+	 * <p>The scope covers the whole attempt, including automatic flushes
+	 * performed when the renderer switches render types. Wrapping only the
+	 * final {@code endBatch()} would leave those automatic submissions without
+	 * the camera rotation.</p>
+	 */
+	private BlockOutlineFrameState.CameraRotationScope openCameraRotationScope() {
+		return this.cameraPose == null
+			? null
+			: BlockOutlineFrameState.openCameraRotation(this.cameraPose);
 	}
 
 	private void renderPresentationSubjects(
@@ -361,139 +384,6 @@ public final class VirtualBlockDisplayRenderer {
 	}
 
 	/**
-	 * Attempts the configured geometry route for a provider-owned block outline.
-	 * The provider resolves a fresh local state and pose for this frame; no
-	 * BlockEntity instance is retained or looked up in the parent level.
-	 * Ordinary {@code block} targets use the existing cached virtual-display
-	 * route, while {@code entity_block} targets use the shared runner for direct
-	 * BER, baked-model, and (when enabled) optional geometry sources.
-	 */
-	private EntityBlockGeometryOutcome renderExternalBlockModel(
-		ClientLevel level,
-		Vec3 cameraPosition,
-		CollisionContext collisionContext,
-		float builtInPartialTick,
-		float flywheelPartialTick,
-		EntityRenderDispatcher entityDispatcher,
-		BlockEntityRenderDispatcher blockEntityDispatcher,
-		TargetKey.ExternalBlockKey targetKey,
-		ExternalBlockOutlineSpec spec
-	) {
-		FailureRoute failureRoute = FailureRoute.BLOCK_DISPLAY;
-		FailureStage failureStage = FailureStage.RENDER;
-		try {
-			var presentationResult = SableClientProvider.resolvePresentation(
-				level, spec.target(), builtInPartialTick, collisionContext);
-
-			if (presentationResult.isEmpty()) {
-				return EntityBlockGeometryOutcome.EMPTY;
-			}
-
-			var presentation = presentationResult.orElseThrow();
-			BlockState blockState = presentation.blockState();
-			var actualRegistryKey = BuiltInRegistries.BLOCK.getKey(blockState.getBlock());
-
-			// The provider performs the same check at its boundary. Keep the
-			// renderer-side comparison explicit so a changed/invalid presentation
-			// can never turn into a model success.
-			if (actualRegistryKey == null
-				|| !targetKey.expectedBlockRegistryId().equals(actualRegistryKey.toString())) {
-				return EntityBlockGeometryOutcome.EMPTY;
-			}
-
-			boolean nativeGlowMatches = ClientConfig.HANDLER.getConfig()
-				.getBlockDisplayPolicy()
-				.shouldUseNativeGlow(spec.targetTypeId(), blockState);
-			BlockModelOutlineRoute route = BlockModelOutlineRoute.routeExternal(
-				spec.targetTypeId(), nativeGlowMatches,
-				blockState.getRenderShape() == RenderShape.MODEL);
-
-			BlockPos localBlockPos = presentation.localBlockPos();
-
-			if (route == BlockModelOutlineRoute.ENTITY_BLOCK) {
-				failureRoute = FailureRoute.ENTITY_BLOCK;
-				failureStage = FailureStage.GEOMETRY_RUNNER;
-				EntityBlockRenderMode mode =
-					ClientConfig.HANDLER.getConfig().getEntityBlockRenderMode();
-				if (presentation.localLevel().getBlockEntity(localBlockPos) == null) {
-					// A provider state can outlive or temporarily lose its live
-					// BlockEntity. Do not let the static baked source turn that
-					// incomplete entity_block back into a model success.
-					return EntityBlockGeometryOutcome.EMPTY;
-				}
-				EntityBlockGeometryTransform transform =
-					new EntityBlockGeometryTransform(presentation.renderPose());
-
-				boolean rendered = entityBlockGeometryRunner.run(
-					mode,
-					() -> new EntityBlockGeometryContext(
-						presentation.localLevel(),
-						localBlockPos,
-						blockState,
-						// The runner asks for a new context for every source. Resolve the
-						// local BlockEntity at that point rather than retaining an instance
-						// identity across frames or source attempts.
-						presentation.localLevel().getBlockEntity(localBlockPos),
-						spec.argbColor(),
-						cameraPosition,
-						builtInPartialTick,
-						flywheelPartialTick,
-						LevelRenderer.getLightColor(presentation.localLevel(), localBlockPos),
-						entityDispatcher,
-						blockEntityDispatcher,
-						Minecraft.getInstance().levelRenderer,
-						targetKey,
-						spec.targetTypeId(),
-						BlockModelOutlineState.INSTANCE.frameId(),
-						transform));
-				return rendered
-					? EntityBlockGeometryOutcome.RENDERED : EntityBlockGeometryOutcome.EMPTY;
-			}
-
-			if (route != BlockModelOutlineRoute.BLOCK_DISPLAY) {
-				return EntityBlockGeometryOutcome.EMPTY;
-			}
-
-			// Ordinary provider-owned blocks retain the existing virtual display
-			// route. The entity_block runner's baked source owns its own display
-			// attempt, so entity_block never reaches this branch.
-			return renderBlockDisplay(
-				level,
-				localBlockPos,
-				blockState,
-				entityDispatcher,
-				builtInPartialTick,
-				() -> LevelRenderer.getLightColor(presentation.localLevel(), localBlockPos),
-				spec.argbColor(),
-				actualRegistryKey.toString(),
-				targetKey,
-				() -> {
-					Vec3 modelOffset = blockState.getOffset(presentation.localLevel(), localBlockPos);
-					Vec3 worldBlockOrigin = presentation.worldBlockOrigin(modelOffset);
-					PoseStack poseStack = new PoseStack();
-					ExternalBlockOutlineTransform.apply(
-						poseStack,
-						worldBlockOrigin,
-						presentation.orientationScale(),
-						cameraPosition);
-					return new BlockDisplayRenderArguments(
-						poseStack, 0.0D, 0.0D, 0.0D, blockState.getSeed(localBlockPos));
-				});
-		} catch (Exception | LinkageError | AssertionError failure) {
-			recordFailure(
-				targetKey.expectedBlockRegistryId(),
-				null,
-				null,
-				targetKey,
-				Display.BlockDisplay.class,
-				failureRoute,
-				failureStage,
-				failure);
-			return EntityBlockGeometryOutcome.FAILED;
-		}
-	}
-
-	/**
 	 * Renders the actual {@link BlockEntity} at {@code pos} through its real
 	 * renderer into an attempt-local transient buffer that is flushed exactly
 	 * once on success. Returns the honest source outcome so the runner can
@@ -539,8 +429,9 @@ public final class VirtualBlockDisplayRenderer {
 				poseStack = context.transform().createPoseStack(pos, context.cameraPosition(), null);
 			}
 
-			try (ByteBufferBuilder builder = new ByteBufferBuilder(RenderType.TRANSIENT_BUFFER_SIZE)) {
-				MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder);
+			try (AttemptBuffer builder = new AttemptBuffer(RenderType.TRANSIENT_BUFFER_SIZE);
+				BlockOutlineFrameState.CameraRotationScope cameraScope = openCameraRotationScope()) {
+				MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder.builder());
 				OutlineOnlyBufferSource buffer = new OutlineOnlyBufferSource(localSource, context.argbColor());
 
 				renderer.render(
@@ -637,8 +528,9 @@ public final class VirtualBlockDisplayRenderer {
 		EntityBlockGeometryContext context
 	) {
 		FailureStage stage = FailureStage.RENDER;
-		try (ByteBufferBuilder builder = new ByteBufferBuilder(RenderType.TRANSIENT_BUFFER_SIZE)) {
-			MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder);
+		try (AttemptBuffer builder = new AttemptBuffer(RenderType.TRANSIENT_BUFFER_SIZE);
+			BlockOutlineFrameState.CameraRotationScope cameraScope = openCameraRotationScope()) {
+			MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder.builder());
 			OutlineOnlyBufferSource buffer = new OutlineOnlyBufferSource(localSource, context.argbColor());
 
 			adapter.render(context, buffer);
@@ -751,8 +643,9 @@ public final class VirtualBlockDisplayRenderer {
 		// any point — even after an incomplete vertex — is discarded together
 		// with the builder instead of corrupting a shared vanilla buffer that
 		// some other code path will later flush.
-		try (ByteBufferBuilder builder = new ByteBufferBuilder(RenderType.TRANSIENT_BUFFER_SIZE)) {
-			MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder);
+		try (AttemptBuffer builder = new AttemptBuffer(RenderType.TRANSIENT_BUFFER_SIZE);
+			BlockOutlineFrameState.CameraRotationScope cameraScope = openCameraRotationScope()) {
+			MultiBufferSource.BufferSource localSource = MultiBufferSource.immediate(builder.builder());
 			OutlineOnlyBufferSource buffer = new OutlineOnlyBufferSource(localSource, argbColor);
 
 			display.setPos(pos.getX(), pos.getY(), pos.getZ());
@@ -951,22 +844,23 @@ public final class VirtualBlockDisplayRenderer {
 			return "<unknown>";
 		}
 
-		return switch (targetKey) {
-			case TargetKey.BlockKey block ->
-				"dimension=" + block.dimensionId()
-					+ "; position=" + block.x() + "," + block.y() + "," + block.z()
-					+ "; blockRegistryId=" + block.blockRegistryId();
-			case TargetKey.ExternalBlockKey external ->
-				"dimension=" + external.dimensionId()
-					+ "; provider=" + external.providerId()
-					+ "; stableTargetId=" + external.stableTargetId()
-					+ "; expectedBlockRegistryId=" + external.expectedBlockRegistryId();
-			case TargetKey.EntityKey entity ->
-				"dimension=" + entity.dimensionId() + "; entity=" + entity.locator();
-			case TargetKey.LocationKey location ->
-				"dimension=" + location.dimensionId()
-					+ "; position=" + location.x() + "," + location.y() + "," + location.z();
-		};
+		if (targetKey instanceof TargetKey.BlockKey block) {
+			return "dimension=" + block.dimensionId()
+				+ "; position=" + block.x() + "," + block.y() + "," + block.z()
+				+ "; blockRegistryId=" + block.blockRegistryId();
+		}
+		if (targetKey instanceof TargetKey.ExternalBlockKey external) {
+			return "dimension=" + external.dimensionId()
+				+ "; provider=" + external.providerId()
+				+ "; stableTargetId=" + external.stableTargetId()
+				+ "; expectedBlockRegistryId=" + external.expectedBlockRegistryId();
+		}
+		if (targetKey instanceof TargetKey.EntityKey entity) {
+			return "dimension=" + entity.dimensionId() + "; entity=" + entity.locator();
+		}
+		TargetKey.LocationKey location = (TargetKey.LocationKey) targetKey;
+		return "dimension=" + location.dimensionId()
+			+ "; position=" + location.x() + "," + location.y() + "," + location.z();
 	}
 
 	private static String failureRegistryId(EntityBlockGeometryContext context) {

@@ -42,7 +42,7 @@ conflicts rather than silently choosing or dropping a requirement.
 | Task | Start with | Also consult when relevant |
 | --- | --- | --- |
 | Understand the end-to-end data flow | [Architecture: geometry pipeline](architecture/geometry/geometry-pipeline.md) | Identity, capture, authority, presentation and geometry topics below |
-| Change Target/Marker identity or lifecycle | [Target model](architecture/identity/target_model.md) | [Validation](architecture/authority/target_validation.md), [winner selection](architecture/authority/ping_winner.md), Sable |
+| Change Target/Marker identity or lifecycle | [Target model](architecture/identity/target_model.md) | [Validation](architecture/authority/target_validation.md), [winner selection](architecture/authority/ping_winner.md) |
 | Change server marker creation, removal, expiry or audience lifetime | [Marker lifecycle](architecture/authority/marker_lifecycle.md) | [Target model](architecture/identity/target_model.md), validation and winner selection |
 | Change client marker synchronization, display deadlines or fallback | [Client marker state](architecture/markers/client-state.md) | [Marker lifecycle](architecture/authority/marker_lifecycle.md), [client configuration](config/client.md) and [names and chat](architecture/rendering/names_chat.md) |
 | Change Target Types, Ping Types, priorities, defaults, keys or colors | [Catalogs](architecture/identity/catalogs.md) | Capture, names/chat and wheel |
@@ -72,7 +72,6 @@ conflicts rather than silently choosing or dropping a requirement.
 | Change model offset, placement or seeded variants | [Model placement](architecture/rendering/model_placement.md) | Outline routing and verification limitations |
 | Change target names, marker receipt feedback, chat templates or phrase emphasis | [Names and chat](architecture/rendering/names_chat.md) | Catalogs and authoritative validation |
 | Change Create/Flywheel support | [Create integration](integrations/create.md) | [Create raycast supplement](integrations/create-contraption-raycast.md), local geometry and geometry sources |
-| Change Sable/external-target support | [Sable integration](integrations/sable.md) | Target identity, validation, winner selection and presentation |
 | Change Simulated stand-in/optional-content support | [Simulated integration](integrations/simulated.md) | Selection policy, compatibility and testing/verification |
 | Change loader, mod-ID or optional-content boundaries | [Compatibility](compatibility.md) | The affected integration and security |
 | Change build logic, source-set wiring, loader packaging or artifact identity verification | [Testing and verification](testing/verification.md#build-source-set-and-artifact-verification) | [Repository build instructions](../README.md#install-build-and-verify), compatibility and the affected loader build file |

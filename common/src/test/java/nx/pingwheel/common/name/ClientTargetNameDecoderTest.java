@@ -64,6 +64,18 @@ class ClientTargetNameDecoderTest {
 	}
 
 	@Test
+	void nullComponentJsonFallsBackToUnknownTranslatable() {
+		for (String payload : new String[] {"null", "[]"}) {
+			Component component = ClientTargetNameDecoder.decode(
+				new MarkerId(3L), new TargetNameJson(payload), RegistryAccess.EMPTY);
+
+			assertTrue(component.getContents() instanceof TranslatableContents);
+			assertEquals("pingforit.target.unknown",
+				((TranslatableContents) component.getContents()).getKey());
+		}
+	}
+
+	@Test
 	void decodeFailureLogsOnlyMarkerIdAndExceptionClass() {
 		List<LogRecord> records = new ArrayList<>();
 		ClientTargetNameDecoder.setLogger((message, args) -> records.add(new LogRecord(message, args)));

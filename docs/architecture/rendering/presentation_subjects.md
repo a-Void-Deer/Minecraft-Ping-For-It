@@ -25,10 +25,6 @@ from presentation, and normal sources plus VoxelShape fallback use the same
 resolved subject list and subject-level type decisions. There is no external
 integration exemption from that contract.
 
-For the current Sable external path, conformance with that contract remains an
-open verification gap rather than a product exception; see
-[Sable coverage and pending scenarios](../../testing/verification.md#sable-integration-coverage).
-
 ## Render-target type rules
 
 Normal composite resolvers preserve the source target type on every subject.

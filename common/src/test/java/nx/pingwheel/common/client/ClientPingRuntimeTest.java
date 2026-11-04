@@ -20,9 +20,9 @@ class ClientPingRuntimeTest {
 		ClientMarkerStore store = new ClientMarkerStore(10L);
 		MarkerId markerId = new MarkerId(7L);
 		Target.ExternalBlockTarget first = Target.ExternalBlockTarget.committed(
-			"minecraft:overworld", "sable", "tracking-id", "minecraft:chest", "locator-a", true);
+			"minecraft:overworld", "external-test", "tracking-id", "minecraft:chest", "locator-a", true);
 		Target.ExternalBlockTarget updated = Target.ExternalBlockTarget.committed(
-			"minecraft:overworld", "sable", "tracking-id", "minecraft:chest", "locator-b", true);
+			"minecraft:overworld", "external-test", "tracking-id", "minecraft:chest", "locator-b", true);
 
 		assertTrue(ClientPingRuntime.isNewMarkerReceipt(store, markerId));
 		store.onCreated(snapshot(markerId, first), 0L);

@@ -24,9 +24,9 @@ class SyncDurationPolicyS2CPacketTest {
 	void negativeAndOutOfBoundsPoliciesAreCorrupt() {
 		assertTrue(new SyncDurationPolicyS2CPacket(-1).isCorrupt());
 		assertTrue(new SyncDurationPolicyS2CPacket(0).isCorrupt());
-		assertTrue(new SyncDurationPolicyS2CPacket(61).isCorrupt());
+		assertTrue(new SyncDurationPolicyS2CPacket(3601).isCorrupt());
 		assertFalse(new SyncDurationPolicyS2CPacket(1).isCorrupt());
-		assertFalse(new SyncDurationPolicyS2CPacket(60).isCorrupt());
+		assertFalse(new SyncDurationPolicyS2CPacket(3600).isCorrupt());
 	}
 
 	@Test

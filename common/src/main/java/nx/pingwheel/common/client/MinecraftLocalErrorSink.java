@@ -39,6 +39,6 @@ public final class MinecraftLocalErrorSink implements ClientPingActionDispatcher
 	public static Component componentFor(String messageKey, int color) {
 		return Component.translatable(PREFIX_KEY)
 			.append(Component.translatable(messageKey))
-			.withColor(color);
+			.withStyle(style -> style.withColor(color));
 	}
 }

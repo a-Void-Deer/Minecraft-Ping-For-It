@@ -131,7 +131,7 @@ boundaries. They do not constitute an in-game Create validation.
 `OptionalDependencySafetyTest` covers absent optional-integration safety.
 Source and focused seam evidence establish
 the native `min(raycastDistance, pingDistance)` limit, Distant Horizons'
-independent trace, the server acceptance range, and Create/Sable reuse of the
+independent trace, the server acceptance range, and Create reuse of the
 finite native segment. No automated end-to-end test exercises that entire client capture,
 optional-provider, packet, and authoritative server-acceptance pipeline.
 
@@ -239,42 +239,6 @@ renderers, and they do not automatically cover the fresh non-render lookup
 bypass. Source inspection remains useful for those call-site boundaries but is
 not automated runtime coverage.
 
-### Sable integration coverage
-
-The linked [Sable integration](../integrations/sable.md) topic remains the
-behavior owner for [client capture and presentation](../integrations/sable.md#client-capture-and-presentation),
-[server validation and materialization](../integrations/sable.md#server-validation-and-materialization),
-and [refresh lifecycle](../integrations/sable.md#refresh-lifecycle). The
-following focused seams provide limited structural, locator-codec and
-diagnostic evidence:
-
-- `SableClientCompanionAccessContractTest` statically parses the compiled
-  access-class constant pool, requires the exact
-  `SableCompanion.getContaining(Level, Position)` symbol, and excludes the
-  exact names `getClientLevel` and `getContainingClient`;
-- `SableExternalBlockLocatorTest` covers representative encode/parse
-  round-trips and selected malformed, noncanonical, and out-of-bounds cases;
-- `SableRefreshLogGateTest` checks decision state for tested locator or reason
-  changes and duplicates, rather than a refresh operation or log sink;
-- `SableDiagnosticsTest` and `SableServerDiagnosticsTest` check selected event
-  metadata and record fields, including same-throwable identity for a server
-  exception and constructed-invalid or `LinkageError` cases;
-- `SableClientDiagnosticsTest` checks an empty capture result when Sable is
-  absent and diagnostic presence from explicit `logCaptureFallback` calls with
-  a reason; and
-- `SablePresentationLogGateTest` checks cadence, capacity, repeated
-  failure-class key de-duplication, and throwable identity.
-
-These unit and bytecode seams do not load a Sable runtime or establish the
-provider, materialization, tracking-point reference, live-sublevel refresh,
-multiplayer, or in-game behavior described by those topic sections.
-The external model and fallback routes also resolve provider presentation
-independently; therefore this evidence cannot guarantee that provider-local
-multipart or subject-type decisions came from one immutable shared snapshot.
-That is an implementation-conformance and automated-coverage gap, not an
-external exception to the shared-subject contract in
-[presentation subjects](../architecture/rendering/presentation_subjects.md).
-
 ### Rate-policy courtesy behavior
 
 The current suite covers the create-only client token-bucket courtesy gate,
@@ -351,7 +315,7 @@ The following gaps remain open until direct evidence closes them:
   the pending regression matrix below specifies the required checks;
 - live GUI/screen input callbacks and physical key-repeat behavior across
   Fabric, Forge, and NeoForge, beyond the input-state seams; and
-- the complete range pipeline across native, Distant Horizons, Create/Sable,
+- the complete range pipeline across native, Distant Horizons, Create,
   packet transport, and authoritative acceptance;
 - deterministic local-position ordering of equal-distance, same-kind local
   child hits: the x/y/z comparator is source-confirmed, but no test exercises
@@ -405,27 +369,6 @@ frame rates.
 | Courtesy limiter rejects the first default `CreatePing`, then a deferred fresh press is present | No deferred capture begins; the dropped request is not queued, retried, or replayed. |
 | A first result is `TargetGone` or another non-`CreatePing` while a deferred fresh press is present | The deferred press is discarded and no ordinary capture starts. |
 
-### Sable-specific gaps
-
-Sable-specific gaps remain for:
-
-- installed-Sable API compatibility and client capture/presentation against a
-  live sublevel, including the established
-  [logical-anchor/render-pose boundary](../integrations/sable.md#client-capture-and-presentation);
-- provider materialization, tracking-point reference counting, rollback and
-  release, including the existing empty-audience cleanup path documented under
-  [server validation and materialization](../integrations/sable.md#server-validation-and-materialization);
-- live-sublevel refresh through the documented available, temporarily
-  unavailable, and invalid outcomes in the
-  [refresh lifecycle](../integrations/sable.md#refresh-lifecycle); and
-- end-to-end server-authoritative names, fail-soft behavior, and multiplayer
-  marker synchronization at the boundaries owned by
-  [Sable](../integrations/sable.md#names-permissions-and-diagnostics) and
-  [target validation](../architecture/authority/target_validation.md).
-
-Coverage of Flywheel diagnostics or another adapter's diagnostic helper does
-not close the private `EntityDiagnostics` gap.
-
 ## Pending manual and integration matrix
 
 No scenario in this matrix is recorded as performed merely because it is listed
@@ -444,12 +387,11 @@ or because related automated tests exist.
 | Multiplayer and protocol | Same-target latest-server-arrival winner; equal-arrival larger-Marker-ID tie; winner fallback after removal or expiry; complete `ServerCore` ordering/channel matrix; all-loader authoritative transport and ignored valid legacy S2C location. |
 | Marker HUD | Repeated same-target pings from one sender and from several senders while same-target records remain display-active: the target's displayed HUD alpha does not accumulate with the number of same-target records ([invariant owner](../architecture/markers/client-state.md#winner-slots-are-not-the-render-marker-collection)). |
 | Settings and config | External edits do not reload in-session and apply after restart or explicit reload; invalid-config recovery and preservation lock; live scope-tab and category navigation with leaf Back/Escape and root Done/Escape, a fixed footer with non-covering scrolled content, and per-page scroll/focus retention across back navigation and GUI resize, native widget input dispatch and focus-list traversal after a deferred page transition, and root and leaf pages at small GUI sizes and with long localized labels; one shared server session with a single correlated snapshot request retained across category and scope navigation, loading/permission/unavailable status, and denial clearing; live permission revocation, permission-loss return to the server overview, and reconnect draft behavior; invalid-draft close blocking with routing to the offending category and field; the client configuration file action and confirmation-dialog flows, including the reset warning when a server draft exists; and the marker display duration option shows its complete localized `<setting name>: <value>` label for both the Follow server sentinel and an explicit duration ([label owner](../UI/settings-screen.md#marker-display-duration-option)). |
-| Range | Client/server range combinations in one live pipeline: native minimum, a live long-distance Distant Horizons target, Create/Sable finite-segment reuse and server acceptance, including exact Create surface selection followed by whole-entity server-anchor range rejection. Installed-Sable scenarios are listed below. |
+| Range | Client/server range combinations in one live pipeline: native minimum, a live long-distance Distant Horizons target, and Create finite-segment reuse and server acceptance, including exact Create surface selection followed by whole-entity server-anchor range rejection. |
 | Rate policy | Synchronization on reconnect and on effective live configuration change. |
 | Optional content and rendering | Absent or partially present optional content; Create/Flywheel routes; occlusion and arbitrary camera angles; current shape, offset and seed. |
 | Render entity lookup | A real frame epoch shared by HUD marker updates and optional outlines; fresh non-render lookups after render misses; CPU-frame and allocation measurements for 1, 10, and 50 entity marks in a dense world at high FPS. |
 | Create contraption raycast | Hollow, L-shaped, sparse and non-full-block structures: hit occupied surfaces and pass through holes; front empty AABBs, overlapping structures and intervening world walls: select the nearest actual target; all four transparent/fluid policy combinations including represented waterlogging and partial fluid shapes; controlled rotations, moving and minecart-mounted structures, pitched carriages and gantry forms; current-dimension portal-hidden portions and client-loading data availability; long rays starting inside only broad bounds versus an actual selected shape; hold the key while the camera or structure moves and retain the press-time target; Create-absent, delegate-unavailable, client-reconnect and different Flywheel/outline backend paths; measure large-structure press-edge targeting cost. |
-| Sable external blocks | An installed-Sable client/server session covering [candidate capture and presentation](../integrations/sable.md#client-capture-and-presentation), [server materialization and release](../integrations/sable.md#server-validation-and-materialization) after removal, expiry, owner disconnect, and empty-audience cleanup, [live-sublevel refresh outcomes](../integrations/sable.md#refresh-lifecycle), names and fail-soft behavior, and multiplayer create, refresh, and removal. |
 
 ## Recording future evidence
 

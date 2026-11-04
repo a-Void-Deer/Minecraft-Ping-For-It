@@ -105,9 +105,9 @@ class ClientMarkerStoreTest {
 		ClientMarkerStore store = newStore();
 		MarkerId id = new MarkerId(3L);
 		Target.ExternalBlockTarget first = Target.ExternalBlockTarget.committed(
-			OVERWORLD, "sable", "tracking-id", "minecraft:chest", "locator-a", true);
+			OVERWORLD, "external-test", "tracking-id", "minecraft:chest", "locator-a", true);
 		Target.ExternalBlockTarget second = Target.ExternalBlockTarget.committed(
-			OVERWORLD, "sable", "tracking-id", "minecraft:chest", "locator-b", true);
+			OVERWORLD, "external-test", "tracking-id", "minecraft:chest", "locator-b", true);
 
 		store.onCreated(snapshot(id, first, 10L, 110L), 50L);
 		TargetKey key = TargetKey.from(first);

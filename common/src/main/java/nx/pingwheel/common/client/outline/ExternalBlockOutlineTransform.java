@@ -19,7 +19,7 @@ public final class ExternalBlockOutlineTransform {
 	}
 
 	/**
-	 * Applies a Sable block transform after its absolute world translation has
+	 * Applies a external provider block transform after its absolute world translation has
 	 * already been evaluated in double precision.  Only the small camera
 	 * relative origin is translated on the pose stack; the supplied matrix must
 	 * contain orientation and scale, but no world-space translation.
@@ -39,12 +39,12 @@ public final class ExternalBlockOutlineTransform {
 			worldBlockOrigin.x - cameraPosition.x,
 			worldBlockOrigin.y - cameraPosition.y,
 			worldBlockOrigin.z - cameraPosition.z);
-		poseStack.mulPose(orientationScale);
+		poseStack.mulPoseMatrix(orientationScale);
 	}
 
 	/**
 	 * Transforms a local integer block corner without first narrowing the
-	 * absolute render pose. This is the Sable path's authoritative origin.
+	 * absolute render pose. This is the external provider path's authoritative origin.
 	 */
 	public static Vec3 worldBlockOrigin(Matrix4d renderPose, BlockPos localBlockPos) {
 		Objects.requireNonNull(renderPose, "renderPose");

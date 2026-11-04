@@ -2,15 +2,13 @@ package nx.pingwheel.common.network;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
-import org.jetbrains.annotations.NotNull;
 
 import static nx.pingwheel.common.Global.C2S_NAMESPACE;
 import static nx.pingwheel.common.config.ClientConfig.MAX_CHANNEL_LENGTH;
 
 public record UpdateChannelC2SPacket(String channel) implements IPacket {
 
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(C2S_NAMESPACE, "update-channel");
-	public static final Type<UpdateChannelC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
+	public static final ResourceLocation PACKET_ID = new ResourceLocation(C2S_NAMESPACE, "update-channel");
 
 	public UpdateChannelC2SPacket() {
 		this((String)null);
@@ -34,10 +32,5 @@ public record UpdateChannelC2SPacket(String channel) implements IPacket {
 
 	public static UpdateChannelC2SPacket readSafe(FriendlyByteBuf buf) {
 		return PacketHandler.readSafe(buf, UpdateChannelC2SPacket.class);
-	}
-
-	@Override
-	public @NotNull Type<UpdateChannelC2SPacket> type() {
-		return PACKET_TYPE;
 	}
 }

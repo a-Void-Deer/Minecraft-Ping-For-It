@@ -287,7 +287,7 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 
 	private static boolean hasUv0(RenderType renderType) {
 		return renderType.format().getElements().stream().anyMatch(element ->
-			element.usage() == VertexFormatElement.Usage.UV && element.index() == 0);
+			element.getUsage() == VertexFormatElement.Usage.UV && element.getIndex() == 0);
 	}
 
 	/**
@@ -365,43 +365,59 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 		}
 
 		@Override
-		public VertexConsumer addVertex(float x, float y, float z) {
+		public VertexConsumer vertex(double x, double y, double z) {
 			if (adapter != null) {
 				adapter.noteVertexWrite();
 			}
-			delegate.addVertex(x, y, z);
+			delegate.vertex(x, y, z);
 			vertices++;
 			if (adapter != null) {
 				adapter.commitVertexWrite();
 			}
-			delegate.setColor(red, green, blue, 255);
+			delegate.color(red, green, blue, 255);
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setColor(int red, int green, int blue, int alpha) {
+		public VertexConsumer color(int red, int green, int blue, int alpha) {
+			// The fixed marker color is applied when the vertex starts.
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setUv(float u, float v) {
-			delegate.setUv(u, v);
+		public VertexConsumer uv(float u, float v) {
+			delegate.uv(u, v);
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setUv1(int u, int v) {
+		public VertexConsumer overlayCoords(int u, int v) {
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setUv2(int u, int v) {
+		public VertexConsumer uv2(int u, int v) {
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setNormal(float normalX, float normalY, float normalZ) {
+		public VertexConsumer normal(float normalX, float normalY, float normalZ) {
 			return this;
+		}
+
+		@Override
+		public void endVertex() {
+			delegate.endVertex();
+		}
+
+		@Override
+		public void defaultColor(int red, int green, int blue, int alpha) {
+			// The fixed marker color is applied for every vertex above.
+		}
+
+		@Override
+		public void unsetDefaultColor() {
+			// The fixed marker color is applied for every vertex above.
 		}
 	}
 
@@ -416,33 +432,45 @@ public final class OutlineOnlyBufferSource implements MultiBufferSource {
 		static final NoOpVertexConsumer INSTANCE = new NoOpVertexConsumer();
 
 		@Override
-		public VertexConsumer addVertex(float x, float y, float z) {
+		public VertexConsumer vertex(double x, double y, double z) {
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setColor(int red, int green, int blue, int alpha) {
+		public VertexConsumer color(int red, int green, int blue, int alpha) {
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setUv(float u, float v) {
+		public VertexConsumer uv(float u, float v) {
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setUv1(int u, int v) {
+		public VertexConsumer overlayCoords(int u, int v) {
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setUv2(int u, int v) {
+		public VertexConsumer uv2(int u, int v) {
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setNormal(float normalX, float normalY, float normalZ) {
+		public VertexConsumer normal(float normalX, float normalY, float normalZ) {
 			return this;
+		}
+
+		@Override
+		public void endVertex() {
+		}
+
+		@Override
+		public void defaultColor(int red, int green, int blue, int alpha) {
+		}
+
+		@Override
+		public void unsetDefaultColor() {
 		}
 	}
 }

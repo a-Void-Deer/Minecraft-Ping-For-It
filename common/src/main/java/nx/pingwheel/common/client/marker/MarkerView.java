@@ -14,7 +14,6 @@ import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.domain.Target;
-import nx.pingwheel.common.integration.sable.client.SableClientProvider;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.math.MathUtils;
 import nx.pingwheel.common.math.ScreenPos;
@@ -200,10 +199,10 @@ public final class MarkerView {
 			this.pos = toVec3(this.entityPositionTracker.resolve(
 				toPosition(anchor),
 				livePosition == null ? null : toPosition(livePosition)));
-		} else if (target instanceof Target.ExternalBlockTarget external) {
-			this.pos = resolveExternalPosition(
-				anchor,
-				SableClientProvider.resolvePosition(Game.level, external, ctx.tickDelta));
+		} else if (target instanceof Target.ExternalBlockTarget) {
+			// No external provider is shipped on 1.20.1; the authoritative
+			// anchor is the only available presentation position.
+			this.pos = resolveExternalPosition(anchor, Optional.empty());
 			this.entityPositionTracker.reset();
 		} else {
 			this.entityPositionTracker.reset();

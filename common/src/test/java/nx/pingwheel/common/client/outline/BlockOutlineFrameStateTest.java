@@ -101,6 +101,80 @@ class BlockOutlineFrameStateTest {
 	}
 
 	@Test
+	void modelFlushAppliesOnlyTheCameraRotationAndRestoresStateOnFailure() {
+		Matrix4f cameraRotation = new Matrix4f().rotateY(0.6F).rotateX(-0.2F);
+		FakeRenderState renderState = new FakeRenderState(
+			new Matrix4f().translation(1.0F, 2.0F, 3.0F),
+			new Matrix4f().scaling(2.0F),
+			VertexSorting.byDistance(4.0F, 5.0F, 6.0F));
+		Matrix4f ambientModelView = new Matrix4f(renderState.modelView);
+		Matrix4f ambientProjection = new Matrix4f(renderState.projection);
+		VertexSorting ambientSorting = renderState.sorting;
+		Matrix4f observed = new Matrix4f();
+
+		// The attempt vertices are camera-relative and carry no rotation, so
+		// the flush must see exactly the camera-rotation view and nothing else.
+		BlockOutlineFrameState.withCameraRotation(
+			cameraRotation, renderState, () -> observed.set(renderState.modelView));
+
+		assertTrue(observed.equals(cameraRotation));
+		assertTrue(renderState.modelView.equals(ambientModelView));
+		assertTrue(renderState.projection.equals(ambientProjection));
+		assertSame(ambientSorting, renderState.sorting,
+			"a model flush must not touch the ambient projection or sorting");
+		assertEquals(1, renderState.pushes);
+		assertEquals(1, renderState.pops);
+		assertEquals(2, renderState.applies);
+
+		assertThrows(IllegalStateException.class, () ->
+			BlockOutlineFrameState.withCameraRotation(cameraRotation, renderState, () -> {
+				throw new IllegalStateException("simulated model flush failure");
+			}));
+
+		assertTrue(renderState.modelView.equals(ambientModelView),
+			"a failed flush must not leak the rotated view into the vanilla outline batch");
+		assertEquals(2, renderState.pushes);
+		assertEquals(2, renderState.pops);
+		assertEquals(4, renderState.applies);
+	}
+
+	@Test
+	void cameraScopeCoversEverySubmissionUntilClosed() {
+		Matrix4f cameraRotation = new Matrix4f().rotateY(-0.4F).rotateX(0.15F);
+		FakeRenderState renderState = new FakeRenderState(
+			new Matrix4f().translation(9.0F, 8.0F, 7.0F),
+			new Matrix4f().scaling(3.0F),
+			VertexSorting.byDistance(0.0F, 0.0F, 0.0F));
+		Matrix4f ambientModelView = new Matrix4f(renderState.modelView);
+
+		try (BlockOutlineFrameState.CameraRotationScope scope =
+			BlockOutlineFrameState.openCameraRotation(cameraRotation, renderState)) {
+			// An automatic flush can happen at any point while the renderer
+			// switches render types; every one of them must see the rotation.
+			assertTrue(renderState.modelView.equals(cameraRotation));
+			assertTrue(renderState.modelView.equals(cameraRotation));
+			assertEquals(1, renderState.pushes);
+			assertEquals(1, renderState.applies);
+		}
+
+		assertTrue(renderState.modelView.equals(ambientModelView));
+		assertEquals(1, renderState.pops);
+		assertEquals(2, renderState.applies);
+
+		assertThrows(IllegalStateException.class, () -> {
+			try (BlockOutlineFrameState.CameraRotationScope scope =
+				BlockOutlineFrameState.openCameraRotation(cameraRotation, renderState)) {
+				throw new IllegalStateException("simulated attempt failure");
+			}
+		});
+
+		assertTrue(renderState.modelView.equals(ambientModelView),
+			"an exceptional attempt must still restore the ambient model view");
+		assertEquals(2, renderState.pops);
+		assertEquals(4, renderState.applies);
+	}
+
+	@Test
 	void snapshotsAreDefensiveConsumedOnceAndRestoreStateAfterFailure() {
 		Matrix4f modelView = new Matrix4f().rotateY(0.35F);
 		Matrix4f projection = new Matrix4f().scaling(0.7F);
@@ -291,34 +365,46 @@ class BlockOutlineFrameStateTest {
 		private final List<Vector3f> positions = new ArrayList<>();
 
 		@Override
-		public VertexConsumer addVertex(float x, float y, float z) {
-			this.positions.add(new Vector3f(x, y, z));
+		public VertexConsumer vertex(double x, double y, double z) {
+			this.positions.add(new Vector3f((float) x, (float) y, (float) z));
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setColor(int red, int green, int blue, int alpha) {
+		public VertexConsumer color(int red, int green, int blue, int alpha) {
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setUv(float u, float v) {
+		public VertexConsumer uv(float u, float v) {
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setUv1(int u, int v) {
+		public VertexConsumer overlayCoords(int u, int v) {
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setUv2(int u, int v) {
+		public VertexConsumer uv2(int u, int v) {
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setNormal(float x, float y, float z) {
+		public VertexConsumer normal(float x, float y, float z) {
 			return this;
+		}
+
+		@Override
+		public void endVertex() {
+		}
+
+		@Override
+		public void defaultColor(int red, int green, int blue, int alpha) {
+		}
+
+		@Override
+		public void unsetDefaultColor() {
 		}
 	}
 }

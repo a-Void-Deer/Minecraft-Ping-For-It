@@ -4,11 +4,13 @@ import net.minecraft.network.FriendlyByteBuf;
 import net.minecraftforge.client.ConfigScreenHandler;
 import net.minecraftforge.client.event.RegisterClientCommandsEvent;
 import net.minecraftforge.client.event.RegisterClientReloadListenersEvent;
+import net.minecraftforge.client.event.RenderGuiOverlayEvent;
+import net.minecraftforge.client.gui.overlay.VanillaGuiOverlay;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-import net.minecraftforge.network.EventNetworkChannel;
+import net.minecraftforge.network.event.EventNetworkChannel;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.command.ClientCommandBuilder;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
@@ -69,7 +71,7 @@ public class ForgeClient {
 
 	public static <T> void registerPacketHandler(EventNetworkChannel channel, Function<FriendlyByteBuf, T> packetReader, Consumer<T> packetHandler) {
 		channel.addListener((event) -> {
-			var ctx = event.getSource();
+			var ctx = event.getSource().get();
 			var payload = event.getPayload();
 
 			if (payload != null) {
@@ -79,6 +81,28 @@ public class ForgeClient {
 
 			ctx.setPacketHandled(true);
 		});
+	}
+
+	/**
+	 * Late HUD entry point for Forge.
+	 *
+	 * <p>Forge 1.20.1 renders vanilla overlays in {@link VanillaGuiOverlay}
+	 * declaration order, where {@code VIGNETTE} is the <em>first</em> overlay,
+	 * not the last. Drawing at {@code VIGNETTE} would leave the marker, wheel,
+	 * and toggle notice underneath later HUD layers, and the portal/frostbite
+	 * overlays would tint the toggle notice.</p>
+	 *
+	 * <p>{@code PLAYER_LIST} is the final vanilla overlay, so its {@code Post}
+	 * event runs after every tint and HUD layer. Forge still fires the event
+	 * when the player list itself is hidden, which makes it a stable
+	 * once-per-frame late entry point.</p>
+	 */
+	@SubscribeEvent
+	public void onRenderGuiPost(RenderGuiOverlayEvent.Post event) {
+		if (event.getOverlay() == VanillaGuiOverlay.PLAYER_LIST.type()) {
+			CommonClient.INSTANCE.onRenderGUI(event.getGuiGraphics(), event.getPartialTick());
+			CommonClient.INSTANCE.onRenderToggleNotice(event.getGuiGraphics());
+		}
 	}
 
 	@SubscribeEvent

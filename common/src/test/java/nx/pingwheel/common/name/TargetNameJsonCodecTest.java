@@ -6,7 +6,7 @@ import com.google.gson.JsonParseException;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.contents.PlainTextContents;
+import net.minecraft.network.chat.contents.LiteralContents;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.server.Bootstrap;
 import org.junit.jupiter.api.BeforeAll;
@@ -67,8 +67,8 @@ class TargetNameJsonCodecTest {
 		assertEquals(original, decoded);
 
 		// Structure survives the round-trip: literal "Bob" + " (" + base + ")".
-		assertTrue(decoded.getContents() instanceof PlainTextContents.LiteralContents);
-		assertEquals("Bob", ((PlainTextContents.LiteralContents) decoded.getContents()).text());
+		assertTrue(decoded.getContents() instanceof LiteralContents);
+		assertEquals("Bob", ((LiteralContents) decoded.getContents()).text());
 
 		List<Component> siblings = decoded.getSiblings();
 		assertEquals(3, siblings.size());
@@ -89,12 +89,20 @@ class TargetNameJsonCodecTest {
 	}
 
 	@Test
+	void decodeNullComponentJsonThrowsControlledJsonException() {
+		for (String payload : new String[] {"null", "[]"}) {
+			assertThrows(JsonParseException.class,
+				() -> TargetNameJsonCodec.decode(new TargetNameJson(payload), RegistryAccess.EMPTY));
+		}
+	}
+
+	@Test
 	void decodeValidLiteralJsonYieldsLiteralComponent() {
 		Component decoded = TargetNameJsonCodec.decode(
 			new TargetNameJson("{\"text\":\"hi\"}"), RegistryAccess.EMPTY);
 
-		assertTrue(decoded.getContents() instanceof PlainTextContents.LiteralContents);
-		assertEquals("hi", ((PlainTextContents.LiteralContents) decoded.getContents()).text());
+		assertTrue(decoded.getContents() instanceof LiteralContents);
+		assertEquals("hi", ((LiteralContents) decoded.getContents()).text());
 	}
 
 	@Test

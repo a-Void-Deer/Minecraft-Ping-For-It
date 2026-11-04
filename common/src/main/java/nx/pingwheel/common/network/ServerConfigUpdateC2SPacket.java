@@ -5,7 +5,6 @@ import net.minecraft.resources.ResourceLocation;
 import nx.pingwheel.common.config.ChannelMode;
 import nx.pingwheel.common.config.ServerConfigBounds;
 import nx.pingwheel.common.config.ServerConfigUpdate;
-import org.jetbrains.annotations.NotNull;
 
 import static nx.pingwheel.common.Global.C2S_NAMESPACE;
 
@@ -18,10 +17,9 @@ public record ServerConfigUpdateC2SPacket(
 	int rateLimit,
 	int syncDuration
 ) implements IPacket {
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(
+	public static final ResourceLocation PACKET_ID = new ResourceLocation(
 		C2S_NAMESPACE,
 		"server-config-update");
-	public static final Type<ServerConfigUpdateC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	/** Compatibility constructor for callers that do not edit sync duration. */
 	public ServerConfigUpdateC2SPacket(
@@ -97,10 +95,5 @@ public record ServerConfigUpdateC2SPacket(
 
 	public static ServerConfigUpdateC2SPacket readSafe(FriendlyByteBuf buf) {
 		return PacketHandler.readSafe(buf, ServerConfigUpdateC2SPacket.class);
-	}
-
-	@Override
-	public @NotNull Type<ServerConfigUpdateC2SPacket> type() {
-		return PACKET_TYPE;
 	}
 }

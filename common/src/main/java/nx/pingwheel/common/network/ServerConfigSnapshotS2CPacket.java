@@ -5,7 +5,6 @@ import net.minecraft.resources.ResourceLocation;
 import nx.pingwheel.common.config.ChannelMode;
 import nx.pingwheel.common.config.ServerConfigBounds;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
-import org.jetbrains.annotations.NotNull;
 
 import static nx.pingwheel.common.Global.S2C_NAMESPACE;
 
@@ -20,10 +19,9 @@ public record ServerConfigSnapshotS2CPacket(
 	int rateLimit,
 	int syncDuration
 ) implements IPacket {
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(
+	public static final ResourceLocation PACKET_ID = new ResourceLocation(
 		S2C_NAMESPACE,
 		"server-config-snapshot");
-	public static final Type<ServerConfigSnapshotS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	/** Compatibility constructor for snapshots from the pre-duration settings model. */
 	public ServerConfigSnapshotS2CPacket(
@@ -102,11 +100,6 @@ public record ServerConfigSnapshotS2CPacket(
 
 	public static ServerConfigSnapshotS2CPacket readSafe(FriendlyByteBuf buf) {
 		return PacketHandler.readSafe(buf, ServerConfigSnapshotS2CPacket.class);
-	}
-
-	@Override
-	public @NotNull Type<ServerConfigSnapshotS2CPacket> type() {
-		return PACKET_TYPE;
 	}
 
 	static ChannelMode readChannelMode(FriendlyByteBuf buf) {
