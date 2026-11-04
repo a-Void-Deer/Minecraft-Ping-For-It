@@ -18,6 +18,7 @@ import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.apache.logging.log4j.core.config.Configuration;
 import org.apache.logging.log4j.core.config.Property;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import java.util.ArrayList;
@@ -42,7 +43,7 @@ class ConfigHandlerDiagnosticsTest {
 			var persisted = com.google.gson.JsonParser.parseString(Files.readString(path)).getAsJsonObject();
 			assertEquals(VERSION, persisted.get(ConfigVersionUpdater.VERSION_KEY).getAsString());
 			assertEquals(new ServerConfig().getRateLimit(), persisted.get("rateLimit").getAsInt());
-			var failures = logs.operation("site=config-io").stream()
+			var failures = logs.operation("site=config-load handling=defaults-restored").stream()
 				.filter(event -> event.getLevel() == Level.ERROR).toList();
 			assertEquals(1, failures.size());
 			String message = failures.getFirst().getMessage().getFormattedMessage();
@@ -57,10 +58,11 @@ class ConfigHandlerDiagnosticsTest {
 		try (var logs = new Capture()) {
 			Diagnostics.setProfile(DiagnosticSide.BOOTSTRAP, LoggingProfile.NORMAL);
 			new ConfigHandler<>(ServerConfig.class, path, VERSION).load();
-			var events = logs.operation("site=config-io").stream().filter(event -> event.getLevel() == Level.ERROR).toList();
+			var events = logs.operation("site=config-load handling=defaults-restored").stream()
+				.filter(event -> event.getLevel() == Level.ERROR).toList();
 			assertEquals(1, events.size());
 			String message = events.getFirst().getMessage().getFormattedMessage();
-			assertTrue(message.contains("handling=load-failed"), message);
+			assertTrue(message.contains("handling=defaults-restored"), message);
 			assertFalse(message.contains(path.toString()), message);
 			assertFalse(message.contains("private-value"), message);
 			assertFalse(message.contains("NumberFormatException"), message);
@@ -98,6 +100,71 @@ class ConfigHandlerDiagnosticsTest {
 		}
 	}
 
+	@Test void saveEntryPublishesInMemoryProfileBeforeHashAndWriteOutcomes(@TempDir Path directory) throws IOException {
+		var runtime = ConfigRuntime.of(DiagnosticSide.CLIENT, ClientConfig::getLoggingProfile,
+			profile -> Diagnostics.setProfile(DiagnosticSide.CLIENT, profile));
+		LoggingProfile previousClient = Diagnostics.profile(DiagnosticSide.CLIENT);
+		LoggingProfile previousServer = Diagnostics.profile(DiagnosticSide.SERVER);
+		try {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEEP);
+			Path noopPath = directory.resolve("noop-profile.json");
+			var noop = new ConfigHandler<>(ClientConfig.class, noopPath, VERSION, runtime);
+			noop.getConfig().setLoggingProfile(LoggingProfile.DEEP);
+			assertTrue(noop.saveSafely());
+			byte[] written = Files.readAllBytes(noopPath);
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.NORMAL);
+			assertTrue(noop.saveSafely());
+			assertArrayEquals(written, Files.readAllBytes(noopPath));
+			assertEquals(LoggingProfile.DEEP, Diagnostics.profile(DiagnosticSide.CLIENT));
+
+			Path failedPath = directory.resolve("failed-profile.json");
+			var failing = new ConfigHandler<>(ClientConfig.class, failedPath,
+				(source, backup, bytes) -> { throw new AssertionError("no backup on save"); },
+				VERSION,
+				(target, serialized) -> { throw new IOException("deterministic save failure"); },
+				runtime);
+			failing.getConfig().setLoggingProfile(LoggingProfile.DEBUG);
+			assertFalse(failing.saveSafely());
+			assertFalse(Files.exists(failedPath));
+			assertEquals(LoggingProfile.DEBUG, Diagnostics.profile(DiagnosticSide.CLIENT));
+			assertEquals(LoggingProfile.DEEP, Diagnostics.profile(DiagnosticSide.SERVER));
+		} finally {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, previousClient);
+			Diagnostics.setProfile(DiagnosticSide.SERVER, previousServer);
+		}
+	}
+
+	@Test void futureProtectedConfigPublishesDefaultProfileThroughSaveAndReset(@TempDir Path directory) throws IOException {
+		Path path = directory.resolve("future-profile.json");
+		byte[] original = ("{\"pingforit-version\":\"3.0.0-pfi-beta1\",\"loggingProfile\":\"DEBUG\"}\n")
+			.getBytes(StandardCharsets.UTF_8);
+		Files.write(path, original);
+		var runtime = ConfigRuntime.of(DiagnosticSide.CLIENT, ClientConfig::getLoggingProfile,
+			profile -> Diagnostics.setProfile(DiagnosticSide.CLIENT, profile));
+		LoggingProfile previousClient = Diagnostics.profile(DiagnosticSide.CLIENT);
+		LoggingProfile previousServer = Diagnostics.profile(DiagnosticSide.SERVER);
+		try {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEBUG);
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEEP);
+			var handler = new ConfigHandler<>(ClientConfig.class, path, VERSION, runtime);
+			handler.load();
+			assertEquals(new ClientConfig().getLoggingProfile(), Diagnostics.profile(DiagnosticSide.CLIENT));
+			assertArrayEquals(original, Files.readAllBytes(path));
+
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEEP);
+			assertFalse(handler.saveSafely());
+			assertEquals(new ClientConfig().getLoggingProfile(), Diagnostics.profile(DiagnosticSide.CLIENT));
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEBUG);
+			handler.resetToDefaults();
+			assertEquals(new ClientConfig().getLoggingProfile(), Diagnostics.profile(DiagnosticSide.CLIENT));
+			assertArrayEquals(original, Files.readAllBytes(path));
+			assertEquals(LoggingProfile.DEEP, Diagnostics.profile(DiagnosticSide.SERVER));
+		} finally {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, previousClient);
+			Diagnostics.setProfile(DiagnosticSide.SERVER, previousServer);
+		}
+	}
+
 	@Test void futureServerConfigWarnsAndRemainsProtected(@TempDir Path directory) throws IOException {
 		Path path = directory.resolve("future-server.json");
 		byte[] original = ("{\"pingforit-version\":\"3.0.0-pfi-beta1\",\"rateLimit\":99}\n")
@@ -119,7 +186,7 @@ class ConfigHandlerDiagnosticsTest {
 			assertTrue(message.contains("config-future-version"), message);
 			assertTrue(message.contains("defaults in memory"), message);
 			assertTrue(message.contains("original preserved"), message);
-			assertEquals(1, logs.operation("site=config-save").stream()
+			assertEquals(2, logs.operation("site=config-save").stream()
 				.filter(event -> event.getLevel() == Level.DEBUG).count());
 		}
 	}
@@ -206,7 +273,7 @@ class ConfigHandlerDiagnosticsTest {
 		private final Logger logger = (Logger) LogManager.getLogger(NAME);
 		private final LoggerContext context = logger.getContext();
 		private final Configuration configuration = context.getConfiguration();
-		private final LoggerConfig previous = configuration.getLoggers().get(NAME);
+		private final @Nullable LoggerConfig previous = configuration.getLoggers().get(NAME);
 		private final List<LogEvent> captured = new ArrayList<>();
 		private final AbstractAppender appender = new AbstractAppender("config-handler-test", null, null, true, Property.EMPTY_ARRAY) {
 			@Override public void append(LogEvent event) { captured.add(event.toImmutable()); }

@@ -15,8 +15,8 @@ import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformServerEventService;
 
+import static nx.pingwheel.common.Global.MOD_ID;
 import static nx.pingwheel.common.Global.MOD_VERSION;
-
 
 public class CommonServer {
 

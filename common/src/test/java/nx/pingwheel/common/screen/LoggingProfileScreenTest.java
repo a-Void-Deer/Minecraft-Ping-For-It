@@ -21,6 +21,7 @@ import net.minecraft.util.FormattedCharSequence;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.config.ChannelMode;
 import nx.pingwheel.common.config.ClientConfig;
+import nx.pingwheel.common.config.ConfigHandler;
 import nx.pingwheel.common.config.InventoryConfigValues;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.diagnostics.DiagnosticSide;
@@ -32,18 +33,23 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -211,6 +217,57 @@ class LoggingProfileScreenTest {
 	}
 
 	@Test
+	void loggingRowFollowsTheHandlersReplacementConfigAfterAStaleMigrationSave(@TempDir Path directory) throws Exception {
+		Path path = directory.resolve("client.json");
+		Files.writeString(path, "{\"pingforit-version\":\"0.4.0-pfi-beta1\",\"loggingProfile\":\"NORMAL\"}\n");
+		ConfigHandler<ClientConfig> handler = newClientHandler(path);
+		handler.load();
+		ClientConfig constructionTimeConfig = handler.getConfig();
+		assertEquals(LoggingProfile.NORMAL, constructionTimeConfig.getLoggingProfile());
+		LoggingProfile previousRuntime = Diagnostics.profile(DiagnosticSide.CLIENT);
+		try {
+			withScreen(constructionTimeConfig, null, handler::getConfig, (screen, client) -> {
+				openCategory(screen, Category.GEOMETRY_CONFIG);
+				LoggingProfileButton button = loggingProfileButton(screen);
+				assertEquals("Logging Detail: Normal", button.getMessage().getString());
+
+				Files.writeString(path,
+					"{\"pingforit-version\":\"0.5.0-pfi-beta1\",\"loggingProfile\":\"DEEP\"}\n");
+				assertFalse(handler.saveSafely(), "the stale migration must fail its guarded save");
+				ClientConfig replacement = handler.getConfig();
+				assertNotSame(constructionTimeConfig, replacement,
+					"the guarded reload must replace the handler-owned config object");
+				assertEquals(LoggingProfile.DEEP, replacement.getLoggingProfile());
+				assertEquals(LoggingProfile.NORMAL, constructionTimeConfig.getLoggingProfile(),
+					"the construction-time fixture is not the handler's current object");
+				assertSame(screen, client.screen, "the screen remains open after the guarded save failure");
+				assertSame(button, loggingProfileButton(screen),
+					"the same mounted logging button is exercised across the replacement");
+				assertEquals("Logging Detail: Normal", button.getMessage().getString(),
+					"the same mounted button is exercised across the replacement");
+
+				button.onPress();
+				assertEquals(LoggingProfile.NORMAL, replacement.getLoggingProfile(),
+					"the getter read the replacement handler config");
+				assertEquals(LoggingProfile.NORMAL, constructionTimeConfig.getLoggingProfile(),
+					"the stale construction-time config was not edited");
+				assertEquals(LoggingProfile.NORMAL, Diagnostics.profile(DiagnosticSide.CLIENT));
+
+				button.onPress();
+				assertEquals(LoggingProfile.DEEP, replacement.getLoggingProfile(),
+					"the setter wrote the replacement handler config");
+				assertEquals(LoggingProfile.NORMAL, constructionTimeConfig.getLoggingProfile(),
+					"the stale construction-time config still has no edit");
+				assertEquals("Logging Detail: Detailed", button.getMessage().getString());
+				assertEquals(LoggingProfile.DEEP, Diagnostics.profile(DiagnosticSide.CLIENT),
+					"the replacement config's selected profile is published immediately");
+			});
+		} finally {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, previousRuntime);
+		}
+	}
+
+	@Test
 	void serverRowEditsOnlyTheDraftAndNeverPublishesTheRuntimeProfile() throws Exception {
 		LoggingProfile previousServer = Diagnostics.profile(DiagnosticSide.SERVER);
 		try {
@@ -295,6 +352,25 @@ class LoggingProfileScreenTest {
 		}
 	}
 
+	@SuppressWarnings("unchecked")
+	private static ConfigHandler<ClientConfig> newClientHandler(Path path) throws Exception {
+		Class<?> backupWriterType = Class.forName("nx.pingwheel.common.config.BackupWriter");
+		Class<?> atomicWriterType = Class.forName("nx.pingwheel.common.config.AtomicConfigWriter");
+		Object backupWriter = java.lang.reflect.Proxy.newProxyInstance(
+			ConfigHandler.class.getClassLoader(), new Class<?>[] {backupWriterType},
+			(proxy, method, arguments) -> null);
+		Object failingWriter = java.lang.reflect.Proxy.newProxyInstance(
+			ConfigHandler.class.getClassLoader(), new Class<?>[] {atomicWriterType},
+			(proxy, method, arguments) -> {
+				throw new IOException("injected migration write failure");
+			});
+		var constructor = ConfigHandler.class.getDeclaredConstructor(
+			Class.class, Path.class, backupWriterType, String.class, atomicWriterType);
+		constructor.setAccessible(true);
+		return (ConfigHandler<ClientConfig>) constructor.newInstance(
+			ClientConfig.class, path, backupWriter, "0.5.0-pfi-beta1", failingWriter);
+	}
+
 	private static LoggingProfileButton loggingProfileButton(SettingsScreen screen) {
 		return widgets(screen).stream().filter(LoggingProfileButton.class::isInstance)
 			.map(LoggingProfileButton.class::cast).findFirst().orElseThrow();
@@ -345,6 +421,15 @@ class LoggingProfileScreenTest {
 		@Nullable Screen parent,
 		ScreenCheck check
 	) throws Exception {
+		withScreen(config, parent, () -> config, check);
+	}
+
+	private static void withScreen(
+		ClientConfig config,
+		@Nullable Screen parent,
+		Supplier<ClientConfig> loggingConfig,
+		ScreenCheck check
+	) throws Exception {
 		var client = allocate(HeadlessMinecraft.class);
 		client.setLastInputType(InputType.KEYBOARD_ARROW);
 		var instanceField = Minecraft.class.getDeclaredField("instance");
@@ -355,7 +440,7 @@ class LoggingProfileScreenTest {
 		var currentScreenField = SettingsScreen.class.getDeclaredField("currentSettingsScreen");
 		currentScreenField.setAccessible(true);
 		@Nullable Object previousScreen = currentScreenField.get(null);
-		var screen = new TestSettingsScreen(config, parent);
+		var screen = new TestSettingsScreen(config, parent, loggingConfig);
 		try {
 			instanceField.set(null, client);
 			CommonClient.Game = client;
@@ -397,7 +482,15 @@ class LoggingProfileScreenTest {
 		private boolean resetRecreated;
 
 		private TestSettingsScreen(ClientConfig config, @Nullable Screen parent) {
-			super(config, parent);
+			this(config, parent, () -> config);
+		}
+
+		private TestSettingsScreen(
+			ClientConfig config,
+			@Nullable Screen parent,
+			Supplier<ClientConfig> loggingConfig
+		) {
+			super(config, parent, loggingConfig);
 		}
 
 		private void initialize(Minecraft client) {

@@ -8,6 +8,7 @@ import nx.pingwheel.common.config.ServerConfigBounds;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.InventoryConfigValues;
 import nx.pingwheel.common.diagnostics.LoggingProfile;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -145,7 +146,7 @@ public record ServerConfigSnapshotS2CPacket(
 	}
 
 	public static ServerConfigSnapshotS2CPacket readSafe(FriendlyByteBuf buf) {
-		return PacketHandler.readSafe(buf, ServerConfigSnapshotS2CPacket.class);
+		return PacketHandler.readSafe(buf, ServerConfigSnapshotS2CPacket.class, Diagnostics.client());
 	}
 
 	@Override

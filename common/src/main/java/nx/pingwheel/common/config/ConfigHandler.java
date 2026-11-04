@@ -105,7 +105,7 @@ public class ConfigHandler <T extends IConfig> {
 		this(configType, configPath, backupWriter, modVersion, atomicConfigWriter, ConfigRuntime.fixture());
 	}
 
-	private ConfigHandler(Class<T> configType, Path configPath, BackupWriter backupWriter, String modVersion,
+	ConfigHandler(Class<T> configType, Path configPath, BackupWriter backupWriter, String modVersion,
 		AtomicConfigWriter atomicConfigWriter, ConfigRuntime<T> runtime) {
 		this.gson = new GsonBuilder()
 			.setPrettyPrinting()
@@ -904,16 +904,16 @@ public class ConfigHandler <T extends IConfig> {
 			return false;
 		}
 
-		migration = pendingMigration;
-		if (migration == null) {
+		final PendingMigration confirmedMigration = pendingMigration;
+		if (confirmedMigration == null) {
 			return true;
 		}
 
 		try {
 			if (invokeUpdate) config.onUpdate();
-			writeSerializedConfig(serializeConfig(migration.root()));
+			writeSerializedConfig(serializeConfig(confirmedMigration.root()));
 		} catch (Exception failure) {
-			logFailure("migration-write", "configVersion=" + migration.configVersion() + " modVersion=" + modVersion
+			logFailure("migration-write", "configVersion=" + confirmedMigration.configVersion() + " modVersion=" + modVersion
 				+ "; valid loaded config retained; later save will retry", failure);
 			return false;
 		}
@@ -922,8 +922,9 @@ public class ConfigHandler <T extends IConfig> {
 		configHash = config.hashCode();
 		publishProfile();
 		runtime.logger().atDetailed().info("config-migration", "applied", null,
-			() -> "type=" + configType.getSimpleName() + " path=" + configPath + " configVersion=" + migration.configVersion()
-				+ " modVersion=" + modVersion + " updates=" + String.join(", ", migration.updates()));
+			() -> "type=" + configType.getSimpleName() + " path=" + configPath
+				+ " configVersion=" + confirmedMigration.configVersion()
+				+ " modVersion=" + modVersion + " updates=" + String.join(", ", confirmedMigration.updates()));
 		return true;
 	}
 

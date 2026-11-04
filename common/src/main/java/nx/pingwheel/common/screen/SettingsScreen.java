@@ -55,6 +55,7 @@ import nx.pingwheel.common.screen.SettingsCategoryCatalog.Row;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Category;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Page;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Scope;
+import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
@@ -78,13 +79,13 @@ import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.config.ClientConfig.*;
 import static nx.pingwheel.common.config.ClientConfigBounds.*;
 import static nx.pingwheel.common.config.SpatialSelectorSettings.*;
-import static nx.pingwheel.common.Global.warnException;
 
 public class SettingsScreen extends OptionsSubScreen {
 	private static final long NO_REQUEST = -1L;
 	private static WeakReference<@Nullable SettingsScreen> currentSettingsScreen = new WeakReference<>(null);
 
 	private final ClientConfig config;
+	private final Supplier<ClientConfig> loggingConfigSupplier;
 	private final ServerSettingsModel serverSettings = new ServerSettingsModel(false);
 	private final LoggingProfileSession loggingProfileSession = new LoggingProfileSession();
 	private final SettingsNavigationModel navigation = new SettingsNavigationModel();
@@ -165,13 +166,28 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	public SettingsScreen() {
-		this(ClientConfig.HANDLER.getConfig(), null);
+		this(ClientConfig.HANDLER.getConfig(), null, ClientConfig.HANDLER::getConfig);
 	}
 
 	/** Builds the same option factories without loading a persisted client session. */
 	SettingsScreen(ClientConfig config, @Nullable Screen parent) {
+		this(config, parent, () -> config);
+	}
+
+	/**
+	 * The logging row reads and writes the handler's current object rather than
+	 * the construction-time reference, because a guarded migration save can
+	 * reload the handler while this screen remains open. Focused tests supply
+	 * their own fixture explicitly.
+	 */
+	SettingsScreen(
+		ClientConfig config,
+		@Nullable Screen parent,
+		Supplier<ClientConfig> loggingConfigSupplier
+	) {
 		super(null, null, LanguageUtils.settings("title").get());
 		this.config = config;
+		this.loggingConfigSupplier = java.util.Objects.requireNonNull(loggingConfigSupplier, "loggingConfigSupplier");
 		this.parent = parent;
 		this.tabManager = new NavigationTabManager(this::addRenderableWidget, this::removeWidget);
 	}
@@ -1703,7 +1719,8 @@ public class SettingsScreen extends OptionsSubScreen {
 			? LoggingProfileSession.Side.SERVER : LoggingProfileSession.Side.CLIENT;
 		final MutableComponent label = LanguageUtils.settings(setting.id()).get();
 		final Supplier<LoggingProfile> current = () -> server
-			? this.serverSettings.loggingProfile() : this.config.getLoggingProfile();
+			? this.serverSettings.loggingProfile()
+			: this.loggingConfigSupplier.get().getLoggingProfile();
 		final Consumer<LoggingProfile> select = profile -> {
 			if (server) {
 				this.serverSettings.setLoggingProfile(profile);
@@ -1726,7 +1743,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void applyClientLoggingProfile(LoggingProfile profile) {
-		this.config.setLoggingProfile(profile);
+		this.loggingConfigSupplier.get().setLoggingProfile(profile);
 		Diagnostics.setProfile(DiagnosticSide.CLIENT, profile);
 	}
 
@@ -2104,7 +2121,8 @@ public class SettingsScreen extends OptionsSubScreen {
 		try {
 			Util.getPlatform().openFile(ClientConfig.HANDLER.getConfigPath().toFile());
 		} catch (Exception | LinkageError failure) {
-			warnException("opening client config file failed", failure);
+			Diagnostics.client().atNormal().failure(Level.WARN, "settings/open-client-config",
+				"open-file-unavailable", () -> "path=" + ClientConfig.HANDLER.getConfigPath(), failure);
 		}
 	}
 

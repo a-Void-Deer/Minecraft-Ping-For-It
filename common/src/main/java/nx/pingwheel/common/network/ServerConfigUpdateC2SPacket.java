@@ -7,6 +7,7 @@ import nx.pingwheel.common.config.ConfigDefaults;
 import nx.pingwheel.common.config.ServerConfigUpdate;
 import nx.pingwheel.common.config.InventoryConfigValues;
 import nx.pingwheel.common.diagnostics.LoggingProfile;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -145,7 +146,7 @@ public record ServerConfigUpdateC2SPacket(
 	}
 
 	public static ServerConfigUpdateC2SPacket readSafe(FriendlyByteBuf buf) {
-		return PacketHandler.readSafe(buf, ServerConfigUpdateC2SPacket.class);
+		return PacketHandler.readSafe(buf, ServerConfigUpdateC2SPacket.class, Diagnostics.server());
 	}
 
 	@Override
