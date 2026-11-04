@@ -37,6 +37,16 @@ final class SettingsListGeometry {
 		return Math.max(0, Math.min(rowRight + SCROLLBAR_GAP, width - SCROLLBAR_GAP));
 	}
 
+	/**
+	 * Row origin used by {@code AbstractSelectionList.getEntryAtPosition}.
+	 * The inherited {@code getRowLeft()} adds two extra pixels, so the custom
+	 * row must opt into this unshifted origin to keep drawing and clicking
+	 * aligned.
+	 */
+	static int nativeRowLeft(int listLeft, int listWidth, int rowWidth) {
+		return listLeft + listWidth / 2 - rowWidth / 2;
+	}
+
 	/** Row width that leaves room for the scrollbar without overflowing. */
 	static int rowWidth(int width) {
 		return Math.max(0, Math.min(

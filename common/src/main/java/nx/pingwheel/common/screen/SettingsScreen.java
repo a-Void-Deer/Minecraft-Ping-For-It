@@ -3,6 +3,7 @@ package nx.pingwheel.common.screen;
 import net.minecraft.ChatFormatting;
 import net.minecraft.Util;
 import net.minecraft.client.OptionInstance;
+import net.minecraft.client.gui.ComponentPath;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
@@ -246,6 +247,15 @@ public class SettingsScreen extends Screen {
 	}
 
 	@Override
+	public void render(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+		// 1.20.1 Screen.render only draws registered children; the background
+		// is not implicit. Without this the title and footer sit on the
+		// undimmed world and become unreadable over bright scenes.
+		this.renderBackground(graphics);
+		super.render(graphics, mouseX, mouseY, partialTick);
+	}
+
+	@Override
 	public void removed() {
 		// ClientConfig owns persistence.  Do not invoke OptionsSubScreen's vanilla
 		// options save for this custom screen.
@@ -373,6 +383,24 @@ public class SettingsScreen extends Screen {
 		}
 	}
 
+	/**
+	 * Clears the complete focus path before replacing the page.
+	 *
+	 * <p>{@code setFocused(null)} only clears the screen's own reference; a
+	 * container such as {@code TabNavigationBar} keeps its focused child and
+	 * continues to report itself focused, which blocks later Tab navigation.
+	 * Applying false through the current path clears every level.</p>
+	 */
+	private void clearFocusPath() {
+		ComponentPath path = this.getCurrentFocusPath();
+
+		if (path != null) {
+			path.applyFocus(false);
+		}
+
+		this.setFocused((GuiEventListener) null);
+	}
+
 	private void rebuildPage(boolean saveCurrentState) {
 		if (this.settingsList == null) {
 			return;
@@ -382,7 +410,7 @@ public class SettingsScreen extends Screen {
 		}
 		this.flushOptionWidgets();
 
-		this.setFocused((GuiEventListener) null);
+		this.clearFocusPath();
 		this.settingsList.setFocused((GuiEventListener) null);
 		this.settingsList.resetEntries();
 		this.keyedWidgets.clear();
@@ -755,7 +783,7 @@ public class SettingsScreen extends Screen {
 		if (target == null) {
 			return;
 		}
-		this.setFocused((GuiEventListener) null);
+		this.clearFocusPath();
 		this.settingsList.focusWidget(target);
 		this.setFocused(this.settingsList);
 		// ContainerObjectSelectionList may scroll while it restores a child focus;
@@ -785,7 +813,7 @@ public class SettingsScreen extends Screen {
 			target = this.serverSyncDurationField;
 		}
 		if (target != null) {
-			this.setFocused((GuiEventListener) null);
+			this.clearFocusPath();
 			this.settingsList.focusWidget(target);
 			this.setFocused(this.settingsList);
 		}
@@ -1330,8 +1358,8 @@ public class SettingsScreen extends Screen {
 		}
 	}
 
-	private static final class SettingsOptionsList extends ContainerObjectSelectionList<SettingsOptionsList.Row> {
-		private SettingsOptionsList(
+	static final class SettingsOptionsList extends ContainerObjectSelectionList<SettingsOptionsList.Row> {
+		SettingsOptionsList(
 			net.minecraft.client.Minecraft minecraft,
 			int width,
 			int height,
@@ -1353,13 +1381,30 @@ public class SettingsScreen extends Screen {
 		}
 
 		@Override
+		public int getRowLeft() {
+			// AbstractSelectionList#getEntryAtPosition uses the unshifted
+			// centered row origin. Drawing at the inherited +2 offset made the
+			// visual row and its clickable range disagree by two pixels.
+			return SettingsListGeometry.nativeRowLeft(
+				this.x0, this.width, this.getRowWidth());
+		}
+
+		@Override
 		protected int getScrollbarPosition() {
 			return SettingsListGeometry.scrollbarX(
 				this.getRowRight(), this.width, this.getMaxScroll());
 		}
 
-		private void addSmall(AbstractWidget first, AbstractWidget second) {
+		void addSmall(AbstractWidget first, AbstractWidget second) {
 			this.addEntry(new Row(first, second));
+		}
+
+		/**
+		 * Package-private hit-test seam. The inherited method is protected in
+		 * the vanilla package and is not reachable from a same-package test.
+		 */
+		Object entryAt(double mouseX, double mouseY) {
+			return this.getEntryAtPosition(mouseX, mouseY);
 		}
 
 		private void resetEntries() {
@@ -1392,7 +1437,7 @@ public class SettingsScreen extends Screen {
 			}
 		}
 
-		private static final class Row extends ContainerObjectSelectionList.Entry<Row> {
+		private final class Row extends ContainerObjectSelectionList.Entry<Row> {
 			private final AbstractWidget first;
 			private final AbstractWidget second;
 
@@ -1414,18 +1459,30 @@ public class SettingsScreen extends Screen {
 				boolean hovered,
 				float partialTick
 			) {
+				// 1.20.1 widget hover checks only the widget rectangle, not the
+				// active scissor. A row clipped by the list viewport would
+				// otherwise report hover from footer coordinates and queue a
+				// tooltip for an invisible control.
+				ScreenRectangle viewport = SettingsOptionsList.this.getRectangle();
+				boolean mouseInsideViewport = mouseX >= viewport.left()
+					&& mouseX < viewport.right()
+					&& mouseY >= viewport.top()
+					&& mouseY < viewport.bottom();
+				int hoverMouseX = mouseInsideViewport ? mouseX : -1;
+				int hoverMouseY = mouseInsideViewport ? mouseY : -1;
+
 				final int gap = 8;
 				final int halfWidth = Math.max(0, (width - gap) / 2);
 				this.first.setX(left);
 				this.first.setY(top);
 				this.first.setWidth(this.second == null ? width : halfWidth);
-				this.first.render(graphics, mouseX, mouseY, partialTick);
+				this.first.render(graphics, hoverMouseX, hoverMouseY, partialTick);
 
 				if (this.second != null) {
 					this.second.setX(left + halfWidth + gap);
 					this.second.setY(top);
 					this.second.setWidth(halfWidth);
-					this.second.render(graphics, mouseX, mouseY, partialTick);
+					this.second.render(graphics, hoverMouseX, hoverMouseY, partialTick);
 				}
 			}
 
