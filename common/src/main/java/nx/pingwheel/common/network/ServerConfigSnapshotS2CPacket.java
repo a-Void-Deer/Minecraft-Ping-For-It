@@ -7,6 +7,7 @@ import nx.pingwheel.common.config.ConfigDefaults;
 import nx.pingwheel.common.config.ServerConfigBounds;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.InventoryConfigValues;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -23,7 +24,8 @@ public record ServerConfigSnapshotS2CPacket(
 	int rateLimit,
 	int syncDuration,
 	@Nullable InventoryConfigValues inventory,
-	boolean budgetDelayNotificationsEnabled
+	boolean budgetDelayNotificationsEnabled,
+	@Nullable LoggingProfile loggingProfile
 ) implements IPacket {
 	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(
 		S2C_NAMESPACE,
@@ -43,7 +45,7 @@ public record ServerConfigSnapshotS2CPacket(
 	}
 
 	/** Source compatibility only; v5 wire snapshots always contain the complete inventory block. */
-	public ServerConfigSnapshotS2CPacket(long requestId, boolean canEdit, ChannelMode defaultChannelMode,
+	public ServerConfigSnapshotS2CPacket(long requestId, boolean canEdit, @Nullable ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled, int msToRegenerate, int rateLimit, int syncDuration) {
 		this(requestId, canEdit, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
 			syncDuration, InventoryConfigValues.defaults());
@@ -73,7 +75,16 @@ public record ServerConfigSnapshotS2CPacket(
 			snapshot.rateLimit(),
 			snapshot.syncDuration(),
 			snapshot.inventory(),
-			snapshot.budgetDelayNotificationsEnabled());
+			snapshot.budgetDelayNotificationsEnabled(),
+			snapshot.loggingProfile());
+	}
+
+	/** Source compatibility only; the complete v5 wire shape always includes a profile. */
+	public ServerConfigSnapshotS2CPacket(long requestId, boolean canEdit, @Nullable ChannelMode defaultChannelMode,
+		boolean playerTrackingEnabled, int msToRegenerate, int rateLimit, int syncDuration,
+		@Nullable InventoryConfigValues inventory, boolean budgetDelayNotificationsEnabled) {
+		this(requestId, canEdit, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			syncDuration, inventory, budgetDelayNotificationsEnabled, ConfigDefaults.Server.LOGGING_PROFILE);
 	}
 
 	public ServerConfigSnapshotS2CPacket(FriendlyByteBuf buf) {
@@ -86,13 +97,8 @@ public record ServerConfigSnapshotS2CPacket(
 			ServerConfigVarNumbers.readInt(buf),
 			ServerConfigVarNumbers.readInt(buf),
 			ServerInventoryConfigCodec.read(buf),
-			readNotificationsEnabled(buf));
-	}
-
-	private static boolean readNotificationsEnabled(FriendlyByteBuf buf) {
-		boolean enabled = ServerInventoryConfigCodec.readBoolean(buf);
-		ServerInventoryConfigCodec.requireEnd(buf);
-		return enabled;
+			ServerInventoryConfigCodec.readBoolean(buf),
+			LogProfileCodec.readFinal(buf));
 	}
 
 	@Override
@@ -106,12 +112,14 @@ public record ServerConfigSnapshotS2CPacket(
 		buf.writeVarInt(syncDuration);
 		ServerInventoryConfigCodec.write(buf, inventory);
 		buf.writeBoolean(budgetDelayNotificationsEnabled);
+		LogProfileCodec.write(buf, loggingProfile);
 	}
 
 	@Override
 	public boolean isCorrupt() {
 		return requestId <= 0L
 			|| defaultChannelMode == null
+			|| loggingProfile == null
 			|| msToRegenerate < 0
 			|| rateLimit < 0
 			|| syncDuration < ServerConfigBounds.MIN_PING_DURATION
@@ -128,7 +136,8 @@ public record ServerConfigSnapshotS2CPacket(
 			rateLimit,
 			syncDuration,
 			inventory,
-			budgetDelayNotificationsEnabled);
+			budgetDelayNotificationsEnabled,
+			loggingProfile);
 	}
 
 	public ResourceLocation getId() {
@@ -153,7 +162,7 @@ public record ServerConfigSnapshotS2CPacket(
 		return values[ordinal];
 	}
 
-	static void writeChannelMode(FriendlyByteBuf buf, ChannelMode mode) {
+	static void writeChannelMode(FriendlyByteBuf buf, @Nullable ChannelMode mode) {
 		buf.writeVarInt(mode == null ? -1 : mode.ordinal());
 	}
 }

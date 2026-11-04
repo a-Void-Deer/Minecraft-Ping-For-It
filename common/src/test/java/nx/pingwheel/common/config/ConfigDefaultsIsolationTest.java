@@ -36,6 +36,7 @@ class ConfigDefaultsIsolationTest {
 	private static final String CLIENT_GROUP = CONFIG_DEFAULTS + "$Client";
 	private static final String PRESENTATION_GROUP = CONFIG_DEFAULTS + "$Presentation";
 	private static final String CHANNEL_MODE = "nx.pingwheel.common.config.ChannelMode";
+	private static final String LOGGING_PROFILE = "nx.pingwheel.common.diagnostics.LoggingProfile";
 	private static final String MOD_CONTEXT = "nx.pingwheel.common.integration.ModContext";
 	private static final String PLATFORM_CONTEXT = "nx.pingwheel.common.platform.IPlatformContextService";
 
@@ -67,6 +68,30 @@ class ConfigDefaultsIsolationTest {
 		"nx.pingwheel.common.Global",
 		PLATFORM_CONTEXT,
 		"nx.pingwheel.common.integration.SableIntegration");
+
+	@Test
+	void bothLoggingDefaultsInitializeWithoutRuntimePlatformOrConfigModels() throws Exception {
+		try (IsolatedConfigDefaultsLoader gate = new IsolatedConfigDefaultsLoader()) {
+			for (String denied : List.of("nx.pingwheel.common.diagnostics.Diagnostics", "nx.pingwheel.common.CommonClient",
+				"nx.pingwheel.common.CommonServer", "nx.pingwheel.common.core.ServerCore")) {
+				assertThrows(ClassNotFoundException.class, () -> gate.loadClass(denied));
+				assertTrue(gate.deniedAttempts().contains(denied));
+			}
+		}
+		for (String group : List.of(SERVER_GROUP, CLIENT_GROUP)) {
+			try (IsolatedConfigDefaultsLoader loader = new IsolatedConfigDefaultsLoader(group)) {
+				Class<?> defaults = Class.forName(group, true, loader);
+				Field field = defaults.getDeclaredField("LOGGING_PROFILE");
+				Object profile = field.get(null);
+				assertEquals(LOGGING_PROFILE, field.getType().getName());
+				assertEquals("NORMAL", field.getType().getMethod("name").invoke(profile));
+				assertSame(loader, profile.getClass().getClassLoader());
+				assertSame(profile, field.getType().getMethod("valueOf", String.class).invoke(null, "NORMAL"));
+				assertTrue(loader.deniedAttempts().isEmpty(),
+					() -> "logging defaults reached unavailable runtime classes: " + loader.deniedAttempts());
+			}
+		}
+	}
 
 	@Test
 	void serverDefaultsInitializeAndStayUsableWithoutClientPlatformOrHandlerClasses() throws Exception {
@@ -123,13 +148,19 @@ class ConfigDefaultsIsolationTest {
 	@NotNullByDefault
 	private static final class IsolatedConfigDefaultsLoader extends URLClassLoader {
 		private final Set<String> deniedAttempts = new LinkedHashSet<>();
+		private final String allowedGroup;
 
 		private IsolatedConfigDefaultsLoader() {
+			this(SERVER_GROUP);
+		}
+
+		private IsolatedConfigDefaultsLoader(String allowedGroup) {
 			super(
 				new URL @Unmodifiable [] {
 					ConfigDefaults.class.getProtectionDomain().getCodeSource().getLocation()
 				},
 				ConfigDefaults.class.getClassLoader());
+			this.allowedGroup = allowedGroup;
 		}
 
 		@Override
@@ -163,7 +194,12 @@ class ConfigDefaultsIsolationTest {
 			return name.startsWith("nx.pingwheel.common.");
 		}
 
-		private static boolean isDenied(String name) {
+		private boolean isDenied(String name) {
+			if (name.equals("nx.pingwheel.common.CommonClient") || name.equals("nx.pingwheel.common.CommonServer")
+				|| name.startsWith("nx.pingwheel.common.core.")
+				|| (name.startsWith("nx.pingwheel.common.diagnostics.") && !name.equals(LOGGING_PROFILE))) {
+				return true;
+			}
 			if (name.equals("nx.pingwheel.common.Global") || name.startsWith("nx.pingwheel.common.Global$")) {
 				return true;
 			}
@@ -172,7 +208,7 @@ class ConfigDefaultsIsolationTest {
 				|| name.startsWith("nx.pingwheel.common.integration.sable.")) {
 				return true;
 			}
-			if (isInGroup(name, CLIENT_GROUP) || isInGroup(name, PRESENTATION_GROUP)) {
+			if ((!allowedGroup.equals(CLIENT_GROUP) && isInGroup(name, CLIENT_GROUP)) || isInGroup(name, PRESENTATION_GROUP)) {
 				return true;
 			}
 			for (String owner : DENIED_CONFIG_OWNERS) {

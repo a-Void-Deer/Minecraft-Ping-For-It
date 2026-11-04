@@ -1,10 +1,12 @@
 package nx.pingwheel.common.config;
 
+import org.jetbrains.annotations.Nullable;
+
 /** Pure authority/merge seam for server settings updates. */
 public final class ServerConfigUpdateService {
 	private ServerConfigUpdateService() {}
 
-	public record Result(boolean applied, ServerConfigSnapshot snapshot) {}
+	public record Result(boolean applied, @Nullable ServerConfigSnapshot snapshot) {}
 
 	/**
 	 * Permission is supplied by the authenticated server-side caller.  The
@@ -13,8 +15,8 @@ public final class ServerConfigUpdateService {
 	 */
 	public static Result apply(
 		boolean hasPermission,
-		ServerConfigSnapshot current,
-		ServerConfigUpdate update) {
+		@Nullable ServerConfigSnapshot current,
+		@Nullable ServerConfigUpdate update) {
 		if (current == null) {
 			return new Result(false, null);
 		}

@@ -8,6 +8,7 @@ import lombok.ToString;
 import nx.pingwheel.common.client.outline.BlockDisplayPolicy;
 import nx.pingwheel.common.client.outline.BlockDisplayWhitelist;
 import nx.pingwheel.common.core.GameContext;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 import org.jetbrains.annotations.Nullable;
@@ -25,6 +26,7 @@ import static nx.pingwheel.common.Global.LOGGER;
 @ToString
 @EqualsAndHashCode
 public class ClientConfig implements IConfig {
+	@Nullable LoggingProfile loggingProfile = ConfigDefaults.Client.LOGGING_PROFILE;
 	int pingVolume = ConfigDefaults.Client.PING_VOLUME;
 	int pingDistance = ConfigDefaults.Client.PING_DISTANCE;
 	boolean itemIconVisible = ConfigDefaults.Client.ITEM_ICON_VISIBLE;
@@ -172,6 +174,16 @@ public class ClientConfig implements IConfig {
 		this.entityBlockRenderMode = EntityBlockRenderMode.effective(mode);
 	}
 
+	/** Returns a usable local preference even before persisted nulls have been validated. */
+	public LoggingProfile getLoggingProfile() {
+		return loggingProfile == null ? ConfigDefaults.Client.LOGGING_PROFILE : loggingProfile;
+	}
+
+	/** Stores the preference only; the runtime lifecycle owns publishing logging policy. */
+	public void setLoggingProfile(@Nullable LoggingProfile loggingProfile) {
+		this.loggingProfile = loggingProfile == null ? ConfigDefaults.Client.LOGGING_PROFILE : loggingProfile;
+	}
+
 	public void setConfigurationNoticeSize(int configurationNoticeSize) {
 		this.configurationNoticeSize = ClientConfigBounds.clampConfigurationNoticeSize(configurationNoticeSize);
 	}
@@ -245,6 +257,7 @@ public class ClientConfig implements IConfig {
 	}
 
 	void validate(ClampWarningSink warningSink) {
+		loggingProfile = getLoggingProfile();
 		// Gson maps unknown enum names to null. Recover them locally so malformed
 		// client data never selects a new geometry route accidentally.
 		entityBlockRenderMode = EntityBlockRenderMode.effective(entityBlockRenderMode);

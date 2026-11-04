@@ -1,5 +1,6 @@
 package nx.pingwheel.common.config;
 
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -16,7 +17,8 @@ public record ServerConfigSnapshot(
 	int rateLimit,
 	int syncDuration,
 	@Nullable InventoryConfigValues inventory,
-	boolean budgetDelayNotificationsEnabled
+	boolean budgetDelayNotificationsEnabled,
+	@Nullable LoggingProfile loggingProfile
 ) {
 	public ServerConfigSnapshot(
 		boolean canEdit,
@@ -31,7 +33,7 @@ public record ServerConfigSnapshot(
 	/** Source-compatible constructor; old Java callers get independent inventory defaults. */
 	public ServerConfigSnapshot(
 		boolean canEdit,
-		ChannelMode defaultChannelMode,
+		@Nullable ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled,
 		int msToRegenerate,
 		int rateLimit,
@@ -57,7 +59,17 @@ public record ServerConfigSnapshot(
 			safeNonNegative(config.getRateLimit()),
 			ServerConfigBounds.clampSyncDuration(config.getSyncDuration()),
 			InventoryConfigValues.from(config.getInventory()),
-			config.isBudgetDelayNotificationsEnabled());
+			config.isBudgetDelayNotificationsEnabled(),
+			config.getLoggingProfile());
+	}
+
+	/** Source compatibility only; remote snapshots always include a logging profile. */
+	public ServerConfigSnapshot(
+		boolean canEdit, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		int msToRegenerate, int rateLimit, int syncDuration, @Nullable InventoryConfigValues inventory,
+		boolean budgetDelayNotificationsEnabled) {
+		this(canEdit, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			syncDuration, inventory, budgetDelayNotificationsEnabled, ConfigDefaults.Server.LOGGING_PROFILE);
 	}
 
 	public ServerConfigSnapshot withCanEdit(boolean canEdit) {
@@ -69,11 +81,13 @@ public record ServerConfigSnapshot(
 			rateLimit,
 			syncDuration,
 			inventory,
-			budgetDelayNotificationsEnabled);
+			budgetDelayNotificationsEnabled,
+			loggingProfile);
 	}
 
 	public boolean isSafe() {
 		return defaultChannelMode != null
+			&& loggingProfile != null
 			&& msToRegenerate >= 0
 			&& rateLimit >= 0
 			&& syncDuration >= ServerConfigBounds.MIN_PING_DURATION

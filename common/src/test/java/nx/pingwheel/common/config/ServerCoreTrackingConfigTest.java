@@ -82,7 +82,7 @@ class ServerCoreTrackingConfigTest {
 				| ServerConfigUpdate.RATE_LIMIT, ChannelMode.AUTO, true, 0, 99, 7,
 				InventoryConfigValues.defaults().with(Field.TRACKING_DISTINGUISH_PLAYERS, Value.scalar(2)));
 			ServerCore.onServerConfigUpdate(server, player, malicious);
-			ServerCore.onServerConfigUpdate(server, player, new ServerConfigUpdateC2SPacket(1 << 29,
+			ServerCore.onServerConfigUpdate(server, player, new ServerConfigUpdateC2SPacket(1 << 30,
 				ChannelMode.AUTO, true, 0, 99, 7, InventoryConfigValues.defaults()));
 			assertEquals(authoritative, ServerConfigSnapshot.from(config, true));
 			var buf = new FriendlyByteBuf(Unpooled.buffer());

@@ -6,6 +6,7 @@ import nx.pingwheel.common.config.ChannelMode;
 import nx.pingwheel.common.config.InventoryConfigValues;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.ServerConfigUpdate;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -74,7 +75,7 @@ class ServerConfigPacketsTest {
 		assertFalse(valid.isCorrupt());
 
 		assertTrue(new ServerConfigUpdateC2SPacket(0, ChannelMode.AUTO, true, 0, 0).isCorrupt());
-		assertTrue(new ServerConfigUpdateC2SPacket(1 << 29, ChannelMode.AUTO, true, 0, 0).isCorrupt());
+		assertTrue(new ServerConfigUpdateC2SPacket(1 << 30, ChannelMode.AUTO, true, 0, 0).isCorrupt());
 		assertTrue(new ServerConfigUpdateC2SPacket(1, ChannelMode.AUTO, true, -1, 0).isCorrupt());
 		assertTrue(new ServerConfigUpdateC2SPacket(1, null, true, 0, 0).isCorrupt());
 	}
@@ -113,21 +114,29 @@ class ServerConfigPacketsTest {
 	}
 
 	@Test
-	void packetCompatibilityConstructorsDefaultNoticesOn() {
+	void packetCompatibilityConstructorsDefaultNoticesOnAndLoggingNormal() {
 		var inventory = InventoryConfigValues.defaults();
 		for (var snapshot : List.of(
 			new ServerConfigSnapshotS2CPacket(1L, true, ChannelMode.AUTO, true, 1, 2),
 			new ServerConfigSnapshotS2CPacket(1L, true, ChannelMode.AUTO, true, 1, 2, 7),
-			new ServerConfigSnapshotS2CPacket(1L, true, ChannelMode.AUTO, true, 1, 2, 7, inventory))) {
+			new ServerConfigSnapshotS2CPacket(1L, true, ChannelMode.AUTO, true, 1, 2, 7, inventory),
+			new ServerConfigSnapshotS2CPacket(1L, true, ChannelMode.AUTO, true, 1, 2, 7, inventory, true))) {
 			assertTrue(snapshot.budgetDelayNotificationsEnabled());
 			assertTrue(snapshot.snapshot().budgetDelayNotificationsEnabled());
+			assertEquals(LoggingProfile.NORMAL, snapshot.loggingProfile());
+			assertEquals(LoggingProfile.NORMAL, snapshot.snapshot().loggingProfile());
 		}
 		for (var update : List.of(
 			new ServerConfigUpdateC2SPacket(1, ChannelMode.AUTO, true, 1, 2),
 			new ServerConfigUpdateC2SPacket(1, ChannelMode.AUTO, true, 1, 2, 7),
-			new ServerConfigUpdateC2SPacket(1, ChannelMode.AUTO, true, 1, 2, 7, inventory))) {
+			new ServerConfigUpdateC2SPacket(1, ChannelMode.AUTO, true, 1, 2, 7, inventory),
+			new ServerConfigUpdateC2SPacket(1, ChannelMode.AUTO, true, 1, 2, 7, inventory, true))) {
 			assertTrue(update.budgetDelayNotificationsEnabled());
 			assertTrue(update.update().budgetDelayNotificationsEnabled());
+			assertEquals(LoggingProfile.NORMAL, update.loggingProfile());
+			assertEquals(LoggingProfile.NORMAL, update.update().loggingProfile());
 		}
+		assertTrue(new ServerConfigUpdateC2SPacket(1, ChannelMode.AUTO, true, 1, 2, 7, inventory, true, null).isCorrupt());
+		assertTrue(new ServerConfigSnapshotS2CPacket(1L, true, ChannelMode.AUTO, true, 1, 2, 7, inventory, true, null).isCorrupt());
 	}
 }

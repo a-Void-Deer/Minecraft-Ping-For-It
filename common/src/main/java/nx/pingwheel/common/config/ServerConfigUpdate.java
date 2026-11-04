@@ -1,5 +1,6 @@
 package nx.pingwheel.common.config;
 
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Optional;
@@ -17,7 +18,8 @@ public record ServerConfigUpdate(
 	int rateLimit,
 	int syncDuration,
 	@Nullable InventoryConfigValues inventory,
-	boolean budgetDelayNotificationsEnabled
+	boolean budgetDelayNotificationsEnabled,
+	@Nullable LoggingProfile loggingProfile
 ) {
 	public static final int DEFAULT_CHANNEL_MODE = 1;
 	public static final int PLAYER_TRACKING_ENABLED = 1 << 1;
@@ -49,13 +51,15 @@ public record ServerConfigUpdate(
 	public static final int INVENTORY_TRACKING_DISTINGUISH_PLAYERS = InventoryConfigValues.Field.TRACKING_DISTINGUISH_PLAYERS.mask();
 	public static final int ALL_INVENTORY_FIELDS = InventoryConfigValues.allFieldMask();
 	public static final int BUDGET_DELAY_NOTIFICATIONS_ENABLED = 1 << 26;
+	public static final int LOGGING_PROFILE = 1 << 29;
 	public static final int ALL_FIELDS = DEFAULT_CHANNEL_MODE
 		| PLAYER_TRACKING_ENABLED
 		| MS_TO_REGENERATE
 		| RATE_LIMIT
 		| SYNC_DURATION
 		| ALL_INVENTORY_FIELDS
-		| BUDGET_DELAY_NOTIFICATIONS_ENABLED;
+		| BUDGET_DELAY_NOTIFICATIONS_ENABLED
+		| LOGGING_PROFILE;
 
 	public ServerConfigUpdate(
 		int changedFields,
@@ -69,7 +73,7 @@ public record ServerConfigUpdate(
 
 	/** Source-compatible constructor for callers selecting the original five fields. */
 	public ServerConfigUpdate(
-		int changedFields, ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		int changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
 		int msToRegenerate, int rateLimit, int syncDuration) {
 		this(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
 			syncDuration, InventoryConfigValues.defaults());
@@ -87,6 +91,7 @@ public record ServerConfigUpdate(
 		return changedFields != 0
 			&& (changedFields & ~ALL_FIELDS) == 0
 			&& defaultChannelMode != null
+			&& loggingProfile != null
 			&& msToRegenerate >= 0
 			&& rateLimit >= 0
 			&& syncDuration >= 0
@@ -105,7 +110,7 @@ public record ServerConfigUpdate(
 
 	public static Optional<ServerConfigUpdate> validated(
 		int changedFields,
-		ChannelMode defaultChannelMode,
+		@Nullable ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled,
 		int msToRegenerate,
 		int rateLimit,
@@ -122,9 +127,26 @@ public record ServerConfigUpdate(
 	}
 
 	public static Optional<ServerConfigUpdate> validated(
-		int changedFields, ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
-		int msToRegenerate, int rateLimit, int syncDuration, InventoryConfigValues inventory,
+		int changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		int msToRegenerate, int rateLimit, int syncDuration, @Nullable InventoryConfigValues inventory,
 		boolean budgetDelayNotificationsEnabled) {
+		return validated(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate,
+			rateLimit, syncDuration, inventory, budgetDelayNotificationsEnabled, ConfigDefaults.Server.LOGGING_PROFILE);
+	}
+
+	/** Source compatibility only; remote updates always include a logging profile. */
+	public ServerConfigUpdate(
+		int changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		int msToRegenerate, int rateLimit, int syncDuration, @Nullable InventoryConfigValues inventory,
+		boolean budgetDelayNotificationsEnabled) {
+		this(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			syncDuration, inventory, budgetDelayNotificationsEnabled, ConfigDefaults.Server.LOGGING_PROFILE);
+	}
+
+	public static Optional<ServerConfigUpdate> validated(
+		int changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		int msToRegenerate, int rateLimit, int syncDuration, @Nullable InventoryConfigValues inventory,
+		boolean budgetDelayNotificationsEnabled, @Nullable LoggingProfile loggingProfile) {
 		var update = new ServerConfigUpdate(
 			changedFields,
 			defaultChannelMode,
@@ -133,7 +155,8 @@ public record ServerConfigUpdate(
 			rateLimit,
 			syncDuration,
 			inventory,
-			budgetDelayNotificationsEnabled);
+			budgetDelayNotificationsEnabled,
+			loggingProfile);
 		return update.isValid() ? Optional.of(update) : Optional.empty();
 	}
 
@@ -143,7 +166,7 @@ public record ServerConfigUpdate(
 	 * preserved.  A rejected update is returned as the unchanged current
 	 * snapshot; callers that must distinguish rejection use {@link #appliedTo}.
 	 */
-	public ServerConfigSnapshot applyTo(ServerConfigSnapshot current) {
+	public @Nullable ServerConfigSnapshot applyTo(@Nullable ServerConfigSnapshot current) {
 		return appliedTo(current).orElse(current);
 	}
 
@@ -153,7 +176,7 @@ public record ServerConfigUpdate(
 	 * An invalid merged pair is rejected atomically: no unselected leaf is
 	 * adjusted and no assignment is produced.
 	 */
-	public Optional<ServerConfigSnapshot> appliedTo(ServerConfigSnapshot current) {
+	public Optional<ServerConfigSnapshot> appliedTo(@Nullable ServerConfigSnapshot current) {
 		if (!isValid() || current == null || !current.isSafe()) {
 			return Optional.empty();
 		}
@@ -174,6 +197,7 @@ public record ServerConfigUpdate(
 				: current.syncDuration(),
 			mergedInventory,
 			(changedFields & BUDGET_DELAY_NOTIFICATIONS_ENABLED) != 0
-				? budgetDelayNotificationsEnabled : current.budgetDelayNotificationsEnabled()));
+				? budgetDelayNotificationsEnabled : current.budgetDelayNotificationsEnabled(),
+			(changedFields & LOGGING_PROFILE) != 0 ? loggingProfile : current.loggingProfile()));
 	}
 }
