@@ -804,8 +804,8 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 |---|---|
 | 现象 | `./gradlew runServer`（根级）报 `Cannot locate tasks that match ':runServer' as task 'runServer' not found in root project 'Ping-For-It'.`（2026-11-03 22:4x 用户实测） |
 | 根因 | 重构后根 `build.gradle` 只 `apply false` 引 loom，**根项目不是 loom 项目**；`runClient`/`runServer` 是 Loom 给 `fabric` 子项目建的 |
-| 处理 | 命令必须带前缀：`./gradlew -g D:/Gradle :fabric:runClient` / `:fabric:runServer`；首次 `:fabric:runServer` 会在仓库根 `run/` 生成 `eula.txt`（`eula=false`），改成 `eula=true` 再跑一次 |
-| 状态 | ✅ 文档已改（`AGENTS.md` §3/§4/§7.18、`README.md`、`02-p0-in-game-checklist.md` V4/V18）；**V18 仍待实机** |
+| 处理 | 推荐命令带前缀：`./gradlew -g D:/Gradle :fabric:runClient` / `:fabric:runServer`；**2026-11-04 已在根 `build.gradle` 注册 `runClient`/`runServer` 转发别名**（`dependsOn ':fabric:runX'`，无 action），根级写法也可用（仍推荐显式）；首次 `:fabric:runServer` 会在仓库根 `run/` 生成 `eula.txt`（`eula=false`），改成 `eula=true` 再跑一次 |
+| 状态 | ✅ 文档已改（`AGENTS.md` §3/§4/§7.18、`README.md`、`02-p0-in-game-checklist.md` V4/V18）；**根级别名已于 2026-11-04 加上** → `./gradlew runServer` 现在可用；**V18 仍待实机** |
 
 **2）装了 DH 时 OIT 不可测**
 

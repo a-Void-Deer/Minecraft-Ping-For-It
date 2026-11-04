@@ -42,7 +42,7 @@ gradlew.bat -g D:\Gradle build
 - 工程是 `common/` + `fabric/` 两个 Gradle 子项目（`settings.gradle` 只 include 这两个；`forge/`、`neoforge/` 是未启用的预留目录）。
 - 产物在 `fabric/build/libs/`：`Ping-For-It-<version>-fabric-26.3.jar`（`fabric` 的 `jar` 任务把 `common` 的 class 与资源合并进同一个 jar，仍是单 jar）。
 - **命令块内不要带行内注释**：Windows cmd 下 `#` 不是注释符，会被当成任务名。
-- **运行任务必须带项目前缀**：`./gradlew -g D:/Gradle :fabric:runClient` / `:fabric:runServer`。重构后根项目只 `apply false` 引 loom、**不是 loom 项目**，根级 `./gradlew runClient` / `runServer` 会直接报 `Cannot locate tasks that match ':runServer' as task 'runServer' not found in root project 'Ping-For-It'.`（2026-11-03 用户实测）。首次 `:fabric:runServer` 会生成 `run/eula.txt`，改成 `eula=true` 再跑一次。
+- **运行任务推荐带项目前缀**：`./gradlew -g D:/Gradle :fabric:runClient` / `:fabric:runServer`。重构后根项目只 `apply false` 引 loom、**不是 loom 项目**，所以 2026-11-03 时根级 `./gradlew runServer` 会直接报 `Cannot locate tasks that match ':runServer' as task 'runServer' not found in root project 'Ping-For-It'.`；**2026-11-04 已在根 `build.gradle` 注册 `runClient`/`runServer` 转发别名**（`dependsOn ':fabric:runX'`，本身没有 action），根级写法现在**也能用**，但报错信息与任务归属不如显式直白 → **仍推荐显式 `:fabric:`**。首次 `:fabric:runServer` 会生成 `run/eula.txt`，改成 `eula=true` 再跑一次。
 - 本地快速编译校验（不启动 Gradle）：`tools/compile-check.sh` / `tools/compile-check.ps1`。
 
 ## 文档

@@ -13,3 +13,16 @@ tasks.register('buildAll') {
 	description = 'Builds every shippable module (common + fabric today).'
 	dependsOn(':common:build', ':fabric:build')
 }
+// 根项目不是 Loom 项目（plugins 里只有 apply false），所以根级**没有** runClient/runServer
+// 任务：直接 > Task 'runServer' not found in root project 失败。Loom 只在 :fabric 里建它们。
+// 这里注册转发别名，让 ./gradlew runClient / runServer 也能用；等价的显式写法始终可用：
+//   ./gradlew :fabric:runClient
+//   ./gradlew :fabric:runServer
+// 注意：别名只是把 :fabric 的任务加进任务图，不会复制一份运行配置。
+['runClient', 'runServer'].each { String runTaskName ->
+	tasks.register(runTaskName) {
+		group = 'fabric'
+		description = "Alias for :fabric:" + runTaskName + " (the root project is not a Loom project)."
+		dependsOn(':' + 'fabric:' + runTaskName)
+	}
+}

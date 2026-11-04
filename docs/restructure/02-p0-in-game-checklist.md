@@ -46,7 +46,7 @@
 
 ### 第 2 组 · 启动（`V4`–`V5`）
 
-- [ ] **V4**（20:58 那次已 ✅ 过；**若你重新构建过就必须重跑**）启动客户端：`./gradlew -g D:/Gradle :fabric:runClient`（**只能用带项目前缀的**；根级 `./gradlew runClient` 会报 `Cannot locate tasks that match ':runClient'…` —— 重构后根项目不是 loom 项目，见 `AGENTS.md` §7.18 与 §3/§4）。
+- [ ] **V4**（20:58 那次已 ✅ 过；**若你重新构建过就必须重跑**）启动客户端：**`./gradlew -g D:/Gradle :fabric:runClient`**（推荐写法），或等价的别名 `./gradlew -g D:/Gradle runClient`（2026-11-04 起根级为转发别名；更早版本会报 `Cannot locate tasks that match ':runClient'…`，见 `AGENTS.md` §7.18 与 §3/§4）。
   - **期望**：加载条正常走完（不卡死、不超 60 秒无进展）；**无** `Mixin apply failed`；无 `ClassNotFoundException: nx.pingwheel…`。
   - **期望日志（顺序大致如此）**：`[PingForIt] Init` → `[PingForIt] Loaded config type=ServerConfig` → `[PingForIt] Loaded config type=ClientConfig` → `[PingForIt] ping outline pipeline registered (depth test disabled, cull off, translucent)` → `[PingForIt] block outline pass registered (custom pipeline, afterTerrain routing)`。
   - **失败要贴**：从启动第一行到 `Sound engine started` 的全部日志（或 `latest.log` 前 150 行）+ 卡住时的截图。
@@ -125,7 +125,7 @@
 
 > 组 1–7 验的都是 **dev 形态**（classpath 上有 `common` jar 与 `fabric/build/resources/main`）。这两条验的是**别人装上去会不会坏** —— 重构改了模块边界，这两条正是重构最容易漏的地方。
 
-- [ ] **V18** 专用服务端冒烟：`./gradlew -g D:/Gradle :fabric:runServer`（**必须带 `:fabric:` 前缀**，根级 `runServer` 不存在，见 `AGENTS.md` §7.18）。
+- [ ] **V18** 专用服务端冒烟：**`./gradlew -g D:/Gradle :fabric:runServer`**（推荐），或别名 `./gradlew -g D:/Gradle runServer`（2026-11-04 起可用；若报 `Cannot locate tasks that match ':runServer'…` 说明别名没生效，改用显式写法）。
   - **首次运行**会在仓库根 `run/` 生成 `eula.txt`（`eula=false`）→ 改成 `eula=true` → **再跑一次**；在此之前 `run/eula.txt` 不存在（这就是 V18 一直「未开始」的原因）。
   - **期望**：启动到 **`Done (…s)! For help, type "help"`**；**无** `NoClassDefFoundError`；**无**客户端类加载错误（例如 `Attempted to load class net/minecraft/client/…`）；控制台里能看到 `[PingForIt] Loaded config type=ServerConfig`。
   - **期望**：输入 `stop` 后正常关停（`Stopping server` → `ThreadedAnvilChunkStorage … All dimensions are saved` 一类收尾行，进程退出码 0）。

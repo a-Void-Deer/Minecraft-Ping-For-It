@@ -1,7 +1,7 @@
 # AGENTS.md · Ping For It（MC 26.3 / Fabric 单端）协作说明
 
 > 团队唯一事实来源：现状、目录、构建、已验证结论、已知坑、待办。
-> 维护者：Lead｜**最后更新：2026-11-03（重构后 P0 验收 R1–R4；M9-1/M9-2 实机通过；`runClient` 必须带 `:fabric:` 前缀）**
+> 维护者：Lead｜**最后更新：2026-11-04（根级 `runClient`/`runServer` 改为转发别名，推荐仍用 `:fabric:runX`；P0 验收 R1–R4；M9-1/M9-2 实机通过）**
 
 ## 0. 2026-10-29 数据事故与恢复（先读）
 
@@ -68,7 +68,8 @@ export GRADLE_USER_HOME="D:/Gradle"
   ```text
   Cannot locate tasks that match ':runServer' as task 'runServer' not found in root project 'Ping-For-It'.
   ```
-  Loom 只在 `fabric` 子项目里建这两个任务 → **命令必须带项目前缀**：`./gradlew -g D:/Gradle :fabric:runClient` / `:fabric:runServer`。
+  Loom 只在 `fabric` 子项目里建这两个任务 → **显式写法**是 `./gradlew -g D:/Gradle :fabric:runClient` / `:fabric:runServer`。
+- **根级 `runClient`/`runServer` 现在是可用的转发别名**（2026-11-04 起，根 `build.gradle` 注册，`dependsOn ':fabric:runX'`，本身没有 action）：`./gradlew -g D:/Gradle runClient` 也能用。但**显式 `:fabric:runX` 仍是推荐写法** —— 别名的报错信息与任务归属不如显式直白（出错时看不出是哪个模块，IDE 里也容易点错）。
 - **`common` 的 run 任务被禁用**：`common` 是纯库模块，`common/build.gradle` 末尾用 `tasks.matching { it.name == 'runClient' || it.name == 'runServer' }.configureEach { enabled = false }` 关掉，否则两个客户端会抢同一个 `run/` 目录。**不要删这段**。
 - **首次 `:fabric:runServer` 需要 eula**：第一次跑会在仓库根 `run/` 生成 `eula.txt`（`eula=false`），改成 `eula=true` 再跑一次即可；在此之前 `run/eula.txt` 不存在（所以 V18 至今未开始）。
 
@@ -81,7 +82,7 @@ export GRADLE_USER_HOME="D:/Gradle"
 - 布局：`settings.gradle` 只 `include('common')` / `include('fabric')`；`forge/`、`neoforge/` 是**未启用的预留目录**（只有 README，未 include）。加模块的前提是先补对应工具链，见各自 README。
 - 约定插件在 `buildSrc/src/main/groovy/`：`multiloader-common.gradle`（Java 25 / 产物名 / 公共 `compileOnly` / `run/mods` 集成 jar 的 glob + `attachIntegrationJarCheck`）、`multiloader-loader.gradle`（`implementation project(':common')`）。模块自己的 `build.gradle` 只写插件、loom 配置与依赖。
 - `splitEnvironmentSourceSets()`：`common` 与 `fabric` 都开；**`common/src/main` 绝不能 import `net.minecraft.client.**` / `com.mojang.blaze3d.**`**（编译期由 split 源集拦截，`tools/compile-check.sh|.ps1` 另有一道 grep 门禁，命中即 exit 1）。
-- `fabric/build.gradle` 的 `loom.mods { "pingforit" { sourceSet main; sourceSet client } }`；`runs.client/server` 显式 `runDir(rootProject.file('run'))` + `ideConfigGenerated(true)`（fabric 不是 root project，Loom 默认只在 root 生成 IDE run 配置），运行目录仍是根 `run/`。**只能用 `./gradlew :fabric:runClient` / `:fabric:runServer`** —— 根级没有这两个任务（不是 loom 项目，见 §7.18）；首次 `:fabric:runServer` 要先把仓库根 `run/eula.txt` 改成 `eula=true`。
+- `fabric/build.gradle` 的 `loom.mods { "pingforit" { sourceSet main; sourceSet client } }`；`runs.client/server` 显式 `runDir(rootProject.file('run'))` + `ideConfigGenerated(true)`（fabric 不是 root project，Loom 默认只在 root 生成 IDE run 配置），运行目录仍是根 `run/`。**推荐 `./gradlew :fabric:runClient` / `:fabric:runServer`**（根级同名任务是转发别名，见 §7.18）；首次 `:fabric:runServer` 要先把仓库根 `run/eula.txt` 改成 `eula=true`。
 - `fabric/build.gradle` 的 `processResources` 从 `:common` 合并资源（dev 的 mod 资源只认本模块源集，见 §7.16）；`jar` 只合并 `:common` 的 `classesDirs`，资源不重复打包。
 - `generateModMetadata`（**Sync** 任务，在 `fabric/build.gradle`）：模板 `fabric/src/main/templates/fabric.mod.json` → `fabric/build/generated/modMetadata` 并替换版本；`inputs.property "version"` 必须保留；不要改回 `processResources { filesMatching { expand } }`。
 - 编译选项在 `multiloader-common.gradle`：`options.release = 25` + `withSourcesJar()`。
@@ -142,11 +143,13 @@ export GRADLE_USER_HOME="D:/Gradle"
 
 17. **improved transparency 打开时描边改投 `outline` 相位**（2026-11-03，登记 `24` **#19**）：`afterTerrain` 相位在 26.3 只有 `LevelRenderer.executeClassicTransparency` 会执行，而它在 `Options.improvedTransparency` 打开时整个被跳过；`SubmitNodeCollectionMixin` 因此在该模式下把描边投到 `outline` 相位（`hasAnyOutline() && shouldShowEntityOutlines` 触发，排在 OIT 之后）。默认值是 false，所以默认仍走 `afterTerrain`（已实机验证）——**默认路径不打任何新日志**，只有真的走到回退时才会打一条 info。门控 `shouldShowEntityOutlines = !camera.isPanoramicMode() && playerState.hasPlayer`，游戏内恒真（主菜单全景/无玩家时才为假）。
 
-18. **根项目没有 Loom 的 run 任务（2026-11-03 用户实测）**：重构后根 `build.gradle` 只 `apply false` 引 loom，**根项目不是 loom 项目**，所以 `./gradlew runClient` / `runServer` 会直接失败：
+18. **根项目没有 Loom 的 run 任务（2026-11-03 实测；2026-11-04 已加根级转发别名）**：重构后根 `build.gradle` 只 `apply false` 引 loom，**根项目不是 loom 项目**，所以**当时（2026-11-03）**根级 `./gradlew runClient` / `runServer` 会直接失败：
     ```text
     Cannot locate tasks that match ':runServer' as task 'runServer' not found in root project 'Ping-For-It'.
     ```
-    Loom 只在 `fabric` 子项目里建这两个任务 → **命令必须带前缀**：`./gradlew -g D:/Gradle :fabric:runClient` / `:fabric:runServer`。**首次 `:fabric:runServer`** 会在仓库根 `run/` 生成 `eula.txt`（`eula=false`），改成 `eula=true` 再跑一次；在此之前 `run/eula.txt` 不存在（V18 因此至今未开始）。
+    Loom 只在 `fabric` 子项目里建这两个任务 → **显式写法**：`./gradlew -g D:/Gradle :fabric:runClient` / `:fabric:runServer`。
+    **现状（2026-11-04）**：根 `build.gradle` 注册了转发别名（`['runClient','runServer'].each { tasks.register(it) { dependsOn ':' + 'fabric:' + it } }`），所以 `./gradlew runServer` 现在**可用**；但别名只是把 `:fabric` 的任务加进任务图（本身没有 action，不复制运行配置），出错时看不出属于哪个模块 → **仍推荐显式 `:fabric:runX`**。
+    **首次 `:fabric:runServer`（用别名跑也一样）** 会在仓库根 `run/` 生成 `eula.txt`（`eula=false`），改成 `eula=true` 再跑一次；在此之前 `run/eula.txt` 不存在（V18 因此至今未开始）。
 
 19. **装了 Distant Horizons 时 improved transparency 会被 DH 强制关闭**：`run/options.txt` 里写 `improvedTransparency:true` 也没用 —— DH 每次进世界都会打 `Disabling improved transparency... This is done to fix vanilla chunks (specifically water blocks) not fading into Distant Horizons LODs`（R4 `latest.log:270`；`:267`–`:269` 还依次关了 vanilla clouds / chunk fade）。我们读到的选项恒为 false → 走经典 `afterTerrain` 通道 → `improved transparency is ON …` **永不打印**。**影响**：V13/V14/V15 在 `run/mods` 里有 `DistantHorizons-3.3.4-26.3-fabric-neoforge.jar` 时**不可测**（不是路由没工作）。**验证方法**：把该 jar 临时移出 `run/mods`（源码 0 处 DH 引用、`build.gradle` 的检查只要求 `modmenu-`/`voicechat-`，移走不影响 `build`）→ 重进世界，确认日志里**没有** `Disabling improved transparency` → ping 方块应出现**恰好 1 条** `[PingForIt] improved transparency is ON: …`；测完放回。
 
@@ -171,7 +174,7 @@ export GRADLE_USER_HOME="D:/Gradle"
 | M7 | 渲染重建：`deferred/` 描边/世界渲染按 26.3 管线重写 | ✅ **M7a 方块线框 + M7b 实体描边 + M7c C1 模型光晕完成并实机通过（2026-10-31）**；**M7c C2（entity_block 真实体光晕）✅ 完成并实机通过**（`020d920`/`b3ad60f`/`f88a887`，含契约对齐：渲染模式门控、不短路、RenderShape 前置）；规格 `33`/`35`/`38`/`40`、复审 `34`/`36`/`39` |
 | M8 | 配置/命令/UI + 资源重载迁 v1 | ✅ **完成（2026-11-01）**：**M8a** 完整分页设置界面（6 客户端分类/25 项 + 3 服务端分类/5 字段，含 tab 冻结修复）实机通过；**M8b** 资源 v1 + 自定义贴图（默认路径通过，**自定义包待补测**）；**M8c** toggle notice 第二层 HUD 实机通过。文档：`46`/`47`/`48`/`49` |
 | M9 | 可选集成（ModMenu/VoiceChat/FTB/DH/Sable） | **M9-1 ✅ 实现 + 实机通过（2026-11-03）**：Mod Menu 类从 `deferred/` 迁回 `src/client`（与上游逐字节一致）、`fabric.mod.json` 加 `modmenu` entrypoint、依赖改 `run/mods` 离线 jar；**M9-2 ✅ 实现 + 实机通过（2026-11-03）**：`VoiceChatIntegration`/`VoiceChatWrapper` 与上游逐字节一致、`fabric.mod.json` 加 `voicechat` entrypoint、`build.gradle` 加 `compileJava` 的 `voicechat-` jar 检查；实机证据：R1 起每轮 `Loaded 1 plugin(s)` + `Initialized 1 plugin(s)` + `Registering events for 'pingforit'`（不再是从前的 0）。**M9-3 ⬜**（DH 需 API 接线）；FTB Teams / Sable **平台强制跳过**（`24` #17/#18） |
-| **P0（重构后验收）** | 多模块重构（`f18e31e`）后的实机回归 | 🟡 **进行中**，逐项状态见 `docs/PORTING-PROGRESS.md` §P0：V1/V4/V9/V12/V16/V17 ✅；V6/V7/V11 🟡（需肉眼/留证）；**V13–V15 ⏸（DH 强制关闭 OIT，需先移走 DH）**、**V18 ⏸（未开始：根级命令不可用，改 `:fabric:runServer` + eula）**、V19 ⏸ |
+| **P0（重构后验收）** | 多模块重构（`f18e31e`）后的实机回归 | 🟡 **进行中**，逐项状态见 `docs/PORTING-PROGRESS.md` §P0：V1/V4/V9/V12/V16/V17 ✅；V6/V7/V11 🟡（需肉眼/留证）；**V13–V15 ⏸（DH 强制关闭 OIT，需先移走 DH）**、**V18 ⏸（未开始：需 `:fabric:runServer`（或根级别名）+ eula）**、V19 ⏸ |
 | M10 | 验证与发布：`runServer`、CI、测试基座、LICENSE → MIT + THIRD-PARTY-NOTICES | ⬜ |
 
 **任务顺序（2026-10-31 用户确认）**：**M8 → M7c-C2 → M9 → M10**（M8 ✅；C2 实现完成待实机，实机通过后进 M9；`entity_block` 已改为真实 BER 光晕，线框仅作 fallback）。

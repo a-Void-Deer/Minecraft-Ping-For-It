@@ -64,7 +64,7 @@ neoforge/ README.md                 预留目录，不参与构建
 5. 最终 jar：`fabric` 的 `jar` 任务 `from project(':common').sourceSets.main.output`，
    把 common 的 class + 资源**合并**进同一个 jar（不引入 JiJ，保持单 jar 可发布）。
 6. dev 运行目录：`loom.runs.client/server` 显式 `runDir(rootProject.file('run'))`，
-   `./gradlew :fabric:runClient` 仍落在仓库根 `run/`（mods/logs/saves 不搬家）。**命令必须带 `:fabric:` 前缀**：根项目不是 loom 项目，根级 `runClient`/`runServer` 不存在（见 `AGENTS.md` §7.18）。
+   `./gradlew :fabric:runClient` 仍落在仓库根 `run/`（mods/logs/saves 不搬家）。**推荐带 `:fabric:` 前缀**：根项目不是 loom 项目（根级同名任务在 2026-11-04 已改为**转发别名**，见 `AGENTS.md` §7.18）。
 7. 产物名仍为 `Ping-For-It-0.4.2-pfi-beta1-fabric-26.3.jar`，位置变为 `fabric/build/libs/`。
 
 ## 4. 迁移者的动作
@@ -96,7 +96,7 @@ neoforge/ README.md                 预留目录，不参与构建
 - 仓库里 grep 不到旧路径引用（`src/main/java`、`src/client/java` 作为构建路径出现的地方）。
 - `git status` 干净可提交；`common/`、`fabric/` 里的文件数与迁移前一致（162+4、76+4、资源齐全）。
 - 顶层不出现空目录残留；`deferred/` 仍未进编译。
-- 用户实机：`./gradlew clean build` 产出同名 jar；`./gradlew :fabric:runClient` 起在根 `run/`（**必须带前缀**，根级 `runClient` 不存在）。
+- 用户实机：`./gradlew clean build` 产出同名 jar；`./gradlew :fabric:runClient` 起在根 `run/`（**推荐带前缀**；根级 `runClient` 自 2026-11-04 起是转发别名，也可用）。
 
 ## 6. 与上游 fork 的刻意差异（保真度登记）
 
