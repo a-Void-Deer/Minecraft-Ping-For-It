@@ -1,11 +1,14 @@
 package nx.pingwheel.common.client;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 
 import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
 import nx.pingwheel.common.interaction.state.PingInteractionLogger;
@@ -35,6 +38,11 @@ import org.jetbrains.annotations.Unmodifiable;
  * {@link ClientPingRuntime}.
  */
 public final class ClientPingActionDispatcher {
+	private static final DiagnosticChannel CREATE_TRANSPORT_FAILURE =
+		DiagnosticChannel.interval("client-send-create-transport", Duration.ofSeconds(10));
+	private static final DiagnosticChannel SELECT_TRANSPORT_FAILURE =
+		DiagnosticChannel.interval("client-send-select-transport", Duration.ofSeconds(10));
+
 	/** Local sender outcome, never server acceptance. */
 	public enum DispatchOutcome { CREATE_SENT, OTHER, NOT_READY, THROTTLED, TRANSPORT_FAILED }
 
@@ -128,8 +136,10 @@ public final class ClientPingActionDispatcher {
 				presentation.epoch(), requestId, target, create.pingType().id(), properties));
 		} catch (RuntimeException failed) {
 			createRequestTracker.failedDispatch(attempt);
-			Diagnostics.warn("client-send/create", "transport",
-				() -> "requestId=" + requestId + " kind=" + target.kind() + " pingType=" + create.pingType().id(), failed);
+			Diagnostics.client().atNormal().rateLimited(CREATE_TRANSPORT_FAILURE).failure(Level.WARN,
+				"client-send/create", "transport",
+				() -> "requestId=" + requestId + " kind=" + target.kind() + " pingType=" + create.pingType().id(),
+				failed);
 			return DispatchOutcome.TRANSPORT_FAILED;
 		}
 		logger.debug("dispatch create: requestId={} kind={} pingType={}", requestId, target.kind(), create.pingType().id());
@@ -141,8 +151,10 @@ public final class ClientPingActionDispatcher {
 		if (!createRateLimiter.tryAcquire()) return ClientInventory.DispatchOutcome.THROTTLED;
 		try { packetSender.sendToServer(packet); }
 		catch (RuntimeException failed) {
-			Diagnostics.warn("client-send/select", "transport",
-				() -> "commitId=" + packet.commitId() + " epoch=" + packet.presentationEpoch() + " view=" + packet.view(), failed);
+			Diagnostics.client().atNormal().rateLimited(SELECT_TRANSPORT_FAILURE).failure(Level.WARN,
+				"client-send/select", "transport",
+				() -> "commitId=" + packet.commitId() + " epoch=" + packet.presentationEpoch() + " view=" + packet.view(),
+				failed);
 			return ClientInventory.DispatchOutcome.TRANSPORT_FAILED;
 		}
 		createRequestTracker.onCreateDispatched(CreateRequestTracker.Route.INVENTORY, packet.commitId());

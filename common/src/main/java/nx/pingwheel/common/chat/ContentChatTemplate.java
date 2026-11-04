@@ -1,5 +1,6 @@
 package nx.pingwheel.common.chat;
 
+import java.time.Duration;
 import java.util.HashSet;
 import java.util.Map;
 import java.util.Objects;
@@ -11,6 +12,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 
 import nx.pingwheel.common.domain.PingType;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
@@ -38,6 +40,14 @@ public final class ContentChatTemplate {
 
 	public static final String TEMPLATE_KEY = "pingforit.chat.content.template";
 	public static final String MULTIPLE_TEMPLATE_KEY = "pingforit.chat.content.multiple.template";
+	private static final DiagnosticChannel ENTRY_BUILD_FAILURE =
+		DiagnosticChannel.interval("chat-content-entry-build", Duration.ofSeconds(10));
+	private static final DiagnosticChannel TEMPLATE_BUILD_FAILURE =
+		DiagnosticChannel.interval("chat-content-template-build", Duration.ofSeconds(10));
+	private static final DiagnosticChannel TEMPLATE_PARSE_FAILURE =
+		DiagnosticChannel.interval("chat-content-template-parse", Duration.ofSeconds(10));
+	private static final DiagnosticChannel TEMPLATE_REJECTION =
+		DiagnosticChannel.interval("chat-content-template-reject", Duration.ofSeconds(10));
 	public static final String ENTRY_TEMPLATE_KEY = "pingforit.chat.content.entry";
 	public static final String SEPARATOR_KEY = "pingforit.chat.content.separator";
 	public static final String QUOTE_KEY = "pingforit.chat.content.quote";
@@ -126,7 +136,8 @@ public final class ContentChatTemplate {
 		try {
 			return parse(template, Map.of(TYPE, PresentationPropertyFormatter.pingTypeDisplay(annotationType), CONTENT, content));
 		} catch (RuntimeException unavailable) {
-			Diagnostics.warn("chat/content-entry-build", "template", () -> "entry construction unavailable", unavailable);
+			Diagnostics.client().atDetailed().rateLimited(ENTRY_BUILD_FAILURE).failure(Level.WARN,
+				"chat/content-entry-build", "template", () -> "entry construction unavailable", unavailable);
 			return Optional.empty();
 		}
 	}
@@ -147,7 +158,8 @@ public final class ContentChatTemplate {
 			return parse(template, Map.of(AUTHOR, author, TYPE, PresentationPropertyFormatter.pingTypeDisplay(annotationType),
 				TARGET, target, CONTENT, content));
 		} catch (RuntimeException unavailable) {
-			Diagnostics.warn("chat/content-template-build", "template", () -> "message construction unavailable", unavailable);
+			Diagnostics.client().atDetailed().rateLimited(TEMPLATE_BUILD_FAILURE).failure(Level.WARN,
+				"chat/content-template-build", "template", () -> "message construction unavailable", unavailable);
 			return Optional.empty();
 		}
 	}
@@ -205,13 +217,15 @@ public final class ContentChatTemplate {
 			if (!present.containsAll(tokens.keySet())) return rejectedTemplate("missing-placeholder");
 			return Optional.of(message);
 		} catch (RuntimeException unavailable) {
-			Diagnostics.warn("chat/content-template-parse", "template", () -> "component construction unavailable", unavailable);
+			Diagnostics.client().atDetailed().rateLimited(TEMPLATE_PARSE_FAILURE).failure(Level.WARN,
+				"chat/content-template-parse", "template", () -> "component construction unavailable", unavailable);
 			return Optional.empty();
 		}
 	}
 
 	private static Optional<Component> rejectedTemplate(String reason) {
-		Diagnostics.event(Level.DEBUG, "chat/content-template", "template", reason, () -> "using safe content template");
+		Diagnostics.client().atDebug().rateLimited(TEMPLATE_REJECTION).event(Level.DEBUG,
+			"chat/content-template", reason, () -> "using safe content template");
 		return Optional.empty();
 	}
 

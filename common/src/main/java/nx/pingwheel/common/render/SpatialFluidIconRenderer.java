@@ -1,18 +1,26 @@
 package nx.pingwheel.common.render;
 
+import java.time.Duration;
+
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.block.state.BlockState;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.platform.client.FluidSprites;
+import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 /** Base-fluid sprite route used by vanilla's liquid renderer, with no item or network texture. */
 @NotNullByDefault
 final class SpatialFluidIconRenderer {
+
+	private static final DiagnosticChannel FLUID_ICON_FAILURE =
+		DiagnosticChannel.interval("selector-fluid-icon", Duration.ofSeconds(10));
 
 	private SpatialFluidIconRenderer() {}
 	static void draw(GuiGraphics graphics, @Nullable Fluid fluid, int x, int y, float tint, float alpha) {
@@ -30,7 +38,8 @@ final class SpatialFluidIconRenderer {
 			draw.draw(graphics, sprite, x, y, ((color >> 16) & 255) / 255f * tint,
 				((color >> 8) & 255) / 255f * tint, (color & 255) / 255f * tint, alpha);
 		} catch (RuntimeException | LinkageError | java.util.ServiceConfigurationError unavailable) {
-			nx.pingwheel.common.diagnostics.Diagnostics.warn("selector/fluid-icon", "client",
+			Diagnostics.client().atDetailed().rateLimited(FLUID_ICON_FAILURE).failure(Level.WARN,
+				"selector/fluid-icon", "client",
 				() -> "base fluid sprite unavailable; retaining text display", unavailable);
 		}
 	}

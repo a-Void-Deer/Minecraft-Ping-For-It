@@ -1,13 +1,16 @@
 package nx.pingwheel.common.name;
 
+import java.time.Duration;
 import java.util.Objects;
 
 import net.minecraft.core.HolderLookup;
 import net.minecraft.network.chat.Component;
 
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.util.SafeExceptionReport;
+import org.apache.logging.log4j.Level;
 
 /**
  * Client-side decoding of authoritative target name JSON into display
@@ -23,6 +26,9 @@ import nx.pingwheel.common.util.SafeExceptionReport;
  * {@link Logger#global()} once during initialization.
  */
 public final class ClientTargetNameDecoder {
+
+	private static final DiagnosticChannel DECODE_FAILURE =
+		DiagnosticChannel.interval("target-name-decode", Duration.ofSeconds(10));
 
 	private ClientTargetNameDecoder() {}
 
@@ -61,25 +67,35 @@ public final class ClientTargetNameDecoder {
 		}
 
 		/**
-		 * A logger backed by the mod's global Log4j logger.
+		 * A logger backed by the explicit CLIENT diagnostic side.
 		 *
-			 * <p>General debug messages resolve {@link nx.pingwheel.common.Global#LOGGER}
-			 * only when emitted. Exception reports use the lazy, platform-independent
-			 * rate-limited diagnostic logger instead. This factory initializes neither.
+		 * <p>General detail and exception reports are formatted lazily only at the
+		 * DEBUG disclosure profile; this factory initializes no platform state.
 		 */
 		static Logger global() {
 			return new Logger() {
 				@Override
 				public void debug(String message, Object... args) {
-					nx.pingwheel.common.Global.LOGGER.debug(message, args);
+					Diagnostics.client().atDebug().debug(() -> format(message, args));
 				}
 
 				@Override
 				public void debugException(MarkerId markerId, Throwable failure) {
-					Diagnostics.debug("target-name-decode", ClientTargetNameDecoder.class.getName(),
+					Diagnostics.client().atDebug().rateLimited(DECODE_FAILURE).failure(Level.DEBUG,
+						"target-name-decode", "decode-fallback",
 						() -> "markerId=" + markerId.value(), failure);
 				}
 			};
+		}
+
+		private static String format(String message, Object[] args) {
+			StringBuilder formatted = new StringBuilder(message);
+			for (Object arg : args) {
+				int placeholder = formatted.indexOf("{}");
+				if (placeholder < 0) break;
+				formatted.replace(placeholder, placeholder + 2, String.valueOf(arg));
+			}
+			return formatted.toString();
 		}
 	}
 

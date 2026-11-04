@@ -4,6 +4,8 @@ import net.minecraft.SharedConstants;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.server.Bootstrap;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.testing.DiagnosticLogCapture;
 import org.apache.logging.log4j.Level;
@@ -18,7 +20,7 @@ class ChatDiagnosticsTest {
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 
 	@Test void invalidTemplatesUseControlledEventsAndKeepTheirOwnFallbackFamilies() {
-		try (var logs = new DiagnosticLogCapture()) {
+		try (var logs = new DiagnosticLogCapture(LoggingProfile.DEBUG)) {
 			var type = PingTypeCatalog.builtIn().findById("attention").orElseThrow();
 			Component target = Component.literal("Chest");
 			Component ordinary = PingChatBuilder.build("{unknown}", "Author", type, target);
@@ -34,7 +36,7 @@ class ChatDiagnosticsTest {
 	}
 
 	@Test void throwingLocaleLookupRetainsCauseAndUsesSafeContentFallback() {
-		try (var logs = new DiagnosticLogCapture()) {
+		try (var logs = new DiagnosticLogCapture(LoggingProfile.DEEP)) {
 			var type = PingTypeCatalog.builtIn().findById("attention").orElseThrow();
 			var templates = ContentChatComposer.localized(key -> {
 				throw new IllegalStateException("lookup-sentinel", new RuntimeException("lookup-root-sentinel"));
@@ -47,6 +49,18 @@ class ChatDiagnosticsTest {
 			assertEquals(Level.WARN, event.getLevel());
 			assertNull(event.getThrown());
 			assertTrue(event.getMessage().getFormattedMessage().contains("lookup-root-sentinel"));
+		}
+	}
+
+	@Test void normalProfileRejectsDebugReportsWithoutEvaluatingDetailSuppliers() {
+		try (var logs = new DiagnosticLogCapture()) {
+			Diagnostics.client().atDebug().debug(() -> {
+				throw new AssertionError("debug detail must stay lazy");
+			});
+			Diagnostics.client().atDebug().event(Level.DEBUG, "chat/profile-gate", "debug-only", () -> {
+				throw new AssertionError("debug context must stay lazy");
+			});
+			assertTrue(logs.events().isEmpty());
 		}
 	}
 }

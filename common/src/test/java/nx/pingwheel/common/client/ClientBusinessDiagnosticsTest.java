@@ -10,6 +10,7 @@ import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.client.spatial.PreciseCaptureRefresh;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.interaction.ActiveInteraction;
 import nx.pingwheel.common.interaction.CapturedPingContext;
 import nx.pingwheel.common.interaction.CapturedRay;
@@ -33,6 +34,7 @@ import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import nx.pingwheel.common.testing.DiagnosticLogCapture;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -40,7 +42,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class ClientBusinessDiagnosticsTest {
 
 	@Test void createFailureReportsOriginalCauseAndRollsBackWithoutRefundOrRetry() {
-		try (var logs = new DiagnosticLogCapture()) {
+		try (var logs = new DiagnosticLogCapture(LoggingProfile.DEEP)) {
 			var active = new ActiveInteraction();
 			var tracker = new CreateRequestTracker();
 			tracker.onCreateDispatched(CreateRequestTracker.Route.INVENTORY, 91);
@@ -62,7 +64,7 @@ class ClientBusinessDiagnosticsTest {
 	}
 
 	@Test void selectFailureReportsOriginalCauseWithoutRecordingOrRefunding() {
-		try (var logs = new DiagnosticLogCapture()) {
+		try (var logs = new DiagnosticLogCapture(LoggingProfile.DEEP)) {
 			var presentation = readyPresentation();
 			var tracker = new CreateRequestTracker();
 			tracker.onCreateDispatched(CreateRequestTracker.Route.PRESENTATION, 42);
@@ -75,6 +77,31 @@ class ClientBusinessDiagnosticsTest {
 			assertTrue(tracker.isLatest(CreateRequestTracker.Route.PRESENTATION, 42));
 			assertEquals(ClientInventory.DispatchOutcome.THROTTLED, dispatcher.dispatchInventory(packet));
 			assertReport(logs, "client-send/select", "select-transport-sentinel", "select-root-sentinel");
+		}
+	}
+
+	@Test void normalTransportFailureKeepsSafeSiteAndNeverReadsOriginalAccessors() {
+		try (var logs = new DiagnosticLogCapture()) {
+			var active = new ActiveInteraction();
+			var tracker = new CreateRequestTracker();
+			tracker.onCreateDispatched(CreateRequestTracker.Route.INVENTORY, 73);
+			var dispatcher = new ClientPingActionDispatcher(packet -> {
+				throw new UnreadableTransportFailure();
+			}, (key, color) -> fail("no local error"), PingInteractionLogger.noop(), tracker,
+				new ClientCreateRateLimiter(() -> 0, new ClientRateLimitPolicy(1, 1000)), readyPresentation());
+			var snapshot = TargetSnapshotFactory.location("minecraft:overworld", 1, 2, 3);
+			var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.noop()).resolve(snapshot.target(), snapshot.matchContext());
+			var action = new PingInteractionAction.CreatePing(new CapturedPingContext(active.begin(), resolved), resolved.targetType().defaultPingType());
+			assertEquals(ClientPingActionDispatcher.DispatchOutcome.TRANSPORT_FAILED, dispatcher.dispatchOutcome(action));
+			var event = logs.operation("client-send/create").getFirst();
+			assertEquals(Level.WARN, event.getLevel());
+			assertNull(event.getThrown());
+			String report = event.getMessage().getFormattedMessage();
+			assertTrue(report.contains("site=client-send/create"));
+			assertTrue(report.contains("handling=transport"));
+			assertTrue(report.contains("failure=type-"));
+			assertFalse(report.contains("transport-message-sentinel"));
+			assertFalse(report.contains("transport-root-sentinel"));
 		}
 	}
 
@@ -93,8 +120,9 @@ class ClientBusinessDiagnosticsTest {
 			assertEquals(Level.WARN, event.getLevel());
 			assertNull(event.getThrown());
 			String report = event.getMessage().getFormattedMessage();
-			assertTrue(report.contains("IllegalStateException"));
-			assertTrue(report.contains("dimension=minecraft:overworld"));
+			assertTrue(report.contains("site=capture/resolve"));
+			assertTrue(report.contains("handling=resolver-failure"));
+			assertTrue(report.contains("failure=invalid-state"));
 			assertFalse(report.contains("private-message-sentinel"));
 			assertFalse(report.contains("private-root-sentinel"));
 			assertFalse(report.contains("private:entity"));
@@ -103,7 +131,7 @@ class ClientBusinessDiagnosticsTest {
 	}
 
 	@Test void nativeAndDistantFailuresKeepIncompleteAndFallbackSemantics() {
-		try (var logs = new DiagnosticLogCapture()) {
+		try (var logs = new DiagnosticLogCapture(LoggingProfile.DEEP)) {
 			var token = new ActiveInteraction().begin();
 			Object level = new Object();
 			var inputs = new PreciseCaptureRefresh.Inputs(token, level, CapturedRay.defaultRay(), RaycastPolicy.from(false, false, false), 10, 100);
@@ -144,7 +172,9 @@ class ClientBusinessDiagnosticsTest {
 			assertEquals(Level.WARN, event.getLevel());
 			assertNull(event.getThrown());
 			String report = event.getMessage().getFormattedMessage();
-			assertTrue(report.contains("IllegalStateException"));
+			assertTrue(report.contains("site=capture/finalize-candidates"));
+			assertTrue(report.contains("handling=finalization-failure"));
+			assertTrue(report.contains("failure=invalid-state"));
 			assertFalse(report.contains("finalization-private-message"));
 			assertFalse(report.contains("finalization-private-root"));
 			assertFalse(report.contains("private:block"));
@@ -153,7 +183,7 @@ class ClientBusinessDiagnosticsTest {
 	}
 
 	@Test void localeFailureIsOncePerCachedReloadAndRestoresKeysOnNextReload() {
-		try (var logs = new DiagnosticLogCapture()) {
+		try (var logs = new DiagnosticLogCapture(LoggingProfile.DEEP)) {
 			setDiagnosticThreshold(Level.INFO);
 			int[] attempts = {0};
 			var cache = new SelectedLocaleTranslationKeyCache((code, resources) -> {
@@ -211,5 +241,14 @@ class ClientBusinessDiagnosticsTest {
 		var context = logger.getContext();
 		context.getConfiguration().getLoggerConfig(logger.getName()).setLevel(level);
 		context.updateLoggers();
+	}
+
+	@NotNullByDefault
+	private static final class UnreadableTransportFailure extends IllegalStateException {
+		@Override public String getMessage() { throw new AssertionError("message accessor must stay disabled"); }
+		@Override public StackTraceElement[] getStackTrace() {
+			throw new AssertionError("stack accessor must stay disabled");
+		}
+		@Override public @Nullable Throwable getCause() { throw new AssertionError("cause accessor must stay disabled"); }
 	}
 }

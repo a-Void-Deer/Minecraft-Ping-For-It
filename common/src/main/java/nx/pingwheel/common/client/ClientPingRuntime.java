@@ -1,5 +1,6 @@
 package nx.pingwheel.common.client;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
@@ -41,6 +42,8 @@ import nx.pingwheel.common.chat.PendingContentChatController;
 import nx.pingwheel.common.presentation.PresentationReceiptContent;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.PingType;
@@ -112,7 +115,7 @@ import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import nx.pingwheel.common.util.DirectionalSoundInstance;
 import nx.pingwheel.common.util.InputUtils;
-import nx.pingwheel.common.util.RateLimitedDiagnostics;
+import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.math.RaycastPolicy;
 
@@ -168,6 +171,24 @@ public final class ClientPingRuntime {
 	 * ids, level references, or coordinates.
 	 */
 	private static final String DISTANT_HIT_ABANDONED_LEVEL_CHANGE = "distant hit abandoned: level unavailable or changed";
+	private static final DiagnosticChannel CONTENT_DISPLAY_FAILURE =
+		DiagnosticChannel.interval("chat-content-display", Duration.ofSeconds(10));
+	private static final DiagnosticChannel SELECTOR_CONTENT_UPDATE_FAILURE =
+		DiagnosticChannel.interval("selector-content-update", Duration.ofSeconds(10));
+	private static final DiagnosticChannel SELECTOR_NAME_DECODE_FAILURE =
+		DiagnosticChannel.interval("selector-content-name-decode", Duration.ofSeconds(10));
+	private static final DiagnosticChannel SELECTOR_CONTENT_INIT_FAILURE =
+		DiagnosticChannel.interval("selector-content-init", Duration.ofSeconds(10));
+	private static final DiagnosticChannel SELECTOR_CONTENT_READ_FAILURE =
+		DiagnosticChannel.interval("selector-content-read", Duration.ofSeconds(10));
+	private static final DiagnosticChannel SELECTOR_CONTENT_CLOSE_FAILURE =
+		DiagnosticChannel.interval("selector-content-close", Duration.ofSeconds(10));
+	private static final DiagnosticChannel INVENTORY_ROW_DISPLAY_FAILURE =
+		DiagnosticChannel.interval("selector-inventory-row-display", Duration.ofSeconds(10));
+	private static final DiagnosticChannel CHAT_TEMPLATE_LOOKUP_FAILURE =
+		DiagnosticChannel.interval("chat-template-lookup", Duration.ofSeconds(10));
+	private static final DiagnosticChannel MARKER_DISPLAY_FAILURE =
+		DiagnosticChannel.interval("chat-marker-display", Duration.ofSeconds(10));
 
 	private final ClientMarkerStore markerStore;
 	private final ActiveInteraction activeInteraction;
@@ -209,8 +230,8 @@ public final class ClientPingRuntime {
 			if (game == null || game.level == null || game.player == null) return;
 			try { game.player.displayClientMessage(message, false); }
 			catch (RuntimeException unavailable) {
-				nx.pingwheel.common.diagnostics.Diagnostics.warn("chat/content-display", "client",
-					() -> "accepted content receipt display failed", unavailable);
+				Diagnostics.client().atNormal().rateLimited(CONTENT_DISPLAY_FAILURE).failure(Level.WARN,
+					"chat/content-display", "client", () -> "accepted content receipt display failed", unavailable);
 			}
 		}
 	}
@@ -451,7 +472,7 @@ public final class ClientPingRuntime {
 		CreateRequestTracker createRequestTracker = new CreateRequestTracker();
 		ClientCreateRateLimiter createRateLimiter = new ClientCreateRateLimiter(timeSource, rateLimitPolicy);
 		PingCaptureCoordinator coordinator = new PingCaptureCoordinator(
-			DefaultTargetResolver.builtIn(TargetResolutionLogger.global()),
+			DefaultTargetResolver.builtIn(TargetResolutionLogger.global(Diagnostics.client())),
 			activeInteraction,
 			PingCaptureLogger.global());
 		PingInteractionStateMachine machine = new PingInteractionStateMachine(
@@ -922,7 +943,8 @@ public final class ClientPingRuntime {
 		if (selectorContent != null && machine.phase() != PingInteractionPhase.IDLE) {
 			try { selectorContent.tick(); }
 			catch (RuntimeException | LinkageError unavailable) {
-				RateLimitedDiagnostics.warn("selector-content-update", NativeSelectorContent.class.getName(),
+				Diagnostics.client().atDetailed().rateLimited(SELECTOR_CONTENT_UPDATE_FAILURE).failure(Level.WARN,
+					"selector-content-update", "client",
 					() -> "selector content update unavailable capture=" + activeInteraction.currentContext().orElse(null)
 						+ " phase=" + machine.phase() + " tick=" + localTick, unavailable);
 			}
@@ -996,14 +1018,16 @@ public final class ClientPingRuntime {
 				if (Game == null || Game.level == null) return null;
 				try { return Component.Serializer.fromJson(json, Game.level.registryAccess()); }
 				catch (RuntimeException | LinkageError invalid) {
-					RateLimitedDiagnostics.warn("selector-content-name-decode", NativeSelectorContent.class.getName(),
+					Diagnostics.client().atDetailed().rateLimited(SELECTOR_NAME_DECODE_FAILURE).failure(Level.WARN,
+						"selector-content-name-decode", "client",
 						() -> "selector target name unavailable capture=" + capture + " nameJson=" + json, invalid);
 					return null;
 				}
 			});
 		try { selectorContent.begin(interactionAccess.lifecycle().level()); }
 		catch (RuntimeException | LinkageError unavailable) {
-			RateLimitedDiagnostics.warn("selector-content-init", NativeSelectorContent.class.getName(),
+			Diagnostics.client().atDetailed().rateLimited(SELECTOR_CONTENT_INIT_FAILURE).failure(Level.WARN,
+				"selector-content-init", "client",
 				() -> "selector preview unavailable capture=" + capture + " tick=" + localTick, unavailable);
 		}
 	}
@@ -1080,7 +1104,8 @@ public final class ClientPingRuntime {
 			(target, bound) -> {
 				try { return content == null ? null : content.read(target, bound); }
 				catch (RuntimeException | LinkageError unavailable) {
-					RateLimitedDiagnostics.warn("selector-content-read", NativeSelectorContent.class.getName(),
+					Diagnostics.client().atDetailed().rateLimited(SELECTOR_CONTENT_READ_FAILURE).failure(Level.WARN,
+						"selector-content-read", "client",
 						() -> "selector content projection unavailable target=" + target + " fence=" + bound
 							+ " capture=" + context, unavailable);
 					return null;
@@ -1151,7 +1176,8 @@ public final class ClientPingRuntime {
 		if (hard) selectorPaint.reset();
 		try { if (old != null) old.close(); }
 		catch (RuntimeException | LinkageError unavailable) {
-			RateLimitedDiagnostics.warn("selector-content-close", NativeSelectorContent.class.getName(),
+			Diagnostics.client().atDetailed().rateLimited(SELECTOR_CONTENT_CLOSE_FAILURE).failure(Level.WARN,
+				"selector-content-close", "client",
 				() -> "selector preview close unavailable capture=" + closingCapture + " hard=" + hard
 					+ " tick=" + localTick, unavailable);
 		}
@@ -1476,7 +1502,8 @@ public final class ClientPingRuntime {
 				var display = nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay.resolve(row.itemId(), row.label(), row.displayJson());
 				return new nx.pingwheel.common.render.SpatialInventoryView.RowDisplay(display.name(), display.stack());
 			} catch (RuntimeException | LinkageError unavailable) {
-				nx.pingwheel.common.diagnostics.Diagnostics.warn("selector/inventory-row-display", "client",
+				Diagnostics.client().atDetailed().rateLimited(INVENTORY_ROW_DISPLAY_FAILURE).failure(Level.WARN,
+					"selector/inventory-row-display", "client",
 					() -> "itemId=" + row.itemId() + " label=" + row.label(), unavailable);
 				return new nx.pingwheel.common.render.SpatialInventoryView.RowDisplay(
 					row.resourceKind() == nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID
@@ -1581,7 +1608,7 @@ public final class ClientPingRuntime {
 				level.dimension().location().toString(), point.x, point.y, point.z))
 				.orElseGet(() -> MinecraftTargetSnapshotFactory.fromCandidateSelection(level, selection)));
 		} else reference = MinecraftTargetSnapshotFactory.fromCandidateSelection(level, selection);
-		var resolver = DefaultTargetResolver.builtIn(TargetResolutionLogger.global());
+		var resolver = DefaultTargetResolver.builtIn(TargetResolutionLogger.global(Diagnostics.client()));
 		var resolved = resolver.resolve(reference.target(), reference.matchContext());
 		var allocated = trace.orElseThrow().candidates().finish(reference, resolved, resolver);
 		var nativeSlots = new java.util.EnumMap<PreciseTargetType, PreciseCaptureRefresh.Outcome>(PreciseTargetType.class);
@@ -1611,7 +1638,7 @@ public final class ClientPingRuntime {
 					Vec3 point = distant.map(HitResult::getLocation).orElseGet(() -> vector(inputs.ray().origin())
 						.add(vector(inputs.ray().direction()).scale(inputs.nativeDistance())));
 					var snapshot = TargetSnapshotFactory.location(level.dimension().location().toString(), point.x, point.y, point.z);
-					var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.global()).resolve(snapshot.target(), snapshot.matchContext());
+					var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.global(Diagnostics.client())).resolve(snapshot.target(), snapshot.matchContext());
 					WorldVector worldPoint = new WorldVector(point.x, point.y, point.z);
 					completion.accept(PreciseCaptureRefresh.Outcome.available(new Candidate(0, resolved, worldPoint,
 						FrozenCandidateAcquisition.distance(inputs.ray().origin(), worldPoint), Optional.empty(), Optional.empty(),
@@ -2204,8 +2231,8 @@ public final class ClientPingRuntime {
 						key));
 				template = language.getOrDefault(templateKey);
 			} catch (RuntimeException unavailable) {
-				nx.pingwheel.common.diagnostics.Diagnostics.warn("chat/template-lookup", "client",
-					() -> "pingType=" + pingTypeId, unavailable);
+				Diagnostics.client().atDetailed().rateLimited(CHAT_TEMPLATE_LOOKUP_FAILURE).failure(Level.WARN,
+					"chat/template-lookup", "client", () -> "pingType=" + pingTypeId, unavailable);
 				template = null;
 			}
 
@@ -2213,8 +2240,8 @@ public final class ClientPingRuntime {
 				template, ownerName, pingType.get(), resolvedTargetName);
 			game.player.displayClientMessage(message, false);
 		} catch (RuntimeException exception) {
-			nx.pingwheel.common.diagnostics.Diagnostics.warn("chat/marker-display", "client",
-				() -> "markerId=" + snapshot.id().value(), exception);
+			Diagnostics.client().atNormal().rateLimited(MARKER_DISPLAY_FAILURE).failure(Level.WARN,
+				"chat/marker-display", "client", () -> "markerId=" + snapshot.id().value(), exception);
 		}
 	}
 

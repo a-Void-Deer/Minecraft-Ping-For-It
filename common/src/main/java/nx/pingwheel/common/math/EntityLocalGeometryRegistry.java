@@ -134,7 +134,7 @@ public final class EntityLocalGeometryRegistry {
 	private void warnOnce(String key, String message, @Nullable Throwable failure) {
 		boolean enabled;
 		try {
-			enabled = Diagnostics.logger().isEnabled(Level.WARN);
+			enabled = Diagnostics.client().atNormal().isEnabled(Level.WARN);
 		} catch (RuntimeException | LinkageError ignored) {
 			enabled = false;
 		}
@@ -143,9 +143,11 @@ public final class EntityLocalGeometryRegistry {
 		}
 		if (warnedDiagnosticKeys.add(key)) {
 			if (failure == null) {
-				Diagnostics.domainApprovedEvent(Level.WARN, "entity-local-geometry", key, "contract-or-registration", () -> message);
+				Diagnostics.client().atNormal().event(Level.WARN, "entity-local-geometry", "source-unavailable",
+					() -> message);
 			} else {
-				Diagnostics.domainApprovedFailure(Level.WARN, "entity-local-geometry", key, () -> message, failure);
+				Diagnostics.client().atNormal().failure(Level.WARN, "entity-local-geometry", "source-failure",
+					() -> message, failure);
 			}
 		}
 	}
