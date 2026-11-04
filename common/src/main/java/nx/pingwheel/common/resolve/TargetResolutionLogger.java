@@ -42,12 +42,6 @@ public interface TargetResolutionLogger {
 		return (message, args) -> diagnostics.atDebug().site("target-resolution").debug(() -> format(message, args));
 	}
 
-	/** @deprecated Callers must select CLIENT or SERVER explicitly. */
-	@Deprecated
-	static TargetResolutionLogger global() {
-		return noop();
-	}
-
 	private static String format(String message, @Nullable Object @Unmodifiable [] args) {
 		StringBuilder formatted = new StringBuilder(message);
 		for (@Nullable Object arg : args) {

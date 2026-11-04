@@ -2,7 +2,6 @@ package nx.pingwheel.common.integration;
 
 import nx.pingwheel.common.diagnostics.DiagnosticLogger;
 import org.apache.logging.log4j.Level;
-import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.NotNullByDefault;
 import java.util.Objects;
 
@@ -14,7 +13,7 @@ import java.util.Objects;
 @NotNullByDefault
 public final class IntegrationLinkGuard {
 	private final String integration;
-	private final @Nullable DiagnosticLogger diagnostics;
+	private final DiagnosticLogger diagnostics;
 	private volatile boolean disabled;
 	private boolean warned;
 
@@ -23,21 +22,14 @@ public final class IntegrationLinkGuard {
 		this.diagnostics = Objects.requireNonNull(diagnostics, "diagnostics");
 	}
 
-	/** @deprecated Bind the logical side explicitly. This compatibility guard is silent. */
-	@Deprecated
-	public IntegrationLinkGuard(String integration) {
-		this.integration = Objects.requireNonNull(integration, "integration");
-		this.diagnostics = null;
-	}
-
 	public boolean disabled() {
 		return disabled;
 	}
 
 	public void disable(LinkageError error) {
 		disabled = true;
-		@Nullable DiagnosticLogger logger = diagnostics;
-		if (logger == null || !logger.atNormal().isEnabled(Level.WARN)) return;
+		DiagnosticLogger logger = diagnostics;
+		if (!logger.atNormal().isEnabled(Level.WARN)) return;
 		synchronized (this) {
 			if (warned) return;
 			warned = true;
