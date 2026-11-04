@@ -25,6 +25,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BeehiveBlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.Fluids;
 import net.minecraftforge.common.util.LazyOptional;
@@ -51,8 +52,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Production route/gates with recording native metadata and borrowed-value seams. Not a Forge launch:
- * the task's vanilla-first Minecraft cannot run Forge FluidStack's Holder.Reference.get extension.
+ * the ordinary task's vanilla-first Minecraft cannot run Forge FluidStack's Holder.Reference.get extension.
  * The real content dispatch is separately exercised for throwing/null getters without booting registries.
+ * The native source task borrows the same recording route with constructor-free block-entity setup.
  */
 @NotNullByDefault
 class PlatformFluidServiceTest {
@@ -732,7 +734,7 @@ class PlatformFluidServiceTest {
 		private final List<String> calls = new ArrayList<>();
 		private final CompoundTag tag = new CompoundTag();
 		private BlockState state = Blocks.BEEHIVE.defaultBlockState();
-		private BlockEntity entity = new BeehiveBlockEntity(BlockPos.ZERO, state);
+		private BlockEntity entity;
 		private IFluidHandler handler = newHandler();
 		private LazyOptional<IFluidHandler> capability = LazyOptional.of(() -> { nativeCall("resolve"); return handler; });
 		private int[] capacities = {1000, 2000};
@@ -743,8 +745,16 @@ class PlatformFluidServiceTest {
 		private Consumer<String> afterNative = operation -> {};
 		private Runnable afterReadGate = () -> {};
 
-		private Fixture(Direction face) {
+		private Fixture(Direction face) { this(face, false); }
+		/** Native source integration supplies real registries, but does not launch FML capability events. */
+		private Fixture(Direction face, boolean nativeRegistries) {
 			this.face = face;
+			if (nativeRegistries) {
+				entity = allocate(BeehiveBlockEntity.class);
+				field(BlockEntity.class, "type", entity, BlockEntityType.BEEHIVE);
+				field(BlockEntity.class, "worldPosition", entity, BlockPos.ZERO);
+				field(BlockEntity.class, "blockState", entity, state);
+			} else entity = new BeehiveBlockEntity(BlockPos.ZERO, state);
 			field(ServerLevel.class, "server", level, server); serverThread(Thread.currentThread());
 			context = new IPlatformFluidService.Context(level, BlockPos.ZERO, face, new UUID(1, 2), (position, operation) -> {
 				operation.allowance().debit(MEMBER); memberChecks++;

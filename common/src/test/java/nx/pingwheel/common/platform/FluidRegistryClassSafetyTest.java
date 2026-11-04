@@ -8,6 +8,7 @@ import java.util.Collections;
 import java.util.Enumeration;
 import net.minecraft.world.level.material.Fluid;
 import net.minecraft.world.level.material.Fluids;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -18,11 +19,32 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Discovery executes with client classes forbidden; hard failures retain their native identity. */
 @NotNullByDefault
 class FluidRegistryClassSafetyTest {
-	@BeforeAll static void bootstrap() {
-		try { Fluid.class.getMethod("getFluidType"); }
+	private static boolean previousBootstrap;
+	private static boolean forgeBootstrapOwned;
+	@BeforeAll static void bootstrap() throws ReflectiveOperationException {
+		try {
+			if (!Fluid.class.getMethod("getFluidType").getReturnType().getName().equals("net.minecraftforge.fluids.FluidType")) return;
+		}
 		catch (NoSuchMethodException vanilla) {
 			net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
+			return;
 		}
+		net.minecraft.SharedConstants.tryDetectVersion();
+		// Match the native Forge fixtures: install GameData's real registries before
+		// touching Fluids, without invoking unrelated item-component/FML mod events.
+		var field = net.minecraft.server.Bootstrap.class.getDeclaredField("isBootstrapped"); field.setAccessible(true);
+		if (!forgeBootstrapOwned) { previousBootstrap = field.getBoolean(null); forgeBootstrapOwned = true; }
+		field.setBoolean(null, true);
+		assertNotNull(Class.forName("net.minecraftforge.registries.ForgeRegistries", true, Fluid.class.getClassLoader()).getField("FLUIDS").get(null));
+		assertSame(Class.forName("net.minecraftforge.registries.NamespacedDefaultedWrapper", false, Fluid.class.getClassLoader()),
+			net.minecraft.core.registries.BuiltInRegistries.FLUID.getClass());
+		assertEquals(net.minecraft.resources.ResourceLocation.withDefaultNamespace("water"),
+			net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(Fluids.WATER));
+	}
+	@AfterAll static void restoreBootstrap() throws ReflectiveOperationException {
+		if (!forgeBootstrapOwned) return;
+		var field = net.minecraft.server.Bootstrap.class.getDeclaredField("isBootstrapped"); field.setAccessible(true);
+		field.setBoolean(null, previousBootstrap); forgeBootstrapOwned = false;
 	}
 	@TempDir Path directory;
 	@Test void missingMalformedAndBrokenProvidersFailClosedWithoutClientLinkage() throws Exception {

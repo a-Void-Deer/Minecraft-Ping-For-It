@@ -38,6 +38,7 @@ import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
 import nx.pingwheel.common.presentation.source.CaptureResult;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -47,10 +48,35 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * Executed on each loader's test classpath with its real adapter and native recording seam.
  * Reflection keeps loader APIs out of common; it never substitutes witness/validation answers.
  * The common-only task skips these cases; loader runs select pingforit.test.fluidLoader explicitly.
+ * Forge requires its actual patched artifact first, just like the native registry tests.
  */
 @NotNullByDefault
 class InventoryFluidLoaderIntegrationTest {
-	@BeforeAll static void bootstrap() { net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap(); }
+	private static boolean previousBootstrap;
+	private static boolean forgeBootstrapOwned;
+	@BeforeAll static void bootstrap() throws ReflectiveOperationException {
+		net.minecraft.SharedConstants.tryDetectVersion();
+		if (!"forge".equals(System.getProperty("pingforit.test.fluidLoader"))) {
+			net.minecraft.server.Bootstrap.bootStrap(); return;
+		}
+		assertEquals("net.minecraftforge.fluids.FluidType", net.minecraft.world.level.material.Fluid.class
+			.getMethod("getFluidType").getReturnType().getName(), "Forge source integration requires patched-first Minecraft");
+		// Let actual GameData install its registries without unrelated FML item events.
+		var field = net.minecraft.server.Bootstrap.class.getDeclaredField("isBootstrapped"); field.setAccessible(true);
+		if (!forgeBootstrapOwned) { previousBootstrap = field.getBoolean(null); forgeBootstrapOwned = true; }
+		field.setBoolean(null, true);
+		var nativeLoader = net.minecraft.world.level.material.Fluid.class.getClassLoader();
+		assertNotNull(Class.forName("net.minecraftforge.registries.ForgeRegistries", true, nativeLoader).getField("FLUIDS").get(null));
+		assertSame(Class.forName("net.minecraftforge.registries.NamespacedDefaultedWrapper", false, nativeLoader),
+			net.minecraft.core.registries.BuiltInRegistries.FLUID.getClass());
+		assertEquals(net.minecraft.resources.ResourceLocation.withDefaultNamespace("water"),
+			net.minecraft.core.registries.BuiltInRegistries.FLUID.getKey(net.minecraft.world.level.material.Fluids.WATER));
+	}
+	@AfterAll static void restoreBootstrap() throws ReflectiveOperationException {
+		if (!forgeBootstrapOwned) return;
+		var field = net.minecraft.server.Bootstrap.class.getDeclaredField("isBootstrapped"); field.setAccessible(true);
+		field.setBoolean(null, previousBootstrap); forgeBootstrapOwned = false;
+	}
 
 	@Test void originalCommonCutRejectsReacquiredNativeRouteAndFabricAddressOrderWithIdenticalDetachedLayout() {
 		String loader = loader();
@@ -68,7 +94,9 @@ class InventoryFluidLoaderIntegrationTest {
 				assertEquals(Optional.of(false), f.runtime.probe(consumer)); assertFalse(consumer.scopeTransition());
 				consumer.restart(); f.runtime.advance(2, f.settings);
 				var fresh = f.runtime.step(consumer).orElseThrow();
+				assertEquals(CaptureResult.Availability.READABLE, fresh.result().availability());
 				assertEquals(CaptureResult.Completeness.COMPLETE, fresh.result().completeness());
+				assertEquals(2, fresh.slots().size());
 				assertEquals(layout, field(Objects.requireNonNull(f.source), "layout"), "identity change is intentionally invisible to the DTO");
 				assertEquals(InventorySharedRead.Check.UNAVAILABLE, f.check(old), "new Source ownership cannot authorize old history");
 				assertTrue(f.probes > 3, "the test actually crossed operation-local native acquisitions");
@@ -79,7 +107,9 @@ class InventoryFluidLoaderIntegrationTest {
 
 	@Test void deterministicallyClearedOriginalNativeProofRetiresAndFreshRuntimeScanRecovers() {
 		try (var f = new Fixture(loader())) {
-			var consumer = f.attach(); f.runtime.step(consumer, 1).orElseThrow();
+			var consumer = f.attach(); var prefix = f.runtime.step(consumer, 1).orElseThrow();
+			assertEquals(CaptureResult.Availability.READABLE, prefix.result().availability());
+			assertEquals(CaptureResult.Completeness.CONTINUE, prefix.result().completeness());
 			var witness = (FluidAddressWitness) field(Objects.requireNonNull(f.source), "addressWitness");
 			try { declared(FluidAddressWitness.class, "clearForTesting", int.class).invoke(witness, 0); }
 			catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
@@ -123,7 +153,7 @@ class InventoryFluidLoaderIntegrationTest {
 				service = neoService();
 			} else {
 				nativeFixture = loader.equals("fabric") ? construct(type(tests.getName() + "$Fixture"), true, Direction.WEST)
-					: construct(type(tests.getName() + "$Fixture"), Direction.WEST);
+					: construct(type(tests.getName() + "$Fixture"), Direction.WEST, true);
 				level = (ServerLevel) field(nativeFixture, "level"); entity = (BlockEntity) field(nativeFixture, "entity");
 				state = (BlockState) field(nativeFixture, "state"); service = (IPlatformFluidService) field(nativeFixture, "service");
 			}
