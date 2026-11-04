@@ -39,3 +39,13 @@ attachIntegrationApiJarCheck('compileJava', 'DistantHorizonsApi-',
 tasks.matching { it.name == 'runClient' || it.name == 'runServer' }.configureEach {
 	enabled = false
 }
+// B6 离线测试基座（common/src/test/java）：用例由 tools/test-check.sh 用 JDK 25 直接
+// javac/java 跑（nx.pingwheel.common.testing.TestRunner），**不经过 Gradle**。
+// 本机没有网络、Gradle 缓存里没有任何 JUnit jar，所以 `test` 任务既拿不到测试框架、
+// 也发现不到用例（Gradle 9 默认 failOnNoDiscoveredTests=true）——一旦把它交给
+// `check`，用户的 `gradlew clean build` 就会挂。这里只关掉 test 任务：
+// 不新增测试依赖、不往 build/check 里加任何任务，纯粹保住离线构建。
+// 等能联网（或提供本地 JUnit jar）后，删掉这段再按 JUnit 正式接线。
+tasks.matching { it.name == 'test' }.configureEach {
+	enabled = false
+}
