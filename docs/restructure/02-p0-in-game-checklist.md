@@ -23,6 +23,7 @@
 | V9 VoiceChat | ✅ | `latest.log:95` `[voicechat/PluginManager] Loaded 1 plugin(s)`、`:97` `Initialized 1 plugin(s)`、`:98` `Registering events for 'pingforit'` |
 | V12 默认路径 | 🟡 | `latest.log` 里 `improved transparency is ON` **0 条**（默认不该出现，符合预期）；**描边是否可见仍要眼看** |
 | V16 闭环 | ✅ | `send ping` **22** / `marker created` **22**（1:1；20:59:39–21:00:26） |
+| **V18 专用服务器（2026-11-04 16:52）** | ✅ | 根级 `runServer` 别名 → `Done (2.998s)!`；**47 mods**、`[PingForIt] Init` + `ServerConfig`、voicechat 服务端 `Loaded 1 plugin(s)`；**0 ERROR / 0 class error / 0 mixin fail**（WARN 3 条全外部） |
 | V17 错误面 | ✅ | ERROR **3** 条全是账户/Realms 噪声（`latest.log:117`/`:173`/`:202`），**0 条模组相关**（`grep ERROR` 会多命中 `:127` 的 `Caused by … HTTP_ERROR` 续行） |
 
 ## 1. 准备（跑之前 2 分钟）
@@ -125,8 +126,8 @@
 
 > 组 1–7 验的都是 **dev 形态**（classpath 上有 `common` jar 与 `fabric/build/resources/main`）。这两条验的是**别人装上去会不会坏** —— 重构改了模块边界，这两条正是重构最容易漏的地方。
 
-- [ ] **V18** 专用服务端冒烟：**`./gradlew -g D:/Gradle :fabric:runServer`**（推荐），或别名 `./gradlew -g D:/Gradle runServer`（2026-11-04 起可用；若报 `Cannot locate tasks that match ':runServer'…` 说明别名没生效，改用显式写法）。
-  - **首次运行**会在仓库根 `run/` 生成 `eula.txt`（`eula=false`）→ 改成 `eula=true` → **再跑一次**；在此之前 `run/eula.txt` 不存在（这就是 V18 一直「未开始」的原因）。
+- [x] **V18** ✅ **已通过（2026-11-04 16:52）**：`Done (2.998s)!` / 47 mods / 0 ERROR / voicechat `Loaded 1 plugin(s)`（服务端）—— 详细证据见 `docs/PORTING-PROGRESS.md` §P0.3 与 `AGENTS.md` §6。命令回顾：`./gradlew -g D:/Gradle :fabric:runServer`（推荐）或别名 `./gradlew -g D:/Gradle runServer`。
+  - **首次运行**会在仓库根 `run/` 生成 `eula.txt`（`eula=false`）→ 改成 `eula=true` → **再跑一次**。⚠ **必须用 ASCII 写**：PowerShell 的 `>` / `Out-File` 会写成 UTF-16 LE + BOM，服务端读不到 → 用 `"eula=true" | Set-Content -Encoding ascii run\eula.txt`（cmd：`echo eula=true>run\eula.txt`）；`Format-Hex` 应看到 `65 75 6C 61 3D 74 72 75 65 0D 0A`。详见 `AGENTS.md` §7.20。
   - **期望**：启动到 **`Done (…s)! For help, type "help"`**；**无** `NoClassDefFoundError`；**无**客户端类加载错误（例如 `Attempted to load class net/minecraft/client/…`）；控制台里能看到 `[PingForIt] Loaded config type=ServerConfig`。
   - **期望**：输入 `stop` 后正常关停（`Stopping server` → `ThreadedAnvilChunkStorage … All dimensions are saved` 一类收尾行，进程退出码 0）。
   - **失败要贴**：从 `Loading Minecraft …` 到失败点的全部控制台输出（`runServer` 不写 `latest.log`，请直接复制终端）+ 完整异常栈。

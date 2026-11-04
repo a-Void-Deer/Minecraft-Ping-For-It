@@ -793,7 +793,7 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 | **V13 / V14 / V15** | OIT 下描边 / 颜色比对 / 关掉后正常 | ⏸ **受阻**：装了 DH 时 OIT 被 DH 强制关闭，测不出来（见 P0.2-2） |
 | **V16** | `send ping` : `marker created` 1:1 | ✅ **32 : 32**（R4，0 reject/deny） |
 | **V17** | 0 条本模组 ERROR | ✅（R1–R4 每轮 3 条 ERROR 全为账户/Realms 噪声） |
-| **V18** | `:fabric:runServer` 冒烟 | ⏸ **未开始**：根级 `runServer` 不可用（见 P0.2-1），`run/eula.txt` 尚未生成 |
+| **V18** | `:fabric:runServer` 冒烟 | ✅ **通过（2026-11-04 16:52）**：根级 `runServer` 别名 → `Done (2.998s)!` → `stop` 正常；**47 mods**、0 ERROR、0 class error、0 mixin fail（见 **P0.3**） |
 | **V19** | 发布 jar 装进干净 mods | ⏸ 未做 |
 
 ### P0.2 当前遇到的问题
@@ -805,7 +805,7 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 | 现象 | `./gradlew runServer`（根级）报 `Cannot locate tasks that match ':runServer' as task 'runServer' not found in root project 'Ping-For-It'.`（2026-11-03 22:4x 用户实测） |
 | 根因 | 重构后根 `build.gradle` 只 `apply false` 引 loom，**根项目不是 loom 项目**；`runClient`/`runServer` 是 Loom 给 `fabric` 子项目建的 |
 | 处理 | 推荐命令带前缀：`./gradlew -g D:/Gradle :fabric:runClient` / `:fabric:runServer`；**2026-11-04 已在根 `build.gradle` 注册 `runClient`/`runServer` 转发别名**（`dependsOn ':fabric:runX'`，无 action），根级写法也可用（仍推荐显式）；首次 `:fabric:runServer` 会在仓库根 `run/` 生成 `eula.txt`（`eula=false`），改成 `eula=true` 再跑一次 |
-| 状态 | ✅ 文档已改（`AGENTS.md` §3/§4/§7.18、`README.md`、`02-p0-in-game-checklist.md` V4/V18）；**根级别名已于 2026-11-04 加上** → `./gradlew runServer` 现在可用；**V18 仍待实机** |
+| 状态 | ✅ 文档已改（`AGENTS.md` §3/§4/§7.18、`README.md`、`02-p0-in-game-checklist.md` V4/V18）；**根级别名已于 2026-11-04 加上** → `./gradlew runServer` 现在可用；**V18 已于 2026-11-04 16:52 用它跑通**（见 §P0.3） |
 
 **2）装了 DH 时 OIT 不可测**
 
@@ -825,9 +825,24 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 | 处理 | 2号 正在把该日志**降为 DEBUG 并改文案**（只动日志级别与措辞，不动渲染行为） |
 | 状态 | ✅ 定性完成（`docs/reviews/61-model-hook-warn-audit.md`：**误报（诊断缺陷），不是重构回归，也不是 DH/OIT 导致**）；代码改动待 2号 |
 
-### P0.3 结论
+### P0.3 V18 · 专用服务器冒烟（2026-11-04 16:52）✅
 
-**重组后的功能面已经稳了**（0 条本模组 ERROR、0 Mixin 失败、VoiceChat 插件加载、闭环 32:32、资源包索引正常），**P0 还差 V13–V15、V18、V19 三项收尾**：V13–V15 先移走 DH 才能测；V18 要按 `:fabric:runServer` + `eula=true` 来；V19 是发布 jar 的安装场景。
+> 命令：`gradlew.bat -g D:\Gradle runServer`（**根级转发别名生效**，Gradle 实际执行 `:fabric:runServer`）。日志：`run/logs/latest.log`（16:52:02–16:52:51，201 行）。
+
+| 观察点 | 结果 |
+|---|---|
+| 服务端启动 | `:102` `Starting minecraft server version 26.3` → `:107` `Preparing level "world"` → `:157` **`Done (2.998s)! For help, type "help"`** |
+| 本模组服务端路径 | `:61` `[PingForIt] Init` → `:62` `Loaded config type=ServerConfig` —— **`common` 源集在专用服务器上跑通，无客户端类误引** |
+| VoiceChat 服务端侧 | `:65-68` `Loaded 1 plugin(s)` / `Initialized 1 plugin(s)`；`:69` `Registering events for 'pingforit'` |
+| 环境 | **47 mods**（含 `pingforit 0.4.2-pfi-beta1`、`distanthorizons 3.3.4`、`voicechat 2.6.27+26.3` 及嵌套 `voicechat_api`） |
+| 错误面 | **0 条 ERROR/FATAL**、**0 条** `NoClassDefFoundError`/`ClassNotFoundException`、**0 条** `Mixin apply failed`；WARN 仅 3 条且全外部（PerfOS 注册表、voicechat debug mode、DH 的 G1 GC 提示） |
+| 关停 | 用户 `stop` → `:170` `Stopping server` → 16:52:51 DH 关闭数据库后正常退出 |
+
+**前置修复（已登记 `AGENTS.md` §7.20）**：`run/eula.txt` 曾被 PowerShell 写成 **UTF-16 LE + BOM**（`ÿþe\0u\0l\0a\0…`），服务端读不到 `eula=true`；改用 `"eula=true" | Set-Content -Encoding ascii run\eula.txt` 后通过。**这是环境/工具链坑，不是模组问题。**
+
+### P0.4 结论
+
+**重组后的功能面已经稳了**（0 条本模组 ERROR、0 Mixin 失败、VoiceChat 插件加载、闭环 32:32、资源包索引正常、**专用服务器冒烟通过**），**P0 还差 V13–V15、V19 两项收尾**：V13–V15 先移走 DH 才能测（见 P0.2-2）；V19 是发布 jar 的安装场景。
 ## 剩余工作总表（2026-11-01 盘点，M0–M8 完成后）
 
 > 目的：确保没有遗漏。每项标注**归属阶段 / 验收方式 / 状态**。
@@ -839,7 +854,7 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 | 3 | M9 逐项接入（只做调研判定「可做」的） | M9 | 装/不装各跑一次，降级路径正确 | ✅ **M9-1（ModMenu）实现 + 实机通过（2026-11-03）**；🔄 **M9-2（VoiceChat）实现完成（审查通过）、实机待验**；M9-3（DH）⬜ |
 | 4 | **M8b 自定义资源包补测**：替换 `assets/pingforit/textures/ping.png` 后 HUD/轮盘显示自定义图标 | M8 | 需要用户提供资源包 | ⏸ 等资源包 |
 | 5 | LICENSE 换 **MIT** + 生成 `THIRD-PARTY-NOTICES` 并入 jar | M10 | 上游是 Apache-2.0 + 第三方声明，移植版按计划改 MIT | ⬜ |
-| 6 | `runServer` 冒烟：专用服务器启动无 `NoClassDefFoundError`（确认 main 不误引客户端类） | M10 | 用户终端 `gradlew :fabric:runServer`（**必须带前缀**；首次先改 `run/eula.txt` 为 `eula=true` 再跑一次） | ⬜ |
+| 6 | `runServer` 冒烟：专用服务器启动无 `NoClassDefFoundError`（确认 main 不误引客户端类） | M10 | 用户终端 `gradlew :fabric:runServer`（或根级别名）；首次先改 `run/eula.txt` 为 `eula=true`（**ASCII**，见 `AGENTS.md` §7.20） | ✅ **已提前于 P0 完成（2026-11-04 16:52）**：`Done (2.998s)!` / 47 mods / 0 ERROR，见 §P0.3 |
 | 7 | CI 校验：workflow 覆盖 `clean build` + 产物上传 + jar 元数据检查 | M10 | GitHub Actions 绿 | ⬜ |
 | 8 | locale 补键：8 个语言文件缺失键全量扫描 | M10 | 脚本比对所有 `translatable` key | ⬜ |
 | 9 | 188 个测试类：重建测试基座（需 26.3 编译产物），能救多少救多少 | M10 | `gradlew test` | ⬜ |

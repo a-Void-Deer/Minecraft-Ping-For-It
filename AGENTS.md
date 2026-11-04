@@ -71,7 +71,7 @@ export GRADLE_USER_HOME="D:/Gradle"
   Loom 只在 `fabric` 子项目里建这两个任务 → **显式写法**是 `./gradlew -g D:/Gradle :fabric:runClient` / `:fabric:runServer`。
 - **根级 `runClient`/`runServer` 现在是可用的转发别名**（2026-11-04 起，根 `build.gradle` 注册，`dependsOn ':fabric:runX'`，本身没有 action）：`./gradlew -g D:/Gradle runClient` 也能用。但**显式 `:fabric:runX` 仍是推荐写法** —— 别名的报错信息与任务归属不如显式直白（出错时看不出是哪个模块，IDE 里也容易点错）。
 - **`common` 的 run 任务被禁用**：`common` 是纯库模块，`common/build.gradle` 末尾用 `tasks.matching { it.name == 'runClient' || it.name == 'runServer' }.configureEach { enabled = false }` 关掉，否则两个客户端会抢同一个 `run/` 目录。**不要删这段**。
-- **首次 `:fabric:runServer` 需要 eula**：第一次跑会在仓库根 `run/` 生成 `eula.txt`（`eula=false`），改成 `eula=true` 再跑一次即可；在此之前 `run/eula.txt` 不存在（所以 V18 至今未开始）。
+- **首次 `:fabric:runServer` 需要 eula**：第一次跑会在仓库根 `run/` 生成 `eula.txt`（`eula=false`），改成 `eula=true` 再跑一次即可 —— 但**必须用 ASCII 写**（PowerShell 默认 UTF-16 会让服务端读不到，见 §7.20）。V18 已于 2026-11-04 按此通过。
 
 **沙箱限制**：DSH 会话内跑不了 Gradle；本地回归用 `tools/compile-check.sh`（三遍直接 javac），真实产物由用户在终端跑 `gradlew clean build`。
 
@@ -113,6 +113,7 @@ export GRADLE_USER_HOME="D:/Gradle"
 | **恢复后实机验收（2026-10-30 12:30–12:33）** | `run/logs/2026-10-30-7.log.gz`：**37 条 `send ping` / 36 条 `marker created`**（差 1，无 reject/cancel/异常）；**轮盘 8 次 select，8/8 与随后 `send` 的 `pingType` 一致**；类型覆盖 `attention`/`danger`/`go_to`/**`loot`**；**0 条模组相关 ERROR**（5 条 ERROR 均为 Realms/Minecraft Services 噪声）、**0 条 HUD 失败**；12:33:04 正常 `Stopping!` |
 | **M9-1 实机验收（2026-11-03 18:27–18:30）** | `run/logs/latest.log`：Mod 列表含 `modmenu 21.0.0` + `pingforit 0.4.2-pfi-beta1`（且上一轮 voicechatprofiles 的 `Incompatible mods found` 已消失）；初始化顺序 `Init → ServerConfig → ClientConfig → ping outline pipeline registered → block outline pass registered`；**`send ping` / `marker created` = 28 : 28（1:1）**（复读全日志到 18:31:19 为 **34 : 34**）；`block model glow active` ≥1 条；**0 条模组相关 ERROR、0 条 `Mixin apply failed`**，12 条 WARN 全部归因于 DH/Sodium/PerfOS/voicechat；正常退出 |
 | **P0 实机（2026-11-03 R1–R4，重构后）** | `run/logs` 四轮（20:58 / 22:13 / 22:15 / 22:28）：**0 条本模组 ERROR**、**0 条 `Mixin apply failed`**、0 条 `ClassNotFoundException: nx.pingwheel`；VoiceChat `Loaded 1 plugin(s)` + `Registering events for 'pingforit'`；闭环 **32 : 32**（R4，严格 1:1，0 reject/deny）；资源包索引含 `pingforit`（`debug.log:1713/1770`）；`Missing sound for event` **0**。**唯一 1 条本模组 WARN**（`entity-block glow: model hook not observed on 120 glowing dispatches`）经 3号 审计判定为**营火误报**（`CampfireRenderer` 只 `submitItem`、从不 `submitModel`；且营火有 C1 烘焙模型兜底），见 `docs/reviews/61-model-hook-warn-audit.md`。逐轮明细见 `docs/restructure/03-p0-log-audit.md` |
+| **V18 专用服务器（2026-11-04 16:52）** | `gradlew.bat -g D:\Gradle runServer`（**根级别名生效**，Gradle 执行 `:fabric:runServer`）→ `Starting minecraft server version 26.3` → **`Done (2.998s)! For help, type "help"`** → `stop` → `Stopping server` 正常退出。**47 mods**；本模组服务端路径 `[PingForIt] Init` + `Loaded config type=ServerConfig`（common 源集在专用服务器跑通、无客户端类误引）；voicechat 服务端侧 `Loaded 1 plugin(s)` / `Initialized 1 plugin(s)` / `Registering events for 'pingforit'`；**0 条 ERROR/FATAL、0 条 `NoClassDefFoundError`/`ClassNotFoundException`、0 条 `Mixin apply failed`**；WARN 3 条全外部（PerfOS 注册表、voicechat debug mode、DH 的 G1 GC 提示）。日志：`run/logs/latest.log:102/107/157/170` |
 
 ## 7. 已知坑与约束
 
@@ -149,9 +150,14 @@ export GRADLE_USER_HOME="D:/Gradle"
     ```
     Loom 只在 `fabric` 子项目里建这两个任务 → **显式写法**：`./gradlew -g D:/Gradle :fabric:runClient` / `:fabric:runServer`。
     **现状（2026-11-04）**：根 `build.gradle` 注册了转发别名（`['runClient','runServer'].each { tasks.register(it) { dependsOn ':' + 'fabric:' + it } }`），所以 `./gradlew runServer` 现在**可用**；但别名只是把 `:fabric` 的任务加进任务图（本身没有 action，不复制运行配置），出错时看不出属于哪个模块 → **仍推荐显式 `:fabric:runX`**。
-    **首次 `:fabric:runServer`（用别名跑也一样）** 会在仓库根 `run/` 生成 `eula.txt`（`eula=false`），改成 `eula=true` 再跑一次；在此之前 `run/eula.txt` 不存在（V18 因此至今未开始）。
+    **首次 `:fabric:runServer`（用别名跑也一样）** 会在仓库根 `run/` 生成 `eula.txt`（`eula=false`），改成 `eula=true` 再跑一次；**务必用 ASCII 写**（§7.20）。V18 已于 2026-11-04 走这条路通过。
 
 19. **装了 Distant Horizons 时 improved transparency 会被 DH 强制关闭**：`run/options.txt` 里写 `improvedTransparency:true` 也没用 —— DH 每次进世界都会打 `Disabling improved transparency... This is done to fix vanilla chunks (specifically water blocks) not fading into Distant Horizons LODs`（R4 `latest.log:270`；`:267`–`:269` 还依次关了 vanilla clouds / chunk fade）。我们读到的选项恒为 false → 走经典 `afterTerrain` 通道 → `improved transparency is ON …` **永不打印**。**影响**：V13/V14/V15 在 `run/mods` 里有 `DistantHorizons-3.3.4-26.3-fabric-neoforge.jar` 时**不可测**（不是路由没工作）。**验证方法**：把该 jar 临时移出 `run/mods`（源码 0 处 DH 引用、`build.gradle` 的检查只要求 `modmenu-`/`voicechat-`，移走不影响 `build`）→ 重进世界，确认日志里**没有** `Disabling improved transparency` → ping 方块应出现**恰好 1 条** `[PingForIt] improved transparency is ON: …`；测完放回。
+
+20. **`run/eula.txt` 必须用 ASCII 写（2026-11-04 实测踩坑）**：第一次 `:fabric:runServer` 会生成 `eula.txt`，但用 PowerShell 的 `>` / `Out-File` 改写成 **UTF-16 LE + BOM**（文件头变成 `ÿþe\0u\0l\0a\0…`）时，服务端读不到 `eula=true` → 报 `You need to agree to the EULA…` 并退出。
+    - **正确写法**：PowerShell 用 `"eula=true" | Set-Content -Encoding ascii run\eula.txt`；cmd 用 `echo eula=true>run\eula.txt`（**`>` 前不要留空格**，否则会写进一个尾随空格）。
+    - **怎么确认**：`Format-Hex run\eula.txt` 应看到 `65 75 6C 61 3D 74 72 75 65 0D 0A`（即 `eula=true\r\n` 的纯 ASCII）；看到 `FF FE` 开头就是 UTF-16，需重写。
+    - 这条与本项目代码无关，是**环境/工具链坑**；V18（2026-11-04）就是修好它之后才通过的。
 
 ## 8. 团队分工与写入范围
 
@@ -174,7 +180,7 @@ export GRADLE_USER_HOME="D:/Gradle"
 | M7 | 渲染重建：`deferred/` 描边/世界渲染按 26.3 管线重写 | ✅ **M7a 方块线框 + M7b 实体描边 + M7c C1 模型光晕完成并实机通过（2026-10-31）**；**M7c C2（entity_block 真实体光晕）✅ 完成并实机通过**（`020d920`/`b3ad60f`/`f88a887`，含契约对齐：渲染模式门控、不短路、RenderShape 前置）；规格 `33`/`35`/`38`/`40`、复审 `34`/`36`/`39` |
 | M8 | 配置/命令/UI + 资源重载迁 v1 | ✅ **完成（2026-11-01）**：**M8a** 完整分页设置界面（6 客户端分类/25 项 + 3 服务端分类/5 字段，含 tab 冻结修复）实机通过；**M8b** 资源 v1 + 自定义贴图（默认路径通过，**自定义包待补测**）；**M8c** toggle notice 第二层 HUD 实机通过。文档：`46`/`47`/`48`/`49` |
 | M9 | 可选集成（ModMenu/VoiceChat/FTB/DH/Sable） | **M9-1 ✅ 实现 + 实机通过（2026-11-03）**：Mod Menu 类从 `deferred/` 迁回 `src/client`（与上游逐字节一致）、`fabric.mod.json` 加 `modmenu` entrypoint、依赖改 `run/mods` 离线 jar；**M9-2 ✅ 实现 + 实机通过（2026-11-03）**：`VoiceChatIntegration`/`VoiceChatWrapper` 与上游逐字节一致、`fabric.mod.json` 加 `voicechat` entrypoint、`build.gradle` 加 `compileJava` 的 `voicechat-` jar 检查；实机证据：R1 起每轮 `Loaded 1 plugin(s)` + `Initialized 1 plugin(s)` + `Registering events for 'pingforit'`（不再是从前的 0）。**M9-3 ⬜**（DH 需 API 接线）；FTB Teams / Sable **平台强制跳过**（`24` #17/#18） |
-| **P0（重构后验收）** | 多模块重构（`f18e31e`）后的实机回归 | 🟡 **进行中**，逐项状态见 `docs/PORTING-PROGRESS.md` §P0：V1/V4/V9/V12/V16/V17 ✅；V6/V7/V11 🟡（需肉眼/留证）；**V13–V15 ⏸（DH 强制关闭 OIT，需先移走 DH）**、**V18 ⏸（未开始：需 `:fabric:runServer`（或根级别名）+ eula）**、V19 ⏸ |
+| **P0（重构后验收）** | 多模块重构（`f18e31e`）后的实机回归 | 🟡 **进行中**，逐项状态见 `docs/PORTING-PROGRESS.md` §P0：V1/V4/V9/V12/V16/V17 ✅；V6/V7/V11 🟡（需肉眼/留证）；**V13–V15 ⏸（DH 强制关闭 OIT，需先移走 DH）**、**V18 ✅（2026-11-04 16:52 通过：`Done (2.998s)!` / 47 mods / 0 ERROR）**、V19 ⏸ |
 | M10 | 验证与发布：`runServer`、CI、测试基座、LICENSE → MIT + THIRD-PARTY-NOTICES | ⬜ |
 
 **任务顺序（2026-10-31 用户确认）**：**M8 → M7c-C2 → M9 → M10**（M8 ✅；C2 实现完成待实机，实机通过后进 M9；`entity_block` 已改为真实 BER 光晕，线框仅作 fallback）。
