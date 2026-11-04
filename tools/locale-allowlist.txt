@@ -1,0 +1,38 @@
+# tools/locale-allowlist.txt
+# Format:
+#   missing-ok <locale> <key> # reason
+#   extra-ok   <locale> <key> # reason
+#   used-ok    <key>         # reason
+# Lines are comments; trailing text after # is ignored by tools/LocaleCheck.java.
+
+# --- intentional missing translations -------------------------------------
+# pl_pl/tr_tr deliberately do NOT translate per-type chat overrides: falling
+# back to the generic pingmsg.template is better than an English override.
+missing-ok pl_pl pingforit.chat.danger.template.override # intentional fallback to generic template
+missing-ok pl_pl pingforit.chat.go_to.template.override # intentional fallback to generic template
+missing-ok pl_pl pingforit.chat.take.template.override # intentional fallback to generic template
+missing-ok pl_pl pingforit.chat.request.template.override # intentional fallback to generic template
+missing-ok tr_tr pingforit.chat.danger.template.override # intentional fallback to generic template
+missing-ok tr_tr pingforit.chat.go_to.template.override # intentional fallback to generic template
+missing-ok tr_tr pingforit.chat.take.template.override # intentional fallback to generic template
+missing-ok tr_tr pingforit.chat.request.template.override # intentional fallback to generic template
+
+# --- historical extra keys ------------------------------------------------
+# de/es/fr still carry loot/destroy overrides that en_us no longer has; they
+# are kept because the fallback selection tolerates them and translators had
+# already provided them. Not a new-key requirement.
+extra-ok de_de pingforit.chat.loot.template.override # historical per-type override
+extra-ok de_de pingforit.chat.destroy.template.override # historical per-type override
+extra-ok es_ar pingforit.chat.loot.template.override # historical per-type override
+extra-ok es_ar pingforit.chat.destroy.template.override # historical per-type override
+extra-ok fr_fr pingforit.chat.loot.template.override # historical per-type override
+extra-ok fr_fr pingforit.chat.destroy.template.override # historical per-type override
+
+# --- statically used but not literal in Java ------------------------------
+# Minecraft derives the key-category title from the KeyMapping.Category
+# Identifier registered by InputUtils (pingforit:name); no literal exists in
+# our source, but the client reads key.category.pingforit.name at runtime.
+used-ok key.category.pingforit.name # Minecraft KeyMapping.Category identifier (pingforit:name)
+# Sound subtitles are consumed by the sound engine from the sound event id;
+# our Java source never spells the subtitle key.
+used-ok subtitles.pingforit.ping # sound engine subtitle for pingforit:ping
