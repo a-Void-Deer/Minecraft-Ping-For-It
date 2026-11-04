@@ -85,10 +85,24 @@
   Off/On/current-authority/next-scan help, draft reversion, read-only permission
   changes and the client-save-first root-close path. Confirm the ordinary no-ack
   update behavior rather than treating a clean draft as persistence success.
-  Exercise matching configuration-v5 GUI endpoints and incompatible v4/v5 peers
+  Exercise matching configuration-v5 GUI endpoints and incompatible older peers
   over real loader connections; headless codec rejection does not establish live
   mixed-version behavior. External server-file edits are not an automatic reload
   mechanism.
+- On a live client and dedicated or integrated server, exercise both logging
+  rows through locked cycling, Shift-plus-left-click unlock, keyboard and wheel
+  input, navigation, resize, root close, reset and read-only server viewing.
+  Trigger representative failures under `NORMAL`, `DEEP` and `DEBUG` on both
+  sides and inspect the deployed appenders. Check that severity is unchanged by
+  the profile, `NORMAL` omits original messages/stacks/causes/suppressed detail/
+  free context, `DEEP`/`DEBUG` include only domain-permitted bounded original
+  detail, and explicit-channel suppression appears only where the owning domain
+  defines it. External filters may drop output, and Forge/NeoForge `DEBUG`
+  records may appear only in the loader debug log. Where a controlled
+  fault-injection build permits, force a reporting failure and confirm one
+  complete self-fault record on the emergency descriptor without closing it or
+  replacing the main logger. These checks remain pending; the headless fixtures
+  do not establish live appender, layout, loader or game-window behavior.
 
 ### Logical container targets and whole presentation
 

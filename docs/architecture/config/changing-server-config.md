@@ -22,6 +22,7 @@ The remote update surface contains these top-level fields:
 - `rateLimit`
 - `syncDuration`
 - `budgetDelayNotificationsEnabled`
+- `loggingProfile`
 
 plus `inventory` administration settings catalogued by
 [server configuration](../../config/server.md#inventory-policy-object). Each
@@ -34,7 +35,8 @@ owned by [server configuration](../../config/server.md#inventory-policy-object).
 The two finite display/frame size scalars have no unlimited flag: each is a
 single finite leaf selected and replaced as one value.
 Each Tracking partition switch is a separate boolean leaf, not a numeric
-slider or an unlimited-mode pair.
+slider or an unlimited-mode pair. The logging profile is one independent enum
+leaf, selected by its own mask bit and replaced as one complete value.
 
 `pingDistance` is explicitly outside this transaction. It is a JSON-only
 server setting catalogued by [server configuration](../../config/server.md) and
@@ -58,13 +60,16 @@ are numbered from zero, starting at the least significant bit:
 | 26 | `budgetDelayNotificationsEnabled` |
 | 27 | `inventory.tracking.distinguishFaces` |
 | 28 | `inventory.tracking.distinguishPlayers` |
+| 29 | `loggingProfile` |
 
-The inventory-only mask contains exactly bits 5–25, 27 and 28; the monitoring
-bit remains outside it. No bit above 28 is valid. Existing numeric and monitoring
-bits retain their meanings.
+The complete valid mask spans bits 0 through 29. The inventory-only mask
+contains exactly bits 5–25, 27 and 28; the monitoring and logging-profile bits
+remain outside it. Existing numeric, monitoring and partition bits retain their
+meanings.
 Bit 6 selects both the pending-memory mode and its retained finite value.
 The mask identifies which leaves the sender changed; it is not a partial
-snapshot. A missing, zero, unknown, or malformed selection, or an otherwise
+snapshot. The complete fixed-shape values must remain valid even when their bit
+is unselected. A missing, zero, unknown, or malformed selection, or an otherwise
 invalid update, performs no mutation. Which fields become dirty and when a plan
 is produced are UI planning details owned by
 [configuration UI](../../UI/settings-screen.md).
@@ -115,12 +120,13 @@ stale-response rules above continue to govern when a response is accepted.
 
 The server merges a valid update into the current authoritative snapshot. Fields
 selected by the update replace the authoritative value; every unselected field
-is preserved from that snapshot, including every unselected inventory leaf. A
-rate-limit-only update therefore does not replace the channel mode,
-player-tracking flag, regeneration interval, synchronization duration, or any
-inventory administration value, and a synchronization-duration-only update
-likewise leaves the other selected-surface fields intact; an inventory-only
-update leaves all top-level fields at their current authoritative values.
+is preserved from that snapshot, including every unselected inventory leaf and
+the logging profile. A rate-limit-only update therefore does not replace the
+channel mode, player-tracking flag, regeneration interval, synchronization
+duration, or any inventory administration value, and a
+synchronization-duration-only update likewise leaves the other selected-surface
+fields intact; an inventory-only update leaves all top-level fields at their
+current authoritative values.
 A malformed, missing, unknown, or zero field selection has no effect. If no
 current authoritative snapshot exists when a valid update arrives, the merge
 produces no result and no mutation.
@@ -146,7 +152,8 @@ The packet-facing server path processes an update in this order:
 3. the update is validated and merged; a rejected update leaves the
    authoritative values unchanged; and
 4. for an applied update, the selected fields are assigned, the configuration
-   is validated, and a persistence write is attempted.
+   is validated, a selected logging profile is published to the server logging
+   runtime, and a persistence write is attempted.
 
 Packet acceptance follows the [network protocol](../network/protocol.md); a
 structurally invalid frame is rejected before the transaction.
@@ -172,9 +179,11 @@ client state therefore means only that the client stopped tracking the local
 draft as dirty; it is not evidence that the server accepted, applied, or
 persisted the update.
 
-Applying an update can also trigger the handler's update notification
+Applying a mixed update can also trigger the handler's update notification
 (reinitializing server-side state and re-broadcasting rate policy) even when the
-subsequent persistence attempt fails. A persistence failure is not reported back
-to the client, and the already-applied assignment is not rolled back.
+subsequent persistence attempt fails. A logging-profile-only update publishes
+the selected profile and attempts persistence without that domain update
+notification. A persistence failure is not reported back to the client, and the
+already-applied assignment, including a published profile, is not rolled back.
 Persisted-state recovery, migration, and future-version protection are owned by
 [configuration revisioning](revisioning.md).

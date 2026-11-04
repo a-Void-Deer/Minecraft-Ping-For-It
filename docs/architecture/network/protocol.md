@@ -290,17 +290,18 @@ The complete packet bodies have this fixed order:
 REQUEST  = requestId
 UPDATE   = changedFields, defaultChannelMode, playerTrackingEnabled,
            msToRegenerate, rateLimit, syncDuration, inventory,
-           budgetDelayNotificationsEnabled
+           budgetDelayNotificationsEnabled, loggingProfile
 SNAPSHOT = requestId, canEdit, defaultChannelMode, playerTrackingEnabled,
            msToRegenerate, rateLimit, syncDuration, inventory,
-           budgetDelayNotificationsEnabled
+           budgetDelayNotificationsEnabled, loggingProfile
 ```
 
 `requestId` is a positive canonical varlong. The mask, channel-mode ordinal
-(`AUTO`, `DISABLED`, `GLOBAL`, `TEAM_ONLY` in that order), and the original
-numeric settings are canonical non-negative varints. Booleans occupy exactly
-one byte, `0` or `1`. `inventory` supplies all leaves, regardless of the update
-mask, in this order:
+(`AUTO`, `DISABLED`, `GLOBAL`, `TEAM_ONLY` in that order), the original numeric
+settings and `loggingProfile` are canonical non-negative varints. The logging
+profile tags are `0` for `NORMAL`, `1` for `DEEP`, and `2` for `DEBUG`; any
+other tag is invalid. Booleans occupy exactly one byte, `0` or `1`. `inventory`
+supplies all leaves, regardless of the update mask, in this order:
 
 ```text
 physicalSlotsPerTick, pendingMemoryMiB,
@@ -325,21 +326,24 @@ grid quanta, and the two size scalars encode positive quarter-multiplier quanta.
 UI-only step sizes for integer leaves do not restrict wire values.
 Legal numeric forms and relationships belong to
 [server configuration](../../config/server.md#inventory-policy-object).
-The final strict `budgetDelayNotificationsEnabled` byte follows the complete
-inventory block in both UPDATE and SNAPSHOT; REQUEST has no added field.
-The field mask and its numeric, monitoring and Tracking partition bits are owned by
+The strict `budgetDelayNotificationsEnabled` byte follows the complete
+inventory block in both UPDATE and SNAPSHOT, and the `loggingProfile` tag
+follows that byte. REQUEST has no added field.
+The field mask and its numeric, monitoring, Tracking partition and
+logging-profile bits are owned by
 [changing server configuration](../config/changing-server-config.md#update-surface).
 
-Overflow, overlong or non-canonical numbers, invalid enum ordinals or inventory
-values, unknown mask bits, missing fields, non-boolean bytes, and trailing bytes
-are rejected in full before any value is applied. Exact-end validation follows
-the final boolean, not the inventory block. A superseded UPDATE or SNAPSHOT
-without either Tracking partition byte, the memory mode byte or final monitoring
-boolean is corrupt rather than defaulted or accepted as a prefix; safe rejection
-drains the frame. All three
-route IDs are version-bound, including the otherwise unchanged request body.
-Earlier server-configuration routes, including version four, are not fallbacks,
-and their payloads are never reinterpreted as version five.
+Overflow, overlong or non-canonical numbers, invalid enum or inventory values,
+invalid logging-profile tags, unknown mask bits, missing fields, non-boolean
+bytes, and trailing bytes are rejected in full before any value is applied.
+Exact-end validation follows `loggingProfile`. A missing or invalid profile tag
+rejects the whole frame even when the update mask does not select the profile.
+An UPDATE or SNAPSHOT without either Tracking partition byte, the memory mode
+byte, the final monitoring boolean or the logging-profile tag is corrupt rather
+than defaulted or accepted as a prefix; safe rejection drains the frame. All
+three route IDs are version-bound, including the unchanged request body. Other
+server-configuration route versions are not fallbacks, and payloads are never
+reinterpreted across route versions.
 Remote settings GUI endpoints must match this
 configuration protocol; this does not change the independent presentation,
 inventory, preview or presentation-policy routes, persisted configuration version

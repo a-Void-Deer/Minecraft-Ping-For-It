@@ -19,63 +19,151 @@ string conversion, while fatal message-accessor failures propagate unchanged.
 Its logger seam receives one complete formatted string without a second
 throwable argument.
 
-`RateLimitedDiagnosticsTest` covers diagnostic reports through a recording sink:
-disabled-level laziness, duplicate suppression despite message/request churn,
-independent stage, scope, exception-type and source-location admissions, exact
-window recovery and clock wraparound, bounded capacity without active-entry
-eviction, counted low-frequency overflow summaries, bounded long fields and
-distinct long scopes, concurrent duplicate admission, and independent capacity
-and overflow accounting for debug, warning and error reports. A blocking context
-does not retain the admission lock. Recoverable context
-failures retain the original exception, recoverable sink failures remain
-fail-soft while consuming the admitted reporting opportunity, and a fatal
-context failure propagates.
+`DiagnosticPolicyTest` covers the explicit-side profile pipeline through a
+recording sink: all severities under every profile and minimum, effective-profile
+disclosure separate from minimum eligibility, `NORMAL` failure summaries without
+context-supplier or throwable-accessor reads, `DEEP` context and original
+exception detail in one report, audited scalar templates, and bounded formatting.
+It also covers the absence of a clock or window without an explicit channel,
+channel object and side independence across severity and profile changes,
+suppressed-count recovery and clock wraparound, hints not consuming admission,
+the effective snapshot staying fixed during a report, and disabled or
+below-minimum terminal reports not invoking the admission callback of an
+explicit domain channel. A backend-disabled domain observation remains subject
+to the owning domain's opportunity rules; the inventory bound-reason gate
+advances without evaluating its detail. Pipeline failures at setup,
+enablement, channel clock, admission, context, accessor, formatting and
+sink stages are observed as self-faults; nested reports terminate or remain
+deferred until outer callback locks are released, and an admitted sink failure
+consumes the opportunity without replay. A blocking context does not retain
+channel or policy locks, while fatal context errors still propagate.
 
-`DiagnosticsTest` covers shared admission through compatibility and direct
-entries, bounded exception-free degradation events, and domain-approved reports
-without a second window. Real-appender assertions cover a single bounded
-message with no attached throwable. An isolated-classloader seam exercises the
-diagnostic entry while platform classes are unavailable; it does not establish
-actual loader startup behavior.
+The same suite covers the limited domain-before-backend ordering used by the
+three inventory gates: one effective-profile snapshot held across a concurrent
+downgrade or upgrade, gate consumption followed by backend suppression without
+rollback, callback-returned-null and below-minimum short-circuit, attached-channel
+rejection, admission and setup faults, and reentry across the callback.
 
-`GlobalExceptionLoggingTest` uses a real Log4j test appender to cover disabled
-DEBUG/WARN/ERROR helpers not reading throwable accessors and the disabled public
-DEBUG route evaluating neither context nor throwable accessors. The enabled
-helpers and public rate-limited DEBUG/WARN/ERROR routes emit their intended
-levels, retaining
-context, original messages, causes, suppressed details and source frames in one
-bounded report without an attached throwable for additional logger rendering.
-The compatibility and direct entries share the same prefixed logging backend.
-The common real-appender fixtures install isolated limiter instances with a
-Log4j-backed test sink and restore the previous instances after capture; public
-static routes and bounded formatting remain exercised. This isolation is not
-evidence of continuous production operation or high-cardinality soak behavior.
-These are helper and test-configured logging seams, not deployed appender,
-layout, asynchronous logging, live provider, loader/Mixin or game-session
-evidence. They do not establish that every integration call site emits the
-required diagnostic details.
+`Log4jDiagnosticBackendTest` covers the exact owned client, server and bootstrap
+logger levels through setup and reconfiguration, registration and publication
+under concurrent setup, a foreign reconfiguration listener without lock
+inversion, and recovery after an initial logger-lookup failure. A real Log4j
+test appender receives one bounded string at the expected level and exact logger
+name with no attached throwable. These cases leave the root level, another
+mod's logger and the existing appender threshold unchanged; they do not establish
+deployed appender, layout, asynchronous-logging or loader behavior.
+
+`DiagnosticFaultReporterTest` covers self-fault identity by side, site, stage and
+kind; monotonic attempted disclosure from a `NORMAL` summary to one later
+higher-profile detail without throwable replay; saturating occurrence, repeat
+and layer counters; and bounded class/message-only detail without a self stack,
+cause or string conversion. A failing self-formatter uses one fixed fallback,
+recursive accessors terminate, and concurrent reporters initialize the writer
+once. The writer emits complete UTF-8 records with a newline and one flush, and
+open, write or flush failure stops after one finite attempt without closing the
+output. The cases use an injected output stream, not the process descriptor, a
+launcher, a live appender or an actual asynchronous backend failure.
+
+`DiagnosticEmergencyWriterProcessTest` runs one child JVM over the real
+standard-error descriptor and passes in the scoped common execution. It verifies
+a `NORMAL` self-fault summary without private class or message detail, one
+complete newline-terminated and flushed record, ordinary standard error still
+usable afterward, and emergency output not routed through or closing the Java
+`System.err` wrapper. This is process-level descriptor evidence, not a live
+appender, loader or game run.
+
+`DiagnosticsTest` covers the public explicit-side routes: independent side
+profiles and assigned severity, the absence of implicit duplicate suppression,
+disabled accessor laziness, bounded escaped detail, and isolated initialization
+without global config or platform services. `GlobalExceptionLoggingTest` covers
+the `Global` side selector at `NORMAL` and `DEEP`, disabled accessor laziness,
+one bounded original graph per call, and repeated calls without implicit
+suppression.
+
+These profile, self-fault, backend and public-route fixtures are covered by the
+scoped automated combined acceptance recorded under
+[logging-profile final combined acceptance](build-checks.md#logging-profile-final-combined-acceptance).
+The acceptance covers the named automated scopes only; loader builds are
+included, while live appender/loader/game behavior and manual scenarios remain
+pending.
+
+The focused `Log4jDiagnosticOutputBoundaryTest` execution is recorded under the
+same [common execution](build-checks.md#logging-profile-common-execution) entry.
+It is synchronous isolated Log4j evidence, not asynchronous or deployed-loader
+coverage.
 
 ## Optional failure diagnostics
 
-`IntegrationFailureDiagnosticsTest` captures shared-backend Log4j events for a
-linkage guard disabling once with its original cause, ordinary Sable failures
-sharing warning admission, and domain-approved Sable exceptions bypassing a
-second window. Its Distant Horizons completion case unwraps an asynchronous
-failure, reports its original cause, completes once with no hit, and lets a
-throwing completion callback propagate. These are direct guard, diagnostic and
+`IntegrationFailureDiagnosticsTest` covers a once-only integration disable, the
+tested Sable fallback and domain-approved calls, and asynchronous Distant
+Horizons completion with a throwing callback. It runs against the explicit
+backend with `DEEP` disclosure: the once-only report retains the original
+linkage cause and root, ordinary and approved Sable reports remain independent,
+and the asynchronous case unwraps its cause, completes once with no hit, and
+lets a throwing completion callback propagate. These are direct guard and
 completion seams, not an installed Sable or Distant Horizons runtime, an actual
 asynchronous trace, loader startup or game-session evidence.
 
 `ExternalBlockRegistryDiagnosticsTest` covers throwing and null-result providers
 at validation, materialization, refresh, name, observation and candidate/committed
-read-source dispatch: warnings retain provider identity and the original cause
-or null-result event without an attached throwable, while the tested invalid,
-temporarily-unavailable and empty outcomes remain intact. Missing-provider and
-ordinary temporary refresh results stay quiet, and an `AssertionError` from
-refresh propagates. Cleanup failures still allow later provider and reference
-cleanup; a throwing member predicate denies access and reports its cause. These
-fixtures use fake providers and uninitialized server/level tokens, not live
-world validation or provider lifecycle evidence.
+read-source dispatch while the tested invalid, temporarily-unavailable and empty
+outcomes remain intact. Against the explicit backend with `DEEP` disclosure, the
+warnings retain provider identity and the original cause or null-result event
+without an attached throwable. Missing-provider and ordinary temporary refresh
+results stay quiet, and an `AssertionError` from refresh propagates. Cleanup
+failures still allow later provider and reference cleanup; a throwing member
+predicate denies access. These fixtures use fake providers and uninitialized
+server/level tokens, not live world validation or provider lifecycle evidence.
+
+## NeoForge logging-profile lifecycle and loader diagnostics
+
+The NeoForge integration suite adds explicit-side logging-profile coverage for
+Create registration, optional registration, entity-outline reporting and
+presentation call sites:
+
+- `CreateRegistrationLifecycleTest` covers concurrent install/close serialization,
+  same-thread reentrant register/close rejection without self-wait, owner-token
+  cleanup that preserves later cross-thread registration/close, non-blocking
+  state reads during install or cleanup, failed install or cleanup leaving a
+  retryable reservation, idempotent close, and interrupt-preserving teardown;
+- `CreateAdapterLifecycleDiagnosticsTest` executes the compiled entity-outline
+  and Flywheel adapter lifecycle paths with injected blocking backend/emergency
+  output and real duplicate-warning callbacks: report and self-fault output occur
+  outside the lifecycle monitor; four same-thread reentry cases across the two
+  adapter families and register/close become `SINK` self-faults without recursive
+  retry; failed nested close cannot close the outer candidate or remove the
+  original registry winner; close remains serialized and a later retry recovers;
+- `NeoClientOptionalRegistrationTest` covers each optional registration route:
+  `NORMAL` and backend-disabled reports perform no probe; `DEEP` runs the state
+  probe once; a probe failure is a self-fault `CONTEXT`, not a registration
+  warning; successful detail stays lazy; a real registration failure retains its
+  `WARN`; and a profile change does not reset transition history;
+- `CreateEntityOutlineDiagnosticSeverityTest` keeps `ERROR` for actual pre-vertex
+  renderer or glue failure, `WARN` for availability, preflight and partial
+  outcomes, and `DEBUG` for expected absence, disabled or rendered outcomes;
+- `CreateEntityOutlineDiagnosticsTest` covers `NORMAL` suppressing entity UUID,
+  probe and throwable reads, admitted `DEEP` detail, heartbeat deduplication,
+  below-`DEBUG` recovery without resetting the domain gate, and one bounded report
+  without an attached throwable;
+- `CreatePresentationLoggingProfileTest` covers independent client/server
+  profiles and channel state, `NORMAL` server reports that never read detail or
+  throwable, `DEEP` client disclosure not widened by the server, suppressed
+  attempts collecting no detail, and a profile change not resetting interval
+  history;
+- `LoaderDiagnosticScopeTest` scopes interval channel state per side, restores the
+  original state after the fixture, and leaves real domain gates unexecuted by
+  the fixture; and
+- `CreatePresentationFactoryCompatibilityTest` covers the existing common
+  reflection entries with Create present and absent, side-bound availability,
+  client/authoritative adapter fields, and no collector load.
+
+The loader build/test execution for this group is recorded under
+[logging-profile loader execution](build-checks.md#logging-profile-loader-execution);
+the final source-input acceptance is recorded under
+[logging-profile final combined acceptance](build-checks.md#logging-profile-final-combined-acceptance).
+These are headless or constructed compiled fixtures with injected sinks; they do
+not establish live loader launch, installed Create, GPU presentation,
+multiplayer or mixed-version behavior.
 
 ## Create presentation adapters
 
@@ -344,7 +432,7 @@ provider-observation and diagnostic evidence:
   reference and entry counts intact; linkage additionally disables the shared
   guard and makes a later refresh invalid. Its refresh-transition case reports a
   warning after a debug-only state observation, suppresses the duplicate and
-  admits a different stable target without a second general window;
+  admits a different stable target through the same admission path;
 - `SableRefreshLogGateTest` checks decision state for tested locator or reason
   changes and duplicates, disabled reporting observing state without consuming a
   later warning, and removal or recovery permitting a new failure report. It
@@ -443,6 +531,11 @@ and successful compilation are not substitutes for exercising them.
 
 ## Known automated gaps
 
+- explicit-side profile disclosure across every optional-integration call site,
+  deployed appender and filter selection, Forge/NeoForge debug-log placement,
+  and emergency-writer behavior under a launched game remain unverified; the
+  shared diagnostic fixtures use test sinks, test appenders and injected output
+  streams;
 - installed-Create presentation sampling and display remain unexercised in-game:
   automated seams cover the summary adapter's shape, work and version gates,
   detached registry-ID aggregation, the derived available-capacity projection,

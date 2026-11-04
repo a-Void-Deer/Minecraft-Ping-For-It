@@ -1141,8 +1141,8 @@ round and source context, the attempted prefix still paid, no capture/read and
 no retained or reserved leak. Its snapshot-discovery limit case also preserves
 the original bound in the incomplete outcome's report without a content read
 or reserved-memory leak. `InventoryCaptureDiagnosticsTest` additionally
-checks that its existing bound-reason gate reaches the shared backend even
-when the general warning window is full, without a second admission window.
+checks that its existing bound-reason gate reaches the shared backend
+independently of unrelated report volume.
 
 `InventoryItemFailureDiagnosticsTest` covers actual canonical-byte refusal
 producing an all-variants aggregate diagnostic without changing a safe exact

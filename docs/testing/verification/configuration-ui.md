@@ -368,6 +368,61 @@ widget and strict-wire assertions in the
   fixtures cover placement and Off/On, current authority and next-scan help;
   they do not establish assembled live tooltip delivery or translation quality.
 
+## Logging-profile configuration and controls
+
+`LoggingProfileConfigTest` covers both client and server configuration types:
+fresh, missing, explicit-null and unknown profiles resolve to `NORMAL` before
+and after validation; explicit `NORMAL`, `DEEP` and `DEBUG` are retained; an
+untouched same-version file preserves its exact bytes across load and no-op save
+for absent and explicit values; a profile-only edit participates in equality,
+hash, save and reload; reset returns to `NORMAL` without allowing a stale model
+reference to affect a later save; older-version migration materializes a missing
+default and preserves explicit profiles and unknown data; and future-version
+save/reset protection preserves the original bytes.
+
+`ServerConfigLoggingProfileTest` covers the independent remote leaf: selecting a
+profile changes only that leaf; denied authority preserves the authoritative
+snapshot; an unselected profile survives other edits; a null profile is invalid
+even when its bit is unselected; an unsafe snapshot rejects the update; and a
+conflicting inventory size pair rejects the selected profile atomically. It also
+covers snapshot/update conversion and permission-copy propagation, `NORMAL`
+defaults from source-compatible constructors, mask bit 29, the thirty-bit
+complete mask and the inventory mask excluding the logging bit.
+
+`ServerSettingsLoggingProfileTest` covers a draft initialized from the
+authoritative profile, its own dirty bit and update plan, read-only display of an
+authoritative `DEBUG` value without editing or planning, preservation through
+other edits, disconnect reset and replacement by a fresh snapshot.
+
+`LoggingProfileControlTest` covers the locked `NORMAL`/`DEEP` cycle, the
+three-value unlocked cycle, Shift-plus-left-click unlocking only the selected
+row without changing a value or dirtying the server draft, keyboard activation
+cycling without unlocking, mouse-wheel input neither selecting nor unlocking,
+and an inactive read-only server row refusing both activation and unlock.
+
+`LoggingProfileScreenTest` covers independent client/server unlock flags across
+category and scope navigation and resize; successful root leave clearing both
+flags; failed save, cancelled reset confirmation and ordinary removal retaining
+them; confirmed reset clearing the old session and creating a locked replacement;
+native tooltip narration containing the unlock hint; the client row showing a
+real locked `DEBUG` value and applying later clicks to config and runtime; the
+server row editing only the draft without publishing the server runtime; and a
+read-only server viewer seeing `DEBUG` without editing or unlocking.
+
+`SettingsCategoryCatalogTest` verifies the logging controls' placement and the
+approved catalogue totals: 75 entries, 73 value controls, and 25 server
+Performance rows. `SettingsLocalizationCoverageTest` requires localized labels
+and tooltips for both logging rows and the shared unlock-help key in all eight
+bundled locales. `ServerConfigVarNumbersTest` covers logging-profile tags
+`0`/`1`/`2`, mask bit 29, preservation when unselected, and rejection of missing,
+unknown, noncanonical, truncated and trailing forms even when unselected.
+
+The scoped common and final combined automated acceptance recorded under
+[logging-profile final combined acceptance](build-checks.md#logging-profile-final-combined-acceptance)
+covers these headless model, handler, packet, widget and screen fixtures. It does
+not establish live native mouse or keyboard delivery, rendered tooltip layout, a
+live client/server profile switch or remote persistence.
+
 ## Server performance contract verification
 
 The [UI](../../UI/settings-screen.md#server-performance-category),
@@ -453,8 +508,8 @@ below describe source-reviewed coverage rather than a recorded full-suite run:
   invalid field, retaining a shared `ServerSettingsModel` draft across
   navigation, and keeping a server leaf open when a permission revocation
   retains a viewable snapshot while forcing the scope overview without one;
-- `SettingsCategoryCatalogTest` covers all 73 catalog entries exactly once in
-  their approved categories, including the 71 value controls and two non-value
+- `SettingsCategoryCatalogTest` covers all 75 catalog entries exactly once in
+  their approved categories, including the 73 value controls and two non-value
   entries. Independent expectations check section headings, section/row order,
   flattened order, the confirmed semantic pairs rather than unrelated packing,
   and singleton rows for ordinary server controls. It checks nonempty sections,
@@ -580,7 +635,7 @@ below describe source-reviewed coverage rather than a recorded full-suite run:
   contracts. Retired timeout and obsolete inventory-sensitivity resources stay
   excluded. These are resource expectations, not a guarantee of translation
   quality. The fixture does not assemble or render screen labels;
-- `SettingsLocalizationCoverageTest` derives the 71 value controls' required
+- `SettingsLocalizationCoverageTest` derives the 73 value controls' required
   nonblank labels and generic help from the production catalog/key builder. It
   checks all category descriptions and section headings, scope/navigation/action
   and presentation-editor help, used enum/state value labels, units, and visible
@@ -729,6 +784,11 @@ or wrapping.
 
 ## Known automated gaps
 
+- logging-profile configuration and controls have headless coverage above, but
+  live native Shift-plus-left-click and keyboard/wheel delivery, rendered
+  localized help, a real client/server profile switch and remote persistence
+  remain unexercised; the headless screen fixture does not create a game window
+  or connection;
 - native-list reflow/input, enum caption/narration/tooltip components, assembled
   caption-change/dialog-return input and native resize have headless assertion
   coverage above, with execution evidence scoped separately; the game render/input
