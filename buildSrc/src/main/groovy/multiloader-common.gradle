@@ -30,15 +30,22 @@ dependencies {
 	compileOnly 'org.jetbrains:annotations:26.0.2'
 }
 
-// --- M9 可选集成：编译期依赖来自本地 run/mods -----------------------------------
+// --- M9 可选集成：编译期依赖来自本地 jar ---------------------------------------
 // 本机 Gradle 没有可用网络，所以 Mod Menu / Simple Voice Chat / Distant Horizons
-// 不在 maven 里声明，而是直接用 run/mods 下的 jar 做 compileOnly。
+// 不在 maven 里声明，而是直接用本地 jar 做 compileOnly。两套来源刻意分开：
+//   * run/mods  -> 集成 mod 自身的 jar（modmenu / voicechat-api / voicechat），既是
+//                  编译依赖也是 dev 运行时 mods 目录；
+//   * compile-libs -> 只做编译期的独立 API jar（方案 A：Distant Horizons）。
+// DH 的完整 mod jar 必须留在 run/mods 的“运行时”角色里，**绝不能**再进编译类路径，
+// 否则编译期 API 与运行时可能静默漂移（见 docs/reviews/63-m9-3-dh-integration-spec.md）。
 // 这里的 glob 与排除规则必须和 tools/compile-check.sh|.ps1 保持一致，否则两边会漂移。
 def projectRef = project
 def loggerRef = logger
 def tasksRef = tasks
 def integrationModsDir = rootProject.file('run/mods')
-def integrationJarPattern = ~/(modmenu|voicechat-api|voicechat|DistantHorizons|DistantHorizonsApi)-.*\.jar/
+def integrationLibsDir = rootProject.file('compile-libs')
+def integrationJarPattern = ~/(modmenu|voicechat-api|voicechat)-.*\.jar/
+def integrationApiJarPattern = ~/DistantHorizonsApi-.*\.jar/
 
 ext.integrationJars = rootProject.fileTree(
 	dir: rootProject.file('run/mods'),
@@ -46,10 +53,15 @@ ext.integrationJars = rootProject.fileTree(
 		'modmenu-*.jar',
 		'voicechat-api-*.jar',
 		'voicechat-*.jar',
-		'DistantHorizons-*.jar',
-		'DistantHorizonsApi-*.jar',
 	],
 	// 与 tools 脚本同一条排除规则：sources/javadoc jar 绝不能混进编译类路径。
+	exclude: ['*-sources.jar', '*-javadoc.jar'],
+)
+
+// 方案 A：Distant Horizons 只用独立 API jar 编译（compile-libs/，jar 不入库）。
+ext.integrationApiJars = rootProject.fileTree(
+	dir: rootProject.file('compile-libs'),
+	include: ['DistantHorizonsApi-*.jar'],
 	exclude: ['*-sources.jar', '*-javadoc.jar'],
 )
 
@@ -74,4 +86,27 @@ ext.attachIntegrationJarCheck = { String taskName, String requiredPrefix, String
 		}
 	}
 	projectRef.logger.debug("integration jar check attached: " + taskName + " (prefix " + requiredPrefix + ")")
+}
+
+// 方案 A 的同一套检查，但扫描 compile-libs/：日志前缀刻意写成
+// "compileOnly integration API jars (...)"，与 run/mods 那行区分开，排查时一眼能看出
+// 命中的是“编译期 API jar”还是“运行时/集成 mod jar”。
+ext.attachIntegrationApiJarCheck = { String taskName, String requiredPrefix, String message ->
+	tasksRef.matching { it.name == taskName }.configureEach {
+		doFirst {
+			def apiJars = integrationLibsDir.isDirectory()
+				? (integrationLibsDir.listFiles() ?: new File[0]).findAll {
+					it.isFile() && it.name.endsWith('.jar') &&
+						!it.name.endsWith('-sources.jar') && !it.name.endsWith('-javadoc.jar')
+				}.collect { it.name }.sort()
+				: []
+			def integrationApiJarNames = apiJars.findAll { it ==~ integrationApiJarPattern }
+			loggerRef.lifecycle("compileOnly integration API jars (" + taskName + "): " + integrationApiJarNames)
+
+			if (!integrationApiJarNames.any { it.startsWith(requiredPrefix) }) {
+				throw new GradleException(message)
+			}
+		}
+	}
+	projectRef.logger.debug("integration API jar check attached: " + taskName + " (prefix " + requiredPrefix + ")")
 }

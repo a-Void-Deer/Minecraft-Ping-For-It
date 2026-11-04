@@ -32,6 +32,9 @@ bin/
 
 run/
 
+# M9-3: compile-time-only integration API jars (compile-libs/README.md and .gitkeep stay tracked)
+compile-libs/*.jar
+
 # java
 
 hs_err_*.log

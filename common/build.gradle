@@ -15,6 +15,9 @@ dependencies {
 	compileOnly "net.fabricmc:fabric-loader:${project.loader_version}"
 	compileOnly "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 	compileOnly integrationJars
+	// 方案 A：Distant Horizons 只用 compile-libs/ 里的独立 API jar 编译；
+	// run/mods 的完整 DH jar 只作 dev 运行时，不再进编译类路径。
+	compileOnly integrationApiJars
 }
 
 // M9-2 Simple Voice Chat：entrypoint 类 nx.pingwheel.common.integration.VoiceChatIntegration
@@ -23,6 +26,12 @@ attachIntegrationJarCheck('compileJava', 'voicechat-',
 	'Missing compile-only jar for the Simple Voice Chat integration: put ' +
 		'voicechat-fabric-2.6.27+26.3.jar (or voicechat-api-2.6.27.jar) into run/mods/ ' +
 		'(https://modrinth.com/mod/simple-voice-chat)')
+// M9-3 Distant Horizons（方案 A）：共享源集里的 DistantHorizonsIntegration 直接引用
+// com.seibel.distanthorizons.api.*，所以编译期必须拿到独立 API jar。
+attachIntegrationApiJarCheck('compileJava', 'DistantHorizonsApi-',
+	'Missing compile-time API jar for the Distant Horizons integration: put ' +
+		'DistantHorizonsApi-7.2.0.jar into compile-libs/ ' +
+		'(https://cdn.modrinth.com/data/Xs0XTOVv/versions/LTP8vW3B/DistantHorizonsApi-7.2.0.jar)')
 // common 只是库模块，不提供 dev 运行配置。Loom 会给每个 loom 项目自动生成 runClient/runServer，
 // 若保留，根级 `./gradlew runClient` 会同时命中 :common:runClient 与 :fabric:runClient，
 // 两个客户端抢同一个 run/ 目录。这里关掉，保证根级 runClient 只落到 :fabric。

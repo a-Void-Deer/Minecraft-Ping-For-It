@@ -28,7 +28,7 @@
 | 1 | 默认键 `-1` → `InputConstants.UNKNOWN.getValue()`（0） | `InputUtils` | **平台强制**（26.3 `isKeyDown` 按 SDL 扫描码索引，`-1` 必崩） | 否（仍是「未绑定」，按键行为与上游一致） |
 | 2 | `KeyMappingMixin` 越界键守卫（坏绑定当未按下 + 一次 WARN） | `mixin/KeyMappingMixin` | 防御性 | 否（只在**非法**键值下生效，正常路径零影响） |
 | 3 | Sable 客户端桩（`resolvePosition` 恒 `empty`） | `SableClientProvider` | 集成桩（M9） | **是**（装了 Sable 时上游会吸附子层级方块，现在回退 anchor）→ M9 恢复 |
-| 4 | Distant Horizons / VoiceChat / FTB Teams 桩 | `integration/*` | 集成桩（M9） | **是**（对应集成不可用）→ M9 恢复 |
+| 4 | ~~Distant Horizons / VoiceChat 桩~~ **已恢复**（M9-3 / M9-2）；只剩 **FTB Teams** 仍为桩 | `integration/*` | 集成桩（M9） | DH / VoiceChat 已回填上游实现 → **否**（2026-11-04 更新）；FTB Teams 见 **#17**（平台强制） |
 | 5 | HUD 用绘制顺序代替上游的 z 阶梯 | `MarkerHudRenderer` | 26.3 无 z 参数 | 否（3号 复核：视觉等价） |
 | 6 | `scale` 为 0/NaN 时的兜底下限 0.01 | `MarkerHudRenderer` | 防御性 | 否（正常路径零影响） |
 | 7 | 轮盘：曾加过扇区楔形填充与纯色图标 | `WheelHudRenderer` | **已回退** | 否（已与上游一致） |
@@ -140,3 +140,15 @@ Simple Voice Chat 集成由桩恢复为上游实现：`VoiceChatIntegration`（3
 **因此实际行为是**：描边仍由我们的 **depth-off 自定义管线**在 **solid 桶**绘制 —— **仍然可见、仍然穿墙**，与回退路径的唯一差别是「被半透明物体叠加时可能被染色」（回退路径会在 `entityOutlineTarget` 里走原版 `ENTITY_OUTLINE_BLIT` 合成）。
 
 **定性**：记为**已知限制**（本条 #19 的触发条件在当前环境无法复现），**不阻塞发布**。若后续要深究，需要加一支**只记录我们自己的提交**的探针，用来区分 `isCustom` 判定与 `afterTerrain` 是否真的执行（当前 `submitted=N` 只能证明提交，不能证明相位）。
+
+## 11. M9-3 备注：Distant Horizons 集成恢复（2026-11-04，**不新增编号**）
+
+`DistantHorizonsIntegration` 由 76 行 stub 换回**上游 201 行实现**（与上游仅 4 行 javadoc 缩进差），调用点 `ClientPingRuntime` **零改动**；构建侧改走**方案 A**（编译期只吃 `compile-libs/DistantHorizonsApi-7.2.0.jar`，`run/mods` 的完整 jar 只做运行时）。复审 `docs/reviews/64-m9-3-dh-integration-review.md`（通过、无阻塞）。
+
+判定：**不新增偏离编号**。理由：
+
+1. 这是**恢复上游行为**，不是新增/改变效果 —— 它把 §2 第 4 行登记过的「集成能力缺失」消掉了一项（该行已同步更新为「DH 已恢复」）；
+2. 接线与平台无关（同一份 DH API 7.2.0 在 26.3 上签名逐条一致，见 `63` §5），没有引入任何 26.3 特有的替代实现；
+3. 唯一的行为差别是「远处地形现在也能 ping 到」，与上游 1.21.1 一致；失败路径按上游语义降级到普通同步射线。
+
+对照：`#17`（FTB Teams）仍是运行时能力缺失，编号保留；本项属「能力恢复」，不需要编号。**已知限制仍按 #19**（DH 会关闭 OIT，`outline` 分支在装 DH 时不可达）。

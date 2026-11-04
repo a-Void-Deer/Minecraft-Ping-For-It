@@ -21,7 +21,7 @@
 | M6.5 | 标记 HUD 上游对齐 | ✅ **已恢复并重新验收**（tag `port-M6.5-restored`，2026-10-30 12:30–12:33 实机） | 2026-10-30 | tag `port-M6.5-restored` |
 | M7 | 渲染重建 | ✅ **M7a 方块线框 + M7b 实体描边 + M7c C1 模型光晕 + C2 entity_block 真实体光晕全部完成并实机通过（2026-11-01）**；含 HUD 投影补 bob、ping 提示改回聊天框（`dde1be5`） | 2026-11-01 | — |
 | M8 | 配置 / 命令 / UI | ✅ **完成（2026-11-01）**：**M8a** 完整分页设置界面 ✅、**M8b** 资源 v1 + 自定义贴图 ✅（**自定义资源包仍待补测**）、**M8c** toggle notice 第二层 HUD ✅，三者均实机通过；文档：`46`/`47`/`48`/`49` | 2026-11-01 | — |
-| M9 | 可选集成 | 🟡 **M9-1 Mod Menu ✅ 实现 + 实机通过（2026-11-03）**；**M9-2 VoiceChat ✅ 实现完成（审查通过，实机待验）**；M9-3 DH ⬜；FTB Teams / Sable 平台强制跳过（`24` #17/#18） | 2026-11-03 | — |
+| M9 | 可选集成 | 🟡 **M9-1 Mod Menu ✅ 实现 + 实机通过（2026-11-03）**；**M9-2 VoiceChat ✅ 实现完成（审查通过，实机待验）**；**M9-3 DH 🟡 实现 + 复审通过（方案 A），实机待验**；FTB Teams / Sable 平台强制跳过（`24` #17/#18） | 2026-11-03 | — |
 | M10 | 验证与发布 | ⬜ 待办（**含合规：LICENSE 换 MIT + THIRD-PARTY-NOTICES**） | — | — |
 | 事故恢复 | 目录重建 + 重新验证 | ✅ 完成 | 2026-10-30 | tag `restore-2026-10-29` |
 
@@ -681,7 +681,7 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 |---|---|---|---|---|
 | **ModMenu** | `21.0.0`（2026-09-23） | `run/mods/modmenu-21.0.0.jar`（**compileOnly，离线**；CI 用 `curl` 从 TerraformersMC maven 补） | ✅ **已完成（M9-1）** | 0.5h |
 | **VoiceChat** | `fabric-2.6.27+26.3`（2026-10-28） | 当前：`run/mods/voicechat-fabric-2.6.27+26.3.jar`（**完整 mod，自带 104 个 `de/maxhenkel/voicechat/api/*` 类，compileOnly，离线**；CI 用 `curl` 取**同一件产物**） | ✅ **实现完成（审查通过），实机待验** | 2–3h |
-| **Distant Horizons** | `3.3.4-26.3`（自带 API 类）+ API `7.2.0` | 当前：`run/mods/DistantHorizons-3.3.4-26.3-fabric-neoforge.jar`（**完整 jar，compileOnly，离线**；CI 用 curl 取**同一件产物**）→ **M9-3 待决**：编译期改用 API jar、full jar 只做 dev runtime（见 §M9-1 剩余事项） | **做** | 3–4h |
+| **Distant Horizons** | `3.3.4-26.3`（自带 API 类）+ API `7.2.0` | 当前：`run/mods/DistantHorizons-3.3.4-26.3-fabric-neoforge.jar`（**完整 jar，compileOnly，离线**；CI 用 curl 取**同一件产物**）→ **已按方案 A 落地（2026-11-04）**：编译期 `compile-libs/DistantHorizonsApi-7.2.0.jar`、运行时 `run/mods` 完整 jar | ✅ **实现完成（复审通过），实机待验** | 3–4h |
 | FTB Teams | **无** | — | **跳过**（保真 #17） | — |
 | Sable | **无** | — | **跳过**（保真 #18） | — |
 
@@ -769,8 +769,35 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 
 - 实机验证如上；通过后把本节标题与顶部总表改为 ✅ 实机通过。
 - 服务端侧同组判定需**双客户端**复测（与 M5 的受众验收合并做更省事）。
-- M9-3（DH）仍 ⬜；FTB Teams / Sable 平台强制跳过不变（`24` #17/#18）。
+- M9-3（DH）见下节；FTB Teams / Sable 平台强制跳过不变（`24` #17/#18）。
 
+### M9-3 · Distant Horizons 集成（2026-11-04）🟡 实现 + 复审通过，实机待验
+
+**目标**：把 `DistantHorizonsIntegration` 从 76 行 stub 换回上游真实实现 —— 客户端射线在原版视距外时，交给 DH 的 LOD 地形做**异步远距离射线**（4096 格），命中则投影成方块目标；失败/未装则回退普通同步射线。
+
+**改动清单**
+
+| # | 改动 | 位置 | 说明 |
+|---|---|---|---|
+| 1 | **stub → 上游实现** | `common/src/main/java/nx/pingwheel/common/integration/DistantHorizonsIntegration.java` | 76 行 → **201 行**（与上游仅 **4 行 javadoc 缩进**差异）；`rootCause` **未动**；`traceDistant` / `traceDistantAsync` / `logVersionDiagnostics` / `logUnguardedLinkFailure` 全部回填 |
+| 2 | **调用点零改动** | `fabric/src/client/java/nx/pingwheel/common/client/ClientPingRuntime.java:722-758` | 与上游 `:720-756` 逐字一致（flag 门 / `LinkageError` 兜底 / `!scheduled` 回退都在），所以本次**只换实现** |
+| 3 | **方案 A：编译期只用 API jar** | 新目录 `compile-libs/` + `buildSrc/src/main/groovy/multiloader-common.gradle:62-70` | `compile-libs/DistantHorizonsApi-7.2.0.jar`（363 318 B，Modrinth 官方件）只做 `compileOnly`；**`DistantHorizons-*` / `DistantHorizonsApi-*` 已从 `ext.integrationJars` 剔除**，完整 jar 只留在 `run/mods` 做运行时 |
+| 4 | **检查与脚本** | `common/build.gradle:18-35`、`tools/compile-check.sh|.ps1` | `compileJava` 上加 `attachIntegrationApiJarCheck("compileJava","DistantHorizonsApi-",…)`（日志前缀 `compileOnly integration API jars (<task>)`）；两脚本新增 `compile-libs` 段（0 命中只警告） |
+| 5 | **CI** | `.github/workflows/build.yml:28-51` | 下 **API jar 到 `compile-libs/`**，**删除完整 DH jar 的下载**（CI 只 build、不启动游戏）；`compile-libs/*.jar` 已入 `.gitignore`（README/.gitkeep 入库） |
+
+**为什么用方案 A**（3号 复审第 2 轮提出的 B2 类问题）：编译期只吃 **API** 能让「接口面」与「运行时实现」解耦 —— 完整 jar 若留在编译类路径，`javac` 会看到约 100 个内部类，任何对内部 API 的误用都不会被编译期拒绝，且「CI 用完整 jar / 本地用 API」会产生编译面漂移。现在两处**统一为 API 7.2.0**。
+
+**工具修复（重要）**：官方 API jar 内含 **155 个 `.java`**，`javac` 默认把 classpath 当 sourcepath → 隐式编译出 100 个 `com/seibel/**` class，`compile-check` 计数虚高（262 → 362）。两个脚本已加 **`-implicit:none`**，计数恢复 **262 / 4 / 126**、输出目录无 `com/seibel`。
+
+**复审结论（`docs/reviews/64-m9-3-dh-integration-review.md`）**：**通过、无阻塞** —— 保真（与上游仅 javadoc 缩进差）、异步契约（true/false、回调线程、call-site `game.execute`）、构建隔离（完整 jar 确实被排除出编译面）三项均成立。非阻断项：① `terrainRepo` 未单独判空（上游也没有；NPE 会被 future 捕获 → 走 empty 回调）；② tools 脚本 0 命中只 warning（真正的 fail-fast 在 Gradle）；③ 建议补一次「无 DH 的 runClient 冒烟」。
+
+**待验（实机，唯一未完成项）**
+
+- **不装 DH**：移走 `run/mods` 的 DH jar → 启动 → ping；期望 `optional integrations: distantHorizons=false`，行为与现状一致。
+- **装 DH + 远距离命中**：放回完整 jar → 朝原版视距外、DH LOD 内的方块 ping；期望生成 `kind=BLOCK` marker、日志出现 `Distant Horizons API Version: 7.2.0`、**0 条** `distanthorizons schedule failed` / `trace failed`。
+- 另建议按复审 ③ 做一次「无 DH 的 `runClient` 冒烟」。
+
+**剩余事项**：实机通过后把本节与顶部总表改 ✅；`DH × OIT 互斥策略`（装 DH 时 OIT 被关，`outline` 分支永不触发）仍需在 `24` 登记或加诊断开关（`AGENTS.md` §9.1 C 组）。
 ## P0 · 重构后验收（2026-11-03）✅ P0 收口（V13–V15 受限未验证）
 
 > **路径口径说明（以 2026-11-03 为界）**：此前的文档可能仍写 `src/main/java` / `src/client/java` / 根 `build/libs/`；**现行布局**见 `AGENTS.md` §2（`common/src/main`、`fabric/src/main|client`，产物在 `fabric/build/libs/`）。**历史记录不改**：M0–M8 各节与 `docs/reviews/*` 是当时的事实快照，保留原样以便追溯。
@@ -859,7 +886,7 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 |---|---|---|---|---|
 | 1 | **M5 服务端权威验收**：受众快照、赢家选择、移除仅本人、限流、过期、断线重连 | M5 | **双客户端互测**（两个 runClient 进同一局域网世界） | ⬜ 代码已存在，未正式验收 |
 | 2 | **M9 集成可行性调研**：ModMenu / VoiceChat / FTB Teams / DH / Sable 的 26.3 版本与接入代价 | M9 | 调研报告 `53-m9-integration-feasibility.md` | ✅ 已交付（**做 3：ModMenu/VoiceChat/DH；跳过 2：FTB Teams/Sable 无 26.3 构建**） |
-| 3 | M9 逐项接入（只做调研判定「可做」的） | M9 | 装/不装各跑一次，降级路径正确 | ✅ **M9-1（ModMenu）实现 + 实机通过（2026-11-03）**；🔄 **M9-2（VoiceChat）实现完成（审查通过）、实机待验**；M9-3（DH）⬜ |
+| 3 | M9 逐项接入（只做调研判定「可做」的） | M9 | 装/不装各跑一次，降级路径正确 | ✅ **M9-1（ModMenu）实现 + 实机通过（2026-11-03）**；🔄 **M9-2（VoiceChat）实现完成（审查通过）、实机待验**；**M9-3（DH）🟡 实现 + 复审通过（方案 A）、实机待验** |
 | 4 | **M8b 自定义资源包补测**：替换 `assets/pingforit/textures/ping.png` 后 HUD/轮盘显示自定义图标 | M8 | 需要用户提供资源包 | ⏸ 等资源包 |
 | 5 | LICENSE 换 **MIT** + 生成 `THIRD-PARTY-NOTICES` 并入 jar | M10 | 上游是 Apache-2.0 + 第三方声明，移植版按计划改 MIT | ⬜ |
 | 6 | `runServer` 冒烟：专用服务器启动无 `NoClassDefFoundError`（确认 main 不误引客户端类） | M10 | 用户终端 `gradlew :fabric:runServer`（或根级别名）；首次先改 `run/eula.txt` 为 `eula=true`（**ASCII**，见 `AGENTS.md` §7.20） | ✅ **已提前于 P0 完成（2026-11-04 16:52）**：`Done (2.998s)!` / 47 mods / 0 ERROR，见 §P0.3 |

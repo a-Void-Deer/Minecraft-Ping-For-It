@@ -1,7 +1,7 @@
 # AGENTS.md · Ping For It（MC 26.3 / Fabric 单端）协作说明
 
 > 团队唯一事实来源：现状、目录、构建、已验证结论、已知坑、待办。
-> 维护者：Lead｜**最后更新：2026-11-04（补待完成清单，含 M10 技术债与发布门禁；根级 `runClient`/`runServer` 改为转发别名，推荐仍用 `:fabric:runX`；P0 验收 R1–R4 + V18 通过；M9-1/M9-2 实机通过）**
+> 维护者：Lead｜**最后更新：2026-11-04（M9-3 DH 集成实现 + 复审通过（方案 A，实机待验）；补待完成清单含 M10 技术债与发布门禁；根级 run 任务为转发别名；P0 收口；M9-1/M9-2 实机通过）**
 
 ## 0. 2026-10-29 数据事故与恢复（先读）
 
@@ -46,6 +46,7 @@ fabric/src/client/resources/       pingforit.mixins.json（JAVA_25，client 列�
 forge/ neoforge/                   只有 README 的预留目录，**不在 settings.gradle**，不参与构建
 deferred/                95 java   26.3 无对应原语的渲染/UI 子系统，不参与编译，M7 取回（原 96，M9-1 移出 `modmenu/`）
 tools/compile-check.sh|.ps1        本地 javac 三遍校验（common → fabric main → fabric client）+ 服务端安全 grep 门禁
+compile-libs/                      DistantHorizonsApi-<ver>.jar（**仅编译期**，不入库；方案 A，见 §7.15）
 docs/                              porting-plan / PORTING-PROGRESS / features / reviews / team.md / restructure/
 Mod_Project/                       上游源码（已重新解压，**.gitignore 排除**）
 run/ build/ .gradle/ .idea/        运行与构建产物（gitignore）
@@ -135,10 +136,13 @@ export GRADLE_USER_HOME="D:/Gradle"
 
 14. **GUI 里抛一次异常 = 整屏冻结（不是崩溃）**：26.3 的 `Minecraft.renderFrame` 在 `acquireNextTexture()` 之后、`present()` 之前抛异常时，window surface 保持 acquired，之后每帧开头 `if (windowSurface.isAcquired()) return` 直接返回——**看起来就是卡死**，日志里只有一条异常。典型触发：退化控件框（宽度 0/1）进入 `ActiveTextCollector.acceptScrolling*` 的 `Parameters.withScissor`（**该路径不做屏幕裁剪**），退化为 2×1 的 scissor 被 `FrontendRenderPass` 拒绝。**任何自绘/滚动文字控件都必须自带退化框闸门**。案例与修法见 `docs/reviews/48-m8a-tab-freeze-review.md`。
 
-15. **可选集成的编译期依赖走 `run/mods` 本地 jar（Gradle 无网络）**：本机 Gradle 没有可用网络，所以 Mod Menu / VoiceChat API / DH API **不在 maven 里声明**，而是 `ext.integrationJars`（`buildSrc/src/main/groovy/multiloader-common.gradle`）用 `rootProject.fileTree(dir: 'run/mods', include: ["modmenu-*.jar", "voicechat-api-*.jar", "voicechat-*.jar", "DistantHorizons-*.jar", "DistantHorizonsApi-*.jar"])` + `exclude "*-sources.jar", "*-javadoc.jar"` + `compileOnly` 直接吃本地 jar，并在**各自编译任务的 `doFirst`（编译时，不是配置期）**用 `logger.lifecycle` 打印命中的 jar 名（`compileOnly integration jars (<task>): [...]`）。**集成检查现在有两个**，由 `attachIntegrationJarCheck(taskName, requiredPrefix, message)` 统一注册：`compileClientJava` → 前缀 **`modmenu-`**、`compileJava` → 前缀 **`voicechat-`**。两个前缀都**带连字符**，专门避免无关 jar（例如 `voicechatprofiles-*.jar`）误满足检查。`tools/compile-check.sh|.ps1` 用**同一套 glob**（排除 `-sources`/`-javadoc`）拼 javac classpath，命中名单打印成 `compile-check: integration jars from run/mods: <name>, <name>`，0 命中时打印 `no integration jars matched in run/mods (M9 integration classes cannot compile)`。
-    - **缺 jar 的症状分两种**：**已有检查的集成**（Mod Menu、VoiceChat）缺失会在**编译时、javac 之前**抛 `GradleException`（各自的 `doFirst`，消息含 `Missing compile-only jar for the …` + 应放的文件名与下载 URL，例如 `modmenu-21.0.0.jar` / `voicechat-fabric-2.6.27+26.3.jar` 或 `voicechat-api-2.6.27.jar`）——fail-fast，走的不是「先报一屏 package does not exist」；检查**刻意不放在配置期**，所以没有 jar 的 checkout 里 `./gradlew tasks` / `clean` / IDE sync 照常可用；**其它集成**（voicechat-api / DH API）缺失只是少一个 compileOnly，症状是随后 `package … does not exist` 的编译错。**排查第一步永远是看 `logger.lifecycle` 那行 jar 列表**（`compile-check` 则是 `integration jars from run/mods:` 那行），先确认命中了哪些 jar，再改代码。
-    - **CI 必须自带**：`run/` 被 gitignore，全新 checkout 里没有 jar，所以 `.github/workflows/build.yml` 在 build 前用 `curl` 从官方 maven/CDN 补同样 3 个 jar：`modmenu-21.0.0.jar`、**VoiceChat 完整 mod jar** `voicechat-fabric-2.6.27+26.3.jar`（同样与本地 `run/mods` 一致，自带 `de/maxhenkel/voicechat/api/*`，不再用 API-only jar）、**DH 完整 jar** `DistantHorizons-3.3.4-26.3-fabric-neoforge.jar`（与 dev `run/mods` 同一件产物，自带 `com/seibel/distanthorizons/api/*`，避免 CI/本地编译面漂移；**不再**单独下 `DistantHorizonsApi-*.jar`）。新增集成时**三处要一致**：`ext.integrationJars` 的 include **+ exclude**、两个脚本的 glob **+ 排除**（`tools/compile-check.sh|.ps1`）、workflow 的 fetch 列表；另外 `multiloader-common.gradle` 里要给该集成**自己的存在性检查**（`attachIntegrationJarCheck`：add its glob here AND its own check）。
-    - **`run/mods` 同时是 dev 运行时的 mods 目录**：M9 阶段放进去的 jar 会被 `runClient` **真的加载**（例如装了 `modmenu-21.0.0.jar` 才看得到配置按钮），所以它既是编译依赖也是运行时依赖，不要当成纯缓存目录。
+15. **可选集成的编译期依赖分两类：`run/mods`（编译 + 运行时共用）与 `compile-libs`（仅编译期）**：本机 Gradle 没有可用网络，所以都不在 maven 里声明，而是直接吃本地 jar。
+    - **`run/mods`（编译 + 运行时）**：`ext.integrationJars`（`buildSrc/src/main/groovy/multiloader-common.gradle:43-54`）用 `rootProject.fileTree(dir: 'run/mods', include: ["modmenu-*.jar", "voicechat-api-*.jar", "voicechat-*.jar"])` + `exclude "*-sources.jar", "*-javadoc.jar"` + `compileOnly`；`compileClientJava` → 前缀 **`modmenu-`**、`compileJava` → 前缀 **`voicechat-`**（前缀带连字符，避免 `voicechatprofiles-*.jar` 误满足）。
+    - **`compile-libs`（仅编译期）**：`ext.integrationApiJars`（同文件 `:62-70`）指向 `compile-libs/`，include 只有 **`DistantHorizonsApi-*.jar`**，由 `attachIntegrationApiJarCheck("compileJava", "DistantHorizonsApi-", ...)` 检查。
+    - **`run/mods` 里的完整 DH jar（`DistantHorizons-3.3.4-26.3-fabric-neoforge.jar`）只做运行时，不得再进编译类路径** —— 它已被从 `ext.integrationJars` 的 include 里**剔除**（方案 A）；否则「编译期独立 API / 运行时完整 mod」的隔离失效，API 漂移也观测不到。
+    - **两行日志要分清**：`run/mods` 命中打印 `compileOnly integration jars (<task>): [...]`；`compile-libs` 命中打印 **`compileOnly integration API jars (<task>): [...]`**。`tools/compile-check.sh|.ps1` 对应两行：`integration jars from run/mods: …` 与 **`integration API jars from compile-libs: …`**（0 命中只警告、不退出；真正的 fail-fast 在 Gradle 端）。
+    - **缺 jar 的症状**：**已有检查的集成**（Mod Menu / VoiceChat / DH API）缺失会在**编译时、javac 之前**抛 `GradleException`（消息含 `Missing compile-only jar for …` 或 `Missing compile-time API jar for …` + 应放的文件名与下载 URL）——fail-fast，不是「先报一屏 package does not exist」；检查**刻意不放在配置期**，所以没有 jar 的 checkout 里 `./gradlew tasks` / `clean` / IDE sync 照常可用。**排查第一步永远是看那两行 jar 列表**，先确认命中了哪些 jar，再改代码。
+    - **CI 必须自带**：`run/` 与 `compile-libs/` 都被 gitignore，全新 checkout 没有 jar，所以 `.github/workflows/build.yml` 在 build 前用 `curl` 补：`run/mods/` 放 `modmenu-21.0.0.jar` 与 **VoiceChat 完整 mod jar** `voicechat-fabric-2.6.27+26.3.jar`；**`compile-libs/` 放 `DistantHorizonsApi-7.2.0.jar`**（**不再**下完整 DH jar —— CI 只跑 `./gradlew build`、从不启动游戏，编译只需要 API）。新增集成时**三处要一致**：`ext.integrationJars` / `ext.integrationApiJars` 的 include + exclude、两个脚本的 glob + 排除、workflow 的 fetch 列表；另外要给该集成**自己的存在性检查**（`attachIntegrationJarCheck` / `attachIntegrationApiJarCheck`）。
 
 16. **dev 里 common 的资源不在 mod root 上——必须合并进 fabric 的 processResources**（2026-11-03 重构后实机暴露）：机制是 **Fabric 的资源包只按「mod root」建索引，而 mod root = 根目录含 `fabric.mod.json` 的 classpath 条目**（`fabric-resource-loader` 的 `ModNioPackResources` 只走 `ModContainer.getRootPaths()`）。dev 的 `runClient` 里 `:common` 是以 **jar** 形式在 classpath 上（`run/logs/debug.log` 的 Knot classpath 可见 `common/build/libs/….jar`），jar 根没有 `fabric.mod.json`，所以它的 `assets/` 物理上在 classpath 却不会进资源包索引；mixin/SPI 不受影响（走 classloader 全 classpath 扫描）。所以只把 common 的资源塞进发布 jar 是不够的：`runClient` 里会出现未翻译的 key（`pingforit.chat.pingmsg`、`unit.pingforit.meters`…）、`Missing sound for event: pingforit:ping`、Mod Menu 图标丢失，而**同一份构建出来的 jar 完全正常**（jar 里 assets 齐全）。修法：`fabric/build.gradle` 的 `processResources { from project(':common').sourceSets.main.resources }`，并且 `jar` 只合并 `:common` 的 `classesDirs`（资源只经 processResources 进一次，否则 jar 里出现重复条目）。上游 fork 的 `multiloader-loader.gradle` 用同一招（`from(configurations.commonResources)`）。**判断依据**：看 `fabric/build/resources/main` 下有没有 `assets/`。
 
@@ -179,7 +183,7 @@ export GRADLE_USER_HOME="D:/Gradle"
 | M5 | **M5 服务端权威：完善 + 双客户端验收**（受众/赢家/限流/移除/过期/重连） | ⬜ |
 | M7 | 渲染重建：`deferred/` 描边/世界渲染按 26.3 管线重写 | ✅ **M7a 方块线框 + M7b 实体描边 + M7c C1 模型光晕完成并实机通过（2026-10-31）**；**M7c C2（entity_block 真实体光晕）✅ 完成并实机通过**（`020d920`/`b3ad60f`/`f88a887`，含契约对齐：渲染模式门控、不短路、RenderShape 前置）；规格 `33`/`35`/`38`/`40`、复审 `34`/`36`/`39` |
 | M8 | 配置/命令/UI + 资源重载迁 v1 | ✅ **完成（2026-11-01）**：**M8a** 完整分页设置界面（6 客户端分类/25 项 + 3 服务端分类/5 字段，含 tab 冻结修复）实机通过；**M8b** 资源 v1 + 自定义贴图（默认路径通过，**自定义包待补测**）；**M8c** toggle notice 第二层 HUD 实机通过。文档：`46`/`47`/`48`/`49` |
-| M9 | 可选集成（ModMenu/VoiceChat/FTB/DH/Sable） | **M9-1 ✅ 实现 + 实机通过（2026-11-03）**：Mod Menu 类从 `deferred/` 迁回 `src/client`（与上游逐字节一致）、`fabric.mod.json` 加 `modmenu` entrypoint、依赖改 `run/mods` 离线 jar；**M9-2 ✅ 实现 + 实机通过（2026-11-03）**：`VoiceChatIntegration`/`VoiceChatWrapper` 与上游逐字节一致、`fabric.mod.json` 加 `voicechat` entrypoint、`build.gradle` 加 `compileJava` 的 `voicechat-` jar 检查；实机证据：R1 起每轮 `Loaded 1 plugin(s)` + `Initialized 1 plugin(s)` + `Registering events for 'pingforit'`（不再是从前的 0）。**M9-3 ⬜**（DH 需 API 接线）；FTB Teams / Sable **平台强制跳过**（`24` #17/#18） |
+| M9 | 可选集成（ModMenu/VoiceChat/FTB/DH/Sable） | **M9-1 ✅ 实现 + 实机通过（2026-11-03）**：Mod Menu 类从 `deferred/` 迁回 `src/client`（与上游逐字节一致）、`fabric.mod.json` 加 `modmenu` entrypoint、依赖改 `run/mods` 离线 jar；**M9-2 ✅ 实现 + 实机通过（2026-11-03）**：`VoiceChatIntegration`/`VoiceChatWrapper` 与上游逐字节一致、`fabric.mod.json` 加 `voicechat` entrypoint、`build.gradle` 加 `compileJava` 的 `voicechat-` jar 检查；实机证据：R1 起每轮 `Loaded 1 plugin(s)` + `Initialized 1 plugin(s)` + `Registering events for 'pingforit'`（不再是从前的 0）。**M9-3 ✅ 实现 + 复审通过（2026-11-04）·实机待验**：`DistantHorizonsIntegration` 由 76 行 stub 换回**上游 201 行实现**（`rootCause` 未动、调用点零改动），**方案 A** = 编译期只吃 `compile-libs/DistantHorizonsApi-7.2.0.jar`（Modrinth 官方件，363 318 B）、运行时仍用 `run/mods` 的完整 jar；复审 `docs/reviews/64-m9-3-dh-integration-review.md`（通过、无阻塞）；FTB Teams / Sable **平台强制跳过**（`24` #17/#18） |
 | **P0（重构后验收）** | 多模块重构（`f18e31e`）后的实机回归 | **✅ P0 收口（V13–V15 受限未验证）**：V1/V4/V9/V12/V16/V17 ✅、**V18 ✅（2026-11-04 16:52，`Done (2.998s)!` / 47 mods / 0 ERROR）**；V6/V7/V11 🟡（需肉眼/留证）；**V13–V15 ⏸ 受限未验证**（见 `24` #19 实测结论；描边仍可见、仍穿墙，仅半透明叠加时可能有染色差异）；V19 ⏸ 可选。逐项见 `docs/PORTING-PROGRESS.md` §P0 |
 | M10 | 验证与发布：`runServer`、CI、测试基座、LICENSE → MIT + THIRD-PARTY-NOTICES | ⬜ |
 
@@ -194,7 +198,7 @@ export GRADLE_USER_HOME="D:/Gradle"
 | A · P0 收尾 | **V13–V15 OIT 描边路由**：移走 DH → 开 Improved Transparency → ping，日志应出现**恰好 1 条** `improved transparency is ON …` | 实机日志 | ⏸ **受限未验证**：已尝试两项修复（门控改读 `Options.improvedTransparency`、`isCustom` 改「实例 → 注册名回退」）仍未触发；结论与影响见 `docs/reviews/24-fidelity-constraint-audit.md` **#19 实测结论**（描边仍可见、仍穿墙，仅半透明叠加时可能有染色差异） |
 | A · P0 收尾 | **V19 发布 jar 干净安装**：干净 Fabric 26.3 实例只放本 jar + fabric-api，启动查图标/中文/ping | 实机启动 | ⏸ 可选 |
 | A · P0 收尾 | **V6 / V7 / V11 肉眼确认**：Mods 列表图标、设置界面中文、ModMenu 配置按钮 | 实机截图 | 🟡 日志级已过，待肉眼留证 |
-| B · 主线功能 | **M9-3 Distant Horizons 集成**：stub → 上游真实现（异步远距离射线 + `ModContext.HasDistantHorizons` + 失败降级） | 装/不装 DH 各跑一次 | ⬜ **开工前需用户定**：独立 API jar（新增 `compile-libs/`）还是沿用完整 jar |
+| B · 主线功能 | **M9-3 Distant Horizons 集成**：stub → 上游真实现（异步远距离射线 + `ModContext.HasDistantHorizons` + 失败降级） | 装/不装 DH 各跑一次 | 🟡 **实现 + 复审通过（2026-11-04，方案 A），实机待验**（`64` 通过、无阻塞；待验见 §9 的 M9 行与 `PORTING-PROGRESS` §M9-3） |
 | B · 主线功能 | **M5 服务端权威验收**：受众快照 / 赢家选择 / 移除仅本人 / 限流 / 过期 / 断线重连 | **两个客户端互测** | ⬜（代码已存在） |
 | C · M10 发布 | **LICENSE → MIT** + `THIRD-PARTY-NOTICES` 并入 jar | 检查 jar 内 `LICENSE_pingforit` 与 notices | ⬜ |
 | C · M10 发布 | **CI 真实跑绿**：`clean build` + 产物上传 + jar 元数据检查 | GitHub Actions 绿 | ⬜ **从未真正跑过**（本机无网）——**发布前唯一外部未知项** |
@@ -204,7 +208,7 @@ export GRADLE_USER_HOME="D:/Gradle"
 | C · M10（技术债） | `GameContext.lastWorld` 静态 `ClientLevel` 断线后不清空（`docs/reviews/57-pipeline-conflict-audit.md` **S1**）→ 内存滞留 | 改代码 + 断线复测 | ⬜ |
 | C · M10（技术债） | 5 处 mixin 仍 `require=1`（同 `57` **H5**）→ 未来 MC 签名变动会**启动崩溃**而不是降级 | 评估改 `require=0` + 诊断 | ⬜ |
 | C · M10（技术债） | 诊断信号变弱（`entity-block glow` 的 WARN 已降 DEBUG）→ 真回归只能靠视觉 | 2号 补强方案（`resolved`/`consumed` 计数 + 首次消费 DEBUG） | ⬜ |
-| C · M10（技术债） | **DH × OIT 互斥策略**：装 DH 的玩家永远走不到 `outline` 相位分支 | 加诊断开关强制走，或在 `docs/reviews/24-fidelity-constraint-audit.md` 登记为已知行为 | ⬜（**M9-3 之前定**） |
+| C · M10（技术债） | **DH × OIT 互斥策略**：装 DH 的玩家永远走不到 `outline` 相位分支 | 加诊断开关强制走，或在 `docs/reviews/24-fidelity-constraint-audit.md` 登记为已知行为 | ⬜（**M9-3 已实现（方案 A），此项待决**） |
 | D · 遗留 / 可选 | **M8b 自定义资源包补测**（替换 `assets/pingforit/textures/ping.png`） | 实机贴图 | ⏸ 等用户提供资源包 |
 | D · 遗留 / 可选 | **OIT 复测**：透明物体叠加顺序 | 实机 | ⏸ 可选 |
 | D · 遗留 / 可选 | `render/spike/OutlineExperiment` 清理 | 删除并确认无引用 | ⏸ 用户已确认保留 |

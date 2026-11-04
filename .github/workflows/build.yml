@@ -24,16 +24,17 @@ jobs:
       - name: make gradle wrapper executable
         run: chmod +x ./gradlew
 
-      # M9 optional integrations are compile-only: the modules compile against jars in
-      # run/mods (the dev machine has no usable gradle network). run/ is gitignored, so a
-      # fresh checkout has no jars and the integration classes cannot compile -- this step
-      # supplies them from their official mavens/CDN. Keep this list in sync with
-      # ext.integrationJars in buildSrc/src/main/groovy/multiloader-common.gradle and its
-      # per-integration existence checks (common/ -> voicechat-, fabric/ -> modmenu-);
-      # the build therefore needs network here (or pre-placed run/mods jars) to succeed.
+      # M9 optional integrations are compile-only (the dev machine has no usable gradle
+      # network). run/ and compile-libs/ are gitignored, so a fresh checkout has no jars and
+      # the integration classes cannot compile -- this step supplies them from their official
+      # mavens/CDN. Keep both lists in sync with buildSrc/src/main/groovy/multiloader-common.gradle:
+      #   * ext.integrationJars    (run/mods)     -> modmenu, voicechat
+      #   * ext.integrationApiJars (compile-libs) -> DistantHorizonsApi
+      # plus their per-integration existence checks (common/ -> voicechat-, DistantHorizonsApi-;
+      # fabric/ -> modmenu-). The build therefore needs network here (or pre-placed jars).
       - name: fetch optional integration jars (compile-only)
         run: |
-          mkdir -p run/mods
+          mkdir -p run/mods compile-libs
           curl -fsSL --retry 3 -o run/mods/modmenu-21.0.0.jar \
             "https://maven.terraformersmc.com/releases/com/terraformersmc/modmenu/21.0.0/modmenu-21.0.0.jar"
           # Same artifact the dev runtime loads (the full Simple Voice Chat mod bundles the
@@ -41,12 +42,13 @@ jobs:
           # surface instead of an api-only jar that can drift.
           curl -fsSL --retry 3 -o "run/mods/voicechat-fabric-2.6.27+26.3.jar" \
             "https://cdn.modrinth.com/data/9eGKb6K1/versions/x9jLR94Q/voicechat-fabric-2.6.27%2B26.3.jar"
-          # Deliberately the same DH artifact the dev runtime loads (it bundles the DH API
-          # classes), so CI and local compile against an identical class surface. The
-          # API-only jar is smaller but would silently drift from run/mods.
-          curl -fsSL --retry 3 -o run/mods/DistantHorizons-3.3.4-26.3-fabric-neoforge.jar \
-            "https://cdn.modrinth.com/data/uCdwusMi/versions/TGgEbP9A/DistantHorizons-3.3.4-26.3-fabric-neoforge.jar"
-          ls -l run/mods
+          # M9-3 scheme A: Distant Horizons compiles against the standalone API jar, never the
+          # full mod jar. CI only runs "./gradlew build" and never launches the game, so the
+          # API jar is enough and ~20 MB smaller; the dev machine keeps the full jar in run/mods
+          # for the actual runtime. Upgrade both together to keep the API surface in sync.
+          curl -fsSL --retry 3 -o compile-libs/DistantHorizonsApi-7.2.0.jar \
+            "https://cdn.modrinth.com/data/Xs0XTOVv/versions/LTP8vW3B/DistantHorizonsApi-7.2.0.jar"
+          ls -l run/mods compile-libs
 
       - name: build
         run: ./gradlew build

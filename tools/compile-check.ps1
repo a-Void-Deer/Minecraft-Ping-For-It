@@ -1,5 +1,7 @@
 # Local javac check for the three source sets of the multi-module layout
 # (no Gradle, no network). Rebuilt 2026-11-03 for common/ + fabric/.
+# NOTE: API jars (compile-libs/DistantHorizonsApi-*.jar) contain .java sources;
+# javac would implicitly compile them into the output dir unless -implicit:none is used.
 # Mirrors tools/compile-check.sh: MC jars from D:/Gradle/caches/fabric-loom/26.3,
 # dependency jars from D:/Gradle/caches/modules-2.
 #
@@ -90,7 +92,7 @@ $CP_JARS += $depJars
 # Same glob list as ext.integrationJars in buildSrc/src/main/groovy/multiloader-common.gradle,
 # so a stray jar in run/mods can never silently widen the compile classpath (and
 # sources/javadoc jars never sneak in).
-$integrationGlobs = @("modmenu-*.jar", "voicechat-api-*.jar", "voicechat-*.jar", "DistantHorizons-*.jar", "DistantHorizonsApi-*.jar")
+$integrationGlobs = @("modmenu-*.jar", "voicechat-api-*.jar", "voicechat-*.jar")
 $integrationJars = @()
 $modDir = Join-Path $T "run/mods"
 if (Test-Path $modDir) {
@@ -106,6 +108,29 @@ if ($integrationJars.Count -gt 0) {
     Write-Output ("compile-check: integration jars from run/mods: " + (($integrationJars | ForEach-Object { $_.Name }) -join ", "))
 } else {
     Write-Output "compile-check: no integration jars matched in run/mods (M9 integration classes cannot compile)"
+}
+
+# M9-3 (scheme A): Distant Horizons compiles against the standalone API jar in
+# compile-libs/, never against the full mod jar in run/mods. Same globs/exclusions as
+# ext.integrationApiJars in buildSrc/src/main/groovy/multiloader-common.gradle.
+# A miss is only a warning: the DH integration then cannot compile, exactly like a
+# missing run/mods jar.
+$integrationApiGlobs = @("DistantHorizonsApi-*.jar")
+$integrationApiJars = @()
+$apiLibDir = Join-Path $T "compile-libs"
+if (Test-Path $apiLibDir) {
+    foreach ($jar in @(Get-ChildItem $apiLibDir -Filter *.jar -File -ErrorAction SilentlyContinue | Sort-Object Name)) {
+        if ($jar.Name -match "-(sources|javadoc)[.]jar$") { continue }
+        foreach ($glob in $integrationApiGlobs) {
+            if ($jar.Name -like $glob) { $integrationApiJars += $jar; break }
+        }
+    }
+}
+if ($integrationApiJars.Count -gt 0) {
+    $CP_JARS += @($integrationApiJars | ForEach-Object { ToSlash $_.FullName })
+    Write-Output ("compile-check: integration API jars from compile-libs: " + (($integrationApiJars | ForEach-Object { $_.Name }) -join ", "))
+} else {
+    Write-Output "compile-check: no integration API jars matched in compile-libs (Distant Horizons integration cannot compile)"
 }
 $CP_BASE = ($CP_JARS -join ";")
 
@@ -153,7 +178,7 @@ function Invoke-Pass([string]$Name, [string]$SrcDir, [string]$Cp, [string]$OutDi
     Write-Output ("[" + $Name + "] sources=" + $src.Count)
     if ($src.Count -gt 0) {
         $env:JAVA_TOOL_OPTIONS = "-Duser.language=en -Duser.country=US"
-        $argLine = '--release 25 -proc:none -nowarn -encoding UTF-8 -Xmaxerrs 20000 "@' + $cpFile + '" "@' + $srcFile + '" -d "' + $OutDir + '"'
+        $argLine = '--release 25 -proc:none -implicit:none -nowarn -encoding UTF-8 -Xmaxerrs 20000 "@' + $cpFile + '" "@' + $srcFile + '" -d "' + $OutDir + '"'
         $psi = New-Object System.Diagnostics.ProcessStartInfo
         $psi.FileName = $JAVAC
         $psi.Arguments = $argLine

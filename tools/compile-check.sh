@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Local javac check for the three source sets of the multi-module layout
 # (no Gradle, no network). Rebuilt 2026-11-03 for common/ + fabric/.
+# NOTE: API jars (compile-libs/DistantHorizonsApi-*.jar) contain .java sources;
+# javac would implicitly compile them into the output dir unless -implicit:none is used.
 # MC jars come from D:/Gradle/caches/fabric-loom/26.3, every dependency jar from
 # D:/Gradle/caches/modules-2 (Fabric Loader / Fabric API modules + libs).
 #
@@ -82,7 +84,7 @@ fi
 # Same glob list as ext.integrationJars in buildSrc/src/main/groovy/multiloader-common.gradle,
 # so a stray jar in run/mods can never silently widen the compile classpath (and
 # sources/javadoc jars never sneak in).
-INTEGRATION_GLOBS=("modmenu-*.jar" "voicechat-api-*.jar" "voicechat-*.jar" "DistantHorizons-*.jar" "DistantHorizonsApi-*.jar")
+INTEGRATION_GLOBS=("modmenu-*.jar" "voicechat-api-*.jar" "voicechat-*.jar")
 INTEGRATION_JARS=()
 INTEGRATION_NAMES=()
 for jar in run/mods/*.jar; do
@@ -103,6 +105,33 @@ if [ "${#INTEGRATION_JARS[@]}" -gt 0 ]; then
   echo "compile-check: integration jars from run/mods: ${joined%, }"
 else
   echo "compile-check: no integration jars matched in run/mods (M9 integration classes cannot compile)" >&2
+fi
+# M9-3 (scheme A): Distant Horizons compiles against the standalone API jar in
+# compile-libs/, never against the full mod jar in run/mods. Same globs/exclusions as
+# ext.integrationApiJars in buildSrc/src/main/groovy/multiloader-common.gradle.
+# A miss is only a warning: the DH integration then cannot compile, exactly like a
+# missing run/mods jar.
+COMPILE_LIBS_GLOBS=("DistantHorizonsApi-*.jar")
+COMPILE_LIBS_JARS=()
+COMPILE_LIBS_NAMES=()
+for jar in compile-libs/*.jar; do
+  if [ ! -f "$jar" ]; then continue; fi
+  base="${jar##*/}"
+  case "$base" in
+    *-sources.jar|*-javadoc.jar) continue ;;
+  esac
+  for glob in "${COMPILE_LIBS_GLOBS[@]}"; do
+    case "$base" in
+      $glob) COMPILE_LIBS_JARS+=("$TW/$jar"); COMPILE_LIBS_NAMES+=("$base"); break ;;
+    esac
+  done
+done
+if [ "${#COMPILE_LIBS_JARS[@]}" -gt 0 ]; then
+  CP_JARS+=("${COMPILE_LIBS_JARS[@]}")
+  joined="$(printf '%s, ' "${COMPILE_LIBS_NAMES[@]}")"
+  echo "compile-check: integration API jars from compile-libs: ${joined%, }"
+else
+  echo "compile-check: no integration API jars matched in compile-libs (Distant Horizons integration cannot compile)" >&2
 fi
 CP_BASE="$(IFS=";"; echo "${CP_JARS[*]}")"
 
@@ -141,7 +170,7 @@ run_pass() {
   echo "[$name] sources=$sources"
   if [ "$sources" -gt 0 ]; then
     JAVA_TOOL_OPTIONS="-Duser.language=en -Duser.country=US" \
-      "$JAVAC" --release 25 -proc:none -nowarn -encoding UTF-8 -Xmaxerrs 20000 \
+      "$JAVAC" --release 25 -proc:none -implicit:none -nowarn -encoding UTF-8 -Xmaxerrs 20000 \
       "@$OUT_WIN/cp-$name.txt" "@$OUT_WIN/src-$name.txt" -d "$outdir" > "$log" 2>&1
     echo "[$name] exit=$?"
   fi
