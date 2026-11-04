@@ -92,8 +92,9 @@ re-create a cleared adapter section, and a section clear deletes neither the
 marker nor another adapter's section. The negotiated Basic atomic initial is
 the sole source of marker initialization and initial chat and label names: the
 created-marker message carries the canonical marker snapshot, the Basic section,
-and the receipt content descriptor, and a message without usable Basic is
-discarded before any part is applied. The client also requires the carried
+and the receipt content descriptor, including its inventory creation snapshot
+when present, and a message without usable Basic is discarded before any part is
+applied. The client also requires the carried
 marker ID to match the snapshot ID. The descriptor's wire grammar is owned by
 [network protocol](../network/protocol.md);
 its projection policy is owned by
@@ -129,8 +130,10 @@ is not charged or sent as an empty section, and its collector is never reached
 from that route. The inventory adapter (`pingforit:inventory`, schema 2) is
 dedicated: it declares two record fields, `pingforit:inventory.items` and
 `pingforit:inventory.fluids`, each enabled by default at permission level zero.
-Their values travel only on the dedicated inventory route owned by
-[network protocol](../network/protocol.md). Dedicated adapters share the same
+Their tracking values travel only on the dedicated inventory route owned by
+[network protocol](../network/protocol.md), while the atomic creation receipt
+carries one bounded creation snapshot for the selected resource as a
+creation-scoped value. Dedicated adapters share the same
 per-field authorization rule as section fields: the target type's selector
 policy decides the manifest default, then the recipient permission callback
 decides the effective level; a missing setting, field or target type denies.
@@ -650,21 +653,34 @@ message family, whose template, wait and fence rules are owned by
 ## Receipt content descriptor
 
 The atomic initial carries, beside the canonical marker snapshot and the Basic
-section, one per-recipient receipt content descriptor: selection metadata only,
-whose referenced content still arrives solely through the existing authorized
-stores. Its exact wire grammar and strict decoding are owned by
+section, one per-recipient receipt content descriptor. The descriptor is
+selection metadata for property content and, for the inventory kind, exactly one
+bounded creation snapshot supplied by the server. Property values and
+annotations still arrive solely through the existing authorized stores; the
+inventory snapshot is a creation-scoped value, not a store subscription or a
+Tracking result. Its exact wire grammar and strict decoding are owned by
 [network protocol](../network/protocol.md#presentation-snapshot-route-presentation-v2);
-the message composition, wait and fence rules are owned by
-[names and chat](../rendering/names_chat.md#content-receipt-lifecycle).
+the message composition, one-shot behavior and uncertainty notation by
+[names and chat](../rendering/names_chat.md#content-receipt-lifecycle); and the
+snapshot's source freeze and Tracking independence by
+[inventory](inventory.md#creation-snapshot-receipt).
 
-Projection uses the recipient's current fresh authorization: the accepted
-manifest and schema kind, the advertised mask, the exact child deny predicate,
-and the recipient's fresh permission must all include a selected reference, and
-the accepted dedicated inventory route view must authorize the committed
-selection's resource field for the marker's target type for the inventory kind.
-A recomputed initial for a replayed or refreshed marker applies the same current
-authorization, so a revocation suppresses a
-later delivery.
+Projection uses the recipient's current fresh authorization. A property
+reference is projected only when the accepted manifest and schema kind, the
+advertised mask, the exact child deny predicate, and the recipient's fresh
+permission all include it. For the inventory kind, the accepted dedicated
+inventory route view must authorize the committed selection's resource field for
+the marker's target type, and the recipient's fresh permission must allow it.
+The inventory projection is marker-scoped and creation-scoped: it uses that
+current server authorization without requiring the client's existing lane
+`POLICY` state to have caught up. A stale lane denial is neither a veto nor a
+grant. The marker-scoped creation projection creates no global lane allowance,
+clears no existing marker denial, and does not change ordinary Tracking
+authorization. A current denial still
+suppresses. A recomputed initial for a replayed or refreshed marker applies the
+same current authorization and carries the same retained creation snapshot when
+still authorized, never a recaptured or later Tracking quantity; revocation
+suppresses a later delivery.
 
 - No admitted non-null property Ping selection — including a create whose
   selections are all null-annotation observations — and no active committed
@@ -677,18 +693,26 @@ later delivery.
   list is never sent. A null-annotation observation is retained and projected as
   authorized data but is not an explicit reference.
 - A marker with an active committed inventory tracking association yields the
-  inventory kind, whose values and count arrive only through the dedicated
-  inventory store; the kind is derived from that existing tracking association,
-  not from a second chat metadata cache.
-- For a content kind, any explicit selected reference that is field-denied,
-  child-denied, or incompatible, any denied required formatting dependency of a
-  selected property (the health pair requires its maximum-health field), or a
-  denied Basic target name yields the suppressed kind with no references,
-  hiding the whole content message rather than showing a partial list.
+  inventory kind, carrying exactly one creation snapshot supplied by
+  [inventory](inventory.md#creation-snapshot-receipt) and no property refs;
+  every other kind carries no snapshot. The kind is derived from that existing
+  tracking association and the creation step, not from a second chat metadata
+  cache or a later Tracking revision.
+- For a property content kind, any explicit selected reference that is
+  field-denied, child-denied, or incompatible, any denied required formatting
+  dependency of a selected property (the health pair requires its maximum-health
+  field), or a denied Basic target name yields the suppressed kind with no
+  references, hiding the whole content message rather than showing a partial
+  list. The inventory kind is suppressed with no snapshot and no references only
+  on a current field, target-type, or recipient-permission denial. A budget
+  defer is not a denial and does not convert a valid receipt into a payload-free
+  `SUPPRESSED` message.
 
-Missing authorized data does not suppress the descriptor: a selected reference
-that is authorized but whose value has not yet arrived still yields its kind,
-and the receipt waits under the names-and-chat lifecycle.
+Missing authorized property data does not suppress the descriptor: a selected
+reference that is authorized but whose value has not yet arrived still yields
+its kind, and the property receipt waits under the names-and-chat lifecycle. An
+inventory receipt carries its frozen snapshot in the atomic initial and never
+waits for a Tracking baseline or for the client lane `POLICY` view to update.
 
 ## Evidence
 

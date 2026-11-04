@@ -349,8 +349,10 @@ this route adds no Fabric/Forge Create integration or version upgrade.
 
 Before capability or content access, verify the loaded root, controller and
 every member, their current objects and controller relationships, positive
-physical scope membership, and the supported static, nonvirtual tank mode.
-The original hit must belong to the verified structure. Creative tanks and
+physical scope membership, and the supported static, nonvirtual tank state.
+The original hit must belong to the verified structure. Only the verified
+current controller's active-boiler mode selects the tank capability mode; a
+former controller's retained boiler state does not. Creative tanks and
 active-boiler input handlers are unavailable; a rejected Create route cannot
 fall through to a generic handler. Recheck current controller, member, mode,
 owner and loaded-scope authority during reads and publication. Structure

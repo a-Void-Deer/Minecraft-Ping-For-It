@@ -165,7 +165,8 @@ property, child-deny, codec, admission, and lease-refresh/capture-budget seams:
 - `PresentationReceiptContentTest` covers the receipt content
   descriptor as a strict codec: the non-property kinds carry no references, a
   property descriptor requires a non-empty sorted unique bounded reference list in a
-  deterministic order and exposes it immutably, every kind round-trips, and
+  deterministic order and exposes it immutably, every kind round-trips including
+  the inventory kind's one creation snapshot, and
   the strict reader rejects an unknown kind, an over-capacity count, an illegal
   list shape, duplicate or out-of-order references, noncanonical numbers,
   invalid identifiers and path grammar, and malformed UTF-8 metadata while a
@@ -182,7 +183,8 @@ property, child-deny, codec, admission, and lease-refresh/capture-budget seams:
   denied target name suppresses without disclosing references, a health
   selection requires its authorized maximum-health dependency, item count and
   kinetic capacity are never mandatory dependencies, and the inventory kind
-  requires the dedicated route and an authorized name;
+  carries the supplied creation snapshot and requires the dedicated route and an
+  authorized name;
 - `PresentationServerReceiptTest` covers the production initial-sending
   projection: a default-only marker stays whole even when the default reference
   is a name, an explicit selection carries its exact references including a
@@ -198,13 +200,20 @@ property, child-deny, codec, admission, and lease-refresh/capture-budget seams:
   mask or accepted manifest entry suppresses, a health
   selection requires the freshly authorized maximum, and both the atomic
   initial and the cached re-baseline use the fresh inventory permission gate
-  rather than the session's cached advertised view without rewriting that view;
+  rather than the session's cached advertised view without rewriting that view.
+  `productionSendInitialWithoutCreationSnapshotSuppressesEvenWithFreshInventoryGrant`
+  and `productionCachedInitialWithoutCreationSnapshotCannotFabricateInventoryReceipt`
+  prove that an inventory boolean without the frozen snapshot cannot fabricate
+  inventory content;
 - `ClientPresentationReceiptAcceptanceTest` covers client acceptance of the
   descriptor: a denied or unaccepted selection rejects before any atomic store
   mutation, a nested scalar selection and a present unannotated value reject
-  without rolling back the prior initial, a missing authorized value still
-  accepts and waits while a suppressed receipt retains no references, and the
-  custom-name manifest field is accepted as raw text beside the composed name;
+  without rolling back the prior initial, a missing authorized property value
+  still accepts and waits while a suppressed receipt retains no references or
+  snapshot, and the custom-name manifest field is accepted as raw text beside
+  the composed name. Its inventory cases accept a negotiated lane without a
+  section-field grant or local registry knowledge, while malformed inventory
+  initials cannot register or replace presentation state;
 - `PresentationPropertyFormatterTest` covers the client display projection:
   distinct nested annotations following the default without inheriting an outer
   Ping Type, annotating the default without duplicating it and absent nested
@@ -579,11 +588,10 @@ store and port coverage rather than live chat evidence:
   own annotation, a missing first reference cannot conceal a later denial,
   a missing, malformed or stale name waits while an explicit denial cancels,
   health waits for its required authorized maximum, a stale selected section
-  waits and an optional capacity never blocks stress, the inventory gates
-  reject partial, unknown-baseline, grey and status-only observations while a
-  complete zero is accepted, a long count stays exact, a ready inventory still
-  waits for a fresh name and negotiation and then reads the latest count, an
-  unknown inventory policy waits while an explicit denial cancels, reset,
+  waits and an optional capacity never blocks stress, a long count stays exact,
+  accepted creation snapshots format with independent quantity uncertainty and
+  are never replaced by an arbitrary fresh Tracking value, an explicit denial
+  suppresses while unknown authorization never fabricates permission; reset,
   removal, eviction, disconnect and changed epoch/view fences discard late
   data, a positive pending bound fails closed without evicting another
   capture, cancellation leaves no permanent sent history, reset or clear
@@ -601,15 +609,12 @@ store and port coverage rather than live chat evidence:
 - `PendingContentChatAcceptedStoresTest` drives the controller from real
   accepted presentation and inventory stores: accepted Basic completes exactly
   once and a known create never repeats even after a zero local visual
-  deadline, fragmented tracking waits for the complete source-data barrier while
-  preview and status-only readiness and later stream data never produce another line,
-  an invalidated count is grey and cannot be resurrected while a complete zero
-  is authoritative, an accepted reset cancels pending and an old or known new
+  deadline, an accepted reset cancels pending and an old or known new
   view cannot restart it, and authoritative expiry cancels while the marker
-  store may retain a visual record; its fixture is not production runtime
-  wiring. Its encoded-publisher bootstrap case keeps both exact and aggregate
-  long quantities pending until a fresh complete ready result, then emits once
-  even when that result equals the seed;
+  store may retain a visual record. Accepted inventory snapshots use scoped
+  receipt authority; publisher wire bootstrap and fresh Tracking cannot repeat
+  or rewrite their snapshot message. Its fixture is not production runtime
+  wiring;
 - `ClientPingRuntimeContentReceiptTest` drives the real packet-dispatched
   runtime, stores and composer with game effects and world/input access as
   ports: an ordinary receipt is immediate once and a replay does not repeat it,
@@ -618,9 +623,9 @@ store and port coverage rather than live chat evidence:
   stays whole while a mixed selection carries only the annotated reference as
   content authority and emits exactly one content line when its annotated
   section arrives with the nullable value still server-projected, non-Basic
-  selections must all arrive before the complete current set emits, an
-  inventory preview and partial baselines wait for the committed baseline
-  while later stream data never produces another line, an exact long count
+  selections must all arrive before the complete current set emits, a property
+  selected value waits for its current authorized section while later unrelated
+  data never produces another line, an exact long count
   stays exact, reset, authoritative expiry, hard removal, eviction and
   disconnect fence late completion,
   fallback stale and final deletion cancel while a short visual deadline does
@@ -632,7 +637,12 @@ store and port coverage rather than live chat evidence:
   complete, a stale epoch, view or revision cannot complete, an optional
   stress value does not require capacity and the current mask never exposes a
   denied capacity, a synchronized sibling supersedes a stale pending without
-  leaking its late values, and receipt callbacks never capture or send. The same
+  leaking its late values, and receipt callbacks never capture or send. Accepted
+  creation snapshots also traverse the real packet-dispatched runtime: immediate
+  chat and HUD `UPDATING` preserve the same value, a later closed Tracking result
+  changes only the HUD, old lane denial cannot veto the creation grant, true
+  denial suppresses, uncertainty remains independent, and sound or removal
+  reentry cannot resurrect late chat. The same
   runtime wiring also carries the production selected-locale template source
   through the controller and composer for a multi-property receipt: the bundled
   Chinese outer template owns the list grammar, a selected-locale per-entry
@@ -650,17 +660,17 @@ The grouped-container cases in these two receipt fixtures match the accepted
 snapshot and stored client marker through their explicit frozen logical key for
 normal chests, trapped chests, Vaults and fluid tanks. Client copies and stale transitions
 retain that identity; another logical group at the same physical hit cannot
-inherit the pending receipt. The runtime cases encode/decode presentation-v2
-packets and inventory frames: a source-incomplete `UPDATING` seed retains its
-exact long count without quantity chat, and a fresh usable complete `READY`
-result emits once. Property receipts require a fresh accepted annotated section;
-wrong epochs, stale data and absent annotations cannot complete them. Duplicate
-frames/creates, reset and authoritative expiry cannot repeat or revive the
-receipt, while `WHOLE` feedback stays immediate and once-only. These cases
-include the grouped tank fluid receipt's independent lane authorization and
-fresh-complete-only completion. They passed in the recorded
-[tank combined-tree run](build-checks.md#fluid-tank-grouping-and-presentation-verification),
-with the same headless effect/transport limits below.
+inherit the content receipt. The runtime cases encode/decode presentation-v2
+packets and inventory frames: property receipts require a fresh accepted
+annotated section, and wrong epochs, stale data and absent annotations cannot
+complete them. Duplicate frames/creates, reset and authoritative expiry cannot
+repeat or revive a property receipt, while `WHOLE` feedback stays immediate and
+once-only. These cases include the grouped tank fluid receipt's independent
+lane authorization. Their recorded
+[tank combined-tree run](build-checks.md#fluid-tank-grouping-and-presentation-verification)
+is historical coverage for that headless receipt path and does not establish
+the immediate creation-snapshot path; the same headless effect/transport limits
+below apply.
 
 `ChatDiagnosticsTest` covers controlled debug events for malformed whole/content
 templates while preserving each family's fallback, and a throwing locale
@@ -676,6 +686,51 @@ These are headless model, codec, store and composer seams over recording
 effect, world and input ports. They do not exercise live packet transport or
 loader registration, the Minecraft chat overlay or GUI delivery, actual sound
 playback, resource reload or locale switching, or multiplayer behavior.
+
+### Immediate inventory creation snapshot coverage
+
+`InventoryCreationSnapshotIntegrationTest` covers 17 parameterized cases across
+eight methods:
+
+- `selectedFiveChatsImmediatelyThenRealTrackingNineOnlyChangesHud` (4 lane and
+  completeness cases) covers immediate chat value 5 with HUD `UPDATING` at 5,
+  then real Tracking 9 changing only the HUD.
+- `twentyFourNormalHellosLeaveOldDenyButCreationStillChatsBeforeQueuedAllow` (4)
+  covers the 0.125 Preview multiplier with 24 distinct HELLOs; `CREATED` arrives
+  before the queued `POLICY` allow while ordinary Tracking stays denied until
+  convergence.
+- `currentRecipientDenialSendsOnlySuppressedBasicWithoutResourceOrChat` (2)
+  covers true recipient denial yielding payload-free `SUPPRESSED` with no
+  resource or chat.
+- `newCreationGrantCannotClearAnotherMarkersDenial` (1).
+- `completedPhysicalSweepWithoutCurrentPreviewCutChatsUncertainImmediately` (2).
+- `refusedInventoryInitialDoesNotBlockOrdinaryOrPropertyReceipt` (1).
+- `soundCallbackRevocationCannotBeUndoneBySeedInstallationOrServerReplay` (1).
+- `deferredCreationRemovedBeforeHandoffCannotEmitLateChat` (2 for `EXPIRED` and
+  `CANCELLED`).
+
+These cases passed in the JDK21 current-source headless common run using actual
+codecs and injected final send/chat sinks. They do not establish a real socket,
+FML/game client or GPU pixels; the combined execution is linked below.
+Supporting unit coverage includes `ClientInventoryLanesTest` for marker-scoped
+creation authority before an inventory handshake and isolation from older lane
+denials, and `ClientDisplayTextTest` for detached bounded component-text freeze.
+
+`InventoryCreationSnapshotPacketsTest` covers the literal `CREATED` inventory
+receipt wire, exactly one snapshot with no refs, and strict malformed, truncated
+and trailing rejection. `EncodedPresentationPayloadTest`, the loader
+`EncodedCreatedTransportTest` cases and the Fabric/NeoForge
+`PresentationPayloadRegistrationTest` cases cover frozen-body write-once,
+existing route/codec registration, missing or unnegotiated channel refusal,
+send-throw caller ownership and unchanged ordinary record/control wire. These
+use injected final send/eligibility and real registered codecs, not a running
+multiplayer connection.
+
+Server-side freeze, missing-row rejection, replay, retirement and budget
+coverage is owned by
+[inventory verification](inventory.md#creation-snapshot-server-coverage).
+The current-input combined execution and artifact checks are recorded in
+[build checks](build-checks.md#final-combined-tree-acceptance-and-artifact-verification).
 
 ## Names and chat
 
@@ -709,10 +764,11 @@ Name-composition and rendering evidence is recorded under
 - content receipt descriptor, projection, server initial-sending and client
   acceptance, pending content-chat completion and content chat composition have
   the headless model, codec, store and port coverage inventoried above. No
-  automated test exercises the receipt descriptor over a live connection or
-  loader transport, the Minecraft chat overlay or GUI delivery, actual sound
-  playback, resource reload or locale switching, or multiplayer; the receipt
-  lifecycle owner is
+  automated test exercises the receipt over a live connection; loader transport
+  tests inject final send/eligibility with real registered codecs and do not
+  establish a running negotiation. The Minecraft chat overlay or GUI delivery,
+  actual sound playback, resource reload, locale switching and multiplayer
+  remain manual gaps; the receipt lifecycle owner is
   [names and chat](../../architecture/rendering/names_chat.md#content-receipt-lifecycle);
 - a live property-upload admission round trip: the admission, recapture,
   override, and creation-rollback seams use fakes, in-memory state, or

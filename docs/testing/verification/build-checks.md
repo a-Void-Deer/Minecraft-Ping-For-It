@@ -813,6 +813,115 @@ launch, multiplayer or long-run
 native-heap/performance; live scenarios remain in the
 [fluid manual matrix](manual-integration.md#fluid-inventory).
 
+### Final combined-tree acceptance and artifact verification
+
+Recorded execution date: 2026-11-04. The tested input is identified by InputID
+`8f9bfed20aff917b8e910b1aff2e84ffa0e1134afda8a630b4e115355df1dbc2`, HEAD
+`0b6b279d4cd51ae33f0fd9c3199e57f8bfcfd88d` plus 55 validated dirty non-document
+paths; that HEAD alone does not contain the inspected inventory creation-snapshot
+and related feature changes. A later commit
+SHA may differ, so the input ID and affected source-tree scope identify this run.
+The affected-file scope contains 76 paths: 70 active paths (69 in the main scope and one additional Vault path) and six checkpoint paths. The 1,350 non-document inputs were
+stable across the before, immediate-after and final snapshots. Earlier failing
+fixtures were repaired and rerun; the previous Common three, Forge two and
+NeoForge `compileTestJava` failures all passed in this current-input run, and
+their earlier results are not reused. Only one Vault test changed since the
+previous formal input, and production source remained unchanged.
+
+Exactly one authorized Gradle invocation ran with Temurin JDK 21, UTF-8,
+`--no-daemon`, `--continue`, `--console=plain`, `--info`, two external init
+scripts and separate stdout/stderr files. It exited 0 with `BUILD SUCCESSFUL`.
+The task arguments were:
+
+```powershell
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$env:JAVA_HOME = 'E:/scoop/apps/temurin21-jdk/current'
+.\gradlew.bat --no-daemon --continue --console=plain --info `
+  "-Dpfi.formal.evidence=$evidenceDir" `
+  '-Dpfi.formal.authorization=allfour-acceptance-20261104-122452-b65071b3' `
+  :common:check :common:javadoc :fabric:build :forge:build :neoforge:build `
+  verifyModIdentity :fabric:fluidSourceIntegration :forge:fluidSourceIntegration `
+  :neoforge:fluidSourceIntegration :forge:fluidPresentationIntegration `
+  :forge:nativeFluidAmountIntegration :common:fluidPresentationClassSafetyIntegration `
+  :forge:fluidRegistryIntegration :forge:nativeFluidRegistryFreezerIntegration `
+  :forge:fluidRegistryColdWaterIntegration :forge:fluidRegistryModuleIntegration `
+  --init-script $formalInit --init-script $classSafetyInit > $stdout 2> $stderr
+```
+
+The run produced 589 fresh JUnit XML suites and 6,094 test executions including
+required supplements: 6,078 passed, 16 skipped, 0 failed and 0 errored. All 14
+Test tasks executed fresh. The 16 ordinary skips each have an exact same-class,
+same-method dedicated PASS in this run; the 6,064 unique class/method display
+identities are not 6,064 independent semantic scenarios.
+
+| Test task | Executions | Passed | Failed/error | Skipped |
+| --- | ---: | ---: | ---: | ---: |
+| `:common:test` | 5,535 | 5,533 | 0 | 2 |
+| `:fabric:test` | 90 | 90 | 0 | 0 |
+| `:forge:test` | 79 | 65 | 0 | 14 |
+| `:neoforge:test` | 360 | 360 | 0 | 0 |
+| `:fabric:fluidSourceIntegration` | 2 | 2 | 0 | 0 |
+| `:forge:fluidSourceIntegration` | 2 | 2 | 0 | 0 |
+| `:neoforge:fluidSourceIntegration` | 2 | 2 | 0 | 0 |
+| `:forge:fluidPresentationIntegration` | 2 | 2 | 0 | 0 |
+| `:forge:nativeFluidAmountIntegration` | 5 | 5 | 0 | 0 |
+| `:common:fluidPresentationClassSafetyIntegration` | 7 | 7 | 0 | 0 |
+| `:forge:fluidRegistryIntegration` | 7 | 7 | 0 | 0 |
+| `:forge:nativeFluidRegistryFreezerIntegration` | 1 | 1 | 0 | 0 |
+| `:forge:fluidRegistryColdWaterIntegration` | 1 | 1 | 0 | 0 |
+| `:forge:fluidRegistryModuleIntegration` | 1 | 1 | 0 | 0 |
+
+Required detector executions also passed:
+
+| Detector scope | Executions | Result |
+| --- | ---: | --- |
+| `InventoryCreationSnapshotIntegrationTest` | 17, including a positive subset of 8 | Passed |
+| Runtime retained-preparation retry (`InventoryFluidPreparationRetryTest`) | 5 | Passed |
+| Create current-controller five classes | 55 | Passed |
+| Reviewed common repair and old-failure controls | 40 | Passed |
+| NeoForge real registration and transport | 7 | Passed |
+| `CertifiedVault1620BackendTest` repaired class | 9 | Passed |
+| Vault five-class adjacency | 28, including the repaired class, not 37 independent cases | Passed |
+
+The required exact-method oracle contains 86 methods and 14 parameter
+invocations; all passed. The 17-case integration includes the positive 8-case
+subset rather than 25 unique cases. Exact method and parameter selectors, XML,
+logs and the 76-path input manifest are retained in the change's external
+evidence report.
+
+The successful lifecycle tasks include `:common:check`, `:fabric:build`,
+`:forge:build`, `:neoforge:build` and `verifyModIdentity`. Of 63 actionable
+tasks, 20 executed and 43 were `UP-TO-DATE`. `:neoforge:compileTestJava` actually
+executed; the other `compileTestJava` tasks, all production `compileJava` tasks
+and the Javadoc tasks were `UP-TO-DATE`. This is not fresh-compilation or fresh
+doclint evidence. Nine main/source/Javadoc artifacts retained
+UP-TO-DATE producer provenance and were rechecked for SHA and content.
+
+The NeoForge compile classpath has 69 entries without the runtime-only event,
+while the 119-entry ordinary runtime classpath has exactly one real loader
+`4.0.21` definition. Actual execution covers the reflective runtime event path
+without an added dependency or stub. All 30 production service descriptors match
+loader source with exactly one provider and no test fixture, test SPI or foreign
+loader leakage; `EncodedPresentationPayload` is present. Six shipped `javap`
+checks report presentation version 2 and inventory version 2, the mod version
+remains `0.5.0-pfi-beta2`, and `verifyModIdentity` passed.
+
+The main audit ran 4,520 checks with 0 failures; the supplemental closeout ran 42
+checks with 0 failures. NeoForge classpath closeout and closeout-detail checks
+exited 0. `git diff --check` exited 0, the untracked whitespace check was clean
+and AST parsing passed. No separately configured lint, static-analysis or
+formatter task exists or is claimed; compiler, Gradle, Javadoc and Git warnings
+are retained in the raw logs and this is not a warning-clean result.
+
+Coverage and remaining manual limits remain owned by
+[inventory creation-snapshot coverage](inventory.md#creation-snapshot-server-coverage)
+and [presentation creation-snapshot coverage](presentation.md#immediate-inventory-creation-snapshot-coverage).
+The [pending manual matrix](manual-integration.md#pending-manual-and-integration-matrix)
+still owns complete game/FML launch, real socket or multiplayer transport,
+installed Create placement, new-feature renderer/GPU/shader/resource-reload and
+performance scenarios.
+
 ## Verification limitations
 
 The 2026-10-27 combined invocation's stderr was empty; stdout retained the Gradle 9

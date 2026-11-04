@@ -92,15 +92,37 @@ The atomic `CREATED` frame carries, in order, the canonical marker snapshot, the
 owner name, the default property ref, the receipt content descriptor, and the
 framed Basic section; a `CREATED` frame without the descriptor is corrupt, and
 no other frame kind carries one. The descriptor is one kind tag (`WHOLE`,
-`PROPERTIES`, `INVENTORY`, or `SUPPRESSED`) followed by a ref count and that
-many property refs in the same bounded shape as a create selection.
-`PROPERTIES` requires a non-empty bounded list, every other kind requires an
-empty list, and a non-empty list with another kind is rejected. The list is
-unique and in deterministic sorted order: a duplicate or out-of-order ref, an
-over-capacity or malformed ref, a non-canonical number, an unknown kind, and
-trailing bytes are rejected rather than normalized. The descriptor never
-carries values, annotations, item counts, content types, or client-uploaded
-content; those remain in the existing authorized stores.
+`PROPERTIES`, `INVENTORY`, or `SUPPRESSED`) followed by a ref count, that many
+property refs in the same bounded shape as a create selection, and, only for
+`INVENTORY`, exactly one length-prefixed creation snapshot payload.
+`PROPERTIES` requires a non-empty bounded list and carries no snapshot;
+`WHOLE` and `SUPPRESSED` require an empty list and carry no snapshot;
+`INVENTORY` requires an empty list and exactly one snapshot. The list is unique
+and in deterministic sorted order: a duplicate or out-of-order ref, an
+over-capacity or malformed ref, a non-canonical number, an unknown kind, a
+missing or extra snapshot, and trailing bytes are rejected rather than
+normalized. Property descriptors never carry values, annotations, item counts,
+content types, or client-uploaded content; those remain in the existing
+authorized stores.
+
+The creation snapshot payload starts with one resource-lane byte (`0` for
+`ITEM`, `1` for `FLUID`), followed by the bounded UTF opaque key, resource ID
+and label, a strict display-present boolean and the optional display JSON, the
+amount as a fixed-width signed non-negative 64-bit long, a strict aggregate
+boolean, the required annotation Ping Type ID as bounded UTF, and strict
+`previewComplete` and `quantityUncertain` booleans. `ITEM` amount is a count and
+`FLUID` amount is exact `U`. An incomplete snapshot with
+`quantityUncertain=false`, an unknown lane or annotation, a negative amount, a
+non-boolean flag, a JSON/ID mismatch, a malformed, overlong or non-canonical UTF
+length, truncation, and trailing payload bytes reject the snapshot and the
+frame. The payload is limited to 133120 bytes before allocation, matching the
+inventory entry ceiling; its canonical length prefix is part of the receipt
+encoding and the unchanged 1048576-byte `CREATED` body ceiling still applies.
+The snapshot reader validates display against the closed item or fluid
+projection grammar without a native component codec, rich-text decode or
+registry lookup. Known Ping Type IDs are accepted structurally; target-specific
+annotation eligibility remains server-owned. The frame version remains presentation version two, and inventory
+version two, inventory schema two and the mod version are unchanged.
 
 ## Inventory preview/tracking route (`inventory-v2`)
 

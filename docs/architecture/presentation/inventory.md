@@ -1,7 +1,8 @@
 # Inventory preview and tracking
 
 This topic owns the inventory domain of the versioned presentation subsystem:
-preview, tracking, incremental reads, detached snapshot capture and schema,
+preview, tracking, incremental reads, detached source snapshot capture and
+schema, the bounded creation snapshot carried by an atomic inventory receipt,
 item and fluid variant identity, exact quantities, zero and identity-fallback
 rules, budget and sync policy, and source recovery deadlines. The generic
 mechanism — source access, capture results, cost accounting, and sync publication — is
@@ -317,11 +318,11 @@ content getter. No match or resource defer does not reject an otherwise valid
 synchronous create; a current invalid admission does. A completed Preview cannot
 supply this join; any reuse must independently satisfy active admission. The
 committed tracking association is installed after the marker is stored and
-before the created notification is published, so the recipient's atomic initial
-can project the inventory selection kind
+before the created notification is published. The recipient's atomic initial can
+then project the inventory selection kind
 ([receipt content descriptor](presentation_snapshot.md#receipt-content-descriptor))
-from this existing tracking association rather than a second chat metadata
-cache.
+from that committed association and its creation snapshot, not from a second
+chat metadata cache or a later Tracking revision.
 
 A submitted single-resource selection creates a new Ping immediately; resources
 are never accumulated into a staged multi-resource selection, and the selector
@@ -384,6 +385,41 @@ lose another key's latest value and must not repackage duplicates. Preview
 selection references support both normal and component-fallback forms, and
 component identity must work in both.
 
+## Creation snapshot receipt
+
+A successful single-resource selection carries one bounded creation snapshot in
+the same atomic `CREATED` initial as the marker and Basic section. The server
+freezes the currently selected, already-validated retained Preview row for that
+selection: its resource identity, label, optional bounded display,
+authoritative long amount, aggregate mode and admitted annotation. A missing
+retained row rejects the create and never becomes a zero or an empty entry. The
+snapshot is made from server-retained data, not a client-uploaded quantity, a
+recipient cache or a later Tracking result; current source and token validation,
+target and source binding, owner/face read permission, annotation eligibility,
+rate, range, audience and marker-lifetime gates still apply.
+
+`previewComplete` describes whether the server handed off the current complete
+Preview cumulative cut. A client acknowledgement, an empty publisher queue or a
+merely completed physical sweep does not establish it. An incomplete Preview is
+always quantity-uncertain. A complete Preview may still be quantity-uncertain
+when its quantity state is independently uncertain; it does not become uncertain
+solely because the first Tracking result has not completed. A false
+`previewComplete` does not block marker creation.
+
+The creation snapshot belongs to creation, not to Tracking. It is not a Tracking
+baseline, checksum input, absence-derived zero or source-completion evidence,
+and later Tracking revisions never rewrite it. The marker's live display keeps
+the separate [selected-preview bootstrap](#selected-preview-bootstrap) seed and
+is replaced only by a closed fresh complete Tracking result.
+
+Source invalidity, a scope loss or a completed fold retires further publication
+of that creation snapshot; marker expiry or removal neither resends nor extends
+it. The receipt's projection authorization is owned by the
+[receipt content descriptor](presentation_snapshot.md#receipt-content-descriptor),
+its chat behavior, including the separate property completion lifecycle, by
+[names and chat](../rendering/names_chat.md#content-receipt-lifecycle), and its
+admission by [Budgets, queues and memory](#budgets-queues-and-memory).
+
 ## Tracking
 
 Tracking is a baseline snapshot plus an absolute stream of the Ping's selected
@@ -401,7 +437,9 @@ Closing the preview releases its ownership of the catalogue, journal and unselec
 without losing this seed. The preview subtotal reflects what the preview has
 observed, not what the complete tracking observation will find. The seed is
 provisional presentation history, not a `CaptureResult`, completed observation,
-native sweep evidence or tracking accumulator.
+native sweep evidence or tracking accumulator. This display seed is separate
+from the [creation snapshot receipt](#creation-snapshot-receipt), which is a
+one-shot creation value and never becomes a Tracking baseline.
 
 The initial tracking publication carries that quantity with `UPDATING` and
 `completeScan=false`, even if the preview itself completed. An exact seed is not
@@ -828,8 +866,13 @@ Fluid identity is the fluid registry ID and the complete bounded native
 persistent variant encoding, excluding its amount. Fabric and NeoForge use the
 actual explicit persistent component patch, preserving persistent additions and
 removals rather than substituting an effective/default map. Forge 52.0.2 uses
-its native variant NBT. Native normalization is respected; exact identity does
-not promise preservation of hidden runtime state outside that persistent form.
+its native variant NBT. The server obtains the registry ID through the loader's
+current registered-fluid lookup for the native fluid, without native object
+hash/equality, a synthesized default key or a wider all-registry trust; a fluid
+without a current registration is unavailable rather than assigned a key, and
+that lookup carries no variant, display, amount or item-identity authority.
+Native normalization is respected; exact identity does not promise preservation
+of hidden runtime state outside that persistent form.
 Canonicalization and collision checks operate on an owned, guarded copy, not on
 a truncated tree or a provider-supplied digest.
 
@@ -1096,6 +1139,13 @@ indexes and historical client display obey the existing memory, queue and byte
 bounds; copying one selected value does not by itself pin the preview source
 round or admit its unselected catalogue into tracking.
 
+The inventory creation snapshot similarly retains its own bounded ownership and
+uses separately admitted, bounded validation, encoding workspace, recipient
+fan-out and staging capacity. It enters neither the Preview send queue nor the
+Tracking baseline, and it carries no guarantee that every recipient receives
+the initial in the same tick. Insufficient admission may reject the create or
+leave bounded retry work; it is not an authorization denial.
+
 Owned source metadata, including frozen views, member layouts and slot mappings,
 has a retained charge separate from fixed round state. Pre-resolution admission
 holds its construction workspace until that ownership transfers into the round
@@ -1344,9 +1394,10 @@ digits from the item count. Fluids follow the shared
 decimal item-count rule. Localized quantity and annotation grammar may place the
 quantity or resource on either side. Initial display and grey failure history follow
 the [bootstrap policy](#selected-preview-bootstrap).
-Provisional quantities do not complete an inventory chat receipt: the existing
+The atomic creation snapshot, not a provisional Tracking quantity, supplies the
+inventory content receipt; the separate
 [content receipt policy](../rendering/names_chat.md#content-receipt-lifecycle)
-still requires a complete, usable ready result.
+owns the one-shot message and its uncertainty notation.
 
 A complete readable native stable-slot sweep with known coverage fully
 traversed is a normal `READY` result under the mixed-time boundary above. Its
