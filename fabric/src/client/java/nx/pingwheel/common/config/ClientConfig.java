@@ -42,9 +42,9 @@ public class ClientConfig implements IConfig {
 	List<String> blockDisplayWhitelist = List.of("*:*");
 	List<String> blockShapeBlacklist = List.of();
 
-	// TODO(M7): transient, non-serialized outline cache. Keep the field (and its
-	// JSON-absent shape) until the M7 render rebuild restores BlockDisplayPolicy;
-	// BlockDisplayPolicy/BlockDisplayWhitelist are real implementations now.
+	// Transient, non-serialized outline cache. Keep the field (and its
+	// JSON-absent shape) so the JSON shape stays stable. M7 landed:
+	// BlockDisplayPolicy is the real implementation now, not a placeholder.
 	private transient BlockDisplayPolicy blockDisplayPolicy = BlockDisplayPolicy.defaults();
 
 	String channel = "";

@@ -80,3 +80,12 @@ ClientPingRuntime.java:287,1278-1294;  WheelHudRenderer.java:116,272
 MarkerHudRenderer.java:91,104,112,257; MarkerLabelRenderer.java:74,161,189
 Interactions: dispatcher:122 / runtime:1010 / InputUtils:38-40
 ```
+## 结案补注（2026-11-04，1号 repo-analyst 追加）
+
+> 只追加结案事实，**不改上面的复审原文**。
+
+- **建议 4 / 5 已作废**：原文要求「M7 接管时把 `Object` 参数签名收紧（`renderEntityOutlines`/`renderBlockOutlines`/`onRenderToggleNotice`）」「M7 接回时必须同时接回调用链，并显式列出这 11 个入口」——**实际 M7 不是接回空壳，而是用 26.3 submit-node / RenderPipeline 重写的**。
+- **那 10 个 `TODO(M7)` 空方法已于 2026-11-04 整块删除**：`CommonClient.java` **471–549**（471 是前置空行 + 472–549 是内容；复审 `67` D 校正过行号），**0 insertions / 79 deletions**，文件 **723 → 644 行**；`compile-check` 三遍 0 error、class 数 **262/4/126 与删除前一致**。留档在 `AGENTS.md` §9.1 C 组「M7 残留死代码清理」。
+- **`onRenderToggleNotice` 已不是空方法**：M8c 起由 `SelectionToggleNoticeState` + `SelectionToggleNoticeRenderer` 真实实现（`CommonClient.java:331-335`，`FabricClient.java:60` 注册）。
+- **`LevelExtractorMixin.pingforit$prepareEntityOutlines`** 是同名的**另一个** mixin 回调，与本次删除无关，仍保留。
+- §四「复跑」里的 `main 262 / client 89` 是 2026-10-30 的旧值；当前 client class 为 **126**（M7/M8 重写后新增），以 `tools/compile-check` 最新输出为准。

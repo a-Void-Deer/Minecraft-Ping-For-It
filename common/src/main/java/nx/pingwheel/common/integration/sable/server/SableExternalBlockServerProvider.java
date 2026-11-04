@@ -10,9 +10,11 @@ import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider
 /**
  * Stub for the optional Sable server adapter for external (sub-level) blocks.
  *
- * <p>TODO(M9): restore the real reflective adapter. Every operation reports
- * {@code Invalid}, so the provider stays registered but no Sable target can be
- * validated, materialised or refreshed.</p>
+ * <p>Platform-forced skip: Sable has no Minecraft 26.3 build (1.21.1 only, latest
+ * 2.0.6), so every operation reports {@code Invalid} by design — final form, not a
+ * pending port; see {@code docs/reviews/24-fidelity-constraint-audit.md} #18. The
+ * provider stays registered but no Sable target can be validated, materialised or
+ * refreshed.</p>
  *
  * <p>{@link #create()} is kept public/no-arg/static so
  * {@code ExternalBlockServerProviders} keeps working unchanged.</p>

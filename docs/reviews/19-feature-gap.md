@@ -74,3 +74,11 @@
 | 3 | **M8**：设置界面 + 资源重载 v1（自定义贴图） | 2–3 天 |
 | 4 | **M9**：ModMenu / 语音 / FTB / DH / Sable | 3–5 天 |
 | 5 | **M10**：测试基座 + runServer + 合规 | 2–3 天 |
+
+## 结案补注（2026-11-04，1号 repo-analyst 追加）
+
+> 本表是 2026-10-30 前后的能力缺口快照；**不改原文**，只标注现状。
+
+- **表中缺口均已关闭**：世界渲染时序 → M7a/M7b/M7c（**重写**，不是取回 `deferred/`）；设置界面 → M8a；自定义贴图 → M8b（v1；自定义资源包仍待补测）；**切换提示 → M8c**；ModMenu / VoiceChat / DH → M9-1/2/3（FTB Teams / Sable 平台强制跳过，`24` #17/#18）。
+- **`onRenderToggleNotice` 已不是空方法**：M8c 起由 `SelectionToggleNoticeState` + `SelectionToggleNoticeRenderer` 实现（`CommonClient.java:331-335`，`FabricClient.java:60` 注册），切换时有右侧提示。
+- **`prepareEntityOutlines` 等 10 个 `TODO(M7)` 空壳已于 2026-11-04 删除**（M7 是重写收口，不存在「M7 接回空壳」这一步），见 `AGENTS.md` §9.1 C 组。

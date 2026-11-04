@@ -4,8 +4,13 @@
 	"version": "${version}",
 	"name": "Ping For It",
 	"description": "Server-authoritative ping system with a ping-type wheel. Fabric port for Minecraft 26.3.",
-	"authors": ["isharmla"],
-	"contact": {},
+	"authors": ["Luken"],
+	"contributors": ["Natsume Anan"],
+	"contact": {
+		"homepage": "https://github.com/Natsume-Anan/QwQ",
+		"sources": "https://github.com/Natsume-Anan/QwQ",
+		"issues": "https://github.com/Natsume-Anan/QwQ/issues"
+	},
 	"license": "MIT",
 	"icon": "icon.png",
 	"environment": "*",
