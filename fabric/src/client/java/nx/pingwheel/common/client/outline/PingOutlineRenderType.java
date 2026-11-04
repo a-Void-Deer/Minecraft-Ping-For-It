@@ -1,6 +1,9 @@
 package nx.pingwheel.common.client.outline;
 
+import java.util.Collections;
+import java.util.Map;
 import java.util.Optional;
+import java.util.WeakHashMap;
 
 import net.minecraft.client.renderer.BindGroupLayouts;
 import net.minecraft.client.renderer.RenderPipelines;
@@ -38,7 +41,8 @@ import static nx.pingwheel.common.Global.LOGGER;
  * <p>Bucket routing is owned by {@code SubmitNodeCollectionMixin} (decision D2):
  * because this class always submits an opaque alpha (255), vanilla would drop it into
  * the solid bucket and ignore {@code afterTerrain}; the mixin recognises this render
- * type by identity and routes it to the requested bucket instead.
+ * type (identity first, registered name as the fallback) and routes it to the requested
+ * bucket instead.
  *
  * <p>Failure is isolated: the first failed attempt logs one warning and every later
  * call returns {@code null}. {@link AssertionError} is caught on purpose — when the
@@ -53,16 +57,42 @@ public final class PingOutlineRenderType {
 	private static RenderType cached;
 	private static boolean failed = false;
 
+	/**
+	 * {@code type.toString().contains(TYPE_NAME)} per render type instance.
+	 *
+	 * <p>Weak keys: a render type that only appears in one submission path can be collected
+	 * as soon as the game drops it, so the cache cannot pin instances. Vanilla line types are
+	 * resolved once each and then answer from here instead of re-running {@code toString()}
+	 * every frame.
+	 */
+	private static final Map<RenderType, Boolean> NAME_CACHE =
+		Collections.synchronizedMap(new WeakHashMap<>());
+
 	private PingOutlineRenderType() {}
 
 	/**
-	 * Identity check used by the bucket-routing mixin.
+	 * Recognises the custom outline type for the bucket-routing mixin.
 	 *
-	 * <p>Deliberately allocation-free and side-effect-free: it must never trigger
-	 * pipeline creation, because it runs for every submitted shape outline.
+	 * <p>Fast path is identity, because that is what {@link #create()} hands out. It is not
+	 * sufficient on its own: a submission path may wrap or copy render types (translucency /
+	 * OIT handling), and an instance compared by identity would then look vanilla. The
+	 * fallback therefore matches the registered type <em>name</em> inside
+	 * {@code RenderType#toString()}, cached per instance in a weak map.
+	 *
+	 * <p>Never triggers pipeline creation, because it runs for every submitted shape outline;
+	 * the only side effect is that name check being cached (normal vanilla types are resolved
+	 * once each, not once per frame).
 	 */
 	public static boolean isCustom(RenderType type) {
-		return type == cached;
+		if (type == null) {
+			return false;
+		}
+
+		if (type == cached) {
+			return true;
+		}
+
+		return NAME_CACHE.computeIfAbsent(type, key -> key.toString().contains(TYPE_NAME));
 	}
 
 	/**

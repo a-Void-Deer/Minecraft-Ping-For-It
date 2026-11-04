@@ -771,7 +771,7 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 - 服务端侧同组判定需**双客户端**复测（与 M5 的受众验收合并做更省事）。
 - M9-3（DH）仍 ⬜；FTB Teams / Sable 平台强制跳过不变（`24` #17/#18）。
 
-## P0 · 重构后验收（2026-11-03）🟡
+## P0 · 重构后验收（2026-11-03）✅ P0 收口（V13–V15 受限未验证）
 
 > **路径口径说明（以 2026-11-03 为界）**：此前的文档可能仍写 `src/main/java` / `src/client/java` / 根 `build/libs/`；**现行布局**见 `AGENTS.md` §2（`common/src/main`、`fabric/src/main|client`，产物在 `fabric/build/libs/`）。**历史记录不改**：M0–M8 各节与 `docs/reviews/*` 是当时的事实快照，保留原样以便追溯。
 >
@@ -790,7 +790,7 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 | **V9** | VoiceChat 插件 | ✅ **R1–R4 每轮 `Loaded 1 plugin(s)` / `Initialized 1 plugin(s)` / `Registering events for 'pingforit'`** |
 | **V11** | Mod Menu 配置入口 | 🟡 用户反馈「大致没问题」，但未逐项留证 |
 | **V12** | 默认设置下描边可见 | ✅（日志级：`improved transparency is ON` 0 条 + 渲染路径有提交记录） |
-| **V13 / V14 / V15** | OIT 下描边 / 颜色比对 / 关掉后正常 | ⏸ **受阻**：装了 DH 时 OIT 被 DH 强制关闭，测不出来（见 P0.2-2） |
+| **V13 / V14 / V15** | OIT 下描边 / 颜色比对 / 关掉后正常 | ⏸ **受限未验证**：本环境（MC 26.3 + Fabric Loader 0.20.1 + **无 DH**、OIT=true 的 57-mod 会话）**从未触发**该回退路由（见 **P0.5**，结论登记 `24` #19） |
 | **V16** | `send ping` : `marker created` 1:1 | ✅ **32 : 32**（R4，0 reject/deny） |
 | **V17** | 0 条本模组 ERROR | ✅（R1–R4 每轮 3 条 ERROR 全为账户/Realms 噪声） |
 | **V18** | `:fabric:runServer` 冒烟 | ✅ **通过（2026-11-04 16:52）**：根级 `runServer` 别名 → `Done (2.998s)!` → `stop` 正常；**47 mods**、0 ERROR、0 class error、0 mixin fail（见 **P0.3**） |
@@ -842,7 +842,15 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 
 ### P0.4 结论
 
-**重组后的功能面已经稳了**（0 条本模组 ERROR、0 Mixin 失败、VoiceChat 插件加载、闭环 32:32、资源包索引正常、**专用服务器冒烟通过**），**P0 还差 V13–V15、V19 两项收尾**：V13–V15 先移走 DH 才能测（见 P0.2-2）；V19 是发布 jar 的安装场景。
+**P0 收口**：**除 V13–V15（⏸ 受限未验证，见 P0.5）与 V19（⏸ 可选）外全部通过** —— 0 条本模组 ERROR、0 Mixin 失败、VoiceChat 插件加载、闭环 32:32、资源包索引正常、专用服务器冒烟通过、V18 ✅。V13–V15 不阻塞发布（描边实际仍由我们的 depth-off 管线绘制，仍可见、仍穿墙；唯一差别是被半透明物体叠加时可能被染色）。
+### P0.5 V13–V15 受限未验证（2026-11-04）⏸
+
+> 会话：2026-11-04 21:24:44–21:25:27（`run/logs/latest.log` + `debug.log`），**57 mods，`run/mods` 里已无 DH**，`run/options.txt` 运行期间 `improvedTransparency:true`（运行结束后的 21:27:29 被改回 `false`）。
+
+- **已排除的外部因素**：① `Disabling improved transparency` **0 条**（DH 不在场）；② mixin **已织入**（`debug.log:2547` `Mixing SubmitNodeCollectionMixin from pingforit.mixins.json into …SubmitNodeCollection`）；③ pass **确实在提交**描边（`debug.log` 的 `block outline: submitted=0/1/2/3`，21:25:17–22）。
+- **结果**：`[PingForIt] improved transparency is ON …` **仍 0 条**（已试两项修复：门控改读 `Options.improvedTransparency`、`isCustom` 改「实例 → 注册名回退」）。
+- **实际行为**：描边由我们的 **depth-off 自定义管线**在 solid 桶绘制 —— **仍然可见、仍然穿墙**；与回退路径的唯一差别是「被半透明物体叠加时可能被染色」。
+- **定性**：记为**已知限制**，**不阻塞发布**；结论与后续探针建议登记在 `docs/reviews/24-fidelity-constraint-audit.md` **#19 实测结论**。
 ## 剩余工作总表（2026-11-01 盘点，M0–M8 完成后）
 
 > 目的：确保没有遗漏。每项标注**归属阶段 / 验收方式 / 状态**。

@@ -24,6 +24,7 @@
 | V12 默认路径 | 🟡 | `latest.log` 里 `improved transparency is ON` **0 条**（默认不该出现，符合预期）；**描边是否可见仍要眼看** |
 | V16 闭环 | ✅ | `send ping` **22** / `marker created` **22**（1:1；20:59:39–21:00:26） |
 | **V18 专用服务器（2026-11-04 16:52）** | ✅ | 根级 `runServer` 别名 → `Done (2.998s)!`；**47 mods**、`[PingForIt] Init` + `ServerConfig`、voicechat 服务端 `Loaded 1 plugin(s)`；**0 ERROR / 0 class error / 0 mixin fail**（WARN 3 条全外部） |
+| **V13–V15 OIT 路由** | ⏸ **受限未验证**（**不是通过**） | 2026-11-04 21:24–21:25（57 mods、无 DH、OIT=true）：`Disabling improved transparency` **0 条**、mixin 已织入（`debug.log:2547`）、pass 有 `block outline: submitted=0/1/2/3`，但 `improved transparency is ON` **仍 0 条** → 回退从未触发；描边实际仍由 depth-off 管线绘制（可见、穿墙）。详见 `24` #19 实测结论 |
 | V17 错误面 | ✅ | ERROR **3** 条全是账户/Realms 噪声（`latest.log:117`/`:173`/`:202`），**0 条模组相关**（`grep ERROR` 会多命中 `:127` 的 `Caused by … HTTP_ERROR` 续行） |
 
 ## 1. 准备（跑之前 2 分钟）
@@ -96,18 +97,18 @@
   - **期望**：能看到该方块被描边（线框/光晕；`entity_block` 类目标是模型发光）；隔墙也可见（`NO_DEPTH_TEST`）。
   - **期望**：日志里**不应出现** `[PingForIt] improved transparency is ON`（默认路径不该打这条）。
   - **失败要贴**：截图（含准星与方块）+ 该次 ping 附近的日志 20 行。
-- [ ] **V13** 打开 **improved transparency**：视频设置里对应开关（中文可能显示为「改进透明度」之类），或直接改 `run/options.txt` 的 `improvedTransparency:true` 后重进世界。再 ping 同一个方块。
+- [ ] **V13** ⏸ **受限未验证**（原因见 `24` #19 实测结论：无 DH + OIT=true 的 57-mod 会话里该回退从未触发）—— 打开 **improved transparency**：视频设置里对应开关（中文可能显示为「改进透明度」之类），或直接改 `run/options.txt` 的 `improvedTransparency:true` 后重进世界。再 ping 同一个方块。
   - **期望**：描边**仍然可见**（这条是 `d7c2975` 的核心）。
   - **期望**：日志出现**恰好一条** info：`[PingForIt] improved transparency is ON: MC 26.3 never executes the afterTerrain phase, routing the outline to the outline phase instead (see docs/reviews/24-fidelity-constraint-audit.md #19)`。
   - **失败要贴**：截图 + 该行原文（若**完全没有**这行 → 路由没走到；若**出现多次** → 一次性标记失效）。
   - **可选子项（验刚补的 `renderWireframeTerrain`）**：保持 OIT 开启，再按 **F3 打开「线框地形」（wireframe terrain）**，ping 一次。
     - **期望**：**不应**出现新的 `improved transparency is ON` 行 —— 因为 `pingforit$classicTransparencyActive()` 现在精确镜像 `GameRenderer.useImprovedTransparency()`（`!improvedTransparency || renderWireframeTerrain`），线框模式下原版会走经典通道，旧实现会在这里**误报**。
     - **失败要贴**：F3 开启前后的日志行（标出是否新增该 info 行）+ 截图。
-- [ ] **V14**（`R5.5-a`）对着同一方块、同一视角、同一距离，各截一张 V12（默认）与 V13（OIT）的图，**记录差异**，而不是要求两者一致。
+- [ ] **V14** ⏸ **受限未验证**（前置的 V13 未触发回退，无从对比；原因见 `24` #19 实测结论）——（`R5.5-a`）对着同一方块、同一视角、同一距离，各截一张 V12（默认）与 V13（OIT）的图，**记录差异**，而不是要求两者一致。
   - **判据**：OIT 模式下最终合成走原版 `entityOutlineTarget` + `ENTITY_OUTLINE_BLIT`，**颜色/亮度本来就可能**与我们的管线直出不同；需要如实记录两件事：**① 线宽是否一致；② 色相/亮度是否有明显偏移**（偏亮/偏暗/偏色）。
   - **通过标准**：线宽一致 + 偏移在「看得出来但不影响可读性」范围内 → 记为**可接受差异**（附在 `24` #19 备注里）；若偏移严重到看不清/认错颜色 → 记为**保真风险**，回到 `24` #19 评估是否要改路线。
   - **要贴**：两张截图（标明哪张是 OIT）+ 一句话差异描述。
-- [ ] **V15** 关掉 improved transparency，再 ping 一次。
+- [ ] **V15** ⏸ **受限未验证**（同 V13；回退路径未触发，故「关掉后行为」无对照；原因见 `24` #19 实测结论）—— 关掉 improved transparency，再 ping 一次。
   - **期望**：描边正常可见（与 V12 同款表现）。
   - **不再断言日志**：`fallbackLogged` 是 **per-session 一次性**标记，重启即重置，所以「关掉后不再出现该行」在逻辑上不可判（3号 第 59 号复审意见）——只验行为即可。
   - **失败要贴**：截图 + ping 前后各 10 行日志。

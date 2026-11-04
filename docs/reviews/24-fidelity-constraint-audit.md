@@ -65,7 +65,7 @@
 
 > **2026-11-01 闭环**：`entity_block` 原先只能走 M7a 线框（`BlockModelGlowPass` 对非 `block` 目标早退），是当时**唯一登记在案的功能性偏差**。M7c-C2 已改为在 `BlockEntityRenderDispatcher#submit` 解析 ping 色、经 `submitModel` 的 outlineColor 走真实 BER 模型发光；线框仅在“本帧该位置真的画出了光晕”时才抑制，其余路径回退线框（上游 fallback 语义）。
 >
-> **来源顺序与上游一致（2026-11-01 补）**：BER → **烘焙方块模型** → VoxelShape。补第二层是因为 26.3 熔炉无 BER、营火 BER 只提交物品，纯 BER 路径对它们 0 画；`BlockModelGlowPass` 现接受 `entity_block`，仅在 BER 本帧未发光时兜底，`missingModel` 仍回退线框。审查 `docs/reviews/50-m7c-c2-review.md`；**待实机最终销项**。
+> **来源顺序与上游一致（2026-11-01 补）**：BER → **烘焙方块模型** → VoxelShape。补第二层是因为 26.3 熔炉无 BER、营火 BER 只提交物品，纯 BER 路径对它们 0 画；`BlockModelGlowPass` 现接受 `entity_block`，仅在 BER 本帧未发光时兜底，`missingModel` 仍回退线框。审查 `docs/reviews/50-m7c-c2-review.md`；**✅ 已实机销项**（2026-11-01 阶段总览记为「M7 含 C2 全部完成并实机通过」，`docs/PORTING-PROGRESS.md:22`；2026-11-03 P0 运行再次见到 C2 路径生效——`run/logs/latest.log:368` `entity-block model glow active (outlineColor via dispatch hook)`，该次紧随其后的 `model hook not observed` WARN 已由 `docs/reviews/61-model-hook-warn-audit.md` 判定为**营火误报**，与本项销项无关）。
 - 距离补偿、文本、箭头等 HUD 元素已在 M6.5 对齐，不受 M7 影响
 
 ## 6. M8a 设置界面（2026-10-31）的平台强制偏离
@@ -134,3 +134,9 @@ Simple Voice Chat 集成由桩恢复为上游实现：`VoiceChatIntegration`（3
 **影响面**：仅影响手动开启「改进透明度」的玩家。回退后描边在 OIT 之后绘制，几何/管线/线宽（3.75px / NO_DEPTH_TEST / NO_CULL / COLOR_WRITE）不变；但 `executeOutline` 渲染进独立的 `entityOutlineTarget`（ZERO_CLEAR），再由 `blitEntityOutline()` 用 `RenderPipelines.ENTITY_OUTLINE_BLIT` 合回主画面 —— **合成 blend 由原版决定，颜色/亮度只能靠实机与默认路径对比**（该 blit 管线没有深度状态，所以穿墙性质保留）。门控 `shouldShowEntityOutlines = !camera.isPanoramicMode() && playerState.hasPlayer`，游戏内恒真，只有主菜单全景/无玩家时为假。首次回退会打一条 `[PingForIt] improved transparency is ON: … routing the outline to the outline phase instead`。
 
 **为什么不是“看得更好”的替代**：这是 26.3 相位调度的强制结果（`afterTerrain` 在 OIT 模式下根本没有执行点），不是主观优化；不改变任何颜色/线宽/深度/混合语义。
+
+**实测结论（2026-11-04）**：该回退路由**在本环境（MC 26.3 + Fabric Loader 0.20.1 + 无 DH 的 57-mod 会话，21:24:44–21:25:27）从未触发** —— `[PingForIt] improved transparency is ON …` **0 条**（连续三处修复后仍为 0）。已排除的外部因素：① `run/mods` 里**已无** Distant Horizons（日志中 `Disabling improved transparency` **0 条**），② 运行期间 `improvedTransparency` 为 **true**（注：`run/options.txt` 在运行结束后的 21:27:29 被改回 `false`，以文件 mtime 与日志时间可辨），③ mixin **已织入**（`debug.log:2547` `Mixing SubmitNodeCollectionMixin from pingforit.mixins.json into net.minecraft.client.renderer.SubmitNodeCollection`），④ 我们的 pass **确实在提交**描边（`debug.log` 的 `block outline: submitted=0/1/2/3`，21:25:17–22）。
+
+**因此实际行为是**：描边仍由我们的 **depth-off 自定义管线**在 **solid 桶**绘制 —— **仍然可见、仍然穿墙**，与回退路径的唯一差别是「被半透明物体叠加时可能被染色」（回退路径会在 `entityOutlineTarget` 里走原版 `ENTITY_OUTLINE_BLIT` 合成）。
+
+**定性**：记为**已知限制**（本条 #19 的触发条件在当前环境无法复现），**不阻塞发布**。若后续要深究，需要加一支**只记录我们自己的提交**的探针，用来区分 `isCustom` 判定与 `afterTerrain` 是否真的执行（当前 `submitted=N` 只能证明提交，不能证明相位）。

@@ -1,7 +1,7 @@
 # AGENTS.md · Ping For It（MC 26.3 / Fabric 单端）协作说明
 
 > 团队唯一事实来源：现状、目录、构建、已验证结论、已知坑、待办。
-> 维护者：Lead｜**最后更新：2026-11-04（根级 `runClient`/`runServer` 改为转发别名，推荐仍用 `:fabric:runX`；P0 验收 R1–R4；M9-1/M9-2 实机通过）**
+> 维护者：Lead｜**最后更新：2026-11-04（补待完成清单，含 M10 技术债与发布门禁；根级 `runClient`/`runServer` 改为转发别名，推荐仍用 `:fabric:runX`；P0 验收 R1–R4 + V18 通过；M9-1/M9-2 实机通过）**
 
 ## 0. 2026-10-29 数据事故与恢复（先读）
 
@@ -142,7 +142,7 @@ export GRADLE_USER_HOME="D:/Gradle"
 
 16. **dev 里 common 的资源不在 mod root 上——必须合并进 fabric 的 processResources**（2026-11-03 重构后实机暴露）：机制是 **Fabric 的资源包只按「mod root」建索引，而 mod root = 根目录含 `fabric.mod.json` 的 classpath 条目**（`fabric-resource-loader` 的 `ModNioPackResources` 只走 `ModContainer.getRootPaths()`）。dev 的 `runClient` 里 `:common` 是以 **jar** 形式在 classpath 上（`run/logs/debug.log` 的 Knot classpath 可见 `common/build/libs/….jar`），jar 根没有 `fabric.mod.json`，所以它的 `assets/` 物理上在 classpath 却不会进资源包索引；mixin/SPI 不受影响（走 classloader 全 classpath 扫描）。所以只把 common 的资源塞进发布 jar 是不够的：`runClient` 里会出现未翻译的 key（`pingforit.chat.pingmsg`、`unit.pingforit.meters`…）、`Missing sound for event: pingforit:ping`、Mod Menu 图标丢失，而**同一份构建出来的 jar 完全正常**（jar 里 assets 齐全）。修法：`fabric/build.gradle` 的 `processResources { from project(':common').sourceSets.main.resources }`，并且 `jar` 只合并 `:common` 的 `classesDirs`（资源只经 processResources 进一次，否则 jar 里出现重复条目）。上游 fork 的 `multiloader-loader.gradle` 用同一招（`from(configurations.commonResources)`）。**判断依据**：看 `fabric/build/resources/main` 下有没有 `assets/`。
 
-17. **improved transparency 打开时描边改投 `outline` 相位**（2026-11-03，登记 `24` **#19**）：`afterTerrain` 相位在 26.3 只有 `LevelRenderer.executeClassicTransparency` 会执行，而它在 `Options.improvedTransparency` 打开时整个被跳过；`SubmitNodeCollectionMixin` 因此在该模式下把描边投到 `outline` 相位（`hasAnyOutline() && shouldShowEntityOutlines` 触发，排在 OIT 之后）。默认值是 false，所以默认仍走 `afterTerrain`（已实机验证）——**默认路径不打任何新日志**，只有真的走到回退时才会打一条 info。门控 `shouldShowEntityOutlines = !camera.isPanoramicMode() && playerState.hasPlayer`，游戏内恒真（主菜单全景/无玩家时才为假）。
+17. **improved transparency 打开时描边改投 `outline` 相位**（2026-11-03，登记 `24` **#19**）：`afterTerrain` 相位在 26.3 只有 `LevelRenderer.executeClassicTransparency` 会执行，而它在 `Options.improvedTransparency` 打开时整个被跳过；`SubmitNodeCollectionMixin` 因此在该模式下把描边投到 `outline` 相位（`hasAnyOutline() && shouldShowEntityOutlines` 触发，排在 OIT 之后）。默认值是 false，所以默认仍走 `afterTerrain`（已实机验证）——**默认路径不打任何新日志**，只有真的走到回退时才会打一条 info。门控 `shouldShowEntityOutlines = !camera.isPanoramicMode() && playerState.hasPlayer`，游戏内恒真（主菜单全景/无玩家时才为假）。**实测（2026-11-04，无 DH、OIT=true 的 57-mod 会话）：本环境从未走到该回退**（`improved transparency is ON` 0 条，而 mixin 已织入、pass 有 `submitted=0/1/2/3`），见 `24` **#19 的实测结论**。
 
 18. **根项目没有 Loom 的 run 任务（2026-11-03 实测；2026-11-04 已加根级转发别名）**：重构后根 `build.gradle` 只 `apply false` 引 loom，**根项目不是 loom 项目**，所以**当时（2026-11-03）**根级 `./gradlew runClient` / `runServer` 会直接失败：
     ```text
@@ -176,29 +176,55 @@ export GRADLE_USER_HOME="D:/Gradle"
 | 阶段 | 待办 | 状态 |
 | --- | --- | --- |
 | 事故恢复 | 源码重建、compile-check 重建、文档重写、git 重建、**实机重新验收** | ✅ **完全收尾**（2026-10-30；基线 tag `restore-2026-10-29`，验收 tag `port-M6.5-restored`） |
-| M5 | 服务端权威完善（受众/赢家/限流/移除/过期） | ⬜ |
+| M5 | **M5 服务端权威：完善 + 双客户端验收**（受众/赢家/限流/移除/过期/重连） | ⬜ |
 | M7 | 渲染重建：`deferred/` 描边/世界渲染按 26.3 管线重写 | ✅ **M7a 方块线框 + M7b 实体描边 + M7c C1 模型光晕完成并实机通过（2026-10-31）**；**M7c C2（entity_block 真实体光晕）✅ 完成并实机通过**（`020d920`/`b3ad60f`/`f88a887`，含契约对齐：渲染模式门控、不短路、RenderShape 前置）；规格 `33`/`35`/`38`/`40`、复审 `34`/`36`/`39` |
 | M8 | 配置/命令/UI + 资源重载迁 v1 | ✅ **完成（2026-11-01）**：**M8a** 完整分页设置界面（6 客户端分类/25 项 + 3 服务端分类/5 字段，含 tab 冻结修复）实机通过；**M8b** 资源 v1 + 自定义贴图（默认路径通过，**自定义包待补测**）；**M8c** toggle notice 第二层 HUD 实机通过。文档：`46`/`47`/`48`/`49` |
 | M9 | 可选集成（ModMenu/VoiceChat/FTB/DH/Sable） | **M9-1 ✅ 实现 + 实机通过（2026-11-03）**：Mod Menu 类从 `deferred/` 迁回 `src/client`（与上游逐字节一致）、`fabric.mod.json` 加 `modmenu` entrypoint、依赖改 `run/mods` 离线 jar；**M9-2 ✅ 实现 + 实机通过（2026-11-03）**：`VoiceChatIntegration`/`VoiceChatWrapper` 与上游逐字节一致、`fabric.mod.json` 加 `voicechat` entrypoint、`build.gradle` 加 `compileJava` 的 `voicechat-` jar 检查；实机证据：R1 起每轮 `Loaded 1 plugin(s)` + `Initialized 1 plugin(s)` + `Registering events for 'pingforit'`（不再是从前的 0）。**M9-3 ⬜**（DH 需 API 接线）；FTB Teams / Sable **平台强制跳过**（`24` #17/#18） |
-| **P0（重构后验收）** | 多模块重构（`f18e31e`）后的实机回归 | 🟡 **进行中**，逐项状态见 `docs/PORTING-PROGRESS.md` §P0：V1/V4/V9/V12/V16/V17 ✅；V6/V7/V11 🟡（需肉眼/留证）；**V13–V15 ⏸（DH 强制关闭 OIT，需先移走 DH）**、**V18 ✅（2026-11-04 16:52 通过：`Done (2.998s)!` / 47 mods / 0 ERROR）**、V19 ⏸ |
+| **P0（重构后验收）** | 多模块重构（`f18e31e`）后的实机回归 | **✅ P0 收口（V13–V15 受限未验证）**：V1/V4/V9/V12/V16/V17 ✅、**V18 ✅（2026-11-04 16:52，`Done (2.998s)!` / 47 mods / 0 ERROR）**；V6/V7/V11 🟡（需肉眼/留证）；**V13–V15 ⏸ 受限未验证**（见 `24` #19 实测结论；描边仍可见、仍穿墙，仅半透明叠加时可能有染色差异）；V19 ⏸ 可选。逐项见 `docs/PORTING-PROGRESS.md` §P0 |
 | M10 | 验证与发布：`runServer`、CI、测试基座、LICENSE → MIT + THIRD-PARTY-NOTICES | ⬜ |
 
 **任务顺序（2026-10-31 用户确认）**：**M8 → M7c-C2 → M9 → M10**（M8 ✅；C2 实现完成待实机，实机通过后进 M9；`entity_block` 已改为真实 BER 光晕，线框仅作 fallback）。
 
-## 9.1 当前任务（M7-prep）
+## 9.1 待完成清单（2026-11-04 盘点）
 
-> 目标：在正式重写渲染后端前，用最小代价钉死三个未知量，避免 M7 走错方向。**完成并汇报后，等用户允许再进 M7 本体。**
+> M0–M8、M9-1、M9-2 已完成；**P0 已收口**——除 **V13–V15（⏸ 受限未验证）** 与 **V19（⏸ 可选）** 外全部通过。
 
-| # | 实验 | 目的 | 通过标准 | 状态 |
-| --- | --- | --- | --- | --- |
-| E6 | 把 `deferred/client/outline` **临时**加入编译（只统计不接线） | 摸清 M3a 半改状态的真实错误基数与缺失 API 分布 | 输出按错误类型分组的清单 | 🔄 |
-| E1 | `submitShapeOutline` + `RenderTypes.lines*` 的遮挡语义（**实为两档**：depth write 开/关；`afterTerrain` 对 alpha=255 无效） | 确认 26.3 线框默认是否被墙遮挡 | 截图/日志区分 `linesTranslucent` vs `linesTranslucentNoDepthWrite` | 🟡 2026-10-30 由源码/字节码分析修正（未实机），依据见 `docs/PORTING-PROGRESS.md` 的 M7-prep 节 |
-| E2 | 自定义无深度管线：**mixin 访问器**（`RenderType.create` / `RenderPipelines.register`）+ 自定义 `RenderPipeline` + `SubmitNodeCollectionMixin` 分桶路由（alpha=255 → `afterTerrain`） | **在保真铁律下，这是唯一能 1:1 复刻上游描边（3.75px / NO_DEPTH_TEST / TRANSLUCENT / NO_CULL / COLOR_WRITE）的路线**；已不引 AW | 能建出等价管线（mode 4 创建成功、编译 0/0） | ✅ 实机通过（2026-10-30，mode 4；OIT 待补，非阻塞） |
-| E3 | `DrawableGizmoPrimitives.submit(..., onTop=true)` | **仅作对照实验**：gizmo 的线宽/混合由原版决定，不满足保真要求，不能替代正式实现 | 记录差异供 M7 参考 | 🔄 |
+| 分组 | 项 | 验收方式 | 状态 |
+| --- | --- | --- | --- |
+| A · P0 收尾 | **V13–V15 OIT 描边路由**：移走 DH → 开 Improved Transparency → ping，日志应出现**恰好 1 条** `improved transparency is ON …` | 实机日志 | ⏸ **受限未验证**：已尝试两项修复（门控改读 `Options.improvedTransparency`、`isCustom` 改「实例 → 注册名回退」）仍未触发；结论与影响见 `docs/reviews/24-fidelity-constraint-audit.md` **#19 实测结论**（描边仍可见、仍穿墙，仅半透明叠加时可能有染色差异） |
+| A · P0 收尾 | **V19 发布 jar 干净安装**：干净 Fabric 26.3 实例只放本 jar + fabric-api，启动查图标/中文/ping | 实机启动 | ⏸ 可选 |
+| A · P0 收尾 | **V6 / V7 / V11 肉眼确认**：Mods 列表图标、设置界面中文、ModMenu 配置按钮 | 实机截图 | 🟡 日志级已过，待肉眼留证 |
+| B · 主线功能 | **M9-3 Distant Horizons 集成**：stub → 上游真实现（异步远距离射线 + `ModContext.HasDistantHorizons` + 失败降级） | 装/不装 DH 各跑一次 | ⬜ **开工前需用户定**：独立 API jar（新增 `compile-libs/`）还是沿用完整 jar |
+| B · 主线功能 | **M5 服务端权威验收**：受众快照 / 赢家选择 / 移除仅本人 / 限流 / 过期 / 断线重连 | **两个客户端互测** | ⬜（代码已存在） |
+| C · M10 发布 | **LICENSE → MIT** + `THIRD-PARTY-NOTICES` 并入 jar | 检查 jar 内 `LICENSE_pingforit` 与 notices | ⬜ |
+| C · M10 发布 | **CI 真实跑绿**：`clean build` + 产物上传 + jar 元数据检查 | GitHub Actions 绿 | ⬜ **从未真正跑过**（本机无网）——**发布前唯一外部未知项** |
+| C · M10 发布 | **188 个测试类**基座重建 | `gradlew test` | ⬜ |
+| C · M10 发布 | **locale 补键**：`zh_cn` 少 5 条用键 + 8 条死键，并全量扫描 8 个语言 | 脚本比对 key | ⬜ |
+| C · M10 发布 | **性能回归**：繁忙世界（大量 BER/实体）下 HUD/光晕开销 | 对比空闲/繁忙帧时 | ⬜ |
+| C · M10（技术债） | `GameContext.lastWorld` 静态 `ClientLevel` 断线后不清空（`docs/reviews/57-pipeline-conflict-audit.md` **S1**）→ 内存滞留 | 改代码 + 断线复测 | ⬜ |
+| C · M10（技术债） | 5 处 mixin 仍 `require=1`（同 `57` **H5**）→ 未来 MC 签名变动会**启动崩溃**而不是降级 | 评估改 `require=0` + 诊断 | ⬜ |
+| C · M10（技术债） | 诊断信号变弱（`entity-block glow` 的 WARN 已降 DEBUG）→ 真回归只能靠视觉 | 2号 补强方案（`resolved`/`consumed` 计数 + 首次消费 DEBUG） | ⬜ |
+| C · M10（技术债） | **DH × OIT 互斥策略**：装 DH 的玩家永远走不到 `outline` 相位分支 | 加诊断开关强制走，或在 `docs/reviews/24-fidelity-constraint-audit.md` 登记为已知行为 | ⬜（**M9-3 之前定**） |
+| D · 遗留 / 可选 | **M8b 自定义资源包补测**（替换 `assets/pingforit/textures/ping.png`） | 实机贴图 | ⏸ 等用户提供资源包 |
+| D · 遗留 / 可选 | **OIT 复测**：透明物体叠加顺序 | 实机 | ⏸ 可选 |
+| D · 遗留 / 可选 | `render/spike/OutlineExperiment` 清理 | 删除并确认无引用 | ⏸ 用户已确认保留 |
+| D · 遗留 / 可选 | **`改进方案.md` 里的用户条目** | 用户逐条确认 | ⏸ 用户暂缓 |
 
-> M7-prep 的结论已用于 **M7a**（E2 ✅：自定义无深度管线 + `afterTerrain` 路由；2026-10-31 实机通过）。
+### 发布门禁（M10 收尾前必须满足）
 
-**工作流（本阶段固定）**：分析需求 → 实现 → 审查 → 有问题修复后**重新**分析审查 → 再进入下一步。
+- **分组 A / B / C 全部 ✅**（V19 可选，但若不做，**必须在发布说明里注明未做**）。
+- **必须重新通读 `改进方案.md`**：那是用户自己写的待办与想法，**发布前逐条给出结论**——「已实现 / 明确不做（写原因）/ 转为后续版本」；**任何一条没有结论都不得发布**。
+- **CI 在真实 GitHub Actions 上绿过一次**，并核对上传的 jar 名称/大小与本地一致。
+- `AGENTS.md` §10 的自检清单全过，且 `docs/PORTING-PROGRESS.md` 的剩余工作总表与本清单一致（**若不一致，以本清单为准**并同步过去）。
+
+## 9.2 M7-prep 实验（已归档，仅存结论）
+
+> 原「当前任务（M7-prep）」的四项实验（E6 / E1 / E2 / E3）已于 2026-11-04 **归档**：结论并入 M7a–M7c 与本文件 §7；**该节的 🔄 状态不再跟踪**（原表格已删除）。
+
+- **E2（自定义无深度管线）**：✅ 实机通过（2026-10-30，mode 4），直接用于 **M7a**（`RenderTypeAccessor` + `RenderPipelinesAccessor` 的自定义 pipeline + `afterTerrain` 路由），并被 M7b / M7c 沿用。
+- **E1（线框遮挡语义）**：结论已写进 `docs/PORTING-PROGRESS.md` 的 M7-prep 节——实为**两档**（depth write 开/关），且 `afterTerrain` 对 alpha=255 不生效。
+- **E3（gizmo 对照）**：❌ **未采用**——线宽/混合/剔除/深度全由原版决定，不满足保真铁律，只能作参照。
+- **E6（`deferred/client/outline` 试编译普查）**：已被 M7a / M7b / M7c 的实际重写取代，不再单独跟踪。
 
 ## 10. 改动后自检
 

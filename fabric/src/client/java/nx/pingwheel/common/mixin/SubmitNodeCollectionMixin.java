@@ -60,7 +60,9 @@ public abstract class SubmitNodeCollectionMixin {
 		boolean afterTerrainFlag,
 		CallbackInfo ci
 	) {
-		if (!PingOutlineRenderType.isCustom(renderType)) {
+		boolean customRenderType = PingOutlineRenderType.isCustom(renderType);
+
+		if (!customRenderType) {
 			return;
 		}
 
@@ -104,9 +106,20 @@ public abstract class SubmitNodeCollectionMixin {
 
 	/**
 	 * True when vanilla will run the classic translucent path this frame, i.e. when the
-	 * {@code afterTerrain} phase is actually executed. Mirrors the boolean LevelRenderer
-	 * branches on ({@code Options.improvedTransparency}); when the client is already gone
-	 * we assume classic (the safer bucket, it also runs with improved transparency off).
+	 * {@code afterTerrain} phase is actually executed.
+	 *
+	 * <p>{@code improvedTransparency} is read from {@link Minecraft#options}, which is the
+	 * authoritative value and available at any time. Only {@code renderWireframeTerrain} is
+	 * read from the render state, and a missing render state is treated as {@code false}
+	 * (i.e. "follow the option") instead of degrading the whole decision to classic — the
+	 * previous version treated a not-yet-populated {@code optionsRenderState} as classic,
+	 * which could silently keep rerouting off even when the option was on.
+	 *
+	 * <p>Vanilla's rule ({@code GameRenderer#useImprovedTransparency}) still needs both:
+	 * improved transparency on <em>and</em> terrain wireframe off. With wireframe terrain on,
+	 * vanilla keeps executing the classic translucent path, so the outline must stay in the
+	 * {@code afterTerrain} bucket. When the client itself is gone we assume classic (the safer
+	 * bucket, it also runs with improved transparency off).
 	 */
 	private static boolean pingforit$classicTransparencyActive() {
 		Minecraft minecraft = Minecraft.getInstance();
@@ -115,17 +128,13 @@ public abstract class SubmitNodeCollectionMixin {
 			return true;
 		}
 
+		boolean improvedTransparency = minecraft.options != null
+			&& minecraft.options.improvedTransparency().get();
 		GameRenderState renderState = minecraft.gameRenderer.gameRenderState();
+		boolean renderWireframeTerrain = renderState != null
+			&& renderState.levelRenderState != null
+			&& renderState.levelRenderState.renderWireframeTerrain;
 
-		if (renderState == null || renderState.optionsRenderState == null || renderState.levelRenderState == null) {
-			return true;
-		}
-
-		// Mirrors GameRenderer#useImprovedTransparency() exactly: the option alone is not enough,
-		// vanilla also requires terrain wireframe rendering to be off. With wireframe terrain on,
-		// vanilla keeps running the classic translucent path (and therefore afterTerrain), so the
-		// outline must stay in that bucket instead of being rerouted to the outline phase.
-		return !renderState.optionsRenderState.improvedTransparency
-			|| renderState.levelRenderState.renderWireframeTerrain;
+		return !improvedTransparency || renderWireframeTerrain;
 	}
 }
