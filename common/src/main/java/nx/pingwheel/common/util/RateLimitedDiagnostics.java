@@ -6,8 +6,9 @@ import org.jetbrains.annotations.Nullable;
 
 import java.util.function.Supplier;
 
-/** Compatibility entry points; all state and logging belong to {@link Diagnostics}. */
+/** Deprecated legacy test adapters. Production callers must choose an explicit side in {@link Diagnostics}. */
 @NotNullByDefault
+@Deprecated
 public final class RateLimitedDiagnostics {
 
 	private RateLimitedDiagnostics() {}

@@ -15,6 +15,7 @@ import java.util.function.Supplier;
 
 /** Bounded scalar-only window state, separate from context, formatting and sinks. */
 @NotNullByDefault
+@Deprecated
 final class DiagnosticReporter {
 
 	static final int CAPACITY = 64;

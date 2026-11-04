@@ -2,6 +2,8 @@ package nx.pingwheel.common.util;
 
 import nx.pingwheel.common.Global;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.diagnostics.RateLimitedDiagnosticsTestScope;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.core.LogEvent;
@@ -13,6 +15,8 @@ import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.apache.logging.log4j.core.config.Property;
 import org.junit.jupiter.api.Test;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,7 +27,46 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@NotNullByDefault
 class GlobalExceptionLoggingTest {
+
+	@Test
+	void explicitSideGlobalHelperUsesNormalDisclosureEvenAtErrorSeverity() {
+		Logger logger = (Logger) org.apache.logging.log4j.LogManager.getLogger("pingforit.server");
+		LoggerContext context = logger.getContext();
+		Configuration configuration = context.getConfiguration();
+		@Nullable LoggerConfig previous = configuration.getLoggers().get(logger.getName());
+		LoggingProfile previousProfile = Diagnostics.profile(DiagnosticSide.SERVER);
+		List<LogEvent> events = new ArrayList<>();
+		AbstractAppender appender = new AbstractAppender("global-side-test", null, null, true, Property.EMPTY_ARRAY) {
+			@Override public void append(LogEvent event) { events.add(event.toImmutable()); }
+		};
+		appender.start();
+		LoggerConfig exact = new LoggerConfig(logger.getName(), Level.DEBUG, false);
+		exact.addAppender(appender, Level.ALL, null);
+		configuration.removeLogger(logger.getName());
+		configuration.addLogger(logger.getName(), exact);
+		context.updateLoggers();
+		try {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.NORMAL);
+			Global.exception(DiagnosticSide.SERVER, Level.ERROR, "global-side", "fallback", new RuntimeException() {
+				@Override public String getMessage() { throw new AssertionError("NORMAL message accessor"); }
+				@Override public StackTraceElement @Unmodifiable [] getStackTrace() { throw new AssertionError("NORMAL stack accessor"); }
+				@Override public @Nullable Throwable getCause() { throw new AssertionError("NORMAL cause accessor"); }
+			});
+			assertEquals(1, events.size());
+			assertEquals(Level.ERROR, events.getFirst().getLevel());
+			assertEquals("pingforit.server", events.getFirst().getLoggerName());
+			assertTrue(events.getFirst().getMessage().getFormattedMessage().contains("site=global-side handling=fallback"));
+			assertNull(events.getFirst().getThrown());
+		} finally {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, previousProfile);
+			configuration.removeLogger(logger.getName());
+			if (previous != null) configuration.addLogger(logger.getName(), previous);
+			context.updateLoggers();
+			appender.stop();
+		}
+	}
 
 	@Test
 	void disabledExceptionHelpersNeverReadThrowableAccessors() {
@@ -119,6 +162,7 @@ class GlobalExceptionLoggingTest {
 		return failure;
 	}
 
+	@NotNullByDefault
 	private static final class Capture implements AutoCloseable {
 		private final Logger logger = (Logger) Global.LOGGER;
 		private final LoggerContext context = logger.getContext();

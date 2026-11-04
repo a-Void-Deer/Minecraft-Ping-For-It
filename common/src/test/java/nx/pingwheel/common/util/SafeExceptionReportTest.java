@@ -1,6 +1,8 @@
 package nx.pingwheel.common.util;
 
 import nx.pingwheel.common.interaction.state.PingInteractionLogger;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -12,7 +14,48 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@NotNullByDefault
 class SafeExceptionReportTest {
+
+	@Test
+	void observerSeesDefensivelyCaughtAccessorFailuresWithoutLosingUnavailableMarkers() {
+		List<String> stages = new ArrayList<>();
+		List<Throwable> observed = new ArrayList<>();
+		RuntimeException messageFailure = new IllegalStateException("message accessor");
+		Error stackFailure = new AssertionError("stack accessor");
+		Error causeFailure = new LinkageError("cause accessor");
+		Throwable hostile = new RuntimeException() {
+			@Override public String getMessage() { throw messageFailure; }
+			@Override public StackTraceElement @Unmodifiable [] getStackTrace() { throw stackFailure; }
+			@Override public Throwable getCause() { throw causeFailure; }
+		};
+		String report = SafeExceptionReport.formatWithContext("permitted context", hostile, (stage, failure) -> {
+			stages.add(stage);
+			observed.add(failure);
+		});
+		assertEquals(List.of("message", "stack", "cause"), stages);
+		assertEquals(List.of(messageFailure, stackFailure, causeFailure), observed);
+		assertTrue(report.contains("message unavailable"));
+		assertTrue(report.contains("stack unavailable"));
+		assertTrue(report.contains("cause: [unavailable]"));
+	}
+
+	@Test
+	void throwingObserverCannotReplaceAccessorFallbackOrExpandMessageFatalCatchBoundary() {
+		Throwable hostile = new RuntimeException() {
+			@Override public String getMessage() { throw new IllegalStateException("accessor"); }
+		};
+		String report = SafeExceptionReport.format(hostile, (stage, failure) -> {
+			throw new NoClassDefFoundError("observer unavailable");
+		});
+		assertTrue(report.contains("message unavailable"));
+		OutOfMemoryError fatal = new OutOfMemoryError("fatal message accessor");
+		Throwable fatalAccessor = new RuntimeException() {
+			@Override public String getMessage() { throw fatal; }
+		};
+		assertSame(fatal, assertThrows(OutOfMemoryError.class, () -> SafeExceptionReport.format(fatalAccessor,
+			(stage, failure) -> { throw new AssertionError("Fatal message accessor was not previously caught"); })));
+	}
 
 	@Test
 	void includesOriginalMessagesTypesFramesAndRelationshipsWithoutRedaction() {

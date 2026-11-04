@@ -2,6 +2,7 @@ package nx.pingwheel.common.diagnostics;
 
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Test-only scope that replaces the shared production diagnostics limiter with
@@ -23,9 +24,9 @@ import org.jetbrains.annotations.NotNullByDefault;
 @NotNullByDefault
 public final class RateLimitedDiagnosticsTestScope implements AutoCloseable {
 
-	private final DiagnosticReporter previous;
+	private final @Nullable DiagnosticReporter previous;
 
-	private RateLimitedDiagnosticsTestScope(DiagnosticReporter previous) {
+	private RateLimitedDiagnosticsTestScope(@Nullable DiagnosticReporter previous) {
 		this.previous = previous;
 	}
 

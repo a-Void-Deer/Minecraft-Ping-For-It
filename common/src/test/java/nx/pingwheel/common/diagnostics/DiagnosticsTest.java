@@ -30,6 +30,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DiagnosticsTest {
 
 	@Test
+	void unownedLegacyStaticRoutesDoNotGuessASideOrBypassProductionProfile() {
+		@Nullable DiagnosticReporter previous = Diagnostics.swapProductionForTesting(null);
+		try {
+			Diagnostics.warn("legacy-read", "provider", () -> {
+				throw new AssertionError("Unowned static route must migrate instead of guessing a side");
+			}, new UnreadableFailure());
+			Diagnostics.domainApprovedEvent(Level.WARN, "legacy-read", "provider", "missing", () -> {
+				throw new AssertionError("No unrestricted production compatibility output");
+			});
+		} finally {
+			Diagnostics.swapProductionForTesting(previous);
+		}
+	}
+
+	@Test
 	void compatibilityAndNewFailureRoutesShareAllLevelWindowsAndOnePrefixedBackend() {
 		try (Capture capture = new Capture(Level.ALL)) {
 			RuntimeException failure = failure("original payload", null);
@@ -132,11 +147,14 @@ class DiagnosticsTest {
 		try (Capture capture = new Capture(Level.ALL);
 			PlatformFreeLoader loader = new PlatformFreeLoader()) {
 			Class<?> diagnostics = loader.loadClass(Diagnostics.class.getName());
-			diagnostics.getMethod("event", Level.class, String.class, String.class, String.class,
-				java.util.function.Supplier.class).invoke(null, Level.WARN, "read", "provider", "missing",
-				(java.util.function.Supplier<String>) () -> "without platform services");
-			assertEquals(1, capture.events.size());
-			assertTrue(capture.events.getFirst().getMessage().getFormattedMessage().contains("without platform services"));
+			Object logger = diagnostics.getMethod("client").invoke(null);
+			Class<?> loggerType = logger.getClass();
+			// New side-owned route is usable without Global, platform or config.
+			loggerType.getMethod("warn", String.class,
+				java.lang.reflect.Array.newInstance(loader.loadClass(SafeDiagnosticValue.class.getName()), 0).getClass())
+				.invoke(logger, "without platform services",
+					java.lang.reflect.Array.newInstance(loader.loadClass(SafeDiagnosticValue.class.getName()), 0));
+			assertTrue((boolean) loggerType.getMethod("isEnabled", Level.class).invoke(logger, Level.WARN));
 		}
 	}
 
@@ -159,7 +177,8 @@ class DiagnosticsTest {
 
 		@Override
 		protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
-			if (name.equals("nx.pingwheel.common.Global") || name.startsWith("nx.pingwheel.common.platform.")) {
+			if (name.equals("nx.pingwheel.common.Global") || name.startsWith("nx.pingwheel.common.platform.")
+				|| name.startsWith("nx.pingwheel.common.config.")) {
 				throw new ClassNotFoundException("Platform services are intentionally unavailable: " + name);
 			}
 			if (!name.startsWith("nx.pingwheel.common.diagnostics.")
