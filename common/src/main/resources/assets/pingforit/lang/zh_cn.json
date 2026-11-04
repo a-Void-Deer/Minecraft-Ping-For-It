@@ -162,4 +162,9 @@
   ,"settings.pingforit.reset_all.server_draft_warning": "这也会丢弃未保存的服务器设置草稿。"
   ,"settings.pingforit.open_client_config": "保存、关闭并打开客户端配置..."
   ,"settings.pingforit.open_client_config.tooltip": "保存并关闭设置，然后打开完整的客户端配置文件。外部编辑将在重启客户端后生效。"
+  ,"value.pingforit.vanilla_team": "原版队伍"
+  ,"value.pingforit.ftb_teams": "FTB 队伍"
+  ,"value.pingforit.voice_chat": "语音聊天"
+  ,"pingforit.chat.go_to.template.override": "{playerName} 请求 {pingType} {targetName}"
+  ,"pingforit.chat.take.template.override": "{playerName} 请求在 {targetName} 处 {pingType}"
 }

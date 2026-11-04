@@ -4,6 +4,7 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.api.EnvType;
 import net.fabricmc.api.Environment;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.fabricmc.fabric.api.resource.v1.ResourceLoader;
@@ -15,6 +16,7 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.Identifier;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.command.ClientCommandBuilder;
+import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
 import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
 import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
@@ -56,6 +58,12 @@ public class FabricClient implements ClientModInitializer {
 		HudElementRegistry.addLast(
 			TOGGLE_NOTICE_HUD_LAYER_ID,
 			(graphics, deltaTracker) -> CommonClient.INSTANCE.onRenderToggleNotice(graphics));
+		// GameContext caches the current ClientLevel identity purely to avoid re-initialising
+		// the dimension every frame; a static reference must not outlive the world, so drop it
+		// when the client disconnects (single player or multiplayer). The next join then
+		// initialises from a fresh level instead of retaining the old one.
+		ClientPlayConnectionEvents.DISCONNECT.register(
+			(handler, client) -> GameContext.clearLastWorld());
 		ClientPlayNetworking.registerGlobalReceiver(
 			RateLimitPolicyS2CPacket.PACKET_TYPE,
 			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onRateLimitPolicyPacket(packet)));

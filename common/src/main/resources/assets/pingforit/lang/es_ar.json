@@ -160,4 +160,13 @@
   ,"settings.pingforit.reset_all.server_draft_warning": "Esto también descarta el borrador sin guardar del servidor."
   ,"settings.pingforit.open_client_config": "Guardar, cerrar y abrir la configuración del cliente..."
   ,"settings.pingforit.open_client_config.tooltip": "Guarda y cierra Ajustes antes de abrir el archivo completo de configuración del cliente. Los cambios externos se aplican al reiniciar el cliente."
+  ,"settings.pingforit.wheel_inner_radius": "Radio interior de la rueda: %s"
+  ,"settings.pingforit.wheel_outer_radius": "Radio exterior de la rueda: %s"
+  ,"settings.pingforit.wheel_opacity": "Opacidad de la rueda: %s"
+  ,"settings.pingforit.wheel_hold_millis": "Tiempo de mantenimiento de la rueda: %s"
+  ,"settings.pingforit.wheel_timeout_millis": "Tiempo de espera de la rueda: %s"
+  ,"settings.pingforit.cancel_half_cone_angle_degrees": "Semiángulo del cono de cancelación: %s"
+  ,"unit.pingforit.degrees": "%s°"
+  ,"unit.pingforit.pixels": "%spx"
+  ,"pingforit.chat.danger.template.override": "{playerName} {pingType}: {targetName}!"
 }

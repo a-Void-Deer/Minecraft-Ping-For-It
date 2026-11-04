@@ -160,4 +160,13 @@
   ,"settings.pingforit.reset_all.server_draft_warning": "Dadurch wird auch der ungespeicherte Serverentwurf verworfen."
   ,"settings.pingforit.open_client_config": "Speichern, schließen & Client-Konfiguration öffnen..."
   ,"settings.pingforit.open_client_config.tooltip": "Speichert und schließt die Einstellungen und öffnet dann die vollständige Client-Konfigurationsdatei. Externe Änderungen werden nach einem Neustart des Clients wirksam."
+  ,"settings.pingforit.wheel_inner_radius": "Radialmenü-Innenradius: %s"
+  ,"settings.pingforit.wheel_outer_radius": "Radialmenü-Außenradius: %s"
+  ,"settings.pingforit.wheel_opacity": "Radialmenü-Deckkraft: %s"
+  ,"settings.pingforit.wheel_hold_millis": "Radialmenü-Haltezeit: %s"
+  ,"settings.pingforit.wheel_timeout_millis": "Radialmenü-Zeitlimit: %s"
+  ,"settings.pingforit.cancel_half_cone_angle_degrees": "Abbruchkegel-Halbwinkel: %s"
+  ,"unit.pingforit.degrees": "%s°"
+  ,"unit.pingforit.pixels": "%spx"
+  ,"pingforit.chat.danger.template.override": "{playerName} {pingType}: {targetName}!"
 }

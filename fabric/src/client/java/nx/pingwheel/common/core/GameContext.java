@@ -48,6 +48,18 @@ public class GameContext {
 			}
 		});
 
+	/**
+	 * Drops the cached {@link ClientLevel} identity.
+	 *
+	 * <p>This field only exists to avoid re-initialising the dimension every frame, but a
+	 * static reference to a level outlives the world it belongs to. Client disconnect clears
+	 * it so a reconnect (the same single-player save or another server) starts from a fresh
+	 * level object instead of keeping the old one reachable.
+	 */
+	public static void clearLastWorld() {
+		lastWorld = null;
+	}
+
 	public static void updateDimension() {
 		if (Game.level == null || lastWorld == Game.level) {
 			return;

@@ -82,4 +82,10 @@ jar {
 	from(rootProject.file('LICENSE')) {
 		rename { it + '_pingforit' }
 	}
+
+	// 上游归属 + Apache-2.0 全文（vendored MavenComparableVersion）随 jar 分发。
+	// 与 LICENSE 分开保留原名：LICENSE_pingforit 是本项目自身的 MIT 许可，而这份文件
+	// 记录派生关系与第三方条款，两者职责不同；Apache 全文直接内嵌在同一文件（不再单独
+	// 出一个 LICENSE-APACHE-2.0 条目），避免 jar 根出现两个容易混淆的许可文件。
+	from(rootProject.file('THIRD-PARTY-NOTICES.md'))
 }

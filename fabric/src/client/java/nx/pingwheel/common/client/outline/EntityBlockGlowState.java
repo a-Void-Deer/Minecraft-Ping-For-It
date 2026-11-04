@@ -89,8 +89,15 @@ public final class EntityBlockGlowState {
 	private static boolean pendingGlow = false;
 	private static boolean pendingConsumed = false;
 
-	/** Glowing dispatches whose colour was never consumed; warns once at the threshold. */
+	/** Glowing dispatches whose colour was never consumed; logs once at the threshold. */
 	private static int missedDispatches = 0;
+
+	/** Dispatches that armed a colour this session, and how many a model submit consumed. */
+	private static int glowingDispatches = 0;
+	private static int consumedDispatches = 0;
+
+	/** One-shot DEBUG proving the model-submit hook actually ran. */
+	private static boolean firstConsumptionLogged = false;
 
 	private static volatile boolean disabled = false;
 	private static boolean activationLogged = false;
@@ -179,9 +186,22 @@ public final class EntityBlockGlowState {
 	 * the screen instead.
 	 */
 	private static void checkMissedDispatch() {
+		if (!pendingGlow) {
+			return;
+		}
+
+		// Counters are per session and never reset: they let a support log distinguish
+		// "this target simply draws no model" from "the model hook is dead".
+		glowingDispatches++;
+
+		if (pendingConsumed) {
+			consumedDispatches++;
+			return;
+		}
+
 		// Once the model hook has been observed working, a dispatch that legitimately draws no
 		// model (renderer null, text-only) must not keep accumulating misses.
-		if (modelHookApplied || !pendingGlow || pendingConsumed) {
+		if (modelHookApplied) {
 			return;
 		}
 
@@ -190,8 +210,10 @@ public final class EntityBlockGlowState {
 		if (missedDispatches == MISSED_DISPATCH_WARN_AT) {
 			LOGGER.debug("entity-block glow: no model submit consumed the colour on {} glowing dispatches "
 					+ "(expected for text/item-only BERs such as campfire or sign); the baked-model or "
-					+ "wireframe fallback decides what is drawn",
-				MISSED_DISPATCH_WARN_AT);
+					+ "wireframe fallback decides what is drawn "
+					+ "(dispatchHookApplied={}, modelHookApplied={}, glowingDispatches={}, consumedDispatches={})",
+				MISSED_DISPATCH_WARN_AT, dispatchHookApplied, modelHookApplied,
+				glowingDispatches, consumedDispatches);
 		}
 	}
 
@@ -214,6 +236,13 @@ public final class EntityBlockGlowState {
 			GLOWING.get().add(pos.asLong());
 			pendingConsumed = true;
 			modelHookApplied = true;
+
+			// One-shot proof that the submitModel hook is woven and consuming colours; without
+			// it a "no model submit consumed ..." debug line is ambiguous.
+			if (!firstConsumptionLogged) {
+				firstConsumptionLogged = true;
+				LOGGER.debug("entity-block glow: model submit hook active (first colour consumed)");
+			}
 		}
 
 		return color;
