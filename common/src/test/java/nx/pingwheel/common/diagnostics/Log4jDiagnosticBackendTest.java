@@ -15,11 +15,172 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
 class Log4jDiagnosticBackendTest {
+	@Test
+	void installedChildrenAreNotReadyUntilTheRequestingLoggerHasPublishedThem() throws Exception {
+		try (PausedPublicationContext context = new PausedPublicationContext()) {
+			DefaultConfiguration configuration = new DefaultConfiguration();
+			configuration.getRootLogger().setLevel(Level.ERROR);
+			context.start(configuration);
+			var server = context.getLogger("pingforit.server");
+			assertFalse(server.isWarnEnabled());
+			Log4jDiagnosticBackend backend = new Log4jDiagnosticBackend(context::getLogger);
+			context.pause.set(true);
+			try (var executor = Executors.newFixedThreadPool(2)) {
+				var first = executor.submit(() -> backend.prepare(DiagnosticSide.CLIENT));
+				try {
+					assertTrue(context.entered.await(5, TimeUnit.SECONDS));
+					assertNotNull(configuration.getLoggers().get("pingforit.server"));
+					assertFalse(server.isWarnEnabled(), "Child installed, cached logger still inherits root ERROR");
+					executor.submit(() -> {
+						backend.prepare(DiagnosticSide.SERVER);
+						assertSame(configuration.getLoggers().get("pingforit.server"), server.get());
+						assertTrue(server.isWarnEnabled());
+					}).get(5, TimeUnit.SECONDS);
+				} finally {
+					context.release.countDown();
+				}
+				first.get(5, TimeUnit.SECONDS);
+			}
+		}
+	}
+
+	@Test
+	void concurrentTerminalCannotMistakeSetupInProgressForReadyUnderErrorRoot() throws Exception {
+		try (LoggerContext context = new LoggerContext("diagnostic-concurrent-setup")) {
+			PausedConfiguration configuration = new PausedConfiguration();
+			configuration.getRootLogger().setLevel(Level.ERROR);
+			RecordingAppender appender = new RecordingAppender();
+			appender.start();
+			configuration.getRootLogger().addAppender(appender, Level.ALL, null);
+			context.start(configuration);
+			context.getLogger("pingforit.client");
+			context.getLogger("pingforit.server");
+			Log4jDiagnosticBackend backend = new Log4jDiagnosticBackend(context::getLogger);
+			DiagnosticBackend previous = Diagnostics.swapBackendForTesting(backend);
+			LoggingProfile profile = Diagnostics.profile(DiagnosticSide.SERVER);
+			try (var executor = Executors.newFixedThreadPool(2)) {
+				Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.NORMAL);
+				configuration.pause.set(true);
+				var first = executor.submit(() -> backend.prepare(DiagnosticSide.CLIENT));
+				try {
+					assertTrue(configuration.entered.await(5, TimeUnit.SECONDS));
+					CountDownLatch secondStarted = new CountDownLatch(1);
+					var second = executor.submit(() -> {
+						secondStarted.countDown();
+						Diagnostics.server().warn("normal warning during concurrent setup");
+					});
+					assertTrue(secondStarted.await(5, TimeUnit.SECONDS));
+					assertThrows(TimeoutException.class, () -> second.get(100, TimeUnit.MILLISECONDS),
+						"A terminal cannot finish against root ERROR while exact children are not installed");
+					configuration.release.countDown();
+					second.get(5, TimeUnit.SECONDS);
+					first.get(5, TimeUnit.SECONDS);
+					assertEquals(1, appender.events.size());
+					assertEquals(Level.WARN, appender.events.getFirst().getLevel());
+					assertEquals("pingforit.server", appender.events.getFirst().getLoggerName());
+					assertEquals(Level.ERROR, configuration.getRootLogger().getLevel());
+				} finally {
+					configuration.release.countDown();
+				}
+			} finally {
+				Diagnostics.swapBackendForTesting(previous);
+				Diagnostics.setProfile(DiagnosticSide.SERVER, profile);
+			}
+		}
+	}
+
+	@Test
+	void foreignListenerCanWaitForConcurrentPrepareAndReconfigureWithoutBackendLockInversion() throws Exception {
+		try (LoggerContext context = new LoggerContext("diagnostic-listener-concurrency")) {
+			DefaultConfiguration first = new DefaultConfiguration();
+			first.getRootLogger().setLevel(Level.ERROR);
+			context.start(first);
+			CountDownLatch listenerEntered = new CountDownLatch(1);
+			CountDownLatch releaseListener = new CountDownLatch(1);
+			AtomicBoolean blockOnce = new AtomicBoolean(true);
+			context.addPropertyChangeListener(event -> {
+				if (blockOnce.compareAndSet(true, false)) {
+					listenerEntered.countDown();
+					await(releaseListener);
+				}
+			});
+			Log4jDiagnosticBackend backend = new Log4jDiagnosticBackend(context::getLogger);
+			try (var executor = Executors.newFixedThreadPool(2)) {
+				var publishing = executor.submit(() -> backend.prepare(DiagnosticSide.CLIENT));
+				try {
+					assertTrue(listenerEntered.await(5, TimeUnit.SECONDS));
+					// This must complete while the first publisher is inside a foreign
+					// listener. A global setup mutex held across updateLoggers deadlocks.
+					executor.submit(() -> {
+						backend.prepare(DiagnosticSide.SERVER);
+						assertTrue(backend.isEnabled(DiagnosticSide.SERVER, Level.WARN));
+						DefaultConfiguration second = new DefaultConfiguration();
+						second.getRootLogger().setLevel(Level.FATAL);
+						context.setConfiguration(second);
+						backend.prepare(DiagnosticSide.SERVER);
+						assertSame(second.getLoggers().get("pingforit.server"), context.getLogger("pingforit.server").get());
+						assertTrue(backend.isEnabled(DiagnosticSide.SERVER, Level.WARN));
+						assertEquals(Level.FATAL, second.getRootLogger().getLevel());
+					}).get(5, TimeUnit.SECONDS);
+				} finally {
+					releaseListener.countDown();
+				}
+				publishing.get(5, TimeUnit.SECONDS);
+				assertSame(context.getConfiguration().getLoggers().get("pingforit.client"), context.getLogger("pingforit.client").get());
+			}
+		}
+	}
+
+	private static void await(CountDownLatch latch) {
+		try {
+			assertTrue(latch.await(5, TimeUnit.SECONDS));
+		} catch (InterruptedException interrupted) {
+			Thread.currentThread().interrupt();
+			throw new IllegalStateException(interrupted);
+		}
+	}
+
+	@NotNullByDefault
+	private static final class PausedConfiguration extends DefaultConfiguration {
+		private final AtomicBoolean pause = new AtomicBoolean();
+		private final CountDownLatch entered = new CountDownLatch(1);
+		private final CountDownLatch release = new CountDownLatch(1);
+
+		@Override public synchronized void addLogger(String name, LoggerConfig logger) {
+			if (pause.compareAndSet(true, false)) {
+				entered.countDown();
+				await(release);
+			}
+			super.addLogger(name, logger);
+		}
+	}
+
+	@NotNullByDefault
+	private static final class PausedPublicationContext extends LoggerContext {
+		private final AtomicBoolean pause = new AtomicBoolean();
+		private final CountDownLatch entered = new CountDownLatch(1);
+		private final CountDownLatch release = new CountDownLatch(1);
+
+		private PausedPublicationContext() { super("diagnostic-paused-publication"); }
+
+		@Override public void updateLoggers() {
+			if (pause.compareAndSet(true, false)) {
+				entered.countDown();
+				await(release);
+			}
+			super.updateLoggers();
+		}
+	}
+
 	@Test
 	void exactOwnedLoggersRemainDebugAcrossReconfigureWithoutChangingRootOtherModOrAppenderPolicies() {
 		try (LoggerContext context = new LoggerContext("diagnostic-backend-test")) {

@@ -23,6 +23,25 @@ import static org.junit.jupiter.api.Assertions.*;
 @NotNullByDefault
 class DiagnosticPolicyTest {
 	@Test
+	void reentryStorageIsAbsentUntilARealReentryAndDetachesWithoutCopying() {
+		DiagnosticLogger.Attempt attempt = new DiagnosticLogger.Attempt();
+		assertNull(attempt.detach(), "Ordinary, denied and hint attempts have no reentry map");
+		DiagnosticLogger.Reentry key = new DiagnosticLogger.Reentry(DiagnosticSide.CLIENT, "nested-site", LoggingProfile.NORMAL);
+		attempt.record(key);
+		attempt.record(key);
+		@Nullable var pending = attempt.detach();
+		assertNotNull(pending);
+		assertEquals(2L, pending.get(key));
+		assertNull(attempt.detach(), "Flush transfers ownership, leaving no map to copy or clear");
+		attempt.record(key);
+		assertEquals(2L, pending.get(key), "Writer reentry cannot mutate the detached batch");
+		@Nullable var later = attempt.detach();
+		assertNotNull(later);
+		assertNotSame(pending, later);
+		assertEquals(1L, later.get(key));
+	}
+
+	@Test
 	void profilesAndAllSeveritiesAreIndependent() {
 		try (Fixture fixture = new Fixture()) {
 			for (LoggingProfile effective : LoggingProfile.values()) {

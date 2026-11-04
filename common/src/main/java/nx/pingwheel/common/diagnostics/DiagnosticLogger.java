@@ -112,7 +112,7 @@ public final class DiagnosticLogger {
 			// own lock. Defer the descriptor write until the outer terminal has
 			// returned from all of those callbacks and released channel locks.
 			Reentry key = new Reentry(side, site, Diagnostics.profile(side));
-			outer.reentries.merge(key, 1L, DiagnosticFaultReporter::add);
+			outer.record(key);
 			return false;
 		}
 		Attempt attempt = new Attempt();
@@ -172,11 +172,10 @@ public final class DiagnosticLogger {
 		} finally {
 			try {
 				// Detached records only; never keep the business throwable or context.
-				// Clear before output so a hostile injected writer cannot mutate the
+				// Detach before output so a hostile injected writer cannot mutate the
 				// collection being traversed or recursively flush an unbounded queue.
-				Map<Reentry, Long> pending = new HashMap<>(attempt.reentries);
-				attempt.reentries.clear();
-				pending.forEach((reentry, count) -> Diagnostics.faults().reportOccurrences(reentry.side,
+				@Nullable Map<Reentry, Long> pending = attempt.detach();
+				if (pending != null) pending.forEach((reentry, count) -> Diagnostics.faults().reportOccurrences(reentry.side,
 					reentry.site, DiagnosticFaultReporter.Stage.REENTRY, reentry.profile, null, count));
 			} finally {
 				REPORTING.remove();
@@ -185,11 +184,22 @@ public final class DiagnosticLogger {
 	}
 
 	@NotNullByDefault
-	private record Reentry(DiagnosticSide side, String site, LoggingProfile profile) {}
+	record Reentry(DiagnosticSide side, String site, LoggingProfile profile) {}
 
 	@NotNullByDefault
-	private static final class Attempt {
-		private final Map<Reentry, Long> reentries = new HashMap<>();
+	static final class Attempt {
+		private @Nullable Map<Reentry, Long> reentries;
+
+		void record(Reentry key) {
+			if (reentries == null) reentries = new HashMap<>();
+			reentries.merge(key, 1L, DiagnosticFaultReporter::add);
+		}
+
+		@Nullable Map<Reentry, Long> detach() {
+			@Nullable Map<Reentry, Long> pending = reentries;
+			reentries = null;
+			return pending;
+		}
 	}
 
 	private static String template(String template, @Nullable SafeDiagnosticValue @Nullable @Unmodifiable [] values) {

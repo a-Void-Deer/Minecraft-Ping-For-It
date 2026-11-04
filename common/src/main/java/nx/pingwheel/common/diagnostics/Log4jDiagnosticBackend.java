@@ -11,7 +11,6 @@ import org.jetbrains.annotations.Nullable;
 
 import java.beans.PropertyChangeListener;
 import java.util.Objects;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
 /** Owns only the three exact PingForIt logger levels; never appender/filter policy. */
@@ -20,9 +19,12 @@ final class Log4jDiagnosticBackend implements DiagnosticBackend {
 	private final Function<String, Logger> lookup;
 	private final Object setupLock = new Object();
 	private @Nullable LoggerContext observed;
-	private final AtomicBoolean updating = new AtomicBoolean();
+	private final ThreadLocal<Boolean> publishing = ThreadLocal.withInitial(() -> false);
 	private final PropertyChangeListener listener = event -> {
 		if (!LoggerContext.PROPERTY_CONFIG.equals(event.getPropertyName())) return;
+		// updateLoggers publishes logger private configurations before notifying
+		// listeners. Only this thread's recursive notification can be skipped.
+		if (publishing.get()) return;
 		try {
 			prepare(DiagnosticSide.BOOTSTRAP);
 		} catch (RuntimeException | LinkageError failure) {
@@ -43,20 +45,23 @@ final class Log4jDiagnosticBackend implements DiagnosticBackend {
 	public void prepare(DiagnosticSide side) {
 		Logger logger = logger(side);
 		if (!(logger instanceof org.apache.logging.log4j.core.Logger core)) return;
-		// A reconfigure thread can own Log4j's configuration lock while invoking
-		// this listener. Never make it wait for our setup lock while another
-		// thread is inside updateLoggers or a foreign property-change listener.
-		if (!updating.compareAndSet(false, true)) return;
-		try {
-			synchronized (setupLock) {
-				LoggerContext context = core.getContext();
-				if (observed != context) {
-					if (observed != null) observed.removePropertyChangeListener(listener);
-					context.addPropertyChangeListener(listener);
-					observed = context;
-				}
-				Configuration configuration = context.getConfiguration();
-				boolean changed = false;
+		LoggerContext context = core.getContext();
+		// The small registration lock never encloses Configuration mutation,
+		// updateLoggers or any user/property-change callback.
+		synchronized (setupLock) {
+			if (observed != context) {
+				if (observed != null) observed.removePropertyChangeListener(listener);
+				context.addPropertyChangeListener(listener);
+				observed = context;
+			}
+		}
+		while (true) {
+			Configuration configuration = context.getConfiguration();
+			boolean changed;
+			// addLogger itself uses this monitor in Core 2.22.1. No backend lock
+			// or callback-producing updateLoggers is held inside this boundary.
+			synchronized (configuration) {
+				changed = false;
 				for (DiagnosticSide owned : DiagnosticSide.values()) {
 					String name = name(owned);
 					@Nullable LoggerConfig exact = configuration.getLoggers().get(name);
@@ -68,10 +73,24 @@ final class Log4jDiagnosticBackend implements DiagnosticBackend {
 						changed = true;
 					}
 				}
-				if (changed) context.updateLoggers();
 			}
-		} finally {
-			updating.set(false);
+			if (configuration != context.getConfiguration()) continue;
+			@Nullable LoggerConfig exact = configuration.getLoggers().get(core.getName());
+			if (changed || core.get() != exact || core.getLevel() != Level.DEBUG) {
+				boolean nested = publishing.get();
+				publishing.set(true);
+				try {
+					// No locks of ours: another prepare/reconfigure can finish even
+					// while a foreign listener blocks this publishing thread.
+					context.updateLoggers();
+				} finally {
+					if (nested) publishing.set(true); else publishing.remove();
+				}
+			}
+			// A competing reconfigure/update may have published another generation.
+			// Never report ready merely because another caller installed the nodes.
+			if (configuration == context.getConfiguration() && exact != null
+				&& exact.getExplicitLevel() == Level.DEBUG && core.get() == exact && core.getLevel() == Level.DEBUG) return;
 		}
 	}
 
