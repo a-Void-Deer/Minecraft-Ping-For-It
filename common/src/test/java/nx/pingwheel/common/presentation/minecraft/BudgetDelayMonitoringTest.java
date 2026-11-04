@@ -10,6 +10,9 @@ import net.minecraft.network.chat.contents.TranslatableContents;
 import org.junit.jupiter.api.Test;
 import org.jetbrains.annotations.Nullable;
 
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.presentation.budget.BudgetDelayMonitor;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
 import nx.pingwheel.common.presentation.PresentationDiagnosticCapture;
@@ -43,6 +46,31 @@ class BudgetDelayMonitoringTest {
 			assertEquals(2, capture.events().size());
 			assertTrue(capture.events().stream().allMatch(event -> event.getLevel() == Level.WARN && event.getThrown() == null));
 			assertTrue(capture.messages().get(0).contains("cycle=0")); assertTrue(capture.messages().get(1).contains("cycle=1"));
+			assertTrue(capture.messages().stream().allMatch(text -> text.contains("observed work items=")),
+				"the higher profile keeps one report per cycle with the full summary");
+		}
+	}
+
+	@Test void normalDiagnosticsReportEveryClosedCycleWithOnlyFiniteModuleCodes() {
+		try (var capture = new PresentationDiagnosticCapture()) {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.NORMAL);
+			var monitor = new BudgetDelayMonitor(BudgetDelayMonitoring::reportSummary, modules -> false);
+			for (Module module : Module.values()) {
+				monitor.observe(event(module, 0, 0, "pending", Quantity.of(Unit.REQUEST_ADAPTER, 1), Reason.SOURCE_WORK.bit()));
+				monitor.state(module, 0, 0, DelayState.DELAYED);
+				monitor.endCycle(module, 0, 0);
+				monitor.finishTick(0, false);
+			}
+			assertEquals(3, capture.events().size(), "disabled administrator notices cannot suppress WARN diagnostics");
+			assertTrue(capture.events().stream().allMatch(event -> event.getLevel() == Level.WARN && event.getThrown() == null));
+			assertTrue(capture.messages().get(0).contains("site=budget/delay"));
+			assertTrue(capture.messages().get(0).contains("handling=closed-cycle/resource-delayed/presentation"));
+			assertTrue(capture.messages().get(1).contains("handling=closed-cycle/resource-delayed/inventory-preview"));
+			assertTrue(capture.messages().get(2).contains("handling=closed-cycle/resource-delayed/inventory-tracking"));
+			assertTrue(capture.messages().stream().noneMatch(text -> text.contains("observed work items=")),
+				"the raw summary stays lazy above NORMAL");
+			assertTrue(capture.messages().stream().noneMatch(text -> text.contains("dimension=example:world")),
+				"NORMAL never receives sample context");
 		}
 	}
 

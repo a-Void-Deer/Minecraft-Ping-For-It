@@ -26,6 +26,9 @@ import net.minecraft.world.level.block.state.BlockState;
 import nx.pingwheel.common.config.IntLimit;
 import nx.pingwheel.common.config.InventorySettings;
 import nx.pingwheel.common.config.ServerConfig;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
@@ -40,6 +43,7 @@ import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.presentation.PresentationBasic;
+import nx.pingwheel.common.presentation.PresentationDiagnosticCapture;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationSettings;
@@ -445,21 +449,31 @@ class InventoryProductionPolicyTest {
 	@ParameterizedTest
 	@CsvSource({"ITEM,DEFER", "FLUID,DEFER", "ITEM,THROW", "FLUID,THROW"})
 	void actualCanonicalRetryRetainsCreationAfterARefusedOrThrowingEncodedHandoff(InventoryResourceKind lane, String failure) throws Exception {
-		try (var f = new Fixture(Map.of())) {
-			f.states.get(lane).amount = 5;
-			long request = f.open();
-			f.refuseCreated = true; f.throwCreated = failure.equals("THROW");
-			MarkerId marker = f.select(request, lane);
-			assertFalse(PresentationServer.inventoryKnows(OWNER, marker));
-			assertTrue(f.session().baselinePending); assertEquals(marker.value(), f.session().blockedInitial);
-			f.tick(1); assertFalse(PresentationServer.inventoryKnows(OWNER, marker));
-			f.states.get(lane).amount = 9; f.refuseCreated = false; f.throwCreated = false;
-			f.tick(2);
-			var initial = f.presentation.stream().filter(p -> p.kind() == PresentationS2CPacket.Kind.CREATED).findFirst().orElseThrow();
-			assertEquals(5, Objects.requireNonNull(initial.content().inventorySnapshot()).amount());
-			assertTrue(PresentationServer.inventoryKnows(OWNER, marker));
-			f.tick(3);
-			assertEquals(1, f.presentation.stream().filter(p -> p.kind() == PresentationS2CPacket.Kind.CREATED).count());
+		try (var capture = new PresentationDiagnosticCapture()) {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.NORMAL);
+			try (var f = new Fixture(Map.of())) {
+				f.states.get(lane).amount = 5;
+				long request = f.open();
+				f.refuseCreated = true; f.throwCreated = failure.equals("THROW");
+				MarkerId marker = f.select(request, lane);
+				assertFalse(PresentationServer.inventoryKnows(OWNER, marker));
+				assertTrue(f.session().baselinePending); assertEquals(marker.value(), f.session().blockedInitial);
+				f.tick(1); assertFalse(PresentationServer.inventoryKnows(OWNER, marker));
+				f.states.get(lane).amount = 9; f.refuseCreated = false; f.throwCreated = false;
+				f.tick(2);
+				var initial = f.presentation.stream().filter(p -> p.kind() == PresentationS2CPacket.Kind.CREATED).findFirst().orElseThrow();
+				assertEquals(5, Objects.requireNonNull(initial.content().inventorySnapshot()).amount());
+				assertTrue(PresentationServer.inventoryKnows(OWNER, marker));
+				f.tick(3);
+				assertEquals(1, f.presentation.stream().filter(p -> p.kind() == PresentationS2CPacket.Kind.CREATED).count());
+			}
+			var reports = capture.messages().stream()
+				.filter(message -> message.contains("site=presentation/initial-publication-failed")).toList();
+			assertEquals(failure.equals("THROW") ? 1 : 0, reports.size());
+			if (failure.equals("THROW")) {
+				assertTrue(reports.getFirst().contains("handling=baseline-retry"));
+				assertFalse(reports.getFirst().contains("encoded handoff failure"));
+			}
 		}
 	}
 

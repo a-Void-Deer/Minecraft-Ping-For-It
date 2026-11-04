@@ -6,6 +6,9 @@ import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import org.jetbrains.annotations.Nullable;
+import nx.pingwheel.common.diagnostics.DiagnosticFaultReporter;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.ServerMarker;
@@ -151,7 +154,10 @@ final class PresentationFairSampler {
 		reasons |= added;
 		try { sink.observe(new DelayEvent(Module.PRESENTATION, serverTick, serverTick,
 			context(marker, adapter.adapterId()), first, added, Quantity.of(Unit.MARKER_ADAPTER, 1))); }
-		catch (RuntimeException | LinkageError ignored) {}
+		catch (RuntimeException | LinkageError failure) {
+			Diagnostics.faults().report(DiagnosticSide.SERVER, "presentation/fair-sampler",
+				DiagnosticFaultReporter.Stage.SINK, Diagnostics.profile(DiagnosticSide.SERVER), failure);
+		}
 	}
 	private static WorkItem context(ServerMarker marker, String adapter) {
 		String description = "marker=" + marker.id().value() + " adapter=" + adapter + " dimension=" + marker.target().dimensionId();

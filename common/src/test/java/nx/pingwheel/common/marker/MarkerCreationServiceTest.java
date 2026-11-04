@@ -32,6 +32,9 @@ import nx.pingwheel.common.domain.TargetMatchContext;
 import nx.pingwheel.common.domain.TargetResolver;
 import nx.pingwheel.common.domain.TargetType;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.presentation.PresentationDiagnosticScope;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.name.AuthoritativeTargetNameResolver;
@@ -664,6 +667,52 @@ class MarkerCreationServiceTest {
 		assertEquals(2, accepted.creation().orElseThrow().winnerChanges().size());
 		store.forgetRecipient(RECIPIENT);
 		assertEquals(marker.properties(), store.find(marker.id()).orElseThrow().properties());
+	}
+
+	@Test
+	void normalContractFailureReportsRejectCreateWithoutRawTargetOrCause() {
+		newService();
+		Target requested = blockTarget();
+		validator.fail(new IllegalStateException("validator secret target=" + requested, new RuntimeException("validator root cause")));
+
+		try (var diagnostics = new DiagnosticCapture()) {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.NORMAL);
+			assertRejected(create(requested, "attention"), MarkerRejectReason.INVALID_REQUEST);
+			assertEquals(1, diagnostics.events.size());
+			LogEvent event = diagnostics.events.getFirst();
+			assertEquals(Level.WARN, event.getLevel());
+			String report = event.getMessage().getFormattedMessage();
+			assertTrue(report.contains("site=marker-create-validate"));
+			assertTrue(report.contains("handling=reject-create"));
+			assertTrue(report.contains("failure="));
+			assertFalse(report.contains("validator secret"));
+			assertFalse(report.contains("validator root cause"));
+			assertFalse(report.contains("target="));
+		}
+		assertEquals(0, store.size());
+	}
+
+	@Test
+	void normalGroupingFailureReportsRejectCreateWithoutDoubleLogging() {
+		newService();
+		Target requested = blockTarget();
+		validator.accepted(validated(requested, TargetMatchContext.none()));
+		resolver.resolves(requested, targetType("block"));
+		RuntimeException failure = new IllegalStateException("grouping secret");
+		service = new MarkerCreationService(store, resolver, PING_TYPES, validator, MarkerCreationLogger.noop(),
+			new nx.pingwheel.common.integration.externalblock.ExternalBlockServerProviderRegistry(), null,
+			(owner, target) -> { throw failure; });
+
+		try (var diagnostics = new DiagnosticCapture()) {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.NORMAL);
+			assertRejected(create(requested, "attention"), MarkerRejectReason.INVALID_REQUEST);
+			assertEquals(1, diagnostics.events.size(), "the service owns the consumed grouping failure");
+			String report = diagnostics.events.getFirst().getMessage().getFormattedMessage();
+			assertTrue(report.contains("site=marker-create-grouping"));
+			assertTrue(report.contains("handling=reject-create"));
+			assertFalse(report.contains("grouping secret"));
+		}
+		assertEquals(0, store.size());
 	}
 
 	// --- resolver contract failures ----------------------------------------------

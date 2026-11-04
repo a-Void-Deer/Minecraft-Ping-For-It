@@ -1,5 +1,7 @@
 package nx.pingwheel.common.presentation.minecraft;
 
+import nx.pingwheel.common.diagnostics.DiagnosticFaultReporter;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import org.jetbrains.annotations.Nullable;
 
@@ -44,6 +46,7 @@ import nx.pingwheel.common.presentation.inventory.InventoryBackend.InitialPublic
 import nx.pingwheel.common.presentation.inventory.InventoryBackend.InitialEnvelope;
 import nx.pingwheel.common.presentation.preview.PresentationPreviewAccess;
 import nx.pingwheel.common.presentation.preview.PresentationPreviewServer;
+import org.apache.logging.log4j.Level;
 
 import java.util.*;
 import java.util.function.Function;
@@ -55,6 +58,7 @@ public final class PresentationServer {
 	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel REGISTRATION = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-server-registration", java.time.Duration.ofSeconds(10));
 	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel CAPTURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-capture", java.time.Duration.ofSeconds(10));
 	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel SANITIZE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-sanitize", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel INITIAL_PUBLICATION = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-initial-publication", java.time.Duration.ofSeconds(10));
 	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel SEND_SECTION = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-send-section", java.time.Duration.ofSeconds(10));
 	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel BLOCK_NAME = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-block-name", java.time.Duration.ofSeconds(10));
 	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel BLOCK_ENCODE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-block-name-encode", java.time.Duration.ofSeconds(10));
@@ -529,9 +533,13 @@ public final class PresentationServer {
 		if (sink == null) sink = BudgetDelaySink.NONE;
 		BudgetDelaySink.DelayState state = previews == null ? sampled : combineState(sampled, previews.delayState());
 		try { sink.state(BudgetDelaySink.Module.PRESENTATION, cycle, serverTick, state); }
-		catch (RuntimeException | LinkageError ignored) {}
+		catch (RuntimeException | LinkageError failure) { reportCycleFault(failure); }
 		try { sink.endCycle(BudgetDelaySink.Module.PRESENTATION, cycle, serverTick); }
-		catch (RuntimeException | LinkageError ignored) {}
+		catch (RuntimeException | LinkageError failure) { reportCycleFault(failure); }
+	}
+	private static void reportCycleFault(Throwable failure) {
+		Diagnostics.faults().report(DiagnosticSide.SERVER, "presentation/cycle",
+			DiagnosticFaultReporter.Stage.SINK, Diagnostics.profile(DiagnosticSide.SERVER), failure);
 	}
 
 	private static String ownerName(MinecraftServer server, Session session, ServerMarker marker) {
@@ -619,14 +627,14 @@ public final class PresentationServer {
 				try { value = adapter.collect(detached(lease.marker.target()), Set.copyOf(demand), budget); }
 				finally { for (int used = allowance - budget.remaining(); used > 0; used--) work.scan(); }
 			}
-		} catch (RuntimeException | LinkageError ignored) {
-			Diagnostics.server().atDetailed().rateLimited(CAPTURE).warn("presentation/capture", "retain-stale", ignored,
+		} catch (RuntimeException | LinkageError failure) {
+			Diagnostics.server().atNormal().rateLimited(CAPTURE).warn("presentation/capture", "retain-stale", failure,
 				() -> "adapter=" + adapter.adapterId() + " target=" + lease.marker.target() + " demand=" + demand);
 			value = null;
 		}
 		try { value = sanitize(adapter, value, demand); }
-		catch (RuntimeException | LinkageError ignored) {
-			Diagnostics.server().atDetailed().rateLimited(SANITIZE).warn("presentation/sanitize", "retain-stale", ignored,
+		catch (RuntimeException | LinkageError failure) {
+			Diagnostics.server().atNormal().rateLimited(SANITIZE).warn("presentation/sanitize", "retain-stale", failure,
 				() -> "adapter=" + adapter.adapterId() + " target=" + lease.marker.target() + " demand=" + demand);
 			value = null;
 		}
@@ -1014,12 +1022,15 @@ public final class PresentationServer {
 			@Nullable var sourceOwner = source.orElse(null);
 			@Nullable var envelopeOwner = envelope.orElse(null);
 			InitialDecision decision;
+			String[] stage = {"construction"};
 			try (@Nullable var sourceGrant = sourceOwner; @Nullable var envelopeGrant = envelopeOwner) {
 				PresentationSection encodedBasic = projected;
 				PresentationS2CPacket packet = InventoryInitialPayload.create(session.epoch, session.view, ++session.revision,
 					marker, owner, defaultRef, content, projected, basicBytes);
+				stage[0] = "settle";
 				if (sourceGrant != null) sourceGrant.settle(packet.encodedCreatedBodyBytes(), construction + packet.createdEncodingWorkspace());
 				else if (envelopeGrant != null) envelopeGrant.settle(packet.encodedCreatedBodyBytes(), construction + packet.createdEncodingWorkspace());
+				stage[0] = "send";
 				decision = InventoryCreationReceiptTransport.send(transport, packet, player, () -> {
 					if (!initialCurrent(session, marker, player, packet.view())) return InitialDecision.SUPPRESSED;
 					if (sourceGrant != null) {
@@ -1054,7 +1065,16 @@ public final class PresentationServer {
 					prior.sections.put(PresentationBasic.ID, pruned);
 				}
 				projected = pruneProjection(basic, projected, currentAllowed, currentChild);
-			} catch (RuntimeException | LinkageError failure) { deferInitial(session, marker); return; }
+			} catch (RuntimeException | LinkageError failure) {
+				String failedStage = stage[0];
+				Diagnostics.server().atNormal().rateLimited(INITIAL_PUBLICATION).failure(Level.WARN,
+					"presentation/initial-publication-failed", "baseline-retry",
+					() -> "marker=" + marker.id().value() + " recipient=" + session.recipient
+						+ " epoch=" + session.epoch + " view=" + session.view + " revision=" + session.revision
+						+ " stage=" + failedStage, failure);
+				deferInitial(session, marker);
+				return;
+			}
 			if (!initialCurrent(session, marker, player, session.view)) return;
 			if (decision == InitialDecision.SUPPRESSED) {
 				content = PresentationReceiptContent.suppressed();
@@ -1193,7 +1213,7 @@ public final class PresentationServer {
 			sent.put(adapter.adapterId(), projected);
 		} catch (RuntimeException oversized) {
 			String failedStage = stage;
-			Diagnostics.server().atDetailed().rateLimited(SEND_SECTION).warn("presentation/send-section", "empty-stale-fallback", oversized,
+			Diagnostics.server().atNormal().rateLimited(SEND_SECTION).warn("presentation/send-section", "empty-stale-fallback", oversized,
 				() -> "adapter=" + adapter.adapterId() + " stage=" + failedStage + " marker=" + markerId + " epoch=" + session.epoch
 					+ " view=" + session.view + " revision=" + session.revision);
 			PresentationSection empty = new PresentationSection(adapter.adapterId(), adapter.schema(), Map.of(), true);

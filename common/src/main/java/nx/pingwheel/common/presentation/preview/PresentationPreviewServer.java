@@ -7,6 +7,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import nx.pingwheel.common.diagnostics.DiagnosticFaultReporter;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
@@ -205,7 +207,10 @@ public final class PresentationPreviewServer {
 			new WorkItem("request:" + player + ":" + request.requestId() + ":" + request.adapterId(),
 				"property preview request=" + request.requestId() + " adapter=" + request.adapterId()
 					+ " dimension=" + request.target().dimensionId()), first, added, Quantity.of(Unit.REQUEST_ADAPTER, 1))); }
-		catch (RuntimeException | LinkageError ignored) {}
+		catch (RuntimeException | LinkageError failure) {
+			Diagnostics.faults().report(DiagnosticSide.SERVER, "presentation/preview-delay",
+				DiagnosticFaultReporter.Stage.SINK, Diagnostics.profile(DiagnosticSide.SERVER), failure);
+		}
 	}
 	private void reply(UUID player, PresentationPreviewC2SPacket request, int schema, PresentationPreviewS2CPacket.Status status) {
 		var current = access(player, request).orElse(null);

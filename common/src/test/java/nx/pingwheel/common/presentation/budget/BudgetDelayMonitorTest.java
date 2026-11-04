@@ -6,6 +6,9 @@ import java.util.Set;
 
 import org.junit.jupiter.api.Test;
 
+import nx.pingwheel.common.diagnostics.DiagnosticFaultReporter;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.presentation.budget.BudgetDelayMonitor.Count;
 import nx.pingwheel.common.presentation.budget.BudgetDelayMonitor.CycleSummary;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink.DelayEvent;
@@ -294,6 +297,27 @@ class BudgetDelayMonitorTest {
 		assertEquals(1, f.notices.size(), "closed-cycle delayed state cannot create fresh notice evidence");
 		f.monitor.endCycle(Module.INVENTORY_PREVIEW, 100, cooldownEndsAt);
 		assertEquals(2, f.warnings.size(), "skipped/unopened empty periods manufacture no WARN");
+	}
+
+	@Test void warningSinkFailureIsReportedAsSelfFaultWithoutReplayingAccounting() {
+		long occurrences = Diagnostics.faults().observations().stream()
+			.filter(observation -> observation.key().side() == DiagnosticSide.SERVER
+				&& observation.key().site().equals("budget/delay")
+				&& observation.key().stage() == DiagnosticFaultReporter.Stage.SINK)
+			.mapToLong(DiagnosticFaultReporter.Observation::occurrences).sum();
+		BudgetDelayMonitor monitor = new BudgetDelayMonitor(summary -> { throw new IllegalStateException("warning sink"); },
+			modules -> false);
+		monitor.observe(event(PRESENTATION, 0, 0, "job", true, Reason.MEMORY.bit(), Quantity.unknown()));
+		monitor.state(PRESENTATION, 0, 0, DelayState.DELAYED);
+		monitor.endCycle(PRESENTATION, 0, 0);
+		long after = Diagnostics.faults().observations().stream()
+			.filter(observation -> observation.key().side() == DiagnosticSide.SERVER
+				&& observation.key().site().equals("budget/delay")
+				&& observation.key().stage() == DiagnosticFaultReporter.Stage.SINK)
+			.mapToLong(DiagnosticFaultReporter.Observation::occurrences).sum();
+		assertTrue(after > occurrences, "the swallowed warning sink is a diagnostic self-fault");
+		assertDoesNotThrow(() -> monitor.endCycle(PRESENTATION, 0, 0));
+		assertDoesNotThrow(() -> monitor.finishTick(0, true));
 	}
 
 	@Test void recoverablePortExceptionsAreIsolatedButFatalResourceErrorsPropagate() {

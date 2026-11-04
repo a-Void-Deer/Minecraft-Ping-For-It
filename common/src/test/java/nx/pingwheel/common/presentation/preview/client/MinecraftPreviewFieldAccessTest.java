@@ -21,9 +21,13 @@ import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.presentation.PresentationBasic;
+import nx.pingwheel.common.presentation.PresentationDiagnosticCapture;
 import nx.pingwheel.common.presentation.PresentationField;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationSection;
@@ -116,14 +120,23 @@ class MinecraftPreviewFieldAccessTest {
 			Set.of(PresentationBasic.CUSTOM_NAME), 2, name -> "unused").get(PresentationBasic.CUSTOM_NAME));
 	}
 	@Test void failedCustomGetterPublishesNeitherNameFieldButKeepsIndependentHealth() {
-		Pig pig = new Pig(); pig.setHealth(7.5F); pig.customUnavailable = true;
-		var observed = MinecraftPreviewFieldAccess.observeEntity(pig,
-			Set.of(PresentationBasic.HEALTH, PresentationBasic.NAME, PresentationBasic.CUSTOM_NAME), 3,
-			name -> { throw new AssertionError("failed getter must not encode a fabricated name"); });
-		assertEquals(new PresentationValue.NumberValue(7.5), value(observed.get(PresentationBasic.HEALTH)));
-		assertEquals(PreviewFieldAccess.Missing.UNAVAILABLE, observed.get(PresentationBasic.NAME));
-		assertEquals(PreviewFieldAccess.Missing.UNAVAILABLE, observed.get(PresentationBasic.CUSTOM_NAME));
-		assertEquals(1, pig.customReads);
+		try (var capture = new PresentationDiagnosticCapture()) {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.NORMAL);
+			Pig pig = new Pig(); pig.setHealth(7.5F); pig.customUnavailable = true;
+			var observed = MinecraftPreviewFieldAccess.observeEntity(pig,
+				Set.of(PresentationBasic.HEALTH, PresentationBasic.NAME, PresentationBasic.CUSTOM_NAME), 3,
+				name -> { throw new AssertionError("failed getter must not encode a fabricated name"); });
+			assertEquals(new PresentationValue.NumberValue(7.5), value(observed.get(PresentationBasic.HEALTH)));
+			assertEquals(PreviewFieldAccess.Missing.UNAVAILABLE, observed.get(PresentationBasic.NAME));
+			assertEquals(PreviewFieldAccess.Missing.UNAVAILABLE, observed.get(PresentationBasic.CUSTOM_NAME));
+			assertEquals(1, pig.customReads);
+			assertEquals(1, capture.events().size());
+			String report = capture.messages().getFirst();
+			assertTrue(report.contains("site=presentation/preview-name-read"));
+			assertTrue(report.contains("handling=name-unavailable"));
+			assertFalse(report.contains("custom name unavailable"));
+			assertFalse(report.contains("entityClass="));
+		}
 	}
 	private static final class Context implements MinecraftPreviewFieldAccess.WorldContext {
 		Entity entity; BlockState state; int entityReads, blockReads, encodes;

@@ -136,7 +136,8 @@ public final class ClientPresentationPreview {
 				local = reader.observe(binding.target, adapter.getValue().fields().keySet(), context);
 				if (local == null) local = Map.of();
 			} catch (RuntimeException | LinkageError unavailable) {
-				Diagnostics.client().atDetailed().rateLimited(READER_FAILURE).warn("presentation/preview-reader", "server-fallback", unavailable,
+				Diagnostics.client().atNormal().rateLimited(READER_FAILURE).warn("presentation/preview-reader",
+					"local-field-unavailable/server-preview-eligible", unavailable,
 					() -> "adapter=" + adapter.getKey() + " target=" + binding.target + " fields=" + adapter.getValue().fields().keySet());
 				local = Map.of();
 			}
@@ -159,7 +160,8 @@ public final class ClientPresentationPreview {
 		@Nullable RetainedSnapshot cached;
 		try { cached = retained.observed(binding.target, binding.targetTypeId).orElse(null); }
 		catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.client().atDetailed().rateLimited(CACHE_FAILURE).warn("presentation/preview-cache", "cache-unavailable", unavailable, () -> "target=" + binding.target);
+			Diagnostics.client().atNormal().rateLimited(CACHE_FAILURE).warn("presentation/preview-cache",
+				"cache-unavailable/server-preview-eligible", unavailable, () -> "target=" + binding.target);
 			cached = null;
 		}
 		if (cached != null && binding.target.equals(cached.target()) && binding.targetTypeId.equals(cached.targetTypeId())

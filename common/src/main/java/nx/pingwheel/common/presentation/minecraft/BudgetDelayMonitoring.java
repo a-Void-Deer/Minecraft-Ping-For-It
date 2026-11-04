@@ -9,6 +9,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
+import nx.pingwheel.common.diagnostics.DiagnosticFaultReporter;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
@@ -58,8 +60,23 @@ public final class BudgetDelayMonitoring {
 
 	/** Each closed delayed cycle has already passed the monitor's domain frequency gate. */
 	static void reportSummary(CycleSummary summary) {
-		Diagnostics.server().atDetailed().event(Level.WARN, "budget/delay", "closed-cycle",
+		Diagnostics.server().atNormal().event(Level.WARN, "budget/delay", cycleReason(summary.module()),
 			() -> formatSummary(summary));
+	}
+
+	/** Finite module distinction in a NORMAL-safe code; the raw summary stays lazy. */
+	private static String cycleReason(Module module) {
+		return switch (module) {
+			case PRESENTATION -> "closed-cycle/resource-delayed/presentation";
+			case INVENTORY_PREVIEW -> "closed-cycle/resource-delayed/inventory-preview";
+			case INVENTORY_TRACKING -> "closed-cycle/resource-delayed/inventory-tracking";
+		};
+	}
+
+	/** Pure diagnostic monitor boundary; never used for administrator-notice handoff failures. */
+	private static void selfFault(DiagnosticFaultReporter.Stage stage, Throwable failure) {
+		Diagnostics.faults().report(DiagnosticSide.SERVER, "budget/delay", stage,
+			Diagnostics.profile(DiagnosticSide.SERVER), failure);
 	}
 
 	/** Unprefixed: the diagnostic backend owns the prefix. */
@@ -145,7 +162,10 @@ public final class BudgetDelayMonitoring {
 					lifetime = new Lifetime(new BudgetDelayMonitor(warnings::accept, modules -> dispatch(server, modules)));
 				}
 				return lifetime;
-			} catch (RuntimeException | LinkageError ignored) { return BudgetDelaySink.NONE; }
+			} catch (RuntimeException | LinkageError failure) {
+				selfFault(DiagnosticFaultReporter.Stage.SETUP, failure);
+				return BudgetDelaySink.NONE;
+			}
 		}
 		void finishTick(@Nullable S server) {
 			if (server == null || active != server || lifetime == null) return;
@@ -155,7 +175,10 @@ public final class BudgetDelayMonitoring {
 				Diagnostics.server().atDetailed().rateLimited(NOTICE_CONFIG).warn("budget/notice-config", "accounting-active", ignored, () -> "notification setting unavailable; accounting remains active");
 			}
 			try { lifetime.monitor.finishTick(port.serverTick(server), enabled); }
-			catch (RuntimeException | LinkageError ignored) { /* Diagnostics cannot break the server tick. */ }
+			catch (RuntimeException | LinkageError failure) {
+				// Diagnostics cannot break the server tick; the delivery state is unchanged.
+				selfFault(DiagnosticFaultReporter.Stage.SINK, failure);
+			}
 		}
 		void reset() {
 			if (lifetime != null) lifetime.close();
@@ -195,15 +218,18 @@ public final class BudgetDelayMonitoring {
 		Lifetime(BudgetDelayMonitor monitor) { this.monitor = monitor; }
 		@Override public void observe(@Nullable DelayEvent event) {
 			if (!active) return;
-			try { monitor.observe(event); } catch (RuntimeException | LinkageError ignored) {}
+			try { monitor.observe(event); }
+			catch (RuntimeException | LinkageError failure) { selfFault(DiagnosticFaultReporter.Stage.SINK, failure); }
 		}
 		@Override public void state(@Nullable Module module, long cycle, long serverTick, @Nullable DelayState state) {
 			if (!active) return;
-			try { monitor.state(module, cycle, serverTick, state); } catch (RuntimeException | LinkageError ignored) {}
+			try { monitor.state(module, cycle, serverTick, state); }
+			catch (RuntimeException | LinkageError failure) { selfFault(DiagnosticFaultReporter.Stage.SINK, failure); }
 		}
 		@Override public void endCycle(@Nullable Module module, long cycle, long serverTick) {
 			if (!active) return;
-			try { monitor.endCycle(module, cycle, serverTick); } catch (RuntimeException | LinkageError ignored) {}
+			try { monitor.endCycle(module, cycle, serverTick); }
+			catch (RuntimeException | LinkageError failure) { selfFault(DiagnosticFaultReporter.Stage.SINK, failure); }
 		}
 		void close() { active = false; monitor.reset(); }
 	}

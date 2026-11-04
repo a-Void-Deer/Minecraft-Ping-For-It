@@ -131,6 +131,45 @@ class PresentationDiagnosticsTest {
 		}
 	}
 
+	@Test void normalOversizedPreencodingKeepsSafeFallbackWithoutRawFields() {
+		try (var capture = new PresentationDiagnosticCapture()) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(
+				nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
+			var values = new LinkedHashMap<String, PresentationValue>();
+			for (int id = 0; id < PresentationLimits.MAX_ENTRIES; id++) values.put("secret" + id,
+				new PresentationValue.Text("x".repeat(PresentationLimits.MAX_TEXT_BYTES)));
+			var oversized = new PresentationSection(PresentationBasic.ID, 1,
+				Map.of(PresentationBasic.BLOCK_STATE, new PresentationValue.RecordValue(values)), false);
+			assertEquals(new PresentationSection(PresentationBasic.ID, 1, Map.of(), true), PresentationCodec.bounded(oversized));
+			assertEquals(1, capture.events().size());
+			assertEquals(Level.WARN, capture.events().getFirst().getLevel());
+			String report = capture.messages().getFirst();
+			assertTrue(report.contains("site=presentation/preencode"));
+			assertTrue(report.contains("handling=empty-stale-fallback"));
+			assertFalse(report.contains("fields="));
+			assertFalse(report.contains("secret"));
+		}
+	}
+
+	@Test void normalHudProviderFailureKeepsEmptyLabelsWithoutRawCause() {
+		try (var capture = new PresentationDiagnosticCapture()) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(
+				nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT,
+				nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
+			var client = new ClientPresentation(packet -> fail("HUD must not send"));
+			client.registerProvider("throwing", view -> { throw new IllegalStateException("HUD failed", new RuntimeException("HUD cause")); });
+			assertTrue(client.selectProvider("throwing"));
+			assertEquals(List.of(), client.labels(PresentationView.empty()));
+			assertEquals(1, capture.events().size());
+			String report = capture.messages().getFirst();
+			assertTrue(report.contains("site=presentation/hud-provider"));
+			assertTrue(report.contains("handling=empty-labels"));
+			assertFalse(report.contains("HUD cause"));
+			assertFalse(report.contains("provider="));
+		}
+	}
+
 	@Test void throwingHudProviderKeepsAllEmptyFallbackWithBoundedWarning() {
 		try (var capture = new PresentationDiagnosticCapture()) {
 			var client = new ClientPresentation(packet -> fail("HUD must not send"));

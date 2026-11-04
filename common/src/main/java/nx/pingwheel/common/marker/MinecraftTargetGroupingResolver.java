@@ -49,7 +49,7 @@ public final class MinecraftTargetGroupingResolver implements TargetGroupingReso
 			if (state == null || !BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals(block.blockRegistryId())) return exact;
 			return TargetKey.requireCompatible(block, IPlatformContextService.INSTANCE.groupBlockTarget(level, block));
 		} catch (RuntimeException | LinkageError | AssertionError unavailable) {
-			Diagnostics.server().atDetailed().rateLimited(GROUPING_FAILURE).warn("target-grouping", "exact-hit", unavailable, () -> "target=" + block);
+			Diagnostics.server().atNormal().rateLimited(GROUPING_FAILURE).warn("target-grouping", "exact-hit-grouping", unavailable, () -> "target=" + block);
 			return exact;
 		}
 	}

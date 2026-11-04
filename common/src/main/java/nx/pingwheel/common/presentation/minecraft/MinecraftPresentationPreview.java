@@ -139,7 +139,8 @@ final class MinecraftPresentationPreview implements PresentationPreviewServer.Ho
 		} else if (!request.target().equals(validated.normalizedTarget())) {
 			return outcome(PresentationPreviewS2CPacket.Status.REJECTED);
 		}
-		var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.noop()).resolve(validated.normalizedTarget(), validated.matchContext());
+		var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.global(Diagnostics.server()))
+			.resolve(validated.normalizedTarget(), validated.matchContext());
 		if (!request.targetTypeId().equals(resolved.targetType().id())) return outcome(PresentationPreviewS2CPacket.Status.REJECTED);
 		Set<String> demand = Set.copyOf(request.fields()); // Queue already intersected fresh and advertised access.
 		PresentationSection section;

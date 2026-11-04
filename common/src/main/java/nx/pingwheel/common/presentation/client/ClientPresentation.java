@@ -483,7 +483,7 @@ public final class ClientPresentation {
 			}
 			return List.copyOf(bounded);
 		} catch (RuntimeException ignored) {
-			Diagnostics.client().atDetailed().rateLimited(HUD_PROVIDER).warn("presentation/hud-provider", "empty-labels", ignored, () -> "provider=" + providerId);
+			Diagnostics.client().atNormal().rateLimited(HUD_PROVIDER).warn("presentation/hud-provider", "empty-labels", ignored, () -> "provider=" + providerId);
 			return List.of();
 		}
 	}

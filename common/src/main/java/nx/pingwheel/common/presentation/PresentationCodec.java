@@ -89,7 +89,7 @@ public final class PresentationCodec {
 			write(probe, section);
 			return section;
 		} catch (RuntimeException notEncodable) {
-			consumer.atDetailed().rateLimited(PREENCODE).warn("presentation/preencode", "empty-stale-section", notEncodable,
+			consumer.atNormal().rateLimited(PREENCODE).warn("presentation/preencode", "empty-stale-fallback", notEncodable,
 				() -> "adapter=" + section.adapterId() + " schema=" + section.schema() + " fields=" + section.fields().keySet() + " stale=" + section.stale());
 			return new PresentationSection(section.adapterId(), section.schema(), Map.of(), true);
 		} finally { probe.release(); }

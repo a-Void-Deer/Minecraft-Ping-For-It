@@ -71,6 +71,55 @@ class PacketHandlerTest {
 		}
 	}
 
+	@Test void decodeFailureChannelsSeparatePacketClassesAndSidesWithoutNormalDisclosure() {
+		try (var capture = new PresentationDiagnosticCapture(org.apache.logging.log4j.Level.DEBUG)) {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEBUG);
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEBUG);
+			for (int attempt = 0; attempt < 20; attempt++) assertCorruptC2S();
+			assertCorruptS2C();
+			assertCorruptC2SWithClientConsumer();
+			assertEquals(3, capture.events().size(),
+				"same packet class repeats share one channel; another family and the other side start independently");
+			assertTrue(capture.events().stream().allMatch(event -> event.getLevel() == org.apache.logging.log4j.Level.DEBUG));
+
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.NORMAL);
+			int before = capture.events().size();
+			assertCorruptS2C();
+			assertEquals(before, capture.events().size(), "malformed decode never becomes a NORMAL report");
+		}
+	}
+
+	private static void assertCorruptC2S() {
+		var buf = buffer();
+		try {
+			buf.writeEnum(PresentationC2SPacket.Kind.CREATE);
+			buf.writeVarInt(PresentationC2SPacket.VERSION);
+			buf.writeLong(41L);
+			assertTrue(PresentationC2SPacket.readSafe(buf).isCorrupt());
+			assertEquals(0, buf.readableBytes());
+		} finally { buf.release(); }
+	}
+
+	private static void assertCorruptC2SWithClientConsumer() {
+		var buf = buffer();
+		try {
+			buf.writeEnum(PresentationC2SPacket.Kind.CREATE);
+			buf.writeVarInt(PresentationC2SPacket.VERSION);
+			buf.writeLong(41L);
+			assertTrue(PacketHandler.readSafe(buf, PresentationC2SPacket.class, Diagnostics.client()).isCorrupt());
+			assertEquals(0, buf.readableBytes());
+		} finally { buf.release(); }
+	}
+
+	private static void assertCorruptS2C() {
+		var buf = buffer();
+		try {
+			buf.writeByte(0);
+			assertTrue(PresentationS2CPacket.readSafe(buf).isCorrupt());
+			assertEquals(0, buf.readableBytes());
+		} finally { buf.release(); }
+	}
+
 	@Test void explicitConsumerIsSelectedBeforeDecodeAndMalformedFloodCannotBlockDelivery() {
 		try (var capture = new PresentationDiagnosticCapture(org.apache.logging.log4j.Level.DEBUG)) {
 			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.NORMAL);
