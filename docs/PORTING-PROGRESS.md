@@ -16,16 +16,16 @@
 | M2 | 源码导入与源集拆分 | ✅ 完成（源码提交 `c48c640`） | 2026-10-28 | tag `port-M2` → `8135ea0`（已打） |
 | M3 | 编译期 API 迁移 + 渲染最小编译修复 | ✅ **完成**：`gradlew clean build` 通过，产物 `Ping-For-It-1.0.0-fabric-26.3.jar`（615 KB / 345 class / major 69） | 2026-10-29 | tag `port-M3` → `c09e808` |
 | M4 | MVP 闭环（无描边） | ✅ **完成**：冒烟 22/22 配对、HUD 0 失败、正常退出；tag `port-M4`（annotated `5cb059c` → `a6cef45`） | 2026-10-29 | tag `port-M4` |
-| M5 | 服务端权威完善 | ⬜ 待办 | — | — |
+| M5 | 服务端权威完善 | 🟡 **代码层完成（2026-11-04）**：`docs/reviews/65-m5-server-authority-code-analysis.md`（提交 `41dd565`）——6 条契约中 **5 条由结构保证**、**4 项须双客户端**（受众/赢家/过期/重连）、**2 项原版客户端验不了**（越权移除、服务端限流层）、**0 硬缺口**；**双客户端实机验收 ⬜** | 2026-11-04 | — |
 | M6 | 轮盘与 7 类型 | ✅ 完成（评审 `08-m6-review.md`） | 2026-10-29 | — |
 | M6.5 | 标记 HUD 上游对齐 | ✅ **已恢复并重新验收**（tag `port-M6.5-restored`，2026-10-30 12:30–12:33 实机） | 2026-10-30 | tag `port-M6.5-restored` |
 | M7 | 渲染重建 | ✅ **M7a 方块线框 + M7b 实体描边 + M7c C1 模型光晕 + C2 entity_block 真实体光晕全部完成并实机通过（2026-11-01）**；含 HUD 投影补 bob、ping 提示改回聊天框（`dde1be5`） | 2026-11-01 | — |
 | M8 | 配置 / 命令 / UI | ✅ **完成（2026-11-01）**：**M8a** 完整分页设置界面 ✅、**M8b** 资源 v1 + 自定义贴图 ✅（**自定义资源包仍待补测**）、**M8c** toggle notice 第二层 HUD ✅，三者均实机通过；文档：`46`/`47`/`48`/`49` | 2026-11-01 | — |
 | M9 | 可选集成 | ✅ **M9-1/2/3 全部实现 + 实机通过**：Mod Menu（2026-11-03）、VoiceChat（**2026-11-03 起每轮 `Loaded 1 plugin(s)`**）、Distant Horizons（2026-11-04，方案 A，58-mod 会话装 DH 3.3.4，视距外 370.8 m BLOCK 命中）；FTB Teams / Sable 平台强制跳过（`24` #17/#18） | 2026-11-04 | — |
-| M10 | 验证与发布 | ⬜ 待办（**含合规：LICENSE 换 MIT + THIRD-PARTY-NOTICES**） | — | — |
+| M10 | 验证与发布 | 🟡 **进行中：首批 4 项已提交（`0cb4a59`，复审 `66`「可合入」）** —— 许可（**MIT 事实订正** + `THIRD-PARTY-NOTICES.md` 237 行入 jar）、locale（7 语言 +70 行）、`GameContext.lastWorld` 清理、glow 诊断补强；**剩余**：CI 真实跑绿、188 测试基座、locale 收尾脚本、性能回归、`require=1` 策略、DH×OIT 决策，以及**用户端 `clean build` 后验 notices 进 jar** | 2026-11-04 | — |
 | 事故恢复 | 目录重建 + 重新验证 | ✅ 完成 | 2026-10-30 | tag `restore-2026-10-29` |
 
-> **合规待办（M10 处理，非 M3 缺陷）**：已实测 jar 内 `LICENSE_pingforit` 内容是工程自带的 **CC0 1.0** 模板，而上游 Ping For It 为 **MIT** → M10 需替换为上游 MIT 全文，并补 `THIRD-PARTY-NOTICES`（上游仓库已有 `THIRD-PARTY-NOTICES.md` 可作底本）。
+> **合规待办（M10，2026-11-04 已结案；此前的「上游是 Apache-2.0」是错的）**：本项目与上游 Ping For It **都是 MIT** —— 两份 `LICENSE` 的 SHA256 完全相同（`089e801f…a29594`，各 21 行）。**Apache-2.0 只适用于 vendor 进来的 `MavenComparableVersion`**（来自 Apache Maven 3.9.9），其 200 行全文已内嵌进 `THIRD-PARTY-NOTICES.md` §38–237（与上游 `LICENSE-APACHE-2.0` 逐行 0 差异）。`THIRD-PARTY-NOTICES.md`（237 行，含上游 MIT 归属 + 本项目说明 + assets 段）已由 `fabric/build.gradle:90` 并入 jar 根；`LICENSE` 经 `:82` 入 jar 为 `LICENSE_pingforit`，两文件并存不冲突。**唯一遗留**：用户端 `gradlew clean build` 后 `unzip -l` 确认 notices 真的在 jar 根（当前 `fabric/build/libs` 是改动前旧产物，复审 `66` B/C 已在旧 jar 上确认「没有 notices」属预期）。
 
 ---
 
@@ -711,7 +711,7 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 |---|---|
 | `bash tools/compile-check.sh`（Lead 2026-11-02 实测） | `main errors=0 classes=266` / `client errors=0 classes=126`（+1 = 新集成类）；集成 jar 命中数当时为 **3**（旧宽口径，吃 `run/mods/*.jar` 全部） |
 | 脚本口径收紧后（同一套 glob） | 按 glob 计算命中 **2 个**：`DistantHorizons-3.3.4-26.3-fabric-neoforge.jar`、`modmenu-21.0.0.jar`；`voicechatprofiles-fabric-26.3-1.0.1.jar` **不在 M9 集成 glob 内被有意排除**（M9-2 需要的是 `voicechat-api-*`），故名字虽在 `run/mods` 也不会进 classpath |
-| 源码文件数（2026-11-02 实测） | `src/main/java` **166** / `src/client/java` **80**（+1）/ `deferred/` **95**（−1） |
+| 源码文件数（2026-11-02 实测） | `src/main/java` **166** / `src/client/java` **80**（+1）/ `deferred/` **95**（−1）——**这是 2026-11-03 多模块重构前的口径**；重构后为 `common/src/main` 162 + `fabric/src/main` 4 + `fabric/src/client` 80（`AGENTS.md` §1） |
 | `build.gradle` 语法（Lead 2026-11-02 实测） | 用 Gradle 自带的 **Groovy 4.0.33 `parseClass`** 解析通过（不执行配置阶段即可确认语法有效） |
 | `run/mods` 现有 3 个 jar | `modmenu-21.0.0.jar`（其 `fabric.mod.json` 声明 `depends.minecraft = ">=26.3-"`，兼容）、`DistantHorizons-3.3.4-26.3-fabric-neoforge.jar`、`voicechatprofiles-fabric-26.3-1.0.1.jar` |
 | **实机验收** | ✅ **通过（2026-11-03 18:27–18:30）**：Mods 列表出现 Ping For It 的配置入口、点开是同一个 `SettingsScreen`、日志无模组相关 ERROR —— 逐项证据见下方「实机证据」表 |
@@ -901,15 +901,15 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 
 | # | 项 | 阶段 | 验收方式 | 状态 |
 |---|---|---|---|---|
-| 1 | **M5 服务端权威验收**：受众快照、赢家选择、移除仅本人、限流、过期、断线重连 | M5 | **双客户端互测**（两个 runClient 进同一局域网世界） | ⬜ 代码已存在，未正式验收 |
+| 1 | **M5 服务端权威验收**：受众快照、赢家选择、移除仅本人、限流、过期、断线重连 | M5 | **双客户端互测**（专用服务器 + 两个客户端实例；`65` §6 给了逐项步骤/期望/判据） | 🟡 **代码层已完成（`65`，`41dd565`）**：5/6 条契约由结构保证、4 项须双客户端、2 项原版客户端验不了、0 硬缺口 / 2 证据缺口（G1 无自动化测试在跑、G2 缺 `RateLimiterTest`）；**实机 ⬜** |
 | 2 | **M9 集成可行性调研**：ModMenu / VoiceChat / FTB Teams / DH / Sable 的 26.3 版本与接入代价 | M9 | 调研报告 `53-m9-integration-feasibility.md` | ✅ 已交付（**做 3：ModMenu/VoiceChat/DH；跳过 2：FTB Teams/Sable 无 26.3 构建**） |
 | 3 | M9 逐项接入（只做调研判定「可做」的） | M9 | 装/不装各跑一次，降级路径正确 | ✅ **M9-1（ModMenu）实现 + 实机通过（2026-11-03）**；✅ **M9-2（VoiceChat）实现 + 实机通过（2026-11-03 起每轮 `Loaded 1 plugin(s)`，最早 `2026-11-03-1.log.gz`）**；✅ **M9-3（DH）实现 + 复审 + 实机通过（2026-11-04，方案 A，装 DH 3.3.4，远距离 370.8 m BLOCK 命中·用户截图）** |
 | 4 | **M8b 自定义资源包补测**：替换 `assets/pingforit/textures/ping.png` 后 HUD/轮盘显示自定义图标 | M8 | 需要用户提供资源包 | ⏸ 等资源包 |
-| 5 | LICENSE 换 **MIT** + 生成 `THIRD-PARTY-NOTICES` 并入 jar | M10 | 上游是 Apache-2.0 + 第三方声明，移植版按计划改 MIT | ⬜ |
+| 5 | **许可合规**：确认本项目/上游许可并把 `THIRD-PARTY-NOTICES` 并入 jar | M10 | 检查 jar 内 `LICENSE_pingforit` 与 `THIRD-PARTY-NOTICES.md` | ✅ **已完成（`0cb4a59`）**：本项目与上游**都是 MIT**（`LICENSE` SHA256 相同、21 行）；**Apache-2.0 只**适用于 vendor 的 `MavenComparableVersion`（全文 200 行内嵌 notices §38–237，与上游 `LICENSE-APACHE-2.0` 逐行一致）；`fabric/build.gradle:82,90` 已接线。**遗留**：需用户端 `gradlew clean build` 后 `unzip` 复验（当前 jar 是旧产物） |
 | 6 | `runServer` 冒烟：专用服务器启动无 `NoClassDefFoundError`（确认 main 不误引客户端类） | M10 | 用户终端 `gradlew :fabric:runServer`（或根级别名）；首次先改 `run/eula.txt` 为 `eula=true`（**ASCII**，见 `AGENTS.md` §7.20） | ✅ **已提前于 P0 完成（2026-11-04 16:52）**：`Done (2.998s)!` / 47 mods / 0 ERROR，见 §P0.3 |
 | 7 | CI 校验：workflow 覆盖 `clean build` + 产物上传 + jar 元数据检查 | M10 | GitHub Actions 绿 | ⬜ |
-| 8 | locale 补键：8 个语言文件缺失键全量扫描 | M10 | 脚本比对所有 `translatable` key | ⬜ |
-| 9 | 188 个测试类：重建测试基座（需 26.3 编译产物），能救多少救多少 | M10 | `gradlew test` | ⬜ |
+| 8 | locale 补键：以 en_us 163 键 − 8 死键 = **155 在用键**为基准，补齐 8 个语言 | M10 | 脚本比对所有 `translatable` key | 🟡 **部分完成（`0cb4a59`）**：7 个 locale **+70 行 / 0 删除**（`zh_cn` +5、`zh_tw` +13、`de_de` +9、`es_ar` +9、`fr_fr` +12、`pl_pl` +11、`tr_tr` +11）；`pl_pl`/`tr_tr` 各 4 条 `*.template.override` **有意留空**（填英文反而更差，`PingChatBuilder:74-75`）；`de/es/fr` 各 2 条历史 extra 键（loot/destroy）。**遗留**：缺能复现 155/8 基准的脚本（`66` D1：多数 key 是 `LanguageUtils.settings(...)` 动态拼的） |
+| 9 | 188 个测试类：重建测试基座（需 26.3 编译产物），能救多少救多少 | M10 | `gradlew test` | ⬜ **搬运清单已备**：`65` §5 把 M5 相关测试按依赖分成 A（零 MC 依赖，约 120 个 `@Test` 可直接搬）/ B（需 MC 服务端类）/ C（需 `FriendlyByteBuf`）三组；另需自写 `RateLimiterTest`（G2） |
 | 10 | 性能回归：繁忙世界（大量 BER/实体）下的 HUD/光晕开销 | M10 | 对比空闲/繁忙帧时 | ⬜ |
 | 11 | **OIT 复测**（M7a 遗留，非阻塞）：透明物体叠加顺序 | M7 | 实机看透明方块后方的线框 | ⬜ 可选 |
 | 12 | `改进方案.md` 里用户正在写的条目 | — | 用户决定后处理 | ⏸ 用户暂缓 |
@@ -967,7 +967,7 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 |---|---|
 | `tools/compile-check.sh` | **main 0 error / 262 class；client 0 error / 83 class** |
 | `gradlew -g D:/Gradle build --offline` | **通过**（用户实测，2026-10-30 00:1x） |
-| 结构 | `deferred/` 96（92 原样 + 4 Sable）、`src/main/java` 162、`src/client/java` 55、资源与 tools 齐备（**2026-11-02 现值：95 / 166 / 80**，见 `AGENTS.md §1`） |
+| 结构 | `deferred/` 96（92 原样 + 4 Sable）、`src/main/java` 162、`src/client/java` 55、资源与 tools 齐备（**2026-11-02 重建时现值：95 / 166 / 80**，为**多模块重构前**口径；重构后见 `AGENTS.md §1`：`common/src/main` 162 + `fabric/src/main` 4 + `fabric/src/client` 80） |
 | 待补 | 实机冒烟（ping / 掉落物 / 轮盘 / 屏外箭头四场景）、47 个「无原文」文件的逐项复核 |
 
 > **新基线**：`restore: rebuild the project after the 2026-10-29 directory wipe` 为恢复后第一个 commit，后续阶段以它为回滚点。

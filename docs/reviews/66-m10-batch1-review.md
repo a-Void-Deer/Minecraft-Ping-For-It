@@ -105,3 +105,11 @@
 2. M10 locale 脚本固定 155/8 基准，并把 pl/tr 4 条 override、de/es/fr 2 条 extra 列为允许。
 3. 核实 Luken 的作者归属来源，或在 notices 中改成可核实的上游仓库署名。
 4. 若产品把 120 理解为“帧”，给 glow 诊断增加 per-frame 去重；当前按 dispatch 计数是自洽的。
+
+## 结案补注（2026-11-04，1号 repo-analyst 追加）
+
+> 只追加结案事实，**不改上面的复审原文**（保留当时的判断快照）。
+
+- **A 段「无法用仓库文件独立确认作者名 Luken」→ 已核实，结案**：上游 `Mod_Project/Minecraft-Ping-For-It-0.4.2-pfi-beta1/gradle.properties:2` 就是 `mod_author=Luken`（同文件 `:3` 为 `mod_name=Ping For It`）。复审当时查的是 LICENSE / README / fabric.mod.json / 构建文件，**漏了 `gradle.properties`**。→ **notices 里的上游署名保持不变**，「非阻塞建议 3」关闭。
+- **C 段「当前 jar 没有 notices」→ 属预期**：当时 `fabric/build/libs` 是改动前产物。`0cb4a59` 已把 `THIRD-PARTY-NOTICES.md` 接到 `fabric/build.gradle:90`（`LICENSE` 在 `:82`，入 jar 为 `LICENSE_pingforit`，两文件并存）。**仍挂**：用户端 `gradlew clean build` 后 `unzip -l` 复验这一条遗留。
+- **许可口径订正（重要）**：`docs/PORTING-PROGRESS.md` 原先写的「上游是 Apache-2.0 + 第三方声明，移植版按计划改 MIT」是**事实错误**，已于 2026-11-04 改为：**本项目与上游 Ping For It 都是 MIT**（`LICENSE` SHA256 相同、各 21 行）；**Apache-2.0 只适用于 vendor 进来的 `MavenComparableVersion`**（全文 200 行内嵌 notices §38–237）。

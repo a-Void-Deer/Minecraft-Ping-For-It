@@ -123,7 +123,7 @@ nx/pingwheel/common/math     nx/pingwheel/fabric
 | 校验脚本 | `tools/compile-check.sh`(145)、`tools/compile-check.ps1`(165) | tools 下唯一 tracked 文件 |
 | CI | `.github/workflows/build.yml`(58) | ubuntu-24.04 + JDK25 + `./gradlew build` + 上传 `build/libs/Ping-For-It-*.jar` |
 | git 配置 | `.gitattributes`(19)、`.gitignore`(47) | 见 §2.6 |
-| 顶层文档/资源 | `AGENTS.md`、`README.md`、`LICENSE`(1067 B, CC0)、`img.png`、`改进方案.md`、`docs/**`(76 tracked) | `Mod_Project/` 与 `run/` 被 gitignore |
+| 顶层文档/资源 | `AGENTS.md`、`README.md`、`LICENSE`(1067 B, **MIT**；此前误记为 CC0 —— CC0 是当时 **jar 内** `LICENSE_pingforit` 的来源模板，根 `LICENSE` 自 `feb9452` 起就是 MIT)、`img.png`、`改进方案.md`、`docs/**`(76 tracked) | `Mod_Project/` 与 `run/` 被 gitignore |
 | tracked 总数 | **454** 文件 | `git ls-files` 实测 |
 
 ### 1.4 `deferred/` 清册（95 java，不编译）
@@ -261,7 +261,7 @@ nx.pingwheel.common.screen.SettingsTitleWidget
 | `README.md:20` | 产物 **`build/libs/Ping-For-It-0.4.2-pfi-beta1-fabric-26.3.jar`**（649 KB / 345 class） | **[SHOULD]** `fabric/build/libs/…`；且 649 KB/345 class 已陈旧（当前 jar **771,558 B / 392 class / 464 entries**，2026-11-03 18:53 构建） |
 | `README.md:41` | `- 产物在 `build/libs/`：`Ping-For-It-<version>-fabric-26.3.jar`。` | **[SHOULD]** `fabric/build/libs/` |
 | `README.md:43` | `- 本地快速编译校验（不启动 Gradle）：tools/compile-check.sh` / `tools/compile-check.ps1`。` | **[NOCHG]** |
-| `README.md:57` | `…当前 jar 内的 LICENSE 仍是模板自带的 CC0 文本…` | **[NOCHG]**（但 jar 内条目会从 `LICENSE_pingforit` 变 `LICENSE_fabric`，见 2.1） |
+| `README.md:57` | `…当前 jar 内的 LICENSE 仍是模板自带的 CC0 文本…` | **⚠ 该行已过时（2026-11-04 订正）**：README 里已无此句；现 `README.md` 的「许可」段写的是 **MIT**（根 `LICENSE` 与上游 SHA256 一致）、jar 内为 `LICENSE_pingforit`、`THIRD-PARTY-NOTICES.md` 已一并入 jar。本行仅作当时审计快照保留；另订正原判断「jar 内条目会变 `LICENSE_fabric`」——实际一直是 `LICENSE_pingforit` |
 | `AGENTS.md:12` | `src/main` **166** java + `src/client` **80** java + `deferred/` **95** java | **[HIST]** §0 是事故恢复记录，保留；建议加脚注指向本文 |
 | `AGENTS.md:13` | `tools/compile-check` **0 error / 0 error**（两源集） | **[MUST]** 迁移后三遍 → `0/0/0`（三源集） |
 | `AGENTS.md:14` | 产物 `build/libs/Ping-For-It-0.4.2-pfi-beta1-fabric-26.3.jar`…649 KB / 345 class | **[HIST]** 2026-10-30 历史记录，加脚注即可 |
@@ -517,7 +517,7 @@ find deferred -name '*.java' | wc -l                 ->  95   (未动)
 | D9 | 保留 `deferred/`(95)、`tools/`(javac 离线校验)、`Mod_Project/`(上游源码) | 移植工程自有资产，不进产物；且 `deferred/` 与活源码 18 个 FQCN 重名，必须留在 source root 之外 |
 | D10 | dev 运行目录是仓库根 `run/`（fork 用 `runs/client`、`runs/server`） | 现有 mods/logs/saves 都在 `run/`，且 `run/mods` 同时是离线编译依赖目录 |
 | D11 | 没有 fork 的 `verifyModIdentity` 聚合任务（约 200 行）；身份校验靠 AGENTS §10 清单 + 本文件 §6.0 的 jar 基线 | 单端场景下该任务的 refmap/forge/neoforge/THIRD-PARTY 分支用不上 |
-| D12 | 单 `LICENSE`(CC0 模板，待 M10 换 MIT)；fork 是 `LICENSE`+`LICENSE-APACHE-2.0`+`THIRD-PARTY-NOTICES.md` | M10 待办已登记，本轮不扩大范围 |
+| D12 | 单 `LICENSE`(当时 jar 内是 CC0 模板，待 M10 换 MIT)；fork 是 `LICENSE`+`LICENSE-APACHE-2.0`+`THIRD-PARTY-NOTICES.md` | **2026-11-04 已结案**：本项目与上游**都是 MIT**（`LICENSE` SHA256 相同、21 行）；**Apache-2.0 只适用于 vendor 的 `MavenComparableVersion`**，全文已内嵌 `THIRD-PARTY-NOTICES.md` §38–237 并由 `fabric/build.gradle:90` 并入 jar 根（见 `docs/reviews/66-m10-batch1-review.md`） |
 
 ---
 

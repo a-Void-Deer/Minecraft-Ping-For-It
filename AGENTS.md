@@ -1,7 +1,7 @@
 # AGENTS.md · Ping For It（MC 26.3 / Fabric 单端）协作说明
 
 > 团队唯一事实来源：现状、目录、构建、已验证结论、已知坑、待办。
-> 维护者：Lead｜**最后更新：2026-11-04（M9-3 DH 集成实现 + 复审 + 实机通过（方案 A，装 DH 3.3.4 的 58-mod 会话）；补待完成清单含 M10 技术债与发布门禁；根级 run 任务为转发别名；P0 收口；M9-1/M9-2 实机通过）**
+> 维护者：Lead｜**最后更新：2026-11-04（M10 首批落地：许可事实订正为 MIT + `THIRD-PARTY-NOTICES.md` 237 行并入 jar + 7 个 locale 补 70 行 + `GameContext.lastWorld` 清理 + glow 诊断补强，提交 `0cb4a59`，复审 `66`「可合入、无阻塞」；M5 代码层分析完成（`41dd565` / `65`），实机仍待双客户端；M9-3 DH 实机通过；P0 收口；根级 run 任务为转发别名）**
 
 ## 0. 2026-10-29 数据事故与恢复（先读）
 
@@ -9,7 +9,7 @@
 
 | 项 | 恢复后状态 |
 |---|---|
-| 规模 | **2026-11-02 实测**：`src/main` **166** java + `src/client` **80** java + `deferred/` **95** java（恢复当时的 162/55/96 已陈旧；事故前为 165/54/92，差异与保真度见 `docs/reviews/14-restore-verification.md`、`15-restore-baseline-audit.md`） |
+| 规模 | **2026-11-02 实测**：`src/main` **166** java + `src/client` **80** java + `deferred/` **95** java（**这是 2026-11-03 多模块重构前的口径**；重构后见 §1：`common/src/main` 162 + `fabric/src/main` 4 + `fabric/src/client` 80。恢复当时的 162/55/96 已陈旧；事故前为 165/54/92，差异与保真度见 `docs/reviews/14-restore-verification.md`、`15-restore-baseline-audit.md`） |
 | 编译 | `tools/compile-check` **0 error / 0 error**（两源集）；用户终端 `gradlew clean build` **通过**（2026-10-30 12:07） |
 | 产物 | `build/libs/Ping-For-It-0.4.2-pfi-beta1-fabric-26.3.jar`：**649 KB / 345 class / major 69 / `id=pingforit` / `version=0.4.2-pfi-beta1`** |
 | 依赖 | `.gradle/` 已重建；`D:\Gradle\caches` 里的 MC 26.3 与 Fabric API jar 未受影响 |
@@ -24,7 +24,7 @@
 - 身份：`mod id = pingforit`、`rootProject.name = Ping-For-It`（与上游 fork 一致）、Java 包 **`nx.pingwheel`**（D3）、maven group `isharmla.mod`。
 - 版本：`0.4.2-pfi-beta1`，**必须符合 `x.x.x-pfi-qualifier`**（`config/PingForItVersion.java` 的正则）。
 - 规模（**2026-11-03 重构后实测**）：`common/src/main` **162** java + `fabric/src/main` **4** java + `fabric/src/client` **80** java + `deferred/` **95** java（`deferred/` 完全不参与编译；client 是独立源集，与 common/main 不同一编译单元）。
-- 进度：**M0–M6.5 已完成，并已恢复后实机重新验收**（tag `port-M6.5-restored`）；原 tag 随 `.git` 丢失，语义见 `docs/PORTING-PROGRESS.md`。**M5 未开始；M7 处于 M7-prep 阶段**。
+- 进度：**M0–M9 已完成**（M0–M6.5 已恢复后实机重新验收，tag `port-M6.5-restored`；M7a–M7c、M8a–M8c、M9-1/2/3 见 §9）。**M5 代码层分析已完成（`docs/reviews/65-m5-server-authority-code-analysis.md`，`41dd565`），双客户端实机验收仍 ⬜**；**M10 首批 4 项已落地（`0cb4a59`），剩余见 §9.1 C 组**。原 tag 随 `.git` 丢失，语义见 `docs/PORTING-PROGRESS.md`。
 
 ## 2. 目录职责
 
@@ -181,18 +181,18 @@ export GRADLE_USER_HOME="D:/Gradle"
 | 阶段 | 待办 | 状态 |
 | --- | --- | --- |
 | 事故恢复 | 源码重建、compile-check 重建、文档重写、git 重建、**实机重新验收** | ✅ **完全收尾**（2026-10-30；基线 tag `restore-2026-10-29`，验收 tag `port-M6.5-restored`） |
-| M5 | **M5 服务端权威：完善 + 双客户端验收**（受众/赢家/限流/移除/过期/重连） | ⬜ |
+| M5 | **M5 服务端权威：完善 + 双客户端验收**（受众/赢家/限流/移除/过期/重连） | 🟡 **代码层分析已完成（2026-11-04，`docs/reviews/65-m5-server-authority-code-analysis.md`，提交 `41dd565`）**：6 条契约中 **5 条由结构保证**（`MarkerCreationService`/`ServerMarkerStore`/`MarkerWinner`/`MarkerSnapshot`/`TargetKey`/`RateLimiter` 与上游**逐字节一致**；`ServerCore.java` 仅 **17 行**平台改名差异）；**4 项必须双客户端**（受众/赢家/过期/重连）；**2 项原版客户端无法验证**（越权移除、服务端限流层）；**0 硬缺口、2 条证据缺口**（G1 无自动化测试在跑；G2 `RateLimiter` 上游也无测试，建议自建 `RateLimiterTest`）；**实机双客户端验收仍 ⬜** |
 | M7 | 渲染重建：`deferred/` 描边/世界渲染按 26.3 管线重写 | ✅ **M7a 方块线框 + M7b 实体描边 + M7c C1 模型光晕完成并实机通过（2026-10-31）**；**M7c C2（entity_block 真实体光晕）✅ 完成并实机通过**（`020d920`/`b3ad60f`/`f88a887`，含契约对齐：渲染模式门控、不短路、RenderShape 前置）；规格 `33`/`35`/`38`/`40`、复审 `34`/`36`/`39` |
 | M8 | 配置/命令/UI + 资源重载迁 v1 | ✅ **完成（2026-11-01）**：**M8a** 完整分页设置界面（6 客户端分类/25 项 + 3 服务端分类/5 字段，含 tab 冻结修复）实机通过；**M8b** 资源 v1 + 自定义贴图（默认路径通过，**自定义包待补测**）；**M8c** toggle notice 第二层 HUD 实机通过。文档：`46`/`47`/`48`/`49` |
 | M9 | 可选集成（ModMenu/VoiceChat/FTB/DH/Sable） | **M9-1 ✅ 实现 + 实机通过（2026-11-03）**：Mod Menu 类从 `deferred/` 迁回 `src/client`（与上游逐字节一致）、`fabric.mod.json` 加 `modmenu` entrypoint、依赖改 `run/mods` 离线 jar；**M9-2 ✅ 实现 + 实机通过（2026-11-03）**：`VoiceChatIntegration`/`VoiceChatWrapper` 与上游逐字节一致、`fabric.mod.json` 加 `voicechat` entrypoint、`build.gradle` 加 `compileJava` 的 `voicechat-` jar 检查；实机证据：R1 起每轮 `Loaded 1 plugin(s)` + `Initialized 1 plugin(s)` + `Registering events for 'pingforit'`（不再是从前的 0）。**M9-3 ✅ 实现 + 复审 + 实机通过（2026-11-04，58-mod 会话装 DH 3.3.4）**：`DistantHorizonsIntegration` 由 76 行 stub 换回**上游 201 行实现**（`rootCause` 未动、调用点零改动），**方案 A** = 编译期只吃 `compile-libs/DistantHorizonsApi-7.2.0.jar`（Modrinth 官方件，363 318 B）、运行时仍用 `run/mods` 的完整 jar；复审 `docs/reviews/64-m9-3-dh-integration-review.md`（通过、无阻塞）；**实机证据**见 §6 表：`Distant Horizons API Version: 7.2.0` 探针 + 闭环 36:36 + 0 条 trace/schedule 失败 + 视距外 `草方块 370.8m` BLOCK 命中（用户截图）；FTB Teams / Sable **平台强制跳过**（`24` #17/#18） |
 | **P0（重构后验收）** | 多模块重构（`f18e31e`）后的实机回归 | **✅ P0 收口（V13–V15 受限未验证）**：V1/V4/V9/V12/V16/V17 ✅、**V18 ✅（2026-11-04 16:52，`Done (2.998s)!` / 47 mods / 0 ERROR）**；V6/V7/V11 🟡（需肉眼/留证）；**V13–V15 ⏸ 受限未验证**（见 `24` #19 实测结论；描边仍可见、仍穿墙，仅半透明叠加时可能有染色差异）；V19 ⏸ 可选。逐项见 `docs/PORTING-PROGRESS.md` §P0 |
-| M10 | 验证与发布：`runServer`、CI、测试基座、LICENSE → MIT + THIRD-PARTY-NOTICES | ⬜ |
+| M10 | 验证与发布：`runServer`、CI、测试基座、许可合规（MIT + `THIRD-PARTY-NOTICES` 入 jar） | 🟡 **进行中：首批 4 项已提交（`0cb4a59`，复审 `66`「可合入、无阻塞」）** —— 许可事实（MIT + `THIRD-PARTY-NOTICES.md` 237 行并入 jar）、locale（7 语言 +70 行）、`GameContext.lastWorld` 清理、glow 诊断补强；**剩余**：CI 真实跑绿、188 测试基座、locale 收尾脚本、性能回归、`require=1` 策略、DH×OIT 决策；**另需用户端 `gradlew clean build` 后 unzip 验 notices 进 jar**（当前 `fabric/build/libs` 是改动前旧产物） |
 
 **任务顺序（2026-10-31 用户确认）**：**M8 → M7c-C2 → M9 → M10**（M8 ✅；C2 实现完成待实机，实机通过后进 M9；`entity_block` 已改为真实 BER 光晕，线框仅作 fallback）。
 
 ## 9.1 待完成清单（2026-11-04 盘点）
 
-> M0–M8、M9-1/M9-2/M9-3 已完成；**P0 已收口**——除 **V13–V15（⏸ 受限未验证）** 与 **V19（⏸ 可选）** 外全部通过。
+> M0–M8、M9-1/M9-2/M9-3 已完成；**P0 已收口**——除 **V13–V15（⏸ 受限未验证）** 与 **V19（⏸ 可选）** 外全部通过。**M10 首批 4 项已提交（`0cb4a59`）**，本表 C 组已按实际状态更新；M5 代码层分析见 `65`（实机仍待双客户端）。
 
 | 分组 | 项 | 验收方式 | 状态 |
 | --- | --- | --- | --- |
@@ -200,15 +200,15 @@ export GRADLE_USER_HOME="D:/Gradle"
 | A · P0 收尾 | **V19 发布 jar 干净安装**：干净 Fabric 26.3 实例只放本 jar + fabric-api，启动查图标/中文/ping | 实机启动 | ⏸ 可选 |
 | A · P0 收尾 | **V6 / V7 / V11 肉眼确认**：Mods 列表图标、设置界面中文、ModMenu 配置按钮 | 实机截图 | 🟡 日志级已过，待肉眼留证 |
 | B · 主线功能 | **M9-3 Distant Horizons 集成**：stub → 上游真实现（异步远距离射线 + `ModContext.HasDistantHorizons` + 失败降级） | 装/不装 DH 各跑一次 | ✅ **实现 + 复审 + 实机通过（2026-11-04，方案 A，装 DH 3.3.4）**：`64` 通过无阻塞；实机 36:36 闭环、`Distant Horizons API Version: 7.2.0` 探针、0 条 `trace failed`/`schedule failed`、视距外 `草方块 370.8m` BLOCK 命中（用户截图，§6 表）——**「不装 DH」未单独跑**：由 `ModContext.HasDistantHorizons` 短路 + 复审静态分析保证 DH 类不加载，M10 验证批可顺手覆盖 |
-| B · 主线功能 | **M5 服务端权威验收**：受众快照 / 赢家选择 / 移除仅本人 / 限流 / 过期 / 断线重连 | **两个客户端互测** | ⬜（代码已存在） |
-| C · M10 发布 | **LICENSE → MIT** + `THIRD-PARTY-NOTICES` 并入 jar | 检查 jar 内 `LICENSE_pingforit` 与 notices | ⬜ |
+| B · 主线功能 | **M5 服务端权威验收**：受众快照 / 赢家选择 / 移除仅本人 / 限流 / 过期 / 断线重连 | **两个客户端互测** | ⬜（代码已存在）——**代码层分析已完成（`65`，`41dd565`）：6 条契约中 5 条由结构保证、2 项原版客户端验不了；只差双客户端实机** |
+| C · M10 发布 | **许可合规**：确认本项目/上游 MIT + `THIRD-PARTY-NOTICES` 并入 jar | 检查 jar 内 `LICENSE_pingforit` 与 notices | ✅ **已完成（`0cb4a59`）**：本项目与上游**都是 MIT**（两份 `LICENSE` SHA256 相同、各 21 行）；`THIRD-PARTY-NOTICES.md` **237 行**（上游 MIT 归属 + vendor 进来的 `MavenComparableVersion` 的 **Apache-2.0** 全文，§38–237 与上游 `LICENSE-APACHE-2.0` 逐行一致）；`fabric/build.gradle:82,90` 已把 `LICENSE`（入 jar 为 `LICENSE_pingforit`）与 `THIRD-PARTY-NOTICES.md` 都打进 jar 根，两者是**不同文件、并存不冲突**。**遗留**：需用户端 `gradlew clean build` 后 `unzip -l` 确认 notices 进 jar（当前 `fabric/build/libs` 是改动前旧产物） |
 | C · M10 发布 | **CI 真实跑绿**：`clean build` + 产物上传 + jar 元数据检查 | GitHub Actions 绿 | ⬜ **从未真正跑过**（本机无网）——**发布前唯一外部未知项** |
 | C · M10 发布 | **188 个测试类**基座重建 | `gradlew test` | ⬜ |
-| C · M10 发布 | **locale 补键**：`zh_cn` 少 5 条用键 + 8 条死键，并全量扫描 8 个语言 | 脚本比对 key | ⬜ |
+| C · M10 发布 | **locale 补键**：以 en_us 163 键 − 8 死键 = **155 个在用键**为基准，补齐 8 个语言 | 脚本比对 key | 🟡 **部分完成（`0cb4a59`，7 个 locale 共 **+70 行 / 0 删除**；`compile-check` class 数不变 262/4/126）**：`zh_cn` +5、`zh_tw` +13、`de_de` +9、`es_ar` +9、`fr_fr` +12、`pl_pl` +11、`tr_tr` +11；8 个文件 UTF-8 可解析、无重复键、占位符一致。**有意留空**：`pl_pl`/`tr_tr` 各 4 条 `pingforit.chat.{danger,go_to,take,request}.template.override`（填英文 override 反而比通用句更差，机制见 `PingChatBuilder:74-75`）；`de/es/fr` 各有 2 条 en_us 没有的历史 extra 键（loot/destroy override）。**遗留**：仍缺一个能复现 155/8 基准的脚本（复审 `66` D1：静态字面量扫描不可靠，多数 key 经 `LanguageUtils.settings(...)` 动态拼） |
 | C · M10 发布 | **性能回归**：繁忙世界（大量 BER/实体）下 HUD/光晕开销 | 对比空闲/繁忙帧时 | ⬜ |
-| C · M10（技术债） | `GameContext.lastWorld` 静态 `ClientLevel` 断线后不清空（`docs/reviews/57-pipeline-conflict-audit.md` **S1**）→ 内存滞留 | 改代码 + 断线复测 | ⬜ |
-| C · M10（技术债） | 5 处 mixin 仍 `require=1`（同 `57` **H5**）→ 未来 MC 签名变动会**启动崩溃**而不是降级 | 评估改 `require=0` + 诊断 | ⬜ |
-| C · M10（技术债） | 诊断信号变弱（`entity-block glow` 的 WARN 已降 DEBUG）→ 真回归只能靠视觉 | 2号 补强方案（`resolved`/`consumed` 计数 + 首次消费 DEBUG） | ⬜ |
+| C · M10（技术债） | `GameContext.lastWorld` 静态 `ClientLevel` 断线后不清空（`docs/reviews/57-pipeline-conflict-audit.md` **S1**）→ 内存滞留 | 改代码 + 断线复测 | ✅ **已修（`0cb4a59`）**：新增 `GameContext.clearLastWorld()`（`fabric/src/client/java/nx/pingwheel/common/core/GameContext.java:59`），由 `FabricClient.java:65-66` 的 `ClientPlayConnectionEvents.DISCONNECT` 调用；`RENDER_ENTITY_LOOKUP_CACHE` 有独立清理（`CommonClient:119` / `:563-565`），**无需在 clearLastWorld 里重复**（复审 `66` E） |
+| C · M10（技术债） | 5 处 mixin 仍 `require=1`（同 `57` **H5**）→ 未来 MC 签名变动会**启动崩溃**而不是降级 | 评估改 `require=0` + 诊断 | ⬜ **策略待定**（复审 `66` 未涉及）：改 `require=0` 必须同时配诊断，否则未来 MC 签名变动会**静默降级**——两种失败模式要一起权衡 |
+| C · M10（技术债） | 诊断信号变弱（`entity-block glow` 的 WARN 已降 DEBUG）→ 真回归只能靠视觉 | 2号 补强方案（`resolved`/`consumed` 计数 + 首次消费 DEBUG） | ✅ **已补强（`0cb4a59`）**：`EntityBlockGlowState` 新增 `glowingDispatches`/`consumedDispatches` 计数（`:96-97`，累加 `:195`/`:198`）与「首次真正消费颜色」的一条 DEBUG（`:244`）；120 派发那条 DEBUG 增加 4 个计数字段（`:211-216`）。**语义注意**：计数单位是「**派发次数**」不是帧数（复审 `66` F） |
 | C · M10（技术债） | **DH × OIT 互斥策略**：装 DH 的玩家永远走不到 `outline` 相位分支 | 加诊断开关强制走，或在 `docs/reviews/24-fidelity-constraint-audit.md` 登记为已知行为 | ⬜ 待决（M9-3 实机已复现：装 DH 时恒有 `Disabling improved transparency…` → `outline` 分支不可达，见 `24` **#19** 实测结论） |
 | D · 遗留 / 可选 | **M8b 自定义资源包补测**（替换 `assets/pingforit/textures/ping.png`） | 实机贴图 | ⏸ 等用户提供资源包 |
 | D · 遗留 / 可选 | **OIT 复测**：透明物体叠加顺序 | 实机 | ⏸ 可选 |
@@ -235,7 +235,7 @@ export GRADLE_USER_HOME="D:/Gradle"
 
 - [ ] `gradlew -g D:/Gradle build` 通过，产物 `fabric/build/libs/Ping-For-It-0.4.2-pfi-beta1-fabric-26.3.jar`
 - [ ] jar 内 `fabric.mod.json` 的 `id=pingforit`、version 与 `gradle.properties` 一致；mixins 对象形式且 `environment: client`
-- [ ] **合并后的 jar 内容完整**（资源经 `fabric.processResources` 合并 `:common` 资源、class 经 `jar.from(:common classesDirs)`）：`nx/pingwheel/common/**` 与 `nx/pingwheel/fabric/**` 都在、`pingforit.mixins.json` 在、`assets/pingforit/**` + `icon.png` 在、`LICENSE_pingforit` 在、`META-INF/services` 五份 SPI 各一份、`unzip -l | sort | uniq -d` 无重复条目。dev 的 `runClient` 走 runtimeClasspath，**通过它不能证明 jar 合并正确**。
+- [ ] **合并后的 jar 内容完整**（资源经 `fabric.processResources` 合并 `:common` 资源、class 经 `jar.from(:common classesDirs)`）：`nx/pingwheel/common/**` 与 `nx/pingwheel/fabric/**` 都在、`pingforit.mixins.json` 在、`assets/pingforit/**` + `icon.png` 在、**`LICENSE_pingforit` 在（本项目 MIT）**、**`THIRD-PARTY-NOTICES.md` 在 jar 根（第三方声明 + 内嵌 Apache-2.0 全文；与 `LICENSE_pingforit` 是**两个不同文件，都要在**）**、`META-INF/services` 五份 SPI 各一份、`unzip -l | sort | uniq -d` 无重复条目。dev 的 `runClient` 走 runtimeClasspath，**通过它不能证明 jar 合并正确**。
 - [ ] `runClient` 不卡加载条，无 `Mixin apply failed`
 - [ ] 进世界后按键产生成对 `send ping` / `marker created`
 - [ ] `common/src/main/java` 下 grep 不到 `net.minecraft.client.` / `com.mojang.blaze3d`（`tools/compile-check.sh|.ps1` 的 gate 命中即 exit 1）
