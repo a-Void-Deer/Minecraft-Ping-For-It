@@ -152,3 +152,5 @@ Simple Voice Chat 集成由桩恢复为上游实现：`VoiceChatIntegration`（3
 3. 唯一的行为差别是「远处地形现在也能 ping 到」，与上游 1.21.1 一致；失败路径按上游语义降级到普通同步射线。
 
 对照：`#17`（FTB Teams）仍是运行时能力缺失，编号保留；本项属「能力恢复」，不需要编号。**已知限制仍按 #19**（DH 会关闭 OIT，`outline` 分支在装 DH 时不可达）。
+
+**实机确认（2026-11-04，58-mod 会话装 DH 3.3.4）**：§11 的「恢复」在实机成立 —— `[PingForIt] Distant Horizons API Version: 7.2.0`（`run/logs/latest.log:102`）、`schedule failed`/`trace failed`/`integration disabled` 各 0 条、闭环 36:36，且**用户截图**里超出 `renderDistance:16`（256 格）的 **370.8 m `草方块` BLOCK 标记**只可能来自 DH 异步射线；同时 DH 照旧强制关 OIT（`:261`–`:263`），与 #19 一致。**仍不新增编号。**

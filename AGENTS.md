@@ -1,7 +1,7 @@
 # AGENTS.md · Ping For It（MC 26.3 / Fabric 单端）协作说明
 
 > 团队唯一事实来源：现状、目录、构建、已验证结论、已知坑、待办。
-> 维护者：Lead｜**最后更新：2026-11-04（M9-3 DH 集成实现 + 复审通过（方案 A，实机待验）；补待完成清单含 M10 技术债与发布门禁；根级 run 任务为转发别名；P0 收口；M9-1/M9-2 实机通过）**
+> 维护者：Lead｜**最后更新：2026-11-04（M9-3 DH 集成实现 + 复审 + 实机通过（方案 A，装 DH 3.3.4 的 58-mod 会话）；补待完成清单含 M10 技术债与发布门禁；根级 run 任务为转发别名；P0 收口；M9-1/M9-2 实机通过）**
 
 ## 0. 2026-10-29 数据事故与恢复（先读）
 
@@ -115,6 +115,7 @@ export GRADLE_USER_HOME="D:/Gradle"
 | **M9-1 实机验收（2026-11-03 18:27–18:30）** | `run/logs/latest.log`：Mod 列表含 `modmenu 21.0.0` + `pingforit 0.4.2-pfi-beta1`（且上一轮 voicechatprofiles 的 `Incompatible mods found` 已消失）；初始化顺序 `Init → ServerConfig → ClientConfig → ping outline pipeline registered → block outline pass registered`；**`send ping` / `marker created` = 28 : 28（1:1）**（复读全日志到 18:31:19 为 **34 : 34**）；`block model glow active` ≥1 条；**0 条模组相关 ERROR、0 条 `Mixin apply failed`**，12 条 WARN 全部归因于 DH/Sodium/PerfOS/voicechat；正常退出 |
 | **P0 实机（2026-11-03 R1–R4，重构后）** | `run/logs` 四轮（20:58 / 22:13 / 22:15 / 22:28）：**0 条本模组 ERROR**、**0 条 `Mixin apply failed`**、0 条 `ClassNotFoundException: nx.pingwheel`；VoiceChat `Loaded 1 plugin(s)` + `Registering events for 'pingforit'`；闭环 **32 : 32**（R4，严格 1:1，0 reject/deny）；资源包索引含 `pingforit`（`debug.log:1713/1770`）；`Missing sound for event` **0**。**唯一 1 条本模组 WARN**（`entity-block glow: model hook not observed on 120 glowing dispatches`）经 3号 审计判定为**营火误报**（`CampfireRenderer` 只 `submitItem`、从不 `submitModel`；且营火有 C1 烘焙模型兜底），见 `docs/reviews/61-model-hook-warn-audit.md`。逐轮明细见 `docs/restructure/03-p0-log-audit.md` |
 | **V18 专用服务器（2026-11-04 16:52）** | `gradlew.bat -g D:\Gradle runServer`（**根级别名生效**，Gradle 执行 `:fabric:runServer`）→ `Starting minecraft server version 26.3` → **`Done (2.998s)! For help, type "help"`** → `stop` → `Stopping server` 正常退出。**47 mods**；本模组服务端路径 `[PingForIt] Init` + `Loaded config type=ServerConfig`（common 源集在专用服务器跑通、无客户端类误引）；voicechat 服务端侧 `Loaded 1 plugin(s)` / `Initialized 1 plugin(s)` / `Registering events for 'pingforit'`；**0 条 ERROR/FATAL、0 条 `NoClassDefFoundError`/`ClassNotFoundException`、0 条 `Mixin apply failed`**；WARN 3 条全外部（PerfOS 注册表、voicechat debug mode、DH 的 G1 GC 提示）。日志：`run/logs/latest.log:102/107/157/170` |
+| **M9-3 实机验收（2026-11-04 22:28–22:31）** | `run/logs/latest.log`（498 行）：**58 mods**，mod 列表含 `distanthorizons 3.3.4`（`:3`/`:4`）；本模组探针 **`[PingForIt] Distant Horizons API Version: 7.2.0`**（`:102`，只有真实现会打这一行）；**`send ping` / `marker created` = 36 : 36（严格 1:1，0 reject/deny）**，其中 **BLOCK 22 / LOCATION 14**；**0 条** `distanthorizons schedule failed` / `distanthorizons trace failed` / `distanthorizons integration disabled`（`latest.log` + `debug.log` 全文检索）；`run/options.txt` = `renderDistance:16`（=256 格），**用户提供的客户端截图（HUD）显示 `草方块 370.8m` 的 BLOCK 标记**（同帧还有 `此处 727.2m / 584.3m / 561.3m`）→ 超出原版加载范围，只可能来自 DH 异步射线；`send ping`/`marker created` 只记 `requestId|markerId|kind|pingType`，**距离不是日志字段**，故本条为**截图证据**而非日志证据；DH 强制关 OIT（`Disabling improved transparency` `:263`，与 `24` **#19** 一致）；**0 条 `Mixin apply failed`**、`[PingForIt] Init` / `Loaded config type=ServerConfig` / `ClientConfig` / `block outline pass registered` 各 1 条、`block model glow active` 1 条；ERROR 3 条全为账户/Realms 噪声，WARN 5 条全外部（Sodium CNF / PerfOS / voicechat debug / DH G1 / `end_of_frame`）；22:31:27 正常 `Stopping!` |
 
 ## 7. 已知坑与约束
 
@@ -183,7 +184,7 @@ export GRADLE_USER_HOME="D:/Gradle"
 | M5 | **M5 服务端权威：完善 + 双客户端验收**（受众/赢家/限流/移除/过期/重连） | ⬜ |
 | M7 | 渲染重建：`deferred/` 描边/世界渲染按 26.3 管线重写 | ✅ **M7a 方块线框 + M7b 实体描边 + M7c C1 模型光晕完成并实机通过（2026-10-31）**；**M7c C2（entity_block 真实体光晕）✅ 完成并实机通过**（`020d920`/`b3ad60f`/`f88a887`，含契约对齐：渲染模式门控、不短路、RenderShape 前置）；规格 `33`/`35`/`38`/`40`、复审 `34`/`36`/`39` |
 | M8 | 配置/命令/UI + 资源重载迁 v1 | ✅ **完成（2026-11-01）**：**M8a** 完整分页设置界面（6 客户端分类/25 项 + 3 服务端分类/5 字段，含 tab 冻结修复）实机通过；**M8b** 资源 v1 + 自定义贴图（默认路径通过，**自定义包待补测**）；**M8c** toggle notice 第二层 HUD 实机通过。文档：`46`/`47`/`48`/`49` |
-| M9 | 可选集成（ModMenu/VoiceChat/FTB/DH/Sable） | **M9-1 ✅ 实现 + 实机通过（2026-11-03）**：Mod Menu 类从 `deferred/` 迁回 `src/client`（与上游逐字节一致）、`fabric.mod.json` 加 `modmenu` entrypoint、依赖改 `run/mods` 离线 jar；**M9-2 ✅ 实现 + 实机通过（2026-11-03）**：`VoiceChatIntegration`/`VoiceChatWrapper` 与上游逐字节一致、`fabric.mod.json` 加 `voicechat` entrypoint、`build.gradle` 加 `compileJava` 的 `voicechat-` jar 检查；实机证据：R1 起每轮 `Loaded 1 plugin(s)` + `Initialized 1 plugin(s)` + `Registering events for 'pingforit'`（不再是从前的 0）。**M9-3 ✅ 实现 + 复审通过（2026-11-04）·实机待验**：`DistantHorizonsIntegration` 由 76 行 stub 换回**上游 201 行实现**（`rootCause` 未动、调用点零改动），**方案 A** = 编译期只吃 `compile-libs/DistantHorizonsApi-7.2.0.jar`（Modrinth 官方件，363 318 B）、运行时仍用 `run/mods` 的完整 jar；复审 `docs/reviews/64-m9-3-dh-integration-review.md`（通过、无阻塞）；FTB Teams / Sable **平台强制跳过**（`24` #17/#18） |
+| M9 | 可选集成（ModMenu/VoiceChat/FTB/DH/Sable） | **M9-1 ✅ 实现 + 实机通过（2026-11-03）**：Mod Menu 类从 `deferred/` 迁回 `src/client`（与上游逐字节一致）、`fabric.mod.json` 加 `modmenu` entrypoint、依赖改 `run/mods` 离线 jar；**M9-2 ✅ 实现 + 实机通过（2026-11-03）**：`VoiceChatIntegration`/`VoiceChatWrapper` 与上游逐字节一致、`fabric.mod.json` 加 `voicechat` entrypoint、`build.gradle` 加 `compileJava` 的 `voicechat-` jar 检查；实机证据：R1 起每轮 `Loaded 1 plugin(s)` + `Initialized 1 plugin(s)` + `Registering events for 'pingforit'`（不再是从前的 0）。**M9-3 ✅ 实现 + 复审 + 实机通过（2026-11-04，58-mod 会话装 DH 3.3.4）**：`DistantHorizonsIntegration` 由 76 行 stub 换回**上游 201 行实现**（`rootCause` 未动、调用点零改动），**方案 A** = 编译期只吃 `compile-libs/DistantHorizonsApi-7.2.0.jar`（Modrinth 官方件，363 318 B）、运行时仍用 `run/mods` 的完整 jar；复审 `docs/reviews/64-m9-3-dh-integration-review.md`（通过、无阻塞）；**实机证据**见 §6 表：`Distant Horizons API Version: 7.2.0` 探针 + 闭环 36:36 + 0 条 trace/schedule 失败 + 视距外 `草方块 370.8m` BLOCK 命中（用户截图）；FTB Teams / Sable **平台强制跳过**（`24` #17/#18） |
 | **P0（重构后验收）** | 多模块重构（`f18e31e`）后的实机回归 | **✅ P0 收口（V13–V15 受限未验证）**：V1/V4/V9/V12/V16/V17 ✅、**V18 ✅（2026-11-04 16:52，`Done (2.998s)!` / 47 mods / 0 ERROR）**；V6/V7/V11 🟡（需肉眼/留证）；**V13–V15 ⏸ 受限未验证**（见 `24` #19 实测结论；描边仍可见、仍穿墙，仅半透明叠加时可能有染色差异）；V19 ⏸ 可选。逐项见 `docs/PORTING-PROGRESS.md` §P0 |
 | M10 | 验证与发布：`runServer`、CI、测试基座、LICENSE → MIT + THIRD-PARTY-NOTICES | ⬜ |
 
@@ -191,14 +192,14 @@ export GRADLE_USER_HOME="D:/Gradle"
 
 ## 9.1 待完成清单（2026-11-04 盘点）
 
-> M0–M8、M9-1、M9-2 已完成；**P0 已收口**——除 **V13–V15（⏸ 受限未验证）** 与 **V19（⏸ 可选）** 外全部通过。
+> M0–M8、M9-1/M9-2/M9-3 已完成；**P0 已收口**——除 **V13–V15（⏸ 受限未验证）** 与 **V19（⏸ 可选）** 外全部通过。
 
 | 分组 | 项 | 验收方式 | 状态 |
 | --- | --- | --- | --- |
 | A · P0 收尾 | **V13–V15 OIT 描边路由**：移走 DH → 开 Improved Transparency → ping，日志应出现**恰好 1 条** `improved transparency is ON …` | 实机日志 | ⏸ **受限未验证**：已尝试两项修复（门控改读 `Options.improvedTransparency`、`isCustom` 改「实例 → 注册名回退」）仍未触发；结论与影响见 `docs/reviews/24-fidelity-constraint-audit.md` **#19 实测结论**（描边仍可见、仍穿墙，仅半透明叠加时可能有染色差异） |
 | A · P0 收尾 | **V19 发布 jar 干净安装**：干净 Fabric 26.3 实例只放本 jar + fabric-api，启动查图标/中文/ping | 实机启动 | ⏸ 可选 |
 | A · P0 收尾 | **V6 / V7 / V11 肉眼确认**：Mods 列表图标、设置界面中文、ModMenu 配置按钮 | 实机截图 | 🟡 日志级已过，待肉眼留证 |
-| B · 主线功能 | **M9-3 Distant Horizons 集成**：stub → 上游真实现（异步远距离射线 + `ModContext.HasDistantHorizons` + 失败降级） | 装/不装 DH 各跑一次 | 🟡 **实现 + 复审通过（2026-11-04，方案 A），实机待验**（`64` 通过、无阻塞；待验见 §9 的 M9 行与 `PORTING-PROGRESS` §M9-3） |
+| B · 主线功能 | **M9-3 Distant Horizons 集成**：stub → 上游真实现（异步远距离射线 + `ModContext.HasDistantHorizons` + 失败降级） | 装/不装 DH 各跑一次 | ✅ **实现 + 复审 + 实机通过（2026-11-04，方案 A，装 DH 3.3.4）**：`64` 通过无阻塞；实机 36:36 闭环、`Distant Horizons API Version: 7.2.0` 探针、0 条 `trace failed`/`schedule failed`、视距外 `草方块 370.8m` BLOCK 命中（用户截图，§6 表）——**「不装 DH」未单独跑**：由 `ModContext.HasDistantHorizons` 短路 + 复审静态分析保证 DH 类不加载，M10 验证批可顺手覆盖 |
 | B · 主线功能 | **M5 服务端权威验收**：受众快照 / 赢家选择 / 移除仅本人 / 限流 / 过期 / 断线重连 | **两个客户端互测** | ⬜（代码已存在） |
 | C · M10 发布 | **LICENSE → MIT** + `THIRD-PARTY-NOTICES` 并入 jar | 检查 jar 内 `LICENSE_pingforit` 与 notices | ⬜ |
 | C · M10 发布 | **CI 真实跑绿**：`clean build` + 产物上传 + jar 元数据检查 | GitHub Actions 绿 | ⬜ **从未真正跑过**（本机无网）——**发布前唯一外部未知项** |
@@ -208,7 +209,7 @@ export GRADLE_USER_HOME="D:/Gradle"
 | C · M10（技术债） | `GameContext.lastWorld` 静态 `ClientLevel` 断线后不清空（`docs/reviews/57-pipeline-conflict-audit.md` **S1**）→ 内存滞留 | 改代码 + 断线复测 | ⬜ |
 | C · M10（技术债） | 5 处 mixin 仍 `require=1`（同 `57` **H5**）→ 未来 MC 签名变动会**启动崩溃**而不是降级 | 评估改 `require=0` + 诊断 | ⬜ |
 | C · M10（技术债） | 诊断信号变弱（`entity-block glow` 的 WARN 已降 DEBUG）→ 真回归只能靠视觉 | 2号 补强方案（`resolved`/`consumed` 计数 + 首次消费 DEBUG） | ⬜ |
-| C · M10（技术债） | **DH × OIT 互斥策略**：装 DH 的玩家永远走不到 `outline` 相位分支 | 加诊断开关强制走，或在 `docs/reviews/24-fidelity-constraint-audit.md` 登记为已知行为 | ⬜（**M9-3 已实现（方案 A），此项待决**） |
+| C · M10（技术债） | **DH × OIT 互斥策略**：装 DH 的玩家永远走不到 `outline` 相位分支 | 加诊断开关强制走，或在 `docs/reviews/24-fidelity-constraint-audit.md` 登记为已知行为 | ⬜ 待决（M9-3 实机已复现：装 DH 时恒有 `Disabling improved transparency…` → `outline` 分支不可达，见 `24` **#19** 实测结论） |
 | D · 遗留 / 可选 | **M8b 自定义资源包补测**（替换 `assets/pingforit/textures/ping.png`） | 实机贴图 | ⏸ 等用户提供资源包 |
 | D · 遗留 / 可选 | **OIT 复测**：透明物体叠加顺序 | 实机 | ⏸ 可选 |
 | D · 遗留 / 可选 | `render/spike/OutlineExperiment` 清理 | 删除并确认无引用 | ⏸ 用户已确认保留 |

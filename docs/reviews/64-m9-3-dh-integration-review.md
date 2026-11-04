@@ -78,3 +78,15 @@
 1. 可选：给 terrainRepo 加 null 判空（返回 empty），或确认 DH API 在 worldProxy 非空时 terrainRepo 恒非空；当前 NPE 会被 future 捕获，功能上已降级。
 2. 可选：tools 脚本 0 命中 API jar 时直接 exit 2，与 Gradle fail-fast 一致。
 3. 无 DH 的 runClient 冒烟一次，确认 DistantHorizonsIntegration 的类加载/静态初始化在 absence 下安全（静态分析成立，实机更稳）。
+
+## G. 实机复验（2026-11-04 22:28–22:31，装 DH 3.3.4 的 58-mod 会话）
+
+> 本节点在复审之后，用于把「静态分析成立」升级为「实机成立」；不修改上面 A–F 的任何结论。
+
+- **环境**：`run/logs/latest.log`（498 行，22:28:21 → 22:31:27 `Stopping!`），mod 列表含 `distanthorizons 3.3.4`（`:4`）；`run/options.txt` 的 `renderDistance:16`（=256 格）。
+- **API 面**：`[PingForIt] Distant Horizons API Version: 7.2.0`（`:102`）—— `logVersionDiagnostics` 由真实现执行，stub 没有这一行。
+- **契约面**：`distanthorizons schedule failed` / `distanthorizons trace failed` / `distanthorizons integration disabled` **各 0 条**（`latest.log` + `debug.log` 全文检索；前两条走 `debugException`，只在 debug 级可见，两处都查过）→ 异步 takeover 无失败、无降级、无 strand。
+- **闭环**：`send ping` **36** / `marker created` **36**（严格 1:1，0 reject/deny），其中 BLOCK 22 / LOCATION 14。
+- **远距离**：**用户提供的客户端截图（HUD）显示 `草方块 370.8m`** 的 BLOCK 标记（同帧 `此处 727.2m / 584.3m / 561.3m`）—— 超出 256 格加载范围、原版 `Clip` 必 MISS，该 BLOCK 只能来自 DH 异步射线。`send ping`/`marker created` 只记 `requestId|markerId|kind|pingType`，**距离不是日志字段**，故本条为**截图证据**而非日志证据。
+- **建议 3（无 DH 冒烟）仍未做**：本轮含 DH。依据不变（`ModContext.HasDistantHorizons` 短路 + `catch LinkageError`，未装时不解析 DH 类），留待 M10 验证批顺手覆盖。
+- **结论**：**实机通过**，与 A–F 的静态结论一致，无新增阻塞项。

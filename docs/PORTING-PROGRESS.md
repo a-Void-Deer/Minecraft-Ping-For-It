@@ -21,7 +21,7 @@
 | M6.5 | 标记 HUD 上游对齐 | ✅ **已恢复并重新验收**（tag `port-M6.5-restored`，2026-10-30 12:30–12:33 实机） | 2026-10-30 | tag `port-M6.5-restored` |
 | M7 | 渲染重建 | ✅ **M7a 方块线框 + M7b 实体描边 + M7c C1 模型光晕 + C2 entity_block 真实体光晕全部完成并实机通过（2026-11-01）**；含 HUD 投影补 bob、ping 提示改回聊天框（`dde1be5`） | 2026-11-01 | — |
 | M8 | 配置 / 命令 / UI | ✅ **完成（2026-11-01）**：**M8a** 完整分页设置界面 ✅、**M8b** 资源 v1 + 自定义贴图 ✅（**自定义资源包仍待补测**）、**M8c** toggle notice 第二层 HUD ✅，三者均实机通过；文档：`46`/`47`/`48`/`49` | 2026-11-01 | — |
-| M9 | 可选集成 | 🟡 **M9-1 Mod Menu ✅ 实现 + 实机通过（2026-11-03）**；**M9-2 VoiceChat ✅ 实现完成（审查通过，实机待验）**；**M9-3 DH 🟡 实现 + 复审通过（方案 A），实机待验**；FTB Teams / Sable 平台强制跳过（`24` #17/#18） | 2026-11-03 | — |
+| M9 | 可选集成 | ✅ **M9-1/2/3 全部实现 + 实机通过**：Mod Menu（2026-11-03）、VoiceChat（**2026-11-03 起每轮 `Loaded 1 plugin(s)`**）、Distant Horizons（2026-11-04，方案 A，58-mod 会话装 DH 3.3.4，视距外 370.8 m BLOCK 命中）；FTB Teams / Sable 平台强制跳过（`24` #17/#18） | 2026-11-04 | — |
 | M10 | 验证与发布 | ⬜ 待办（**含合规：LICENSE 换 MIT + THIRD-PARTY-NOTICES**） | — | — |
 | 事故恢复 | 目录重建 + 重新验证 | ✅ 完成 | 2026-10-30 | tag `restore-2026-10-29` |
 
@@ -730,12 +730,12 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 
 **剩余事项**
 
-- **M9-2（VoiceChat）**：**已实现并审查通过**（`56-m9-2-voicechat-review.md`），状态见下方 **§M9-2**；`run/mods` 已放入 `voicechat-fabric-2.6.27+26.3.jar`（完整 mod，含 API 类）；`voicechat` entrypoint、真 `VoicechatPlugin`、`VoiceChatWrapper` 两方法均已就位（**唯一剩余是实机验证**，详见 §M9-2「待验」）。
-- **M9-3（DH）**：`DistantHorizonsIntegration` 201 行实现回填 + API 接线；`DistantHorizons-3.3.4-26.3`（完整 jar，自带 API 类）已在 `run/mods`，但运行时仍需用户实际安装 DH 才能验证。
-  - **待决（3号 复审第 2 轮采纳为 M9-3 项）**：编译期最好统一吃 **API jar**、**full jar 只做 dev runtime**（需要一个独立的 `compile-libs/` 目录把两者分开）。**当前临时做法**是 full jar 既编译又运行 —— 因为 DH 仍是 stub、`traceDistantAsync` 恒 `false`，这个不一致暂时不影响编译，M9-3 落地时必须先定下来。
+- **M9-2（VoiceChat）✅ 完成**：**已实现、审查通过并实机通过**（`56-m9-2-voicechat-review.md`），状态见下方 **§M9-2**；`run/mods` 已放入 `voicechat-fabric-2.6.27+26.3.jar`（完整 mod，含 API 类）；`voicechat` entrypoint、真 `VoicechatPlugin`、`VoiceChatWrapper` 两方法均已就位；**2026-11-03 起每轮 `Loaded 1 plugin(s)` + `Registering events for 'pingforit'`**。
+- **M9-3（DH）✅ 完成**：`DistantHorizonsIntegration` 201 行实现回填 + API 接线；**实机已于 2026-11-04 通过**（见下方 §M9-3「实机验收」，装 DH 3.3.4 的 58-mod 会话）。
+  - **已决（3号 复审第 2 轮采纳为 M9-3 项）**：编译期统一吃 **API jar**、**full jar 只做 dev runtime** —— 已按**方案 A** 落地：新增 `compile-libs/`（`DistantHorizonsApi-7.2.0.jar` 仅 `compileOnly`），完整 DH jar 已从 `ext.integrationJars` 剔除、只留在 `run/mods` 做运行时。
 - **M9-4（收尾）**：`fabric.mod.json` 的 `depends/recommends/suggests` 策略统一。~~`docs/features.md:382` 的 Mod Menu 描述已过时~~ → **已于 2026-11-02 更正**（§8 新增「本地现状」列，Mod Menu 标 ✅ 已实现，VoiceChat/DH 标桩、FTB/Sable 标平台强制跳过）。
 
-### M9-2 · Simple Voice Chat 集成（2026-11-03）✅ 实现完成（审查通过），实机待验
+### M9-2 · Simple Voice Chat 集成（2026-11-03）✅ 实现 + 实机通过（11-03 起每轮均有）
 
 **目标**：恢复上游的语音小组集成——ping 的「团队上下文」优先用 Simple Voice Chat 的**分组（group）**（不是「团队」）：同组成员才互见（AUTO/TEAM_ONLY 时），服务端受众判定同样按 group 走。缺省时按 `VoiceChat > FTB Teams > 原版队伍 > NONE` 回落（`TeamContextHandler.java:15-30`）。
 
@@ -763,15 +763,23 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 | 独立审查 | `docs/reviews/56-m9-2-voicechat-review.md`：**通过、无阻塞**（逐字节一致 / Fabric 只认 entrypoint、注解惰性 / 服务端安全 / API 面 `javap` 核验 / `LinkageError` 覆盖 / 未碰 M9-1）。两处非阻断：**B1** `serverApi` 字段解析在 `try` 之外（上游同形）；**B2** CI 与本地编译面 → 已由改动 #5 消除 |
 | `run/mods` 里 voicechat 产物体量 | `voicechat-fabric-2.6.27+26.3.jar`（5.6 MB / 704 class），其中 `de/maxhenkel/voicechat/api/*` **104 个 class**（实测 `unzip -l` 计数；56 号审查记的也是 104） |
 
-**待验（实机，唯一未完成项）**：重新构建后带着完整 jar 跑一次客户端，确认日志出现 `[voicechat/PluginManager] Loaded 1 plugin(s)` / `Initialized 1 plugin(s)`（M9-1 那次是 `0`）；并核对装 VC 后同组互见、未装时回落原版队伍。
+**实机验收（2026-11-03 起）✅ 通过**
+
+| 项 | 结果 |
+|---|---|
+| 客户端 | `run/logs/latest.log:94-98`（2026-11-04 22:28:36，58 mods）：`Loading plugins` → **`Loaded 1 plugin(s)`** → `Initializing plugins` → **`Initialized 1 plugin(s)`** → **`Registering events for 'pingforit'`**（M9-1 那次是 `0`） |
+| 归档全量核对（1号 逐档 gunzip 复核） | `run/logs/*.log.gz`：**2026-10-30 / 10-31 / 11-01 的 18 个归档全部 0 条**；**2026-11-03 起（最早 `2026-11-03-1.log.gz`，20:06:20）到 2026-11-04 的 13 个归档各 1 条** `Loaded 1 plugin` → 「2026-11-03 起每轮均有」成立 |
+| 专用服务器（2026-11-04 16:52） | 同样 `Loaded 1 plugin(s)` / `Initialized 1 plugin(s)` / `Registering events for 'pingforit'`（见 `AGENTS.md` §6 V18 行） |
+
+**未覆盖**：「同组互见 / 未装时回落原版队伍」是**双客户端行为**，仍在 M5 受众验收里做；本项只验到「插件已被加载且注册了事件」。
 
 **剩余事项**
 
-- 实机验证如上；通过后把本节标题与顶部总表改为 ✅ 实机通过。
+- ~~实机验证~~ → **已完成**（2026-11-03 起每轮均有，见上表）。
 - 服务端侧同组判定需**双客户端**复测（与 M5 的受众验收合并做更省事）。
 - M9-3（DH）见下节；FTB Teams / Sable 平台强制跳过不变（`24` #17/#18）。
 
-### M9-3 · Distant Horizons 集成（2026-11-04）🟡 实现 + 复审通过，实机待验
+### M9-3 · Distant Horizons 集成（2026-11-04）✅ 实现 + 复审 + 实机通过
 
 **目标**：把 `DistantHorizonsIntegration` 从 76 行 stub 换回上游真实实现 —— 客户端射线在原版视距外时，交给 DH 的 LOD 地形做**异步远距离射线**（4096 格），命中则投影成方块目标；失败/未装则回退普通同步射线。
 
@@ -791,13 +799,22 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 
 **复审结论（`docs/reviews/64-m9-3-dh-integration-review.md`）**：**通过、无阻塞** —— 保真（与上游仅 javadoc 缩进差）、异步契约（true/false、回调线程、call-site `game.execute`）、构建隔离（完整 jar 确实被排除出编译面）三项均成立。非阻断项：① `terrainRepo` 未单独判空（上游也没有；NPE 会被 future 捕获 → 走 empty 回调）；② tools 脚本 0 命中只 warning（真正的 fail-fast 在 Gradle）；③ 建议补一次「无 DH 的 runClient 冒烟」。
 
-**待验（实机，唯一未完成项）**
+**实机验收（2026-11-04 22:28–22:31，装 DH 3.3.4）✅ 通过**
 
-- **不装 DH**：移走 `run/mods` 的 DH jar → 启动 → ping；期望 `optional integrations: distantHorizons=false`，行为与现状一致。
-- **装 DH + 远距离命中**：放回完整 jar → 朝原版视距外、DH LOD 内的方块 ping；期望生成 `kind=BLOCK` marker、日志出现 `Distant Horizons API Version: 7.2.0`、**0 条** `distanthorizons schedule failed` / `trace failed`。
-- 另建议按复审 ③ 做一次「无 DH 的 `runClient` 冒烟」。
+| 项 | 结果 |
+|---|---|
+| 环境 | `run/logs/latest.log`（498 行；22:28:21 启动 → 22:31:27 `Stopping!`）：**58 mods**，mod 列表含 `distanthorizons 3.3.4`（`:4`）；`run/options.txt` = `renderDistance:16`（=256 格） |
+| **DH API 探针** | **`[PingForIt] Distant Horizons API Version: 7.2.0`**（`:102`，`(pingforit)` logger）→ `logVersionDiagnostics` 真的执行了（旧 stub 没有这一行） |
+| **异步路径零失败** | `distanthorizons schedule failed` / `distanthorizons trace failed` / `distanthorizons integration disabled` **各 0 条**（`latest.log` 与 `debug.log` 全文检索；前两条走 `debugException`，只在 `debug.log` 里可见，所以两处都要查） |
+| **闭环** | `send ping` **36** / `marker created` **36**（严格 1:1，0 reject/deny）：**BLOCK 22 / LOCATION 14**；方块目标 22 次（`草方块`×16 / `土径` / `橡木木板`×2 / `玻璃板` 等），`前往 此处`（LOCATION 回落）14 次 |
+| **视距外命中（决定性证据）** | **用户提供的客户端截图（HUD）显示 `草方块 370.8m` 的 BLOCK 标记**（同帧还有 `此处 727.2m / 584.3m / 561.3m`）—— `renderDistance:16` 只有 256 格，370.8 m 处没有加载区块，原版 `Clip` 必然 MISS，该 BLOCK 只可能来自 **DH 异步射线**。`send ping`/`marker created` 只记 `requestId|markerId|kind|pingType`，**距离不是日志字段**，故本条为**截图证据**而非日志证据 |
+| 其余 | **0 条 `Mixin apply failed`**；`[PingForIt] Init` / `ServerConfig` / `ClientConfig` / `ping outline pipeline registered`（`:140`）/ `block outline pass registered`（`:141`）各 1 条、`block model glow active`（`:314`）1 条；ERROR 3 条全为账户/Realms 噪声（`:147`/`:179`/`:204`），WARN 5 条全外部（Sodium CNF / PerfOS / voicechat debug / DH 的 G1 / `end_of_frame`） |
+| DH × OIT | DH 照旧强制关 OIT（`Disabling improved transparency…` `:263`，`:261`/`:262` 另关 vanilla clouds 与 chunk fade）→ 与 `24` **#19** 一致：装 DH 时 `outline` 回退分支仍不可达 |
 
-**剩余事项**：实机通过后把本节与顶部总表改 ✅；`DH × OIT 互斥策略`（装 DH 时 OIT 被关，`outline` 分支永不触发）仍需在 `24` 登记或加诊断开关（`AGENTS.md` §9.1 C 组）。
+**未覆盖**：**「不装 DH」未单独跑**（本轮 58 mods 含 DH）。依据：入口是 `ModContext.HasDistantHorizons` 布尔短路 + `try/catch LinkageError`（`ClientPingRuntime.java:722-756`），未装时根本不解析 DH 类（复审 `64` 的静态结论）；建议并入 M10 验证批顺手覆盖。
+
+**剩余事项**：`DH × OIT 互斥策略`（装 DH 时 OIT 被关，`outline` 分支永不触发）仍需在 `24` 登记或加诊断开关（`AGENTS.md` §9.1 C 组）——**本轮实机已复现该前提**（`:261`–`:263`）。
+
 ## P0 · 重构后验收（2026-11-03）✅ P0 收口（V13–V15 受限未验证）
 
 > **路径口径说明（以 2026-11-03 为界）**：此前的文档可能仍写 `src/main/java` / `src/client/java` / 根 `build/libs/`；**现行布局**见 `AGENTS.md` §2（`common/src/main`、`fabric/src/main|client`，产物在 `fabric/build/libs/`）。**历史记录不改**：M0–M8 各节与 `docs/reviews/*` 是当时的事实快照，保留原样以便追溯。
@@ -886,7 +903,7 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 |---|---|---|---|---|
 | 1 | **M5 服务端权威验收**：受众快照、赢家选择、移除仅本人、限流、过期、断线重连 | M5 | **双客户端互测**（两个 runClient 进同一局域网世界） | ⬜ 代码已存在，未正式验收 |
 | 2 | **M9 集成可行性调研**：ModMenu / VoiceChat / FTB Teams / DH / Sable 的 26.3 版本与接入代价 | M9 | 调研报告 `53-m9-integration-feasibility.md` | ✅ 已交付（**做 3：ModMenu/VoiceChat/DH；跳过 2：FTB Teams/Sable 无 26.3 构建**） |
-| 3 | M9 逐项接入（只做调研判定「可做」的） | M9 | 装/不装各跑一次，降级路径正确 | ✅ **M9-1（ModMenu）实现 + 实机通过（2026-11-03）**；🔄 **M9-2（VoiceChat）实现完成（审查通过）、实机待验**；**M9-3（DH）🟡 实现 + 复审通过（方案 A）、实机待验** |
+| 3 | M9 逐项接入（只做调研判定「可做」的） | M9 | 装/不装各跑一次，降级路径正确 | ✅ **M9-1（ModMenu）实现 + 实机通过（2026-11-03）**；✅ **M9-2（VoiceChat）实现 + 实机通过（2026-11-03 起每轮 `Loaded 1 plugin(s)`，最早 `2026-11-03-1.log.gz`）**；✅ **M9-3（DH）实现 + 复审 + 实机通过（2026-11-04，方案 A，装 DH 3.3.4，远距离 370.8 m BLOCK 命中·用户截图）** |
 | 4 | **M8b 自定义资源包补测**：替换 `assets/pingforit/textures/ping.png` 后 HUD/轮盘显示自定义图标 | M8 | 需要用户提供资源包 | ⏸ 等资源包 |
 | 5 | LICENSE 换 **MIT** + 生成 `THIRD-PARTY-NOTICES` 并入 jar | M10 | 上游是 Apache-2.0 + 第三方声明，移植版按计划改 MIT | ⬜ |
 | 6 | `runServer` 冒烟：专用服务器启动无 `NoClassDefFoundError`（确认 main 不误引客户端类） | M10 | 用户终端 `gradlew :fabric:runServer`（或根级别名）；首次先改 `run/eula.txt` 为 `eula=true`（**ASCII**，见 `AGENTS.md` §7.20） | ✅ **已提前于 P0 完成（2026-11-04 16:52）**：`Done (2.998s)!` / 47 mods / 0 ERROR，见 §P0.3 |
