@@ -29,7 +29,7 @@ import org.jetbrains.annotations.Nullable;
 /**
  * Component-level content-message composer for the first-receipt content
  * family. It only reads the caller-supplied authorized projection and the
- * accepted tracking entry; it never samples a world, a preview observation or
+ * accepted creation entry; it never samples a world, a preview observation or
  * an uploaded value, and it never renders a partial message.
  *
  * <p>A property message keeps the retained author and composed target, derives
@@ -39,7 +39,7 @@ import org.jetbrains.annotations.Nullable;
  * authoritative name JSON, or a missing dependency makes the whole message
  * unavailable ({@link Optional#empty()}) instead of a partial line.
  *
- * <p>An inventory message uses the accepted tracking entry's exact long count,
+ * <p>An inventory message uses the accepted creation entry's exact long count,
  * the localized item display decoded from the server-bounded display JSON or
  * the registry localized name fallback, and the entry's annotation Ping Type.
  * A negative (unknown) count or a terminal quality is unavailable; an explicit
@@ -201,11 +201,11 @@ public final class ContentChatComposer {
 	}
 
 	/**
-	 * One inventory content message from the accepted tracking entry.
+	 * One inventory content message from an accepted immutable entry projection.
 	 *
 	 * @param author          the retained plain author component
 	 * @param target          the composed authoritative target name component
-	 * @param entry           the accepted tracking entry projection
+	 * @param entry           the accepted creation entry projection
 	 * @param displayDecoder  decodes the server-bounded item display JSON, or empty
 	 * @param templates       the localized template source
 	 */
@@ -213,6 +213,18 @@ public final class ContentChatComposer {
 		Component author,
 		Component target,
 		ClientInventory.EntryView entry,
+		Function<String, Optional<Component>> displayDecoder,
+		TemplateSource templates
+	) {
+		return inventoryMessage(author, target, entry, false, displayDecoder, templates);
+	}
+
+	/** Quantity uncertainty is independent of identity fallback and fluid unit approximation. */
+	public static Optional<Component> inventoryMessage(
+		Component author,
+		Component target,
+		ClientInventory.EntryView entry,
+		boolean quantityUncertain,
 		Function<String, Optional<Component>> displayDecoder,
 		TemplateSource templates
 	) {
@@ -244,6 +256,10 @@ public final class ContentChatComposer {
 			if (suffix == null) return Optional.empty();
 			content = Component.translatable(ContentChatTemplate.QUALITY_KEY, content,
 				Component.translatable(INVENTORY_STATUS_PREFIX + suffix));
+		}
+		if (quantityUncertain && quality != InventoryS2CPacket.Status.UNCERTAIN) {
+			content = Component.translatable(ContentChatTemplate.QUALITY_KEY, content,
+				Component.translatable(INVENTORY_STATUS_PREFIX + "uncertain"));
 		}
 
 		return Optional.of(ContentChatTemplate.build(

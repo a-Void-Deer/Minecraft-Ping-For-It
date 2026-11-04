@@ -14,6 +14,7 @@ import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.CommonServer;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
+import nx.pingwheel.common.network.EncodedPresentationPayload;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
@@ -40,7 +41,6 @@ public class NeoMain {
 	private static final StreamCodec<FriendlyByteBuf, ServerPresentationPolicyC2SPacket> SERVER_PRESENTATION_POLICY_C2S_CODEC = StreamCodec.ofMember(ServerPresentationPolicyC2SPacket::write, ServerPresentationPolicyC2SPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, ServerPresentationPolicyS2CPacket> SERVER_PRESENTATION_POLICY_S2C_CODEC = StreamCodec.ofMember(ServerPresentationPolicyS2CPacket::write, ServerPresentationPolicyS2CPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, PresentationC2SPacket> PRESENTATION_C2S_CODEC = StreamCodec.ofMember(PresentationC2SPacket::write, PresentationC2SPacket::readSafe);
-	private static final StreamCodec<FriendlyByteBuf, PresentationS2CPacket> PRESENTATION_S2C_CODEC = StreamCodec.ofMember(PresentationS2CPacket::write, PresentationS2CPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, InventoryC2SPacket> INVENTORY_C2S_CODEC = StreamCodec.ofMember(InventoryC2SPacket::write, InventoryC2SPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, InventoryS2CPacket> INVENTORY_S2C_CODEC = StreamCodec.ofMember(InventoryS2CPacket::write, InventoryS2CPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, PresentationPreviewC2SPacket> PRESENTATION_PREVIEW_C2S_CODEC = StreamCodec.ofMember(PresentationPreviewC2SPacket::write, PresentationPreviewC2SPacket::readSafe);
@@ -60,8 +60,10 @@ public class NeoMain {
 	}
 
 	public void onRegisterPackets(RegisterPayloadHandlersEvent event) {
-		PayloadRegistrar registrar = event.registrar(MOD_ID).optional();
+		registerPackets(event.registrar(MOD_ID).optional());
+	}
 
+	static void registerPackets(PayloadRegistrar registrar) {
 		registrar.playToServer(UpdateChannelC2SPacket.PACKET_TYPE, UPDATE_CHANNEL_C2S_CODEC, (payload, context) -> {
 			context.enqueueWork(() -> CommonServer.INSTANCE.onChannelUpdatePacket(context.player().getServer(), (ServerPlayer)context.player(), payload));
 		});
@@ -94,8 +96,8 @@ public class NeoMain {
 			context.enqueueWork(() -> CommonServer.INSTANCE.onPresentationPacket(context.player().getServer(), (ServerPlayer) context.player(), payload));
 		});
 
-		registrar.playToClient(PresentationS2CPacket.PACKET_TYPE, PRESENTATION_S2C_CODEC, (payload, context) -> {
-			context.enqueueWork(() -> CommonClient.INSTANCE.onPresentationPacket(payload));
+		registrar.playToClient(EncodedPresentationPayload.PACKET_TYPE, EncodedPresentationPayload.STREAM_CODEC, (payload, context) -> {
+			context.enqueueWork(() -> CommonClient.INSTANCE.onPresentationPacket((PresentationS2CPacket) payload));
 		});
 
 		registrar.playToServer(InventoryC2SPacket.PACKET_TYPE, INVENTORY_C2S_CODEC, (payload, context) -> {

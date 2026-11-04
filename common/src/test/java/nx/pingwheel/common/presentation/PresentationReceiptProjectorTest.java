@@ -12,6 +12,10 @@ import static org.junit.jupiter.api.Assertions.*;
  * formatting dependencies.
  */
 class PresentationReceiptProjectorTest {
+	private static final nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot SNAPSHOT =
+		new nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot(
+			nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM, "selected", "minecraft:stone", "Stone",
+			null, 5, false, "attention", true, false);
 	private static final PresentationPropertyRef NAME =
 		PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.NAME);
 	private static final PresentationPropertyRef HEALTH =
@@ -57,7 +61,7 @@ class PresentationReceiptProjectorTest {
 	}
 
 	@Test void nullableOnlySelectionsFallThroughToTheInventoryKindWithoutRefs() {
-		var content = PresentationReceiptProjector.project(List.of(nullable(NAME)), true, true, true, ALL);
+		var content = PresentationReceiptProjector.project(List.of(nullable(NAME)), true, SNAPSHOT, true, true, ALL);
 		assertEquals(PresentationReceiptContent.Kind.INVENTORY, content.kind());
 		assertTrue(content.selectedRefs().isEmpty());
 		assertEquals(PresentationReceiptContent.suppressed(),
@@ -139,8 +143,9 @@ class PresentationReceiptProjectorTest {
 	}
 
 	@Test void inventoryReceiptNeedsTheDedicatedRouteAndAnAuthorizedName() {
-		var content = PresentationReceiptProjector.project(List.of(), true, true, true, ALL);
+		var content = PresentationReceiptProjector.project(List.of(), true, SNAPSHOT, true, true, ALL);
 		assertEquals(PresentationReceiptContent.Kind.INVENTORY, content.kind());
+		assertSame(SNAPSHOT, content.inventorySnapshot());
 		assertTrue(content.selectedRefs().isEmpty());
 		assertEquals(PresentationReceiptContent.suppressed(),
 			PresentationReceiptProjector.project(List.of(), true, false, true, ALL),

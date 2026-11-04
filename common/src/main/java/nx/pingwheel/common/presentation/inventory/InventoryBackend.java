@@ -245,6 +245,13 @@ public final class InventoryBackend implements AutoCloseable {
 		@Nullable RetainedMemoryLedger.Ticket presentationMemory;
 		/** One detached selected value, never capture evidence or a scan accumulator. */
 		@Nullable Bootstrap bootstrap;
+		@Nullable InventoryCreationSnapshot creationSnapshot;
+		@Nullable RetainedMemoryLedger.Ticket creationMemory;
+		@Nullable InventoryPublicationEvidence creationEvidence;
+		boolean creationClosed;
+		/** Frozen-audience-sized denial index prepaid by admission, separate from lane-policy recovery. */
+		final Set<UUID> creationDenied = new HashSet<>();
+		final Map<UUID, InventoryRuntime.PublicationGrant> initialGrants = new LinkedHashMap<>();
 		InventoryS2CPacket.Status bootstrapLifecycle = InventoryS2CPacket.Status.UPDATING;
 		int presentationCeiling;
 		long count, total, completedCount, completedTotal, revision, state = 1, nextSweep;
@@ -340,6 +347,111 @@ public final class InventoryBackend implements AutoCloseable {
 	public Optional<InventoryResourceKind> trackedKind(MarkerId marker) {
 		@Nullable Tracking lease = tracking.get(marker);
 		return lease == null || lease.marker.expiresAtTick() <= tick ? Optional.empty() : Optional.of(lease.selection.kind());
+	}
+	/** Immutable selected creation history, independent of Bootstrap and completed Tracking. */
+	public Optional<InventoryCreationSnapshot> creationSnapshot(MarkerId marker) {
+		@Nullable Tracking lease = tracking.get(marker);
+		return lease == null || lease.marker.expiresAtTick() <= tick || lease.creationClosed
+			? Optional.empty() : Optional.ofNullable(lease.creationSnapshot);
+	}
+	@org.jetbrains.annotations.NotNullByDefault
+	public enum InitialDecision { READY, DEFERRED, SUPPRESSED }
+	/** A paid one-shot source check, held through encoding and checked at the final transport handoff. */
+	@org.jetbrains.annotations.NotNullByDefault
+	public final class InitialPublication implements AutoCloseable {
+		private final Tracking lease;
+		private final UUID recipient;
+		private final long epoch, view;
+		private final InventoryRuntime.PublicationGrant source;
+		private final InventorySyncPublisher.InitialStaging staging;
+		private boolean closed;
+		private InitialPublication(Tracking lease, UUID recipient, long epoch, long view,
+			InventoryRuntime.PublicationGrant source, InventorySyncPublisher.InitialStaging staging) {
+			this.lease = lease; this.recipient = recipient; this.epoch = epoch; this.view = view; this.source = source; this.staging = staging;
+			publishing = true;
+		}
+		public InitialDecision beforeHandoff() {
+			if (closed || !creationAllowed(lease, recipient, epoch, view)) return InitialDecision.SUPPRESSED;
+			var check = source.validate();
+			if (check == InventorySharedRead.Check.DEFERRED) return InitialDecision.DEFERRED;
+			if (check != InventorySharedRead.Check.VALID) {
+				lease.creationClosed = true;
+				return InitialDecision.SUPPRESSED;
+			}
+			return creationAllowed(lease, recipient, epoch, view) ? InitialDecision.READY : InitialDecision.SUPPRESSED;
+		}
+		public void settle(long wireBytes, long workspace) { staging.settle(wireBytes, workspace); }
+		@Override public void close() {
+			if (closed) return;
+			closed = true;
+			try { source.close(); }
+			finally {
+				try { staging.close(); }
+				finally {
+					finishInitialPublication();
+				}
+			}
+		}
+	}
+	private void finishInitialPublication() {
+		publishing = false;
+		for (MarkerId marker : Set.copyOf(deferredRemovals)) remove(marker); deferredRemovals.clear();
+		for (UUID player : Set.copyOf(deferredDisconnects)) disconnect(player); deferredDisconnects.clear();
+		if (closeRequested) close();
+	}
+	public boolean initialMarkerActive(MarkerId marker, UUID recipient) {
+		@Nullable Tracking lease = tracking.get(marker);
+		return lease != null && !closeRequested && !deferredRemovals.contains(marker) && !deferredDisconnects.contains(recipient)
+			&& !deferredDisconnects.contains(lease.marker.owner()) && lease.marker.expiresAtTick() > tick && lease.marker.recipients().contains(recipient);
+	}
+	private boolean creationAllowed(Tracking lease, UUID recipient, long epoch, long view) {
+		@Nullable Policy policy = host.policy(recipient).orElse(null);
+		return tracking.get(lease.marker.id()) == lease && !closeRequested && !lease.creationClosed
+			&& !lease.invalid && !lease.recomputingScope && !lease.consumer.invalidated() && lease.deniedEvidence == null
+			&& !deferredRemovals.contains(lease.marker.id()) && !deferredDisconnects.contains(lease.marker.owner())
+			&& !deferredDisconnects.contains(recipient) && !lease.creationDenied.contains(recipient) && lease.marker.expiresAtTick() > tick
+			&& lease.marker.recipients().contains(recipient) && policy != null && policy.epoch() == epoch && policy.view() == view
+			&& policy.types(lease.selection.kind()).contains(lease.marker.targetType().id());
+	}
+	public InitialDecision creationDecision(MarkerId marker, UUID recipient, long epoch, long view) {
+		@Nullable Tracking lease = tracking.get(marker);
+		return lease != null && lease.creationSnapshot != null && creationAllowed(lease, recipient, epoch, view)
+			? InitialDecision.READY : InitialDecision.SUPPRESSED;
+	}
+	public void suppressCreation(MarkerId marker, UUID recipient) {
+		@Nullable Tracking lease = tracking.get(marker);
+		if (lease != null && lease.marker.recipients().contains(recipient)) lease.creationDenied.add(recipient);
+	}
+	/** Missing admission is DEFERRED, never a permission denial. Does not require Basic-known or POLICY handoff. */
+	public Optional<InitialPublication> reserveInitial(MarkerId marker, UUID recipient, long epoch, long view,
+		long wireBytes, long encodingWorkspace) {
+		if (publishing) return Optional.empty();
+		@Nullable Tracking lease = tracking.get(marker);
+		if (lease == null || !creationAllowed(lease, recipient, epoch, view) || lease.creationEvidence == null) return Optional.empty();
+		var staging = publisher.reserveInitial(wireBytes, encodingWorkspace);
+		if (staging.isEmpty()) return Optional.empty();
+		@Nullable InventoryRuntime.PublicationGrant source = lease.initialGrants.remove(recipient);
+		if (source == null) source = runtime.reservePublication(lease.creationEvidence).orElse(null);
+		if (source == null) { staging.get().close(); return Optional.empty(); }
+		if (!runtime.claimDetachedItemWork(encodingWorkspace)) { source.close(); staging.get().close(); return Optional.empty(); }
+		return Optional.of(new InitialPublication(lease, recipient, epoch, view, source, staging.get()));
+	}
+	/** Suppressed inventory initials still pay construction and transport workspace, but disclose no source data. */
+	public Optional<InitialEnvelope> reserveInitialEnvelope(long wireBytes, long workspace) {
+		if (publishing) return Optional.empty();
+		var held = publisher.reserveInitial(wireBytes, workspace);
+		if (held.isEmpty()) return Optional.empty();
+		if (!runtime.claimDetachedItemWork(workspace)) { held.get().close(); return Optional.empty(); }
+		publishing = true;
+		return Optional.of(new InitialEnvelope(held.get()));
+	}
+	@org.jetbrains.annotations.NotNullByDefault
+	public final class InitialEnvelope implements AutoCloseable {
+		private final InventorySyncPublisher.InitialStaging staging;
+		private boolean closed;
+		private InitialEnvelope(InventorySyncPublisher.InitialStaging staging) { this.staging = staging; }
+		public void settle(long wireBytes, long workspace) { staging.settle(wireBytes, workspace); }
+		@Override public void close() { if (!closed) { closed = true; try { staging.close(); } finally { finishInitialPublication(); } } }
 	}
 	private void advance(long now, InventorySettings settings) {
 		if (now != tick) closePublicationOpportunity(); // close against the OLD ledger before Runtime resets it
@@ -734,6 +846,12 @@ public final class InventoryBackend implements AutoCloseable {
 		@Nullable TargetKey admittedKey;
 		@Nullable InventoryRuntime.Consumer consumer;
 		@Nullable RetainedMemoryLedger.Ticket memory;
+		@Nullable InventoryCreationSnapshot creationSnapshot;
+		@Nullable RetainedMemoryLedger.Ticket creationMemory;
+		@Nullable InventoryPublicationEvidence creationEvidence;
+		@Nullable InventorySyncPublisher.InitialStaging initialStaging;
+		final Map<UUID, InventoryRuntime.PublicationGrant> initialGrants = new LinkedHashMap<>();
+		@Nullable Tracking installed;
 		long leaseBytes, bootstrapCount;
 		final Map<UUID, RetainedMemoryLedger.Ticket> recipients = new LinkedHashMap<>();
 		Prepared(Preview preview, InventorySelection reference, String token, String pingType) {
@@ -770,7 +888,7 @@ public final class InventoryBackend implements AutoCloseable {
 			if (variants.size() > settings.getTracking().effectiveMaxVariantsPerTarget()) return MarkerRejectReason.INVALID_REQUEST;
 			// The lease slab owns bounded identity strings, the seed and its indexes;
 			// display lifetime is charged independently of the preview/catalogue.
-			leaseBytes = checkedAdd(LEASE_BYTES + 512L, reference.aggregate()
+			leaseBytes = checkedAdd(checkedAdd(LEASE_BYTES + 512L, checkedMultiply(audience.size(), 128L)), reference.aggregate()
 				? REPROJECT_DISPLAY_FIXED_BYTES + 2L * AGGREGATE_JSON_BYTES : replacementActual(reference.displayJson()));
 			memory = runtime.memory().tryReserve(leaseBytes).orElse(null);
 			if (memory == null) return MarkerRejectReason.INVALID_REQUEST;
@@ -789,9 +907,51 @@ public final class InventoryBackend implements AutoCloseable {
 			consumer = runtime.attach(bound, new InventoryRuntime.TrackingSubject(targetKey)).orElse(null);
 			if (consumer == null) return MarkerRejectReason.INVALID_REQUEST;
 			consumer.requirePublicationEvidence();
-			// Pin a compatible ACTIVE observation while the Preview still owns it. This
-			// admits metadata only; no match or budget pressure cannot veto creation.
+			// Pin the paid active observation before detached receipt work consumes this tick's work envelope.
 			if (reference.kind() == InventoryResourceKind.ITEM && runtime.tryJoinInProgress(consumer) == InventoryRuntime.JoinResult.INVALID) return MarkerRejectReason.INVALID_REQUEST;
+			long snapshotWorkspace = InventoryCreationSnapshot.validationWorkspace(effectiveDisplayCeiling());
+			var validation = runtime.memory().tryReserve(snapshotWorkspace);
+			if (validation.isEmpty()) return MarkerRejectReason.INVALID_REQUEST;
+			try (var workspace = validation.get()) {
+				if (!runtime.claimDetachedItemWork(snapshotWorkspace)) return MarkerRejectReason.INVALID_REQUEST;
+				boolean complete = preview.last != null && preview.last.result().availability() == CaptureResult.Availability.READABLE
+					&& preview.last.result().completeness() == CaptureResult.Completeness.COMPLETE
+					&& !preview.rebaselineNeeded && !preview.fencePending && !preview.republishPending
+					&& publisher.previewCutComplete(preview.context, preview.revision);
+				boolean stableSweep = complete && preview.last != null
+					&& preview.last.evidence() == InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP
+					&& preview.last.result().consistency() == CaptureResult.Consistency.EVENTUAL
+					&& preview.last.result().coverage().expected().isPresent()
+					&& preview.last.result().coverage().scanned() == preview.last.result().coverage().expected().getAsLong();
+				boolean uncertain = preview.last == null || !complete
+					|| preview.last.result().consistency() != CaptureResult.Consistency.VERIFIED && !stableSweep;
+				// Aggregate display is the admitted projection; no source getter is involved.
+				InventoryResourceValue selected = selection.aggregate() ? InventoryResourceCodec.value(
+					new InventoryScanner.Key(selection.kind(), selection.itemId(), ""), retained.amount(), retained.label(),
+					selection.displayJson(), true) : retained;
+				long retainedUpper = 512L + 2L * (token.length() + selected.resourceId().length() + selected.label().length()
+					+ pingType.length() + (selected.displayJson() == null ? 0 : selected.displayJson().length()));
+				creationMemory = runtime.memory().tryReserve(retainedUpper).orElse(null);
+				if (creationMemory == null) return MarkerRejectReason.INVALID_REQUEST;
+				creationSnapshot = InventoryCreationSnapshot.fromRetained(token, selection, selected, complete, uncertain);
+				creationMemory.commit(creationSnapshot.retainedBytes());
+			}
+			var binding = runtime.acquirePublicationBinding(consumer);
+			if (binding.check() != InventorySharedRead.Check.VALID || binding.evidence() == null) return MarkerRejectReason.INVALID_REQUEST;
+			creationEvidence = binding.evidence();
+			long snapshotBytes = nx.pingwheel.common.network.InventoryCreationSnapshotCodec.encodedSize(creationSnapshot);
+			int fanout = 0;
+			for (UUID recipient : audience) {
+				@Nullable Policy policy = host.policy(recipient).orElse(null);
+				if (policy == null || !policy.types(reference.kind()).contains(type)) continue;
+				var source = runtime.reservePublication(creationEvidence);
+				if (source.isEmpty()) return MarkerRejectReason.INVALID_REQUEST;
+				initialGrants.put(recipient, source.get()); fanout++;
+			}
+			// Precommit pays the actual snapshot fanout. The final packet's Basic/marker framing
+			// is measured and admitted separately at the single initial exit after storage.
+			initialStaging = publisher.reserveInitial(snapshotBytes * fanout, fanout * (4096L + 8L * snapshotBytes)).orElse(null);
+			if (initialStaging == null) return MarkerRejectReason.INVALID_REQUEST;
 			committedInput = bound;
 			admittedKey = targetKey;
 			for (UUID recipient : audience) {
@@ -810,7 +970,13 @@ public final class InventoryBackend implements AutoCloseable {
 				|| !marker.targetKey().equals(admittedKey)) throw new IllegalStateException("dedicated admission bypass or target key changed");
 			memory.commit(leaseBytes);
 			Tracking lease = new Tracking(marker, committedInput, selection, consumer, memory, effectiveDisplayCeiling(), bootstrapCount);
+			lease.creationSnapshot = creationSnapshot; lease.creationMemory = creationMemory; lease.creationEvidence = creationEvidence;
+			lease.initialGrants.putAll(initialGrants); initialGrants.clear(); installed = lease;
+			creationSnapshot = null; creationMemory = null; creationEvidence = null;
 			tracking.put(marker.id(), lease); consumer = null; memory = null;
+			// Admission proved the extension fanout before storage. Full per-recipient envelopes
+			// replace that temporary hold at publication; do not charge the same snapshot bytes twice.
+			if (initialStaging != null) { initialStaging.close(); initialStaging = null; }
 		}
 		/**
 		 * Registers the reserved recipients after the atomic Basic initial is
@@ -831,6 +997,10 @@ public final class InventoryBackend implements AutoCloseable {
 		}
 		@Override public void close() {
 			if (consumer != null) consumer.close(); if (memory != null) memory.close(); recipients.values().forEach(RetainedMemoryLedger.Ticket::close);
+			if (creationMemory != null) creationMemory.close(); if (creationEvidence != null) creationEvidence.close();
+			if (initialStaging != null) initialStaging.close();
+			initialGrants.values().forEach(InventoryRuntime.PublicationGrant::close); initialGrants.clear();
+			if (installed != null) { installed.initialGrants.values().forEach(InventoryRuntime.PublicationGrant::close); installed.initialGrants.clear(); }
 		}
 	}
 	public void tick(long now, InventorySettings settings) {
@@ -1534,6 +1704,7 @@ public final class InventoryBackend implements AutoCloseable {
 		for (Recipient recipient : List.copyOf(lease.recipients.values())) publishTracking(lease, recipient);
 	}
 	private void retireTrackingGroup(Tracking lease) {
+		if (!lease.selection.aggregate()) lease.creationClosed = true;
 		lease.folded = true;
 		// A selected exact subtotal is not an all-ID total. Historical received
 		// values may remain grey, but no queued exact seed may escape the fold.
@@ -1563,6 +1734,7 @@ public final class InventoryBackend implements AutoCloseable {
 			? lease.bootstrapLifecycle : InventoryS2CPacket.Status.UPDATING;
 	}
 	private void invalidate(Tracking lease) {
+		lease.creationClosed = true;
 		if (lease.consumer.scopeTransition()) { recomputeScope(lease); return; }
 		lease.recomputingScope = false;
 		lease.projectionDelay.cancel(); lease.registrationDelay.cancel();
@@ -1580,6 +1752,7 @@ public final class InventoryBackend implements AutoCloseable {
 	}
 	/** New physical scope, same Sable FLUID lease. Retained quantity is client history, never new proof. */
 	private void recomputeScope(Tracking lease) {
+		lease.creationClosed = true;
 		lease.consumer.recomputeScope();
 		if (lease.completedEvidence != null) { lease.completedEvidence.close(); lease.completedEvidence = null; }
 		if (lease.bootstrapEvidence != null) { lease.bootstrapEvidence.close(); lease.bootstrapEvidence = null; }
@@ -1781,7 +1954,10 @@ public final class InventoryBackend implements AutoCloseable {
 	public void remove(MarkerId marker) {
 		if (publishing) { if (tracking.containsKey(marker)) deferredRemovals.add(marker); return; }
 		Tracking lease = tracking.remove(marker); if (lease == null) return;
+		lease.initialGrants.values().forEach(InventoryRuntime.PublicationGrant::close); lease.initialGrants.clear();
 		lease.recipients.values().forEach(recipient -> publisher.cancel(recipient.context)); lease.consumer.close(); lease.memory.close();
+		if (lease.creationMemory != null) lease.creationMemory.close();
+		if (lease.creationEvidence != null) lease.creationEvidence.close();
 		if (lease.presentationMemory != null) lease.presentationMemory.close();
 		if (lease.completedEvidence != null) lease.completedEvidence.close();
 		if (lease.bootstrapEvidence != null) lease.bootstrapEvidence.close();

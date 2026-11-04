@@ -245,14 +245,14 @@ class PresentationServerReceiptTest {
 		assertEquals(List.of(HEALTH), withMax.selectedRefs());
 	}
 
-	@Test void productionSendInitialUsesTheFreshInventoryGateRatherThanTheCachedView() {
+	@Test void productionSendInitialWithoutCreationSnapshotSuppressesEvenWithFreshInventoryGrant() {
 		var session = inventorySession();
 		var lease = lease(marker(List.of()));
 		var allowedPackets = new ArrayList<PresentationS2CPacket>();
 		PresentationServer.sendInitial(session, lease, new BasicAdapter(), Set.of(PresentationBasic.NAME),
 			allowedPackets::add, adapter -> Set.of(), true, Set.of(TYPE));
-		assertEquals(PresentationReceiptContent.Kind.INVENTORY, contentOf(allowedPackets).kind(),
-			"the tracked sidecar plus the fresh and cached view agree on the target type");
+		assertEquals(PresentationReceiptContent.Kind.SUPPRESSED, contentOf(allowedPackets).kind(),
+			"a boolean discriminator without the selected creation snapshot cannot disclose content");
 
 		// Inventory permission is revoked after the last RESET; the session's
 		// cached inventoryTypes still advertises the type for this recipient.
@@ -270,14 +270,14 @@ class PresentationServerReceiptTest {
 		assertEquals(0, lease.sources.get(BASIC).nextSample, "the atomic initial never samples a source");
 	}
 
-	@Test void productionCachedInitialUsesTheFreshInventoryGateRatherThanTheCachedView() {
+	@Test void productionCachedInitialWithoutCreationSnapshotCannotFabricateInventoryReceipt() {
 		var session = inventorySession();
 		var marker = marker(List.of());
 		var allowedPackets = new ArrayList<PresentationS2CPacket>();
 		PresentationServer.sendCachedInitial(session, marker, "Owner", new BasicAdapter(), cachedBasic(),
 			Set.of(PresentationBasic.NAME), allowedPackets::add, adapter -> Set.of(), true, Set.of(TYPE));
-		assertEquals(PresentationReceiptContent.Kind.INVENTORY, contentOf(allowedPackets).kind(),
-			"the cached re-baseline projects the inventory kind while the fresh gate allows it");
+		assertEquals(PresentationReceiptContent.Kind.SUPPRESSED, contentOf(allowedPackets).kind(),
+			"a cached boolean discriminator is not creation history");
 
 		var deniedPackets = new ArrayList<PresentationS2CPacket>();
 		PresentationServer.sendCachedInitial(session, marker, "Owner", new BasicAdapter(), cachedBasic(),

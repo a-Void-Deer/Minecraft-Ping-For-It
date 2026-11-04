@@ -8,6 +8,9 @@ import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.network.MarkerPacketCodec;
 import nx.pingwheel.common.network.PresentationS2CPacket;
+import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
+import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
@@ -20,11 +23,16 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@NotNullByDefault
 class PresentationReceiptContentTest {
 	private static final String BASIC = PresentationBasic.ID;
 
 	private static FriendlyByteBuf buffer() {
 		return new FriendlyByteBuf(Unpooled.buffer());
+	}
+	private static PresentationReceiptContent inventory() {
+		return PresentationReceiptContent.inventory(new InventoryCreationSnapshot(InventoryResourceKind.ITEM,
+			"selected-row", "minecraft:stone", "block.minecraft.stone", null, 7, false, "attention", false, true));
 	}
 
 	private static PresentationPropertyRef name() {
@@ -64,10 +72,10 @@ class PresentationReceiptContentTest {
 	@Test
 	void nonPropertiesKindsCarryNoRefs() {
 		assertEquals(List.of(), PresentationReceiptContent.whole().selectedRefs());
-		assertEquals(List.of(), PresentationReceiptContent.inventory().selectedRefs());
+		assertEquals(List.of(), inventory().selectedRefs());
 		assertEquals(List.of(), PresentationReceiptContent.suppressed().selectedRefs());
 		assertEquals(PresentationReceiptContent.Kind.WHOLE, PresentationReceiptContent.whole().kind());
-		assertEquals(PresentationReceiptContent.Kind.INVENTORY, PresentationReceiptContent.inventory().kind());
+		assertEquals(PresentationReceiptContent.Kind.INVENTORY, inventory().kind());
 		assertEquals(PresentationReceiptContent.Kind.SUPPRESSED, PresentationReceiptContent.suppressed().kind());
 
 		assertThrows(IllegalArgumentException.class,
@@ -85,7 +93,7 @@ class PresentationReceiptContentTest {
 		List<PresentationReceiptContent> contents = List.of(
 			PresentationReceiptContent.whole(),
 			PresentationReceiptContent.properties(List.of(name(), counts())),
-			PresentationReceiptContent.inventory(),
+			inventory(),
 			PresentationReceiptContent.suppressed());
 
 		for (PresentationReceiptContent content : contents) {

@@ -638,31 +638,52 @@ class InventoryBudgetDelayIntegrationTest {
 	private static void reconfigurationEligibilitySequence(boolean tracking, boolean cancel, boolean revoke) {
 		var sink = new RecordingSink(); var host = new InventoryBackendTest.Host(); var settings = explicitSettings(10, 10);
 		settings.setDisplayByteMultiplier(BigDecimal.valueOf(2));
+		// Real retained item projections: SELECT now validates the frozen Preview
+		// display. Keep exactly the original 6000-byte pressure, not arbitrary text.
+		String prefix = "{\"id\":\"minecraft:stone\",\"components\":{\"!minecraft:lore\":{},\"minecraft:custom_data\":{\"padding\":\"";
+		String suffix = "\"}}}";
+		String largeDisplay = prefix + "d".repeat(6000 - prefix.length() - suffix.length()) + suffix;
+		String smallDisplay = "{\"id\":\"minecraft:stone\"}";
+		assertTrue(nx.pingwheel.common.presentation.inventory.minecraft.InventoryDisplayWriter.validProjection("minecraft:stone", largeDisplay));
+		assertTrue(nx.pingwheel.common.presentation.inventory.minecraft.InventoryDisplayWriter.validProjection("minecraft:stone", smallDisplay));
+		assertEquals(6000, largeDisplay.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
+		assertTrue(largeDisplay.length() <= settings.effectiveDisplayBytes());
 		// The selected seed uses the initial snapshot; its 6 KiB complete
 		// replacement is a stream. Keep this fixture's pre-reprojection phase
 		// serviceable so it measures eligibility, not unrelated wire pressure.
 		settings.getTracking().setStreamByteMultiplier(ByteMultiplier.finite(BigDecimal.valueOf(4)));
 		settings.getPreview().getClientByteMultiplier().setUnlimited(true); settings.getPreview().getGlobalByteMultiplier().setUnlimited(true);
 		if (tracking) host.expiry = cancel && !revoke ? 3 : 80;
-		host.projector = (display, cap) -> new nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.Display(
-			display.itemId(), display.label(), "small", display.aggregateRequired());
+		var projections = new AtomicInteger();
+		host.projector = (display, cap) -> {
+			projections.incrementAndGet(); assertTrue(smallDisplay.length() <= cap);
+			return new nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.Display(
+				display.itemId(), display.label(), smallDisplay, display.aggregateRequired());
+		};
 		var reads = new AtomicInteger(); var validations = new AtomicInteger();
 		var runtime = new InventoryRuntime((input, cap) -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 1) {
 			@Override public int displayBytes() { return cap; }
 			@Override public boolean valid() { validations.incrementAndGet(); return true; }
 			@Override public InventoryDomainCodec.Item read(int slot) {
-				reads.incrementAndGet(); return new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "plain"), 7, "stone", "d".repeat(6000), false);
+				reads.incrementAndGet(); return new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "plain"), 7, "stone", largeDisplay, false);
 			}
 		}), settings.pendingMemoryBytes(), host.projector, sink);
 		try (var backend = new InventoryBackend(host, runtime, 1, sink)) {
 			if (tracking) {
 				helloOpenAndSelect(backend, host, settings);
+				assertEquals(1, host.store.size(), "real SELECT must pass dedicated precommit admission before testing reconfiguration");
+				var snapshot = backend.creationSnapshot(host.store.allMarkers().getFirst().id()).orElseThrow();
+				assertEquals(largeDisplay, snapshot.displayJson()); assertEquals(7, snapshot.amount());
 				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.close(host.epoch(InventoryBackendTest.A), 1).stamp(100, 1), 1, settings);
 				backend.tick(1, settings);
+				assertTrue(host.packets.stream().anyMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.SELECTED
+					&& host.store.allMarkers().getFirst().id().equals(packet.markerId())), "real admission outcome is delivered");
 				assertTrue(backend.tracksInventory(host.store.allMarkers().getFirst().id()));
 			} else helloOpen(backend, host, settings);
 			assertTrue(sink.events.isEmpty());
 			settings.setDisplayByteMultiplier(new BigDecimal("0.25"));
+			assertTrue(largeDisplay.length() > settings.effectiveDisplayBytes());
+			assertTrue(smallDisplay.length() <= settings.effectiveDisplayBytes());
 			// HELLO drains the new OFFER but does not run a sampling tick or a
 			// second reconfiguration pass after its handoff.
 			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.hello(), 2, settings);
@@ -671,6 +692,7 @@ class InventoryBudgetDelayIntegrationTest {
 			try {
 				if (cancel && revoke) host.policies.put(InventoryBackendTest.A, new InventoryBackend.Policy(100, 2, Set.of()));
 				int beforeReads = reads.get(), beforeChecks = validations.get();
+				int beforeProjections = projections.get();
 				// Ingress-first advance must use the same fresh eligibility as tick.
 				backend.handle(InventoryBackendTest.A, null, 3, settings); backend.tick(3, settings);
 				Module module = tracking ? Module.INVENTORY_TRACKING : Module.INVENTORY_PREVIEW;
@@ -690,7 +712,19 @@ class InventoryBudgetDelayIntegrationTest {
 					assertEquals(DelayState.DELAYED, sink.lastState(module, tracking ? runtime.trackingPeriodId() : runtime.previewPeriodId()));
 				}
 				assertEquals(beforeReads, reads.get());
+				assertEquals(beforeProjections, projections.get(), "denied memory or lost eligibility prevents detached reprojection");
 			} finally { pressure.close(); }
+			if (!cancel) {
+				int beforeReads = reads.get(), beforeProjections = projections.get();
+				int beforeFrames = host.packets.size();
+				backend.tick(4, settings);
+				assertTrue(projections.get() > beforeProjections, "eligible reprojection resumes after actual contention is released");
+				assertEquals(beforeReads, reads.get(), "reprojection uses retained metadata, not a new content read");
+				if (tracking) assertTrue(host.packets.subList(beforeFrames, host.packets.size()).stream().flatMap(packet -> packet.entries().stream())
+					.anyMatch(entry -> smallDisplay.equals(entry.displayJson()) && entry.count() == 7), "tracking recovery publishes the smaller display without changing amount");
+				assertNotEquals(DelayState.DELAYED, sink.lastState(tracking ? Module.INVENTORY_TRACKING : Module.INVENTORY_PREVIEW,
+					tracking ? runtime.trackingPeriodId() : runtime.previewPeriodId()));
+			}
 		}
 	}
 	@Test void revokedPreviewCapReprojectionProducesNoDelayWhileEligibleCounterpartDoes() {
@@ -700,7 +734,7 @@ class InventoryBudgetDelayIntegrationTest {
 		reconfigurationEligibilitySequence(true, true, false); reconfigurationEligibilitySequence(true, false, false);
 	}
 	@Test void revokedTrackingCapReprojectionProducesNoDelayAndRemovesRecipient() {
-		reconfigurationEligibilitySequence(true, true, true);
+		reconfigurationEligibilitySequence(true, true, true); reconfigurationEligibilitySequence(true, false, false);
 	}
 	private static Object field(Object owner, String name) {
 		try { var field = owner.getClass().getDeclaredField(name); field.setAccessible(true); return field.get(owner); }

@@ -416,6 +416,8 @@ class InventoryBackendTest {
 			assertEquals(missing ? 0 : 1, f.host.store.size());
 			if (!missing) {
 				Object lease = ((Map<?, ?>) field(f.backend, "tracking")).values().iterator().next();
+				var snapshot = f.backend.creationSnapshot(f.host.store.allMarkers().getFirst().id()).orElseThrow();
+				assertEquals(9007199254740993L, snapshot.amount()); assertFalse(snapshot.aggregate());
 				assertNull(field(lease, "completed")); assertEquals(0L, field(lease, "count")); assertEquals(0L, field(lease, "total"));
 				assertNull(field(field(lease, "consumer"), "completedRound")); assertEquals(0, field(field(lease, "consumer"), "cursor"));
 				f.backend.handle(A, InventoryC2SPacket.close(f.host.epoch(A), 1).stamp(100, 1), 1, f.settings);
@@ -450,6 +452,9 @@ class InventoryBackendTest {
 			counts.put(key, new InventoryDomainCodec.Item(key, 9007199254740993L, "stone", null, true));
 			totals.put(key.itemId(), new InventoryDomainCodec.Item(key, 99, "stone", null, true));
 			int reads = f.reads.get(); f.backend.handle(A, packet, 1, f.settings); assertEquals(1, f.host.store.size()); assertEquals(reads, f.reads.get());
+			var snapshot = f.backend.creationSnapshot(f.host.store.allMarkers().getFirst().id()).orElseThrow();
+			assertEquals(9007199254740993L, snapshot.amount()); assertTrue(snapshot.aggregate());
+			assertNotNull(snapshot.displayJson());
 			InventoryPublicationTicks.withoutScanSlots(f.backend, 1, f.settings);
 			var seed = f.host.packets.stream().filter(p -> p.markerId() != null && !p.entries().isEmpty()).findFirst().orElseThrow();
 			assertEquals(9007199254740993L, seed.entries().getFirst().count()); assertTrue(seed.entries().getFirst().fallback());

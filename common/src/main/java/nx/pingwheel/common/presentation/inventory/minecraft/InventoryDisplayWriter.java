@@ -63,6 +63,21 @@ public final class InventoryDisplayWriter {
 			&& displayJson.endsWith("\"}");
 	}
 
+	/**
+	 * Strict bounded retained projection validation, without registry access, native
+	 * codecs or reprojection. Shared by atomic creation receipts; the existing
+	 * syntax/depth, item envelope and closed component grammar remain the owner.
+	 * Callers admit at most 4096 + 16 * encoded display bytes of validation scratch.
+	 */
+	public static boolean validProjection(String itemId, String displayJson) {
+		if (!validItemId(itemId) || displayJson.length() > InventoryLimits.MAX_DISPLAY_BYTES) return false;
+		long bytes = utf8(displayJson);
+		if (bytes > InventoryLimits.MAX_DISPLAY_BYTES) return false;
+		int end = scan(displayJson, white(displayJson, 0), 0);
+		return end >= 0 && white(displayJson, end) == displayJson.length()
+			&& new Spans(displayJson, (int) bytes).read(itemId);
+	}
+
 	private static boolean validItemId(@Nullable String id) {
 		return id != null && id.length() <= 256 && id.indexOf(':') > 0 && resource(id, 0);
 	}

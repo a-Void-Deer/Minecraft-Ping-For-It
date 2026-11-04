@@ -303,6 +303,44 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		return state != null && state.context.equals(context) && state.offeredWatermark != 0
 			&& watermark <= state.offeredWatermark && !state.retirementPending && !state.rebaselineRequired;
 	}
+	/** Exact current cumulative Preview handoff; never an acknowledgement or an offered-cut shortcut. */
+	public boolean previewCutComplete(Context context, long revision) {
+		@Nullable State state = states.get(key(context));
+		return state != null && state.context.equals(context) && state.route.markerId() == null
+			&& revision > 0 && state.offeredWatermark == revision && state.deliveredWatermark == revision
+			&& state.complete && !state.deliveryIncomplete && !state.retirementPending && !state.rebaselineRequired
+			&& !state.fencePending && !state.control && !state.restageLatest && !state.sourceDenied
+			&& state.pending.isEmpty() && state.admitted.isEmpty();
+	}
+	/** Temporary atomic-initial staging shares the existing Tracking queue capacity, without its wire clock. */
+	public Optional<InitialStaging> reserveInitial(long wireBytes, long encodingWorkspace) {
+		if (wireBytes < 0 || encodingWorkspace < 0) throw new IllegalArgumentException("initial staging bound");
+		if (settings == null || wireBytes > settings.trackingRollingQueueBytes() - trackingQueued) return Optional.empty();
+		var held = memory.tryReserve(checkedAdd(wireBytes, encodingWorkspace));
+		if (held.isEmpty()) return Optional.empty();
+		trackingQueued += wireBytes;
+		return Optional.of(new InitialStaging(wireBytes, encodingWorkspace, held.get()));
+	}
+	@NotNullByDefault
+	public final class InitialStaging implements AutoCloseable {
+		private long wireBytes;
+		private final RetainedMemoryLedger.Ticket memory;
+		private final long upper;
+		private boolean settled;
+		private boolean closed;
+		private InitialStaging(long wireBytes, long workspace, RetainedMemoryLedger.Ticket memory) {
+			this.wireBytes = wireBytes; this.memory = memory; this.upper = checkedAdd(wireBytes, workspace);
+		}
+		public void settle(long actualWire, long actualWorkspace) {
+			if (closed || settled || actualWire < 0 || actualWire > wireBytes || actualWorkspace < 0
+				|| checkedAdd(actualWire, actualWorkspace) > upper) throw new IllegalArgumentException("initial staging settlement");
+			memory.commit(checkedAdd(actualWire, actualWorkspace));
+			trackingQueued -= wireBytes - actualWire; wireBytes = actualWire; settled = true;
+		}
+		@Override public void close() {
+			if (!closed) { closed = true; trackingQueued -= wireBytes; memory.close(); }
+		}
+	}
 	@Override public Outcome publish(CaptureResult result, AuthorizedProjection projection, Context context, CostLedger ledger) {
 		return publish(result, InventoryStep.SweepEvidence.NONE, projection, context, ledger);
 	}

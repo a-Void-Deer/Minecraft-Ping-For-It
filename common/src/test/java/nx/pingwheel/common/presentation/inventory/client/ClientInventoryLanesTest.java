@@ -14,6 +14,7 @@ import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.inventory.InventoryChecksums;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
+import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -31,6 +32,51 @@ class ClientInventoryLanesTest {
 	private final ClientInventory client = new ClientInventory(sent::add);
 	private final Target.BlockTarget target = new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest");
 	private final MarkerId marker = new MarkerId(4);
+
+	@Test void creationAuthorityBeforeAnyInventoryHandshakeIsMarkerScopedAndCannotClearOlderDenials() {
+		client.presentationReset(100, 1);
+		client.acceptedSchemas(Set.of(ITEM, FLUID));
+		client.markerCreated(markerSnapshot(target));
+		var snapshot = new InventoryCreationSnapshot(ITEM, "creation-key", "minecraft:gunpowder", "item.minecraft.gunpowder",
+			null, 5, false, "take", false, true);
+		assertTrue(client.creationSnapshot(marker, snapshot));
+		assertEquals(java.util.Optional.of(true), client.receiptAuthorization(marker, 100, 1, "entity_block"));
+		assertTrue(client.authorization(ITEM, 100, 1, "entity_block").isEmpty());
+		assertTrue(client.receiptAuthorization(marker, 101, 1, "entity_block").isEmpty());
+		assertEquals(java.util.Optional.of(false), client.receiptAuthorization(marker, 100, 1, "block"));
+		assertEquals(InventoryClientStore.NO_BASELINE, client.tracking(marker).baselineId());
+		assertEquals(0, client.stats().trackedChannels());
+		assertFalse(client.tracking(marker).complete());
+		client.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(3, 3, 0, 0)).stamp(100, 1));
+		policy(ITEM, false);
+		assertNull(client.creationSnapshot(marker));
+		policy(ITEM, true);
+		assertFalse(client.creationSnapshot(marker, snapshot), "receipt membership is consumed even after deny/re-allow");
+		assertEquals(java.util.Optional.of(false), client.receiptAuthorization(marker, 100, 1, "entity_block"));
+		MarkerId later = new MarkerId(5);
+		client.markerCreated(new MarkerSnapshot(later, new UUID(1, 2), target, "entity_block", "attention", new MarkerAnchor(1, 2, 3), 1, 10000));
+		assertTrue(client.creationSnapshot(later, snapshot));
+		assertEquals(java.util.Optional.of(true), client.receiptAuthorization(later, 100, 1, "entity_block"));
+		assertEquals(java.util.Optional.of(false), client.receiptAuthorization(marker, 100, 1, "entity_block"),
+			"a new marker's receipt cannot clear a different marker's latched denial");
+		assertTrue(sent.isEmpty(), "creation seeding performs no negotiation, reads or network requests");
+	}
+
+	@Test void lateCreationSeedCannotDowngradeAClosedFreshTrackingProjectionOrEnterItsChecksum() {
+		ready(); sent.clear();
+		data(ITEM, 0, marker, 0, 1, true, 9);
+		assertTrue(client.tracking(marker).complete());
+		assertEquals(9, client.tracking(marker).entries().getFirst().count());
+		var snapshot = new InventoryCreationSnapshot(ITEM, "other-creation-key", "minecraft:gunpowder", "item.minecraft.gunpowder",
+			null, 5, false, "take", false, true);
+		assertTrue(client.creationSnapshot(marker, snapshot));
+		assertEquals(snapshot, client.creationSnapshot(marker), "receipt retains its immutable creation value independently");
+		assertEquals(9, client.tracking(marker).entries().getFirst().count());
+		client.accept(InventoryS2CPacket.heartbeat(ITEM, 7, 0, marker, 2, 1, 1,
+			InventoryChecksums.checksumEntries(ITEM, List.of(entry(9, 1)))).stamp(100, 1));
+		assertTrue(sent.isEmpty(), "creation metadata cannot cause a digest mismatch or corrective repair");
+		assertTrue(client.tracking(marker).complete());
+	}
 
 	private long ready() {
 		client.presentationReset(100, 1);

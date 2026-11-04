@@ -3,6 +3,9 @@ package nx.pingwheel.common.presentation;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import nx.pingwheel.common.network.StrictPacketCodec;
+import nx.pingwheel.common.network.InventoryCreationSnapshotCodec;
+import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
+import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 
 import java.nio.ByteBuffer;
@@ -165,16 +168,16 @@ public final class PresentationCodec {
 	}
 
 	/**
-	 * Receipt metadata: one kind tag followed by the explicit property references.
-	 * Values, annotations and counts never travel here; they stay in the existing
-	 * authorized stores. The reader is strict and canonical: an unknown kind, an
-	 * over-capacity or malformed list, a duplicate or out-of-order ref, a
+	 * Receipt metadata: one kind tag followed by explicit property references, and
+	 * exactly one bounded creation snapshot for INVENTORY. The reader is strict
+	 * and canonical: an unknown kind, an over-capacity or malformed list, a duplicate or out-of-order ref, a
 	 * non-canonical number, and an invalid id or path all reject the frame.
 	 */
 	public static void writeReceiptContent(FriendlyByteBuf buf, PresentationReceiptContent content) {
 		buf.writeVarInt(content.kind().ordinal());
 		buf.writeVarInt(content.selectedRefs().size());
 		for (PresentationPropertyRef ref : content.selectedRefs()) writePropertyRef(buf, ref);
+		if (content.inventorySnapshot() != null) InventoryCreationSnapshotCodec.write(buf, content.inventorySnapshot());
 	}
 
 	public static PresentationReceiptContent readReceiptContent(FriendlyByteBuf buf) {
@@ -183,8 +186,10 @@ public final class PresentationCodec {
 		if (kindTag < 0 || kindTag >= kinds.length) throw new IllegalArgumentException("receipt content kind");
 		int count = StrictPacketCodec.readVarInt(buf);
 		if (count < 0 || count > MAX_PROPERTIES) throw new IllegalArgumentException("receipt content ref count");
+		if ((kinds[kindTag] == PresentationReceiptContent.Kind.PROPERTIES) == (count == 0))
+			throw new IllegalArgumentException("receipt content ref shape");
 		List<PresentationPropertyRef> refs = new ArrayList<>(count);
-		PresentationPropertyRef previous = null;
+		@Nullable PresentationPropertyRef previous = null;
 		for (int i = 0; i < count; i++) {
 			PresentationPropertyRef ref = readPropertyRef(buf, true);
 			if (previous != null && previous.compareTo(ref) >= 0)
@@ -192,7 +197,31 @@ public final class PresentationCodec {
 			refs.add(ref);
 			previous = ref;
 		}
-		return new PresentationReceiptContent(kinds[kindTag], refs);
+		@Nullable InventoryCreationSnapshot inventory = kinds[kindTag] == PresentationReceiptContent.Kind.INVENTORY
+			? InventoryCreationSnapshotCodec.read(buf) : null;
+		return new PresentationReceiptContent(kinds[kindTag], refs, inventory);
+	}
+
+	/** Exact receipt bytes without serializing display JSON or allocating payload buffers. */
+	public static int receiptContentEncodedSize(PresentationReceiptContent content) {
+		int size = 1 + varIntBytes(content.selectedRefs().size());
+		for (int i = 0; i < content.selectedRefs().size(); i++) {
+			PresentationPropertyRef ref = content.selectedRefs().get(i);
+			size += utfBytes(ref.adapterId(), MAX_ID_LENGTH) + utfBytes(ref.fieldId(), MAX_ID_LENGTH) + varIntBytes(ref.recordPath().size());
+			for (int k = 0; k < ref.recordPath().size(); k++)
+				size += utfBytes(ref.recordPath().get(k), PresentationPropertyRef.MAX_KEY_BYTES);
+		}
+		return size + (content.inventorySnapshot() == null ? 0 : InventoryCreationSnapshotCodec.encodedSize(content.inventorySnapshot()));
+	}
+	private static int utfBytes(String value, int maxChars) {
+		if (value.length() > maxChars) throw new IllegalArgumentException("receipt UTF size");
+		int bytes = io.netty.buffer.ByteBufUtil.utf8Bytes(value);
+		return varIntBytes(bytes) + bytes;
+	}
+	private static int varIntBytes(int value) {
+		int size = 1;
+		while ((value & ~0x7f) != 0) { value >>>= 7; size++; }
+		return size;
 	}
 
 	private static PresentationPropertyRef readPropertyRef(FriendlyByteBuf buf, boolean strict) {

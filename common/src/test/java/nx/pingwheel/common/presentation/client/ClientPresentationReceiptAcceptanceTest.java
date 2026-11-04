@@ -15,9 +15,16 @@ import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationReceiptContent;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
+import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
+import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import static org.junit.jupiter.api.Assertions.*;
 
+@NotNullByDefault
 class ClientPresentationReceiptAcceptanceTest {
 
 	private static final String BASIC = PresentationBasic.ID;
@@ -78,6 +85,66 @@ class ClientPresentationReceiptAcceptanceTest {
 		assertEquals(new PresentationValue.Text("Custom"), client.view(ID).property(CUSTOM));
 		assertEquals(new PresentationValue.Text("{\"text\":\"Custom (Chest)\"}"), client.view(ID).property(NAME));
 		assertTrue(client.previewAccess("entity_block").orElseThrow().fields(BASIC).contains(PresentationBasic.CUSTOM_NAME));
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = {"epoch", "view", "version", "marker-id", "target", "type", "external-type", "ping", "ref",
+		"missing-name", "stale-name", "denied-name", "schema", "lane", "basic-frame"})
+	void invalidInventoryInitialCannotRegisterOrReplaceAnyPresentationState(String fault) {
+		ClientPresentation client = inventoryReady(fault);
+		assertTrue(client.initial(created(1, PresentationReceiptContent.whole(), basic(false))));
+		var before = client.view(ID);
+		var content = inventoryReceipt();
+		MarkerSnapshot marker = switch (fault) {
+			case "target" -> new MarkerSnapshot(ID, SNAPSHOT.owner(), new Target.LocationTarget("minecraft:overworld", 1, 2, 3),
+				"entity_block", "attention", SNAPSHOT.anchor(), 1, 100);
+			case "type" -> new MarkerSnapshot(ID, SNAPSHOT.owner(), SNAPSHOT.target(), "location", "attention", SNAPSHOT.anchor(), 1, 100);
+			case "external-type" -> new MarkerSnapshot(ID, SNAPSHOT.owner(), Target.ExternalBlockTarget.committed(
+				"minecraft:overworld", "sable", "tracking", "minecraft:stone", "opaque", false),
+				"entity_block", "attention", SNAPSHOT.anchor(), 1, 100);
+			case "ping" -> new MarkerSnapshot(ID, SNAPSHOT.owner(), SNAPSHOT.target(), "entity_block", "not_registered", SNAPSHOT.anchor(), 1, 100);
+			default -> SNAPSHOT;
+		};
+		PresentationSection section = switch (fault) {
+			case "missing-name" -> new PresentationSection(BASIC, 1, Map.of(), false);
+			case "stale-name" -> new PresentationSection(BASIC, 1, basic(false).fields(), true);
+			default -> basic(false);
+		};
+		var base = PresentationS2CPacket.created(fault.equals("epoch") ? 82 : 81, fault.equals("view") ? 2 : 1,
+			2, marker, "Replacement", fault.equals("ref") ? HEALTH : NAME, content, section);
+		var candidate = new PresentationS2CPacket(base.kind(), fault.equals("version") ? base.protocol() + 1 : base.protocol(),
+			base.epoch(), base.view(), base.revision(), base.manifest(), base.schemas(), base.mask(), base.childBlack(), base.snapshot(),
+			base.ownerName(), base.defaultRef(), base.content(), fault.equals("basic-frame") ? new byte[] {(byte) 255} : base.sectionBytes(),
+			fault.equals("marker-id") ? new MarkerId(99) : base.markerId(), base.removalReason(), base.targetKey(), base.winnerId(),
+			base.requestId(), base.requestKind(), base.rejectReason());
+		assertFalse(client.initial(candidate));
+		assertEquals(before, client.view(ID));
+		assertEquals(1, client.store().sections(ID.value()).get(BASIC).revision());
+		assertFalse(client.store().isKnown(99));
+	}
+
+	@Test void inventoryCreationAcceptsNegotiatedLaneWithoutSectionFieldGrantOrLocalRegistryKnowledge() {
+		ClientPresentation client = inventoryReady("valid");
+		assertTrue(client.initial(created(1, inventoryReceipt(), basic(false))));
+		assertEquals(NAME, client.view(ID).defaultRef());
+		assertEquals(basic(false).fields().get(PresentationBasic.NAME), client.view(ID).property(NAME));
+	}
+
+	private static PresentationReceiptContent inventoryReceipt() {
+		return PresentationReceiptContent.inventory(new InventoryCreationSnapshot(InventoryResourceKind.ITEM, "selected",
+			"uninstalled:resource", "item.uninstalled.resource", null, 5, false, "take", false, true));
+	}
+	private static ClientPresentation inventoryReady(String fault) {
+		ClientPresentation client = new ClientPresentation(packet -> {});
+		client.tick(true);
+		var inventoryFields = fault.equals("lane") ? InventoryPresentation.INSTANCE.fields().stream()
+			.filter(field -> !field.id().equals(InventoryPresentation.ITEMS)).toList() : InventoryPresentation.INSTANCE.fields();
+		assertTrue(client.offer(PresentationS2CPacket.offer(81, Map.of(BASIC, PresentationBasic.fields(),
+			InventoryPresentation.ADAPTER_ID, inventoryFields), Map.of(BASIC, 1, InventoryPresentation.ADAPTER_ID,
+			InventoryPresentation.SCHEMA + (fault.equals("schema") ? 1 : 0)))));
+		assertTrue(client.reset(PresentationS2CPacket.reset(81, 1, Map.of("entity_block", Map.of(BASIC,
+			fault.equals("denied-name") ? Set.of(PresentationBasic.HEALTH) : Set.of(PresentationBasic.NAME))))));
+		return client;
 	}
 
 	private static ClientPresentation ready(List<PresentationField> offeredFields, Set<String> allowed) {

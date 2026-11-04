@@ -53,6 +53,22 @@ class ClientDisplayTextTest {
 
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 
+	@Test void composedChatSnapshotDetachesNestedMutableArgumentsAndSiblings() {
+		MutableComponent quantity = Component.literal("5");
+		MutableComponent qualifier = Component.literal("Uncertain");
+		MutableComponent message = Component.translatableWithFallback("test.chat", "%s", quantity).append(qualifier);
+		Component frozen = ClientItemDisplay.freezeComponent(message);
+		quantity.append("9"); qualifier.append("changed"); message.append("later");
+		assertEquals("5Uncertain", frozen.getString());
+		assertNotEquals(message.getString(), frozen.getString());
+	}
+
+	@Test @Timeout(10) void composedChatSnapshotRejectsUnboundedTranslationExpansion() {
+		Component huge = repeatedArgumentExpansion(Component.literal("x"), 20);
+		assertThrows(ClientItemDisplay.UnsafeDisplay.class, () -> ClientItemDisplay.freezeComponent(huge));
+		assertTrue(ClientItemDisplay.validationVisits() <= FIXTURE_VISIT_ENVELOPE);
+	}
+
 	@Test void nativeFormattingOracleCoversIndexedMixedEscapedPrimitiveAndInvalidTemplates() {
 		Object[] arguments = {Component.literal("A"), "B", null, 42, 2.5, true};
 		for (String template : List.of("%s", "%2$s/%1$s", "%%", "%s %2$s %s", "%3$s %4$s %5$s %6$s",

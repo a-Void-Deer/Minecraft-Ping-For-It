@@ -325,6 +325,14 @@ public final class ClientItemDisplay {
 		}
 	}
 
+	/** Copies one composed chat graph through the same bounded native-text whitelist. */
+	public static Component freezeComponent(Component component) {
+		Objects.requireNonNull(component, "component");
+		Validation budget = new Validation();
+		if (!supportedText(component, 0, budget)) throw new UnsafeDisplay();
+		return ClientDisplayText.snapshot(component, 0, budget);
+	}
+
 	/**
 	 * The confirmed item display name policy, shared with the content-message
 	 * family: a transmitted custom or item name is flattened to plain text and

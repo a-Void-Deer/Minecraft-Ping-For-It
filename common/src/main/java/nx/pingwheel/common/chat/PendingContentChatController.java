@@ -11,28 +11,28 @@ import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
 import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
-import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.presentation.PresentationBasic;
-import nx.pingwheel.common.presentation.PresentationPropertyPingTypes;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationReceiptContent;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.client.PresentationView;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
+import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Main-thread-confined, bounded first-receipt state. Only accepted CREATED
- * metadata starts a receipt; values always come from the current authorized
- * stores at attempt time. There is no world access, capture, timer, ordinary
+ * metadata starts a receipt; properties use current authorized sections while
+ * inventory uses the immutable atomic creation snapshot. There is no world access, capture, timer, ordinary
  * chat fallback, or permanent sent-ID history here.
  */
 public final class PendingContentChatController {
@@ -69,14 +69,19 @@ public final class PendingContentChatController {
 	 * masks. live means current membership without authoritative removal/expiry,
 	 * not visibility: a locally elapsed display deadline is irrelevant.
 	 *
-	 * <p>tracking must be ClientInventory.tracking(id), never preview entries,
-	 * packet fragments, or a cached count. A not-ready inventory policy reports
-	 * UNKNOWN rather than DENIED. A missing marker may have a null identity.
+	 * <p>Inventory authorization is marker-scoped creation authority, not the
+	 * ordinary Tracking lane policy. The creation snapshot is absent after
+	 * revocation and never comes from Tracking or local Preview data.
 	 */
 	public record Current(long epoch, long view, boolean ready, boolean live,
-		@Nullable MarkerIdentity identity, Map<String, Set<String>> allowedFields,
+		@Nullable MarkerIdentity identity, @Unmodifiable Map<String, @Unmodifiable Set<String>> allowedFields,
 		Authorization inventoryAuthorization, PresentationView projection,
-		ClientInventory.@Nullable Tracking tracking) {
+		ClientInventory.@Nullable Tracking tracking, @Nullable InventoryCreationSnapshot creationSnapshot) {
+		public Current(long epoch, long view, boolean ready, boolean live, @Nullable MarkerIdentity identity,
+			Map<String, Set<String>> allowedFields, Authorization inventoryAuthorization, PresentationView projection,
+			ClientInventory.@Nullable Tracking tracking) {
+			this(epoch, view, ready, live, identity, allowedFields, inventoryAuthorization, projection, tracking, null);
+		}
 		public Current {
 			Map<String, Set<String>> detached = new LinkedHashMap<>();
 			Objects.requireNonNull(allowedFields, "allowedFields").forEach((adapter, fields) ->
@@ -96,7 +101,7 @@ public final class PendingContentChatController {
 
 	@FunctionalInterface
 	public interface ReadPort {
-		Current current(MarkerId markerId);
+		@Nullable Current current(MarkerId markerId);
 	}
 
 	/** Formatting-only seam. The normal constructor below uses the real composer. */
@@ -105,6 +110,8 @@ public final class PendingContentChatController {
 		Optional<Component> properties(Component author, Component target, PresentationView view,
 			List<PresentationPropertyRef> selectedRefs);
 		Optional<Component> inventory(Component author, Component target, ClientInventory.EntryView entry);
+		default Optional<Component> inventory(Component author, Component target, ClientInventory.EntryView entry,
+			boolean quantityUncertain) { return inventory(author, target, entry); }
 	}
 
 	private static final PresentationPropertyRef NAME =
@@ -113,7 +120,8 @@ public final class PendingContentChatController {
 	/** Only immutable receipt/author/fences/identity survive between callbacks. */
 	private record Pending(long epoch, long view, MarkerIdentity identity,
 		String author, PresentationReceiptContent content) {}
-	private record Inputs(PresentationView projection, String nameJson, ClientInventory.Tracking tracking) {}
+	private record Inputs(PresentationView projection, String nameJson,
+		@Nullable InventoryCreationSnapshot creation) {}
 
 	private final int limit;
 	private final ReadPort reader;
@@ -151,7 +159,11 @@ public final class PendingContentChatController {
 				return ContentChatComposer.propertyMessage(author, target, view, refs, nameJsonDecoder, templates);
 			}
 			@Override public Optional<Component> inventory(Component author, Component target, ClientInventory.EntryView entry) {
-				return ContentChatComposer.inventoryMessage(author, target, entry, itemDisplayDecoder, templates);
+				return ContentChatComposer.inventoryMessage(author, target, entry, false, itemDisplayDecoder, templates);
+			}
+			@Override public Optional<Component> inventory(Component author, Component target, ClientInventory.EntryView entry,
+				boolean quantityUncertain) {
+				return ContentChatComposer.inventoryMessage(author, target, entry, quantityUncertain, itemDisplayDecoder, templates);
 			}
 		};
 	}
@@ -176,7 +188,7 @@ public final class PendingContentChatController {
 		Pending capture = new Pending(acceptedCreated.epoch(), acceptedCreated.view(),
 			MarkerIdentity.of(acceptedCreated.snapshot()), acceptedCreated.ownerName(), content);
 		long version = lifecycleVersion;
-		Current current = reader.current(id);
+		@Nullable Current current = reader.current(id);
 		// The read port can re-enter; never overwrite a receipt installed by it.
 		if (version != lifecycleVersion || !matches(capture, current) || !current.ready()
 			|| pending.containsKey(id) || pending.size() >= limit)
@@ -187,30 +199,34 @@ public final class PendingContentChatController {
 
 	/** Attempts exactly one complete line, always re-reading authority and values. */
 	public boolean attempt(MarkerId id) {
-		Pending capture = pending.get(id);
+		@Nullable Pending capture = pending.get(id);
 		if (capture == null || attempting.size() >= limit || !attempting.add(id)) return false;
 		try {
-			Current before = reader.current(id);
+			@Nullable Current before = reader.current(id);
 			if (pending.get(id) != capture) return false;
-			Inputs inputs = inputs(capture, before);
+			@Nullable Inputs inputs = inputs(capture, before);
 			if (inputs == null) return false;
 			Optional<Component> message;
 			try {
-				Component target = formatter.name(inputs.nameJson()).orElse(null);
+				@Nullable Component target = formatter.name(inputs.nameJson()).orElse(null);
 				if (target == null || pending.get(id) != capture) return false;
 				Component author = Component.literal(capture.author());
-				message = capture.content().kind() == PresentationReceiptContent.Kind.PROPERTIES
-					? formatter.properties(author, target, inputs.projection(), capture.content().selectedRefs())
-					: formatter.inventory(author, target, inputs.tracking().entries().getFirst());
+				if (capture.content().kind() == PresentationReceiptContent.Kind.PROPERTIES)
+					message = formatter.properties(author, target, inputs.projection(), capture.content().selectedRefs());
+				else {
+					InventoryCreationSnapshot creation = Objects.requireNonNull(inputs.creation());
+					message = formatter.inventory(author, target, inventoryEntry(creation), creation.quantityUncertain())
+						.map(ClientItemDisplay::freezeComponent);
+				}
 			} catch (RuntimeException unavailable) {
 				Diagnostics.warn("chat/content-compose", "receipt",
 					() -> "markerId=" + id.value() + " kind=" + capture.content().kind() + "; receipt remains pending", unavailable);
 				return false; // No partial or ordinary fallback on formatting failure.
 			}
 			if (message == null || message.isEmpty() || pending.get(id) != capture) return false;
-			Current after = reader.current(id);
+			@Nullable Current after = reader.current(id);
 			if (pending.get(id) != capture) return false;
-			Inputs latest = inputs(capture, after);
+			@Nullable Inputs latest = inputs(capture, after);
 			// Callbacks may reset/clear, revoke, remove, or replace a received value.
 			if (pending.get(id) != capture || !inputs.equals(latest)) return false;
 			pending.remove(id);
@@ -222,12 +238,12 @@ public final class PendingContentChatController {
 		}
 	}
 
-	private static boolean matches(Pending capture, Current current) {
+	private static boolean matches(Pending capture, @Nullable Current current) {
 		return current != null && current.epoch() == capture.epoch() && current.view() == capture.view()
 			&& current.live() && capture.identity().equals(current.identity());
 	}
 
-	private Inputs inputs(Pending capture, Current current) {
+	private @Nullable Inputs inputs(Pending capture, @Nullable Current current) {
 		MarkerId id = capture.identity().id();
 		if (!matches(capture, current)) {
 			pending.remove(id, capture);
@@ -255,29 +271,23 @@ public final class PendingContentChatController {
 		if (!capture.identity().targetTypeId().equals(view.targetTypeId())
 			|| !(view.property(NAME) instanceof PresentationValue.Text name)) return null;
 		for (PresentationPropertyRef ref : capture.content().selectedRefs()) {
-			PresentationSection section = view.sections().get(ref.adapterId());
+			@Nullable PresentationSection section = view.sections().get(ref.adapterId());
 			if (section == null || view.property(ref) == null || section.annotations().get(ref) == null
 				|| !requiredContextPresent(view, ref)) return null;
 		}
-		ClientInventory.Tracking tracking = null;
+		@Nullable InventoryCreationSnapshot creation = null;
 		if (inventory) {
 			if (current.inventoryAuthorization() != Authorization.ALLOWED) return null;
-			tracking = current.tracking();
-			if (tracking == null || !id.equals(tracking.markerId()) || !tracking.complete()
-				|| tracking.baselineId() <= 0 || tracking.grey() || tracking.status() != InventoryS2CPacket.Status.READY
-				|| tracking.entries().size() != 1) return null;
-			ClientInventory.EntryView entry = tracking.entries().getFirst();
-			if (tracking.resourceKind() == null || tracking.resourceKind() != entry.resourceKind()
-				|| entry.count() < 0 || entry.itemId() == null || ResourceLocation.tryParse(entry.itemId()) == null
-				|| !PresentationPropertyPingTypes.isKnownPingTypeId(entry.itemPingType())
-				|| !usableQuality(entry.quality())) return null;
+			creation = capture.content().inventorySnapshot();
+			if (creation == null || !creation.equals(current.creationSnapshot())) return null;
 		}
-		return new Inputs(view, name.value(), tracking);
+		return new Inputs(view, name.value(), creation);
 	}
-
-	private static boolean usableQuality(InventoryS2CPacket.Status quality) {
-		return quality == null || quality == InventoryS2CPacket.Status.READY
-			|| quality == InventoryS2CPacket.Status.UNCERTAIN || quality == InventoryS2CPacket.Status.COMPONENT_TOO_LONG;
+	private static ClientInventory.EntryView inventoryEntry(InventoryCreationSnapshot creation) {
+		Objects.requireNonNull(creation, "creation");
+		return new ClientInventory.EntryView(creation.resourceKind(), creation.opaqueKey(), creation.resourceId(), creation.label(),
+			creation.displayJson(), creation.amount(), creation.aggregate(), null,
+			creation.annotationPingType());
 	}
 
 	private static boolean requiredContextDenied(Current current, PresentationPropertyRef ref) {

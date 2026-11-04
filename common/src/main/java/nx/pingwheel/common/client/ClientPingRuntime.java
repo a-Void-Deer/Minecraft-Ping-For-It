@@ -1935,6 +1935,8 @@ public final class ClientPingRuntime {
 			case CREATED -> {
 				if (!presentation.current(packet) || packet.markerId() == null
 					|| markerStore.isAuthoritativelyRemoved(packet.markerId())) return;
+				if (packet.content() != null && packet.content().kind() == PresentationReceiptContent.Kind.INVENTORY
+					&& inventory != null && !inventory.acceptsCreationSnapshot(packet.markerId(), packet.content().inventorySnapshot())) return;
 				if (!presentation.initial(packet)) return;
 				updatePresentationName(packet.markerId());
 				applyPresentationCreated(packet);
@@ -2032,14 +2034,21 @@ public final class ClientPingRuntime {
 		}
 		if (inventory != null) inventory.markerCreated(snapshot);
 		if (newlySeen) {
+			nx.pingwheel.common.presentation.inventory.@Nullable InventoryCreationSnapshot creation = packet.content().inventorySnapshot();
+			boolean seeded = inventory != null && creation != null && inventory.creationSnapshot(snapshot.id(), creation);
 			presentationReceiptFeedback.play(snapshot);
 			if (packet.content().kind() == PresentationReceiptContent.Kind.WHOLE)
 				presentationReceiptFeedback.chat(ownerName, snapshot, presentationTargetName(snapshot.id()));
 			else if (packet.content().kind() == PresentationReceiptContent.Kind.INVENTORY && inventory != null && inventory.schemaUnavailable())
 				contentChat.cancel(snapshot.id());
-			else if (contentChat.begin(packet, true)) attemptContentReceipt(snapshot.id());
+			else if (packet.content().kind() == PresentationReceiptContent.Kind.INVENTORY && inventory != null) {
+				if (seeded && contentChat.begin(packet, true)) attemptContentReceipt(snapshot.id());
+			} else if (contentChat.begin(packet, true)) attemptContentReceipt(snapshot.id());
 		}
-		else if (packet.content().kind() == PresentationReceiptContent.Kind.SUPPRESSED) contentChat.cancel(snapshot.id());
+		else if (packet.content().kind() == PresentationReceiptContent.Kind.SUPPRESSED) {
+			contentChat.cancel(snapshot.id());
+			if (inventory != null) inventory.revokeCreationSnapshot(snapshot.id());
+		}
 		else attemptContentReceipt(snapshot.id());
 	}
 
@@ -2058,7 +2067,8 @@ public final class ClientPingRuntime {
 			authorization.map(allowed -> allowed ? PendingContentChatController.Authorization.ALLOWED
 				: PendingContentChatController.Authorization.DENIED).orElse(PendingContentChatController.Authorization.UNKNOWN),
 			presentation.view(id),
-			inventory == null ? null : inventory.tracking(id));
+			inventory == null ? null : inventory.tracking(id),
+			inventory == null ? null : inventory.creationSnapshot(id));
 	}
 
 	private void attemptContentReceipt(MarkerId id) {

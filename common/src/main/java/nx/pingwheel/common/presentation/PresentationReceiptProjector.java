@@ -5,15 +5,17 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Predicate;
+import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Pure server-side projection of one marker's atomic-initial receipt content
  * descriptor. It consumes only server-authoritative state: the marker's
- * admitted explicit property selections, the dedicated inventory sidecar
- * discriminator, and per-reference authorization verdicts supplied by the
+ * admitted explicit property selections, the dedicated inventory creation
+ * snapshot, and per-reference authorization verdicts supplied by the
  * caller from the recipient's accepted manifest/schema, field mask and fresh
  * permission. It never samples a source, captures a value, or discloses a
- * denied reference, item count, or annotation.
+ * denied reference, resource quantity, or annotation.
  *
  * <p>Kind rules:
  * <ul>
@@ -26,8 +28,8 @@ import java.util.function.Predicate;
  *   <li>Explicit non-null-ping selections: {@code PROPERTIES} carrying exactly
  *       the complete set of pinged references, in the record's deterministic
  *       order. A nullable selection beside them stays out of the receipt.</li>
- *   <li>An active inventory sidecar: {@code INVENTORY}, whose values and count
- *       arrive only through the existing dedicated inventory store.</li>
+ *   <li>An authorized inventory creation snapshot: {@code INVENTORY}, carrying
+ *       the selected Preview value independently of subsequent Tracking.</li>
  *   <li>Any pinged reference that is denied or incompatible, any denied
  *       required formatting dependency, or a denied target name: {@code
  *       SUPPRESSED} with no references, so the whole content message is hidden
@@ -71,8 +73,14 @@ public final class PresentationReceiptProjector {
 	 *                            name field is available
 	 * @param fieldAuthorized     per-reference manifest/schema, mask and fresh-permission verdict
 	 */
-	public static PresentationReceiptContent project(List<PresentationPropertySelection> selections,
+	public static PresentationReceiptContent project(@Nullable List<PresentationPropertySelection> selections,
 		boolean inventory, boolean inventoryAuthorized, boolean nameAuthorized,
+		Predicate<PresentationPropertyRef> fieldAuthorized) {
+		return project(selections, inventory, null, inventoryAuthorized, nameAuthorized, fieldAuthorized);
+	}
+
+	public static PresentationReceiptContent project(@Nullable List<PresentationPropertySelection> selections,
+		boolean inventory, @Nullable InventoryCreationSnapshot snapshot, boolean inventoryAuthorized, boolean nameAuthorized,
 		Predicate<PresentationPropertyRef> fieldAuthorized) {
 		Objects.requireNonNull(fieldAuthorized, "fieldAuthorized");
 		Set<PresentationPropertyRef> refs = new LinkedHashSet<>();
@@ -91,8 +99,8 @@ public final class PresentationReceiptProjector {
 			}
 			return PresentationReceiptContent.properties(List.copyOf(refs));
 		}
-		if (inventory) return inventoryAuthorized && nameAuthorized
-			? PresentationReceiptContent.inventory() : PresentationReceiptContent.suppressed();
+		if (inventory) return inventoryAuthorized && nameAuthorized && snapshot != null
+			? PresentationReceiptContent.inventory(snapshot) : PresentationReceiptContent.suppressed();
 		return PresentationReceiptContent.whole();
 	}
 }

@@ -102,6 +102,21 @@ public final class InventoryServer {
 	public static Optional<nx.pingwheel.common.presentation.inventory.InventoryResourceKind> trackedKind(MarkerId marker) {
 		return backend == null ? Optional.empty() : backend.trackedKind(marker);
 	}
+	public static Optional<nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot> creationSnapshot(MarkerId marker) {
+		return backend == null ? Optional.empty() : backend.creationSnapshot(marker);
+	}
+	public static InventoryBackend.InitialDecision creationDecision(MarkerId marker, UUID recipient, long epoch, long view) {
+		return backend == null ? InventoryBackend.InitialDecision.SUPPRESSED : backend.creationDecision(marker, recipient, epoch, view);
+	}
+	public static Optional<InventoryBackend.InitialPublication> reserveInitial(MarkerId marker, UUID recipient,
+		long epoch, long view, long wireBytes, long encodingWorkspace) {
+		return backend == null ? Optional.empty() : backend.reserveInitial(marker, recipient, epoch, view, wireBytes, encodingWorkspace);
+	}
+	public static Optional<InventoryBackend.InitialEnvelope> reserveInitialEnvelope(long wireBytes, long workspace) {
+		return backend == null ? Optional.empty() : backend.reserveInitialEnvelope(wireBytes, workspace);
+	}
+	public static boolean initialMarkerActive(MarkerId marker, UUID recipient) { return backend != null && backend.initialMarkerActive(marker, recipient); }
+	public static void suppressCreation(MarkerId marker, UUID recipient) { if (backend != null) backend.suppressCreation(marker, recipient); }
 
 	private record Host(MinecraftServer server, InventoryRuntime runtime, InventoryRuntime.DisplayReprojector reprojector) implements InventoryBackend.Host {
 		@Override public Optional<InventoryRuntime.DisplayReprojector> displayReprojector() { return Optional.of(reprojector); }

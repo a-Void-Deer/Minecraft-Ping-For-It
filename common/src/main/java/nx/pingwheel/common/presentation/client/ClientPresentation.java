@@ -24,12 +24,18 @@ import nx.pingwheel.common.presentation.PresentationIds;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationBasic;
 import nx.pingwheel.common.presentation.PresentationReceiptContent;
+import nx.pingwheel.common.presentation.PresentationPropertyPingTypes;
+import nx.pingwheel.common.presentation.PresentationDefaults;
 import nx.pingwheel.common.presentation.PresentationRegistry;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationStore;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
 import nx.pingwheel.common.presentation.PresentationSettings;
+import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
+import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
+import nx.pingwheel.common.domain.Target;
+import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.presentation.preview.PresentationPreviewAccess;
 
 /** One client connection's negotiated capabilities, server mask and retained presentation. */
@@ -311,6 +317,25 @@ public final class ClientPresentation {
 	/** Receipt hints are validated against current authority before the atomic initial mutates any store. */
 	private boolean validReceipt(PresentationS2CPacket packet, PresentationSection basic) {
 		if (packet.content() == null) return false;
+		if (packet.content().kind() == PresentationReceiptContent.Kind.INVENTORY) {
+			@Nullable InventoryCreationSnapshot creation = packet.content().inventorySnapshot();
+			String type = packet.snapshot().targetTypeId();
+			if (creation == null || !PresentationSettings.isKnownTargetType(packet.snapshot().targetTypeId())
+				|| !(packet.snapshot().target() instanceof Target.BlockTarget
+					|| packet.snapshot().target() instanceof Target.ExternalBlockTarget)
+				|| !(type.equals("entity_block") || type.equals("block"))
+				|| (packet.snapshot().target() instanceof Target.ExternalBlockTarget external
+					&& external.blockEntity() != type.equals("entity_block"))
+				|| !PresentationPropertyPingTypes.isKnownPingTypeId(packet.snapshot().pingTypeId())
+				|| PresentationDefaults.forTargetType(type).filter(ref -> ref.equals(packet.defaultRef())).isEmpty()
+				|| !compatible.containsKey(InventoryPresentation.ADAPTER_ID)
+				|| !acceptedServerCatalog.getOrDefault(InventoryPresentation.ADAPTER_ID, Map.of())
+					.containsKey(creation.resourceKind() == InventoryResourceKind.ITEM ? InventoryPresentation.ITEMS : InventoryPresentation.FLUIDS)
+				|| !mask.getOrDefault(packet.snapshot().targetTypeId(), Map.of())
+					.getOrDefault(BASIC, Set.of()).contains(NAME)
+				|| basic.stale() || !(basic.fields().get(NAME) instanceof PresentationValue.Text name) || name.value().isBlank()
+				|| !PresentationPropertyPingTypes.isKnownPingTypeId(creation.annotationPingType())) return false;
+		}
 		if (packet.content().kind() != PresentationReceiptContent.Kind.PROPERTIES) return true;
 		var access = previewAccess(packet.snapshot().targetTypeId()).orElse(null);
 		if (access == null) return false;

@@ -33,7 +33,7 @@ class CertifiedVault1620BackendTest {
 	@BeforeAll static void bootstrap() throws ReflectiveOperationException { CreateVaultTrackingPerformanceTest.bootstrap(); }
 	@AfterAll static void restore() { CreateVaultTrackingPerformanceTest.restoreRegistries(); }
 	@NotNullByDefault
-	static final class Fixture implements InventoryBackend.Host, AutoCloseable {
+	static final class Fixture implements InventoryBackend.Host, InventoryRuntime.SourceResolver, AutoCloseable {
 		final World world = new World(Contents.MIXED);
 		final InventorySettings settings;
 		final InventoryRuntime runtime;
@@ -43,11 +43,15 @@ class CertifiedVault1620BackendTest {
 		long tick, visits, frames, measurements, completeFrames;
 		boolean rejectAfterAdmission;
 		boolean deferJoin;
+		boolean deferNextResolution;
+		int joinMetadataAttempts, joinMetadataDefers;
+		long joinMetadataWork;
+		InventorySourceAccess.@Nullable Source deferredJoinSource, firstSourceAfterJoin;
 		@Nullable InventoryC2SPacket lastSelection;
 		Fixture() { this(Profile.INCIDENT); }
 		Fixture(Profile profile) {
 			settings = profile.settings();
-			runtime = new InventoryRuntime(world, settings.pendingMemoryBytes(), InventoryRuntime.DisplayReprojector.none(), BudgetDelaySink.NONE, true);
+			runtime = new InventoryRuntime(this, settings.pendingMemoryBytes(), InventoryRuntime.DisplayReprojector.none(), BudgetDelaySink.NONE, true);
 			backend = new InventoryBackend(this, runtime, 1);
 			client.presentationReset(100, 1); ingress(InventoryC2SPacket.hello()); assertTrue(client.ready());
 		}
@@ -60,12 +64,29 @@ class CertifiedVault1620BackendTest {
 		@Override public Optional<InventoryBackend.Policy> policy(UUID player) { return Optional.of(new InventoryBackend.Policy(100, 1, Set.of("entity_block"))); }
 		@Override public Optional<InventoryBackend.Opened> open(UUID player, Target requested) { return Optional.of(new InventoryBackend.Opened(requested, "entity_block", "attention")); }
 		@Override public boolean annotationAllowed(InventorySourceInput input, String pingType) {
-			if (deferJoin) {
-				var ledger = (nx.pingwheel.common.presentation.source.CostLedger) java.util.Objects.requireNonNull(get(runtime, "physical"));
-				var work = new nx.pingwheel.common.presentation.source.CostLedger.Counter("inventory/item_work", nx.pingwheel.common.presentation.source.CostLedger.Unit.WORK);
-				var rest = Map.of(work, ledger.remaining(work)); ledger.tryReserve(rest).orElseThrow().commit(rest);
-			}
+			if (deferJoin) deferNextResolution = true;
 			return pingType.equals("danger");
+		}
+		@Override public InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput input) { return world.resolutionValidationCost(input); }
+		@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int cap) { return world.resolve(input, cap); }
+		@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int cap, InventoryValidationBudget.Allowance allowance) {
+			long before = allowance.attemptedWorkUnits();
+			var resolved = world.resolve(input, cap, allowance);
+			if (deferNextResolution) {
+				deferNextResolution = false; joinMetadataAttempts++;
+				joinMetadataWork = allowance.attemptedWorkUnits() - before;
+				deferredJoinSource = resolved.orElseThrow();
+				try {
+					// A second metadata pass cannot fit the join's spent caller grant.
+					// Its paid first pass remains charged; independent receipt work keeps its own admission.
+					allowance.requireAvailable(resolutionValidationCost(input));
+					throw new AssertionError("join metadata retry must exceed the original operation allowance");
+				} catch (InventoryItemBudget.CaptureLimitException deferred) {
+					joinMetadataDefers++; throw deferred;
+				} finally { deferredJoinSource.close(); }
+			}
+			if (joinMetadataDefers != 0 && firstSourceAfterJoin == null) firstSourceAfterJoin = resolved.orElseThrow();
+			return resolved;
 		}
 		@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
 			var type = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
@@ -262,13 +283,27 @@ class CertifiedVault1620BackendTest {
 		try (var f = new Fixture()) {
 			long request = f.open(BlockPos.ZERO, BlockFace.NORTH); f.awaitRow(request, "minecraft:stone");
 			Object old = java.util.Objects.requireNonNull(get(f.previewConsumer(request), "round")); f.deferJoin = true;
+			long selectedTick = f.tick;
 			MarkerId marker = f.select(request, "minecraft:stone");
+			assertEquals(selectedTick, f.tick, "metadata defer must not turn SELECT into pending creation");
+			assertEquals(1, f.joinMetadataAttempts); assertEquals(1, f.joinMetadataDefers);
+			assertEquals(f.world.resolutionValidationCost(input(BlockPos.ZERO, BlockFace.NORTH, OWNER)).workUnits(), f.joinMetadataWork,
+				"the failed join pays its actual native metadata pass before the next pass defers");
 			assertNull(get(f.consumer(marker), "round")); assertEquals(1, get(old, "references"));
+			assertEquals(0, get(old, "activeTracking"));
+			var evidence = java.util.Objects.requireNonNull(get(java.util.Objects.requireNonNull(f.leases().get(marker)), "creationEvidence"));
+			var receiptSource = java.util.Objects.requireNonNull(get(java.util.Objects.requireNonNull(get(evidence, "owner")), "source"));
+			assertNotNull(f.firstSourceAfterJoin); assertSame(f.firstSourceAfterJoin, receiptSource);
+			assertNotSame(f.deferredJoinSource, receiptSource, "receipt authority requires an independently resolved source after join defer");
+			assertTrue(f.backend.creationSnapshot(marker).isPresent());
 			f.client.close(request); assertEquals(true, get(old, "closed"));
 			f.deferJoin = false;
+			long resolutions = f.world.resolutions, checks = f.world.checks, visits = f.visits;
 			for (int tick = 0; tick < 180 && !f.client.tracking(marker).complete(); tick++) f.next();
 			assertTrue(f.client.tracking(marker).complete()); assertEquals(expected("minecraft:stone"), f.client.tracking(marker).entries().getFirst().count());
 			assertNotSame(old, get(f.consumer(marker), "round"));
+			assertTrue(f.world.resolutions > resolutions); assertTrue(f.world.checks > checks);
+			assertEquals(SLOTS, f.visits - visits, "fresh Tracking reads every address; the abandoned Preview prefix is not a grant");
 		}
 	}
 }

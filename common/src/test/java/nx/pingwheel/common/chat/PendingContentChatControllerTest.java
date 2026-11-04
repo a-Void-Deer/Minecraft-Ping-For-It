@@ -27,6 +27,9 @@ import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.client.PresentationView;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
+import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
+import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.testing.DiagnosticLogCapture;
 import org.apache.logging.log4j.Level;
 import org.junit.jupiter.api.BeforeAll;
@@ -170,9 +173,11 @@ class PendingContentChatControllerTest {
 		assertEquals(0, countKey(f.sent.getFirst(), "presentation.pingforit.format.su_percent"));
 	}
 
-	@Test void inventoryGatesRejectPartialUnknownBaselineGreyAndStatusOnlyValuesButAcceptZero() {
+	@Test void arbitraryTrackingCannotSubstituteForMissingCreationAuthorityAndExplicitSnapshotZeroIsValid() {
 		Fixture f = new Fixture();
-		assertTrue(f.begin(PresentationReceiptContent.inventory()));
+		var receipt = inventoryReceipt(0, false, true);
+		assertTrue(f.begin(receipt));
+		f.creation.remove(ID);
 		ClientInventory.EntryView entry = entry(96, false, InventoryS2CPacket.Status.READY, "take");
 		List<ClientInventory.Tracking> unusable = List.of(
 			tracking(ID, entry, false, false, 4, InventoryS2CPacket.Status.READY),
@@ -196,6 +201,8 @@ class PendingContentChatControllerTest {
 		}
 		f.tracking.put(ID, tracking(ID, entry(0, false, InventoryS2CPacket.Status.UNCERTAIN, "take"),
 			true, false, 4, InventoryS2CPacket.Status.READY));
+		assertFalse(f.controller.attempt(ID), "even valid complete Tracking is not a creation snapshot");
+		f.creation.put(ID, receipt.inventorySnapshot());
 		assertTrue(f.controller.attempt(ID));
 		assertEquals("0", countArgument(f.sent.getFirst()));
 		assertEquals(1, countKey(f.sent.getFirst(), ContentChatTemplate.QUALITY_KEY));
@@ -203,7 +210,7 @@ class PendingContentChatControllerTest {
 
 	@Test void componentFallbackAndLongCountRemainValidWithoutASecondStreamLine() {
 		Fixture f = new Fixture();
-		assertTrue(f.begin(PresentationReceiptContent.inventory()));
+		assertTrue(f.begin(inventoryReceipt(9007199254740993L, true, false)));
 		f.tracking.put(ID, tracking(ID, entry(9007199254740993L, true, InventoryS2CPacket.Status.COMPONENT_TOO_LONG, "take"),
 			true, false, 4, InventoryS2CPacket.Status.READY));
 		assertTrue(f.controller.attempt(ID));
@@ -213,28 +220,29 @@ class PendingContentChatControllerTest {
 		assertFalse(f.controller.attempt(ID));
 		assertEquals(1, f.sent.size());
 	}
-	@Test void fluidReceiptWaitsForFreshReadyAndItsOwnAuthorityThenEmitsOnlyOnce() {
+	@Test void fluidReceiptUsesFrozenSnapshotNotTrackingAndRequiresOnlyItsScopedAuthority() {
 		Fixture f = new Fixture();
-		assertTrue(f.begin(PresentationReceiptContent.inventory()));
 		var kind = nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID;
+		var snapshot = new InventoryCreationSnapshot(kind, "selected", "minecraft:water", "block.minecraft.water",
+			"{\"version\":1,\"id\":\"minecraft:water\",\"name\":\"Fresh Water\"}", 82, false, "attention", false, true);
+		assertTrue(f.begin(PresentationReceiptContent.inventory(snapshot)));
 		var fluid = new ClientInventory.EntryView(kind, "selected", "minecraft:water", "block.minecraft.water",
 			"{\"version\":1,\"id\":\"minecraft:water\",\"name\":\"Fresh Water\"}", 82, false, null, "attention");
 		f.tracking.put(ID, new ClientInventory.Tracking(kind, ID, InventoryS2CPacket.Status.UPDATING, false, false, 4, 1, 1, List.of(fluid)));
-		assertFalse(f.controller.attempt(ID), "the selected preview seed is not receipt evidence");
-		f.tracking.put(ID, new ClientInventory.Tracking(kind, ID, InventoryS2CPacket.Status.READY, false, true, 4, 1, 2, List.of(fluid)));
 		f.inventoryAuthorization = UNKNOWN;
-		assertFalse(f.controller.attempt(ID), "ITEM policy must not substitute for unknown FLUID policy");
+		assertFalse(f.controller.attempt(ID), "a missing scoped grant must not borrow another lane's policy");
 		f.inventoryAuthorization = ALLOWED;
 		assertTrue(f.controller.attempt(ID));
 		assertEquals(1, countKey(f.sent.getFirst(), "presentation.pingforit.format.fluid_amount"));
 		assertEquals(1, countKey(f.sent.getFirst(), "pingforit.inventory.quantity.approximate"));
+		assertEquals(1, countKey(f.sent.getFirst(), "pingforit.spatial.inventory.uncertain"));
 		assertFalse(flatten(f.sent.getFirst()).contains("\"version\""));
 		assertFalse(f.controller.attempt(ID)); assertEquals(1, f.sent.size());
 	}
 
-	@Test void readyInventoryStillWaitsForFreshNameAndNegotiationThenReadsTheLatestCount() {
+	@Test void inventoryStillRequiresFreshNameAndSessionButNeverReadsLaterTrackingQuantity() {
 		Fixture f = new Fixture();
-		assertTrue(f.begin(PresentationReceiptContent.inventory()));
+		assertTrue(f.begin(inventoryReceipt(95, false, false)));
 		f.tracking.put(ID, tracking(ID, entry(95, false, null, "take"), true, false, 4, InventoryS2CPacket.Status.READY));
 		f.projection(ID, new PresentationSection(BASIC, 1, name().fields(), true));
 		assertFalse(f.controller.attempt(ID));
@@ -244,12 +252,12 @@ class PendingContentChatControllerTest {
 		f.ready = true;
 		f.tracking.put(ID, tracking(ID, entry(96, false, null, "take"), true, false, 4, InventoryS2CPacket.Status.READY));
 		assertTrue(f.controller.attempt(ID));
-		assertEquals("96", countArgument(f.sent.getFirst()), "a pending receipt never caches an earlier count");
+		assertEquals("95", countArgument(f.sent.getFirst()), "only the atomic creation quantity may enter inventory chat");
 	}
 
 	@Test void inventoryPolicyUnknownWaitsAndExplicitDenialCancelsEvenWithMissingName() {
 		Fixture f = new Fixture();
-		assertTrue(f.begin(PresentationReceiptContent.inventory()));
+		assertTrue(f.begin(inventoryReceipt(96, false, false)));
 		f.inventoryAuthorization = UNKNOWN;
 		assertFalse(f.controller.attempt(ID));
 		assertEquals(1, f.controller.pendingCount());
@@ -294,7 +302,7 @@ class PendingContentChatControllerTest {
 		assertTrue(f.controller.begin(first, true));
 		MarkerId second = new MarkerId(43);
 		f.install(second);
-		var overflow = f.created(second, PresentationReceiptContent.inventory(), "Overflow");
+		var overflow = f.created(second, inventoryReceipt(96, false, false), "Overflow");
 		assertFalse(f.controller.begin(overflow, true));
 		assertEquals(1, f.controller.pendingCount());
 		f.projection(ID, namedCustom("Selected", true, false));
@@ -473,7 +481,7 @@ class PendingContentChatControllerTest {
 		assertEquals(1, f.sent.size());
 	}
 
-	@Test void inventoryComposerResetAndBaselineReplacementCannotEmitThePreviousCount() {
+	@Test void inventoryComposerResetCancelsButUnrelatedTrackingBaselineReplacementDoesNotChangeSnapshotChat() {
 		Fixture f = new Fixture();
 		ClientInventory.EntryView entry = entry(96, false, null, "take");
 		f.tracking.put(ID, tracking(ID, entry, true, false, 4, InventoryS2CPacket.Status.READY));
@@ -482,7 +490,7 @@ class PendingContentChatControllerTest {
 				f.controller.reset(); return Optional.of(Component.literal("Old count"));
 			}
 		}, f.sent::add);
-		assertTrue(f.begin(PresentationReceiptContent.inventory()));
+		assertTrue(f.begin(inventoryReceipt(96, false, false)));
 		assertFalse(f.controller.attempt(ID));
 		assertTrue(f.sent.isEmpty());
 		assertEquals(0, f.controller.pendingCount());
@@ -492,10 +500,10 @@ class PendingContentChatControllerTest {
 				return Optional.of(Component.literal("Old baseline"));
 			}
 		}, f.sent::add);
-		assertTrue(f.begin(PresentationReceiptContent.inventory()));
-		assertFalse(f.controller.attempt(ID), "even equal counts on a new baseline require a fresh attempt");
-		assertTrue(f.sent.isEmpty());
-		assertEquals(1, f.controller.pendingCount());
+		assertTrue(f.begin(inventoryReceipt(96, false, false)));
+		assertTrue(f.controller.attempt(ID), "tracking is not an inventory receipt input");
+		assertEquals(1, f.sent.size());
+		assertEquals(0, f.controller.pendingCount());
 	}
 
 	@Test void reentrantReadPortClearFencesBeginAndFinalRead() {
@@ -552,6 +560,7 @@ class PendingContentChatControllerTest {
 		final Map<MarkerId, MarkerSnapshot> live = new LinkedHashMap<>();
 		final Map<MarkerId, PresentationView> projections = new LinkedHashMap<>();
 		final Map<MarkerId, ClientInventory.Tracking> tracking = new LinkedHashMap<>();
+		final Map<MarkerId, InventoryCreationSnapshot> creation = new LinkedHashMap<>();
 		final List<Component> sent = new ArrayList<>();
 		PendingContentChatController controller;
 		Fixture() { allowAll(); install(ID); controller = production(4, sent::add); }
@@ -570,7 +579,7 @@ class PendingContentChatControllerTest {
 			MarkerSnapshot marker = live.get(id);
 			return new PendingContentChatController.Current(epoch, view, ready, marker != null,
 				marker == null ? null : PendingContentChatController.MarkerIdentity.of(marker), allowed,
-				inventoryAuthorization, projections.getOrDefault(id, PresentationView.empty()), tracking.get(id));
+				inventoryAuthorization, projections.getOrDefault(id, PresentationView.empty()), tracking.get(id), creation.get(id));
 		}
 		PendingContentChatController production(int limit, Consumer<Component> sink) {
 			return new PendingContentChatController(limit, this::current,
@@ -578,6 +587,8 @@ class PendingContentChatControllerTest {
 				ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY), ignored -> ContentChatTemplate.DEFAULT_TEMPLATE, sink);
 		}
 		PresentationS2CPacket created(MarkerId id, PresentationReceiptContent content, String author) {
+			@Nullable InventoryCreationSnapshot snapshot = content.inventorySnapshot();
+			if (snapshot != null) creation.putIfAbsent(id, snapshot);
 			return PresentationS2CPacket.created(81, 1, 1, live.get(id), author, NAME, content, name());
 		}
 		boolean begin(PresentationReceiptContent receipt) { return controller.begin(created(ID, receipt, "Author"), true); }
@@ -619,6 +630,27 @@ class PendingContentChatControllerTest {
 	private static ClientInventory.EntryView entry(long count, boolean fallback, InventoryS2CPacket.Status quality, String ping) {
 		return new ClientInventory.EntryView("selected", "minecraft:gunpowder", "item.minecraft.gunpowder", null,
 			count, fallback, quality, ping);
+	}
+
+	@Test void inventoryRevocationDuringFormattingIsRecheckedBeforeSendingAndCannotRetry() {
+		Fixture f = new Fixture();
+		f.controller = new PendingContentChatController(4, f::current, new LifecycleFormatter() {
+			@Override public Optional<Component> inventory(Component author, Component target, ClientInventory.EntryView received) {
+				f.inventoryAuthorization = DENIED;
+				f.creation.remove(ID);
+				return Optional.of(Component.literal("Revoked count"));
+			}
+		}, f.sent::add);
+		assertTrue(f.begin(inventoryReceipt(5, false, true)));
+		assertFalse(f.controller.attempt(ID));
+		assertEquals(0, f.controller.pendingCount());
+		assertTrue(f.sent.isEmpty());
+		f.inventoryAuthorization = ALLOWED;
+		assertFalse(f.controller.attempt(ID));
+	}
+	private static PresentationReceiptContent inventoryReceipt(long amount, boolean aggregate, boolean uncertain) {
+		return PresentationReceiptContent.inventory(new InventoryCreationSnapshot(InventoryResourceKind.ITEM, "selected",
+			"minecraft:gunpowder", "item.minecraft.gunpowder", null, amount, aggregate, "take", !uncertain, uncertain));
 	}
 	private static ClientInventory.Tracking tracking(MarkerId id, ClientInventory.EntryView entry, boolean complete,
 		boolean grey, long baseline, InventoryS2CPacket.Status status) {

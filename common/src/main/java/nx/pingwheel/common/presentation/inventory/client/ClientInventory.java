@@ -26,6 +26,7 @@ import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.inventory.InventoryChecksums;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
+import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -147,6 +148,10 @@ public final class ClientInventory {
 		final boolean sable;
 		final Set<InventoryResourceKind> receiptDenials = EnumSet.noneOf(InventoryResourceKind.class);
 		final Map<InventoryResourceKind, Long> retiredBaselines = new EnumMap<>(InventoryResourceKind.class);
+		@Nullable InventoryCreationSnapshot creationSeed;
+		@Nullable InventoryResourceKind creationKind;
+		boolean creationReceived;
+		boolean displayCreationSeed;
 
 		MarkerMetadata(MarkerSnapshot marker) {
 			targetType = marker.targetTypeId();
@@ -355,9 +360,12 @@ public final class ClientInventory {
 	/** Receipt-only denial survives reallow within membership; unknown kind never borrows another lane's grant. */
 	public Optional<Boolean> receiptAuthorization(MarkerId markerId, long currentEpoch, long currentView, String targetTypeId) {
 		if (currentEpoch != presentationEpoch || currentView != presentationView) return Optional.empty();
+		@Nullable MarkerMetadata known = knownMarkers.get(markerId);
+		if (known != null && !known.targetType.equals(targetTypeId)) return Optional.of(false);
 		@Nullable InventoryResourceKind kind = markerKinds.get(markerId);
 		if (kind != null) {
 			@Nullable MarkerMetadata marker = knownMarkers.get(markerId);
+			if (marker != null && marker.creationSeed != null && marker.creationKind == kind) return Optional.of(true);
 			if (marker != null && marker.receiptDenials.contains(kind)) return Optional.of(false);
 			return authorization(kind, currentEpoch, currentView, targetTypeId);
 		}
@@ -367,12 +375,50 @@ public final class ClientInventory {
 		}
 		return Optional.of(false);
 	}
+	/** Installs only the atomic CREATED projection, scoped to this accepted marker and membership. */
+	public boolean creationSnapshot(MarkerId markerId, InventoryCreationSnapshot snapshot) {
+		@Nullable MarkerMetadata marker = knownMarkers.get(markerId);
+		if (marker == null || marker.creationReceived || presentationEpoch == 0) return false;
+		InventoryResourceKind kind = snapshot.resourceKind();
+		if (schemaDisabled.contains(kind)) return false;
+		@Nullable InventoryResourceKind previous = markerKinds.get(markerId);
+		if (previous != null && previous != kind || marker.creationKind != null && marker.creationKind != kind) return false;
+		markerKinds.put(markerId, kind);
+		marker.creationSeed = snapshot;
+		marker.creationKind = kind;
+		marker.creationReceived = true;
+		@Nullable TrackingState state = tracking.get(markerId);
+		marker.displayCreationSeed = state == null || !state.sourceComplete;
+		return true;
+	}
+	public boolean acceptsCreationSnapshot(MarkerId markerId, @Nullable InventoryCreationSnapshot snapshot) {
+		if (snapshot == null || schemaDisabled.contains(snapshot.resourceKind())) return false;
+		@Nullable InventoryResourceKind existing = markerKinds.get(markerId);
+		return existing == null || existing == snapshot.resourceKind();
+	}
+	public @Nullable InventoryCreationSnapshot creationSnapshot(MarkerId id) {
+		@Nullable MarkerMetadata marker = knownMarkers.get(id);
+		return marker == null ? null : marker.creationSeed;
+	}
+	/** A current suppressed refresh revokes creation authority without changing ordinary lane policy. */
+	public void revokeCreationSnapshot(MarkerId id) {
+		@Nullable MarkerMetadata marker = knownMarkers.get(id);
+		if (marker == null || marker.creationKind == null) return;
+		marker.creationSeed = null;
+		marker.displayCreationSeed = false;
+		marker.receiptDenials.add(marker.creationKind);
+	}
 	/** Accepted presentation schema gates only inventory; incompatible lanes never remain loading. */
 	public void acceptedSchemas(Set<InventoryResourceKind> accepted) {
 		for (InventoryResourceKind kind : InventoryResourceKind.values()) {
 			if (accepted.contains(kind)) schemaDisabled.remove(kind);
 			else {
 				schemaDisabled.add(kind);
+				for (MarkerMetadata marker : knownMarkers.values()) if (marker.creationKind == kind) {
+					marker.creationSeed = null;
+					marker.displayCreationSeed = false;
+					marker.receiptDenials.add(kind);
+				}
 				previews.values().removeIf(state -> state.resourceKind == kind);
 				for (TrackingState state : List.copyOf(tracking.values())) if (state.resourceKind == kind) {
 					store.expire(state.channel); tracking.remove(state.markerId); removeUnknownSessions(state.markerId);
@@ -588,8 +634,10 @@ public final class ClientInventory {
 		if (markerId == null)
 			return Tracking.empty(null);
 		@Nullable TrackingState state = tracking.get(markerId);
-		if (state == null)
-			return Tracking.empty(markerId);
+		if (state == null) return seededTracking(markerId, null);
+		@Nullable MarkerMetadata metadata = knownMarkers.get(markerId);
+		if (!state.sourceComplete && metadata != null && metadata.displayCreationSeed && metadata.creationSeed != null)
+			return seededTracking(markerId, state);
 		List<EntryView> entries = new ArrayList<>(state.metadata.size());
 		Map<String, InventoryClientStore.Value> committed = store.values(state.channel);
 		for (EntryView view : state.metadata.values()) {
@@ -615,6 +663,20 @@ public final class ClientInventory {
 		return new Tracking(state.resourceKind, markerId, displayStatus,
 			store.isInvalid(state.channel) || (history && !sableFluidUpdating(state, displayStatus)) || isPreviewTerminalFailure(state.status), state.sourceComplete,
 			store.baselineId(state.channel), state.statusRevision, state.watermark, history ? state.historical : List.copyOf(entries));
+	}
+	private Tracking seededTracking(MarkerId markerId, @Nullable TrackingState state) {
+		@Nullable MarkerMetadata metadata = knownMarkers.get(markerId);
+		@Nullable InventoryCreationSnapshot seed = metadata == null || !metadata.displayCreationSeed ? null : metadata.creationSeed;
+		if (seed == null) return Tracking.empty(markerId);
+		EntryView entry = new EntryView(seed.resourceKind(), seed.opaqueKey(), seed.resourceId(), seed.label(), seed.displayJson(),
+			seed.amount(), seed.aggregate(), null,
+			seed.annotationPingType());
+		InventoryS2CPacket.Status status = state != null && state.historicalFailure != null ? state.historicalFailure
+			: state != null && isPreviewTerminalFailure(state.status) ? state.status : InventoryS2CPacket.Status.UPDATING;
+		return new Tracking(seed.resourceKind(), markerId, status,
+			state != null && (store.isInvalid(state.channel) || state.historicalFailure != null
+				|| isPreviewTerminalFailure(state.status)), false, state == null ? InventoryClientStore.NO_BASELINE : state.baselineId,
+			state == null ? -1L : state.statusRevision, state == null ? 0L : state.watermark, List.of(entry));
 	}
 	private boolean sableFluidUpdating(TrackingState state, InventoryS2CPacket.Status displayStatus) {
 		// Server UPDATING starts a fresh scope cut without declaring the old source
@@ -654,8 +716,12 @@ public final class ClientInventory {
 		if (packet.kind() == InventoryS2CPacket.Kind.POLICY) {
 			InventoryResourceKind lane = packet.resourceKind();
 			allowedTypes.put(lane, packet.allowedTypes()); policyViews.put(lane, packet.view());
-			for (MarkerMetadata marker : knownMarkers.values())
-				if (!allows(lane, marker.targetType)) marker.receiptDenials.add(lane);
+			for (MarkerMetadata marker : knownMarkers.values()) {
+				if (!allows(lane, marker.targetType)) {
+					marker.receiptDenials.add(lane);
+					if (marker.creationKind == lane) { marker.creationSeed = null; marker.displayCreationSeed = false; }
+				}
+			}
 			for (TrackingState state : List.copyOf(tracking.values())) {
 				@Nullable MarkerMetadata metadata = knownMarkers.get(state.markerId);
 				if (state.resourceKind == lane && (metadata == null || !allows(lane, metadata.targetType))) {
@@ -1190,7 +1256,7 @@ public final class ClientInventory {
 		state.watermark = batch.watermark;
 		state.status = batch.status();
 		state.sourceComplete |= batch.sourceComplete();
-		if (state.sourceComplete) { state.historical = null; state.historicalFailure = null; state.failureWatermark = -1; }
+		if (state.sourceComplete) { state.historical = null; state.historicalFailure = null; state.failureWatermark = -1; retireCreationDisplay(state); }
 		state.committed = true;
 		state.closedCut = true;
 		state.committedChecksum = computeChecksum(state);
@@ -1270,7 +1336,7 @@ public final class ClientInventory {
 				state.watermark = first.watermark;
 				state.status = first.status();
 				state.sourceComplete |= first.sourceComplete();
-				if (state.sourceComplete) { state.historical = null; state.historicalFailure = null; state.failureWatermark = -1; }
+				if (state.sourceComplete) { state.historical = null; state.historicalFailure = null; state.failureWatermark = -1; retireCreationDisplay(state); }
 			}
 			state.batches.remove(first.watermark);
 			state.batchBytes -= first.bytes;
@@ -1587,6 +1653,10 @@ public final class ClientInventory {
 		if (state.committed && state.closedCut && !keepScopeHistory)
 			state.historical = state.closedEntries.values().stream().map(entry -> viewOf(state.resourceKind, entry)).toList();
 		if (isPreviewTerminalFailure(state.status)) state.historicalFailure = state.status;
+	}
+	private void retireCreationDisplay(TrackingState state) {
+		@Nullable MarkerMetadata marker = knownMarkers.get(state.markerId);
+		if (marker != null) marker.displayCreationSeed = false;
 	}
 
 	private static void clearCuts(TrackingState state) {

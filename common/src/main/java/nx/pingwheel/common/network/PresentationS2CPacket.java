@@ -4,6 +4,8 @@ import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.marker.*;
 import nx.pingwheel.common.presentation.*;
 import org.jetbrains.annotations.NotNull;
@@ -139,6 +141,7 @@ public record PresentationS2CPacket(Kind kind, int protocol, long epoch, long vi
 	}
 	@Override public void write(FriendlyByteBuf buf) {
 		if (isCorrupt()) throw new IllegalArgumentException("invalid presentation response");
+		if (kind == Kind.CREATED) encodedCreatedBodyBytes();
 		buf.writeEnum(kind); buf.writeVarInt(protocol); buf.writeLong(epoch); buf.writeLong(view); buf.writeLong(revision);
 		switch (kind) {
 			case OFFER -> {
@@ -384,9 +387,82 @@ public record PresentationS2CPacket(Kind kind, int protocol, long epoch, long vi
 		return size;
 	}
 
+	/**
+	 * Exact CREATED body size, including Basic and the creation snapshot, before
+	 * allocation or transport write. No serialization, native codec, byte-array
+	 * copy or source lookup occurs. Other kinds are deliberately unsupported.
+	 */
+	public int encodedCreatedBodyBytes() {
+		if (kind != Kind.CREATED || isCorrupt()) throw new IllegalArgumentException("not a valid CREATED packet");
+		int size = 1 + varIntSize(protocol) + 24 + 64 + targetBytes(snapshot.target())
+			+ targetKeyBytes(snapshot.targetKey()) + encodedUtfBytes(snapshot.targetTypeId(), MarkerPacketCodec.MAX_ID_LENGTH)
+			+ encodedUtfBytes(snapshot.pingTypeId(), MarkerPacketCodec.MAX_ID_LENGTH)
+			+ encodedUtfBytes(ownerName, MarkerPacketCodec.MAX_OWNER_NAME_LENGTH)
+			+ propertyRefBytes(defaultRef) + PresentationCodec.receiptContentEncodedSize(content)
+			+ varIntSize(sectionBytes.length) + sectionBytes.length;
+		if (size > MAX_S2C_BODY_BYTES) throw new IllegalArgumentException("presentation body bytes");
+		return size;
+	}
+
+	/**
+	 * Conservative synchronous encoding/handoff workspace over a pre-existing
+	 * immutable packet. Covers fresh destination growth, UTF temporary buffers
+	 * and wrappers; retained packet/Basic/snapshot ownership is charged separately.
+	 * No workspace is allocated by the measurement itself.
+	 */
+	public long createdEncodingWorkspace() { return 4096L + 8L * encodedCreatedBodyBytes(); }
+
+	private static int propertyRefBytes(PresentationPropertyRef ref) {
+		int size = encodedUtfBytes(ref.adapterId(), 193) + encodedUtfBytes(ref.fieldId(), 193) + varIntSize(ref.recordPath().size());
+		for (int i = 0; i < ref.recordPath().size(); i++)
+			size += encodedUtfBytes(ref.recordPath().get(i), PresentationPropertyRef.MAX_KEY_BYTES);
+		return size;
+	}
+	private static int locatorBytes(EntityLocator locator) {
+		return 1 + switch (locator) {
+			case EntityLocator.UUID uuid -> 16;
+			case EntityLocator.RuntimeId runtime -> varIntSize(runtime.value());
+		};
+	}
+	private static int targetBytes(Target target) {
+		return encodedUtfBytes(target.kind().name(), MarkerPacketCodec.MAX_ID_LENGTH)
+			+ encodedUtfBytes(target.dimensionId(), MarkerPacketCodec.MAX_ID_LENGTH) + switch (target) {
+			case Target.EntityTarget entity -> locatorBytes(entity.locator());
+			case Target.BlockTarget block -> 1 + 12 + encodedUtfBytes(block.blockRegistryId(), MarkerPacketCodec.MAX_ID_LENGTH);
+			case Target.ExternalBlockTarget external -> 2 + encodedUtfBytes(external.providerId(), MarkerPacketCodec.MAX_ID_LENGTH)
+				+ encodedUtfBytes(external.stableTargetId(), MarkerPacketCodec.MAX_ID_LENGTH)
+				+ encodedUtfBytes(external.expectedBlockRegistryId(), MarkerPacketCodec.MAX_ID_LENGTH)
+				+ encodedUtfBytes(external.providerLocator(), MarkerPacketCodec.MAX_EXTERNAL_PROVIDER_LOCATOR_LENGTH);
+			case Target.LocationTarget location -> 24;
+		};
+	}
+	private static int targetKeyBytes(TargetKey key) {
+		String kind = switch (key) {
+			case TargetKey.EntityKey entity -> "ENTITY";
+			case TargetKey.LocationKey location -> "LOCATION";
+			default -> "BLOCK";
+		};
+		return encodedUtfBytes(kind, MarkerPacketCodec.MAX_ID_LENGTH)
+			+ encodedUtfBytes(key.dimensionId(), MarkerPacketCodec.MAX_ID_LENGTH) + switch (key) {
+			case TargetKey.EntityKey entity -> locatorBytes(entity.locator());
+			case TargetKey.LocationKey location -> 24;
+			case TargetKey.BlockKey block -> 13 + encodedUtfBytes(block.blockRegistryId(), MarkerPacketCodec.MAX_ID_LENGTH);
+			case TargetKey.ExternalBlockKey external -> 1 + encodedUtfBytes(external.providerId(), MarkerPacketCodec.MAX_ID_LENGTH)
+				+ encodedUtfBytes(external.stableTargetId(), MarkerPacketCodec.MAX_ID_LENGTH)
+				+ encodedUtfBytes(external.expectedBlockRegistryId(), MarkerPacketCodec.MAX_ID_LENGTH);
+			case TargetKey.DoubleChestKey chest -> 25 + encodedUtfBytes(chest.blockRegistryId(), MarkerPacketCodec.MAX_ID_LENGTH);
+			case TargetKey.VaultKey vault -> 13 + encodedUtfBytes(vault.blockRegistryId(), MarkerPacketCodec.MAX_ID_LENGTH);
+			case TargetKey.CreateTankKey tank -> 13 + encodedUtfBytes(tank.blockRegistryId(), MarkerPacketCodec.MAX_ID_LENGTH);
+		};
+	}
+
 	/** UTF length prefix plus bytes; {@code writeUtf} bounds characters, not bytes. */
+	private static int encodedUtfBytes(String value, int maxChars) {
+		if (value.length() > maxChars) throw new IllegalArgumentException("CREATED UTF size");
+		return encodedUtfBytes(value);
+	}
 	private static int encodedUtfBytes(String value) {
-		int bytes = value.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+		int bytes = io.netty.buffer.ByteBufUtil.utf8Bytes(value);
 		return varIntSize(bytes) + bytes;
 	}
 
