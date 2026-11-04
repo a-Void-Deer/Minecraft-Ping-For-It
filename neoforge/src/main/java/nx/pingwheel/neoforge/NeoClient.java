@@ -10,6 +10,8 @@ import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.common.NeoForge;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
+import nx.pingwheel.common.diagnostics.DiagnosticLogger;
 import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.command.ClientCommandBuilder;
 import nx.pingwheel.common.resource.LanguageUtils;
@@ -17,10 +19,14 @@ import nx.pingwheel.common.resource.ResourceReloadListener;
 import nx.pingwheel.common.screen.SettingsScreen;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
 import nx.pingwheel.neoforge.integration.NeoForgeWorldAwareBlockModelOutlineAdapter;
+import java.util.function.Supplier;
 
-import static nx.pingwheel.common.Global.LOGGER;
 
 public class NeoClient {
+	private static final DiagnosticLogger LOG = Diagnostics.client();
+	private static final DiagnosticChannel ADAPTER_REGISTRATION = DiagnosticChannel.interval("neoforge-adapter-registration", java.time.Duration.ofSeconds(10));
+	private static final DiagnosticChannel RESOLVER_REGISTRATION = DiagnosticChannel.interval("neoforge-resolver-registration", java.time.Duration.ofSeconds(10));
+	private static final DiagnosticChannel ADAPTER_CLOSE = DiagnosticChannel.interval("neoforge-adapter-close", java.time.Duration.ofSeconds(10));
 	private static final String CREATE_ENTITY_ADAPTER =
 		"nx.pingwheel.neoforge.integration.create.CreateEntityOutlineAdapter";
 	private static final String CREATE_CONTRAPTION_RAYCAST_ADAPTER =
@@ -91,8 +97,9 @@ public class NeoClient {
 			|| !Boolean.valueOf(flywheelDetected).equals(lastFlywheelDetected)) {
 			lastCreateDetected = createDetected;
 			lastFlywheelDetected = flywheelDetected;
-			LOGGER.info("create/flywheel detection changed: createDetected={} flywheelDetected={}",
-				createDetected, flywheelDetected);
+			LOG.atNormal().info("create/flywheel detection changed: createDetected={} flywheelDetected={}",
+				nx.pingwheel.common.diagnostics.SafeDiagnosticValue.bool(createDetected),
+				nx.pingwheel.common.diagnostics.SafeDiagnosticValue.bool(flywheelDetected));
 		}
 
 		if (createDetected) {
@@ -100,7 +107,7 @@ public class NeoClient {
 			registerOptionalContraptionRaycastAdapter();
 			registerOptionalResolver(CREATE_WATER_WHEEL_RESOLVER, "create-water-wheel-presentation");
 			registerOptionalResolver(CREATE_DOOR_RESOLVER, "create-door-presentation");
-			if (nx.pingwheel.neoforge.integration.create.presentation.CreatePresentationAvailability.available()) {
+			if (nx.pingwheel.neoforge.integration.create.presentation.CreatePresentationAvailability.available(LOG)) {
 				registerOptionalResolver(CREATE_VAULT_RESOLVER, "create-vault-presentation");
 				registerOptionalResolver(CREATE_TANK_RESOLVER, "create-tank-presentation");
 			} else {
@@ -129,43 +136,43 @@ public class NeoClient {
 	 * absent optional mod never alters the ordinary client class-loading path.
 	 */
 	private static void registerOptionalContraptionRaycastAdapter() {
+		Class<?> adapter;
 		try {
-			LOGGER.debug("optional adapter reflection attempt: adapter=create-contraption-raycast class={}",
-				CREATE_CONTRAPTION_RAYCAST_ADAPTER);
-			Class<?> adapter = Class.forName(
+			LOG.atDebug().debug(() -> "optional adapter reflection attempt: adapter=create-contraption-raycast class="
+				+ CREATE_CONTRAPTION_RAYCAST_ADAPTER);
+			adapter = Class.forName(
 				CREATE_CONTRAPTION_RAYCAST_ADAPTER, true, NeoClient.class.getClassLoader());
 			contraptionRaycastAdapterResolved = true;
 			adapter.getMethod("register").invoke(null);
-			String state = String.valueOf(adapter.getMethod("registrationState").invoke(null));
-			logAdapterState("create-contraption-raycast", "reflection-success; sourceHandleState=" + state);
 		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
 			logAdapterState("create-contraption-raycast", "reflection-failure; sourceHandleState=failed");
-			Diagnostics.warn("optional-adapter-register", CREATE_CONTRAPTION_RAYCAST_ADAPTER,
-				() -> "optional adapter registration failed; adapter=create-contraption-raycast"
-					+ "; class=" + CREATE_CONTRAPTION_RAYCAST_ADAPTER + "; sourceHandleState=failed",
-				failure);
+			LOG.atNormal().rateLimited(ADAPTER_REGISTRATION).warn("optional-adapter-register", "adapter-registration-failed",
+				failure, () -> "adapter=create-contraption-raycast; class=" + CREATE_CONTRAPTION_RAYCAST_ADAPTER);
+			return;
 		}
+		logAdapterState("create-contraption-raycast", "reflection-success",
+			() -> "reflection-success; sourceHandleState=" + registrationState(adapter));
 	}
 
 	private static void registerOptionalAdapter(String className, String adapterName, boolean entityAdapter) {
+		Class<?> adapter;
 		try {
-			LOGGER.debug("optional adapter reflection attempt: adapter={} class={}", adapterName, className);
-			Class<?> adapter = Class.forName(className, true, NeoClient.class.getClassLoader());
+			LOG.atDebug().debug(() -> "optional adapter reflection attempt: adapter=" + adapterName + " class=" + className);
+			adapter = Class.forName(className, true, NeoClient.class.getClassLoader());
 			if (entityAdapter) {
 				entityAdapterResolved = true;
 			} else {
 				flywheelAdapterResolved = true;
 			}
 			adapter.getMethod("register").invoke(null);
-			String state = String.valueOf(adapter.getMethod("registrationState").invoke(null));
-			logAdapterState(adapterName, "reflection-success; sourceHandleState=" + state);
 		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
 			logAdapterState(adapterName, "reflection-failure; sourceHandleState=failed");
-			Diagnostics.warn("optional-adapter-register", className,
-				() -> "optional adapter registration failed; adapter=" + adapterName
-					+ "; class=" + className + "; sourceHandleState=failed",
-				failure);
+			LOG.atNormal().rateLimited(ADAPTER_REGISTRATION).warn("optional-adapter-register", "adapter-registration-failed",
+				failure, () -> "adapter=" + adapterName + "; class=" + className);
+			return;
 		}
+		logAdapterState(adapterName, "reflection-success",
+			() -> "reflection-success; sourceHandleState=" + registrationState(adapter));
 	}
 
 	private static void loadSimulatedResolver() {
@@ -176,18 +183,33 @@ public class NeoClient {
 	}
 
 	private static void registerOptionalResolver(String className, String resolverName) {
+		Class<?> resolver;
 		try {
-			LOGGER.debug("optional resolver reflection attempt: resolver={} class={}", resolverName, className);
-			Class<?> resolver = Class.forName(className, true, NeoClient.class.getClassLoader());
+			LOG.atDebug().debug(() -> "optional resolver reflection attempt: resolver=" + resolverName + " class=" + className);
+			resolver = Class.forName(className, true, NeoClient.class.getClassLoader());
 			resolver.getMethod("register").invoke(null);
-			String state = String.valueOf(resolver.getMethod("registrationState").invoke(null));
-			logResolverState(resolverName, "reflection-success; registrationState=" + state);
 		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
 			logResolverState(resolverName, "reflection-failure; registrationState=failed");
-			Diagnostics.warn("optional-resolver-register", className,
-				() -> "optional resolver registration failed; resolver=" + resolverName
-					+ "; class=" + className + "; registrationState=failed",
-				failure);
+			LOG.atNormal().rateLimited(RESOLVER_REGISTRATION).warn("optional-resolver-register", "resolver-registration-failed",
+				failure, () -> "resolver=" + resolverName + "; class=" + className);
+			return;
+		}
+		logResolverState(resolverName, "reflection-success",
+			() -> "reflection-success; registrationState=" + registrationState(resolver));
+	}
+
+	/** Called only by admitted detail suppliers, never by registration or its failure boundary. */
+	private static String registrationState(Class<?> owner) {
+		try {
+			return String.valueOf(owner.getMethod("registrationState").invoke(null));
+		} catch (java.lang.reflect.InvocationTargetException failure) {
+			@Nullable Throwable cause = failure.getCause();
+			if (cause instanceof RuntimeException runtime) throw runtime;
+			if (cause instanceof LinkageError linkage) throw linkage;
+			if (cause instanceof Error error && !(cause instanceof AssertionError)) throw error;
+			throw new IllegalStateException("registrationState probe failed", failure);
+		} catch (ReflectiveOperationException | AssertionError failure) {
+			throw new IllegalStateException("registrationState probe unavailable", failure);
 		}
 	}
 
@@ -224,11 +246,8 @@ public class NeoClient {
 			logAdapterState("create-contraption-raycast", "not-loaded");
 		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
 			logAdapterState("create-contraption-raycast", "close-failure; sourceHandleState=close-failure");
-			Diagnostics.warn("optional-adapter-close", CREATE_CONTRAPTION_RAYCAST_ADAPTER,
-				() -> "optional adapter teardown failed; adapter=create-contraption-raycast"
-					+ "; class=" + CREATE_CONTRAPTION_RAYCAST_ADAPTER
-					+ "; sourceHandleState=close-failure",
-				failure);
+			LOG.atNormal().rateLimited(ADAPTER_CLOSE).warn("optional-adapter-close", "adapter-teardown-failed",
+				failure, () -> "adapter=create-contraption-raycast; class=" + CREATE_CONTRAPTION_RAYCAST_ADAPTER);
 		} finally {
 			contraptionRaycastAdapterResolved = false;
 		}
@@ -243,10 +262,8 @@ public class NeoClient {
 			logAdapterState(adapterName, "not-loaded");
 		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
 			logAdapterState(adapterName, "close-failure; sourceHandleState=close-failure");
-			Diagnostics.warn("optional-adapter-close", className,
-				() -> "optional adapter teardown failed; adapter=" + adapterName
-					+ "; class=" + className + "; sourceHandleState=close-failure",
-				failure);
+			LOG.atNormal().rateLimited(ADAPTER_CLOSE).warn("optional-adapter-close", "adapter-teardown-failed",
+				failure, () -> "adapter=" + adapterName + "; class=" + className);
 		} finally {
 			if (entityAdapter) {
 				entityAdapterResolved = false;
@@ -257,6 +274,10 @@ public class NeoClient {
 	}
 
 	private static void logAdapterState(String adapterName, String state) {
+		logAdapterState(adapterName, state, () -> state);
+	}
+
+	private static void logAdapterState(String adapterName, String state, Supplier<String> description) {
 		@Nullable String previous = switch (adapterName) {
 			case "create-entity" -> lastEntityAdapterState;
 			case "create-contraption-raycast" -> lastContraptionRaycastAdapterState;
@@ -270,13 +291,15 @@ public class NeoClient {
 			case "create-contraption-raycast" -> lastContraptionRaycastAdapterState = state;
 			default -> lastFlywheelAdapterState = state;
 		}
-		LOGGER.info("optional source handle state transition: adapter={} state={} createDetected={} flywheelDetected={}",
-			adapterName, state,
-			lastCreateDetected == null ? false : lastCreateDetected,
-			lastFlywheelDetected == null ? false : lastFlywheelDetected);
+		LOG.atDetailed().site("optional-adapter-state").info(() -> "optional source handle state transition: adapter=" + adapterName + " state=" + description.get()
+			+ " createDetected=" + Boolean.TRUE.equals(lastCreateDetected) + " flywheelDetected=" + Boolean.TRUE.equals(lastFlywheelDetected));
 	}
 
 	private static void logResolverState(String resolverName, String state) {
+		logResolverState(resolverName, state, () -> state);
+	}
+
+	private static void logResolverState(String resolverName, String state, Supplier<String> description) {
 		@Nullable String previous;
 		switch (resolverName) {
 			case "simulated-docking-connector-presentation" -> previous = lastSimulatedResolverState;
@@ -295,8 +318,8 @@ public class NeoClient {
 			case "create-tank-presentation" -> lastCreateTankResolverState = state;
 			default -> lastWaterWheelResolverState = state;
 		}
-		LOGGER.info("optional presentation resolver state transition: resolver={} state={} createDetected={}",
-			resolverName, state, lastCreateDetected == null ? false : lastCreateDetected);
+		LOG.atDetailed().site("optional-resolver-state").info(() -> "optional presentation resolver state transition: resolver=" + resolverName + " state=" + description.get()
+			+ " createDetected=" + Boolean.TRUE.equals(lastCreateDetected));
 	}
 
 	@SubscribeEvent

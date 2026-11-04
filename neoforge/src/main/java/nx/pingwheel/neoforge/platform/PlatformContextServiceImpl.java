@@ -9,6 +9,7 @@ import nx.pingwheel.common.platform.IPlatformContextService;
 import net.minecraft.server.level.ServerLevel;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.TargetKey;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.neoforge.integration.create.CreateVaultTopology;
 import nx.pingwheel.neoforge.integration.create.CreateFluidTankTopology;
 
@@ -50,8 +51,8 @@ public class PlatformContextServiceImpl implements IPlatformContextService {
 	@Override
 	public TargetKey groupBlockTarget(ServerLevel level, Target.BlockTarget target) {
 		return switch (target.blockRegistryId()) {
-			case CreateVaultTopology.VAULT_ID -> CreateVaultTopology.group(level, target);
-			case CreateFluidTankTopology.TANK_ID -> CreateFluidTankTopology.group(level, target);
+			case CreateVaultTopology.VAULT_ID -> CreateVaultTopology.group(level, target, Diagnostics.server());
+			case CreateFluidTankTopology.TANK_ID -> CreateFluidTankTopology.group(level, target, Diagnostics.server());
 			default -> TargetKey.from(target);
 		};
 	}

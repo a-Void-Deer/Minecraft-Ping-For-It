@@ -9,10 +9,13 @@ import nx.pingwheel.fabric.mixin.inventory.InventorySlotResidentAccessor;
 import nx.pingwheel.fabric.mixin.inventory.InventoryStorageResidentAccessor;
 import nx.pingwheel.common.platform.IPlatformInventoryService.ResidentReads;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
 import org.jetbrains.annotations.Nullable;
+import java.time.Duration;
 
 /** Narrow raw-field/invoker port; none of these methods certify its delegates. */
 interface FabricResidentStorageAccess {
+	DiagnosticChannel RESIDENT_SLOT_DIAGNOSTICS = DiagnosticChannel.interval("fabric-inventory-resident-slot", Duration.ofSeconds(10));
 	FabricResidentStorageAccess MIXIN = new FabricResidentStorageAccess() {};
 	default ItemStack stack(SingleStackStorage storage) {
 		return ((SingleStackStorageResidentInvoker) storage).pingforit$residentStack();
@@ -29,7 +32,8 @@ interface FabricResidentStorageAccess {
 			return slot instanceof SingleStackStorage storage ? storage : null;
 		} catch (ClassNotFoundException absent) { return null; }
 		catch (LinkageError failure) {
-			Diagnostics.warn("inventory-resident-slot", "fabric:transfer", () -> "viewClass=" + view.getClass().getName(), failure);
+			Diagnostics.server().atNormal().rateLimited(RESIDENT_SLOT_DIAGNOSTICS).warn("inventory-resident-slot",
+				"resident-slot-unavailable", failure, () -> "viewClass=" + view.getClass().getName());
 			return null;
 		}
 	}

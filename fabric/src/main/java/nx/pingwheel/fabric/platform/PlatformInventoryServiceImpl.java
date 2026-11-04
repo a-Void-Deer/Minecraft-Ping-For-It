@@ -29,6 +29,8 @@ import nx.pingwheel.common.platform.IPlatformInventoryService;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentItem;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
+import java.time.Duration;
 
 /**
  * Fabric Transfer provider for the platform inventory bridge.
@@ -41,6 +43,10 @@ import nx.pingwheel.common.diagnostics.Diagnostics;
  * gate runs before any position lookup.
  */
 public final class PlatformInventoryServiceImpl implements IPlatformInventoryService {
+	private static final DiagnosticChannel FIND_DIAGNOSTICS = DiagnosticChannel.interval("fabric-inventory-find", Duration.ofSeconds(10));
+	private static final DiagnosticChannel VERSION_DIAGNOSTICS = DiagnosticChannel.interval("fabric-inventory-version", Duration.ofSeconds(10));
+	private static final DiagnosticChannel VALID_DIAGNOSTICS = DiagnosticChannel.interval("fabric-inventory-valid", Duration.ofSeconds(10));
+	private static final DiagnosticChannel CLASS_DIAGNOSTICS = DiagnosticChannel.interval("fabric-inventory-resident-class", Duration.ofSeconds(10));
 
 	@Override
 	public Optional<Access> find(ServerLevel level, BlockPos pos, Direction side) {
@@ -87,9 +93,9 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			return Optional.of(new EnumeratedAccess(storage, gate));
 		} catch (RuntimeException | LinkageError failure) {
 			if (!(failure instanceof InventorySourceUnavailableException))
-				Diagnostics.warn("inventory-capability-find", "fabric:transfer",
-					() -> "position=" + pos + " face=" + side + " worldClass=" + world.getClass().getName()
-						+ " blockEntityClass=" + (blockEntity == null ? "none" : blockEntity.getClass().getName()), failure);
+				Diagnostics.server().atNormal().rateLimited(FIND_DIAGNOSTICS).warn("inventory-capability-find", "source-unavailable",
+					failure, () -> "position=" + pos + " face=" + side + " worldClass=" + world.getClass().getName()
+						+ " blockEntityClass=" + (blockEntity == null ? "none" : blockEntity.getClass().getName()));
 			return Optional.empty();
 		}
 	}
@@ -99,8 +105,8 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			return OptionalLong.of(storage.getVersion());
 		} catch (RuntimeException | LinkageError failure) {
 			if (!(failure instanceof InventorySourceUnavailableException))
-				Diagnostics.warn("inventory-storage-version", storage.getClass().getName(),
-					() -> "storageClass=" + storage.getClass().getName(), failure);
+				Diagnostics.server().atNormal().rateLimited(VERSION_DIAGNOSTICS).warn("inventory-storage-version", "version-unavailable",
+					failure, () -> "storageClass=" + storage.getClass().getName());
 			return OptionalLong.empty();
 		}
 	}
@@ -135,7 +141,8 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			try { return Class.forName(name, false, PlatformInventoryServiceImpl.class.getClassLoader()); }
 			catch (ClassNotFoundException absent) { return null; }
 			catch (LinkageError failure) {
-				Diagnostics.warn("inventory-resident-class", "fabric:transfer", () -> "class=" + name, failure);
+				Diagnostics.server().atNormal().rateLimited(CLASS_DIAGNOSTICS).warn("inventory-resident-class", "resident-lookup-unavailable", failure,
+					() -> "class=" + name);
 				return null;
 			}
 		}
@@ -301,8 +308,8 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			try { return memberGate.getAsBoolean(); }
 			catch (RuntimeException | LinkageError unavailable) {
 				if (!(unavailable instanceof InventorySourceUnavailableException))
-					Diagnostics.warn("inventory-storage-valid", storage.getClass().getName(),
-						() -> "storageClass=" + storage.getClass().getName() + " gateClass=" + memberGate.getClass().getName(), unavailable);
+					Diagnostics.server().atNormal().rateLimited(VALID_DIAGNOSTICS).warn("inventory-storage-valid", "source-unavailable", unavailable,
+						() -> "storageClass=" + storage.getClass().getName() + " gateClass=" + memberGate.getClass().getName());
 				return false;
 			}
 		}
@@ -426,8 +433,8 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			try { return memberGate.getAsBoolean(); }
 			catch (RuntimeException | LinkageError unavailable) {
 				if (!(unavailable instanceof InventorySourceUnavailableException))
-					Diagnostics.warn("inventory-storage-valid", storage.getClass().getName(),
-						() -> "storageClass=" + storage.getClass().getName() + " gateClass=" + memberGate.getClass().getName(), unavailable);
+					Diagnostics.server().atNormal().rateLimited(VALID_DIAGNOSTICS).warn("inventory-storage-valid", "source-unavailable", unavailable,
+						() -> "storageClass=" + storage.getClass().getName() + " gateClass=" + memberGate.getClass().getName());
 				return false;
 			}
 		}

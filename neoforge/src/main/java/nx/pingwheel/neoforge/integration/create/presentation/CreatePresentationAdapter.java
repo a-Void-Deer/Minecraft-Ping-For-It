@@ -1,6 +1,8 @@
 package nx.pingwheel.neoforge.integration.create.presentation;
 
-import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticLogger;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,7 +36,7 @@ public final class CreatePresentationAdapter implements PresentationAdapter {
 	public static final String INVENTORY = "create:inventory.summary";
 	public static final String FLUID = "create:fluid.summary";
 
-	private static final List<PresentationField> FIELDS = List.of(
+	private static final @Unmodifiable List<PresentationField> FIELDS = List.of(
 		new PresentationField(SPEED, PresentationField.Kind.RECORD, true, 0, "Kinetic speed (RPM)"),
 		new PresentationField(HAS_NETWORK, PresentationField.Kind.FLAG, true, 0, "Kinetic network"),
 		new PresentationField(OVERSTRESSED, PresentationField.Kind.FLAG, true, 0, "Overstressed"),
@@ -47,16 +49,16 @@ public final class CreatePresentationAdapter implements PresentationAdapter {
 	@FunctionalInterface
 	public interface Source {
 		/** Return null when the source is temporarily unavailable. */
-		Observation observe(DetachedTarget target, Set<String> demand, CaptureBudget budget);
+		@Nullable Observation observe(DetachedTarget target, Set<String> demand, CaptureBudget budget);
 		/** Preview may observe an uncommitted candidate through a safe provider source. */
-		default Observation observePreview(DetachedTarget target, Set<String> demand, CaptureBudget budget) {
+		default @Nullable Observation observePreview(DetachedTarget target, Set<String> demand, CaptureBudget budget) {
 			return observe(target, demand, budget);
 		}
 	}
 
 	/** Pure detached values; no block entities, world, handlers or stacks escape. */
-	public record Observation(Speed speed, Boolean hasNetwork, Boolean overStressed,
-		Double stress, Double capacity, Summary items, Summary fluids) {
+	public record Observation(@Nullable Speed speed, @Nullable Boolean hasNetwork, @Nullable Boolean overStressed,
+		@Nullable Double stress, @Nullable Double capacity, @Nullable Summary items, @Nullable Summary fluids) {
 		public Observation {
 			if ((stress != null && (!Double.isFinite(stress) || stress < 0))
 				|| (capacity != null && (!Double.isFinite(capacity) || capacity < 0))) {
@@ -74,7 +76,7 @@ public final class CreatePresentationAdapter implements PresentationAdapter {
 	}
 
 	/** Unavailable and verified-empty summaries are distinct. Counts are detached. */
-	public record Summary(Map<String, Long> counts, boolean partial, int scanned, boolean available) {
+	public record Summary(@Unmodifiable Map<String, Long> counts, boolean partial, int scanned, boolean available) {
 		public Summary {
 			counts = Map.copyOf(Objects.requireNonNull(counts, "counts"));
 			if (scanned < 0 || (!available && !counts.isEmpty())) {
@@ -90,26 +92,32 @@ public final class CreatePresentationAdapter implements PresentationAdapter {
 		}
 	}
 
-	private final Source source;
+	private final @Nullable Source source;
 	private final int minInterval;
+	private final DiagnosticLogger diagnostics;
 
 	/** Client manifest, intentionally without any world collector. */
 	public CreatePresentationAdapter() {
-		this(null, MIN_UPDATE_INTERVAL_TICKS);
+		this(null, MIN_UPDATE_INTERVAL_TICKS, nx.pingwheel.common.diagnostics.Diagnostics.client());
 	}
 
 	/** Server collector; caller must invoke it on the authoritative server thread. */
 	public CreatePresentationAdapter(Source source) {
-		this(source, MIN_UPDATE_INTERVAL_TICKS);
+		this(source, MIN_UPDATE_INTERVAL_TICKS, nx.pingwheel.common.diagnostics.Diagnostics.server());
 	}
 
 	/** Server-specific update cadence, while schema and fields remain identical. */
-	public CreatePresentationAdapter(Source source, int minUpdateIntervalTicks) {
+	public CreatePresentationAdapter(@Nullable Source source, int minUpdateIntervalTicks) {
+		this(source, minUpdateIntervalTicks, nx.pingwheel.common.diagnostics.Diagnostics.server());
+	}
+
+	public CreatePresentationAdapter(@Nullable Source source, int minUpdateIntervalTicks, DiagnosticLogger diagnostics) {
 		if (minUpdateIntervalTicks < 1) {
 			throw new IllegalArgumentException("invalid Create minimum update interval");
 		}
 		this.source = source;
 		this.minInterval = minUpdateIntervalTicks;
+		this.diagnostics = Objects.requireNonNull(diagnostics, "diagnostics");
 	}
 
 	@Override
@@ -133,12 +141,12 @@ public final class CreatePresentationAdapter implements PresentationAdapter {
 	}
 
 	@Override
-	public List<PresentationField> fields() {
+	public @Unmodifiable List<PresentationField> fields() {
 		return FIELDS;
 	}
 
 	@Override
-	public PresentationSection collect(DetachedTarget target, Set<String> demand,
+	public @Nullable PresentationSection collect(DetachedTarget target, Set<String> demand,
 		CaptureBudget budget) {
 		return collect(target, demand, budget, false);
 	}
@@ -149,12 +157,12 @@ public final class CreatePresentationAdapter implements PresentationAdapter {
 	 * committed-only.
 	 */
 	@Override
-	public PresentationSection collectPreview(DetachedTarget target, Set<String> demand,
+	public @Nullable PresentationSection collectPreview(DetachedTarget target, Set<String> demand,
 		CaptureBudget budget) {
 		return collect(target, demand, budget, true);
 	}
 
-	private PresentationSection collect(DetachedTarget target, Set<String> demand,
+	private @Nullable PresentationSection collect(DetachedTarget target, Set<String> demand,
 		CaptureBudget budget, boolean preview) {
 		Objects.requireNonNull(target, "target");
 		Objects.requireNonNull(demand, "demand");
@@ -162,16 +170,17 @@ public final class CreatePresentationAdapter implements PresentationAdapter {
 		if (source == null || budget.remaining() == 0 || !isBlockTarget(target.kind())) {
 			return null;
 		}
-		Set<String> requested = Set.copyOf(demand);
+		@Unmodifiable Set<String> requested = Set.copyOf(demand);
 		if (requested.stream().noneMatch(CreatePresentationAdapter::knownField)) {
 			return PresentationSection.empty(ADAPTER_ID, SCHEMA);
 		}
 		try {
-			Observation observed = preview ? source.observePreview(target, requested, budget)
+			@Nullable Observation observed = preview ? source.observePreview(target, requested, budget)
 				: source.observe(target, requested, budget);
 			return observed == null ? null : project(observed, requested);
 		} catch (RuntimeException | LinkageError failure) {
-			Diagnostics.warn("create/presentation-source", ADAPTER_ID,
+			CreatePresentationDiagnostics.failure(diagnostics,
+				"create/presentation-source", "adapter-unavailable",
 				() -> "preview=" + preview + " target=" + target + " demand=" + requested, failure);
 			// A failed optional source cannot break Basic or another adapter.
 			return null;

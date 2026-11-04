@@ -15,6 +15,9 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.dimension.DimensionType;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticLogger;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
+import java.time.Duration;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.neoforge.integration.create.presentation.CreatePresentationAvailability;
@@ -30,6 +33,7 @@ public final class CreateFluidTankTopology {
 	private static final String TANK = "com.simibubi.create.content.fluids.tank.FluidTankBlockEntity";
 	private static final String BLOCK = "com.simibubi.create.content.fluids.tank.FluidTankBlock";
 	private static final String SMART = "com.simibubi.create.foundation.blockEntity.SmartBlockEntity";
+	private static final DiagnosticChannel DIAGNOSTICS = DiagnosticChannel.interval("create-tank-topology", Duration.ofSeconds(10));
 	private CreateFluidTankTopology() {}
 
 	@NotNullByDefault
@@ -68,24 +72,31 @@ public final class CreateFluidTankTopology {
 	interface Chunks { @Nullable LevelChunk loaded(int x, int z); }
 
 	public static TargetKey group(ServerLevel level, Target.BlockTarget target) {
+		return group(level, target, Diagnostics.server());
+	}
+	public static TargetKey group(ServerLevel level, Target.BlockTarget target, DiagnosticLogger diagnostics) {
 		TargetKey exact = TargetKey.from(target);
 		if (!TANK_ID.equals(target.blockRegistryId())
 			|| !level.dimension().location().toString().equals(target.dimensionId())) return exact;
 		return resolve(level, (x, z) -> level.getChunkSource().getChunkNow(x, z),
-			new BlockPos(target.x(), target.y(), target.z())).<TargetKey>map(t -> t.key(target.dimensionId())).orElse(exact);
+			new BlockPos(target.x(), target.y(), target.z()), diagnostics).<TargetKey>map(t -> t.key(target.dimensionId())).orElse(exact);
 	}
 
-	static Optional<Topology> resolve(Level level, Chunks chunks, BlockPos original) {
+	static Optional<Topology> resolve(Level level, Chunks chunks, BlockPos original, DiagnosticLogger diagnostics) {
 		// Fixed optional classes are discovered only after the existing tested-version gate.
-		if (!CreatePresentationAvailability.available()) return Optional.empty();
+		if (!CreatePresentationAvailability.available(diagnostics)) return Optional.empty();
 		try {
-			return read(new MinecraftWorld(level, chunks, ApiHolder.API), original);
+			return read(new MinecraftWorld(level, chunks, ApiHolder.API), original, diagnostics);
 		} catch (RuntimeException | LinkageError unavailable) {
-			failure(original, unavailable); return Optional.empty();
+			failure(original, unavailable, diagnostics); return Optional.empty();
 		}
 	}
 
 	static Optional<Topology> read(World world, BlockPos original) {
+		return read(world, original, Diagnostics.server());
+	}
+
+	static Optional<Topology> read(World world, BlockPos original, DiagnosticLogger diagnostics) {
 		try {
 			@Nullable Reading source = world.loaded(original);
 			if (source == null) return Optional.empty();
@@ -124,16 +135,17 @@ public final class CreateFluidTankTopology {
 			}
 			return Optional.of(new Topology(controller, width, height, cells));
 		} catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
-			failure(original, unavailable); return Optional.empty();
+			failure(original, unavailable, diagnostics); return Optional.empty();
 		}
 	}
 
-	private static void failure(BlockPos original, Throwable failure) {
+	private static void failure(BlockPos original, Throwable failure, DiagnosticLogger diagnostics) {
 		if (failure instanceof java.lang.reflect.InvocationTargetException invocation) {
 			@Nullable Throwable cause = invocation.getCause();
 			if (cause instanceof Error fatal && !(fatal instanceof LinkageError) && !(fatal instanceof AssertionError)) throw fatal;
 		}
-		Diagnostics.warn("create/tank-topology", TANK_ID, () -> "position=" + original + "; using physical target", failure);
+		diagnostics.atNormal().rateLimited(DIAGNOSTICS).failure(org.apache.logging.log4j.Level.WARN, "create/tank-topology", "using-physical-target",
+			() -> "position=" + original, failure);
 	}
 
 	@NotNullByDefault

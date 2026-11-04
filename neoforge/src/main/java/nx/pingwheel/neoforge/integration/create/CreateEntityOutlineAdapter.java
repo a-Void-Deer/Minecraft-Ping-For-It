@@ -17,9 +17,8 @@ import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
 
-import nx.pingwheel.common.Global;
 import nx.pingwheel.common.diagnostics.Diagnostics;
-import nx.pingwheel.common.util.SafeExceptionReport;
+import nx.pingwheel.common.diagnostics.DiagnosticLogger;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.client.outline.AabbOutlineMask;
@@ -40,6 +39,7 @@ import nx.pingwheel.common.math.EntitySelectionBlacklist;
  * jar.</p>
  */
 public final class CreateEntityOutlineAdapter {
+	private static final DiagnosticLogger LOG = Diagnostics.client();
 	public static final String SOURCE_ID = "pingforit:create_entity_outline";
 
 	private static final int MAX_RENDER_VERTICES = 262_144;
@@ -53,18 +53,26 @@ public final class CreateEntityOutlineAdapter {
 	private static final CreateEntityOutlineBackendProbe BACKEND_PROBE =
 		new CreateEntityOutlineBackendProbe(FLYWHEEL_VISUALIZATION_MANAGER, SUPPORTS_VISUALIZATION_METHOD);
 
-	private static @Nullable EntityOutlineSourceRegistry.Registration registration;
-	private static @Nullable EntitySelectionBlacklist.Registration selectionBlacklistRegistration;
-	private static @Nullable CreateEntityOutlineSource source;
+	private static final CreateRegistrationLifecycle<Registration> LIFECYCLE = new CreateRegistrationLifecycle<>();
 
 	private CreateEntityOutlineAdapter() {}
 
 	/** Called reflectively after NeoForge has confirmed that Create is loaded. */
-	public static synchronized void register() {
-		if (registration != null) {
-			return;
+	public static void register() {
+		@Nullable Registration installed = LIFECYCLE.register(CreateEntityOutlineAdapter::install);
+		if (installed == null) return;
+		String state = installed.state();
+		if (installed.outline.accepted()) {
+			LOG.atNormal().info("Create entity outline source registration succeeded: id={} handleState={}",
+				nx.pingwheel.common.diagnostics.SafeDiagnosticValue.code(SOURCE_ID),
+				nx.pingwheel.common.diagnostics.SafeDiagnosticValue.code(state));
+		} else {
+			LOG.atNormal().event(Level.WARN, "create-entity-register", "registration-rejected",
+				() -> "handleState=" + state);
 		}
+	}
 
+	private static Registration install() {
 		CreateEntityOutlineSource candidate = new CreateEntityOutlineSource();
 		@Nullable EntityOutlineSourceRegistry.Registration outlineHandle = null;
 		@Nullable EntitySelectionBlacklist.Registration blacklistHandle = null;
@@ -72,9 +80,7 @@ public final class CreateEntityOutlineAdapter {
 			outlineHandle = EntityOutlineSourceRegistry.INSTANCE.register(candidate);
 			blacklistHandle = EntitySelectionBlacklist.INSTANCE.register(
 				entity -> entity instanceof SuperGlueEntity);
-			source = candidate;
-			registration = outlineHandle;
-			selectionBlacklistRegistration = blacklistHandle;
+			return new Registration(outlineHandle, blacklistHandle, candidate);
 		} catch (RuntimeException | Error failure) {
 			try {
 				if (blacklistHandle != null) {
@@ -91,56 +97,40 @@ public final class CreateEntityOutlineAdapter {
 			}
 			throw failure;
 		}
-
-		if (outlineHandle.accepted()) {
-			Global.LOGGER.info("Create entity outline source registration succeeded: id={} handleState={}",
-				SOURCE_ID, registrationState());
-		} else {
-			Diagnostics.event(Level.WARN, "create-entity-register", SOURCE_ID, "registration-rejected",
-				() -> "handleState=" + registrationState());
-		}
 	}
 
 	/** Called reflectively at client teardown; safe to call repeatedly. */
-	public static synchronized void close() {
-		@Nullable EntitySelectionBlacklist.Registration retainedBlacklistRegistration = selectionBlacklistRegistration;
-		@Nullable EntityOutlineSourceRegistry.Registration retainedRegistration = registration;
-		@Nullable CreateEntityOutlineSource retainedSource = source;
-		try {
-			if (retainedBlacklistRegistration != null) {
-				retainedBlacklistRegistration.close();
-			}
-		} finally {
-			try {
-				if (retainedRegistration != null) {
-					retainedRegistration.close();
-				}
-			} finally {
-				try {
-					if (retainedSource != null) {
-						retainedSource.close();
-					}
-				} finally {
-					selectionBlacklistRegistration = null;
-					registration = null;
-					source = null;
-				}
-			}
-		}
-		Global.LOGGER.info("Create entity outline source registration closed: id={} handleState=closed", SOURCE_ID);
+	public static void close() {
+		LIFECYCLE.close();
+		LOG.atNormal().info("Create entity outline source registration closed: id={} handleState=closed",
+			nx.pingwheel.common.diagnostics.SafeDiagnosticValue.code(SOURCE_ID));
 	}
 
 	/** Reflection-only lifecycle probe used by NeoForge transition diagnostics. */
-	public static synchronized String registrationState() {
-		if (registration == null) {
-			return "not-registered";
-		}
-		return registration.accepted() ? "registered" : "rejected";
+	public static String registrationState() {
+		return LIFECYCLE.state();
 	}
 
+	private record Registration(EntityOutlineSourceRegistry.Registration outline,
+		EntitySelectionBlacklist.Registration blacklist, CreateEntityOutlineSource source)
+		implements CreateRegistrationLifecycle.Handle {
+		@Override public String state() { return outline.accepted() ? "registered" : "rejected"; }
+
+		@Override public void close() {
+			try {
+				blacklist.close();
+			} finally {
+				try {
+					outline.close();
+				} finally {
+					source.close();
+				}
+			}
+		}
+	}
 
 	private static final class CreateEntityOutlineSource implements EntityOutlineSource {
-		private final EntityDiagnostics diagnostics = new EntityDiagnostics();
+		private final CreateEntityOutlineDiagnostics diagnostics = new CreateEntityOutlineDiagnostics(BACKEND_PROBE::diagnosticDescription);
 
 		@Override
 		public String id() {
@@ -240,7 +230,8 @@ public final class CreateEntityOutlineAdapter {
 				return EntityBlockGeometryOutcome.FAILED;
 			}
 
-			OutlineOnlyBufferSource outlineOnly = null;
+			@Nullable OutlineOnlyBufferSource outlineOnly = null;
+			boolean dispatchStarted = false;
 			try {
 				int color = opaqueColor(context);
 				shared.setColor(red(color), green(color), blue(color), 255);
@@ -263,6 +254,7 @@ public final class CreateEntityOutlineAdapter {
 
 				try (CreateEntityOutlineMaskScope.Scope ignored = CreateEntityOutlineMaskScope.enter()) {
 					PoseStack poseStack = new PoseStack();
+					dispatchStarted = true;
 					dispatcher.render(
 						entity,
 						x,
@@ -293,7 +285,7 @@ public final class CreateEntityOutlineAdapter {
 					return EntityBlockGeometryOutcome.RENDERED;
 				}
 
-				diagnostics.report(entity, "renderer-failed-before-vertices", "on", true, 0, failure,
+				diagnostics.report(entity, dispatchStarted ? "renderer-failed-before-vertices" : "render-setup-failed", "on", true, 0, failure,
 					EntityBlockGeometryOutcome.FAILED);
 				return EntityBlockGeometryOutcome.FAILED;
 			}
@@ -335,9 +327,11 @@ public final class CreateEntityOutlineAdapter {
 
 			int color = opaqueColor(context);
 			VertexCounter counter = new VertexCounter();
+			boolean emissionStarted = false;
 			try {
 				shared.setColor(red(color), green(color), blue(color), 255);
 				VertexConsumer consumer = shared.getBuffer(SUPER_GLUE_OUTLINE);
+				emissionStarted = true;
 				for (AabbOutlineMask.Quad quad : mask.quads()) {
 					emitQuad(consumer, quad, color, counter);
 				}
@@ -356,7 +350,7 @@ public final class CreateEntityOutlineAdapter {
 					return EntityBlockGeometryOutcome.RENDERED;
 				}
 
-				diagnostics.report(entity, "glue-render-failed-before-vertices", "not-required", false,
+				diagnostics.report(entity, emissionStarted ? "glue-render-failed-before-vertices" : "glue-render-setup-failed", "not-required", false,
 					0, failure, EntityBlockGeometryOutcome.FAILED);
 				return EntityBlockGeometryOutcome.FAILED;
 			}
@@ -443,98 +437,4 @@ public final class CreateEntityOutlineAdapter {
 		private int count;
 	}
 
-	/**
-	 * Bounded, lazy-detail diagnostics for the optional entity route.  The
-	 * state is intentionally small and only the first event, reason changes,
-	 * recovery, and a five-second heartbeat construct the complete descriptor
-	 * and exception stack trace.
-	 */
-	private static final class EntityDiagnostics {
-		private final CreateEntityOutlineDiagnosticGate gate = new CreateEntityOutlineDiagnosticGate(System::nanoTime);
-
-		private void report(
-			@Nullable Entity entity,
-			String reason,
-			String backend,
-			boolean scope,
-			int vertexCount,
-			@Nullable Throwable failure,
-			@Nullable EntityBlockGeometryOutcome outcome
-		) {
-			String key = entityKey(entity);
-			String result = outcome == null ? "UNKNOWN" : outcome.name();
-			Level level = failure != null || outcome == EntityBlockGeometryOutcome.FAILED
-				|| (reason.equals("backend-unavailable") && !backend.equals("class-missing")) || reason.equals("outline-buffer-unavailable")
-				|| reason.startsWith("nonfinite") || reason.contains("mismatch")
-				? Level.WARN : Level.DEBUG;
-			boolean enabled;
-			try {
-				enabled = Diagnostics.logger().isEnabled(level);
-			} catch (RuntimeException | LinkageError ignored) {
-				enabled = false;
-			}
-			if (!gate.admit(key, reason, result, enabled, level == Level.DEBUG)) {
-				return;
-			}
-
-			if (failure == null) {
-				Diagnostics.domainApprovedEvent(level, "create-entity-outline", SOURCE_ID, reason,
-					() -> fullDetails(entity, reason, result, backend, scope, vertexCount));
-			} else {
-				Diagnostics.domainApprovedFailure(level, "create-entity-outline", SOURCE_ID,
-					() -> fullDetails(entity, reason, result, backend, scope, vertexCount), failure);
-			}
-		}
-
-		private void clear() {
-			gate.clear();
-		}
-
-		private static String entityKey(@Nullable Entity entity) {
-			if (entity == null) {
-				return "<null>";
-			}
-			try {
-				return String.valueOf(entity.getUUID());
-			} catch (Exception | LinkageError | AssertionError failure) {
-				return entity.getClass().getName() + "@" + Integer.toHexString(System.identityHashCode(entity));
-			}
-		}
-
-		private static String fullDetails(
-			@Nullable Entity entity,
-			String reason,
-			String outcome,
-			String backend,
-			boolean scope,
-			int vertexCount
-		) {
-			StringBuilder details = new StringBuilder()
-				.append("sourceId=").append(SOURCE_ID)
-				.append("; reason=").append(reason)
-				.append("; outcome=").append(outcome)
-				.append("; backend=").append(backend)
-				.append("; backendProbeState=").append(BACKEND_PROBE.diagnosticDescription())
-				.append("; scope=").append(scope)
-				.append("; vertexCount=").append(vertexCount);
-
-			if (entity == null) {
-				return details.append("; entity=<null>").toString();
-			}
-
-			try {
-				Vec3 position = entity.position();
-				details.append("; entityType=").append(entity.getType())
-					.append("; entityId=").append(entity.getId())
-					.append("; entityUuid=").append(entity.getUUID())
-					.append("; position=").append(position)
-					.append("; class=").append(entity.getClass().getName());
-			} catch (Exception | LinkageError | AssertionError descriptorFailure) {
-				details.append("; entityDescriptorFailure=").append(SafeExceptionReport.format(descriptorFailure));
-			}
-
-			return details.toString();
-		}
-
-	}
 }

@@ -20,7 +20,7 @@ import java.util.function.ToLongFunction;
 final class CreateFlywheelGeometryAttempt {
 
 	private @Nullable Throwable resolutionFailure;
-	private String resolutionDetails = "";
+	private Supplier<String> resolutionDetails = () -> "";
 
 	private CreateFlywheelGeometryAttempt() {}
 
@@ -36,7 +36,7 @@ final class CreateFlywheelGeometryAttempt {
 				? FlywheelDiagnosticReason.INSTANCE_RESOLUTION_FAILED : result.reason();
 			Result selected = result;
 			result = new Result(result.outcome(), reason, result.target(),
-				() -> attempt.resolutionDetails + "; " + selected.details().get(), combined);
+				() -> attempt.resolutionDetails.get() + "; " + selected.details().get(), combined);
 		}
 		report.accept(result);
 		return result.outcome();
@@ -46,7 +46,7 @@ final class CreateFlywheelGeometryAttempt {
 		FlywheelInstanceResolution.Batch<R> batch = FlywheelInstanceResolution.resolve(instances, resolver);
 		resolutionFailure = batch.firstFailure();
 		if (resolutionFailure != null) {
-			resolutionDetails = batch.failureDetails();
+			resolutionDetails = batch::failureDetails;
 		}
 		return batch;
 	}

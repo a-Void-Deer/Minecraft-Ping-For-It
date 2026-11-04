@@ -11,6 +11,7 @@ import nx.pingwheel.common.client.outline.BlockPresentationResolver;
 import nx.pingwheel.common.client.outline.BlockPresentationResolverRegistry;
 import nx.pingwheel.common.client.outline.BlockRenderSubject;
 import nx.pingwheel.neoforge.integration.create.presentation.CreatePresentationAvailability;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -29,7 +30,7 @@ public final class NeoForgeCreateVaultBlockPresentationResolver implements Block
 	NeoForgeCreateVaultBlockPresentationResolver(Reader reader) { this.reader = reader; }
 
 	public static synchronized void register() {
-		if (registration == null && CreatePresentationAvailability.available())
+		if (registration == null && CreatePresentationAvailability.available(Diagnostics.client()))
 			registration = BlockPresentationResolverRegistry.INSTANCE.register(new NeoForgeCreateVaultBlockPresentationResolver());
 	}
 	public static synchronized String registrationState() {
@@ -51,6 +52,6 @@ public final class NeoForgeCreateVaultBlockPresentationResolver implements Block
 	}
 	private static Optional<CreateVaultTopology.Topology> readClient(BlockPresentationContext context) {
 		if (!(context.world() instanceof ClientLevel level)) return Optional.empty();
-		return CreateVaultTopology.resolve(level, (x, z) -> level.getChunkSource().getChunk(x, z, ChunkStatus.FULL, false), context.sourcePos());
+		return CreateVaultTopology.resolve(level, (x, z) -> level.getChunkSource().getChunk(x, z, ChunkStatus.FULL, false), context.sourcePos(), Diagnostics.client());
 	}
 }

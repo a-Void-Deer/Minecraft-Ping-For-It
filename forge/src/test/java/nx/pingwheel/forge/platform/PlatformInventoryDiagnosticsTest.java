@@ -58,7 +58,22 @@ class PlatformInventoryDiagnosticsTest {
 			assertEquals(1, capture.events.size()); assertTrue(capture.message().contains("Forge gate cause"));
 		}
 	}
+	@Test void normalServerFailureNeverReadsOriginalThrowableEvenWhenClientIsDebug() {
+		var reads = new AtomicInteger();
+		var failure = new IllegalStateException("private Forge failure") {
+			@Override public String getMessage() { reads.incrementAndGet(); return "private Forge failure"; }
+		};
+		try (var capture = new Capture()) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT, nx.pingwheel.common.diagnostics.LoggingProfile.DEBUG);
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER, nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
+			assertFalse(new PlatformInventoryServiceImpl.HandlerAccess(new ItemStackHandler(1), () -> { throw failure; }).valid());
+			assertEquals(0, reads.get()); assertEquals(1, capture.events.size());
+			assertTrue(capture.message().contains("side=SERVER"));
+			assertFalse(capture.message().contains("private Forge failure")); assertNull(capture.events.getFirst().getThrown());
+		}
+	}
 	private static final class Capture implements AutoCloseable {
+		private final nx.pingwheel.common.diagnostics.LoaderDiagnosticScope diagnostics = new nx.pingwheel.common.diagnostics.LoaderDiagnosticScope();
 		final List<LogEvent> events = new ArrayList<>();
 		private final Logger logger = (Logger) LogManager.getLogger("pingforit");
 		private final org.apache.logging.log4j.core.config.Configuration configuration = logger.getContext().getConfiguration();
@@ -72,6 +87,7 @@ class PlatformInventoryDiagnosticsTest {
 		}
 		String message() { assertEquals(Level.WARN, events.getFirst().getLevel()); return events.getFirst().getMessage().getFormattedMessage(); }
 		@Override public void close() {
+			diagnostics.close();
 			configuration.removeLogger(logger.getName()); if (previous != null) configuration.addLogger(logger.getName(), previous);
 			logger.getContext().updateLoggers(); appender.stop();
 		}

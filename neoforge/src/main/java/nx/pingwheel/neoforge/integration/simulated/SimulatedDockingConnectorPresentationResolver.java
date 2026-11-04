@@ -5,6 +5,8 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
+import java.time.Duration;
 import org.jetbrains.annotations.Nullable;
 
 import net.minecraft.core.BlockPos;
@@ -32,6 +34,8 @@ import nx.pingwheel.common.client.outline.BlockRenderSubject;
  * loader has confirmed that Simulated is present.</p>
  */
 public final class SimulatedDockingConnectorPresentationResolver implements BlockPresentationResolver {
+	private static final DiagnosticChannel BLOCK_LOOKUP = DiagnosticChannel.interval("simulated-block-lookup", Duration.ofSeconds(10));
+	private static final DiagnosticChannel ENTITY_LOOKUP = DiagnosticChannel.interval("simulated-block-entity-lookup", Duration.ofSeconds(10));
 	public static final String RESOLVER_ID = "pingforit:simulated_docking_connector_presentation";
 	private static final ResourceLocation PAIRED_BLOCK_ID =
 		ResourceLocation.parse("simulated:paired_docking_connector");
@@ -188,7 +192,9 @@ public final class SimulatedDockingConnectorPresentationResolver implements Bloc
 		try {
 			return lookup.get().orElse(null);
 		} catch (Exception | LinkageError | AssertionError failure) {
-			Diagnostics.warn(operation, id.toString(), () -> "resolver=" + RESOLVER_ID, failure);
+			Diagnostics.client().atNormal().rateLimited(operation.equals("simulated-block-entity-lookup") ? ENTITY_LOOKUP : BLOCK_LOOKUP)
+				.failure(org.apache.logging.log4j.Level.WARN, operation,
+				"resolver-lookup-unavailable", () -> "resolver=" + RESOLVER_ID + " id=" + id, failure);
 			return null;
 		}
 	}

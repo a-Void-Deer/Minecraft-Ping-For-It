@@ -6,6 +6,8 @@ import net.minecraft.server.MinecraftServer;
 
 import nx.pingwheel.common.presentation.PresentationAdapter;
 import nx.pingwheel.common.presentation.PresentationRegistry;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Loader reflection entry point for the two independent registries. The loader
@@ -20,17 +22,17 @@ public final class CreatePresentationRegistration {
 	public static boolean registerServer(PresentationRegistry registry, MinecraftServer server) {
 		Objects.requireNonNull(registry, "registry");
 		Objects.requireNonNull(server, "server");
-		return register(registry, CreatePresentationAdapters.server(server));
+		return register(registry, CreatePresentationAdapters.server(server, Diagnostics.server()));
 	}
 
 	/** Called reflectively for each client registry/session, without a world. */
 	public static boolean registerClient(PresentationRegistry registry) {
 		Objects.requireNonNull(registry, "registry");
-		return register(registry, CreatePresentationAdapters.client());
+		return register(registry, CreatePresentationAdapters.client(Diagnostics.client()));
 	}
 
 	/** Shared registration guard; a session may initialize its registry twice. */
-	static boolean register(PresentationRegistry registry, PresentationAdapter adapter) {
+	static boolean register(PresentationRegistry registry, @Nullable PresentationAdapter adapter) {
 		Objects.requireNonNull(registry, "registry");
 		if (adapter == null) {
 			return false;

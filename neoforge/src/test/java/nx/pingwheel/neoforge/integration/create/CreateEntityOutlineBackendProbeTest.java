@@ -30,7 +30,7 @@ class CreateEntityOutlineBackendProbeTest {
 			throw failure;
 		});
 		try (CreateDiagnosticCapture capture = new CreateDiagnosticCapture(Level.OFF)) {
-			assertFalse(nx.pingwheel.common.diagnostics.Diagnostics.logger().isEnabled(Level.WARN),
+			assertFalse(nx.pingwheel.common.diagnostics.Diagnostics.client().atNormal().isEnabled(Level.WARN),
 				"the fixture must disable WARN despite the loader's global filter");
 			assertFalse(probe.availability().available());
 			assertEquals("probe-failed", probe.diagnosticDescription());
@@ -66,10 +66,10 @@ class CreateEntityOutlineBackendProbeTest {
 	void aSuppressedActualProbeFailureDoesNotReadMessageOrCauseForACachedReport() {
 		ScalarReadFailure failure = new ScalarReadFailure();
 		try (CreateDiagnosticCapture capture = new CreateDiagnosticCapture()) {
+			CreateEntityOutlineBackendProbe probe = new CreateEntityOutlineBackendProbe("test.suppressedProbe", "supports", name -> {
+				throw failure;
+			});
 			for (int index = 0; index < 2; index++) {
-				CreateEntityOutlineBackendProbe probe = new CreateEntityOutlineBackendProbe("test.suppressedProbe", "supports", name -> {
-					throw failure;
-				});
 				assertFalse(probe.availability().available());
 				if (index == 0) {
 					assertTrue(failure.scalarReads.get() > 0);

@@ -17,6 +17,8 @@ import org.spongepowered.asm.service.MixinService;
 import net.neoforged.fml.ModList;
 import net.neoforged.fml.loading.LoadingModList;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
+import java.time.Duration;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -33,6 +35,7 @@ public final class CreatePresentationMixinPlugin implements IMixinConfigPlugin {
 	private static final String TESTED_ARTIFACT_VERSION = "6.0.10-281";
 	private final BooleanSupplier testedCreate;
 	private final Supplier<IClassBytecodeProvider> bytecodeProvider;
+	private final DiagnosticChannel diagnostics = DiagnosticChannel.interval("create-presentation-mixin-gate", Duration.ofSeconds(10));
 
 	public CreatePresentationMixinPlugin() {
 		this(CreatePresentationMixinPlugin::testedCreatePresent,
@@ -68,7 +71,8 @@ public final class CreatePresentationMixinPlugin implements IMixinConfigPlugin {
 				.getClassNode(TARGET, true);
 			return compatibleTarget(target);
 		} catch (ClassNotFoundException | IOException | RuntimeException | LinkageError failure) {
-			Diagnostics.warn("create/presentation-mixin-gate", "cached-network",
+			Diagnostics.bootstrap().atNormal().rateLimited(diagnostics).failure(org.apache.logging.log4j.Level.WARN,
+				"create/presentation-mixin-gate", "mixin-gate-unavailable",
 				() -> "target=" + targetClassName + " mixin=" + mixinClassName, failure);
 			return false;
 		}

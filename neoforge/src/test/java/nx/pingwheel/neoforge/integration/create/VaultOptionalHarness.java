@@ -68,6 +68,7 @@ final class VaultOptionalHarness extends ClassLoader {
 					if (name.equals("nx.pingwheel.common.config.ServerConfig")) {
 						var node = new ClassNode(); new ClassReader(bytes).accept(node, 0);
 						node.methods.removeIf(m -> m.name.equals("<clinit>"));
+						node.fields.stream().filter(f -> f.name.equals("HANDLER")).forEach(f -> f.access &= ~Opcodes.ACC_FINAL);
 						var writer = new ClassWriter(0); node.accept(writer); bytes = writer.toByteArray();
 					}
 					found = defineClass(name, bytes, 0, bytes.length);
@@ -80,10 +81,17 @@ final class VaultOptionalHarness extends ClassLoader {
 	private static byte[] creationFactory(byte[] bytes) {
 		// Execute the production factory unchanged; omit unrelated static config/network initialization.
 		var original = new ClassNode(); new ClassReader(bytes).accept(original, 0);
-		original.fields.removeIf(f -> !List.of("MARKER_STORE", "SERVER_CONFIG").contains(f.name));
+		original.fields.removeIf(f -> !f.name.equals("MARKER_STORE"));
 		original.fields.forEach(f -> f.access &= ~Opcodes.ACC_FINAL);
 		original.methods.removeIf(m -> !List.of("markerService", "markerStore").contains(m.name));
 		var writer = new ClassWriter(0); original.accept(writer); return writer.toByteArray();
+	}
+	/** Only supplies detached config to the current factory's real HANDLER.getConfig() route; no file/platform lifecycle. */
+	static void initializeServerConfig(ClassLoader loader) throws Exception {
+		Class<?> config = loader.loadClass("nx.pingwheel.common.config.ServerConfig");
+		var handler = allocate(nx.pingwheel.common.config.ConfigHandler.class);
+		field(nx.pingwheel.common.config.ConfigHandler.class, "config").set(handler, config.getConstructor().newInstance());
+		field(config, "HANDLER").set(null, handler);
 	}
 	static ClassNode archive(String name) throws Exception {
 		try (var zip = new ZipFile(System.getProperty("pingforit.test.createArtifact"))) {

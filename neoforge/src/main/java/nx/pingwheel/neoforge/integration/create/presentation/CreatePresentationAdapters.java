@@ -1,6 +1,8 @@
 package nx.pingwheel.neoforge.integration.create.presentation;
 
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticLogger;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.Objects;
 import java.util.Set;
@@ -27,26 +29,41 @@ import nx.pingwheel.common.domain.Target;
 public final class CreatePresentationAdapters {
 	private CreatePresentationAdapters() {}
 
+	/** Compatibility entry for the common server's optional reflection boundary. */
+	public static @Nullable PresentationAdapter server(MinecraftServer server) {
+		return server(server, Diagnostics.server());
+	}
+
+	public static @Nullable PresentationAdapter server(MinecraftServer server, int minUpdateIntervalTicks) {
+		return server(server, minUpdateIntervalTicks, Diagnostics.server());
+	}
+
+	/** Compatibility entry for the common client's optional reflection boundary. */
+	public static @Nullable PresentationAdapter client() {
+		return client(Diagnostics.client());
+	}
+
 	/** Return null if Create is absent/untested; register the result only if non-null. */
-	public static PresentationAdapter server(MinecraftServer server) {
-		return server(server, CreatePresentationAdapter.MIN_UPDATE_INTERVAL_TICKS);
+	public static @Nullable PresentationAdapter server(MinecraftServer server, DiagnosticLogger diagnostics) {
+		return server(server, CreatePresentationAdapter.MIN_UPDATE_INTERVAL_TICKS, diagnostics);
 	}
 
 	/** Server config may increase the sampling interval without editing the manifest. */
-	public static PresentationAdapter server(MinecraftServer server, int minUpdateIntervalTicks) {
+	public static @Nullable PresentationAdapter server(MinecraftServer server, int minUpdateIntervalTicks, DiagnosticLogger diagnostics) {
 		Objects.requireNonNull(server, "server");
 		if (minUpdateIntervalTicks < 1) {
 			throw new IllegalArgumentException("invalid Create minimum update interval");
 		}
-		if (!CreatePresentationAvailability.available()) {
+		if (!CreatePresentationAvailability.available(diagnostics)) {
 			return null;
 		}
-		return new CreatePresentationAdapter(new ServerSource(server), minUpdateIntervalTicks);
+		return new CreatePresentationAdapter(new ServerSource(server, diagnostics), minUpdateIntervalTicks, diagnostics);
 	}
 
 	/** Client manifest only: no server, world lookup, collector or render dependency. */
-	public static PresentationAdapter client() {
-		return CreatePresentationAvailability.available() ? new CreatePresentationAdapter() : null;
+	public static @Nullable PresentationAdapter client(DiagnosticLogger diagnostics) {
+		return CreatePresentationAvailability.available(diagnostics)
+			? new CreatePresentationAdapter(null, CreatePresentationAdapter.MIN_UPDATE_INTERVAL_TICKS, diagnostics) : null;
 	}
 
 	record SourceWorld(Object value, String dimensionId) {
@@ -68,30 +85,31 @@ public final class CreatePresentationAdapters {
 	}
 
 	interface SourceAccess {
+		default DiagnosticLogger diagnostics() { return Diagnostics.server(); }
 		boolean serverThread();
 		boolean available();
-		SourceWorld resolveWorld(String dimensionId);
+		@Nullable SourceWorld resolveWorld(String dimensionId);
 		/** Legacy test seam only; committed collection never resolves content through this observation. */
 		default ExternalBlockServerProvider.ObservationResult observeExternal(
 			SourceWorld world, Target.ExternalBlockTarget target) {
 			return new ExternalBlockServerProvider.ObservationResult.TemporarilyUnavailable();
 		}
 		/** No legacy observation fallback: missing scoped-source support is unavailable. */
-		default CommittedBinding resolveCommittedExternal(SourceWorld world, Target.ExternalBlockTarget target) {
+		default @Nullable CommittedBinding resolveCommittedExternal(SourceWorld world, Target.ExternalBlockTarget target) {
 			return null;
 		}
 		/** Candidate-only provider source resolution; never materializes or mutates provider state. */
-		PreviewBinding resolvePreviewExternal(SourceWorld world, Target.ExternalBlockTarget candidate);
+		@Nullable PreviewBinding resolvePreviewExternal(SourceWorld world, Target.ExternalBlockTarget candidate);
 		boolean matchesOrdinary(SourceWorld world, BlockPos position, String expectedRegistryId);
-		CreatePresentationAdapter.Observation collect(SourceWorld world, BlockPos position,
+		CreatePresentationAdapter.@Nullable Observation collect(SourceWorld world, BlockPos position,
 			Set<String> demand, PresentationAdapter.CaptureBudget budget);
 		/** Older access implementations remain compatible but cannot drop an external member gate. */
-		default CreatePresentationAdapter.Observation collect(SourceWorld world, BlockPos position,
+		default CreatePresentationAdapter.@Nullable Observation collect(SourceWorld world, BlockPos position,
 			Set<String> demand, PresentationAdapter.CaptureBudget budget,
-			java.util.function.Predicate<BlockPos> memberGate) {
+			java.util.function.@Nullable Predicate<BlockPos> memberGate) {
 			return memberGate == null ? collect(world, position, demand, budget) : null;
 		}
-		CreatePresentationAdapter.Observation collectPreview(SourceWorld world, BlockPos position,
+		CreatePresentationAdapter.@Nullable Observation collectPreview(SourceWorld world, BlockPos position,
 			Set<String> demand, PresentationAdapter.CaptureBudget budget,
 			java.util.function.Predicate<BlockPos> memberGate);
 	}
@@ -106,12 +124,12 @@ public final class CreatePresentationAdapters {
 			&& external.expectedBlockRegistryId().equals(target.registryId());
 	}
 
-	static CreatePresentationAdapter.Observation observeSource(
+	static CreatePresentationAdapter.@Nullable Observation observeSource(
 		PresentationAdapter.DetachedTarget target, Set<String> demand,
 		PresentationAdapter.CaptureBudget budget, SourceAccess access) {
 		if (target == null || demand == null || budget == null || access == null
 			|| budget.remaining() < 1 || !access.serverThread()) return null;
-		Target.ExternalBlockTarget external = target.externalBlock();
+		Target.@Nullable ExternalBlockTarget external = target.externalBlock();
 		if (external != null && !validExternalMetadata(target, external)) return null;
 		if (target.dimension() == null || target.dimension().length() > 193
 			|| target.dimension().isBlank() || target.registryId() == null
@@ -120,14 +138,14 @@ public final class CreatePresentationAdapters {
 			|| (external == null && !"block".equals(target.kind())
 				&& !"entity_block".equals(target.kind()))) return null;
 		if (!access.available()) return null;
-		ResourceLocation dimension = ResourceLocation.tryParse(target.dimension());
-		ResourceLocation expectedBlock = ResourceLocation.tryParse(target.registryId());
+		@Nullable ResourceLocation dimension = ResourceLocation.tryParse(target.dimension());
+		@Nullable ResourceLocation expectedBlock = ResourceLocation.tryParse(target.registryId());
 		if (dimension == null || expectedBlock == null || budget.remaining() < 2 || !budget.scan()) return null;
-		SourceWorld world = access.resolveWorld(dimension.toString());
+		@Nullable SourceWorld world = access.resolveWorld(dimension.toString());
 		if (world == null) return null;
 		if (external != null) {
-			CommittedBinding binding = access.resolveCommittedExternal(world, external);
-			if (binding == null || !admitted(binding.memberGate(), binding.position())
+			@Nullable CommittedBinding binding = access.resolveCommittedExternal(world, external);
+			if (binding == null || !admitted(binding.memberGate(), binding.position(), access.diagnostics())
 				|| !access.matchesOrdinary(world, binding.position(), expectedBlock.toString())) return null;
 			return access.collect(world, binding.position(), Set.copyOf(demand), budget, binding.memberGate());
 		}
@@ -152,56 +170,56 @@ public final class CreatePresentationAdapters {
 	 * and member gate; the original detached identity is never replaced by
 	 * physical coordinates, and no member outside that gate is read.
 	 */
-	static CreatePresentationAdapter.Observation observePreviewSource(
+	static CreatePresentationAdapter.@Nullable Observation observePreviewSource(
 		PresentationAdapter.DetachedTarget target, Set<String> demand,
 		PresentationAdapter.CaptureBudget budget, SourceAccess access) {
 		if (target == null || demand == null || budget == null || access == null
 			|| budget.remaining() < 1 || !access.serverThread()) return null;
-		Target.ExternalBlockTarget external = target.externalBlock();
+		Target.@Nullable ExternalBlockTarget external = target.externalBlock();
 		if (external == null || !validPreviewExternalMetadata(target, external)) return null;
 		if (target.dimension() == null || target.dimension().length() > 193
 			|| target.dimension().isBlank() || target.registryId() == null
 			|| target.registryId().length() > 193 || target.registryId().isBlank()) return null;
 		if (!access.available()) return null;
-		ResourceLocation dimension = ResourceLocation.tryParse(target.dimension());
-		ResourceLocation expectedBlock = ResourceLocation.tryParse(target.registryId());
+		@Nullable ResourceLocation dimension = ResourceLocation.tryParse(target.dimension());
+		@Nullable ResourceLocation expectedBlock = ResourceLocation.tryParse(target.registryId());
 		if (dimension == null || expectedBlock == null || budget.remaining() < 2 || !budget.scan()) return null;
-		SourceWorld world = access.resolveWorld(dimension.toString());
+		@Nullable SourceWorld world = access.resolveWorld(dimension.toString());
 		if (world == null) return null;
-		PreviewBinding binding = access.resolvePreviewExternal(world, external);
-		if (binding == null || !admitted(binding, binding.position())
+		@Nullable PreviewBinding binding = access.resolvePreviewExternal(world, external);
+		if (binding == null || !admitted(binding.memberGate(), binding.position(), access.diagnostics())
 			|| !access.matchesOrdinary(world, binding.position(), expectedBlock.toString())) return null;
 		return access.collectPreview(world, binding.position(), Set.copyOf(demand), budget, binding.memberGate());
 	}
 
-	private static boolean admitted(PreviewBinding binding, BlockPos position) {
-		return admitted(binding.memberGate(), position);
-	}
-
-	private static boolean admitted(java.util.function.Predicate<BlockPos> memberGate, BlockPos position) {
+	private static boolean admitted(java.util.function.@Nullable Predicate<BlockPos> memberGate, BlockPos position, DiagnosticLogger diagnostics) {
 		if (memberGate == null) return true;
 		try { return memberGate.test(position); }
 		catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("create/presentation-member-gate", "source", () -> "position=" + position, unavailable);
+			CreatePresentationDiagnostics.failure(diagnostics,
+				"create/presentation-member-gate", "member-rejected", () -> "position=" + position, unavailable);
 			return false;
 		}
 	}
 
 	private static final class ServerSource implements CreatePresentationAdapter.Source, SourceAccess {
 		private final MinecraftServer server;
+		private final DiagnosticLogger diagnostics;
 
-		private ServerSource(MinecraftServer server) {
+		private ServerSource(MinecraftServer server, DiagnosticLogger diagnostics) {
 			this.server = server;
+			this.diagnostics = diagnostics;
 		}
+		@Override public DiagnosticLogger diagnostics() { return diagnostics; }
 
 		@Override
-		public CreatePresentationAdapter.Observation observe(PresentationAdapter.DetachedTarget target,
+		public CreatePresentationAdapter.@Nullable Observation observe(PresentationAdapter.DetachedTarget target,
 			Set<String> demand, PresentationAdapter.CaptureBudget budget) {
 			return observeSource(target, demand, budget, this);
 		}
 
 		@Override
-		public CreatePresentationAdapter.Observation observePreview(PresentationAdapter.DetachedTarget target,
+		public CreatePresentationAdapter.@Nullable Observation observePreview(PresentationAdapter.DetachedTarget target,
 			Set<String> demand, PresentationAdapter.CaptureBudget budget) {
 			return target != null && target.externalBlock() != null
 				? observePreviewSource(target, demand, budget, this)
@@ -212,20 +230,20 @@ public final class CreatePresentationAdapters {
 		public boolean serverThread() { return server.isSameThread(); }
 
 		@Override
-		public boolean available() { return CreatePresentationAvailability.available(); }
+		public boolean available() { return CreatePresentationAvailability.available(diagnostics); }
 
 		@Override
-		public SourceWorld resolveWorld(String dimensionId) {
-			ResourceLocation dimension = ResourceLocation.tryParse(dimensionId);
+		public @Nullable SourceWorld resolveWorld(String dimensionId) {
+			@Nullable ResourceLocation dimension = ResourceLocation.tryParse(dimensionId);
 			if (dimension == null) return null;
-			ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, dimension));
+			@Nullable ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, dimension));
 			return level == null ? null : new SourceWorld(level, dimensionId);
 		}
 
 		@Override
-		public CommittedBinding resolveCommittedExternal(SourceWorld world, Target.ExternalBlockTarget target) {
+		public @Nullable CommittedBinding resolveCommittedExternal(SourceWorld world, Target.ExternalBlockTarget target) {
 			ServerLevel level = (ServerLevel) world.value();
-			ResolvedBlockReadSource resolved = MinecraftBlockReadSources.resolveCommittedReadSource(level, target)
+			@Nullable ResolvedBlockReadSource resolved = MinecraftBlockReadSources.resolveCommittedReadSource(level, target)
 				.orElse(null);
 			if (resolved == null || resolved.level() != level
 				|| !(resolved.descriptor().target() instanceof Target.ExternalBlockTarget bound)
@@ -237,9 +255,9 @@ public final class CreatePresentationAdapters {
 		}
 
 		@Override
-		public PreviewBinding resolvePreviewExternal(SourceWorld world, Target.ExternalBlockTarget candidate) {
+		public @Nullable PreviewBinding resolvePreviewExternal(SourceWorld world, Target.ExternalBlockTarget candidate) {
 			ServerLevel level = (ServerLevel) world.value();
-			ResolvedBlockReadSource resolved = MinecraftBlockReadSources.resolvePreviewReadSource(level, candidate)
+			@Nullable ResolvedBlockReadSource resolved = MinecraftBlockReadSources.resolvePreviewReadSource(level, candidate)
 				.orElse(null);
 			if (resolved == null || !(resolved.descriptor().target() instanceof Target.ExternalBlockTarget bound)
 				|| !MinecraftBlockReadSources.sameReadBinding(bound, candidate)) return null;
@@ -260,28 +278,28 @@ public final class CreatePresentationAdapters {
 		}
 
 		@Override
-		public CreatePresentationAdapter.Observation collect(SourceWorld world, BlockPos position,
+		public CreatePresentationAdapter.@Nullable Observation collect(SourceWorld world, BlockPos position,
 			Set<String> demand, PresentationAdapter.CaptureBudget budget) {
 			return collectAt((ServerLevel) world.value(), position, demand, budget, null);
 		}
 
 		@Override
-		public CreatePresentationAdapter.Observation collect(SourceWorld world, BlockPos position,
+		public CreatePresentationAdapter.@Nullable Observation collect(SourceWorld world, BlockPos position,
 			Set<String> demand, PresentationAdapter.CaptureBudget budget,
-			java.util.function.Predicate<BlockPos> memberGate) {
+			java.util.function.@Nullable Predicate<BlockPos> memberGate) {
 			return collectAt((ServerLevel) world.value(), position, demand, budget, memberGate);
 		}
 
 		@Override
-		public CreatePresentationAdapter.Observation collectPreview(SourceWorld world, BlockPos position,
+		public CreatePresentationAdapter.@Nullable Observation collectPreview(SourceWorld world, BlockPos position,
 			Set<String> demand, PresentationAdapter.CaptureBudget budget,
 			java.util.function.Predicate<BlockPos> memberGate) {
 			return collectAt((ServerLevel) world.value(), position, demand, budget, memberGate);
 		}
 
-		private CreatePresentationAdapter.Observation collectAt(ServerLevel level, BlockPos pos,
+		private CreatePresentationAdapter.@Nullable Observation collectAt(ServerLevel level, BlockPos pos,
 			Set<String> demand, PresentationAdapter.CaptureBudget budget,
-			java.util.function.Predicate<BlockPos> memberGate) {
+			java.util.function.@Nullable Predicate<BlockPos> memberGate) {
 			int maxWork = Math.min(budget.remaining(), CreatePresentationCollector.DEFAULT_LIMITS.maxWork());
 			CreateSamplingLimits defaults = CreatePresentationCollector.DEFAULT_LIMITS;
 			CreateSamplingLimits limits = new CreateSamplingLimits(defaults.maxStructureBlocks(),
@@ -298,7 +316,7 @@ public final class CreatePresentationAdapters {
 				demand.contains(CreatePresentationAdapter.STRESS) || derivedRawPair,
 				demand.contains(CreatePresentationAdapter.CAPACITY) || derivedRawPair,
 				demand.contains(CreatePresentationAdapter.INVENTORY),
-				demand.contains(CreatePresentationAdapter.FLUID), limits, memberGate);
+				demand.contains(CreatePresentationAdapter.FLUID), limits, memberGate, diagnostics);
 			for (int scan = 0; scan < sampled.workUsed(); scan++) {
 				if (!budget.scan()) {
 					return null;
@@ -307,10 +325,10 @@ public final class CreatePresentationAdapters {
 			return observation(sampled);
 		}
 
-		private CreatePresentationAdapter.Observation observation(CreatePresentationCollector.Sample sampled) {
+		private CreatePresentationAdapter.@Nullable Observation observation(CreatePresentationCollector.Sample sampled) {
 			if (!sampled.sourcePresent()) return null;
 			CreatePresentationCollector.Kinetic kinetic = sampled.kinetic();
-			CreatePresentationAdapter.Speed speed = kinetic.effectiveSpeed() != null
+			CreatePresentationAdapter.@Nullable Speed speed = kinetic.effectiveSpeed() != null
 				&& kinetic.theoreticalSpeed() != null && kinetic.moving() != null
 				? new CreatePresentationAdapter.Speed(kinetic.effectiveSpeed(),
 					kinetic.theoreticalSpeed(), kinetic.moving()) : null;

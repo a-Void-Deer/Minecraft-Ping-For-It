@@ -32,13 +32,13 @@ public final class CreateVaultInventoryAccess {
 	private CreateVaultInventoryAccess() {}
 	public static boolean recognizes(@Nullable BlockEntity entity) { return entity != null && TYPE.equals(entity.getClass().getName()); }
 	public static Optional<IPlatformInventoryService.Access> find(ServerLevel level, BlockPos original, Direction face) {
-		if (face == null || !CreatePresentationAvailability.available()) return Optional.empty();
+		if (face == null || !CreatePresentationAvailability.available(Diagnostics.server())) return Optional.empty();
 		return find(new MinecraftWorld(level), original, face);
 	}
 	/** Root, controller and every member must pass the gate before its state, relation or local handler is read. */
 	public static Optional<IPlatformInventoryService.Access> find(ServerLevel level, BlockPos original, Direction face,
 		Predicate<BlockPos> memberGate) {
-		if (face == null || memberGate == null || !CreatePresentationAvailability.available()) return Optional.empty();
+		if (face == null || memberGate == null || !CreatePresentationAvailability.available(Diagnostics.server())) return Optional.empty();
 		return find(new MinecraftWorld(level), original, face, memberGate);
 	}
 	static Optional<IPlatformInventoryService.Access> find(World world, BlockPos original, Direction face, Predicate<BlockPos> memberGate) {
@@ -132,7 +132,8 @@ public final class CreateVaultInventoryAccess {
 					|| field.getModifiers() != Modifier.PROTECTED || !field.trySetAccessible()) return null;
 				return field;
 			} catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
-				Diagnostics.warn("inventory-vault-stacks-field", "create:item_vault", () -> "fixed ItemStackHandler.stacks metadata unavailable", unavailable);
+				CreatePresentationDiagnostics.failure(Diagnostics.server(),
+					"inventory-vault-stacks-field", "native-stack-metadata-unavailable", null, unavailable);
 				return null;
 			}
 		}
@@ -140,7 +141,8 @@ public final class CreateVaultInventoryAccess {
 			if (FIELD == null) return null;
 			try { return FIELD.get(handler); }
 			catch (IllegalAccessException | RuntimeException | LinkageError unavailable) {
-				Diagnostics.warn("inventory-vault-stacks-read", "create:item_vault", () -> "current native local backing unavailable", unavailable);
+				CreatePresentationDiagnostics.failure(Diagnostics.server(),
+					"inventory-vault-stacks-read", "native-backing-unavailable", null, unavailable);
 				return null;
 			}
 		}
@@ -172,8 +174,9 @@ public final class CreateVaultInventoryAccess {
 	private static void failure(String operation, @org.jetbrains.annotations.Nullable World world, BlockPos original, java.util.function.Supplier<String> detail, Throwable failure) {
 		@org.jetbrains.annotations.Nullable Throwable reason = failure instanceof java.lang.reflect.InvocationTargetException ? failure.getCause() : failure;
 		if (reason instanceof InventorySourceUnavailableException) return;
-		Diagnostics.warn(operation, "create:item_vault",
-			() -> "position=" + original + " worldClass=" + (world == null ? "none" : world.getClass().getName()) + " " + detail.get(), failure);
+		CreatePresentationDiagnostics.failure(Diagnostics.server(), operation,
+			"vault-inventory-source-unavailable", () -> "provider=create:item_vault position=" + original + " worldClass="
+				+ (world == null ? "none" : world.getClass().getName()) + " " + detail.get(), failure);
 	}
 	private record Layout(BlockPos controller, int width, int length, Direction.Axis axis,
 		@org.jetbrains.annotations.Unmodifiable List<BlockPos> members, @org.jetbrains.annotations.Unmodifiable List<Integer> slotCounts,
@@ -213,7 +216,7 @@ public final class CreateVaultInventoryAccess {
 	}
 	private record MinecraftWorld(ServerLevel level) implements World {
 		@Override public String dimension() { return level.dimension().location().toString(); }
-		@Override public boolean currentRoute() { return CreatePresentationAvailability.available(); }
+		@Override public boolean currentRoute() { return CreatePresentationAvailability.available(Diagnostics.server()); }
 		@Override public Member loaded(BlockPos pos) {
 			if (!level.isLoaded(pos)) throw new InventorySourceUnavailableException("Vault member unloaded");
 			@Nullable BlockEntity entity = level.getBlockEntity(pos);

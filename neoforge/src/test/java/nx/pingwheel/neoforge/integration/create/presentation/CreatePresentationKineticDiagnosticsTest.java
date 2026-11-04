@@ -50,7 +50,7 @@ public class CreatePresentationKineticDiagnosticsTest {
 				var event = capture.events().getFirst();
 				assertEquals(Level.WARN, event.getLevel()); assertNull(event.getThrown());
 				String report = event.getMessage().getFormattedMessage();
-				assertTrue(report.contains("operation=create/presentation-kinetic"), report);
+				assertTrue(report.contains("site=create/presentation-kinetic"), report);
 				assertTrue(report.contains("kinetic getter cause"), report);
 				@Unmodifiable List<String> expected = switch (failedGetter) {
 					case "speed" -> List.of("speed");
@@ -75,7 +75,7 @@ public class CreatePresentationKineticDiagnosticsTest {
 				failedGetter.equals("stress") ? null : 3f, failedGetter.equals("capacity") ? null : 8f), kinetic);
 			assertEquals(List.of("speed", "theoretical", "network", "stress", "capacity", "overstress"), entity.reads);
 			assertEquals(1, capture.events().size());
-			assertTrue(capture.messages().getFirst().contains("operation=create/presentation-cached-" + failedGetter));
+			assertTrue(capture.messages().getFirst().contains("site=create/presentation-cached-" + failedGetter));
 		}
 	}
 
@@ -91,7 +91,8 @@ public class CreatePresentationKineticDiagnosticsTest {
 	}
 
 	private static CreatePresentationCollector.Kinetic invoke(Method read, GetterSource entity) throws Exception {
-		try { return (CreatePresentationCollector.Kinetic) read.invoke(null, entity, true, true, true, true, true); }
+		try { return (CreatePresentationCollector.Kinetic) read.invoke(null, entity, true, true, true, true, true,
+			nx.pingwheel.common.diagnostics.Diagnostics.server()); }
 		catch (InvocationTargetException failure) {
 			if (failure.getCause() instanceof Error error) throw error;
 			throw failure;
@@ -115,13 +116,14 @@ public class CreatePresentationKineticDiagnosticsTest {
 		var copied = new ClassNode(); copied.version = original.version;
 		copied.access = Opcodes.ACC_PUBLIC; copied.name = harness; copied.superName = "java/lang/Object";
 		for (var method : original.methods) {
-			if (!method.name.equals("readKinetic") && !method.name.startsWith("lambda$readKinetic$")) continue;
+			if (!method.name.equals("readKinetic") && !method.name.equals("report") && !method.name.startsWith("lambda$readKinetic$")) continue;
 			if (method.name.equals("readKinetic")) method.access = Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC;
 			for (var instruction : method.instructions) {
 				if (instruction instanceof TypeInsnNode type && type.desc.equals("com/simibubi/create/content/kinetics/base/KineticBlockEntity"))
 					type.desc = Type.getInternalName(GetterSource.class);
 				if (instruction instanceof MethodInsnNode call && call.owner.equals("com/simibubi/create/content/kinetics/base/KineticBlockEntity"))
 					call.owner = Type.getInternalName(GetterSource.class);
+				if (instruction instanceof MethodInsnNode call && call.owner.equals(owner)) call.owner = harness;
 				if (instruction instanceof InvokeDynamicInsnNode dynamic) {
 					for (int index = 0; index < dynamic.bsmArgs.length; index++) {
 						if (dynamic.bsmArgs[index] instanceof Handle handle && handle.getOwner().equals(owner))
@@ -139,7 +141,8 @@ public class CreatePresentationKineticDiagnosticsTest {
 		var writer = new ClassWriter(ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS);
 		copied.accept(writer);
 		return new HarnessLoader().define(harness.replace('/', '.'), writer.toByteArray())
-			.getMethod("readKinetic", BlockEntity.class, boolean.class, boolean.class, boolean.class, boolean.class, boolean.class);
+			.getMethod("readKinetic", BlockEntity.class, boolean.class, boolean.class, boolean.class, boolean.class, boolean.class,
+				nx.pingwheel.common.diagnostics.DiagnosticLogger.class);
 	}
 
 	@NotNullByDefault

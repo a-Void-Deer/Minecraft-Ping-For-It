@@ -1,6 +1,8 @@
 package nx.pingwheel.neoforge.integration.create;
 
-import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.LoaderDiagnosticScope;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
+import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.core.Filter;
 import org.apache.logging.log4j.core.LogEvent;
@@ -19,7 +21,8 @@ import java.util.List;
 public final class CreateDiagnosticCapture implements AutoCloseable {
 
 	public final List<LogEvent> events = new ArrayList<>();
-	private final Logger logger = (Logger) Diagnostics.logger();
+	private final Logger logger = (Logger) LogManager.getLogger("pingforit");
+	private final LoaderDiagnosticScope diagnostics;
 	private final Configuration configuration = logger.getContext().getConfiguration();
 	private final @Nullable LoggerConfig previous = configuration.getLoggers().get(logger.getName());
 	private final @Nullable Filter previousFilter = configuration.getFilter();
@@ -30,6 +33,11 @@ public final class CreateDiagnosticCapture implements AutoCloseable {
 	}
 
 	CreateDiagnosticCapture(Level level) {
+		this(level, LoggingProfile.DEEP);
+	}
+
+	CreateDiagnosticCapture(Level level, LoggingProfile profile) {
+		diagnostics = new LoaderDiagnosticScope(profile, profile);
 		// The loader's global WARN/ACCEPT filter overrides even a logger set to OFF.
 		if (previousFilter != null) {
 			configuration.removeFilter(previousFilter);
@@ -44,6 +52,7 @@ public final class CreateDiagnosticCapture implements AutoCloseable {
 
 	@Override
 	public void close() {
+		diagnostics.close();
 		configuration.removeLogger(logger.getName());
 		if (previous != null) {
 			configuration.addLogger(logger.getName(), previous);
