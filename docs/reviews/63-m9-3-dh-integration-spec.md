@@ -5,7 +5,7 @@
 - 我们的目标文件：`common/src/main/java/nx/pingwheel/common/integration/DistantHorizonsIntegration.java`（现为 76 行 stub）
 - API 面依据：`javap`（JDK 25）对 `run/mods/DistantHorizons-3.3.4-26.3-fabric-neoforge.jar` 的实测，命令与输出见 §9
 
-> **落地状态（2026-11-04）**：**已按本规格实现并通过复审**（`docs/reviews/64-m9-3-dh-integration-review.md`：通过、无阻塞），`compile-check` 绿（262 / 4 / 126，无 `com/seibel` 泄漏）；**实机待验**。
+> **落地状态（2026-11-04）**：**已按本规格实现并通过复审**（`docs/reviews/64-m9-3-dh-integration-review.md`：通过、无阻塞），`compile-check` 绿（262 / 4 / 126，无 `com/seibel` 泄漏）；**实机通过（2026-11-04，58-mod 会话装 DH 3.3.4）** —— 证据见 `docs/PORTING-PROGRESS.md` §M9-3「实机验收」。
 
 ## 0. 结论速览
 

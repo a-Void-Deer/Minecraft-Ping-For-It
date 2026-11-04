@@ -680,8 +680,8 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 | 集成 | 26.3 可用版本 | 依赖坐标 | 结论 | 预估 |
 |---|---|---|---|---|
 | **ModMenu** | `21.0.0`（2026-09-23） | `run/mods/modmenu-21.0.0.jar`（**compileOnly，离线**；CI 用 `curl` 从 TerraformersMC maven 补） | ✅ **已完成（M9-1）** | 0.5h |
-| **VoiceChat** | `fabric-2.6.27+26.3`（2026-10-28） | 当前：`run/mods/voicechat-fabric-2.6.27+26.3.jar`（**完整 mod，自带 104 个 `de/maxhenkel/voicechat/api/*` 类，compileOnly，离线**；CI 用 `curl` 取**同一件产物**） | ✅ **实现完成（审查通过），实机待验** | 2–3h |
-| **Distant Horizons** | `3.3.4-26.3`（自带 API 类）+ API `7.2.0` | 当前：`run/mods/DistantHorizons-3.3.4-26.3-fabric-neoforge.jar`（**完整 jar，compileOnly，离线**；CI 用 curl 取**同一件产物**）→ **已按方案 A 落地（2026-11-04）**：编译期 `compile-libs/DistantHorizonsApi-7.2.0.jar`、运行时 `run/mods` 完整 jar | ✅ **实现完成（复审通过），实机待验** | 3–4h |
+| **VoiceChat** | `fabric-2.6.27+26.3`（2026-10-28） | 当前：`run/mods/voicechat-fabric-2.6.27+26.3.jar`（**完整 mod，自带 104 个 `de/maxhenkel/voicechat/api/*` 类，compileOnly，离线**；CI 用 `curl` 取**同一件产物**） | ✅ **实现 + 审查 + 实机通过**（2026-11-03 起每轮 `Loaded 1 plugin(s)`） | 2–3h |
+| **Distant Horizons** | `3.3.4-26.3`（自带 API 类）+ API `7.2.0` | 当前：`run/mods/DistantHorizons-3.3.4-26.3-fabric-neoforge.jar`（**完整 jar，compileOnly，离线**；CI 用 curl 取**同一件产物**）→ **已按方案 A 落地（2026-11-04）**：编译期 `compile-libs/DistantHorizonsApi-7.2.0.jar`、运行时 `run/mods` 完整 jar | ✅ **实现 + 复审 + 实机通过**（2026-11-04，58-mod 会话装 DH 3.3.4；视距外 370.8 m BLOCK 命中·用户截图） | 3–4h |
 | FTB Teams | **无** | — | **跳过**（保真 #17） | — |
 | Sable | **无** | — | **跳过**（保真 #18） | — |
 
