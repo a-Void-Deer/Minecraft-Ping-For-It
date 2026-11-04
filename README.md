@@ -47,10 +47,6 @@ grammar, list defaults, and entity-block geometry modes are owned by the
 [client configuration](docs/config/client.md) and
 [VoxelShape geometry](docs/architecture/geometry/voxel_shape.md) contracts.
 
-The optional Create/Flywheel entity-block silhouette integration is not part of
-the 1.20.1 branch yet. Ordinary entity and block pings remain fully
-loader-independent.
-
 ## Languages
 
 Eight bundled locales are supported: `en_us`, `de_de`, `es_ar`,

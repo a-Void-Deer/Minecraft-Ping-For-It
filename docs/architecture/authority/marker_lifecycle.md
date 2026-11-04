@@ -21,7 +21,7 @@ by [server configuration](../../config/server.md).
 | From | Trigger | To or result |
 | --- | --- | --- |
 | No server record | The server accepts a create after authoritative validation and audience snapshotting | One active record with a new monotonic ID. Its arrival and expiry ticks are the authoritative lifetime carried in later snapshots. |
-| Active | An external-target refresh with the same committed identity succeeds | Still active. The locator or anchor may change, but ID, owner, target key, arrival, expiry, Ping Type, Target Type, and audience stay unchanged. It is not a new create or a new winner arrival; the preserved identity fields are owned by [target identity](../identity/target_model.md) and [Sable](../../integrations/sable.md). |
+| Active | An external-target refresh with the same committed identity succeeds | Still active. The locator or anchor may change, but ID, owner, target key, arrival, expiry, Ping Type, Target Type, and audience stay unchanged. It is not a new create or a new winner arrival; the preserved identity fields are owned by [target identity](../identity/target_model.md). |
 | Active | Owner cancellation | The record is physically removed with reason `CANCELLED`. |
 | Active | Server tick reaches the expiry tick (`expiresAtTick <= currentTick`) | The record is physically removed with reason `EXPIRED`. The boundary is server time, not a client display deadline. |
 | Active | Authoritative target invalidation | The record is physically removed with reason `TARGET_INVALID`. |

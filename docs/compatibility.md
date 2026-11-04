@@ -27,15 +27,13 @@ of hard optional-mod dependencies and respect deterministic teardown handles.
 
 - [Create](integrations/create.md) describes the three separate NeoForge routes
   and their different Create/Flywheel gates.
-- [Sable](integrations/sable.md) describes the existing external-block provider.
 - [Capture](architecture/picking/capture.md) preserves asynchronous Distant Horizons behavior.
 
 Optional integration support is version- and API-shape-specific. Reflective or
 lazy discovery may fail soft when the detected implementation does not provide
 the expected contract; this is not a promise of compatibility with arbitrary
-future versions. In particular, the current Sable adapter targets its established
-2.0.5 API shape, while Create/Flywheel support follows the versions documented
-by its integration contract.
+future versions. Create/Flywheel support follows the versions documented by its
+integration contract.
 
 ## Fixed exclusions and preserved behavior
 

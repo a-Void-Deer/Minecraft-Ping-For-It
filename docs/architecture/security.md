@@ -25,8 +25,7 @@ identity and anchor validation are a server boundary; the server does not claim
 to replay a client ray. Exact geometry and whole-entity rules are owned by
 [local geometry picking](picking/local_geometry.md#frozen-metadata-and-whole-entity-identity).
 External provider candidates and opaque locators must pass provider
-validation/materialization before gaining committed identity; see
-[Sable](../integrations/sable.md).
+validation/materialization before gaining committed identity.
 
 ## Server configuration update enforcement
 

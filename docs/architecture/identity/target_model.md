@@ -84,8 +84,7 @@ does not rewrite the whole-entity Target, marker identity or packet shape. See
 
 ## External-block identity
 
-The common external-block model, currently used by
-[Sable](../../integrations/sable.md), distinguishes a create candidate from a
+The common external-block model distinguishes a create candidate from a
 committed target:
 
 - An uncommitted candidate has an empty stable target ID. It cannot become a
@@ -121,8 +120,7 @@ round trips, are owned by the
 
 External locator/anchor refresh continuity, including the preserved marker
 fields, is owned by
-[marker lifecycle](../authority/marker_lifecycle.md) and the
-[Sable integration](../../integrations/sable.md#refresh-lifecycle). This
+[marker lifecycle](../authority/marker_lifecycle.md). This
 continuity within the fork does not imply original-mod protocol support.
 
 Packet roles are specified in [network protocol](../network/protocol.md); the
