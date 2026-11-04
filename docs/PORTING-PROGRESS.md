@@ -22,7 +22,7 @@
 | M7 | 渲染重建 | ✅ **M7a 方块线框 + M7b 实体描边 + M7c C1 模型光晕 + C2 entity_block 真实体光晕全部完成并实机通过（2026-11-01）**；含 HUD 投影补 bob、ping 提示改回聊天框（`dde1be5`） | 2026-11-01 | — |
 | M8 | 配置 / 命令 / UI | ✅ **完成（2026-11-01）**：**M8a** 完整分页设置界面 ✅、**M8b** 资源 v1 + 自定义贴图 ✅（**自定义资源包仍待补测**）、**M8c** toggle notice 第二层 HUD ✅，三者均实机通过；文档：`46`/`47`/`48`/`49` | 2026-11-01 | — |
 | M9 | 可选集成 | ✅ **M9-1/2/3 全部实现 + 实机通过**：Mod Menu（2026-11-03）、VoiceChat（**2026-11-03 起每轮 `Loaded 1 plugin(s)`**）、Distant Horizons（2026-11-04，方案 A，58-mod 会话装 DH 3.3.4，视距外 370.8 m BLOCK 命中）；FTB Teams / Sable 平台强制跳过（`24` #17/#18） | 2026-11-04 | — |
-| M10 | 验证与发布 | 🟡 **进行中：首批 4 项已提交（`0cb4a59`，复审 `66`「可合入」）** —— 许可（**MIT 事实订正** + `THIRD-PARTY-NOTICES.md` 237 行入 jar）、locale（7 语言 +70 行）、`GameContext.lastWorld` 清理、glow 诊断补强；**剩余**：CI 真实跑绿、188 测试基座、locale 收尾脚本、性能回归、`require=1` 策略、DH×OIT 决策，以及**用户端 `clean build` 后验 notices 进 jar** | 2026-11-04 | — |
+| M10 | 验证与发布 | 🟡 **进行中：首批 4 项已提交（`0cb4a59`，复审 `66`「可合入」）** —— 许可（**MIT 事实订正** + `THIRD-PARTY-NOTICES.md` 237 行入 jar）、locale（7 语言 +70 行）、`GameContext.lastWorld` 清理、glow 诊断补强；**剩余**：CI 真实跑绿、性能回归、`require=1` 策略、DH×OIT 决策，以及**用户端 `clean build` 后验 notices 进 jar**；**已落地（2026-11-04）**：B6 测试基座（`bash tools/test-check.sh` = **319/319/0**，`common/src/test` 55 java、非 188 全量）+ B7 locale 校验工具（`bash tools/locale-check.sh` = **used=155 / dead=8**、problems=none）；**清理包（未提交，2026-11-04）**：`CommonClient` 10 个 M7 残留空方法已删（0 ins / 79 del，723→644 行，`compile-check` 262/4/126 不变）+ `fabric.mod.json` 署名（`Luken`/`Natsume Anan`/`Natsume-Anan/QwQ`）+ 新增 `deferred/README.md`（39 行） | 2026-11-04 | — |
 | 事故恢复 | 目录重建 + 重新验证 | ✅ 完成 | 2026-10-30 | tag `restore-2026-10-29` |
 
 > **合规待办（M10，2026-11-04 已结案；此前的「上游是 Apache-2.0」是错的）**：本项目与上游 Ping For It **都是 MIT** —— 两份 `LICENSE` 的 SHA256 完全相同（`089e801f…a29594`，各 21 行）。**Apache-2.0 只适用于 vendor 进来的 `MavenComparableVersion`**（来自 Apache Maven 3.9.9），其 200 行全文已内嵌进 `THIRD-PARTY-NOTICES.md` §38–237（与上游 `LICENSE-APACHE-2.0` 逐行 0 差异）。`THIRD-PARTY-NOTICES.md`（237 行，含上游 MIT 归属 + 本项目说明 + assets 段）已由 `fabric/build.gradle:90` 并入 jar 根；`LICENSE` 经 `:82` 入 jar 为 `LICENSE_pingforit`，两文件并存不冲突。**唯一遗留**：用户端 `gradlew clean build` 后 `unzip -l` 确认 notices 真的在 jar 根（当前 `fabric/build/libs` 是改动前旧产物，复审 `66` B/C 已在旧 jar 上确认「没有 notices」属预期）。
@@ -164,7 +164,7 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 
 ### M3b · 渲染层最小编译修复 + 子系统搬迁（提交 `d8d610f`，121 文件）✅
 
-只做「能编译」所需的最小修复，**不重建渲染管线**；无法编译的渲染/UI 子系统整体搬到 `deferred/`（保留原目录结构，便于 M7 原样取回）。
+只做「能编译」所需的最小修复，**不重建渲染管线**；无法编译的渲染/UI 子系统整体搬到 `deferred/`（保留原目录结构，便于 M7 原样取回）。**（口径订正 2026-11-04：M7 最终以「重写」收口，这些文件**没有**被取回编译；`deferred/` 现为历史参考副本，见 `AGENTS.md` §2/§7.1 与 `deferred/README.md`。**另**：M3b 在 `CommonClient` 里留下的 10 个 `TODO(M7)` 空方法（`prepareEntityOutlines` 等）已于 2026-11-04 **整块删除**（0 ins / 79 del，723→644 行，`compile-check` 262/4/126 不变）—— 见 `AGENTS.md` §9.1 C 组「M7 残留死代码清理」）**
 
 **搬迁清单（M3b 当时 `deferred/` 共 92 个 java；现值 95，见下方 2026-11-02 注）**
 
@@ -909,7 +909,7 @@ M3 拆成两轮，避免「渲染层大改」把机械改名拖成长期红。
 | 6 | `runServer` 冒烟：专用服务器启动无 `NoClassDefFoundError`（确认 main 不误引客户端类） | M10 | 用户终端 `gradlew :fabric:runServer`（或根级别名）；首次先改 `run/eula.txt` 为 `eula=true`（**ASCII**，见 `AGENTS.md` §7.20） | ✅ **已提前于 P0 完成（2026-11-04 16:52）**：`Done (2.998s)!` / 47 mods / 0 ERROR，见 §P0.3 |
 | 7 | CI 校验：workflow 覆盖 `clean build` + 产物上传 + jar 元数据检查 | M10 | GitHub Actions 绿 | ⬜ |
 | 8 | locale 补键：以 en_us 163 键 − 8 死键 = **155 在用键**为基准，补齐 8 个语言 | M10 | 脚本比对所有 `translatable` key | 🟡 **部分完成（`0cb4a59`）**：7 个 locale **+70 行 / 0 删除**（`zh_cn` +5、`zh_tw` +13、`de_de` +9、`es_ar` +9、`fr_fr` +12、`pl_pl` +11、`tr_tr` +11）；`pl_pl`/`tr_tr` 各 4 条 `*.template.override` **有意留空**（填英文反而更差，`PingChatBuilder:74-75`）；`de/es/fr` 各 2 条历史 extra 键（loot/destroy）。**遗留**：缺能复现 155/8 基准的脚本（`66` D1：多数 key 是 `LanguageUtils.settings(...)` 动态拼的） |
-| 9 | 188 个测试类：重建测试基座（需 26.3 编译产物），能救多少救多少 | M10 | `gradlew test` | ⬜ **搬运清单已备**：`65` §5 把 M5 相关测试按依赖分成 A（零 MC 依赖，约 120 个 `@Test` 可直接搬）/ B（需 MC 服务端类）/ C（需 `FriendlyByteBuf`）三组；另需自写 `RateLimiterTest`（G2） |
+| 9 | 上游测试基座（**B6**）：上游 `common/src/test` **188** + `neoforge/src/test` **3** = **191** java | M10 | `bash tools/test-check.sh`（离线，不经 Gradle） | ✅ **已落地并实跑（2026-11-04）**：**55 个测试文件 / tests=319 / passed=319 / failed=0 / exit=0**；零依赖基座 `nx.pingwheel.common.testing.{TestCase,Assertions,TestRunner,AllTests}`（`AllTests` 用 `Class.forName` 注册）；**非 188 全量移植**（只搬零 MC 依赖部分，未搬清单见复审 `68`）；`gradlew test` 仍被离线环境阻塞（`common/build.gradle` 已临时关 `test` 任务）；另需自写 `RateLimiterTest`（`65` G2） |
 | 10 | 性能回归：繁忙世界（大量 BER/实体）下的 HUD/光晕开销 | M10 | 对比空闲/繁忙帧时 | ⬜ |
 | 11 | **OIT 复测**（M7a 遗留，非阻塞）：透明物体叠加顺序 | M7 | 实机看透明方块后方的线框 | ⬜ 可选 |
 | 12 | `改进方案.md` 里用户正在写的条目 | — | 用户决定后处理 | ⏸ 用户暂缓 |

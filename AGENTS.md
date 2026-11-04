@@ -1,7 +1,7 @@
 # AGENTS.md · Ping For It（MC 26.3 / Fabric 单端）协作说明
 
 > 团队唯一事实来源：现状、目录、构建、已验证结论、已知坑、待办。
-> 维护者：Lead｜**最后更新：2026-11-04（M10 首批落地：许可事实订正为 MIT + `THIRD-PARTY-NOTICES.md` 237 行并入 jar + 7 个 locale 补 70 行 + `GameContext.lastWorld` 清理 + glow 诊断补强，提交 `0cb4a59`，复审 `66`「可合入、无阻塞」；M5 代码层分析完成（`41dd565` / `65`），实机仍待双客户端；M9-3 DH 实机通过；P0 收口；根级 run 任务为转发别名）**
+> 维护者：Lead｜**最后更新：2026-11-04（M10 首批落地：许可事实订正为 MIT + `THIRD-PARTY-NOTICES.md` 237 行并入 jar + 7 个 locale 补 70 行 + `GameContext.lastWorld` 清理 + glow 诊断补强，提交 `0cb4a59`，复审 `66`「可合入、无阻塞」；M5 代码层分析完成（`41dd565` / `65`），实机仍待双客户端；M9-3 DH 实机通过；P0 收口；根级 run 任务为转发别名；`deferred/` 口径订正为「历史参考副本、不参与编译、**M7 是重写收口**、去留待用户决定」；**清理包落地（2026-11-04，未提交）：`CommonClient` 删 10 个 M7 残留空方法（0 insertions / 79 deletions，723→644 行，`compile-check` 262/4/126 不变）+ `fabric.mod.json` 署名（`Luken` / `Natsume Anan` / `Natsume-Anan/QwQ`）+ 新增 `deferred/README.md`（39 行）**；清理包复审通过（`docs/reviews/67-cleanup-package-review.md`「可合入、无代码阻塞」，两个非阻塞项：`deferred/` 仍有 6 处旧调用、行号已校正为 471–549）；**B6 测试基座 ✅ 已落地并实跑**（`tests=319 / passed=319 / failed=0`，`bash tools/test-check.sh` exit 0；`common/src/test` 现 55 java，**非 188 全量移植**）+ **B7 locale 工具 ✅**（`used=155 / dead=8`、problems=none）；**B4 / B5 / B9 待用户决策，B9 是发布门禁**）**
 
 ## 0. 2026-10-29 数据事故与恢复（先读）
 
@@ -44,7 +44,7 @@ fabric/src/main/templates/fabric.mod.json      元数据模板（构建时生成
 fabric/src/client/java/  80 java   仅客户端：HUD、输入、命令、平台适配、客户端 mixin、ModMenu entrypoint
 fabric/src/client/resources/       pingforit.mixins.json（JAVA_25，client 列表）+ 2 个客户端 ServiceLoader 条目
 forge/ neoforge/                   只有 README 的预留目录，**不在 settings.gradle**，不参与构建
-deferred/                95 java   26.3 无对应原语的渲染/UI 子系统，不参与编译，M7 取回（原 96，M9-1 移出 `modmenu/`）
+deferred/                95 java   26.3 无对应原语的渲染/UI 子系统的**历史参考副本**，**不参与编译**（`settings.gradle` 不 include、`*.gradle` 零引用）；**M7 以重写收口**（`deferred/README.md`：39 行说明 + **11 行旧→新对照表**，2026-11-04 新增）；**去留待用户决定**，不要为「修红」加回编译路径（原 96，M9-1 移出 `modmenu/`）
 tools/compile-check.sh|.ps1        本地 javac 三遍校验（common → fabric main → fabric client）+ 服务端安全 grep 门禁
 compile-libs/                      DistantHorizonsApi-<ver>.jar（**仅编译期**，不入库；方案 A，见 §7.15）
 docs/                              porting-plan / PORTING-PROGRESS / features / reviews / team.md / restructure/
@@ -119,7 +119,7 @@ export GRADLE_USER_HOME="D:/Gradle"
 
 ## 7. 已知坑与约束
 
-1. **`deferred/` 不在编译路径**：类找不到是正常的，M7 取回；不要为「修红」重写。
+1. **`deferred/` 不在编译路径，也**不会**被取回编译**：它是 26.3 无对应原语的渲染/UI 子系统的**历史参考副本**（`settings.gradle` 不 include、`*.gradle` 零引用、`deferred/README.md` 有说明）；**M7 是重写收口**，不是把这些文件搬回 sourceSets。类找不到是正常的，**不要为「修红」加回编译路径**；去留待用户决定。
 2. **26.3 的 HUD/渲染 API 与 1.21.1 完全不同**：HUD 走 `HudElementRegistry.addLast` + `GuiGraphicsExtractor`；旧 `WorldRenderEvents`/`MultiBufferSource`/`OutlineBufferSource`/`RenderStateShard`/`LevelRenderer.renderLevel` 都不存在。
 3. **`InputConstants` 是 SDL 语义、鼠标键 1 基**：`MOUSE_BUTTON_LEFT=1 … MOUSE_BUTTON_5=5`、`KEY_LSHIFT=225`，`Type` 只剩 `KEYBOARD/MOUSE`。
 4. **配置版本号必须是 `x.x.x-pfi-qualifier`**，否则配置迁移/入口异常。
@@ -186,13 +186,13 @@ export GRADLE_USER_HOME="D:/Gradle"
 | M8 | 配置/命令/UI + 资源重载迁 v1 | ✅ **完成（2026-11-01）**：**M8a** 完整分页设置界面（6 客户端分类/25 项 + 3 服务端分类/5 字段，含 tab 冻结修复）实机通过；**M8b** 资源 v1 + 自定义贴图（默认路径通过，**自定义包待补测**）；**M8c** toggle notice 第二层 HUD 实机通过。文档：`46`/`47`/`48`/`49` |
 | M9 | 可选集成（ModMenu/VoiceChat/FTB/DH/Sable） | **M9-1 ✅ 实现 + 实机通过（2026-11-03）**：Mod Menu 类从 `deferred/` 迁回 `src/client`（与上游逐字节一致）、`fabric.mod.json` 加 `modmenu` entrypoint、依赖改 `run/mods` 离线 jar；**M9-2 ✅ 实现 + 实机通过（2026-11-03）**：`VoiceChatIntegration`/`VoiceChatWrapper` 与上游逐字节一致、`fabric.mod.json` 加 `voicechat` entrypoint、`build.gradle` 加 `compileJava` 的 `voicechat-` jar 检查；实机证据：R1 起每轮 `Loaded 1 plugin(s)` + `Initialized 1 plugin(s)` + `Registering events for 'pingforit'`（不再是从前的 0）。**M9-3 ✅ 实现 + 复审 + 实机通过（2026-11-04，58-mod 会话装 DH 3.3.4）**：`DistantHorizonsIntegration` 由 76 行 stub 换回**上游 201 行实现**（`rootCause` 未动、调用点零改动），**方案 A** = 编译期只吃 `compile-libs/DistantHorizonsApi-7.2.0.jar`（Modrinth 官方件，363 318 B）、运行时仍用 `run/mods` 的完整 jar；复审 `docs/reviews/64-m9-3-dh-integration-review.md`（通过、无阻塞）；**实机证据**见 §6 表：`Distant Horizons API Version: 7.2.0` 探针 + 闭环 36:36 + 0 条 trace/schedule 失败 + 视距外 `草方块 370.8m` BLOCK 命中（用户截图）；FTB Teams / Sable **平台强制跳过**（`24` #17/#18） |
 | **P0（重构后验收）** | 多模块重构（`f18e31e`）后的实机回归 | **✅ P0 收口（V13–V15 受限未验证）**：V1/V4/V9/V12/V16/V17 ✅、**V18 ✅（2026-11-04 16:52，`Done (2.998s)!` / 47 mods / 0 ERROR）**；V6/V7/V11 🟡（需肉眼/留证）；**V13–V15 ⏸ 受限未验证**（见 `24` #19 实测结论；描边仍可见、仍穿墙，仅半透明叠加时可能有染色差异）；V19 ⏸ 可选。逐项见 `docs/PORTING-PROGRESS.md` §P0 |
-| M10 | 验证与发布：`runServer`、CI、测试基座、许可合规（MIT + `THIRD-PARTY-NOTICES` 入 jar） | 🟡 **进行中：首批 4 项已提交（`0cb4a59`，复审 `66`「可合入、无阻塞」）** —— 许可事实（MIT + `THIRD-PARTY-NOTICES.md` 237 行并入 jar）、locale（7 语言 +70 行）、`GameContext.lastWorld` 清理、glow 诊断补强；**剩余**：CI 真实跑绿、188 测试基座、locale 收尾脚本、性能回归、`require=1` 策略、DH×OIT 决策；**另需用户端 `gradlew clean build` 后 unzip 验 notices 进 jar**（当前 `fabric/build/libs` 是改动前旧产物） |
+| M10 | 验证与发布：`runServer`、CI、测试基座、许可合规（MIT + `THIRD-PARTY-NOTICES` 入 jar） | 🟡 **进行中：首批 4 项已提交（`0cb4a59`，复审 `66`「可合入、无阻塞」）** —— 许可事实（MIT + `THIRD-PARTY-NOTICES.md` 237 行并入 jar）、locale（7 语言 +70 行）、`GameContext.lastWorld` 清理、glow 诊断补强；**剩余**：CI 真实跑绿、**B6 测试基座 ✅ 已落地（319/319/0）/ B7 locale 工具 ✅ 已落地**、性能回归、**B4 `require=1` 策略（待用户）**、**B5 DH×OIT 路线（待用户）**、**B9 改进方案 3 条（待用户结论）**；**另需用户端 `gradlew clean build` 后 unzip 验 notices 进 jar**（当前 `fabric/build/libs` 是改动前旧产物）。**2026-11-04 清理包（未提交）**：`CommonClient` 10 个 M7 残留空方法已删（0 ins / 79 del，723→644 行，`compile-check` 262/4/126 不变）、`fabric.mod.json` 署名已改、新增 `deferred/README.md`（39 行） |
 
 **任务顺序（2026-10-31 用户确认）**：**M8 → M7c-C2 → M9 → M10**（M8 ✅；C2 实现完成待实机，实机通过后进 M9；`entity_block` 已改为真实 BER 光晕，线框仅作 fallback）。
 
 ## 9.1 待完成清单（2026-11-04 盘点）
 
-> M0–M8、M9-1/M9-2/M9-3 已完成；**P0 已收口**——除 **V13–V15（⏸ 受限未验证）** 与 **V19（⏸ 可选）** 外全部通过。**M10 首批 4 项已提交（`0cb4a59`）**，本表 C 组已按实际状态更新；M5 代码层分析见 `65`（实机仍待双客户端）。
+> M0–M8、M9-1/M9-2/M9-3 已完成；**P0 已收口**——除 **V13–V15（⏸ 受限未验证）** 与 **V19（⏸ 可选）** 外全部通过。**M10 首批 4 项已提交（`0cb4a59`）**，本表 C 组已按实际状态更新；M5 代码层分析见 `65`（实机仍待双客户端）。**2026-11-04 回填**：**B6 已落地并实跑**（`tests=319 / passed=319 / failed=0`；`common/src/test` 现 **55** java，**非 188 全量移植**）；**B7 已落地并实跑**（`used=155 / dead=8`）；B4 / B5 / B9 为**待用户拍板**项；B9 是**发布门禁**（每条没有结论都不得发布）。
 
 | 分组 | 项 | 验收方式 | 状态 |
 | --- | --- | --- | --- |
@@ -203,17 +203,25 @@ export GRADLE_USER_HOME="D:/Gradle"
 | B · 主线功能 | **M5 服务端权威验收**：受众快照 / 赢家选择 / 移除仅本人 / 限流 / 过期 / 断线重连 | **两个客户端互测** | ⬜（代码已存在）——**代码层分析已完成（`65`，`41dd565`）：6 条契约中 5 条由结构保证、2 项原版客户端验不了；只差双客户端实机** |
 | C · M10 发布 | **许可合规**：确认本项目/上游 MIT + `THIRD-PARTY-NOTICES` 并入 jar | 检查 jar 内 `LICENSE_pingforit` 与 notices | ✅ **已完成（`0cb4a59`）**：本项目与上游**都是 MIT**（两份 `LICENSE` SHA256 相同、各 21 行）；`THIRD-PARTY-NOTICES.md` **237 行**（上游 MIT 归属 + vendor 进来的 `MavenComparableVersion` 的 **Apache-2.0** 全文，§38–237 与上游 `LICENSE-APACHE-2.0` 逐行一致）；`fabric/build.gradle:82,90` 已把 `LICENSE`（入 jar 为 `LICENSE_pingforit`）与 `THIRD-PARTY-NOTICES.md` 都打进 jar 根，两者是**不同文件、并存不冲突**。**遗留**：需用户端 `gradlew clean build` 后 `unzip -l` 确认 notices 进 jar（当前 `fabric/build/libs` 是改动前旧产物） |
 | C · M10 发布 | **CI 真实跑绿**：`clean build` + 产物上传 + jar 元数据检查 | GitHub Actions 绿 | ⬜ **从未真正跑过**（本机无网）——**发布前唯一外部未知项** |
-| C · M10 发布 | **188 个测试类**基座重建 | `gradlew test` | ⬜ |
-| C · M10 发布 | **locale 补键**：以 en_us 163 键 − 8 死键 = **155 个在用键**为基准，补齐 8 个语言 | 脚本比对 key | 🟡 **部分完成（`0cb4a59`，7 个 locale 共 **+70 行 / 0 删除**；`compile-check` class 数不变 262/4/126）**：`zh_cn` +5、`zh_tw` +13、`de_de` +9、`es_ar` +9、`fr_fr` +12、`pl_pl` +11、`tr_tr` +11；8 个文件 UTF-8 可解析、无重复键、占位符一致。**有意留空**：`pl_pl`/`tr_tr` 各 4 条 `pingforit.chat.{danger,go_to,take,request}.template.override`（填英文 override 反而比通用句更差，机制见 `PingChatBuilder:74-75`）；`de/es/fr` 各有 2 条 en_us 没有的历史 extra 键（loot/destroy override）。**遗留**：仍缺一个能复现 155/8 基准的脚本（复审 `66` D1：静态字面量扫描不可靠，多数 key 经 `LanguageUtils.settings(...)` 动态拼） |
+| C · M10 发布 | **B6 上游测试基座**：上游测试 java 共 **191**（`common/src/test` **188** + `neoforge/src/test` **3**） | `bash tools/test-check.sh`（离线，不经 Gradle）+ 零依赖基座 | ✅ **已落地并实跑（2026-11-04；2号 跑通 + Lead、1号 复核）**：上游测试 java 共 **191**（`common/src/test` **188** + `neoforge/src/test` **3**）；**本轮不是 188 全量移植** —— `common/src/test/java` 现 **55 个 java**，只搬**零 MC 依赖**的部分（未搬清单与原因由复审 `docs/reviews/68-b6-b7-review.md` 记录；**该文件截至本次写入尚未入库**）。零依赖基座：`nx.pingwheel.common.testing.{TestCase, Assertions, TestRunner, AllTests}`（另有 `Test` / `BeforeEach` / `Executable` 注解与函数式接口）；**`AllTests` 用字符串类名 + `Class.forName` 注册** → 类缺失会在 runner 启动时**立刻报错**而不是静默跳过。本机无网、Gradle 缓存无任何 JUnit jar → 不能引 JUnit（否则 `gradlew clean build` 会在依赖解析阶段挂）。**实测 tests=319 / passed=319 / failed=0** |
+| C · M10 发布 | **B6 A 组用例移植与本地执行**（**离线替代，不是 `gradlew test`**） | `bash tools/test-check.sh`（4号 的脚本：JDK 25 直接 `javac` + `java` 跑 `nx.pingwheel.common.testing.TestRunner`，**不经过 Gradle**） | ✅ **已落地并实跑（2026-11-04）**：`bash tools/test-check.sh` → `[main] sources=162 classes=262`、test 编译通过、**tests=319 / passed=319 / failed=0**、`[runner] exit=0`、`[summary] test-check status=PASSED exit=0`。**口径声明**：这**不是 `gradlew test`** —— 是 JDK 25 直接 `javac`+`java` 跑 `TestRunner` 的**离线替代**，只证明这 319 个 A 组用例在离线基座上通过 |
+| C · M10 发布 | **B6 JUnit 依赖 + `gradlew test` 接线**（真正的 Gradle 测试任务） | 需要能从 maven 下载 `org.junit.jupiter:junit-jupiter`，或提供本地 jar | ⏸ **被环境阻塞**：离线环境做不到；恢复网络或提供本地 jar 后才能做。**在此之前不要往 `build`/`check` 挂测试任务**（会破坏 offline `gradlew build`）。**配套改动（已落地）**：`common/build.gradle` 末尾加了 `tasks.matching { it.name == 'test' }.configureEach { enabled = false }`（8 行注释说明：无网 / 缓存无 JUnit jar / Gradle 9 默认 `failOnNoDiscoveredTests=true`，不关掉会让离线 `gradlew clean build` 挂）。**等能联网或提供本地 JUnit jar 后，删掉这段再按 JUnit 正式接线** |
+| C · M10 发布 | **locale 补键**：以 en_us 163 键 − 8 死键 = **155 个在用键**为基准，补齐 8 个语言 | 脚本比对 key | 🟡 **部分完成（`0cb4a59`，7 个 locale 共 **+70 行 / 0 删除**；`compile-check` class 数不变 262/4/126）**：`zh_cn` +5、`zh_tw` +13、`de_de` +9、`es_ar` +9、`fr_fr` +12、`pl_pl` +11、`tr_tr` +11；8 个文件 UTF-8 可解析、无重复键、占位符一致。**有意留空**：`pl_pl`/`tr_tr` 各 4 条 `pingforit.chat.{danger,go_to,take,request}.template.override`（填英文 override 反而比通用句更差，机制见 `PingChatBuilder:74-75`）；`de/es/fr` 各有 2 条 en_us 没有的历史 extra 键（loot/destroy override）。**遗留**：见下方「B7 locale 一致性校验工具」行 —— 工具实测 **[used] used=155 / dead=8**，与团队旧口径一致 |
+| C · M10 发布 | **B7 locale 一致性校验工具** | `bash tools/locale-check.sh`（**`--strict` 时未白名单问题 exit 1**） | ✅ **已落地（4号，2026-11-04；1号 实跑 `bash tools/locale-check.sh` = exit 0）**：`tools/LocaleCheck.java`（单文件零依赖）+ `tools/locale-check.sh` / `.ps1`（薄包装）+ `tools/locale-allowlist.txt`（每条白名单带理由：`pl_pl`/`tr_tr` 各 4 条 chat override 允许 missing、`de_de`/`es_ar`/`fr_fr` 各 2 条 loot/destroy override 允许 extra）。**实测**：baseline `en_us` **163** 键；8 个 locale 的 missing / extra / duplicate / placeholder-mismatch **全 0**（白名单命中 missing-ok=8、extra-ok=6、used-ok=2，problems=none）；**[used] used=155 / dead=8**（dead = `settings.pingforit.server_settings.*` ×6 + `open_block_shape_blacklist_config` ×2）→ **与团队旧 155/8 口径一致**（工具把动态 key 也推导进来了，`66` D1 的顾虑已解决）。**used 扫描覆盖面**（不只字面量）：`LanguageUtils.settings/command/of/keyOf/path` 的字面量 + **变量链**（如 `langChannel.path`）+ `SettingsCategoryCatalog` 的 setting id 与其 `.tooltip` + 9 个分类 / 8 个 group + `PingTypeCatalog` 的 7 个类型与 `.phrase`/override + 4 个枚举 value 名；`--strict` 存在未白名单问题时 **exit 1** |
 | C · M10 发布 | **性能回归**：繁忙世界（大量 BER/实体）下 HUD/光晕开销 | 对比空闲/繁忙帧时 | ⬜ |
 | C · M10（技术债） | `GameContext.lastWorld` 静态 `ClientLevel` 断线后不清空（`docs/reviews/57-pipeline-conflict-audit.md` **S1**）→ 内存滞留 | 改代码 + 断线复测 | ✅ **已修（`0cb4a59`）**：新增 `GameContext.clearLastWorld()`（`fabric/src/client/java/nx/pingwheel/common/core/GameContext.java:59`），由 `FabricClient.java:65-66` 的 `ClientPlayConnectionEvents.DISCONNECT` 调用；`RENDER_ENTITY_LOOKUP_CACHE` 有独立清理（`CommonClient:119` / `:563-565`），**无需在 clearLastWorld 里重复**（复审 `66` E） |
-| C · M10（技术债） | 5 处 mixin 仍 `require=1`（同 `57` **H5**）→ 未来 MC 签名变动会**启动崩溃**而不是降级 | 评估改 `require=0` + 诊断 | ⬜ **策略待定**（复审 `66` 未涉及）：改 `require=0` 必须同时配诊断，否则未来 MC 签名变动会**静默降级**——两种失败模式要一起权衡 |
+| C · M10（技术债） | **B4 mixin `require` 策略**（同 `57` **H5**）：显式 `require = 1` **0 处**；其余 **15 处已 `require = 0` + 诊断**；**仍有 5 处隐式 `require = 1`（默认值）**：`fabric/src/client/java/nx/pingwheel/common/mixin/KeyMappingMixin.java`（`@Inject` ×3：`click`/`set`/`releaseAll` + `@Redirect` ×1）与 `MinecraftMixin.java`（`setScreenAndShow`） | 用户决策后再改 | ⬜ **待用户拍板**。两种失败模式：**保留 `require=1`** → 未来 MC 签名变动 = **启动崩溃**（可发现）；**改 `require=0`** → **静默降级**，必须同时加一次性诊断日志才可接受 |
 | C · M10（技术债） | 诊断信号变弱（`entity-block glow` 的 WARN 已降 DEBUG）→ 真回归只能靠视觉 | 2号 补强方案（`resolved`/`consumed` 计数 + 首次消费 DEBUG） | ✅ **已补强（`0cb4a59`）**：`EntityBlockGlowState` 新增 `glowingDispatches`/`consumedDispatches` 计数（`:96-97`，累加 `:195`/`:198`）与「首次真正消费颜色」的一条 DEBUG（`:244`）；120 派发那条 DEBUG 增加 4 个计数字段（`:211-216`）。**语义注意**：计数单位是「**派发次数**」不是帧数（复审 `66` F） |
-| C · M10（技术债） | **DH × OIT 互斥策略**：装 DH 的玩家永远走不到 `outline` 相位分支 | 加诊断开关强制走，或在 `docs/reviews/24-fidelity-constraint-audit.md` 登记为已知行为 | ⬜ 待决（M9-3 实机已复现：装 DH 时恒有 `Disabling improved transparency…` → `outline` 分支不可达，见 `24` **#19** 实测结论） |
+| C · M10（技术债） | **DH × OIT 互斥策略**：装 DH 的玩家永远走不到 `outline` 相位分支 | 加诊断开关强制走，或在 `docs/reviews/24-fidelity-constraint-audit.md` 登记为已知行为 | ⬜ **待用户选**（B5）：M9-3 实机已复现「装 DH 时恒有 `Disabling improved transparency…` → `outline` 分支不可达」（`24` **#19**）。两条候选路线：**① 加诊断开关强制走 `outline` 相位**（可测，但属非上游行为，需在 `24` 登记为保真偏差）；**② 在 `docs/reviews/24` 登记为已知行为**（零代码改动） |
+| C · M10（清理） | **M7 残留死代码清理**：`CommonClient` 里 10 个**零调用**的 `TODO(M7)` 空方法（`prepareEntityOutlines` / `prepareBlockOutlines` / `prepareBlockPresentations` / `requestEntityOutlineEffect` / `renderModelOutlines` / `renderEntityOutlines` / `entityOutlineRequestSucceededThisFrame` / `modelOutlinesEmittedThisFrame` / `resetModelOutlinesForFrame` / `renderBlockOutlines`）+ M3b 段的占位注释 | 零调用点 + `compile-check` 三遍 | ✅ **已完成（2026-11-04，2号 自测 + 1号 复核；复审 `docs/reviews/67-cleanup-package-review.md`：「可合入、无代码阻塞」）**：删除 `CommonClient.java` **471–549**（471 是前置空行 + 472–549 是段落注释 12 行 + 方法 65 行）＝ **0 insertions / 79 deletions**（复审 `67` D 校正：原写「472–549」少算 471 这一行，**79 与 471–549 吻合**），文件 **723 → 644 行**；`onRenderFrame()` 保留（现 `:481`）；`import net.minecraft.client.Camera` **不能删**（`hudRenderContext()` 仍在用，`:382-383`）；`LevelExtractorMixin.pingforit$prepareEntityOutlines` 是同名的**另一个** mixin 回调，**保留**；**`compile-check` 三遍 0 error、class 数 262/4/126 与删除前完全一致**（1号 复跑确认） |
 | D · 遗留 / 可选 | **M8b 自定义资源包补测**（替换 `assets/pingforit/textures/ping.png`） | 实机贴图 | ⏸ 等用户提供资源包 |
 | D · 遗留 / 可选 | **OIT 复测**：透明物体叠加顺序 | 实机 | ⏸ 可选 |
 | D · 遗留 / 可选 | `render/spike/OutlineExperiment` 清理 | 删除并确认无引用 | ⏸ 用户已确认保留 |
-| D · 遗留 / 可选 | **`改进方案.md` 里的用户条目** | 用户逐条确认 | ⏸ 用户暂缓 |
+| D · 遗留 / 可选 | **`deferred/` 95 个 java 的去留**：保留作历史参考 or 删除 | 用户决定 | ⏸ **保留中，等用户决定**：**`deferred/README.md` 已落地（39 行，2026-11-04）** —— 仅历史参考 / 不参与编译（`grep -rn 'deferred' --include=*.gradle .` 零命中）/ **M7 是重写而非取回** / **11 行旧→新对照表**（每行在源码核对过：`screen/*` 8 个里 **5 个逐字节相同**、`render/SelectionToggleNoticeRenderPolicy` 也逐字节相同；`Flywheel*` 8 个与 `OutlineOnlyBufferSource`/`LevelRendererOutlineRequest` 等**无一一对应**，`grep -rni flywheel fabric/src common/src` 0 命中）；**不得加回编译路径**；**复审 `67` A 项已闭环**：README 新增「副本自身也已编译不过」段，列出 `deferred/mixin/LevelRendererMixin.java:92,95,102,119,124` → 5 个已删方法、`GameRendererMixin.java:62` → `renderBlockOutlines`（共 6 处 M7 空方法旧调用），另加 `GuiMixin.java:22` → `onRenderGUI`（HUD 入口已并入 `HudElementRegistry`）共 7 处；并明确「零引用只在编译树成立」 |
+| D · 改进方案 §1（**B9-1**） | **描边线宽随距离补偿**：远处方块变小但线宽固定 3.75px → 观感「线越来越粗」 | 已在 `改进方案.md` §1 记录完整分析 | ✅ **已结案（2026-10-31 用户决定：保持与上游一致，不做距离补偿）** |
+| D · 改进方案 §2.1（**B9-2**） | **整体方块标记判定**：大箱子 / 床 / 木门类只标**单格**而非整体 | **发布门禁**：必须给出结论（实现 / 不做 / 转下一版） | ⬜ **待用户结论** |
+| D · 改进方案 §2.2（**B9-3**） | **标记点远离后的「标记伪形」** | **发布门禁**：同上 | ⬜ **待用户结论** |
+| D · 改进方案 §2.3（**B9-4**） | **基准线**（用户原文只写「待补充」，内容未定义） | **发布门禁**：同上 | ⏸ **条目还没写，无法评估** |
 
 ### 发布门禁（M10 收尾前必须满足）
 
@@ -236,9 +244,11 @@ export GRADLE_USER_HOME="D:/Gradle"
 - [ ] `gradlew -g D:/Gradle build` 通过，产物 `fabric/build/libs/Ping-For-It-0.4.2-pfi-beta1-fabric-26.3.jar`
 - [ ] jar 内 `fabric.mod.json` 的 `id=pingforit`、version 与 `gradle.properties` 一致；mixins 对象形式且 `environment: client`
 - [ ] **合并后的 jar 内容完整**（资源经 `fabric.processResources` 合并 `:common` 资源、class 经 `jar.from(:common classesDirs)`）：`nx/pingwheel/common/**` 与 `nx/pingwheel/fabric/**` 都在、`pingforit.mixins.json` 在、`assets/pingforit/**` + `icon.png` 在、**`LICENSE_pingforit` 在（本项目 MIT）**、**`THIRD-PARTY-NOTICES.md` 在 jar 根（第三方声明 + 内嵌 Apache-2.0 全文；与 `LICENSE_pingforit` 是**两个不同文件，都要在**）**、`META-INF/services` 五份 SPI 各一份、`unzip -l | sort | uniq -d` 无重复条目。dev 的 `runClient` 走 runtimeClasspath，**通过它不能证明 jar 合并正确**。
+- [ ] **`fabric.mod.json` 署名/联系信息**（2026-11-04 已落地，**待 build 后核 jar 内生成结果**）：`authors: ["Luken"]`（上游原作者）+ `contributors: ["Natsume Anan"]`（移植者）+ `contact` 的 `homepage`/`sources`/`issues` → `https://github.com/Natsume-Anan/QwQ`（**不再是模板的 `isharmla` / 空 `contact`**）
 - [ ] `runClient` 不卡加载条，无 `Mixin apply failed`
 - [ ] 进世界后按键产生成对 `send ping` / `marker created`
 - [ ] `common/src/main/java` 下 grep 不到 `net.minecraft.client.` / `com.mojang.blaze3d`（`tools/compile-check.sh|.ps1` 的 gate 命中即 exit 1）
+- [ ] **离线校验两条全绿**：`bash tools/test-check.sh` → **319/319/0**、exit 0；`bash tools/locale-check.sh` → **used=155 / dead=8**、problems=none、exit 0（这两条**不依赖 Gradle**，比 `gradlew test` 更现实）
 - [ ] 未把 `deferred/` 误加回编译路径
 
 ## 11. 移植阶段与估算
@@ -261,5 +271,5 @@ export GRADLE_USER_HOME="D:/Gradle"
 | D5 | 暂时保留 ServiceLoader 平台层 |
 | D6 | 不引入 Parchment |
 | D7 | 移除 Lombok |
-| D8 | 188 个测试类在 M10 重建 |
+| D8 | 上游测试在 M10 重建：**191 个 java**（`common/src/test` **188** + `neoforge/src/test` **3**）；落地方式见 §9.1 B6（零依赖微型基座 + A 组用例；`gradlew test` 被离线环境阻塞） |
 | D9 | 可选集成最后做 |
