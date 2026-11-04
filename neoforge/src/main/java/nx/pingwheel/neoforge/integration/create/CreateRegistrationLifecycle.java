@@ -10,6 +10,7 @@ import java.util.function.Supplier;
 final class CreateRegistrationLifecycle<H extends CreateRegistrationLifecycle.Handle> {
 	private @Nullable H registration;
 	private boolean changing;
+	private @Nullable Thread owningThread;
 	private String state = "not-registered";
 
 	/** A null result is an idempotent no-op; only the installing caller reports the returned handle. */
@@ -18,6 +19,7 @@ final class CreateRegistrationLifecycle<H extends CreateRegistrationLifecycle.Ha
 			awaitIdle();
 			if (registration != null) return null;
 			changing = true;
+			owningThread = Thread.currentThread();
 		}
 		try {
 			H installed = install.get();
@@ -35,6 +37,7 @@ final class CreateRegistrationLifecycle<H extends CreateRegistrationLifecycle.Ha
 			return installed;
 		} finally {
 			synchronized (this) {
+				owningThread = null;
 				changing = false;
 				notifyAll();
 			}
@@ -48,6 +51,7 @@ final class CreateRegistrationLifecycle<H extends CreateRegistrationLifecycle.Ha
 			if (registration == null) return false;
 			retained = registration;
 			changing = true;
+			owningThread = Thread.currentThread();
 		}
 		try {
 			retained.close();
@@ -56,6 +60,7 @@ final class CreateRegistrationLifecycle<H extends CreateRegistrationLifecycle.Ha
 			synchronized (this) {
 				registration = null;
 				state = "not-registered";
+				owningThread = null;
 				changing = false;
 				notifyAll();
 			}
@@ -70,6 +75,10 @@ final class CreateRegistrationLifecycle<H extends CreateRegistrationLifecycle.Ha
 	private void awaitIdle() {
 		boolean interrupted = false;
 		while (changing) {
+			// A synchronous registry/backend callback cannot wait for its own unfinished transition.
+			if (owningThread == Thread.currentThread()) {
+				throw new IllegalStateException("create-registration-lifecycle-reentry");
+			}
 			try {
 				wait();
 			} catch (InterruptedException ignored) {

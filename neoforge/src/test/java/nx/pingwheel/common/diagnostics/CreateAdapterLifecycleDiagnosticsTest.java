@@ -12,6 +12,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
@@ -19,8 +20,10 @@ import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.MethodNode;
 
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.InvocationTargetException;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
@@ -32,6 +35,53 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
 class CreateAdapterLifecycleDiagnosticsTest {
+	@ParameterizedTest
+	@CsvSource({"false, register", "false, close", "true, register", "true, close"})
+	void sameThreadLifecycleReentryFromRealDuplicateWarningIsASinkFaultAndLeavesTheWinnerAndOuterHandleUsable(
+		boolean flywheel, String operation
+	) throws Exception {
+		var adapter = new AdapterHarness(flywheel);
+		try (var winner = winner(flywheel); var fixture = new ReentrantFaultFixture(adapter, operation)) {
+			var executor = Executors.newSingleThreadExecutor(Thread.ofPlatform().daemon().factory());
+			var task = executor.submit(() -> {
+				Object originalWinner = registeredSource(adapter, flywheel);
+				adapter.invoke("register");
+				assertEquals(1, fixture.callbacks.get()); assertEquals("rejected", adapter.state());
+				assertEquals(0, adapter.closedSources(), "failed nested close cannot silently close the outer candidate");
+				assertSame(originalWinner, registeredSource(adapter, flywheel));
+				assertEquals(1, fixture.faults.observations().size());
+				var fault = fixture.faults.observations().getFirst();
+				assertEquals(DiagnosticSide.CLIENT, fault.key().side());
+				assertEquals(DiagnosticFaultReporter.Stage.SINK, fault.key().stage());
+				assertEquals(DiagnosticFaultReporter.Kind.RUNTIME, fault.key().kind());
+				assertEquals(flywheel ? "entity-block-source-register" : "entity-outline-register", fault.key().site());
+				assertEquals(1, fault.occurrences());
+				adapter.invoke("close"); assertEquals("not-registered", adapter.state()); assertEquals(1, adapter.closedSources());
+				assertSame(originalWinner, registeredSource(adapter, flywheel), "closing a rejected handle cannot remove the winner");
+				adapter.invoke("register"); assertEquals("rejected", adapter.state());
+				adapter.invoke("close"); assertEquals(2, adapter.closedSources());
+				assertDoesNotThrow(winner::close);
+				adapter.invoke("register"); assertEquals("registered", adapter.state());
+				assertNotSame(originalWinner, registeredSource(adapter, flywheel));
+				adapter.invoke("register"); adapter.invoke("close"); adapter.invoke("close");
+				assertEquals("not-registered", adapter.state()); assertEquals(3, adapter.closedSources());
+				assertEquals(1, fixture.callbacks.get(), "the backend must not recursively retry the lifecycle operation");
+			});
+			try { task.get(5, TimeUnit.SECONDS); }
+			finally {
+				// The old self-wait ignores interruption. Never join that daemon or close this executor synchronously.
+				task.cancel(true); executor.shutdownNow();
+			}
+		}
+	}
+
+	private static Object registeredSource(AdapterHarness adapter, boolean flywheel) {
+		return flywheel ? EntityBlockGeometrySourceRegistry.INSTANCE.snapshot().stream()
+			.filter(source -> source.id().equals(adapter.id())).findFirst().orElseThrow()
+			: EntityOutlineSourceRegistry.INSTANCE.snapshot().stream()
+				.filter(source -> source.id().equals(adapter.id())).findFirst().orElseThrow();
+	}
+
 	@ParameterizedTest
 	@ValueSource(booleans = {false, true})
 	void blockedEmergencyOutputAfterRegistrationOrCloseNeverHoldsTheLifecycleMonitor(boolean flywheel) throws Exception {
@@ -167,6 +217,16 @@ class CreateAdapterLifecycleDiagnosticsTest {
 		private String id() { return flywheel ? "create:flywheel_silhouette_mask" : "pingforit:create_entity_outline"; }
 		private void invoke(String name) {
 			try { adapter.getMethod(name).invoke(null); }
+			catch (InvocationTargetException failure) {
+				@Nullable Throwable cause = failure.getCause();
+				if (cause instanceof RuntimeException runtime) throw runtime;
+				if (cause instanceof Error error) throw error;
+				throw new AssertionError(failure);
+			}
+			catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+		}
+		private int closedSources() {
+			try { return source.getField("closes").getInt(null); }
 			catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
 		}
 		private String state() {
@@ -178,6 +238,38 @@ class CreateAdapterLifecycleDiagnosticsTest {
 			try {
 				var field = adapter.getDeclaredField("LIFECYCLE"); field.setAccessible(true); assertFalse(Thread.holdsLock(field.get(null)));
 			} catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+		}
+	}
+
+	@NotNullByDefault
+	private static final class ReentrantFaultFixture implements AutoCloseable {
+		private final LoggingProfile client = Diagnostics.profile(DiagnosticSide.CLIENT);
+		private final AtomicInteger callbacks = new AtomicInteger();
+		private final DiagnosticFaultReporter faults = new DiagnosticFaultReporter(new DiagnosticEmergencyWriter(ByteArrayOutputStream::new));
+		private final DiagnosticFaultReporter previousFaults;
+		private final DiagnosticBackend previous;
+		private ReentrantFaultFixture(AdapterHarness adapter, String operation) {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.NORMAL);
+			previousFaults = Diagnostics.swapFaultsForTesting(faults);
+			previous = Diagnostics.swapBackendForTesting(new DiagnosticBackend() {
+				@Override public boolean isEnabled(DiagnosticSide side, Level severity) { return true; }
+				@Override public void log(DiagnosticSide side, Level severity, String message) {
+					if (!(message.contains("site=entity-outline-register") || message.contains("site=entity-block-source-register"))
+						|| !callbacks.compareAndSet(0, 1)) return;
+					adapter.assertOutsideMonitors();
+					try {
+						adapter.invoke(operation);
+						fail("reentrant lifecycle operation must not return success");
+					} catch (IllegalStateException failure) {
+						assertEquals("create-registration-lifecycle-reentry", failure.getMessage());
+						throw failure; // The real DiagnosticLogger must consume this as its own SINK fault.
+					}
+				}
+			});
+		}
+		@Override public void close() {
+			Diagnostics.swapBackendForTesting(previous); Diagnostics.swapFaultsForTesting(previousFaults);
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, client);
 		}
 	}
 

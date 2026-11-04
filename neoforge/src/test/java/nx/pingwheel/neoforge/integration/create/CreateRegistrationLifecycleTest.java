@@ -12,6 +12,42 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
 class CreateRegistrationLifecycleTest {
+	@Test void sameThreadReentrantRegisterFailsFastDuringInstallAndCleanupWithoutConsumingEitherOperation() throws Exception {
+		assertReentryRejected(true);
+	}
+
+	@Test void sameThreadReentrantCloseFailsFastDuringInstallAndCleanupWithoutPretendingToClose() throws Exception {
+		assertReentryRejected(false);
+	}
+
+	private static void assertReentryRejected(boolean register) throws Exception {
+		var executor = Executors.newSingleThreadExecutor(Thread.ofPlatform().daemon().factory());
+		var task = executor.submit(() -> {
+			var lifecycle = new CreateRegistrationLifecycle<TestHandle>();
+			var installs = new AtomicInteger(); var closes = new AtomicInteger();
+			Runnable reenter = register ? () -> lifecycle.register(() -> {
+				fail("reentrant register must not begin a nested installation"); return new TestHandle(() -> {});
+			}) : () -> lifecycle.close();
+			var installFailure = assertThrows(IllegalStateException.class, () -> lifecycle.register(() -> {
+				installs.incrementAndGet(); reenter.run(); return new TestHandle(closes::incrementAndGet);
+			}));
+			assertEquals("create-registration-lifecycle-reentry", installFailure.getMessage());
+			assertEquals(1, installs.get()); assertEquals(0, closes.get()); assertEquals("not-registered", lifecycle.state());
+			assertNotNull(lifecycle.register(() -> new TestHandle(() -> { closes.incrementAndGet(); reenter.run(); })));
+			var closeFailure = assertThrows(IllegalStateException.class, lifecycle::close);
+			assertEquals("create-registration-lifecycle-reentry", closeFailure.getMessage());
+			assertEquals(1, closes.get()); assertEquals("not-registered", lifecycle.state());
+			assertNotNull(lifecycle.register(() -> new TestHandle(closes::incrementAndGet)));
+			assertEquals("registered", lifecycle.state()); assertTrue(lifecycle.close()); assertFalse(lifecycle.close());
+			assertEquals(2, closes.get());
+		});
+		try { task.get(5, TimeUnit.SECONDS); }
+		finally {
+			// A regressed uninterruptible self-wait cannot keep the test worker alive or block executor.close().
+			task.cancel(true); executor.shutdownNow();
+		}
+	}
+
 	@Test void concurrentRegistrationsInstallOnlyOneHandle() throws Exception {
 		var lifecycle = new CreateRegistrationLifecycle<TestHandle>();
 		var installing = new CountDownLatch(1); var release = new CountDownLatch(1); var secondCalled = new CountDownLatch(1);
