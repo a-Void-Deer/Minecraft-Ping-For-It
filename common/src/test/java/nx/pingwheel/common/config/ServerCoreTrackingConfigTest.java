@@ -9,6 +9,9 @@ import net.minecraft.server.level.ServerPlayer;
 import nx.pingwheel.common.config.InventoryConfigValues.Field;
 import nx.pingwheel.common.config.InventoryConfigValues.Value;
 import nx.pingwheel.common.core.ServerCore;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -43,6 +46,7 @@ class ServerCoreTrackingConfigTest {
 		int previousHash = hashField.getInt(handler);
 		@Nullable Object previousServer = activeField.get(null);
 		var path = handler.getConfigPath();
+		LoggingProfile previousProfile = Diagnostics.profile(DiagnosticSide.SERVER);
 		byte @Nullable [] previousBytes = Files.exists(path) ? Files.readAllBytes(path) : null;
 		var config = new ServerConfig();
 		config.getInventory().getTracking().setDistinguishFaces(true);
@@ -85,6 +89,29 @@ class ServerCoreTrackingConfigTest {
 			ServerCore.onServerConfigUpdate(server, player, new ServerConfigUpdateC2SPacket(1 << 30,
 				ChannelMode.AUTO, true, 0, 99, 7, InventoryConfigValues.defaults()));
 			assertEquals(authoritative, ServerConfigSnapshot.from(config, true));
+			var deniedProfile = new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE,
+				ChannelMode.AUTO, true, 0, 0, 7, InventoryConfigValues.defaults(), false, LoggingProfile.DEBUG);
+			player.permission = 2;
+			ServerCore.onServerConfigUpdate(server, player, deniedProfile);
+			assertEquals(LoggingProfile.NORMAL, config.getLoggingProfile());
+			assertEquals(previousProfile, Diagnostics.profile(DiagnosticSide.SERVER));
+			player.permission = 3;
+			var selectedProfile = wire(new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE,
+				ChannelMode.AUTO, true, 0, 0, 7, InventoryConfigValues.defaults(), false, LoggingProfile.DEEP));
+			ServerCore.onServerConfigUpdate(server, player, selectedProfile);
+			assertEquals(LoggingProfile.DEEP, config.getLoggingProfile());
+			assertEquals(LoggingProfile.DEEP, Diagnostics.profile(DiagnosticSide.SERVER));
+			var unselectedProfile = wire(new ServerConfigUpdateC2SPacket(ServerConfigUpdate.RATE_LIMIT,
+				ChannelMode.AUTO, true, 0, 5, 7, InventoryConfigValues.defaults(), false, LoggingProfile.DEBUG));
+			ServerCore.onServerConfigUpdate(server, player, unselectedProfile);
+			assertEquals(LoggingProfile.DEEP, config.getLoggingProfile());
+			assertEquals(LoggingProfile.DEEP, Diagnostics.profile(DiagnosticSide.SERVER));
+			var invalidMixedProfile = new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE | (1 << 30),
+				ChannelMode.AUTO, true, 0, 5, 7, InventoryConfigValues.defaults(), false, LoggingProfile.DEBUG);
+			ServerCore.onServerConfigUpdate(server, player, invalidMixedProfile);
+			assertEquals(LoggingProfile.DEEP, config.getLoggingProfile());
+			assertEquals(LoggingProfile.DEEP, Diagnostics.profile(DiagnosticSide.SERVER));
+			authoritative = ServerConfigSnapshot.from(config, true);
 			var buf = new FriendlyByteBuf(Unpooled.buffer());
 			try {
 				new ServerConfigSnapshotS2CPacket(17, authoritative).write(buf);
@@ -98,6 +125,7 @@ class ServerCoreTrackingConfigTest {
 			configField.set(handler, previousConfig);
 			hashField.setInt(handler, previousHash);
 			activeField.set(null, previousServer);
+			Diagnostics.setProfile(DiagnosticSide.SERVER, previousProfile);
 			ServerCore.init();
 			if (previousBytes == null) Files.deleteIfExists(path);
 			else Files.write(path, previousBytes);

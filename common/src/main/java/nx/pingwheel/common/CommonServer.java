@@ -4,6 +4,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.core.ServerCore;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.integration.ModContext;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
@@ -14,9 +15,8 @@ import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformServerEventService;
 
-import static nx.pingwheel.common.Global.LOGGER;
-import static nx.pingwheel.common.Global.MOD_ID;
 import static nx.pingwheel.common.Global.MOD_VERSION;
+
 
 public class CommonServer {
 
@@ -26,9 +26,7 @@ public class CommonServer {
 	private boolean serverEventsRegistered;
 
 	public void onInit() {
-		LOGGER.debug("server init: mod_id={} mod_version={}", MOD_ID, MOD_VERSION);
-
-		LOGGER.info("Init");
+		Diagnostics.server().atDetailed().info(() -> "server init: mod_id=" + MOD_ID + " mod_version=" + MOD_VERSION);
 
 		ServerConfig.HANDLER.load();
 

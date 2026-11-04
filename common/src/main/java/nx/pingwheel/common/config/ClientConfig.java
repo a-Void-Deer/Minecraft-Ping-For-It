@@ -397,7 +397,7 @@ public class ClientConfig implements IConfig {
 		return true;
 	}
 
-	public static final ConfigHandler<ClientConfig> HANDLER = ConfigHandler.of(ClientConfig.class, ".json");
+	public static final ConfigHandler<ClientConfig> HANDLER = ConfigHandler.of(ClientConfig.class, ".json", ConfigRuntime.client());
 }
 
 @FunctionalInterface

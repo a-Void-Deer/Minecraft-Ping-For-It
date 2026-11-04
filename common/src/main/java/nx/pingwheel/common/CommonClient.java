@@ -30,6 +30,7 @@ import nx.pingwheel.common.client.outline.EntityOutlineLocatorResolver;
 import nx.pingwheel.common.client.outline.EntityOutlineLogger;
 import nx.pingwheel.common.client.outline.EntityOutlineRunner;
 import nx.pingwheel.common.client.outline.EntityOutlineSourceRegistry;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.client.outline.EntityOutlineSpec;
 import nx.pingwheel.common.client.outline.EntityOutlineState;
 import nx.pingwheel.common.client.outline.LevelRendererOutlineRequest;
@@ -62,7 +63,6 @@ import nx.pingwheel.common.screen.SettingsScreen;
 import nx.pingwheel.common.util.InputUtils;
 import org.jetbrains.annotations.Nullable;
 
-import static nx.pingwheel.common.Global.LOGGER;
 import static nx.pingwheel.common.util.InputUtils.KEY_BINDING_PING;
 import static nx.pingwheel.common.util.InputUtils.KEY_BINDING_SETTINGS;
 
@@ -663,7 +663,7 @@ public class CommonClient {
 	 */
 	public void onRateLimitPolicyPacket(RateLimitPolicyS2CPacket packet) {
 		if (packet.isCorrupt()) {
-			LOGGER.warn("received invalid rate limit policy from server");
+			Diagnostics.client().atNormal().event(org.apache.logging.log4j.Level.WARN, "invalid rate limit policy received; rejected");
 			return;
 		}
 
@@ -680,7 +680,7 @@ public class CommonClient {
 			pingRuntime.applyRateLimitPolicy(nextPolicy);
 		}
 
-		LOGGER.debug("client rate limit policy changed");
+		Diagnostics.client().atDetailed().info("rate-limit-policy", "changed", null, null);
 	}
 
 	/**
@@ -706,7 +706,7 @@ public class CommonClient {
 	 */
 	public void onServerPresentationPolicyPacket(ServerPresentationPolicyS2CPacket packet) {
 		if (packet == null || packet.isCorrupt()) {
-			LOGGER.warn("received invalid server presentation policy from server");
+			Diagnostics.client().atNormal().event(org.apache.logging.log4j.Level.WARN, "invalid server presentation policy received; rejected");
 			return;
 		}
 

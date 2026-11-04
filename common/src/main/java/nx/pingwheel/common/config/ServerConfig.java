@@ -73,5 +73,5 @@ public class ServerConfig implements IConfig {
 		ServerCore.broadcastRateLimitPolicy();
 	}
 
-	public static final ConfigHandler<ServerConfig> HANDLER = ConfigHandler.of(ServerConfig.class, ".server.json");
+	public static final ConfigHandler<ServerConfig> HANDLER = ConfigHandler.of(ServerConfig.class, ".server.json", ConfigRuntime.server());
 }

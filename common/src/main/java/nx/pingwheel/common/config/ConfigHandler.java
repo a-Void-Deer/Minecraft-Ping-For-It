@@ -12,7 +12,6 @@ import lombok.Getter;
 import lombok.SneakyThrows;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationSettings;
-import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.platform.IPlatformContextService;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
@@ -34,7 +33,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 
-import static nx.pingwheel.common.Global.LOGGER;
 import static nx.pingwheel.common.Global.MOD_ID;
 
 public class ConfigHandler <T extends IConfig> {
@@ -47,6 +45,7 @@ public class ConfigHandler <T extends IConfig> {
 	private final BackupWriter backupWriter;
 	private final PingForItVersion modVersion;
 	private final AtomicConfigWriter atomicConfigWriter;
+	private final ConfigRuntime<T> runtime;
 	private SaveProtection saveProtection;
 	private PendingMigration pendingMigration;
 
@@ -58,6 +57,10 @@ public class ConfigHandler <T extends IConfig> {
 		return new ConfigHandler<>(configType, IPlatformContextService.INSTANCE.resolveConfigDir(MOD_ID + configExtension));
 	}
 
+	static <T extends IConfig> ConfigHandler<T> of(Class<T> configType, String configExtension, ConfigRuntime<T> runtime) {
+		return new ConfigHandler<>(configType, IPlatformContextService.INSTANCE.resolveConfigDir(MOD_ID + configExtension), runtime);
+	}
+
 	public ConfigHandler(Class<T> configType, Path configPath) {
 		this(
 			configType,
@@ -65,6 +68,11 @@ public class ConfigHandler <T extends IConfig> {
 			ConfigHandler::writeBackupFile,
 			IPlatformContextService.INSTANCE.getSelfModVersion(),
 			ConfigHandler::writeAtomically);
+	}
+
+	private ConfigHandler(Class<T> configType, Path configPath, ConfigRuntime<T> runtime) {
+		this(configType, configPath, ConfigHandler::writeBackupFile,
+			IPlatformContextService.INSTANCE.getSelfModVersion(), ConfigHandler::writeAtomically, runtime);
 	}
 
 	ConfigHandler(Class<T> configType, Path configPath, BackupWriter backupWriter) {
@@ -80,6 +88,10 @@ public class ConfigHandler <T extends IConfig> {
 		this(configType, configPath, ConfigHandler::writeBackupFile, modVersion, ConfigHandler::writeAtomically);
 	}
 
+	ConfigHandler(Class<T> configType, Path configPath, String modVersion, ConfigRuntime<T> runtime) {
+		this(configType, configPath, ConfigHandler::writeBackupFile, modVersion, ConfigHandler::writeAtomically, runtime);
+	}
+
 	ConfigHandler(Class<T> configType, Path configPath, BackupWriter backupWriter, String modVersion) {
 		this(configType, configPath, backupWriter, modVersion, ConfigHandler::writeAtomically);
 	}
@@ -90,6 +102,11 @@ public class ConfigHandler <T extends IConfig> {
 		BackupWriter backupWriter,
 		String modVersion,
 		AtomicConfigWriter atomicConfigWriter) {
+		this(configType, configPath, backupWriter, modVersion, atomicConfigWriter, ConfigRuntime.fixture());
+	}
+
+	private ConfigHandler(Class<T> configType, Path configPath, BackupWriter backupWriter, String modVersion,
+		AtomicConfigWriter atomicConfigWriter, ConfigRuntime<T> runtime) {
 		this.gson = new GsonBuilder()
 			.setPrettyPrinting()
 			// IntLimit carries its model default in the owning field, so a
@@ -105,9 +122,11 @@ public class ConfigHandler <T extends IConfig> {
 		this.backupWriter = Objects.requireNonNull(backupWriter, "backupWriter");
 		this.modVersion = PingForItVersion.parse(modVersion);
 		this.atomicConfigWriter = Objects.requireNonNull(atomicConfigWriter, "atomicConfigWriter");
+		this.runtime = Objects.requireNonNull(runtime, "runtime");
 
 		this.configHash = 0;
 		this.config = createDefaultConfig();
+		publishProfile();
 		this.recoverInvalidConfig = this.config.recoverInvalidOnLoad();
 		this.saveProtection = SaveProtection.NONE;
 		this.pendingMigration = null;
@@ -118,6 +137,7 @@ public class ConfigHandler <T extends IConfig> {
 	}
 
 	public synchronized void save() {
+		publishProfile();
 		saveInternal();
 	}
 
@@ -127,7 +147,14 @@ public class ConfigHandler <T extends IConfig> {
 	 * use this result-bearing variant.
 	 */
 	public synchronized boolean saveSafely() {
+		publishProfile();
 		return saveInternal();
+	}
+
+	/** Persists already-applied configuration without invoking domain update callbacks. */
+	public synchronized boolean saveWithoutUpdate() {
+		publishProfile();
+		return saveInternal(false, false);
 	}
 
 	/**
@@ -137,6 +164,7 @@ public class ConfigHandler <T extends IConfig> {
 	public synchronized void resetToDefaults() {
 		if (pendingMigration != null && !ensurePendingMigrationSourceCurrent()) {
 			config = createDefaultConfig();
+			publishProfile();
 			if (saveProtection != SaveProtection.NONE) {
 				return;
 			}
@@ -144,6 +172,7 @@ public class ConfigHandler <T extends IConfig> {
 
 		pendingMigration = null;
 		config = createDefaultConfig();
+		publishProfile();
 		saveInternal(true);
 	}
 
@@ -152,14 +181,19 @@ public class ConfigHandler <T extends IConfig> {
 	}
 
 	private boolean saveInternal(boolean force) {
+		return saveInternal(force, true);
+	}
+
+	private boolean saveInternal(boolean force, boolean invokeUpdate) {
+		publishProfile();
 		if (saveProtection != SaveProtection.NONE) {
-			Diagnostics.event(Level.DEBUG, "config/save", configType.getName(), "protected",
-				() -> "path=" + configPath + " reason=" + saveProtection.description + "; original file preserved");
+			runtime.logger().atDetailed().event(Level.DEBUG, "config-save", "protected",
+				() -> "type=" + configType.getSimpleName() + " path=" + configPath + " reason=" + saveProtection.description);
 			return false;
 		}
 
 		if (pendingMigration != null) {
-			return savePendingMigration();
+			return savePendingMigration(invokeUpdate);
 		}
 
 		if (!force && configHash == config.hashCode() && Files.exists(configPath)) {
@@ -167,7 +201,7 @@ public class ConfigHandler <T extends IConfig> {
 		}
 
 		try {
-			config.onUpdate();
+			if (invokeUpdate) config.onUpdate();
 			writeSerializedConfig(serializeConfig());
 		} catch (Exception e) {
 			logFailure("save", "config save failed", e);
@@ -175,15 +209,18 @@ public class ConfigHandler <T extends IConfig> {
 		}
 
 		configHash = config.hashCode();
-		LOGGER.info("Saved config type=%s".formatted(configType.getSimpleName()));
+		runtime.logger().atDetailed().info("config-save", "saved", null,
+			() -> "type=" + configType.getSimpleName() + " path=" + configPath);
 		return true;
 	}
 
 	@SneakyThrows
 	public synchronized void load() {
+		runtime.beginLoad();
 		pendingMigration = null;
 		if (!Files.exists(configPath)) {
 			config = createDefaultConfig();
+			publishProfile();
 			saveProtection = SaveProtection.NONE;
 			saveInternal();
 			return;
@@ -210,6 +247,7 @@ public class ConfigHandler <T extends IConfig> {
 
 			config = deserializeConfig(versionedConfig.root());
 			config.validate();
+			publishProfile();
 			saveProtection = SaveProtection.NONE;
 			configHash = config.hashCode();
 			if (versionedConfig.migrated()) {
@@ -222,12 +260,13 @@ public class ConfigHandler <T extends IConfig> {
 			}
 		} catch (Exception e) {
 			config = null;
-			Diagnostics.error("config/load", configType.getName(),
-				() -> "path=" + configPath + " defaults will be restored", e);
+			runtime.logger().atNormal().failure(Level.ERROR, "config-load", "defaults-restored",
+				() -> "type=" + configType.getSimpleName() + " path=" + configPath, e);
 		}
 
 		if (config == null) {
 			config = createDefaultConfig();
+			publishProfile();
 			saveProtection = SaveProtection.NONE;
 
 			save();
@@ -235,6 +274,7 @@ public class ConfigHandler <T extends IConfig> {
 		}
 
 		config.validate();
+		publishProfile();
 		configHash = config.hashCode();
 		logLoadedConfig();
 	}
@@ -253,6 +293,7 @@ public class ConfigHandler <T extends IConfig> {
 
 			config = deserializeConfig(versionedConfig.root());
 			config.validate();
+			publishProfile();
 			saveProtection = SaveProtection.NONE;
 			configHash = config.hashCode();
 			if (versionedConfig.migrated()) {
@@ -276,6 +317,7 @@ public class ConfigHandler <T extends IConfig> {
 
 		BackupResult backup = backupOriginal(originalBytes);
 		config = createDefaultConfig();
+		publishProfile();
 
 		if (backup.failure() != null) {
 			saveProtection = SaveProtection.INVALID_FILE;
@@ -290,8 +332,8 @@ public class ConfigHandler <T extends IConfig> {
 			writeSerializedConfig(header + serializeConfig());
 			configHash = config.hashCode();
 			saveProtection = SaveProtection.NONE;
-			Diagnostics.event(Level.DEBUG, "config/reset", configType.getName(), "recovered",
-				() -> "path=" + configPath + " backup=" + backup.path());
+			runtime.logger().atDetailed().info("config-recovery", "recovered", null,
+				() -> "type=" + configType.getSimpleName() + " path=" + configPath + " backup=" + backup.path());
 		} catch (Exception writeFailure) {
 			saveProtection = SaveProtection.INVALID_FILE;
 			configHash = config.hashCode();
@@ -447,8 +489,8 @@ public class ConfigHandler <T extends IConfig> {
 				sourceBytes);
 		}
 
-		Diagnostics.event(Level.DEBUG, "config/version", configType.getName(), "mismatch",
-			() -> "path=" + configPath + " configVersion=" + configVersion + " modVersion=" + modVersion);
+		runtime.logger().atDetailed().info("config-version", "mismatch", null,
+			() -> "type=" + configType.getSimpleName() + " path=" + configPath + " configVersion=" + configVersion + " modVersion=" + modVersion);
 
 		if (comparison > 0) {
 			return new VersionedConfig(root, configVersion, false, true, List.of(), sourceBytes);
@@ -841,14 +883,18 @@ public class ConfigHandler <T extends IConfig> {
 
 	private void rejectFutureConfig(PingForItVersion configVersion) {
 		config = createDefaultConfig();
+		publishProfile();
 		configHash = config.hashCode();
 		saveProtection = SaveProtection.FUTURE_VERSION;
-		Diagnostics.event(Level.WARN, "config/load", configType.getName(), "future-version",
-			() -> "path=" + configPath + " configVersion=" + configVersion + " modVersion=" + modVersion
-				+ "; defaults in memory; original file preserved");
+		runtime.logger().atNormal().site("config-future-version")
+			.event(Level.WARN, "future config protected; defaults in memory; original preserved");
 	}
 
 	private boolean savePendingMigration() {
+		return savePendingMigration(true);
+	}
+
+	private boolean savePendingMigration(boolean invokeUpdate) {
 		PendingMigration migration = pendingMigration;
 		if (migration == null) {
 			return true;
@@ -864,7 +910,7 @@ public class ConfigHandler <T extends IConfig> {
 		}
 
 		try {
-			config.onUpdate();
+			if (invokeUpdate) config.onUpdate();
 			writeSerializedConfig(serializeConfig(migration.root()));
 		} catch (Exception failure) {
 			logFailure("migration-write", "configVersion=" + migration.configVersion() + " modVersion=" + modVersion
@@ -874,14 +920,10 @@ public class ConfigHandler <T extends IConfig> {
 
 		pendingMigration = null;
 		configHash = config.hashCode();
-		LOGGER.info(
-			"Config migration applied; type=%s path=%s configVersion=%s modVersion=%s updates=%s"
-				.formatted(
-					configType.getSimpleName(),
-					configPath,
-					migration.configVersion(),
-					modVersion,
-					String.join(", ", migration.updates())));
+		publishProfile();
+		runtime.logger().atDetailed().info("config-migration", "applied", null,
+			() -> "type=" + configType.getSimpleName() + " path=" + configPath + " configVersion=" + migration.configVersion()
+				+ " modVersion=" + modVersion + " updates=" + String.join(", ", migration.updates()));
 		return true;
 	}
 
@@ -907,7 +949,7 @@ public class ConfigHandler <T extends IConfig> {
 
 	private boolean discardStalePendingMigration(String reason) {
 		pendingMigration = null;
-		Diagnostics.event(Level.DEBUG, "config/migration", configType.getName(), "source-changed",
+		runtime.logger().atDetailed().event(Level.DEBUG, "config-migration", "source-changed",
 			() -> "path=" + configPath + " reason=" + reason + "; reloading current disk state");
 		load();
 		return false;
@@ -915,11 +957,12 @@ public class ConfigHandler <T extends IConfig> {
 
 	private void logLoadedConfig() {
 		if (pendingMigration == null) {
-			LOGGER.info("Loaded config type=%s".formatted(configType.getSimpleName()));
+			runtime.logger().atDetailed().info("config-load", "loaded", null,
+				() -> "type=" + configType.getSimpleName() + " path=" + configPath);
 			return;
 		}
 
-		Diagnostics.event(Level.DEBUG, "config/migration", configType.getName(), "write-pending",
+		runtime.logger().atDetailed().event(Level.DEBUG, "config-migration", "write-pending",
 			() -> "path=" + configPath + "; loaded config in memory; migration writeback pending");
 	}
 
@@ -978,7 +1021,8 @@ public class ConfigHandler <T extends IConfig> {
 			try {
 				Files.deleteIfExists(backupPath);
 			} catch (IOException cleanupFailure) {
-				Diagnostics.debug("config/backup-cleanup", configType.getName(), () -> "path=" + backupPath, cleanupFailure);
+				runtime.logger().atDebug().failure(Level.DEBUG, "config-backup-cleanup", "cleanup-failed",
+					() -> "type=" + configType.getSimpleName() + " path=" + backupPath, cleanupFailure);
 			}
 			return new BackupResult(null, failure);
 		}
@@ -1024,7 +1068,13 @@ public class ConfigHandler <T extends IConfig> {
 	}
 
 	private void logFailure(String operation, String context, @Nullable Throwable failure) {
-		Diagnostics.warn("config/" + operation, configType.getName(), () -> "path=" + configPath + " " + context, failure);
+		Level severity = operation.equals("load") ? Level.ERROR : Level.WARN;
+		runtime.logger().atNormal().failure(severity, "config-io", operation + "-failed",
+			() -> "type=" + configType.getSimpleName() + " path=" + configPath + " " + context, failure);
+	}
+
+	private void publishProfile() {
+		runtime.publish(config);
 	}
 
 	private static String parserOrIoReason(Throwable failure) {

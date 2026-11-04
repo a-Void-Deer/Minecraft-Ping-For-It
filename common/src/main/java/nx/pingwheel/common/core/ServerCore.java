@@ -13,6 +13,8 @@ import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.ServerConfigUpdate;
 import nx.pingwheel.common.config.ServerConfigUpdateService;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
@@ -54,7 +56,6 @@ import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import nx.pingwheel.common.util.RateLimiter;
-import nx.pingwheel.common.util.RateLimitedDiagnostics;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -64,7 +65,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
-import static nx.pingwheel.common.Global.LOGGER;
 import static nx.pingwheel.common.Global.MOD_PREFIX;
 import static nx.pingwheel.common.Global.MOD_VERSION;
 
@@ -74,7 +74,6 @@ public class ServerCore {
 	private static final int TICKS_PER_SECOND = 20;
 	private static final int EXTERNAL_REFRESH_INTERVAL_TICKS = 5;
 
-	private static final ServerConfig SERVER_CONFIG = ServerConfig.HANDLER.getConfig();
 	private static final HashMap<UUID, String> PLAYER_CHANNELS = new HashMap<>();
 	private static final HashMap<UUID, RateLimiter> PLAYER_RATES = new HashMap<>();
 
@@ -110,7 +109,8 @@ public class ServerCore {
 	 * config reload within the same server.
 	 */
 	public static void init() {
-		RateLimiter.setRates(SERVER_CONFIG.getMsToRegenerate(), SERVER_CONFIG.getRateLimit());
+		var config = ServerConfig.HANDLER.getConfig();
+		RateLimiter.setRates(config.getMsToRegenerate(), config.getRateLimit());
 	}
 
 	/**
@@ -163,7 +163,7 @@ public class ServerCore {
 		PresentationServer.activate(server);
 		InventoryServer.activate(server);
 
-		LOGGER.debug(() -> "marker store initialized for server instance 0x%s".formatted(
+		Diagnostics.server().atDetailed().debug(() -> "marker store initialized for server instance 0x%s".formatted(
 			Integer.toHexString(System.identityHashCode(server))));
 	}
 
@@ -193,12 +193,12 @@ public class ServerCore {
 
 		return new MarkerCreationService(
 			markerStore(),
-			DefaultTargetResolver.builtIn(TargetResolutionLogger.global()),
+			DefaultTargetResolver.builtIn(TargetResolutionLogger.global(Diagnostics.server())),
 			PingTypeCatalog.builtIn(),
 			new MinecraftAuthoritativeTargetValidator(
 				server,
-				SERVER_CONFIG.getPingDistance(),
-				SERVER_CONFIG.isPlayerTrackingEnabled(),
+				ServerConfig.HANDLER.getConfig().getPingDistance(),
+				ServerConfig.HANDLER.getConfig().isPlayerTrackingEnabled(),
 				nameResolver,
 				externalProviders),
 			MarkerCreationLogger.global(),
@@ -209,7 +209,7 @@ public class ServerCore {
 
 	public static void onChannelUpdate(ServerPlayer player, UpdateChannelC2SPacket packet) {
 		if (packet.isCorrupt()) {
-			LOGGER.warn(() -> "invalid channel update from %s (%s)".formatted(player.getGameProfile().getName(), player.getUUID()));
+			Diagnostics.server().atNormal().event(org.apache.logging.log4j.Level.WARN, "invalid channel update; rejected");
 			player.displayClientMessage(Component.literal("§8" + MOD_PREFIX + "§cChannel couldn't be updated\n§fMake sure your version matches the server's version: §d" + MOD_VERSION), false);
 			return;
 		}
@@ -217,9 +217,9 @@ public class ServerCore {
 		ensureMarkerStore(player.serverLevel().getServer());
 		updatePlayerChannel(player, packet.channel());
 		IPlatformNetworkService.INSTANCE.sendToClient(
-			new RateLimitPolicyS2CPacket(SERVER_CONFIG.getRateLimit(), SERVER_CONFIG.getMsToRegenerate()),
+			new RateLimitPolicyS2CPacket(ServerConfig.HANDLER.getConfig().getRateLimit(), ServerConfig.HANDLER.getConfig().getMsToRegenerate()),
 			player);
-		LOGGER.debug("sent rate limit policy");
+		Diagnostics.server().atDetailed().info("rate-policy", "sent", null, null);
 	}
 
 	/**
@@ -235,14 +235,14 @@ public class ServerCore {
 		}
 
 		var players = server.getPlayerList().getPlayers();
-		var packet = new RateLimitPolicyS2CPacket(
-			SERVER_CONFIG.getRateLimit(), SERVER_CONFIG.getMsToRegenerate());
+		var config = ServerConfig.HANDLER.getConfig();
+		var packet = new RateLimitPolicyS2CPacket(config.getRateLimit(), config.getMsToRegenerate());
 
 		for (ServerPlayer player : players) {
 			IPlatformNetworkService.INSTANCE.sendToClient(packet, player);
 		}
 
-		LOGGER.debug("broadcast rate limit policy");
+		Diagnostics.server().atDetailed().info("rate-policy", "broadcast", null, null);
 	}
 
 	/**
@@ -255,7 +255,7 @@ public class ServerCore {
 		ServerPlayer player,
 		ServerConfigRequestC2SPacket packet) {
 		if (packet.isCorrupt()) {
-			LOGGER.debug("server settings request rejected: invalid request id");
+			Diagnostics.server().atDetailed().debug("server settings request rejected: invalid request id");
 			return;
 		}
 
@@ -274,12 +274,12 @@ public class ServerCore {
 		final boolean canEdit = player.hasPermissions(3);
 
 		if (packet.isCorrupt()) {
-			LOGGER.debug("server settings update rejected: invalid packet");
+			Diagnostics.server().atDetailed().debug("server settings update rejected: invalid packet");
 			return;
 		}
 
 		if (!canEdit) {
-			LOGGER.debug("server settings update rejected: insufficient permission");
+			Diagnostics.server().atDetailed().debug("server settings update rejected: insufficient permission");
 			return;
 		}
 
@@ -290,9 +290,10 @@ public class ServerCore {
 			ServerConfigSnapshot.from(config, true),
 			update);
 		if (!plan.applied()) {
-			LOGGER.debug("server settings update rejected: invalid update");
+			Diagnostics.server().atDetailed().debug("server settings update rejected: invalid update");
 			return;
 		}
+		final var mergedSnapshot = java.util.Objects.requireNonNull(plan.snapshot());
 		final var inventoryCandidate = (update.changedFields() & ServerConfigUpdate.ALL_INVENTORY_FIELDS) != 0
 			? plan.snapshot().inventory().toSettings() : null;
 
@@ -316,8 +317,18 @@ public class ServerCore {
 		if ((update.changedFields() & ServerConfigUpdate.BUDGET_DELAY_NOTIFICATIONS_ENABLED) != 0) {
 			config.setBudgetDelayNotificationsEnabled(update.budgetDelayNotificationsEnabled());
 		}
+		if ((update.changedFields() & ServerConfigUpdate.LOGGING_PROFILE) != 0) {
+			config.setLoggingProfile(mergedSnapshot.loggingProfile());
+		}
 		config.validate();
-		ServerConfig.HANDLER.save();
+		if ((update.changedFields() & ServerConfigUpdate.LOGGING_PROFILE) != 0) {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, config.getLoggingProfile());
+		}
+		if (update.changedFields() == ServerConfigUpdate.LOGGING_PROFILE) {
+			ServerConfig.HANDLER.saveWithoutUpdate();
+		} else {
+			ServerConfig.HANDLER.save();
+		}
 	}
 
 	private static void sendServerConfigSnapshot(ServerPlayer player, boolean canEdit, long requestId) {
@@ -350,7 +361,7 @@ public class ServerCore {
 		ServerPlayer player,
 		ServerPresentationPolicyC2SPacket packet) {
 		if (packet == null || packet.isCorrupt()) {
-			LOGGER.debug("presentation policy request rejected: invalid packet");
+			Diagnostics.server().atDetailed().debug("presentation policy request rejected: invalid packet");
 			return;
 		}
 
@@ -407,10 +418,9 @@ public class ServerCore {
 			config.validate();
 			saved = ServerConfig.HANDLER.saveSafely();
 		} catch (RuntimeException ex) {
-			RateLimitedDiagnostics.warn("presentation-policy-save", "server-config",
-				() -> "presentation policy validation/save failed: path=%s requestId=%d operation=%s targetType=%s selector=%s whitelistOnly=%s player=%s"
-					.formatted(ServerConfig.HANDLER.getConfigPath(), packet.requestId(), packet.operation(),
-						packet.targetTypeId(), packet.selector(), packet.whitelistOnly(), player.getUUID()), ex);
+			Diagnostics.server().atNormal().failure(org.apache.logging.log4j.Level.WARN, "presentation-policy-save",
+				"save-failed", () -> "requestId=" + packet.requestId() + " operation=" + packet.operation()
+					+ " targetType=" + packet.targetTypeId() + " selector=" + packet.selector(), ex);
 			saved = false;
 		}
 
@@ -509,7 +519,7 @@ public class ServerCore {
 		ensureMarkerStore(server);
 
 		if (requestedTarget == null || requestedPingType == null || requestedPingType.isBlank() || requestId < 0L) {
-			LOGGER.debug(() -> "marker create rejected: requestId=%d reason=%s".formatted(requestId, MarkerRejectReason.INVALID_REQUEST));
+			Diagnostics.server().atDetailed().debug(() -> "marker create rejected: requestId=%d reason=%s".formatted(requestId, MarkerRejectReason.INVALID_REQUEST));
 			PresentationServer.rejected(player, requestId, MarkerRequestKind.CREATE, MarkerRejectReason.INVALID_REQUEST);
 			return;
 		}
@@ -517,23 +527,24 @@ public class ServerCore {
 		PLAYER_RATES.putIfAbsent(player.getUUID(), new RateLimiter());
 		final var rateLimiter = PLAYER_RATES.get(player.getUUID());
 
-		if (SERVER_CONFIG.getRateLimit() > 0 && rateLimiter.checkExceeded()) {
-			LOGGER.debug(() -> "marker create rejected: requestId=%d reason=%s".formatted(requestId, MarkerRejectReason.RATE_LIMITED));
+		var serverConfig = ServerConfig.HANDLER.getConfig();
+		if (serverConfig.getRateLimit() > 0 && rateLimiter.checkExceeded()) {
+			Diagnostics.server().atDetailed().debug(() -> "marker create rejected: requestId=%d reason=%s".formatted(requestId, MarkerRejectReason.RATE_LIMITED));
 			PresentationServer.rejected(player, requestId, MarkerRequestKind.CREATE, MarkerRejectReason.RATE_LIMITED);
 			return;
 		}
 
 		final var channel = PLAYER_CHANNELS.getOrDefault(player.getUUID(), "");
-		final var defaultChannelMode = SERVER_CONFIG.getDefaultChannelMode();
+		final var defaultChannelMode = serverConfig.getDefaultChannelMode();
 
 		if (channel.isEmpty() && defaultChannelMode == ChannelMode.DISABLED) {
-			LOGGER.debug(() -> "marker create rejected: requestId=%d reason=%s".formatted(requestId, MarkerRejectReason.CHANNEL_DISABLED));
+			Diagnostics.server().atDetailed().debug(() -> "marker create rejected: requestId=%d reason=%s".formatted(requestId, MarkerRejectReason.CHANNEL_DISABLED));
 			PresentationServer.rejected(player, requestId, MarkerRequestKind.CREATE, MarkerRejectReason.CHANNEL_DISABLED);
 			return;
 		}
 
 		if (channel.isEmpty() && defaultChannelMode == ChannelMode.TEAM_ONLY && !TeamContextHandler.hasTeam(player)) {
-			LOGGER.debug(() -> "marker create rejected: requestId=%d reason=%s".formatted(requestId, MarkerRejectReason.CHANNEL_DISABLED));
+			Diagnostics.server().atDetailed().debug(() -> "marker create rejected: requestId=%d reason=%s".formatted(requestId, MarkerRejectReason.CHANNEL_DISABLED));
 			PresentationServer.rejected(player, requestId, MarkerRequestKind.CREATE, MarkerRejectReason.CHANNEL_DISABLED);
 			return;
 		}
@@ -542,7 +553,7 @@ public class ServerCore {
 		final var recipients = snapshotRecipients(playerList, player, channel, defaultChannelMode);
 
 		final long arrivalTick = server.getTickCount();
-		final long expiresAtTick = arrivalTick + SERVER_CONFIG.getSyncDuration() * (long) TICKS_PER_SECOND;
+		final long expiresAtTick = arrivalTick + serverConfig.getSyncDuration() * (long) TICKS_PER_SECOND;
 
 		final var outcome = markerService(server).create(
 			player.serverLevel(),
@@ -553,7 +564,7 @@ public class ServerCore {
 		if (!outcome.isAccepted()) {
 			final var reason = outcome.rejectReason().orElseThrow();
 
-			LOGGER.debug(() -> "marker create rejected: requestId=%d reason=%s".formatted(requestId, reason));
+			Diagnostics.server().atDetailed().debug(() -> "marker create rejected: requestId=%d reason=%s".formatted(requestId, reason));
 			PresentationServer.rejected(player, requestId, MarkerRequestKind.CREATE, reason);
 			return;
 		}
@@ -561,7 +572,7 @@ public class ServerCore {
 		final var creation = outcome.creation().orElseThrow();
 		final var marker = creation.marker();
 
-		LOGGER.debug(() -> "marker create accepted: requestId=%d markerId=%d kind=%s targetType=%s pingType=%s recipients=%d".formatted(
+		Diagnostics.server().atDetailed().debug(() -> "marker create accepted: requestId=%d markerId=%d kind=%s targetType=%s pingType=%s recipients=%d".formatted(
 			requestId,
 			marker.id().value(),
 			marker.target().kind(),
@@ -586,16 +597,17 @@ public class ServerCore {
 		if (player == null || !server.isSameThread()) return new InventoryBackend.Created(null, MarkerRejectReason.INVALID_REQUEST);
 		ensureMarkerStore(server);
 		PLAYER_RATES.putIfAbsent(player.getUUID(), new RateLimiter());
-		if (SERVER_CONFIG.getRateLimit() > 0 && PLAYER_RATES.get(player.getUUID()).checkExceeded())
+		var serverConfig = ServerConfig.HANDLER.getConfig();
+		if (serverConfig.getRateLimit() > 0 && PLAYER_RATES.get(player.getUUID()).checkExceeded())
 			return new InventoryBackend.Created(null, MarkerRejectReason.RATE_LIMITED);
 		String channel = PLAYER_CHANNELS.getOrDefault(player.getUUID(), "");
-		ChannelMode mode = SERVER_CONFIG.getDefaultChannelMode();
+		ChannelMode mode = serverConfig.getDefaultChannelMode();
 		if (channel.isEmpty() && (mode == ChannelMode.DISABLED || mode == ChannelMode.TEAM_ONLY && !TeamContextHandler.hasTeam(player)))
 			return new InventoryBackend.Created(null, MarkerRejectReason.CHANNEL_DISABLED);
 		List<UUID> audience = snapshotRecipients(server.getPlayerList(), player, channel, mode);
 		long now = server.getTickCount();
 		var outcome = markerService(server).createDedicated(player.serverLevel(), player.getUUID(), frozen.target(), frozen.defaultPingType(),
-			now, now + SERVER_CONFIG.getSyncDuration() * (long) TICKS_PER_SECOND, audience, (target, targetKey, type, owner, recipients) -> {
+			now, now + serverConfig.getSyncDuration() * (long) TICKS_PER_SECOND, audience, (target, targetKey, type, owner, recipients) -> {
 				@Nullable var policy = PresentationServer.inventoryPolicy(owner).orElse(null);
 				@Nullable MarkerRejectReason rejection = policy == null || !policy.types(kind).contains(type) ? MarkerRejectReason.INVALID_REQUEST : admission.prepare(target, targetKey, type, recipients);
 				return rejection == null ? MarkerCreationService.AdmissionResult.accepted(List.of(), Map.of()) : MarkerCreationService.AdmissionResult.rejected(rejection);
@@ -622,9 +634,9 @@ public class ServerCore {
 			PresentationServer.created(server, created.marker(), created.authoritativeName(), owner.getGameProfile().getName());
 			sendPresentationWinnerChanges(server.getPlayerList(), created.winnerChanges(), null);
 		} catch (RuntimeException | LinkageError deliveryFailure) {
-			RateLimitedDiagnostics.error("inventory-create-publish", "server-marker",
-				() -> "inventory create publication failed after commit: marker=" + created.marker()
-					+ " winnerChanges=" + created.winnerChanges(), deliveryFailure);
+			Diagnostics.server().atNormal().failure(org.apache.logging.log4j.Level.ERROR, "inventory-create-publish",
+				"delivery-failed-after-commit", () -> "markerId=" + created.marker().id().value()
+					+ " winnerChanges=" + created.winnerChanges().size(), deliveryFailure);
 		}
 	}
 
@@ -638,7 +650,7 @@ public class ServerCore {
 		if (requestedMarkerId == null) {
 			final long requestId = 0L;
 
-			LOGGER.debug(() -> "marker remove rejected: requestId=%d reason=%s".formatted(requestId, MarkerRejectReason.INVALID_REQUEST));
+			Diagnostics.server().atDetailed().debug(() -> "marker remove rejected: requestId=%d reason=%s".formatted(requestId, MarkerRejectReason.INVALID_REQUEST));
 			PresentationServer.rejected(player, requestId, MarkerRequestKind.REMOVE, MarkerRejectReason.INVALID_REQUEST);
 			return;
 		}
@@ -651,17 +663,17 @@ public class ServerCore {
 				final var removal = result.removal().orElseThrow();
 				releaseExternal(server, removal.marker());
 
-				LOGGER.debug(() -> "marker remove accepted: markerId=%d reason=%s".formatted(markerId.value(), removal.reason()));
+				Diagnostics.server().atDetailed().debug(() -> "marker remove accepted: markerId=%d reason=%s".formatted(markerId.value(), removal.reason()));
 				PresentationServer.forget(removal.marker().id());
 				sendPresentationRemoved(server.getPlayerList(), removal, null);
 				sendPresentationWinnerChanges(server.getPlayerList(), result.winnerChanges(), null);
 			}
 			case NOT_FOUND -> {
-				LOGGER.debug(() -> "marker remove rejected: requestId=%d reason=%s".formatted(markerId.value(), MarkerRejectReason.NOT_FOUND));
+				Diagnostics.server().atDetailed().debug(() -> "marker remove rejected: requestId=%d reason=%s".formatted(markerId.value(), MarkerRejectReason.NOT_FOUND));
 				PresentationServer.rejected(player, markerId.value(), MarkerRequestKind.REMOVE, MarkerRejectReason.NOT_FOUND);
 			}
 			case NOT_OWNER -> {
-				LOGGER.debug(() -> "marker remove rejected: requestId=%d reason=%s".formatted(markerId.value(), MarkerRejectReason.NOT_OWNER));
+				Diagnostics.server().atDetailed().debug(() -> "marker remove rejected: requestId=%d reason=%s".formatted(markerId.value(), MarkerRejectReason.NOT_OWNER));
 				PresentationServer.rejected(player, markerId.value(), MarkerRequestKind.REMOVE, MarkerRejectReason.NOT_OWNER);
 			}
 		}
@@ -685,7 +697,7 @@ public class ServerCore {
 		final var playerList = server.getPlayerList();
 
 		if (!batch.removals().isEmpty()) {
-			LOGGER.debug(() -> "marker expiry: removed=%d winnerChanges=%d".formatted(
+			Diagnostics.server().atDetailed().debug(() -> "marker expiry: removed=%d winnerChanges=%d".formatted(
 				batch.removals().size(), batch.winnerChanges().size()));
 
 			for (final var removal : batch.removals()) {
@@ -746,7 +758,7 @@ public class ServerCore {
 			releaseExternal(server, droppedMarker);
 		}
 
-		LOGGER.debug(() -> "marker disconnect cleanup: removed=%d audienceEmptyDrops=%d".formatted(
+		Diagnostics.server().atDetailed().debug(() -> "marker disconnect cleanup: removed=%d audienceEmptyDrops=%d".formatted(
 			removed.removals().size(), dropped.size()));
 
 		PLAYER_CHANNELS.remove(player.getUUID());
@@ -782,9 +794,8 @@ public class ServerCore {
 				try {
 					sameTargetKey = marker.targetKey().equals(nx.pingwheel.common.marker.TargetKey.from(available.target()));
 				} catch (RuntimeException invalidRefresh) {
-					RateLimitedDiagnostics.warn("external-marker-refresh-key", external.providerId(),
-						() -> "markerId=" + marker.id() + " committedTarget=" + external
-							+ " refreshedTarget=" + available.target(), invalidRefresh);
+					Diagnostics.server().atNormal().failure(org.apache.logging.log4j.Level.WARN, "external-marker-refresh-key",
+						"refresh-target-mismatch", () -> "markerId=" + marker.id().value(), invalidRefresh);
 					sameTargetKey = false;
 				}
 			}
@@ -900,10 +911,10 @@ public class ServerCore {
 	private static void updatePlayerChannel(ServerPlayer player, String channel) {
 		if (channel.isEmpty()) {
 			PLAYER_CHANNELS.remove(player.getUUID());
-			LOGGER.info(() -> "Channel update: %s -> default".formatted(player.getGameProfile().getName()));
+			Diagnostics.server().atDetailed().info(() -> "channel changed to default for player=" + player.getGameProfile().getName());
 		} else {
 			PLAYER_CHANNELS.put(player.getUUID(), channel);
-			LOGGER.info(() -> "Channel update: %s -> \"%s\"".formatted(player.getGameProfile().getName(), channel));
+			Diagnostics.server().atDetailed().info(() -> "channel changed for player=" + player.getGameProfile().getName() + " channel=" + channel);
 		}
 	}
 }
