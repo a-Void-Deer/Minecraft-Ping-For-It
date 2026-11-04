@@ -34,6 +34,16 @@ class PingClickArbitrationTest {
 	}
 
 	@Test
+	void setDownCompatibilityPathClaimsWithoutClickCounters() {
+		// AMEcs cancels click/set and re-dispatches the edge through setDown, so
+		// no click counter exists at claim time. The state-edge path may claim
+		// whenever the arbitration plan itself allows it.
+		assertTrue(PingClickArbitration.plan(false, true).mayClaim());
+		assertTrue(PingClickArbitration.plan(true, true).mayClaim());
+		assertFalse(PingClickArbitration.plan(true, false).mayClaim());
+	}
+
+	@Test
 	void dedicatedBindingConsumesAndClaimsOnlyItsCustomMapping() {
 		PingClickArbitration.Plan plan = PingClickArbitration.plan(false, true);
 
