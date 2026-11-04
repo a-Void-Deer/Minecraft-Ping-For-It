@@ -9,6 +9,7 @@ import nx.pingwheel.common.config.ChannelMode;
 import nx.pingwheel.common.config.EntityBlockRenderMode;
 import nx.pingwheel.common.config.PlayerInfoMode;
 import nx.pingwheel.common.config.TeamColorMode;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.integration.TeamContext;
 import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.screen.SettingsCategoryCatalog.Setting;
@@ -131,7 +132,8 @@ class SettingsLocalizationCoverageTest {
 		"presentation.advanced.tooltip",
 		"presentation.whitelist_only.tooltip",
 		"presentation.rule.allow.tooltip",
-		"presentation.rule.block.tooltip");
+		"presentation.rule.block.tooltip",
+		"logging_profile.unlock");
 
 	/**
 	 * Settings-screen format resources that are rendered with more than one value
@@ -311,6 +313,7 @@ class SettingsLocalizationCoverageTest {
 		for (TeamColorMode mode : TeamColorMode.values()) ids.add(mode.toString());
 		for (ChannelMode mode : ChannelMode.values()) ids.add(mode.toString());
 		for (EntityBlockRenderMode mode : EntityBlockRenderMode.values()) ids.add(mode.toString());
+		for (LoggingProfile profile : LoggingProfile.values()) ids.add(profile.name().toLowerCase(Locale.ROOT));
 		ids.add(TeamContext.VANILLA_TEAM.toString());
 		ids.add("global");
 		ids.add("follow_server");

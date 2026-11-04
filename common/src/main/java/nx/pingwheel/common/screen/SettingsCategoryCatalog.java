@@ -68,6 +68,7 @@ public final class SettingsCategoryCatalog {
 		PING_VOLUME("ping_volume"),
 		CONFIGURATION_NOTICE_SIZE("configuration_notice_size"),
 		ENTITY_BLOCK_RENDER_MODE("entity_block_render_mode"),
+		LOGGING_PROFILE("logging_profile"),
 		OPEN_CLIENT_CONFIG("open_client_config"),
 		DEFAULT_CHANNEL_MODE("default_channel_mode"),
 		PLAYER_TRACKING_ENABLED("player_tracking_enabled"),
@@ -76,6 +77,7 @@ public final class SettingsCategoryCatalog {
 		SYNC_DURATION("sync_duration"),
 		PRESENTATION_SERVER_POLICY("presentation_server_policy"),
 		BUDGET_DELAY_NOTIFICATIONS_ENABLED("budget_delay_notifications_enabled"),
+		SERVER_LOGGING_PROFILE("server_logging_profile"),
 		INVENTORY_PHYSICAL_SLOTS_PER_TICK(Field.PHYSICAL_SLOTS_PER_TICK),
 		INVENTORY_PENDING_MEMORY_MIB(Field.PENDING_MEMORY_MIB),
 		INVENTORY_DISPLAY_BYTE_MULTIPLIER(Field.DISPLAY_BYTE_MULTIPLIER),
@@ -220,13 +222,15 @@ public final class SettingsCategoryCatalog {
 		sections.put(Category.CHANNEL_NOTICES, List.of(section("channel", Row.single(Setting.CHANNEL)),
 			section("sound_notices", Row.single(Setting.PING_VOLUME), Row.single(Setting.CONFIGURATION_NOTICE_SIZE))));
 		sections.put(Category.GEOMETRY_CONFIG, List.of(section("geometry", Row.single(Setting.ENTITY_BLOCK_RENDER_MODE)),
+			section("logging", Row.single(Setting.LOGGING_PROFILE)),
 			section("client_config_file", Row.single(Setting.OPEN_CLIENT_CONFIG))));
 		sections.put(Category.CLIENT_PERFORMANCE, List.of(section("wheel_options", Row.single(Setting.PRECISE_CAPTURE_PERIOD_TICKS))));
 		sections.put(Category.CHANNEL_PLAYERS, List.of(section("channel_players", Row.single(Setting.DEFAULT_CHANNEL_MODE), Row.single(Setting.PLAYER_TRACKING_ENABLED))));
 		sections.put(Category.SEND_RATE, List.of(section("send_rate", Row.single(Setting.MS_TO_REGENERATE), Row.single(Setting.RATE_LIMIT))));
 		sections.put(Category.MARKER_DURATION, List.of(section("marker_duration", Row.single(Setting.SYNC_DURATION))));
 		sections.put(Category.PERFORMANCE, List.of(
-			section("monitoring", Row.single(Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED)),
+			section("monitoring", Row.single(Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED),
+				Row.single(Setting.SERVER_LOGGING_PROFILE)),
 			section("inventory_shared", Row.single(Setting.INVENTORY_PHYSICAL_SLOTS_PER_TICK), Row.single(Setting.INVENTORY_PENDING_MEMORY_MIB),
 				Row.single(Setting.INVENTORY_DISPLAY_BYTE_MULTIPLIER), Row.single(Setting.INVENTORY_FRAME_BYTE_MULTIPLIER)),
 			section("inventory_preview", Row.single(Setting.INVENTORY_PREVIEW_PERIOD_TICKS), Row.single(Setting.INVENTORY_PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD),

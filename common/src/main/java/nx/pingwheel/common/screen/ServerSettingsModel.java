@@ -1,12 +1,14 @@
 package nx.pingwheel.common.screen;
 
 import nx.pingwheel.common.config.ChannelMode;
+import nx.pingwheel.common.config.ConfigDefaults;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.ServerConfigUpdate;
 import nx.pingwheel.common.config.InventoryConfigValues;
 import nx.pingwheel.common.config.InventoryConfigValues.Field;
 import nx.pingwheel.common.config.InventoryConfigValues.Value;
 import nx.pingwheel.common.config.InventorySizeScale;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -34,6 +36,7 @@ public final class ServerSettingsModel {
 	private @Nullable ChannelMode defaultChannelMode;
 	private boolean playerTrackingEnabled;
 	private boolean budgetDelayNotificationsEnabled;
+	private LoggingProfile loggingProfile = ConfigDefaults.Server.LOGGING_PROFILE;
 	private String msToRegenerate = "";
 	private String rateLimit = "";
 	private String syncDuration = "";
@@ -111,6 +114,20 @@ public final class ServerSettingsModel {
 
 	public boolean budgetDelayNotificationsEnabled() {
 		return budgetDelayNotificationsEnabled;
+	}
+
+	public LoggingProfile loggingProfile() {
+		return loggingProfile;
+	}
+
+	/** Editing the profile changes only the draft; the root close owns the update packet. */
+	public void setLoggingProfile(LoggingProfile loggingProfile) {
+		if (!canEdit()) {
+			return;
+		}
+
+		this.loggingProfile = java.util.Objects.requireNonNull(loggingProfile, "loggingProfile");
+		recomputeDirtyFields();
 	}
 
 	public String msToRegenerateText() {
@@ -546,7 +563,8 @@ public final class ServerSettingsModel {
 			parseNonNegative(rateLimit).orElseThrow(),
 			parseNonNegative(syncDuration).orElseThrow(),
 			new InventoryConfigValues(inventory),
-			budgetDelayNotificationsEnabled));
+			budgetDelayNotificationsEnabled,
+			loggingProfile));
 	}
 
 	public void markClean() {
@@ -557,6 +575,8 @@ public final class ServerSettingsModel {
 		defaultChannelMode = authoritative.defaultChannelMode();
 		playerTrackingEnabled = authoritative.playerTrackingEnabled();
 		budgetDelayNotificationsEnabled = authoritative.budgetDelayNotificationsEnabled();
+		loggingProfile = authoritative.loggingProfile() == null
+			? ConfigDefaults.Server.LOGGING_PROFILE : authoritative.loggingProfile();
 		msToRegenerate = Integer.toString(authoritative.msToRegenerate());
 		rateLimit = Integer.toString(authoritative.rateLimit());
 		syncDuration = Integer.toString(authoritative.syncDuration());
@@ -572,6 +592,7 @@ public final class ServerSettingsModel {
 		defaultChannelMode = null;
 		playerTrackingEnabled = false;
 		budgetDelayNotificationsEnabled = false;
+		loggingProfile = ConfigDefaults.Server.LOGGING_PROFILE;
 		msToRegenerate = "";
 		rateLimit = "";
 		syncDuration = "";
@@ -596,6 +617,11 @@ public final class ServerSettingsModel {
 		}
 		if (budgetDelayNotificationsEnabled != authoritative.budgetDelayNotificationsEnabled()) {
 			fields |= ServerConfigUpdate.BUDGET_DELAY_NOTIFICATIONS_ENABLED;
+		}
+		LoggingProfile authoritativeProfile = authoritative.loggingProfile() == null
+			? ConfigDefaults.Server.LOGGING_PROFILE : authoritative.loggingProfile();
+		if (loggingProfile != authoritativeProfile) {
+			fields |= ServerConfigUpdate.LOGGING_PROFILE;
 		}
 		if (!matchesAuthoritative(msToRegenerate, authoritative.msToRegenerate())) {
 			fields |= ServerConfigUpdate.MS_TO_REGENERATE;
