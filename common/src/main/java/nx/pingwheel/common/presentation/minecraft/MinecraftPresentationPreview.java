@@ -37,6 +37,7 @@ import nx.pingwheel.common.resolve.TargetResolutionLogger;
 
 /** Active-server thread bridge; no marker, materialization, inventory runtime or second sampler. */
 final class MinecraftPresentationPreview implements PresentationPreviewServer.Host {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel MEMBER_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-server-preview-member", java.time.Duration.ofSeconds(10));
 	private final MinecraftServer server;
 	MinecraftPresentationPreview(MinecraftServer server) { this.server = server; }
 	@Override public Optional<PresentationPreviewAccess> access(UUID player, String type) {
@@ -91,7 +92,7 @@ final class MinecraftPresentationPreview implements PresentationPreviewServer.Ho
 		// second world read.
 		try { if (!memberGate.test(position)) return null; }
 		catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("presentation/preview-member-gate", "server", () -> "target=" + target + " member=" + position, unavailable);
+			Diagnostics.server().atDetailed().rateLimited(MEMBER_FAILURE).warn("presentation/preview-member-gate", "deny-member", unavailable, () -> "target=" + target + " member=" + position);
 			return null;
 		}
 		BlockState state = null;

@@ -21,6 +21,8 @@ import nx.pingwheel.common.presentation.minecraft.MinecraftBlockReadSources;
 
 /** Tick-local view of the current client world. Consumers retain detached observations only. */
 public record MinecraftPreviewReadContext(ClientLevel level, long tick) implements MinecraftPreviewFieldAccess.WorldContext {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel PREDICTION_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-preview-prediction", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel SOURCE_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-preview-source", java.time.Duration.ofSeconds(10));
 	public MinecraftPreviewReadContext {
 		if (level == null || tick < 0) throw new IllegalArgumentException("preview world");
 	}
@@ -55,7 +57,7 @@ public record MinecraftPreviewReadContext(ClientLevel level, long tick) implemen
 			if (!((Object) handler instanceof PreviewPredictionView predictions)
 				|| predictions.pingforit$hasPendingPrediction(pos)) return null;
 		} catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("presentation/preview-prediction", "client", () -> "target=" + target, unavailable);
+			Diagnostics.client().atDetailed().rateLimited(PREDICTION_FAILURE).warn("presentation/preview-prediction", "unavailable", unavailable, () -> "target=" + target);
 			return null;
 		}
 		BlockState state = chunk.getBlockState(pos);
@@ -80,7 +82,7 @@ public record MinecraftPreviewReadContext(ClientLevel level, long tick) implemen
 		ResolvedBlockReadSource source;
 		try { source = SableClientProvider.resolvePreviewReadSource(level, external).orElse(null); }
 		catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("presentation/preview-source", "sable", () -> "target=" + external, unavailable);
+			Diagnostics.client().atDetailed().rateLimited(SOURCE_FAILURE).warn("presentation/preview-source", "unavailable", unavailable, () -> "target=" + external);
 			source = null;
 		}
 		if (source == null || !MinecraftBlockReadSources.sameReadBinding(source.descriptor().target(), external)) return null;

@@ -5,7 +5,7 @@ import java.util.UUID;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import nx.pingwheel.common.domain.Target;
-import nx.pingwheel.common.testing.DiagnosticLogCapture;
+import nx.pingwheel.common.presentation.PresentationDiagnosticCapture;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -15,7 +15,7 @@ import static org.junit.jupiter.api.Assertions.*;
 class TargetNameDiagnosticsTest {
 
 	@Test void throwingGetterUsesUnknownAndReportsBoundedRootButExpectedAbsenceDoesNotWarn() {
-		try (var logs = new DiagnosticLogCapture()) {
+		try (var logs = new PresentationDiagnosticCapture()) {
 			var target = new Target.EntityTarget("minecraft:overworld", UUID.randomUUID());
 			var lookup = new Lookup();
 			assertUnknown(ClientTargetNameResolver.resolve(target, lookup));
@@ -23,8 +23,8 @@ class TargetNameDiagnosticsTest {
 			lookup.failing = true;
 			assertUnknown(ClientTargetNameResolver.resolve(target, lookup));
 			assertUnknown(ClientTargetNameResolver.resolve(target, lookup));
-			assertEquals(1, logs.operation("target-name/client-lookup").size());
-			var event = logs.operation("target-name/client-lookup").getFirst();
+			assertEquals(1, logs.events().size());
+			var event = logs.events().getFirst();
 			assertEquals(Level.WARN, event.getLevel());
 			assertNull(event.getThrown());
 			String report = event.getMessage().getFormattedMessage();

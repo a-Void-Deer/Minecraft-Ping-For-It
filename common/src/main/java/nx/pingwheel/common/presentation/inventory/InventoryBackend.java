@@ -38,6 +38,7 @@ import org.jetbrains.annotations.Unmodifiable;
 
 /** Server-thread coordinator: request authority, shared capture and marker-owned tracking. */
 public final class InventoryBackend implements AutoCloseable {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel PUBLISH_CREATED = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-publish-created", java.time.Duration.ofSeconds(10));
 	public record Policy(long epoch, long view, @Unmodifiable Set<String> types, @Unmodifiable Set<String> fluidTypes) {
 		public Policy(long epoch, long view, Set<String> types) { this(epoch, view, types, Set.of()); }
 		public Policy { types = Set.copyOf(types); fluidTypes = Set.copyOf(fluidTypes); }
@@ -787,10 +788,10 @@ public final class InventoryBackend implements AutoCloseable {
 						prepared.commit(marker);
 						try { host.publishCreated(outcome); }
 						catch (RuntimeException | LinkageError publicationFailure) {
-							nx.pingwheel.common.diagnostics.Diagnostics.error("inventory/publish-created", host.getClass().getName(),
+							nx.pingwheel.common.diagnostics.Diagnostics.server().atNormal().rateLimited(PUBLISH_CREATED).error("inventory/publish-created", "committed-marker-delivery-failed", publicationFailure,
 								() -> "committed marker=" + outcome.marker().id() + " request=" + packet.requestId()
 									+ " commit=" + packet.commitId() + " owner=" + player + " epoch=" + session.epoch
-									+ " " + InventoryCaptureDiagnostics.context(preview.input), publicationFailure);
+									+ " " + InventoryCaptureDiagnostics.context(preview.input));
 						}
 						prepared.attachRecipients(marker);
 					}

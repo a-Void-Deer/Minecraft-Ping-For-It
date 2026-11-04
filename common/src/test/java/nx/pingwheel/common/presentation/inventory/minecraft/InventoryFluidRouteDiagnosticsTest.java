@@ -1,6 +1,6 @@
 package nx.pingwheel.common.presentation.inventory.minecraft;
 
-import nx.pingwheel.common.integration.IntegrationDiagnosticCapture;
+import nx.pingwheel.common.presentation.PresentationDiagnosticCapture;
 import nx.pingwheel.common.platform.IPlatformFluidService;
 import nx.pingwheel.common.topology.DoubleChestFixture;
 import org.apache.logging.log4j.Level;
@@ -14,7 +14,7 @@ class InventoryFluidRouteDiagnosticsTest {
 	@BeforeAll static void bootstrap() { net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap(); }
 	@Test void successfulPublicRoutesDeduplicateWithoutEvictionAndExplicitStructuresNeverReport() {
 		InventoryFluidRouteDiagnostics.clear(); var server = DoubleChestFixture.allocate(InventoryFluidWorldTest.Server.class);
-		try (var capture = new IntegrationDiagnosticCapture(Level.INFO)) {
+		try (var capture = new PresentationDiagnosticCapture(Level.INFO)) {
 			InventoryFluidRouteDiagnostics.used(server, new IPlatformFluidService.RouteInfo(IPlatformFluidService.TopologyEvidence.EXPLICIT_STRUCTURE, "create.explicit"));
 			assertTrue(capture.events().isEmpty());
 			for (int i = 0; i < 300; i++) {

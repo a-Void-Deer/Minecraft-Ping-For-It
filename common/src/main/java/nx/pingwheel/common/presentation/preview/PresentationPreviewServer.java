@@ -25,6 +25,10 @@ import nx.pingwheel.common.presentation.budget.BudgetDelaySink.WorkItem;
 
 /** Packet ingress only queues. The host drains with the remaining SECTION tick allowance. */
 public final class PresentationPreviewServer {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel ACCESS_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-preview-access", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel CAPTURE_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-preview-capture", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel ENCODE_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-preview-encode", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel SEND_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-preview-send", java.time.Duration.ofSeconds(10));
 	public interface Host {
 		/** Fresh authorization intersected with the already-advertised epoch/view; no world reads. */
 		Optional<PresentationPreviewAccess> access(UUID player, String targetTypeId);
@@ -79,7 +83,7 @@ public final class PresentationPreviewServer {
 			return host.access(player, request.targetTypeId()).filter(value -> value.epoch() == request.epoch()
 				&& value.view() == request.view() && value.targetTypeId().equals(request.targetTypeId()));
 		} catch (RuntimeException | LinkageError denied) {
-			Diagnostics.warn("presentation/preview-access", "server", () -> "player=" + player + " request=" + request, denied);
+			Diagnostics.server().atDetailed().rateLimited(ACCESS_FAILURE).warn("presentation/preview-access", "deny-request", denied, () -> "player=" + player + " request=" + request);
 			return Optional.empty();
 		}
 	}
@@ -156,7 +160,7 @@ public final class PresentationPreviewServer {
 			@Nullable Capture captured;
 			try { captured = host.capture(player, request, authorized.narrow(request.adapterId(), request.fields()), budget); }
 			catch (RuntimeException | LinkageError unavailable) {
-				Diagnostics.warn("presentation/preview-capture", request.adapterId(), () -> "player=" + player + " request=" + request, unavailable);
+				Diagnostics.server().atDetailed().rateLimited(CAPTURE_FAILURE).warn("presentation/preview-capture", "unavailable", unavailable, () -> "player=" + player + " request=" + request);
 				captured = null;
 			}
 			finally { for (int debit = allowance - budget.remaining(); debit > 0; debit--) work.scan(); }
@@ -182,7 +186,7 @@ public final class PresentationPreviewServer {
 			try { send(player, PresentationPreviewS2CPacket.result(request,
 				new PresentationSection(section.adapterId(), section.schema(), projected, false))); }
 			catch (RuntimeException | LinkageError unavailable) {
-				Diagnostics.warn("presentation/preview-result-encode", request.adapterId(), () -> "request=" + request, unavailable);
+				Diagnostics.server().atDetailed().rateLimited(ENCODE_FAILURE).warn("presentation/preview-result-encode", "unavailable", unavailable, () -> "request=" + request);
 				reply(player, request, adapter.schema(), PresentationPreviewS2CPacket.Status.UNAVAILABLE);
 			}
 		}
@@ -212,8 +216,8 @@ public final class PresentationPreviewServer {
 	private boolean send(UUID player, PresentationPreviewS2CPacket packet) {
 		try { return host.send(player, packet); }
 		catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("presentation/preview-result-send", packet.adapterId(),
-				() -> "player=" + player + " request=" + packet.requestId() + " status=" + packet.status(), unavailable);
+			Diagnostics.server().atDetailed().rateLimited(SEND_FAILURE).warn("presentation/preview-result-send", "delivery-failed", unavailable,
+				() -> "player=" + player + " request=" + packet.requestId() + " status=" + packet.status());
 			return false;
 		}
 	}

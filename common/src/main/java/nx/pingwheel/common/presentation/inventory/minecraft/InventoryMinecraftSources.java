@@ -47,6 +47,7 @@ import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /** Ordinary and provider-confirmed blocks. Every view is sided, read-only, loaded and owner-authorized. */
 public final class InventoryMinecraftSources {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel MEMBER_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-member-scope", java.time.Duration.ofSeconds(10));
 	private InventoryMinecraftSources() {}
 	/** Production compatibility conversion also forwards the consuming read grant. */
 	private interface AdmittedEntryCodec extends Function<IPlatformInventoryService.Entry, InventoryDomainCodec.Item> {
@@ -161,8 +162,8 @@ public final class InventoryMinecraftSources {
 		try { return gate.test(pos); }
 		catch (RuntimeException | LinkageError unavailable) {
 			if (!(unavailable instanceof InventorySourceUnavailableException) && !(unavailable instanceof InventoryItemBudget.CaptureLimitException))
-				Diagnostics.warn("inventory-member-scope", gate.getClass().getName(),
-					() -> "position=" + pos + " binding=" + binding + " face=" + face + " gateClass=" + gate.getClass().getName(), unavailable);
+				Diagnostics.server().atDetailed().rateLimited(MEMBER_FAILURE).warn("inventory-member-scope", "deny-member", unavailable,
+					() -> "position=" + pos + " binding=" + binding + " face=" + face + " gateClass=" + gate.getClass().getName());
 			return false;
 		}
 	}

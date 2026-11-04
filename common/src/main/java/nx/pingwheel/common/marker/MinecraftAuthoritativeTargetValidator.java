@@ -25,7 +25,6 @@ import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.name.TargetNameJsonCodec;
 import nx.pingwheel.common.resolve.BlockEntityClassification;
 
-import static nx.pingwheel.common.Global.LOGGER;
 
 /**
  * The Minecraft 1.21.1 server adapter of {@link AuthoritativeTargetValidator}.
@@ -76,6 +75,7 @@ import static nx.pingwheel.common.Global.LOGGER;
  * client-only or loader-specific types and never mutates any store state.
  */
 public final class MinecraftAuthoritativeTargetValidator implements AuthoritativeTargetValidator {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel NAME_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("marker-target-name-resolve", java.time.Duration.ofSeconds(10));
 
 	/**
 	 * The fail-safe display name JSON used only when the injected name
@@ -189,8 +189,8 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 		MinecraftServerEntityLookup.Result lookup = MinecraftServerEntityLookup.find(level, requested.locator());
 
 		if (requested.locator() instanceof EntityLocator.RuntimeId) {
-			LOGGER.debug("authoritative entity lookup: locatorStrategy={} outcome={}",
-				requested.locator().tag(), lookup.outcome().tag());
+			Diagnostics.server().atDebug().site("authoritative-entity-lookup").debug(
+				() -> "locatorStrategy=" + requested.locator().tag() + " outcome=" + lookup.outcome().tag());
 		}
 
 		if (!lookup.accepted()) {
@@ -314,8 +314,8 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 
 			return name;
 		} catch (RuntimeException failure) {
-			Diagnostics.warn("marker-target-name-resolve", nameResolver.getClass().getName(),
-				() -> "targetKind=" + normalized.kind() + " target=" + normalized, failure);
+			Diagnostics.server().atDetailed().rateLimited(NAME_FAILURE).warn("marker-target-name-resolve", "unknown-name", failure,
+				() -> "targetKind=" + normalized.kind() + " target=" + normalized);
 			return FAIL_SAFE_NAME;
 		}
 	}

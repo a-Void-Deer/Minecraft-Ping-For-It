@@ -52,6 +52,17 @@ import java.util.function.Supplier;
 
 /** Server-thread, world-lifetime presentation leases. Cached values never hold world objects. */
 public final class PresentationServer {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel REGISTRATION = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-server-registration", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel CAPTURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-capture", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel SANITIZE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-sanitize", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel SEND_SECTION = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-send-section", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel BLOCK_NAME = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-block-name", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel BLOCK_ENCODE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-block-name-encode", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel EXTERNAL_NAME = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-external-name", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel ENTITY_NAME = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-entity-name", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel ENTITY_ENCODE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-entity-name-encode", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel CUSTOM_NAME = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-custom-name", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel COMPOSE_NAME = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-compose-name", java.time.Duration.ofSeconds(10));
 	private static final int MAX_LEASES = 1024;
 	private static final int MAX_CAPTURE_WORK_PER_TICK = 4096;
 	private static final int MAX_CAPTURES_PER_TICK = 32;
@@ -134,7 +145,7 @@ public final class PresentationServer {
 		} catch (ClassNotFoundException absent) {
 			// The NeoForge factory is normally absent on the other loaders.
 		} catch (ReflectiveOperationException | LinkageError | RuntimeException ignored) {
-			Diagnostics.warn("presentation/optional-registration", "create", () -> "server adapter registration", ignored);
+			Diagnostics.server().atNormal().rateLimited(REGISTRATION).warn("presentation/optional-registration", "basic-only", ignored, () -> "server adapter registration");
 			// Optional integrations must not prevent Basic from negotiating.
 		}
 		policyFingerprint = settings().fingerprint();
@@ -609,14 +620,14 @@ public final class PresentationServer {
 				finally { for (int used = allowance - budget.remaining(); used > 0; used--) work.scan(); }
 			}
 		} catch (RuntimeException | LinkageError ignored) {
-			Diagnostics.warn("presentation/capture", adapter.adapterId(),
-				() -> "target=" + lease.marker.target() + " demand=" + demand, ignored);
+			Diagnostics.server().atDetailed().rateLimited(CAPTURE).warn("presentation/capture", "retain-stale", ignored,
+				() -> "adapter=" + adapter.adapterId() + " target=" + lease.marker.target() + " demand=" + demand);
 			value = null;
 		}
 		try { value = sanitize(adapter, value, demand); }
 		catch (RuntimeException | LinkageError ignored) {
-			Diagnostics.warn("presentation/sanitize", adapter.adapterId(),
-				() -> "target=" + lease.marker.target() + " demand=" + demand, ignored);
+			Diagnostics.server().atDetailed().rateLimited(SANITIZE).warn("presentation/sanitize", "retain-stale", ignored,
+				() -> "adapter=" + adapter.adapterId() + " target=" + lease.marker.target() + " demand=" + demand);
 			value = null;
 		}
 		source.value = transition(adapter.adapterId(), adapter.schema(), source.value, demand, value);
@@ -932,7 +943,7 @@ public final class PresentationServer {
 		}
 		// A semantically valid Basic capture may exceed the encoded field bounds;
 		// degrade to the established empty stale section instead of throwing here.
-		PresentationSection projected = PresentationCodec.bounded(cached);
+		PresentationSection projected = PresentationCodec.bounded(cached, Diagnostics.server());
 		PresentationReceiptContent content = receipt(session, marker, basic, allowed, freshAuthorization,
 			inventoryTracked, freshInventoryTypes);
 		// Old-cache replay may retain a selected Basic value after its annotation
@@ -1182,9 +1193,9 @@ public final class PresentationServer {
 			sent.put(adapter.adapterId(), projected);
 		} catch (RuntimeException oversized) {
 			String failedStage = stage;
-			Diagnostics.warn("presentation/send-section", adapter.adapterId(),
-				() -> "stage=" + failedStage + " marker=" + markerId + " epoch=" + session.epoch
-					+ " view=" + session.view + " revision=" + session.revision, oversized);
+			Diagnostics.server().atDetailed().rateLimited(SEND_SECTION).warn("presentation/send-section", "empty-stale-fallback", oversized,
+				() -> "adapter=" + adapter.adapterId() + " stage=" + failedStage + " marker=" + markerId + " epoch=" + session.epoch
+					+ " view=" + session.view + " revision=" + session.revision);
 			PresentationSection empty = new PresentationSection(adapter.adapterId(), adapter.schema(), Map.of(), true);
 			delivery.accept(PresentationS2CPacket.section(session.epoch, session.view,
 				++session.revision, markerId, empty));
@@ -1499,7 +1510,7 @@ public final class PresentationServer {
 				Object observed = blockEntity.get();
 				custom = observed instanceof Nameable named && named.hasCustomName() ? named.getCustomName() : null;
 			} catch (RuntimeException | LinkageError unavailable) {
-				Diagnostics.warn("presentation/basic-block-name-read", "minecraft", () -> "demand=" + demand, unavailable);
+				Diagnostics.server().atDetailed().rateLimited(BLOCK_NAME).warn("presentation/basic-block-name-read", "name-unavailable", unavailable, () -> "demand=" + demand);
 				customNameReadable = false;
 			}
 			if (customNameReadable) {
@@ -1510,7 +1521,7 @@ public final class PresentationServer {
 							put(fields, demand, PresentationBasic.NAME,
 								new PresentationValue.Text(encodeName.apply(name)));
 						} catch (RuntimeException | LinkageError unavailable) {
-							Diagnostics.warn("presentation/basic-name-encode", "block", () -> "demand=" + demand, unavailable);
+							Diagnostics.server().atDetailed().rateLimited(BLOCK_ENCODE).warn("presentation/basic-name-encode", "block-name-unavailable", unavailable, () -> "demand=" + demand);
 							// NAME only; an independently captured plain custom name stays fresh.
 						}
 					}
@@ -1571,7 +1582,7 @@ public final class PresentationServer {
 				return externalName(ExternalBlockServerProviders.registry().resolveName(player.serverLevel(), target),
 					server.registryAccess(), TargetNameJsonCodec.UNKNOWN, demand);
 		} catch (RuntimeException unavailable) {
-			Diagnostics.warn("presentation/basic-external-name", "provider", () -> "target=" + target, unavailable);
+			Diagnostics.server().atDetailed().rateLimited(EXTERNAL_NAME).warn("presentation/basic-external-name", "unknown-name", unavailable, () -> "target=" + target);
 			// A failed source must not synthesize custom text or change the existing NAME fallback.
 		}
 		return new ExternalNameObservation(demand.contains(PresentationBasic.NAME) ? TargetNameJsonCodec.UNKNOWN : null, null);
@@ -1675,7 +1686,7 @@ public final class PresentationServer {
 				try {
 					custom = entity.getCustomName();
 				} catch (RuntimeException | LinkageError unavailable) {
-					Diagnostics.warn("presentation/basic-entity-name-read", "minecraft", () -> "entityClass=" + entity.getClass().getName(), unavailable);
+					Diagnostics.server().atDetailed().rateLimited(ENTITY_NAME).warn("presentation/basic-entity-name-read", "name-unavailable", unavailable, () -> "entityClass=" + entity.getClass().getName());
 					customNameReadable = false;
 				}
 				if (customNameReadable) {
@@ -1688,7 +1699,7 @@ public final class PresentationServer {
 			try {
 				put(fields, demand, PresentationBasic.NAME, new PresentationValue.Text(encodeName.apply(name)));
 			} catch (RuntimeException | LinkageError unavailable) {
-				Diagnostics.warn("presentation/basic-name-encode", "entity", () -> "entityClass=" + entity.getClass().getName(), unavailable);
+				Diagnostics.server().atDetailed().rateLimited(ENTITY_ENCODE).warn("presentation/basic-name-encode", "entity-name-unavailable", unavailable, () -> "entityClass=" + entity.getClass().getName());
 				// NAME only; every independently captured value stays fresh.
 			}
 		}
@@ -1707,7 +1718,7 @@ public final class PresentationServer {
 			String text = TargetNameComposer.plainText(custom, PresentationLimits.MAX_TEXT_BYTES);
 			if (!text.isEmpty()) put(fields, demand, PresentationBasic.CUSTOM_NAME, new PresentationValue.Text(text));
 		} catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("presentation/basic-custom-name", "minecraft", () -> "plain custom-name reduction", unavailable);
+			Diagnostics.server().atDetailed().rateLimited(CUSTOM_NAME).warn("presentation/basic-custom-name", "custom-name-unavailable", unavailable, () -> "plain custom-name reduction");
 			// An unreducible custom component stays absent; the composed name and every
 			// unrelated Basic field remain independently fresh.
 		}
@@ -1729,7 +1740,7 @@ public final class PresentationServer {
 		try {
 			return optionalName(customName, baseName);
 		} catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("presentation/basic-name-compose", "minecraft", () -> "optional custom/base composition", unavailable);
+			Diagnostics.server().atDetailed().rateLimited(COMPOSE_NAME).warn("presentation/basic-name-compose", "name-unavailable", unavailable, () -> "optional custom/base composition");
 			return null;
 		}
 	}

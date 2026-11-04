@@ -498,7 +498,7 @@ public final class ClientItemDisplay {
 				&& !InventoryDisplayWriter.isDefaultIcon(element.getAsJsonObject().get("id").getAsString(), json)) return Optional.empty();
 			replaceFlat(element, 0, budget);
 			var decoded = SNAPSHOT_CODEC.parse(registryAccess.createSerializationContext(JsonOps.INSTANCE), element);
-			if (decoded.error().isPresent()) InventoryItemDiagnostics.codecRejected("inventory/client-display-codec", "persistent display patch");
+			if (decoded.error().isPresent()) InventoryItemDiagnostics.codecRejected(nx.pingwheel.common.diagnostics.Diagnostics.client(), "inventory/client-display-codec", "persistent display patch");
 			return decoded.result()
 				.filter(snapshot -> supportedSnapshot(snapshot, 0, budget));
 		} catch (RuntimeException malformed) {
@@ -511,7 +511,7 @@ public final class ClientItemDisplay {
 		// A normal safety/budget refusal is deliberate display suppression, as
 		// are Lore/shulker stripping and ceiling reprojection. Hooks and codecs
 		// throwing their own exceptions are unexpected failures.
-		if (!(failure instanceof UnsafeDisplay) || failure.getCause() != null) InventoryItemDiagnostics.displayFailure(operation, itemId, failure);
+		if (!(failure instanceof UnsafeDisplay) || failure.getCause() != null) InventoryItemDiagnostics.displayFailure(nx.pingwheel.common.diagnostics.Diagnostics.client(), operation, itemId, failure);
 	}
 
 	/**
@@ -708,7 +708,7 @@ public final class ClientItemDisplay {
 			// has already passed its own item-bearing-position guard above.
 			replaceFlat(value, depth, budget);
 			var decoded = ComponentSerialization.CODEC.parse(JsonOps.INSTANCE, value);
-			if (decoded.error().isPresent()) InventoryItemDiagnostics.codecRejected("inventory/client-display-legacy-codec", "legacy display text");
+			if (decoded.error().isPresent()) InventoryItemDiagnostics.codecRejected(nx.pingwheel.common.diagnostics.Diagnostics.client(), "inventory/client-display-legacy-codec", "legacy display text");
 			Optional<Component> text = decoded.result();
 			if (text.isEmpty() || !supportedText(text.get(), depth, budget)) return false;
 			String plain = ClientDisplayText.own(text.get(), depth, budget).plain();

@@ -60,6 +60,8 @@ import org.apache.logging.log4j.Level;
  * retain their original bounded details in a controlled warning.
  */
 public final class MinecraftTargetNameResolver implements AuthoritativeTargetNameResolver {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel LOOKUP_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("target-name-server-lookup-failure", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel LOOKUP_ABSENT = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("target-name-server-lookup-absent", java.time.Duration.ofSeconds(10));
 
 	/**
 	 * Expected absence classifications used by the scalar fallback debug event.
@@ -106,8 +108,8 @@ public final class MinecraftTargetNameResolver implements AuthoritativeTargetNam
 
 			return TargetNameJsonCodec.encode(resolution.component(), server.registryAccess());
 		} catch (RuntimeException e) {
-			Diagnostics.warn("target-name/server-lookup", "minecraft",
-				() -> "kind=" + normalizedTarget.kind() + "; using unknown name", e);
+			Diagnostics.server().atDetailed().rateLimited(LOOKUP_FAILURE).warn("target-name/server-lookup", "unknown-name", e,
+				() -> "kind=" + normalizedTarget.kind() + "; using unknown name");
 			return TargetNameJsonCodec.UNKNOWN;
 		}
 	}
@@ -221,8 +223,8 @@ public final class MinecraftTargetNameResolver implements AuthoritativeTargetNam
 	 * reason class only. Never names, JSON, UUIDs, positions, or registry ids.
 	 */
 	private TargetNameJson fallback(Target target, String reasonClass) {
-		Diagnostics.event(Level.DEBUG, "target-name/server-lookup", "minecraft", reasonClass,
-			() -> "kind=" + target.kind() + "; using unknown name");
+		Diagnostics.server().atDebug().rateLimited(LOOKUP_ABSENT).event(Level.DEBUG, "target-name/server-lookup", "unknown-name",
+			() -> "reason=" + reasonClass + " kind=" + target.kind());
 		return TargetNameJsonCodec.UNKNOWN;
 	}
 }

@@ -191,7 +191,7 @@ public final class InventoryServer {
 			if (requested instanceof Target.ExternalBlockTarget external && external.isCandidate()
 				&& !InventoryBackend.sameCandidateNormalization(requested, validated.normalizedTarget()))
 				return Optional.empty();
-			var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.global())
+			var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.global(nx.pingwheel.common.diagnostics.Diagnostics.server()))
 				.resolve(validated.normalizedTarget(), validated.matchContext());
 			int level = 0;
 			for (int candidate = 1; candidate <= 4; candidate++) if (player.hasPermissions(candidate)) level = candidate;

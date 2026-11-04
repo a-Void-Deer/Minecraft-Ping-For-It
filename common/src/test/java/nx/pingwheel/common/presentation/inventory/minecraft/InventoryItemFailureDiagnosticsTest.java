@@ -21,6 +21,21 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
 class InventoryItemFailureDiagnosticsTest {
+	@Test void nativeErrorSupplierIsNeverEvaluatedAtAnyProfile() {
+		for (var profile : nx.pingwheel.common.diagnostics.LoggingProfile.values()) {
+			try (var logs = new InventoryDiagnosticsTestCapture()) {
+				nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER, profile);
+				var calls = new java.util.concurrent.atomic.AtomicInteger();
+				var result = com.mojang.serialization.DataResult.<String>error(() -> {
+					calls.incrementAndGet(); throw new AssertionError("native codec error supplier must not traverse payloads");
+				});
+				var refusal = assertThrows(RuntimeException.class, () -> InventoryItemDiagnostics.complete(result, "caller-owned-stage"));
+				InventoryItemDiagnostics.refusal("inventory/item-identity", "private:item", refusal);
+				assertEquals(0, calls.get());
+				assertEquals(profile == nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL ? 0 : 1, logs.events().size());
+			}
+		}
+	}
 
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 
@@ -35,7 +50,7 @@ class InventoryItemFailureDiagnosticsTest {
 			assertEquals("", aggregate.key().componentsKey()); assertTrue(aggregate.display().aggregateRequired());
 			assertEquals(safe.key(), catalog.encode(new ItemStack(Items.STONE)).key());
 			assertEquals(1, logs.events().size());
-			assertTrue(logs.messages().contains("operation=inventory/item-identity"));
+			assertTrue(logs.messages().contains("site=inventory/item-identity"));
 			assertTrue(logs.messages().contains("canonical byte bound=65536"), logs.messages());
 			assertTrue(logs.messages().contains("minecraft:stone")); assertNull(logs.events().getFirst().getThrown());
 		}
@@ -115,7 +130,7 @@ class InventoryItemFailureDiagnosticsTest {
 			assertEquals(1, logs.events().size()); assertFalse(logs.messages().contains("not-an-integer"), logs.messages());
 			assertTrue(logs.messages().contains("stage=persistent display patch"));
 			assertTrue(logs.messages().contains("native error detail not evaluated"));
-			assertTrue(logs.messages().contains("reason=native-codec-rejected")); assertNull(logs.events().getFirst().getThrown());
+			assertTrue(logs.messages().contains("handling=native-codec-rejected")); assertNull(logs.events().getFirst().getThrown());
 		}
 	}
 

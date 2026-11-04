@@ -33,6 +33,8 @@ import org.jetbrains.annotations.Unmodifiable;
 
 /** Actual bounded dedicated publication. Queued cuts remain immutable until fully transmitted. */
 public final class InventorySyncPublisher implements SyncPublisher, AutoCloseable {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel TRANSPORT = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-publisher-transport", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel CONTROL = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-publisher-control", java.time.Duration.ofSeconds(10));
 	public static final CostLedger.Counter PUBLICATIONS = new CostLedger.Counter("inventory/publication", CostLedger.Unit.WORK);
 	public interface Transport {
 		/** Last callback before accounting and irreversible host handoff; production must implement source authorization. */
@@ -852,7 +854,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		}
 	}
 	private void warn(String operation, State state, InventoryS2CPacket packet, Throwable failure) {
-		Diagnostics.warn("inventory/publisher/" + operation, transport.getClass().getName() + "/" + packet.kind(),
+		Diagnostics.server().atDetailed().rateLimited(operation.equals("control-handoff") ? CONTROL : TRANSPORT).failure(org.apache.logging.log4j.Level.WARN, "inventory/publisher/" + operation, "handoff-refused",
 			() -> "kind=" + packet.kind() + " request=" + packet.requestId() + " recipient=" + state.context.recipient()
 				+ " marker=" + packet.markerId() + " epoch=" + packet.epoch() + " presentationEpoch=" + packet.presentationEpoch()
 				+ " view=" + packet.view() + " baseline=" + packet.baselineId() + " stateRevision=" + packet.statusRevision()

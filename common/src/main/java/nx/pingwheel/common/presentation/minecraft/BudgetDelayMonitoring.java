@@ -25,6 +25,10 @@ import nx.pingwheel.common.presentation.budget.BudgetDelaySink.WorkItem;
 
 /** One monitoring lifetime per authoritative server identity, independent of config refreshes. */
 public final class BudgetDelayMonitoring {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel NOTICE_CONFIG = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("budget-notice-config", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel NOTICE_HOST = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("budget-notice-host", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel NOTICE_RECIPIENT = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("budget-notice-recipient", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel NOTICE_RECIPIENTS = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("budget-notice-recipients", java.time.Duration.ofSeconds(10));
 
 	private static final Coordinator<MinecraftServer> COORDINATOR = new Coordinator<>(new MinecraftPort());
 
@@ -54,7 +58,7 @@ public final class BudgetDelayMonitoring {
 
 	/** Each closed delayed cycle has already passed the monitor's domain frequency gate. */
 	static void reportSummary(CycleSummary summary) {
-		Diagnostics.domainApprovedEvent(Level.WARN, "budget/delay", summary.module().name(), "closed-cycle",
+		Diagnostics.server().atDetailed().event(Level.WARN, "budget/delay", "closed-cycle",
 			() -> formatSummary(summary));
 	}
 
@@ -148,7 +152,7 @@ public final class BudgetDelayMonitoring {
 			boolean enabled = false;
 			try { enabled = port.notificationsEnabled(server); }
 			catch (RuntimeException | LinkageError ignored) {
-				Diagnostics.warn("budget/notice-config", "administrator", () -> "notification setting unavailable; accounting remains active", ignored);
+				Diagnostics.server().atDetailed().rateLimited(NOTICE_CONFIG).warn("budget/notice-config", "accounting-active", ignored, () -> "notification setting unavailable; accounting remains active");
 			}
 			try { lifetime.monitor.finishTick(port.serverTick(server), enabled); }
 			catch (RuntimeException | LinkageError ignored) { /* Diagnostics cannot break the server tick. */ }
@@ -164,7 +168,7 @@ public final class BudgetDelayMonitoring {
 			@Nullable UUID host = null;
 			try { if (!port.dedicated(server)) host = port.hostId(server); }
 			catch (RuntimeException | LinkageError ignored) {
-				Diagnostics.warn("budget/notice-host", "administrator", () -> "host eligibility unavailable", ignored);
+				Diagnostics.server().atDetailed().rateLimited(NOTICE_HOST).warn("budget/notice-host", "host-unavailable", ignored, () -> "host eligibility unavailable");
 			}
 			boolean delivered = false;
 			try {
@@ -175,11 +179,11 @@ public final class BudgetDelayMonitoring {
 							delivered = true;
 						}
 					} catch (RuntimeException | LinkageError ignored) {
-						Diagnostics.warn("budget/notice-recipient", "administrator", () -> "modules=" + modules, ignored);
+						Diagnostics.server().atDetailed().rateLimited(NOTICE_RECIPIENT).warn("budget/notice-recipient", "skip-recipient", ignored, () -> "modules=" + modules);
 					}
 				}
 			} catch (RuntimeException | LinkageError ignored) {
-				Diagnostics.warn("budget/notice-recipients", "administrator", () -> "modules=" + modules, ignored);
+				Diagnostics.server().atDetailed().rateLimited(NOTICE_RECIPIENTS).warn("budget/notice-recipients", "skip-notice", ignored, () -> "modules=" + modules);
 			}
 			return delivered;
 		}

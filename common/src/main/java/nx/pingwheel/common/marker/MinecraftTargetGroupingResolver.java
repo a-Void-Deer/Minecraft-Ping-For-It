@@ -19,6 +19,7 @@ import org.jetbrains.annotations.Nullable;
 /** Creation-only grouping. Unavailable topology never rejects a valid ordinary ping. */
 @NotNullByDefault
 public final class MinecraftTargetGroupingResolver implements TargetGroupingResolver {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel GROUPING_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("target-grouping", java.time.Duration.ofSeconds(10));
 
 	private final MinecraftServer server;
 
@@ -48,7 +49,7 @@ public final class MinecraftTargetGroupingResolver implements TargetGroupingReso
 			if (state == null || !BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals(block.blockRegistryId())) return exact;
 			return TargetKey.requireCompatible(block, IPlatformContextService.INSTANCE.groupBlockTarget(level, block));
 		} catch (RuntimeException | LinkageError | AssertionError unavailable) {
-			Diagnostics.warn("target-grouping", "minecraft", () -> "target=" + block + "; using exact hit", unavailable);
+			Diagnostics.server().atDetailed().rateLimited(GROUPING_FAILURE).warn("target-grouping", "exact-hit", unavailable, () -> "target=" + block);
 			return exact;
 		}
 	}

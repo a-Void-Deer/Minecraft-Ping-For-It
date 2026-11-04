@@ -28,6 +28,10 @@ import nx.pingwheel.common.presentation.preview.PreviewObservation;
 
 /** Explicit vanilla synchronized fields only. Each getter is behind authorized demand. */
 public final class MinecraftPreviewFieldAccess implements PreviewFieldAccess {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel MEMBER_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-client-preview-member", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel NAME_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-client-preview-name", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel CUSTOM_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-client-preview-custom", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel FIELD_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-client-preview-field", java.time.Duration.ofSeconds(10));
 	/** Transient client-thread world access; no world objects enter the resulting projection. */
 	public interface WorldContext extends ReadContext {
 		Entity entity(EntityLocator locator);
@@ -54,7 +58,7 @@ public final class MinecraftPreviewFieldAccess implements PreviewFieldAccess {
 			if (memberGate == null) return true;
 			try { return memberGate.test(position); }
 			catch (RuntimeException | LinkageError unavailable) {
-				Diagnostics.warn("presentation/preview-member-gate", "client", () -> "block=" + block + " member=" + position, unavailable);
+				Diagnostics.client().atDetailed().rateLimited(MEMBER_FAILURE).warn("presentation/preview-member-gate", "deny-member", unavailable, () -> "block=" + block + " member=" + position);
 				return false;
 			}
 		}
@@ -171,7 +175,7 @@ public final class MinecraftPreviewFieldAccess implements PreviewFieldAccess {
 				Component custom;
 				try { custom = entity.getCustomName(); }
 				catch (RuntimeException | LinkageError unavailable) {
-					Diagnostics.warn("presentation/preview-name-read", "entity", () -> "entityClass=" + entity.getClass().getName(), unavailable);
+					Diagnostics.client().atDetailed().rateLimited(NAME_FAILURE).warn("presentation/preview-name-read", "name-unavailable", unavailable, () -> "entityClass=" + entity.getClass().getName());
 					if (demand.contains(PresentationBasic.NAME)) result.put(PresentationBasic.NAME, Missing.UNAVAILABLE);
 					if (demand.contains(PresentationBasic.CUSTOM_NAME)) result.put(PresentationBasic.CUSTOM_NAME, Missing.UNAVAILABLE);
 					return Map.copyOf(result);
@@ -197,14 +201,14 @@ public final class MinecraftPreviewFieldAccess implements PreviewFieldAccess {
 			String text = TargetNameComposer.plainText(custom, PresentationLimits.MAX_TEXT_BYTES);
 			if (!text.isEmpty()) put(result, PresentationBasic.CUSTOM_NAME, () -> new PresentationValue.Text(text), tick);
 		} catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("presentation/preview-custom-name", "minecraft", () -> "plain custom-name reduction", unavailable);
+			Diagnostics.client().atDetailed().rateLimited(CUSTOM_FAILURE).warn("presentation/preview-custom-name", "custom-name-unavailable", unavailable, () -> "plain custom-name reduction");
 			result.put(PresentationBasic.CUSTOM_NAME, Missing.UNAVAILABLE);
 		}
 	}
 	private static void put(Map<String, Outcome> result, String id, java.util.function.Supplier<PresentationValue> getter, long tick) {
 		try { result.put(id, new Observed(new PreviewObservation(getter.get(), PreviewObservation.Origin.CLIENT_SYNCED, tick, false))); }
 		catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("presentation/preview-field", "minecraft", () -> "field=" + id + " tick=" + tick, unavailable);
+			Diagnostics.client().atDetailed().rateLimited(FIELD_FAILURE).warn("presentation/preview-field", "field-unavailable", unavailable, () -> "field=" + id + " tick=" + tick);
 			result.put(id, Missing.UNAVAILABLE);
 		}
 	}

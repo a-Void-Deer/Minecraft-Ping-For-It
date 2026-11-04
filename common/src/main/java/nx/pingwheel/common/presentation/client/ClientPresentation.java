@@ -40,6 +40,8 @@ import nx.pingwheel.common.presentation.preview.PresentationPreviewAccess;
 
 /** One client connection's negotiated capabilities, server mask and retained presentation. */
 public final class ClientPresentation {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel REGISTRATION = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-client-registration", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel HUD_PROVIDER = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-hud-provider", java.time.Duration.ofSeconds(10));
 	public static final String BASIC = "minecraft:basic";
 	public static final String NAME = "minecraft:target.name";
 	private static final int BASIC_SCHEMA = 1;
@@ -92,7 +94,7 @@ public final class ClientPresentation {
 		} catch (ClassNotFoundException absent) {
 			return null;
 		} catch (ReflectiveOperationException | LinkageError | IllegalArgumentException ignored) {
-			Diagnostics.warn("presentation/optional-registration", "create", () -> "client adapter registration", ignored);
+			Diagnostics.client().atNormal().rateLimited(REGISTRATION).warn("presentation/optional-registration", "basic-only", ignored, () -> "client adapter registration");
 			// Basic remains independently usable.
 			return null;
 		}
@@ -481,7 +483,7 @@ public final class ClientPresentation {
 			}
 			return List.copyOf(bounded);
 		} catch (RuntimeException ignored) {
-			Diagnostics.warn("presentation/hud-provider", "client", () -> "provider=" + providerId, ignored);
+			Diagnostics.client().atDetailed().rateLimited(HUD_PROVIDER).warn("presentation/hud-provider", "empty-labels", ignored, () -> "provider=" + providerId);
 			return List.of();
 		}
 	}

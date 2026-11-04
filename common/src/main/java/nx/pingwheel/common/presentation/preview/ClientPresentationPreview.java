@@ -22,6 +22,8 @@ import nx.pingwheel.common.presentation.PresentationValue;
 
 /** Client-thread, one-interaction provisional store. It never mutates a marker. */
 public final class ClientPresentationPreview {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel READER_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-preview-reader", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel CACHE_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-preview-cache", java.time.Duration.ofSeconds(10));
 	@FunctionalInterface public interface AccessSource {
 		Optional<PresentationPreviewAccess> current(String targetTypeId);
 	}
@@ -134,8 +136,8 @@ public final class ClientPresentationPreview {
 				local = reader.observe(binding.target, adapter.getValue().fields().keySet(), context);
 				if (local == null) local = Map.of();
 			} catch (RuntimeException | LinkageError unavailable) {
-				Diagnostics.warn("presentation/preview-reader", adapter.getKey(),
-					() -> "target=" + binding.target + " fields=" + adapter.getValue().fields().keySet(), unavailable);
+				Diagnostics.client().atDetailed().rateLimited(READER_FAILURE).warn("presentation/preview-reader", "server-fallback", unavailable,
+					() -> "adapter=" + adapter.getKey() + " target=" + binding.target + " fields=" + adapter.getValue().fields().keySet());
 				local = Map.of();
 			}
 			for (var field : adapter.getValue().fields().entrySet()) {
@@ -157,7 +159,7 @@ public final class ClientPresentationPreview {
 		@Nullable RetainedSnapshot cached;
 		try { cached = retained.observed(binding.target, binding.targetTypeId).orElse(null); }
 		catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("presentation/preview-cache", "client", () -> "target=" + binding.target, unavailable);
+			Diagnostics.client().atDetailed().rateLimited(CACHE_FAILURE).warn("presentation/preview-cache", "cache-unavailable", unavailable, () -> "target=" + binding.target);
 			cached = null;
 		}
 		if (cached != null && binding.target.equals(cached.target()) && binding.targetTypeId.equals(cached.targetTypeId())

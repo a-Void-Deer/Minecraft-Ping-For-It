@@ -2,7 +2,7 @@ package nx.pingwheel.common.presentation.inventory;
 
 import java.util.ArrayList;
 import java.util.List;
-import nx.pingwheel.common.diagnostics.RateLimitedDiagnosticsTestScope;
+import nx.pingwheel.common.presentation.PresentationDiagnosticScope;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LogEvent;
@@ -25,7 +25,7 @@ public final class InventoryDiagnosticsTestCapture implements AutoCloseable {
 	private final AbstractAppender appender = new AbstractAppender("inventory-failure-paths", null, null, true, Property.EMPTY_ARRAY) {
 		@Override public void append(LogEvent event) { events.add(event.toImmutable()); }
 	};
-	private final RateLimitedDiagnosticsTestScope diagnostics;
+	private final PresentationDiagnosticScope diagnostics;
 
 	public InventoryDiagnosticsTestCapture() { this(Level.WARN); }
 	public InventoryDiagnosticsTestCapture(Level level) {
@@ -33,7 +33,7 @@ public final class InventoryDiagnosticsTestCapture implements AutoCloseable {
 		var config = new LoggerConfig(logger.getName(), level, false);
 		config.addAppender(appender, Level.ALL, null);
 		configuration.removeLogger(logger.getName()); configuration.addLogger(logger.getName(), config);
-		logger.getContext().updateLoggers(); diagnostics = RateLimitedDiagnosticsTestScope.install();
+		logger.getContext().updateLoggers(); diagnostics = PresentationDiagnosticScope.install();
 	}
 
 	public @Unmodifiable List<LogEvent> events() { return List.copyOf(events); }

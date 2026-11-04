@@ -31,6 +31,7 @@ import java.util.function.Predicate;
  * value-type validation all remain part of this single codec.
  */
 public final class PresentationCodec {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel PREENCODE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-preencode", java.time.Duration.ofSeconds(10));
 	public static final int MAX_FIELDS = PresentationLimits.MAX_FIELDS;
 	public static final int MAX_ENTRIES = PresentationLimits.MAX_ENTRIES;
 	public static final int MAX_DEPTH = PresentationLimits.MAX_DEPTH;
@@ -78,13 +79,18 @@ public final class PresentationCodec {
 	 * degrade instead of letting the codec exception escape.
 	 */
 	public static PresentationSection bounded(PresentationSection section) {
+		return bounded(section, Diagnostics.server());
+	}
+
+	/** The caller selects the encoding consumer explicitly when sharing this codec. */
+	public static PresentationSection bounded(PresentationSection section, nx.pingwheel.common.diagnostics.DiagnosticLogger consumer) {
 		FriendlyByteBuf probe = new FriendlyByteBuf(Unpooled.buffer(256, MAX_SECTION_BYTES + 5));
 		try {
 			write(probe, section);
 			return section;
 		} catch (RuntimeException notEncodable) {
-			Diagnostics.warn("presentation/preencode", section.adapterId(),
-				() -> "schema=" + section.schema() + " fields=" + section.fields().keySet() + " stale=" + section.stale(), notEncodable);
+			consumer.atDetailed().rateLimited(PREENCODE).warn("presentation/preencode", "empty-stale-section", notEncodable,
+				() -> "adapter=" + section.adapterId() + " schema=" + section.schema() + " fields=" + section.fields().keySet() + " stale=" + section.stale());
 			return new PresentationSection(section.adapterId(), section.schema(), Map.of(), true);
 		} finally { probe.release(); }
 	}

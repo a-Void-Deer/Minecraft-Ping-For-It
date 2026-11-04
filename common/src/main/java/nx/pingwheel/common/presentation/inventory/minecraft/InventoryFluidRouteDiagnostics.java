@@ -22,13 +22,13 @@ final class InventoryFluidRouteDiagnostics {
 		if (active != server) { active = server; classes.clear(); summary = false; }
 		if (classes.contains(route.providerClass())) return;
 		if (classes.size() == MAX_CLASSES) {
-			if (!summary) { summary = true; Diagnostics.domainApprovedEvent(Level.INFO, "inventory/fluid-route", "public-address", "capacity",
+			if (!summary) { summary = true; Diagnostics.server().atDetailed().event(Level.INFO, "inventory/fluid-route", "capacity",
 				() -> "Further opaque fluid provider classes use public address evidence; hidden equal-capacity remaps cannot be guaranteed detectable."); }
 			return;
 		}
 		classes.add(route.providerClass());
-		Diagnostics.domainApprovedEvent(Level.INFO, "inventory/fluid-route", route.providerClass(), "public-address",
-			() -> "Fluid provider uses public route/address/capacity metadata; hidden equal-capacity remaps cannot be guaranteed detectable.");
+		Diagnostics.server().atDetailed().event(Level.INFO, "inventory/fluid-route", "public-address",
+			() -> "provider=" + route.providerClass() + " Fluid provider uses public route/address/capacity metadata; hidden equal-capacity remaps cannot be guaranteed detectable.");
 	}
 	static void clear() { active = null; classes.clear(); summary = false; }
 }

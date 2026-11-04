@@ -17,6 +17,7 @@ import java.util.function.Predicate;
 
 /** One bounded, authoritative capture transaction before a marker enters the store. */
 final class ServerPropertyAdmission {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel CAPTURE_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-property-capture", java.time.Duration.ofSeconds(10));
 	private ServerPropertyAdmission() {}
 
 	record Context(String registryId, Set<String> tagIds) {
@@ -94,8 +95,8 @@ final class ServerPropertyAdmission {
 			@Nullable PresentationSection sampled;
 			try { sampled = capture.capture(adapter, Set.copyOf(demand), budget); }
 			catch (RuntimeException | LinkageError failure) {
-				Diagnostics.warn("presentation/property-capture", adapter.adapterId(),
-					() -> "demand=" + demand + " context=" + context, failure);
+				Diagnostics.server().atDetailed().rateLimited(CAPTURE_FAILURE).warn("presentation/property-capture", "reject-admission", failure,
+					() -> "adapter=" + adapter.adapterId() + " demand=" + demand + " context=" + context);
 				return MarkerCreationService.AdmissionResult.rejected(MarkerRejectReason.INVALID_REQUEST);
 			}
 			PresentationSection neutral = PresentationServer.sanitize(adapter, sampled, demand);

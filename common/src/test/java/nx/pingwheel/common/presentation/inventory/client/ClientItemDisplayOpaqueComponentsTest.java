@@ -512,7 +512,7 @@ class ClientItemDisplayOpaqueComponentsTest {
 			item.nameHook = stack -> { throw new IllegalStateException("name hook failed", new RuntimeException("display hook root cause")); };
 			assertUnavailable(resolve(payload(""))); assertUnavailable(resolve(payload("")));
 			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("display hook root cause"));
-			assertTrue(logs.messages().contains("operation=inventory/client-display-resolve")); assertNull(logs.events().getFirst().getThrown());
+			assertTrue(logs.messages().contains("site=inventory/client-display-resolve")); assertNull(logs.events().getFirst().getThrown());
 		}
 	}
 
@@ -556,7 +556,7 @@ class ClientItemDisplayOpaqueComponentsTest {
 		item.componentsReadHook = () -> { throw new IllegalStateException("cached defaults failed"); };
 		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
 			assertUnavailable(resolve(encoded)); assertEquals(0, ClientItemDisplay.cachedEntryCount());
-			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("operation=inventory/client-display-resolve"));
+			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("site=inventory/client-display-resolve"));
 		}
 		item.componentsReadHook = () -> {};
 		assertFalse(resolve(encoded).stack().isEmpty()); assertEquals(1, ClientItemDisplay.cachedEntryCount());
@@ -584,7 +584,7 @@ class ClientItemDisplayOpaqueComponentsTest {
 				if (failure instanceof RuntimeException) {
 					assertUnavailable(ClientItemDisplay.resolve(provider, itemId(), "fallback.registry.label", encoded));
 					assertTrue(ClientItemDisplay.decode(provider, encoded).isEmpty()); assertTrue(ClientItemDisplay.decodeName(provider, encoded).isEmpty());
-					assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("operation=inventory/client-display-codec"));
+					assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("site=inventory/client-display-codec"));
 				} else {
 					assertSame(failure, assertThrows(LinkageError.class, () -> ClientItemDisplay.resolve(provider, itemId(), "fallback.registry.label", encoded)));
 					assertSame(failure, assertThrows(LinkageError.class, () -> ClientItemDisplay.decode(provider, encoded)));

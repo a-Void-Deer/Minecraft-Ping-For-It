@@ -744,7 +744,7 @@ class InventorySyncPublisherTest {
 			assertEquals(List.of(offer, policy), transport.sent, "new callback work cannot extend the current drain");
 			assertEquals(2, callbacks[0]); assertTrue(publisher.dataGated(recipient));
 			assertFalse(publisher.controlQueued(recipient, policy)); assertTrue(publisher.controlQueued(recipient, offer));
-			var failures = logs.events.stream().filter(e -> e.getMessage().getFormattedMessage().contains("operation=inventory/publisher/control-handoff ")).toList();
+			var failures = logs.events.stream().filter(e -> e.getMessage().getFormattedMessage().contains("site=inventory/publisher/control-handoff ")).toList();
 			assertEquals(2, failures.size(), "OFFER and POLICY are independently scoped failures");
 			for (var event : failures) {
 				assertEquals(Level.WARN, event.getLevel()); var message = event.getMessage().getFormattedMessage();

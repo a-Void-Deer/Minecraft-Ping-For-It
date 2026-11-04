@@ -99,7 +99,7 @@ class PresentationPreviewDiagnosticsTest {
 				preview.projection().orElseThrow().fields().get(PresentationPropertyRef.root(ADAPTER, FIELD)));
 			assertEquals(1, capture.events().size(), "no duplicate report from the preview transport cleanup");
 			assertEquals(Level.WARN, capture.events().getFirst().getLevel());
-			assertTrue(capture.messages().getFirst().contains("operation=selector-content-init"));
+			assertTrue(capture.messages().getFirst().contains("site=selector-content-init"));
 			assertTrue(capture.messages().getFirst().contains("runtime preview transport cause"));
 			preview.tick(); assertEquals(1, sends[0]);
 			runtime.close();

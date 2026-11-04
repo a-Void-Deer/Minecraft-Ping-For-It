@@ -15,6 +15,39 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
 class PresentationDiagnosticsTest {
+	@Test void clientAndServerProfilesRemainIndependentInOneJvm() {
+		try (var capture = new PresentationDiagnosticCapture()) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT,
+				nx.pingwheel.common.diagnostics.LoggingProfile.DEEP);
+			var rules = new com.google.gson.Gson().fromJson("{\"black\":[\"invalid selector\"]}", PresentationSettings.RuleSet.class);
+			assertFalse(rules.policy(nx.pingwheel.common.diagnostics.Diagnostics.server()).allows(PresentationBasic.NAME, true));
+			assertTrue(capture.events().isEmpty());
+			assertFalse(rules.policy(nx.pingwheel.common.diagnostics.Diagnostics.client()).allows(PresentationBasic.NAME, true));
+			assertEquals(1, capture.events().size());
+			assertTrue(capture.messages().getFirst().contains("side=CLIENT"));
+		}
+	}
+
+	@Test void normalHistoryWarningClosesAdmissionUntilRealStoreReset() {
+		try (var capture = new PresentationDiagnosticCapture()) {
+			var store = new PresentationStore(); store.reset(1);
+			for (long id = 0; id < 8192; id++) store.clear(1, id, 1, false);
+			var profile = nx.pingwheel.common.diagnostics.Diagnostics.profile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT);
+			try {
+				// NORMAL still receives this selected warning. Its state is gameplay history,
+				// so generation changes may never rearm acceptance or emission.
+				nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT,
+					nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
+				store.initial(1, 0, 9000, "block", NAME, BASIC);
+				store.generation(1, 1); store.initial(1, 1, 9001, "block", NAME, BASIC);
+				assertFalse(store.isKnown(9000)); assertFalse(store.isKnown(9001));
+				assertEquals(1, capture.events().size());
+				assertFalse(capture.messages().getFirst().contains("epoch="));
+			} finally { nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT, profile); }
+		}
+	}
 	private static final PresentationSection BASIC = new PresentationSection(PresentationBasic.ID, 1,
 		Map.of(PresentationBasic.NAME, new PresentationValue.Text("name")), false);
 	private static final PresentationPropertyRef NAME = PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.NAME);

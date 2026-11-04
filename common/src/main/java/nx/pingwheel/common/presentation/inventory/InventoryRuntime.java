@@ -36,6 +36,7 @@ import org.jetbrains.annotations.Unmodifiable;
 
 /** One server-lifetime owner of physical rounds, logical coverage and retained admission. */
 public final class InventoryRuntime implements AutoCloseable {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel PREFLIGHT = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-preflight", java.time.Duration.ofSeconds(10));
 	private static final int MAX_CONSUMERS = 256, MAX_ROUNDS = 32;
 	private static final int MAX_RETAINED_ROUNDS = MAX_ROUNDS * 2; // bounded replacement headroom for completed evidence leases
 	private static final long CONSUMER_MEMORY = 4096;
@@ -678,7 +679,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK)); return work.get();
 		} catch (RuntimeException | LinkageError failure) {
 			if (!InventoryCaptureDiagnostics.expectedFailure(failure))
-				Diagnostics.warn("inventory/runtime/preflight", work.getClass().getName(), () -> "tick=" + tick, failure);
+				Diagnostics.server().atDetailed().rateLimited(PREFLIGHT).warn("inventory/runtime/preflight", "unavailable", failure, () -> "tick=" + tick);
 			return Optional.empty();
 		}
 		}
@@ -990,7 +991,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		long reads = plan == null ? 0 : plan.physicalReadUpperBound();
 		long work = plan == null ? 0 : plan.itemWorkUpperBoundUnits();
 		if (reads < 0 || reads > InventorySourceAccess.MAX_SLOTS || work < 0) {
-			InventoryCaptureDiagnostics.boundExceeded(consumer.input, "snapshot-plan-reads-or-work reads=" + reads + " work=" + work);
+			InventoryCaptureDiagnostics.boundExceeded(consumer.input, () -> "snapshot-plan-reads-or-work reads=" + reads + " work=" + work);
 			return InventorySourceAccess.Preparation.INCOMPLETE;
 		}
 		var admission = physical.tryReserve(Map.of(CAPTURE_READS, reads, ITEM_WORK, work));

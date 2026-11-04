@@ -32,7 +32,7 @@ import nx.pingwheel.common.domain.TargetMatchContext;
 import nx.pingwheel.common.domain.TargetResolver;
 import nx.pingwheel.common.domain.TargetType;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
-import nx.pingwheel.common.diagnostics.RateLimitedDiagnosticsTestScope;
+import nx.pingwheel.common.presentation.PresentationDiagnosticScope;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.name.AuthoritativeTargetNameResolver;
 import nx.pingwheel.common.name.TargetNameJson;
@@ -820,7 +820,7 @@ class MarkerCreationServiceTest {
 		private final Configuration configuration = context.getConfiguration();
 		private final LoggerConfig previous = configuration.getLoggers().get(logger.getName());
 		private final List<LogEvent> events = new ArrayList<>();
-		private final RateLimitedDiagnosticsTestScope diagnostics;
+		private final PresentationDiagnosticScope diagnostics;
 		private final AbstractAppender appender = new AbstractAppender(
 			"marker-admission-diagnostics", null, null, true, Property.EMPTY_ARRAY) {
 			@Override public void append(LogEvent event) { events.add(event.toImmutable()); }
@@ -833,7 +833,7 @@ class MarkerCreationServiceTest {
 			configuration.removeLogger(logger.getName());
 			configuration.addLogger(logger.getName(), capture);
 			context.updateLoggers();
-			diagnostics = RateLimitedDiagnosticsTestScope.install();
+			diagnostics = PresentationDiagnosticScope.install();
 		}
 
 		@Override public void close() {

@@ -161,7 +161,7 @@ public final class PresentationStore {
 		if (markerHistoryFull) return;
 		markerHistoryFull = true;
 		// This sticky transition is the frequency gate; only reset restores admission.
-		Diagnostics.domainApprovedEvent(Level.WARN, "presentation/history", "marker-store", "capacity-exhausted",
+		Diagnostics.client().atNormal().event(Level.WARN, "presentation/history", "capacity-exhausted",
 			() -> "epoch=" + epoch + " view=" + viewGeneration + " markers=" + markers.size()
 				+ " tombstones=" + tombstones.size() + " limit=" + MAX_MARKER_HISTORY);
 	}

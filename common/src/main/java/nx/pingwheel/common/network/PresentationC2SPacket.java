@@ -118,5 +118,5 @@ public record PresentationC2SPacket(Kind kind, int protocol, long epoch,
 	}
 	@Override public ResourceLocation getId() { return PACKET_ID; }
 	@Override public @NotNull Type<PresentationC2SPacket> type() { return PACKET_TYPE; }
-	public static PresentationC2SPacket readSafe(FriendlyByteBuf buf) { return PacketHandler.readSafe(buf, PresentationC2SPacket.class); }
+	public static PresentationC2SPacket readSafe(FriendlyByteBuf buf) { return PacketHandler.readSafe(buf, PresentationC2SPacket.class, nx.pingwheel.common.diagnostics.Diagnostics.server()); }
 }
