@@ -138,7 +138,9 @@ class VoxelShapeRenderUtilTest {
 
 		@Override
 		public VertexConsumer vertex(double x, double y, double z) {
-			commitCurrent();
+			if (started) {
+				throw new IllegalStateException("previous vertex was not completed with endVertex()");
+			}
 
 			this.x = (float) x;
 			this.y = (float) y;
@@ -181,6 +183,10 @@ class VoxelShapeRenderUtilTest {
 
 		@Override
 		public void endVertex() {
+			if (!started) {
+				throw new IllegalStateException("endVertex() called without a started vertex");
+			}
+
 			commitCurrent();
 			started = false;
 		}
@@ -194,18 +200,16 @@ class VoxelShapeRenderUtilTest {
 		}
 
 		private void commitCurrent() {
-			if (!started) {
-				return;
-			}
-
 			vertices.add(new Vertex(
 				this.x, this.y, this.z, red, green, blue, alpha,
 				normalX, normalY, normalZ));
 		}
 
 		List<Vertex> vertices() {
-			commitCurrent();
-			started = false;
+			if (started) {
+				throw new IllegalStateException("incomplete vertex cannot be read");
+			}
+
 			return vertices;
 		}
 	}

@@ -22,9 +22,9 @@ class ExternalBlockMarkerRefreshTest {
 	@Test
 	void locatorRefreshPreservesMarkerIdentityWinnerLifetimeAndAudience() {
 		Target.ExternalBlockTarget original = Target.ExternalBlockTarget.committed(
-			"minecraft:overworld", "sable", "tracking-1", "minecraft:chest", "locator-a", true);
+			"minecraft:overworld", "external-test", "tracking-1", "minecraft:chest", "locator-a", true);
 		Target.ExternalBlockTarget migrated = Target.ExternalBlockTarget.committed(
-			"minecraft:overworld", "sable", "tracking-1", "minecraft:chest", "locator-b", true);
+			"minecraft:overworld", "external-test", "tracking-1", "minecraft:chest", "locator-b", true);
 		ServerMarkerStore store = new ServerMarkerStore(new MarkerIdSource());
 
 		ServerMarker created = store.create(
@@ -52,7 +52,7 @@ class ExternalBlockMarkerRefreshTest {
 		assertEquals(created.id(), store.winnerFor(key, RECIPIENT).orElseThrow().id());
 		assertTrue(store.updateExternalTarget(
 			created.id(), Target.ExternalBlockTarget.committed(
-				"minecraft:overworld", "sable", "other", "minecraft:chest", "locator-c", true),
+				"minecraft:overworld", "external-test", "other", "minecraft:chest", "locator-c", true),
 			new MarkerAnchor(0, 0, 0)).isEmpty());
 	}
 }

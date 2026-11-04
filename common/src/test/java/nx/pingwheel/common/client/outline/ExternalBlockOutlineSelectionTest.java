@@ -20,7 +20,7 @@ class ExternalBlockOutlineSelectionTest {
 	@Test
 	void retainsExternalLocatorForRenderTimeProviderRefresh() {
 		Target.ExternalBlockTarget target = Target.ExternalBlockTarget.committed(
-			"minecraft:overworld", "sable", "tracking-id", "minecraft:chest", "sublevel/1,2,3", true);
+			"minecraft:overworld", "external-test", "tracking-id", "minecraft:chest", "sublevel/1,2,3", true);
 		MarkerId markerId = new MarkerId(4L);
 		ClientMarker marker = ClientMarker.from(
 			new MarkerSnapshot(
@@ -48,9 +48,9 @@ class ExternalBlockOutlineSelectionTest {
 	@Test
 	void locatorMigrationChangesTheRenderSpecEvenThoughMarkerIdentityIsStable() {
 		Target.ExternalBlockTarget first = Target.ExternalBlockTarget.committed(
-			"minecraft:overworld", "sable", "tracking-id", "minecraft:chest", "sublevel/1,2,3", true);
+			"minecraft:overworld", "external-test", "tracking-id", "minecraft:chest", "sublevel/1,2,3", true);
 		Target.ExternalBlockTarget second = Target.ExternalBlockTarget.committed(
-			"minecraft:overworld", "sable", "tracking-id", "minecraft:chest", "sublevel/4,5,6", true);
+			"minecraft:overworld", "external-test", "tracking-id", "minecraft:chest", "sublevel/4,5,6", true);
 		MarkerId markerId = new MarkerId(4L);
 		TargetKey key = TargetKey.from(first);
 		ClientMarker firstMarker = marker(markerId, first);

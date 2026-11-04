@@ -69,8 +69,8 @@ dependencies {
     // https://www.curseforge.com/minecraft/mc-mods/ftb-teams-forge
     compileOnly "curse.maven:ftbteams-404468:${ftbteams_version}"
 
-    // Sable is loaded reflectively by the optional integration, so no
-    // compile-time artifact is needed on the 1.20.1 branch.
+    // The 1.20.1 branch ships no external-block provider, so no optional
+    // provider artifact is required at compile time.
 }
 
 // Declare capabilities on the outgoing configurations.
