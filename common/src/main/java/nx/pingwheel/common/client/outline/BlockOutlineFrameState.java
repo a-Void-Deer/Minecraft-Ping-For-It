@@ -68,32 +68,72 @@ public final class BlockOutlineFrameState {
 	 * the vanilla outline flush that follows.</p>
 	 */
 	public static void withCameraRotation(Matrix4f cameraRotation, Runnable renderer) {
-		withCameraRotation(cameraRotation, RenderSystemAccess.INSTANCE, renderer);
+		try (CameraRotationScope ignored = openCameraRotation(cameraRotation)) {
+			renderer.run();
+		}
+	}
+
+	/**
+	 * Opens a camera-rotation model-view scope that covers every submission
+	 * made while it is open, including automatic flushes performed by
+	 * {@code MultiBufferSource.BufferSource.getBuffer()} when the render type
+	 * changes. The previous model view is restored on
+	 * {@link CameraRotationScope#close()}.
+	 */
+	public static CameraRotationScope openCameraRotation(Matrix4f cameraRotation) {
+		return new CameraRotationScope(cameraRotation, RenderSystemAccess.INSTANCE);
+	}
+
+	/** Visible to focused package tests through a small render-state seam. */
+	static CameraRotationScope openCameraRotation(
+		Matrix4f cameraRotation, RenderStateAccess renderState
+	) {
+		return new CameraRotationScope(cameraRotation, renderState);
 	}
 
 	/** Visible to focused package tests through a small render-state seam. */
 	static void withCameraRotation(
 		Matrix4f cameraRotation, RenderStateAccess renderState, Runnable renderer
 	) {
-		Objects.requireNonNull(cameraRotation, "cameraRotation");
-		Objects.requireNonNull(renderState, "renderState");
 		Objects.requireNonNull(renderer, "renderer");
 
-		boolean modelViewPushed = false;
-
-		try {
-			renderState.pushModelView();
-			modelViewPushed = true;
-			renderState.setModelView(cameraRotation);
-			renderState.applyModelView();
+		try (CameraRotationScope ignored = openCameraRotation(cameraRotation, renderState)) {
 			renderer.run();
-		} finally {
-			if (modelViewPushed) {
-				try {
-					renderState.popModelView();
-				} finally {
-					renderState.applyModelView();
-				}
+		}
+	}
+
+	/** Scope handle returned by {@link #openCameraRotation(Matrix4f)}. */
+	public static final class CameraRotationScope implements AutoCloseable {
+		private final RenderStateAccess renderState;
+		private boolean closed;
+
+		private CameraRotationScope(Matrix4f cameraRotation, RenderStateAccess renderState) {
+			Objects.requireNonNull(cameraRotation, "cameraRotation");
+			this.renderState = Objects.requireNonNull(renderState, "renderState");
+
+			this.renderState.pushModelView();
+
+			try {
+				this.renderState.setModelView(cameraRotation);
+				this.renderState.applyModelView();
+			} catch (RuntimeException | Error failure) {
+				close();
+				throw failure;
+			}
+		}
+
+		@Override
+		public void close() {
+			if (this.closed) {
+				return;
+			}
+
+			this.closed = true;
+
+			try {
+				this.renderState.popModelView();
+			} finally {
+				this.renderState.applyModelView();
 			}
 		}
 	}

@@ -103,6 +103,11 @@ public final class ClientPingActionDispatcher {
 			dispatchCancel(cancel);
 		} else if (action instanceof PingInteractionAction.TargetGone gone) {
 			dispatchTargetGone(gone);
+		} else {
+			// Keep the action set fail-loud: a newly added action must not be
+			// silently dropped by this dispatch chain.
+			throw new IllegalStateException(
+				"Unhandled ping interaction action: " + action.getClass().getName());
 		}
 	}
 

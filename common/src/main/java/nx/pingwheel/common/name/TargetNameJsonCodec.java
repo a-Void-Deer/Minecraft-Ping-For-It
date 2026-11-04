@@ -2,6 +2,7 @@ package nx.pingwheel.common.name;
 
 import java.util.Objects;
 
+import com.google.gson.JsonParseException;
 import net.minecraft.core.RegistryAccess;
 import net.minecraft.network.chat.Component;
 
@@ -64,6 +65,15 @@ public final class TargetNameJsonCodec {
 		Objects.requireNonNull(json, "json");
 		Objects.requireNonNull(registryAccess, "registryAccess");
 
-		return Component.Serializer.fromJson(json.value());
+		Component decoded = Component.Serializer.fromJson(json.value());
+
+		if (decoded == null) {
+			// 1.20.1 returns Java null for JSON "null" and "[]". Keep the same
+			// controlled failure mode as malformed JSON so callers can fall
+			// back to the unknown name.
+			throw new JsonParseException("component JSON produced a null component");
+		}
+
+		return decoded;
 	}
 }

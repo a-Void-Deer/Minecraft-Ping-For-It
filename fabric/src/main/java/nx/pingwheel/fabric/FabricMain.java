@@ -1,12 +1,15 @@
 package nx.pingwheel.fabric;
 
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.protocol.game.ClientboundCustomPayloadPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import nx.pingwheel.common.CommonServer;
+import nx.pingwheel.common.network.ChannelRegistrationPayload;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
 import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
@@ -44,6 +47,26 @@ public class FabricMain implements ModInitializer {
 	@Override
 	public void onInitialize() {
 		CommonServer.INSTANCE.onInit();
+
+		// Forge 47.2.0 does not commit the final unterminated channel in a
+		// Fabric register payload. Send a second, terminated announcement after
+		// Fabric's initial one so a Forge client sees every C2S channel. The
+		// delayed task runs after ServerPlayNetworkAddon's initial registration.
+		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+			ServerPlayer player = handler.player;
+
+			server.execute(() -> {
+				var channels = ServerPlayNetworking.getReceived(player);
+
+				if (channels.isEmpty()) {
+					return;
+				}
+
+				player.connection.send(new ClientboundCustomPayloadPacket(
+					new ResourceLocation("minecraft", "register"),
+					ChannelRegistrationPayload.encode(channels)));
+			});
+		});
 
 		receive(PingLocationC2SPacket.PACKET_ID,
 			PingLocationC2SPacket::readSafe, CommonServer.INSTANCE::onPingLocationPacket);

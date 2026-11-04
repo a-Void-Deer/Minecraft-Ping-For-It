@@ -86,22 +86,21 @@ public class ForgeClient {
 	/**
 	 * Late HUD entry point for Forge.
 	 *
-	 * <p>Forge 1.20.1 does not use the common {@code GuiMixin} any more: the
-	 * proven upstream path is a vanilla overlay event. {@code VIGNETTE} runs
-	 * late in the HUD pass, so the marker overlay and the wheel are drawn above
-	 * the regular HUD without depending on Mixin application order.</p>
+	 * <p>Forge 1.20.1 renders vanilla overlays in {@link VanillaGuiOverlay}
+	 * declaration order, where {@code VIGNETTE} is the <em>first</em> overlay,
+	 * not the last. Drawing at {@code VIGNETTE} would leave the marker, wheel,
+	 * and toggle notice underneath later HUD layers, and the portal/frostbite
+	 * overlays would tint the toggle notice.</p>
+	 *
+	 * <p>{@code PLAYER_LIST} is the final vanilla overlay, so its {@code Post}
+	 * event runs after every tint and HUD layer. Forge still fires the event
+	 * when the player list itself is hidden, which makes it a stable
+	 * once-per-frame late entry point.</p>
 	 */
 	@SubscribeEvent
-	public void onRenderGuiPre(RenderGuiOverlayEvent.Pre event) {
-		if (event.getOverlay() == VanillaGuiOverlay.VIGNETTE.type()) {
-			CommonClient.INSTANCE.onRenderGUI(event.getGuiGraphics(), event.getPartialTick());
-		}
-	}
-
-	/** Draws the selection toggle notice after the same late HUD layer. */
-	@SubscribeEvent
 	public void onRenderGuiPost(RenderGuiOverlayEvent.Post event) {
-		if (event.getOverlay() == VanillaGuiOverlay.VIGNETTE.type()) {
+		if (event.getOverlay() == VanillaGuiOverlay.PLAYER_LIST.type()) {
+			CommonClient.INSTANCE.onRenderGUI(event.getGuiGraphics(), event.getPartialTick());
 			CommonClient.INSTANCE.onRenderToggleNotice(event.getGuiGraphics());
 		}
 	}

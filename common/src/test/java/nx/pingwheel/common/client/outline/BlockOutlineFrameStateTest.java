@@ -139,6 +139,42 @@ class BlockOutlineFrameStateTest {
 	}
 
 	@Test
+	void cameraScopeCoversEverySubmissionUntilClosed() {
+		Matrix4f cameraRotation = new Matrix4f().rotateY(-0.4F).rotateX(0.15F);
+		FakeRenderState renderState = new FakeRenderState(
+			new Matrix4f().translation(9.0F, 8.0F, 7.0F),
+			new Matrix4f().scaling(3.0F),
+			VertexSorting.byDistance(0.0F, 0.0F, 0.0F));
+		Matrix4f ambientModelView = new Matrix4f(renderState.modelView);
+
+		try (BlockOutlineFrameState.CameraRotationScope scope =
+			BlockOutlineFrameState.openCameraRotation(cameraRotation, renderState)) {
+			// An automatic flush can happen at any point while the renderer
+			// switches render types; every one of them must see the rotation.
+			assertTrue(renderState.modelView.equals(cameraRotation));
+			assertTrue(renderState.modelView.equals(cameraRotation));
+			assertEquals(1, renderState.pushes);
+			assertEquals(1, renderState.applies);
+		}
+
+		assertTrue(renderState.modelView.equals(ambientModelView));
+		assertEquals(1, renderState.pops);
+		assertEquals(2, renderState.applies);
+
+		assertThrows(IllegalStateException.class, () -> {
+			try (BlockOutlineFrameState.CameraRotationScope scope =
+				BlockOutlineFrameState.openCameraRotation(cameraRotation, renderState)) {
+				throw new IllegalStateException("simulated attempt failure");
+			}
+		});
+
+		assertTrue(renderState.modelView.equals(ambientModelView),
+			"an exceptional attempt must still restore the ambient model view");
+		assertEquals(2, renderState.pops);
+		assertEquals(4, renderState.applies);
+	}
+
+	@Test
 	void snapshotsAreDefensiveConsumedOnceAndRestoreStateAfterFailure() {
 		Matrix4f modelView = new Matrix4f().rotateY(0.35F);
 		Matrix4f projection = new Matrix4f().scaling(0.7F);

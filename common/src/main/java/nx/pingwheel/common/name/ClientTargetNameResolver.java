@@ -19,7 +19,6 @@ import net.minecraft.world.level.block.state.BlockState;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.domain.Target;
-import nx.pingwheel.common.integration.sable.client.SableClientProvider;
 
 /**
  * Client-only presentation resolver for the target frozen in a ping
@@ -179,13 +178,9 @@ public final class ClientTargetNameResolver {
 
 		@Override
 		public Optional<Component> externalBlock(Target.ExternalBlockTarget target) {
-			Minecraft game = CommonClient.Game;
-
-			if (game == null || game.level == null || !sameDimension(game.level, target.dimensionId())) {
-				return Optional.empty();
-			}
-
-			return SableClientProvider.resolveName(game.level, target);
+			// The 1.20.1 branch has no external-block provider, so no local
+			// display name is available; the authoritative name remains in use.
+			return Optional.empty();
 		}
 
 		private static boolean sameDimension(Level level, String targetDimensionId) {

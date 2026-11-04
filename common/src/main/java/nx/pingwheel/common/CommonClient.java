@@ -16,7 +16,6 @@ import java.util.Map;
 import nx.pingwheel.common.client.ClientPingRuntime;
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
 import nx.pingwheel.common.client.SelectionToggleNoticeState;
-import nx.pingwheel.common.client.WheelDiagnostics;
 import nx.pingwheel.common.client.duration.ClientSyncDurationPolicy;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
@@ -449,7 +448,7 @@ public class CommonClient {
 
 		VirtualBlockDisplayRenderer.INSTANCE.render(
 			cameraPose, game.level, camera, builtInPartialTick, flywheelPartialTick,
-			BlockOutlineState.INSTANCE, BlockModelOutlineState.INSTANCE);
+			BlockModelOutlineState.INSTANCE);
 	}
 
 	/**
@@ -586,11 +585,8 @@ public class CommonClient {
 			VertexConsumer lines = bufferSource.getBuffer(BlockOutlineRenderType.BLOCK_OUTLINE);
 			BlockOutlineRenderer.render(
 				game.level, camera, frame.cameraPosition(), lines,
-				BlockOutlineState.INSTANCE,
 				BlockModelOutlineState.INSTANCE.presentations(),
-				BlockModelOutlineState.INSTANCE.successKeys(),
-				BlockModelOutlineState.INSTANCE.externalSuccessKeys(),
-				frame.partialTick());
+				BlockModelOutlineState.INSTANCE.successKeys());
 			bufferSource.endBatch(BlockOutlineRenderType.BLOCK_OUTLINE);
 		});
 	}
@@ -618,14 +614,7 @@ public class CommonClient {
 		}
 
 		if (pingRuntime != null) {
-			boolean pingHeld = InputUtils.isPingHotkeyDown();
-			pingRuntime.onRenderFrame(pingHeld);
-			WheelDiagnostics.INSTANCE.note(
-				pingHeld,
-				pingRuntime.phase(),
-				pingRuntime.hasFrozenCapture(),
-				pingRuntime.wheelPresentation().isPresent(),
-				Game);
+			pingRuntime.onRenderFrame(InputUtils.isPingHotkeyDown());
 		}
 
 		if (Game.level == null || Game.player == null) {

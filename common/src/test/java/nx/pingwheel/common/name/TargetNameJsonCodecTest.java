@@ -89,6 +89,14 @@ class TargetNameJsonCodecTest {
 	}
 
 	@Test
+	void decodeNullComponentJsonThrowsControlledJsonException() {
+		for (String payload : new String[] {"null", "[]"}) {
+			assertThrows(JsonParseException.class,
+				() -> TargetNameJsonCodec.decode(new TargetNameJson(payload), RegistryAccess.EMPTY));
+		}
+	}
+
+	@Test
 	void decodeValidLiteralJsonYieldsLiteralComponent() {
 		Component decoded = TargetNameJsonCodec.decode(
 			new TargetNameJson("{\"text\":\"hi\"}"), RegistryAccess.EMPTY);

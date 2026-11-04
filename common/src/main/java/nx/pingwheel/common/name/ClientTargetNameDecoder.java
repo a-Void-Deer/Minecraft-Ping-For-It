@@ -78,7 +78,18 @@ public final class ClientTargetNameDecoder {
 		Objects.requireNonNull(registryAccess, "registryAccess");
 
 		try {
-			return Component.Serializer.fromJson(json.value());
+			Component decoded = Component.Serializer.fromJson(json.value());
+
+			// 1.20.1 returns Java null for JSON "null" and "[]" instead of
+			// throwing. Returning it would reach MarkerView and fail during
+			// rendering, so the unknown-name fallback must also cover null.
+			if (decoded == null) {
+				logger.debug("target name decode failed: markerId={} reason={}",
+					markerId.value(), "NullComponent");
+				return TargetNameComposer.unknown();
+			}
+
+			return decoded;
 		} catch (RuntimeException e) {
 			logger.debug("target name decode failed: markerId={} reason={}",
 				markerId.value(), e.getClass().getSimpleName());
