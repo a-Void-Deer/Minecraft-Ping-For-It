@@ -12,6 +12,7 @@ import nx.pingwheel.common.presentation.budget.BudgetDelaySink.Reason;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink.Unit;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink.WorkItem;
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.Unmodifiable;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -203,6 +204,28 @@ class InventoryBudgetDelayStateTest {
 		assertTrue(state.outstanding());
 		assertSame(fatal, assertThrows(OutOfMemoryError.class,
 			() -> state.observe(new Sink(), 2, 0, Reason.PROVIDER_WORK.bit(), () -> { throw fatal; }, Quantity::unknown)));
+	}
+
+	@Test
+	void monitorFailuresUseSelfFaultStagesWithoutBusinessWarningsOrReasonRollback() {
+		try (var logs = new InventoryDiagnosticsTestCapture()) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
+			long before = nx.pingwheel.common.diagnostics.Diagnostics.faults().observations().stream()
+				.filter(observation -> observation.key().site().equals("inventory/budget-delay"))
+				.mapToLong(nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Observation::occurrences).sum();
+			var state = new InventoryBudgetDelayState(Module.INVENTORY_TRACKING);
+			var sink = new Sink() { @Override public void observe(DelayEvent event) { throw new IllegalStateException("private-monitor"); } };
+			assertTrue(observe(state, sink, 2, Reason.MEMORY.bit(), Quantity.unknown()));
+			assertFalse(observe(state, sink, 2, Reason.MEMORY.bit(), Quantity.unknown()));
+			assertTrue(state.observe(new Sink(), 2, 0, Reason.PROVIDER_WORK.bit(), () -> { throw new LinkageError("private-context"); }, Quantity::unknown));
+			@Unmodifiable List<nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Observation> observations = nx.pingwheel.common.diagnostics.Diagnostics.faults().observations().stream()
+				.filter(observation -> observation.key().site().equals("inventory/budget-delay")).toList();
+			assertEquals(before + 2, observations.stream().mapToLong(nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Observation::occurrences).sum());
+			assertTrue(observations.stream().anyMatch(observation -> observation.key().stage() == nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Stage.SINK));
+			assertTrue(observations.stream().anyMatch(observation -> observation.key().stage() == nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Stage.CONTEXT));
+			assertTrue(state.outstanding()); state.progress(2); assertFalse(state.outstanding()); assertTrue(logs.events().isEmpty());
+		}
 	}
 
 	private static void throwFailure(Throwable failure) {

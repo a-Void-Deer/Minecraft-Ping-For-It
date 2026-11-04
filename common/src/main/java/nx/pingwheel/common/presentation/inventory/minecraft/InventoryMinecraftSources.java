@@ -162,7 +162,7 @@ public final class InventoryMinecraftSources {
 		try { return gate.test(pos); }
 		catch (RuntimeException | LinkageError unavailable) {
 			if (!(unavailable instanceof InventorySourceUnavailableException) && !(unavailable instanceof InventoryItemBudget.CaptureLimitException))
-				Diagnostics.server().atDetailed().rateLimited(MEMBER_FAILURE).warn("inventory-member-scope", "deny-member", unavailable,
+				Diagnostics.server().atNormal().rateLimited(MEMBER_FAILURE).warn("inventory-member-scope", "deny-member", unavailable,
 					() -> "position=" + pos + " binding=" + binding + " face=" + face + " gateClass=" + gate.getClass().getName());
 			return false;
 		}

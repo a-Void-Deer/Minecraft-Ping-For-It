@@ -17,7 +17,7 @@ import nx.pingwheel.common.diagnostics.Diagnostics;
 final class InventorySnapshotDiagnostics {
 	@NotNullByDefault
 	private enum FailureSite {
-		SOURCE_RESOLVE, EXTERNAL_RESOLVE, RESIDENT_VALID, PROVIDER_LAYOUT, SOURCE_VALID, AUTHORITY, EXTERNAL_VALID;
+		SOURCE_RESOLVE, EXTERNAL_RESOLVE, RESIDENT_VALID, PROVIDER_LAYOUT, SOURCE_VALID, AUTHORITY, EXTERNAL_VALID, CERTIFIED_CREATE;
 		final nx.pingwheel.common.diagnostics.DiagnosticChannel channel = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-snapshot-" + name(), java.time.Duration.ofSeconds(10));
 	}
 	private static nx.pingwheel.common.diagnostics.DiagnosticLogger failureLogger(String operation) {
@@ -29,9 +29,10 @@ final class InventorySnapshotDiagnostics {
 			case "inventory-source-valid" -> FailureSite.SOURCE_VALID;
 			case "inventory-snapshot-authority" -> FailureSite.AUTHORITY;
 			case "inventory-external-valid" -> FailureSite.EXTERNAL_VALID;
+			case "inventory-certified-create" -> FailureSite.CERTIFIED_CREATE;
 			default -> null;
 		};
-		var logger = Diagnostics.server().atDetailed();
+		var logger = Diagnostics.server().atNormal();
 		return site == null ? logger : logger.rateLimited(site.channel);
 	}
 	private enum Reason { UNSUPPORTED }
@@ -43,8 +44,15 @@ final class InventorySnapshotDiagnostics {
 	/** Only the boundary converting an exception into unavailable/fallback reports it. */
 	static void failure(String operation, InventorySourceInput input, @Nullable Object provider, Supplier<String> detail, Throwable failure) {
 		if (failure instanceof InventorySourceUnavailableException || failure instanceof InventoryItemBudget.CaptureLimitException) return;
+		if (failure instanceof nx.pingwheel.common.presentation.inventory.InventorySharedRead.ReadFailure typed && typed.failure() == null) return;
 		var target = input.target();
-		failureLogger(operation).failure(Level.WARN, operation, "source-unavailable",
+		String handling = switch (operation) {
+			case "inventory-provider-snapshot-layout" -> "live-read-fallback";
+			case "inventory-certified-create" -> "exact-read-fallback";
+			case "inventory-snapshot-authority", "inventory-resident-scope-valid" -> "deny-read";
+			default -> "invalidate-read";
+		};
+		failureLogger(operation).failure(Level.WARN, operation, handling,
 			() -> "owner=" + input.readOwner() + " face=" + input.face() + " providerClass=" + (provider == null ? "minecraft" : provider.getClass().getName())
 				+ " " + detail.get() + " target=" + target, failure);
 	}

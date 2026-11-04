@@ -11,6 +11,7 @@ import org.jetbrains.annotations.Nullable;
 public final class InventoryItemDiagnostics {
 	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel IDENTITY = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-item-identity", java.time.Duration.ofSeconds(10));
 	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel DISPLAY = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-item-display", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel FLUID_IDENTITY = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-fluid-identity", java.time.Duration.ofSeconds(10));
 	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel CLIENT_CODEC = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-client-display-codec", java.time.Duration.ofSeconds(10));
 	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel CLIENT_LEGACY = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-client-display-legacy", java.time.Duration.ofSeconds(10));
 	@NotNullByDefault
@@ -29,19 +30,36 @@ public final class InventoryItemDiagnostics {
 	}
 
 	static void refusal(String operation, String itemId, RuntimeException refusal) {
-		var logger = Diagnostics.server().atDetailed().rateLimited(operation.equals("inventory/item-identity") ? IDENTITY : DISPLAY);
+		boolean identity = operation.equals("inventory/item-identity");
+		boolean unexpected = refusal instanceof CodecRefusal
+			|| !(refusal instanceof InventoryItemBudget.RootLimitException || refusal instanceof InventoryItemCodec.IdentityUnavailableException);
+		if (!unexpected) return;
+		var logger = Diagnostics.server().atNormal().rateLimited(identity ? IDENTITY : DISPLAY);
 		if (!logger.isEnabled(Level.WARN)) return;
 		if (refusal instanceof CodecRefusal codec) {
-			logger.event(Level.WARN, operation, "native-codec-rejected",
+			logger.event(Level.WARN, operation, identity ? "all-variants-native-codec-rejected" : "empty-icon-registry-label",
 				() -> "item=" + itemId + " stage=" + codec.getMessage() + " detail=" + CODEC_REJECTION);
 		} else {
-			logger.failure(Level.WARN, operation, "root-refused", () -> "item=" + itemId, refusal);
+			logger.failure(Level.WARN, operation, identity ? "all-variants" : "empty-icon-registry-label", () -> "item=" + itemId, refusal);
 		}
+	}
+
+	static void fluidIdentityRefused(String fluidId, RuntimeException refusal) {
+		if (refusal instanceof InventoryItemBudget.RootLimitException || refusal instanceof InventoryItemCodec.IdentityUnavailableException) {
+			if (refusal instanceof CodecRefusal) {
+				Diagnostics.server().atNormal().rateLimited(FLUID_IDENTITY).event(Level.WARN, "inventory/fluid-identity", "all-variants-native-codec-rejected",
+					() -> "fluid=" + fluidId + " stage=" + refusal.getMessage() + " detail=" + CODEC_REJECTION);
+				return;
+			}
+			return;
+		}
+		Diagnostics.server().atNormal().rateLimited(FLUID_IDENTITY).failure(Level.WARN, "inventory/fluid-identity", "all-variants",
+			() -> "fluid=" + fluidId, refusal);
 	}
 
 	/** Native error suppliers may traverse payloads; report only the caller-owned failure stage. */
 	public static void codecRejected(nx.pingwheel.common.diagnostics.DiagnosticLogger consumer, String operation, String stage) {
-		consumer.atDetailed().rateLimited(operation.equals("inventory/client-display-legacy-codec") ? CLIENT_LEGACY : CLIENT_CODEC).event(Level.WARN, operation, "native-codec-rejected",
+		consumer.atNormal().rateLimited(operation.equals("inventory/client-display-legacy-codec") ? CLIENT_LEGACY : CLIENT_CODEC).event(Level.WARN, operation, "empty-icon-registry-label",
 			() -> "stage=" + stage + " detail=" + CODEC_REJECTION);
 	}
 
@@ -55,9 +73,9 @@ public final class InventoryItemDiagnostics {
 			case "inventory/client-display-registry" -> DisplayFailure.REGISTRY;
 			default -> null;
 		};
-		var logger = consumer.atDetailed();
+		var logger = consumer.atNormal();
 		if (site != null) logger = logger.rateLimited(site.channel);
-		logger.failure(Level.WARN, operation, "display-fallback", () -> "item=" + itemId, failure);
+		logger.failure(Level.WARN, operation, "empty-icon-registry-label", () -> "item=" + itemId, failure);
 	}
 
 	@NotNullByDefault

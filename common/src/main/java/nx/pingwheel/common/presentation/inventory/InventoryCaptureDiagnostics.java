@@ -28,7 +28,7 @@ final class InventoryCaptureDiagnostics {
 		CAPTURE, SNAPSHOT_STEP, NATIVE_STEP, LIVE_STEP, RESOLVE, SELECTION_WITNESS, SOURCE_CLOSE,
 		SNAPSHOT_CLOSE, MEMORY_CLOSE, SELECTION_WITNESS_CLOSE, RESOLVE_CLOSE, SELECT_CREATE, PREVIEW_COUNT, TRACKING_COUNT,
 		RUNTIME_SELECTION, INPUT_PROBE, SOURCE_PROJECTION, SNAPSHOT_PREPARE, EVIDENCE_PROBE,
-		BINDING_PROBE, HANDOFF_PROBE, POOLED_PAGE;
+		BINDING_PROBE, HANDOFF_PROBE, POOLED_PAGE, CATALOG_CREATE, METADATA_VALIDATE, PUBLICATION_VALIDATE;
 		final nx.pingwheel.common.diagnostics.DiagnosticChannel channel =
 			nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-" + name(), java.time.Duration.ofSeconds(10));
 	}
@@ -56,10 +56,13 @@ final class InventoryCaptureDiagnostics {
 			case "runtime/evidence-probe" -> FailureSite.EVIDENCE_PROBE;
 			case "runtime/binding-probe" -> FailureSite.BINDING_PROBE;
 			case "runtime/handoff-probe" -> FailureSite.HANDOFF_PROBE;
-			case "runtime/pooled-page" -> FailureSite.POOLED_PAGE;
+			case "runtime/pooled-read" -> FailureSite.POOLED_PAGE;
+			case "runtime/catalog-create" -> FailureSite.CATALOG_CREATE;
+			case "runtime/metadata-validate" -> FailureSite.METADATA_VALIDATE;
+			case "runtime/publication-validate" -> FailureSite.PUBLICATION_VALIDATE;
 			default -> null;
 		};
-		var logger = Diagnostics.server().atDetailed();
+		var logger = Diagnostics.server().atNormal();
 		return site == null ? logger : logger.rateLimited(site.channel);
 	}
 
@@ -89,17 +92,41 @@ final class InventoryCaptureDiagnostics {
 	}
 
 	static void warn(String operation, InventorySourceInput input, @Nullable SourceKey source, Supplier<String> detail, Throwable failure) {
+		warn(operation, handling(operation), input, source, detail, failure);
+	}
+
+	static void warn(String operation, String handling, InventorySourceInput input, @Nullable SourceKey source, Supplier<String> detail, Throwable failure) {
 		if (expectedFailure(failure)) return;
-		failureLogger(operation).failure(Level.WARN, "inventory/" + operation, "source-unavailable",
+		failureLogger(operation).failure(Level.WARN, "inventory/" + operation, handling,
 			() -> context(input) + (source == null ? "" : " source=" + source) + " " + detail.get()
 				+ (input.target() instanceof Target.ExternalBlockTarget external ? " locator=" + external.providerLocator() : ""), failure);
 	}
 
 	static boolean expectedFailure(Throwable failure) {
+		if (failure instanceof InventorySharedRead.ReadFailure typed) {
+			@Nullable Throwable cause = typed.failure();
+			return cause == null || cause instanceof nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.CapacityExceededException
+				|| expectedFailure(cause);
+		}
 		@Nullable Throwable reason = failure instanceof InventorySourceAccess.CursorlessReadFailure ? failure.getCause() : failure;
 		return reason instanceof InventoryItemBudget.CaptureLimitException
 			|| reason instanceof InventoryObservationSnapshot.LimitException
 			|| reason instanceof InventorySourceUnavailableException;
+	}
+
+	static void publicationFailed(Supplier<String> detail, Throwable failure) {
+		if (expectedFailure(failure)) return;
+		failureLogger("runtime/publication-validate").failure(Level.WARN, "inventory/runtime/publication-validate", "deny-publication", detail::get, failure);
+	}
+
+	private static String handling(String operation) {
+		return switch (operation) {
+			case "source-close", "snapshot-close", "snapshot-memory-close", "selection-witness-close", "resolve-close" -> "cleanup-continued";
+			case "selection-witness", "select-create", "runtime/selection" -> "reject-selection";
+			case "preview-count", "tracking-count" -> "reject-quantity";
+			case "runtime/input-probe", "runtime/evidence-probe", "runtime/binding-probe", "runtime/handoff-probe" -> "deny-publication";
+			default -> "invalidate-read";
+		};
 	}
 
 	static String scope(Target target) {

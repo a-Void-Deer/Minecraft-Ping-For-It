@@ -145,6 +145,39 @@ class InventoryFluidFreezerTest {
 			assertTrue(InventoryFluidDisplayCodec.decode("minecraft:water", refused.displayJson()).isPresent());
 		}
 	}
+	@Test void unexpectedFluidCodecFailureWarnsOnceIndependentlyOfItemIdentityAndPreservesFallback() throws ReflectiveOperationException {
+		for (var profile : nx.pingwheel.common.diagnostics.LoggingProfile.values()) {
+			try (var registration = new InventoryCertifiedReadTest.CallbackComponent();
+				var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
+				nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER, profile);
+				var calls = new java.util.concurrent.atomic.AtomicInteger();
+				registration.callback = () -> { calls.incrementAndGet(); throw new IllegalStateException("private-fluid-codec", new IllegalArgumentException("private-fluid-root")); };
+				var patch = DataComponentPatch.builder().set(registration.type, 1).build();
+				var registries = RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY);
+				var entry = new IPlatformFluidService.Entry(new IPlatformFluidService.Components(Fluids.WATER, patch), 9007199254740993L);
+				var first = InventoryFluidFreezer.freeze(entry, registries, 1024, new InventoryFluidCodec.Catalog(), admission(), fluid -> null);
+				var second = InventoryFluidFreezer.freeze(entry, registries, 1024, new InventoryFluidCodec.Catalog(), admission(), fluid -> null);
+				assertNotNull(first); assertNotNull(second); assertTrue(first.aggregateRequired()); assertEquals(first.key(), second.key());
+				assertEquals(9007199254740993L, first.amount()); assertEquals("minecraft:water", first.resourceId()); assertEquals(first.display(), second.display());
+				assertEquals(2, calls.get()); assertEquals(1, logs.events().size());
+				assertTrue(logs.messages().contains("site=inventory/fluid-identity")); assertTrue(logs.messages().contains("handling=all-variants"));
+				if (profile == nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL) assertFalse(logs.messages().contains("private-"));
+				else assertTrue(logs.messages().contains("private-fluid-root"));
+				InventoryItemDiagnostics.refusal("inventory/item-identity", "private:item", new IllegalStateException("private-item-codec"));
+				assertEquals(2, logs.events().size(), "fluid and item identity have independent admission channels");
+			}
+		}
+	}
+	@Test void expectedFluidIdentityBoundRefusalStaysQuietAtEveryProfile() {
+		var tag = new CompoundTag(); tag.putString("native", "x".repeat(InventoryFluidCodec.MAX_CANONICAL_BYTES + 1));
+		for (var profile : nx.pingwheel.common.diagnostics.LoggingProfile.values()) {
+			try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
+				nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER, profile);
+				var value = nbt(tag, Long.MAX_VALUE); assertTrue(value.aggregateRequired()); assertEquals(Long.MAX_VALUE, value.amount());
+				assertTrue(logs.events().isEmpty());
+			}
+		}
+	}
 	@Test void persistentPatchRemovalIsExactAndNoDefaultItemGraphIsRead() {
 		var registries = RegistryAccess.fromRegistryOfRegistries(BuiltInRegistries.REGISTRY);
 		var empty = InventoryFluidFreezer.freeze(new IPlatformFluidService.Entry(new IPlatformFluidService.Components(Fluids.WATER, DataComponentPatch.EMPTY), 81),

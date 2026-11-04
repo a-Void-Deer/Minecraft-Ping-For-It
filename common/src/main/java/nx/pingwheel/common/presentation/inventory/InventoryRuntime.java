@@ -309,7 +309,11 @@ public final class InventoryRuntime implements AutoCloseable {
 			if (closed) return InventorySharedRead.Check.UNAVAILABLE;
 			try { return lease.port.validate(expected, allowance); }
 			catch (InventoryItemBudget.CaptureLimitException deferred) { return InventorySharedRead.Check.DEFERRED; }
-			catch (RuntimeException | LinkageError unavailable) { return InventorySharedRead.Check.UNAVAILABLE; }
+			catch (RuntimeException | LinkageError unavailable) {
+				InventoryCaptureDiagnostics.warn("runtime/publication-validate", "deny-publication", lease.input, null,
+					() -> "stage=historical-metadata proofRoute=" + expected.graph().route() + " alias=" + expected.graph().alias(), unavailable);
+				return InventorySharedRead.Check.UNAVAILABLE;
+			}
 		}
 		@Override public void close() { if (!closed) { closed = true; try { lease.release(); } finally { memory.close(); } } }
 	}
@@ -472,7 +476,11 @@ public final class InventoryRuntime implements AutoCloseable {
 			installFluidGrants(allowance);
 			try { return value.validate(allowance); }
 			catch (InventoryItemBudget.CaptureLimitException deferred) { return InventorySharedRead.Check.DEFERRED; }
-			catch (RuntimeException | LinkageError unavailable) { return InventorySharedRead.Check.UNAVAILABLE; }
+			catch (RuntimeException | LinkageError unavailable) {
+				InventoryCaptureDiagnostics.publicationFailed(
+					() -> "stage=handoff-metadata probes=" + calls + " admittedWork=" + cost.workUnits(), unavailable);
+				return InventorySharedRead.Check.UNAVAILABLE;
+			}
 			finally { work.commit(Map.of(ITEM_WORK, allowance.attemptedWorkUnits() - allowance.independentlyChargedWork(), InventorySourceAccess.PROBES, (long) value.probeCalls(),
 				InventorySourceAccess.PROVIDER_WORK, value.probeCalls() * InventorySourceAccess.PROVIDER_CALL_WORK)); }
 		}
@@ -593,10 +601,19 @@ public final class InventoryRuntime implements AutoCloseable {
 	private void physicalProgress(Round round) {
 		if (round.physicalDelay != null) round.physicalDelay.progress(cycle(round.physicalModule));
 	}
-	private void warn(String operation, Consumer consumer, Round round, Throwable failure) {
+	private void warn(String operation, Consumer consumer, @Nullable Round round, Throwable failure) {
 		InventoryCaptureDiagnostics.warn("runtime/" + operation, consumer.input, round == null ? null : round.key,
 			() -> "consumer=" + consumer.diagnosticId + " subject=" + consumer.subject
 				+ " round=" + (round == null ? "none" : round.sequence) + " tick=" + tick, failure);
+	}
+	private void warnPooled(String operation, Consumer consumer, @Nullable Round round, InventorySharedRead.Proof proof,
+		String stage, Throwable failure) {
+		InventoryCaptureDiagnostics.warn("runtime/" + operation, "invalidate-observation", consumer.input, round == null ? null : round.key,
+			() -> "consumer=" + consumer.diagnosticId + " subject=" + consumer.subject + " stage=" + stage
+				+ " round=" + (round == null ? "none" : round.sequence) + " tick=" + tick
+				+ " proofRoute=" + proof.graph().route() + " alias=" + proof.graph().alias()
+				+ " readPage=" + (round == null ? 0 : round.size())
+				+ (failure instanceof InventorySharedRead.ReadFailure typed ? " check=" + typed.check() : " check=UNAVAILABLE"), failure);
 	}
 	private int providerReasons(long probes, long work) {
 		return (physical.remaining(InventorySourceAccess.PROBES) < probes ? Reason.PROBE_WORK.bit() : 0)
@@ -679,7 +696,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK)); return work.get();
 		} catch (RuntimeException | LinkageError failure) {
 			if (!InventoryCaptureDiagnostics.expectedFailure(failure))
-				Diagnostics.server().atDetailed().rateLimited(PREFLIGHT).warn("inventory/runtime/preflight", "unavailable", failure, () -> "tick=" + tick);
+				Diagnostics.server().atNormal().rateLimited(PREFLIGHT).warn("inventory/runtime/preflight", "reject-selection", failure, () -> "tick=" + tick);
 			return Optional.empty();
 		}
 		}
@@ -1318,7 +1335,10 @@ public final class InventoryRuntime implements AutoCloseable {
 			}
 		}
 		catch (InventoryItemBudget.CaptureLimitException deferred) { check = InventorySharedRead.Check.DEFERRED; }
-		catch (RuntimeException | LinkageError failure) { check = InventorySharedRead.Check.UNAVAILABLE; }
+		catch (RuntimeException | LinkageError failure) {
+			warnPooled("metadata-validate", consumer, selected, expected, "pool-admission", failure);
+			check = InventorySharedRead.Check.UNAVAILABLE;
+		}
 		if (check == InventorySharedRead.Check.DEFERRED) return InventorySourceAccess.Preparation.DEFERRED;
 		if (check != InventorySharedRead.Check.VALID) {
 			if (selected != null && check != InventorySharedRead.Check.AUTHORITY_DENIED) retire(selected, unavailable(consumer.input.viewKey()));
@@ -1388,10 +1408,12 @@ public final class InventoryRuntime implements AutoCloseable {
 			round.preparation = InventorySourceAccess.Preparation.READY;
 			return round.preparation;
 		} catch (InventorySharedRead.ReadFailure failure) {
+			warnPooled("catalog-create", consumer, round, association.expected, "catalog-create", failure);
 			pooledFailure(consumer, association, failure.check()); return InventorySourceAccess.Preparation.UNAVAILABLE;
 		} catch (InventoryItemBudget.CaptureLimitException capacity) {
 			pooledFailure(consumer, association, InventorySharedRead.Check.UNAVAILABLE); return InventorySourceAccess.Preparation.UNAVAILABLE;
 		} catch (RuntimeException | LinkageError failure) {
+			warnPooled("catalog-create", consumer, round, association.expected, "catalog-create", failure);
 			pooledFailure(consumer, association, InventorySharedRead.Check.UNAVAILABLE); return InventorySourceAccess.Preparation.UNAVAILABLE;
 		} finally { if (!transferred) retained.get().close(); }
 	}
@@ -1466,7 +1488,10 @@ public final class InventoryRuntime implements AutoCloseable {
 						if (association != null) {
 							InventorySharedRead.Check check;
 							try { check = association.lease.port.validate(association.expected, operation.allowance); }
-							catch (RuntimeException | LinkageError failure) { check = InventorySharedRead.Check.UNAVAILABLE; }
+							catch (RuntimeException | LinkageError failure) {
+								warnPooled("metadata-validate", consumer, round, association.expected, "association-validate", failure);
+								check = InventorySharedRead.Check.UNAVAILABLE;
+							}
 							if (check == InventorySharedRead.Check.DEFERRED) return InventorySourceAccess.Preparation.DEFERRED;
 							if (check != InventorySharedRead.Check.VALID) { pooledFailure(consumer, association, check); return InventorySourceAccess.Preparation.UNAVAILABLE; }
 						} else {
@@ -2042,9 +2067,11 @@ public final class InventoryRuntime implements AutoCloseable {
 							round.sweepEvidence = InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP; physicalProgress(round);
 							return true;
 						} catch (InventorySharedRead.ReadFailure failure) {
+							warnPooled("pooled-read", consumer, round, association.expected, "pooled-read", failure);
 							pooledFailure(consumer, association, failure.check()); return true;
 						} catch (RuntimeException | LinkageError failure) {
-							warn("pooled-page", consumer, round, failure); pooledFailure(consumer, association, InventorySharedRead.Check.UNAVAILABLE); return true;
+							warnPooled("pooled-read", consumer, round, association.expected, "pooled-read", failure);
+							pooledFailure(consumer, association, InventorySharedRead.Check.UNAVAILABLE); return true;
 						} finally {
 							grant.commit(Map.of(InventorySourceAccess.PHYSICAL, (long) attempted, InventorySourceAccess.PROBES, 1L,
 								InventorySourceAccess.PROVIDER_WORK, (attempted + 1L) * InventorySourceAccess.PROVIDER_CALL_WORK,

@@ -38,7 +38,10 @@ class InventoryCaptureDiagnosticsTest {
 			var calls = new java.util.concurrent.atomic.AtomicInteger();
 			InventoryCaptureDiagnostics.warn("test-profile-disabled", input, null, () -> { calls.incrementAndGet(); return "private-detail"; },
 				new IllegalStateException("private-message"));
-			assertEquals(0, calls.get()); assertTrue(logs.events().isEmpty());
+			assertEquals(0, calls.get()); assertEquals(1, logs.events().size());
+			assertEquals(Level.WARN, logs.events().getFirst().getLevel());
+			assertTrue(logs.messages().contains("handling=invalidate-read"));
+			assertTrue(!logs.messages().contains("private-"));
 		}
 	}
 
@@ -105,7 +108,20 @@ class InventoryCaptureDiagnosticsTest {
 			InventoryCaptureDiagnostics.warn("test-budget", input, null, () -> { throw new AssertionError("expected refusal has no log"); }, exhausted);
 			InventoryCaptureDiagnostics.warn("test-budget", input, null, () -> { throw new AssertionError("expected wrapper has no log"); },
 				new InventorySourceAccess.CursorlessReadFailure(1, exhausted));
+			InventoryCaptureDiagnostics.warn("test-budget", input, null, () -> { throw new AssertionError("expected certified budget has no log"); },
+				new InventorySharedRead.ReadFailure(InventorySharedRead.Check.AUTHORITY_DENIED, exhausted));
 			assertTrue(logs.events.isEmpty());
+		}
+	}
+	@Test void normalFailureHandlingDistinguishesCleanupFromSelectionRejection() {
+		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "private:block"), new UUID(51, 7), BlockFace.NORTH);
+		try (var logs = new InventoryDiagnosticsTestCapture()) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
+			InventoryCaptureDiagnostics.warn("source-close", input, null, () -> { throw new AssertionError("NORMAL cleanup context"); }, new IllegalStateException("private-cleanup"));
+			InventoryCaptureDiagnostics.warn("selection-witness", input, null, () -> { throw new AssertionError("NORMAL selection context"); }, new IllegalArgumentException("private-selection"));
+			assertEquals(2, logs.events().size()); assertTrue(logs.messages().contains("handling=cleanup-continued"));
+			assertTrue(logs.messages().contains("handling=reject-selection")); assertTrue(!logs.messages().contains("private-"));
 		}
 	}
 

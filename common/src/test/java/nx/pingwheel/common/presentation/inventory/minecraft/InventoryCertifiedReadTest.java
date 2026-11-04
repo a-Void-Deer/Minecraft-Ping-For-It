@@ -380,7 +380,7 @@ class InventoryCertifiedReadTest {
 	}
 	/** Temporary native component registration with exact registry restoration, used only to provoke real codec callbacks. */
 	@NotNullByDefault
-	private static final class CallbackComponent implements AutoCloseable {
+	static final class CallbackComponent implements AutoCloseable {
 		final net.minecraft.core.component.DataComponentType<Integer> type;
 		Runnable callback = () -> {};
 		private final Object registry = BuiltInRegistries.DATA_COMPONENT_TYPE;

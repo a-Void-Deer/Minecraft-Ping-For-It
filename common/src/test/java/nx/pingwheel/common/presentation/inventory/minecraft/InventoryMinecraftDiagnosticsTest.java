@@ -27,6 +27,20 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
 class InventoryMinecraftDiagnosticsTest {
+	@Test void normalUnexpectedSnapshotFailureWarnsWithoutCollectingContextAndExpectedDenialStaysQuiet() {
+		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
+			var calls = new AtomicInteger();
+			InventorySnapshotDiagnostics.failure("inventory-provider-snapshot-layout", input("private:block"), null,
+				() -> { calls.incrementAndGet(); return "private-layout"; }, new IllegalStateException("private-cause"));
+			InventorySnapshotDiagnostics.failure("inventory-source-valid", input("private:block"), null,
+				() -> { throw new AssertionError("expected denial detail"); }, new InventorySourceUnavailableException("private-denial"));
+			assertEquals(0, calls.get()); assertEquals(1, logs.events().size());
+			assertEquals(Level.WARN, logs.events().getFirst().getLevel()); assertTrue(logs.messages().contains("handling=live-read-fallback"));
+			assertFalse(logs.messages().contains("private-")); assertNull(logs.events().getFirst().getThrown());
+		}
+	}
 	@Test void belowMinimumProfileDoesNotConsumeUnsupportedGateAndFirstDebugAttemptStillReports() throws ReflectiveOperationException {
 		var field = InventorySnapshotDiagnostics.class.getDeclaredField("LAST_LOGGED"); field.setAccessible(true);
 		var gate = (java.util.concurrent.atomic.AtomicLongArray) field.get(null);

@@ -890,7 +890,8 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		nx.pingwheel.common.diagnostics.DiagnosticChannel channel = packetKind == null
 			? controlHandoff ? CONTROL_UNKNOWN : TRANSPORT_UNKNOWN
 			: controlHandoff ? packetKind.controlHandoff : packetKind.transportSend;
-		Diagnostics.server().atDetailed().rateLimited(channel).failure(org.apache.logging.log4j.Level.WARN, "inventory/publisher/" + operation, "handoff-refused",
+		Diagnostics.server().atNormal().rateLimited(channel).failure(org.apache.logging.log4j.Level.WARN, "inventory/publisher/" + operation,
+			controlHandoff ? "control-completed-callback-failed" : "retry-same-part-charged",
 			() -> "kind=" + packet.kind() + " request=" + packet.requestId() + " recipient=" + state.context.recipient()
 				+ " marker=" + packet.markerId() + " epoch=" + packet.epoch() + " presentationEpoch=" + packet.presentationEpoch()
 				+ " view=" + packet.view() + " baseline=" + packet.baselineId() + " stateRevision=" + packet.statusRevision()

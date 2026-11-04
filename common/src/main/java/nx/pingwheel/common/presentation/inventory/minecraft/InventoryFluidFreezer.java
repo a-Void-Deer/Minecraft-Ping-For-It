@@ -67,6 +67,7 @@ public final class InventoryFluidFreezer {
 				// Only this identity transaction is inside the fallback boundary. Reliable
 				// registry/amount and later display/catalogue/admission failures are not.
 				identity = InventoryFluidCodec.Identity.refused();
+				InventoryItemDiagnostics.fluidIdentityRefused(id, refused);
 			}
 			budget.beginDisplay();
 			// Prepay one external base-name call plus the closed projection's bounded key/plain-text

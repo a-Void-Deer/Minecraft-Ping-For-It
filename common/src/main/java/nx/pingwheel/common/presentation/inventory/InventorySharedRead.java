@@ -88,12 +88,16 @@ public final class InventorySharedRead {
 	@NotNullByDefault
 	public static final class ReadFailure extends IllegalStateException {
 		private final Check check;
+		private final @Nullable Throwable failure;
 		public ReadFailure(Check check) { this(check, null); }
 		public ReadFailure(Check check, @Nullable Throwable cause) {
 			super("certified inventory read: " + check, cause);
 			if (check == Check.VALID || check == Check.DEFERRED) throw new IllegalArgumentException("non-failure check");
 			this.check = check;
+			this.failure = cause;
 		}
 		public Check check() { return check; }
+		/** Owned cause reference; classification must not invoke throwable accessors. */
+		public @Nullable Throwable failure() { return failure; }
 	}
 }

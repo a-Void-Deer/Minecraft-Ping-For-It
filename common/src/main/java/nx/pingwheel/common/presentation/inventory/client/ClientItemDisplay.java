@@ -511,7 +511,7 @@ public final class ClientItemDisplay {
 		// A normal safety/budget refusal is deliberate display suppression, as
 		// are Lore/shulker stripping and ceiling reprojection. Hooks and codecs
 		// throwing their own exceptions are unexpected failures.
-		if (!(failure instanceof UnsafeDisplay) || failure.getCause() != null) InventoryItemDiagnostics.displayFailure(nx.pingwheel.common.diagnostics.Diagnostics.client(), operation, itemId, failure);
+		if (!(failure instanceof UnsafeDisplay unsafe) || unsafe.failure != null) InventoryItemDiagnostics.displayFailure(nx.pingwheel.common.diagnostics.Diagnostics.client(), operation, itemId, failure);
 	}
 
 	/**
@@ -793,8 +793,9 @@ public final class ClientItemDisplay {
 		@Override public void traverse(int entries, int capacity) { cells(entries); cells(capacity); }
 	}
 	static final class UnsafeDisplay extends RuntimeException {
-		UnsafeDisplay() { super(null, null, false, false); }
-		UnsafeDisplay(Throwable cause) { super(null, cause, false, false); }
+		private final @Nullable Throwable failure;
+		UnsafeDisplay() { super(null, null, false, false); failure = null; }
+		UnsafeDisplay(Throwable cause) { super(null, cause, false, false); failure = cause; }
 	}
 
 	private static final @Unmodifiable Set<Class<?>> SAFE_LISTS = Set.of(ArrayList.class,
