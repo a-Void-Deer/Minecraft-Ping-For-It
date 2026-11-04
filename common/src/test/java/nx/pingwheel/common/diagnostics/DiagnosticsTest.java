@@ -1,15 +1,7 @@
 package nx.pingwheel.common.diagnostics;
 
-import nx.pingwheel.common.util.RateLimitedDiagnostics;
 import nx.pingwheel.common.util.SafeExceptionReport;
 import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.core.LogEvent;
-import org.apache.logging.log4j.core.Logger;
-import org.apache.logging.log4j.core.LoggerContext;
-import org.apache.logging.log4j.core.appender.AbstractAppender;
-import org.apache.logging.log4j.core.config.Configuration;
-import org.apache.logging.log4j.core.config.LoggerConfig;
-import org.apache.logging.log4j.core.config.Property;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -18,181 +10,129 @@ import org.junit.jupiter.api.Test;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
 
+/** Public explicit-side routes, without the retired implicit reporter/window adapter. */
 @NotNullByDefault
 class DiagnosticsTest {
 
 	@Test
-	void unownedLegacyStaticRoutesDoNotGuessASideOrBypassProductionProfile() {
-		@Nullable DiagnosticReporter previous = Diagnostics.swapProductionForTesting(null);
-		try {
-			Diagnostics.warn("legacy-read", "provider", () -> {
-				throw new AssertionError("Unowned static route must migrate instead of guessing a side");
-			}, new UnreadableFailure());
-			Diagnostics.domainApprovedEvent(Level.WARN, "legacy-read", "provider", "missing", () -> {
-				throw new AssertionError("No unrestricted production compatibility output");
-			});
-		} finally {
-			Diagnostics.swapProductionForTesting(previous);
-		}
-	}
-
-	@Test
-	void compatibilityAndNewFailureRoutesShareAllLevelWindowsAndOnePrefixedBackend() {
-		try (Capture capture = new Capture(Level.ALL)) {
-			RuntimeException failure = failure("original payload", null);
+	void everySideHasIndependentDisclosureAndPreservesAssignedSeverity() {
+		try (Capture capture = new Capture()) {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEEP);
 			AtomicInteger reads = new AtomicInteger();
-			RateLimitedDiagnostics.debug("read", "provider", () -> "old-debug", failure);
-			Diagnostics.debug("read", "provider", () -> "suppressed=" + reads.incrementAndGet(), failure);
-			Diagnostics.warn("read", "provider", () -> "new-warn", failure);
-			RateLimitedDiagnostics.warn("read", "provider", () -> "suppressed=" + reads.incrementAndGet(), failure);
-			RateLimitedDiagnostics.error("read", "provider", () -> "old-error", failure);
-			Diagnostics.error("read", "provider", () -> "suppressed=" + reads.incrementAndGet(), failure);
-
-			assertEquals(0, reads.get());
-			assertEquals(List.of(Level.DEBUG, Level.WARN, Level.ERROR), capture.events.stream().map(LogEvent::getLevel).toList());
-			for (LogEvent event : capture.events) {
-				String message = event.getMessage().getFormattedMessage();
-				assertTrue(message.startsWith(Diagnostics.PREFIX + "operation=read"));
-				assertFalse(message.contains(Diagnostics.PREFIX + Diagnostics.PREFIX));
-				assertTrue(message.contains("original payload"));
-				assertNull(event.getThrown());
+			RuntimeException failure = new RuntimeException("original payload", new IllegalArgumentException("root cause"));
+			for (DiagnosticSide side : DiagnosticSide.values()) {
+				logger(side).atNormal().failure(Level.ERROR, "public-read", "fallback",
+					() -> { reads.incrementAndGet(); return "permitted context"; }, failure);
+			}
+			assertEquals(1, reads.get());
+			assertEquals(List.of(DiagnosticSide.CLIENT, DiagnosticSide.SERVER, DiagnosticSide.BOOTSTRAP),
+				capture.events.stream().map(Event::side).toList());
+			for (Event event : capture.events) {
+				assertEquals(Level.ERROR, event.level);
+				assertTrue(event.text.startsWith(Diagnostics.PREFIX + "side=" + event.side));
+				assertTrue(event.text.contains("site=public-read handling=fallback"));
+				assertEquals(event.side == DiagnosticSide.SERVER, event.text.contains("original payload"));
+				assertEquals(event.side == DiagnosticSide.SERVER, event.text.contains("root cause"));
 			}
 		}
 	}
 
 	@Test
-	void importantScalarEventsAndRepeatedDomainApprovalsEmitWithoutAnyThrowable() {
-		try (Capture capture = new Capture(Level.ALL)) {
+	void reportsWithoutAChannelDoNotInventDuplicateWindowsAndScalarEventsStayExceptionFree() {
+		try (Capture capture = new Capture()) {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEEP);
 			AtomicInteger reads = new AtomicInteger();
-			Diagnostics.event(Level.ERROR, "capture", "provider", "invalid-target", () -> "position=(1,64,-2)");
-			Diagnostics.event(Level.ERROR, "capture", "provider", "invalid-target", () -> "unused=" + reads.incrementAndGet());
-			for (int attempt = 0; attempt < 2; attempt++) {
-				Diagnostics.domainApprovedEvent(Level.ERROR, "capture", "provider", "invalid-target",
-					() -> "position=(1,64,-2)");
-				Diagnostics.domainApprovedFailure(Level.WARN, "refresh", "provider", () -> "approved",
-					failure("original failure", null));
+			for (int attempt = 0; attempt < 3; attempt++) {
+				Diagnostics.client().event(Level.WARN, "public-status", "unavailable",
+					() -> "context=" + reads.incrementAndGet());
 			}
-			assertEquals(0, reads.get());
-			assertEquals(5, capture.events.size());
-			for (LogEvent event : capture.events) {
-				String message = event.getMessage().getFormattedMessage();
-				assertNull(event.getThrown());
-				assertTrue(message.startsWith(Diagnostics.PREFIX));
-				assertFalse(message.contains("null throwable"));
-				if (event.getLevel() == Level.ERROR) {
-					assertTrue(message.contains("operation=capture scope=provider reason=invalid-target"));
-					assertTrue(message.contains("position=(1,64,-2)"));
-					assertFalse(message.contains("exception:"));
-				}
+			assertEquals(3, reads.get());
+			assertEquals(3, capture.events.size());
+			for (Event event : capture.events) {
+				assertTrue(event.text.contains("site=public-status handling=unavailable"));
+				assertFalse(event.text.contains("exception:"));
+				assertFalse(event.text.contains("channel="));
 			}
 		}
 	}
 
 	@Test
-	void prefixedFailureAndScalarEventsStayInsideTheTotalBudgetWithStableHeaderAndEscapedContext() {
-		try (Capture capture = new Capture(Level.ALL)) {
-			@Nullable Throwable chain = null;
-			for (int depth = 0; depth < 14; depth++) {
-				chain = failure("payload=" + "x".repeat(1000), chain);
-			}
-			String huge = "provider\n" + "y".repeat(20_000);
-			Diagnostics.error("read", "provider", () -> huge, chain);
-			Diagnostics.event(Level.ERROR, huge, huge, huge, () -> huge);
-			Diagnostics.domainApprovedFailure(Level.ERROR, "read", "provider", () -> huge, chain);
-			Diagnostics.domainApprovedEvent(Level.ERROR, huge, huge, huge, () -> huge);
-			assertEquals(4, capture.events.size());
-			for (LogEvent event : capture.events) {
-				String message = event.getMessage().getFormattedMessage();
-				assertTrue(message.length() <= SafeExceptionReport.MAX_CHARACTERS);
-				assertTrue(message.startsWith(Diagnostics.PREFIX + "operation="));
-				assertTrue(message.contains("scope="));
-				assertTrue(message.contains("provider\\n"));
-				assertTrue(message.contains("truncated"));
-				assertNull(event.getThrown());
-				if (message.contains("exception:")) {
-					assertTrue(message.contains("provider.Inventory.read (Inventory.java:17)"));
-				}
-			}
-		}
-	}
-
-	@Test
-	void disabledPublicEventAndDomainApprovedEntrypointsRemainLazy() {
-		try (Capture capture = new Capture(Level.OFF)) {
-			for (Level level : List.of(Level.DEBUG, Level.WARN, Level.ERROR)) {
-				Diagnostics.event(level, "read", "provider", "missing", () -> {
-					throw new AssertionError("disabled event context");
-				});
-				Diagnostics.domainApprovedEvent(level, "read", "provider", "missing", () -> {
-					throw new AssertionError("disabled approved context");
-				});
-				Diagnostics.domainApprovedFailure(level, "read", "provider", () -> {
-					throw new AssertionError("disabled approved context");
+	void disabledPublicRoutesReadNeitherContextNorThrowableAcrossSeverities() {
+		try (Capture capture = new Capture()) {
+			capture.enabled = false;
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEBUG);
+			for (Level level : List.of(Level.DEBUG, Level.INFO, Level.WARN, Level.ERROR)) {
+				Diagnostics.client().failure(level, "disabled-read", "fallback", () -> {
+					throw new AssertionError("disabled failure context");
 				}, new UnreadableFailure());
+				Diagnostics.client().event(level, "disabled-status", "unavailable", () -> {
+					throw new AssertionError("disabled scalar context");
+				});
 			}
 			assertTrue(capture.events.isEmpty());
 		}
 	}
 
 	@Test
-	void publicDiagnosticsInitializeAndRunWithoutGlobalOrPlatformServices() throws Exception {
-		try (Capture capture = new Capture(Level.ALL);
-			PlatformFreeLoader loader = new PlatformFreeLoader()) {
-			Class<?> diagnostics = loader.loadClass(Diagnostics.class.getName());
-			Object logger = diagnostics.getMethod("client").invoke(null);
-			Class<?> loggerType = logger.getClass();
-			// New side-owned route is usable without Global, platform or config.
-			loggerType.getMethod("warn", String.class,
-				java.lang.reflect.Array.newInstance(loader.loadClass(SafeDiagnosticValue.class.getName()), 0).getClass())
-				.invoke(logger, "without platform services",
-					java.lang.reflect.Array.newInstance(loader.loadClass(SafeDiagnosticValue.class.getName()), 0));
-			assertTrue((boolean) loggerType.getMethod("isEnabled", Level.class).invoke(logger, Level.WARN));
+	void explicitFailureAndScalarReportsRetainBoundedEscapedDetail() {
+		try (Capture capture = new Capture()) {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEEP);
+			String huge = "provider\n" + "x".repeat(30_000);
+			RuntimeException failure = new RuntimeException("original " + "y".repeat(30_000));
+			Diagnostics.client().error("bounded-read", "fallback", failure, () -> huge);
+			Diagnostics.client().event(Level.ERROR, "bounded-status", "unavailable", () -> huge);
+			assertEquals(2, capture.events.size());
+			for (Event event : capture.events) {
+				assertTrue(event.text.length() <= SafeExceptionReport.MAX_CHARACTERS);
+				assertTrue(event.text.contains("provider\\n"));
+				assertTrue(event.text.contains("truncated"));
+			}
 		}
 	}
 
-	private static RuntimeException failure(String message, @Nullable Throwable cause) {
-		RuntimeException failure = new RuntimeException(message, cause);
-		failure.setStackTrace(new StackTraceElement @Unmodifiable [] {
-			new StackTraceElement("provider.Inventory", "read", "Inventory.java", 17),
-			new StackTraceElement("provider." + "y".repeat(1400), "caller", "Caller.java", 18)
-		});
-		return failure;
+	@Test
+	void publicDiagnosticsInitializeAndRunWithoutGlobalConfigOrPlatformServices() throws Exception {
+		try (PlatformFreeLoader loader = new PlatformFreeLoader()) {
+			Class<?> diagnostics = loader.loadClass(Diagnostics.class.getName());
+			Object logger = diagnostics.getMethod("client").invoke(null);
+			Object values = java.lang.reflect.Array.newInstance(loader.loadClass(SafeDiagnosticValue.class.getName()), 0);
+			logger.getClass().getMethod("warn", String.class, values.getClass())
+				.invoke(logger, "without platform services", values);
+			assertTrue((boolean) logger.getClass().getMethod("isEnabled", Level.class).invoke(logger, Level.WARN));
+		}
 	}
 
-	/** A fresh copy of the production classes, with platform initialization unavailable. */
+	private static DiagnosticLogger logger(DiagnosticSide side) {
+		return switch (side) {
+			case CLIENT -> Diagnostics.client();
+			case SERVER -> Diagnostics.server();
+			case BOOTSTRAP -> Diagnostics.bootstrap();
+		};
+	}
+
 	@NotNullByDefault
 	private static final class PlatformFreeLoader extends URLClassLoader {
 		private PlatformFreeLoader() {
-			super(new URL @Unmodifiable [] { Diagnostics.class.getProtectionDomain().getCodeSource().getLocation() },
+			super(new URL @Unmodifiable [] {Diagnostics.class.getProtectionDomain().getCodeSource().getLocation()},
 				Diagnostics.class.getClassLoader());
 		}
-
-		@Override
-		protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+		@Override protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
 			if (name.equals("nx.pingwheel.common.Global") || name.startsWith("nx.pingwheel.common.platform.")
 				|| name.startsWith("nx.pingwheel.common.config.")) {
-				throw new ClassNotFoundException("Platform services are intentionally unavailable: " + name);
+				throw new ClassNotFoundException("Platform services intentionally unavailable: " + name);
 			}
 			if (!name.startsWith("nx.pingwheel.common.diagnostics.")
-				&& !name.startsWith("nx.pingwheel.common.util.SafeExceptionReport")) {
-				return super.loadClass(name, resolve);
-			}
+				&& !name.startsWith("nx.pingwheel.common.util.SafeExceptionReport")) return super.loadClass(name, resolve);
 			synchronized (getClassLoadingLock(name)) {
 				@Nullable Class<?> loaded = findLoadedClass(name);
-				if (loaded == null) {
-					loaded = findClass(name);
-				}
-				if (resolve) {
-					resolveClass(loaded);
-				}
+				if (loaded == null) loaded = findClass(name);
+				if (resolve) resolveClass(loaded);
 				return loaded;
 			}
 		}
@@ -200,60 +140,27 @@ class DiagnosticsTest {
 
 	@NotNullByDefault
 	private static final class UnreadableFailure extends RuntimeException {
-		@Override
-		public String getMessage() {
-			throw new AssertionError("disabled message accessor");
-		}
-
-		@Override
-		public StackTraceElement[] getStackTrace() {
-			throw new AssertionError("disabled stack accessor");
-		}
+		@Override public String getMessage() { throw new AssertionError("disabled message accessor"); }
+		@Override public StackTraceElement @Unmodifiable [] getStackTrace() { throw new AssertionError("disabled stack accessor"); }
 	}
 
 	@NotNullByDefault
-	private static final class RecordingAppender extends AbstractAppender {
-		private final List<LogEvent> events = new ArrayList<>();
-
-		private RecordingAppender() {
-			super("unified-diagnostics-test", null, null, true, Property.EMPTY_ARRAY);
-		}
-
-		@Override
-		public void append(LogEvent event) {
-			events.add(event.toImmutable());
-		}
-	}
+	private record Event(DiagnosticSide side, Level level, String text) {}
 
 	@NotNullByDefault
-	private static final class Capture implements AutoCloseable {
-		private final Logger logger = (Logger) Diagnostics.logger();
-		private final LoggerContext context = logger.getContext();
-		private final Configuration configuration = context.getConfiguration();
-		private final @Nullable LoggerConfig previousConfig = configuration.getLoggers().get(logger.getName());
-		private final RecordingAppender appender = new RecordingAppender();
-		private final List<LogEvent> events = appender.events;
-		private final RateLimitedDiagnosticsTestScope diagnostics;
-
-		private Capture(Level level) {
-			appender.start();
-			LoggerConfig captureConfig = new LoggerConfig(logger.getName(), level, false);
-			captureConfig.addAppender(appender, Level.ALL, null);
-			configuration.removeLogger(logger.getName());
-			configuration.addLogger(logger.getName(), captureConfig);
-			context.updateLoggers();
-			diagnostics = RateLimitedDiagnosticsTestScope.install();
-		}
-
-		@Override
-		public void close() {
-			diagnostics.close();
-			configuration.removeLogger(logger.getName());
-			if (previousConfig != null) {
-				configuration.addLogger(logger.getName(), previousConfig);
+	private static final class Capture implements DiagnosticBackend, AutoCloseable {
+		private final List<Event> events = new ArrayList<>();
+		private final EnumMap<DiagnosticSide, LoggingProfile> profiles = new EnumMap<>(DiagnosticSide.class);
+		private final DiagnosticBackend previous = Diagnostics.swapBackendForTesting(this);
+		private boolean enabled = true;
+		private Capture() {
+			for (DiagnosticSide side : DiagnosticSide.values()) {
+				profiles.put(side, Diagnostics.profile(side));
+				Diagnostics.setProfile(side, LoggingProfile.NORMAL);
 			}
-			context.updateLoggers();
-			appender.stop();
 		}
+		@Override public boolean isEnabled(DiagnosticSide side, Level severity) { return enabled; }
+		@Override public void log(DiagnosticSide side, Level severity, String message) { events.add(new Event(side, severity, message)); }
+		@Override public void close() { Diagnostics.swapBackendForTesting(previous); profiles.forEach(Diagnostics::setProfile); }
 	}
 }

@@ -7,7 +7,12 @@ import java.util.function.Supplier;
 import java.util.function.Predicate;
 
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticLogger;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Stage;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -19,8 +24,9 @@ import org.jetbrains.annotations.Nullable;
  * reason heartbeat. The event contains the caller's complete diagnostic
  * details and throwable; this class intentionally does not redact or rewrite
  * either value. The adapter supplies the detailed target/component/material
- * context, while this class only controls event frequency.</p>
+ * context lazily; production disclosure remains owned by the shared profile.</p>
  */
+@NotNullByDefault
 public final class FlywheelDiagnostics {
 	public static final long HEARTBEAT_MILLIS = 5_000L;
 	public static final int MAX_TRACKED_TARGETS = 512;
@@ -55,20 +61,49 @@ public final class FlywheelDiagnostics {
 	}
 
 	/** One emitted diagnostic record, including the original throwable. */
-	public record Event(
-		@Nullable String target,
-		FlywheelDiagnosticReason reason,
-		EventKind kind,
-		long timestampMillis,
-		@Nullable String details,
-		@Nullable Throwable failure
-	) {
-		public Event {
-			target = target == null ? "<unknown-target>" : target;
-			reason = Objects.requireNonNull(reason, "reason");
-			kind = Objects.requireNonNull(kind, "kind");
-			details = details == null ? "" : details;
+	@NotNullByDefault
+	public static final class Event {
+		private final Supplier<@Nullable String> target;
+		private final FlywheelDiagnosticReason reason;
+		private final EventKind kind;
+		private final long timestampMillis;
+		private final Supplier<@Nullable String> details;
+		private final @Nullable Throwable failure;
+		private final LoggingProfile profile;
+		private @Nullable String targetText;
+		private @Nullable String detailText;
+
+		private Event(Supplier<@Nullable String> target, FlywheelDiagnosticReason reason, EventKind kind,
+			long timestampMillis, @Nullable Supplier<@Nullable String> details, @Nullable Throwable failure,
+			LoggingProfile profile) {
+			this.target = target;
+			this.reason = reason;
+			this.kind = kind;
+			this.timestampMillis = timestampMillis;
+			this.details = details == null ? () -> "" : details;
+			this.failure = failure;
+			this.profile = profile;
 		}
+
+		public String target() {
+			if (targetText == null) targetText = collect(target, "<unknown-target>");
+			return targetText;
+		}
+		public String details() {
+			if (detailText == null) detailText = collect(details, "");
+			return detailText;
+		}
+		private String collect(Supplier<@Nullable String> supplier, String absent) {
+			try { return Objects.requireNonNullElse(supplier.get(), absent); }
+			catch (RuntimeException | LinkageError failure) {
+				Diagnostics.faults().report(DiagnosticSide.CLIENT, "create-flywheel", Stage.CONTEXT, profile, failure);
+				return "[context unavailable]";
+			}
+		}
+		public FlywheelDiagnosticReason reason() { return reason; }
+		public EventKind kind() { return kind; }
+		public long timestampMillis() { return timestampMillis; }
+		public @Nullable Throwable failure() { return failure; }
 	}
 
 	private record State(FlywheelDiagnosticReason reason, long lastEmissionMillis, boolean admitted) {}
@@ -85,15 +120,15 @@ public final class FlywheelDiagnostics {
 
 	/** Creates the production logger without initializing it until an event is emitted. */
 	public static FlywheelDiagnostics global() {
-		return new FlywheelDiagnostics(Clock.system(), FlywheelDiagnostics::logGlobally,
-			level -> Diagnostics.logger().isEnabled(level));
+		return new FlywheelDiagnostics(Clock.system(), event -> logGlobally(Diagnostics.client(), event),
+			level -> selection(Diagnostics.client(), level).isEnabled(level));
 	}
 
 	/**
 	 * Reports the current reason. Returns {@code true} when the event sink was
 	 * invoked, which is useful for focused tests and does not affect rendering.
 	 */
-	public synchronized boolean report(
+	public boolean report(
 		@Nullable String target,
 		FlywheelDiagnosticReason reason,
 		@Nullable String details,
@@ -106,7 +141,7 @@ public final class FlywheelDiagnostics {
 	 * Compatibility overload for callers that already have a cheap target key.
 	 * The detail supplier is not evaluated unless this report is emitted.
 	 */
-	public synchronized boolean report(
+	public boolean report(
 		@Nullable String target,
 		FlywheelDiagnosticReason reason,
 		@Nullable Supplier<@Nullable String> details,
@@ -122,7 +157,7 @@ public final class FlywheelDiagnostics {
 	 * This keeps repeated render attempts from walking live instances, models,
 	 * materials, or exception text when the event is suppressed.</p>
 	 */
-	public synchronized boolean report(
+	public boolean report(
 		@Nullable Object targetKey,
 		FlywheelDiagnosticReason reason,
 		Supplier<@Nullable String> target,
@@ -132,41 +167,43 @@ public final class FlywheelDiagnostics {
 		Objects.requireNonNull(reason, "reason");
 		Objects.requireNonNull(target, "target");
 		Object key = targetKey == null ? UNKNOWN_TARGET_KEY : targetKey;
-		long now = clock.nowMillis();
-		@Nullable State previous = states.get(key);
-		EventKind kind;
-
-		if (previous == null) {
-			kind = EventKind.FIRST;
-		} else if (previous.reason() != reason) {
-			kind = reason == FlywheelDiagnosticReason.RENDERED
-				&& previous.reason() != FlywheelDiagnosticReason.RENDERED
-				? EventKind.RECOVERY : EventKind.REASON_TRANSITION;
-		} else if (!previous.admitted()) {
-			kind = EventKind.FIRST;
-		} else if (now - previous.lastEmissionMillis() >= HEARTBEAT_MILLIS) {
-			kind = EventKind.HEARTBEAT;
-		} else {
-			return false;
-		}
-
+		LoggingProfile profile = Diagnostics.profile(DiagnosticSide.CLIENT);
+		long now;
+		@Nullable EventKind kind;
 		boolean emit;
 		try {
-			emit = enabled.test(reason == FlywheelDiagnosticReason.RENDERED && failure == null ? Level.DEBUG : Level.WARN);
-		} catch (RuntimeException | LinkageError ignored) {
+			now = clock.nowMillis();
+		} catch (RuntimeException | LinkageError failureAtClock) {
+			Diagnostics.faults().report(DiagnosticSide.CLIENT, "create-flywheel", Stage.CHANNEL_CLOCK, profile, failureAtClock);
+			return false;
+		}
+		try {
+			emit = enabled.test(severity(reason, failure));
+		} catch (RuntimeException | LinkageError failureAtEnabled) {
+			Diagnostics.faults().report(DiagnosticSide.CLIENT, "create-flywheel", Stage.ENABLED, profile, failureAtEnabled);
 			emit = false;
 		}
-		states.put(key, new State(reason, emit ? now : previous == null ? now : previous.lastEmissionMillis(), emit));
-		evictIfNecessary();
+		synchronized (this) {
+			@Nullable State previous = states.get(key);
+			kind = null;
+			if (previous == null) kind = EventKind.FIRST;
+			else if (previous.reason() != reason) kind = reason == FlywheelDiagnosticReason.RENDERED
+				&& previous.reason() != FlywheelDiagnosticReason.RENDERED ? EventKind.RECOVERY : EventKind.REASON_TRANSITION;
+			else if (!previous.admitted()) kind = EventKind.FIRST;
+			else if (now - previous.lastEmissionMillis() >= HEARTBEAT_MILLIS) kind = EventKind.HEARTBEAT;
+			if (kind == null) return false;
+			states.put(key, new State(reason, emit ? now : previous == null ? now : previous.lastEmissionMillis(), emit));
+			evictIfNecessary();
+		}
 		if (!emit) {
 			return false;
 		}
 		try {
-			Event event = new Event(target.get(), reason, kind, now,
-				details == null ? "" : details.get(), failure);
+			Event event = new Event(target, reason, kind, now, details, failure, profile);
 			eventSink.accept(event);
-		} catch (RuntimeException | LinkageError ignored) {
+		} catch (RuntimeException | LinkageError sinkFailure) {
 			// An admitted sink failure stays consumed and never recurses.
+			Diagnostics.faults().report(DiagnosticSide.CLIENT, "create-flywheel", Stage.SINK, profile, sinkFailure);
 		}
 		return true;
 	}
@@ -187,17 +224,33 @@ public final class FlywheelDiagnostics {
 		return states.size();
 	}
 
-	private static void logGlobally(Event event) {
+	private static void logGlobally(DiagnosticLogger diagnostics, Event event) {
 		Supplier<String> message = () -> "create/flywheel silhouette diagnostic: kind=" + event.kind()
 			+ "; reason=" + event.reason().diagnosticId()
 			+ "; target=" + event.target()
 			+ "; details=" + event.details();
 
-		Level level = event.reason() == FlywheelDiagnosticReason.RENDERED && event.failure() == null ? Level.DEBUG : Level.WARN;
+		Level level = severity(event.reason(), event.failure());
 		if (event.failure() == null) {
-			Diagnostics.domainApprovedEvent(level, "create-flywheel", event.reason().diagnosticId(), event.kind().name(), message);
+			selection(diagnostics, level).event(level, "create-flywheel", "render-outcome", message);
 		} else {
-			Diagnostics.domainApprovedFailure(level, "create-flywheel", event.reason().diagnosticId(), message, event.failure());
+			selection(diagnostics, level).failure(level, "create-flywheel", "render-failure", message, event.failure());
 		}
+	}
+
+	/** The terminal and domain admission must use the same severity/profile classification. */
+	public static Level severity(FlywheelDiagnosticReason reason, @Nullable Throwable failure) {
+		if (reason == FlywheelDiagnosticReason.MASK_EMISSION_FAILED
+			|| reason == FlywheelDiagnosticReason.MASK_PARTIAL_EMISSION) return Level.ERROR;
+		if (failure != null) return Level.WARN;
+		return switch (reason) {
+			case RENDERED, ADAPTER_NOT_REGISTERED, MODE_OR_POLICY, CONTEXT_UNAVAILABLE,
+				MANAGER_NULL, VISUAL_NULL, NO_INSTANCES, UNSUPPORTED_TYPE -> Level.DEBUG;
+			default -> Level.WARN;
+		};
+	}
+
+	private static DiagnosticLogger selection(DiagnosticLogger logger, Level level) {
+		return level == Level.DEBUG ? logger.atDebug() : logger.atNormal();
 	}
 }

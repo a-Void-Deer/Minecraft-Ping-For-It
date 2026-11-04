@@ -42,7 +42,7 @@ class InventoryCaptureDiagnosticsTest {
 		}
 	}
 
-	@Test void reasonGateAdvancesWhileProfileDisabledWithoutFormattingFailure() throws ReflectiveOperationException {
+	@Test void belowMinimumProfileDoesNotConsumeReasonGateAndFirstDeepAttemptStillReports() throws ReflectiveOperationException {
 		var field = InventoryCaptureDiagnostics.class.getDeclaredField("LAST_LOGGED"); field.setAccessible(true);
 		var gate = (java.util.concurrent.atomic.AtomicLongArray) field.get(null);
 		long[] previous = new long[gate.length()];
@@ -51,11 +51,31 @@ class InventoryCaptureDiagnosticsTest {
 		try (var logs = new InventoryDiagnosticsTestCapture()) {
 			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
 				nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
-			InventoryCaptureDiagnostics.boundExceeded(input, () -> { throw new AssertionError("disabled detail"); });
-			assertTrue(gate.get(0) != 0);
+			InventoryCaptureDiagnostics.boundExceeded(input, () -> { throw new AssertionError("below-minimum detail"); });
+			assertEquals(0L, gate.get(0), "a below-minimum diagnostic must not consume the domain gate");
+			assertTrue(logs.events().isEmpty());
 			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
 				nx.pingwheel.common.diagnostics.LoggingProfile.DEEP);
-			InventoryCaptureDiagnostics.boundExceeded(input, "suppressed");
+			InventoryCaptureDiagnostics.boundExceeded(input, "first-eligible");
+			assertTrue(gate.get(0) != 0);
+			assertEquals(1, logs.events().size());
+			assertTrue(logs.messages().contains("detail=first-eligible"));
+			InventoryCaptureDiagnostics.boundExceeded(input, "repeat");
+			assertEquals(1, logs.events().size(), "the existing reason interval still suppresses a same-window repeat");
+		} finally { for (int index = 0; index < gate.length(); index++) gate.set(index, previous[index]); }
+	}
+
+	@Test void backendDisabledAtEligibleProfileStillAdvancesReasonGateWithoutFormatting() throws ReflectiveOperationException {
+		var field = InventoryCaptureDiagnostics.class.getDeclaredField("LAST_LOGGED"); field.setAccessible(true);
+		var gate = (java.util.concurrent.atomic.AtomicLongArray) field.get(null);
+		long[] previous = new long[gate.length()];
+		for (int index = 0; index < gate.length(); index++) previous[index] = gate.getAndSet(index, 0);
+		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 4, 5, 6, "private:block"), new UUID(51, 5), BlockFace.NORTH);
+		try (var logs = new InventoryDiagnosticsTestCapture(Level.OFF)) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.DEEP);
+			InventoryCaptureDiagnostics.boundExceeded(input, () -> { throw new AssertionError("backend-disabled detail"); });
+			assertTrue(gate.get(0) != 0, "the established backend-disabled reason semantics advance the domain gate");
 			assertTrue(logs.events().isEmpty());
 		} finally { for (int index = 0; index < gate.length(); index++) gate.set(index, previous[index]); }
 	}

@@ -2,9 +2,12 @@ package nx.pingwheel.common.testing;
 
 import java.util.ArrayList;
 import java.util.List;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
 import nx.pingwheel.common.diagnostics.Diagnostics;
-import nx.pingwheel.common.diagnostics.RateLimitedDiagnosticsTestScope;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
+import nx.pingwheel.common.presentation.PresentationDiagnosticScope;
 import org.apache.logging.log4j.Level;
+import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LogEvent;
 import org.apache.logging.log4j.core.Logger;
 import org.apache.logging.log4j.core.LoggerContext;
@@ -16,26 +19,33 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
-/** Captures the public diagnostics backend with isolated admission state. */
+/**
+ * Captures explicit-side diagnostics through the shared test backend and restores the client profile and
+ * owned explicit channel state. Callers choose NORMAL, DEEP, or DEBUG
+ * explicitly so a disclosure test cannot inherit another test's profile.
+ */
 @NotNullByDefault
 public final class DiagnosticLogCapture implements AutoCloseable {
 
-	private final Logger logger = (Logger) Diagnostics.logger();
+	private final Logger logger = (Logger) LogManager.getLogger("pingforit");
 	private final LoggerContext context = logger.getContext();
 	private final Configuration configuration = context.getConfiguration();
 	private final @Nullable LoggerConfig previous = configuration.getLoggers().get(logger.getName());
 	private final List<LogEvent> events = new ArrayList<>();
-	private final RateLimitedDiagnosticsTestScope diagnostics;
+	private final PresentationDiagnosticScope diagnostics;
 	private final AbstractAppender appender = new RecordingAppender();
 
-	public DiagnosticLogCapture() {
+	public DiagnosticLogCapture() { this(LoggingProfile.NORMAL); }
+
+	public DiagnosticLogCapture(LoggingProfile profile) {
 		appender.start();
 		LoggerConfig capture = new LoggerConfig(logger.getName(), Level.ALL, false);
 		capture.addAppender(appender, Level.ALL, null);
 		configuration.removeLogger(logger.getName());
 		configuration.addLogger(logger.getName(), capture);
 		context.updateLoggers();
-		diagnostics = RateLimitedDiagnosticsTestScope.install();
+		diagnostics = PresentationDiagnosticScope.install();
+		Diagnostics.setProfile(DiagnosticSide.CLIENT, profile);
 	}
 
 	public @Unmodifiable List<LogEvent> events() { return List.copyOf(events); }

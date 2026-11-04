@@ -60,7 +60,7 @@ final class SableClientCompanionAccess {
 	}
 
 	static SableClientCompanionAccess create() throws ReflectiveOperationException {
-		return create(SableDiagnostics.global());
+		return create(SableDiagnostics.global(nx.pingwheel.common.diagnostics.Diagnostics.client()));
 	}
 
 	static SableClientCompanionAccess create(SableDiagnostics diagnostics)
@@ -353,7 +353,7 @@ final class SableClientCompanionAccess {
 			"world_hit_source", "logicalPose",
 			"block_registry_id", best.registryId(),
 			"block_entity", best.hasBlockEntity(),
-			"provider_locator", best.locator().encode(),
+			"provider_locator", SableDiagnostics.lazy(() -> best.locator().encode()),
 			"ray_projection", best.rayPoint().projection(),
 			"ray_perpendicular_distance_squared", best.rayPoint().perpendicularDistanceSquared());
 
@@ -447,7 +447,7 @@ final class SableClientCompanionAccess {
 					"target", target, "position", pos);
 				return false;
 			}
-		}));
+		}, nx.pingwheel.common.diagnostics.Diagnostics.client()));
 	}
 
 	private boolean contentMember(ClientLevel parent, UUID id, BlockPos pos) throws ReflectiveOperationException {

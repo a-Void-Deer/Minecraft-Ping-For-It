@@ -53,16 +53,15 @@ public final class WorldAwareBlockModelOutlineAdapterRegistry {
 		}
 
 		synchronized (lock) {
-			if (registrations.containsKey(id)) {
-				OutlineDiagnostics.rejected("world-aware-model-register", id, "duplicate-id", null);
-				return Registration.rejected();
+			if (!registrations.containsKey(id)) {
+				Registration registration = new Registration(this, id, adapter);
+				registrations.put(id, registration);
+				publishSnapshot();
+				return registration;
 			}
-
-			Registration registration = new Registration(this, id, adapter);
-			registrations.put(id, registration);
-			publishSnapshot();
-			return registration;
 		}
+		OutlineDiagnostics.rejected("world-aware-model-register", id, "duplicate-id", null);
+		return Registration.rejected();
 	}
 
 	/** Returns the immutable registration-order snapshot. */

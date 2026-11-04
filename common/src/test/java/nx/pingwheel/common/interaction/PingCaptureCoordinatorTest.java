@@ -13,6 +13,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import nx.pingwheel.common.domain.ResolvedTarget;
 import nx.pingwheel.common.domain.BlockFace;
@@ -24,11 +26,17 @@ import nx.pingwheel.common.interaction.cancel.WorldVector;
 import nx.pingwheel.common.math.LocalGeometryKind;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
+import nx.pingwheel.common.util.SafeExceptionReport;
+import nx.pingwheel.common.testing.DiagnosticLogCapture;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertSame;
 
 class PingCaptureCoordinatorTest {
 
@@ -181,6 +189,61 @@ class PingCaptureCoordinatorTest {
 		assertFalse(joined.contains("boom"), "exception message must not be logged");
 		assertFalse(joined.contains(entityUuid.toString()), "UUID must not be logged");
 		assertFalse(joined.contains("minecraft:item"), "entity type id must not be logged");
+	}
+
+	@Test
+	void productionCaptureFailureKeepsOriginalThrowableAndAppliesProfileDisclosure() {
+		LoggingProfile previous = Diagnostics.profile(DiagnosticSide.CLIENT);
+		try (DiagnosticLogCapture capture = new DiagnosticLogCapture(LoggingProfile.NORMAL)) {
+			AtomicInteger accessorReads = new AtomicInteger();
+			RuntimeException failure = new RuntimeException() {
+				@Override public String getMessage() { accessorReads.incrementAndGet(); return "deep-original-secret"; }
+				@Override public StackTraceElement @Unmodifiable [] getStackTrace() {
+					accessorReads.incrementAndGet();
+					return new StackTraceElement @Unmodifiable [] {new StackTraceElement("secret.Frame", "run", "Secret.java", 1)};
+				}
+				@Override public synchronized @Nullable Throwable getCause() { accessorReads.incrementAndGet(); return null; }
+				@Override public String toString() { throw new AssertionError("Throwable string conversion is forbidden"); }
+			};
+			PingCaptureCoordinator coordinator = new PingCaptureCoordinator((target, context) -> { throw failure; },
+				new ActiveInteraction(), PingCaptureLogger.global());
+			InteractionToken token = coordinator.begin();
+			TargetSnapshot snapshot = TargetSnapshotFactory.entity(OVERWORLD, UUID.randomUUID(), "minecraft:item");
+			assertTrue(coordinator.complete(token, snapshot).isEmpty());
+			assertEquals(0, accessorReads.get());
+			String normal = capture.events().getLast().getMessage().getFormattedMessage();
+			assertTrue(normal.contains("failure=type-"));
+			assertFalse(normal.contains("deep-original-secret"));
+			assertFalse(normal.contains("Secret.java"));
+
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEEP);
+			assertTrue(coordinator.complete(token, snapshot).isEmpty());
+			String deep = capture.events().getLast().getMessage().getFormattedMessage();
+			assertTrue(deep.contains("deep-original-secret"));
+			assertTrue(deep.contains("Secret.java"));
+			assertTrue(accessorReads.get() > 0);
+			assertTrue(deep.length() <= SafeExceptionReport.MAX_CHARACTERS + Diagnostics.PREFIX.length());
+		} finally {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, previous);
+		}
+	}
+
+	@Test
+	void coordinatorForwardsTheOriginalResolverFailureExactlyOnce() {
+		RuntimeException original = new IllegalStateException("original resolver cause");
+		List<Throwable> failures = new ArrayList<>();
+		PingCaptureLogger logger = new PingCaptureLogger() {
+			@Override public void debug(String message, @Nullable Object @Unmodifiable ... args) {}
+			@Override public void failure(String operation, String reason, Throwable originalFailure,
+				String message, @Nullable Object @Unmodifiable ... args) {
+				failures.add(originalFailure);
+			}
+		};
+		PingCaptureCoordinator coordinator = new PingCaptureCoordinator((target, context) -> { throw original; },
+			new ActiveInteraction(), logger);
+		assertTrue(coordinator.complete(coordinator.begin(), TargetSnapshotFactory.location(OVERWORLD, 1, 2, 3)).isEmpty());
+		assertEquals(1, failures.size());
+		assertSame(original, failures.getFirst());
 	}
 
 	@Test

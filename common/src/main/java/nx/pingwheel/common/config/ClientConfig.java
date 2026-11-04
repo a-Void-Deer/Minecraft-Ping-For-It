@@ -8,9 +8,12 @@ import lombok.ToString;
 import nx.pingwheel.common.client.outline.BlockDisplayPolicy;
 import nx.pingwheel.common.client.outline.BlockDisplayWhitelist;
 import nx.pingwheel.common.core.GameContext;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.diagnostics.LoggingProfile;
+import nx.pingwheel.common.diagnostics.SafeDiagnosticValue;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
+import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
@@ -19,7 +22,6 @@ import java.util.List;
 import java.util.Map;
 
 import static nx.pingwheel.common.CommonClient.Game;
-import static nx.pingwheel.common.Global.LOGGER;
 
 @Getter
 @Setter
@@ -247,8 +249,10 @@ public class ClientConfig implements IConfig {
 
 	@Override
 	public void validate() {
-		validate((key, suppliedValue, effectiveValue) -> LOGGER.warn(
-			formatClampWarning(key, suppliedValue, effectiveValue)));
+		validate((key, suppliedValue, effectiveValue) -> Diagnostics.client().atNormal().site("config/client-clamp")
+			.event(Level.WARN, "key={} supplied={} effective={}",
+				SafeDiagnosticValue.code(key), SafeDiagnosticValue.number(suppliedValue),
+				SafeDiagnosticValue.number(effectiveValue)));
 	}
 
 	static String formatClampWarning(String key, int suppliedValue, int effectiveValue) {
@@ -371,8 +375,8 @@ public class ClientConfig implements IConfig {
 		if (longPressCompatibilityMode) doubleClickDangerAngleDegrees = 0.0;
 		if (longPressCompatibilityMode && spatialSelector != null) spatialSelector.setGestureSkipHoldEnabled(false);
 		blockDisplayPolicy = BlockDisplayPolicy.compile(blockDisplayWhitelist, blockShapeBlacklist);
-		LOGGER.debug(
-			"Client wheel settings updated: wheelHoldMillis=%d, longPressCompatibilityMode=%s, longPressCompatibilitySliceMillis=%d, cancelHalfConeAngleDegrees=%d, doubleClickDangerWindowMs=%d, doubleClickDangerAngleDegrees=%s, wheelOpacity=%d, wheelTargetOpacity=%d, wheelFontSize=%d, wheelTargetFontSize=%d, configurationNoticeSize=%d, spatialSelector=%s"
+		Diagnostics.client().atDebug().site("config/client-update").debug(
+			() -> "Client wheel settings updated: wheelHoldMillis=%d, longPressCompatibilityMode=%s, longPressCompatibilitySliceMillis=%d, cancelHalfConeAngleDegrees=%d, doubleClickDangerWindowMs=%d, doubleClickDangerAngleDegrees=%s, wheelOpacity=%d, wheelTargetOpacity=%d, wheelFontSize=%d, wheelTargetFontSize=%d, configurationNoticeSize=%d, spatialSelector=%s"
 				.formatted(
 					wheelHoldMillis,
 					longPressCompatibilityMode,

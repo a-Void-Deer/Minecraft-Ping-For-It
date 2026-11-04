@@ -87,17 +87,16 @@ public final class EntityOutlineSourceRegistry {
 		}
 
 		synchronized (lock) {
-			if (registrations.containsKey(id)) {
-				rejected("duplicate-id:" + id, "entity outline source registration ignored; id="
-					+ id + "; category=duplicate-id-first-registration-kept", null);
-				return Registration.rejected();
+			if (!registrations.containsKey(id)) {
+				Registration registration = new Registration(this, id, source);
+				registrations.put(id, registration);
+				publishSnapshot();
+				return registration;
 			}
-
-			Registration registration = new Registration(this, id, source);
-			registrations.put(id, registration);
-			publishSnapshot();
-			return registration;
 		}
+		rejected("duplicate-id:" + id, "entity outline source registration ignored; id="
+			+ id + "; category=duplicate-id-first-registration-kept", null);
+		return Registration.rejected();
 	}
 
 	/**
@@ -165,10 +164,11 @@ public final class EntityOutlineSourceRegistry {
 	private void rejected(String category, String message, @Nullable Throwable failure) {
 		if (warningSink == null) {
 			if (failure == null) {
-				Diagnostics.event(Level.WARN,
-					"entity-outline-register", category, "registration-rejected", () -> message);
+				Diagnostics.client().atNormal().event(Level.WARN,
+					"entity-outline-register", "registration-rejected", () -> message);
 			} else {
-				Diagnostics.warn("entity-outline-register", category, () -> message, failure);
+				Diagnostics.client().atNormal().failure(Level.WARN, "entity-outline-register",
+					"registration-rejected", () -> message, failure);
 			}
 		} else {
 			OutlineDiagnostics.deliver(text -> warningSink.warn(text, null), () -> message, failure);
@@ -181,6 +181,9 @@ public final class EntityOutlineSourceRegistry {
 				+ "; id=" + entity.getId()
 				+ "; uuid=" + entity.getUUID();
 		} catch (Exception | LinkageError | AssertionError failure) {
+			Diagnostics.faults().report(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT,
+				"entity-outline/descriptor", nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Stage.CONTEXT,
+				Diagnostics.profile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT), failure);
 			return "class=" + entity.getClass().getName() + "; <descriptor-unavailable>";
 		}
 	}

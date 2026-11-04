@@ -3,6 +3,7 @@ package nx.pingwheel.common.integration;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProviderRegistry;
 import nx.pingwheel.common.integration.sable.SableDiagnostics;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 
 import net.minecraft.server.MinecraftServer;
 
@@ -18,7 +19,7 @@ public final class ExternalBlockServerProviders {
 
 	private static final ExternalBlockServerProviderRegistry REGISTRY =
 		new ExternalBlockServerProviderRegistry();
-	private static final SableDiagnostics DIAGNOSTICS = SableDiagnostics.global();
+	private static final SableDiagnostics DIAGNOSTICS = SableDiagnostics.global(Diagnostics.server());
 
 	private ExternalBlockServerProviders() {
 	}

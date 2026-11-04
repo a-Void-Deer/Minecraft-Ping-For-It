@@ -8,6 +8,8 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
+import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -31,6 +33,8 @@ import org.jetbrains.annotations.Nullable;
  * and can be reset via {@link #resetCache()}.</p>
  */
 public final class LevelRendererOutlineRequest {
+	private static final DiagnosticChannel REQUEST_FAILURES = DiagnosticChannel.interval(
+		"entity-outline/effect-request", java.time.Duration.ofSeconds(10));
 
 	public static final String METHOD_NAME = "requestOutlineEffect";
 	private static final int MAX_CACHE_ENTRIES = 64;
@@ -105,8 +109,8 @@ public final class LevelRendererOutlineRequest {
 			method.invoke(target);
 			return true;
 		} catch (Exception | LinkageError | AssertionError failure) {
-			Diagnostics.warn("entity-outline-effect-request", target.getClass().getName(),
-				() -> "entity outline effect request failed; method=" + method.getName()
+			Diagnostics.client().atNormal().rateLimited(REQUEST_FAILURES).failure(Level.WARN, "entity-outline-effect-request",
+				"outline-request-failed", () -> "entity outline effect request failed; method=" + method.getName()
 					+ "; target=" + target.getClass().getName(),
 				failure);
 			return false;

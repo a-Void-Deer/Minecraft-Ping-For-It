@@ -39,6 +39,7 @@ import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.config.EntityBlockRenderMode;
 import nx.pingwheel.common.integration.sable.client.SableClientProvider;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 
@@ -117,6 +118,10 @@ import org.jetbrains.annotations.Nullable;
  * mutated; optional-mod block entity classes are never referenced directly.
  */
 public final class VirtualBlockDisplayRenderer {
+	private static final DiagnosticChannel MODEL_CLAIM_FAILURES = DiagnosticChannel.interval(
+		"block-outline/model-claim", java.time.Duration.ofSeconds(10));
+	private static final DiagnosticChannel MODEL_ID_FAILURES = DiagnosticChannel.interval(
+		"block-outline/model-id", java.time.Duration.ofSeconds(10));
 	private enum FailureRoute {
 		BLOCK_ENTITY("block entity"),
 		ENTITY_BLOCK("entity-block"),
@@ -240,10 +245,9 @@ public final class VirtualBlockDisplayRenderer {
 		}
 
 		if (!frameFailures.isEmpty()) {
-			int attempts = frameFailures.values().stream().mapToInt(Integer::intValue).sum();
-			Diagnostics.domainApprovedEvent(Level.DEBUG, "block-outline-frame", "aggregate", "source-failures",
+			Diagnostics.client().atDebug().detail(Level.DEBUG,
 				() -> "block outline model pass: %d attempts failed across %d block types; voxel fallback applied"
-					.formatted(attempts, frameFailures.size()));
+					.formatted(frameFailures.values().stream().mapToInt(Integer::intValue).sum(), frameFailures.size()));
 		}
 	}
 
@@ -615,8 +619,8 @@ public final class VirtualBlockDisplayRenderer {
 			try {
 				claims = adapter.handles(context);
 			} catch (Exception | LinkageError | AssertionError failure) {
-				Diagnostics.warn("world-aware-model-handles", adapter.getClass().getName(),
-					() -> "adapter=" + adapterId(adapter) + "; context=" + context, failure);
+				Diagnostics.client().atNormal().rateLimited(MODEL_CLAIM_FAILURES).failure(Level.WARN, "world-aware-model-handles",
+					"adapter-probe-failed", () -> "adapter=" + adapterId(adapter) + "; context=" + context, failure);
 				continue;
 			}
 
@@ -865,9 +869,9 @@ public final class VirtualBlockDisplayRenderer {
 			cachedLevel = level;
 			return cachedDisplay;
 		} catch (Exception | LinkageError | AssertionError throwable) {
-			if (!displayCreationWarned && OutlineDiagnostics.enabled()) {
+			if (!displayCreationWarned && Diagnostics.client().atNormal().isEnabled(Level.ERROR)) {
 				displayCreationWarned = true;
-				Diagnostics.domainApprovedFailure(Level.WARN, "virtual-display-create", Display.BlockDisplay.class.getName(),
+				Diagnostics.client().atNormal().failure(Level.ERROR, "virtual-display-create", "display-creation-fallback",
 					() -> "unable to create virtual block display; stage=display-creation; class="
 						+ Display.BlockDisplay.class.getName(),
 					throwable);
@@ -911,8 +915,8 @@ public final class VirtualBlockDisplayRenderer {
 	) {
 		frameFailures.merge(registryId, 1, Integer::sum);
 
-		if (OutlineDiagnostics.enabled() && warnOnceRegistryIds.add(registryId)) {
-			Diagnostics.domainApprovedFailure(Level.WARN, "block-outline-model", registryId,
+		if (Diagnostics.client().atNormal().isEnabled(Level.ERROR) && warnOnceRegistryIds.add(registryId)) {
+			Diagnostics.client().atNormal().failure(Level.ERROR, "block-outline-model", "voxel-fallback",
 				() -> failureMessage(
 					registryId, position, blockState, targetKey, sourceTarget,
 					route, stage, throwable),
@@ -990,7 +994,8 @@ public final class VirtualBlockDisplayRenderer {
 			@Nullable String id = EntityBlockGeometrySourceIds.validate(adapter.id());
 			return id == null ? EntityBlockGeometrySourceIds.INVALID : id;
 		} catch (Exception | LinkageError | AssertionError failure) {
-			Diagnostics.warn("world-aware-model-id", adapter.getClass().getName(), () -> "adapter id lookup failed", failure);
+			Diagnostics.client().atNormal().rateLimited(MODEL_ID_FAILURES).failure(Level.WARN, "world-aware-model-id", "adapter-id-unavailable",
+				() -> "adapter id lookup failed", failure);
 			return EntityBlockGeometrySourceIds.UNAVAILABLE;
 		}
 	}

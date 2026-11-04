@@ -49,7 +49,7 @@ public final class DiagnosticLogger {
 
 	/** A hint only: never touches a channel or consumes an admission. */
 	public boolean isEnabled(Level severity) {
-		return attempt(severity, false, true, null, null, null, null, null);
+		return attempt(severity, false, true, null, null, null, null, null, null);
 	}
 
 	public void debug(String template, SafeDiagnosticValue @Unmodifiable ... values) { event(Level.DEBUG, template, values); }
@@ -79,11 +79,11 @@ public final class DiagnosticLogger {
 
 	/** Template must be caller-controlled prose, not provider/request text. Only explicit safe scalars interpolate. */
 	public void event(Level severity, String template, SafeDiagnosticValue @Unmodifiable ... values) {
-		attempt(severity, false, false, template, values, null, null, null);
+		attempt(severity, false, false, template, values, null, null, null, null);
 	}
 
 	public void detail(Level severity, Supplier<@Nullable String> detail) {
-		attempt(severity, true, false, null, null, null, Objects.requireNonNull(detail, "detail"), null);
+		attempt(severity, true, false, null, null, null, Objects.requireNonNull(detail, "detail"), null, null);
 	}
 
 	/**
@@ -94,18 +94,36 @@ public final class DiagnosticLogger {
 	public void failure(Level severity, String stableSite, String handling,
 		@Nullable Supplier<@Nullable String> detail, @Nullable Throwable failure) {
 		DiagnosticLogger selected = site(stableSite);
-		selected.attempt(severity, false, false, null, null, DiagnosticText.controlled(handling), detail, failure);
+		selected.attempt(severity, false, false, null, null, DiagnosticText.controlled(handling), detail, failure, null);
 	}
 
 	/** Scalar-only counterpart; raw provider reasons belong only in the lazy detail. */
 	public void event(Level severity, String stableSite, String safeReason, @Nullable Supplier<@Nullable String> detail) {
 		DiagnosticLogger selected = site(stableSite);
-		selected.attempt(severity, false, false, null, null, DiagnosticText.controlled(safeReason), detail, null);
+		selected.attempt(severity, false, false, null, null, DiagnosticText.controlled(safeReason), detail, null, null);
 	}
+
+	/**
+	 * Runs an existing domain gate after profile eligibility but before backend
+	 * admission, under the same report's policy snapshot. A null descriptor denies
+	 * the report. Backend suppression/failure does not refund the domain gate.
+	 * The callback performs domain admission only and returns lazy diagnostic
+	 * detail; neither callback nor descriptor is retained or replayed. This route
+	 * cannot be combined with a channel or a second admission policy.
+	 */
+	public void domainBeforeBackend(Level severity, String stableSite, Supplier<@Nullable DomainReport> admission) {
+		site(stableSite).attempt(severity, false, false, null, null, null, null, null,
+			Objects.requireNonNull(admission, "admission"));
+	}
+
+	/** Attempt-local result of an existing domain gate, never a public admission permit. */
+	@NotNullByDefault
+	public record DomainReport(String handling, @Nullable Throwable failure, @Nullable Supplier<@Nullable String> detail) {}
 
 	private boolean attempt(Level severity, boolean detailOnly, boolean hint, @Nullable String template,
 		@Nullable SafeDiagnosticValue @Nullable @Unmodifiable [] values, @Nullable String handling,
-		@Nullable Supplier<@Nullable String> detail, @Nullable Throwable failure) {
+		@Nullable Supplier<@Nullable String> detail, @Nullable Throwable failure,
+		@Nullable Supplier<@Nullable DomainReport> domainAdmission) {
 		@Nullable Attempt outer = REPORTING.get();
 		if (outer != null) {
 			// A clock/domain gate/backend callback can reenter while holding its
@@ -121,6 +139,16 @@ public final class DiagnosticLogger {
 		DiagnosticFaultReporter.Stage stage = DiagnosticFaultReporter.Stage.SETUP;
 		try {
 			if (!effective.includes(minimum) || (detailOnly && effective == LoggingProfile.NORMAL)) return false;
+			if (domainAdmission != null) {
+				stage = DiagnosticFaultReporter.Stage.ADMISSION;
+				if (channel != null) throw new IllegalStateException("Domain-before-backend reports cannot have a channel");
+				@Nullable DomainReport report = domainAdmission.get();
+				if (report == null) return false;
+				handling = DiagnosticText.controlled(report.handling());
+				failure = report.failure();
+				detail = report.detail();
+			}
+			stage = DiagnosticFaultReporter.Stage.SETUP;
 			DiagnosticBackend backend = Diagnostics.backend();
 			backend.prepare(side);
 			stage = DiagnosticFaultReporter.Stage.ENABLED;

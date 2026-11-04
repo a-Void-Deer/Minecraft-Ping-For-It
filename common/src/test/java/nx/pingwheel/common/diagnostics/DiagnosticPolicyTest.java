@@ -161,6 +161,210 @@ class DiagnosticPolicyTest {
 	}
 
 	@Test
+	void domainBeforeBackendKeepsDeepSnapshotAcrossDowngradeAndConsumesDisabledGateWithoutDetail() throws Exception {
+		for (boolean backendEnabled : List.of(true, false)) {
+			try (Fixture fixture = new Fixture()) {
+				Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEEP);
+				fixture.sink.enabled = backendEnabled;
+				AtomicInteger admissions = new AtomicInteger();
+				AtomicInteger details = new AtomicInteger();
+				CountDownLatch consumed = new CountDownLatch(1);
+				CountDownLatch continueReport = new CountDownLatch(1);
+				DiagnosticLogger logger = Diagnostics.client().atDetailed();
+				try (var executor = Executors.newFixedThreadPool(2)) {
+					var terminal = executor.submit(() -> logger.domainBeforeBackend(Level.WARN, "domain-downgrade", () -> {
+						admissions.incrementAndGet();
+						consumed.countDown();
+						await(continueReport);
+						return new DiagnosticLogger.DomainReport("fallback", new IllegalStateException("original-secret"),
+							() -> { details.incrementAndGet(); return "deep-secret"; });
+					}));
+					try {
+						assertTrue(consumed.await(5, TimeUnit.SECONDS));
+						executor.submit(() -> Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.NORMAL)).get(5, TimeUnit.SECONDS);
+					} finally {
+						continueReport.countDown();
+					}
+					terminal.get(5, TimeUnit.SECONDS);
+				}
+				assertEquals(1, admissions.get());
+				assertEquals(1, fixture.sink.preparations.get());
+				assertEquals(1, fixture.sink.enabledChecks.get());
+				assertEquals(backendEnabled ? 1 : 0, details.get());
+				assertEquals(backendEnabled ? 1 : 0, fixture.sink.events.size());
+				if (backendEnabled) {
+					assertTrue(fixture.sink.events.getFirst().text.contains("deep-secret"));
+					assertTrue(fixture.sink.events.getFirst().text.contains("original-secret"));
+				}
+				logger.domainBeforeBackend(Level.WARN, "domain-downgrade", () -> {
+					throw new AssertionError("Next NORMAL snapshot must reject a DEEP minimum before the domain gate");
+				});
+				assertEquals(1, admissions.get());
+				assertEquals(1, fixture.sink.preparations.get());
+				assertEquals(1, fixture.sink.enabledChecks.get());
+			}
+		}
+	}
+
+	@Test
+	void domainBeforeBackendKeepsNormalDisclosureAcrossUpgradeAndOnlyNextReportReadsHighDetail() throws Exception {
+		try (Fixture fixture = new Fixture()) {
+			AtomicInteger admissions = new AtomicInteger();
+			AtomicInteger detailReads = new AtomicInteger();
+			AtomicInteger throwableReads = new AtomicInteger();
+			Throwable failure = hostile(throwableReads);
+			CountDownLatch consumed = new CountDownLatch(1);
+			CountDownLatch continueReport = new CountDownLatch(1);
+			Supplier<String> detail = () -> { detailReads.incrementAndGet(); return "upgraded-secret"; };
+			try (var executor = Executors.newFixedThreadPool(2)) {
+				var terminal = executor.submit(() -> Diagnostics.client().atNormal().domainBeforeBackend(Level.ERROR, "domain-upgrade", () -> {
+					admissions.incrementAndGet();
+					consumed.countDown();
+					await(continueReport);
+					return new DiagnosticLogger.DomainReport("fallback", failure, detail);
+				}));
+				try {
+					assertTrue(consumed.await(5, TimeUnit.SECONDS));
+					executor.submit(() -> Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEBUG)).get(5, TimeUnit.SECONDS);
+				} finally {
+					continueReport.countDown();
+				}
+				terminal.get(5, TimeUnit.SECONDS);
+			}
+			assertEquals(1, admissions.get());
+			assertEquals(0, throwableReads.get());
+			assertEquals(0, detailReads.get());
+			assertTrue(fixture.sink.events.getFirst().text.contains("site=domain-upgrade handling=fallback"));
+			assertFalse(fixture.sink.events.getFirst().text.contains("secret"));
+			Diagnostics.client().atNormal().domainBeforeBackend(Level.ERROR, "domain-upgrade", () -> {
+				admissions.incrementAndGet();
+				return new DiagnosticLogger.DomainReport("fallback", failure, detail);
+			});
+			assertEquals(2, admissions.get());
+			assertEquals(1, detailReads.get());
+			assertTrue(throwableReads.get() > 0);
+			assertEquals(2, fixture.sink.events.size());
+			assertTrue(fixture.sink.events.getLast().text.contains("upgraded-secret"));
+			assertTrue(fixture.sink.events.getLast().text.contains("original-secret"));
+		}
+	}
+
+	@Test
+	void domainBeforeBackendShortCircuitsMinimumAndNullWithoutTouchingBackend() {
+		try (Fixture fixture = new Fixture()) {
+			AtomicInteger admissions = new AtomicInteger();
+			Diagnostics.client().atDetailed().domainBeforeBackend(Level.ERROR, "domain-minimum", () -> {
+				throw new AssertionError("Below minimum cannot consume domain admission");
+			});
+			Diagnostics.client().atNormal().domainBeforeBackend(Level.ERROR, "domain-denied", () -> {
+				admissions.incrementAndGet();
+				return null;
+			});
+			assertEquals(1, admissions.get());
+			assertEquals(0, fixture.sink.preparations.get());
+			assertEquals(0, fixture.sink.enabledChecks.get());
+			assertTrue(fixture.sink.events.isEmpty());
+			assertTrue(fixture.faults.observations().isEmpty());
+		}
+	}
+
+	@Test
+	void domainBeforeBackendCallbackAndHandlingFailuresAreAdmissionFaultsWithoutRollbackOrBackendCalls() {
+		try (Fixture fixture = new Fixture()) {
+			AtomicInteger domainState = new AtomicInteger();
+			for (boolean linkage : List.of(false, true)) {
+				Diagnostics.client().domainBeforeBackend(Level.WARN, linkage ? "domain-linkage" : "domain-runtime", () -> {
+					domainState.incrementAndGet();
+					if (linkage) throw new NoClassDefFoundError("gate failed");
+					throw new IllegalStateException("gate failed");
+				});
+			}
+			Diagnostics.client().domainBeforeBackend(Level.WARN, "domain-handling", () -> {
+				domainState.incrementAndGet();
+				return new DiagnosticLogger.DomainReport("raw provider reason", new RuntimeException(),
+					() -> { throw new AssertionError("Invalid handling never formats detail"); });
+			});
+			assertThrows(IllegalArgumentException.class, () -> Diagnostics.client().domainBeforeBackend(Level.WARN, "raw dynamic site", () -> {
+				throw new AssertionError("Site must be controlled before admission");
+			}));
+			assertEquals(3, domainState.get(), "Reporting failures do not refund or repeat a consumed domain transition");
+			assertEquals(0, fixture.sink.preparations.get());
+			assertEquals(0, fixture.sink.enabledChecks.get());
+			assertTrue(fixture.sink.events.isEmpty());
+			assertEquals(3, fixture.faults.observations().size());
+			assertTrue(fixture.faults.observations().stream().allMatch(value -> value.key().stage() == DiagnosticFaultReporter.Stage.ADMISSION));
+			Diagnostics.client().warn("guard-restored");
+			assertEquals(1, fixture.sink.events.size());
+		}
+	}
+
+	@Test
+	void domainBeforeBackendRejectsBothDomainAndIntervalChannelsBeforeAnyGateOrClock() {
+		try (Fixture fixture = new Fixture()) {
+			DiagnosticChannel domain = DiagnosticChannel.domain("second-domain", () -> {
+				throw new AssertionError("No second domain gate");
+			});
+			DiagnosticChannel interval = DiagnosticChannel.interval("second-clock", Duration.ofSeconds(10), () -> {
+				throw new AssertionError("No additional channel clock");
+			});
+			for (DiagnosticChannel channel : List.of(domain, interval)) {
+				Diagnostics.client().rateLimited(channel).domainBeforeBackend(Level.WARN, channel == domain ? "reject-domain" : "reject-interval", () -> {
+					throw new AssertionError("Cannot consume callback with an attached channel");
+				});
+			}
+			assertEquals(0, fixture.sink.preparations.get());
+			assertEquals(0, fixture.sink.enabledChecks.get());
+			assertTrue(fixture.sink.events.isEmpty());
+			assertEquals(2, fixture.faults.observations().size());
+			assertTrue(fixture.faults.observations().stream().allMatch(value -> value.key().stage() == DiagnosticFaultReporter.Stage.ADMISSION));
+		}
+	}
+
+	@Test
+	void domainBeforeBackendConsumesOneGateOnSetupFailureAndDoesNotReplayDescriptor() {
+		try (Fixture fixture = new Fixture()) {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEEP);
+			fixture.sink.throwAt = DiagnosticFaultReporter.Stage.SETUP;
+			AtomicInteger admissions = new AtomicInteger();
+			AtomicInteger details = new AtomicInteger();
+			Diagnostics.client().domainBeforeBackend(Level.WARN, "domain-setup", () -> {
+				admissions.incrementAndGet();
+				return new DiagnosticLogger.DomainReport("fallback", new RuntimeException("business"),
+					() -> { details.incrementAndGet(); return "unread-detail"; });
+			});
+			assertEquals(1, admissions.get());
+			assertEquals(0, details.get());
+			assertEquals(1, fixture.sink.preparations.get());
+			assertEquals(0, fixture.sink.enabledChecks.get());
+			assertEquals(DiagnosticFaultReporter.Stage.SETUP, fixture.faults.observations().getFirst().key().stage());
+			fixture.sink.throwAt = null;
+			Diagnostics.client().domainBeforeBackend(Level.WARN, "domain-setup", () -> null);
+			assertEquals(1, admissions.get());
+			assertEquals(0, details.get());
+			assertEquals(1, fixture.sink.preparations.get());
+			assertTrue(fixture.sink.events.isEmpty());
+		}
+	}
+
+	@Test
+	void domainBeforeBackendRetainsReentryGuardAcrossAdmissionCallback() {
+		try (Fixture fixture = new Fixture()) {
+			Diagnostics.client().domainBeforeBackend(Level.WARN, "domain-outer", () -> {
+				Diagnostics.client().domainBeforeBackend(Level.ERROR, "domain-nested", () -> {
+					throw new AssertionError("Reentrant callback must not execute");
+				});
+				return new DiagnosticLogger.DomainReport("fallback", null,
+					() -> { throw new AssertionError("NORMAL never reads detail"); });
+			});
+			assertEquals(1, fixture.sink.events.size());
+			assertEquals(1, fixture.sink.preparations.get());
+			assertEquals(1, fixture.sink.enabledChecks.get());
+			assertEquals(1, fixture.faults.observations().size());
+			assertEquals(DiagnosticFaultReporter.Stage.REENTRY, fixture.faults.observations().getFirst().key().stage());
+		}
+	}
+
+	@Test
 	void concurrentChannelDuplicatesAndClockWraparoundAdmitOnce() throws Exception {
 		try (Fixture fixture = new Fixture()) {
 			AtomicLong clock = new AtomicLong(Long.MAX_VALUE - 5);
@@ -327,6 +531,15 @@ class DiagnosticPolicyTest {
 		}
 	}
 
+	private static void await(CountDownLatch latch) {
+		try {
+			assertTrue(latch.await(5, TimeUnit.SECONDS));
+		} catch (InterruptedException interrupted) {
+			Thread.currentThread().interrupt();
+			throw new IllegalStateException(interrupted);
+		}
+	}
+
 	private static DiagnosticLogger select(DiagnosticLogger logger, LoggingProfile profile) {
 		return switch (profile) { case NORMAL -> logger.atNormal(); case DEEP -> logger.atDetailed(); case DEBUG -> logger.atDebug(); };
 	}
@@ -352,8 +565,14 @@ class DiagnosticPolicyTest {
 		private @Nullable Runnable onEnabled;
 		private @Nullable Runnable onLog;
 		private final List<Event> events = new ArrayList<>();
-		@Override public void prepare(DiagnosticSide side) { fail(DiagnosticFaultReporter.Stage.SETUP); }
+		private final AtomicInteger preparations = new AtomicInteger();
+		private final AtomicInteger enabledChecks = new AtomicInteger();
+		@Override public void prepare(DiagnosticSide side) {
+			preparations.incrementAndGet();
+			fail(DiagnosticFaultReporter.Stage.SETUP);
+		}
 		@Override public boolean isEnabled(DiagnosticSide side, Level severity) {
+			enabledChecks.incrementAndGet();
 			fail(DiagnosticFaultReporter.Stage.ENABLED);
 			if (onEnabled != null) onEnabled.run();
 			return enabled;

@@ -27,18 +27,36 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
 class InventoryMinecraftDiagnosticsTest {
-	@Test void unsupportedGateAdvancesAtNormalWithoutEmittingWhenDebugIsEnabledLater() throws ReflectiveOperationException {
+	@Test void belowMinimumProfileDoesNotConsumeUnsupportedGateAndFirstDebugAttemptStillReports() throws ReflectiveOperationException {
 		var field = InventorySnapshotDiagnostics.class.getDeclaredField("LAST_LOGGED"); field.setAccessible(true);
 		var gate = (java.util.concurrent.atomic.AtomicLongArray) field.get(null);
 		long previous = gate.getAndSet(0, 0);
 		try (var capture = new nx.pingwheel.common.presentation.PresentationDiagnosticCapture(Level.DEBUG)) {
 			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
 				nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
-			InventorySnapshotDiagnostics.unsupported(input("private:block"), "disabled");
-			assertTrue(gate.get(0) != 0);
+			InventorySnapshotDiagnostics.unsupported(input("private:block"), "below-minimum");
+			assertEquals(0L, gate.get(0), "a below-minimum diagnostic must not consume the logging-only once gate");
+			assertTrue(capture.events().isEmpty());
 			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
 				nx.pingwheel.common.diagnostics.LoggingProfile.DEBUG);
-			InventorySnapshotDiagnostics.unsupported(input("private:block"), "suppressed");
+			InventorySnapshotDiagnostics.unsupported(input("private:block"), "first-eligible");
+			assertTrue(gate.get(0) != 0);
+			assertEquals(1, capture.events().size());
+			assertTrue(capture.messages().getFirst().contains("detail=first-eligible"));
+			InventorySnapshotDiagnostics.unsupported(input("private:block"), "repeat");
+			assertEquals(1, capture.events().size(), "the existing interval still suppresses a same-window repeat");
+		} finally { gate.set(0, previous); }
+	}
+
+	@Test void backendDisabledAtEligibleProfileStillAdvancesUnsupportedGateWithoutFormatting() throws ReflectiveOperationException {
+		var field = InventorySnapshotDiagnostics.class.getDeclaredField("LAST_LOGGED"); field.setAccessible(true);
+		var gate = (java.util.concurrent.atomic.AtomicLongArray) field.get(null);
+		long previous = gate.getAndSet(0, 0);
+		try (var capture = new nx.pingwheel.common.presentation.PresentationDiagnosticCapture(Level.OFF)) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.DEBUG);
+			InventorySnapshotDiagnostics.unsupported(input("private:block"), "backend-disabled");
+			assertTrue(gate.get(0) != 0, "an eligible but backend-disabled report still owns the existing once gate");
 			assertTrue(capture.events().isEmpty());
 		} finally { gate.set(0, previous); }
 	}

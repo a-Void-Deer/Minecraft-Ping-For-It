@@ -59,7 +59,8 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	private static final String TRACKING_POINT_CLASS =
 		"dev.ryanhcode.sable.sublevel.tracking_points.TrackingPoint";
 
-	private final IntegrationLinkGuard linkGuard = new IntegrationLinkGuard(PROVIDER_ID);
+	private final IntegrationLinkGuard linkGuard = new IntegrationLinkGuard(PROVIDER_ID,
+		nx.pingwheel.common.diagnostics.Diagnostics.server());
 	private final SableDiagnostics diagnostics;
 	private final @Nullable ReflectiveApi api;
 	private @Nullable MembershipApi membershipApi;
@@ -73,7 +74,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	}
 
 	private SableExternalBlockServerProvider() {
-		this(SableDiagnostics.global());
+		this(SableDiagnostics.global(nx.pingwheel.common.diagnostics.Diagnostics.server()));
 	}
 
 	SableExternalBlockServerProvider(SableDiagnostics diagnostics) {
@@ -347,7 +348,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 						"materialization",
 						"reused-tracking-point-missing",
 						"stable_target_uuid", existingStableId.get(),
-						"provider_locator", available.locator().encode(),
+						"provider_locator", SableDiagnostics.lazy(() -> available.locator().encode()),
 						"candidate", candidate);
 					return new MaterializationResult.Invalid();
 				}
@@ -356,7 +357,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 					"materialization",
 					"tracking-point-reused",
 					"stable_target_uuid", existingStableId.get(),
-					"provider_locator", available.locator().encode(),
+					"provider_locator", SableDiagnostics.lazy(() -> available.locator().encode()),
 					"anchor", available.anchor(),
 					"refcount_before", state.references.references(existingStableId.get()));
 				ExternalBlockReferenceIndex.Lease lease = state.references.prepare(
@@ -366,13 +367,13 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 					"lease-prepared",
 					"stable_target_uuid", lease.stableId(),
 					"lease_new", lease.newlyCreated(),
-					"provider_locator", available.locator().encode());
+					"provider_locator", SableDiagnostics.lazy(() -> available.locator().encode()));
 				if (!state.references.commit(lease)) {
 					diagnostics.server(
 						"materialization",
 						"lease-commit-failure",
 						"stable_target_uuid", lease.stableId(),
-						"provider_locator", available.locator().encode());
+						"provider_locator", SableDiagnostics.lazy(() -> available.locator().encode()));
 					return new MaterializationResult.Invalid();
 				}
 
@@ -384,7 +385,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 					"stable_target_uuid", lease.stableId(),
 					"lease_new", lease.newlyCreated(),
 					"refcount_after", state.references.references(lease.stableId()),
-					"provider_locator", available.locator().encode(),
+					"provider_locator", SableDiagnostics.lazy(() -> available.locator().encode()),
 					"anchor", available.anchor());
 				return materialized(available, entry.trackingId());
 			}
@@ -392,7 +393,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			diagnostics.server(
 				"materialization",
 				"tracking-point-generation-start",
-				"provider_locator", available.locator().encode(),
+				"provider_locator", SableDiagnostics.lazy(() -> available.locator().encode()),
 				"sublevel_uuid", available.locator().subLevelId(),
 				"local_block_pos", available.position(),
 				"anchor", available.anchor());
@@ -418,7 +419,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				"materialization",
 				"tracking-point-generated",
 				"stable_target_uuid", trackingId,
-				"provider_locator", available.locator().encode(),
+				"provider_locator", SableDiagnostics.lazy(() -> available.locator().encode()),
 				"sublevel_uuid", available.locator().subLevelId(),
 				"local_block_pos", available.position());
 
@@ -428,13 +429,13 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				"lease-prepared",
 				"stable_target_uuid", lease.stableId(),
 				"lease_new", lease.newlyCreated(),
-				"provider_locator", available.locator().encode());
+				"provider_locator", SableDiagnostics.lazy(() -> available.locator().encode()));
 			if (!state.references.commit(lease)) {
 				diagnostics.server(
 					"materialization",
 					"lease-commit-failure",
 					"stable_target_uuid", lease.stableId(),
-					"provider_locator", available.locator().encode());
+					"provider_locator", SableDiagnostics.lazy(() -> available.locator().encode()));
 				state.references.rollback(lease, retiredId -> removeTrackingPoint(data, trackingId));
 				return new MaterializationResult.Invalid();
 			}
@@ -449,7 +450,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				"stable_target_uuid", lease.stableId(),
 				"lease_new", lease.newlyCreated(),
 				"refcount_after", state.references.references(lease.stableId()),
-				"provider_locator", available.locator().encode(),
+				"provider_locator", SableDiagnostics.lazy(() -> available.locator().encode()),
 				"anchor", available.anchor());
 
 			return materialized(available, trackingId);
@@ -460,7 +461,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				failure,
 				"candidate", candidate,
 				"generated_tracking_id", generatedId,
-				"provider_locator", available.locator().encode());
+				"provider_locator", SableDiagnostics.lazy(() -> available.locator().encode()));
 			if (generatedId != null && generatedData != null) {
 				removeTrackingPoint(generatedData, generatedId);
 			}
@@ -473,7 +474,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				failure,
 				"candidate", candidate,
 				"generated_tracking_id", generatedId,
-				"provider_locator", available.locator().encode());
+				"provider_locator", SableDiagnostics.lazy(() -> available.locator().encode()));
 			linkGuard.disableSilently();
 			if (generatedId != null && generatedData != null) {
 				removeTrackingPoint(generatedData, generatedId);
@@ -720,9 +721,9 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	private Optional<ResolvedBlockReadSource> contentFailure(Throwable failure) {
 		// Additive discovery and invocation failures cannot disable established capture/leases/Basic observation.
 		if (membershipApi == null || failure instanceof LinkageError) contentUnavailable = true;
+		if (!diagnostics.enabled(org.apache.logging.log4j.Level.WARN)) return Optional.empty();
 		long now = System.nanoTime();
-		if (diagnostics.enabled(org.apache.logging.log4j.Level.WARN)
-			&& (nextContentFailureLogNanos == 0 || now - nextContentFailureLogNanos >= 0)) {
+		if (nextContentFailureLogNanos == 0 || now - nextContentFailureLogNanos >= 0) {
 			nextContentFailureLogNanos = now + 5_000_000_000L;
 			diagnostics.approvedException(SableDiagnostics.SERVER_PREFIX, "content-read-source", "unavailable", failure,
 				"provider", PROVIDER_ID);
@@ -741,7 +742,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				contentFailure(unavailable);
 				return false;
 			}
-		});
+		}, nx.pingwheel.common.diagnostics.Diagnostics.server());
 	}
 
 	private boolean activeContentBinding(ServerLevel level, BlockReadSource descriptor) throws ReflectiveOperationException {
@@ -1177,7 +1178,8 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				"stable_target_uuid", stableId, "committed_target", committed);
 			return new RefreshResult.TemporarilyUnavailable();
 		}
-		boolean emit = state.refreshDiagnostics.temporarilyUnavailable(stableId, reason);
+		boolean emit = state.refreshDiagnostics.temporarilyUnavailable(stableId, reason,
+			diagnostics.enabled(org.apache.logging.log4j.Level.DEBUG));
 
 		if (emit) {
 			diagnostics.approvedEvent(SableDiagnostics.REFRESH_PREFIX,
@@ -1208,7 +1210,8 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			}
 			return new RefreshResult.Invalid();
 		}
-		boolean emit = (failure == null ? state.refreshDiagnostics.invalid(stableId, reason)
+		boolean emit = (failure == null ? state.refreshDiagnostics.invalid(stableId, reason,
+				diagnostics.enabled(org.apache.logging.log4j.Level.DEBUG))
 				: state.refreshDiagnostics.invalidFailure(stableId, reason,
 					diagnostics.enabled(org.apache.logging.log4j.Level.WARN)));
 
@@ -1241,7 +1244,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		LiveResult.Available available
 	) {
 		boolean changed = state.refreshDiagnostics.available(
-			stableId, available.locator().encode(), available.anchor());
+			stableId, available.locator().encode(), available.anchor(), diagnostics.enabled(org.apache.logging.log4j.Level.DEBUG));
 
 		if (changed) {
 			diagnostics.approvedEvent(SableDiagnostics.REFRESH_PREFIX,
@@ -1249,7 +1252,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				"locator-or-anchor-changed",
 				"stable_target_uuid", stableId,
 				"previous_target", committed,
-				"current_locator", available.locator().encode(),
+				"current_locator", SableDiagnostics.lazy(() -> available.locator().encode()),
 				"current_anchor", available.anchor(),
 				"block_registry_id", available.registryId(),
 				"block_entity", available.hasBlockEntity());
@@ -1352,7 +1355,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				"block_registry_id", actualId,
 				"block_entity", hasBlockEntity,
 				"anchor", available.anchor(),
-				"provider_locator", available.locator().encode());
+				"provider_locator", SableDiagnostics.lazy(() -> available.locator().encode()));
 		}
 
 		return available;

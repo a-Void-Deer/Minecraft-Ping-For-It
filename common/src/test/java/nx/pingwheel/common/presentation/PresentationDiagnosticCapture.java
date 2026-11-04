@@ -2,7 +2,7 @@ package nx.pingwheel.common.presentation;
 
 import java.util.ArrayList;
 import java.util.List;
-import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.core.LogEvent;
 import org.apache.logging.log4j.core.Logger;
@@ -17,7 +17,7 @@ import org.jetbrains.annotations.Unmodifiable;
 /** Real backend capture shared by the presentation call-site tests. */
 @NotNullByDefault
 public final class PresentationDiagnosticCapture implements AutoCloseable {
-	private final Logger logger = (Logger) Diagnostics.logger();
+	private final Logger logger = (Logger) LogManager.getLogger("pingforit");
 	private final Configuration configuration = logger.getContext().getConfiguration();
 	private final @Nullable LoggerConfig previous = configuration.getLoggers().get(logger.getName());
 	private final RecordingAppender appender = new RecordingAppender();

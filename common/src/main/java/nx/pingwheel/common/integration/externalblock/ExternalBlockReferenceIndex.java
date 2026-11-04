@@ -160,7 +160,8 @@ public final class ExternalBlockReferenceIndex {
 			try {
 				removePoint.accept(entry.stableId);
 			} catch (RuntimeException failure) {
-				Diagnostics.warn("external-block.reference-close", entry.locator.providerId(),
+				Diagnostics.server().atNormal().failure(org.apache.logging.log4j.Level.WARN,
+					"external-block/reference-close", "reference-cleanup-failed",
 					() -> "stableId=" + entry.stableId + " locator=" + entry.locator, failure);
 				// One provider cleanup failure must not prevent later points from
 				// being retired during server teardown.

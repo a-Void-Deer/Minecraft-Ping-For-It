@@ -7,20 +7,30 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.apache.logging.log4j.Level;
 import java.util.concurrent.atomic.AtomicBoolean;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
+import nx.pingwheel.common.integration.IntegrationDiagnosticCapture;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Stage;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
+@NotNullByDefault
 class FlywheelDiagnosticsTest {
 	@Test
 	void debugDisabledRecoveryStillObservesSuccessAndTheNextFailureIsATransition() {
 		List<FlywheelDiagnostics.Event> events = new ArrayList<>();
 		FlywheelDiagnostics diagnostics = new FlywheelDiagnostics(() -> 1L, events::add, level -> level == Level.WARN);
-		assertEquals(true, diagnostics.report("target", FlywheelDiagnosticReason.VISUAL_NULL, () -> "failure", null));
+		assertEquals(true, diagnostics.report("target", FlywheelDiagnosticReason.MODEL_UNAVAILABLE, () -> "failure", null));
 		assertEquals(false, diagnostics.report("target", FlywheelDiagnosticReason.RENDERED,
 			() -> { throw new AssertionError("disabled DEBUG detail must remain lazy"); }, null));
-		assertEquals(true, diagnostics.report("target", FlywheelDiagnosticReason.VISUAL_NULL, () -> "failed again", null));
+		assertEquals(true, diagnostics.report("target", FlywheelDiagnosticReason.MODEL_UNAVAILABLE, () -> "failed again", null));
 		assertEquals(FlywheelDiagnostics.EventKind.REASON_TRANSITION, events.get(1).kind());
 	}
 
@@ -107,7 +117,10 @@ class FlywheelDiagnosticsTest {
 		long[] now = { 0L };
 		AtomicInteger detailCalls = new AtomicInteger();
 		List<FlywheelDiagnostics.Event> events = new ArrayList<>();
-		FlywheelDiagnostics diagnostics = new FlywheelDiagnostics(() -> now[0], events::add);
+		FlywheelDiagnostics diagnostics = new FlywheelDiagnostics(() -> now[0], event -> {
+			event.details();
+			events.add(event);
+		});
 
 		assertEquals(true, diagnostics.report(
 			"target", FlywheelDiagnosticReason.VISUAL_NULL,
@@ -155,7 +168,10 @@ class FlywheelDiagnosticsTest {
 	void targetAndDetailSuppliersAreBothDeferredUntilAnEmission() {
 		AtomicInteger targetCalls = new AtomicInteger();
 		AtomicInteger detailCalls = new AtomicInteger();
-		FlywheelDiagnostics diagnostics = new FlywheelDiagnostics(() -> 1L, event -> {});
+		FlywheelDiagnostics diagnostics = new FlywheelDiagnostics(() -> 1L, event -> {
+			event.target();
+			event.details();
+		});
 
 		assertEquals(true, diagnostics.report(
 			new Object(), FlywheelDiagnosticReason.VISUAL_NULL,
@@ -182,5 +198,100 @@ class FlywheelDiagnosticsTest {
 		assertEquals(FlywheelDiagnostics.MAX_TRACKED_TARGETS, diagnostics.trackedTargetCount());
 		diagnostics.clear();
 		assertEquals(0, diagnostics.trackedTargetCount());
+	}
+
+	@Test
+	void productionNormalAndRejectedProfilesDoNotCollectTargetOrDetails() {
+		AtomicInteger reads = new AtomicInteger();
+		try (IntegrationDiagnosticCapture capture = new IntegrationDiagnosticCapture(Level.DEBUG, LoggingProfile.NORMAL)) {
+			FlywheelDiagnostics diagnostics = FlywheelDiagnostics.global();
+			assertFalse(diagnostics.report("target", FlywheelDiagnosticReason.VISUAL_NULL,
+				() -> { reads.incrementAndGet(); return "private-target"; },
+				() -> { reads.incrementAndGet(); return "private-details"; }, null));
+			assertTrue(diagnostics.report("target", FlywheelDiagnosticReason.MODEL_UNAVAILABLE,
+				() -> { reads.incrementAndGet(); return "private-target"; },
+				() -> { reads.incrementAndGet(); return "private-details"; }, null));
+			assertEquals(0, reads.get());
+			assertFalse(capture.events().getFirst().getMessage().getFormattedMessage().contains("private"));
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEBUG);
+			assertTrue(diagnostics.report("target", FlywheelDiagnosticReason.VISUAL_NULL,
+				() -> { reads.incrementAndGet(); return "private-target"; },
+				() -> { reads.incrementAndGet(); return "private-details"; }, null));
+			assertEquals(2, reads.get());
+		}
+	}
+
+	@Test
+	void suppliersAndSinkRunWithoutHoldingDomainMonitor() {
+		@Nullable FlywheelDiagnostics[] holder = new FlywheelDiagnostics[1];
+		holder[0] = new FlywheelDiagnostics(() -> 1L, event -> {
+			assertFalse(Thread.holdsLock(holder[0]));
+			event.target();
+			event.details();
+		});
+		assertTrue(holder[0].report("key", FlywheelDiagnosticReason.MODEL_UNAVAILABLE, () -> {
+			assertFalse(Thread.holdsLock(holder[0]));
+			return "target";
+		}, () -> {
+			assertFalse(Thread.holdsLock(holder[0]));
+			return "details";
+		}, null));
+	}
+
+	@Test
+	void clockEnabledAndSinkFaultsAreObservedWithoutHoldingTheDomainMonitor() {
+		long clockFaults = faults(Stage.CHANNEL_CLOCK);
+		long enabledFaults = faults(Stage.ENABLED);
+		long sinkFaults = faults(Stage.SINK);
+		@Nullable FlywheelDiagnostics[] holder = new FlywheelDiagnostics[1];
+		holder[0] = new FlywheelDiagnostics(() -> {
+			assertFalse(Thread.holdsLock(holder[0]));
+			throw new IllegalStateException("clock fault");
+		}, event -> failUnexpectedSink());
+		assertFalse(holder[0].report("target", FlywheelDiagnosticReason.MODEL_UNAVAILABLE, () -> "detail", null));
+		assertEquals(clockFaults + 1, faults(Stage.CHANNEL_CLOCK));
+		AtomicBoolean enabledFails = new AtomicBoolean(true);
+		holder[0] = new FlywheelDiagnostics(() -> 1L, event -> {
+			assertFalse(Thread.holdsLock(holder[0]));
+			throw new IllegalStateException("sink fault");
+		}, level -> {
+			assertFalse(Thread.holdsLock(holder[0]));
+			if (enabledFails.get()) throw new LinkageError("enabled fault");
+			return true;
+		});
+		assertFalse(holder[0].report("target", FlywheelDiagnosticReason.MODEL_UNAVAILABLE, () -> "detail", null));
+		assertEquals(enabledFaults + 1, faults(Stage.ENABLED));
+		enabledFails.set(false);
+		assertTrue(holder[0].report("target", FlywheelDiagnosticReason.MODEL_UNAVAILABLE, () -> "detail", null));
+		assertFalse(holder[0].report("target", FlywheelDiagnosticReason.MODEL_UNAVAILABLE, () -> "detail", null));
+		assertEquals(sinkFaults + 1, faults(Stage.SINK));
+	}
+
+	@Test
+	void unavailableTargetContextDoesNotReplaceTheOriginalFailureOrRepeatCollection() {
+		long contextFaults = faults(Stage.CONTEXT);
+		AtomicInteger reads = new AtomicInteger();
+		RuntimeException original = new IllegalStateException("business cause");
+		FlywheelDiagnostics diagnostics = new FlywheelDiagnostics(() -> 1L, event -> {
+			assertEquals("[context unavailable]", event.target());
+			assertEquals("[context unavailable]", event.target());
+			assertEquals("detail", event.details());
+			assertSame(original, event.failure());
+		});
+		assertTrue(diagnostics.report("target", FlywheelDiagnosticReason.MODEL_UNAVAILABLE, () -> {
+			reads.incrementAndGet();
+			throw new IllegalStateException("context fault");
+		}, () -> "detail", original));
+		assertEquals(1, reads.get());
+		assertEquals(contextFaults + 1, faults(Stage.CONTEXT));
+	}
+
+	private static void failUnexpectedSink() { throw new AssertionError("sink must not run after clock failure"); }
+
+	private static long faults(Stage stage) {
+		return Diagnostics.faults().observations().stream()
+			.filter(observation -> observation.key().side() == DiagnosticSide.CLIENT
+				&& observation.key().site().equals("create-flywheel") && observation.key().stage() == stage)
+			.mapToLong(observation -> observation.occurrences()).sum();
 	}
 }

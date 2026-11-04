@@ -47,4 +47,21 @@ class SableRefreshLogGateTest {
 		gate.available("tracking", "locator", new MarkerAnchor(1, 2, 3));
 		assertTrue(gate.invalidFailure("tracking", "exception", true));
 	}
+
+	@Test
+	void disabledStatusAndRecoveryObserveTransitionsWithoutSpendingTheFutureReport() {
+		SableRefreshLogGate gate = new SableRefreshLogGate();
+		MarkerAnchor anchor = new MarkerAnchor(1, 2, 3);
+		assertFalse(gate.available("tracking", "locator", anchor, false), "first success is only a baseline");
+		assertFalse(gate.available("tracking", "locator", anchor, true));
+		assertFalse(gate.temporarilyUnavailable("tracking", "unloaded", false));
+		assertTrue(gate.temporarilyUnavailable("tracking", "unloaded", true));
+		assertFalse(gate.temporarilyUnavailable("tracking", "unloaded", true));
+		assertFalse(gate.invalid("tracking", "removed", false));
+		assertTrue(gate.invalid("tracking", "removed", true));
+		assertFalse(gate.invalid("tracking", "removed", true));
+		assertFalse(gate.available("tracking", "locator", anchor, false));
+		assertTrue(gate.available("tracking", "locator", anchor, true));
+		assertFalse(gate.available("tracking", "locator", anchor, true));
+	}
 }

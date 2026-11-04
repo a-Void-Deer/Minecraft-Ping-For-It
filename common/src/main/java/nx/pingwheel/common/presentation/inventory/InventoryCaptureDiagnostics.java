@@ -12,6 +12,7 @@ import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryObservationSnapshot;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.source.SourceKey;
+import nx.pingwheel.common.diagnostics.DiagnosticLogger;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /**
@@ -73,7 +74,7 @@ final class InventoryCaptureDiagnostics {
 		}
 	}
 
-	/** Ordinary reason gates advance even while reporting is disabled. */
+	/** Ordinary reason gates advance after profile eligibility even while backend output is disabled. */
 	private static final long MIN_INTERVAL_NANOS = 10_000_000_000L;
 	private static final AtomicLongArray LAST_LOGGED = new AtomicLongArray(Reason.values().length);
 
@@ -141,16 +142,17 @@ final class InventoryCaptureDiagnostics {
 	}
 
 	private static void log(Reason reason, InventorySourceInput input, Supplier<String> detail, @Nullable Throwable failure) {
-		long now = System.nanoTime();
-		int index = reason.ordinal();
-		long last = LAST_LOGGED.get(index);
-		if (last != 0L && now - last < MIN_INTERVAL_NANOS) return;
-		if (!LAST_LOGGED.compareAndSet(index, last, now)) return;
-		Level level = reason == Reason.MEMORY_DEFERRED ? Level.DEBUG : Level.WARN;
-		var logger = reason == Reason.MEMORY_DEFERRED ? Diagnostics.server().atDebug() : Diagnostics.server().atDetailed();
-		if (failure == null) logger.event(level, "inventory/snapshot", reason.token,
-			() -> context(input) + " detail=" + detail.get());
-		else logger.failure(level, "inventory/snapshot", reason.token,
-			() -> "reason=" + reason.token + " " + context(input) + " detail=" + detail.get(), failure);
+		boolean debug = reason == Reason.MEMORY_DEFERRED;
+		Level level = debug ? Level.DEBUG : Level.WARN;
+		DiagnosticLogger logger = debug ? Diagnostics.server().atDebug() : Diagnostics.server().atDetailed();
+		logger.domainBeforeBackend(level, "inventory/snapshot", () -> {
+			long now = System.nanoTime();
+			int index = reason.ordinal();
+			long last = LAST_LOGGED.get(index);
+			if (last != 0L && now - last < MIN_INTERVAL_NANOS) return null;
+			if (!LAST_LOGGED.compareAndSet(index, last, now)) return null;
+			return new DiagnosticLogger.DomainReport(reason.token, failure,
+				() -> context(input) + " detail=" + detail.get());
+		});
 	}
 }

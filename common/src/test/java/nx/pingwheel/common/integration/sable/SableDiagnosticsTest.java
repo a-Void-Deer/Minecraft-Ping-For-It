@@ -3,6 +3,12 @@ package nx.pingwheel.common.integration.sable;
 import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
+import nx.pingwheel.common.integration.IntegrationDiagnosticCapture;
+import org.apache.logging.log4j.Level;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -61,5 +67,25 @@ class SableDiagnosticsTest {
 		assertSame(failure, diagnostics.events().get(0).throwable());
 		assertEquals("reflection-discovery", diagnostics.events().get(0).stage());
 		assertEquals("failure", diagnostics.events().get(0).reason());
+	}
+
+	@Test
+	void rejectedNormalAndSuppressedFailureDoNotReadDeferredProviderFields() {
+		try (IntegrationDiagnosticCapture capture = new IntegrationDiagnosticCapture(Level.DEBUG, LoggingProfile.NORMAL)) {
+			SableDiagnostics diagnostics = SableDiagnostics.global(Diagnostics.server());
+			AtomicInteger reads = new AtomicInteger();
+			Object field = SableDiagnostics.lazy(() -> { reads.incrementAndGet(); return "private-locator"; });
+			diagnostics.server("candidate-query", "start", "locator", field);
+			diagnostics.serverException("observe-block", "failed", new IllegalStateException("private-cause"), "locator", field);
+			assertEquals(0, reads.get());
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEEP);
+			diagnostics.serverException("observe-block", "failed", new IllegalStateException("later-cause"), "locator", field);
+			assertEquals(0, reads.get(), "suppressed failure fields remain lazy after a profile change");
+			diagnostics.approvedException(SableDiagnostics.SERVER_PREFIX, "observe-block", "failed",
+				new IllegalStateException("original-cause"), "locator", field);
+			assertEquals(1, reads.get());
+			assertTrue(capture.events().getLast().getMessage().getFormattedMessage().contains("original-cause"));
+			assertTrue(capture.events().getLast().getMessage().getFormattedMessage().contains("private-locator"));
+		}
 	}
 }

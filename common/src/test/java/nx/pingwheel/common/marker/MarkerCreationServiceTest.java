@@ -506,7 +506,8 @@ class MarkerCreationServiceTest {
 			String report = event.getMessage().getFormattedMessage();
 			assertEquals(Level.WARN, event.getLevel());
 			assertTrue(report.contains("marker-create-name-resolve"));
-			assertTrue(report.contains(nameResolver.getClass().getName()));
+			assertTrue(report.contains("handling=unknown-name"));
+			assertTrue(report.contains("targetKind=BLOCK"));
 			assertTrue(report.contains("name lookup unavailable"));
 			assertTrue(report.contains("resolver cause"));
 			assertTrue(report.length() <= SafeExceptionReport.MAX_CHARACTERS);
@@ -544,7 +545,8 @@ class MarkerCreationServiceTest {
 			String report = event.getMessage().getFormattedMessage();
 			assertEquals(Level.WARN, event.getLevel());
 			assertTrue(report.contains("marker-target-name-resolve"));
-			assertTrue(report.contains(nameResolver.getClass().getName()));
+			assertTrue(report.contains("handling=unknown-name"));
+			assertTrue(report.contains("targetKind=ENTITY"));
 			assertTrue(report.contains("authoritative name unavailable"));
 			assertTrue(report.contains("name source failed"));
 			assertTrue(report.length() <= SafeExceptionReport.MAX_CHARACTERS);

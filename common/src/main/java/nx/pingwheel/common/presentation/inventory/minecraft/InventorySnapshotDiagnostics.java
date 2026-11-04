@@ -9,6 +9,7 @@ import org.jetbrains.annotations.Nullable;
 
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
+import nx.pingwheel.common.diagnostics.DiagnosticLogger;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 
 /** Low-frequency snapshot discovery/failure diagnostics; never captures or serializes snapshot data for logging. */
@@ -49,18 +50,19 @@ final class InventorySnapshotDiagnostics {
 	}
 
 	static void unsupported(InventorySourceInput input, String detail) {
-		int index = Reason.UNSUPPORTED.ordinal();
-		long now = System.nanoTime();
-		long previous = LAST_LOGGED.get(index);
-		if (previous != 0L && now - previous < MIN_INTERVAL_NANOS) return;
-		if (!LAST_LOGGED.compareAndSet(index, previous, now)) return;
-		Diagnostics.server().atDebug().event(Level.DEBUG, "inventory/snapshot-discovery", "unsupported",
-			() -> {
+		Diagnostics.server().atDebug().domainBeforeBackend(Level.DEBUG, "inventory/snapshot-discovery", () -> {
+			int index = Reason.UNSUPPORTED.ordinal();
+			long now = System.nanoTime();
+			long previous = LAST_LOGGED.get(index);
+			if (previous != 0L && now - previous < MIN_INTERVAL_NANOS) return null;
+			if (!LAST_LOGGED.compareAndSet(index, previous, now)) return null;
+			return new DiagnosticLogger.DomainReport("unsupported", null, () -> {
 				var target = input.target();
 				String context = target instanceof Target.ExternalBlockTarget external
 					? "dimension=" + external.dimensionId() + " provider=" + external.providerId() + " registry=" + external.expectedBlockRegistryId()
 					: "target=" + target;
 				return context + " face=" + input.face() + " detail=" + detail;
 			});
+		});
 	}
 }

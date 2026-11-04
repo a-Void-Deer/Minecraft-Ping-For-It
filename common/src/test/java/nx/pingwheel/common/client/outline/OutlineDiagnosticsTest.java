@@ -2,6 +2,9 @@ package nx.pingwheel.common.client.outline;
 
 import nx.pingwheel.common.config.EntityBlockRenderMode;
 import nx.pingwheel.common.util.SafeExceptionReport;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Stage;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -118,6 +121,26 @@ class OutlineDiagnosticsTest {
 			runner.run(EntityBlockRenderMode.COMPATIBLE, EntityBlockGeometryContext::empty);
 			assertEquals(1, capture.events.size());
 		}
+	}
+
+	@Test
+	void contextSelfFaultLeavesUnavailableContextAndTheOriginalBusinessCause() {
+		long before = Diagnostics.faults().observations().stream()
+			.filter(observation -> observation.key().side() == DiagnosticSide.CLIENT
+				&& observation.key().site().equals("outline/custom-sink") && observation.key().stage() == Stage.CONTEXT)
+			.mapToLong(observation -> observation.occurrences()).sum();
+		List<String> reports = new ArrayList<>();
+		OutlineDiagnostics.deliver(reports::add, () -> { throw new IllegalStateException("context fault"); },
+			failure("business-original", "business-cause"));
+		assertEquals(1, reports.size());
+		assertTrue(reports.getFirst().contains("context unavailable"));
+		assertTrue(reports.getFirst().contains("business-original"));
+		assertTrue(reports.getFirst().contains("business-cause"));
+		long after = Diagnostics.faults().observations().stream()
+			.filter(observation -> observation.key().side() == DiagnosticSide.CLIENT
+				&& observation.key().site().equals("outline/custom-sink") && observation.key().stage() == Stage.CONTEXT)
+			.mapToLong(observation -> observation.occurrences()).sum();
+		assertEquals(before + 1, after);
 	}
 
 	private static RuntimeException failure(String message, String cause) {

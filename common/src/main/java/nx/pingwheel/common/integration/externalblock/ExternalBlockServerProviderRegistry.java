@@ -13,6 +13,9 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
+import org.jetbrains.annotations.NotNullByDefault;
+import java.time.Duration;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -459,12 +462,33 @@ public final class ExternalBlockServerProviderRegistry {
 	}
 
 	private static void failure(String operation, @Nullable ExternalBlockServerProvider provider, Throwable failure) {
-		Diagnostics.warn("external-block." + operation, providerScope(provider),
-			() -> "External block provider operation failed", failure);
+		Diagnostics.server().atNormal().rateLimited(Operation.channel(operation)).failure(Level.WARN, "external-block/" + operation,
+			"provider-operation-failed", () -> "provider=" + providerScope(provider) + "; operation=" + operation, failure);
 	}
 
 	private static void nullResult(String operation, @Nullable ExternalBlockServerProvider provider) {
-		Diagnostics.event(Level.WARN, "external-block." + operation, providerScope(provider), "null-result",
-			() -> "External block provider returned null");
+		Diagnostics.server().atNormal().rateLimited(Operation.channel(operation)).event(Level.WARN,
+			"external-block/" + operation, "provider-null-result",
+			() -> "provider=" + providerScope(provider) + "; External block provider returned null");
+	}
+
+	@NotNullByDefault
+	private enum Operation {
+		VALIDATE("validate"), MATERIALIZE("materialize"), REFRESH("refresh"),
+		PREVIEW_BINDING("preview-source-binding"), COMMITTED_BINDING("committed-source-binding"),
+		PREVIEW_READ("preview-read-source"), COMMITTED_READ("committed-read-source"),
+		OBSERVE("observe-block"), NAME("resolve-name"), DISTANCE("observe-validation-distance"),
+		RELEASE("release"), CLOSE("close");
+
+		private final String id;
+		private final DiagnosticChannel channel;
+		Operation(String id) {
+			this.id = id;
+			channel = DiagnosticChannel.interval("external-block/" + id, Duration.ofSeconds(10));
+		}
+		static DiagnosticChannel channel(String id) {
+			for (Operation operation : values()) if (operation.id.equals(id)) return operation.channel;
+			throw new IllegalArgumentException("Unknown external block operation");
+		}
 	}
 }

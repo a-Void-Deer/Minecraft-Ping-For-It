@@ -1,5 +1,6 @@
 package nx.pingwheel.common.math;
 
+import java.time.Duration;
 import java.util.Objects;
 import java.util.EnumSet;
 import java.util.List;
@@ -11,6 +12,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.phys.*;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.interaction.CapturedRay;
 import nx.pingwheel.common.interaction.InteractionToken;
 import nx.pingwheel.common.interaction.MinecraftTargetSnapshotFactory;
@@ -20,6 +23,11 @@ import nx.pingwheel.common.interaction.candidate.*;
 import static nx.pingwheel.common.CommonClient.Game;
 
 public class Raycast {
+	private static final DiagnosticChannel ENTITY_SCAN_FAILURE =
+		DiagnosticChannel.interval("precise-entity-scan", Duration.ofSeconds(10));
+	private static final DiagnosticChannel BLOCK_SCAN_FAILURE =
+		DiagnosticChannel.interval("precise-block-scan", Duration.ofSeconds(10));
+
 	private Raycast() {}
 
 	/**
@@ -211,7 +219,8 @@ public class Raycast {
 			}
 		} catch (RuntimeException | LinkageError failure) {
 			// Discard certification, not the independently completed ordinary trace.
-			nx.pingwheel.common.diagnostics.Diagnostics.warn("precise/entity-scan", "native",
+			Diagnostics.client().atDetailed().rateLimited(ENTITY_SCAN_FAILURE).failure(org.apache.logging.log4j.Level.WARN,
+				"precise/entity-scan", "native",
 				() -> "token=" + token.sequence() + " dimension=" + level.dimension().location(), failure);
 		}
 		try {
@@ -243,7 +252,8 @@ public class Raycast {
 			}
 		} catch (RuntimeException | LinkageError failure) {
 			// A partial native/provider scan cannot certify a nearest block.
-			nx.pingwheel.common.diagnostics.Diagnostics.warn("precise/block-scan", "native",
+			Diagnostics.client().atDetailed().rateLimited(BLOCK_SCAN_FAILURE).failure(org.apache.logging.log4j.Level.WARN,
+				"precise/block-scan", "native",
 				() -> "token=" + token.sequence() + " dimension=" + level.dimension().location(), failure);
 		}
 		return Optional.of(new SelectorTrace(ordinary, new FrozenCandidateAcquisition(token, ray, pingDistance,

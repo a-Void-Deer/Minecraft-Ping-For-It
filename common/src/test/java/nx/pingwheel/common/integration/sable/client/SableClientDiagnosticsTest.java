@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.integration.ModContext;
 import nx.pingwheel.common.integration.sable.SableDiagnostics;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -23,7 +24,7 @@ class SableClientDiagnosticsTest {
 
 	@AfterEach
 	void restoreDiagnosticsAndSableFlag() {
-		SableClientProvider.setDiagnosticsForTests(SableDiagnostics.global());
+		SableClientProvider.setDiagnosticsForTests(SableDiagnostics.global(Diagnostics.client()));
 		ModContext.HasSable = previousSableLoaded;
 	}
 

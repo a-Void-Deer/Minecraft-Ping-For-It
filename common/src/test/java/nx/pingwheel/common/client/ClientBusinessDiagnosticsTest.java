@@ -237,7 +237,7 @@ class ClientBusinessDiagnosticsTest {
 	}
 
 	private static void setDiagnosticThreshold(Level level) {
-		var logger = (org.apache.logging.log4j.core.Logger) Diagnostics.logger();
+		var logger = (org.apache.logging.log4j.core.Logger) org.apache.logging.log4j.LogManager.getLogger("pingforit");
 		var context = logger.getContext();
 		context.getConfiguration().getLoggerConfig(logger.getName()).setLevel(level);
 		context.updateLoggers();

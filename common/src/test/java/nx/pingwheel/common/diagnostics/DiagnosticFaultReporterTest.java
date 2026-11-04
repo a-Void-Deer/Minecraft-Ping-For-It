@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.lang.reflect.Modifier;
 import java.nio.ByteBuffer;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
@@ -22,6 +23,50 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
 class DiagnosticFaultReporterTest {
+	@Test
+	void publicCrossOwnerEntryKeepsControlledSitesWithoutReadingARejectedFailure() throws Exception {
+		var method = DiagnosticFaultReporter.class.getMethod("report", DiagnosticSide.class, String.class,
+			DiagnosticFaultReporter.Stage.class, LoggingProfile.class, Throwable.class);
+		assertTrue(Modifier.isPublic(method.getModifiers()));
+		ByteArrayOutputStream output = new ByteArrayOutputStream();
+		DiagnosticFaultReporter reporter = new DiagnosticFaultReporter(new DiagnosticEmergencyWriter(() -> output));
+		AtomicInteger reads = new AtomicInteger();
+		Throwable unreadable = new RuntimeException() {
+			@Override public String getMessage() { reads.incrementAndGet(); return "must stay unread"; }
+			@Override public StackTraceElement @Unmodifiable [] getStackTrace() { reads.incrementAndGet(); return new StackTraceElement[0]; }
+		};
+		assertThrows(IllegalArgumentException.class, () -> reporter.report(DiagnosticSide.CLIENT,
+			"dynamic provider name", DiagnosticFaultReporter.Stage.CONTEXT, LoggingProfile.DEBUG, unreadable));
+		assertEquals(0, reads.get());
+		assertTrue(reporter.observations().isEmpty());
+		assertTrue(output.toString(StandardCharsets.UTF_8).isEmpty());
+		reporter.report(DiagnosticSide.CLIENT, "create-entity-outline-gate",
+			DiagnosticFaultReporter.Stage.CHANNEL_CLOCK, LoggingProfile.NORMAL, unreadable);
+		assertEquals(0, reads.get());
+		assertEquals(1, records(output).size());
+		assertTrue(records(output).getFirst().contains("site=create-entity-outline-gate stage=CHANNEL_CLOCK kind=RUNTIME"));
+	}
+
+	@Test
+	void publicReportDerivesKindFromReentryStageThenLinkageThenRuntime() {
+		ByteArrayOutputStream output = new ByteArrayOutputStream();
+		DiagnosticFaultReporter reporter = new DiagnosticFaultReporter(new DiagnosticEmergencyWriter(() -> output));
+		reporter.report(DiagnosticSide.CLIENT, "reentry-site", DiagnosticFaultReporter.Stage.REENTRY,
+			LoggingProfile.NORMAL, new NoClassDefFoundError("reentry"));
+		reporter.report(DiagnosticSide.CLIENT, "linkage-site", DiagnosticFaultReporter.Stage.CONTEXT,
+			LoggingProfile.NORMAL, new NoClassDefFoundError("linkage"));
+		reporter.report(DiagnosticSide.CLIENT, "runtime-site", DiagnosticFaultReporter.Stage.CONTEXT,
+			LoggingProfile.NORMAL, new AssertionError("runtime"));
+		reporter.report(DiagnosticSide.CLIENT, "null-site", DiagnosticFaultReporter.Stage.CONTEXT,
+			LoggingProfile.NORMAL, null);
+		List<DiagnosticFaultReporter.Kind> kinds = reporter.observations().stream()
+			.map(value -> value.key().kind()).toList();
+		assertTrue(kinds.containsAll(List.of(DiagnosticFaultReporter.Kind.REENTRY,
+			DiagnosticFaultReporter.Kind.LINKAGE, DiagnosticFaultReporter.Kind.RUNTIME)));
+		assertEquals(4, kinds.size());
+		assertEquals(4, records(output).size());
+	}
+
 	@Test
 	void normalUsesOnlyControlledIdentityAndLaterRealFaultAddsDetailsOnceWithoutReplay() {
 		ByteArrayOutputStream output = new ByteArrayOutputStream();

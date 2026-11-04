@@ -1,35 +1,48 @@
 package nx.pingwheel.common.integration;
 
-import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticLogger;
 import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.NotNullByDefault;
+import java.util.Objects;
 
 /**
  * Shared once-only {@link LinkageError} guard for optional-mod boundaries. A
  * link error disables the owning boundary for the rest of the session, warns
  * once with the integration id and original cause in one bounded report.
  */
+@NotNullByDefault
 public final class IntegrationLinkGuard {
 	private final String integration;
+	private final @Nullable DiagnosticLogger diagnostics;
 	private volatile boolean disabled;
 	private boolean warned;
 
+	public IntegrationLinkGuard(String integration, DiagnosticLogger diagnostics) {
+		this.integration = Objects.requireNonNull(integration, "integration");
+		this.diagnostics = Objects.requireNonNull(diagnostics, "diagnostics");
+	}
+
+	/** @deprecated Bind the logical side explicitly. This compatibility guard is silent. */
+	@Deprecated
 	public IntegrationLinkGuard(String integration) {
-		this.integration = integration;
+		this.integration = Objects.requireNonNull(integration, "integration");
+		this.diagnostics = null;
 	}
 
 	public boolean disabled() {
 		return disabled;
 	}
 
-	public synchronized void disable(LinkageError error) {
+	public void disable(LinkageError error) {
 		disabled = true;
-
-		if (warned) {
-			return;
+		@Nullable DiagnosticLogger logger = diagnostics;
+		if (logger == null || !logger.atNormal().isEnabled(Level.WARN)) return;
+		synchronized (this) {
+			if (warned) return;
+			warned = true;
 		}
-
-		warned = true;
-		Diagnostics.domainApprovedFailure(Level.WARN, "integration-link", integration,
+		logger.atNormal().failure(Level.WARN, "integration-link", "integration-disabled",
 			() -> integration + " integration disabled", error);
 	}
 

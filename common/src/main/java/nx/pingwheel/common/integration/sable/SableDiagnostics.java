@@ -5,8 +5,13 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
+import java.time.Duration;
 
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticLogger;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -20,6 +25,7 @@ import org.jetbrains.annotations.Unmodifiable;
  * logger, while the global implementation still gives every event a stable
  * channel prefix.</p>
  */
+@NotNullByDefault
 public interface SableDiagnostics {
 
 	String CAPTURE_PREFIX = "[sable-capture]";
@@ -37,6 +43,9 @@ public interface SableDiagnostics {
 	);
 
 	default boolean enabled(Level level) { return true; }
+
+	/** Values wrapped here are evaluated only in an admitted high-detail report. */
+	static Object lazy(Supplier<@Nullable Object> value) { return value; }
 
 	/** These routes require admission by an existing Sable domain gate. */
 	default void approvedEvent(String prefix, String stage, String reason, @Nullable Object... fields) {
@@ -101,14 +110,16 @@ public interface SableDiagnostics {
 	/**
 	 * Uses the shared backend and keeps formatting lazy until admission.
 	 */
-	static SableDiagnostics global() {
+	public static SableDiagnostics global(DiagnosticLogger logger) {
 		return new SableDiagnostics() {
 			@Override
-			public boolean enabled(Level level) { return Diagnostics.logger().isEnabled(level); }
+			public boolean enabled(Level level) {
+				return (level == Level.DEBUG ? logger.atDebug() : logger.atNormal()).isEnabled(level);
+			}
 
 			@Override
 			public void debug(String prefix, String stage, String reason, @Nullable Object... fields) {
-				Diagnostics.event(Level.DEBUG, operation(stage, fields), prefix, reason,
+				logger.atDebug().event(Level.DEBUG, "sable/" + stage, "sable-status",
 					() -> format(prefix, stage, reason, fields));
 			}
 
@@ -116,28 +127,34 @@ public interface SableDiagnostics {
 			public void debugException(
 				String prefix, String stage, String reason, Throwable throwable, @Nullable Object... fields
 			) {
-				Diagnostics.warn(operation(stage, fields), prefix,
-					() -> format(prefix, stage, reason, fields), throwable);
+				FailureChannel.select(logger, stage).atNormal().warn("sable/" + stage, "sable-fallback", throwable,
+					() -> format(prefix, stage, reason, fields));
 			}
 
 			@Override
 			public void approvedEvent(String prefix, String stage, String reason, @Nullable Object... fields) {
-				Diagnostics.domainApprovedEvent(Level.DEBUG, operation(stage, fields), prefix, reason,
+				logger.atDebug().event(Level.DEBUG, "sable/" + stage, "sable-status",
 					() -> format(prefix, stage, reason, fields));
 			}
 
 			@Override
 			public void approvedException(String prefix, String stage, String reason, Throwable failure, @Nullable Object... fields) {
-				Diagnostics.domainApprovedFailure(Level.WARN, operation(stage, fields), prefix,
-					() -> format(prefix, stage, reason, fields), failure);
+				logger.atNormal().warn("sable/" + stage, "sable-fallback", failure,
+					() -> format(prefix, stage, reason, fields));
 			}
 
 			@Override
 			public void warning(String prefix, String stage, String reason, @Nullable Object... fields) {
-				Diagnostics.event(Level.WARN, operation(stage, fields), prefix, reason,
+				logger.atNormal().event(Level.WARN, "sable/" + stage, "sable-status",
 					() -> format(prefix, stage, reason, fields));
 			}
 		};
+	}
+
+	/** @deprecated Production callers must bind the owning side explicitly. */
+	@Deprecated
+	static SableDiagnostics global() {
+		return noop();
 	}
 
 	/** Creates an in-memory recording implementation for focused tests. */
@@ -202,8 +219,9 @@ public interface SableDiagnostics {
 			.append(" reason=").append(reason);
 
 		for (int index = 0; index + 1 < fields.length; index += 2) {
-			message.append(' ').append(String.valueOf(fields[index]))
-				.append('=').append(String.valueOf(fields[index + 1]));
+			@Nullable Object value = fields[index + 1];
+			if (value instanceof Supplier<?> deferred) value = deferred.get();
+			message.append(' ').append(String.valueOf(fields[index])).append('=').append(String.valueOf(value));
 		}
 
 		if ((fields.length & 1) != 0) {
@@ -213,12 +231,24 @@ public interface SableDiagnostics {
 		return message.toString();
 	}
 
-	private static String operation(String stage, @Nullable Object... fields) {
-		for (int index = 0; index + 1 < fields.length; index += 2) {
-			if ("operation".equals(fields[index]) && fields[index + 1] instanceof String operation) {
-				return "sable." + stage + "." + operation;
-			}
+	/** Ungated retry capabilities keep the previous ten-second cadence; domain-approved routes bypass these. */
+	@NotNullByDefault
+	enum FailureChannel {
+		PROVIDER_INIT("provider-init"), CANDIDATE("candidate-rejection"), CAPTURE("capture"),
+		SUPPLEMENTAL_RAY("supplemental-ray"), SUPPLEMENTAL_MEMBER("supplemental-member-scan"),
+		SUPPLEMENTAL_SUBLEVEL("supplemental-sublevel-scan"), PROJECTION("projection"),
+		DISCOVERY("reflection-discovery"), MATERIALIZATION("materialization"), OBSERVATION("observe-block"),
+		LIVE_RESOLUTION("live-resolution"), REFRESH("refresh"), CLEANUP("cleanup"), PROVIDER_SELECTION("provider-selection");
+
+		private final String stage;
+		private final DiagnosticChannel channel;
+		FailureChannel(String stage) {
+			this.stage = stage;
+			this.channel = DiagnosticChannel.interval("sable/" + stage, Duration.ofSeconds(10));
 		}
-		return "sable." + stage;
+		static DiagnosticLogger select(DiagnosticLogger logger, String stage) {
+			for (FailureChannel entry : values()) if (entry.stage.equals(stage)) return logger.rateLimited(entry.channel);
+			return logger;
+		}
 	}
 }

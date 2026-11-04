@@ -15,6 +15,9 @@ import nx.pingwheel.common.integration.IntegrationLinkGuard;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockReferenceIndex;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.integration.sable.SableDiagnostics;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.BeforeAll;
@@ -33,8 +36,9 @@ class SableObservationFailureDiagnosticsTest {
 	@Test void refreshDomainTransitionReportsAfterDebugOnlyStateAndDoesNotAddASecondWindow()
 		throws ReflectiveOperationException {
 		try (var capture = new IntegrationDiagnosticCapture(org.apache.logging.log4j.Level.WARN)) {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEEP);
 			var provider = token(SableExternalBlockServerProvider.class);
-			set(provider, "diagnostics", SableDiagnostics.global());
+			set(provider, "diagnostics", SableDiagnostics.global(Diagnostics.server()));
 			Class<?> stateType = nested("ServerState");
 			var stateConstructor = stateType.getDeclaredConstructor();
 			stateConstructor.setAccessible(true);
@@ -59,10 +63,11 @@ class SableObservationFailureDiagnosticsTest {
 		throws ReflectiveOperationException {
 		for (boolean linkage : new boolean[] {false, true}) {
 			try (var capture = new IntegrationDiagnosticCapture(org.apache.logging.log4j.Level.WARN)) {
+				Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEEP);
 				var provider = token(SableExternalBlockServerProvider.class);
-				var guard = new IntegrationLinkGuard("sable");
+				var guard = new IntegrationLinkGuard("sable", Diagnostics.server());
 				set(provider, "linkGuard", guard);
-				set(provider, "diagnostics", SableDiagnostics.global());
+				set(provider, "diagnostics", SableDiagnostics.global(Diagnostics.server()));
 				Class<?> apiType = nested("ReflectiveApi");
 				var apiConstructor = apiType.getDeclaredConstructors()[0];
 				apiConstructor.setAccessible(true);

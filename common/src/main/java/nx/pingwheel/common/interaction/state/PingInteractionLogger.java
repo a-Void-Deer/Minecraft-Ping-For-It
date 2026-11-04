@@ -1,7 +1,10 @@
 package nx.pingwheel.common.interaction.state;
 
-import nx.pingwheel.common.Global;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
 import nx.pingwheel.common.util.SafeExceptionReport;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * A tiny, injectable debug logger for the interaction state machine.
@@ -11,7 +14,7 @@ import nx.pingwheel.common.util.SafeExceptionReport;
  * cancellation candidate count, and marker id value. UUIDs, positions,
  * dimension/registry ids, names, item data, and chat text are never logged.
  * Tests use {@link #noop()} or an in-memory recording implementation, so the
- * game logger ({@link Global}) is never initialized in tests unless
+	 * game logger is never initialized in tests unless
  * {@link #global()} is explicitly requested.
  */
 @FunctionalInterface
@@ -20,7 +23,7 @@ public interface PingInteractionLogger {
 	/**
 	 * Emits a debug message with {@code {}} placeholder arguments.
 	 */
-	void debug(String message, Object... args);
+	void debug(String message, @Nullable Object @Unmodifiable ... args);
 
 	/**
 	 * Emits a complete bounded exception report without passing the throwable
@@ -50,23 +53,32 @@ public interface PingInteractionLogger {
 	}
 
 	/**
-	 * A logger backed by the mod's global Log4j logger.
+	 * A logger backed by the explicit client diagnostic side.
 	 *
-	 * <p>The reference to {@link Global#LOGGER} is deferred into the returned
-	 * lambda body, so calling this factory does not initialize {@link Global};
-	 * only the first {@code debug(...)} invocation does.
+	 * <p>Details and throwable access are deferred until DEBUG is enabled.
 	 */
 	static PingInteractionLogger global() {
 		return new PingInteractionLogger() {
 			@Override
-			public void debug(String message, Object... args) {
-				Global.LOGGER.debug(message, args);
+			public void debug(String message, @Nullable Object @Unmodifiable ... args) {
+				Diagnostics.client().atDebug().site("interaction/state").debug(() -> format(message, args));
 			}
 
 			@Override
 			public void debugException(String constantContext, Throwable throwable) {
-				Global.debugException(constantContext, throwable);
+				Diagnostics.client().atDebug().failure(Level.DEBUG, "interaction/state", "state-failure",
+					() -> constantContext, throwable);
 			}
 		};
+	}
+
+	private static String format(String message, @Nullable Object @Unmodifiable [] args) {
+		StringBuilder formatted = new StringBuilder(message);
+		for (@Nullable Object arg : args) {
+			int placeholder = formatted.indexOf("{}");
+			if (placeholder < 0) break;
+			formatted.replace(placeholder, placeholder + 2, String.valueOf(arg));
+		}
+		return formatted.toString();
 	}
 }

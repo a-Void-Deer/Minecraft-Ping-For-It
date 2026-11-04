@@ -5,6 +5,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -29,8 +30,18 @@ public final class DiagnosticFaultReporter {
 		this.writer = writer;
 	}
 
-	void report(DiagnosticSide side, String site, Stage stage, LoggingProfile profile, @Nullable Throwable failure) {
-		reportOccurrences(side, site, stage, profile, failure, 1);
+	/**
+	 * Records one self-fault from an owning subsystem or loader diagnostic gate.
+	 * The site is a stable controlled code, not dynamic provider/request text.
+	 * NORMAL retains only side/site/stage/kind; higher profiles may add the
+	 * failure class and bounded message. Reentrancy and state are thread-safe,
+	 * and no throwable is retained.
+	 */
+	public void report(DiagnosticSide side, String site, Stage stage, LoggingProfile profile, @Nullable Throwable failure) {
+		Objects.requireNonNull(side, "side");
+		Objects.requireNonNull(stage, "stage");
+		Objects.requireNonNull(profile, "profile");
+		reportOccurrences(side, DiagnosticText.controlled(site), stage, profile, failure, 1);
 	}
 
 	void reportOccurrences(DiagnosticSide side, String site, Stage stage, LoggingProfile profile,

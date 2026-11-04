@@ -74,16 +74,15 @@ public final class EntityBlockGeometrySourceRegistry {
 		}
 
 		synchronized (lock) {
-			if (registrations.containsKey(id)) {
-				warn(id, "duplicate-id-first-registration-kept", null);
-				return Registration.rejected();
+			if (!registrations.containsKey(id)) {
+				Registration registration = new Registration(this, id, source);
+				registrations.put(id, registration);
+				publishSnapshot();
+				return registration;
 			}
-
-			Registration registration = new Registration(this, id, source);
-			registrations.put(id, registration);
-			publishSnapshot();
-			return registration;
 		}
+		warn(id, "duplicate-id-first-registration-kept", null);
+		return Registration.rejected();
 	}
 
 	/**
@@ -166,12 +165,6 @@ public final class EntityBlockGeometrySourceRegistry {
 	private void warn(String sourceId, String category, @Nullable Throwable failure) {
 		if (warningSink == null) {
 			OutlineDiagnostics.rejected("entity-block-source-register", sourceId, category, failure);
-		} else if (failure == null) {
-			try {
-				warningSink.warn(sourceId, category);
-			} catch (RuntimeException | LinkageError ignored) {
-				// A diagnostic sink must not reject a later valid registration.
-			}
 		} else {
 			OutlineDiagnostics.deliver(text -> warningSink.warn(sourceId, text), () -> category, failure);
 		}

@@ -78,6 +78,7 @@ class LoggingProfileScreenTest {
 			assertFalse(screen.loggingProfileSession().isUnlocked(LoggingProfileSession.Side.SERVER));
 
 			screen.loggingProfileSession().unlock(LoggingProfileSession.Side.SERVER);
+			backButton(screen).onPress();
 			selectScope(screen, 1);
 
 			assertTrue(screen.loggingProfileSession().isUnlocked(LoggingProfileSession.Side.CLIENT));
