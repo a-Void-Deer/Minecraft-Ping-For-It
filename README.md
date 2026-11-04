@@ -57,4 +57,6 @@ gradlew.bat -g D:\Gradle build
 
 ## 许可
 
-移植目标沿用上游 **MIT** 许可：仓库根 `LICENSE` 已是 MIT 文本，`jar` 内的 `LICENSE_pingforit` 就是它。**M10 还需补 `THIRD-PARTY-NOTICES.md`**（上游同款，列第三方声明）。
+移植目标沿用上游 **MIT** 许可：仓库根 `LICENSE` 已是 MIT 文本（与上游 `LICENSE` 的 SHA256 一致），`jar` 内打包为 `LICENSE_pingforit`。
+
+第三方声明见 [`THIRD-PARTY-NOTICES.md`](THIRD-PARTY-NOTICES.md)：上游 Ping For It 的 MIT 归属，加上 vendor 进来的 `MavenComparableVersion`（源自 Apache Maven）的 **Apache-2.0** 全文。它与 `LICENSE_pingforit` 一起被打进 `jar` 根，构建后可用 `unzip -l` 确认两个文件都在。
