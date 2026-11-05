@@ -1,5 +1,6 @@
 package nx.pingwheel.common.screen;
 
+import com.mojang.blaze3d.platform.Window;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.InputType;
 import net.minecraft.client.Minecraft;
@@ -34,6 +35,12 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.lwjgl.PointerBuffer;
+import org.lwjgl.system.CallbackI;
+import org.lwjgl.system.MemoryUtil;
+import org.lwjgl.system.Pointer;
+import org.lwjgl.system.libffi.FFICIF;
+import org.lwjgl.system.libffi.LibFFI;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -41,6 +48,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -53,7 +61,7 @@ import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Headless root-session seams; this does not claim GLFW or live window input coverage. */
+/** Headless mounted-widget seams with a physical modifier-key read; this is not a live-window or macOS claim. */
 @NotNullByDefault
 class LoggingProfileScreenTest {
 	@BeforeAll
@@ -63,107 +71,94 @@ class LoggingProfileScreenTest {
 	}
 
 	@Test
-	void unlockFlagsSurviveNavigationAndResizeAndRemainScopeIndependent() throws Exception {
-		withScreen(new ClientConfig(), null, (screen, client) -> {
-			screen.loggingProfileSession().unlock(LoggingProfileSession.Side.CLIENT);
+	void navigationAndResizeDoNotCarryTheTemporaryAltCandidate() throws Exception {
+		var config = new ClientConfig();
+		LoggingProfile previousRuntime = Diagnostics.profile(DiagnosticSide.CLIENT);
+		try {
+			withScreen(config, (screen, client) -> {
+				openCategory(screen, Category.GEOMETRY_CONFIG);
+				LoggingProfileButton button = loggingProfileButton(screen);
 
-			selectScope(screen, 1);
-			openCategory(screen, Category.PERFORMANCE);
-			backButton(screen).onPress();
-			selectScope(screen, 0);
-			openCategory(screen, Category.GEOMETRY_CONFIG);
-			screen.resizeTo(640, 360);
+				PhysicalAltKeys.hold(true);
+				button.onClick(0, 0);
+				button.onClick(0, 0);
+				PhysicalAltKeys.hold(false);
+				assertEquals(LoggingProfile.DEBUG, config.getLoggingProfile());
+				assertEquals("Logging Detail: Debug", button.getMessage().getString());
 
-			assertTrue(screen.loggingProfileSession().isUnlocked(LoggingProfileSession.Side.CLIENT));
-			assertFalse(screen.loggingProfileSession().isUnlocked(LoggingProfileSession.Side.SERVER));
+				backButton(screen).onPress();
+				selectScope(screen, 1);
+				openCategory(screen, Category.PERFORMANCE);
+				backButton(screen).onPress();
+				selectScope(screen, 0);
+				openCategory(screen, Category.GEOMETRY_CONFIG);
+				screen.resizeTo(640, 360);
 
-			screen.loggingProfileSession().unlock(LoggingProfileSession.Side.SERVER);
-			backButton(screen).onPress();
-			selectScope(screen, 1);
+				LoggingProfileButton reopened = loggingProfileButton(screen);
+				assertEquals("Logging Detail: Debug", reopened.getMessage().getString(),
+					"the selected Debug value remains truthful after navigation and resize");
 
-			assertTrue(screen.loggingProfileSession().isUnlocked(LoggingProfileSession.Side.CLIENT));
-			assertTrue(screen.loggingProfileSession().isUnlocked(LoggingProfileSession.Side.SERVER));
-		});
+				reopened.onClick(0, 0);
+				assertEquals(LoggingProfile.NORMAL, config.getLoggingProfile());
+				reopened.onClick(0, 0);
+				assertEquals(LoggingProfile.DEEP, config.getLoggingProfile(),
+					"a released Alt candidate is not retained by the page or screen session");
+
+				PhysicalAltKeys.hold(true);
+				reopened.onClick(0, 0);
+				assertEquals(LoggingProfile.DEBUG, config.getLoggingProfile(),
+					"a later Alt press still adds Debug for that press only");
+			});
+		} finally {
+			PhysicalAltKeys.hold(false);
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, previousRuntime);
+		}
 	}
 
 	@Test
-	void successfulRootLeaveClearsBothUnlockFlags() throws Exception {
-		var parent = new TestParent();
-		withScreen(new ClientConfig(), parent, (screen, client) -> {
-			screen.loggingProfileSession().unlock(LoggingProfileSession.Side.CLIENT);
-			screen.loggingProfileSession().unlock(LoggingProfileSession.Side.SERVER);
-			screen.saveSucceeds = true;
+	void mountedRowReadsPhysicalAltAndDoesNotPersistAnUnlock() throws Exception {
+		var config = new ClientConfig();
+		LoggingProfile previousRuntime = Diagnostics.profile(DiagnosticSide.CLIENT);
+		try {
+			withScreen(config, (screen, client) -> {
+				openCategory(screen, Category.GEOMETRY_CONFIG);
+				LoggingProfileButton button = loggingProfileButton(screen);
 
-			screen.onClose();
+				PhysicalAltKeys.hold(true);
+				button.onClick(0, 0);
+				assertEquals(LoggingProfile.DEEP, config.getLoggingProfile());
+				assertEquals("Logging Detail: Detailed", button.getMessage().getString());
 
-			assertSame(parent, client.screen);
-			assertFalse(screen.loggingProfileSession().isUnlocked(LoggingProfileSession.Side.CLIENT));
-			assertFalse(screen.loggingProfileSession().isUnlocked(LoggingProfileSession.Side.SERVER));
-		});
+				button.onClick(0, 0);
+				assertEquals(LoggingProfile.DEBUG, config.getLoggingProfile());
+				assertEquals("Logging Detail: Debug", button.getMessage().getString());
+
+				PhysicalAltKeys.hold(false);
+				assertEquals("Logging Detail: Debug", button.getMessage().getString(),
+					"releasing Alt changes no value and no caption");
+
+				button.onClick(0, 0);
+				assertEquals(LoggingProfile.NORMAL, config.getLoggingProfile());
+				button.onClick(0, 0);
+				assertEquals(LoggingProfile.DEEP, config.getLoggingProfile(),
+					"the physical Alt press left no persistent candidate");
+			});
+		} finally {
+			PhysicalAltKeys.hold(false);
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, previousRuntime);
+		}
 	}
 
 	@Test
-	void failedRootSaveKeepsTheScreenAndItsUnlockFlags() throws Exception {
-		withScreen(new ClientConfig(), new TestParent(), (screen, client) -> {
-			screen.loggingProfileSession().unlock(LoggingProfileSession.Side.CLIENT);
-			screen.saveSucceeds = false;
-
-			screen.onClose();
-
-			assertSame(screen, client.screen);
-			assertTrue(screen.loggingProfileSession().isUnlocked(LoggingProfileSession.Side.CLIENT));
-		});
-	}
-
-	@Test
-	void cancellingTheResetConfirmationKeepsTheSession() throws Exception {
-		withScreen(new ClientConfig(), new TestParent(), (screen, client) -> {
-			screen.loggingProfileSession().unlock(LoggingProfileSession.Side.CLIENT);
-
-			screen.handleResetConfirmation(false);
-
-			assertSame(screen, client.screen);
-			assertTrue(screen.loggingProfileSession().isUnlocked(LoggingProfileSession.Side.CLIENT));
-		});
-	}
-
-	@Test
-	void plainScreenRemovalDoesNotClearTheSession() throws Exception {
-		withScreen(new ClientConfig(), new TestParent(), (screen, client) -> {
-			screen.loggingProfileSession().unlock(LoggingProfileSession.Side.CLIENT);
-
-			screen.removed();
-
-			assertTrue(screen.loggingProfileSession().isUnlocked(LoggingProfileSession.Side.CLIENT));
-		});
-	}
-
-	@Test
-	void confirmedResetClearsTheOldSessionAndTheReplacementStartsLocked() throws Exception {
-		withScreen(new ClientConfig(), new TestParent(), (screen, client) -> {
-			screen.loggingProfileSession().unlock(LoggingProfileSession.Side.CLIENT);
-			screen.loggingProfileSession().unlock(LoggingProfileSession.Side.SERVER);
-
-			screen.handleResetConfirmation(true);
-
-			assertTrue(screen.resetRecreated);
-			assertFalse(screen.loggingProfileSession().isUnlocked(LoggingProfileSession.Side.CLIENT));
-			assertFalse(screen.loggingProfileSession().isUnlocked(LoggingProfileSession.Side.SERVER));
-			var replacement = assertInstanceOf(TestSettingsScreen.class, client.screen);
-			assertFalse(replacement.loggingProfileSession().isUnlocked(LoggingProfileSession.Side.CLIENT));
-			assertFalse(replacement.loggingProfileSession().isUnlocked(LoggingProfileSession.Side.SERVER));
-		});
-	}
-
-	@Test
-	void loggingRowsExposeNativeTooltipNarrationWithTheUnlockHint() throws Exception {
-		withScreen(new ClientConfig(), null, (screen, client) -> {
+	void loggingRowsExposeShortScopeHelpWithoutUnlockOrDebugHints() throws Exception {
+		withScreen(new ClientConfig(), (screen, client) -> {
 			openCategory(screen, Category.GEOMETRY_CONFIG);
 			LoggingProfileButton clientRow = loggingProfileButton(screen);
 			assertTrue(clientRow.getMessage().getString().contains("Logging Detail"));
 			String clientHelp = tooltipText(clientRow);
-			assertTrue(clientHelp.contains("Client diagnostic logging detail"));
-			assertTrue(clientHelp.contains("Shift+left-click only unlocks the Debug candidate"));
+			assertTrue(clientHelp.contains("Client log detail."));
+			assertTrue(clientHelp.contains("Applies immediately."));
+			assertNoUnlockHint(clientHelp);
 
 			backButton(screen).onPress();
 			selectScope(screen, 1);
@@ -174,8 +169,9 @@ class LoggingProfileScreenTest {
 			LoggingProfileButton serverRow = loggingProfileButton(screen);
 			assertTrue(serverRow.getMessage().getString().contains("Server Logging Detail"));
 			String serverHelp = tooltipText(serverRow);
-			assertTrue(serverHelp.contains("Server diagnostic logging detail"));
-			assertTrue(serverHelp.contains("Shift+left-click only unlocks the Debug candidate"));
+			assertTrue(serverHelp.contains("Server log detail."));
+			assertTrue(serverHelp.contains("Submitted when settings close"));
+			assertNoUnlockHint(serverHelp);
 		});
 	}
 
@@ -185,11 +181,11 @@ class LoggingProfileScreenTest {
 		config.setLoggingProfile(LoggingProfile.DEBUG);
 		LoggingProfile previousRuntime = Diagnostics.profile(DiagnosticSide.CLIENT);
 		try {
-			withScreen(config, null, (screen, client) -> {
+			withScreen(config, (screen, client) -> {
 				openCategory(screen, Category.GEOMETRY_CONFIG);
 				LoggingProfileButton button = loggingProfileButton(screen);
 				assertEquals("Logging Detail: Debug", button.getMessage().getString(),
-					"a current Debug value stays visible while the row is locked");
+					"a current Debug value stays visible without holding Alt");
 
 				button.onPress();
 				assertEquals(LoggingProfile.NORMAL, config.getLoggingProfile());
@@ -199,20 +195,14 @@ class LoggingProfileScreenTest {
 				assertEquals(LoggingProfile.DEEP, config.getLoggingProfile());
 				assertEquals(LoggingProfile.DEEP, Diagnostics.profile(DiagnosticSide.CLIENT));
 
+				PhysicalAltKeys.hold(true);
 				button.onPress();
-				assertEquals(LoggingProfile.NORMAL, config.getLoggingProfile(),
-					"the locked row skips Debug after leaving it");
-				assertEquals(LoggingProfile.NORMAL, Diagnostics.profile(DiagnosticSide.CLIENT));
-
-				screen.loggingProfileSession().unlock(LoggingProfileSession.Side.CLIENT);
-				button.onPress();
-				button.onPress();
-
 				assertEquals(LoggingProfile.DEBUG, config.getLoggingProfile());
 				assertEquals(LoggingProfile.DEBUG, Diagnostics.profile(DiagnosticSide.CLIENT),
 					"the client setter immediately publishes the selected profile");
 			});
 		} finally {
+			PhysicalAltKeys.hold(false);
 			Diagnostics.setProfile(DiagnosticSide.CLIENT, previousRuntime);
 		}
 	}
@@ -227,7 +217,7 @@ class LoggingProfileScreenTest {
 		assertEquals(LoggingProfile.NORMAL, constructionTimeConfig.getLoggingProfile());
 		LoggingProfile previousRuntime = Diagnostics.profile(DiagnosticSide.CLIENT);
 		try {
-			withScreen(constructionTimeConfig, null, handler::getConfig, (screen, client) -> {
+			withScreen(constructionTimeConfig, handler::getConfig, (screen, client) -> {
 				openCategory(screen, Category.GEOMETRY_CONFIG);
 				LoggingProfileButton button = loggingProfileButton(screen);
 				assertEquals("Logging Detail: Normal", button.getMessage().getString());
@@ -262,8 +252,17 @@ class LoggingProfileScreenTest {
 				assertEquals("Logging Detail: Detailed", button.getMessage().getString());
 				assertEquals(LoggingProfile.DEEP, Diagnostics.profile(DiagnosticSide.CLIENT),
 					"the replacement config's selected profile is published immediately");
+
+				PhysicalAltKeys.hold(true);
+				button.onPress();
+				assertEquals(LoggingProfile.DEBUG, replacement.getLoggingProfile(),
+					"the temporarily available Debug candidate also writes the replacement handler config");
+				assertEquals(LoggingProfile.NORMAL, constructionTimeConfig.getLoggingProfile());
+				assertEquals("Logging Detail: Debug", button.getMessage().getString());
+				assertEquals(LoggingProfile.DEBUG, Diagnostics.profile(DiagnosticSide.CLIENT));
 			});
 		} finally {
+			PhysicalAltKeys.hold(false);
 			Diagnostics.setProfile(DiagnosticSide.CLIENT, previousRuntime);
 		}
 	}
@@ -272,7 +271,7 @@ class LoggingProfileScreenTest {
 	void serverRowEditsOnlyTheDraftAndNeverPublishesTheRuntimeProfile() throws Exception {
 		LoggingProfile previousServer = Diagnostics.profile(DiagnosticSide.SERVER);
 		try {
-			withScreen(new ClientConfig(), null, (screen, client) -> {
+			withScreen(new ClientConfig(), (screen, client) -> {
 				ServerSettingsModel model = openServerPerformance(screen, snapshot(true, LoggingProfile.DEEP));
 				LoggingProfileButton button = loggingProfileButton(screen);
 				assertEquals("Server Logging Detail: Detailed", button.getMessage().getString());
@@ -288,34 +287,44 @@ class LoggingProfileScreenTest {
 				assertEquals(LoggingProfile.DEEP, model.loggingProfile());
 				assertFalse(model.dirty());
 
-				button.onPress();
-				assertEquals(LoggingProfile.NORMAL, model.loggingProfile());
-				screen.loggingProfileSession().unlock(LoggingProfileSession.Side.SERVER);
-				button.onPress();
+				PhysicalAltKeys.hold(true);
 				button.onPress();
 				assertEquals(LoggingProfile.DEBUG, model.loggingProfile());
 				assertEquals(LoggingProfile.DEBUG, model.updatePlan().orElseThrow().loggingProfile());
+				assertEquals(previousServer, Diagnostics.profile(DiagnosticSide.SERVER),
+					"the temporary Debug candidate still stays in the draft");
 			});
 		} finally {
+			PhysicalAltKeys.hold(false);
 			Diagnostics.setProfile(DiagnosticSide.SERVER, previousServer);
 		}
 	}
 
 	@Test
-	void readOnlyServerRowShowsDebugWithoutEditingOrUnlocking() throws Exception {
-		withScreen(new ClientConfig(), null, (screen, client) -> {
+	void readOnlyServerRowShowsDebugWithoutEditing() throws Exception {
+		withScreen(new ClientConfig(), (screen, client) -> {
 			ServerSettingsModel model = openServerPerformance(screen, snapshot(false, LoggingProfile.DEBUG));
 			LoggingProfileButton button = loggingProfileButton(screen);
 			assertEquals("Server Logging Detail: Debug", button.getMessage().getString(),
 				"a read-only viewer sees the authoritative Debug value");
-			assertFalse(button.active, "a read-only viewer cannot activate or Shift-unlock the row");
+			assertFalse(button.active, "a read-only viewer cannot activate the row");
 
+			PhysicalAltKeys.hold(true);
 			button.onPress();
+			button.onClick(0, 0);
 
 			assertEquals(LoggingProfile.DEBUG, model.loggingProfile());
 			assertFalse(model.dirty());
-			assertFalse(screen.loggingProfileSession().isUnlocked(LoggingProfileSession.Side.SERVER));
+			assertTrue(model.updatePlan().isEmpty());
 		});
+	}
+
+	private static void assertNoUnlockHint(String help) {
+		String normalized = help.toLowerCase(Locale.ROOT);
+		assertFalse(normalized.contains("unlock"));
+		assertFalse(normalized.contains("shift"));
+		assertFalse(normalized.contains("alt"));
+		assertFalse(normalized.contains("debug"));
 	}
 
 	private static ServerConfigSnapshot snapshot(boolean canEdit, LoggingProfile profile) {
@@ -417,22 +426,20 @@ class LoggingProfileScreenTest {
 			.flatMap(entry -> entry.children().stream()).map(AbstractWidget.class::cast).toList();
 	}
 
-	private static void withScreen(
-		ClientConfig config,
-		@Nullable Screen parent,
-		ScreenCheck check
-	) throws Exception {
-		withScreen(config, parent, () -> config, check);
+	private static void withScreen(ClientConfig config, ScreenCheck check) throws Exception {
+		withScreen(config, () -> config, check);
 	}
 
 	private static void withScreen(
 		ClientConfig config,
-		@Nullable Screen parent,
 		Supplier<ClientConfig> loggingConfig,
 		ScreenCheck check
 	) throws Exception {
 		var client = allocate(HeadlessMinecraft.class);
 		client.setLastInputType(InputType.KEYBOARD_ARROW);
+		var window = allocate(Window.class);
+		setField(Window.class, window, "window", 1L);
+		setField(Minecraft.class, client, "window", window);
 		var instanceField = Minecraft.class.getDeclaredField("instance");
 		instanceField.setAccessible(true);
 		@Nullable Object previousClient = instanceField.get(null);
@@ -441,8 +448,8 @@ class LoggingProfileScreenTest {
 		var currentScreenField = SettingsScreen.class.getDeclaredField("currentSettingsScreen");
 		currentScreenField.setAccessible(true);
 		@Nullable Object previousScreen = currentScreenField.get(null);
-		var screen = new TestSettingsScreen(config, parent, loggingConfig);
-		try {
+		var screen = new TestSettingsScreen(config, loggingConfig);
+		try (var ignored = new PhysicalAltKeys()) {
 			instanceField.set(null, client);
 			CommonClient.Game = client;
 			Language.inject(new EnglishLanguage(previousLanguage));
@@ -464,6 +471,13 @@ class LoggingProfileScreenTest {
 		return type.cast(unsafeClass.getMethod("allocateInstance", Class.class).invoke(unsafeField.get(null), type));
 	}
 
+	private static void setField(Class<?> owner, Object instance, String name, Object value)
+		throws ReflectiveOperationException {
+		var field = owner.getDeclaredField(name);
+		field.setAccessible(true);
+		field.set(instance, value);
+	}
+
 	@NotNullByDefault
 	@FunctionalInterface
 	private interface ScreenCheck {
@@ -471,27 +485,9 @@ class LoggingProfileScreenTest {
 	}
 
 	@NotNullByDefault
-	private static final class TestParent extends Screen {
-		private TestParent() {
-			super(Component.literal("parent"));
-		}
-	}
-
-	@NotNullByDefault
 	private static final class TestSettingsScreen extends SettingsScreen {
-		private boolean saveSucceeds = true;
-		private boolean resetRecreated;
-
-		private TestSettingsScreen(ClientConfig config, @Nullable Screen parent) {
-			this(config, parent, () -> config);
-		}
-
-		private TestSettingsScreen(
-			ClientConfig config,
-			@Nullable Screen parent,
-			Supplier<ClientConfig> loggingConfig
-		) {
-			super(config, parent, loggingConfig);
+		private TestSettingsScreen(ClientConfig config, Supplier<ClientConfig> loggingConfig) {
+			super(config, null, loggingConfig);
 		}
 
 		private void initialize(Minecraft client) {
@@ -506,17 +502,6 @@ class LoggingProfileScreenTest {
 		private void resizeTo(int width, int height) {
 			this.resize(this.minecraft, width, height);
 		}
-
-		@Override
-		boolean persistSettings() {
-			return this.saveSucceeds;
-		}
-
-		@Override
-		void recreateAfterClientReset() {
-			this.resetRecreated = true;
-			this.minecraft.setScreen(new TestSettingsScreen(new ClientConfig(), null));
-		}
 	}
 
 	@NotNullByDefault
@@ -524,14 +509,6 @@ class LoggingProfileScreenTest {
 		private HeadlessMinecraft() {
 			super(null);
 			throw new AssertionError("allocate without starting Minecraft");
-		}
-
-		@Override
-		public void setScreen(@Nullable Screen screen) {
-			this.screen = screen;
-			if (screen instanceof TestSettingsScreen test) {
-				test.initialize(this);
-			}
 		}
 	}
 
@@ -608,6 +585,78 @@ class LoggingProfileScreenTest {
 		@Override
 		public FormattedCharSequence getVisualOrder(FormattedText text) {
 			return this.fallback.getVisualOrder(text);
+		}
+	}
+
+	/** Native Screen.hasAltDown asks GLFW; intercept that read without creating a live window. */
+	@NotNullByDefault
+	private static final class PhysicalAltKeys implements AutoCloseable {
+		// A JVM may inline GLFW's final function pointer. Keep one bounded callback
+		// alive for the test process even after restoring the original pointer.
+		private static final PressedKeyCallback CALLBACK = new PressedKeyCallback();
+		private static volatile boolean held;
+		private final Class<?> unsafeClass = Class.forName("sun.misc.Unsafe");
+		private final Object unsafe;
+		private final Object functionBase;
+		private final long functionOffset;
+		private final long previousFunction;
+
+		private PhysicalAltKeys() throws ReflectiveOperationException {
+			var unsafeField = this.unsafeClass.getDeclaredField("theUnsafe");
+			unsafeField.setAccessible(true);
+			this.unsafe = Objects.requireNonNull(unsafeField.get(null));
+			java.lang.reflect.Field function = Class.forName("org.lwjgl.glfw.GLFW$Functions")
+				.getDeclaredField("GetKey");
+			this.functionBase = Objects.requireNonNull(
+				this.unsafeClass.getMethod("staticFieldBase", java.lang.reflect.Field.class)
+					.invoke(this.unsafe, function));
+			this.functionOffset = (long) this.unsafeClass.getMethod("staticFieldOffset", java.lang.reflect.Field.class)
+				.invoke(this.unsafe, function);
+			this.previousFunction = function.getLong(null);
+			this.writeFunction(CALLBACK.address);
+		}
+
+		private static void hold(boolean value) {
+			held = value;
+		}
+
+		private void writeFunction(long address) throws ReflectiveOperationException {
+			this.unsafeClass.getMethod("putLongVolatile", Object.class, long.class, long.class)
+				.invoke(this.unsafe, this.functionBase, this.functionOffset, address);
+		}
+
+		@Override
+		public void close() throws ReflectiveOperationException {
+			held = false;
+			this.writeFunction(this.previousFunction);
+		}
+	}
+
+	@NotNullByDefault
+	private static final class PressedKeyCallback implements CallbackI {
+		private final FFICIF callInterface = FFICIF.calloc();
+		private final PointerBuffer argumentTypes = MemoryUtil.memAllocPointer(2);
+		private final long address;
+
+		private PressedKeyCallback() {
+			this.argumentTypes.put(0, LibFFI.ffi_type_pointer.address())
+				.put(1, LibFFI.ffi_type_sint32.address());
+			assertEquals(LibFFI.FFI_OK,
+				LibFFI.ffi_prep_cif(this.callInterface, LibFFI.FFI_DEFAULT_ABI, LibFFI.ffi_type_sint32,
+					this.argumentTypes));
+			this.address = CallbackI.super.address();
+		}
+
+		@Override
+		public FFICIF getCallInterface() {
+			return this.callInterface;
+		}
+
+		@Override
+		public void callback(long result, long arguments) {
+			int key = MemoryUtil.memGetInt(MemoryUtil.memGetAddress(arguments + Pointer.POINTER_SIZE));
+			boolean alt = key == 342 || key == 346;
+			MemoryUtil.memPutInt(result, PhysicalAltKeys.held && alt ? 1 : 0);
 		}
 	}
 }

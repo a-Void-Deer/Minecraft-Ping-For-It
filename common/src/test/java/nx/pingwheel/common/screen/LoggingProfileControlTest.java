@@ -4,6 +4,8 @@ import net.minecraft.network.chat.Component;
 import nx.pingwheel.common.config.ChannelMode;
 import nx.pingwheel.common.config.InventoryConfigValues;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.diagnostics.LoggingProfile;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
@@ -21,147 +23,150 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class LoggingProfileControlTest {
 
 	@Test
-	void lockedCycleMovesOnlyBetweenNormalAndDetailed() {
-		assertEquals(LoggingProfile.DEEP, LoggingProfileSession.next(LoggingProfile.NORMAL, false));
-		assertEquals(LoggingProfile.NORMAL, LoggingProfileSession.next(LoggingProfile.DEEP, false));
-		assertEquals(LoggingProfile.NORMAL, LoggingProfileSession.next(LoggingProfile.DEBUG, false));
+	void ordinaryRotationMovesOnlyBetweenNormalAndDetailed() {
+		assertEquals(LoggingProfile.DEEP, LoggingProfileButton.next(LoggingProfile.NORMAL, false));
+		assertEquals(LoggingProfile.NORMAL, LoggingProfileButton.next(LoggingProfile.DEEP, false));
+		assertEquals(LoggingProfile.NORMAL, LoggingProfileButton.next(LoggingProfile.DEBUG, false));
 	}
 
 	@Test
-	void unlockedCycleUsesAllThreeCandidates() {
-		assertEquals(LoggingProfile.DEEP, LoggingProfileSession.next(LoggingProfile.NORMAL, true));
-		assertEquals(LoggingProfile.DEBUG, LoggingProfileSession.next(LoggingProfile.DEEP, true));
-		assertEquals(LoggingProfile.NORMAL, LoggingProfileSession.next(LoggingProfile.DEBUG, true));
+	void heldAltTemporarilyIncludesDebugInTheRotation() {
+		assertEquals(LoggingProfile.DEEP, LoggingProfileButton.next(LoggingProfile.NORMAL, true));
+		assertEquals(LoggingProfile.DEBUG, LoggingProfileButton.next(LoggingProfile.DEEP, true));
+		assertEquals(LoggingProfile.NORMAL, LoggingProfileButton.next(LoggingProfile.DEBUG, true));
 	}
 
 	@Test
-	void shiftClickOnlyUnlocksThisRowsCandidateWithoutSelectingOrRepeatingTheCycle() {
-		var session = new LoggingProfileSession();
+	void eachPressReadsTheCurrentAltState() {
 		var current = new AtomicReference<>(LoggingProfile.NORMAL);
 		var selected = new ArrayList<LoggingProfile>();
-		var shift = new AtomicBoolean(true);
-		var button = button(session, LoggingProfileSession.Side.CLIENT, current, selected, shift);
-		assertEquals("Normal", button.getMessage().getString());
+		var alt = new AtomicBoolean(false);
+		var button = button(current, selected, alt);
 
-		button.onClick(0, 0);
+		button.onPress();
+		assertEquals(LoggingProfile.DEEP, current.get());
 
-		assertTrue(session.isUnlocked(LoggingProfileSession.Side.CLIENT));
-		assertFalse(session.isUnlocked(LoggingProfileSession.Side.SERVER), "the other row stays locked");
-		assertEquals(LoggingProfile.NORMAL, current.get());
-		assertTrue(selected.isEmpty(), "unlocking must not apply a value");
-		assertEquals("Normal", button.getMessage().getString());
+		alt.set(true);
+		button.onPress();
+		assertEquals(LoggingProfile.DEBUG, current.get());
+		assertEquals("Logging Detail: Debug", button.getMessage().getString());
 
-		button.onClick(0, 0);
+		alt.set(false);
+		button.onPress();
+		assertEquals(LoggingProfile.NORMAL, current.get(), "a normal press leaves Debug");
 
-		assertEquals(LoggingProfile.NORMAL, current.get());
-		assertTrue(selected.isEmpty(), "an already-unlocked Shift click still does not cycle");
+		alt.set(true);
+		button.onPress();
+		button.onPress();
+		assertEquals(LoggingProfile.DEBUG, current.get(),
+			"Alt remains a live per-press modifier rather than a one-time unlock");
+		assertEquals(List.of(LoggingProfile.DEEP, LoggingProfile.DEBUG, LoggingProfile.NORMAL,
+			LoggingProfile.DEEP, LoggingProfile.DEBUG), selected);
+	}
 
-		shift.set(false);
+	@Test
+	void altClickSelectsTheNextValueInsteadOfOnlyRevealingACandidate() {
+		var current = new AtomicReference<>(LoggingProfile.NORMAL);
+		var selected = new ArrayList<LoggingProfile>();
+		var button = button(current, selected, new AtomicBoolean(true));
+
 		button.onClick(0, 0);
 
 		assertEquals(LoggingProfile.DEEP, current.get());
-		assertEquals(List.of(LoggingProfile.DEEP), selected);
+		assertEquals(List.of(LoggingProfile.DEEP), selected, "the same activation must apply the selected value");
+		assertEquals("Logging Detail: Detailed", button.getMessage().getString());
+
+		button.onClick(0, 0);
+
+		assertEquals(LoggingProfile.DEBUG, current.get());
+		assertEquals(List.of(LoggingProfile.DEEP, LoggingProfile.DEBUG), selected);
 	}
 
 	@Test
-	void keyboardActivationCyclesWithoutEverUnlockingDebugByItself() {
-		var session = new LoggingProfileSession();
-		var current = new AtomicReference<>(LoggingProfile.NORMAL);
+	void releasingAltRetractsTheCandidateButKeepsTheVisibleDebugValue() {
+		var current = new AtomicReference<>(LoggingProfile.DEBUG);
 		var selected = new ArrayList<LoggingProfile>();
-		var button = button(session, LoggingProfileSession.Side.CLIENT, current, selected, new AtomicBoolean(false));
+		var alt = new AtomicBoolean(false);
+		var button = button(current, selected, alt);
+
+		alt.set(true);
+		alt.set(false);
+
+		assertEquals(LoggingProfile.DEBUG, current.get(), "releasing Alt does not change the selected value");
+		assertEquals("Logging Detail: Debug", button.getMessage().getString());
 
 		button.onPress();
-		button.onPress();
 
-		assertEquals(LoggingProfile.NORMAL, current.get());
-		assertEquals(List.of(LoggingProfile.DEEP, LoggingProfile.NORMAL), selected);
-		assertFalse(session.isUnlocked(LoggingProfileSession.Side.CLIENT));
-		assertFalse(session.isUnlocked(LoggingProfileSession.Side.SERVER));
-
-		session.unlock(LoggingProfileSession.Side.CLIENT);
-		button.onPress();
-		button.onPress();
-		button.onPress();
-
-		assertEquals(LoggingProfile.NORMAL, current.get());
-		assertEquals(List.of(LoggingProfile.DEEP, LoggingProfile.NORMAL, LoggingProfile.DEEP,
-			LoggingProfile.DEBUG, LoggingProfile.NORMAL), selected,
-			"an existing session unlock enables Debug for keyboard cycling but the keyboard never grants it");
+		assertEquals(LoggingProfile.NORMAL, current.get(), "the next ordinary press cannot stay in Debug");
+		assertEquals(List.of(LoggingProfile.NORMAL), selected);
 	}
 
 	@Test
-	void wheelInputDoesNotUnlockOrSelect() {
-		var session = new LoggingProfileSession();
+	void wheelInputDoesNotSelectAValue() {
 		var current = new AtomicReference<>(LoggingProfile.NORMAL);
 		var selected = new ArrayList<LoggingProfile>();
-		var button = button(session, LoggingProfileSession.Side.CLIENT, current, selected, new AtomicBoolean(false));
+		var button = button(current, selected, new AtomicBoolean(true));
 
 		assertFalse(button.mouseScrolled(0, 0, 0, 1));
 
-		assertFalse(session.isUnlocked(LoggingProfileSession.Side.CLIENT));
 		assertEquals(LoggingProfile.NORMAL, current.get());
 		assertTrue(selected.isEmpty());
 	}
 
 	@Test
-	void serverRevealGestureDoesNotDirtyOrPlanTheDraft() {
-		var model = new ServerSettingsModel(true);
-		long requestId = model.beginExpansion();
-		assertTrue(model.applySnapshot(requestId, new ServerConfigSnapshot(
-			true, ChannelMode.AUTO, true, 1000, 5, 7, InventoryConfigValues.defaults(), true,
-			LoggingProfile.DEEP)));
-		var session = new LoggingProfileSession();
-		var button = new LoggingProfileButton(
-			() -> Component.literal(caption(model.loggingProfile())),
-			model::loggingProfile,
-			() -> session.isUnlocked(LoggingProfileSession.Side.SERVER),
-			() -> {
-				if (model.canEdit()) session.unlock(LoggingProfileSession.Side.SERVER);
-			},
-			model::setLoggingProfile,
-			() -> true);
-
-		button.onClick(0, 0);
-
-		assertTrue(session.isUnlocked(LoggingProfileSession.Side.SERVER));
-		assertEquals(LoggingProfile.DEEP, model.loggingProfile());
-		assertFalse(model.dirty());
-		assertTrue(model.updatePlan().isEmpty());
-	}
-
-	@Test
-	void inactiveServerRowCanNeitherSelectNorUnlock() {
-		var session = new LoggingProfileSession();
+	void inactiveServerRowCanNeitherSelectNorUseAlt() {
 		var current = new AtomicReference<>(LoggingProfile.DEBUG);
 		var selected = new ArrayList<LoggingProfile>();
-		var button = button(session, LoggingProfileSession.Side.SERVER, current, selected, new AtomicBoolean(true));
+		var button = button(current, selected, new AtomicBoolean(true));
 		button.active = false;
 
 		button.onClick(0, 0);
 		button.onPress();
 
-		assertFalse(session.isUnlocked(LoggingProfileSession.Side.SERVER));
 		assertEquals(LoggingProfile.DEBUG, current.get());
 		assertTrue(selected.isEmpty());
 	}
 
+	@Test
+	void serverDraftSelectionUsesTheSameTemporaryAltCandidateWithoutPublishingRuntime() {
+		LoggingProfile previousRuntime = Diagnostics.profile(DiagnosticSide.SERVER);
+		try {
+			var model = new ServerSettingsModel(true);
+			long requestId = model.beginExpansion();
+			assertTrue(model.applySnapshot(requestId, new ServerConfigSnapshot(
+				true, ChannelMode.AUTO, true, 1000, 5, 7, InventoryConfigValues.defaults(), true,
+				LoggingProfile.DEEP)));
+			var button = new LoggingProfileButton(
+				() -> Component.literal(caption(model.loggingProfile())),
+				model::loggingProfile,
+				model::setLoggingProfile,
+				() -> true);
+
+			button.onPress();
+
+			assertEquals(LoggingProfile.DEBUG, model.loggingProfile());
+			assertTrue(model.dirty());
+			assertEquals(LoggingProfile.DEBUG, model.updatePlan().orElseThrow().loggingProfile());
+			assertEquals(previousRuntime, Diagnostics.profile(DiagnosticSide.SERVER),
+				"the temporary Debug candidate stays in the draft");
+		} finally {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, previousRuntime);
+		}
+	}
+
 	private static LoggingProfileButton button(
-		LoggingProfileSession session,
-		LoggingProfileSession.Side side,
 		AtomicReference<LoggingProfile> current,
 		List<LoggingProfile> selected,
-		AtomicBoolean shift
+		AtomicBoolean alt
 	) {
 		return new LoggingProfileButton(
-			() -> Component.literal(caption(current.get())),
+			() -> Component.literal("Logging Detail: " + caption(current.get())),
 			current::get,
-			() -> session.isUnlocked(side),
-			() -> session.unlock(side),
 			profile -> {
 				current.set(profile);
 				selected.add(profile);
 			},
-			shift::get);
+			alt::get);
 	}
 
 	private static String caption(LoggingProfile profile) {

@@ -87,7 +87,6 @@ public class SettingsScreen extends OptionsSubScreen {
 	private final ClientConfig config;
 	private final Supplier<ClientConfig> loggingConfigSupplier;
 	private final ServerSettingsModel serverSettings = new ServerSettingsModel(false);
-	private final LoggingProfileSession loggingProfileSession = new LoggingProfileSession();
 	private final SettingsNavigationModel navigation = new SettingsNavigationModel();
 	private final Map<String, AbstractWidget> keyedWidgets = new HashMap<>();
 	private final Map<Scope, ScopeTab> scopeTabs = new EnumMap<>(Scope.class);
@@ -1703,20 +1702,8 @@ public class SettingsScreen extends OptionsSubScreen {
 		return button;
 	}
 
-	/** The root session owner; widgets only read its per-row reveal flag. */
-	LoggingProfileSession loggingProfileSession() {
-		return this.loggingProfileSession;
-	}
-
-	/** Shared root-exit/reset boundary; a failing save or ordinary removal never calls it. */
-	void clearLoggingProfileSession() {
-		this.loggingProfileSession.clear();
-	}
-
 	private LoggingProfileButton createLoggingProfileButton(boolean server) {
 		final Setting setting = server ? Setting.SERVER_LOGGING_PROFILE : Setting.LOGGING_PROFILE;
-		final LoggingProfileSession.Side side = server
-			? LoggingProfileSession.Side.SERVER : LoggingProfileSession.Side.CLIENT;
 		final MutableComponent label = LanguageUtils.settings(setting.id()).get();
 		final Supplier<LoggingProfile> current = () -> server
 			? this.serverSettings.loggingProfile()
@@ -1731,12 +1718,8 @@ public class SettingsScreen extends OptionsSubScreen {
 		final LoggingProfileButton button = new LoggingProfileButton(
 			() -> this.loggingProfileRowText(label, current.get()),
 			current,
-			() -> this.loggingProfileSession.isUnlocked(side),
-			() -> {
-				if (!server || this.serverSettings.canEdit()) this.loggingProfileSession.unlock(side);
-			},
 			select,
-			Screen::hasShiftDown);
+			Screen::hasAltDown);
 		button.active = !server || this.serverSettings.canEdit();
 		button.setTooltip(Tooltip.create(this.loggingProfileTooltip(server)));
 		return button;
@@ -1753,10 +1736,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private Component loggingProfileTooltip(boolean server) {
-		return Component.empty()
-			.append(LanguageUtils.settings(server ? "server_logging_profile" : "logging_profile").path("tooltip").get())
-			.append("\n")
-			.append(LanguageUtils.settings("logging_profile").path("unlock").get());
+		return LanguageUtils.settings(server ? "server_logging_profile" : "logging_profile").path("tooltip").get();
 	}
 
 	private Button createServerChannelModeButton() {
@@ -2093,7 +2073,6 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void leaveSettingsScreen() {
-		this.clearLoggingProfileSession();
 		if (parent != null && this.minecraft != null) {
 			clearCurrent(this);
 			this.minecraft.setScreen(parent);
@@ -2274,7 +2253,6 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.resetConfirmationHandled = true;
 		if (confirmed) {
 			this.suppressSaveOnClose = true;
-			this.clearLoggingProfileSession();
 			clearCurrent(this);
 			this.recreateAfterClientReset();
 		} else {

@@ -132,8 +132,7 @@ class SettingsLocalizationCoverageTest {
 		"presentation.advanced.tooltip",
 		"presentation.whitelist_only.tooltip",
 		"presentation.rule.allow.tooltip",
-		"presentation.rule.block.tooltip",
-		"logging_profile.unlock");
+		"presentation.rule.block.tooltip");
 
 	/**
 	 * Settings-screen format resources that are rendered with more than one value
