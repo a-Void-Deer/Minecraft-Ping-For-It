@@ -716,6 +716,28 @@ public class PlatformFluidServiceTest {
 		}
 	}
 
+	@Test void memberLocationContextDistinguishesUnloadedChunkAndUninstantiatedEntity() throws Exception {
+		var world = allocate(NativeWorld.class); world.server = allocate(NativeServer.class);
+		var context = new IPlatformFluidService.Context(world, BlockPos.ZERO, Direction.NORTH, UUID.randomUUID(),
+			(position, op) -> true, op -> true);
+		world.loaded = false;
+		try (var a = admission(); var op = a.enter(new PlatformFluidServiceImpl().probeProfile())) {
+			var unloaded = assertThrows(InventorySourceUnavailableException.class,
+				() -> new PlatformFluidServiceImpl().probe(context, op));
+			assertEquals("fluid member unloaded", unloaded.getMessage());
+			@Nullable String detail = unloaded.diagnosticContext();
+			assertNotNull(detail); assertTrue(detail.contains("position=0, 0, 0"), detail);
+		}
+		world.loaded = true; world.cache = allocate(NativeCache.class); world.cache.chunk = allocate(NativeChunk.class);
+		try (var a = admission(); var op = a.enter(new PlatformFluidServiceImpl().probeProfile())) {
+			var missing = assertThrows(InventorySourceUnavailableException.class,
+				() -> new PlatformFluidServiceImpl().probe(context, op));
+			assertEquals("fluid member entity not instantiated", missing.getMessage());
+			@Nullable String detail = missing.diagnosticContext();
+			assertNotNull(detail); assertTrue(detail.contains("hasBlockEntity=true"), detail);
+		}
+	}
+
 	public static void assertReleasedProbe(IPlatformFluidService.Probe probe) throws Exception {
 		for (var field : probe.getClass().getDeclaredFields()) if (List.of("route", "handler", "discovery", "origin").contains(field.getName())) {
 			field.setAccessible(true); assertNull(field.get(probe), "closed probe releases " + field.getName());

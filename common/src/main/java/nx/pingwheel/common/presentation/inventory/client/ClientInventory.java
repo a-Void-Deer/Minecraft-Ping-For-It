@@ -413,7 +413,10 @@ public final class ClientInventory {
 		for (InventoryResourceKind kind : InventoryResourceKind.values()) {
 			if (accepted.contains(kind)) schemaDisabled.remove(kind);
 			else {
+				boolean wasDisabled = schemaDisabled.contains(kind);
 				schemaDisabled.add(kind);
+				int removedPreviews = (int) previews.keySet().stream().filter(key -> key.kind() == kind).count();
+				int removedTracking = (int) tracking.values().stream().filter(state -> state.resourceKind == kind).count();
 				for (MarkerMetadata marker : knownMarkers.values()) if (marker.creationKind == kind) {
 					marker.creationSeed = null;
 					marker.displayCreationSeed = false;
@@ -423,6 +426,8 @@ public final class ClientInventory {
 				for (TrackingState state : List.copyOf(tracking.values())) if (state.resourceKind == kind) {
 					store.expire(state.channel); tracking.remove(state.markerId); removeUnknownSessions(state.markerId);
 				}
+				if (!wasDisabled)
+					ClientInventoryDiagnostics.laneSchemaDisabled(kind, removedPreviews, removedTracking);
 			}
 		}
 	}
@@ -516,6 +521,7 @@ public final class ClientInventory {
 	 * the preview channel bound is reached or the target is absent.
 	 */
 	public long open(@Nullable Target target) {
+		ClientInventoryDiagnostics.openRejected("missing-face", target, null, null);
 		return NO_REQUEST; // No face is never an unsided or inferred-UP view.
 	}
 	/**
@@ -527,23 +533,50 @@ public final class ClientInventory {
 	 * location, or a missing face never opens a channel.
 	 */
 	public long open(@Nullable CapturedPingContext frozen) {
-		if (frozen == null || frozen.blockHitFace().isEmpty()) return NO_REQUEST;
+		if (frozen == null) {
+			ClientInventoryDiagnostics.openRejected("missing-context", null, null, null);
+			return NO_REQUEST;
+		}
+		if (frozen.blockHitFace().isEmpty()) {
+			ClientInventoryDiagnostics.openRejected("missing-face", frozen.resolvedTarget().target(), null,
+				frozen.resolvedTarget().targetType().id());
+			return NO_REQUEST;
+		}
 		Target target = frozen.resolvedTarget().target();
 		if (!(target instanceof Target.BlockTarget)
-			&& !(target instanceof Target.ExternalBlockTarget external && external.isCandidate())) return NO_REQUEST;
+			&& !(target instanceof Target.ExternalBlockTarget external && external.isCandidate())) {
+			ClientInventoryDiagnostics.openRejected(target instanceof Target.ExternalBlockTarget
+					? "committed-external-target" : "unsupported-target",
+				target, frozen.blockHitFace().get(), frozen.resolvedTarget().targetType().id());
+			return NO_REQUEST;
+		}
 		return open(target, frozen.blockHitFace().get(), frozen.resolvedTarget().targetType().id());
 	}
 	public long open(@Nullable Target target, @Nullable BlockFace face, String targetType) {
-		if (face == null || !isOpenTarget(target) || !nx.pingwheel.common.presentation.PresentationSettings.isKnownTargetType(targetType)
-			|| schemaUnavailable() || requests.size() >= MAX_PREVIEW_CHANNELS) {
+		@Nullable String rejection = face == null ? "missing-face"
+			: !isOpenTarget(target) ? "unsupported-target"
+			: !nx.pingwheel.common.presentation.PresentationSettings.isKnownTargetType(targetType) ? "unknown-target-type"
+			: schemaUnavailable() ? "schema-unavailable"
+			: requests.size() >= MAX_PREVIEW_CHANNELS ? "preview-capacity" : null;
+		if (rejection != null) {
+			ClientInventoryDiagnostics.openRejected(rejection, target, face, targetType);
 			boundRejects++;
 			return NO_REQUEST;
 		}
 		long requestId = nextRequestId++;
-		PreviewRequest request = new PreviewRequest(Objects.requireNonNull(target), face, targetType);
+		PreviewRequest request = new PreviewRequest(Objects.requireNonNull(target), Objects.requireNonNull(face, "face"), targetType);
 		requests.put(requestId, request);
 		for (InventoryResourceKind kind : InventoryResourceKind.values()) {
-			if (schemaDisabled.contains(kind) || ready(kind) && !allows(kind, targetType)) continue;
+			if (schemaDisabled.contains(kind)) {
+				ClientInventoryDiagnostics.laneDecision(requestId, kind, "lane-schema-disabled", targetType);
+				continue;
+			}
+			if (!ready(kind)) {
+				ClientInventoryDiagnostics.laneDecision(requestId, kind, "lane-pending", targetType);
+			} else if (!allows(kind, targetType)) {
+				ClientInventoryDiagnostics.laneDecision(requestId, kind, "lane-policy-denied", targetType);
+				continue;
+			}
 			PreviewState state = new PreviewState(kind, request, requestId, target, face, targetType);
 			previews.put(new PreviewKey(requestId, kind), state);
 		}
@@ -716,6 +749,8 @@ public final class ClientInventory {
 		if (packet.kind() == InventoryS2CPacket.Kind.POLICY) {
 			InventoryResourceKind lane = packet.resourceKind();
 			allowedTypes.put(lane, packet.allowedTypes()); policyViews.put(lane, packet.view());
+			ClientInventoryDiagnostics.lanePolicy(lane, !packet.allowedTypes().isEmpty(), packet.view(),
+				packet.allowedTypes().size());
 			for (MarkerMetadata marker : knownMarkers.values()) {
 				if (!allows(lane, marker.targetType)) {
 					marker.receiptDenials.add(lane);
@@ -730,11 +765,13 @@ public final class ClientInventory {
 						for (UnknownKey key : unknown.keySet()) if (key.resourceKind() == lane && key.markerId().equals(state.markerId)) retired = Math.max(retired, key.baselineId());
 						metadata.retiredBaselines.merge(lane, retired, Math::max);
 					}
+					ClientInventoryDiagnostics.laneRevoked("tracking", state.serverRequestId, lane, state.status, state.baselineId);
 					store.expire(state.channel); tracking.remove(state.markerId); removeUnknownSessions(state.markerId);
 				}
 			}
 			for (PreviewState state : List.copyOf(previews.values())) if (state.resourceKind == lane && !allows(lane, state.targetType)) {
 				state.request.retiredBaselines.merge(lane, state.baselineId, Math::max);
+				ClientInventoryDiagnostics.laneRevoked("preview", state.requestId, lane, state.status, state.baselineId);
 				previews.remove(new PreviewKey(state.requestId, lane));
 			}
 			for (var entry : requests.entrySet()) {
@@ -919,6 +956,7 @@ public final class ClientInventory {
 		if (state.request.sent) return;
 		state.request.sent = true;
 		send(InventoryC2SPacket.open(epoch, presentationEpoch, presentationView, state.requestId, state.target, state.face));
+		ClientInventoryDiagnostics.openSent(state.requestId, state.resourceKind, state.target, state.face);
 	}
 
 	/** An inventory-v2 OPEN target is one native block or one uncommitted external candidate. */
@@ -937,6 +975,7 @@ public final class ClientInventory {
 			fencedPackets++;
 			return;
 		}
+		InventoryS2CPacket.Status previousStatus = state.status;
 		if (packet.baselineId() <= state.request.retiredBaselines.getOrDefault(state.resourceKind, -1L)) { fencedPackets++; return; }
 		if (packet.statusRevision() < state.statusRevision
 			|| state.status == InventoryS2CPacket.Status.INVALID && packet.statusRevision() == state.statusRevision
@@ -1006,6 +1045,9 @@ public final class ClientInventory {
 			if (state.groupRejected || isPreviewTerminalFailure(state.status))
 				state.completeScan = false;
 		}
+		if (previousStatus != state.status)
+			ClientInventoryDiagnostics.previewStatus(state.requestId, state.resourceKind, previousStatus, state.status,
+				state.statusRevision);
 	}
 
 	/** Merges one packet's absolute deltas per key; a rejected key makes the group incomplete. */

@@ -35,16 +35,24 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 		world.require(root, operation);
 		if (CreateFluidTankAccess.recognizes(block)) {
 			// A claimed but denied/malformed/unsupported tank never falls through to generic access.
-			if (!world.createAvailable()) return Optional.empty();
+			if (!world.createAvailable()) {
+				FluidSourceDiagnostics.createProbeAbsent(root, face, block.blockId(), block.entityId());
+				return Optional.empty();
+			}
 			return Optional.of(CreateFluidTankAccess.probe(world, root, face, block, operation));
 		}
 		return FluidCapabilityAccess.probe(new OrdinaryRoute(world, face, root, List.of(new FluidCapabilityAccess.Member(root, block))), operation);
 	}
 	/** Guard native strings before toString concatenates/copies an unbounded registry ID. */
 	static String boundedId(@Nullable ResourceLocation id) {
-		if (id == null || id.getNamespace().length() > 255 || id.getPath().length() > 255
-			|| (long) id.getNamespace().length() + id.getPath().length() + 1 > 256)
-			throw new InventorySourceUnavailableException("fluid registry identity bound");
+		if (id == null) throw FluidSourceDiagnostics.unavailable("fluid registry identity bound",
+			() -> "id=null;max=256");
+		int namespaceLength = id.getNamespace().length(), pathLength = id.getPath().length();
+		long totalLength = (long) namespaceLength + pathLength + 1;
+		if (namespaceLength > 255 || pathLength > 255 || totalLength > 256)
+			throw FluidSourceDiagnostics.unavailable("fluid registry identity bound",
+				() -> "namespaceLength=" + namespaceLength + ";pathLength=" + pathLength
+					+ ";totalLength=" + totalLength + ";max=256");
 		return id.toString();
 	}
 
@@ -68,30 +76,41 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 	private record MinecraftWorld(Context context) implements FluidCapabilityAccess.World {
 		@Override public void require(BlockPos position, Operation operation) {
 			context.require(position, operation);
-			if (!context.level().isLoaded(position)) throw new InventorySourceUnavailableException("fluid member unloaded");
+			if (!context.level().isLoaded(position)) throw FluidSourceDiagnostics.unavailable("fluid member unloaded",
+				() -> "position=" + position.toShortString() + ";chunk=" + (position.getX() >> 4) + "," + (position.getZ() >> 4));
 			context.require(position, operation);
 		}
 		@Override public FluidCapabilityAccess.Block block(BlockPos position, Operation operation) {
 			require(position, operation);
 			var chunk = context.level().getChunkSource().getChunkNow(position.getX() >> 4, position.getZ() >> 4);
-			if (chunk == null) throw new InventorySourceUnavailableException("fluid member chunk unavailable");
+			if (chunk == null) throw FluidSourceDiagnostics.unavailable("fluid member chunk unavailable",
+				() -> "position=" + position.toShortString() + ";chunk=" + (position.getX() >> 4) + "," + (position.getZ() >> 4));
 			require(position, operation);
 			var state = chunk.getBlockState(position);
 			if (state.getBlock() instanceof net.minecraft.world.level.block.AbstractCauldronBlock)
-				throw new InventorySourceUnavailableException("cauldron fluid storage is unsupported");
+				throw FluidSourceDiagnostics.unavailable("cauldron fluid storage is unsupported",
+					() -> "position=" + position.toShortString());
 			require(position, operation);
 			// Do not promote pending NBT: a Create member constructor can refresh its capability and
 			// perform an unguarded controller lookup before the complete structure is admitted.
 			@Nullable BlockEntity entity = chunk.getBlockEntities().get(position);
-			if (state.hasBlockEntity() && entity == null) throw new InventorySourceUnavailableException("fluid member entity not instantiated");
+			if (state.hasBlockEntity() && entity == null) throw FluidSourceDiagnostics.unavailable("fluid member entity not instantiated",
+				() -> "position=" + position.toShortString() + ";hasBlockEntity=true");
 			require(position, operation);
 			if (entity != null) {
-				if (entity.isRemoved() || entity.getLevel() != context.level() || !position.equals(entity.getBlockPos())
-					|| entity.getBlockState().getBlock() != state.getBlock())
-					throw new InventorySourceUnavailableException("fluid member identity changed");
+				if (entity.isRemoved()) throw FluidSourceDiagnostics.unavailable("fluid member identity changed",
+					() -> "position=" + position.toShortString() + ";removed=true");
+				if (entity.getLevel() != context.level()) throw FluidSourceDiagnostics.unavailable("fluid member identity changed",
+					() -> "position=" + position.toShortString() + ";levelMatch=false");
+				BlockPos entityPosition = entity.getBlockPos();
+				if (!position.equals(entityPosition)) throw FluidSourceDiagnostics.unavailable("fluid member identity changed",
+					() -> "position=" + position.toShortString() + ";entityPosition=" + entityPosition.toShortString());
+				if (entity.getBlockState().getBlock() != state.getBlock()) throw FluidSourceDiagnostics.unavailable("fluid member identity changed",
+					() -> "position=" + position.toShortString() + ";blockMatch=false");
 				require(position, operation);
 				if (entity instanceof RandomizableContainer container && container.getLootTable() != null)
-					throw new InventorySourceUnavailableException("fluid member has pending loot");
+					throw FluidSourceDiagnostics.unavailable("fluid member has pending loot",
+						() -> "position=" + position.toShortString() + ";lootTablePresent=true");
 			}
 			require(position, operation);
 			String blockId = boundedId(BuiltInRegistries.BLOCK.getKey(state.getBlock()));

@@ -24,6 +24,9 @@ import nx.pingwheel.common.config.IntLimit;
 import nx.pingwheel.common.config.InventorySettings;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.integration.externalblock.BlockReadSource;
 import nx.pingwheel.common.integration.externalblock.ResolvedBlockReadSource;
 import nx.pingwheel.common.marker.MarkerAnchor;
@@ -33,6 +36,7 @@ import nx.pingwheel.common.platform.IPlatformFluidService;
 import nx.pingwheel.common.presentation.inventory.*;
 import nx.pingwheel.common.presentation.source.CaptureResult;
 import nx.pingwheel.common.topology.DoubleChestFixture;
+import nx.pingwheel.common.testing.DiagnosticLogCapture;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
@@ -49,7 +53,7 @@ public class InventoryFluidWorldTest {
 		public final InventoryRuntime runtime;
 		public final World level = DoubleChestFixture.allocate(World.class);
 		public final Map<BlockPos, Chest> entities = new HashMap<>();
-		public final BlockPos root = new BlockPos(1, 64, 3);
+		public final BlockPos root;
 		public final Target target;
 		public final InventorySourceInput input;
 		public final int tanks, memberCount;
@@ -64,11 +68,17 @@ public class InventoryFluidWorldTest {
 		public final List<FluidAddressWitness> witnesses = new ArrayList<>();
 		public ItemStack held = ItemStack.EMPTY;
 		public int reads, probes, closes, liveAccess, maxLiveAccess, binds, notices, witnessCaptures, witnessCompares;
+		public int memberChecks;
+		public @Nullable BlockPos deniedMember;
 		public long amount = 81;
 		public java.util.function.IntFunction<Entry> entryAt = slot -> amount == 0 ? Entry.empty() : new Entry(new Nbt(Fluids.WATER, null), amount);
 		public Runnable afterRead = () -> {};
 		public InventorySourceAccess.@Nullable Source lastSource;
 		public Fixture(int tanks, int members, boolean external) {
+			this(tanks, members, external, new BlockPos(1, 64, 3));
+		}
+		public Fixture(int tanks, int members, boolean external, BlockPos root) {
+			this.root = root;
 			this.tanks = tanks; memberCount = members; level.server = DoubleChestFixture.allocate(Server.class);
 			for (int i = 0; i < tanks; i++) addresses.add(new Object());
 			for (int i = 0; i < members; i++) { BlockPos pos = root.offset(i, 0, 0); var chest = new Chest(pos); chest.setLevel(level); entities.put(pos, chest); }
@@ -94,6 +104,10 @@ public class InventoryFluidWorldTest {
 		@Override public @Nullable BlockEntity existingEntity(ServerLevel level, BlockPos pos) { return entities.get(pos); }
 		@Override public BlockState blockState(ServerLevel level, BlockPos pos) { return Blocks.CHEST.defaultBlockState(); }
 		@Override public boolean loaded(ServerLevel level, BlockPos pos) { return loaded; }
+		@Override public boolean contains(InventoryFluidSources.Binding binding, BlockPos pos, InventoryValidationBudget.Allowance allowance) {
+			memberChecks++;
+			return !pos.equals(deniedMember) && InventoryFluidSources.World.super.contains(binding, pos, allowance);
+		}
 		@Override public @Nullable ItemStack ownerKey(InventorySourceInput input) { return authorized ? held : null; }
 		@Override public net.minecraft.core.HolderLookup.Provider registries(ServerLevel level) { return RegistryAccess.EMPTY; }
 		@Override public void used(RouteInfo route) { notices++; }
@@ -181,6 +195,60 @@ public class InventoryFluidWorldTest {
 		public void replaceMember(BlockPos pos) { var chest = new Chest(pos); chest.setLevel(level); entities.put(pos, chest); }
 		public void clearMemberWitness() { clearWitness((FluidAddressWitness) field(Objects.requireNonNull(lastSource), "memberWitness"), 0); }
 		@Override public void close() { runtime.close(); assertEquals(0, liveAccess); assertEquals(0, runtime.memory().reserved()); assertEquals(0, runtime.memory().retained()); }
+	}
+	@Test void firstCommonMemberGateRejectionReportsSpecificMemberOnceWithoutExtraSourceReads() {
+		for (var profile : LoggingProfile.values()) try (var logs = new DiagnosticLogCapture(profile);
+			var f = new Fixture(1, 3, false)) {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, profile);
+			var consumer = f.attach();
+			assertEquals(CaptureResult.Completeness.COMPLETE, f.runtime.step(consumer).orElseThrow().result().completeness());
+			f.deniedMember = f.root.offset(2, 0, 0);
+			int before = f.memberChecks, reads = f.reads;
+			assertEquals(Optional.of(false), f.runtime.probe(consumer));
+			assertEquals(4, f.memberChecks - before, "root plus ordered members; diagnostics add no gate reads");
+			assertEquals(reads, f.reads, "metadata rejection starts no content getter");
+			var rejected = logs.events().stream().map(event -> event.getMessage().getFormattedMessage())
+				.filter(message -> message.contains("site=inventory/fluid/valid")).toList();
+			if (profile == LoggingProfile.DEBUG) {
+				assertEquals(1, rejected.size(), logs.events().toString());
+				String message = rejected.getFirst();
+				assertTrue(message.contains("stage=member-gate reason=membership member=3, 64, 3"), message);
+				assertTrue(message.contains("face=NORTH"), message);
+			} else assertTrue(rejected.isEmpty(), "common expected denial is DEBUG-only");
+			assertEquals(Optional.of(false), f.runtime.probe(consumer));
+			assertEquals(rejected.size(), logs.events().stream().filter(event ->
+				event.getMessage().getFormattedMessage().contains("site=inventory/fluid/valid")).count());
+		}
+	}
+	@Test void initialNonRootMemberDenialKeepsItsPositionAndStageThroughTheRealCommonConstructor() {
+		try (var logs = new DiagnosticLogCapture(LoggingProfile.DEBUG); var f = new Fixture(1, 3, false)) {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEBUG);
+			f.deniedMember = f.root.offset(2, 0, 0);
+			f.runtime.advance(0, f.settings);
+			assertEquals(Optional.of(false), f.runtime.probe(f.input));
+			assertEquals(0, f.reads);
+			var rejected = logs.events().stream().map(event -> event.getMessage().getFormattedMessage())
+				.filter(message -> message.contains("site=inventory/runtime/input-probe")).toList();
+			assertEquals(1, rejected.size());
+			assertTrue(rejected.getFirst().contains("stage=member-gate reason=membership member=3, 64, 3 historical=false"), rejected.getFirst());
+		}
+	}
+	@Test void separateSourcesBothReportTheirFirstValidationRejectionWithoutResettingDiagnosticChannels() {
+		try (var logs = new DiagnosticLogCapture(LoggingProfile.DEBUG);
+			var first = new Fixture(1, 3, false);
+			var second = new Fixture(1, 3, false, new BlockPos(20, 64, 3))) {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEBUG);
+			var firstConsumer = first.attach(); var secondConsumer = second.attach();
+			first.runtime.step(firstConsumer).orElseThrow(); second.runtime.step(secondConsumer).orElseThrow();
+			first.deniedMember = first.root.offset(2, 0, 0); second.deniedMember = second.root.offset(2, 0, 0);
+			assertEquals(Optional.of(false), first.runtime.probe(firstConsumer));
+			assertEquals(Optional.of(false), second.runtime.probe(secondConsumer));
+			var rejected = logs.events().stream().map(event -> event.getMessage().getFormattedMessage())
+				.filter(message -> message.contains("site=inventory/fluid/valid")).toList();
+			assertEquals(2, rejected.size(), rejected.toString());
+			assertTrue(rejected.stream().anyMatch(message -> message.contains("member=3, 64, 3")));
+			assertTrue(rejected.stream().anyMatch(message -> message.contains("member=22, 64, 3")));
+		}
 	}
 	@Test void stableNativeHandlerWith257CompleteFluidKeysAnd129NbtEncodingsEndsExplicitlyIncomplete() {
 		try (var f = new Fixture(257, 1, false)) {

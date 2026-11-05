@@ -22,6 +22,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BaseContainerBlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.integration.ExternalBlockServerProviders;
 import nx.pingwheel.common.integration.externalblock.BlockReadSource;
 import nx.pingwheel.common.integration.externalblock.ResolvedBlockReadSource;
@@ -38,6 +39,7 @@ import nx.pingwheel.common.presentation.source.SourceKey;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
+import org.apache.logging.log4j.Level;
 
 /** Static fluid sources. Only detached metadata/object witnesses survive an external operation. */
 @NotNullByDefault
@@ -153,6 +155,7 @@ public final class InventoryFluidSources {
 		private int displayBytes;
 		private @Nullable InventoryFluidCodec.Catalog catalog;
 		private boolean closed, scopeTransition, frozen;
+		private boolean validationRejectionReported;
 		Source(World world, IPlatformFluidService service, InventorySourceInput input, int displayBytes, InventoryValidationBudget.Allowance allowance) {
 			this.world = world; this.service = service; this.input = input; this.displayBytes = displayBytes;
 			external = input.target() instanceof Target.ExternalBlockTarget;
@@ -251,16 +254,32 @@ public final class InventoryFluidSources {
 		}
 		private boolean memberGate(Binding binding, BlockPos pos, Operation operation, boolean historical) {
 			operation.allowance().debit(MEMBER);
-			if (!world.onServerThread() || !world.contains(binding, pos, operation.allowance()) || !world.loaded(binding.level(), pos)) return false;
+			if (!world.onServerThread()) return memberDenied("server-thread", pos, historical);
+			if (!world.contains(binding, pos, operation.allowance())) return memberDenied("membership", pos, historical);
+			if (!world.loaded(binding.level(), pos)) return memberDenied("unloaded", pos, historical);
 			@Nullable BlockEntity entity = world.existingEntity(binding.level(), pos);
-			if (entity == null || entity.getLevel() != binding.level() || !entity.getBlockPos().equals(pos)
-				|| entity.getBlockState().getBlock() != world.blockState(binding.level(), pos).getBlock() || !readable(entity, operation)) return false;
+			if (entity == null) return memberDenied("entity-missing", pos, historical);
+			if (entity.getLevel() != binding.level()) return memberDenied("level-changed", pos, historical);
+			if (!entity.getBlockPos().equals(pos)) return memberDenied("position-changed", pos, historical);
+			if (entity.getBlockState().getBlock() != world.blockState(binding.level(), pos).getBlock()) return memberDenied("block-changed", pos, historical);
+			if (!readable(entity, operation)) return memberDenied("read-authority", pos, historical);
 			if (!historical) return true;
 			operation.allowance().debit(INDEX_LOOKUP); int index = findIndex(pos);
 			@Nullable Witness witness = index < 0 ? null : members[index];
-			return witness != null && (ordinaryMembers == null || entity == ordinaryMembers[index])
-				&& registryMatches(witness.blockId(), BuiltInRegistries.BLOCK.getKey(world.blockState(binding.level(), pos).getBlock()))
-				&& registryMatches(witness.entityId(), BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()));
+			if (witness == null) return memberDenied("member-not-captured", pos, true);
+			if (ordinaryMembers != null && entity != ordinaryMembers[index]) return memberDenied("member-replaced", pos, true);
+			if (!registryMatches(witness.blockId(), BuiltInRegistries.BLOCK.getKey(world.blockState(binding.level(), pos).getBlock())))
+				return memberDenied("block-registry-changed", pos, true);
+			if (!registryMatches(witness.entityId(), BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType())))
+				return memberDenied("entity-registry-changed", pos, true);
+			return true;
+		}
+		private boolean memberDenied(String reason, BlockPos position, boolean historical) {
+			// Context.require used to turn this false into the same expected failure. Retain its
+			// first rejected member before that boundary loses the already-evaluated stage.
+			throw new InventorySourceUnavailableException("fluid access outside current owner/member scope",
+				() -> "stage=member-gate reason=" + reason + " member=" + position.toShortString()
+					+ " historical=" + historical + " owner=" + input.readOwner() + " face=" + input.face());
 		}
 		private @Nullable Witness find(BlockPos pos, Operation operation) {
 			operation.allowance().debit(INDEX_LOOKUP); int index = findIndex(pos); return index < 0 ? null : members[index];
@@ -313,11 +332,17 @@ public final class InventoryFluidSources {
 		}
 		private boolean validate(Binding binding, IPlatformFluidService.Access access, InventoryFluidAdmission admission) {
 			try (var operation = admission.enter(new OperationProfile(InventoryValidationBudget.NONE, members.length + 1L, members.length + 1L, 0))) {
-				if (!memberGate(binding, binding.root(), operation, true) || !authority(binding, operation)) return false;
-				for (Witness witness : members) if (!memberGate(binding, witness.position(), operation, true) || !authority(binding, operation)) return false;
+				if (!memberGate(binding, binding.root(), operation, true)) return validationRejected("root-member-gate", binding.root(), -1);
+				if (!authority(binding, operation)) return validationRejected("root-authority", binding.root(), -1);
+				for (int index = 0; index < members.length; index++) {
+					BlockPos position = members[index].position();
+					if (!memberGate(binding, position, operation, true)) return validationRejected("member-gate", position, index);
+					if (!authority(binding, operation)) return validationRejected("member-authority", position, index);
+				}
 			}
+			// A provider that consumes an exception into false owns that failure's detailed report.
 			try (var operation = admission.enter(access.validationProfile())) { if (!access.valid(operation)) return false; }
-			if (!sameLayout(access)) return false;
+			if (!sameLayout(access)) return validationRejected("layout-changed", binding.root(), -1);
 			if (memberWitness != null) {
 				var profile = FluidAddressWitness.profile(WitnessUse.COMPARE, members.length);
 				// One callback-free loaded-map lookup per member, separate from the helper's vector
@@ -331,7 +356,8 @@ public final class InventoryFluidSources {
 					// only after ALL checks, from the loaded-existing-BE map (no provider callbacks).
 					for (int index = 0; index < members.length; index++) {
 						@Nullable BlockEntity entity = world.existingEntity(binding.level(), members[index].position());
-						if (entity == null) return false; current[index] = entity;
+						if (entity == null) return validationRejected("member-missing-after-checks", members[index].position(), index);
+						current[index] = entity;
 					}
 					requireSame(memberWitness.compare(FluidAddressWitness.Schema.COMMON_MEMBERS_V1, current, operation));
 				}
@@ -339,7 +365,19 @@ public final class InventoryFluidSources {
 			try (var operation = admission.enter(access.witnessProfile(WitnessUse.COMPARE))) {
 				requireSame(access.compareWitness(addressWitness, operation));
 			}
+			validationRejectionReported = false;
 			return true;
+		}
+		private boolean validationRejected(String reason, BlockPos position, int index) {
+			if (!validationRejectionReported) {
+				validationRejectionReported = true;
+				Diagnostics.server().atDebug().event(Level.DEBUG,
+					"inventory/fluid/valid", reason,
+					() -> "operation=fluid/valid stage=validate member=" + position.toShortString() + " index=" + index
+						+ " members=" + members.length + " layout=" + layout.layoutId() + " slots=" + slots
+						+ " owner=" + input.readOwner() + " face=" + input.face() + " target=" + input.target());
+			}
+			return false;
 		}
 		private static void requireSame(WitnessMatch match) {
 			if (match == WitnessMatch.UNVERIFIABLE) throw unavailable("fluid historical identity evidence unverifiable");
@@ -362,7 +400,20 @@ public final class InventoryFluidSources {
 		@Override public boolean valid() { throw new IllegalStateException("fluid validity requires Runtime grants"); }
 		@Override public boolean valid(InventoryValidationBudget.Allowance allowance) {
 			try { return withAccess(allowance, this::validate); }
-			catch (InventorySourceUnavailableException unavailable) { return false; }
+			catch (InventorySourceUnavailableException unavailable) {
+				if (!validationRejectionReported) {
+					validationRejectionReported = true;
+					Diagnostics.server().atDebug().failure(Level.DEBUG,
+						"inventory/fluid/valid", "source-unavailable", () -> diagnosticDetail(unavailable), unavailable);
+				}
+				return false;
+			}
+		}
+		private String diagnosticDetail(InventorySourceUnavailableException unavailable) {
+			@Nullable String context = unavailable.diagnosticContext();
+			return "operation=fluid/valid stage=validate source=" + key + " owner=" + input.readOwner()
+				+ " face=" + input.face() + " target=" + input.target()
+				+ (context == null ? "" : " context=" + context);
 		}
 		@Override public InventoryDomainCodec.@Nullable Item read(int slot) { throw new UnsupportedOperationException("fluid resource admission required"); }
 		@Override public @Nullable InventoryResourceValue readResource(int slot, @Nullable InventoryCatalogAdmission catalogAdmission, InventoryValidationBudget.Allowance allowance) {

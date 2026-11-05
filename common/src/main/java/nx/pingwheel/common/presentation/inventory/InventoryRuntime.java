@@ -105,6 +105,8 @@ public final class InventoryRuntime implements AutoCloseable {
 		}
 	}
 	public final class Consumer implements AutoCloseable {
+		/** Diagnostic-only input recovery transition, bounded by this consumer's lifecycle. */
+		private boolean inputRejectionReported;
 		private final long diagnosticId = ++consumerSequence;
 		private final InventoryBudgetDelayState admissionDelay, probeDelay, logicalDelay, projectionDelay;
 		private boolean serviceableDemand = true;
@@ -996,7 +998,10 @@ public final class InventoryRuntime implements AutoCloseable {
 			if (round.physicalDelay != null) round.physicalDelay.cancel();
 			return InventorySourceAccess.Preparation.INCOMPLETE;
 		} catch (RuntimeException | LinkageError unavailable) {
-			warn("snapshot-prepare", consumer, round, unavailable);
+			if (InventoryCaptureDiagnostics.expectedSourceUnavailable(unavailable))
+				InventoryCaptureDiagnostics.sourceUnavailable("runtime/snapshot-prepare", consumer.input,
+					() -> round.key.toString(), "snapshot-prepare", unavailable);
+			else warn("snapshot-prepare", consumer, round, unavailable);
 			if (round.physicalDelay != null) round.physicalDelay.cancel();
 			return InventorySourceAccess.Preparation.UNAVAILABLE;
 		}
@@ -1055,37 +1060,58 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	/** Empty is admission defer, not source invalidity. */
 	public Optional<Boolean> probe(InventorySourceInput input) {
+		return probe(input, true);
+	}
+	private Optional<Boolean> probe(InventorySourceInput input, boolean reportRejection) {
 		var workspace = memory.tryReserve(authorityWorkspaceBytes());
 		if (workspace.isEmpty()) return Optional.empty();
 		try (var reserved = workspace.get()) {
 		var ticket = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
 		if (ticket.isEmpty()) return Optional.empty();
+		InventorySourceAccess.@org.jetbrains.annotations.Nullable Source resolved = null;
 		try (var grant = ticket.get()) {
 			grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
 			var resolution = validation(resolver.resolutionValidationCost(input), new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE), authorityWorkspaceBytes());
 			if (resolution.isEmpty()) return Optional.empty();
 			InventoryValidationBudget.Allowance allowance;
-			InventorySourceAccess.@org.jetbrains.annotations.Nullable Source resolved;
 			try (var operation = resolution.get()) {
 				allowance = operation.allowance;
 				resolved = resolver.resolve(input, effectiveDisplayCap(), allowance).orElse(null);
 			}
 			try (var source = resolved) {
-				if (source == null) { retireInvalid(input); return Optional.of(false); }
+				if (source == null) {
+					if (reportRejection) InventoryCaptureDiagnostics.sourceUnavailable("runtime/input-probe", input, null, "resolve-null", null);
+					retireInvalid(input); return Optional.of(false);
+				}
 				var evidence = validation(source.evidenceValidationCost(), allowance, authorityWorkspaceBytes());
 				if (evidence.isEmpty()) return Optional.empty();
 				boolean valid;
 				try (var operation = evidence.get()) { valid = source.valid(allowance); }
-				if (!valid) retireInvalid(input);
+				if (!valid) {
+					var probed = source;
+					if (reportRejection) InventoryCaptureDiagnostics.sourceUnavailable("runtime/input-probe", input, () -> probed.key().toString(), "valid-false", null);
+					retireInvalid(input);
+				}
 				return Optional.of(valid);
 			}
 		} catch (InventoryItemBudget.CaptureLimitException deferred) {
 			return Optional.empty();
 		} catch (RuntimeException | LinkageError unavailable) {
-			InventoryCaptureDiagnostics.warn("runtime/input-probe", input, null, () -> "tick=" + tick, unavailable);
+			@org.jetbrains.annotations.Nullable InventorySourceAccess.Source failedSource = resolved;
+			if (InventoryCaptureDiagnostics.expectedSourceUnavailable(unavailable)) {
+				if (reportRejection) InventoryCaptureDiagnostics.sourceUnavailable("runtime/input-probe", input,
+					failedSource == null ? null : () -> failedSource.key().toString(), "input-valid", unavailable);
+			}
+			else InventoryCaptureDiagnostics.warn("runtime/input-probe", input, null, () -> "tick=" + tick, unavailable);
 			retireInvalid(input); return Optional.of(false);
 		}
 		}
+	}
+	/** Recovery still performs the same input-only probe; only repeated diagnostic output is coalesced. */
+	public Optional<Boolean> probeRecovery(Consumer consumer) {
+		var result = probe(consumer.input, !consumer.inputRejectionReported);
+		if (result.isPresent()) consumer.inputRejectionReported = !result.get();
+		return result;
 	}
 	/** Checks the actual observation being published, including the completed result retained during a new sweep. */
 	public Optional<Boolean> probe(Consumer consumer) {
@@ -1098,7 +1124,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		Round completed = consumer.completedRound, scanning = consumer.round;
 		if (completed == null && scanning == null) {
 			// Input-only recovery has no readable-source evidence. Do not infer delay.
-			var result = probe(consumer.input);
+			var result = probeRecovery(consumer);
 			if (result.isPresent()) consumer.probeDelay.cancel();
 			return result;
 		}
@@ -1127,10 +1153,25 @@ public final class InventoryRuntime implements AutoCloseable {
 					for (Round round : completed == null ? List.of(scanning) : scanning == null || completed == scanning ? List.of(completed) : List.of(completed, scanning)) {
 						used++; // attempted validity calls remain charged, including exceptions and invalid retirement
 						boolean valid;
+						boolean reported = false;
 						try { valid = !round.closed && round.handle.evidenceValid(operation.allowance); }
 						catch (InventoryItemBudget.CaptureLimitException deferred) { return Optional.empty(); }
-						catch (RuntimeException | LinkageError unavailable) { warn("evidence-probe", consumer, round, unavailable); valid = false; }
-						if (!valid) { retire(round, unavailable(consumer.input.viewKey())); return Optional.of(false); }
+						catch (RuntimeException | LinkageError unavailable) {
+							if (InventoryCaptureDiagnostics.expectedSourceUnavailable(unavailable)) {
+								InventoryCaptureDiagnostics.sourceUnavailable("runtime/evidence-probe", consumer.input,
+									() -> round.key.toString(), "evidence-valid", unavailable);
+								reported = true;
+							} else {
+								warn("evidence-probe", consumer, round, unavailable);
+								reported = true;
+							}
+							valid = false;
+						}
+						if (!valid) {
+							if (!reported) InventoryCaptureDiagnostics.sourceUnavailable("runtime/evidence-probe", consumer.input,
+								() -> round.key.toString(), "valid-false", null);
+							retire(round, unavailable(consumer.input.viewKey())); return Optional.of(false);
+						}
 					}
 					if (consumer.probeDelay.outstanding()) consumer.probeDelay.progress(cycle(consumer));
 					return Optional.of(true);
@@ -1226,12 +1267,15 @@ public final class InventoryRuntime implements AutoCloseable {
 					}
 					consumer.cancelDelays();
 					consumer.pendingObservation = unavailable(scope.viewKey());
+					InventoryCaptureDiagnostics.sourceUnavailable("runtime/prepare", consumer.input, null,
+						resolved == SourceAccess.ResolveResult.Unresolved.UNSUPPORTED ? "resolve-unsupported" : "resolve-unavailable", null);
 					return InventorySourceAccess.Preparation.UNAVAILABLE;
 				}
 				var opened = access.open(available.descriptor(), scope, physical);
 				if (!(opened instanceof SourceAccess.OpenResult.Started started)) {
 					if (opened == SourceAccess.OpenResult.Unstarted.DEFERRED) return InventorySourceAccess.Preparation.DEFERRED;
 					consumer.pendingObservation = unavailable(scope.viewKey());
+					InventoryCaptureDiagnostics.sourceUnavailable("runtime/prepare", consumer.input, null, "open-unavailable", null);
 					return InventorySourceAccess.Preparation.UNAVAILABLE;
 				}
 				openedHandle = started.handle();

@@ -10,6 +10,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 import nx.pingwheel.common.config.SpatialSelectorSettings;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.domain.PingTypeCatalog;
@@ -24,6 +25,7 @@ import nx.pingwheel.common.interaction.candidate.CaptureEquivalenceKey;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.render.SpatialInventoryView.Status;
+import nx.pingwheel.common.testing.DiagnosticLogCapture;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -377,6 +379,13 @@ class SpatialSelectorSessionTest {
 			new SpatialSelectorSession.InventoryPreview<>("inventory", Status.UPDATING, rows,
 				List.of(ping("attention"), ping("request")), ping("attention")));
 	}
+	private static SpatialSelectorSession.ContentProjection<String> inventory(SpatialSelectorSession.CapturedTarget target,
+		long revision, Status status, boolean allowedTypes) {
+		List<PingType> types = allowedTypes ? List.of(ping("attention")) : List.of();
+		return new SpatialSelectorSession.ContentProjection<>(fence(target), revision, false, Status.READY, List.of(),
+			new SpatialSelectorSession.InventoryPreview<>("inventory", status, List.of(row("a", 5L)),
+				types, allowedTypes ? ping("attention") : null));
+	}
 	private static SpatialSelectorSession<String> openedList(boolean hover, Content port) {
 		var target = target("ordinary", "entity_block", true);
 		port.next = inventory(target, 1, false, List.of(row("a", 50L), row("b", 30L), row("c", 10L)));
@@ -510,6 +519,33 @@ class SpatialSelectorSessionTest {
 						assertEquals(inventory.id(), current(session).entryChoiceId(), "breadcrumb follows the resolved inventory choice");
 					}
 				}
+			}
+		}
+	}
+
+	@Test
+	void selectorContentLogsOneGreyReasonPerStateChange() {
+		record Case(boolean face, Status status, boolean allowedTypes, String reason) {}
+		for (var testCase : List.of(
+			new Case(false, Status.READY, true, "inventory-ineligible"),
+			new Case(true, Status.INVALID, true, "preview-invalid"),
+			new Case(true, Status.READY, false, "no-allowed-types"))) {
+			var target = target("ordinary", "entity_block", testCase.face());
+			var port = new Content();
+			port.next = inventory(target, 1, testCase.status(), testCase.allowedTypes());
+			try (var logs = new DiagnosticLogCapture(LoggingProfile.DEBUG)) {
+				var session = session(target, Map.of(), false, port);
+				session.open(0);
+				session.updateContent(inventory(target, 2, testCase.status(), testCase.allowedTypes()), 1);
+				session.updateContent(inventory(target, 3, testCase.status(), testCase.allowedTypes()), 2);
+
+				var messages = logs.events().stream().map(event -> event.getMessage().getFormattedMessage())
+					.filter(message -> message.contains("site=inventory/selector-content")).toList();
+				assertEquals(1, messages.size(), "a persistent grey reason is logged once per transition");
+				String message = messages.getFirst();
+				assertTrue(message.contains("handling=" + testCase.reason()));
+				assertTrue(message.contains("request=42"));
+				assertTrue(message.contains("status=" + testCase.status()));
 			}
 		}
 	}

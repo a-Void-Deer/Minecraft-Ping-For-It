@@ -12,12 +12,14 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.material.Fluids;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.capability.IFluidHandler;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.platform.IPlatformFluidService;
 import nx.pingwheel.common.platform.IPlatformFluidService.Operation;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.neoforge.platform.FluidCapabilityAccess;
 import nx.pingwheel.neoforge.platform.PlatformFluidServiceTest.PaidAccess;
 import static nx.pingwheel.neoforge.platform.PlatformFluidServiceTest.*;
+import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -153,6 +155,34 @@ class CreateFluidTankMetadataTest {
 		}
 	}
 
+	@Test void threeByThreeByTwentyArchiveProbeFinishDoesNotEmitRejectionDiagnostics() throws Exception {
+		var loader = new Loader(""); var world = new World(loader, 3, 20);
+		try (var capture = new CreateDiagnosticCapture(Level.DEBUG, LoggingProfile.DEBUG);
+			var access = access(loader, world, new BlockPos(2, 19, 2))) {
+			assertEquals(180, access.layout().members().size());
+			assertEquals(1, access.slots());
+			assertTrue(access.valid());
+			assertTrue(capture.events.isEmpty(), () -> capture.events.stream()
+				.map(event -> event.getMessage().getFormattedMessage()).toList().toString());
+		}
+	}
+
+	@Test void oneHundredEightyMemberFailureNamesCoordinateIndexAndShape() throws Exception {
+		var loader = new Loader(""); var world = new World(loader, 3, 20);
+		BlockPos target = new BlockPos(2, 19, 1);
+		Object entity = java.util.Objects.requireNonNull(world.blocks.get(target).entity());
+		field(entity.getClass(), "controller").set(entity, new BlockPos(99, 98, 97));
+		var failure = assertThrows(InventorySourceUnavailableException.class,
+			() -> access(loader, world, new BlockPos(2, 19, 2)));
+		assertEquals("Create fluid member controller", failure.getMessage());
+		@Nullable String context = failure.diagnosticContext();
+		assertNotNull(context);
+		assertTrue(context.contains("member=2, 19, 1"), context);
+		assertTrue(context.contains("index=178"), context);
+		assertTrue(context.contains("width=3;height=20;members=180"), context);
+		assertTrue(context.contains("observedController=99, 98, 97"), context);
+	}
+
 	private static PaidAccess access(Loader loader, World world) throws Exception {
 		return access(loader, world, BlockPos.ZERO.above());
 	}
@@ -174,23 +204,26 @@ class CreateFluidTankMetadataTest {
 		private final IFluidHandler ownTank;
 		private IFluidHandler handler;
 		private int requireCalls, capabilityCalls;
-		private final int height;
-		private World(Loader loader) throws Exception { this(loader, 2); }
-		private World(Loader loader, int height) throws Exception {
-			this.height = height;
+		private World(Loader loader) throws Exception { this(loader, 1, 2); }
+		private World(Loader loader, int height) throws Exception { this(loader, 1, height); }
+		private World(Loader loader, int width, int height) throws Exception {
 			Object block = allocate(loader.loadClass(BLOCK));
 			ownTank = (IFluidHandler) loader.loadClass(STORED).getConstructor(int.class, java.util.function.Consumer.class).newInstance(1000, (java.util.function.Consumer<Object>) ignored -> {});
 			handler = ownTank;
-			controller = entity(loader, BlockPos.ZERO, null);
+			controller = entity(loader, BlockPos.ZERO, null, width, height);
 			blocks.put(BlockPos.ZERO, new FluidCapabilityAccess.Block(block, controller, "create:fluid_tank", "create:fluid_tank"));
-			for (int y = 1; y < height; y++) blocks.put(BlockPos.ZERO.above(y),
-				new FluidCapabilityAccess.Block(block, entity(loader, BlockPos.ZERO.above(y), BlockPos.ZERO), "create:fluid_tank", "create:fluid_tank"));
+			for (int x = 0; x < width; x++) for (int y = 0; y < height; y++) for (int z = 0; z < width; z++) {
+				if (x == 0 && y == 0 && z == 0) continue;
+				BlockPos position = new BlockPos(x, y, z);
+				blocks.put(position, new FluidCapabilityAccess.Block(block, entity(loader, position, BlockPos.ZERO, width, height),
+					"create:fluid_tank", "create:fluid_tank"));
+			}
 		}
-		private Object entity(Loader loader, BlockPos position, @Nullable BlockPos parent) throws Exception {
+		private Object entity(Loader loader, BlockPos position, @Nullable BlockPos parent, int width, int height) throws Exception {
 			Object entity = allocate(loader.loadClass(TANK));
 			field(net.minecraft.world.level.block.entity.BlockEntity.class, "worldPosition").set(entity, position);
 			field(entity.getClass(), "controller").set(entity, parent);
-			field(entity.getClass(), "width").setInt(entity, 1); field(entity.getClass(), "height").setInt(entity, height);
+			field(entity.getClass(), "width").setInt(entity, width); field(entity.getClass(), "height").setInt(entity, height);
 			field(entity.getClass(), "boiler").set(entity, allocate(loader.loadClass(BOILER)));
 			field(entity.getClass(), "tankInventory").set(entity, ownTank); return entity;
 		}

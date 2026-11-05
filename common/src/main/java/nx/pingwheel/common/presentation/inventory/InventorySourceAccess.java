@@ -412,7 +412,9 @@ public final class InventorySourceAccess implements SourceAccess {
 			Source failed = prepared; prepared = null;
 			closeAttemptSource("resolve-close", failed, unavailable, () -> "stage=resolve");
 			String failedClass = sourceClass;
-			InventoryCaptureDiagnostics.warn("resolve", input, null, () -> "sourceClass=" + failedClass, unavailable);
+			if (InventoryCaptureDiagnostics.expectedSourceUnavailable(unavailable))
+				InventoryCaptureDiagnostics.sourceUnavailable("resolve", input, () -> failedClass, "resolve", unavailable);
+			else InventoryCaptureDiagnostics.warn("resolve", input, null, () -> "sourceClass=" + failedClass, unavailable);
 			return ResolveResult.Unresolved.UNAVAILABLE;
 		} catch (Error fatal) {
 			Source failed = prepared; prepared = null;
@@ -573,8 +575,14 @@ public final class InventorySourceAccess implements SourceAccess {
 				// Fatal Errors propagate, but never strand a captured object or its
 				// provisional retained-memory reservation.
 				releaseUntransferred(input, descriptor.key(), captured, reserved, preparationFailure);
-				if (preparationFailure != null)
-					InventoryCaptureDiagnostics.warn("capture-failed", input, descriptor.key(), () -> "stage=snapshot-prepare sourceClass=" + source.getClass().getName(), preparationFailure);
+				@Nullable Throwable failed = preparationFailure;
+				if (failed != null) {
+					if (InventoryCaptureDiagnostics.expectedSourceUnavailable(failed))
+						InventoryCaptureDiagnostics.sourceUnavailable("capture-failed", input,
+							() -> descriptor.key().toString(), "snapshot-prepare", failed);
+					else InventoryCaptureDiagnostics.warn("capture-failed", input, descriptor.key(),
+						() -> "stage=snapshot-prepare sourceClass=" + source.getClass().getName(), failed);
+				}
 			}
 		}
 

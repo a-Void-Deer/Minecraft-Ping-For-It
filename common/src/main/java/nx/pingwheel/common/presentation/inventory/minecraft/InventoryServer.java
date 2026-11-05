@@ -32,9 +32,12 @@ import nx.pingwheel.common.presentation.minecraft.PresentationServer;
 import nx.pingwheel.common.presentation.minecraft.BudgetDelayMonitoring;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
 import nx.pingwheel.common.core.ServerCore;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.Nullable;
 
 /** Minecraft-facing inventory ingress. All world handles stay on the active server thread. */
 public final class InventoryServer {
@@ -173,32 +176,66 @@ public final class InventoryServer {
 		 */
 		@Override
 		public Optional<InventoryBackend.Opened> open(UUID playerId, Target requested) {
-			ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+			@Nullable ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+			if (player == null) {
+				debugOpen("player", playerId, requested);
+				return Optional.empty();
+			}
 			// Entity/private inventory and committed external contexts require their separate owning contracts.
 			boolean openable = requested instanceof Target.BlockTarget
 				|| requested instanceof Target.ExternalBlockTarget external && external.isCandidate();
-			if (player == null || !openable) return Optional.empty();
+			if (!openable) {
+				debugOpen("context", playerId, requested);
+				return Optional.empty();
+			}
 			ServerConfig config = ServerConfig.HANDLER.getConfig();
 			var validation = new MinecraftAuthoritativeTargetValidator(server, config.getPingDistance(),
 				config.isPlayerTrackingEnabled(), new MinecraftTargetNameResolver(server), ExternalBlockServerProviders.registry())
 				.validate(playerId, requested);
-			if (!validation.isAccepted()) return Optional.empty();
+			if (!validation.isAccepted()) {
+				debugOpen("validation", playerId, requested, null, null,
+					() -> "rejection=" + validation.rejectReason().map(reason -> reason.name()).orElse("unknown"));
+				return Optional.empty();
+			}
 			var validated = validation.validatedTarget().orElseThrow();
 			// The validator may correct a candidate's classification, but a
 			// provider, dimension, expected registry or opaque locator drift is
 			// rejected before any resolver or source access. Ordinary targets
 			// keep their existing normalization behavior.
 			if (requested instanceof Target.ExternalBlockTarget external && external.isCandidate()
-				&& !InventoryBackend.sameCandidateNormalization(requested, validated.normalizedTarget()))
+				&& !InventoryBackend.sameCandidateNormalization(requested, validated.normalizedTarget())) {
+				debugOpen("normalize", playerId, requested, validated.normalizedTarget(), null, null);
 				return Optional.empty();
+			}
 			var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.global(nx.pingwheel.common.diagnostics.Diagnostics.server()))
 				.resolve(validated.normalizedTarget(), validated.matchContext());
 			int level = 0;
 			for (int candidate = 1; candidate <= 4; candidate++) if (player.hasPermissions(candidate)) level = candidate;
 			var allowed = InventoryPresentation.allowed(config.getPresentation(), playerId, level, resolved.targetType().id());
-			if (!allowed.contains(InventoryPresentation.ITEMS) && !allowed.contains(InventoryPresentation.FLUIDS)) return Optional.empty();
+			int permissionLevel = level;
+			if (!allowed.contains(InventoryPresentation.ITEMS) && !allowed.contains(InventoryPresentation.FLUIDS)) {
+				debugOpen("presentation", playerId, requested, resolved.target(), resolved.targetType().id(),
+					() -> "items=" + allowed.contains(InventoryPresentation.ITEMS) + " fluids=" + allowed.contains(InventoryPresentation.FLUIDS)
+						+ " permissionLevel=" + permissionLevel);
+				return Optional.empty();
+			}
+			debugOpen("opened", playerId, requested, resolved.target(), resolved.targetType().id(),
+				() -> "defaultPingType=" + resolved.targetType().defaultPingType().id());
 			return Optional.of(new InventoryBackend.Opened(resolved.target(),
 				resolved.targetType().id(), resolved.targetType().defaultPingType().id()));
+		}
+
+		private static void debugOpen(String reason, UUID playerId, Target requested) {
+			debugOpen(reason, playerId, requested, null, null, null);
+		}
+
+		private static void debugOpen(String reason, UUID playerId, Target requested, @Nullable Target normalized,
+			@Nullable String targetType, @Nullable java.util.function.Supplier<String> detail) {
+			Diagnostics.server().atDebug().event(Level.DEBUG, "inventory/preview/host", reason,
+				() -> "owner=" + playerId + " requested=" + requested
+					+ (normalized == null ? "" : " normalized=" + normalized)
+					+ (targetType == null ? "" : " targetType=" + targetType)
+					+ (detail == null ? "" : " " + detail.get()));
 		}
 
 		/**

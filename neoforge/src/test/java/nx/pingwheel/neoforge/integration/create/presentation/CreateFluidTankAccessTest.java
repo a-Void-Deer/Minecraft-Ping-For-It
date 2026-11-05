@@ -21,12 +21,16 @@ import nx.pingwheel.common.platform.IPlatformFluidService.WitnessUse;
 import nx.pingwheel.neoforge.platform.PlatformFluidServiceTest.PaidAccess;
 import static nx.pingwheel.neoforge.platform.PlatformFluidServiceTest.*;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission;
 import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
+import nx.pingwheel.neoforge.integration.create.CreateDiagnosticCapture;
 import nx.pingwheel.neoforge.platform.FluidCapabilityAccess;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
+import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
@@ -445,6 +449,81 @@ class CreateFluidTankAccessTest {
 			assertThrows(InventorySourceUnavailableException.class, () -> fresh.consume(0, entry -> fail("replaced handler cannot read")));
 			assertEquals(0, held.reads); assertEquals(0, current.handler.reads); assertEquals(0, previous.handler.reads);
 		}
+	}
+
+	@Test void sourceFailureContextDistinguishesCreativeBoilerShapeAndMemberRelation() {
+		var creativeWorld = new World(1, 1); creativeWorld.entities.get(BlockPos.ZERO).ordinary = false;
+		var creative = assertThrows(InventorySourceUnavailableException.class,
+			() -> access(creativeWorld, BlockPos.ZERO, Direction.NORTH));
+		assertEquals("Create creative/foreign fluid tank", creative.getMessage());
+		assertTrue(context(creative).contains("ordinary=false"), context(creative));
+
+		var boilerWorld = new World(1, 1); boilerWorld.entities.get(BlockPos.ZERO).active = true;
+		var boiler = assertThrows(InventorySourceUnavailableException.class,
+			() -> access(boilerWorld, BlockPos.ZERO, Direction.NORTH));
+		assertEquals("Create active boiler is not stored fluid", boiler.getMessage());
+		assertTrue(context(boiler).contains("active=true"), context(boiler));
+
+		var shapeWorld = new World(1, 1); shapeWorld.entities.get(BlockPos.ZERO).width = 4;
+		var shape = assertThrows(InventorySourceUnavailableException.class,
+			() -> access(shapeWorld, BlockPos.ZERO, Direction.NORTH));
+		assertEquals("Create fluid bounded static topology", shape.getMessage());
+		assertTrue(context(shape).contains("width=4;height=1;axis=y"), context(shape));
+		assertTrue(context(shape).contains("maxMembers=" + InventorySnapshotLayout.MAX_MEMBERS), context(shape));
+
+		var memberWorld = new World(2, 1); BlockPos hit = new BlockPos(1, 0, 1), other = new BlockPos(1, 0, 0);
+		memberWorld.entities.get(other).controller = new BlockPos(20, 0, 0);
+		var member = assertThrows(InventorySourceUnavailableException.class,
+			() -> access(memberWorld, hit, Direction.NORTH));
+		assertEquals("Create fluid member controller", member.getMessage());
+		assertTrue(context(member).contains("member=1, 0, 0;index=2;width=2;height=1;members=4"), context(member));
+		assertTrue(context(member).contains("observedController=20, 0, 0"), context(member));
+	}
+
+	@Test void absentControllerCapabilityReportsOneDebugEventWithRouteShape() {
+		var world = new World(3, 20); world.missingCapability = true; BlockPos hit = new BlockPos(2, 19, 2);
+		try (var capture = new CreateDiagnosticCapture(Level.DEBUG, LoggingProfile.DEBUG)) {
+			try (var a = admission(); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE)) {
+				op.allowance().debit(FluidCapabilityAccess.PROBE_PROFILE.ownedCost());
+				world.require(hit, op);
+				try (var probe = CreateFluidTankAccess.probe(world, hit, Direction.NORTH, world.block(hit, op), world, op)) {
+					assertTrue(probe.finish(a).isEmpty());
+				}
+			}
+			assertEquals(1, capture.events.size());
+			String message = capture.events.getFirst().getMessage().getFormattedMessage();
+			assertTrue(message.contains("site=fluid/create-finish"), message);
+			assertTrue(message.contains("handling=capability-absent"), message);
+			assertTrue(message.contains("route=create:static-fluid"), message);
+			assertTrue(message.contains("members=180"), message);
+			assertTrue(message.contains("handler=none"), message);
+		}
+	}
+
+	@Test void consumedValidationFailureReportsOnceWithRouteAndMemberContext() {
+		var world = new World(2, 1); var access = access(world, new BlockPos(1, 0, 1), Direction.NORTH);
+		world.entities.get(new BlockPos(1, 0, 0)).controller = new BlockPos(20, 0, 0);
+		try (var capture = new CreateDiagnosticCapture(Level.DEBUG, LoggingProfile.DEBUG)) {
+			assertFalse(access.valid());
+			assertEquals(1, capture.events.size());
+			String message = capture.events.getFirst().getMessage().getFormattedMessage();
+			assertTrue(message.contains("site=fluid/capability-valid"), message);
+			assertTrue(message.contains("handling=source-rejected"), message);
+			assertTrue(message.contains("route=create:static-fluid"), message);
+			assertTrue(message.contains("handler=" + Handler.class.getName()), message);
+			assertTrue(message.contains("count=1"), message);
+			assertTrue(message.contains("ctx="), message);
+			assertTrue(message.contains("reason=controller-changed"), message);
+			assertTrue(message.contains("member=1, 0, 0"), message);
+			assertFalse(access.valid());
+			assertEquals(1, capture.events.size(), "same invalid access reports its first rejection once");
+		}
+	}
+
+	private static String context(InventorySourceUnavailableException failure) {
+		@Nullable String context = failure.diagnosticContext();
+		assertNotNull(context, "provider failure must carry lazy context");
+		return context;
 	}
 
 	private static IPlatformFluidService.Probe probe(World world, BlockPos root, Direction face, Operation op) {

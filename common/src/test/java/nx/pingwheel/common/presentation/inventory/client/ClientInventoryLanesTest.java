@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
@@ -15,6 +16,7 @@ import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.inventory.InventoryChecksums;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
+import nx.pingwheel.common.testing.DiagnosticLogCapture;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
@@ -126,6 +128,50 @@ class ClientInventoryLanesTest {
 		client.close(request);
 		assertFalse(client.hasPreview(request));
 		assertEquals(1, sent.stream().filter(packet -> packet instanceof InventoryC2SPacket p && p.kind() == InventoryC2SPacket.Kind.CLOSE).count());
+	}
+
+	@Test void policySkippedFluidLaneLogsItsReasonWhileTheSharedOpenIsActuallySent() {
+		try (var logs = new DiagnosticLogCapture(LoggingProfile.DEBUG)) {
+			client.presentationReset(100, 1);
+			client.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(3, 3, 0, 0)).stamp(100, 1));
+			policy(ITEM, true);
+			client.accept(InventoryS2CPacket.policy(FLUID, 7, 100, 1, Set.of()));
+			long request = client.open(target, BlockFace.NORTH, "entity_block");
+			assertNotEquals(ClientInventory.NO_REQUEST, request);
+			assertTrue(client.hasPreview(request, ITEM));
+			assertFalse(client.hasPreview(request, FLUID));
+			assertEquals(1, sent.stream().filter(packet -> packet instanceof InventoryC2SPacket p
+				&& p.kind() == InventoryC2SPacket.Kind.OPEN).count());
+
+			var messages = logs.events().stream().map(event -> event.getMessage().getFormattedMessage()).toList();
+			assertTrue(messages.stream().anyMatch(message -> message.contains("site=inventory/preview-lane")
+				&& message.contains("handling=lane-policy-denied") && message.contains("kind=FLUID")
+				&& message.contains("request=" + request)), "the skipped lane keeps its request/kind reason");
+			assertTrue(messages.stream().anyMatch(message -> message.contains("site=inventory/preview-send")
+				&& message.contains("handling=open-sent") && message.contains("kind=ITEM")
+				&& message.contains("request=" + request)), "the shared OPEN is evidence that a request was actually sent");
+		}
+	}
+
+	@Test void invalidPreviewStatusLogsOneTransitionWithRequestKindAndOldNew() {
+		long request = ready();
+		try (var logs = new DiagnosticLogCapture(LoggingProfile.DEBUG)) {
+			var invalid = InventoryS2CPacket.data(ITEM, InventoryS2CPacket.Kind.PREVIEW, 7, request, null, 2, 1, 1,
+				0, 1, true, InventoryS2CPacket.Status.INVALID, 0, List.of()).stamp(100, 1);
+			client.accept(invalid);
+			client.accept(invalid);
+			assertTrue(client.preview(request, ITEM).invalid());
+
+			var statusEvents = logs.events().stream().map(event -> event.getMessage().getFormattedMessage())
+				.filter(message -> message.contains("site=inventory/preview-status")).toList();
+			assertEquals(1, statusEvents.size(), "a repeated same status must not produce another transition line");
+			String message = statusEvents.getFirst();
+			assertTrue(message.contains("handling=status-invalid"));
+			assertTrue(message.contains("request=" + request));
+			assertTrue(message.contains("kind=ITEM"));
+			assertTrue(message.contains("old=UPDATING"));
+			assertTrue(message.contains("new=INVALID"));
+		}
 	}
 
 	@Test void sharedCommitRejectsWrongLaneOutcomeWithoutConsumingTheCorrectOutcome() {

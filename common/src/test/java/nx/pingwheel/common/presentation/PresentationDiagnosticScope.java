@@ -95,6 +95,7 @@ public final class PresentationDiagnosticScope implements AutoCloseable {
 		"presentation.preview.client.PreviewLocalReaders", "presentation.inventory.InventoryBackend",
 		"presentation.inventory.InventoryCaptureDiagnostics", "presentation.inventory.InventoryRuntime",
 		"presentation.inventory.InventorySyncPublisher", "presentation.inventory.minecraft.InventoryItemDiagnostics",
+		"presentation.inventory.minecraft.InventoryFluidSources",
 		"presentation.inventory.minecraft.InventorySnapshotDiagnostics", "presentation.inventory.minecraft.InventoryMinecraftSources",
 		"platform.IPlatformInventoryService", "marker.MarkerCreationService", "marker.MinecraftAuthoritativeTargetValidator",
 		"marker.MinecraftTargetGroupingResolver", "name.ClientTargetNameResolver", "name.MinecraftTargetNameResolver",

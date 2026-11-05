@@ -36,7 +36,7 @@ public final class CreateDiagnosticCapture implements AutoCloseable {
 		this(level, LoggingProfile.DEEP);
 	}
 
-	CreateDiagnosticCapture(Level level, LoggingProfile profile) {
+	public CreateDiagnosticCapture(Level level, LoggingProfile profile) {
 		diagnostics = new LoaderDiagnosticScope(profile, profile);
 		// The loader's global WARN/ACCEPT filter overrides even a logger set to OFF.
 		if (previousFilter != null) {

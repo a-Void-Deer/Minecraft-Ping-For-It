@@ -39,6 +39,7 @@ public final class LoaderDiagnosticScope implements AutoCloseable {
 		Diagnostics.setProfile(DiagnosticSide.BOOTSTRAP, LoggingProfile.NORMAL);
 		try {
 			for (String owner : List.of("nx.pingwheel.neoforge.platform.PlatformInventoryServiceImpl",
+				"nx.pingwheel.neoforge.platform.FluidSourceDiagnostics",
 				"nx.pingwheel.neoforge.NeoClient",
 				"nx.pingwheel.neoforge.integration.create.presentation.CreatePresentationDiagnostics",
 				"nx.pingwheel.neoforge.integration.create.presentation.CreatePresentationAvailability",

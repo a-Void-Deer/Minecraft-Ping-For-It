@@ -715,18 +715,45 @@ public final class InventoryBackend implements AutoCloseable {
 		if (next != null) for (var kind : InventoryResourceKind.values()) queuePolicy(player, session, kind);
 	}
 	private void open(UUID player, Session session, InventoryC2SPacket packet) {
-		if (packet.requestId() <= session.lastRequest || session.requests.size() >= settings.getPreview().effectiveMaxTargetsPerClient()) return;
-		session.lastRequest = packet.requestId();
+		long request = packet.requestId();
+		Target requested = packet.target();
+		var face = packet.face();
+		if (request <= session.lastRequest) {
+			InventoryCaptureDiagnostics.previewOpen("request", "request-fence", request, requested, face);
+			return;
+		}
+		if (session.requests.size() >= settings.getPreview().effectiveMaxTargetsPerClient()) {
+			InventoryCaptureDiagnostics.previewOpen("capacity", "client-targets", request, requested, face);
+			return;
+		}
+		session.lastRequest = request;
 		var held = runtime.memory().tryReserve(4096);
-		if (held.isEmpty()) return;
+		if (held.isEmpty()) {
+			InventoryCaptureDiagnostics.previewOpen("memory", "request-ticket", request, requested, face);
+			return;
+		}
 		boolean retained = false;
 		try {
-		Opened frozen = runtime.preflight(() -> host.open(player, packet.target())).orElse(null);
-		if (frozen == null || java.util.Arrays.stream(InventoryResourceKind.values()).noneMatch(kind -> session.policy.types(kind).contains(frozen.targetType()))) return;
+		boolean[] hostAttempted = {false};
+		var admission = runtime.preflight(() -> {
+			hostAttempted[0] = true;
+			return host.open(player, requested);
+		});
+		if (admission.isEmpty()) {
+			if (hostAttempted[0]) InventoryCaptureDiagnostics.previewOpen("host", "authority", request, requested, face);
+			else InventoryCaptureDiagnostics.previewOpen("admission", "preflight-deferred", request, requested, face);
+			return;
+		}
+		Opened frozen = admission.get();
+		if (java.util.Arrays.stream(InventoryResourceKind.values()).noneMatch(kind -> session.policy.types(kind).contains(frozen.targetType()))) {
+			InventoryCaptureDiagnostics.previewOpen("policy", "lane-policy", request, requested, face);
+			return;
+		}
 		held.get().commit(4096);
 		var parent = new PreviewRequest(packet.requestId(), frozen, packet.face(), held.get(), session.policy);
 		session.requests.put(parent.request, parent);
 		retained = true;
+		InventoryCaptureDiagnostics.previewOpen("opened", "request", request, frozen.target(), face);
 		for (var kind : InventoryResourceKind.values()) if (session.policy.types(kind).contains(frozen.targetType())) openLane(player, session, parent, kind);
 		} finally {
 			if (!retained) held.get().close();
@@ -734,21 +761,31 @@ public final class InventoryBackend implements AutoCloseable {
 	}
 	private void openLane(UUID player, Session session, PreviewRequest parent, InventoryResourceKind kind) {
 		var held = runtime.memory().tryReserve(PREVIEW_BYTES);
-		if (held.isEmpty()) return;
+		if (held.isEmpty()) {
+			InventoryCaptureDiagnostics.previewLaneRejected("memory", "lane-ticket", parent.request, kind, parent.frozen.target(), parent.face);
+			return;
+		}
 		InventoryRuntime.@Nullable Consumer attached = null;
 		SyncPublisher.@Nullable Context registered = null;
 		boolean retained = false;
 		try {
 			var input = new InventorySourceInput(parent.frozen.target(), player, parent.face, kind);
 			attached = runtime.attach(input, new InventoryRuntime.PreviewSubject(player)).orElse(null);
-			if (attached == null) return;
+			if (attached == null) {
+				InventoryCaptureDiagnostics.previewLaneRejected("attach", "runtime-consumer", parent.request, kind, parent.frozen.target(), parent.face);
+				return;
+			}
 			attached.requirePublicationEvidence();
 			var context = context("preview/" + parent.request + "/" + kind, player, session.policy, 1);
-			if (!publisher.register(context, route(session, parent.request, null, null, null, kind))) return;
+			if (!publisher.register(context, route(session, parent.request, null, null, null, kind))) {
+				InventoryCaptureDiagnostics.previewLaneRejected("publisher", "register", parent.request, kind, parent.frozen.target(), parent.face);
+				return;
+			}
 			registered = context; held.get().commit(PREVIEW_BYTES);
 			var preview = new Preview(parent, input, attached, held.get(), context);
 			preview.metadataCeiling = effectiveDisplayCeiling();
 			session.previews.put(new LaneKey(parent.request, kind), preview); retained = true;
+			InventoryCaptureDiagnostics.previewLaneOpened(parent.request, kind, parent.frozen.target(), parent.face);
 		} finally { if (!retained) { if (registered != null) publisher.cancel(registered); try { if (attached != null) attached.close(); } finally { held.get().close(); } } }
 	}
 	private void select(UUID player, Session session, InventoryC2SPacket packet) {
@@ -1029,7 +1066,7 @@ public final class InventoryBackend implements AutoCloseable {
 				continue;
 			}
 			if (lease.consumer.invalidated() && !lease.invalid) { invalidate(lease); continue; }
-			var valid = lease.invalid ? runtime.probe(lease.input) : runtime.probe(lease.consumer);
+			var valid = lease.invalid ? runtime.probeRecovery(lease.consumer) : runtime.probe(lease.consumer);
 			if (valid.isEmpty()) continue;
 			lease.checkedTick = tick;
 			if (!valid.get()) { invalidate(lease); continue; }
@@ -1629,6 +1666,7 @@ public final class InventoryBackend implements AutoCloseable {
 		return item.withAmount(previous == null ? item.amount() : Math.addExact(previous.amount(), item.amount()));
 	}
 	private void invalidatePreview(Session session, Preview preview) {
+		boolean invalidTransition = preview.context.stateFence() == 1;
 		preview.samplingDelay.cancel(); preview.projectionDelay.cancel(); preview.publicationDelay.cancel();
 		preview.consumer.discardObservation();
 		if (preview.publicationEvidence != null) { preview.publicationEvidence.close(); preview.publicationEvidence = null; }
@@ -1643,6 +1681,7 @@ public final class InventoryBackend implements AutoCloseable {
 		preview.rebaselineNeeded = false; preview.fencePending = false; preview.republishPending = false; preview.metadataChanged = false;
 		preview.metadataCeiling = effectiveDisplayCeiling();
 		if (preview.metadataMemory != null) { preview.metadataMemory.close(); preview.metadataMemory = null; }
+		if (invalidTransition) InventoryCaptureDiagnostics.previewInvalidated(preview.request, preview.input.resourceKind(), preview.input.target(), preview.input.face());
 		publisher.status(preview.context, InventoryS2CPacket.Status.INVALID);
 	}
 	private InventoryResourceValue aggregate(InventoryResourceValue item) {
