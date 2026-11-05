@@ -106,8 +106,8 @@ class SablePresentationLogGateTest {
 		java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
 		SableClientProvider.setDiagnosticsForTests(new SableDiagnostics() {
 			@Override public void debug(String prefix, String stage, String reason, @Nullable Object... fields) {}
-			@Override public void debugException(String prefix, String stage, String reason, Throwable failure,
-				@Nullable Object... fields) {
+			@Override public void debugException(String prefix, String stage, String handling, String reason,
+				Throwable failure, @Nullable Object... fields) {
 				calls.incrementAndGet();
 				throw new IllegalStateException("diagnostic sink fault");
 			}

@@ -32,14 +32,24 @@ public interface SableDiagnostics {
 	String SERVER_PREFIX = "[sable-server]";
 	String REFRESH_PREFIX = "[sable-refresh]";
 
+	/** Finite handling codes owned by this optional integration. */
+	String CONTENT_UNAVAILABLE = "content-unavailable";
+	String CAPTURE_PROJECTED_FALLBACK = "capture-projected-fallback";
+	String OBSERVATION_TEMPORARILY_UNAVAILABLE = "observation-temporarily-unavailable";
+	String INTEGRATION_DISABLED = "integration-disabled";
+	String SUPPLEMENTAL_INCOMPLETE = "supplemental-incomplete";
+	String OPERATION_UNAVAILABLE = "operation-unavailable";
+
 	/** Emits one structured DEBUG event. Fields are supplied as key/value pairs. */
 	void debug(String prefix, String stage, String reason, @Nullable Object... fields);
 
 	/**
-	 * Emits a controlled WARN failure with the original cause in a bounded report.
+	 * Emits a controlled WARN failure with a finite handling code and the original
+	 * cause in a bounded report.
 	 */
 	void debugException(
-		String prefix, String stage, String reason, Throwable throwable, @Nullable Object... fields
+		String prefix, String stage, String handling, String reason, Throwable throwable,
+		@Nullable Object... fields
 	);
 
 	default boolean enabled(Level level) { return true; }
@@ -52,8 +62,11 @@ public interface SableDiagnostics {
 		debug(prefix, stage, reason, fields);
 	}
 
-	default void approvedException(String prefix, String stage, String reason, Throwable failure, @Nullable Object... fields) {
-		debugException(prefix, stage, reason, failure, fields);
+	default void approvedException(
+		String prefix, String stage, String handling, String reason, Throwable failure,
+		@Nullable Object... fields
+	) {
+		debugException(prefix, stage, handling, reason, failure, fields);
 	}
 
 	default void warning(String prefix, String stage, String reason, @Nullable Object... fields) {
@@ -65,9 +78,9 @@ public interface SableDiagnostics {
 	}
 
 	default void captureException(
-		String stage, String reason, Throwable throwable, @Nullable Object... fields
+		String stage, String handling, String reason, Throwable throwable, @Nullable Object... fields
 	) {
-		debugException(CAPTURE_PREFIX, stage, reason, throwable, fields);
+		debugException(CAPTURE_PREFIX, stage, handling, reason, throwable, fields);
 	}
 
 	default void server(String stage, String reason, @Nullable Object... fields) {
@@ -75,9 +88,9 @@ public interface SableDiagnostics {
 	}
 
 	default void serverException(
-		String stage, String reason, Throwable throwable, @Nullable Object... fields
+		String stage, String handling, String reason, Throwable throwable, @Nullable Object... fields
 	) {
-		debugException(SERVER_PREFIX, stage, reason, throwable, fields);
+		debugException(SERVER_PREFIX, stage, handling, reason, throwable, fields);
 	}
 
 	default void refresh(String stage, String reason, @Nullable Object... fields) {
@@ -85,9 +98,9 @@ public interface SableDiagnostics {
 	}
 
 	default void refreshException(
-		String stage, String reason, Throwable throwable, @Nullable Object... fields
+		String stage, String handling, String reason, Throwable throwable, @Nullable Object... fields
 	) {
-		debugException(REFRESH_PREFIX, stage, reason, throwable, fields);
+		debugException(REFRESH_PREFIX, stage, handling, reason, throwable, fields);
 	}
 
 	/** A no-op seam for tests and for callers that do not want logging. */
@@ -100,7 +113,8 @@ public interface SableDiagnostics {
 
 			@Override
 			public void debugException(
-				String prefix, String stage, String reason, Throwable throwable, @Nullable Object... fields
+				String prefix, String stage, String handling, String reason, Throwable throwable,
+				@Nullable Object... fields
 			) {
 				// intentionally empty
 			}
@@ -125,9 +139,10 @@ public interface SableDiagnostics {
 
 			@Override
 			public void debugException(
-				String prefix, String stage, String reason, Throwable throwable, @Nullable Object... fields
+				String prefix, String stage, String handling, String reason, Throwable throwable,
+				@Nullable Object... fields
 			) {
-				FailureChannel.select(logger, stage).atNormal().warn("sable/" + stage, "sable-fallback", throwable,
+				FailureChannel.select(logger, stage).atNormal().warn("sable/" + stage, handling, throwable,
 					() -> format(prefix, stage, reason, fields));
 			}
 
@@ -138,8 +153,11 @@ public interface SableDiagnostics {
 			}
 
 			@Override
-			public void approvedException(String prefix, String stage, String reason, Throwable failure, @Nullable Object... fields) {
-				logger.atNormal().warn("sable/" + stage, "sable-fallback", failure,
+			public void approvedException(
+				String prefix, String stage, String handling, String reason, Throwable failure,
+				@Nullable Object... fields
+			) {
+				logger.atNormal().warn("sable/" + stage, handling, failure,
 					() -> format(prefix, stage, reason, fields));
 			}
 
@@ -164,7 +182,8 @@ public interface SableDiagnostics {
 
 	/** Immutable event captured by {@link Recording}. */
 	record Event(
-		String prefix, String stage, String reason, @Unmodifiable List<@Nullable Object> fields, @Nullable Throwable throwable
+		String prefix, String stage, @Nullable String handling, String reason,
+		@Unmodifiable List<@Nullable Object> fields, @Nullable Throwable throwable
 	) {
 		public Event {
 			Objects.requireNonNull(prefix, "prefix");
@@ -184,15 +203,17 @@ public interface SableDiagnostics {
 
 		@Override
 		public synchronized void debug(String prefix, String stage, String reason, @Nullable Object... fields) {
-			events.add(new Event(prefix, stage, reason, copyFields(fields), null));
+			events.add(new Event(prefix, stage, null, reason, copyFields(fields), null));
 		}
 
 		@Override
 		public synchronized void debugException(
-			String prefix, String stage, String reason, Throwable throwable, @Nullable Object... fields
+			String prefix, String stage, String handling, String reason, Throwable throwable,
+			@Nullable Object... fields
 		) {
+			Objects.requireNonNull(handling, "handling");
 			events.add(new Event(
-				prefix, stage, reason, copyFields(fields), Objects.requireNonNull(throwable, "throwable")));
+				prefix, stage, handling, reason, copyFields(fields), Objects.requireNonNull(throwable, "throwable")));
 		}
 
 		public synchronized @Unmodifiable List<Event> events() {

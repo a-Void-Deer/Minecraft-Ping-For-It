@@ -96,10 +96,11 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				"provider-init",
 				"success",
 				"provider", PROVIDER_ID,
-				"api_methods", discovered.signatures());
+				"api_methods", SableDiagnostics.lazy(discovered::signatures));
 		} catch (ReflectiveOperationException | RuntimeException failure) {
 			diagnostics.serverException(
 				"reflection-discovery",
+				SableDiagnostics.OPERATION_UNAVAILABLE,
 				"failure",
 				failure,
 				"provider", PROVIDER_ID,
@@ -109,6 +110,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		} catch (LinkageError failure) {
 			diagnostics.serverException(
 				"reflection-discovery",
+				SableDiagnostics.INTEGRATION_DISABLED,
 				"linkage-error",
 				failure,
 				"provider", PROVIDER_ID,
@@ -457,6 +459,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		} catch (ReflectiveOperationException | RuntimeException failure) {
 			diagnostics.serverException(
 				"materialization",
+				SableDiagnostics.OPERATION_UNAVAILABLE,
 				"exception",
 				failure,
 				"candidate", candidate,
@@ -470,6 +473,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		} catch (LinkageError failure) {
 			diagnostics.serverException(
 				"materialization",
+				SableDiagnostics.INTEGRATION_DISABLED,
 				"linkage-error",
 				failure,
 				"candidate", candidate,
@@ -657,11 +661,15 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			return new ObservationResult.Available(new BlockObservation(
 				available.level(), available.position(), available.state()));
 		} catch (ReflectiveOperationException | RuntimeException failure) {
-			diagnostics.serverException("observe-block", "temporarily-unavailable", failure,
+			diagnostics.serverException("observe-block",
+				SableDiagnostics.OBSERVATION_TEMPORARILY_UNAVAILABLE,
+				"temporarily-unavailable", failure,
 				"committed_target", committed);
 			return new ObservationResult.TemporarilyUnavailable();
 		} catch (LinkageError failure) {
-			diagnostics.serverException("observe-block", "linkage-disabled", failure,
+			diagnostics.serverException("observe-block",
+				SableDiagnostics.INTEGRATION_DISABLED,
+				"linkage-disabled", failure,
 				"committed_target", committed);
 			linkGuard.disableSilently();
 			return new ObservationResult.TemporarilyUnavailable();
@@ -725,7 +733,8 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		long now = System.nanoTime();
 		if (nextContentFailureLogNanos == 0 || now - nextContentFailureLogNanos >= 0) {
 			nextContentFailureLogNanos = now + 5_000_000_000L;
-			diagnostics.approvedException(SableDiagnostics.SERVER_PREFIX, "content-read-source", "unavailable", failure,
+			diagnostics.approvedException(SableDiagnostics.SERVER_PREFIX, "content-read-source",
+				SableDiagnostics.CONTENT_UNAVAILABLE, "unavailable", failure,
 				"provider", PROVIDER_ID);
 		}
 		return Optional.empty();
@@ -1154,6 +1163,8 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		if (invalid.failure() != null) {
 			diagnostics.serverException(
 				"live-resolution",
+				invalid.failure() instanceof LinkageError
+					? SableDiagnostics.INTEGRATION_DISABLED : SableDiagnostics.OPERATION_UNAVAILABLE,
 				invalid.reason(),
 				invalid.failure(),
 				"operation", operation,
@@ -1205,7 +1216,8 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				diagnostics.refresh("refresh", "invalidation", "invalidation_reason", reason,
 					"stable_target_uuid", stableId, "committed_target", committed);
 			} else {
-				diagnostics.refreshException("refresh", "exception", failure, "invalidation_reason", reason,
+				diagnostics.refreshException("refresh", SableDiagnostics.OPERATION_UNAVAILABLE,
+					"exception", failure, "invalidation_reason", reason,
 					"stable_target_uuid", stableId, "committed_target", committed);
 			}
 			return new RefreshResult.Invalid();
@@ -1219,6 +1231,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			if (failure != null) {
 				diagnostics.approvedException(SableDiagnostics.REFRESH_PREFIX,
 					"refresh",
+					SableDiagnostics.OPERATION_UNAVAILABLE,
 					"exception",
 					failure,
 					"invalidation_reason", reason,
@@ -1375,6 +1388,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		} catch (ReflectiveOperationException | RuntimeException failure) {
 			diagnostics.serverException(
 				"cleanup",
+				SableDiagnostics.OPERATION_UNAVAILABLE,
 				"tracking-point-removal-failure",
 				failure,
 				"tracking_id", trackingId,
@@ -1382,6 +1396,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		} catch (LinkageError failure) {
 			diagnostics.serverException(
 				"cleanup",
+				SableDiagnostics.INTEGRATION_DISABLED,
 				"tracking-point-removal-linkage-error",
 				failure,
 				"tracking_id", trackingId,
@@ -1652,7 +1667,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				"reflection-discovery",
 				"method-found",
 				"class_name", owner.getName(),
-				"method_signature", method.toGenericString());
+				"method_signature", SableDiagnostics.lazy(method::toGenericString));
 			return method;
 		}
 

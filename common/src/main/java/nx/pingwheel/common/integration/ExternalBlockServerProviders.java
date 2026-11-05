@@ -66,15 +66,24 @@ public final class ExternalBlockServerProviders {
 					"provider_class", providerClass.getName(),
 					"provider_value", provider);
 			}
-		} catch (ReflectiveOperationException | LinkageError failure) {
+		} catch (ReflectiveOperationException failure) {
 			DIAGNOSTICS.serverException(
 				"provider-selection",
+				SableDiagnostics.OPERATION_UNAVAILABLE,
+				"failure",
+				failure,
+				"provider_class", SABLE_PROVIDER_CLASS);
+		} catch (LinkageError failure) {
+			DIAGNOSTICS.serverException(
+				"provider-selection",
+				SableDiagnostics.INTEGRATION_DISABLED,
 				"failure",
 				failure,
 				"provider_class", SABLE_PROVIDER_CLASS);
 		} catch (RuntimeException failure) {
 			DIAGNOSTICS.serverException(
 				"provider-selection",
+				SableDiagnostics.OPERATION_UNAVAILABLE,
 				"runtime-failure",
 				failure,
 				"provider_class", SABLE_PROVIDER_CLASS);

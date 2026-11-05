@@ -103,6 +103,9 @@ class SableObservationFailureDiagnosticsTest {
 				var event = capture.events().getFirst();
 				assertEquals(org.apache.logging.log4j.Level.WARN, event.getLevel());
 				assertTrue(event.getMessage().getFormattedMessage().contains("original observation cause"));
+				assertTrue(event.getMessage().getFormattedMessage().contains("handling="
+					+ (linkage ? SableDiagnostics.INTEGRATION_DISABLED
+						: SableDiagnostics.OBSERVATION_TEMPORARILY_UNAVAILABLE)));
 				assertNull(event.getThrown());
 				assertEquals(1, references.references(id.toString()));
 				assertEquals(1, entries.size());

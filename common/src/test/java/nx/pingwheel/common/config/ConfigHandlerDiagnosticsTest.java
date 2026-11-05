@@ -43,7 +43,7 @@ class ConfigHandlerDiagnosticsTest {
 			var persisted = com.google.gson.JsonParser.parseString(Files.readString(path)).getAsJsonObject();
 			assertEquals(VERSION, persisted.get(ConfigVersionUpdater.VERSION_KEY).getAsString());
 			assertEquals(new ServerConfig().getRateLimit(), persisted.get("rateLimit").getAsInt());
-			var failures = logs.operation("site=config-load handling=defaults-restored").stream()
+			var failures = logs.operation("site=config-load handling=defaults-written").stream()
 				.filter(event -> event.getLevel() == Level.ERROR).toList();
 			assertEquals(1, failures.size());
 			String message = failures.getFirst().getMessage().getFormattedMessage();
@@ -58,14 +58,69 @@ class ConfigHandlerDiagnosticsTest {
 		try (var logs = new Capture()) {
 			Diagnostics.setProfile(DiagnosticSide.BOOTSTRAP, LoggingProfile.NORMAL);
 			new ConfigHandler<>(ServerConfig.class, path, VERSION).load();
-			var events = logs.operation("site=config-load handling=defaults-restored").stream()
+			var events = logs.operation("site=config-load handling=defaults-written").stream()
 				.filter(event -> event.getLevel() == Level.ERROR).toList();
 			assertEquals(1, events.size());
 			String message = events.getFirst().getMessage().getFormattedMessage();
-			assertTrue(message.contains("handling=defaults-restored"), message);
+			assertTrue(message.contains("handling=defaults-written"), message);
 			assertFalse(message.contains(path.toString()), message);
 			assertFalse(message.contains("private-value"), message);
 			assertFalse(message.contains("NumberFormatException"), message);
+		}
+	}
+
+	@Test void serverRecoveryReportsDefaultsInMemoryWithoutTouchingTheInvalidOriginal(@TempDir Path directory)
+		throws IOException {
+		Path path = directory.resolve("server.json");
+		byte[] original = ("{\"pingforit-version\":\"" + VERSION
+			+ "\",\"rateLimit\":\"bad-rate-limit-sentinel\"}").getBytes(StandardCharsets.UTF_8);
+		Files.write(path, original);
+		try (var logs = new Capture()) {
+			var handler = new ConfigHandler<>(ServerConfig.class, path, (source, backup, bytes) -> {
+				throw new AssertionError("no backup on server recovery");
+			}, VERSION, (target, serialized) -> { throw failure("save"); });
+			handler.load();
+
+			assertEquals(new ServerConfig(), handler.getConfig());
+			assertArrayEquals(original, Files.readAllBytes(path));
+
+			var recovery = logs.operation("site=config-load handling=defaults-in-memory").stream()
+				.filter(event -> event.getLevel() == Level.ERROR).toList();
+			assertEquals(1, recovery.size());
+			assertTrue(recovery.getFirst().getMessage().getFormattedMessage()
+				.contains("bad-rate-limit-sentinel"));
+			assertFullReport(logs, "config-io", "save-failed", "save-root-cause-sentinel");
+		}
+	}
+
+	@Test void recoveryHashNoopPreservesInvalidBytesAndOnUpdateContract(@TempDir Path directory)
+		throws IOException {
+		Path path = directory.resolve("hash-noop.json");
+		byte[] broken = "{broken".getBytes(StandardCharsets.UTF_8);
+		CountingConfig.ON_UPDATE.set(0);
+		java.util.concurrent.atomic.AtomicInteger writes = new java.util.concurrent.atomic.AtomicInteger();
+		var handler = new ConfigHandler<>(CountingConfig.class, path,
+			(source, backup, bytes) -> { throw new AssertionError("no backup on server recovery"); },
+			VERSION,
+			(target, serialized) -> {
+				Files.writeString(target, serialized + System.lineSeparator(), StandardCharsets.UTF_8);
+				writes.incrementAndGet();
+			});
+		handler.save();
+		assertEquals(1, writes.get());
+		assertEquals(1, CountingConfig.ON_UPDATE.get());
+		Files.write(path, broken);
+
+		try (var logs = new Capture()) {
+			Diagnostics.setProfile(DiagnosticSide.BOOTSTRAP, LoggingProfile.NORMAL);
+			handler.load();
+			assertEquals(1, writes.get(), "the non-force save must keep its hash-equal no-write behavior");
+			assertArrayEquals(broken, Files.readAllBytes(path));
+			assertEquals(1, CountingConfig.ON_UPDATE.get(), "a no-op save must not invoke onUpdate");
+			var recovery = logs.operation("site=config-load handling=defaults-in-memory").stream()
+				.filter(event -> event.getLevel() == Level.ERROR).toList();
+			assertEquals(1, recovery.size());
+			assertFalse(recovery.getFirst().getMessage().getFormattedMessage().contains(path.toString()));
 		}
 	}
 
@@ -202,7 +257,7 @@ class ConfigHandlerDiagnosticsTest {
 			assertEquals("// Error reason: parser failure", lines[1]);
 			assertTrue(lines[1].length() < 240);
 			assertFalse(lines[1].contains("root-cause-sentinel"));
-			assertFullReport(logs, "config-io", "load");
+			assertFullReport(logs, "config-load", "defaults-written", "load-root-cause-sentinel");
 		}
 	}
 
@@ -220,9 +275,12 @@ class ConfigHandlerDiagnosticsTest {
 			handler.resetToDefaults();
 			assertArrayEquals(original, Files.readAllBytes(path));
 			assertEquals(new ClientConfig(), handler.getConfig());
-			assertFullReport(logs, "config-io", "backup");
+			assertFullReport(logs, "config-io", "backup-failed-original-protected", "backup-root-cause-sentinel");
 			assertEquals(1, logs.events().stream().filter(event -> event.getLevel() == Level.WARN
 				&& event.getMessage().getFormattedMessage().contains("backup-failed")).count());
+			assertEquals(1, logs.events().stream().filter(event -> event.getLevel() == Level.ERROR
+				&& event.getMessage().getFormattedMessage().contains("site=config-load handling=defaults-in-memory"))
+				.count());
 		}
 	}
 
@@ -242,8 +300,11 @@ class ConfigHandlerDiagnosticsTest {
 			resetting.load();
 			assertArrayEquals(original, Files.readAllBytes(reset));
 			assertFalse(resetting.saveSafely());
-			assertFullReport(logs, "config-io", "save");
-			assertFullReport(logs, "config-io", "reset");
+			assertFullReport(logs, "config-io", "save-failed", "save-root-cause-sentinel");
+			assertFullReport(logs, "config-io", "reset-write-failed-backup-retained", "reset-root-cause-sentinel");
+			assertEquals(1, logs.events().stream().filter(event -> event.getLevel() == Level.ERROR
+				&& event.getMessage().getFormattedMessage().contains("site=config-load handling=defaults-in-memory"))
+				.count());
 		}
 	}
 
@@ -252,10 +313,11 @@ class ConfigHandlerDiagnosticsTest {
 			new IllegalStateException(stage + "-root-cause-sentinel"));
 	}
 
-	private static void assertFullReport(Capture logs, String operation, String stage) {
-		Level expected = stage.equals("load") ? Level.ERROR : Level.WARN;
-		var failures = logs.operation(operation).stream().filter(event -> event.getLevel() == expected
-			&& event.getMessage().getFormattedMessage().contains(stage + "-failed")).toList();
+	private static void assertFullReport(Capture logs, String site, String handling, String rootSentinel) {
+		Level expected = site.equals("config-load") ? Level.ERROR : Level.WARN;
+		var failures = logs.events().stream().filter(event -> event.getLevel() == expected
+			&& event.getMessage().getFormattedMessage().contains("site=" + site)
+			&& event.getMessage().getFormattedMessage().contains("handling=" + handling)).toList();
 		assertEquals(1, failures.size());
 		var event = failures.getFirst();
 		assertEquals(expected, event.getLevel());
@@ -264,11 +326,11 @@ class ConfigHandlerDiagnosticsTest {
 		assertTrue(message.length() > 240, message);
 		assertTrue(message.length() <= SafeExceptionReport.MAX_CHARACTERS, "one bounded diagnostic envelope");
 		assertTrue(message.contains("-message-tail"), message);
-		assertTrue(message.contains(stage + "-root-cause-sentinel"), message);
+		assertTrue(message.contains(rootSentinel), message);
 	}
 
 	@NotNullByDefault
-	private static final class Capture implements AutoCloseable {
+	static final class Capture implements AutoCloseable {
 		private static final String NAME = "pingforit.bootstrap";
 		private final Logger logger = (Logger) LogManager.getLogger(NAME);
 		private final LoggerContext context = logger.getContext();
@@ -288,6 +350,10 @@ class ConfigHandlerDiagnosticsTest {
 			context.updateLoggers();
 			Diagnostics.setProfile(DiagnosticSide.BOOTSTRAP, LoggingProfile.DEEP);
 		}
+		void level(Level level) {
+			configuration.getLoggerConfig(NAME).setLevel(level);
+			context.updateLoggers();
+		}
 		@Unmodifiable List<LogEvent> operation(String text) { return captured.stream()
 			.filter(event -> event.getMessage().getFormattedMessage().contains(text)).toList(); }
 		@Unmodifiable List<LogEvent> events() { return List.copyOf(captured); }
@@ -298,6 +364,17 @@ class ConfigHandlerDiagnosticsTest {
 			context.updateLoggers();
 			appender.stop();
 		}
+	}
+
+	@NotNullByDefault
+	public static final class CountingConfig implements IConfig {
+		private static final java.util.concurrent.atomic.AtomicInteger ON_UPDATE =
+			new java.util.concurrent.atomic.AtomicInteger();
+		public CountingConfig() {}
+		@Override public void validate() {}
+		@Override public void onUpdate() { ON_UPDATE.incrementAndGet(); }
+		@Override public int hashCode() { return 1; }
+		@Override public boolean equals(@Nullable Object other) { return other instanceof CountingConfig; }
 	}
 
 	@NotNullByDefault

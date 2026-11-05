@@ -46,11 +46,17 @@ class IntegrationFailureDiagnosticsTest {
 			cause.addSuppressed(new RuntimeException("cleanup detail"));
 			var failure = new RuntimeException("original message " + "x".repeat(100_000), cause);
 			diagnostics.server("observe-block", "unavailable", "target", "normal missing data");
-			diagnostics.serverException("observe-block", "exception", failure, "target", "provider target");
-			diagnostics.serverException("observe-block", "exception", failure, "target", "changed detail");
+			diagnostics.serverException("observe-block", SableDiagnostics.OBSERVATION_TEMPORARILY_UNAVAILABLE,
+				"exception", failure, "target", "provider target");
+			diagnostics.serverException("observe-block", SableDiagnostics.OBSERVATION_TEMPORARILY_UNAVAILABLE,
+				"exception", failure, "target", "changed detail");
 			assertEquals(1, capture.events().size(), "ordinary failures share controlled admission");
-			diagnostics.approvedException(SableDiagnostics.CAPTURE_PREFIX, "presentation", "exception", failure);
-			diagnostics.approvedException(SableDiagnostics.CAPTURE_PREFIX, "presentation", "exception", failure);
+			assertTrue(message(capture.events().getFirst())
+				.contains("handling=" + SableDiagnostics.OBSERVATION_TEMPORARILY_UNAVAILABLE));
+			diagnostics.approvedException(SableDiagnostics.CAPTURE_PREFIX, "presentation",
+				SableDiagnostics.OPERATION_UNAVAILABLE, "exception", failure);
+			diagnostics.approvedException(SableDiagnostics.CAPTURE_PREFIX, "presentation",
+				SableDiagnostics.OPERATION_UNAVAILABLE, "exception", failure);
 			assertEquals(3, capture.events().size(), "approved domain transitions have no second window");
 			for (LogEvent event : capture.events()) {
 				assertEquals(Level.WARN, event.getLevel());

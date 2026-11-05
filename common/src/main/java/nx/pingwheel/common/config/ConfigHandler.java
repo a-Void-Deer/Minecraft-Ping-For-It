@@ -10,6 +10,7 @@ import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import lombok.Getter;
 import lombok.SneakyThrows;
+import nx.pingwheel.common.diagnostics.SafeDiagnosticValue;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.platform.IPlatformContextService;
@@ -32,6 +33,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import static nx.pingwheel.common.Global.MOD_ID;
 
@@ -185,33 +187,37 @@ public class ConfigHandler <T extends IConfig> {
 	}
 
 	private boolean saveInternal(boolean force, boolean invokeUpdate) {
+		return saveResult(force, invokeUpdate).successful();
+	}
+
+	private SaveResult saveResult(boolean force, boolean invokeUpdate) {
 		publishProfile();
 		if (saveProtection != SaveProtection.NONE) {
 			runtime.logger().atDetailed().event(Level.DEBUG, "config-save", "protected",
 				() -> "type=" + configType.getSimpleName() + " path=" + configPath + " reason=" + saveProtection.description);
-			return false;
+			return SaveResult.PROTECTED;
 		}
 
 		if (pendingMigration != null) {
-			return savePendingMigration(invokeUpdate);
+			return savePendingMigration(invokeUpdate) ? SaveResult.WRITTEN : SaveResult.FAILED;
 		}
 
 		if (!force && configHash == config.hashCode() && Files.exists(configPath)) {
-			return true;
+			return SaveResult.UNCHANGED;
 		}
 
 		try {
 			if (invokeUpdate) config.onUpdate();
 			writeSerializedConfig(serializeConfig());
 		} catch (Exception e) {
-			logFailure("save", "config save failed", e);
-			return false;
+			logFailure("save", () -> "config save failed", e);
+			return SaveResult.FAILED;
 		}
 
 		configHash = config.hashCode();
 		runtime.logger().atDetailed().info("config-save", "saved", null,
 			() -> "type=" + configType.getSimpleName() + " path=" + configPath);
-		return true;
+		return SaveResult.WRITTEN;
 	}
 
 	@SneakyThrows
@@ -235,6 +241,8 @@ public class ConfigHandler <T extends IConfig> {
 	}
 
 	private void loadWithLegacyRecovery() {
+		@Nullable Exception loadFailure = null;
+
 		try {
 			byte[] sourceBytes = Files.readAllBytes(configPath);
 			VersionedConfig versionedConfig = readVersionedConfig(
@@ -258,10 +266,9 @@ public class ConfigHandler <T extends IConfig> {
 					versionedConfig.sourceBytes());
 				savePendingMigration();
 			}
-		} catch (Exception e) {
+		} catch (Exception failure) {
 			config = null;
-			runtime.logger().atNormal().failure(Level.ERROR, "config-load", "defaults-restored",
-				() -> "type=" + configType.getSimpleName() + " path=" + configPath, e);
+			loadFailure = failure;
 		}
 
 		if (config == null) {
@@ -269,7 +276,10 @@ public class ConfigHandler <T extends IConfig> {
 			publishProfile();
 			saveProtection = SaveProtection.NONE;
 
-			save();
+			SaveResult result = saveResult(false, true);
+			logRecoveryFailure(
+				Objects.requireNonNull(loadFailure, "load failure"),
+				result == SaveResult.WRITTEN ? "defaults-written" : "defaults-in-memory");
 			return;
 		}
 
@@ -313,7 +323,6 @@ public class ConfigHandler <T extends IConfig> {
 	private void recoverClientConfig(byte @Nullable [] originalBytes, Exception failure) {
 		pendingMigration = null;
 		String reason = safeReason(failure);
-		logFailure("load", "client defaults will be restored", failure);
 
 		BackupResult backup = backupOriginal(originalBytes);
 		config = createDefaultConfig();
@@ -322,7 +331,11 @@ public class ConfigHandler <T extends IConfig> {
 		if (backup.failure() != null) {
 			saveProtection = SaveProtection.INVALID_FILE;
 			configHash = config.hashCode();
-			logFailure("backup", "original file preserved; defaults remain in memory", backup.failure());
+			logRecoveryFailure(failure, "defaults-in-memory");
+			logFailure(Level.WARN, "config-io", "backup-failed-original-protected",
+				() -> "type=" + configType.getSimpleName() + " path=" + configPath
+					+ " original file preserved; defaults remain in memory",
+				backup.failure());
 			return;
 		}
 
@@ -332,12 +345,18 @@ public class ConfigHandler <T extends IConfig> {
 			writeSerializedConfig(header + serializeConfig());
 			configHash = config.hashCode();
 			saveProtection = SaveProtection.NONE;
+			logRecoveryFailure(failure, "defaults-written");
 			runtime.logger().atDetailed().info("config-recovery", "recovered", null,
 				() -> "type=" + configType.getSimpleName() + " path=" + configPath + " backup=" + backup.path());
 		} catch (Exception writeFailure) {
 			saveProtection = SaveProtection.INVALID_FILE;
 			configHash = config.hashCode();
-			logFailure("reset", "reset file could not be written; original backup is available", writeFailure);
+			logRecoveryFailure(failure, "defaults-in-memory");
+			logFailure(Level.WARN, "config-io", "reset-write-failed-backup-retained",
+				() -> "type=" + configType.getSimpleName() + " path=" + configPath
+					+ " reset file could not be written; original backup is available"
+					+ " backup=" + backup.path(),
+				writeFailure);
 		}
 	}
 
@@ -616,7 +635,7 @@ public class ConfigHandler <T extends IConfig> {
 		return null;
 	}
 
-	private static @Nullable String normalizeServerPresentationShape(JsonObject root) {
+	private @Nullable String normalizeServerPresentationShape(JsonObject root) {
 		JsonElement presentationElement = root.get("presentation");
 		if (presentationElement == null) {
 			return null;
@@ -627,17 +646,23 @@ public class ConfigHandler <T extends IConfig> {
 			// failing the whole config into a reset that allows every field. The new
 			// deny state wins over any legacy shape because the whole object is replaced.
 			root.add("presentation", failClosedPresentation());
+			reportSecurityPolicyNormalization("global", PresentationSettings.TARGET_TYPE_IDS.size());
 			return "presentation: malformed policy object replaced with deny-all target types";
 		}
 
 		JsonObject presentation = presentationElement.getAsJsonObject();
 		boolean changed = false;
 		boolean globalDeny = false;
+		boolean malformedGlobalShape = false;
+		int malformedTargetTypes = 0;
 
 		JsonElement targetTypesElement = presentation.get("targetTypes");
 		if (targetTypesElement != null) {
 			if (targetTypesElement.isJsonObject()) {
-				JsonObject normalized = normalizeTargetTypeRules(targetTypesElement.getAsJsonObject());
+				TargetTypeNormalization normalization =
+					normalizeTargetTypeRules(targetTypesElement.getAsJsonObject());
+				malformedTargetTypes = normalization.malformedCount();
+				JsonObject normalized = normalization.rules();
 				if (!normalized.equals(targetTypesElement)) {
 					presentation.add("targetTypes", normalized);
 					changed = true;
@@ -648,14 +673,15 @@ public class ConfigHandler <T extends IConfig> {
 				// same-version and an older-version load both stay fail closed.
 				presentation.add("targetTypes", failClosedTargetTypes());
 				changed = true;
+				malformedGlobalShape = true;
 			}
 			changed |= removeKeys(presentation, LEGACY_FLAT_PRESENTATION_KEYS);
 		} else if (presentation.has("white") || presentation.has("black") || presentation.has("whitelistOnly")) {
-			presentation.add("targetTypes", validFlatRuleShape(presentation)
-				? flatRuleCopies(presentation)
-				: failClosedTargetTypes());
+			boolean validFlat = validFlatRuleShape(presentation);
+			presentation.add("targetTypes", validFlat ? flatRuleCopies(presentation) : failClosedTargetTypes());
 			removeKeys(presentation, LEGACY_FLAT_PRESENTATION_KEYS);
 			changed = true;
+			malformedGlobalShape |= !validFlat;
 		}
 
 		JsonElement permissionElement = presentation.get("permissionLevels");
@@ -700,23 +726,46 @@ public class ConfigHandler <T extends IConfig> {
 			changed = true;
 		}
 
+		if (malformedGlobalShape || globalDeny) {
+			reportSecurityPolicyNormalization("global", PresentationSettings.TARGET_TYPE_IDS.size());
+		} else if (malformedTargetTypes > 0) {
+			reportSecurityPolicyNormalization("target-type", malformedTargetTypes);
+		}
+
 		return changed ? "presentation: security-sensitive shapes normalized fail closed" : null;
 	}
 
-	private static JsonObject normalizeTargetTypeRules(JsonObject raw) {
+	private void reportSecurityPolicyNormalization(String scope, int count) {
+		runtime.logger().atNormal().site("config-policy").warn(
+			"security-sensitive-shape-denied scope={} targetTypes={}",
+			SafeDiagnosticValue.code(scope),
+			SafeDiagnosticValue.number(count));
+	}
+
+	private static TargetTypeNormalization normalizeTargetTypeRules(JsonObject raw) {
 		JsonObject normalized = new JsonObject();
+		int malformed = 0;
 		for (String id : PresentationSettings.TARGET_TYPE_IDS) {
 			JsonElement entry = raw.get(id);
-			if (entry == null || !entry.isJsonObject() || !validRuleShape(entry.getAsJsonObject())) {
-				// A missing, non-object, or partially mistyped type rule fails closed
-				// instead of silently becoming the allow-by-default rule shape.
+			if (entry == null) {
+				// A missing type entry keeps its documented deny-all outcome without
+				// turning ordinary default absence into a security-policy warning.
 				normalized.add(id, denyAllRule());
+				continue;
+			}
+			if (!entry.isJsonObject() || !validRuleShape(entry.getAsJsonObject())) {
+				// A present but non-object or partially mistyped type rule is an actual
+				// malformed policy denial and fails closed for that type.
+				normalized.add(id, denyAllRule());
+				malformed++;
 				continue;
 			}
 			normalized.add(id, entry.deepCopy());
 		}
-		return normalized;
+		return new TargetTypeNormalization(normalized, malformed);
 	}
+
+	private record TargetTypeNormalization(JsonObject rules, int malformedCount) {}
 
 	private static JsonObject flatRuleCopies(JsonObject presentation) {
 		JsonObject targetTypes = new JsonObject();
@@ -913,8 +962,11 @@ public class ConfigHandler <T extends IConfig> {
 			if (invokeUpdate) config.onUpdate();
 			writeSerializedConfig(serializeConfig(confirmedMigration.root()));
 		} catch (Exception failure) {
-			logFailure("migration-write", "configVersion=" + confirmedMigration.configVersion() + " modVersion=" + modVersion
-				+ "; valid loaded config retained; later save will retry", failure);
+			logFailure("migration-write",
+				() -> "configVersion=" + confirmedMigration.configVersion()
+					+ " modVersion=" + modVersion
+					+ "; valid loaded config retained; later save will retry",
+				failure);
 			return false;
 		}
 
@@ -938,7 +990,8 @@ public class ConfigHandler <T extends IConfig> {
 		try {
 			currentBytes = Files.readAllBytes(configPath);
 		} catch (Exception failure) {
-			logFailure("migration-source-read", "pending migration discarded; reloading disk state", failure);
+			logFailure("migration-source-read",
+				() -> "pending migration discarded; reloading disk state", failure);
 			return discardStalePendingMigration("the config file could not be read");
 		}
 
@@ -1068,10 +1121,25 @@ public class ConfigHandler <T extends IConfig> {
 		return parserOrIoReason(failure);
 	}
 
-	private void logFailure(String operation, String context, @Nullable Throwable failure) {
+	private void logFailure(String operation, Supplier<@Nullable String> context, @Nullable Throwable failure) {
 		Level severity = operation.equals("load") ? Level.ERROR : Level.WARN;
-		runtime.logger().atNormal().failure(severity, "config-io", operation + "-failed",
-			() -> "type=" + configType.getSimpleName() + " path=" + configPath + " " + context, failure);
+		logFailure(severity, "config-io", operation + "-failed", context, failure);
+	}
+
+	private void logFailure(
+		Level severity,
+		String site,
+		String handling,
+		Supplier<@Nullable String> context,
+		Throwable failure
+	) {
+		runtime.logger().atNormal().failure(severity, site, handling,
+			() -> "type=" + configType.getSimpleName() + " path=" + configPath + " " + context.get(), failure);
+	}
+
+	private void logRecoveryFailure(Throwable failure, String handling) {
+		logFailure(Level.ERROR, "config-load", handling,
+			() -> "type=" + configType.getSimpleName() + " path=" + configPath, failure);
 	}
 
 	private void publishProfile() {
@@ -1144,6 +1212,23 @@ public class ConfigHandler <T extends IConfig> {
 		byte[] sourceBytes) {
 		private PendingMigration {
 			sourceBytes = sourceBytes.clone();
+		}
+	}
+
+	private enum SaveResult {
+		WRITTEN(true),
+		UNCHANGED(true),
+		FAILED(false),
+		PROTECTED(false);
+
+		private final boolean successful;
+
+		SaveResult(boolean successful) {
+			this.successful = successful;
+		}
+
+		private boolean successful() {
+			return successful;
 		}
 	}
 

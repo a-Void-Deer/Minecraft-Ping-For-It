@@ -10,6 +10,7 @@ import nx.pingwheel.common.integration.IntegrationDiagnosticCapture;
 import org.apache.logging.log4j.Level;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -60,13 +61,52 @@ class SableDiagnosticsTest {
 		RuntimeException failure = new RuntimeException("provider payload and coordinates");
 
 		diagnostics.serverException(
-			"reflection-discovery", "failure", failure,
+			"reflection-discovery", SableDiagnostics.OPERATION_UNAVAILABLE, "failure", failure,
 			"class_name", "dev.ryanhcode.sable.sublevel.SubLevel");
 
 		assertEquals(1, diagnostics.events().size());
 		assertSame(failure, diagnostics.events().get(0).throwable());
 		assertEquals("reflection-discovery", diagnostics.events().get(0).stage());
+		assertEquals(SableDiagnostics.OPERATION_UNAVAILABLE, diagnostics.events().get(0).handling());
 		assertEquals("failure", diagnostics.events().get(0).reason());
+	}
+
+	/**
+	 * Controlled descriptor seam: it exercises only the logging boundary used by
+	 * discovery, not a live Sable class or a real reflective API payload.
+	 */
+	@Test
+	void descriptorSupplierStaysLazyAndADescriptorFailureDoesNotDisableTheCallerBoundary() {
+		try (IntegrationDiagnosticCapture capture =
+				new IntegrationDiagnosticCapture(Level.DEBUG, LoggingProfile.NORMAL)) {
+			SableDiagnostics diagnostics = SableDiagnostics.global(Diagnostics.server());
+			AtomicInteger reads = new AtomicInteger();
+			Object descriptor = SableDiagnostics.lazy(() -> {
+				reads.incrementAndGet();
+				return "descriptor-method";
+			});
+
+			diagnostics.server("provider-init", "success", "api_methods", descriptor);
+			assertEquals(0, reads.get(), "NORMAL must not evaluate a DEBUG-only descriptor");
+
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEBUG);
+			diagnostics.server("provider-init", "success", "api_methods", descriptor);
+			assertEquals(1, reads.get());
+			assertEquals(1, capture.events().size());
+			assertTrue(capture.events().getFirst().getMessage().getFormattedMessage()
+				.contains("descriptor-method"));
+
+			capture.level(Level.WARN);
+			diagnostics.server("provider-init", "success", "api_methods", descriptor);
+			assertEquals(1, reads.get(), "backend-disabled DEBUG must not evaluate the descriptor");
+
+			capture.level(Level.DEBUG);
+			assertDoesNotThrow(() -> diagnostics.server("provider-init", "success", "api_methods",
+				SableDiagnostics.lazy(() -> { throw new IllegalStateException("descriptor failure"); })));
+			diagnostics.server("provider-init", "success", "api_methods", "still-available");
+			assertTrue(capture.events().stream().anyMatch(event -> event.getMessage().getFormattedMessage()
+				.contains("still-available")), "a descriptor failure must not disable later reports");
+		}
 	}
 
 	@Test
@@ -76,12 +116,15 @@ class SableDiagnosticsTest {
 			AtomicInteger reads = new AtomicInteger();
 			Object field = SableDiagnostics.lazy(() -> { reads.incrementAndGet(); return "private-locator"; });
 			diagnostics.server("candidate-query", "start", "locator", field);
-			diagnostics.serverException("observe-block", "failed", new IllegalStateException("private-cause"), "locator", field);
+			diagnostics.serverException("observe-block", SableDiagnostics.OBSERVATION_TEMPORARILY_UNAVAILABLE,
+				"failed", new IllegalStateException("private-cause"), "locator", field);
 			assertEquals(0, reads.get());
 			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEEP);
-			diagnostics.serverException("observe-block", "failed", new IllegalStateException("later-cause"), "locator", field);
+			diagnostics.serverException("observe-block", SableDiagnostics.OBSERVATION_TEMPORARILY_UNAVAILABLE,
+				"failed", new IllegalStateException("later-cause"), "locator", field);
 			assertEquals(0, reads.get(), "suppressed failure fields remain lazy after a profile change");
-			diagnostics.approvedException(SableDiagnostics.SERVER_PREFIX, "observe-block", "failed",
+			diagnostics.approvedException(SableDiagnostics.SERVER_PREFIX, "observe-block",
+				SableDiagnostics.OBSERVATION_TEMPORARILY_UNAVAILABLE, "failed",
 				new IllegalStateException("original-cause"), "locator", field);
 			assertEquals(1, reads.get());
 			assertTrue(capture.events().getLast().getMessage().getFormattedMessage().contains("original-cause"));
