@@ -108,16 +108,21 @@ public final class CreateFluidTankAccess {
 		// The common layout guard is finite even when Create's configurable max height is very large.
 		if (width < 1 || width > 3 || height < 1 || axis != Direction.Axis.Y)
 			throw unavailable("Create fluid bounded static topology",
-				() -> "controller=" + controller.toShortString() + ";width=" + width + ";height=" + height
-					+ ";axis=" + axis(axis) + ";maxMembers=" + InventorySnapshotLayout.MAX_MEMBERS
-					+ ";position=" + root.toShortString());
+				() -> "reason=invalid-shape;controller=" + controller.toShortString() + ";width=" + width
+					+ ";height=" + height + ";axis=" + axis(axis)
+					+ ";maxMembers=" + InventorySnapshotLayout.MAX_MEMBERS + ";" + blockContext(root, face, block));
 		long size = (long) width * width * height;
 		boolean containsHit = contains(controller, root, width, height);
-		if (size > InventorySnapshotLayout.MAX_MEMBERS || !containsHit)
-			throw unavailable("Create fluid bounded static topology",
-				() -> "controller=" + controller.toShortString() + ";width=" + width + ";height=" + height
-					+ ";members=" + size + ";maxMembers=" + InventorySnapshotLayout.MAX_MEMBERS
-					+ ";containsHit=" + containsHit + ";position=" + root.toShortString());
+		if (size > InventorySnapshotLayout.MAX_MEMBERS)
+			throw unavailable("Create fluid member limit exceeded (member-limit-exceeded)",
+				() -> "reason=member-limit-exceeded;controller=" + controller.toShortString()
+					+ ";width=" + width + ";height=" + height + ";members=" + size
+					+ ";maxMembers=" + InventorySnapshotLayout.MAX_MEMBERS + ";" + blockContext(root, face, block));
+		if (!containsHit)
+			throw unavailable("Create fluid hit outside structure (hit-outside-structure)",
+				() -> "reason=hit-outside-structure;controller=" + controller.toShortString()
+					+ ";width=" + width + ";height=" + height + ";members=" + size + ";"
+					+ blockContext(root, face, block));
 		return new TankProbe(new Discovery(world, face, original, master, metadata, width, height), operation);
 	}
 

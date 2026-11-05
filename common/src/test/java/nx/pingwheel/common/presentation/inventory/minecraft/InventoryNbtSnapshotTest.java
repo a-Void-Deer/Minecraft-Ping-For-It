@@ -385,6 +385,12 @@ class InventoryNbtSnapshotTest {
 	}
 
 	@Test
+	void memberGuardAcceptsTheConfiguredLimitAndRejectsOneMore() {
+		assertDoesNotThrow(() -> InventoryNbtSnapshot.memoryUpperBound(0, 1_024));
+		assertThrows(IllegalArgumentException.class, () -> InventoryNbtSnapshot.memoryUpperBound(0, 1_025));
+	}
+
+	@Test
 	void excessiveDepthCyclesNodesAndArraysFailBeforeDeepCopy() {
 		var topology = layout(List.of(member(BlockPos.ZERO, segment(1, List.of(0)))));
 		CompoundTag root = new CompoundTag();

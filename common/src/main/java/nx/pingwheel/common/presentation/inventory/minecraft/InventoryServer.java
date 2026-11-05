@@ -59,6 +59,7 @@ public final class InventoryServer {
 		var runtime = new InventoryRuntime(
 			new InventoryRuntime.SourceResolver() {
 				@Override public InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput input) { return InventoryMinecraftSources.resolutionValidationCost(input); }
+				@Override public InventoryValidationBudget.Cost resolutionProbeCost(InventorySourceInput input) { return InventoryMinecraftSources.resolutionProbeCost(input); }
 				@Override public Optional<nx.pingwheel.common.presentation.inventory.InventorySourceAccess.Source> resolve(InventorySourceInput input, int displayBytes) {
 					throw new IllegalStateException("production inventory resolution requires admission");
 				}

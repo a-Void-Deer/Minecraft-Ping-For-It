@@ -34,6 +34,7 @@ public final class InventoryValidationBudget {
 		private long fluidAllocationAdmitted, fluidWorkAdmitted;
 		private boolean fluidSettlementFailed;
 		private @org.jetbrains.annotations.Nullable FluidGrants fluidGrants;
+		private @org.jetbrains.annotations.Nullable ItemResolutionGrants itemResolutionGrants;
 		public Allowance(Cost limit) { this.limit = java.util.Objects.requireNonNull(limit); }
 		/** Pure preflight; does not create a grant or change attempted use. */
 		public void checkAdditional(Cost admitted) {
@@ -84,6 +85,15 @@ public final class InventoryValidationBudget {
 		/** Caller-owned attempts exclude all fluid owners, including owners whose tickets are still live. */
 		public long attemptedOuterWorkUnits() { return outerWork; }
 		public long peakWorkspaceBytes() { return peak; }
+		/** Present only during the Runtime's synchronous resolution/validation operation. */
+		public @org.jetbrains.annotations.Nullable ItemResolutionGrants itemResolutionGrants() { return itemResolutionGrants; }
+		public void itemResolutionGrants(@org.jetbrains.annotations.Nullable ItemResolutionGrants grants) { itemResolutionGrants = grants; }
+		/** ITEM stages belong to the outer operation, never to an independently settled FLUID scope. */
+		public void checkItemResolutionAdditional(Cost cost) {
+			requireFluidAccounting();
+			if (fluidScope != null) throw new IllegalStateException("item resolution cannot extend an independent fluid grant");
+			checkAdditional(cost);
+		}
 		/** Runtime installs this capability; sources cannot manufacture an additional ledger. */
 		public void fluidGrants(FluidGrants grants) { fluidGrants = java.util.Objects.requireNonNull(grants); }
 		public FluidGrants fluidGrants() {
@@ -131,6 +141,43 @@ public final class InventoryValidationBudget {
 	@FunctionalInterface
 	public interface FluidGrants {
 		InventoryFluidAdmission open(Allowance allowance, Cost memberGate, Cost authority);
+	}
+	@org.jetbrains.annotations.NotNullByDefault
+	@FunctionalInterface
+	public interface ItemResolutionGrants {
+		ItemResolutionStage open(Cost cost);
+	}
+	public static InventoryItemBudget.CaptureLimitException itemResolutionDeferred() {
+		return new InventoryItemBudget.CaptureLimitException("item resolution admission deferred");
+	}
+	/** Construction workspace becomes the source's one retained metadata ticket, without a release/reacquire gap. */
+	@org.jetbrains.annotations.NotNullByDefault
+	public static final class ItemResolutionStage implements AutoCloseable {
+		private final nx.pingwheel.common.presentation.source.RetainedMemoryLedger.Ticket memory;
+		private final long upperBound;
+		private boolean closed, transferred;
+		public ItemResolutionStage(nx.pingwheel.common.presentation.source.RetainedMemoryLedger.Ticket memory, long upperBound) {
+			this.memory = java.util.Objects.requireNonNull(memory); this.upperBound = upperBound;
+		}
+		public ItemMetadataOwnership retain(long bytes) {
+			if (closed || transferred) throw new IllegalStateException("item resolution stage already settled");
+			if (bytes < 0 || bytes > upperBound) throw new IllegalStateException("item metadata exceeds finish admission");
+			var ownership = new ItemMetadataOwnership(memory, bytes);
+			memory.commit(bytes); transferred = true; return ownership;
+		}
+		@Override public void close() { if (!closed) { closed = true; if (!transferred) memory.close(); } }
+	}
+	/** No runtime, world, allowance or callback can escape with detached ownership. */
+	@org.jetbrains.annotations.NotNullByDefault
+	public static final class ItemMetadataOwnership implements AutoCloseable {
+		private final nx.pingwheel.common.presentation.source.RetainedMemoryLedger.Ticket memory;
+		private final long bytes;
+		private boolean closed;
+		private ItemMetadataOwnership(nx.pingwheel.common.presentation.source.RetainedMemoryLedger.Ticket memory, long bytes) {
+			this.memory = memory; this.bytes = bytes;
+		}
+		public long bytes() { return bytes; }
+		@Override public void close() { if (!closed) { closed = true; memory.close(); } }
 	}
 	private static Cost owned(long bytes, long work) { return new Cost(bytes, bytes, work); }
 	private static long array(long cells) { return add(O, mul(cells, R)); }
@@ -256,6 +303,44 @@ public final class InventoryValidationBudget {
 		// Unknown capability internals are external-trusted. Our known wrapper graph and possible native Vault discovery remain owned.
 		return bookkeeping().plus(structure.overlap(locks(members + 1)).overlap(classification(1, true).times(4))
 			.overlap(vaultLayout(81).plus(vaultValidation(81).times(3))));
+	}
+	/** Binding, registry/owner/root/scope probes, one root lock, and the fixed stage/profile/ticket directory. */
+	public static Cost itemResolutionProbe() {
+		return bookkeeping().plus(fixed(null)).overlap(owned(8192, 65536)).overlap(locks(1));
+	}
+	/** Native Container construction is bounded to the hit and its reciprocal chest partner, never a provider limit. */
+	public static Cost itemContainerResolution() {
+		return itemResolutionStructure(2, 2).overlap(locks(2)).overlap(itemResolutionCertificate(2, 2));
+	}
+	/** Before find/snapshotLayout: known bridge classification and possible native Vault DTO construction (81 members). */
+	public static Cost itemProviderLookup() {
+		return changedLayoutCopy(81, 81).overlap(classification(1, true).times(4))
+			.overlap(vaultLayout(81).plus(vaultValidation(81).times(3))).overlap(fixed(null));
+	}
+	/** O(1) shape selection from the immutable returned DTO; no member/segment traversal computes this bound. */
+	public static Cost itemProviderFinish(long members) {
+		if (members < 0 || members > InventorySnapshotLayout.MAX_MEMBERS) throw new IllegalArgumentException("item finish member bound");
+		long m = Math.max(1, members);
+		// Every member may expose every legal segment and text/slot bound. Root and
+		// member locks, retained DTO/scope/profile construction and a possible native
+		// certificate overlap: none is silently replaced by max(workspace).
+		long segments = members * InventorySnapshotLayout.MAX_SEGMENTS_PER_MEMBER;
+		// SourceRetention also conservatively charges a certified canonical DTO's
+		// shared segment texts/mappings a second time. Its two bounded metadata
+		// graphs must fit the finish ticket even for non-native custom layouts.
+		return itemResolutionStructure(m, segments).overlap(owned(segments * 4 * (1024L + 256L)
+			+ 4096L * (O + R + Integer.BYTES), segments * 2 * (1024L + 256L) + 4096))
+			.overlap(locks(m + 1)).overlap(itemResolutionCertificate(m, 2 * m));
+	}
+	private static Cost itemResolutionStructure(long members, long segments) {
+		return changedLayoutCopy(members, segments).overlap(fixed(null))
+			.overlap(owned(4096L * (O + 2 * R) + 16 * list(members), 4096 + 32 * members));
+	}
+	private static Cost itemResolutionCertificate(long members, long locks) {
+		// Canonical DTO, witnesses, route/state arrays and both cached 0..MAX_STEP
+		// cost directories; three current native checks plus cold local discovery.
+		return owned(8192 + members * 4096 + 4096 * 128L, 131072 + members * 4096)
+			.overlap(vaultValidation(members).times(3).plus(localClassification(3 * members))).overlap(locks(locks));
 	}
 	/** Fixed DTO rebuild: member/segment records, mappings, seen arrays, copies and position set. */
 	public static Cost layoutCopy(InventorySnapshotLayout layout) {

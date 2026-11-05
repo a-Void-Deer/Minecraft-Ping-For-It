@@ -71,6 +71,8 @@ public final class InventoryRuntime implements AutoCloseable {
 	public interface SourceResolver {
 		Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int displayBytes);
 		default InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput input) { return InventoryValidationBudget.NONE; }
+		/** Legacy resolvers keep their complete profile; staged production resolvers select only the paid root probe. */
+		default InventoryValidationBudget.Cost resolutionProbeCost(InventorySourceInput input) { return resolutionValidationCost(input); }
 		default Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int displayBytes, InventoryValidationBudget.Allowance allowance) {
 			return resolve(input, displayBytes);
 		}
@@ -504,7 +506,7 @@ public final class InventoryRuntime implements AutoCloseable {
 	public record BindingEvidenceResult(InventorySharedRead.Check check, @Nullable InventoryPublicationEvidence evidence) {}
 	public BindingEvidenceResult acquirePublicationBinding(Consumer consumer) {
 		if (consumer.closed || consumer.invalidated()) return new BindingEvidenceResult(InventorySharedRead.Check.UNAVAILABLE, null);
-		var resolutionCost = resolver.resolutionValidationCost(consumer.input);
+		var resolutionCost = resolver.resolutionProbeCost(consumer.input);
 		long upper = Math.max(authorityWorkspaceBytes(), resolutionCost.workspaceBytes());
 		var retained = memory.tryReserve(checkedAdd(upper, EVIDENCE_MEMORY));
 		if (retained.isEmpty()) return new BindingEvidenceResult(InventorySharedRead.Check.DEFERRED, null);
@@ -521,7 +523,7 @@ public final class InventoryRuntime implements AutoCloseable {
 					source = resolver.resolve(consumer.input, effectiveDisplayCap(), operation.allowance).orElse(null);
 				}
 			}
-			if (source == null) return new BindingEvidenceResult(InventorySharedRead.Check.UNAVAILABLE, null);
+			if (source == null || consumer.closed || consumer.invalidated()) return new BindingEvidenceResult(InventorySharedRead.Check.UNAVAILABLE, null);
 			if (source.sourceRetainedBytes() < 0 || source.sourceRetainedBytes() > upper) throw new IllegalStateException("binding metadata exceeds resolution grant");
 			var evidence = new LegacyPublicationEvidence(new MetadataOwner(source, true), retained.get());
 			var admission = reservePublication(evidence);
@@ -659,7 +661,7 @@ public final class InventoryRuntime implements AutoCloseable {
 					var probe = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
 					if (probe.isEmpty()) return false;
 					try (var admittedProbe = probe.get()) {
-					var resolution = validation(resolver.resolutionValidationCost(input), new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE), authorityWorkspaceBytes());
+					var resolution = validation(resolver.resolutionProbeCost(input), new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE), authorityWorkspaceBytes());
 					if (resolution.isEmpty()) return false;
 					InventoryValidationBudget.Allowance allowance;
 					InventorySourceAccess.@org.jetbrains.annotations.Nullable Source source;
@@ -742,21 +744,57 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (current == null) return InventoryDomainCodec.MAX_DISPLAY_BYTES;
 		return clampDisplayBytes((int) current.effectiveDisplayBytes());
 	}
-	/** One caller-owned synchronous allowance. No ticket or allowance survives the operation. */
+	/** One caller-owned synchronous allowance. Only a settled source-metadata ticket may escape the operation. */
 	private final class ValidationOperation implements AutoCloseable {
 		final InventoryValidationBudget.Allowance allowance;
 		final RetainedMemoryLedger.Ticket workspace;
 		final CostLedger.Ticket work;
 		final long before;
+		final long workUpper;
+		private @Nullable ItemStageGrant first, second;
+		private boolean closed;
 		ValidationOperation(InventoryValidationBudget.Cost cost, RetainedMemoryLedger.Ticket workspace, CostLedger.Ticket work, InventoryValidationBudget.Allowance allowance) {
 			this.allowance = allowance; before = allowance.attemptedOuterWorkUnits();
 			installFluidGrants(allowance);
-			allowance.admitAdditional(cost); this.workspace = workspace; this.work = work;
+			allowance.admitAdditional(cost); this.workspace = workspace; this.work = work; workUpper = cost.workUnits();
+			allowance.itemResolutionGrants(this::openItemStage);
+		}
+		private InventoryValidationBudget.ItemResolutionStage openItemStage(InventoryValidationBudget.Cost cost) {
+			if (closed || second != null) throw new IllegalStateException("item resolution operation is not active");
+			allowance.checkItemResolutionAdditional(cost); // arithmetic/scope preflight before either real ledger moves
+			var scratch = memory.tryReserve(cost.workspaceBytes()).orElseThrow(InventoryValidationBudget::itemResolutionDeferred);
+			try {
+				var ticket = physical.tryReserve(Map.of(ITEM_WORK, cost.workUnits())).orElseThrow(InventoryValidationBudget::itemResolutionDeferred);
+				try {
+					var stage = new InventoryValidationBudget.ItemResolutionStage(scratch, cost.workspaceBytes());
+					var grant = new ItemStageGrant(ticket, cost.workUnits(), stage);
+					allowance.admitAdditional(cost);
+					if (first == null) first = grant; else second = grant;
+					return stage;
+				} catch (RuntimeException | Error failure) { ticket.close(); throw failure; }
+			} catch (RuntimeException | Error failure) { scratch.close(); throw failure; }
 		}
 		@Override public void close() {
-			try { work.commit(Map.of(ITEM_WORK, allowance.attemptedOuterWorkUnits() - before)); }
-			finally { try { allowance.releaseUnusedAdmission(); } finally { try { work.close(); } finally { workspace.close(); } } }
+			if (closed) return; closed = true; allowance.itemResolutionGrants(null);
+			long remaining = allowance.attemptedOuterWorkUnits() - before;
+			try {
+				long used = Math.min(remaining, workUpper); remaining -= used; work.commit(Map.of(ITEM_WORK, used));
+				if (first != null) remaining = first.settle(remaining);
+				if (second != null) remaining = second.settle(remaining);
+				if (remaining != 0) throw new IllegalStateException("item validation work exceeds genuine grants");
+			} finally {
+				try { allowance.releaseUnusedAdmission(); }
+				finally {
+					try { try { if (first != null) first.close(); } finally { if (second != null) second.close(); } }
+					finally { try { work.close(); } finally { workspace.close(); } }
+				}
+			}
 		}
+	}
+	@NotNullByDefault
+	private record ItemStageGrant(CostLedger.Ticket work, long upperBound, InventoryValidationBudget.ItemResolutionStage stage) implements AutoCloseable {
+		long settle(long remaining) { long used = Math.min(remaining, upperBound); work.commit(Map.of(ITEM_WORK, used)); return remaining - used; }
+		@Override public void close() { try { work.close(); } finally { stage.close(); } }
 	}
 	private Optional<ValidationOperation> validation(InventoryValidationBudget.Cost cost) {
 		return validation(cost, new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE));
@@ -1071,7 +1109,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		InventorySourceAccess.@org.jetbrains.annotations.Nullable Source resolved = null;
 		try (var grant = ticket.get()) {
 			grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
-			var resolution = validation(resolver.resolutionValidationCost(input), new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE), authorityWorkspaceBytes());
+			var resolution = validation(resolver.resolutionProbeCost(input), new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE), authorityWorkspaceBytes());
 			if (resolution.isEmpty()) return Optional.empty();
 			InventoryValidationBudget.Allowance allowance;
 			try (var operation = resolution.get()) {
@@ -1242,7 +1280,7 @@ public final class InventoryRuntime implements AutoCloseable {
 				if (joinOnly) return InventorySourceAccess.Preparation.READY;
 				delay(consumer, consumer.admissionDelay, Reason.ROUND_CAPACITY.bit(), "admission"); return InventorySourceAccess.Preparation.DEFERRED;
 			}
-			var resolutionCost = resolver.resolutionValidationCost(consumer.input).plus(pooled ? POOL_BOOKKEEPING : InventoryValidationBudget.NONE);
+			var resolutionCost = resolver.resolutionProbeCost(consumer.input).plus(pooled ? POOL_BOOKKEEPING : InventoryValidationBudget.NONE);
 			long resolutionWorkspace = Math.max(InventoryItemBudget.workspaceUpperBound(effectiveDisplayCap()), resolutionCost.workspaceBytes());
 			var retained = memory.tryReserve(checkedAdd(ROUND_MEMORY, resolutionWorkspace));
 			if (retained.isEmpty()) { delay(consumer, consumer.admissionDelay, Reason.MEMORY.bit(), "admission"); return InventorySourceAccess.Preparation.DEFERRED; }
@@ -1279,6 +1317,7 @@ public final class InventoryRuntime implements AutoCloseable {
 					return InventorySourceAccess.Preparation.UNAVAILABLE;
 				}
 				openedHandle = started.handle();
+				if (consumer.closed || consumer.invalidated()) return InventorySourceAccess.Preparation.UNAVAILABLE;
 				long sourceBytes = resolvedSource[0].sourceRetainedBytes();
 				// The outer resolution reservation is still held: transfer its owned metadata
 				// into the round/binding ticket before releasing scratch. Catalogue growth is separate.

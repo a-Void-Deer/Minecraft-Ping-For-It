@@ -12,10 +12,17 @@ import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.material.Fluids;
 import net.neoforged.neoforge.fluids.FluidStack;
 import net.neoforged.neoforge.fluids.capability.IFluidHandler;
+import nx.pingwheel.common.config.InventorySettings;
 import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.platform.IPlatformFluidService;
 import nx.pingwheel.common.platform.IPlatformFluidService.Operation;
+import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
+import nx.pingwheel.common.presentation.source.CostLedger;
+import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.neoforge.platform.FluidCapabilityAccess;
 import nx.pingwheel.neoforge.platform.PlatformFluidServiceTest.PaidAccess;
 import static nx.pingwheel.neoforge.platform.PlatformFluidServiceTest.*;
@@ -155,16 +162,40 @@ class CreateFluidTankMetadataTest {
 		}
 	}
 
-	@Test void threeByThreeByTwentyArchiveProbeFinishDoesNotEmitRejectionDiagnostics() throws Exception {
-		var loader = new Loader(""); var world = new World(loader, 3, 20);
+	@ParameterizedTest @ValueSource(ints = {20, 32})
+	void threeByThreeArchiveProbeFinishDoesNotEmitRejectionDiagnostics(int height) throws Exception {
+		var loader = new Loader(""); var world = new World(loader, 3, height);
+		BlockPos hit = new BlockPos(2, height - 1, 2);
+		((net.neoforged.neoforge.fluids.capability.templates.FluidTank) world.ownTank).setFluid(new FluidStack(Fluids.WATER, 1000));
+		var settings = InventorySettings.serverDefaults();
+		var memory = new RetainedMemoryLedger(settings.pendingMemoryBytes());
+		long work = (long) InventorySourceAccess.MAX_SLOTS * InventoryItemBudget.workUpperBound((int) settings.effectiveDisplayBytes());
+		var ledger = new CostLedger(Map.of(WORK, work));
+		world.memberCost = new InventoryValidationBudget.Cost(1024, 1024, 528);
+		world.authorityCost = new InventoryValidationBudget.Cost(9216, 9216, 2560);
 		try (var capture = new CreateDiagnosticCapture(Level.DEBUG, LoggingProfile.DEBUG);
-			var access = access(loader, world, new BlockPos(2, 19, 2))) {
-			assertEquals(180, access.layout().members().size());
-			assertEquals(1, access.slots());
-			assertTrue(access.valid());
+			var a = new InventoryFluidAdmission(ledger, WORK, memory, world.memberCost, world.authorityCost);
+			var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE)) {
+			op.allowance().debit(FluidCapabilityAccess.PROBE_PROFILE.ownedCost());
+			try (var probe = (IPlatformFluidService.Probe) loader.loadClass(ACCESS).getMethod("probe", FluidCapabilityAccess.World.class,
+				BlockPos.class, Direction.class, FluidCapabilityAccess.Block.class, Operation.class)
+				.invoke(null, world, hit, Direction.WEST, java.util.Objects.requireNonNull(world.blocks.get(hit)), op)) {
+				assertEquals(0, world.capabilityCalls);
+				try (var access = probe.finish(a).orElseThrow()) {
+					assertEquals(9 * height, access.layout().members().size()); assertEquals(1, access.slots());
+					try (var validation = a.enter(access.validationProfile())) { assertTrue(access.valid(validation)); }
+					var visits = new java.util.concurrent.atomic.AtomicInteger();
+					try (var read = a.enter(access.readProfile())) {
+						assertTrue(access.consume(0, entry -> { visits.incrementAndGet(); assertEquals(81_000, entry.amount()); return true; }, read));
+					}
+					assertEquals(1, visits.get(), "one controller address, not one quantity per structure member");
+				}
+			}
 			assertTrue(capture.events.isEmpty(), () -> capture.events.stream()
 				.map(event -> event.getMessage().getFormattedMessage()).toList().toString());
 		}
+		assertTrue(ledger.used(WORK) > 0); assertTrue(ledger.used(WORK) <= work);
+		assertEquals(0, memory.reserved()); assertEquals(0, memory.retained());
 	}
 
 	@Test void oneHundredEightyMemberFailureNamesCoordinateIndexAndShape() throws Exception {
@@ -183,11 +214,19 @@ class CreateFluidTankMetadataTest {
 		assertTrue(context.contains("observedController=99, 98, 97"), context);
 	}
 
+	/** Mirrors Runtime.advance's default item-work and pending-memory ledgers, not a test work quota. */
+	private static InventoryFluidAdmission defaultAdmission() {
+		var settings = InventorySettings.serverDefaults();
+		long work = (long) InventorySourceAccess.MAX_SLOTS
+			* InventoryItemBudget.workUpperBound((int) settings.effectiveDisplayBytes());
+		return new InventoryFluidAdmission(new CostLedger(Map.of(WORK, work)), WORK,
+			new RetainedMemoryLedger(settings.pendingMemoryBytes()), GATE, GATE);
+	}
 	private static PaidAccess access(Loader loader, World world) throws Exception {
 		return access(loader, world, BlockPos.ZERO.above());
 	}
 	private static PaidAccess access(Loader loader, World world, BlockPos hit) throws Exception {
-		try (var a = admission(); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE)) {
+		try (var a = defaultAdmission(); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE)) {
 			op.allowance().debit(FluidCapabilityAccess.PROBE_PROFILE.ownedCost());
 			try (var probe = (IPlatformFluidService.Probe) loader.loadClass(ACCESS).getMethod("probe", FluidCapabilityAccess.World.class,
 				BlockPos.class, Direction.class, FluidCapabilityAccess.Block.class, Operation.class)
@@ -204,6 +243,7 @@ class CreateFluidTankMetadataTest {
 		private final IFluidHandler ownTank;
 		private IFluidHandler handler;
 		private int requireCalls, capabilityCalls;
+		private InventoryValidationBudget.Cost memberCost = GATE, authorityCost = GATE;
 		private World(Loader loader) throws Exception { this(loader, 1, 2); }
 		private World(Loader loader, int height) throws Exception { this(loader, 1, height); }
 		private World(Loader loader, int width, int height) throws Exception {
@@ -227,7 +267,10 @@ class CreateFluidTankMetadataTest {
 			field(entity.getClass(), "boiler").set(entity, allocate(loader.loadClass(BOILER)));
 			field(entity.getClass(), "tankInventory").set(entity, ownTank); return entity;
 		}
-		@Override public void require(BlockPos position, Operation operation) { gate(operation); requireCalls++; if (!blocks.containsKey(position)) throw new InventorySourceUnavailableException("unknown member"); }
+		@Override public void require(BlockPos position, Operation operation) {
+			operation.allowance().debit(memberCost); operation.allowance().debit(authorityCost);
+			requireCalls++; if (!blocks.containsKey(position)) throw new InventorySourceUnavailableException("unknown member");
+		}
 		@Override public FluidCapabilityAccess.Block block(BlockPos position, Operation operation) { require(position, operation); return java.util.Objects.requireNonNull(blocks.get(position)); }
 		@Override public @Nullable IFluidHandler capability(BlockPos position, Direction face, Operation operation) { require(position, operation); capabilityCalls++; assertEquals(BlockPos.ZERO, position); assertEquals(Direction.WEST, face); return handler; }
 		@Override public String dimension(Operation operation) { return "minecraft:overworld"; }

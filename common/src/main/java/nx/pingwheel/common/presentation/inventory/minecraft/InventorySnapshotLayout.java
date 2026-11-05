@@ -13,7 +13,7 @@ import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 public record InventorySnapshotLayout(String layoutId, String layoutData, BlockPos controller, List<Member> members) {
 
 	/** Finite engineering guards, including members that contribute no slots. */
-	public static final int MAX_MEMBERS = 256;
+	public static final int MAX_MEMBERS = 1024;
 	public static final int MAX_SEGMENTS_PER_MEMBER = 16;
 	private static final int MAX_ID_CHARS = 256, MAX_PATH_CHARS = 1024, MAX_LAYOUT_DATA_CHARS = 65536;
 
