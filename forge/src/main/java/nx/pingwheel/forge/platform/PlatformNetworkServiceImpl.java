@@ -83,7 +83,10 @@ public class PlatformNetworkServiceImpl implements IPlatformNetworkService, Enco
 			return;
 		}
 
-		send.accept(player, NetworkProtocol.PLAY.buildPacket(PacketFlow.CLIENTBOUND, chan.getName(), packet::writeTo));
+		var buf = new FriendlyByteBuf(Unpooled.buffer());
+		packet.write(buf);
+
+		send.accept(player, NetworkProtocol.PLAY.buildPacket(PacketFlow.CLIENTBOUND, chan, buf));
 		ServerConfigTransportDiagnostics.decision(Diagnostics.server(), kind,
 			ServerConfigTransportDiagnostics.Decision.SEND_DISPATCHED);
 	}

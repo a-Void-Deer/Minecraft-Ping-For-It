@@ -300,24 +300,65 @@ class BudgetDelayMonitorTest {
 	}
 
 	@Test void warningSinkFailureIsReportedAsSelfFaultWithoutReplayingAccounting() {
-		long occurrences = Diagnostics.faults().observations().stream()
-			.filter(observation -> observation.key().side() == DiagnosticSide.SERVER
-				&& observation.key().site().equals("budget/delay")
-				&& observation.key().stage() == DiagnosticFaultReporter.Stage.SINK)
-			.mapToLong(DiagnosticFaultReporter.Observation::occurrences).sum();
-		BudgetDelayMonitor monitor = new BudgetDelayMonitor(summary -> { throw new IllegalStateException("warning sink"); },
+		long occurrences = sinkFaultOccurrences();
+		int[] attempts = {0};
+		BudgetDelayMonitor monitor = new BudgetDelayMonitor(summary -> {
+			attempts[0]++;
+			assertEquals(new Count(1, false), summary.observedWorkItems());
+			assertEquals(new Count(1, false), summary.unknownQuantities());
+			throw new IllegalStateException("warning sink");
+		},
 			modules -> false);
 		monitor.observe(event(PRESENTATION, 0, 0, "job", true, Reason.MEMORY.bit(), Quantity.unknown()));
 		monitor.state(PRESENTATION, 0, 0, DelayState.DELAYED);
 		monitor.endCycle(PRESENTATION, 0, 0);
-		long after = Diagnostics.faults().observations().stream()
+		assertEquals(occurrences + 1, sinkFaultOccurrences(), "one consumed warning failure is one self-fault");
+		assertEquals(1, attempts[0]);
+		assertDoesNotThrow(() -> monitor.endCycle(PRESENTATION, 0, 0));
+		assertDoesNotThrow(() -> monitor.finishTick(0, true));
+		assertEquals(occurrences + 1, sinkFaultOccurrences(), "reclosing the same cycle cannot replay its failure");
+		assertEquals(1, attempts[0]);
+		monitor.observe(event(PRESENTATION, 1, 1, "next-job", true, Reason.MEMORY.bit(), Quantity.unknown()));
+		monitor.endCycle(PRESENTATION, 1, 1);
+		assertEquals(occurrences + 2, sinkFaultOccurrences(), "a new failed cycle is a genuine new occurrence");
+		assertEquals(2, attempts[0], "failed reporting cannot reopen the old accounting buffer");
+	}
+
+	@Test void administratorNoticeFailureIsNotSelfFaultAndDoesNotConsumeDeliveredCooldown() {
+		for (Throwable failure : List.of(new IllegalStateException("notice"), new NoClassDefFoundError("notice"))) {
+			long occurrences = sinkFaultOccurrences();
+			int[] attempts = {0};
+			List<CycleSummary> warnings = new ArrayList<>();
+			BudgetDelayMonitor monitor = new BudgetDelayMonitor(warnings::add, modules -> {
+				assertEquals(Set.of(PRESENTATION), modules);
+				if (attempts[0]++ == 0) failWith(failure);
+				return true;
+			});
+			monitor.state(PRESENTATION, 0, 0, DelayState.DELAYED);
+			monitor.finishTick(0, true);
+			monitor.state(PRESENTATION, 0, THRESHOLD_TICKS, DelayState.DELAYED);
+			assertDoesNotThrow(() -> monitor.finishTick(THRESHOLD_TICKS, true));
+			assertEquals(1, attempts[0]);
+			assertEquals(occurrences, sinkFaultOccurrences(), "administrator delivery is not a diagnostic sink");
+			monitor.finishTick(THRESHOLD_TICKS + 1, true);
+			assertEquals(1, attempts[0], "a failed handoff still requires fresh delayed evidence");
+			monitor.state(PRESENTATION, 0, THRESHOLD_TICKS + 1, DelayState.DELAYED);
+			monitor.finishTick(THRESHOLD_TICKS + 1, true);
+			assertEquals(2, attempts[0], "failed delivery did not consume the global cooldown");
+			monitor.state(PRESENTATION, 0, THRESHOLD_TICKS + 2, DelayState.DELAYED);
+			monitor.finishTick(THRESHOLD_TICKS + 2, true);
+			assertEquals(2, attempts[0], "the successful retry consumed the global cooldown");
+			assertEquals(occurrences, sinkFaultOccurrences());
+			assertTrue(warnings.isEmpty(), "final delay state alone does not invent a closed-cycle warning");
+		}
+	}
+
+	private static long sinkFaultOccurrences() {
+		return Diagnostics.faults().observations().stream()
 			.filter(observation -> observation.key().side() == DiagnosticSide.SERVER
 				&& observation.key().site().equals("budget/delay")
 				&& observation.key().stage() == DiagnosticFaultReporter.Stage.SINK)
 			.mapToLong(DiagnosticFaultReporter.Observation::occurrences).sum();
-		assertTrue(after > occurrences, "the swallowed warning sink is a diagnostic self-fault");
-		assertDoesNotThrow(() -> monitor.endCycle(PRESENTATION, 0, 0));
-		assertDoesNotThrow(() -> monitor.finishTick(0, true));
 	}
 
 	@Test void recoverablePortExceptionsAreIsolatedButFatalResourceErrorsPropagate() {
