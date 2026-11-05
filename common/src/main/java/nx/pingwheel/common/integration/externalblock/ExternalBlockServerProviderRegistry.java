@@ -33,20 +33,35 @@ public final class ExternalBlockServerProviderRegistry {
 		var cost = nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.NONE;
 		for (var provider : providers.values()) cost = cost.plus(provider.membershipCost()); return cost;
 	}
-	public synchronized ExternalBlockServerProvider.Membership membership(ServerLevel level, BlockPos position,
+	public ExternalBlockServerProvider.Membership membership(ServerLevel level, BlockPos position,
 		nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Allowance allowance) {
-		boolean unknown = false; ExternalBlockServerProvider.Membership found = ExternalBlockServerProvider.Membership.OUTSIDE;
-		for (var provider : providers.values()) {
-			ExternalBlockServerProvider.Membership value;
-			try { value = provider.membership(level, position, allowance); }
-			catch (nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.CaptureLimitException deferred) { throw deferred; }
-			catch (RuntimeException | LinkageError failure) { value = ExternalBlockServerProvider.Membership.UNKNOWN; }
-			if (value == null || value.state() == ExternalBlockServerProvider.MembershipState.UNKNOWN) unknown = true;
-			else if (value.state() == ExternalBlockServerProvider.MembershipState.INSIDE) {
-				if (found.state() == ExternalBlockServerProvider.MembershipState.INSIDE && !found.equals(value)) return ExternalBlockServerProvider.Membership.UNKNOWN;
-				found = value;
+		boolean unknown = false; boolean conflict = false;
+		ExternalBlockServerProvider.Membership found = ExternalBlockServerProvider.Membership.OUTSIDE;
+		@Nullable ArrayList<MembershipFailure> failures = null;
+		synchronized (this) {
+			for (var provider : providers.values()) {
+				ExternalBlockServerProvider.Membership value;
+				try { value = provider.membership(level, position, allowance); }
+				catch (nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.CaptureLimitException deferred) { throw deferred; }
+				catch (RuntimeException | LinkageError failure) {
+					value = ExternalBlockServerProvider.Membership.UNKNOWN;
+					if (failures == null) failures = new ArrayList<>(1);
+					failures.add(new MembershipFailure(provider, position, failure));
+				}
+				if (value == null || value.state() == ExternalBlockServerProvider.MembershipState.UNKNOWN) unknown = true;
+				else if (value.state() == ExternalBlockServerProvider.MembershipState.INSIDE) {
+					if (found.state() == ExternalBlockServerProvider.MembershipState.INSIDE && !found.equals(value)) {
+						conflict = true;
+						break;
+					}
+					found = value;
+				}
 			}
 		}
+		if (failures != null) {
+			for (var failure : failures) membershipFailure(failure.provider(), failure.position(), failure.failure());
+		}
+		if (conflict) return ExternalBlockServerProvider.Membership.UNKNOWN;
 		return found.state() == ExternalBlockServerProvider.MembershipState.INSIDE ? found : unknown ? ExternalBlockServerProvider.Membership.UNKNOWN : found;
 	}
 
@@ -472,13 +487,22 @@ public final class ExternalBlockServerProviderRegistry {
 			() -> "provider=" + providerScope(provider) + "; External block provider returned null");
 	}
 
+	private static void membershipFailure(ExternalBlockServerProvider provider, BlockPos position, Throwable failure) {
+		Diagnostics.server().atNormal().rateLimited(Operation.channel("membership")).failure(Level.WARN,
+			"external-block/membership", "membership-unavailable",
+			() -> "provider=" + providerScope(provider) + "; position=" + position, failure);
+	}
+
+	@NotNullByDefault
+	private record MembershipFailure(ExternalBlockServerProvider provider, BlockPos position, Throwable failure) {}
+
 	@NotNullByDefault
 	private enum Operation {
 		VALIDATE("validate"), MATERIALIZE("materialize"), REFRESH("refresh"),
 		PREVIEW_BINDING("preview-source-binding"), COMMITTED_BINDING("committed-source-binding"),
 		PREVIEW_READ("preview-read-source"), COMMITTED_READ("committed-read-source"),
 		OBSERVE("observe-block"), NAME("resolve-name"), DISTANCE("observe-validation-distance"),
-		RELEASE("release"), CLOSE("close");
+		RELEASE("release"), CLOSE("close"), MEMBERSHIP("membership");
 
 		private final String id;
 		private final DiagnosticChannel channel;

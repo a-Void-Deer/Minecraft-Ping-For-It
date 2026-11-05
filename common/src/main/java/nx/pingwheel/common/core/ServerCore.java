@@ -15,6 +15,7 @@ import nx.pingwheel.common.config.ServerConfigUpdate;
 import nx.pingwheel.common.config.ServerConfigUpdateService;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
@@ -274,12 +275,17 @@ public class ServerCore {
 		final boolean canEdit = player.hasPermissions(3);
 
 		if (packet.isCorrupt()) {
-			Diagnostics.server().atDetailed().debug("server settings update rejected: invalid packet");
+			Diagnostics.server().atDetailed().event(org.apache.logging.log4j.Level.DEBUG,
+				"server-config/update", "invalid-packet",
+				() -> "mask=" + packet.changedFields() + "; trustedPermission=" + canEdit);
 			return;
 		}
 
 		if (!canEdit) {
-			Diagnostics.server().atDetailed().debug("server settings update rejected: insufficient permission");
+			Diagnostics.server().atDetailed().event(org.apache.logging.log4j.Level.DEBUG,
+				"server-config/update", "permission-denied",
+				() -> updateContext(packet.changedFields(), false,
+					packet.changedFields() == ServerConfigUpdate.LOGGING_PROFILE, null));
 			return;
 		}
 
@@ -290,10 +296,16 @@ public class ServerCore {
 			ServerConfigSnapshot.from(config, true),
 			update);
 		if (!plan.applied()) {
-			Diagnostics.server().atDetailed().debug("server settings update rejected: invalid update");
+			Diagnostics.server().atDetailed().event(org.apache.logging.log4j.Level.DEBUG,
+				"server-config/update", "invalid-update",
+				() -> updateContext(update.changedFields(), true,
+					update.changedFields() == ServerConfigUpdate.LOGGING_PROFILE, null));
 			return;
 		}
 		final var mergedSnapshot = java.util.Objects.requireNonNull(plan.snapshot());
+		final boolean loggingSelected = (update.changedFields() & ServerConfigUpdate.LOGGING_PROFILE) != 0;
+		final boolean profileOnly = update.changedFields() == ServerConfigUpdate.LOGGING_PROFILE;
+		final @Nullable LoggingProfile selectedProfile = loggingSelected ? mergedSnapshot.loggingProfile() : null;
 		final var inventoryCandidate = (update.changedFields() & ServerConfigUpdate.ALL_INVENTORY_FIELDS) != 0
 			? plan.snapshot().inventory().toSettings() : null;
 
@@ -321,14 +333,26 @@ public class ServerCore {
 			config.setLoggingProfile(mergedSnapshot.loggingProfile());
 		}
 		config.validate();
-		if ((update.changedFields() & ServerConfigUpdate.LOGGING_PROFILE) != 0) {
+		if (loggingSelected) {
 			Diagnostics.setProfile(DiagnosticSide.SERVER, config.getLoggingProfile());
 		}
-		if (update.changedFields() == ServerConfigUpdate.LOGGING_PROFILE) {
+		Diagnostics.server().atDetailed().event(org.apache.logging.log4j.Level.INFO,
+			"server-config/update", "applied-in-memory",
+			() -> updateContext(update.changedFields(), true, profileOnly, selectedProfile));
+		if (profileOnly) {
 			ServerConfig.HANDLER.saveWithoutUpdate();
 		} else {
 			ServerConfig.HANDLER.save();
 		}
+		Diagnostics.server().atDetailed().event(org.apache.logging.log4j.Level.INFO,
+			"server-config/update", "persistence-attempted",
+			() -> updateContext(update.changedFields(), true, profileOnly, selectedProfile));
+	}
+
+	private static String updateContext(int mask, boolean trustedPermission, boolean profileOnly,
+		@Nullable LoggingProfile selectedProfile) {
+		return "mask=" + mask + "; trustedPermission=" + trustedPermission + "; profileOnly=" + profileOnly
+			+ (selectedProfile == null ? "" : "; selectedProfile=" + selectedProfile);
 	}
 
 	private static void sendServerConfigSnapshot(ServerPlayer player, boolean canEdit, long requestId) {

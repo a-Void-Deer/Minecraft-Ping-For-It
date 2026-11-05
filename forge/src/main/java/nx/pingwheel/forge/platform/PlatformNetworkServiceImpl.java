@@ -10,9 +10,11 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.EventNetworkChannel;
 import net.minecraftforge.network.PacketDistributor;
 import net.minecraftforge.network.NetworkProtocol;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.network.EncodedPresentationPayload;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
+import nx.pingwheel.common.network.ServerConfigTransportDiagnostics;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.presentation.minecraft.InventoryCreationReceiptTransport.EncodedTransport;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -45,15 +47,20 @@ public class PlatformNetworkServiceImpl implements IPlatformNetworkService, Enco
 
 	@Override
 	public void sendToServer(IPacket packet) {
+		var kind = ServerConfigTransportDiagnostics.kindOf(packet);
 		@Nullable ClientPacketListener connection = Game.getConnection();
 
 		if (connection == null) {
+			ServerConfigTransportDiagnostics.decision(Diagnostics.client(), kind,
+				ServerConfigTransportDiagnostics.Decision.CONNECTION_MISSING);
 			return;
 		}
 
 		@Nullable EventNetworkChannel chan = CHANNEL_MAP.get(packet.getId());
 
 		if (chan == null || !chan.isRemotePresent(connection.getConnection())) {
+			ServerConfigTransportDiagnostics.decision(Diagnostics.client(), kind,
+				ServerConfigTransportDiagnostics.Decision.ROUTE_UNAVAILABLE);
 			return;
 		}
 
@@ -61,20 +68,24 @@ public class PlatformNetworkServiceImpl implements IPlatformNetworkService, Enco
 		packet.write(buf);
 
 		chan.send(buf, PacketDistributor.SERVER.noArg());
+		ServerConfigTransportDiagnostics.decision(Diagnostics.client(), kind,
+			ServerConfigTransportDiagnostics.Decision.SEND_DISPATCHED);
 	}
 
 	@Override
 	public void sendToClient(IPacket packet, ServerPlayer player) {
+		var kind = ServerConfigTransportDiagnostics.kindOf(packet);
 		@Nullable EventNetworkChannel chan = CHANNEL_MAP.get(packet.getId());
 
-		if (chan == null || !chan.isRemotePresent(player.connection.getConnection())) {
+		if (chan == null || !canSend.test(chan, player)) {
+			ServerConfigTransportDiagnostics.decision(Diagnostics.server(), kind,
+				ServerConfigTransportDiagnostics.Decision.ROUTE_UNAVAILABLE);
 			return;
 		}
 
-		var buf = new FriendlyByteBuf(Unpooled.buffer());
-		packet.write(buf);
-
-		chan.send(buf, PacketDistributor.PLAYER.with(player));
+		send.accept(player, NetworkProtocol.PLAY.buildPacket(PacketFlow.CLIENTBOUND, chan.getName(), packet::writeTo));
+		ServerConfigTransportDiagnostics.decision(Diagnostics.server(), kind,
+			ServerConfigTransportDiagnostics.Decision.SEND_DISPATCHED);
 	}
 
 	@Override
