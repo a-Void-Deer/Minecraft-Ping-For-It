@@ -8,6 +8,8 @@ import java.util.function.Function;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
+import org.jetbrains.annotations.Nullable;
+
 import nx.pingwheel.common.config.ClientConfigBounds;
 import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.domain.Target;
@@ -363,6 +365,7 @@ public final class PingInteractionStateMachine {
 		Objects.requireNonNull(frozenCandidateContext, "frozenCandidateContext");
 		Objects.requireNonNull(cancellationContextSupplier, "cancellationContextSupplier");
 		if (token != expectedToken || phase != PingInteractionPhase.WHEEL_OPEN) {
+			rejectSelectorRelease(SelectorReleaseRejection.WRONG_TOKEN, expectedToken, 0L, phase);
 			return SelectorReleaseResult.empty();
 		}
 
@@ -370,6 +373,7 @@ public final class PingInteractionStateMachine {
 		Optional<CapturedPingContext> capture = activeInteraction.currentContext();
 		if (!activeInteraction.isCurrent(expectedToken) || capture.isEmpty()
 			|| capture.get() != capturedContext || capture.get().token() != expectedToken) {
+			rejectSelectorRelease(SelectorReleaseRejection.WRONG_TOKEN, expectedToken, 0L, phase);
 			resetMachineState();
 			return SelectorReleaseResult.empty();
 		}
@@ -392,44 +396,84 @@ public final class PingInteractionStateMachine {
 		Function<String, Optional<CapturedPingContext>> frozenCandidateContext,
 		Supplier<CancellationContext> cancellationContextSupplier, Map<String, CapturedPingContext> painted, long paintRevision) {
 		SelectorReleaseProposal<P> proposal = Objects.requireNonNull(proposalSupplier.get(), "proposal");
-		if (!activeInteraction.isCurrent(expectedToken)) return SelectorReleaseResult.empty();
+		if (!activeInteraction.isCurrent(expectedToken)) {
+			rejectSelectorRelease(SelectorReleaseRejection.WRONG_TOKEN, expectedToken, revisionOf(proposal), phase);
+			return SelectorReleaseResult.empty();
+		}
 		return switch (proposal) {
 			case SelectorReleaseProposal.None<P> ignored -> SelectorReleaseResult.empty();
 			case SelectorReleaseProposal.Local<P> local ->
 				new SelectorReleaseResult<>(Optional.of(local.intent()), Optional.empty());
 			case SelectorReleaseProposal.Cancel<P> cancel -> {
 				CancellationContext cancellation = Objects.requireNonNull(cancellationContextSupplier.get(), "cancellationContext");
-				yield activeInteraction.isCurrent(expectedToken)
-					? new SelectorReleaseResult<>(Optional.of(cancel.intent()), pickCancellation(expectedToken, cancellation))
-					: SelectorReleaseResult.empty();
+				if (!activeInteraction.isCurrent(expectedToken)) {
+					rejectSelectorRelease(SelectorReleaseRejection.WRONG_TOKEN, expectedToken, revisionOf(proposal), phase);
+					yield SelectorReleaseResult.empty();
+				}
+				yield new SelectorReleaseResult<>(Optional.of(cancel.intent()), pickCancellation(expectedToken, cancellation));
 			}
 			case SelectorReleaseProposal.Create<P> create -> {
 				Optional<CapturedPingContext> candidate = Objects.requireNonNull(
 					frozenCandidateContext.apply(create.candidateId()), "candidateContext");
-				if (!activeInteraction.isCurrent(expectedToken) || candidate.isEmpty()
-					|| !isSelectorCandidate(candidate.get(), openedCapture, create, painted, paintRevision)) {
+				if (!activeInteraction.isCurrent(expectedToken)) {
+					rejectSelectorRelease(SelectorReleaseRejection.WRONG_TOKEN, expectedToken,
+						create.presentationRevision(), phase);
+					yield SelectorReleaseResult.empty();
+				}
+				if (candidate.isEmpty()) {
+					rejectSelectorRelease(SelectorReleaseRejection.MISSING_CANDIDATE, expectedToken,
+						create.presentationRevision(), phase);
+					yield SelectorReleaseResult.empty();
+				}
+				@Nullable SelectorReleaseRejection rejection = selectorCandidateRejection(
+					candidate.get(), openedCapture, create, painted, paintRevision);
+				if (rejection != null) {
+					rejectSelectorRelease(rejection, expectedToken, create.presentationRevision(), phase);
 					yield SelectorReleaseResult.empty();
 				}
 				Optional<PingInteractionAction> action = validatePing(candidate.get(), create.pingType());
-				if (!activeInteraction.isCurrent(expectedToken)) yield SelectorReleaseResult.empty();
+				if (!activeInteraction.isCurrent(expectedToken)) {
+					rejectSelectorRelease(SelectorReleaseRejection.WRONG_TOKEN, expectedToken,
+						create.presentationRevision(), phase);
+					yield SelectorReleaseResult.empty();
+				}
 				yield new SelectorReleaseResult<>(action.orElseThrow() instanceof PingInteractionAction.CreatePing
 					? Optional.of(create.intent()) : Optional.empty(), action);
 			}
 		};
 	}
 
-	private boolean isSelectorCandidate(CapturedPingContext candidate, CapturedPingContext openedCapture,
-		SelectorReleaseProposal.Create<?> proposal, Map<String, CapturedPingContext> painted, long paintRevision) {
-		return candidate.token() == openedCapture.token()
-			&& (proposal.admission() == SelectorReleaseProposal.Admission.PRESS_RAY
-				? candidate.ray().equals(openedCapture.ray())
-				: proposal.presentationRevision() == paintRevision && painted.get(proposal.candidateId()) == candidate)
-			&& candidate.resolvedTarget().target().dimensionId().equals(openedCapture.resolvedTarget().target().dimensionId())
-			&& candidate.resolvedTarget().equals(proposal.target())
-			&& (!(candidate.resolvedTarget().target() instanceof Target.ExternalBlockTarget external)
-				|| proposal.target().target() instanceof Target.ExternalBlockTarget claimedExternal
-					&& external.providerLocator().equals(claimedExternal.providerLocator()))
-			&& candidate.resolvedTarget().targetType().pingTypes().contains(proposal.pingType());
+	private static long revisionOf(SelectorReleaseProposal<?> proposal) {
+		return proposal instanceof SelectorReleaseProposal.Create<?> create ? create.presentationRevision() : 0L;
+	}
+
+	private @Nullable SelectorReleaseRejection selectorCandidateRejection(CapturedPingContext candidate,
+		CapturedPingContext openedCapture, SelectorReleaseProposal.Create<?> proposal,
+		Map<String, CapturedPingContext> painted, long paintRevision) {
+		if (candidate.token() != openedCapture.token()) return SelectorReleaseRejection.WRONG_TOKEN;
+		if (proposal.admission() == SelectorReleaseProposal.Admission.PRESS_RAY) {
+			if (!candidate.ray().equals(openedCapture.ray())) return SelectorReleaseRejection.RAY_TYPE_LOCATOR_MISMATCH;
+		} else {
+			if (proposal.presentationRevision() != paintRevision) return SelectorReleaseRejection.PAINT_REVISION_MISMATCH;
+			if (painted.get(proposal.candidateId()) != candidate) return SelectorReleaseRejection.MISSING_CANDIDATE;
+		}
+		if (!candidate.resolvedTarget().target().dimensionId().equals(openedCapture.resolvedTarget().target().dimensionId()))
+			return SelectorReleaseRejection.RAY_TYPE_LOCATOR_MISMATCH;
+		if (!candidate.resolvedTarget().equals(proposal.target())) return SelectorReleaseRejection.RAY_TYPE_LOCATOR_MISMATCH;
+		if (candidate.resolvedTarget().target() instanceof Target.ExternalBlockTarget external
+			&& (!(proposal.target().target() instanceof Target.ExternalBlockTarget claimedExternal)
+				|| !external.providerLocator().equals(claimedExternal.providerLocator())))
+			return SelectorReleaseRejection.RAY_TYPE_LOCATOR_MISMATCH;
+		if (!candidate.resolvedTarget().targetType().pingTypes().contains(proposal.pingType()))
+			return SelectorReleaseRejection.RAY_TYPE_LOCATOR_MISMATCH;
+		return null;
+	}
+
+	private void rejectSelectorRelease(SelectorReleaseRejection rejection, InteractionToken token,
+		long revision, PingInteractionPhase observedPhase) {
+		logger.debug(() -> "selector release rejected: reason=" + rejection.code()
+			+ " token=" + token.sequence() + " revision=" + revision
+			+ " route=selector phase=" + observedPhase + " action=false admitted=false");
 	}
 
 	/**
@@ -666,7 +710,7 @@ public final class PingInteractionStateMachine {
 
 		if (!effective.equals(selection)) {
 			selection = effective;
-			logger.debug("wheel selection: token={} selection={}", token.sequence(), describe(effective));
+			logger.debug(() -> "wheel selection: token=" + token.sequence() + " selection=" + describe(effective));
 		}
 
 		if (!keyDown) {

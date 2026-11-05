@@ -41,6 +41,7 @@ import nx.pingwheel.common.interaction.candidate.CaptureEquivalenceKey;
 import nx.pingwheel.common.interaction.candidate.FrozenCandidateAcquisition;
 import nx.pingwheel.common.interaction.candidate.PreciseTargetType;
 import nx.pingwheel.common.interaction.state.InteractionTimeSource;
+import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.interaction.state.TargetGoneReason;
 import nx.pingwheel.common.interaction.state.TargetValidation;
@@ -208,6 +209,8 @@ class ClientPingRuntimeInteractionTest {
 		final ClientInventory inventory = new ClientInventory(this::send);
 		final ClientPresentationPreview preview;
 		final ClientPingRuntime runtime;
+		final RecordingLogger pingLogger = new RecordingLogger();
+		boolean previewObserve = true;
 		double propertyValue = 7;
 		Fixture() { this(new ClientRateLimitPolicy(20, 1000), true); }
 		Fixture(ClientRateLimitPolicy policy, boolean ready) {
@@ -215,6 +218,7 @@ class ClientPingRuntimeInteractionTest {
 				public String adapterId() { return PresentationBasic.ID; }
 				public Map<String, Outcome> observe(nx.pingwheel.common.domain.Target target, Set<String> fields, ReadContext context) {
 					Map<String, Outcome> result = new java.util.LinkedHashMap<>();
+					if (!previewObserve) return result;
 					for (String field : fields) if (field.equals(PresentationBasic.HEALTH) || field.equals(PresentationBasic.MAX_HEALTH))
 						result.put(field, new Observed(new PreviewObservation(new PresentationValue.NumberValue(
 							field.equals(PresentationBasic.HEALTH) ? propertyValue : 20), PreviewObservation.Origin.CLIENT_SYNCED, context.tick(), false)));
@@ -228,7 +232,7 @@ class ClientPingRuntimeInteractionTest {
 			}, List.of(reader), (target, type) -> Optional.empty(), this::send);
 			runtime = ClientPingRuntime.createForInteraction((key, color) -> errors.add(key), this::send, policy, clock,
 				target -> { validations.add(target); validationHook.run(); return gone ? TargetValidation.gone(TargetGoneReason.BLOCK_REPLACED) : TargetValidation.valid(); },
-				access, presentation, inventory, preview);
+				access, presentation, inventory, preview, pingLogger);
 			if (ready) negotiate(Set.of(PresentationBasic.NAME));
 		}
 		void send(IPacket packet) {
@@ -1423,6 +1427,66 @@ class ClientPingRuntimeInteractionTest {
 		assertEquals(captures + 1, f.access.captures);
 		assertEquals(creates + 1, f.creates().size());
 		assertFalse(f.runtime.hasCompatibilityState());
+	}
+
+	@Test void authorizedPropertyWithPendingResetPreviewLogsPresentationNotReadyWithoutExtraWork() {
+		Fixture f = new Fixture();
+		f.access.snapshot = TargetSnapshotFactory.entity(DIMENSION, new UUID(5, 6), "minecraft:pig");
+		f.reset(2, Set.of(PresentationBasic.HEALTH, PresentationBasic.MAX_HEALTH));
+		f.press(0); f.frame(250, true); f.prime(); f.enter("content", 260);
+		String property = f.menu().choices().stream().filter(choice -> choice.label().contains(PresentationBasic.HEALTH))
+			.findFirst().orElseThrow().id();
+		f.focus(property, 460);
+		f.previewObserve = false;
+		f.reset(3, Set.of(PresentationBasic.HEALTH, PresentationBasic.MAX_HEALTH));
+		assertTrue(f.presentation.propertyAllowed("entity",
+			PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.HEALTH)),
+			"the reset keeps the property authorization even while the new preview is pending");
+		f.preview.tick();
+		assertEquals(PreviewFieldAccess.Missing.PENDING, f.preview.projection().orElseThrow().fields()
+			.get(PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.HEALTH)),
+			"establish the reset view's one-shot request before checking release adds no polling");
+
+		long previewReadsBefore = f.sent.stream().filter(packet -> packet instanceof PresentationPreviewC2SPacket preview
+			&& preview.kind() == PresentationPreviewC2SPacket.Kind.READ).count();
+		assertEquals(1, previewReadsBefore, "the fixture has exactly one genuinely pending preview read");
+		int validationsBefore = f.validations.size();
+		int liveRequestsBefore = f.access.liveRequests.size();
+		int cancellationsBefore = f.access.cancellations;
+
+		f.release(470);
+
+		assertTrue(f.creates().isEmpty());
+		assertTrue(f.errors.isEmpty());
+		assertEquals(validationsBefore + 1, f.validations.size(), "the release validator runs once, as before");
+		assertEquals(liveRequestsBefore, f.access.liveRequests.size(), "diagnostic classification adds no precise scan");
+		assertEquals(cancellationsBefore, f.access.cancellations, "no cancellation was requested");
+		assertEquals(previewReadsBefore, f.sent.stream().filter(packet -> packet instanceof PresentationPreviewC2SPacket preview
+			&& preview.kind() == PresentationPreviewC2SPacket.Kind.READ).count(),
+			"the pending preview is not polled again at release");
+		assertTrue(f.pingLogger.messages().stream().anyMatch(message ->
+			message.contains("reason=presentation-not-ready") && message.contains("route=selector")));
+		assertFalse(f.pingLogger.messages().stream().anyMatch(message -> message.contains("reason=property-denied")));
+		assertTrue(f.runtime.selectorSnapshot().isEmpty());
+	}
+
+	private static final class RecordingLogger implements PingInteractionLogger {
+		private final List<String> messages = new ArrayList<>();
+
+		@Override public void debug(String message, Object... args) {
+			String rendered = message;
+			for (Object arg : args) {
+				int placeholder = rendered.indexOf("{}");
+				if (placeholder >= 0) rendered = rendered.substring(0, placeholder) + arg + rendered.substring(placeholder + 2);
+			}
+			messages.add(rendered);
+		}
+
+		@Override public void debug(java.util.function.Supplier<@org.jetbrains.annotations.Nullable String> detail) {
+			messages.add(String.valueOf(detail.get()));
+		}
+
+		List<String> messages() { return List.copyOf(messages); }
 	}
 
 	@Test void worldChangeAndNewHoldFenceLateLiveCompletionWithoutTouchingNewPreview() {

@@ -962,6 +962,11 @@ class PingInteractionStateMachineTest {
 			messages.add(format(message, args));
 		}
 
+		@Override
+		public void debug(java.util.function.Supplier<@org.jetbrains.annotations.Nullable String> detail) {
+			messages.add(String.valueOf(detail.get()));
+		}
+
 		List<String> messages() {
 			return List.copyOf(messages);
 		}

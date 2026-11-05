@@ -70,6 +70,7 @@ import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.interaction.state.PingInteractionStateMachine;
 import nx.pingwheel.common.interaction.state.SelectorReleaseProposal;
+import nx.pingwheel.common.interaction.state.SelectorReleaseRejection;
 import nx.pingwheel.common.client.spatial.NativeSelectorInput;
 import nx.pingwheel.common.client.spatial.GestureSkipHold;
 import nx.pingwheel.common.client.spatial.SelectorIntent;
@@ -518,10 +519,19 @@ public final class ClientPingRuntime {
 		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
 		ClientPresentation presentation, @Nullable ClientInventory inventory, @Nullable ClientPresentationPreview preview) {
 		return createForInteraction(errors, sender, policy, clock, validator, access, presentation, inventory, preview,
+			PingInteractionLogger.noop());
+	}
+
+	static ClientPingRuntime createForInteraction(ClientPingActionDispatcher.LocalErrorSink errors,
+		ClientPingActionDispatcher.PacketSender sender, ClientRateLimitPolicy policy, InteractionTimeSource clock,
+		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
+		ClientPresentation presentation, @Nullable ClientInventory inventory, @Nullable ClientPresentationPreview preview,
+		PingInteractionLogger logger) {
+		return createForInteraction(errors, sender, policy, clock, validator, access, presentation, inventory, preview,
 			ClientMarker::serverDurationTicks, new PresentationReceiptFeedback() {
 				public void play(MarkerSnapshot snapshot) {}
 				public void chat(String owner, MarkerSnapshot snapshot, Component name) {}
-			});
+			}, logger);
 	}
 
 	static ClientPingRuntime createForInteraction(ClientPingActionDispatcher.LocalErrorSink errors,
@@ -529,17 +539,29 @@ public final class ClientPingRuntime {
 		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
 		ClientPresentation presentation, @Nullable ClientInventory inventory, @Nullable ClientPresentationPreview preview,
 		ClientMarkerStore.DisplayDurationPolicy displayDuration, PresentationReceiptFeedback feedback) {
+		return createForInteraction(errors, sender, policy, clock, validator, access, presentation, inventory, preview,
+			displayDuration, feedback, PingInteractionLogger.noop());
+	}
+
+	static ClientPingRuntime createForInteraction(ClientPingActionDispatcher.LocalErrorSink errors,
+		ClientPingActionDispatcher.PacketSender sender, ClientRateLimitPolicy policy, InteractionTimeSource clock,
+		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
+		ClientPresentation presentation, @Nullable ClientInventory inventory, @Nullable ClientPresentationPreview preview,
+		ClientMarkerStore.DisplayDurationPolicy displayDuration, PresentationReceiptFeedback feedback,
+		PingInteractionLogger logger) {
 		var active = new ActiveInteraction();
+		// Headless test seam only. The production create(...) path below
+		// explicitly wires TargetResolutionLogger.global(Diagnostics.client()).
 		var coordinator = new PingCaptureCoordinator(DefaultTargetResolver.builtIn(TargetResolutionLogger.noop()),
 			active, PingCaptureLogger.noop());
-		var logger = PingInteractionLogger.noop();
+		PingInteractionLogger interactionLogger = Objects.requireNonNull(logger, "logger");
 		var limiter = new ClientCreateRateLimiter(clock, policy);
 		var tracker = new CreateRequestTracker();
 		var machine = new PingInteractionStateMachine(coordinator, active, clock, validator, new CancelCandidatePicker(),
-			logger, () -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis());
+			interactionLogger, () -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis());
 		var runtime = new ClientPingRuntime(new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS, displayDuration), active, coordinator, machine,
-			new ClientPingActionDispatcher(sender, errors, logger, tracker, limiter, presentation), errors, logger,
-			new WheelMouseCapture(logger), tracker, limiter, clock, presentation, feedback);
+			new ClientPingActionDispatcher(sender, errors, interactionLogger, tracker, limiter, presentation), errors, interactionLogger,
+			new WheelMouseCapture(interactionLogger), tracker, limiter, clock, presentation, feedback);
 		runtime.interactionAccess = Objects.requireNonNull(access);
 		runtime.contentPreview = preview;
 		runtime.inventory(inventory);
@@ -813,8 +835,10 @@ public final class ClientPingRuntime {
 				var result = machine.releaseSelectorAt(releasing, now, () -> proposal(opened.releaseIntent(now)),
 					id -> Optional.ofNullable(candidates.get(id)), () -> interactionAccess.cancellation(ray));
 				action = result.action();
-				if (baselineToken != releasing || !activeInteraction.isCurrent(releasing)) action = Optional.empty();
-				else if (result.admittedIntent().isPresent()) {
+				if (baselineToken != releasing || !activeInteraction.isCurrent(releasing)) {
+					if (action.isPresent()) rejectSelectorRelease(SelectorReleaseRejection.WRONG_TOKEN, releasing, content);
+					action = Optional.empty();
+				} else if (result.admittedIntent().isPresent()) {
 					SelectorIntent<ClientInventory.PreviewEntryReference> intent = result.admittedIntent().get();
 					if (intent instanceof SelectorIntent.ToggleNextCapture<ClientInventory.PreviewEntryReference> toggle)
 						interactionAccess.applyToggle(toggle.toggle(), now);
@@ -823,15 +847,33 @@ public final class ClientPingRuntime {
 					} else if (intent instanceof SelectorIntent.CreateProperty<ClientInventory.PreviewEntryReference> property) {
 						var authorized = content == null ? Optional.<PresentationPropertyIntent>empty()
 							: content.intent(property.property().ref(), property.property().pingTypeId());
-						if (baselineToken == releasing && activeInteraction.isCurrent(releasing) && authorized.isPresent() && action.isPresent()
-							&& propertyTypes(candidates.get(property.candidate().candidateId())).contains(
-								PingTypeCatalog.builtIn().findById(property.property().pingTypeId()).orElseThrow()))
+						boolean owned = baselineToken == releasing && activeInteraction.isCurrent(releasing);
+						boolean admittedType = false;
+						if (owned && authorized.isPresent() && action.isPresent()) {
+							PingType requestedType = PingTypeCatalog.builtIn()
+								.findById(property.property().pingTypeId()).orElseThrow();
+							admittedType = propertyTypes(candidates.get(property.candidate().candidateId()))
+								.contains(requestedType);
+						}
+						if (owned && authorized.isPresent() && action.isPresent() && admittedType)
 							sent = dispatcher.dispatchOutcome(action.get(), List.of(property.property()));
+						else if (!owned)
+							rejectSelectorRelease(SelectorReleaseRejection.WRONG_TOKEN, releasing, content);
+						else if (authorized.isEmpty())
+							// The preview projection can be empty while the property mask is
+							// still authorized (for example a RESET with a new pending view).
+							// Do not claim a permission denial without an actual deny decision.
+							rejectSelectorRelease(SelectorReleaseRejection.PRESENTATION_NOT_READY, releasing, content);
+						else if (!admittedType)
+							rejectSelectorRelease(SelectorReleaseRejection.RAY_TYPE_LOCATOR_MISMATCH, releasing, content);
 					} else if (action.isPresent()) sent = dispatcher.dispatchOutcome(action.get());
 				} else if (action.isPresent()) sent = dispatcher.dispatchOutcome(action.get());
 			} else {
 				action = machine.updateAt(false, WheelSelection.NONE, emptyCancellationContext(), now);
-				if (baselineToken != releasing || !activeInteraction.isCurrent(releasing)) action = Optional.empty();
+				if (baselineToken != releasing || !activeInteraction.isCurrent(releasing)) {
+					if (action.isPresent()) rejectSelectorRelease(SelectorReleaseRejection.WRONG_TOKEN, releasing, null);
+					action = Optional.empty();
+				}
 				if (action.isPresent()) sent = dispatcher.dispatchOutcome(action.get());
 			}
 			return baselineOutcome(action, sent);
@@ -840,6 +882,14 @@ public final class ClientPingRuntime {
 			interactionAccess.syncMouse(machine.phase());
 			synchronizeNativeInput();
 		}
+	}
+
+	private void rejectSelectorRelease(SelectorReleaseRejection rejection, InteractionToken token,
+		@Nullable NativeSelectorContent content) {
+		long revision = content == null ? ClientInventory.NO_REQUEST : content.requestId();
+		logger.debug(() -> "selector release rejected: reason=" + rejection.code()
+			+ " token=" + token.sequence() + " revision=" + revision
+			+ " route=selector action=false admitted=false");
 	}
 
 	private void releaseInventoryStay(long now) {
@@ -1026,10 +1076,31 @@ public final class ClientPingRuntime {
 			});
 		try { selectorContent.begin(interactionAccess.lifecycle().level()); }
 		catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.client().atDetailed().rateLimited(SELECTOR_CONTENT_INIT_FAILURE).failure(Level.WARN,
-				"selector-content-init", "client",
-				() -> "selector preview unavailable capture=" + capture + " tick=" + localTick, unavailable);
+			reportSelectorPreviewStartFailure(capture.token(), machine.phase(), localTick, unavailable);
 		}
+	}
+
+	static void reportSelectorPreviewStartFailure(InteractionToken token, PingInteractionPhase phase,
+		long tick, Throwable failure) {
+		Diagnostics.client().atNormal().rateLimited(SELECTOR_CONTENT_INIT_FAILURE).failure(Level.WARN,
+			"selector-content-init", "preview-start-failed",
+			() -> "token=" + token.sequence() + " phase=" + phase + " tick=" + tick, failure);
+	}
+
+	static void reportSelectorProjectionUpdateSkipped(InteractionToken token,
+		SpatialSelectorSession.ContentFence fence, PingInteractionPhase phase, long tick, Throwable failure) {
+		Diagnostics.client().atNormal().rateLimited(SELECTOR_CONTENT_READ_FAILURE).failure(Level.WARN,
+			"selector-content-read", "projection-update-skipped",
+			() -> "token=" + token.sequence() + " phase=" + phase + " tick=" + tick
+				+ " selectorSession=" + fence.selectorSession() + " requestId=" + fence.requestId()
+				+ " previewSession=" + fence.previewSession() + " candidateId=" + fence.candidateId(), failure);
+	}
+
+	static void reportSelectorPreviewCloseFailure(long token, PingInteractionPhase phase, long tick,
+		boolean hard, Throwable failure) {
+		Diagnostics.client().atNormal().rateLimited(SELECTOR_CONTENT_CLOSE_FAILURE).failure(Level.WARN,
+			"selector-content-close", "preview-close-failed",
+			() -> "token=" + token + " phase=" + phase + " hard=" + hard + " tick=" + tick, failure);
 	}
 
 	private List<PingType> propertyTypes(CapturedPingContext context) {
@@ -1104,10 +1175,7 @@ public final class ClientPingRuntime {
 			(target, bound) -> {
 				try { return content == null ? null : content.read(target, bound); }
 				catch (RuntimeException | LinkageError unavailable) {
-					Diagnostics.client().atDetailed().rateLimited(SELECTOR_CONTENT_READ_FAILURE).failure(Level.WARN,
-						"selector-content-read", "client",
-						() -> "selector content projection unavailable target=" + target + " fence=" + bound
-							+ " capture=" + context, unavailable);
+					reportSelectorProjectionUpdateSkipped(context.token(), bound, machine.phase(), localTick, unavailable);
 					return null;
 				}
 			}, interactionAccess.listGeometry(selectorStyle));
@@ -1159,6 +1227,8 @@ public final class ClientPingRuntime {
 	}
 
 	private void finishSelector(boolean hard, CapturedPingContext closingCapture) {
+		long closingToken = closingCapture == null ? 0L : closingCapture.token().sequence();
+		PingInteractionPhase closingPhase = machine.phase();
 		inventorySelectionStay.close();
 		committingInventoryStay = false;
 		gestureSkipHold.reset();
@@ -1176,10 +1246,7 @@ public final class ClientPingRuntime {
 		if (hard) selectorPaint.reset();
 		try { if (old != null) old.close(); }
 		catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.client().atDetailed().rateLimited(SELECTOR_CONTENT_CLOSE_FAILURE).failure(Level.WARN,
-				"selector-content-close", "client",
-				() -> "selector preview close unavailable capture=" + closingCapture + " hard=" + hard
-					+ " tick=" + localTick, unavailable);
+			reportSelectorPreviewCloseFailure(closingToken, closingPhase, localTick, hard, unavailable);
 		}
 	}
 
@@ -1939,9 +2006,9 @@ public final class ClientPingRuntime {
 			presentation.evict(marker.id());
 		}
 
-		logger.debug("marker client lifetime ended: count={} ids={}",
-			expired.size(),
-			expired.stream().map(marker -> Long.toString(marker.id().value())).toList());
+		logger.debug(() -> "marker client lifetime ended: count=" + expired.size()
+			+ " ids=" + expired.stream().map(marker -> Long.toString(marker.id().value())).toList()
+			+ " tick=" + localTick);
 	}
 
 	/** Sole production S2C path for versioned marker and presentation messages. */
@@ -2231,8 +2298,7 @@ public final class ClientPingRuntime {
 						key));
 				template = language.getOrDefault(templateKey);
 			} catch (RuntimeException unavailable) {
-				Diagnostics.client().atDetailed().rateLimited(CHAT_TEMPLATE_LOOKUP_FAILURE).failure(Level.WARN,
-					"chat/template-lookup", "client", () -> "pingType=" + pingTypeId, unavailable);
+				reportChatTemplateLookupFailure(pingTypeId, unavailable);
 				template = null;
 			}
 
@@ -2240,9 +2306,18 @@ public final class ClientPingRuntime {
 				template, ownerName, pingType.get(), resolvedTargetName);
 			game.player.displayClientMessage(message, false);
 		} catch (RuntimeException exception) {
-			Diagnostics.client().atNormal().rateLimited(MARKER_DISPLAY_FAILURE).failure(Level.WARN,
-				"chat/marker-display", "client", () -> "markerId=" + snapshot.id().value(), exception);
+			reportMarkerDisplayFailure(snapshot.id(), exception);
 		}
+	}
+
+	static void reportChatTemplateLookupFailure(String pingTypeId, Throwable failure) {
+		Diagnostics.client().atNormal().rateLimited(CHAT_TEMPLATE_LOOKUP_FAILURE).failure(Level.WARN,
+			"chat/template-lookup", "legacy-template", () -> "pingType=" + pingTypeId, failure);
+	}
+
+	static void reportMarkerDisplayFailure(MarkerId markerId, Throwable failure) {
+		Diagnostics.client().atNormal().rateLimited(MARKER_DISPLAY_FAILURE).failure(Level.WARN,
+			"chat/marker-display", "receipt-not-displayed", () -> "markerId=" + markerId.value(), failure);
 	}
 
 	/**
@@ -2288,9 +2363,8 @@ public final class ClientPingRuntime {
 			if (inventory != null) inventory.markerRemoved(marker.id());
 		}
 
-		logger.debug("marker winner applied: kind={} winner={}",
-			targetKindOf(targetKey),
-			winnerId.map(id -> Long.toString(id.value())).orElse("none"));
+		logger.debug(() -> "marker winner applied: kind=" + targetKindOf(targetKey)
+			+ " winner=" + winnerId.map(id -> Long.toString(id.value())).orElse("none"));
 	}
 
 	/**

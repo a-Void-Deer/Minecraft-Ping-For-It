@@ -5,6 +5,7 @@ import java.util.Objects;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ClipContext;
@@ -219,9 +220,8 @@ public class Raycast {
 			}
 		} catch (RuntimeException | LinkageError failure) {
 			// Discard certification, not the independently completed ordinary trace.
-			Diagnostics.client().atDetailed().rateLimited(ENTITY_SCAN_FAILURE).failure(org.apache.logging.log4j.Level.WARN,
-				"precise/entity-scan", "native",
-				() -> "token=" + token.sequence() + " dimension=" + level.dimension().location(), failure);
+			reportEntityScanIncomplete(token, () -> level.dimension().location().toString(),
+				nativeDistance, pingDistance, policy, failure);
 		}
 		try {
 			boolean[] providerComplete = {true};
@@ -252,9 +252,8 @@ public class Raycast {
 			}
 		} catch (RuntimeException | LinkageError failure) {
 			// A partial native/provider scan cannot certify a nearest block.
-			Diagnostics.client().atDetailed().rateLimited(BLOCK_SCAN_FAILURE).failure(org.apache.logging.log4j.Level.WARN,
-				"precise/block-scan", "native",
-				() -> "token=" + token.sequence() + " dimension=" + level.dimension().location(), failure);
+			reportBlockScanIncomplete(token, () -> level.dimension().location().toString(),
+				nativeDistance, pingDistance, policy, failure);
 		}
 		return Optional.of(new SelectorTrace(ordinary, new FrozenCandidateAcquisition(token, ray, pingDistance,
 			world(ordinary.hitResult().getLocation()), collector.evidence(), certified)));
@@ -262,6 +261,24 @@ public class Raycast {
 
 	/** Contains transient ordinary HitResult only; retain candidates(), never this object across callbacks. */
 	public record SelectorTrace(RaycastSelection ordinarySelection, FrozenCandidateAcquisition candidates) {}
+
+	static void reportEntityScanIncomplete(InteractionToken token, Supplier<String> dimensionId,
+		double nativeDistance, double pingDistance, RaycastPolicy policy, Throwable failure) {
+		Diagnostics.client().atNormal().rateLimited(ENTITY_SCAN_FAILURE).failure(org.apache.logging.log4j.Level.WARN,
+			"precise/entity-scan", "entity-slots-incomplete",
+			() -> "token=" + token.sequence() + " dimension=" + dimensionId.get()
+				+ " nativeRange=" + nativeDistance + " pingRange=" + pingDistance
+				+ " policy=" + policy, failure);
+	}
+
+	static void reportBlockScanIncomplete(InteractionToken token, Supplier<String> dimensionId,
+		double nativeDistance, double pingDistance, RaycastPolicy policy, Throwable failure) {
+		Diagnostics.client().atNormal().rateLimited(BLOCK_SCAN_FAILURE).failure(org.apache.logging.log4j.Level.WARN,
+			"precise/block-scan", "block-slots-incomplete",
+			() -> "token=" + token.sequence() + " dimension=" + dimensionId.get()
+				+ " nativeRange=" + nativeDistance + " pingRange=" + pingDistance
+				+ " policy=" + policy, failure);
+	}
 
 	static boolean collectEntityCandidates(Iterable<Entity> entities, Vec3 start, Vec3 end,
 		RaycastPolicy policy, EntityLocalGeometryRegistry.Snapshot owners, EntityLocalRaycastRequest request,

@@ -94,7 +94,7 @@ public final class ClientTargetNameResolver {
 					.orElseGet(TargetNameComposer::unknown);
 			};
 		} catch (RuntimeException unavailable) {
-			nx.pingwheel.common.diagnostics.Diagnostics.client().atDetailed().rateLimited(LOOKUP_FAILURE).warn("target-name/client-lookup", "unknown-name", unavailable,
+			nx.pingwheel.common.diagnostics.Diagnostics.client().atNormal().rateLimited(LOOKUP_FAILURE).warn("target-name/client-lookup", "unknown-name", unavailable,
 				() -> "kind=" + target.kind() + "; using unknown name");
 			return TargetNameComposer.unknown();
 		}

@@ -1,5 +1,7 @@
 package nx.pingwheel.common.interaction.state;
 
+import java.util.function.Supplier;
+
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import org.apache.logging.log4j.Level;
 import nx.pingwheel.common.util.SafeExceptionReport;
@@ -26,6 +28,15 @@ public interface PingInteractionLogger {
 	void debug(String message, @Nullable Object @Unmodifiable ... args);
 
 	/**
+	 * Emits one lazily collected DEBUG detail. The default deliberately does not
+	 * evaluate the supplier because discarding helpers such as {@link #noop()}
+	 * must keep pure diagnostic collection free.
+	 */
+	default void debug(Supplier<@Nullable String> detail) {
+		// Implementations that consume detail override this; noop keeps it lazy.
+	}
+
+	/**
 	 * Emits a complete bounded exception report without passing the throwable
 	 * to the underlying logger.
 	 */
@@ -39,7 +50,7 @@ public interface PingInteractionLogger {
 	 * must never be used for target, player, identity, position, or name data.
 	 */
 	default void debugCreateThrottled(long requestId, int rateLimit, int msToRegenerate) {
-		debug("dispatch create throttled: requestId={} rateLimit={} msToRegenerate={}",
+		debug("dispatch create throttled: reason=courtesy-throttled requestId={} rateLimit={} msToRegenerate={} sent=false throttled=true",
 			requestId, rateLimit, msToRegenerate);
 	}
 
@@ -62,6 +73,11 @@ public interface PingInteractionLogger {
 			@Override
 			public void debug(String message, @Nullable Object @Unmodifiable ... args) {
 				Diagnostics.client().atDebug().site("interaction/state").debug(() -> format(message, args));
+			}
+
+			@Override
+			public void debug(Supplier<@Nullable String> detail) {
+				Diagnostics.client().atDebug().site("interaction/state").debug(detail);
 			}
 
 			@Override

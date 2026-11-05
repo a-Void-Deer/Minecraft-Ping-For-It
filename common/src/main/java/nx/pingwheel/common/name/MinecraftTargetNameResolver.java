@@ -108,10 +108,14 @@ public final class MinecraftTargetNameResolver implements AuthoritativeTargetNam
 
 			return TargetNameJsonCodec.encode(resolution.component(), server.registryAccess());
 		} catch (RuntimeException e) {
-			Diagnostics.server().atDetailed().rateLimited(LOOKUP_FAILURE).warn("target-name/server-lookup", "unknown-name", e,
-				() -> "kind=" + normalizedTarget.kind() + "; using unknown name");
+			reportLookupFailure(normalizedTarget, e);
 			return TargetNameJsonCodec.UNKNOWN;
 		}
+	}
+
+	static void reportLookupFailure(Target normalizedTarget, Throwable failure) {
+		Diagnostics.server().atNormal().rateLimited(LOOKUP_FAILURE).warn("target-name/server-lookup", "unknown-name", failure,
+			() -> "kind=" + normalizedTarget.kind() + "; using unknown name");
 	}
 
 	private Resolution resolve(UUID requester, Target normalizedTarget) {

@@ -83,6 +83,11 @@ class ClientPingActionDispatcherTest {
 		}
 
 		@Override
+		public void debug(java.util.function.Supplier<@org.jetbrains.annotations.Nullable String> detail) {
+			rendered.add(String.valueOf(detail.get()));
+		}
+
+		@Override
 		public void debugCreateThrottled(long requestId, int rateLimit, int msToRegenerate) {
 			throttled.add("requestId=" + requestId + " rateLimit=" + rateLimit
 				+ " msToRegenerate=" + msToRegenerate);
@@ -438,6 +443,46 @@ class ClientPingActionDispatcherTest {
 		assertEquals(ClientInventory.DispatchOutcome.SENT, dispatcher.dispatchInventory(select));
 		assertEquals(List.of(select), sender.sent);
 		assertTrue(tracker.isLatest(CreateRequestTracker.Route.INVENTORY, 55));
+	}
+
+	@Test
+	void terminalRejectionsCarryFiniteDebugReasonsWithoutConsumingAllowance() {
+		var logger = new RecordingLogger();
+		var active = new ActiveInteraction();
+		var unready = new ClientPingActionDispatcher(new RecordingPacketSender(), new RecordingErrorSink(), logger,
+			new CreateRequestTracker(), new ClientCreateRateLimiter(new ManualTime(), new ClientRateLimitPolicy(1, 1000)),
+			new ClientPresentation(packet -> {}));
+		assertEquals(ClientPingActionDispatcher.DispatchOutcome.NOT_READY,
+			unready.dispatchOutcome(createAction(active.begin())));
+		assertTrue(logger.rendered.stream().anyMatch(line -> line.contains("reason=presentation-not-ready")
+			&& line.contains("route=presentation")), logger.rendered.toString());
+
+		var denied = new ClientPingActionDispatcher(new RecordingPacketSender(), new RecordingErrorSink(), logger,
+			new CreateRequestTracker(), new ClientCreateRateLimiter(new ManualTime(), new ClientRateLimitPolicy(1, 1000)),
+			readyPresentation());
+		var action = createAction(active.begin());
+		var deniedProperty = PresentationPropertyIntent.of(
+			PresentationPropertyRef.root(PresentationBasic.ID, "missing:field"),
+			new PresentationValue.Text("value"), action.pingType().id());
+		assertEquals(ClientPingActionDispatcher.DispatchOutcome.NOT_READY,
+			denied.dispatchOutcome(action, List.of(deniedProperty)));
+		assertTrue(logger.rendered.stream().anyMatch(line -> line.contains("reason=property-denied")),
+			logger.rendered.toString());
+
+		var inventoryLogger = new RecordingLogger();
+		var inventorySender = new RecordingPacketSender();
+		var inventory = new ClientPingActionDispatcher(inventorySender, new RecordingErrorSink(), inventoryLogger,
+			new CreateRequestTracker(), new ClientCreateRateLimiter(new ManualTime(), new ClientRateLimitPolicy(1, 1000)),
+			readyPresentation());
+		var selection = InventoryC2SPacket.select(7, 31, 1, 55, 3, 1, 1, "entry", "attention");
+		assertEquals(ClientInventory.DispatchOutcome.NOT_READY,
+			inventory.dispatchInventory(InventoryC2SPacket.select(7, 31, 2, 55, 3, 1, 1, "entry", "attention")));
+		assertEquals(ClientInventory.DispatchOutcome.SENT, inventory.dispatchInventory(selection));
+		assertEquals(ClientInventory.DispatchOutcome.THROTTLED, inventory.dispatchInventory(selection));
+		assertTrue(inventoryLogger.rendered.stream().anyMatch(line -> line.contains("reason=inventory-view-mismatch")
+			&& line.contains("route=inventory")), inventoryLogger.rendered.toString());
+		assertTrue(inventoryLogger.rendered.stream().anyMatch(line -> line.contains("reason=courtesy-throttled")
+			&& line.contains("route=inventory")), inventoryLogger.rendered.toString());
 	}
 
 	private static final class ManualTime implements InteractionTimeSource {

@@ -149,9 +149,12 @@ public final class PreciseCaptureRefresh {
 		Scan scan;
 		try { scan = Objects.requireNonNull(nativeCapture.capture(request)); }
 		catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.client().atDetailed().rateLimited(NATIVE_CAPTURE_FAILURE).failure(Level.WARN,
-				"precise/native-capture", "client",
-				() -> "generation=" + request.generation() + " token=" + token.sequence(), unavailable);
+			Diagnostics.client().atNormal().rateLimited(NATIVE_CAPTURE_FAILURE).failure(Level.WARN,
+				"precise/native-capture", "all-native-slots-incomplete",
+				() -> "generation=" + request.generation() + " token=" + token.sequence()
+					+ " nativeRange=" + request.inputs().nativeDistance()
+					+ " pingRange=" + request.inputs().pingDistance()
+					+ " policy=" + request.inputs().policy(), unavailable);
 			scan = Scan.incomplete();
 		}
 		if (!active || ended || epoch != branchEpoch || request.generation() != generation || !owned(request.inputs())) return;
@@ -174,9 +177,13 @@ public final class PreciseCaptureRefresh {
 		boolean scheduled;
 		try { scheduled = distantCapture.start(pending.request(), outcome -> complete(pending, outcome)); }
 		catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.client().atDetailed().rateLimited(DISTANT_START_FAILURE).failure(Level.WARN,
-				"precise/distant-start", "client",
-				() -> "generation=" + pending.request().generation() + " token=" + token.sequence(), unavailable);
+			Diagnostics.client().atNormal().rateLimited(DISTANT_START_FAILURE).failure(Level.WARN,
+				"precise/distant-start", "request-fallback",
+				() -> "generation=" + pending.request().generation() + " token=" + token.sequence()
+					+ " nativeRange=" + pending.request().inputs().nativeDistance()
+					+ " pingRange=" + pending.request().inputs().pingDistance()
+					+ " policy=" + pending.request().inputs().policy()
+					+ " fallback=" + pending.fallback().availability(), unavailable);
 			scheduled = false;
 		}
 		if (!scheduled) complete(pending, pending.fallback());

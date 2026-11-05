@@ -51,6 +51,8 @@ class PingSelectorReleaseTest {
 		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
 		assertSame(h.token, h.machine.currentToken().orElseThrow());
 		assertTrue(h.releaseNone(HOLD + 1).action().isEmpty(), "old timestamp must not poison the newer clock");
+		assertTrue(h.logger.messages().stream().anyMatch(message ->
+			message.contains("reason=wrong-token") && message.contains("token=" + old.sequence())));
 	}
 
 	@Test
@@ -205,6 +207,13 @@ class PingSelectorReleaseTest {
 			assertEquals(SelectorReleaseResult.empty(), result, mismatch);
 			assertNull(h.validated, mismatch);
 			assertEquals(PingInteractionPhase.IDLE, h.machine.phase(), mismatch);
+			String expected = switch (mismatch) {
+				case "missing" -> "reason=missing-candidate";
+				case "token" -> "reason=wrong-token";
+				default -> "reason=ray-type-locator-mismatch";
+			};
+			assertTrue(h.logger.messages().stream().anyMatch(message -> message.contains(expected)),
+				() -> mismatch + " logs: " + h.logger.messages());
 		}
 	}
 
@@ -343,7 +352,17 @@ class PingSelectorReleaseTest {
 			if (scenario.equals("valid")) {
 				assertSame(live, assertInstanceOf(PingInteractionAction.CreatePing.class, result.action().orElseThrow()).context());
 				assertEquals(Optional.of("opaque"), result.admittedIntent());
-			} else { assertEquals(SelectorReleaseResult.empty(), result, scenario); assertNull(h.validated, scenario); }
+			} else {
+				assertEquals(SelectorReleaseResult.empty(), result, scenario);
+				assertNull(h.validated, scenario);
+				String expected = switch (scenario) {
+					case "unpainted", "wrong-revision" -> "reason=paint-revision-mismatch";
+					case "other-context" -> "reason=missing-candidate";
+					default -> "reason=ray-type-locator-mismatch";
+				};
+				assertTrue(h.logger.messages().stream().anyMatch(message -> message.contains(expected)),
+					() -> scenario + " logs: " + h.logger.messages());
+			}
 		}
 	}
 
@@ -372,6 +391,7 @@ class PingSelectorReleaseTest {
 		final ActiveInteraction active = new ActiveInteraction();
 		final nx.pingwheel.common.domain.TargetResolver resolver = DefaultTargetResolver.builtIn(TargetResolutionLogger.noop());
 		final PingCaptureCoordinator coordinator = new PingCaptureCoordinator(resolver, active, PingCaptureLogger.noop());
+		final RecordingLogger logger = new RecordingLogger();
 		ResolvedTarget validated;
 		TargetValidation verdict = TargetValidation.valid();
 		Runnable validationHook = () -> {};
@@ -380,7 +400,7 @@ class PingSelectorReleaseTest {
 		CapturedPingContext ordinary;
 		Harness() {
 			machine = new PingInteractionStateMachine(coordinator, active, clock, this::validate,
-				new CancelCandidatePicker(), PingInteractionLogger.noop(), HOLD);
+				new CancelCandidatePicker(), logger, HOLD);
 		}
 		TargetValidation validate(ResolvedTarget target) {
 			assertEquals(PingInteractionPhase.IDLE, machine.phase(), "terminal before validator");
@@ -407,5 +427,24 @@ class PingSelectorReleaseTest {
 	private static final class Clock implements InteractionTimeSource {
 		long now;
 		public long nowMillis() { return now; }
+	}
+
+	private static final class RecordingLogger implements PingInteractionLogger {
+		private final List<String> messages = new java.util.ArrayList<>();
+
+		@Override public void debug(String message, @org.jetbrains.annotations.Nullable Object... args) {
+			String rendered = message;
+			for (Object arg : args) {
+				int placeholder = rendered.indexOf("{}");
+				if (placeholder >= 0) rendered = rendered.substring(0, placeholder) + arg + rendered.substring(placeholder + 2);
+			}
+			messages.add(rendered);
+		}
+
+		@Override public void debug(Supplier<@org.jetbrains.annotations.Nullable String> detail) {
+			messages.add(String.valueOf(detail.get()));
+		}
+
+		List<String> messages() { return List.copyOf(messages); }
 	}
 }
