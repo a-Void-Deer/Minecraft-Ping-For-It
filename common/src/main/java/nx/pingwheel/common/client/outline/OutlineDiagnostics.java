@@ -18,15 +18,37 @@ final class OutlineDiagnostics {
 
 	private OutlineDiagnostics() {}
 
-	static boolean enabled() {
-		return Diagnostics.client().atNormal().isEnabled(Level.WARN);
+	enum Category {
+		CONTEXT_CREATION("context-creation-failed", "next-source", Level.WARN),
+		NULL_CONTEXT("null-context", "next-source", Level.WARN),
+		OBSERVER("observer-failed", "observer-ignored", Level.WARN),
+		NULL_OUTCOME("null-outcome", "next-source", Level.ERROR),
+		ATTEMPT("source-render-failed", "next-source-fallback-eligible", Level.ERROR),
+		HANDLES("source-probe-failed", "next-source", Level.WARN),
+		INVALID_ID("invalid-source-id", "source-id-unavailable", Level.WARN),
+		SOURCE_ID("source-id-failed", "source-id-unavailable", Level.WARN),
+		REGISTRATION("registration-failed", "registration-rejected", Level.WARN);
+
+		final String code;
+		final String handling;
+		final Level level;
+		Category(String code, String handling, Level level) {
+			this.code = code;
+			this.handling = handling;
+			this.level = level;
+		}
 	}
 
-	static void approved(String operation, String scope, Supplier<String> details, @Nullable Throwable failure) {
+	static boolean enabled(Category category) {
+		return Diagnostics.client().atNormal().isEnabled(category.level);
+	}
+
+	static void approved(String operation, Category category, Supplier<String> details, @Nullable Throwable failure) {
+		String site = operation + "/" + category.code;
 		if (failure == null) {
-			Diagnostics.client().atNormal().event(Level.WARN, operation, "contract-or-source-failure", details);
+			Diagnostics.client().atNormal().event(category.level, site, category.handling, details);
 		} else {
-			Diagnostics.client().atNormal().failure(Level.WARN, operation, "source-failure", details, failure);
+			Diagnostics.client().atNormal().failure(category.level, site, category.handling, details, failure);
 		}
 	}
 
@@ -53,10 +75,18 @@ final class OutlineDiagnostics {
 	}
 
 	static void rejected(String operation, String scope, String reason, @Nullable Throwable failure) {
+		// Only this finite caller-owned vocabulary may enter a NORMAL envelope.
+		String category = switch (reason) {
+			case "null-source", "source-id-lookup-failed", "invalid-source-id", "duplicate-id-first-registration-kept",
+				"duplicate-id", "missing-anchor-or-duplicate", "null-resolver", "resolver-id-failed", "invalid-id",
+				"null-adapter", "adapter-id-failed" -> reason;
+			default -> "registration-rejected";
+		};
+		Supplier<String> detail = () -> "scope=" + scope + "; category=" + reason;
 		if (failure == null) {
-			Diagnostics.client().atNormal().event(Level.WARN, operation, reason, () -> "scope=" + scope);
+			Diagnostics.client().atNormal().event(Level.WARN, operation + "/" + category, "registration-rejected", detail);
 		} else {
-			Diagnostics.client().atNormal().failure(Level.WARN, operation, "source-rejected", () -> reason, failure);
+			Diagnostics.client().atNormal().failure(Level.WARN, operation + "/" + category, "registration-rejected", detail, failure);
 		}
 	}
 }

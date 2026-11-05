@@ -10,7 +10,6 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import net.minecraft.world.entity.Entity;
 import nx.pingwheel.common.diagnostics.Diagnostics;
-import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
@@ -94,7 +93,7 @@ public final class EntityOutlineSourceRegistry {
 				return registration;
 			}
 		}
-		rejected("duplicate-id:" + id, "entity outline source registration ignored; id="
+		rejected("duplicate-id-first-registration-kept", "entity outline source registration ignored; id="
 			+ id + "; category=duplicate-id-first-registration-kept", null);
 		return Registration.rejected();
 	}
@@ -126,7 +125,7 @@ public final class EntityOutlineSourceRegistry {
 			} catch (Exception | LinkageError | AssertionError failure) {
 				String sourceId = safeSourceId(source);
 				warnOnce(
-					"handles:" + sourceId,
+					"handles:" + sourceId, OutlineDiagnostics.Category.HANDLES,
 					() -> "entity outline source handles() failed; id=" + sourceId
 						+ "; category=handles; entity=" + describeEntity(entity),
 					failure);
@@ -147,15 +146,15 @@ public final class EntityOutlineSourceRegistry {
 	 * spam one log line per entity per frame while still being retried on
 	 * every call.
 	 */
-	void warnOnce(String key, java.util.function.Supplier<String> message, @Nullable Throwable failure) {
-		if (warningSink == null && !OutlineDiagnostics.enabled()) {
+	void warnOnce(String key, OutlineDiagnostics.Category category, java.util.function.Supplier<String> message, @Nullable Throwable failure) {
+		if (warningSink == null && !OutlineDiagnostics.enabled(category)) {
 			return;
 		}
 		if (!warnedKeys.add(key)) {
 			return;
 		}
 		if (warningSink == null) {
-			OutlineDiagnostics.approved("entity-outline-source", key, message, failure);
+			OutlineDiagnostics.approved("entity-outline-source", category, message, failure);
 		} else {
 			OutlineDiagnostics.deliver(text -> warningSink.warn(text, null), message, failure);
 		}
@@ -163,13 +162,7 @@ public final class EntityOutlineSourceRegistry {
 
 	private void rejected(String category, String message, @Nullable Throwable failure) {
 		if (warningSink == null) {
-			if (failure == null) {
-				Diagnostics.client().atNormal().event(Level.WARN,
-					"entity-outline-register", "registration-rejected", () -> message);
-			} else {
-				Diagnostics.client().atNormal().failure(Level.WARN, "entity-outline-register",
-					"registration-rejected", () -> message, failure);
-			}
+			OutlineDiagnostics.rejected("entity-outline-register", message, category, failure);
 		} else {
 			OutlineDiagnostics.deliver(text -> warningSink.warn(text, null), () -> message, failure);
 		}
@@ -261,12 +254,12 @@ public final class EntityOutlineSourceRegistry {
 		try {
 			@Nullable String id = EntityBlockGeometrySourceIds.validate(source.id());
 			if (id == null) {
-				warnOnce("invalid-id:" + source.getClass().getName(),
+				warnOnce("invalid-id:" + source.getClass().getName(), OutlineDiagnostics.Category.INVALID_ID,
 					() -> "entity outline source has invalid id; class=" + source.getClass().getName(), null);
 			}
 			return id == null ? EntityBlockGeometrySourceIds.INVALID : id;
 		} catch (Exception | LinkageError | AssertionError failure) {
-			warnOnce("source-id:" + source.getClass().getName(),
+			warnOnce("source-id:" + source.getClass().getName(), OutlineDiagnostics.Category.SOURCE_ID,
 				() -> "entity outline source id failed; class=" + source.getClass().getName(), failure);
 			return EntityBlockGeometrySourceIds.UNAVAILABLE;
 		}
@@ -284,7 +277,7 @@ public final class EntityOutlineSourceRegistry {
 
 		static WarningSink global() {
 			return (message, failure) -> {
-				OutlineDiagnostics.approved("entity-outline-source", "source", () -> message, failure);
+				OutlineDiagnostics.approved("entity-outline-source", OutlineDiagnostics.Category.REGISTRATION, () -> message, failure);
 			};
 		}
 	}

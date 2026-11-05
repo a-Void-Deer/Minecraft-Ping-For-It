@@ -120,7 +120,7 @@ public final class EntityBlockGeometryRunner {
 				context = contextFactory.get();
 			} catch (Exception | LinkageError | AssertionError failure) {
 				warnOnce(
-					"context-creation:" + sourceId,
+					"context-creation:" + sourceId, OutlineDiagnostics.Category.CONTEXT_CREATION,
 					() -> "entity block geometry attempt failed; id=" + sourceId
 						+ "; category=context-creation; context=<unavailable>",
 					failure);
@@ -130,7 +130,7 @@ public final class EntityBlockGeometryRunner {
 
 			if (context == null) {
 				warnOnce(
-					"null-context:" + sourceId,
+					"null-context:" + sourceId, OutlineDiagnostics.Category.NULL_CONTEXT,
 					() -> "entity block geometry attempt failed; id=" + sourceId
 						+ "; category=null-context; context=null",
 					null);
@@ -158,7 +158,7 @@ public final class EntityBlockGeometryRunner {
 		} catch (Exception | LinkageError | AssertionError failure) {
 			// Presentation observers are auxiliary bookkeeping. A recoverable
 			// observer fault must not alter source ordering or fallback behavior.
-			warnOnce("observer:" + sourceId,
+			warnOnce("observer:" + sourceId, OutlineDiagnostics.Category.OBSERVER,
 				() -> "entity block geometry observer failed; id=" + sourceId + "; outcome=" + outcome,
 				failure);
 		}
@@ -172,7 +172,7 @@ public final class EntityBlockGeometryRunner {
 			@Nullable EntityBlockGeometryOutcome outcome = source.attempt(context);
 			if (outcome == null) {
 				String sourceId = safeSourceId(source);
-				warnOnce("null-outcome:" + sourceId,
+				warnOnce("null-outcome:" + sourceId, OutlineDiagnostics.Category.NULL_OUTCOME,
 					() -> "entity block geometry source returned null; id=" + sourceId + "; context=" + context, null);
 				return EntityBlockGeometryOutcome.FAILED;
 			}
@@ -180,7 +180,7 @@ public final class EntityBlockGeometryRunner {
 		} catch (Exception | LinkageError | AssertionError failure) {
 			String sourceId = safeSourceId(source);
 			warnOnce(
-				"attempt:" + sourceId,
+				"attempt:" + sourceId, OutlineDiagnostics.Category.ATTEMPT,
 				() -> "entity block geometry source failed; id=" + sourceId
 					+ "; category=attempt; context=" + context,
 				failure);
@@ -188,15 +188,15 @@ public final class EntityBlockGeometryRunner {
 		}
 	}
 
-	void warnOnce(String key, Supplier<String> message, @Nullable Throwable failure) {
-		if (warningSink == null && !OutlineDiagnostics.enabled()) {
+	void warnOnce(String key, OutlineDiagnostics.Category category, Supplier<String> message, @Nullable Throwable failure) {
+		if (warningSink == null && !OutlineDiagnostics.enabled(category)) {
 			return;
 		}
 		if (!warnedFailureKeys.add(key)) {
 			return;
 		}
 		if (warningSink == null) {
-			OutlineDiagnostics.approved("entity-block-geometry", key, message, failure);
+			OutlineDiagnostics.approved("entity-block-geometry", category, message, failure);
 		} else {
 			OutlineDiagnostics.deliver(text -> warningSink.warn(text, null), message, failure);
 		}
@@ -206,12 +206,12 @@ public final class EntityBlockGeometryRunner {
 		try {
 			@Nullable String id = EntityBlockGeometrySourceIds.validate(source.id());
 			if (id == null) {
-				warnOnce("invalid-id:" + source.getClass().getName(),
+				warnOnce("invalid-id:" + source.getClass().getName(), OutlineDiagnostics.Category.INVALID_ID,
 					() -> "entity block geometry source has invalid id; class=" + source.getClass().getName(), null);
 			}
 			return id == null ? EntityBlockGeometrySourceIds.INVALID : id;
 		} catch (Exception | LinkageError | AssertionError failure) {
-			warnOnce("source-id:" + source.getClass().getName(),
+			warnOnce("source-id:" + source.getClass().getName(), OutlineDiagnostics.Category.SOURCE_ID,
 				() -> "entity block geometry source id failed; class=" + source.getClass().getName(), failure);
 			return EntityBlockGeometrySourceIds.UNAVAILABLE;
 		}

@@ -13,15 +13,31 @@ import org.jetbrains.annotations.Nullable;
 @NotNullByDefault
 public final class FluidSprites {
 	private FluidSprites() {}
+	/** Compatibility lookup: recoverable discovery and sprite failures remain unavailable to old callers. */
 	public static @Nullable TextureAtlasSprite stillSprite(Fluid fluid) {
-		return stillSprite(fluid, ServiceHolder.service());
+		try {
+			return lookupStillSprite(fluid);
+		} catch (RuntimeException | LinkageError | ServiceConfigurationError unavailable) { return null; }
 	}
 	public static @Nullable TextureAtlasSprite stillSprite(Fluid fluid, @Nullable IPlatformFluidRenderService service) {
-		if (service == null) return null;
 		try {
-			@Nullable var sprite = service.stillSprite(fluid);
-			return usable(sprite) ? sprite : null;
+			return lookupStillSprite(fluid, service);
 		} catch (RuntimeException | LinkageError | ServiceConfigurationError unavailable) { return null; }
+	}
+
+	/**
+	 * One lookup for the consumer that owns fallback and diagnostics. Absence or an unusable sprite returns null;
+	 * original discovery and native lookup failures propagate unchanged.
+	 */
+	public static @Nullable TextureAtlasSprite lookupStillSprite(Fluid fluid) {
+		return lookupStillSprite(fluid, ServiceHolder.service());
+	}
+
+	/** The same lookup with an already selected service; never performs discovery. */
+	public static @Nullable TextureAtlasSprite lookupStillSprite(Fluid fluid, @Nullable IPlatformFluidRenderService service) {
+		if (service == null) return null;
+		@Nullable var sprite = service.stillSprite(fluid);
+		return usable(sprite) ? sprite : null;
 	}
 	public static boolean usable(@Nullable TextureAtlasSprite sprite) {
 		return sprite != null && TextureAtlas.LOCATION_BLOCKS.equals(sprite.atlasLocation()) && sprite.contents() != null
@@ -33,10 +49,8 @@ public final class FluidSprites {
 		private static @Nullable IPlatformFluidRenderService cached;
 		private static @Nullable IPlatformFluidRenderService service() {
 			if (cached != null) return cached;
-			try {
-				cached = ServiceLoader.load(IPlatformFluidRenderService.class).findFirst().orElse(null);
-				return cached;
-			} catch (RuntimeException | LinkageError | ServiceConfigurationError unavailable) { return null; }
+			cached = ServiceLoader.load(IPlatformFluidRenderService.class).findFirst().orElse(null);
+			return cached;
 		}
 	}
 }

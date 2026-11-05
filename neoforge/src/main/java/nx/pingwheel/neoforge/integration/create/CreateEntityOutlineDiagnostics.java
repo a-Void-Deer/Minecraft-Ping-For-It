@@ -3,11 +3,8 @@ package nx.pingwheel.neoforge.integration.create;
 import net.minecraft.world.entity.Entity;
 import nx.pingwheel.common.client.outline.EntityBlockGeometryOutcome;
 import nx.pingwheel.common.diagnostics.DiagnosticChannel;
-import nx.pingwheel.common.diagnostics.DiagnosticFaultReporter;
 import nx.pingwheel.common.diagnostics.DiagnosticLogger;
-import nx.pingwheel.common.diagnostics.DiagnosticSide;
 import nx.pingwheel.common.diagnostics.Diagnostics;
-import nx.pingwheel.common.util.SafeExceptionReport;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -61,22 +58,11 @@ final class CreateEntityOutlineDiagnostics {
 			.append("; scope=").append(scope)
 			.append("; vertexCount=").append(vertexCount);
 		if (entity == null) return details.append("; entity=<null>").toString();
-		try {
-			details.append("; entityType=").append(entity.getType())
-				.append("; entityId=").append(entity.getId())
-				.append("; entityUuid=").append(entity.getUUID())
-				.append("; position=").append(entity.position())
-				.append("; class=").append(entity.getClass().getName());
-		} catch (Exception | LinkageError | AssertionError descriptorFailure) {
-			fault(DiagnosticFaultReporter.Stage.CONTEXT, descriptorFailure);
-			details.append("; entityDescriptorFailure=").append(SafeExceptionReport.format(descriptorFailure,
-				(accessor, accessorFailure) -> fault(DiagnosticFaultReporter.Stage.ACCESSOR, accessorFailure)));
-		}
+		// Rendering already supplies its outcome, scope and vertex count. Higher
+		// disclosure does not authorize another live entity descriptor read.
+		details.append("; class=").append(entity.getClass().getName())
+			.append("; identity=").append(Integer.toHexString(System.identityHashCode(entity)));
 		return details.toString();
 	}
 
-	private static void fault(DiagnosticFaultReporter.Stage stage, Throwable failure) {
-		Diagnostics.faults().report(DiagnosticSide.CLIENT, "create-entity-descriptor", stage,
-			Diagnostics.profile(DiagnosticSide.CLIENT), failure);
-	}
 }

@@ -85,7 +85,7 @@ public final class EntityOutlineRunner {
 		} catch (Exception | LinkageError | AssertionError failure) {
 			String sourceId = safeSourceId(source);
 			warnOnce(
-				"handles:" + sourceId,
+				"handles:" + sourceId, OutlineDiagnostics.Category.HANDLES,
 				() -> "entity outline source handles() failed; id=" + sourceId
 					+ "; category=handles; context=" + context,
 				failure);
@@ -101,7 +101,7 @@ public final class EntityOutlineRunner {
 			@Nullable EntityBlockGeometryOutcome outcome = source.attempt(context);
 			if (outcome == null) {
 				String sourceId = safeSourceId(source);
-				warnOnce("null-outcome:" + sourceId,
+				warnOnce("null-outcome:" + sourceId, OutlineDiagnostics.Category.NULL_OUTCOME,
 					() -> "entity outline source returned null; id=" + sourceId + "; context=" + context, null);
 				return EntityBlockGeometryOutcome.FAILED;
 			}
@@ -109,7 +109,7 @@ public final class EntityOutlineRunner {
 		} catch (Exception | LinkageError | AssertionError failure) {
 			String sourceId = safeSourceId(source);
 			warnOnce(
-				"attempt:" + sourceId,
+					"attempt:" + sourceId, OutlineDiagnostics.Category.ATTEMPT,
 				() -> "entity outline source attempt failed; id=" + sourceId
 					+ "; category=attempt; context=" + context,
 				failure);
@@ -122,15 +122,15 @@ public final class EntityOutlineRunner {
 	 * category that has not been warned before, so a broken source cannot
 	 * spam per-frame logs while still being retried on every call.
 	 */
-	void warnOnce(String key, Supplier<String> message, @Nullable Throwable failure) {
-		if (warningSink == null && !OutlineDiagnostics.enabled()) {
+	void warnOnce(String key, OutlineDiagnostics.Category category, Supplier<String> message, @Nullable Throwable failure) {
+		if (warningSink == null && !OutlineDiagnostics.enabled(category)) {
 			return;
 		}
 		if (!warnedFailureKeys.add(key)) {
 			return;
 		}
 		if (warningSink == null) {
-			OutlineDiagnostics.approved("entity-outline", key, message, failure);
+			OutlineDiagnostics.approved("entity-outline", category, message, failure);
 		} else {
 			OutlineDiagnostics.deliver(text -> warningSink.warn(text, null), message, failure);
 		}
@@ -140,12 +140,12 @@ public final class EntityOutlineRunner {
 		try {
 			@Nullable String id = EntityBlockGeometrySourceIds.validate(source.id());
 			if (id == null) {
-				warnOnce("invalid-id:" + source.getClass().getName(),
+				warnOnce("invalid-id:" + source.getClass().getName(), OutlineDiagnostics.Category.INVALID_ID,
 					() -> "entity outline source has invalid id; class=" + source.getClass().getName(), null);
 			}
 			return id == null ? EntityBlockGeometrySourceIds.INVALID : id;
 		} catch (Exception | LinkageError | AssertionError failure) {
-			warnOnce("source-id:" + source.getClass().getName(),
+			warnOnce("source-id:" + source.getClass().getName(), OutlineDiagnostics.Category.SOURCE_ID,
 				() -> "entity outline source id failed; class=" + source.getClass().getName(), failure);
 			return EntityBlockGeometrySourceIds.UNAVAILABLE;
 		}

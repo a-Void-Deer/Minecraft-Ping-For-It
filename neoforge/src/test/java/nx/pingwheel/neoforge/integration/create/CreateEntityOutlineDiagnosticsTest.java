@@ -35,7 +35,7 @@ class CreateEntityOutlineDiagnosticsTest {
 			assertEquals(0, entity.uuidReads); assertEquals(0, probe.get()); assertEquals(0, failure.reads);
 			now[0] = CreateEntityOutlineDiagnosticGate.HEARTBEAT_NANOS;
 			diagnostics.report(entity, "renderer-failed-before-vertices", "on", true, 0, failure, EntityBlockGeometryOutcome.FAILED);
-			assertEquals(1, entity.uuidReads); assertEquals(1, probe.get()); assertTrue(failure.reads > 0);
+			assertEquals(0, entity.uuidReads); assertEquals(1, probe.get()); assertTrue(failure.reads > 0);
 			assertEquals(2, capture.events.size());
 			assertTrue(capture.events.getLast().getMessage().getFormattedMessage().contains("original private"));
 			assertNull(capture.events.getLast().getThrown());

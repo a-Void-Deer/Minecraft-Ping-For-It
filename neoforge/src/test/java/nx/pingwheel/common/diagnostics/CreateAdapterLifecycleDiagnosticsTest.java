@@ -54,7 +54,8 @@ class CreateAdapterLifecycleDiagnosticsTest {
 				assertEquals(DiagnosticSide.CLIENT, fault.key().side());
 				assertEquals(DiagnosticFaultReporter.Stage.SINK, fault.key().stage());
 				assertEquals(DiagnosticFaultReporter.Kind.RUNTIME, fault.key().kind());
-				assertEquals(flywheel ? "entity-block-source-register" : "entity-outline-register", fault.key().site());
+				assertEquals((flywheel ? "entity-block-source-register" : "entity-outline-register")
+					+ "/duplicate-id-first-registration-kept", fault.key().site());
 				assertEquals(1, fault.occurrences());
 				adapter.invoke("close"); assertEquals("not-registered", adapter.state()); assertEquals(1, adapter.closedSources());
 				assertSame(originalWinner, registeredSource(adapter, flywheel), "closing a rejected handle cannot remove the winner");

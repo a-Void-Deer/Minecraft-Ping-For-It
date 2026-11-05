@@ -57,7 +57,7 @@ class CreateFlywheelGeometryAttemptTest {
 					reports.incrementAndGet();
 					assertEquals(expectedReason, result.reason());
 					assertSame(original, result.failure());
-					diagnostics.report("target", result.reason(), result.target(), result.details(), result.failure());
+					diagnostics.report("target", result.reason(), result.outcome(), result.category(), result.target(), result.details(), result.failure());
 				}));
 			}
 			assertEquals(4, resolutions.get(), "both instances are retried every attempt");
@@ -90,7 +90,7 @@ class CreateFlywheelGeometryAttemptTest {
 					return result(outcome, reason, () -> "terminal stage", terminal);
 				}, selected -> {
 					assertEquals(reason, selected.reason());
-					FlywheelDiagnostics.global().report("target", selected.reason(), selected.target(), selected.details(), selected.failure());
+					FlywheelDiagnostics.global().report("target", selected.reason(), selected.outcome(), selected.category(), selected.target(), selected.details(), selected.failure());
 				}));
 				String message = capture.events.getFirst().getMessage().getFormattedMessage();
 				for (String part : List.of("resolution original", "resolution cause", "terminal original", "terminal cause")) {
@@ -125,7 +125,7 @@ class CreateFlywheelGeometryAttemptTest {
 						return result(EntityBlockGeometryOutcome.FAILED, FlywheelDiagnosticReason.MESH_EXTRACTION_FAILED,
 							() -> "model extraction failed", failure);
 					}
-				}, result -> diagnostics.report("target", result.reason(), result.target(), result.details(), result.failure())));
+				}, result -> diagnostics.report("target", result.reason(), result.outcome(), result.category(), result.target(), result.details(), result.failure())));
 				if (frame == 0) {
 					assertTrue(messageReads.get() > 0);
 					messageReads.set(0);
@@ -153,11 +153,11 @@ class CreateFlywheelGeometryAttemptTest {
 					FlywheelDiagnosticReason.MESH_EXTRACTION_FAILED,
 					() -> { reads.incrementAndGet(); return "target private"; },
 					() -> { reads.incrementAndGet(); return "mesh/material private"; }, terminal);
-			}, result -> FlywheelDiagnostics.global().report("cheap-key", result.reason(), result.target(), result.details(), result.failure())));
+			}, result -> FlywheelDiagnostics.global().report("cheap-key", result.reason(), result.outcome(), result.category(), result.target(), result.details(), result.failure())));
 			assertEquals(0, reads.get()); assertEquals(1, capture.events.size());
 			String text = capture.events.getFirst().getMessage().getFormattedMessage();
 			assertFalse(text.contains("private")); assertNull(capture.events.getFirst().getThrown());
-			assertEquals(Level.WARN, capture.events.getFirst().getLevel());
+			assertEquals(Level.ERROR, capture.events.getFirst().getLevel());
 		}
 	}
 

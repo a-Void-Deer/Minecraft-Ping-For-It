@@ -69,6 +69,16 @@ public final class WorldAwareBlockModelOutlineAdapterRegistry {
 		return snapshot;
 	}
 
+	/** Reuses the registration's validated identity without calling an optional adapter again for diagnostics. */
+	@Nullable String registeredId(WorldAwareBlockModelOutlineAdapter adapter) {
+		synchronized (lock) {
+			for (var entry : registrations.entrySet()) {
+				if (entry.getValue().adapter == adapter) return entry.getKey();
+			}
+		}
+		return null;
+	}
+
 	private void close(Registration registration) {
 		synchronized (lock) {
 			if (registration.closed) {

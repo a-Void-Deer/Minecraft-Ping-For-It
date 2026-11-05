@@ -120,9 +120,7 @@ import org.jetbrains.annotations.Nullable;
 public final class VirtualBlockDisplayRenderer {
 	private static final DiagnosticChannel MODEL_CLAIM_FAILURES = DiagnosticChannel.interval(
 		"block-outline/model-claim", java.time.Duration.ofSeconds(10));
-	private static final DiagnosticChannel MODEL_ID_FAILURES = DiagnosticChannel.interval(
-		"block-outline/model-id", java.time.Duration.ofSeconds(10));
-	private enum FailureRoute {
+	enum FailureRoute {
 		BLOCK_ENTITY("block entity"),
 		ENTITY_BLOCK("entity-block"),
 		BLOCK_DISPLAY("block display");
@@ -134,7 +132,7 @@ public final class VirtualBlockDisplayRenderer {
 		}
 	}
 
-	private enum FailureStage {
+	enum FailureStage {
 		RENDER("render"),
 		GEOMETRY_RUNNER("geometry-runner"),
 		FLUSH("flush");
@@ -159,7 +157,7 @@ public final class VirtualBlockDisplayRenderer {
 	private @Nullable Display.BlockDisplay cachedDisplay;
 	private final EntityBlockGeometryRunner entityBlockGeometryRunner;
 
-	private VirtualBlockDisplayRenderer() {
+	VirtualBlockDisplayRenderer() {
 		// These built-ins are owned by the runner and intentionally never enter
 		// the optional/modded registry.
 		this.entityBlockGeometryRunner = new EntityBlockGeometryRunner(
@@ -246,7 +244,7 @@ public final class VirtualBlockDisplayRenderer {
 
 		if (!frameFailures.isEmpty()) {
 			Diagnostics.client().atDebug().detail(Level.DEBUG,
-				() -> "block outline model pass: %d attempts failed across %d block types; voxel fallback applied"
+				() -> "block outline model pass: %d attempts failed across %d block types; fallback eligibility retained"
 					.formatted(frameFailures.values().stream().mapToInt(Integer::intValue).sum(), frameFailures.size()));
 		}
 	}
@@ -661,11 +659,15 @@ public final class VirtualBlockDisplayRenderer {
 			localSource.endBatch();
 			return outcome;
 		} catch (Exception | LinkageError | AssertionError failure) {
-			recordFailure(
-				adapterId(adapter), context.blockPos(), context.blockState(), context.targetKey(),
-				adapter, FailureRoute.ENTITY_BLOCK, stage, failure);
+			recordWorldAwareFailure(adapter, context, stage, failure);
 			return WorldAwareBlockModelOutlineOutcome.FAILED;
 		}
+	}
+
+	void recordWorldAwareFailure(WorldAwareBlockModelOutlineAdapter adapter, EntityBlockGeometryContext context,
+		FailureStage stage, Throwable failure) {
+		recordFailure(failureRegistryId(context), context.blockPos(), context.blockState(), context.targetKey(),
+			adapter, FailureRoute.ENTITY_BLOCK, stage, failure, () -> adapterId(adapter));
 	}
 
 	/**
@@ -903,7 +905,7 @@ public final class VirtualBlockDisplayRenderer {
 	 * causal/suppressed stack. The session-level warning still
 	 * prevents per-frame warning spam.
 	 */
-	private void recordFailure(
+	void recordFailure(
 		String registryId,
 		@Nullable BlockPos position,
 		@Nullable BlockState blockState,
@@ -913,13 +915,27 @@ public final class VirtualBlockDisplayRenderer {
 		FailureStage stage,
 		Throwable throwable
 	) {
+		recordFailure(registryId, position, blockState, targetKey, sourceTarget, route, stage, throwable, null);
+	}
+
+	private void recordFailure(
+		String registryId,
+		@Nullable BlockPos position,
+		@Nullable BlockState blockState,
+		@Nullable TargetKey targetKey,
+		@Nullable Object sourceTarget,
+		FailureRoute route,
+		FailureStage stage,
+		Throwable throwable,
+		@Nullable Supplier<String> adapterId
+	) {
 		frameFailures.merge(registryId, 1, Integer::sum);
 
 		if (Diagnostics.client().atNormal().isEnabled(Level.ERROR) && warnOnceRegistryIds.add(registryId)) {
-			Diagnostics.client().atNormal().failure(Level.ERROR, "block-outline-model", "voxel-fallback",
+			Diagnostics.client().atNormal().failure(Level.ERROR, "block-outline-model/source-render-failed", "fallback-eligible",
 				() -> failureMessage(
 					registryId, position, blockState, targetKey, sourceTarget,
-					route, stage, throwable),
+					route, stage, throwable, adapterId == null ? null : adapterId.get()),
 				throwable);
 		}
 	}
@@ -932,7 +948,8 @@ public final class VirtualBlockDisplayRenderer {
 		@Nullable Object sourceTarget,
 		FailureRoute route,
 		FailureStage stage,
-		@Nullable Throwable throwable
+		@Nullable Throwable throwable,
+		@Nullable String adapterId
 	) {
 		String blockClass = blockState == null || blockState.getBlock() == null
 			? "<null>" : blockState.getBlock().getClass().getName();
@@ -947,11 +964,12 @@ public final class VirtualBlockDisplayRenderer {
 			+ "; stage=" + stage.label
 			+ "; target=" + target
 			+ "; registry=" + registryId
+			+ "; adapterId=" + (adapterId == null ? "<not-applicable>" : adapterId)
 			+ "; position=" + positionText
 			+ "; class=" + sourceClass
 			+ "; blockClass=" + blockClass
 			+ "; exceptionClass=" + exceptionClass
-			+ "; voxelFallback=applied";
+			+ "; voxelFallback=eligible";
 	}
 
 	private static String targetDescription(@Nullable TargetKey targetKey) {
@@ -990,13 +1008,7 @@ public final class VirtualBlockDisplayRenderer {
 	}
 
 	private static String adapterId(WorldAwareBlockModelOutlineAdapter adapter) {
-		try {
-			@Nullable String id = EntityBlockGeometrySourceIds.validate(adapter.id());
-			return id == null ? EntityBlockGeometrySourceIds.INVALID : id;
-		} catch (Exception | LinkageError | AssertionError failure) {
-			Diagnostics.client().atNormal().rateLimited(MODEL_ID_FAILURES).failure(Level.WARN, "world-aware-model-id", "adapter-id-unavailable",
-				() -> "adapter id lookup failed", failure);
-			return EntityBlockGeometrySourceIds.UNAVAILABLE;
-		}
+		return Objects.requireNonNullElse(WorldAwareBlockModelOutlineAdapterRegistry.INSTANCE.registeredId(adapter),
+			EntityBlockGeometrySourceIds.UNAVAILABLE);
 	}
 }

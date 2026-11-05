@@ -3,6 +3,7 @@ package nx.pingwheel.common.client.outline;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.junit.jupiter.api.Test;
 import org.apache.logging.log4j.Level;
@@ -23,6 +24,157 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 
 @NotNullByDefault
 class FlywheelDiagnosticsTest {
+	@Test
+	void sameReasonAbsenceToResolutionFailureIsNotSuppressedByTheHeartbeat() {
+		try (IntegrationDiagnosticCapture capture = new IntegrationDiagnosticCapture(Level.ALL, LoggingProfile.DEBUG)) {
+			FlywheelDiagnostics diagnostics = FlywheelDiagnostics.global();
+			assertTrue(diagnostics.report("target", FlywheelDiagnosticReason.NO_INSTANCES, EntityBlockGeometryOutcome.EMPTY,
+				() -> "target", () -> "ordinary absence", null));
+			assertTrue(diagnostics.report("target", FlywheelDiagnosticReason.NO_INSTANCES, EntityBlockGeometryOutcome.EMPTY,
+				() -> "target", () -> "all live handles failed", new IllegalStateException("original")));
+			assertFalse(diagnostics.report("target", FlywheelDiagnosticReason.NO_INSTANCES, EntityBlockGeometryOutcome.EMPTY,
+				() -> { throw new AssertionError("suppressed target"); }, () -> { throw new AssertionError("suppressed detail"); },
+				new IllegalArgumentException("different exception class is not a new domain category")));
+			assertEquals(List.of(Level.DEBUG, Level.WARN), capture.events().stream().map(event -> event.getLevel()).toList());
+		}
+	}
+
+	@Test
+	void renderFailureAvailabilityAndMixedSuccessKeepTheirOwnSeverityAndHandlingAtNormal() {
+		AtomicInteger details = new AtomicInteger();
+		try (IntegrationDiagnosticCapture capture = new IntegrationDiagnosticCapture(Level.ALL, LoggingProfile.NORMAL)) {
+			FlywheelDiagnostics diagnostics = FlywheelDiagnostics.global();
+			var failure = new IllegalStateException("private original");
+			for (FlywheelDiagnosticReason reason : List.of(FlywheelDiagnosticReason.MESH_EXTRACTION_FAILED,
+				FlywheelDiagnosticReason.MATERIAL_INCOMPATIBLE)) {
+				assertTrue(diagnostics.report(reason, reason, EntityBlockGeometryOutcome.FAILED,
+					() -> "private target", () -> { details.incrementAndGet(); return "private graph"; }, failure));
+			}
+			assertTrue(diagnostics.report("preflight", FlywheelDiagnosticReason.TRANSFORM_UNAVAILABLE, EntityBlockGeometryOutcome.FAILED,
+				() -> "target", () -> "preflight origin", failure));
+			assertTrue(diagnostics.report("mixed", FlywheelDiagnosticReason.INSTANCE_RESOLUTION_FAILED, EntityBlockGeometryOutcome.RENDERED,
+				() -> "target", () -> "valid sibling rendered", failure));
+			assertFalse(diagnostics.report("absence", FlywheelDiagnosticReason.NO_INSTANCES, EntityBlockGeometryOutcome.EMPTY,
+				() -> "target", () -> "no instances", null));
+			assertEquals(List.of(Level.ERROR, Level.ERROR, Level.WARN, Level.WARN),
+				capture.events().stream().map(event -> event.getLevel()).toList());
+			assertEquals(0, details.get());
+			String mixed = capture.events().getLast().getMessage().getFormattedMessage();
+			assertTrue(mixed.contains("instance-resolution"));
+			assertTrue(mixed.contains("rendered-degraded-fallback-suppressed"));
+			assertTrue(capture.events().stream().noneMatch(event -> event.getMessage().getFormattedMessage().contains("private")));
+		}
+	}
+
+	@Test
+	void repeatedDisabledStatusObservesRecoveryWithoutReadingClockAndDoesNotRefundAnEmittedWarning() {
+		AtomicInteger clocks = new AtomicInteger();
+		AtomicBoolean enabled = new AtomicBoolean(false);
+		List<FlywheelDiagnostics.Event> events = new ArrayList<>();
+		FlywheelDiagnostics diagnostics = new FlywheelDiagnostics(() -> { clocks.incrementAndGet(); return 1L; }, events::add,
+			level -> enabled.get() && level != Level.DEBUG);
+		for (int index = 0; index < 10; index++) diagnostics.report("target", FlywheelDiagnosticReason.NO_INSTANCES,
+			() -> { throw new AssertionError("disabled context"); }, null);
+		assertEquals(0, clocks.get());
+		enabled.set(true);
+		assertTrue(diagnostics.report("target", FlywheelDiagnosticReason.MODEL_UNAVAILABLE, () -> "failure", null));
+		enabled.set(false);
+		assertFalse(diagnostics.report("target", FlywheelDiagnosticReason.MODEL_UNAVAILABLE, () -> "disabled", null));
+		enabled.set(true);
+		assertFalse(diagnostics.report("target", FlywheelDiagnosticReason.MODEL_UNAVAILABLE, () -> "still suppressed", null));
+		assertFalse(diagnostics.report("target", FlywheelDiagnosticReason.RENDERED, () -> "recovery", null));
+		assertTrue(diagnostics.report("target", FlywheelDiagnosticReason.MODEL_UNAVAILABLE, () -> "failure again", null));
+		assertEquals(FlywheelDiagnostics.EventKind.REASON_TRANSITION, events.getLast().kind());
+	}
+
+	@Test
+	void disabledRecoveryStartsANewFailureEpisodeBeforeThePreviousHeartbeat() {
+		for (FlywheelDiagnosticReason reason : List.of(FlywheelDiagnosticReason.MESH_EXTRACTION_FAILED,
+			FlywheelDiagnosticReason.MATERIAL_INCOMPATIBLE, FlywheelDiagnosticReason.MODEL_UNAVAILABLE)) {
+			AtomicLong now = new AtomicLong(100L);
+			AtomicInteger clocks = new AtomicInteger();
+			AtomicBoolean enabled = new AtomicBoolean(true);
+			List<FlywheelDiagnostics.Event> events = new ArrayList<>();
+			FlywheelDiagnostics diagnostics = new FlywheelDiagnostics(() -> { clocks.incrementAndGet(); return now.get(); },
+				events::add, level -> enabled.get());
+			var failure = new IllegalStateException("original failure");
+			assertTrue(diagnostics.report("target", reason, EntityBlockGeometryOutcome.FAILED,
+				() -> "target", () -> "first episode", failure));
+			enabled.set(false); now.set(200L);
+			assertFalse(diagnostics.report("target", FlywheelDiagnosticReason.RENDERED, () -> "recovery", null));
+			now.set(300L);
+			for (int observation = 0; observation < 10; observation++) {
+				assertFalse(diagnostics.report("target", reason, EntityBlockGeometryOutcome.FAILED,
+					() -> { throw new AssertionError("disabled target"); },
+					() -> { throw new AssertionError("disabled detail"); }, failure));
+			}
+			assertEquals(1, clocks.get(), "disabled transitions and repeats do not read the clock");
+			enabled.set(true); now.set(400L);
+			assertTrue(diagnostics.report("target", reason, EntityBlockGeometryOutcome.FAILED,
+				() -> "target", () -> "new episode", failure));
+			assertEquals(List.of(FlywheelDiagnostics.EventKind.FIRST, FlywheelDiagnostics.EventKind.FIRST),
+				events.stream().map(FlywheelDiagnostics.Event::kind).toList());
+			assertEquals(List.of(100L, 400L), events.stream().map(FlywheelDiagnostics.Event::timestampMillis).toList());
+			now.set(400L + FlywheelDiagnostics.HEARTBEAT_MILLIS - 1L);
+			assertFalse(diagnostics.report("target", reason, EntityBlockGeometryOutcome.FAILED,
+				() -> "target", () -> "before new heartbeat", failure));
+			now.incrementAndGet();
+			assertTrue(diagnostics.report("target", reason, EntityBlockGeometryOutcome.FAILED,
+				() -> "target", () -> "new heartbeat", failure));
+			assertEquals(FlywheelDiagnostics.EventKind.HEARTBEAT, events.getLast().kind());
+		}
+	}
+
+	@Test
+	void backendToggleWithoutATransitionKeepsTheConsumedHeartbeatOpportunity() {
+		AtomicLong now = new AtomicLong(100L);
+		AtomicInteger clocks = new AtomicInteger();
+		AtomicBoolean enabled = new AtomicBoolean(true);
+		List<FlywheelDiagnostics.Event> events = new ArrayList<>();
+		FlywheelDiagnostics diagnostics = new FlywheelDiagnostics(() -> { clocks.incrementAndGet(); return now.get(); },
+			events::add, level -> enabled.get());
+		var failure = new IllegalStateException("original failure");
+		assertTrue(diagnostics.report("target", FlywheelDiagnosticReason.MESH_EXTRACTION_FAILED, () -> "first", failure));
+		enabled.set(false); now.set(200L);
+		for (int observation = 0; observation < 10; observation++) {
+			assertFalse(diagnostics.report("target", FlywheelDiagnosticReason.MESH_EXTRACTION_FAILED,
+				() -> { throw new AssertionError("disabled detail"); }, failure));
+		}
+		assertEquals(1, clocks.get());
+		enabled.set(true); now.set(400L);
+		assertFalse(diagnostics.report("target", FlywheelDiagnosticReason.MESH_EXTRACTION_FAILED, () -> "not refunded", failure));
+		assertEquals(1, events.size());
+		now.set(100L + FlywheelDiagnostics.HEARTBEAT_MILLIS);
+		assertTrue(diagnostics.report("target", FlywheelDiagnosticReason.MESH_EXTRACTION_FAILED, () -> "original heartbeat", failure));
+		assertEquals(FlywheelDiagnostics.EventKind.HEARTBEAT, events.getLast().kind());
+	}
+
+	@Test
+	void sameReasonCategoryTransitionsKeepSeverityAndNewEpisodeAdmission() {
+		AtomicBoolean enabled = new AtomicBoolean(true);
+		List<Level> levels = new ArrayList<>();
+		List<FlywheelDiagnostics.Event> events = new ArrayList<>();
+		FlywheelDiagnostics diagnostics = new FlywheelDiagnostics(() -> 100L, events::add, level -> {
+			levels.add(level); return enabled.get();
+		});
+		var failure = new IllegalStateException("original failure");
+		for (var category : List.of(FlywheelDiagnostics.FailureCategory.AVAILABILITY, FlywheelDiagnostics.FailureCategory.RENDER)) {
+			assertTrue(diagnostics.report("target", FlywheelDiagnosticReason.TRANSFORM_UNAVAILABLE, EntityBlockGeometryOutcome.FAILED,
+				category, () -> "target", () -> "category transition", failure));
+		}
+		assertEquals(List.of(Level.WARN, Level.ERROR), levels);
+		assertEquals(FlywheelDiagnostics.EventKind.REASON_TRANSITION, events.getLast().kind());
+		enabled.set(false);
+		for (var category : List.of(FlywheelDiagnostics.FailureCategory.AVAILABILITY, FlywheelDiagnostics.FailureCategory.RENDER)) {
+			assertFalse(diagnostics.report("target", FlywheelDiagnosticReason.TRANSFORM_UNAVAILABLE, EntityBlockGeometryOutcome.FAILED,
+				category, () -> "target", () -> "disabled category transition", failure));
+		}
+		enabled.set(true);
+		assertTrue(diagnostics.report("target", FlywheelDiagnosticReason.TRANSFORM_UNAVAILABLE, EntityBlockGeometryOutcome.FAILED,
+			FlywheelDiagnostics.FailureCategory.RENDER, () -> "target", () -> "new render episode", failure));
+		assertEquals(FlywheelDiagnostics.EventKind.FIRST, events.getLast().kind());
+		assertEquals(3, events.size());
+	}
 	@Test
 	void debugDisabledRecoveryStillObservesSuccessAndTheNextFailureIsATransition() {
 		List<FlywheelDiagnostics.Event> events = new ArrayList<>();
