@@ -18,6 +18,7 @@ import nx.pingwheel.common.platform.IPlatformFluidService.Operation;
 import nx.pingwheel.common.platform.IPlatformFluidService.OperationProfile;
 import nx.pingwheel.common.presentation.inventory.InventoryQuantities;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidReadOperation;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
@@ -27,7 +28,7 @@ import org.jetbrains.annotations.Unmodifiable;
 
 /** One capability read implementation, shared by ordinary blocks and the Create safety route. */
 @NotNullByDefault
-public final class FluidCapabilityAccess implements IPlatformFluidService.Access {
+public final class FluidCapabilityAccess implements IPlatformFluidService.CoordinatedAccess {
 
 	/** Detached identities plus server-local object witnesses; never fluid contents. */
 	@NotNullByDefault
@@ -50,6 +51,7 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 	@NotNullByDefault
 	public interface World {
 		void require(BlockPos position, Operation operation);
+		/** Implementations must apply an entry gate before any chunk, state, entity or other metadata read. */
 		Block block(BlockPos position, Operation operation);
 		@Nullable IFluidHandler capability(BlockPos position, Direction face, Operation operation);
 		String dimension(Operation operation);
@@ -93,6 +95,9 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 	// VM reflection internals, like the native getter internals, remain external-trusted.
 	private static final InventoryValidationBudget.Cost RESIDENT_HANDOFF =
 		new InventoryValidationBudget.Cost(256, 256, 32);
+	// Local slot/state handoff and one native getter. coordinatedResidentProfile adds the
+	// full pre-getter current fence; the two common validations are separately admitted.
+	private static final OperationProfile COORDINATED_RESIDENT = new OperationProfile(RESIDENT_HANDOFF, 0, 0, 0);
 
 	private @Nullable Route route;
 	private @Nullable IFluidHandler handler;
@@ -270,9 +275,16 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 	}
 	@Override public OperationProfile validationProfile() { return validationProfile; }
 	@Override public OperationProfile readProfile() { return readProfile; }
+	@Override public OperationProfile coordinatedResidentProfile() { return validationProfile.plus(COORDINATED_RESIDENT); }
 	@Override public OperationProfile observationProfile(int limit) {
 		if (limit < 0 || limit > InventorySourceAccess.MAX_SLOTS) throw new IllegalArgumentException("fluid observation limit");
-		return validationProfile.times(2).plus(IPlatformFluidService.Access.super.observationProfile(limit));
+		// A non-empty indexed pass performs the complete pre/post validation inside each consume.
+		// A zero tank or zero limit reaches no consume, so it must admit one explicit full check;
+		// neither path keeps the old observe-outer duplicate requireCurrent pair.
+		int count = slots();
+		var loop = new OperationProfile(new InventoryValidationBudget.Cost(256, 256, 8L + limit), 0, 0, 0);
+		if (count == 0 || limit == 0) return validationProfile.plus(loop);
+		return readProfile.times(Math.min(count, limit)).plus(loop);
 	}
 
 	private Route liveRoute() {
@@ -311,6 +323,25 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 		}
 	}
 
+	@Override public void consumeCoordinatedResident(int slot, InventoryFluidReadOperation operation, Operation admitted) {
+		Objects.requireNonNull(operation); Objects.checkIndex(slot, count);
+		liveRoute();
+		operation.enter(this, slot); // bind this provider/address before any local metadata
+		operation.beforeResident(this, slot);
+		// The common guarded validation ends with a root-authority callback AFTER the
+		// provider's all-member pass. That callback can mutate a sibling. Keep the original
+		// standalone full current fence immediately before the getter, under the profile
+		// admitted and paid at operation entry; a root-only check cannot replace this pass.
+		requireCurrent(admitted);
+		operation.requireGetter(this, slot);
+		@Nullable FluidStack stack = Objects.requireNonNull(handler).getFluidInTank(slot);
+		// The native getter is followed immediately by synchronous identity/display freeze.
+		operation.detach(this, slot, borrow(slot, stack));
+		// The final complete common validation runs after freeze; the provider returns with no
+		// further callback, so a late revocation cannot be hidden behind a successful result.
+		operation.afterResident(this, slot);
+	}
+
 	@Override public boolean consume(int slot, IPlatformFluidService.Visitor visitor, Operation operation) {
 		Objects.requireNonNull(visitor); Objects.checkIndex(slot, count);
 		liveRoute(); operation.allowance().debit(readProfile.ownedCost()); requireCurrent(operation);
@@ -325,11 +356,16 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 	@Override public IPlatformFluidService.Visit observe(int limit, IPlatformFluidService.Visitor visitor, Operation operation) {
 		if (limit < 0 || limit > InventorySourceAccess.MAX_SLOTS) throw new IllegalArgumentException("fluid observation limit");
 		Objects.requireNonNull(visitor);
-		liveRoute(); operation.allowance().debit(validationProfile.ownedCost().times(2));
-		requireCurrent(operation);
-		var result = IPlatformFluidService.Access.super.observe(limit, visitor, operation);
-		requireCurrent(operation); // even a zero-tank/zero-limit pass needs current metadata before completion
-		return result;
+		liveRoute();
+		int count = slots();
+		// Each non-empty indexed consume already performs its own complete before/after current
+		// validation. A zero tank or zero limit invokes no consume, so it must explicitly run the
+		// current check before reporting completion; it cannot return a synthetic verified empty.
+		if (limit == 0 || count == 0) {
+			operation.allowance().debit(validationProfile.ownedCost());
+			requireCurrent(operation);
+		}
+		return IPlatformFluidService.CoordinatedAccess.super.observe(limit, visitor, operation);
 	}
 	@Override public void close() { route = null; handler = null; capacities = NO_CAPACITIES; }
 

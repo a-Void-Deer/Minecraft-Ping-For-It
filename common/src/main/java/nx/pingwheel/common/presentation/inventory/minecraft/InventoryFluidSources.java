@@ -29,6 +29,7 @@ import nx.pingwheel.common.integration.externalblock.ResolvedBlockReadSource;
 import nx.pingwheel.common.mixin.BaseContainerLockAccessor;
 import nx.pingwheel.common.platform.FluidAddressWitness;
 import nx.pingwheel.common.platform.IPlatformFluidService;
+import nx.pingwheel.common.platform.IPlatformFluidService.CoordinatedAccess;
 import nx.pingwheel.common.platform.IPlatformFluidService.Operation;
 import nx.pingwheel.common.platform.IPlatformFluidService.OperationProfile;
 import nx.pingwheel.common.platform.IPlatformFluidService.WitnessMatch;
@@ -416,9 +417,21 @@ public final class InventoryFluidSources {
 				+ (context == null ? "" : " context=" + context);
 		}
 		@Override public InventoryDomainCodec.@Nullable Item read(int slot) { throw new UnsupportedOperationException("fluid resource admission required"); }
+		private boolean reading, readPoisoned;
+		private @Nullable InventoryFluidReadOperation activeRead;
 		@Override public @Nullable InventoryResourceValue readResource(int slot, @Nullable InventoryCatalogAdmission catalogAdmission, InventoryValidationBudget.Allowance allowance) {
+			if (reading) {
+				readPoisoned = true;
+				if (activeRead != null) activeRead.close();
+				throw unavailable("fluid source read reentered");
+			}
 			Objects.checkIndex(slot, slots); Objects.requireNonNull(catalogAdmission);
-			return withAccess(allowance, (binding, access, admission) -> {
+			reading = true;
+			try { return withAccess(allowance, (binding, access, admission) -> {
+				if (!external) {
+					var coordinated = IPlatformFluidService.coordinated(access);
+					if (coordinated != null) return coordinatedRead(binding, access, admission, coordinated, slot, catalogAdmission);
+				}
 				if (!validate(binding, access, admission)) throw unavailable("fluid source invalid before getter");
 				var cell = new Cell();
 				try (var operation = admission.enter(access.readProfile())) {
@@ -427,10 +440,46 @@ public final class InventoryFluidSources {
 				}
 				if (!validate(binding, access, admission)) throw unavailable("fluid source invalid after getter");
 				world.used(access.routeInfo()); return cell.value;
-			});
+			}); } finally {
+				if (activeRead != null) activeRead.close();
+				activeRead = null; reading = false; readPoisoned = false;
+			}
+		}
+		/**
+		 * One coordinated ordinary read. The operation owns the two complete common validations and
+		 * the synchronous freeze; the provider retains its full pre-getter current fence and one native getter.
+		 * No external/Sable binding, Fabric/Forge access or custom/decorated access reaches here.
+		 */
+		private @Nullable InventoryResourceValue coordinatedRead(Binding binding, IPlatformFluidService.Access access,
+			InventoryFluidAdmission admission, CoordinatedAccess coordinated, int slot, InventoryCatalogAdmission catalogAdmission) {
+			var profile = coordinated.coordinatedResidentProfile().plus(InventoryFluidReadOperation.profile());
+			try (var operation = admission.enter(profile)) {
+				// Pay the state/handoff body before any provider, world or catalogue callback.
+				operation.allowance().debit(profile.ownedCost());
+				var currentCatalog = catalogForRead();
+				var registries = world.registries(binding.level());
+				if (readPoisoned || closed) throw unavailable("fluid source read invalidated before operation");
+				var port = new InventoryFluidReadOperation.Port() {
+					@Override public Object proof() { return binding; }
+					@Override public IPlatformFluidService.Access wrapper() { return access; }
+					@Override public InventoryValidationBudget.Allowance allowance() { return operation.allowance(); }
+					@Override public boolean active(InventoryFluidReadOperation read) { return activeRead == read && reading && !readPoisoned && !closed; }
+					@Override public boolean validate() { return Source.this.validate(binding, access, admission); }
+				};
+				var read = new InventoryFluidReadOperation(port, binding, access, coordinated, slot, Thread.currentThread(),
+					currentCatalog, registries, catalogAdmission, displayBytes, operation.allowance());
+				activeRead = read;
+				try {
+					coordinated.consumeCoordinatedResident(slot, read, operation);
+					world.used(access.routeInfo()); return read.completed(port);
+				} finally { read.close(); activeRead = null; }
+			}
+		}
+		private InventoryFluidCodec.Catalog catalogForRead() {
+			if (catalog == null) catalog = new InventoryFluidCodec.Catalog(); return catalog;
 		}
 		private @Nullable InventoryFluidValue freeze(IPlatformFluidService.Entry entry, HolderLookup.Provider registries, InventoryCatalogAdmission admission) {
-			if (catalog == null) catalog = new InventoryFluidCodec.Catalog(); return InventoryFluidFreezer.freeze(entry, registries, displayBytes, catalog, admission);
+			return InventoryFluidFreezer.freeze(entry, registries, displayBytes, catalogForRead(), admission);
 		}
 		@Override public InventorySourceAccess.ResourcePage enumerateResources(int limit, @Nullable InventoryCatalogAdmission catalogAdmission, InventoryValidationBudget.Allowance allowance) {
 			Objects.requireNonNull(catalogAdmission);
@@ -449,6 +498,8 @@ public final class InventoryFluidSources {
 		}
 		@Override public void releaseReadData() { catalog = null; }
 		@Override public void close() {
+			if (reading) readPoisoned = true;
+			if (activeRead != null) activeRead.close();
 			if (!closed) { closed = true; catalog = null; try { if (ordinaryAccess != null) ordinaryAccess.close(); }
 				finally { ordinaryAccess = null; ownership.close(); } }
 		}

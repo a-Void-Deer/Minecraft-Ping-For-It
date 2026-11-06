@@ -432,6 +432,39 @@ public final class InventorySourceAccess implements SourceAccess {
 		prepared = null;
 		return new OpenResult.Started(new CaptureHandle(input, descriptor, scope, source));
 	}
+	/**
+	 * Adopts a source that a caller already resolved under the same input. This
+	 * never invokes the resolver or charges another resolution; it only proves
+	 * the compatible read scope and builds the same handle as {@link #open}.
+	 * Ownership transfers on success. On failure this method closes the source.
+	 */
+	public OpenResult adopt(Source source, ReadScope scope) {
+		Objects.requireNonNull(source, "source");
+		Objects.requireNonNull(scope, "scope");
+		boolean started = false;
+		@Nullable Throwable primary = null;
+		try {
+			if (!source.key().readScope().equals(scope.viewKey())) return OpenResult.Unstarted.UNAVAILABLE;
+			var descriptor = new Descriptor(source.key(), 1,
+				new Capabilities(!source.stableCursor(), source.stableCursor(), source.version().isPresent()));
+			var handle = new CaptureHandle(input, descriptor, scope, source);
+			started = true;
+			return new OpenResult.Started(handle);
+		} catch (InventoryItemBudget.CaptureLimitException deferred) {
+			primary = deferred;
+			return OpenResult.Unstarted.DEFERRED;
+		} catch (RuntimeException | LinkageError unavailable) {
+			primary = unavailable;
+			InventoryCaptureDiagnostics.warn("adopt", input, null,
+				() -> "stage=descriptor sourceClass=" + source.getClass().getName(), unavailable);
+			return OpenResult.Unstarted.UNAVAILABLE;
+		} catch (Error fatal) {
+			primary = fatal;
+			throw fatal;
+		} finally {
+			if (!started) closeAttemptSource("adopt-close", source, primary, () -> "stage=adopt");
+		}
+	}
 	private boolean matches(PresentationAdapter.DetachedTarget target) {
 		return input.matchesDetached(target);
 	}

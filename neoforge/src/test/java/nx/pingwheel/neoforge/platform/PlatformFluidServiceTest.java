@@ -224,6 +224,29 @@ public class PlatformFluidServiceTest {
 		assertEquals(0, world.handler().reads);
 	}
 
+	@Test void nonemptyObserveHasTheSameCurrentPassesAsOneConsumeAndEmptyStillValidates() {
+		var world = new World(); world.handler().count = 1;
+		try (var access = resolve(world, BlockPos.ZERO, Direction.NORTH).orElseThrow()) {
+			world.faces.clear(); world.callbacks = 0; world.handler().reads = 0;
+			assertTrue(access.consume(0, entry -> true));
+			int consumeGates = world.callbacks;
+			assertEquals(2, world.faces.size());
+			world.faces.clear(); world.callbacks = 0; world.handler().reads = 0;
+			assertEquals(new IPlatformFluidService.Visit(1, true), access.observe(1, entry -> true));
+			assertEquals(1, world.handler().reads); assertEquals(2, world.faces.size());
+			assertEquals(consumeGates, world.callbacks, "observe does not add another outer current pair");
+			world.faces.clear(); world.handler().reads = 0;
+			assertEquals(new IPlatformFluidService.Visit(0, false), access.observe(0, entry -> fail("zero limit")));
+			assertEquals(0, world.handler().reads); assertEquals(1, world.faces.size(), "zero limit still validates current metadata");
+		}
+		var empty = new World(); empty.handler().count = 0;
+		try (var access = resolve(empty, BlockPos.ZERO, Direction.NORTH).orElseThrow()) {
+			empty.faces.clear();
+			assertEquals(new IPlatformFluidService.Visit(0, true), access.observe(1, entry -> fail("zero tanks")));
+			assertEquals(1, empty.faces.size()); assertEquals(0, empty.handler().reads);
+		}
+	}
+
 	@Test void orderedPublicCapacitiesDetectSameCountReorderWithoutAnotherContentRead() {
 		var world = new World(); var handler = world.handler(); handler.capacities = new int[] {1000, 2000};
 		var access = resolve(world, BlockPos.ZERO, Direction.NORTH).orElseThrow();

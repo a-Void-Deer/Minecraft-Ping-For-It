@@ -1153,19 +1153,44 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	/** Checks the actual observation being published, including the completed result retained during a new sweep. */
 	public Optional<Boolean> probe(Consumer consumer) {
-		if (consumer.closed || consumer.invalidObservation != null) return Optional.of(false);
+		try (var attempt = beginProbe(consumer, true, false, true)) { return attempt.result(); }
+	}
+	/**
+	 * One synchronous probe that may keep its resolved source for a later
+	 * same-iteration prepare/step handoff. The attempt is strictly bound to this
+	 * consumer, input, tick and display ceiling, and is single-use.
+	 */
+	public ProbeAttempt beginProbe(Consumer consumer) {
+		return beginProbe(consumer, true, true, true);
+	}
+	/** Recovery keeps the original input-only probe cadence and diagnostic coalescing. */
+	public ProbeAttempt beginProbeRecovery(Consumer consumer) {
+		var attempt = inputProbe(consumer, !consumer.inputRejectionReported, true);
+		attempt.result().ifPresent(value -> consumer.inputRejectionReported = !value);
+		return attempt;
+	}
+	private ProbeAttempt beginProbe(Consumer consumer, boolean reportRejection, boolean retainCandidate, boolean cancelInputDelay) {
+		if (consumer.closed || consumer.invalidObservation != null)
+			return new ProbeAttempt(consumer, effectiveDisplayCap(), Optional.of(false), null, null, 0);
 		if (consumer.scanningAssociation != null || consumer.completedAssociation != null) {
 			var allowance = new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE);
 			var checked = checkAssociations(consumer, allowance);
-			return checked == InventorySourceAccess.Preparation.DEFERRED ? Optional.empty() : Optional.of(checked == InventorySourceAccess.Preparation.READY);
+			return new ProbeAttempt(consumer, effectiveDisplayCap(), checked == InventorySourceAccess.Preparation.DEFERRED
+				? Optional.empty() : Optional.of(checked == InventorySourceAccess.Preparation.READY), null, null, 0);
 		}
 		Round completed = consumer.completedRound, scanning = consumer.round;
 		if (completed == null && scanning == null) {
 			// Input-only recovery has no readable-source evidence. Do not infer delay.
-			var result = probeRecovery(consumer);
-			if (result.isPresent()) consumer.probeDelay.cancel();
-			return result;
+			var attempt = inputProbe(consumer, reportRejection, retainCandidate);
+			attempt.result().ifPresent(value -> {
+				consumer.inputRejectionReported = !value;
+				if (cancelInputDelay) consumer.probeDelay.cancel();
+			});
+			return attempt;
 		}
+		return new ProbeAttempt(consumer, effectiveDisplayCap(), probeRounds(consumer, completed, scanning), null, null, 0);
+	}
+	private Optional<Boolean> probeRounds(Consumer consumer, @Nullable Round completed, @Nullable Round scanning) {
 		int calls = (completed != null && scanning != null && completed != scanning ? 2 : 1) + (consumer.bindingEvidence == null ? 0 : 1);
 		var validationCost = consumer.bindingEvidence == null ? InventoryValidationBudget.NONE : consumer.bindingEvidence.evidenceValidationCost();
 		if (completed != null) validationCost = validationCost.plus(completed.handle.evidenceValidationCost());
@@ -1221,13 +1246,215 @@ public final class InventoryRuntime implements AutoCloseable {
 		}
 		}
 	}
+	private ProbeAttempt inputProbe(Consumer consumer, boolean reportRejection, boolean retainCandidate) {
+		InventorySourceInput input = consumer.input;
+		long probeTick = tick;
+		int displayCap = effectiveDisplayCap();
+		var resolutionCost = resolver.resolutionProbeCost(input);
+		if (retainCandidate && certifiedPooling && input.resourceKind() == InventoryResourceKind.ITEM)
+			resolutionCost = resolutionCost.plus(POOL_BOOKKEEPING);
+		long resolutionWorkspace = Math.max(InventoryItemBudget.workspaceUpperBound(displayCap), resolutionCost.workspaceBytes());
+		long envelope = retainCandidate ? checkedAdd(ROUND_MEMORY, resolutionWorkspace) : authorityWorkspaceBytes();
+		var workspaceAdmission = memory.tryReserve(envelope);
+		if (workspaceAdmission.isEmpty()) return new ProbeAttempt(consumer, displayCap, Optional.empty(), null, null, 0);
+		RetainedMemoryLedger.Ticket workspace = workspaceAdmission.get();
+		var ticket = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
+		if (ticket.isEmpty()) { workspace.close(); return new ProbeAttempt(consumer, displayCap, Optional.empty(), null, null, 0); }
+		InventorySourceAccess.@Nullable Source resolved = null;
+		RetainedMemoryLedger.@Nullable Ticket retained = null;
+		@Nullable Throwable primary = null;
+		boolean transferred = false;
+		try (var grant = ticket.get()) {
+			grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
+			var resolution = validation(resolutionCost, new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE), envelope);
+			if (resolution.isEmpty()) return new ProbeAttempt(consumer, displayCap, Optional.empty(), null, null, 0);
+			InventoryValidationBudget.Allowance allowance;
+			try (var operation = resolution.get()) {
+				allowance = operation.allowance;
+				if (retainCandidate && certifiedPooling && input.resourceKind() == InventoryResourceKind.ITEM) allowance.debit(POOL_BOOKKEEPING);
+				resolved = resolver.resolve(input, displayCap, allowance).orElse(null);
+			}
+			if (resolved == null) {
+				if (reportRejection) InventoryCaptureDiagnostics.sourceUnavailable("runtime/input-probe", input, null, "resolve-null", null);
+				retireInvalid(input); return new ProbeAttempt(consumer, displayCap, Optional.of(false), null, null, 0);
+			}
+			var evidence = validation(resolved.evidenceValidationCost(), allowance, envelope);
+			if (evidence.isEmpty()) return new ProbeAttempt(consumer, displayCap, Optional.empty(), null, null, 0);
+			boolean valid;
+			try (var operation = evidence.get()) { valid = resolved.valid(allowance); }
+			if (!valid) {
+				var probed = resolved;
+				if (reportRejection) InventoryCaptureDiagnostics.sourceUnavailable("runtime/input-probe", input, () -> probed.key().toString(), "valid-false", null);
+				retireInvalid(input); return new ProbeAttempt(consumer, displayCap, Optional.of(false), null, null, 0);
+			}
+			if (retainCandidate && (tick != probeTick || effectiveDisplayCap() != displayCap))
+				return new ProbeAttempt(consumer, displayCap, Optional.empty(), null, null, 0);
+			if (!retainCandidate) {
+				InventorySourceAccess.Source closing = resolved; resolved = null;
+				closing.close();
+				return new ProbeAttempt(consumer, displayCap, Optional.of(true), null, null, 0);
+			}
+			retained = workspace;
+			var attempt = new ProbeAttempt(consumer, displayCap, Optional.of(true), resolved, retained, resolutionWorkspace);
+			resolved = null; retained = null; transferred = true;
+			return attempt;
+		} catch (InventoryItemBudget.CaptureLimitException deferred) {
+			primary = deferred;
+			return new ProbeAttempt(consumer, displayCap, Optional.empty(), null, null, 0);
+		} catch (RuntimeException | LinkageError unavailable) {
+			primary = unavailable;
+			@org.jetbrains.annotations.Nullable InventorySourceAccess.Source failedSource = resolved;
+			if (InventoryCaptureDiagnostics.expectedSourceUnavailable(unavailable)) {
+				if (reportRejection) InventoryCaptureDiagnostics.sourceUnavailable("runtime/input-probe", input,
+					failedSource == null ? null : () -> failedSource.key().toString(), "input-valid", unavailable);
+			}
+			else InventoryCaptureDiagnostics.warn("runtime/input-probe", input, null, () -> "tick=" + tick, unavailable);
+			retireInvalid(input); return new ProbeAttempt(consumer, displayCap, Optional.of(false), null, null, 0);
+		} catch (Error fatal) {
+			primary = fatal;
+			throw fatal;
+		} finally {
+			if (!transferred) {
+				RetainedMemoryLedger.Ticket release = retained == null ? workspace : retained;
+				if (resolved != null) {
+					try { closeProbeCandidate(consumer, input, resolved, release); }
+					catch (Error cleanup) {
+						if (primary instanceof Error && !(primary instanceof LinkageError)) {
+							if (primary != cleanup) primary.addSuppressed(cleanup);
+						} else {
+							if (primary != null && primary != cleanup) cleanup.addSuppressed(primary);
+							throw cleanup;
+						}
+					}
+				}
+				else release.close();
+			}
+		}
+	}
+	/** Releases an untransferred candidate exactly once; a failed close is an input-probe failure. */
+	private void closeProbeCandidate(Consumer owner, InventorySourceInput input, InventorySourceAccess.Source candidate, RetainedMemoryLedger.@Nullable Ticket ticket) {
+		try {
+			try { candidate.close(); }
+			catch (RuntimeException | LinkageError unavailable) {
+				if (InventoryCaptureDiagnostics.expectedSourceUnavailable(unavailable))
+					InventoryCaptureDiagnostics.sourceUnavailable("runtime/input-probe", input,
+						() -> candidate.key().toString(), "input-close", unavailable);
+				else InventoryCaptureDiagnostics.warn("runtime/input-probe", input, null, () -> "tick=" + tick, unavailable);
+				retireInvalid(input);
+				if (!owner.closed && !owner.invalidated()) owner.discardObservation();
+			}
+		} finally {
+			if (ticket != null) ticket.close();
+		}
+	}
+	/**
+	 * One synchronous single-consumer probe. A successful input check may retain
+	 * one resolved source and its resolution/metadata envelope until the same
+	 * iteration's prepare or step takes it over. The attempt is bound to the
+	 * exact consumer, input, tick and display ceiling, is single-use, and closes
+	 * any untransferred candidate on every exit.
+	 */
+	@NotNullByDefault
+	public final class ProbeAttempt implements AutoCloseable {
+		private final Consumer consumer;
+		private final InventorySourceInput input;
+		private final long tick;
+		private final Thread thread = Thread.currentThread();
+		private final int displayCeiling;
+		private final Optional<Boolean> result;
+		private final long metadataUpperBound;
+		private @Nullable InventorySourceAccess.Source source;
+		private @Nullable RetainedMemoryLedger.Ticket ticket;
+		private boolean transferred, closed;
+		private ProbeAttempt(Consumer consumer, int displayCeiling, Optional<Boolean> result,
+			@Nullable InventorySourceAccess.Source source, @Nullable RetainedMemoryLedger.Ticket ticket, long metadataUpperBound) {
+			this.consumer = consumer; this.input = consumer.input; this.tick = InventoryRuntime.this.tick;
+			this.displayCeiling = displayCeiling; this.result = result; this.source = source; this.ticket = ticket;
+			this.metadataUpperBound = metadataUpperBound;
+		}
+		public Optional<Boolean> result() { return result; }
+		private Adoption take(Consumer expectedConsumer, long expectedTick, int expectedDisplayCeiling) {
+			if (closed) throw new IllegalStateException("closed inventory probe attempt");
+			if (transferred) throw new IllegalStateException("inventory probe attempt was already transferred");
+			if (expectedConsumer != consumer || !expectedConsumer.input.equals(input))
+				throw new IllegalStateException("inventory probe attempt consumer or input mismatch");
+			if (thread != Thread.currentThread()) throw new IllegalStateException("inventory probe attempt thread mismatch");
+			if (expectedTick != tick || expectedDisplayCeiling != displayCeiling) {
+				close();
+				return new Adoption(null, true);
+			}
+			InventorySourceAccess.@Nullable Source candidate = source;
+			RetainedMemoryLedger.@Nullable Ticket held = ticket;
+			if (candidate == null || held == null) {
+				if (held != null) { ticket = null; held.close(); }
+				transferred = true;
+				return new Adoption(null, false);
+			}
+			var adoption = new Adoption(new Candidate(consumer, input, candidate, held, metadataUpperBound), false);
+			source = null; ticket = null; transferred = true;
+			return adoption;
+		}
+		private boolean belongsTo(InventoryRuntime runtime) { return InventoryRuntime.this == runtime; }
+		@Override public void close() {
+			if (closed || transferred) return;
+			closed = true;
+			InventorySourceAccess.@Nullable Source candidate = source; source = null;
+			RetainedMemoryLedger.@Nullable Ticket held = ticket; ticket = null;
+			if (candidate == null) { if (held != null) held.close(); return; }
+			closeProbeCandidate(consumer, input, candidate, held);
+		}
+	}
+	@NotNullByDefault
+	private record Adoption(@Nullable Candidate candidate, boolean deferred) {}
+	@NotNullByDefault
+	private final class Candidate implements AutoCloseable {
+		private final Consumer consumer;
+		private final InventorySourceInput input;
+		private final InventorySourceAccess.Source source;
+		private final RetainedMemoryLedger.Ticket ticket;
+		private final long metadataUpperBound;
+		private boolean transferred, closed;
+		private Candidate(Consumer consumer, InventorySourceInput input, InventorySourceAccess.Source source, RetainedMemoryLedger.Ticket ticket, long metadataUpperBound) {
+			this.consumer = consumer; this.input = input; this.source = source; this.ticket = ticket; this.metadataUpperBound = metadataUpperBound;
+		}
+		private InventorySourceAccess.Source source() {
+			if (closed || transferred) throw new IllegalStateException("inventory probe candidate is no longer owned");
+			return source;
+		}
+		private RetainedMemoryLedger.Ticket ticket() {
+			if (closed || transferred) throw new IllegalStateException("inventory probe candidate is no longer owned");
+			return ticket;
+		}
+		private long metadataUpperBound() { return metadataUpperBound; }
+		private void transfer() {
+			if (closed || transferred) throw new IllegalStateException("inventory probe candidate is no longer owned");
+			transferred = true;
+		}
+		@Override public void close() {
+			if (closed || transferred) return;
+			closed = true;
+			closeProbeCandidate(consumer, input, source, ticket);
+		}
+	}
 
 	public Optional<Observation> step(Consumer consumer) {
 		return step(consumer, InventorySourceAccess.MAX_STEP);
 	}
+	/** One step may consume the same-iteration probe candidate before its first resolve position. */
+	public Optional<Observation> step(Consumer consumer, ProbeAttempt attempt) {
+		return step(consumer, InventorySourceAccess.MAX_STEP, attempt);
+	}
+	public Optional<Observation> step(Consumer consumer, int slotBound) {
+		return step(consumer, slotBound, null);
+	}
 	/** Fix the physical capture route before scan or logical allowance is considered. */
 	public InventorySourceAccess.Preparation prepare(Consumer consumer) {
 		return prepare(consumer, new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE));
+	}
+	/** Consumes one same-iteration probe attempt; an unusable attempt defers instead of resolving again. */
+	public InventorySourceAccess.Preparation prepare(Consumer consumer, ProbeAttempt attempt) {
+		java.util.Objects.requireNonNull(attempt, "attempt");
+		return prepare(consumer, new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE), false, attempt);
 	}
 	@NotNullByDefault
 	public enum JoinResult { JOINED, NO_MATCH, DEFERRED, INVALID }
@@ -1242,6 +1469,23 @@ public final class InventoryRuntime implements AutoCloseable {
 		return prepare(consumer, allowance, false);
 	}
 	private InventorySourceAccess.Preparation prepare(Consumer consumer, InventoryValidationBudget.Allowance allowance, boolean joinOnly) {
+		return prepare(consumer, allowance, joinOnly, null);
+	}
+	private InventorySourceAccess.Preparation prepare(Consumer consumer, InventoryValidationBudget.Allowance allowance,
+		boolean joinOnly, @Nullable ProbeAttempt attempt) {
+		@Nullable Candidate candidate = null;
+		if (attempt != null) {
+			if (!attempt.belongsTo(this)) throw new IllegalStateException("inventory probe attempt runtime mismatch");
+			var adoption = attempt.take(consumer, tick, effectiveDisplayCap());
+			if (adoption.deferred() || attempt.result().isEmpty()) return InventorySourceAccess.Preparation.DEFERRED;
+			if (!attempt.result().get()) return InventorySourceAccess.Preparation.UNAVAILABLE;
+			candidate = adoption.candidate();
+		}
+		try { return prepareWithCandidate(consumer, allowance, joinOnly, candidate); }
+		finally { if (candidate != null) candidate.close(); }
+	}
+	private InventorySourceAccess.Preparation prepareWithCandidate(Consumer consumer, InventoryValidationBudget.Allowance allowance,
+		boolean joinOnly, @Nullable Candidate candidate) {
 		boolean pooled = certifiedPooling && consumer.input.resourceKind() == InventoryResourceKind.ITEM;
 		if (consumer.closed) return InventorySourceAccess.Preparation.UNAVAILABLE;
 		if (consumer.invalidObservation != null || consumer.pendingObservation != null)
@@ -1282,8 +1526,12 @@ public final class InventoryRuntime implements AutoCloseable {
 			}
 			var resolutionCost = resolver.resolutionProbeCost(consumer.input).plus(pooled ? POOL_BOOKKEEPING : InventoryValidationBudget.NONE);
 			long resolutionWorkspace = Math.max(InventoryItemBudget.workspaceUpperBound(effectiveDisplayCap()), resolutionCost.workspaceBytes());
-			var retained = memory.tryReserve(checkedAdd(ROUND_MEMORY, resolutionWorkspace));
-			if (retained.isEmpty()) { delay(consumer, consumer.admissionDelay, Reason.MEMORY.bit(), "admission"); return InventorySourceAccess.Preparation.DEFERRED; }
+			var retainedAdmission = candidate == null
+				? memory.tryReserve(checkedAdd(ROUND_MEMORY, resolutionWorkspace))
+				: Optional.of(candidate.ticket());
+			if (retainedAdmission.isEmpty()) { delay(consumer, consumer.admissionDelay, Reason.MEMORY.bit(), "admission"); return InventorySourceAccess.Preparation.DEFERRED; }
+			RetainedMemoryLedger.Ticket retained = retainedAdmission.get();
+			if (candidate != null) resolutionWorkspace = candidate.metadataUpperBound();
 			boolean ownsReservation = true;
 			SourceAccess.@Nullable Handle openedHandle = null;
 			try {
@@ -1291,33 +1539,48 @@ public final class InventoryRuntime implements AutoCloseable {
 				AdmittedSource[] resolvedSource = new AdmittedSource[1];
 				var access = sourceAccess(consumer.input, displayCap, source -> resolvedSource[0] = new AdmittedSource(source, true, memory));
 				var scope = new SourceAccess.ReadScope(consumer.input.viewKey(), Set.of(consumer.input.resourceKind().fieldId()));
-				var resolution = validation(resolutionCost, allowance, resolutionWorkspace);
-				if (resolution.isEmpty()) { delay(consumer, consumer.admissionDelay, Reason.PROVIDER_WORK.bit() | Reason.MEMORY.bit(), "admission"); return InventorySourceAccess.Preparation.DEFERRED; }
-				SourceAccess.ResolveResult resolved;
-				try (var operation = resolution.get()) {
-					if (pooled) operation.allowance.debit(POOL_BOOKKEEPING);
-					resolved = access.resolve(MinecraftBlockReadSources.detached(consumer.input.target()), scope, physical, operation.allowance);
-				}
-				if (!(resolved instanceof SourceAccess.ResolveResult.Available available)) {
-					if (resolved == SourceAccess.ResolveResult.Unresolved.DEFERRED) {
-						delay(consumer, consumer.admissionDelay, providerReasons(1, InventorySourceAccess.PROVIDER_CALL_WORK), "admission");
-						return InventorySourceAccess.Preparation.DEFERRED;
+				if (candidate != null) {
+					var admitted = new AdmittedSource(candidate.source(), true, memory);
+					resolvedSource[0] = admitted;
+					candidate.transfer();
+					var opened = access.adopt(admitted, scope);
+					if (!(opened instanceof SourceAccess.OpenResult.Started started)) {
+						if (opened == SourceAccess.OpenResult.Unstarted.DEFERRED) return InventorySourceAccess.Preparation.DEFERRED;
+						consumer.pendingObservation = unavailable(scope.viewKey());
+						InventoryCaptureDiagnostics.sourceUnavailable("runtime/prepare", consumer.input, null, "open-unavailable", null);
+						return InventorySourceAccess.Preparation.UNAVAILABLE;
 					}
-					consumer.cancelDelays();
-					consumer.pendingObservation = unavailable(scope.viewKey());
-					InventoryCaptureDiagnostics.sourceUnavailable("runtime/prepare", consumer.input, null,
-						resolved == SourceAccess.ResolveResult.Unresolved.UNSUPPORTED ? "resolve-unsupported" : "resolve-unavailable", null);
-					return InventorySourceAccess.Preparation.UNAVAILABLE;
+					openedHandle = started.handle();
+				} else {
+					var resolution = validation(resolutionCost, allowance, resolutionWorkspace);
+					if (resolution.isEmpty()) { delay(consumer, consumer.admissionDelay, Reason.PROVIDER_WORK.bit() | Reason.MEMORY.bit(), "admission"); return InventorySourceAccess.Preparation.DEFERRED; }
+					SourceAccess.ResolveResult resolved;
+					try (var operation = resolution.get()) {
+						if (pooled) operation.allowance.debit(POOL_BOOKKEEPING);
+						resolved = access.resolve(MinecraftBlockReadSources.detached(consumer.input.target()), scope, physical, operation.allowance);
+					}
+					if (!(resolved instanceof SourceAccess.ResolveResult.Available available)) {
+						if (resolved == SourceAccess.ResolveResult.Unresolved.DEFERRED) {
+							delay(consumer, consumer.admissionDelay, providerReasons(1, InventorySourceAccess.PROVIDER_CALL_WORK), "admission");
+							return InventorySourceAccess.Preparation.DEFERRED;
+						}
+						consumer.cancelDelays();
+						consumer.pendingObservation = unavailable(scope.viewKey());
+						InventoryCaptureDiagnostics.sourceUnavailable("runtime/prepare", consumer.input, null,
+							resolved == SourceAccess.ResolveResult.Unresolved.UNSUPPORTED ? "resolve-unsupported" : "resolve-unavailable", null);
+						return InventorySourceAccess.Preparation.UNAVAILABLE;
+					}
+					var opened = access.open(available.descriptor(), scope, physical);
+					if (!(opened instanceof SourceAccess.OpenResult.Started started)) {
+						if (opened == SourceAccess.OpenResult.Unstarted.DEFERRED) return InventorySourceAccess.Preparation.DEFERRED;
+						consumer.pendingObservation = unavailable(scope.viewKey());
+						InventoryCaptureDiagnostics.sourceUnavailable("runtime/prepare", consumer.input, null, "open-unavailable", null);
+						return InventorySourceAccess.Preparation.UNAVAILABLE;
+					}
+					openedHandle = started.handle();
 				}
-				var opened = access.open(available.descriptor(), scope, physical);
-				if (!(opened instanceof SourceAccess.OpenResult.Started started)) {
-					if (opened == SourceAccess.OpenResult.Unstarted.DEFERRED) return InventorySourceAccess.Preparation.DEFERRED;
-					consumer.pendingObservation = unavailable(scope.viewKey());
-					InventoryCaptureDiagnostics.sourceUnavailable("runtime/prepare", consumer.input, null, "open-unavailable", null);
-					return InventorySourceAccess.Preparation.UNAVAILABLE;
-				}
-				openedHandle = started.handle();
 				if (consumer.closed || consumer.invalidated()) return InventorySourceAccess.Preparation.UNAVAILABLE;
+				SourceKey resolvedKey = resolvedSource[0].key();
 				long sourceBytes = resolvedSource[0].sourceRetainedBytes();
 				// The outer resolution reservation is still held: transfer its owned metadata
 				// into the round/binding ticket before releasing scratch. Catalogue growth is separate.
@@ -1325,8 +1588,8 @@ public final class InventoryRuntime implements AutoCloseable {
 					throw new IllegalStateException("source retention exceeds resolution admission");
 				InventorySharedRead.@Nullable Port port = pooled ? ((InventorySourceAccess.InventoryHandle) openedHandle).sharedRead() : null;
 				if (pooled && ((InventorySourceAccess.InventoryHandle) openedHandle).certifiedResourceSharing() && port != null) {
-					var outcome = admitPooled(consumer, handoff, available.descriptor().key(), (InventorySourceAccess.InventoryHandle) openedHandle,
-						port, retained.get(), canCreate, allowance, joinOnly);
+					var outcome = admitPooled(consumer, handoff, resolvedKey, (InventorySourceAccess.InventoryHandle) openedHandle,
+						port, retained, canCreate, allowance, joinOnly);
 					if (consumer.scanningAssociation != null) { ownsReservation = false; openedHandle = null; }
 					return outcome;
 				}
@@ -1336,20 +1599,20 @@ public final class InventoryRuntime implements AutoCloseable {
 					return InventorySourceAccess.Preparation.UNAVAILABLE;
 				}
 				// Aliased hit positions still resolve their canonical key before joining a pinned handoff.
-				if (handoff != null && !handoff.key.equals(available.descriptor().key())) {
+				if (handoff != null && !handoff.key.equals(resolvedKey)) {
 					retire(consumer.completedRound, unavailable(scope.viewKey()));
 					return InventorySourceAccess.Preparation.UNAVAILABLE;
 				}
 				if (handoff != null) {
-					if (retainBindingEvidence(consumer, handoff, (InventorySourceAccess.InventoryHandle) openedHandle, resolvedSource[0], retained.get())) {
+					if (retainBindingEvidence(consumer, handoff, (InventorySourceAccess.InventoryHandle) openedHandle, resolvedSource[0], retained)) {
 						ownsReservation = false; openedHandle = null;
 					}
-					if (ownsReservation) { retained.get().close(); ownsReservation = false; }
+					if (ownsReservation) { retained.close(); ownsReservation = false; }
 					return prepareHandoff(consumer, handoff, allowance);
 				}
-				Round round = rounds.get(new ExactKey(available.descriptor().key(), policy));
-				if (consumer.subject instanceof PreviewSubject) for (Round candidate : liveRounds) {
-					if (candidate.sweep == null && candidate.key.equals(available.descriptor().key()) && shareable(consumer, candidate)) { round = candidate; break; }
+				Round round = rounds.get(new ExactKey(resolvedKey, policy));
+				if (consumer.subject instanceof PreviewSubject) for (Round previewRound : liveRounds) {
+					if (previewRound.sweep == null && previewRound.key.equals(resolvedKey) && shareable(consumer, previewRound)) { round = previewRound; break; }
 				}
 				// A newly selected Ping never inherits a completed preview count.
 				if (round != null && !shareable(consumer, round)) round = null;
@@ -1358,18 +1621,18 @@ public final class InventoryRuntime implements AutoCloseable {
 					// Only an actual new physical round needs the normal/replacement admission slot.
 					if (!canCreate) { delay(consumer, consumer.admissionDelay, Reason.ROUND_CAPACITY.bit(), "admission"); return InventorySourceAccess.Preparation.DEFERRED; }
 					if (consumer.completedRound != null && consumer.completedRound.sweep == null && consumer.completedRound.policy.equals(policy)
-						&& !consumer.completedRound.key.equals(available.descriptor().key())) {
+						&& !consumer.completedRound.key.equals(resolvedKey)) {
 						retire(consumer.completedRound, unavailable(scope.viewKey()));
 						return InventorySourceAccess.Preparation.UNAVAILABLE; // canonical view topology changed, not admission pressure
 					}
-					retainMetadata(resolvedSource[0], retained.get());
-					round = new Round(available.descriptor().key(), consumer.input, (InventorySourceAccess.InventoryHandle) started.handle(), resolvedSource[0], retained.get(), tick, ++roundSequence, consumer.subject instanceof TrackingSubject, displayCap, policy);
+					retainMetadata(resolvedSource[0], retained);
+					round = new Round(resolvedKey, consumer.input, (InventorySourceAccess.InventoryHandle) openedHandle, resolvedSource[0], retained, tick, ++roundSequence, consumer.subject instanceof TrackingSubject, displayCap, policy);
 					retainedRounds++;
 					scanningRounds++;
 					rounds.put(round.lookupKey, round); liveRounds.add(round);
 					ownsReservation = false; openedHandle = null;
 				}
-				else if (retainBindingEvidence(consumer, round, (InventorySourceAccess.InventoryHandle) openedHandle, resolvedSource[0], retained.get())) {
+				else if (retainBindingEvidence(consumer, round, (InventorySourceAccess.InventoryHandle) openedHandle, resolvedSource[0], retained)) {
 					ownsReservation = false; openedHandle = null;
 				}
 				join(consumer, round);
@@ -1377,7 +1640,7 @@ public final class InventoryRuntime implements AutoCloseable {
 				if (admittedBinding != InventorySourceAccess.Preparation.READY) return admittedBinding;
 			} finally {
 				try { if (openedHandle != null) openedHandle.close(); }
-				finally { if (ownsReservation) retained.get().close(); }
+				finally { if (ownsReservation) retained.close(); }
 			}
 		}
 		Round round = consumer.round;
@@ -1624,13 +1887,13 @@ public final class InventoryRuntime implements AutoCloseable {
 		consumer.probeDelay.progress(cycle(consumer));
 		return handoff.preparation == null ? prepare(consumer, allowance) : handoff.preparation;
 	}
-	public Optional<Observation> step(Consumer consumer, int slotBound) {
+	private Optional<Observation> step(Consumer consumer, int slotBound, @Nullable ProbeAttempt attempt) {
 		if (slotBound < 1 || slotBound > InventorySourceAccess.MAX_STEP) throw new IllegalArgumentException("inventory step bound");
 		if (consumer.closed) return Optional.empty();
 		if (consumer.invalidObservation != null) return Optional.of(consumer.invalidObservation);
 		if (consumer.pendingObservation != null) return Optional.of(consumer.pendingObservation);
 		var operationAllowance = new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE);
-		InventorySourceAccess.Preparation preparation = prepare(consumer, operationAllowance);
+		InventorySourceAccess.Preparation preparation = prepare(consumer, operationAllowance, false, attempt);
 		if (preparation == InventorySourceAccess.Preparation.DEFERRED) return Optional.empty();
 		if (consumer.invalidObservation != null) return Optional.of(consumer.invalidObservation);
 		if (preparation != InventorySourceAccess.Preparation.READY) {

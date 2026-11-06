@@ -60,16 +60,23 @@ class InventoryBackendTest {
 	static class Fixture implements AutoCloseable {
 		final Host host = new Host(); final InventorySettings settings = InventorySettings.serverDefaults(); final AtomicInteger reads = new AtomicInteger();
 		final AtomicInteger validations = new AtomicInteger();
+		final AtomicInteger resolutions = new AtomicInteger();
+		final AtomicInteger closes = new AtomicInteger();
 		boolean valid = true; long amount = 7;
 		boolean stripped;
 		String itemId = "minecraft:stone";
-		final InventoryBackend backend = new InventoryBackend(host, new InventoryRuntime(i -> Optional.of(new InventoryRuntimeTest.Source(i, reads, 1) {
-			@Override public boolean valid() { validations.incrementAndGet(); return Fixture.this.valid; }
-			@Override public InventoryDomainCodec.Item read(int slot) {
-				reads.incrementAndGet(); var item = InventoryRuntimeTest.item(amount);
-				return amount == 0 ? null : new InventoryDomainCodec.Item(new InventoryScanner.Key(itemId, stripped ? "" : item.key().componentsKey()), item.count(), item.label(), item.displayJson(), stripped);
-			}
-		}), 16000000), 1);
+		final InventoryBackend backend = new InventoryBackend(host, new InventoryRuntime(i -> {
+			resolutions.incrementAndGet();
+			return Optional.of(new InventoryRuntimeTest.Source(i, reads, 1) {
+				private boolean closed;
+				@Override public boolean valid() { validations.incrementAndGet(); return Fixture.this.valid; }
+				@Override public InventoryDomainCodec.Item read(int slot) {
+					reads.incrementAndGet(); var item = InventoryRuntimeTest.item(amount);
+					return amount == 0 ? null : new InventoryDomainCodec.Item(new InventoryScanner.Key(itemId, stripped ? "" : item.key().componentsKey()), item.count(), item.label(), item.displayJson(), stripped);
+				}
+				@Override public void close() { if (!closed) { closed = true; closes.incrementAndGet(); } }
+			});
+		}, 16000000), 1);
 		void hello(UUID player) { backend.handle(player, InventoryC2SPacket.hello(), 0, settings); }
 		InventoryS2CPacket preview() { return host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).reduce((a, b) -> b).orElseThrow(); }
 		InventoryC2SPacket select(long commit) { var p = preview(); return InventoryC2SPacket.select(host.epoch(A), 100, 1, commit, 1, p.baselineId(), p.statusRevision(), p.entries().getFirst().key(), "danger"); }
@@ -118,6 +125,21 @@ class InventoryBackendTest {
 			f.backend.handle(A, InventoryC2SPacket.close(f.host.epoch(A), 1).stamp(100, 1), 7, f.settings);
 			int reads = f.reads.get(), validations = f.validations.get(); f.backend.tick(12, f.settings); f.backend.tick(30, f.settings);
 			assertEquals(reads, f.reads.get()); assertEquals(validations, f.validations.get(), "hard expiry removes all tracking evidence before any validation or recovery probe");
+		}
+	}
+	@Test void recoveryProbeClosesAnUnusedCandidateBeforeTheNextDueSweep() {
+		try (Fixture f = new Fixture()) {
+			f.open(); f.backend.handle(A, f.select(1), 1, f.settings); f.backend.tick(2, f.settings);
+			f.valid = false; f.backend.tick(3, f.settings);
+			f.valid = true;
+			int resolutions = f.resolutions.get(), closes = f.closes.get();
+			f.backend.tick(4, f.settings);
+			assertEquals(resolutions + 1, f.resolutions.get(), "an invalid lease still probes recovery once per eligible tick");
+			assertEquals(closes + 1, f.closes.get(), "a not-yet-due recovery candidate closes before the next tick");
+			assertEquals(0, f.backend.runtime().memory().reserved());
+			long due = 4 + f.settings.getTracking().getPeriodTicks();
+			f.backend.tick(due, f.settings);
+			assertEquals(resolutions + 2, f.resolutions.get(), "the due restart transfers the same candidate instead of resolving again");
 		}
 	}
 	@Test void revokedViewPurgesQueuesWithoutChangingFrozenAudience() {

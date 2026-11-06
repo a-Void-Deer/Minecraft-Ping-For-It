@@ -96,6 +96,21 @@ class InventoryBackendLifecycleTest {
 		}
 	}
 
+	@Test
+	void firstSamplingConstructsOneSourceAndLaterTicksReuseTheRound() {
+		try (Fixture f = new Fixture(2)) {
+			long epoch = f.hello(OWNER, 0);
+			f.open(OWNER, epoch, 1, 0);
+			f.tick(0);
+			assertEquals(1, f.state.resolutions, "one probe source is transferred into the first round");
+			assertEquals(1, f.state.liveSources);
+			assertEquals(2, f.state.reads);
+			f.tick(PERIOD);
+			assertEquals(1, f.state.resolutions, "existing round evidence never resolves another source");
+			assertEquals(2, f.state.reads, "a completed preview has no periodic recapture");
+		}
+	}
+
 	@ParameterizedTest
 	@ValueSource(booleans = { false, true })
 	void closeAndReopenCannotRefundClientOrGlobalPeriodSlots(boolean globalLimit) {

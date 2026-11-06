@@ -30,7 +30,9 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 	static Optional<Probe> probe(FluidCapabilityAccess.World world, BlockPos root, Direction face, Operation operation) {
 		Objects.requireNonNull(world); Objects.requireNonNull(root); Objects.requireNonNull(face);
 		operation.allowance().debit(FluidCapabilityAccess.PROBE_PROFILE.ownedCost());
-		root = root.immutable(); world.require(root, operation);
+		root = root.immutable();
+		// World.block owns its entry gate. No callback lies between that gate and this call,
+		// so an additional immediately preceding world.require would duplicate the same fence.
 		var block = world.block(root, operation);
 		world.require(root, operation);
 		if (CreateFluidTankAccess.recognizes(block)) {
@@ -63,12 +65,13 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 		@Override public Optional<String> alias() { return Optional.empty(); }
 		@Override public String description() { return "block-fluid;face=" + face.getName(); }
 		@Override public boolean matches(Operation operation) {
-			world.require(capabilityPosition, operation);
+			// world.block applies its entry gate; only the post-read fence before the pure route
+			// classification remains explicit here.
 			var current = world.block(capabilityPosition, operation);
 			world.require(capabilityPosition, operation);
 			return members.getFirst().block().same(current) && !CreateFluidTankAccess.recognizes(current);
 		}
-		@Override public OperationProfile checkProfile() { return world.requireProfile().times(2).plus(world.blockProfile()); }
+		@Override public OperationProfile checkProfile() { return world.requireProfile().plus(world.blockProfile()); }
 		@Override public TopologyEvidence topology() { return TopologyEvidence.PUBLIC_ADDRESS_ONLY; }
 	}
 

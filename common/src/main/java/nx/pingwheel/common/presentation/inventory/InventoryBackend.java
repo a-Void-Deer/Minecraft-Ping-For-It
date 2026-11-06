@@ -1066,22 +1066,30 @@ public final class InventoryBackend implements AutoCloseable {
 				continue;
 			}
 			if (lease.consumer.invalidated() && !lease.invalid) { invalidate(lease); continue; }
-			var valid = lease.invalid ? runtime.probeRecovery(lease.consumer) : runtime.probe(lease.consumer);
-			if (valid.isEmpty()) continue;
-			lease.checkedTick = tick;
-			if (!valid.get()) { invalidate(lease); continue; }
-			if (!lease.invalid && !lease.recomputingScope && lease.bootstrap != null && lease.bootstrapEvidence == null) {
-				var acquired = runtime.acquirePublicationBinding(lease.consumer);
-				if (acquired.check() == InventorySharedRead.Check.DEFERRED) continue;
-				if (acquired.check() != InventorySharedRead.Check.VALID) { invalidate(lease); continue; }
-				lease.bootstrapEvidence = acquired.evidence();
-			}
-			for (Recipient recipient : List.copyOf(lease.recipients.values())) if (recipient.rebaselineNeeded)
-				rebaselineTracking(recipient.context.recipient(), lease, recipient);
-			if (!lease.invalid) for (Recipient recipient : List.copyOf(lease.recipients.values())) publishTracking(lease, recipient);
-			if (lease.scanning) sampleTracking(lease);
-			else if (now >= lease.nextSweep) {
-				lease.consumer.restart(); lease.count = lease.total = 0; lease.folded = lease.selection.aggregate(); lease.scanning = true; sampleTracking(lease);
+			try (var attempt = lease.invalid ? runtime.beginProbeRecovery(lease.consumer) : runtime.beginProbe(lease.consumer)) {
+				var valid = attempt.result();
+				if (valid.isEmpty()) continue;
+				lease.checkedTick = tick;
+				if (!valid.get()) { invalidate(lease); continue; }
+				boolean preparedAttempt = false;
+				if (!lease.invalid && !lease.recomputingScope && lease.bootstrap != null && lease.bootstrapEvidence == null) {
+					// Transfer the probe's metadata envelope before the independent bootstrap
+					// binding needs another resolution workspace. This prepares no contents and
+					// retains every later scan/publication authority check.
+					if (runtime.prepare(lease.consumer, attempt) == InventorySourceAccess.Preparation.DEFERRED) continue;
+					preparedAttempt = true;
+					var acquired = runtime.acquirePublicationBinding(lease.consumer);
+					if (acquired.check() == InventorySharedRead.Check.DEFERRED) continue;
+					if (acquired.check() != InventorySharedRead.Check.VALID) { invalidate(lease); continue; }
+					lease.bootstrapEvidence = acquired.evidence();
+				}
+				for (Recipient recipient : List.copyOf(lease.recipients.values())) if (recipient.rebaselineNeeded)
+					rebaselineTracking(recipient.context.recipient(), lease, recipient);
+				if (!lease.invalid) for (Recipient recipient : List.copyOf(lease.recipients.values())) publishTracking(lease, recipient);
+				if (lease.scanning) sampleTracking(lease, preparedAttempt ? null : attempt);
+				else if (now >= lease.nextSweep) {
+					lease.consumer.restart(); lease.count = lease.total = 0; lease.folded = lease.selection.aggregate(); lease.scanning = true; sampleTracking(lease, attempt);
+				}
 			}
 		}
 		var previews = new ArrayList<Map.Entry<UUID, Preview>>();
@@ -1098,12 +1106,14 @@ public final class InventoryBackend implements AutoCloseable {
 			Preview preview = entry.getValue();
 			preview.checkedTick = -1;
 			if (preview.context.stateFence() > 1) { preview.checkedTick = tick; continue; } // pending INVALID control needs no recovery probe
-			var valid = runtime.probe(preview.consumer);
-			if (valid.isEmpty()) continue;
-			preview.checkedTick = tick;
-			if (!valid.get()) invalidatePreview(sessions.get(entry.getKey()), preview);
-			else if (!preview.terminal) samplePreview(entry.getKey(), preview);
-			else if (preview.last != null) publishPreview(preview);
+			try (var attempt = runtime.beginProbe(preview.consumer)) {
+				var valid = attempt.result();
+				if (valid.isEmpty()) continue;
+				preview.checkedTick = tick;
+				if (!valid.get()) invalidatePreview(sessions.get(entry.getKey()), preview);
+				else if (!preview.terminal) samplePreview(entry.getKey(), preview, attempt);
+				else if (preview.last != null) publishPreview(preview);
+			}
 		}
 		// A later shared probe/step can retire an earlier, already-checked terminal consumer.
 		// Cancel/rebase outside publisher traversal so no admitted old fragment can escape this tick.
@@ -1496,8 +1506,12 @@ public final class InventoryBackend implements AutoCloseable {
 		publishTracking(lease, replacement);
 		return true;
 	}
+	/** Direct sampling callers keep the original probe-then-sample boundary. */
 	private void samplePreview(UUID player, Preview preview) {
-		InventorySourceAccess.Preparation preparation = runtime.prepare(preview.consumer);
+		try (var attempt = runtime.beginProbe(preview.consumer)) { samplePreview(player, preview, attempt); }
+	}
+	private void samplePreview(UUID player, Preview preview, InventoryRuntime.ProbeAttempt attempt) {
+		InventorySourceAccess.Preparation preparation = runtime.prepare(preview.consumer, attempt);
 		if (preparation == InventorySourceAccess.Preparation.DEFERRED) return;
 		if (preparation != InventorySourceAccess.Preparation.READY) {
 			var observation = runtime.step(preview.consumer, 1);
@@ -1693,8 +1707,8 @@ public final class InventoryBackend implements AutoCloseable {
 			: InventoryFluidDisplayCodec.encode(new InventoryFluidDisplayCodec.Projection(id));
 	}
 	private static String opaque(Preview preview, String identity) { return preview.keys.computeIfAbsent(identity, ignored -> UUID.randomUUID().toString()); }
-	private void sampleTracking(Tracking lease) {
-		var observed = runtime.step(lease.consumer);
+	private void sampleTracking(Tracking lease, InventoryRuntime.@Nullable ProbeAttempt attempt) {
+		var observed = attempt == null ? runtime.step(lease.consumer) : runtime.step(lease.consumer, attempt);
 		if (observed.isEmpty()) return;
 		CaptureResult result = observed.get().result();
 		if (result.availability() != CaptureResult.Availability.READABLE) {

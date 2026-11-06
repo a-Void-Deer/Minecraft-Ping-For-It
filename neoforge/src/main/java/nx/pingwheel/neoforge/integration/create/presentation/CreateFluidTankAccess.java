@@ -88,7 +88,8 @@ public final class CreateFluidTankAccess {
 		@Nullable BlockPos found = controller(world, metadata, original, operation);
 		if (found == null) throw unavailable("Create fluid controller missing",
 			() -> blockContext(root, face, block));
-		BlockPos controller = found.immutable(); world.require(controller, operation);
+		BlockPos controller = found.immutable();
+		// world.block applies its own entry gate; no callback lies between the controller lookup and it.
 		var master = new FluidCapabilityAccess.Member(controller, world.block(controller, operation));
 		requireStatic(world, metadata, master, operation);
 		world.require(controller, operation);
@@ -127,8 +128,9 @@ public final class CreateFluidTankAccess {
 	}
 
 	private static OperationProfile memberProfile(FluidCapabilityAccess.World world) {
-		// One existing-world acquisition, eight fresh gates, fixed zero-arg metadata and bounded IDs.
-		return world.blockProfile().plus(world.requireProfile().times(8))
+		// One existing-world acquisition, seven fresh metadata gates (world.block already owns
+		// the removed pre-block entry fence), fixed zero-arg metadata and bounded IDs.
+		return world.blockProfile().plus(world.requireProfile().times(7))
 			.plus(FluidCapabilityAccess.profile(2048, 2048, 256, 0, 0));
 	}
 	@NotNullByDefault
@@ -155,7 +157,7 @@ public final class CreateFluidTankAccess {
 				() -> "position=" + rootPosition.toShortString() + ";face=" + frozenFace.getName()
 					+ ";width=" + frozenWidth + ";height=" + frozenHeight);
 			// Compare frozen discovery before visiting ANY newly computed prism/member/controller.
-			world.require(rootPosition, operation);
+			// world.block applies its entry gate; no callback lies between that predicate and it.
 			var currentRoot = world.block(rootPosition, operation);
 			if (!root.block().same(currentRoot)) throw unavailable("Create fluid probe root changed",
 				() -> "position=" + rootPosition.toShortString() + ";face=" + frozenFace.getName()
@@ -168,7 +170,7 @@ public final class CreateFluidTankAccess {
 					+ ";blockId=" + rootBlockId + ";entityId=" + rootEntityId
 					+ ";expectedController=" + masterPosition.toShortString()
 					+ ";observedController=" + pos(rootController));
-			world.require(masterPosition, operation);
+			// The preceding controller callback ended before this callback-free block entry gate.
 			var currentMaster = world.block(masterPosition, operation);
 			if (!master.block().same(currentMaster)) throw unavailable("Create fluid probe controller replaced",
 				() -> "position=" + masterPosition.toShortString() + ";face=" + frozenFace.getName()
@@ -208,7 +210,7 @@ public final class CreateFluidTankAccess {
 			for (int x = 0; x < frozenWidth; x++) for (int y = 0; y < frozenHeight; y++) for (int z = 0; z < frozenWidth; z++) {
 				BlockPos position = masterPosition.offset(x, y, z);
 				int memberIndex = index++;
-				world.require(position, operation);
+				// world.block applies the entry gate; this is the callback-free predecessor interval.
 				var member = new FluidCapabilityAccess.Member(position, world.block(position, operation));
 				requireStatic(world, metadata, member, operation);
 				@Nullable BlockPos memberController = controller(world, metadata, member, operation);
@@ -360,7 +362,7 @@ public final class CreateFluidTankAccess {
 				BlockPos position = member.position();
 				int memberIndex = index++;
 				String expectedBlockId = member.block().blockId(), expectedEntityId = member.block().entityId();
-				world.require(position, operation);
+				// world.block applies its entry gate; no callback lies between the frozen identity read and it.
 				var current = world.block(position, operation);
 				if (!member.block().same(current)) {
 					String observedBlockId = current.blockId(), observedEntityId = current.entityId();

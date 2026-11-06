@@ -74,6 +74,7 @@ public class InventoryFluidWorldTest {
 		public java.util.function.IntFunction<Entry> entryAt = slot -> amount == 0 ? Entry.empty() : new Entry(new Nbt(Fluids.WATER, null), amount);
 		public Runnable afterRead = () -> {};
 		public InventorySourceAccess.@Nullable Source lastSource;
+		private final List<InventorySourceAccess.Source> sources = new ArrayList<>();
 		public Fixture(int tanks, int members, boolean external) {
 			this(tanks, members, external, new BlockPos(1, 64, 3));
 		}
@@ -89,6 +90,7 @@ public class InventoryFluidWorldTest {
 				@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int cap) { throw new AssertionError("unadmitted resolution"); }
 				@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int cap, InventoryValidationBudget.Allowance allowance) {
 					var source = InventoryFluidSources.resolve(Fixture.this, Fixture.this, input, cap, allowance);
+					source.ifPresent(sources::add);
 					lastSource = source.orElse(null); return source;
 				}
 			}, settings.pendingMemoryBytes());
@@ -193,7 +195,12 @@ public class InventoryFluidWorldTest {
 			runtime.advance(0, settings); return runtime.attach(input, new InventoryRuntime.TrackingSubject(nx.pingwheel.common.marker.TargetKey.from(target))).orElseThrow();
 		}
 		public void replaceMember(BlockPos pos) { var chest = new Chest(pos); chest.setLevel(level); entities.put(pos, chest); }
-		public void clearMemberWitness() { clearWitness((FluidAddressWitness) field(Objects.requireNonNull(lastSource), "memberWitness"), 0); }
+		public void clearMemberWitness() {
+			// The last resolved source can be a closed temporary publication-binding probe.
+			// Invalidate every live source proof, rather than depending on incidental resolution order.
+			for (var source : sources) if (!(boolean) field(source, "closed"))
+				clearWitness((FluidAddressWitness) field(source, "memberWitness"), 0);
+		}
 		@Override public void close() { runtime.close(); assertEquals(0, liveAccess); assertEquals(0, runtime.memory().reserved()); assertEquals(0, runtime.memory().retained()); }
 	}
 	@Test void firstCommonMemberGateRejectionReportsSpecificMemberOnceWithoutExtraSourceReads() {
