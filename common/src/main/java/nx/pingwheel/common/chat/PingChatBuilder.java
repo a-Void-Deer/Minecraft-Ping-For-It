@@ -1,5 +1,6 @@
 package nx.pingwheel.common.chat;
 
+import java.time.Duration;
 import java.util.Objects;
 import java.util.function.Predicate;
 
@@ -7,6 +8,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 
 import nx.pingwheel.common.domain.PingType;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
@@ -42,6 +44,10 @@ public final class PingChatBuilder {
 	private static final String PLAYER_NAME_PLACEHOLDER = "playerName";
 	private static final String PING_TYPE_PLACEHOLDER = "pingType";
 	private static final String TARGET_NAME_PLACEHOLDER = "targetName";
+	private static final DiagnosticChannel WHOLE_TEMPLATE_FAILURE =
+		DiagnosticChannel.interval("chat-whole-template-build", Duration.ofSeconds(10));
+	private static final DiagnosticChannel WHOLE_TEMPLATE_REJECT =
+		DiagnosticChannel.interval("chat-whole-template-reject", Duration.ofSeconds(10));
 
 	private PingChatBuilder() {}
 
@@ -188,13 +194,15 @@ public final class PingChatBuilder {
 
 			return message;
 		} catch (RuntimeException unavailable) {
-			Diagnostics.warn("chat/whole-template-build", "template", () -> "using legacy template", unavailable);
+			Diagnostics.client().atDetailed().rateLimited(WHOLE_TEMPLATE_FAILURE).failure(Level.WARN,
+				"chat/whole-template-build", "template", () -> "using legacy template", unavailable);
 			return build(playerName, pingType, targetName);
 		}
 	}
 
 	private static Component rejectedTemplate(String reason, String playerName, PingType pingType, Component targetName) {
-		Diagnostics.event(Level.DEBUG, "chat/whole-template", "template", reason, () -> "using legacy template");
+		Diagnostics.client().atDebug().rateLimited(WHOLE_TEMPLATE_REJECT).event(Level.DEBUG,
+			"chat/whole-template", reason, () -> "using legacy template");
 		return build(playerName, pingType, targetName);
 	}
 

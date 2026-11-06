@@ -18,6 +18,7 @@ import nx.pingwheel.common.platform.IPlatformFluidService.Operation;
 import nx.pingwheel.common.platform.IPlatformFluidService.OperationProfile;
 import nx.pingwheel.common.presentation.inventory.InventoryQuantities;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidReadOperation;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
@@ -27,7 +28,7 @@ import org.jetbrains.annotations.Unmodifiable;
 
 /** One capability read implementation, shared by ordinary blocks and the Create safety route. */
 @NotNullByDefault
-public final class FluidCapabilityAccess implements IPlatformFluidService.Access {
+public final class FluidCapabilityAccess implements IPlatformFluidService.CoordinatedAccess {
 
 	/** Detached identities plus server-local object witnesses; never fluid contents. */
 	@NotNullByDefault
@@ -50,6 +51,7 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 	@NotNullByDefault
 	public interface World {
 		void require(BlockPos position, Operation operation);
+		/** Implementations must apply an entry gate before any chunk, state, entity or other metadata read. */
 		Block block(BlockPos position, Operation operation);
 		@Nullable IFluidHandler capability(BlockPos position, Direction face, Operation operation);
 		String dimension(Operation operation);
@@ -93,10 +95,14 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 	// VM reflection internals, like the native getter internals, remain external-trusted.
 	private static final InventoryValidationBudget.Cost RESIDENT_HANDOFF =
 		new InventoryValidationBudget.Cost(256, 256, 32);
+	// Local slot/state handoff and one native getter. coordinatedResidentProfile adds the
+	// full pre-getter current fence; the two common validations are separately admitted.
+	private static final OperationProfile COORDINATED_RESIDENT = new OperationProfile(RESIDENT_HANDOFF, 0, 0, 0);
 
 	private @Nullable Route route;
 	private @Nullable IFluidHandler handler;
 	private final int count;
+	private boolean rejectionReported;
 	private int @Unmodifiable [] capacities;
 	private final InventorySnapshotLayout layout;
 	private final Optional<String> alias;
@@ -149,7 +155,7 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 
 	public static Optional<IPlatformFluidService.Probe> probe(Route route, Operation operation) {
 		@Nullable IFluidHandler handler = acquire(route, operation);
-		if (handler == null) return Optional.empty();
+		if (handler == null) { FluidSourceDiagnostics.capabilityProbeAbsent(route); return Optional.empty(); }
 		route.world().require(route.capabilityPosition(), operation);
 		int count = handler.getTanks();
 		requireBound(count);
@@ -160,25 +166,40 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 		@Nullable IFluidHandler handler = route.world().capability(route.capabilityPosition(), route.face(), operation);
 		requireHeld(route, operation);
 		if (handler != null && !route.accepts(handler, operation))
-			throw new InventorySourceUnavailableException("fluid capability mode unavailable");
+			throw FluidSourceDiagnostics.unavailable("fluid capability mode unavailable",
+				() -> FluidSourceDiagnostics.describeRoute(route) + ";handler=" + FluidSourceDiagnostics.describeHandler(handler));
 		return handler;
 	}
 	public static int tankCount(Route route, IFluidHandler handler, Operation operation) {
 		route.world().require(route.capabilityPosition(), operation); int count = handler.getTanks(); requireBound(count); return count;
 	}
 	private static void requireBound(int count) {
-		if (count < 0 || count > InventorySourceAccess.MAX_SLOTS) throw new InventorySourceUnavailableException("fluid capability address bound");
+		if (count < 0 || count > InventorySourceAccess.MAX_SLOTS)
+			throw FluidSourceDiagnostics.unavailable("fluid capability address bound",
+				() -> "count=" + count + ";maxSlots=" + InventorySourceAccess.MAX_SLOTS);
 	}
 	/** Caller entered addressProfile before this method; the expected route/count never widen. */
 	public static IPlatformFluidService.Access finish(Route route, IFluidHandler handler, int count, Operation operation) {
 		operation.allowance().debit(addressProfile(route, count).ownedCost());
-		if (acquire(route, operation) != handler || tankCount(route, handler, operation) != count)
-			throw new InventorySourceUnavailableException("fluid probe shape changed");
+		@Nullable IFluidHandler current = acquire(route, operation);
+		if (current != handler)
+			throw FluidSourceDiagnostics.unavailable("fluid probe shape changed",
+				() -> FluidSourceDiagnostics.describeRoute(route)
+					+ ";expectedHandler=" + FluidSourceDiagnostics.describeHandler(handler)
+					+ ";currentHandler=" + FluidSourceDiagnostics.describeHandler(current));
+		int currentCount = tankCount(route, handler, operation);
+		if (currentCount != count)
+			throw FluidSourceDiagnostics.unavailable("fluid probe shape changed",
+				() -> FluidSourceDiagnostics.describeRoute(route) + ";expectedCount=" + count
+					+ ";currentCount=" + currentCount);
 		int[] capacities = new int[count];
 		for (int index = 0; index < count; index++) {
+			int address = index;
 			route.world().require(route.capabilityPosition(), operation);
 			int capacity = handler.getTankCapacity(index);
-			if (capacity < 0) throw new InventorySourceUnavailableException("negative fluid address capacity");
+			if (capacity < 0) throw FluidSourceDiagnostics.unavailable("negative fluid address capacity",
+				() -> FluidSourceDiagnostics.describeRoute(route) + ";index=" + address
+					+ ";capacity=" + capacity + ";count=" + count);
 			capacities[index] = capacity;
 		}
 		requireRoute(route, operation);
@@ -188,28 +209,44 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 	}
 
 	private static void requireRoute(Route route, Operation operation) {
-		if (!route.matches(operation)) throw new InventorySourceUnavailableException("fluid capability route changed");
+		if (!route.matches(operation))
+			throw FluidSourceDiagnostics.unavailable("fluid capability route changed",
+				() -> FluidSourceDiagnostics.describeRoute(route));
 		// The final metadata callback cannot authorize a now-denied sibling or controller.
 		requireHeld(route, operation);
 	}
 	private static void requireHeld(Route route, Operation operation) {
-		for (Member member : route.members())
-			if (!route.world().held(member, operation)) throw new InventorySourceUnavailableException("fluid held member replaced");
+		int index = 0;
+		for (Member member : route.members()) {
+			int memberIndex = index++;
+			if (!route.world().held(member, operation)) {
+				BlockPos position = member.position();
+				throw FluidSourceDiagnostics.unavailable("fluid held member replaced",
+					() -> FluidSourceDiagnostics.describeRoute(route) + ";index=" + memberIndex
+						+ ";position=" + position.toShortString());
+			}
+		}
 	}
 	private static void requireCapacities(Route route, IFluidHandler handler, int[] expected, Operation operation) {
 		// Capacities are public address metadata, not contents or a claim of opaque provider internals.
 		// Only the capability owner is accessed per address; do not rescan every structural member for
 		// every tank. Full route/mode and all-member checks surround the bounded sequence.
 		for (int index = 0; index < expected.length; index++) {
+			int address = index;
 			route.world().require(route.capabilityPosition(), operation);
-			if (handler.getTankCapacity(index) != expected[index])
-				throw new InventorySourceUnavailableException("fluid capability address mapping changed");
+			int capacity = handler.getTankCapacity(index);
+			if (capacity != expected[index])
+				throw FluidSourceDiagnostics.unavailable("fluid capability address mapping changed",
+					() -> FluidSourceDiagnostics.describeRoute(route) + ";index=" + address
+						+ ";expected=" + expected[address] + ";observed=" + capacity + ";count=" + expected.length);
 		}
 	}
 	private static void requireCountAndHeld(Route route, IFluidHandler handler, int expected, Operation operation) {
 		requireHeld(route, operation);
 		route.world().require(route.capabilityPosition(), operation);
-		if (handler.getTanks() != expected) throw new InventorySourceUnavailableException("fluid capability layout changed");
+		int count = handler.getTanks();
+		if (count != expected) throw FluidSourceDiagnostics.unavailable("fluid capability layout changed",
+			() -> FluidSourceDiagnostics.describeRoute(route) + ";expected=" + expected + ";observed=" + count);
 		// Count follows the last state/entity/route callback. The closing pass rechecks current
 		// authority only, without another route/state getter that could hide a later count change.
 		for (Member member : route.members()) route.world().require(member.position(), operation);
@@ -238,9 +275,16 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 	}
 	@Override public OperationProfile validationProfile() { return validationProfile; }
 	@Override public OperationProfile readProfile() { return readProfile; }
+	@Override public OperationProfile coordinatedResidentProfile() { return validationProfile.plus(COORDINATED_RESIDENT); }
 	@Override public OperationProfile observationProfile(int limit) {
 		if (limit < 0 || limit > InventorySourceAccess.MAX_SLOTS) throw new IllegalArgumentException("fluid observation limit");
-		return validationProfile.times(2).plus(IPlatformFluidService.Access.super.observationProfile(limit));
+		// A non-empty indexed pass performs the complete pre/post validation inside each consume.
+		// A zero tank or zero limit reaches no consume, so it must admit one explicit full check;
+		// neither path keeps the old observe-outer duplicate requireCurrent pair.
+		int count = slots();
+		var loop = new OperationProfile(new InventoryValidationBudget.Cost(256, 256, 8L + limit), 0, 0, 0);
+		if (count == 0 || limit == 0) return validationProfile.plus(loop);
+		return readProfile.times(Math.min(count, limit)).plus(loop);
 	}
 
 	private Route liveRoute() {
@@ -251,10 +295,14 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 		@Nullable IFluidHandler current = acquire(route, operation);
 		// A matching total is not a route witness: retain the exact capability object and root/member
 		// objects as well as the ordered indices. Replacement starts a fresh observation, not a remap.
-		if (current == null || current != handler) throw new InventorySourceUnavailableException("fluid capability replaced");
+		if (current == null || current != handler) throw FluidSourceDiagnostics.unavailable("fluid capability replaced",
+			() -> FluidSourceDiagnostics.describeRoute(route)
+				+ ";expectedHandler=" + FluidSourceDiagnostics.describeHandler(handler)
+				+ ";currentHandler=" + FluidSourceDiagnostics.describeHandler(current) + ";count=" + count);
 		route.world().require(route.capabilityPosition(), operation);
 		int currentCount = current.getTanks();
-		if (currentCount != count) throw new InventorySourceUnavailableException("fluid capability layout changed");
+		if (currentCount != count) throw FluidSourceDiagnostics.unavailable("fluid capability layout changed",
+			() -> FluidSourceDiagnostics.describeRoute(route) + ";expected=" + count + ";observed=" + currentCount);
 		requireCapacities(route, current, capacities, operation);
 		requireRoute(route, operation);
 		// The post-capacity route callbacks may themselves change public addressing. Check that
@@ -264,9 +312,34 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 	}
 
 	@Override public boolean valid(Operation operation) {
-		liveRoute(); operation.allowance().debit(validationProfile.ownedCost());
-		try { requireCurrent(operation); return true; }
-		catch (InventorySourceUnavailableException unavailable) { return false; }
+		Route currentRoute = liveRoute(); operation.allowance().debit(validationProfile.ownedCost());
+		try { requireCurrent(operation); rejectionReported = false; return true; }
+		catch (InventorySourceUnavailableException unavailable) {
+			if (!rejectionReported) {
+				rejectionReported = true;
+				FluidSourceDiagnostics.validationRejected(currentRoute, handler, count, unavailable);
+			}
+			return false;
+		}
+	}
+
+	@Override public void consumeCoordinatedResident(int slot, InventoryFluidReadOperation operation, Operation admitted) {
+		Objects.requireNonNull(operation); Objects.checkIndex(slot, count);
+		liveRoute();
+		operation.enter(this, slot); // bind this provider/address before any local metadata
+		operation.beforeResident(this, slot);
+		// The common guarded validation ends with a root-authority callback AFTER the
+		// provider's all-member pass. That callback can mutate a sibling. Keep the original
+		// standalone full current fence immediately before the getter, under the profile
+		// admitted and paid at operation entry; a root-only check cannot replace this pass.
+		requireCurrent(admitted);
+		operation.requireGetter(this, slot);
+		@Nullable FluidStack stack = Objects.requireNonNull(handler).getFluidInTank(slot);
+		// The native getter is followed immediately by synchronous identity/display freeze.
+		operation.detach(this, slot, borrow(slot, stack));
+		// The final complete common validation runs after freeze; the provider returns with no
+		// further callback, so a late revocation cannot be hidden behind a successful result.
+		operation.afterResident(this, slot);
 	}
 
 	@Override public boolean consume(int slot, IPlatformFluidService.Visitor visitor, Operation operation) {
@@ -275,7 +348,7 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 		// No callback, including authority or provider metadata, is allowed between this getter and
 		// synchronous detachment. FluidStack is final; its native getters supply the borrowed patch.
 		@Nullable FluidStack stack = Objects.requireNonNull(handler).getFluidInTank(slot);
-		boolean more = visitor.visit(borrow(stack));
+		boolean more = visitor.visit(borrow(slot, stack));
 		requireCurrent(operation);
 		return more;
 	}
@@ -283,11 +356,16 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 	@Override public IPlatformFluidService.Visit observe(int limit, IPlatformFluidService.Visitor visitor, Operation operation) {
 		if (limit < 0 || limit > InventorySourceAccess.MAX_SLOTS) throw new IllegalArgumentException("fluid observation limit");
 		Objects.requireNonNull(visitor);
-		liveRoute(); operation.allowance().debit(validationProfile.ownedCost().times(2));
-		requireCurrent(operation);
-		var result = IPlatformFluidService.Access.super.observe(limit, visitor, operation);
-		requireCurrent(operation); // even a zero-tank/zero-limit pass needs current metadata before completion
-		return result;
+		liveRoute();
+		int count = slots();
+		// Each non-empty indexed consume already performs its own complete before/after current
+		// validation. A zero tank or zero limit invokes no consume, so it must explicitly run the
+		// current check before reporting completion; it cannot return a synthetic verified empty.
+		if (limit == 0 || count == 0) {
+			operation.allowance().debit(validationProfile.ownedCost());
+			requireCurrent(operation);
+		}
+		return IPlatformFluidService.CoordinatedAccess.super.observe(limit, visitor, operation);
 	}
 	@Override public void close() { route = null; handler = null; capacities = NO_CAPACITIES; }
 
@@ -319,14 +397,16 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Access
 		@Override public void close() { route = null; handler = null; origin = null; }
 	}
 
-	private static IPlatformFluidService.Entry borrow(@Nullable FluidStack stack) {
-		if (stack == null) throw new InventorySourceUnavailableException("fluid capability returned null");
+	private static IPlatformFluidService.Entry borrow(int slot, @Nullable FluidStack stack) {
+		if (stack == null) throw FluidSourceDiagnostics.unavailable("fluid capability returned null",
+			() -> "slot=" + slot);
 		// Constructors/setAmount retain negatives even though the public getter normalizes them to zero.
 		InventoryQuantities.require(retainedAmount(stack));
 		long amount = InventoryQuantities.fromMillibuckets(stack.getAmount());
 		if (amount == 0) return IPlatformFluidService.Entry.empty();
 		var fluid = Objects.requireNonNull(stack.getFluid(), "fluid capability identity");
-		if (fluid == Fluids.EMPTY) throw new InventorySourceUnavailableException("positive fluid amount without identity");
+		if (fluid == Fluids.EMPTY) throw FluidSourceDiagnostics.unavailable("positive fluid amount without identity",
+			() -> "slot=" + slot + ";amount=" + amount + ";fluid=empty");
 		return new IPlatformFluidService.Entry(new IPlatformFluidService.Components(fluid, stack.getComponentsPatch()), amount);
 	}
 

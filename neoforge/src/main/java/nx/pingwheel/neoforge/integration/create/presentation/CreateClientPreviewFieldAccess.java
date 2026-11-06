@@ -18,7 +18,7 @@ public final class CreateClientPreviewFieldAccess implements PreviewFieldAccess 
 	@Override public Map<String, Outcome> observe(Target target, Set<String> demand, ReadContext context) {
 		Map<String, Outcome> result = new LinkedHashMap<>();
 		for (String field : demand) result.put(field, Missing.UNAVAILABLE);
-		if (!CreatePresentationAvailability.available() || demand.isEmpty()) return Map.copyOf(result);
+		if (!CreatePresentationAvailability.available(Diagnostics.client()) || demand.isEmpty()) return Map.copyOf(result);
 		if (!(context instanceof MinecraftPreviewFieldAccess.WorldContext world)
 			|| !context.dimensionId().equals(target.dimensionId())) return Map.copyOf(result);
 		if (!(target instanceof Target.BlockTarget) && !(target instanceof Target.ExternalBlockTarget)) {
@@ -62,7 +62,8 @@ public final class CreateClientPreviewFieldAccess implements PreviewFieldAccess 
 	private static void put(Map<String, Outcome> result, String field, java.util.function.Supplier<PresentationValue> getter, long tick) {
 		try { result.put(field, new Observed(new PreviewObservation(getter.get(), PreviewObservation.Origin.CLIENT_SYNCED, tick, false))); }
 		catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("create/preview-field", "kinetic", () -> "field=" + field + " tick=" + tick, unavailable);
+			CreatePresentationDiagnostics.failure(Diagnostics.client(),
+				"create/preview-field", "field-unavailable", () -> "field=" + field + " tick=" + tick, unavailable);
 			result.put(field, Missing.UNAVAILABLE);
 		}
 	}

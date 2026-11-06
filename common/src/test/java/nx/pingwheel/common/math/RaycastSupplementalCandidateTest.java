@@ -1,9 +1,14 @@
 package nx.pingwheel.common.math;
 
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import nx.pingwheel.common.diagnostics.DiagnosticBackend;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
@@ -24,8 +29,11 @@ import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.interaction.ActiveInteraction;
 import nx.pingwheel.common.interaction.MinecraftTargetSnapshotFactory;
 import nx.pingwheel.common.interaction.candidate.*;
+import nx.pingwheel.common.testing.DiagnosticLogCapture;
+import org.apache.logging.log4j.Level;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -139,6 +147,126 @@ class RaycastSupplementalCandidateTest {
 		var xpSnapshot = MinecraftTargetSnapshotFactory.fromEntityCandidateSelection("minecraft:overworld",
 			RaycastSelection.withoutLocalGeometry(new EntityHitResult(xp, new Vec3(2, 0.5, 0))));
 		assertEquals(EntityLocator.runtimeId(314), ((Target.EntityTarget) xpSnapshot.target()).locator());
+	}
+
+	@Test
+	void supplementalScanFailuresReportSafeNormalSummariesAndLazyDecisionContext() {
+		try (var logs = new DiagnosticLogCapture()) {
+			var token = new ActiveInteraction().begin();
+			Raycast.reportEntityScanIncomplete(token, () -> "minecraft:overworld", 10, 100, POLICY,
+				new IllegalStateException("entity-scan-sentinel"));
+			Raycast.reportBlockScanIncomplete(token, () -> "minecraft:overworld", 10, 100, POLICY,
+				new IllegalStateException("block-scan-sentinel"));
+
+			var entity = logs.operation("precise/entity-scan").getFirst();
+			assertEquals(Level.WARN, entity.getLevel());
+			assertNull(entity.getThrown());
+			String entityReport = entity.getMessage().getFormattedMessage();
+			assertTrue(entityReport.contains("handling=entity-slots-incomplete"), entityReport);
+			assertTrue(entityReport.contains("failure=invalid-state"), entityReport);
+			assertFalse(entityReport.contains("entity-scan-sentinel"));
+
+			var block = logs.operation("precise/block-scan").getFirst();
+			assertEquals(Level.WARN, block.getLevel());
+			assertNull(block.getThrown());
+			String blockReport = block.getMessage().getFormattedMessage();
+			assertTrue(blockReport.contains("handling=block-slots-incomplete"), blockReport);
+			assertTrue(blockReport.contains("failure=invalid-state"), blockReport);
+			assertFalse(blockReport.contains("block-scan-sentinel"));
+		}
+
+		try (var logs = new DiagnosticLogCapture(nx.pingwheel.common.diagnostics.LoggingProfile.DEEP)) {
+			var token = new ActiveInteraction().begin();
+			Raycast.reportEntityScanIncomplete(token, () -> "minecraft:overworld", 10, 100, POLICY,
+				new IllegalStateException("deep-entity-scan-sentinel"));
+			String report = logs.operation("precise/entity-scan").getFirst().getMessage().getFormattedMessage();
+			assertTrue(report.contains("token=" + token.sequence()), report);
+			assertTrue(report.contains("dimension=minecraft:overworld"), report);
+			assertTrue(report.contains("nativeRange=10.0"), report);
+			assertTrue(report.contains("pingRange=100.0"), report);
+			assertTrue(report.contains("policy="), report);
+			assertTrue(report.contains("deep-entity-scan-sentinel"), report);
+		}
+	}
+
+	@Test
+	void scanFailureDimensionSupplierStaysLazyUntilDeepAdmissionAndSuppression() {
+		AtomicInteger entityReads = new AtomicInteger();
+		AtomicInteger blockReads = new AtomicInteger();
+		try (var logs = new DiagnosticLogCapture()) {
+			var token = new ActiveInteraction().begin();
+			Raycast.reportEntityScanIncomplete(token, () -> {
+				entityReads.incrementAndGet();
+				return "minecraft:overworld";
+			}, 10, 100, POLICY, new IllegalStateException("normal-entity-sentinel"));
+			Raycast.reportBlockScanIncomplete(token, () -> {
+				blockReads.incrementAndGet();
+				return "minecraft:overworld";
+			}, 10, 100, POLICY, new IllegalStateException("normal-block-sentinel"));
+			assertEquals(0, entityReads.get(), "NORMAL must not read the dimension context");
+			assertEquals(0, blockReads.get(), "NORMAL must not read the dimension context");
+			assertEquals(1, logs.operation("precise/entity-scan").size());
+			assertEquals(1, logs.operation("precise/block-scan").size());
+		}
+
+		try (var logs = new DiagnosticLogCapture(LoggingProfile.DEEP)) {
+			var token = new ActiveInteraction().begin();
+			Raycast.reportEntityScanIncomplete(token, () -> {
+				entityReads.incrementAndGet();
+				return "minecraft:overworld";
+			}, 10, 100, POLICY, new IllegalStateException("deep-entity-sentinel"));
+			Raycast.reportEntityScanIncomplete(token, () -> {
+				entityReads.incrementAndGet();
+				return "minecraft:overworld";
+			}, 10, 100, POLICY, new IllegalStateException("suppressed-entity-sentinel"));
+			Raycast.reportBlockScanIncomplete(token, () -> {
+				blockReads.incrementAndGet();
+				return "minecraft:overworld";
+			}, 10, 100, POLICY, new IllegalStateException("deep-block-sentinel"));
+			assertEquals(1, entityReads.get(), "only the admitted DEEP report reads the dimension context");
+			assertEquals(1, blockReads.get());
+			assertEquals(1, logs.operation("precise/entity-scan").size());
+			assertTrue(logs.operation("precise/entity-scan").getFirst().getMessage().getFormattedMessage()
+				.contains("dimension=minecraft:overworld"));
+		}
+	}
+
+	@Test
+	void scanFailureDimensionSupplierIsNotReadWhenBackendDisabled() {
+		AtomicInteger reads = new AtomicInteger();
+		LoggingProfile previousProfile = Diagnostics.profile(DiagnosticSide.CLIENT);
+		DiagnosticBackend previous = swapBackend(new DiagnosticBackend() {
+			@Override public boolean isEnabled(DiagnosticSide side, Level severity) { return false; }
+			@Override public void log(DiagnosticSide side, Level severity, String message) {
+				throw new AssertionError("disabled backend must receive no report");
+			}
+		});
+		Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.NORMAL);
+		try {
+			var token = new ActiveInteraction().begin();
+			Raycast.reportEntityScanIncomplete(token, () -> {
+				reads.incrementAndGet();
+				return "minecraft:overworld";
+			}, 10, 100, POLICY, new IllegalStateException("disabled-entity-sentinel"));
+			Raycast.reportBlockScanIncomplete(token, () -> {
+				reads.incrementAndGet();
+				return "minecraft:overworld";
+			}, 10, 100, POLICY, new IllegalStateException("disabled-block-sentinel"));
+			assertEquals(0, reads.get());
+		} finally {
+			swapBackend(previous);
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, previousProfile);
+		}
+	}
+
+	private static DiagnosticBackend swapBackend(DiagnosticBackend replacement) {
+		try {
+			Method swap = Diagnostics.class.getDeclaredMethod("swapBackendForTesting", DiagnosticBackend.class);
+			swap.setAccessible(true);
+			return (DiagnosticBackend) swap.invoke(null, replacement);
+		} catch (ReflectiveOperationException failure) {
+			throw new AssertionError("diagnostic backend test seam unavailable", failure);
+		}
 	}
 
 	private static boolean collect(List<Entity> entities, EntityLocalGeometryRegistry.Snapshot owners,

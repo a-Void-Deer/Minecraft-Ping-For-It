@@ -25,7 +25,9 @@ class CreatePresentationMixinPluginTest {
 			for (int attempt = 0; attempt < 5; attempt++) assertFalse(broken.shouldApplyMixin(KINETIC.replace('/', '.'),
 				"nx.pingwheel.neoforge.mixin.presentation.KineticCachedNetworkMixin"));
 			assertEquals(1, capture.events().size()); assertEquals(Level.WARN, capture.events().getFirst().getLevel());
-			assertTrue(capture.messages().getFirst().contains("bytecode provider cause"));
+			assertTrue(capture.messages().getFirst().contains("side=BOOTSTRAP"));
+			assertTrue(capture.messages().getFirst().contains("handling=mixin-gate-unavailable"));
+			assertFalse(capture.messages().getFirst().contains("bytecode provider cause"));
 		}
 	}
 

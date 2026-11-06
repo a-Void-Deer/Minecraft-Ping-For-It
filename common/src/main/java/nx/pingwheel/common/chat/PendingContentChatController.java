@@ -1,5 +1,6 @@
 package nx.pingwheel.common.chat;
 
+import java.time.Duration;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -13,6 +14,7 @@ import java.util.function.Function;
 import net.minecraft.network.chat.Component;
 import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
@@ -26,6 +28,7 @@ import nx.pingwheel.common.presentation.client.PresentationView;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
 import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
 import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay;
+import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
@@ -36,6 +39,9 @@ import org.jetbrains.annotations.Unmodifiable;
  * chat fallback, or permanent sent-ID history here.
  */
 public final class PendingContentChatController {
+
+	private static final DiagnosticChannel COMPOSE_FAILURE =
+		DiagnosticChannel.interval("chat-content-compose", Duration.ofSeconds(10));
 
 	/** UNKNOWN is negotiation/missing authority, not an explicit denial. */
 	public enum Authorization { ALLOWED, DENIED, UNKNOWN }
@@ -219,8 +225,10 @@ public final class PendingContentChatController {
 						.map(ClientItemDisplay::freezeComponent);
 				}
 			} catch (RuntimeException unavailable) {
-				Diagnostics.warn("chat/content-compose", "receipt",
-					() -> "markerId=" + id.value() + " kind=" + capture.content().kind() + "; receipt remains pending", unavailable);
+				Diagnostics.client().atNormal().rateLimited(COMPOSE_FAILURE).failure(Level.WARN,
+					"chat/content-compose", "receipt",
+					() -> "markerId=" + id.value() + " kind=" + capture.content().kind() + "; receipt remains pending",
+					unavailable);
 				return false; // No partial or ordinary fallback on formatting failure.
 			}
 			if (message == null || message.isEmpty() || pending.get(id) != capture) return false;

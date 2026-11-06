@@ -53,21 +53,30 @@ public final class WorldAwareBlockModelOutlineAdapterRegistry {
 		}
 
 		synchronized (lock) {
-			if (registrations.containsKey(id)) {
-				OutlineDiagnostics.rejected("world-aware-model-register", id, "duplicate-id", null);
-				return Registration.rejected();
+			if (!registrations.containsKey(id)) {
+				Registration registration = new Registration(this, id, adapter);
+				registrations.put(id, registration);
+				publishSnapshot();
+				return registration;
 			}
-
-			Registration registration = new Registration(this, id, adapter);
-			registrations.put(id, registration);
-			publishSnapshot();
-			return registration;
 		}
+		OutlineDiagnostics.rejected("world-aware-model-register", id, "duplicate-id", null);
+		return Registration.rejected();
 	}
 
 	/** Returns the immutable registration-order snapshot. */
 	public @Unmodifiable List<WorldAwareBlockModelOutlineAdapter> snapshot() {
 		return snapshot;
+	}
+
+	/** Reuses the registration's validated identity without calling an optional adapter again for diagnostics. */
+	@Nullable String registeredId(WorldAwareBlockModelOutlineAdapter adapter) {
+		synchronized (lock) {
+			for (var entry : registrations.entrySet()) {
+				if (entry.getValue().adapter == adapter) return entry.getKey();
+			}
+		}
+		return null;
 	}
 
 	private void close(Registration registration) {

@@ -17,7 +17,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
+import org.apache.logging.log4j.Level;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
@@ -78,7 +81,7 @@ class CreateContraptionRaycastAdapterTest {
 		CreateContraptionRaycastAdapter adapter = new CreateContraptionRaycastAdapter(() -> {
 			loads.incrementAndGet();
 			throw new ReflectiveOperationException("missing optional delegate");
-		}, (message, failure) -> {});
+		});
 
 		assertEquals(0, loads.get());
 		assertEquals(EntityLocalGeometryResult.Outcome.UNAVAILABLE, adapter.trace(null, request()).outcome());
@@ -101,7 +104,7 @@ class CreateContraptionRaycastAdapterTest {
 		CreateContraptionRaycastAdapter adapter = new CreateContraptionRaycastAdapter(() -> {
 			loads.incrementAndGet();
 			throw new ReflectiveOperationException("missing optional delegate");
-		}, (message, failure) -> {});
+		});
 
 		assertEquals(EntityLocalGeometryResult.Outcome.UNAVAILABLE, adapter.trace(null, request()).outcome());
 		adapter.reset();
@@ -111,80 +114,190 @@ class CreateContraptionRaycastAdapterTest {
 
 	@Test
 	void shellLoadFailureIsUnavailableAndLogsOneBoundedFullDiagnostic() {
-		AtomicInteger loads = new AtomicInteger();
-		List<String> messages = new ArrayList<>();
-		List<@Nullable Throwable> failures = new ArrayList<>();
-		LinkageError failure = new LinkageError("missing optional Create linkage");
-		CreateContraptionRaycastAdapter adapter = new CreateContraptionRaycastAdapter(() -> {
-			loads.incrementAndGet();
-			throw failure;
-		}, (message, reportedFailure) -> {
-			messages.add(message);
-			failures.add(reportedFailure);
-		});
+		try (CreateDiagnosticCapture capture = new CreateDiagnosticCapture()) {
+			AtomicInteger loads = new AtomicInteger();
+			LinkageError failure = new LinkageError("missing optional Create linkage");
+			CreateContraptionRaycastAdapter adapter = new CreateContraptionRaycastAdapter(() -> {
+				loads.incrementAndGet();
+				throw failure;
+			});
 
-		assertEquals(EntityLocalGeometryResult.Outcome.UNAVAILABLE, adapter.trace(null, request()).outcome());
-		assertEquals(EntityLocalGeometryResult.Outcome.UNAVAILABLE, adapter.trace(null, request()).outcome());
-		assertEquals(1, loads.get());
-		assertEquals(1, messages.size(), "one entity/category key must be rate limited");
-		assertEquals(1, failures.size());
-		assertEquals(null, failures.get(0), "the sink receives one bounded report, not a raw throwable");
-		assertTrue(messages.get(0).contains("missing optional Create linkage"));
-		assertTrue(messages.get(0).contains("CreateContraptionRaycastAdapterTest"));
+			assertEquals(EntityLocalGeometryResult.Outcome.UNAVAILABLE, adapter.trace(null, request()).outcome());
+			assertEquals(EntityLocalGeometryResult.Outcome.UNAVAILABLE, adapter.trace(null, request()).outcome());
+			assertEquals(1, loads.get());
+			assertEquals(1, capture.events.size(), "one entity/category key must be rate limited");
+			assertEquals(null, capture.events.getFirst().getThrown(), "the sink receives one bounded report, not a raw throwable");
+			String diagnostic = capture.events.getFirst().getMessage().getFormattedMessage();
+			assertTrue(diagnostic.contains("missing optional Create linkage"));
+			assertTrue(diagnostic.contains("CreateContraptionRaycastAdapterTest"));
 
-		String diagnostic = messages.get(0);
-		assertTrue(diagnostic.contains("sourceId=pingforit:create_contraption_raycast"));
-		assertTrue(diagnostic.contains("delegateClass=nx.pingwheel.neoforge.integration.create.CreateContraptionRaycastDelegate"));
-		assertTrue(diagnostic.contains("category=delegate-load-linkage"));
-		assertTrue(diagnostic.contains("entityRegistry=<null>"));
-		assertTrue(diagnostic.contains("entityClass=<null>"));
-		assertTrue(diagnostic.contains("entityUuid=<null>"));
-		assertTrue(diagnostic.contains("entityPosition=<null>"));
-		assertTrue(diagnostic.contains("requestStart=" + request().start()));
-		assertTrue(diagnostic.contains("requestEnd=" + request().end()));
-		assertTrue(diagnostic.contains("policy=" + request().policy()));
-		assertTrue(diagnostic.contains("partialTick=" + request().partialTick()));
+			assertTrue(diagnostic.contains("sourceId=pingforit:create_contraption_raycast"));
+			assertTrue(diagnostic.contains("delegateClass=nx.pingwheel.neoforge.integration.create.CreateContraptionRaycastDelegate"));
+			assertTrue(diagnostic.contains("category=delegate-load-linkage"));
+			assertTrue(diagnostic.contains("entityRegistry=<null>"));
+			assertTrue(diagnostic.contains("entityClass=<null>"));
+			assertTrue(diagnostic.contains("entityUuid=<null>"));
+			assertTrue(diagnostic.contains("entityPosition=<null>"));
+			assertTrue(diagnostic.contains("requestStart=" + request().start()));
+			assertTrue(diagnostic.contains("requestEnd=" + request().end()));
+			assertTrue(diagnostic.contains("policy=" + request().policy()));
+			assertTrue(diagnostic.contains("partialTick=" + request().partialTick()));
+		}
 	}
 
 	@Test
 	void structuralDelegateFailureBecomesUnavailableWithoutRetryingTheQuarantinedDelegate() {
-		AtomicInteger traces = new AtomicInteger();
-		List<String> messages = new ArrayList<>();
-		AssertionError failure = new AssertionError("incompatible optional delegate");
-		CreateContraptionRaycastAdapter adapter = new CreateContraptionRaycastAdapter(
-			() -> (candidate, raycastRequest) -> {
-				traces.incrementAndGet();
-				throw failure;
-			},
-			(message, reportedFailure) -> messages.add(message));
+		try (CreateDiagnosticCapture capture = new CreateDiagnosticCapture()) {
+			AtomicInteger traces = new AtomicInteger();
+			AssertionError failure = new AssertionError("incompatible optional delegate");
+			CreateContraptionRaycastAdapter adapter = new CreateContraptionRaycastAdapter(
+				() -> (candidate, raycastRequest) -> {
+					traces.incrementAndGet();
+					throw failure;
+				});
 
-		assertEquals(EntityLocalGeometryResult.Outcome.UNAVAILABLE, adapter.trace(null, request()).outcome());
-		assertEquals(EntityLocalGeometryResult.Outcome.UNAVAILABLE, adapter.trace(null, request()).outcome());
-		assertEquals(1, traces.get());
-		assertEquals(1, messages.size());
-		assertTrue(messages.get(0).contains("category=delegate-trace-assertion"));
+			assertEquals(EntityLocalGeometryResult.Outcome.UNAVAILABLE, adapter.trace(null, request()).outcome());
+			assertEquals(EntityLocalGeometryResult.Outcome.UNAVAILABLE, adapter.trace(null, request()).outcome());
+			assertEquals(1, traces.get());
+			assertEquals(1, capture.events.size());
+			assertTrue(capture.events.getFirst().getMessage().getFormattedMessage().contains("category=delegate-trace-assertion"));
+		}
 	}
 
 	@Test
 	void transientDelegateRuntimeFailurePropagatesWithoutShellDiagnosticOrQuarantine() {
-		AtomicInteger traces = new AtomicInteger();
-		List<String> messages = new ArrayList<>();
-		CreateContraptionRaycastAdapter adapter = new CreateContraptionRaycastAdapter(
-			() -> (candidate, raycastRequest) -> {
-				traces.incrementAndGet();
-				throw new IllegalStateException("transient native shape scan failure");
-			},
-			(message, failure) -> messages.add(message));
+		try (CreateDiagnosticCapture capture = new CreateDiagnosticCapture()) {
+			AtomicInteger traces = new AtomicInteger();
+			CreateContraptionRaycastAdapter adapter = new CreateContraptionRaycastAdapter(
+				() -> (candidate, raycastRequest) -> {
+					traces.incrementAndGet();
+					throw new IllegalStateException("transient native shape scan failure");
+				});
 
-		IllegalStateException first = assertThrows(IllegalStateException.class,
-			() -> adapter.trace(null, request()));
-		IllegalStateException second = assertThrows(IllegalStateException.class,
-			() -> adapter.trace(null, request()));
+			IllegalStateException first = assertThrows(IllegalStateException.class,
+				() -> adapter.trace(null, request()));
+			IllegalStateException second = assertThrows(IllegalStateException.class,
+				() -> adapter.trace(null, request()));
 
-		assertEquals("transient native shape scan failure", first.getMessage());
-		assertEquals("transient native shape scan failure", second.getMessage());
-		assertEquals(2, traces.get(), "a transient scan failure must remain eligible for the common FAILED boundary");
-		assertTrue(messages.isEmpty(), "the common registry owns the sole runtime callback diagnostic");
+			assertEquals("transient native shape scan failure", first.getMessage());
+			assertEquals("transient native shape scan failure", second.getMessage());
+			assertEquals(2, traces.get(), "a transient scan failure must remain eligible for the common FAILED boundary");
+			assertTrue(capture.events.isEmpty(), "the common registry owns the sole runtime callback diagnostic");
+		}
+	}
+
+	@Test
+	void normalAndSuppressedReportsNeverCollectUuidOrReadTheOriginalFailure() {
+		var entity = VaultOptionalHarness.allocate(CountingEntity.class);
+		var failure = new CountingFailure();
+		long[] now = {0};
+		var diagnostics = new CreateContraptionRaycastAdapter.Diagnostics(() -> now[0]);
+		try (CreateDiagnosticCapture capture = new CreateDiagnosticCapture(Level.ALL, LoggingProfile.NORMAL)) {
+			diagnostics.report(entity, request(), "delegate-load-linkage", failure);
+			assertEquals(0, entity.uuidReads);
+			assertEquals(0, failure.reads);
+			assertEquals(1, capture.events.size());
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(
+				nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT, LoggingProfile.DEEP);
+			diagnostics.report(entity, request(), "delegate-load-linkage", failure);
+			assertEquals(0, entity.uuidReads, "raising the profile must not bypass domain history");
+			assertEquals(0, failure.reads);
+			now[0] = 5_000_000_000L;
+			diagnostics.report(entity, request(), "delegate-load-linkage", failure);
+			assertEquals(1, entity.uuidReads);
+			assertTrue(failure.reads > 0);
+			assertEquals(2, capture.events.size());
+			assertTrue(capture.events.getLast().getMessage().getFormattedMessage().contains("original private failure"));
+		}
+	}
+
+	@Test
+	void disabledBackendDoesNotReadDomainClockOrConsumeTheNextOpportunity() {
+		AtomicInteger clocks = new AtomicInteger();
+		var diagnostics = new CreateContraptionRaycastAdapter.Diagnostics(() -> { clocks.incrementAndGet(); return 0; });
+		try (CreateDiagnosticCapture capture = new CreateDiagnosticCapture(Level.OFF)) {
+			diagnostics.report(null, request(), "delegate-load-linkage", new LinkageError("original"));
+			assertEquals(0, clocks.get()); assertTrue(capture.events.isEmpty());
+		}
+		try (CreateDiagnosticCapture capture = new CreateDiagnosticCapture()) {
+			diagnostics.report(null, request(), "delegate-load-linkage", new LinkageError("original"));
+			assertEquals(1, clocks.get()); assertEquals(1, capture.events.size());
+		}
+	}
+
+	@Test
+	void failedDescriptorUsesBoundedOriginalDetailWithoutThrowableStringConversion() {
+		var entity = VaultOptionalHarness.allocate(CountingEntity.class); entity.failUuid = true;
+		try (CreateDiagnosticCapture capture = new CreateDiagnosticCapture()) {
+			new CreateContraptionRaycastAdapter.Diagnostics(() -> 0).report(entity, request(), "delegate-load-linkage",
+				new LinkageError("business original"));
+			assertEquals(1, capture.events.size());
+			String text = capture.events.getFirst().getMessage().getFormattedMessage();
+			assertTrue(text.contains("business original"));
+			assertTrue(text.contains("descriptor original"));
+			assertTrue(text.length() <= nx.pingwheel.common.util.SafeExceptionReport.MAX_CHARACTERS);
+		}
+	}
+
+	@Test
+	void delegateFailureReportingRunsOutsideTheBusinessMonitor() {
+		CreateContraptionRaycastAdapter[] owner = new CreateContraptionRaycastAdapter[1];
+		owner[0] = new CreateContraptionRaycastAdapter(() -> { throw new LinkageError("original"); }, () -> {
+			assertFalse(Thread.holdsLock(owner[0])); return 0;
+		});
+		try (CreateDiagnosticCapture capture = new CreateDiagnosticCapture()) {
+			assertEquals(EntityLocalGeometryResult.Outcome.UNAVAILABLE, owner[0].trace(null, request()).outcome());
+			assertEquals(1, capture.events.size());
+		}
+	}
+
+	@Test void failedDiagnosticClockIsObservedAndCanRecoverWithoutChangingTheOwnedResult() {
+		var broken = new java.util.concurrent.atomic.AtomicBoolean(true);
+		var diagnostics = new CreateContraptionRaycastAdapter.Diagnostics(() -> {
+			if (broken.get()) throw new IllegalStateException("diagnostic clock"); return 0;
+		});
+		long before = nx.pingwheel.common.diagnostics.Diagnostics.faults().observations().stream()
+			.filter(value -> value.key().site().equals("create-contraption-shell")
+				&& value.key().stage() == nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Stage.CHANNEL_CLOCK)
+			.mapToLong(nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Observation::occurrences).sum();
+		try (CreateDiagnosticCapture capture = new CreateDiagnosticCapture(Level.WARN, LoggingProfile.NORMAL)) {
+			diagnostics.report(null, request(), "delegate-load-linkage", new LinkageError("original"));
+			assertTrue(capture.events.isEmpty());
+			long after = nx.pingwheel.common.diagnostics.Diagnostics.faults().observations().stream()
+				.filter(value -> value.key().site().equals("create-contraption-shell")
+					&& value.key().stage() == nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Stage.CHANNEL_CLOCK)
+				.mapToLong(nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Observation::occurrences).sum();
+			assertEquals(before + 1, after);
+			broken.set(false);
+			diagnostics.report(null, request(), "delegate-load-linkage", new LinkageError("original"));
+			assertEquals(1, capture.events.size());
+		}
+	}
+
+	@NotNullByDefault
+	private static final class CountingEntity extends net.minecraft.world.entity.decoration.ArmorStand {
+		private int uuidReads;
+		private boolean failUuid;
+		private CountingEntity() { super(net.minecraft.world.entity.EntityType.ARMOR_STAND, null); }
+		@Override public net.minecraft.world.entity.EntityType<?> getType() { return net.minecraft.world.entity.EntityType.ARMOR_STAND; }
+		@Override public java.util.UUID getUUID() {
+			uuidReads++;
+			if (failUuid) throw new DescriptorFailure();
+			return new java.util.UUID(0, 1);
+		}
+	}
+
+	@NotNullByDefault
+	private static final class DescriptorFailure extends RuntimeException {
+		private DescriptorFailure() { super("descriptor original"); }
+		@Override public String toString() { throw new AssertionError("Throwable.toString must never run"); }
+	}
+
+	@NotNullByDefault
+	private static final class CountingFailure extends LinkageError {
+		private int reads;
+		@Override public @Nullable String getMessage() { reads++; return "original private failure"; }
+		@Override public synchronized @Nullable Throwable getCause() { reads++; return null; }
 	}
 
 	@Test

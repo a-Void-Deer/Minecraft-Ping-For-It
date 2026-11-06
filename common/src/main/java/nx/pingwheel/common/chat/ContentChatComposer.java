@@ -1,5 +1,6 @@
 package nx.pingwheel.common.chat;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -10,6 +11,7 @@ import net.minecraft.core.HolderLookup;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.domain.PingTypeCatalog;
@@ -24,6 +26,7 @@ import nx.pingwheel.common.presentation.client.PresentationPropertyFormatter;
 import nx.pingwheel.common.presentation.client.PresentationView;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
 import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay;
+import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -64,6 +67,16 @@ public final class ContentChatComposer {
 	}
 
 	private static final String INVENTORY_STATUS_PREFIX = "pingforit.spatial.inventory.";
+	private static final DiagnosticChannel LOCALE_LOOKUP_FAILURE =
+		DiagnosticChannel.interval("chat-content-locale-lookup", Duration.ofSeconds(10));
+	private static final DiagnosticChannel NAME_DECODE_FAILURE =
+		DiagnosticChannel.interval("chat-content-name-decode", Duration.ofSeconds(10));
+	private static final DiagnosticChannel PROPERTY_FORMAT_FAILURE =
+		DiagnosticChannel.interval("chat-content-property-format", Duration.ofSeconds(10));
+	private static final DiagnosticChannel NAME_FORMAT_FAILURE =
+		DiagnosticChannel.interval("chat-content-name-format", Duration.ofSeconds(10));
+	private static final DiagnosticChannel ITEM_FORMAT_FAILURE =
+		DiagnosticChannel.interval("chat-content-item-format", Duration.ofSeconds(10));
 
 	private ContentChatComposer() {}
 
@@ -93,7 +106,8 @@ public final class ContentChatComposer {
 				try {
 					return templateValue.apply(key.get());
 				} catch (RuntimeException unavailable) {
-					Diagnostics.warn("chat/content-locale-lookup", "templates", () -> "localized template unavailable", unavailable);
+					Diagnostics.client().atNormal().rateLimited(LOCALE_LOOKUP_FAILURE).failure(Level.WARN,
+						"chat/content-locale-lookup", "templates", () -> "localized template unavailable", unavailable);
 					return null;
 				}
 			}
@@ -137,7 +151,8 @@ public final class ContentChatComposer {
 			try {
 				return Optional.of(TargetNameJsonCodec.decode(new TargetNameJson(json), registryAccess));
 			} catch (RuntimeException malformed) {
-				Diagnostics.debug("chat/content-name-decode", "name-json", () -> "authoritative name unavailable", malformed);
+				Diagnostics.client().atDebug().rateLimited(NAME_DECODE_FAILURE).debug(
+					"chat/content-name-decode", "name-json", malformed, () -> "authoritative name unavailable");
 				return Optional.empty();
 			}
 		};
@@ -282,8 +297,9 @@ public final class ContentChatComposer {
 		try {
 			return PresentationPropertyFormatter.valueComponent(view, ref);
 		} catch (RuntimeException unavailable) {
-			Diagnostics.warn("chat/content-property-format", ref.adapterId(),
-				() -> "field=" + ref.fieldId(), unavailable);
+			Diagnostics.client().atNormal().rateLimited(PROPERTY_FORMAT_FAILURE).failure(Level.WARN,
+				"chat/content-property-format", "field-format",
+				() -> "adapter=" + ref.adapterId() + " field=" + ref.fieldId(), unavailable);
 			return null;
 		}
 	}
@@ -297,8 +313,9 @@ public final class ContentChatComposer {
 			try {
 				return nameJsonDecoder.apply(text).orElse(null);
 			} catch (RuntimeException malformed) {
-				Diagnostics.warn("chat/content-name-formatter", ref.adapterId(),
-					() -> "field=" + ref.fieldId(), malformed);
+				Diagnostics.client().atNormal().rateLimited(NAME_FORMAT_FAILURE).failure(Level.WARN,
+					"chat/content-name-formatter", "name-format",
+					() -> "adapter=" + ref.adapterId() + " field=" + ref.fieldId(), malformed);
 				return null;
 			}
 		}
@@ -322,7 +339,8 @@ public final class ContentChatComposer {
 				if (decoded != null) return decoded;
 			} catch (RuntimeException malformed) {
 				// A malformed server display never becomes raw text or an exception.
-				Diagnostics.warn("chat/content-item-formatter", "item-display",
+				Diagnostics.client().atNormal().rateLimited(ITEM_FORMAT_FAILURE).failure(Level.WARN,
+					"chat/content-item-formatter", "item-display",
 					() -> "itemId=" + entry.itemId() + "; using localized base name", malformed);
 			}
 		}

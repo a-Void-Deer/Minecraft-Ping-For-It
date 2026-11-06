@@ -23,7 +23,10 @@ explicit cancellation outcomes are single-use; precise and opaque inventory
 proposals keep their frozen payload without item or count authority; an
 unavailable candidate never falls back to the ordinary target; and an abort
 fences a late completion before any release proposal can evaluate it,
-including an abort re-entered from terminal release ports.
+including an abort re-entered from terminal release ports. Rejected terminal
+releases emit a finite DEBUG reason such as wrong-token, missing-candidate,
+paint-revision-mismatch or ray-type-locator-mismatch without changing the
+terminal outcome or consuming a proposal.
 `TargetSnapshotTest` covers snapshot identity, copied capture metadata and frozen
 context construction, and that an ordinary or external block target may carry a
 capture face while other target kinds may not;
@@ -86,10 +89,18 @@ private message/cause text, registry IDs, entity identity and block-position
 sentinel.
 A failed ordinary resolution leaves the current token uncompleted; failed
 candidate finalization keeps the ordinary completion without selector
-candidates. Its Precise refresh cases retain original native-scan and
-distant-start causes while leaving native slots incomplete or the location
-missing. These are headless coordinator and refresh-controller seams, not live
-input, native world scanning or a Distant Horizons trace.
+candidates. Its Precise refresh cases keep native slots incomplete or the
+location missing while reporting a `NORMAL` warning with
+all-native-slots-incomplete or request-fallback handling; ranges, policy and
+fallback outcome stay lazy for higher disclosure, and `NORMAL` does not read
+the original causes. Additional cases cover selector preview start,
+projection-update and close failures plus chat template-lookup and marker-display
+consumption with finite `NORMAL` handling and no raw context. A separate
+`ClientPingRuntimeInteractionTest` case covers an authorized property release
+with a pending reset preview: it records presentation-not-ready without a
+precise scan, preview re-poll or cancellation. These are headless
+coordinator, refresh-controller and logging seams, not live input, native world
+scanning or a Distant Horizons trace.
 
 ### Gesture shortcut opening
 
@@ -183,8 +194,11 @@ session, release-admission and paint-admission seams:
   cover farther entity candidates, exact-owned non-hit rejection without coarse
   fallback, frozen geometry ownership, selection filters, canonical multipart
   and XP locator construction, and bounded lazy enumeration charging nonmatches
-  before filtering. The multipart case is a factory fixture, not a dragon-world
-  or rendering test;
+  before filtering. `RaycastSupplementalCandidateTest` also exercises the
+  exported incomplete entity- and block-scan report seams: finite `NORMAL`
+  handling and failure class, with dimension, ranges and policy lazy until
+  admitted higher disclosure, and a disabled backend reading none of them. The
+  multipart case is a factory fixture, not a dragon-world or rendering test;
 - `PreciseCaptureRefreshTest` covers the production refresh controller
   headlessly: capture starts immediately on branch entry and then follows the
   frozen tick period, entering again does not duplicate the first scan, leaving
@@ -307,7 +321,12 @@ Focused coverage exercises:
 - owner resolution and `HIT`/`MISS`/`UNAVAILABLE`/`FAILED` candidate rules;
 - retention of entity-local metadata only for the matching resolved identity;
 - native local block/fluid shape policy and the exact block/fluid kind tie;
-- the common native local-shape scanner and candidate pipeline.
+- the common native local-shape scanner and candidate pipeline; and
+- `EntityLocalGeometryRegistryTest` covers duplicate-first-kept,
+  null-result-candidate-rejected and callback-failed-candidate-rejected
+  reporting, with source ID and priority visible only at higher disclosure, a
+  disabled backend collecting nothing, and registration or snapshot progress
+  while a warning sink is blocked.
 
 These tests preserve whole-entity identity and exercise the non-optional engine
 boundaries. They do not constitute an in-game Create validation. Create-specific

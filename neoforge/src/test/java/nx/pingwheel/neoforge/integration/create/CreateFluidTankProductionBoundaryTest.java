@@ -199,7 +199,7 @@ class CreateFluidTankProductionBoundaryTest {
 			var vault = fixture.loader.loadClass("nx.pingwheel.neoforge.integration.create.NeoForgeCreateVaultBlockPresentationResolver");
 			try {
 				assertEquals("registered", type.getMethod("registrationState").invoke(null));
-				assertTrue(String.valueOf(field(client, "lastCreateTankResolverState").get(null)).contains("registrationState=registered"));
+				assertEquals("reflection-success", field(client, "lastCreateTankResolverState").get(null));
 				assertNotSame(field(type, "registration").get(null), field(vault, "registration").get(null));
 				fixture.clientEntities(); assertEquals(12, BlockPresentationResolverRegistry.INSTANCE.resolve(fixture.client, spec(fixture, fixture.root)).renderSubjects().size());
 				try (var unsupported = new Mods("6.0.11")) { load.invoke(null); assertEquals("unsupported-version", field(client, "lastCreateTankResolverState").get(null)); }
@@ -317,7 +317,7 @@ class CreateFluidTankProductionBoundaryTest {
 			Thread.currentThread().setContextClassLoader(fixture.loader);
 			try {
 				var core = fixture.loader.loadClass("nx.pingwheel.common.core.ServerCore"); var store = new ServerMarkerStore(new MarkerIdSource()); field(core, "MARKER_STORE").set(null, store);
-				field(core, "SERVER_CONFIG").set(null, fixture.loader.loadClass("nx.pingwheel.common.config.ServerConfig").getConstructor().newInstance());
+				VaultOptionalHarness.initializeServerConfig(fixture.loader);
 				var factory = core.getDeclaredMethod("markerService", MinecraftServer.class); factory.setAccessible(true);
 				var service = (MarkerCreationService) factory.invoke(null, fixture.server); var end = fixture.root.offset(2, 4, 2); var outsider = new java.util.UUID(3, 3);
 				var first = service.create(VaultNativeFixture.OWNER, fixture.target(fixture.root), "attention", 1, 30, List.of(VaultNativeFixture.OWNER, VaultNativeFixture.OTHER, outsider)).creation().orElseThrow().marker();

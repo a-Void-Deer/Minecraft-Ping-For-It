@@ -498,7 +498,7 @@ public final class ClientItemDisplay {
 				&& !InventoryDisplayWriter.isDefaultIcon(element.getAsJsonObject().get("id").getAsString(), json)) return Optional.empty();
 			replaceFlat(element, 0, budget);
 			var decoded = SNAPSHOT_CODEC.parse(registryAccess.createSerializationContext(JsonOps.INSTANCE), element);
-			if (decoded.error().isPresent()) InventoryItemDiagnostics.codecRejected("inventory/client-display-codec", "persistent display patch");
+			if (decoded.error().isPresent()) InventoryItemDiagnostics.codecRejected(nx.pingwheel.common.diagnostics.Diagnostics.client(), "inventory/client-display-codec", "persistent display patch");
 			return decoded.result()
 				.filter(snapshot -> supportedSnapshot(snapshot, 0, budget));
 		} catch (RuntimeException malformed) {
@@ -511,7 +511,7 @@ public final class ClientItemDisplay {
 		// A normal safety/budget refusal is deliberate display suppression, as
 		// are Lore/shulker stripping and ceiling reprojection. Hooks and codecs
 		// throwing their own exceptions are unexpected failures.
-		if (!(failure instanceof UnsafeDisplay) || failure.getCause() != null) InventoryItemDiagnostics.displayFailure(operation, itemId, failure);
+		if (!(failure instanceof UnsafeDisplay unsafe) || unsafe.failure != null) InventoryItemDiagnostics.displayFailure(nx.pingwheel.common.diagnostics.Diagnostics.client(), operation, itemId, failure);
 	}
 
 	/**
@@ -708,7 +708,7 @@ public final class ClientItemDisplay {
 			// has already passed its own item-bearing-position guard above.
 			replaceFlat(value, depth, budget);
 			var decoded = ComponentSerialization.CODEC.parse(JsonOps.INSTANCE, value);
-			if (decoded.error().isPresent()) InventoryItemDiagnostics.codecRejected("inventory/client-display-legacy-codec", "legacy display text");
+			if (decoded.error().isPresent()) InventoryItemDiagnostics.codecRejected(nx.pingwheel.common.diagnostics.Diagnostics.client(), "inventory/client-display-legacy-codec", "legacy display text");
 			Optional<Component> text = decoded.result();
 			if (text.isEmpty() || !supportedText(text.get(), depth, budget)) return false;
 			String plain = ClientDisplayText.own(text.get(), depth, budget).plain();
@@ -793,8 +793,9 @@ public final class ClientItemDisplay {
 		@Override public void traverse(int entries, int capacity) { cells(entries); cells(capacity); }
 	}
 	static final class UnsafeDisplay extends RuntimeException {
-		UnsafeDisplay() { super(null, null, false, false); }
-		UnsafeDisplay(Throwable cause) { super(null, cause, false, false); }
+		private final @Nullable Throwable failure;
+		UnsafeDisplay() { super(null, null, false, false); failure = null; }
+		UnsafeDisplay(Throwable cause) { super(null, cause, false, false); failure = cause; }
 	}
 
 	private static final @Unmodifiable Set<Class<?>> SAFE_LISTS = Set.of(ArrayList.class,

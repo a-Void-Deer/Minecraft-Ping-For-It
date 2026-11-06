@@ -4,16 +4,21 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.network.EncodedPresentationPayload;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
+import nx.pingwheel.common.network.ServerConfigTransportDiagnostics;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.presentation.minecraft.InventoryCreationReceiptTransport.EncodedTransport;
 import org.jetbrains.annotations.NotNullByDefault;
 
 import java.util.function.BiConsumer;
 import java.util.function.BiPredicate;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 @NotNullByDefault
 public class PlatformNetworkServiceImpl implements IPlatformNetworkService, EncodedTransport {
@@ -33,20 +38,34 @@ public class PlatformNetworkServiceImpl implements IPlatformNetworkService, Enco
 
 	@Override
 	public void sendToServer(IPacket packet) {
-		if (!ClientPlayNetworking.canSend(packet.getId())) {
+		sendToServer(packet, id -> ClientPlayNetworking.canSend(id), payload -> ClientPlayNetworking.send(payload));
+	}
+
+	static void sendToServer(IPacket packet, Predicate<ResourceLocation> canSend, Consumer<IPacket> send) {
+		var kind = ServerConfigTransportDiagnostics.kindOf(packet);
+		if (!canSend.test(packet.getId())) {
+			ServerConfigTransportDiagnostics.decision(Diagnostics.client(), kind,
+				ServerConfigTransportDiagnostics.Decision.ROUTE_UNAVAILABLE);
 			return;
 		}
 
-		ClientPlayNetworking.send(packet);
+		send.accept(packet);
+		ServerConfigTransportDiagnostics.decision(Diagnostics.client(), kind,
+			ServerConfigTransportDiagnostics.Decision.SEND_DISPATCHED);
 	}
 
 	@Override
 	public void sendToClient(IPacket packet, ServerPlayer player) {
+		var kind = ServerConfigTransportDiagnostics.kindOf(packet);
 		if (!canSend.test(player, packet)) {
+			ServerConfigTransportDiagnostics.decision(Diagnostics.server(), kind,
+				ServerConfigTransportDiagnostics.Decision.ROUTE_UNAVAILABLE);
 			return;
 		}
 
 		send.accept(player, packet);
+		ServerConfigTransportDiagnostics.decision(Diagnostics.server(), kind,
+			ServerConfigTransportDiagnostics.Decision.SEND_DISPATCHED);
 	}
 
 	@Override

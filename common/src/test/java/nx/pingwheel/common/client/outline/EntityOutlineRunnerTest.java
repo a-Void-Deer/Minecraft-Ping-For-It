@@ -160,11 +160,11 @@ class EntityOutlineRunnerTest {
 		EntityOutlineRunner runner = new EntityOutlineRunner(
 			registry, (message, failure) -> warningCalls.incrementAndGet());
 
-		runner.warnOnce("same-failure", () -> {
+		runner.warnOnce("same-failure", OutlineDiagnostics.Category.ATTEMPT, () -> {
 			supplierCalls.incrementAndGet();
 			return "complete context";
 		}, null);
-		runner.warnOnce("same-failure", () -> {
+		runner.warnOnce("same-failure", OutlineDiagnostics.Category.ATTEMPT, () -> {
 			supplierCalls.incrementAndGet();
 			return "must remain suppressed";
 		}, null);

@@ -81,7 +81,8 @@ The main agent decides which changes are needed, then makes them or delegates
 a documentation-only task. Resolve routine content and placement questions
 using `README.md` and these rules. Ask the user when unresolved uncertainty
 about intended behavior, document authority, or task scope prevents a correct
-change.
+change. Main agent should also dispatch a doc-style-checker subagent after modifying
+and reviewing. 
 
 ## Explaining documentation
 

@@ -69,7 +69,7 @@ class ServerConfigUpdateTest {
 	@Test
 	void invalidMasksAndValuesAreRejected() {
 		assertFalse(new ServerConfigUpdate(0, ChannelMode.AUTO, true, 0, 0).isValid());
-		assertFalse(new ServerConfigUpdate(1 << 29, ChannelMode.AUTO, true, 0, 0).isValid());
+		assertFalse(new ServerConfigUpdate(1 << 30, ChannelMode.AUTO, true, 0, 0).isValid());
 		assertFalse(new ServerConfigUpdate(1, null, true, 0, 0).isValid());
 		assertFalse(new ServerConfigUpdate(1, ChannelMode.AUTO, true, -1, 0).isValid());
 	}
@@ -78,7 +78,7 @@ class ServerConfigUpdateTest {
 	void noticeMaskIsAdditiveAndUnselectedFalseSurvivesOtherEdits() {
 		assertEquals(1 << 26, ServerConfigUpdate.BUDGET_DELAY_NOTIFICATIONS_ENABLED);
 		assertEquals((((1 << 26) - 1) & ~31) | (1 << 27) | (1 << 28), ServerConfigUpdate.ALL_INVENTORY_FIELDS);
-		assertEquals((1 << 29) - 1, ServerConfigUpdate.ALL_FIELDS);
+		assertEquals((1 << 30) - 1, ServerConfigUpdate.ALL_FIELDS);
 		var current = new ServerConfigSnapshot(true, ChannelMode.AUTO, true, 1000, 5, 23,
 			InventoryConfigValues.defaults(), false);
 		var update = new ServerConfigUpdate(ServerConfigUpdate.RATE_LIMIT, ChannelMode.GLOBAL,

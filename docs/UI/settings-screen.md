@@ -88,7 +88,8 @@ The client scope has seven categories:
   Channel, followed by Ping Volume and Configuration Notice Size under Sound
   and notices.
 - **Rendering & Config**: Entity Block Geometry under entity-block rendering,
-  followed by the configuration-file action under its own heading.
+  followed by Logging Detail under its own Logging subgroup, then the
+  configuration-file action under its own heading.
 - **Performance**: a Wheel options subgroup with Precise Selection Capture
   Period.
 
@@ -97,11 +98,12 @@ The server scope has five categories:
 - **Channel & Players**: Default Channel Mode and Player Tracking.
 - **Send Rate**: Regeneration Time and Rate Limit.
 - **Marker Duration**: Sync Duration.
-- **Performance**: a Monitoring subgroup with Budget Delay Notifications; a
-  Shared inventory budgets subgroup with Physical Slots per
-  Tick, Pending Memory, Display Byte Size, and Frame Byte Size; an Inventory
-  preview subgroup with Preview Period, Preview Variants per Client Period,
-  Preview Slots per Client, Preview Slots Server-wide, Preview Targets per
+- **Performance**: a Monitoring subgroup with Budget Delay Notifications and
+  Server Logging Detail, in that order; a Shared inventory budgets subgroup with
+  Physical Slots per Tick, Pending Memory, Display Byte Size, and Frame Byte
+  Size; an Inventory preview subgroup with Preview Period, Preview Variants per
+  Client Period, Preview Slots per Client, Preview Slots Server-wide, Preview
+  Targets per
   Client, Preview Client Byte Multiplier, and Preview Global Byte Multiplier;
   and an Inventory tracking subgroup with Tracking Period, Separate Tracking by
   Face, Separate Tracking by Player, Tracking Variants per Target, Tracking Slots
@@ -188,13 +190,49 @@ Inventory Selection Stay Open is the
 [inventory stay-open](../architecture/picking/wheel.md#inventory-selection-stay-open)
 preference, and its tooltip states that a change applies to the next hold.
 
+## Logging profile controls
+
+Logging Detail in the client scope and Server Logging Detail in the server scope
+are independent native buttons for the profile owned by
+[diagnostics and logging](../architecture/logging.md). Each shows its current
+value. On activation, the client button resolves the current client
+configuration through the handler, edits the local preference, and publishes
+the client profile immediately; the server button edits only the ordinary
+server-settings draft and does not publish the server profile by itself. The
+[server-settings transaction](../architecture/config/changing-server-config.md)
+owns when an accepted server selection takes effect.
+
+Every mouse or keyboard activation reads the live Alt state, with Option serving
+as Alt on macOS. With Alt released, activation cycles between `NORMAL` and
+`DEEP`; a row already showing `DEBUG` exits to `NORMAL` on its next activation
+and cannot return to `DEBUG` without Alt. With Alt held, activation cycles
+`NORMAL` → `DEEP` → `DEBUG` → `NORMAL`. Shift has no special role, and
+mouse-wheel input remains list scrolling and never selects. Releasing Alt is not
+itself an edit: it changes neither the selected value nor the server draft, does
+not publish a profile, and leaves the caption unchanged. A row left at `DEBUG`
+therefore keeps that caption until an activation changes the value. The screen
+keeps no unlock, reveal, or per-row access state across activations, navigation,
+resize, or close.
+
+A read-only server viewer sees the authoritative value, including `DEBUG`, but
+cannot activate the row.
+
+Both rows provide native hover and keyboard-focus help localized in every
+bundled locale. The help identifies the client or server scope, distinguishes
+the redacted `NORMAL` profile from unredacted detailed profiles, and states when
+the edit takes effect. It does not mention `DEBUG` or hint at the activation
+modifier.
+
 ## Server performance category
 
 The Performance category begins with a plain-text, non-interactive Monitoring
-subgroup and a full-width Budget Delay Notifications server-value toggle. Its
-tooltip identifies administrator budget-delay notices and the effect of
-enabling or disabling them; value semantics and the persisted key are owned by
-[server configuration](../config/server.md#persisted-fields).
+subgroup and two full-width rows: the Budget Delay Notifications server-value
+toggle, then Server Logging Detail. The notice toggle's tooltip identifies
+administrator budget-delay notices and the effect of enabling or disabling
+them; value semantics and the persisted key are owned by
+[server configuration](../config/server.md#persisted-fields). The logging row's
+profile, activation and disclosure behavior is owned by
+[Logging profile controls](#logging-profile-controls).
 
 The inventory administration controls follow in three
 plain-text, non-interactive subgroups: Shared inventory budgets, Inventory
@@ -329,7 +367,8 @@ so the screen does not promise that the server applied or persisted an update.
 The ordinary server settings are one shared session within the screen, not a
 per-category or per-visit section. This session covers the Channel & Players,
 Send Rate, Marker Duration, and Performance categories, including the monitoring
-toggle and the twenty-three inventory administration leaves. Entering the server
+toggle, the server logging-profile control, and the twenty-three inventory
+administration leaves. Entering the server
 scope shows its overview and requests the current server configuration when the
 client holds a live connection and the session holds no loaded or in-flight
 snapshot. The loaded snapshot, the draft, and any in-flight request are retained

@@ -2,7 +2,9 @@ package nx.pingwheel.neoforge.integration.create.presentation;
 
 import java.util.Objects;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticLogger;
 import org.jetbrains.annotations.Nullable;
 
 import static nx.pingwheel.neoforge.integration.create.presentation.CreateSamplingWork.member;
@@ -32,6 +34,9 @@ import net.neoforged.neoforge.items.IItemHandler;
  */
 public final class CreatePresentationCollector {
 	private CreatePresentationCollector() {}
+	private static void report(DiagnosticLogger diagnostics, String site, String handling, Supplier<String> detail, Throwable failure) {
+		CreatePresentationDiagnostics.failure(diagnostics, site, handling, detail, failure);
+	}
 
 	public static final CreateSamplingLimits DEFAULT_LIMITS =
 		new CreateSamplingLimits(128, 128, 16, 16, 256, 2048);
@@ -74,7 +79,7 @@ public final class CreatePresentationCollector {
 
 	/** External reads admit only positions inside the resolved source's member scope. */
 	public static Sample capture(ServerLevel level, BlockPos pos, boolean kinetic,
-		boolean items, boolean fluids, CreateSamplingLimits limits, Predicate<BlockPos> memberGate) {
+		boolean items, boolean fluids, CreateSamplingLimits limits, @Nullable Predicate<BlockPos> memberGate) {
 		return capture(level, pos, kinetic, kinetic, kinetic, kinetic, kinetic,
 			items, fluids, limits, memberGate);
 	}
@@ -90,49 +95,56 @@ public final class CreatePresentationCollector {
 	/** Every member gate is checked before that position's block entity or capability read. */
 	public static Sample capture(ServerLevel level, BlockPos pos, boolean speed,
 		boolean hasNetwork, boolean overStressed, boolean stress, boolean capacity,
-		boolean items, boolean fluids, CreateSamplingLimits limits, Predicate<BlockPos> memberGate) {
+		boolean items, boolean fluids, CreateSamplingLimits limits, @Nullable Predicate<BlockPos> memberGate) {
+		return capture(level, pos, speed, hasNetwork, overStressed, stress, capacity, items, fluids, limits, memberGate, Diagnostics.server());
+	}
+
+	public static Sample capture(ServerLevel level, BlockPos pos, boolean speed,
+		boolean hasNetwork, boolean overStressed, boolean stress, boolean capacity,
+		boolean items, boolean fluids, CreateSamplingLimits limits, @Nullable Predicate<BlockPos> memberGate,
+		DiagnosticLogger diagnostics) {
 		Objects.requireNonNull(level, "level");
 		Objects.requireNonNull(pos, "pos");
 		Objects.requireNonNull(limits, "limits");
 		if (!level.getServer().isSameThread()) {
 			throw new IllegalStateException("Create sampling must run on the server thread");
 		}
-		if (!CreatePresentationAvailability.available()) {
+		if (!CreatePresentationAvailability.available(diagnostics)) {
 			return unavailableSample(0);
 		}
 		return captureLoaded(level, pos, speed, hasNetwork, overStressed,
-			stress, capacity, items, fluids, limits, memberGate);
+			stress, capacity, items, fluids, limits, memberGate, diagnostics);
 	}
 
 	private static Sample captureLoaded(ServerLevel level, BlockPos pos, boolean speed,
 		boolean hasNetwork, boolean overStressed, boolean stress, boolean capacity,
-		boolean items, boolean fluids, CreateSamplingLimits limits, Predicate<BlockPos> memberGate) {
+		boolean items, boolean fluids, CreateSamplingLimits limits, @Nullable Predicate<BlockPos> memberGate, DiagnosticLogger diagnostics) {
 		if (!speed && !hasNetwork && !overStressed && !stress && !capacity
 			&& !items && !fluids) {
 			return unavailableSample(0);
 		}
-		if (!level.hasChunkAt(pos) || !member(memberGate, pos)) {
+		if (!level.hasChunkAt(pos) || !member(memberGate, pos, diagnostics)) {
 			return unavailableSample(0);
 		}
-		CreateSamplingWork work = new CreateSamplingWork(limits.maxWork());
+		CreateSamplingWork work = new CreateSamplingWork(limits.maxWork(), diagnostics);
 		if (!work.take(1)) {
 			return unavailableSample(0);
 		}
 		try {
-			BlockEntity source = level.getBlockEntity(pos);
+			@Nullable BlockEntity source = level.getBlockEntity(pos);
 			if (source == null || source.isRemoved()) {
 				return unavailableSample(work.used());
 			}
 			Kinetic k = (speed || hasNetwork || overStressed || stress || capacity) && work.take(1)
-				? readKinetic(source, speed, hasNetwork, overStressed, stress, capacity)
+				? readKinetic(source, speed, hasNetwork, overStressed, stress, capacity, diagnostics)
 				: Kinetic.unavailable();
 			BoundedCreateSummary.Summary i = items && source instanceof ItemVaultBlockEntity vault
-				? readVault(level, vault, limits, work, memberGate) : BoundedCreateSummary.Summary.unavailable();
+				? readVault(level, vault, limits, work, memberGate, diagnostics) : BoundedCreateSummary.Summary.unavailable();
 			BoundedCreateSummary.Summary f = fluids && source instanceof FluidTankBlockEntity tank
-				? readTank(level, tank, limits, work, memberGate) : BoundedCreateSummary.Summary.unavailable();
+				? readTank(level, tank, limits, work, memberGate, diagnostics) : BoundedCreateSummary.Summary.unavailable();
 			return new Sample(k, i, f, work.used(), true);
 		} catch (RuntimeException | LinkageError failure) {
-			Diagnostics.warn("create/presentation-capture", "collector", () -> "position=" + pos + " workUsed=" + work.used(), failure);
+			report(diagnostics, "create/presentation-capture", "collector-unavailable", () -> "position=" + pos + " workUsed=" + work.used(), failure);
 			return unavailableSample(work.used());
 		}
 	}
@@ -144,7 +156,7 @@ public final class CreatePresentationCollector {
 
 	private static Kinetic readKinetic(BlockEntity source, boolean speed,
 		boolean networkRequested, boolean overStressed, boolean stressRequested,
-		boolean capacityRequested) {
+		boolean capacityRequested, DiagnosticLogger diagnostics) {
 		if (!(source instanceof KineticBlockEntity be)) {
 			return Kinetic.unavailable();
 		}
@@ -177,7 +189,7 @@ public final class CreatePresentationCollector {
 									stress = s;
 								}
 							} catch (RuntimeException | LinkageError ignored) {
-								Diagnostics.warn("create/presentation-cached-stress", "kinetic", () -> "cached stress getter", ignored);
+								report(diagnostics, "create/presentation-cached-stress", "stress-unavailable", () -> "cached stress getter", ignored);
 								// A broken stress accessor cannot hide capacity or speed.
 							}
 						}
@@ -188,20 +200,20 @@ public final class CreatePresentationCollector {
 									capacity = c;
 								}
 							} catch (RuntimeException | LinkageError ignored) {
-								Diagnostics.warn("create/presentation-cached-capacity", "kinetic", () -> "cached capacity getter", ignored);
+								report(diagnostics, "create/presentation-cached-capacity", "capacity-unavailable", () -> "cached capacity getter", ignored);
 								// A broken capacity accessor cannot hide stress or speed.
 							}
 						}
 					}
 				} catch (RuntimeException | LinkageError ignored) {
-					Diagnostics.warn("create/presentation-cached-bridge", "kinetic", () -> "cached network bridge", ignored);
+					report(diagnostics, "create/presentation-cached-bridge", "cached-bridge-unavailable", () -> "cached network bridge", ignored);
 					// The public getter route remains usable if the bridge drifts.
 				}
 			}
 			return new Kinetic(true, effective, theoretical, moving, network,
 				overStressed ? be.isOverStressed() : null, stress, capacity);
 		} catch (RuntimeException | LinkageError failure) {
-			Diagnostics.warn("create/presentation-kinetic", "collector",
+			report(diagnostics, "create/presentation-kinetic", "kinetic-values-unavailable",
 				() -> "speed=" + speed + " network=" + networkRequested + " overstressed=" + overStressed
 					+ " stress=" + stressRequested + " capacity=" + capacityRequested, failure);
 			return Kinetic.unavailable();
@@ -210,16 +222,16 @@ public final class CreatePresentationCollector {
 
 	private static BoundedCreateSummary.Summary readVault(ServerLevel level,
 		ItemVaultBlockEntity source, CreateSamplingLimits limits, CreateSamplingWork work,
-		Predicate<BlockPos> memberGate) {
+		@Nullable Predicate<BlockPos> memberGate, DiagnosticLogger diagnostics) {
 		try {
 			if (!work.take(1)) {
 				return BoundedCreateSummary.Summary.incomplete();
 			}
-			BlockPos controllerPos = source.getController();
-			if (controllerPos == null || !level.hasChunkAt(controllerPos) || !member(memberGate, controllerPos)) {
+			@Nullable BlockPos controllerPos = source.getController();
+			if (controllerPos == null || !level.hasChunkAt(controllerPos) || !member(memberGate, controllerPos, diagnostics)) {
 				return BoundedCreateSummary.Summary.unavailable();
 			}
-			BlockEntity candidate = level.getBlockEntity(controllerPos);
+			@Nullable BlockEntity candidate = level.getBlockEntity(controllerPos);
 			if (!(candidate instanceof ItemVaultBlockEntity controller) || controller.isRemoved()
 				|| !controller.isController() || !controllerPos.equals(controller.getBlockPos())) {
 				return BoundedCreateSummary.Summary.unavailable();
@@ -250,7 +262,7 @@ public final class CreatePresentationCollector {
 			}
 			// Create's controller BLOCK capability exposes the combined vault;
 			// getInventoryOfBlock() would silently return only one block.
-			IItemHandler handler = level.getCapability(Capabilities.ItemHandler.BLOCK, controllerPos, null);
+			@Nullable IItemHandler handler = level.getCapability(Capabilities.ItemHandler.BLOCK, controllerPos, null);
 			if (handler == null) {
 				return BoundedCreateSummary.Summary.unavailable();
 			}
@@ -269,7 +281,7 @@ public final class CreatePresentationCollector {
 					break;
 				}
 				try {
-					ItemStack stack = handler.getStackInSlot(slot);
+					@Nullable ItemStack stack = handler.getStackInSlot(slot);
 					if (stack == null) {
 						summary.markPartial();
 					} else if (stack.getCount() < 0) {
@@ -280,7 +292,7 @@ public final class CreatePresentationCollector {
 					}
 				} catch (RuntimeException | LinkageError failure) {
 					int failedSlot = slot;
-					Diagnostics.warn("create/presentation-vault-slot", "item-vault", () -> "slot=" + failedSlot + " slots=" + slots, failure);
+					report(diagnostics, "create/presentation-vault-slot", "vault-summary-partial", () -> "slot=" + failedSlot + " slots=" + slots, failure);
 					summary.markPartial();
 					interrupted = true;
 					break;
@@ -290,14 +302,14 @@ public final class CreatePresentationCollector {
 			work.take(result.scanned());
 			return interrupted ? BoundedCreateSummary.Summary.incomplete() : result;
 		} catch (RuntimeException | LinkageError failure) {
-			Diagnostics.warn("create/presentation-vault", "item-vault", () -> "workUsed=" + work.used(), failure);
+			report(diagnostics, "create/presentation-vault", "vault-summary-unavailable", () -> "workUsed=" + work.used(), failure);
 			return BoundedCreateSummary.Summary.unavailable();
 		}
 	}
 
 	private static BoundedCreateSummary.Summary readTank(ServerLevel level,
 		FluidTankBlockEntity source, CreateSamplingLimits limits, CreateSamplingWork work,
-		Predicate<BlockPos> memberGate) {
+		@Nullable Predicate<BlockPos> memberGate, DiagnosticLogger diagnostics) {
 		try {
 			if (!work.take(1)) {
 				return BoundedCreateSummary.Summary.incomplete();
@@ -307,11 +319,11 @@ public final class CreatePresentationCollector {
 			if (source instanceof CreativeFluidTankBlockEntity) {
 				return BoundedCreateSummary.Summary.unavailable();
 			}
-			BlockPos controllerPos = source.getController();
-			if (controllerPos == null || !level.hasChunkAt(controllerPos) || !member(memberGate, controllerPos)) {
+			@Nullable BlockPos controllerPos = source.getController();
+			if (controllerPos == null || !level.hasChunkAt(controllerPos) || !member(memberGate, controllerPos, diagnostics)) {
 				return BoundedCreateSummary.Summary.unavailable();
 			}
-			BlockEntity candidate = level.getBlockEntity(controllerPos);
+			@Nullable BlockEntity candidate = level.getBlockEntity(controllerPos);
 			if (!(candidate instanceof FluidTankBlockEntity controller) || controller.isRemoved()
 				|| controller instanceof CreativeFluidTankBlockEntity
 				|| !controller.isController() || !controllerPos.equals(controller.getBlockPos())) {
@@ -342,7 +354,7 @@ public final class CreatePresentationCollector {
 			}
 			// Read only the ordinary controller BLOCK capability after ruling out
 			// the boiler's input-only wrapper and incomplete shapes.
-			IFluidHandler handler = level.getCapability(Capabilities.FluidHandler.BLOCK, controllerPos, null);
+			@Nullable IFluidHandler handler = level.getCapability(Capabilities.FluidHandler.BLOCK, controllerPos, null);
 			if (handler == null) {
 				return BoundedCreateSummary.Summary.unavailable();
 			}
@@ -361,7 +373,7 @@ public final class CreatePresentationCollector {
 					break;
 				}
 				try {
-					FluidStack stack = handler.getFluidInTank(tank);
+					@Nullable FluidStack stack = handler.getFluidInTank(tank);
 					if (stack == null) {
 						summary.markPartial();
 					} else if (stack.getAmount() < 0) {
@@ -373,7 +385,7 @@ public final class CreatePresentationCollector {
 					}
 				} catch (RuntimeException | LinkageError failure) {
 					int failedTank = tank;
-					Diagnostics.warn("create/presentation-tank-entry", "fluid-tank", () -> "tank=" + failedTank + " tanks=" + tanks, failure);
+					report(diagnostics, "create/presentation-tank-entry", "tank-summary-partial", () -> "tank=" + failedTank + " tanks=" + tanks, failure);
 					summary.markPartial();
 					interrupted = true;
 					break;
@@ -383,7 +395,7 @@ public final class CreatePresentationCollector {
 			work.take(result.scanned());
 			return interrupted ? BoundedCreateSummary.Summary.incomplete() : result;
 		} catch (RuntimeException | LinkageError failure) {
-			Diagnostics.warn("create/presentation-tank", "fluid-tank", () -> "workUsed=" + work.used(), failure);
+			report(diagnostics, "create/presentation-tank", "tank-summary-unavailable", () -> "workUsed=" + work.used(), failure);
 			return BoundedCreateSummary.Summary.unavailable();
 		}
 	}
@@ -391,10 +403,10 @@ public final class CreatePresentationCollector {
 	/** Untrusted/incomplete structure never reaches a capability; visited members remain paid. */
 	private static boolean verifyVault(ServerLevel level, BlockPos origin,
 		int x, int y, int z, CreateSamplingLimits limits, CreateSamplingWork work,
-		Predicate<BlockPos> memberGate) {
+		@Nullable Predicate<BlockPos> memberGate) {
 		return work.verifyShape(origin, x, y, z, limits, memberGate, part -> {
 			if (!level.hasChunkAt(part)) return false;
-			BlockEntity be = level.getBlockEntity(part);
+			@Nullable BlockEntity be = level.getBlockEntity(part);
 			return be instanceof ItemVaultBlockEntity vault && !vault.isRemoved()
 				&& ItemVaultBlock.isVault(level.getBlockState(part))
 				&& origin.equals(vault.getController());
@@ -403,10 +415,10 @@ public final class CreatePresentationCollector {
 
 	private static boolean verifyTank(ServerLevel level, BlockPos origin,
 		int width, int height, CreateSamplingLimits limits, CreateSamplingWork work,
-		Predicate<BlockPos> memberGate) {
+		@Nullable Predicate<BlockPos> memberGate) {
 		return work.verifyShape(origin, width, height, width, limits, memberGate, part -> {
 			if (!level.hasChunkAt(part)) return false;
-			BlockEntity be = level.getBlockEntity(part);
+			@Nullable BlockEntity be = level.getBlockEntity(part);
 			return be instanceof FluidTankBlockEntity tank && !tank.isRemoved()
 				&& !(tank instanceof CreativeFluidTankBlockEntity)
 				&& FluidTankBlock.isTank(level.getBlockState(part))

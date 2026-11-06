@@ -21,18 +21,25 @@ import nx.pingwheel.common.platform.IPlatformFluidService.WitnessUse;
 import nx.pingwheel.neoforge.platform.PlatformFluidServiceTest.PaidAccess;
 import static nx.pingwheel.neoforge.platform.PlatformFluidServiceTest.*;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission;
+import nx.pingwheel.common.config.InventorySettings;
+import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
+import nx.pingwheel.neoforge.integration.create.CreateDiagnosticCapture;
 import nx.pingwheel.neoforge.platform.FluidCapabilityAccess;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
+import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Real safety-route algorithm with detached metadata ports; not a live Create/capability launch. */
@@ -241,37 +248,41 @@ class CreateFluidTankAccessTest {
 			+ " admissionHeadroom=" + needed + " defaultMemory=" + settings.pendingMemoryBytes());
 	}
 
-	@Test void staged108MemberControllerTraversalReallyFinishesReadsAndReleasesCallerOwnership() throws Exception {
-		var world = new World(3, 12); BlockPos hit = new BlockPos(2, 11, 2);
+	@ParameterizedTest @CsvSource({"3,12,108", "3,113,1017", "2,256,1024"})
+	void stagedControllerTraversalReallyFinishesReadsAndReleasesCallerOwnership(int width, int height, int members) throws Exception {
+		// Headless metadata extents exercise admission, not Create's configurable live height limit.
+		var world = new World(width, height); BlockPos hit = new BlockPos(width - 1, height - 1, width - 1);
 		world.requireAllBeforeCapability = true;
 		// Ordinary source callback envelopes (before optional external membership work), with
 		// independent execution debits rather than charging the provider's composed profile twice.
 		world.memberCost = new InventoryValidationBudget.Cost(1024, 1024, 528);
 		world.authorityCost = new InventoryValidationBudget.Cost(9216, 9216, 2560);
 		var profiles = new ArrayList<IPlatformFluidService.OperationProfile>();
-		var memory = new RetainedMemoryLedger(64L << 20);
+		var settings = InventorySettings.serverDefaults();
+		var memory = new RetainedMemoryLedger(settings.pendingMemoryBytes());
 		// Same engineering work ledger used by Runtime, not the unrelated provider-call counter.
-		long work = 4096L * InventoryItemBudget.workUpperBound(4096);
+		long work = (long) InventorySourceAccess.MAX_SLOTS * InventoryItemBudget.workUpperBound((int) settings.effectiveDisplayBytes());
 		var ledger = new CostLedger(Map.of(WORK, work));
 		InventoryFluidAdmission.Ownership ownership; IPlatformFluidService.Access access;
 		try (var a = new InventoryFluidAdmission(ledger, WORK, memory, world.memberCost, world.authorityCost);
 			var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE); var probe = probe(world, hit, Direction.SOUTH, op)) {
-			assertEquals(108, probe.shape().members()); assertTrue(probe.shape().indexedSlots().isEmpty());
+			assertEquals(members, probe.shape().members()); assertTrue(probe.shape().indexedSlots().isEmpty());
 			assertTrue(world.blockReads.stream().allMatch(pos -> pos.equals(hit) || pos.equals(BlockPos.ZERO)));
 			assertEquals(0, world.handler.capacityReads); assertEquals(0, world.handler.countReads); assertTrue(world.queryPositions.isEmpty());
 			int calls = world.requireCalls; probe.shape(); probe.finishProfile(); assertEquals(calls, world.requireCalls);
 			access = probe.finish(profile -> {
 				profiles.add(profile);
 				if (profiles.size() == 1) { assertTrue(world.queryPositions.isEmpty()); assertEquals(0, world.handler.countReads); }
-				else { assertEquals(1, world.handler.countReads); assertEquals(0, world.handler.capacityReads); assertEquals(108, new HashSet<>(world.blockReads).size()); }
+				else { assertEquals(1, world.handler.countReads); assertEquals(0, world.handler.capacityReads); assertEquals(world.blocks.keySet(), new HashSet<>(world.blockReads)); }
 				return a.enter(profile);
 			}).orElseThrow();
 			assertEquals(2, profiles.size()); assertEquals(probe.finishProfile(), profiles.getFirst()); assertReleasedProbe(probe);
 			assertThrows(IllegalStateException.class, () -> probe.finish(a));
-			assertEquals(108, access.layout().members().size()); assertEquals(1, access.slots());
+			assertEquals(members, access.layout().members().size()); assertEquals(1, access.slots());
 			assertEquals(IPlatformFluidService.TopologyEvidence.EXPLICIT_STRUCTURE, access.routeInfo().topology());
 			assertTrue(world.queryPositions.stream().allMatch(BlockPos.ZERO::equals)); assertEquals(0, world.handler.reads);
-			world.requireCalls = 0; world.metadataCalls = 0; int capacities = world.handler.capacityReads;
+			try (var validation = a.enter(access.validationProfile())) { assertTrue(access.valid(validation)); }
+			world.requireCalls = 0; world.metadataCalls = 0; world.blockReads.clear(); int capacities = world.handler.capacityReads;
 			try (var read = a.enter(access.readProfile())) {
 				assertSame(op.allowance(), read.allowance()); long before = read.allowance().attemptedWorkUnits();
 				assertTrue(access.consume(0, entry -> { assertEquals(81_000, entry.amount()); return true; }, read));
@@ -280,15 +291,17 @@ class CreateFluidTankAccessTest {
 					read.allowance().attemptedWorkUnits() - before);
 			}
 			assertEquals(1, world.handler.reads); assertEquals(4, world.handler.capacityReads - capacities);
+			assertEquals(world.blocks.keySet(), new HashSet<>(world.blockReads), "read pre/postchecks visit every member");
 			assertTrue(world.requireCalls <= access.readProfile().memberGateCalls());
 			ownership = a.retain();
 			assertEquals(profiles.stream().mapToLong(IPlatformFluidService.OperationProfile::retainedBytes).sum() + 768, ownership.bytes());
-			System.out.println("NEOFORGE staged Create M=108 N=1 structure=" + profiles.getFirst() + " address=" + profiles.getLast()
+			System.out.println("NEOFORGE staged Create M=" + members + " N=1 structure=" + profiles.getFirst() + " address=" + profiles.getLast()
 				+ " read=" + access.readProfile() + " retained=" + ownership.bytes() + " actualRequires=" + world.requireCalls
 				+ " actualMetadata=" + world.metadataCalls + " composedRead=" + access.readProfile().cost(world.memberCost, world.authorityCost)
 				+ " attemptedWork=" + op.allowance().attemptedWorkUnits() + " reservedScratch=" + memory.reserved() + " workLimit=" + work);
 		}
-		assertTrue(ledger.used(WORK) > 0); assertEquals(0, memory.reserved()); assertEquals(ownership.bytes(), memory.retained());
+		assertTrue(ledger.used(WORK) > 0); assertTrue(ledger.used(WORK) <= work);
+		assertEquals(0, memory.reserved()); assertEquals(ownership.bytes(), memory.retained());
 		int calls = world.requireCalls; access.close(); access.close(); assertEquals(calls, world.requireCalls); assertReleasedAccess(access);
 		ownership.close(); ownership.close(); assertEquals(0, memory.retained());
 	}
@@ -445,6 +458,137 @@ class CreateFluidTankAccessTest {
 			assertThrows(InventorySourceUnavailableException.class, () -> fresh.consume(0, entry -> fail("replaced handler cannot read")));
 			assertEquals(0, held.reads); assertEquals(0, current.handler.reads); assertEquals(0, previous.handler.reads);
 		}
+	}
+
+	@Test void sourceFailureContextDistinguishesCreativeBoilerShapeAndMemberRelation() {
+		var creativeWorld = new World(1, 1); creativeWorld.entities.get(BlockPos.ZERO).ordinary = false;
+		var creative = assertThrows(InventorySourceUnavailableException.class,
+			() -> access(creativeWorld, BlockPos.ZERO, Direction.NORTH));
+		assertEquals("Create creative/foreign fluid tank", creative.getMessage());
+		assertTrue(context(creative).contains("ordinary=false"), context(creative));
+
+		var boilerWorld = new World(1, 1); boilerWorld.entities.get(BlockPos.ZERO).active = true;
+		var boiler = assertThrows(InventorySourceUnavailableException.class,
+			() -> access(boilerWorld, BlockPos.ZERO, Direction.NORTH));
+		assertEquals("Create active boiler is not stored fluid", boiler.getMessage());
+		assertTrue(context(boiler).contains("active=true"), context(boiler));
+
+		var shapeWorld = new World(1, 1); shapeWorld.entities.get(BlockPos.ZERO).width = 4;
+		var shape = assertThrows(InventorySourceUnavailableException.class,
+			() -> access(shapeWorld, BlockPos.ZERO, Direction.NORTH));
+		assertEquals("Create fluid bounded static topology", shape.getMessage());
+		assertTrue(context(shape).contains("reason=invalid-shape"), context(shape));
+		assertTrue(context(shape).contains("width=4;height=1;axis=y"), context(shape));
+		assertTrue(context(shape).contains("maxMembers=" + InventorySnapshotLayout.MAX_MEMBERS), context(shape));
+
+		var memberWorld = new World(2, 1); BlockPos hit = new BlockPos(1, 0, 1), other = new BlockPos(1, 0, 0);
+		memberWorld.entities.get(other).controller = new BlockPos(20, 0, 0);
+		var member = assertThrows(InventorySourceUnavailableException.class,
+			() -> access(memberWorld, hit, Direction.NORTH));
+		assertEquals("Create fluid member controller", member.getMessage());
+		assertTrue(context(member).contains("member=1, 0, 0;index=2;width=2;height=1;members=4"), context(member));
+		assertTrue(context(member).contains("observedController=20, 0, 0"), context(member));
+	}
+
+	@Test void configuredMemberLimitAccepts1017AndExact1024ButRejects1026BeforeMemberOrCapabilityWork() {
+		var nearLimit = new World(3, 113);
+		try (var a = admission(); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE);
+			var probe = probe(nearLimit, new BlockPos(2, 112, 2), Direction.NORTH, op)) {
+			assertEquals(1_017, probe.shape().members());
+		}
+		assertTrue(nearLimit.queryPositions.isEmpty()); assertEquals(0, nearLimit.handler.countReads);
+		assertEquals(0, nearLimit.handler.capacityReads); assertEquals(0, nearLimit.handler.reads);
+		// Headless metadata math only: height 256 is not a claim about a live default Create configuration.
+		var exactLimit = new World(2, 256);
+		try (var a = admission(); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE);
+			var probe = probe(exactLimit, new BlockPos(1, 255, 1), Direction.NORTH, op)) {
+			assertEquals(1_024, probe.shape().members());
+		}
+		assertTrue(exactLimit.queryPositions.isEmpty()); assertEquals(0, exactLimit.handler.countReads);
+		assertEquals(0, exactLimit.handler.capacityReads); assertEquals(0, exactLimit.handler.reads);
+		var overLimit = new World(3, 114); BlockPos hit = new BlockPos(2, 113, 2);
+		try (var a = admission(); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE)) {
+			var failure = assertThrows(InventorySourceUnavailableException.class,
+				() -> probe(overLimit, hit, Direction.NORTH, op));
+			assertEquals("Create fluid member limit exceeded (member-limit-exceeded)", failure.getMessage());
+			String context = context(failure);
+			assertTrue(context.contains("reason=member-limit-exceeded"), context);
+			assertTrue(context.contains("controller=0, 0, 0"), context);
+			assertTrue(context.contains("width=3;height=114;members=1026;maxMembers=1024"), context);
+			assertTrue(context.contains("position=2, 113, 2"), context);
+			assertTrue(overLimit.blockReads.stream().allMatch(position -> position.equals(hit) || position.equals(BlockPos.ZERO)));
+			assertTrue(overLimit.queryPositions.isEmpty()); assertEquals(0, overLimit.handler.countReads);
+			assertEquals(0, overLimit.handler.capacityReads); assertEquals(0, overLimit.handler.reads);
+		}
+	}
+
+	@Test void hitOutsideTheVerifiedPrismHasItsOwnReasonWithoutMemberOrCapabilityWork() {
+		var world = new World(1, 1); BlockPos outside = new BlockPos(1, 0, 0);
+		var outsideMember = new Member();
+		outsideMember.controller = BlockPos.ZERO; outsideMember.width = 1; outsideMember.height = 1;
+		world.blocks.put(outside, new FluidCapabilityAccess.Block(world.blockType, outsideMember,
+			"create:fluid_tank", "create:fluid_tank"));
+		world.allowed.add(outside); world.loaded.add(outside);
+		try (var a = admission(); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE)) {
+			var failure = assertThrows(InventorySourceUnavailableException.class,
+				() -> probe(world, outside, Direction.NORTH, op));
+			assertEquals("Create fluid hit outside structure (hit-outside-structure)", failure.getMessage());
+			String context = context(failure);
+			assertTrue(context.contains("reason=hit-outside-structure"), context);
+			assertFalse(context.contains("reason=member-limit-exceeded"), context);
+			assertTrue(context.contains("controller=0, 0, 0"), context);
+			assertTrue(context.contains("width=1;height=1;members=1"), context);
+			assertTrue(context.contains("position=1, 0, 0"), context);
+			assertTrue(world.queryPositions.isEmpty()); assertEquals(0, world.handler.countReads);
+			assertEquals(0, world.handler.capacityReads); assertEquals(0, world.handler.reads);
+			assertTrue(world.blockReads.stream().allMatch(position -> position.equals(outside) || position.equals(BlockPos.ZERO)));
+		}
+	}
+
+	@Test void absentControllerCapabilityReportsOneDebugEventWithRouteShape() {
+		var world = new World(3, 20); world.missingCapability = true; BlockPos hit = new BlockPos(2, 19, 2);
+		try (var capture = new CreateDiagnosticCapture(Level.DEBUG, LoggingProfile.DEBUG)) {
+			try (var a = admission(); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE)) {
+				op.allowance().debit(FluidCapabilityAccess.PROBE_PROFILE.ownedCost());
+				world.require(hit, op);
+				try (var probe = CreateFluidTankAccess.probe(world, hit, Direction.NORTH, world.block(hit, op), world, op)) {
+					assertTrue(probe.finish(a).isEmpty());
+				}
+			}
+			assertEquals(1, capture.events.size());
+			String message = capture.events.getFirst().getMessage().getFormattedMessage();
+			assertTrue(message.contains("site=fluid/create-finish"), message);
+			assertTrue(message.contains("handling=capability-absent"), message);
+			assertTrue(message.contains("route=create:static-fluid"), message);
+			assertTrue(message.contains("members=180"), message);
+			assertTrue(message.contains("handler=none"), message);
+		}
+	}
+
+	@Test void consumedValidationFailureReportsOnceWithRouteAndMemberContext() {
+		var world = new World(2, 1); var access = access(world, new BlockPos(1, 0, 1), Direction.NORTH);
+		world.entities.get(new BlockPos(1, 0, 0)).controller = new BlockPos(20, 0, 0);
+		try (var capture = new CreateDiagnosticCapture(Level.DEBUG, LoggingProfile.DEBUG)) {
+			assertFalse(access.valid());
+			assertEquals(1, capture.events.size());
+			String message = capture.events.getFirst().getMessage().getFormattedMessage();
+			assertTrue(message.contains("site=fluid/capability-valid"), message);
+			assertTrue(message.contains("handling=source-rejected"), message);
+			assertTrue(message.contains("route=create:static-fluid"), message);
+			assertTrue(message.contains("handler=" + Handler.class.getName()), message);
+			assertTrue(message.contains("count=1"), message);
+			assertTrue(message.contains("ctx="), message);
+			assertTrue(message.contains("reason=controller-changed"), message);
+			assertTrue(message.contains("member=1, 0, 0"), message);
+			assertFalse(access.valid());
+			assertEquals(1, capture.events.size(), "same invalid access reports its first rejection once");
+		}
+	}
+
+	private static String context(InventorySourceUnavailableException failure) {
+		@Nullable String context = failure.diagnosticContext();
+		assertNotNull(context, "provider failure must carry lazy context");
+		return context;
 	}
 
 	private static IPlatformFluidService.Probe probe(World world, BlockPos root, Direction face, Operation op) {

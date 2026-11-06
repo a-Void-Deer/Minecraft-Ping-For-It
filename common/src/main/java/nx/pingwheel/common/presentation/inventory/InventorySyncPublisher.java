@@ -33,6 +33,39 @@ import org.jetbrains.annotations.Unmodifiable;
 
 /** Actual bounded dedicated publication. Queued cuts remain immutable until fully transmitted. */
 public final class InventorySyncPublisher implements SyncPublisher, AutoCloseable {
+	@NotNullByDefault
+	private enum PacketKindChannel {
+		OFFER("offer"), POLICY("policy"), SELECTED("selected"), REJECT("reject"), PREVIEW("preview"),
+		SNAPSHOT("snapshot"), STREAM("stream"), STATUS("status"), HEARTBEAT("heartbeat");
+
+		private final nx.pingwheel.common.diagnostics.DiagnosticChannel controlHandoff;
+		private final nx.pingwheel.common.diagnostics.DiagnosticChannel transportSend;
+
+		PacketKindChannel(String suffix) {
+			controlHandoff = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval(
+				"inventory-publisher-control-handoff-" + suffix, java.time.Duration.ofSeconds(10));
+			transportSend = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval(
+				"inventory-publisher-transport-send-" + suffix, java.time.Duration.ofSeconds(10));
+		}
+
+		static @Nullable PacketKindChannel of(@Nullable InventoryS2CPacket.Kind kind) {
+			return kind == null ? null : switch (kind) {
+				case OFFER -> OFFER;
+				case POLICY -> POLICY;
+				case SELECTED -> SELECTED;
+				case REJECT -> REJECT;
+				case PREVIEW -> PREVIEW;
+				case SNAPSHOT -> SNAPSHOT;
+				case STREAM -> STREAM;
+				case STATUS -> STATUS;
+				case HEARTBEAT -> HEARTBEAT;
+			};
+		}
+	}
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel CONTROL_UNKNOWN =
+		nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-publisher-control-handoff-unknown", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel TRANSPORT_UNKNOWN =
+		nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-publisher-transport-send-unknown", java.time.Duration.ofSeconds(10));
 	public static final CostLedger.Counter PUBLICATIONS = new CostLedger.Counter("inventory/publication", CostLedger.Unit.WORK);
 	public interface Transport {
 		/** Last callback before accounting and irreversible host handoff; production must implement source authorization. */
@@ -852,7 +885,13 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		}
 	}
 	private void warn(String operation, State state, InventoryS2CPacket packet, Throwable failure) {
-		Diagnostics.warn("inventory/publisher/" + operation, transport.getClass().getName() + "/" + packet.kind(),
+		boolean controlHandoff = operation.equals("control-handoff");
+		@Nullable PacketKindChannel packetKind = PacketKindChannel.of(packet.kind());
+		nx.pingwheel.common.diagnostics.DiagnosticChannel channel = packetKind == null
+			? controlHandoff ? CONTROL_UNKNOWN : TRANSPORT_UNKNOWN
+			: controlHandoff ? packetKind.controlHandoff : packetKind.transportSend;
+		Diagnostics.server().atNormal().rateLimited(channel).failure(org.apache.logging.log4j.Level.WARN, "inventory/publisher/" + operation,
+			controlHandoff ? "control-completed-callback-failed" : "retry-same-part-charged",
 			() -> "kind=" + packet.kind() + " request=" + packet.requestId() + " recipient=" + state.context.recipient()
 				+ " marker=" + packet.markerId() + " epoch=" + packet.epoch() + " presentationEpoch=" + packet.presentationEpoch()
 				+ " view=" + packet.view() + " baseline=" + packet.baselineId() + " stateRevision=" + packet.statusRevision()

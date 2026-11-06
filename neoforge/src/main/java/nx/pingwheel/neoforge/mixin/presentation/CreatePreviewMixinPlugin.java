@@ -14,6 +14,8 @@ import org.spongepowered.asm.service.MixinService;
 import net.neoforged.fml.ModList;
 import net.neoforged.fml.loading.LoadingModList;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
+import java.time.Duration;
 import org.jetbrains.annotations.Nullable;
 
 /** Independent fail-soft receipt gate; does not alter the existing summary/accessor plugin. */
@@ -21,6 +23,7 @@ public final class CreatePreviewMixinPlugin implements IMixinConfigPlugin {
 	private static final String TARGET = "com.simibubi.create.content.kinetics.base.KineticBlockEntity";
 	private final BooleanSupplier testedCreate;
 	private final Supplier<IClassBytecodeProvider> bytecodeProvider;
+	private final DiagnosticChannel diagnostics = DiagnosticChannel.interval("create-preview-mixin-gate", Duration.ofSeconds(10));
 	public CreatePreviewMixinPlugin() {
 		this(CreatePreviewMixinPlugin::testedCreatePresent, () -> MixinService.getService().getBytecodeProvider());
 	}
@@ -37,7 +40,8 @@ public final class CreatePreviewMixinPlugin implements IMixinConfigPlugin {
 			// that lookup excludes Mixin and never initializes the Create class.
 			return compatibleTarget(bytecodeProvider.get().getClassNode(TARGET, true));
 		} catch (ClassNotFoundException | IOException | RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("create/preview-mixin-gate", "receipt", () -> "target=" + target + " mixin=" + mixin, unavailable);
+			Diagnostics.client().atNormal().rateLimited(diagnostics).failure(org.apache.logging.log4j.Level.WARN,
+				"create/preview-mixin-gate", "mixin-gate-unavailable", () -> "target=" + target + " mixin=" + mixin, unavailable);
 			return false;
 		}
 	}

@@ -12,6 +12,9 @@ import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import nx.pingwheel.common.client.ClientPingActionDispatcher;
 import nx.pingwheel.common.client.ClientPingRuntime;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.domain.Target;
@@ -68,6 +71,28 @@ class PresentationPreviewDiagnosticsTest {
 			assertTrue(capture.messages().stream().anyMatch(line -> line.contains("cache cause")));
 		}
 	}
+	@Test void normalLocalReaderAndCacheFailuresKeepServerPreviewEligibleWithoutRawContext() {
+		try (var capture = new PresentationDiagnosticCapture()) {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.NORMAL);
+			var context = new Context(); var sent = new ArrayList<PresentationPreviewC2SPacket>();
+			var preview = new ClientPresentationPreview(type -> Optional.of(access()), () -> context,
+				List.of(new ThrowingReader()), (target, type) -> {
+					throw new IllegalStateException("cache failure", new RuntimeException("cache cause"));
+				}, sent::add);
+			preview.begin(new ClientPresentationPreview.Binding(new Object(), TARGET, "block", context.level));
+			preview.tick();
+			assertEquals(1, sent.size(), "local failure still issues the one bounded server preview request");
+			assertEquals(2, capture.events().size());
+			assertTrue(capture.events().stream().allMatch(event -> event.getLevel() == Level.WARN));
+			assertTrue(capture.messages().get(0).contains("site=presentation/preview-reader"));
+			assertTrue(capture.messages().get(0).contains("handling=local-field-unavailable/server-preview-eligible"));
+			assertTrue(capture.messages().get(1).contains("site=presentation/preview-cache"));
+			assertTrue(capture.messages().get(1).contains("handling=cache-unavailable/server-preview-eligible"));
+			assertTrue(capture.messages().stream().noneMatch(text -> text.contains("reader failure")
+				|| text.contains("cache cause") || text.contains("adapter=") || text.contains("target=")));
+		}
+	}
+
 	@Test void throwingRequestTransportCleansUnavailableThenRethrowsWithoutLocalDuplicateReport() {
 		try (var capture = new PresentationDiagnosticCapture()) {
 			var context = new Context();
@@ -99,7 +124,7 @@ class PresentationPreviewDiagnosticsTest {
 				preview.projection().orElseThrow().fields().get(PresentationPropertyRef.root(ADAPTER, FIELD)));
 			assertEquals(1, capture.events().size(), "no duplicate report from the preview transport cleanup");
 			assertEquals(Level.WARN, capture.events().getFirst().getLevel());
-			assertTrue(capture.messages().getFirst().contains("operation=selector-content-init"));
+			assertTrue(capture.messages().getFirst().contains("site=selector-content-init"));
 			assertTrue(capture.messages().getFirst().contains("runtime preview transport cause"));
 			preview.tick(); assertEquals(1, sends[0]);
 			runtime.close();

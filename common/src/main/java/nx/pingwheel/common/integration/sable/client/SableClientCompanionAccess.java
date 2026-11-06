@@ -60,7 +60,7 @@ final class SableClientCompanionAccess {
 	}
 
 	static SableClientCompanionAccess create() throws ReflectiveOperationException {
-		return create(SableDiagnostics.global());
+		return create(SableDiagnostics.global(nx.pingwheel.common.diagnostics.Diagnostics.client()));
 	}
 
 	static SableClientCompanionAccess create(SableDiagnostics diagnostics)
@@ -75,6 +75,7 @@ final class SableClientCompanionAccess {
 			// routes fail soft below while the legacy location fallback survives.
 			diagnostics.captureException(
 				"provider-init",
+				SableDiagnostics.OPERATION_UNAVAILABLE,
 				"internal-access-unavailable",
 				failure,
 				"operation", "SableClientInternalAccess.create");
@@ -253,6 +254,7 @@ final class SableClientCompanionAccess {
 			} catch (RuntimeException failure) {
 				diagnostics.captureException(
 					"candidate-rejection",
+					SableDiagnostics.OPERATION_UNAVAILABLE,
 					"classification-resolution-failure",
 					failure,
 					"candidate_index", queriedCandidates,
@@ -278,6 +280,7 @@ final class SableClientCompanionAccess {
 			} catch (RuntimeException failure) {
 				diagnostics.captureException(
 					"candidate-rejection",
+					SableDiagnostics.OPERATION_UNAVAILABLE,
 					"provider-locator-parse-failure",
 					failure,
 					"candidate_index", queriedCandidates,
@@ -300,6 +303,7 @@ final class SableClientCompanionAccess {
 			} catch (ReflectiveOperationException | RuntimeException failure) {
 				diagnostics.captureException(
 					"candidate-rejection",
+					SableDiagnostics.OPERATION_UNAVAILABLE,
 					"candidate-exception",
 					failure,
 					"candidate_index", queriedCandidates,
@@ -353,7 +357,7 @@ final class SableClientCompanionAccess {
 			"world_hit_source", "logicalPose",
 			"block_registry_id", best.registryId(),
 			"block_entity", best.hasBlockEntity(),
-			"provider_locator", best.locator().encode(),
+			"provider_locator", SableDiagnostics.lazy(() -> best.locator().encode()),
 			"ray_projection", best.rayPoint().projection(),
 			"ray_perpendicular_distance_squared", best.rayPoint().perpendicularDistanceSquared());
 
@@ -404,13 +408,15 @@ final class SableClientCompanionAccess {
 						pos -> {
 							try { return internal.contains(plot, pos, work); }
 							catch (ReflectiveOperationException failure) {
-								diagnostics.captureException("supplemental-member-scan", "reflection-failure", failure,
+								diagnostics.captureException("supplemental-member-scan",
+									SableDiagnostics.SUPPLEMENTAL_INCOMPLETE, "reflection-failure", failure,
 									"sublevel", id, "position", pos);
 								throw new ExactNativeShapeClip.Incomplete();
 							}
 						}, level::isLoaded);
 				} catch (ReflectiveOperationException failure) {
-					diagnostics.captureException("supplemental-sublevel-scan", "reflection-failure", failure,
+					diagnostics.captureException("supplemental-sublevel-scan",
+						SableDiagnostics.SUPPLEMENTAL_INCOMPLETE, "reflection-failure", failure,
 						"raw_index", index);
 					throw new ExactNativeShapeClip.Incomplete();
 				}
@@ -447,7 +453,7 @@ final class SableClientCompanionAccess {
 					"target", target, "position", pos);
 				return false;
 			}
-		}));
+		}, nx.pingwheel.common.diagnostics.Diagnostics.client()));
 	}
 
 	private boolean contentMember(ClientLevel parent, UUID id, BlockPos pos) throws ReflectiveOperationException {

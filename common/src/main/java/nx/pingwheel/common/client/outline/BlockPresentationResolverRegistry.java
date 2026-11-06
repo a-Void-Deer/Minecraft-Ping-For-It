@@ -8,6 +8,7 @@ import java.util.Objects;
 
 import net.minecraft.world.level.BlockGetter;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -21,6 +22,8 @@ import org.jetbrains.annotations.Unmodifiable;
  * direct presentation remains available.</p>
  */
 public final class BlockPresentationResolverRegistry {
+	private static final DiagnosticChannel RESOLUTION_FAILURES = DiagnosticChannel.interval(
+		"block-presentation/resolve", java.time.Duration.ofSeconds(10));
 	/** The common registry with the vanilla multipart resolvers installed. */
 	public static final BlockPresentationResolverRegistry INSTANCE =
 		new BlockPresentationResolverRegistry(true);
@@ -57,17 +60,16 @@ public final class BlockPresentationResolverRegistry {
 		}
 
 		synchronized (lock) {
-			if (registrations.containsKey(validatedResolver.id())) {
-				OutlineDiagnostics.rejected("block-presentation-register", validatedResolver.id(), "duplicate-id", null);
-				return Registration.rejected();
+			if (!registrations.containsKey(validatedResolver.id())) {
+				Registration registration = new Registration(
+					this, validatedResolver.id(), validatedResolver.resolver());
+				registrations.put(validatedResolver.id(), registration);
+				publishSnapshot();
+				return registration;
 			}
-
-			Registration registration = new Registration(
-				this, validatedResolver.id(), validatedResolver.resolver());
-			registrations.put(validatedResolver.id(), registration);
-			publishSnapshot();
-			return registration;
 		}
+		OutlineDiagnostics.rejected("block-presentation-register", validatedResolver.id(), "duplicate-id", null);
+		return Registration.rejected();
 	}
 
 	/**
@@ -82,26 +84,25 @@ public final class BlockPresentationResolverRegistry {
 		}
 
 		synchronized (lock) {
-			if (!registrations.containsKey(anchorId)
-				|| registrations.containsKey(validatedResolver.id())) {
-				OutlineDiagnostics.rejected("block-presentation-register", validatedResolver.id(), "missing-anchor-or-duplicate", null);
-				return Registration.rejected();
-			}
-
-			Registration registration = new Registration(
-				this, validatedResolver.id(), validatedResolver.resolver());
-			Map<String, Registration> reordered = new LinkedHashMap<>();
-			for (Map.Entry<String, Registration> entry : registrations.entrySet()) {
-				if (entry.getKey().equals(anchorId)) {
-					reordered.put(validatedResolver.id(), registration);
+			if (registrations.containsKey(anchorId)
+				&& !registrations.containsKey(validatedResolver.id())) {
+				Registration registration = new Registration(
+					this, validatedResolver.id(), validatedResolver.resolver());
+				Map<String, Registration> reordered = new LinkedHashMap<>();
+				for (Map.Entry<String, Registration> entry : registrations.entrySet()) {
+					if (entry.getKey().equals(anchorId)) {
+						reordered.put(validatedResolver.id(), registration);
+					}
+					reordered.put(entry.getKey(), entry.getValue());
 				}
-				reordered.put(entry.getKey(), entry.getValue());
+				registrations.clear();
+				registrations.putAll(reordered);
+				publishSnapshot();
+				return registration;
 			}
-			registrations.clear();
-			registrations.putAll(reordered);
-			publishSnapshot();
-			return registration;
 		}
+		OutlineDiagnostics.rejected("block-presentation-register", validatedResolver.id(), "missing-anchor-or-duplicate", null);
+		return Registration.rejected();
 	}
 
 	/** Returns the immutable registration-order resolver snapshot. */
@@ -132,13 +133,13 @@ public final class BlockPresentationResolverRegistry {
 			try {
 				result = resolver.resolve(context);
 			} catch (Exception | LinkageError | AssertionError failure) {
-				Diagnostics.warn("block-presentation-resolve", resolver.getClass().getName(),
-					() -> "source=" + context.sourceSpec() + "; resolverClass=" + resolver.getClass().getName(), failure);
+				Diagnostics.client().atNormal().rateLimited(RESOLUTION_FAILURES).failure(Level.WARN, "block-presentation-resolve",
+					"resolver-failed", () -> "source=" + context.sourceSpec() + "; resolverClass=" + resolver.getClass().getName(), failure);
 				continue;
 			}
 			if (result == null) {
-				Diagnostics.event(Level.WARN, "block-presentation-resolve",
-					resolver.getClass().getName(), "null-resolution", () -> "source=" + context.sourceSpec());
+				Diagnostics.client().atNormal().rateLimited(RESOLUTION_FAILURES).event(Level.WARN, "block-presentation-resolve",
+					"null-resolution", () -> "source=" + context.sourceSpec());
 			}
 
 			if (result != null && result.handled()) {

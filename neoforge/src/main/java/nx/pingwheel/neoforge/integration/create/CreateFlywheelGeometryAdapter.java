@@ -38,7 +38,6 @@ import net.minecraft.core.Vec3i;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.phys.Vec3;
 
-import nx.pingwheel.common.Global;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.client.outline.FlywheelInstanceResolution;
 import org.apache.logging.log4j.Level;
@@ -80,52 +79,57 @@ import org.lwjgl.system.MemoryUtil;
  * Flywheel's normal renderer remains untouched.</p>
  */
 public final class CreateFlywheelGeometryAdapter {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticLogger LOG = Diagnostics.client();
 	public static final String SOURCE_ID = "create:flywheel_silhouette_mask";
 	private static final int MAX_INSTANCES_PER_TARGET = 1_024;
 
-	private static EntityBlockGeometrySourceRegistryHandle registration;
+	private static final CreateRegistrationLifecycle<EntityBlockGeometrySourceRegistryHandle> LIFECYCLE = new CreateRegistrationLifecycle<>();
 
 	private CreateFlywheelGeometryAdapter() {}
 
 	/** Called reflectively after the optional-mod checks have passed. */
-	public static synchronized void register() {
-		if (registration != null) {
-			return;
-		}
-
-		CreateFlywheelGeometrySource source = new CreateFlywheelGeometrySource();
-		EntityBlockGeometrySourceRegistry.Registration handle =
-			nx.pingwheel.common.client.outline.EntityBlockGeometrySourceRegistry.INSTANCE
-				.register(source);
-		registration = new EntityBlockGeometrySourceRegistryHandle(handle, source);
-		if (handle.accepted()) {
-			Global.LOGGER.info("create/flywheel source registration succeeded: id={} handleState={}",
-				SOURCE_ID, registration.state());
+	public static void register() {
+		@Nullable EntityBlockGeometrySourceRegistryHandle installed = LIFECYCLE.register(() -> {
+			CreateFlywheelGeometrySource source = new CreateFlywheelGeometrySource();
+			@Nullable EntityBlockGeometrySourceRegistry.Registration handle = null;
+			try {
+				handle = EntityBlockGeometrySourceRegistry.INSTANCE.register(source);
+				return new EntityBlockGeometrySourceRegistryHandle(handle, source);
+			} catch (RuntimeException | Error failure) {
+				try {
+					if (handle != null) handle.close();
+				} finally {
+					source.close();
+				}
+				throw failure;
+			}
+		});
+		if (installed == null) return;
+		String state = installed.state();
+		if (installed.handle.accepted()) {
+			LOG.atNormal().info("create/flywheel source registration succeeded: id={} handleState={}",
+				nx.pingwheel.common.diagnostics.SafeDiagnosticValue.code(SOURCE_ID),
+				nx.pingwheel.common.diagnostics.SafeDiagnosticValue.code(state));
 		} else {
-			Diagnostics.event(Level.WARN, "create-flywheel-register", SOURCE_ID, "registration-rejected",
-				() -> "handleState=" + registration.state());
+			LOG.atNormal().event(Level.WARN, "create-flywheel-register", "registration-rejected",
+				() -> "handleState=" + state);
 		}
 	}
 
 	/** Called reflectively during client teardown; safe to call repeatedly. */
-	public static synchronized void close() {
-		EntityBlockGeometrySourceRegistryHandle retained = registration;
-		try {
-			if (retained != null) {
-				retained.close();
-				Global.LOGGER.info("create/flywheel source registration: id={} handleState=closed", SOURCE_ID);
-			}
-		} finally {
-			registration = null;
+	public static void close() {
+		if (LIFECYCLE.close()) {
+			LOG.atNormal().info("create/flywheel source registration: id={} handleState=closed",
+				nx.pingwheel.common.diagnostics.SafeDiagnosticValue.code(SOURCE_ID));
 		}
 	}
 
 	/** Reflection-only state probe used by the loader registration diagnostics. */
-	public static synchronized String registrationState() {
-		return registration == null ? "not-registered" : registration.state();
+	public static String registrationState() {
+		return LIFECYCLE.state();
 	}
 
-	private static final class EntityBlockGeometrySourceRegistryHandle implements AutoCloseable {
+	private static final class EntityBlockGeometrySourceRegistryHandle implements CreateRegistrationLifecycle.Handle {
 		private final EntityBlockGeometrySourceRegistry.Registration handle;
 		private final CreateFlywheelGeometrySource source;
 
@@ -137,7 +141,7 @@ public final class CreateFlywheelGeometryAdapter {
 			this.source = source;
 		}
 
-		private String state() {
+		@Override public String state() {
 			return handle.accepted() ? "registered" : "rejected";
 		}
 
@@ -169,7 +173,7 @@ public final class CreateFlywheelGeometryAdapter {
 		@Override
 		public EntityBlockGeometryOutcome attempt(@Nullable EntityBlockGeometryContext context) {
 			return CreateFlywheelGeometryAttempt.run(attempt -> attempt(context, attempt), result ->
-				diagnostics.report(targetKey(context), result.reason(), result.target(), result.details(), result.failure()));
+				diagnostics.report(targetKey(context), result.reason(), result.outcome(), result.category(), result.target(), result.details(), result.failure()));
 		}
 
 		private CreateFlywheelGeometryAttempt.Result attempt(
@@ -230,7 +234,7 @@ public final class CreateFlywheelGeometryAdapter {
 
 
 			FlywheelInstanceResolution.Batch<ResolvedInstance> resolutionBatch = attempt.resolve(instances, instance -> {
-				@Nullable LiveInstanceResolution resolution = resolveLiveInstance(instance, context);
+				@Nullable LiveInstanceResolution resolution = resolveLiveInstance(instance, context, attempt.evidence);
 				return resolution == null ? null : new ResolvedInstance(
 					instance, resolution.instancer(), resolution.model(), resolution.environmentOrigin());
 			});
@@ -319,7 +323,7 @@ public final class CreateFlywheelGeometryAdapter {
 			final float currentOriginZ = originZ;
 			try {
 				return attempt.models(liveInstances,
-					resolved -> new InstanceGeometry(resolved.instance(), modelCache.get(resolved.model()), resolved.environmentOrigin()),
+					resolved -> new InstanceGeometry(resolved.instance(), modelCache.get(resolved.model(), attempt.evidence), resolved.environmentOrigin()),
 					geometry -> geometry.model().triangleCount(),
 					(reason, detail) -> empty(context, reason, currentManager, currentVisual, currentInstances, detail),
 					geometries -> renderPlan(context, currentManager, currentVisual, currentInstances, geometries,
@@ -329,7 +333,7 @@ public final class CreateFlywheelGeometryAdapter {
 					() -> "model extraction=" + failure.getMessage(), failure);
 			}
 			} catch (Exception | LinkageError | AssertionError failure) {
-				return failed(context, FlywheelDiagnosticReason.MASK_EMISSION_FAILED,
+				return failed(context, FlywheelDiagnosticReason.INSTANCE_RESOLUTION_FAILED,
 					manager, visual, instances, () -> "unclassified source failure", failure);
 			}
 		}
@@ -345,8 +349,15 @@ public final class CreateFlywheelGeometryAdapter {
 				plan = buildPlan(
 					geometries, originX, originY, originZ, renderTicks, renderSeconds, context);
 			} catch (GeometryFormatException failure) {
-				return failed(context, failure.reason(), manager, visual, instances,
-					() -> "current-frame plan construction=" + failure.getMessage(), failure);
+				return new CreateFlywheelGeometryAttempt.Result(EntityBlockGeometryOutcome.FAILED, failure.reason(),
+					FlywheelDiagnostics.FailureCategory.RENDER, () -> targetDescription(context),
+					() -> diagnosticDetails(context, manager, visual, instances,
+						() -> "current-frame plan construction=" + failure.getMessage()), failure);
+			} catch (Exception | LinkageError | AssertionError failure) {
+				return new CreateFlywheelGeometryAttempt.Result(EntityBlockGeometryOutcome.FAILED,
+					FlywheelDiagnosticReason.TRANSFORM_UNAVAILABLE, FlywheelDiagnostics.FailureCategory.RENDER,
+					() -> targetDescription(context),
+					() -> diagnosticDetails(context, manager, visual, instances, () -> "current-frame plan construction failed"), failure);
 			}
 
 			int plannedTriangles;
@@ -363,9 +374,10 @@ public final class CreateFlywheelGeometryAdapter {
 			}
 
 			if (!frameBudget.reserve(context.frameId(), plannedTriangles)) {
+				int frameTriangleCount = frameBudget.count();
 				return empty(context, FlywheelDiagnosticReason.BUDGET_EXCEEDED,
 					manager, visual, instances,
-					() -> "frameTriangleCount=" + frameBudget.count() + "; requested=" + plannedTriangles
+					() -> "frameTriangleCount=" + frameTriangleCount + "; requested=" + plannedTriangles
 						+ "; maxFrameTriangles=" + FlywheelModelBudget.MAX_TRIANGLES_PER_FRAME);
 			}
 
@@ -391,7 +403,7 @@ public final class CreateFlywheelGeometryAdapter {
 				return failed(context, FlywheelDiagnosticReason.MASK_EMISSION_FAILED,
 					manager, visual, instances,
 					() -> "shared OutlineBufferSource commit failed before first vertex; plannedTriangles="
-						+ plannedTriangles + "; voxelFallbackApplied=true",
+						+ plannedTriangles + "; voxelFallback=eligible",
 					originalFailure);
 			} catch (Exception | LinkageError | AssertionError failure) {
 				frameBudget.release(plannedTriangles);
@@ -406,20 +418,22 @@ public final class CreateFlywheelGeometryAdapter {
 	}
 
 	private static BlockEntityVisualLookup liveVisualAt(VisualizationManagerImpl manager, BlockPos pos) {
-		if (!(manager.blockEntities() instanceof VisualManagerImpl<?, ?> visualManager)) {
+		@Nullable var blockEntities = manager.blockEntities();
+		if (!(blockEntities instanceof VisualManagerImpl<?, ?> visualManager)) {
 			return new BlockEntityVisualLookup(null, true,
-				() -> "managerBlockEntitiesClass=" + className(manager.blockEntities()));
+				() -> "managerBlockEntitiesClass=" + className(blockEntities));
 		}
-		if (!(visualManager.getStorage() instanceof BlockEntityStorage storage)) {
+		@Nullable var currentStorage = visualManager.getStorage();
+		if (!(currentStorage instanceof BlockEntityStorage storage)) {
 			return new BlockEntityVisualLookup(null, true,
 				() -> "visualManagerClass=" + className(visualManager)
-					+ "; storageClass=" + className(visualManager.getStorage()));
+					+ "; storageClass=" + className(currentStorage));
 		}
 		return new BlockEntityVisualLookup(storage.visualAtPos(pos.asLong()), false,
 			() -> "visualManager=" + identity(visualManager) + "; storage=" + identity(storage));
 	}
 
-	private static List<Instance> collectLiveInstances(BlockEntityVisual<?> visual) {
+	private static @Unmodifiable List<Instance> collectLiveInstances(BlockEntityVisual<?> visual) {
 		// One sentinel beyond the limit distinguishes an over-budget visual while
 		// keeping the callback allocation bounded.
 		List<Instance> instances = new ArrayList<>(MAX_INSTANCES_PER_TARGET + 1);
@@ -443,7 +457,7 @@ public final class CreateFlywheelGeometryAdapter {
 	 * deliberately used instead of probing visibility: indirect live pages are
 	 * not reported visible by {@code InstanceHandleImpl}.</p>
 	 */
-	private static AbstractInstancer<?> resolveLiveInstancer(InstanceHandleImpl.State<?> state) {
+	private static @Nullable AbstractInstancer<?> resolveLiveInstancer(InstanceHandleImpl.@Nullable State<?> state) {
 		if (state instanceof AbstractInstancer<?> instancer) {
 			return instancer;
 		}
@@ -451,19 +465,33 @@ public final class CreateFlywheelGeometryAdapter {
 	}
 
 	private static @Nullable LiveInstanceResolution resolveLiveInstance(
-		Instance instance,
-		EntityBlockGeometryContext context
+		@Nullable Instance instance,
+		@Nullable EntityBlockGeometryContext context,
+		CreateFlywheelGeometryAttempt.Evidence evidence
 	) {
-		if (instance == null || !(instance.handle() instanceof InstanceHandleImpl<?> handle)) {
+		evidence.resolutionAttempts++;
+		evidence.instance = instance;
+		evidence.handle = null;
+		evidence.backendState = null;
+		evidence.instancer = null;
+		evidence.model = null;
+		if (instance == null) return null;
+		@Nullable var handleValue = instance.handle();
+		evidence.handle = handleValue;
+		if (!(handleValue instanceof InstanceHandleImpl<?> handle)) {
 			return null;
 		}
 
-		AbstractInstancer<?> instancer = resolveLiveInstancer(handle.state);
+		InstanceHandleImpl.@Nullable State<?> state = handle.state;
+		evidence.backendState = state;
+		@Nullable AbstractInstancer<?> instancer = resolveLiveInstancer(state);
+		evidence.instancer = instancer;
 		if (instancer == null) {
 			return null;
 		}
 
-		Vec3i environmentOrigin = environmentOrigin(instancer);
+		@Nullable Vec3i environmentOrigin = environmentOrigin(instancer);
+		evidence.environmentOrigin = environmentOrigin;
 		boolean hasExternalTransform = context != null && context.transform() != null;
 		if (!FlywheelEnvironmentPolicy.accepts(
 			hasExternalTransform,
@@ -473,28 +501,30 @@ public final class CreateFlywheelGeometryAdapter {
 			return null;
 		}
 
-		AbstractInstancer.Recreate<?> recreate = instancer.recreate;
+		AbstractInstancer.@Nullable Recreate<?> recreate = instancer.recreate;
 		if (recreate == null || recreate.key() == null) {
 			return null;
 		}
 
 		var key = recreate.key();
-		Model model = key.model();
+		@Nullable Model model = key.model();
+		evidence.model = model;
 		if (model == null) {
 			return null;
 		}
 
-		InstanceType<?> instanceType = instance.type();
+		@Nullable InstanceType<?> instanceType = instance.type();
 		if (instanceType == null || instancer.type != instanceType || key.type() != instanceType
 			|| !supportedInstanceType(instance)) {
 			return null;
 		}
 
+		evidence.resolvedInstances++;
 		return new LiveInstanceResolution(
 			instancer, model, hasExternalTransform ? environmentOrigin : null);
 	}
 
-	private static Vec3i environmentOrigin(AbstractInstancer<?> instancer) {
+	private static @Nullable Vec3i environmentOrigin(@Nullable AbstractInstancer<?> instancer) {
 		if (instancer == null) {
 			return null;
 		}
@@ -846,12 +876,6 @@ public final class CreateFlywheelGeometryAdapter {
 		}
 		if (instances != null) {
 			result.append("; instanceCount=").append(instances.size());
-			for (int index = 0; index < instances.size(); index++) {
-				result.append("; instance[").append(index).append("]=")
-					.append(instanceDetails(instances.get(index), context));
-				result.append("; instance[").append(index).append("].model=")
-					.append(modelDetails(instances.get(index), context));
-			}
 		}
 		if (detail != null) {
 			@Nullable String detailText = detail.get();
@@ -862,140 +886,21 @@ public final class CreateFlywheelGeometryAdapter {
 		return result.toString();
 	}
 
-	private static String instanceDetails(Instance instance, EntityBlockGeometryContext context) {
-		if (instance == null) {
-			return "<null>";
-		}
-		String type;
-		try {
-			type = String.valueOf(instance.type());
-		} catch (Exception | LinkageError | AssertionError failure) {
-			type = "<type-unavailable:" + failure + ">";
-		}
-		return className(instance) + "@" + Integer.toHexString(System.identityHashCode(instance))
-			+ "{type=" + type + "; " + instanceStateDetails(instance, context) + "}";
-	}
-
-	private static String modelDetails(Instance instance, EntityBlockGeometryContext context) {
-		if (instance == null) {
-			return "<null-instance>";
-		}
-		try {
-			LiveInstanceResolution resolution = resolveLiveInstance(instance, context);
-			if (resolution == null) {
-				return "<model-unavailable; " + instanceStateDetails(instance, context) + ">";
-			}
-			Model model = resolution.model();
-			List<Model.ConfiguredMesh> meshes = model.meshes();
-			StringBuilder result = new StringBuilder(identity(model))
-				.append("{meshCount=").append(meshes == null ? "<null>" : meshes.size());
-			if (meshes != null) {
-				for (int index = 0; index < meshes.size(); index++) {
-					Model.ConfiguredMesh configured = meshes.get(index);
-					if (configured == null || configured.mesh() == null) {
-						result.append("; mesh[").append(index).append("]=<null>");
-						continue;
-					}
-					Material material = configured.material();
-					ResourceLocation texture = material == null ? null : material.texture();
-					result.append("; mesh[").append(index).append("]={vertices=")
-						.append(configured.mesh().vertexCount())
-						.append("; indices=").append(configured.mesh().indexCount())
-						.append("; texture=").append(texture);
-					if (material != null && texture != null) {
-						result.append("; ").append(materialDetails(material, texture));
-					}
-					result.append("}");
-				}
-			}
-			return result.append("}").toString();
-		} catch (Exception | LinkageError | AssertionError failure) {
-			return "<model-details-failed: " + failure + ">";
-		}
-	}
-
-	private static String instanceStateDetails(Instance instance, EntityBlockGeometryContext context) {
-		if (instance == null) {
-			return "handleClass=<null>; backendStateClass=<null>; resolvedInstancerClass=<null>";
-		}
-		try {
-			Object handleValue = instance.handle();
-			if (!(handleValue instanceof InstanceHandleImpl<?> handle)) {
-				return "handleClass=" + className(handleValue)
-					+ "; backendStateClass=<not-InstanceHandleImpl>; resolvedInstancerClass=<null>";
-			}
-			InstanceHandleImpl.State<?> state = handle.state;
-			AbstractInstancer<?> instancer = resolveLiveInstancer(state);
-			return "handleClass=" + className(handleValue)
-				+ "; backendStateClass=" + className(state)
-				+ "; resolvedInstancerClass=" + className(instancer)
-				+ "; environmentClass=" + className(instancer == null ? null : instancer.environment)
-				+ "; environmentOrigin=" + environmentOriginDetails(instancer)
-				+ "; transformMode=" + transformMode(context);
-		} catch (Exception | LinkageError | AssertionError failure) {
-			return "handleClass=<unavailable>; backendStateClass=<unavailable>; resolvedInstancerClass=<unavailable:"
-				+ failure + ">";
-		}
-	}
-
-	private static String identity(Object value) {
+	private static String identity(@Nullable Object value) {
 		return value == null ? "<null>" : className(value)
 			+ "@" + Integer.toHexString(System.identityHashCode(value));
 	}
 
-	private static String className(Object value) {
+	private static String className(@Nullable Object value) {
 		return value == null ? "<null>" : value.getClass().getName();
 	}
 
-	private static String environmentOriginDetails(AbstractInstancer<?> instancer) {
-		if (instancer == null || instancer.environment == null) {
-			return "<null>";
-		}
-		if (!(instancer.environment instanceof VisualizationContext environment)) {
-			return "<public-renderOrigin-unavailable>";
-		}
-		try {
-			return String.valueOf(environment.renderOrigin());
-		} catch (Exception | LinkageError | AssertionError failure) {
-			return "<unavailable: " + failure + ">";
-		}
-	}
-
-	private static String transformMode(EntityBlockGeometryContext context) {
+	private static String transformMode(@Nullable EntityBlockGeometryContext context) {
 		return context != null && context.transform() != null ? "embedded" : "main";
 	}
 
-	private static String materialDetails(Material material, ResourceLocation texture) {
-		return "materialClass=" + className(material)
-			+ "{texture=" + texture
-			+ "; shaders=" + materialValue(material, "shaders", material::shaders)
-			+ "; fog=" + materialValue(material, "fog", material::fog)
-			+ "; cutout=" + materialValue(material, "cutout", material::cutout)
-			+ "; light=" + materialValue(material, "light", material::light)
-			+ "; blur=" + materialValue(material, "blur", material::blur)
-			+ "; mipmap=" + materialValue(material, "mipmap", material::mipmap)
-			+ "; backfaceCulling=" + materialValue(material, "backfaceCulling", material::backfaceCulling)
-			+ "; polygonOffset=" + materialValue(material, "polygonOffset", material::polygonOffset)
-			+ "; depthTest=" + materialValue(material, "depthTest", material::depthTest)
-			+ "; transparency=" + materialValue(material, "transparency", material::transparency)
-			+ "; writeMask=" + materialValue(material, "writeMask", material::writeMask)
-			+ "; useOverlay=" + materialValue(material, "useOverlay", material::useOverlay)
-			+ "; useLight=" + materialValue(material, "useLight", material::useLight)
-			+ "; cardinalLightingMode=" + materialValue(
-				material, "cardinalLightingMode", material::cardinalLightingMode)
-			+ "; value=" + materialValue(material, "toString", material::toString) + "}";
-	}
-
-	private static String materialValue(Material material, String field, Supplier<?> supplier) {
-		try {
-			return String.valueOf(supplier.get());
-		} catch (Exception | LinkageError | AssertionError failure) {
-			return "<" + field + " unavailable: " + failure + ">";
-		}
-	}
-
 	private record BlockEntityVisualLookup(
-		BlockEntityVisual<?> visual,
+		@Nullable BlockEntityVisual<?> visual,
 		boolean storageUnavailable,
 		Supplier<String> details
 	) {}
@@ -1003,32 +908,45 @@ public final class CreateFlywheelGeometryAdapter {
 	private record InstanceGeometry(
 		Instance instance,
 		ModelGeometry model,
-		Vec3i environmentOrigin
+		@Nullable Vec3i environmentOrigin
 	) {}
 
 	private record LiveInstanceResolution(
 		AbstractInstancer<?> instancer,
 		Model model,
-		Vec3i environmentOrigin
+		@Nullable Vec3i environmentOrigin
 	) {}
 
 	private record ResolvedInstance(
 		Instance instance,
 		AbstractInstancer<?> instancer,
 		Model model,
-		Vec3i environmentOrigin
+		@Nullable Vec3i environmentOrigin
 	) {}
 
 	private static final class ModelGeometryCache {
 		private final WeakIdentityCache<Model, ModelGeometry> entries = new WeakIdentityCache<>();
 
-		private synchronized ModelGeometry get(Model model) throws GeometryFormatException {
-			ModelGeometry cached = entries.get(model);
+		private synchronized ModelGeometry get(Model model, CreateFlywheelGeometryAttempt.Evidence evidence) throws GeometryFormatException {
+			evidence.modelAttempts++;
+			evidence.model = model;
+			@Nullable ModelGeometry cached = entries.get(model);
 			if (cached != null) {
+				evidence.cacheHits++;
+				evidence.meshCount = cached.meshes().size();
+				evidence.extractedTriangles += cached.triangleCount();
 				return cached;
 			}
 
-			ModelGeometry extracted = extract(model);
+			ModelGeometry extracted;
+			try {
+				extracted = extract(model, evidence);
+			} catch (GeometryFormatException failure) {
+				throw failure;
+			} catch (Exception | LinkageError | AssertionError failure) {
+				throw new GeometryFormatException(FlywheelDiagnosticReason.MESH_EXTRACTION_FAILED,
+					"model extraction failed", failure);
+			}
 			entries.put(model, extracted);
 			return extracted;
 		}
@@ -1037,8 +955,8 @@ public final class CreateFlywheelGeometryAdapter {
 			entries.clear();
 		}
 
-		private static ModelGeometry extract(Model model) throws GeometryFormatException {
-			List<Model.ConfiguredMesh> configuredMeshes;
+		private static ModelGeometry extract(Model model, CreateFlywheelGeometryAttempt.Evidence evidence) throws GeometryFormatException {
+			@Nullable List<Model.ConfiguredMesh> configuredMeshes;
 			try {
 				configuredMeshes = model.meshes();
 			} catch (Exception | LinkageError | AssertionError failure) {
@@ -1048,34 +966,41 @@ public final class CreateFlywheelGeometryAdapter {
 			}
 
 			if (configuredMeshes == null || configuredMeshes.isEmpty()) {
+				evidence.meshCount = 0;
 				return ModelGeometry.EMPTY;
 			}
-			if (configuredMeshes.size() > FlywheelModelBudget.MAX_MESHES_PER_MODEL) {
+			int meshCount = configuredMeshes.size();
+			evidence.meshCount = meshCount;
+			if (meshCount > FlywheelModelBudget.MAX_MESHES_PER_MODEL) {
 				throw new GeometryFormatException(
 					FlywheelDiagnosticReason.BUDGET_EXCEEDED,
-					"meshCount=" + configuredMeshes.size());
+					"meshCount=" + meshCount);
 			}
 
 			List<FlywheelModelBudget.MeshCounts> counts = new ArrayList<>(configuredMeshes.size());
 		List<MaterialInfo> materials = new ArrayList<>(configuredMeshes.size());
 		for (int meshIndex = 0; meshIndex < configuredMeshes.size(); meshIndex++) {
-			Model.ConfiguredMesh configured = configuredMeshes.get(meshIndex);
+			evidence.meshIndex = meshIndex;
+			@Nullable Model.ConfiguredMesh configured = configuredMeshes.get(meshIndex);
 			if (configured == null || configured.mesh() == null) {
 				throw new GeometryFormatException(
 					FlywheelDiagnosticReason.MESH_EXTRACTION_FAILED,
 					"configured mesh " + meshIndex + " or its mesh is null");
 			}
 
-			Material material = configured.material();
+			@Nullable Material material = configured.material();
+			evidence.material = material;
+			evidence.texture = null;
 			if (material == null) {
 				throw new GeometryFormatException(
 					FlywheelDiagnosticReason.MATERIAL_INCOMPATIBLE,
 					"configured mesh " + meshIndex + " has null material");
 			}
 
-			ResourceLocation texture;
+			@Nullable ResourceLocation texture;
 			try {
 				texture = material.texture();
+				evidence.texture = texture;
 			} catch (Exception | LinkageError | AssertionError failure) {
 				throw new GeometryFormatException(
 					FlywheelDiagnosticReason.MATERIAL_INCOMPATIBLE,
@@ -1088,7 +1013,11 @@ public final class CreateFlywheelGeometryAdapter {
 			}
 
 			Mesh mesh = configured.mesh();
-			counts.add(new FlywheelModelBudget.MeshCounts(mesh.vertexCount(), mesh.indexCount()));
+			int vertices = mesh.vertexCount();
+			int indices = mesh.indexCount();
+			evidence.vertexCount = vertices;
+			evidence.indexCount = indices;
+			counts.add(new FlywheelModelBudget.MeshCounts(vertices, indices));
 			materials.add(new MaterialInfo(texture));
 		}
 
@@ -1101,9 +1030,13 @@ public final class CreateFlywheelGeometryAdapter {
 
 		List<MeshGeometry> meshes = new ArrayList<>(preflight.meshCount());
 		for (int index = 0; index < configuredMeshes.size(); index++) {
+			evidence.meshIndex = index;
 			Model.ConfiguredMesh configured = configuredMeshes.get(index);
 			MaterialInfo material = materials.get(index);
-			meshes.add(extractMesh(configured.mesh(), material));
+			MeshGeometry extracted = extractMesh(configured.mesh(), material);
+			meshes.add(extracted);
+			evidence.extractedMeshes++;
+			evidence.extractedTriangles += extracted.indices().length / 3;
 		}
 		return new ModelGeometry(List.copyOf(meshes), preflight.triangleCount());
 	}
@@ -1135,8 +1068,8 @@ public final class CreateFlywheelGeometryAdapter {
 					"mesh allocation size overflow", overflow);
 			}
 
-			MemoryBlock vertexMemory = null;
-			MemoryBlock indexMemory = null;
+			@Nullable MemoryBlock vertexMemory = null;
+			@Nullable MemoryBlock indexMemory = null;
 			try {
 				vertexMemory = MemoryBlock.malloc(vertexBytes);
 				FullVertexView vertices = new FullVertexView();
@@ -1208,9 +1141,9 @@ public final class CreateFlywheelGeometryAdapter {
 	private record MaterialInfo(ResourceLocation texture) {}
 
 	private record MeshGeometry(
-		float[] positions,
-		float[] uvs,
-		int[] indices,
+		float @Unmodifiable [] positions,
+		float @Unmodifiable [] uvs,
+		int @Unmodifiable [] indices,
 		ResourceLocation texture
 	) {
 		private int vertexCount() {
@@ -1232,7 +1165,7 @@ public final class CreateFlywheelGeometryAdapter {
 		}
 	}
 
-	private record ModelGeometry(List<MeshGeometry> meshes, int triangleCount) {
+	private record ModelGeometry(@Unmodifiable List<MeshGeometry> meshes, int triangleCount) {
 		private static final ModelGeometry EMPTY = new ModelGeometry(List.of(), 0);
 	}
 

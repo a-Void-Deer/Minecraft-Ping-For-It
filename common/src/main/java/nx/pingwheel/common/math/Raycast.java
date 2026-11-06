@@ -1,9 +1,11 @@
 package nx.pingwheel.common.math;
 
+import java.time.Duration;
 import java.util.Objects;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.ClipContext;
@@ -11,6 +13,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.phys.*;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.interaction.CapturedRay;
 import nx.pingwheel.common.interaction.InteractionToken;
 import nx.pingwheel.common.interaction.MinecraftTargetSnapshotFactory;
@@ -20,6 +24,11 @@ import nx.pingwheel.common.interaction.candidate.*;
 import static nx.pingwheel.common.CommonClient.Game;
 
 public class Raycast {
+	private static final DiagnosticChannel ENTITY_SCAN_FAILURE =
+		DiagnosticChannel.interval("precise-entity-scan", Duration.ofSeconds(10));
+	private static final DiagnosticChannel BLOCK_SCAN_FAILURE =
+		DiagnosticChannel.interval("precise-block-scan", Duration.ofSeconds(10));
+
 	private Raycast() {}
 
 	/**
@@ -211,8 +220,8 @@ public class Raycast {
 			}
 		} catch (RuntimeException | LinkageError failure) {
 			// Discard certification, not the independently completed ordinary trace.
-			nx.pingwheel.common.diagnostics.Diagnostics.warn("precise/entity-scan", "native",
-				() -> "token=" + token.sequence() + " dimension=" + level.dimension().location(), failure);
+			reportEntityScanIncomplete(token, () -> level.dimension().location().toString(),
+				nativeDistance, pingDistance, policy, failure);
 		}
 		try {
 			boolean[] providerComplete = {true};
@@ -243,8 +252,8 @@ public class Raycast {
 			}
 		} catch (RuntimeException | LinkageError failure) {
 			// A partial native/provider scan cannot certify a nearest block.
-			nx.pingwheel.common.diagnostics.Diagnostics.warn("precise/block-scan", "native",
-				() -> "token=" + token.sequence() + " dimension=" + level.dimension().location(), failure);
+			reportBlockScanIncomplete(token, () -> level.dimension().location().toString(),
+				nativeDistance, pingDistance, policy, failure);
 		}
 		return Optional.of(new SelectorTrace(ordinary, new FrozenCandidateAcquisition(token, ray, pingDistance,
 			world(ordinary.hitResult().getLocation()), collector.evidence(), certified)));
@@ -252,6 +261,24 @@ public class Raycast {
 
 	/** Contains transient ordinary HitResult only; retain candidates(), never this object across callbacks. */
 	public record SelectorTrace(RaycastSelection ordinarySelection, FrozenCandidateAcquisition candidates) {}
+
+	static void reportEntityScanIncomplete(InteractionToken token, Supplier<String> dimensionId,
+		double nativeDistance, double pingDistance, RaycastPolicy policy, Throwable failure) {
+		Diagnostics.client().atNormal().rateLimited(ENTITY_SCAN_FAILURE).failure(org.apache.logging.log4j.Level.WARN,
+			"precise/entity-scan", "entity-slots-incomplete",
+			() -> "token=" + token.sequence() + " dimension=" + dimensionId.get()
+				+ " nativeRange=" + nativeDistance + " pingRange=" + pingDistance
+				+ " policy=" + policy, failure);
+	}
+
+	static void reportBlockScanIncomplete(InteractionToken token, Supplier<String> dimensionId,
+		double nativeDistance, double pingDistance, RaycastPolicy policy, Throwable failure) {
+		Diagnostics.client().atNormal().rateLimited(BLOCK_SCAN_FAILURE).failure(org.apache.logging.log4j.Level.WARN,
+			"precise/block-scan", "block-slots-incomplete",
+			() -> "token=" + token.sequence() + " dimension=" + dimensionId.get()
+				+ " nativeRange=" + nativeDistance + " pingRange=" + pingDistance
+				+ " policy=" + policy, failure);
+	}
 
 	static boolean collectEntityCandidates(Iterable<Entity> entities, Vec3 start, Vec3 end,
 		RaycastPolicy policy, EntityLocalGeometryRegistry.Snapshot owners, EntityLocalRaycastRequest request,

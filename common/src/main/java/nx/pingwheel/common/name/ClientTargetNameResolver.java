@@ -33,6 +33,7 @@ import nx.pingwheel.common.integration.sable.client.SableClientProvider;
  * through {@link TargetNameComposer}.
  */
 public final class ClientTargetNameResolver {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel LOOKUP_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("target-name-client-lookup", java.time.Duration.ofSeconds(10));
 
 	/**
 	 * Testable seam for live entity/block adapters.  Values returned by the seam
@@ -93,8 +94,8 @@ public final class ClientTargetNameResolver {
 					.orElseGet(TargetNameComposer::unknown);
 			};
 		} catch (RuntimeException unavailable) {
-			nx.pingwheel.common.diagnostics.Diagnostics.warn("target-name/client-lookup", lookup.getClass().getName(),
-				() -> "kind=" + target.kind() + "; using unknown name", unavailable);
+			nx.pingwheel.common.diagnostics.Diagnostics.client().atNormal().rateLimited(LOOKUP_FAILURE).warn("target-name/client-lookup", "unknown-name", unavailable,
+				() -> "kind=" + target.kind() + "; using unknown name");
 			return TargetNameComposer.unknown();
 		}
 	}

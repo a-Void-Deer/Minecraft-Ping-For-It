@@ -4,6 +4,9 @@ import java.util.Objects;
 import java.util.Optional;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Stage;
 
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -35,11 +38,12 @@ public final class SableClientProvider {
 
 	public static final String PROVIDER_ID = "sable";
 
-	private static final IntegrationLinkGuard LINK_GUARD = new IntegrationLinkGuard(PROVIDER_ID);
+	private static final IntegrationLinkGuard LINK_GUARD = new IntegrationLinkGuard(PROVIDER_ID,
+		nx.pingwheel.common.diagnostics.Diagnostics.client());
 	private static volatile @Nullable SableClientCompanionAccess access;
 	private static volatile @Nullable SableClientCompanionAccess contentAccess;
 	private static volatile boolean contentUnavailable;
-	private static volatile SableDiagnostics diagnostics = SableDiagnostics.global();
+	private static volatile SableDiagnostics diagnostics = SableDiagnostics.global(nx.pingwheel.common.diagnostics.Diagnostics.client());
 	private static final SablePresentationLogGate PRESENTATION_FAILURES =
 		new SablePresentationLogGate();
 
@@ -67,7 +71,7 @@ public final class SableClientProvider {
 			"block_pos", hit == null ? null : hit.getBlockPos(),
 			"ray_start", rayStart,
 			"ray_end", rayEnd,
-			"ray_direction", rayDirection(rayStart, rayEnd));
+			"ray_direction", SableDiagnostics.lazy(() -> rayDirection(rayStart, rayEnd)));
 
 		if (!ModContext.HasSable) {
 			logCaptureFallback("EXTERNAL_CAPTURE_FAILED", "sable-not-loaded", "attempt");
@@ -101,6 +105,7 @@ public final class SableClientProvider {
 		} catch (ReflectiveOperationException | RuntimeException failure) {
 			currentDiagnostics.captureException(
 				"capture",
+				SableDiagnostics.CAPTURE_PROJECTED_FALLBACK,
 				"exception",
 				failure,
 				"hit", hit,
@@ -108,12 +113,13 @@ public final class SableClientProvider {
 				"block_pos", hit.getBlockPos(),
 				"ray_start", rayStart,
 				"ray_end", rayEnd,
-				"ray_direction", rayDirection(rayStart, rayEnd));
+				"ray_direction", SableDiagnostics.lazy(() -> rayDirection(rayStart, rayEnd)));
 			logCaptureFallback("EXTERNAL_CAPTURE_FAILED", "exception", "capture");
 			return Optional.empty();
 		} catch (LinkageError failure) {
 			currentDiagnostics.captureException(
 				"capture",
+				SableDiagnostics.INTEGRATION_DISABLED,
 				"linkage-error",
 				failure,
 				"hit", hit,
@@ -121,7 +127,7 @@ public final class SableClientProvider {
 				"block_pos", hit.getBlockPos(),
 				"ray_start", rayStart,
 				"ray_end", rayEnd,
-				"ray_direction", rayDirection(rayStart, rayEnd));
+				"ray_direction", SableDiagnostics.lazy(() -> rayDirection(rayStart, rayEnd)));
 			LINK_GUARD.disableSilently();
 			logCaptureFallback("EXTERNAL_CAPTURE_FAILED", "linkage-error", "capture");
 			return Optional.empty();
@@ -148,11 +154,17 @@ public final class SableClientProvider {
 					diagnostics.capture("supplemental-ray", "incomplete");
 					return false;
 				} catch (ReflectiveOperationException | RuntimeException failure) {
-					diagnostics.captureException("supplemental-ray", "unavailable-or-incomplete", failure,
+					diagnostics.captureException("supplemental-ray",
+						LINK_GUARD.disabled()
+							? SableDiagnostics.INTEGRATION_DISABLED : SableDiagnostics.SUPPLEMENTAL_INCOMPLETE,
+						"unavailable-or-incomplete", failure,
 						"companion_contract", "1.6.0", "api", "getAllSubLevels/getPlot");
 					return false;
 				} catch (LinkageError failure) {
-					diagnostics.captureException("supplemental-ray", "linkage-unavailable", failure,
+					diagnostics.captureException("supplemental-ray",
+						LINK_GUARD.disabled()
+							? SableDiagnostics.INTEGRATION_DISABLED : SableDiagnostics.SUPPLEMENTAL_INCOMPLETE,
+						"linkage-unavailable", failure,
 						"companion_contract", "1.6.0", "api", "getAllSubLevels/getPlot");
 					return false;
 				}
@@ -186,6 +198,7 @@ public final class SableClientProvider {
 		} catch (RuntimeException failure) {
 			diagnostics.captureException(
 				"projection",
+				SableDiagnostics.CAPTURE_PROJECTED_FALLBACK,
 				"exception",
 				failure,
 				"hit_position", hitPosition);
@@ -193,6 +206,7 @@ public final class SableClientProvider {
 		} catch (LinkageError failure) {
 			diagnostics.captureException(
 				"projection",
+				SableDiagnostics.INTEGRATION_DISABLED,
 				"linkage-error",
 				failure,
 				"hit_position", hitPosition);
@@ -453,30 +467,43 @@ public final class SableClientProvider {
 	}
 
 	static void logPresentationFailure(String operation, String reason, @Nullable Object... fields) {
-		if (!diagnostics.enabled(Level.DEBUG)) return;
-		String key = presentationFailureKey(operation, reason, null, fields);
-		if (!PRESENTATION_FAILURES.shouldLog(key)) {
-			return;
+		SableDiagnostics current = diagnostics;
+		Stage stage = Stage.ENABLED;
+		try {
+			if (!current.enabled(Level.DEBUG)) return;
+			stage = Stage.CONTEXT;
+			String key = presentationFailureKey(operation, reason, null, fields);
+			stage = Stage.ADMISSION;
+			if (!PRESENTATION_FAILURES.shouldLog(key)) return;
+			stage = Stage.SINK;
+			current.approvedEvent(SableDiagnostics.CAPTURE_PREFIX, "presentation", reason, append(
+				new Object[] {"operation", operation}, fields));
+		} catch (RuntimeException | LinkageError failure) {
+			Diagnostics.faults().report(DiagnosticSide.CLIENT, "sable/presentation", stage,
+				Diagnostics.profile(DiagnosticSide.CLIENT), failure);
 		}
-
-		diagnostics.approvedEvent(SableDiagnostics.CAPTURE_PREFIX, "presentation", reason, append(
-			new Object[] {"operation", operation}, fields));
 	}
 
 	static void logPresentationException(
 		String operation, Throwable failure, @Nullable Object... fields
 	) {
 		Objects.requireNonNull(failure, "failure");
-		if (!diagnostics.enabled(Level.WARN)) return;
-		String key = presentationFailureKey(
-			operation, "exception", failure.getClass().getName(), fields);
-		if (!PRESENTATION_FAILURES.shouldLog(key)) {
-			return;
+		SableDiagnostics current = diagnostics;
+		Stage stage = Stage.ENABLED;
+		try {
+			if (!current.enabled(Level.WARN)) return;
+			stage = Stage.CONTEXT;
+			String key = presentationFailureKey(operation, "exception", failure.getClass().getName(), fields);
+			stage = Stage.ADMISSION;
+			if (!PRESENTATION_FAILURES.shouldLog(key)) return;
+			stage = Stage.SINK;
+			current.approvedException(SableDiagnostics.CAPTURE_PREFIX, "presentation",
+				SableDiagnostics.OPERATION_UNAVAILABLE, "exception", failure,
+				append(new Object[] {"operation", operation}, fields));
+		} catch (RuntimeException | LinkageError reportingFailure) {
+			Diagnostics.faults().report(DiagnosticSide.CLIENT, "sable/presentation", stage,
+				Diagnostics.profile(DiagnosticSide.CLIENT), reportingFailure);
 		}
-
-		diagnostics.approvedException(
-			SableDiagnostics.CAPTURE_PREFIX, "presentation", "exception", failure,
-			append(new Object[] {"operation", operation}, fields));
 	}
 
 	private static String presentationFailureKey(

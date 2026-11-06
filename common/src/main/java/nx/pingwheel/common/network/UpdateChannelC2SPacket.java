@@ -33,7 +33,7 @@ public record UpdateChannelC2SPacket(String channel) implements IPacket {
 	}
 
 	public static UpdateChannelC2SPacket readSafe(FriendlyByteBuf buf) {
-		return PacketHandler.readSafe(buf, UpdateChannelC2SPacket.class);
+		return PacketHandler.readSafe(buf, UpdateChannelC2SPacket.class, nx.pingwheel.common.diagnostics.Diagnostics.server());
 	}
 
 	@Override

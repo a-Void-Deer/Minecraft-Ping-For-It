@@ -16,6 +16,10 @@ import nx.pingwheel.common.presentation.preview.PresentationPreviewLimits;
 /** Framed bytes remain undecoded until current request authorization is available. */
 public record PresentationPreviewS2CPacket(int protocol, long epoch, long view, long requestId,
 	@Nullable String adapterId, int schema, @Nullable Status status, byte @Unmodifiable [] sectionBytes) implements IPacket {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel DECODE_FAILURE =
+		nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("preview-section-decode", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel SECTION_REJECTION =
+		nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("preview-section-reject", java.time.Duration.ofSeconds(10));
 	public enum Status { RESULT, UNAVAILABLE, DEFERRED, REJECTED }
 	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath("pingforit-s2c", "presentation-preview-v1");
 	public static final Type<PresentationPreviewS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
@@ -59,15 +63,15 @@ public record PresentationPreviewS2CPacket(int protocol, long epoch, long view, 
 				return rejectSection("field-kind");
 			return section;
 		} catch (RuntimeException invalid) {
-			Diagnostics.debug("presentation/preview-section-decode", "client", () -> "adapter=" + adapterId
-				+ " schema=" + schema + " request=" + requestId + " bytes=" + sectionBytes.length, invalid);
+			Diagnostics.client().atDebug().rateLimited(DECODE_FAILURE).debug("presentation/preview-section-decode", "discard-section", invalid, () -> "adapter=" + adapterId
+				+ " schema=" + schema + " request=" + requestId + " bytes=" + sectionBytes.length);
 			return null;
 		}
 		finally { buf.release(); }
 	}
 	private @Nullable PresentationSection rejectSection(String reason) {
-		Diagnostics.event(Level.DEBUG, "presentation/preview-section-reject", "client", reason,
-			() -> "adapter=" + adapterId + " schema=" + schema + " request=" + requestId + " bytes=" + sectionBytes.length);
+		Diagnostics.client().atDebug().rateLimited(SECTION_REJECTION).event(Level.DEBUG, "presentation/preview-section-reject", "discard-section",
+			() -> "reason=" + reason + " adapter=" + adapterId + " schema=" + schema + " request=" + requestId + " bytes=" + sectionBytes.length);
 		return null;
 	}
 	@Override public void write(FriendlyByteBuf buf) {
@@ -97,5 +101,5 @@ public record PresentationPreviewS2CPacket(int protocol, long epoch, long view, 
 	}
 	@Override public ResourceLocation getId() { return PACKET_ID; }
 	@Override public Type<PresentationPreviewS2CPacket> type() { return PACKET_TYPE; }
-	public static PresentationPreviewS2CPacket readSafe(FriendlyByteBuf buf) { return PacketHandler.readSafe(buf, PresentationPreviewS2CPacket.class); }
+	public static PresentationPreviewS2CPacket readSafe(FriendlyByteBuf buf) { return PacketHandler.readSafe(buf, PresentationPreviewS2CPacket.class, Diagnostics.client()); }
 }

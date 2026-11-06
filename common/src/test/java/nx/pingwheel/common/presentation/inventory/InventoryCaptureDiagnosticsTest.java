@@ -9,7 +9,7 @@ import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
-import nx.pingwheel.common.diagnostics.RateLimitedDiagnosticsTestScope;
+import nx.pingwheel.common.presentation.PresentationDiagnosticScope;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LogEvent;
@@ -20,13 +20,68 @@ import org.apache.logging.log4j.core.config.Configuration;
 import org.apache.logging.log4j.core.config.LoggerConfig;
 import org.apache.logging.log4j.core.config.Property;
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@NotNullByDefault
 class InventoryCaptureDiagnosticsTest {
+	@Test void normalProfileDoesNotEvaluateUnexpectedFailureContext() {
+		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "private:block"), new UUID(51, 2), BlockFace.NORTH);
+		try (var logs = new InventoryDiagnosticsTestCapture()) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
+			var calls = new java.util.concurrent.atomic.AtomicInteger();
+			InventoryCaptureDiagnostics.warn("test-profile-disabled", input, null, () -> { calls.incrementAndGet(); return "private-detail"; },
+				new IllegalStateException("private-message"));
+			assertEquals(0, calls.get()); assertEquals(1, logs.events().size());
+			assertEquals(Level.WARN, logs.events().getFirst().getLevel());
+			assertTrue(logs.messages().contains("handling=invalidate-read"));
+			assertTrue(!logs.messages().contains("private-"));
+		}
+	}
+
+	@Test void belowMinimumProfileDoesNotConsumeReasonGateAndFirstDeepAttemptStillReports() throws ReflectiveOperationException {
+		var field = InventoryCaptureDiagnostics.class.getDeclaredField("LAST_LOGGED"); field.setAccessible(true);
+		var gate = (java.util.concurrent.atomic.AtomicLongArray) field.get(null);
+		long[] previous = new long[gate.length()];
+		for (int index = 0; index < gate.length(); index++) previous[index] = gate.getAndSet(index, 0);
+		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 4, 5, 6, "private:block"), new UUID(51, 4), BlockFace.NORTH);
+		try (var logs = new InventoryDiagnosticsTestCapture()) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
+			InventoryCaptureDiagnostics.boundExceeded(input, () -> { throw new AssertionError("below-minimum detail"); });
+			assertEquals(0L, gate.get(0), "a below-minimum diagnostic must not consume the domain gate");
+			assertTrue(logs.events().isEmpty());
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.DEEP);
+			InventoryCaptureDiagnostics.boundExceeded(input, "first-eligible");
+			assertTrue(gate.get(0) != 0);
+			assertEquals(1, logs.events().size());
+			assertTrue(logs.messages().contains("detail=first-eligible"));
+			InventoryCaptureDiagnostics.boundExceeded(input, "repeat");
+			assertEquals(1, logs.events().size(), "the existing reason interval still suppresses a same-window repeat");
+		} finally { for (int index = 0; index < gate.length(); index++) gate.set(index, previous[index]); }
+	}
+
+	@Test void backendDisabledAtEligibleProfileStillAdvancesReasonGateWithoutFormatting() throws ReflectiveOperationException {
+		var field = InventoryCaptureDiagnostics.class.getDeclaredField("LAST_LOGGED"); field.setAccessible(true);
+		var gate = (java.util.concurrent.atomic.AtomicLongArray) field.get(null);
+		long[] previous = new long[gate.length()];
+		for (int index = 0; index < gate.length(); index++) previous[index] = gate.getAndSet(index, 0);
+		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 4, 5, 6, "private:block"), new UUID(51, 5), BlockFace.NORTH);
+		try (var logs = new InventoryDiagnosticsTestCapture(Level.OFF)) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.DEEP);
+			InventoryCaptureDiagnostics.boundExceeded(input, () -> { throw new AssertionError("backend-disabled detail"); });
+			assertTrue(gate.get(0) != 0, "the established backend-disabled reason semantics advance the domain gate");
+			assertTrue(logs.events().isEmpty());
+		} finally { for (int index = 0; index < gate.length(); index++) gate.set(index, previous[index]); }
+	}
 
 	@Test void externalCaptureFailureKeepsProviderIdentityAndOriginalDetailsWithoutPhysicalCoordinates() {
 		var target = new Target.ExternalBlockTarget("minecraft:overworld", "test:provider", "stable-machine",
@@ -53,7 +108,20 @@ class InventoryCaptureDiagnosticsTest {
 			InventoryCaptureDiagnostics.warn("test-budget", input, null, () -> { throw new AssertionError("expected refusal has no log"); }, exhausted);
 			InventoryCaptureDiagnostics.warn("test-budget", input, null, () -> { throw new AssertionError("expected wrapper has no log"); },
 				new InventorySourceAccess.CursorlessReadFailure(1, exhausted));
+			InventoryCaptureDiagnostics.warn("test-budget", input, null, () -> { throw new AssertionError("expected certified budget has no log"); },
+				new InventorySharedRead.ReadFailure(InventorySharedRead.Check.AUTHORITY_DENIED, exhausted));
 			assertTrue(logs.events.isEmpty());
+		}
+	}
+	@Test void normalFailureHandlingDistinguishesCleanupFromSelectionRejection() {
+		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "private:block"), new UUID(51, 7), BlockFace.NORTH);
+		try (var logs = new InventoryDiagnosticsTestCapture()) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
+			InventoryCaptureDiagnostics.warn("source-close", input, null, () -> { throw new AssertionError("NORMAL cleanup context"); }, new IllegalStateException("private-cleanup"));
+			InventoryCaptureDiagnostics.warn("selection-witness", input, null, () -> { throw new AssertionError("NORMAL selection context"); }, new IllegalArgumentException("private-selection"));
+			assertEquals(2, logs.events().size()); assertTrue(logs.messages().contains("handling=cleanup-continued"));
+			assertTrue(logs.messages().contains("handling=reject-selection")); assertTrue(!logs.messages().contains("private-"));
 		}
 	}
 
@@ -84,8 +152,8 @@ class InventoryCaptureDiagnosticsTest {
 		long[] previous = new long[gate.length()];
 		for (int index = 0; index < gate.length(); index++) previous[index] = gate.getAndSet(index, 0);
 		try (var logs = new InventoryDiagnosticsTestCapture()) {
-			for (int index = 0; index < 65; index++) nx.pingwheel.common.diagnostics.Diagnostics.event(Level.WARN,
-				"inventory/test-window-" + index, "test", "filled", () -> "unrelated");
+			for (int index = 0; index < 65; index++) nx.pingwheel.common.diagnostics.Diagnostics.server().atDetailed().event(Level.WARN,
+				"inventory/test-window", "filled", () -> "unrelated");
 			int before = logs.events().size();
 			InventoryCaptureDiagnostics.boundExceeded(input, "native-refusal");
 			InventoryCaptureDiagnostics.boundExceeded(input, "repeat-refusal");
@@ -99,13 +167,14 @@ class InventoryCaptureDiagnosticsTest {
 	}
 
 	/** Captures the production lazy logger without touching Global or platform services. */
+	@NotNullByDefault
 	static final class Capture implements AutoCloseable {
 		private final Logger logger = (Logger) LogManager.getLogger("pingforit");
 		private final LoggerContext context = logger.getContext();
 		private final Configuration configuration = context.getConfiguration();
-		private final LoggerConfig previousConfig = configuration.getLoggers().get(logger.getName());
+		private final @Nullable LoggerConfig previousConfig = configuration.getLoggers().get(logger.getName());
 		final List<LogEvent> events = new ArrayList<>();
-		private final RateLimitedDiagnosticsTestScope diagnostics;
+		private final PresentationDiagnosticScope diagnostics;
 		private final AbstractAppender appender = new AbstractAppender("inventory-diagnostic-test", null, null, true, Property.EMPTY_ARRAY) {
 			@Override public void append(LogEvent event) { events.add(event.toImmutable()); }
 		};
@@ -117,10 +186,10 @@ class InventoryCaptureDiagnosticsTest {
 			context.updateLoggers();
 			// Shared with InventorySourceSnapshotTest: each capture starts with
 			// independent limiter state and restores the shared one on close.
-			diagnostics = RateLimitedDiagnosticsTestScope.install();
+			diagnostics = PresentationDiagnosticScope.install();
 		}
 		void report(String operation, Level level, String... details) {
-			var matching = events.stream().filter(e -> e.getMessage().getFormattedMessage().contains("operation=inventory/" + operation + " ")).toList();
+			var matching = events.stream().filter(e -> e.getMessage().getFormattedMessage().contains("site=inventory/" + operation + " ")).toList();
 			assertEquals(1, matching.size(), () -> "Expected one " + operation + " report; got " + events);
 			var event = matching.getFirst();
 			assertEquals(level, event.getLevel());

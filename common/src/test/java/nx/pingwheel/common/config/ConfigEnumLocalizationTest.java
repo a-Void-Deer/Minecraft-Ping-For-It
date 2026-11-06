@@ -3,6 +3,7 @@ package nx.pingwheel.common.config;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.resource.LanguageUtils;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -60,6 +61,10 @@ class ConfigEnumLocalizationTest {
 					for (ChannelMode mode : ChannelMode.values()) {
 						assertLocalized(translations, resourceLocale, defaultLocale,
 							LanguageUtils.of("value", mode.toString()).getKey());
+					}
+					for (LoggingProfile profile : LoggingProfile.values()) {
+						assertLocalized(translations, resourceLocale, defaultLocale,
+							LanguageUtils.of("value", profile.name().toLowerCase(Locale.ROOT)).getKey());
 					}
 				}
 			}

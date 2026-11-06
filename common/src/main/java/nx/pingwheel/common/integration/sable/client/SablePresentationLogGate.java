@@ -6,6 +6,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.LongSupplier;
 import org.jetbrains.annotations.Nullable;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Stage;
 
 /**
  * Bounds and rate-limits diagnostics for presentation failures.
@@ -41,9 +44,16 @@ final class SablePresentationLogGate {
 		this.maxEntries = maxEntries;
 	}
 
-	synchronized boolean shouldLog(String key) {
+	boolean shouldLog(String key) {
 		Objects.requireNonNull(key, "key");
-		return shouldLog(key, clock.getAsLong());
+		long now;
+		try { now = clock.getAsLong(); }
+		catch (RuntimeException | LinkageError failure) {
+			Diagnostics.faults().report(DiagnosticSide.CLIENT, "sable/presentation", Stage.CHANNEL_CLOCK,
+				Diagnostics.profile(DiagnosticSide.CLIENT), failure);
+			return false;
+		}
+		synchronized (this) { return shouldLog(key, now); }
 	}
 
 	private boolean shouldLog(String key, long nowNanos) {

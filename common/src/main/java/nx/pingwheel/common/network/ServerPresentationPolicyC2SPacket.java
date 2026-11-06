@@ -99,7 +99,7 @@ public record ServerPresentationPolicyC2SPacket(
 	}
 
 	public static ServerPresentationPolicyC2SPacket readSafe(FriendlyByteBuf buf) {
-		return PacketHandler.readSafe(buf, ServerPresentationPolicyC2SPacket.class);
+		return PacketHandler.readSafe(buf, ServerPresentationPolicyC2SPacket.class, nx.pingwheel.common.diagnostics.Diagnostics.server());
 	}
 
 	@Override

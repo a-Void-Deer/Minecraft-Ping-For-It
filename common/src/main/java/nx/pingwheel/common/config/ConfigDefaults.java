@@ -1,5 +1,6 @@
 package nx.pingwheel.common.config;
 
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
@@ -20,6 +21,7 @@ public final class ConfigDefaults {
 
 	@NotNullByDefault
 	public static final class Client {
+		public static final LoggingProfile LOGGING_PROFILE = LoggingProfile.NORMAL;
 		public static final int PING_VOLUME = 100;
 		public static final int PING_DISTANCE = 2048;
 		public static final int PING_SIZE = 100;
@@ -93,6 +95,7 @@ public final class ConfigDefaults {
 	@NotNullByDefault
 	public static final class Server {
 
+		public static final LoggingProfile LOGGING_PROFILE = LoggingProfile.NORMAL;
 		public static final ChannelMode DEFAULT_CHANNEL_MODE = ChannelMode.AUTO;
 		public static final boolean PLAYER_TRACKING_ENABLED = true;
 		public static final boolean BUDGET_DELAY_NOTIFICATIONS_ENABLED = true;

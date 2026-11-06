@@ -1099,9 +1099,29 @@ native live getters from the slot allowance.
 
 One caller-backed validation allowance is admitted before initial source
 resolution and follows the operation through nested discovery, validity,
-member, mapping and read checks. It is not reset at each helper or item.
-Attempted work remains paid after denial, a defer or an exception; unused
-admission is released without refunding work already attempted.
+member, mapping and read checks. Production ITEM discovery admits the paid root
+probe first, then the actual container or provider-lookup route, then the actual
+returned-layout finish, each before the callbacks it authorizes, instead of
+reserving one generic worst case up front; legacy non-staged entry points keep
+the complete profile.
+It is not reset at each helper or item. Attempted work remains paid after
+denial, a defer or an exception; unused admission is released without
+refunding work already attempted. A stage refusal or budget defer does not
+change authority or produce an empty result.
+
+First-sampling source construction does not outlive its probe iteration. One
+synchronous sampling or recovery probe may construct the current source once
+and hand the same source and resolution envelope to that consumer's prepare or
+step in the same iteration; it is not reused across consumers, requests, ticks,
+inputs or display ceilings. Current preparation, read and publication authority,
+pool admission, alias binding and recovery retirement keep their existing
+owners; a prior probe success is not a permission cache. An untransferred candidate and
+its envelope are closed; a transferred candidate becomes the round or
+binding-evidence retained metadata without a second resolution charge, and the
+receiving owner pins it until close. A failed candidate close retires only its
+own binding and alias, not another owner/face or pooled peer. Preview terminal
+refresh, Tracking refresh and invalidation cadence are unchanged.
+
 Staged fluid-port admission follows
 [shared operation accounting](shared_sources.md#cost-accounting), rather than
 reserving one opaque worst-case provider cost for every operation. Page size is
@@ -1147,9 +1167,11 @@ the initial in the same tick. Insufficient admission may reject the create or
 leave bounded retry work; it is not an authorization denial.
 
 Owned source metadata, including frozen views, member layouts and slot mappings,
-has a retained charge separate from fixed round state. Pre-resolution admission
-holds its construction workspace until that ownership transfers into the round
-or binding-evidence reservation. Retained-cost queries use cached metadata and
+has a retained charge separate from fixed round state. Discovery admission holds
+each construction workspace until the actual finish workspace becomes the
+source-owned retained metadata charge; the round or binding-evidence owner then
+pins that source until that owner closes, with no release/re-reserve gap.
+Retained-cost and lazy reprojection-summary queries use cached metadata and
 perform no provider or world callback. Each source's bounded page-cost directory
 is retained and charged with its handle; these profiles describe metadata work
 only, not contents or a cached permission decision. Reacquired access wrappers
@@ -1167,13 +1189,21 @@ scratch. Refused admission advances no cursor and invokes no guarded operation.
 
 The audited coordinated Vault read admits five full common-validation envelopes
 per attempted slot: four successful gates and one possible failure
-reclassification, plus one local resident-operation envelope. Synchronous
-operation state, root budget and refusal bookkeeping overlap those checks and
-are admitted before callbacks. Attempted allocation and work accumulate across
-slots while workspace follows peak overlap. Runtime page-entry/page-exit and
-association checks remain separately paid. The provider-specific ordering and
-opt-in are owned by [Create](../../integrations/create.md#vault-inventory-provider);
-generic certified chests, legacy and external reads retain their previous path.
+reclassification, plus one local resident-operation envelope. NeoForge fluid
+coordination admits complete common and provider validation costs and
+operation-local resident state under the same caller grant. Neither coordinated
+path caches a successful validation, probe result or content.
+Synchronous operation state, root budget and refusal bookkeeping overlap those
+checks and are admitted before callbacks.
+Attempted allocation and work accumulate across slots while workspace follows
+peak overlap. Runtime page-entry/page-exit and association checks remain
+separately paid. Ordinary fluid ordering is owned by
+[provider safety](#provider-layer-and-safety); Create-specific gates and Vault
+ordering by [Create Vault](../../integrations/create.md#vault-inventory-provider)
+and [Create fluid tank](../../integrations/create.md#fluid-tank-inventory-provider);
+generic audited-operation semantics by
+[shared sources](shared_sources.md#source-access); generic certified chests,
+legacy and external reads retain their previous path.
 
 Item processing keeps effect-copy descriptors and encoding-planner scratch local
 to one root, allocating each group only when used. Descriptor ranges preserve
@@ -1264,6 +1294,26 @@ current native tank/view addresses incrementally; cursorless providers use a
 bounded one-pass enumeration and cannot invent cross-tick continuation. Borrowed
 native fluid data is frozen synchronously before another metadata callback,
 then source and provider postchecks must pass before it becomes usable evidence.
+The ordinary NeoForge capability route may use the audited single-use
+[coordinated read](shared_sources.md#source-access); the common pre/post
+validation, state binding and provisional-result rules are owned there. Only
+the production-guarded ordinary NeoForge fluid capability access qualifies.
+The production guarded wrapper may still run a tail authority callback after the
+common pre-validation and revoke a sibling. The coordinated path therefore keeps
+the provider's full current check and its admission immediately before the
+native getter, and omits only the standalone consume's duplicate post-getter
+check. The common pre/post validations, synchronous freeze and provisional
+result follow the linked shared single-use boundary. The standalone `valid` and
+`consume` paths remain unchanged for every route. Unknown, decorated, raw or
+custom access paths, external or Sable bindings, and Fabric or Forge routes
+remain outside this opt-in; an ordinary capability read in a world with Sable
+membership still checks that current membership, and that check does not by
+itself disable coordination. An indexed observation does not add an outer
+current-check pair for a non-empty pass; each visited address keeps its complete
+before/after validation, while a zero-tank or zero-limit pass performs one
+explicit current check. Provider-internal route, capability, count, capacity and
+held-state checks remain; only adjacent equivalent world gates with no
+intervening callback are merged.
 The native [mixed-time sweep boundary](#native-incremental-reads) applies to
 movement between fluid addresses as it does to item slots.
 

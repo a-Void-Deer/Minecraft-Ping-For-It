@@ -2,8 +2,13 @@ package nx.pingwheel.neoforge.integration.create;
 
 import nx.pingwheel.common.client.outline.EntityBlockGeometryOutcome;
 import nx.pingwheel.common.client.outline.FlywheelDiagnosticReason;
+import nx.pingwheel.common.client.outline.FlywheelDiagnostics;
 import nx.pingwheel.common.client.outline.FlywheelInstanceResolution;
 import nx.pingwheel.common.client.outline.FlywheelModelBudget;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
+import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -20,7 +25,8 @@ import java.util.function.ToLongFunction;
 final class CreateFlywheelGeometryAttempt {
 
 	private @Nullable Throwable resolutionFailure;
-	private String resolutionDetails = "";
+	private Supplier<String> resolutionDetails = () -> "";
+	final Evidence evidence = new Evidence();
 
 	private CreateFlywheelGeometryAttempt() {}
 
@@ -35,9 +41,15 @@ final class CreateFlywheelGeometryAttempt {
 			FlywheelDiagnosticReason reason = result.reason() == FlywheelDiagnosticReason.RENDERED
 				? FlywheelDiagnosticReason.INSTANCE_RESOLUTION_FAILED : result.reason();
 			Result selected = result;
-			result = new Result(result.outcome(), reason, result.target(),
-				() -> attempt.resolutionDetails + "; " + selected.details().get(), combined);
+			FlywheelDiagnostics.FailureCategory category = result.category() == FlywheelDiagnostics.FailureCategory.NONE
+				? FlywheelDiagnostics.FailureCategory.INSTANCE_RESOLUTION : result.category();
+			result = new Result(result.outcome(), reason, category, result.target(),
+				() -> attempt.resolutionDetails.get() + "; " + selected.details().get(), combined);
 		}
+		Result selected = result;
+		LoggingProfile profile = Diagnostics.profile(DiagnosticSide.CLIENT);
+		result = new Result(selected.outcome(), selected.reason(), selected.category(), selected.target(),
+			() -> selected.details().get() + "; " + attempt.evidence.describe(profile == LoggingProfile.DEBUG), selected.failure());
 		report.accept(result);
 		return result.outcome();
 	}
@@ -46,7 +58,7 @@ final class CreateFlywheelGeometryAttempt {
 		FlywheelInstanceResolution.Batch<R> batch = FlywheelInstanceResolution.resolve(instances, resolver);
 		resolutionFailure = batch.firstFailure();
 		if (resolutionFailure != null) {
-			resolutionDetails = batch.failureDetails();
+			resolutionDetails = batch::failureDetails;
 		}
 		return batch;
 	}
@@ -84,8 +96,52 @@ final class CreateFlywheelGeometryAttempt {
 	}
 
 	@NotNullByDefault
-	record Result(EntityBlockGeometryOutcome outcome, FlywheelDiagnosticReason reason,
-		Supplier<String> target, Supplier<String> details, @Nullable Throwable failure) {}
+	record Result(EntityBlockGeometryOutcome outcome, FlywheelDiagnosticReason reason, FlywheelDiagnostics.FailureCategory category,
+		Supplier<String> target, Supplier<String> details, @Nullable Throwable failure) {
+		Result(EntityBlockGeometryOutcome outcome, FlywheelDiagnosticReason reason,
+			Supplier<String> target, Supplier<String> details, @Nullable Throwable failure) {
+			this(outcome, reason, FlywheelDiagnostics.category(reason, outcome, failure), target, details, failure);
+		}
+	}
+
+	/** Fixed-size facts copied where business work already reads them; never calls back into a live graph. */
+	@NotNullByDefault
+	static final class Evidence {
+		int resolutionAttempts;
+		int resolvedInstances;
+		int modelAttempts;
+		int cacheHits;
+		int meshCount = -1;
+		int meshIndex = -1;
+		int vertexCount = -1;
+		int indexCount = -1;
+		int extractedMeshes;
+		long extractedTriangles;
+		@Nullable Object instance;
+		@Nullable Object handle;
+		@Nullable Object backendState;
+		@Nullable Object instancer;
+		@Nullable Object model;
+		@Nullable Object material;
+		@Nullable ResourceLocation texture;
+		@Nullable Object environmentOrigin;
+
+		String describe(boolean debug) {
+			String summary = "resolutionAttempts=" + resolutionAttempts + "; resolvedInstances=" + resolvedInstances
+				+ "; modelAttempts=" + modelAttempts + "; cacheHits=" + cacheHits
+				+ "; meshCount=" + meshCount + "; lastMeshIndex=" + meshIndex
+				+ "; extractedMeshes=" + extractedMeshes + "; extractedTriangles=" + extractedTriangles
+				+ "; lastInstanceClass=" + type(instance) + "; modelClass=" + type(model);
+			if (!debug) return summary;
+			return summary + "; handleClass=" + type(handle)
+				+ "; backendStateClass=" + type(backendState) + "; instancerClass=" + type(instancer)
+				+ "; materialClass=" + type(material)
+				+ "; texture=" + texture + "; environmentOriginClass=" + type(environmentOrigin)
+				+ "; vertices=" + vertexCount + "; indices=" + indexCount;
+		}
+
+		private static String type(@Nullable Object value) { return value == null ? "<unobserved>" : value.getClass().getName(); }
+	}
 
 	/** Only this fresh wrapper is mutated; both original exceptions remain untouched. */
 	@NotNullByDefault

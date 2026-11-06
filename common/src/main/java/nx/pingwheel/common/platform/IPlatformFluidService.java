@@ -15,6 +15,7 @@ import net.minecraft.world.level.material.Fluid;
 import nx.pingwheel.common.presentation.inventory.InventoryQuantities;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidReadOperation;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -279,20 +280,53 @@ public interface IPlatformFluidService {
 		/** Release only, idempotent; no new provider callbacks or unadmitted traversal. */
 		@Override void close();
 	}
+	/**
+	 * Additional audited synchronous protocol, not implied by Access. Only the production guarded
+	 * wrapper around the exact ordinary NeoForge capability access forwards it. External/Sable
+	 * bindings, Fabric/Forge and custom or decorated accesses never obtain this capability by
+	 * implementing the interface or by claiming a route.
+	 */
+	@NotNullByDefault
+	interface CoordinatedAccess extends Access {
+		/** Pure cached bound for the full pre-getter current fence and handoff; common validations are separate. */
+		OperationProfile coordinatedResidentProfile();
+		/**
+		 * Single-use handoff. The operation binds this provider, slot, guarded wrapper and caller
+		 * allowance before any local metadata; the provider calls beforeResident then its admitted
+		 * full current fence before the getter, and afterResident after synchronous freeze, with no
+		 * provider, authority or admission callback after that final check.
+		 */
+		void consumeCoordinatedResident(int slot, InventoryFluidReadOperation operation, Operation admitted);
+	}
 	private static InventoryValidationBudget.Cost observationLoopCost(int limit) {
 		return new InventoryValidationBudget.Cost(256, 256, 8L + limit);
+	}
+	/**
+	 * The only common entry to the audited coordinated protocol. A bare Access implementation,
+	 * a custom decorator, an external binding or a Fabric/Forge access does not qualify; the
+	 * production wrapper must have recognized the exact ordinary NeoForge capability class.
+	 */
+	static IPlatformFluidService.@Nullable CoordinatedAccess coordinated(Access access) {
+		return access instanceof GuardedAccess guarded ? guarded.coordinated() : null;
 	}
 	/** Keeps the former root entry/exit fences; metadata accessors are now pure, not authorization boundaries. */
 	static Access guarded(Context context, Access delegate) { return new GuardedAccess(context, delegate); }
 	@NotNullByDefault
 	final class GuardedAccess implements Access {
 		private static final OperationProfile WRAPPER = new OperationProfile(new InventoryValidationBudget.Cost(256, 256, 16), 2, 2, 0);
+		/** The one ordinary NeoForge capability implementation audited for the coordinated handoff. */
+		private static final String COORDINATED_PROVIDER = "nx.pingwheel.neoforge.platform.FluidCapabilityAccess";
 		private final Context context;
 		private final Access delegate;
+		private final IPlatformFluidService.@Nullable CoordinatedAccess coordinated;
 		private boolean closed;
 		private GuardedAccess(Context context, Access delegate) {
 			this.context = Objects.requireNonNull(context); this.delegate = Objects.requireNonNull(delegate);
+			coordinated = delegate instanceof CoordinatedAccess capable && delegate.getClass().getName().equals(COORDINATED_PROVIDER)
+				&& delegate.getClass().getClassLoader() == GuardedAccess.class.getClassLoader()
+				? capable : null;
 		}
+		private IPlatformFluidService.@Nullable CoordinatedAccess coordinated() { return closed ? null : coordinated; }
 		private void before(Operation operation) {
 			if (closed) throw new IllegalStateException("fluid access closed");
 			operation.allowance().debit(WRAPPER.ownedCost()); context.require(context.root(), operation);

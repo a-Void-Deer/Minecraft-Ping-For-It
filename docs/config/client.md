@@ -187,6 +187,18 @@ These display lists are separate from the entity-selection blacklist controlled
 by `markBlacklistedTargets`; see
 [the blacklist boundary](../architecture/picking/selection_policy.md#raycast-use-and-blacklist-boundary).
 
+### Diagnostic logging
+
+| Key | JSON form | Local meaning |
+| --- | --- | --- |
+| `loggingProfile` | `NORMAL`, `DEEP`, or `DEBUG` | Local disclosure profile for client-side diagnostic reports. The persisted spelling is the uppercase value. |
+
+The client default is `NORMAL`. A missing, explicit `null`, or unknown value
+resolves to `NORMAL`. The field is additive: a same-version document without it
+loads the default without a shape migration or rewrite. The model setter stores
+the preference only; runtime publication and disclosure effects are owned by
+[diagnostics and logging](../architecture/logging.md).
+
 ### Obsolete keys
 
 `spatialSelector.targetGlide` is not a modeled preference and has no input,

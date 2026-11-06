@@ -31,15 +31,14 @@ public interface EntityOutlineLogger {
 	}
 
 	/**
-	 * A logger backed by the mod's global Log4j logger.
+	 * A logger backed by the explicit client diagnostic side.
 	 *
 	 * <p>The reference to {@link Diagnostics} is deferred into the returned
 	 * lambda body, so calling this factory does not initialize the backend;
 	 * only the first {@code transition(...)} invocation does.
 	 */
 	static EntityOutlineLogger global() {
-		return (added, removed, changed, total) -> Diagnostics.domainApprovedEvent(Level.DEBUG,
-			"entity-outline-state", "aggregate", "snapshot-transition",
+		return (added, removed, changed, total) -> Diagnostics.client().atDebug().detail(Level.DEBUG,
 			() -> "entity outline state transition: added=%d removed=%d changed=%d total=%d"
 				.formatted(added, removed, changed, total));
 	}

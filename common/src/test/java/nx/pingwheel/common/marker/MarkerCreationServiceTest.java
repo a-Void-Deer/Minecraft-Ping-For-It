@@ -32,7 +32,10 @@ import nx.pingwheel.common.domain.TargetMatchContext;
 import nx.pingwheel.common.domain.TargetResolver;
 import nx.pingwheel.common.domain.TargetType;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
-import nx.pingwheel.common.diagnostics.RateLimitedDiagnosticsTestScope;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
+import nx.pingwheel.common.presentation.PresentationDiagnosticScope;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.name.AuthoritativeTargetNameResolver;
 import nx.pingwheel.common.name.TargetNameJson;
@@ -506,7 +509,8 @@ class MarkerCreationServiceTest {
 			String report = event.getMessage().getFormattedMessage();
 			assertEquals(Level.WARN, event.getLevel());
 			assertTrue(report.contains("marker-create-name-resolve"));
-			assertTrue(report.contains(nameResolver.getClass().getName()));
+			assertTrue(report.contains("handling=unknown-name"));
+			assertTrue(report.contains("targetKind=BLOCK"));
 			assertTrue(report.contains("name lookup unavailable"));
 			assertTrue(report.contains("resolver cause"));
 			assertTrue(report.length() <= SafeExceptionReport.MAX_CHARACTERS);
@@ -544,7 +548,8 @@ class MarkerCreationServiceTest {
 			String report = event.getMessage().getFormattedMessage();
 			assertEquals(Level.WARN, event.getLevel());
 			assertTrue(report.contains("marker-target-name-resolve"));
-			assertTrue(report.contains(nameResolver.getClass().getName()));
+			assertTrue(report.contains("handling=unknown-name"));
+			assertTrue(report.contains("targetKind=ENTITY"));
 			assertTrue(report.contains("authoritative name unavailable"));
 			assertTrue(report.contains("name source failed"));
 			assertTrue(report.length() <= SafeExceptionReport.MAX_CHARACTERS);
@@ -662,6 +667,52 @@ class MarkerCreationServiceTest {
 		assertEquals(2, accepted.creation().orElseThrow().winnerChanges().size());
 		store.forgetRecipient(RECIPIENT);
 		assertEquals(marker.properties(), store.find(marker.id()).orElseThrow().properties());
+	}
+
+	@Test
+	void normalContractFailureReportsRejectCreateWithoutRawTargetOrCause() {
+		newService();
+		Target requested = blockTarget();
+		validator.fail(new IllegalStateException("validator secret target=" + requested, new RuntimeException("validator root cause")));
+
+		try (var diagnostics = new DiagnosticCapture()) {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.NORMAL);
+			assertRejected(create(requested, "attention"), MarkerRejectReason.INVALID_REQUEST);
+			assertEquals(1, diagnostics.events.size());
+			LogEvent event = diagnostics.events.getFirst();
+			assertEquals(Level.WARN, event.getLevel());
+			String report = event.getMessage().getFormattedMessage();
+			assertTrue(report.contains("site=marker-create-validate"));
+			assertTrue(report.contains("handling=reject-create"));
+			assertTrue(report.contains("failure="));
+			assertFalse(report.contains("validator secret"));
+			assertFalse(report.contains("validator root cause"));
+			assertFalse(report.contains("target="));
+		}
+		assertEquals(0, store.size());
+	}
+
+	@Test
+	void normalGroupingFailureReportsRejectCreateWithoutDoubleLogging() {
+		newService();
+		Target requested = blockTarget();
+		validator.accepted(validated(requested, TargetMatchContext.none()));
+		resolver.resolves(requested, targetType("block"));
+		RuntimeException failure = new IllegalStateException("grouping secret");
+		service = new MarkerCreationService(store, resolver, PING_TYPES, validator, MarkerCreationLogger.noop(),
+			new nx.pingwheel.common.integration.externalblock.ExternalBlockServerProviderRegistry(), null,
+			(owner, target) -> { throw failure; });
+
+		try (var diagnostics = new DiagnosticCapture()) {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.NORMAL);
+			assertRejected(create(requested, "attention"), MarkerRejectReason.INVALID_REQUEST);
+			assertEquals(1, diagnostics.events.size(), "the service owns the consumed grouping failure");
+			String report = diagnostics.events.getFirst().getMessage().getFormattedMessage();
+			assertTrue(report.contains("site=marker-create-grouping"));
+			assertTrue(report.contains("handling=reject-create"));
+			assertFalse(report.contains("grouping secret"));
+		}
+		assertEquals(0, store.size());
 	}
 
 	// --- resolver contract failures ----------------------------------------------
@@ -820,7 +871,7 @@ class MarkerCreationServiceTest {
 		private final Configuration configuration = context.getConfiguration();
 		private final LoggerConfig previous = configuration.getLoggers().get(logger.getName());
 		private final List<LogEvent> events = new ArrayList<>();
-		private final RateLimitedDiagnosticsTestScope diagnostics;
+		private final PresentationDiagnosticScope diagnostics;
 		private final AbstractAppender appender = new AbstractAppender(
 			"marker-admission-diagnostics", null, null, true, Property.EMPTY_ARRAY) {
 			@Override public void append(LogEvent event) { events.add(event.toImmutable()); }
@@ -833,7 +884,7 @@ class MarkerCreationServiceTest {
 			configuration.removeLogger(logger.getName());
 			configuration.addLogger(logger.getName(), capture);
 			context.updateLoggers();
-			diagnostics = RateLimitedDiagnosticsTestScope.install();
+			diagnostics = PresentationDiagnosticScope.install();
 		}
 
 		@Override public void close() {

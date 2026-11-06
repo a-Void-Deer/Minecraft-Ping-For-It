@@ -345,7 +345,10 @@ fluid-handler capability only after the Create-specific tested-version and
 metadata gates, and shares the
 [inventory fluid contract](../architecture/presentation/inventory.md#fluid-variants-and-quantities).
 The existing NeoForge and tested Create version strategy remains the gate;
-this route adds no Fabric/Forge Create integration or version upgrade.
+this route adds no Fabric/Forge Create integration or version upgrade. The
+ordinary NeoForge capability access for this provider may use the audited
+single-use [coordinated read](../architecture/presentation/shared_sources.md#source-access);
+the Create controller, member, scope and mode gates above remain in force.
 
 Before capability or content access, verify the loaded root, controller and
 every member, their current objects and controller relationships, positive

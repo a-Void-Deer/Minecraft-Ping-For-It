@@ -70,6 +70,7 @@ class CreateVaultInventoryDiagnosticsTest {
 		}
 	}
 	private static final class Capture implements AutoCloseable {
+		private final nx.pingwheel.common.diagnostics.LoaderDiagnosticScope diagnostics = new nx.pingwheel.common.diagnostics.LoaderDiagnosticScope();
 		final List<LogEvent> events = new ArrayList<>();
 		private final Logger logger = (Logger) LogManager.getLogger("pingforit");
 		private final org.apache.logging.log4j.core.config.Configuration configuration = logger.getContext().getConfiguration();
@@ -82,6 +83,7 @@ class CreateVaultInventoryDiagnosticsTest {
 			configuration.removeLogger(logger.getName()); configuration.addLogger(logger.getName(), config); logger.getContext().updateLoggers();
 		}
 		@Override public void close() {
+			diagnostics.close();
 			configuration.removeLogger(logger.getName()); if (previous != null) configuration.addLogger(logger.getName(), previous);
 			logger.getContext().updateLoggers(); appender.stop();
 		}

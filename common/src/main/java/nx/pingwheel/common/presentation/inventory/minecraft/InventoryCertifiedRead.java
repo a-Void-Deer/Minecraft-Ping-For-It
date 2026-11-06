@@ -41,7 +41,10 @@ final class InventoryCertifiedRead {
 		InventoryMinecraftSources.SourceWorld world, BooleanSupplier closed) {
 		try { return createSupported(input, view, world, closed); }
 		catch (InventoryItemBudget.CaptureLimitException exhausted) { throw exhausted; }
-		catch (RuntimeException | LinkageError unsupported) { return null; }
+		catch (RuntimeException | LinkageError unsupported) {
+			InventorySnapshotDiagnostics.failure("inventory-certified-create", input, view.access(), () -> "stage=certificate-create", unsupported);
+			return null;
+		}
 	}
 	private static @Nullable NativePort createSupported(InventorySourceInput input, InventoryMinecraftSources.View view,
 		InventoryMinecraftSources.SourceWorld world, BooleanSupplier closed) {
@@ -160,7 +163,8 @@ final class InventoryCertifiedRead {
 		private Check checked(Proof expected) {
 			try { return current(expected); }
 			catch (InventoryItemBudget.CaptureLimitException exhausted) { throw exhausted; }
-			catch (RuntimeException | LinkageError unavailable) { return Check.UNAVAILABLE; }
+			catch (InventorySourceUnavailableException unavailable) { return Check.UNAVAILABLE; }
+			catch (RuntimeException | LinkageError unavailable) { throw new ReadFailure(Check.UNAVAILABLE, unavailable); }
 		}
 		private Check current(Proof expected) {
 			if (closed.getAsBoolean() || !world.onServerThread()) return Check.UNAVAILABLE;
@@ -295,12 +299,19 @@ final class InventoryCertifiedRead {
 				require(checked(expected));
 				return item;
 			} catch (InventoryItemBudget.CaptureLimitException | InventoryItemCodec.CapacityExceededException exhausted) {
-				Check after = checked(expected);
+				Check after;
+				try { after = checked(expected); }
+				catch (ReadFailure metadataFailure) { metadataFailure.addSuppressed(exhausted); throw metadataFailure; }
 				if (after != Check.VALID) throw new ReadFailure(after, exhausted);
 				throw exhausted;
 			}
 			catch (RuntimeException | LinkageError failure) {
-				Check after = checked(expected);
+				Check after;
+				try { after = checked(expected); }
+				catch (ReadFailure metadataFailure) {
+					if (metadataFailure != failure) metadataFailure.addSuppressed(failure);
+					throw metadataFailure;
+				}
 				if (after != Check.VALID) throw new ReadFailure(after, failure);
 				if (failure instanceof ReadFailure typed) throw typed;
 				throw new ReadFailure(Check.UNAVAILABLE, failure);

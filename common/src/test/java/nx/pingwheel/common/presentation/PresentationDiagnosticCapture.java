@@ -2,8 +2,7 @@ package nx.pingwheel.common.presentation;
 
 import java.util.ArrayList;
 import java.util.List;
-import nx.pingwheel.common.diagnostics.Diagnostics;
-import nx.pingwheel.common.diagnostics.RateLimitedDiagnosticsTestScope;
+import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.core.LogEvent;
 import org.apache.logging.log4j.core.Logger;
@@ -18,11 +17,11 @@ import org.jetbrains.annotations.Unmodifiable;
 /** Real backend capture shared by the presentation call-site tests. */
 @NotNullByDefault
 public final class PresentationDiagnosticCapture implements AutoCloseable {
-	private final Logger logger = (Logger) Diagnostics.logger();
+	private final Logger logger = (Logger) LogManager.getLogger("pingforit");
 	private final Configuration configuration = logger.getContext().getConfiguration();
 	private final @Nullable LoggerConfig previous = configuration.getLoggers().get(logger.getName());
 	private final RecordingAppender appender = new RecordingAppender();
-	private final RateLimitedDiagnosticsTestScope diagnostics;
+	private final PresentationDiagnosticScope diagnostics;
 
 	public PresentationDiagnosticCapture() { this(Level.WARN); }
 	public PresentationDiagnosticCapture(Level level) {
@@ -32,7 +31,7 @@ public final class PresentationDiagnosticCapture implements AutoCloseable {
 		configuration.removeLogger(logger.getName());
 		configuration.addLogger(logger.getName(), config);
 		logger.getContext().updateLoggers();
-		diagnostics = RateLimitedDiagnosticsTestScope.install();
+		diagnostics = PresentationDiagnosticScope.install();
 	}
 	public @Unmodifiable List<LogEvent> events() { return List.copyOf(appender.events); }
 	public @Unmodifiable List<String> messages() {

@@ -2,6 +2,7 @@ package nx.pingwheel.common.network;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import org.jetbrains.annotations.NotNull;
 
 import static nx.pingwheel.common.Global.C2S_NAMESPACE;
@@ -38,7 +39,7 @@ public record ServerConfigRequestC2SPacket(long requestId) implements IPacket {
 	}
 
 	public static ServerConfigRequestC2SPacket readSafe(FriendlyByteBuf buf) {
-		return PacketHandler.readSafe(buf, ServerConfigRequestC2SPacket.class);
+		return PacketHandler.readSafe(buf, ServerConfigRequestC2SPacket.class, Diagnostics.server());
 	}
 
 	@Override

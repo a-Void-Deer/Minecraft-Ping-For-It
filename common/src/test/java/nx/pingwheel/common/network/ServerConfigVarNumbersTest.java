@@ -9,9 +9,11 @@ import nx.pingwheel.common.config.InventoryConfigValues.Value;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.ServerConfigUpdate;
 import nx.pingwheel.common.config.ServerConfigUpdateService;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.jetbrains.annotations.Unmodifiable;
 
@@ -30,7 +32,7 @@ class ServerConfigVarNumbersTest {
 	private static final byte @Unmodifiable [] UPDATE = hex(
 		"20 00 01 01 01 07 "
 			+ "00 10 01 41 07 00 11 00 43 00 61 00 03 00 04 00 08 "
-			+ "03 00 09 00 51 00 80 01 00 04 00 04 00 08 00 01 01 04 04 01 00 01");
+			+ "03 00 09 00 51 00 80 01 00 04 00 04 00 08 00 01 01 04 04 01 00 01 00");
 	private static final byte @Unmodifiable [] SNAPSHOT = concat(hex("01 01"), UPDATE, 1, UPDATE.length - 1);
 
 	@ParameterizedTest
@@ -105,13 +107,13 @@ class ServerConfigVarNumbersTest {
 	}
 
 	@ParameterizedTest
-	@ValueSource(ints = {0, 1, 3, 4, 5, 7, 9, 10, 12, 14, 16, 18, 20, 22, 23, 25, 27, 29, 32, 34, 36, 37, 38, 39, 40, 41})
+	@ValueSource(ints = {0, 1, 3, 4, 5, 7, 9, 10, 12, 14, 16, 18, 20, 22, 23, 25, 27, 29, 32, 34, 36, 37, 38, 39, 40, 41, 45})
 	void everyUpdateVariableIntRejectsOverflowWithoutServiceMutation(int offset) {
 		assertRejectedUpdate(replace(UPDATE, offset, hex("81 80 80 80 10")));
 	}
 
 	@ParameterizedTest
-	@ValueSource(ints = {2, 4, 5, 6, 8, 10, 11, 13, 15, 17, 19, 21, 23, 24, 26, 28, 30, 33, 35, 37, 38, 39, 40, 41, 42})
+	@ValueSource(ints = {2, 4, 5, 6, 8, 10, 11, 13, 15, 17, 19, 21, 23, 24, 26, 28, 30, 33, 35, 37, 38, 39, 40, 41, 42, 46})
 	void everySnapshotVariableIntRejectsOverflowRatherThanPublishingAView(int offset) {
 		var buf = buffer(replace(SNAPSHOT, offset, hex("81 80 80 80 10")));
 		try {
@@ -155,8 +157,8 @@ class ServerConfigVarNumbersTest {
 		assertEncoding(UPDATE, new ServerConfigUpdateC2SPacket(32, ChannelMode.AUTO, true, 1, 1, 7, inventory, true));
 		assertEncoding(SNAPSHOT, new ServerConfigSnapshotS2CPacket(1L, true, ChannelMode.AUTO, true, 1, 1, 7, inventory, true));
 		assertEncoding(hex("01"), new ServerConfigRequestC2SPacket(1L));
-		byte[] falseUpdate = replace(UPDATE, UPDATE.length - 1, hex("00"));
-		byte[] falseSnapshot = replace(SNAPSHOT, SNAPSHOT.length - 1, hex("00"));
+		byte[] falseUpdate = replace(UPDATE, UPDATE.length - 2, hex("00"));
+		byte[] falseSnapshot = replace(SNAPSHOT, SNAPSHOT.length - 2, hex("00"));
 		assertEncoding(falseUpdate, new ServerConfigUpdateC2SPacket(32, ChannelMode.AUTO, true, 1, 1, 7, inventory, false));
 		assertEncoding(falseSnapshot, new ServerConfigSnapshotS2CPacket(1L, true, ChannelMode.AUTO, true, 1, 1, 7, inventory, false));
 		for (boolean enabled : new boolean[] {false, true}) {
@@ -184,7 +186,8 @@ class ServerConfigVarNumbersTest {
 		assertStrictShape(UPDATE, ServerConfigUpdateC2SPacket::readSafe);
 		assertStrictShape(SNAPSHOT, ServerConfigSnapshotS2CPacket::readSafe);
 		for (String invalid : new String[] {"02", "ff"}) {
-			assertRejectedUpdate(replace(UPDATE, UPDATE.length - 1, hex(invalid)));
+			assertRejectedUpdate(replace(UPDATE, UPDATE.length - 2, hex(invalid)));
+			assertCorruptAndDrained(replace(SNAPSHOT, SNAPSHOT.length - 2, hex(invalid)), ServerConfigSnapshotS2CPacket::readSafe);
 		}
 	}
 
@@ -203,8 +206,8 @@ class ServerConfigVarNumbersTest {
 	}
 
 	@Test
-	void rawNoticeMaskBit26AppliesFalseWhileBit29RemainsUnknown() {
-		byte[] raw = replace(replace(UPDATE, UPDATE.length - 1, hex("00")), 0, hex("80 80 80 20"));
+	void rawNoticeMaskBit26AppliesFalseWhileBit30RemainsUnknown() {
+		byte[] raw = replace(replace(UPDATE, UPDATE.length - 2, hex("00")), 0, hex("80 80 80 20"));
 		var buf = buffer(raw);
 		try {
 			var packet = ServerConfigUpdateC2SPacket.readSafe(buf);
@@ -217,7 +220,7 @@ class ServerConfigVarNumbersTest {
 			assertEquals(current().rateLimit(), result.snapshot().rateLimit());
 			assertEquals(0, buf.readableBytes());
 		} finally { buf.release(); }
-		assertRejectedUpdate(replace(UPDATE, 0, hex("80 80 80 80 02")));
+		assertRejectedUpdate(replace(UPDATE, 0, hex("80 80 80 80 04")));
 	}
 
 	@Test
@@ -225,8 +228,8 @@ class ServerConfigVarNumbersTest {
 		for (boolean faces : new boolean[] {false, true}) {
 			for (boolean players : new boolean[] {false, true}) {
 				byte[] raw = UPDATE.clone();
-				raw[raw.length - 3] = (byte) (faces ? 1 : 0);
-				raw[raw.length - 2] = (byte) (players ? 1 : 0);
+				raw[raw.length - 4] = (byte) (faces ? 1 : 0);
+				raw[raw.length - 3] = (byte) (players ? 1 : 0);
 				var inventory = fixtureInventory().with(Field.TRACKING_DISTINGUISH_FACES, Value.bool(faces))
 					.with(Field.TRACKING_DISTINGUISH_PLAYERS, Value.bool(players));
 				assertEncoding(raw, new ServerConfigUpdateC2SPacket(32, ChannelMode.AUTO, true, 1, 1, 7, inventory, true));
@@ -254,8 +257,72 @@ class ServerConfigVarNumbersTest {
 	}
 
 	@Test
+	void supersededV5WithoutFinalLoggingProfileIsCorruptRatherThanDefaulted() {
+		assertRejectedUpdate(Arrays.copyOf(UPDATE, UPDATE.length - 1));
+		assertCorruptAndDrained(Arrays.copyOf(SNAPSHOT, SNAPSHOT.length - 1), ServerConfigSnapshotS2CPacket::readSafe);
+	}
+
+	@ParameterizedTest
+	@EnumSource(LoggingProfile.class)
+	void independentLoggingTagsEncodeDecodeAndSelectOnlyBit29(LoggingProfile profile) {
+		String tag = switch (profile) {
+			case NORMAL -> "00";
+			case DEEP -> "01";
+			case DEBUG -> "02";
+		};
+		byte[] raw = replace(UPDATE, UPDATE.length - 1, hex(tag));
+		byte[] selected = replace(raw, 0, hex("80 80 80 80 02"));
+		var inventory = fixtureInventory();
+		assertEncoding(selected, new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE,
+			ChannelMode.AUTO, true, 1, 1, 7, inventory, true, profile));
+		byte[] snapshotBytes = replace(SNAPSHOT, SNAPSHOT.length - 1, hex(tag));
+		assertEncoding(snapshotBytes, new ServerConfigSnapshotS2CPacket(1L, true, ChannelMode.AUTO,
+			true, 1, 1, 7, inventory, true, profile));
+		var buf = buffer(selected);
+		try {
+			var decoded = ServerConfigUpdateC2SPacket.readSafe(buf);
+			assertFalse(decoded.isCorrupt());
+			assertEquals(1 << 29, decoded.changedFields());
+			assertEquals(profile, decoded.loggingProfile());
+			assertEquals(profile, decoded.update().loggingProfile());
+			assertEquals(decoded, new ServerConfigUpdateC2SPacket(decoded.update()));
+			var merged = ServerConfigUpdateService.apply(true, current(), decoded.update());
+			assertTrue(merged.applied());
+			assertEquals(profile, merged.snapshot().loggingProfile());
+			assertEquals(current().inventory(), merged.snapshot().inventory());
+			assertEquals(current().syncDuration(), merged.snapshot().syncDuration());
+			assertEquals(0, buf.readableBytes());
+		} finally { buf.release(); }
+		buf = buffer(raw); // Inventory-only mask: a carried profile does not change unselected authority.
+		try {
+			var decoded = ServerConfigUpdateC2SPacket.readSafe(buf);
+			assertFalse(decoded.isCorrupt());
+			assertEquals(LoggingProfile.NORMAL, decoded.update().appliedTo(current()).orElseThrow().loggingProfile());
+		} finally { buf.release(); }
+		buf = buffer(snapshotBytes);
+		try {
+			var decoded = ServerConfigSnapshotS2CPacket.readSafe(buf);
+			assertFalse(decoded.isCorrupt());
+			assertEquals(profile, decoded.loggingProfile());
+			assertEquals(profile, decoded.snapshot().loggingProfile());
+			assertEquals(decoded, new ServerConfigSnapshotS2CPacket(decoded.requestId(), decoded.snapshot()));
+			assertEquals(0, buf.readableBytes());
+		} finally { buf.release(); }
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = {"", "03", "7f", "80", "80 00", "81 00", "82 00", "ff ff ff ff 0f",
+		"80 80 80 80 08", "81 80 80 80 10", "80 80 80 80 80 00", "00 00", "02 01"})
+	void missingUnknownNegativeNoncanonicalTruncatedAndTrailingProfilesRejectEvenUnselected(String invalid) {
+		byte[] raw = replace(UPDATE, UPDATE.length - 1, hex(invalid));
+		assertRejectedUpdate(raw); // Existing mask selects physical slots only, not logging.
+		assertRejectedUpdate(replace(raw, 0, hex("80 80 80 80 02")));
+		assertCorruptAndDrained(replace(SNAPSHOT, SNAPSHOT.length - 1, hex(invalid)), ServerConfigSnapshotS2CPacket::readSafe);
+	}
+
+	@Test
 	void bothNewBooleanBytesRejectNonBooleanOverlongMissingAndSupersededV4Shapes() {
-		for (int fromEnd : new int[] {2, 3}) {
+		for (int fromEnd : new int[] {3, 4}) {
 			for (String invalid : new String[] {"02", "ff", "81 00"}) {
 				assertRejectedUpdate(replace(UPDATE, UPDATE.length - fromEnd, hex(invalid)));
 				assertCorruptAndDrained(replace(SNAPSHOT, SNAPSHOT.length - fromEnd, hex(invalid)), ServerConfigSnapshotS2CPacket::readSafe);
@@ -263,7 +330,8 @@ class ServerConfigVarNumbersTest {
 			assertRejectedUpdate(replace(UPDATE, UPDATE.length - fromEnd, new byte[0]));
 			assertCorruptAndDrained(replace(SNAPSHOT, SNAPSHOT.length - fromEnd, new byte[0]), ServerConfigSnapshotS2CPacket::readSafe);
 		}
-		byte[] oldUpdate = replace(replace(UPDATE, UPDATE.length - 2, new byte[0]), UPDATE.length - 3, new byte[0]);
+		byte[] oldUpdate = Arrays.copyOf(UPDATE, UPDATE.length - 1);
+		oldUpdate = replace(replace(oldUpdate, oldUpdate.length - 2, new byte[0]), oldUpdate.length - 3, new byte[0]);
 		assertRejectedUpdate(oldUpdate);
 		assertCorruptAndDrained(concat(hex("01 01"), oldUpdate, 1, oldUpdate.length - 1), ServerConfigSnapshotS2CPacket::readSafe);
 	}
@@ -272,7 +340,7 @@ class ServerConfigVarNumbersTest {
 		for (int length = 0; length < raw.length; length++) {
 			assertCorruptAndDrained(Arrays.copyOf(raw, length), reader);
 		}
-		for (String invalid : new String[] {"02", "ff"}) {
+		for (String invalid : new String[] {"03", "ff"}) {
 			assertCorruptAndDrained(replace(raw, raw.length - 1, hex(invalid)), reader);
 		}
 		for (byte trailing : new byte[] {0, 1, 2, (byte) 255}) {

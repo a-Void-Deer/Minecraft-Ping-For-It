@@ -267,5 +267,5 @@ public record InventoryC2SPacket(@Nullable Kind kind, int protocol, long epoch, 
 
 	@Override public ResourceLocation getId() { return PACKET_ID; }
 	@Override public @NotNull Type<InventoryC2SPacket> type() { return PACKET_TYPE; }
-	public static InventoryC2SPacket readSafe(FriendlyByteBuf buf) { return PacketHandler.readSafe(buf, InventoryC2SPacket.class); }
+	public static InventoryC2SPacket readSafe(FriendlyByteBuf buf) { return PacketHandler.readSafe(buf, InventoryC2SPacket.class, nx.pingwheel.common.diagnostics.Diagnostics.server()); }
 }

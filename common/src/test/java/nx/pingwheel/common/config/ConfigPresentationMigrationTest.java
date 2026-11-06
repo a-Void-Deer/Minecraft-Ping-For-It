@@ -3,8 +3,12 @@ package nx.pingwheel.common.config;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationSettings;
+import org.apache.logging.log4j.Level;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -41,22 +45,27 @@ class ConfigPresentationMigrationTest {
 				+ "\"unknown\":{\"source\":\"legacy\"}}\n",
 			StandardCharsets.UTF_8);
 
-		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
-		handler.load();
+		try (var logs = new ConfigHandlerDiagnosticsTest.Capture()) {
+			ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+			handler.load();
 
-		PresentationSettings settings = handler.getConfig().getPresentation();
-		for (String type : PresentationSettings.TARGET_TYPE_IDS) {
-			assertEquals(List.of("minecraft:basic"), settings.policyFor(type).white());
-			assertEquals(List.of("create:*"), settings.policyFor(type).black());
-			assertTrue(settings.policyFor(type).whitelistOnly());
+			PresentationSettings settings = handler.getConfig().getPresentation();
+			for (String type : PresentationSettings.TARGET_TYPE_IDS) {
+				assertEquals(List.of("minecraft:basic"), settings.policyFor(type).white());
+				assertEquals(List.of("create:*"), settings.policyFor(type).black());
+				assertTrue(settings.policyFor(type).whitelistOnly());
+			}
+
+			JsonObject presentation = readRoot(configPath).getAsJsonObject("presentation");
+			assertTrue(presentation.has("targetTypes"));
+			assertFalse(presentation.has("white"));
+			assertFalse(presentation.has("black"));
+			assertFalse(presentation.has("whitelistOnly"));
+			assertEquals("legacy", readRoot(configPath).getAsJsonObject("unknown").get("source").getAsString());
+			assertTrue(logs.operation("site=config-policy").stream()
+				.noneMatch(event -> event.getLevel() == Level.WARN),
+				"ordinary legacy-shape normalization is not a malformed-policy refusal");
 		}
-
-		JsonObject presentation = readRoot(configPath).getAsJsonObject("presentation");
-		assertTrue(presentation.has("targetTypes"));
-		assertFalse(presentation.has("white"));
-		assertFalse(presentation.has("black"));
-		assertFalse(presentation.has("whitelistOnly"));
-		assertEquals("legacy", readRoot(configPath).getAsJsonObject("unknown").get("source").getAsString());
 	}
 
 	@Test
@@ -115,13 +124,18 @@ class ConfigPresentationMigrationTest {
 				+ "\"entity\":{\"white\":[],\"black\":[],\"whitelistOnly\":false}}}}\n",
 			StandardCharsets.UTF_8);
 
-		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
-		handler.load();
+		try (var logs = new ConfigHandlerDiagnosticsTest.Capture()) {
+			ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+			handler.load();
 
-		assertTrue(handler.getConfig().getPresentation().policyFor("entity").allows("minecraft:basic", true));
-		assertTrue(handler.getConfig().getPresentation().policyFor("block").whitelistOnly());
-		assertEquals(5, readRoot(configPath).getAsJsonObject("presentation")
-			.getAsJsonObject("targetTypes").size());
+			assertTrue(handler.getConfig().getPresentation().policyFor("entity").allows("minecraft:basic", true));
+			assertTrue(handler.getConfig().getPresentation().policyFor("block").whitelistOnly());
+			assertEquals(5, readRoot(configPath).getAsJsonObject("presentation")
+				.getAsJsonObject("targetTypes").size());
+			assertTrue(logs.operation("site=config-policy").stream()
+				.noneMatch(event -> event.getLevel() == Level.WARN),
+				"missing target-type defaults stay deny-all without a malformed-policy warning");
+		}
 	}
 
 	@Test
@@ -155,19 +169,31 @@ class ConfigPresentationMigrationTest {
 				+ "}},\"unknown\":{\"keep\":true}}\n",
 			StandardCharsets.UTF_8);
 
-		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
-		handler.load();
+		try (var logs = new ConfigHandlerDiagnosticsTest.Capture()) {
+			Diagnostics.setProfile(DiagnosticSide.BOOTSTRAP, LoggingProfile.NORMAL);
+			ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+			handler.load();
 
-		var settings = handler.getConfig().getPresentation();
-		assertFalse(settings.policyFor("entity").allows("minecraft:basic", true));
-		assertFalse(settings.policyFor("location").allows("minecraft:basic", true));
-		assertFalse(settings.policyFor("dropped_item").allows("minecraft:basic", true)); // non-string array element
-		assertTrue(settings.policyFor("block").allows("minecraft:basic", true));
-		assertTrue(settings.policyFor("entity_block").whitelistOnly()); // missing type entry fails closed
-		assertEquals(3, handler.getConfig().getRateLimit());
-		assertEquals(5, readRoot(configPath).getAsJsonObject("presentation")
-			.getAsJsonObject("targetTypes").size());
-		assertTrue(readRoot(configPath).getAsJsonObject("unknown").get("keep").getAsBoolean());
+			var settings = handler.getConfig().getPresentation();
+			assertFalse(settings.policyFor("entity").allows("minecraft:basic", true));
+			assertFalse(settings.policyFor("location").allows("minecraft:basic", true));
+			assertFalse(settings.policyFor("dropped_item").allows("minecraft:basic", true)); // non-string array element
+			assertTrue(settings.policyFor("block").allows("minecraft:basic", true));
+			assertTrue(settings.policyFor("entity_block").whitelistOnly()); // missing type entry fails closed
+			assertEquals(3, handler.getConfig().getRateLimit());
+			assertEquals(5, readRoot(configPath).getAsJsonObject("presentation")
+				.getAsJsonObject("targetTypes").size());
+			assertTrue(readRoot(configPath).getAsJsonObject("unknown").get("keep").getAsBoolean());
+
+			var warnings = logs.operation("site=config-policy").stream()
+				.filter(event -> event.getLevel() == Level.WARN).toList();
+			assertEquals(1, warnings.size());
+			String message = warnings.getFirst().getMessage().getFormattedMessage();
+			assertTrue(message.contains("scope=target-type"), message);
+			assertTrue(message.contains("targetTypes=3"), message);
+			assertFalse(message.contains("not-an-array"), message);
+			assertFalse(message.contains("minecraft:basic"), message);
+		}
 	}
 
 	@Test
@@ -200,20 +226,34 @@ class ConfigPresentationMigrationTest {
 				+ "\"targetTypes\":{\"block\":{\"white\":[\"minecraft:basic\"],\"black\":[],\"whitelistOnly\":false}}}}\n",
 			StandardCharsets.UTF_8);
 
-		ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
-		handler.load();
+		try (var logs = new ConfigHandlerDiagnosticsTest.Capture()) {
+			Diagnostics.setProfile(DiagnosticSide.BOOTSTRAP, LoggingProfile.NORMAL);
+			ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+			handler.load();
 
-		assertFalse(handler.getConfig().getPresentation().policyFor("block").allows("minecraft:basic", true));
-		assertEquals(3, handler.getConfig().getRateLimit());
-		JsonObject permission = readRoot(configPath).getAsJsonObject("presentation")
-			.getAsJsonObject("permissionLevels");
-		assertNotNull(permission);
-		assertEquals(0, permission.size()); // the malformed structure is sanitized to a valid empty map
+			assertFalse(handler.getConfig().getPresentation().policyFor("block").allows("minecraft:basic", true));
+			assertEquals(3, handler.getConfig().getRateLimit());
+			JsonObject permission = readRoot(configPath).getAsJsonObject("presentation")
+				.getAsJsonObject("permissionLevels");
+			assertNotNull(permission);
+			assertEquals(0, permission.size()); // the malformed structure is sanitized to a valid empty map
 
-		ConfigHandler<ServerConfig> reloaded = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
-		reloaded.load();
-		for (String type : List.of("dropped_item", "entity", "entity_block", "block", "location")) {
-			assertFalse(reloaded.getConfig().getPresentation().policyFor(type).allows("minecraft:basic", true));
+			var warnings = logs.operation("site=config-policy").stream()
+				.filter(event -> event.getLevel() == Level.WARN).toList();
+			assertEquals(1, warnings.size());
+			String message = warnings.getFirst().getMessage().getFormattedMessage();
+			assertTrue(message.contains("scope=global"), message);
+			assertTrue(message.contains("targetTypes=5"), message);
+			assertFalse(message.contains("minecraft:basic"), message);
+
+			ConfigHandler<ServerConfig> reloaded = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+			reloaded.load();
+			for (String type : List.of("dropped_item", "entity", "entity_block", "block", "location")) {
+				assertFalse(reloaded.getConfig().getPresentation().policyFor(type).allows("minecraft:basic", true));
+			}
+			assertEquals(1, logs.operation("site=config-policy").stream()
+				.filter(event -> event.getLevel() == Level.WARN).count(),
+				"the durable reload must not repeat the original malformed-policy warning");
 		}
 	}
 

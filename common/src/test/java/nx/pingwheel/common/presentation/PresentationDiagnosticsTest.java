@@ -15,6 +15,39 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
 class PresentationDiagnosticsTest {
+	@Test void clientAndServerProfilesRemainIndependentInOneJvm() {
+		try (var capture = new PresentationDiagnosticCapture()) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT,
+				nx.pingwheel.common.diagnostics.LoggingProfile.DEEP);
+			var rules = new com.google.gson.Gson().fromJson("{\"black\":[\"invalid selector\"]}", PresentationSettings.RuleSet.class);
+			assertFalse(rules.policy(nx.pingwheel.common.diagnostics.Diagnostics.server()).allows(PresentationBasic.NAME, true));
+			assertTrue(capture.events().isEmpty());
+			assertFalse(rules.policy(nx.pingwheel.common.diagnostics.Diagnostics.client()).allows(PresentationBasic.NAME, true));
+			assertEquals(1, capture.events().size());
+			assertTrue(capture.messages().getFirst().contains("side=CLIENT"));
+		}
+	}
+
+	@Test void normalHistoryWarningClosesAdmissionUntilRealStoreReset() {
+		try (var capture = new PresentationDiagnosticCapture()) {
+			var store = new PresentationStore(); store.reset(1);
+			for (long id = 0; id < 8192; id++) store.clear(1, id, 1, false);
+			var profile = nx.pingwheel.common.diagnostics.Diagnostics.profile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT);
+			try {
+				// NORMAL still receives this selected warning. Its state is gameplay history,
+				// so generation changes may never rearm acceptance or emission.
+				nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT,
+					nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
+				store.initial(1, 0, 9000, "block", NAME, BASIC);
+				store.generation(1, 1); store.initial(1, 1, 9001, "block", NAME, BASIC);
+				assertFalse(store.isKnown(9000)); assertFalse(store.isKnown(9001));
+				assertEquals(1, capture.events().size());
+				assertFalse(capture.messages().getFirst().contains("epoch="));
+			} finally { nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT, profile); }
+		}
+	}
 	private static final PresentationSection BASIC = new PresentationSection(PresentationBasic.ID, 1,
 		Map.of(PresentationBasic.NAME, new PresentationValue.Text("name")), false);
 	private static final PresentationPropertyRef NAME = PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.NAME);
@@ -95,6 +128,45 @@ class PresentationDiagnosticsTest {
 			assertSame(BASIC, PresentationCodec.bounded(BASIC));
 			assertEquals(1, capture.events().size());
 			assertTrue(capture.messages().getFirst().contains("presentation/preencode"));
+		}
+	}
+
+	@Test void normalOversizedPreencodingKeepsSafeFallbackWithoutRawFields() {
+		try (var capture = new PresentationDiagnosticCapture()) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(
+				nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
+			var values = new LinkedHashMap<String, PresentationValue>();
+			for (int id = 0; id < PresentationLimits.MAX_ENTRIES; id++) values.put("secret" + id,
+				new PresentationValue.Text("x".repeat(PresentationLimits.MAX_TEXT_BYTES)));
+			var oversized = new PresentationSection(PresentationBasic.ID, 1,
+				Map.of(PresentationBasic.BLOCK_STATE, new PresentationValue.RecordValue(values)), false);
+			assertEquals(new PresentationSection(PresentationBasic.ID, 1, Map.of(), true), PresentationCodec.bounded(oversized));
+			assertEquals(1, capture.events().size());
+			assertEquals(Level.WARN, capture.events().getFirst().getLevel());
+			String report = capture.messages().getFirst();
+			assertTrue(report.contains("site=presentation/preencode"));
+			assertTrue(report.contains("handling=empty-stale-fallback"));
+			assertFalse(report.contains("fields="));
+			assertFalse(report.contains("secret"));
+		}
+	}
+
+	@Test void normalHudProviderFailureKeepsEmptyLabelsWithoutRawCause() {
+		try (var capture = new PresentationDiagnosticCapture()) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(
+				nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT,
+				nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
+			var client = new ClientPresentation(packet -> fail("HUD must not send"));
+			client.registerProvider("throwing", view -> { throw new IllegalStateException("HUD failed", new RuntimeException("HUD cause")); });
+			assertTrue(client.selectProvider("throwing"));
+			assertEquals(List.of(), client.labels(PresentationView.empty()));
+			assertEquals(1, capture.events().size());
+			String report = capture.messages().getFirst();
+			assertTrue(report.contains("site=presentation/hud-provider"));
+			assertTrue(report.contains("handling=empty-labels"));
+			assertFalse(report.contains("HUD cause"));
+			assertFalse(report.contains("provider="));
 		}
 	}
 

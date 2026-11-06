@@ -8,6 +8,7 @@ import nx.pingwheel.common.presentation.preview.PreviewFieldAccess;
 
 /** Fixed optional endpoint registration, never reflection over world fields. */
 public final class PreviewLocalReaders {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel REGISTRATION = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-preview-registration", java.time.Duration.ofSeconds(10));
 	private PreviewLocalReaders() {}
 	public static @Unmodifiable List<PreviewFieldAccess> create() {
 		List<PreviewFieldAccess> readers = new ArrayList<>();
@@ -22,7 +23,7 @@ public final class PreviewLocalReaders {
 		} catch (ClassNotFoundException absent) {
 			// Optional loader/reader classes may be absent.
 		} catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("presentation/optional-preview-registration", "create", () -> "client reader registration", unavailable);
+			Diagnostics.client().atNormal().rateLimited(REGISTRATION).warn("presentation/optional-preview-registration", "basic-only", unavailable, () -> "client reader registration");
 			// Optional integration absence/drift must not affect Basic.
 		}
 		return List.copyOf(readers);

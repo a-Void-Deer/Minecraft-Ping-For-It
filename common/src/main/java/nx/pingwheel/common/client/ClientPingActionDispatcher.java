@@ -1,14 +1,18 @@
 package nx.pingwheel.common.client;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
 
 import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
 import nx.pingwheel.common.interaction.state.PingInteractionLogger;
+import nx.pingwheel.common.interaction.state.SelectorReleaseRejection;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.presentation.client.ClientPresentation;
@@ -35,6 +39,11 @@ import org.jetbrains.annotations.Unmodifiable;
  * {@link ClientPingRuntime}.
  */
 public final class ClientPingActionDispatcher {
+	private static final DiagnosticChannel CREATE_TRANSPORT_FAILURE =
+		DiagnosticChannel.interval("client-send-create-transport", Duration.ofSeconds(10));
+	private static final DiagnosticChannel SELECT_TRANSPORT_FAILURE =
+		DiagnosticChannel.interval("client-send-select-transport", Duration.ofSeconds(10));
+
 	/** Local sender outcome, never server acceptance. */
 	public enum DispatchOutcome { CREATE_SENT, OTHER, NOT_READY, THROTTLED, TRANSPORT_FAILED }
 
@@ -111,11 +120,17 @@ public final class ClientPingActionDispatcher {
 	}
 
 	private DispatchOutcome dispatchCreate(PingInteractionAction.CreatePing create, List<PresentationPropertyIntent> properties) {
-		if (!presentation.ready()) return DispatchOutcome.NOT_READY;
-		if (properties.stream().anyMatch(property ->
-			!presentation.propertyAllowed(create.context().resolvedTarget().targetType().id(), property.ref())))
-			return DispatchOutcome.NOT_READY;
 		long requestId = create.context().token().sequence();
+		long revision = presentation.epoch();
+		if (!presentation.ready()) {
+			rejectSelectorRelease(SelectorReleaseRejection.PRESENTATION_NOT_READY, requestId, revision, "presentation");
+			return DispatchOutcome.NOT_READY;
+		}
+		if (properties.stream().anyMatch(property ->
+			!presentation.propertyAllowed(create.context().resolvedTarget().targetType().id(), property.ref()))) {
+			rejectSelectorRelease(SelectorReleaseRejection.PROPERTY_DENIED, requestId, revision, "presentation");
+			return DispatchOutcome.NOT_READY;
+		}
 		var target = create.context().resolvedTarget().target();
 		var policy = createRateLimiter.policy();
 		if (!createRateLimiter.tryAcquire()) {
@@ -128,21 +143,37 @@ public final class ClientPingActionDispatcher {
 				presentation.epoch(), requestId, target, create.pingType().id(), properties));
 		} catch (RuntimeException failed) {
 			createRequestTracker.failedDispatch(attempt);
-			Diagnostics.warn("client-send/create", "transport",
-				() -> "requestId=" + requestId + " kind=" + target.kind() + " pingType=" + create.pingType().id(), failed);
+			Diagnostics.client().atNormal().rateLimited(CREATE_TRANSPORT_FAILURE).failure(Level.WARN,
+				"client-send/create", "transport",
+				() -> "requestId=" + requestId + " kind=" + target.kind() + " pingType=" + create.pingType().id(),
+				failed);
 			return DispatchOutcome.TRANSPORT_FAILED;
 		}
 		logger.debug("dispatch create: requestId={} kind={} pingType={}", requestId, target.kind(), create.pingType().id());
 		return DispatchOutcome.CREATE_SENT;
 	}
 	public ClientInventory.DispatchOutcome dispatchInventory(@Nullable InventoryC2SPacket packet) {
-		if (packet == null || packet.isCorrupt() || packet.kind() != InventoryC2SPacket.Kind.SELECT || !presentation.ready()
-			|| packet.presentationEpoch() != presentation.epoch() || packet.view() != presentation.sessionView()) return ClientInventory.DispatchOutcome.NOT_READY;
-		if (!createRateLimiter.tryAcquire()) return ClientInventory.DispatchOutcome.THROTTLED;
+		if (packet == null || packet.isCorrupt() || packet.kind() != InventoryC2SPacket.Kind.SELECT)
+			return ClientInventory.DispatchOutcome.NOT_READY;
+		long revision = presentation.epoch();
+		if (!presentation.ready()) {
+			rejectSelectorRelease(SelectorReleaseRejection.PRESENTATION_NOT_READY, packet.commitId(), revision, "inventory");
+			return ClientInventory.DispatchOutcome.NOT_READY;
+		}
+		if (packet.presentationEpoch() != presentation.epoch() || packet.view() != presentation.sessionView()) {
+			rejectSelectorRelease(SelectorReleaseRejection.INVENTORY_VIEW_MISMATCH, packet.commitId(), revision, "inventory");
+			return ClientInventory.DispatchOutcome.NOT_READY;
+		}
+		if (!createRateLimiter.tryAcquire()) {
+			rejectSelectorRelease(SelectorReleaseRejection.COURTESY_THROTTLED, packet.commitId(), revision, "inventory");
+			return ClientInventory.DispatchOutcome.THROTTLED;
+		}
 		try { packetSender.sendToServer(packet); }
 		catch (RuntimeException failed) {
-			Diagnostics.warn("client-send/select", "transport",
-				() -> "commitId=" + packet.commitId() + " epoch=" + packet.presentationEpoch() + " view=" + packet.view(), failed);
+			Diagnostics.client().atNormal().rateLimited(SELECT_TRANSPORT_FAILURE).failure(Level.WARN,
+				"client-send/select", "transport",
+				() -> "commitId=" + packet.commitId() + " epoch=" + packet.presentationEpoch() + " view=" + packet.view(),
+				failed);
 			return ClientInventory.DispatchOutcome.TRANSPORT_FAILED;
 		}
 		createRequestTracker.onCreateDispatched(CreateRequestTracker.Route.INVENTORY, packet.commitId());
@@ -151,6 +182,8 @@ public final class ClientPingActionDispatcher {
 
 	private void dispatchCancel(PingInteractionAction.CancelMarker cancel) {
 		if (!presentation.ready()) {
+			rejectSelectorRelease(SelectorReleaseRejection.PRESENTATION_NOT_READY, cancel.markerId().value(),
+				presentation.epoch(), "presentation");
 			return;
 		}
 		MarkerId markerId = cancel.markerId();
@@ -167,5 +200,10 @@ public final class ClientPingActionDispatcher {
 
 		logger.debug("dispatch target gone: kind={} reason={}",
 			gone.context().resolvedTarget().target().kind(), gone.reason());
+	}
+
+	private void rejectSelectorRelease(SelectorReleaseRejection rejection, long token, long revision, String route) {
+		logger.debug(() -> "selector release rejected: reason=" + rejection.code()
+			+ " token=" + token + " revision=" + revision + " route=" + route + " sent=false");
 	}
 }

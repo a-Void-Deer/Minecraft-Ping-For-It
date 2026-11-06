@@ -46,6 +46,7 @@ class SettingsCategoryCatalogTest {
 	private static final String CHANNEL_HEADING = GROUP_PREFIX + "channel";
 	private static final String SOUND_NOTICES_HEADING = GROUP_PREFIX + "sound_notices";
 	private static final String GEOMETRY_HEADING = GROUP_PREFIX + "geometry";
+	private static final String LOGGING_HEADING = GROUP_PREFIX + "logging";
 	private static final String CLIENT_CONFIG_FILE_HEADING = GROUP_PREFIX + "client_config_file";
 	private static final String WHEEL_OPTIONS_HEADING = GROUP_PREFIX + "wheel_options";
 	private static final String CHANNEL_PLAYERS_HEADING = GROUP_PREFIX + "channel_players";
@@ -91,7 +92,7 @@ class SettingsCategoryCatalogTest {
 
 	@Test
 	void everySettingAppearsExactlyOnceInItsApprovedCategory() {
-		assertEquals(73, Setting.values().length, "the approved catalog has 73 entries");
+		assertEquals(75, Setting.values().length, "the approved catalog has 75 entries");
 		assertEquals(EnumSet.allOf(Category.class), EnumSet.copyOf(EXPECTED_SECTIONS.keySet()),
 			"the approved section map must cover every settings category");
 
@@ -112,9 +113,9 @@ class SettingsCategoryCatalogTest {
 		}
 
 		assertEquals(EnumSet.allOf(Setting.class), all);
-		assertEquals(71L, all.stream()
+		assertEquals(73L, all.stream()
 			.filter(setting -> setting != Setting.OPEN_CLIENT_CONFIG && setting != Setting.PRESENTATION_SERVER_POLICY)
-			.count(), "only the file action and presentation editor are outside the 71 value controls");
+			.count(), "only the file action and presentation editor are outside the 73 value controls");
 	}
 
 	@Test
@@ -205,7 +206,7 @@ class SettingsCategoryCatalogTest {
 		assertEquals(PERFORMANCE_HEADINGS, sections.stream().map(Section::headingKey).toList());
 
 		var rows = sections.stream().flatMap(section -> section.rows().stream()).toList();
-		assertEquals(24, rows.size(), "Performance contains monitoring, 21 numeric leaves and two tracking toggles");
+		assertEquals(25, rows.size(), "Performance contains monitoring, logging, 21 numeric leaves and two tracking toggles");
 		assertTrue(rows.stream().allMatch(row -> row.settings().size() == 1),
 			"server Performance controls must not be paired into shared rows");
 		assertEquals(
@@ -307,6 +308,7 @@ class SettingsCategoryCatalogTest {
 		// the other shared budgets rather than at the end of the catalogue.
 		assertEquals(List.of(
 			Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED,
+			Setting.SERVER_LOGGING_PROFILE,
 			Setting.INVENTORY_PHYSICAL_SLOTS_PER_TICK,
 			Setting.INVENTORY_PENDING_MEMORY_MIB,
 			Setting.INVENTORY_DISPLAY_BYTE_MULTIPLIER,
@@ -348,6 +350,7 @@ class SettingsCategoryCatalogTest {
 	@Test
 	void invalidInventoryRoutingSkipsMonitoringAndKeepsExistingInventoryOrder() {
 		assertNull(Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED.inventoryField());
+		assertNull(Setting.SERVER_LOGGING_PROFILE.inventoryField());
 		assertNull(SettingsCategoryCatalog.firstInvalidInventorySetting(ServerConfigUpdate.BUDGET_DELAY_NOTIFICATIONS_ENABLED));
 		assertNull(SettingsCategoryCatalog.firstInvalidInventorySetting(0));
 		assertEquals(Setting.INVENTORY_DISPLAY_BYTE_MULTIPLIER,
@@ -414,6 +417,8 @@ class SettingsCategoryCatalogTest {
 		expected.put(Category.GEOMETRY_CONFIG, List.of(
 			section(GEOMETRY_HEADING,
 				row(Setting.ENTITY_BLOCK_RENDER_MODE)),
+			section(LOGGING_HEADING,
+				row(Setting.LOGGING_PROFILE)),
 			section(CLIENT_CONFIG_FILE_HEADING,
 				row(Setting.OPEN_CLIENT_CONFIG))));
 		expected.put(Category.CLIENT_PERFORMANCE, List.of(
@@ -432,7 +437,8 @@ class SettingsCategoryCatalogTest {
 				row(Setting.SYNC_DURATION))));
 		expected.put(Category.PERFORMANCE, List.of(
 			section(MONITORING_HEADING,
-				row(Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED)),
+				row(Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED),
+				row(Setting.SERVER_LOGGING_PROFILE)),
 			section(INVENTORY_SHARED_HEADING,
 				row(Setting.INVENTORY_PHYSICAL_SLOTS_PER_TICK),
 				row(Setting.INVENTORY_PENDING_MEMORY_MIB),

@@ -35,6 +35,9 @@ import nx.pingwheel.common.config.InventorySizeScale;
 import nx.pingwheel.common.config.ServerConfigUpdate;
 import nx.pingwheel.common.config.SpatialSelectorSettings;
 import nx.pingwheel.common.config.TeamColorMode;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.integration.TeamContext;
 import nx.pingwheel.common.integration.TeamContextHandler;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
@@ -52,6 +55,7 @@ import nx.pingwheel.common.screen.SettingsCategoryCatalog.Row;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Category;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Page;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Scope;
+import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
@@ -75,13 +79,13 @@ import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.config.ClientConfig.*;
 import static nx.pingwheel.common.config.ClientConfigBounds.*;
 import static nx.pingwheel.common.config.SpatialSelectorSettings.*;
-import static nx.pingwheel.common.Global.warnException;
 
 public class SettingsScreen extends OptionsSubScreen {
 	private static final long NO_REQUEST = -1L;
 	private static WeakReference<@Nullable SettingsScreen> currentSettingsScreen = new WeakReference<>(null);
 
 	private final ClientConfig config;
+	private final Supplier<ClientConfig> loggingConfigSupplier;
 	private final ServerSettingsModel serverSettings = new ServerSettingsModel(false);
 	private final SettingsNavigationModel navigation = new SettingsNavigationModel();
 	private final Map<String, AbstractWidget> keyedWidgets = new HashMap<>();
@@ -161,13 +165,28 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	public SettingsScreen() {
-		this(ClientConfig.HANDLER.getConfig(), null);
+		this(ClientConfig.HANDLER.getConfig(), null, ClientConfig.HANDLER::getConfig);
 	}
 
 	/** Builds the same option factories without loading a persisted client session. */
 	SettingsScreen(ClientConfig config, @Nullable Screen parent) {
+		this(config, parent, () -> config);
+	}
+
+	/**
+	 * The logging row reads and writes the handler's current object rather than
+	 * the construction-time reference, because a guarded migration save can
+	 * reload the handler while this screen remains open. Focused tests supply
+	 * their own fixture explicitly.
+	 */
+	SettingsScreen(
+		ClientConfig config,
+		@Nullable Screen parent,
+		Supplier<ClientConfig> loggingConfigSupplier
+	) {
 		super(null, null, LanguageUtils.settings("title").get());
 		this.config = config;
+		this.loggingConfigSupplier = java.util.Objects.requireNonNull(loggingConfigSupplier, "loggingConfigSupplier");
 		this.parent = parent;
 		this.tabManager = new NavigationTabManager(this::addRenderableWidget, this::removeWidget);
 	}
@@ -645,6 +664,12 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private AbstractWidget createSettingWidget(Setting setting) {
+		if (setting == Setting.SERVER_LOGGING_PROFILE) {
+			return this.createLoggingProfileButton(true);
+		}
+		if (setting == Setting.LOGGING_PROFILE) {
+			return this.createLoggingProfileButton(false);
+		}
 		if (setting.inventoryField() != null) {
 			return this.createServerInventoryWidget(setting);
 		}
@@ -1677,6 +1702,43 @@ public class SettingsScreen extends OptionsSubScreen {
 		return button;
 	}
 
+	private LoggingProfileButton createLoggingProfileButton(boolean server) {
+		final Setting setting = server ? Setting.SERVER_LOGGING_PROFILE : Setting.LOGGING_PROFILE;
+		final MutableComponent label = LanguageUtils.settings(setting.id()).get();
+		final Supplier<LoggingProfile> current = () -> server
+			? this.serverSettings.loggingProfile()
+			: this.loggingConfigSupplier.get().getLoggingProfile();
+		final Consumer<LoggingProfile> select = profile -> {
+			if (server) {
+				this.serverSettings.setLoggingProfile(profile);
+			} else {
+				this.applyClientLoggingProfile(profile);
+			}
+		};
+		final LoggingProfileButton button = new LoggingProfileButton(
+			() -> this.loggingProfileRowText(label, current.get()),
+			current,
+			select,
+			Screen::hasAltDown);
+		button.active = !server || this.serverSettings.canEdit();
+		button.setTooltip(Tooltip.create(this.loggingProfileTooltip(server)));
+		return button;
+	}
+
+	private void applyClientLoggingProfile(LoggingProfile profile) {
+		this.loggingConfigSupplier.get().setLoggingProfile(profile);
+		Diagnostics.setProfile(DiagnosticSide.CLIENT, profile);
+	}
+
+	private MutableComponent loggingProfileRowText(Component label, LoggingProfile profile) {
+		return LanguageUtils.settings("format.name_value").get(label,
+			LanguageUtils.of("value", profile.name().toLowerCase(java.util.Locale.ROOT)).get());
+	}
+
+	private Component loggingProfileTooltip(boolean server) {
+		return LanguageUtils.settings(server ? "server_logging_profile" : "logging_profile").path("tooltip").get();
+	}
+
 	private Button createServerChannelModeButton() {
 		final var button = this.createServerValueButton(
 			"default_channel_mode",
@@ -2003,7 +2065,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		}
 	}
 
-	private boolean persistSettings() {
+	boolean persistSettings() {
 		this.flushOptionWidgets();
 		// Client options are local and must be persisted even when an invalid
 		// server draft keeps this screen open.
@@ -2038,7 +2100,8 @@ public class SettingsScreen extends OptionsSubScreen {
 		try {
 			Util.getPlatform().openFile(ClientConfig.HANDLER.getConfigPath().toFile());
 		} catch (Exception | LinkageError failure) {
-			warnException("opening client config file failed", failure);
+			Diagnostics.client().atNormal().failure(Level.WARN, "settings/open-client-config",
+				"open-file-unavailable", () -> "path=" + ClientConfig.HANDLER.getConfigPath(), failure);
 		}
 	}
 
@@ -2182,7 +2245,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			message));
 	}
 
-	private void handleResetConfirmation(boolean confirmed) {
+	void handleResetConfirmation(boolean confirmed) {
 		if (this.resetConfirmationHandled || this.minecraft == null) {
 			return;
 		}
@@ -2191,11 +2254,16 @@ public class SettingsScreen extends OptionsSubScreen {
 		if (confirmed) {
 			this.suppressSaveOnClose = true;
 			clearCurrent(this);
-			ClientConfig.HANDLER.resetToDefaults();
-			this.minecraft.setScreen(new SettingsScreen(this.parent));
+			this.recreateAfterClientReset();
 		} else {
 			this.minecraft.setScreen(this);
 		}
+	}
+
+	/** Confirmed reset recreates the screen session and discards the old server draft. */
+	void recreateAfterClientReset() {
+		ClientConfig.HANDLER.resetToDefaults();
+		this.minecraft.setScreen(new SettingsScreen(this.parent));
 	}
 
 	private SettingsScreenLayout getScreenLayout() {

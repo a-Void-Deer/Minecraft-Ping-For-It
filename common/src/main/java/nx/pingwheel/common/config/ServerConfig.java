@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
 import nx.pingwheel.common.core.ServerCore;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.presentation.PresentationSettings;
 import org.jetbrains.annotations.Nullable;
 
@@ -27,6 +28,17 @@ public class ServerConfig implements IConfig {
 	InventorySettings inventory = InventorySettings.serverDefaults();
 	/** Controls administrator budget-delay messages only; WARN diagnostics remain enabled. */
 	boolean budgetDelayNotificationsEnabled = ConfigDefaults.Server.BUDGET_DELAY_NOTIFICATIONS_ENABLED;
+	@Nullable LoggingProfile loggingProfile = ConfigDefaults.Server.LOGGING_PROFILE;
+
+	/** Returns a usable preference even before persisted nulls have been validated. */
+	public LoggingProfile getLoggingProfile() {
+		return loggingProfile == null ? ConfigDefaults.Server.LOGGING_PROFILE : loggingProfile;
+	}
+
+	/** Stores the preference only; the runtime lifecycle owns publishing logging policy. */
+	public void setLoggingProfile(@Nullable LoggingProfile loggingProfile) {
+		this.loggingProfile = loggingProfile == null ? ConfigDefaults.Server.LOGGING_PROFILE : loggingProfile;
+	}
 
 	public PresentationSettings getPresentation() {
 		return presentation;
@@ -34,6 +46,7 @@ public class ServerConfig implements IConfig {
 
 	@Override
 	public void validate() {
+		loggingProfile = getLoggingProfile();
 		if (presentation == null) presentation = PresentationSettings.serverDefaults();
 		presentation.validate();
 		if (inventory == null) inventory = InventorySettings.serverDefaults();
@@ -60,5 +73,5 @@ public class ServerConfig implements IConfig {
 		ServerCore.broadcastRateLimitPolicy();
 	}
 
-	public static final ConfigHandler<ServerConfig> HANDLER = ConfigHandler.of(ServerConfig.class, ".server.json");
+	public static final ConfigHandler<ServerConfig> HANDLER = ConfigHandler.of(ServerConfig.class, ".server.json", ConfigRuntime.server());
 }

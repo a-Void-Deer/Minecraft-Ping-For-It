@@ -98,8 +98,7 @@ class InventoryPublicationIntegrationTest {
 			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.select(epoch, 100, 1, 1, 1, old.baselineId(), old.statusRevision(), old.entries().getFirst().key(), "danger"), 2, settings);
 			assertEquals(0, host.store.size()); assertEquals(2, reads.get(), "a retired exact reference is rejected before a new witness");
 			assertTrue(host.packets.stream().anyMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.REJECT));
-			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("canonical byte bound=65536"), logs.messages());
-			assertNull(logs.events().getFirst().getThrown());
+			assertTrue(logs.events().isEmpty(), "the deliberate identity bound refusal is not an unexpected codec failure");
 		}
 	}
 

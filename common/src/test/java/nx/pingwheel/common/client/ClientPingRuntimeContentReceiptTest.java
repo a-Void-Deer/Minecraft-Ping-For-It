@@ -57,6 +57,7 @@ import nx.pingwheel.common.presentation.inventory.InventoryChecksums;
 import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.presentation.inventory.client.InventoryClientStore;
 import nx.pingwheel.common.render.InventoryTrackingRenderer;
 import nx.pingwheel.common.render.SpatialOverlayRenderer;
@@ -1007,7 +1008,7 @@ class ClientPingRuntimeContentReceiptTest {
  }
 
  @Test void formatterFailureWaitsForTickAndDeliveryFailureDoesNotRetractAcceptedMarker() {
-  try (var logs = new DiagnosticLogCapture()) {
+  try (var logs = new DiagnosticLogCapture(LoggingProfile.DEEP)) {
    Fixture f = new Fixture(200);
    f.feedback.nameFailure = new IllegalStateException("runtime-name-sentinel", new RuntimeException("runtime-name-root"));
    f.created(PresentationReceiptContent.properties(List.of(HEALTH)), basic(true));

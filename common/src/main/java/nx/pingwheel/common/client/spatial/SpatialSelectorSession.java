@@ -2,6 +2,7 @@ package nx.pingwheel.common.client.spatial;
 
 import java.util.ArrayList;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
+import nx.pingwheel.common.presentation.inventory.client.ClientInventoryDiagnostics;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import java.util.HashMap;
@@ -272,6 +273,8 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	private double returnTranslationY;
 	private SpatialController.Viewport viewport;
 	private boolean listAlignmentPending;
+	/** Diagnostic-only transition key; never participates in content or navigation decisions. */
+	private @Nullable String loggedInventoryDisableKey;
 
 	/** Precise allocations are copied as-is in catalog order; acquisition/nonreuse is external. */
 	public SpatialSelectorSession(CapturedTarget ordinary, Map<String, CapturedTarget> precise,
@@ -301,6 +304,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	public boolean open(long nowMillis) {
 		if (opened) return false;
 		opened = true; active = true;
+		loggedInventoryDisableKey = null;
 		radial.start(nowMillis);
 		pollContent(nowMillis);
 		return true;
@@ -563,15 +567,40 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		if (projection == null) return result;
 		result.addAll(buildContentLevel(List.of()));
 		if (preview != null) {
-			if (!inventoryEligible() || unavailable(preview.status()) || preview.allowedItemTypes().isEmpty())
-				result.add(SpatialMenu.Choice.disabled(inventoryMenu, preview.labelKey()));
+			InventoryPreview<R> currentPreview = preview;
+			boolean eligible = inventoryEligible();
+			@Nullable String disabledReason = inventoryDisabledReason(currentPreview, eligible);
+			logInventoryDisableTransition(disabledReason, currentPreview, eligible);
+			if (disabledReason != null)
+				result.add(SpatialMenu.Choice.disabled(inventoryMenu, currentPreview.labelKey()));
 			else {
-				result.add(SpatialMenu.Choice.branch(inventoryMenu, preview.labelKey(),
-					SpatialMenu.of(inventoryMenu, SpatialMenu.Choice.reserved(inventoryMenu + ":surface", preview.labelKey()))));
+				result.add(SpatialMenu.Choice.branch(inventoryMenu, currentPreview.labelKey(),
+					SpatialMenu.of(inventoryMenu, SpatialMenu.Choice.reserved(inventoryMenu + ":surface", currentPreview.labelKey()))));
 				if (itemKey != null && rows.containsKey(itemKey)) buildItemMenu(itemKey);
 			}
-		}
+		} else loggedInventoryDisableKey = null;
 		return result;
+	}
+
+	private @Nullable String inventoryDisabledReason(InventoryPreview<R> currentPreview, boolean eligible) {
+		if (!eligible) return "inventory-ineligible";
+		Status status = currentPreview.status();
+		if (status == Status.INVALID) return "preview-invalid";
+		if (status == Status.UNAVAILABLE) return "preview-unavailable";
+		if (status == Status.EXPIRED) return "preview-expired";
+		if (currentPreview.allowedItemTypes().isEmpty()) return "no-allowed-types";
+		return null;
+	}
+
+	private void logInventoryDisableTransition(@Nullable String reason, InventoryPreview<R> currentPreview,
+		boolean eligible) {
+		@Nullable String key = reason == null ? null : reason + ":" + fence.requestId() + ":"
+			+ currentPreview.status() + ":" + eligible + ":" + currentPreview.allowedItemTypes().size();
+		if (Objects.equals(loggedInventoryDisableKey, key)) return;
+		loggedInventoryDisableKey = key;
+		if (reason == null) return;
+		ClientInventoryDiagnostics.selectorContentDisabled(reason, fence.requestId(), fence.previewSession(),
+			currentPreview.status(), eligible, currentPreview.allowedItemTypes().size());
 	}
 
 	/**

@@ -53,7 +53,7 @@ public final class CreateCachedKineticPreview {
 		try {
 			network = source.hasNetwork();
 		} catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("create/preview-network", "kinetic", () -> "demand=" + demand, unavailable);
+			CreatePresentationDiagnostics.failure(Diagnostics.client(), "create/preview-network", "field-unavailable", () -> "demand=" + demand, unavailable);
 			return Map.copyOf(result);
 		}
 		if (!network || !hasCachedTotals(source)) return Map.copyOf(result);
@@ -81,7 +81,7 @@ public final class CreateCachedKineticPreview {
 		try {
 			return source.hasCachedTotals();
 		} catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("create/preview-cached-access", "kinetic", () -> "cached totals bridge", unavailable);
+			CreatePresentationDiagnostics.failure(Diagnostics.client(), "create/preview-cached-access", "field-unavailable", () -> "cached totals bridge", unavailable);
 			return false;
 		}
 	}
@@ -91,7 +91,8 @@ public final class CreateCachedKineticPreview {
 			float value = getter.get();
 			return Float.isFinite(value) && value >= 0 ? value : null;
 		} catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("create/preview-cached-total", field, () -> "raw synchronized " + field, unavailable);
+			CreatePresentationDiagnostics.failure(Diagnostics.client(), "stress".equals(field)
+				? "create/preview-cached-stress" : "create/preview-cached-capacity", "field-unavailable", () -> "raw synchronized " + field, unavailable);
 			return null;
 		}
 	}

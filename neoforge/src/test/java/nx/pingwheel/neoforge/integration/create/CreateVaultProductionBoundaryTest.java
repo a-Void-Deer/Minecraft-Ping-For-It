@@ -180,7 +180,7 @@ class CreateVaultProductionBoundaryTest {
 			var resolver = f.loader.loadClass("nx.pingwheel.neoforge.integration.create.NeoForgeCreateVaultBlockPresentationResolver");
 			try {
 				assertEquals("registered", resolver.getMethod("registrationState").invoke(null));
-				assertTrue(String.valueOf(field(client, "lastCreateVaultResolverState").get(null)).contains("registrationState=registered"));
+				assertEquals("reflection-success", field(client, "lastCreateVaultResolverState").get(null));
 				f.clientEntities(); assertEquals(12, BlockPresentationResolverRegistry.INSTANCE.resolve(f.client, spec(f, f.root)).renderSubjects().size());
 				try (var unsupported = new Mods("6.0.11")) { load.invoke(null); assertEquals("unsupported-version", field(client, "lastCreateVaultResolverState").get(null)); }
 				try (var absent = new Mods(null)) { load.invoke(null); assertEquals("not-detected", field(client, "lastCreateVaultResolverState").get(null)); }
@@ -243,7 +243,7 @@ class CreateVaultProductionBoundaryTest {
 			ClassLoader previous = Thread.currentThread().getContextClassLoader(); Thread.currentThread().setContextClassLoader(f.loader);
 			try {
 				var core = f.loader.loadClass("nx.pingwheel.common.core.ServerCore"); var store = new ServerMarkerStore(new MarkerIdSource()); field(core, "MARKER_STORE").set(null, store);
-				field(core, "SERVER_CONFIG").set(null, f.loader.loadClass("nx.pingwheel.common.config.ServerConfig").getConstructor().newInstance());
+				VaultOptionalHarness.initializeServerConfig(f.loader);
 				var factory = core.getDeclaredMethod("markerService", MinecraftServer.class); factory.setAccessible(true);
 				var service = (MarkerCreationService) factory.invoke(null, f.server);
 				var end = f.root.offset(4, 2, 2); var outsider = new java.util.UUID(3, 3);

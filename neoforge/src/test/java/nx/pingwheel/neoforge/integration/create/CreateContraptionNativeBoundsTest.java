@@ -11,10 +11,14 @@ class CreateContraptionNativeBoundsTest {
 	@Test
 	void missingAndCheckedNativeBoundsStayUnavailableRatherThanInventingABoundsView() {
 		try (CreateDiagnosticCapture capture = new CreateDiagnosticCapture()) {
-			assertNull(CreateContraptionNativeBounds.lookup(Object.class, new Object()));
-			assertNull(CreateContraptionNativeBounds.lookup(CheckedFailure.class, new CheckedFailure()));
-			assertNull(CreateContraptionNativeBounds.lookup(WrongType.class, new WrongType()));
-			assertEquals(2, capture.events.size());
+			assertNull(CreateContraptionNativeBounds.lookup(Object.class, new Object(), nx.pingwheel.common.diagnostics.Diagnostics.client()));
+			assertEquals(1, capture.events.size());
+		}
+		try (CreateDiagnosticCapture capture = new CreateDiagnosticCapture()) {
+			assertNull(CreateContraptionNativeBounds.lookup(CheckedFailure.class, new CheckedFailure(), nx.pingwheel.common.diagnostics.Diagnostics.client()));
+			assertNull(CreateContraptionNativeBounds.lookup(CheckedFailure.class, new CheckedFailure(), nx.pingwheel.common.diagnostics.Diagnostics.client()));
+			assertNull(CreateContraptionNativeBounds.lookup(WrongType.class, new WrongType(), nx.pingwheel.common.diagnostics.Diagnostics.client()));
+			assertEquals(1, capture.events.size(), "the native-bounds retry channel is explicit and shared by the site");
 			assertTrue(capture.events.stream().anyMatch(event -> {
 				String text = event.getMessage().getFormattedMessage();
 				return text.contains("native checked original") && text.contains("native checked cause")
@@ -31,10 +35,10 @@ class CreateContraptionNativeBoundsTest {
 	void runtimeAndFatalInvocationCausesKeepTheirExistingPropagationBoundary() {
 		RuntimeFailure runtime = new RuntimeFailure();
 		assertSame(runtime.failure, assertThrows(IllegalStateException.class,
-			() -> CreateContraptionNativeBounds.lookup(RuntimeFailure.class, runtime)));
+			() -> CreateContraptionNativeBounds.lookup(RuntimeFailure.class, runtime, nx.pingwheel.common.diagnostics.Diagnostics.client())));
 		FatalFailure fatal = new FatalFailure();
 		assertSame(fatal.failure, assertThrows(OutOfMemoryError.class,
-			() -> CreateContraptionNativeBounds.lookup(FatalFailure.class, fatal)));
+			() -> CreateContraptionNativeBounds.lookup(FatalFailure.class, fatal, nx.pingwheel.common.diagnostics.Diagnostics.client())));
 	}
 
 	@NotNullByDefault

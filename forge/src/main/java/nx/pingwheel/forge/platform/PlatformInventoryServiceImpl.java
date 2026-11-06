@@ -24,6 +24,8 @@ import net.minecraft.world.WorldlyContainer;
 import nx.pingwheel.common.platform.IPlatformInventoryService;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
+import java.time.Duration;
 
 /**
  * Forge item-handler provider for the platform inventory bridge.
@@ -35,6 +37,8 @@ import nx.pingwheel.common.diagnostics.Diagnostics;
  * single-item exemplar plus the exact count and never mutate the handler.
  */
 public final class PlatformInventoryServiceImpl implements IPlatformInventoryService {
+	private static final DiagnosticChannel FIND_DIAGNOSTICS = DiagnosticChannel.interval("forge-inventory-find", Duration.ofSeconds(10));
+	private static final DiagnosticChannel VALID_DIAGNOSTICS = DiagnosticChannel.interval("forge-inventory-valid", Duration.ofSeconds(10));
 
 	@Override
 	public Optional<Access> find(ServerLevel level, BlockPos pos, Direction side) {
@@ -80,9 +84,9 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			return handler.map(found -> new HandlerAccess(found, () -> memberGate.test(position)));
 		} catch (RuntimeException | LinkageError failure) {
 			if (!(failure instanceof InventorySourceUnavailableException))
-				Diagnostics.warn("inventory-capability-find", "forge:item_handler",
-					() -> "position=" + pos + " face=" + side + " worldClass=" + world.getClass().getName()
-						+ " blockEntityClass=" + blockEntity.getClass().getName(), failure);
+				Diagnostics.server().atNormal().rateLimited(FIND_DIAGNOSTICS).warn("inventory-capability-find", "source-unavailable",
+					failure, () -> "position=" + pos + " face=" + side + " worldClass=" + world.getClass().getName()
+						+ " blockEntityClass=" + blockEntity.getClass().getName());
 			return Optional.empty();
 		}
 	}
@@ -219,8 +223,8 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			try { return memberGate.getAsBoolean(); }
 			catch (RuntimeException | LinkageError unavailable) {
 				if (!(unavailable instanceof InventorySourceUnavailableException))
-					Diagnostics.warn("inventory-handler-valid", handler.getClass().getName(),
-						() -> "handlerClass=" + handler.getClass().getName() + " gateClass=" + memberGate.getClass().getName(), unavailable);
+					Diagnostics.server().atNormal().rateLimited(VALID_DIAGNOSTICS).warn("inventory-handler-valid", "source-unavailable", unavailable,
+						() -> "handlerClass=" + handler.getClass().getName() + " gateClass=" + memberGate.getClass().getName());
 				return false;
 			}
 		}

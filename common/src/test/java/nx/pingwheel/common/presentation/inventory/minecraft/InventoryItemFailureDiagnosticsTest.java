@@ -21,10 +21,27 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
 class InventoryItemFailureDiagnosticsTest {
+	@Test void nativeErrorSupplierIsNeverEvaluatedAtAnyProfile() {
+		for (var profile : nx.pingwheel.common.diagnostics.LoggingProfile.values()) {
+			try (var logs = new InventoryDiagnosticsTestCapture()) {
+				nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER, profile);
+				var calls = new java.util.concurrent.atomic.AtomicInteger();
+				var result = com.mojang.serialization.DataResult.<String>error(() -> {
+					calls.incrementAndGet(); throw new AssertionError("native codec error supplier must not traverse payloads");
+				});
+				var refusal = assertThrows(RuntimeException.class, () -> InventoryItemDiagnostics.complete(result, "caller-owned-stage"));
+				InventoryItemDiagnostics.refusal("inventory/item-identity", "private:item", refusal);
+				assertEquals(0, calls.get());
+				assertEquals(1, logs.events().size());
+				assertTrue(logs.messages().contains("handling=all-variants-native-codec-rejected"));
+				if (profile == nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL) assertFalse(logs.messages().contains("private:item"));
+			}
+		}
+	}
 
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 
-	@Test void canonicalByteRefusalProducesAggregateDiagnosticWithoutChangingSafeIdentity() {
+	@Test void expectedCanonicalByteRefusalIsQuietWithoutChangingAggregateOrSafeIdentity() {
 		var huge = new ItemStack(Items.STONE);
 		var payload = new CompoundTag(); payload.putString("data", "\u0800".repeat(23000));
 		huge.set(DataComponents.CUSTOM_DATA, CustomData.of(payload));
@@ -34,10 +51,7 @@ class InventoryItemFailureDiagnosticsTest {
 			var aggregate = catalog.encode(huge);
 			assertEquals("", aggregate.key().componentsKey()); assertTrue(aggregate.display().aggregateRequired());
 			assertEquals(safe.key(), catalog.encode(new ItemStack(Items.STONE)).key());
-			assertEquals(1, logs.events().size());
-			assertTrue(logs.messages().contains("operation=inventory/item-identity"));
-			assertTrue(logs.messages().contains("canonical byte bound=65536"), logs.messages());
-			assertTrue(logs.messages().contains("minecraft:stone")); assertNull(logs.events().getFirst().getThrown());
+			assertTrue(logs.events().isEmpty());
 		}
 	}
 
@@ -92,7 +106,7 @@ class InventoryItemFailureDiagnosticsTest {
 				4096, InventoryItemBudget.root(4096), raw, InventoryItemNativeAccess.load());
 			assertEquals(InventoryIdentityMode.EXACT, frozen.identityMode()); assertNotNull(frozen.canonicalForCatalog());
 			assertNull(frozen.display().displayJson()); assertFalse(frozen.display().aggregateRequired());
-			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("display root bound"));
+			assertTrue(logs.events().isEmpty(), "a deliberate display bound refusal has no unexpected cause");
 		}
 	}
 
@@ -115,7 +129,21 @@ class InventoryItemFailureDiagnosticsTest {
 			assertEquals(1, logs.events().size()); assertFalse(logs.messages().contains("not-an-integer"), logs.messages());
 			assertTrue(logs.messages().contains("stage=persistent display patch"));
 			assertTrue(logs.messages().contains("native error detail not evaluated"));
-			assertTrue(logs.messages().contains("reason=native-codec-rejected")); assertNull(logs.events().getFirst().getThrown());
+			assertTrue(logs.messages().contains("handling=empty-icon-registry-label")); assertNull(logs.events().getFirst().getThrown());
+		}
+	}
+	@Test void clientNativeCodecRefusalKeepsFallbackAndContentFreeNormalSummaryAtEveryProfile() {
+		for (var profile : nx.pingwheel.common.diagnostics.LoggingProfile.values()) {
+			try (var logs = new InventoryDiagnosticsTestCapture()) {
+				nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT, profile);
+				nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay.reset();
+				var display = nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay.resolve(RegistryAccess.EMPTY,
+					"minecraft:stone", "block.minecraft.stone", "{\"id\":\"minecraft:stone\",\"components\":{\"minecraft:damage\":\"private-codec-input\"}}");
+				assertTrue(display.stack().isEmpty()); assertEquals(1, logs.events().size());
+				assertTrue(logs.messages().contains("handling=empty-icon-registry-label")); assertFalse(logs.messages().contains("private-codec-input"));
+				if (profile == nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL) assertFalse(logs.messages().contains("stage="));
+				else assertTrue(logs.messages().contains("stage=persistent display patch"));
+			}
 		}
 	}
 

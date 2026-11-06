@@ -11,6 +11,8 @@ public interface PresentationAuthorization {
 	boolean allows(UUID recipient, PresentationField field, int actualLevel, int requiredLevel);
 
 	final class Holder {
+		private static final nx.pingwheel.common.diagnostics.DiagnosticChannel PERMISSION = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-permission", java.time.Duration.ofSeconds(10));
+		private static final nx.pingwheel.common.diagnostics.DiagnosticChannel POLICY = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-authorization-policy", java.time.Duration.ofSeconds(10));
 		private static final PresentationAuthorization VANILLA =
 			(recipient, field, actualLevel, requiredLevel) -> actualLevel >= requiredLevel;
 		private static volatile PresentationAuthorization provider = VANILLA;
@@ -23,8 +25,8 @@ public interface PresentationAuthorization {
 		try {
 			return Holder.provider.allows(recipient, field, actualLevel, requiredLevel);
 		} catch (RuntimeException | LinkageError ex) {
-			Diagnostics.warn("presentation/permission", "provider",
-				() -> "recipient=" + recipient + " field=" + field.id() + " actual=" + actualLevel + " required=" + requiredLevel, ex);
+			Diagnostics.server().atNormal().rateLimited(Holder.PERMISSION).warn("presentation/permission", "deny-field", ex,
+				() -> "recipient=" + recipient + " field=" + field.id() + " actual=" + actualLevel + " required=" + requiredLevel);
 			return false;
 		}
 	}
@@ -43,8 +45,8 @@ public interface PresentationAuthorization {
 				&& canSee(recipient, field, actualLevel,
 					settings.permission(field.id(), field.permissionLevel()));
 		} catch (RuntimeException | LinkageError ex) {
-			Diagnostics.warn("presentation/policy", "authorization",
-				() -> "targetType=" + targetTypeId + " field=" + field.id(), ex);
+			Diagnostics.server().atDetailed().rateLimited(Holder.POLICY).warn("presentation/policy", "deny-field", ex,
+				() -> "targetType=" + targetTypeId + " field=" + field.id());
 			return false;
 		}
 	}

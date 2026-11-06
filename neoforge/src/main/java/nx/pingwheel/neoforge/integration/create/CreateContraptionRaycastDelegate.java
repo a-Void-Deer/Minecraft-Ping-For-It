@@ -16,6 +16,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.structure.templatesystem.StructureTemplate.StructureBlockInfo;
 import net.minecraft.world.phys.Vec3;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.math.EntityLocalGeometryResult;
 import nx.pingwheel.common.math.EntityLocalGeometryResolver;
 import nx.pingwheel.common.math.EntityLocalRaycastRequest;
@@ -102,6 +103,6 @@ public final class CreateContraptionRaycastDelegate implements EntityLocalGeomet
 	 * native contraption bounds from its own world exactly once per trace.
 	 */
 	private static @Nullable BlockGetter nativeBoundsView(Contraption contraption) {
-		return CreateContraptionNativeBounds.lookup(Contraption.class, contraption);
+		return CreateContraptionNativeBounds.lookup(Contraption.class, contraption, Diagnostics.client());
 	}
 }

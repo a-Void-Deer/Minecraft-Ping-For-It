@@ -555,6 +555,27 @@ class InventorySyncPublisherTest {
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 	}
+	@Test void normalTransportWarningKeepsRetryPartAndIndependentPacketKindChannels() {
+		var settings = InventorySettings.serverDefaults(); var memory = new RetainedMemoryLedger(16000000);
+		var attempts = new ArrayList<InventoryS2CPacket>();
+		var transport = new Transport() {
+			@Override public void send(UUID recipient, InventoryS2CPacket packet) { attempts.add(packet); throw new IllegalStateException("private-transport-cause"); }
+		};
+		try (var logs = new InventoryDiagnosticsTestCapture(); var publisher = new InventorySyncPublisher(memory, transport)) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER, nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
+			publisher.advance(0, settings); var context = context("preview/private-target", 43);
+			assertTrue(publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 41, null, "target", null)));
+			publish(publisher, context, capture(1, 1, 10)); publisher.drain(); publisher.drain();
+			assertEquals(2, attempts.size()); assertSame(attempts.getFirst(), attempts.getLast()); assertTrue(publisher.pending(context));
+			assertTrue(publisher.control(context.recipient(), InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 16)).stamp(100, 1)));
+			publisher.drainControls(); assertEquals(3, attempts.size());
+			assertEquals(2, logs.events().size(), "PREVIEW failure cannot suppress an OFFER transport failure");
+			assertTrue(logs.messages().contains("handling=retry-same-part-charged")); assertFalse(logs.messages().contains("private-"));
+			assertFalse(logs.messages().contains(context.recipient().toString()));
+			logs.events().forEach(event -> { assertEquals(Level.WARN, event.getLevel()); assertNull(event.getThrown()); });
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
 	@Test void largeAllowedFrameIsRefusedWhenTheIndependentFragmentBudgetIsTooSmall() {
 		var settings = InventorySettings.serverDefaults();
 		settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(0.25)));
@@ -744,19 +765,80 @@ class InventorySyncPublisherTest {
 			assertEquals(List.of(offer, policy), transport.sent, "new callback work cannot extend the current drain");
 			assertEquals(2, callbacks[0]); assertTrue(publisher.dataGated(recipient));
 			assertFalse(publisher.controlQueued(recipient, policy)); assertTrue(publisher.controlQueued(recipient, offer));
-			var failures = logs.events.stream().filter(e -> e.getMessage().getFormattedMessage().contains("operation=inventory/publisher/control-handoff ")).toList();
-			assertEquals(2, failures.size(), "OFFER and POLICY are independently scoped failures");
+			var failures = logs.events.stream().filter(e -> e.getMessage().getFormattedMessage().contains("site=inventory/publisher/control-handoff ")).toList();
+			assertEquals(2, failures.size(), "OFFER and POLICY each retain their own finite packet-kind admission channel");
 			for (var event : failures) {
 				assertEquals(Level.WARN, event.getLevel()); var message = event.getMessage().getFormattedMessage();
+				assertNull(event.getThrown(), "The backend receives no second, unbounded throwable");
+				assertTrue(message.contains("channel=inventory-publisher-control-handoff-"));
 				assertTrue(message.contains("callback failed after transport accepted")); assertTrue(message.contains("recipient=" + recipient));
 				assertTrue(message.contains("at " + getClass().getName() + ".lambda$callbackAddedControls"));
 			}
+			var failureTexts = failures.stream().map(event -> event.getMessage().getFormattedMessage()).toList();
+			assertTrue(failureTexts.stream().anyMatch(text -> text.contains("kind=OFFER")
+				&& text.contains("channel=inventory-publisher-control-handoff-offer suppressed=0")));
+			assertTrue(failureTexts.stream().anyMatch(text -> text.contains("kind=POLICY")
+				&& text.contains("channel=inventory-publisher-control-handoff-policy suppressed=0")));
 			publisher.setControlHandoff((player, packet) -> true); publisher.drainControls();
 			assertEquals(List.of(offer, policy, offer), transport.sent); assertFalse(publisher.dataGated(recipient));
 			publisher.drainControls(); assertEquals(3, transport.sent.size());
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 	}
+	@Test void controlHandoffFailureChannelsArePerKindAndSuppressSameKindRepeats() {
+		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
+		try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings);
+			var first = new UUID(2, 1); var second = new UUID(2, 2);
+			var offerFirst = InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 0)).stamp(100, 1);
+			var offerSecond = InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 0)).stamp(100, 1);
+			var policyFirst = InventoryS2CPacket.policy(7, 100, 1, Set.of("block"));
+			var policySecond = InventoryS2CPacket.policy(7, 100, 1, Set.of("block"));
+			assertTrue(publisher.control(first, offerFirst)); assertTrue(publisher.control(second, offerSecond));
+			assertTrue(publisher.control(first, policyFirst)); assertTrue(publisher.control(second, policySecond));
+			int[] callbacks = {0};
+			publisher.setControlHandoff((player, packet) -> {
+				callbacks[0]++; throw new IllegalStateException("handoff refused " + packet.kind());
+			});
+			publisher.drainControls();
+			assertEquals(4, callbacks[0]);
+			var failures = logs.events.stream().filter(e -> e.getMessage().getFormattedMessage().contains("site=inventory/publisher/control-handoff ")).toList();
+			assertEquals(2, failures.size(), "each packet kind is visible once while its same-kind repeat is suppressed");
+			var texts = failures.stream().map(event -> event.getMessage().getFormattedMessage()).toList();
+			assertEquals(1, texts.stream().filter(text -> text.contains("channel=inventory-publisher-control-handoff-offer")).count());
+			assertEquals(1, texts.stream().filter(text -> text.contains("channel=inventory-publisher-control-handoff-policy")).count());
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+
+	@Test void transportSendFailureChannelsArePerKindAndSuppressSameKindRepeats() {
+		var settings = InventorySettings.serverDefaults(); var memory = new RetainedMemoryLedger(16000000);
+		var failure = new IllegalStateException("transport send refused");
+		class FailingTransport extends Transport {
+			@Override public void send(UUID recipient, InventoryS2CPacket packet) { throw failure; }
+		}
+		var transport = new FailingTransport();
+		try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings);
+			var first = new UUID(3, 1); var second = new UUID(3, 2);
+			var offerFirst = InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 0)).stamp(100, 1);
+			var offerSecond = InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 0)).stamp(100, 1);
+			var policyFirst = InventoryS2CPacket.policy(7, 100, 1, Set.of("block"));
+			var policySecond = InventoryS2CPacket.policy(7, 100, 1, Set.of("block"));
+			assertTrue(publisher.control(first, offerFirst)); assertTrue(publisher.control(second, offerSecond));
+			assertTrue(publisher.control(first, policyFirst)); assertTrue(publisher.control(second, policySecond));
+			publisher.drainControls();
+			var failures = logs.events.stream().filter(e -> e.getMessage().getFormattedMessage().contains("site=inventory/publisher/transport-send ")).toList();
+			assertEquals(2, failures.size(), "transport-send keeps OFFER and POLICY independent and suppresses same-kind repeats");
+			var texts = failures.stream().map(event -> event.getMessage().getFormattedMessage()).toList();
+			assertEquals(1, texts.stream().filter(text -> text.contains("channel=inventory-publisher-transport-send-offer")).count());
+			assertEquals(1, texts.stream().filter(text -> text.contains("channel=inventory-publisher-transport-send-policy")).count());
+			assertTrue(publisher.controlQueued(first, offerFirst)); assertTrue(publisher.controlQueued(second, offerSecond));
+			assertTrue(publisher.controlQueued(first, policyFirst)); assertTrue(publisher.controlQueued(second, policySecond));
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+
 	@Test void callbackReplacedControlsAndRecursiveDrainsDeferNewWork() {
 		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
 		try (var publisher = new InventorySyncPublisher(memory, transport)) {

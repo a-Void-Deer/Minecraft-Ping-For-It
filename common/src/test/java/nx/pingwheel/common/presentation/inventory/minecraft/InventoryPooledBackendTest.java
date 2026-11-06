@@ -509,7 +509,14 @@ class InventoryPooledBackendTest {
 			if (selectedRound != null) assertEquals(nx.pingwheel.common.presentation.source.CaptureResult.Completeness.CONTINUE,
 				((nx.pingwheel.common.presentation.source.CaptureResult) state(selectedRound, "last")).completeness());
 			for (int tick = 601; tick <= 750; tick++) f.backend.tick(tick, settings);
-			for (var client : f.clients.values()) { assertTrue(client.tracking(selectedLater).complete()); assertEquals(768, client.tracking(selectedLater).entries().getFirst().count()); }
+			for (var client : f.clients.values()) {
+				var selectedConsumer = state(selected, "consumer");
+				assertTrue(client.tracking(selectedLater).complete(), () -> "late selected status=" + client.tracking(selectedLater).status()
+					+ " invalid=" + state(selected, "invalid") + " scanning=" + state(selected, "scanning")
+					+ " cursor=" + state(selectedConsumer, "cursor") + " round=" + stateField(selectedConsumer, "round")
+					+ " completed=" + stateField(selectedConsumer, "completedRound") + " nextSweep=" + state(selected, "nextSweep"));
+				assertEquals(768, client.tracking(selectedLater).entries().getFirst().count());
+			}
 			for (UUID owner : owners) assertEquals(true, state(previewState(f, owner, 2), "terminal"));
 			assertEquals(0, resolver.deniedReads); assertEquals(0, f.runtime.memory().reserved());
 		}

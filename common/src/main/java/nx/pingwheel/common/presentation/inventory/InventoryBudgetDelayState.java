@@ -3,6 +3,9 @@ package nx.pingwheel.common.presentation.inventory;
 import java.util.Objects;
 import java.util.function.Supplier;
 import org.jetbrains.annotations.Nullable;
+import nx.pingwheel.common.diagnostics.DiagnosticFaultReporter;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink.DelayEvent;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink.Module;
@@ -70,12 +73,16 @@ final class InventoryBudgetDelayState {
 		boolean firstObservation = reasonMask == 0;
 		reasonMask |= newReasons;
 		if (sink == null || sink == BudgetDelaySink.NONE) return true;
+		var profile = Diagnostics.profile(DiagnosticSide.SERVER);
+		var stage = DiagnosticFaultReporter.Stage.CONTEXT;
 		try {
-			sink.observe(new DelayEvent(module, cycleId, serverTick, Objects.requireNonNull(item).get(),
-				firstObservation, newReasons, Objects.requireNonNull(quantity).get()));
+			var event = new DelayEvent(module, cycleId, serverTick, Objects.requireNonNull(item).get(),
+				firstObservation, newReasons, Objects.requireNonNull(quantity).get());
+			stage = DiagnosticFaultReporter.Stage.SINK;
+			sink.observe(event);
 		}
-		catch (RuntimeException | LinkageError ignored) {
-			// Diagnostics must not change producer scheduling or publication.
+		catch (RuntimeException | LinkageError failure) {
+			Diagnostics.faults().report(DiagnosticSide.SERVER, "inventory/budget-delay", stage, profile, failure);
 		}
 		return true;
 	}

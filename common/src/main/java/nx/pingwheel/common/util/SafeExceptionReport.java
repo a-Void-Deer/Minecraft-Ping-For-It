@@ -1,5 +1,9 @@
 package nx.pingwheel.common.util;
 
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+
 import java.util.Collections;
 import java.util.IdentityHashMap;
 import java.util.Set;
@@ -12,6 +16,7 @@ import java.util.Set;
  * {@code getLocalizedMessage()}, {@code toString()}, or a crash-report API.
  * Throwable accessors are treated as hostile and fail soft to explicit markers.
  */
+@NotNullByDefault
 public final class SafeExceptionReport {
 	/** Maximum relationship depth, counting the top node as depth zero. */
 	public static final int MAX_CAUSE_DEPTH = 16;
@@ -40,6 +45,14 @@ public final class SafeExceptionReport {
 	private static final String CYCLE = "[cycle]";
 	private static final String UNAVAILABLE = "[unavailable]";
 	private static final String NULL_VALUE = "[null]";
+	private static final FailureObserver NO_OBSERVER = (accessor, failure) -> {};
+
+	/** Controlled accessor labels only; the failure is attempt-local and must not be retained. */
+	@NotNullByDefault
+	@FunctionalInterface
+	public interface FailureObserver {
+		void failed(String accessor, Throwable failure);
+	}
 
 	private SafeExceptionReport() {}
 
@@ -48,11 +61,15 @@ public final class SafeExceptionReport {
 	 * throwable string conversion. The bounded result is one log message argument;
 	 * callers must not also attach the throwable for unbounded logger rendering.
 	 */
-	public static String format(Throwable throwable) {
-		return format(throwable, MAX_CHARACTERS);
+	public static String format(@Nullable Throwable throwable) {
+		return format(throwable, MAX_CHARACTERS, NO_OBSERVER);
 	}
 
-	private static String format(Throwable throwable, int maximum) {
+	public static String format(@Nullable Throwable throwable, FailureObserver observer) {
+		return format(throwable, MAX_CHARACTERS, observer);
+	}
+
+	private static String format(@Nullable Throwable throwable, int maximum, FailureObserver observer) {
 		BoundedText report = new BoundedText(maximum, TRUNCATED);
 
 		if (throwable == null) {
@@ -62,7 +79,7 @@ public final class SafeExceptionReport {
 
 		Set<Throwable> visited = Collections.newSetFromMap(new IdentityHashMap<>());
 		FrameBudget frameBudget = new FrameBudget(MAX_TOTAL_FRAMES);
-		renderNode(report, throwable, "exception", 0, visited, frameBudget);
+		renderNode(report, throwable, "exception", 0, visited, frameBudget, observer);
 		return report.value();
 	}
 
@@ -71,14 +88,18 @@ public final class SafeExceptionReport {
 	 * bounded message. Ordinary text is not redacted; control characters in the
 	 * context are escaped, and report structure retains real line breaks.
 	 */
-	public static String formatWithContext(String context, Throwable throwable) {
+	public static String formatWithContext(@Nullable String context, @Nullable Throwable throwable) {
+		return formatWithContext(context, throwable, NO_OBSERVER);
+	}
+
+	public static String formatWithContext(@Nullable String context, @Nullable Throwable throwable, FailureObserver observer) {
 		String boundedContext = boundedScalar(
 			context == null ? "[null context]" : context,
 			MAX_CONTEXT_CHARACTERS, "[context truncated]"
 		);
 		String separator = ":\n";
 		return boundedContext + separator
-			+ format(throwable, MAX_CHARACTERS - boundedContext.length() - separator.length());
+			+ format(throwable, MAX_CHARACTERS - boundedContext.length() - separator.length(), observer);
 	}
 
 	private static void renderNode(
@@ -87,14 +108,15 @@ public final class SafeExceptionReport {
 		String relationship,
 		int depth,
 		Set<Throwable> visited,
-		FrameBudget frameBudget
+		FrameBudget frameBudget,
+		FailureObserver observer
 	) {
 		if (report.isTruncated()) {
 			return;
 		}
 
 		if (visited.contains(throwable)) {
-			appendRelationship(report, relationship, CYCLE, safeClassName(throwable));
+			appendRelationship(report, relationship, CYCLE, safeClassName(throwable, observer));
 			return;
 		}
 
@@ -108,11 +130,11 @@ public final class SafeExceptionReport {
 		BoundedText node = new BoundedText(MAX_NODE_CHARACTERS, NODE_TRUNCATED);
 		node.append(relationship);
 		node.append(": ");
-		node.appendEscaped(safeClassName(throwable));
+		node.appendEscaped(safeClassName(throwable, observer));
 		node.append(": ");
-		node.append(boundedScalar(lookupMessage(throwable), MAX_MESSAGE_CHARACTERS, "[message truncated]"));
+		node.append(boundedScalar(lookupMessage(throwable, observer), MAX_MESSAGE_CHARACTERS, "[message truncated]"));
 		node.append("\n");
-		appendFrames(node, throwable, frameBudget);
+		appendFrames(node, throwable, frameBudget, observer);
 		report.append(node.value());
 
 		if (report.isTruncated()) {
@@ -124,19 +146,19 @@ public final class SafeExceptionReport {
 			return;
 		}
 
-		CauseLookup cause = lookupCause(throwable);
+		CauseLookup cause = lookupCause(throwable, observer);
 
 		if (cause.failed) {
 			appendRelationship(report, "cause", UNAVAILABLE, null);
 		} else if (cause.value != null) {
-			renderNode(report, cause.value, "cause", depth + 1, visited, frameBudget);
+			renderNode(report, cause.value, "cause", depth + 1, visited, frameBudget, observer);
 		}
 
 		if (report.isTruncated()) {
 			return;
 		}
 
-		SuppressedLookup suppressed = lookupSuppressed(throwable);
+		SuppressedLookup suppressed = lookupSuppressed(throwable, observer);
 
 		if (suppressed.failed) {
 			appendRelationship(report, "suppressed", UNAVAILABLE, null);
@@ -155,12 +177,12 @@ public final class SafeExceptionReport {
 				return;
 			}
 
-			Throwable value = suppressed.values[index];
+			@Nullable Throwable value = suppressed.values[index];
 
 			if (value == null) {
 				appendRelationship(report, "suppressed[" + index + "]", NULL_VALUE, null);
 			} else {
-				renderNode(report, value, "suppressed[" + index + "]", depth + 1, visited, frameBudget);
+				renderNode(report, value, "suppressed[" + index + "]", depth + 1, visited, frameBudget, observer);
 			}
 		}
 
@@ -170,7 +192,7 @@ public final class SafeExceptionReport {
 	}
 
 	private static void appendRelationship(
-		BoundedText report, String relationship, String marker, String className
+		BoundedText report, String relationship, String marker, @Nullable String className
 	) {
 		report.append("  ");
 		report.append(relationship);
@@ -185,12 +207,13 @@ public final class SafeExceptionReport {
 		report.append("\n");
 	}
 
-	private static void appendFrames(BoundedText node, Throwable throwable, FrameBudget frameBudget) {
-		StackTraceElement[] frames;
+	private static void appendFrames(BoundedText node, Throwable throwable, FrameBudget frameBudget, FailureObserver observer) {
+		@Nullable StackTraceElement @Nullable @Unmodifiable [] frames;
 
 		try {
 			frames = throwable.getStackTrace();
-		} catch (Throwable ignored) {
+		} catch (Throwable failure) {
+			observe(observer, "stack", failure);
 			node.append("    [stack unavailable]\n");
 			return;
 		}
@@ -204,7 +227,7 @@ public final class SafeExceptionReport {
 		count = Math.min(count, frameBudget.remaining());
 
 		for (int index = 0; index < count; index++) {
-			appendFrame(node, frames[index]);
+			appendFrame(node, frames[index], observer);
 			frameBudget.consume();
 		}
 
@@ -217,7 +240,7 @@ public final class SafeExceptionReport {
 		}
 	}
 
-	private static void appendFrame(BoundedText node, StackTraceElement frame) {
+	private static void appendFrame(BoundedText node, @Nullable StackTraceElement frame, FailureObserver observer) {
 		node.append("    at ");
 
 		if (frame == null) {
@@ -225,12 +248,12 @@ public final class SafeExceptionReport {
 			return;
 		}
 
-		node.appendEscaped(safeFrameClassName(frame));
+		node.appendEscaped(safeFrameClassName(frame, observer));
 		node.append(".");
-		node.appendEscaped(safeFrameMethodName(frame));
+		node.appendEscaped(safeFrameMethodName(frame, observer));
 
-		String fileName = safeFrameFileName(frame);
-		int lineNumber = safeFrameLineNumber(frame);
+		@Nullable String fileName = safeFrameFileName(frame, observer);
+		int lineNumber = safeFrameLineNumber(frame, observer);
 
 		if (fileName != null) {
 			node.append(" (");
@@ -251,19 +274,21 @@ public final class SafeExceptionReport {
 		node.append("\n");
 	}
 
-	private static String safeClassName(Throwable throwable) {
+	private static String safeClassName(Throwable throwable, FailureObserver observer) {
 		try {
 			return throwable.getClass().getName();
-		} catch (Throwable ignored) {
+		} catch (Throwable failure) {
+			observe(observer, "class", failure);
 			return UNAVAILABLE;
 		}
 	}
 
-	private static String lookupMessage(Throwable throwable) {
+	private static String lookupMessage(Throwable throwable, FailureObserver observer) {
 		try {
-			String message = throwable.getMessage();
+			@Nullable String message = throwable.getMessage();
 			return message == null ? "[null message]" : message;
-		} catch (RuntimeException | LinkageError ignored) {
+		} catch (RuntimeException | LinkageError failure) {
+			observe(observer, "message", failure);
 			return "[message unavailable]";
 		}
 	}
@@ -274,77 +299,94 @@ public final class SafeExceptionReport {
 		return scalar.value();
 	}
 
-	private static String safeFrameClassName(StackTraceElement frame) {
+	private static String safeFrameClassName(StackTraceElement frame, FailureObserver observer) {
 		try {
-			String value = frame.getClassName();
+			@Nullable String value = frame.getClassName();
 			return value == null ? UNAVAILABLE : value;
-		} catch (Throwable ignored) {
+		} catch (Throwable failure) {
+			observe(observer, "frame-class", failure);
 			return UNAVAILABLE;
 		}
 	}
 
-	private static String safeFrameMethodName(StackTraceElement frame) {
+	private static String safeFrameMethodName(StackTraceElement frame, FailureObserver observer) {
 		try {
-			String value = frame.getMethodName();
+			@Nullable String value = frame.getMethodName();
 			return value == null ? UNAVAILABLE : value;
-		} catch (Throwable ignored) {
+		} catch (Throwable failure) {
+			observe(observer, "frame-method", failure);
 			return UNAVAILABLE;
 		}
 	}
 
-	private static String safeFrameFileName(StackTraceElement frame) {
+	private static @Nullable String safeFrameFileName(StackTraceElement frame, FailureObserver observer) {
 		try {
-			String value = frame.getFileName();
+			@Nullable String value = frame.getFileName();
 			return value;
-		} catch (Throwable ignored) {
+		} catch (Throwable failure) {
+			observe(observer, "frame-file", failure);
 			return UNAVAILABLE;
 		}
 	}
 
-	private static int safeFrameLineNumber(StackTraceElement frame) {
+	private static int safeFrameLineNumber(StackTraceElement frame, FailureObserver observer) {
 		try {
 			return frame.getLineNumber();
-		} catch (Throwable ignored) {
+		} catch (Throwable failure) {
+			observe(observer, "frame-line", failure);
 			return -1;
 		}
 	}
 
-	private static CauseLookup lookupCause(Throwable throwable) {
+	private static CauseLookup lookupCause(Throwable throwable, FailureObserver observer) {
 		try {
 			return new CauseLookup(throwable.getCause(), false);
-		} catch (Throwable ignored) {
+		} catch (Throwable failure) {
+			observe(observer, "cause", failure);
 			return new CauseLookup(null, true);
 		}
 	}
 
-	private static SuppressedLookup lookupSuppressed(Throwable throwable) {
+	private static SuppressedLookup lookupSuppressed(Throwable throwable, FailureObserver observer) {
 		try {
 			return new SuppressedLookup(throwable.getSuppressed(), false);
-		} catch (Throwable ignored) {
+		} catch (Throwable failure) {
+			observe(observer, "suppressed", failure);
 			return new SuppressedLookup(null, true);
 		}
 	}
 
+	private static void observe(FailureObserver observer, String accessor, Throwable failure) {
+		try {
+			observer.failed(accessor, failure);
+		} catch (RuntimeException | LinkageError ignored) {
+			// An observer cannot replace the original unavailable marker or graph.
+		}
+	}
+
+	@NotNullByDefault
 	private static final class CauseLookup {
-		private final Throwable value;
+		private final @Nullable Throwable value;
 		private final boolean failed;
 
-		private CauseLookup(Throwable value, boolean failed) {
+		private CauseLookup(@Nullable Throwable value, boolean failed) {
 			this.value = value;
 			this.failed = failed;
 		}
 	}
 
+	@NotNullByDefault
 	private static final class SuppressedLookup {
-		private final Throwable[] values;
+		private final @Nullable Throwable @Nullable @Unmodifiable [] values;
 		private final boolean failed;
 
-		private SuppressedLookup(Throwable[] values, boolean failed) {
+		private SuppressedLookup(@Nullable Throwable @Nullable @Unmodifiable [] values, boolean failed) {
 			this.values = values;
 			this.failed = failed;
 		}
 	}
 
+	@NotNullByDefault
 	private static final class FrameBudget {
 		private int remaining;
 
@@ -363,6 +405,7 @@ public final class SafeExceptionReport {
 		}
 	}
 
+	@NotNullByDefault
 	private static final class BoundedText {
 		private final int maximum;
 		private final String truncationMarker;
@@ -374,7 +417,7 @@ public final class SafeExceptionReport {
 			this.truncationMarker = truncationMarker;
 		}
 
-		private void append(String text) {
+		private void append(@Nullable String text) {
 			if (truncated) {
 				return;
 			}
@@ -401,7 +444,7 @@ public final class SafeExceptionReport {
 			truncated = true;
 		}
 
-		private void appendEscaped(String text) {
+		private void appendEscaped(@Nullable String text) {
 			if (text == null) {
 				append(NULL_VALUE);
 				return;

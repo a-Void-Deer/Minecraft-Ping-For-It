@@ -36,6 +36,8 @@ class PlatformFluidServiceContractTest {
 		assertThrows(IllegalArgumentException.class, () -> new IPlatformFluidService.Shape(0, OptionalInt.empty(), true));
 		assertThrows(IllegalArgumentException.class, () -> new IPlatformFluidService.Shape(1, OptionalInt.of(4097), true));
 		assertThrows(IllegalArgumentException.class, () -> new IPlatformFluidService.Shape(1, OptionalInt.of(1), false));
+		assertEquals(1_024, new IPlatformFluidService.Shape(1_024, OptionalInt.empty(), true).members());
+		assertThrows(IllegalArgumentException.class, () -> new IPlatformFluidService.Shape(1_025, OptionalInt.empty(), true));
 		assertEquals(OptionalInt.empty(), new IPlatformFluidService.Shape(81, OptionalInt.empty(), true).indexedSlots());
 		assertThrows(IllegalArgumentException.class, () -> new IPlatformFluidService.RouteInfo(IPlatformFluidService.TopologyEvidence.PUBLIC_ADDRESS_ONLY, "x\ny"));
 		assertThrows(ArithmeticException.class, () -> new IPlatformFluidService.OperationProfile(InventoryValidationBudget.NONE, Long.MAX_VALUE, 0, 0)

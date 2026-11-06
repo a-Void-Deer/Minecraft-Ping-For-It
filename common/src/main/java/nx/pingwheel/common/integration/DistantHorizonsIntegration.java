@@ -13,9 +13,12 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticLogger;
+import nx.pingwheel.common.diagnostics.SafeDiagnosticValue;
+import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
-import static nx.pingwheel.common.Global.LOGGER;
 
 /**
  * Dedicated boundary for the optional Distant Horizons integration: every
@@ -24,6 +27,7 @@ import static nx.pingwheel.common.Global.LOGGER;
  * reference the optional packages and only use the JDK/Minecraft signature
  * {@link #traceDistantAsync(Vec3, Vec3, Consumer)}.
  */
+@NotNullByDefault
 public class DistantHorizonsIntegration {
 	private DistantHorizonsIntegration() {}
 
@@ -31,7 +35,7 @@ public class DistantHorizonsIntegration {
 	private static final long CACHE_MAX_AGE_SECONDS = 10L;
 	private static final int RAYCAST_RANGE = 4096;
 
-	private static final IntegrationLinkGuard LINK_GUARD = new IntegrationLinkGuard("distanthorizons");
+	private static final IntegrationLinkGuard LINK_GUARD = new IntegrationLinkGuard("distanthorizons", Diagnostics.client());
 
 	private static @Nullable IDhApiTerrainDataCache terrainCache = null;
 	private static Instant lastCacheLoad = Instant.EPOCH;
@@ -61,7 +65,8 @@ public class DistantHorizonsIntegration {
 			LINK_GUARD.disable(error);
 			return false;
 		} catch (RuntimeException error) {
-			Diagnostics.warn("distanthorizons.schedule", "distanthorizons",
+			Diagnostics.client().atNormal().rateLimited(DistantHorizonsDiagnosticChannels.SCHEDULE_FAILURES).failure(Level.WARN,
+				"distanthorizons/schedule", "async-schedule-rejected",
 				() -> "rayStart=" + rayStart + " direction=" + direction, error);
 			return false;
 		}
@@ -78,7 +83,8 @@ public class DistantHorizonsIntegration {
 			if (root instanceof LinkageError linkError) {
 				LINK_GUARD.disable(linkError);
 			} else {
-				Diagnostics.warn("distanthorizons.trace", "distanthorizons",
+				Diagnostics.client().atNormal().rateLimited(DistantHorizonsDiagnosticChannels.TRACE_FAILURES).failure(Level.WARN,
+					"distanthorizons/trace", "async-trace-failed",
 					() -> "rayStart=" + rayStart + " direction=" + direction, root);
 			}
 			completion.accept(Optional.empty());
@@ -173,10 +179,15 @@ public class DistantHorizonsIntegration {
 		if (!ModContext.HasDistantHorizons || LINK_GUARD.disabled()) {
 			return;
 		}
+		DiagnosticLogger diagnostics = Diagnostics.bootstrap().atNormal().site("distanthorizons/version");
+		if (!diagnostics.isEnabled(Level.INFO)) return;
 
 		try {
-			LOGGER.info("Distant Horizons API Version: %s.%s.%s".formatted(
-				DhApi.getApiMajorVersion(), DhApi.getApiMinorVersion(), DhApi.getApiPatchVersion()));
+			int major = DhApi.getApiMajorVersion();
+			int minor = DhApi.getApiMinorVersion();
+			int patch = DhApi.getApiPatchVersion();
+			diagnostics.info("Distant Horizons API Version: {}.{}.{}",
+				SafeDiagnosticValue.number(major), SafeDiagnosticValue.number(minor), SafeDiagnosticValue.number(patch));
 		} catch (LinkageError error) {
 			LINK_GUARD.disable(error);
 		}
@@ -192,7 +203,6 @@ public class DistantHorizonsIntegration {
 			return;
 		}
 
-		Diagnostics.warn("distanthorizons.unguarded-link", "distanthorizons",
-			() -> "distanthorizons integration disabled: unguarded link failure", error);
+		LINK_GUARD.disable(error);
 	}
 }

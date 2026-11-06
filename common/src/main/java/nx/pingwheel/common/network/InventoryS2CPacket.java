@@ -660,5 +660,5 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 
 	@Override public ResourceLocation getId() { return PACKET_ID; }
 	@Override public @NotNull Type<InventoryS2CPacket> type() { return PACKET_TYPE; }
-	public static InventoryS2CPacket readSafe(FriendlyByteBuf buf) { return PacketHandler.readSafe(buf, InventoryS2CPacket.class); }
+	public static InventoryS2CPacket readSafe(FriendlyByteBuf buf) { return PacketHandler.readSafe(buf, InventoryS2CPacket.class, nx.pingwheel.common.diagnostics.Diagnostics.client()); }
 }

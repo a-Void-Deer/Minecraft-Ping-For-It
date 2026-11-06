@@ -4,13 +4,18 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
 import nx.pingwheel.common.util.SafeExceptionReport;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
+import nx.pingwheel.common.diagnostics.DiagnosticFaultReporter;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
 import org.apache.logging.log4j.Level;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import nx.pingwheel.common.math.EntityLocalGeometryRegistry;
@@ -27,6 +32,7 @@ import nx.pingwheel.common.math.EntityLocalRaycastRequest;
  * still owns the candidate and prevents legacy AABB selection from reviving
  * it.</p>
  */
+@NotNullByDefault
 public final class CreateContraptionRaycastAdapter implements EntityLocalGeometryResolver {
 
 	public static final String SOURCE_ID = "pingforit:create_contraption_raycast";
@@ -48,16 +54,16 @@ public final class CreateContraptionRaycastAdapter implements EntityLocalGeometr
 	private DelegateState delegateState = DelegateState.UNRESOLVED;
 
 	private CreateContraptionRaycastAdapter() {
-		this(new ReflectiveDelegateLoader(), null);
+		this(new ReflectiveDelegateLoader());
 	}
 
 	CreateContraptionRaycastAdapter(DelegateLoader delegateLoader) {
-		this(delegateLoader, null);
+		this(delegateLoader, System::nanoTime);
 	}
 
-	CreateContraptionRaycastAdapter(DelegateLoader delegateLoader, @Nullable DiagnosticSink diagnosticSink) {
+	CreateContraptionRaycastAdapter(DelegateLoader delegateLoader, LongSupplier clock) {
 		this.delegateLoader = Objects.requireNonNull(delegateLoader, "delegateLoader");
-		this.diagnostics = new Diagnostics(diagnosticSink);
+		this.diagnostics = new Diagnostics(clock);
 	}
 
 	static @Unmodifiable List<ResourceLocation> claimedEntityTypeIds() {
@@ -112,8 +118,7 @@ public final class CreateContraptionRaycastAdapter implements EntityLocalGeometr
 		try {
 			@Nullable EntityLocalGeometryResult result = resolvedDelegate.trace(candidate, request);
 			if (result == null) {
-				nx.pingwheel.common.diagnostics.Diagnostics.event(Level.WARN, "create-contraption-trace", SOURCE_ID,
-					"null-result", () -> "delegate returned null; ownedCandidateRemainsFailed=true");
+				diagnostics.report(candidate, request, "null-result", null);
 				return EntityLocalGeometryResult.failed();
 			}
 			return result;
@@ -125,25 +130,24 @@ public final class CreateContraptionRaycastAdapter implements EntityLocalGeometr
 		}
 	}
 
-	private synchronized @Nullable Delegate delegate(@Nullable Entity candidate, EntityLocalRaycastRequest request) {
-		if (delegateState == DelegateState.READY) {
-			return delegate;
+	private @Nullable Delegate delegate(@Nullable Entity candidate, EntityLocalRaycastRequest request) {
+		Throwable unavailable;
+		synchronized (this) {
+			if (delegateState == DelegateState.READY) return delegate;
+			if (delegateState == DelegateState.UNAVAILABLE) return null;
+			try {
+				delegate = Objects.requireNonNull(delegateLoader.load(), "Create contraption raycast delegate");
+				delegateState = DelegateState.READY;
+				return delegate;
+			} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
+				delegateState = DelegateState.UNAVAILABLE;
+				unavailable = failure;
+			}
 		}
-		if (delegateState == DelegateState.UNAVAILABLE) {
-			return null;
-		}
-
-		try {
-			delegate = Objects.requireNonNull(delegateLoader.load(), "Create contraption raycast delegate");
-			delegateState = DelegateState.READY;
-			return delegate;
-		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
-			delegateState = DelegateState.UNAVAILABLE;
-			diagnostics.report(candidate, request, failure instanceof ReflectiveOperationException
-				? "delegate-load-reflection"
-				: failure instanceof LinkageError ? "delegate-load-linkage" : "delegate-load-assertion", failure);
-			return null;
-		}
+		diagnostics.report(candidate, request, unavailable instanceof ReflectiveOperationException
+			? "delegate-load-reflection"
+			: unavailable instanceof LinkageError ? "delegate-load-linkage" : "delegate-load-assertion", unavailable);
+		return null;
 	}
 
 	private synchronized void markUnavailable() {
@@ -155,11 +159,6 @@ public final class CreateContraptionRaycastAdapter implements EntityLocalGeometr
 		delegate = null;
 		delegateState = DelegateState.UNRESOLVED;
 		diagnostics.clear();
-	}
-
-	@FunctionalInterface
-	interface DiagnosticSink {
-		void warn(String message, @Nullable Throwable failure);
 	}
 
 	interface DelegateLoader {
@@ -181,38 +180,46 @@ public final class CreateContraptionRaycastAdapter implements EntityLocalGeometr
 	 * callback failures deliberately bypass it and reach the common registry's
 	 * existing callback diagnostic instead.
 	 */
-	private static final class Diagnostics {
+	@NotNullByDefault
+	static final class Diagnostics {
 		private static final int MAX_KEYS = 256;
 		private static final long MIN_LOG_INTERVAL_NANOS = 5_000_000_000L;
 
-		private final @Nullable DiagnosticSink sink;
+		private final LongSupplier clock;
 		private final LinkedHashMap<String, Long> lastLogged = new LinkedHashMap<>(16, 0.75F, true);
 
-		private Diagnostics(@Nullable DiagnosticSink sink) {
-			this.sink = sink;
+		Diagnostics(LongSupplier clock) {
+			this.clock = Objects.requireNonNull(clock, "clock");
 		}
 
-		private void report(
+		void report(
 			@Nullable Entity entity,
 			EntityLocalRaycastRequest request,
 			String category,
-			Throwable failure
+			@Nullable Throwable failure
 		) {
-			if (sink == null) {
-				try {
-					if (!nx.pingwheel.common.diagnostics.Diagnostics.logger().isEnabled(Level.WARN)) {
-						return;
-					}
-				} catch (RuntimeException | LinkageError ignored) {
-					return;
-				}
+			var selected = nx.pingwheel.common.diagnostics.Diagnostics.client().atNormal().rateLimited(
+				DiagnosticChannel.domain("create-contraption-shell", () -> admit(category + ':' + entityKey(entity))));
+			if (failure == null) {
+				selected.event(Level.WARN, "create-contraption-shell", category, () -> fullDetails(entity, request, category));
+			} else {
+				selected.failure(Level.WARN, "create-contraption-shell", "owned-candidate-unavailable",
+					() -> fullDetails(entity, request, category), failure);
 			}
-			long now = System.nanoTime();
-			String key = category + ':' + entityKey(entity);
+		}
+
+		private boolean admit(String key) {
+			long now;
+			try {
+				now = clock.getAsLong();
+			} catch (RuntimeException | LinkageError failure) {
+				fault(DiagnosticFaultReporter.Stage.CHANNEL_CLOCK, failure);
+				return false;
+			}
 			synchronized (lastLogged) {
 				@Nullable Long previous = lastLogged.get(key);
 				if (previous != null && now - previous < MIN_LOG_INTERVAL_NANOS) {
-					return;
+					return false;
 				}
 				if (previous == null && lastLogged.size() >= MAX_KEYS) {
 					Iterator<String> iterator = lastLogged.keySet().iterator();
@@ -223,17 +230,7 @@ public final class CreateContraptionRaycastAdapter implements EntityLocalGeometr
 				}
 				lastLogged.put(key, now);
 			}
-
-			if (sink == null) {
-				nx.pingwheel.common.diagnostics.Diagnostics.domainApprovedFailure(Level.WARN,
-					"create-contraption-shell", SOURCE_ID, () -> fullDetails(entity, request, category), failure);
-			} else {
-				try {
-					sink.warn(SafeExceptionReport.formatWithContext(fullDetails(entity, request, category), failure), null);
-				} catch (RuntimeException | LinkageError ignored) {
-					// The domain admission remains consumed when an injected sink fails.
-				}
-			}
+			return true;
 		}
 
 		private void clear() {
@@ -246,8 +243,7 @@ public final class CreateContraptionRaycastAdapter implements EntityLocalGeometr
 			if (entity == null) {
 				return "<null>";
 			}
-			return safe(() -> entity.getUUID().toString(),
-				entity.getClass().getName() + '@' + Integer.toHexString(System.identityHashCode(entity)));
+			return entity.getClass().getName() + '@' + Integer.toHexString(System.identityHashCode(entity));
 		}
 
 		private static String fullDetails(
@@ -282,8 +278,15 @@ public final class CreateContraptionRaycastAdapter implements EntityLocalGeometr
 			try {
 				return supplier.get();
 			} catch (RuntimeException | LinkageError | AssertionError descriptorFailure) {
-				return fallback + "(" + descriptorFailure + ')';
+				fault(DiagnosticFaultReporter.Stage.CONTEXT, descriptorFailure);
+				return fallback + "(" + SafeExceptionReport.format(descriptorFailure,
+					(accessor, failure) -> fault(DiagnosticFaultReporter.Stage.ACCESSOR, failure)) + ')';
 			}
+		}
+
+		private static void fault(DiagnosticFaultReporter.Stage stage, Throwable failure) {
+			nx.pingwheel.common.diagnostics.Diagnostics.faults().report(DiagnosticSide.CLIENT, "create-contraption-shell",
+				stage, nx.pingwheel.common.diagnostics.Diagnostics.profile(DiagnosticSide.CLIENT), failure);
 		}
 	}
 

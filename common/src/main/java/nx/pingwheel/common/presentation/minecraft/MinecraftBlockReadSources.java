@@ -17,6 +17,7 @@ import nx.pingwheel.common.presentation.PresentationAdapter;
 
 /** Read-only source routing, separate from marker validation/materialization and render shapes. */
 public final class MinecraftBlockReadSources {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel READ_FAILURE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("presentation-block-read-source", java.time.Duration.ofSeconds(10));
 	private MinecraftBlockReadSources() {}
 
 	public static Optional<ResolvedBlockReadSource> resolvePreviewReadSource(ServerLevel level, Target target) {
@@ -60,7 +61,7 @@ public final class MinecraftBlockReadSources {
 				member -> !level.isOutsideBuildHeight(member) && level.isLoaded(member)));
 		} catch (nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.CaptureLimitException deferred) { throw deferred;
 		} catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("presentation/block-read-source", "minecraft", () -> "target=" + target, unavailable);
+			Diagnostics.server().atDetailed().rateLimited(READ_FAILURE).warn("presentation/block-read-source", "unavailable", unavailable, () -> "target=" + target);
 			return Optional.empty();
 		}
 	}

@@ -9,7 +9,10 @@ import nx.pingwheel.common.config.InventorySettings;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.platform.IPlatformFluidService;
+import nx.pingwheel.common.network.InventoryC2SPacket;
+import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryCatalogAdmission;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryMinecraftSources;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import nx.pingwheel.common.presentation.source.CaptureResult;
 import nx.pingwheel.common.presentation.source.CostLedger;
@@ -32,11 +35,12 @@ class InventoryValidationAdmissionTest {
 	private static final class Resolver implements InventoryRuntime.SourceResolver {
 		int calls, metadata, reads, validity;
 		boolean denied, throwing;
+		InventoryValidationBudget.Cost resolutionCost = RESOLVE;
 		final List<InventoryValidationBudget.Allowance> grants = new ArrayList<>();
-		@Override public InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput input) { return RESOLVE; }
+		@Override public InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput input) { return resolutionCost; }
 		@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int cap) { throw new AssertionError("unadmitted resolver"); }
 		@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int cap, InventoryValidationBudget.Allowance allowance) {
-			allowance.debit(RESOLVE); calls++; grants.add(allowance);
+			allowance.debit(resolutionCost); calls++; grants.add(allowance);
 			if (throwing) throw new IllegalStateException("paid resolver prefix");
 			return Optional.of(new InventorySourceAccess.Source() {
 				@Override public SourceKey key() { return new SourceKey("test", "inventory", "admitted", input.viewKey()); }
@@ -73,6 +77,85 @@ class InventoryValidationAdmissionTest {
 			assertTrue(cost.workspaceBytes() + 4_000_000L < memory, id + " resolution must fit beside caller authority scratch");
 			assertTrue(cost.workUnits() < 4096L * nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.workUpperBound(4096), id);
 		}
+	}
+	@Test void genericResolutionPessimisticBoundStillFitsDefaultProbeMemoryAndWork() throws Exception {
+		var resolver = new Resolver();
+		resolver.resolutionCost = InventoryValidationBudget.resolution("minecraft:furnace");
+		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 0, 0, 0, "minecraft:furnace"), INPUT.readOwner(), BlockFace.NORTH);
+		var settings = InventorySettings.serverDefaults();
+		try (var runtime = new InventoryRuntime(resolver, settings.pendingMemoryBytes())) {
+			runtime.advance(0, settings);
+			assertEquals(Optional.of(true), runtime.probe(input));
+			assertEquals(1, resolver.calls); assertEquals(0, resolver.reads);
+			assertEquals(resolver.resolutionCost.workUnits() + VALID.workUnits(), ledger(runtime).used(WORK));
+			assertEquals(0, runtime.memory().reserved());
+			runtime.advance(1, settings);
+			var consumer = runtime.attach(input, new InventoryRuntime.PreviewSubject(input.readOwner())).orElseThrow();
+			assertEquals(CaptureResult.Completeness.COMPLETE, runtime.step(consumer, 1).orElseThrow().result().completeness());
+			assertEquals(1, resolver.reads);
+			System.out.println("COMMON generic resolution=" + resolver.resolutionCost + " defaultMemory=" + settings.pendingMemoryBytes()
+				+ " defaultWork=" + ledger(runtime).limit(WORK));
+		}
+	}
+	@Test void genericPessimisticResolutionAlsoAdmitsAtLegalLowMemory() throws Exception {
+		var settings = InventorySettings.serverDefaults(); settings.setPendingMemoryMiB(16); settings.validate();
+		var resolver = new Resolver(); resolver.resolutionCost = InventoryValidationBudget.resolution("minecraft:furnace");
+		try (var runtime = new InventoryRuntime(resolver, settings.pendingMemoryBytes())) {
+			runtime.advance(0, settings); assertEquals(Optional.of(true), runtime.probe(INPUT));
+			assertEquals(1, resolver.calls); assertEquals(0, resolver.reads);
+			assertEquals(0, runtime.memory().reserved()); assertEquals(0, runtime.memory().retained());
+		}
+	}
+	@Test void dualLaneBackendAtLegalLowMemoryCompletesSmallGenericItemPreviewDespiteAbsentFluid() {
+		var settings = InventorySettings.serverDefaults(); settings.setPendingMemoryMiB(16); settings.validate();
+		var target = new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:furnace");
+		@NotNullByDefault
+		class Host extends InventoryBackendTest.Host {
+			@Override public Optional<InventoryBackend.Opened> open(UUID player, Target requested) {
+				assertEquals(target, requested);
+				return Optional.of(new InventoryBackend.Opened(requested, "entity_block", "attention"));
+			}
+		}
+		var host = new Host();
+		host.policies.replaceAll((player, policy) -> new InventoryBackend.Policy(100, 1, java.util.Set.of("entity_block"), java.util.Set.of("entity_block")));
+		var reads = new java.util.concurrent.atomic.AtomicInteger();
+		var itemResolutions = new java.util.concurrent.atomic.AtomicInteger();
+		var fluidResolutions = new java.util.concurrent.atomic.AtomicInteger();
+		var resolver = new InventoryRuntime.SourceResolver() {
+			@Override public InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput input) {
+				return InventoryMinecraftSources.resolutionValidationCost(input);
+			}
+			@Override public InventoryValidationBudget.Cost resolutionProbeCost(InventorySourceInput input) {
+				return InventoryMinecraftSources.resolutionProbeCost(input);
+			}
+			@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int cap) {
+				throw new AssertionError("Backend must keep caller-backed resolution admission");
+			}
+			@Override public Optional<InventorySourceAccess.Source> resolve(InventorySourceInput input, int cap, InventoryValidationBudget.Allowance allowance) {
+				assertEquals(target, input.target()); allowance.debit(resolutionProbeCost(input));
+				if (input.resourceKind() == InventoryResourceKind.FLUID) { fluidResolutions.incrementAndGet(); return Optional.empty(); }
+				itemResolutions.incrementAndGet(); return Optional.of(new InventoryRuntimeTest.Source(input, reads, 3));
+			}
+		};
+		var runtime = new InventoryRuntime(resolver, settings.pendingMemoryBytes());
+		try (var backend = new InventoryBackend(host, runtime, 1)) {
+			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.hello(), 0, settings);
+			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.open(host.epoch(InventoryBackendTest.A), 100, 1, 1, target, BlockFace.NORTH), 0, settings);
+			long openedRetained = runtime.memory().retained();
+			System.out.println("COMMON dual-lane OPEN memory=" + openedRetained + " genericResolution="
+				+ InventoryValidationBudget.resolution("minecraft:furnace") + " cap=" + settings.pendingMemoryBytes());
+			for (int tick = 0; tick <= 3 * settings.getPreview().getPeriodTicks(); tick++) backend.tick(tick, settings);
+			assertTrue(fluidResolutions.get() > 0, "the absent sibling must actually resolve and become INVALID");
+			assertTrue(host.packets.stream().anyMatch(packet -> packet.resourceKind() == InventoryResourceKind.FLUID
+				&& packet.status() == InventoryS2CPacket.Status.INVALID));
+			assertTrue(itemResolutions.get() > 0, "real dual-lane retained ownership must leave room for generic ITEM admission");
+			assertEquals(3, reads.get(), "the small container finishes once, without replaying contents");
+			assertTrue(host.packets.stream().anyMatch(packet -> packet.resourceKind() == InventoryResourceKind.ITEM
+				&& packet.kind() == InventoryS2CPacket.Kind.PREVIEW && packet.completeScan()
+				&& packet.entries().size() == 1 && packet.entries().getFirst().amount() == 7));
+			assertEquals(0, runtime.memory().reserved());
+		}
+		assertEquals(0, runtime.memory().reserved()); assertEquals(0, runtime.memory().retained());
 	}
 	@Test void zeroAndOneShortResolutionGrantDeferBeforeAnyResolverOrMetadataCallback() throws Exception {
 		for (int remaining : new int[] {0, 10}) {

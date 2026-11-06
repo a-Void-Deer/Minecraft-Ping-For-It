@@ -169,7 +169,7 @@ public final class SelectedLocaleTranslationKeyCache {
 		Set<String> keys = new HashSet<>();
 		for (T resource : resources) {
 			if (resource == null) {
-				Diagnostics.domainApprovedEvent(Level.DEBUG, "locale/resource", "selected-locale", "null-resource",
+				Diagnostics.client().atDebug().event(Level.DEBUG, "locale/resource", "null-resource",
 					() -> RESOURCE_PARSE_FAILED);
 				continue;
 			}
@@ -195,6 +195,7 @@ public final class SelectedLocaleTranslationKeyCache {
 
 	private static void logFailure(String reason, Throwable exception) {
 		// Cache rebuild/resource traversal already gates attempts to this reload.
-		Diagnostics.domainApprovedFailure(Level.WARN, "locale/resource", "selected-locale", () -> reason, exception);
+		String handling = reason.equals(STACK_LOOKUP_FAILED) ? "stack-lookup" : "resource-parse";
+		Diagnostics.client().atNormal().failure(Level.WARN, "locale/resource", handling, () -> reason, exception);
 	}
 }

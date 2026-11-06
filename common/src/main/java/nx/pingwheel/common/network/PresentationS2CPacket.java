@@ -223,7 +223,7 @@ public record PresentationS2CPacket(Kind kind, int protocol, long epoch, long vi
 	}
 	@Override public ResourceLocation getId() { return PACKET_ID; }
 	@Override public @NotNull Type<PresentationS2CPacket> type() { return PACKET_TYPE; }
-	public static PresentationS2CPacket readSafe(FriendlyByteBuf buf) { return PacketHandler.readSafe(buf, PresentationS2CPacket.class); }
+	public static PresentationS2CPacket readSafe(FriendlyByteBuf buf) { return PacketHandler.readSafe(buf, PresentationS2CPacket.class, nx.pingwheel.common.diagnostics.Diagnostics.client()); }
 
 	/** Empty is a valid deny-all mask; an unknown type or over-capacity entry is rejected. */
 	static Map<String, Map<String, Set<String>>> validateMask(Map<String, Map<String, Set<String>>> mask, Kind kind) {

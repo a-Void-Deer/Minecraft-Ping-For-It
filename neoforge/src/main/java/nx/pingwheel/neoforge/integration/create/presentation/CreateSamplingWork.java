@@ -5,17 +5,23 @@ import java.util.function.Predicate;
 
 import net.minecraft.core.BlockPos;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticLogger;
 import org.jetbrains.annotations.Nullable;
 
 /** Create-free work ledger and the production vault/tank member-verification loop. */
 final class CreateSamplingWork {
 	private final int initial;
 	private int remaining;
+	private final DiagnosticLogger diagnostics;
 
 	CreateSamplingWork(int remaining) {
+		this(remaining, Diagnostics.server());
+	}
+	CreateSamplingWork(int remaining, DiagnosticLogger diagnostics) {
 		if (remaining < 0) throw new IllegalArgumentException("negative Create work budget");
 		this.initial = remaining;
 		this.remaining = remaining;
+		this.diagnostics = Objects.requireNonNull(diagnostics);
 	}
 
 	int remaining() { return remaining; }
@@ -39,7 +45,7 @@ final class CreateSamplingWork {
 				for (int dz = 0; dz < z; dz++) {
 					if (!take(1)) return false;
 					BlockPos part = origin.offset(dx, dy, dz);
-					if (!member(memberGate, part) || !verifyMember.test(part)) return false;
+					if (!member(memberGate, part, diagnostics) || !verifyMember.test(part)) return false;
 				}
 			}
 		}
@@ -48,10 +54,14 @@ final class CreateSamplingWork {
 
 	/** A rejected or throwing gate is unavailable, never permission to read the member. */
 	static boolean member(@Nullable Predicate<BlockPos> memberGate, BlockPos position) {
+		return member(memberGate, position, Diagnostics.server());
+	}
+	static boolean member(@Nullable Predicate<BlockPos> memberGate, BlockPos position, DiagnosticLogger diagnostics) {
 		if (memberGate == null) return true;
 		try { return memberGate.test(position); }
 		catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("create/presentation-member-gate", "collector", () -> "position=" + position, unavailable);
+			CreatePresentationDiagnostics.failure(diagnostics,
+				"create/presentation-member-gate", "member-rejected", () -> "position=" + position, unavailable);
 			return false;
 		}
 	}

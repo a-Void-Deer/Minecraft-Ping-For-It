@@ -236,7 +236,7 @@ public record ServerPresentationPolicyS2CPacket(
 	}
 
 	public static ServerPresentationPolicyS2CPacket readSafe(FriendlyByteBuf buf) {
-		return PacketHandler.readSafe(buf, ServerPresentationPolicyS2CPacket.class);
+		return PacketHandler.readSafe(buf, ServerPresentationPolicyS2CPacket.class, nx.pingwheel.common.diagnostics.Diagnostics.client());
 	}
 
 	@Override

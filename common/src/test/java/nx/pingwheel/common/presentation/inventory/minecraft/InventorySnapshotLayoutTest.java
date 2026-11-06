@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.stream.IntStream;
 
 import net.minecraft.core.BlockPos;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -53,6 +54,15 @@ class InventorySnapshotLayoutTest {
 	}
 
 	@Test
+	void memberBoundAcceptsTheConfiguredLimitAndRejectsOneMore() {
+		@Unmodifiable List<InventorySnapshotLayout.Member> atLimit = members(1_024);
+		var layout = new InventorySnapshotLayout("test:layout", "", null, atLimit);
+		assertEquals(1_024, layout.members().size());
+		assertThrows(IllegalArgumentException.class,
+			() -> new InventorySnapshotLayout("test:layout", "", null, members(1_025)));
+	}
+
+	@Test
 	void totalVisibleBoundSpansAllMembersRatherThanEachMemberAlone() {
 		var full = segment(4096, IntStream.range(0, 4096).boxed().toList());
 		assertDoesNotThrow(() -> new InventorySnapshotLayout("test:layout", "", null, List.of(member(BlockPos.ZERO, List.of(full)))));
@@ -66,5 +76,9 @@ class InventorySnapshotLayoutTest {
 
 	private static InventorySnapshotLayout.Member member(BlockPos position, List<InventorySnapshotLayout.Segment> segments) {
 		return new InventorySnapshotLayout.Member(position, "minecraft:chest", "minecraft:chest", "member", segments);
+	}
+
+	private static @Unmodifiable List<InventorySnapshotLayout.Member> members(int count) {
+		return IntStream.range(0, count).mapToObj(index -> member(new BlockPos(index, 0, 0), List.of())).toList();
 	}
 }

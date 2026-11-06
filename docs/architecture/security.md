@@ -74,10 +74,11 @@ owns the distinct client and server recovery rules.
 
 ## Diagnostic detail and user feedback
 
-[Diagnostics and logging](logging.md) owns severity, report admission, bounded
-exception detail, disclosure restrictions and diagnostic-output isolation.
-Those reporting rules do not replace the authority and business-failure
-boundaries above.
+[Diagnostics and logging](logging.md) owns logging profiles, severity, report
+admission, bounded exception detail, disclosure and diagnostic-output
+isolation. Selecting a higher-disclosure profile does not authorize a source
+read, widen a business catch or change user feedback. Those reporting rules do
+not replace the authority and business-failure boundaries above.
 
 Do not add toast or action-bar feedback for rate or integration failures. The
 required local invalid-target message, including its color and chat output, is

@@ -2,6 +2,11 @@ package nx.pingwheel.common.config;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
+import nx.pingwheel.common.integration.IntegrationDiagnosticCapture;
+import org.apache.logging.log4j.Level;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -77,18 +82,24 @@ class ConfigHandlerVersionTest {
             "{\"pingforit-version\":\"0.2.0-pfi-beta1\",\"rateLimit\":3,\"pingDistance\":512,\"pingDuration\":23,\"unknown\":{\"source\":\"legacy\"}}\n",
             StandardCharsets.UTF_8);
 
-        ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
-        handler.load();
+        try (var logs = new ConfigHandlerDiagnosticsTest.Capture()) {
+            Diagnostics.setProfile(DiagnosticSide.BOOTSTRAP, LoggingProfile.NORMAL);
+            ConfigHandler<ServerConfig> handler = new ConfigHandler<>(ServerConfig.class, configPath, CURRENT_VERSION);
+            handler.load();
 
-        assertEquals(23, handler.getConfig().getSyncDuration());
-        assertEquals(3, handler.getConfig().getRateLimit());
-        assertEquals(512, handler.getConfig().getPingDistance());
-        JsonObject persisted = readRoot(configPath);
-        assertEquals(CURRENT_VERSION, persisted.get(ConfigVersionUpdater.VERSION_KEY).getAsString());
-        assertEquals(23, persisted.get("syncDuration").getAsInt());
-        assertFalse(persisted.has("pingDuration"));
-        assertEquals("legacy", persisted.get("unknown").getAsJsonObject().get("source").getAsString());
-		assertFalse(hasBrokenBackup(tempDir));
+            assertEquals(23, handler.getConfig().getSyncDuration());
+            assertEquals(3, handler.getConfig().getRateLimit());
+            assertEquals(512, handler.getConfig().getPingDistance());
+            JsonObject persisted = readRoot(configPath);
+            assertEquals(CURRENT_VERSION, persisted.get(ConfigVersionUpdater.VERSION_KEY).getAsString());
+            assertEquals(23, persisted.get("syncDuration").getAsInt());
+            assertFalse(persisted.has("pingDuration"));
+            assertTrue(logs.events().stream().noneMatch(event -> event.getLevel() == Level.WARN
+                    || event.getLevel() == Level.ERROR),
+                "an ordinary successful migration must stay quiet at NORMAL");
+            assertEquals("legacy", persisted.get("unknown").getAsJsonObject().get("source").getAsString());
+            assertFalse(hasBrokenBackup(tempDir));
+        }
 	}
 
 	@Test
@@ -273,6 +284,64 @@ class ConfigHandlerVersionTest {
         JsonObject persisted = readRoot(configPath);
         assertEquals(CURRENT_VERSION, persisted.get("pingforit-version").getAsString());
         assertTrue(persisted.get("unknown").getAsBoolean());
+    }
+
+    @Test
+    void migrationWriteFailureDefersVersionAndPathUntilHighDisclosure(@TempDir Path tempDir)
+        throws IOException {
+        Path configPath = tempDir.resolve("migration-diagnostic.json");
+        byte[] original = ("{\"pingforit-version\":\"" + GENERIC_OLDER_VERSION
+            + "\",\"pingVolume\":23}\n").getBytes(StandardCharsets.UTF_8);
+        Files.write(configPath, original);
+        AtomicBoolean failWrite = new AtomicBoolean(true);
+        try (var logs = new IntegrationDiagnosticCapture(Level.WARN, LoggingProfile.NORMAL)) {
+            var handler = new ConfigHandler<>(
+                ClientConfig.class,
+                configPath,
+                (source, backupPath, originalBytes) -> Files.write(backupPath, originalBytes),
+                CURRENT_VERSION,
+                (path, serialized) -> {
+                    if (failWrite.get()) throw new IOException("deterministic migration write failure");
+                    Files.writeString(path, serialized + System.lineSeparator(), StandardCharsets.UTF_8);
+                });
+
+            handler.load();
+            var normal = logs.events().stream()
+                .filter(event -> event.getLevel() == Level.WARN
+                    && event.getMessage().getFormattedMessage()
+                        .contains("site=config-io handling=migration-write-failed"))
+                .toList();
+            assertEquals(1, normal.size());
+            String normalMessage = normal.getFirst().getMessage().getFormattedMessage();
+            assertFalse(normalMessage.contains("configVersion="), normalMessage);
+            assertFalse(normalMessage.contains("path="), normalMessage);
+
+            logs.level(Level.OFF);
+            assertFalse(handler.saveSafely());
+            assertEquals(1, logs.events().size(), "disabled logging must not evaluate or emit migration detail");
+
+            logs.level(Level.WARN);
+            Diagnostics.setProfile(DiagnosticSide.BOOTSTRAP, LoggingProfile.DEEP);
+            assertFalse(handler.saveSafely());
+            var detailed = logs.events().stream()
+                .filter(event -> event.getLevel() == Level.WARN
+                    && event.getMessage().getFormattedMessage()
+                        .contains("site=config-io handling=migration-write-failed"))
+                .toList();
+            assertEquals(2, detailed.size());
+            String detailedMessage = detailed.getLast().getMessage().getFormattedMessage();
+            assertTrue(detailedMessage.contains("configVersion=" + GENERIC_OLDER_VERSION), detailedMessage);
+            assertTrue(detailedMessage.contains("path=" + configPath.toString().replace("\\", "\\\\")), detailedMessage);
+            assertEquals(1, count(detailedMessage, "configVersion="), "admitted context is expanded once");
+        }
+    }
+
+    private static int count(String text, String token) {
+        int occurrences = 0;
+        for (int index = text.indexOf(token); index >= 0; index = text.indexOf(token, index + token.length())) {
+            occurrences++;
+        }
+        return occurrences;
     }
 
     @Test

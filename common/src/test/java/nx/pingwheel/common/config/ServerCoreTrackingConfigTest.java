@@ -9,14 +9,22 @@ import net.minecraft.server.level.ServerPlayer;
 import nx.pingwheel.common.config.InventoryConfigValues.Field;
 import nx.pingwheel.common.config.InventoryConfigValues.Value;
 import nx.pingwheel.common.core.ServerCore;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
+import nx.pingwheel.common.integration.IntegrationDiagnosticCapture;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
+import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.nio.file.Files;
+import java.util.List;
 import java.util.Objects;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -43,6 +51,7 @@ class ServerCoreTrackingConfigTest {
 		int previousHash = hashField.getInt(handler);
 		@Nullable Object previousServer = activeField.get(null);
 		var path = handler.getConfigPath();
+		LoggingProfile previousProfile = Diagnostics.profile(DiagnosticSide.SERVER);
 		byte @Nullable [] previousBytes = Files.exists(path) ? Files.readAllBytes(path) : null;
 		var config = new ServerConfig();
 		config.getInventory().getTracking().setDistinguishFaces(true);
@@ -82,9 +91,32 @@ class ServerCoreTrackingConfigTest {
 				| ServerConfigUpdate.RATE_LIMIT, ChannelMode.AUTO, true, 0, 99, 7,
 				InventoryConfigValues.defaults().with(Field.TRACKING_DISTINGUISH_PLAYERS, Value.scalar(2)));
 			ServerCore.onServerConfigUpdate(server, player, malicious);
-			ServerCore.onServerConfigUpdate(server, player, new ServerConfigUpdateC2SPacket(1 << 29,
+			ServerCore.onServerConfigUpdate(server, player, new ServerConfigUpdateC2SPacket(1 << 30,
 				ChannelMode.AUTO, true, 0, 99, 7, InventoryConfigValues.defaults()));
 			assertEquals(authoritative, ServerConfigSnapshot.from(config, true));
+			var deniedProfile = new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE,
+				ChannelMode.AUTO, true, 0, 0, 7, InventoryConfigValues.defaults(), false, LoggingProfile.DEBUG);
+			player.permission = 2;
+			ServerCore.onServerConfigUpdate(server, player, deniedProfile);
+			assertEquals(LoggingProfile.NORMAL, config.getLoggingProfile());
+			assertEquals(previousProfile, Diagnostics.profile(DiagnosticSide.SERVER));
+			player.permission = 3;
+			var selectedProfile = wire(new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE,
+				ChannelMode.AUTO, true, 0, 0, 7, InventoryConfigValues.defaults(), false, LoggingProfile.DEEP));
+			ServerCore.onServerConfigUpdate(server, player, selectedProfile);
+			assertEquals(LoggingProfile.DEEP, config.getLoggingProfile());
+			assertEquals(LoggingProfile.DEEP, Diagnostics.profile(DiagnosticSide.SERVER));
+			var unselectedProfile = wire(new ServerConfigUpdateC2SPacket(ServerConfigUpdate.RATE_LIMIT,
+				ChannelMode.AUTO, true, 0, 5, 7, InventoryConfigValues.defaults(), false, LoggingProfile.DEBUG));
+			ServerCore.onServerConfigUpdate(server, player, unselectedProfile);
+			assertEquals(LoggingProfile.DEEP, config.getLoggingProfile());
+			assertEquals(LoggingProfile.DEEP, Diagnostics.profile(DiagnosticSide.SERVER));
+			var invalidMixedProfile = new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE | (1 << 30),
+				ChannelMode.AUTO, true, 0, 5, 7, InventoryConfigValues.defaults(), false, LoggingProfile.DEBUG);
+			ServerCore.onServerConfigUpdate(server, player, invalidMixedProfile);
+			assertEquals(LoggingProfile.DEEP, config.getLoggingProfile());
+			assertEquals(LoggingProfile.DEEP, Diagnostics.profile(DiagnosticSide.SERVER));
+			authoritative = ServerConfigSnapshot.from(config, true);
 			var buf = new FriendlyByteBuf(Unpooled.buffer());
 			try {
 				new ServerConfigSnapshotS2CPacket(17, authoritative).write(buf);
@@ -98,10 +130,129 @@ class ServerCoreTrackingConfigTest {
 			configField.set(handler, previousConfig);
 			hashField.setInt(handler, previousHash);
 			activeField.set(null, previousServer);
+			Diagnostics.setProfile(DiagnosticSide.SERVER, previousProfile);
 			ServerCore.init();
 			if (previousBytes == null) Files.deleteIfExists(path);
 			else Files.write(path, previousBytes);
 		}
+	}
+
+	@Test
+	void packetFacingUpdateReportsLazyStageFactsOnlyAtDeepDisclosure() throws Exception {
+		var handler = ServerConfig.HANDLER;
+		var configField = ConfigHandler.class.getDeclaredField("config");
+		var hashField = ConfigHandler.class.getDeclaredField("configHash");
+		var activeField = ServerCore.class.getDeclaredField("ACTIVE_SERVER");
+		configField.setAccessible(true);
+		hashField.setAccessible(true);
+		activeField.setAccessible(true);
+		Object previousConfig = Objects.requireNonNull(configField.get(handler));
+		int previousHash = hashField.getInt(handler);
+		@Nullable Object previousServer = activeField.get(null);
+		var path = handler.getConfigPath();
+		LoggingProfile previousProfile = Diagnostics.profile(DiagnosticSide.SERVER);
+		byte @Nullable [] previousBytes = Files.exists(path) ? Files.readAllBytes(path) : null;
+		var config = new ServerConfig();
+		config.setLoggingProfile(LoggingProfile.NORMAL);
+		var player = allocate(Player.class);
+		var server = allocate(DedicatedServer.class);
+		try {
+			activeField.set(null, null);
+			configField.set(handler, config);
+			var rateOnly = wire(new ServerConfigUpdateC2SPacket(ServerConfigUpdate.RATE_LIMIT,
+				ChannelMode.AUTO, true, 1000, 5, 7, InventoryConfigValues.defaults()));
+			var conflicting = InventoryConfigValues.defaults().with(Field.DISPLAY_BYTE_MULTIPLIER,
+				new Value(false, new BigDecimal("32")));
+			var invalid = wire(new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE
+				| ServerConfigUpdate.INVENTORY_DISPLAY_BYTE_MULTIPLIER, ChannelMode.AUTO, true,
+				0, 0, 7, conflicting, true, LoggingProfile.DEBUG));
+
+			try (var capture = new IntegrationDiagnosticCapture(Level.DEBUG, LoggingProfile.NORMAL)) {
+				player.permission = 2;
+				ServerCore.onServerConfigUpdate(server, player, rateOnly);
+				assertTrue(updateMessages(capture).isEmpty());
+
+				player.permission = 3;
+				ServerCore.onServerConfigUpdate(server, player, invalid);
+				ServerCore.onServerConfigUpdate(server, player, rateOnly);
+				assertTrue(updateMessages(capture).isEmpty());
+
+				Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEEP);
+				config.setLoggingProfile(LoggingProfile.DEEP);
+				player.permission = 2;
+				ServerCore.onServerConfigUpdate(server, player, rateOnly);
+				var denied = updateMessages(capture);
+				assertEquals(1, denied.size());
+				assertTrue(denied.getFirst().contains("handling=permission-denied"));
+				assertTrue(denied.getFirst().contains("mask=" + ServerConfigUpdate.RATE_LIMIT));
+				assertTrue(denied.getFirst().contains("trustedPermission=false"));
+				assertTrue(denied.getFirst().contains("profileOnly=false"));
+
+				var deniedProfilePacket = wire(new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE,
+					ChannelMode.AUTO, true, 0, 0, 7, InventoryConfigValues.defaults(), true, LoggingProfile.DEBUG));
+				ServerCore.onServerConfigUpdate(server, player, deniedProfilePacket);
+				var deniedProfile = updateMessages(capture);
+				assertEquals(2, deniedProfile.size());
+				assertTrue(deniedProfile.getLast().contains("handling=permission-denied"));
+				assertTrue(deniedProfile.getLast().contains("mask=" + ServerConfigUpdate.LOGGING_PROFILE));
+				assertTrue(deniedProfile.getLast().contains("trustedPermission=false"));
+				assertTrue(deniedProfile.getLast().contains("profileOnly=true"));
+				assertEquals(LoggingProfile.DEEP, config.getLoggingProfile());
+				assertEquals(LoggingProfile.DEEP, Diagnostics.profile(DiagnosticSide.SERVER));
+
+				player.permission = 3;
+				ServerCore.onServerConfigUpdate(server, player, invalid);
+				var rejected = updateMessages(capture);
+				assertEquals(3, rejected.size());
+				assertTrue(rejected.getLast().contains("handling=invalid-update"));
+				assertTrue(rejected.getLast().contains("mask=" + invalid.changedFields()));
+				assertTrue(rejected.getLast().contains("trustedPermission=true"));
+
+				ServerCore.onServerConfigUpdate(server, player, rateOnly);
+				var applied = updateMessages(capture);
+				assertEquals(5, applied.size());
+				assertTrue(applied.get(3).contains("handling=applied-in-memory"));
+				assertTrue(applied.get(3).contains("mask=" + ServerConfigUpdate.RATE_LIMIT));
+				assertTrue(applied.get(3).contains("profileOnly=false"));
+				assertTrue(applied.get(4).contains("handling=persistence-attempted"));
+				assertFalse(applied.get(4).contains("persisted"));
+				assertFalse(applied.get(4).contains("ACK"));
+
+				var selected = wire(new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE,
+					ChannelMode.AUTO, true, 0, 0, 7, InventoryConfigValues.defaults(), true, LoggingProfile.DEEP));
+				ServerCore.onServerConfigUpdate(server, player, selected);
+				var profileOnly = updateMessages(capture);
+				assertEquals(7, profileOnly.size());
+				assertTrue(profileOnly.get(5).contains("handling=applied-in-memory"));
+				assertTrue(profileOnly.get(5).contains("profileOnly=true"));
+				assertTrue(profileOnly.get(5).contains("selectedProfile=DEEP"));
+				assertTrue(profileOnly.get(6).contains("handling=persistence-attempted"));
+				assertEquals(LoggingProfile.DEEP, config.getLoggingProfile());
+				assertEquals(LoggingProfile.DEEP, Diagnostics.profile(DiagnosticSide.SERVER));
+
+				var downgrade = wire(new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE,
+					ChannelMode.AUTO, true, 0, 0, 7, InventoryConfigValues.defaults(), true, LoggingProfile.NORMAL));
+				ServerCore.onServerConfigUpdate(server, player, downgrade);
+				assertEquals(7, updateMessages(capture).size());
+				assertEquals(LoggingProfile.NORMAL, config.getLoggingProfile());
+				assertEquals(LoggingProfile.NORMAL, Diagnostics.profile(DiagnosticSide.SERVER));
+			}
+		} finally {
+			configField.set(handler, previousConfig);
+			hashField.setInt(handler, previousHash);
+			activeField.set(null, previousServer);
+			Diagnostics.setProfile(DiagnosticSide.SERVER, previousProfile);
+			ServerCore.init();
+			if (previousBytes == null) Files.deleteIfExists(path);
+			else Files.write(path, previousBytes);
+		}
+	}
+
+	private static @Unmodifiable List<String> updateMessages(IntegrationDiagnosticCapture capture) {
+		return capture.events().stream()
+			.map(event -> event.getMessage().getFormattedMessage())
+			.filter(message -> message.contains("site=server-config/update"))
+			.toList();
 	}
 
 	private static ServerConfigUpdateC2SPacket wire(ServerConfigUpdateC2SPacket packet) {

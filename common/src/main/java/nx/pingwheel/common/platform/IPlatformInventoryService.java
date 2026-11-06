@@ -37,6 +37,14 @@ import nx.pingwheel.common.diagnostics.Diagnostics;
 	 * physical access with {@code SourceKey} identity.
  */
 public interface IPlatformInventoryService {
+	@org.jetbrains.annotations.NotNullByDefault
+	final class DiagnosticChannels {
+		private DiagnosticChannels() {}
+		private static final nx.pingwheel.common.diagnostics.DiagnosticChannel VALID = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-guarded-valid", java.time.Duration.ofSeconds(10));
+		private static final nx.pingwheel.common.diagnostics.DiagnosticChannel METHOD = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-resident-method", java.time.Duration.ofSeconds(10));
+		private static final nx.pingwheel.common.diagnostics.DiagnosticChannel FIELD = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-resident-field", java.time.Duration.ofSeconds(10));
+		private static final nx.pingwheel.common.diagnostics.DiagnosticChannel STACKS = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-resident-stacks", java.time.Duration.ofSeconds(10));
+	}
 
 	IPlatformInventoryService INSTANCE = ServiceLoader.load(IPlatformInventoryService.class)
 		.findFirst()
@@ -345,7 +353,7 @@ public interface IPlatformInventoryService {
 			try { return checked(delegate::valid); }
 			catch (RuntimeException | LinkageError unavailable) {
 				if (!(unavailable instanceof InventorySourceUnavailableException))
-					Diagnostics.warn("inventory-guarded-access-valid", delegate.getClass().getName(),
+					Diagnostics.server().atDetailed().rateLimited(DiagnosticChannels.VALID).failure(org.apache.logging.log4j.Level.WARN, "inventory-guarded-access-valid", "invalid-access",
 						() -> "delegateClass=" + delegate.getClass().getName() + " gateClass=" + memberGate.getClass().getName(), unavailable);
 				return false;
 			}
@@ -437,7 +445,7 @@ public interface IPlatformInventoryService {
 					return declaring == owner ? MethodOwnership.PROVEN_INHERITED : MethodOwnership.PROVEN_OVERRIDE;
 				} catch (NoSuchMethodException absent) { /* continue through the bounded parent chain */ }
 				catch (SecurityException unavailable) {
-					Diagnostics.warn("inventory-resident-method", owner.getName(), () -> "method=" + name + " valueClass=" + value.getClass().getName(), unavailable);
+					Diagnostics.server().atDetailed().rateLimited(DiagnosticChannels.METHOD).failure(org.apache.logging.log4j.Level.WARN, "inventory-resident-method", "unclassified", () -> "method=" + name + " valueClass=" + value.getClass().getName(), unavailable);
 					return MethodOwnership.UNCLASSIFIED;
 				}
 			}
@@ -464,7 +472,7 @@ public interface IPlatformInventoryService {
 				return field.get(value);
 			} catch (NoSuchFieldException absent) { return null; }
 			catch (ReflectiveOperationException | RuntimeException unavailable) {
-				Diagnostics.warn("inventory-resident-field", owner.getName(), () -> "field=" + name + " valueClass=" + value.getClass().getName(), unavailable);
+				Diagnostics.server().atDetailed().rateLimited(DiagnosticChannels.FIELD).failure(org.apache.logging.log4j.Level.WARN, "inventory-resident-field", "unavailable", () -> "field=" + name + " valueClass=" + value.getClass().getName(), unavailable);
 				return null;
 			}
 		}
@@ -481,7 +489,7 @@ public interface IPlatformInventoryService {
 				@org.jetbrains.annotations.Nullable List<?> list = raw.nonNullList((net.minecraft.core.NonNullList<?>) value);
 				return list != null && (list.getClass() == ArrayList.class || list.getClass() == ARRAY_LIST_VIEW);
 			} catch (RuntimeException | LinkageError unavailable) {
-				Diagnostics.warn("inventory-resident-stacks", raw.getClass().getName(), () -> "valueClass=" + value.getClass().getName(), unavailable);
+				Diagnostics.server().atDetailed().rateLimited(DiagnosticChannels.STACKS).failure(org.apache.logging.log4j.Level.WARN, "inventory-resident-stacks", "unavailable", () -> "valueClass=" + value.getClass().getName(), unavailable);
 				return false;
 			}
 		}

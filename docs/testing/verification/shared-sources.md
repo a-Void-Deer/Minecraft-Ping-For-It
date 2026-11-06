@@ -134,13 +134,23 @@ expectations.
 They also cover disabled messages preserving diagnostics and evidence,
 failed or recipient-less notice retry, permission and authoritative-host
 eligibility, live flag reads, server-lifetime replacement/stop, recoverable
-sink failures and fatal-error propagation through recording ports. These are
-not live WARN capture or administrator-message delivery. A test-appender case in
-`BudgetDelayMonitoringTest` also drives the production summary-reporting entry:
-adjacent closed delayed cycles each emit one WARN without a second general
-diagnostic window or an attached throwable, while repeated closure of the same
-cycle emits no duplicate. This is headless report delivery, not a live server
-cycle or administrator notification.
+sink failures and fatal-error propagation through recording ports.
+`BudgetDelayMonitorTest` and `InventoryBudgetDelayStateTest` additionally
+classify a throwing warning sink or monitor-context factory as a diagnostic
+self-fault (`SINK` or `CONTEXT`) without replaying accounting, inventing a
+business WARN or rolling back outstanding reasons; a failed administrator notice
+remains a business handoff, is not a self-fault and consumes no delivered
+cooldown. These are not live WARN capture or administrator-message delivery. A
+test-appender case in `BudgetDelayMonitoringTest` also drives the production
+summary-reporting entry: adjacent closed delayed cycles each emit one WARN
+through their domain cadence without an implicit duplicate gate or an attached
+throwable, with finite per-module handling
+(`closed-cycle/resource-delayed/presentation`,
+`closed-cycle/resource-delayed/inventory-preview` and
+`closed-cycle/resource-delayed/inventory-tracking`); the raw summary and sample
+context stay lazy above `NORMAL`, while repeated closure of the same cycle emits
+no duplicate. This is headless report delivery, not a live server cycle or
+administrator notification.
 
 `InventoryBudgetDelayStateTest` and `InventoryBudgetDelayIntegrationTest`
 exercise production physical, logical, projection, publication and control-delay
@@ -160,8 +170,9 @@ allowance, and skipped periods emit no synthetic WARN. Presentation and
 property-preview producer cases are inventoried under
 [presentation snapshot negotiation, policy and adapters](presentation.md#presentation-snapshot-negotiation-policy-and-adapters)
 and [target content preview](presentation.md#target-content-preview).
-The complete Common suite passed in the recorded
-[automated verification results](build-checks.md#automated-verification-results).
+The current source-input execution, including the added diagnostic cases, is
+recorded under
+[logging-coverage audit final acceptance](build-checks.md#logging-coverage-audit-final-acceptance).
 No live server, notification, heap/TPS or soak result follows from these seams.
 
 ## Certified pool delay diagnostics
@@ -210,9 +221,9 @@ or administrator messages. The wider pool/source coverage remains owned by
   [shared-source](../../architecture/presentation/shared_sources.md) and
   [inventory](../../architecture/presentation/inventory.md) owners remain the
   contracts; source presence alone does not close these evidence gaps;
-- monitoring has pure evidence-transition, eligibility, localization and
-  recording-producer coverage, but actual closed-cycle WARN output and localized
-  vanilla system messages under live resource pressure have not been exercised.
-  Live permission or host changes, notification-switch administration, server
-  replacement and stop, and prolonged low-TPS/overload behavior remain integration
-  scenarios;
+- monitoring has pure evidence-transition, eligibility, localization,
+  recording-producer and test-appender closed-cycle WARN coverage, but closed-cycle
+  warnings and localized vanilla system messages under live resource pressure
+  have not been exercised. Live permission or host changes, notification-switch
+  administration, server replacement and stop, and prolonged low-TPS/overload
+  behavior remain integration scenarios;

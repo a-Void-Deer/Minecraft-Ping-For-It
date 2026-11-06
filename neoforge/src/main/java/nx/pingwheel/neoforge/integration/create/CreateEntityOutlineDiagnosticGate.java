@@ -20,8 +20,21 @@ final class CreateEntityOutlineDiagnosticGate {
 		this.clock = clock;
 	}
 
-	synchronized boolean admit(String key, String reason, String outcome, boolean enabled, boolean debug) {
-		long now = clock.getAsLong();
+	boolean admit(String key, String reason, String outcome, boolean enabled, boolean debug) {
+		long now;
+		try {
+			now = clock.getAsLong();
+		} catch (RuntimeException | LinkageError failure) {
+			nx.pingwheel.common.diagnostics.Diagnostics.faults().report(
+				nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT, "create-entity-outline-gate",
+				nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Stage.CHANNEL_CLOCK,
+				nx.pingwheel.common.diagnostics.Diagnostics.profile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT), failure);
+			return false;
+		}
+		return admitAt(key, reason, outcome, enabled, debug, now);
+	}
+
+	private synchronized boolean admitAt(String key, String reason, String outcome, boolean enabled, boolean debug, long now) {
 		@Nullable State previous = states.get(key);
 		boolean log;
 		if (previous == null || !previous.emitted) {

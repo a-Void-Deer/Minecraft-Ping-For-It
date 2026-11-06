@@ -9,6 +9,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import nx.pingwheel.common.diagnostics.DiagnosticFaultReporter;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
 import org.jetbrains.annotations.Nullable;
 
 /** Server-thread monitor with fixed counters and one bounded open buffer per module. */
@@ -103,7 +106,11 @@ public final class BudgetDelayMonitor implements BudgetDelaySink {
 		state.clearBuffer();
 		if (summary != null) {
 			try { warnings.warn(summary); }
-			catch (RuntimeException | LinkageError ignored) { /* Diagnostics cannot break scheduling. */ }
+			catch (RuntimeException | LinkageError failure) {
+				// Pure diagnostic sink boundary: accounting and cadence already advanced.
+				Diagnostics.faults().report(DiagnosticSide.SERVER, "budget/delay",
+					DiagnosticFaultReporter.Stage.SINK, Diagnostics.profile(DiagnosticSide.SERVER), failure);
+			}
 		}
 	}
 
@@ -123,7 +130,10 @@ public final class BudgetDelayMonitor implements BudgetDelaySink {
 				delivered = true;
 				deliveredAt = serverTick;
 			}
-		} catch (RuntimeException | LinkageError ignored) { /* Failed handoffs consume no cooldown. */ }
+		} catch (RuntimeException | LinkageError failure) {
+			// Administrator notification is a business handoff, not a diagnostic self-fault.
+			// Failed handoffs consume no cooldown.
+		}
 	}
 
 	public void reset() {

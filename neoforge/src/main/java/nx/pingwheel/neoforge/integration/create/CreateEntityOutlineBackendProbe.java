@@ -55,7 +55,8 @@ final class CreateEntityOutlineBackendProbe {
 		}
 		if (failure != null) {
 			String description = current.description();
-			Diagnostics.warn("create-entity-backend-probe", managerClassName, () -> description, failure);
+			Diagnostics.client().atNormal().failure(org.apache.logging.log4j.Level.WARN,
+				"create-entity-backend-probe", "backend-unavailable", () -> description, failure);
 		}
 		return current;
 	}

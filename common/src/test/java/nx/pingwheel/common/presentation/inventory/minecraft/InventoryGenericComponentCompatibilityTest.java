@@ -390,7 +390,8 @@ class InventoryGenericComponentCompatibilityTest {
 		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
 			var failure = assertThrows(InventorySnapshotSchemas.ReadFailureException.class, () -> index.read(0, registries));
 			assertTrue(PARTIAL_DECODE_CALLS.get() > 0, "the native entry codec reached the registered failing decoder");
-			nx.pingwheel.common.diagnostics.Diagnostics.warn("inventory/test-snapshot-decode", "minecraft", () -> "stage=items-entry", failure);
+			nx.pingwheel.common.diagnostics.Diagnostics.server().atNormal().warn(
+				"inventory/test-snapshot-decode", "minecraft", failure, () -> "stage=items-entry");
 			assertTrue(failure.getMessage().contains("Minecraft items codec rejected"));
 			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("Minecraft items codec rejected"));
 			assertEquals(0, ERROR_MESSAGE_CALLS.get(), "neither the rejection accessor nor admitted WARN may evaluate the supplier");

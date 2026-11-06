@@ -8,6 +8,9 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import net.minecraft.network.FriendlyByteBuf;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
@@ -50,6 +53,53 @@ class PresentationServerDiagnosticsTest {
 			assertTrue(capture.messages().stream().anyMatch(line -> line.contains("collector cause")));
 			assertTrue(capture.messages().stream().anyMatch(line -> line.contains("sanitize cause")));
 			assertTrue(capture.events().stream().allMatch(event -> event.getLevel() == Level.WARN));
+		}
+	}
+
+	@Test void normalCaptureAndSanitizeFailuresKeepRetainedStaleAndNoRawContext() {
+		try (var capture = new PresentationDiagnosticCapture()) {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.NORMAL);
+			var policy = PresentationSettings.serverDefaults();
+			var collector = new Adapter(); collector.failure = new IllegalStateException("collector failed", new RuntimeException("collector cause"));
+			var lease = lease();
+			var source = new PresentationServer.Source(ID, 1); source.value = FRESH; lease.sources.put(ID, source);
+			var work = new PresentationAdapter.CaptureBudget(20);
+			PresentationServer.captureSource(lease, collector, policy, 0, work, Set.of(FIELD), demand -> fail("optional collector only"));
+			var sanitize = new Adapter(); sanitize.brokenFields = true;
+			PresentationServer.captureSource(lease, sanitize, policy, 10, work, Set.of(FIELD), demand -> fail("optional only"));
+			assertEquals(new PresentationSection(ID, 1, FRESH.fields(), true), source.value);
+			assertEquals(2, capture.events().size());
+			assertTrue(capture.events().stream().allMatch(event -> event.getLevel() == Level.WARN && event.getThrown() == null));
+			assertTrue(capture.messages().get(0).contains("site=presentation/capture"));
+			assertTrue(capture.messages().get(0).contains("handling=retain-stale"));
+			assertTrue(capture.messages().get(1).contains("site=presentation/sanitize"));
+			assertTrue(capture.messages().get(1).contains("handling=retain-stale"));
+			assertTrue(capture.messages().stream().noneMatch(text -> text.contains("collector cause")
+				|| text.contains("sanitize cause") || text.contains("target=") || text.contains("demand=")));
+		}
+	}
+
+	@Test void normalSectionFailuresKeepTwoAttemptsAndHideRawStageAndRevision() {
+		try (var capture = new PresentationDiagnosticCapture()) {
+			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.NORMAL);
+			var session = new PresentationServer.Session(7, Map.of(ID, 1), Map.of());
+			session.view = 1;
+			var sent = new LinkedHashMap<String, PresentationSection>();
+			var attempts = new ArrayList<PresentationS2CPacket>();
+			var failure = new IllegalStateException("transport failed", new RuntimeException("transport cause"));
+			assertSame(failure, assertThrows(IllegalStateException.class, () -> PresentationServer.sendProjectedSection(
+				session, new MarkerId(1), new Adapter(), FRESH, sent, packet -> { attempts.add(packet); throw failure; })));
+			assertEquals(2, attempts.size());
+			assertEquals(2, session.revision);
+			assertEquals(1, capture.events().size());
+			assertEquals(Level.WARN, capture.events().getFirst().getLevel());
+			String report = capture.messages().getFirst();
+			assertTrue(report.contains("site=presentation/send-section"));
+			assertTrue(report.contains("handling=empty-stale-fallback"));
+			assertFalse(report.contains("transport cause"));
+			assertFalse(report.contains("stage="));
+			assertFalse(report.contains("revision="));
+			assertFalse(report.contains("adapter=" + ID));
 		}
 	}
 

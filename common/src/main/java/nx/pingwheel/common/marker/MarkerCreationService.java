@@ -24,7 +24,6 @@ import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.presentation.PresentationPropertyIntent;
 import nx.pingwheel.common.presentation.PresentationPropertySelection;
 import nx.pingwheel.common.presentation.PresentationSection;
-import nx.pingwheel.common.util.RateLimitedDiagnostics;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
@@ -78,6 +77,13 @@ import org.jetbrains.annotations.Unmodifiable;
  * reports without changing the pipeline's rejection or rollback behavior.
  */
 public final class MarkerCreationService {
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel PROPERTY = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("marker-property-admission", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel GROUPING = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("marker-create-grouping", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel DEDICATED = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("marker-dedicated-admission", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel STORE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("marker-create-store", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel NAME = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("marker-create-name", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel VALIDATE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("marker-create-validate", java.time.Duration.ofSeconds(10));
+	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel RESOLVE = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("marker-create-resolve", java.time.Duration.ofSeconds(10));
 	@FunctionalInterface
 	public interface PropertyAdmission {
 		AdmissionResult admit(Target committedTarget, String targetTypeId, UUID owner,
@@ -388,8 +394,7 @@ public final class MarkerCreationService {
 			if (materializedTarget != null) releaseMaterialized(level, materializedTarget, transaction);
 			Target failedTarget = markerTarget;
 			String failedType = markerTargetType.id();
-			RateLimitedDiagnostics.warn("marker-property-admission",
-				failedTarget.getClass().getName(),
+			Diagnostics.server().atNormal().rateLimited(PROPERTY).failure(org.apache.logging.log4j.Level.WARN, "marker-property-admission", "reject-create",
 				() -> "create rejected: admission failed owner=" + owner + " target=" + failedTarget
 					+ " targetType=" + failedType + " pingType=" + pingTypeId + " recipients=" + recipients
 					+ " intents=" + intents, failure);
@@ -408,7 +413,7 @@ public final class MarkerCreationService {
 		} catch (RuntimeException | LinkageError failure) {
 			if (materializedTarget != null) releaseMaterialized(level, materializedTarget, transaction);
 			Target failedTarget = markerTarget;
-			RateLimitedDiagnostics.warn("marker-create-grouping", groupingResolver.getClass().getName(),
+			Diagnostics.server().atNormal().rateLimited(GROUPING).failure(org.apache.logging.log4j.Level.WARN, "marker-create-grouping", "reject-create",
 				() -> "create rejected: target grouping failed owner=" + owner + " target=" + failedTarget, failure);
 			return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
 		}
@@ -422,7 +427,7 @@ public final class MarkerCreationService {
 			} catch (RuntimeException | LinkageError failure) {
 				if (materializedTarget != null) releaseMaterialized(level, materializedTarget, transaction);
 				Target failedTarget = markerTarget;
-				RateLimitedDiagnostics.warn("marker-dedicated-admission", dedicated.getClass().getName(),
+				Diagnostics.server().atNormal().rateLimited(DEDICATED).failure(org.apache.logging.log4j.Level.WARN, "marker-dedicated-admission", "reject-create",
 					() -> "create rejected: admission failed owner=" + owner + " target=" + failedTarget, failure);
 				return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
 			}
@@ -447,7 +452,7 @@ public final class MarkerCreationService {
 
 			Target failedTarget = markerTarget;
 			String failedType = markerTargetType.id();
-			RateLimitedDiagnostics.warn("marker-create-store", failedTarget.getClass().getName(),
+			Diagnostics.server().atNormal().rateLimited(STORE).failure(org.apache.logging.log4j.Level.WARN, "marker-create-store", "reject-create",
 				() -> "create rejected: store contract failure owner=" + owner + " target=" + failedTarget
 					+ " targetType=" + failedType + " pingType=" + pingTypeId + " recipients=" + recipients
 					+ " arrivalTick=" + arrivalTick + " expiresAtTick=" + expiresAtTick, e);
@@ -467,7 +472,7 @@ public final class MarkerCreationService {
 			@Nullable TargetNameJson resolved = nameResolver.resolveName(owner, target);
 			return resolved == null ? fallback : resolved;
 		} catch (RuntimeException | LinkageError failure) {
-			Diagnostics.warn("marker-create-name-resolve", nameResolver.getClass().getName(),
+			Diagnostics.server().atDetailed().rateLimited(NAME).failure(org.apache.logging.log4j.Level.WARN, "marker-create-name-resolve", "unknown-name",
 				() -> "targetKind=" + target.kind() + " target=" + target, failure);
 			return fallback;
 		}
@@ -528,7 +533,7 @@ public final class MarkerCreationService {
 
 			return result;
 		} catch (RuntimeException | LinkageError e) {
-			RateLimitedDiagnostics.warn("marker-create-validate", validator.getClass().getName(),
+			Diagnostics.server().atNormal().rateLimited(VALIDATE).failure(org.apache.logging.log4j.Level.WARN, "marker-create-validate", "reject-create",
 				() -> "create rejected: validator contract failure owner=" + owner + " target=" + requestedTarget, e);
 			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.INVALID_REQUEST);
 		}
@@ -557,7 +562,7 @@ public final class MarkerCreationService {
 
 			return Optional.of(resolved);
 		} catch (RuntimeException e) {
-			RateLimitedDiagnostics.warn("marker-create-resolve", resolver.getClass().getName(),
+			Diagnostics.server().atNormal().rateLimited(RESOLVE).failure(org.apache.logging.log4j.Level.WARN, "marker-create-resolve", "reject-create",
 				() -> "create rejected: resolver contract failure target=" + target + " matchContext=" + context, e);
 			return Optional.empty();
 		}

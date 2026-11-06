@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Supplier;
 
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -62,20 +63,34 @@ public final class EntityLocalGeometryRegistry {
 			throw new IllegalArgumentException("entityTypeIds must not be empty");
 		}
 
+		boolean duplicateFound = false;
+		int existingPriority = 0;
+
 		synchronized (lock) {
 			for (Registration existing : registrations) {
 				if (existing.sourceId.equals(sourceId)) {
-					warnOnce("duplicate:" + sourceId, "entity local geometry source registration ignored; id="
-						+ sourceId + "; category=duplicate-id-first-registration-kept", null);
-					return Registration.rejected(this, sourceId);
+					duplicateFound = true;
+					existingPriority = existing.priority;
+					break;
 				}
 			}
 
-			Registration registration = new Registration(this, sourceId, priority, exactTypeIds, resolver, true);
-			registrations.add(registration);
-			publishSnapshot();
-			return registration;
+			if (!duplicateFound) {
+				Registration registration = new Registration(this, sourceId, priority, exactTypeIds, resolver, true);
+				registrations.add(registration);
+				publishSnapshot();
+				return registration;
+			}
 		}
+
+		// Reporting never runs while the registry lock is held: a slow sink must
+		// not delay registrations or removals, and the duplicate still leaves the
+		// first owner untouched.
+		int firstPriority = existingPriority;
+		warnOnce("duplicate:" + sourceId, "duplicate-first-kept", null,
+			() -> "entity local geometry source registration ignored; id=" + sourceId
+				+ "; priority=" + firstPriority + "; rejectedPriority=" + priority);
+		return Registration.rejected(this, sourceId);
 	}
 
 	private static @Unmodifiable Set<ResourceLocation> copyExactTypeIds(Collection<ResourceLocation> entityTypeIds) {
@@ -124,17 +139,19 @@ public final class EntityLocalGeometryRegistry {
 		return new Snapshot(this, snapshot);
 	}
 
-	private void warnCallbackFailure(ResourceLocation sourceId, Throwable failure) {
+	private void warnCallbackFailure(ResourceLocation sourceId, int priority, Throwable failure) {
 		warnOnce(
 			"callback:" + sourceId + ':' + failure.getClass().getName(),
-			"entity local geometry source failed; id=" + sourceId + "; category=callback",
-			failure);
+			"callback-failed-candidate-rejected",
+			failure,
+			() -> "entity local geometry source failed; id=" + sourceId + "; priority=" + priority);
 	}
 
-	private void warnOnce(String key, String message, @Nullable Throwable failure) {
+	private void warnOnce(String key, String handling, @Nullable Throwable failure,
+		Supplier<@Nullable String> detail) {
 		boolean enabled;
 		try {
-			enabled = Diagnostics.logger().isEnabled(Level.WARN);
+			enabled = Diagnostics.client().atNormal().isEnabled(Level.WARN);
 		} catch (RuntimeException | LinkageError ignored) {
 			enabled = false;
 		}
@@ -143,9 +160,9 @@ public final class EntityLocalGeometryRegistry {
 		}
 		if (warnedDiagnosticKeys.add(key)) {
 			if (failure == null) {
-				Diagnostics.domainApprovedEvent(Level.WARN, "entity-local-geometry", key, "contract-or-registration", () -> message);
+				Diagnostics.client().atNormal().event(Level.WARN, "entity-local-geometry", handling, detail);
 			} else {
-				Diagnostics.domainApprovedFailure(Level.WARN, "entity-local-geometry", key, () -> message, failure);
+				Diagnostics.client().atNormal().failure(Level.WARN, "entity-local-geometry", handling, detail, failure);
 			}
 		}
 	}
@@ -197,12 +214,14 @@ public final class EntityLocalGeometryRegistry {
 				@Nullable EntityLocalGeometryResult result = entry.resolver().trace(candidate, request);
 				if (result == null) {
 					registry.warnOnce("null-result:" + entry.sourceId(),
-						"entity local geometry source returned null; id=" + entry.sourceId(), null);
+						"null-result-candidate-rejected", null,
+						() -> "entity local geometry source returned null; id=" + entry.sourceId()
+							+ "; priority=" + entry.priority());
 					return EntityLocalGeometryResult.failed();
 				}
 				return result;
 			} catch (RuntimeException | LinkageError | AssertionError recoverableFailure) {
-				registry.warnCallbackFailure(entry.sourceId(), recoverableFailure);
+				registry.warnCallbackFailure(entry.sourceId(), entry.priority(), recoverableFailure);
 				return EntityLocalGeometryResult.failed();
 			}
 		}

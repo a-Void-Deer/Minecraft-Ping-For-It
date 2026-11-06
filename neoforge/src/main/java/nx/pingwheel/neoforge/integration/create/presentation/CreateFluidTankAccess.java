@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.function.Supplier;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -19,6 +20,7 @@ import nx.pingwheel.common.platform.IPlatformFluidService.OperationProfile;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.neoforge.platform.FluidCapabilityAccess;
+import nx.pingwheel.neoforge.platform.FluidSourceDiagnostics;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -56,7 +58,8 @@ public final class CreateFluidTankAccess {
 
 	public static IPlatformFluidService.Probe probe(FluidCapabilityAccess.World world, BlockPos root, Direction face,
 		FluidCapabilityAccess.Block block, Operation operation) {
-		if (!world.createAvailable()) throw unavailable("unsupported Create fluid route");
+		if (!world.createAvailable()) throw unavailable("unsupported Create fluid route",
+			() -> blockContext(root, face, block));
 		return probe(world, root, face, block, ApiHolder.API, operation);
 	}
 
@@ -78,17 +81,26 @@ public final class CreateFluidTankAccess {
 	static IPlatformFluidService.Probe probe(FluidCapabilityAccess.World world, BlockPos root, Direction face,
 		FluidCapabilityAccess.Block block, Metadata metadata, Operation operation) {
 		Objects.requireNonNull(face); world.require(root, operation);
-		if (!world.createAvailable()) throw unavailable("unsupported Create fluid route");
+		if (!world.createAvailable()) throw unavailable("unsupported Create fluid route",
+			() -> blockContext(root, face, block));
 		var original = new FluidCapabilityAccess.Member(root, block);
 		requireStatic(world, metadata, original, operation);
-		@Nullable BlockPos controller = controller(world, metadata, original, operation);
-		if (controller == null) throw unavailable("Create fluid controller missing");
-		controller = controller.immutable(); world.require(controller, operation);
+		@Nullable BlockPos found = controller(world, metadata, original, operation);
+		if (found == null) throw unavailable("Create fluid controller missing",
+			() -> blockContext(root, face, block));
+		BlockPos controller = found.immutable();
+		// world.block applies its own entry gate; no callback lies between the controller lookup and it.
 		var master = new FluidCapabilityAccess.Member(controller, world.block(controller, operation));
 		requireStatic(world, metadata, master, operation);
 		world.require(controller, operation);
-		if (!metadata.isController(entity(master)) || !controller.equals(controller(world, metadata, master, operation)))
-			throw unavailable("Create fluid controller relation");
+		boolean controllerRole = metadata.isController(entity(master));
+		if (!controllerRole) throw unavailable("Create fluid controller relation",
+			() -> "controller=" + controller.toShortString() + ";isController=false;"
+				+ blockContext(root, face, block));
+		@Nullable BlockPos observedController = controller(world, metadata, master, operation);
+		if (!controller.equals(observedController)) throw unavailable("Create fluid controller relation",
+			() -> "controller=" + controller.toShortString() + ";observedController=" + pos(observedController)
+				+ ";isController=true;" + blockContext(root, face, block));
 		requireStoredFluids(world, metadata, master, operation);
 		world.require(controller, operation); int width = metadata.width(entity(master));
 		world.require(controller, operation); int height = metadata.height(entity(master));
@@ -96,16 +108,29 @@ public final class CreateFluidTankAccess {
 		// Preflight the WHOLE member table before allocating positions or probing any prism member.
 		// The common layout guard is finite even when Create's configurable max height is very large.
 		if (width < 1 || width > 3 || height < 1 || axis != Direction.Axis.Y)
-			throw unavailable("Create fluid bounded static topology");
+			throw unavailable("Create fluid bounded static topology",
+				() -> "reason=invalid-shape;controller=" + controller.toShortString() + ";width=" + width
+					+ ";height=" + height + ";axis=" + axis(axis)
+					+ ";maxMembers=" + InventorySnapshotLayout.MAX_MEMBERS + ";" + blockContext(root, face, block));
 		long size = (long) width * width * height;
-		if (size > InventorySnapshotLayout.MAX_MEMBERS || !contains(controller, root, width, height))
-			throw unavailable("Create fluid bounded static topology");
+		boolean containsHit = contains(controller, root, width, height);
+		if (size > InventorySnapshotLayout.MAX_MEMBERS)
+			throw unavailable("Create fluid member limit exceeded (member-limit-exceeded)",
+				() -> "reason=member-limit-exceeded;controller=" + controller.toShortString()
+					+ ";width=" + width + ";height=" + height + ";members=" + size
+					+ ";maxMembers=" + InventorySnapshotLayout.MAX_MEMBERS + ";" + blockContext(root, face, block));
+		if (!containsHit)
+			throw unavailable("Create fluid hit outside structure (hit-outside-structure)",
+				() -> "reason=hit-outside-structure;controller=" + controller.toShortString()
+					+ ";width=" + width + ";height=" + height + ";members=" + size + ";"
+					+ blockContext(root, face, block));
 		return new TankProbe(new Discovery(world, face, original, master, metadata, width, height), operation);
 	}
 
 	private static OperationProfile memberProfile(FluidCapabilityAccess.World world) {
-		// One existing-world acquisition, eight fresh gates, fixed zero-arg metadata and bounded IDs.
-		return world.blockProfile().plus(world.requireProfile().times(8))
+		// One existing-world acquisition, seven fresh metadata gates (world.block already owns
+		// the removed pre-block entry fence), fixed zero-arg metadata and bounded IDs.
+		return world.blockProfile().plus(world.requireProfile().times(7))
 			.plus(FluidCapabilityAccess.profile(2048, 2048, 256, 0, 0));
 	}
 	@NotNullByDefault
@@ -122,40 +147,92 @@ public final class CreateFluidTankAccess {
 					0, 2048 + 2048L * size()));
 		}
 		private TankRoute route(Operation operation) {
-			if (!world.createAvailable()) throw unavailable("unsupported Create fluid route");
+			BlockPos rootPosition = root.position();
+			String rootBlockId = root.block().blockId(), rootEntityId = root.block().entityId();
+			BlockPos masterPosition = master.position();
+			String masterBlockId = master.block().blockId(), masterEntityId = master.block().entityId();
+			Direction frozenFace = face;
+			int frozenWidth = width, frozenHeight = height;
+			if (!world.createAvailable()) throw unavailable("unsupported Create fluid route",
+				() -> "position=" + rootPosition.toShortString() + ";face=" + frozenFace.getName()
+					+ ";width=" + frozenWidth + ";height=" + frozenHeight);
 			// Compare frozen discovery before visiting ANY newly computed prism/member/controller.
-			world.require(root.position(), operation);
-			if (!root.block().same(world.block(root.position(), operation))) throw unavailable("Create fluid probe root changed");
+			// world.block applies its entry gate; no callback lies between that predicate and it.
+			var currentRoot = world.block(rootPosition, operation);
+			if (!root.block().same(currentRoot)) throw unavailable("Create fluid probe root changed",
+				() -> "position=" + rootPosition.toShortString() + ";face=" + frozenFace.getName()
+					+ ";blockId=" + rootBlockId + ";entityId=" + rootEntityId
+					+ ";observedBlock=" + currentRoot.blockId() + ";observedEntity=" + currentRoot.entityId());
 			requireStatic(world, metadata, root, operation);
-			if (!master.position().equals(controller(world, metadata, root, operation))) throw unavailable("Create fluid probe controller changed");
-			world.require(master.position(), operation);
-			if (!master.block().same(world.block(master.position(), operation))) throw unavailable("Create fluid probe controller replaced");
+			@Nullable BlockPos rootController = controller(world, metadata, root, operation);
+			if (!masterPosition.equals(rootController)) throw unavailable("Create fluid probe controller changed",
+				() -> "position=" + rootPosition.toShortString() + ";face=" + frozenFace.getName()
+					+ ";blockId=" + rootBlockId + ";entityId=" + rootEntityId
+					+ ";expectedController=" + masterPosition.toShortString()
+					+ ";observedController=" + pos(rootController));
+			// The preceding controller callback ended before this callback-free block entry gate.
+			var currentMaster = world.block(masterPosition, operation);
+			if (!master.block().same(currentMaster)) throw unavailable("Create fluid probe controller replaced",
+				() -> "position=" + masterPosition.toShortString() + ";face=" + frozenFace.getName()
+					+ ";blockId=" + masterBlockId + ";entityId=" + masterEntityId
+					+ ";observedBlock=" + currentMaster.blockId() + ";observedEntity=" + currentMaster.entityId());
 			requireStatic(world, metadata, master, operation);
-			world.require(master.position(), operation);
-			if (!metadata.isController(entity(master)) || !master.position().equals(controller(world, metadata, master, operation)))
-				throw unavailable("Create fluid probe controller role changed");
+			world.require(masterPosition, operation);
+			boolean controllerRole = metadata.isController(entity(master));
+			if (!controllerRole) throw unavailable("Create fluid probe controller role changed",
+				() -> "position=" + masterPosition.toShortString() + ";blockId=" + masterBlockId
+					+ ";entityId=" + masterEntityId + ";isController=false;expectedController="
+					+ masterPosition.toShortString());
+			@Nullable BlockPos observedMasterController = controller(world, metadata, master, operation);
+			if (!masterPosition.equals(observedMasterController))
+				throw unavailable("Create fluid probe controller role changed",
+					() -> "position=" + masterPosition.toShortString() + ";blockId=" + masterBlockId
+						+ ";entityId=" + masterEntityId + ";isController=true;expectedController="
+						+ masterPosition.toShortString() + ";observedController=" + pos(observedMasterController));
 			requireStoredFluids(world, metadata, master, operation);
-			world.require(master.position(), operation);
-			if (metadata.width(entity(master)) != width) throw unavailable("Create fluid probe width changed");
-			world.require(master.position(), operation);
-			if (metadata.height(entity(master)) != height) throw unavailable("Create fluid probe height changed");
-			world.require(master.position(), operation);
-			if (metadata.axis(entity(master)) != Direction.Axis.Y) throw unavailable("Create fluid probe axis changed");
+			world.require(masterPosition, operation);
+			int observedWidth = metadata.width(entity(master));
+			if (observedWidth != frozenWidth) throw unavailable("Create fluid probe width changed",
+				() -> "position=" + masterPosition.toShortString() + ";blockId=" + masterBlockId
+					+ ";entityId=" + masterEntityId + ";expectedWidth=" + frozenWidth + ";observedWidth=" + observedWidth);
+			world.require(masterPosition, operation);
+			int observedHeight = metadata.height(entity(master));
+			if (observedHeight != frozenHeight) throw unavailable("Create fluid probe height changed",
+				() -> "position=" + masterPosition.toShortString() + ";blockId=" + masterBlockId
+					+ ";entityId=" + masterEntityId + ";expectedHeight=" + frozenHeight + ";observedHeight=" + observedHeight);
+			world.require(masterPosition, operation);
+			Direction.@Nullable Axis observedAxis = metadata.axis(entity(master));
+			if (observedAxis != Direction.Axis.Y) throw unavailable("Create fluid probe axis changed",
+				() -> "position=" + masterPosition.toShortString() + ";blockId=" + masterBlockId
+					+ ";entityId=" + masterEntityId + ";expectedAxis=Y;observedAxis=" + axis(observedAxis));
 			List<FluidCapabilityAccess.Member> members = new ArrayList<>(size());
-			for (int x = 0; x < width; x++) for (int y = 0; y < height; y++) for (int z = 0; z < width; z++) {
-				BlockPos position = master.position().offset(x, y, z);
-				world.require(position, operation);
+			int index = 0;
+			for (int x = 0; x < frozenWidth; x++) for (int y = 0; y < frozenHeight; y++) for (int z = 0; z < frozenWidth; z++) {
+				BlockPos position = masterPosition.offset(x, y, z);
+				int memberIndex = index++;
+				// world.block applies the entry gate; this is the callback-free predecessor interval.
 				var member = new FluidCapabilityAccess.Member(position, world.block(position, operation));
 				requireStatic(world, metadata, member, operation);
-				if (!master.position().equals(controller(world, metadata, member, operation))) throw unavailable("Create fluid member controller");
+				@Nullable BlockPos memberController = controller(world, metadata, member, operation);
+				if (!masterPosition.equals(memberController)) throw unavailable("Create fluid member controller",
+					() -> memberContext(position, memberIndex, frozenWidth, frozenHeight)
+						+ ";expectedController=" + masterPosition.toShortString()
+						+ ";observedController=" + pos(memberController));
 				world.require(position, operation);
-				if (metadata.isController(entity(member)) != position.equals(master.position())) throw unavailable("Create fluid member role");
+				boolean memberRole = metadata.isController(entity(member));
+				boolean expectedRole = position.equals(masterPosition);
+				if (memberRole != expectedRole) throw unavailable("Create fluid member role",
+					() -> memberContext(position, memberIndex, frozenWidth, frozenHeight)
+						+ ";isController=" + memberRole + ";expectedController=" + expectedRole);
 				world.require(position, operation);
-				if (metadata.axis(entity(member)) != Direction.Axis.Y) throw unavailable("Create fluid member axis");
+				Direction.@Nullable Axis memberAxis = metadata.axis(entity(member));
+				if (memberAxis != Direction.Axis.Y) throw unavailable("Create fluid member axis",
+					() -> memberContext(position, memberIndex, frozenWidth, frozenHeight)
+						+ ";axis=" + axis(memberAxis) + ";expectedAxis=Y");
 				members.add(member);
 			}
-			String alias = world.dimension(operation) + "|fluid-tank|" + master.position().toShortString() + "|" + ID;
-			return new TankRoute(world, face, master.position(), List.copyOf(members), metadata, width, height, alias);
+			String alias = world.dimension(operation) + "|fluid-tank|" + masterPosition.toShortString() + "|" + ID;
+			return new TankRoute(world, frozenFace, masterPosition, List.copyOf(members), metadata, frozenWidth, frozenHeight, alias);
 		}
 	}
 	@NotNullByDefault
@@ -183,7 +260,7 @@ public final class CreateFluidTankAccess {
 					// Member cache initialization can call unguarded getControllerBE. Use only the fully
 					// verified controller's public capability, still on the original non-null face.
 					@Nullable IFluidHandler handler = FluidCapabilityAccess.acquire(route, operation);
-					if (handler == null) return Optional.empty();
+					if (handler == null) { FluidSourceDiagnostics.createFinishAbsent(route); return Optional.empty(); }
 					int count = FluidCapabilityAccess.tankCount(route, handler, operation);
 					source.allowance();
 					try (var addresses = admission.enter(FluidCapabilityAccess.addressProfile(route, count))) {
@@ -208,25 +285,54 @@ public final class CreateFluidTankAccess {
 		world.require(member.position(), operation); return metadata.controller(entity(member));
 	}
 	private static void requireStatic(FluidCapabilityAccess.World world, Metadata metadata, FluidCapabilityAccess.Member member, Operation operation) {
-		world.require(member.position(), operation);
-		if (!ID.equals(member.block().blockId()) || !ID.equals(member.block().entityId()) || !metadata.ordinary(member.block()))
-			throw unavailable("Create creative/foreign fluid tank");
-		world.require(member.position(), operation);
-		if (metadata.virtual(entity(member))) throw unavailable("Create virtual fluid tank");
-		world.require(member.position(), operation);
+		BlockPos position = member.position();
+		FluidCapabilityAccess.Block block = member.block();
+		String blockId = block.blockId(), entityId = block.entityId();
+		world.require(position, operation);
+		boolean blockMatch = ID.equals(blockId), entityMatch = ID.equals(entityId);
+		boolean ordinary = blockMatch && entityMatch && metadata.ordinary(block);
+		if (!blockMatch || !entityMatch || !ordinary)
+			throw unavailable("Create creative/foreign fluid tank",
+				() -> "position=" + position.toShortString() + ";blockId=" + blockId + ";entityId=" + entityId
+					+ ";expected=" + ID + ";ordinary=" + ordinary);
+		world.require(position, operation);
+		boolean virtual = metadata.virtual(entity(member));
+		if (virtual) throw unavailable("Create virtual fluid tank",
+			() -> "position=" + position.toShortString() + ";blockId=" + blockId + ";entityId=" + entityId + ";virtual=true");
+		world.require(position, operation);
 		@Nullable BlockPos last = metadata.lastPosition(entity(member));
-		if (last != null && !last.equals(member.position())) throw unavailable("Create moved fluid tank");
+		if (last != null && !last.equals(position)) throw unavailable("Create moved fluid tank",
+			() -> "position=" + position.toShortString() + ";blockId=" + blockId + ";entityId=" + entityId
+				+ ";lastPosition=" + last.toShortString());
 	}
 	private static void requireStoredFluids(FluidCapabilityAccess.World world, Metadata metadata, FluidCapabilityAccess.Member master, Operation operation) {
 		// Only the verified current controller selects the capability mode. Former controllers can
 		// keep stale active BoilerData after becoming members; Create does not clear it on that path.
-		world.require(master.position(), operation);
-		if (metadata.activeBoiler(entity(master))) throw unavailable("Create active boiler is not stored fluid");
+		BlockPos position = master.position();
+		String blockId = master.block().blockId(), entityId = master.block().entityId();
+		world.require(position, operation);
+		boolean active = metadata.activeBoiler(entity(master));
+		if (active) throw unavailable("Create active boiler is not stored fluid",
+			() -> "position=" + position.toShortString() + ";blockId=" + blockId
+				+ ";entityId=" + entityId + ";active=true");
 	}
 	private static InventorySourceUnavailableException unavailable(String message) { return new InventorySourceUnavailableException(message); }
+	private static InventorySourceUnavailableException unavailable(String message, Supplier<String> context) {
+		return FluidSourceDiagnostics.unavailable(message, context);
+	}
 	private static InventorySourceUnavailableException unavailable(String message, Throwable cause) {
 		var failure = unavailable(message); failure.initCause(cause); return failure;
 	}
+	private static String blockContext(BlockPos position, Direction face, FluidCapabilityAccess.Block block) {
+		return "position=" + position.toShortString() + ";face=" + face.getName()
+			+ ";blockId=" + block.blockId() + ";entityId=" + block.entityId();
+	}
+	private static String memberContext(BlockPos position, int index, int width, int height) {
+		return "member=" + position.toShortString() + ";index=" + index + ";width=" + width
+			+ ";height=" + height + ";members=" + ((long) width * width * height);
+	}
+	private static String pos(@Nullable BlockPos position) { return position == null ? "none" : position.toShortString(); }
+	private static String axis(@Nullable Direction.Axis axis) { return axis == null ? "none" : axis.getName(); }
 
 	@NotNullByDefault
 	private record TankRoute(FluidCapabilityAccess.World world, Direction face, BlockPos capabilityPosition,
@@ -247,19 +353,48 @@ public final class CreateFluidTankAccess {
 				.plus(FluidCapabilityAccess.profile(2048, 2048, 128, 0, 0));
 		}
 		@Override public boolean matches(Operation operation) {
-			if (!world.createAvailable()) return false;
+			BlockPos controllerPosition = capabilityPosition;
+			int frozenWidth = width, frozenHeight = height;
+			if (!world.createAvailable()) throw unavailable("fluid capability route changed",
+				() -> "reason=create-unavailable;" + description());
+			int index = 0;
 			for (FluidCapabilityAccess.Member member : members) {
-				world.require(member.position(), operation);
-				if (!member.block().same(world.block(member.position(), operation))) return false;
+				BlockPos position = member.position();
+				int memberIndex = index++;
+				String expectedBlockId = member.block().blockId(), expectedEntityId = member.block().entityId();
+				// world.block applies its entry gate; no callback lies between the frozen identity read and it.
+				var current = world.block(position, operation);
+				if (!member.block().same(current)) {
+					String observedBlockId = current.blockId(), observedEntityId = current.entityId();
+					throw unavailable("fluid capability route changed",
+						() -> "reason=member-replaced;member=" + position.toShortString() + ";index=" + memberIndex
+							+ ";expectedBlock=" + expectedBlockId + ";observedBlock=" + observedBlockId
+							+ ";expectedEntity=" + expectedEntityId + ";observedEntity=" + observedEntityId);
+				}
 				requireStatic(world, metadata, member, operation);
-				if (!capabilityPosition.equals(controller(world, metadata, member, operation))) return false;
-				world.require(member.position(), operation);
-				if (metadata.isController(entity(member)) != member.position().equals(capabilityPosition)) return false;
-				world.require(member.position(), operation);
-				if (metadata.axis(entity(member)) != Direction.Axis.Y) return false;
-				if (member.position().equals(capabilityPosition)) {
-					world.require(member.position(), operation); if (metadata.width(entity(member)) != width) return false;
-					world.require(member.position(), operation); if (metadata.height(entity(member)) != height) return false;
+				@Nullable BlockPos memberController = controller(world, metadata, member, operation);
+				if (!controllerPosition.equals(memberController)) throw unavailable("fluid capability route changed",
+					() -> "reason=controller-changed;member=" + position.toShortString() + ";index=" + memberIndex
+						+ ";expectedController=" + controllerPosition.toShortString() + ";observedController=" + pos(memberController));
+				world.require(position, operation);
+				boolean memberRole = metadata.isController(entity(member)), expectedRole = position.equals(controllerPosition);
+				if (memberRole != expectedRole) throw unavailable("fluid capability route changed",
+					() -> "reason=role-changed;member=" + position.toShortString() + ";index=" + memberIndex
+						+ ";isController=" + memberRole + ";expectedController=" + expectedRole);
+				world.require(position, operation);
+				Direction.@Nullable Axis memberAxis = metadata.axis(entity(member));
+				if (memberAxis != Direction.Axis.Y) throw unavailable("fluid capability route changed",
+					() -> "reason=axis-changed;member=" + position.toShortString() + ";index=" + memberIndex
+						+ ";axis=" + axis(memberAxis) + ";expectedAxis=Y");
+				if (position.equals(controllerPosition)) {
+					world.require(position, operation); int observedWidth = metadata.width(entity(member));
+					if (observedWidth != frozenWidth) throw unavailable("fluid capability route changed",
+						() -> "reason=width-changed;member=" + position.toShortString() + ";index=" + memberIndex
+							+ ";expectedWidth=" + frozenWidth + ";observedWidth=" + observedWidth);
+					world.require(position, operation); int observedHeight = metadata.height(entity(member));
+					if (observedHeight != frozenHeight) throw unavailable("fluid capability route changed",
+						() -> "reason=height-changed;member=" + position.toShortString() + ";index=" + memberIndex
+							+ ";expectedHeight=" + frozenHeight + ";observedHeight=" + observedHeight);
 					requireStoredFluids(world, metadata, member, operation);
 				}
 			}

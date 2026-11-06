@@ -14,6 +14,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.PlainTextContents;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.server.Bootstrap;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.MarkerAnchor;
@@ -379,7 +380,7 @@ class PendingContentChatControllerTest {
 	}
 
 	@Test void formattingFailureIsDiagnosedOnceWhilePendingCanRetryAndSinkFailureStillEscapes() {
-		try (var logs = new DiagnosticLogCapture()) {
+		try (var logs = new DiagnosticLogCapture(LoggingProfile.DEEP)) {
 			Fixture f = new Fixture();
 			LifecycleFormatter formatter = new LifecycleFormatter();
 			f.controller = new PendingContentChatController(4, f::current, formatter, message -> {

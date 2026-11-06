@@ -1,5 +1,6 @@
 package nx.pingwheel.common.client.spatial;
 
+import java.time.Duration;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.Objects;
@@ -15,7 +16,9 @@ import nx.pingwheel.common.interaction.candidate.Candidate;
 import nx.pingwheel.common.interaction.candidate.PreciseSlot.Availability;
 import nx.pingwheel.common.interaction.candidate.PreciseTargetType;
 import nx.pingwheel.common.math.RaycastPolicy;
+import nx.pingwheel.common.diagnostics.DiagnosticChannel;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -25,6 +28,11 @@ import org.jetbrains.annotations.Nullable;
  * Each slot carries its own ray/generation; pending DH never borrows a newer ray.
  */
 public final class PreciseCaptureRefresh {
+
+	private static final DiagnosticChannel NATIVE_CAPTURE_FAILURE =
+		DiagnosticChannel.interval("precise-native-capture", Duration.ofSeconds(10));
+	private static final DiagnosticChannel DISTANT_START_FAILURE =
+		DiagnosticChannel.interval("precise-distant-start", Duration.ofSeconds(10));
 
 	public record Inputs(InteractionToken token, Object level, CapturedRay ray,
 		RaycastPolicy policy, double nativeDistance, double pingDistance) {
@@ -141,8 +149,12 @@ public final class PreciseCaptureRefresh {
 		Scan scan;
 		try { scan = Objects.requireNonNull(nativeCapture.capture(request)); }
 		catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("precise/native-capture", "client",
-				() -> "generation=" + request.generation() + " token=" + token.sequence(), unavailable);
+			Diagnostics.client().atNormal().rateLimited(NATIVE_CAPTURE_FAILURE).failure(Level.WARN,
+				"precise/native-capture", "all-native-slots-incomplete",
+				() -> "generation=" + request.generation() + " token=" + token.sequence()
+					+ " nativeRange=" + request.inputs().nativeDistance()
+					+ " pingRange=" + request.inputs().pingDistance()
+					+ " policy=" + request.inputs().policy(), unavailable);
 			scan = Scan.incomplete();
 		}
 		if (!active || ended || epoch != branchEpoch || request.generation() != generation || !owned(request.inputs())) return;
@@ -165,8 +177,13 @@ public final class PreciseCaptureRefresh {
 		boolean scheduled;
 		try { scheduled = distantCapture.start(pending.request(), outcome -> complete(pending, outcome)); }
 		catch (RuntimeException | LinkageError unavailable) {
-			Diagnostics.warn("precise/distant-start", "client",
-				() -> "generation=" + pending.request().generation() + " token=" + token.sequence(), unavailable);
+			Diagnostics.client().atNormal().rateLimited(DISTANT_START_FAILURE).failure(Level.WARN,
+				"precise/distant-start", "request-fallback",
+				() -> "generation=" + pending.request().generation() + " token=" + token.sequence()
+					+ " nativeRange=" + pending.request().inputs().nativeDistance()
+					+ " pingRange=" + pending.request().inputs().pingDistance()
+					+ " policy=" + pending.request().inputs().policy()
+					+ " fallback=" + pending.fallback().availability(), unavailable);
 			scheduled = false;
 		}
 		if (!scheduled) complete(pending, pending.fallback());
