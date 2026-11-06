@@ -33,14 +33,28 @@ coverage, with no passing run recorded here; it does not establish game startup,
 loader-specific dedicated-server initialization or multiplayer behavior.
 
 `ConfigHandlerDiagnosticsTest` covers filesystem-backed load-validation,
-backup, save and recovery-reset failures. Warning reports retain long original
-message tails and root causes within the diagnostic bound, without an attached
-throwable; the generated recovery reason remains a separate safe one-line
-comment. Failed backup preserves the original bytes and blocks save/reset
-writes while leaving defaults in memory; failed initial save creates no file,
-and failed recovery-reset preserves the original source and blocks subsequent
-saves. These are handler and injected-failure seams, not a live settings screen
-or client/server persistence session.
+backup, save and recovery-reset failures with actual recovery-result reporting:
+server invalid input distinguishes a written default file from defaults retained
+in memory, and a hash-equal recovery save remains a no-op that preserves the
+invalid original bytes without invoking `onUpdate`. Warning reports retain long
+original message tails and root causes within the diagnostic bound at higher
+disclosure, without an attached throwable; `NORMAL` hides path, value and
+failure-class detail. The generated recovery reason remains a separate safe
+one-line comment. Failed backup preserves the original bytes and blocks
+save/reset writes while leaving defaults in memory; failed initial save creates
+no file, and failed recovery-reset preserves the original source and blocks
+subsequent saves. These are handler and injected-failure seams, not a live
+settings screen or client/server persistence session.
+
+`ConfigHandlerVersionTest` checks a successful older-config migration remaining
+WARN-free at `NORMAL` and a failed migration write deferring version and path
+detail until an admitted higher disclosure while the original bytes and loaded
+values remain usable. `ConfigPresentationMigrationTest` covers fail-closed
+policy normalization diagnostics: a malformed global or individual target-type
+rule emits one `NORMAL` warning with a finite scope and affected count but no raw
+value, while missing target-type defaults and an ordinary legacy flat-shape copy
+stay quiet; a durable normalized reload does not repeat the original malformed
+warning.
 
 `TransparentBlockSelectionMigrationTest` contains filesystem-backed fixtures
 for the transparent-toggle transformation at the existing client beta1
@@ -341,9 +355,20 @@ catalogued by
 model and wire seams; the additional packet-facing `ServerCore` fixture below
 is headless rather than a live administration session.
 
-The Tracking partition additions have dedicated model, persistence, transaction,
-widget and strict-wire assertions in the
-[publication-stage input](build-checks.md#tracking-pool-publication-stage-run):
+Each loader's `ServerConfigTransportDiagnosticsTest` drives the production send
+seam for request, update and snapshot packets: route unavailability, a missing
+connection where that loader distinguishes it, and a dispatched send are
+DEBUG-only decisions on the owning side with the known packet kind. The seam
+adds no extra probe, serialization, retry or new return path; a non-config
+packet emits nothing. Fabric and NeoForge use their existing can-send/send
+seams, and Forge exercises the existing event-channel path with a recording
+channel rather than another dependency. These are headless loader send seams,
+not live connection or multiplayer transport evidence.
+
+The Tracking partition additions, including the later stage-report case, have
+dedicated model, persistence, transaction, widget and strict-wire assertions in
+the current
+[logging-coverage audit final acceptance](build-checks.md#logging-coverage-audit-final-acceptance):
 
 - `InventorySettingsPersistenceTest` checks absent/null defaults, all four
   independent boolean pairs, explicit sibling preservation, unchanged
@@ -361,7 +386,12 @@ widget and strict-wire assertions in the
   constructor-free server/player fixtures: a numeric-only update preserves both
   unselected flags through settings reconstruction and persistence, a face-only
   edit preserves the player flag, permission denial and malicious values/masks
-  leave authority unchanged, and the snapshot round-trips the actual values.
+  leave authority unchanged, and the snapshot round-trips the actual values. A
+  separate stage-report case keeps permission-denied and invalid-update
+  decisions silent at `NORMAL`, expands their mask, trusted-permission and
+  profile-only facts only at `DEEP`, and records applied-in-memory followed by
+  persistence-attempted without claiming persistence or an acknowledgement; a
+  selected logging profile is published before the attempt.
 - `InventoryPerformanceOptionTest` constructs both actual full-width native
   toggle factories, checks help presence, exactly-own-leaf dirty/revert and stale
   callbacks after revocation/disconnect. Catalog and eight-locale resource
@@ -394,34 +424,42 @@ authoritative profile, its own dirty bit and update plan, read-only display of a
 authoritative `DEBUG` value without editing or planning, preservation through
 other edits, disconnect reset and replacement by a fresh snapshot.
 
-`LoggingProfileControlTest` covers the locked `NORMAL`/`DEEP` cycle, the
-three-value unlocked cycle, Shift-plus-left-click unlocking only the selected
-row without changing a value or dirtying the server draft, keyboard activation
-cycling without unlocking, mouse-wheel input neither selecting nor unlocking,
-and an inactive read-only server row refusing both activation and unlock.
+`LoggingProfileControlTest` covers the two-value cycle when Alt is released, the
+three-value cycle while Alt is held, a current `DEBUG` value exiting to `NORMAL`
+on the next release-state activation, keyboard and mouse activation sharing the
+same live candidate, no separate Shift path, mouse-wheel input leaving the value
+unchanged without selecting, an inactive read-only server row refusing
+activation, and a server draft selection that does not publish the runtime
+profile.
 
-`LoggingProfileScreenTest` covers independent client/server unlock flags across
-category and scope navigation and resize; successful root leave clearing both
-flags; failed save, cancelled reset confirmation and ordinary removal retaining
-them; confirmed reset clearing the old session and creating a locked replacement;
-native tooltip narration containing the unlock hint; the client row showing a
-real locked `DEBUG` value and applying later clicks to config and runtime; the
-server row editing only the draft without publishing the server runtime; and a
-read-only server viewer seeing `DEBUG` without editing or unlocking.
+`LoggingProfileScreenTest` covers the per-activation Alt read and the current
+client handler configuration, including a replaced handler object read and
+written through the same mounted row instead of the construction-time reference.
+It checks that dropping Alt after a `DEBUG` selection leaves the configuration
+and caption unchanged while the next activation exits to `NORMAL`, that the
+client row publishes immediately and the server row edits only the draft
+without publishing the server runtime, and that navigation and resize do not
+carry the temporary Alt candidate. It also covers native tooltip narration
+containing only scope, redacted `NORMAL` versus unredacted detail, and apply
+timing, without naming `DEBUG` or hinting at the activation gesture, plus a
+read-only server viewer seeing `DEBUG` without editing.
 
 `SettingsCategoryCatalogTest` verifies the logging controls' placement and the
 approved catalogue totals: 75 entries, 73 value controls, and 25 server
 Performance rows. `SettingsLocalizationCoverageTest` requires localized labels
-and tooltips for both logging rows and the shared unlock-help key in all eight
-bundled locales. `ServerConfigVarNumbersTest` covers logging-profile tags
+and tooltips for both logging rows in all eight bundled locales.
+`ServerConfigVarNumbersTest` covers logging-profile tags
 `0`/`1`/`2`, mask bit 29, preservation when unselected, and rejection of missing,
 unknown, noncanonical, truncated and trailing forms even when unselected.
 
-The scoped common and final combined automated acceptance recorded under
-[logging-profile final combined acceptance](build-checks.md#logging-profile-final-combined-acceptance)
-covers these headless model, handler, packet, widget and screen fixtures. It does
-not establish live native mouse or keyboard delivery, rendered tooltip layout, a
-live client/server profile switch or remote persistence.
+The focused result and the full combined execution for the accepted Alt-control
+input are recorded under
+[Alt logging profile controls](build-checks.md#alt-logging-profile-controls).
+The full common test task covers the model, catalog, packet and wire fixtures
+above (`LoggingProfileConfigTest`, `ServerConfigLoggingProfileTest`,
+`SettingsCategoryCatalogTest`, `ServerConfigVarNumbersTest`). None of these
+fixtures establishes live native mouse or keyboard delivery, rendered tooltip
+layout, a live client/server profile switch or remote persistence.
 
 ## Server performance contract verification
 
@@ -784,11 +822,13 @@ or wrapping.
 
 ## Known automated gaps
 
-- logging-profile configuration and controls have headless coverage above, but
-  live native Shift-plus-left-click and keyboard/wheel delivery, rendered
-  localized help, a real client/server profile switch and remote persistence
-  remain unexercised; the headless screen fixture does not create a game window
-  or connection;
+- logging-profile configuration and controls have focused and full common
+  headless coverage above, but live native Alt/Option-held and released
+  activation, keyboard delivery and wheel scrolling, rendered localized help
+  without a debug or gesture hint, a real macOS Option key, a Minecraft window,
+  a real client/server profile switch, multiplayer and remote persistence remain
+  unexercised; the headless screen fixture intercepts a physical modifier read
+  without creating a game window or connection;
 - native-list reflow/input, enum caption/narration/tooltip components, assembled
   caption-change/dialog-return input and native resize have headless assertion
   coverage above, with execution evidence scoped separately; the game render/input

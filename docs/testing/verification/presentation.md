@@ -347,11 +347,19 @@ once while existing data remains usable, only a store reset rearms that
 domain warning, section-history refusal stays quiet, a throwing permission
 provider or invalid compiled policy still denies, oversized pre-encoding keeps
 the empty-stale fallback, and a throwing HUD provider keeps its empty labels.
+At `NORMAL` the oversized pre-encoding and HUD-provider cases expose only fixed
+fallback text and no raw field, provider identity or cause; higher disclosure
+retains the original causes.
 `PresentationServerDiagnosticsTest` covers collector and sanitization failures
 retaining demanded stale values while advancing cadence, property-capture
 failure rejecting the whole admission without seeds, and section-construction
-versus transport failure diagnostics. The sending seam keeps its revisioned
-empty-stale fallback and propagates a failed fallback without a third attempt.
+versus transport failure diagnostics. Its `NORMAL` cases retain the same
+stale/empty-stale fallbacks without raw stage, revision, adapter, target or
+demand context; the sending seam still makes two attempts and propagates a
+failed fallback without a third. `InventoryProductionPolicyTest` additionally
+keeps the initial baseline pending after a thrown creation handoff and reports
+one `WARN` with baseline-retry handling, while a deliberate pre-send refusal
+stays quiet and a later successful tick sends one creation snapshot.
 `PresentationServerBasicEntityTest` additionally asserts cause-bearing warnings
 for failed name getters and encoders while independently demanded health stays
 available. These are headless production-call-site and recording-delivery
@@ -366,7 +374,10 @@ and remaining courtesy allowance. Its inventory `SELECT` cases reject an
 unready or `OFFER`-only presentation session and a mismatched presentation
 epoch or view without sending or replacing the prior receipt; a matching ready
 request can still consume the sole allowance and establish its inventory
-receipt. These are headless dispatcher/session checks;
+receipt. Terminal rejections emit finite DEBUG reasons such as
+presentation-not-ready, property-denied, inventory-view-mismatch or
+courtesy-throttled without altering those allowance and receipt outcomes. These
+are headless dispatcher/session checks;
 `ClientPingDispatchReceiptTest` covers the
 actual-send receipt and transport-failure rollback; and
 `ClientPingRuntimeInteractionTest` drives that property create through the
@@ -503,15 +514,18 @@ has foundation and production-seam tests, not a live client/server validation:
 
 `PresentationPreviewDiagnosticsTest` covers throwing local and retained-cache
 readers reporting their causes while the one-shot server fallback times out
-without invented values. A throwing client request sender first clears pending
-state to unavailable, then rethrows the same exception without a duplicate
-local report or retry; a headless runtime case reports it at the existing
-interaction boundary. Client access/context failures retain their propagation
-boundary, and a failed cancel still clears pending state and the aborted
-binding before propagating. Server access failure still denies and capture
-failure returns unavailable; a failed send does not trigger another source
-read. These use fake reader, world and transport ports with a test appender,
-not live preview delivery or input.
+without invented values. At `NORMAL`, local reader and retained-cache failures
+are content-free warnings that keep the one bounded server-preview request
+eligible, using local-field-unavailable/server-preview-eligible or
+cache-unavailable/server-preview-eligible handling. A throwing client request
+sender first clears pending state to unavailable, then rethrows the same
+exception without a duplicate local report or retry; a headless runtime case
+reports it at the existing interaction boundary. Client access/context failures
+retain their propagation boundary, and a failed cancel still clears pending
+state and the aborted binding before propagating. Server access failure still
+denies and capture failure returns unavailable; a failed send does not trigger
+another source read. These use fake reader, world and transport ports with a
+test appender, not live preview delivery or input.
 
 Optional Create receipt and preview-gate evidence is recorded under
 [Create content preview](integrations.md#create-content-preview).

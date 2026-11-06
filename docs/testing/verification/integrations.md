@@ -81,9 +81,9 @@ one bounded original graph per call, and repeated calls without implicit
 suppression.
 
 These profile, self-fault, backend and public-route fixtures are covered by the
-scoped automated combined acceptance recorded under
-[logging-profile final combined acceptance](build-checks.md#logging-profile-final-combined-acceptance).
-The acceptance covers the named automated scopes only; loader builds are
+current source-input acceptance recorded under
+[logging-coverage audit final acceptance](build-checks.md#logging-coverage-audit-final-acceptance).
+That acceptance covers the named automated scopes only; loader builds are
 included, while live appender/loader/game behavior and manual scenarios remain
 pending.
 
@@ -110,10 +110,14 @@ read-source dispatch while the tested invalid, temporarily-unavailable and empty
 outcomes remain intact. Against the explicit backend with `DEEP` disclosure, the
 warnings retain provider identity and the original cause or null-result event
 without an attached throwable. Missing-provider and ordinary temporary refresh
-results stay quiet, and an `AssertionError` from refresh propagates. Cleanup
-failures still allow later provider and reference cleanup; a throwing member
-predicate denies access. These fixtures use fake providers and uninitialized
-server/level tokens, not live world validation or provider lifecycle evidence.
+results stay quiet, and an `AssertionError` from refresh propagates. Membership
+dispatch keeps a throwing provider outcome unknown with one `NORMAL` warning,
+one provider-identity read and one membership call; ordinary unknown, budget
+exhaustion and fatal errors stay quiet, and the warning does not hold the
+registry monitor. Cleanup failures still allow later provider and reference
+cleanup; a throwing member predicate denies access. These fixtures use fake
+providers and uninitialized server/level tokens, not live world validation or
+provider lifecycle evidence.
 
 ## NeoForge logging-profile lifecycle and loader diagnostics
 
@@ -142,7 +146,8 @@ presentation call sites:
   renderer or glue failure, `WARN` for availability, preflight and partial
   outcomes, and `DEBUG` for expected absence, disabled or rendered outcomes;
 - `CreateEntityOutlineDiagnosticsTest` covers `NORMAL` suppressing entity UUID,
-  probe and throwable reads, admitted `DEEP` detail, heartbeat deduplication,
+  probe and throwable reads, admitted `DEEP` detail without another live entity
+  descriptor read (class and stable identity only), heartbeat deduplication,
   below-`DEBUG` recovery without resetting the domain gate, and one bounded report
   without an attached throwable;
 - `CreatePresentationLoggingProfileTest` covers independent client/server
@@ -157,11 +162,11 @@ presentation call sites:
   reflection entries with Create present and absent, side-bound availability,
   client/authoritative adapter fields, and no collector load.
 
-The loader build/test execution for this group is recorded under
-[logging-profile loader execution](build-checks.md#logging-profile-loader-execution);
-the final source-input acceptance is recorded under
-[logging-profile final combined acceptance](build-checks.md#logging-profile-final-combined-acceptance).
-These are headless or constructed compiled fixtures with injected sinks; they do
+The current loader build/test execution for this group, including the newer
+diagnostic cases above, is recorded under
+[logging-coverage audit final acceptance](build-checks.md#logging-coverage-audit-final-acceptance).
+Earlier loader and combined records remain historical assertions only. These
+are headless or constructed compiled fixtures with injected sinks; they do
 not establish live loader launch, installed Create, GPU presentation,
 multiplayer or mixed-version behavior.
 
@@ -430,19 +435,26 @@ provider-observation and diagnostic evidence:
   and linkage failures return temporary unavailability and emit one warning
   retaining the original cause without an attached throwable, leaving existing
   reference and entry counts intact; linkage additionally disables the shared
-  guard and makes a later refresh invalid. Its refresh-transition case reports a
-  warning after a debug-only state observation, suppresses the duplicate and
-  admits a different stable target through the same admission path;
+  guard and makes a later refresh invalid. Its warnings carry
+  observation-temporarily-unavailable or integration-disabled handling
+  respectively. Its refresh-transition case reports a warning after a debug-only
+  state observation, suppresses the duplicate and admits a different stable
+  target through the same admission path;
 - `SableRefreshLogGateTest` checks decision state for tested locator or reason
   changes and duplicates, disabled reporting observing state without consuming a
   later warning, and removal or recovery permitting a new failure report. It
   does not itself run a refresh operation or log sink;
-- `SableDiagnosticsTest` and `SableServerDiagnosticsTest` check selected event
-  metadata and record fields, including same-throwable identity for a server
-  exception and constructed-invalid or `LinkageError` cases;
-- `SableClientDiagnosticsTest` checks an empty capture result when Sable is
-  absent and diagnostic presence from explicit `logCaptureFallback` calls with
-  a reason; and
+- `SableDiagnosticsTest` covers recorded capture, server and refresh events,
+  same-throwable identity, finite handling on failure events, deferred provider
+  fields that stay lazy at `NORMAL`, under a disabled backend or under
+  suppression, and a throwing descriptor supplier that does not disable a later
+  successful report.
+  `SableServerDiagnosticsTest` adds the discovered twelve-descriptor API list
+  and the constructed linkage failure at the operation boundary;
+- `SableClientDiagnosticsTest` checks an absent-Sable empty capture with its
+  attempt-start and explicit projected/vanilla-target fallback stages, and a
+  supplemental scan failure classified as supplemental-incomplete while leaving
+  the shared guard usable; and
 - `SablePresentationLogGateTest` checks cadence, capacity, repeated
   failure-class key de-duplication, and throwable identity. Its shared-backend
   case covers a disabled debug status followed by one warning for repeated
@@ -498,14 +510,29 @@ zero-triangle or over-budget sibling stops before planning while retaining the
 first resolution failure and retrying the valid sibling on later attempts. A
 later model or terminal failure retains both original cause chains through a
 fresh wrapper without mutating either original exception, and supplied FAILED
-or RENDERED terminal outcomes stay unchanged. Each attempt selects one report,
-repeated identical reports are domain-suppressed without formatting either
-failure, and a subsequent clean attempt retains no earlier failure. These are
-headless attempt/model and diagnostic seams, not live Flywheel resolution,
-geometry emission, shared-buffer partial commits or GPU evidence.
+or RENDERED terminal outcomes stay unchanged. Each attempt selects one report;
+reports with the same reason, outcome and failure category are domain-suppressed
+without formatting either failure, while a same-reason failure after ordinary
+absence or a different category is a transition or new episode. A subsequent
+clean attempt retains no earlier failure. Admitted detail is assembled from
+fixed attempt-local evidence captured during business work, so it does not
+repeat model, material or mesh getters. These are headless
+attempt/model and diagnostic seams, not live Flywheel resolution, geometry
+emission, shared-buffer partial commits or GPU evidence.
+`CreateFlywheelDiagnosticEvidenceTest` executes the compiled extraction,
+preflight and detail methods with recording optional-API stand-ins: at every
+profile the business attempt reads the model list, material texture and mesh
+counts only as often as its failed attempts require; admitted `DEEP`/`DEBUG`
+detail completes from evidence without another live read, disabled reports
+collect neither target nor detail, and extraction/material failures stay `ERROR`
+while preflight budget failure is `WARN`.
 `FlywheelDiagnosticsTest` covers a DEBUG-disabled recovery still allowing the
 next warning transition, disabled warning levels preserving admission, and a
-throwing admitted sink consuming the reporting opportunity.
+throwing admitted sink consuming the reporting opportunity. It also covers
+same-reason absence-to-resolution-failure admission, render versus availability
+versus mixed-success severity and handling, clock-free disabled observations,
+new failure episodes after a disabled recovery, category transitions that keep
+their own severity, and consumed heartbeat opportunities not being refunded.
 `CreateEntityOutlineDiagnosticGateTest` covers the entity adapter's
 production-used admission gate: disabled-debug recovery, debounce and heartbeat,
 warning-level changes without resetting consumed admission, bounded retained

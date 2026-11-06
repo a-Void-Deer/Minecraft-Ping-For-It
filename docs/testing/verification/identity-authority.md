@@ -28,9 +28,13 @@ The current suite covers:
 `MarkerCreationServiceTest` captures actual Log4j events for admission after
 external materialization: an ordinary admission-type rejection emits no WARN,
 while a throwing admission callback emits one WARN with the original message,
-cause, suppressed detail, source frame and committed external locator.
-Both paths reject, release the materialized reference and leave the marker store
-untouched. Its target-type admission cases accept `danger` for a resolved
+cause, suppressed detail, source frame and committed external locator. A
+separate `NORMAL` fixture keeps a validator or grouping contract failure to one
+`WARN` with reject-create handling and no raw target or cause; ordinary null
+validator or resolver results stay quiet, and the grouping failure is not
+reported a second time by the caller. The admission paths reject, release the
+materialized reference and leave the marker store untouched. Its target-type
+admission cases accept `danger` for a resolved
 `entity_block`, record that whole-marker type on the stored marker, reject the
 disallowed `loot` type with `INVALID_PING_TYPE`, and keep only the accepted
 marker. This is a headless service/callback seam, not a live provider,
@@ -46,10 +50,14 @@ target validation.
 
 `PacketHandlerTest` covers full buffer consumption after valid or corrupt
 decoding and a failed fallback constructor preserving its reflection failure
-cause while still draining the buffer. It does not assert the actual DEBUG
-events from `readSafe`; public diagnostic-helper evidence is inventoried in
-[shared exception diagnostics](integrations.md#shared-exception-diagnostics),
-not an end-to-end packet decode or transport logging test.
+cause while still draining the buffer. Its decode-failure cases assert
+DEBUG-only reporting on finite class-keyed channels: repeats of one packet
+class share a channel, another class and the other logical side admit
+independently, an explicit consumer selects its side before decode, and
+`NORMAL` never reports malformed input. The finite route vocabulary covers the
+known packet classes plus one fallback for an unknown caller class; malformed
+input cannot create a new channel. These are decoder and reporting seams, not
+an end-to-end packet decode, transport registration or live connection test.
 
 Marker-store, packet, and update tests provide recipient-scoped state and
 channel-mode transport seams, but do not establish the complete `ServerCore`

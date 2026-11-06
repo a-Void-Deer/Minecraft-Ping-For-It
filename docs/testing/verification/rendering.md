@@ -34,22 +34,31 @@ internal DEBUG enablement. Shared production-helper evidence is inventoried in
 
 `TargetNameDiagnosticsTest` covers the injected client entity-name lookup seam:
 expected absence returns the unknown name without a warning, while a throwing
-lookup keeps that fallback and repeated failures emit one warning retaining the
-original message and cause without an attached throwable. It does not exercise
-the real client-world getters, block/external lookup, server name encoding or
-the decoder's production logger admission.
+lookup keeps that fallback, consumes the getter once and emits one content-free
+`NORMAL` warning with the unknown-name handling. Higher disclosure retains the
+original message and cause without an attached throwable. The server-side
+helper has the same `NORMAL` fallback summary. These cases do not exercise the
+real client-world getters, block/external lookup, server name encoding or the
+decoder's production logger admission.
 
 `OutlineDiagnosticsTest` covers common production runner and registry seams:
 throwing model claims allow the next adapter and a later retry, null outcomes
 and throwing observers retain the successful sibling result with independent
 once-only warnings, and a failed source ID or rejected duplicate cannot
-displace an accepted registration. Failure warnings retain the original cause
-in one bounded string without an attached throwable; a throwing sink consumes
-only the report opportunity, not later source attempts, and log-level changes do
-not reset an already emitted warning. `BlockPresentationResolverTest` also
-asserts cause-bearing warnings while a failed resolver leaves later resolution
-or the ordinary direct subject usable. These are headless source, resolver and
-logging seams, not render-frame or GPU execution. Optional Flywheel and Create
+displace an accepted registration. `NORMAL` reports carry finite category and
+handling codes; a source attempt or null outcome is `ERROR`, while context,
+observer, probe and registration failures are `WARN`.
+The source-render report states fallback eligibility and does not claim an
+applied fallback even when a later source renders or the native shape is empty.
+A world-aware failure keeps its once key on the real block registry identity and
+reuses the registration-validated adapter ID for admitted detail instead of
+calling the adapter again. Higher disclosure retains the original cause in one
+bounded string without an attached throwable; a throwing sink consumes only the
+report opportunity, not later source attempts, and log-level changes do not
+reset an already emitted warning. `BlockPresentationResolverTest` also asserts
+cause-bearing warnings while a failed resolver leaves later resolution or the
+ordinary direct subject usable. These are headless source, resolver and logging
+seams, not render-frame or GPU execution. Optional Flywheel and Create
 diagnostic seams are inventoried under
 [optional rendering coverage](integrations.md#optional-rendering-structural-coverage).
 
@@ -83,15 +92,30 @@ assertions are inventoried under
 
 `SpatialFluidIconRendererTest` records the production draw dispatch without a
 GPU: a fluid whose legacy block is air still uses its native still sprite;
-null, missing, wrong-atlas and throwing native routes try only a non-air legacy
-particle sprite before text-only fallback. The recorded draw preserves existing
-alpha/tint composition. Replacing supplied sprite resources is observed on the
-next draw, and a failed lookup does not prevent later recovery. This simulates
-resource replacement, not a live client reload. Loader API and actual tea-asset
-assertions are inventoried under
-[native fluid presentation](integrations.md#native-fluid-presentation);
-[combined-tree execution](build-checks.md#native-fluid-boundary-and-presentation-verification)
-records the passing headless results.
+null, missing, wrong-atlas and throwing native routes try a non-air legacy
+particle sprite once before text-only fallback. Ordinary unusable or absent
+sprites stay quiet; a native failure with a legacy replacement is a `WARN`
+legacy-sprite handling, terminal text-only resolution has its own `WARN`, and a
+failed GPU submission is `ERROR` with separate draw-failed handling. `NORMAL`
+summaries stay content-free while `DEEP` retains both original causes without
+mutating them, and suppressed or disabled reports read neither again. Production
+discovery and native-port failures cross `FluidSprites.lookupStillSprite`
+unchanged and are reported only by the renderer after it selects a fallback;
+the compatibility `stillSprite` entry still returns null after exactly its own
+lookup, absence stays null and only a successful service is cached. The
+recorded draw preserves existing alpha/tint composition. Replacing supplied
+sprite resources is observed on the next draw, and a failed lookup does not
+prevent later recovery. This simulates resource replacement, not a live client
+reload. `FluidSpritesTest` separately covers current native, linkage and service
+configuration failures keeping their identity, fatal errors propagating from
+both entries, quiet missing-service behavior, and one discovery per uncached
+call without a negative cache. Loader API and actual tea-asset assertions are
+inventoried under
+[native fluid presentation](integrations.md#native-fluid-presentation). The
+added diagnostic cases are included in the current
+[logging-coverage audit final acceptance](build-checks.md#logging-coverage-audit-final-acceptance);
+the earlier [combined-tree execution](build-checks.md#native-fluid-boundary-and-presentation-verification)
+remains historical evidence for its pre-existing headless results.
 
 ### Low-opacity quad regressions
 

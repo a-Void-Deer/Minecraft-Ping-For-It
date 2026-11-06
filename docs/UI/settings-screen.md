@@ -195,33 +195,33 @@ preference, and its tooltip states that a change applies to the next hold.
 Logging Detail in the client scope and Server Logging Detail in the server scope
 are independent native buttons for the profile owned by
 [diagnostics and logging](../architecture/logging.md). Each shows its current
-value. The client button edits the local preference and publishes the client
-profile immediately; the server button edits only the ordinary server-settings
-draft and does not publish the server profile by itself. The
+value. On activation, the client button resolves the current client
+configuration through the handler, edits the local preference, and publishes
+the client profile immediately; the server button edits only the ordinary
+server-settings draft and does not publish the server profile by itself. The
 [server-settings transaction](../architecture/config/changing-server-config.md)
 owns when an accepted server selection takes effect.
 
-Without a session unlock, ordinary activation cycles between `NORMAL` and
-`DEEP`. A row that already displays `DEBUG` keeps that visible value while
-locked, but its next ordinary activation exits to `NORMAL`, and the locked cycle
-cannot select `DEBUG` again. After that row is unlocked, ordinary activation
-cycles through all three values. Keyboard activation uses the ordinary cycle and
-never unlocks; mouse-wheel input neither selects nor unlocks.
+Every mouse or keyboard activation reads the live Alt state, with Option serving
+as Alt on macOS. With Alt released, activation cycles between `NORMAL` and
+`DEEP`; a row already showing `DEBUG` exits to `NORMAL` on its next activation
+and cannot return to `DEBUG` without Alt. With Alt held, activation cycles
+`NORMAL` → `DEEP` → `DEBUG` → `NORMAL`. Shift has no special role, and
+mouse-wheel input remains list scrolling and never selects. Releasing Alt is not
+itself an edit: it changes neither the selected value nor the server draft, does
+not publish a profile, and leaves the caption unchanged. A row left at `DEBUG`
+therefore keeps that caption until an activation changes the value. The screen
+keeps no unlock, reveal, or per-row access state across activations, navigation,
+resize, or close.
 
-Shift plus the ordinary left click on one row only unlocks that row's `DEBUG`
-candidate for the current screen session. It does not change the value, mark the
-server draft dirty, produce an update plan, or dispatch an update. The client
-and server unlock flags are independent and survive page rebuilds, category and
-scope navigation, and resize. A successful final root leave and a confirmed
-reset clear both flags; a failed save, a cancelled reset confirmation, and
-ordinary screen removal leave them intact. A read-only server viewer sees the
-authoritative value but cannot activate or unlock the server row.
+A read-only server viewer sees the authoritative value, including `DEBUG`, but
+cannot activate the row.
 
 Both rows provide native hover and keyboard-focus help localized in every
-bundled locale. The help identifies the client or server scope, the effect of
-each profile, how ordinary activation differs from the Shift-plus-left-click
-unlock gesture, when the edit takes effect, and that `DEEP` or `DEBUG` detail may
-include unredacted diagnostic content.
+bundled locale. The help identifies the client or server scope, distinguishes
+the redacted `NORMAL` profile from unredacted detailed profiles, and states when
+the edit takes effect. It does not mention `DEBUG` or hint at the activation
+modifier.
 
 ## Server performance category
 
@@ -231,7 +231,7 @@ toggle, then Server Logging Detail. The notice toggle's tooltip identifies
 administrator budget-delay notices and the effect of enabling or disabling
 them; value semantics and the persisted key are owned by
 [server configuration](../config/server.md#persisted-fields). The logging row's
-session, unlock and disclosure behavior is owned by
+profile, activation and disclosure behavior is owned by
 [Logging profile controls](#logging-profile-controls).
 
 The inventory administration controls follow in three

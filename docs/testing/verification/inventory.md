@@ -104,6 +104,71 @@ pass, a full loader build or a live source run.
 boiler mode with stale former-controller state. That is archive/headless
 coverage, not installed Create gameplay or a combined loader run.
 
+`CreateFluidTankAccessTest` adds provider-local `DEBUG` reporting and lazy
+failure context for creative/foreign, active-boiler and controller/member
+relation rejections. Invalid shape, member-limit exhaustion and a hit outside
+the verified prism retain the independent `invalid-shape`,
+`member-limit-exceeded` and `hit-outside-structure` reasons; over-limit and
+outside-structure failures stop before member or capability work. It also
+covers one absent controller-capability report with route shape and handler
+absence, and one consumed validation rejection with route, handler, count,
+first rejection reason and member context.
+`CreateFluidTankMetadataTest` drives the tested Create archive through 3x3x20
+(180-member) and 3x3x32 (288-member) tanks under an admission fixture matching
+the default runtime ledgers: a complete headless probe and finish admits all
+members without a rejection event, while a specific member-controller change
+names its coordinate, member index and frozen shape. Both sizes stay within the
+finite member guard and do not widen the supported topology.
+`CreateFluidTankAccessTest` also exercises the finite member guard
+arithmetically: 3x3x113 (1,017 members) and 2x2x256 (1,024 members) are
+admitted, while 3x3x114 (1,026 members) reports `member-limit-exceeded`. The
+exact-limit 2x2x256 case is headless shape arithmetic, not a claim that a live
+Create configuration or target uses that shape.
+`PlatformFluidServiceTest` distinguishes unloaded-chunk and
+uninstantiated-entity positions. Creative/foreign tanks remain explicit
+rejections without generic fallback. These are archive-backed or
+constructed-provider headless fixtures, not installed Create, a loader launch
+or live-world evidence.
+
+`InventoryFluidReadOperationTest` covers the common single-use state machine:
+the common pre/post validations, synchronous freeze and single completion;
+missing, duplicate, reordered, reentrant, wrong-provider, wrong-slot,
+wrong-thread and post-close calls fail closed and clear owned references; a
+budget defer before freeze yields no provisional value; codec reentry cannot
+complete a detached value. NeoForge's `InventoryFluidCoordinatedSourceTest`
+drives the real common fluid source and capability access through the
+production guarded wrapper over headless metadata: the ordinary route keeps the
+provider full current check and admission immediately before the one native
+getter, the common pre/post validations, and synchronous freeze; the
+external/Sable route keeps the legacy standalone path. The 2026-11-06
+integration run passed these cases. Its guarded-tail authority, getter-reentry
+and codec-reentry review detectors failed on the unfixed code and pass on the
+final code; the final suite also covers metadata/provider-current callback
+reentry, and getter count stays at most one.
+
+`CreateFluidTankValidationPerformanceTest` is one deterministic headless
+counter baseline over the real Create tank algorithm and real capability
+discovery, standalone validation, consume and observe sequence, using detached
+metadata, a production-shaped nested-gate world and the default work and memory
+ledgers. The unchanged provider-only fixture supplies the observe rows; the
+separate common + production guard source test supplies the provider-current/
+bind row; the Backend first-Preview regression supplies the construction row:
+
+| Headless comparison | Result |
+| --- | --- |
+| Provider-only 288-member observe context/member/authority | 99,168 -> 47,280 |
+| Provider-only 1,024-member observe context/member/authority | 352,352 -> 167,984 |
+| Provider-only observe capability/current passes | 4 -> 2 |
+| Common + production guard provider current passes; binds | legacy 4 / 315 -> coordinated 3 / 237 |
+| Backend first-Preview source constructions | 2 -> 1 |
+
+Consume and observe retain one content getter; the valid, consume and cleanup
+rows remain in the integration counters. The provider-only fixture excludes the
+common guarded source and live Create. These deterministic headless counts are
+not an end-to-end Preview, TPS, latency or allocation measurement; the live
+288-member 3-5 Hz/20 s comparison remains pending in the
+[manual matrix](manual-integration.md#fluid-inventory).
+
 Mixed-lane selection assertions belong to
 [interaction verification](interaction.md#inventory-list-gestures-and-navigation),
 quantity fitting and sprite dispatch to
@@ -572,7 +637,11 @@ snapshot. `InventorySnapshotLayoutTest` covers the detached
 layout model: positions, lists and nested mappings are detached and immutable,
 structural members invent no slots, duplicate positions and invalid or
 duplicate per-segment mappings are rejected, and the total visible bound spans
-all members rather than each member alone. NeoForge's
+all members rather than each member alone. Current finite-guard assertions
+accept exactly 1,024 layout members and reject 1,025, while the snapshot memory
+bound assertion accepts the same 1,024-member count and rejects 1,025; these are
+test boundaries, not a live Create shape or a widened supported topology.
+NeoForge's
 `CreateVaultInventoryAccessTest` covers the segmented Vault access snapshot
 layout: member order, controller role, member-local visible mappings and layout
 data are preserved, and an invalid current layout exposes no snapshot
@@ -1114,10 +1183,15 @@ no corresponding module-runtime probe evidence.
 `InventoryCaptureDiagnosticsTest` checks a real Log4j test appender for the
 original external-capture cast message and source frame, provider identity,
 locator, frozen face and read owner without inventing physical coordinates.
-Expected budget or access denials, directly or as cursorless causes, neither
-emit a warning nor evaluate diagnostic context; an unexpected provider failure
-with the same message still warns. `InventorySourceSnapshotTest` checks capture,
-live-read and snapshot-read cast failures retaining original messages, frames
+Expected budget or access denials, directly, as cursorless causes or wrapped in
+a certified read failure with only an expected budget cause, neither emit a
+warning nor evaluate diagnostic context; an unexpected provider failure with
+the same message still warns. An unexpected failure at `NORMAL` emits one
+content-free `WARN` with finite handling such as cleanup-continued,
+reject-selection, deny-publication or invalidate-read; higher disclosure can
+expand source, target, locator, owner, face and round context.
+`InventorySourceSnapshotTest` checks capture, live-read and snapshot-read cast
+failures retaining original messages, frames
 and source/target context with unavailable outcomes and no empty or partial
 payloads. Failed capture never falls back to live reads and attempted reads
 stay charged. Metadata/read failure followed by snapshot-close failure keeps
@@ -1144,21 +1218,73 @@ or reserved-memory leak. `InventoryCaptureDiagnosticsTest` additionally
 checks that its existing bound-reason gate reaches the shared backend
 independently of unrelated report volume.
 
-`InventoryItemFailureDiagnosticsTest` covers actual canonical-byte refusal
-producing an all-variants aggregate diagnostic without changing a safe exact
-identity, while intentional display stripping and ceiling projection stay silent.
-At the freezer seam, only the tested display root-limit
-refusal retains exact canonical identity with unavailable display; ordinary
-runtime and linkage getter failures propagate unchanged to the source owner
-without an exact result or a duplicate local report. Native snapshot and client
-display decoding reject incomplete codec results without adopting partial data
-or retaining native error-payload text; client refusal keeps the empty-icon
-fallback and reports the trusted stage and fixed refusal description. A
-catalogue guard after a successful freeze does not falsely report an identity
-aggregate. The real-Catalog refusal case in
+`InventorySourceUnavailableExceptionTest` checks that provider-supplied
+diagnostic context stays lazy through construction, message and
+localized-message access, and that the legacy constructor has no context.
+`InventoryRuntimeSourceDiagnosticsTest` records `DEBUG`-only
+expected-unavailability reports at the runtime input probe with operation,
+stage, source and target context, including resolve-null/valid-false stages.
+The direct probe keeps same-target ITEM/FLUID and distinct-source first
+failures independent; consumer recovery suppresses only that consumer's
+repeated rejection without re-evaluating context. `NORMAL`, `DEEP` and a
+disabled backend emit nothing and read no context.
+`InventoryBackendDiagnosticsTest` checks an accepted OPEN with request and face,
+both admitted lanes, one INVALID transition per lane without repeating an
+already-invalid lane, a rejected OPEN retaining its request fence, and a
+non-memory preflight deferral reported as admission/preflight-deferred rather
+than memory. Extended `ClientInventoryLanesTest` checks that a policy-skipped
+lane keeps its request/kind reason while the shared OPEN is actually sent, and
+that a repeated INVALID status reports one request/kind/old/new transition.
+`ClientInventoryDiagnosticsTest` checks below-minimum and disabled-backend
+detail laziness and the enabled `DEBUG` site/reason; extended
+`SpatialSelectorSessionTest` checks one grey-reason report per
+request/status/type-count change for an ineligible target, invalid preview and
+empty allowed types. `InventoryFluidWorldTest` adds common fluid source
+member-gate coverage: at `DEBUG`, the first rejection names its stage, reason
+and position once without extra source reads, an initial non-root denial
+preserves that context through the real source constructor, and separate
+sources both retain their first validation rejection. These `DEBUG`-only
+reports leave the earlier direct-seam expected-denial silence and its `WARN`
+suppression unchanged; the
+runtime, source, backend and client boundaries add detail at `DEBUG`. These
+are headless runtime/source/backend/client fixtures with test Log4j capture,
+not a live client, server or multiplayer session.
+
+`InventoryCertifiedFailureDiagnosticsTest` drives the real certified native
+port through runtime retirement without relaxed authority or grants. An actual
+codec callback failure retains its original graph once with `WARN`
+invalidate-observation handling at every profile, charges the uncommitted page
+and item work, and reads neither cause nor message at `NORMAL`. A typed metadata
+unavailability stays quiet while an unexpected metadata exception reaches the
+consumer once without an extra audit or content read; final publication
+metadata failure reports once with deny-publication handling after a charged
+validation; certificate construction reports at its exact-read-fallback
+boundary; a forwarding port reports nothing itself. An owner denial remains
+quiet and leaves an authorized peer's paid prefix usable; an actual read failure
+coupled with revocation retains the cause and only detaches that owner. These
+are real native codec callback fixtures with a headless world, not live server
+or installed-mod evidence.
+
+`InventoryItemFailureDiagnosticsTest` covers expected canonical-byte and display
+root-bound refusals staying quiet while preserving aggregate or exact identity
+and unavailable display; intentional display stripping and ceiling projection
+also stay silent. An unexpected native or client codec rejection keeps the
+registry or empty-icon fallback and emits one `WARN` with
+all-variants-native-codec-rejected or empty-icon-registry-label handling; the
+trusted stage appears only at higher disclosure, while `NORMAL` never sees the
+item ID. `InventoryFluidFreezerTest` adds an unexpected fluid codec failure that
+warns once per fluid-identity channel across profiles while preserving reliable
+amount, registry identity and display, with item and fluid identity admission
+independent; expected fluid identity bounds stay quiet. Ordinary runtime and
+linkage getter failures propagate unchanged to the source owner without an exact
+result or a duplicate local report. Native snapshot and client display decoding
+reject incomplete codec results without adopting partial data or retaining
+native error-payload text. A catalogue guard after a successful freeze does not
+falsely report an identity aggregate. The real-Catalog refusal case in
 `InventoryPublicationIntegrationTest` additionally drives the production
 backend's preview fold: the authoritative long group total survives and the
-retired exact selection is rejected before a content read or marker creation.
+retired exact selection is rejected before a content read or marker creation,
+with the deliberate identity bound refusal remaining a quiet expected outcome.
 That case uses a recording packet host, not client replay or live transport.
 
 `InventoryGenericComponentCompatibilityTest` checks that a codec error retains
@@ -1187,11 +1313,15 @@ callbacks or running-loader evidence.
 suppressed details, frames and read context, cross-position warning suppression
 without extra content reads, and a failed layout callback retaining its live
 route. Missing/unregistered schemas, absent optional bindings, ordinary lease
-loss and membership denial stay silent; throwing resolver, current-binding,
-membership and validity callbacks report their causes without changing denial
-or fallback. Default guarded-access cases distinguish ordinary false/denial
-from throwing gates/delegates, rate-control repeated gate warnings and propagate
-a fatal gate error. `InventoryMinecraftSnapshotCaptureTest` checks lock, pending
+loss, an expected source denial and typed certified unavailability stay silent;
+a `NORMAL` unexpected provider snapshot-layout failure warns with
+live-read-fallback handling without collecting detail. Throwing resolver,
+current-binding, membership and validity callbacks report their causes without
+changing denial or fallback, using finite handling such as deny-member or
+invalidate-read.
+Default guarded-access cases distinguish ordinary false/denial from throwing
+gates/delegates, rate-control repeated gate warnings and propagate a fatal gate
+error. `InventoryMinecraftSnapshotCaptureTest` checks lock, pending
 loot, unload and topology loss without WARN or item reads, and a throwing frozen
 authority callback diagnosed before capture becomes unavailable with its
 attempted read counted. `InventoryContainerReadsTest` checks expected denial for
@@ -1210,9 +1340,13 @@ These do not install Create or launch any loader or Mixin runtime.
 
 `InventorySyncPublisherTest` checks transport failure reports while retries keep
 the same immutable packet and charge each handoff; repeated failure suppresses
-the warning, not the retry, and later transport recovery progresses. Its
-control-callback cases retain the data gate after accepted-transport callback
-failure, report OFFER and POLICY independently, and defer callback-added work.
+the warning, not the retry, and later transport recovery progresses. A `NORMAL`
+transport warning carries retry-same-part-charged handling without recipient,
+target or cause, and packet-kind channels keep a PREVIEW failure from suppressing
+an OFFER failure; control callbacks use their own completed-callback-failed
+handling. Its control-callback cases retain the data gate after
+accepted-transport callback failure, report OFFER and POLICY independently, and
+defer callback-added work.
 `InventoryAuthorityOrderTest` checks an ERROR with committed-marker and request
 context after initial publication fails, while retaining the selected outcome
 and tracking sidecar without re-entering admission or re-creating a marker.
@@ -1483,8 +1617,13 @@ cache. Against unchanged `9f41bf59`, both negative controls stall at 756; the
 `7e435d4f` fix passes these regressions and its independent rereview. This records
 encoded headless lifetime behavior, not a stay-open in-game UI run.
 
-Execution results for these assertions and their identified code input are
-recorded in the
+The 2026-11-06 integration also prepares/transfers the probe source before the
+independent bootstrap binding, so their resolution workspaces no longer overlap;
+a late certified Tracking cohort admits and completes without content reads or
+cached authority.
+
+Execution results for the earlier pool assertions and their identified code
+input are recorded in the
 [publication-stage run](build-checks.md#tracking-pool-publication-stage-run) and
 the later [active-join and validation run](build-checks.md#certified-active-join-and-validation-run).
 Live UI, mixed config versions, installed-provider behavior and
@@ -1644,7 +1783,52 @@ are not measurements of borrowed provider internals or whole-JVM retention.
 `InventoryValidationAdmissionTest` covers admission before initial resolution
 and metadata, one cumulative caller allowance through nested validity/read or
 selection-witness callbacks, attempted-prefix settlement on denial/throw, fresh
-operation grants and retained-evidence defer without invalidation. NeoForge's
+operation grants and retained-evidence defer without invalidation. Its generic
+pessimistic-resolution case admits the default budget, resolves once and then
+completes a preview with one content read; a legal 16 MiB variant admits only
+the probe without reading or retaining content. A separate real Backend case
+at 16 MiB keeps both lanes active: the absent FLUID sibling resolves and
+becomes `INVALID`, while the small generic ITEM preview completes once with
+one entry and no reservation. Custom-resolver cases are cost/admission seams
+and do not alone establish that real dual-lane claim.
+
+`InventoryProbeAttemptTest` covers the same-iteration sampling candidate: one
+source construction handed once to the same consumer's prepare or step, current
+revalidation instead of a cached probe success, unused-candidate close and
+envelope release, rejection across consumers, duplicate transfer, later ticks
+and changed display ceilings, recovery restart reuse, transferred provider-key
+preservation, face isolation, and fail-close retirement limited to the origin
+binding and alias.
+`InventoryBackendLifecycleTest` and `InventoryBackendTest` add one first-sampling
+source per preview with later-tick round reuse and no periodic recapture. They
+separately cover an unused recovery candidate closing when its sweep is not
+due, and a due recovery sweep transferring a same-iteration probe candidate
+into the restart. The 2026-11-06 integration run passed these headless runtime
+and backend ownership fixtures; the first Preview source-construction
+regression retains one construction.
+
+`InventoryItemDiscoveryAdmissionTest` exercises fifteen production discovery
+cases over real world/view ports and Runtime work/memory grants. Every root,
+container, provider-lookup, returned-layout finish and member callback follows
+a paid stage; work or `CaptureLimit` refusals become deferrals, never invalid
+or empty completion, leave the attempted prefix paid and drain temporary
+tickets. A small container and layoutless provider complete at the legal
+16 MiB setting with backend-equivalent fixed ownership; cancellation during
+discovery or a throwing lookup/revocation leaves no content read, retained
+metadata charge or temporary reservation. The finish ticket becomes source-owned
+retained metadata, survives consumer and Runtime close while publication
+evidence owns it, and releases with evidence or source; external discovery
+retains only detached metadata.
+The source-owned ticket adds no provider or world callback to the existing
+cached retained-cost or lazy reprojection-summary read boundary. Explicit 1-, 257- and 1,024-member ITEM layouts
+keep actual-shape charging and one snapshot callback; the 1,024-member case is
+covered at the legal 128 MiB setting and is not a guarantee for the default
+64 MiB or 16 MiB setting. Legacy non-staged entry points keep their complete
+profiles; unknown provider internals remain external-trusted. The separate
+FLUID 1,024-member Create case uses default settings and is not evidence for
+this ITEM finish. These are headless production-seam assertions, not a live
+game session or full-run evidence.
+NeoForge's
 `CreateVaultInventoryAccessTest` checks immutable descriptor reuse, in-place
 dynamic member/local-boundary validation, empty-member offsets, a 900-slot final
 member-local address, same-total local-count redistribution, immediate resident

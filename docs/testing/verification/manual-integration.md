@@ -89,10 +89,15 @@
   over real loader connections; headless codec rejection does not establish live
   mixed-version behavior. External server-file edits are not an automatic reload
   mechanism.
-- On a live client and dedicated or integrated server, exercise both logging
-  rows through locked cycling, Shift-plus-left-click unlock, keyboard and wheel
-  input, navigation, resize, root close, reset and read-only server viewing.
-  Trigger representative failures under `NORMAL`, `DEEP` and `DEBUG` on both
+- On a live client and dedicated or integrated server, with a real macOS Option
+  key and a Minecraft window, exercise both logging rows through activation
+  with Alt/Option held and released, keyboard input and wheel scrolling,
+  navigation, resize, root close, reset and read-only server viewing. Confirm
+  that a current `DEBUG` value keeps its caption when Alt/Option is released,
+  the next non-Alt activation exits to `NORMAL`, and `DEBUG` cannot be selected
+  again without the modifier. Check that labels, narration and rendered help
+  never explain `DEBUG` or hint at the activation gesture. Trigger
+  representative failures under `NORMAL`, `DEEP` and `DEBUG` on both
   sides and inspect the deployed appenders. Check that severity is unchanged by
   the profile, `NORMAL` omits original messages/stacks/causes/suppressed detail/
   free context, `DEEP`/`DEBUG` include only domain-permitted bounded original
@@ -102,7 +107,8 @@
   fault-injection build permits, force a reporting failure and confirm one
   complete self-fault record on the emergency descriptor without closing it or
   replacing the main logger. These checks remain pending; the headless fixtures
-  do not establish live appender, layout, loader or game-window behavior.
+  do not establish a live Minecraft window, a real macOS Option key, multiplayer
+  or remote persistence, or live appender, layout or loader behavior.
 
 ### Logical container targets and whole presentation
 
@@ -231,7 +237,19 @@ records the final headless coverage separately from these unperformed live check
   and faces, including cross-chunk load changes, controller replacement, merge,
   split, creative tanks and active boilers. Confirm controller-only quantity
   without member duplication, fixed-face capability access, mode denial without
-  generic fallback and fresh recovery under the original marker expiry.
+  generic fallback and fresh recovery under the original marker expiry. Repeat
+  the creative-tank denial and valid 3x3x20 (180-member) and 3x3x32
+  (288-member) targets with each side's logging profile at `DEBUG`: correlate
+  the request, resource kind and target; for a denial or a changed
+  member/controller, observe the first rejection's stage/reason and
+  controller/shape/member/handler context, then the matching selector
+  transition to grey status. At `NORMAL`, expected unavailability stays absent.
+  A successful 180- or 288-member tank completes without a rejection line or
+  size refusal; a target whose hit lies outside the verified prism names the
+  distinct `hit-outside-structure` reason rather than the member limit. While
+  sampling the same 288-member tank at roughly 3-5 Hz for 20 s, compare TPS tail
+  latency with a matched run that samples no fluid target; this remains a
+  pending measurement. These checks do not widen the supported topology.
 - With an installed Sable provider and an otherwise supported fluid target,
   move the same target under the same live lease to another sub-level. Check
   `UPDATING` retains the displayed quantity without transition-only `INVALID`

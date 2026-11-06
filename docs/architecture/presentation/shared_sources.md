@@ -107,15 +107,20 @@ not grant this capability; other providers retain full re-resolution. Layout
 reuse freezes addressing, not permission, availability or content.
 
 An explicitly audited provider may coordinate a synchronous resident read with
-the common source through a single-use operation. It binds the exact read port,
-proof, provider, slot, thread, catalogue and invocation; it is not a transferable
-validity grant. Missing, duplicate, reordered, reentrant, reused or post-close
-handoffs fail closed. Detachment is provisional until the final current checks
-succeed, and operation-owned references are cleared on every exit. Merely
-implementing a capability or claiming a route does not authorize fewer checks.
-The supported opt-in and validation ordering are owned by
-[Create](../../integrations/create.md#vault-inventory-provider); admitted operation
-costs follow [inventory accounting](inventory.md#budgets-queues-and-memory).
+the common source through a single-use operation only under its domain's
+explicit opt-in. It binds the operation's source/input proof, guarded wrapper,
+provider, slot, thread, caller allowance, catalogue and invocation; it is not a
+transferable validity grant. Coordination preserves the current read and
+authority boundaries under the domain's audited validation ordering. The result
+remains provisional through synchronous detachment and freeze until final
+validation succeeds. Missing, duplicate, reordered, reentrant, reused or
+post-close handoffs fail closed, and operation-owned references are cleared on
+every exit. Merely implementing a capability or claiming a route does not
+authorize fewer checks. Supported opt-in eligibility and validation ordering are
+owned by [inventory provider safety](inventory.md#provider-layer-and-safety) and
+[Create Vault](../../integrations/create.md#vault-inventory-provider).
+Admitted operation costs follow
+[inventory accounting](inventory.md#budgets-queues-and-memory).
 
 A conservative bridge for adapters that expose no resumable or version
 capability may only perform one-shot bounded calls. It must not invent
@@ -311,8 +316,9 @@ Physical membership distinguishes positive `INSIDE`, positive `OUTSIDE` and
 `UNKNOWN`; only positive inside evidence can authorize the physical read.
 Unknown evidence is never silently promoted to inside. These are admission and
 evidence boundaries, not authorization to merge repeated validation checks or
-to extend the existing audited
-[coordinated-read opt-in](#source-access) to another route.
+to extend the audited
+[coordinated-read opt-in](#source-access) without a separate explicit provider
+decision.
 
 Lazy scratch and adaptive buffers obey the same boundary. Every replacement
 array's full allocation and initialization, growth control and written-prefix

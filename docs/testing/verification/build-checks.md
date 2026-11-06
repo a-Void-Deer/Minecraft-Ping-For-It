@@ -1041,6 +1041,88 @@ gameplay, rendering/GPU, installed Create, multiplayer, mixed-version and live
 appender/address behavior are not verified. Synchronous isolated Log4j and child
 `FD.err` tests are automated seams, not asynchronous or deployed logging evidence.
 
+### Alt logging profile controls
+
+Recorded 2026-11-05. The accepted input was HEAD
+`4b82c691edd139f67404f228dd8aa02482922f34`, tree
+`2981d22f447174223492d6d27bd444f6a8a54618`, plus the 14-path Alt patch. The
+archived patch and `git diff 4b82c691..71de6ebe` are byte-identical with source
+diff SHA256
+`fc847fe1c917839e8a13c817b488d82d1cce365f282a12603915f799e5e8513d`; the same
+content was committed as `71de6ebe61bce9fa330d5ff7c688a02b89f9cb08`. The 13
+retained files currently equal the tested manifest and normalize to that commit,
+and the old session class remains deleted, so the 14 paths have no later edits
+or uncommitted repair. The patch covered three common screen paths, eight locale
+resources and three screen-test paths.
+
+The focused command was:
+
+```powershell
+.\gradlew.bat --no-daemon :common:test --tests 'nx.pingwheel.common.screen.LoggingProfile*' --tests 'nx.pingwheel.common.screen.SettingsLocalizationCoverageTest' --tests 'nx.pingwheel.common.screen.ServerSettingsLoggingProfileTest'
+```
+
+Three consecutive executions exited 0; the final focused invocation completed
+in 18 seconds. `LoggingProfileControlTest` ran 8 tests, `LoggingProfileScreenTest`
+7, `SettingsLocalizationCoverageTest` 11 and `ServerSettingsLoggingProfileTest`
+4: 30 total with 0 failures, 0 errors and 0 skips. Focused stdout and stderr are
+retained as `pingforit-logging-alt-focused.stdout.log` and
+`pingforit-logging-alt-focused.stderr.log` in the local OpenCode temporary
+evidence directory.
+
+The final combined command was:
+
+```powershell
+.\gradlew.bat --no-daemon :common:check :common:javadoc :fabric:build :forge:build :neoforge:build verifyModIdentity
+```
+
+It exited 0 with `BUILD SUCCESSFUL` in 2m19s: 53 actionable tasks, 31 executed
+and 22 up-to-date. All four module test tasks executed:
+
+- Common: 522 suites, 5,733 tests, 5,731 passed and 2 skipped.
+- Fabric: 10 suites and 93 passed.
+- Forge: 12 suites, 82 tests, 68 passed and 14 skipped.
+- NeoForge: 61 suites and 414 passed.
+
+That is 6,322 tests, 6,306 passed, 16 skipped, 0 failures and 0 errors. The 16
+skips match the previous audit class/method baseline: the two Common
+`InventoryFluidLoaderIntegrationTest` cases require a loader-native fixture,
+and the 14 Forge vanilla-first cases are `FluidPresentationServiceTest` 1,
+`NativeFluidAmountTest` 5, `PlatformFluidRegistryServiceTest` 7 and
+`NativeFluidRegistryFreezerTest` 1. The UI change is unrelated to those
+fixtures; no patched-first task was rerun and the earlier supplemental pass is
+not claimed here.
+
+Common main and test compilation were `UP-TO-DATE`; the three loader
+`compileJava` tasks executed and shared the common compilation. Forge
+`compileTestJava` executed, while Fabric and NeoForge `compileTestJava` were
+`UP-TO-DATE`. All four Javadoc tasks, the three loader `build` tasks and
+`verifyModIdentity` executed. Identity remained `pingforit` / `Ping For It` /
+`0.5.0-pfi-beta2` / Minecraft 1.21.1. Artifact inspection was limited to
+identity, the new button and no old-session entry in the three main jars, and
+the eight locale byte comparisons; it is not an exhaustive jar audit.
+
+Of the 1,397 fresh pre/post inputs, 1,395 chain to the commit through
+blob/EOL/current hashes; the two later-changed Create files were not directly
+restored to test-time bytes. The archived patch equality above covers the 14 Alt
+paths. This is not a full-tree or current-workspace PASS. `git diff --check HEAD --`
+over the common main, common test and eight locale paths exited 0. Four Javadoc
+warning groups totaling 400 lines matched the existing baseline; mapping,
+deprecated, processor-option, MixinGradle and Gradle deprecation warnings
+remain. No independent Java lint or format task exists or is claimed.
+
+Detailed evidence remains under the local OpenCode prefix
+`pingforit-logging-alt-final-1`; it retains raw stdout/stderr, the result and
+execution summary, test XML, static audit, artifact checks, input captures, the
+long-path note and state drift. The static and post audit invocations both
+exited 0; static reported zero old session references, zero unlock-key
+references and 16 tooltip variants free of Debug or modifier hints while the
+real Debug value caption is preserved.
+
+This PASS applies to the tested Alt-control input, not to the full tree or
+latest workspace. Later inventory/Create edits are outside this result. No
+Minecraft client or server, real macOS Option key, multiplayer, manual
+appender/layout or rendered-tooltip check was performed.
+
 ## Verification limitations
 
 The 2026-10-27 combined invocation's stderr was empty; stdout retained the Gradle 9
