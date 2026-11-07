@@ -124,7 +124,43 @@ public final class InventoryServer {
 	private record Host(MinecraftServer server, InventoryRuntime runtime, InventoryRuntime.DisplayReprojector reprojector) implements InventoryBackend.Host {
 		@Override public Optional<InventoryRuntime.DisplayReprojector> displayReprojector() { return Optional.of(reprojector); }
 		@Override public Optional<InventoryBackend.Policy> policy(UUID player) {
-			return PresentationServer.inventoryPolicy(player).map(p -> new InventoryBackend.Policy(p.epoch(), p.view(), p.types(), p.fluidTypes()));
+			return PresentationServer.inventoryPolicy(player).map(p -> new InventoryBackend.Policy(
+				p.epoch(), p.view(), p.types(), p.fluidTypes(), p.revision()));
+		}
+		@Override public void policyDemand(UUID player) {
+			PresentationServer.refreshInventoryPolicy(player);
+		}
+		@Override public InventoryBackend.PolicyToken policyToken(UUID player) {
+			var token = PresentationServer.inventoryHintToken(player);
+			return new InventoryBackend.PolicyToken(token.owner(), token.sessionEpoch(), token.sessionView(),
+				token.hintGeneration(), token.revision(), token.providerRevision());
+		}
+		@Override public InventoryBackend.PreviewLaneGrant freezeInventoryPreviewGrant(UUID owner, String targetTypeId) {
+			var grant = PresentationServer.freezeInventoryPreviewGrant(owner, targetTypeId);
+			return new InventoryBackend.PreviewLaneGrant(grant.lanes(), new InventoryBackend.PolicyToken(
+				grant.token().owner(), grant.token().sessionEpoch(), grant.token().sessionView(),
+				grant.token().hintGeneration(), grant.token().revision(), grant.token().providerRevision()));
+		}
+		@Override public void adoptPreviewPolicy(UUID player, String targetTypeId,
+			java.util.Set<nx.pingwheel.common.presentation.inventory.InventoryResourceKind> lanes) {
+			PresentationServer.adoptInventoryPolicyLanes(player, targetTypeId, lanes);
+		}
+		@Override public void adoptPreviewPolicy(UUID player, String targetTypeId, InventoryBackend.PreviewLaneGrant grant) {
+			PresentationServer.adoptInventoryPolicyLanes(player, targetTypeId, grant.lanes(),
+				new PresentationServer.InventoryHintToken(grant.token().owner(), grant.token().sessionEpoch(),
+					grant.token().sessionView(), grant.token().hintGeneration(),
+					grant.token().hintRevision(), grant.token().providerRevision()));
+		}
+		@Override public void adoptCreatePolicy(UUID player, String targetTypeId,
+			nx.pingwheel.common.presentation.inventory.InventoryResourceKind kind, boolean allowed) {
+			PresentationServer.adoptInventoryPolicyLane(player, targetTypeId, kind, allowed);
+		}
+		@Override public void adoptCreatePolicy(UUID player, String targetTypeId,
+			nx.pingwheel.common.presentation.inventory.InventoryResourceKind kind, boolean allowed,
+			InventoryBackend.PolicyToken token) {
+			PresentationServer.adoptInventoryPolicyLane(player, targetTypeId, kind, allowed,
+				new PresentationServer.InventoryHintToken(token.owner(), token.sessionEpoch(), token.sessionView(),
+					token.hintGeneration(), token.hintRevision(), token.providerRevision()));
 		}
 		@Override public Optional<InventoryBackend.SessionAccess> session(UUID player) {
 			return PresentationServer.sessionAccess(player).map(s -> new InventoryBackend.SessionAccess(

@@ -138,13 +138,22 @@ class InventoryCreationSnapshotIntegrationTest {
 	void twentyFourNormalHellosLeaveOldDenyButCreationStillChatsBeforeQueuedAllow(InventoryResourceKind lane, boolean partial) throws Exception {
 		try (var f = new Combined(Map.of(lane.fieldId(), 2), RECEIVER)) {
 			f.preview(lane, partial); long request = f.open();
-			f.settings().getPreview().setGlobalByteMultiplier(ByteMultiplier.finite(new BigDecimal("0.125")));
-			for (int index = 0; index < 24; index++) f.join(new UUID(800, index));
-			assertEquals(24, f.joined().size(), "24 distinct server players, one normal HELLO each");
-			assertEquals(Optional.of(false), f.client.authorization(lane));
+			// Advertise a genuine old deny before congestion: the first normal HELLO
+			// hands the session its OFFER, then an explicit demand refreshes the hint.
+			f.join(RECEIVER);
+			f.demand(RECEIVER);
+			f.tick(0);
+			assertEquals(Optional.of(false), f.client.authorization(lane), "the old deny hint was actually advertised");
 			assertTrue(f.events.stream().anyMatch(e -> e.recipient().equals(RECEIVER) && e.packet() instanceof InventoryS2CPacket p
 				&& p.kind() == InventoryS2CPacket.Kind.POLICY && p.resourceKind() == lane && !p.allowedTypes().contains(TYPE)), "recipient actually received deny");
+			// A new generation is congested by the production byte budget; the
+			// remaining normal HELLOs share it fairly with that generation.
+			f.settings().getPreview().setGlobalByteMultiplier(ByteMultiplier.finite(new BigDecimal("0.125")));
+			for (int index = 1; index < 24; index++) f.join(new UUID(800, index));
+			assertEquals(24, f.joined().size(), "24 distinct server players, one normal HELLO each");
+			assertEquals(Optional.of(false), f.client.authorization(lane), "the queued allow is not advertised before handoff");
 			for (Object player : f.joined().values()) put(player, "permission", 2);
+			for (Object id : f.joined().keySet()) f.demand((UUID) id);
 			f.tick(0);
 			InventoryS2CPacket pending = f.pending(RECEIVER, lane);
 			assertTrue(pending.allowedTypes().contains(TYPE));
@@ -202,7 +211,6 @@ class InventoryCreationSnapshotIntegrationTest {
 			Event allow = f.events.stream().filter(e -> e.recipient().equals(RECEIVER) && e.packet() instanceof InventoryS2CPacket p
 				&& p.kind() == InventoryS2CPacket.Kind.POLICY && p.resourceKind() == lane && p.allowedTypes().contains(TYPE)).findFirst().orElseThrow();
 			assertTrue(created.order() < allow.order(), "actual target recipient CREATED handoff precedes POLICY");
-			System.out.println("CONGESTION " + lane + " partial=" + partial + " recipient=" + RECEIVER + " CREATED@" + created.order() + " POLICY@" + allow.order());
 			f.replayAndRefresh(marker);
 			assertEquals(1, f.client.feedback.content.size()); assertSame(chat, f.client.feedback.content.getFirst()); assertEquals(text, chat.getString());
 		}
@@ -433,6 +441,7 @@ class InventoryCreationSnapshotIntegrationTest {
 			}
 		}
 		void join(UUID id) throws Exception { call(serverFixture, "join", new Class<?>[] {UUID.class}, id); }
+		void demand(UUID id) throws Exception { call(serverFixture, "demand", new Class<?>[] {UUID.class}, id); }
 		Map<?, ?> joined() throws Exception { return (Map<?, ?>) get(get(serverFixture, "players"), "others"); }
 		InventorySettings settings() throws Exception { return (InventorySettings) get(serverFixture, "settings"); }
 		InventoryBackend backend() throws Exception { return (InventoryBackend) get(serverFixture, "backend"); }

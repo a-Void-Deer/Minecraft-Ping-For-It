@@ -81,6 +81,10 @@ public final class PresentationServer {
 	private static BudgetDelaySink delaySink = BudgetDelaySink.NONE;
 	private static String policyFingerprint = "";
 	private static PresentationPreviewServer previews;
+	/** Explicit demand/config/provider inputs for the cached Inventory POLICY hint. */
+	private static long inventoryHintRevision;
+	private static long inventoryHintProviderRevision;
+	private static long inventoryHintSequence;
 
 	private PresentationServer() {}
 
@@ -100,8 +104,13 @@ public final class PresentationServer {
 		final Map<Long, SentMarker> sent = new HashMap<>();
 		Map<String, Map<String, Set<String>>> mask = Map.of();
 		Map<String, List<PresentationPropertyRef>> childBlack = Map.of();
+		/** Cached future-input hint; never an existing marker or Preview grant. */
 		Set<String> inventoryTypes = Set.of();
 		Set<String> fluidTypes = Set.of();
+		long inventoryHintRevision;
+		long inventoryHintGeneration;
+		long inventoryHintView;
+		boolean inventoryHintComputing;
 		long view;
 		long revision;
 		long authorizationCut = -1;
@@ -144,6 +153,8 @@ public final class PresentationServer {
 		if (activeServer == server) return;
 		SESSIONS.clear(); LEASES.clear(); sampler = new PresentationFairSampler(); baselineRecipient = null;
 		observationSerial = 0;
+		inventoryHintRevision = 0; inventoryHintSequence = 0;
+		inventoryHintProviderRevision = PresentationAuthorization.providerRevision();
 		if (previews != null) previews.reset();
 		activeServer = server;
 		delaySink = BudgetDelayMonitoring.sink(server);
@@ -168,6 +179,8 @@ public final class PresentationServer {
 		if (previews != null) previews.reset();
 		previews = null;
 		SESSIONS.clear(); LEASES.clear(); activeServer = null; registry = new PresentationRegistry();
+		inventoryHintRevision = 0; inventoryHintSequence = 0;
+		inventoryHintProviderRevision = PresentationAuthorization.providerRevision();
 		sampler = new PresentationFairSampler(); baselineRecipient = null; observationSerial = 0;
 		delaySink = BudgetDelaySink.NONE;
 	}
@@ -243,6 +256,36 @@ public final class PresentationServer {
 				lanes.add(kind);
 		}
 		return Set.copyOf(lanes);
+	}
+
+	/** Immutable owner/session/hint identity for one Inventory hint decision. */
+	public record InventoryHintToken(UUID owner, long sessionEpoch, long sessionView, long hintGeneration,
+		long revision, long providerRevision) {}
+
+	/** A fresh OPEN freeze plus the exact hint input identity it observed. */
+	public record InventoryLaneGrant(Set<InventoryResourceKind> lanes, InventoryHintToken token) {
+		public InventoryLaneGrant { lanes = Set.copyOf(lanes); }
+	}
+
+	/** Captures the current explicit hint inputs without evaluating any field. */
+	public static InventoryHintToken inventoryHintToken(UUID owner) {
+		syncInventoryHintInputs();
+		Session session = owner == null ? null : SESSIONS.get(owner);
+		long provider = PresentationAuthorization.providerRevision();
+		if (session == null || !session.ready)
+			return new InventoryHintToken(owner, 0L, 0L, 0L, inventoryHintRevision, provider);
+		return new InventoryHintToken(owner, session.epoch, session.view, session.inventoryHintGeneration,
+			inventoryHintRevision, provider);
+	}
+
+	/**
+	 * One-shot OPEN freeze with its input token. A provider replacement during
+	 * the callback changes the token, so the old lanes must not be merged into
+	 * a hint refreshed from the new provider.
+	 */
+	public static InventoryLaneGrant freezeInventoryPreviewGrant(UUID owner, String targetTypeId) {
+		InventoryHintToken token = inventoryHintToken(owner);
+		return new InventoryLaneGrant(freezeInventoryPreviewLanes(owner, targetTypeId), token);
 	}
 
 	/**
@@ -395,10 +438,9 @@ public final class PresentationServer {
 	private static void prepare(ServerPlayer player, Session session, ServerMarkerStore store) {
 		session.mask = mask(player, session);
 		session.childBlack = childBlackFor(settings());
-		session.inventoryTypes = inventoryTypes(player, session);
-		session.fluidTypes = inventoryTypes(player, session, nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID);
 		session.view++;
 		session.ready = true;
+		refreshInventoryHint(player, session);
 		send(player, PresentationS2CPacket.reset(session.epoch, session.view, session.mask, session.childBlack));
 		long tick = activeServer.getTickCount();
 		startBaseline(session, store);
@@ -653,6 +695,8 @@ public final class PresentationServer {
 		String nextPolicy = settings().fingerprint();
 		boolean policyChanged = !nextPolicy.equals(policyFingerprint);
 		policyFingerprint = nextPolicy;
+		syncInventoryHintInputs();
+		if (policyChanged) inventoryHintRevision++;
 		for (var entry : SESSIONS.entrySet()) {
 			Session session = entry.getValue();
 			if (!session.ready || session.view == Long.MAX_VALUE) continue;
@@ -660,13 +704,9 @@ public final class PresentationServer {
 			if (player == null) continue;
 			@org.jetbrains.annotations.Unmodifiable Map<String, Map<String, Set<String>>> effective = mask(player, session);
 			@org.jetbrains.annotations.Unmodifiable Map<String, List<PresentationPropertyRef>> effectiveChildBlack = childBlackFor(settings());
-			@org.jetbrains.annotations.Unmodifiable Set<String> dedicated = inventoryTypes(player, session);
-			@org.jetbrains.annotations.Unmodifiable Set<String> fluids = inventoryTypes(player, session, nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID);
 			// Dedicated delivery owns its lane policy, baselines and revocation.
-			// Updating those grants must not turn an unrelated SECTION generation
-			// (or the still-authorized inventory sibling) into a new view.
-			session.inventoryTypes = dedicated;
-			session.fluidTypes = fluids;
+			// Its hint is refreshed lazily on explicit demand; updating SECTION or
+			// an unrelated inventory sibling must not become a new view generation.
 			if (!policyChanged && effective.equals(session.mask)
 				&& effectiveChildBlack.equals(session.childBlack)) continue;
 			session.mask = effective;
@@ -1526,39 +1566,159 @@ public final class PresentationServer {
 	static PresentationSettings previewSettings() { return settings(); }
 
 	/** Dedicated delivery shares the presentation fence, but never widens the SECTION mask. */
-	public record InventoryPolicy(long epoch, long view, Set<String> types, Set<String> fluidTypes) {
-		public InventoryPolicy(long epoch, long view, Set<String> types) { this(epoch, view, types, Set.of()); }
-		public InventoryPolicy { types = Set.copyOf(types); fluidTypes = Set.copyOf(fluidTypes); }
+	public record InventoryPolicy(long epoch, long view, Set<String> types, Set<String> fluidTypes, long revision) {
+		public InventoryPolicy(long epoch, long view, Set<String> types) { this(epoch, view, types, Set.of(), 0); }
+		public InventoryPolicy(long epoch, long view, Set<String> types, Set<String> fluidTypes) {
+			this(epoch, view, types, fluidTypes, 0);
+		}
+		public InventoryPolicy {
+			types = Set.copyOf(types);
+			fluidTypes = Set.copyOf(fluidTypes);
+			if (revision < 0) throw new IllegalArgumentException("inventory hint revision");
+		}
 		public Set<String> types(nx.pingwheel.common.presentation.inventory.InventoryResourceKind kind) {
 			return kind == nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM ? types : fluidTypes;
 		}
 	}
+	/**
+	 * Cached future-input hint. Only an explicit demand, configuration change or
+	 * provider replacement input invalidates it; a normal tick reuses it.
+	 */
 	public static Optional<InventoryPolicy> inventoryPolicy(UUID playerId) {
 		Session session = SESSIONS.get(playerId);
 		ServerPlayer player = activeServer == null ? null : activeServer.getPlayerList().getPlayer(playerId);
 		if (session == null || !session.ready || player == null) return Optional.empty();
+		syncInventoryHintInputs();
+		if (inventoryHintStale(session)) refreshInventoryHint(player, session);
 		return Optional.of(new InventoryPolicy(session.epoch, session.view,
-			effectiveInventoryTypes(player, session), effectiveInventoryTypes(player, session, nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID)));
+			session.inventoryTypes, session.fluidTypes, session.inventoryHintGeneration));
+	}
+
+	/** Explicit HELLO/demand refresh; this is one full type pass, never an authority grant. */
+	public static Optional<InventoryPolicy> refreshInventoryPolicy(UUID playerId) {
+		Session session = SESSIONS.get(playerId);
+		ServerPlayer player = activeServer == null ? null : activeServer.getPlayerList().getPlayer(playerId);
+		if (session == null || !session.ready || player == null) return Optional.empty();
+		refreshInventoryHint(player, session);
+		return Optional.of(new InventoryPolicy(session.epoch, session.view,
+			session.inventoryTypes, session.fluidTypes, session.inventoryHintGeneration));
 	}
 
 	/**
-	 * The recipient's single fresh dedicated-inventory authorization: current
-	 * permission/policy intersected with the already-advertised route/session
-	 * view, so a newly allowed type is not promoted before the policy tick and a revoked
-	 * type is denied immediately. The dedicated policy and every initial
-	 * receipt share this one gate.
+	 * Folds one fresh OPEN freeze's already-authorized actual-type lane bits
+	 * into the cached hint. It performs no permission callback and never grants
+	 * a Preview lane; an unchanged set keeps the existing generations.
 	 */
-	private static Set<String> effectiveInventoryTypes(ServerPlayer player, Session session) {
-		return effectiveInventoryTypes(player, session, nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM);
+	public static void adoptInventoryPolicyLanes(UUID playerId, String targetTypeId, Set<InventoryResourceKind> lanes) {
+		adoptInventoryPolicyLanes(playerId, targetTypeId, lanes, inventoryHintToken(playerId));
 	}
-	private static Set<String> effectiveInventoryTypes(ServerPlayer player, Session session, MarkerId marker) {
-		return InventoryServer.trackedKind(marker).map(kind -> effectiveInventoryTypes(player, session, kind)).orElse(Set.of());
+
+	/**
+	 * Folds a fresh OPEN freeze only when no explicit hint input changed after
+	 * that freeze. A callback-time provider replacement therefore discards the
+	 * old lanes instead of overwriting the newly refreshed hint.
+	 */
+	public static void adoptInventoryPolicyLanes(UUID playerId, String targetTypeId, Set<InventoryResourceKind> lanes,
+		@Nullable InventoryHintToken token) {
+		Session session = SESSIONS.get(playerId);
+		ServerPlayer player = activeServer == null ? null : activeServer.getPlayerList().getPlayer(playerId);
+		if (session == null || !session.ready || player == null || !PresentationSettings.isKnownTargetType(targetTypeId)) return;
+		syncInventoryHintInputs();
+		if (!currentHintToken(playerId, session, token)) return;
+		Set<String> items = new LinkedHashSet<>(session.inventoryTypes);
+		Set<String> fluids = new LinkedHashSet<>(session.fluidTypes);
+		boolean item = lanes.contains(InventoryResourceKind.ITEM);
+		boolean fluid = lanes.contains(InventoryResourceKind.FLUID);
+		boolean changed = item ? items.add(targetTypeId) : items.remove(targetTypeId);
+		changed |= fluid ? fluids.add(targetTypeId) : fluids.remove(targetTypeId);
+		if (!changed) return;
+		session.inventoryTypes = Set.copyOf(items);
+		session.fluidTypes = Set.copyOf(fluids);
+		session.inventoryHintView = session.view;
+		session.inventoryHintGeneration = ++inventoryHintSequence;
 	}
-	private static Set<String> effectiveInventoryTypes(ServerPlayer player, Session session, nx.pingwheel.common.presentation.inventory.InventoryResourceKind kind) {
-		Set<String> fresh = new HashSet<>(inventoryTypes(player, session, kind));
-		fresh.retainAll(kind == nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM ? session.inventoryTypes : session.fluidTypes);
-		return Set.copyOf(fresh);
+
+	/**
+	 * Folds one already-frozen successful create's actual lane into the hint.
+	 * This is a result of fresh create authority, never a permission recheck.
+	 */
+	public static void adoptInventoryPolicyLane(UUID playerId, String targetTypeId, InventoryResourceKind kind, boolean allowed) {
+		adoptInventoryPolicyLane(playerId, targetTypeId, kind, allowed, inventoryHintToken(playerId));
 	}
+
+	public static void adoptInventoryPolicyLane(UUID playerId, String targetTypeId, InventoryResourceKind kind,
+		boolean allowed, @Nullable InventoryHintToken token) {
+		Session session = SESSIONS.get(playerId);
+		ServerPlayer player = activeServer == null ? null : activeServer.getPlayerList().getPlayer(playerId);
+		if (session == null || !session.ready || player == null || !PresentationSettings.isKnownTargetType(targetTypeId)) return;
+		syncInventoryHintInputs();
+		if (!currentHintToken(playerId, session, token)) return;
+		Set<String> next = new LinkedHashSet<>(kind == InventoryResourceKind.ITEM ? session.inventoryTypes : session.fluidTypes);
+		boolean changed = allowed ? next.add(targetTypeId) : next.remove(targetTypeId);
+		if (!changed) return;
+		if (kind == InventoryResourceKind.ITEM) session.inventoryTypes = Set.copyOf(next);
+		else session.fluidTypes = Set.copyOf(next);
+		session.inventoryHintView = session.view;
+		session.inventoryHintGeneration = ++inventoryHintSequence;
+	}
+
+	private static boolean currentHintToken(UUID playerId, Session session, @Nullable InventoryHintToken token) {
+		return token != null && playerId != null && playerId.equals(token.owner()) && token.sessionEpoch() != 0
+			&& token.sessionEpoch() == session.epoch && token.sessionView() == session.view
+			&& token.hintGeneration() == session.inventoryHintGeneration
+			&& token.revision() == inventoryHintRevision
+			&& token.providerRevision() == PresentationAuthorization.providerRevision()
+			&& !inventoryHintStale(session);
+	}
+
+	private static boolean inventoryHintStale(Session session) {
+		return session.inventoryHintRevision != inventoryHintRevision
+			|| session.inventoryHintGeneration != 0 && session.inventoryHintView != session.view;
+	}
+
+	private static void syncInventoryHintInputs() {
+		long provider = PresentationAuthorization.providerRevision();
+		if (provider != inventoryHintProviderRevision) {
+			inventoryHintProviderRevision = provider;
+			inventoryHintRevision++;
+		}
+	}
+
+	/**
+	 * One pass over five target types evaluates both Inventory fields together.
+	 * The snapshot is installed only after the pass completes; a reentrant call
+	 * or a changed explicit input never observes a partial set.
+	 */
+	private static void refreshInventoryHint(ServerPlayer player, Session session) {
+		if (session.inventoryHintComputing) return;
+		session.inventoryHintComputing = true;
+		try {
+			syncInventoryHintInputs();
+			long expectedRevision = inventoryHintRevision;
+			PresentationSettings currentSettings = settings();
+			Set<String> items = new LinkedHashSet<>();
+			Set<String> fluids = new LinkedHashSet<>();
+			if (Objects.equals(session.schemas.get(InventoryPresentation.ADAPTER_ID), InventoryPresentation.SCHEMA)) {
+				int level = permissionLevel(player);
+				UUID recipient = player.getUUID();
+				for (String type : PresentationSettings.TARGET_TYPE_IDS) {
+					Set<String> fields = InventoryPresentation.allowed(currentSettings, recipient, level, type);
+					if (fields.contains(InventoryPresentation.ITEMS)) items.add(type);
+					if (fields.contains(InventoryPresentation.FLUIDS)) fluids.add(type);
+				}
+			}
+			syncInventoryHintInputs();
+			if (currentSettings != settings() || expectedRevision != inventoryHintRevision) return;
+			session.inventoryTypes = Set.copyOf(items);
+			session.fluidTypes = Set.copyOf(fluids);
+			session.inventoryHintRevision = inventoryHintRevision;
+			session.inventoryHintView = session.view;
+			session.inventoryHintGeneration = ++inventoryHintSequence;
+		} finally {
+			session.inventoryHintComputing = false;
+		}
+	}
+
 	public static boolean inventoryKnows(UUID player, MarkerId marker) {
 		Session session = SESSIONS.get(player);
 		return inventoryKnows(session, marker);
@@ -1566,16 +1726,6 @@ public final class PresentationServer {
 	static boolean inventoryKnows(Session session, MarkerId marker) {
 		SentMarker sent = session == null ? null : session.sent.get(marker.value());
 		return session != null && session.ready && sent != null && sent.deliveredView == session.view;
-	}
-	private static Set<String> inventoryTypes(ServerPlayer player, Session session) {
-		return inventoryTypes(player, session, nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM);
-	}
-	private static Set<String> inventoryTypes(ServerPlayer player, Session session, nx.pingwheel.common.presentation.inventory.InventoryResourceKind kind) {
-		if (!Objects.equals(session.schemas.get(InventoryPresentation.ADAPTER_ID), InventoryPresentation.SCHEMA)) return Set.of();
-		Set<String> result = new HashSet<>();
-		for (String type : PresentationSettings.TARGET_TYPE_IDS)
-			if (allowed(player, session, InventoryPresentation.INSTANCE, type).contains(kind.fieldId())) result.add(type);
-		return Set.copyOf(result);
 	}
 	public static void winner(ServerPlayer player, TargetKey key, Optional<MarkerId> winner) {
 		Session session = SESSIONS.get(player.getUUID());

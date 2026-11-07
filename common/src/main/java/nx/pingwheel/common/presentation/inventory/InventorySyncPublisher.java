@@ -1,6 +1,7 @@
 package nx.pingwheel.common.presentation.inventory;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -10,6 +11,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.IntConsumer;
 
 import nx.pingwheel.common.config.InventoryLimits;
 import nx.pingwheel.common.config.InventorySettings;
@@ -147,12 +149,14 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		final Set<String> retiredGroups = new LinkedHashSet<>(), retiringGroups = new LinkedHashSet<>();
 		boolean restageLatest, rebaselineRequired, retirementPending;
 		@Unmodifiable List<InventoryS2CPacket> admitted = List.of();
-		long admittedWatermark;
+		/** Frozen with the admitted packets and watermark; never the newer offered projection. */
+		long admittedWatermark, admittedChecksum;
 		@Nullable InventoryPublicationEvidence offeredEvidence, admittedEvidence, deliveredEvidence;
 		boolean sourceDenied;
 		RetainedMemoryLedger.@Nullable Ticket batchMemory;
 		int part;
-		long offeredWatermark, deliveredWatermark, lastHeartbeat = -1;
+		/** Digest of the actual delivered map at deliveredWatermark; heartbeat uses only this. */
+		long offeredWatermark, deliveredWatermark, deliveredChecksum, lastHeartbeat = -1;
 		InventoryS2CPacket.Status status = InventoryS2CPacket.Status.UPDATING;
 		boolean baseline = true, complete, control, deliveryIncomplete, fencePending;
 		/** Bootstrap is retained presentation, never completed source evidence. */
@@ -169,6 +173,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	private final RetainedMemoryLedger memory;
 	private final Transport transport;
 	private final BudgetDelaySink sink;
+	private final @Nullable IntConsumer checksumSamples;
 	private long tick = -1;
 	private final Map<String, State> states = new LinkedHashMap<>();
 	private record Control(State state, InventoryS2CPacket packet) {}
@@ -191,7 +196,13 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 
 	public InventorySyncPublisher(RetainedMemoryLedger memory, Transport transport) { this(memory, transport, BudgetDelaySink.NONE); }
 	public InventorySyncPublisher(RetainedMemoryLedger memory, Transport transport, BudgetDelaySink sink) {
+		this(memory, transport, sink, null);
+	}
+	/** Package-visible traversal accounting for focused publisher tests; production passes null. */
+	InventorySyncPublisher(RetainedMemoryLedger memory, Transport transport, BudgetDelaySink sink,
+		@Nullable IntConsumer checksumSamples) {
 		this.memory = memory; this.transport = transport; this.sink = sink == null ? BudgetDelaySink.NONE : sink;
+		this.checksumSamples = checksumSamples;
 	}
 	private long cycle(State state) { return periodId(state.module); }
 	long periodId(Module module) { return module == Module.INVENTORY_PREVIEW ? previewClock.period() : trackingClock.period(); }
@@ -733,12 +744,13 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 						if (state.route.markerId() == null) previewQueued -= cost(entry); else trackingQueued -= cost(entry);
 					}
 					state.deliveredWatermark = state.admittedWatermark;
+					state.deliveredChecksum = checksum(state, state.delivered.values());
 					replaceDeliveredEvidence(state, state.admittedEvidence);
 					// Every preview part already carries this cut's status/completion.
 					// A redundant empty 0/1 control could impersonate a withheld data
 					// index zero at the client and falsely close its multipart barrier.
 					if (state.route.markerId() == null && state.admittedWatermark == state.offeredWatermark) state.control = false;
-					state.admitted = List.of(); state.part = 0; state.baseline = false;
+					state.admitted = List.of(); state.admittedChecksum = 0; state.part = 0; state.baseline = false;
 					if (state.admittedEvidence != null) { state.admittedEvidence.close(); state.admittedEvidence = null; }
 					if (state.batchMemory != null) { state.batchMemory.close(); state.batchMemory = null; }
 					releaseUnretainedEntries(state);
@@ -753,7 +765,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			if (state.route.markerId() != null && !state.baseline && heartbeat > 0 && state.pending.isEmpty() && state.admitted.isEmpty()
 				&& (state.lastHeartbeat < 0 || trackingPeriod - state.lastHeartbeat >= heartbeat)) {
 				if (sendControl(state, () -> InventoryS2CPacket.heartbeat(state.route.resourceKind(), state.route.epoch(), 0, state.route.markerId(), state.context.baseline(), state.context.stateFence(),
-					state.deliveredWatermark, InventoryChecksums.checksumEntries(state.route.resourceKind(), state.delivered.values())).stamp(state.route.presentationEpoch(), state.route.view()), true)) state.lastHeartbeat = trackingPeriod;
+					state.deliveredWatermark, state.deliveredChecksum).stamp(state.route.presentationEpoch(), state.route.view()), true)) state.lastHeartbeat = trackingPeriod;
 			}
 		}
 	}
@@ -763,7 +775,9 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		// Preview filtering below measures exactly without allocating codec buffers.
 		// data + stamp construct two packets; singleton entry lists, growable batch,
 		// immutable batch and checksum sample/sort/UTF buffers overlap sequentially.
-		long workspace = checkedAdd(checksumWorkspace(state.offered.size()),
+		// The delivered digest is computed at promotion under this same grant.
+		int deliveredBound = Math.addExact(state.delivered.size(), state.pending.size());
+		long workspace = checkedAdd(checksumWorkspace(Math.max(state.offered.size(), deliveredBound)),
 			checkedAdd(4096L, checkedMultiply(1024L, state.pending.size())));
 		var reservation = memory.tryReserve(workspace);
 		if (reservation.isEmpty()) { delay(state, state.batchDelay, Reason.MEMORY.bit(), "batch", Unit.ENTRY, state.pending.size()); return; }
@@ -800,12 +814,16 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			}
 		}
 		if (state.pending.isEmpty()) { state.batchDelay.cancel(); state.dataDelay.cancel(); return; }
+		// One immutable cut, one full-projection digest. Every part below carries
+		// this exact value; a later offered revision cannot rewrite it.
+		long cutChecksum = checksum(state, state.offered.values());
 		List<InventoryS2CPacket> batch = new ArrayList<>();
 		// One entry per bounded part: quotas and byte caps never reset for a new part.
 		int parts = state.pending.size(), index = 0;
-		for (var entry : state.pending.values()) batch.add(packet(state, false, List.of(entry), index++, parts));
+		for (var entry : state.pending.values()) batch.add(packet(state, false, List.of(entry), index++, parts, cutChecksum));
 		state.admitted = List.copyOf(batch); state.pending.clear(); state.part = 0;
 		state.admittedWatermark = state.offeredWatermark;
+		state.admittedChecksum = cutChecksum;
 		state.admittedEvidence = state.offeredEvidence == null ? null : state.offeredEvidence.retain();
 		reservation.get().commit(workspace);
 		state.batchMemory = reservation.get();
@@ -814,12 +832,19 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		} finally { if (!retained) reservation.get().close(); }
 	}
 	private InventoryS2CPacket packet(State state, boolean control, List<InventoryS2CPacket.Entry> entries, int part, int parts) {
+		return packet(state, control, entries, part, parts, checksum(state, state.offered.values()));
+	}
+	private InventoryS2CPacket packet(State state, boolean control, List<InventoryS2CPacket.Entry> entries, int part, int parts,
+		long checksum) {
 		Route route = state.route;
 		if (control && route.markerId() != null && !(state.baseline && state.complete && state.status != InventoryS2CPacket.Status.INVALID)) return InventoryS2CPacket.status(route.resourceKind(), route.epoch(), 0, route.markerId(), state.context.baseline(),
-			state.context.stateFence(), state.offeredWatermark, state.status, InventoryChecksums.checksumEntries(route.resourceKind(), state.offered.values())).stamp(route.presentationEpoch(), route.view());
+			state.context.stateFence(), state.offeredWatermark, state.status, checksum).stamp(route.presentationEpoch(), route.view());
 		return InventoryS2CPacket.data(route.resourceKind(), route.markerId() == null ? InventoryS2CPacket.Kind.PREVIEW : state.baseline ? InventoryS2CPacket.Kind.SNAPSHOT : InventoryS2CPacket.Kind.STREAM,
 			route.epoch(), route.markerId() == null ? route.requestId() : 0, route.markerId(), state.context.baseline(), state.context.stateFence(), state.offeredWatermark,
-			part, parts, state.complete, state.status, InventoryChecksums.checksumEntries(route.resourceKind(), state.offered.values()), entries).stamp(route.presentationEpoch(), route.view());
+			part, parts, state.complete, state.status, checksum, entries).stamp(route.presentationEpoch(), route.view());
+	}
+	private long checksum(State state, Collection<InventoryS2CPacket.Entry> entries) {
+		return InventoryChecksums.checksumEntries(state.route.resourceKind(), entries, checksumSamples);
 	}
 	/** Bounded digest samples/sort storage and UTF comparison scratch; display is not hashed. */
 	private static long checksumWorkspace(int keys) { return checkedAdd(4096L, checkedMultiply(keys, 256L)); }
@@ -930,7 +955,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		releaseEvidence(state); state.sourceDenied = false;
 		state.entryMemory.values().forEach(RetainedMemoryLedger.Ticket::close); state.entryMemory.clear();
 		state.context = new Context(context.consumerId(), context.recipient(), context.sessionView(), newStateFence, context.baseline()); state.baseline = true;
-		state.offeredWatermark = state.deliveredWatermark = 0; state.complete = false; state.control = false; state.deliveryIncomplete = false; state.status = InventoryS2CPacket.Status.UPDATING;
+		state.offeredWatermark = state.deliveredWatermark = 0; state.deliveredChecksum = 0; state.complete = false; state.control = false; state.deliveryIncomplete = false; state.status = InventoryS2CPacket.Status.UPDATING;
 		state.retiredGroups.clear(); state.retiringGroups.clear(); state.restageLatest = false; state.rebaselineRequired = false; state.retirementPending = false;
 	}
 	private void withdraw(State state) {
@@ -938,7 +963,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		long bytes = state.pending.values().stream().mapToLong(InventorySyncPublisher::cost).sum();
 		for (var packet : state.admitted) bytes += packet.entries().stream().mapToLong(InventorySyncPublisher::cost).sum();
 		if (state.route.markerId() == null) previewQueued -= bytes; else trackingQueued -= bytes;
-		state.pending.clear(); state.admitted = List.of(); state.part = 0;
+		state.pending.clear(); state.admitted = List.of(); state.admittedChecksum = 0; state.part = 0;
 		if (state.admittedEvidence != null) { state.admittedEvidence.close(); state.admittedEvidence = null; }
 		if (state.batchMemory != null) { state.batchMemory.close(); state.batchMemory = null; }
 		releaseUnretainedEntries(state);

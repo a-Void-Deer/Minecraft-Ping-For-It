@@ -42,6 +42,7 @@ import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
+import nx.pingwheel.common.presentation.PresentationAuthorization;
 import nx.pingwheel.common.presentation.PresentationBasic;
 import nx.pingwheel.common.presentation.PresentationDiagnosticCapture;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
@@ -456,6 +457,7 @@ class InventoryProductionPolicyTest {
 			assertFalse(recipientSession.inventoryTypes.contains("entity_block") && lane == InventoryResourceKind.ITEM
 				|| recipientSession.fluidTypes.contains("entity_block") && lane == InventoryResourceKind.FLUID);
 			for (Player joined : f.players.others.values()) joined.permission = 2;
+			for (Player joined : f.players.others.values()) f.demand(joined.id);
 			f.tick(0);
 			assertTrue(f.publisher().controlQueued(recipient.getUUID(), f.pendingPolicy(recipient.getUUID(), lane)), "fresh POLICY must really be queued");
 			f.audience = List.of(OWNER, recipient.getUUID());
@@ -586,7 +588,7 @@ class InventoryProductionPolicyTest {
 			var mask = f.session().mask;
 			int siblingReads = f.states.get(sibling).reads, deniedReads = f.states.get(denied).reads;
 			f.presentation.clear();
-			f.player.permission = 0;
+			f.player.permission = 0; f.demand();
 			f.tick(1);
 			assertAll("deop updates the POLICY hint but never revokes the OPEN-frozen preview",
 				() -> assertEquals(epoch, f.session().epoch),
@@ -817,17 +819,20 @@ class InventoryProductionPolicyTest {
 			Object recipient = f.recipient(f.trackingLease(marker));
 			long epoch = f.session().epoch, view = f.session().view;
 			f.presentation.clear();
-			if (allow) { f.player.permission = 0; f.tick(1); }
+			if (allow) f.player.permission = 0;
+			f.demand();
+			f.backend.handle(OWNER, InventoryC2SPacket.hello(), 1, f.settings);
+			f.tick(1);
 			assertEquals(Optional.of(!allow), f.client.authorization(lane, epoch, view, "entity_block"));
 			// Legitimate HELLO traffic spends the existing shared preview/control byte window.
 			for (int i = 0; i < 100; i++) f.backend.handle(OWNER, InventoryC2SPacket.hello(), 1, f.settings);
-			f.player.permission = allow ? 2 : 0; f.tick(2);
+			f.player.permission = allow ? 2 : 0; f.demand(); f.tick(2);
 			@Nullable var queued = f.queuedPolicy(lane);
 			assertNotNull(queued, "the desired lane control was admitted but its byte window is exhausted");
 			boolean pendingWhileQueued = f.pendingPolicies().containsKey(lane);
 			int sent = f.packets.size();
 			// Another connection drains globally before this owner's Backend policy is refreshed.
-			f.player.permission = allow ? 0 : 2;
+			f.player.permission = allow ? 0 : 2; f.demand();
 			// Both directions advance the real presentation view stamp before the
 			// foreign-connection drain, so the queued control is fenced by session
 			// authority rather than a test-only POLICY value assumption.
@@ -836,7 +841,7 @@ class InventoryProductionPolicyTest {
 			f.publisher().drainControls();
 			assertNull(f.queuedPolicy(lane), "fresh authority rejects the queued old control");
 			assertEquals(sent, f.packets.size(), "a fresh-fenced control is never sent");
-			f.player.permission = allow ? 2 : 0;
+			f.player.permission = allow ? 2 : 0; f.demand();
 			int processed = f.requests.size(), largestLaneQueue = 0;
 			for (int tick = 3; tick <= 150; tick++) {
 				f.tick(tick); f.client.tick(true);
@@ -864,9 +869,9 @@ class InventoryProductionPolicyTest {
 	void queuedPolicyKeepsItsExactOwnerAcrossRepeatedTicksAndStaleAuthorityOrSupersededCompletions(InventoryResourceKind lane, boolean allow) throws Exception {
 		try (var f = new Fixture(Map.of(lane.fieldId(), 2))) {
 			f.open();
-			if (allow) { f.player.permission = 0; f.tick(1); }
+			if (allow) { f.player.permission = 0; f.demand(); f.tick(1); }
 			for (int i = 0; i < 100; i++) f.backend.handle(OWNER, InventoryC2SPacket.hello(), 1, f.settings);
-			f.player.permission = allow ? 2 : 0; f.tick(2);
+			f.player.permission = allow ? 2 : 0; f.demand(); f.tick(2);
 			var original = f.pendingPolicy(lane); Object queued = Objects.requireNonNull(f.queuedPolicy(lane));
 			var handoff = f.controlHandoff();
 			int sent = f.packets.size();
@@ -876,13 +881,13 @@ class InventoryProductionPolicyTest {
 				assertTrue(f.queuedPolicyCount() <= 2); assertTrue(f.pendingPolicies().size() <= 2);
 			}
 			assertEquals(sent, f.packets.size(), "budget-deferred drains never report a handoff or replace the queued owner");
-			f.player.permission = allow ? 0 : 2; PresentationServer.tick(f.server, f.store);
+			f.player.permission = allow ? 0 : 2; f.demand(); f.tick(2);
 			handoff.accepted(OWNER, original);
 			assertNotSame(original, f.pendingPolicy(lane),
 				"a completion under changed fresh authority cannot retain the old desired owner");
-			f.tick(2); var superseding = f.pendingPolicy(lane); assertNotSame(original, superseding);
+			var superseding = f.pendingPolicy(lane); assertNotSame(original, superseding);
 			handoff.accepted(OWNER, original); assertSame(superseding, f.pendingPolicy(lane));
-			f.player.permission = allow ? 2 : 0; f.tick(2);
+			f.player.permission = allow ? 2 : 0; f.demand(); f.tick(2);
 			var latest = f.pendingPolicy(lane);
 			assertEquals(original, latest); assertNotSame(original, latest, "returning to the same value is a new desired owner");
 			handoff.accepted(OWNER, original); assertSame(latest, f.pendingPolicy(lane), "an old equal-valued completion cannot clear the replacement");
@@ -897,13 +902,13 @@ class InventoryProductionPolicyTest {
 	void successfulPolicySendThatChangesAuthorityBeforeReturnKeepsItsDesiredOwnerRetryable(InventoryResourceKind lane, boolean allow) throws Exception {
 		try (var f = new Fixture(Map.of(lane.fieldId(), 2))) {
 			f.open();
-			if (allow) { f.player.permission = 0; f.tick(1); }
+			if (allow) { f.player.permission = 0; f.demand(); f.tick(1); }
 			for (int i = 0; i < 100; i++) f.backend.handle(OWNER, InventoryC2SPacket.hello(), 1, f.settings);
-			f.player.permission = allow ? 2 : 0; f.tick(2);
+			f.player.permission = allow ? 2 : 0; f.demand(); f.tick(2);
 			var desired = f.pendingPolicy(lane);
 			f.afterSend = packet -> {
 				if (packet != desired) return;
-				f.afterSend = null; f.player.permission = allow ? 0 : 2;
+				f.afterSend = null; f.player.permission = allow ? 0 : 2; f.demand();
 				PresentationServer.tick(f.server, f.store);
 			};
 			f.tick(10);
@@ -911,7 +916,7 @@ class InventoryProductionPolicyTest {
 			assertNotSame(desired, afterSuccessful,
 				"a successful transport return naturally completes the old desired owner");
 			if (afterSuccessful != null) assertFalse(f.publisher().controlQueued(OWNER, afterSuccessful));
-			f.player.permission = allow ? 2 : 0; f.tick(11);
+			f.player.permission = allow ? 2 : 0; f.demand(); f.tick(11);
 			assertTrue(f.pendingPolicies().isEmpty()); assertFalse(f.publisher().controlQueued(OWNER, desired));
 			assertTrue(f.packets.stream().filter(packet -> packet == desired).count() >= 1,
 				"a successful handoff is not resent without a new desired owner");
@@ -923,9 +928,9 @@ class InventoryProductionPolicyTest {
 		"ITEM,REPLACE", "FLUID,REPLACE", "ITEM,CLOSE", "FLUID,CLOSE"})
 	void retiredPolicyCompletionCannotClearOrReviveWorkAcrossLifecycleBoundaries(InventoryResourceKind lane, String boundary) throws Exception {
 		try (var f = new Fixture(Map.of(lane.fieldId(), 2))) {
-			f.open(); f.player.permission = 0; f.tick(1);
+			f.open(); f.player.permission = 0; f.demand(); f.tick(1);
 			for (int i = 0; i < 100; i++) f.backend.handle(OWNER, InventoryC2SPacket.hello(), 1, f.settings);
-			f.player.permission = 2; f.tick(2);
+			f.player.permission = 2; f.demand(); f.tick(2);
 			var retired = f.pendingPolicy(lane); var handoff = f.controlHandoff(); int sent = f.packets.size();
 			switch (boundary) {
 				case "VIEW" -> { f.policy.setPermissionLevels(Map.of(lane.fieldId(), 1)); f.tick(2); }
@@ -997,6 +1002,225 @@ class InventoryProductionPolicyTest {
 		}
 	}
 
+	@Test void inventoryHintIsDemandOnlyAndEvaluatesBothFieldsOncePerType() throws Exception {
+		try (var f = new Fixture(Map.of())) {
+			var calls = new java.util.concurrent.atomic.AtomicInteger();
+			PresentationAuthorization.setProvider((recipient, field, actual, required) -> {
+				if (!field.id().equals(InventoryPresentation.ITEMS) && !field.id().equals(InventoryPresentation.FLUIDS))
+					return true;
+				calls.incrementAndGet();
+				return actual >= required;
+			});
+			try {
+				f.demand(); f.tick(1); calls.set(0);
+				f.tick(2);
+				assertEquals(0, calls.get(), "a steady tick reuses the cached inventory hint");
+				f.backend.handle(OWNER, InventoryC2SPacket.hello(), 2, f.settings);
+				assertEquals(10, calls.get(), "HELLO evaluates five target types and both fields once");
+				f.backend.handle(OWNER, InventoryC2SPacket.hello(), 2, f.settings);
+				assertEquals(20, calls.get(), "each explicit HELLO is one pass, not a double lookup");
+				long generation = f.session().inventoryHintGeneration;
+				f.policy.setPermissionLevels(Map.of(InventoryPresentation.ITEMS, 4));
+				f.tick(3);
+				assertTrue(f.session().inventoryHintGeneration > generation,
+					"an explicit configuration change refreshes the hint");
+				assertFalse(f.session().inventoryTypes.contains("entity_block"));
+			} finally {
+				PresentationAuthorization.setProvider(null);
+			}
+		}
+	}
+
+	@Test void internalProviderFlipDoesNotRefreshHintButNewOpenFreezeIsFresh() throws Exception {
+		try (var f = new Fixture(Map.of())) {
+			boolean[] allow = {true};
+			var calls = new java.util.concurrent.atomic.AtomicInteger();
+			PresentationAuthorization.setProvider((recipient, field, actual, required) -> {
+				if (!field.id().equals(InventoryPresentation.ITEMS) && !field.id().equals(InventoryPresentation.FLUIDS))
+					return true;
+				calls.incrementAndGet();
+				return allow[0];
+			});
+			try {
+				f.demand(); f.tick(1); calls.set(0);
+				allow[0] = false;
+				f.tick(2);
+				assertEquals(0, calls.get(), "an internal provider change without a replacement is not polled");
+				assertTrue(PresentationServer.inventoryPolicy(OWNER).orElseThrow().types().contains("entity_block"),
+					"the retained hint may stay stale");
+				var lanes = PresentationServer.freezeInventoryPreviewLanes(OWNER, "entity_block");
+				assertTrue(lanes.isEmpty(), "a new OPEN resolves its actual type from current authority");
+				assertEquals(2, calls.get(), "OPEN evaluates only the actual type's two inventory fields");
+				PresentationServer.adoptInventoryPolicyLanes(OWNER, "entity_block", lanes);
+				assertFalse(PresentationServer.inventoryPolicy(OWNER).orElseThrow().types().contains("entity_block"));
+			} finally {
+				PresentationAuthorization.setProvider(null);
+			}
+		}
+	}
+
+	@Test void firstHelloQueuesOfferBeforePolicyAndDeliversTheInitialHint() throws Exception {
+		try (var f = new Fixture(Map.of())) {
+			Object owner = Objects.requireNonNull(((Map<?, ?>) value(f.backend, "sessions")).get(OWNER));
+			String state = "sent=" + f.packets.stream().map(InventoryS2CPacket::kind).toList()
+				+ ", awaitingOffer=" + value(owner, "policyAwaitingOffer")
+				+ ", reconfiguring=" + value(owner, "reconfiguring")
+				+ ", policy=" + value(owner, "policy") + ", pending=" + f.pendingPolicies()
+				+ ", queued=" + value(f.publisher(), "controls");
+			int offer = -1, policy = -1;
+			for (int index = 0; index < f.packets.size(); index++) {
+				InventoryS2CPacket.Kind kind = f.packets.get(index).kind();
+				if (kind == InventoryS2CPacket.Kind.OFFER && offer < 0) offer = index;
+				if (kind == InventoryS2CPacket.Kind.POLICY && policy < 0) policy = index;
+			}
+			assertTrue(offer >= 0, "the first hello must queue its OFFER");
+			assertTrue(policy > offer, "POLICY must follow the OFFER, never cross a deferred initial gate: " + state);
+			assertTrue(f.client.authorization(InventoryResourceKind.ITEM, f.session().epoch, f.session().view,
+				"entity_block").isPresent(), "the first hello's hint is accepted by the real client");
+		}
+	}
+
+	@ParameterizedTest @CsvSource({"RETRY", "RECONFIG", "VIEW", "EPOCH"})
+	void initialPolicyRetainsItsOwnerUntilTheCurrentOfferReallyHandsOff(String boundary) throws Exception {
+		try (var f = new Fixture(Map.of(), null, false)) {
+			var calls = new java.util.concurrent.atomic.AtomicInteger();
+			PresentationAuthorization.setProvider((recipient, field, actual, required) -> {
+				if (field.id().equals(InventoryPresentation.ITEMS) || field.id().equals(InventoryPresentation.FLUIDS)) calls.incrementAndGet();
+				return true;
+			});
+			try {
+				f.refuseOffer = true;
+				f.backend.handle(OWNER, InventoryC2SPacket.hello(), 0, f.settings);
+				InventoryS2CPacket initial = Objects.requireNonNull(f.pendingPolicy(InventoryResourceKind.ITEM));
+				assertFalse(f.publisher().controlQueued(OWNER, initial), "the desired owner exists without crossing the failed OFFER");
+				assertTrue(f.packets.isEmpty());
+				calls.set(0);
+				f.tick(1); f.publisher().drainControls();
+				assertSame(initial, f.pendingPolicy(InventoryResourceKind.ITEM));
+				assertEquals(0, calls.get(), "waiting for transport does not poll permission");
+				Object queued = Objects.requireNonNull(((Map<?, ?>) value(f.publisher(), "controls")).get(OWNER + "/OFFER/ITEM/0"));
+				InventoryS2CPacket retiredOffer = (InventoryS2CPacket) value(queued, "packet");
+				switch (boundary) {
+					case "RECONFIG" -> f.settings.setDisplayByteMultiplier(new java.math.BigDecimal("0.5"));
+					case "VIEW" -> f.policy.setPermissionLevels(Map.of(InventoryPresentation.ITEMS, 1));
+					case "EPOCH" -> { PresentationServer.reset(); PresentationServer.activate(f.server); f.negotiatePresentation(); }
+					case "RETRY" -> {}
+					default -> throw new AssertionError(boundary);
+				}
+				f.tick(2);
+				if (!boundary.equals("RETRY")) {
+					assertFalse(f.controlHandoff().accepted(OWNER, retiredOffer), "superseded caps or epoch/view cannot release the gate");
+					assertEquals(0, f.queuedPolicyCount());
+				}
+				assertTrue(f.packets.isEmpty(), "no POLICY bypasses the current failed OFFER");
+				f.refuseOffer = false;
+				for (int tick = 3; tick <= 20; tick++) f.tick(tick);
+				assertEquals(InventoryS2CPacket.Kind.OFFER, f.packets.getFirst().kind());
+				for (var lane : InventoryResourceKind.values()) {
+					assertEquals(Optional.of(true), f.client.authorization(lane, f.session().epoch, f.session().view, "entity_block"));
+					assertEquals(1, f.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.POLICY && packet.resourceKind() == lane).count());
+				}
+				assertTrue(f.pendingPolicies().isEmpty());
+				assertEquals(0, f.queuedPolicyCount());
+				if (boundary.equals("RETRY")) {
+					assertTrue(f.packets.stream().anyMatch(packet -> packet == initial), "handoff preserves the original desired identity");
+					assertEquals(0, calls.get());
+				}
+			} finally { PresentationAuthorization.setProvider(null); }
+		}
+	}
+
+	@Test void failedPolicyTransportRetriesTheSameOwnerWithoutPermissionPolling() throws Exception {
+		try (var f = new Fixture(Map.of(), null, false)) {
+			f.refusePolicy = true;
+			f.backend.handle(OWNER, InventoryC2SPacket.hello(), 0, f.settings);
+			InventoryS2CPacket pending = Objects.requireNonNull(f.pendingPolicy(InventoryResourceKind.ITEM));
+			Object queued = Objects.requireNonNull(f.queuedPolicy(InventoryResourceKind.ITEM));
+			long generation = f.session().inventoryHintGeneration;
+			for (int tick = 1; tick <= 2; tick++) {
+				f.tick(tick);
+				assertSame(pending, f.pendingPolicy(InventoryResourceKind.ITEM));
+				assertSame(queued, f.queuedPolicy(InventoryResourceKind.ITEM));
+				assertEquals(generation, f.session().inventoryHintGeneration);
+			}
+			assertEquals(List.of(InventoryS2CPacket.Kind.OFFER), f.packets.stream().map(InventoryS2CPacket::kind).toList());
+			f.refusePolicy = false;
+			for (int tick = 3; tick <= 20; tick++) f.tick(tick);
+			assertTrue(f.pendingPolicies().isEmpty());
+			assertEquals(1, f.packets.stream().filter(packet -> packet == pending).count());
+			assertEquals(generation, f.session().inventoryHintGeneration);
+			assertEquals(Optional.of(true), f.client.authorization(InventoryResourceKind.ITEM, f.session().epoch, f.session().view, "entity_block"));
+		}
+	}
+
+	@Test void sameProviderCallbackRefreshCannotBeOverwrittenByAnOlderFreeze() throws Exception {
+		try (var f = new Fixture(Map.of())) {
+			boolean[] allow = {true};
+			boolean[] refreshing = {false}, refreshed = {false};
+			PresentationAuthorization.setProvider((recipient, field, actual, required) -> {
+				if (refreshing[0] && !refreshed[0]) {
+					refreshed[0] = true;
+					allow[0] = false;
+					PresentationServer.refreshInventoryPolicy(OWNER);
+					return true;
+				}
+				return allow[0];
+			});
+			try {
+				f.demand(); f.tick(1);
+				refreshing[0] = true;
+				var grant = PresentationServer.freezeInventoryPreviewGrant(OWNER, "entity_block");
+				assertTrue(grant.lanes().contains(InventoryResourceKind.ITEM));
+				PresentationServer.adoptInventoryPolicyLanes(OWNER, "entity_block", grant.lanes(), grant.token());
+				assertFalse(PresentationServer.inventoryPolicy(OWNER).orElseThrow().types().contains("entity_block"),
+					"an explicit same-provider refresh must not be overwritten by the older freeze generation");
+			} finally {
+				PresentationAuthorization.setProvider(null);
+			}
+		}
+	}
+
+	@Test void oldSessionTokenCannotBeAcceptedByAReplacementSession() throws Exception {
+		try (var f = new Fixture(Map.of())) {
+			PresentationAuthorization.setProvider((recipient, field, actual, required) -> true);
+			try {
+				f.demand(); f.tick(1);
+				var old = PresentationServer.freezeInventoryPreviewGrant(OWNER, "entity_block");
+				PresentationServer.reset();
+				PresentationServer.activate(f.server);
+				f.negotiatePresentation();
+				f.demand();
+				PresentationAuthorization.setProvider((recipient, field, actual, required) -> false);
+				PresentationServer.refreshInventoryPolicy(OWNER);
+				PresentationServer.adoptInventoryPolicyLanes(OWNER, "entity_block", old.lanes(), old.token());
+				assertFalse(PresentationServer.inventoryPolicy(OWNER).orElseThrow().types().contains("entity_block"),
+					"a replacement session epoch must reject an old freeze token");
+			} finally {
+				PresentationAuthorization.setProvider(null);
+			}
+		}
+	}
+
+	@Test void callbackProviderReplacementCannotMergeOldFreezeLanesIntoTheNewHint() throws Exception {
+		try (var f = new Fixture(Map.of())) {
+			PresentationAuthorization.setProvider((recipient, field, actual, required) -> true);
+			try {
+				f.demand(); f.tick(1);
+				PresentationAuthorization.setProvider((recipient, field, actual, required) -> {
+					PresentationAuthorization.setProvider((nextRecipient, nextField, nextActual, nextRequired) -> false);
+					return true;
+				});
+				var grant = PresentationServer.freezeInventoryPreviewGrant(OWNER, "entity_block");
+				assertTrue(grant.lanes().contains(InventoryResourceKind.ITEM));
+				PresentationServer.adoptInventoryPolicyLanes(OWNER, "entity_block", grant.lanes(), grant.token());
+				assertFalse(PresentationServer.inventoryPolicy(OWNER).orElseThrow().types().contains("entity_block"),
+					"an old freeze result must not overwrite the hint after a callback-time provider replacement");
+			} finally {
+				PresentationAuthorization.setProvider(null);
+			}
+		}
+	}
+
 	private static PresentationSection decodedBasic(PresentationS2CPacket packet) {
 		var encoded = new net.minecraft.network.FriendlyByteBuf(io.netty.buffer.Unpooled.wrappedBuffer(packet.sectionBytes()));
 		try { return nx.pingwheel.common.presentation.PresentationCodec.read(encoded, id -> true); }
@@ -1032,7 +1256,7 @@ class InventoryProductionPolicyTest {
 		final InventoryRuntime runtime;
 		final InventoryBackend backend;
 		final Target requestedTarget;
-		boolean refuseResults, refuseData, refusePreview;
+		boolean refuseResults, refuseData, refusePreview, refuseOffer, refusePolicy;
 		boolean refuseCreated, throwCreated;
 		@Nullable Set<String> blockedCreated;
 		@Nullable Runnable beforePublish;
@@ -1041,6 +1265,10 @@ class InventoryProductionPolicyTest {
 		Fixture(@Unmodifiable Map<String, Integer> permissions) throws Exception { this(permissions, null); }
 		Fixture(@Unmodifiable Map<String, Integer> permissions,
 			nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidWorldTest.@Nullable Fixture nativeSource) throws Exception {
+			this(permissions, nativeSource, true);
+		}
+		Fixture(@Unmodifiable Map<String, Integer> permissions,
+			nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidWorldTest.@Nullable Fixture nativeSource, boolean initialHello) throws Exception {
 			requestedTarget = nativeSource == null ? TARGET : Target.ExternalBlockTarget.candidate("minecraft:overworld", "sable", "minecraft:chest", "locator", true);
 			server.players = players; server.world = level; players.player = player; players.others = new java.util.LinkedHashMap<>(); player.level = level; level.server = server;
 			player.permission = 2;
@@ -1075,7 +1303,37 @@ class InventoryProductionPolicyTest {
 			var resolver = nativeSource == null ? fallback : nx.pingwheel.common.presentation.inventory.minecraft.InventoryCreationNativeFluidFixture.resolver(nativeSource);
 			runtime = new InventoryRuntime(resolver, settings.pendingMemoryBytes());
 			backend = new InventoryBackend(new InventoryBackend.Host() {
-				@Override public Optional<InventoryBackend.Policy> policy(UUID id) { return PresentationServer.inventoryPolicy(id).map(p -> new InventoryBackend.Policy(p.epoch(), p.view(), p.types(), p.fluidTypes())); }
+				@Override public Optional<InventoryBackend.Policy> policy(UUID id) { return PresentationServer.inventoryPolicy(id).map(p -> new InventoryBackend.Policy(p.epoch(), p.view(), p.types(), p.fluidTypes(), p.revision())); }
+				@Override public void policyDemand(UUID id) { PresentationServer.refreshInventoryPolicy(id); }
+				@Override public InventoryBackend.PolicyToken policyToken(UUID id) {
+					var token = PresentationServer.inventoryHintToken(id);
+					return new InventoryBackend.PolicyToken(token.owner(), token.sessionEpoch(), token.sessionView(),
+						token.hintGeneration(), token.revision(), token.providerRevision());
+				}
+				@Override public InventoryBackend.PreviewLaneGrant freezeInventoryPreviewGrant(UUID id, String targetTypeId) {
+					var grant = PresentationServer.freezeInventoryPreviewGrant(id, targetTypeId);
+					return new InventoryBackend.PreviewLaneGrant(grant.lanes(), new InventoryBackend.PolicyToken(
+						grant.token().owner(), grant.token().sessionEpoch(), grant.token().sessionView(),
+						grant.token().hintGeneration(), grant.token().revision(), grant.token().providerRevision()));
+				}
+				@Override public void adoptPreviewPolicy(UUID id, String targetTypeId, Set<InventoryResourceKind> lanes) {
+					PresentationServer.adoptInventoryPolicyLanes(id, targetTypeId, lanes);
+				}
+				@Override public void adoptPreviewPolicy(UUID id, String targetTypeId, InventoryBackend.PreviewLaneGrant grant) {
+					PresentationServer.adoptInventoryPolicyLanes(id, targetTypeId, grant.lanes(),
+						new PresentationServer.InventoryHintToken(grant.token().owner(), grant.token().sessionEpoch(),
+							grant.token().sessionView(), grant.token().hintGeneration(),
+							grant.token().hintRevision(), grant.token().providerRevision()));
+				}
+				@Override public void adoptCreatePolicy(UUID id, String targetTypeId, InventoryResourceKind kind, boolean allowed) {
+					PresentationServer.adoptInventoryPolicyLane(id, targetTypeId, kind, allowed);
+				}
+				@Override public void adoptCreatePolicy(UUID id, String targetTypeId, InventoryResourceKind kind, boolean allowed,
+					InventoryBackend.PolicyToken token) {
+					PresentationServer.adoptInventoryPolicyLane(id, targetTypeId, kind, allowed,
+						new PresentationServer.InventoryHintToken(token.owner(), token.sessionEpoch(), token.sessionView(),
+							token.hintGeneration(), token.hintRevision(), token.providerRevision()));
+				}
 				@Override public Optional<InventoryBackend.SessionAccess> session(UUID id) {
 					return PresentationServer.sessionAccess(id).map(access -> new InventoryBackend.SessionAccess(
 						access.epoch(), access.view(), access.compatibleInventoryKinds()));
@@ -1119,6 +1377,8 @@ class InventoryProductionPolicyTest {
 				@Override public boolean authorized(SyncPublisher.Context context) { return true; }
 				@Override public int encodedBytes(InventoryS2CPacket packet) { return packet.encodedSize(nx.pingwheel.common.presentation.inventory.InventoryDomainCodec.MAX_DISPLAY_BYTES, InventoryS2CPacket.MAX_FRAME_BYTES); }
 				@Override public void send(UUID id, InventoryS2CPacket packet) {
+					if (refuseOffer && packet.kind() == InventoryS2CPacket.Kind.OFFER) throw new IllegalStateException("offer transport deferred");
+					if (refusePolicy && packet.kind() == InventoryS2CPacket.Kind.POLICY) throw new IllegalStateException("policy transport deferred");
 					if (refusePreview && packet.kind() == InventoryS2CPacket.Kind.PREVIEW) throw new IllegalStateException("preview cut handoff deferred");
 					if (refuseResults && (packet.kind() == InventoryS2CPacket.Kind.SELECTED || packet.kind() == InventoryS2CPacket.Kind.REJECT)) throw new IllegalStateException("result transport deferred");
 					if (refuseData && !packet.entries().isEmpty()) throw new IllegalStateException("quantity transport deferred");
@@ -1128,7 +1388,7 @@ class InventoryProductionPolicyTest {
 				}
 			}, runtime, 1);
 			field(InventoryServer.class, "active").set(null, server); field(InventoryServer.class, "backend").set(null, backend);
-			backend.handle(OWNER, InventoryC2SPacket.hello(), 0, settings);
+			if (initialHello) backend.handle(OWNER, InventoryC2SPacket.hello(), 0, settings);
 		}
 		private void receive(IPacket packet) {
 			if (!(packet instanceof PresentationS2CPacket p)) return;
@@ -1142,6 +1402,8 @@ class InventoryProductionPolicyTest {
 			return request;
 		}
 		void tick(int tick) { server.now = tick; PresentationServer.tick(server, store); backend.tick(tick, settings); }
+		void demand() { PresentationServer.refreshInventoryPolicy(OWNER); }
+		void demand(UUID id) { PresentationServer.refreshInventoryPolicy(id); }
 		void negotiatePresentation() { PresentationServer.negotiate(server, player, PresentationC2SPacket.hello(Map.of(
 			PresentationBasic.ID, 1, InventoryPresentation.ADAPTER_ID, InventoryPresentation.SCHEMA)), store); }
 		void join(UUID id) {
