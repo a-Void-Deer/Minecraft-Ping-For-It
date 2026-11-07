@@ -97,6 +97,19 @@ public final class ServerMarkerStore {
 	public synchronized MarkerCreation create(UUID owner, Target target, TargetKey targetKey, TargetType targetType,
 		PingType pingType, MarkerAnchor anchor, long arrivalTick, long expiresAtTick, List<UUID> recipients,
 		List<PresentationPropertySelection> properties) {
+		return create(owner, target, targetKey, targetType, pingType, anchor, arrivalTick, expiresAtTick, recipients,
+			properties, PingAuthorization.denied(recipients));
+	}
+
+	/**
+	 * Commits one marker together with its creation-frozen recipient
+	 * authorization. The authorization is complete before this atomic store
+	 * mutation and follows the marker's own lifetime; no delivery path may
+	 * recompute it.
+	 */
+	public synchronized MarkerCreation create(UUID owner, Target target, TargetKey targetKey, TargetType targetType,
+		PingType pingType, MarkerAnchor anchor, long arrivalTick, long expiresAtTick, List<UUID> recipients,
+		List<PresentationPropertySelection> properties, PingAuthorization authorization) {
 		ServerMarker marker = new ServerMarker(
 			idSource.nextId(),
 			owner,
@@ -107,7 +120,7 @@ public final class ServerMarkerStore {
 			anchor,
 			arrivalTick,
 			expiresAtTick,
-			recipients, properties);
+			recipients, properties, authorization);
 
 		List<MarkerWinnerChange> winnerChanges = creationChanges(marker);
 
@@ -312,7 +325,7 @@ public final class ServerMarkerStore {
 			anchor,
 			current.arrivalTick(),
 			current.expiresAtTick(),
-			current.recipients(), current.properties());
+			current.recipients(), current.properties(), current.authorization());
 
 		markers.put(id, updated);
 		return Optional.of(updated);
@@ -534,7 +547,7 @@ public final class ServerMarkerStore {
 			marker.anchor(),
 			marker.arrivalTick(),
 			marker.expiresAtTick(),
-			recipients, marker.properties());
+			recipients, marker.properties(), marker.authorization().retaining(recipients));
 	}
 
 	/**

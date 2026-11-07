@@ -34,6 +34,7 @@ import nx.pingwheel.common.presentation.inventory.InventoryRuntime;
 import nx.pingwheel.common.presentation.inventory.InventoryScanner;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
+import nx.pingwheel.common.presentation.inventory.InventoryTestGrants;
 import nx.pingwheel.common.presentation.source.SourceKey;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
 import org.jetbrains.annotations.Unmodifiable;
@@ -178,7 +179,12 @@ class SableInventoryHandoffTest {
 				(target, context) -> new ResolvedTarget(target, entityBlock),
 				PingTypeCatalog.builtIn(),
 				(owner, target) -> AuthoritativeTargetValidation.accepted(new ValidatedMarkerTarget(target,
-					TargetMatchContext.blockEntityBlock(true), new MarkerAnchor(5, 6, 7), new TargetNameJson("{\"text\":\"Chest\"}"))));
+					TargetMatchContext.blockEntityBlock(true), new MarkerAnchor(5, 6, 7), new TargetNameJson("{\"text\":\"Chest\"}"))),
+				MarkerCreationLogger.noop(),
+				new nx.pingwheel.common.integration.externalblock.ExternalBlockServerProviderRegistry(),
+				null,
+				TargetGroupingResolver.exact(),
+				(target, targetTypeId, owner, audience) -> InventoryTestGrants.allowAll(audience));
 			policies.put(A, new InventoryBackend.Policy(100, 1, Set.of("entity_block")));
 			policies.put(B, policies.get(A));
 		}
@@ -189,6 +195,15 @@ class SableInventoryHandoffTest {
 			throw new AssertionError();
 		}
 		@Override public Optional<InventoryBackend.Policy> policy(UUID player) { return Optional.ofNullable(policies.get(player)); }
+		@Override public Optional<InventoryBackend.SessionAccess> session(UUID player) {
+			return policy(player).map(policy -> new InventoryBackend.SessionAccess(policy.epoch(), policy.view(),
+				InventoryTestGrants.both()));
+		}
+		@Override public Optional<ServerMarker> activeMarker(MarkerId marker) { return store.find(marker); }
+		@Override public java.util.Set<nx.pingwheel.common.presentation.inventory.InventoryResourceKind> freezeInventoryPreviewLanes(
+			UUID owner, String targetTypeId) {
+			return java.util.Set.of(nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM);
+		}
 		@Override public Optional<InventoryBackend.Opened> open(UUID player, Target requested) {
 			events.add("open");
 			if (!(requested instanceof Target.ExternalBlockTarget external) || !external.isCandidate()) return Optional.empty();
@@ -252,11 +267,19 @@ class SableInventoryHandoffTest {
 							TargetMatchContext.blockEntityBlock(true), new MarkerAnchor(5, 6, 7)));
 				}
 				@Override public void release(Target.ExternalBlockTarget committed) { releaseCalls.incrementAndGet(); }
-			}, player, frozen.target(), frozen.defaultPingType(), 1, 80, List.of(A, B), (target, key, type, owner, audience) -> {
-				events.add("admission");
-				@org.jetbrains.annotations.Nullable var rejection = admission.prepare(target, key, type, audience);
-				return rejection == null ? MarkerCreationService.AdmissionResult.accepted(List.of(), Map.of())
-					: MarkerCreationService.AdmissionResult.rejected(rejection);
+			}, player, frozen.target(), frozen.defaultPingType(), 1, 80, List.of(A, B), new MarkerCreationService.DedicatedAdmission() {
+				@Override public MarkerCreationService.AdmissionResult admit(Target target, TargetKey key, String type,
+					UUID owner, List<UUID> audience) {
+					events.add("admission");
+					@org.jetbrains.annotations.Nullable var rejection = admission.prepare(target, key, type, audience);
+					return rejection == null ? MarkerCreationService.AdmissionResult.accepted(List.of(), Map.of())
+						: MarkerCreationService.AdmissionResult.rejected(rejection);
+				}
+				@Override public @org.jetbrains.annotations.Nullable MarkerRejectReason finishAuthorization(PingAuthorization authorization) {
+					// Forward the exact stored authorization to the Prepared finalizer;
+					// a lambda that only implements admit would drop its reservations.
+					return admission.finishAuthorization(authorization);
+				}
 			});
 			if (!outcome.isAccepted()) return new InventoryBackend.Created(null, outcome.rejectReason().orElseThrow());
 			return new InventoryBackend.Created(outcome.creation().orElseThrow().marker(), null);

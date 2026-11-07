@@ -29,8 +29,10 @@ import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.presentation.PresentationBasic;
+import nx.pingwheel.common.presentation.TestContentGrants;
 import nx.pingwheel.common.presentation.PresentationField;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
+import nx.pingwheel.common.presentation.PresentationReceiptContent;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
@@ -217,6 +219,8 @@ class ClientPingRuntimeTest {
 	private static PresentationS2CPacket created(long revision, MarkerSnapshot snapshot) {
 		return PresentationS2CPacket.created(81, 1, revision, snapshot, "Owner",
 			PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.NAME),
+			TestContentGrants.content(TestContentGrants.basic(Set.of(PresentationBasic.NAME))),
+			PresentationReceiptContent.whole(),
 			new PresentationSection(PresentationBasic.ID, 1, Map.of(PresentationBasic.NAME,
 				new PresentationValue.Text("{\"text\":\"Cached name\"}")), false));
 	}

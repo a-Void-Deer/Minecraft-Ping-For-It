@@ -21,7 +21,6 @@ import nx.pingwheel.common.name.MinecraftTargetNameResolver;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
-import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
 import nx.pingwheel.common.presentation.inventory.InventoryBackend;
 import nx.pingwheel.common.presentation.inventory.InventoryRuntime;
 import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
@@ -127,7 +126,20 @@ public final class InventoryServer {
 		@Override public Optional<InventoryBackend.Policy> policy(UUID player) {
 			return PresentationServer.inventoryPolicy(player).map(p -> new InventoryBackend.Policy(p.epoch(), p.view(), p.types(), p.fluidTypes()));
 		}
-		@Override public boolean authorized(SyncPublisher.Context context) { return policy(context.recipient()).map(p -> (p.epoch() + "/" + p.view()).equals(context.sessionView())).orElse(false); }
+		@Override public Optional<InventoryBackend.SessionAccess> session(UUID player) {
+			return PresentationServer.sessionAccess(player).map(s -> new InventoryBackend.SessionAccess(
+				s.epoch(), s.view(), s.compatibleInventoryKinds()));
+		}
+		@Override public Optional<nx.pingwheel.common.marker.ServerMarker> activeMarker(MarkerId marker) {
+			return ServerCore.activeMarker(marker);
+		}
+		@Override public java.util.Set<nx.pingwheel.common.presentation.inventory.InventoryResourceKind> freezeInventoryPreviewLanes(
+			UUID owner, String targetTypeId) {
+			return PresentationServer.freezeInventoryPreviewLanes(owner, targetTypeId);
+		}
+		@Override public boolean authorized(SyncPublisher.Context context) {
+			return session(context.recipient()).map(s -> s.stamp().equals(context.sessionView())).orElse(false);
+		}
 		@Override public boolean knows(UUID player, MarkerId marker) { return PresentationServer.inventoryKnows(player, marker); }
 		@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
 			return ServerCore.createInventory(server, server.getPlayerList().getPlayer(player), frozen, admission);
@@ -210,16 +222,6 @@ public final class InventoryServer {
 			}
 			var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.global(nx.pingwheel.common.diagnostics.Diagnostics.server()))
 				.resolve(validated.normalizedTarget(), validated.matchContext());
-			int level = 0;
-			for (int candidate = 1; candidate <= 4; candidate++) if (player.hasPermissions(candidate)) level = candidate;
-			var allowed = InventoryPresentation.allowed(config.getPresentation(), playerId, level, resolved.targetType().id());
-			int permissionLevel = level;
-			if (!allowed.contains(InventoryPresentation.ITEMS) && !allowed.contains(InventoryPresentation.FLUIDS)) {
-				debugOpen("presentation", playerId, requested, resolved.target(), resolved.targetType().id(),
-					() -> "items=" + allowed.contains(InventoryPresentation.ITEMS) + " fluids=" + allowed.contains(InventoryPresentation.FLUIDS)
-						+ " permissionLevel=" + permissionLevel);
-				return Optional.empty();
-			}
 			debugOpen("opened", playerId, requested, resolved.target(), resolved.targetType().id(),
 				() -> "defaultPingType=" + resolved.targetType().defaultPingType().id());
 			return Optional.of(new InventoryBackend.Opened(resolved.target(),

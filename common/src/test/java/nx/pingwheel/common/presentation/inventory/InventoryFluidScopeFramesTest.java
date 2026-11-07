@@ -30,12 +30,20 @@ class InventoryFluidScopeFramesTest {
 				@Override public Optional<InventorySourceInput> bindCommitted(InventorySourceInput input, Target committed) {
 					return Optional.of(new InventorySourceInput(committed, input.readOwner(), input.face(), input.resourceKind()));
 				}
+				@Override public Set<InventoryResourceKind> freezeInventoryPreviewLanes(UUID owner, String targetTypeId) {
+					return Set.of(InventoryResourceKind.FLUID);
+				}
 				@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
 					var type = nx.pingwheel.common.domain.TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
-					var reason = admission.prepare(world.target, nx.pingwheel.common.marker.TargetKey.from(world.target), "entity_block", List.of(player));
+					var audience = List.of(player);
+					var key = nx.pingwheel.common.marker.TargetKey.from(world.target);
+					var reason = admission.prepare(world.target, key, "entity_block", audience);
 					if (reason != null) return new InventoryBackend.Created(null, reason);
-					return new InventoryBackend.Created(store.create(player, world.target, type, type.defaultPingType(),
-						new nx.pingwheel.common.marker.MarkerAnchor(1, 64, 3), 1, 80, List.of(player)).marker(), null);
+					var authorization = InventoryTestGrants.allowAll(audience);
+					reason = admission.finishAuthorization(authorization);
+					if (reason != null) return new InventoryBackend.Created(null, reason);
+					return new InventoryBackend.Created(store.create(player, world.target, key, type, type.defaultPingType(),
+						new nx.pingwheel.common.marker.MarkerAnchor(1, 64, 3), 1, 80, audience, List.of(), authorization).marker(), null);
 				}
 			}
 			var host = new Host(); host.policies.replaceAll((player, policy) -> new InventoryBackend.Policy(100, 1, Set.of(), Set.of("entity_block")));
@@ -52,15 +60,15 @@ class InventoryFluidScopeFramesTest {
 				var prior = host.packets.stream().filter(packet -> marker.id().equals(packet.markerId()) && packet.completeScan() && !packet.entries().isEmpty()).reduce((a,b)->b).orElseThrow();
 				assertEquals(162, prior.entries().getFirst().amount());
 				int start = host.packets.size(); world.scope = "two"; world.amount = 243; world.settings.setPhysicalSlotsPerTick(IntLimit.finite(1));
-				backend.tick(3, world.settings);
+				backend.tick(5, world.settings);
 				var transition = host.packets.subList(start, host.packets.size()).stream().filter(packet -> marker.id().equals(packet.markerId())).toList();
 				assertTrue(transition.stream().noneMatch(packet -> packet.status() == InventoryS2CPacket.Status.INVALID || !packet.entries().isEmpty()));
 				var fence = transition.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.STATUS).findFirst().orElseThrow();
 				assertEquals(InventoryS2CPacket.Status.UPDATING, fence.status()); assertEquals(0, fence.watermark());
 				assertTrue(fence.baselineId() > prior.baselineId()); assertTrue(fence.statusRevision() > prior.statusRevision());
-				backend.tick(4, world.settings); // first fresh slot; no partial subtotal
+				backend.tick(6, world.settings); // first fresh slot; no partial subtotal
 				assertTrue(host.packets.subList(start, host.packets.size()).stream().noneMatch(packet -> marker.id().equals(packet.markerId()) && !packet.entries().isEmpty()));
-				backend.tick(5, world.settings);
+				backend.tick(7, world.settings);
 				var fresh = host.packets.subList(start, host.packets.size()).stream().filter(packet -> marker.id().equals(packet.markerId()) && !packet.entries().isEmpty()).findFirst().orElseThrow();
 				assertEquals(InventoryS2CPacket.Kind.SNAPSHOT, fresh.kind()); assertTrue(fresh.completeScan()); assertEquals(486, fresh.entries().getFirst().amount());
 				assertEquals(fence.baselineId(), fresh.baselineId()); assertEquals(fence.statusRevision(), fresh.statusRevision()); assertTrue(fresh.watermark() > 0);
@@ -97,12 +105,20 @@ class InventoryFluidScopeFramesTest {
 		@Override public Optional<InventorySourceInput> bindCommitted(InventorySourceInput input, Target committed) {
 			return Optional.of(new InventorySourceInput(committed, input.readOwner(), input.face(), input.resourceKind()));
 		}
+		@Override public Set<InventoryResourceKind> freezeInventoryPreviewLanes(UUID owner, String targetTypeId) {
+			return Set.of(InventoryResourceKind.FLUID);
+		}
 		@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
 			var type = nx.pingwheel.common.domain.TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
-			@Nullable var reason = admission.prepare(world.target, nx.pingwheel.common.marker.TargetKey.from(world.target), "entity_block", List.of(player));
+			var audience = List.of(player);
+			var key = nx.pingwheel.common.marker.TargetKey.from(world.target);
+			@Nullable var reason = admission.prepare(world.target, key, "entity_block", audience);
 			if (reason != null) return new InventoryBackend.Created(null, reason);
-			return new InventoryBackend.Created(store.create(player, world.target, type, type.defaultPingType(),
-				new nx.pingwheel.common.marker.MarkerAnchor(1, 64, 3), 1, expiry, List.of(player)).marker(), null);
+			var authorization = InventoryTestGrants.allowAll(audience);
+			reason = admission.finishAuthorization(authorization);
+			if (reason != null) return new InventoryBackend.Created(null, reason);
+			return new InventoryBackend.Created(store.create(player, world.target, key, type, type.defaultPingType(),
+				new nx.pingwheel.common.marker.MarkerAnchor(1, 64, 3), 1, expiry, audience, List.of(), authorization).marker(), null);
 		}
 		@Override public int encodedBytes(InventoryS2CPacket packet, int displayBytes, int frameBytes) {
 			if (packet.markerId() != null && !packet.entries().isEmpty() && beforeMeasurement != null) {
@@ -128,14 +144,14 @@ class InventoryFluidScopeFramesTest {
 	}
 	@Test void revokeUnloadAndExpiryDuringRecomputeKeepOrdinaryFailureAndHardStop() {
 		for (boolean unload : new boolean[] {false, true}) try (var f = new Scenario()) {
-			f.backend.tick(2, f.world.settings); f.world.scope = "two"; f.backend.tick(3, f.world.settings);
+			f.backend.tick(2, f.world.settings); f.world.scope = "two"; f.backend.tick(5, f.world.settings);
 			int start = f.host.packets.size(); f.world.authorized = unload; f.world.loaded = !unload;
-			f.backend.tick(4, f.world.settings);
+			f.backend.tick(6, f.world.settings);
 			assertTrue(f.since(start).stream().anyMatch(packet -> packet.status() == InventoryS2CPacket.Status.INVALID));
 			assertTrue(f.since(start).stream().noneMatch(packet -> !packet.entries().isEmpty())); assertEquals(80, f.host.store.allMarkers().getFirst().expiresAtTick());
 		}
 		try (var f = new Scenario()) {
-			f.backend.tick(2, f.world.settings); f.world.scope = "two"; f.backend.tick(3, f.world.settings);
+			f.backend.tick(2, f.world.settings); f.world.scope = "two"; f.backend.tick(5, f.world.settings);
 			int reads = f.world.reads, binds = f.world.binds, start = f.host.packets.size();
 			f.backend.tick(80, f.world.settings); f.backend.tick(81, f.world.settings);
 			assertEquals(reads, f.world.reads); assertEquals(binds, f.world.binds); assertTrue(f.since(start).stream().noneMatch(packet -> !packet.entries().isEmpty()));
@@ -152,13 +168,13 @@ class InventoryFluidScopeFramesTest {
 		}
 		try (var f = new Scenario()) {
 			f.backend.tick(2, f.world.settings); f.world.layoutToken = "changed-members";
-			int start = f.host.packets.size(); f.backend.tick(3, f.world.settings);
+			int start = f.host.packets.size(); f.backend.tick(5, f.world.settings);
 			assertTrue(f.since(start).stream().anyMatch(packet -> packet.status() == InventoryS2CPacket.Status.INVALID));
 			assertTrue(f.since(start).stream().noneMatch(packet -> !packet.entries().isEmpty()));
 		}
 		try (var f = new Scenario()) {
 			f.backend.tick(2, f.world.settings); f.world.scope = "two"; f.world.layoutToken = "changed-members";
-			int start = f.host.packets.size(); f.backend.tick(3, f.world.settings);
+			int start = f.host.packets.size(); f.backend.tick(5, f.world.settings);
 			assertTrue(f.since(start).stream().anyMatch(packet -> packet.status() == InventoryS2CPacket.Status.INVALID),
 				"a simultaneous topology change is not a scope-only transition");
 			assertTrue(f.since(start).stream().noneMatch(packet -> !packet.entries().isEmpty()));
@@ -185,7 +201,7 @@ class InventoryFluidScopeFramesTest {
 			if (change == 0) f.world.routeIdentity = new Object();
 			else if (change == 1) f.world.replaceMember(f.world.root);
 			else f.world.clearMemberWitness();
-			f.backend.tick(3, f.world.settings);
+			f.backend.tick(5, f.world.settings);
 			assertTrue(f.since(start).stream().anyMatch(packet -> packet.status() == InventoryS2CPacket.Status.INVALID));
 			assertTrue(f.since(start).stream().noneMatch(packet -> !packet.entries().isEmpty()));
 			assertTrue(f.since(start).stream().noneMatch(packet -> packet.status() == InventoryS2CPacket.Status.UPDATING && packet.watermark() == 0));
@@ -195,10 +211,10 @@ class InventoryFluidScopeFramesTest {
 	@Test void clearedHistoricalProofRecoversByFreshScanAndNeverPublishesSyntheticZeroOrOldCompletion() {
 		try (var f = new Scenario()) {
 			f.backend.tick(2, f.world.settings); int start = f.host.packets.size(); f.world.clearMemberWitness();
-			f.backend.tick(3, f.world.settings);
+			f.backend.tick(5, f.world.settings);
 			assertTrue(f.since(start).stream().anyMatch(packet -> packet.status() == InventoryS2CPacket.Status.INVALID));
 			assertTrue(f.since(start).stream().noneMatch(packet -> !packet.entries().isEmpty()));
-			for (int tick = 4; tick < 80 && f.since(start).stream().noneMatch(packet -> !packet.entries().isEmpty()); tick++)
+			for (int tick = 6; tick < 80 && f.since(start).stream().noneMatch(packet -> !packet.entries().isEmpty()); tick++)
 				f.backend.tick(tick, f.world.settings);
 			var fresh = f.since(start).stream().filter(packet -> !packet.entries().isEmpty()).findFirst().orElseThrow();
 			assertTrue(fresh.completeScan()); assertEquals(162, fresh.entries().getFirst().amount());

@@ -283,6 +283,7 @@ class ClientItemDisplayOpaqueComponentsTest {
 		long request = client.open(new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest"), BlockFace.NORTH, "entity_block");
 		client.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(5, 3, 5, 5)).stamp(100, 1));
 		client.accept(InventoryS2CPacket.policy(7, 100, 1, java.util.Set.of("entity_block")));
+		client.accept(InventoryS2CPacket.opened(7, 100, 1, request, 1));
 		String encoded = payload("");
 		var entry = new InventoryS2CPacket.Entry("exact-variant", itemId(), "fallback.registry.label", encoded, 9007199254740993L, 1, false, null);
 		client.accept(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, request, null, 4, 1, 5, 0, 1,
@@ -1157,6 +1158,7 @@ class ClientItemDisplayOpaqueComponentsTest {
 			BlockFace.NORTH, "entity_block");
 		client.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(5, 3, 5, 5)).stamp(100, 1));
 		client.accept(InventoryS2CPacket.policy(7, 100, 1, java.util.Set.of("entity_block")));
+		client.accept(InventoryS2CPacket.opened(7, 100, 1, request, 1));
 		String encoded = payload("");
 		var entry = new InventoryS2CPacket.Entry("exact-variant", itemId(), "fallback.registry.label", encoded,
 			9007199254740993L, 1, false, null, 0, false, "take");

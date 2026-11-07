@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.BiConsumer;
 import net.minecraft.SharedConstants;
@@ -48,7 +49,9 @@ import nx.pingwheel.common.interaction.state.TargetValidation;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerSnapshot;
+import nx.pingwheel.common.marker.PingAuthorization;
 import nx.pingwheel.common.marker.ServerMarkerStore;
+import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
@@ -59,8 +62,10 @@ import nx.pingwheel.common.presentation.PresentationPropertySelection;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.PresentationReceiptContent;
+import nx.pingwheel.common.presentation.TestContentGrants;
 import nx.pingwheel.common.presentation.client.ClientPresentation;
 import nx.pingwheel.common.presentation.inventory.InventoryBackend;
+import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.inventory.InventorySyncPublisher;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
@@ -83,7 +88,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * Bounded reflection reuses that private fixture and wraps the existing publisher transport port;
  * it does not replace policy, source validation, publication admission or packet encoding.
  * Oracles: D0018; inventory Creation snapshot receipt; presentation Receipt content descriptor;
- * names/chat Content receipt lifecycle. No socket, loader launch or rendered-pixel claim.
+ * names/chat Content receipt lifecycle; D0019 creation-frozen recipient/content authorization.
+ * No socket, loader launch or rendered-pixel claim.
  */
 @NotNullByDefault
 class InventoryCreationSnapshotIntegrationTest {
@@ -147,32 +153,52 @@ class InventoryCreationSnapshotIntegrationTest {
 			MarkerId marker = f.select(request, lane);
 			Component chat = f.assertImmediate(marker, partial);
 			String text = chat.getString();
+			assertNotNull(f.client.inventory.creationSnapshot(marker),
+				"a successful create freezes its own grant regardless of the stale HELLO-derived deny");
+			var createdPacket = (PresentationS2CPacket) f.created(marker).packet();
+			assertTrue(createdPacket.markerGrant().authorization()
+					.allowsField(InventoryPresentation.ADAPTER_ID, lane.fieldId()),
+				"the atomic create carries the freshly authorized inventory grant");
+			assertEquals(lane, createdPacket.markerGrant().trackingKind());
+			assertTrue(f.events.stream().noneMatch(e -> e.recipient().equals(RECEIVER)
+					&& e.packet() instanceof InventoryS2CPacket p && p.kind() == InventoryS2CPacket.Kind.OPENED),
+				"OPENED answers only an actual Preview OPEN request, never a CREATED handoff");
 			assertEquals(Optional.of(false), f.client.authorization(lane), "creation does not globally clear old deny");
 			assertTrue(f.publisher().controlQueued(RECEIVER, pending));
 			Event created = f.created(marker);
 			assertTrue(f.events.stream().noneMatch(e -> e.recipient().equals(RECEIVER) && e.packet() instanceof InventoryS2CPacket p
 				&& p.kind() == InventoryS2CPacket.Kind.POLICY && p.resourceKind() == lane && p.allowedTypes().contains(TYPE)));
 			// Replay a genuine production data cut, stamped for this receiver, while its deny is still installed.
-			// It must be rejected even though this membership has a valid creation grant.
+			// The create-frozen grant, not the queued POLICY hint, owns this marker's content.
 			f.state(lane, "amount", 9L);
 			f.tick(1);
+			f.client.inventoryPacket(wire(InventoryS2CPacket.policy(lane, f.client.inventory.epoch(),
+				f.client.presentation.epoch(), f.client.presentation.sessionView(), Set.of())));
+			assertEquals(Optional.of(false), f.client.authorization(lane), "the stale POLICY hint is not create authority");
 			InventoryS2CPacket data = f.events.stream().filter(e -> e.recipient().equals(OWNER))
 				.map(Event::packet).filter(InventoryS2CPacket.class::isInstance).map(InventoryS2CPacket.class::cast)
 				.filter(p -> marker.equals(p.markerId()) && !p.entries().isEmpty()).findFirst().orElseThrow();
 			var receiverData = new InventoryS2CPacket(data.kind(), data.protocol(), f.client.inventory.epoch(), data.requestId(), data.markerId(),
 				data.baselineId(), data.statusRevision(), data.watermark(), data.partIndex(), data.partCount(), data.completeScan(), data.status(),
 				data.checksum(), data.entries(), data.offer(), f.client.presentation.epoch(), f.client.presentation.sessionView(), data.allowedTypes(),
-				data.commitId(), data.rejection(), data.resourceKind());
+				data.commitId(), data.rejection(), data.resourceKind(), data.laneBits());
 			f.client.inventoryPacket(wire(receiverData));
-			assertEquals(Optional.of(false), f.client.authorization(lane));
-			assertEquals(0, f.client.inventory.stats().trackedChannels(), "scoped creation cannot admit normal data");
-			assertEquals(5L, f.client.inventory.tracking(marker).entries().getFirst().count());
-			for (int tick = 2; tick <= 180 && !f.client.inventory.tracking(marker).complete(); tick++) f.tick(tick);
+			assertEquals(Optional.of(false), f.client.authorization(lane), "the denied hint remains only a hint after replay");
+			assertEquals(1, f.client.inventory.stats().trackedChannels(),
+				"the frozen creation grant admits its own data despite the stale deny hint");
+			assertNotNull(f.client.inventory.creationSnapshot(marker), "old POLICY denial cannot revoke the creation seed");
+			assertEquals(partial ? 5L : 9L, f.client.inventory.tracking(marker).entries().getFirst().count(),
+				"an incomplete first replay keeps the provisional creation quantity until its cut closes");
+			for (int tick = 2; tick <= 180 && !Optional.of(true).equals(f.client.authorization(lane)); tick++) f.tick(tick);
 			assertEquals(Optional.of(true), f.client.authorization(lane));
-			assertTrue(f.client.inventory.tracking(marker).complete(), () -> "post-congestion tracking=" + f.client.inventory.tracking(marker)
-				+ " offer=" + f.client.inventory.offer() + " stats=" + f.client.inventory.stats() + " packets=" + f.events.stream()
-				.filter(e -> e.recipient().equals(RECEIVER) && e.packet() instanceof InventoryS2CPacket).toList());
-			assertEquals(9L, InventoryTrackingRenderer.lines(f.client.inventory.tracking(marker)).getFirst().count());
+			var tracking = f.client.inventory.tracking(marker);
+			long displayed = InventoryTrackingRenderer.lines(tracking).getFirst().count();
+			if (tracking.complete()) {
+				assertEquals(9L, displayed, "a closed cut replaces the provisional creation seed");
+			} else {
+				assertEquals(5L, displayed,
+					"an incomplete UPDATING cut cannot replace the provisional creation seed");
+			}
 			Event allow = f.events.stream().filter(e -> e.recipient().equals(RECEIVER) && e.packet() instanceof InventoryS2CPacket p
 				&& p.kind() == InventoryS2CPacket.Kind.POLICY && p.resourceKind() == lane && p.allowedTypes().contains(TYPE)).findFirst().orElseThrow();
 			assertTrue(created.order() < allow.order(), "actual target recipient CREATED handoff precedes POLICY");
@@ -191,6 +217,11 @@ class InventoryCreationSnapshotIntegrationTest {
 			var initial = (PresentationS2CPacket) f.created(marker).packet();
 			assertEquals(PresentationReceiptContent.Kind.SUPPRESSED, initial.content().kind());
 			assertNull(initial.content().inventorySnapshot());
+			assertNotNull(initial.markerGrant(), "every CREATED carries the mandatory frozen grant");
+			assertEquals(lane, initial.markerGrant().trackingKind(),
+				"a suppressed receipt still carries its dedicated inventory domain");
+			assertFalse(initial.markerGrant().authorization().allowsField(InventoryPresentation.ADAPTER_ID, lane.fieldId()),
+				"the denied recipient's own grant excludes the inventory field");
 			var bytes = new FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
 			try {
 				initial.write(bytes);
@@ -201,20 +232,33 @@ class InventoryCreationSnapshotIntegrationTest {
 			assertTrue(f.client.feedback.content.isEmpty()); assertTrue(f.client.feedback.ordinary.isEmpty());
 			assertTrue(f.client.inventory.tracking(marker).entries().isEmpty());
 			assertNull(f.client.inventory.creationSnapshot(marker));
+			assertEquals(Optional.of(lane), f.client.inventory.trackingKind(marker));
+			assertEquals(Optional.of(false), f.client.inventory.receiptAuthorization(marker,
+				f.client.presentation.epoch(), f.client.presentation.sessionView(), TYPE),
+				"no snapshot and a denied lane cannot be turned into an authorized receipt");
 		}
 	}
 
-	@Test void newCreationGrantCannotClearAnotherMarkersDenial() throws Exception {
+	@Test void deOpCannotClearAnOldCreateGrantAndANewGrantDoesNotBackfillIt() throws Exception {
 		try (var f = new Combined(Map.of(InventoryResourceKind.ITEM.fieldId(), 2), OWNER)) {
 			f.preview(InventoryResourceKind.ITEM, false);
 			MarkerId old = f.select(f.open(), InventoryResourceKind.ITEM); f.assertImmediate(old, false);
 			put(get(f.serverFixture, "player"), "permission", 0); f.tick(1);
-			assertNull(f.client.inventory.creationSnapshot(old));
+			assertNotNull(f.client.inventory.creationSnapshot(old), "de-op cannot revoke the create-frozen seed");
+			assertEquals(5L, f.client.inventory.creationSnapshot(old).amount());
+			assertEquals(Optional.of(InventoryResourceKind.ITEM), f.client.inventory.trackingKind(old));
+			assertEquals(Optional.of(true), f.client.inventory.receiptAuthorization(old,
+				f.client.presentation.epoch(), f.client.presentation.sessionView(), TYPE),
+				"the old marker keeps its create-time receipt entitlement");
 			put(get(f.serverFixture, "player"), "permission", 2); f.tick(2);
 			MarkerId fresh = f.select(f.open(), InventoryResourceKind.ITEM);
-			assertNotNull(f.client.inventory.creationSnapshot(fresh));
-			assertNull(f.client.inventory.creationSnapshot(old));
-			assertEquals(Optional.of(false), f.client.inventory.receiptAuthorization(old, f.client.presentation.epoch(), f.client.presentation.sessionView(), TYPE));
+			assertNotNull(f.client.inventory.creationSnapshot(fresh), "a new create uses the then-current server authority");
+			assertEquals(5L, f.client.inventory.creationSnapshot(fresh).amount());
+			assertEquals(5L, f.client.inventory.creationSnapshot(old).amount(),
+				"the new grant neither replaces nor backfills the old marker's seed");
+			assertEquals(Optional.of(true), f.client.inventory.receiptAuthorization(old,
+				f.client.presentation.epoch(), f.client.presentation.sessionView(), TYPE),
+				"the new grant neither revokes nor widens the old marker's entitlement");
 			f.replayAndRefresh(old); assertEquals(2, f.client.feedback.content.size());
 		}
 	}
@@ -243,8 +287,12 @@ class InventoryCreationSnapshotIntegrationTest {
 			for (boolean property : new boolean[] {false, true}) {
 				var type = TargetTypeCatalog.builtIn().findById(TYPE).orElseThrow();
 				var ref = PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.CUSTOM_NAME);
-				var marker = f.store().create(OWNER, (Target) get(f.serverFixture, "requestedTarget"), type, type.defaultPingType(),
-					new MarkerAnchor(1,64,3), 0, 10000, List.of(OWNER), property ? List.of(PresentationPropertySelection.of(ref, "request")) : List.of()).marker();
+				var grant = TestContentGrants.basic(Set.of(PresentationBasic.NAME, PresentationBasic.CUSTOM_NAME));
+				var target = (Target) get(f.serverFixture, "requestedTarget");
+				var marker = f.store().create(OWNER, target, TargetKey.from(target), type, type.defaultPingType(),
+					new MarkerAnchor(1,64,3), 0, 10000, List.of(OWNER),
+					property ? List.of(PresentationPropertySelection.of(ref, "request")) : List.of(),
+					new PingAuthorization(Map.of(OWNER, grant))).marker();
 				PresentationServer.created(f.server(), marker, nx.pingwheel.common.name.TargetNameJsonCodec.UNKNOWN, "owner", Map.of(PresentationBasic.ID,
 					new PresentationSection(PresentationBasic.ID, 1, Map.of(PresentationBasic.NAME, new PresentationValue.Text("\"chest\""),
 						PresentationBasic.CUSTOM_NAME, new PresentationValue.Text("selected custom")), false)));
@@ -255,18 +303,56 @@ class InventoryCreationSnapshotIntegrationTest {
 		}
 	}
 
-	@Test void soundCallbackRevocationCannotBeUndoneBySeedInstallationOrServerReplay() throws Exception {
+	@Test void soundCallbackLanePolicyCannotRevokeTheFrozenCreationGrantOrDuplicateChat() throws Exception {
 		try (var f = new Combined(Map.of(), OWNER)) {
 			f.preview(InventoryResourceKind.ITEM, false); long request = f.open();
-			f.client.feedback.onPlay = () -> f.client.inventoryPacket(wire(InventoryS2CPacket.policy(f.client.inventory.epoch(),
-				f.client.presentation.epoch(), f.client.presentation.sessionView(), java.util.Set.of())));
+			f.client.feedback.onPlay = () -> f.client.inventoryPacket(wire(InventoryS2CPacket.policy(
+				InventoryResourceKind.ITEM, f.client.inventory.epoch(), f.client.presentation.epoch(),
+				f.client.presentation.sessionView(), Set.of())));
 			MarkerId marker = f.select(request, InventoryResourceKind.ITEM);
 			assertTrue(f.client.runtime.store().marker(marker).isPresent());
-			assertNull(f.client.inventory.creationSnapshot(marker)); assertTrue(f.client.inventory.tracking(marker).entries().isEmpty());
+			assertNotNull(f.client.inventory.creationSnapshot(marker),
+				"a sound-time POLICY denial cannot revoke the create-frozen seed");
+			assertEquals(5L, f.client.inventory.creationSnapshot(marker).amount());
+			assertEquals(Optional.of(true), f.client.inventory.receiptAuthorization(marker,
+				f.client.presentation.epoch(), f.client.presentation.sessionView(), TYPE),
+				"the frozen receipt entitlement survives the stale denial");
+			assertEquals(1, f.client.feedback.content.size());
+			assertEquals(1, f.client.feedback.sounds.size());
+			f.state(InventoryResourceKind.ITEM, "amount", 9L);
+			for (int tick = 1; tick <= 30 && !f.client.inventory.tracking(marker).complete(); tick++) f.tick(tick);
+			assertTrue(f.client.inventory.tracking(marker).complete());
+			assertEquals(9L, InventoryTrackingRenderer.lines(f.client.inventory.tracking(marker)).getFirst().count(),
+				"the frozen tracking grant is not fenced by the stale POLICY hint");
+			f.replayAndRefresh(marker);
+			assertNotNull(f.client.inventory.creationSnapshot(marker), "a known replay cannot replace the retained seed");
+			assertEquals(1, f.client.feedback.content.size(), "replay cannot send a second receipt");
+			assertEquals(1, f.client.feedback.sounds.size());
+		}
+	}
+
+	@Test void sourceProofFailureSuppressesTheReceiptWithoutInventingASeedOrChat() throws Exception {
+		try (var f = new Combined(Map.of(), OWNER)) {
+			f.preview(InventoryResourceKind.ITEM, false); long request = f.open();
+			put(f.serverFixture, "beforePublish", (Runnable) () -> {
+				try { f.state(InventoryResourceKind.ITEM, "valid", false); }
+				catch (Exception failure) { throw new AssertionError(failure); }
+			});
+			MarkerId marker = f.select(request, InventoryResourceKind.ITEM);
+			put(f.serverFixture, "beforePublish", null);
+			for (int tick = 1; tick <= 3 && f.events.stream().noneMatch(e -> e.packet() instanceof PresentationS2CPacket p
+				&& p.kind() == PresentationS2CPacket.Kind.CREATED && p.snapshot().id().equals(marker)); tick++) f.tick(tick);
+			var created = (PresentationS2CPacket) f.created(marker).packet();
+			assertEquals(PresentationReceiptContent.Kind.SUPPRESSED, created.content().kind());
+			assertNull(created.content().inventorySnapshot());
+			assertNotNull(created.markerGrant(), "a suppressed receipt still carries the frozen grant");
+			assertEquals(InventoryResourceKind.ITEM, created.markerGrant().trackingKind());
+			assertTrue(f.client.runtime.store().marker(marker).isPresent(), "Basic still inserts");
+			assertNull(f.client.inventory.creationSnapshot(marker), "no source proof cannot fabricate a creation seed");
+			assertEquals(Optional.of(InventoryResourceKind.ITEM), f.client.inventory.trackingKind(marker));
 			assertTrue(f.client.feedback.content.isEmpty());
-			f.client.inventoryPacket(wire(InventoryS2CPacket.policy(f.client.inventory.epoch(), f.client.presentation.epoch(),
-				f.client.presentation.sessionView(), java.util.Set.of(TYPE))));
-			f.replayAndRefresh(marker); assertNull(f.client.inventory.creationSnapshot(marker)); assertTrue(f.client.feedback.content.isEmpty());
+			assertTrue(f.client.feedback.ordinary.isEmpty());
+			assertTrue(f.client.inventory.tracking(marker).entries().isEmpty());
 		}
 	}
 
@@ -359,6 +445,14 @@ class InventoryCreationSnapshotIntegrationTest {
 		Component assertImmediate(MarkerId marker, boolean partial) {
 			var packet = (PresentationS2CPacket) created(marker).packet();
 			var snapshot = Objects.requireNonNull(packet.content().inventorySnapshot());
+			assertNotNull(packet.markerGrant(), "CREATED carries the mandatory frozen content grant");
+			assertEquals(snapshot.resourceKind(), packet.markerGrant().trackingKind(),
+				"the receipt snapshot and its dedicated inventory domain travel together");
+			assertTrue(packet.markerGrant().authorization().allowsField(InventoryPresentation.ADAPTER_ID,
+					snapshot.resourceKind().fieldId()),
+				"the receipt is backed by the create-frozen inventory field grant");
+			assertEquals(packet.markerGrant(), client.presentation.markerGrant(marker).orElseThrow(),
+				"the client retains the server's canonical grant without resynthesis");
 			assertEquals(5, snapshot.amount()); assertEquals(!partial, snapshot.previewComplete()); assertEquals(partial, snapshot.quantityUncertain());
 			assertEquals(1, client.feedback.content.size(), "CREATED must synchronously chat retained Preview5 without POLICY/Tracking completion");
 			assertTrue(client.feedback.ordinary.isEmpty());

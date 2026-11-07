@@ -24,6 +24,8 @@ import nx.pingwheel.common.marker.MarkerRejectReason;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
+import nx.pingwheel.common.presentation.MarkerContentGrant;
+import nx.pingwheel.common.presentation.PresentationGrant;
 import nx.pingwheel.common.presentation.inventory.InventoryChecksums;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
@@ -146,6 +148,8 @@ public final class ClientInventory {
 	private static final class MarkerMetadata {
 		final String targetType;
 		final boolean sable;
+		final PresentationGrant grant;
+		final @Nullable InventoryResourceKind trackingKind;
 		final Set<InventoryResourceKind> receiptDenials = EnumSet.noneOf(InventoryResourceKind.class);
 		final Map<InventoryResourceKind, Long> retiredBaselines = new EnumMap<>(InventoryResourceKind.class);
 		@Nullable InventoryCreationSnapshot creationSeed;
@@ -153,9 +157,14 @@ public final class ClientInventory {
 		boolean creationReceived;
 		boolean displayCreationSeed;
 
-		MarkerMetadata(MarkerSnapshot marker) {
+		MarkerMetadata(MarkerSnapshot marker, MarkerContentGrant content) {
 			targetType = marker.targetTypeId();
 			sable = marker.target() instanceof Target.ExternalBlockTarget external && external.providerId().equals("sable");
+			grant = content.authorization();
+			trackingKind = content.trackingKind();
+			for (InventoryResourceKind kind : InventoryResourceKind.values())
+				if (!grant.allowsField(nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID, kind.fieldId()))
+					receiptDenials.add(kind);
 		}
 	}
 	private static final class PreviewRequest {
@@ -165,6 +174,9 @@ public final class ClientInventory {
 		final Map<InventoryResourceKind, Long> retiredBaselines = new EnumMap<>(InventoryResourceKind.class);
 		boolean released;
 		boolean sent;
+		/** False until the server's complete OPENED entitlement; no lane data is accepted before it. */
+		boolean opened;
+		int laneMask;
 		PreviewRequest(Target target, BlockFace face, String targetType) { this.target = target; this.face = face; this.targetType = targetType; }
 	}
 	private static final class PreviewState {
@@ -338,42 +350,41 @@ public final class ClientInventory {
 		this.store = new InventoryClientStore(MAX_ASSEMBLY_PARTS, MAX_METADATA_ENTRIES, STORE_CHANNELS);
 	}
 
-	/** Whether an OFFER established the epoch and server periods for this connection. */
+	/** Whether the inventory transport has an OFFER and a current presentation session. */
 	public boolean ready() {
-		return ready(InventoryResourceKind.ITEM) || ready(InventoryResourceKind.FLUID);
+		return offered && presentationEpoch != 0;
 	}
+	/** Schema-compatible transport readiness; current POLICY is only a future-input hint. */
 	public boolean ready(InventoryResourceKind kind) {
-		return !schemaDisabled.contains(kind) && offered && policyViews.getOrDefault(kind, -1L) == presentationView && presentationEpoch != 0;
+		return !schemaDisabled.contains(kind) && ready();
+	}
+	private boolean policyReady(InventoryResourceKind kind) {
+		return ready(kind) && policyViews.getOrDefault(kind, -1L) == presentationView;
 	}
 	private boolean allows(InventoryResourceKind kind, @Nullable String targetType) {
-		return ready(kind) && allowedTypes.getOrDefault(kind, Set.of()).contains(targetType);
+		return policyReady(kind) && allowedTypes.getOrDefault(kind, Set.of()).contains(targetType);
 	}
-	/** Current accepted dedicated-route policy; absence means authority is not ready, never denial. */
+	/** Current accepted dedicated-route policy hint; absence means authority is not ready, never denial. */
 	public Optional<Boolean> authorization(long currentEpoch, long currentView, String targetTypeId) {
 		return authorization(InventoryResourceKind.ITEM, currentEpoch, currentView, targetTypeId);
 	}
 	public Optional<Boolean> authorization(InventoryResourceKind kind, long currentEpoch, long currentView, String targetTypeId) {
 		if (schemaDisabled.contains(kind)) return Optional.of(false);
-		if (!ready(kind) || currentEpoch != presentationEpoch || currentView != presentationView) return Optional.empty();
+		if (!policyReady(kind) || currentEpoch != presentationEpoch || currentView != presentationView) return Optional.empty();
 		return Optional.of(allows(kind, targetTypeId));
 	}
 	/** Receipt-only denial survives reallow within membership; unknown kind never borrows another lane's grant. */
 	public Optional<Boolean> receiptAuthorization(MarkerId markerId, long currentEpoch, long currentView, String targetTypeId) {
 		if (currentEpoch != presentationEpoch || currentView != presentationView) return Optional.empty();
 		@Nullable MarkerMetadata known = knownMarkers.get(markerId);
-		if (known != null && !known.targetType.equals(targetTypeId)) return Optional.of(false);
-		@Nullable InventoryResourceKind kind = markerKinds.get(markerId);
-		if (kind != null) {
-			@Nullable MarkerMetadata marker = knownMarkers.get(markerId);
-			if (marker != null && marker.creationSeed != null && marker.creationKind == kind) return Optional.of(true);
-			if (marker != null && marker.receiptDenials.contains(kind)) return Optional.of(false);
-			return authorization(kind, currentEpoch, currentView, targetTypeId);
-		}
-		for (InventoryResourceKind lane : InventoryResourceKind.values()) {
-			Optional<Boolean> permitted = authorization(lane, currentEpoch, currentView, targetTypeId);
-			if (permitted.isEmpty() || permitted.get()) return Optional.empty();
-		}
-		return Optional.of(false);
+		if (known == null) return Optional.empty();
+		if (!known.targetType.equals(targetTypeId)) return Optional.of(false);
+		@Nullable InventoryResourceKind kind = known.trackingKind;
+		if (kind == null) return Optional.empty();
+		return Optional.of(inventoryAllowed(known, kind) && !known.receiptDenials.contains(kind));
+	}
+	private static boolean inventoryAllowed(MarkerMetadata marker, InventoryResourceKind kind) {
+		return marker.grant.allowsField(nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID, kind.fieldId());
 	}
 	/** Installs only the atomic CREATED projection, scoped to this accepted marker and membership. */
 	public boolean creationSnapshot(MarkerId markerId, InventoryCreationSnapshot snapshot) {
@@ -381,6 +392,7 @@ public final class ClientInventory {
 		if (marker == null || marker.creationReceived || presentationEpoch == 0) return false;
 		InventoryResourceKind kind = snapshot.resourceKind();
 		if (schemaDisabled.contains(kind)) return false;
+		if (!inventoryAllowed(marker, kind)) return false;
 		@Nullable InventoryResourceKind previous = markerKinds.get(markerId);
 		if (previous != null && previous != kind || marker.creationKind != null && marker.creationKind != kind) return false;
 		markerKinds.put(markerId, kind);
@@ -391,8 +403,44 @@ public final class ClientInventory {
 		marker.displayCreationSeed = state == null || !state.sourceComplete;
 		return true;
 	}
+	/**
+	 * Side-effect-free admission for the optional dedicated inventory sidecar of
+	 * an incoming CREATED. Ordinary markers always admit. A payload-free
+	 * SUPPRESSED receipt admits only its marker identity/frozen grant, so missing
+	 * inventory schema or capacity cannot hide the Basic marker. A creation
+	 * snapshot must additionally pass capacity, accepted schema, grant/domain
+	 * compatibility and any existing marker identity before presentation or
+	 * marker-store mutation.
+	 */
+	public boolean admitsCreation(@Nullable MarkerSnapshot snapshot, @Nullable MarkerContentGrant content,
+		@Nullable InventoryCreationSnapshot creation) {
+		if (content == null || content.trackingKind() == null) return true;
+		if (snapshot == null) return false;
+		InventoryResourceKind kind = content.trackingKind();
+		@Nullable MarkerMetadata known = knownMarkers.get(snapshot.id());
+		if (known != null) {
+			return known.trackingKind == kind && known.targetType.equals(snapshot.targetTypeId())
+				&& known.grant.equals(content.authorization());
+		}
+		// A payload-free SUPPRESSED receipt has no creation sidecar to install.
+		// Its marker identity and frozen grant still drive Basic display and the
+		// independent receipt denial, so inventory schema or channel capacity
+		// cannot drop the whole CREATED. Any later Tracking data remains fenced by
+		// the frozen lane grant and this marker never gains a creation seed/chat.
+		if (creation == null) return true;
+		if (schemaDisabled.contains(kind)) return false;
+		if (creation.resourceKind() != kind
+			|| !content.authorization().allowsField(
+				nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID, kind.fieldId()))
+			return false;
+		if (knownMarkers.size() >= MAX_TRACKED_CHANNELS) return false;
+		@Nullable InventoryResourceKind existing = markerKinds.get(snapshot.id());
+		return existing == null || existing == kind;
+	}
 	public boolean acceptsCreationSnapshot(MarkerId markerId, @Nullable InventoryCreationSnapshot snapshot) {
 		if (snapshot == null || schemaDisabled.contains(snapshot.resourceKind())) return false;
+		@Nullable MarkerMetadata marker = knownMarkers.get(markerId);
+		if (marker == null || !inventoryAllowed(marker, snapshot.resourceKind())) return false;
 		@Nullable InventoryResourceKind existing = markerKinds.get(markerId);
 		return existing == null || existing == snapshot.resourceKind();
 	}
@@ -400,19 +448,29 @@ public final class ClientInventory {
 		@Nullable MarkerMetadata marker = knownMarkers.get(id);
 		return marker == null ? null : marker.creationSeed;
 	}
-	/** A current suppressed refresh revokes creation authority without changing ordinary lane policy. */
+	/** A current suppressed refresh can hide the provisional display, never revoke the frozen grant. */
 	public void revokeCreationSnapshot(MarkerId id) {
 		@Nullable MarkerMetadata marker = knownMarkers.get(id);
 		if (marker == null || marker.creationKind == null) return;
-		marker.creationSeed = null;
 		marker.displayCreationSeed = false;
-		marker.receiptDenials.add(marker.creationKind);
 	}
 	/** Accepted presentation schema gates only inventory; incompatible lanes never remain loading. */
 	public void acceptedSchemas(Set<InventoryResourceKind> accepted) {
 		for (InventoryResourceKind kind : InventoryResourceKind.values()) {
-			if (accepted.contains(kind)) schemaDisabled.remove(kind);
-			else {
+			if (accepted.contains(kind)) {
+				schemaDisabled.remove(kind);
+				for (MarkerMetadata marker : knownMarkers.values())
+					if (inventoryAllowed(marker, kind)) marker.receiptDenials.remove(kind);
+				for (var entry : requests.entrySet()) {
+					PreviewRequest request = entry.getValue();
+					if (request.released) continue;
+					if (request.opened && (request.laneMask & (1 << kind.wireId())) == 0) continue;
+					previews.computeIfAbsent(new PreviewKey(entry.getKey(), kind),
+						key -> new PreviewState(kind, request, key.requestId(), request.target, request.face, request.targetType));
+				}
+				for (PreviewState state : List.copyOf(previews.values()))
+					if (state.resourceKind == kind && requests.containsKey(state.requestId) && ready(kind)) sendOpen(state);
+			} else {
 				boolean wasDisabled = schemaDisabled.contains(kind);
 				schemaDisabled.add(kind);
 				int removedPreviews = (int) previews.keySet().stream().filter(key -> key.kind() == kind).count();
@@ -422,7 +480,13 @@ public final class ClientInventory {
 					marker.displayCreationSeed = false;
 					marker.receiptDenials.add(kind);
 				}
-				previews.values().removeIf(state -> state.resourceKind == kind);
+				for (var iterator = previews.entrySet().iterator(); iterator.hasNext();) {
+					var entry = iterator.next();
+					if (entry.getKey().kind() == kind) {
+						entry.getValue().request.retiredBaselines.merge(kind, entry.getValue().baselineId, Math::max);
+						iterator.remove();
+					}
+				}
 				for (TrackingState state : List.copyOf(tracking.values())) if (state.resourceKind == kind) {
 					store.expire(state.channel); tracking.remove(state.markerId); removeUnknownSessions(state.markerId);
 				}
@@ -433,19 +497,56 @@ public final class ClientInventory {
 	}
 	public Optional<InventoryResourceKind> trackingKind(MarkerId markerId) { return Optional.ofNullable(markerKinds.get(markerId)); }
 	public boolean schemaUnavailable() { return schemaDisabled.size() == InventoryResourceKind.values().length; }
-	/** Accepted presentation RESET immediately purges old-view inventory, before POLICY arrives. */
+	/**
+	 * Same-epoch RESET keeps every frozen marker grant, Preview request/mask and
+	 * displayable closed quantity while fencing old-view assembly and packets.
+	 * A true epoch change clears the complete inventory session.
+	 */
 	public void presentationReset(long epoch, long view) {
 		if (epoch == 0 || view < 0 || (epoch == presentationEpoch && view <= presentationView)) return;
-		purgeViews(); presentationEpoch = epoch; presentationView = view; policyViews.clear(); allowedTypes.clear();
+		if (epoch != presentationEpoch) {
+			purgeViews(); selectionResults.clear();
+			presentationEpoch = epoch; presentationView = view; policyViews.clear(); allowedTypes.clear(); return;
+		}
+		presentationView = view; policyViews.clear(); allowedTypes.clear();
+		for (PreviewRequest request : requests.values()) {
+			for (PreviewState state : previews.values()) if (state.request == request) {
+				request.retiredBaselines.merge(state.resourceKind, state.baselineId, Math::max);
+				state.receivedPartIndexes.clear(); state.groupComplete = false; state.groupRejected = false; state.completeScan = false;
+				state.serverSeen = false;
+			}
+			request.opened = false;
+		}
+		for (TrackingState state : tracking.values()) {
+			@Nullable MarkerMetadata marker = knownMarkers.get(state.markerId);
+			if (marker != null) marker.retiredBaselines.merge(state.resourceKind, state.baselineId, Math::max);
+			retainHistory(state);
+			state.metadata.clear();
+			state.groups.clear();
+			state.pending = null;
+			clearCuts(state);
+			store.discardAssembly(state.channel);
+			state.committed = false; state.sourceComplete = false; state.committedChecksum = 0L; state.watermark = 0L;
+			state.baselineId = InventoryClientStore.NO_BASELINE; state.statusRevision = -1L;
+		}
+		unknown.clear(); pendingCommits.clear();
 	}
+	/** Explicit deny-only bridge for fixtures that predate per-marker content grants. */
 	public void markerCreated(@Nullable MarkerSnapshot marker) {
-		if (marker == null || knownMarkers.size() >= MAX_TRACKED_CHANNELS && !knownMarkers.containsKey(marker.id())) return;
+		markerCreated(marker, new MarkerContentGrant(PresentationGrant.denied(), null));
+	}
+	/** Installs the one complete per-marker grant and its immutable dedicated domain. */
+	public void markerCreated(@Nullable MarkerSnapshot marker, @Nullable MarkerContentGrant content) {
+		if (marker == null || content == null || knownMarkers.size() >= MAX_TRACKED_CHANNELS && !knownMarkers.containsKey(marker.id())) return;
 		if (knownMarkers.containsKey(marker.id())) return;
-		MarkerMetadata metadata = new MarkerMetadata(marker);
+		@Nullable InventoryResourceKind domain = content.trackingKind();
+		if (domain != null) {
+			@Nullable InventoryResourceKind existing = markerKinds.get(marker.id());
+			if (existing != null && existing != domain) return;
+		}
+		MarkerMetadata metadata = new MarkerMetadata(marker, content);
+		if (domain != null) markerKinds.put(marker.id(), domain);
 		knownMarkers.put(marker.id(), metadata);
-		for (InventoryResourceKind kind : InventoryResourceKind.values())
-			if (authorization(kind, presentationEpoch, presentationView, metadata.targetType).equals(Optional.of(false)))
-				metadata.receiptDenials.add(kind);
 	}
 	public void markerRemoved(MarkerId marker) {
 		knownMarkers.remove(marker); markerKinds.remove(marker); @Nullable TrackingState state = tracking.remove(marker);
@@ -571,17 +672,13 @@ public final class ClientInventory {
 				ClientInventoryDiagnostics.laneDecision(requestId, kind, "lane-schema-disabled", targetType);
 				continue;
 			}
-			if (!ready(kind)) {
-				ClientInventoryDiagnostics.laneDecision(requestId, kind, "lane-pending", targetType);
-			} else if (!allows(kind, targetType)) {
-				ClientInventoryDiagnostics.laneDecision(requestId, kind, "lane-policy-denied", targetType);
-				continue;
-			}
-			PreviewState state = new PreviewState(kind, request, requestId, target, face, targetType);
-			previews.put(new PreviewKey(requestId, kind), state);
+			// Current POLICY never removes a candidate lane; the server's complete
+			// OPENED result decides every lane for this request.
+			ClientInventoryDiagnostics.laneDecision(requestId, kind, ready(kind) ? "lane-pending-opened" : "lane-pending", targetType);
+			previews.put(new PreviewKey(requestId, kind), new PreviewState(kind, request, requestId, target, face, targetType));
 		}
 		for (PreviewState state : List.copyOf(previews.values()))
-			if (state.requestId == requestId && requests.containsKey(requestId) && allows(state.resourceKind, targetType)) sendOpen(state);
+			if (state.requestId == requestId && requests.containsKey(requestId) && ready(state.resourceKind)) sendOpen(state);
 		return requestId;
 	}
 
@@ -607,16 +704,17 @@ public final class ClientInventory {
 	}
 	public @Unmodifiable List<PreviewEntryReference> selectable(long requestId, InventoryResourceKind kind) {
 		@Nullable PreviewState state = previews.get(new PreviewKey(requestId, kind));
-		if (state == null || !state.serverSeen || state.request.released || !allows(kind, state.targetType)
-			|| state.status == InventoryS2CPacket.Status.INVALID) return List.of();
+		if (state == null || !state.request.opened || (state.request.laneMask & (1 << kind.wireId())) == 0
+			|| !state.serverSeen || state.request.released || state.status == InventoryS2CPacket.Status.INVALID) return List.of();
 		return state.entries.keySet().stream().map(key -> new PreviewEntryReference(kind, requestId, state.baselineId, state.statusRevision, key)).toList();
 	}
 	/** Single-use release. The injected dispatcher owns the shared courtesy limiter and transport result. */
 	public DispatchOutcome select(@Nullable PreviewEntryReference reference, String itemPingType, Function<InventoryC2SPacket, DispatchOutcome> dispatch) {
 		if (reference == null || !ready(reference.resourceKind())) return DispatchOutcome.NOT_READY;
 		@Nullable PreviewState state = previews.get(new PreviewKey(reference.requestId(), reference.resourceKind()));
-		if (state == null || state.baselineId != reference.baselineId() || state.statusRevision != reference.stateRevision()
-			|| !state.entries.containsKey(reference.entryKey()) || !bounded(itemPingType) || !allows(state.resourceKind, state.targetType)) return DispatchOutcome.STALE_REFERENCE;
+		if (state == null || !state.request.opened || (state.request.laneMask & (1 << reference.resourceKind().wireId())) == 0
+			|| state.baselineId != reference.baselineId() || state.statusRevision != reference.stateRevision()
+			|| !state.entries.containsKey(reference.entryKey()) || !bounded(itemPingType)) return DispatchOutcome.STALE_REFERENCE;
 		if (state.request.released) return DispatchOutcome.ALREADY_RELEASED;
 		state.request.released = true;
 		if (state.status == InventoryS2CPacket.Status.INVALID)
@@ -748,39 +846,26 @@ public final class ClientInventory {
 		if (packet.presentationEpoch() != presentationEpoch || packet.view() != presentationView) { fencedPackets++; return; }
 		if (packet.kind() == InventoryS2CPacket.Kind.POLICY) {
 			InventoryResourceKind lane = packet.resourceKind();
+			// POLICY is only a future-input hint. It never prunes an old Preview,
+			// Tracking consumer, creation seed or receipt denial.
 			allowedTypes.put(lane, packet.allowedTypes()); policyViews.put(lane, packet.view());
 			ClientInventoryDiagnostics.lanePolicy(lane, !packet.allowedTypes().isEmpty(), packet.view(),
 				packet.allowedTypes().size());
-			for (MarkerMetadata marker : knownMarkers.values()) {
-				if (!allows(lane, marker.targetType)) {
-					marker.receiptDenials.add(lane);
-					if (marker.creationKind == lane) { marker.creationSeed = null; marker.displayCreationSeed = false; }
+			return;
+		}
+		if (packet.kind() == InventoryS2CPacket.Kind.OPENED) {
+			@Nullable PreviewRequest request = requests.get(packet.requestId());
+			if (request == null || !ready() || packet.requestId() <= 0) { fencedPackets++; return; }
+			if (request.opened) {
+				if (request.laneMask != packet.laneBits()) invalidPackets++;
+				return;
+			}
+			request.opened = true; request.laneMask = packet.laneBits();
+			for (InventoryResourceKind kind : InventoryResourceKind.values())
+				if ((request.laneMask & (1 << kind.wireId())) == 0) {
+					@Nullable PreviewState denied = previews.remove(new PreviewKey(packet.requestId(), kind));
+					if (denied != null) { request.retiredBaselines.merge(kind, denied.baselineId, Math::max); denied.entries.clear(); }
 				}
-			}
-			for (TrackingState state : List.copyOf(tracking.values())) {
-				@Nullable MarkerMetadata metadata = knownMarkers.get(state.markerId);
-				if (state.resourceKind == lane && (metadata == null || !allows(lane, metadata.targetType))) {
-					if (metadata != null) {
-						long retired = Math.max(state.baselineId, state.pending == null ? state.baselineId : state.pending.baselineId);
-						for (UnknownKey key : unknown.keySet()) if (key.resourceKind() == lane && key.markerId().equals(state.markerId)) retired = Math.max(retired, key.baselineId());
-						metadata.retiredBaselines.merge(lane, retired, Math::max);
-					}
-					ClientInventoryDiagnostics.laneRevoked("tracking", state.serverRequestId, lane, state.status, state.baselineId);
-					store.expire(state.channel); tracking.remove(state.markerId); removeUnknownSessions(state.markerId);
-				}
-			}
-			for (PreviewState state : List.copyOf(previews.values())) if (state.resourceKind == lane && !allows(lane, state.targetType)) {
-				state.request.retiredBaselines.merge(lane, state.baselineId, Math::max);
-				ClientInventoryDiagnostics.laneRevoked("preview", state.requestId, lane, state.status, state.baselineId);
-				previews.remove(new PreviewKey(state.requestId, lane));
-			}
-			for (var entry : requests.entrySet()) {
-				PreviewRequest request = entry.getValue();
-				if (!request.released && allows(lane, request.targetType)) previews.computeIfAbsent(new PreviewKey(entry.getKey(), lane),
-					key -> new PreviewState(lane, request, key.requestId(), request.target, request.face, request.targetType));
-			}
-			for (PreviewState state : List.copyOf(previews.values()))
-				if (requests.containsKey(state.requestId) && allows(state.resourceKind, state.targetType)) sendOpen(state);
 			return;
 		}
 		if (packet.kind() == InventoryS2CPacket.Kind.SELECTED || packet.kind() == InventoryS2CPacket.Kind.REJECT) {
@@ -798,11 +883,15 @@ public final class ClientInventory {
 		}
 		if (!ready(packet.resourceKind())) { fencedPackets++; return; }
 		@Nullable MarkerMetadata marker = knownMarkers.get(packet.markerId());
-		if (packet.markerId() != null && (marker == null || !allows(packet.resourceKind(), marker.targetType)
+		if (packet.markerId() != null && (marker == null || marker.trackingKind != packet.resourceKind()
+			|| !inventoryAllowed(marker, packet.resourceKind())
 			|| markerKinds.containsKey(packet.markerId()) && markerKinds.get(packet.markerId()) != packet.resourceKind())) { fencedPackets++; return; }
 		if (marker != null && packet.baselineId() <= marker.retiredBaselines.getOrDefault(packet.resourceKind(), -1L)) { fencedPackets++; return; }
-		if (packet.kind() == InventoryS2CPacket.Kind.PREVIEW
-			&& !previews.containsKey(new PreviewKey(packet.requestId(), packet.resourceKind()))) { fencedPackets++; return; }
+		if (packet.kind() == InventoryS2CPacket.Kind.PREVIEW) {
+			@Nullable PreviewState state = previews.get(new PreviewKey(packet.requestId(), packet.resourceKind()));
+			@Nullable PreviewRequest request = requests.get(packet.requestId());
+			if (state == null || request == null || !request.opened || (request.laneMask & (1 << packet.resourceKind().wireId())) == 0) { fencedPackets++; return; }
+		}
 		if (isData(packet.kind()) && !withinEffectiveCaps(packet, effectiveDisplayBytes, effectiveFrameBytes)) { capRejectedPackets++; return; }
 		acceptedPackets++;
 		switch (packet.kind()) {
@@ -810,7 +899,7 @@ public final class ClientInventory {
 			case SNAPSHOT, STREAM -> acceptTrackedData(packet);
 			case STATUS -> acceptStatus(packet);
 			case HEARTBEAT -> acceptHeartbeat(packet);
-			case OFFER, POLICY, SELECTED, REJECT -> {}
+			case OFFER, POLICY, SELECTED, REJECT, OPENED -> {}
 		}
 	}
 
@@ -830,7 +919,7 @@ public final class ClientInventory {
 			applyEffectiveCaps(next);
 		}
 		for (PreviewState state : List.copyOf(previews.values())) {
-			if (requests.containsKey(state.requestId) && allows(state.resourceKind, state.targetType))
+			if (requests.containsKey(state.requestId) && ready(state.resourceKind))
 				sendOpen(state);
 		}
 	}

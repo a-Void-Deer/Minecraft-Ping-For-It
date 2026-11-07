@@ -25,9 +25,15 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Replays the production publisher's ordered wire frames, not hand-ordered status/data fixtures. */
 class InventoryPublicationIntegrationTest {
+	/** Headless host fixture with the ITEM lane explicitly frozen for this item-only file. */
+	static class ItemHost extends InventoryBackendTest.Host {
+		@Override public Set<InventoryResourceKind> freezeInventoryPreviewLanes(UUID owner, String targetTypeId) {
+			return Set.of(InventoryResourceKind.ITEM);
+		}
+	}
 	@Test void genericEventualEmptyAndAbsentZeroStayUncertainWhileExplicitAtomicAdapterKeepsReady() {
 		for (boolean atomic : new boolean[] {false, true}) {
-			var host = new InventoryBackendTest.Host(); var settings = InventorySettings.serverDefaults();
+			var host = new ItemHost(); var settings = InventorySettings.serverDefaults();
 			var reads = new java.util.concurrent.atomic.AtomicInteger(); boolean[] empty = {false};
 			try (var backend = new InventoryBackend(host, new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 1) {
 				@Override public InventoryDomainCodec.@org.jetbrains.annotations.Nullable Item read(int slot) {
@@ -73,7 +79,7 @@ class InventoryPublicationIntegrationTest {
 		var rejected = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.STONE);
 		var payload = new net.minecraft.nbt.CompoundTag(); payload.putString("data", "\u0800".repeat(23000));
 		rejected.set(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.of(payload));
-		var host = new InventoryBackendTest.Host(); var settings = InventorySettings.serverDefaults();
+		var host = new ItemHost(); var settings = InventorySettings.serverDefaults();
 		settings.getPreview().setPeriodTicks(1); settings.setPhysicalSlotsPerTick(nx.pingwheel.common.config.IntLimit.finite(1));
 		var reads = new java.util.concurrent.atomic.AtomicInteger(); long firstAmount = 9_007_199_254_740_993L;
 		try (var logs = new InventoryDiagnosticsTestCapture(); var backend = new InventoryBackend(host,
@@ -115,7 +121,9 @@ class InventoryPublicationIntegrationTest {
 		final UUID recipient;
 		int cursor;
 		Endpoint(UUID recipient, MarkerSnapshot marker) {
-			this.recipient = recipient; client.presentationReset(100, 1); client.markerCreated(marker);
+			this.recipient = recipient; client.presentationReset(100, 1);
+			client.markerCreated(marker, InventoryTestGrants.content(
+				InventoryTestGrants.allowAll(List.of(recipient)), recipient, InventoryResourceKind.ITEM));
 		}
 		void drain(InventoryBackendTest.Host host) { drain(host, p -> true); }
 		void drain(InventoryBackendTest.Host host, java.util.function.Predicate<InventoryS2CPacket> applied) {
@@ -132,7 +140,7 @@ class InventoryPublicationIntegrationTest {
 	}
 	@Test void firstTrackingIdentityRefusalReportsIncompleteAcrossFailedSweepsThenCompletesOnlySuccessfulEvidence() {
 		for (boolean overflow : List.of(false, true)) {
-			class Host extends InventoryBackendTest.Host {
+			class Host extends ItemHost {
 				boolean refuseFailureControl = true;
 				@Override public void send(UUID recipient, InventoryS2CPacket packet) {
 					if (refuseFailureControl && packet.kind() == InventoryS2CPacket.Kind.STATUS && packet.status() == InventoryS2CPacket.Status.INCOMPLETE)
@@ -190,7 +198,7 @@ class InventoryPublicationIntegrationTest {
 	}
 
 	@Test void historicalFoldChurnStopsAtTheRequestCategoryBoundWithoutReusingRetiredTokens() throws Exception {
-		var host = new InventoryBackendTest.Host(); var settings = InventorySettings.serverDefaults(); settings.setPendingMemoryMiB(64);
+		var host = new ItemHost(); var settings = InventorySettings.serverDefaults(); settings.setPendingMemoryMiB(64);
 		var unlimitedBytes = ByteMultiplier.one(); unlimitedBytes.setUnlimited(true);
 		settings.getPreview().setClientByteMultiplier(unlimitedBytes); settings.getPreview().setGlobalByteMultiplier(unlimitedBytes);
 		settings.getPreview().setPeriodTicks(1); settings.setPhysicalSlotsPerTick(nx.pingwheel.common.config.IntLimit.finite(1));
@@ -206,8 +214,8 @@ class InventoryPublicationIntegrationTest {
 			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.hello(), 0, settings);
 			var requests = new ArrayList<IPacket>(); var client = new ClientInventory(requests::add); client.presentationReset(100, 1);
 			host.packets.forEach(packet -> client.accept(wire(packet))); client.open(InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH, "entity_block");
-			backend.handle(InventoryBackendTest.A, (InventoryC2SPacket) requests.getFirst(), 0, settings);
 			int cursor = host.packets.size();
+			backend.handle(InventoryBackendTest.A, (InventoryC2SPacket) requests.getFirst(), 0, settings);
 			for (int tick = 0; tick < 270; tick++) {
 				backend.tick(tick, settings);
 				for (; cursor < host.packets.size(); cursor++) client.accept(wire(host.packets.get(cursor)));
@@ -227,7 +235,7 @@ class InventoryPublicationIntegrationTest {
 	}
 
 	@Test void backendRetiresTrackingBaselineAfterItsFenceHandsOffWhileExactDataIsStillAdmitted() {
-		class Host extends InventoryBackendTest.Host {
+		class Host extends ItemHost {
 			boolean blockExact = true;
 			@Override public void send(UUID recipient, InventoryS2CPacket packet) {
 				if (blockExact && packet.markerId() != null && packet.entries().stream().anyMatch(entry -> !entry.fallback()))
@@ -262,7 +270,7 @@ class InventoryPublicationIntegrationTest {
 	}
 
 	@Test void retiredSelectCannotSpendFreshAttemptWhenBackendReplacementPublicationWasMemoryRefused() {
-		var host = new InventoryBackendTest.Host(); var settings = InventorySettings.serverDefaults(); settings.setPendingMemoryMiB(64);
+		var host = new ItemHost(); var settings = InventorySettings.serverDefaults(); settings.setPendingMemoryMiB(64);
 		settings.getPreview().setPeriodTicks(1); settings.setPhysicalSlotsPerTick(nx.pingwheel.common.config.IntLimit.finite(1));
 		var reads = new java.util.concurrent.atomic.AtomicInteger(); var memory = new java.util.concurrent.atomic.AtomicReference<RetainedMemoryLedger>();
 		boolean[] refusePublication = {true};
@@ -292,7 +300,7 @@ class InventoryPublicationIntegrationTest {
 		long[] amounts = {9_007_199_254_740_993L, 7, 11};
 		for (int[] order : List.of(new int[] {0, 1, 2}, new int[] {0, 2, 1}, new int[] {1, 0, 2},
 			new int[] {1, 2, 0}, new int[] {2, 0, 1}, new int[] {2, 1, 0})) for (int width : new int[] {1, 2, 64}) {
-			var host = new InventoryBackendTest.Host(); var settings = InventorySettings.serverDefaults();
+			var host = new ItemHost(); var settings = InventorySettings.serverDefaults();
 			settings.getPreview().setPeriodTicks(1); settings.setPhysicalSlotsPerTick(nx.pingwheel.common.config.IntLimit.finite(width));
 			var reads = new java.util.concurrent.atomic.AtomicInteger();
 			try (var backend = new InventoryBackend(host, new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 4) {
@@ -308,8 +316,9 @@ class InventoryPublicationIntegrationTest {
 				var requests = new ArrayList<IPacket>(); var client = new ClientInventory(requests::add); client.presentationReset(100, 1);
 				for (var packet : host.packets) client.accept(wire(packet));
 				long request = client.open(InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH, "entity_block");
+				int cursor = host.packets.size();
 				backend.handle(InventoryBackendTest.A, (InventoryC2SPacket) requests.getFirst(), 0, settings);
-				int cursor = host.packets.size(); var exact = new ArrayList<InventoryS2CPacket>();
+				var exact = new ArrayList<InventoryS2CPacket>();
 				for (int tick = 0; tick < 8; tick++) {
 					backend.tick(tick, settings);
 					for (; cursor < host.packets.size(); cursor++) {
@@ -330,7 +339,7 @@ class InventoryPublicationIntegrationTest {
 	}
 
 	@Test void retiredExactSelectBeforeAggregateHandoffRejectsAndReplaysWithoutSpendingTheFreshAggregateAttempt() {
-		class Host extends InventoryBackendTest.Host {
+		class Host extends ItemHost {
 			boolean blockAggregate = true;
 			@Override public void send(UUID recipient, InventoryS2CPacket packet) {
 				if (blockAggregate && packet.kind() == InventoryS2CPacket.Kind.PREVIEW && packet.entries().stream().anyMatch(InventoryS2CPacket.Entry::fallback))
@@ -363,7 +372,7 @@ class InventoryPublicationIntegrationTest {
 
 	@Test void foldedQuotaCountsOneCategoryForLaterSafeVariantsAndOverflowNeverPublishesWrappedOrCompleteTotals() {
 		for (boolean overflow : List.of(false, true)) {
-			var host = new InventoryBackendTest.Host(); var settings = InventorySettings.serverDefaults();
+			var host = new ItemHost(); var settings = InventorySettings.serverDefaults();
 			settings.getPreview().setMaxVariantsPerClientPeriod(nx.pingwheel.common.config.IntLimit.finite(1));
 			var reads = new java.util.concurrent.atomic.AtomicInteger();
 			try (var backend = new InventoryBackend(host, new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 4) {
@@ -375,8 +384,9 @@ class InventoryPublicationIntegrationTest {
 				backend.handle(InventoryBackendTest.A, InventoryC2SPacket.hello(), 0, settings);
 				var requests = new ArrayList<IPacket>(); var client = new ClientInventory(requests::add); client.presentationReset(100, 1);
 				host.packets.forEach(packet -> client.accept(wire(packet))); client.open(InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH, "entity_block");
+				int start = host.packets.size();
 				backend.handle(InventoryBackendTest.A, (InventoryC2SPacket) requests.getFirst(), 0, settings);
-				int start = host.packets.size(); backend.tick(0, settings);
+				backend.tick(0, settings);
 				for (var packet : host.packets.subList(start, host.packets.size())) client.accept(wire(packet));
 				var view = client.preview(1); assertEquals(1, view.entries().size()); assertTrue(view.entries().getFirst().fallback());
 				if (overflow) {
@@ -388,7 +398,7 @@ class InventoryPublicationIntegrationTest {
 	}
 
 	@Test void exactCategoryQuotaIsNotRefundedWhenAnIdentityRefusalRetiresItsRows() {
-		var host = new InventoryBackendTest.Host(); var settings = InventorySettings.serverDefaults();
+		var host = new ItemHost(); var settings = InventorySettings.serverDefaults();
 		settings.getPreview().setMaxVariantsPerClientPeriod(nx.pingwheel.common.config.IntLimit.finite(1));
 		var reads = new java.util.concurrent.atomic.AtomicInteger();
 		try (var backend = new InventoryBackend(host, new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 2) {
@@ -405,7 +415,7 @@ class InventoryPublicationIntegrationTest {
 	}
 
 	@Test void partiallyScannedRetainedPreviewKeepsPaidCursorAndTruthfulUpdatingStatusAcrossTicks() {
-		var host = new InventoryBackendTest.Host(); var settings = InventorySettings.serverDefaults();
+		var host = new ItemHost(); var settings = InventorySettings.serverDefaults();
 		settings.getPreview().setPeriodTicks(1); settings.setPhysicalSlotsPerTick(nx.pingwheel.common.config.IntLimit.finite(1));
 		var reads = new java.util.concurrent.atomic.AtomicInteger();
 		try (var backend = new InventoryBackend(host, new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 4) {
@@ -414,8 +424,9 @@ class InventoryPublicationIntegrationTest {
 			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.hello(), 0, settings);
 			var requests = new ArrayList<IPacket>(); var client = new ClientInventory(requests::add); client.presentationReset(100, 1);
 			host.packets.forEach(packet -> client.accept(wire(packet))); client.open(InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH, "entity_block");
+			int cursor = host.packets.size();
 			backend.handle(InventoryBackendTest.A, (InventoryC2SPacket) requests.getFirst(), 0, settings);
-			int cursor = host.packets.size(); backend.tick(0, settings);
+			backend.tick(0, settings);
 			for (; cursor < host.packets.size(); cursor++) client.accept(wire(host.packets.get(cursor)));
 			var first = client.preview(1); assertFalse(first.completeScan());
 			backend.tick(1, settings); // the original scan continues: slot 1 is consumed exactly once
@@ -433,6 +444,7 @@ class InventoryPublicationIntegrationTest {
 	}
 	@Test void smallRecoveryFencePrecedesSnapshotAndEachRecipientReplacesGreyBaselineWithoutOldStreamResurrection() {
 		try (var f = new InventoryBackendTest.Fixture()) {
+			f.host.frozenLanes = Set.of(InventoryResourceKind.ITEM);
 			f.open(); f.backend.handle(InventoryBackendTest.A, f.select(1), 1, f.settings);
 			InventoryPublicationTicks.withoutScanSlots(f.backend, 1, f.settings);
 			var marker = f.host.store.allMarkers().getFirst(); var a = new Endpoint(InventoryBackendTest.A, MarkerSnapshot.from(marker)); var b = new Endpoint(InventoryBackendTest.B, MarkerSnapshot.from(marker));
@@ -440,7 +452,7 @@ class InventoryPublicationIntegrationTest {
 			f.amount = 8; f.backend.tick(5, f.settings); a.drain(f.host); b.drain(f.host);
 			@org.jetbrains.annotations.Unmodifiable List<InventoryS2CPacket> oldStreams = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.STREAM).toList(); assertEquals(4, oldStreams.size());
 			long baselineA = a.client.tracking(marker.id()).baselineId(), baselineB = b.client.tracking(marker.id()).baselineId();
-			f.valid = false; f.backend.tick(6, f.settings); a.drain(f.host); b.drain(f.host);
+			f.valid = false; f.backend.tick(8, f.settings); a.drain(f.host); b.drain(f.host);
 			assertTrue(a.client.tracking(marker.id()).grey()); assertEquals(8, a.client.tracking(marker.id()).entries().getFirst().count()); assertTrue(b.client.tracking(marker.id()).grey());
 			int start = f.host.packets.size(); f.valid = true; f.amount = 11; f.backend.tick(9, f.settings);
 			for (UUID recipient : List.of(InventoryBackendTest.A, InventoryBackendTest.B)) {
@@ -463,6 +475,7 @@ class InventoryPublicationIntegrationTest {
 	}
 	@Test void missingApplicationStreamIsRepairedByRealCompletionControlsAtNormalHeartbeatCadenceAndCooldownIsBounded() {
 		try (var f = new InventoryBackendTest.Fixture()) {
+			f.host.frozenLanes = Set.of(InventoryResourceKind.ITEM);
 			f.host.expiry = 200; f.settings.getTracking().setHeartbeatPeriods(16); f.open(); f.backend.handle(InventoryBackendTest.A, f.select(1), 1, f.settings);
 			var marker = f.host.store.allMarkers().getFirst(); var a = new Endpoint(InventoryBackendTest.A, MarkerSnapshot.from(marker)); var b = new Endpoint(InventoryBackendTest.B, MarkerSnapshot.from(marker));
 			f.backend.tick(2, f.settings); a.drain(f.host); b.drain(f.host); count(a.client, marker.id(), 7);
@@ -573,7 +586,7 @@ class InventoryPublicationIntegrationTest {
 			}
 			assertTrue(endpoint.client.tracking(marker).complete()); assertEquals(12, endpoint.client.tracking(marker).entries().size()); assertEquals(1, endpoint.client.tracking(marker).watermark());
 		}
-		class BackpressuredHost extends InventoryBackendTest.Host {
+		class BackpressuredHost extends ItemHost {
 			boolean blocked = true; final List<Long> attempts = new ArrayList<>();
 			@Override public void send(UUID player, InventoryS2CPacket packet) {
 				if (player.equals(InventoryBackendTest.A) && packet.kind() == InventoryS2CPacket.Kind.SNAPSHOT) {
@@ -666,7 +679,7 @@ class InventoryPublicationIntegrationTest {
 		}
 	}
 	@Test void laterSharedRetirementWithdrawsAnEarlierCheckedTerminalPreviewBeforePublisherDrain() {
-		var host = new InventoryBackendTest.Host(); var settings = InventorySettings.serverDefaults();
+		var host = new ItemHost(); var settings = InventorySettings.serverDefaults();
 		settings.getPreview().setPeriodTicks(1); var reads = new java.util.concurrent.atomic.AtomicInteger();
 		boolean[] invalidatingTick = {false}, readable = {true}; var checks = new java.util.concurrent.atomic.AtomicInteger();
 		var runtime = new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 2) {
@@ -694,6 +707,7 @@ class InventoryPublicationIntegrationTest {
 	}
 	@Test void cachedTrackingPublicationDefersWithZeroProviderCallsAndResumesSameBaselineWhenBudgetReturns() {
 		try (var f = new InventoryBackendTest.Fixture()) {
+			f.host.frozenLanes = Set.of(InventoryResourceKind.ITEM);
 			f.open(); f.backend.handle(InventoryBackendTest.A, f.select(1), 1, f.settings); f.backend.tick(2, f.settings);
 			var marker = f.host.store.allMarkers().getFirst();
 			long baseline = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && marker.id().equals(p.markerId())).findFirst().orElseThrow().baselineId();
@@ -709,7 +723,7 @@ class InventoryPublicationIntegrationTest {
 		}
 	}
 	@Test void queuedFoldReplacementRetiresExactCutAndKeepsLatestRowsThroughQueueAndTransportRecoveryWithoutRecapture() {
-		class Host extends InventoryBackendTest.Host {
+		class Host extends ItemHost {
 			boolean blocked;
 			final List<InventoryS2CPacket> attempts = new ArrayList<>();
 			@Override public void send(UUID recipient, InventoryS2CPacket packet) {
@@ -746,8 +760,9 @@ class InventoryPublicationIntegrationTest {
 			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.hello(), 0, settings);
 			host.packets.forEach(packet -> client.accept(wire(packet)));
 			long request = client.open(InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH, "entity_block");
+			int cursor = host.packets.size();
 			backend.handle(InventoryBackendTest.A, (InventoryC2SPacket) requests.getFirst(), 0, settings);
-			int cursor = host.packets.size(); backend.tick(0, settings); backend.tick(1, settings);
+			backend.tick(0, settings); backend.tick(1, settings);
 			for (; cursor < host.packets.size(); cursor++) client.accept(wire(host.packets.get(cursor)));
 			var original = client.preview(request); assertEquals(2, original.entries().size());
 			String retiredKey = original.entries().stream().filter(entry -> entry.itemId().equals("minecraft:stone")).findFirst().orElseThrow().key();
@@ -820,6 +835,8 @@ class InventoryPublicationIntegrationTest {
 		client.accept(wire(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(5, 3, 5, 16)).stamp(100, 1)));
 		client.accept(wire(InventoryS2CPacket.policy(7, 100, 1, Set.of("entity_block"))));
 		long request = client.open(InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH, "entity_block");
+		client.accept(wire(InventoryS2CPacket.opened(7, 100, 1, request,
+			InventoryBackend.laneMask(Set.of(InventoryResourceKind.ITEM)))));
 		try (var publisher = new InventorySyncPublisher(memory, transport)) {
 			publisher.advance(0, settings); var context = InventorySyncPublisherTest.context("preview/1", 1);
 			assertTrue(publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, request, null, "preview", null)));
@@ -859,7 +876,7 @@ class InventoryPublicationIntegrationTest {
 	}
 
 	@Test void trackingRestartKeepsPublishedCompletedEvidenceUntilFreshAcceptedResultAndInvalidityFencesRealFrames() {
-		var host = new InventoryBackendTest.Host(); host.expiry = 30;
+		var host = new ItemHost(); host.expiry = 30;
 		var settings = InventorySettings.serverDefaults(); var reads = new java.util.concurrent.atomic.AtomicInteger();
 		boolean[] newObservation = {false}, oldValid = {true};
 		try (var backend = new InventoryBackend(host, new InventoryRuntime(input -> {

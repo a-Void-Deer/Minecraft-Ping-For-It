@@ -40,6 +40,7 @@ import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.presentation.*;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
 import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
+import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryServer;
 import nx.pingwheel.common.presentation.inventory.InventoryBackend.InitialDecision;
 import nx.pingwheel.common.presentation.inventory.InventoryBackend.InitialPublication;
@@ -82,6 +83,14 @@ public final class PresentationServer {
 	private static PresentationPreviewServer previews;
 
 	private PresentationServer() {}
+
+	/** Session identity and inventory-compatible kinds for a ready, online recipient. */
+	public record PresentationSession(long epoch, long view,
+		@org.jetbrains.annotations.Unmodifiable Set<nx.pingwheel.common.presentation.inventory.InventoryResourceKind> compatibleInventoryKinds) {
+		public PresentationSession {
+			compatibleInventoryKinds = Set.copyOf(compatibleInventoryKinds);
+		}
+	}
 
 	static final class Session {
 		@Nullable UUID recipient;
@@ -181,6 +190,176 @@ public final class PresentationServer {
 		return !packet.isCorrupt() && session != null && session.ready && session.epoch == packet.epoch();
 	}
 
+	/**
+	 * Ready/online/session and accepted Inventory schema-kind access only. It
+	 * deliberately does not consult the current inventory lane policy or fresh
+	 * per-field permission.
+	 */
+	public static Optional<PresentationSession> sessionAccess(UUID recipient) {
+		Session session = recipient == null ? null : SESSIONS.get(recipient);
+		ServerPlayer player = activeServer == null || recipient == null ? null : activeServer.getPlayerList().getPlayer(recipient);
+		if (session == null || !session.ready || player == null) return Optional.empty();
+		return Optional.of(new PresentationSession(session.epoch, session.view, compatibleInventoryKinds(session)));
+	}
+
+	private static Set<nx.pingwheel.common.presentation.inventory.InventoryResourceKind> compatibleInventoryKinds(Session session) {
+		if (!Objects.equals(session.schemas.get(InventoryPresentation.ADAPTER_ID), InventoryPresentation.SCHEMA))
+			return Set.of();
+		Set<nx.pingwheel.common.presentation.inventory.InventoryResourceKind> kinds = new LinkedHashSet<>();
+		for (nx.pingwheel.common.presentation.inventory.InventoryResourceKind kind
+			: nx.pingwheel.common.presentation.inventory.InventoryResourceKind.values()) {
+			boolean local = InventoryPresentation.INSTANCE.fields().stream()
+				.anyMatch(field -> field.id().equals(kind.fieldId()) && field.kind() == PresentationField.Kind.RECORD);
+			boolean accepted = session.manifest.getOrDefault(InventoryPresentation.ADAPTER_ID, List.of()).stream()
+				.anyMatch(field -> field.id().equals(kind.fieldId()) && field.kind() == PresentationField.Kind.RECORD);
+			if (local && accepted) kinds.add(kind);
+		}
+		return Set.copyOf(kinds);
+	}
+
+	/**
+	 * One-shot OPEN freeze of the current preview lanes for an owner and target
+	 * type. The result is the intersection of the fresh per-field authorization
+	 * with the session's negotiated Inventory schema and both field kinds. It is
+	 * not a cached policy and is never reused by later creates.
+	 */
+	public static Set<nx.pingwheel.common.presentation.inventory.InventoryResourceKind> freezeInventoryPreviewLanes(
+		UUID owner, String targetTypeId) {
+		Session session = owner == null ? null : SESSIONS.get(owner);
+		ServerPlayer player = activeServer == null || owner == null ? null : activeServer.getPlayerList().getPlayer(owner);
+		if (session == null || !session.ready || player == null
+			|| !PresentationSettings.isKnownTargetType(targetTypeId)) return Set.of();
+		Set<nx.pingwheel.common.presentation.inventory.InventoryResourceKind> compatible = compatibleInventoryKinds(session);
+		if (compatible.isEmpty()) return Set.of();
+		int level = permissionLevel(player);
+		Set<nx.pingwheel.common.presentation.inventory.InventoryResourceKind> lanes = new LinkedHashSet<>();
+		PresentationSettings current = settings();
+		for (nx.pingwheel.common.presentation.inventory.InventoryResourceKind kind
+			: nx.pingwheel.common.presentation.inventory.InventoryResourceKind.values()) {
+			if (!compatible.contains(kind)) continue;
+			PresentationField field = InventoryPresentation.INSTANCE.fields().stream()
+				.filter(candidate -> candidate.id().equals(kind.fieldId())).findFirst().orElse(null);
+			if (field != null && PresentationAuthorization.fieldAllowed(current, owner, level, field, targetTypeId))
+				lanes.add(kind);
+		}
+		return Set.copyOf(lanes);
+	}
+
+	/**
+	 * The production creation freeze: every audience member, every registered
+	 * adapter, including SECTION and dedicated Inventory, resolved once from the
+	 * then-current policy and permission result. No required session/HELLO state
+	 * narrows the result; a missing definition, type, player or permission result
+	 * is an explicit per-recipient denial.
+	 */
+	public static PingAuthorization freezeForCreate(MinecraftServer server, Target committedTarget,
+		String targetTypeId, UUID owner, List<UUID> audience) {
+		activate(server);
+		PresentationSettings current = settings();
+		Map<UUID, PresentationGrant> grants = new LinkedHashMap<>();
+		for (UUID recipient : audience) {
+			ServerPlayer player = recipient == null ? null : server.getPlayerList().getPlayer(recipient);
+			if (recipient == null || !PresentationSettings.isKnownTargetType(targetTypeId)) {
+				grants.put(recipient, PresentationGrant.denied());
+				continue;
+			}
+			// An offline member is still part of the create audience. Its native
+			// permission result is level zero rather than a missing denial, so a
+			// later first delivery can use the same frozen create result.
+			int level = player == null ? 0 : permissionLevel(player);
+			// Creation freeze is server-owned: the fresh child policy is the only
+			// child-deny source. An earlier advertised RESET map describes that
+			// session's later-create UI/preview inputs, not this marker.
+			Set<PresentationPropertyRef> childBlack = new LinkedHashSet<>(
+				current.policyFor(targetTypeId).childBlack());
+			Map<String, PresentationGrant.AdapterGrant> adapters = new LinkedHashMap<>();
+			for (PresentationAdapter adapter : registry.all()) {
+				Map<String, PresentationField.Kind> fields = new LinkedHashMap<>();
+				for (PresentationField field : adapter.fields()) {
+					if (PresentationAuthorization.fieldAllowed(current, recipient, level, field, targetTypeId))
+						fields.put(field.id(), field.kind());
+				}
+				if (!fields.isEmpty())
+					adapters.put(adapter.adapterId(), new PresentationGrant.AdapterGrant(adapter.schema(), fields));
+			}
+			grants.put(recipient, new PresentationGrant(adapters, childBlack));
+		}
+		return new PingAuthorization(grants);
+	}
+
+	private static int permissionLevel(ServerPlayer player) {
+		int level = 0;
+		for (int candidate = 1; candidate <= 4; candidate++) if (player.hasPermissions(candidate)) level = candidate;
+		return level;
+	}
+
+	/** The session-projected wire grant: canonical grant ∩ accepted catalogue/schema/kind. */
+	static MarkerContentGrant wireContentGrant(Session session, ServerMarker marker) {
+		return wireContentGrant(session, marker, recipientGrant(session, marker));
+	}
+
+	static MarkerContentGrant wireContentGrant(Session session, ServerMarker marker, PresentationGrant canonical) {
+		return wireContentGrant(session, InventoryServer.trackedKind(marker.id()).orElse(null), canonical);
+	}
+
+	/** The exact session-projected grant encoded size, computed without a wire copy. */
+	static int projectedGrantSize(Session session, @Nullable InventoryResourceKind tracked,
+		PresentationGrant canonical) {
+		return nx.pingwheel.common.network.PresentationGrantCodec.projectedEncodedSize(canonical, tracked,
+			adapterId -> wireAdapterIncluded(session, canonical, adapterId),
+			(adapterId, fieldId, kind) -> wireFieldIncluded(session, canonical, adapterId, fieldId, kind),
+			ref -> wireChildIncluded(session, canonical, ref));
+	}
+
+	private static boolean wireAdapterIncluded(Session session, PresentationGrant canonical, String adapterId) {
+		if (session == null) return false;
+		PresentationAdapter local = registry.get(adapterId);
+		PresentationGrant.AdapterGrant frozen = canonical.adapters().get(adapterId);
+		Integer acceptedSchema = session.schemas.get(adapterId);
+		return local != null && frozen != null && acceptedSchema != null
+			&& local.schema() == acceptedSchema && frozen.schema() == acceptedSchema;
+	}
+
+	private static boolean wireFieldIncluded(Session session, PresentationGrant canonical, String adapterId,
+		String fieldId, PresentationField.Kind kind) {
+		if (!wireAdapterIncluded(session, canonical, adapterId)) return false;
+		for (PresentationField field : session.manifest.getOrDefault(adapterId, List.of()))
+			if (field.id().equals(fieldId)) return field.kind() == kind;
+		return false;
+	}
+
+	private static boolean wireChildIncluded(Session session, PresentationGrant canonical,
+		PresentationPropertyRef ref) {
+		PresentationGrant.AdapterGrant frozen = canonical.adapters().get(ref.adapterId());
+		PresentationField.Kind kind = frozen == null ? null : frozen.fields().get(ref.fieldId());
+		return kind != null && wireFieldIncluded(session, canonical, ref.adapterId(), ref.fieldId(), kind);
+	}
+
+	static MarkerContentGrant wireContentGrant(Session session, @Nullable InventoryResourceKind tracked,
+		PresentationGrant canonical) {
+		if (session == null) return MarkerContentGrant.denied(tracked);
+		Map<String, PresentationGrant.AdapterGrant> adapters = new LinkedHashMap<>();
+		for (var accepted : session.schemas.entrySet()) {
+			String adapterId = accepted.getKey();
+			if (!wireAdapterIncluded(session, canonical, adapterId)) continue;
+			PresentationGrant.AdapterGrant frozen = canonical.adapters().get(adapterId);
+			Map<String, PresentationField.Kind> fields = new LinkedHashMap<>();
+			frozen.fields().forEach((id, kind) -> {
+				if (wireFieldIncluded(session, canonical, adapterId, id, kind)) fields.put(id, kind);
+			});
+			if (!fields.isEmpty()) adapters.put(adapterId, new PresentationGrant.AdapterGrant(frozen.schema(), fields));
+		}
+		Set<PresentationPropertyRef> childBlack = new LinkedHashSet<>();
+		for (PresentationPropertyRef ref : canonical.childBlack())
+			if (wireChildIncluded(session, canonical, ref)) childBlack.add(ref);
+		return new MarkerContentGrant(new PresentationGrant(adapters, childBlack), tracked);
+	}
+
+	private static PresentationGrant recipientGrant(Session session, ServerMarker marker) {
+		return session == null || session.recipient == null
+			? PresentationGrant.denied() : marker.authorization().forRecipient(session.recipient);
+	}
+
 	public static void negotiate(MinecraftServer server, ServerPlayer player, PresentationC2SPacket packet,
 		ServerMarkerStore store) {
 		activate(server);
@@ -246,7 +425,10 @@ public final class PresentationServer {
 		session.sent.values().forEach(sent -> sent.deliveredMetadataRevision = sent.metadataRevision);
 	}
 
-	/** One shared discovery allowance, rotating recipients after each canonical inspection. */
+	/**
+	 * One shared discovery allowance, rotating recipients after each canonical
+	 * inspection. Delivery is projected from each marker's frozen grant.
+	 */
 	static @Nullable UUID baselineTick(ServerMarkerStore store, Map<UUID, Session> sessions, @Nullable UUID lastRecipient,
 		long tick, int allowance, Predicate<UUID> online,
 		java.util.function.BiConsumer<UUID, ServerMarker> deliver) {
@@ -290,15 +472,24 @@ public final class PresentationServer {
 		return lastRecipient;
 	}
 
-	static void pruneSession(Session session, ServerMarkerStore store, Function<String, PresentationAdapter> adapters,
-		java.util.function.BiFunction<ServerMarker, PresentationAdapter, Set<String>> fresh) {
+	static void pruneSession(Session session, ServerMarkerStore store, Function<String, PresentationAdapter> adapters) {
 		var iterator = session.sent.entrySet().iterator();
 		while (iterator.hasNext()) {
 			var entry = iterator.next();
 			ServerMarker marker = store.find(new MarkerId(entry.getKey())).orElse(null);
 			if (marker == null) { iterator.remove(); continue; }
-			pruneKnown(session, marker, adapters, adapter -> fresh.apply(marker, adapter));
+			pruneKnown(session, marker, adapters);
 		}
+	}
+
+	/**
+	 * Fixture seam retained for source compatibility. Existing markers always
+	 * prune against the session recipient's canonical marker grant; the legacy
+	 * fresh supplier is deliberately not evaluated and cannot replace it.
+	 */
+	static void pruneSession(Session session, ServerMarkerStore store, Function<String, PresentationAdapter> adapters,
+		java.util.function.BiFunction<ServerMarker, PresentationAdapter, Set<String>> fresh) {
+		pruneSession(session, store, adapters);
 	}
 
 	/** Winner-before-record converges as bounded canonical record pages arrive. */
@@ -348,9 +539,7 @@ public final class PresentationServer {
 			ServerPlayer player = server.getPlayerList().getPlayer(recipient); Session session = SESSIONS.get(recipient);
 			if (player != null && session != null && session.ready) {
 				if (sourceSeeds.isEmpty()) sendInitial(player, session, lease);
-				else sendBaseline(session, lease, registry,
-					adapter -> allowed(player, session, adapter, marker.targetType().id()),
-					packet -> send(player, packet), InventoryServer.tracksInventory(marker.id()), effectiveInventoryTypes(player, session, marker.id()));
+				else sendBaseline(session, lease, registry, packet -> send(player, packet));
 			}
 		}
 	}
@@ -364,16 +553,25 @@ public final class PresentationServer {
 
 	public static void updated(MinecraftServer server, ServerMarker marker) {
 		PresentationAdapter basic = registry.get(PresentationBasic.ID);
-		String targetType = marker.targetType().id();
-		refreshMarker(marker, LEASES, basic, server.getTickCount(), SESSIONS,
-			recipient -> server.getPlayerList().getPlayer(recipient) != null,
-			recipient -> allowed(server.getPlayerList().getPlayer(recipient), SESSIONS.get(recipient),
-				basic, targetType),
-			recipient -> adapter -> allowed(server.getPlayerList().getPlayer(recipient),
-				SESSIONS.get(recipient), adapter, targetType),
-			recipient -> effectiveInventoryTypes(server.getPlayerList().getPlayer(recipient),
-				SESSIONS.get(recipient), marker.id()),
-			(recipient, packet) -> send(server.getPlayerList().getPlayer(recipient), packet));
+		long tick = server.getTickCount();
+		Lease lease = LEASES.get(marker.id().value());
+		java.util.function.Predicate<UUID> online = recipient -> server.getPlayerList().getPlayer(recipient) != null;
+		java.util.function.BiConsumer<UUID, PresentationS2CPacket> delivery =
+			(recipient, packet) -> send(server.getPlayerList().getPlayer(recipient), packet);
+		if (lease != null) {
+			updateLease(lease, marker, tick, SESSIONS, online, recipient -> {
+				Session session = SESSIONS.get(recipient);
+				ServerPlayer player = server.getPlayerList().getPlayer(recipient);
+				if (session != null && player != null) sendInitial(player, session, lease);
+			});
+		} else {
+			deliverKnownRefresh(marker, tick, SESSIONS, online, (recipient, sent) -> {
+				Session session = SESSIONS.get(recipient);
+				if (session != null) sendCachedInitial(session, marker, sent.ownerName, basic,
+					sent.sections.get(PresentationBasic.ID), recipientGrant(session, marker),
+					packet -> delivery.accept(recipient, packet));
+			});
+		}
 	}
 
 	/** Metadata-only refresh, including markers that exceeded the bounded sampling cache. */
@@ -415,14 +613,14 @@ public final class PresentationServer {
 		if (lease != null) {
 			updateLease(lease, marker, tick, sessions, online, recipient ->
 				sendInitial(sessions.get(recipient), lease, basic, allowed.apply(recipient),
-					packet -> delivery.accept(recipient, packet), freshAuthorization.apply(recipient),
-					inventoryTracked, freshInventoryTypes.apply(recipient)));
+					packet -> delivery.accept(recipient, packet), adapter -> Set.of(),
+					inventoryTracked, Set.of()));
 		} else {
 			deliverKnownRefresh(marker, tick, sessions, online, (recipient, sent) ->
 				sendCachedInitial(sessions.get(recipient), marker, sent.ownerName, basic,
 					sent.sections.get(PresentationBasic.ID), allowed.apply(recipient),
-					packet -> delivery.accept(recipient, packet), freshAuthorization.apply(recipient),
-					inventoryTracked, freshInventoryTypes.apply(recipient)));
+					packet -> delivery.accept(recipient, packet), adapter -> Set.of(),
+					inventoryTracked, Set.of()));
 		}
 	}
 
@@ -474,9 +672,8 @@ public final class PresentationServer {
 			session.mask = effective;
 			session.childBlack = effectiveChildBlack;
 			session.view++;
-			session.authorizationCut = observationSerial;
-			pruneSession(session, store, registry::get, (marker, adapter) ->
-				allowed(player, session, adapter, marker.targetType().id()));
+			// A same-epoch reset updates future-create/preview inputs only. It
+			// never prunes or reauthorizes an existing marker's frozen grant.
 			send(player, PresentationS2CPacket.reset(session.epoch, session.view, effective, effectiveChildBlack));
 			startBaseline(session, store);
 			sendWinnerBaseline(session, player.getUUID(), server.getTickCount(), store, packet -> send(player, packet));
@@ -488,9 +685,7 @@ public final class PresentationServer {
 				Lease lease = LEASES.get(marker.id().value());
 				if (lease == null) lease = new Lease(marker, ownerName(server, session, marker));
 				else lease.marker = marker;
-				sendBaseline(session, lease, registry,
-					adapter -> allowed(player, session, adapter, marker.targetType().id()),
-					packet -> send(player, packet), InventoryServer.tracksInventory(marker.id()), effectiveInventoryTypes(player, session, marker.id()));
+				sendBaseline(session, lease, registry, packet -> send(player, packet));
 			});
 		PresentationAdapter.CaptureBudget work = new PresentationAdapter.CaptureBudget(MAX_CAPTURE_WORK_PER_TICK);
 		PresentationFairSampler.Result sampled = sampler.tick(store, LEASES, registry, settings(), tick, work,
@@ -554,9 +749,8 @@ public final class PresentationServer {
 		for (UUID recipient : marker.recipients()) {
 			Session session = SESSIONS.get(recipient);
 			ServerPlayer player = server.getPlayerList().getPlayer(recipient);
-			if (session != null && session.ready && player != null)
-				demand.addAll(projectionAllowed(session, marker, adapter,
-					allowed(player, session, adapter, marker.targetType().id())));
+			if (session != null && session.ready && session.recipient != null && player != null)
+				demand.addAll(projectionAllowed(session, marker, adapter));
 		}
 		return Set.copyOf(demand);
 	}
@@ -773,44 +967,50 @@ public final class PresentationServer {
 		return new PresentationSection(adapter.adapterId(), adapter.schema(), fields, neutral.stale(), annotations);
 	}
 
-	private static Predicate<PresentationPropertyRef> childAllowed(Session session, String targetTypeId) {
-		Set<PresentationPropertyRef> denied = effectiveChildBlack(session, settings(), targetTypeId);
+	private static Predicate<PresentationPropertyRef> childAllowed(Session session, ServerMarker marker) {
+		Set<PresentationPropertyRef> denied = recipientGrant(session, marker).childBlack();
 		return ref -> !denied.contains(ref);
 	}
 
 	private static PresentationSection project(ServerPlayer player, Session session, PresentationAdapter adapter, Lease lease) {
 		Source source = lease.sources.get(adapter.adapterId());
-		String targetType = lease.marker.targetType().id();
-		return recipientProjection(session, lease.marker, adapter, source,
-			allowed(player, session, adapter, targetType));
+		return recipientProjection(session, lease.marker, adapter, source);
 	}
 
-	static Set<String> projectionAllowed(Session session, ServerMarker marker, PresentationAdapter adapter, Set<String> fresh) {
+	/** Frozen grant fields intersected with the accepted adapter schema and field kinds. */
+	static Set<String> projectionAllowed(Session session, ServerMarker marker, PresentationAdapter adapter) {
+		return projectionAllowed(session, marker, adapter, recipientGrant(session, marker));
+	}
+
+	static Set<String> projectionAllowed(Session session, ServerMarker marker, PresentationAdapter adapter,
+		PresentationGrant grant) {
 		if (!Objects.equals(session.schemas.get(adapter.adapterId()), adapter.schema())) return Set.of();
-		Set<String> advertised = session.mask.getOrDefault(marker.targetType().id(), Map.of())
-			.getOrDefault(adapter.adapterId(), Set.of());
+		PresentationGrant.AdapterGrant frozen = grant.adapters().get(adapter.adapterId());
+		if (frozen == null || frozen.schema() != adapter.schema()) return Set.of();
 		Set<String> result = new LinkedHashSet<>();
 		for (PresentationField field : adapter.fields()) {
-			if (fresh.contains(field.id()) && advertised.contains(field.id())
+			if (frozen.fields().get(field.id()) == field.kind()
 				&& session.manifest.getOrDefault(adapter.adapterId(), List.of()).stream()
 					.anyMatch(accepted -> accepted.id().equals(field.id()) && accepted.kind() == field.kind())) result.add(field.id());
 		}
 		return Set.copyOf(result);
 	}
 
-	/** Deletes revoked recipient state in place before any neutral cache replay. */
-	static void pruneKnown(Session session, ServerMarker marker, Function<String, PresentationAdapter> adapters,
-		Function<PresentationAdapter, Set<String>> fresh) {
+	/** Removes fields/annotations outside the marker's frozen grant; never uses current policy. */
+	static void pruneKnown(Session session, ServerMarker marker, Function<String, PresentationAdapter> adapters) {
+		pruneKnown(session, marker, adapters, recipientGrant(session, marker));
+	}
+
+	private static void pruneKnown(Session session, ServerMarker marker,
+		Function<String, PresentationAdapter> adapters, PresentationGrant grant) {
 		SentMarker known = session.sent.get(marker.id().value());
 		if (known == null) return;
 		for (var entry : known.sections.entrySet()) {
 			PresentationAdapter adapter = adapters.apply(entry.getKey());
 			PresentationSection prior = entry.getValue();
 			PresentationSection pruned = adapter == null ? PresentationSection.empty(prior.adapterId(), prior.schema())
-				: pruneProjection(adapter, prior, projectionAllowed(session, marker, adapter, fresh.apply(adapter)),
-					childAllowed(session, marker.targetType().id()));
-			if (!pruned.fields().keySet().equals(prior.fields().keySet()) || !pruned.annotations().equals(prior.annotations()))
-				session.authorizationCut = Math.max(session.authorizationCut, observationSerial);
+				: pruneProjection(adapter, prior, projectionAllowed(session, marker, adapter, grant),
+					ref -> !grant.childBlack().contains(ref));
 			entry.setValue(pruned);
 		}
 	}
@@ -826,11 +1026,26 @@ public final class PresentationServer {
 	}
 
 	static PresentationSection recipientProjection(Session session, ServerMarker marker, PresentationAdapter adapter,
-		Source source, Set<String> fresh) {
-		Set<String> allowed = projectionAllowed(session, marker, adapter, fresh);
+		Source source) {
+		return recipientProjection(session, marker, adapter, source, recipientGrant(session, marker));
+	}
+
+	/**
+	 * Fixture seam retained for source compatibility. Existing markers always
+	 * project through the session recipient's canonical marker grant; the
+	 * legacy allowed set is not evaluated and cannot replace a deny.
+	 */
+	static PresentationSection recipientProjection(Session session, ServerMarker marker, PresentationAdapter adapter,
+		Source source, Set<String> allowed) {
+		return recipientProjection(session, marker, adapter, source, recipientGrant(session, marker));
+	}
+
+	static PresentationSection recipientProjection(Session session, ServerMarker marker, PresentationAdapter adapter,
+		Source source, PresentationGrant grant) {
+		Set<String> allowed = projectionAllowed(session, marker, adapter, grant);
 		SentMarker known = session.sent.get(marker.id().value());
 		PresentationSection prior = known == null ? null : known.sections.get(adapter.adapterId());
-		Predicate<PresentationPropertyRef> child = childAllowed(session, marker.targetType().id());
+		Predicate<PresentationPropertyRef> child = ref -> !grant.childBlack().contains(ref);
 		if (source == null || source.observation == Source.Observation.NEVER) {
 			if (prior != null) return pruneProjection(adapter, prior, allowed, child);
 			return new PresentationSection(adapter.adapterId(), adapter.schema(), Map.of(), true);
@@ -840,35 +1055,23 @@ public final class PresentationServer {
 			PresentationSection retained = pruneProjection(adapter, prior, allowed, child);
 			return new PresentationSection(adapter.adapterId(), adapter.schema(), retained.fields(), true, retained.annotations());
 		}
-		boolean old = known != null && session.authorizationCut >= 0 && source.successfulSerial <= session.authorizationCut;
-		if (old) {
-			Set<String> retainedKeys = prior == null ? Set.of() : prior.fields().keySet();
-			Set<String> narrowed = new LinkedHashSet<>(allowed); narrowed.retainAll(retainedKeys);
-			Set<PresentationPropertyRef> retainedRefs = prior == null ? Set.of() : prior.annotations().keySet();
-			return project(adapter, source.value, narrowed, marker.properties(), ref -> child.test(ref) && retainedRefs.contains(ref));
-		}
 		return project(adapter, source.value, allowed, marker.properties(), child);
 	}
 
 	private static void sendInitial(ServerPlayer player, Session session, Lease lease) {
 		PresentationAdapter basic = registry.get(PresentationBasic.ID);
-		String targetType = lease.marker.targetType().id();
-		sendInitial(session, lease, basic,
-			allowed(player, session, basic, targetType), packet -> send(player, packet),
-			adapter -> allowed(player, session, adapter, targetType),
-			InventoryServer.tracksInventory(lease.marker.id()), effectiveInventoryTypes(player, session, lease.marker.id()));
+		sendProjectedInitial(session, lease.marker, lease.ownerName, basic,
+			recipientProjection(session, lease.marker, basic, lease.sources.get(basic.adapterId())),
+			packet -> send(player, packet));
 	}
 
-	/** Test seam: no fresh non-Basic policy port, so content refs project conservatively. */
+	/** Fixture seam; production never supplies a fresh-authorization fallback. */
 	static void sendInitial(Session session, Lease lease, PresentationAdapter basic, Set<String> allowed,
 		java.util.function.Consumer<PresentationS2CPacket> delivery) {
 		sendInitial(session, lease, basic, allowed, delivery, adapter -> Set.of());
 	}
 
-	/**
-	 * Test seam: no fresh dedicated inventory gate is supplied, so an inventory
-	 * receipt stays conservatively suppressed.
-	 */
+	/** Fixture seam; production never supplies a fresh-authorization fallback. */
 	static void sendInitial(Session session, Lease lease, PresentationAdapter basic, Set<String> allowed,
 		java.util.function.Consumer<PresentationS2CPacket> delivery,
 		Function<PresentationAdapter, Set<String>> freshAuthorization) {
@@ -876,22 +1079,19 @@ public final class PresentationServer {
 	}
 
 	/**
-	 * Project and deliver cached Basic atomically with the marker, without a
-	 * source observation. Every initial exit computes the receipt descriptor
-	 * from the marker's explicit selections, the tracked inventory sidecar and
-	 * this recipient's fresh per-adapter and inventory authorization against
-	 * the accepted manifest/mask and the advertised route/session view.
+	 * Fixture seam for focused cached-initial checks. The session recipient's
+	 * canonical marker grant is the only authority; an empty grant is an
+	 * explicit denial. The legacy allowed/fresh parameters are retained for
+	 * source compatibility but are not evaluated.
 	 */
 	static void sendInitial(Session session, Lease lease, PresentationAdapter basic, Set<String> allowed,
 		java.util.function.Consumer<PresentationS2CPacket> delivery,
 		Function<PresentationAdapter, Set<String>> freshAuthorization,
 		boolean inventoryTracked, Set<String> freshInventoryTypes) {
-		Source source = lease.sources.get(basic.adapterId());
-		pruneKnown(session, lease.marker, id -> id.equals(basic.adapterId()) ? basic : registry.get(id),
-			adapter -> adapter.adapterId().equals(basic.adapterId()) ? allowed : freshAuthorization.apply(adapter));
+		PresentationGrant grant = fixtureGrant(session, lease.marker, allowed, freshAuthorization);
 		sendProjectedInitial(session, lease.marker, lease.ownerName, basic,
-			recipientProjection(session, lease.marker, basic, source, allowed), allowed, delivery, freshAuthorization,
-			inventoryTracked, freshInventoryTypes);
+			recipientProjection(session, lease.marker, basic, lease.sources.get(basic.adapterId()), grant),
+			grant, inventoryTracked, delivery);
 	}
 
 	static void sendCachedInitial(Session session, ServerMarker marker, String ownerName,
@@ -899,25 +1099,57 @@ public final class PresentationServer {
 		java.util.function.Consumer<PresentationS2CPacket> delivery,
 		Function<PresentationAdapter, Set<String>> freshAuthorization,
 		boolean inventoryTracked, Set<String> freshInventoryTypes) {
-		pruneKnown(session, marker, id -> id.equals(basic.adapterId()) ? basic : registry.get(id),
-			adapter -> adapter.adapterId().equals(basic.adapterId()) ? allowed : freshAuthorization.apply(adapter));
+		sendCachedInitial(session, marker, ownerName, basic, cached,
+			fixtureGrant(session, marker, allowed, freshAuthorization), inventoryTracked, delivery);
+	}
+
+	private static void sendCachedInitial(Session session, ServerMarker marker, String ownerName,
+		PresentationAdapter basic, PresentationSection cached, PresentationGrant grant,
+		java.util.function.Consumer<PresentationS2CPacket> delivery) {
+		sendCachedInitial(session, marker, ownerName, basic, cached, grant,
+			InventoryServer.tracksInventory(marker.id()), delivery);
+	}
+
+	private static void sendCachedInitial(Session session, ServerMarker marker, String ownerName,
+		PresentationAdapter basic, PresentationSection cached, PresentationGrant grant,
+		boolean inventoryTracked, java.util.function.Consumer<PresentationS2CPacket> delivery) {
 		// This path owns only the recipient's delivered projection, never a
 		// successful neutral observation. Keep its retained annotations verbatim.
 		SentMarker known = session.sent.get(marker.id().value());
 		PresentationSection retained = known == null ? cached : known.sections.get(basic.adapterId());
 		PresentationSection projected = retained == null
 			? new PresentationSection(basic.adapterId(), basic.schema(), Map.of(), true)
-			: pruneProjection(basic, retained, projectionAllowed(session, marker, basic, allowed),
-				childAllowed(session, marker.targetType().id()));
-		sendProjectedInitial(session, marker, ownerName, basic, projected,
-			allowed, delivery, freshAuthorization, inventoryTracked, freshInventoryTypes);
+			: pruneProjection(basic, retained, projectionAllowed(session, marker, basic, grant),
+				ref -> !grant.childBlack().contains(ref));
+		sendProjectedInitial(session, marker, ownerName, basic, projected, grant, inventoryTracked, delivery);
 	}
 
-	/** Read-free, Basic-first replay. A first baseline's optional projections precede sent-state insertion. */
+	/**
+	 * The fixture seams use only the session recipient's canonical marker
+	 * grant. A missing recipient or an empty grant is an explicit denial; the
+	 * legacy fixture set parameters never synthesize or widen authority.
+	 */
+	private static PresentationGrant fixtureGrant(Session session, ServerMarker marker, Set<String> basicAllowed,
+		Function<PresentationAdapter, Set<String>> freshAuthorization) {
+		return recipientGrant(session, marker);
+	}
+
+	/** Read-free, Basic-first replay from the marker's frozen grant. */
+	static void sendBaseline(Session session, Lease lease, PresentationRegistry adapters,
+		java.util.function.Consumer<PresentationS2CPacket> delivery) {
+		sendBaseline(session, lease, adapters, recipientGrant(session, lease.marker), delivery);
+	}
+
+	/** Fixture seam; production uses the marker grant overload. */
 	static void sendBaseline(Session session, Lease lease, PresentationRegistry adapters,
 		Function<PresentationAdapter, Set<String>> fresh, java.util.function.Consumer<PresentationS2CPacket> delivery,
 		boolean inventoryTracked, Set<String> freshInventoryTypes) {
-		pruneKnown(session, lease.marker, adapters::get, fresh);
+		sendBaseline(session, lease, adapters, recipientGrant(session, lease.marker), delivery);
+	}
+
+	private static void sendBaseline(Session session, Lease lease, PresentationRegistry adapters,
+		PresentationGrant grant, java.util.function.Consumer<PresentationS2CPacket> delivery) {
+		pruneKnown(session, lease.marker, adapters::get);
 		SentMarker prior = session.sent.get(lease.marker.id().value());
 		Map<String, PresentationSection> optional = new LinkedHashMap<>();
 		for (PresentationAdapter adapter : adapters.sectionAdapters()) {
@@ -925,12 +1157,12 @@ public final class PresentationServer {
 			Source source = lease.sources.get(adapter.adapterId());
 			if ((source == null || source.observation == Source.Observation.NEVER)
 				&& (prior == null || !prior.sections.containsKey(adapter.adapterId()))) continue;
-			optional.put(adapter.adapterId(), recipientProjection(session, lease.marker, adapter, source, fresh.apply(adapter)));
+			optional.put(adapter.adapterId(), recipientProjection(session, lease.marker, adapter, source, grant));
 		}
 		PresentationAdapter basic = adapters.get(PresentationBasic.ID);
 		sendProjectedInitial(session, lease.marker, lease.ownerName, basic,
-			recipientProjection(session, lease.marker, basic, lease.sources.get(basic.adapterId()), fresh.apply(basic)),
-			fresh.apply(basic), delivery, fresh, inventoryTracked, freshInventoryTypes);
+			recipientProjection(session, lease.marker, basic, lease.sources.get(basic.adapterId()), grant),
+			grant, InventoryServer.tracksInventory(lease.marker.id()), delivery);
 		SentMarker sent = session.sent.get(lease.marker.id().value());
 		if (sent == null || sent.deliveredView != session.view) return;
 		optional.forEach((id, projected) -> sendProjectedSection(session, lease.marker.id(), adapters.get(id), projected,
@@ -938,22 +1170,44 @@ public final class PresentationServer {
 	}
 
 	private static void sendProjectedInitial(Session session, ServerMarker marker, String ownerName,
-		PresentationAdapter basic, PresentationSection cached, Set<String> allowed,
-		java.util.function.Consumer<PresentationS2CPacket> delivery,
-		Function<PresentationAdapter, Set<String>> freshAuthorization,
-		boolean inventoryTracked, Set<String> freshInventoryTypes) {
+		PresentationAdapter basic, PresentationSection cached,
+		java.util.function.Consumer<PresentationS2CPacket> delivery) {
+		sendProjectedInitial(session, marker, ownerName, basic, cached, recipientGrant(session, marker),
+			InventoryServer.tracksInventory(marker.id()), delivery);
+	}
+
+	private static void sendProjectedInitial(Session session, ServerMarker marker, String ownerName,
+		PresentationAdapter basic, PresentationSection cached, PresentationGrant grant,
+		java.util.function.Consumer<PresentationS2CPacket> delivery) {
+		sendProjectedInitial(session, marker, ownerName, basic, cached, grant,
+			InventoryServer.tracksInventory(marker.id()), delivery);
+	}
+
+	/**
+	 * {@code inventoryTracked} is the receipt discriminator for this delivery.
+	 * The inventory creation envelope path additionally requires the live
+	 * backend's tracked identity so a fixture discriminator alone cannot enter
+	 * creation-snapshot publication.
+	 */
+	private static void sendProjectedInitial(Session session, ServerMarker marker, String ownerName,
+		PresentationAdapter basic, PresentationSection cached, PresentationGrant grant,
+		boolean inventoryTracked, java.util.function.Consumer<PresentationS2CPacket> delivery) {
 		PresentationPropertyRef defaultRef = PresentationDefaults.forTargetType(marker.targetType().id())
 			.orElse(null);
 		if (defaultRef == null) return;
-		if (inventoryTracked && activeServer != null) {
-			sendInventoryInitial(session, marker, ownerName, basic, cached, allowed, freshAuthorization, freshInventoryTypes, defaultRef);
+		// The inventory creation-publication path owns only recipients with an
+		// initial source reservation. Other audience members (a denied lane or a
+		// late recipient) still receive the canonical CREATED with its projected
+		// receipt; the receipt gate suppresses their snapshot independently.
+		if (inventoryTracked && activeServer != null && InventoryServer.tracksInventory(marker.id())
+			&& session.recipient != null && InventoryServer.initialMarkerActive(marker.id(), session.recipient)) {
+			sendInventoryInitial(session, marker, ownerName, basic, cached, grant, defaultRef);
 			return;
 		}
 		// A semantically valid Basic capture may exceed the encoded field bounds;
 		// degrade to the established empty stale section instead of throwing here.
 		PresentationSection projected = PresentationCodec.bounded(cached, Diagnostics.server());
-		PresentationReceiptContent content = receipt(session, marker, basic, allowed, freshAuthorization,
-			inventoryTracked, freshInventoryTypes);
+		PresentationReceiptContent content = receipt(session, marker, basic, grant, inventoryTracked);
 		// Old-cache replay may retain a selected Basic value after its annotation
 		// was pruned. Do not promise that selection in the atomic initial until a
 		// fresh capture restores the annotation; genuinely absent values still wait.
@@ -970,7 +1224,8 @@ public final class PresentationServer {
 		String deliveredOwner = prior == null ? ownerName : prior.ownerName;
 		long metadataRevision = prior == null ? 0 : prior.metadataRevision;
 		PresentationS2CPacket packet = PresentationS2CPacket.created(session.epoch, session.view,
-			++session.revision, MarkerSnapshot.from(marker), deliveredOwner, defaultRef, content, projected);
+			++session.revision, MarkerSnapshot.from(marker), deliveredOwner, defaultRef,
+			wireContentGrant(session, marker, grant), content, projected);
 		delivery.accept(packet);
 		SentMarker sent = session.sent.computeIfAbsent(marker.id().value(), id -> new SentMarker(deliveredOwner));
 		sent.sections.put(PresentationBasic.ID, projected);
@@ -979,8 +1234,7 @@ public final class PresentationServer {
 		completeInitial(session, marker, sent);
 	}
 	private static void sendInventoryInitial(Session session, ServerMarker marker, String ownerName, PresentationAdapter basic,
-		PresentationSection cached, Set<String> allowed, Function<PresentationAdapter, Set<String>> freshAuthorization,
-		Set<String> freshInventoryTypes, PresentationPropertyRef defaultRef) {
+		PresentationSection cached, PresentationGrant grant, PresentationPropertyRef defaultRef) {
 		if (session.recipient == null) return;
 		UUID recipient = session.recipient;
 		@Nullable ServerPlayer player = activeServer.getPlayerList().getPlayer(recipient);
@@ -992,8 +1246,15 @@ public final class PresentationServer {
 		String owner = prior == null ? ownerName : prior.ownerName;
 		long metadataRevision = prior == null ? 0 : prior.metadataRevision;
 		PresentationSection projected = cached;
-		PresentationReceiptContent content = receipt(session, marker, basic, allowed, freshAuthorization, true, freshInventoryTypes);
+		PresentationReceiptContent content = receipt(session, marker, basic, grant, true);
 		if (content.kind() == PresentationReceiptContent.Kind.SUPPRESSED) InventoryServer.suppressCreation(marker.id(), recipient);
+		// The staging wire bound is the exact session projection, not the
+		// canonical grant: absent adapters/fields/child refs are filtered before
+		// they can consume the rolling queue. Construction workspace stays
+		// independently conservative.
+		@Nullable nx.pingwheel.common.presentation.inventory.InventoryResourceKind tracked =
+			InventoryServer.trackedKind(marker.id()).orElse(null);
+		int grantBytes = projectedGrantSize(session, tracked, grant);
 		// Each rebuild pays a new envelope/source opportunity. At most two attempts;
 		// unrelated Basic revocation need not suppress still-authorized creation content.
 		for (int attempt = 0; attempt < 2; attempt++) {
@@ -1002,7 +1263,8 @@ public final class PresentationServer {
 			catch (IllegalArgumentException oversized) {
 				projected = InventoryInitialPayload.EMPTY_BASIC; basicBytes = InventoryInitialPayload.basicBytes(projected);
 			}
-			int bodyUpper = InventoryInitialPayload.bodyUpper(marker, owner, defaultRef, content, basicBytes);
+			int bodyUpper = InventoryInitialPayload.bodyUpper(marker, owner, defaultRef,
+				grantBytes, content, basicBytes);
 			// Reentrant revocation also prunes the previously delivered Basic, never
 			// unrelated optional sections. Its existing bytes bound that paid work.
 			@Nullable PresentationSection retained = prior == null ? null : prior.sections.get(PresentationBasic.ID);
@@ -1025,8 +1287,9 @@ public final class PresentationServer {
 			String[] stage = {"construction"};
 			try (@Nullable var sourceGrant = sourceOwner; @Nullable var envelopeGrant = envelopeOwner) {
 				PresentationSection encodedBasic = projected;
+				MarkerContentGrant wireGrant = wireContentGrant(session, tracked, grant);
 				PresentationS2CPacket packet = InventoryInitialPayload.create(session.epoch, session.view, ++session.revision,
-					marker, owner, defaultRef, content, projected, basicBytes);
+					marker, owner, defaultRef, wireGrant, content, projected, basicBytes);
 				stage[0] = "settle";
 				if (sourceGrant != null) sourceGrant.settle(packet.encodedCreatedBodyBytes(), construction + packet.createdEncodingWorkspace());
 				else if (envelopeGrant != null) envelopeGrant.settle(packet.encodedCreatedBodyBytes(), construction + packet.createdEncodingWorkspace());
@@ -1034,15 +1297,15 @@ public final class PresentationServer {
 				decision = InventoryCreationReceiptTransport.send(transport, packet, player, () -> {
 					if (!initialCurrent(session, marker, player, packet.view())) return InitialDecision.SUPPRESSED;
 					if (sourceGrant != null) {
-						if (!initialReceiptAuthorized(session, marker, basic, player)) return InitialDecision.SUPPRESSED;
+						if (!initialReceiptAuthorized(session, marker, basic, grant)) return InitialDecision.SUPPRESSED;
 						var checked = sourceGrant.beforeHandoff();
 						if (checked != InitialDecision.READY) return checked;
-						if (!initialCurrent(session, marker, player, packet.view()) || !initialReceiptAuthorized(session, marker, basic, player))
+						if (!initialCurrent(session, marker, player, packet.view()) || !initialReceiptAuthorized(session, marker, basic, grant))
 							return InitialDecision.SUPPRESSED;
 					}
-					return initialBasicAuthorized(session, marker, basic, player, encodedBasic) ? InitialDecision.READY : InitialDecision.DEFERRED;
+					return initialBasicAuthorized(session, marker, basic, grant, encodedBasic) ? InitialDecision.READY : InitialDecision.DEFERRED;
 				});
-				if (decision == InitialDecision.DEFERRED && initialBasicAuthorized(session, marker, basic, player, encodedBasic)) {
+				if (decision == InitialDecision.DEFERRED && initialBasicAuthorized(session, marker, basic, grant, encodedBasic)) {
 					deferInitial(session, marker); return;
 				}
 				if (decision == InitialDecision.READY) {
@@ -1056,12 +1319,10 @@ public final class PresentationServer {
 				// Pruning/rebuild planning still belongs to this admitted construction
 				// workspace; actual next encoding must acquire a separate full grant.
 				if (!initialCurrent(session, marker, player, packet.view())) return;
-				Set<String> currentAllowed = projectionAllowed(session, marker, basic, allowed(player, session, basic, marker.targetType().id()));
-				Predicate<PresentationPropertyRef> currentChild = childAllowed(session, marker.targetType().id());
+				Set<String> currentAllowed = projectionAllowed(session, marker, basic, grant);
+				Predicate<PresentationPropertyRef> currentChild = ref -> !grant.childBlack().contains(ref);
 				if (prior != null && retained != null) {
 					PresentationSection pruned = pruneProjection(basic, retained, currentAllowed, currentChild);
-					if (!pruned.fields().keySet().equals(retained.fields().keySet()) || !pruned.annotations().equals(retained.annotations()))
-						session.authorizationCut = Math.max(session.authorizationCut, observationSerial);
 					prior.sections.put(PresentationBasic.ID, pruned);
 				}
 				projected = pruneProjection(basic, projected, currentAllowed, currentChild);
@@ -1085,10 +1346,10 @@ public final class PresentationServer {
 	}
 	/** Checks every encoded field/annotation without encoding or widening the retained projection. */
 	private static boolean initialBasicAuthorized(Session session, ServerMarker marker, PresentationAdapter basic,
-		ServerPlayer player, PresentationSection projected) {
-		Set<String> allowed = projectionAllowed(session, marker, basic, allowed(player, session, basic, marker.targetType().id()));
+		PresentationGrant grant, PresentationSection projected) {
+		Set<String> allowed = projectionAllowed(session, marker, basic, grant);
 		if (!allowed.containsAll(projected.fields().keySet())) return false;
-		Predicate<PresentationPropertyRef> child = childAllowed(session, marker.targetType().id());
+		Predicate<PresentationPropertyRef> child = ref -> !grant.childBlack().contains(ref);
 		return projected.annotations().keySet().stream().allMatch(ref -> allowed.contains(ref.fieldId()) && child.test(ref));
 	}
 	private static boolean initialCurrent(Session session, ServerMarker marker, ServerPlayer player, long view) {
@@ -1096,10 +1357,9 @@ public final class PresentationServer {
 			&& activeServer.getPlayerList().getPlayer(player.getUUID()) == player && marker.recipients().contains(player.getUUID())
 			&& marker.expiresAtTick() > activeServer.getTickCount() && InventoryServer.initialMarkerActive(marker.id(), player.getUUID());
 	}
-	private static boolean initialReceiptAuthorized(Session session, ServerMarker marker, PresentationAdapter basic, ServerPlayer player) {
-		return receipt(session, marker, basic, allowed(player, session, basic, marker.targetType().id()),
-			adapter -> allowed(player, session, adapter, marker.targetType().id()), true, effectiveInventoryTypes(player, session, marker.id()))
-			.kind() == PresentationReceiptContent.Kind.INVENTORY;
+	private static boolean initialReceiptAuthorized(Session session, ServerMarker marker, PresentationAdapter basic,
+		PresentationGrant grant) {
+		return receipt(session, marker, basic, grant, true).kind() == PresentationReceiptContent.Kind.INVENTORY;
 	}
 	private static void completeInitial(Session session, ServerMarker marker, SentMarker sent) {
 		if (sent.deliveredMetadataRevision != sent.metadataRevision) deferInitial(session, marker);
@@ -1122,49 +1382,43 @@ public final class PresentationServer {
 	}
 
 	/**
-	 * Per-recipient receipt projection: the accepted manifest/schema, the
-	 * advertised field mask and fresh policy authorization gate every explicit
-	 * selection, while the tracked inventory sidecar and the recipient's fresh
-	 * inventory authorization (already intersected with the advertised
-	 * route/session view) gate the dedicated inventory kind. A denied or
-	 * incompatible input suppresses the whole content message without
-	 * disclosing references.
+	 * Per-recipient receipt projection from the marker's frozen grant: accepted
+	 * schema/kind and the grant gate every explicit selection and the target
+	 * name; the tracked inventory sidecar kind must itself be frozen-allowed.
+	 * Current resource/handoff decisions still gate the inventory snapshot.
 	 */
 	private static PresentationReceiptContent receipt(Session session, ServerMarker marker,
-		PresentationAdapter basic, Set<String> basicAllowed,
-		Function<PresentationAdapter, Set<String>> freshAuthorization,
-		boolean inventoryTracked, Set<String> freshInventoryTypes) {
+		PresentationAdapter basic, PresentationGrant grant, boolean inventoryTracked) {
 		String targetType = marker.targetType().id();
-		boolean nameAuthorized = receiptFieldAuthorized(session, targetType, basic,
-			PresentationPropertyRef.root(basic.adapterId(), PresentationBasic.NAME), basicAllowed);
+		boolean nameAuthorized = receiptFieldAuthorized(session, basic,
+			PresentationPropertyRef.root(basic.adapterId(), PresentationBasic.NAME), grant);
 		boolean inventoryAuthorized = inventoryTracked
 			&& Objects.equals(session.schemas.get(InventoryPresentation.ADAPTER_ID), InventoryPresentation.SCHEMA)
-			&& freshInventoryTypes.contains(targetType)
-			&& InventoryServer.trackedKind(marker.id()).map(kind -> session.manifest
-				.getOrDefault(InventoryPresentation.ADAPTER_ID, List.of()).stream().anyMatch(field -> field.id().equals(kind.fieldId())
-					&& InventoryPresentation.INSTANCE.fields().stream().anyMatch(local -> local.id().equals(field.id()) && local.kind() == field.kind()))).orElse(false)
+			&& InventoryServer.trackedKind(marker.id()).map(kind -> grant.allowsField(InventoryPresentation.ADAPTER_ID, kind.fieldId())
+				&& session.manifest.getOrDefault(InventoryPresentation.ADAPTER_ID, List.of()).stream()
+					.anyMatch(field -> field.id().equals(kind.fieldId())
+						&& InventoryPresentation.INSTANCE.fields().stream().anyMatch(local -> local.id().equals(field.id()) && local.kind() == field.kind())))
+				.orElse(false)
 			&& (session.recipient == null || InventoryServer.creationDecision(marker.id(), session.recipient, session.epoch, session.view)
 				== InitialDecision.READY);
 		return PresentationReceiptProjector.project(marker.properties(), inventoryTracked,
 			InventoryServer.creationSnapshot(marker.id()).orElse(null), inventoryAuthorized,
 			nameAuthorized,
 			ref -> {
-				PresentationAdapter adapter = ref.adapterId().equals(basic.adapterId())
-					? basic : registry.get(ref.adapterId());
-				if (adapter == null) return false;
-				Set<String> fresh = adapter == basic ? basicAllowed : freshAuthorization.apply(adapter);
-				return receiptFieldAuthorized(session, targetType, adapter, ref, fresh);
+				PresentationAdapter adapter = registry.get(ref.adapterId());
+				return adapter != null && receiptFieldAuthorized(session, adapter, ref, grant);
 			});
 	}
 
 	/**
-	 * Accepted schema/kind, advertised mask, fresh permission, and the exact
-	 * child deny predicate must all admit the reference; an allow selector never
-	 * overrides a child deny.
+	 * Accepted schema/kind and the exact frozen grant must both admit the
+	 * reference. A later current policy is not consulted.
 	 */
-	private static boolean receiptFieldAuthorized(Session session, String targetTypeId, PresentationAdapter adapter,
-		PresentationPropertyRef ref, Set<String> freshAllowed) {
+	private static boolean receiptFieldAuthorized(Session session, PresentationAdapter adapter,
+		PresentationPropertyRef ref, PresentationGrant grant) {
 		if (ref == null || !Objects.equals(session.schemas.get(adapter.adapterId()), adapter.schema())) return false;
+		PresentationGrant.AdapterGrant frozen = grant.adapters().get(adapter.adapterId());
+		if (frozen == null || frozen.schema() != adapter.schema()) return false;
 		List<PresentationField> advertised = session.manifest.get(adapter.adapterId());
 		PresentationField local = null;
 		for (PresentationField field : adapter.fields()) if (field.id().equals(ref.fieldId())) { local = field; break; }
@@ -1172,11 +1426,8 @@ public final class PresentationServer {
 		PresentationField.Kind requiredKind = local.kind();
 		boolean compatible = advertised.stream().anyMatch(field ->
 			field.id().equals(ref.fieldId()) && field.kind() == requiredKind);
-		if (!compatible) return false;
-		if (!session.mask.getOrDefault(targetTypeId, Map.of())
-			.getOrDefault(adapter.adapterId(), Set.of()).contains(ref.fieldId())) return false;
-		if (childBlackDenied(session, settings(), targetTypeId, ref)) return false;
-		return freshAllowed.contains(ref.fieldId());
+		if (!compatible || !grant.allowsRef(ref)) return false;
+		return true;
 	}
 
 	private static void publish(ServerPlayer player, Session session, Lease lease) {
@@ -1184,8 +1435,7 @@ public final class PresentationServer {
 		Map<String, PresentationSection> sent = marker == null ? null : marker.sections;
 		if (sent == null || marker.deliveredView != session.view) return;
 		Map<String, PresentationSection> beforePruning = new HashMap<>(sent);
-		pruneKnown(session, lease.marker, registry::get,
-			adapter -> allowed(player, session, adapter, lease.marker.targetType().id()));
+		pruneKnown(session, lease.marker, registry::get);
 		for (PresentationAdapter adapter : registry.sectionAdapters()) {
 			if (!session.schemas.containsKey(adapter.adapterId())) continue;
 			PresentationSection projected = project(player, session, adapter, lease);
@@ -1345,12 +1595,14 @@ public final class PresentationServer {
 		if (session == null || !session.ready || settings().scanBudget() == 0)
 			return MarkerCreationService.AdmissionResult.rejected(MarkerRejectReason.INVALID_REQUEST);
 		Map<String, Set<String>> allowed = mask(owner, session).getOrDefault(targetTypeId, Map.of());
-		Set<PresentationPropertyRef> deniedChildren = effectiveChildBlack(session, settings(), targetTypeId);
+		// Create authorization uses the latest server-owned policy and permission
+		// set. The advertised RESET mask and child map are preview inputs only and
+		// cannot defer an otherwise authorized successful create.
+		Set<PresentationPropertyRef> deniedChildren = Set.copyOf(settings().policyFor(targetTypeId).childBlack());
 		// Reject forged/revoked references before world lookup or external source observation.
 		if (intents == null || intents.stream().anyMatch(intent -> intent == null
 			|| deniedChildren.contains(intent.ref())
-			|| !allowed.getOrDefault(intent.ref().adapterId(), Set.of()).contains(intent.ref().fieldId())
-			|| !session.mask.getOrDefault(targetTypeId, Map.of()).getOrDefault(intent.ref().adapterId(), Set.of()).contains(intent.ref().fieldId())))
+			|| !allowed.getOrDefault(intent.ref().adapterId(), Set.of()).contains(intent.ref().fieldId())))
 			return MarkerCreationService.AdmissionResult.rejected(MarkerRejectReason.INVALID_REQUEST);
 		Set<String> initialBasic = new LinkedHashSet<>();
 		PresentationAdapter basicAdapter = registry.get(PresentationBasic.ID);

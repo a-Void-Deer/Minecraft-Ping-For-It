@@ -15,6 +15,7 @@ import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerIdSource;
+import nx.pingwheel.common.marker.PingAuthorization;
 import nx.pingwheel.common.marker.ServerMarker;
 import nx.pingwheel.common.marker.ServerMarkerStore;
 import nx.pingwheel.common.marker.TargetKey;
@@ -23,12 +24,14 @@ import nx.pingwheel.common.presentation.PresentationAdapter;
 import nx.pingwheel.common.presentation.PresentationBasic;
 import nx.pingwheel.common.presentation.PresentationCodec;
 import nx.pingwheel.common.presentation.PresentationField;
+import nx.pingwheel.common.presentation.PresentationGrant;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationPropertySelection;
 import nx.pingwheel.common.presentation.PresentationRegistry;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.presentation.TestContentGrants;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -40,12 +43,20 @@ class PresentationServerRefreshTest {
 	private static final UUID STRANGER = new UUID(0, 4);
 	private static final String BASIC = PresentationBasic.ID;
 	private static final String NAME = PresentationBasic.NAME;
+	private static final PresentationGrant ALL_BASIC = TestContentGrants.basicAll();
 
 	private static ServerMarker marker(long id, String locator, MarkerAnchor anchor, List<UUID> viewers) {
+		return marker(id, locator, anchor, viewers, new PingAuthorization(java.util.Map.of(
+			VIEWER, ALL_BASIC, OTHER, ALL_BASIC)));
+	}
+
+	private static ServerMarker marker(long id, String locator, MarkerAnchor anchor, List<UUID> viewers,
+		PingAuthorization authorization) {
 		var type = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
-		return new ServerMarker(new MarkerId(id), OWNER,
-			Target.ExternalBlockTarget.committed("minecraft:overworld", "sable", "tracking-id", "minecraft:chest", locator, true),
-			type, type.defaultPingType(), anchor, 2, 500, viewers);
+		var target = Target.ExternalBlockTarget.committed("minecraft:overworld", "sable", "tracking-id", "minecraft:chest", locator, true);
+		return new ServerMarker(new MarkerId(id), OWNER, target, TargetKey.from(target),
+			type, type.defaultPingType(), anchor, 2, 500, viewers,
+			List.of(), authorization.retaining(viewers));
 	}
 
 	private static PresentationSection cached() {
@@ -53,8 +64,26 @@ class PresentationServerRefreshTest {
 			Map.of(NAME, new PresentationValue.Text("{\"text\":\"cached\"}")), false);
 	}
 
+	private static PingAuthorization authorize(List<UUID> audience) {
+		Map<UUID, PresentationGrant> grants = new java.util.LinkedHashMap<>();
+		for (UUID recipient : audience) grants.put(recipient, ALL_BASIC);
+		return new PingAuthorization(grants);
+	}
+
+	private static nx.pingwheel.common.marker.MarkerCreation create(ServerMarkerStore store, Target target,
+		MarkerAnchor anchor, long arrival, long expiry, List<UUID> audience) {
+		var type = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
+		return store.create(OWNER, target, TargetKey.from(target), type, type.defaultPingType(), anchor, arrival, expiry, audience,
+			List.of(), authorize(audience));
+	}
+
 	private static PresentationServer.Session readySession() {
+		return readySession(VIEWER);
+	}
+
+	private static PresentationServer.Session readySession(UUID recipient) {
 		var session = new PresentationServer.Session(37, Map.of(BASIC, 1), Map.of(BASIC, PresentationBasic.fields()));
+		session.recipient = recipient;
 		session.mask = Map.of("entity_block", Map.of(BASIC, Set.of(NAME)));
 		session.ready = true;
 		session.view = 1;
@@ -89,7 +118,7 @@ class PresentationServerRefreshTest {
 		lease.sources.put(BASIC, source);
 		var known = readySession();
 		known.sent.put(first.id().value(), sentMarker("Cached owner", cached()));
-		var notSent = readySession();
+		var notSent = readySession(OTHER);
 		var sessions = Map.of(VIEWER, known, OTHER, notSent);
 		var sent = new ArrayList<PresentationS2CPacket>();
 		var basicAdapter = new BasicAdapter();
@@ -116,7 +145,7 @@ class PresentationServerRefreshTest {
 			viewer -> fail("offline viewers must not be delivered"));
 	}
 
-	@Test void cachedRefreshProjectsAgainstCurrentAllowedFieldsRatherThanLeakingPriorSessionFields() {
+	@Test void cachedRefreshKeepsTheFrozenMarkerGrantDespiteATighterCurrentMask() {
 		var lease = new PresentationServer.Lease(marker(11, "before", new MarkerAnchor(1, 2, 3), List.of(VIEWER)), "Owner");
 		var source = new PresentationServer.Source(BASIC, 1);
 		source.value = cached();
@@ -129,8 +158,8 @@ class PresentationServerRefreshTest {
 			100, Map.of(VIEWER, session), viewer -> true,
 			viewer -> PresentationServer.sendInitial(session, lease, new BasicAdapter(), Set.of(), packets::add));
 		assertEquals(1, packets.size());
-		assertTrue(session.sent.get(lease.marker.id().value()).sections.get(BASIC).fields().isEmpty(),
-			"a tight server mask must remove cached name on same-id delivery");
+		assertEquals(Set.of(NAME), session.sent.get(lease.marker.id().value()).sections.get(BASIC).fields().keySet(),
+			"a tighter current mask cannot prune the marker's frozen field");
 		assertEquals(cached(), source.value, "server cache remains neutral; projection is recipient scoped");
 	}
 
@@ -148,7 +177,7 @@ class PresentationServerRefreshTest {
 		assertFalse(PresentationServer.rememberLease(leases, new PresentationServer.Lease(previous, "Owner")));
 		assertFalse(leases.containsKey(beyond));
 		var ready = readySession();
-		var unknown = readySession();
+		var unknown = readySession(OTHER);
 		var basicAdapter = new BasicAdapter();
 		var deliveries = new ArrayList<PresentationS2CPacket>();
 		// This is the production initial-sending method used even if the lease was
@@ -183,18 +212,21 @@ class PresentationServerRefreshTest {
 		assertEquals(2, deliveries.size());
 	}
 
-	@Test void cappedMarkerRefreshRevokesCachedValuesAndAnnotationsPerRecipient() {
+	@Test void cappedMarkerRefreshProjectsEachRecipientsFrozenGrantWithoutRevokingTheAuthorizedSibling() {
 		var previous = marker(40, "before", new MarkerAnchor(1, 2, 3), List.of(VIEWER, OTHER));
-		var annotated = new ServerMarker(previous.id(), previous.owner(), previous.target(), previous.targetType(),
-			previous.pingType(), previous.anchor(), previous.arrivalTick(), previous.expiresAtTick(),
-			previous.recipients(), List.of(PresentationPropertySelection.of(
-				PresentationPropertyRef.root(BASIC, NAME), "danger")));
+		var authorization = new PingAuthorization(Map.of(
+			VIEWER, PresentationGrant.denied(), OTHER, ALL_BASIC));
+		var annotated = new ServerMarker(previous.id(), previous.owner(), previous.target(), previous.targetKey(),
+			previous.targetType(), previous.pingType(), previous.anchor(), previous.arrivalTick(),
+			previous.expiresAtTick(), previous.recipients(), List.of(PresentationPropertySelection.of(
+				PresentationPropertyRef.root(BASIC, NAME), "danger")), authorization);
 		var next = new ServerMarker(annotated.id(), annotated.owner(),
 			marker(40, "after", new MarkerAnchor(4, 5, 6), annotated.recipients()).target(),
-			annotated.targetType(), annotated.pingType(), new MarkerAnchor(4, 5, 6),
-			annotated.arrivalTick(), annotated.expiresAtTick(), annotated.recipients(), annotated.properties());
+			annotated.targetKey(), annotated.targetType(), annotated.pingType(), new MarkerAnchor(4, 5, 6),
+			annotated.arrivalTick(), annotated.expiresAtTick(), annotated.recipients(), annotated.properties(),
+			authorization);
 		var first = readySession();
-		var second = readySession();
+		var second = readySession(OTHER);
 		var prior = new PresentationSection(BASIC, 1, cached().fields(), false,
 			Map.of(PresentationPropertyRef.root(BASIC, NAME), "danger"));
 		first.sent.put(annotated.id().value(), sentMarker("Owner", prior));
@@ -364,10 +396,8 @@ class PresentationServerRefreshTest {
 		var store = new ServerMarkerStore(new MarkerIdSource());
 		var type = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
 		var target = externalTarget();
-		var older = store.create(OWNER, target, type, type.defaultPingType(), new MarkerAnchor(1, 2, 3),
-			2L, 500L, List.of(VIEWER));
-		var newer = store.create(OWNER, target, type, type.defaultPingType(), new MarkerAnchor(4, 5, 6),
-			3L, 500L, List.of(VIEWER));
+		var older = create(store, target, new MarkerAnchor(1, 2, 3), 2L, 500L, List.of(VIEWER));
+		var newer = create(store, target, new MarkerAnchor(4, 5, 6), 3L, 500L, List.of(VIEWER));
 		var lease = new PresentationServer.Lease(older.marker(), "Owner");
 		var source = new PresentationServer.Source(BASIC, 1);
 		source.value = cached();
@@ -401,14 +431,10 @@ class PresentationServerRefreshTest {
 		var store = new ServerMarkerStore(new MarkerIdSource());
 		var type = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
 		var target = externalTarget();
-		store.create(OWNER, target, type, type.defaultPingType(), new MarkerAnchor(1, 2, 3),
-			10L, 100L, List.of(VIEWER)); // id 0
-		store.create(OWNER, target, type, type.defaultPingType(), new MarkerAnchor(1, 2, 3),
-			20L, 100L, List.of(VIEWER)); // id 1: would win but is due at tick 100
-		store.create(OWNER, target, type, type.defaultPingType(), new MarkerAnchor(1, 2, 3),
-			5L, 200L, List.of(VIEWER)); // id 2
-		store.create(OWNER, target, type, type.defaultPingType(), new MarkerAnchor(1, 2, 3),
-			30L, 200L, List.of(OTHER)); // id 3: other recipient only
+		create(store, target, new MarkerAnchor(1, 2, 3), 10L, 100L, List.of(VIEWER)); // id 0
+		create(store, target, new MarkerAnchor(1, 2, 3), 20L, 100L, List.of(VIEWER)); // id 1: would win but is due at tick 100
+		create(store, target, new MarkerAnchor(1, 2, 3), 5L, 200L, List.of(VIEWER)); // id 2
+		create(store, target, new MarkerAnchor(1, 2, 3), 30L, 200L, List.of(OTHER)); // id 3: other recipient only
 		var session = readySession();
 		var deliveries = new ArrayList<PresentationS2CPacket>();
 
@@ -433,8 +459,7 @@ class PresentationServerRefreshTest {
 		var store = new ServerMarkerStore(new MarkerIdSource());
 		var type = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
 		var target = externalTarget();
-		var created = store.create(OWNER, target, type, type.defaultPingType(), new MarkerAnchor(1, 2, 3),
-			2L, 500L, List.of(VIEWER));
+		var created = create(store, target, new MarkerAnchor(1, 2, 3), 2L, 500L, List.of(VIEWER));
 		var lease = new PresentationServer.Lease(created.marker(), "Owner");
 		var source = new PresentationServer.Source(BASIC, 1);
 		source.value = cached();
@@ -465,8 +490,7 @@ class PresentationServerRefreshTest {
 		var store = new ServerMarkerStore(new MarkerIdSource());
 		var type = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
 		var target = externalTarget();
-		var created = store.create(OWNER, target, type, type.defaultPingType(), new MarkerAnchor(1, 2, 3),
-			2L, 500L, List.of(VIEWER));
+		var created = create(store, target, new MarkerAnchor(1, 2, 3), 2L, 500L, List.of(VIEWER));
 		var lease = new PresentationServer.Lease(created.marker(), "Owner");
 		var source = new PresentationServer.Source(BASIC, 1);
 		source.value = cached();

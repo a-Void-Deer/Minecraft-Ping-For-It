@@ -17,6 +17,7 @@ import nx.pingwheel.common.domain.TargetTypeCatalog;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerIdSource;
 import nx.pingwheel.common.marker.MarkerSnapshot;
+import nx.pingwheel.common.marker.ServerMarker;
 import nx.pingwheel.common.marker.ServerMarkerStore;
 import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.network.InventoryC2SPacket;
@@ -59,6 +60,22 @@ public final class InventoryPublicationBackendFixture implements AutoCloseable, 
 		for (UUID owner : List.of(A, B)) { var client = new ClientInventory(packet -> {}); client.presentationReset(100, 1); clients.put(owner, client); backend.handle(owner, InventoryC2SPacket.hello(), 0, settings); }
 	}
 	@Override public Optional<InventoryBackend.Policy> policy(UUID player) { return currentPolicy.apply(player); }
+	@Override public Optional<InventoryBackend.SessionAccess> session(UUID player) {
+		return currentPolicy.apply(player).map(policy ->
+			new InventoryBackend.SessionAccess(policy.epoch(), policy.view(), InventoryTestGrants.both()));
+	}
+	@Override public Optional<ServerMarker> activeMarker(MarkerId marker) {
+		return markers.find(marker);
+	}
+	@Override public java.util.Set<InventoryResourceKind> freezeInventoryPreviewLanes(UUID owner, String targetTypeId) {
+		return currentPolicy.apply(owner).map(policy -> {
+			// This shared chest/browser fixture freezes its explicit policy view;
+			// item-only tests must not resolve an unintended FLUID provider round.
+			var lanes = java.util.EnumSet.noneOf(InventoryResourceKind.class);
+			for (var kind : InventoryResourceKind.values()) if (policy.types(kind).contains(targetTypeId)) lanes.add(kind);
+			return java.util.Set.copyOf(lanes);
+		}).orElseGet(() -> java.util.Set.of());
+	}
 	@Override public Optional<InventoryBackend.Opened> open(UUID player, Target requested) { return Optional.of(new InventoryBackend.Opened(requested, "entity_block", "attention")); }
 	@Override public boolean annotationAllowed(InventorySourceInput input, String pingType) { return pingType.equals("danger"); }
 	@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
@@ -66,9 +83,17 @@ public final class InventoryPublicationBackendFixture implements AutoCloseable, 
 		@Unmodifiable List<UUID> recipients = List.copyOf(audience.apply(player));
 		@Nullable var rejection = admission.prepare(frozen.target(), group, type.id(), recipients);
 		if (rejection != null) return new InventoryBackend.Created(null, rejection);
-		return new InventoryBackend.Created(markers.create(player, frozen.target(), group, type, type.defaultPingType(), new MarkerAnchor(0, 0, 0), 0, 10000, recipients).marker(), null);
+		var authorization = InventoryTestGrants.allowAll(recipients);
+		rejection = admission.finishAuthorization(authorization);
+		if (rejection != null) return new InventoryBackend.Created(null, rejection);
+		return new InventoryBackend.Created(markers.create(player, frozen.target(), group, type, type.defaultPingType(),
+			new MarkerAnchor(0, 0, 0), 0, 10000, recipients, List.of(), authorization).marker(), null);
 	}
-	@Override public void publishCreated(InventoryBackend.Created created) { for (UUID recipient : created.marker().recipients()) clients.get(recipient).markerCreated(MarkerSnapshot.from(created.marker())); }
+	@Override public void publishCreated(InventoryBackend.Created created) {
+		for (UUID recipient : created.marker().recipients())
+			clients.get(recipient).markerCreated(MarkerSnapshot.from(created.marker()),
+				InventoryTestGrants.content(created.marker(), recipient, backend.trackedKind(created.marker().id()).orElse(null)));
+	}
 	@Override public boolean knows(UUID player, MarkerId marker) { return known.test(player, marker) && markers.allMarkers().stream().anyMatch(value -> value.id().equals(marker) && value.recipients().contains(player)); }
 	@Override public boolean authorized(SyncPublisher.Context context) { return true; }
 	@Override public int encodedBytes(InventoryS2CPacket packet) { throw new AssertionError("production adapter must forward effective-budget measurement"); }
@@ -87,6 +112,11 @@ public final class InventoryPublicationBackendFixture implements AutoCloseable, 
 	}
 	public long open(UUID owner, Target target, BlockFace face, long tick) {
 		long request = requests.merge(owner, 1L, Long::sum);
+		return open(owner, request, target, face, tick);
+	}
+	/** Sends the exact request id already issued by the endpoint client; never opens a second local channel. */
+	public long open(UUID owner, long request, Target target, BlockFace face, long tick) {
+		requests.merge(owner, request, Math::max);
 		backend.handle(owner, InventoryC2SPacket.open(epochs.get(owner), 100, 1, request, target, face), tick, settings); return request;
 	}
 	public MarkerId select(UUID owner, long request, long tick) {

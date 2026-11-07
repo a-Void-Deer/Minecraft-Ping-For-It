@@ -6,6 +6,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -29,6 +30,7 @@ public final class PresentationStore {
 		boolean sectionHistoryFull;
 		@Nullable String targetTypeId;
 		@Nullable PresentationPropertyRef defaultRef;
+		@Nullable MarkerContentGrant grant;
 	}
 
 	public long epoch() { return epoch; }
@@ -40,6 +42,10 @@ public final class PresentationStore {
 	public @Nullable PresentationPropertyRef defaultRef(long markerId) {
 		@Nullable MarkerState marker = markers.get(markerId);
 		return marker == null ? null : marker.defaultRef;
+	}
+	public @Nullable MarkerContentGrant grant(long markerId) {
+		@Nullable MarkerState marker = markers.get(markerId);
+		return marker == null ? null : marker.grant;
 	}
 	public boolean isKnown(long markerId) { return markers.containsKey(markerId) || tombstones.containsKey(markerId); }
 	public boolean isFrozen(long markerId) {
@@ -57,25 +63,43 @@ public final class PresentationStore {
 
 	public void generation(long epoch, long view) {
 		if (this.epoch != epoch || view < viewGeneration) return;
-		if (view != viewGeneration) {
-			for (MarkerState marker : markers.values()) {
-				if (marker.frozen) continue;
-				marker.sections.clear();
-				marker.clearedSections.clear();
-				marker.sectionHistoryFull = false;
-			}
-		}
+		// A same-epoch reset updates the current packet view. Retained sections
+		// and section tombstones belong to their markers' own frozen grants and
+		// are not pruned by a later future-create mask.
 		viewGeneration = view;
 	}
 
 	public void initial(long epoch, long view, long markerId, String targetTypeId,
 		@Nullable PresentationPropertyRef defaultRef, PresentationSection basic) {
-		initial(epoch, view, markerId, targetTypeId, defaultRef, basic, 0);
+		initial(epoch, view, markerId, targetTypeId, defaultRef, legacyGrant(basic), basic, 0);
 	}
 
 	public void initial(long epoch, long view, long markerId, String targetTypeId,
 		@Nullable PresentationPropertyRef defaultRef, PresentationSection basic, long revision) {
-		if (!current(epoch, view) || isKnown(markerId) || markerHistoryFull
+		initial(epoch, view, markerId, targetTypeId, defaultRef, legacyGrant(basic), basic, revision);
+	}
+
+	/**
+	 * Fixture-only source compatibility for a caller that predates the
+	 * per-marker grant. Production always supplies the wire-decoded grant; an
+	 * old wire CREATED without one is rejected before reaching this store.
+	 */
+	private static MarkerContentGrant legacyGrant(PresentationSection basic) {
+		Map<String, PresentationField.Kind> fields = new LinkedHashMap<>();
+		basic.fields().forEach((id, value) -> fields.put(id, switch (value) {
+			case PresentationValue.Text ignored -> PresentationField.Kind.TEXT;
+			case PresentationValue.NumberValue ignored -> PresentationField.Kind.NUMBER;
+			case PresentationValue.Flag ignored -> PresentationField.Kind.FLAG;
+			case PresentationValue.Sequence ignored -> PresentationField.Kind.SEQUENCE;
+			case PresentationValue.RecordValue ignored -> PresentationField.Kind.RECORD;
+		}));
+		return new MarkerContentGrant(new PresentationGrant(Map.of(basic.adapterId(),
+			new PresentationGrant.AdapterGrant(basic.schema(), fields)), Set.of()), null);
+	}
+
+	public void initial(long epoch, long view, long markerId, String targetTypeId,
+		@Nullable PresentationPropertyRef defaultRef, MarkerContentGrant grant, PresentationSection basic, long revision) {
+		if (!current(epoch, view) || isKnown(markerId) || markerHistoryFull || grant == null
 			|| !PresentationSettings.isKnownTargetType(targetTypeId) || defaultRef == null) return;
 		if (markers.size() + tombstones.size() >= MAX_MARKER_HISTORY) {
 			markHistoryFull();
@@ -84,6 +108,7 @@ public final class PresentationStore {
 		MarkerState marker = new MarkerState();
 		marker.targetTypeId = targetTypeId;
 		marker.defaultRef = defaultRef;
+		marker.grant = grant;
 		marker.sections.put(basic.adapterId(), new Entry(revision, basic));
 		markers.put(markerId, marker);
 	}

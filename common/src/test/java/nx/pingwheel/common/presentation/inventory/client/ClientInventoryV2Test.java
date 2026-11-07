@@ -1,7 +1,9 @@
 package nx.pingwheel.common.presentation.inventory.client;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -11,9 +13,16 @@ import nx.pingwheel.common.interaction.CapturedPingContext;
 import nx.pingwheel.common.interaction.CapturedRay;
 import nx.pingwheel.common.marker.*;
 import nx.pingwheel.common.network.*;
+import nx.pingwheel.common.presentation.MarkerContentGrant;
+import nx.pingwheel.common.presentation.PresentationField;
+import nx.pingwheel.common.presentation.PresentationGrant;
+import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
+import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
+@NotNullByDefault
 class ClientInventoryV2Test {
 	static final Target.BlockTarget TARGET = new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest");
 	static InventoryS2CPacket data(InventoryS2CPacket.Kind kind, MarkerId marker, long watermark, InventoryS2CPacket.Entry entry) {
@@ -24,6 +33,17 @@ class ClientInventoryV2Test {
 		client.presentationReset(100, 1);
 		client.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(5, 3, 5, 0)).stamp(100, 1));
 		client.accept(InventoryS2CPacket.policy(7, 100, 1, Set.of("entity_block")));
+	}
+	static void opened(ClientInventory client, long request, int laneBits) {
+		client.accept(InventoryS2CPacket.opened(7, 100, 1, request, laneBits));
+	}
+	static MarkerContentGrant grant(InventoryResourceKind trackingKind, InventoryResourceKind... lanes) {
+		Map<String, PresentationField.Kind> fields = new LinkedHashMap<>();
+		for (InventoryResourceKind lane : lanes) fields.put(lane.fieldId(), PresentationField.Kind.RECORD);
+		PresentationGrant authorization = fields.isEmpty() ? PresentationGrant.denied()
+			: new PresentationGrant(Map.of(InventoryPresentation.ADAPTER_ID,
+				new PresentationGrant.AdapterGrant(InventoryPresentation.SCHEMA, fields)), Set.of());
+		return new MarkerContentGrant(authorization, trackingKind);
 	}
 	static CapturedPingContext capture(Target target, String targetTypeId, BlockFace face) {
 		var resolved = new ResolvedTarget(target, TargetTypeCatalog.builtIn().findById(targetTypeId).orElseThrow());
@@ -39,6 +59,9 @@ class ClientInventoryV2Test {
 		long request = client.open(TARGET, BlockFace.SOUTH, "entity_block");
 		assertEquals(BlockFace.SOUTH, ((InventoryC2SPacket) sent.getFirst()).face());
 		client.accept(data(InventoryS2CPacket.Kind.PREVIEW, null, 1, new InventoryS2CPacket.Entry("opaque", "minecraft:stone", "stone", null, 7, 1, false, null)));
+		assertTrue(client.selectable(request).isEmpty(), "preview content waits for the complete OPENED entitlement");
+		opened(client, request, 3);
+		client.accept(data(InventoryS2CPacket.Kind.PREVIEW, null, 1, new InventoryS2CPacket.Entry("opaque", "minecraft:stone", "stone", null, 7, 1, false, null)));
 		var ref = client.selectable(request).getFirst();
 		assertEquals(ClientInventory.DispatchOutcome.THROTTLED, client.select(ref, "attention", p -> ClientInventory.DispatchOutcome.THROTTLED));
 		assertEquals(ClientInventory.DispatchOutcome.ALREADY_RELEASED, client.select(ref, "attention", p -> { throw new AssertionError("single use"); }));
@@ -48,15 +71,23 @@ class ClientInventoryV2Test {
 		ClientInventory client = new ClientInventory(p -> {}); ready(client); MarkerId marker = new MarkerId(3);
 		var entry = new InventoryS2CPacket.Entry("selected", "minecraft:stone", "stone", null, 2, 1, false, null);
 		client.accept(data(InventoryS2CPacket.Kind.SNAPSHOT, marker, 1, entry)); assertTrue(client.tracking(marker).entries().isEmpty());
-		client.markerCreated(new MarkerSnapshot(marker, new UUID(1, 1), TARGET, "entity_block", "attention", new MarkerAnchor(1, 2, 3), 0, 30));
+		client.markerCreated(new MarkerSnapshot(marker, new UUID(1, 1), TARGET, "entity_block", "attention", new MarkerAnchor(1, 2, 3), 0, 30),
+			grant(InventoryResourceKind.ITEM, InventoryResourceKind.ITEM, InventoryResourceKind.FLUID));
 		client.accept(data(InventoryS2CPacket.Kind.SNAPSHOT, marker, 1, entry)); assertEquals(2, client.tracking(marker).entries().getFirst().count());
-		client.presentationReset(100, 2); assertFalse(client.ready()); assertTrue(client.tracking(marker).entries().isEmpty());
+		client.presentationReset(100, 2); assertTrue(client.ready()); assertEquals(2, client.tracking(marker).entries().getFirst().count(),
+			"a same-epoch RESET keeps the closed display but fences its old view");
 		client.accept(InventoryS2CPacket.policy(7, 100, 2, Set.of()));
-		client.accept(data(InventoryS2CPacket.Kind.SNAPSHOT, marker, 1, entry)); assertTrue(client.tracking(marker).entries().isEmpty());
+		client.accept(data(InventoryS2CPacket.Kind.SNAPSHOT, marker, 1, entry)); assertEquals(2, client.tracking(marker).entries().getFirst().count(),
+			"old-view tracking data cannot resurrect or overwrite the retained display");
+		var fresh = new InventoryS2CPacket.Entry("selected", "minecraft:stone", "stone", null, 3, 2, false, null);
+		client.accept(InventoryS2CPacket.data(InventoryResourceKind.ITEM, InventoryS2CPacket.Kind.SNAPSHOT, 7, 0, marker, 5, 2, 2,
+			0, 1, true, InventoryS2CPacket.Status.READY, 0, List.of(fresh)).stamp(100, 2));
+		assertEquals(3, client.tracking(marker).entries().getFirst().count(), "a fresh view and baseline can update again");
 	}
 	@Test void atomicGroupReplacementRetiresExactVariantAndLateExactCannotResurrect() {
 		ClientInventory client = new ClientInventory(p -> {}); ready(client); MarkerId marker = new MarkerId(3);
-		client.markerCreated(new MarkerSnapshot(marker, new UUID(1, 1), TARGET, "entity_block", "attention", new MarkerAnchor(1, 2, 3), 0, 30));
+		client.markerCreated(new MarkerSnapshot(marker, new UUID(1, 1), TARGET, "entity_block", "attention", new MarkerAnchor(1, 2, 3), 0, 30),
+			grant(InventoryResourceKind.ITEM, InventoryResourceKind.ITEM, InventoryResourceKind.FLUID));
 		client.accept(data(InventoryS2CPacket.Kind.SNAPSHOT, marker, 1, new InventoryS2CPacket.Entry("exact", "minecraft:stone", "stone", null, 2, 1, false, null)));
 		client.accept(data(InventoryS2CPacket.Kind.STREAM, marker, 2, new InventoryS2CPacket.Entry("aggregate", "minecraft:stone", "stone", null, 9, 2, true,
 			InventoryS2CPacket.Status.COMPONENT_TOO_LONG, 2, true, "danger")));
@@ -104,6 +135,7 @@ class ClientInventoryV2Test {
 		assertEquals(2, opens.size());
 		assertEquals("locator:a", ((Target.ExternalBlockTarget) opens.get(0).target()).providerLocator());
 		assertEquals("locator:b", ((Target.ExternalBlockTarget) opens.get(1).target()).providerLocator());
+		opened(client, first, 3);
 
 		client.accept(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, first, null, 9, 1, 1, 0, 1, true,
 			InventoryS2CPacket.Status.READY, 0, List.of(new InventoryS2CPacket.Entry("opaque", "minecraft:stone", "stone", null, 7, 1, false, null))).stamp(100, 1));

@@ -56,10 +56,17 @@ class CompositeTargetQuotaTest {
 			var type = TargetTypeCatalog.builtIn().findById(frozen.targetType()).orElseThrow();
 			Target target = committedOverride == null ? frozen.target() : committedOverride;
 			TargetKey key = grouping.resolve(player, target);
-			@Nullable MarkerRejectReason rejection = admission.prepare(target, key, type.id(), List.of(A, B));
+			var audience = List.of(A, B);
+			@Nullable MarkerRejectReason rejection = admission.prepare(target, key, type.id(), audience);
+			if (rejection != null) return new InventoryBackend.Created(null, rejection);
+			PingAuthorization authorization = InventoryTestGrants.allowAll(audience);
+			rejection = admission.finishAuthorization(authorization);
 			if (rejection != null) return new InventoryBackend.Created(null, rejection);
 			return new InventoryBackend.Created(store.create(player, target, key, type, type.defaultPingType(),
-				new MarkerAnchor(2.5, 2.5, 3.5), 1, 1000, List.of(A, B)).marker(), null);
+				new MarkerAnchor(2.5, 2.5, 3.5), 1, 1000, audience, List.of(), authorization).marker(), null);
+		}
+		@Override public Set<InventoryResourceKind> freezeInventoryPreviewLanes(UUID owner, String targetTypeId) {
+			return Set.of(InventoryResourceKind.ITEM);
 		}
 	}
 	@NotNullByDefault

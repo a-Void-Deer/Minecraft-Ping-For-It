@@ -227,16 +227,20 @@ class PresentationPacketsV2Test {
 		var section = new PresentationSection(BASIC, 1,
 			Map.of("minecraft:target.name", new PresentationValue.Text("Chest")), false, Map.of(ref, "attention"));
 		var defaultRef = PresentationPropertyRef.root(BASIC, "minecraft:target.name");
+		var grant = nx.pingwheel.common.presentation.TestContentGrants.content(
+			nx.pingwheel.common.presentation.TestContentGrants.basic(Set.of("minecraft:target.name")));
 
 		FriendlyByteBuf buf = buffer();
 		try {
-			var packet = PresentationS2CPacket.created(41L, 2L, 5L, snapshot, "Owner", defaultRef, section);
+			var packet = PresentationS2CPacket.created(41L, 2L, 5L, snapshot, "Owner", defaultRef, grant,
+				PresentationReceiptContent.whole(), section);
 			packet.write(buf);
 			var decoded = PresentationS2CPacket.readSafe(buf);
 
 			assertFalse(decoded.isCorrupt());
 			assertEquals(PresentationS2CPacket.Kind.CREATED, decoded.kind());
 			assertEquals(defaultRef, decoded.defaultRef());
+			assertEquals(grant, decoded.markerGrant(), "the per-marker content grant must survive the strict frame");
 			assertEquals(PresentationReceiptContent.whole(), decoded.content());
 			assertEquals(snapshot, decoded.snapshot());
 			assertEquals("Owner", decoded.ownerName());

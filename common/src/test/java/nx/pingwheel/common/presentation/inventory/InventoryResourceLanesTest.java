@@ -133,9 +133,9 @@ class InventoryResourceLanesTest {
 			assertTrue(f.host.packets.subList(start, f.host.packets.size()).stream().noneMatch(packet -> marker.id().equals(packet.markerId())));
 		}
 	}
-	@Test void deniedFluidNeverResolvesWhileItemCompletes() {
+	@Test void openFreezeWithoutFluidNeverResolvesWhileItemCompletes() {
 		try (var f = new Fixture()) {
-			f.host.policies.replaceAll((player, prior) -> new InventoryBackend.Policy(100, 1, Set.of("entity_block"), Set.of()));
+			f.host.frozenLanes = Set.of(InventoryResourceKind.ITEM);
 			f.open(); assertTrue(f.preview(InventoryResourceKind.ITEM).completeScan());
 			assertEquals(0, f.states.get(InventoryResourceKind.FLUID).resolutions.get());
 			assertEquals(0, f.states.get(InventoryResourceKind.FLUID).reads.get());
@@ -204,13 +204,15 @@ class InventoryResourceLanesTest {
 				.noneMatch(p -> p.completeScan() && p.kind() == InventoryS2CPacket.Kind.PREVIEW));
 		}
 	}
-	@Test void revokedFluidRecipientCannotReceiveQueuedSeedOrFreshData() {
+	@Test void frozenRecipientWithoutFluidGrantCannotReceiveQueuedSeedOrFreshData() {
 		try (var f = new Fixture()) {
+			f.host.grants = player -> player.equals(InventoryBackendTest.B)
+				? Set.of(InventoryResourceKind.ITEM) : Set.of(InventoryResourceKind.values());
 			f.open(); f.backend.handle(InventoryBackendTest.A, f.select(InventoryResourceKind.FLUID, 1, f.preview(InventoryResourceKind.FLUID)), 1, f.settings);
 			f.host.policies.put(InventoryBackendTest.B, new InventoryBackend.Policy(100, 2, Set.of("entity_block"), Set.of()));
 			int start = f.host.packets.size(); f.backend.tick(2, f.settings);
 			for (int index = start; index < f.host.packets.size(); index++) if (f.host.recipients.get(index).equals(InventoryBackendTest.B))
-				assertTrue(f.host.packets.get(index).entries().isEmpty(), "revoked recipient received fluid contents");
+				assertTrue(f.host.packets.get(index).entries().isEmpty(), "non-granted recipient received fluid contents");
 			assertTrue(f.tracking().stream().anyMatch(InventoryS2CPacket::completeScan));
 		}
 	}
@@ -230,14 +232,17 @@ class InventoryResourceLanesTest {
 			assertEquals(1, f.host.store.size(), "retired-token rejection does not consume the replacement cut's attempt");
 		}
 	}
-	@Test void sameViewFieldRevocationPreservesSiblingAndReallowFreshlyAdmitsOnlyItsLane() {
+	@Test void sameViewPolicyChangeCannotWidenOrReopenAnAlreadyFrozenPreviewLane() {
 		try (var f = new Fixture()) {
 			f.open(); var item = f.preview(InventoryResourceKind.ITEM);
+			int fluidReads = f.states.get(InventoryResourceKind.FLUID).reads.get();
+			int itemReads = f.states.get(InventoryResourceKind.ITEM).reads.get();
 			f.host.policies.put(InventoryBackendTest.A, new InventoryBackend.Policy(100, 1, Set.of("entity_block"), Set.of()));
 			f.backend.tick(1, f.settings);
 			f.host.policies.put(InventoryBackendTest.A, new InventoryBackend.Policy(100, 1, Set.of("entity_block"), Set.of("entity_block")));
-			f.backend.tick(2, f.settings); assertEquals(2, f.states.get(InventoryResourceKind.FLUID).reads.get());
-			assertEquals(1, f.states.get(InventoryResourceKind.ITEM).reads.get());
+			f.backend.tick(2, f.settings);
+			assertEquals(fluidReads, f.states.get(InventoryResourceKind.FLUID).reads.get(), "reallow cannot refreeze or reopen an existing lane");
+			assertEquals(itemReads, f.states.get(InventoryResourceKind.ITEM).reads.get());
 			f.backend.handle(InventoryBackendTest.A, f.select(InventoryResourceKind.ITEM, 1, item), 2, f.settings);
 			assertEquals(1, f.host.store.size());
 		}
@@ -256,7 +261,7 @@ class InventoryResourceLanesTest {
 			assertTrue(f.backend.trackedKind(f.host.store.allMarkers().getFirst().id()).isEmpty());
 		}
 	}
-	@Test void finalFluidProofRechecksRecipientFieldRevocationWithoutRetiringAuthorizedItemSibling() {
+	@Test void finalSourceProofKeepsTheFrozenFluidGrantAndAuthorizedItemSibling() {
 		@NotNullByDefault
 		class Host extends InventoryBackendTest.Host {
 			Runnable duringProof = () -> {};
@@ -274,9 +279,13 @@ class InventoryResourceLanesTest {
 			host.duringProof = () -> fluid.afterValidation = () -> host.policies.put(InventoryBackendTest.B,
 				new InventoryBackend.Policy(100, 1, Set.of("entity_block"), Set.of()));
 			int start = host.packets.size(); InventoryPublicationTicks.withoutScanSlots(f.backend, 1, f.settings);
-			for (int index = start; index < host.packets.size(); index++) if (host.recipients.get(index).equals(InventoryBackendTest.B))
-				assertTrue(host.packets.get(index).entries().isEmpty(), "field authority changed inside final source proof");
-			assertTrue(f.tracking().stream().anyMatch(packet -> packet.entries().getFirst().amount() == 81000));
+			var marker = host.store.allMarkers().getFirst();
+			assertTrue(host.packets.subList(start, host.packets.size()).stream()
+					.anyMatch(packet -> host.recipients.get(host.packets.indexOf(packet)).equals(InventoryBackendTest.B)
+						&& marker.id().equals(packet.markerId()) && !packet.entries().isEmpty()),
+				"a later policy change cannot retire B's create-frozen fluid grant");
+			assertTrue(f.tracking().stream().anyMatch(packet -> !packet.entries().isEmpty()
+				&& packet.entries().getFirst().amount() == 81000));
 			assertEquals(1, fluid.reads.get(), "proof does not acquire another content value");
 			assertTrue(f.preview(InventoryResourceKind.ITEM).completeScan());
 		}

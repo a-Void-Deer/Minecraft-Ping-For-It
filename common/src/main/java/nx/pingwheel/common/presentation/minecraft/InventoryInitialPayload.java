@@ -61,8 +61,24 @@ final class InventoryInitialPayload {
 	/** Existing marker strings bound both target and frozen-key framing; no fixed 1 MiB reservation. */
 	static int bodyUpper(ServerMarker marker, String owner, PresentationPropertyRef defaultRef,
 		PresentationReceiptContent content, int basicBytes) {
+		return bodyUpper(marker, owner, defaultRef, nx.pingwheel.common.presentation.MarkerContentGrant.denied(null),
+			content, basicBytes);
+	}
+
+	static int bodyUpper(ServerMarker marker, String owner, PresentationPropertyRef defaultRef,
+		nx.pingwheel.common.presentation.MarkerContentGrant markerGrant,
+		PresentationReceiptContent content, int basicBytes) {
+		return bodyUpper(marker, owner, defaultRef,
+			nx.pingwheel.common.network.PresentationGrantCodec.encodedSize(markerGrant),
+			content, basicBytes);
+	}
+
+	static int bodyUpper(ServerMarker marker, String owner, PresentationPropertyRef defaultRef,
+		int grantBytes, PresentationReceiptContent content, int basicBytes) {
 		int size = 256 + 5 + basicBytes + utf(owner) + utf(marker.targetType().id()) + utf(marker.pingType().id())
-			+ utf(defaultRef.adapterId()) + utf(defaultRef.fieldId()) + 5 + PresentationCodec.receiptContentEncodedSize(content);
+			+ utf(defaultRef.adapterId()) + utf(defaultRef.fieldId()) + 5
+			+ grantBytes
+			+ PresentationCodec.receiptContentEncodedSize(content);
 		for (String key : defaultRef.recordPath()) size += utf(key);
 		Target target = marker.target();
 		size += utf(target.dimensionId()) + switch (target) {
@@ -89,6 +105,13 @@ final class InventoryInitialPayload {
 	/** Caller owns construction admission before entering this method. No bounded() probe or second Basic encoding. */
 	static PresentationS2CPacket create(long epoch, long view, long revision, ServerMarker marker, String owner,
 		PresentationPropertyRef defaultRef, PresentationReceiptContent content, PresentationSection basic, int basicBytes) {
+		return create(epoch, view, revision, marker, owner, defaultRef,
+			nx.pingwheel.common.presentation.MarkerContentGrant.denied(null), content, basic, basicBytes);
+	}
+
+	static PresentationS2CPacket create(long epoch, long view, long revision, ServerMarker marker, String owner,
+		PresentationPropertyRef defaultRef, nx.pingwheel.common.presentation.MarkerContentGrant markerGrant,
+		PresentationReceiptContent content, PresentationSection basic, int basicBytes) {
 		FriendlyByteBuf buffer = new FriendlyByteBuf(Unpooled.buffer(basicBytes, basicBytes));
 		try {
 			PresentationCodec.write(buffer, basic);
@@ -97,7 +120,7 @@ final class InventoryInitialPayload {
 			buffer.readBytes(payload);
 			return new PresentationS2CPacket(PresentationS2CPacket.Kind.CREATED, PresentationS2CPacket.VERSION,
 				epoch, view, revision, Map.of(), Map.of(), Map.of(), Map.of(), MarkerSnapshot.from(marker), owner,
-				defaultRef, content, payload, marker.id(), null, null, Optional.empty(), 0, null, null);
+				defaultRef, markerGrant, content, payload, marker.id(), null, null, Optional.empty(), 0, null, null);
 		} finally { buffer.release(); }
 	}
 	private static int utf(String value) { int bytes = ByteBufUtil.utf8Bytes(value); return varInt(bytes) + bytes; }

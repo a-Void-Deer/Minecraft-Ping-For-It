@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -30,6 +31,8 @@ import nx.pingwheel.common.presentation.PresentationRegistry;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationStore;
 import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.presentation.MarkerContentGrant;
+import nx.pingwheel.common.presentation.PresentationGrant;
 import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
 import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
@@ -181,6 +184,31 @@ public final class ClientPresentation {
 		if (access == null || !access.allows(ref)) return false;
 		return ref.isRoot() || access.adapters().get(ref.adapterId()).fields().get(ref.fieldId()).kind() == PresentationField.Kind.RECORD;
 	}
+	/** The marker's immutable creation-frozen content grant, if retained. */
+	public Optional<MarkerContentGrant> markerGrant(MarkerId id) {
+		if (id == null || !store.isKnown(id.value())) return Optional.empty();
+		MarkerContentGrant grant = store.grant(id.value());
+		return grant == null ? Optional.empty() : Optional.of(grant);
+	}
+
+	/** Frozen marker fields intersected with this session's decodable accepted kinds. */
+	public Map<String, java.util.Set<String>> markerAllowedFields(MarkerId id) {
+		MarkerContentGrant content = markerGrant(id).orElse(null);
+		if (content == null) return Map.of();
+		Map<String, java.util.Set<String>> result = new LinkedHashMap<>();
+		content.authorization().adapters().forEach((adapterId, adapter) -> {
+			PresentationAdapter local = registry.get(adapterId);
+			Map<String, PresentationField> accepted = compatible.get(adapterId);
+			if (local == null || accepted == null || local.schema() != adapter.schema()) return;
+			java.util.Set<String> fields = new LinkedHashSet<>();
+			adapter.fields().forEach((fieldId, kind) -> {
+				PresentationField field = accepted.get(fieldId);
+				if (field != null && field.kind() == kind) fields.add(fieldId);
+			});
+			if (!fields.isEmpty()) result.put(adapterId, java.util.Set.copyOf(fields));
+		});
+		return Map.copyOf(result);
+	}
 	/** Package-private verification seam; UI callers only receive {@link #view}. */
 	PresentationStore store() { return store; }
 
@@ -280,7 +308,8 @@ public final class ClientPresentation {
 		// Both policies are validated before either becomes observable.
 		mask = acceptedMask;
 		childBlack = nextChildBlack;
-		store.restrict(mask, childBlack);
+		// A same-epoch reset updates future-create/preview inputs. Retained
+		// sections and their frozen per-marker grants are not restricted.
 		store.generation(epoch, packet.view());
 		view = packet.view();
 		ready = true;
@@ -293,35 +322,40 @@ public final class ClientPresentation {
 			&& packet.view() == view;
 	}
 
-	/** Initial Basic and marker metadata are decoded before either is applied. */
+	/** Initial Basic, marker metadata and the per-marker grant are validated before either is applied. */
 	public boolean initial(PresentationS2CPacket packet) {
 		if (!current(packet) || packet.kind() != PresentationS2CPacket.Kind.CREATED
-			|| packet.snapshot() == null || packet.markerId() == null
+			|| packet.snapshot() == null || packet.markerId() == null || packet.markerGrant() == null
 			|| !packet.markerId().equals(packet.snapshot().id()) || packet.revision() < 1) return false;
-		if (packet.defaultRef() != null && childBlack.getOrDefault(packet.snapshot().targetTypeId(), List.of()).contains(packet.defaultRef())) return false;
-		PresentationSection basic = decode(packet.sectionBytes(), BASIC, packet.snapshot().targetTypeId());
-		if (basic == null || !validReceipt(packet, basic)) return false;
+		MarkerContentGrant grant = packet.markerGrant();
+		PresentationSection basic = decode(packet.sectionBytes(), BASIC, packet.snapshot().targetTypeId(), grant);
+		if (basic == null || !validReceipt(packet, basic, grant)) return false;
 		long id = packet.markerId().value();
 		if (!store.isKnown(id)) {
 			if (!nx.pingwheel.common.presentation.PresentationSettings.isKnownTargetType(packet.snapshot().targetTypeId())
 				|| packet.defaultRef() == null) return false;
-			store.initial(epoch, view, id, packet.snapshot().targetTypeId(), packet.defaultRef(),
-				project(basic, packet.snapshot().targetTypeId()), packet.revision());
+			store.initial(epoch, view, id, packet.snapshot().targetTypeId(), packet.defaultRef(), grant,
+				project(basic, packet.snapshot().targetTypeId(), grant), packet.revision());
 			return store.isKnown(id);
 		}
-		if (store.isFrozen(id) || !packet.snapshot().targetTypeId().equals(store.targetTypeId(id))
+		MarkerContentGrant retained = store.grant(id);
+		if (store.isFrozen(id) || retained == null || !retained.equals(grant)
+			|| !packet.snapshot().targetTypeId().equals(store.targetTypeId(id))
 			|| !packet.defaultRef().equals(store.defaultRef(id))) return false;
 		// Only a newer atomic Basic initial may update this marker's payload.
 		return store.replace(epoch, view, id, packet.revision(),
-			project(basic, store.targetTypeId(id)));
+			project(basic, store.targetTypeId(id), grant));
 	}
 
-	/** Receipt hints are validated against current authority before the atomic initial mutates any store. */
-	private boolean validReceipt(PresentationS2CPacket packet, PresentationSection basic) {
+	/** Receipt hints are validated against the marker grant before the atomic initial mutates any store. */
+	private boolean validReceipt(PresentationS2CPacket packet, PresentationSection basic, MarkerContentGrant grant) {
 		if (packet.content() == null) return false;
 		if (packet.content().kind() == PresentationReceiptContent.Kind.INVENTORY) {
 			@Nullable InventoryCreationSnapshot creation = packet.content().inventorySnapshot();
 			String type = packet.snapshot().targetTypeId();
+			MarkerContentGrant markerGrant = Objects.requireNonNull(packet.markerGrant());
+			@Nullable String lane = creation == null ? null
+				: creation.resourceKind() == InventoryResourceKind.ITEM ? InventoryPresentation.ITEMS : InventoryPresentation.FLUIDS;
 			if (creation == null || !PresentationSettings.isKnownTargetType(packet.snapshot().targetTypeId())
 				|| !(packet.snapshot().target() instanceof Target.BlockTarget
 					|| packet.snapshot().target() instanceof Target.ExternalBlockTarget)
@@ -330,36 +364,41 @@ public final class ClientPresentation {
 					&& external.blockEntity() != type.equals("entity_block"))
 				|| !PresentationPropertyPingTypes.isKnownPingTypeId(packet.snapshot().pingTypeId())
 				|| PresentationDefaults.forTargetType(type).filter(ref -> ref.equals(packet.defaultRef())).isEmpty()
-				|| !compatible.containsKey(InventoryPresentation.ADAPTER_ID)
-				|| !acceptedServerCatalog.getOrDefault(InventoryPresentation.ADAPTER_ID, Map.of())
-					.containsKey(creation.resourceKind() == InventoryResourceKind.ITEM ? InventoryPresentation.ITEMS : InventoryPresentation.FLUIDS)
-				|| !mask.getOrDefault(packet.snapshot().targetTypeId(), Map.of())
-					.getOrDefault(BASIC, Set.of()).contains(NAME)
+				|| !acceptedField(PresentationPropertyRef.root(InventoryPresentation.ADAPTER_ID, Objects.requireNonNull(lane)),
+					markerGrant.authorization())
+				|| markerGrant.trackingKind() != creation.resourceKind()
+				|| !acceptedField(PresentationPropertyRef.root(BASIC, NAME), markerGrant.authorization())
 				|| basic.stale() || !(basic.fields().get(NAME) instanceof PresentationValue.Text name) || name.value().isBlank()
 				|| !PresentationPropertyPingTypes.isKnownPingTypeId(creation.annotationPingType())) return false;
 		}
 		if (packet.content().kind() != PresentationReceiptContent.Kind.PROPERTIES) return true;
-		var access = previewAccess(packet.snapshot().targetTypeId()).orElse(null);
-		if (access == null) return false;
 		for (PresentationPropertyRef ref : packet.content().selectedRefs()) {
-			var adapter = access.adapters().get(ref.adapterId());
-			PresentationField field = adapter == null ? null : adapter.fields().get(ref.fieldId());
-			if (field == null || !access.allows(ref) || !ref.isRoot() && field.kind() != PresentationField.Kind.RECORD) return false;
-			// A later SECTION may supply a missing value; presence without its explicit
-			// annotation is malformed metadata, not a reason to publish an ordinary line.
+			if (!acceptedField(ref, grant.authorization())) return false;
 			if (BASIC.equals(ref.adapterId()) && ref.resolve(basic) != null
 				&& basic.annotations().get(ref) == null) return false;
 		}
 		return true;
 	}
 
+	private boolean acceptedField(PresentationPropertyRef ref, PresentationGrant grant) {
+		if (ref == null || !grant.allowsRef(ref)) return false;
+		PresentationAdapter local = registry.get(ref.adapterId());
+		PresentationGrant.AdapterGrant frozen = grant.adapters().get(ref.adapterId());
+		PresentationField accepted = compatible.getOrDefault(ref.adapterId(), Map.of()).get(ref.fieldId());
+		return local != null && frozen != null && local.schema() == frozen.schema()
+			&& accepted != null && frozen.fields().get(ref.fieldId()) == accepted.kind();
+	}
+
 	public boolean section(PresentationS2CPacket packet) {
 		if (!current(packet) || packet.kind() != PresentationS2CPacket.Kind.SECTION || packet.markerId() == null
 			|| store.targetTypeId(packet.markerId().value()) == null) return false;
-		PresentationSection section = decode(packet.sectionBytes(), null, store.targetTypeId(packet.markerId().value()));
+		MarkerContentGrant grant = store.grant(packet.markerId().value());
+		if (grant == null) return false;
+		PresentationSection section = decode(packet.sectionBytes(), null,
+			store.targetTypeId(packet.markerId().value()), grant);
 		if (section == null) return false;
 		return store.replace(epoch, view, packet.markerId().value(), packet.revision(),
-			project(section, store.targetTypeId(packet.markerId().value())));
+			project(section, store.targetTypeId(packet.markerId().value()), grant));
 	}
 
 	public void removed(MarkerId id, long revision, boolean expired) {
@@ -368,7 +407,8 @@ public final class ClientPresentation {
 
 	public void evict(MarkerId id) { store.evict(id.value()); }
 
-	private PresentationSection decode(byte[] bytes, String expectedAdapter, String targetTypeId) {
+	private PresentationSection decode(byte[] bytes, String expectedAdapter, String targetTypeId,
+		MarkerContentGrant grant) {
 		if (bytes == null || bytes.length == 0 || bytes.length > PresentationCodec.MAX_SECTION_BYTES + 5) return null;
 		FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.wrappedBuffer(bytes));
 		try {
@@ -379,14 +419,20 @@ public final class ClientPresentation {
 			int schema = buf.readVarInt();
 			if (expectedAdapter != null && !expectedAdapter.equals(adapter)) return null;
 			PresentationAdapter local = registry.get(adapter);
-			if (local == null || local.schema() != schema
-				|| local.deliveryMode() != PresentationAdapter.DeliveryMode.SECTION
-				|| !compatible.containsKey(adapter)) return null;
-			buf.readerIndex(start);
 			Map<String, PresentationField> fields = compatible.get(adapter);
-			Set<String> allowed = mask.getOrDefault(targetTypeId, Map.of()).getOrDefault(adapter, Set.of());
+			if (local == null || fields == null || local.schema() != schema
+				|| local.deliveryMode() != PresentationAdapter.DeliveryMode.SECTION) return null;
+			PresentationGrant.AdapterGrant frozen = grant.authorization().adapters().get(adapter);
+			// A deny-all grant has no adapter entry and therefore no authorized
+			// fields. The marker identity and empty section still decode; only a
+			// present frozen adapter adds an exact schema/kind gate.
+			if (frozen != null && frozen.schema() != schema) return null;
+			buf.readerIndex(start);
 			PresentationSection decoded = PresentationCodec.read(buf,
-				id -> fields.containsKey(id) && allowed.contains(id));
+				id -> {
+					PresentationField accepted = fields.get(id);
+					return frozen != null && accepted != null && frozen.fields().get(id) == accepted.kind();
+				});
 			if (buf.isReadable()) return null;
 			Map<String, PresentationValue> checked = new LinkedHashMap<>();
 			decoded.fields().forEach((id, value) -> {
@@ -394,7 +440,7 @@ public final class ClientPresentation {
 			});
 			Map<PresentationPropertyRef, String> annotations = new LinkedHashMap<>();
 			decoded.annotations().forEach((ref, ping) -> {
-				if (checked.containsKey(ref.fieldId()) && !childBlack.getOrDefault(targetTypeId, List.of()).contains(ref)) annotations.put(ref, ping);
+				if (checked.containsKey(ref.fieldId()) && grant.authorization().allowsRef(ref)) annotations.put(ref, ping);
 			});
 			return new PresentationSection(adapter, schema, checked, decoded.stale(), annotations);
 		} catch (RuntimeException invalid) {
@@ -404,16 +450,18 @@ public final class ClientPresentation {
 		}
 	}
 
-	private PresentationSection project(PresentationSection section, String targetTypeId) {
-		Set<String> allowed = mask.getOrDefault(targetTypeId, Map.of())
-			.getOrDefault(section.adapterId(), Set.of());
+	private PresentationSection project(PresentationSection section, String targetTypeId, MarkerContentGrant grant) {
+		PresentationGrant.AdapterGrant frozen = grant.authorization().adapters().get(section.adapterId());
+		PresentationAdapter local = registry.get(section.adapterId());
+		if (frozen == null || local == null || local.schema() != section.schema() || frozen.schema() != section.schema())
+			return new PresentationSection(section.adapterId(), section.schema(), Map.of(), section.stale());
 		Map<String, PresentationValue> fields = new LinkedHashMap<>();
-		section.fields().forEach((id, value) -> {
-			if (allowed.contains(id)) fields.put(id, value);
+		if (frozen != null) section.fields().forEach((id, value) -> {
+			if (grant.authorization().allowsField(section.adapterId(), id)) fields.put(id, value);
 		});
 		Map<PresentationPropertyRef, String> annotations = new LinkedHashMap<>();
 		section.annotations().forEach((ref, ping) -> {
-			if (fields.containsKey(ref.fieldId()) && !childBlack.getOrDefault(targetTypeId, List.of()).contains(ref)) annotations.put(ref, ping);
+			if (fields.containsKey(ref.fieldId()) && grant.authorization().allowsRef(ref)) annotations.put(ref, ping);
 		});
 		return new PresentationSection(section.adapterId(), section.schema(), fields, section.stale(), annotations);
 	}
@@ -439,14 +487,15 @@ public final class ClientPresentation {
 		return Map.copyOf(result);
 	}
 
-	/** Only values authorized by the latest server mask may reach a UI provider. */
+	/** Only values authorized by the marker's frozen grant may reach a UI provider. */
 	public PresentationView view(MarkerId id) {
 		if (id == null || !store.isKnown(id.value())) return PresentationView.empty();
 		String targetTypeId = store.targetTypeId(id.value());
-		if (targetTypeId == null) return PresentationView.empty(); // a hard-removal tombstone has no display authority
+		MarkerContentGrant grant = store.grant(id.value());
+		if (targetTypeId == null || grant == null) return PresentationView.empty();
 		Map<String, PresentationSection> shown = new LinkedHashMap<>();
 		store.sections(id.value()).forEach((adapter, entry) -> {
-			PresentationSection authorized = project(entry.section(), targetTypeId);
+			PresentationSection authorized = project(entry.section(), targetTypeId, grant);
 			if (!authorized.fields().isEmpty()) shown.put(adapter, authorized);
 		});
 		Map<String, Map<String, String>> labels = new LinkedHashMap<>();
@@ -456,7 +505,7 @@ public final class ClientPresentation {
 			labels.put(adapter, names);
 		});
 		return new PresentationView(targetTypeId, store.defaultRef(id.value()), shown, labels,
-			Set.copyOf(childBlack.getOrDefault(targetTypeId, List.of())));
+			grant.authorization().childBlack());
 	}
 
 	/** Provider changes affect presentation only: no packets or source work. */

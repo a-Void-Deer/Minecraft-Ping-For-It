@@ -16,6 +16,7 @@ import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.marker.*;
 import nx.pingwheel.common.network.*;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
@@ -26,18 +27,51 @@ class InventoryBackendTest {
 		final List<InventoryS2CPacket> packets = new ArrayList<>(); final List<UUID> recipients = new ArrayList<>();
 		final ServerMarkerStore store = new ServerMarkerStore(new MarkerIdSource());
 		final Map<UUID, InventoryBackend.Policy> policies = new java.util.HashMap<>();
+		/** Per-recipient creation grant used by this headless fixture; never a production default. */
+		java.util.function.Function<UUID, java.util.Set<InventoryResourceKind>> grants = player -> InventoryTestGrants.both();
+		@Nullable java.util.Set<InventoryResourceKind> frozenLanes;
+		/** Current presentation schema lanes; empty represents a revoked session lane view. */
+		java.util.Set<InventoryResourceKind> compatibleKinds = InventoryTestGrants.both();
+		/** Optional late audience revocation without mutating the canonical marker record. */
+		@Nullable java.util.function.BiPredicate<UUID, MarkerId> known;
 		long expiry = 80;
 		boolean failPrepared;
 		boolean failResultSend;
 		boolean failInvalidPreviewSend;
+		boolean deferResultSend;
 		InventoryRuntime.DisplayReprojector projector;
 		Host() { policies.put(A, new InventoryBackend.Policy(100, 1, Set.of("entity_block"))); policies.put(B, policies.get(A)); }
 		@Override public Optional<InventoryBackend.Policy> policy(UUID player) { return Optional.ofNullable(policies.get(player)); }
+		@Override public Optional<InventoryBackend.SessionAccess> session(UUID player) {
+			@Nullable InventoryBackend.Policy policy = policies.get(player);
+			return policy == null ? Optional.empty() : Optional.of(new InventoryBackend.SessionAccess(policy.epoch(), policy.view(), compatibleKinds));
+		}
+		@Override public Optional<ServerMarker> activeMarker(MarkerId marker) {
+			return store.allMarkers().stream().filter(candidate -> candidate.id().equals(marker)).findFirst();
+		}
+		@Override public java.util.Set<InventoryResourceKind> freezeInventoryPreviewLanes(UUID owner, String targetTypeId) {
+			if (frozenLanes != null) return frozenLanes;
+			@Nullable InventoryBackend.Policy policy = policies.get(owner);
+			if (policy == null) return Set.of();
+			// The fixture's explicit policy view owns its OPEN-time lane entitlement;
+			// an item-only policy must not accidentally resolve a fluid provider.
+			var lanes = java.util.EnumSet.noneOf(InventoryResourceKind.class);
+			for (var kind : InventoryResourceKind.values()) if (policy.types(kind).contains(targetTypeId)) lanes.add(kind);
+			return lanes;
+		}
 		@Override public Optional<InventoryBackend.Opened> open(UUID player, nx.pingwheel.common.domain.Target requested) { return Optional.of(new InventoryBackend.Opened(InventoryRuntimeTest.TARGET, "entity_block", "attention")); }
 		@Override public boolean annotationAllowed(InventorySourceInput input, String type) { return Set.of("attention", "danger").contains(type); }
-		@Override public boolean knows(UUID player, MarkerId marker) { return store.allMarkers().stream().anyMatch(m -> m.id().equals(marker) && m.recipients().contains(player)); }
+		@Override public boolean knows(UUID player, MarkerId marker) {
+			boolean canonical = store.allMarkers().stream().anyMatch(m -> m.id().equals(marker) && m.recipients().contains(player));
+			return canonical && (known == null || known.test(player, marker));
+		}
 		@Override public boolean authorized(SyncPublisher.Context context) { return true; }
 		@Override public Optional<InventoryRuntime.DisplayReprojector> displayReprojector() { return Optional.ofNullable(projector); }
+		@Override public InventorySyncPublisher.SendDecision beforeSend(SyncPublisher.Context context, InventoryS2CPacket packet,
+			@Nullable InventoryPublicationEvidence evidence) {
+			return deferResultSend && (packet.kind() == InventoryS2CPacket.Kind.SELECTED || packet.kind() == InventoryS2CPacket.Kind.REJECT)
+				? InventorySyncPublisher.SendDecision.DEFER : InventorySyncPublisher.SendDecision.ALLOW;
+		}
 		@Override public int encodedBytes(InventoryS2CPacket packet) { FriendlyByteBuf buf = new FriendlyByteBuf(Unpooled.buffer()); try { packet.write(buf); return buf.readableBytes(); } finally { buf.release(); } }
 		@Override public void send(UUID player, InventoryS2CPacket packet) {
 			assertFalse(packet.isCorrupt(), packet.toString());
@@ -49,10 +83,19 @@ class InventoryBackendTest {
 		}
 		@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
 			var type = TargetTypeCatalog.builtIn().findById(frozen.targetType()).orElseThrow();
-			@org.jetbrains.annotations.Nullable var reject = admission.prepare(frozen.target(), TargetKey.from(frozen.target()), type.id(), List.of(A, B));
+			var audience = List.of(A, B);
+			@Nullable var reject = admission.prepare(frozen.target(), TargetKey.from(frozen.target()), type.id(), audience);
+			if (reject != null) return new InventoryBackend.Created(null, reject);
+			// Freeze the exact explicit fixture grant once, then consume that same
+			// result in the real finalizer and store commit.
+			var allowed = new java.util.LinkedHashMap<UUID, java.util.Set<InventoryResourceKind>>();
+			for (UUID recipient : audience) allowed.put(recipient, grants.apply(recipient));
+			PingAuthorization authorization = InventoryTestGrants.lanes(audience, allowed);
+			reject = admission.finishAuthorization(authorization);
 			if (reject != null) return new InventoryBackend.Created(null, reject);
 			if (failPrepared) return new InventoryBackend.Created(null, MarkerRejectReason.INVALID_REQUEST);
-			var marker = store.create(player, frozen.target(), type, type.defaultPingType(), new MarkerAnchor(1, 2, 3), 1, expiry, List.of(A, B)).marker();
+			var marker = store.create(player, frozen.target(), TargetKey.from(frozen.target()), type, type.defaultPingType(),
+				new MarkerAnchor(1, 2, 3), 1, expiry, List.of(A, B), List.of(), authorization).marker();
 			return new InventoryBackend.Created(marker, null);
 		}
 		long epoch(UUID player) { for (int i = packets.size() - 1; i >= 0; i--) if (recipients.get(i).equals(player) && packets.get(i).kind() == InventoryS2CPacket.Kind.OFFER) return packets.get(i).epoch(); throw new AssertionError(); }
@@ -117,7 +160,10 @@ class InventoryBackendTest {
 	@Test void invalidityRecoveryAndHardExpiryDoNotChangeMarkerLifetimeOrProbeAfterDeadline() {
 		try (Fixture f = new Fixture()) {
 			f.host.expiry = 12; f.open(); f.backend.handle(A, f.select(1), 1, f.settings); f.backend.tick(2, f.settings);
-			var marker = f.host.store.allMarkers().getFirst(); f.valid = false; f.backend.tick(3, f.settings);
+			var marker = f.host.store.allMarkers().getFirst(); f.valid = false;
+			// A completed Tracking observation waits its own idle period; the
+			// currently due check is the first one allowed to report invalidity.
+			f.backend.tick(5, f.settings);
 			assertTrue(f.host.packets.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.STATUS && p.status() == InventoryS2CPacket.Status.INVALID));
 			assertEquals(12, marker.expiresAtTick()); assertEquals(1, f.host.store.size());
 			f.valid = true; f.backend.tick(6, f.settings);
@@ -127,19 +173,20 @@ class InventoryBackendTest {
 			assertEquals(reads, f.reads.get()); assertEquals(validations, f.validations.get(), "hard expiry removes all tracking evidence before any validation or recovery probe");
 		}
 	}
-	@Test void recoveryProbeClosesAnUnusedCandidateBeforeTheNextDueSweep() {
+	@Test void recoveryProbeTransfersItsCandidateIntoFirstEligibleRestart() {
 		try (Fixture f = new Fixture()) {
 			f.open(); f.backend.handle(A, f.select(1), 1, f.settings); f.backend.tick(2, f.settings);
-			f.valid = false; f.backend.tick(3, f.settings);
+			long due = 2 + f.settings.getTracking().getPeriodTicks();
+			f.valid = false; f.backend.tick(due, f.settings);
 			f.valid = true;
 			int resolutions = f.resolutions.get(), closes = f.closes.get();
-			f.backend.tick(4, f.settings);
-			assertEquals(resolutions + 1, f.resolutions.get(), "an invalid lease still probes recovery once per eligible tick");
-			assertEquals(closes + 1, f.closes.get(), "a not-yet-due recovery candidate closes before the next tick");
+			f.backend.tick(due + 1, f.settings);
+			assertEquals(resolutions + 1, f.resolutions.get(), "an invalid lease probes recovery on the first eligible tick");
+			assertEquals(closes, f.closes.get(), "the recovery candidate is transferred into the restart, not stranded");
 			assertEquals(0, f.backend.runtime().memory().reserved());
-			long due = 4 + f.settings.getTracking().getPeriodTicks();
-			f.backend.tick(due, f.settings);
-			assertEquals(resolutions + 2, f.resolutions.get(), "the due restart transfers the same candidate instead of resolving again");
+			f.backend.tick(due + 1 + f.settings.getTracking().getPeriodTicks(), f.settings);
+			assertEquals(resolutions + 2, f.resolutions.get(),
+				"the later due sweep owns a fresh observation instead of reusing an earlier tick's source");
 		}
 	}
 	@Test void revokedViewPurgesQueuesWithoutChangingFrozenAudience() {
@@ -151,10 +198,14 @@ class InventoryBackendTest {
 			var revoked = new ArrayList<InventoryS2CPacket>();
 			for (int i = start; i < f.host.packets.size(); i++) if (f.host.recipients.get(i).equals(B)) revoked.add(f.host.packets.get(i));
 			// Revocation fences the purged view with its POLICY first and only then
-			// re-advertises the current view's negotiation OFFER; no revoked inventory
-			// data frame may follow and the frozen marker audience stays untouched.
-			assertEquals(List.of(InventoryS2CPacket.Kind.POLICY, InventoryS2CPacket.Kind.POLICY, InventoryS2CPacket.Kind.OFFER),
-				revoked.stream().map(InventoryS2CPacket::kind).toList());
+			// re-advertises the current view's negotiation OFFER. The marker's frozen
+			// audience is untouched, so any later data must already belong to the
+			// replacement view rather than escaping the old queued context.
+			@Unmodifiable List<InventoryS2CPacket.Kind> kinds = revoked.stream().map(InventoryS2CPacket::kind).toList();
+			assertTrue(kinds.size() >= 3 && kinds.subList(0, 3).equals(List.of(InventoryS2CPacket.Kind.POLICY,
+				InventoryS2CPacket.Kind.POLICY, InventoryS2CPacket.Kind.OFFER)), kinds.toString());
+			assertTrue(revoked.stream().skip(3).allMatch(packet -> packet.view() == 2),
+				"the frozen audience may continue only in the replacement view");
 			assertEquals(Set.of(), revoked.getFirst().allowedTypes());
 			for (var packet : revoked) {
 				assertEquals(epoch, packet.epoch());
@@ -300,12 +351,12 @@ class InventoryBackendTest {
 	@Test void refusedResultsCannotEscapeAnOldPresentationViewOrDisconnectedSession() {
 		for (boolean disconnect : List.of(false, true)) try (Fixture f = new Fixture()) {
 			f.open(); var selection = f.select(1);
-			var padding = f.backend.runtime().memory().tryReserve(5L * 1024 * 1024).orElseThrow();
-			padding.commit(5L * 1024 * 1024); f.settings.setPendingMemoryMiB(4); f.amount = 0;
+			// Create a genuine refusal whose result cannot hand off yet.
+			f.host.failPrepared = true; f.host.deferResultSend = true;
 			f.backend.handle(A, selection, 1, f.settings);
 			if (disconnect) f.backend.disconnect(A);
 			else f.host.policies.put(A, new InventoryBackend.Policy(100, 2, Set.of("entity_block")));
-			int start = f.host.packets.size(); padding.close(); f.settings.setPendingMemoryMiB(16);
+			int start = f.host.packets.size(); f.host.deferResultSend = false;
 			f.backend.tick(2, f.settings); f.backend.tick(3, f.settings);
 			if (disconnect) f.backend.handle(A, InventoryC2SPacket.hello(), 4, f.settings);
 			else f.backend.handle(A, selection.stamp(100, 2), 4, f.settings);
@@ -364,6 +415,7 @@ class InventoryBackendTest {
 	}
 	@Test void invalidPreviewWithoutCloseReleasesPhysicalRoundAndEntriesSoUnrelatedPreviewCanProgress() {
 		try (Fixture f = new Fixture()) {
+			f.settings.getPreview().setPeriodTicks(1);
 			f.open(); long before = f.backend.runtime().memory().retained(); f.valid = false; f.backend.tick(1, f.settings);
 			assertTrue(f.backend.runtime().memory().retained() < before - 280000, "probe invalidation releases provider round/pages and preview entries without CLOSE");
 			assertTrue(f.host.packets.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.status() == InventoryS2CPacket.Status.INVALID));
@@ -387,6 +439,7 @@ class InventoryBackendTest {
 	}
 	@Test void invalidPreviewControlRetriesOnNormalTicksWithoutProbingOrRestoringQuantities() {
 		try (Fixture f = new Fixture()) {
+			f.settings.getPreview().setPeriodTicks(1);
 			f.open(); f.host.failInvalidPreviewSend = true; f.valid = false;
 			int start = f.host.packets.size(); f.backend.tick(1, f.settings);
 			assertTrue(f.host.packets.subList(start, f.host.packets.size()).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW));

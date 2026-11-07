@@ -96,6 +96,15 @@ class InventoryReconfigurationTest {
 		int offerAttempts;
 		Host() { policies.put(A, new InventoryBackend.Policy(100, 1, Set.of("entity_block"))); policies.put(B, policies.get(A)); }
 		@Override public Optional<InventoryBackend.Policy> policy(UUID player) { return Optional.ofNullable(policies.get(player)); }
+		@Override public Optional<InventoryBackend.SessionAccess> session(UUID player) {
+			return policy(player).map(policy -> new InventoryBackend.SessionAccess(policy.epoch(), policy.view(), InventoryTestGrants.both()));
+		}
+		@Override public Optional<nx.pingwheel.common.marker.ServerMarker> activeMarker(MarkerId marker) {
+			return store.allMarkers().stream().filter(candidate -> candidate.id().equals(marker)).findFirst();
+		}
+		@Override public java.util.Set<InventoryResourceKind> freezeInventoryPreviewLanes(UUID owner, String targetTypeId) {
+			return InventoryTestGrants.both();
+		}
 		@Override public Optional<InventoryBackend.Opened> open(UUID player, nx.pingwheel.common.domain.Target requested) { return Optional.of(new InventoryBackend.Opened(InventoryRuntimeTest.TARGET, "entity_block", "attention")); }
 		@Override public boolean annotationAllowed(InventorySourceInput input, String type) { return "attention".equals(type); }
 		@Override public boolean knows(UUID player, MarkerId marker) { return store.allMarkers().stream().anyMatch(m -> m.id().equals(marker) && m.recipients().contains(player)); }
@@ -114,7 +123,11 @@ class InventoryReconfigurationTest {
 			var type = TargetTypeCatalog.builtIn().findById(frozen.targetType()).orElseThrow();
 			@org.jetbrains.annotations.Nullable var reject = admission.prepare(frozen.target(), nx.pingwheel.common.marker.TargetKey.from(frozen.target()), type.id(), List.of(A, B));
 			if (reject != null) return new InventoryBackend.Created(null, reject);
-			var marker = store.create(player, frozen.target(), type, type.defaultPingType(), new MarkerAnchor(1, 2, 3), 1, expiry, List.of(A, B)).marker();
+			var authorization = InventoryTestGrants.allowAll(List.of(A, B));
+			reject = admission.finishAuthorization(authorization);
+			if (reject != null) return new InventoryBackend.Created(null, reject);
+			var marker = store.create(player, frozen.target(), nx.pingwheel.common.marker.TargetKey.from(frozen.target()),
+				type, type.defaultPingType(), new MarkerAnchor(1, 2, 3), 1, expiry, List.of(A, B), List.of(), authorization).marker();
 			return new InventoryBackend.Created(marker, null);
 		}
 		long epoch(UUID player) { for (int i = packets.size() - 1; i >= 0; i--) if (recipients.get(i).equals(player) && packets.get(i).kind() == InventoryS2CPacket.Kind.OFFER) return packets.get(i).epoch(); throw new AssertionError("no offer for " + player); }
@@ -191,7 +204,8 @@ class InventoryReconfigurationTest {
 		Endpoint(UUID recipient, MarkerSnapshot marker) {
 			this.recipient = recipient;
 			client.presentationReset(100, 1);
-			if (marker != null) client.markerCreated(marker);
+			if (marker != null) client.markerCreated(marker, InventoryTestGrants.content(
+				InventoryTestGrants.allowAll(List.of(recipient)), recipient, InventoryResourceKind.ITEM));
 		}
 		void drain(Host host) {
 			for (; cursor < host.packets.size(); cursor++) if (host.recipients.get(cursor).equals(recipient)) client.accept(wire(host.packets.get(cursor)));

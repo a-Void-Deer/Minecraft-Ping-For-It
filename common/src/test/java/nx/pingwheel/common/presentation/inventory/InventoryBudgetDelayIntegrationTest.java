@@ -574,6 +574,7 @@ class InventoryBudgetDelayIntegrationTest {
 				assertEquals(DelayState.DELAYED, sink.lastState(Module.INVENTORY_TRACKING, runtime.trackingPeriodId()));
 				host.policies.put(InventoryBackendTest.A, new InventoryBackend.Policy(100, 2, Set.of()));
 				host.policies.put(InventoryBackendTest.B, new InventoryBackend.Policy(100, 2, Set.of()));
+				host.compatibleKinds = Set.of();
 				int before = reads.get(); backend.tick(3, settings);
 				assertEquals(before, reads.get()); assertEquals(DelayState.IDLE, sink.lastState(Module.INVENTORY_TRACKING, runtime.trackingPeriodId()));
 			} finally { pressure.close(); }
@@ -625,14 +626,20 @@ class InventoryBudgetDelayIntegrationTest {
 			try {
 				int frames = host.packets.size(), checked = validations.get();
 				backend.tick(9, settings); backend.tick(10, settings);
-				assertEquals(frames, host.packets.size()); assertEquals(160, reads.get()); assertTrue(validations.get() > checked);
+				assertEquals(frames, host.packets.size()); assertEquals(160, reads.get());
+				assertEquals(checked, validations.get(), "an idle completed preview needs no send proof without a pending frame");
 				assertEquals(deliveredEvents, sink.events.size(), "an already delivered cut must not add encoding or final-validation delays");
 				assertNotEquals(DelayState.DELAYED, sink.lastState(Module.INVENTORY_PREVIEW, runtime.previewPeriodId()));
 			} finally { pressure.close(); }
 			int frames = host.packets.size(); backend.tick(12, settings); assertEquals(frames, host.packets.size());
 			assertNotEquals(DelayState.DELAYED, sink.lastState(Module.INVENTORY_PREVIEW, runtime.previewPeriodId())); assertEquals(160, reads.get());
-			sourceValidity[0] = false; backend.tick(13, settings);
-			assertEquals(InventoryS2CPacket.Status.INVALID, host.packets.getLast().status()); assertEquals(160, reads.get());
+			sourceValidity[0] = false;
+			int invalidStart = host.packets.size();
+			for (int tick = 13; tick <= 30 && host.packets.subList(invalidStart, host.packets.size()).stream()
+				.noneMatch(packet -> packet.status() == InventoryS2CPacket.Status.INVALID); tick++) backend.tick(tick, settings);
+			assertTrue(host.packets.subList(invalidStart, host.packets.size()).stream()
+				.anyMatch(packet -> packet.status() == InventoryS2CPacket.Status.INVALID), "the due idle check reports the invalid source");
+			assertEquals(160, reads.get());
 		}
 	}
 	private static void reconfigurationEligibilitySequence(boolean tracking, boolean cancel, boolean revoke) {
@@ -690,7 +697,12 @@ class InventoryBudgetDelayIntegrationTest {
 			assertEquals(settings.effectiveDisplayBytes(), host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OFFER).reduce((a, b) -> b).orElseThrow().offer().effectiveDisplayBytes());
 			var pressure = runtime.memory().tryReserve(runtime.memory().remaining()).orElseThrow();
 			try {
-				if (cancel && revoke) host.policies.put(InventoryBackendTest.A, new InventoryBackend.Policy(100, 2, Set.of()));
+				if (cancel && revoke) {
+					host.policies.put(InventoryBackendTest.A, new InventoryBackend.Policy(100, 2, Set.of()));
+					// Current session/adapter compatibility is a live delivery gate;
+					// a later POLICY edit is not a frozen marker revocation.
+					host.compatibleKinds = Set.of();
+				}
 				int beforeReads = reads.get(), beforeChecks = validations.get();
 				int beforeProjections = projections.get();
 				// Ingress-first advance must use the same fresh eligibility as tick.

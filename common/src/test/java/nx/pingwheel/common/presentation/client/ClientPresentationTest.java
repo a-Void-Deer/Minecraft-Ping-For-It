@@ -10,8 +10,10 @@ import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.presentation.PresentationField;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
+import nx.pingwheel.common.presentation.PresentationReceiptContent;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.presentation.TestContentGrants;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.domain.Target;
@@ -57,7 +59,7 @@ class ClientPresentationTest {
 		assertEquals(1, sent.size());
 	}
 
-	@Test void tighterMaskPrunesFrozenFieldsAndAnnotationsWithoutResurrection() {
+	@Test void retainedFieldsSurviveLaterMaskTighteningAndLoosening() {
 		offer();
 		assertTrue(client.reset(PresentationS2CPacket.reset(81, 1,
 			Map.of("entity", Map.of(BASIC, Set.of(NAME, HEALTH))))));
@@ -66,13 +68,13 @@ class ClientPresentationTest {
 		assertTrue(client.store().isFrozen(ID.value()));
 		assertTrue(client.reset(PresentationS2CPacket.reset(81, 2,
 			Map.of("entity", Map.of(BASIC, Set.of(NAME))))));
-		assertNull(client.view(ID).field(BASIC, HEALTH));
+		assertNotNull(client.view(ID).field(BASIC, HEALTH), "same-epoch reset cannot strip a frozen field");
 		assertEquals(initial().fields().get(NAME), client.view(ID).field(BASIC, NAME));
-		assertTrue(client.view(ID).sections().get(BASIC).annotations().isEmpty());
-		assertEquals(DEFAULT, client.view(ID).defaultRef(), "an unauthorized default is not replaced with an invented one");
+		assertEquals("danger", client.view(ID).sections().get(BASIC).annotations().get(DEFAULT));
+		assertEquals(DEFAULT, client.view(ID).defaultRef());
 		assertTrue(client.reset(PresentationS2CPacket.reset(81, 3,
 			Map.of("entity", Map.of(BASIC, Set.of(NAME, HEALTH))))));
-		assertNull(client.view(ID).property(DEFAULT), "loosening cannot resurrect pruned frozen values");
+		assertEquals(new PresentationValue.NumberValue(6), client.view(ID).property(DEFAULT));
 	}
 
 	@Test void acceptedMetadataIsPreservedButNotAnAuthorizationMask() {
@@ -81,7 +83,7 @@ class ClientPresentationTest {
 		assertEquals(2, client.acceptedCatalog().entries().size());
 		assertTrue(client.reset(PresentationS2CPacket.reset(81, 1, Map.of())));
 		client.store().initial(81, 1, ID.value(), "entity", DEFAULT, initial());
-		assertTrue(client.view(ID).sections().isEmpty(), "missing server mask denies even offered fields");
+		assertFalse(client.view(ID).sections().isEmpty(), "the marker's frozen grant, not a future mask, authorizes retained values");
 		client.close();
 		assertFalse(client.catalogOffered());
 		assertTrue(client.acceptedCatalog().isEmpty());
@@ -94,7 +96,8 @@ class ClientPresentationTest {
 		var snapshot = new MarkerSnapshot(ID, UUID.randomUUID(),
 			new Target.LocationTarget("minecraft:overworld", 1, 2, 3), "entity", "attention",
 			new MarkerAnchor(1, 2, 3), 1, 100);
-		assertTrue(client.initial(PresentationS2CPacket.created(81, 1, 1, snapshot, "Owner", DEFAULT, initial())));
+		assertTrue(client.initial(PresentationS2CPacket.created(81, 1, 1, snapshot, "Owner", DEFAULT,
+			TestContentGrants.content(TestContentGrants.basicAll()), PresentationReceiptContent.whole(), initial())));
 		assertEquals("entity", client.view(ID).targetTypeId());
 		assertEquals(DEFAULT, client.view(ID).defaultRef());
 		assertEquals("danger", client.view(ID).sections().get(BASIC).annotations().get(DEFAULT));
@@ -106,7 +109,7 @@ class ClientPresentationTest {
 		assertNull(client.view(ID).field(BASIC, NAME), "a section replaces rather than merges fields");
 	}
 
-	@Test void masksAuthorizeEachMarkerByItsStoredTypeRatherThanItsAdapterOrName() {
+	@Test void frozenFieldsFollowEachMarkerRatherThanTheCurrentMask() {
 		offer();
 		assertTrue(client.reset(PresentationS2CPacket.reset(81, 1,
 			Map.of("entity", Map.of(BASIC, Set.of(HEALTH)), "block", Map.of(BASIC, Set.of(NAME))))));
@@ -114,14 +117,15 @@ class ClientPresentationTest {
 		client.store().initial(81, 1, ID.value(), "entity", DEFAULT, initial());
 		client.store().initial(81, 1, blockId.value(), "block",
 			PresentationPropertyRef.root(BASIC, NAME), initial());
-		assertNull(client.view(ID).field(BASIC, NAME));
+		assertNotNull(client.view(ID).field(BASIC, NAME), "a marker keeps its own frozen fields, not the later mask");
 		assertNotNull(client.view(ID).field(BASIC, HEALTH));
 		assertNotNull(client.view(blockId).field(BASIC, NAME));
-		assertNull(client.view(blockId).field(BASIC, HEALTH));
-		assertEquals(Map.of(), client.view(blockId).sections().get(BASIC).annotations());
+		assertNotNull(client.view(blockId).field(BASIC, HEALTH), "each marker keeps its own frozen fields, not the later mask");
+		assertEquals(Map.of(DEFAULT, "danger"), client.view(blockId).sections().get(BASIC).annotations(),
+			"an annotation follows its frozen field, not the current mask");
 	}
 
-	@Test void childOnlyResetPrunesFrozenAnnotationsAndReferenceWithoutDestroyingRootOrResurrection() {
+	@Test void sameEpochResetDoesNotPruneAFrozenChildReferenceAndLaterSectionsKeepTheFrozenFence() {
 		String state = "minecraft:block.state";
 		var denied = new PresentationPropertyRef(BASIC, state, List.of("denied"));
 		var descendant = new PresentationPropertyRef(BASIC, state, List.of("denied", "allowed"));
@@ -135,23 +139,28 @@ class ClientPresentationTest {
 			Map.of("allowed", new PresentationValue.Flag(true))), "sibling", new PresentationValue.NumberValue(2)));
 		var section = new PresentationSection(BASIC, 1, Map.of(state, value), false,
 			Map.of(denied, "danger", descendant, "attention", sibling, "attention"));
-		client.store().initial(81, 1, ID.value(), "block", denied, section);
-		client.removed(ID, 2, true);
+		var root = PresentationPropertyRef.root(BASIC, state);
+		var grant = new nx.pingwheel.common.presentation.PresentationGrant(Map.of(BASIC,
+			new nx.pingwheel.common.presentation.PresentationGrant.AdapterGrant(1,
+				Map.of(state, PresentationField.Kind.RECORD))), Set.of(denied));
+		client.store().initial(81, 1, ID.value(), "block", root,
+			new nx.pingwheel.common.presentation.MarkerContentGrant(grant, null), section, 0);
 		var children = new java.util.LinkedHashMap<>(PresentationS2CPacket.emptyChildBlack());
 		children.put("block", List.of(denied));
 		assertTrue(client.reset(PresentationS2CPacket.reset(81, 2, mask, children)));
 		var shown = client.view(ID);
-		assertNull(shown.defaultRef()); assertNull(shown.property(denied));
+		assertEquals(root, shown.defaultRef());
+		assertNull(shown.property(denied));
 		assertEquals(value, shown.field(BASIC, state), "authorization never strips nested keys from a root record");
 		assertEquals(new PresentationValue.Flag(true), shown.property(descendant), "exact denial does not cascade");
 		assertEquals(Set.of(descendant, sibling), shown.sections().get(BASIC).annotations().keySet());
-		assertFalse(client.propertyAllowed("block", denied));
+		assertFalse(client.propertyAllowed("block", denied), "new previews use the current reset child map");
 		assertTrue(client.previewAccess("block").orElseThrow().allows(descendant));
 		assertTrue(client.reset(PresentationS2CPacket.reset(81, 3, mask)));
-		assertNull(client.view(ID).defaultRef(), "loosening cannot restore a removed frozen reference");
+		assertEquals(root, client.view(ID).defaultRef(), "loosening cannot alter the frozen marker default");
 		assertFalse(client.view(ID).sections().get(BASIC).annotations().containsKey(denied));
-		assertFalse(client.section(PresentationS2CPacket.section(81, 2, 4, ID, section)));
-		assertFalse(client.section(PresentationS2CPacket.section(81, 3, 4, ID, section)), "frozen data cannot resurrect annotations");
+		assertTrue(client.section(PresentationS2CPacket.section(81, 3, 4, ID, section)), "the new view updates values under the frozen child fence");
+		assertFalse(client.view(ID).sections().get(BASIC).annotations().containsKey(denied));
 	}
 
 	@Test void incomingSectionDropsDeniedAnnotationsAndReceiptCannotSelectDeniedChild() {
@@ -168,10 +177,14 @@ class ClientPresentationTest {
 			Map.of(denied, "danger", allowed, "attention"));
 		var snapshot = new MarkerSnapshot(ID, UUID.randomUUID(), new Target.LocationTarget("minecraft:overworld", 1, 2, 3),
 			"block", "attention", new MarkerAnchor(1, 2, 3), 1, 100);
+		var grant = new nx.pingwheel.common.presentation.MarkerContentGrant(
+			new nx.pingwheel.common.presentation.PresentationGrant(Map.of(BASIC,
+				new nx.pingwheel.common.presentation.PresentationGrant.AdapterGrant(1,
+					Map.of(state, PresentationField.Kind.RECORD))), Set.of(denied)), null);
 		assertFalse(client.initial(PresentationS2CPacket.created(81, 1, 1, snapshot, "Owner", PresentationPropertyRef.root(BASIC, state),
-			nx.pingwheel.common.presentation.PresentationReceiptContent.properties(List.of(denied)), section)));
+			grant, nx.pingwheel.common.presentation.PresentationReceiptContent.properties(List.of(denied)), section)));
 		assertFalse(client.store().isKnown(ID.value()), "receipt validation is atomic with marker acceptance");
-		assertTrue(client.initial(PresentationS2CPacket.created(81, 1, 1, snapshot, "Owner", PresentationPropertyRef.root(BASIC, state), section)));
+		assertTrue(client.initial(PresentationS2CPacket.created(81, 1, 1, snapshot, "Owner", PresentationPropertyRef.root(BASIC, state), grant, PresentationReceiptContent.whole(), section)));
 		assertEquals(Set.of(allowed), client.view(ID).sections().get(BASIC).annotations().keySet());
 		assertTrue(client.section(PresentationS2CPacket.section(81, 1, 2, ID, section)));
 		assertEquals(Set.of(allowed), client.view(ID).sections().get(BASIC).annotations().keySet());

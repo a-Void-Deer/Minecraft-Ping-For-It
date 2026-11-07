@@ -248,8 +248,8 @@ class InventoryS2CPacketTest {
 		assertEquals("pingforit-s2c:inventory-v2", InventoryS2CPacket.PACKET_ID.toString());
 		assertEquals(List.of(InventoryS2CPacket.Kind.OFFER, InventoryS2CPacket.Kind.POLICY, InventoryS2CPacket.Kind.SELECTED, InventoryS2CPacket.Kind.REJECT, InventoryS2CPacket.Kind.PREVIEW,
 			InventoryS2CPacket.Kind.SNAPSHOT, InventoryS2CPacket.Kind.STREAM,
-			InventoryS2CPacket.Kind.STATUS, InventoryS2CPacket.Kind.HEARTBEAT),
-			Arrays.asList(InventoryS2CPacket.Kind.values()));
+			InventoryS2CPacket.Kind.STATUS, InventoryS2CPacket.Kind.HEARTBEAT, InventoryS2CPacket.Kind.OPENED),
+			Arrays.asList(InventoryS2CPacket.Kind.values()), "OPENED is appended without changing an existing ordinal");
 		assertEquals(List.of(InventoryS2CPacket.Status.UPDATING, InventoryS2CPacket.Status.READY,
 			InventoryS2CPacket.Status.UNCERTAIN, InventoryS2CPacket.Status.INCOMPLETE,
 			InventoryS2CPacket.Status.INVALID, InventoryS2CPacket.Status.COMPONENT_TOO_LONG),
@@ -974,7 +974,8 @@ class InventoryS2CPacketTest {
 			InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, 1, 2, new MarkerId(4), 3, 4, 5, 128, 129, true, InventoryS2CPacket.Status.UNCERTAIN, 6, entries),
 			InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, 1, 2, new MarkerId(4), 3, 4, 5, 0, 1, false, InventoryS2CPacket.Status.UPDATING, 6, List.of()),
 			InventoryS2CPacket.status(1, 2, new MarkerId(4), 3, 4, 5, InventoryS2CPacket.Status.INVALID, 6),
-			InventoryS2CPacket.heartbeat(1, 2, new MarkerId(4), 3, 4, 5, 6));
+			InventoryS2CPacket.heartbeat(1, 2, new MarkerId(4), 3, 4, 5, 6),
+			InventoryS2CPacket.opened(1, 100, 1, 2, 3));
 		for (var packet : packets) {
 			var vanilla = buffer(); var actual = buffer();
 			try {
@@ -1192,13 +1193,15 @@ class InventoryS2CPacketTest {
 	private static void writeVanillaFrame(FriendlyByteBuf buf, InventoryS2CPacket packet) {
 		MarkerPacketCodec.writeEnum(buf, packet.kind()); buf.writeVarInt(packet.protocol());
 		buf.writeLong(packet.epoch()); buf.writeLong(packet.requestId()); buf.writeLong(packet.presentationEpoch()); buf.writeLong(packet.view());
-		if (packet.kind() != InventoryS2CPacket.Kind.OFFER) buf.writeByte(packet.resourceKind().wireId());
+		if (packet.kind() != InventoryS2CPacket.Kind.OFFER && packet.kind() != InventoryS2CPacket.Kind.OPENED)
+			buf.writeByte(packet.resourceKind().wireId());
 		switch (packet.kind()) {
 			case OFFER -> {
 				var offer = packet.offer(); buf.writeVarInt(offer.previewPeriodTicks()); buf.writeVarInt(offer.trackingPeriodTicks());
 				buf.writeVarInt(offer.resyncMinPeriods()); buf.writeVarInt(offer.heartbeatPeriods());
 				buf.writeVarInt(offer.effectiveDisplayBytes()); buf.writeVarInt(offer.effectiveFrameBytes());
 			}
+			case OPENED -> buf.writeByte(packet.laneBits());
 			case POLICY -> {
 				buf.writeVarInt(packet.allowedTypes().size());
 				for (String type : packet.allowedTypes().stream().sorted().toList()) buf.writeUtf(type, 256);

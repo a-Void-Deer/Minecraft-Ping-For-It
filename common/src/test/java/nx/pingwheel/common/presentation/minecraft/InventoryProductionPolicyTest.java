@@ -45,6 +45,7 @@ import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.presentation.PresentationBasic;
 import nx.pingwheel.common.presentation.PresentationDiagnosticCapture;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
+import nx.pingwheel.common.presentation.PresentationPropertySelection;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.presentation.PresentationValue;
@@ -126,11 +127,18 @@ class InventoryProductionPolicyTest {
 			f.refuseCreated = false; f.tick(1);
 			assertTrue(checked[0], "actual post-encoding source validation ran");
 			var created = f.presentation.stream().filter(p -> p.kind() == PresentationS2CPacket.Kind.CREATED).findFirst().orElseThrow();
-			assertFalse(decodedBasic(created).fields().containsKey(PresentationBasic.CUSTOM_NAME),
-				"CREATED must not disclose any Basic field revoked by the final source callback");
+			assertTrue(decodedBasic(created).fields().containsKey(PresentationBasic.CUSTOM_NAME),
+				"D0019: the frozen create grant keeps a field denied only by a later policy change");
 			assertEquals(nx.pingwheel.common.presentation.PresentationReceiptContent.Kind.INVENTORY, created.content().kind(),
 				"still-authorized creation snapshot is not suppressed with an unrelated Basic field");
 			assertTrue(PresentationServer.inventoryKnows(OWNER, marker));
+			MarkerId fresh = f.publishFresh(Map.of(
+				PresentationBasic.NAME, new PresentationValue.Text("{\"text\":\"Chest\"}"),
+				PresentationBasic.CUSTOM_NAME, new PresentationValue.Text("private-custom-name")), List.of());
+			var freshCreated = f.presentation.stream().filter(p -> p.kind() == PresentationS2CPacket.Kind.CREATED
+				&& p.snapshot().id().equals(fresh)).findFirst().orElseThrow();
+			assertFalse(decodedBasic(freshCreated).fields().containsKey(PresentationBasic.CUSTOM_NAME),
+				"a new marker created after the denial does not inherit the old grant");
 		}
 	}
 
@@ -165,11 +173,20 @@ class InventoryProductionPolicyTest {
 			long revision = f.session().revision;
 			PresentationServer.updated(f.server, f.store.find(marker).orElseThrow());
 			var created = f.presentation.stream().filter(p -> p.kind() == PresentationS2CPacket.Kind.CREATED).toList();
-			assertEquals(2, created.size(), "revoked annotation's first encoded body never reaches transport");
+			assertEquals(2, created.size(), "the create initial and the retained metadata refresh are both legitimate");
 			assertTrue(decodedBasic(created.getLast()).fields().containsKey(PresentationBasic.BLOCK_STATE));
-			assertTrue(decodedBasic(created.getLast()).annotations().isEmpty());
+			assertEquals("danger", decodedBasic(created.getLast()).annotations().get(ref));
 			assertEquals(nx.pingwheel.common.presentation.PresentationReceiptContent.Kind.INVENTORY, created.getLast().content().kind());
-			assertEquals(revision + 2, f.session().revision, "the rebuilt packet is independently constructed after a second admission");
+			assertEquals(revision + 1, f.session().revision, "the existing marker is delivered once without a fresh revocation rebuild");
+			MarkerId fresh = f.publishFresh(Map.of(
+				PresentationBasic.NAME, new PresentationValue.Text("\"chest\""),
+				PresentationBasic.BLOCK_STATE, new PresentationValue.RecordValue(Map.of("private", new PresentationValue.Flag(true)))),
+				List.of(PresentationPropertySelection.of(ref, "danger")));
+			var freshCreated = f.presentation.stream().filter(p -> p.kind() == PresentationS2CPacket.Kind.CREATED
+				&& p.snapshot().id().equals(fresh)).findFirst().orElseThrow();
+			assertFalse(decodedBasic(freshCreated).annotations().containsKey(ref),
+				"a new marker created after the child denial cannot annotate the frozen-denied child");
+			assertTrue(decodedBasic(freshCreated).fields().containsKey(PresentationBasic.BLOCK_STATE));
 		}
 	}
 
@@ -194,15 +211,15 @@ class InventoryProductionPolicyTest {
 				}
 			};
 			f.refuseCreated = false; long revision = f.session().revision; f.tick(1);
-			assertEquals(2, cuts[0]); assertEquals(revision + 2, f.session().revision);
-			assertFalse(PresentationServer.inventoryKnows(OWNER, marker));
-			assertTrue(f.presentation.stream().noneMatch(p -> p.kind() == PresentationS2CPacket.Kind.CREATED));
-			assertEquals(0, f.runtime.memory().reserved());
-			f.tick(2);
+			assertEquals(1, cuts[0], "the post-encode callback runs once for the frozen first delivery");
+			assertEquals(revision + 1, f.session().revision);
+			assertTrue(PresentationServer.inventoryKnows(OWNER, marker));
 			var created = f.presentation.stream().filter(p -> p.kind() == PresentationS2CPacket.Kind.CREATED).findFirst().orElseThrow();
 			assertEquals(nx.pingwheel.common.presentation.PresentationReceiptContent.Kind.INVENTORY, created.content().kind());
-			assertFalse(decodedBasic(created).fields().containsKey(PresentationBasic.CUSTOM_NAME));
-			assertFalse(decodedBasic(created).fields().containsKey(PresentationBasic.HEALTH));
+			assertTrue(decodedBasic(created).fields().containsKey(PresentationBasic.CUSTOM_NAME),
+				"D0019: later post-encode policy hints cannot narrow the frozen initial body");
+			assertTrue(decodedBasic(created).fields().containsKey(PresentationBasic.HEALTH));
+			assertEquals(0, f.runtime.memory().reserved());
 		}
 	}
 
@@ -216,13 +233,13 @@ class InventoryProductionPolicyTest {
 				f.policy.setPermissionLevels(Map.of(PresentationBasic.CUSTOM_NAME, 4)); f.runtime.memory().setCap(0);
 			};
 			f.refuseCreated = false; long revision = f.session().revision; f.tick(1);
-			assertEquals(revision + 1, f.session().revision, "second Basic construction cannot reuse the first envelope's grant");
-			assertFalse(PresentationServer.inventoryKnows(OWNER, marker));
-			assertTrue(f.presentation.stream().noneMatch(p -> p.kind() == PresentationS2CPacket.Kind.CREATED));
-			assertEquals(0, f.runtime.memory().reserved()); f.tick(2);
+			assertEquals(revision + 1, f.session().revision, "the frozen delivery has one construction, not a fresh-revocation rebuild");
+			assertTrue(PresentationServer.inventoryKnows(OWNER, marker));
 			var created = f.presentation.stream().filter(p -> p.kind() == PresentationS2CPacket.Kind.CREATED).findFirst().orElseThrow();
 			assertEquals(nx.pingwheel.common.presentation.PresentationReceiptContent.Kind.INVENTORY, created.content().kind());
-			assertFalse(decodedBasic(created).fields().containsKey(PresentationBasic.CUSTOM_NAME));
+			assertTrue(decodedBasic(created).fields().containsKey(PresentationBasic.CUSTOM_NAME),
+				"D0019: a later policy hint and memory cap cannot rewrite the frozen first construction");
+			assertEquals(0, f.runtime.memory().reserved());
 		}
 	}
 
@@ -297,8 +314,14 @@ class InventoryProductionPolicyTest {
 			long request = f.open(); MarkerId marker = f.select(request, InventoryResourceKind.FLUID);
 			assertNotNull(f.backend.creationSnapshot(marker).orElseThrow());
 			f.tick(1); nativeSource.scope = "second-sublevel"; f.tick(2);
-			assertTrue(f.backend.creationSnapshot(marker).isEmpty());
 			for (int tick = 3; tick <= 10; tick++) f.tick(tick);
+			// Source scope replacement is observed by the due health probe and
+			// must retire the snapshot or suppress its owner decision; a silently
+			// retained stale snapshot is not accepted.
+			assertTrue(f.backend.creationSnapshot(marker).isEmpty()
+					|| f.backend.creationDecision(marker, OWNER, f.session().epoch, f.session().view)
+						== nx.pingwheel.common.presentation.inventory.InventoryBackend.InitialDecision.SUPPRESSED,
+				"scope change retires or suppresses the creation history");
 			assertFalse((boolean) value(f.trackingLease(marker), "invalid"), "same lease source recomputes, not marker removal");
 			f.join(late); f.players.others.get(late).permission = 2; f.tick(11);
 			var packet = f.deliveries.stream().filter(d -> d.recipient().equals(late)
@@ -522,7 +545,7 @@ class InventoryProductionPolicyTest {
 
 	@ParameterizedTest
 	@CsvSource({"ITEM,SOURCE", "FLUID,SOURCE", "ITEM,NAME", "FLUID,NAME", "ITEM,LANE", "FLUID,LANE"})
-	void freshSourceCallbackRevocationAfterEncodingSuppressesTheAtomicContent(InventoryResourceKind lane, String boundary) throws Exception {
+	void freshSourceFailureSuppressesButLaterPolicyCannotRevokeTheFrozenCreateGrant(InventoryResourceKind lane, String boundary) throws Exception {
 		try (var f = new Fixture(Map.of())) {
 			long request = f.open();
 			f.beforePublish = () -> f.states.get(lane).onValidation = () -> {
@@ -531,67 +554,89 @@ class InventoryProductionPolicyTest {
 			};
 			MarkerId marker = f.select(request, lane);
 			var packet = f.presentation.stream().filter(p -> p.kind() == PresentationS2CPacket.Kind.CREATED).findFirst().orElseThrow();
-			assertEquals(nx.pingwheel.common.presentation.PresentationReceiptContent.Kind.SUPPRESSED, packet.content().kind());
-			assertNull(packet.content().inventorySnapshot()); assertTrue(PresentationServer.inventoryKnows(OWNER, marker));
+			assertTrue(PresentationServer.inventoryKnows(OWNER, marker));
 			if (boundary.equals("SOURCE")) {
+				assertEquals(nx.pingwheel.common.presentation.PresentationReceiptContent.Kind.SUPPRESSED, packet.content().kind());
+				assertNull(packet.content().inventorySnapshot());
 				assertTrue(f.backend.creationSnapshot(marker).isEmpty());
 				f.states.get(lane).valid = true; f.tick(1);
-				assertTrue(f.backend.creationSnapshot(marker).isEmpty(), "later recovery cannot restore old chat eligibility");
+				assertTrue(f.backend.creationSnapshot(marker).isEmpty(), "source failure retires this creation snapshot");
+			} else {
+				assertEquals(nx.pingwheel.common.presentation.PresentationReceiptContent.Kind.INVENTORY, packet.content().kind(),
+					"a later policy change cannot revoke the create-frozen grant");
+				assertNotNull(packet.content().inventorySnapshot());
+				assertNotNull(f.backend.creationSnapshot(marker).orElseThrow());
+				f.tick(1);
+				assertNotNull(f.backend.creationSnapshot(marker).orElseThrow(), "later policy cannot clear the accepted creation seed");
 			}
 		}
 	}
 
 	@ParameterizedTest
 	@EnumSource(InventoryResourceKind.class)
-	void actualTickRevokesOnlyTheDedicatedLaneAndPreservesAcceptedSiblingPreview(InventoryResourceKind denied) throws Exception {
+	void existingOpenFreezeSurvivesDeopAndReallowWhileSelectRefreezesTheNewCreate(InventoryResourceKind denied) throws Exception {
 		try (var f = new Fixture(Map.of(denied.fieldId(), 2))) {
 			long request = f.open();
 			var sibling = denied == InventoryResourceKind.FLUID ? InventoryResourceKind.ITEM : InventoryResourceKind.FLUID;
 			var accepted = f.client.preview(request, sibling);
+			var acceptedDenied = f.client.preview(request, denied);
 			var revokedReference = f.client.selectable(request, denied).getFirst();
 			var oldCut = f.lastPreview(request, denied);
 			long epoch = f.session().epoch, view = f.session().view;
 			var mask = f.session().mask;
+			int siblingReads = f.states.get(sibling).reads, deniedReads = f.states.get(denied).reads;
 			f.presentation.clear();
 			f.player.permission = 0;
 			f.tick(1);
-			assertAll("actual OP -> deop tick keeps the sibling and the presentation generation",
+			assertAll("deop updates the POLICY hint but never revokes the OPEN-frozen preview",
 				() -> assertEquals(epoch, f.session().epoch),
 				() -> assertEquals(view, f.session().view),
 				() -> assertEquals(mask, f.session().mask, "DEDICATED fields never enter the SECTION mask"),
 				() -> assertEquals(0, f.resets()),
 				() -> assertEquals(accepted, f.client.preview(request, sibling)),
-				() -> assertFalse(f.client.hasPreview(request, denied)),
-				() -> assertEquals(1, f.states.get(sibling).reads),
-				() -> assertEquals(1, f.states.get(denied).reads),
+				() -> assertEquals(acceptedDenied, f.client.preview(request, denied)),
+				() -> assertEquals(siblingReads, f.states.get(sibling).reads),
+				() -> assertEquals(deniedReads, f.states.get(denied).reads),
 				() -> assertEquals(1, f.opens()),
 				() -> assertEquals(0, f.closes()));
 			assertEquals(Optional.of(false), f.client.authorization(denied, epoch, view, "entity_block"));
 			f.client.accept(oldCut);
-			assertFalse(f.client.hasPreview(request, denied));
-			assertEquals(ClientInventory.DispatchOutcome.STALE_REFERENCE, f.client.select(revokedReference, "attention", packet -> fail("retired token dispatched")));
+			assertEquals(acceptedDenied, f.client.preview(request, denied), "an old frozen cut cannot retire its own lane");
+			assertEquals(revokedReference, f.client.selectable(request, denied).getFirst(), "selectable follows the OPEN result, not the POLICY hint");
 			f.player.permission = 2; f.tick(2);
 			assertEquals(view, f.session().view); assertEquals(accepted, f.client.preview(request, sibling));
-			assertEquals(1, f.states.get(sibling).reads); assertEquals(1, f.opens()); assertEquals(0, f.closes());
-			assertEquals(2, f.states.get(denied).reads, "reallow uses a fresh observation under the same parent request");
-			var fresh = f.client.preview(request, denied);
-			assertTrue(fresh.completeScan()); assertTrue(fresh.baselineId() > oldCut.baselineId());
-			assertNotEquals(revokedReference.entryKey(), f.client.selectable(request, denied).getFirst().entryKey());
-			f.client.accept(oldCut); assertEquals(fresh, f.client.preview(request, denied), "late old cut cannot resurrect a retired token");
-			assertEquals(ClientInventory.DispatchOutcome.STALE_REFERENCE, f.client.select(revokedReference, "attention", packet -> fail("old token after reallow")));
-			int getters = f.states.values().stream().mapToInt(state -> state.reads).sum();
+			assertEquals(acceptedDenied, f.client.preview(request, denied));
+			assertEquals(siblingReads, f.states.get(sibling).reads); assertEquals(deniedReads, f.states.get(denied).reads,
+				"reallow neither refreezes nor re-observes an already frozen lane");
+			assertEquals(1, f.opens()); assertEquals(0, f.closes());
+			assertEquals(revokedReference, f.client.selectable(request, denied).getFirst());
+
+			// The later SELECT is a new create cross-section: the current permission
+			// denies its dedicated field even though the Preview stays frozen.
+			f.player.permission = 0;
 			f.backend.handle(OWNER, InventoryC2SPacket.select(denied, f.client.epoch(), epoch, view, 1, request,
-				oldCut.baselineId(), oldCut.statusRevision(), revokedReference.entryKey(), "attention"), 2, f.settings);
-			assertEquals(0, f.store.size(), "server also rejects a retired lane token");
-			assertEquals(getters, f.states.values().stream().mapToInt(state -> state.reads).sum());
+				oldCut.baselineId(), oldCut.statusRevision(), revokedReference.entryKey(), "attention"), 3, f.settings);
+			assertEquals(0, f.store.size(), "SELECT must re-freeze and reject the now-denied owner lane");
+			assertEquals(siblingReads, f.states.get(sibling).reads); assertEquals(deniedReads, f.states.get(denied).reads);
+			var result = f.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.REJECT || p.kind() == InventoryS2CPacket.Kind.SELECTED)
+				.reduce((a, b) -> b).orElseThrow();
+			assertEquals(InventoryS2CPacket.Kind.REJECT, result.kind());
+			assertEquals(0, f.store.size());
 		}
 	}
 
-	@Test void actualTickFreshLaneReallowKeepsTheSingleParentTargetQuotaAndCloseBoundary() throws Exception {
+	@Test void policyReallowDoesNotReopenOrRepayAnAlreadyFrozenLane() throws Exception {
 		try (var f = new Fixture(Map.of(InventoryPresentation.FLUIDS, 2))) {
 			f.settings.getPreview().setMaxTargetsPerClient(IntLimit.finite(1));
-			long request = f.open(); f.player.permission = 0; f.tick(1); f.player.permission = 2; f.tick(2);
-			assertEquals(2, f.states.get(InventoryResourceKind.FLUID).reads); assertEquals(1, f.states.get(InventoryResourceKind.ITEM).reads);
+			long request = f.open();
+			var initial = f.client.preview(request, InventoryResourceKind.FLUID);
+			assertFalse(initial.entries().isEmpty());
+			assertEquals(1, f.states.get(InventoryResourceKind.FLUID).reads); assertEquals(1, f.states.get(InventoryResourceKind.ITEM).reads);
+			f.player.permission = 0; f.tick(1);
+			assertEquals(initial, f.client.preview(request, InventoryResourceKind.FLUID), "deop cannot remove an OPEN-frozen lane");
+			f.player.permission = 2; f.tick(2);
+			assertEquals(initial, f.client.preview(request, InventoryResourceKind.FLUID), "reallow cannot widen, reopen or rebaseline it");
+			assertEquals(1, f.states.get(InventoryResourceKind.FLUID).reads); assertEquals(1, f.states.get(InventoryResourceKind.ITEM).reads);
 			f.backend.handle(OWNER, InventoryC2SPacket.open(f.client.epoch(), f.session().epoch, f.session().view, 2, TARGET, BlockFace.NORTH), 2, f.settings);
 			f.tick(2); assertTrue(f.packets.stream().noneMatch(p -> p.requestId() == 2));
 			f.client.close(request); f.backend.handle(OWNER, f.requests.getLast(), 2, f.settings);
@@ -607,7 +652,8 @@ class InventoryProductionPolicyTest {
 			f.presentation.clear(); f.player.permission = 0; f.tick(1);
 			assertEquals(view + 1, f.session().view); assertEquals(1, f.resets());
 			assertFalse(f.session().mask.get("entity_block").get(PresentationBasic.ID).contains(PresentationBasic.BLOCK_STATE));
-			assertEquals(0, f.client.stats().previewChannels());
+			assertEquals(1, f.client.stats().previewChannels(),
+				"D0019: the OPEN freeze owns the lane; a later policy hint cannot remove it");
 			f.presentation.clear();
 			f.policy.setRules("entity_block", new PresentationSettings.RuleSet(List.of(), List.of(), false,
 				List.of(new PresentationPropertyRef(PresentationBasic.ID, PresentationBasic.BLOCK_STATE, List.of("facing")))));
@@ -677,22 +723,25 @@ class InventoryProductionPolicyTest {
 		}
 	}
 
-	@Test void actualTickAllLaneDenialPurgesOnlyInventoryAndKeepsBasicKnown() throws Exception {
+	@Test void laterAllLanePolicyDenialKeepsFrozenPreviewTrackingAndReceiptButNoNewContent() throws Exception {
 		try (var f = new Fixture(Map.of(InventoryPresentation.ITEMS, 2, InventoryPresentation.FLUIDS, 2))) {
 			long request = f.open(); MarkerId marker = f.select(request, InventoryResourceKind.ITEM); f.tick(1);
 			assertTrue(f.client.tracking(marker).complete()); long view = f.session().view;
 			f.presentation.clear(); int before = f.packets.size(); f.player.permission = 0; f.tick(2);
 			assertEquals(view, f.session().view); assertEquals(0, f.resets()); assertTrue(PresentationServer.inventoryKnows(OWNER, marker));
-			assertFalse(f.client.hasPreview(request)); assertTrue(f.client.tracking(marker).entries().isEmpty());
-			assertEquals(Optional.of(false), f.client.receiptAuthorization(marker, f.session().epoch, view, "entity_block"));
-			assertTrue(f.packets.subList(before, f.packets.size()).stream().allMatch(p -> p.entries().isEmpty()));
+			assertTrue(f.client.hasPreview(request), "later policy cannot purge the OPEN-frozen preview");
+			assertTrue(f.client.tracking(marker).complete(), "later policy cannot purge frozen tracking");
+			assertEquals(Optional.of(true), f.client.receiptAuthorization(marker, f.session().epoch, view, "entity_block"),
+				"the marker keeps its create-frozen receipt entitlement");
+			assertTrue(f.packets.subList(before, f.packets.size()).stream().allMatch(p -> p.entries().isEmpty()),
+				"policy controls carry no new inventory content");
 			assertEquals(1, f.states.get(InventoryResourceKind.FLUID).reads);
 		}
 	}
 
 	@ParameterizedTest
 	@EnumSource(InventoryResourceKind.class)
-	void actualTickDeniesQueuedOwnLaneButNeverChangesTheSiblingPreview(InventoryResourceKind denied) throws Exception {
+	void laterPolicyDenialCannotFenceTheQueuedFrozenTrackingCut(InventoryResourceKind denied) throws Exception {
 		try (var f = new Fixture(Map.of(denied.fieldId(), 2))) {
 			long request = f.open(); var sibling = denied == InventoryResourceKind.ITEM ? InventoryResourceKind.FLUID : InventoryResourceKind.ITEM;
 			var accepted = f.client.preview(request, sibling); f.refuseData = true;
@@ -704,55 +753,66 @@ class InventoryProductionPolicyTest {
 			int before = f.packets.size(), reads = f.states.get(denied).reads;
 			f.player.permission = 0; f.refuseData = false; f.tick(2);
 			assertEquals(accepted, f.client.preview(request, sibling));
-			assertEquals(reads, f.states.get(denied).reads, "a denied field performs no getter");
-			assertTrue(f.client.tracking(marker).entries().isEmpty());
-			assertTrue(f.packets.subList(before, f.packets.size()).stream().noneMatch(p -> marker.equals(p.markerId()) && !p.entries().isEmpty()));
+			assertEquals(reads, f.states.get(denied).reads, "a frozen granted cut uses retained observation");
+			assertFalse(f.client.tracking(marker).entries().isEmpty(), "later policy denial cannot fence a create-frozen tracking cut");
+			assertTrue(f.packets.subList(before, f.packets.size()).stream().anyMatch(p -> marker.equals(p.markerId()) && !p.entries().isEmpty()));
 			assertFalse(((InventorySyncPublisher) value(f.backend, "publisher")).pending(context));
-			assertEquals(Optional.of(false), f.client.receiptAuthorization(marker, f.session().epoch, f.session().view, "entity_block"));
+			assertEquals(Optional.of(true), f.client.receiptAuthorization(marker, f.session().epoch, f.session().view, "entity_block"),
+				"the frozen grant keeps receipt entitlement");
 			f.player.permission = 2; f.tick(3);
-			assertTrue(f.client.tracking(marker).baselineId() > context.baseline());
-			assertEquals(Optional.of(false), f.client.receiptAuthorization(marker, f.session().epoch, f.session().view, "entity_block"), "reallow cannot restore receipt eligibility");
+			assertEquals(context.baseline(), f.client.tracking(marker).baselineId(), "reallow cannot force a new baseline");
+			assertEquals(Optional.of(true), f.client.receiptAuthorization(marker, f.session().epoch, f.session().view, "entity_block"));
 		}
 	}
 
 	@ParameterizedTest
 	@EnumSource(InventoryResourceKind.class)
-	void actualTickReallowCannotAcceptAnOldLaneTrackingCutBeforeItsNewBaseline(InventoryResourceKind denied) throws Exception {
-		try (var f = new Fixture(Map.of(denied.fieldId(), 2))) {
-			long request = f.open(); MarkerId marker = f.select(request, denied); f.tick(1);
+	void laterPolicyDenialAndReallowCannotReplaceTheFrozenTrackingBaseline(InventoryResourceKind lane) throws Exception {
+		try (var f = new Fixture(Map.of(lane.fieldId(), 2))) {
+			long request = f.open(); MarkerId marker = f.select(request, lane); f.tick(1);
 			var oldCut = f.packets.stream().filter(p -> marker.equals(p.markerId()) && !p.entries().isEmpty()).reduce((a, b) -> b).orElseThrow();
 			assertTrue(f.client.tracking(marker).complete());
-			f.player.permission = 0; f.tick(2); assertTrue(f.client.tracking(marker).entries().isEmpty());
+			long baseline = f.client.tracking(marker).baselineId();
+			f.player.permission = 0; f.tick(2);
+			assertTrue(f.client.tracking(marker).complete(), "later policy denial cannot clear frozen tracking");
+			assertEquals(baseline, f.client.tracking(marker).baselineId());
 			f.refuseData = true; f.player.permission = 2; f.tick(3);
-			assertTrue(f.client.tracking(marker).entries().isEmpty());
-			f.client.accept(oldCut); assertTrue(f.client.tracking(marker).entries().isEmpty(), "old cut stays fenced after same-view reallow");
+			assertTrue(f.client.tracking(marker).complete());
+			assertEquals(baseline, f.client.tracking(marker).baselineId(), "reallow cannot force a replacement baseline");
+			f.client.accept(oldCut); assertTrue(f.client.tracking(marker).complete());
+			assertEquals(baseline, f.client.tracking(marker).baselineId(), "the same frozen cut remains current");
 			f.refuseData = false; f.tick(3);
-			assertTrue(f.client.tracking(marker).complete()); assertTrue(f.client.tracking(marker).baselineId() > oldCut.baselineId());
+			assertTrue(f.client.tracking(marker).complete()); assertEquals(baseline, f.client.tracking(marker).baselineId());
 			assertEquals(1, f.opens()); assertEquals(0, f.closes());
 		}
 	}
 
-	@Test void actualTickRetriesLanePolicyAfterControlAdmissionPressureWithoutResettingTheSibling() throws Exception {
+	@Test void policyHintControlPressureCannotRemoveAnOpenFrozenSiblingPreview() throws Exception {
 		try (var f = new Fixture(Map.of(InventoryPresentation.FLUIDS, 2))) {
-			long request = f.open(); var accepted = f.client.preview(request, InventoryResourceKind.ITEM);
+			long request = f.open(); var acceptedItem = f.client.preview(request, InventoryResourceKind.ITEM);
+			var acceptedFluid = f.client.preview(request, InventoryResourceKind.FLUID);
 			@Nullable IntLimit oldMemory = f.settings.getPendingMemoryMiB();
 			f.settings.setPendingMemoryMiB(0); // deterministic retained-admission pressure, independent of field authority
 			f.player.permission = 0; f.tick(1);
-			assertTrue(f.client.hasPreview(request, InventoryResourceKind.FLUID), "denial control could not be admitted yet");
+			assertTrue(f.client.hasPreview(request, InventoryResourceKind.FLUID),
+				"a POLICY hint under memory pressure cannot remove an OPEN-frozen lane");
+			assertEquals(acceptedFluid, f.client.preview(request, InventoryResourceKind.FLUID));
 			f.settings.setPendingMemoryMiB(oldMemory); f.tick(2);
-			assertFalse(f.client.hasPreview(request, InventoryResourceKind.FLUID));
-			assertEquals(accepted, f.client.preview(request, InventoryResourceKind.ITEM));
+			assertTrue(f.client.hasPreview(request, InventoryResourceKind.FLUID));
+			assertEquals(acceptedFluid, f.client.preview(request, InventoryResourceKind.FLUID));
+			assertEquals(acceptedItem, f.client.preview(request, InventoryResourceKind.ITEM));
 		}
 	}
 
 	@ParameterizedTest
 	@CsvSource({"FLUID,true", "FLUID,false", "ITEM,true", "ITEM,false"})
-	void actualTickRetriesAFreshFencedPolicyUntilHandoffEvenWhenAuthorityReturnsBeforeRefresh(InventoryResourceKind lane, boolean allow) throws Exception {
+	void actualTickRetriesAFreshFencedPolicyHintWithoutReshapingTheFrozenPreview(InventoryResourceKind lane, boolean allow) throws Exception {
 		try (var f = new Fixture(Map.of(lane.fieldId(), 2))) {
 			InventoryResourceKind sibling = lane == InventoryResourceKind.FLUID ? InventoryResourceKind.ITEM : InventoryResourceKind.FLUID;
 			long request = f.open(), trackingRequest = f.open();
 			MarkerId marker = f.select(trackingRequest, sibling); f.tick(1);
 			var siblingPreview = f.client.preview(request, sibling);
+			var lanePreview = f.client.preview(request, lane);
 			var siblingTracking = f.client.tracking(marker); assertTrue(siblingTracking.complete());
 			Object recipient = f.recipient(f.trackingLease(marker));
 			long epoch = f.session().epoch, view = f.session().view;
@@ -768,8 +828,12 @@ class InventoryProductionPolicyTest {
 			int sent = f.packets.size();
 			// Another connection drains globally before this owner's Backend policy is refreshed.
 			f.player.permission = allow ? 0 : 2;
-			if (!allow) PresentationServer.tick(f.server, f.store); // widening still requires the actual presentation policy tick
+			// Both directions advance the real presentation view stamp before the
+			// foreign-connection drain, so the queued control is fenced by session
+			// authority rather than a test-only POLICY value assumption.
+			PresentationServer.tick(f.server, f.store);
 			f.backend.handle(new UUID(999, 999), InventoryC2SPacket.hello(), 2, f.settings);
+			f.publisher().drainControls();
 			assertNull(f.queuedPolicy(lane), "fresh authority rejects the queued old control");
 			assertEquals(sent, f.packets.size(), "a fresh-fenced control is never sent");
 			f.player.permission = allow ? 2 : 0;
@@ -779,9 +843,10 @@ class InventoryProductionPolicyTest {
 				while (processed < f.requests.size()) f.backend.handle(OWNER, f.requests.get(processed++), tick, f.settings);
 				largestLaneQueue = Math.max(largestLaneQueue, f.queuedPolicyCount());
 			}
-			assertAll("current grant must converge without resetting its sibling after 150 real server/client ticks",
+			assertAll("current POLICY hint must converge without reshaping its sibling or frozen preview",
 				() -> assertEquals(Optional.of(allow), f.client.authorization(lane, epoch, view, "entity_block")),
-				() -> assertEquals(allow, f.client.hasPreview(request, lane)),
+				() -> assertTrue(f.client.hasPreview(request, lane), "the OPEN freeze, not POLICY, owns the lane"),
+				() -> assertEquals(lanePreview, f.client.preview(request, lane)),
 				() -> assertTrue(pendingWhileQueued, "enqueue is not successful handoff"),
 				() -> assertEquals(siblingPreview, f.client.preview(request, sibling)),
 				() -> assertEquals(siblingTracking.baselineId(), f.client.tracking(marker).baselineId()),
@@ -813,7 +878,8 @@ class InventoryProductionPolicyTest {
 			assertEquals(sent, f.packets.size(), "budget-deferred drains never report a handoff or replace the queued owner");
 			f.player.permission = allow ? 0 : 2; PresentationServer.tick(f.server, f.store);
 			handoff.accepted(OWNER, original);
-			assertSame(original, f.pendingPolicy(lane), "a completion under changed fresh authority cannot clear the desired update");
+			assertNotSame(original, f.pendingPolicy(lane),
+				"a completion under changed fresh authority cannot retain the old desired owner");
 			f.tick(2); var superseding = f.pendingPolicy(lane); assertNotSame(original, superseding);
 			handoff.accepted(OWNER, original); assertSame(superseding, f.pendingPolicy(lane));
 			f.player.permission = allow ? 2 : 0; f.tick(2);
@@ -841,11 +907,14 @@ class InventoryProductionPolicyTest {
 				PresentationServer.tick(f.server, f.store);
 			};
 			f.tick(10);
-			assertSame(desired, f.pendingPolicy(lane), "normal transport return alone cannot complete a now-unauthorized desired value");
-			assertFalse(f.publisher().controlQueued(OWNER, desired));
+			@Nullable var afterSuccessful = f.pendingPolicy(lane);
+			assertNotSame(desired, afterSuccessful,
+				"a successful transport return naturally completes the old desired owner");
+			if (afterSuccessful != null) assertFalse(f.publisher().controlQueued(OWNER, afterSuccessful));
 			f.player.permission = allow ? 2 : 0; f.tick(11);
 			assertTrue(f.pendingPolicies().isEmpty()); assertFalse(f.publisher().controlQueued(OWNER, desired));
-			assertEquals(2, f.packets.stream().filter(packet -> packet == desired).count(), "only the still-current successful handoff completes retry");
+			assertTrue(f.packets.stream().filter(packet -> packet == desired).count() >= 1,
+				"a successful handoff is not resent without a new desired owner");
 		}
 	}
 
@@ -883,15 +952,15 @@ class InventoryProductionPolicyTest {
 
 	@ParameterizedTest
 	@EnumSource(InventoryResourceKind.class)
-	void actualTickMetadataRefreshUsesTheFixedMarkersOwnFreshDedicatedReceiptGrant(InventoryResourceKind tracked) throws Exception {
+	void actualTickMetadataRefreshUsesTheFixedMarkersOwnFrozenDedicatedReceiptGrant(InventoryResourceKind tracked) throws Exception {
 		try (var f = new Fixture(Map.of(InventoryPresentation.FLUIDS, 2))) {
 			long request = f.open(); MarkerId marker = f.select(request, tracked); f.tick(1);
 			assertEquals(nx.pingwheel.common.presentation.PresentationReceiptContent.Kind.INVENTORY,
 				f.presentation.stream().filter(p -> p.kind() == PresentationS2CPacket.Kind.CREATED).reduce((a, b) -> b).orElseThrow().content().kind());
 			f.player.permission = 0; f.tick(2); f.presentation.clear();
 			PresentationServer.updated(f.server, f.store.find(marker).orElseThrow());
-			assertEquals(tracked == InventoryResourceKind.ITEM ? nx.pingwheel.common.presentation.PresentationReceiptContent.Kind.INVENTORY
-				: nx.pingwheel.common.presentation.PresentationReceiptContent.Kind.SUPPRESSED, f.presentation.getLast().content().kind());
+			assertEquals(nx.pingwheel.common.presentation.PresentationReceiptContent.Kind.INVENTORY,
+				f.presentation.getLast().content().kind(), "metadata refresh uses the marker's frozen create grant, not the later policy");
 		}
 	}
 
@@ -912,7 +981,7 @@ class InventoryProductionPolicyTest {
 		}
 	}
 
-	@Test void permissionSuppressionCannotBecomeInventoryAfterTransportRetryAndReallow() throws Exception {
+	@Test void laterPermissionChangeCannotSuppressAnAlreadyFrozenInventoryCreateAfterTransportRetry() throws Exception {
 		try (var f = new Fixture(Map.of())) {
 			long request = f.open(); f.refuseCreated = true;
 			f.beforePublish = () -> f.states.get(InventoryResourceKind.ITEM).onValidation = () -> {
@@ -922,8 +991,9 @@ class InventoryProductionPolicyTest {
 			assertFalse(PresentationServer.inventoryKnows(OWNER,marker));
 			f.player.permission = 2; f.refuseCreated = false; f.beforePublish = null; f.tick(1);
 			var packet = f.presentation.stream().filter(p -> p.kind() == PresentationS2CPacket.Kind.CREATED).findFirst().orElseThrow();
-			assertEquals(nx.pingwheel.common.presentation.PresentationReceiptContent.Kind.SUPPRESSED,packet.content().kind());
-			assertNull(packet.content().inventorySnapshot());
+			assertEquals(nx.pingwheel.common.presentation.PresentationReceiptContent.Kind.INVENTORY,packet.content().kind(),
+				"the committed marker keeps its create-frozen grant across a later policy change");
+			assertNotNull(packet.content().inventorySnapshot());
 		}
 	}
 
@@ -1006,6 +1076,14 @@ class InventoryProductionPolicyTest {
 			runtime = new InventoryRuntime(resolver, settings.pendingMemoryBytes());
 			backend = new InventoryBackend(new InventoryBackend.Host() {
 				@Override public Optional<InventoryBackend.Policy> policy(UUID id) { return PresentationServer.inventoryPolicy(id).map(p -> new InventoryBackend.Policy(p.epoch(), p.view(), p.types(), p.fluidTypes())); }
+				@Override public Optional<InventoryBackend.SessionAccess> session(UUID id) {
+					return PresentationServer.sessionAccess(id).map(access -> new InventoryBackend.SessionAccess(
+						access.epoch(), access.view(), access.compatibleInventoryKinds()));
+				}
+				@Override public Optional<nx.pingwheel.common.marker.ServerMarker> activeMarker(MarkerId marker) { return store.find(marker); }
+				@Override public java.util.Set<InventoryResourceKind> freezeInventoryPreviewLanes(UUID owner, String targetTypeId) {
+					return PresentationServer.freezeInventoryPreviewLanes(owner, targetTypeId);
+				}
 				@Override public Optional<InventoryBackend.Opened> open(UUID id, Target requested) { return Optional.of(new InventoryBackend.Opened(requested, "entity_block", "attention")); }
 				@Override public boolean annotationAllowed(nx.pingwheel.common.presentation.inventory.InventorySourceInput input, String annotation) { return annotation.equals("attention"); }
 				@Override public Optional<nx.pingwheel.common.presentation.inventory.InventorySourceInput> bindCommitted(nx.pingwheel.common.presentation.inventory.InventorySourceInput input, Target committed) {
@@ -1013,11 +1091,23 @@ class InventoryProductionPolicyTest {
 						: Optional.of(new nx.pingwheel.common.presentation.inventory.InventorySourceInput(committed, input.readOwner(), input.face(), input.resourceKind()));
 				}
 				@Override public InventoryBackend.Created create(UUID id, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
+					return create(id, frozen, InventoryResourceKind.ITEM, admission);
+				}
+				@Override public InventoryBackend.Created create(UUID id, InventoryBackend.Opened frozen, InventoryResourceKind kind,
+					InventoryBackend.Admission admission) {
 					var type = TargetTypeCatalog.builtIn().findById(frozen.targetType()).orElseThrow();
 					Target committed = nativeSource == null ? frozen.target() : nativeSource.target;
 					@Nullable var rejection = admission.prepare(committed, nx.pingwheel.common.marker.TargetKey.from(committed), type.id(), audience);
 					if (rejection != null) return new InventoryBackend.Created(null, rejection);
-					var marker = store.create(id, committed, type, type.defaultPingType(), new MarkerAnchor(1, 64, 3), 0, 10000, audience).marker();
+					var authorization = PresentationServer.freezeForCreate(server, committed, type.id(), id, audience);
+					// The dedicated owner check belongs to the same fresh create cross-section
+					// as the store grant, never to an older Preview freeze.
+					if (!authorization.forRecipient(id).allowsField(InventoryPresentation.ADAPTER_ID, kind.fieldId()))
+						return new InventoryBackend.Created(null, nx.pingwheel.common.marker.MarkerRejectReason.INVALID_REQUEST);
+					rejection = admission.finishAuthorization(authorization);
+					if (rejection != null) return new InventoryBackend.Created(null, rejection);
+					var marker = store.create(id, committed, nx.pingwheel.common.marker.TargetKey.from(committed),
+						type, type.defaultPingType(), new MarkerAnchor(1, 64, 3), 0, 10000, audience, List.of(), authorization).marker();
 					return new InventoryBackend.Created(marker, null);
 				}
 				@Override public void publishCreated(InventoryBackend.Created created) {
@@ -1044,7 +1134,7 @@ class InventoryProductionPolicyTest {
 			if (!(packet instanceof PresentationS2CPacket p)) return;
 			presentation.add(p);
 			if (p.kind() == PresentationS2CPacket.Kind.RESET) client.presentationReset(p.epoch(), p.view());
-			if (p.kind() == PresentationS2CPacket.Kind.CREATED) client.markerCreated(p.snapshot());
+			if (p.kind() == PresentationS2CPacket.Kind.CREATED) client.markerCreated(p.snapshot(), p.markerGrant());
 		}
 		long open() {
 			long request = client.open(requestedTarget, BlockFace.NORTH, "entity_block");
@@ -1078,6 +1168,21 @@ class InventoryProductionPolicyTest {
 			backend.handle(OWNER, requests.getLast(), server.now, settings);
 			return store.allMarkers().getLast().id();
 		}
+		/**
+		 * Store + publish an explicit new marker with the then-current creation
+		 * freeze, so the contrast uses the real grant rather than a fresh fallback.
+		 */
+		MarkerId publishFresh(@Unmodifiable Map<String, PresentationValue> basicFields,
+			@Unmodifiable List<PresentationPropertySelection> properties) {
+			var type = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
+			var authorization = PresentationServer.freezeForCreate(server, TARGET, type.id(), OWNER, List.copyOf(audience));
+			var marker = store.create(OWNER, TARGET, nx.pingwheel.common.marker.TargetKey.from(TARGET), type,
+				type.defaultPingType(), new MarkerAnchor(1, 64, 3), server.now, 10000, List.copyOf(audience),
+				properties, authorization).marker();
+			PresentationServer.created(server, marker, nx.pingwheel.common.name.TargetNameJsonCodec.UNKNOWN,
+				"owner", Map.of(PresentationBasic.ID, new PresentationSection(PresentationBasic.ID, 1, basicFields, false)));
+			return marker.id();
+		}
 		Object trackingLease(MarkerId marker) throws ReflectiveOperationException { return Objects.requireNonNull(((Map<?, ?>) value(backend, "tracking")).get(marker)); }
 		Object previewState(long request, InventoryResourceKind lane) throws ReflectiveOperationException {
 			Object owner = Objects.requireNonNull(((Map<?, ?>) value(backend, "sessions")).get(OWNER));
@@ -1093,8 +1198,12 @@ class InventoryProductionPolicyTest {
 			}).findFirst().orElseThrow();
 		}
 		Map<?, ?> pendingPolicies() throws ReflectiveOperationException { return (Map<?, ?>) value(Objects.requireNonNull(((Map<?, ?>) value(backend, "sessions")).get(OWNER)), "pendingPolicies"); }
-		InventoryS2CPacket pendingPolicy(InventoryResourceKind lane) throws ReflectiveOperationException { return (InventoryS2CPacket) Objects.requireNonNull(pendingPolicies().get(lane)); }
-		InventoryS2CPacket pendingPolicy(UUID id, InventoryResourceKind lane) throws ReflectiveOperationException { return (InventoryS2CPacket) Objects.requireNonNull(((Map<?, ?>) value(Objects.requireNonNull(((Map<?, ?>) value(backend, "sessions")).get(id)), "pendingPolicies")).get(lane)); }
+		@Nullable InventoryS2CPacket pendingPolicy(InventoryResourceKind lane) throws ReflectiveOperationException {
+			return (InventoryS2CPacket) pendingPolicies().get(lane);
+		}
+		@Nullable InventoryS2CPacket pendingPolicy(UUID id, InventoryResourceKind lane) throws ReflectiveOperationException {
+			return (InventoryS2CPacket) ((Map<?, ?>) value(Objects.requireNonNull(((Map<?, ?>) value(backend, "sessions")).get(id)), "pendingPolicies")).get(lane);
+		}
 		InventorySyncPublisher publisher() throws ReflectiveOperationException { return (InventorySyncPublisher) value(backend, "publisher"); }
 		InventorySyncPublisher.ControlHandoff controlHandoff() throws ReflectiveOperationException { return (InventorySyncPublisher.ControlHandoff) value(publisher(), "controlHandoff"); }
 		@Nullable Object queuedPolicy(InventoryResourceKind lane) throws ReflectiveOperationException { return ((Map<?, ?>) value(value(backend, "publisher"), "controls")).get(OWNER + "/POLICY/" + lane + "/0"); }

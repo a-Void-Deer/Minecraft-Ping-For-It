@@ -33,9 +33,12 @@ class ClientInventoryTest {
 	/** Existing delivery regressions run under an explicitly authorized v2 presentation fixture. */
 	private final class V2Fixture {
 		final ClientInventory client = new ClientInventory(sent::add);
+		private final java.util.Set<Long> acknowledged = new java.util.HashSet<>();
 		long open(Target target) {
 			client.presentationReset(100, 1);
-			return client.open((Target.BlockTarget) target, nx.pingwheel.common.domain.BlockFace.NORTH, "entity_block");
+			long request = client.open((Target.BlockTarget) target, nx.pingwheel.common.domain.BlockFace.NORTH, "entity_block");
+			acknowledgeOpens();
+			return request;
 		}
 		void accept(InventoryS2CPacket packet) {
 			client.accept(packet.stamp(100, 1));
@@ -43,11 +46,29 @@ class ClientInventoryTest {
 				client.presentationReset(100, 1);
 				client.accept(InventoryS2CPacket.policy(EPOCH, 100, 1, java.util.Set.of("entity_block")));
 				for (long id : new long[] {3, 8}) client.markerCreated(new nx.pingwheel.common.marker.MarkerSnapshot(new MarkerId(id), new java.util.UUID(1, 1),
-					target(), "entity_block", "attention", new nx.pingwheel.common.marker.MarkerAnchor(1, 2, 3), 0, 10000));
+					target(), "entity_block", "attention", new nx.pingwheel.common.marker.MarkerAnchor(1, 2, 3), 0, 10000),
+					itemContentGrant());
+			}
+			acknowledgeOpens();
+		}
+		/** Answers each actually sent local OPEN with its matching complete lane grant. */
+		private void acknowledgeOpens() {
+			for (InventoryC2SPacket packet : sent.stream().filter(InventoryC2SPacket.class::isInstance)
+				.map(InventoryC2SPacket.class::cast).toList()) {
+				if (packet.kind() != InventoryC2SPacket.Kind.OPEN || !acknowledged.add(packet.requestId())) continue;
+				client.accept(InventoryS2CPacket.opened(EPOCH, 100, 1, packet.requestId(), 3));
 			}
 		}
+		private static nx.pingwheel.common.presentation.MarkerContentGrant itemContentGrant() {
+			return new nx.pingwheel.common.presentation.MarkerContentGrant(
+				nx.pingwheel.common.presentation.TestContentGrants.adapters(
+					nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID,
+					nx.pingwheel.common.presentation.inventory.InventoryPresentation.SCHEMA,
+					java.util.Set.of(nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM.fieldId())),
+				nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM);
+		}
 		void tick(boolean connected) { client.tick(connected); }
-		void reset() { client.reset(); }
+		void reset() { client.reset(); acknowledged.clear(); }
 		boolean ready() { return client.ready(); }
 		boolean helloPending() { return client.helloPending(); }
 		long epoch() { return client.epoch(); }
@@ -160,6 +181,32 @@ class ClientInventoryTest {
 	private void elapseRepairCooldown() {
 		for (long i = 0; i < WINDOW; i++)
 			session.tick(true);
+	}
+
+	@Test
+	void payloadFreeSuppressedAdmissionKeepsIdentityAndDenialWithoutSeedOrTracking() {
+		session.client.presentationReset(100, 1);
+		session.client.accept(InventoryS2CPacket.offer(EPOCH, settings()).stamp(100, 1));
+		var suppressed = new nx.pingwheel.common.marker.MarkerSnapshot(new MarkerId(9), new java.util.UUID(1, 1), target(),
+			"entity_block", "attention", new nx.pingwheel.common.marker.MarkerAnchor(1, 2, 3), 0, 10000);
+		var grant = new nx.pingwheel.common.presentation.MarkerContentGrant(
+			nx.pingwheel.common.presentation.PresentationGrant.denied(),
+			nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM);
+		session.client.acceptedSchemas(java.util.Set.of());
+		assertTrue(session.client.admitsCreation(suppressed, grant, null),
+			"no creation sidecar exists to reject, so a schema mismatch cannot drop the Basic identity");
+		session.client.acceptedSchemas(java.util.Set.of(nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM));
+		session.client.markerCreated(suppressed, grant);
+		assertEquals(java.util.Optional.of(nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM),
+			session.client.trackingKind(suppressed.id()));
+		assertNull(session.client.creationSnapshot(suppressed.id()));
+		assertEquals(java.util.Optional.of(false),
+			session.client.receiptAuthorization(suppressed.id(), 100, 1, "entity_block"));
+		session.client.accept(InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, EPOCH, 1L, suppressed.id(),
+			BASELINE, REVISION, WATERMARK, 0, 1, true, InventoryS2CPacket.Status.READY, 0L,
+			List.of(entry("a", 3L, 1L))).stamp(100, 1));
+		assertEquals(0, session.client.stats().trackedChannels(),
+			"the frozen deny grant never admits tracking data for a payload-free receipt");
 	}
 
 	@Test

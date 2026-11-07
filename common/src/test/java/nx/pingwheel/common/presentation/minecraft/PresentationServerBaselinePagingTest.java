@@ -12,13 +12,16 @@ import net.minecraft.network.FriendlyByteBuf;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.marker.MarkerIdSource;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
+import nx.pingwheel.common.marker.PingAuthorization;
 import nx.pingwheel.common.marker.ServerMarker;
 import nx.pingwheel.common.marker.ServerMarkerStore;
+import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.presentation.PresentationAdapter;
 import nx.pingwheel.common.presentation.PresentationBasic;
 import nx.pingwheel.common.presentation.PresentationCodec;
 import nx.pingwheel.common.presentation.PresentationField;
+import nx.pingwheel.common.presentation.PresentationGrant;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationPropertySelection;
 import nx.pingwheel.common.presentation.PresentationReceiptContent;
@@ -26,14 +29,47 @@ import nx.pingwheel.common.presentation.PresentationRegistry;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.presentation.TestContentGrants;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
 import nx.pingwheel.common.presentation.client.ClientPresentation;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PresentationServerBaselinePagingTest {
 	private static final String BASIC = PresentationBasic.ID, NAME = PresentationBasic.NAME;
 	private static final UUID VIEWER = PresentationServerFairRotationTest.VIEWER, OTHER = new UUID(0, 3);
+	private static final PresentationGrant PAGE_GRANT = TestContentGrants.fromAllowed(Map.of(
+		BASIC, Set.of(NAME, PresentationBasic.BLOCK_STATE),
+		PresentationServerFairRotationTest.OPTIONAL, Set.of(PresentationServerFairRotationTest.FIELD)));
+
+	@BeforeEach void activatePresentation() { PresentationServerHeadlessFixture.activate(); }
+	@AfterEach void resetPresentation() { PresentationServerHeadlessFixture.reset(); }
+
+	private static PingAuthorization authorization(List<UUID> audience) {
+		Map<UUID, PresentationGrant> grants = new LinkedHashMap<>();
+		for (UUID recipient : audience) grants.put(recipient, PAGE_GRANT);
+		return new PingAuthorization(grants);
+	}
+
+	private static ServerMarker create(ServerMarkerStore store, int position, long arrival, long expiry) {
+		return create(store, position, arrival, expiry, List.of());
+	}
+
+	private static ServerMarker create(ServerMarkerStore store, int position, long arrival, long expiry,
+		List<PresentationPropertySelection> selections) {
+		return create(store, position, arrival, expiry, selections, List.of(VIEWER));
+	}
+
+	private static ServerMarker create(ServerMarkerStore store, int position, long arrival, long expiry,
+		List<PresentationPropertySelection> selections, List<UUID> audience) {
+		var type = nx.pingwheel.common.domain.TargetTypeCatalog.builtIn().findById("block").orElseThrow();
+		var target = new nx.pingwheel.common.domain.Target.BlockTarget("minecraft:overworld", position, 1, 2, "minecraft:stone");
+		return store.create(PresentationServerFairRotationTest.OWNER, target, TargetKey.from(target),
+			type, type.defaultPingType(), new nx.pingwheel.common.marker.MarkerAnchor(position, 1, 2), arrival, expiry,
+			audience, selections, authorization(audience)).marker();
+	}
 	private static final class ReadFreeAdapter extends PresentationServerFairRotationTest.Adapter {
 		ReadFreeAdapter(String id) { super(id, 1); }
 		@Override public PresentationSection collect(DetachedTarget target, Set<String> demand, CaptureBudget budget) {
@@ -47,9 +83,13 @@ class PresentationServerBaselinePagingTest {
 		return registry;
 	}
 	private static PresentationServer.Session session(PresentationRegistry registry) {
+		return session(registry, VIEWER);
+	}
+
+	private static PresentationServer.Session session(PresentationRegistry registry, UUID recipient) {
 		Map<String, Integer> schemas = new LinkedHashMap<>(); Map<String, List<PresentationField>> manifest = new LinkedHashMap<>();
 		registry.all().forEach(adapter -> { schemas.put(adapter.adapterId(), adapter.schema()); manifest.put(adapter.adapterId(), adapter.fields()); });
-		var session = new PresentationServer.Session(51, schemas, manifest); session.view = 1; session.ready = true;
+		var session = new PresentationServer.Session(51, schemas, manifest); session.recipient = recipient; session.view = 1; session.ready = true;
 		Map<String, Set<String>> mask = new LinkedHashMap<>();
 		registry.sectionAdapters().forEach(adapter -> mask.put(adapter.adapterId(), PresentationServerFairRotationTest.demand(adapter)));
 		session.mask = Map.of("block", Map.copyOf(mask));
@@ -78,7 +118,7 @@ class PresentationServerBaselinePagingTest {
 		var cache = new LinkedHashMap<Long, PresentationServer.Lease>();
 		int population = 1119;
 		for (int id = 0; id < population; id++) {
-			ServerMarker marker = PresentationServerFairRotationTest.create(store, id, 0, 10000);
+			ServerMarker marker = create(store, id, 0, 10000);
 			PresentationServer.rememberLease(cache, cached(marker));
 		}
 		assertEquals(1024, cache.size());
@@ -120,7 +160,7 @@ class PresentationServerBaselinePagingTest {
 
 	@Test void baselineSharesDiscoveryBetweenReadySessionsAndSkipsRemovedExpiredAndAudienceHoles() {
 		var store = new ServerMarkerStore(new MarkerIdSource()); var adapters = registry();
-		for (int id = 0; id < 11; id++) PresentationServerFairRotationTest.create(store, id, 0, id == 4 ? 5 : 10000);
+		for (int id = 0; id < 11; id++) create(store, id, 0, id == 4 ? 5 : 10000);
 		var first = session(adapters); var second = session(adapters);
 		PresentationServer.startBaseline(first, store); PresentationServer.startBaseline(second, store);
 		// Only first is in the frozen audience, but both session cursors consume canonical discovery.
@@ -131,7 +171,7 @@ class PresentationServerBaselinePagingTest {
 		});
 		assertEquals(List.of(0L, 1L), firstIds); assertEquals(1, first.baselineAfter); assertEquals(0, second.baselineAfter);
 		store.removeByServer(new MarkerId(2), MarkerRemovalReason.CANCELLED);
-		var newMarker = PresentationServerFairRotationTest.create(store, 99, 3, 10000);
+		var newMarker = create(store, 99, 3, 10000);
 		for (int i = 0; i < 20 && (first.baselinePending || second.baselinePending); i++)
 			cursor = PresentationServer.baselineTick(store, sessions, cursor, 5, 3, recipient -> true,
 				(recipient, marker) -> { turns.add(recipient); firstIds.add(marker.id().value()); });
@@ -142,11 +182,8 @@ class PresentationServerBaselinePagingTest {
 
 	@Test void readyAudiencesTakeAlternatingBaselineTurnsUnderOneAllowance() {
 		var store = new ServerMarkerStore(new MarkerIdSource()); var adapters = registry();
-		var type = nx.pingwheel.common.domain.TargetTypeCatalog.builtIn().findById("block").orElseThrow();
-		for (int id = 0; id < 9; id++) store.create(PresentationServerFairRotationTest.OWNER,
-			new nx.pingwheel.common.domain.Target.BlockTarget("minecraft:overworld", id, 0, 0, "minecraft:stone"),
-			type, type.defaultPingType(), new nx.pingwheel.common.marker.MarkerAnchor(id, 0, 0), 0, 10000, List.of(VIEWER, OTHER));
-		var first = session(adapters); var second = session(adapters);
+		for (int id = 0; id < 9; id++) create(store, id, 0, 10000, List.of(), List.of(VIEWER, OTHER));
+		var first = session(adapters); var second = session(adapters, OTHER);
 		PresentationServer.startBaseline(first, store); PresentationServer.startBaseline(second, store);
 		List<UUID> turns = new ArrayList<>();
 		UUID cursor = PresentationServer.baselineTick(store, Map.of(VIEWER, first, OTHER, second), null, 5, 5,
@@ -160,7 +197,7 @@ class PresentationServerBaselinePagingTest {
 	}
 
 	@Test void failedReentryRetainsOnlyEachRecipientsOwnAuthorizedPriorAndBudgetDeferDoesNotFabricateStale() {
-		var store = new ServerMarkerStore(new MarkerIdSource()); var marker = PresentationServerFairRotationTest.create(store, 0, 0, 10000);
+		var store = new ServerMarkerStore(new MarkerIdSource()); var marker = create(store, 0, 0, 10000);
 		var adapters = registry(); var first = session(adapters); var second = session(adapters);
 		var firstLease = cached(marker); firstLease.sources.get(BASIC).value = new PresentationSection(BASIC, 1,
 			Map.of(NAME, new PresentationValue.Text("first")), false);
@@ -186,7 +223,7 @@ class PresentationServerBaselinePagingTest {
 	@Test void restrictiveMetadataBeforeResetAdvancesCutAndLooseningCannotResurrectOldFieldsOrAnnotations() {
 		var store = new ServerMarkerStore(new MarkerIdSource());
 		var ref = new PresentationPropertyRef(BASIC, PresentationBasic.BLOCK_STATE, List.of("selected"));
-		var marker = PresentationServerFairRotationTest.create(store, 0, 0, 10000,
+		var marker = create(store, 0, 0, 10000,
 			List.of(PresentationPropertySelection.of(ref, "attention")));
 		var adapters = registry(); var session = session(adapters); var basic = adapters.get(BASIC);
 		Set<String> fields = Set.of(NAME, PresentationBasic.BLOCK_STATE);
@@ -203,9 +240,13 @@ class PresentationServerBaselinePagingTest {
 		// This production metadata refresh sees revocation before ordinary RESET.
 		PresentationServer.refreshMarker(marker, Map.of(marker.id().value(), lease), basic, 11,
 			Map.of(VIEWER, session), recipient -> true, recipient -> Set.of(), (recipient, packet) -> packets.add(packet));
-		assertTrue(decode(packets.getLast()).fields().isEmpty()); assertTrue(session.authorizationCut >= serial);
-		PresentationServer.sendInitial(session, lease, basic, fields, packets::add);
-		assertTrue(decode(packets.getLast()).fields().isEmpty(), "fresh permission loosening cannot restore an older neutral capture");
+		var refreshed = decode(packets.getLast());
+		assertFalse(refreshed.fields().isEmpty(), "D0019: later fresh empty hints cannot prune the frozen fields");
+		assertEquals(new PresentationValue.Text("name"), refreshed.fields().get(NAME));
+		assertEquals(new PresentationValue.RecordValue(Map.of("selected", new PresentationValue.Flag(true))),
+			refreshed.fields().get(PresentationBasic.BLOCK_STATE));
+		assertEquals("attention", refreshed.annotations().get(ref),
+			"the frozen child grant keeps its annotation through a later empty fresh hint");
 		PresentationServer.captureSource(lease, basic, policy, 30, new PresentationAdapter.CaptureBudget(10), fields,
 			demand -> new PresentationSection(BASIC, 1, Map.of(NAME, new PresentationValue.Text("new"), PresentationBasic.BLOCK_STATE,
 				new PresentationValue.RecordValue(Map.of("selected", new PresentationValue.Flag(false)))), false));
@@ -234,8 +275,10 @@ class PresentationServerBaselinePagingTest {
 		session.authorizationCut = beforeDenialSerial;
 		PresentationServer.pruneSession(session, store, adapters::get, (m, a) -> a == basic ? fields : PresentationServerFairRotationTest.demand(a));
 		resetClient(client, session);
-		replayAcceptedBaseline(store, session, lease, adapters, fields, client, packets, PresentationReceiptContent.suppressed());
-		assertTrue(client.view(marker.id()).sections().get(BASIC).annotations().isEmpty());
+		replayAcceptedBaseline(store, session, lease, adapters, fields, client, packets,
+			PresentationReceiptContent.properties(List.of(ref)));
+		assertEquals("attention", client.view(marker.id()).sections().get(BASIC).annotations().get(ref),
+			"a same-epoch reset cannot prune the marker's frozen child grant");
 		assertEquals(neutral.fields().get(PresentationBasic.BLOCK_STATE), client.view(marker.id()).field(BASIC, PresentationBasic.BLOCK_STATE));
 		assertEquals(neutral.fields().get(NAME), client.view(marker.id()).field(BASIC, NAME));
 		assertEquals("attention", unaffected.sent.get(marker.id().value()).sections.get(BASIC).annotations().get(ref),
@@ -243,9 +286,10 @@ class PresentationServerBaselinePagingTest {
 		session.childBlack = Map.of(); session.view++;
 		PresentationServer.pruneSession(session, store, adapters::get, (m, a) -> a == basic ? fields : PresentationServerFairRotationTest.demand(a));
 		resetClient(client, session);
-		replayAcceptedBaseline(store, session, lease, adapters, fields, client, packets, PresentationReceiptContent.suppressed());
-		assertTrue(client.view(marker.id()).sections().get(BASIC).annotations().isEmpty(),
-			"loosening cannot regenerate a pruned selection annotation");
+		replayAcceptedBaseline(store, session, lease, adapters, fields, client, packets,
+			PresentationReceiptContent.properties(List.of(ref)));
+		assertTrue(client.view(marker.id()).sections().get(BASIC).annotations().containsKey(ref),
+			"loosening cannot reinterpret the frozen grant");
 		assertEquals(new PresentationValue.Flag(false), client.view(marker.id()).property(ref),
 			"the root's selected child value remains present even though its annotation was removed");
 		assertEquals(neutral, lease.sources.get(BASIC).value, "recipient replay leaves the authoritative neutral data unchanged");
@@ -254,7 +298,7 @@ class PresentationServerBaselinePagingTest {
 		PresentationServer.captureSource(lease, basic, policy, 50, new PresentationAdapter.CaptureBudget(10), fields,
 			demand -> new PresentationSection(BASIC, 1, Map.of(NAME, new PresentationValue.Text("fresh"), PresentationBasic.BLOCK_STATE,
 				new PresentationValue.RecordValue(Map.of("selected", new PresentationValue.Flag(true)))), false));
-		assertTrue(lease.sources.get(BASIC).successfulSerial > session.authorizationCut);
+		assertTrue(lease.sources.get(BASIC).successfulSerial > beforeDenialSerial);
 		PresentationServer.sendInitial(session, lease, basic, fields, packet -> {
 			assertEquals(PresentationReceiptContent.properties(List.of(ref)), packet.content(), "fresh capture restores the complete property receipt");
 			assertTrue(client.initial(wire(packet)));
@@ -269,7 +313,7 @@ class PresentationServerBaselinePagingTest {
 	@Test void absentSelectedBasicValueStillCarriesWaitingPropertyReceiptOnFirstAndKnownReplay() {
 		var store = new ServerMarkerStore(new MarkerIdSource()); var adapters = registry(); var session = session(adapters);
 		var ref = new PresentationPropertyRef(BASIC, PresentationBasic.BLOCK_STATE, List.of("facing"));
-		var marker = PresentationServerFairRotationTest.create(store, 0, 0, 10000,
+		var marker = create(store, 0, 0, 10000,
 			List.of(PresentationPropertySelection.of(ref, "attention")));
 		Set<String> fields = Set.of(NAME, PresentationBasic.BLOCK_STATE);
 		session.mask = Map.of("block", Map.of(BASIC, fields));
@@ -339,9 +383,9 @@ class PresentationServerBaselinePagingTest {
 		assertTrue(PresentationServer.inventoryKnows(session, lease.marker.id()));
 	}
 
-	@Test void fieldPolicyResetPrunesInPlaceAndOverflowPriorCannotReturnOnLooseningBeforeFreshCapture() {
+	@Test void fieldPolicyResetRetainsFrozenOldValuesWhileANewDenyStartsEmptyAndCannotReturnOnLoosening() {
 		var store = new ServerMarkerStore(new MarkerIdSource()); var adapters = registry();
-		var marker = PresentationServerFairRotationTest.create(store, 0, 0, 10000); var session = session(adapters);
+		var marker = create(store, 0, 0, 10000); var session = session(adapters);
 		var packets = new ArrayList<PresentationS2CPacket>(); var lease = cached(marker);
 		deliver(session, lease, adapters, packets);
 		var sameDeliveredState = session.sent.get(marker.id().value());
@@ -350,16 +394,28 @@ class PresentationServerBaselinePagingTest {
 		session.mask = Map.of("block", Map.of());
 		PresentationServer.pruneSession(session, store, adapters::get, (m, a) -> Set.of());
 		assertSame(sameDeliveredState, session.sent.get(marker.id().value()), "reset retains and prunes the existing recipient owner; no duplicate prior-sent map");
-		assertTrue(sameDeliveredState.sections.get(BASIC).fields().isEmpty());
+		assertFalse(sameDeliveredState.sections.get(BASIC).fields().isEmpty(),
+			"D0019: a later fresh empty hint cannot prune an existing marker's frozen grant");
 		assertFalse(PresentationServer.inventoryKnows(session, marker.id()));
+		// A new deny grant is the comparison: it starts from nothing regardless
+		// of the fresh hint that could not touch the older marker.
+		var deniedMarker = store.create(nx.pingwheel.common.presentation.minecraft.PresentationServerFairRotationTest.OWNER,
+			marker.target(), marker.targetKey(), marker.targetType(), marker.pingType(), marker.anchor(), 0, 10000,
+			List.of(VIEWER), List.of(), new PingAuthorization(Map.of(VIEWER, PresentationGrant.denied()))).marker();
+		deliver(session, cached(deniedMarker), adapters, packets);
+		assertTrue(session.sent.get(deniedMarker.id().value()).sections.get(BASIC).fields().isEmpty(),
+			"an empty canonical grant is an explicit new-marker denial");
 		deliver(session, new PresentationServer.Lease(marker, "Different owner"), adapters, packets); // evicted overflow replay
 		assertEquals("Owner", packets.stream().filter(p -> p.kind() == PresentationS2CPacket.Kind.CREATED).reduce((a, b) -> b).orElseThrow().ownerName());
 		session.view++; session.mask = Map.of("block", Map.of(BASIC, Set.of(NAME),
 			PresentationServerFairRotationTest.OPTIONAL, Set.of(PresentationServerFairRotationTest.FIELD)));
 		PresentationServer.pruneSession(session, store, adapters::get, (m, a) -> PresentationServerFairRotationTest.demand(a));
-		deliver(session, lease, adapters, packets); // old neutral cache still contains the deleted fields
-		assertTrue(session.sent.get(marker.id().value()).sections.get(BASIC).fields().isEmpty());
-		assertTrue(session.sent.get(marker.id().value()).sections.get(PresentationServerFairRotationTest.OPTIONAL).fields().isEmpty());
+		deliver(session, lease, adapters, packets); // old neutral cache still contains the delivered fields
+		assertFalse(session.sent.get(marker.id().value()).sections.get(BASIC).fields().isEmpty(),
+			"the old marker retains its frozen value across the fixture reset/loosening");
+		var deniedSection = session.sent.get(deniedMarker.id().value()).sections.get(PresentationServerFairRotationTest.OPTIONAL);
+		assertTrue(deniedSection == null || deniedSection.fields().isEmpty(),
+			"the new deny grant owns its own empty projection and is not widened by the old replay");
 		assertSame(sameDeliveredState, session.sent.get(marker.id().value()));
 		assertFalse(lease.sources.get(BASIC).value.fields().isEmpty(), "the neutral cache was not pruned or repopulated from recipient data");
 		long revision = session.revision;

@@ -25,7 +25,9 @@ import nx.pingwheel.common.presentation.PresentationBasic;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationReceiptContent;
 import nx.pingwheel.common.presentation.PresentationSection;
+import nx.pingwheel.common.presentation.MarkerContentGrant;
 import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.presentation.TestContentGrants;
 import nx.pingwheel.common.presentation.client.PresentationView;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
 import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
@@ -288,6 +290,12 @@ class PendingContentChatControllerTest {
 				default -> throw new AssertionError();
 			}
 			f.projection(ID, namedCustom("Late", true, false));
+			if (reason == 4) {
+				assertTrue(f.controller.attempt(ID), "a same-epoch view change keeps the in-flight receipt");
+				assertEquals(0, f.controller.pendingCount());
+				assertEquals(1, f.sent.size());
+				continue;
+			}
 			assertFalse(f.controller.attempt(ID));
 			assertEquals(0, f.controller.pendingCount(), "lifecycle reason " + reason);
 			assertTrue(f.sent.isEmpty());
@@ -587,11 +595,16 @@ class PendingContentChatControllerTest {
 				ContentChatComposer.nameJsonDecoder(RegistryAccess.EMPTY),
 				ContentChatComposer.itemDisplayDecoder(RegistryAccess.EMPTY), ignored -> ContentChatTemplate.DEFAULT_TEMPLATE, sink);
 		}
-		PresentationS2CPacket created(MarkerId id, PresentationReceiptContent content, String author) {
-			@Nullable InventoryCreationSnapshot snapshot = content.inventorySnapshot();
-			if (snapshot != null) creation.putIfAbsent(id, snapshot);
-			return PresentationS2CPacket.created(81, 1, 1, live.get(id), author, NAME, content, name());
-		}
+	private PresentationS2CPacket created(MarkerId id, PresentationReceiptContent content, String author) {
+		@Nullable InventoryCreationSnapshot snapshot = content.inventorySnapshot();
+		if (snapshot != null) creation.putIfAbsent(id, snapshot);
+		Map<String, Set<String>> granted = new LinkedHashMap<>(allowed);
+		if (snapshot != null) granted.put(nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID,
+			Set.of(snapshot.resourceKind().fieldId()));
+		MarkerContentGrant grant = new MarkerContentGrant(TestContentGrants.fromAllowed(granted),
+			snapshot == null ? null : snapshot.resourceKind());
+		return PresentationS2CPacket.created(81, 1, 1, live.get(id), author, NAME, grant, content, name());
+	}
 		boolean begin(PresentationReceiptContent receipt) { return controller.begin(created(ID, receipt, "Author"), true); }
 	}
 

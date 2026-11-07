@@ -59,6 +59,8 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 				case STREAM -> STREAM;
 				case STATUS -> STATUS;
 				case HEARTBEAT -> HEARTBEAT;
+				// No new production diagnostic channel for the appended control kind.
+				case OPENED -> null;
 			};
 		}
 	}
@@ -213,8 +215,9 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	/** Negotiation and correlated results are bounded control traffic, not a free transport side path. */
 	public boolean control(UUID recipient, InventoryS2CPacket packet) {
 		if (packet.isCorrupt() || packet.kind() != InventoryS2CPacket.Kind.OFFER && packet.kind() != InventoryS2CPacket.Kind.POLICY
-			&& packet.kind() != InventoryS2CPacket.Kind.SELECTED && packet.kind() != InventoryS2CPacket.Kind.REJECT) return false;
-		String key = recipient + "/" + packet.kind() + "/" + packet.resourceKind() + "/" + packet.commitId();
+			&& packet.kind() != InventoryS2CPacket.Kind.SELECTED && packet.kind() != InventoryS2CPacket.Kind.REJECT
+			&& packet.kind() != InventoryS2CPacket.Kind.OPENED) return false;
+		String key = controlKey(recipient, packet);
 		Control previous = controls.get(key);
 		if (previous != null) { controls.remove(key); previous.state.memory.close(); }
 		if (controls.size() >= 256 || controls.values().stream().filter(c -> c.state.context.recipient().equals(recipient)).count() >= 64) return false;
@@ -228,7 +231,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	}
 	/** Exact queued owner only: admission is not a successful transport handoff. */
 	public boolean controlQueued(UUID recipient, InventoryS2CPacket packet) {
-		@Nullable Control control = controls.get(recipient + "/" + packet.kind() + "/" + packet.resourceKind() + "/" + packet.commitId());
+		@Nullable Control control = controls.get(controlKey(recipient, packet));
 		return control != null && control.packet == packet;
 	}
 	public void drainControls() {
@@ -265,7 +268,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	}
 	/** Retiring a bounded result owner also retires only its exact queued send. */
 	public void cancelControl(UUID recipient, InventoryS2CPacket packet) {
-		String key = recipient + "/" + packet.kind() + "/" + packet.resourceKind() + "/" + packet.commitId();
+		String key = controlKey(recipient, packet);
 		Control control = controls.get(key);
 		if (control != null && control.packet == packet && controls.remove(key, control)) control.state.memory.close();
 	}
@@ -671,36 +674,46 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		for (var entry : state.offered.values()) if (!withinEffectiveCaps(entry)) return true;
 		return false;
 	}
+	/**
+	 * Flushes only terminal status/failure fences after a proof rejection applied
+	 * outside the normal drain. Pending data is deliberately not retried here:
+	 * its own next-tick attempt keeps the established deferral timing.
+	 */
+	public void drainTerminal() {
+		drainControls();
+		for (State state : new ArrayList<>(states.values())) drainStatus(state);
+	}
+	private void drainStatus(State state) {
+		if (!transport.authorized(state.context)) { cancel(state.context); return; }
+		// A terminal failure carries no quantity or completed cut. Retirement
+		// fences data and success digests, not this explicit tracking status.
+		boolean incomplete = state.route.markerId() != null && state.control && state.status == InventoryS2CPacket.Status.INCOMPLETE;
+		if ((state.retirementPending || state.rebaselineRequired) && !incomplete) return;
+		if (transport.admittedToSend(state.context) && state.fencePending) {
+			// A completed small recovery can be ready in this same drain. Its clean
+			// fence must still precede every baseline part, and is not a completed cut.
+			if (!sendControl(state, () -> InventoryS2CPacket.status(state.route.resourceKind(), state.route.epoch(), 0, state.route.markerId(), state.context.baseline(),
+				state.context.stateFence(), 0, state.status == InventoryS2CPacket.Status.INVALID
+					? state.status : InventoryS2CPacket.Status.UPDATING, 0).stamp(state.route.presentationEpoch(), state.route.view()))) return;
+			state.fencePending = false;
+			if (!incomplete && !state.complete && state.pending.isEmpty() && state.admitted.isEmpty()) state.control = false;
+		}
+		if (incomplete) {
+			if (transport.admittedToSend(state.context) && sendControl(state, () -> InventoryS2CPacket.status(state.route.resourceKind(), state.route.epoch(), 0,
+				state.route.markerId(), state.context.baseline(), state.context.stateFence(), state.bootstrap ? state.offeredWatermark : 0,
+				InventoryS2CPacket.Status.INCOMPLETE, 0).stamp(state.route.presentationEpoch(), state.route.view()))) state.control = false;
+			return;
+		}
+		if (!transport.admittedToSend(state.context) || !state.control || state.complete
+			|| !state.pending.isEmpty() || !state.admitted.isEmpty()) return;
+		if (sendControl(state, () -> packet(state, true, List.of(), 0, 1))) state.control = false;
+	}
 	public void drain() {
 		drainControls();
 		// Status/invalidation never waits behind a different consumer's item traffic.
 		var ordered = new ArrayList<>(states.values());
 		if (!ordered.isEmpty()) java.util.Collections.rotate(ordered, -(drainCursor++ % ordered.size()));
-		for (State state : ordered) {
-			if (!transport.authorized(state.context)) { cancel(state.context); continue; }
-			// A terminal failure carries no quantity or completed cut. Retirement
-			// fences data and success digests, not this explicit tracking status.
-			boolean incomplete = state.route.markerId() != null && state.control && state.status == InventoryS2CPacket.Status.INCOMPLETE;
-			if ((state.retirementPending || state.rebaselineRequired) && !incomplete) continue;
-			if (transport.admittedToSend(state.context) && state.fencePending) {
-				// A completed small recovery can be ready in this same drain. Its clean
-				// fence must still precede every baseline part, and is not a completed cut.
-				if (!sendControl(state, () -> InventoryS2CPacket.status(state.route.resourceKind(), state.route.epoch(), 0, state.route.markerId(), state.context.baseline(),
-					state.context.stateFence(), 0, state.status == InventoryS2CPacket.Status.INVALID
-						? state.status : InventoryS2CPacket.Status.UPDATING, 0).stamp(state.route.presentationEpoch(), state.route.view()))) continue;
-				state.fencePending = false;
-				if (!incomplete && !state.complete && state.pending.isEmpty() && state.admitted.isEmpty()) state.control = false;
-			}
-			if (incomplete) {
-				if (transport.admittedToSend(state.context) && sendControl(state, () -> InventoryS2CPacket.status(state.route.resourceKind(), state.route.epoch(), 0,
-					state.route.markerId(), state.context.baseline(), state.context.stateFence(), state.bootstrap ? state.offeredWatermark : 0,
-					InventoryS2CPacket.Status.INCOMPLETE, 0).stamp(state.route.presentationEpoch(), state.route.view()))) state.control = false;
-				continue;
-			}
-			if (!transport.admittedToSend(state.context) || !state.control || state.complete
-				|| !state.pending.isEmpty() || !state.admitted.isEmpty()) continue;
-			if (sendControl(state, () -> packet(state, true, List.of(), 0, 1))) state.control = false;
-		}
+		for (State state : ordered) drainStatus(state);
 		for (State state : ordered) {
 			if (!transport.authorized(state.context)) { cancel(state.context); continue; }
 			if (state.retirementPending || state.rebaselineRequired) continue;
@@ -1029,6 +1042,11 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		catch (ArithmeticException overflow) { throw new IllegalStateException("inventory accounting overflow"); }
 	}
 	private static String key(Context context) { return context.recipient() + "/" + context.consumerId(); }
+	/** OPENED is one per request; other controls keep their commit/frame identity. */
+	private static String controlKey(UUID recipient, InventoryS2CPacket packet) {
+		long identity = packet.kind() == InventoryS2CPacket.Kind.OPENED ? packet.requestId() : packet.commitId();
+		return recipient + "/" + packet.kind() + "/" + packet.resourceKind() + "/" + identity;
+	}
 	private void releaseWireSubjects(String prefix) {
 		var iterator = wireSubjects.entrySet().iterator();
 		while (iterator.hasNext()) { var entry = iterator.next(); if (entry.getKey().startsWith(prefix)) { entry.getValue().close(); iterator.remove(); } }

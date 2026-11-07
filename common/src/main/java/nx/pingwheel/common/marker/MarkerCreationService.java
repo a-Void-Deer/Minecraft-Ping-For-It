@@ -23,6 +23,7 @@ import nx.pingwheel.common.name.AuthoritativeTargetNameResolver;
 import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.presentation.PresentationPropertyIntent;
 import nx.pingwheel.common.presentation.PresentationPropertySelection;
+import nx.pingwheel.common.presentation.PresentationGrant;
 import nx.pingwheel.common.presentation.PresentationSection;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -90,9 +91,24 @@ public final class MarkerCreationService {
 			List<UUID> recipients, List<PresentationPropertyIntent> intents);
 	}
 	@FunctionalInterface
+	public interface ContentAuthorization {
+		PingAuthorization freeze(Target committedTarget, String targetTypeId, UUID owner,
+			@Unmodifiable List<UUID> audience);
+	}
+	@FunctionalInterface
 	public interface DedicatedAdmission {
 		AdmissionResult admit(Target committedTarget, TargetKey targetKey, String targetTypeId, UUID owner,
 			@Unmodifiable List<UUID> recipients);
+
+		/**
+		 * Final authorization hook of a dedicated create. It runs after the
+		 * creation authorization is frozen and before the atomic store commit,
+		 * so a prepared resource/registration can consume the exact grant that
+		 * will be stored. A rejection releases the candidate.
+		 */
+		default @Nullable MarkerRejectReason finishAuthorization(PingAuthorization authorization) {
+			return null;
+		}
 	}
 
 	public record AdmissionResult(@Nullable MarkerRejectReason rejection, @Unmodifiable List<PresentationPropertySelection> selections,
@@ -120,6 +136,7 @@ public final class MarkerCreationService {
 	private final ExternalBlockServerProviderRegistry externalProviders;
 	private final @Nullable AuthoritativeTargetNameResolver nameResolver;
 	private final TargetGroupingResolver groupingResolver;
+	private final ContentAuthorization contentAuthorization;
 
 	public MarkerCreationService(
 		ServerMarkerStore store,
@@ -170,6 +187,19 @@ public final class MarkerCreationService {
 		AuthoritativeTargetValidator validator, MarkerCreationLogger logger,
 		ExternalBlockServerProviderRegistry externalProviders, @Nullable AuthoritativeTargetNameResolver nameResolver,
 		TargetGroupingResolver groupingResolver) {
+		this(store, resolver, catalog, validator, logger, externalProviders, nameResolver, groupingResolver,
+			(target, targetTypeId, owner, audience) -> PingAuthorization.denied(audience));
+	}
+
+	/**
+	 * Production construction supplies the presentation freeze callback. A
+	 * fixture may explicitly keep the deny-all default constructor; there is no
+	 * allow-all or dynamic fallback.
+	 */
+	public MarkerCreationService(ServerMarkerStore store, TargetResolver resolver, PingTypeCatalog catalog,
+		AuthoritativeTargetValidator validator, MarkerCreationLogger logger,
+		ExternalBlockServerProviderRegistry externalProviders, @Nullable AuthoritativeTargetNameResolver nameResolver,
+		TargetGroupingResolver groupingResolver, ContentAuthorization contentAuthorization) {
 		this.store = Objects.requireNonNull(store, "store");
 		this.resolver = Objects.requireNonNull(resolver, "resolver");
 		this.catalog = Objects.requireNonNull(catalog, "catalog");
@@ -178,6 +208,7 @@ public final class MarkerCreationService {
 		this.externalProviders = Objects.requireNonNull(externalProviders, "externalProviders");
 		this.nameResolver = nameResolver;
 		this.groupingResolver = Objects.requireNonNull(groupingResolver, "groupingResolver");
+		this.contentAuthorization = Objects.requireNonNull(contentAuthorization, "contentAuthorization");
 	}
 
 	/**
@@ -289,6 +320,14 @@ public final class MarkerCreationService {
 		@Nullable PropertyAdmission admission, @Nullable ExternalBlockTransaction transaction, @Nullable DedicatedAdmission dedicated) {
 		if (owner == null || requestedTarget == null || pingTypeId == null || recipients == null || intents == null) {
 			logger.debug("create rejected: null owner, target, ping type id, or recipients");
+			return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
+		}
+
+		// A malformed audience is an invalid request before any validation,
+		// materialization, admission or freeze work. The freeze map requires
+		// exactly one non-null key per audience member and must never throw here.
+		if (recipients.isEmpty() || recipients.stream().anyMatch(java.util.Objects::isNull)) {
+			logger.debug("create rejected: empty or null recipient audience");
 			return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
 		}
 
@@ -433,6 +472,37 @@ public final class MarkerCreationService {
 			}
 		}
 
+		// The final creation cross-section freezes exactly once, after every
+		// classification, property capture and dedicated prepare, and before the
+		// atomic store commit.
+		@Nullable PingAuthorization frozenAuthorization = freezeAuthorization(
+			markerTarget, markerTargetType.id(), owner, recipients);
+		PingAuthorization authorization = frozenAuthorization == null
+			? PingAuthorization.denied(recipients) : frozenAuthorization;
+		PresentationGrant ownerGrant = authorization.forRecipient(owner);
+		for (PresentationPropertySelection selection : admitted.selections()) {
+			if (!ownerGrant.allowsRef(selection.ref())) {
+				if (materializedTarget != null) releaseMaterialized(level, materializedTarget, transaction);
+				return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
+			}
+		}
+		if (dedicated != null) {
+			try {
+				@Nullable MarkerRejectReason rejection = dedicated.finishAuthorization(authorization);
+				if (rejection != null) {
+					if (materializedTarget != null) releaseMaterialized(level, materializedTarget, transaction);
+					return MarkerCreateOutcome.rejected(rejection);
+				}
+			} catch (RuntimeException | LinkageError failure) {
+				if (materializedTarget != null) releaseMaterialized(level, materializedTarget, transaction);
+				Target failedTarget = markerTarget;
+				Diagnostics.server().atNormal().rateLimited(DEDICATED).failure(org.apache.logging.log4j.Level.WARN,
+					"marker-dedicated-finalize", "reject-create",
+					() -> "create rejected: finalization failed owner=" + owner + " target=" + failedTarget, failure);
+				return MarkerCreateOutcome.rejected(MarkerRejectReason.INVALID_REQUEST);
+			}
+		}
+
 		MarkerCreation creation;
 		try {
 			creation = store.create(
@@ -444,7 +514,7 @@ public final class MarkerCreationService {
 				markerAnchor,
 				arrivalTick,
 				expiresAtTick,
-				recipients, admitted.selections());
+				recipients, admitted.selections(), authorization);
 		} catch (RuntimeException | LinkageError e) {
 			if (materializedTarget != null) {
 				releaseMaterialized(level, materializedTarget, transaction);
@@ -461,6 +531,30 @@ public final class MarkerCreationService {
 		logger.debug("create accepted: id={} targetType={} pingType={}",
 			creation.marker().id(), markerTargetType.id(), pingType.id());
 		return MarkerCreateOutcome.accepted(creation, markerName, admitted.sourceSeeds());
+	}
+
+	/**
+	 * Freezes the complete creation authorization once. A provider failure,
+	 * null result or malformed audience key set resolves to explicit per-recipient
+	 * denial; it never widens access and never rejects the marker identity.
+	 */
+	private @Nullable PingAuthorization freezeAuthorization(Target target, String targetTypeId, UUID owner,
+		List<UUID> audience) {
+		try {
+			PingAuthorization frozen = contentAuthorization.freeze(target, targetTypeId, owner, List.copyOf(audience));
+			if (frozen == null || !frozen.recipients().keySet().equals(java.util.Set.copyOf(audience))) {
+				Diagnostics.server().atNormal().rateLimited(DEDICATED).event(org.apache.logging.log4j.Level.WARN,
+					"marker-content-authorization", "deny-all",
+					() -> "malformed frozen authorization owner=" + owner + " targetType=" + targetTypeId);
+				return PingAuthorization.denied(audience);
+			}
+			return frozen;
+		} catch (RuntimeException | LinkageError failure) {
+			Diagnostics.server().atNormal().rateLimited(DEDICATED).failure(org.apache.logging.log4j.Level.WARN,
+				"marker-content-authorization", "deny-all",
+				() -> "authorization provider failed owner=" + owner + " targetType=" + targetTypeId, failure);
+			return PingAuthorization.denied(audience);
+		}
 	}
 
 	private TargetNameJson resolveName(UUID owner, Target target, TargetNameJson fallback) {

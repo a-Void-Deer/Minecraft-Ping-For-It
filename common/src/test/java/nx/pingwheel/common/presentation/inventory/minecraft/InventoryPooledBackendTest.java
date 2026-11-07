@@ -222,7 +222,7 @@ class InventoryPooledBackendTest {
 	}
 	private static long openClientPreview(InventoryPublicationBackendFixture fixture, UUID owner, long tick) {
 		long request = fixture.clients.get(owner).open(target(Blocks.CHEST), BlockFace.NORTH, "entity_block");
-		assertEquals(request, fixture.open(owner, target(Blocks.CHEST), BlockFace.NORTH, tick)); return request;
+		assertEquals(request, fixture.open(owner, request, target(Blocks.CHEST), BlockFace.NORTH, tick)); return request;
 	}
 	private static MarkerId selectStone(InventoryPublicationBackendFixture fixture, UUID owner, long request, long tick) {
 		var client = fixture.clients.get(owner);
@@ -359,10 +359,15 @@ class InventoryPooledBackendTest {
 			Object bLease = trackingState(f, b), bConsumer = state(bLease, "consumer");
 			Object original = state(bConsumer, "completedRound"), evidence = state(bLease, "completedEvidence");
 			long baseline = aClient.tracking(a).baselineId(), revision = (Long) state(trackingState(f, a), "revision");
+			// Keep both completed trackers on their explicit cadence wait so the
+			// suspension below is observed before either starts a replacement sweep.
+			for (Object tracker : List.of(trackingState(f, a), bLease)) {
+				var due = tracker.getClass().getDeclaredField("nextSweep"); due.setAccessible(true); due.setLong(tracker, 32);
+			}
 			boolean[] permitted = {true}; int[] grants = {0};
-			// This is inventory-field permission, not source-read authority or marker removal.
-			f.currentPolicy = player -> Optional.of(new InventoryBackend.Policy(100, 1,
-				player.equals(suspended) && !permitted[0] ? java.util.Set.of() : java.util.Set.of("entity_block")));
+			// A current known-marker gate is the live audience eligibility, not a
+			// creation-frozen content permission or a later POLICY edit.
+			f.known = (player, id) -> !player.equals(suspended) || permitted[0];
 			int forbiddenStart = f.frames.size();
 			if (!revokeAfterGrant) permitted[0] = false;
 			f.backend.tick(26, settings); // suspension is observed while both completed trackers are waiting for cadence

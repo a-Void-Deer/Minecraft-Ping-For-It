@@ -2020,8 +2020,12 @@ public final class ClientPingRuntime {
 				if (presentation.offer(packet)) syncInventorySchemas();
 			}
 			case RESET -> {
+				long previousEpoch = presentation.epoch();
 				if (presentation.reset(packet)) {
-					contentChat.reset();
+					// Only a true epoch change clears pending receipt chat. A
+					// same-epoch reset re-fences the packet view but not the
+					// marker's frozen content or an in-flight receipt.
+					if (packet.epoch() != previousEpoch) contentChat.clear();
 					if (inventory != null) inventory.presentationReset(packet.epoch(), packet.view());
 					syncPresentationNames();
 				}
@@ -2029,8 +2033,18 @@ public final class ClientPingRuntime {
 			case CREATED -> {
 				if (!presentation.current(packet) || packet.markerId() == null
 					|| markerStore.isAuthoritativelyRemoved(packet.markerId())) return;
-				if (packet.content() != null && packet.content().kind() == PresentationReceiptContent.Kind.INVENTORY
-					&& inventory != null && !inventory.acceptsCreationSnapshot(packet.markerId(), packet.content().inventorySnapshot())) return;
+				// The optional inventory sidecar must be installable before any
+				// presentation/name/main-marker or receipt effect. This admission is
+				// pure and does not require an already-known marker, so a freed slot
+				// can still admit a later first delivery. Ordinary markers admit
+				// without a new restriction.
+				if (inventory != null && !inventory.admitsCreation(packet.snapshot(), packet.markerGrant(),
+					packet.content() == null ? null : packet.content().inventorySnapshot())) return;
+				// presentation.initial validates the complete CREATED frame,
+				// frozen grant and receipt (including an inventory snapshot's
+				// accepted schema/kind/domain) before mutating any client store.
+				// Inventory marker and seed installation therefore follows that
+				// acceptance instead of requiring a marker that does not exist yet.
 				if (!presentation.initial(packet)) return;
 				updatePresentationName(packet.markerId());
 				applyPresentationCreated(packet);
@@ -2126,10 +2140,15 @@ public final class ClientPingRuntime {
 			presentation.evict(marker.id());
 			if (inventory != null) inventory.markerRemoved(marker.id());
 		}
-		if (inventory != null) inventory.markerCreated(snapshot);
+		boolean inventoryKnown = inventory != null && inventory.trackingKind(snapshot.id()).isPresent();
+		if (inventory != null) inventory.markerCreated(snapshot, packet.markerGrant());
 		if (newlySeen) {
 			nx.pingwheel.common.presentation.inventory.@Nullable InventoryCreationSnapshot creation = packet.content().inventorySnapshot();
 			boolean seeded = inventory != null && creation != null && inventory.creationSnapshot(snapshot.id(), creation);
+			// The frame was fully validated before presentation acceptance. Keep
+			// the adjacent inventory marker all-or-nothing if its seed cannot be
+			// retained for a local capacity/policy reason.
+			if (creation != null && !seeded && !inventoryKnown && inventory != null) inventory.markerRemoved(snapshot.id());
 			presentationReceiptFeedback.play(snapshot);
 			if (packet.content().kind() == PresentationReceiptContent.Kind.WHOLE)
 				presentationReceiptFeedback.chat(ownerName, snapshot, presentationTargetName(snapshot.id()));
@@ -2149,8 +2168,7 @@ public final class ClientPingRuntime {
 	private PendingContentChatController.Current currentContentReceipt(MarkerId id) {
 		@Nullable ClientMarker marker = markerStore.marker(id).orElse(null);
 		Map<String, Set<String>> fields = new LinkedHashMap<>();
-		if (marker != null) presentation.previewAccess(marker.targetTypeId()).ifPresent(access ->
-			access.adapters().forEach((adapter, descriptor) -> fields.put(adapter, descriptor.fields().keySet())));
+		if (marker != null) fields.putAll(presentation.markerAllowedFields(id));
 		var authorization = inventory == null || marker == null ? Optional.<Boolean>empty()
 			: inventory.receiptAuthorization(id, presentation.epoch(), presentation.sessionView(), marker.targetTypeId());
 		return new PendingContentChatController.Current(presentation.epoch(),

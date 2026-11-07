@@ -205,7 +205,14 @@ public class ServerCore {
 			MarkerCreationLogger.global(),
 			externalProviders,
 			nameResolver,
-			new MinecraftTargetGroupingResolver(server));
+			new MinecraftTargetGroupingResolver(server),
+			(target, targetTypeId, owner, audience) ->
+				PresentationServer.freezeForCreate(server, target, targetTypeId, owner, audience));
+	}
+
+	/** Read-only canonical lookup used by the dedicated inventory host. */
+	public static java.util.Optional<ServerMarker> activeMarker(MarkerId marker) {
+		return marker == null ? java.util.Optional.empty() : markerStore().find(marker);
 	}
 
 	public static void onChannelUpdate(ServerPlayer player, UpdateChannelC2SPacket packet) {
@@ -631,10 +638,24 @@ public class ServerCore {
 		List<UUID> audience = snapshotRecipients(server.getPlayerList(), player, channel, mode);
 		long now = server.getTickCount();
 		var outcome = markerService(server).createDedicated(player.serverLevel(), player.getUUID(), frozen.target(), frozen.defaultPingType(),
-			now, now + serverConfig.getSyncDuration() * (long) TICKS_PER_SECOND, audience, (target, targetKey, type, owner, recipients) -> {
-				@Nullable var policy = PresentationServer.inventoryPolicy(owner).orElse(null);
-				@Nullable MarkerRejectReason rejection = policy == null || !policy.types(kind).contains(type) ? MarkerRejectReason.INVALID_REQUEST : admission.prepare(target, targetKey, type, recipients);
-				return rejection == null ? MarkerCreationService.AdmissionResult.accepted(List.of(), Map.of()) : MarkerCreationService.AdmissionResult.rejected(rejection);
+			now, now + serverConfig.getSyncDuration() * (long) TICKS_PER_SECOND, audience,
+			new MarkerCreationService.DedicatedAdmission() {
+				@Override public MarkerCreationService.AdmissionResult admit(Target target, nx.pingwheel.common.marker.TargetKey targetKey,
+					String type, UUID owner, List<UUID> recipients) {
+					@Nullable MarkerRejectReason rejection = admission.prepare(target, targetKey, type, recipients);
+					return rejection == null ? MarkerCreationService.AdmissionResult.accepted(List.of(), Map.of())
+						: MarkerCreationService.AdmissionResult.rejected(rejection);
+				}
+
+				@Override public @Nullable MarkerRejectReason finishAuthorization(nx.pingwheel.common.marker.PingAuthorization authorization) {
+					// The owner is always a creation-audience member. The frozen
+					// dedicated field is the actual committed kind, not a re-read of
+					// the current lane policy.
+					if (!authorization.forRecipient(player.getUUID())
+						.allowsField(nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID, kind.fieldId()))
+						return MarkerRejectReason.INVALID_REQUEST;
+					return admission.finishAuthorization(authorization);
+				}
 			});
 		if (!outcome.isAccepted()) return new InventoryBackend.Created(null, outcome.rejectReason().orElseThrow());
 		var creation = outcome.creation().orElseThrow();

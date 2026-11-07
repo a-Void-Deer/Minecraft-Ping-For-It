@@ -1,7 +1,9 @@
 package nx.pingwheel.common.presentation.inventory.client;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import nx.pingwheel.common.diagnostics.LoggingProfile;
@@ -13,7 +15,11 @@ import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
+import nx.pingwheel.common.presentation.MarkerContentGrant;
+import nx.pingwheel.common.presentation.PresentationField;
+import nx.pingwheel.common.presentation.PresentationGrant;
 import nx.pingwheel.common.presentation.inventory.InventoryChecksums;
+import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
 import nx.pingwheel.common.testing.DiagnosticLogCapture;
@@ -35,10 +41,10 @@ class ClientInventoryLanesTest {
 	private final Target.BlockTarget target = new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest");
 	private final MarkerId marker = new MarkerId(4);
 
-	@Test void creationAuthorityBeforeAnyInventoryHandshakeIsMarkerScopedAndCannotClearOlderDenials() {
+	@Test void creationAuthorityBeforeAnyInventoryHandshakeIsMarkerScopedAndPolicyCannotRevokeItsSeedOrReceipt() {
 		client.presentationReset(100, 1);
 		client.acceptedSchemas(Set.of(ITEM, FLUID));
-		client.markerCreated(markerSnapshot(target));
+		client.markerCreated(markerSnapshot(target), inventoryGrant(ITEM, ITEM));
 		var snapshot = new InventoryCreationSnapshot(ITEM, "creation-key", "minecraft:gunpowder", "item.minecraft.gunpowder",
 			null, 5, false, "take", false, true);
 		assertTrue(client.creationSnapshot(marker, snapshot));
@@ -51,17 +57,34 @@ class ClientInventoryLanesTest {
 		assertFalse(client.tracking(marker).complete());
 		client.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(3, 3, 0, 0)).stamp(100, 1));
 		policy(ITEM, false);
-		assertNull(client.creationSnapshot(marker));
+		assertNotNull(client.creationSnapshot(marker), "current POLICY cannot revoke the creation-frozen seed");
 		policy(ITEM, true);
 		assertFalse(client.creationSnapshot(marker, snapshot), "receipt membership is consumed even after deny/re-allow");
-		assertEquals(java.util.Optional.of(false), client.receiptAuthorization(marker, 100, 1, "entity_block"));
+		assertEquals(java.util.Optional.of(true), client.receiptAuthorization(marker, 100, 1, "entity_block"),
+			"current POLICY cannot revoke the creation-frozen receipt");
 		MarkerId later = new MarkerId(5);
-		client.markerCreated(new MarkerSnapshot(later, new UUID(1, 2), target, "entity_block", "attention", new MarkerAnchor(1, 2, 3), 1, 10000));
+		client.markerCreated(markerSnapshot(later, target), inventoryGrant(ITEM, ITEM));
 		assertTrue(client.creationSnapshot(later, snapshot));
 		assertEquals(java.util.Optional.of(true), client.receiptAuthorization(later, 100, 1, "entity_block"));
-		assertEquals(java.util.Optional.of(false), client.receiptAuthorization(marker, 100, 1, "entity_block"),
-			"a new marker's receipt cannot clear a different marker's latched denial");
+		assertEquals(java.util.Optional.of(true), client.receiptAuthorization(marker, 100, 1, "entity_block"),
+			"another marker's frozen grant cannot alter an existing marker's receipt");
 		assertTrue(sent.isEmpty(), "creation seeding performs no negotiation, reads or network requests");
+	}
+
+	@Test void deniedFrozenGrantIsNotRestoredByALaterMarkerGrantButANewMarkerUsesItsOwnGrant() {
+		handshake();
+		var snapshot = new InventoryCreationSnapshot(ITEM, "creation-key", "minecraft:gunpowder", "item.minecraft.gunpowder",
+			null, 5, false, "take", false, true);
+		client.markerCreated(markerSnapshot(target), MarkerContentGrant.denied(ITEM));
+		assertFalse(client.creationSnapshot(marker, snapshot));
+		assertEquals(java.util.Optional.of(false), client.receiptAuthorization(marker, 100, 1, "entity_block"));
+		client.markerCreated(markerSnapshot(target), inventoryGrant(ITEM, ITEM));
+		assertFalse(client.creationSnapshot(marker, snapshot), "a duplicate marker refresh cannot widen its frozen grant");
+		assertEquals(java.util.Optional.of(false), client.receiptAuthorization(marker, 100, 1, "entity_block"));
+		MarkerId later = new MarkerId(5);
+		client.markerCreated(markerSnapshot(later, target), inventoryGrant(ITEM, ITEM));
+		assertTrue(client.creationSnapshot(later, snapshot), "a new marker reconciles its own frozen grant");
+		assertEquals(java.util.Optional.of(true), client.receiptAuthorization(later, 100, 1, "entity_block"));
 	}
 
 	@Test void lateCreationSeedCannotDowngradeAClosedFreshTrackingProjectionOrEnterItsChecksum() {
@@ -80,20 +103,50 @@ class ClientInventoryLanesTest {
 		assertTrue(client.tracking(marker).complete());
 	}
 
-	private long ready() {
+	private void handshake() {
 		client.presentationReset(100, 1);
 		client.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(3, 3, 0, 0)).stamp(100, 1));
-		for (var kind : InventoryResourceKind.values()) policy(kind, true);
-		client.markerCreated(new MarkerSnapshot(marker, new UUID(1, 2), target, "entity_block", "attention", new MarkerAnchor(1, 2, 3), 0, 10000));
-		return client.open(target, BlockFace.NORTH, "entity_block");
+	}
+	private long ready() {
+		return ready(ITEM);
+	}
+	private long ready(InventoryResourceKind trackingKind) {
+		handshake();
+		client.markerCreated(markerSnapshot(target), inventoryGrant(trackingKind, ITEM, FLUID));
+		long request = client.open(target, BlockFace.NORTH, "entity_block");
+		client.accept(InventoryS2CPacket.opened(7, 100, 1, request, 3));
+		return request;
 	}
 	private MarkerSnapshot markerSnapshot(Target target) {
-		return new MarkerSnapshot(marker, new UUID(1, 2), target, "entity_block", "attention", new MarkerAnchor(1, 2, 3), 0, 10000);
+		return markerSnapshot(marker, target);
+	}
+	private MarkerSnapshot markerSnapshot(MarkerId id, Target target) {
+		return new MarkerSnapshot(id, new UUID(1, 2), target, "entity_block", "attention", new MarkerAnchor(1, 2, 3), 0, 10000);
+	}
+	/** Explicit creation-frozen content grant; a missing lane is denied forever for this membership. */
+	private static MarkerContentGrant inventoryGrant(InventoryResourceKind trackingKind, InventoryResourceKind... lanes) {
+		return inventoryGrant(trackingKind, Set.of(lanes));
+	}
+	private static MarkerContentGrant inventoryGrant(InventoryResourceKind trackingKind, Set<InventoryResourceKind> lanes) {
+		Map<String, PresentationField.Kind> fields = new LinkedHashMap<>();
+		for (InventoryResourceKind lane : lanes) fields.put(lane.fieldId(), PresentationField.Kind.RECORD);
+		PresentationGrant authorization = fields.isEmpty() ? PresentationGrant.denied()
+			: new PresentationGrant(Map.of(InventoryPresentation.ADAPTER_ID,
+				new PresentationGrant.AdapterGrant(InventoryPresentation.SCHEMA, fields)), Set.of());
+		return new MarkerContentGrant(authorization, trackingKind);
+	}
+	private static MarkerContentGrant inventoryGrantMissing(InventoryResourceKind trackingKind, InventoryResourceKind missing) {
+		Set<InventoryResourceKind> lanes = java.util.EnumSet.allOf(InventoryResourceKind.class);
+		lanes.remove(missing);
+		return inventoryGrant(trackingKind, lanes);
+	}
+	private void opened(long request, int laneBits) {
+		client.accept(InventoryS2CPacket.opened(7, 100, 1, request, laneBits));
 	}
 	private void sableMarker() {
 		client.markerRemoved(marker);
 		client.markerCreated(markerSnapshot(Target.ExternalBlockTarget.committed("minecraft:overworld", "sable", "tracking",
-			"minecraft:chest", "opaque", true)));
+			"minecraft:chest", "opaque", true)), inventoryGrant(FLUID, FLUID));
 	}
 	private void policy(InventoryResourceKind kind, boolean allowed) {
 		client.accept(InventoryS2CPacket.policy(kind, 7, 100, 1, allowed ? Set.of("entity_block") : Set.of()));
@@ -123,14 +176,19 @@ class ClientInventoryLanesTest {
 		assertTrue(client.preview(request, FLUID).invalid());
 		assertEquals(8, client.preview(request, ITEM).entries().getFirst().count());
 		policy(FLUID, false);
-		assertFalse(client.hasPreview(request, FLUID));
+		assertTrue(client.hasPreview(request, FLUID), "current POLICY revocation cannot clear a frozen preview lane");
 		assertTrue(client.hasPreview(request, ITEM));
+		long narrowed = client.open(target, BlockFace.NORTH, "entity_block");
+		assertTrue(client.hasPreview(narrowed, FLUID), "a new request starts lane-neutral until its own OPENED result");
+		opened(narrowed, 1);
+		assertFalse(client.hasPreview(narrowed, FLUID), "the new request uses the server's frozen OPENED lane mask");
+		assertTrue(client.hasPreview(narrowed, ITEM));
 		client.close(request);
 		assertFalse(client.hasPreview(request));
 		assertEquals(1, sent.stream().filter(packet -> packet instanceof InventoryC2SPacket p && p.kind() == InventoryC2SPacket.Kind.CLOSE).count());
 	}
 
-	@Test void policySkippedFluidLaneLogsItsReasonWhileTheSharedOpenIsActuallySent() {
+	@Test void openedMaskDecidesTheLaneEvenWhileCurrentPolicyDeniesItAndTheSharedOpenIsActuallySent() {
 		try (var logs = new DiagnosticLogCapture(LoggingProfile.DEBUG)) {
 			client.presentationReset(100, 1);
 			client.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(3, 3, 0, 0)).stamp(100, 1));
@@ -139,14 +197,17 @@ class ClientInventoryLanesTest {
 			long request = client.open(target, BlockFace.NORTH, "entity_block");
 			assertNotEquals(ClientInventory.NO_REQUEST, request);
 			assertTrue(client.hasPreview(request, ITEM));
-			assertFalse(client.hasPreview(request, FLUID));
+			assertTrue(client.hasPreview(request, FLUID), "current POLICY is only a hint and never excludes a candidate lane");
 			assertEquals(1, sent.stream().filter(packet -> packet instanceof InventoryC2SPacket p
 				&& p.kind() == InventoryC2SPacket.Kind.OPEN).count());
+			opened(request, 1);
+			assertTrue(client.hasPreview(request, ITEM));
+			assertFalse(client.hasPreview(request, FLUID), "OPENED removes only the lanes outside its complete mask");
 
 			var messages = logs.events().stream().map(event -> event.getMessage().getFormattedMessage()).toList();
 			assertTrue(messages.stream().anyMatch(message -> message.contains("site=inventory/preview-lane")
-				&& message.contains("handling=lane-policy-denied") && message.contains("kind=FLUID")
-				&& message.contains("request=" + request)), "the skipped lane keeps its request/kind reason");
+				&& message.contains("handling=lane-pending-opened") && message.contains("kind=FLUID")
+				&& message.contains("request=" + request)), "the pending lane keeps its request/kind reason");
 			assertTrue(messages.stream().anyMatch(message -> message.contains("site=inventory/preview-send")
 				&& message.contains("handling=open-sent") && message.contains("kind=ITEM")
 				&& message.contains("request=" + request)), "the shared OPEN is evidence that a request was actually sent");
@@ -175,7 +236,7 @@ class ClientInventoryLanesTest {
 	}
 
 	@Test void sharedCommitRejectsWrongLaneOutcomeWithoutConsumingTheCorrectOutcome() {
-		long request = ready();
+		long request = ready(FLUID);
 		data(ITEM, request, null, 0, 1, true, 1);
 		data(FLUID, request, null, 0, 1, true, 81);
 		var item = client.selectable(request, ITEM).getFirst();
@@ -205,8 +266,8 @@ class ClientInventoryLanesTest {
 			client.select(item, "attention", packet -> fail("late reference cannot reach the transport")));
 	}
 
-	@Test void fixedKindTrackingFencesWrongLaneIncludingEmptyControlsAndRevokeThenResetClearsBothGroups() {
-		long request = ready();
+	@Test void fixedFrozenKindFencesWrongLaneAndSameEpochResetKeepsGrantAndClosedDisplayUntilATrueEpoch() {
+		long request = ready(FLUID);
 		data(FLUID, request, marker, 0, 1, false, 80);
 		assertFalse(client.tracking(marker).complete());
 		data(ITEM, request, marker, 0, 1, true, 900);
@@ -215,13 +276,80 @@ class ClientInventoryLanesTest {
 		assertEquals(80, client.tracking(marker).entries().getFirst().count());
 		policy(FLUID, false);
 		data(ITEM, request, marker, 0, 1, true, 900);
-		assertTrue(client.tracking(marker).entries().isEmpty());
+		assertEquals(80, client.tracking(marker).entries().getFirst().count(),
+			"a later POLICY denial cannot clear a frozen tracking grant");
 		assertEquals(FLUID, client.trackingKind(marker).orElseThrow());
 		client.presentationReset(100, 2);
+		assertTrue(client.hasPreview(request), "a same-epoch RESET keeps the Preview request and its frozen lanes");
+		assertEquals(FLUID, client.trackingKind(marker).orElseThrow(), "a same-epoch RESET keeps the frozen grant");
+		assertEquals(80, client.tracking(marker).entries().getFirst().count(),
+			"a same-epoch RESET keeps the closed display");
+		client.presentationReset(101, 1);
 		assertFalse(client.hasPreview(request));
 		assertTrue(client.trackingKind(marker).isEmpty());
 		assertEquals(0, client.stats().trackedChannels());
 		assertEquals(0, client.stats().unknownSessions());
+	}
+
+	@Test void previewDataBeforeOpenedAckIsFencedAndTheAckMaskGatesEachLane() {
+		handshake();
+		client.markerCreated(markerSnapshot(target), inventoryGrant(ITEM, ITEM, FLUID));
+		long request = client.open(target, BlockFace.NORTH, "entity_block");
+		data(ITEM, request, null, 0, 1, true, 8);
+		data(FLUID, request, null, 0, 1, true, 80);
+		assertTrue(client.preview(request, ITEM).entries().isEmpty(), "no PREVIEW content is accepted before OPENED");
+		assertTrue(client.preview(request, FLUID).entries().isEmpty(), "no PREVIEW content is accepted before OPENED");
+		assertFalse(client.preview(request, ITEM).completeScan());
+		opened(request, 3);
+		data(ITEM, request, null, 0, 1, true, 8);
+		data(FLUID, request, null, 0, 1, true, 80);
+		assertEquals(8, client.preview(request, ITEM).entries().getFirst().count());
+		assertEquals(80, client.preview(request, FLUID).entries().getFirst().count());
+		long narrowed = client.open(target, BlockFace.NORTH, "entity_block");
+		opened(narrowed, 1);
+		data(FLUID, narrowed, null, 0, 1, true, 120);
+		assertTrue(client.preview(narrowed, FLUID).entries().isEmpty(), "a lane outside the complete OPENED mask is denied");
+	}
+	@Test void openedAckIsIdempotentForTheSameMaskAndFencesConflictingOrStaleAcks() {
+		handshake();
+		client.markerCreated(markerSnapshot(target), inventoryGrant(ITEM, ITEM, FLUID));
+		long request = client.open(target, BlockFace.NORTH, "entity_block");
+		long invalid = client.stats().invalidPackets();
+		opened(request, 3);
+		opened(request, 3);
+		assertEquals(invalid, client.stats().invalidPackets(), "a repeated identical OPENED ack is idempotent");
+		opened(request, 1);
+		assertEquals(invalid + 1, client.stats().invalidPackets(), "a conflicting mask is rejected as invalid");
+		assertTrue(client.hasPreview(request, FLUID), "a conflicting ack cannot shrink the accepted mask");
+		long staleEpoch = client.stats().staleEpochPackets();
+		client.accept(InventoryS2CPacket.opened(8, 100, 1, request, 3));
+		assertEquals(staleEpoch + 1, client.stats().staleEpochPackets());
+		long fenced = client.stats().fencedPackets();
+		client.accept(InventoryS2CPacket.opened(7, 100, 2, request, 3));
+		client.accept(InventoryS2CPacket.opened(7, 100, 1, 999, 3));
+		assertEquals(fenced + 2, client.stats().fencedPackets(), "stale view or unknown request acks cannot entitle a lane");
+	}
+	@Test void sameEpochResetKeepsPreviewGrantButFencesOldViewBaselineUntilAFreshOpenedAck() {
+		long request = ready();
+		data(ITEM, request, null, 0, 1, true, 8);
+		assertTrue(client.preview(request, ITEM).completeScan());
+		client.presentationReset(100, 2);
+		assertTrue(client.hasPreview(request), "same-epoch RESET keeps the frozen Preview request");
+		assertEquals(8, client.preview(request, ITEM).entries().getFirst().count());
+		data(ITEM, request, null, 0, 1, true, 9);
+		assertEquals(8, client.preview(request, ITEM).entries().getFirst().count(),
+			"old-view or retired-baseline data cannot overwrite the retained display");
+		assertFalse(client.preview(request, ITEM).completeScan());
+		var fresh = entry(9, 2);
+		client.accept(InventoryS2CPacket.data(ITEM, InventoryS2CPacket.Kind.PREVIEW, 7, request, null, 3, 2, 2, 0, 1,
+			true, InventoryS2CPacket.Status.READY, InventoryChecksums.checksumEntries(ITEM, List.of(fresh)), List.of(fresh)).stamp(100, 2));
+		assertEquals(8, client.preview(request, ITEM).entries().getFirst().count(),
+			"a fresh view still requires its own OPENED ack");
+		client.accept(InventoryS2CPacket.opened(7, 100, 2, request, 3));
+		client.accept(InventoryS2CPacket.data(ITEM, InventoryS2CPacket.Kind.PREVIEW, 7, request, null, 3, 2, 2, 0, 1,
+			true, InventoryS2CPacket.Status.READY, InventoryChecksums.checksumEntries(ITEM, List.of(fresh)), List.of(fresh)).stamp(100, 2));
+		assertEquals(9, client.preview(request, ITEM).entries().getFirst().count());
+		assertTrue(client.preview(request, ITEM).completeScan());
 	}
 
 	@Test void incompatibleSchemaDisablesOnlyInventoryAndNeverKeepsARequestLoading() {
@@ -230,55 +358,63 @@ class ClientInventoryLanesTest {
 		assertFalse(client.hasPreview(request));
 		assertTrue(client.schemaUnavailable());
 		assertEquals(false, client.authorization(FLUID, 100, 1, "entity_block").orElseThrow());
-		assertFalse(client.ready());
+		assertTrue(client.ready(), "the transport session remains usable for non-inventory presentation");
+		assertFalse(client.ready(ITEM));
 	}
-	@Test void unknownKindReceiptDenialRequiresEveryLaneToBeExplicitlyDeniedInTheCurrentView() {
-		ready();
-		policy(ITEM, false);
+	@Test void ordinaryMarkerWithoutTrackingKindCannotReceiveALaneEvenWhenItsGrantAllowsIt() {
+		handshake();
+		client.markerCreated(markerSnapshot(target), inventoryGrant(null, ITEM, FLUID));
 		assertTrue(client.receiptAuthorization(marker, 100, 1, "entity_block").isEmpty());
-		policy(FLUID, false);
-		assertEquals(false, client.receiptAuthorization(marker, 100, 1, "entity_block").orElseThrow());
-		assertTrue(client.receiptAuthorization(marker, 100, 2, "entity_block").isEmpty());
-		policy(ITEM, true);
-		assertTrue(client.receiptAuthorization(marker, 100, 1, "entity_block").isEmpty(), "an unrelated lane grant cannot invent marker kind");
-		client.presentationReset(100, 2);
-		assertTrue(client.receiptAuthorization(marker, 100, 2, "entity_block").isEmpty());
+		data(ITEM, 0, marker, 0, 1, true, 4);
+		assertTrue(client.tracking(marker).entries().isEmpty(), "ordinary markers have no dedicated inventory domain");
+		assertEquals(0, client.stats().trackedChannels());
+		MarkerId typed = new MarkerId(6);
+		client.markerCreated(markerSnapshot(typed, target), inventoryGrant(ITEM, ITEM));
+		data(ITEM, 0, typed, 0, 1, true, 4);
+		assertTrue(client.tracking(typed).complete());
+		assertEquals(java.util.Optional.of(true), client.receiptAuthorization(typed, 100, 1, "entity_block"));
 	}
-	@Test void denialHistoryStartsAtMembershipAndCannotBeClearedByRefreshOrReallow() {
-		long request = ready();
+	@Test void frozenLaneDenialCannotBeClearedByCurrentPolicyReallowAndANewMembershipUsesItsOwnGrant() {
+		long request = ready(ITEM);
 		client.markerRemoved(marker);
 		policy(ITEM, false); policy(ITEM, true);
-		client.markerCreated(markerSnapshot(target));
+		client.markerCreated(markerSnapshot(target), MarkerContentGrant.denied(ITEM));
 		data(ITEM, request, marker, 0, 1, true, 4);
-		assertEquals(true, client.receiptAuthorization(marker, 100, 1, "entity_block").orElseThrow(), "pre-membership denial is irrelevant");
-		client.markerRemoved(marker);
-		policy(ITEM, false);
-		client.markerCreated(markerSnapshot(target));
-		policy(ITEM, true);
-		client.markerCreated(markerSnapshot(target));
-		assertTrue(client.receiptAuthorization(marker, 100, 1, "entity_block").isEmpty(), "a possible FLUID receipt is still unknown");
-		data(ITEM, request, marker, 0, 1, true, 4);
-		assertTrue(client.tracking(marker).complete());
-		assertEquals(false, client.receiptAuthorization(marker, 100, 1, "entity_block").orElseThrow(), "initial denial survives reallow and refresh");
-		assertTrue(client.receiptAuthorization(marker, 101, 1, "entity_block").isEmpty());
-		assertTrue(client.receiptAuthorization(marker, 100, 2, "entity_block").isEmpty());
+		assertTrue(client.tracking(marker).entries().isEmpty());
+		assertEquals(false, client.receiptAuthorization(marker, 100, 1, "entity_block").orElseThrow());
+		client.markerCreated(markerSnapshot(target), inventoryGrant(ITEM, ITEM));
+		assertEquals(false, client.receiptAuthorization(marker, 100, 1, "entity_block").orElseThrow(),
+			"a refresh cannot widen the frozen denial");
+		MarkerId later = new MarkerId(5);
+		client.markerCreated(markerSnapshot(later, target), inventoryGrant(ITEM, ITEM));
+		data(ITEM, request, later, 0, 1, true, 4);
+		assertTrue(client.tracking(later).complete());
+		assertEquals(true, client.receiptAuthorization(later, 100, 1, "entity_block").orElseThrow());
 	}
 	@ParameterizedTest
 	@EnumSource(InventoryResourceKind.class)
-	void eachLaneRetainsOnlyItsOwnDenialWhenTheFirstFreshDataBindsTheKind(InventoryResourceKind denied) {
-		long request = ready();
-		policy(denied, false); policy(denied, true);
-		assertTrue(client.receiptAuthorization(marker, 100, 1, "entity_block").isEmpty());
-		data(denied, request, marker, 0, 1, true, 80);
-		assertTrue(client.tracking(marker).complete());
+	void eachLaneReceiptFollowsItsFrozenGrantRatherThanCurrentPolicy(InventoryResourceKind lane) {
+		handshake();
+		client.markerCreated(markerSnapshot(target), inventoryGrantMissing(lane, lane));
 		assertEquals(false, client.receiptAuthorization(marker, 100, 1, "entity_block").orElseThrow());
+		client.accept(InventoryS2CPacket.policy(lane, 7, 100, 1, Set.of("entity_block")));
+		assertEquals(false, client.receiptAuthorization(marker, 100, 1, "entity_block").orElseThrow(),
+			"a current allow cannot restore a lane missing from the frozen grant");
+		data(lane, 0, marker, 0, 1, true, 80);
+		assertTrue(client.tracking(marker).entries().isEmpty());
+		client.markerRemoved(marker);
+		client.markerCreated(markerSnapshot(target), inventoryGrant(lane, lane));
+		client.accept(InventoryS2CPacket.policy(lane, 7, 100, 1, Set.of()));
+		assertEquals(true, client.receiptAuthorization(marker, 100, 1, "entity_block").orElseThrow(),
+			"a current denial cannot revoke a lane present in the frozen grant");
+		data(lane, 0, marker, 0, 1, true, 80);
+		assertTrue(client.tracking(marker).complete());
 	}
 	@ParameterizedTest
 	@ValueSource(strings = {"remove", "view-reset", "epoch-reset", "disconnect"})
-	void newMembershipDoesNotInheritReceiptDenials(String transition) {
-		long request = ready();
-		policy(ITEM, false); policy(ITEM, true);
-		data(ITEM, request, marker, 0, 1, true, 4);
+	void newMembershipDoesNotInheritReceiptDenialsButSameEpochResetKeepsThem(String transition) {
+		handshake();
+		client.markerCreated(markerSnapshot(target), MarkerContentGrant.denied(ITEM));
 		assertEquals(false, client.receiptAuthorization(marker, 100, 1, "entity_block").orElseThrow());
 		long epoch = 100, view = 1;
 		switch (transition) {
@@ -292,27 +428,30 @@ class ClientInventoryLanesTest {
 			}
 			default -> throw new AssertionError(transition);
 		}
-		assertTrue(client.trackingKind(marker).isEmpty()); assertTrue(client.tracking(marker).entries().isEmpty());
-		for (var kind : InventoryResourceKind.values())
-			client.accept(InventoryS2CPacket.policy(kind, 7, epoch, view, Set.of("entity_block")));
-		client.markerCreated(markerSnapshot(target));
-		if (epoch != 100 || view != 1) policy(ITEM, false); // A stale policy cannot recreate history in the new view.
-		client.accept(InventoryS2CPacket.data(ITEM, InventoryS2CPacket.Kind.SNAPSHOT, 7, 0, marker, 2, 1, 1, 0, 1,
-			true, InventoryS2CPacket.Status.READY, InventoryChecksums.checksumEntries(ITEM, List.of(entry(4, 1))), List.of(entry(4, 1))).stamp(epoch, view));
-		assertTrue(client.tracking(marker).complete());
-		assertEquals(true, client.receiptAuthorization(marker, epoch, view, "entity_block").orElseThrow());
+		client.markerCreated(markerSnapshot(target), inventoryGrant(ITEM, ITEM));
+		if (transition.equals("view-reset")) {
+			assertEquals(false, client.receiptAuthorization(marker, epoch, view, "entity_block").orElseThrow(),
+				"a same-epoch RESET keeps the same frozen membership");
+		} else {
+			assertEquals(true, client.receiptAuthorization(marker, epoch, view, "entity_block").orElseThrow(),
+				"a new membership resolves its own frozen grant");
+		}
 	}
 	@Test void markerMetadataCapacityDoesNotRetainHistoryForAnUnacceptedMembership() {
 		ready();
-		for (int index = 0; index < ClientInventory.MAX_TRACKED_CHANNELS; index++) {
+		for (int index = 0; index < ClientInventory.MAX_TRACKED_CHANNELS - 1; index++) {
 			var id = new MarkerId(1000 + index);
-			client.markerCreated(new MarkerSnapshot(id, new UUID(1, 2), target, "entity_block", "attention", new MarkerAnchor(1, 2, 3), 0, 10000));
+			client.markerCreated(markerSnapshot(id, target), inventoryGrant(ITEM, ITEM));
 		}
 		var overflow = new MarkerId(1000 + ClientInventory.MAX_TRACKED_CHANNELS - 1);
-		policy(ITEM, false); policy(ITEM, true);
-		client.markerRemoved(marker);
-		client.markerCreated(new MarkerSnapshot(overflow, new UUID(1, 2), target, "entity_block", "attention", new MarkerAnchor(1, 2, 3), 0, 10000));
+		client.markerCreated(markerSnapshot(overflow, target), inventoryGrant(ITEM, ITEM));
+		assertTrue(client.receiptAuthorization(overflow, 100, 1, "entity_block").isEmpty());
 		client.accept(InventoryS2CPacket.status(ITEM, 7, 0, overflow, 2, 1, 0, InventoryS2CPacket.Status.UPDATING, 0).stamp(100, 1));
+		assertEquals(0, client.stats().trackedChannels());
+		client.markerRemoved(new MarkerId(1000));
+		client.markerCreated(markerSnapshot(overflow, target), inventoryGrant(ITEM, ITEM));
+		client.accept(InventoryS2CPacket.status(ITEM, 7, 0, overflow, 2, 1, 0, InventoryS2CPacket.Status.UPDATING, 0).stamp(100, 1));
+		assertEquals(1, client.stats().trackedChannels());
 		assertEquals(true, client.receiptAuthorization(overflow, 100, 1, "entity_block").orElseThrow());
 	}
 	@ParameterizedTest
@@ -382,15 +521,14 @@ class ClientInventoryLanesTest {
 		assertEquals(InventoryS2CPacket.Status.valueOf(failure), client.tracking(marker).status());
 		assertTrue(client.tracking(marker).grey()); assertFalse(client.tracking(marker).complete());
 		assertEquals(80, client.tracking(marker).entries().getFirst().count());
-		policy(FLUID, false);
-		assertTrue(client.tracking(marker).entries().isEmpty(), "real read denial still purges retained quantities");
 	}
 	@ParameterizedTest
 	@CsvSource({"ITEM,sable", "FLUID,other", "FLUID,minecraft"})
 	void nonSableFluidRebaselineKeepsItsExistingGreyHistoryRule(InventoryResourceKind kind, String provider) {
-		long request = ready(); client.markerRemoved(marker);
+		long request = ready(kind); client.markerRemoved(marker);
 		client.markerCreated(markerSnapshot(provider.equals("minecraft") ? target
-			: Target.ExternalBlockTarget.committed("minecraft:overworld", provider, "tracking", "minecraft:chest", "opaque", true)));
+			: Target.ExternalBlockTarget.committed("minecraft:overworld", provider, "tracking", "minecraft:chest", "opaque", true)),
+			inventoryGrant(kind, kind));
 		data(kind, request, marker, 0, 1, true, 80);
 		client.accept(InventoryS2CPacket.status(kind, 7, request, marker, 3, 2, 0, InventoryS2CPacket.Status.UPDATING, 0).stamp(100, 1));
 		assertEquals(InventoryS2CPacket.Status.UPDATING, client.tracking(marker).status());
@@ -398,7 +536,7 @@ class ClientInventoryLanesTest {
 		assertEquals(80, client.tracking(marker).entries().getFirst().count());
 	}
 	@Test void closedFluidDigestKeepsSubMillibucketDifferencesAndRepairCarriesItsOwnKind() {
-		long request = ready();
+		long request = ready(FLUID);
 		data(FLUID, request, marker, 0, 1, true, 1);
 		var value = client.tracking(marker);
 		assertTrue(value.complete()); assertEquals(1, value.entries().getFirst().count());
@@ -412,7 +550,7 @@ class ClientInventoryLanesTest {
 		assertEquals(1, client.tracking(marker).entries().getFirst().count());
 	}
 	@Test void fluidFreshMultipartCompletionAndRecoveryNeverPromotePartialCountsOrLateSeeds() {
-		long request = ready();
+		long request = ready(FLUID);
 		data(FLUID, request, marker, 0, 1, false, 80);
 		var fresh = entry(81, 2);
 		long checksum = InventoryChecksums.checksumEntries(FLUID, List.of(fresh));
