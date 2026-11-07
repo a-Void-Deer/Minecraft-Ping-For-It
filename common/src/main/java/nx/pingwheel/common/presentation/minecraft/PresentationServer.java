@@ -552,6 +552,7 @@ public final class PresentationServer {
 	public static void created(MinecraftServer server, ServerMarker marker, TargetNameJson name, String ownerName,
 		Map<String, PresentationSection> sourceSeeds) {
 		activate(server);
+		boolean inventoryFanout = InventoryServer.tracksInventory(marker.id());
 		Lease lease = LEASES.get(marker.id().value());
 		boolean first = lease == null;
 		if (first) {
@@ -580,6 +581,9 @@ public final class PresentationServer {
 		for (UUID recipient : marker.recipients()) {
 			ServerPlayer player = server.getPlayerList().getPlayer(recipient); Session session = SESSIONS.get(recipient);
 			if (player != null && session != null && session.ready) {
+				// An earlier handoff may remove the canonical marker and its sidecar.
+				// Sidecar disappearance cannot turn this stale fanout into an ordinary create.
+				if (inventoryFanout && !InventoryServer.initialCanonicalAudienceActive(marker.id(), recipient, server.getTickCount())) continue;
 				if (sourceSeeds.isEmpty()) sendInitial(player, session, lease);
 				else sendBaseline(session, lease, registry, packet -> send(player, packet));
 			}
@@ -1232,15 +1236,14 @@ public final class PresentationServer {
 	private static void sendProjectedInitial(Session session, ServerMarker marker, String ownerName,
 		PresentationAdapter basic, PresentationSection cached, PresentationGrant grant,
 		boolean inventoryTracked, java.util.function.Consumer<PresentationS2CPacket> delivery) {
-		PresentationPropertyRef defaultRef = PresentationDefaults.forTargetType(marker.targetType().id())
+		@Nullable PresentationPropertyRef defaultRef = PresentationDefaults.forTargetType(marker.targetType().id())
 			.orElse(null);
 		if (defaultRef == null) return;
-		// The inventory creation-publication path owns only recipients with an
-		// initial source reservation. Other audience members (a denied lane or a
-		// late recipient) still receive the canonical CREATED with its projected
-		// receipt; the receipt gate suppresses their snapshot independently.
-		if (inventoryTracked && activeServer != null && InventoryServer.tracksInventory(marker.id())
-			&& session.recipient != null && InventoryServer.initialMarkerActive(marker.id(), session.recipient)) {
+		// Every live inventory initial pays publication admission, including an
+		// identity-only receipt for a frozen-denied or late-ready recipient.
+		// Audience lifecycle gates delivery; the content grant independently
+		// selects a source-backed snapshot or a source-free suppressed envelope.
+		if (inventoryTracked && activeServer != null && InventoryServer.tracksInventory(marker.id())) {
 			sendInventoryInitial(session, marker, ownerName, basic, cached, grant, defaultRef);
 			return;
 		}
@@ -1393,9 +1396,10 @@ public final class PresentationServer {
 		return projected.annotations().keySet().stream().allMatch(ref -> allowed.contains(ref.fieldId()) && child.test(ref));
 	}
 	private static boolean initialCurrent(Session session, ServerMarker marker, ServerPlayer player, long view) {
+		if (activeServer == null || activeServer.getPlayerList().getPlayer(player.getUUID()) != player
+			|| !InventoryServer.initialAudienceActive(marker.id(), player.getUUID())) return false;
 		return activeServer != null && SESSIONS.get(player.getUUID()) == session && session.ready && session.view == view
-			&& activeServer.getPlayerList().getPlayer(player.getUUID()) == player && marker.recipients().contains(player.getUUID())
-			&& marker.expiresAtTick() > activeServer.getTickCount() && InventoryServer.initialMarkerActive(marker.id(), player.getUUID());
+			&& marker.recipients().contains(player.getUUID()) && marker.expiresAtTick() > activeServer.getTickCount();
 	}
 	private static boolean initialReceiptAuthorized(Session session, ServerMarker marker, PresentationAdapter basic,
 		PresentationGrant grant) {

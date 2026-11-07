@@ -1080,6 +1080,245 @@ class InventoryProductionPolicyTest {
 		}
 	}
 
+	@ParameterizedTest
+	@CsvSource({"ITEM,MEMORY", "FLUID,MEMORY", "ITEM,WORK", "FLUID,WORK", "ITEM,STAGING", "FLUID,STAGING"})
+	void frozenDeniedInitialCannotBypassPublicationAdmission(InventoryResourceKind lane, String budget) throws Exception {
+		try (var f = new Fixture(Map.of(lane.fieldId(), 2))) {
+			UUID denied = new UUID(703, 1); f.join(denied); f.audience = List.of(denied, OWNER);
+			var deniedSession = Objects.requireNonNull(sessions().get(denied));
+			long request = f.open(), ownerRevision = f.session().revision, deniedRevision = deniedSession.revision;
+			AutoCloseable[] held = {() -> {}};
+			f.beforePublish = () -> {
+				try {
+					switch (budget) {
+						case "MEMORY" -> f.runtime.memory().setCap(0);
+						case "WORK" -> {
+							var ledger = (nx.pingwheel.common.presentation.source.CostLedger) value(f.runtime, "physical");
+							var work = new nx.pingwheel.common.presentation.source.CostLedger.Counter("inventory/item_work",
+								nx.pingwheel.common.presentation.source.CostLedger.Unit.WORK);
+							@Unmodifiable Map<nx.pingwheel.common.presentation.source.CostLedger.Counter, Long> charge =
+								Map.of(work, ledger.remaining(work));
+							try (var ticket = ledger.tryReserve(charge).orElseThrow()) { ticket.commit(charge); }
+						}
+						case "STAGING" -> held[0] = f.publisher().reserveInitial(f.settings.trackingRollingQueueBytes()
+							- (long) value(f.publisher(), "trackingQueued"), 0).orElseThrow();
+						default -> throw new AssertionError(budget);
+					}
+				} catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+			};
+			MarkerId marker;
+			try {
+				marker = f.select(request, lane);
+				assertEquals(ownerRevision, f.session().revision, "allowed initial must wait before packet construction");
+				assertEquals(deniedRevision, deniedSession.revision, "suppression is not free packet construction");
+				assertFalse(PresentationServer.inventoryKnows(OWNER, marker));
+				assertFalse(PresentationServer.inventoryKnows(denied, marker));
+				assertTrue(f.deliveries.stream().noneMatch(d -> d.packet().kind() == PresentationS2CPacket.Kind.CREATED));
+				assertTrue(deniedSession.baselinePending);
+			} finally { held[0].close(); }
+			f.beforePublish = null; f.runtime.memory().setCap(f.settings.pendingMemoryBytes());
+			f.players.others.get(denied).permission = 2; // a later grant must not widen the pending initial
+			for (int tick = 1; tick <= 3; tick++) f.tick(tick);
+			@Unmodifiable List<Delivery> deniedPackets = f.deliveries.stream().filter(d -> d.recipient().equals(denied)
+				&& d.packet().kind() == PresentationS2CPacket.Kind.CREATED).toList();
+			assertEquals(1, deniedPackets.size());
+			var packet = deniedPackets.getFirst().packet();
+			assertEquals(nx.pingwheel.common.presentation.PresentationReceiptContent.Kind.SUPPRESSED, packet.content().kind());
+			assertNull(packet.content().inventorySnapshot());
+			assertEquals(lane, packet.markerGrant().trackingKind());
+			assertFalse(packet.markerGrant().authorization().allowsField(InventoryPresentation.ADAPTER_ID, lane.fieldId()));
+			assertTrue(PresentationServer.inventoryKnows(denied, marker));
+			@Unmodifiable List<PresentationS2CPacket> ownerPackets = f.presentation.stream()
+				.filter(p -> p.kind() == PresentationS2CPacket.Kind.CREATED).toList();
+			assertEquals(1, ownerPackets.size());
+			assertNotNull(ownerPackets.getFirst().content().inventorySnapshot());
+			assertEquals(0, f.runtime.memory().reserved());
+		}
+	}
+
+	@ParameterizedTest @EnumSource(InventoryResourceKind.class)
+	void suppressedInitialPaysItsEncodedEnvelopeWithoutSourceValidationOrContentReads(InventoryResourceKind lane) throws Exception {
+		try (var f = new Fixture(Map.of(lane.fieldId(), 2))) {
+			UUID denied = new UUID(703, 2); f.join(denied); f.audience = List.of(denied, OWNER);
+			long request = f.open(); int reads = f.states.get(lane).reads;
+			long[] retained = {0}, queued = {0}; int[] validations = {0}, handoffs = {0};
+			boolean[] released = {false};
+			f.beforePublish = () -> {
+				retained[0] = f.runtime.memory().retained();
+				try { queued[0] = (long) value(f.publisher(), "trackingQueued"); }
+				catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+				f.states.get(lane).onValidation = () -> validations[0]++;
+			};
+			Network.admitRecipient = (packet, recipient) -> {
+				if (!recipient.getUUID().equals(denied)) return true;
+				handoffs[0]++;
+				assertTrue(packet.encodedCreatedBodyBytes() > 0);
+				assertEquals(nx.pingwheel.common.presentation.PresentationReceiptContent.Kind.SUPPRESSED, packet.content().kind());
+				assertNull(packet.content().inventorySnapshot());
+				try {
+					assertEquals(queued[0] + packet.encodedCreatedBodyBytes(), value(f.publisher(), "trackingQueued"),
+						"the actual encoded suppressed body owns settled staging until handoff returns");
+				} catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+				assertEquals(retained[0] + packet.encodedCreatedBodyBytes() + packet.createdEncodingWorkspace()
+					+ InventoryInitialPayload.constructionWorkspace(packet.sectionBytes().length), f.runtime.memory().retained());
+				assertEquals(0, validations[0], "a source-free denied receipt must not demand native validation");
+				assertEquals(reads, f.states.get(lane).reads, "publication never rereads quantities");
+				f.players.beforeLookup = id -> {
+					if (!id.equals(OWNER)) return;
+					f.players.beforeLookup = null; released[0] = true;
+					try { assertEquals(queued[0], value(f.publisher(), "trackingQueued")); }
+					catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+					assertEquals(retained[0], f.runtime.memory().retained(), "suppressed staging closes before the owner publishes");
+				};
+				return true;
+			};
+			MarkerId marker = f.select(request, lane);
+			assertEquals(1, handoffs[0]); assertTrue(validations[0] > 0, "the allowed owner still validates its source");
+			assertTrue(PresentationServer.inventoryKnows(denied, marker));
+			assertTrue(released[0]);
+			assertEquals(0, f.runtime.memory().reserved());
+		}
+	}
+
+	@ParameterizedTest
+	@CsvSource({"AUDIENCE", "EXPIRE", "VIEW", "REMOVE", "DISCONNECT"})
+	void suppressedInitialRechecksCanonicalLifecycleAfterEncodingAndReleasesAdmission(String boundary) throws Exception {
+		try (var f = new Fixture(Map.of(InventoryPresentation.ITEMS, 2))) {
+			UUID denied = new UUID(703, 3); f.join(denied); f.audience = List.of(denied, OWNER);
+			var deniedSession = Objects.requireNonNull(sessions().get(denied));
+			long request = f.open(), revision = deniedSession.revision;
+			boolean[] checked = {false};
+			f.beforePublish = () -> f.players.beforeLookup = id -> {
+				if (!id.equals(denied) || deniedSession.revision == revision) return;
+				f.players.beforeLookup = null; checked[0] = true;
+				// Refuse only the owner; a missing denied-recipient lifecycle fence must still fail this test.
+				Network.admitRecipient = (packet, recipient) -> !recipient.getUUID().equals(OWNER);
+				try { assertTrue((long) value(f.publisher(), "trackingQueued") > 0, "final check follows admitted encoding"); }
+				catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+				var marker = f.store.allMarkers().getLast();
+				switch (boundary) {
+					case "AUDIENCE" -> f.store.forgetRecipient(denied);
+					case "EXPIRE" -> f.server.now = (int) marker.expiresAtTick();
+					case "VIEW" -> deniedSession.view++;
+					case "REMOVE" -> f.backend.remove(marker.id());
+					case "DISCONNECT" -> f.backend.disconnect(denied);
+					default -> throw new AssertionError(boundary);
+				}
+			};
+			MarkerId marker = f.select(request, InventoryResourceKind.ITEM);
+			assertTrue(checked[0], "a suppressed envelope still reaches the final lifecycle callback");
+			assertFalse(PresentationServer.inventoryKnows(denied, marker));
+			assertTrue(f.deliveries.stream().noneMatch(d -> d.recipient().equals(denied)
+				&& d.packet().kind() == PresentationS2CPacket.Kind.CREATED));
+			assertEquals(0L, value(f.publisher(), "trackingQueued"));
+			assertEquals(0, f.runtime.memory().reserved());
+			assertFalse((boolean) value(f.backend, "publishing"), "deferred cleanup cannot retain the envelope owner");
+		}
+	}
+
+	@ParameterizedTest @EnumSource(InventoryResourceKind.class)
+	void canonicalRemovalDuringSuppressedInitialCannotResurrectRemainingAudience(InventoryResourceKind lane) throws Exception {
+		assertSuppressedInitialRemovalFanout(lane, true);
+	}
+
+	@ParameterizedTest @EnumSource(InventoryResourceKind.class)
+	void sidecarOnlyRemovalDuringSuppressedInitialPreservesRemainingAudienceFallback(InventoryResourceKind lane) throws Exception {
+		assertSuppressedInitialRemovalFanout(lane, false);
+	}
+
+	private static void assertSuppressedInitialRemovalFanout(InventoryResourceKind lane, boolean removeCanonical) throws Exception {
+		try (var f = new Fixture(Map.of(lane.fieldId(), 2))) {
+			UUID denied = new UUID(703, 5), peer = new UUID(705, 5);
+			f.join(denied); f.join(peer); f.players.others.get(peer).permission = 2;
+			f.audience = List.of(denied, OWNER, peer);
+			var deniedSession = Objects.requireNonNull(sessions().get(denied));
+			var peerSession = Objects.requireNonNull(sessions().get(peer));
+			long request = f.open(), deniedRevision = deniedSession.revision;
+			long ownerRevision = f.session().revision, peerRevision = peerSession.revision;
+			var selectedMarker = new java.util.concurrent.atomic.AtomicReference<MarkerId>();
+			boolean[] removed = {false};
+			f.beforePublish = () -> {
+				var marker = f.store.allMarkers().getLast(); selectedMarker.set(marker.id());
+				f.players.beforeLookup = id -> {
+					if (!id.equals(denied) || deniedSession.revision == deniedRevision) return;
+					f.players.beforeLookup = null; removed[0] = true;
+					try { assertTrue((long) value(f.publisher(), "trackingQueued") > 0, "callback follows admitted encoding"); }
+					catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
+					if (removeCanonical) {
+						var result = f.store.removeByServer(marker.id(), nx.pingwheel.common.marker.MarkerRemovalReason.CANCELLED);
+						assertTrue(result.removal().isPresent());
+					}
+					InventoryServer.remove(marker.id());
+					if (removeCanonical) {
+						PresentationServer.forget(marker.id());
+						for (UUID recipient : marker.recipients()) PresentationServer.removed(
+							Objects.requireNonNull(f.players.getPlayer(recipient)), marker.id(),
+							nx.pingwheel.common.marker.MarkerRemovalReason.CANCELLED);
+					}
+					f.runtime.memory().setCap(0); // no remaining recipient can obtain a new envelope
+				};
+			};
+			assertEquals(ClientInventory.DispatchOutcome.SENT, f.client.select(f.client.selectable(request, lane).getFirst(),
+				"attention", packet -> { f.requests.add(packet); return ClientInventory.DispatchOutcome.SENT; }));
+			f.backend.handle(OWNER, f.requests.getLast(), f.server.now, f.settings);
+			MarkerId marker = Objects.requireNonNull(selectedMarker.get());
+			assertTrue(removed[0]);
+			assertEquals(!removeCanonical, f.store.find(marker).isPresent());
+			assertFalse(InventoryServer.tracksInventory(marker));
+			assertEquals(deniedRevision + 1, deniedSession.revision, "the first admitted encoding remains paid");
+			assertFalse(PresentationServer.inventoryKnows(denied, marker));
+			assertAll("the whole original audience remains fenced by canonical removal, not sidecar existence",
+				() -> assertEquals(ownerRevision + (removeCanonical ? 0 : 1), f.session().revision, "later owner revision"),
+				() -> assertEquals(peerRevision + (removeCanonical ? 0 : 1), peerSession.revision, "later peer revision"),
+				() -> assertEquals(!removeCanonical, PresentationServer.inventoryKnows(OWNER, marker), "later owner known"),
+				() -> assertEquals(!removeCanonical, PresentationServer.inventoryKnows(peer, marker), "later peer known"),
+				() -> assertEquals(removeCanonical ? List.of() : List.of(OWNER, peer), f.deliveries.stream()
+					.filter(d -> d.packet().kind() == PresentationS2CPacket.Kind.CREATED).map(Delivery::recipient).toList(),
+					"CREATED handoffs across every recipient, including ordinary transport"));
+			assertEquals(0L, value(f.publisher(), "trackingQueued"));
+			assertEquals(0, f.runtime.memory().reserved());
+			assertFalse((boolean) value(f.backend, "publishing"));
+		}
+	}
+
+	@ParameterizedTest @EnumSource(InventoryResourceKind.class)
+	void lateReadyFrozenDeniedAudienceNeedsAdmissionAndDisconnectCannotRestoreIt(InventoryResourceKind lane) throws Exception {
+		try (var f = new Fixture(Map.of(lane.fieldId(), 2))) {
+			UUID late = new UUID(803, 4); f.audience = List.of(OWNER, late);
+			long request = f.open(); MarkerId marker = f.select(request, lane);
+			f.join(late); f.players.others.get(late).permission = 2;
+			var lateSession = Objects.requireNonNull(sessions().get(late)); long revision = lateSession.revision;
+			f.runtime.memory().setCap(0); PresentationServer.tick(f.server, f.store);
+			assertEquals(revision, lateSession.revision); assertFalse(PresentationServer.inventoryKnows(late, marker));
+			assertTrue(f.deliveries.stream().noneMatch(d -> d.recipient().equals(late)
+				&& d.packet().kind() == PresentationS2CPacket.Kind.CREATED));
+			f.runtime.memory().setCap(f.settings.pendingMemoryBytes()); f.tick(1); f.tick(2);
+			@Unmodifiable List<Delivery> packets = f.deliveries.stream().filter(d -> d.recipient().equals(late)
+				&& d.packet().kind() == PresentationS2CPacket.Kind.CREATED).toList();
+			assertEquals(1, packets.size());
+			assertEquals(nx.pingwheel.common.presentation.PresentationReceiptContent.Kind.SUPPRESSED, packets.getFirst().packet().content().kind());
+			assertNull(packets.getFirst().packet().content().inventorySnapshot());
+			assertFalse(packets.getFirst().packet().markerGrant().authorization().allowsField(InventoryPresentation.ADAPTER_ID, lane.fieldId()));
+			// Evict only the heavy observation: metadata replay must use the same
+			// admitted path even when its Basic comes from the recipient's cache.
+			((Map<?, ?>) field(PresentationServer.class, "LEASES").get(null)).remove(marker.value());
+			revision = lateSession.revision;
+			f.runtime.memory().setCap(0); PresentationServer.updated(f.server, f.store.find(marker).orElseThrow());
+			assertEquals(revision, lateSession.revision, "cached metadata refresh cannot use ordinary free construction");
+			assertEquals(1, f.deliveries.stream().filter(d -> d.recipient().equals(late)
+				&& d.packet().kind() == PresentationS2CPacket.Kind.CREATED).count());
+			f.runtime.memory().setCap(f.settings.pendingMemoryBytes());
+			PresentationServer.updated(f.server, f.store.find(marker).orElseThrow());
+			assertEquals(2, f.deliveries.stream().filter(d -> d.recipient().equals(late)
+				&& d.packet().kind() == PresentationS2CPacket.Kind.CREATED).count());
+			f.store.forgetRecipient(late); PresentationServer.disconnect(late); f.backend.disconnect(late); f.players.others.remove(late);
+			f.join(late); f.tick(3); f.tick(4);
+			assertFalse(PresentationServer.inventoryKnows(late, marker));
+			assertEquals(2, f.deliveries.stream().filter(d -> d.recipient().equals(late)
+				&& d.packet().kind() == PresentationS2CPacket.Kind.CREATED).count());
+		}
+	}
+
 	@ParameterizedTest @CsvSource({"RETRY", "RECONFIG", "VIEW", "EPOCH"})
 	void initialPolicyRetainsItsOwnerUntilTheCurrentOfferReallyHandsOff(String boundary) throws Exception {
 		try (var f = new Fixture(Map.of(), null, false)) {
@@ -1514,8 +1753,13 @@ class InventoryProductionPolicyTest {
 	private static final class Players extends DedicatedPlayerList {
 		private @Nullable Player player;
 		private Map<UUID, Player> others = new java.util.LinkedHashMap<>();
+		private @Nullable Consumer<UUID> beforeLookup;
 		private Players() { super(null, null, null); }
-		@Override public @Nullable ServerPlayer getPlayer(UUID id) { return id.equals(OWNER) ? player : others.get(id); }
+		@Override public @Nullable ServerPlayer getPlayer(UUID id) {
+			@Nullable Consumer<UUID> effect = beforeLookup;
+			if (effect != null) effect.accept(id);
+			return id.equals(OWNER) ? player : others.get(id);
+		}
 		@Override public @Unmodifiable List<ServerPlayer> getPlayers() { return List.of(Objects.requireNonNull(player)); }
 	}
 	@NotNullByDefault

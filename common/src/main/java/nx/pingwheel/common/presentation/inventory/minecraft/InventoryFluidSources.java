@@ -235,7 +235,11 @@ public final class InventoryFluidSources {
 		private InventoryFluidAdmission open(InventoryValidationBudget.Allowance allowance) {
 			return allowance.fluidGrants().open(allowance, memberCost(), authorityCost());
 		}
-		private InventoryValidationBudget.Cost memberCost() { return MEMBER.plus(INDEX_LOOKUP).plus(world.membershipCost()); }
+		private InventoryValidationBudget.Cost memberCost() {
+			// Each profiled member callback may gate the root or controller. Prepay its
+			// current identity comparison with that callback, not another retained grant.
+			return MEMBER.plus(INDEX_LOOKUP).plus(world.membershipCost()).plus(TARGET_IDENTITY);
+		}
 		private InventoryValidationBudget.Cost authorityCost() { return MEMBER.plus(world.bindingCost()); }
 		private Binding bind(InventoryFluidAdmission admission) {
 			try (var operation = admission.enter(owned(world.bindingCost()))) {
@@ -326,7 +330,7 @@ public final class InventoryFluidSources {
 			@Nullable FluidAddressWitness witness = pos.equals(binding.root()) ? rootWitness
 				: currentUnit != null && pos.equals(currentUnit.controller()) ? controllerWitness : null;
 			if (witness != null) {
-				operation.requireAdditional(TARGET_IDENTITY);
+				operation.allowance().requireAvailable(TARGET_IDENTITY);
 				requireSame(witness.compare(FluidAddressWitness.Schema.COMMON_MEMBERS_V1, new Object[] {entity}, operation));
 			}
 			return true;

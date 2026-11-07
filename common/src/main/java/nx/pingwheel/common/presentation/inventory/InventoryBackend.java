@@ -498,12 +498,19 @@ public final class InventoryBackend implements AutoCloseable {
 		for (UUID player : Set.copyOf(deferredDisconnects)) disconnect(player); deferredDisconnects.clear();
 		if (closeRequested) close();
 	}
-	public boolean initialMarkerActive(MarkerId marker, UUID recipient) {
+	/** Marker/audience lifetime only; a frozen lane denial still permits an admitted suppressed initial. */
+	public boolean initialAudienceActive(MarkerId marker, UUID recipient) {
 		@Nullable Tracking lease = tracking.get(marker);
 		@Nullable ServerMarker canonical = host.activeMarker(marker).orElse(null);
 		return lease != null && canonical != null && !closeRequested && !deferredRemovals.contains(marker) && !deferredDisconnects.contains(recipient)
-			&& !deferredDisconnects.contains(canonical.owner()) && canonical.expiresAtTick() > tick && canonical.recipients().contains(recipient)
-			&& inventoryAllowed(canonical.authorization(), recipient, lease.selection.kind());
+			&& !deferredDisconnects.contains(canonical.owner()) && canonicalAudienceActive(canonical, recipient, tick);
+	}
+	/** Canonical lifetime survives sidecar-only cleanup but never actual marker or audience removal. */
+	public boolean initialCanonicalAudienceActive(MarkerId marker, UUID recipient, long now) {
+		return canonicalAudienceActive(host.activeMarker(marker).orElse(null), recipient, now);
+	}
+	private static boolean canonicalAudienceActive(@Nullable ServerMarker marker, UUID recipient, long now) {
+		return marker != null && marker.expiresAtTick() > now && marker.recipients().contains(recipient);
 	}
 	private boolean creationAllowed(Tracking lease, UUID recipient, long epoch, long view) {
 		@Nullable ServerMarker marker = host.activeMarker(lease.marker.id()).orElse(null);
@@ -1429,7 +1436,13 @@ public final class InventoryBackend implements AutoCloseable {
 			@Nullable Session previewSession = sessions.get(entry.getKey());
 			if (previewSession == null) continue;
 			preview.checkedTick = -1;
-			if (preview.context.stateFence() > 1) { preview.checkedTick = tick; continue; } // pending INVALID control needs no recovery probe
+			if (preview.context.stateFence() > 1) {
+				// A deferred INVALID is terminal: retry its context/fence on a normal
+				// tick, but never probe or rescan the retired source.
+				progressPreviewBaseline(previewSession, preview);
+				preview.checkedTick = tick;
+				continue;
+			}
 			if (!previewHealthDue(preview)) continue;
 			if (!progressPreviewBaseline(previewSession, preview)) continue;
 			try (var attempt = runtime.beginProbe(preview.consumer)) {
@@ -1778,6 +1791,7 @@ public final class InventoryBackend implements AutoCloseable {
 	/** Cancels the old context and registers a fresh baseline; the replacement fence is handed off before data. */
 	private boolean rebaselinePreview(Session session, Preview preview) {
 		if (session.access == null) return false;
+		boolean terminalInvalid = preview.context.stateFence() > 1;
 		publisher.cancel(preview.context);
 		SyncPublisher.Context fresh = new SyncPublisher.Context(preview.context.consumerId(), preview.context.recipient(),
 			session.access.stamp(), preview.context.stateFence(), ++baseline);
@@ -1788,7 +1802,9 @@ public final class InventoryBackend implements AutoCloseable {
 		preview.projectionDelay.progress(previewCycle);
 		preview.context = fresh;
 		preview.fencePending = true; preview.republishPending = true; preview.rebaselineNeeded = false;
-		publisher.status(fresh, InventoryS2CPacket.Status.INCOMPLETE);
+		// A retired source never returns to INCOMPLETE after a same-epoch view
+		// rebuild; its terminal INVALID must survive until transport handoff.
+		publisher.status(fresh, terminalInvalid ? InventoryS2CPacket.Status.INVALID : InventoryS2CPacket.Status.INCOMPLETE);
 		return true;
 	}
 	/**
@@ -2064,20 +2080,23 @@ public final class InventoryBackend implements AutoCloseable {
 		preview.consumer.discardObservation();
 		if (preview.publicationEvidence != null) { preview.publicationEvidence.close(); preview.publicationEvidence = null; }
 		preview.checkedTick = tick; // invalid control is independent of item/read admission
+		boolean registered = true;
 		if (preview.context.stateFence() == 1) {
 			publisher.cancel(preview.context);
 			if (session.access != null) {
 				preview.context = new SyncPublisher.Context(preview.context.consumerId(), preview.context.recipient(), session.access.stamp(), 2, preview.context.baseline());
-				publisher.register(preview.context, route(session, preview.request, null, null, null, preview.input.resourceKind()));
+				registered = publisher.register(preview.context, route(session, preview.request, null, null, null, preview.input.resourceKind()));
 			}
 		}
 		preview.terminal = true; preview.last = null; preview.references.clear(); preview.witnesses.clear(); preview.counts.clear();
 		preview.totals.clear(); preview.keys.clear(); preview.folded.clear(); preview.retired.clear(); preview.categories = 0; preview.entries.forEach(RetainedMemoryLedger.Ticket::close); preview.entries.clear();
-		preview.rebaselineNeeded = false; preview.fencePending = false; preview.republishPending = false; preview.metadataChanged = false;
+		preview.rebaselineNeeded = !registered; preview.fencePending = false; preview.republishPending = false; preview.metadataChanged = false;
 		preview.metadataCeiling = effectiveDisplayCeiling();
 		if (preview.metadataMemory != null) { preview.metadataMemory.close(); preview.metadataMemory = null; }
 		if (invalidTransition) InventoryCaptureDiagnostics.previewInvalidated(preview.request, preview.input.resourceKind(), preview.input.target(), preview.input.face());
-		publisher.status(preview.context, InventoryS2CPacket.Status.INVALID);
+		// A failed registration must not silently drop the terminal control; the
+		// next normal tick retries this context while the consumer stays retired.
+		if (registered) publisher.status(preview.context, InventoryS2CPacket.Status.INVALID);
 	}
 	private InventoryResourceValue aggregate(InventoryResourceValue item) {
 		return InventoryResourceCodec.value(new InventoryScanner.Key(item.resourceKind(), item.resourceId(), ""), item.amount(), item.label(),

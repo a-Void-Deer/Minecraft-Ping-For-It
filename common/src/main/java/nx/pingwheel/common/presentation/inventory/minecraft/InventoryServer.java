@@ -118,7 +118,10 @@ public final class InventoryServer {
 	public static Optional<InventoryBackend.InitialEnvelope> reserveInitialEnvelope(long wireBytes, long workspace) {
 		return backend == null ? Optional.empty() : backend.reserveInitialEnvelope(wireBytes, workspace);
 	}
-	public static boolean initialMarkerActive(MarkerId marker, UUID recipient) { return backend != null && backend.initialMarkerActive(marker, recipient); }
+	public static boolean initialAudienceActive(MarkerId marker, UUID recipient) { return backend != null && backend.initialAudienceActive(marker, recipient); }
+	public static boolean initialCanonicalAudienceActive(MarkerId marker, UUID recipient, long now) {
+		return backend != null && backend.initialCanonicalAudienceActive(marker, recipient, now);
+	}
 	public static void suppressCreation(MarkerId marker, UUID recipient) { if (backend != null) backend.suppressCreation(marker, recipient); }
 
 	private record Host(MinecraftServer server, InventoryRuntime runtime, InventoryRuntime.DisplayReprojector reprojector) implements InventoryBackend.Host {
