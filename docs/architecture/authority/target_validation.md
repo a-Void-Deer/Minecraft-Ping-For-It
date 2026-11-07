@@ -182,6 +182,8 @@ gate identifies the sender's context as their vanilla scoreboard team or
 The server assigns arrival/expiry state and synchronizes the accepted marker as
 described by [marker lifecycle](marker_lifecycle.md). Channel switches and
 team/group changes after creation do not rewrite its recipient snapshot.
+Successful creation also freezes those recipients'
+[content authorization](../presentation/presentation_snapshot.md#frozen-recipient-content-authorization).
 Disconnect cleanup is the only audience mutation, and it is owned by
 [marker lifecycle](marker_lifecycle.md); it does not recalculate channel/team
 policy for remaining recipients.

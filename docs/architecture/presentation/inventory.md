@@ -25,6 +25,9 @@ caches, is recorded in
 observation pooling and active-prefix admission without shared authority are
 explained by
 [D0017](../../decisions/D0017-certified-tracking-observation-pools.md).
+Provider-owned fluid validation and the separation between frozen recipient
+content authorization and current source authority are explained by
+[D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md).
 
 Coverage scope and pending runtime evidence for the ordinary-block and
 provider-confirmed external preview and tracking, item-choice create and native
@@ -44,10 +47,13 @@ Marker lifetime remains owned by
 The inventory domain has two closed resource lanes, `ITEM` and `FLUID`. One
 preview request opens both authorized lanes for the same frozen target and face;
 it does not open a second target or session for fluid. Each lane has its own
-field authorization, source binding, status, baseline, revisions, checksum,
-completion barrier and historical publication proof. Equal registry IDs, opaque
-entry keys or baseline numbers in different lanes never identify the same data.
-Revoking, invalidating or repairing one lane cannot clear or complete the other.
+recipient field authorization, source binding, status, baseline, revisions,
+checksum, completion barrier and historical publication proof. Equal registry
+IDs, opaque entry keys or baseline numbers in different lanes never identify
+the same data.
+Invalidating or repairing one lane cannot clear or complete the other, and a
+later recipient content-authorization change does not retroactively clear an
+already frozen lane.
 The shared request, commit replay and close boundary is owned by
 [network protocol](../network/protocol.md#inventory-previewtracking-route-inventory-v2),
 and field declarations by
@@ -68,6 +74,36 @@ entity/private-inventory context or new Target Type. A provider-confirmed
 external block remains eligible only in the already supported target contexts;
 the [Sable binding](../../integrations/sable.md#server-information-sampling)
 does not enable moving or otherwise unsupported storage by itself.
+
+## Receiver authorization freeze points
+
+The [global frozen recipient content authorization](presentation_snapshot.md#frozen-recipient-content-authorization)
+contract owns the complete effective set, its resolution inputs, and the effects
+of later grants and revocations. Inventory owns only when its own recipient set
+freezes:
+
+- Opening a Preview request resolves and freezes that request's recipient
+  content authorization for each lane it opens. The Preview set is independent
+  of any Ping.
+- A successful `SELECT` resolves and freezes the new Ping's recipient content
+  authorization at creation, including the creation snapshot receipt and later
+  Inventory Tracking content. The new Ping's set is independent of the Preview
+  that supplied its selection.
+
+A later lane denial or configuration change that only changes recipient content
+authorization does not retroactively clear an existing Preview lane or Ping.
+Current session and view validity, known-marker eligibility, marker expiry and
+source-owner read authority remain current gates. Those source-owner checks
+cover actual read conditions such as world state, lock or key, loot table, lease
+and read scope; they do not re-evaluate a presentation field permission that was
+already frozen. Resource-budget refusal and source failure remain separate
+outcomes.
+
+When the recipient is also the source owner, the source-owner recheck remains
+only the independent read conditions above; revoking that recipient's
+presentation field permission does not terminate the old Ping through that
+recheck. [D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md)
+explains the low-overhead and timeliness trade-offs.
 
 ## Source identity, invalidation and recovery
 
@@ -152,9 +188,9 @@ or tracking consumers must not reactivate an expired consumer.
 External providers keep their established stable target IDs, leases and removal
 rules. The ordinary-block replacement tolerance neither extends nor revives an
 expired external lease, and it does not rewrite target identity globally. A
-committed source whose tracking point moved or whose member topology changed
-invalidates the old observation, except for the separately owned
-[Sable fluid sub-level transition](../../integrations/sable.md#fluid-sub-level-transition).
+committed source whose tracking point moved or whose provider-visible member
+topology changed invalidates the old observation, except for the separately
+owned [Sable fluid sub-level transition](../../integrations/sable.md#fluid-sub-level-transition).
 Recovery re-resolves and reauthorizes the current provider-confirmed binding;
 an arbitrary wrong sub-level or tracking point is rejected rather than adopted.
 Ordinary recovery uses a fresh baseline and complete observation, never the old cut or
@@ -262,7 +298,9 @@ seed, reset a baseline, refund paid work or alter marker lifetime.
 Inventory preview and tracking are enabled by default; no separate user
 opt-in switch gates them. Each request passes the existing server gates:
 target and field permission, range acceptance, lock state, and safe-read
-validation. The preview resolves accepted ordinary-block targets and
+validation. Opening the request freezes its per-lane recipient content
+authorization under [receiver authorization freeze points](#receiver-authorization-freeze-points).
+The preview resolves accepted ordinary-block targets and
 uncommitted provider-confirmed external candidates; entity, private-inventory,
 and committed-external contexts report unavailable until their owning contracts
 exist.
@@ -295,10 +333,10 @@ physical read bindings. An ordinary block must match its original identity
 exactly; an external candidate's current source and the committed source must
 resolve to the same provider, sub-level, physical root block and registry, so
 same-registry candidates and different hit roots cannot cross-bind. The
-owner's current read authority and the preview's original source/layout evidence
-are revalidated through metadata checks, the selection reference and annotation
-are checked, and retained memory is admitted before the tracking lease is
-stored. Any failure releases the acquired reference and stores nothing.
+owner's current source read conditions and the preview's original source/layout
+evidence are revalidated through metadata checks, the selection reference and
+annotation are checked, and retained memory is admitted before the tracking
+lease is stored. Any failure releases the acquired reference and stores nothing.
 
 Selection expresses intent to track the selected resource at an authorized source,
 not proof that its previously observed slot still contains it. Ordinary input
@@ -337,11 +375,14 @@ An exact reference takes only its exact key's current server-retained count;
 an aggregate reference takes only the current folded key's count, never a
 different resource-ID subtotal or a retired exact entry. The preview may still be
 partial, and the retained count may be newer than the last row delivered to the
-client. No client-screen quantity authorizes the seed. Current target, source,
-owner/face binding, read permission, annotation, rate, channel, audience,
-selection-capacity and memory gates still apply. Resource absence at the old
-observed slot does not veto an otherwise valid selection: the complete tracking
-observation decides the subsequent count. The new Ping's whole-marker type is the
+client. No client-screen quantity authorizes the seed. The create resolves the
+new Ping's recipient content authorization afresh and freezes it at creation
+under [receiver authorization freeze points](#receiver-authorization-freeze-points);
+current target, source, owner/face binding, source read conditions, annotation,
+rate, channel, audience, selection-capacity and memory gates still apply.
+Resource absence at the old observed slot does not veto an otherwise valid
+selection: the complete tracking observation decides the subsequent count. The
+new Ping's whole-marker type is the
 frozen Target Type's default Ping Type; the chosen Ping Type travels as a
 separate resource annotation rather than as the whole-marker type. The item
 annotation's eligible Ping Type set is the target's effective
@@ -395,8 +436,8 @@ authoritative long amount, aggregate mode and admitted annotation. A missing
 retained row rejects the create and never becomes a zero or an empty entry. The
 snapshot is made from server-retained data, not a client-uploaded quantity, a
 recipient cache or a later Tracking result; current source and token validation,
-target and source binding, owner/face read permission, annotation eligibility,
-rate, range, audience and marker-lifetime gates still apply.
+target and source binding, owner/face source read conditions, annotation
+eligibility, rate, range, audience and marker-lifetime gates still apply.
 
 `previewComplete` describes whether the server handed off the current complete
 Preview cumulative cut. A client acknowledgement, an empty publisher queue or a
@@ -445,9 +486,11 @@ The initial tracking publication carries that quantity with `UPDATING` and
 `completeScan=false`, even if the preview itself completed. An exact seed is not
 grey merely because it is updating; an aggregate keeps its independent All
 variants qualifier and grey identity quality. Publication follows the committed
-Basic notification and each recipient's current authorization and known-marker
-gate; a recipient needs no preview of its own. The owner's metadata/read gates
-are checked again after creation callbacks and before retained data sends.
+Basic notification, the Ping's creation-frozen recipient content authorization,
+and each recipient's current session, known-marker and expiry gates; a recipient
+needs no preview of its own. The owner's current source-read and metadata
+conditions are checked again after creation callbacks and before retained data
+sends.
 Marker storage, sidecar installation, Basic notification and the correlated
 selection outcome remain synchronous. Seed quantities wait for the next
 eligible normal publication tick and its current budgeted source validation;
@@ -509,20 +552,22 @@ completed totals remain displayed while a replacement is partial; partial
 replacement counts never overwrite them. A slow consumer keeps its paid
 observation and progress instead of being starved by newer sweeps.
 
-The sampling owner's container read condition is the sampling authority: the
+The sampling owner's container read condition is the source-read authority: the
 preview requester, or for tracking the bound Ping owner, is checked for lock,
 loot-table, loaded, block-identity and view-topology state, and those checks
 continue to run on every read, cache consumption and recovery probe. The
 sampled data is delivered to the Ping's normal frozen
 [audience snapshot](../authority/target_validation.md#audience-snapshot-at-create)
-under the existing per-target-type
+under the Ping's
+[frozen recipient content authorization](presentation_snapshot.md#frozen-recipient-content-authorization),
+which resolves the per-target-type
 [field policy](presentation_snapshot.md#per-target-type-field-policy). A
 recipient does not need to hold the container's key or reproduce the owner's
 look or read condition, and no new inventory distance or audience policy is
 introduced: the marker's established audience and acceptance range remain
-authoritative. The owner's read condition is checked again before cached or
+authoritative. The same source-read condition is checked again before cached or
 queued valid inventory is published: if it no longer holds, that data is not
-sent to a recipient even when the recipient's field permission remains. This
+sent even when the recipient's frozen content authorization includes it. This
 send-time check asks nothing of the recipient and changes no audience or
 distance rule. Ordinary content changes do not rewrite already retained slot
 observations or invalidate the source topology; unread native slots follow
@@ -572,9 +617,10 @@ or insufficient bandwidth.
 
 Baseline assembly is bounded. A temporarily displayed value does not mean the
 baseline is complete, and a per-item stream is applied item by item rather than
-as one atomic batch. Checksums are computed over the recipient's authorized
-selected projection, its identity mode, and explicit zeros; offered and
-delivered or transmitted watermarks are distinct, and a checksum must not
+as one atomic batch. Checksums are computed over the recipient's selected
+projection under its frozen content authorization, its identity mode, and
+explicit zeros; offered and delivered or transmitted watermarks are distinct,
+and a checksum must not
 compare partial fragments with a future state. A gap or mismatch schedules a
 snapshot repair under the cooldown and waiting rules above. Writing an update into the send queue is not proof
 that the client applied it, and a mismatch alone does not justify a TCP-loss
@@ -601,11 +647,13 @@ follow the provider's separate continuity contract rather than a weak match
 authorizing a new scope.
 
 Every quantity-bearing frame, including a provisional seed, and every
-success-bearing completion, checksum or heartbeat receives a fresh owner/source
-check immediately before irreversible transport handoff. It runs after actual
-encoding/budget measurement and wire eligibility, with current recipient,
-session, known-marker and expiry checks. An earlier same-tick approval is not a
-permission cache. Failure-only controls need no successful source grant. A
+success-bearing completion, checksum or heartbeat receives a fresh source-owner
+read-condition check immediately before irreversible transport handoff. It runs
+after actual encoding/budget measurement and wire eligibility, together with
+current session, known-marker and expiry checks. The recipient content
+authorization is the owning Preview request's or Ping's frozen set and is not
+re-evaluated here; an earlier same-tick source approval is not a read-condition
+cache. Failure-only controls need no successful source grant. A
 defer advances no part index, delivered watermark or heartbeat and spends no
 wire bytes for an unhanded frame; attempted validation remains paid. Source
 failures are latched. Affected valid publications are withdrawn through normal
@@ -617,12 +665,13 @@ seed-retirement and grey history rules above.
 Before scan or ingress work on each new tick, one rotating pending valid-frame
 context may reserve validation capacity from the existing probe, provider-work,
 item-work and workspace ledgers. Same-tick ingress neither resets the ledgers
-nor creates another protected opportunity. Reservation is not permission: the
-actual outgoing cut is checked fresh at handoff. Other frames use remaining
-capacity, and newly queued work may wait until the next tick. This adds no
+nor creates another protected opportunity. Reservation is not a source-read
+grant: the actual outgoing cut's source conditions are checked fresh at
+handoff. Other frames use remaining capacity, and newly queued work may wait
+until the next tick. This adds no
 unmetered budget or guarantee under insufficient memory/wire capacity or an
-unserviceable proof. Fewer shared getters do not remove per-player authority
-metadata work or promise lower CPU, memory or allocation rate.
+unserviceable proof. Fewer shared getters do not remove per-participant
+source-read metadata work or promise lower CPU, memory or allocation rate.
 
 ## Item variants and component fallback
 
@@ -1098,12 +1147,12 @@ the structure guard and finite shared memory. That exception does not exempt
 native live getters from the slot allowance.
 
 One caller-backed validation allowance is admitted before initial source
-resolution and follows the operation through nested discovery, validity,
-member, mapping and read checks. Production ITEM discovery admits the paid root
-probe first, then the actual container or provider-lookup route, then the actual
-returned-layout finish, each before the callbacks it authorizes, instead of
-reserving one generic worst case up front; legacy non-staged entry points keep
-the complete profile.
+resolution and follows the operation through the applicable nested discovery,
+validity, provider/member, mapping and read checks. Production ITEM discovery
+admits the paid root probe first, then the actual container or provider-lookup
+route, then the actual returned-layout finish, each before the callbacks it
+authorizes, instead of reserving one generic worst case up front; legacy
+non-staged entry points keep the complete profile.
 It is not reset at each helper or item. Attempted work remains paid after
 denial, a defer or an exception; unused admission is released without
 refunding work already attempted. A stage refusal or budget defer does not
@@ -1317,11 +1366,12 @@ intervening callback are merged.
 The native [mixed-time sweep boundary](#native-incremental-reads) applies to
 movement between fluid addresses as it does to item slots.
 
-Every fluid lookup, held-handler read and publication rechecks the original
-root/member identities, expected registry, current route and topology, owner
-authority, loaded scope and frozen real face. Historical identity evidence is
-non-owning; it does not preserve an old handler as a content-read route. Equal
-count or capacity is not a certificate of unchanged addressing. Generic opaque
+Every fluid lookup, held-handler read and publication applies the target-level
+checks owned by
+[fluid provider trust and validation exceptions](#fluid-provider-trust-and-validation-exceptions).
+Historical identity evidence is non-owning; it does not preserve an old handler
+as a content-read route. Equal count or capacity is not a certificate of
+unchanged addressing. Generic opaque
 providers can detect only changes exposed by their public native identities,
 route, address count and capacity metadata. A matching weak witness does not
 make a hidden same-identity, same-capacity remap detectable. Generic
@@ -1332,10 +1382,10 @@ not certified pooling or atomicity. Notice content and failure isolation follow
 
 Fabric may reacquire a new public wrapper for the same stable native underlying
 storage when bounded validation establishes that continuity. Reads use the
-current wrapper, not a retained old view, and this grants no new face, member
-scope or permission. A merge, detachment or changed underlying mapping
-invalidates the old observation. Create's specialized tank gates and controller
-quantity ownership are owned by
+current wrapper, not a retained old view, and this grants no new face, provider
+scope or source-read authority. A merge, detachment or changed underlying
+mapping invalidates the old observation. Create's specialized tank gates and
+controller quantity ownership are owned by
 [Create](../../integrations/create.md#fluid-tank-inventory-provider).
 
 Audited adapters preserve the selected face, ordered member and segment-local
@@ -1391,13 +1441,16 @@ empty result.
 
 A provider-confirmed external candidate uses the same frozen local face, one of
 the six block directions, and never an unsided or look-inferred direction. Its
-membership scope is resolved fresh for each operation and is never retained
-across ticks; a stale or cross-tick predicate never authorizes a read. Source
+provider binding is resolved fresh for each operation and is never retained
+across ticks; a stale or cross-tick binding never authorizes a read. Source
 movement and topology transitions follow the
-[recovery contract](#source-identity-invalidation-and-recovery). Every supported
-loader's capability route is entered only under that same frozen local face,
-and a capability read is re-checked against the current membership scope, so a
-revoked member or handler is unavailable rather than read.
+[recovery contract](#source-identity-invalidation-and-recovery). For an `ITEM`
+candidate, the loader capability route is entered only under that same frozen
+local face, and its current item membership scope is re-checked so a revoked
+member or handler is unavailable rather than read. A `FLUID` candidate uses the
+provider's positive scope endorsement for its internal storage unit under
+[fluid provider trust and validation exceptions](#fluid-provider-trust-and-validation-exceptions),
+including that section's target-level checks and root gate.
 
 A double chest is read as the pair, never either half alone. The pair is a
 valid source only when both halves are loaded, share the same container type,
@@ -1408,8 +1461,8 @@ under the same frozen face as one consistent source view, each contributing
 the slots that face permits; a pairing or mapping change is the view-topology
 invalidity owned by
 [source identity, invalidation and recovery](#source-identity-invalidation-and-recovery),
-not a completed mixed view. Any registered member source follows the same
-all-members precheck: every member is gated before any member content is read,
+not a completed mixed view. Any registered `ITEM` member source follows the same
+all-member precheck: every item member is gated before member content is read,
 and a failing member makes the source unavailable rather than partially empty.
 Initial and final certified checks, catalogue creation and reads gate loaded
 members and a chest's cross-chunk partner before querying their state; no
@@ -1425,6 +1478,40 @@ Source reads must not trigger loot-table generation, force-load chunks, or
 modify the world. If a read cannot satisfy those gates, the source reports
 unavailable instead of pretending that every private provider API is supported.
 The same safety rules apply to recovery probing.
+
+### Fluid provider trust and validation exceptions
+
+The inventory domain treats a `FLUID` source as one provider-scoped access unit.
+It does not require every physical member to pass an independent Ping
+access-authorization check, and the target provider owns its internal member
+layout, storage relationships and handler view. Ping validates the target-level
+applicability conditions: the target context and expected registry match; the
+source is loaded and readable on the server thread; the frozen face applies; the
+source owner's current read conditions hold; and the provider's current route
+accepts the operation. A provider's own metadata structure rules, such as a
+controller or mode requirement, remain source applicability rules; they are not
+recipient content authorization.
+
+The root gate is unchanged. An ordinary Minecraft block root must be positively
+`OUTSIDE` any external/Sable provider scope; an external block root must be
+positively `INSIDE` the matching provider scope. `UNKNOWN` membership rejects the
+source in either case.
+
+Provider trust begins after that gate resolves positively and does not require
+the root to prove every internal member address.
+
+Source validity, read-only behavior, the frozen face, variant identity, checked
+arithmetic and finite resource budgets remain unchanged. Existing `ITEM` rules,
+including certified double-chest and
+[Vault](../../integrations/create.md#vault-inventory-provider) all-member
+validation, are not relaxed.
+
+The code-owned, hardcoded target set requiring specialized validation is empty;
+a future built-in or external plugin that provides a custom provider for such
+targets is a product direction whose API, matching, registration priority and
+fallback remain undecided. [D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md)
+explains the low-performance-cost priority and the timeliness/correctness
+trade-off.
 
 ## Status presentation
 

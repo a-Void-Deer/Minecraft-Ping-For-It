@@ -5,6 +5,12 @@
 Product decision represented by the linked topic contracts. This record
 explains the timeliness trade-off, not completed implementation or verification.
 
+[D0019](D0019-provider-trust-and-frozen-recipient-authorization.md) locally
+supersedes this record's new-authorization timing: recipient/content authorization
+for a new Ping is fixed at successful creation rather than re-evaluated for later
+delivery. This record's immediate creation snapshot, its timeliness rationale, and
+the feature and protocol authorizations previously recorded remain unchanged.
+
 ## Decision
 
 An inventory selection's atomic `CREATED` marker carries one server-frozen

@@ -348,25 +348,32 @@ The existing NeoForge and tested Create version strategy remains the gate;
 this route adds no Fabric/Forge Create integration or version upgrade. The
 ordinary NeoForge capability access for this provider may use the audited
 single-use [coordinated read](../architecture/presentation/shared_sources.md#source-access);
-the Create controller, member, scope and mode gates above remain in force.
+coordination preserves the provider applicability and target-level conditions below.
 
-Before capability or content access, verify the loaded root, controller and
-every member, their current objects and controller relationships, positive
-physical scope membership, and the supported static, nonvirtual tank state.
-The original hit must belong to the verified structure. Only the verified
-current controller's active-boiler mode selects the tank capability mode; a
-former controller's retained boiler state does not. Creative tanks and
-active-boiler input handlers are unavailable; a rejected Create route cannot
-fall through to a generic handler. Recheck current controller, member, mode,
-owner and loaded-scope authority during reads and publication. Structure
-merge, split, detachment or controller/mode changes retire old observations
-under [inventory recovery](../architecture/presentation/inventory.md#source-identity-invalidation-and-recovery).
+Before capability or content access, apply the
+[inventory fluid provider trust](../architecture/presentation/inventory.md#fluid-provider-trust-and-validation-exceptions).
+The Create route additionally accepts only the supported static, nonvirtual tank
+state, and the original hit must belong to the verified structure. The
+provider's controller/member metadata structure remains a source applicability
+condition, not recipient authorization.
 
-Read only the verified controller's fluid-handler quantity. Members establish
-topology and authority, not additional copies to sum. Every capability lookup
-uses the frozen real face; the summary adapter's unsided sampling semantics do
-not authorize this route. This provider supplies no fluid observation-pool
-certificate or atomic snapshot promise.
+Only the verified current controller's active-boiler mode selects the tank
+capability mode; a former controller's retained boiler state does not. Creative
+tanks and active-boiler input handlers are unavailable; a rejected Create route
+cannot fall through to a generic handler. Recheck the current controller and
+known capability mode during reads and publication; the remaining target-level
+conditions are owned by the linked inventory contract. Structure merge, split,
+detachment or controller/mode changes retire old observations under
+[inventory recovery](../architecture/presentation/inventory.md#source-identity-invalidation-and-recovery).
+
+Read only the verified current controller's fluid-handler quantity.
+Provider-owned member layout supplies the internal structure, not additional
+copies to sum. Every capability lookup uses the frozen real face; the summary
+adapter's unsided sampling semantics do not authorize this route. This provider
+supplies no fluid observation-pool certificate or atomic snapshot promise. The
+separate `create:fluid.summary` presentation sampling and metadata-only topology
+rules remain presentation-adapter requirements; they do not define this
+inventory provider's access unit or recipient authorization.
 
 ## Create block presentation resolvers
 

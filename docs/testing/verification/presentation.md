@@ -703,6 +703,12 @@ playback, resource reload or locale switching, or multiplayer behavior.
 
 ### Immediate inventory creation snapshot coverage
 
+Historical evidence note: these cases passed with the dynamic lane and receipt
+authorization of their recorded input.
+[D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md)
+changes new-Ping authorization timing; they remain evidence for the behavior they
+exercised, not for the frozen policy. The pending section below records the gap.
+
 `InventoryCreationSnapshotIntegrationTest` covers 17 parameterized cases across
 eight methods:
 
@@ -746,6 +752,25 @@ coverage is owned by
 The current-input combined execution and artifact checks are recorded in
 [build checks](build-checks.md#final-combined-tree-acceptance-and-artifact-verification).
 
+### Frozen recipient content authorization verification pending
+
+The dynamic recipient, field, child and receipt checks inventoried above remain
+historical evidence for their recorded inputs. They do not establish
+[D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md)'s
+create-time policy. Pending checks cover:
+
+- the complete create-time effective authorization result for Basic, Property,
+  SECTION, Inventory and receipt content, including native and custom permission,
+  field/selector and child-reference constraints;
+- `RESET` and metadata changes after create applying only to new authorization and
+  new Pings;
+- two same-type Pings created under different grants keeping independent
+  create-time results;
+- content values continuing to update under current source, session/schema,
+  expiry and resource gates, with source-read revocation still rejecting; and
+- future wire-visible fields needed for a complete authorization snapshot.
+  D0019 does not design that shape, and no test exercises it.
+
 ## Names and chat
 
 The current suite covers:
@@ -767,14 +792,19 @@ Name-composition and rendering evidence is recorded under
 - live loader registration/network transport for the presentation snapshot and
   policy routes;
 - a live two-sided presentation session: negotiation and reset over a real
-  connection, per-recipient permission projection, a reset's child deny map
-  pruning retained annotations and default references, policy changes advancing
-  the view, and delivery of Basic/adapter values across the loader transport;
+  connection, per-recipient permission projection, same-epoch `RESET` retaining
+  an old Ping's frozen child/default-reference result without retroactive
+  pruning or expansion under the
+  [global frozen authorization rule](../../architecture/presentation/presentation_snapshot.md#frozen-recipient-content-authorization),
+  the epoch/view fence still governing a reset, policy changes advancing the view
+  for new creates, and delivery of Basic/adapter values across the loader
+  transport;
 - external-refresh and client-receipt behavior under live conditions: those
   seams are headless, so no automated test exercises a real Minecraft or Sable
   world (logical anchor or render pose), a loaded sublevel, world-backed
-  projection, source sampling cost, packet-level ordering or an authorization
-  change between snapshot and delivery, or the rendered client marker;
+  projection, source sampling cost, packet-level ordering, a policy change between
+  snapshot and delivery that must not alter the Ping's frozen recipient/content
+  result, or the rendered client marker;
 - content receipt descriptor, projection, server initial-sending and client
   acceptance, pending content-chat completion and content chat composition have
   the headless model, codec, store and port coverage inventoried above. No

@@ -178,6 +178,12 @@ loader APIs and the Create tea archive to
 
 ### Production lane policy and native amount regressions
 
+Historical evidence note: the lane-policy and recipient assertions below
+exercised dynamic permission and lane behavior at their recorded input.
+[D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md)
+changes new-Ping recipient/content authorization timing; these passing results
+remain historical and do not establish the frozen policy.
+
 These regressions passed in the
 [lane-policy, native-amount and icon-opacity execution](build-checks.md#lane-policy-native-amount-and-icon-opacity-verification),
 extending the earlier fluid coverage.
@@ -1659,6 +1665,12 @@ or multiplayer evidence.
 
 ### Recipientless Tracking and successor continuity
 
+Historical evidence note: these successor and permission-suspension cases
+exercised dynamic recipient permission at their recorded input.
+[D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md)
+changes new-Ping recipient/content authorization timing; the passing results
+remain evidence for the behavior they drove, not for the frozen policy.
+
 Three additional `InventoryPooledBackendTest` cases exercise recurring Tracking
 through the production backend, certified native source, publisher and encoded
 client sessions. Two owners share one unlocked 27-slot chest with player
@@ -2359,6 +2371,35 @@ Execution scope is recorded in the
 [automated verification results](build-checks.md#automated-verification-results).
 Live timing and multiplayer repair remain pending in the
 [manual matrix](manual-integration.md#inventory).
+
+## Frozen recipient authorization and fluid provider trust pending
+
+The passing lane-policy, recipientless tracking, certified-pool, member-gate and
+creation-snapshot cases above remain evidence for the dynamic permission and
+per-member gates they exercised. They do not establish
+[D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md).
+Pending evidence covers:
+
+- Inventory Preview authorization at request start and a separate new
+  authorization for the `SELECT` create, without inheriting the Preview result;
+- inventory-specific creation snapshot and receipt behavior under the frozen
+  rule, including de-op/re-op where old Pings keep their create-time result and
+  new Pings use the new result;
+- the global field/selector/child, `RESET`, metadata and same-type Ping grant
+  scenarios in the
+  [presentation pending section](presentation.md#frozen-recipient-content-authorization-verification-pending);
+- fluid validation through the target provider rather than every physical member
+  as an independent Ping access-check object, with the hardcoded
+  stricter-validation exception set empty.
+
+Known limitation: a future built-in or external plugin dedicated provider is not
+defined or implemented here; its API, matching and fallback remain open, and no
+implementation test is recorded. The
+[inventory provider contract](../../architecture/presentation/inventory.md#fluid-provider-trust-and-validation-exceptions)
+owns that boundary.
+
+The [manual matrix](manual-integration.md#frozen-recipient-authorization-and-provider-trust)
+owns the pending live checks.
 
 ## Known automated gaps
 

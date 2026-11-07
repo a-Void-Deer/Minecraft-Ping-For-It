@@ -67,6 +67,16 @@ resolutions of the same generic role; the domain decides when a committed
 source follows a current tracking point instead of a stale locator, and when a
 moved source or changed topology invalidates an old observation.
 
+The domain provider defines the source's access unit: which physical or logical
+storage one bounded observation addresses and which internal member, layout or
+handler relationships it owns. The generic layer does not itself decompose that
+unit into per-member authorization checks, and it does not widen the unit. Inventory's
+fluid unit and trust boundary are owned by
+[inventory](inventory.md#fluid-provider-trust-and-validation-exceptions); existing
+item rules, including certified double-chest and
+[Vault](../../integrations/create.md#vault-inventory-provider) all-member
+validation, remain with their owners and are not relaxed.
+
 Demand is the server-derived union of already-authorized demand only. Providers
 never observe baselines, HUD state, or inventory fallback policy. Compatible
 views may share one physical observation under the eligibility rules below.
@@ -440,11 +450,17 @@ packet-global revision for a different key. Sparse updates leave a missing key
 unchanged rather than re-sending or zeroing it; a tombstone has domain meaning
 and is not zero.
 
-A state or baseline fence discards data older than it. Publication re-projects
-against the current server policy and session at send time. Budget exhaustion
-schedules a defer, while an unavailable or invalid source maps to the
-result availability and the domain status or fence, never to a defer and never
-to a pretend-complete publication.
+A state or baseline fence discards data older than it. Publication projects
+under the domain-owned authorization context for the consumer. A Ping uses its
+[frozen recipient content authorization](presentation_snapshot.md#frozen-recipient-content-authorization);
+an Inventory Preview uses its request-start freeze under
+[inventory freeze points](inventory.md#receiver-authorization-freeze-points).
+Other domains keep their own authorization model; this generic layer requires
+neither freezing nor current re-evaluation. Current session and schema
+compatibility, source-read conditions, lifecycle, and resource policy remain
+independent delivery gates. Budget exhaustion schedules a defer, while an
+unavailable or invalid source maps to the result availability and the domain
+status or fence, never to a defer and never to a pretend-complete publication.
 
 A logical baseline may be fragmented, but each fragment is bounded and the
 baseline commits only after it completes. A temporarily displayed value does

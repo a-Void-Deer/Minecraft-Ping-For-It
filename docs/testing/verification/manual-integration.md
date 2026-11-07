@@ -154,11 +154,14 @@
   separation and track the same unlocked 27-slot chest under the legal physical
   cap of 16 and a permission-gated inventory field policy. Remove B's field
   permission by de-op without disconnecting or making the source unreadable,
-  both before a successor grant and after one has been established. Confirm A
-  completes multiple later refreshes, B receives
-  no forbidden quantity/success frames or heartbeats, and re-op restores B's
-  updates without changing frozen audiences or marker lifetime. Include an
-  authorized peer waiting only for cadence as the continuity control. The
+  both before a successor grant and after one has been established. Under
+  create-time frozen recipient authorization, B's existing Ping keeps the
+  content set authorized at its create; de-op does not retract it, and re-op
+  does not backfill old Pings. Confirm A completes multiple later refreshes,
+  B's old Ping keeps only its create-authorized content, a new Ping created
+  after re-op receives the newly authorized content, and frozen audiences and
+  marker lifetime do not change. Include an authorized peer waiting only for
+  cadence as the continuity control. The
   [headless successor assertions](inventory.md#recipientless-tracking-and-successor-continuity)
   do not exercise live permission or channel changes.
 - Under the legal physical cap of 16, capture certified first-page and
@@ -202,6 +205,27 @@
   does not reproduce the reported live allocation rate or CPU percentage.
 - Exercise the [patch-only identity and display boundary](../../architecture/presentation/inventory.md#item-variants-and-component-fallback) with installed modded containers and component wrappers, including owo-backed items, through live preview, item selection and tracking on the supported loaders. This remains pending; headless fixtures are not installed-mod evidence.
 - Exercise client/server local-default differences and the terminal size-only default icon in the live inventory list and tracking HUD, including retained reprojection after a ceiling change and delivery delayed by period-byte pressure. Automated transition evidence is tracked in [inventory verification](inventory.md#patch-only-identity-and-display-verification-pending).
+
+### Frozen recipient authorization and provider trust
+
+All scenarios here are pending. They cover
+[D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md);
+the passing dynamic recipient and member-gate tests inventoried elsewhere are
+historical and do not establish this policy.
+
+- With two connected owners, create Pings across Basic, Property, SECTION,
+  Inventory and receipt. Change selector, child, provider, `RESET` and metadata
+  policy after creation. Record which content old Pings keep and which new Pings
+  receive.
+- Open an Inventory Preview, then select. Compare the Preview-start and `SELECT`
+  create authorization outcomes.
+- Keep an original-audience member that had not completed `HELLO` at create
+  late-ready during delivery or repair, and separately exercise a true disconnect.
+- Revoke source-owner read authority separately from recipient permission.
+  Confirm reads still reject while the create-time recipient result remains as
+  recorded.
+- On supported fluid targets, inspect Preview and Tracking provider validation
+  and confirm the hardcoded stricter-validation exception set is empty.
 
 ### Fluid inventory
 

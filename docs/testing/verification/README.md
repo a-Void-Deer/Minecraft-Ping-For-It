@@ -56,6 +56,15 @@ Each topic page keeps its coverage and local known automated gaps together.
 | [Rendering](rendering.md) | [Name and geometry outcomes](rendering.md#name-and-geometry-outcomes); [container presentation subjects](rendering.md#container-presentation-subjects); [selector overlay layout and frame rendering](rendering.md#selector-overlay-layout-and-frame-rendering); [render entity lookup and locator resolver seams](rendering.md#render-entity-lookup-and-locator-resolver-seams); [focused native block-outline regression coverage](rendering.md#focused-native-block-outline-regression-coverage). | [Known automated gaps](rendering.md#known-automated-gaps) |
 | [Integrations](integrations.md) | [Shared exception diagnostics](integrations.md#shared-exception-diagnostics); [optional failure diagnostics](integrations.md#optional-failure-diagnostics); [Create presentation adapters](integrations.md#create-presentation-adapters); [Vault topology, grouping and presentation](integrations.md#vault-topology-grouping-and-presentation); [fluid-tank topology, grouping and presentation](integrations.md#fluid-tank-topology-grouping-and-presentation); [Create content preview](integrations.md#create-content-preview); [Create raycast seams](integrations.md#create-raycast-seams); [Sable integration coverage](integrations.md#sable-integration-coverage); [Simulated integration coverage](integrations.md#simulated-integration-coverage); [optional rendering structural coverage](integrations.md#optional-rendering-structural-coverage). | [Known automated gaps](integrations.md#known-automated-gaps), including [Sable-specific gaps](integrations.md#sable-specific-gaps) |
 
+Create-time recipient/content authorization and fluid provider validation are not
+established by the historical passing tests above. Their pending evidence is
+indexed in [manual and integration verification](manual-integration.md#frozen-recipient-authorization-and-provider-trust),
+with topic-local notes in
+[identity and authority](identity-authority.md#frozen-recipient-authorization-pending)
+for recipient authorization, [presentation](presentation.md#frozen-recipient-content-authorization-verification-pending)
+for global content authorization, and [inventory](inventory.md#frozen-recipient-authorization-and-fluid-provider-trust-pending)
+for inventory freeze points and provider validation.
+
 ## Known automated gaps
 
 The gaps linked in the [coverage inventory](#existing-automated-coverage-inventory)

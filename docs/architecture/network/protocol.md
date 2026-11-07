@@ -32,7 +32,7 @@ presentation `CREATE` (including pure location targets) or dedicated inventory
 | Packet family and direction | Registered route | Server-side effect | Current client acceptance and presentation |
 | --- | --- | --- | --- |
 | Presentation `PresentationC2SPacket` (C2S): `HELLO`, `CREATE`, `REMOVE` | Fabric, Forge, and NeoForge common server handler. | The versioned route negotiates presentation sessions, answers `HELLO` with an offer and a server-selected authorization mask, and carries marker create/remove intents with the negotiated epoch; a create may carry property selections. Session negotiation, manifest, mask, policy, property, and projection semantics are owned by [presentation snapshot](../presentation/presentation_snapshot.md); accepted intents enter the admission and removal rules owned by [target validation](../authority/target_validation.md); rejections are sent to the requester. | Not applicable on C2S. |
-| Presentation `PresentationS2CPacket` (S2C): `OFFER`, `RESET`, `CREATED`, `SECTION`, `REMOVED`, `WINNER`, `REJECT` | Fabric, Forge, and NeoForge common client handler. | Accepted marker creation, removal, and winner changes are projected per recipient; a rejection is sent only to its requester. | Accepted only for the negotiated session epoch/view. The atomic Basic initial, receipt content descriptor, default display reference, retained values, and mask and child-deny pruning are owned by [presentation snapshot](../presentation/presentation_snapshot.md); marker record state and visual lifetime are owned by [client marker state](../markers/client-state.md); rejection presentation remains owned by [ping feedback](../../UI/ping-feedback.md). Corrupt packets, or packets received without a runtime, are safely dropped. |
+| Presentation `PresentationS2CPacket` (S2C): `OFFER`, `RESET`, `CREATED`, `SECTION`, `REMOVED`, `WINNER`, `REJECT` | Fabric, Forge, and NeoForge common client handler. | Accepted marker creation, removal, and winner changes are projected per recipient; a rejection is sent only to its requester. | Accepted only for the negotiated session epoch/view. The atomic Basic initial, receipt content descriptor, default display reference, retained values, and mask, child-deny and marker-scoped authorization rules are owned by [presentation snapshot](../presentation/presentation_snapshot.md); marker record state and visual lifetime are owned by [client marker state](../markers/client-state.md); rejection presentation remains owned by [ping feedback](../../UI/ping-feedback.md). Corrupt packets, or packets received without a runtime, are safely dropped. |
 | Presentation policy `ServerPresentationPolicyC2SPacket` (C2S): `READ`, `ADD_WHITE`, `REMOVE_WHITE`, `ADD_BLACK`, `REMOVE_BLACK`, `SET_WHITELIST_ONLY` | Fabric, Forge, and NeoForge common server handler. | The versioned route carries the correlated read of all five per-target-type rule views, each including its persisted child deny list, and the bounded selector and whitelist-only mutations for a selected target type, which leave the child deny list unchanged. Disclosure, revision, transaction, and broadcast semantics are owned by [presentation snapshot](../presentation/presentation_snapshot.md); authority and server-side enforcement are owned by [server configuration authority](../authority/server-config.md) and [security](../security.md#server-configuration-update-enforcement). | Not applicable on C2S. |
 | Presentation policy `ServerPresentationPolicyS2CPacket` (S2C) | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted into the connection-scoped rule-view mirror under the correlation and revision rules owned by [presentation snapshot](../presentation/presentation_snapshot.md); it does not mutate marker state, overlay/outline state, or presentation field values. |
 | Inventory `InventoryC2SPacket` (C2S): `HELLO`, `OPEN`, `CLOSE`, `RESYNC`, `SELECT` | Fabric, Forge, and NeoForge common server handler. | `HELLO` creates or renews the per-player preview session and answers with an offer of server-selected periods, the effective display and frame byte budgets, and the inventory target-type policy view; every other kind runs only under the session epoch and the current presentation epoch/view fence. `OPEN` binds one bounded preview request to a server-validated ordinary block target or uncommitted external provider candidate with its carried real local face, `CLOSE` releases it, `RESYNC` schedules repair for its required marker ID, and `SELECT` resolves one opaque retained entry reference under its baseline/state fences into a correlated selection outcome. The request carries no player identity, item count, or client-supplied authoritative target. Inventory domain semantics are owned by [inventory](../presentation/inventory.md). | Not applicable on C2S. |
@@ -88,6 +88,18 @@ trailing bytes are rejected rather than normalized, and a missing target type
 can never decode as an empty deny list. The mask and the child deny map travel
 in one frame and become observable together.
 
+The `RESET` mask and child deny map are the session's current authorization
+view. They resolve later creations; they do not re-authorize an existing
+marker. A marker's
+[frozen recipient content authorization](../presentation/presentation_snapshot.md#frozen-recipient-content-authorization)
+is per Ping, so two markers of one target type can carry different frozen sets
+and the latest session-wide mask cannot express them. The grammar above records
+the current version-two encoding and does not design the wire or client
+representation of the per-Ping set. That representation remains pending, and
+any necessary fields or grammar may join the current already-updated protocol
+without another version number. Pending evidence remains owned by
+[testing and verification](../../testing/verification/presentation.md#frozen-recipient-content-authorization-verification-pending).
+
 The atomic `CREATED` frame carries, in order, the canonical marker snapshot, the
 owner name, the default property ref, the receipt content descriptor, and the
 framed Basic section; a `CREATED` frame without the descriptor is corrupt, and
@@ -121,8 +133,9 @@ encoding and the unchanged 1048576-byte `CREATED` body ceiling still applies.
 The snapshot reader validates display against the closed item or fluid
 projection grammar without a native component codec, rich-text decode or
 registry lookup. Known Ping Type IDs are accepted structurally; target-specific
-annotation eligibility remains server-owned. The frame version remains presentation version two, and inventory
-version two, inventory schema two and the mod version are unchanged.
+annotation eligibility remains server-owned. The frame version remains
+presentation version two, and inventory version two, inventory schema two and
+the mod version are unchanged.
 
 ## Inventory preview/tracking route (`inventory-v2`)
 
@@ -173,7 +186,13 @@ ID, or trailing bytes.
 stateRevision, entryKey, pingType)` carries one opaque retained entry reference
 and the commit/baseline/state fences; the server derives the authoritative
 target and count from its own retained reference and answers `SELECTED` or `REJECT`
-correlated by request, commit ID and lane. Commit replay is shared across the
+correlated by request, commit ID and lane. A successful selection is a Ping
+creation and resolves that marker's own
+[frozen recipient content authorization](../presentation/presentation_snapshot.md#frozen-recipient-content-authorization),
+not an inherited Preview freeze or an older marker's grant; the inventory domain
+owns the exact Preview and selection freeze points in
+[inventory](../presentation/inventory.md#receiver-authorization-freeze-points).
+Commit replay is shared across the
 request: changing the lane cannot execute a second selection under an already
 used commit ID. A repeated `SELECT` replays its stored outcome instead of
 re-running materialization, marker storage or rate charging. Cross-lane entry

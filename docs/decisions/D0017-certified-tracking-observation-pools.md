@@ -13,6 +13,13 @@ the original fresh-only/Tracking-only eligibility subset, not its independent
 authority or completed-result-cache boundary. It authorizes no further protocol,
 configuration, version or capture-timer change.
 
+[D0019](D0019-provider-trust-and-frozen-recipient-authorization.md) records the
+rationale for the new create-time recipient/content authorization boundary. It
+does not change this decision's ITEM observation pools or participant source-read
+authority, which remain independent of that recipient grant. The
+[inventory provider contract](../architecture/presentation/inventory.md#fluid-provider-trust-and-validation-exceptions)
+owns the separate fluid provider validation boundary.
+
 ## Decision
 
 Separate exact owner/face authority from certified equivalence of physical

@@ -10,6 +10,13 @@ completed review result.
 observation reuse across exact bindings; it retains this decision's prohibition on
 authority and content caches rather than making metadata reuse a pooling grant.
 
+[D0019](D0019-provider-trust-and-frozen-recipient-authorization.md) records the
+rationale for the create-time recipient/content authorization result. The
+[presentation snapshot](../architecture/presentation/presentation_snapshot.md#frozen-recipient-content-authorization)
+owns that authorization rule. Source read authority is not recipient grant: this
+decision's no-authority-cache boundary continues to cover source validity and read
+authority, which remain owned by the source contracts linked below.
+
 ## Decision
 
 Reuse process-fixed resident-access discovery and explicitly admitted immutable

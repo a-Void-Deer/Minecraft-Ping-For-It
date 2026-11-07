@@ -3,7 +3,8 @@
 This topic owns the versioned presentation snapshot subsystem: its independent
 negotiation/intent/mutation route, its separate policy rule-view route, the
 adapter and field model, the demand-driven server capture and per-recipient
-projection, the per-target-type server field policy, the pre-commit target
+projection, the creation-frozen recipient content authorization, the
+per-target-type server field policy, the pre-commit target
 content preview with its field authorization, provenance and bounded fallback,
 marker-owned property selections and their code-defined property Ping Type
 policy, and the session-scoped client value store. Packet
@@ -39,27 +40,30 @@ A connection reaches presentation readiness in stages:
   client accepts only the first valid offer for the connection, and only after
   its own `HELLO`.
 - The server follows its offer with a `RESET` carrying the epoch, the
-  non-regressing view, the server-selected authorization mask, and the complete
-  per-target-type child deny map. The mask is keyed by target type, adapter, and
-  the field IDs the server will send for that target type; it is derived from
-  the accepted server field policy, and the client has no local receive or
-  display filter to intersect. The child deny map is likewise server-selected
-  and complete: one list per target type, carrying the exact nested references
-  that are not independently selectable or annotatable. The field mask and
-  complete child deny map must both pass
+  non-regressing view, the server-selected current authorization mask, and the
+  complete per-target-type child deny map. The mask is keyed by target type,
+  adapter, and the field IDs the server will send for a later creation of that
+  target type; it is derived from the accepted server field policy, and the
+  client has no local receive or display filter to intersect. The child deny map
+  is likewise server-selected and complete: one list per target type, carrying
+  the exact nested references that are not independently selectable or
+  annotatable. The
+  field mask and complete child deny map must both pass
   [RESET wire validation](../network/protocol.md#presentation-snapshot-route-presentation-v2)
-  before either replaces the previous authorization; a rejected RESET leaves
-  both unchanged. There is no
-  client subscription, no field acknowledgement, and no subscription
-  generation.
+  before either replaces the previous current values; a rejected RESET leaves
+  both unchanged. There is no client subscription, no field acknowledgement, and
+  no subscription generation.
 - Only a `RESET` for the offered epoch and a non-regressing view turns the
-  client ready, enables marker intents, and starts the new view generation. On
-  that reset the client prunes its retained values — including values inside a
-  frozen section — to the mask and applies the child deny map, so a field the
-  server no longer authorizes is deleted rather than displayed, a denied
-  reference's annotation is removed, and a default reference naming it is
-  cleared; an empty mask authorizes no field, and a denied child never strips
-  keys from an authorized root record. `CREATE`/`REMOVE` intents carry the
+  client ready, enables marker intents, and starts the new view generation. A
+  reset that establishes an epoch starts that epoch's store; a same-epoch reset
+  replaces the current mask and child deny map used to resolve later creations
+  but does not prune, extend or re-authorize the retained content of an existing
+  marker. A field created under the marker's
+  [frozen recipient content authorization](#frozen-recipient-content-authorization)
+  stays retained and displayable after a later mask excludes it, and a field the
+  current mask adds for later creations is not added to an older marker. For a
+  later creation, an empty mask authorizes no field, and a denied child never
+  strips keys from an authorized root record. `CREATE`/`REMOVE` intents carry the
   negotiated epoch and are ignored unless the session is ready for that epoch,
   and a create carries no client field list.
 
@@ -69,8 +73,11 @@ are dropped rather than applied. A schema mismatch removes that adapter from the
 session's compatible manifest. Basic is mandatory: an offer without a compatible
 Basic adapter is rejected, so that connection has no negotiated presentation
 session. The client validates a received section's field kinds and wire bounds
-against the accepted manifest; it applies only the advertised reset mask and
-child deny map and no allow or deny policy of its own.
+against the accepted manifest and the marker's marker-scoped
+[frozen authorization](#frozen-recipient-content-authorization); a same-epoch
+reset mask and child deny map resolve later creations rather than
+reinterpreting retained marker content. The client applies no allow or deny
+policy of its own.
 
 ## Field manifest and value model
 
@@ -133,12 +140,14 @@ dedicated: it declares two record fields, `pingforit:inventory.items` and
 Their tracking values travel only on the dedicated inventory route owned by
 [network protocol](../network/protocol.md), while the atomic creation receipt
 carries one bounded creation snapshot for the selected resource as a
-creation-scoped value. Dedicated adapters share the same
-per-field authorization rule as section fields: the target type's selector
-policy decides the manifest default, then the recipient permission callback
-decides the effective level; a missing setting, field or target type denies.
+creation-scoped value. Dedicated adapters share the same creation-time
+authorization resolution as section fields: the target type's selector policy
+decides the manifest default, then the recipient permission callback decides
+the effective level; a missing server setting, field definition or target type
+denies, and the resolved grant is frozen with the marker under
+[Frozen recipient content authorization](#frozen-recipient-content-authorization).
 The fields are authorized independently: allowing items does not authorize
-fluids, and revoking either field does not grant or revoke the other. An
+fluids, and resolving either field does not grant or revoke the other. An
 incompatible inventory schema excludes that dedicated adapter under the
 ordinary manifest rule; it does not negotiate a schema-one inventory fallback.
 Inventory lane state, grouping and recovery remain owned by
@@ -160,8 +169,10 @@ Basic (`minecraft:basic`, schema 1) is the stable common field set:
 | `minecraft:item.icon` | flag | Whether an item icon is present. |
 | `minecraft:block.state` | record | Block state properties by name. |
 
-Values are captured on demand for the fields that at least one recipient is
-authorized to receive; a field no recipient's mask includes is not read. Entity and
+Values are captured on demand for the fields that at least one active marker's
+frozen recipient authorization, or a successful creation's resolved
+authorization, includes; a field no recipient is authorized to receive is not
+read. Entity and
 block captures resolve the current authoritative world state and fail to an
 unavailable result rather than asserting stale content; a mismatch between the
 stored block registry ID and the live block is unavailable. Name composition
@@ -178,22 +189,23 @@ substitutes for the stack rule. The composed `minecraft:target.name` keeps its
 established composition and is demanded independently, so neither name field
 forces the other. Both fields derive from one name observation of the same
 target, and an absent custom name is never fabricated as an empty value. It is
-declared enabled by default at permission level zero and remains subject to the
-field policy, mask and permission evaluation like every other Basic field.
+declared enabled by default at permission level zero and resolves through the
+same creation-time authorization as every other Basic field.
 
 Basic fields are declared enabled by default. Under an unrestricted
 per-target-type policy — no matching block selector and no whitelist-only mode —
-the server includes a Basic field in the recipient's mask and projection
-without an explicit allow selector. That covers entity health and maximum
-health: no allow rule is needed for the health pair to travel. Deny rules,
-whitelist-only, permission evaluation, target kind, and capture availability
-still apply; existing deny selectors and whitelist-only configurations keep
-their exact meaning, and default enablement never implies that every target or
-every viewer has health. The default provider emits a
+the server resolves a Basic field into the recipient's effective authorization
+at creation without an explicit allow selector. That covers entity health and
+maximum health: no allow rule is needed for the health pair to travel. Deny
+rules, whitelist-only, permission evaluation, and target kind apply to that
+resolution; capture availability remains a current source condition. Existing
+deny selectors and whitelist-only configurations keep their exact meaning, and
+default enablement never implies that every target or every viewer has health.
+The default provider emits a
 health line only when both current health and maximum health are present in the
-authorized projection; a missing maximum never produces a partial line. That
-line is provider output, not a name-composition rule; name composition remains
-owned by [names and chat](../rendering/names_chat.md).
+frozen-authorized projection; a missing maximum never produces a partial line.
+That line is provider output, not a name-composition rule; name composition
+remains owned by [names and chat](../rendering/names_chat.md).
 
 ## External-block Basic sampling
 
@@ -204,8 +216,9 @@ component. It contains no Minecraft or loader objects, is used only for
 in-memory sampling, and is not a new serialized target form.
 
 For a committed external-block target, a recognized authoritative provider may
-resolve the current live block state and local position for demanded, authorized
-Basic fields. `minecraft:block.state` is captured only when it is demanded and
+resolve the current live block state and local position for demanded Basic
+fields in the marker's frozen recipient authorization. `minecraft:block.state`
+is captured only when it is demanded and
 the provider observation succeeds. A provider-backed name request (the composed
 `minecraft:target.name` or the separate plain `minecraft:target.custom_name`)
 keeps its existing name-resolution semantics and does not require state
@@ -254,9 +267,10 @@ without restarting earlier adapters, and new creates or metadata refreshes do
 not reset progress through the active population. Dedicated adapters retain
 their independent delivery path.
 
-The field policy and each adapter's declared interval bound how often a source
-is polled; a configured interval can only raise an adapter's declared minimum,
-never lower it. Resumable turns and age-safe cache residency preserve that
+The marker's frozen field demand and each adapter's effective interval bound how
+often a source is polled; a configured interval can only raise an adapter's
+declared minimum, never lower it. Resumable turns and age-safe cache residency
+preserve that
 minimum cadence across eviction and reentry: eviction cannot erase an unelapsed
 sampling deadline, including a deadline established by an initial observation.
 Live interval edits preserve already-established deadlines. Rotation above
@@ -265,41 +279,42 @@ wall-clock latency guarantee or promise to observe every marker before every
 finite expiry, and an indivisibly unserviceable collector has no progress
 guarantee.
 
-Each recipient's projection is recomputed independently: a field is sent only
-when that recipient's session manifest includes the field with the same kind,
-the marker's target-type rule set and the recipient's server-derived mask include
-the field, and permission evaluation allows the recipient to receive it. A
-child-denied exact reference is never annotated even when its root field is
-projected, and the parent value stays complete.
+Each recipient's projection follows that marker's frozen effective
+authorization for the recipient: a field is sent only when the frozen set
+includes it and, once the recipient has an accepted session manifest, that
+manifest still carries a compatible schema for decoding. Current field policy, the current session mask,
+and a later permission result do not re-evaluate the marker. A child reference
+denied at creation is never annotated even when its root field is projected, and
+the parent value stays complete.
 
 An absent or evicted observation and a budget-deferred turn are not failed
 captures: they neither replace a section with empty fresh data nor manufacture
 staleness. An actual failed capture retains each known recipient's own last
-still-authorized projection as stale, even after cache eviction; recipient
+frozen-authorized projection as stale, even after cache eviction; recipient
 projections are never combined into a neutral source observation. A failed or
 unavailable optional source cannot break Basic or another adapter. A successful
 fresh capture replaces the whole section, and a legitimate empty demand clears
 it without pretending that a source was captured.
 
-Revocation immediately prunes each recipient's retained fields and selection
-annotations, including when fresh authorization is first observed during a
-metadata refresh before a reset. Cached replay and later loosening cannot
-restore those pruned fields or regenerate their annotations from the marker's
-selections; only a successful fresh capture under the new authorization can
-restore them. Failed captures and empty-demand clears do not authorize that
-restoration. Initial delivery, baseline replay and metadata refresh obey the
-same no-resurrection rule.
+A later authorization change does not prune an existing marker's retained
+fields or selection annotations, and a later grant does not extend them. Cached
+replay, baseline replay, metadata refresh and view reconstruction use the
+marker's frozen authorization rather than resolving it again. A failed capture
+or an empty-demand clear still cannot fabricate content; only a successful fresh
+capture under the frozen authorization may deliver the field.
 
-Negotiation and policy resets schedule read-free baseline paging over the
+Negotiation and view resets schedule read-free baseline paging over the
 canonical active population, including markers absent from the heavy cache;
 total baseline discovery remains bounded across ready sessions.
 A newly ready member of a marker's frozen audience remains eligible; expiry and
-audience are rechecked at delivery. The baseline uses an authorized cached
-observation, that recipient's still-authorized prior projection, or explicitly
-empty stale Basic when neither exists. The atomic `CREATED` Basic initial must
-be delivered for the current view before optional sections or inventory data.
-A replayed initial must satisfy the same atomic acceptance contract as a new
-initial; pruning is not bypassed to make a cached receipt acceptable.
+audience are rechecked at delivery. The baseline uses a cached observation
+authorized by the marker's frozen set, that recipient's retained
+frozen-authorized prior projection, or explicitly empty stale Basic when neither
+exists. The atomic `CREATED` Basic initial must be delivered for the current
+view before optional sections or inventory data. A replayed initial must satisfy
+the same atomic acceptance contract as a new initial; a current policy, mask or
+permission change is not substituted for the marker's frozen authorization
+during replay.
 Markers created after a baseline's population boundary retain their immediate
 ready-recipient publication path. Baselines announce the canonical store's
 recipient winners, never cache winners, and session revisions remain monotonic
@@ -309,15 +324,93 @@ Metadata refresh is likewise read-free and does not advance sampling cadence;
 it updates only already-known recipients using their retained owner name. A
 first baseline may obtain an online owner's existing profile name without a
 world or source read. Baseline paging and metadata replay do not add sampling
-allowances or change marker identity, frozen audience or lifetime. Monitoring
+allowances or change marker identity, frozen audience, lifetime or the frozen
+recipient content authorization. Monitoring
 of actual resource-delayed work, including property previews, is owned by
 [shared sources](shared_sources.md#budget-delay-monitoring).
 
-Permission evaluation is replaceable and independent of field policy and
-projection. The default compares the recipient's actual level to the required
-level; a replacement provider receives the same recipient, field, actual, and
-required inputs and may allow or deny, but a provider that throws, or an
-out-of-range actual/required level, denies access.
+Authorization resolution uses replaceable permission evaluation and is
+independent of field policy and projection. The default compares the recipient's
+actual level to the required level; a replacement provider receives the same
+recipient, field, actual, and required inputs and may allow or deny, but a
+provider that throws, or an out-of-range actual/required level, denies access.
+The result is resolved when the marker is created and retained in its frozen
+authorization; a later provider change does not re-evaluate that marker.
+
+## Frozen recipient content authorization
+
+A successful Ping creation resolves and freezes that marker's complete
+effective recipient content authorization. The resolution covers every
+recipient in the creation audience and every content surface carried for it:
+the Basic and section fields, exact record-child references eligible for
+selection or annotation, the dedicated inventory resource fields, and the
+receipt content descriptor including its creation snapshot entitlement. It is
+resolved from the server-owned presentation manifest and field definitions, the
+manifest field defaults, the target type's then-current allow, deny and
+whitelist-only rules, permission overrides and the current native or custom
+permission result, and the then-current child deny set. A recipient's accepted
+session manifest is not a creation input: a creation-audience member that has
+not yet sent `HELLO` or completed negotiation still holds the resolved
+authorization, and readiness or a later negotiated schema is a delivery gate
+rather than a field-level denial. A missing server adapter, field, target type
+or permission result resolves to denial, and an adapter or field definition
+added after creation does not extend an existing marker's frozen grant.
+
+The frozen authorization is per marker. Two markers of the same target type can
+therefore carry different authorized sets when their creations observe
+different policies or permissions. The session-wide current mask and child deny
+map describe the inputs for later creations. They do not express a same-type
+marker's own frozen set and are not the authorization of an existing marker.
+The server retains the resolved per-Ping set as the normative authorization for
+that marker. The required wire and client representation remains pending within
+the existing presentation and inventory protocol update; necessary fields or
+grammar may join that update without another version number, and this contract
+does not design them here.
+
+The frozen authorization covers which content each recipient may receive and
+which references may be selected or annotated for that marker. It does not
+freeze captured values: fields are still sampled or recaptured from their
+current authorized source, and an unavailable field stays unavailable rather
+than becoming zero, empty or a synthetic default.
+
+Later presentation policy edits, selector or child-deny changes, permission
+revocation or grant, policy-fingerprint changes, same-epoch presentation resets,
+and manifest changes do not recompute the authorization of an existing marker.
+A recipient whose access is revoked after creation keeps receiving the marker's
+frozen-authorized content; a recipient granted access later does not begin
+receiving an older marker. A new successful creation resolves a new authorization from the
+then-current inputs. An already created receipt descriptor and any property or
+inventory receipt follow the same frozen set; a later denial neither suppresses
+nor extends them.
+
+The creation audience remains owned by target validation. A member accepted at
+creation but not yet presentation-ready remains eligible for its frozen-authorized
+content on first and baseline delivery. Real disconnect cleanup still removes that
+recipient as owned by marker lifecycle; a later connection does not restore the
+old marker's authorization. Marker expiry or removal still ends delivery. The
+inventory domain owns its Preview freeze and the exact successful-`SELECT`
+resolution point in
+[inventory](inventory.md#receiver-authorization-freeze-points); a successful
+selection resolves this Ping's authorization from the then-current inputs.
+
+Current conditions continue to apply without redefining the frozen grant:
+session epoch and view fencing, current schema and adapter compatibility, packet
+validation, sampling and delivery budgets, periods, byte ceilings, resource and
+memory limits, Tracking pool partitions, source-owner read authority and scope,
+source availability, and marker lifetime. A field the current schema cannot
+decode or that is absent from the current manifest is safely omitted; it is not
+reinterpreted as a new grant. Baseline replay, cache replay, metadata refresh,
+repair and view reconstruction project the frozen set and retained values rather
+than resolving the marker again.
+
+The wheel target content preview is not a Ping creation and creates no frozen
+marker authorization; it continues to use the current accepted preview
+authorization owned by [Target content preview](#target-content-preview). A
+Property create resolves its own creation authorization and never inherits an
+older marker's frozen set. Coverage and pending migration evidence are owned by
+[testing and verification](../../testing/verification/presentation.md#frozen-recipient-content-authorization-verification-pending).
+Rationale and alternatives are owned by
+[D0019 — Provider trust and frozen recipient authorization](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md).
 
 ## Per-target-type field policy
 
@@ -328,9 +421,9 @@ semantic child-deny defaults are catalogued in
 [server configuration](../../config/server.md#presentation-policy-object); this
 topic owns policy application:
 
-- A marker is evaluated against the rule set of its exact target type; a
+- A new creation is evaluated against the rule set of its exact target type; a
   missing, unknown, or invalid rule set denies every field of that type instead
-  of widening access.
+  of widening access. The resolved result is frozen for the marker.
 - Evaluation is allow, then deny, then the manifest field's default enablement.
 - An allow match wins over a deny match; otherwise a deny match is evaluated
   before the manifest field's default enablement.
@@ -340,24 +433,26 @@ topic owns policy application:
   adapter/field/nonempty-literal-record-path tuple: it covers no descendant, no
   sibling, and not the root field, and a field allow match never overrides it.
   Child denial is not root-value redaction: the parent field and its complete
-  value stay authorized and projectable, so an authorized record still formats
-  from all of its entries, while the denied reference is never independently
-  selectable or annotated. A reference naming a missing field or an absent
+  value stay frozen-authorized and projectable, so a frozen-authorized record
+  still formats from all of its entries, while the denied reference is never
+  independently selectable or annotated. A reference naming a missing field or an absent
   optional adapter is retained but inert.
-- The effective child deny set is the advertised `RESET` map unioned with the
-  fresh policy: a newly denied reference is enforced immediately, while a newly
-  allowed reference stays denied until a new `RESET` re-baselines the advertised
-  view, because the client never widens an advertised map in place.
-- The server derives each recipient's `RESET` mask and child deny map from this
-  policy; the policy is part of the server's effective configuration
+- For a later creation, the effective child deny set is the advertised `RESET`
+  map unioned with the then-current policy: a newly denied reference is
+  enforced for later creations, while a newly allowed reference stays denied
+  until a new `RESET` advertises the wider map. Neither change reopens or
+  extends an existing marker's frozen child set.
+- The server derives each recipient's current `RESET` mask and child deny map
+  from this policy; the policy is part of the server's effective configuration
   fingerprint, and when the fingerprint changes — including a child-only change
-  that leaves the mask unchanged — every ready session advances its view and is
-  re-projected rather than keeping values authorized under the previous policy.
-- The client has no receive or display policy of its own. Values excluded by a
-  new mask are deleted on reset, including values inside an expired/frozen
-  snapshot, and re-allowing a field cannot restore deleted values; the reset's
-  child deny map prunes retained annotations and default references under the
-  same no-restore rule.
+  that leaves the mask unchanged — every ready session advances its view and
+  advertises the new policy for later creations. The advance does not
+  re-project an existing marker or replace its frozen authorization.
+- The client has no receive or display policy of its own. A same-epoch mask
+  change governs later creations and does not delete an existing marker's
+  frozen-authorized values, annotations or default references; a true new
+  session epoch clears the store as before. Current schema incompatibility can
+  make a retained value undisplayable without redefining its authorization.
 
 ## Server policy rule view
 
@@ -425,28 +520,29 @@ policy object, catalogued in
 
 The client keeps one session store per connection: known markers, per-adapter
 sections, per-adapter clear tombstones, and whole-marker tombstones. A marker
-removal reason that only expires the marker freezes the retained sections, so
-later sections cannot modify them and their values can still be displayed until
-the record is hard-removed; hard removals tombstone even unseen IDs, and local
-eviction also leaves a tombstone so a delayed initial cannot resurrect the
-marker. Tombstones and per-marker section history are bounded; when history
-exhausts, the store fails closed instead of discarding the history that prevents
-resurrection. The store resets on a new epoch; a new `RESET` mask prunes retained
-sections to the fields it still authorizes, including values inside a frozen
-section, and applies the reset's child deny map to retained and frozen
-annotations and default references, while an ordinary view generation change
-clears retained sections and leaves frozen values in place. A denied reference
-is removed from annotations and a default reference naming it is cleared, but
-the parent field and its complete value stay; an incoming section's denied
-annotations are dropped before storage, so a later loosening or a later section
-cannot resurrect a denied reference.
+removal reason that only expires the marker makes the retained sections
+read-only, so later sections cannot modify them and their values can still be
+displayed until the record is hard-removed; hard removals tombstone even unseen
+IDs, and local eviction also leaves a tombstone so a delayed initial cannot
+resurrect the marker. Tombstones and per-marker section history are bounded;
+when history exhausts, the store fails closed instead of discarding the history
+that prevents resurrection. The store resets on a true new epoch. A same-epoch
+`RESET` advertises the current mask and child deny map for later creations but
+neither prunes nor extends an existing marker's retained sections or
+annotations. Each marker retains the fields, child references and default
+reference admitted under its creation-frozen authorization; a reference denied
+for that marker is removed from its annotations and a default reference naming
+it is cleared, while the parent field and its complete value stay. An incoming
+section's annotations outside the marker's frozen set are dropped before
+storage. A current schema or session validity check can make a retained value
+undisplayable; it does not re-authorize or delete the marker's frozen set.
 
 There is no client receive or display policy. A UI consumer asks for a marker's
-view and receives an immutable projection of the retained, mask-authorized
-fields per adapter; an empty projection carries no sections, and a property
-lookup for a child-denied reference yields nothing even while the parent
-field's value stays visible. UI consumers never
-receive the retained store itself, and registered UI providers
+view and receives an immutable projection of the retained,
+frozen-authorized fields per adapter; an empty projection carries no sections,
+and a property lookup for a reference child-denied by that marker's frozen set
+yields nothing even while the parent field's value stays visible. UI consumers
+never receive the retained store itself, and registered UI providers
 are manifest-only: a provider supplies at most three short HUD lines (longer
 lines are truncated and blank lines dropped), can narrow the supplied view but
 cannot acquire a store, sender, or capture callback, and switching or failing a
@@ -458,10 +554,11 @@ The wheel's content branch may present a captured target's authorized
 observations before any Ping exists. It is client-first: it shows a value the
 client can observe locally and falls back to the bounded server preview only
 for a field it cannot observe locally. The preview is a presentation read: it
-creates no marker, audience, lease, winner slot, chat output, or marker
-lifetime, and a missing or unavailable preview never changes the plain default
-action. Its provisional projection is not the retained marker store and never
-supplies marker records or marker names.
+uses the current accepted preview authorization, creates no marker, audience,
+lease, winner slot, chat output, or marker lifetime, and freezes no marker
+content authorization. A missing or unavailable preview never changes the plain
+default action. Its provisional projection is not the retained marker store and
+never supplies marker records or marker names.
 The [wheel](../picking/wheel.md) owns the branch's native
 presentation, navigation, selection input and lifecycle, and
 [capture](../picking/capture.md#interaction-lifecycle-aborts) owns the
@@ -565,7 +662,7 @@ flag, record, or sequence, under the existing value bounds — and a nullable
 Ping Type ID, one Ping Type per property. A null Ping Type means the property is
 not specially pinged: it adds no additional ping emphasis and does not by itself
 add a HUD line, and it is not a claim that the field is unreceived, unknown, or
-absent from the authorized projection. A non-null Ping Type is a code-defined
+absent from the frozen-authorized projection. A non-null Ping Type is a code-defined
 property Ping Type and drives that property's additional display line. One
 intent may co-annotate several properties. On the wire, every top-level field
 value and every addressable record entry carries a presence flag and, only when
@@ -593,23 +690,27 @@ The atomic initial message carries a default display reference chosen by the
 server per target type even when the client uploaded no selection: entity health
 (`minecraft:entity.health`, exactly; there is no health alias), presented under
 the existing health-line rule that requires both current health and maximum
-health to be authorized and captured, a dropped item's `minecraft:item.id`
+health values to be present in the frozen-authorized and captured projection, a
+dropped item's `minecraft:item.id`
 formatted with its count, and `minecraft:target.name` for entity-block, block,
 and location targets. The default reference controls the marker's ordinary
-  display, may be formatted without a Ping Type, and selects which authorized
+  display, may be formatted without a Ping Type, and selects which
+  frozen-authorized
   property the HUD presents first; it is not a selection and never produces a
   content receipt; it does not limit which fields remain available or received,
   and it is not a legacy marker-shape fallback. For entity-block,
   block, and location targets, the `minecraft:target.name` default is consumed by
   the authoritative marker name line rather than added as a second property line.
-  The marker name is sent whenever the server authorizes and knows it,
-  independently of the default reference and of any non-null property annotation;
-  the name is not exempt from the field policy. The HUD presents the default
+  The marker name is sent whenever the server's frozen authorization includes
+  it and the server knows it, independently of the default reference and of any
+  non-null property annotation; the name is not exempt from the creation-time
+  field policy. The HUD presents the default
   non-name reference and the properties carrying an explicit non-null Ping Type
   annotation in a deterministic, de-duplicated order within the existing
   per-provider line cap. A field whose annotation is null is still retained and
   server-projected but is not displayed unless the default reference selects it,
-  and presenting count context still requires its parent field to be authorized.
+  and presenting count context still requires its parent field to be
+  frozen-authorized.
   An annotation on `minecraft:target.name` does not add another name line.
 
 Property Ping Types are code-defined and independent of the whole-marker Ping
@@ -634,18 +735,19 @@ This target-selector grammar belongs to the property Ping policy and is distinct
 from the field-ID selector grammar of the persisted field policy.
 
 The selectable attributes are code-defined as well: the Basic field set plus
-each applicable adapter's fields, filtered by the server field policy and the
-exact child deny list, so a denied nested reference is not offered for selection
-even when its root field is authorized. A Create
+each applicable adapter's fields, filtered by the creation-time server field
+policy and the exact child deny list, so a denied nested reference is not offered
+for selection even when its root field is authorized at creation. A Create
 RPM property is offered only for the actual machines the adapter can observe,
-and a count selection still requires its parent field to be authorized.
+and a count selection still requires its parent field to be authorized at
+creation.
 Presentation attribute names, default labels, property Ping Type text, and
 formatted values use presentation-owned resource keys, not the whole-marker Ping
 Type phrase or display keys owned by [catalogs](../identity/catalogs.md) and
 [names and chat](../rendering/names_chat.md). Whole-marker names and labels keep
 their established meaning, and a property the default reference or a non-null
-annotation selects for display is presented to every authorized viewer without
-requiring a local selection control. Only an admitted explicit property Ping
+annotation selects for display is presented to every frozen-authorized viewer
+without requiring a local selection control. Only an admitted explicit property Ping
 selection or an active committed inventory selection produces the content
 message family, whose template, wait and fence rules are owned by
 [names and chat](../rendering/names_chat.md#content-message-family).
@@ -665,33 +767,32 @@ the message composition, one-shot behavior and uncertainty notation by
 snapshot's source freeze and Tracking independence by
 [inventory](inventory.md#creation-snapshot-receipt).
 
-Projection uses the recipient's current fresh authorization. A property
-reference is projected only when the accepted manifest and schema kind, the
-advertised mask, the exact child deny predicate, and the recipient's fresh
-permission all include it. For the inventory kind, the accepted dedicated
-inventory route view must authorize the committed selection's resource field for
-the marker's target type, and the recipient's fresh permission must allow it.
+Projection uses the recipient authorization frozen for the marker at creation.
+A property reference is projected only when it is in that frozen set, the
+recipient's current accepted manifest and schema kind can decode it, and it
+remains in the exact child-reference set resolved at creation. For the inventory
+kind, the frozen resolution includes the committed selection's resource field
+for the marker's target type and the recipient permission result at creation.
 The inventory projection is marker-scoped and creation-scoped: it uses that
-current server authorization without requiring the client's existing lane
-`POLICY` state to have caught up. A stale lane denial is neither a veto nor a
-grant. The marker-scoped creation projection creates no global lane allowance,
-clears no existing marker denial, and does not change ordinary Tracking
-authorization. A current denial still
-suppresses. A recomputed initial for a replayed or refreshed marker applies the
-same current authorization and carries the same retained creation snapshot when
-still authorized, never a recaptured or later Tracking quantity; revocation
-suppresses a later delivery.
+frozen authorization without requiring the client's existing lane `POLICY` state
+to have caught up. A stale lane denial is neither a veto nor a grant. The
+marker-scoped creation projection creates no global lane allowance, clears no
+existing marker denial, and does not change ordinary Tracking authorization. A
+later policy, mask, permission or child-deny change neither suppresses nor
+extends an existing marker's descriptor, and a replayed or refreshed initial
+applies the same frozen set and carries the same retained creation snapshot when
+that set authorized it, never a recaptured or later Tracking quantity.
 
 - No admitted non-null property Ping selection — including a create whose
   selections are all null-annotation observations — and no active committed
   inventory tracking yields the whole-marker kind; those null observations stay
-  retained and projected as authorized data rather than being discarded.
+  retained and projected as frozen-authorized data rather than being discarded.
 - Only admitted non-null Ping Type selections enter the explicit reference set:
   the property kind carries exactly the complete set of admitted non-null
   references in their deterministic order, so a create mixing nullable and
   annotated selections contributes that full non-null subset only and a partial
   list is never sent. A null-annotation observation is retained and projected as
-  authorized data but is not an explicit reference.
+  frozen-authorized data but is not an explicit reference.
 - A marker with an active committed inventory tracking association yields the
   inventory kind, carrying exactly one creation snapshot supplied by
   [inventory](inventory.md#creation-snapshot-receipt) and no property refs;
@@ -699,18 +800,20 @@ suppresses a later delivery.
   tracking association and the creation step, not from a second chat metadata
   cache or a later Tracking revision.
 - For a property content kind, any explicit selected reference that is
-  field-denied, child-denied, or incompatible, any denied required formatting
-  dependency of a selected property (the health pair requires its maximum-health
-  field), or a denied Basic target name yields the suppressed kind with no
-  references, hiding the whole content message rather than showing a partial
-  list. The inventory kind is suppressed with no snapshot and no references only
-  on a current field, target-type, or recipient-permission denial. A budget
-  defer is not a denial and does not convert a valid receipt into a payload-free
-  `SUPPRESSED` message.
+  field-denied, child-denied, or incompatible under the marker's frozen
+  authorization, any denied required formatting dependency of a selected
+  property (the health pair requires its maximum-health field), or a Basic
+  target name denied by that set yields the suppressed kind with no references,
+  hiding the whole content message rather than showing a partial list. The
+  inventory kind is suppressed with no snapshot and no references only on a
+  field, target-type, or recipient-permission denial in that frozen resolution.
+  A budget defer is not a denial and does not convert a valid receipt into a
+  payload-free `SUPPRESSED` message.
 
-Missing authorized property data does not suppress the descriptor: a selected
-reference that is authorized but whose value has not yet arrived still yields
-its kind, and the property receipt waits under the names-and-chat lifecycle. An
+Missing frozen-authorized property data does not suppress the descriptor: a
+selected reference that is frozen-authorized but whose value has not yet arrived
+still yields its kind, and the property receipt waits under the names-and-chat
+lifecycle. An
 inventory receipt carries its frozen snapshot in the atomic initial and never
 waits for a Tracking baseline or for the client lane `POLICY` view to update.
 

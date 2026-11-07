@@ -52,14 +52,14 @@ file has no presentation policy shape.
 
 | Member | JSON form | Meaning |
 | --- | --- | --- |
-| `targetTypes` | object mapping each of the five target-type IDs (`dropped_item`, `entity`, `entity_block`, `block`, `location`) to a rule object | Per-target-type field authorization. A missing or malformed target-type entry denies every field of that type instead of widening access. |
+| `targetTypes` | object mapping each of the five target-type IDs (`dropped_item`, `entity`, `entity_block`, `block`, `location`) to a rule object | Per-target-type field authorization resolved at a new creation. A missing or malformed target-type entry denies every field of that type instead of widening access. |
 | `targetTypes.<type>.white` | array of selector strings | Allow selectors for that target type. An empty list grants nothing by itself; an advertised field's manifest default still applies unless whitelist-only mode denies it. |
 | `targetTypes.<type>.black` | array of selector strings | Deny selectors for that target type; a matching field is denied unless an allow selector also matches, because an allow match wins. |
 | `targetTypes.<type>.childBlack` | array of child-reference objects | Exact record-child deny references for that target type; each object carries `adapterId`, `fieldId`, and a nonempty `recordPath` array of literal record keys. |
 | `targetTypes.<type>.whitelistOnly` | boolean | When true, a field that matches neither list for that target type is denied even when its manifest default is enabled. |
 | `minUpdateIntervalTicks` | number, ticks | Global minimum sampling interval; an adapter is never polled faster than this or its declared minimum. |
 | `scanBudget` | number | Per-capture source-scan allowance; `0` disables capture. |
-| `permissionLevels` | object mapping field ID to a vanilla level `0`–`4` | Per-field replacement of the manifest's required permission level. |
+| `permissionLevels` | object mapping field ID to a vanilla level `0`–`4` | Per-field replacement of the manifest's required permission level when a new creation resolves its authorization. |
 | `updateIntervals` | object mapping adapter ID to ticks | Per-adapter override that can only raise an adapter's declared sampling interval, not lower it. |
 
 A field selector is a field-ID pattern written as `namespace:path`; it matches
@@ -99,9 +99,17 @@ An explicit empty array is a deliberate opt-out and stays empty, and an explicit
 nonempty list is retained rather than overwritten. A target-type entry missing
 from the map keeps its deny-all outcome instead of receiving defaults.
 
-Each rule set applies to the marker's exact target type. Evaluation precedence,
-recipient masks, child-deny application, and client consequences are owned by
+Each rule set applies to a new creation's exact target type. Evaluation
+precedence, creation-time recipient authorization, child-deny application, and
+client consequences are owned by
 [presentation snapshot](../architecture/presentation/presentation_snapshot.md#per-target-type-field-policy).
+The selector, whitelist-only, permission override and child deny values are
+authorization inputs when a Ping is successfully created. A later edit affects
+later creations and does not re-evaluate an existing Ping's
+[frozen recipient content authorization](../architecture/presentation/presentation_snapshot.md#frozen-recipient-content-authorization).
+Sampling intervals and `scanBudget` remain current runtime settings; their
+fingerprint changes do not re-judge an existing marker's content
+authorization.
 Property Ping override selectors are a different grammar that matches a
 target's registry ID or tags rather than field IDs; it is owned by
 [presentation snapshot](../architecture/presentation/presentation_snapshot.md#property-ping).

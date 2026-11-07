@@ -178,6 +178,31 @@ live configuration changes, or real dedicated-server initialization. Narrow
 isolated server-default initialization coverage is inventoried under
 [configuration verification](configuration-ui.md#configuration-recovery-and-selection-grammar).
 
+## Frozen recipient authorization pending
+
+The existing coverage and evidence records above remain limited to their recorded
+execution or source-review scope.
+[D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md)
+changes new-Ping authorization timing; those records do not prove the new policy.
+
+Pending evidence covers:
+
+- the complete frozen recipient permission result at create for the Ping's
+  audience and content permission;
+- later revocation or grant affecting only new creates; and
+- for an online original-audience member that had not completed `HELLO` at
+  create, the Ping still stores the creation-time grant computed from
+  server-owned manifest and field definitions, not from receiver-accepted
+  manifest presence; after a later permission change, a ready, schema-compatible
+  `HELLO` is only a delivery or repair gate, later server fields or adapters do
+  not expand that grant, and true disconnect does not resurrect it.
+
+Global field, selector, child, `RESET`, metadata and same-type Ping grant scenarios
+are owned by the
+[presentation pending section](presentation.md#frozen-recipient-content-authorization-verification-pending);
+the fluid provider validation boundary is owned by the
+[inventory pending section](inventory.md#frozen-recipient-authorization-and-fluid-provider-trust-pending).
+
 ## Known automated gaps
 
 - the complete `ServerCore` operation ordering and channel/admission matrix in
