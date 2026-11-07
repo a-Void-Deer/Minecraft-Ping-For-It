@@ -84,6 +84,11 @@ public final class InventoryMinecraftSources {
 		@org.jetbrains.annotations.Unmodifiable List<Slot> slots, IPlatformInventoryService.@Nullable Access access,
 		@Nullable InventorySnapshotLayout snapshotLayout, boolean discoverItems,
 		@org.jetbrains.annotations.Unmodifiable List<BlockEntity> providerMembers) {
+		View {
+			entities = List.copyOf(entities);
+			slots = List.copyOf(slots);
+			providerMembers = List.copyOf(providerMembers);
+		}
 		View(String identity, List<BlockEntity> entities, List<Slot> slots, IPlatformInventoryService.@Nullable Access access) {
 			this(identity, entities, slots, access, null, false, List.of());
 		}
@@ -504,6 +509,8 @@ public final class InventoryMinecraftSources {
 				}
 			}
 			@Override public boolean allows(Container container) {
+				// valid() itself invokes mutable authority callbacks. Keep the established
+				// lookup boundary; a previous successful verdict is not reusable here.
 				if (!valid()) return false;
 				if (container instanceof net.minecraft.world.CompoundContainer) return true; // children independently checked
 				// A layout-less capability can own non-world backing storage. Keep

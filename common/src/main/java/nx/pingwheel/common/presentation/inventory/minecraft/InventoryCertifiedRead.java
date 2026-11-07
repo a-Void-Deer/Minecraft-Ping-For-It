@@ -96,6 +96,7 @@ final class InventoryCertifiedRead {
 		private final Proof proof;
 		private final @Unmodifiable List<BlockEntity> members;
 		private final BlockState @Unmodifiable [] states;
+		private final boolean frozenChestMapping;
 		private final InventoryValidationBudget.Cost validationCost, creationCost;
 		private final InventoryValidationBudget.Cost @Unmodifiable [] readCosts;
 		private final long retainedBytes;
@@ -121,11 +122,18 @@ final class InventoryCertifiedRead {
 				routes.add(new RouteEvidence(new Witness(states[index].getBlock()), view.access() == null ? states[index].getValue(ChestBlock.TYPE) : null,
 					view.access() == null && members.size() == 2 ? states[index].getValue(ChestBlock.FACING) : null));
 			}
+			// A vanilla chest certificate proves its ordered 27-slot mapping once.
+			// Later current() calls recheck live chest state/entities/size/owner/lock,
+			// never the two frozen 27-element address walks.
+			frozenChestMapping = view.access() != null || frozenChestMappingValid(view, members);
+			if (!frozenChestMapping) throw new ReadFailure(Check.STRUCTURE_INVALID);
 			// Only these audited routes establish a face-independent ordered physical address sequence.
 			var canonicalLayout = new InventorySnapshotLayout(route.name(), view.access() == null ? "" : layout.layoutData(),
 				view.access() == null ? layout.members().getFirst().position() : layout.controller(), canonical);
 			var graph = new Graph(view.access() == null ? "minecraft" : "create", input.target().dimensionId(), view.identity(), route, canonicalLayout);
 			proof = new Proof(graph, new Witness(world.worldIdentity()), new Witness(world.registries()), identities, routes);
+			// Retain the conservative admission profile. The one-time pure mapping
+			// walk replaces both construction-time current() walks; no live gate is added.
 			var memberCost = InventoryValidationBudget.currentMembers(members).times(2).plus(new InventoryValidationBudget.Cost(512, 512,
 				131072 + 8L * graph.slots() + 1024L * members.size()));
 			validationCost = view.access() instanceof IPlatformInventoryService.CertifiedSharedAccess provider
@@ -145,7 +153,7 @@ final class InventoryCertifiedRead {
 				: InventoryValidationBudget.coordinatedRead(validationCost, coordinated.coordinatedResidentCost(), slots);
 			retainedBytes = InventorySourceRetention.layout(canonicalLayout) + 2048 + 3 * InventorySourceRetention.list(members.size())
 				+ members.size() * 3L * (40 + 8) + InventorySourceRetention.array(states.length, 8)
-				+ InventorySourceRetention.array(readCosts.length, 8) + (readCosts.length + 2L) * 64 + 2 * 8 + 2;
+				+ InventorySourceRetention.array(readCosts.length, 8) + (readCosts.length + 2L) * 64 + 2 * 8 + 3;
 		}
 		@Override public Proof proof() { return proof; }
 		@Override public long retainedBytes() { return retainedBytes; }
@@ -220,6 +228,7 @@ final class InventoryCertifiedRead {
 			return Check.VALID;
 		}
 		private Check chestMapping(int index, BlockState state) {
+			if (!frozenChestMapping) return Check.STRUCTURE_INVALID;
 			ChestType type = states[index].getValue(ChestBlock.TYPE);
 			if (state.getValue(ChestBlock.TYPE) != type) return Check.STRUCTURE_INVALID;
 			if ((type == ChestType.SINGLE) != (members.size() == 1)) return Check.STRUCTURE_INVALID;
@@ -234,16 +243,32 @@ final class InventoryCertifiedRead {
 					|| other.getValue(ChestBlock.FACING) != state.getValue(ChestBlock.FACING)
 					|| !partner.relative(ChestBlock.getConnectedDirection(other)).equals(position)) return Check.STRUCTURE_INVALID;
 			}
-			var member = proof.graph().layout().members().get(index);
-			if (member.segments().size() != 1) return Check.STRUCTURE_INVALID;
-			var segment = member.segments().getFirst();
 			var container = (Container) members.get(index);
-			if (segment.localSlots() != 27 || segment.visibleSlots().size() != 27 || container.getContainerSize() != 27) return Check.STRUCTURE_INVALID;
-			for (int slot = 0; slot < 27; slot++) if (segment.visibleSlots().get(slot) != slot) return Check.STRUCTURE_INVALID;
-			int first = index * 27;
-			if (view.slots().size() != members.size() * 27) return Check.STRUCTURE_INVALID;
-			for (int slot = 0; slot < 27; slot++) if (view.slots().get(first + slot).container() != container || view.slots().get(first + slot).index() != slot) return Check.STRUCTURE_INVALID;
-			return Check.VALID;
+			return container.getContainerSize() == 27 ? Check.VALID : Check.STRUCTURE_INVALID;
+		}
+		/**
+		 * One construction-time proof of the frozen ordered address graph. The source
+		 * owns this immutable DTO; later current() calls only inspect live state.
+		 */
+		static boolean frozenChestMappingValid(InventoryMinecraftSources.View view, List<BlockEntity> members) {
+			@Nullable var layout = view.snapshotLayout();
+			if (layout == null || members.size() < 1 || members.size() > 2
+				|| layout.members().size() != members.size()
+				|| view.slots().size() != members.size() * 27) return false;
+			for (int index = 0; index < members.size(); index++) {
+				if (!(members.get(index) instanceof Container container)) return false;
+				var member = layout.members().get(index);
+				if (member.segments().size() != 1) return false;
+				var segment = member.segments().getFirst();
+				if (segment.localSlots() != 27 || segment.visibleSlots().size() != 27) return false;
+				int first = index * 27;
+				for (int slot = 0; slot < 27; slot++) {
+					if (segment.visibleSlots().get(slot) != slot) return false;
+					var visible = view.slots().get(first + slot);
+					if (visible.container() != container || visible.index() != slot) return false;
+				}
+			}
+			return true;
 		}
 		@Override public InventoryItemCodec.Catalog createCatalog(int ceiling, InventoryValidationBudget.Allowance allowance) {
 			InventoryMinecraftSources.requireDisplayBytes(ceiling);

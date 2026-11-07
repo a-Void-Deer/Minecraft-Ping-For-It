@@ -330,11 +330,12 @@ public interface IPlatformInventoryService {
 		Direction face();
 		/** Precheck every already resolved member, including lock/loot/mapping. */
 		boolean valid();
-		/** Only members already admitted by the source, not arbitrary wrapper delegates. */
+		/** Only members already admitted by the source, not arbitrary wrapper delegates; rechecks current authority. */
 		boolean allows(Container container);
+		/** Audits the admitted delegate graph under current source authority. */
 		boolean audited(Container container);
-		/** Frozen local mapping, null when no bounded member mapping was resolved. */
-		List<Integer> slots(Container container);
+		/** Frozen local mapping under current authority, null when no bounded member mapping was resolved. */
+		@org.jetbrains.annotations.Nullable @org.jetbrains.annotations.Unmodifiable List<Integer> slots(Container container);
 	}
 	/** Default indexed decorator; never retained by an external source across operations. */
 	final class GuardedAccess implements Access {
