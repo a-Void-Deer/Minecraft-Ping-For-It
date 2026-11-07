@@ -32,12 +32,15 @@ import org.jetbrains.annotations.Nullable;
  * original root/member objects, current route/controller/mode and owner again before committing data.
  * Revalidate the exact historical evidence again before publication. No successful check is cached.
  *
- * <p>Adapters must gate the root, controller and EVERY member before state/entity/capability/content
- * or iterator metadata access, including already acquired objects. The frozen side never widens to
- * null, another face or an unsided handler. Create uses the same NeoForge IFluidHandler route with
- * tested-version, whole-structure, controller, creative-tank and active-boiler mode checks. Static
- * block capabilities only: cauldrons, moving/virtual sources and entity/private storage are unsupported.
- * No fluid route certifies cross-owner/face pooling or snapshot atomicity.
+ * <p>Adapters must route root, controller and internal member callbacks through the source context
+ * before state/entity/capability/content or iterator metadata access, including already acquired
+ * objects. The source gates the target root and a declared controller; it trusts the provider's
+ * internal member layout and handler relationship instead of treating every physical member as an
+ * independent Ping access unit. The frozen side never widens to null, another face or an unsided
+ * handler. Create uses the same NeoForge IFluidHandler route with tested-version, whole-structure,
+ * controller, creative-tank and active-boiler mode checks. Static block capabilities only: cauldrons,
+ * moving/virtual sources and entity/private storage are unsupported. No fluid route certifies
+ * cross-owner/face pooling or snapshot atomicity.
  * Native third-party capability/codec internals remain external-trusted: admission bounds invocation
  * count, not arbitrary callback time or allocation. Ping-owned metadata, copies, canonicalization,
  * hashing, retained values and publication still require their separately admitted finite guards.
@@ -130,6 +133,10 @@ public interface IPlatformFluidService {
 	@NotNullByDefault
 	@FunctionalInterface
 	interface AuthorityGate { boolean test(Operation operation); }
+	/** Provider declaration of the target controller that must carry the target-level gate before access. */
+	@NotNullByDefault
+	@FunctionalInterface
+	interface ControllerGate { boolean test(BlockPos controller, Operation operation); }
 	/** Pure cached profile, before the first provider/world callback. */
 	OperationProfile probeProfile();
 	/** Root/controller/count/size only: no full-member allocation, iterator/content getter or layout construction. */
@@ -141,10 +148,12 @@ public interface IPlatformFluidService {
 		/** Pure incremental finish bound for the known shape, excluding separately admitted later N growth. */
 		OperationProfile finishProfile();
 		/**
-		 * Single use, synchronous and never tick-retained. Enter finishProfile before work. Gate all M members
-		 * before a controller capability; when N is then known, enter its incremental profile BEFORE allocating
-		 * layout/underlying/capacity arrays. Share Admission/allowance, including failure/closing callbacks.
-		 * Close partial state on every failure; successful Access owns its metadata, never the probe ticket.
+		 * Single use, synchronous and never tick-retained. Enter finishProfile before work. Route the
+		 * target root and declared controller through the target gate before a controller capability;
+		 * internal member callbacks stay provider-owned. When N is then known, enter its incremental
+		 * profile BEFORE allocating layout/underlying/capacity arrays. Share Admission/allowance,
+		 * including failure/closing callbacks. Close partial state on every failure; successful Access
+		 * owns its metadata, never the probe ticket.
 		 */
 		Optional<Access> finish(Admission admission);
 		/** Idempotent release only; any provider closing callbacks run inside the admitted probe/finish operation. */
@@ -152,22 +161,41 @@ public interface IPlatformFluidService {
 	}
 
 	/**
-	 * Server-thread current scope. Suppliers must re-read authority/membership on every call; they must
-	 * not capture a successful check, an allowance or an expired external resolution. External sources
-	 * reacquire this context per operation; ordinary handles may retain it with live suppliers.
+	 * Server-thread current scope. The source re-reads target root/controller authority and membership
+	 * on every root/controller call and never captures a successful check, an allowance or an expired
+	 * external resolution. Internal member callbacks remain provider-owned and do not repeat that target
+	 * authority work. External sources reacquire this context per operation; ordinary handles may retain
+	 * it with live suppliers.
 	 */
 	@NotNullByDefault
 	record Context(ServerLevel level, BlockPos root, Direction face, UUID readOwner,
-		MemberGate memberGate, AuthorityGate currentAuthority) {
+		MemberGate memberGate, AuthorityGate currentAuthority, ControllerGate controllerGate) {
 		public Context {
 			Objects.requireNonNull(level); root = Objects.requireNonNull(root).immutable();
 			Objects.requireNonNull(face); Objects.requireNonNull(readOwner);
 			Objects.requireNonNull(memberGate); Objects.requireNonNull(currentAuthority);
+			Objects.requireNonNull(controllerGate);
+		}
+		/** Existing wiring without a controller declaration keeps the member gate as its fallback. */
+		public Context(ServerLevel level, BlockPos root, Direction face, UUID readOwner,
+			MemberGate memberGate, AuthorityGate currentAuthority) {
+			this(level, root, face, readOwner, memberGate, currentAuthority,
+				(controller, operation) -> memberGate.test(controller, operation));
 		}
 		public void require(BlockPos member, Operation operation) {
 			Objects.requireNonNull(member); Objects.requireNonNull(operation).allowance();
 			if (!level.getServer().isSameThread() || !memberGate.test(member, operation) || !currentAuthority.test(operation))
 				throw new InventorySourceUnavailableException("fluid access outside current owner/member scope");
+		}
+		/**
+		 * Explicit provider declaration and gate for a non-root target controller. The declaration
+		 * is applied before the provider's controller metadata or capability callback; it never
+		 * turns every internal member into an independent target gate.
+		 */
+		public void requireController(BlockPos controller, Operation operation) {
+			Objects.requireNonNull(controller); Objects.requireNonNull(operation).allowance();
+			if (!level.getServer().isSameThread() || !controllerGate.test(controller, operation) || !currentAuthority.test(operation))
+				throw new InventorySourceUnavailableException("fluid controller outside current target scope");
 		}
 	}
 

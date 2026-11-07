@@ -51,6 +51,8 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Coordi
 	@NotNullByDefault
 	public interface World {
 		void require(BlockPos position, Operation operation);
+		/** Explicit target-controller declaration/gate before controller metadata or capability access. */
+		default void requireController(BlockPos position, Operation operation) { require(position, operation); }
 		/** Implementations must apply an entry gate before any chunk, state, entity or other metadata read. */
 		Block block(BlockPos position, Operation operation);
 		@Nullable IFluidHandler capability(BlockPos position, Direction face, Operation operation);
@@ -76,6 +78,22 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Coordi
 		String description();
 		/** Metadata only, checking original identities, current mode and exact ordered topology. */
 		boolean matches(Operation operation);
+		/**
+		 * Current target applicability for an already-bound unit: the original root/controller
+		 * identities, provider mode and handler route, without re-decomposing every internal
+		 * physical member. A provider that owns a structure supplies this cheaper current check.
+		 */
+		default boolean targetMatches(Operation operation) { return matches(operation); }
+		/** Pure upper bound for {@link #targetMatches(Operation)}, including provider metadata calls. */
+		default OperationProfile targetCheckProfile() { return checkProfile(); }
+		/**
+		 * Current access-authority snapshot after the final count. It must not re-enter address
+		 * metadata callbacks such as {@link World#block}; cached provider structure may be checked
+		 * only through the explicit controller/root authority closure.
+		 */
+		default boolean authorityMatches(Operation operation) { return true; }
+		/** Pure upper bound for one {@link #authorityMatches(Operation)} call. */
+		default OperationProfile authorityProfile() { return OperationProfile.NONE; }
 		/** Reject non-stock capability modes (for example a stale Create boiler cache). No contents. */
 		default boolean accepts(IFluidHandler handler, Operation operation) { return true; }
 		default OperationProfile acceptanceProfile() { return OperationProfile.NONE; }
@@ -115,11 +133,25 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Coordi
 	}
 	private static OperationProfile currentProfile(Route route, int count) {
 		var world = route.world(); long members = route.members().size();
-		// Two route passes each close with held(M); acquisition and final count add two more held(M).
+		// Initial discovery/finish remains the full provider-owned structure pass: two route
+		// passes each close with held(M); acquisition and final count add two more held(M).
 		// The two count gates, closing authority(M), and two ordered capacity(N) passes are separate.
 		return route.checkProfile().times(2).plus(world.heldProfile().times(4 * members))
 			.plus(world.capabilityProfile()).plus(route.acceptanceProfile())
 			.plus(world.requireProfile().times(2 + members)).plus(COUNT.times(2))
+			.plus(world.requireProfile().plus(CAPACITY).times(2L * count));
+	}
+	/**
+	 * Current-operation bound. The provider owns its internal members, so this validates only the
+	 * frozen target/controller/handler/count/capacity route instead of walking every member again.
+	 */
+	private static OperationProfile targetProfile(Route route, int count) {
+		var world = route.world();
+		// Two O(1) route-metadata checks (before handoff and after capacity passes), one pure
+		// authority/mode closure after the final count, and no address callback after that count.
+		return route.targetCheckProfile().times(2).plus(route.authorityProfile())
+			.plus(world.capabilityProfile()).plus(route.acceptanceProfile())
+			.plus(world.requireProfile().times(5)).plus(COUNT.times(3))
 			.plus(world.requireProfile().plus(CAPACITY).times(2L * count));
 	}
 	/** Incremental N-sized allocation, only after an admitted count lookup. No maximum-slot reservation. */
@@ -149,7 +181,7 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Coordi
 		var description = new StringBuilder(route.description()).append(";capacities=");
 		for (int index = 0; index < count; index++) { if (index > 0) description.append(','); description.append(capacities[index]); }
 		layout = new InventorySnapshotLayout("neoforge:fluid_capability", description.toString(), route.capabilityPosition(), members);
-		validationProfile = currentProfile(route, count);
+		validationProfile = targetProfile(route, count);
 		readProfile = validationProfile.times(2).plus(new OperationProfile(RESIDENT_HANDOFF, 0, 0, 0));
 	}
 
@@ -215,6 +247,22 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Coordi
 		// The final metadata callback cannot authorize a now-denied sibling or controller.
 		requireHeld(route, operation);
 	}
+	/** Current target-level route/mode only; internal member layout is provider-owned. */
+	private static void requireTarget(Route route, Operation operation) {
+		if (!route.targetMatches(operation))
+			throw FluidSourceDiagnostics.unavailable("fluid capability route changed",
+				() -> FluidSourceDiagnostics.describeRoute(route));
+	}
+	/** The current capability getter after the target/mode check, without an all-member held walk. */
+	private static @Nullable IFluidHandler acquireCurrent(Route route, Operation operation) {
+		route.world().require(route.capabilityPosition(), operation);
+		@Nullable IFluidHandler handler = route.world().capability(route.capabilityPosition(), route.face(), operation);
+		route.world().require(route.capabilityPosition(), operation);
+		if (handler != null && !route.accepts(handler, operation))
+			throw FluidSourceDiagnostics.unavailable("fluid capability mode unavailable",
+				() -> FluidSourceDiagnostics.describeRoute(route) + ";handler=" + FluidSourceDiagnostics.describeHandler(handler));
+		return handler;
+	}
 	private static void requireHeld(Route route, Operation operation) {
 		int index = 0;
 		for (Member member : route.members()) {
@@ -230,7 +278,7 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Coordi
 	private static void requireCapacities(Route route, IFluidHandler handler, int[] expected, Operation operation) {
 		// Capacities are public address metadata, not contents or a claim of opaque provider internals.
 		// Only the capability owner is accessed per address; do not rescan every structural member for
-		// every tank. Full route/mode and all-member checks surround the bounded sequence.
+		// every tank. Current target/controller checks (and the initial full route pass) surround this sequence.
 		for (int index = 0; index < expected.length; index++) {
 			int address = index;
 			route.world().require(route.capabilityPosition(), operation);
@@ -250,6 +298,23 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Coordi
 		// Count follows the last state/entity/route callback. The closing pass rechecks current
 		// authority only, without another route/state getter that could hide a later count change.
 		for (Member member : route.members()) route.world().require(member.position(), operation);
+	}
+	/** Current count closure after the last capacity/route callback; no member authorisation walk. */
+	private static void requireCount(Route route, IFluidHandler handler, int expected, Operation operation) {
+		route.world().require(route.capabilityPosition(), operation);
+		int count = handler.getTanks();
+		// No World.block/route metadata here: that was the final-count callback that could change
+		// count or capacity after an earlier target check. Only cached authority/mode evidence and
+		// the pure root/controller closure run after this count.
+		if (!route.authorityMatches(operation))
+			throw FluidSourceDiagnostics.unavailable("fluid capability authority changed",
+				() -> FluidSourceDiagnostics.describeRoute(route));
+		int closureCount = handler.getTanks();
+		route.world().require(route.capabilityPosition(), operation);
+		if (closureCount != count || closureCount != expected)
+			throw FluidSourceDiagnostics.unavailable("fluid capability layout changed",
+				() -> FluidSourceDiagnostics.describeRoute(route) + ";expected=" + expected
+					+ ";count=" + count + ";closure=" + closureCount);
 	}
 
 	@Override public InventorySnapshotLayout layout() { return layout; }
@@ -292,9 +357,10 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Coordi
 	}
 	private void requireCurrent(Operation operation) {
 		var route = liveRoute();
-		@Nullable IFluidHandler current = acquire(route, operation);
-		// A matching total is not a route witness: retain the exact capability object and root/member
-		// objects as well as the ordered indices. Replacement starts a fresh observation, not a remap.
+		requireTarget(route, operation);
+		@Nullable IFluidHandler current = acquireCurrent(route, operation);
+		// A matching total is not a route witness: retain the exact capability object and the
+		// ordered indices. Internal member objects remain the provider's own frozen layout.
 		if (current == null || current != handler) throw FluidSourceDiagnostics.unavailable("fluid capability replaced",
 			() -> FluidSourceDiagnostics.describeRoute(route)
 				+ ";expectedHandler=" + FluidSourceDiagnostics.describeHandler(handler)
@@ -304,11 +370,11 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Coordi
 		if (currentCount != count) throw FluidSourceDiagnostics.unavailable("fluid capability layout changed",
 			() -> FluidSourceDiagnostics.describeRoute(route) + ";expected=" + count + ";observed=" + currentCount);
 		requireCapacities(route, current, capacities, operation);
-		requireRoute(route, operation);
+		requireTarget(route, operation);
 		// The post-capacity route callbacks may themselves change public addressing. Check that
 		// ordered witness again, then check count AFTER the last capacity/route callback as well.
 		requireCapacities(route, current, capacities, operation);
-		requireCountAndHeld(route, current, count, operation);
+		requireCount(route, current, count, operation);
 	}
 
 	@Override public boolean valid(Operation operation) {

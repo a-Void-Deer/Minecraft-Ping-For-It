@@ -87,6 +87,8 @@ final class CreateFluidTankValidationPerformanceTest {
 				world.reset();
 				long before = 0, started = System.nanoTime();
 				OperationProfile finishProfile;
+				var admitted = new java.util.ArrayList<OperationProfile>();
+				IPlatformFluidService.Admission recorder = profile -> { admitted.add(profile); return admission.enter(profile); };
 				try (var op = admission.enter(FluidCapabilityAccess.PROBE_PROFILE)) {
 					// Mirror PlatformFluidServiceImpl.probe: admit the fixed probe profile, gate the
 					// root, read its block, gate again, then run the actual Create discovery.
@@ -99,7 +101,7 @@ final class CreateFluidTankValidationPerformanceTest {
 					try (var probe = CreateFluidTankAccess.probe(world, hit, FACE, block, world, op)) {
 						assertEquals(members, probe.shape().members());
 						finishProfile = probe.finishProfile();
-						access = probe.finish(admission).orElseThrow();
+						access = probe.finish(recorder).orElseThrow();
 						assertReleasedProbe(probe);
 					}
 					before = op.allowance().attemptedWorkUnits();
@@ -115,10 +117,10 @@ final class CreateFluidTankValidationPerformanceTest {
 				var discovery = Snapshot.of(world);
 				assertEquals(0, discovery.contentGet(), "discovery is metadata only");
 				assertTrue(discovery.memberGate() > 0 && discovery.authority() > 0 && discovery.held() > 0);
-				// The public probe profile, the finish profile and the address/finish profile are
-				// the independently admitted upper bounds for this discovery tree.
+				// The public probe profile plus the actual finish Admission profiles are the
+				// independently admitted upper bounds for this discovery tree.
 				long gateBound = Math.addExact(FluidCapabilityAccess.PROBE_PROFILE.memberGateCalls(),
-					Math.addExact(finishProfile.memberGateCalls(), finished.validationProfile().memberGateCalls()));
+					admitted.stream().mapToLong(OperationProfile::memberGateCalls).sum());
 				assertTrue(discovery.memberGate() <= gateBound, () -> "discovery member gates " + discovery);
 				assertTrue(discovery.authority() <= gateBound, () -> "discovery authority gates " + discovery);
 				print(members, "discovery", discovery, before, finishProfile, discoveryNanos);

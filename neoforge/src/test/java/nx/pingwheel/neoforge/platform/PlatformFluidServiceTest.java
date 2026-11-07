@@ -276,6 +276,27 @@ public class PlatformFluidServiceTest {
 		}
 	}
 
+	@Test void finalCountCallbackCannotRevokeTargetAuthorityBeforeTheGetter() {
+		for (String change : List.of("authority", "identity")) {
+			var world = new World(); var handler = world.handler();
+			var access = resolve(world, BlockPos.ZERO, Direction.NORTH).orElseThrow();
+			var original = world.block;
+			handler.countReads = 0;
+			handler.onCount = () -> {
+				if (handler.countReads != 2) return;
+				world.afterBlock = () -> fail("route metadata called after the final count");
+				if (change.equals("authority")) world.allowed = false;
+				else world.routeIdentity = false;
+			};
+			assertFalse(access.valid(), change + ": the post-count target gate must see the revoked root/controller state");
+			assertEquals(0, handler.reads);
+			world.allowed = true; world.routeIdentity = true; world.block = original;
+			world.afterBlock = () -> {}; handler.countReads = 0; handler.reads = 0;
+			assertThrows(InventorySourceUnavailableException.class,
+				() -> access.consume(0, entry -> fail("content getter ran after final-count revocation")), change);
+			assertEquals(0, handler.reads);
+		}
+	}
 	@Test void finalCountIsCheckedAfterCapacityAndPostCapacityRouteCallbacks() {
 		for (boolean duringCapacity : new boolean[] {true, false}) for (int changed : new int[] {1, 3}) {
 			var world = new World(); var handler = world.handler();
@@ -299,7 +320,7 @@ public class PlatformFluidServiceTest {
 		var heldAccess = resolve(changedHeld, BlockPos.ZERO, Direction.NORTH).orElseThrow();
 		int heldBefore = heldHandler.capacityReads;
 		changedHeld.afterHeld = () -> { if (heldHandler.capacityReads >= heldBefore + 4) heldHandler.count = 3; };
-		assertFalse(heldAccess.valid(), "final count follows held state/entity metadata callbacks too");
+		assertTrue(heldAccess.valid(), "provider-internal held/member callbacks are not re-run by current target validation");
 	}
 
 	@Test void equalCapacityOpaqueRemappingIsNotClaimedAsDetectableAndEachNativeReadIsStillPaid() {
@@ -861,7 +882,7 @@ public class PlatformFluidServiceTest {
 		private FluidCapabilityAccess.Block block = new FluidCapabilityAccess.Block(new Object(), new Object(), "test:tank", "test:tank");
 		private @Nullable Handler handler = new Handler();
 		private final List<Direction> faces = new ArrayList<>();
-		private boolean allowed = true;
+		private boolean allowed = true, routeIdentity = true;
 		private int callbacks;
 		private Runnable afterRead = () -> {};
 		private Runnable afterBlock = () -> {};
@@ -870,7 +891,8 @@ public class PlatformFluidServiceTest {
 		@Override public void require(BlockPos position, Operation operation) {
 			gate(operation);
 			callbacks++;
-			if (!allowed || !position.equals(BlockPos.ZERO)) throw new InventorySourceUnavailableException("denied member/owner");
+			if (!allowed || !routeIdentity || !position.equals(BlockPos.ZERO))
+				throw new InventorySourceUnavailableException("denied member/owner/route");
 			if (handler != null && handler.reads > 0) afterRead.run();
 		}
 		@Override public FluidCapabilityAccess.Block block(BlockPos position, Operation operation) { require(position, operation); afterBlock.run(); return block; }
@@ -885,13 +907,14 @@ public class PlatformFluidServiceTest {
 		private int count = 2, reads, capacityReads, countReads;
 		private int[] capacities = {1000, 2000};
 		private java.util.function.IntConsumer onCapacity = index -> {};
+		private Runnable onCount = () -> {};
 		private FluidStack stack = FluidStack.EMPTY;
 		private @Nullable RuntimeException failure;
 		private boolean nullStack;
 		@Override public boolean equals(@Nullable Object other) { throw new AssertionError("native handler equals"); }
 		@Override public int hashCode() { throw new AssertionError("native handler hashCode"); }
 		@Override public String toString() { throw new AssertionError("native handler formatting"); }
-		@Override public int getTanks() { countReads++; return count; }
+		@Override public int getTanks() { countReads++; onCount.run(); return count; }
 		@Override public @Nullable FluidStack getFluidInTank(int tank) {
 			reads++;
 			if (failure != null) throw failure;
