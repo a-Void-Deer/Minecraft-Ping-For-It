@@ -205,8 +205,12 @@ class CreateFluidTankProductionBoundaryTest {
 				try (var unsupported = new Mods("6.0.11")) { load.invoke(null); assertEquals("unsupported-version", field(client, "lastCreateTankResolverState").get(null)); }
 				try (var absent = new Mods(null)) { load.invoke(null); assertEquals("not-detected", field(client, "lastCreateTankResolverState").get(null)); }
 			} finally {
-				for (var resolverType : List.of(type, vault)) {
-					((BlockPresentationResolverRegistry.Registration) field(resolverType, "registration").get(null)).close(); field(resolverType, "registration").set(null, null);
+				try {
+					VaultOptionalHarness.closeCreateAdapters(client);
+				} finally {
+					for (var resolverType : List.of(type, vault)) {
+						((BlockPresentationResolverRegistry.Registration) field(resolverType, "registration").get(null)).close(); field(resolverType, "registration").set(null, null);
+					}
 				}
 			}
 		}

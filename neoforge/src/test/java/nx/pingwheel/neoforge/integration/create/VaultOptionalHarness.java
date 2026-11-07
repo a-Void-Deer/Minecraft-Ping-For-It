@@ -3,6 +3,7 @@ package nx.pingwheel.neoforge.integration.create;
 import java.io.InputStream;
 import java.lang.reflect.Field;
 import java.lang.reflect.Proxy;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.zip.ZipFile;
@@ -17,9 +18,11 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
+import org.objectweb.asm.Handle;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.ClassNode;
+import org.objectweb.asm.tree.InvokeDynamicInsnNode;
 import org.objectweb.asm.tree.MethodNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 
@@ -83,7 +86,26 @@ final class VaultOptionalHarness extends ClassLoader {
 		var original = new ClassNode(); new ClassReader(bytes).accept(original, 0);
 		original.fields.removeIf(f -> !f.name.equals("MARKER_STORE"));
 		original.fields.forEach(f -> f.access &= ~Opcodes.ACC_FINAL);
-		original.methods.removeIf(m -> !List.of("markerService", "markerStore").contains(m.name));
+		// Keep the factory methods and every own method they reach, including the
+		// synthetic lambda bodies behind invokedynamic. Removing those bodies makes
+		// the retained production bytecode fail linkage only in this harness.
+		var retained = new HashSet<String>(); retained.add("markerService"); retained.add("markerStore");
+		boolean grew;
+		do {
+			grew = false;
+			for (var method : original.methods) {
+				if (!retained.contains(method.name)) continue;
+				for (var instruction : method.instructions) {
+					if (instruction instanceof MethodInsnNode call && call.owner.equals(original.name)
+						&& retained.add(call.name)) grew = true;
+					if (instruction instanceof InvokeDynamicInsnNode dynamic)
+						for (var argument : dynamic.bsmArgs)
+							if (argument instanceof Handle handle && handle.getOwner().equals(original.name)
+								&& retained.add(handle.getName())) grew = true;
+				}
+			}
+		} while (grew);
+		original.methods.removeIf(m -> !retained.contains(m.name));
 		var writer = new ClassWriter(0); original.accept(writer); return writer.toByteArray();
 	}
 	/** Only supplies detached config to the current factory's real HANDLER.getConfig() route; no file/platform lifecycle. */
@@ -171,6 +193,11 @@ final class VaultOptionalHarness extends ClassLoader {
 		field(entity.getClass(), "width").setInt(entity, width);
 		field(entity.getClass(), "height").setInt(entity, height);
 		return entity;
+	}
+	static void closeCreateAdapters(Class<?> client) throws Exception {
+		var close = client.getDeclaredMethod("closeCreateAdapters");
+		close.setAccessible(true);
+		close.invoke(null);
 	}
 	static Field field(Class<?> owner, String name) throws Exception { var field = owner.getDeclaredField(name); field.setAccessible(true); return field; }
 	static <T> T allocate(Class<T> type) {
