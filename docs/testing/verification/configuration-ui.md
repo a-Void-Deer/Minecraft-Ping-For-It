@@ -366,9 +366,7 @@ channel rather than another dependency. These are headless loader send seams,
 not live connection or multiplayer transport evidence.
 
 The Tracking partition additions, including the later stage-report case, have
-dedicated model, persistence, transaction, widget and strict-wire assertions in
-the current
-[logging-coverage audit final acceptance](build-checks.md#logging-coverage-audit-final-acceptance):
+dedicated model, persistence, transaction, widget and strict-wire assertions:
 
 - `InventorySettingsPersistenceTest` checks absent/null defaults, all four
   independent boolean pairs, explicit sibling preservation, unchanged
@@ -397,6 +395,11 @@ the current
   callbacks after revocation/disconnect. Catalog and eight-locale resource
   fixtures cover placement and Off/On, current authority and next-scan help;
   they do not establish assembled live tooltip delivery or translation quality.
+
+No saved execution acceptance record yet covers these added logging/diagnostic
+coverage items; that evidence remains pending. The
+[shared diagnostics evidence note](integrations.md#shared-exception-diagnostics)
+owns the cross-domain gap.
 
 ## Logging-profile configuration and controls
 

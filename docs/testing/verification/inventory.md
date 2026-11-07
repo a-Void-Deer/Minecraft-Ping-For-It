@@ -2058,6 +2058,12 @@ bodies and initialized native locals, checking method signatures/bytecode with
 isolated optional ancestors and a stand-in `ServerLevel`. It is not a composed
 coordinated content read, installed-mod launch or whole-game benchmark.
 
+The later ITEM baseline-to-after comparison over this workload is recorded in
+[build checks](build-checks.md#item-redundant-work-final-verification). It
+observed unchanged actual operation counters, certified modeled retained bytes
+`+2` and small allocation deltas; it is a matched observation, not a new
+performance baseline or an overall speedup claim.
+
 ### Fixed metadata and coordinated-validation coverage
 
 `CreateVaultMetadataPortTest` checks lazy tested-version gating, defining-loader
@@ -2248,12 +2254,12 @@ counterpart pressure.
 
 These are headless owner executions. The current-input combined execution and
 artifact checks are recorded in
-[build checks](build-checks.md#final-combined-tree-acceptance-and-artifact-verification).
+[build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
 Cross-boundary client chat and transport coverage is in
 [presentation verification](presentation.md#immediate-inventory-creation-snapshot-coverage).
 
 Execution results are recorded in the
-[automated verification results](build-checks.md#automated-verification-results).
+[final combined build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
 These headless tests and builds do not establish live Create/Refined Storage
 behavior, the cause of the reported Vault import/export failure,
 live multiplayer, GPU rendering
@@ -2378,28 +2384,155 @@ The passing lane-policy, recipientless tracking, certified-pool, member-gate and
 creation-snapshot cases above remain evidence for the dynamic permission and
 per-member gates they exercised. They do not establish
 [D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md).
-Pending evidence covers:
+
+Current-source automated cases cover inventory-specific boundaries.
+`InventoryFrozenControlTest` covers the first `HELLO` using live host session
+authority, same-epoch reset isolation between recipients, a normal same-epoch
+reset republishing Preview, and `CLOSE` removing a deferred `OPENED` retry.
+`InventoryOpenedPacketTest` covers the `OPENED` wire kind, its lane-bit
+authorization, session-wide shape, exact size, and malformed, truncated or
+trailing rejection; the
+[inventory-v2 protocol](../../architecture/network/protocol.md#inventory-previewtracking-route-inventory-v2)
+owns that grammar. `FrozenInitialAdmissionTest` covers inventory first-delivery
+admission at capacity without mutation and reopening after removal. These cases
+passed in the final combined execution recorded in
+[build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
+
+Pending live evidence covers:
 
 - Inventory Preview authorization at request start and a separate new
   authorization for the `SELECT` create, without inheriting the Preview result;
-- inventory-specific creation snapshot and receipt behavior under the frozen
-  rule, including de-op/re-op where old Pings keep their create-time result and
-  new Pings use the new result;
+- inventory creation snapshot and receipt behavior under the frozen rule,
+  including de-op/re-op where old Pings keep their create-time result and new
+  Pings use the new result;
 - the global field/selector/child, `RESET`, metadata and same-type Ping grant
   scenarios in the
   [presentation pending section](presentation.md#frozen-recipient-content-authorization-verification-pending);
-- fluid validation through the target provider rather than every physical member
-  as an independent Ping access-check object, with the hardcoded
-  stricter-validation exception set empty.
-
-Known limitation: a future built-in or external plugin dedicated provider is not
-defined or implemented here; its API, matching and fallback remain open, and no
-implementation test is recorded. The
-[inventory provider contract](../../architecture/presentation/inventory.md#fluid-provider-trust-and-validation-exceptions)
-owns that boundary.
+  and
+- fluid validation through the target provider, whose boundary and any
+  stricter-validation exceptions remain owned by the
+  [inventory provider contract](../../architecture/presentation/inventory.md#fluid-provider-trust-and-validation-exceptions).
+  No dedicated-provider implementation or measured live performance benefit is
+  recorded.
 
 The [manual matrix](manual-integration.md#frozen-recipient-authorization-and-provider-trust)
-owns the pending live checks.
+owns the pending live checks. The final combined automated acceptance is recorded
+in [build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
+
+## Idle source health scheduling verification pending
+
+`InventoryIdleHealthSchedulingTest` contains six current-source headless cases
+over the production backend and runtime with counted source-validation and read
+callbacks. They cover a completed Preview's period and a deferred overdue retry,
+an active Tracking sweep probing while an idle lease waits, a live Tracking
+period change, `INVALID` recovery retaining its per-tick attempts, a late-joining
+recipient's immediate check and completed handoff, and a pending handoff
+validating immediately before send without a separate health probe. These
+current-source cases passed in the final combined execution recorded in
+[build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
+They are deterministic seam checks, not a live timing measurement; live timing
+remains pending. The
+[idle source health scheduling contract](../../architecture/presentation/inventory.md#idle-source-health-scheduling)
+owns the behavior.
+
+## Lane policy hint refresh verification
+
+`InventoryPolicyFrozenDemandRegressionTest` has current-source cases over the
+production backend and server. They cover the on-demand
+[lane policy hint refresh contract](../../architecture/presentation/inventory.md#lane-policy-hint-and-refresh):
+a replaceable provider changing a lane without a provider replacement leaves the
+cached hint stale, while the next `OPEN` and create resolve current authority and
+keep the accepted Preview's `OPEN` lanes and the existing Ping's creation-frozen
+content and Tracking. In steady state with a frozen Preview and Tracking, ticks
+perform zero permission callbacks for the two Inventory fields while SECTION-mask
+callbacks and live quantity/source reads continue; a later SECTION-mask change
+evaluates its own fields without clearing either frozen lane. An explicit
+provider replacement refreshes the queued hint once and budget retries do not
+re-evaluate it.
+
+`InventoryProductionPolicyTest` passing cases include the first-HELLO
+OFFER-before-POLICY initial hint, deferred-offer/data gate, transport-failure
+retry, queued-owner retention across retry/reconfiguration/view/epoch
+boundaries, provider-callback refresh and session-replacement/token cases. A new
+inventory create still resolves its own audience and content authorization; it
+does not inherit a Preview's frozen lanes, target type or retained hint. These
+are behavioral authorization and ownership assertions, not a measured
+performance claim. The cases passed in the
+[final ITEM execution](build-checks.md#item-redundant-work-final-verification).
+
+## Resident scope and certified mapping boundary verification
+
+`ResidentScopeReadBoundaryTest` exists in the common test source set and in the
+Fabric, Forge and NeoForge loader test source sets, and those cases pass in the
+final suite. They verify the baseline authority safe fallback: the explicit
+current-authority gate remains the whole-source check at mutable-callback
+boundaries; frozen membership and mapping are not a current authority token, and
+the production membership/mapping boundaries retain the existing nested authority
+checks and refuse a foreign delegate. The loader cases count the explicit loader
+gates without replacing them with frozen lookups. The Forge and NeoForge
+`ResidentScopeReadBoundaryLoaderTest` cases use the actual native wrapper,
+install a removal hook in the final callback and assert zero content getters;
+they also check that a refused caller allowance invokes no world key or native
+wrapper and that an admitted prefix remains paid.
+
+`CertifiedChestFrozenMappingTest` passes in the final execution and covers the
+retained P3 certificate: the single- and double-chest ordered address mapping
+(27 and 54 pairs) is proved once at construction, the view owns immutable entity,
+slot-address and member copies, a malformed or reversed mapping is refused, and
+later current validation rechecks live identity, pairing, size, owner, lock and
+grant without consulting producer-owned address lists. The baseline authority
+gates and existing conservative cost accounting remain unchanged; the old cost
+is not lowered. The frozen mapping remains layout evidence under [the certified
+pool contract](../../architecture/presentation/inventory.md#certified-tracking-observation-pools),
+and the resident-scope authority boundary remains under [provider
+safety](../../architecture/presentation/inventory.md#provider-layer-and-safety).
+
+P2 lookup deduplication was withdrawn from this phase because the evaluated
+`valid()` callback paths did not establish callback-free closure. The new tests
+protect the retained baseline authority sequence and add no unpaid extra
+authority pass. P2 is not a delivered optimization and has no completion,
+performance or allocation claim.
+
+## Immutable publication work reuse verification
+
+The [publication authority and progress contract](../../architecture/presentation/inventory.md#publication-authority-and-progress)
+owns inventory cut authorization and progress, and the
+[sync publication contract](../../architecture/presentation/shared_sources.md#sync-publication)
+owns the generic immutable cut and cost mechanics. The cases below exercise
+inventory-specific reuse of one detached encoding within a publication operation
+and pass in the [final ITEM execution](build-checks.md#item-redundant-work-final-verification).
+
+`CutWorkReuseTest` covers the detached encoded-fragment helper: one immutable
+fragment backs independent recipient results without exposing mutable bytes, and
+a cross-lane value is refused before encoding. `InventoryChecksumsTest` covers
+independent ITEM and FLUID golden vectors over non-ASCII canonical samples,
+including input-order independence, lane-domain separation, wire-entry
+projection and one whole-cut sample visit. FNV-1a checksum bytes and the v2 wire
+format are unchanged.
+
+`InventorySyncPublisherTest` covers multipart cut cases: the admitted
+cut's checksum is computed once and reused across its parts, a newer offer cannot
+rewrite it, retry reuses the immutable packet without another admission
+traversal, delivery freezes a separate delivered-map checksum for heartbeat, and
+withdrawal plus rebase starts a fresh cut rather than carrying the old digest.
+The admitted workspace stays charged through delivery and releases at
+completion.
+
+`InventoryFanoutEncodingReuseTest` covers the operation-local fan-out: within
+one publication operation, an identical tracking projection encodes once across
+recipients without sharing
+proof, authorization or session state; each recipient retains its own admission
+and current checks, and distinct fold projections use separate encodings. The
+provisional seed and completed cut are distinct publication operations, and each
+case observes its own actual publication rather than merging the two into one
+tick. A blocked recipient keeps its previously delivered closed value, and the
+shared encoding does not substitute for that recipient's proof or delivery
+admission.
+
+These are headless helper, publisher, backend, frame and accounting assertions,
+not live transport, elapsed-time, allocation, CPU or throughput measurements; no
+N-times benefit is established. The helper adds no service-provider interface or
+cross-tick completed-content cache.
 
 ## Known automated gaps
 
@@ -2452,9 +2585,11 @@ owns the pending live checks.
   the actual wrapper/default-root WATER and handler/freezer cases. These are
   patched-first or classpath adapter checks, not installed dedicated-server or
   real-FML evidence; they neither widen the audited registration trust nor
-  supply a fallback key for an unregistered fluid. The current-input execution
-  passed the Forge source integration cases; installed-server and real-FML
-  behavior remain manual gaps;
+  supply a fallback key for an unregistered fluid. The supplemental
+  native-classpath run passed the Forge source integration and previously
+  skipped patched-first cases
+  ([execution record](build-checks.md#supplemental-native-classpath-verification));
+  installed-server and real-FML behavior remain manual gaps;
 - inventory call-site logging coverage is limited to the
   [diagnostic seams above](#failure-diagnostic-seams). Other runtime
   probe/projection branches, capture-handle source-close and standalone

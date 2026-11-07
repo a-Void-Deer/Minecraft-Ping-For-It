@@ -4,7 +4,8 @@ This topic owns the inventory domain of the versioned presentation subsystem:
 preview, tracking, incremental reads, detached source snapshot capture and
 schema, the bounded creation snapshot carried by an atomic inventory receipt,
 item and fluid variant identity, exact quantities, zero and identity-fallback
-rules, budget and sync policy, and source recovery deadlines. The generic
+rules, budget and sync policy, the session lane policy hint and its refresh
+boundary, and source recovery deadlines. The generic
 mechanism — source access, capture results, cost accounting, and sync publication — is
 owned by [shared sources](shared_sources.md). The reason a tracked inventory
 keeps the live Ping and original target identity instead of a source-instance
@@ -83,8 +84,11 @@ of later grants and revocations. Inventory owns only when its own recipient set
 freezes:
 
 - Opening a Preview request resolves and freezes that request's recipient
-  content authorization for each lane it opens. The Preview set is independent
-  of any Ping.
+  content authorization for each lane it opens. The request-scoped `OPENED`
+  response carries that per-lane grant before any Preview data; its wire
+  grammar is owned by
+  [network protocol](../network/protocol.md#inventory-previewtracking-route-inventory-v2).
+  The Preview set is independent of any Ping.
 - A successful `SELECT` resolves and freezes the new Ping's recipient content
   authorization at creation, including the creation snapshot receipt and later
   Inventory Tracking content. The new Ping's set is independent of the Preview
@@ -104,6 +108,46 @@ only the independent read conditions above; revoking that recipient's
 presentation field permission does not terminate the old Ping through that
 recheck. [D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md)
 explains the low-overhead and timeliness trade-offs.
+
+## Lane policy hint and refresh
+
+The per-lane `POLICY` view is a future-input hint for the inventory session: it
+advertises which target types may open a new Preview or submit a new selection
+in that resource lane. It is not the authorization of an accepted Preview or an
+existing Ping. The Preview freeze at `OPEN` and the Ping freeze at creation are
+owned by [receiver authorization freeze points](#receiver-authorization-freeze-points);
+a hint refresh neither clears nor widens either.
+
+The server re-evaluates the hint at future-input boundaries: a `HELLO` that
+creates or renews the session, a new `OPEN`, a new `SELECT` that creates a Ping,
+a presentation session or compatible-schema change that changes the session view
+or the lane's decode eligibility, and an explicit configuration change or
+permission-provider replacement that can change the lane's target-type
+authorization. A new `OPEN` resolves its actual target type and a new create
+resolves its actual audience from current authorization; neither is authorized
+by the retained hint. Current source-owner read authority, read scope, source
+identity, marker expiry and resource budgets remain live checks at their
+existing points.
+
+Between those triggers, the session may retain the last generated hint. A
+replaceable permission provider whose internal state changes without a
+replacement or another observable trigger is not polled merely to keep the hint
+current; the hint and any diagnostics derived from it may report the old view
+until a trigger refreshes it. A stale hint is not authority for a new Preview or
+create; each resolves its own authorization.
+
+A newly generated hint supersedes an older queued hint for the same resource
+lane. A queued hint is delivered only while the inventory session that owns it
+and its final epoch/view stamp remain current; an older or fenced hint is
+discarded rather than advertised. The existing `POLICY` kind and the current
+inventory route and schema versions are unchanged; the
+[inventory-v2 route](../network/protocol.md#inventory-previewtracking-route-inventory-v2)
+owns the wire grammar.
+
+This refresh boundary governs only the inventory lane hint. The independent
+non-Ping Property preview keeps its advertised/fresh intersection under
+[target content preview](presentation_snapshot.md#target-content-preview), and
+the session `SECTION` mask and property-preview checks remain separate work.
 
 ## Source identity, invalidation and recovery
 
@@ -214,12 +258,21 @@ support for other containers is not implied.
 Certification is admitted metadata work, with no content read or cached
 permission result. It establishes the concrete route, current world and registry
 objects, exact member objects, ordered membership, segment boundaries and every
-ordered member-local visible address. Matching aliases, slot totals or hashes
-alone are insufficient. Hit-relative roles and face labels may be normalized
-only after the physical address sequence is proven identical. Each participant
-retains its own exact binding, proof and owner-authorized read port for scanning
-and completed evidence; one participant's successful check never authorizes
-another.
+ordered member-local visible address. For a supported vanilla chest route, the
+certificate is built over an owned snapshot of its entity, ordered slot-address
+and member lists, so later producer-side mutation cannot rewrite the certified
+route. The ordered address mapping is proved once when the certificate is built.
+The immutable mapping establishes layout evidence, not a permission or content
+result: later current validation still checks the live world and registry, exact
+member identity and loaded state, chest pairing and container size, and the
+source owner's read authority and lock conditions. Current validation does not
+re-walk the frozen mapping or consult producer-owned address lists, and the
+mapping never substitutes for those live checks. Matching aliases, slot totals or
+hashes alone are insufficient. Hit-relative roles and face labels may be
+normalized only after the physical address sequence is proven identical. Each
+participant retains its own exact binding, proof and owner-authorized read port
+for scanning and completed evidence; one participant's successful check never
+authorizes another.
 
 The pool key combines the certified graph and the round's frozen partition
 policy. It additionally includes the owner when player separation is enabled and
@@ -672,6 +725,42 @@ until the next tick. This adds no
 unmetered budget or guarantee under insufficient memory/wire capacity or an
 unserviceable proof. Fewer shared getters do not remove per-participant
 source-read metadata work or promise lower CPU, memory or allocation rate.
+
+## Idle source health scheduling
+
+Only a completed Preview or Tracking observation is eligible for the periodic
+source health check: a completed Tracking observation is idle between sweeps,
+and a completed Preview is idle after its single scan. A newly admitted consumer
+or late join performs its own initial check immediately; once idle, its later
+checks are due one corresponding configured period after its last completed
+check, using the Preview period for Preview and the Tracking period for
+Tracking. A completed Preview is not recaptured, restarted or repopulated by an
+idle check. Tracking keeps its established next-sweep due time independently.
+
+An active or incomplete sweep continues to advance under the existing per-tick
+budget; idle scheduling does not gate, replace or reset its progress. If a due
+health check or sweep cannot run within the current budget, it remains due and
+is retried at the next eligible opportunity rather than moving a full period
+later. A live period change recalculates the next health-check due from the
+consumer's last completed check under the new period.
+
+Each consumer's check history is its own. A newly admitted, late-joined or
+renewed association does not inherit another consumer's last-check time,
+health-check evidence or validity result. Tracking with no recipients retains
+its existing skip. Expiry, removal or close clears the consumer's idle-health
+state.
+
+An `INVALID` consumer keeps the existing per-tick eligible recovery attempt
+rather than waiting for an idle check. The schedule does not add a hard
+wall-clock invalidation deadline: a budget-deferred check may be delayed, and no
+fixed-time or strict-freshness detection is guaranteed.
+
+Actual source reads, cache or queued-value consumption, recovery probes and
+publication handoffs still perform their current source, owner, scope and
+read-condition checks at the time they run. The idle check is an additional
+opportunity to detect invalidity, not a permission cache or a substitute for
+those checks. It reuses existing periods and tick budgets, favors low overhead
+and timely detection over strict freshness, and introduces no new configuration.
 
 ## Item variants and component fallback
 
@@ -1404,12 +1493,23 @@ is not retried. This process-local port retains no mutable world data, and expli
 injected ports remain independent.
 
 Optional resident-scope evidence is supplied lazily after the source's eager
-member and owner prechecks. The compatibility path invokes the supplier once and
-dispatches through the existing scope overload, preserving legacy overrides.
-Guarded access rechecks its current gate around delegation and guards the returned
-access. A provider owning complete resident validation may decline the factory,
-but cannot retain it or postpone source authority checks; mod-specific use is
-owned by [Create](../../integrations/create.md#vault-inventory-provider).
+member and owner prechecks. The current-authority verdict remains the full-source
+gate at mutable-callback boundaries; evaluating it rechecks the current source and
+every admitted member, may execute provider or lock callbacks, and is not a
+callback-free metadata read. Frozen membership, audited classification and
+member-local address mapping are metadata about the admitted source/layout, not a
+token that carries a prior current-authority result. They do not waive the
+current check: the established membership and mapping boundaries still run their
+nested authority checks, and the caller still performs its explicit current check
+before and after mutable callbacks; a successful lookup does not by itself admit
+an unknown member, wrapper or delegate. The compatibility path invokes the
+supplier once and dispatches through the existing scope overload, preserving
+legacy overrides. Guarded access rechecks its current gate around delegation and
+guards the returned access, while the existing ITEM all-member prechecks and
+per-read current checks remain in force. A provider owning complete resident
+validation may decline the factory, but cannot retain it or postpone source
+authority checks; mod-specific use is owned by
+[Create](../../integrations/create.md#vault-inventory-provider).
 
 Existing unverified mod-provider live support remains available under explicit
 external trust in the provider's getter and lookup internals. Its admitted call

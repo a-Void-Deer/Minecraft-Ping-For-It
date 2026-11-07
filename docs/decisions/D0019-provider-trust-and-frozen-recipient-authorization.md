@@ -3,8 +3,10 @@
 ## Status
 
 Confirmed product decision represented by the linked topic contracts.
-Implementation and verification are pending; this record changes no code, claims
-no measured benefit, and records no test result.
+Implementation is present; current-source automated verification is recorded in
+[build checks](../testing/verification/build-checks.md#provider-trust-and-frozen-authorization-final-verification);
+live and performance evidence remain pending, and this record claims no measured
+benefit.
 
 ## Decision
 
@@ -54,9 +56,11 @@ approval or matching semantics.
 
 The complete create-time authorization result is retained with the Ping. This adds
 per-Ping state and can deliver content under a later-revoked grant; neither a
-measured benefit nor freedom from staleness is claimed. Provider validation and
-future dedicated-provider behavior remain implementation and verification work.
-Pending evidence is owned by
+measured benefit nor freedom from staleness is claimed. Provider trust and
+validation are implemented with current-source automated verification; live and
+performance evidence remain pending. A future built-in or external
+dedicated-provider interface, matching and fallback remain undefined and
+unimplemented. Pending evidence is owned by
 [identity and authority](../testing/verification/identity-authority.md#frozen-recipient-authorization-pending),
 [presentation](../testing/verification/presentation.md#frozen-recipient-content-authorization-verification-pending),
 [inventory](../testing/verification/inventory.md#frozen-recipient-authorization-and-fluid-provider-trust-pending)

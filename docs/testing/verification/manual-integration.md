@@ -211,7 +211,14 @@
 All scenarios here are pending. They cover
 [D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md);
 the passing dynamic recipient and member-gate tests inventoried elsewhere are
-historical and do not establish this policy.
+historical and do not establish this policy. The current-source automated cases
+in the [identity](identity-authority.md#frozen-recipient-authorization-pending),
+[presentation](presentation.md#frozen-recipient-content-authorization-verification-pending)
+and [inventory](inventory.md#frozen-recipient-authorization-and-fluid-provider-trust-pending)
+inventories passed in the final combined execution recorded in
+[build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification);
+they do not replace these live scenarios, and provider trust claims no measured
+live performance benefit.
 
 - With two connected owners, create Pings across Basic, Property, SECTION,
   Inventory and receipt. Change selector, child, provider, `RESET` and metadata

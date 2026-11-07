@@ -112,9 +112,11 @@ both entries, quiet missing-service behavior, and one discovery per uncached
 call without a negative cache. Loader API and actual tea-asset assertions are
 inventoried under
 [native fluid presentation](integrations.md#native-fluid-presentation). The
-added diagnostic cases are included in the current
-[logging-coverage audit final acceptance](build-checks.md#logging-coverage-audit-final-acceptance);
-the earlier [combined-tree execution](build-checks.md#native-fluid-boundary-and-presentation-verification)
+added diagnostic cases remain automated coverage inventoried above; no saved
+execution acceptance record yet covers them, and that evidence remains pending.
+The [shared diagnostics evidence note](integrations.md#shared-exception-diagnostics)
+owns the cross-domain gap. The earlier
+[combined-tree execution](build-checks.md#native-fluid-boundary-and-presentation-verification)
 remains historical evidence for its pre-existing headless results.
 
 ### Low-opacity quad regressions

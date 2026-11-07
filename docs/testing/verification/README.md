@@ -37,7 +37,7 @@ their limitations and gaps, not those product contracts.
 | Page | Evidence responsibility |
 | --- | --- |
 | [Testing and verification](README.md) | Global evidence rules, check selection, topic routing, and recording future evidence. |
-| [Build checks](build-checks.md#build-source-set-and-artifact-verification) | Source-set, build-task and artifact-identity evidence and its limits; [final fluid combined-tree execution](build-checks.md#fluid-inventory-final-combined-tree-verification); [tank grouping and presentation execution](build-checks.md#fluid-tank-grouping-and-presentation-verification); [native fluid boundary/presentation execution](build-checks.md#native-fluid-boundary-and-presentation-verification); [lane policy/native amount/icon opacity execution](build-checks.md#lane-policy-native-amount-and-icon-opacity-verification); [logging-profile common execution](build-checks.md#logging-profile-common-execution); [logging-profile loader execution](build-checks.md#logging-profile-loader-execution); [logging-profile final combined acceptance](build-checks.md#logging-profile-final-combined-acceptance); [logging-coverage audit final acceptance](build-checks.md#logging-coverage-audit-final-acceptance); [standalone documentation tooling](build-checks.md#documentation-tooling-coverage). |
+| [Build checks](build-checks.md#build-source-set-and-artifact-verification) | Source-set, build-task and artifact-identity evidence and its limits; [final fluid combined-tree execution](build-checks.md#fluid-inventory-final-combined-tree-verification); [tank grouping and presentation execution](build-checks.md#fluid-tank-grouping-and-presentation-verification); [native fluid boundary/presentation execution](build-checks.md#native-fluid-boundary-and-presentation-verification); [lane policy/native amount/icon opacity execution](build-checks.md#lane-policy-native-amount-and-icon-opacity-verification); [provider trust and frozen authorization final verification](build-checks.md#provider-trust-and-frozen-authorization-final-verification); [ITEM redundant-work final verification](build-checks.md#item-redundant-work-final-verification); [logging-profile common execution](build-checks.md#logging-profile-common-execution); [logging-profile loader execution](build-checks.md#logging-profile-loader-execution); [logging-profile final combined acceptance](build-checks.md#logging-profile-final-combined-acceptance); added logging/diagnostic execution evidence remains pending ([shared diagnostics note](integrations.md#shared-exception-diagnostics)); [standalone documentation tooling](build-checks.md#documentation-tooling-coverage). |
 | [Manual and integration verification](manual-integration.md#pending-manual-and-integration-matrix) | Pending manual/integration scenarios; listing a scenario does not record a completed run. |
 
 ## Existing automated coverage inventory
@@ -57,13 +57,17 @@ Each topic page keeps its coverage and local known automated gaps together.
 | [Integrations](integrations.md) | [Shared exception diagnostics](integrations.md#shared-exception-diagnostics); [optional failure diagnostics](integrations.md#optional-failure-diagnostics); [Create presentation adapters](integrations.md#create-presentation-adapters); [Vault topology, grouping and presentation](integrations.md#vault-topology-grouping-and-presentation); [fluid-tank topology, grouping and presentation](integrations.md#fluid-tank-topology-grouping-and-presentation); [Create content preview](integrations.md#create-content-preview); [Create raycast seams](integrations.md#create-raycast-seams); [Sable integration coverage](integrations.md#sable-integration-coverage); [Simulated integration coverage](integrations.md#simulated-integration-coverage); [optional rendering structural coverage](integrations.md#optional-rendering-structural-coverage). | [Known automated gaps](integrations.md#known-automated-gaps), including [Sable-specific gaps](integrations.md#sable-specific-gaps) |
 
 Create-time recipient/content authorization and fluid provider validation are not
-established by the historical passing tests above. Their pending evidence is
-indexed in [manual and integration verification](manual-integration.md#frozen-recipient-authorization-and-provider-trust),
-with topic-local notes in
+established by the historical passing tests above. Current-source automated cases
+are inventoried in
 [identity and authority](identity-authority.md#frozen-recipient-authorization-pending)
 for recipient authorization, [presentation](presentation.md#frozen-recipient-content-authorization-verification-pending)
-for global content authorization, and [inventory](inventory.md#frozen-recipient-authorization-and-fluid-provider-trust-pending)
-for inventory freeze points and provider validation.
+for global content authorization and wire replay, and
+[inventory](inventory.md#frozen-recipient-authorization-and-fluid-provider-trust-pending)
+for inventory freeze points and provider validation. Those cases passed in the
+final combined execution recorded in
+[build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification);
+that result is headless, and live evidence remains pending in
+[manual and integration verification](manual-integration.md#frozen-recipient-authorization-and-provider-trust).
 
 ## Known automated gaps
 

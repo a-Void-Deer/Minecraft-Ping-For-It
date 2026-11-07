@@ -170,10 +170,11 @@ allowance, and skipped periods emit no synthetic WARN. Presentation and
 property-preview producer cases are inventoried under
 [presentation snapshot negotiation, policy and adapters](presentation.md#presentation-snapshot-negotiation-policy-and-adapters)
 and [target content preview](presentation.md#target-content-preview).
-The current source-input execution, including the added diagnostic cases, is
-recorded under
-[logging-coverage audit final acceptance](build-checks.md#logging-coverage-audit-final-acceptance).
-No live server, notification, heap/TPS or soak result follows from these seams.
+No saved source-input execution record yet covers these added diagnostic cases;
+that evidence remains pending. The
+[shared diagnostics evidence note](integrations.md#shared-exception-diagnostics)
+owns the cross-domain gap. No live server, notification, heap/TPS or soak result
+follows from these seams.
 
 ## Certified pool delay diagnostics
 

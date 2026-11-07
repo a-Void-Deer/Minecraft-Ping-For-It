@@ -180,22 +180,42 @@ isolated server-default initialization coverage is inventoried under
 
 ## Frozen recipient authorization pending
 
-The existing coverage and evidence records above remain limited to their recorded
-execution or source-review scope.
-[D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md)
-changes new-Ping authorization timing; those records do not prove the new policy.
+The historical coverage and evidence records above remain limited to their
+recorded execution or source-review scope; they do not prove
+[D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md)'s
+new-Ping authorization timing. The current-source cases below do.
 
-Pending evidence covers:
+Current-source automated cases cover the authorization value and the server
+creation cut. `FrozenGrantIsolationTest` covers immutable per-recipient grants,
+exact child denial without removing its root, explicit deny entries,
+`retaining` keeping only the original audience, and the marker content grant
+keeping authorization separate from its dedicated tracking kind.
+`FrozenPingCreationCutTest` covers fresh server permission, selector and child
+results frozen at create; an
+accepted session mask or advertised child map that cannot alter them; two
+same-type creations keeping opposite grants; a later adapter field not extending
+an old grant; and a not-`HELLO` original-audience member whose later-ready wire
+projection keeps the creation grant. Its permission-call-count case exercises
+the production wire projection only, not the complete send loop.
+`FrozenGrantDeliveryTest` extends that creation-cut scope to the actual initial,
+baseline, refreshed and cached-send entry points plus receipt projection: with a
+later-denying provider installed, those deliveries call it zero times, still send
+the creation-frozen Basic and optional SECTION values and receipt, and a new
+create resolves the provider and freezes its denial without rewriting the old
+marker's grant. These cases passed in the final combined execution recorded in
+[build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
+The delivery case is still a headless production-call seam; it does not claim
+tick or session-mask behavior, non-Ping preview delivery, a live connection or
+live disconnect.
 
-- the complete frozen recipient permission result at create for the Ping's
-  audience and content permission;
-- later revocation or grant affecting only new creates; and
-- for an online original-audience member that had not completed `HELLO` at
-  create, the Ping still stores the creation-time grant computed from
-  server-owned manifest and field definitions, not from receiver-accepted
-  manifest presence; after a later permission change, a ready, schema-compatible
-  `HELLO` is only a delivery or repair gate, later server fields or adapters do
-  not expand that grant, and true disconnect does not resurrect it.
+Pending evidence still covers:
+
+- delivery and repair to an original-audience member through a real connection,
+  including the later `HELLO` gate when the member was not ready at create;
+- true disconnect behavior after create;
+- a live session where later revocation or grant affects only new creates; and
+- the complete create-authorization result for every audience member under a
+  real server world and transport.
 
 Global field, selector, child, `RESET`, metadata and same-type Ping grant scenarios
 are owned by the

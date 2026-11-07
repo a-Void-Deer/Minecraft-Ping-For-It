@@ -150,6 +150,15 @@ counts were 223 groups and 349 extras, or 274 groups and 668 extras ignoring
 chapter anchors. Each CLI exited zero; no Python suite or Gradle was rerun for
 the documentation addendum.
 
+The 2026-11-08 ITEM documentation finalization reran both CLIs on 71 sources:
+1,604 local links, zero broken links and zero external URIs. Duplicate reporting
+found 263 groups and 416 extra occurrences, or 304 groups and 862 extras with
+`--ignore-chapter-anchors`. Both commands exited zero. The link checker also
+resolved the changed heading anchors; the 71 sources contain 36 fenced blocks
+with zero unclosed fences, and ownership review kept execution statistics on
+this page with summary links from the topic inventory. The documentation
+`git diff --check` exited 0. That pass did not rerun the Python suite or Gradle.
+
 ## Automated verification results
 
 Recorded execution date: 2026-10-27. The saved JDK 21, PowerShell executions
@@ -1122,6 +1131,459 @@ This PASS applies to the tested Alt-control input, not to the full tree or
 latest workspace. Later inventory/Create edits are outside this result. No
 Minecraft client or server, real macOS Option key, multiplayer, manual
 appender/layout or rendered-tooltip check was performed.
+
+### Provider trust and frozen authorization final verification
+
+Recorded execution date: 2026-11-07. This is the current-source acceptance run
+for [D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md).
+The verified input is the working tree at HEAD
+`4a67c3e78ebd1932ebc533fe2e8be282cbc69ceb` (`agent/perf-fix`) plus its
+uncommitted source and test changes; HEAD alone does not contain that
+implementation. The captured tracked-diff SHA-256, which also covers the
+uncommitted documentation files outside the Java/build input scope, was
+`378EFB37F84FB0E45BA30D0A92D4DC73F08E655FCFE56ED2E6134E78EDC969DA`
+and the 18-file untracked-manifest SHA-256 was
+`B43C9DF5DB94D05CA1CFBB10572E3E68C25EAF767DE4BBED98D170CB1ED103DA`.
+Both values and HEAD were identical before and after execution. The later commit
+below is a source-identity binding only; the run itself was not performed on a
+clean commit.
+
+The run was executed at HEAD `4a67c3e78ebd1932ebc533fe2e8be282cbc69ceb` plus the
+working-tree hashes above. Afterwards, commit
+`a4ae36fa121c1899c946e1a419ae66afbbfb4344` (`feat: freeze Ping content grants
+and schedule idle source checks`) on parent
+`4a67c3e78ebd1932ebc533fe2e8be282cbc69ceb` committed the identical 83 Java
+implementation/test paths (20 production and 63 test). The external
+`commit.evidence.json` records 1,334 Java sources with raw identity SHA-256
+`3fd2a0d0118b34118bcd8cd7beece8d05fa5c04b722192b65e417e0e2ecd80fb`
+both before and after the commit, all raw bytes matching the manifest, and all
+canonical Git blobs matching the tested input. Those 83 paths were the complete
+remaining implementation set, and no Gradle build metadata or documentation
+changed. Gradle was not rerun for this commit: this binds the already-verified
+source bytes to the commit, not a new run at HEAD `a4ae36fa` or a clean-commit
+revalidation. The working-tree hashes and prior execution evidence above remain
+the run record.
+
+The single authorized PowerShell invocation used Temurin JDK `21.0.12.1+1-LTS`,
+UTF-8, `--no-daemon`, `--console=plain`, `--continue` and separate stdout/stderr
+files:
+
+```powershell
+$env:JAVA_HOME = 'E:/scoop/apps/temurin21-jdk/current'
+$env:PATH = "$env:JAVA_HOME/bin;$env:PATH"
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+.\gradlew.bat --no-daemon --console=plain --continue :common:check :common:javadoc verifyModIdentity > $stdout 2> $stderr
+```
+
+It exited 0 with `BUILD SUCCESSFUL` from 19:18:09 to 19:22:19 (+08:00) and
+applied no test filter. All four test tasks executed, and all 621 archived JUnit
+XML files were fresh: zero reused `UP-TO-DATE` reports and zero stale or
+unproven reports.
+
+| Module | XML suites | Tests | Passed | Skipped |
+| --- | ---: | ---: | ---: | ---: |
+| Common | 535 | 5,843 | 5,841 | 2 |
+| Fabric | 10 | 93 | 93 | 0 |
+| Forge | 12 | 82 | 68 | 14 |
+| NeoForge | 64 | 440 | 440 | 0 |
+| Total | 621 | 6,458 | 6,442 | 16 |
+
+Every row has zero failures and errors. Each skip is an assumption skip, not a
+pass:
+
+| Module | Class and method | Recorded reason |
+| --- | --- | --- |
+| Common | `InventoryFluidLoaderIntegrationTest.deterministicallyClearedOriginalNativeProofRetiresAndFreshRuntimeScanRecovers` and `.originalCommonCutRejectsReacquiredNativeRouteAndFabricAddressOrderWithIdenticalDetachedLayout` | `Assumption failed: requires a loader's native API/test fixture classpath`. |
+| Forge | `FluidPresentationServiceTest.realPatchedFluidTypeBaseDescriptionAndLiteralOverrideUseNoNativeStack` | `Assumption failed: Forge's ordinary test task is vanilla-first; native success runs on the patched integration classpath`. |
+| Forge | `NativeFluidAmountTest.legitimateEmptyPositiveAndPublicOverrideSemanticsArePreserved`, `.negativeNativeNbtConstructorAndSetterNeverBecomeEmptyVisits`, `.inaccessibleCachedPrimitiveFieldFailsClosedWithoutPoisoningTheNextRead`, `.nullAndThrowingNativeGettersRemainPaidSingleAttempts`, `.nativeReadFailureCannotReplaceThePreviousCompleteRuntimeResultWithZero` | Class-level `BeforeAll` assumption on the ordinary vanilla-first classpath; the XML skipped entries carry no message. |
+| Forge | `NativeFluidRegistryFreezerTest.nativePositiveHandlerEntryFreezesThroughActualWrapper` | Ordinary vanilla-first classpath assumption; not a pass in the normal matrix. |
+| Forge | `PlatformFluidRegistryServiceTest.foreignHolderMapAndMismatchedDelegateOrStageFailClosed`, `.realCurrentWrapperWaterFreezesExactlyWithAuthoritativeLongAmount`, `.refusalBeforeMetadataAndCurrentMapReadsIsPropagatedUnchanged`, `.retainedHolderIsNotProofOfActiveRegistrationAndSameObjectMapsAreReadAgain`, `.coldMetadataFailureIsCachedAndColdAdmissionPrecedesDiscovery`, `.realCurrentWrapperKeepsDistinctNativeNbtVariants`, `.emptyAndUnregisteredHostileFluidDoNotCallHashOrEquality` | Ordinary vanilla-first classpath assumption; not a pass in the normal matrix. |
+
+These 16 remain the normal-matrix skips. The
+[supplemental native-classpath run](#supplemental-native-classpath-verification)
+below separately passes all 16 scenarios across seven dedicated tasks; it does
+not rewrite these counts or turn a normal-matrix skip into a pass.
+
+All three loader `compileJava` tasks, all loader `test`, `check`, `javadoc`,
+jar/source/Javadoc packaging and `build` tasks, Fabric remapping and
+`verifyModIdentity` executed successfully. Common main and test compilation and
+all three loader test compilations were `UP-TO-DATE`. Of 53 actionable tasks, 27
+executed and 26 were `UP-TO-DATE`.
+
+The three shippable jars retained their exact names and version:
+
+| Loader | Artifact | SHA-256 |
+| --- | --- | --- |
+| Fabric | `Ping-For-It-0.5.0-pfi-beta2-fabric-1.21.1.jar` | `06B7743001F84EB95E46A040C7B960B5BC00DF4683AA82819085F8A73995D175` |
+| Forge | `Ping-For-It-0.5.0-pfi-beta2-forge-1.21.1.jar` | `B31A49CA95ECF8FC1580E39A7941AB76EFC50DAE3EA48C65ECC9156F9C3D803C` |
+| NeoForge | `Ping-For-It-0.5.0-pfi-beta2-neoforge-1.21.1.jar` | `20B290FBE4147C13E5585B0369D5D1A8501FC1692FEE735765CA1E9BC7A2D79C` |
+
+The external archive
+`C:\Users\Void_Deer\AppData\Local\Temp\opencode\d0019-verification\combined-final-1-artifacts\20261107T1918097358676\jars`
+retains these exact jars and their metadata. Identity is `pingforit` /
+`Ping For It` / `0.5.0-pfi-beta2` on Minecraft 1.21.1. These are build and
+artifact-identity checks, not an exhaustive package-content audit.
+
+#### Intermediate rounds and repairs
+
+The following executions explain how the final input was reached. Only the
+invocation above is the acceptance result; failed or reused intermediate results
+are not folded into its counts. The `combined-*` rounds used the recorded
+PowerShell, Temurin JDK 21, UTF-8, `--no-daemon`, `--console=plain`, `--continue`
+and redirected-log harness, with the task set named in the row. The focused and
+direct rows retain only their own recorded evidence; unrecorded flags, JDK
+versions, timestamps or hashes are not inherited or reconstructed.
+
+| Round | Task set | Result |
+| --- | --- | --- |
+| `combined-production-1` | `:common:compileJava :fabric:compileJava :forge:compileJava :neoforge:compileJava` | **FAIL** exit 1; `:common:compileJava` failed and dependent compilers did not run. Tests were not run. |
+| `combined-compile-2` | `:common:compileTestJava :fabric:compileTestJava :forge:compileTestJava :neoforge:compileTestJava` | **FAIL** exit 1; Common and NeoForge test compilation failed. |
+| `combined-compile-3` | Same test-compilation task set | **FAIL** exit 1; Common main compilation failed before downstream tasks. |
+| `combined-compile-4` | Same test-compilation task set | **PASS** exit 0; all four main and test compilations succeeded. |
+| `combined-tests-1` | `:common:test :fabric:test :forge:test :neoforge:test` | **FAIL** exit 1; 6,455 tests, 230 failures, 16 skipped. |
+| `combined-tests-2` | Same test task set | **FAIL** exit 1; Common test compilation failed and its 534 stale XML reports were excluded from conclusions; fresh NeoForge results contained 3 failures. |
+| `combined-tests-2-retry-1` | Same test task set | **FAIL** exit 1; 6,455 tests, 59 Common failures, 16 skipped. Fabric/Forge reused 22 `UP-TO-DATE` XML reports. |
+| `combined-tests-3` | Same test task set | **FAIL** exit 1; 6,457 tests, 13 failures, 16 skipped. |
+| `combined-tests-4` | Same test task set | **FAIL** exit 1; 6,458 tests, 6 failures, 16 skipped. |
+| Focused final repair | Common `--tests` selector rounds; exact selector list and global flags not retained | **FAIL then PASS**; the first round executed 90 tests with six failures; after source/test repair, the final focused round executed 176 tests and passed. |
+| `nf-order-1` | Direct `javac` plus JUnit Launcher `java @ordered.args` and `java @isolation.args` | **PASS**; 30 ordered executions in one JVM (11 + 11 + 8) plus one independent isolation execution. Not a Gradle run. |
+| Direct fluid/loader audit | Direct `javac` plus JUnit Platform | **PASS**; 92 full-class executions (26 Common + 44 NeoForge + 22 Create boundary) plus five focused executions. Intermediate, not part of the final matrix. |
+| `FrozenGrantDeliveryTest` focus | `.\gradlew.bat --no-daemon :common:test --tests "nx.pingwheel.common.presentation.minecraft.FrozenGrantDeliveryTest"` (two attempts; UTF-8, `*>` redirect, no explicit timeout; `--console=plain` and `--continue` were not recorded) | **FAIL** exit 1 on both attempts at `:common:compileTestJava`; the test task never ran. Neither attempt is a pass; JDK version, start/end times and log hashes were not recorded. |
+| `combined-final-1` | `:common:check :common:javadoc verifyModIdentity` | **PASS** exit 0; 6,458 tests, 0 failures, 0 errors, 16 skipped. |
+
+The six `combined-tests-4` failures were in `FrozenGrantDeliveryTest`,
+`InventoryProductionCreateTest` and `InventoryProductionPolicyTest`. Focused
+diagnostics isolated the create and policy paths; source/test repair then let the
+final Common full suite above run them successfully. The later `1/1` delivery
+case result is from that full suite, not from either failed focused attempt.
+The direct audit and `nf-order-1` are separate evidence and do not add to the
+final totals; `combined-tests-2-retry-1`'s reused reports are explicitly reuse,
+not fresh execution. The direct audit's intermediate classpath-repair logs were
+overwritten; only its final direct run is retained, and it is not final
+acceptance. Earlier ad-hoc logs with no recorded command line were not used as
+evidence and are not reconstructed.
+
+`git diff --check HEAD -- <changed implementation, test and build files>` exited
+0; its only output was LF-to-CRLF working-copy warnings. The combined-final
+snapshot's documentation check scanned 71 Markdown files and passed 1,577 local
+links with zero broken links and zero validated external URIs. The
+documentation-only evidence update reran the same checker on the edited corpus:
+71 files, 1,588 local links, zero broken and zero external URIs. No separately
+configured Java lint, formatter or static-analysis task exists, and none was
+invented or run; the actual Java compile, Javadoc/doclint, Gradle check,
+`verifyModIdentity` and Git checks above are the configured evidence. Nonfatal
+Javadoc missing-comment/`@param`, Mixin mapping, Forge annotation-processor and
+Gradle deprecation warnings remain; this is not a warning-clean result.
+
+This is headless automated evidence. No Minecraft client or server, loader
+launch, multiplayer/mixed-version connection, installed Create/Sable provider,
+GPU/font/UI output, manual gameplay or CPU/TPS/GC/allocation/FPS measurement was
+performed. The frozen-authorization Create path still discovers the full initial
+target structure; its automated operation-count assertions are current-check
+counts, not a live FPS or allocation improvement. The optional dedicated-provider
+SPI remains future work and is not claimed. Live delivery/repair, a member that
+was not `HELLO`-ready at create, true disconnect, live source-read revocation and
+live reconnect remain pending in the
+[manual matrix](manual-integration.md#frozen-recipient-authorization-and-provider-trust).
+
+#### Supplemental native-classpath verification
+
+The ordinary matrix above retains its 6,458 tests, zero failures and 16 skips.
+A separate external supplemental harness exercised those skipped scenarios on
+loader/native classpaths against the same commit
+`a4ae36fa121c1899c946e1a419ae66afbbfb4344` and source raw identity
+`3fd2a0d0118b34118bcd8cd7beece8d05fa5c04b722192b65e417e0e2ecd80fb`.
+It did not rewrite the ordinary XML or add its executions to 6,458. The three
+shippable jars remained byte- and mtime-identical, and no ordinary-matrix test
+task was rerun.
+
+Both invocations used PowerShell, Temurin `21.0.12.1+1-LTS`, UTF-8, `--offline`,
+`--no-daemon`, `--no-build-cache`, `--console=plain`, `--continue` and separate
+stdout/stderr files. Here `$evidence` is
+`C:\Users\Void_Deer\AppData\Local\Temp\opencode\d0019-verification`:
+
+```powershell
+.\gradlew.bat --offline --no-daemon --no-build-cache --console=plain --continue --init-script "$evidence/native-supplement.init.gradle" --init-script "$evidence/native-supplement-forge.init.gradle" :fabric:fluidSourceIntegration :forge:fluidSourceIntegration :neoforge:fluidSourceIntegration :forge:loggingFluidPresentationIntegration :forge:loggingNativeFluidAmountIntegration :forge:loggingFluidRegistryIntegration :forge:loggingNativeFluidRegistryFreezerIntegration
+.\gradlew.bat --offline --no-daemon --no-build-cache --console=plain --continue --init-script "$evidence/native-supplement-forge-source-fixed.init.gradle" :forge:fluidSourceIntegration
+```
+
+| Script | SHA-256 |
+| --- | --- |
+| `native-supplement.init.gradle` | `1671e97cf2e458eac4bf5f07ed4cc96a148894630a06d59f83ba857e5481d809` |
+| `native-supplement-forge.init.gradle` | `0a1987cb2fdd62b6b6bc6464b95caf0a23556abc1ebd12cfe8ee6de5dcdba8a2` |
+| `native-supplement-forge-source-fixed.init.gradle` | `5bd2e531ef78c4232f03080a5cf2bdb6a2d9e1952c3ff4d54c5fde749b3209a6` |
+| `native-supplement-state.py` | `c3154d281f11d8f90835834875338ab448782fe0143c4f8d1c626b75a410950a` |
+| `native-supplement-2-state.py` | `897def82c1b9b4a8f4a241e02ebf578e387cb4d217f7459fd8fbe9bc56845a23` |
+
+The first invocation ran from 20:00:25 to 20:01:24 (+08:00), 58.8 seconds, and
+exited 1. It ran seven tasks and produced seven fresh XML files: 19 passing
+scenario executions and one Forge `fluidSourceIntegration` initialization failure.
+That failure was a `NoSuchMethodException` for
+`net.minecraft.world.level.material.Fluid.getFluidType()` during
+`InventoryFluidLoaderIntegrationTest` bootstrap because the vanilla jar preceded
+the patched Forge jar. It is an initialization failure, not a scenario pass; the
+first invocation is not recorded as all-seven passing.
+
+The second invocation ran from 20:06:38 to 20:07:05 (+08:00), 26.8 seconds, and
+exited 0. It reran only Forge `fluidSourceIntegration`; its two cases passed.
+
+| External task | First invocation | Second invocation | Passing scenario executions |
+| --- | --- | --- | ---: |
+| `:fabric:fluidSourceIntegration` | 2/2 passed | Not run | 2 |
+| `:forge:fluidSourceIntegration` | 0 scenarios; 1 initialization failure | 2/2 passed | 2 |
+| `:neoforge:fluidSourceIntegration` | 2/2 passed | Not run | 2 |
+| `:forge:loggingFluidPresentationIntegration` | 2/2 passed | Not run | 2 |
+| `:forge:loggingNativeFluidAmountIntegration` | 5/5 passed | Not run | 5 |
+| `:forge:loggingFluidRegistryIntegration` | 7/7 passed | Not run | 7 |
+| `:forge:loggingNativeFluidRegistryFreezerIntegration` | 1/1 passed | Not run | 1 |
+| Total | 19 passed + 1 initialization failure | 2 passed | 21 |
+
+The only harness correction moved the already-present, same-version Forge
+patched jar from classpath index 6 to index 0. Its SHA-256
+`6ca6adb420e93cdd2c4b3e39fd580ebcc6473fd10861cd79b674fb81e436ddee`
+matched, every other original classpath entry retained its relative order, and
+the selectors, `pingforit.test.fluidLoader=forge` system property, JUnit and
+worker settings were unchanged. No dependency version changed.
+
+The 14 ordinary Forge skip methods pass in the four Forge tasks (2 + 5 + 7 + 1 =
+15 executions, including one extra in `loggingFluidPresentationIntegration`).
+The two Common fluid-loader skip methods pass on Fabric, NeoForge and Forge (2 x
+3 = 6 executions). The resulting 21 passing scenario executions span seven tasks
+and include repeated source methods on different loader classpaths; 21 is not a
+unique-test count and does not replace the 16 normal-matrix skips. The external
+evidence archives are `native-supplement-1-artifacts` and
+`native-supplement-2-artifacts`; their result files are
+`native-supplement-1.results.json` and `native-supplement-2.results.json` in the
+same evidence directory. These are headless JUnit/classpath executions, not
+loader launch, a Minecraft client/server or game behavior.
+
+### ITEM redundant-work final verification
+
+Recorded execution date: 2026-11-08. This is the final acceptance run for the
+ITEM redundant-work optimization set on branch `agent/perf-fix`. The tested input
+was a dirty combined working tree at HEAD
+`0301adb625b3148839929340b5c30b9dae05302b` (tree
+`c90cf1a44a5c90f31072d9529621b14077a292ac`), not a clean commit. The certified
+chest-mapping change (P3) was already in that HEAD; the P1 lane-policy hint, P4
+publication reuse and their test changes remained uncommitted, together with the
+pre-existing documentation changes. After execution, commit
+`0d9f841116e3789ac224cc1393c6990b0f01cb33` on parent
+`0301adb625b3148839929340b5c30b9dae05302b` committed the identical 14 Java
+paths (seven production and seven test). The recorded result remains the
+execution at HEAD `0301adb` plus the working hashes below; it is not renamed a
+clean-`0d9f8411` run and was not retested after the commit.
+
+The tested source/build input manifest SHA-256 was
+`4E93DC0302B0AC883A80D2355DAEC6CC50B863D2E845AAE661B0A76D3DD023D9`
+(`final.inputs.csv`, 1,425 non-documentation build/source inputs). The tracked
+binary diff SHA-256 was
+`06817ED07A89FFA838568E95274C1E42DAB102A4592A9AC79917AA692E5F9260`
+(`final.diff`). The all-file manifest SHA-256 was
+`0B05DED9B528AE3427BA064E782DB8ADEAB055088336AB08E75D678855F074D1`
+(`final.files.csv`): it covers all 1,513 tracked and non-ignored untracked
+repository files, paths plus bytes, so it identifies the untracked Java files and
+dirty tracked sources and documentation as well as tracked changes. It is not an
+untracked-only manifest and the tracked diff alone does not identify the
+untracked bytes. HEAD, the tracked diff and both manifests were identical before
+and after every recorded invocation and at final inspection.
+
+The external `item-final-commit.evidence.json` binds this tested state to commit
+`0d9f841116e3789ac224cc1393c6990b0f01cb33` (tree
+`b1bbe37c0f41ff335b800c002557ddc7d684a754`, parent `0301adb`), which contains
+exactly those 14 Java paths: seven production and seven test. All 1,425 raw
+source/build inputs matched the tested `final.inputs.csv` manifest above before
+and after the commit; all 1,425 normalized committed blobs
+match the tested tree; the nine archived loader main/source/Javadoc artifacts,
+including the three shippable jars, retained their SHA-256 and `archiveMatches`;
+and the protected build/configuration/network/resource files, mod version
+`0.5.0-pfi-beta2`, Minecraft 1.21.1 and the inventory/presentation protocol
+version-2 values were unchanged. The commit agent ran no Gradle or tests. This
+is a byte-identity binding to the prior execution, not a clean-commit execution
+claim or a retest.
+
+All 1,425 source/build paths match the owner's passing
+`policy-lifecycle-repair-01/run4-full` input manifest byte-for-byte
+(`prior-full-input-delta.csv` is empty); that run's manifest additionally covers
+17 repository files outside the build-input scope, so its manifest SHA-256 is a
+different scope, not a different source state. The full `run4-full` test run at
+the same HEAD and tracked diff ran 6,498 tests: 6,482 passed, 16 skipped, and zero
+failures or errors. It supplies the reused Fabric and Forge reports below.
+
+The single final PowerShell invocation used Temurin JDK `21.0.12.1+1-LTS`, UTF-8,
+`--no-daemon`, `--console=plain`, `--continue` and separate stdout/stderr files:
+
+```powershell
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+.\gradlew.bat --no-daemon --console=plain --continue :common:check :common:javadoc verifyModIdentity > $stdout 2> $stderr
+```
+
+It exited 0 with `BUILD SUCCESSFUL` from 01:02:58 to 01:07:37 (+08:00), with no
+test filter and no rerun init script. All four test tasks produced a complete
+result set, but only Common and NeoForge executed freshly in this invocation:
+
+| Module | Suites | Tests | Passed | Skipped | Execution in final invocation |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Common | 540 | 5,876 | 5,874 | 2 | Fresh, unfiltered. |
+| Fabric | 11 | 94 | 94 | 0 | `UP-TO-DATE`; same-input reuse of the passing `run4-full` XML. |
+| Forge | 14 | 85 | 71 | 14 | `UP-TO-DATE`; same-input reuse of the passing `run4-full` XML. |
+| NeoForge | 66 | 443 | 443 | 0 | Fresh, unfiltered. |
+| Total | 631 | 6,498 | 6,482 | 16 | Zero failures and zero errors. |
+
+The reused Fabric/Forge XML is byte-identical to the archived `run4-full`
+reports, and the compared source/build inputs are unchanged; this is explicitly
+reuse, not a second fresh execution and not an "all tests freshly ran" claim.
+The 16 skips are the same normal-matrix fluid-classpath cases as the
+[D0019 record above](#provider-trust-and-frozen-authorization-final-verification):
+two Common `InventoryFluidLoaderIntegrationTest` cases and 14 Forge
+patched-first native-fluid cases. They are not ITEM wrapper cases; the ITEM
+wrapper and regression cases ran without skips in this suite. The old fluid
+native-classpath supplemental harness was not rerun because the ITEM change does
+not affect those fluid classpaths; this is not an unavailable-tool claim.
+
+`common:check`, `common:javadoc`, all three loader `build`, `javadoc` and
+packaging tasks, Fabric remapping and `verifyModIdentity` succeeded. Version and
+protocol metadata were unchanged. The three current shippable jars were newly
+built and retained:
+
+| Loader | Artifact | Bytes | SHA-256 |
+| --- | --- | ---: | --- |
+| Fabric | `Ping-For-It-0.5.0-pfi-beta2-fabric-1.21.1.jar` | 3,545,911 | `4b86f553bbf000ed192444217e3b16b53b536588cbe33479127a06c2a05355c6` |
+| Forge | `Ping-For-It-0.5.0-pfi-beta2-forge-1.21.1.jar` | 3,497,279 | `85304ce07367251ae2f2e467b9e6169d57971fd12e9108eddcfab4f9ae42a10e` |
+| NeoForge | `Ping-For-It-0.5.0-pfi-beta2-neoforge-1.21.1.jar` | 3,803,648 | `3f926671df234928fc9bc8fbbfd7e98db97d0f1c5da7becf40dbc89843799367` |
+
+Identity verification passed for `pingforit` / `Ping For It` /
+`0.5.0-pfi-beta2` on Minecraft 1.21.1. These are artifact-identity checks, not an
+exhaustive package-content audit. No independently configured Java lint,
+formatter or static-analysis task exists. The actual
+`git diff --check -- common/src fabric/src forge/src neoforge/src` exited 0. The
+run retained existing Javadoc missing-tag, mapping and Gradle deprecation
+warnings; it is not warning-clean evidence.
+
+#### Delivered ITEM scope
+
+- **P1 on-demand lane-policy hint.** `InventoryPolicyFrozenDemandRegressionTest`
+  passed 3/3. Steady frozen Preview/Tracking ticks perform zero permission
+  callbacks for the two Inventory fields while SECTION-mask callbacks and live
+  quantity/source reads continue; an internal provider-state flip leaves the
+  cached hint stale but a new `OPEN` and create resolve current authority; an
+  explicit provider replacement refreshes the queued hint once and budget
+  retries do not re-evaluate it. An accepted Preview and existing Ping keep
+  their original grants while the next `OPEN`/`SELECT` uses the fresh result.
+  `InventoryProductionPolicyTest` passed 99/99, including the first-HELLO
+  OFFER-before-POLICY initial hint, deferred-offer/data gate, transport-failure
+  retry, queued-owner retention across retry/reconfiguration/view/epoch
+  boundaries, provider-callback refresh and session-replacement/token cases.
+  These are authority and ownership assertions, not allocation measurements.
+- **P3 certified chest mapping; P2 withdrawn.** `CertifiedChestFrozenMappingTest`
+  passed 7/7 and the common/Fabric/Forge/NeoForge resident-scope and actual
+  Forge/NeoForge wrapper-boundary regressions passed. The immutable single- and
+  double-chest address mapping (27/54 pairs) is proved once at construction; the
+  view owns immutable entity, address and member copies; current validation
+  still checks live identity, pairing, size, owner, lock and grant without
+  re-walking producer-owned address lists. The baseline authority gates and
+  existing conservative cost accounting remain unchanged and the old cost is
+  not lowered. P2 lookup deduplication was withdrawn because the evaluated
+  `valid()` callback paths did not establish callback-free closure; the baseline
+  current-authority sequence is retained. The new tests protect that baseline
+  authority and add no unpaid extra authority pass or P2 completion/benefit
+  claim.
+- **P4 immutable publication work reuse.** `CutWorkReuseTest` passed 3/3,
+  `InventoryChecksumsTest` passed 7/7, `InventorySyncPublisherTest` passed 52/52
+  and `InventoryFanoutEncodingReuseTest` passed 3/3. FNV-1a checksum bytes and
+  the v2 wire format are unchanged. A multipart admitted cut computes its digest
+  once and every part reuses it; a newer offer cannot rewrite that digest and a
+  retry adds no admission traversal. Delivery computes one separate delivered
+  digest and heartbeat reuses it, and withdrawal/rebase cannot carry an old
+  checksum into a fresh cut. Within one publication operation, identical
+  recipient projections encode once while each recipient retains its own proof,
+  admission and current checks; distinct fold projections use separate
+  encodings. The provisional seed and completed cut are distinct publication
+  operations, and each fan-out observation is taken after its own publication
+  rather than merging the two into one tick. The shared bytes do not substitute
+  for a blocked recipient's proof or delivery admission. No N-times or
+  end-to-end allocation gain is claimed.
+
+Full command lines, logs, JUnit XML/HTML, manifests, failure stacks, archive
+hashes and the complete attempt history are retained in the external
+`item-redundant-work-20261107` evidence directory and its `execution-ledger.md`.
+
+#### Matched baseline-to-after observations
+
+The dedicated after commands re-ran the same five Common and three NeoForge
+performance/regression classes on the tested input: 167/167 Common and 16/16
+NeoForge passed. All eight test-source SHA-256 values were compared; the three
+NeoForge performance sources are unchanged, while
+`InventoryProductionPolicyTest` (88 to 99 cases) and
+`InventorySyncPublisherTest` (49 to 52 cases) changed. The selected Common total
+153 to 167 is therefore regression verification, not an identical-case
+benchmark comparison. Both certified 1,620-slot profiles match fixture/world
+class hashes, normalized settings, JDK/VM, three warmups and five samples; the
+900-slot metadata string also matches.
+
+The comparison matched 72 keys (36 counter and 36 allocation) with no missing
+keys, profile changes or schema issues. Across all 36 counter rows, every actual
+operation counter is unchanged: physical visits, committed addresses, pages,
+completions/scans, loaded/read checks, defers and invalid results. The only
+numeric counter change is modeled retained bytes `+2` in all 24 certified rows;
+reserved bytes stay zero in every row. The 900-slot retained/reserved counters
+are unchanged. Certified `inferredCommonCurrent` and provider matches, and the
+900 inferred full matches, are derived values, not direct gate-call counters.
+The 900 and 1,620 fixtures have different slots, fixtures and paths and are not
+cross-compared or subtracted.
+
+| Representative full sweep | Physical visits | Pages | Completion/scan | Actual common/provider loaded | Inferred matches | Modeled retained |
+| --- | --- | --- | --- | --- | --- | --- |
+| certified 1,620 / INCIDENT / EMPTY | 1,620 → 1,620 | 51 → 51 | 1 → 1 | 1,081,179 / 2,439,684 unchanged | 13,266 → 13,266 | 767,116 → 767,118 |
+| certified 1,620 / DEFAULTS / EMPTY | 1,620 → 1,620 | 51 → 51 | 1 → 1 | 1,081,179 / 2,439,684 unchanged | 13,266 → 13,266 | 767,116 → 767,118 |
+| vault 900 / MIXED | 900 → 900 | 29 → 29 | 1 → 1 | 84,134 / 584,036 unchanged | 5,458 → 5,458 | 253,412 → 253,412 |
+
+Allocation observations use `ThreadMXBean` current-thread allocated bytes and
+`System.nanoTime` elapsed time with three warmups and five samples; they are not
+retained heap, allocation rate, CPU, TPS or a portable threshold. Every
+certified full-sweep median increased by 9,792 bytes (about 0.010–0.014%):
+EMPTY 70,661,616 → 70,671,408 and 70,660,392 → 70,670,184 for INCIDENT and
+DEFAULTS, REPEATED 79,791,592 → 79,801,384 and 79,788,600 → 79,798,392, MIXED
+93,532,344 → 93,542,136 and 93,526,952 → 93,536,744. Certified window32 increased
+192 bytes and idle validation 64 bytes. The 900-slot EMPTY and REPEATED sweep
+medians are unchanged; MIXED increased 384 bytes (17,094,112 → 17,094,496).
+Time medians move in both directions; no ratio determines pass/fail and no
+speedup is claimed.
+
+These macro fixtures do not traverse the P1 Backend hint path, the P3 chest
+route or most P4 fan-out paths, so their unchanged counters do not prove those
+optimizations and their small allocation increases are not asserted to be
+noise. The direct named regressions above are the evidence for those boundaries.
+No overall FPS, TPS, CPU, GC, allocation-rate or live-performance improvement is
+claimed.
+
+#### Historical attempts and audit exceptions
+
+The following runs are retained as history and are not folded into the final
+acceptance totals. External logs, exact commands and failure stacks remain the
+detailed record.
+
+| Attempt | Result and treatment |
+| --- | --- |
+| Baseline `gradlew --version` probe | Audit exception: omitted `--no-daemon` and stdout/stderr redirection; ran no build or test and was not reconstructed as compliant. |
+| Four test-agent policy compile attempts | Four unauthorized, unfrozen-input `:common:compileTestJava` attempts, all exit 1; not a gate, not reused and not acceptance evidence. |
+| `central-integration-01` | First compile failed on nine javac errors in two untracked tests; one mechanical repair passed. The targeted subset then ran 244 tests with 238 passes and six assertion failures. |
+| `central-integration-02` | Full four-module tests ran 6,492 tests with 6,469 passes, seven failures and 16 skips; the isolated chest class passed 7/7. After-baseline and later gates were not entered. |
+| `central-integration-03` | Full four-module tests ran 6,493 tests with 31 failures and 16 skips; later gates were not entered. |
+| `central-repair-01` | Six diagnostic-only invocations, all failed; no JUnit XML or result record exists for diag2–diag6, and only diag1 retains an input manifest. They are not acceptance evidence. |
+| `policy-lifecycle-repair-01` | Run 1 ran 152 tests with 31 failures; run 2 ran 157 with two failures; run 3 passed 157; `run4-full` ran 6,498 tests: 6,482 passed, 16 skipped, zero failures/errors, and supplies the reused Fabric/Forge XML. |
+| After pair and final run | The two after commands passed 167/167 Common and 16/16 NeoForge; the final command passed as recorded above. |
+
+This is headless automated evidence. No live or in-game Minecraft client or
+server, loader launch, multiplayer/mixed-version connection, installed
+Create/Sable provider, GPU/font/UI output, manual gameplay or live
+CPU/TPS/GC/allocation/FPS measurement was performed. The headless
+`ThreadMXBean` allocation observations and scoped macro comparison above remain
+recorded; they do not measure live CPU, GC, allocation rate, TPS or FPS. The
+6,498-test final result applies to the tested working-tree bytes; commit
+`0d9f8411` binds those bytes without a rerun. It is not a clean-commit execution
+claim or a post-commit retest.
 
 ## Verification limitations
 

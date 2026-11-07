@@ -40,32 +40,35 @@ A connection reaches presentation readiness in stages:
   client accepts only the first valid offer for the connection, and only after
   its own `HELLO`.
 - The server follows its offer with a `RESET` carrying the epoch, the
-  non-regressing view, the server-selected current authorization mask, and the
+  non-regressing view, the server-selected current field mask, and the
   complete per-target-type child deny map. The mask is keyed by target type,
-  adapter, and the field IDs the server will send for a later creation of that
-  target type; it is derived from the accepted server field policy, and the
-  client has no local receive or display filter to intersect. The child deny map
-  is likewise server-selected and complete: one list per target type, carrying
-  the exact nested references that are not independently selectable or
+  adapter, and field IDs; it is the session's current information and the
+  advertised boundary for the independent
+  [target content preview](#target-content-preview) and its client-side current
+  interaction hints. It is derived from the accepted server field policy, and
+  the client has no local receive or display filter to intersect. The child deny
+  map is likewise server-selected and complete: one list per target type,
+  carrying the exact nested references that are not independently selectable or
   annotatable. The
   field mask and complete child deny map must both pass
   [RESET wire validation](../network/protocol.md#presentation-snapshot-route-presentation-v2)
   before either replaces the previous current values; a rejected RESET leaves
-  both unchanged. There is no client subscription, no field acknowledgement, and
-  no subscription generation.
+  both unchanged. They are not an authorization input for a server Ping's
+  create-time frozen result. There is no client subscription, no field
+  acknowledgement, and no subscription generation.
 - Only a `RESET` for the offered epoch and a non-regressing view turns the
   client ready, enables marker intents, and starts the new view generation. A
   reset that establishes an epoch starts that epoch's store; a same-epoch reset
-  replaces the current mask and child deny map used to resolve later creations
-  but does not prune, extend or re-authorize the retained content of an existing
-  marker. A field created under the marker's
+  replaces the current advertised mask and child deny map for the independent
+  preview but neither prunes, extends or re-authorizes the retained content of
+  an existing marker nor determines a new Ping's creation authorization. A
+  field created under the marker's
   [frozen recipient content authorization](#frozen-recipient-content-authorization)
   stays retained and displayable after a later mask excludes it, and a field the
-  current mask adds for later creations is not added to an older marker. For a
-  later creation, an empty mask authorizes no field, and a denied child never
-  strips keys from an authorized root record. `CREATE`/`REMOVE` intents carry the
-  negotiated epoch and are ignored unless the session is ready for that epoch,
-  and a create carries no client field list.
+  current mask adds for the preview is not added to an older marker. A denied
+  child never strips keys from an authorized root record. `CREATE`/`REMOVE`
+  intents carry the negotiated epoch and are ignored unless the session is ready
+  for that epoch, and a create carries no client field list.
 
 `RESET` and the mutation messages are accepted only for the current epoch/view;
 the first accepted `OFFER` establishes the epoch, and stale or off-view messages
@@ -75,9 +78,9 @@ Basic adapter is rejected, so that connection has no negotiated presentation
 session. The client validates a received section's field kinds and wire bounds
 against the accepted manifest and the marker's marker-scoped
 [frozen authorization](#frozen-recipient-content-authorization); a same-epoch
-reset mask and child deny map resolve later creations rather than
-reinterpreting retained marker content. The client applies no allow or deny
-policy of its own.
+reset mask and child deny map update the preview boundary rather than
+reinterpreting retained marker content or determining a new Ping's frozen
+authorization. The client applies no allow or deny policy of its own.
 
 ## Field manifest and value model
 
@@ -151,7 +154,10 @@ fluids, and resolving either field does not grant or revoke the other. An
 incompatible inventory schema excludes that dedicated adapter under the
 ordinary manifest rule; it does not negotiate a schema-one inventory fallback.
 Inventory lane state, grouping and recovery remain owned by
-[inventory](inventory.md#resource-lanes-and-scope).
+[inventory](inventory.md#resource-lanes-and-scope). The dedicated lane `POLICY`
+view is a future-input advertisement, separate from the presentation `RESET`
+mask and from the creation-frozen grant; its refresh and staleness boundary are
+owned by [inventory](inventory.md#lane-policy-hint-and-refresh).
 
 ## Basic target fields
 
@@ -340,7 +346,9 @@ authorization; a later provider change does not re-evaluate that marker.
 ## Frozen recipient content authorization
 
 A successful Ping creation resolves and freezes that marker's complete
-effective recipient content authorization. The resolution covers every
+effective recipient content authorization. The freeze is a server-side snapshot
+of the latest server policy at that successful create; it does not wait for a
+`RESET`, a view advance or recipient readiness. The resolution covers every
 recipient in the creation audience and every content surface carried for it:
 the Basic and section fields, exact record-child references eligible for
 selection or annotation, the dedicated inventory resource fields, and the
@@ -348,9 +356,10 @@ receipt content descriptor including its creation snapshot entitlement. It is
 resolved from the server-owned presentation manifest and field definitions, the
 manifest field defaults, the target type's then-current allow, deny and
 whitelist-only rules, permission overrides and the current native or custom
-permission result, and the then-current child deny set. A recipient's accepted
-session manifest is not a creation input: a creation-audience member that has
-not yet sent `HELLO` or completed negotiation still holds the resolved
+permission result, and the then-current persisted child deny set. Neither the
+session's advertised `RESET` mask and child deny map nor a recipient's accepted
+session manifest is a creation input: a creation-audience member that has not
+yet sent `HELLO` or completed negotiation still holds the resolved
 authorization, and readiness or a later negotiated schema is a delivery gate
 rather than a field-level denial. A missing server adapter, field, target type
 or permission result resolves to denial, and an adapter or field definition
@@ -359,13 +368,14 @@ added after creation does not extend an existing marker's frozen grant.
 The frozen authorization is per marker. Two markers of the same target type can
 therefore carry different authorized sets when their creations observe
 different policies or permissions. The session-wide current mask and child deny
-map describe the inputs for later creations. They do not express a same-type
-marker's own frozen set and are not the authorization of an existing marker.
-The server retains the resolved per-Ping set as the normative authorization for
-that marker. The required wire and client representation remains pending within
-the existing presentation and inventory protocol update; necessary fields or
-grammar may join that update without another version number, and this contract
-does not design them here.
+map describe the session's current advertisement for the independent preview;
+they do not express a same-type marker's own frozen set, are not an
+authorization input for a new Ping's freeze, and are not the authorization of an
+existing marker. A stale or empty advertised mask therefore cannot deny or
+widen that create-time result. The server retains the resolved per-Ping set as
+the normative authorization for that marker. `CREATED` carries it as the marker
+content grant; the wire grammar and replay rule are owned by
+[network protocol](../network/protocol.md#presentation-snapshot-route-presentation-v2).
 
 The frozen authorization covers which content each recipient may receive and
 which references may be selected or annotated for that marker. It does not
@@ -437,22 +447,27 @@ topic owns policy application:
   still formats from all of its entries, while the denied reference is never
   independently selectable or annotated. A reference naming a missing field or an absent
   optional adapter is retained but inert.
-- For a later creation, the effective child deny set is the advertised `RESET`
-  map unioned with the then-current policy: a newly denied reference is
-  enforced for later creations, while a newly allowed reference stays denied
-  until a new `RESET` advertises the wider map. Neither change reopens or
-  extends an existing marker's frozen child set.
+- For a successful Ping creation, the effective child deny set is the
+  then-current persisted child deny set for its exact target type. The
+  advertised `RESET` map is not unioned into that create-time set and cannot
+  retain a stale denial; a newly allowed reference applies to a subsequent
+  successful creation without waiting for a new `RESET`. Neither change reopens
+  or extends an existing marker's frozen child set. The independent target
+  content preview retains its advertised/fresh child-denial behavior, owned by
+  [Target content preview](#target-content-preview).
 - The server derives each recipient's current `RESET` mask and child deny map
   from this policy; the policy is part of the server's effective configuration
   fingerprint, and when the fingerprint changes — including a child-only change
   that leaves the mask unchanged — every ready session advances its view and
-  advertises the new policy for later creations. The advance does not
-  re-project an existing marker or replace its frozen authorization.
+  advertises the new preview boundary. The advance does not gate a new Ping's
+  creation freeze, re-project an existing marker or replace its frozen
+  authorization.
 - The client has no receive or display policy of its own. A same-epoch mask
-  change governs later creations and does not delete an existing marker's
-  frozen-authorized values, annotations or default references; a true new
-  session epoch clears the store as before. Current schema incompatibility can
-  make a retained value undisplayable without redefining its authorization.
+  change governs only the independent preview and its current interaction
+  hints; it does not delete an existing marker's frozen-authorized values,
+  annotations or default references; a true new session epoch clears the store
+  as before. Current schema incompatibility can make a retained value
+  undisplayable without redefining its authorization.
 
 ## Server policy rule view
 
@@ -527,12 +542,13 @@ IDs, and local eviction also leaves a tombstone so a delayed initial cannot
 resurrect the marker. Tombstones and per-marker section history are bounded;
 when history exhausts, the store fails closed instead of discarding the history
 that prevents resurrection. The store resets on a true new epoch. A same-epoch
-`RESET` advertises the current mask and child deny map for later creations but
-neither prunes nor extends an existing marker's retained sections or
-annotations. Each marker retains the fields, child references and default
-reference admitted under its creation-frozen authorization; a reference denied
-for that marker is removed from its annotations and a default reference naming
-it is cleared, while the parent field and its complete value stay. An incoming
+`RESET` updates the current preview mask and child deny map but neither prunes
+nor extends an existing marker's retained sections or annotations and does not
+determine a later Ping's frozen authorization. Each marker retains the fields,
+child references and default reference admitted under its creation-frozen
+authorization; a reference denied for that marker is removed from its
+annotations and a default reference naming it is cleared, while the parent field
+and its complete value stay. An incoming
 section's annotations outside the marker's frozen set are dropped before
 storage. A current schema or session validity check can make a retained value
 undisplayable; it does not re-authorize or delete the marker's frozen set.
@@ -570,15 +586,19 @@ are owned by [testing and verification](../../testing/verification/presentation.
   accepted presentation epoch and view. The field must be included by the
   accepted `RESET` mask for the target's exact target type and must intersect
   the accepted manifest's compatible section fields with a matching kind; the
-  client adds no grant of its own. Manifest metadata such as a field's default
-  enablement or label is not a grant by itself, and an unready session, a stale
-  view, an unknown field, a target-type mismatch, or a mask exclusion makes the
-  field ineligible. The reset's child deny map applies at the same
-  granularity: a denied nested reference is ineligible even when its root field
-  is eligible, is filtered from the content branch's property entries and
-  dispatchable intents, and never becomes a selection. Dedicated adapters,
-  including inventory, are excluded from this preview; inventory's own list,
-  stream and variant rules stay owned by [inventory](inventory.md).
+  client adds no grant of its own. An empty mask therefore authorizes no preview
+  field. Manifest metadata such as a field's default enablement or label is not
+  a grant by itself, and an unready session, a stale view, an unknown field, a
+  target-type mismatch, or a mask exclusion makes the field ineligible. This
+  no-Ping preview keeps its advertised/fresh intersection: the field also
+  requires fresh server authorization, and the advertised child deny map is
+  unioned with the fresh policy. A newly denied nested reference is therefore
+  immediately ineligible even when its root field is eligible, while a newly
+  allowed reference becomes eligible only after a `RESET` advertises the wider
+  map. Denied references are filtered from the content branch's property
+  entries and dispatchable intents and cannot become selections. Dedicated
+  adapters, including inventory, are excluded from this preview; inventory's
+  own list, stream and variant rules stay owned by [inventory](inventory.md).
 - **Provenance and precedence.** A value the client already legitimately
   received for the exact target is shown as `CLIENT_SYNCED`; only a field the
   client cannot observe locally may fall back to the bounded server preview,
