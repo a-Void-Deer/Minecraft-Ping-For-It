@@ -112,7 +112,7 @@ public final class WheelMouseCapture {
 			}
 			case GRAB -> {
 				releasedByWheel = false;
-				game.mouseHandler.grabMouse();
+				grabWithoutScreenChange(game);
 				logger.debug("wheel mouse regrabbed");
 			}
 			default -> {
@@ -140,7 +140,25 @@ public final class WheelMouseCapture {
 			return;
 		}
 
-		game.mouseHandler.grabMouse();
+		grabWithoutScreenChange(game);
 		logger.debug("wheel mouse regrabbed on close");
+	}
+
+	/**
+	 * Re-grabs the cursor without calling {@code Minecraft.setScreen(null)}.
+	 *
+	 * <p>1.20.1 {@code MouseHandler.grabMouse()} always transitions the screen
+	 * to {@code null}, even when it already is. That transition is invisible in
+	 * vanilla but makes the Blur mod start a fade-out blur, so closing the wheel
+	 * briefly blurred the whole game view in modpacks that include it. The
+	 * accessor mirrors the cursor grab without the redundant screen change.</p>
+	 */
+	private static void grabWithoutScreenChange(Minecraft game) {
+		if (game.mouseHandler instanceof MouseGrabAccess access) {
+			access.pingforit$grabWithoutScreenChange();
+		} else {
+			// Defensive fallback when the accessor mixin is unavailable.
+			game.mouseHandler.grabMouse();
+		}
 	}
 }

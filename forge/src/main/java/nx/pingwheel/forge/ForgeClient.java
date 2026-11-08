@@ -84,7 +84,7 @@ public class ForgeClient {
 	}
 
 	/**
-	 * Late HUD entry point for Forge.
+	 * HUD entry point for Forge, drawn immediately before the chat panel.
 	 *
 	 * <p>Forge 1.20.1 renders vanilla overlays in {@link VanillaGuiOverlay}
 	 * declaration order, where {@code VIGNETTE} is the <em>first</em> overlay,
@@ -92,14 +92,23 @@ public class ForgeClient {
 	 * and toggle notice underneath later HUD layers, and the portal/frostbite
 	 * overlays would tint the toggle notice.</p>
 	 *
-	 * <p>{@code PLAYER_LIST} is the final vanilla overlay, so its {@code Post}
-	 * event runs after every tint and HUD layer. Forge still fires the event
-	 * when the player list itself is hidden, which makes it a stable
-	 * once-per-frame late entry point.</p>
+	 * <p>{@code CHAT_PANEL} must be entered as {@code Pre}, not as a late
+	 * {@code Post(PLAYER_LIST)} hook. 1.20.1 draws every chat line background at
+	 * a {@code z} offset of 50 with {@code RenderType.gui()}, whose depth test is
+	 * {@code LEQUAL}: those backgrounds write depth. Drawing the wheel after the
+	 * chat at the ordinary HUD depth makes the depth test reject the wheel
+	 * exactly inside every chat line rectangle, which looks like the wheel has
+	 * a missing cut-out. Drawing before the chat keeps the wheel intact and lets
+	 * the chat background shade it, so the wheel appears underneath the chat
+	 * shadow as intended.</p>
+	 *
+	 * <p>Forge fires {@code Pre}/{@code Post} for every registered overlay
+	 * regardless of whether that overlay is visible, so this is a stable
+	 * once-per-frame entry point.</p>
 	 */
 	@SubscribeEvent
-	public void onRenderGuiPost(RenderGuiOverlayEvent.Post event) {
-		if (event.getOverlay() == VanillaGuiOverlay.PLAYER_LIST.type()) {
+	public void onRenderGuiPre(RenderGuiOverlayEvent.Pre event) {
+		if (event.getOverlay() == VanillaGuiOverlay.CHAT_PANEL.type()) {
 			CommonClient.INSTANCE.onRenderGUI(event.getGuiGraphics(), event.getPartialTick());
 			CommonClient.INSTANCE.onRenderToggleNotice(event.getGuiGraphics());
 		}
