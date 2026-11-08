@@ -222,15 +222,14 @@ public final class SettingsCategoryCatalog {
 		sections.put(Category.CHANNEL_NOTICES, List.of(section("channel", Row.single(Setting.CHANNEL)),
 			section("sound_notices", Row.single(Setting.PING_VOLUME), Row.single(Setting.CONFIGURATION_NOTICE_SIZE))));
 		sections.put(Category.GEOMETRY_CONFIG, List.of(section("geometry", Row.single(Setting.ENTITY_BLOCK_RENDER_MODE)),
-			section("logging", Row.single(Setting.LOGGING_PROFILE)),
 			section("client_config_file", Row.single(Setting.OPEN_CLIENT_CONFIG))));
 		sections.put(Category.CLIENT_PERFORMANCE, List.of(section("wheel_options", Row.single(Setting.PRECISE_CAPTURE_PERIOD_TICKS))));
+		sections.put(Category.CLIENT_DEBUG, List.of(section("logging", Row.single(Setting.LOGGING_PROFILE))));
 		sections.put(Category.CHANNEL_PLAYERS, List.of(section("channel_players", Row.single(Setting.DEFAULT_CHANNEL_MODE), Row.single(Setting.PLAYER_TRACKING_ENABLED))));
 		sections.put(Category.SEND_RATE, List.of(section("send_rate", Row.single(Setting.MS_TO_REGENERATE), Row.single(Setting.RATE_LIMIT))));
 		sections.put(Category.MARKER_DURATION, List.of(section("marker_duration", Row.single(Setting.SYNC_DURATION))));
 		sections.put(Category.PERFORMANCE, List.of(
-			section("monitoring", Row.single(Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED),
-				Row.single(Setting.SERVER_LOGGING_PROFILE)),
+			section("monitoring", Row.single(Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED)),
 			section("inventory_shared", Row.single(Setting.INVENTORY_PHYSICAL_SLOTS_PER_TICK), Row.single(Setting.INVENTORY_PENDING_MEMORY_MIB),
 				Row.single(Setting.INVENTORY_DISPLAY_BYTE_MULTIPLIER), Row.single(Setting.INVENTORY_FRAME_BYTE_MULTIPLIER)),
 			section("inventory_preview", Row.single(Setting.INVENTORY_PREVIEW_PERIOD_TICKS), Row.single(Setting.INVENTORY_PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD),
@@ -244,6 +243,7 @@ public final class SettingsCategoryCatalog {
 				Row.single(Setting.INVENTORY_TRACKING_RESYNC_MIN_PERIODS), Row.single(Setting.INVENTORY_TRACKING_HEARTBEAT_PERIODS), Row.single(Setting.INVENTORY_TRACKING_GRACE_PERIODS))));
 		sections.put(Category.SERVER_PRESENTATION, List.of(new Section("settings.pingforit.presentation.server.title",
 			List.of(Row.single(Setting.PRESENTATION_SERVER_POLICY)))));
+		sections.put(Category.SERVER_DEBUG, List.of(section("logging", Row.single(Setting.SERVER_LOGGING_PROFILE))));
 		validate(sections);
 		return Map.copyOf(sections);
 	}

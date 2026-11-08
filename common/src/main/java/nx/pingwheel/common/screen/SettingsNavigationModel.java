@@ -32,11 +32,13 @@ public final class SettingsNavigationModel {
 		CHANNEL_NOTICES(Scope.CLIENT, "channel_notices"),
 		GEOMETRY_CONFIG(Scope.CLIENT, "geometry_config"),
 		CLIENT_PERFORMANCE(Scope.CLIENT, "performance"),
+		CLIENT_DEBUG(Scope.CLIENT, "debug"),
 		SERVER_PRESENTATION(Scope.SERVER, "server_presentation"),
 		CHANNEL_PLAYERS(Scope.SERVER, "channel_players"),
 		SEND_RATE(Scope.SERVER, "send_rate"),
 		MARKER_DURATION(Scope.SERVER, "marker_duration"),
-		PERFORMANCE(Scope.SERVER, "performance");
+		PERFORMANCE(Scope.SERVER, "performance"),
+		SERVER_DEBUG(Scope.SERVER, "debug");
 
 		private final Scope scope;
 		private final String id;
@@ -73,12 +75,14 @@ public final class SettingsNavigationModel {
 		CLIENT_CHANNEL_NOTICES(Scope.CLIENT, Category.CHANNEL_NOTICES),
 		CLIENT_GEOMETRY_CONFIG(Scope.CLIENT, Category.GEOMETRY_CONFIG),
 		CLIENT_PERFORMANCE(Scope.CLIENT, Category.CLIENT_PERFORMANCE),
+		CLIENT_DEBUG(Scope.CLIENT, Category.CLIENT_DEBUG),
 		SERVER_OVERVIEW(Scope.SERVER, null),
 		SERVER_PRESENTATION(Scope.SERVER, Category.SERVER_PRESENTATION),
 		SERVER_CHANNEL_PLAYERS(Scope.SERVER, Category.CHANNEL_PLAYERS),
 		SERVER_SEND_RATE(Scope.SERVER, Category.SEND_RATE),
 		SERVER_MARKER_DURATION(Scope.SERVER, Category.MARKER_DURATION),
-		SERVER_PERFORMANCE(Scope.SERVER, Category.PERFORMANCE);
+		SERVER_PERFORMANCE(Scope.SERVER, Category.PERFORMANCE),
+		SERVER_DEBUG(Scope.SERVER, Category.SERVER_DEBUG);
 
 		private final Scope scope;
 		private final Category category;
@@ -131,14 +135,16 @@ public final class SettingsNavigationModel {
 			Category.INPUT_INTERACTION,
 			Category.CHANNEL_NOTICES,
 			Category.GEOMETRY_CONFIG,
-			Category.CLIENT_PERFORMANCE),
+			Category.CLIENT_PERFORMANCE,
+			Category.CLIENT_DEBUG),
 		Scope.SERVER,
 		List.of(
 			Category.CHANNEL_PLAYERS,
 			Category.SEND_RATE,
 			Category.MARKER_DURATION,
 			Category.PERFORMANCE,
-			Category.SERVER_PRESENTATION));
+			Category.SERVER_PRESENTATION,
+			Category.SERVER_DEBUG));
 
 	private static final PageViewState EMPTY_VIEW_STATE = new PageViewState(0, null);
 

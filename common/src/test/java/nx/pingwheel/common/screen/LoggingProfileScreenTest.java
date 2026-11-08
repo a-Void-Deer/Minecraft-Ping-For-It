@@ -76,7 +76,7 @@ class LoggingProfileScreenTest {
 		LoggingProfile previousRuntime = Diagnostics.profile(DiagnosticSide.CLIENT);
 		try {
 			withScreen(config, (screen, client) -> {
-				openCategory(screen, Category.GEOMETRY_CONFIG);
+				openCategory(screen, Category.CLIENT_DEBUG);
 				LoggingProfileButton button = loggingProfileButton(screen);
 
 				PhysicalAltKeys.hold(true);
@@ -88,10 +88,10 @@ class LoggingProfileScreenTest {
 
 				backButton(screen).onPress();
 				selectScope(screen, 1);
-				openCategory(screen, Category.PERFORMANCE);
+				openCategory(screen, Category.SERVER_DEBUG);
 				backButton(screen).onPress();
 				selectScope(screen, 0);
-				openCategory(screen, Category.GEOMETRY_CONFIG);
+				openCategory(screen, Category.CLIENT_DEBUG);
 				screen.resizeTo(640, 360);
 
 				LoggingProfileButton reopened = loggingProfileButton(screen);
@@ -121,7 +121,7 @@ class LoggingProfileScreenTest {
 		LoggingProfile previousRuntime = Diagnostics.profile(DiagnosticSide.CLIENT);
 		try {
 			withScreen(config, (screen, client) -> {
-				openCategory(screen, Category.GEOMETRY_CONFIG);
+				openCategory(screen, Category.CLIENT_DEBUG);
 				LoggingProfileButton button = loggingProfileButton(screen);
 
 				PhysicalAltKeys.hold(true);
@@ -152,7 +152,7 @@ class LoggingProfileScreenTest {
 	@Test
 	void loggingRowsExposeShortScopeHelpWithoutUnlockOrDebugHints() throws Exception {
 		withScreen(new ClientConfig(), (screen, client) -> {
-			openCategory(screen, Category.GEOMETRY_CONFIG);
+			openCategory(screen, Category.CLIENT_DEBUG);
 			LoggingProfileButton clientRow = loggingProfileButton(screen);
 			assertTrue(clientRow.getMessage().getString().contains("Logging Detail"));
 			String clientHelp = tooltipText(clientRow);
@@ -165,7 +165,7 @@ class LoggingProfileScreenTest {
 			ServerSettingsModel model = serverSettings(screen);
 			model.setClientPermission(true);
 			screen.onServerConfigSnapshot(model.beginSessionIfNeeded(), snapshot(true, LoggingProfile.NORMAL));
-			openCategory(screen, Category.PERFORMANCE);
+			openCategory(screen, Category.SERVER_DEBUG);
 			LoggingProfileButton serverRow = loggingProfileButton(screen);
 			assertTrue(serverRow.getMessage().getString().contains("Server Logging Detail"));
 			String serverHelp = tooltipText(serverRow);
@@ -182,7 +182,7 @@ class LoggingProfileScreenTest {
 		LoggingProfile previousRuntime = Diagnostics.profile(DiagnosticSide.CLIENT);
 		try {
 			withScreen(config, (screen, client) -> {
-				openCategory(screen, Category.GEOMETRY_CONFIG);
+				openCategory(screen, Category.CLIENT_DEBUG);
 				LoggingProfileButton button = loggingProfileButton(screen);
 				assertEquals("Logging Detail: Debug", button.getMessage().getString(),
 					"a current Debug value stays visible without holding Alt");
@@ -218,7 +218,7 @@ class LoggingProfileScreenTest {
 		LoggingProfile previousRuntime = Diagnostics.profile(DiagnosticSide.CLIENT);
 		try {
 			withScreen(constructionTimeConfig, handler::getConfig, (screen, client) -> {
-				openCategory(screen, Category.GEOMETRY_CONFIG);
+				openCategory(screen, Category.CLIENT_DEBUG);
 				LoggingProfileButton button = loggingProfileButton(screen);
 				assertEquals("Logging Detail: Normal", button.getMessage().getString());
 
@@ -272,7 +272,7 @@ class LoggingProfileScreenTest {
 		LoggingProfile previousServer = Diagnostics.profile(DiagnosticSide.SERVER);
 		try {
 			withScreen(new ClientConfig(), (screen, client) -> {
-				ServerSettingsModel model = openServerPerformance(screen, snapshot(true, LoggingProfile.DEEP));
+				ServerSettingsModel model = openServerDebug(screen, snapshot(true, LoggingProfile.DEEP));
 				LoggingProfileButton button = loggingProfileButton(screen);
 				assertEquals("Server Logging Detail: Detailed", button.getMessage().getString());
 
@@ -303,7 +303,7 @@ class LoggingProfileScreenTest {
 	@Test
 	void readOnlyServerRowShowsDebugWithoutEditing() throws Exception {
 		withScreen(new ClientConfig(), (screen, client) -> {
-			ServerSettingsModel model = openServerPerformance(screen, snapshot(false, LoggingProfile.DEBUG));
+			ServerSettingsModel model = openServerDebug(screen, snapshot(false, LoggingProfile.DEBUG));
 			LoggingProfileButton button = loggingProfileButton(screen);
 			assertEquals("Server Logging Detail: Debug", button.getMessage().getString(),
 				"a read-only viewer sees the authoritative Debug value");
@@ -340,7 +340,7 @@ class LoggingProfileScreenTest {
 			profile);
 	}
 
-	private static ServerSettingsModel openServerPerformance(
+	private static ServerSettingsModel openServerDebug(
 		SettingsScreen screen,
 		ServerConfigSnapshot snapshot
 	) {
@@ -348,7 +348,7 @@ class LoggingProfileScreenTest {
 		var model = serverSettings(screen);
 		model.setClientPermission(true);
 		screen.onServerConfigSnapshot(model.beginSessionIfNeeded(), snapshot);
-		openCategory(screen, Category.PERFORMANCE);
+		openCategory(screen, Category.SERVER_DEBUG);
 		return model;
 	}
 

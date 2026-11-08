@@ -206,7 +206,7 @@ class SettingsCategoryCatalogTest {
 		assertEquals(PERFORMANCE_HEADINGS, sections.stream().map(Section::headingKey).toList());
 
 		var rows = sections.stream().flatMap(section -> section.rows().stream()).toList();
-		assertEquals(25, rows.size(), "Performance contains monitoring, logging, 21 numeric leaves and two tracking toggles");
+		assertEquals(24, rows.size(), "Performance contains monitoring, 21 numeric leaves and two tracking toggles");
 		assertTrue(rows.stream().allMatch(row -> row.settings().size() == 1),
 			"server Performance controls must not be paired into shared rows");
 		assertEquals(
@@ -308,7 +308,6 @@ class SettingsCategoryCatalogTest {
 		// the other shared budgets rather than at the end of the catalogue.
 		assertEquals(List.of(
 			Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED,
-			Setting.SERVER_LOGGING_PROFILE,
 			Setting.INVENTORY_PHYSICAL_SLOTS_PER_TICK,
 			Setting.INVENTORY_PENDING_MEMORY_MIB,
 			Setting.INVENTORY_DISPLAY_BYTE_MULTIPLIER,
@@ -417,13 +416,14 @@ class SettingsCategoryCatalogTest {
 		expected.put(Category.GEOMETRY_CONFIG, List.of(
 			section(GEOMETRY_HEADING,
 				row(Setting.ENTITY_BLOCK_RENDER_MODE)),
-			section(LOGGING_HEADING,
-				row(Setting.LOGGING_PROFILE)),
 			section(CLIENT_CONFIG_FILE_HEADING,
 				row(Setting.OPEN_CLIENT_CONFIG))));
 		expected.put(Category.CLIENT_PERFORMANCE, List.of(
 			section(WHEEL_OPTIONS_HEADING,
 				row(Setting.PRECISE_CAPTURE_PERIOD_TICKS))));
+		expected.put(Category.CLIENT_DEBUG, List.of(
+			section(LOGGING_HEADING,
+				row(Setting.LOGGING_PROFILE))));
 		expected.put(Category.CHANNEL_PLAYERS, List.of(
 			section(CHANNEL_PLAYERS_HEADING,
 				row(Setting.DEFAULT_CHANNEL_MODE),
@@ -437,8 +437,7 @@ class SettingsCategoryCatalogTest {
 				row(Setting.SYNC_DURATION))));
 		expected.put(Category.PERFORMANCE, List.of(
 			section(MONITORING_HEADING,
-				row(Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED),
-				row(Setting.SERVER_LOGGING_PROFILE)),
+				row(Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED)),
 			section(INVENTORY_SHARED_HEADING,
 				row(Setting.INVENTORY_PHYSICAL_SLOTS_PER_TICK),
 				row(Setting.INVENTORY_PENDING_MEMORY_MIB),
@@ -468,6 +467,9 @@ class SettingsCategoryCatalogTest {
 		expected.put(Category.SERVER_PRESENTATION, List.of(
 			section(PRESENTATION_HEADING,
 				row(Setting.PRESENTATION_SERVER_POLICY))));
+		expected.put(Category.SERVER_DEBUG, List.of(
+			section(LOGGING_HEADING,
+				row(Setting.SERVER_LOGGING_PROFILE))));
 		return Map.copyOf(expected);
 	}
 
