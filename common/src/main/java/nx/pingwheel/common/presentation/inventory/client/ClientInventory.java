@@ -25,6 +25,11 @@ import nx.pingwheel.common.marker.MarkerRejectReason;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
+import nx.pingwheel.common.monitor.client.ClientMonitorCollector;
+import nx.pingwheel.common.monitor.MonitorSchema.Counter;
+import nx.pingwheel.common.monitor.MonitorSchema.Gauge;
+import nx.pingwheel.common.monitor.MonitorSchema.Lane;
+import nx.pingwheel.common.monitor.MonitorSchema.Phase;
 import nx.pingwheel.common.presentation.MarkerContentGrant;
 import nx.pingwheel.common.presentation.PresentationGrant;
 import nx.pingwheel.common.presentation.inventory.InventoryChecksums;
@@ -101,6 +106,12 @@ public final class ClientInventory {
 		}
 	}
 	public enum DispatchOutcome { SENT, NOT_READY, STALE_REFERENCE, ALREADY_RELEASED, THROTTLED, TRANSPORT_FAILED }
+	/**
+	 * Monitor-only outcomes; existing diagnostic ingress counters keep their original meaning.
+	 * APPLIED means an installed projection/control or an actually compared heartbeat.
+	 * HELD fragments/controls and unchanged replays are neither successful applies nor rejects.
+	 */
+	private enum ApplyOutcome { APPLIED, REJECTED, HELD, UNCHANGED }
 	public record SelectionResult(InventoryResourceKind resourceKind, long commitId, long requestId, @Nullable MarkerId markerId, @Nullable MarkerRejectReason rejection) {}
 
 	/**
@@ -312,6 +323,7 @@ public final class ClientInventory {
 
 	private final Consumer<IPacket> sender;
 	private final InventoryClientStore store;
+	private @Nullable ClientMonitorCollector monitor;
 	private final Map<PreviewKey, PreviewState> previews = new LinkedHashMap<>();
 	private final Map<Long, PreviewRequest> requests = new LinkedHashMap<>();
 	private final Map<MarkerId, TrackingState> tracking = new LinkedHashMap<>();
@@ -416,6 +428,32 @@ public final class ClientInventory {
 	public boolean admitsCreation(@Nullable MarkerSnapshot snapshot, @Nullable MarkerContentGrant content,
 		@Nullable InventoryCreationSnapshot creation) {
 		return admitsCreation(snapshot, content, creation, ignored -> false);
+	}
+
+	/** Client-owner-thread binding; null removes instrumentation without changing session state. */
+	public void monitor(@Nullable ClientMonitorCollector collector) {
+		monitor = collector;
+		store.monitor(collector);
+	}
+
+	/** Scalar map sizes only: no content walk, byte re-encoding or heap estimate. */
+	public void observeMonitorState() {
+		@Nullable ClientMonitorCollector collector = monitor;
+		if (collector == null || !collector.enabled()) return;
+		collector.gauge(Lane.PREVIEW, Gauge.CHANNELS, previews.size());
+		collector.gauge(Lane.TRACKING, Gauge.CHANNELS, tracking.size());
+		collector.gauge(Lane.PREVIEW, Gauge.SESSIONS, offered ? 1 : 0);
+		collector.gauge(Lane.TRACKING, Gauge.SESSIONS, offered ? 1 : 0);
+	}
+
+	/** Workload classification is independent of the packet's ITEM/FLUID resource lane. */
+	public static @Nullable Lane monitorLane(@Nullable InventoryS2CPacket packet) {
+		if (packet == null || packet.kind() == null) return null;
+		return switch (packet.kind()) {
+			case PREVIEW, OPENED, POLICY, SELECTED, REJECT -> Lane.PREVIEW;
+			case SNAPSHOT, STREAM, STATUS, HEARTBEAT -> Lane.TRACKING;
+			case OFFER -> null;
+		};
 	}
 	/**
 	 * Projects only metadata entries that the accepted create will supersede.
@@ -848,34 +886,67 @@ public final class ClientInventory {
 	 * OFFER is only accepted as the first offer of this connection.
 	 */
 	public void accept(@Nullable InventoryS2CPacket packet) {
+		@Nullable ClientMonitorCollector collector = monitor;
+		if (collector == null || !collector.enabled()) { acceptUnmeasured(packet); return; }
+		@Nullable Lane lane = monitorLane(packet);
+		if (lane == null) { acceptUnmeasured(packet); return; }
+		collector.count(lane, Counter.ACCEPTED, 0);
+		collector.count(lane, Counter.REJECTED, 0);
+		// These are decoded data-frame receptions, including domain-fenced,
+		// duplicate and held frames; internal buffer replay is not a reception.
+		if (packet != null && !packet.isCorrupt()) {
+			switch (Objects.requireNonNull(packet.kind())) {
+				case PREVIEW -> collector.count(lane, Counter.FRAMES_PREVIEW, 1);
+				case SNAPSHOT -> collector.count(lane, Counter.FRAMES_SNAPSHOT, 1);
+				case STREAM -> collector.count(lane, Counter.FRAMES_STREAM, 1);
+				default -> {}
+			}
+		}
+		collector.begin(lane, Phase.APPLY);
+		try { observeApplyOutcome(lane, acceptUnmeasured(packet)); }
+		finally { collector.end(lane, Phase.APPLY); }
+	}
+
+	private void observeApplyOutcome(Lane lane, ApplyOutcome outcome) {
+		@Nullable ClientMonitorCollector collector = monitor;
+		if (collector == null || !collector.enabled()) return;
+		if (outcome == ApplyOutcome.APPLIED) collector.count(lane, Counter.ACCEPTED, 1);
+		else if (outcome == ApplyOutcome.REJECTED) collector.count(lane, Counter.REJECTED, 1);
+	}
+
+	private boolean monitoring() { return monitor != null && monitor.enabled(); }
+
+	private ApplyOutcome acceptUnmeasured(@Nullable InventoryS2CPacket packet) {
 		if (packet == null || packet.isCorrupt()) {
 			invalidPackets++;
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 		if (packet.kind() == InventoryS2CPacket.Kind.OFFER) {
 			acceptOffer(packet);
-			return;
+			return ApplyOutcome.UNCHANGED; // OFFER has no workload-lane monitor outcome.
 		}
 		if (!offered || packet.epoch() != epoch) {
 			staleEpochPackets++;
-			return;
+			return ApplyOutcome.REJECTED;
 		}
-		if (packet.presentationEpoch() != presentationEpoch || packet.view() != presentationView) { fencedPackets++; return; }
+		if (packet.presentationEpoch() != presentationEpoch || packet.view() != presentationView) { fencedPackets++; return ApplyOutcome.REJECTED; }
 		if (packet.kind() == InventoryS2CPacket.Kind.POLICY) {
 			InventoryResourceKind lane = packet.resourceKind();
+			boolean unchanged = monitoring() && policyViews.getOrDefault(lane, -1L) == packet.view()
+				&& allowedTypes.getOrDefault(lane, Set.of()).equals(packet.allowedTypes());
 			// POLICY is only a future-input hint. It never prunes an old Preview,
 			// Tracking consumer, creation seed or receipt denial.
 			allowedTypes.put(lane, packet.allowedTypes()); policyViews.put(lane, packet.view());
 			ClientInventoryDiagnostics.lanePolicy(lane, !packet.allowedTypes().isEmpty(), packet.view(),
 				packet.allowedTypes().size());
-			return;
+			return unchanged ? ApplyOutcome.UNCHANGED : ApplyOutcome.APPLIED;
 		}
 		if (packet.kind() == InventoryS2CPacket.Kind.OPENED) {
 			@Nullable PreviewRequest request = requests.get(packet.requestId());
-			if (request == null || !ready() || packet.requestId() <= 0) { fencedPackets++; return; }
+			if (request == null || !ready() || packet.requestId() <= 0) { fencedPackets++; return ApplyOutcome.REJECTED; }
 			if (request.opened) {
-				if (request.laneMask != packet.laneBits()) invalidPackets++;
-				return;
+				if (request.laneMask != packet.laneBits()) { invalidPackets++; return ApplyOutcome.REJECTED; }
+				return ApplyOutcome.UNCHANGED;
 			}
 			request.opened = true; request.laneMask = packet.laneBits();
 			for (InventoryResourceKind kind : InventoryResourceKind.values())
@@ -883,41 +954,41 @@ public final class ClientInventory {
 					@Nullable PreviewState denied = previews.remove(new PreviewKey(packet.requestId(), kind));
 					if (denied != null) { request.retiredBaselines.merge(kind, denied.baselineId, Math::max); denied.entries.clear(); }
 				}
-			return;
+			return ApplyOutcome.APPLIED;
 		}
 		if (packet.kind() == InventoryS2CPacket.Kind.SELECTED || packet.kind() == InventoryS2CPacket.Kind.REJECT) {
 			@Nullable PendingCommit pending = pendingCommits.get(packet.commitId());
-			if (pending == null || pending.requestId() != packet.requestId() || pending.kind() != packet.resourceKind()) return;
+			if (pending == null || pending.requestId() != packet.requestId() || pending.kind() != packet.resourceKind()) return ApplyOutcome.REJECTED;
 			if (packet.kind() == InventoryS2CPacket.Kind.SELECTED && packet.markerId() != null
 				&& knownMarkers.containsKey(packet.markerId())) {
 				@Nullable InventoryResourceKind previous = markerKinds.putIfAbsent(packet.markerId(), packet.resourceKind());
-				if (previous != null && previous != packet.resourceKind()) { fencedPackets++; return; }
+				if (previous != null && previous != packet.resourceKind()) { fencedPackets++; return ApplyOutcome.REJECTED; }
 			}
 			pendingCommits.remove(packet.commitId());
 			selectionResults.put(packet.commitId(), new SelectionResult(packet.resourceKind(), packet.commitId(), pending.requestId(), packet.markerId(), packet.rejection()));
 			while (selectionResults.size() > 64) selectionResults.remove(selectionResults.keySet().iterator().next());
-			return;
+			return ApplyOutcome.APPLIED;
 		}
-		if (!ready(packet.resourceKind())) { fencedPackets++; return; }
+		if (!ready(packet.resourceKind())) { fencedPackets++; return ApplyOutcome.REJECTED; }
 		@Nullable MarkerMetadata marker = knownMarkers.get(packet.markerId());
 		if (packet.markerId() != null && (marker == null || marker.trackingKind != packet.resourceKind()
 			|| !inventoryAllowed(marker, packet.resourceKind())
-			|| markerKinds.containsKey(packet.markerId()) && markerKinds.get(packet.markerId()) != packet.resourceKind())) { fencedPackets++; return; }
-		if (marker != null && packet.baselineId() <= marker.retiredBaselines.getOrDefault(packet.resourceKind(), -1L)) { fencedPackets++; return; }
+			|| markerKinds.containsKey(packet.markerId()) && markerKinds.get(packet.markerId()) != packet.resourceKind())) { fencedPackets++; return ApplyOutcome.REJECTED; }
+		if (marker != null && packet.baselineId() <= marker.retiredBaselines.getOrDefault(packet.resourceKind(), -1L)) { fencedPackets++; return ApplyOutcome.REJECTED; }
 		if (packet.kind() == InventoryS2CPacket.Kind.PREVIEW) {
 			@Nullable PreviewState state = previews.get(new PreviewKey(packet.requestId(), packet.resourceKind()));
 			@Nullable PreviewRequest request = requests.get(packet.requestId());
-			if (state == null || request == null || !request.opened || (request.laneMask & (1 << packet.resourceKind().wireId())) == 0) { fencedPackets++; return; }
+			if (state == null || request == null || !request.opened || (request.laneMask & (1 << packet.resourceKind().wireId())) == 0) { fencedPackets++; return ApplyOutcome.REJECTED; }
 		}
-		if (isData(packet.kind()) && !withinEffectiveCaps(packet, effectiveDisplayBytes, effectiveFrameBytes)) { capRejectedPackets++; return; }
+		if (isData(packet.kind()) && !withinEffectiveCaps(packet, effectiveDisplayBytes, effectiveFrameBytes)) { capRejectedPackets++; return ApplyOutcome.REJECTED; }
 		acceptedPackets++;
-		switch (packet.kind()) {
+		return switch (packet.kind()) {
 			case PREVIEW -> acceptPreview(packet);
 			case SNAPSHOT, STREAM -> acceptTrackedData(packet);
 			case STATUS -> acceptStatus(packet);
 			case HEARTBEAT -> acceptHeartbeat(packet);
-			case OFFER, POLICY, SELECTED, REJECT, OPENED -> {}
-		}
+			case OFFER, POLICY, SELECTED, REJECT, OPENED -> ApplyOutcome.UNCHANGED;
+		};
 	}
 
 	private void acceptOffer(InventoryS2CPacket packet) {
@@ -1075,25 +1146,25 @@ public final class ClientInventory {
 		sender.accept(packet);
 	}
 
-	private void acceptPreview(InventoryS2CPacket packet) {
+	private ApplyOutcome acceptPreview(InventoryS2CPacket packet) {
 		@Nullable PreviewState state = previews.get(new PreviewKey(packet.requestId(), packet.resourceKind()));
 		if (state == null) {
 			fencedPackets++;
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 		InventoryS2CPacket.Status previousStatus = state.status;
-		if (packet.baselineId() <= state.request.retiredBaselines.getOrDefault(state.resourceKind, -1L)) { fencedPackets++; return; }
+		if (packet.baselineId() <= state.request.retiredBaselines.getOrDefault(state.resourceKind, -1L)) { fencedPackets++; return ApplyOutcome.REJECTED; }
 		if (packet.statusRevision() < state.statusRevision
 			|| state.status == InventoryS2CPacket.Status.INVALID && packet.statusRevision() == state.statusRevision
 				&& packet.status() != InventoryS2CPacket.Status.INVALID
 			|| (packet.statusRevision() == state.statusRevision && state.serverSeen
 				&& packet.baselineId() < state.baselineId)) {
 			fencedPackets++;
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 		if (packet.partCount() > MAX_ASSEMBLY_PARTS) {
 			boundRejects++;
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 
 		boolean resetChannel = !state.serverSeen
@@ -1101,6 +1172,9 @@ public final class ClientInventory {
 			|| packet.statusRevision() != state.statusRevision;
 		boolean newerWatermark = !resetChannel && packet.watermark() > state.watermark;
 		boolean current = resetChannel || packet.watermark() >= state.watermark;
+		boolean changed = monitoring() && (resetChannel || newerWatermark || packet.watermark() == state.watermark
+			&& packet.partCount() > state.totalParts || current && (!state.receivedPartIndexes.get(packet.partIndex())
+				|| packet.completeScan() && !state.groupComplete || packet.status() != null && packet.status() != state.status));
 
 		if (resetChannel) {
 			if (state.serverSeen && packet.baselineId() != state.baselineId) {
@@ -1138,7 +1212,8 @@ public final class ClientInventory {
 				state.status = packet.status();
 		}
 
-		boolean entriesAccepted = applyPreviewEntries(state, packet.entries());
+		ApplyOutcome entryOutcome = applyPreviewEntries(state, packet.entries());
+		boolean entriesAccepted = entryOutcome != ApplyOutcome.REJECTED;
 		if (current && !entriesAccepted)
 			state.groupRejected = true;
 
@@ -1154,11 +1229,15 @@ public final class ClientInventory {
 		if (previousStatus != state.status)
 			ClientInventoryDiagnostics.previewStatus(state.requestId, state.resourceKind, previousStatus, state.status,
 				state.statusRevision);
+		return !entriesAccepted ? ApplyOutcome.REJECTED : changed || entryOutcome == ApplyOutcome.APPLIED
+			? ApplyOutcome.APPLIED : ApplyOutcome.UNCHANGED;
 	}
 
 	/** Merges one packet's absolute deltas per key; a rejected key makes the group incomplete. */
-	private boolean applyPreviewEntries(PreviewState state, List<InventoryS2CPacket.Entry> entries) {
+	private ApplyOutcome applyPreviewEntries(PreviewState state, List<InventoryS2CPacket.Entry> entries) {
 		boolean allAccepted = true;
+		boolean measuring = monitoring();
+		boolean changed = false;
 		for (InventoryS2CPacket.Entry entry : entries) {
 			@Nullable Long group = state.groups.get(entry.itemId());
 			if (group != null && (!entry.fallback() || entry.groupRevision() < group)) continue;
@@ -1178,12 +1257,14 @@ public final class ClientInventory {
 				continue;
 			}
 			state.bytes = nextBytes;
+			if (measuring && (!view.equals(previous) || !removed.isEmpty()
+				|| knownRevision == null || knownRevision != entry.itemRevision())) changed = true;
 			for (String key : removed) { state.entries.remove(key); state.itemRevisions.remove(key); }
 			if (entry.replaceGroup()) state.groups.put(entry.itemId(), entry.groupRevision());
 			state.entries.put(view.key(), view);
 			state.itemRevisions.put(view.key(), entry.itemRevision());
 		}
-		return allAccepted;
+		return !allAccepted ? ApplyOutcome.REJECTED : changed ? ApplyOutcome.APPLIED : ApplyOutcome.UNCHANGED;
 	}
 
 	private static boolean isPreviewTerminalFailure(InventoryS2CPacket.@Nullable Status status) {
@@ -1191,19 +1272,18 @@ public final class ClientInventory {
 			|| status == InventoryS2CPacket.Status.INCOMPLETE;
 	}
 
-	private void acceptTrackedData(InventoryS2CPacket packet) {
+	private ApplyOutcome acceptTrackedData(InventoryS2CPacket packet) {
 		@Nullable TrackingState state = trackingState(packet.resourceKind(), packet.markerId());
 		if (state == null)
-			return;
+			return ApplyOutcome.REJECTED;
 		state.serverRequestId = packet.requestId();
 		InventoryS2CPacket.@Nullable Status status = packet.status();
 		if (status == InventoryS2CPacket.Status.INVALID) {
-			invalidateTracking(state, packet.statusRevision());
-			return;
+			return invalidateTracking(state, packet.statusRevision());
 		}
 		if (packet.statusRevision() < state.statusRevision) {
 			fencedPackets++;
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 		if ((packet.statusRevision() == state.statusRevision && state.baselineId != InventoryClientStore.NO_BASELINE
 			&& packet.baselineId() < state.baselineId)
@@ -1211,51 +1291,48 @@ public final class ClientInventory {
 				|| (packet.statusRevision() == state.pending.statusRevision
 					&& packet.baselineId() < state.pending.baselineId)))) {
 			fencedPackets++;
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 		if (store.isInvalid(state.channel) && packet.statusRevision() == state.statusRevision) {
 			fencedPackets++;
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 		if (packet.partCount() > MAX_ASSEMBLY_PARTS) {
 			boundRejects++;
 			scheduleRepair(state);
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 		if (!packet.completeScan() && (state.sourceComplete || state.historicalFailure == InventoryS2CPacket.Status.INVALID
 			|| packet.status() == InventoryS2CPacket.Status.UPDATING && state.failureWatermark >= 0)) {
 			fencedPackets++;
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 		if (state.committed && packet.baselineId() == store.baselineId(state.channel)
 			&& packet.statusRevision() == state.statusRevision && !store.assembling(state.channel)) {
-			applyUpdates(state, packet);
-			return;
+			return applyUpdates(state, packet);
 		}
 		boolean sameFence = packet.statusRevision() == state.statusRevision
 			&& packet.baselineId() == state.baselineId;
 		boolean pendingFence = state.pending != null && state.pending.baselineId == packet.baselineId()
 			&& state.pending.statusRevision == packet.statusRevision();
 		if (packet.kind() == InventoryS2CPacket.Kind.SNAPSHOT || sameFence || pendingFence) {
-			assemble(state, packet);
-			return;
+			return assemble(state, packet);
 		}
-		bufferUnknown(state, packet);
+		return bufferUnknown(state, packet);
 	}
 
-	private void assemble(TrackingState state, InventoryS2CPacket packet) {
+	private ApplyOutcome assemble(TrackingState state, InventoryS2CPacket packet) {
 		@Nullable TrackingBatch batch = state.pending;
 		boolean sameIdentity = batch != null && batch.baselineId == packet.baselineId()
 			&& batch.statusRevision == packet.statusRevision();
 		if (sameIdentity && batch.watermark != packet.watermark()
 			&& packet.kind() == InventoryS2CPacket.Kind.STREAM) {
-			bufferUnknown(state, packet);
-			return;
+			return bufferUnknown(state, packet);
 		}
 		if (!sameIdentity)
 			batch = new TrackingBatch(packet);
-		if (!admitPart(state, batch, packet, true))
-			return;
+		ApplyOutcome admission = admitPart(state, batch, packet, true);
+		if (admission != ApplyOutcome.APPLIED) return admission;
 		InventoryClientStore.PartOutcome begin = store.beginSnapshot(state.channel, packet.baselineId(),
 			packet.statusRevision(), packet.partCount(), ticks);
 		if (begin == InventoryClientStore.PartOutcome.REJECTED_BOUND
@@ -1265,7 +1342,7 @@ public final class ClientInventory {
 			if (begin == InventoryClientStore.PartOutcome.REJECTED_BOUND
 				|| begin == InventoryClientStore.PartOutcome.CONFLICT)
 				boundRejects++;
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 		InventoryClientStore.PartOutcome outcome = store.part(state.channel, packet.baselineId(),
 			packet.statusRevision(), packet.partIndex(), valuesOf(packet.entries()), ticks);
@@ -1273,11 +1350,11 @@ public final class ClientInventory {
 			|| outcome == InventoryClientStore.PartOutcome.CONFLICT
 			|| outcome == InventoryClientStore.PartOutcome.CONFLICT_PART) {
 			boundRejects++;
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 		if (outcome != InventoryClientStore.PartOutcome.ACCEPTED
 			&& outcome != InventoryClientStore.PartOutcome.COMMITTED)
-			return;
+			return outcome == InventoryClientStore.PartOutcome.DUPLICATE_PART ? ApplyOutcome.UNCHANGED : ApplyOutcome.REJECTED;
 		batch.add(packet);
 		if (!sameIdentity && (state.baselineId != packet.baselineId()
 			|| state.statusRevision != packet.statusRevision()))
@@ -1287,9 +1364,10 @@ public final class ClientInventory {
 			commitTracking(state, batch);
 		}
 		flushUnknownIntoAssembly(state, packet.baselineId(), packet.statusRevision());
+		return outcome == InventoryClientStore.PartOutcome.COMMITTED ? ApplyOutcome.APPLIED : ApplyOutcome.HELD;
 	}
 
-	private void applyUpdates(TrackingState state, InventoryS2CPacket packet) {
+	private ApplyOutcome applyUpdates(TrackingState state, InventoryS2CPacket packet) {
 		List<InventoryS2CPacket.Entry> permitted = packet.entries().stream().filter(entry -> {
 			@Nullable Long group = state.groups.get(entry.itemId());
 			return group == null || entry.fallback() && entry.groupRevision() >= group;
@@ -1300,8 +1378,8 @@ public final class ClientInventory {
 		@Nullable TrackingBatch closed = state.closedBatches.get(packet.watermark());
 		if (closed != null) {
 			// Closed deliveries retain a bounded replay guard; they never become new batches.
-			admitPart(state, closed, packet, false);
-			return;
+			ApplyOutcome admission = admitPart(state, closed, packet, false);
+			return admission == ApplyOutcome.REJECTED ? admission : ApplyOutcome.UNCHANGED;
 		}
 		// Replay detail is evictable, completion ownership is not: the closed
 		// watermark permanently retires barriers in its range. A late independent
@@ -1312,30 +1390,36 @@ public final class ClientInventory {
 			if (!historical && state.batches.size() >= MAX_TRACKING_BATCHES) {
 				boundRejects++;
 				scheduleRepair(state);
-				return;
+				return ApplyOutcome.REJECTED;
 			}
 			batch = new TrackingBatch(packet);
 		}
-		if (!admitPart(state, batch, packet, false))
-			return;
+		ApplyOutcome admission = admitPart(state, batch, packet, false);
+		if (admission != ApplyOutcome.APPLIED) return admission;
 		long bytes = packetBytes(packet);
 		if (!historical && state.batchBytes + bytes > MAX_METADATA_BYTES_PER_CHANNEL) {
 			boundRejects++;
 			scheduleRepair(state);
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 		Map<String, InventoryClientStore.Value> before = store.values(state.channel);
+		boolean measuring = monitoring();
+		boolean changed = false;
 		Map<String, EntryView> nextMetadata = new LinkedHashMap<>(state.metadata);
 		Set<String> removed = new HashSet<>();
 		for (var entry : packet.entries()) if (entry.replaceGroup()) {
 			for (EntryView old : nextMetadata.values()) if (old.itemId().equals(entry.itemId()) && !old.key().equals(entry.key())) removed.add(old.key());
 			removed.forEach(nextMetadata::remove);
+			if (measuring && !Objects.equals(state.groups.get(entry.itemId()), entry.groupRevision())) changed = true;
 		}
+		if (measuring && removed.stream().anyMatch(before::containsKey)) changed = true;
 		List<InventoryS2CPacket.Entry> cutEntries = new ArrayList<>(packet.entries().size());
 		for (InventoryS2CPacket.Entry entry : packet.entries()) {
 			InventoryClientStore.@Nullable Value previous = before.get(entry.key());
-			if (previous == null || entry.itemRevision() > previous.revision())
+			if (previous == null || entry.itemRevision() > previous.revision()) {
 				nextMetadata.put(entry.key(), viewOf(state.resourceKind, entry));
+				if (measuring) changed = true;
+			}
 			if (previous != null && entry.itemRevision() == previous.revision()) {
 				EntryView accepted = state.metadata.get(entry.key());
 				cutEntries.add(new InventoryS2CPacket.Entry(accepted.key(), accepted.itemId(), accepted.label(),
@@ -1348,21 +1432,23 @@ public final class ClientInventory {
 		Map<String, InventoryS2CPacket.Entry> nextCut = new LinkedHashMap<>(historical
 			? state.closedEntries : batch.entries);
 		mergeEntries(nextCut, cutEntries);
+		if (measuring && historical && !nextCut.equals(state.closedEntries)) changed = true;
+		if (measuring && !historical && (!state.closedCut || packet.watermark() > state.watermark)) changed = true;
 		if (nextMetadata.size() > MAX_METADATA_ENTRIES || nextBytes > MAX_METADATA_BYTES_PER_CHANNEL
 			|| entryBytes(nextCut) > MAX_METADATA_BYTES_PER_CHANNEL) {
 			boundRejects++;
 			scheduleRepair(state);
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 		Map<String, InventoryClientStore.Value> updates = valuesOf(packet.entries());
 		InventoryClientStore.Outcome outcome = store.applyReplacing(state.channel, packet.baselineId(),
 			packet.statusRevision(), updates, removed);
 		if (outcome == InventoryClientStore.Outcome.REJECTED_BOUND) {
 			boundRejects++;
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 		if (outcome != InventoryClientStore.Outcome.APPLIED)
-			return;
+			return ApplyOutcome.REJECTED;
 		state.metadata.clear();
 		state.metadata.putAll(nextMetadata);
 		for (var entry : packet.entries()) if (entry.replaceGroup()) state.groups.put(entry.itemId(), entry.groupRevision());
@@ -1374,12 +1460,13 @@ public final class ClientInventory {
 			state.closedEntries.putAll(nextCut);
 			state.committedChecksum = computeChecksum(state);
 			compareHeartbeat(state);
-			return;
+			return changed ? ApplyOutcome.APPLIED : ApplyOutcome.UNCHANGED;
 		}
 		batch.add(packet, cutEntries);
 		state.batches.put(packet.watermark(), batch);
 		state.batchBytes += bytes;
 		advanceClosedCut(state);
+		return changed ? ApplyOutcome.APPLIED : ApplyOutcome.UNCHANGED;
 	}
 
 	private void commitTracking(TrackingState state, TrackingBatch batch) {
@@ -1415,27 +1502,28 @@ public final class ClientInventory {
 	}
 
 	/** Admission never mutates values, metadata, status or the accepted delivery barrier. */
-	private boolean admitPart(TrackingState state, TrackingBatch batch, InventoryS2CPacket packet,
+	private ApplyOutcome admitPart(TrackingState state, TrackingBatch batch, InventoryS2CPacket packet,
 		boolean baseline) {
 		if (!batch.matches(packet)) {
 			boundRejects++;
 			scheduleRepair(state);
-			return false;
+			return ApplyOutcome.REJECTED;
 		}
 		@Nullable InventoryS2CPacket previous = batch.parts.get(packet.partIndex());
 		if (previous != null) {
 			if (!samePart(previous, packet)) {
 				boundRejects++;
 				scheduleRepair(state);
+				return ApplyOutcome.REJECTED;
 			}
-			return false;
+			return ApplyOutcome.UNCHANGED;
 		}
 		if (baseline) {
 			for (InventoryS2CPacket.Entry entry : packet.entries()) {
 				if (batch.entries.containsKey(entry.key())) {
 					boundRejects++;
 					scheduleRepair(state);
-					return false;
+					return ApplyOutcome.REJECTED;
 				}
 			}
 		} else {
@@ -1444,7 +1532,7 @@ public final class ClientInventory {
 				if (known != null && known.itemRevision() == entry.itemRevision() && !known.equals(entry)) {
 					boundRejects++;
 					scheduleRepair(state);
-					return false;
+					return ApplyOutcome.REJECTED;
 				}
 			}
 		}
@@ -1455,9 +1543,9 @@ public final class ClientInventory {
 			|| entryBytes(entries) > MAX_METADATA_BYTES_PER_CHANNEL) {
 			boundRejects++;
 			scheduleRepair(state);
-			return false;
+			return ApplyOutcome.REJECTED;
 		}
-		return true;
+		return ApplyOutcome.APPLIED;
 	}
 
 	private void advanceClosedCut(TrackingState state) {
@@ -1540,15 +1628,16 @@ public final class ClientInventory {
 		return bytes;
 	}
 
-	private void invalidateTracking(TrackingState state, long statusRevision) {
+	private ApplyOutcome invalidateTracking(TrackingState state, long statusRevision) {
 		if (statusRevision < state.statusRevision) {
 			fencedPackets++;
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 		if (!store.invalidate(state.channel, statusRevision)) {
 			fencedPackets++;
-			return;
+			return ApplyOutcome.REJECTED;
 		}
+		boolean unchanged = monitoring() && state.status == InventoryS2CPacket.Status.INVALID && state.statusRevision == statusRevision;
 		state.status = InventoryS2CPacket.Status.INVALID;
 		retainHistory(state);
 		state.historicalFailure = InventoryS2CPacket.Status.INVALID;
@@ -1558,28 +1647,28 @@ public final class ClientInventory {
 		clearCuts(state);
 		retireUnknownBefore(state.markerId, InventoryClientStore.NO_BASELINE, statusRevision, true);
 		state.committedChecksum = computeChecksum(state);
+		return unchanged ? ApplyOutcome.UNCHANGED : ApplyOutcome.APPLIED;
 	}
 
-	private void acceptStatus(InventoryS2CPacket packet) {
+	private ApplyOutcome acceptStatus(InventoryS2CPacket packet) {
 		@Nullable TrackingState state = trackingState(packet.resourceKind(), packet.markerId());
 		if (state == null)
-			return;
+			return ApplyOutcome.REJECTED;
 		state.serverRequestId = packet.requestId();
 		InventoryS2CPacket.@Nullable Status status = packet.status();
 		if (packet.statusRevision() < state.statusRevision) {
 			fencedPackets++;
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 		if (status == InventoryS2CPacket.Status.INVALID) {
-			invalidateTracking(state, packet.statusRevision());
-			return;
+			return invalidateTracking(state, packet.statusRevision());
 		}
 		if (packet.statusRevision() == state.statusRevision && packet.baselineId() == state.baselineId
 			&& (store.isInvalid(state.channel) || packet.watermark() < state.watermark
 				&& (packet.watermark() > 0 || !isPreviewTerminalFailure(status))
 				|| status == InventoryS2CPacket.Status.UPDATING && (state.sourceComplete || state.failureWatermark >= 0))) {
 			fencedPackets++;
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 		boolean rebase = !state.committed
 			|| state.pending != null
@@ -1588,12 +1677,25 @@ public final class ClientInventory {
 		boolean establishedFence = packet.statusRevision() == state.statusRevision && packet.baselineId() == store.baselineId(state.channel);
 		boolean completionFence = establishedFence || state.pending != null && state.pending.baselineId == packet.baselineId()
 			&& state.pending.statusRevision == packet.statusRevision();
+		// Rebase is a business operation condition, not proof of installation:
+		// before the first baseline it runs even for an identical control. Count
+		// actual fence/status changes or withdrawal of a committed projection.
+		boolean changed = monitoring() && (packet.baselineId() != state.baselineId || packet.statusRevision() != state.statusRevision
+			|| rebase && state.committed || status != null && status != state.status
+			|| isPreviewTerminalFailure(status) && packet.watermark() > state.failureWatermark
+			|| state.committed && completionFence && (status == InventoryS2CPacket.Status.READY || status == InventoryS2CPacket.Status.UNCERTAIN)
+				&& packet.watermark() >= state.watermark && packet.watermark() >= state.completionWatermark
+				// A consumed matching barrier is not a new apply merely because
+				// comparison cleared its pending marker; an identical pending
+				// barrier is likewise a replay, not another installed control.
+				&& !(packet.watermark() == state.watermark && packet.checksum() == state.committedChecksum)
+				&& !(packet.watermark() == state.completionWatermark && packet.checksum() == state.completionChecksum));
 		if (rebase) {
 			boolean keepAssembly = state.pending != null && state.pending.baselineId == packet.baselineId()
 				&& state.pending.statusRevision == packet.statusRevision();
 			if (!store.rebase(state.channel, packet.baselineId(), packet.statusRevision())) {
 				boundRejects++;
-				return;
+				return ApplyOutcome.REJECTED;
 			}
 			@Nullable TrackingBatch pending = keepAssembly ? state.pending : null;
 			Map<Long, Long> heartbeats = keepAssembly ? new LinkedHashMap<>(state.heartbeats) : Map.of();
@@ -1624,6 +1726,7 @@ public final class ClientInventory {
 				compareCompletion(state);
 			}
 		}
+		return changed ? ApplyOutcome.APPLIED : ApplyOutcome.UNCHANGED;
 	}
 	private void compareCompletion(TrackingState state) {
 		if (state.completionWatermark < 0 || !state.committed || !state.closedCut || store.assembling(state.channel)) return;
@@ -1654,36 +1757,36 @@ public final class ClientInventory {
 		state.completionWatermark = -1; state.completionSince = -1;
 	}
 
-	private void acceptHeartbeat(InventoryS2CPacket packet) {
+	private ApplyOutcome acceptHeartbeat(InventoryS2CPacket packet) {
 		@Nullable TrackingState state = tracking.get(packet.markerId());
 		if (state == null || store.isInvalid(state.channel))
-			return;
+			return ApplyOutcome.UNCHANGED;
 		boolean pendingFence = state.pending != null && state.pending.baselineId == packet.baselineId()
 			&& state.pending.statusRevision == packet.statusRevision();
 		if (state.pending != null && !pendingFence)
-			return;
+			return ApplyOutcome.UNCHANGED;
 		if (!pendingFence && (packet.statusRevision() != state.statusRevision
 			|| packet.baselineId() != store.baselineId(state.channel)))
-			return;
+			return ApplyOutcome.UNCHANGED;
 		if (!pendingFence && state.closedCut && packet.watermark() < state.watermark)
-			return;
+			return ApplyOutcome.UNCHANGED;
 		state.heartbeats.put(packet.watermark(), packet.checksum());
 		var iterator = state.heartbeats.keySet().iterator();
 		while (state.heartbeats.size() > MAX_TRACKING_BATCHES && iterator.hasNext()) {
 			iterator.next();
 			iterator.remove();
 		}
-		compareHeartbeat(state);
+		return compareHeartbeat(state) ? ApplyOutcome.APPLIED : ApplyOutcome.HELD;
 	}
 
-	private void compareHeartbeat(TrackingState state) {
+	private boolean compareHeartbeat(TrackingState state) {
 		if (!state.committed || !state.closedCut || store.assembling(state.channel)) {
 			state.heartbeatGapSince = -1;
-			return;
+			return false;
 		}
 		for (long watermark : state.batches.keySet()) {
 			if (watermark <= state.watermark)
-				return;
+				return false;
 		}
 		@Nullable Long checksum = state.heartbeats.remove(state.watermark);
 		state.heartbeats.keySet().removeIf(watermark -> watermark < state.watermark);
@@ -1693,6 +1796,7 @@ public final class ClientInventory {
 			&& state.batches.keySet().stream().noneMatch(open -> open <= watermark));
 		if (!futureGap) state.heartbeatGapSince = -1;
 		else if (state.heartbeatGapSince < 0) state.heartbeatGapSince = ticks;
+		return checksum != null;
 	}
 
 	private void scheduleRepair(TrackingState state) {
@@ -1704,16 +1808,18 @@ public final class ClientInventory {
 		state.nextRepairTick = ticks + cooldown;
 		send(InventoryC2SPacket.resync(state.resourceKind, epoch, 0, state.markerId).stamp(presentationEpoch, presentationView));
 		repairRequests++;
+		@Nullable ClientMonitorCollector collector = monitor;
+		if (collector != null && collector.enabled()) collector.count(Lane.TRACKING, Counter.REPAIR_REQUESTS, 1);
 	}
 
-	private void bufferUnknown(TrackingState state, InventoryS2CPacket packet) {
+	private ApplyOutcome bufferUnknown(TrackingState state, InventoryS2CPacket packet) {
 		UnknownKey key = new UnknownKey(state.resourceKind, state.markerId, packet.baselineId(), packet.statusRevision());
 		@Nullable UnknownSession session = unknown.get(key);
 		if (session == null) {
 			if (unknown.size() >= MAX_UNKNOWN_SESSIONS) {
 				boundRejects++;
 				scheduleRepair(state);
-				return;
+				return ApplyOutcome.REJECTED;
 			}
 			session = new UnknownSession(ticks);
 			unknown.put(key, session);
@@ -1724,11 +1830,12 @@ public final class ClientInventory {
 			unknown.remove(key);
 			droppedUnknownSessions++;
 			scheduleRepair(state);
-			return;
+			return ApplyOutcome.REJECTED;
 		}
 		session.fragments.add(packet);
 		session.entries += count;
 		session.bytes += size;
+		return ApplyOutcome.HELD;
 	}
 
 	private void expireUnknownSessions() {
@@ -1751,7 +1858,7 @@ public final class ClientInventory {
 		if (session == null)
 			return;
 		for (InventoryS2CPacket fragment : session.fragments) {
-			acceptTrackedData(fragment);
+			observeApplyOutcome(Lane.TRACKING, acceptTrackedData(fragment));
 		}
 	}
 

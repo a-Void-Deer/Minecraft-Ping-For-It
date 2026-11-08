@@ -17,6 +17,13 @@ import nx.pingwheel.common.config.InventoryLimits;
 import nx.pingwheel.common.config.InventorySettings;
 import nx.pingwheel.common.config.InventorySizeScale;
 import nx.pingwheel.common.domain.MarkerId;
+import nx.pingwheel.common.monitor.MonitorSchema.Budget;
+import nx.pingwheel.common.monitor.MonitorSchema.Counter;
+import nx.pingwheel.common.monitor.MonitorSchema.Gauge;
+import nx.pingwheel.common.monitor.MonitorSchema.Lane;
+import nx.pingwheel.common.monitor.MonitorSchema.Phase;
+import nx.pingwheel.common.monitor.server.ServerInventoryMonitor;
+import nx.pingwheel.common.platform.TransportHandoff;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink.Module;
@@ -89,6 +96,10 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			return packet.encodedSize(displayBytes, frameBytes);
 		}
 		void send(UUID recipient, InventoryS2CPacket packet);
+		/** Observation only: all three normal returns retain the legacy void-send progress semantics. */
+		default TransportHandoff sendObserved(UUID recipient, InventoryS2CPacket packet) {
+			send(recipient, packet); return TransportHandoff.UNOBSERVED;
+		}
 	}
 	@NotNullByDefault
 	public enum SendDecision { ALLOW, DEFER, DENY }
@@ -173,6 +184,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	private final RetainedMemoryLedger memory;
 	private final Transport transport;
 	private final BudgetDelaySink sink;
+	private final ServerInventoryMonitor monitor;
 	private final @Nullable IntConsumer checksumSamples;
 	private long tick = -1;
 	private final Map<String, State> states = new LinkedHashMap<>();
@@ -196,13 +208,37 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 
 	public InventorySyncPublisher(RetainedMemoryLedger memory, Transport transport) { this(memory, transport, BudgetDelaySink.NONE); }
 	public InventorySyncPublisher(RetainedMemoryLedger memory, Transport transport, BudgetDelaySink sink) {
-		this(memory, transport, sink, null);
+		this(memory, transport, sink, null, new ServerInventoryMonitor());
+	}
+	public InventorySyncPublisher(RetainedMemoryLedger memory, Transport transport, BudgetDelaySink sink, ServerInventoryMonitor monitor) {
+		this(memory, transport, sink, null, monitor);
 	}
 	/** Package-visible traversal accounting for focused publisher tests; production passes null. */
 	InventorySyncPublisher(RetainedMemoryLedger memory, Transport transport, BudgetDelaySink sink,
 		@Nullable IntConsumer checksumSamples) {
+		this(memory, transport, sink, checksumSamples, new ServerInventoryMonitor());
+	}
+	private InventorySyncPublisher(RetainedMemoryLedger memory, Transport transport, BudgetDelaySink sink,
+		@Nullable IntConsumer checksumSamples, ServerInventoryMonitor monitor) {
 		this.memory = memory; this.transport = transport; this.sink = sink == null ? BudgetDelaySink.NONE : sink;
 		this.checksumSamples = checksumSamples;
+		this.monitor = Objects.requireNonNull(monitor, "monitor");
+	}
+	/** Existing logical queue cost, not estimated unsent wire bytes; includes existing initial staging. */
+	void sampleMonitor() {
+		if (!monitor.enabled() || settings == null) return;
+		if (monitor.enabled(Lane.PREVIEW)) {
+			monitor.gauge(Lane.PREVIEW, Gauge.QUEUE_LOGICAL_COST, previewQueued);
+			monitor.gauge(Lane.PREVIEW, Gauge.QUEUE_CAP, settings.previewQueueBytes());
+			monitor.budget(Lane.PREVIEW, Budget.WIRE_BYTES, previewClock.period(), settings.previewGlobalPeriodBytes(),
+				previewGlobal, settings.previewGlobalPeriodBytes() - previewGlobal);
+		}
+		if (monitor.enabled(Lane.TRACKING)) {
+			monitor.gauge(Lane.TRACKING, Gauge.QUEUE_LOGICAL_COST, trackingQueued);
+			monitor.gauge(Lane.TRACKING, Gauge.QUEUE_CAP, settings.trackingRollingQueueBytes());
+			if (window != null) monitor.budget(Lane.TRACKING, Budget.WIRE_BYTES, trackingClock.period(),
+				windowBase * (windowGrace + 1L), window.spent(), window.remaining());
+		}
 	}
 	private long cycle(State state) { return periodId(state.module); }
 	long periodId(Module module) { return module == Module.INVENTORY_PREVIEW ? previewClock.period() : trackingClock.period(); }
@@ -859,6 +895,36 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		try (var workspace = grant.get()) { return send(state, factory.get(), true); }
 	}
 	private boolean send(State state, InventoryS2CPacket packet, boolean control) {
+		Lane lane = monitorLane(state, packet);
+		if (!monitor.enabled()) return sendWork(state, packet, control);
+		long timing = monitor.beginPhase(lane, Phase.PUBLISH);
+		try { return sendWork(state, packet, control); }
+		finally { monitor.end(timing); }
+	}
+	private int measuredBytes(State state, InventoryS2CPacket packet) {
+		Lane lane = monitorLane(state, packet);
+		if (!monitor.enabled()) return transport.encodedBytes(packet, displayBytes, frameBytes);
+		long timing = monitor.beginPhase(lane, Phase.MEASURE);
+		try { return transport.encodedBytes(packet, displayBytes, frameBytes); }
+		finally { monitor.end(timing); }
+	}
+	private void observeSend(State state, InventoryS2CPacket packet, long bytes, TransportHandoff handoff, long generation) {
+		if (!monitor.enabled() || generation != monitor.collectionGeneration()) return;
+		// Wire counters follow the unchanged business ledger charged above; timing follows the actual SELECT workload.
+		Lane lane = state.route.markerId() == null ? Lane.PREVIEW : Lane.TRACKING;
+		@Nullable Counter frame = switch (packet.kind()) {
+			case PREVIEW -> Counter.FRAMES_PREVIEW;
+			case SNAPSHOT -> Counter.FRAMES_SNAPSHOT;
+			case STREAM -> Counter.FRAMES_STREAM;
+			default -> null;
+		};
+		monitor.sent(lane, frame, bytes, handoff);
+	}
+	private static Lane monitorLane(State state, InventoryS2CPacket packet) {
+		return state.route.markerId() != null || packet.kind() == InventoryS2CPacket.Kind.SELECTED || packet.kind() == InventoryS2CPacket.Kind.REJECT
+			? Lane.TRACKING : Lane.PREVIEW;
+	}
+	private boolean sendWork(State state, InventoryS2CPacket packet, boolean control) {
 		if (!control && dataGated(state.context.recipient())) return false;
 		boolean heartbeat = packet.kind() == InventoryS2CPacket.Kind.HEARTBEAT;
 		InventoryBudgetDelayState stage = heartbeat ? state.heartbeatDelay : control ? state.controlDelay : state.dataDelay;
@@ -870,7 +936,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		if (held.isEmpty()) { delay(state, stage, Reason.MEMORY.bit(), name, Unit.FRAME, 1); return false; }
 		try (var reserved = held.get()) {
 			int bytes;
-			try { bytes = transport.encodedBytes(packet, displayBytes, frameBytes); }
+			try { bytes = measuredBytes(state, packet); }
 			catch (IllegalArgumentException overBudget) { delay(state, stage, Reason.FRAME_OR_FRAGMENT_UNSERVICEABLE.bit(), name, Unit.FRAME, 1); return false; }
 			if (bytes < 0 || bytes > InventoryS2CPacket.MAX_FRAME_BYTES) throw new IllegalArgumentException("encoded inventory frame");
 			boolean tracking = state.route.markerId() != null;
@@ -895,6 +961,8 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			if (tracking ? bytes > window.remaining() - (control ? 0 : Math.min(windowBase, 128 + windowBase / 16)) : bytes > settings.previewGlobalPeriodBytes() - previewGlobal - reserve) {
 				delay(state, stage, Reason.WIRE_GLOBAL.bit(), name, Unit.BYTE, bytes); return false;
 			}
+			// Capture the collection fence BEFORE final authorization. No clock or observer may follow the proof until send returns.
+			long monitorGeneration = monitor.enabled() ? monitor.collectionGeneration() : -1;
 			// Measurement and wire eligibility can invoke host code. Nothing callback-bearing follows this proof except send itself.
 			if (state.monitored && (!states.containsValue(state) || !transport.authorized(state.context))) return false;
 			if (!state.monitored && !transport.authorizedControl(state.context.recipient(), packet)) return false;
@@ -910,16 +978,17 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			ticket.commit(Map.of(new CostLedger.Counter(subject, CostLedger.Unit.WIRE_BYTES), (long) bytes));
 			accounting.put(subject, used + bytes);
 			if (tracking) window.trySpend(bytes); else previewGlobal += bytes;
-			try {
-				transport.send(state.context.recipient(), packet);
-				// Monitoring is callback-bearing too: it follows the irreversible handoff, never the final proof.
-				if (state.monitored) stage.progress(cycle(state));
-				return true;
-			}
+			TransportHandoff handoff;
+			try { handoff = transport.sendObserved(state.context.recipient(), packet); }
 			catch (RuntimeException failure) {
+				observeSend(state, packet, bytes, TransportHandoff.UNOBSERVED, monitorGeneration);
 				warn("transport-send", state, packet, failure);
 				return false; // conservatively charged; same immutable part retries
 			}
+			observeSend(state, packet, bytes, handoff, monitorGeneration);
+			// Monitoring is callback-bearing too: it follows the irreversible handoff, never the final proof.
+			if (state.monitored) stage.progress(cycle(state));
+			return true;
 		}
 	}
 	private void warn(String operation, State state, InventoryS2CPacket packet, Throwable failure) {

@@ -29,6 +29,7 @@ public abstract class GuiMixin {
 		GuiGraphics guiGraphics,
 		DeltaTracker deltaTracker,
 		CallbackInfo callbackInfo) {
+		CommonClient.INSTANCE.onRenderMonitor(guiGraphics);
 		CommonClient.INSTANCE.onRenderToggleNotice(guiGraphics);
 	}
 }

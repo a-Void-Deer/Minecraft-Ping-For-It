@@ -10,12 +10,18 @@ import net.fabricmc.fabric.api.resource.ResourceManagerHelper;
 import net.minecraft.core.Registry;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.network.Connection;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.server.packs.PackType;
 import net.minecraft.server.packs.resources.ResourceManager;
 import net.minecraft.util.profiling.ProfilerFiller;
 import nx.pingwheel.common.CommonClient;
+import nx.pingwheel.common.monitor.integration.MonitorPacketDispatch;
 import nx.pingwheel.common.command.ClientCommandBuilder;
 import nx.pingwheel.common.network.InventoryS2CPacket;
+import nx.pingwheel.common.network.InventoryMonitorStatusS2CPacket;
+import nx.pingwheel.common.network.InventoryMonitorSampleS2CPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.network.PresentationPreviewS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
@@ -27,6 +33,9 @@ import nx.pingwheel.fabric.integration.FabricWorldAwareBlockModelOutlineAdapter;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.function.BiConsumer;
+import java.util.function.LongConsumer;
+import org.jetbrains.annotations.Nullable;
 
 import static nx.pingwheel.common.Global.MOD_ID;
 import static nx.pingwheel.common.resource.ResourceConstants.PING_SOUND_EVENT;
@@ -44,6 +53,7 @@ public class FabricClient implements ClientModInitializer {
 			RateLimitPolicyS2CPacket.PACKET_TYPE,
 			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onRateLimitPolicyPacket(packet)));
 		CommonClient.INSTANCE.onInit();
+		registerMonitorReceivers(CommonClient.INSTANCE::onMonitorStatus, CommonClient.INSTANCE::onMonitorSample);
 
 		Registry.register(BuiltInRegistries.SOUND_EVENT, PING_SOUND_ID, PING_SOUND_EVENT);
 
@@ -87,5 +97,27 @@ public class FabricClient implements ClientModInitializer {
 				}
 			}));
 		});
+	}
+
+	static void registerMonitorReceivers(BiConsumer<Long, InventoryMonitorStatusS2CPacket> status,
+		BiConsumer<Long, InventoryMonitorSampleS2CPacket> sample) {
+		ClientPlayNetworking.registerGlobalReceiver(InventoryMonitorStatusS2CPacket.PACKET_TYPE,
+			(packet, context) -> dispatchMonitor(packet, context, token -> status.accept(token, packet)));
+		ClientPlayNetworking.registerGlobalReceiver(InventoryMonitorSampleS2CPacket.PACKET_TYPE,
+			(packet, context) -> dispatchMonitor(packet, context, token -> sample.accept(token, packet)));
+	}
+
+	private static void dispatchMonitor(nx.pingwheel.common.network.IPacket packet,
+		ClientPlayNetworking.Context context, LongConsumer receive) {
+		Minecraft client = context.client();
+		@Nullable ClientPacketListener listener = client.getConnection();
+		// Context.player() is dynamic in Fabric; the response sender retains the originating addon.
+		if (listener == null || !listener.isAcceptingMessages() || context.responseSender() != ClientPlayNetworking.getSender()) return;
+		Connection connection = listener.getConnection();
+		long token = CommonClient.INSTANCE.monitorConnectionToken();
+		MonitorPacketDispatch.client(client, connection, () -> {
+			@Nullable ClientPacketListener current = client.getConnection();
+			return current == null ? null : current.getConnection();
+		}, packet, () -> receive.accept(token));
 	}
 }

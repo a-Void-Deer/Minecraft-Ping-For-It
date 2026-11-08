@@ -56,6 +56,7 @@ import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
+import nx.pingwheel.common.platform.TransportHandoff;
 import nx.pingwheel.common.presentation.PresentationBasic;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationPropertySelection;
@@ -71,6 +72,7 @@ import nx.pingwheel.common.presentation.inventory.InventorySyncPublisher;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
 import nx.pingwheel.common.presentation.inventory.client.InventoryClientStore;
 import nx.pingwheel.common.presentation.minecraft.PresentationServer;
+import nx.pingwheel.common.presentation.source.SyncPublisher;
 import nx.pingwheel.common.render.InventoryTrackingRenderer;
 import nx.pingwheel.common.render.SpatialOverlayRenderer;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -81,6 +83,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.EnumSource;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Headless real backend SELECT -> server initial -> encoded body -> runtime/composer/HUD projection.
@@ -110,6 +113,49 @@ class InventoryCreationSnapshotIntegrationTest {
 		Language.inject(new ReceiptLanguage(locale, previousLanguage));
 	}
 	@AfterAll static void restoreLanguage() { if (previousLanguage != null) Language.inject(previousLanguage); }
+
+	@ParameterizedTest @EnumSource(TransportHandoff.class)
+	void transportMirrorPreservesTheObservedResultAndNeverInventsDelivery(TransportHandoff handoff) {
+		var attempts = new ArrayList<InventoryS2CPacket>();
+		var delivered = new ArrayList<InventoryS2CPacket>();
+		var packet = InventoryS2CPacket.policy(InventoryResourceKind.ITEM, 1, 1, 1, Set.of());
+		var original = new InventorySyncPublisher.Transport() {
+			@Override public boolean authorized(SyncPublisher.Context context) { return true; }
+			@Override public int encodedBytes(InventoryS2CPacket outgoing) { return fail("send must not measure again"); }
+			@Override public void send(UUID id, InventoryS2CPacket outgoing) { fail("observed send must not invoke the legacy port again"); }
+			@Override public TransportHandoff sendObserved(UUID id, InventoryS2CPacket outgoing) {
+				assertEquals(OWNER, id); attempts.add(outgoing); return handoff;
+			}
+		};
+		var mirrored = mirrorTransport(original, (id, outgoing) -> { assertEquals(OWNER, id); delivered.add(outgoing); });
+		assertSame(handoff, mirrored.sendObserved(OWNER, packet));
+		assertEquals(List.of(packet), attempts);
+		assertEquals(handoff == TransportHandoff.NOT_HANDED_OFF ? List.of() : List.of(packet), delivered);
+	}
+
+	@Test void transportMirrorDelegatesLegacyVoidAndDefaultObservedSendExactlyOnceAndPropagatesRefusal() {
+		var attempts = new ArrayList<InventoryS2CPacket>();
+		var delivered = new ArrayList<InventoryS2CPacket>();
+		var packet = InventoryS2CPacket.policy(InventoryResourceKind.ITEM, 1, 1, 1, Set.of());
+		var refusal = new IllegalStateException("transport refused");
+		var original = new InventorySyncPublisher.Transport() {
+			@Override public boolean authorized(SyncPublisher.Context context) { return true; }
+			@Override public int encodedBytes(InventoryS2CPacket outgoing) { return fail("send must not measure again"); }
+			@Override public void send(UUID id, InventoryS2CPacket outgoing) {
+				assertEquals(OWNER, id); attempts.add(outgoing);
+				if (attempts.size() > 2) throw refusal;
+			}
+		};
+		var mirrored = mirrorTransport(original, (id, outgoing) -> delivered.add(outgoing));
+		mirrored.send(OWNER, packet);
+		assertEquals(1, attempts.size()); assertEquals(1, delivered.size());
+		assertSame(TransportHandoff.UNOBSERVED, mirrored.sendObserved(OWNER, packet));
+		assertEquals(2, attempts.size()); assertEquals(2, delivered.size());
+		assertSame(refusal, assertThrows(IllegalStateException.class, () -> mirrored.sendObserved(OWNER, packet)));
+		assertEquals(3, attempts.size()); assertEquals(2, delivered.size());
+		assertSame(refusal, assertThrows(IllegalStateException.class, () -> mirrored.send(OWNER, packet)));
+		assertEquals(4, attempts.size()); assertEquals(2, delivered.size());
+	}
 
 	@ParameterizedTest @CsvSource({"ITEM,false", "ITEM,true", "FLUID,false", "FLUID,true"})
 	void selectedFiveChatsImmediatelyThenRealTrackingNineOnlyChangesHud(InventoryResourceKind lane, boolean partial) throws Exception {
@@ -404,13 +450,7 @@ class InventoryCreationSnapshotIntegrationTest {
 				receive(player.getUUID(), decoded);
 			});
 			InventorySyncPublisher.Transport originalTransport = (InventorySyncPublisher.Transport) get(publisher(), "transport");
-			InventorySyncPublisher.Transport transport = (InventorySyncPublisher.Transport) Proxy.newProxyInstance(getClass().getClassLoader(), new Class<?>[] {InventorySyncPublisher.Transport.class}, (proxy, method, args) -> {
-				try {
-					@Nullable Object result = method.invoke(originalTransport, args);
-					if (method.getName().equals("send")) receive((UUID) args[0], wire((InventoryS2CPacket) args[1]));
-					return result;
-				} catch (InvocationTargetException failure) { throw failure.getCause(); }
-			});
+			InventorySyncPublisher.Transport transport = mirrorTransport(originalTransport, (id, packet) -> receive(id, wire(packet)));
 			put(publisher(), "transport", transport);
 			// Owner negotiation precedes port wrapping; replay only its genuine recorded OFFER/RESET/controls.
 			if (recipient.equals(OWNER)) {
@@ -544,6 +584,22 @@ class InventoryCreationSnapshotIntegrationTest {
 		var buffer = new FriendlyByteBuf(io.netty.buffer.Unpooled.buffer());
 		try { packet.write(buffer); var decoded = InventoryS2CPacket.readSafe(buffer); assertFalse(decoded.isCorrupt()); assertFalse(buffer.isReadable()); return decoded; }
 		finally { buffer.release(); }
+	}
+	private static InventorySyncPublisher.Transport mirrorTransport(InventorySyncPublisher.Transport original,
+		BiConsumer<UUID, InventoryS2CPacket> receive) {
+		return (InventorySyncPublisher.Transport) Proxy.newProxyInstance(InventoryCreationSnapshotIntegrationTest.class.getClassLoader(),
+			new Class<?>[] {InventorySyncPublisher.Transport.class}, (Object proxy, Method method, Object @Nullable [] args) -> {
+				try {
+					@Nullable Object result = method.invoke(original, args);
+					// A legacy/default UNOBSERVED return still delivered through this fixture's void port.
+					if (method.getName().equals("send") || method.getName().equals("sendObserved")
+						&& (result == TransportHandoff.HANDED_OFF || result == TransportHandoff.UNOBSERVED)) {
+						Object[] arguments = Objects.requireNonNull(args);
+						receive.accept((UUID) arguments[0], (InventoryS2CPacket) arguments[1]);
+					}
+					return result;
+				} catch (InvocationTargetException failure) { throw Objects.requireNonNull(failure.getCause()); }
+			});
 	}
 	private static int translations(Component text, String key) {
 		int count = 0;

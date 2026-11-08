@@ -22,6 +22,8 @@ import nx.pingwheel.common.marker.ServerMarkerStore;
 import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
+import nx.pingwheel.common.monitor.server.ServerInventoryMonitor;
+import nx.pingwheel.common.platform.TransportHandoff;
 import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
@@ -46,6 +48,7 @@ public final class InventoryPublicationBackendFixture implements AutoCloseable, 
 	public final TargetKey group;
 	public java.util.function.Consumer<InventoryS2CPacket> measured = packet -> {};
 	public java.util.function.Consumer<InventoryS2CPacket> handed = packet -> {};
+	public @Nullable java.util.function.BiFunction<UUID, InventoryS2CPacket, TransportHandoff> observed;
 	public java.util.function.Function<UUID, Optional<InventoryBackend.Policy>> currentPolicy = player -> Optional.of(new InventoryBackend.Policy(100, 1, Set.of("entity_block")));
 	public java.util.function.Function<UUID, @Unmodifiable List<UUID>> audience = player -> List.of(A, B);
 	public java.util.function.BiPredicate<UUID, MarkerId> known = (player, marker) -> true;
@@ -54,8 +57,12 @@ public final class InventoryPublicationBackendFixture implements AutoCloseable, 
 	public boolean holdData;
 	public int effectiveMeasurements;
 	public InventoryPublicationBackendFixture(InventoryRuntime.SourceResolver resolver, InventorySettings settings, TargetKey group) {
+		this(resolver, settings, group, new ServerInventoryMonitor());
+	}
+	public InventoryPublicationBackendFixture(InventoryRuntime.SourceResolver resolver, InventorySettings settings, TargetKey group,
+		ServerInventoryMonitor monitor) {
 		this.settings = settings; this.group = group;
-		runtime = new InventoryRuntime(resolver, settings.pendingMemoryBytes(), InventoryRuntime.DisplayReprojector.none(), BudgetDelaySink.NONE, true);
+		runtime = new InventoryRuntime(resolver, settings.pendingMemoryBytes(), InventoryRuntime.DisplayReprojector.none(), BudgetDelaySink.NONE, true, monitor);
 		backend = new InventoryBackend(this, runtime, 1);
 		for (UUID owner : List.of(A, B)) { var client = new ClientInventory(packet -> {}); client.presentationReset(100, 1); clients.put(owner, client); backend.handle(owner, InventoryC2SPacket.hello(), 0, settings); }
 	}
@@ -109,6 +116,10 @@ public final class InventoryPublicationBackendFixture implements AutoCloseable, 
 			if (packet.kind() == InventoryS2CPacket.Kind.OFFER) epochs.put(recipient, packet.epoch());
 		} finally { buffer.release(); }
 		handed.accept(packet);
+	}
+	@Override public TransportHandoff sendObserved(UUID recipient, InventoryS2CPacket packet) {
+		if (observed != null) return observed.apply(recipient, packet);
+		send(recipient, packet); return TransportHandoff.UNOBSERVED;
 	}
 	public long open(UUID owner, Target target, BlockFace face, long tick) {
 		long request = requests.merge(owner, 1L, Long::sum);

@@ -19,6 +19,16 @@ public final class HeadlessEventChannel extends EventNetworkChannel {
 		return ChannelBuilder.named(id).optional().channel(HeadlessEventChannel::new);
 	}
 
+	/** Reuses a production-created optional channel without registering its route a second time. */
+	public static HeadlessEventChannel wrap(EventNetworkChannel channel) {
+		return new HeadlessEventChannel(channel.instance);
+	}
+
+	public boolean acceptsMissingPeer() {
+		return instance.clientAcceptedVersions.accepts(Channel.VersionTest.Status.MISSING, -1)
+			&& instance.serverAcceptedVersions.accepts(Channel.VersionTest.Status.MISSING, -1);
+	}
+
 	@Override
 	public <T extends CustomPayloadEvent> EventNetworkChannel addListener(Consumer<T> listener) {
 		@SuppressWarnings("unchecked")

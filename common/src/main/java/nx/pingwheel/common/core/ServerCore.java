@@ -38,6 +38,7 @@ import nx.pingwheel.common.marker.ServerMarker;
 import nx.pingwheel.common.marker.ServerMarkerStore;
 import nx.pingwheel.common.name.MinecraftTargetNameResolver;
 import nx.pingwheel.common.network.InventoryC2SPacket;
+import nx.pingwheel.common.network.InventoryMonitorSubscribeC2SPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
 import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
@@ -517,6 +518,12 @@ public class ServerCore {
 		InventoryServer.handle(server, player, packet);
 	}
 
+	public static void onInventoryMonitorSubscribe(MinecraftServer server, ServerPlayer player, InventoryMonitorSubscribeC2SPacket packet) {
+		if (!server.isSameThread() || packet.isCorrupt() || server.getPlayerList().getPlayer(player.getUUID()) != player) return;
+		ensureMarkerStore(server);
+		InventoryServer.subscribeMonitor(server, player, packet);
+	}
+
 	public static void onPresentationPacket(MinecraftServer server, ServerPlayer player, PresentationC2SPacket packet) {
 		PresentationServer.activate(server);
 		if (packet == null || packet.isCorrupt()) return;
@@ -814,7 +821,7 @@ public class ServerCore {
 		PLAYER_CHANNELS.remove(player.getUUID());
 		PLAYER_RATES.remove(player.getUUID());
 		PresentationServer.disconnect(player.getUUID());
-		InventoryServer.disconnect(player.getUUID());
+		InventoryServer.disconnect(player);
 	}
 
 	/**

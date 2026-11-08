@@ -7,10 +7,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.common.ClientboundCustomPayloadPacket;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.network.EventNetworkChannel;
+import net.minecraftforge.network.ForgePayload;
 import net.minecraftforge.network.HeadlessEventChannel;
+import nx.pingwheel.forge.ForgeMain;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.config.ChannelMode;
 import nx.pingwheel.common.config.InventoryConfigValues;
@@ -70,32 +73,35 @@ class ServerConfigTransportDiagnosticsTest {
 		var sent = new ArrayList<Packet<?>>();
 		var routeChecks = new AtomicInteger();
 		var recipient = recipient();
+		var channel = HeadlessEventChannel.wrap(ForgeMain.SERVER_CONFIG_SNAPSHOT_CHANNEL_S2C);
+		assertEquals(ServerConfigSnapshotS2CPacket.PACKET_ID, channel.getName());
 		@Nullable EventNetworkChannel previous = PlatformNetworkServiceImpl.CHANNEL_MAP.put(
 			ServerConfigSnapshotS2CPacket.PACKET_ID,
-			HeadlessEventChannel.create(ServerConfigSnapshotS2CPacket.PACKET_ID));
+			channel);
 		try (var capture = new Capture()) {
 			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEEP);
 			assertEquals(TransportHandoff.NOT_HANDED_OFF,
-				new PlatformNetworkServiceImpl((channel, player) -> { routeChecks.incrementAndGet(); return false; },
+				new PlatformNetworkServiceImpl((current, player) -> { assertSame(channel, current); routeChecks.incrementAndGet(); return false; },
 					(player, packet) -> fail("unavailable route must not send")).sendToClientObserved(snapshot, recipient));
 			assertEquals(1, routeChecks.get());
 			assertTrue(sent.isEmpty());
 			assertTrue(capture.events.isEmpty());
 
 			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEBUG);
-			new PlatformNetworkServiceImpl((channel, player) -> { routeChecks.incrementAndGet(); return false; },
+			new PlatformNetworkServiceImpl((current, player) -> { assertSame(channel, current); routeChecks.incrementAndGet(); return false; },
 				(player, packet) -> fail("unavailable route must not send")).sendToClient(snapshot, recipient);
 			assertEquals(2, routeChecks.get());
 			assertTrue(sent.isEmpty());
 			assertEquals(1, capture.events.size());
 			assertDecision(capture.events.getFirst(), "SERVER", "route-unavailable", "snapshot");
 
-			var sending = new PlatformNetworkServiceImpl((channel, player) -> { routeChecks.incrementAndGet(); return true; },
+			var sending = new PlatformNetworkServiceImpl((current, player) -> { assertSame(channel, current); routeChecks.incrementAndGet(); return true; },
 				(player, packet) -> sent.add(packet));
 			assertEquals(TransportHandoff.HANDED_OFF, sending.sendToClientObserved(snapshot, recipient));
 			assertEquals(3, routeChecks.get());
 			assertEquals(1, sent.size());
-			assertNotNull(sent.getFirst());
+			assertEquals(ServerConfigSnapshotS2CPacket.PACKET_ID, assertInstanceOf(ForgePayload.class,
+				assertInstanceOf(ClientboundCustomPayloadPacket.class, sent.getFirst()).payload()).id());
 			assertEquals(2, capture.events.size());
 			assertDecision(capture.events.getLast(), "SERVER", "send-dispatched", "snapshot");
 		} finally {

@@ -998,8 +998,16 @@ class InventoryS2CPacketTest {
 		var bean = (com.sun.management.ThreadMXBean) java.lang.management.ManagementFactory.getThreadMXBean();
 		assertTrue(bean.isThreadAllocatedMemorySupported()); bean.setThreadAllocatedMemoryEnabled(true);
 		int checksum = 0;
+		long thread = Thread.currentThread().threadId();
+		// HotSpot can resolve a class's cold string constants on the calling thread
+		// when submitting C2 compilation. Warm the counter and this test loop as well
+		// as the codec before attributing any allocation to the measured large packet.
+		for (int i = 0; i < 100_000; i++) {
+			checksum += small.encodedSize(InventoryS2CPacket.MAX_DISPLAY_BYTES, InventoryS2CPacket.MAX_FRAME_BYTES);
+			bean.getThreadAllocatedBytes(thread);
+		}
 		for (int i = 0; i < 200; i++) checksum += large.encodedSize(InventoryS2CPacket.MAX_DISPLAY_BYTES, InventoryS2CPacket.MAX_FRAME_BYTES);
-		long thread = Thread.currentThread().threadId(), before = bean.getThreadAllocatedBytes(thread);
+		long before = bean.getThreadAllocatedBytes(thread);
 		for (int i = 0; i < 64; i++) checksum += large.encodedSize(InventoryS2CPacket.MAX_DISPLAY_BYTES, InventoryS2CPacket.MAX_FRAME_BYTES);
 		long allocated = bean.getThreadAllocatedBytes(thread) - before;
 		assertTrue(checksum > 0); assertEquals(0, allocated, "warmed exact measurement allocates no objects or byte buffers");

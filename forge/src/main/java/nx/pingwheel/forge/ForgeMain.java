@@ -11,8 +11,12 @@ import net.minecraftforge.network.EventNetworkChannel;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.server.ServerStoppedEvent;
 import nx.pingwheel.common.CommonServer;
+import nx.pingwheel.common.monitor.integration.MonitorPacketDispatch;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
+import nx.pingwheel.common.network.InventoryMonitorSubscribeC2SPacket;
+import nx.pingwheel.common.network.InventoryMonitorStatusS2CPacket;
+import nx.pingwheel.common.network.InventoryMonitorSampleS2CPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
@@ -26,6 +30,8 @@ import nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.forge.platform.PlatformNetworkServiceImpl;
 import org.apache.logging.log4j.util.TriConsumer;
+import org.jetbrains.annotations.Nullable;
+import net.minecraft.server.network.ServerGamePacketListenerImpl;
 
 import java.util.function.Function;
 
@@ -45,6 +51,9 @@ public class ForgeMain {
 	public static final EventNetworkChannel PRESENTATION_CHANNEL_S2C = ChannelBuilder.named(PresentationS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel INVENTORY_CHANNEL_C2S = ChannelBuilder.named(InventoryC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel INVENTORY_CHANNEL_S2C = ChannelBuilder.named(InventoryS2CPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel INVENTORY_MONITOR_SUBSCRIBE_CHANNEL_C2S = ChannelBuilder.named(InventoryMonitorSubscribeC2SPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel INVENTORY_MONITOR_STATUS_CHANNEL_S2C = ChannelBuilder.named(InventoryMonitorStatusS2CPacket.PACKET_ID).optional().eventNetworkChannel();
+	public static final EventNetworkChannel INVENTORY_MONITOR_SAMPLE_CHANNEL_S2C = ChannelBuilder.named(InventoryMonitorSampleS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel PRESENTATION_PREVIEW_CHANNEL_C2S = ChannelBuilder.named(PresentationPreviewC2SPacket.PACKET_ID).optional().eventNetworkChannel();
 	public static final EventNetworkChannel PRESENTATION_PREVIEW_CHANNEL_S2C = ChannelBuilder.named(PresentationPreviewS2CPacket.PACKET_ID).optional().eventNetworkChannel();
 
@@ -66,6 +75,9 @@ public class ForgeMain {
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(PresentationS2CPacket.PACKET_ID, PRESENTATION_CHANNEL_S2C);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(InventoryC2SPacket.PACKET_ID, INVENTORY_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(InventoryS2CPacket.PACKET_ID, INVENTORY_CHANNEL_S2C);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(InventoryMonitorSubscribeC2SPacket.PACKET_ID, INVENTORY_MONITOR_SUBSCRIBE_CHANNEL_C2S);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(InventoryMonitorStatusS2CPacket.PACKET_ID, INVENTORY_MONITOR_STATUS_CHANNEL_S2C);
+		PlatformNetworkServiceImpl.CHANNEL_MAP.put(InventoryMonitorSampleS2CPacket.PACKET_ID, INVENTORY_MONITOR_SAMPLE_CHANNEL_S2C);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(PresentationPreviewC2SPacket.PACKET_ID, PRESENTATION_PREVIEW_CHANNEL_C2S);
 		PlatformNetworkServiceImpl.CHANNEL_MAP.put(PresentationPreviewS2CPacket.PACKET_ID, PRESENTATION_PREVIEW_CHANNEL_S2C);
 		registerPacketHandler(UPDATE_CHANNEL_C2S, UpdateChannelC2SPacket::readSafe, CommonServer.INSTANCE::onChannelUpdatePacket);
@@ -74,6 +86,7 @@ public class ForgeMain {
 		registerPacketHandler(SERVER_PRESENTATION_POLICY_CHANNEL_C2S, ServerPresentationPolicyC2SPacket::readSafe, CommonServer.INSTANCE::onServerPresentationPolicyPacket);
 		registerPacketHandler(PRESENTATION_CHANNEL_C2S, PresentationC2SPacket::readSafe, CommonServer.INSTANCE::onPresentationPacket);
 		registerPacketHandler(INVENTORY_CHANNEL_C2S, InventoryC2SPacket::readSafe, CommonServer.INSTANCE::onInventoryPacket);
+		registerMonitorReceiver(INVENTORY_MONITOR_SUBSCRIBE_CHANNEL_C2S, CommonServer.INSTANCE::onInventoryMonitorSubscribe);
 		registerPacketHandler(PRESENTATION_PREVIEW_CHANNEL_C2S, PresentationPreviewC2SPacket::readSafe, CommonServer.INSTANCE::onPresentationPreview);
 	}
 
@@ -89,6 +102,26 @@ public class ForgeMain {
 			}
 
 			ctx.setPacketHandled(true);
+		});
+	}
+
+	static void registerMonitorReceiver(EventNetworkChannel channel,
+		TriConsumer<MinecraftServer, ServerPlayer, InventoryMonitorSubscribeC2SPacket> receiver) {
+		channel.addListener(event -> {
+			var context = event.getSource();
+			var payload = event.getPayload();
+			@Nullable ServerPlayer player = context.getSender();
+			if (context.isServerSide() && payload != null && player != null) {
+				var packet = InventoryMonitorSubscribeC2SPacket.readSafe(payload);
+				@Nullable MinecraftServer server = player.getServer();
+				@Nullable ServerGamePacketListenerImpl listener = player.connection;
+				// getSender is derived from this event's original transport listener.
+				if (server != null && listener != null && context.getConnection().getPacketListener() == listener) {
+					MonitorPacketDispatch.server(action -> context.enqueueWork(action), server, player, listener, packet,
+						current -> receiver.accept(server, current, packet));
+				}
+			}
+			context.setPacketHandled(true);
 		});
 	}
 

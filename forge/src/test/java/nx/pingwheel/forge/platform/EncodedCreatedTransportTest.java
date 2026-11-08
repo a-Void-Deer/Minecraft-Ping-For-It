@@ -19,6 +19,7 @@ import net.minecraftforge.event.network.CustomPayloadEvent;
 import net.minecraft.network.Connection;
 import net.minecraft.network.protocol.PacketFlow;
 import nx.pingwheel.forge.ForgeClient;
+import nx.pingwheel.forge.ForgeMain;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.MarkerAnchor;
@@ -33,14 +34,28 @@ import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.minecraft.InventoryCreationReceiptTransport.EncodedTransport;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
 class EncodedCreatedTransportTest {
+	private @Nullable EventNetworkChannel previous;
+	private @Nullable HeadlessEventChannel channel;
 	@BeforeAll static void bootstrap() { net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap(); }
+	@BeforeEach void installProductionChannelWrapper() {
+		channel = HeadlessEventChannel.wrap(ForgeMain.PRESENTATION_CHANNEL_S2C);
+		assertEquals(PresentationS2CPacket.PACKET_ID, channel.getName());
+		previous = PlatformNetworkServiceImpl.CHANNEL_MAP.put(PresentationS2CPacket.PACKET_ID, channel);
+	}
+	@AfterEach void restoreChannelMap() {
+		if (previous == null) PlatformNetworkServiceImpl.CHANNEL_MAP.remove(PresentationS2CPacket.PACKET_ID);
+		else PlatformNetworkServiceImpl.CHANNEL_MAP.put(PresentationS2CPacket.PACKET_ID, previous);
+	}
 	@Test void publicServiceConstructorExposesTheProductionEncodedHandoff() {
 		assertInstanceOf(EncodedTransport.class, new PlatformNetworkServiceImpl());
 	}
@@ -67,7 +82,7 @@ class EncodedCreatedTransportTest {
 			for (int i = queued.size() - 1; i >= 0; i--) {
 				var packet = assertInstanceOf(ClientboundCustomPayloadPacket.class, queued.get(i));
 				var payload = assertInstanceOf(ForgePayload.class, packet.payload());
-				assertEquals(channel.getName(), payload.id()); assertNull(payload.data());
+				assertEquals(PresentationS2CPacket.PACKET_ID, payload.id()); assertNull(payload.data());
 				FriendlyByteBuf output = new RegistryFriendlyByteBuf(Unpooled.buffer(), RegistryAccess.EMPTY);
 				FriendlyByteBuf body = buffer(); FriendlyByteBuf expected = buffer();
 				try {
@@ -130,9 +145,8 @@ class EncodedCreatedTransportTest {
 		} finally { encoded.release(); wire.release(); }
 	}
 
-	private static HeadlessEventChannel channel() {
-		return (HeadlessEventChannel) PlatformNetworkServiceImpl.CHANNEL_MAP.computeIfAbsent(PresentationS2CPacket.PACKET_ID,
-			HeadlessEventChannel::create);
+	private HeadlessEventChannel channel() {
+		return Objects.requireNonNull(channel);
 	}
 	@NotNullByDefault
 	private static final class ImmediateContext extends CustomPayloadEvent.Context {

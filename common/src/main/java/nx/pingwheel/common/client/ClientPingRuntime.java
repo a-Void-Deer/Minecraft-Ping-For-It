@@ -92,6 +92,10 @@ import nx.pingwheel.common.presentation.preview.client.PreviewLocalReaders;
 import nx.pingwheel.common.presentation.InventoryItemPingTypes;
 import nx.pingwheel.common.presentation.PresentationPropertyPingTypes;
 import nx.pingwheel.common.network.PresentationPreviewS2CPacket;
+import nx.pingwheel.common.monitor.client.ClientMonitorState;
+import nx.pingwheel.common.monitor.client.ClientMonitorCollector;
+import nx.pingwheel.common.monitor.MonitorSchema.Lane;
+import nx.pingwheel.common.monitor.MonitorSchema.Phase;
 import nx.pingwheel.common.render.SpatialOverlayRenderer;
 import nx.pingwheel.common.interaction.wheel.WheelSelection;
 import nx.pingwheel.common.client.LongPressCompatibilityController;
@@ -296,6 +300,14 @@ public final class ClientPingRuntime {
 	private Object observedWorldIdentity;
 	private Object observedScreenIdentity;
 	private List<nx.pingwheel.common.render.InventoryTrackingRenderer.MarkerLines> trackingPaint = List.of();
+	private ClientMonitorState monitor = new ClientMonitorState();
+
+	/** P6 owns final client-profile configuration and the separate monitor transport. */
+	public ClientMonitorState monitor() { return monitor; }
+	public void monitor(ClientMonitorState state) {
+		monitor = Objects.requireNonNull(state, "state");
+		if (inventory != null) inventory.monitor(monitor.collector());
+	}
 
 	/** Production-used Minecraft boundary; recordings exercise the same runtime/coordinator/selector path. */
 	interface InteractionAccess {
@@ -582,6 +594,10 @@ public final class ClientPingRuntime {
 		if (preciseRefresh != null) preciseRefresh.tick(localTick);
 		expireFallbackMarkers();
 		reconcileContentReceipts();
+		if (monitor.enabled()) {
+			if (inventory != null) inventory.observeMonitorState();
+			monitor.tick(localTick);
+		}
 	}
 
 	/** Handles a claimed physical press immediately on the client thread. */
@@ -721,6 +737,8 @@ public final class ClientPingRuntime {
 		observedScreenIdentity = null;
 		trackingPaint = List.of();
 		observedDimension = null;
+		monitor.configure(false, monitor.selected());
+		monitor.resetConnection();
 	}
 
 	/**
@@ -1266,10 +1284,22 @@ public final class ClientPingRuntime {
 	 */
 	private void prepareInventoryGeometry(NativeSelectorInput.Frame frame, long nowMillis) {
 		if (selector == null || selectorStyle == null) return;
-		selector.prepareInventoryGeometry(view -> interactionAccess.listGeometry(selectorStyle, frame, view),
-			interactionAccess::inventoryDisplay, nowMillis);
+		ClientMonitorCollector collector = monitor.collector();
+		boolean measuring = collector.enabled();
+		if (measuring) collector.begin(Lane.PREVIEW, Phase.PREPARE);
+		try {
+			selector.prepareInventoryGeometry(view -> interactionAccess.listGeometry(selectorStyle, frame, view),
+				interactionAccess::inventoryDisplay, nowMillis);
+		} finally { if (measuring) collector.end(Lane.PREVIEW, Phase.PREPARE); }
 	}
 	public void drawSelector(GuiGraphics graphics) {
+		ClientMonitorCollector collector = monitor.collector();
+		boolean measuring = collector.enabled();
+		if (measuring) collector.begin(Lane.PREVIEW, Phase.DRAW);
+		try { drawSelectorUnmeasured(graphics); }
+		finally { if (measuring) collector.end(Lane.PREVIEW, Phase.DRAW); }
+	}
+	private void drawSelectorUnmeasured(GuiGraphics graphics) {
 		var inputFrame = interactionAccess.inputFrame();
 		if (inputFrame.isEmpty()) return;
 		if (selectorStyle == null || (selector == null && !selectorPaint.isAnimating())) return;
@@ -1313,6 +1343,13 @@ public final class ClientPingRuntime {
 		else preciseRefresh.leave();
 	}
 	public void prepareInventoryTracking(nx.pingwheel.common.render.WorldRenderContext frame) {
+		ClientMonitorCollector collector = monitor.collector();
+		boolean measuring = collector.enabled();
+		if (measuring) collector.begin(Lane.TRACKING, Phase.PREPARE);
+		try { prepareInventoryTrackingUnmeasured(frame); }
+		finally { if (measuring) collector.end(Lane.TRACKING, Phase.PREPARE); }
+	}
+	private void prepareInventoryTrackingUnmeasured(nx.pingwheel.common.render.WorldRenderContext frame) {
 		if (inventory == null || Game == null || Game.level == null) { trackingPaint = List.of(); return; }
 		String dimension = Game.level.dimension().location().toString();
 		var lines = new java.util.ArrayList<nx.pingwheel.common.render.InventoryTrackingRenderer.MarkerLines>();
@@ -1332,7 +1369,11 @@ public final class ClientPingRuntime {
 		trackingPaint = List.copyOf(lines);
 	}
 	public void drawInventoryTracking(GuiGraphics graphics) {
-		nx.pingwheel.common.render.InventoryTrackingRenderer.draw(graphics, trackingPaint);
+		ClientMonitorCollector collector = monitor.collector();
+		boolean measuring = collector.enabled();
+		if (measuring) collector.begin(Lane.TRACKING, Phase.DRAW);
+		try { nx.pingwheel.common.render.InventoryTrackingRenderer.draw(graphics, trackingPaint); }
+		finally { if (measuring) collector.end(Lane.TRACKING, Phase.DRAW); }
 	}
 	public void onPresentationPreview(PresentationPreviewS2CPacket packet) {
 		if (contentPreview != null && selectorContent != null && observeInteractionLifecycle()) contentPreview.accept(packet);
@@ -2084,7 +2125,9 @@ public final class ClientPingRuntime {
 	}
 	private @Nullable ClientInventory inventory;
 	public void inventory(@Nullable ClientInventory inventory) {
+		if (this.inventory != null && this.inventory != inventory) this.inventory.monitor(null);
 		this.inventory = inventory;
+		if (inventory != null) inventory.monitor(monitor.collector());
 		syncInventorySchemas();
 		if (inventory != null && presentation.ready()) {
 			inventory.presentationReset(presentation.epoch(), presentation.sessionView());
@@ -2104,6 +2147,14 @@ public final class ClientPingRuntime {
 		inventory.acceptedSchemas(accepted);
 	}
 	public void onInventoryPacket(nx.pingwheel.common.network.@Nullable InventoryS2CPacket packet) {
+		if (inventory == null) return;
+		ClientMonitorCollector collector = monitor.collector();
+		@Nullable Lane lane = collector.enabled() ? ClientInventory.monitorLane(packet) : null;
+		if (lane != null) collector.begin(lane, Phase.APPLY);
+		try { onInventoryPacketUnmeasured(packet); }
+		finally { if (lane != null) collector.end(lane, Phase.APPLY); }
+	}
+	private void onInventoryPacketUnmeasured(nx.pingwheel.common.network.@Nullable InventoryS2CPacket packet) {
 		if (inventory == null) return;
 		ClientInventory.@Nullable SelectionResult previous = packet == null ? null : inventory.selectionResult(packet.commitId());
 		inventory.accept(packet);

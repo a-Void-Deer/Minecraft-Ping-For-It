@@ -5,6 +5,12 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.OptionalLong;
+import nx.pingwheel.common.monitor.client.ClientMonitorCollector;
+import nx.pingwheel.common.monitor.MonitorSchema.Lane;
+import nx.pingwheel.common.monitor.MonitorSchema.Phase;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Transport-free client state for streamed inventory consumers.
@@ -34,6 +40,7 @@ import java.util.OptionalLong;
  * reported as {@link Outcome#IGNORED_UNKNOWN_BASELINE}. No world or network call
  * and no UI work happens here.
  */
+@NotNullByDefault
 public final class InventoryClientStore {
 
 	/** Sentinel for "no committed baseline"; baseline identities are non-negative. */
@@ -108,7 +115,7 @@ public final class InventoryClientStore {
 		boolean invalid;
 		boolean baselineInstalled;
 		final Map<String, Value> values = new LinkedHashMap<>();
-		Assembly assembly;
+		@Nullable Assembly assembly;
 	}
 
 	private static final class Assembly {
@@ -133,6 +140,20 @@ public final class InventoryClientStore {
 	private final long maxEntries;
 	private final int maxChannels;
 	private final Map<Channel, ChannelState> channels = new LinkedHashMap<>();
+	private @Nullable ClientMonitorCollector monitor;
+
+	public void monitor(@Nullable ClientMonitorCollector collector) { monitor = collector; }
+
+	private @Nullable ClientMonitorCollector beginMeasurement(Channel channel) {
+		@Nullable ClientMonitorCollector collector = monitor;
+		if (collector == null || !collector.enabled()) return null;
+		collector.begin(channel.tracking() ? Lane.TRACKING : Lane.PREVIEW, Phase.APPLY);
+		return collector;
+	}
+
+	private static void endMeasurement(@Nullable ClientMonitorCollector collector, Channel channel) {
+		if (collector != null) collector.end(channel.tracking() ? Lane.TRACKING : Lane.PREVIEW, Phase.APPLY);
+	}
 
 	public InventoryClientStore(int maxParts, int maxEntries) {
 		this(maxParts, maxEntries, DEFAULT_MAX_CHANNELS);
@@ -163,11 +184,17 @@ public final class InventoryClientStore {
 	 * streamed values.
 	 */
 	public Outcome snapshot(Channel channel, long baselineId, long stateRevision, Map<String, Value> entries) {
+		@Nullable ClientMonitorCollector collector = beginMeasurement(channel);
+		try { return snapshotUnmeasured(channel, baselineId, stateRevision, entries); }
+		finally { endMeasurement(collector, channel); }
+	}
+
+	private Outcome snapshotUnmeasured(Channel channel, long baselineId, long stateRevision, Map<String, Value> entries) {
 		Objects.requireNonNull(channel, "channel");
 		Map<String, Value> copy = copyValues(entries);
 		requireBaseline(baselineId);
 		requireRevision(stateRevision);
-		ChannelState state = channels.get(channel);
+		@Nullable ChannelState state = channels.get(channel);
 
 		if (state != null && state.invalid)
 			return Outcome.IGNORED_INVALID;
@@ -176,7 +203,7 @@ public final class InventoryClientStore {
 			if (channels.size() >= maxChannels)
 				return Outcome.REJECTED_BOUND;
 		} else {
-			Outcome stale = fenceOutcome(state, baselineId, stateRevision);
+			@Nullable Outcome stale = fenceOutcome(state, baselineId, stateRevision);
 			if (stale != null)
 				return stale;
 			if (state.baselineInstalled && baselineId == state.baselineId
@@ -212,11 +239,17 @@ public final class InventoryClientStore {
 	}
 	/** Atomic domain group replacement; removal and its aggregate are admitted together. */
 	public Outcome applyReplacing(Channel channel, long baselineId, long stateRevision, Map<String, Value> updates, java.util.Set<String> removed) {
+		@Nullable ClientMonitorCollector collector = beginMeasurement(channel);
+		try { return applyReplacingUnmeasured(channel, baselineId, stateRevision, updates, removed); }
+		finally { endMeasurement(collector, channel); }
+	}
+
+	private Outcome applyReplacingUnmeasured(Channel channel, long baselineId, long stateRevision, Map<String, Value> updates, java.util.Set<String> removed) {
 		Objects.requireNonNull(channel, "channel");
 		Map<String, Value> copy = copyValues(updates);
 		requireBaseline(baselineId);
 		requireRevision(stateRevision);
-		ChannelState state = channels.get(channel);
+		@Nullable ChannelState state = channels.get(channel);
 
 		if (state == null)
 			return Outcome.IGNORED_UNKNOWN_BASELINE;
@@ -237,7 +270,7 @@ public final class InventoryClientStore {
 		removed.forEach(state.values::remove);
 
 		for (Map.Entry<String, Value> update : copy.entrySet()) {
-			Value existing = state.values.get(update.getKey());
+			@Nullable Value existing = state.values.get(update.getKey());
 			if (existing == null || update.getValue().revision() > existing.revision())
 				state.values.put(update.getKey(), update.getValue());
 		}
@@ -254,7 +287,7 @@ public final class InventoryClientStore {
 	public boolean invalidate(Channel channel, long newStateRevision) {
 		Objects.requireNonNull(channel, "channel");
 		requireRevision(newStateRevision);
-		ChannelState state = channels.get(channel);
+		@Nullable ChannelState state = channels.get(channel);
 
 		if (state == null) {
 			if (channels.size() >= maxChannels)
@@ -290,7 +323,7 @@ public final class InventoryClientStore {
 		Objects.requireNonNull(channel, "channel");
 		requireBaseline(newBaselineId);
 		requireRevision(newStateRevision);
-		ChannelState state = channels.get(channel);
+		@Nullable ChannelState state = channels.get(channel);
 
 		if (state == null) {
 			if (channels.size() >= maxChannels)
@@ -303,7 +336,7 @@ public final class InventoryClientStore {
 		}
 		if (newStateRevision < state.statusRevision)
 			return false;
-		Assembly pending = state.assembly;
+		@Nullable Assembly pending = state.assembly;
 		if (pending != null && (newStateRevision < pending.stateRevision
 			|| (newStateRevision == pending.stateRevision && newBaselineId < pending.baselineId)))
 			return false;
@@ -334,7 +367,7 @@ public final class InventoryClientStore {
 	 */
 	public boolean discardAssembly(Channel channel) {
 		Objects.requireNonNull(channel, "channel");
-		ChannelState state = channels.get(channel);
+		@Nullable ChannelState state = channels.get(channel);
 		if (state == null || state.assembly == null)
 			return false;
 		state.assembly = null;
@@ -356,6 +389,13 @@ public final class InventoryClientStore {
 	 */
 	public PartOutcome beginSnapshot(Channel channel, long baselineId, long stateRevision, int totalParts,
 			long startTick) {
+		@Nullable ClientMonitorCollector collector = beginMeasurement(channel);
+		try { return beginSnapshotUnmeasured(channel, baselineId, stateRevision, totalParts, startTick); }
+		finally { endMeasurement(collector, channel); }
+	}
+
+	private PartOutcome beginSnapshotUnmeasured(Channel channel, long baselineId, long stateRevision, int totalParts,
+			long startTick) {
 		Objects.requireNonNull(channel, "channel");
 		requireBaseline(baselineId);
 		requireRevision(stateRevision);
@@ -364,14 +404,14 @@ public final class InventoryClientStore {
 		if (totalParts < 1 || totalParts > maxParts)
 			return PartOutcome.REJECTED_BOUND;
 
-		ChannelState state = channels.get(channel);
+		@Nullable ChannelState state = channels.get(channel);
 		if (state == null) {
 			if (channels.size() >= maxChannels)
 				return PartOutcome.REJECTED_BOUND;
 		} else {
 			if (state.invalid)
 				return PartOutcome.IGNORED_INVALID;
-			Assembly pending = state.assembly;
+			@Nullable Assembly pending = state.assembly;
 			if (pending != null) {
 				if (baselineId == pending.baselineId && stateRevision == pending.stateRevision)
 					return totalParts == pending.totalParts ? PartOutcome.STARTED : PartOutcome.CONFLICT;
@@ -405,24 +445,31 @@ public final class InventoryClientStore {
 	 */
 	public PartOutcome part(Channel channel, long baselineId, long stateRevision, int partIndex,
 			Map<String, Value> entries, long tick) {
+		@Nullable ClientMonitorCollector collector = beginMeasurement(channel);
+		try { return partUnmeasured(channel, baselineId, stateRevision, partIndex, entries, tick); }
+		finally { endMeasurement(collector, channel); }
+	}
+
+	private PartOutcome partUnmeasured(Channel channel, long baselineId, long stateRevision, int partIndex,
+			Map<String, Value> entries, long tick) {
 		Objects.requireNonNull(channel, "channel");
 		Map<String, Value> copy = copyValues(entries);
 		if (tick < 0L)
 			throw new IllegalArgumentException("tick must be non-negative");
 
-		ChannelState state = channels.get(channel);
+		@Nullable ChannelState state = channels.get(channel);
 		if (state == null)
 			return PartOutcome.NO_ASSEMBLY;
 		if (state.invalid)
 			return PartOutcome.IGNORED_INVALID;
 
-		Assembly assembly = state.assembly;
+		@Nullable Assembly assembly = state.assembly;
 		if (assembly == null || assembly.baselineId != baselineId || assembly.stateRevision != stateRevision)
 			return PartOutcome.NO_ASSEMBLY;
 		if (partIndex < 0 || partIndex >= assembly.totalParts)
 			return PartOutcome.REJECTED_BOUND;
 
-		Map<String, Value> existing = assembly.parts.get(partIndex);
+		@Nullable Map<String, Value> existing = assembly.parts.get(partIndex);
 		if (existing != null)
 			return existing.equals(copy) ? PartOutcome.DUPLICATE_PART : PartOutcome.CONFLICT_PART;
 
@@ -442,7 +489,7 @@ public final class InventoryClientStore {
 		if (assembly.parts.size() < assembly.totalParts)
 			return PartOutcome.ACCEPTED;
 
-		commit(state, assembly);
+		commit(channel, state, assembly);
 		return PartOutcome.COMMITTED;
 	}
 
@@ -453,50 +500,50 @@ public final class InventoryClientStore {
 
 	public boolean isInvalid(Channel channel) {
 		Objects.requireNonNull(channel, "channel");
-		ChannelState state = channels.get(channel);
+		@Nullable ChannelState state = channels.get(channel);
 		return state != null && state.invalid;
 	}
 
 	public long baselineId(Channel channel) {
 		Objects.requireNonNull(channel, "channel");
-		ChannelState state = channels.get(channel);
+		@Nullable ChannelState state = channels.get(channel);
 		return state == null ? NO_BASELINE : state.baselineId;
 	}
 
 	/** Current status revision, or {@code -1} when the channel is absent. */
 	public long statusRevision(Channel channel) {
 		Objects.requireNonNull(channel, "channel");
-		ChannelState state = channels.get(channel);
+		@Nullable ChannelState state = channels.get(channel);
 		return state == null ? -1L : state.statusRevision;
 	}
 
 	/** Whether a fragmented baseline is still waiting for parts. */
 	public boolean assembling(Channel channel) {
 		Objects.requireNonNull(channel, "channel");
-		ChannelState state = channels.get(channel);
+		@Nullable ChannelState state = channels.get(channel);
 		return state != null && state.assembly != null;
 	}
 
 	/** Tick at which the running assembly started, if one is running. */
 	public OptionalLong assemblyStartTick(Channel channel) {
 		Objects.requireNonNull(channel, "channel");
-		ChannelState state = channels.get(channel);
+		@Nullable ChannelState state = channels.get(channel);
 		return state != null && state.assembly != null
 			? OptionalLong.of(state.assembly.startTick)
 			: OptionalLong.empty();
 	}
 
 	/** Immutable copy of the committed values; a partial assembly stays hidden. */
-	public Map<String, Value> values(Channel channel) {
+	public @Unmodifiable Map<String, Value> values(Channel channel) {
 		Objects.requireNonNull(channel, "channel");
-		ChannelState state = channels.get(channel);
+		@Nullable ChannelState state = channels.get(channel);
 		return state == null ? Map.of() : Map.copyOf(state.values);
 	}
 
-	private static Outcome fenceOutcome(ChannelState state, long baselineId, long stateRevision) {
+	private static @Nullable Outcome fenceOutcome(ChannelState state, long baselineId, long stateRevision) {
 		long fenceRevision = state.statusRevision;
 		long fenceBaseline = state.baselineId;
-		Assembly assembly = state.assembly;
+		@Nullable Assembly assembly = state.assembly;
 		if (assembly != null && (assembly.stateRevision > fenceRevision
 			|| (assembly.stateRevision == fenceRevision && assembly.baselineId > fenceBaseline))) {
 			fenceRevision = assembly.stateRevision;
@@ -509,10 +556,16 @@ public final class InventoryClientStore {
 		return null;
 	}
 
-	private static void commit(ChannelState state, Assembly assembly) {
+	private void commit(Channel channel, ChannelState state, Assembly assembly) {
+		@Nullable ClientMonitorCollector collector = beginMeasurement(channel);
+		try { commitUnmeasured(state, assembly); }
+		finally { endMeasurement(collector, channel); }
+	}
+
+	private static void commitUnmeasured(ChannelState state, Assembly assembly) {
 		Map<String, Value> merged = new LinkedHashMap<>();
 		for (int i = 0; i < assembly.totalParts; i++) {
-			Map<String, Value> part = assembly.parts.get(i);
+			@Nullable Map<String, Value> part = assembly.parts.get(i);
 			if (part != null)
 				merged.putAll(part);
 		}
