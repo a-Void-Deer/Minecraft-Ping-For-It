@@ -416,7 +416,7 @@ public final class InventoryBackend implements AutoCloseable {
 					&& (packet.kind() != InventoryS2CPacket.Kind.OPENED || session.pendingOpened.get(packet.requestId()) == packet);
 			}
 			@Override public boolean admittedToSend(SyncPublisher.Context context) {
-				return publicationAllowed(context); // checkedTick is sampling eligibility, never a send permit
+				return publicationAllowed(context) && previewOpened(context); // waiting for OPENED defers, never revokes the context
 			}
 			@Override public InventorySyncPublisher.SendDecision beforeSend(SyncPublisher.Context context, InventoryS2CPacket packet, @Nullable InventoryPublicationEvidence evidence) {
 				return authorizeSend(context, packet, evidence);
@@ -623,6 +623,7 @@ public final class InventoryBackend implements AutoCloseable {
 				? InventorySyncPublisher.SendDecision.ALLOW : InventorySyncPublisher.SendDecision.DENY;
 		}
 		if (!publicationAllowed(context)) return InventorySyncPublisher.SendDecision.DENY;
+		if (!previewOpened(context)) return InventorySyncPublisher.SendDecision.DEFER;
 		if (!InventorySyncPublisher.requiresSource(packet)) return InventorySyncPublisher.SendDecision.ALLOW;
 		if (evidence == null) return InventorySyncPublisher.SendDecision.DEFER;
 		@Nullable Preview preview = null; @Nullable Tracking lease = null;
@@ -776,11 +777,15 @@ public final class InventoryBackend implements AutoCloseable {
 			publisher.drainControls();
 			return;
 		}
-		Session session = sessions.get(player);
+		@Nullable Session session = sessions.get(player);
 		if (session == null) return;
 		refreshSession(player, session);
+		// Request IDs never repeat within an inventory session. A same-epoch
+		// view rebuild retains their ownership, so an in-flight cancellation may
+		// release its request even before the client receives the replacement view.
+		boolean cancellation = packet.kind() == InventoryC2SPacket.Kind.CLOSE && session.requests.containsKey(packet.requestId());
 		if (session.access == null || packet.epoch() != session.epoch || packet.presentationEpoch() != session.access.epoch()
-			|| packet.view() != session.access.view()) { publisher.drainControls(); return; }
+			|| packet.view() != session.access.view() && (!cancellation || packet.view() > session.access.view())) { publisher.drainControls(); return; }
 		switch (packet.kind()) {
 			case OPEN -> open(player, session, packet);
 			case CLOSE -> closePreview(session, packet.requestId());
@@ -2457,6 +2462,13 @@ public final class InventoryBackend implements AutoCloseable {
 		if (lease.bootstrap != null) lease.revision++;
 		publisher.cancel(old.context); lease.recipients.remove(player); addRecipient(lease, player, null);
 		@Nullable Recipient replacement = lease.recipients.get(player); if (replacement != null) replacement.resyncAt = next;
+	}
+	/** OPENED handoff is a temporary ordering gate, distinct from permanent context authorization. */
+	private boolean previewOpened(SyncPublisher.Context context) {
+		@Nullable Session session = sessions.get(context.recipient());
+		if (session == null) return false;
+		for (Preview preview : session.previews.values()) if (preview.context.equals(context)) return preview.parent.openedHandedOff;
+		return true; // Tracking has its independent known-marker and baseline gates.
 	}
 	private boolean publicationAllowed(SyncPublisher.Context context) {
 		if (closeRequested || deferredDisconnects.contains(context.recipient())) return false;

@@ -2035,11 +2035,11 @@ public final class ClientPingRuntime {
 					|| markerStore.isAuthoritativelyRemoved(packet.markerId())) return;
 				// The optional inventory sidecar must be installable before any
 				// presentation/name/main-marker or receipt effect. This admission is
-				// pure and does not require an already-known marker, so a freed slot
-				// can still admit a later first delivery. Ordinary markers admit
-				// without a new restriction.
+				// pure and credits metadata removed by the accepted create's stale
+				// sibling cleanup. Ordinary markers admit without a new restriction.
 				if (inventory != null && !inventory.admitsCreation(packet.snapshot(), packet.markerGrant(),
-					packet.content() == null ? null : packet.content().inventorySnapshot())) return;
+					packet.content() == null ? null : packet.content().inventorySnapshot(),
+					id -> packet.snapshot() != null && markerStore.isSupersededByCreation(id, packet.snapshot()))) return;
 				// presentation.initial validates the complete CREATED frame,
 				// frozen grant and receipt (including an inventory snapshot's
 				// accepted schema/kind/domain) before mutating any client store.

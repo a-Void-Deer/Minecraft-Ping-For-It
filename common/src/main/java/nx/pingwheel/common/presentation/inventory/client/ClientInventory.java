@@ -15,6 +15,7 @@ import java.util.Set;
 import java.util.HashSet;
 import java.util.function.Function;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.BlockFace;
@@ -414,6 +415,15 @@ public final class ClientInventory {
 	 */
 	public boolean admitsCreation(@Nullable MarkerSnapshot snapshot, @Nullable MarkerContentGrant content,
 		@Nullable InventoryCreationSnapshot creation) {
+		return admitsCreation(snapshot, content, creation, ignored -> false);
+	}
+	/**
+	 * Projects only metadata entries that the accepted create will supersede.
+	 * The predicate must be read-only; actual eviction remains with marker-store
+	 * commit after the complete CREATED has passed validation.
+	 */
+	public boolean admitsCreation(@Nullable MarkerSnapshot snapshot, @Nullable MarkerContentGrant content,
+		@Nullable InventoryCreationSnapshot creation, Predicate<MarkerId> superseded) {
 		if (content == null || content.trackingKind() == null) return true;
 		if (snapshot == null) return false;
 		InventoryResourceKind kind = content.trackingKind();
@@ -433,7 +443,14 @@ public final class ClientInventory {
 			|| !content.authorization().allowsField(
 				nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID, kind.fieldId()))
 			return false;
-		if (knownMarkers.size() >= MAX_TRACKED_CHANNELS) return false;
+		int retained = knownMarkers.size();
+		if (retained >= MAX_TRACKED_CHANNELS) {
+			// Iterate the bounded metadata map, not all retained marker visuals.
+			// Each real entry is credited once, never the incoming ID itself.
+			for (MarkerId id : knownMarkers.keySet())
+				if (!id.equals(snapshot.id()) && superseded.test(id)) retained--;
+			if (retained >= MAX_TRACKED_CHANNELS) return false;
+		}
 		@Nullable InventoryResourceKind existing = markerKinds.get(snapshot.id());
 		return existing == null || existing == kind;
 	}
