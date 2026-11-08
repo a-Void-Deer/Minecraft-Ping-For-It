@@ -1585,6 +1585,148 @@ recorded; they do not measure live CPU, GC, allocation rate, TPS or FPS. The
 `0d9f8411` binds those bytes without a rerun. It is not a clean-commit execution
 claim or a post-commit retest.
 
+### Inventory initial-admission and terminal-reset final verification
+
+Recorded execution date: 2026-11-08. This is the final acceptance run for the
+three Inventory regression fixes on branch `agent/perf-fix`. The tested input was
+a dirty combined working tree at HEAD
+`c124208ad265878e03da86f4ba68e705c9b9da01` (tree
+`98a99a9c980235304a4f3a143a0f17c58d44493c`), not a clean commit. Eight changed
+paths were present: seven Java production/test paths plus `inventory.md`; the
+index was empty. The 1,427 source/build inputs had manifest SHA-256
+`9741B4D62DFCAF8278BF71947E8D0224F78AB79F072108BAE82604BAE616D9E2`.
+All 1,515 tracked and non-ignored untracked repository files remained unchanged
+through the full, native and final-inspection phases. This documentation update
+is later than that input and is outside the source/build scope.
+
+After execution, commit `a610498608dd9ce18b898bf3a6dfb75cef96667e`
+(`fix: correct inventory admission and publication lifecycles`) on parent
+`c124208ad265878e03da86f4ba68e705c9b9da01` committed exactly the seven tested
+Java paths (four production and three test); documentation was not committed.
+All 1,427 post-commit source/build inputs remained byte-identical to the tested
+manifest, and the seven committed blobs are normalization-equivalent to the
+tested files. This is a byte-identity binding, not a clean-commit retest: the
+execution above remains `c124208` plus the dirty seven-code/one-doc input, and
+no Gradle or tests were rerun for the commit. `commit-report.md` and
+`commit-authorized.result.json` retain the commit evidence.
+
+`central-full-checks-1` did not reach a task: its evidence init evaluated
+`:common` against `buildSrc` and failed with `Project with path ':common' could
+not be found in project ':buildSrc'`. The sole harness correction added a
+root-project guard to both evidence hooks; no production or test source changed.
+`central-full-checks-2` is the acceptance invocation:
+
+```powershell
+$evidence = 'C:\Users\Void_Deer\AppData\Local\Temp\opencode\inventory-regressions-20261108\central-02'
+$env:JAVA_HOME = 'E:/scoop/apps/temurin21-jdk/current'
+$env:PATH = "$env:JAVA_HOME/bin;$env:PATH"
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+.\gradlew.bat ':common:check' ':common:javadoc' 'verifyModIdentity' '--continue' '--no-daemon' '--console=plain' '--init-script' "$evidence\force-fresh.gradle" '--init-script' "$evidence\full-evidence.init.gradle" 1> "$evidence\central-full-checks-2.stdout.log" 2> "$evidence\central-full-checks-2.stderr.log"
+```
+
+It exited 0 with `BUILD SUCCESSFUL` in 5m 58s: 53 actionable tasks, 29 executed
+and 24 `UP-TO-DATE`. All four ordinary Test tasks executed freshly with no test
+filters:
+
+| Module | Suites | Tests | Passed | Skipped |
+| --- | ---: | ---: | ---: | ---: |
+| Common | 541 | 5,900 | 5,898 | 2 |
+| Fabric | 12 | 99 | 99 | 0 |
+| Forge | 14 | 85 | 71 | 14 |
+| NeoForge | 66 | 443 | 443 | 0 |
+| Total | 633 | 6,527 | 6,511 | 16 |
+
+Every row has zero failures and errors; all 633 XML suites were fresh and none
+was reused. `InventoryTerminalPreviewResetTest` passed 5/5,
+`FluidIdentityAdmissionScalingTest` passed 5/5 and
+`InventoryProductionPolicyTest` passed 118/118 (99 prior, 15
+initial-admission and four removal/fan-out cases), all without skips.
+
+#### Native supplement and skip mapping
+
+The native supplement ran in two invocations: six tasks in `native-six-1` and the
+corrected Forge source task in `native-forge-source-1`. Seven tasks produced
+seven fresh XML suites and 21 successful scenario executions, with zero
+failures, errors or skips:
+
+| Task | Executions |
+| --- | ---: |
+| `:fabric:fluidSourceIntegration` | 2 |
+| `:neoforge:fluidSourceIntegration` | 2 |
+| `:forge:fluidSourceIntegration` | 2 |
+| `:forge:loggingFluidPresentationIntegration` | 2 |
+| `:forge:loggingNativeFluidAmountIntegration` | 5 |
+| `:forge:loggingFluidRegistryIntegration` | 7 |
+| `:forge:loggingNativeFluidRegistryFreezerIntegration` | 1 |
+| Total | 21 |
+
+Repeated common methods on distinct loader classpaths are scenario executions,
+not 21 unique new tests. Current workspace test classes were on each classpath,
+class hashes matched before and after, and no classpath entry was missing. The
+Forge patched-first source context moved its index from 6 to 0, preserved every
+other entry's relative order and used patched SHA-256
+`6CA6ADB420E93CDD2C4B3E39FD580EBCC6473FD10861CD79B674FB81E436DDEE`.
+The 16 ordinary skips remain 16 and are not converted to passes: two Common
+`InventoryFluidLoaderIntegrationTest` cases and 14 Forge vanilla-first
+native-fluid cases. `ordinary-skip-native-coverage.csv` maps every skipped method
+to its passing supplemental task.
+
+#### Build and artifact results
+
+All three loader builds, `:common:javadoc` and `verifyModIdentity` succeeded;
+mod version `0.5.0-pfi-beta2` and Minecraft 1.21.1 were unchanged. The executed
+check graph contains the four Test tasks plus Fabric `validateAccessWidener`
+(`UP-TO-DATE`); no standalone lint, formatter or static-analysis task is
+configured. Nine main/source/Javadoc jars were archived; the three shippable jars
+were:
+
+| Loader | Artifact | Bytes | SHA-256 |
+| --- | --- | ---: | --- |
+| Fabric | `Ping-For-It-0.5.0-pfi-beta2-fabric-1.21.1.jar` | 3,546,338 | `C1F890EDC11435DD163914DB44D02DAC33892BFBF5C3CD4FB4CEC9F55EA0A4A8` |
+| Forge | `Ping-For-It-0.5.0-pfi-beta2-forge-1.21.1.jar` | 3,497,667 | `79252C86341CCE50C0941FB7D8A7C779CAE235F97A61AE3C52B0347CEE790AD0` |
+| NeoForge | `Ping-For-It-0.5.0-pfi-beta2-neoforge-1.21.1.jar` | 3,804,036 | `06B2AD8E081D71476B91D7175E375570B31999D7353EFD1C02096AE649DE622C` |
+
+The run retained existing deprecated API/Gradle, mapping/processor and Javadoc
+warnings, and some tool-rendered diagnostics contained replacement characters
+despite UTF-8 settings; the raw logs preserve the output. No OOM, compile
+failure, test failure or heap/cap adjustment occurred.
+
+#### Superseded and focused evidence
+
+These runs are retained as history or prior-input owner evidence; they are not
+added to the central totals.
+
+| Run | Scope | Result |
+| --- | --- | --- |
+| `central-01` | Four module test-compilation tasks, then focused selectors | Compilation exited 0 for the four test-compilation tasks. The focused run executed 508 tests: 503 passed, four `InventoryTerminalPreviewResetTest` fixture failures and one known Forge vanilla-first skip. Its terminal fixture set the preview period to 20, above `InventoryLimits.MAX_PERIOD_TICKS`; it is a historical failed attempt, not acceptance. |
+| `terminal-focused-02` | Final terminal class, related selectors, negative/positive control | Final terminal class 5/5, related selectors 9/9, negative control 1 expected `INVALID`-versus-`INCOMPLETE` failure, restored positive control 1/1 pass. |
+| `suppressed-followup-03` | Callback-time removal negative control and final positive classes | Pre-guard 4 executions: canonical ITEM/FLUID 2 expected failures, sidecar-only ITEM/FLUID 2 passes. Post-guard five classes passed 140/140, including `InventoryProductionPolicyTest` 118/118. |
+
+Logs, XML, manifests, task graphs and artifact records for the central run are
+retained in the external
+`C:\Users\Void_Deer\AppData\Local\Temp\opencode\inventory-regressions-20261108\central-02`
+directory; the focused owner records are in the external
+`C:\Users\Void_Deer\AppData\Local\Temp\opencode\inventory-regressions-20261108\terminal-focused-02`
+and `C:\Users\Void_Deer\AppData\Local\Temp\opencode\suppressed-followup-03`
+directories. These local paths are reference text, not portable documentation
+links. The central directory retains `final-execution-ledger.md`,
+`final-summary.json`, `final.state.json`, `full-module-counts.json`,
+`regression-class-counts.csv`, `native-results.json`,
+`native-provenance-check.json`, `ordinary-skip-native-coverage.csv`,
+`full-task-graph.json` and `build-artifacts.json`.
+
+Coverage scope, including the seeded-Basic removal path and the statically
+reviewed alternative empty-source branch, is owned by
+[fluid inventory coverage](inventory.md#fluid-inventory-coverage),
+[creation snapshot server coverage](inventory.md#creation-snapshot-server-coverage)
+and [terminal Preview evidence](inventory.md#terminal-preview-evidence-and-active-demand).
+This record adds no live game, loader launch, multiplayer, rendering, heap, TPS,
+latency or manual gameplay evidence. The executor's documentation check covered
+71 files with zero broken links and `git diff --check` exited 0; the final
+coverage update was rechecked with the same command over 71 files and 1,611
+local links with zero broken links.
+
 ## Verification limitations
 
 The 2026-10-27 combined invocation's stderr was empty; stdout retained the Gradle 9

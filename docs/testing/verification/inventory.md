@@ -78,6 +78,24 @@ The matrix records automated coverage on that final input.
 | Sable membership and fluid-only transition | `ExternalBlockMembershipTest` and `SablePhysicalMembershipTest` cover positive/negative/unknown physical membership. `InventoryFluidWorldTest`, `InventoryFluidScopeFramesTest`, `InventoryFluidServerContextTest` and `ClientInventoryLanesTest` cover continuous scope-only `UPDATING` with retained quantity, fresh complete replacement, old-cut/seed/partial fencing, and real failure/expiry controls. Simultaneous scope/identity/layout change still invalidates. Installed Sable remains pending. |
 | Formal regression/build | Completed on the identified final input; exact execution and loader-native skip handling belong to the linked build record. |
 
+Outside that historical matrix, `FluidIdentityAdmissionScalingTest` adds five
+current-source cases. They compose the production common fluid source, the
+Fabric indexed provider adapter and the production runtime ledgers, with the
+native world, storage and block entity as fixtures: a 2,048-address sweep
+completes under the default pending-memory and operation budgets without
+replaying an address or restarting the source; the maximum legal address count
+advances one address per tick for three ticks without ownership exhaustion; a
+real runtime memory refusal before metadata or reads invokes no getter or count
+callback and later recovery reads the first address; an already-admitted
+metadata callback that lowers the remaining budget refuses the next source phase
+before a content getter; and a root replacement injected at the final count or
+underlying-view callback is rejected before the native getter and leaves no
+reservation. All five passed in the
+[final combined execution](build-checks.md#inventory-initial-admission-and-terminal-reset-final-verification).
+These are deterministic admission, cursor and ownership assertions from a
+Fabric test-source-set fixture; they are not heap measurements, throughput
+benchmarks, loader launches or evidence for every native or mod provider.
+
 ### Native fluid boundary regressions
 
 The following regressions passed on the
@@ -1663,6 +1681,22 @@ These additions passed the focused and full Java 21 executions recorded in the
 which also built all three loaders. They add no live UI, window, provider-launch
 or multiplayer evidence.
 
+`InventoryTerminalPreviewResetTest` adds five current-source cases for a terminal
+Preview control across same-epoch presentation rebuilds. They cover
+transport-deferred `INVALID` through two resets and a normal-tick retry, a real
+byte-budget defer with retry when the next period reopens, retained-memory
+context-registration refusal through two resets and recovery to a current-view
+`INVALID`, close-before-handoff retirement, and a non-terminal completed Preview
+that keeps its closed value and selectable row. The transport, byte-budget and
+registration retries assert no new source read or validation, and the
+registration case uses the real `RetainedMemoryLedger` and records its real
+projection `MEMORY` delay. All five
+passed in the
+[final combined execution](build-checks.md#inventory-initial-admission-and-terminal-reset-final-verification).
+Related Backend, lifecycle, reconfiguration and client-inventory coverage
+belongs to the same boundary and execution record. These are headless backend,
+publisher, wire and client-session assertions, not a live client UI run.
+
 ### Recipientless Tracking and successor continuity
 
 Historical evidence note: these successor and permission-suspension cases
@@ -2244,6 +2278,39 @@ Named review-fix cases include `sourceCallbackCannotLeakRevokedBasicCustomName`,
 `deferredKnownRefreshCoalescesToLatestCanonicalLocatorAndAnchor` and
 `successfulOlderHandoffCannotClearAReentrantNewerMetadataRefresh`.
 
+`InventoryProductionPolicyTest` adds four parameterized current-source methods
+(15 cases) for the frozen initial boundary.
+`frozenDeniedInitialCannotBypassPublicationAdmission` covers ITEM and FLUID
+memory, detached operation-work and initial-staging refusal without a `CREATED`
+send, a session revision advance or a known-record advance; recovery admits the
+payload-free suppressed initial for the denied recipient while the owner keeps
+its source-backed snapshot, and the later permission change does not widen the
+frozen denial. `suppressedInitialPaysItsEncodedEnvelopeWithoutSourceValidationOrContentReads`
+checks both lanes' exact encoded-body and workspace charges through handoff,
+with no extra source validation or content read and no staging retained after
+the owner publishes. `suppressedInitialRechecksCanonicalLifecycleAfterEncodingAndReleasesAdmission`
+covers audience, expiry, view, removal and disconnect changes after encoding and
+releases staging and admission.
+`lateReadyFrozenDeniedAudienceNeedsAdmissionAndDisconnectCannotRestoreIt`
+checks both lanes' first late-recipient and cached-metadata refreshes still pay
+admission, and a true disconnect cannot restore the receipt.
+
+Two further ITEM/FLUID methods add four cases for callback-time removal during
+the first suppressed encoding.
+`canonicalRemovalDuringSuppressedInitialCannotResurrectRemainingAudience`
+removes the real canonical marker and backend sidecar after that encoding: no
+later owner or remaining peer receives a `CREATED`, their session revisions and
+known records do not advance, and staging, reservation and publishing ownership
+are released. `sidecarOnlyRemovalDuringSuppressedInitialPreservesRemainingAudienceFallback`
+removes only the backend sidecar and keeps the current fan-out's ordinary
+fallback for the remaining audience. These cases exercise the seeded-Basic
+fan-out path; the alternative `sourceSeeds.isEmpty()` path was reviewed
+statically for the same canonical-audience guard but is not independently
+exercised dynamically, so this coverage does not generalize to every real
+audience or source combination. The class's 118 cases (99 prior plus 19 new:
+15 initial-admission and four removal/fan-out cases) passed in the
+[final combined execution](build-checks.md#inventory-initial-admission-and-terminal-reset-final-verification).
+
 `InventoryAuthorityOrderTest` covers committed Preview evidence and annotation
 before storage without a content witness, receipt-binding metadata revalidation
 that pays failed metadata without reading contents, and publication failure that
@@ -2252,14 +2319,14 @@ memory defer as retryable while unavailable, unsafe, empty and bounded
 continuation outcomes are not delayed, including expiry, revocation and eligible
 counterpart pressure.
 
-These are headless owner executions. The current-input combined execution and
-artifact checks are recorded in
-[build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
+These are headless owner executions. The combined execution and artifact checks
+for the current-source admission and lifecycle additions above are recorded in
+[build checks](build-checks.md#inventory-initial-admission-and-terminal-reset-final-verification);
+the earlier creation-snapshot cases remain in the
+[provider-trust final verification](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
 Cross-boundary client chat and transport coverage is in
 [presentation verification](presentation.md#immediate-inventory-creation-snapshot-coverage).
 
-Execution results are recorded in the
-[final combined build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
 These headless tests and builds do not establish live Create/Refined Storage
 behavior, the cause of the reported Vault import/export failure,
 live multiplayer, GPU rendering
