@@ -63,7 +63,7 @@ Numbers use JSON numeric form. Units are stated where meaningful.
 | `directionIndicatorVisible` | boolean | Whether the off-screen direction indicator is visible. |
 | `pingSize` | number | Local visual scale for marker and direction-indicator presentation. |
 | `configurationNoticeSize` | number | Local visual size for target-selection toggle notices. |
-| `markerDisplayDuration` | number | Local marker-display-duration preference. Serialized `0` means each marker follows its frozen server-side duration, rather than a literal zero-duration display; [client marker state](../architecture/markers/client-state.md) owns the resulting state behavior. |
+| `markerDisplayDuration` | integer, seconds | Local marker-display-duration preference. A nonzero value is the local display duration in seconds; serialized `0` means each marker follows its frozen server-side duration, rather than a literal zero-duration display. [Client marker state](../architecture/markers/client-state.md) owns the resulting state behavior. |
 | `raycastDistance` | number | Native local raycast cap; [range](../architecture/picking/range.md) owns capture-range composition. Its current screen exposure is owned by the [configuration UI](../UI/settings-screen.md). |
 
 ### Press, wheel, and cancellation interaction

@@ -379,6 +379,18 @@ provider reference or tracking state and resolves no marker group key. The
 request identity scopes preview state and publication within the inventory
 session; quota accounting is owned by [Budgets, queues and memory](#budgets-queues-and-memory).
 
+A retained Preview request keeps its logical request identity, lanes, and any
+pending terminal status across a same-epoch presentation view rebuild. Waiting
+for the rebuilt view's replacement `OPENED` grant is temporary and preserves
+that request and status, not an old publication context: publication is
+re-established for the rebuilt view and baseline, and earlier fences are
+retired. The rebuild does not permanently revoke the request. No `PREVIEW` frame
+for that request, including the terminal `INVALID` status, is handed off until
+the replacement `OPENED` grant has successfully handed off. Cancellation and a
+true presentation epoch change keep their existing release boundaries and are
+not extended by this retention rule; cancellation remains owned by
+[network protocol](../network/protocol.md#inventory-previewtracking-route-inventory-v2).
+
 The preview-to-tracking handoff follows the existing create authority first:
 the server materializes an external candidate once, then binds the preview's
 original input to the committed target through both current provider-confirmed
@@ -629,11 +641,9 @@ detached snapshot keeps its captured contents.
 
 Apart from the selected-preview bootstrap above, only a complete scan produces
 a normal valid quantity update. One logical batch may span several periods and
-may contain more entries than one fragment
-carries; it must not rescan the inventory once per fragment. Stream updates are
-revisioned per item key, so a late item for one key is not discarded by a
-packet-global revision for another key. A key that has not been received stays
-unchanged.
+may contain more entries than one fragment carries; it must not rescan the
+inventory once per fragment. Per-key revision and sparse updates follow
+[sync publication](shared_sources.md#sync-publication).
 
 A selected item that is absent from a complete, successful, authoritative scan
 is reported as zero even when the container holds other items; an empty
@@ -668,16 +678,13 @@ Scheduling must prevent unbounded restart or starvation against a stable,
 serviceable source, but completion is not guaranteed under sustained overload
 or insufficient bandwidth.
 
-Baseline assembly is bounded. A temporarily displayed value does not mean the
-baseline is complete, and a per-item stream is applied item by item rather than
-as one atomic batch. Checksums are computed over the recipient's selected
-projection under its frozen content authorization, its identity mode, and
-explicit zeros; offered and delivered or transmitted watermarks are distinct,
-and a checksum must not
-compare partial fragments with a future state. A gap or mismatch schedules a
-snapshot repair under the cooldown and waiting rules above. Writing an update into the send queue is not proof
-that the client applied it, and a mismatch alone does not justify a TCP-loss
-conclusion.
+Baseline assembly is bounded. Checksums are computed over the recipient's
+selected projection under its frozen content authorization, its identity mode,
+and explicit zeros; a checksum must not compare partial fragments with a future
+state. A gap or mismatch schedules a snapshot repair under the cooldown and
+waiting rules above; a mismatch alone does not justify a TCP-loss conclusion.
+Baseline fragmentation, item-by-item application and offered-versus-delivered
+watermarks follow [sync publication](shared_sources.md#sync-publication).
 
 ### Publication authority and progress
 
@@ -1150,6 +1157,8 @@ frequency with the reason and the source context.
 
 ## Budgets, queues and memory
 
+### Quota scopes and size ceilings
+
 Preview and tracking keep separate period, byte, slot and quota accounting, and
 the server keeps a shared source-scan allowance plus per-recipient wire-byte
 accounting. Quota identity is preview-client for preview and target for
@@ -1225,6 +1234,8 @@ current status width, not a provisional single-part size. An indivisible entry
 that cannot fit is dropped whole with explicit incompleteness rather than left
 permanently pending; other entries still obey their normal delivery budgets.
 
+### Scan, validation and admission
+
 The shared scan allowance is configurable and measured in slots. Native
 incremental reads charge actual live slot visits, including empty and throwing
 attempts, together with their admitted item-processing work; budgeting only a
@@ -1278,6 +1289,8 @@ the finite internal work and memory guard and both logical quotas survive, and
 unlimited is never implemented as a sentinel, integer overflow, unbounded array,
 or unbounded work loop.
 
+### Retained memory and creation state
+
 Pending memory is one server-wide bound covering preview and tracking together,
 with a finite configurable value or explicit unlimited mode. Unlimited mode uses
 a finite internal memory guard. It is not a per-queue bound, and every finite
@@ -1303,6 +1316,8 @@ fan-out and staging capacity. It enters neither the Preview send queue nor the
 Tracking baseline, and it carries no guarantee that every recipient receives
 the initial in the same tick. Insufficient admission may reject the create or
 leave bounded retry work; it is not an authorization denial.
+
+### Source metadata and validation accounting
 
 Owned source metadata, including frozen views, member layouts and slot mappings,
 has a retained charge separate from fixed round state. Discovery admission holds
@@ -1342,6 +1357,8 @@ and [Create fluid tank](../../integrations/create.md#fluid-tank-inventory-provid
 generic audited-operation semantics by
 [shared sources](shared_sources.md#source-access); generic certified chests,
 legacy and external reads retain their previous path.
+
+### Scratch, journals and retained capacity
 
 Item processing keeps effect-copy descriptors and encoding-planner scratch local
 to one root, allocating each group only when used. Descriptor ranges preserve
@@ -1383,6 +1400,8 @@ Slot capacity and catalogue variant/payload capacity are independent
 finite guards: admitting a large repeated-item inventory does not promise the
 same slot count of arbitrary distinct variants. Capacity exhaustion is explicit
 incompleteness, never a completed total or an absence-derived zero.
+
+### Wire, queue and delivery accounting
 
 Global wire accounting uses excess smoothing. With a period
 base `B`, actual sends `s_i` in a period, and excess

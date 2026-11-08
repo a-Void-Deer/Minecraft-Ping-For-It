@@ -391,61 +391,66 @@ and hover mode owns Back instead of retracing. Each
 pushed level exposes the radial entry choice that opened it, the root and an
 externally pushed menu expose none, and an ancestor keeps its original entry
 edge.
-The same model owns the viewport projection: the logical pointer is clamped to
-the inclusive GUI pixel centers of the current viewport under the frame's rigid
-translation, including every edge and corner and fractional pan offsets, while
-raw finite input saturates without overflow. Only effective movement counts:
-outward input spent at the boundary adds no overshoot debt, trail point or
-timer progress, a reversal moves the pointer at once, and non-finite deltas
-leave radial and external state untouched. The root-floor case protects
-pending dwell; separately, a resize or pan correction cannot complete pending
-dwell or enter a branch. A non-root held-Back regression confirms that
-projection-only leave/re-entry and saturated zero-effective movement cannot
-re-arm an already-fired held Back, while effective physical leave/re-entry and
-qualified-turn movement preserve legitimate rearming. Rebase, start, end and
-Back snapshots stay inside the published viewport. The programmatic
-circumference placement is still covered as its own seam: the
-placed pointer keeps the frozen inclusive-deadzone radius and admits no focus,
-a stationary release abandons, the reconstructed absolute point stays inside
-the same inclusive deadzone predicate including at nonzero and mirrored
-origins, an unreachable placement stays pending without travel, trail growth or
-timer progress until the projection can show it, resolution pays no fresh
-stroke by itself, a partial new stroke cannot pay the pop's fresh-stroke
-requirement while a full stroke plus dwell re-enters, a fresh effective
-physical movement cancels a pending placement instead of chasing it, and
-resolution or projection cannot re-arm an already-fired held Back or append a
-joining stroke while a deliberate physical leave and re-entry still arms one
-return. User returns replace that placement on every path (explicit Back,
-retrace, dwell, qualified turn, and hover) by admitting the trigger's confined
-pointer and rigidly translating the returned parent's origin and every other
-retained menu origin and parent/row anchor so the returned parent's centre
-lands on the pointer, which itself stays at the trigger; exactly one level is
-removed, retained parent-child vectors and entry choices survive, a nested
-return translates all ancestors and an independent row anchor, a zero-distance
-alignment still reports one cumulative user-return notification, and a
-stationary release on the returned centre abandons even when the old root
-direction was an action. The return seeds exactly one trail point with an
-advanced epoch and clears stale focus. A programmatic return keeps the old
-placement and focus and reports no notification, root pruning preserves an
-already-translated placement, a user return discards a stale pending placement
-before projection can resolve it, and only a new start resets the cumulative
-notification. Incremental one-pixel reverse samples return exactly one level
-at a non-root parent and cannot cascade without that level's own full reverse
-distance. External relayout is also covered: it restarts a pending hover dwell
-and a hover-disabled Back dwell at the new geometry without pointer, trail or
-timer movement or an immediate pop, leaves an unchanged placement's running
-deadline intact, re-evaluates focus without supplying branch travel, clears a
-stale turn corner, cannot pay a return's fresh stroke while preserving real
-partial travel, is inert for an inactive root or ordinary radial menu, and
-preserves the shared held-Back block.
-That model also exposes the renderer-facing sample identity that separates
-effective input from projection and navigation: only effective pointer movement
-advances the sample sequence, a saturated callback is not a sample, a projection
-or resize correction advances a separate alignment identity and fences the
-sequence without adding a trail point or a synthetic stroke, an explicit rebase
-changes the discontinuity identity even at coincident coordinates, and entering
-or returning from an external menu starts a fresh identity. The frozen per-hold
-bound caps the published trail.
+The same model owns the viewport projection:
+
+- **Viewport confinement.** The logical pointer is clamped to the inclusive GUI
+  pixel centers of the current viewport under the frame's rigid translation,
+  including every edge and corner and fractional pan offsets, while raw finite
+  input saturates without overflow. Only effective movement counts: outward
+  input spent at the boundary adds no overshoot debt, trail point or timer
+  progress, a reversal moves the pointer at once, and non-finite deltas leave
+  radial and external state untouched. The root-floor case protects pending
+  dwell; separately, a resize or pan correction cannot complete pending dwell or
+  enter a branch. A non-root held-Back regression confirms that projection-only
+  leave/re-entry and saturated zero-effective movement cannot re-arm an
+  already-fired held Back, while effective physical leave/re-entry and
+  qualified-turn movement preserve legitimate rearming. Rebase, start, end and
+  Back snapshots stay inside the published viewport.
+- **Programmatic circumference placement.** This remains its own seam: the
+  placed pointer keeps the frozen inclusive-deadzone radius and admits no focus,
+  a stationary release abandons, the reconstructed absolute point stays inside
+  the same inclusive deadzone predicate including at nonzero and mirrored
+  origins, an unreachable placement stays pending without travel, trail growth
+  or timer progress until the projection can show it, resolution pays no fresh
+  stroke by itself, a partial new stroke cannot pay the pop's fresh-stroke
+  requirement while a full stroke plus dwell re-enters, a fresh effective
+  physical movement cancels a pending placement instead of chasing it, and
+  resolution or projection cannot re-arm an already-fired held Back or append a
+  joining stroke while a deliberate physical leave and re-entry still arms one
+  return.
+- **User returns.** User returns replace that placement on every path (explicit
+  Back, retrace, dwell, qualified turn, and hover) by admitting the trigger's
+  confined pointer and rigidly translating the returned parent's origin and
+  every other retained menu origin and parent/row anchor so the returned
+  parent's centre lands on the pointer, which itself stays at the trigger;
+  exactly one level is removed, retained parent-child vectors and entry choices
+  survive, a nested return translates all ancestors and an independent row
+  anchor, a zero-distance alignment still reports one cumulative user-return
+  notification, and a stationary release on the returned centre abandons even
+  when the old root direction was an action. The return seeds exactly one trail
+  point with an advanced epoch and clears stale focus. A programmatic return
+  keeps the old placement and focus and reports no notification, root pruning
+  preserves an already-translated placement, a user return discards a stale
+  pending placement before projection can resolve it, and only a new start
+  resets the cumulative notification. Incremental one-pixel reverse samples
+  return exactly one level at a non-root parent and cannot cascade without that
+  level's own full reverse distance.
+- **External relayout.** It restarts a pending hover dwell and a hover-disabled
+  Back dwell at the new geometry without pointer, trail or timer movement or an
+  immediate pop, leaves an unchanged placement's running deadline intact,
+  re-evaluates focus without supplying branch travel, clears a stale turn corner,
+  cannot pay a return's fresh stroke while preserving real partial travel, is
+  inert for an inactive root or ordinary radial menu, and preserves the shared
+  held-Back block.
+- **Renderer-facing sample identity.** The sample identity separates effective
+  input from projection and navigation: only effective pointer movement advances
+  the sample sequence, a saturated callback is not a sample, a projection or
+  resize correction advances a separate alignment identity and fences the
+  sequence without adding a trail point or a synthetic stroke, an explicit
+  rebase changes the discontinuity identity even at coincident coordinates, and
+  entering or returning from an external menu starts a fresh identity. The
+  frozen per-hold bound caps the published trail.
+
 It is a standalone model seam: no native screen, renderer, input callback,
 configuration, or world-candidate source is exercised.
 

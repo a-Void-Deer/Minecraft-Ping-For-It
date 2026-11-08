@@ -1370,9 +1370,10 @@ publication reuse and their test changes remained uncommitted, together with the
 pre-existing documentation changes. After execution, commit
 `0d9f841116e3789ac224cc1393c6990b0f01cb33` on parent
 `0301adb625b3148839929340b5c30b9dae05302b` committed the identical 14 Java
-paths (seven production and seven test). The recorded result remains the
-execution at HEAD `0301adb` plus the working hashes below; it is not renamed a
-clean-`0d9f8411` run and was not retested after the commit.
+paths (seven production and seven test); no Gradle or tests were rerun for that
+commit. The recorded result remains the execution at HEAD `0301adb` plus the
+working hashes below, and the external evidence below binds those bytes to
+`0d9f8411` without making this a clean-commit execution or retest.
 
 The tested source/build input manifest SHA-256 was
 `4E93DC0302B0AC883A80D2355DAEC6CC50B863D2E845AAE661B0A76D3DD023D9`
@@ -1388,7 +1389,7 @@ untracked-only manifest and the tracked diff alone does not identify the
 untracked bytes. HEAD, the tracked diff and both manifests were identical before
 and after every recorded invocation and at final inspection.
 
-The external `item-final-commit.evidence.json` binds this tested state to commit
+The external `item-final-commit.evidence.json` records commit
 `0d9f841116e3789ac224cc1393c6990b0f01cb33` (tree
 `b1bbe37c0f41ff335b800c002557ddc7d684a754`, parent `0301adb`), which contains
 exactly those 14 Java paths: seven production and seven test. All 1,425 raw
@@ -1398,9 +1399,7 @@ match the tested tree; the nine archived loader main/source/Javadoc artifacts,
 including the three shippable jars, retained their SHA-256 and `archiveMatches`;
 and the protected build/configuration/network/resource files, mod version
 `0.5.0-pfi-beta2`, Minecraft 1.21.1 and the inventory/presentation protocol
-version-2 values were unchanged. The commit agent ran no Gradle or tests. This
-is a byte-identity binding to the prior execution, not a clean-commit execution
-claim or a retest.
+version-2 values were unchanged.
 
 All 1,425 source/build paths match the owner's passing
 `policy-lifecycle-repair-01/run4-full` input manifest byte-for-byte
@@ -1432,15 +1431,14 @@ result set, but only Common and NeoForge executed freshly in this invocation:
 | Total | 631 | 6,498 | 6,482 | 16 | Zero failures and zero errors. |
 
 The reused Fabric/Forge XML is byte-identical to the archived `run4-full`
-reports, and the compared source/build inputs are unchanged; this is explicitly
-reuse, not a second fresh execution and not an "all tests freshly ran" claim.
+reports, and the compared source/build inputs are unchanged.
 The 16 skips are the same normal-matrix fluid-classpath cases as the
 [D0019 record above](#provider-trust-and-frozen-authorization-final-verification):
 two Common `InventoryFluidLoaderIntegrationTest` cases and 14 Forge
 patched-first native-fluid cases. They are not ITEM wrapper cases; the ITEM
 wrapper and regression cases ran without skips in this suite. The old fluid
 native-classpath supplemental harness was not rerun because the ITEM change does
-not affect those fluid classpaths; this is not an unavailable-tool claim.
+not affect those fluid classpaths.
 
 `common:check`, `common:javadoc`, all three loader `build`, `javadoc` and
 packaging tasks, Fabric remapping and `verifyModIdentity` succeeded. Version and
@@ -1464,17 +1462,11 @@ warnings; it is not warning-clean evidence.
 #### Delivered ITEM scope
 
 - **P1 on-demand lane-policy hint.** `InventoryPolicyFrozenDemandRegressionTest`
-  passed 3/3. Steady frozen Preview/Tracking ticks perform zero permission
-  callbacks for the two Inventory fields while SECTION-mask callbacks and live
-  quantity/source reads continue; an internal provider-state flip leaves the
-  cached hint stale but a new `OPEN` and create resolve current authority; an
-  explicit provider replacement refreshes the queued hint once and budget
-  retries do not re-evaluate it. An accepted Preview and existing Ping keep
-  their original grants while the next `OPEN`/`SELECT` uses the fresh result.
-  `InventoryProductionPolicyTest` passed 99/99, including the first-HELLO
-  OFFER-before-POLICY initial hint, deferred-offer/data gate, transport-failure
-  retry, queued-owner retention across retry/reconfiguration/view/epoch
-  boundaries, provider-callback refresh and session-replacement/token cases.
+  passed 3/3 and `InventoryProductionPolicyTest` passed 99/99. The execution
+  covered accepted Preview and existing Ping grant retention with fresh later
+  `OPEN`/`SELECT` resolution; the detailed authority, retry and ownership
+  assertions are owned by
+  [lane policy hint refresh verification](inventory.md#lane-policy-hint-refresh-verification).
   These are authority and ownership assertions, not allocation measurements.
 - **P3 certified chest mapping; P2 withdrawn.** `CertifiedChestFrozenMappingTest`
   passed 7/7 and the common/Fabric/Forge/NeoForge resident-scope and actual
@@ -1492,18 +1484,10 @@ warnings; it is not warning-clean evidence.
 - **P4 immutable publication work reuse.** `CutWorkReuseTest` passed 3/3,
   `InventoryChecksumsTest` passed 7/7, `InventorySyncPublisherTest` passed 52/52
   and `InventoryFanoutEncodingReuseTest` passed 3/3. FNV-1a checksum bytes and
-  the v2 wire format are unchanged. A multipart admitted cut computes its digest
-  once and every part reuses it; a newer offer cannot rewrite that digest and a
-  retry adds no admission traversal. Delivery computes one separate delivered
-  digest and heartbeat reuses it, and withdrawal/rebase cannot carry an old
-  checksum into a fresh cut. Within one publication operation, identical
-  recipient projections encode once while each recipient retains its own proof,
-  admission and current checks; distinct fold projections use separate
-  encodings. The provisional seed and completed cut are distinct publication
-  operations, and each fan-out observation is taken after its own publication
-  rather than merging the two into one tick. The shared bytes do not substitute
-  for a blocked recipient's proof or delivery admission. No N-times or
-  end-to-end allocation gain is claimed.
+  the v2 wire format are unchanged. The checksum, retry, delivery and fan-out
+  assertion scope is owned by
+  [immutable publication work reuse verification](inventory.md#immutable-publication-work-reuse-verification);
+  no N-times or end-to-end allocation gain is claimed.
 
 Full command lines, logs, JUnit XML/HTML, manifests, failure stacks, archive
 hashes and the complete attempt history are retained in the external
@@ -1581,9 +1565,7 @@ Create/Sable provider, GPU/font/UI output, manual gameplay or live
 CPU/TPS/GC/allocation/FPS measurement was performed. The headless
 `ThreadMXBean` allocation observations and scoped macro comparison above remain
 recorded; they do not measure live CPU, GC, allocation rate, TPS or FPS. The
-6,498-test final result applies to the tested working-tree bytes; commit
-`0d9f8411` binds those bytes without a rerun. It is not a clean-commit execution
-claim or a post-commit retest.
+6,498-test final result applies to the tested working-tree bytes.
 
 ### Inventory initial-admission and terminal-reset final verification
 
@@ -1709,8 +1691,7 @@ retained in the external
 directory; the focused owner records are in the external
 `C:\Users\Void_Deer\AppData\Local\Temp\opencode\inventory-regressions-20261108\terminal-focused-02`
 and `C:\Users\Void_Deer\AppData\Local\Temp\opencode\suppressed-followup-03`
-directories. These local paths are reference text, not portable documentation
-links. The central directory retains `final-execution-ledger.md`,
+directories. The central directory retains `final-execution-ledger.md`,
 `final-summary.json`, `final.state.json`, `full-module-counts.json`,
 `regression-class-counts.csv`, `native-results.json`,
 `native-provenance-check.json`, `ordinary-skip-native-coverage.csv`,
@@ -1727,6 +1708,115 @@ latency or manual gameplay evidence. The executor's documentation check covered
 coverage update was rechecked with the same command over 71 files and 1,611
 local links with zero broken links.
 
+### Inventory reset regression final verification
+
+Recorded execution date: 2026-11-08. This is the final acceptance run for the
+Preview cancellation/`OPENED` reset boundary and client creation-admission
+regressions on branch `agent/perf-fix`. The tested input was a dirty combined
+working tree at HEAD `658235a5f3a8323a18a2f006a54df1d1781dd6fa` (tree
+`fd65ecd28165f1416bd0263a84ee1cd0d1efe799`), not a clean commit. The final 1,429
+source/test/resource/build inputs had manifest SHA-256
+`67FF8699F7669F5FC95B1082C3AFBFE5A1AFA7ACBF5D1F140B2FD229A48BF2C8`; the two new
+test files were untracked, the index was empty, and the six task files matched
+their external final backups byte for byte. Thirty pre-existing dirty
+documentation/discipline paths remained outside that source/build scope. Two
+authorized topic-document edits occurred during the final runs and did not change
+the frozen source/build manifest. The recorded executor made no source, test,
+build or documentation edit and did not stage, commit or push; only the
+authorized minimal control hunks were temporarily patched and restored.
+
+After execution, commit `02ec9aafd1178cae664d1ca2414b96b9adb4726f` (tree
+`1fd98d26a3db3b648dda6a3ef7aeab167f35cf92`) on parent
+`658235a5f3a8323a18a2f006a54df1d1781dd6fa` with subject
+`fix: preserve preview reset lifecycle and stale replacement admission`
+committed exactly the six Java paths: four production and two test. Only those
+six paths were committed; documentation, build metadata, version and evidence
+files were not staged, and no push occurred. The accepted Gradle runs remain the
+old HEAD plus the dirty six-file worktree, not a clean-commit retest. Before
+staging, after staging and after commit, all 1,429 input hashes and all nine
+recorded jar hashes were unchanged, and each worktree blob equalled its committed
+HEAD blob. No Gradle command or test rerun was made for the commit.
+`central-03/commit-report.md` records this binding.
+
+Earlier phases and expected-failure controls are retained as history and are
+not added to the final totals:
+
+| Phase | Result |
+| --- | --- |
+| `central-01` four-module test compilation | Exit 0 on the earlier input; 24 actionable tasks, eight executed and 16 up-to-date; all four `compileTestJava` tasks succeeded and all four main compilations executed; no tests ran. |
+| `central-01` focused | Exit 1; 73 executions, 72 passed, one fixture-precondition failure and zero skips. |
+| `server-focused-02` exact | Exit 0; 1/1. |
+| `server-focused-02` regression-eight | Exit 0; 8/8, the new server class 3/3 and existing terminal class 5/5. |
+| `central-02` negative-A | Exit 1; strict view equality left the request unreleased, matching the intended `CLOSE` control. |
+| `central-02` negative-B | Exit 1; an earlier 256-versus-257 frame count, not certified as `OPENED`-ordering evidence. |
+| `central-03` negative-B | Exit 1; terminal `INVALID` before replacement `OPENED`, matching the intended ordering control. |
+| `central-03` negative-C | Exit 1; the false parameter missed the expected marker admission while the true parameter passed. |
+| `central-03` positive | Exit 0; 21/21 across the new server, new client and existing terminal classes. |
+
+The initial focused failure was a fixture precondition: a below-minimum
+physical-slot setting normalized to the legal minimum, so the Preview completed
+before its idle-health period and terminal invalidity was not due at the original
+tick. The corrected fixture used the legal minimum, spent the legal budget with
+real `HELLO` traffic, and required an actual due health validation before the
+reset assertions. Negative A was not rerun; its failure remains historical
+evidence for the strict-view control, while the final positive/full runs
+exercise the fixed current input. Each temporary control hunk was restored by
+its inverse before the next phase; every restore rechecked all 1,429 final input
+hashes. Expected control failures are not final-test failures.
+
+The restored positive invocation selected `InventoryPreviewResetLifecycleTest`,
+`ClientInventoryCreationCapacityTest` and `InventoryTerminalPreviewResetTest`:
+three suites, 21 executions, all passed, zero skips. The final unfiltered
+four-module invocation was:
+
+```powershell
+.\gradlew.bat ':common:cleanTest' ':common:check' ':common:javadoc' 'verifyModIdentity' '--init-script' 'C:/Users/Void_Deer/AppData/Local/Temp/opencode/inventory-reset-regressions-20261108/central-03/full.init.gradle' '--continue' '--no-daemon' '--console=plain'
+```
+
+It exited 0 with `BUILD SUCCESSFUL` in 5m 7s: 54 actionable tasks, 25 executed
+and 29 up-to-date. All four ordinary Test tasks ran freshly with empty include,
+exclude and command-line filter sets. Counts:
+
+| Module | Suites | Tests | Passed | Failed/errors | Skipped |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Common | 543 | 5,916 | 5,914 | 0 | 2 |
+| Fabric | 12 | 99 | 99 | 0 | 0 |
+| Forge | 14 | 85 | 71 | 0 | 14 |
+| NeoForge | 66 | 443 | 443 | 0 | 0 |
+| Total | 635 | 6,543 | 6,527 | 0 | 16 |
+
+`InventoryPreviewResetLifecycleTest` passed 3/3,
+`ClientInventoryCreationCapacityTest` 13/13 and
+`InventoryTerminalPreviewResetTest` 5/5, all without skips. All 39 previously
+planned selectors were present in the unfiltered output and expanded to 51
+passing executions; no focused rerun substitutes for the full result.
+
+All four Javadoc tasks, all three loader builds, Fabric remapping and
+`verifyModIdentity` executed and passed; nine main/source/Javadoc jars were
+archived. Mod version `0.5.0-pfi-beta2`, Minecraft 1.21.1 and the route versions
+were unchanged. Main and test compilation tasks were `UP-TO-DATE` in the full
+run; this is reused compilation, not a fresh-recompile claim. The earlier
+four-module compilation covers its historical input.
+
+The 16 ordinary skips are the unchanged native-classpath limitation: two Common
+`InventoryFluidLoaderIntegrationTest` cases and 14 Forge fluid-presentation,
+amount, registry and freezer cases. No native-fluid supplement ran because those
+adapters and profiles were unchanged; historical native passes are not claimed
+as current same-run coverage. No separate lint, formatter or static-analysis task
+is configured. The timeout proposal remained read-only and no timeout test ran.
+No live game, loader launch, dedicated server, manual interaction, rendering,
+multiplayer, heap/TPS/latency or other performance evidence was produced.
+Documentation changes during the runs are outside the source/build scope; any
+later source/test/build edit invalidates this input-specific record.
+
+The complete command ledger, logs, module/new-class/skip/artifact summaries,
+task graph, filter audit and negative-control records are retained at
+`C:\Users\Void_Deer\AppData\Local\Temp\opencode\inventory-reset-regressions-20261108\central-03`;
+the earlier phases are under the sibling `central-01`, `server-focused-02` and
+`central-02` directories. Coverage scope is owned by
+[terminal Preview evidence](inventory.md#terminal-preview-evidence-and-active-demand)
+and [client creation admission capacity](inventory.md#client-creation-admission-capacity).
+
 ## Verification limitations
 
 The 2026-10-27 combined invocation's stderr was empty; stdout retained the Gradle 9
@@ -1742,7 +1832,7 @@ Passing headless tests, builds and artifact-identity checks do not establish
 live loader registration, installed-provider or Create/Refined Storage behavior,
 native screen rendering, multiplayer transport, UI review completion or game
 performance. The isolated real-jar probe retains its own input and construction
-limits in [inventory verification](inventory.md#patch-only-identity-and-display-verification-pending).
+limits in [inventory verification](inventory.md#patch-only-identity-and-display-coverage-and-live-gaps).
 The scoped allocation comparison does not measure live CPU, GC, allocation rate,
 heap retention or TPS, and automated results do not supply missing independent
 scratch-bound review evidence. These limits and the separate named-host Mixin

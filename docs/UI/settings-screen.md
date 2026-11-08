@@ -398,17 +398,17 @@ and [security](../architecture/security.md) own.
 
 The draft begins when an editable authoritative snapshot is accepted. Controls
 are inert unless `canEdit` holds. Each control recomputes dirty bits against the
-authoritative snapshot. The original numeric fields must parse as non-negative
-integers; inventory booleans use their two toggle states, while each numeric
-inventory leaf validates under its own kind, bounds and,
-for decimal settings, exact grid and size-pair constraints. An empty, malformed
-or out-of-range draft, or a decimal draft outside its exact grid, remains dirty
-but makes the update plan unavailable; an in-range integer between UI-only
-adjustment stops is valid and retained exactly. A draft that returns every
-edited value to its authoritative value has no dirty bits and produces no
-update plan. Thus no-change and invalid-draft states do not dispatch a settings
-update merely because a page is open. The field-masked merge and the
-no-update-result consequence are owned by
+authoritative snapshot. The Regeneration Time, Rate Limit, and Sync Duration
+fields must parse as non-negative integers; inventory booleans use their two
+toggle states, while each numeric inventory leaf validates under its own kind,
+bounds and, for decimal settings, exact grid and size-pair constraints. An
+empty, malformed or out-of-range draft, or a decimal draft outside its exact
+grid, remains dirty but makes the update plan unavailable; an in-range integer
+between UI-only adjustment stops is valid and retained exactly. A draft that
+returns every edited value to its authoritative value has no dirty bits and
+produces no update plan. Thus no-change and invalid-draft states do not
+dispatch a settings update merely because a page is open. The field-masked merge
+and the no-update-result consequence are owned by
 [changing server configuration](../architecture/config/changing-server-config.md#no-update-result).
 
 Category, scope-tab, and overview navigation neither dispatches an update nor

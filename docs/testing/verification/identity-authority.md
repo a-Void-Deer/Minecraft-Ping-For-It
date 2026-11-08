@@ -178,7 +178,7 @@ live configuration changes, or real dedicated-server initialization. Narrow
 isolated server-default initialization coverage is inventoried under
 [configuration verification](configuration-ui.md#configuration-recovery-and-selection-grammar).
 
-## Frozen recipient authorization pending
+## Frozen recipient authorization coverage and live gaps
 
 The historical coverage and evidence records above remain limited to their
 recorded execution or source-review scope; they do not prove
@@ -219,9 +219,9 @@ Pending evidence still covers:
 
 Global field, selector, child, `RESET`, metadata and same-type Ping grant scenarios
 are owned by the
-[presentation pending section](presentation.md#frozen-recipient-content-authorization-verification-pending);
+[presentation coverage and live gaps](presentation.md#frozen-recipient-content-authorization-coverage-and-live-gaps);
 the fluid provider validation boundary is owned by the
-[inventory pending section](inventory.md#frozen-recipient-authorization-and-fluid-provider-trust-pending).
+[inventory coverage and live gaps](inventory.md#frozen-recipient-authorization-and-fluid-provider-trust-coverage-and-live-gaps).
 
 ## Known automated gaps
 

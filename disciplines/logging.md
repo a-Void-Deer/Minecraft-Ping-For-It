@@ -8,6 +8,53 @@ isolation; security boundaries remain with
 Use the shared `Diagnostics` API, not a platform logger, and omit reports that do
 not change understanding.
 
+## Diagnostic completeness
+
+A diagnostic report must explain an observed outcome, not merely restate its symptom.
+
+For failures, unexpected rejections, degraded outcomes, and fallback paths, preserve the diagnostic evidence already available to the owning operation.
+
+### Required diagnostic evidence
+
+When applicable, a report must make the following distinguishable:
+
+1. **Failure point:** The operation, stage, or predicate that rejected or failed.
+2. **Observed reason:** The specific condition or failure category responsible for that decision, rather than a generic description such as `invalid`, `failed`, or `unavailable`.
+3. **Recovery decision:** Why a fallback was selected, skipped, or abandoned.
+4. **Recovery outcome:** Which fallback strategies were actually attempted, in what order when relevant, and why each failed or succeeded.
+5. **Final outcome:** Whether the overall operation failed, recovered, degraded, or skipped optional functionality.
+
+These are diagnostic requirements for the operation, not mandatory fields on every individual log entry. Omit inapplicable evidence and never invent explanations unsupported by the execution.
+
+### Preserve decisions, not just symptoms
+
+- Do not replace a known rejection reason with a generic failure message.
+- If distinct branches reject for different reasons, preserve those distinctions using stable domain-defined reason codes.
+- When multiple fallbacks exist, preserve their actual attempted outcomes, not merely the final fallback result.
+- Distinguish a fallback that was not attempted from one that was attempted and failed.
+- Preserve meaningful decision inputs and observed conditions when permitted, rather than inferring a root cause from the final outcome.
+- An exception is evidence of a failure, not necessarily a complete explanation of the domain decision.
+
+### Disclosure and collection
+
+At `NORMAL`, expose diagnostically meaningful distinctions through fixed templates and audited, finite safe codes where the API permits. Do not expose provider-controlled data, identifiers, paths, positions, messages, or other prohibited values.
+
+At `DEEP` and `DEBUG`, use lazy detail to preserve permitted decision context, attempted recovery steps, and failure evidence.
+
+Capture diagnostic facts from the business operation as it executes. Do not initiate new reads, repeat validation, expand source authority, or change fallback behavior for logging.
+
+Preserve the existing one-report ownership and admission policies. Diagnostic completeness does not justify duplicate reports or an additional `NORMAL`/`DEEP` pair.
+
+### Review requirement
+
+For every modified failure or recovery path, ask:
+
+**Could a maintainer reading the intended logging profile distinguish what failed, why the operation made its recovery decisions, what recovery actually attempted, why it did or did not work, and what happened finally?**
+
+If the answer is no, the diagnostic implementation is incomplete unless the missing evidence is unavailable, inapplicable, prohibited by disclosure policy, or intentionally deferred to a higher profile.
+
+Tests should verify representative failure and recovery outcomes, their permitted diagnostic evidence, and the absence of logging-induced behavior changes.
+
 ## Quick start
 
 These examples use business facts already owned by the enclosing operation.
@@ -168,13 +215,15 @@ final class PresentationApplyDiagnostics {
 A production channel is a stable field. Identity is object identity, while the
 name is only a label: a new `interval(...)` per call loses history. The example
 interval is this owner's cadence, not a project default; use the domain's
-existing value. An interval channel admits its first report, suppresses repeats
-inside the interval, and includes the saturated suppressed count on the next
-admitted report. It keeps independent state per logical side and shares that
-side's history across severity and profile changes; a profile change does not
-reset it. A domain channel runs the same captured callback for every side and
-does not partition mutable callback state per side; the owning domain must key
-side-local state itself. Split channels when outcomes need independent
+existing value. An interval channel controls repeated report admission within its
+domain-owned interval; the
+[explicit admission channels](../docs/architecture/logging.md#explicit-admission-channels)
+contract owns first-report, suppression and saturated-count behavior. It keeps
+independent state per logical side and shares that side's history across
+severity and profile changes; a profile change does not reset it. A domain
+channel runs the same captured callback for every side and does not partition
+mutable callback state per side; the owning domain must key side-local state
+itself. Split channels when outcomes need independent
 suppression: a summary and its failure path, or separate offer and policy
 outcomes, differ even with a shared site. Reuse intentionally shares history and
 the suppressed count.
@@ -199,14 +248,14 @@ rather than copying a gate algorithm or adding a fourth helper.
 ## Profile publication and runtime ownership
 
 Ordinary sites do not call `Diagnostics.setProfile`; configuration handlers own
-load, reset, recovery and save publication. The client UI publishes immediately;
-the server screen edits a draft without publishing; an authorized applied update
-publishes the selected profile before attempting persistence, and a save failure
-does not roll back the in-memory value. Fields and values remain with
-[client configuration](../docs/config/client.md#diagnostic-logging),
-[server configuration](../docs/config/server.md#persisted-fields),
-[logging profile controls](../docs/UI/settings-screen.md#logging-profile-controls)
-and [server apply order](../docs/architecture/config/changing-server-config.md#server-apply-order-and-persistence).
+load, reset, recovery and save publication. The client's immediate publication and
+the server draft are owned by
+[logging profile controls](../docs/UI/settings-screen.md#logging-profile-controls),
+and the server-side apply and persistence transaction is owned by
+[server apply order and persistence](../docs/architecture/config/changing-server-config.md#server-apply-order-and-persistence).
+Fields and values remain with
+[client configuration](../docs/config/client.md#diagnostic-logging) and
+[server configuration](../docs/config/server.md#persisted-fields).
 
 `BOOTSTRAP` is only for genuinely early work with no owner; it is fixed `NORMAL`,
 not a third setting, and must not be used to avoid choosing a side or set a profile.

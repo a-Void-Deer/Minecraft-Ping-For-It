@@ -35,7 +35,7 @@ presentation `CREATE` (including pure location targets) or dedicated inventory
 | Presentation `PresentationS2CPacket` (S2C): `OFFER`, `RESET`, `CREATED`, `SECTION`, `REMOVED`, `WINNER`, `REJECT` | Fabric, Forge, and NeoForge common client handler. | Accepted marker creation, removal, and winner changes are projected per recipient; a rejection is sent only to its requester. | Accepted only for the negotiated session epoch/view. The atomic Basic initial, marker content grant, receipt content descriptor, default display reference, retained values, and mask, child-deny and marker-scoped authorization rules are owned by [presentation snapshot](../presentation/presentation_snapshot.md); marker record state and visual lifetime are owned by [client marker state](../markers/client-state.md); rejection presentation remains owned by [ping feedback](../../UI/ping-feedback.md). Corrupt packets, or packets received without a runtime, are safely dropped. |
 | Presentation policy `ServerPresentationPolicyC2SPacket` (C2S): `READ`, `ADD_WHITE`, `REMOVE_WHITE`, `ADD_BLACK`, `REMOVE_BLACK`, `SET_WHITELIST_ONLY` | Fabric, Forge, and NeoForge common server handler. | The versioned route carries the correlated read of all five per-target-type rule views, each including its persisted child deny list, and the bounded selector and whitelist-only mutations for a selected target type, which leave the child deny list unchanged. Disclosure, revision, transaction, and broadcast semantics are owned by [presentation snapshot](../presentation/presentation_snapshot.md); authority and server-side enforcement are owned by [server configuration authority](../authority/server-config.md) and [security](../security.md#server-configuration-update-enforcement). | Not applicable on C2S. |
 | Presentation policy `ServerPresentationPolicyS2CPacket` (S2C) | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted into the connection-scoped rule-view mirror under the correlation and revision rules owned by [presentation snapshot](../presentation/presentation_snapshot.md); it does not mutate marker state, overlay/outline state, or presentation field values. |
-| Inventory `InventoryC2SPacket` (C2S): `HELLO`, `OPEN`, `CLOSE`, `RESYNC`, `SELECT` | Fabric, Forge, and NeoForge common server handler. | `HELLO` creates or renews the per-player preview session and answers with an offer of server-selected periods, the effective display and frame byte budgets, and the inventory target-type policy view; every other kind runs only under the session epoch and the current presentation epoch/view fence. `OPEN` binds one bounded preview request to a server-validated ordinary block target or uncommitted external provider candidate with its carried real local face, `CLOSE` releases it, `RESYNC` schedules repair for its required marker ID, and `SELECT` resolves one opaque retained entry reference under its baseline/state fences into a correlated selection outcome. The request carries no player identity, item count, or client-supplied authoritative target. Inventory domain semantics are owned by [inventory](../presentation/inventory.md). | Not applicable on C2S. |
+| Inventory `InventoryC2SPacket` (C2S): `HELLO`, `OPEN`, `CLOSE`, `RESYNC`, `SELECT` | Fabric, Forge, and NeoForge common server handler. | `HELLO` creates or renews the per-player preview session and answers with an offer of server-selected periods, the effective display and frame byte budgets, and the inventory target-type policy view; every other kind runs under the session epoch and presentation epoch, with view acceptance and the narrow same-request cancellation exception owned by the [inventory route](#inventory-previewtracking-route-inventory-v2). `OPEN` binds one bounded preview request to a server-validated ordinary block target or uncommitted external provider candidate with its carried real local face, `CLOSE` releases it, `RESYNC` schedules repair for its required marker ID, and `SELECT` resolves one opaque retained entry reference under its baseline/state fences into a correlated selection outcome. The request carries no player identity, item count, or client-supplied authoritative target. Inventory domain semantics are owned by [inventory](../presentation/inventory.md). | Not applicable on C2S. |
 | Inventory `InventoryS2CPacket` (S2C): `OFFER`, `POLICY`, `SELECTED`, `REJECT`, `PREVIEW`, `SNAPSHOT`, `STREAM`, `STATUS`, `HEARTBEAT`, `OPENED` | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted into the connection-scoped inventory session only under the negotiated epoch and the current presentation epoch/view: `OFFER` establishes the epoch, the periods, and the effective display and frame byte budgets, `POLICY` carries the inventory target-type policy view, `OPENED` grants one Preview request's lane authorization before any of its `PREVIEW` data, `SELECTED`/`REJECT` are accepted only against a pending commit with the matching request id, `PREVIEW` is request-scoped, and `SNAPSHOT`/`STREAM`/`STATUS`/`HEARTBEAT` are marker-scoped tracking frames. Coverage and pending runtime evidence for native input and HUD consumption of the session are owned by [testing and verification](../../testing/verification/inventory.md). Inventory domain semantics are owned by [inventory](../presentation/inventory.md). |
 | Presentation preview `PresentationPreviewC2SPacket` (C2S): `READ`, `CANCEL` | Fabric, Forge, and NeoForge common server handler. | A bounded one-shot hint, not a subscription or authority: `READ` asks only for presentation fields the client cannot observe locally and is answered only under the current accepted presentation epoch/view and an accepted adapter schema and field authorization; `CANCEL` withdraws the pending request. It creates no marker, lease, winner slot, or lifetime. Field authorization, provenance, and fallback are owned by [presentation snapshot](../presentation/presentation_snapshot.md). | Not applicable on C2S. |
 | Presentation preview `PresentationPreviewS2CPacket` (S2C): `RESULT`, `UNAVAILABLE`, `DEFERRED`, `REJECTED` | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted only against the current request authorization: `RESULT` carries one framed presentation section that stays undecoded until the accepted adapter schema and field authorization are available, and the control statuses carry no section. Corrupt packets are safely dropped. Field authorization, provenance, and fallback are owned by [presentation snapshot](../presentation/presentation_snapshot.md). |
@@ -101,7 +101,7 @@ is per Ping, so two markers of one target type can carry different frozen sets
 and a session-wide mask cannot express them. `CREATED` carries that per-Ping
 grant directly; runtime acceptance of the grant and its replay behavior remain
 pending and are owned by
-[testing and verification](../../testing/verification/presentation.md#frozen-recipient-content-authorization-verification-pending).
+[testing and verification](../../testing/verification/presentation.md#frozen-recipient-content-authorization-coverage-and-live-gaps).
 
 The atomic `CREATED` frame carries, in order, the canonical marker snapshot, the
 owner name, the default property ref, the marker content grant, the receipt
@@ -206,10 +206,18 @@ never reinterpreted.
 The response side carries the effective size budgets.
 `HELLO` is the epoch-zero handshake; every other request runs under the
 negotiated nonzero epoch and a non-negative request id, and only while the
-current presentation epoch/view fence matches. `OFFER` and `POLICY` are
-session messages; `OPEN`, `CLOSE`, `SELECT`, the `OPENED` response, and the
-`PREVIEW` response are request-scoped; `RESYNC` and the `SNAPSHOT`, `STREAM`,
-`STATUS`, and `HEARTBEAT` responses are marker-scoped.
+current presentation epoch/view fence matches, with one exception: a `CLOSE`
+for an existing Preview request may carry the current view or an earlier one
+when the request belongs to the same authenticated connection and the same
+inventory and presentation epochs; a later view is rejected like any other
+fenced request. The exception applies only to `CLOSE`; the request ID keeps its
+established meaning, and no request changes its target. A same-epoch view
+rebuild retains the request, so an in-flight `CLOSE` carrying the previous view
+is still honored. `OPEN`, `SELECT`, and `RESYNC` remain strictly bound to the
+current view. `OFFER` and `POLICY` are session messages; `OPEN`, `CLOSE`,
+`SELECT`, the `OPENED` response, and the `PREVIEW` response are request-scoped;
+`RESYNC` and the `SNAPSHOT`, `STREAM`, `STATUS`, and `HEARTBEAT` responses are
+marker-scoped.
 
 The resource-lane byte is `0` for `ITEM` and `1` for `FLUID`; any other value
 rejects the whole frame. C2S `SELECT` and `RESYNC` carry it immediately after
@@ -269,23 +277,24 @@ relationship remain owned by
 [server configuration](../../config/server.md#inventory-policy-object) and
 [inventory](../presentation/inventory.md). `POLICY` carries its lane's inventory
 target-type policy view.
-`OPENED` is appended after `HEARTBEAT` as a new S2C kind; existing kind names
-and their wire encodings are unchanged. It answers an accepted `OPEN` as the
-request-scoped Preview grant: after the common header it carries one lane-bit
-byte and no resource-lane byte, marker, entries or other body. Its request id
-must be positive, and `laneBits` is one byte from `0` through `3`, where the low
-two bits independently authorize the `ITEM` and `FLUID` lanes in wire-id order
+`OPENED` is the final inventory S2C kind after `HEARTBEAT`; the complete wire
+kind order is `OFFER`, `POLICY`, `SELECTED`, `REJECT`, `PREVIEW`, `SNAPSHOT`,
+`STREAM`, `STATUS`, `HEARTBEAT`, `OPENED`, and each kind retains its established
+encoding. It answers an accepted `OPEN` as the request-scoped Preview grant:
+after the common header it carries one lane-bit byte and no resource-lane byte,
+marker, entries or other body. Its request id must be positive, and `laneBits`
+is one byte from `0` through `3`, where the low two bits independently authorize
+the `ITEM` and `FLUID` lanes in wire-id order
 (`0` is valid and grants no lane); any other value rejects the frame. The client
 accepts a request's `PREVIEW` data only after its `OPENED` grant, so `OPENED`
-precedes any `PREVIEW` fragment for
-that request and a data frame cannot widen the grant. A repeated `OPENED` with
-the same session epoch, presentation epoch, view, request id and lane bits is
-idempotent; a conflicting repeat is rejected rather than merged, and the
-accepted grant neither widens nor narrows. A later `POLICY` frame updates only
-the lane policy view and does not revoke, widen or replace an accepted `OPENED`
-grant. `OPENED` neither establishes the inventory session nor replaces the
-`OFFER` data gate. It joins inventory version two without another version or
-schema change.
+precedes any `PREVIEW` fragment for that request and a data frame cannot widen
+the grant. A repeated `OPENED` with the same session epoch, presentation epoch,
+view, request id and lane bits is idempotent; a conflicting repeat is rejected
+rather than merged, and the accepted grant neither widens nor narrows. A later
+`POLICY` frame updates only the lane policy view and does not revoke, widen or
+replace an accepted `OPENED` grant. `OPENED` neither establishes the inventory
+session nor replaces the `OFFER` data gate. It is an inventory version-two S2C
+kind; no additional version or schema applies.
 
 `PREVIEW`, `SNAPSHOT` and `STREAM` each carry one fragment under an independent
 `(resourceKind, epoch, requestId, markerId, baselineId)` identity plus `statusRevision`,

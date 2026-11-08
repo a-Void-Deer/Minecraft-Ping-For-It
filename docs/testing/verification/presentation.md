@@ -149,19 +149,24 @@ property, child-deny, codec, admission, and lease-refresh/capture-budget seams:
   not live-world fairness, latency or heap/TPS measurements;
 - `ClientPresentationTest` covers the version-two presentation client session:
   `HELLO`/`OFFER`/`RESET`
-  epoch and view guards without any client preference, a tighter reset mask
-  pruning frozen fields and annotations without resurrection, accepted metadata
-  being preserved but never treated as an authorization mask, `CREATED`
-  initializing the stored target type and default while sections carry nested
-  annotations, masks authorizing each marker by its stored type rather than
-  its adapter or name, a reset's child deny map pruning a stored frozen
-  annotation and a denied default reference while the parent field keeps its
-  complete value and its descendants stay selectable, a denied annotation
-  dropped before storage so neither a later loosening nor a frozen section can
-  resurrect it,
-  a `CREATED` selection naming a denied child rejecting atomically with the
-  marker insertion, a zero-view reset rejected without publishing authority,
-  and a soft-removed tombstone exposing an empty projection;
+  epoch and view guards without any client preference, a same-epoch tighter
+  reset retaining a frozen field and annotation rather than pruning them,
+  accepted metadata being preserved but never treated as an authorization mask,
+  `CREATED` initializing the stored target type and default while sections carry
+  nested annotations, masks authorizing each marker by its stored type rather
+  than its adapter or name, a reset's child deny map dropping a stored frozen
+  annotation while retaining the frozen default reference and the parent field's
+  complete value with its descendants selectable, a denied annotation dropped
+  before storage so neither a later loosening nor a frozen section can
+  resurrect it, a `CREATED` selection naming a denied child rejecting atomically
+  with the marker insertion, a zero-view reset rejected without publishing
+  authority, and a soft-removed tombstone exposing an empty projection.
+  Historical dynamic-policy cases exercised a tighter reset pruning frozen
+  fields and annotations without resurrection, and a child-only reset pruning a
+  denied default reference; they remain evidence for their recorded input only.
+  Current frozen-grant projection, including tighter and looser reset behavior,
+  is inventoried under
+  [frozen recipient content authorization](#frozen-recipient-content-authorization-coverage-and-live-gaps).
 - `PresentationReceiptContentTest` covers the receipt content
   descriptor as a strict codec: the non-property kinds carry no references, a
   property descriptor requires a non-empty sorted unique bounded reference list in a
@@ -757,15 +762,18 @@ coverage is owned by
 The final combined execution is recorded in
 [build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
 
-### Frozen recipient content authorization verification pending
+### Frozen recipient content authorization coverage and live gaps
 
 The dynamic recipient, field, child and receipt checks inventoried above remain
 historical evidence for their recorded inputs. They do not establish
 [D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md)'s
-create-time policy. The current-source cases below passed in the final combined
-execution recorded in
+create-time policy.
+
+**Automated coverage.** The current-source cases below passed in the final
+combined execution recorded in
 [build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification);
-the remaining live scenarios stay pending.
+they establish the frozen-grant boundary headlessly, and the remaining live
+scenarios stay pending.
 
 - `FrozenGrantReplayTest` covers client projection against the `CREATED` grant:
   per-marker opposite fields and exact child denials, same-epoch tighter and
@@ -782,7 +790,7 @@ the remaining live scenarios stay pending.
   admits marker identity without retaining a denied field, mismatched schema or
   kind behavior, and projected grant sizing equal to wire filtering with inert
   child references ignored. Its inventory admission case is inventoried under
-  [inventory](inventory.md#frozen-recipient-authorization-and-fluid-provider-trust-pending).
+  [inventory](inventory.md#frozen-recipient-authorization-and-fluid-provider-trust-coverage-and-live-gaps).
 - `FrozenGrantMalformedFrameTest` covers the grant codec boundary: canonical
   round trips, every truncation, duplicate or non-canonical adapter/field order,
   unknown kinds, root child references, bounded counts before reading their
@@ -791,20 +799,21 @@ the remaining live scenarios stay pending.
 
 The server creation cut, the per-recipient authorization value and the actual
 initial/baseline/refreshed/cached send-entry delivery case are inventoried under
-[identity and authority](identity-authority.md#frozen-recipient-authorization-pending).
+[identity and authority](identity-authority.md#frozen-recipient-authorization-coverage-and-live-gaps).
 
 The `CREATED` marker-content-grant grammar is owned by the
 [presentation-v2 protocol](../../architecture/network/protocol.md#presentation-snapshot-route-presentation-v2);
 the inventory Preview request grant is the session-wide `OPENED` control in the
 [inventory-v2 protocol](../../architecture/network/protocol.md#inventory-previewtracking-route-inventory-v2).
-Remaining pending evidence covers live delivery and repair of a create-time
-result for Basic, Property, SECTION, Inventory and receipt content over a real
-connection; the ready/`HELLO` gate for an original audience member that was not
-ready at create; true disconnect behavior; later `RESET` and metadata changes
-applying only to new authorization and new Pings, while the no-Ping preview
-continues to require the accepted `RESET` mask and advertised/fresh child union;
-and content updates under current source, session, schema, expiry and resource
-gates with source-read revocation still rejecting. The
+
+**Pending live evidence.** Remaining pending evidence covers live delivery and
+repair of a create-time result for Basic, Property, SECTION, Inventory and
+receipt content over a real connection; the ready/`HELLO` gate for an original
+audience member that was not ready at create; true disconnect behavior; later
+`RESET` and metadata changes applying only to new authorization and new Pings,
+while the no-Ping preview continues to require the accepted `RESET` mask and
+advertised/fresh child union; and content updates under current source, session,
+schema, expiry and resource gates with source-read revocation still rejecting. The
 [immediate creation snapshot coverage](#immediate-inventory-creation-snapshot-coverage)
 records that path's historical scope.
 

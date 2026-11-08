@@ -25,7 +25,8 @@ not hide a real target behind the hole merely because its broad bounds intersect
 Compare exact candidates using their actual world-space surface points and the
 existing strict nearest-hit rules. Equal-distance entity candidates retain the
 first candidate-iteration selection. A world hit must be strictly nearer to
-displace an entity hit. Existing entity endpoint exclusion is preserved.
+displace an entity hit. An entity hit exactly at the finite segment's far
+endpoint is excluded.
 
 The common scanner obtains the selected native block and fluid shapes through
 `ClipContext.getBlockShape` and `getFluidShape` under the frozen

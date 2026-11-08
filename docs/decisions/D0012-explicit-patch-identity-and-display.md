@@ -69,5 +69,5 @@ Retained terminal display state is monotone rather than a recipe to rebuild
 discarded detail later.
 
 Coverage changes and pending runtime evidence are owned by
-[inventory verification](../testing/verification/inventory.md#patch-only-identity-and-display-verification-pending).
+[inventory verification](../testing/verification/inventory.md#patch-only-identity-and-display-coverage-and-live-gaps).
 This decision records no test, installed-mod or manual result.

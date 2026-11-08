@@ -58,17 +58,18 @@ A connection reaches presentation readiness in stages:
   acknowledgement, and no subscription generation.
 - Only a `RESET` for the offered epoch and a non-regressing view turns the
   client ready, enables marker intents, and starts the new view generation. A
-  reset that establishes an epoch starts that epoch's store; a same-epoch reset
+  reset that establishes an epoch starts that epoch's store. A same-epoch reset
   replaces the current advertised mask and child deny map for the independent
-  preview but neither prunes, extends or re-authorizes the retained content of
-  an existing marker nor determines a new Ping's creation authorization. A
-  field created under the marker's
-  [frozen recipient content authorization](#frozen-recipient-content-authorization)
-  stays retained and displayable after a later mask excludes it, and a field the
-  current mask adds for the preview is not added to an older marker. A denied
-  child never strips keys from an authorized root record. `CREATE`/`REMOVE`
-  intents carry the negotiated epoch and are ignored unless the session is ready
-  for that epoch, and a create carries no client field list.
+  preview, but neither prunes, extends or re-authorizes the retained content of
+  an existing marker nor determines a new Ping's creation authorization; those
+  marker-scoped results remain owned by the
+  [frozen recipient content authorization](#frozen-recipient-content-authorization).
+  A field created under that authorization stays retained and displayable after
+  a later mask excludes it, and a field the current mask adds for the preview is
+  not added to an older marker. A denied child never strips keys from an
+  authorized root record. `CREATE`/`REMOVE` intents carry the negotiated epoch
+  and are ignored unless the session is ready for that epoch, and a create
+  carries no client field list.
 
 `RESET` and the mutation messages are accepted only for the current epoch/view;
 the first accepted `OFFER` establishes the epoch, and stale or off-view messages
@@ -77,10 +78,8 @@ session's compatible manifest. Basic is mandatory: an offer without a compatible
 Basic adapter is rejected, so that connection has no negotiated presentation
 session. The client validates a received section's field kinds and wire bounds
 against the accepted manifest and the marker's marker-scoped
-[frozen authorization](#frozen-recipient-content-authorization); a same-epoch
-reset mask and child deny map update the preview boundary rather than
-reinterpreting retained marker content or determining a new Ping's frozen
-authorization. The client applies no allow or deny policy of its own.
+[frozen authorization](#frozen-recipient-content-authorization). The client
+applies no allow or deny policy of its own.
 
 ## Field manifest and value model
 
@@ -418,7 +417,7 @@ marker authorization; it continues to use the current accepted preview
 authorization owned by [Target content preview](#target-content-preview). A
 Property create resolves its own creation authorization and never inherits an
 older marker's frozen set. Coverage and pending migration evidence are owned by
-[testing and verification](../../testing/verification/presentation.md#frozen-recipient-content-authorization-verification-pending).
+[testing and verification](../../testing/verification/presentation.md#frozen-recipient-content-authorization-coverage-and-live-gaps).
 Rationale and alternatives are owned by
 [D0019 — Provider trust and frozen recipient authorization](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md).
 

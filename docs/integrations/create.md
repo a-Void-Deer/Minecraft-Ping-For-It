@@ -111,39 +111,50 @@ server-thread sampling source. The generic negotiation, demand-driven
 capture, policy, and projection contracts are owned by
 [presentation snapshot](../architecture/presentation/presentation_snapshot.md).
 
-The manifest declares kinetic speed (`create:kinetic.speed`, a record of
-effective/theoretical signed RPM and a moving flag), `create:kinetic.has_network`,
-`create:kinetic.overstressed`, `create:kinetic.stress`, `create:kinetic.capacity`,
-and `create:kinetic.available_capacity` as enabled by default, and the item-vault
-(`create:inventory.summary`) and fluid-tank (`create:fluid.summary`) registry-ID
-summaries as disabled by default. `create:kinetic.capacity` and
-`create:kinetic.stress` are numbers holding the network's total stress capacity
-and its used stress; the derived number `create:kinetic.available_capacity`
-equals `create:kinetic.capacity` minus `create:kinetic.stress` and may be
-negative. A demand for the derived field reads the raw capacity/stress pair
-once, but projection still carries only the demanded, authorized fields; the
-derived field adds no new annotation, and no property create requires a capacity
-context. Stress keeps its raw used-stress meaning and is not reinterpreted when
-it is disabled or omitted; the game's overstress state remains the separate
-`create:kinetic.overstressed` flag. Kinetic quantities use the SU unit, and a
-used-stress display may optionally include a percent only when the same
-authorized received projection also contains a capacity greater than zero; with
-a zero capacity the percent is undefined and omitted. There is no utilization
-field, and the percent is never clamped to 100%. The kinetic fields are
-default-enabled, so an unmatched kinetic field is authorized for capture and
-projection under the recipient's policy unless a block rule matches or
-whitelist-only mode is on, and the server policy page's outcome label reflects
-that default. Default
-authorization is not display: the RPM HUD line appears only when the default
-display reference selects it or a create carries a non-null property Ping
-annotation naming it, and no target type's default reference selects
-RPM. The disabled summaries stay disabled until explicitly allowed. Item and
-fluid summaries are record values keyed by registry ID; an uploaded property
-selection may address one nested registry-ID entry of such a summary. The property reference, recapture, authority, and
+The manifest declares the following fields.
+
+| Field | Kind | Default grant | Display |
+| --- | --- | --- | --- |
+| `create:kinetic.speed` | Record of effective/theoretical signed RPM and a moving flag | Enabled by default | RPM HUD line |
+| `create:kinetic.has_network` | Flag | Enabled by default | Property display |
+| `create:kinetic.overstressed` | Flag | Enabled by default | Property display |
+| `create:kinetic.stress` | Number | Enabled by default | Property display |
+| `create:kinetic.capacity` | Number | Enabled by default | Property display |
+| `create:kinetic.available_capacity` | Derived number | Enabled by default | Property display |
+| `create:inventory.summary` | Item-vault record keyed by registry ID | Disabled by default | Property display |
+| `create:fluid.summary` | Fluid-tank record keyed by registry ID | Disabled by default | Property display |
+
+`create:kinetic.capacity` and `create:kinetic.stress` are numbers holding the
+network's total stress capacity and its used stress. The derived number
+`create:kinetic.available_capacity` equals `create:kinetic.capacity` minus
+`create:kinetic.stress` and may be negative. A demand for the derived field
+reads the raw capacity/stress pair once, but projection still carries only the
+demanded, authorized fields; the derived field adds no new annotation, and no
+property create requires a capacity context.
+
+Kinetic quantities use the SU unit. Stress keeps its raw used-stress meaning and
+is not reinterpreted when it is disabled or omitted; the game's overstress state
+remains the separate `create:kinetic.overstressed` flag. A used-stress display
+may optionally include a percent only when the same authorized received
+projection also contains a capacity greater than zero; with a zero capacity the
+percent is undefined and omitted. There is no utilization field, and the percent
+is never clamped to 100%.
+
+The kinetic fields are default-enabled, so an unmatched kinetic field is
+authorized for capture and projection under the recipient's policy unless a
+block rule matches or whitelist-only mode is on, and the server policy page's
+outcome label reflects that default. Default authorization is not display: the
+RPM HUD line appears only when the default display reference selects it or a
+create carries a non-null property Ping annotation naming it, and no target
+type's default reference selects RPM. The disabled summaries stay disabled until
+explicitly allowed. Item and fluid summaries are record values keyed by
+registry ID; an uploaded property selection may address one nested registry-ID
+entry of such a summary. The property reference, recapture, authority and
 display contract is owned by
 [presentation snapshot](../architecture/presentation/presentation_snapshot.md#property-ping).
-Selector evaluation and the outcome labels are owned
-by [presentation snapshot](../architecture/presentation/presentation_snapshot.md#per-target-type-field-policy).
+Selector evaluation and the outcome labels are owned by
+[presentation snapshot](../architecture/presentation/presentation_snapshot.md#per-target-type-field-policy).
+
 Sampling is requested only for demanded fields and for a supported whole-block
 input. This includes an ordinary whole block and a committed, validated Sable
 external-block target, provided the current provider registry identity still
@@ -153,8 +164,8 @@ provider's current tracking-point position for the whole-block collector path;
 it does not make the detached placeholder coordinates or opaque locator a
 sampling position, and no legacy observation fallback serves a committed
 external read. On this committed route, an unrecognized provider, a missing or
-inactive lease, wrong dimensions, unloaded chunks, mismatched state, or a
-member outside the resolved scope is unavailable rather than asserted. Entity,
+inactive lease, wrong dimensions, unloaded chunks, mismatched state, or a member
+outside the resolved scope is unavailable rather than asserted. Entity,
 contraption-constituent, partial-geometry, and generic foreign-provider targets
 are not thereby added to this route. A server interval override can only raise
 the adapter's declared minimum sampling cadence.

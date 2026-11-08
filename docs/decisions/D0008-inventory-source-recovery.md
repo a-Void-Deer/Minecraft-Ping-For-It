@@ -38,12 +38,12 @@ never a definite zero, and a different block type is not a valid source while it
 occupies the location. If the original registry ID later returns while the same
 Ping and its hard tracking duration remain valid, the source may recover.
 
-Recovery keeps the existing Ping ID. It advances the inventory status revision
-and establishes a new inventory snapshot identity with a clean baseline for each
-Ping+recipient pair; the source is scanned afresh and old streams and values are
-invalidated rather than merged into the recovered state. This inventory baseline
-is a new inventory-protocol concept, not a rename of the existing marker
-snapshot identity or its initial delivery, and it changes no marker identity.
+Recovery keeps the existing Ping ID. The exact recovery baseline and
+stale-data retirement mechanics are owned by
+[inventory source identity and recovery](../architecture/presentation/inventory.md#source-identity-invalidation-and-recovery).
+This inventory baseline is a new inventory-protocol concept, not a rename of the
+existing marker snapshot identity or its initial delivery, and it changes no
+marker identity.
 Baselines are per Ping+recipient: one recipient's resynchronization neither
 advances nor resets another recipient's baseline. Recipients may share an actual
 source read, but shared reads are not a shared protocol baseline and are not a
@@ -58,14 +58,12 @@ execution details are owned by
 wire messages are owned by [network protocol](../architecture/network/protocol.md).
 
 The inventory tracking duration ends in a hard stop. The hard deadline follows
-the Ping's own marker lifetime exactly: there is no independent inventory
-tracking-duration setting and no earlier tracking-only grey interval. At that
-boundary, tracking stops scanning and stops recovery probing, and the source
-never recovers afterward. Only a source invalidated before that boundary is
-shown as grey; normal Ping expiry or removal removes the marker record as
-usual and is not extended by tracking, invalidation or recovery. An expired or
-removed Ping never recovers, and a fresh ping after the old one is a new
-lifetime with its own identity and baselines.
+the Ping's own marker lifetime exactly; the
+[inventory recovery contract](../architecture/presentation/inventory.md#source-identity-invalidation-and-recovery)
+owns the detailed boundary behavior and display states. Normal Ping expiry or
+removal removes the marker record as usual and is not extended by tracking,
+invalidation or recovery. An expired or removed Ping never recovers, and a fresh
+ping after the old one is a new lifetime with its own identity and baselines.
 
 This ordinary-block decision does not change external provider identity, lease
 or removal rules, and replacement tolerance cannot revive an expired lease.

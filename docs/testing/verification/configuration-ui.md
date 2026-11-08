@@ -100,27 +100,32 @@ pair legality, frame-priority reconcile and ordered position stepping.
 For the Performance controls' coverage, see
 [Server performance contract verification](#server-performance-contract-verification).
 `SpatialSelectorSettingsTest` covers the spatial-selector settings snapshot and
-bounds. A missing, explicit-null or fresh-file center deadzone initializes the
-current confirmed default while representative valid saved deadzone values,
-including both bounds, are retained literally without rescaling and a held
-snapshot keeps its frozen deadzone, the
-distance and timing clamps preserve the valid interval and saturate on both
-sides, every supported stroke can leave every supported center deadzone, and
-null and out-of-range nested values validate without throwing, the opt-in
-Back-hover default stays disabled,
-a missing or explicit-null submenu radius scale gains the confirmed default and
-the value clamps and freezes into the snapshot, the precise capture period
-clamps to its persisted range and freezes into the snapshot, the content-intent
-choice defaults disabled for fresh, missing and
-null values, an explicit choice is retained and freezes into the held snapshot
-while the live setter supplies the next snapshot, the canonical snapshot
-constructor carries the choice while every previous constructor form defaults
-it, the previous snapshot constructor forms remain compatible and default
-the submenu radius scale and precise capture period, raw-JSON validation and a
-frozen snapshot clamp every value without resetting boolean choices, a frozen
-session snapshot never follows later config edits, root distance and gesture
-preferences stay independent in both mutation directions, and fresh defaults do
-not alias another client's mutable preferences.
+bounds:
+
+- **Initialization and saved values.** A missing, explicit-null or fresh-file
+  center deadzone initializes the current confirmed default; representative
+  valid saved deadzone values, including both bounds, are retained literally
+  without rescaling; a held snapshot keeps its frozen deadzone; the opt-in
+  Back-hover default stays disabled; a missing or explicit-null submenu radius
+  scale gains the confirmed default and the value clamps and freezes into the
+  snapshot; the precise capture period clamps to its persisted range and freezes
+  into the snapshot; and the content-intent choice defaults disabled for fresh,
+  missing and null values.
+- **Clamps and validation.** The distance and timing clamps preserve the valid
+  interval and saturate on both sides; every supported stroke can leave every
+  supported center deadzone; null and out-of-range nested values validate
+  without throwing; and raw-JSON validation and a frozen snapshot clamp every
+  value without resetting boolean choices.
+- **Snapshot construction and isolation.** An explicit content-intent choice is
+  retained and freezes into the held snapshot while the live setter supplies
+  the next snapshot; the canonical snapshot constructor carries the choice
+  while every previous constructor form defaults it; the previous snapshot
+  constructor forms remain compatible and default the submenu radius scale and
+  precise capture period; a frozen session snapshot never follows later config
+  edits; root distance and gesture preferences stay independent in both
+  mutation directions; and fresh defaults do not alias another client's mutable
+  preferences.
+
 `SpatialSelectorMigrationTest` contains filesystem-backed cases for the obsolete
 preference catalogued by
 [client configuration](../../config/client.md#obsolete-keys): fresh output omits

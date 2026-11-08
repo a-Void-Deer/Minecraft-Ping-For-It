@@ -6,13 +6,21 @@
 
 ### General
 
-- General Multi-player / other mod playtests.
-  - dev-environment manual playtests have done.
+- General multiplayer and other-mod playtests remain pending.
+  - Limited recorded observation: dev-environment manual playtests were
+    performed, but their environment, scenarios, date and results are
+    unrecorded, so they do not close this scenario.
 
 ### Wheel
 
-- the [inventory-list input and presentation contract](../../architecture/picking/wheel.md#inventory-list) under live input on Fabric, Forge (NeoForge done)
-- Focus loss and Alt-Tab, window replacement, screen handoffs and abort without overriding a newer cursor owner
+- The [inventory-list input and presentation
+  contract](../../architecture/picking/wheel.md#inventory-list) under live input
+  remains pending on Fabric and Forge.
+  - Limited recorded observation: NeoForge was exercised, but the environment,
+    scenarios, date and results are unrecorded, so the observation does not
+    establish full live-input validation.
+- Focus loss and Alt-Tab, window replacement, screen handoffs and abort without
+  overriding a newer cursor owner
 
 ### Selector readability
 
@@ -204,7 +212,7 @@
   [headless allocation comparison](inventory.md#vault-tracking-performance-evidence)
   does not reproduce the reported live allocation rate or CPU percentage.
 - Exercise the [patch-only identity and display boundary](../../architecture/presentation/inventory.md#item-variants-and-component-fallback) with installed modded containers and component wrappers, including owo-backed items, through live preview, item selection and tracking on the supported loaders. This remains pending; headless fixtures are not installed-mod evidence.
-- Exercise client/server local-default differences and the terminal size-only default icon in the live inventory list and tracking HUD, including retained reprojection after a ceiling change and delivery delayed by period-byte pressure. Automated transition evidence is tracked in [inventory verification](inventory.md#patch-only-identity-and-display-verification-pending).
+- Exercise client/server local-default differences and the terminal size-only default icon in the live inventory list and tracking HUD, including retained reprojection after a ceiling change and delivery delayed by period-byte pressure. Automated transition evidence is tracked in [inventory verification](inventory.md#patch-only-identity-and-display-coverage-and-live-gaps).
 
 ### Frozen recipient authorization and provider trust
 
@@ -212,9 +220,9 @@ All scenarios here are pending. They cover
 [D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md);
 the passing dynamic recipient and member-gate tests inventoried elsewhere are
 historical and do not establish this policy. The current-source automated cases
-in the [identity](identity-authority.md#frozen-recipient-authorization-pending),
-[presentation](presentation.md#frozen-recipient-content-authorization-verification-pending)
-and [inventory](inventory.md#frozen-recipient-authorization-and-fluid-provider-trust-pending)
+in the [identity](identity-authority.md#frozen-recipient-authorization-coverage-and-live-gaps),
+[presentation](presentation.md#frozen-recipient-content-authorization-coverage-and-live-gaps)
+and [inventory](inventory.md#frozen-recipient-authorization-and-fluid-provider-trust-coverage-and-live-gaps)
 inventories passed in the final combined execution recorded in
 [build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification);
 they do not replace these live scenarios, and provider trust claims no measured

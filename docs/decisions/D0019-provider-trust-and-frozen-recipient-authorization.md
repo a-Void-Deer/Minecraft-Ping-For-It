@@ -61,9 +61,9 @@ validation are implemented with current-source automated verification; live and
 performance evidence remain pending. A future built-in or external
 dedicated-provider interface, matching and fallback remain undefined and
 unimplemented. Pending evidence is owned by
-[identity and authority](../testing/verification/identity-authority.md#frozen-recipient-authorization-pending),
-[presentation](../testing/verification/presentation.md#frozen-recipient-content-authorization-verification-pending),
-[inventory](../testing/verification/inventory.md#frozen-recipient-authorization-and-fluid-provider-trust-pending)
+[identity and authority](../testing/verification/identity-authority.md#frozen-recipient-authorization-coverage-and-live-gaps),
+[presentation](../testing/verification/presentation.md#frozen-recipient-content-authorization-coverage-and-live-gaps),
+[inventory](../testing/verification/inventory.md#frozen-recipient-authorization-and-fluid-provider-trust-coverage-and-live-gaps)
 and the [manual matrix](../testing/verification/manual-integration.md#frozen-recipient-authorization-and-provider-trust).
 
 The historical version approvals in

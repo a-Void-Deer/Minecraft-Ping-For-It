@@ -566,24 +566,18 @@ and successful compilation are not substitutes for exercising them.
   and emergency-writer behavior under a launched game remain unverified; the
   shared diagnostic fixtures use test sinks, test appenders and injected output
   streams;
-- installed-Create presentation sampling and display remain unexercised in-game:
-  automated seams cover the summary adapter's shape, work and version gates,
-  detached registry-ID aggregation, the derived available-capacity projection,
-  the constructed ASM field-shape gate for the cached network accessor, the
-  real-loader gate decisions over the actual Create archive bytes, the
-  Create-free cached-kinetic-preview receipt/network/accessor and per-field
-  fallback rules, the kinetic-method bytecode failure harness and diagnostic
-  callback seams above, and the external-block `observeSource`
-  position/demand/budget route and candidate preview entry with recording
-  access, but no automated test runs the production collector's own per-member
-  checks or captures a real Create collector's vault or tank controller/member
-  structure or samples a live block capability; a real Create collector or
-  handler, the applied Create cached-accessor and receipt mixins under a
-  launched game's live loader environment, an installed Create block
-  entity read, the Sable API, an in-game goggles/game-HUD label line, and
-  manual evidence for the freshness of a last-synchronized cached network total
-  remain pending, so a last reliable client sync may be stale until an
-  authoritative recapture;
+- installed-Create presentation sampling and display remain unexercised in-game.
+  Automated adapter, loader-gate, cached-accessor, receipt and external-block
+  route seams are inventoried under
+  [Create presentation adapters](#create-presentation-adapters); they do not run
+  the production collector's own per-member checks, capture a real Create
+  collector's vault or tank controller/member structure, or sample a live block
+  capability. A real Create collector or handler, the applied Create
+  cached-accessor and receipt mixins under a launched game's live loader
+  environment, an installed Create block entity read, the Sable API, an in-game
+  goggles/game-HUD label line, and manual evidence for the freshness of a
+  last-synchronized cached network total remain pending, so a last reliable
+  client sync may be stale until an authoritative recapture;
 - full-report construction and delivery in the private Create entity-outline
   diagnostic path; its admission gate and separate backend probe have the
   headless coverage above.

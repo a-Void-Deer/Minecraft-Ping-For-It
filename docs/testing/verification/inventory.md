@@ -21,7 +21,7 @@ The [patch-only contract](../../architecture/presentation/inventory.md#item-vari
 has test-source assertions inventoried below. Reading those assertions does not
 establish that they passed; the completed integration run and remaining live
 verification gaps are scoped
-[below](#patch-only-identity-and-display-verification-pending).
+[below](#patch-only-identity-and-display-coverage-and-live-gaps).
 
 ## Fluid inventory coverage
 
@@ -342,88 +342,95 @@ through public packet, tick and memory-ledger seams:
   Fixture cleanup balances every resolved source and retained/reserved charge.
 
 `InventoryRuntimeTest` covers the production runtime's exact legacy/unsupported
-source seam: one admitted slot prefix, covering adapter snapshot decode or live
-slot reads, charged once against the shared scan allowance and shared by
-preview, duplicate-preview and tracking consumers while
-client and target logical subjects stay independent and finite; a memory defer
-performs no resolver or read and retained lifetime ends with the paid period;
-cursorless enumeration cannot invent continuation;
-owner and frozen face split live sharing; repeated tracking Pings share one
-target quota while a fresh select skips an older preview sweep; live cadence
-and cap changes cannot refund spent usage; invalid rounds retire all shared
-handles once without closing consumers and unrelated work progresses; a
-throwing read or close releases all retained and reserved memory; a live
-scan-allowance reduction preserves already-spent slots and blocks reads or
-selection past the new cap; and zero-allowance provider validation defers after
-the fixed provider-work budget is exhausted. With an explicit snapshot adapter,
-preparation captures once and fixes the route independently of the remaining
-slot allowance; a zero remaining slot allowance cannot consume non-empty
-snapshot slots; the frozen slots decode across later periods under a low
-per-tick allowance, keep their captured values after live contents change,
-never fall back to live reads, and release the retained snapshot on the last
-consumer close; an already-delivered cached empty snapshot completes another
-consumer without revalidation, capture, or read; and a snapshot-memory defer
-retries later and admits the capture once capacity returns. A restarted sweep
-cannot reattach an older peer's incomplete round; an invalid probe retires the
-shared round while paid quotas survive until fresh tracking recovery; a
-rejected completed sweep does not replace the still-published previous result,
-and terminal publication uses retained evidence rather than a fresh
-self-consistent wrapper; publication-evidence admission defers before any
-provider call and never invalidates on budget pressure; the evidence lease
-releases pages at the last scanner restart and closes only when replaced or
-when the last consumer leaves; and the bounded retained-evidence-lease set
-allows a fresh replacement without an unbounded cache. A second batch of new
-consumers cannot consume the replacement reserve: with normal new-observation
-admission full, their preparations defer before resolver work, retain no memory
-and cannot turn into replacement leases, while the existing consumers'
-replacements proceed across periods and keep their prior publication evidence
-until an accepted replacement; releasing the prior leases lets the waiting
-consumers enter, and closing evidence never refunds the current target's paid
-progress. Compatible aliased inputs still share one physical round when normal
-observation admission is full, because the bounded round guard counts physical
-rounds rather than a compatible consumer's references, and per-target-key
-quotas stay independent. On that exact path, owner and frozen face remain part
-of the source key: one original block resolves separately for a different owner or face
-instead of reusing a same-binding shortcut, and retiring an invalid origin
-input invalidates only the handle bound to that input while a different
-owner's and a different face's handles stay active. A shared physical
-replacement hands off from a
-predecessor to its successor: same-owner, same-subject peers skewed across
-periods share the one replacement, a fast peer's accepted successor stays
-serviceable to a slow peer that can consume it without a second physical
-sweep, and the handoff is counted in the bounded scan admission so another
-handoff cannot fork before the slow peer advances. Rejected, invalid or merged
-successors detach their handoff, and closing, retiring or merging peers cancel
-handoff-only references without dropping independently owned old publication
-evidence or refunding paid target progress; a successor's cached-validity
-admission defers before provider work and cannot authorize an invalid cached
-successor. Handoff completion and close leave no reserved or retained leak. A
-configured display cap threads into new observations and an invalid requested
-cap normalizes into the bounded range; lowering reprojects retained metadata
-monotonically through a bounded, deferrable pass that keeps its cursor with no
-ticket or progress loss, and a later increase cannot resurrect an omitted
-display through the same snapshot. A released completed sweep ends its
-deferred tightening pass while keeping its cumulative projection summary,
-a tighter ceiling mid-pass restarts the walk from the first retained slot, the
-still-referenced encoded page stays charged until its round is released, and
-closing a consumer during a deferred pass leaves no workspace and rejects
-later work. Additional admission tests cover refusal before resolver, lock,
-witness or content callbacks; mapped exact and aggregate witness helpers; charged
-cursorless blank visits and throwing attempts; attempted capture work remaining
-paid without spending decode-slot allowance; and discovery grants propagated
-through plan lookup and validity checks with attempted-prefix settlement on
-defer or exception. Retained-input reprojection tests refuse before parsing,
-preserve the cursor and exact long count, release temporary workspace, and retry
-after work returns. These synthetic admission seams do not prove ordinary
-native-container serviceability by themselves. Separate native-read wiring tests
-exercise complete single- and double-chest preview, a direct live-witness helper and
-fresh tracking under unchanged default memory, with exact read counts and no
-outstanding reservations. Lazy-consumption tests refuse a read without fresh
-scratch after capture scratch has closed; caller-wiring tests cover shared
-Catalog grants and attempted work settlement without resetting the allowance for
-each item. Exceptional cursorless-prefix tests cover actual attempted visits,
-including blank views and a throwing handoff, for both scanning and selection;
-unobserved legacy callbacks retain their conservative accounting boundary.
+source seam. Its assertions group by capability:
+
+- **Shared access and quotas.** One admitted slot prefix covers adapter snapshot
+  decode or live slot reads, charged once against the shared scan allowance and
+  shared by preview, duplicate-preview and tracking consumers while client and
+  target logical subjects stay independent and finite. A memory defer performs
+  no resolver or read and retained lifetime ends with the paid period; cursorless
+  enumeration cannot invent continuation. Owner and frozen face split live
+  sharing; repeated tracking Pings share one target quota while a fresh select
+  skips an older preview sweep; live cadence and cap changes cannot refund spent
+  usage. Invalid rounds retire all shared handles once without closing consumers
+  and unrelated work progresses; a throwing read or close releases all retained
+  and reserved memory; a live scan-allowance reduction preserves already-spent
+  slots and blocks reads or selection past the new cap. Compatible aliased
+  inputs still share one physical round when normal observation admission is
+  full, because the bounded round guard counts physical rounds rather than a
+  compatible consumer's references, and per-target-key quotas stay independent.
+  On that exact path, owner and frozen face remain part of the source key: one
+  original block resolves separately for a different owner or face instead of
+  reusing a same-binding shortcut, and retiring an invalid origin input
+  invalidates only the handle bound to that input while a different owner's and
+  a different face's handles stay active.
+- **Explicit snapshots.** With an explicit snapshot adapter, preparation captures
+  once and fixes the route independently of the remaining slot allowance; a zero
+  remaining slot allowance cannot consume non-empty snapshot slots. The frozen
+  slots decode across later periods under a low per-tick allowance, keep their
+  captured values after live contents change, never fall back to live reads, and
+  release the retained snapshot on the last consumer close. An already-delivered
+  cached empty snapshot completes another consumer without revalidation, capture,
+  or read; a snapshot-memory defer retries later and admits the capture once
+  capacity returns.
+- **Publication evidence and successor handoff.** A restarted sweep cannot
+  reattach an older peer's incomplete round; an invalid probe retires the shared
+  round while paid quotas survive until fresh tracking recovery. A rejected
+  completed sweep does not replace the still-published previous result, and
+  terminal publication uses retained evidence rather than a fresh
+  self-consistent wrapper. Publication-evidence admission defers before any
+  provider call and never invalidates on budget pressure; the evidence lease
+  releases pages at the last scanner restart and closes only when replaced or
+  when the last consumer leaves; the bounded retained-evidence-lease set allows
+  a fresh replacement without an unbounded cache. A second batch of new
+  consumers cannot consume the replacement reserve: with normal new-observation
+  admission full, their preparations defer before resolver work, retain no
+  memory and cannot turn into replacement leases, while the existing consumers'
+  replacements proceed across periods and keep their prior publication evidence
+  until an accepted replacement; releasing the prior leases lets the waiting
+  consumers enter, and closing evidence never refunds the current target's paid
+  progress. A shared physical replacement hands off from a predecessor to its
+  successor: same-owner, same-subject peers skewed across periods share the one
+  replacement, a fast peer's accepted successor stays serviceable to a slow peer
+  that can consume it without a second physical sweep, and the handoff is counted
+  in the bounded scan admission so another handoff cannot fork before the slow
+  peer advances. Rejected, invalid or merged successors detach their handoff,
+  and closing, retiring or merging peers cancel handoff-only references without
+  dropping independently owned old publication evidence or refunding paid target
+  progress; a successor's cached-validity admission defers before provider work
+  and cannot authorize an invalid cached successor. Handoff completion and close
+  leave no reserved or retained leak.
+- **Display tightening.** A configured display cap threads into new observations
+  and an invalid requested cap normalizes into the bounded range; lowering
+  reprojects retained metadata monotonically through a bounded, deferrable pass
+  that keeps its cursor with no ticket or progress loss, and a later increase
+  cannot resurrect an omitted display through the same snapshot. A released
+  completed sweep ends its deferred tightening pass while keeping its cumulative
+  projection summary, a tighter ceiling mid-pass restarts the walk from the first
+  retained slot, the still-referenced encoded page stays charged until its round
+  is released, and closing a consumer during a deferred pass leaves no workspace
+  and rejects later work.
+- **Admission and native reads.** Additional admission tests cover refusal before
+  resolver, lock, witness or content callbacks; mapped exact and aggregate
+  witness helpers; charged cursorless blank visits and throwing attempts;
+  attempted capture work remaining paid without spending decode-slot allowance;
+  and discovery grants propagated through plan lookup and validity checks with
+  attempted-prefix settlement on defer or exception. Zero-allowance provider
+  validation defers after the fixed provider-work budget is exhausted.
+  Retained-input reprojection tests refuse before parsing, preserve the cursor and
+  exact long count, release temporary workspace, and retry after work returns.
+  These synthetic admission seams do not prove ordinary native-container
+  serviceability by themselves. Separate native-read wiring tests exercise
+  complete single- and double-chest preview, a direct live-witness helper and
+  fresh tracking under unchanged default memory, with exact read counts and no
+  outstanding reservations. Lazy-consumption tests refuse a read without fresh
+  scratch after capture scratch has closed; caller-wiring tests cover shared
+  Catalog grants and attempted work settlement without resetting the allowance
+  for each item. Exceptional cursorless-prefix tests cover actual attempted
+  visits, including blank views and a throwing handoff, for both scanning and
+  selection; unobserved legacy callbacks retain their conservative accounting
+  boundary.
+
 `InventorySourceSnapshotTest` covers explicit-adapter source-access snapshot
 preparation and decode headlessly: capture stays lazy until preparation and the prepared
 route is fixed for the handle lifetime; explicit atomic-detached evidence
@@ -820,7 +827,7 @@ tombstones. Explicit nested container, bundle, projectile and food-conversion
 patches retain sanitized sparse child displays. A local-default-drift fixture
 decodes one sparse patch against different server and client defaults and
 restores the registry afterward. Execution evidence and its limits are scoped
-[below](#patch-only-identity-and-display-verification-pending).
+[below](#patch-only-identity-and-display-coverage-and-live-gaps).
 
 `InventoryDomainCodecTest` covers the closed code-owned inventory observation
 codec: the absolute display envelope round-trips within its bound, a display
@@ -1697,6 +1704,25 @@ Related Backend, lifecycle, reconfiguration and client-inventory coverage
 belongs to the same boundary and execution record. These are headless backend,
 publisher, wire and client-session assertions, not a live client UI run.
 
+`InventoryPreviewResetLifecycleTest` adds three current-source cases for the
+same-epoch `CLOSE` and replacement-`OPENED` boundaries. They drive both `CLOSE`
+races: one after the server tick has rebuilt the view and one where ingress
+discovers the advance. Both use the previous view to retire the retained
+request, release ownership immediately and prevent a late replacement `OPENED`
+from recreating the client request; both request slots reopen after the next
+eligible period. Wrong inventory or presentation epochs, a future view, an
+unknown request, another authenticated recipient, an old connection's same-ID
+`CLOSE` after reconnect and stale `OPEN`/`SELECT` are rejected, while accepted
+action fences still require the current view. The ninety-one-session case
+saturates the real generic control queue on legal wire capacity: terminal
+`INVALID` remains pending with its request state until the replacement
+`OPENED` handoff, then the same request hands off `OPENED` before `INVALID`; the
+real client preview becomes invalid and unselectable without another source
+probe or read. The cases call the real client presentation-reset interface but
+do not cover the complete presentation `RESET` network path or live
+multiplayer. Their execution evidence is recorded in the
+[inventory reset regression final verification](build-checks.md#inventory-reset-regression-final-verification).
+
 ### Recipientless Tracking and successor continuity
 
 Historical evidence note: these successor and permission-suspension cases
@@ -2202,14 +2228,15 @@ has headless source-to-encoded-client and publication coverage:
   chest controls progress on the next eligible tick. These tests pass production
   bytes into the client, then cover seed retirement, fresh zero recovery and
   expiry without a live world or loader launch.
-- `InventoryBackendTest` distinguishes the current retained exact-key count
-  from the last delivered row, and the current folded-key count from another
-  all-ID subtotal. Missing counts, forged/retired tokens, owner, baseline, state
-  and current-invalidity failures reject without a content read. The patch-flow,
-  authority-order and `SableInventoryHandoffTest` fixtures cover distinct exact
-  identities, current binding, rollback and one materialization/store/outcome
-  under replay. Sable alias/revocation fixtures remain scoped to recording
-  providers, not a live sub-level.
+- `InventoryBackendTest` covers missing counts, forged/retired tokens, owner,
+  baseline, state and current-invalidity failures rejecting without a content
+  read. The retained exact-key count versus the last delivered row and the
+  retained folded-key count versus another all-ID subtotal are consolidated
+  under [creation snapshot server coverage](#creation-snapshot-server-coverage).
+  The patch-flow, authority-order and `SableInventoryHandoffTest` fixtures cover
+  distinct exact identities, current binding, rollback and one
+  materialization/store/outcome under replay. Sable alias/revocation fixtures
+  remain scoped to recording providers, not a live sub-level.
 - Native backend/client cases cover Basic-before-seed delivery, independent
   recipient baselines without recipient previews, current owner lock/layout
   checks, display-cap repair without recapture or restored detail, first-scan
@@ -2249,8 +2276,9 @@ has headless source-to-encoded-client and publication coverage:
 
 ### Creation snapshot server coverage
 
-`InventoryBackendTest` covers the selected retained exact or folded count rather
-than the last client frame, missing-reference rejection without a zero, aggregate
+`InventoryBackendTest` distinguishes the current retained exact-key count from
+the last delivered row and the current folded-key count from another all-ID
+subtotal; it also covers missing-reference rejection without a zero, aggregate
 display, and selection outcomes preserved across transport refusal.
 `InventoryCreationPublicationTest` covers the current fully handed cumulative
 Preview-cut completion proof, initial staging that shares Tracking capacity, and
@@ -2332,7 +2360,28 @@ behavior, the cause of the reported Vault import/export failure,
 live multiplayer, GPU rendering
 or performance. Those remain [manual scenarios](manual-integration.md#inventory).
 
-## Patch-only identity and display verification pending
+### Client creation admission capacity
+
+`ClientInventoryCreationCapacityTest` adds 13 current-source wire-decoded
+client-admission cases. It fills the finite metadata-channel capacity with real
+initial receipts while no tracking channels are active, then replaces an old
+same-logical-target marker whose local fallback has gone stale but whose server
+expiry is not due. The replacement uses a frozen double-chest key across
+different physical members and owners, is admitted net-zero, and keeps the
+accepted marker and its frozen creation snapshot, including a long amount above
+the exact-integer boundary. A timely `EXPIRED` control releases the slot.
+
+Four ineligible scenarios reject without store, presentation, name, seed or
+feedback effects. Invalid epoch, view, name and revision creates have no effects
+while the same revision remains retryable; a same-ID stale or newer refresh
+preserves the old metadata and visual deadline; and the prospective check visits
+actual unique metadata entries without releasing a slot. The class uses the real
+wire envelope and client runtime only; it does not cover server-side eviction or
+capacity, live expiry or clock skew, the complete presentation `RESET` network
+path, or live multiplayer. Its execution evidence is recorded in the
+[inventory reset regression final verification](build-checks.md#inventory-reset-regression-final-verification).
+
+## Patch-only identity and display coverage and live gaps
 
 The [inventory owner](../../architecture/presentation/inventory.md#item-variants-and-component-fallback)
 and [D0012](../../decisions/D0012-explicit-patch-identity-and-display.md) define the
@@ -2340,8 +2389,9 @@ accepted boundary. The test-source inventory above includes the shared-reader,
 native patch oracle, server projection, client explicit-value/default-inheritance,
 pre-frozen-key backend flow and publisher scheduling assertions.
 
-The completed integration run used Java 21 from PowerShell with UTF-8 output and
-redirected logs. It exited zero with `BUILD SUCCESSFUL` for:
+**Automated coverage.** The completed integration run used Java 21 from
+PowerShell with UTF-8 output and redirected logs. It exited zero with
+`BUILD SUCCESSFUL` for:
 
 ```powershell
 .\gradlew.bat --no-daemon --console=plain --continue :common:test :fabric:test :forge:test :neoforge:test :fabric:build :forge:build :neoforge:build verifyModIdentity
@@ -2394,9 +2444,11 @@ resolver fixtures are complementary seams, not one native-container-to-live-row
 test. The publisher budget fixture starts from preprojected data, and the client
 wrapper fixture models a local default map rather than installing owo; the
 separate real-jar probe has only the baseline and construction scope above.
-Automatic Mixins, live installed-mod behavior, loader lifecycle, default drift across real
-installations, delayed transport, GUI rows, tracking HUD and GPU behavior remain
-outside that source evidence. Live scenarios remain in the
+
+**Pending live evidence.** Automatic Mixins, live installed-mod behavior, loader
+lifecycle, default drift across real installations, delayed transport, GUI rows,
+tracking HUD and GPU behavior remain outside that source evidence. Live
+scenarios remain in the
 [manual matrix](manual-integration.md#inventory).
 
 ## Resynchronization and budget policy verification
@@ -2445,14 +2497,15 @@ Execution scope is recorded in the
 Live timing and multiplayer repair remain pending in the
 [manual matrix](manual-integration.md#inventory).
 
-## Frozen recipient authorization and fluid provider trust pending
+## Frozen recipient authorization and fluid provider trust coverage and live gaps
 
 The passing lane-policy, recipientless tracking, certified-pool, member-gate and
 creation-snapshot cases above remain evidence for the dynamic permission and
 per-member gates they exercised. They do not establish
 [D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md).
 
-Current-source automated cases cover inventory-specific boundaries.
+**Automated coverage.** Current-source automated cases cover inventory-specific
+boundaries.
 `InventoryFrozenControlTest` covers the first `HELLO` using live host session
 authority, same-epoch reset isolation between recipients, a normal same-epoch
 reset republishing Preview, and `CLOSE` removing a deferred `OPENED` retry.
@@ -2465,7 +2518,7 @@ admission at capacity without mutation and reopening after removal. These cases
 passed in the final combined execution recorded in
 [build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
 
-Pending live evidence covers:
+**Pending live evidence.** The following scenarios remain pending:
 
 - Inventory Preview authorization at request start and a separate new
   authorization for the `SELECT` create, without inheriting the Preview result;
@@ -2474,7 +2527,7 @@ Pending live evidence covers:
   Pings use the new result;
 - the global field/selector/child, `RESET`, metadata and same-type Ping grant
   scenarios in the
-  [presentation pending section](presentation.md#frozen-recipient-content-authorization-verification-pending);
+  [presentation coverage](presentation.md#frozen-recipient-content-authorization-coverage-and-live-gaps);
   and
 - fluid validation through the target provider, whose boundary and any
   stricter-validation exceptions remain owned by the
@@ -2486,19 +2539,21 @@ The [manual matrix](manual-integration.md#frozen-recipient-authorization-and-pro
 owns the pending live checks. The final combined automated acceptance is recorded
 in [build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
 
-## Idle source health scheduling verification pending
+## Idle source health scheduling coverage and live gaps
 
-`InventoryIdleHealthSchedulingTest` contains six current-source headless cases
-over the production backend and runtime with counted source-validation and read
-callbacks. They cover a completed Preview's period and a deferred overdue retry,
-an active Tracking sweep probing while an idle lease waits, a live Tracking
-period change, `INVALID` recovery retaining its per-tick attempts, a late-joining
-recipient's immediate check and completed handoff, and a pending handoff
-validating immediately before send without a separate health probe. These
-current-source cases passed in the final combined execution recorded in
+**Automated coverage.** `InventoryIdleHealthSchedulingTest` contains six
+current-source headless cases over the production backend and runtime with
+counted source-validation and read callbacks. They cover a completed Preview's
+period and a deferred overdue retry, an active Tracking sweep probing while an
+idle lease waits, a live Tracking period change, `INVALID` recovery retaining its
+per-tick attempts, a late-joining recipient's immediate check and completed
+handoff, and a pending handoff validating immediately before send without a
+separate health probe. These current-source cases passed in the final combined
+execution recorded in
 [build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
-They are deterministic seam checks, not a live timing measurement; live timing
-remains pending. The
+They are deterministic seam checks, not a live timing measurement.
+
+**Pending live evidence.** Live timing remains pending. The
 [idle source health scheduling contract](../../architecture/presentation/inventory.md#idle-source-health-scheduling)
 owns the behavior.
 
@@ -2684,7 +2739,7 @@ cross-tick completed-content cache.
 - generic registered-component compatibility, external-context and owned-tree
   assertions do not establish installed Offroad or other mod runtime
   compatibility, or live preview-to-tracking identity fidelity. The
-  [patch-only transition](#patch-only-identity-and-display-verification-pending)
+  [patch-only transition](#patch-only-identity-and-display-coverage-and-live-gaps)
   passed the complete integration run. Client hook and explicit-value
   text-snapshot fixtures remain local seams, not safety guarantees for arbitrary
   hooks, inherited defaults or asynchronous component mutation;
@@ -2727,9 +2782,11 @@ cross-tick completed-content cache.
   scenarios;
 - headless provider-confirmed external inventory coverage is inventoried above,
   including `SableInventorySourceTest` alias/source independence and the Create
-  Vault member-access tests. No automated test exercises live provider
-  membership, a real loaded sub-level, a real provider layout or capability, or
-  loader/runtime integration;
+  Vault member-access tests. Pending live evidence for the external and Sable
+  provider source is: live membership and sub-level checks, a real provider
+  layout or capability, member-gate revocation between operations, getter-free
+  selection and the preview-to-tracking handoff, inventory reads on the three
+  supported loaders, and loader/runtime integration;
 - item-display safety has headless decode, cache, row and callback-baseline
   evidence, not GPU or live profile-service evidence. Native nested decoding may
   create PROFILE callbacks before icon eligibility is known; selected detached
@@ -2749,9 +2806,4 @@ cross-tick completed-content cache.
   live GUI row, an installed mod's local item defaults, client/server default
   drift across real installations, asynchronous component mutation, multiplayer
   transport or transport timing; the full send-queue and byte-budget path
-  remains manual/integration evidence;
-- the provider-confirmed external inventory source against a live Sable runtime
-  and world: live membership and sub-level checks, a real provider layout or
-  capability, member-gate revocation between operations, getter-free selection
-  and the preview-to-tracking handoff, and inventory reads on the three
-  supported loaders;
+  remains manual/integration evidence.

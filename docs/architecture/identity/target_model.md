@@ -84,9 +84,10 @@ trigger and dimension distinction is owned by
 [names and chat](../rendering/names_chat.md#new-marker-feedback-and-dimension-behavior).
 An unavailable entity may use its last or authoritative anchor. An ordinary
 committed block replacement does not itself remove the marker; the renderer uses
-the current block render state. Explicitly supported external-target markers
-retain their established periodic invalidation exception. Pure locations retain
-existing location-ping semantics.
+the current block render state only for the same block registry identity
+([Marker data versus current presentation](#marker-data-versus-current-presentation)).
+Explicitly supported external-target markers retain their established periodic
+invalidation exception. Pure locations retain existing location-ping semantics.
 
 Pre-commit validation is
 owned by [target validation](../authority/target_validation.md); the local
