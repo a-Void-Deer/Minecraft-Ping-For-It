@@ -55,7 +55,7 @@ category. Paired controls are marked explicitly; all other controls are
 full-width singletons. Localized category labels retain their stable navigation
 identities.
 
-The client scope has seven categories:
+The client scope has eight categories:
 
 - **Markers & Range**:
   - Reach and display duration: Ping Distance, then Marker Display Duration.
@@ -88,35 +88,34 @@ The client scope has seven categories:
   Channel, followed by Ping Volume and Configuration Notice Size under Sound
   and notices.
 - **Rendering & Config**: Entity Block Geometry under entity-block rendering,
-  followed by Logging Detail under its own Logging subgroup, then the
-  configuration-file action under its own heading.
+  followed by the configuration-file action under its own heading.
 - **Performance**: a Wheel options subgroup with Precise Selection Capture
   Period.
+- **Debug**: Logging Detail under a Logging subgroup.
 
-The server scope has five categories:
+The server scope has six categories:
 
 - **Channel & Players**: Default Channel Mode and Player Tracking.
 - **Send Rate**: Regeneration Time and Rate Limit.
 - **Marker Duration**: Sync Duration.
-- **Performance**: a Monitoring subgroup with Budget Delay Notifications and
-  Server Logging Detail, in that order; a Shared inventory budgets subgroup with
-  Physical Slots per Tick, Pending Memory, Display Byte Size, and Frame Byte
-  Size; an Inventory preview subgroup with Preview Period, Preview Variants per
-  Client Period, Preview Slots per Client, Preview Slots Server-wide, Preview
-  Targets per
-  Client, Preview Client Byte Multiplier, and Preview Global Byte Multiplier;
-  and an Inventory tracking subgroup with Tracking Period, Separate Tracking by
-  Face, Separate Tracking by Player, Tracking Variants per Target, Tracking Slots
-  per Target, Tracking Slots Server-wide, Tracking
-  Stream Byte Multiplier, Tracking Snapshot Byte Multiplier, Tracking Global
-  Byte Multiplier, Resync Cooldown, Heartbeat Cadence, and Byte Smoothing
-  Window.
+- **Performance**: a Monitoring subgroup with Budget Delay Notifications; a
+  Shared inventory budgets subgroup with Physical Slots per Tick, Pending
+  Memory, Display Byte Size, and Frame Byte Size; an Inventory preview subgroup
+  with Preview Period, Preview Variants per Client Period, Preview Slots per
+  Client, Preview Slots Server-wide, Preview Targets per Client, Preview Client
+  Byte Multiplier, and Preview Global Byte Multiplier; and an Inventory tracking
+  subgroup with Tracking Period, Separate Tracking by Face, Separate Tracking by
+  Player, Tracking Variants per Target, Tracking Slots per Target, Tracking
+  Slots Server-wide, Tracking Stream Byte Multiplier, Tracking Snapshot Byte
+  Multiplier, Tracking Global Byte Multiplier, Resync Cooldown, Heartbeat
+  Cadence, and Byte Smoothing Window.
 - **Server Presentation**: Server Policy.
+- **Debug**: Server Logging Detail under a Logging subgroup.
 
 All ordinary server controls occupy full-width rows, including the Monitoring,
-Shared inventory budgets, Inventory preview, and Inventory tracking subgroups.
-The independent Server Policy editor retains its native controls and related
-Allow/Block pairs.
+Logging, Shared inventory budgets, Inventory preview, and Inventory tracking
+subgroups. The independent Server Policy editor retains its native controls and
+related Allow/Block pairs.
 
 Each option's value semantics and persisted form remain owned by the
 configuration catalogues. This page owns their UI placement, layout and help,
@@ -140,9 +139,11 @@ settings, and when edits take effect, including next-hold application where
 applicable. It must not promise a distinction that the implementation does not
 produce.
 
-All twelve category buttons have scope-appropriate descriptions of what the
+All fourteen category buttons have scope-appropriate descriptions of what the
 category contains. The client and server Performance descriptions distinguish
-local capture work from server monitoring and inventory administration.
+local capture work from server monitoring and inventory administration, and the
+client and server Debug descriptions distinguish local logging detail from
+server logging detail.
 
 Navigation and action controls also provide native hover and keyboard-focus
 help. Scope/category navigation and Back distinguish navigation from final
@@ -226,13 +227,11 @@ modifier.
 ## Server performance category
 
 The Performance category begins with a plain-text, non-interactive Monitoring
-subgroup and two full-width rows: the Budget Delay Notifications server-value
-toggle, then Server Logging Detail. The notice toggle's tooltip identifies
-administrator budget-delay notices and the effect of enabling or disabling
-them; value semantics and the persisted key are owned by
-[server configuration](../config/server.md#persisted-fields). The logging row's
-profile, activation and disclosure behavior is owned by
-[Logging profile controls](#logging-profile-controls).
+subgroup and one full-width row: the Budget Delay Notifications server-value
+toggle. The notice toggle's tooltip identifies administrator budget-delay
+notices and the effect of enabling or disabling them; value semantics and the
+persisted key are owned by
+[server configuration](../config/server.md#persisted-fields).
 
 The inventory administration controls follow in three
 plain-text, non-interactive subgroups: Shared inventory budgets, Inventory
@@ -366,9 +365,9 @@ so the screen does not promise that the server applied or persisted an update.
 
 The ordinary server settings are one shared session within the screen, not a
 per-category or per-visit section. This session covers the Channel & Players,
-Send Rate, Marker Duration, and Performance categories, including the monitoring
-toggle, the server logging-profile control, and the twenty-three inventory
-administration leaves. Entering the server
+Send Rate, Marker Duration, Performance, and Debug categories, including the
+monitoring toggle, the server logging-profile control, and the twenty-three
+inventory administration leaves. Entering the server
 scope shows its overview and requests the current server configuration when the
 client holds a live connection and the session holds no loaded or in-flight
 snapshot. The loaded snapshot, the draft, and any in-flight request are retained

@@ -452,11 +452,11 @@ containing only scope, redacted `NORMAL` versus unredacted detail, and apply
 timing, without naming `DEBUG` or hinting at the activation gesture, plus a
 read-only server viewer seeing `DEBUG` without editing.
 
-`SettingsCategoryCatalogTest` verifies the logging controls' placement and the
-approved catalogue totals: 75 entries, 73 value controls, and 25 server
-Performance rows. `SettingsLocalizationCoverageTest` requires localized labels
-and tooltips for both logging rows in all eight bundled locales.
-`ServerConfigVarNumbersTest` covers logging-profile tags
+`SettingsCategoryCatalogTest` verifies the logging controls' Debug-category
+placement and the approved catalogue totals: 75 entries, 73 value controls, and
+24 server Performance rows. `SettingsLocalizationCoverageTest` requires
+localized labels and tooltips for both logging rows in all eight bundled
+locales. `ServerConfigVarNumbersTest` covers logging-profile tags
 `0`/`1`/`2`, mask bit 29, preservation when unselected, and rejection of missing,
 unknown, noncanonical, truncated and trailing forms even when unselected.
 
@@ -539,21 +539,20 @@ below describe source-reviewed coverage rather than a recorded full-suite run:
 
 - `SettingsNavigationModelTest` covers the initial client overview, per-scope
   overview selection, each category opening its own leaf page within its scope,
-  the immutable seven-category client and five-category server order including
-  the client Performance and server Performance categories, the client
-  Performance category opening independently of the server Performance
-  category, the server Presentation category opening without
-  ordinary-server permission, the
-  separate Server Presentation leaf, independent ordinary-server and
-  presentation-policy view access, and independent per-page viewport and focus
-  retention; it also covers rejection of a
-  foreign-scope category without navigating, Back to the owning overview with a
-  root that reports itself as not closable, per-page scroll and focus retention
-  across back, scope switching and forced routing, clamping of negative scroll,
-  routing an invalid server draft mask to the category that owns its first
-  invalid field, retaining a shared `ServerSettingsModel` draft across
-  navigation, and keeping a server leaf open when a permission revocation
-  retains a viewable snapshot while forcing the scope overview without one;
+  the immutable eight-category client and six-category server order including
+  both scopes' Performance and Debug categories, the client Performance
+  category opening independently of the server Performance category, the server
+  Presentation category opening without ordinary-server permission, the separate
+  Server Presentation leaf, independent ordinary-server and presentation-policy
+  view access, and independent per-page viewport and focus retention; it also
+  covers rejection of a foreign-scope category without navigating, Back to the
+  owning overview with a root that reports itself as not closable, per-page
+  scroll and focus retention across back, scope switching and forced routing,
+  clamping of negative scroll, routing an invalid server draft mask to the
+  category that owns its first invalid field, retaining a shared
+  `ServerSettingsModel` draft across navigation, and keeping a server leaf open
+  when a permission revocation retains a viewable snapshot while forcing the
+  scope overview without one;
 - `SettingsCategoryCatalogTest` covers all 75 catalog entries exactly once in
   their approved categories, including the 73 value controls and two non-value
   entries. Independent expectations check section headings, section/row order,
@@ -562,8 +561,9 @@ below describe source-reviewed coverage rather than a recorded full-suite run:
   defensive copies and immutable descriptor collections, and rejection of blank
   headings, empty sections/rows, oversized rows, and duplicate members in a
   pair. Every category has a distinct description key, including scope-distinct
-  Performance keys. Inventory leaves remain server-only, and invalid-inventory
-  routing skips the monitoring toggle and follows the owning control order.
+  Performance and Debug keys. Inventory leaves remain server-only, and
+  invalid-inventory routing skips the monitoring toggle and follows the owning
+  control order.
   This is descriptor coverage, not native placement or focus dispatch; the
   [UI contract](../../UI/settings-screen.md#category-layout) owns the detailed
   category and grouping rules;
