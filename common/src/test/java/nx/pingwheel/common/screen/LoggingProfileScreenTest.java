@@ -179,6 +179,8 @@ class LoggingProfileScreenTest {
 	void clientRowShowsARealDebugValueAndAppliesClickChangesToConfigAndRuntime() throws Exception {
 		var config = new ClientConfig();
 		config.setLoggingProfile(LoggingProfile.DEBUG);
+		config.setMonitorHudEnabled(true);
+		config.getMonitorMetrics().setSelected("summary.processing", false);
 		LoggingProfile previousRuntime = Diagnostics.profile(DiagnosticSide.CLIENT);
 		try {
 			withScreen(config, (screen, client) -> {
@@ -190,16 +192,21 @@ class LoggingProfileScreenTest {
 				button.onPress();
 				assertEquals(LoggingProfile.NORMAL, config.getLoggingProfile());
 				assertEquals(LoggingProfile.NORMAL, Diagnostics.profile(DiagnosticSide.CLIENT));
+				assertFalse(config.isMonitorHudEnabled());
+				assertFalse(config.getMonitorMetrics().isSelected("summary.processing"));
 
 				button.onPress();
 				assertEquals(LoggingProfile.DEEP, config.getLoggingProfile());
 				assertEquals(LoggingProfile.DEEP, Diagnostics.profile(DiagnosticSide.CLIENT));
+				assertFalse(config.isMonitorHudEnabled());
 
 				PhysicalAltKeys.hold(true);
 				button.onPress();
 				assertEquals(LoggingProfile.DEBUG, config.getLoggingProfile());
 				assertEquals(LoggingProfile.DEBUG, Diagnostics.profile(DiagnosticSide.CLIENT),
 					"the client setter immediately publishes the selected profile");
+				assertFalse(config.isMonitorHudEnabled(), "re-entering DEBUG never restores the HUD");
+				assertFalse(config.getMonitorMetrics().isSelected("summary.processing"));
 			});
 		} finally {
 			PhysicalAltKeys.hold(false);

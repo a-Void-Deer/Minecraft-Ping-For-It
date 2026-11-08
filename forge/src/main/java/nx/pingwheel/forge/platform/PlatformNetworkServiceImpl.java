@@ -1,8 +1,9 @@
 package nx.pingwheel.forge.platform;
 
 import io.netty.buffer.Unpooled;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
+import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.PacketFlow;
 import net.minecraft.resources.ResourceLocation;
@@ -16,6 +17,8 @@ import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.network.ServerConfigTransportDiagnostics;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
+import nx.pingwheel.common.platform.RouteSupport;
+import nx.pingwheel.common.platform.TransportHandoff;
 import nx.pingwheel.common.presentation.minecraft.InventoryCreationReceiptTransport.EncodedTransport;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -24,6 +27,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.BiPredicate;
+import java.util.function.Predicate;
 
 import static nx.pingwheel.common.CommonClient.Game;
 
@@ -74,13 +78,18 @@ public class PlatformNetworkServiceImpl implements IPlatformNetworkService, Enco
 
 	@Override
 	public void sendToClient(IPacket packet, ServerPlayer player) {
-		var kind = ServerConfigTransportDiagnostics.kindOf(packet);
+		sendToClientObserved(packet, player);
+	}
+
+	@Override
+	public TransportHandoff sendToClientObserved(IPacket packet, ServerPlayer player) {
+		@Nullable ServerConfigTransportDiagnostics.Kind kind = ServerConfigTransportDiagnostics.kindOf(packet);
 		@Nullable EventNetworkChannel chan = CHANNEL_MAP.get(packet.getId());
 
 		if (chan == null || !canSend.test(chan, player)) {
 			ServerConfigTransportDiagnostics.decision(Diagnostics.server(), kind,
 				ServerConfigTransportDiagnostics.Decision.ROUTE_UNAVAILABLE);
-			return;
+			return TransportHandoff.NOT_HANDED_OFF;
 		}
 
 		var buf = new FriendlyByteBuf(Unpooled.buffer());
@@ -89,6 +98,28 @@ public class PlatformNetworkServiceImpl implements IPlatformNetworkService, Enco
 		send.accept(player, NetworkProtocol.PLAY.buildPacket(PacketFlow.CLIENTBOUND, chan, buf));
 		ServerConfigTransportDiagnostics.decision(Diagnostics.server(), kind,
 			ServerConfigTransportDiagnostics.Decision.SEND_DISPATCHED);
+		return TransportHandoff.HANDED_OFF;
+	}
+
+	@Override
+	public RouteSupport serverboundSupport(ResourceLocation routeId) {
+		@Nullable Minecraft client = Game;
+		@Nullable ClientPacketListener connection = client == null ? null : client.getConnection();
+		if (connection == null || !connection.isAcceptingMessages()) return RouteSupport.UNKNOWN;
+		return routeSupport(routeId, true, channel -> channel.isRemotePresent(connection.getConnection()));
+	}
+
+	@Override
+	public RouteSupport clientboundSupport(ServerPlayer player, ResourceLocation routeId) {
+		boolean ready = player.connection != null && player.connection.isAcceptingMessages();
+		return routeSupport(routeId, ready, channel -> canSend.test(channel, player));
+	}
+
+	static RouteSupport routeSupport(ResourceLocation routeId, boolean ready, Predicate<EventNetworkChannel> canSend) {
+		// A live play listener is reached after Forge's configuration/channel exchange.
+		if (!ready) return RouteSupport.UNKNOWN;
+		@Nullable EventNetworkChannel channel = CHANNEL_MAP.get(routeId);
+		return channel != null && canSend.test(channel) ? RouteSupport.AVAILABLE : RouteSupport.UNAVAILABLE;
 	}
 
 	@Override

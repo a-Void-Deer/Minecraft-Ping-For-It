@@ -225,7 +225,7 @@ public record InventoryConfigValues(@Nullable @Unmodifiable Map<Field, @Nullable
 	}
 
 	/** Every unselected leaf is retained from this current authoritative value. */
-	public InventoryConfigValues merge(int changedFields, InventoryConfigValues replacement) {
+	public InventoryConfigValues merge(long changedFields, InventoryConfigValues replacement) {
 		var merged = new EnumMap<Field, @Nullable Value>(Field.class);
 		merged.putAll(fields);
 		for (Field field : Field.values()) {

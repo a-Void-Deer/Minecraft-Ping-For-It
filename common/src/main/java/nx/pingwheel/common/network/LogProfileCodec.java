@@ -19,12 +19,6 @@ final class LogProfileCodec {
 		};
 	}
 
-	static LoggingProfile readFinal(FriendlyByteBuf buf) {
-		LoggingProfile profile = read(buf);
-		ServerInventoryConfigCodec.requireEnd(buf);
-		return profile;
-	}
-
 	static void write(FriendlyByteBuf buf, @Nullable LoggingProfile profile) {
 		if (profile == null) {
 			throw new IllegalArgumentException("missing server configuration logging profile");

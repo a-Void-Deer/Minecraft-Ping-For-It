@@ -318,7 +318,7 @@ class SettingsScreenInputLayoutTest {
 			assertNotNull(model.sizeAdjustment());
 			String frameDraft = model.inventoryText(Field.FRAME_BYTE_MULTIPLIER);
 			String displayDraft = model.inventoryText(Field.DISPLAY_BYTE_MULTIPLIER);
-			int dirty = model.dirtyFields();
+			long dirty = model.dirtyFields();
 			var client = Minecraft.getInstance();
 			client.setScreen(new ConfirmScreen(ignored -> client.setScreen(screen), Component.literal("Pause"), Component.literal("Return")));
 			assertGestureCancelled(screen);

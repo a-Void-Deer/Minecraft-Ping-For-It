@@ -9,6 +9,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import nx.pingwheel.common.config.ChannelMode;
+import nx.pingwheel.common.config.InventorySettings;
 import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.ServerConfigUpdate;
@@ -313,7 +314,7 @@ public class ServerCore {
 		final boolean loggingSelected = (update.changedFields() & ServerConfigUpdate.LOGGING_PROFILE) != 0;
 		final boolean profileOnly = update.changedFields() == ServerConfigUpdate.LOGGING_PROFILE;
 		final @Nullable LoggingProfile selectedProfile = loggingSelected ? mergedSnapshot.loggingProfile() : null;
-		final var inventoryCandidate = (update.changedFields() & ServerConfigUpdate.ALL_INVENTORY_FIELDS) != 0
+		final @Nullable InventorySettings inventoryCandidate = (update.changedFields() & ServerConfigUpdate.ALL_INVENTORY_FIELDS) != 0
 			? plan.snapshot().inventory().toSettings() : null;
 
 		if ((update.changedFields() & ServerConfigUpdate.DEFAULT_CHANNEL_MODE) != 0) {
@@ -339,6 +340,10 @@ public class ServerCore {
 		if ((update.changedFields() & ServerConfigUpdate.LOGGING_PROFILE) != 0) {
 			config.setLoggingProfile(mergedSnapshot.loggingProfile());
 		}
+		// The merge already selected and normalized all three dependent leaves.
+		// Assign the final flags after the final profile, not payload defaults.
+		config.setPreviewMonitorEnabled(mergedSnapshot.previewMonitorEnabled());
+		config.setTrackingMonitorEnabled(mergedSnapshot.trackingMonitorEnabled());
 		config.validate();
 		if (loggingSelected) {
 			Diagnostics.setProfile(DiagnosticSide.SERVER, config.getLoggingProfile());
@@ -356,7 +361,7 @@ public class ServerCore {
 			() -> updateContext(update.changedFields(), true, profileOnly, selectedProfile));
 	}
 
-	private static String updateContext(int mask, boolean trustedPermission, boolean profileOnly,
+	private static String updateContext(long mask, boolean trustedPermission, boolean profileOnly,
 		@Nullable LoggingProfile selectedProfile) {
 		return "mask=" + mask + "; trustedPermission=" + trustedPermission + "; profileOnly=" + profileOnly
 			+ (selectedProfile == null ? "" : "; selectedProfile=" + selectedProfile);

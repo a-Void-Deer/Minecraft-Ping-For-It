@@ -15,7 +15,7 @@ import static nx.pingwheel.common.Global.C2S_NAMESPACE;
 
 /** Sends one dirty-field-only server settings update. */
 public record ServerConfigUpdateC2SPacket(
-	int changedFields,
+	long changedFields,
 	@Nullable ChannelMode defaultChannelMode,
 	boolean playerTrackingEnabled,
 	int msToRegenerate,
@@ -23,7 +23,9 @@ public record ServerConfigUpdateC2SPacket(
 	int syncDuration,
 	@Nullable InventoryConfigValues inventory,
 	boolean budgetDelayNotificationsEnabled,
-	@Nullable LoggingProfile loggingProfile
+	@Nullable LoggingProfile loggingProfile,
+	boolean previewMonitorEnabled,
+	boolean trackingMonitorEnabled
 ) implements IPacket {
 	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(
 		C2S_NAMESPACE,
@@ -32,7 +34,7 @@ public record ServerConfigUpdateC2SPacket(
 
 	/** Compatibility constructor for callers that do not edit sync duration. */
 	public ServerConfigUpdateC2SPacket(
-		int changedFields,
+		long changedFields,
 		@Nullable ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled,
 		int msToRegenerate,
@@ -42,14 +44,14 @@ public record ServerConfigUpdateC2SPacket(
 	}
 
 	/** Source compatibility only; v5 wire updates always contain the complete inventory block. */
-	public ServerConfigUpdateC2SPacket(int changedFields, @Nullable ChannelMode defaultChannelMode,
+	public ServerConfigUpdateC2SPacket(long changedFields, @Nullable ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled, int msToRegenerate, int rateLimit, int syncDuration) {
 		this(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
 			syncDuration, InventoryConfigValues.defaults());
 	}
 
 	/** Source compatibility only; the complete v5 wire shape includes the notice flag. */
-	public ServerConfigUpdateC2SPacket(int changedFields, @Nullable ChannelMode defaultChannelMode,
+	public ServerConfigUpdateC2SPacket(long changedFields, @Nullable ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled, int msToRegenerate, int rateLimit, int syncDuration,
 		@Nullable InventoryConfigValues inventory) {
 		this(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
@@ -59,11 +61,12 @@ public record ServerConfigUpdateC2SPacket(
 	public ServerConfigUpdateC2SPacket(ServerConfigUpdate update) {
 		this(update.changedFields(), update.defaultChannelMode(), update.playerTrackingEnabled(),
 			update.msToRegenerate(), update.rateLimit(), update.syncDuration(), update.inventory(),
-			update.budgetDelayNotificationsEnabled(), update.loggingProfile());
+			update.budgetDelayNotificationsEnabled(), update.loggingProfile(),
+			update.previewMonitorEnabled(), update.trackingMonitorEnabled());
 	}
 
 	/** Source compatibility only; the complete v5 wire shape always includes a profile. */
-	public ServerConfigUpdateC2SPacket(int changedFields, @Nullable ChannelMode defaultChannelMode,
+	public ServerConfigUpdateC2SPacket(long changedFields, @Nullable ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled, int msToRegenerate, int rateLimit, int syncDuration,
 		@Nullable InventoryConfigValues inventory, boolean budgetDelayNotificationsEnabled) {
 		this(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
@@ -77,7 +80,18 @@ public record ServerConfigUpdateC2SPacket(
 	public static final int SYNC_DURATION = ServerConfigUpdate.SYNC_DURATION;
 	public static final int BUDGET_DELAY_NOTIFICATIONS_ENABLED = ServerConfigUpdate.BUDGET_DELAY_NOTIFICATIONS_ENABLED;
 	public static final int LOGGING_PROFILE = ServerConfigUpdate.LOGGING_PROFILE;
-	public static final int ALL_FIELDS = ServerConfigUpdate.ALL_FIELDS;
+	public static final long PREVIEW_MONITOR_ENABLED = ServerConfigUpdate.PREVIEW_MONITOR_ENABLED;
+	public static final long TRACKING_MONITOR_ENABLED = ServerConfigUpdate.TRACKING_MONITOR_ENABLED;
+	public static final long ALL_FIELDS = ServerConfigUpdate.ALL_FIELDS;
+
+	/** Source compatibility only; final v5 wire updates require both monitor flags. */
+	public ServerConfigUpdateC2SPacket(long changedFields, @Nullable ChannelMode defaultChannelMode,
+		boolean playerTrackingEnabled, int msToRegenerate, int rateLimit, int syncDuration,
+		@Nullable InventoryConfigValues inventory, boolean budgetDelayNotificationsEnabled,
+		@Nullable LoggingProfile loggingProfile) {
+		this(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			syncDuration, inventory, budgetDelayNotificationsEnabled, loggingProfile, false, false);
+	}
 
 	/** Invalid values are used only by safe-decoding fallback. */
 	public ServerConfigUpdateC2SPacket() {
@@ -86,7 +100,7 @@ public record ServerConfigUpdateC2SPacket(
 
 	public ServerConfigUpdateC2SPacket(FriendlyByteBuf buf) {
 		this(
-			ServerConfigVarNumbers.readInt(buf),
+			ServerConfigVarNumbers.readLong(buf),
 			ServerConfigSnapshotS2CPacket.readChannelMode(buf),
 			ServerInventoryConfigCodec.readBoolean(buf),
 			ServerConfigVarNumbers.readInt(buf),
@@ -94,12 +108,14 @@ public record ServerConfigUpdateC2SPacket(
 			ServerConfigVarNumbers.readInt(buf),
 			ServerInventoryConfigCodec.read(buf),
 			ServerInventoryConfigCodec.readBoolean(buf),
-			LogProfileCodec.readFinal(buf));
+			LogProfileCodec.read(buf),
+			ServerInventoryConfigCodec.readBoolean(buf),
+			ServerInventoryConfigCodec.readFinalBoolean(buf));
 	}
 
 	@Override
 	public void write(FriendlyByteBuf buf) {
-		buf.writeVarInt(changedFields);
+		buf.writeVarLong(changedFields);
 		ServerConfigSnapshotS2CPacket.writeChannelMode(buf, defaultChannelMode);
 		buf.writeBoolean(playerTrackingEnabled);
 		buf.writeVarInt(msToRegenerate);
@@ -108,6 +124,8 @@ public record ServerConfigUpdateC2SPacket(
 		ServerInventoryConfigCodec.write(buf, inventory);
 		buf.writeBoolean(budgetDelayNotificationsEnabled);
 		LogProfileCodec.write(buf, loggingProfile);
+		buf.writeBoolean(previewMonitorEnabled);
+		buf.writeBoolean(trackingMonitorEnabled);
 	}
 
 	@Override
@@ -121,7 +139,9 @@ public record ServerConfigUpdateC2SPacket(
 			syncDuration,
 			inventory,
 			budgetDelayNotificationsEnabled,
-			loggingProfile).isValid();
+			loggingProfile,
+			previewMonitorEnabled,
+			trackingMonitorEnabled).isValid();
 	}
 
 	public ServerConfigUpdate update() {
@@ -134,10 +154,12 @@ public record ServerConfigUpdateC2SPacket(
 			syncDuration,
 			inventory,
 			budgetDelayNotificationsEnabled,
-			loggingProfile);
+			loggingProfile,
+			previewMonitorEnabled,
+			trackingMonitorEnabled);
 	}
 
-	public int changedMask() {
+	public long changedMask() {
 		return changedFields;
 	}
 

@@ -29,15 +29,33 @@ public class ServerConfig implements IConfig {
 	/** Controls administrator budget-delay messages only; WARN diagnostics remain enabled. */
 	boolean budgetDelayNotificationsEnabled = ConfigDefaults.Server.BUDGET_DELAY_NOTIFICATIONS_ENABLED;
 	@Nullable LoggingProfile loggingProfile = ConfigDefaults.Server.LOGGING_PROFILE;
+	boolean previewMonitorEnabled = ConfigDefaults.Server.PREVIEW_MONITOR_ENABLED;
+	boolean trackingMonitorEnabled = ConfigDefaults.Server.TRACKING_MONITOR_ENABLED;
 
 	/** Returns a usable preference even before persisted nulls have been validated. */
 	public LoggingProfile getLoggingProfile() {
 		return loggingProfile == null ? ConfigDefaults.Server.LOGGING_PROFILE : loggingProfile;
 	}
 
-	/** Stores the preference only; the runtime lifecycle owns publishing logging policy. */
+	/** Stores authoritative preferences; the runtime lifecycle owns publishing logging policy. */
 	public void setLoggingProfile(@Nullable LoggingProfile loggingProfile) {
 		this.loggingProfile = loggingProfile == null ? ConfigDefaults.Server.LOGGING_PROFILE : loggingProfile;
+		normalizeMonitorEnabled();
+	}
+
+	public void setPreviewMonitorEnabled(boolean enabled) {
+		previewMonitorEnabled = enabled && getLoggingProfile() == LoggingProfile.DEBUG;
+	}
+
+	public void setTrackingMonitorEnabled(boolean enabled) {
+		trackingMonitorEnabled = enabled && getLoggingProfile() == LoggingProfile.DEBUG;
+	}
+
+	private void normalizeMonitorEnabled() {
+		if (getLoggingProfile() != LoggingProfile.DEBUG) {
+			previewMonitorEnabled = false;
+			trackingMonitorEnabled = false;
+		}
 	}
 
 	public PresentationSettings getPresentation() {
@@ -47,6 +65,7 @@ public class ServerConfig implements IConfig {
 	@Override
 	public void validate() {
 		loggingProfile = getLoggingProfile();
+		normalizeMonitorEnabled();
 		if (presentation == null) presentation = PresentationSettings.serverDefaults();
 		presentation.validate();
 		if (inventory == null) inventory = InventorySettings.serverDefaults();

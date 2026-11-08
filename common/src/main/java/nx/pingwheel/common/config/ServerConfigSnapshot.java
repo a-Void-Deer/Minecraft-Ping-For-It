@@ -18,7 +18,9 @@ public record ServerConfigSnapshot(
 	int syncDuration,
 	@Nullable InventoryConfigValues inventory,
 	boolean budgetDelayNotificationsEnabled,
-	@Nullable LoggingProfile loggingProfile
+	@Nullable LoggingProfile loggingProfile,
+	boolean previewMonitorEnabled,
+	boolean trackingMonitorEnabled
 ) {
 	public ServerConfigSnapshot(
 		boolean canEdit,
@@ -60,7 +62,9 @@ public record ServerConfigSnapshot(
 			ServerConfigBounds.clampSyncDuration(config.getSyncDuration()),
 			InventoryConfigValues.from(config.getInventory()),
 			config.isBudgetDelayNotificationsEnabled(),
-			config.getLoggingProfile());
+			config.getLoggingProfile(),
+			config.getLoggingProfile() == LoggingProfile.DEBUG && config.isPreviewMonitorEnabled(),
+			config.getLoggingProfile() == LoggingProfile.DEBUG && config.isTrackingMonitorEnabled());
 	}
 
 	/** Source compatibility only; remote snapshots always include a logging profile. */
@@ -82,12 +86,24 @@ public record ServerConfigSnapshot(
 			syncDuration,
 			inventory,
 			budgetDelayNotificationsEnabled,
-			loggingProfile);
+			loggingProfile,
+			previewMonitorEnabled,
+			trackingMonitorEnabled);
+	}
+
+	/** Source compatibility only; wire snapshots always carry both monitor flags. */
+	public ServerConfigSnapshot(
+		boolean canEdit, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		int msToRegenerate, int rateLimit, int syncDuration, @Nullable InventoryConfigValues inventory,
+		boolean budgetDelayNotificationsEnabled, @Nullable LoggingProfile loggingProfile) {
+		this(canEdit, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			syncDuration, inventory, budgetDelayNotificationsEnabled, loggingProfile, false, false);
 	}
 
 	public boolean isSafe() {
 		return defaultChannelMode != null
 			&& loggingProfile != null
+			&& (loggingProfile == LoggingProfile.DEBUG || (!previewMonitorEnabled && !trackingMonitorEnabled))
 			&& msToRegenerate >= 0
 			&& rateLimit >= 0
 			&& syncDuration >= ServerConfigBounds.MIN_PING_DURATION

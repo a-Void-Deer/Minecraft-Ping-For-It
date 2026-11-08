@@ -66,6 +66,12 @@ final class ServerInventoryConfigCodec {
 		return value == 1;
 	}
 
+	static boolean readFinalBoolean(FriendlyByteBuf buf) {
+		boolean value = readBoolean(buf);
+		requireEnd(buf);
+		return value;
+	}
+
 	static InventoryConfigValues readComplete(FriendlyByteBuf buf) {
 		InventoryConfigValues inventory = read(buf);
 		requireEnd(buf);

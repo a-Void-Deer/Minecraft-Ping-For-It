@@ -32,7 +32,7 @@ class ServerConfigVarNumbersTest {
 	private static final byte @Unmodifiable [] UPDATE = hex(
 		"20 00 01 01 01 07 "
 			+ "00 10 01 41 07 00 11 00 43 00 61 00 03 00 04 00 08 "
-			+ "03 00 09 00 51 00 80 01 00 04 00 04 00 08 00 01 01 04 04 01 00 01 00");
+			+ "03 00 09 00 51 00 80 01 00 04 00 04 00 08 00 01 01 04 04 01 00 01 00 00 00");
 	private static final byte @Unmodifiable [] SNAPSHOT = concat(hex("01 01"), UPDATE, 1, UPDATE.length - 1);
 
 	@ParameterizedTest
@@ -108,7 +108,7 @@ class ServerConfigVarNumbersTest {
 
 	@ParameterizedTest
 	@ValueSource(ints = {0, 1, 3, 4, 5, 7, 9, 10, 12, 14, 16, 18, 20, 22, 23, 25, 27, 29, 32, 34, 36, 37, 38, 39, 40, 41, 45})
-	void everyUpdateVariableIntRejectsOverflowWithoutServiceMutation(int offset) {
+	void everyUpdateNumberRejectsOverflowOrUnknownMaskWithoutServiceMutation(int offset) {
 		assertRejectedUpdate(replace(UPDATE, offset, hex("81 80 80 80 10")));
 	}
 
@@ -132,9 +132,8 @@ class ServerConfigVarNumbersTest {
 
 	@ParameterizedTest
 	@MethodSource("invalidNumberEncodings")
-	void malformedCapAndMaskGrammarBothRejectWithoutMutation(String raw) {
+	void malformedIntCapGrammarRejectsWithoutMutation(String raw) {
 		assertRejectedUpdate(replace(UPDATE, 7, hex(raw)));
-		assertRejectedUpdate(replace(UPDATE, 0, hex(raw)));
 	}
 
 	@Test
@@ -157,8 +156,8 @@ class ServerConfigVarNumbersTest {
 		assertEncoding(UPDATE, new ServerConfigUpdateC2SPacket(32, ChannelMode.AUTO, true, 1, 1, 7, inventory, true));
 		assertEncoding(SNAPSHOT, new ServerConfigSnapshotS2CPacket(1L, true, ChannelMode.AUTO, true, 1, 1, 7, inventory, true));
 		assertEncoding(hex("01"), new ServerConfigRequestC2SPacket(1L));
-		byte[] falseUpdate = replace(UPDATE, UPDATE.length - 2, hex("00"));
-		byte[] falseSnapshot = replace(SNAPSHOT, SNAPSHOT.length - 2, hex("00"));
+		byte[] falseUpdate = replace(UPDATE, UPDATE.length - 4, hex("00"));
+		byte[] falseSnapshot = replace(SNAPSHOT, SNAPSHOT.length - 4, hex("00"));
 		assertEncoding(falseUpdate, new ServerConfigUpdateC2SPacket(32, ChannelMode.AUTO, true, 1, 1, 7, inventory, false));
 		assertEncoding(falseSnapshot, new ServerConfigSnapshotS2CPacket(1L, true, ChannelMode.AUTO, true, 1, 1, 7, inventory, false));
 		for (boolean enabled : new boolean[] {false, true}) {
@@ -186,8 +185,8 @@ class ServerConfigVarNumbersTest {
 		assertStrictShape(UPDATE, ServerConfigUpdateC2SPacket::readSafe);
 		assertStrictShape(SNAPSHOT, ServerConfigSnapshotS2CPacket::readSafe);
 		for (String invalid : new String[] {"02", "ff"}) {
-			assertRejectedUpdate(replace(UPDATE, UPDATE.length - 2, hex(invalid)));
-			assertCorruptAndDrained(replace(SNAPSHOT, SNAPSHOT.length - 2, hex(invalid)), ServerConfigSnapshotS2CPacket::readSafe);
+			assertRejectedUpdate(replace(UPDATE, UPDATE.length - 4, hex(invalid)));
+			assertCorruptAndDrained(replace(SNAPSHOT, SNAPSHOT.length - 4, hex(invalid)), ServerConfigSnapshotS2CPacket::readSafe);
 		}
 	}
 
@@ -206,8 +205,8 @@ class ServerConfigVarNumbersTest {
 	}
 
 	@Test
-	void rawNoticeMaskBit26AppliesFalseWhileBit30RemainsUnknown() {
-		byte[] raw = replace(replace(UPDATE, UPDATE.length - 2, hex("00")), 0, hex("80 80 80 20"));
+	void rawNoticeMaskBit26AppliesFalseWhileBit32RemainsUnknown() {
+		byte[] raw = replace(replace(UPDATE, UPDATE.length - 4, hex("00")), 0, hex("80 80 80 20"));
 		var buf = buffer(raw);
 		try {
 			var packet = ServerConfigUpdateC2SPacket.readSafe(buf);
@@ -220,7 +219,7 @@ class ServerConfigVarNumbersTest {
 			assertEquals(current().rateLimit(), result.snapshot().rateLimit());
 			assertEquals(0, buf.readableBytes());
 		} finally { buf.release(); }
-		assertRejectedUpdate(replace(UPDATE, 0, hex("80 80 80 80 04")));
+		assertRejectedUpdate(replace(UPDATE, 0, hex("80 80 80 80 10")));
 	}
 
 	@Test
@@ -228,8 +227,8 @@ class ServerConfigVarNumbersTest {
 		for (boolean faces : new boolean[] {false, true}) {
 			for (boolean players : new boolean[] {false, true}) {
 				byte[] raw = UPDATE.clone();
-				raw[raw.length - 4] = (byte) (faces ? 1 : 0);
-				raw[raw.length - 3] = (byte) (players ? 1 : 0);
+				raw[raw.length - 6] = (byte) (faces ? 1 : 0);
+				raw[raw.length - 5] = (byte) (players ? 1 : 0);
 				var inventory = fixtureInventory().with(Field.TRACKING_DISTINGUISH_FACES, Value.bool(faces))
 					.with(Field.TRACKING_DISTINGUISH_PLAYERS, Value.bool(players));
 				assertEncoding(raw, new ServerConfigUpdateC2SPacket(32, ChannelMode.AUTO, true, 1, 1, 7, inventory, true));
@@ -258,8 +257,8 @@ class ServerConfigVarNumbersTest {
 
 	@Test
 	void supersededV5WithoutFinalLoggingProfileIsCorruptRatherThanDefaulted() {
-		assertRejectedUpdate(Arrays.copyOf(UPDATE, UPDATE.length - 1));
-		assertCorruptAndDrained(Arrays.copyOf(SNAPSHOT, SNAPSHOT.length - 1), ServerConfigSnapshotS2CPacket::readSafe);
+		assertRejectedUpdate(Arrays.copyOf(UPDATE, UPDATE.length - 3));
+		assertCorruptAndDrained(Arrays.copyOf(SNAPSHOT, SNAPSHOT.length - 3), ServerConfigSnapshotS2CPacket::readSafe);
 	}
 
 	@ParameterizedTest
@@ -270,12 +269,12 @@ class ServerConfigVarNumbersTest {
 			case DEEP -> "01";
 			case DEBUG -> "02";
 		};
-		byte[] raw = replace(UPDATE, UPDATE.length - 1, hex(tag));
+		byte[] raw = replace(UPDATE, UPDATE.length - 3, hex(tag));
 		byte[] selected = replace(raw, 0, hex("80 80 80 80 02"));
 		var inventory = fixtureInventory();
 		assertEncoding(selected, new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE,
 			ChannelMode.AUTO, true, 1, 1, 7, inventory, true, profile));
-		byte[] snapshotBytes = replace(SNAPSHOT, SNAPSHOT.length - 1, hex(tag));
+		byte[] snapshotBytes = replace(SNAPSHOT, SNAPSHOT.length - 3, hex(tag));
 		assertEncoding(snapshotBytes, new ServerConfigSnapshotS2CPacket(1L, true, ChannelMode.AUTO,
 			true, 1, 1, 7, inventory, true, profile));
 		var buf = buffer(selected);
@@ -314,15 +313,15 @@ class ServerConfigVarNumbersTest {
 	@ValueSource(strings = {"", "03", "7f", "80", "80 00", "81 00", "82 00", "ff ff ff ff 0f",
 		"80 80 80 80 08", "81 80 80 80 10", "80 80 80 80 80 00", "00 00", "02 01"})
 	void missingUnknownNegativeNoncanonicalTruncatedAndTrailingProfilesRejectEvenUnselected(String invalid) {
-		byte[] raw = replace(UPDATE, UPDATE.length - 1, hex(invalid));
+		byte[] raw = replace(UPDATE, UPDATE.length - 3, hex(invalid));
 		assertRejectedUpdate(raw); // Existing mask selects physical slots only, not logging.
 		assertRejectedUpdate(replace(raw, 0, hex("80 80 80 80 02")));
-		assertCorruptAndDrained(replace(SNAPSHOT, SNAPSHOT.length - 1, hex(invalid)), ServerConfigSnapshotS2CPacket::readSafe);
+		assertCorruptAndDrained(replace(SNAPSHOT, SNAPSHOT.length - 3, hex(invalid)), ServerConfigSnapshotS2CPacket::readSafe);
 	}
 
 	@Test
 	void bothNewBooleanBytesRejectNonBooleanOverlongMissingAndSupersededV4Shapes() {
-		for (int fromEnd : new int[] {3, 4}) {
+		for (int fromEnd : new int[] {5, 6}) {
 			for (String invalid : new String[] {"02", "ff", "81 00"}) {
 				assertRejectedUpdate(replace(UPDATE, UPDATE.length - fromEnd, hex(invalid)));
 				assertCorruptAndDrained(replace(SNAPSHOT, SNAPSHOT.length - fromEnd, hex(invalid)), ServerConfigSnapshotS2CPacket::readSafe);
@@ -330,10 +329,70 @@ class ServerConfigVarNumbersTest {
 			assertRejectedUpdate(replace(UPDATE, UPDATE.length - fromEnd, new byte[0]));
 			assertCorruptAndDrained(replace(SNAPSHOT, SNAPSHOT.length - fromEnd, new byte[0]), ServerConfigSnapshotS2CPacket::readSafe);
 		}
-		byte[] oldUpdate = Arrays.copyOf(UPDATE, UPDATE.length - 1);
+		byte[] oldUpdate = Arrays.copyOf(UPDATE, UPDATE.length - 3);
 		oldUpdate = replace(replace(oldUpdate, oldUpdate.length - 2, new byte[0]), oldUpdate.length - 3, new byte[0]);
 		assertRejectedUpdate(oldUpdate);
 		assertCorruptAndDrained(concat(hex("01 01"), oldUpdate, 1, oldUpdate.length - 1), ServerConfigSnapshotS2CPacket::readSafe);
+	}
+
+	@Test
+	void rawLongMasksKeepBits30And31AndTheCompleteUnsignedIntSurface() {
+		String @Unmodifiable [] masks = {"80 80 80 80 04", "80 80 80 80 08", "ff ff ff ff 0f"};
+		long @Unmodifiable [] expected = {1073741824L, 2147483648L, 4294967295L};
+		for (int index = 0; index < masks.length; index++) {
+			for (boolean preview : new boolean[] {false, true}) {
+				for (boolean tracking : new boolean[] {false, true}) {
+					byte[] values = UPDATE.clone();
+					values[values.length - 3] = 2; // DEBUG
+					values[values.length - 2] = (byte) (preview ? 1 : 0);
+					values[values.length - 1] = (byte) (tracking ? 1 : 0);
+					byte[] raw = replace(values, 0, hex(masks[index]));
+					var packet = new ServerConfigUpdateC2SPacket(expected[index], ChannelMode.AUTO, true,
+						1, 1, 7, fixtureInventory(), true, LoggingProfile.DEBUG, preview, tracking);
+					assertEncoding(raw, packet);
+					var buf = buffer(raw);
+					try {
+						var decoded = ServerConfigUpdateC2SPacket.readSafe(buf);
+						assertFalse(decoded.isCorrupt());
+						assertEquals(expected[index], decoded.changedFields());
+						assertEquals(expected[index], decoded.changedMask());
+						assertEquals(packet, decoded);
+						assertEquals(packet.update(), decoded.update());
+					} finally { buf.release(); }
+					byte[] snapshot = concat(hex("01 01"), values, 1, values.length - 1);
+					assertEncoding(snapshot, new ServerConfigSnapshotS2CPacket(1L, true, ChannelMode.AUTO,
+						true, 1, 1, 7, fixtureInventory(), true, LoggingProfile.DEBUG, preview, tracking));
+					buf = buffer(snapshot);
+					try {
+						var decoded = ServerConfigSnapshotS2CPacket.readSafe(buf);
+						assertFalse(decoded.isCorrupt());
+						assertEquals(preview, decoded.snapshot().previewMonitorEnabled());
+						assertEquals(tracking, decoded.snapshot().trackingMonitorEnabled());
+					} finally { buf.release(); }
+				}
+			}
+		}
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = {"00", "80", "81 00", "80 00", "ff ff ff ff 8f 00",
+		"80 80 80 80 10", "ff ff ff ff ff ff ff ff 7f", "80 80 80 80 80 80 80 80 80 01",
+		"ff ff ff ff ff ff ff ff ff 01", "81 80 80 80 80 80 80 80 80 80 00"})
+	void malformedNegativeOverflowOverlongNoncanonicalAndUnknownLongMasksReject(String raw) {
+		assertRejectedUpdate(replace(UPDATE, 0, hex(raw)));
+	}
+
+	@Test
+	void finalMonitorBooleansAreStrictAndOldDevelopmentV5NeverDefaultsMissingFields() {
+		for (int fromEnd : new int[] {1, 2}) {
+			for (String invalid : new String[] {"02", "ff", "81 00"}) {
+				assertRejectedUpdate(replace(UPDATE, UPDATE.length - fromEnd, hex(invalid)));
+				assertCorruptAndDrained(replace(SNAPSHOT, SNAPSHOT.length - fromEnd, hex(invalid)),
+					ServerConfigSnapshotS2CPacket::readSafe);
+			}
+		}
+		assertRejectedUpdate(Arrays.copyOf(UPDATE, UPDATE.length - 2));
+		assertCorruptAndDrained(Arrays.copyOf(SNAPSHOT, SNAPSHOT.length - 2), ServerConfigSnapshotS2CPacket::readSafe);
 	}
 
 	private static <T extends IPacket> void assertStrictShape(byte[] raw, Function<FriendlyByteBuf, T> reader) {

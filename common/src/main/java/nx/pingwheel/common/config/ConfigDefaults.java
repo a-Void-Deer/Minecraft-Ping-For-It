@@ -22,6 +22,7 @@ public final class ConfigDefaults {
 	@NotNullByDefault
 	public static final class Client {
 		public static final LoggingProfile LOGGING_PROFILE = LoggingProfile.NORMAL;
+		public static final boolean MONITOR_HUD_ENABLED = false;
 		public static final int PING_VOLUME = 100;
 		public static final int PING_DISTANCE = 2048;
 		public static final int PING_SIZE = 100;
@@ -96,6 +97,8 @@ public final class ConfigDefaults {
 	public static final class Server {
 
 		public static final LoggingProfile LOGGING_PROFILE = LoggingProfile.NORMAL;
+		public static final boolean PREVIEW_MONITOR_ENABLED = false;
+		public static final boolean TRACKING_MONITOR_ENABLED = false;
 		public static final ChannelMode DEFAULT_CHANNEL_MODE = ChannelMode.AUTO;
 		public static final boolean PLAYER_TRACKING_ENABLED = true;
 		public static final boolean BUDGET_DELAY_NOTIFICATIONS_ENABLED = true;

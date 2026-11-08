@@ -26,7 +26,9 @@ public record ServerConfigSnapshotS2CPacket(
 	int syncDuration,
 	@Nullable InventoryConfigValues inventory,
 	boolean budgetDelayNotificationsEnabled,
-	@Nullable LoggingProfile loggingProfile
+	@Nullable LoggingProfile loggingProfile,
+	boolean previewMonitorEnabled,
+	boolean trackingMonitorEnabled
 ) implements IPacket {
 	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(
 		S2C_NAMESPACE,
@@ -77,7 +79,9 @@ public record ServerConfigSnapshotS2CPacket(
 			snapshot.syncDuration(),
 			snapshot.inventory(),
 			snapshot.budgetDelayNotificationsEnabled(),
-			snapshot.loggingProfile());
+			snapshot.loggingProfile(),
+			snapshot.previewMonitorEnabled(),
+			snapshot.trackingMonitorEnabled());
 	}
 
 	/** Source compatibility only; the complete v5 wire shape always includes a profile. */
@@ -99,7 +103,18 @@ public record ServerConfigSnapshotS2CPacket(
 			ServerConfigVarNumbers.readInt(buf),
 			ServerInventoryConfigCodec.read(buf),
 			ServerInventoryConfigCodec.readBoolean(buf),
-			LogProfileCodec.readFinal(buf));
+			LogProfileCodec.read(buf),
+			ServerInventoryConfigCodec.readBoolean(buf),
+			ServerInventoryConfigCodec.readFinalBoolean(buf));
+	}
+
+	/** Source compatibility only; final v5 wire snapshots require both monitor flags. */
+	public ServerConfigSnapshotS2CPacket(long requestId, boolean canEdit, @Nullable ChannelMode defaultChannelMode,
+		boolean playerTrackingEnabled, int msToRegenerate, int rateLimit, int syncDuration,
+		@Nullable InventoryConfigValues inventory, boolean budgetDelayNotificationsEnabled,
+		@Nullable LoggingProfile loggingProfile) {
+		this(requestId, canEdit, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			syncDuration, inventory, budgetDelayNotificationsEnabled, loggingProfile, false, false);
 	}
 
 	@Override
@@ -114,6 +129,8 @@ public record ServerConfigSnapshotS2CPacket(
 		ServerInventoryConfigCodec.write(buf, inventory);
 		buf.writeBoolean(budgetDelayNotificationsEnabled);
 		LogProfileCodec.write(buf, loggingProfile);
+		buf.writeBoolean(previewMonitorEnabled);
+		buf.writeBoolean(trackingMonitorEnabled);
 	}
 
 	@Override
@@ -121,6 +138,7 @@ public record ServerConfigSnapshotS2CPacket(
 		return requestId <= 0L
 			|| defaultChannelMode == null
 			|| loggingProfile == null
+			|| (loggingProfile != LoggingProfile.DEBUG && (previewMonitorEnabled || trackingMonitorEnabled))
 			|| msToRegenerate < 0
 			|| rateLimit < 0
 			|| syncDuration < ServerConfigBounds.MIN_PING_DURATION
@@ -138,7 +156,9 @@ public record ServerConfigSnapshotS2CPacket(
 			syncDuration,
 			inventory,
 			budgetDelayNotificationsEnabled,
-			loggingProfile);
+			loggingProfile,
+			previewMonitorEnabled,
+			trackingMonitorEnabled);
 	}
 
 	public ResourceLocation getId() {

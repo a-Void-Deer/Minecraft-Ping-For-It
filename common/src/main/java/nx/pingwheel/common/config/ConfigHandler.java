@@ -11,6 +11,7 @@ import com.google.gson.JsonParser;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import nx.pingwheel.common.diagnostics.SafeDiagnosticValue;
+import nx.pingwheel.common.monitor.MonitorSchema.Metric;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.platform.IPlatformContextService;
@@ -387,7 +388,7 @@ public class ConfigHandler <T extends IConfig> {
 		return serializeConfig(null);
 	}
 
-	private String serializeConfig(JsonElement rootToPreserve) {
+	private String serializeConfig(@Nullable JsonElement rootToPreserve) {
 		JsonElement serialized = JsonParser.parseString(gson.toJson(config));
 		if (!serialized.isJsonObject()) {
 			throw new IllegalStateException("serialized config root is not an object");
@@ -407,6 +408,12 @@ public class ConfigHandler <T extends IConfig> {
 
 			var merged = rootToPreserve.getAsJsonObject().deepCopy();
 			for (var entry : serialized.getAsJsonObject().entrySet()) {
+				if (configType == ClientConfig.class && entry.getKey().equals("monitorMetrics")
+					&& merged.has("monitorMetrics") && merged.get("monitorMetrics").isJsonObject()
+					&& entry.getValue().isJsonObject()) {
+					mergeMonitorMetricMembers(merged.getAsJsonObject("monitorMetrics"), entry.getValue().getAsJsonObject());
+					continue;
+				}
 				if (configType == ServerConfig.class && entry.getKey().equals("inventory")
 					&& merged.has("inventory") && merged.get("inventory").isJsonObject()
 					&& entry.getValue().isJsonObject()) {
@@ -446,6 +453,22 @@ public class ConfigHandler <T extends IConfig> {
 		JsonElement marker = new com.google.gson.JsonPrimitive(modVersion.originalVersion());
 		serialized.getAsJsonObject().add(ConfigVersionUpdater.VERSION_KEY, marker);
 		return documentGson.toJson(serialized);
+	}
+
+	/** Selector-local preservation for guarded writeback, including unknown IDs and object members. */
+	private static void mergeMonitorMetricMembers(JsonObject preserved, JsonObject known) {
+		@Nullable JsonElement previous = preserved.get("overrides");
+		if (previous != null && previous.isJsonObject()) {
+			// Sparse defaults must remove stale known overrides rather than let a
+			// preservation base restore a previously disabled summary preference.
+			JsonObject overrides = previous.getAsJsonObject();
+			for (Metric metric : Metric.all()) overrides.remove(metric.id());
+			for (var entry : known.getAsJsonObject("overrides").entrySet()) {
+				overrides.add(entry.getKey(), entry.getValue());
+			}
+		} else {
+			preserved.add("overrides", known.get("overrides"));
+		}
 	}
 
 	/** Inventory-local preservation for guarded shape writeback, including unknown nested members. */
