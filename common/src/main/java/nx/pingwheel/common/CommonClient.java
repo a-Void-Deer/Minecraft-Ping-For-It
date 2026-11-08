@@ -5,7 +5,6 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.OutlineBufferSource;
@@ -44,8 +43,7 @@ import nx.pingwheel.common.name.ClientTargetNameDecoder;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.InventoryMonitorStatusS2CPacket;
 import nx.pingwheel.common.network.InventoryMonitorSampleS2CPacket;
-import nx.pingwheel.common.monitor.MonitorLabels;
-import nx.pingwheel.common.monitor.client.ClientMonitorState;
+import nx.pingwheel.common.monitor.MonitorHudLabels;
 import nx.pingwheel.common.monitor.client.MonitorDisplayModel;
 import nx.pingwheel.common.monitor.integration.ClientMonitorService;
 import nx.pingwheel.common.render.InventoryMonitorHud;
@@ -97,11 +95,8 @@ public class CommonClient {
 	/** Network callbacks capture only this published scalar; mutable state remains client-thread confined. */
 	private static volatile long monitorConnectionGeneration = -1;
 	private static MonitorDisplayModel monitorModel = MonitorDisplayModel.EMPTY;
-	private static @Nullable ClientMonitorState.View monitorView;
-	private static @Nullable Font monitorFont;
-	private static @Nullable net.minecraft.locale.Language monitorLanguage;
-	private static int monitorWidth = -1;
-	private static InventoryMonitorHud.Viewport monitorViewport = new InventoryMonitorHud.Viewport(0, 0, 0, 0);
+	private static final InventoryMonitorHud.PreparationKey MONITOR_PREPARATION = new InventoryMonitorHud.PreparationKey();
+	private static InventoryMonitorHud.Viewport monitorViewport = new InventoryMonitorHud.Viewport(0, 0);
 
 	/** Runs the registered entity-outline sources over the production registry. */
 	private static final EntityOutlineRunner ENTITY_OUTLINE_RUNNER =
@@ -162,7 +157,7 @@ public class CommonClient {
 		pingRuntime = null;
 		monitorService = null;
 		monitorModel = MonitorDisplayModel.EMPTY;
-		monitorView = null;
+		MONITOR_PREPARATION.clear();
 		storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
 		if (inventory != null) {
 			inventory.reset();
@@ -632,38 +627,31 @@ public class CommonClient {
 			INTERACTION_TIME_SOURCE.nowMillis());
 	}
 
-	/** Tail paint consumes only tick/packet-prepared text; the original notice pass remains independent. */
+	/** Bottom-layer paint consumes only prepared text; screen/overlay presence does not hide it. */
 	public void onRenderMonitor(GuiGraphics graphics) {
-		if (monitorModel.rows().isEmpty() || Game == null || Game.options.hideGui || Game.player == null) return;
+		if (monitorModel.rows().isEmpty() || Game == null || Game.options.hideGui || Game.level == null || Game.player == null) return;
 		InventoryMonitorHud.draw(graphics, Game.font, monitorModel, monitorViewport);
 	}
 
 	private static void prepareMonitorView() {
-		if (pingRuntime == null || Game == null || Game.font == null) { monitorModel = MonitorDisplayModel.EMPTY; return; }
+		if (pingRuntime == null || Game == null || Game.font == null) {
+			monitorModel = MonitorDisplayModel.EMPTY; MONITOR_PREPARATION.clear(); return;
+		}
 		var state = pingRuntime.monitor();
-		if (!state.enabled()) { monitorModel = MonitorDisplayModel.EMPTY; monitorView = null; return; }
+		if (!state.enabled()) { monitorModel = MonitorDisplayModel.EMPTY; MONITOR_PREPARATION.clear(); return; }
 		int width = Game.getWindow().getGuiScaledWidth();
 		int height = Game.getWindow().getGuiScaledHeight();
-		int heartRows = Game.player == null ? 1 : Math.max(1,
-			(int) Math.ceil((Game.player.getMaxHealth() + Game.player.getAbsorptionAmount()) / 20.0));
-		int bottom = Math.max(52, 39 + heartRows * Math.max(3, 12 - heartRows));
-		if (Game.options.chatVisibility().get() != net.minecraft.world.entity.player.ChatVisiblity.HIDDEN) {
-			// Public chat API has no visible-line snapshot. Conservatively reserve
-			// its configured rectangle, including baseline, even while fading/empty.
-			bottom = Math.max(bottom, 40 + Game.gui.getChat().getHeight());
-		}
-		int noticeSize = ClientConfig.HANDLER.getConfig().getConfigurationNoticeSize();
-		int top = noticeSize <= 0 ? 0 : (int) (height * 0.25F)
-			+ (int) Math.ceil(Game.font.lineHeight * noticeSize / 200.0F) + 4;
-		if (monitorViewport.width() != width || monitorViewport.height() != height
-			|| monitorViewport.bottomReserved() != bottom || monitorViewport.topReserved() != top) {
-			monitorViewport = new InventoryMonitorHud.Viewport(width, height, bottom, top);
+		if (monitorViewport.width() != width || monitorViewport.height() != height) {
+			monitorViewport = new InventoryMonitorHud.Viewport(width, height);
 		}
 		var language = net.minecraft.locale.Language.getInstance();
-		if (monitorView == state.view() && monitorWidth == width && monitorFont == Game.font && monitorLanguage == language) return;
-		monitorModel = MonitorDisplayModel.prepare(state.view(), MonitorLabels::metric, MonitorLabels::shortLabel, MonitorLabels::scope)
-			.fit(Math.max(0, width - 8), Game.font.getSplitter());
-		monitorView = state.view(); monitorWidth = width; monitorFont = Game.font; monitorLanguage = language;
+		// LanguageManager installs a fresh Language on every resource reload, even
+		// when the locale code is unchanged. Font options can change glyph metrics
+		// on the same Font instance without changing that Language identity.
+		if (!MONITOR_PREPARATION.update(state.view(), width, Game.getWindow().getGuiScale(), Game.font, language,
+			Game.options.forceUnicodeFont().get(), Game.options.japaneseGlyphVariants().get())) return;
+		monitorModel = MonitorDisplayModel.prepare(state.view(), MonitorHudLabels.DEFAULT)
+			.fit(InventoryMonitorHud.availableTextWidth(width), Game.font.getSplitter());
 	}
 
 	/** Captured before loader enqueue, together with its original transport identity. */

@@ -188,7 +188,7 @@ class MonitorLabelsLocalizationTest {
 				}
 				var active = new ClientMonitorState.View(true, Metric.all(), ClientMonitorState.Status.ACTIVE,
 					ClientMonitorState.Status.ACTIVE, ClientMonitorState.Status.ACTIVE, localSample(), remoteSample());
-				var details = MonitorDisplayModel.prepare(active, MonitorLabels::metric, MonitorLabels::shortLabel, MonitorLabels::scope);
+				var details = MonitorDisplayModel.prepare(active, MonitorHudLabels.DEFAULT);
 				for (var row : details.rows()) assertResolved(locale, row.text());
 				for (Metric metric : Metric.rawMetrics()) {
 					assertResolved(locale, MonitorDisplayModel.format(metric,
@@ -197,14 +197,14 @@ class MonitorLabelsLocalizationTest {
 				}
 				for (ClientMonitorState.Status status : ClientMonitorState.Status.values()) {
 					var view = new ClientMonitorState.View(true, Metric.defaults(), status, status, status, localSample(), null);
-					var model = MonitorDisplayModel.prepare(view, MonitorLabels::metric, MonitorLabels::shortLabel, MonitorLabels::scope);
+					var model = MonitorDisplayModel.prepare(view, MonitorHudLabels.DEFAULT);
 					long offTokens = 0;
 					for (var row : model.rows()) {
 						assertResolved(locale, row.text());
 						for (var segment : row.segments()) {
 							if (segment.tone() == MonitorDisplayModel.Tone.OFF) {
 								offTokens++;
-								assertEquals(requireString(root, locale, ROOT + "status.off"), segment.text().getString());
+								assertEquals(requireString(root, locale, ROOT + "hud.status.off"), segment.text().getString());
 							}
 						}
 					}

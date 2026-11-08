@@ -1,12 +1,11 @@
 package nx.pingwheel.common.monitor.client;
 
+import java.math.BigInteger;
 import java.util.ArrayList;
-import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
-import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.function.Function;
 import net.minecraft.ChatFormatting;
@@ -18,11 +17,15 @@ import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
 import net.minecraft.network.chat.contents.PlainTextContents;
 import net.minecraft.util.FormattedCharSequence;
-import nx.pingwheel.common.monitor.MonitorDemand;
+import nx.pingwheel.common.monitor.MonitorHudLabels;
+import nx.pingwheel.common.monitor.MonitorHudLabels.Labels;
+import nx.pingwheel.common.monitor.MonitorHudLabels.Labels.Format;
+import nx.pingwheel.common.monitor.MonitorHudLabels.Labels.Stat;
 import nx.pingwheel.common.monitor.MonitorSchema.Budget;
 import nx.pingwheel.common.monitor.MonitorSchema.BudgetUsage;
 import nx.pingwheel.common.monitor.MonitorSchema.Counter;
 import nx.pingwheel.common.monitor.MonitorSchema.CounterReading;
+import nx.pingwheel.common.monitor.MonitorSchema.Gauge;
 import nx.pingwheel.common.monitor.MonitorSchema.GaugeReading;
 import nx.pingwheel.common.monitor.MonitorSchema.Lane;
 import nx.pingwheel.common.monitor.MonitorSchema.LaneSample;
@@ -33,22 +36,27 @@ import nx.pingwheel.common.monitor.MonitorSchema.Scope;
 import nx.pingwheel.common.monitor.MonitorSchema.SharedSample;
 import nx.pingwheel.common.monitor.MonitorSchema.Source;
 import nx.pingwheel.common.monitor.MonitorSchema.TimingStats;
+import nx.pingwheel.common.monitor.client.MonitorNumberFormat.Quality;
+import nx.pingwheel.common.monitor.client.MonitorNumberFormat.Result;
+import nx.pingwheel.common.monitor.client.MonitorNumberFormat.Value;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Immutable, preformatted HUD rows. Build on tick/status/selection/locale changes,
-	 * never while painting. Component caches are immutable literal leaves and
-	 * immutable sibling lists, not MutableComponent. No clock, transport, history or selector
- * mutation is available to a painter. Label ownership stays in the injected UI
- * label provider, shared with the selector controls.
+ * never while painting. Component caches are immutable literal leaves and
+ * immutable sibling lists, not MutableComponent. No clock, transport, history or
+ * selector mutation is available to a painter. HUD label ownership stays in the
+ * injected label provider rather than the full selector vocabulary.
  */
 @NotNullByDefault
 public final class MonitorDisplayModel {
 
 	public static final String PREFIX = "monitor.pingforit.";
 	public static final MonitorDisplayModel EMPTY = new MonitorDisplayModel(List.of());
+	private static final @Unmodifiable List<Scope> DISPLAY_SCOPES = List.of(Scope.SERVER_PREVIEW,
+		Scope.SERVER_TRACKING, Scope.SHARED, Scope.LOCAL_PREVIEW, Scope.LOCAL_TRACKING);
 
 	@NotNullByDefault
 	public enum Tone { NORMAL, OFF }
@@ -72,7 +80,7 @@ public final class MonitorDisplayModel {
 
 		private Row(String id, List<Segment> segments, List<String> metricIds) {
 			this.id = id; this.segments = List.copyOf(segments); this.metricIds = List.copyOf(metricIds);
-			List<Component> leaves = segments.stream().map(segment -> (Component) new CachedText(segment.text().getString(),
+			@Unmodifiable List<Component> leaves = segments.stream().map(segment -> (Component) new CachedText(segment.text().getString(),
 				segment.tone() == Tone.OFF ? Style.EMPTY.withColor(ChatFormatting.RED) : Style.EMPTY, List.of())).toList();
 			text = new CachedText("", Style.EMPTY, leaves);
 		}
@@ -131,50 +139,62 @@ public final class MonitorDisplayModel {
 		return new MonitorDisplayModel(fitted);
 	}
 
-	/** shortLabel excludes scope; fullLabel includes it. P5 supplies both from one vocabulary. */
-	public static MonitorDisplayModel prepare(ClientMonitorState.View view, Function<Metric, Component> fullLabel,
-		Function<Metric, Component> shortLabel, Function<Scope, Component> scopeLabel) {
+	/** Compose selected fields once per endpoint/lane; neither selection nor sampling is changed. */
+	public static MonitorDisplayModel prepare(ClientMonitorState.View view, Labels labels) {
 		if (!view.enabled()) return EMPTY;
-		List<Row> rows = new ArrayList<>();
-		MonitorDemand demand = MonitorDemand.fromMetrics(view.selected());
-		if (demand.includes(Lane.PREVIEW)) addStatus(rows, Scope.SERVER_PREVIEW, view.previewStatus(), scopeLabel);
-		if (demand.includes(Lane.TRACKING)) addStatus(rows, Scope.SERVER_TRACKING, view.trackingStatus(), scopeLabel);
-		if (demand.shared()) addStatus(rows, Scope.SHARED, view.sharedStatus(), scopeLabel);
-		Set<Metric> represented = new HashSet<>();
-		for (Metric summary : Metric.defaults()) {
-			if (!view.selected().contains(summary)) continue;
-			// One compact row per selected summary and region. Local has two
-			// independent lane cells; no local/server duration or ledger sums.
-			for (int group = 0; group < 4; group++) {
-				List<Component> cells = new ArrayList<>();
-				List<String> ids = new ArrayList<>();
-				boolean applicable = false;
-				for (Metric metric : summary.expanded()) {
-					Scope scope = Objects.requireNonNull(metric.scope());
-					if (group(scope) != group || !active(view, scope) || !principal(summary, metric)) continue;
-					applicable = true;
-					@Nullable MonitorSample sample = sample(view, scope);
-					if (!available(metric, sample)) continue;
-					Component value = compact(metric, sample, summary == Metric.SUMMARY_SYNC_RATE);
-					Component field = shortLabel.apply(metric);
-					if (scope.source() == Source.LOCAL) field = tr("format.scope", tr("lane." + Objects.requireNonNull(scope.lane()).id()), field);
-					cells.add(tr("format.entry", field, value));
-					ids.add(metric.id());
-					represented.add(metric);
-				}
-				if (!applicable) continue;
-				Component region = group == 3 ? tr("source.local") : scopeLabel.apply(groupScope(group));
-				Component heading = tr("format.scope", region, shortLabel.apply(summary));
-				rows.add(normalRow(summary.id() + "." + group, tr("format.row", heading, cells.isEmpty() ? unavailable() : join(cells)), ids));
+		Set<Metric> displayed = new HashSet<>();
+		Set<Metric> rates = new HashSet<>();
+		for (Metric selected : view.selected()) {
+			for (Metric metric : selected.expanded()) {
+				if (selected.kind() == Metric.Kind.SUMMARY && !principal(selected, metric)) continue;
+				displayed.add(metric);
+				if (selected == Metric.SUMMARY_SYNC_RATE) rates.add(metric);
 			}
 		}
-		for (Metric metric : Metric.rawMetrics()) {
-			if (!view.selected().contains(metric) || represented.contains(metric)) continue;
-			Scope scope = Objects.requireNonNull(metric.scope());
-			if (!active(view, scope)) continue;
-			rows.add(normalRow(metric.id(), tr("format.row", fullLabel.apply(metric), format(metric, sample(view, scope), false)), List.of(metric.id())));
+		List<Row> rows = new ArrayList<>();
+		for (Scope scope : DISPLAY_SCOPES) {
+			@Unmodifiable List<Metric> metrics = Metric.rawMetrics().stream()
+				.filter(metric -> scope.equals(metric.scope()) && displayed.contains(metric))
+				.sorted(Comparator.comparingInt(MonitorDisplayModel::category).thenComparingInt(MonitorDisplayModel::fieldOrder)).toList();
+			if (metrics.isEmpty()) continue;
+			ClientMonitorState.Status status = status(view, scope);
+			if (status != ClientMonitorState.Status.ACTIVE) {
+				rows.add(statusRow(scope, status, labels));
+				continue;
+			}
+			List<Component> fields = new ArrayList<>();
+			List<String> ids = new ArrayList<>();
+			boolean missing = false;
+			for (Metric metric : metrics) {
+				Metric base = baseMetric(metric);
+				if (metric.kind() == Metric.Kind.TIMING_MAX && displayed.contains(base)) continue;
+				boolean main = metric.kind() != Metric.Kind.TIMING_MAX;
+				@Nullable Metric peak = base.kind() == Metric.Kind.TIMING ? Metric.byId(base.id() + ".max") : null;
+				boolean showPeak = peak != null && displayed.contains(peak);
+				Field field = field(base, sample(view, scope), main, showPeak, view.selected().contains(base), rates.contains(base), labels, true);
+				if (field.text() != null) fields.add(field.text());
+				missing |= field.missing();
+				if (main) ids.add(base.id());
+				if (showPeak) ids.add(Objects.requireNonNull(peak).id());
+			}
+			if (missing || fields.isEmpty()) fields.add(labels.unavailable());
+			rows.add(normalRow("scope." + scope.id(), labels.format(Format.ROW, labels.prefix(scope),
+				join(fields, labels, Format.FIELD_SEPARATOR)), ids));
 		}
 		return new MonitorDisplayModel(rows);
+	}
+
+	/** Compatibility adapter. Full selector names are not used as a second HUD vocabulary. */
+	public static MonitorDisplayModel prepare(ClientMonitorState.View view, Function<Metric, Component> fullLabel,
+		Function<Metric, Component> shortLabel, Function<Scope, Component> scopeLabel) {
+		return prepare(view, new Labels() {
+			@Override public Component prefix(Scope scope) { return scopeLabel.apply(scope); }
+			@Override public Component field(Metric metric) { return shortLabel.apply(baseMetric(metric)); }
+			@Override public Component stat(Stat stat) { return MonitorHudLabels.DEFAULT.stat(stat); }
+			@Override public Component status(ClientMonitorState.Status status) { return MonitorHudLabels.DEFAULT.status(status); }
+			@Override public Component unavailable() { return MonitorHudLabels.DEFAULT.unavailable(); }
+			@Override public Component format(Format format, Object... args) { return MonitorHudLabels.DEFAULT.format(format, args); }
+		});
 	}
 
 	private static boolean principal(Metric summary, Metric metric) {
@@ -188,166 +208,193 @@ public final class MonitorDisplayModel {
 				|| metric.counter() == Counter.UNOBSERVED_HANDOFF_FRAMES;
 		}
 		if (summary == Metric.SUMMARY_REQUESTS_QUEUE) {
-			return metric.counter() == Counter.REQUESTS_RECEIVED || metric.counter() == Counter.ACCEPTED
+			return metric.counter() == Counter.REQUESTS_RECEIVED || metric.counter() == Counter.REQUESTS_ADMITTED || metric.counter() == Counter.ACCEPTED
 				|| metric.counter() == Counter.REJECTED || metric.gauge() != null
-				&& (metric.gauge() == nx.pingwheel.common.monitor.MonitorSchema.Gauge.REQUESTS_OPEN
-					|| metric.gauge() == nx.pingwheel.common.monitor.MonitorSchema.Gauge.QUEUE_LOGICAL_COST
-					|| metric.gauge() == nx.pingwheel.common.monitor.MonitorSchema.Gauge.CHANNELS
-					|| metric.gauge() == nx.pingwheel.common.monitor.MonitorSchema.Gauge.CONSUMERS);
+				&& (metric.gauge() == Gauge.REQUESTS_OPEN || metric.gauge() == Gauge.QUEUE_LOGICAL_COST
+					|| metric.gauge() == Gauge.CHANNELS || metric.gauge() == Gauge.CONSUMERS);
 		}
 		return true;
 	}
 
-	private static void addStatus(List<Row> rows, Scope scope, ClientMonitorState.Status status,
-		Function<Scope, Component> labels) {
-		if (status == ClientMonitorState.Status.ACTIVE) return;
-		String key = status.name().toLowerCase(Locale.ROOT);
+	private static Row statusRow(Scope scope, ClientMonitorState.Status status, Labels labels) {
 		// Row grammar remains localized while the exact OFF token alone is red.
-		Component token = tr("status." + key);
+		Component token = labels.status(status);
 		// Resolve localized grammar with a sentinel so OFF remains independently
 		// styled even in locales whose value precedes the label.
 		String sentinel = "\u0001";
-		String grammar = tr("format.row", labels.apply(scope), sentinel).getString();
-		String[] parts = grammar.split(sentinel, -1);
+		String grammar = labels.format(Format.ROW, labels.prefix(scope), sentinel).getString();
+		String @Unmodifiable [] parts = grammar.split(sentinel, -1);
 		List<Segment> segments = new ArrayList<>();
 		for (int index = 0; index < parts.length; index++) {
 			segments.add(new Segment(Component.literal(parts[index]), Tone.NORMAL));
 			if (index < parts.length - 1) segments.add(new Segment(token, status == ClientMonitorState.Status.OFF ? Tone.OFF : Tone.NORMAL));
 		}
 		if (parts.length == 1) segments.add(new Segment(token, status == ClientMonitorState.Status.OFF ? Tone.OFF : Tone.NORMAL));
-		rows.add(new Row("status." + scope.id(), segments, List.of()));
+		return new Row("status." + scope.id(), segments, List.of());
 	}
 
 	private static Row normalRow(String id, Component text, List<String> ids) {
 		return new Row(id, List.of(new Segment(text, Tone.NORMAL)), ids);
 	}
 
-	private static Component compact(Metric metric, @Nullable MonitorSample sample, boolean rate) {
-		if (sample == null) return unavailable();
-		Scope scope = Objects.requireNonNull(metric.scope());
-		@Nullable LaneSample lane = scope.lane() == Lane.PREVIEW ? sample.preview() : sample.tracking();
-		if (metric.kind() == Metric.Kind.TIMING) {
-			@Nullable TimingStats stats = lane == null ? null : lane.timing(Objects.requireNonNull(metric.phase()));
-			return stats == null ? unavailable() : tr("format.milliseconds", stats.saturated()
-				? tr("format.lower_bound", decimal(stats.totalNs() / 1_000_000.0)) : decimal(stats.totalNs() / 1_000_000.0));
-		}
-		if (metric.kind() == Metric.Kind.BUDGET) {
-			@Nullable BudgetUsage usage = scope.source() == Source.SHARED
-				? sample.shared() == null ? null : sample.shared().budget(Objects.requireNonNull(metric.budget()))
-				: lane == null ? null : lane.budget(Objects.requireNonNull(metric.budget()));
-			return usage == null || !usage.available() ? unavailable()
-				: tr("format.budget_compact", Long.toString(usage.used()), Long.toString(usage.limit()));
-		}
-		return format(metric, sample, rate);
-	}
-
-	/** Missing optional details do not inflate a concise summary into dozens of unavailable cells. */
-	private static boolean available(Metric metric, @Nullable MonitorSample sample) {
-		if (sample == null) return false;
-		Scope scope = Objects.requireNonNull(metric.scope());
-		@Nullable LaneSample lane = scope.source() == Source.SHARED ? null : scope.lane() == Lane.PREVIEW ? sample.preview() : sample.tracking();
-		@Nullable SharedSample shared = scope.source() == Source.SHARED ? sample.shared() : null;
-		return switch (metric.kind()) {
-			case TIMING, TIMING_MAX -> lane != null && lane.timing(Objects.requireNonNull(metric.phase())) != null;
-			case COUNTER -> lane != null ? lane.counter(Objects.requireNonNull(metric.counter())) != null
-				: shared != null && shared.counter(Objects.requireNonNull(metric.counter())) != null;
-			case GAUGE -> lane != null ? lane.gauge(Objects.requireNonNull(metric.gauge())) != null
-				: shared != null && shared.gauge(Objects.requireNonNull(metric.gauge())) != null;
-			case BUDGET -> {
-				@Nullable BudgetUsage usage = lane != null ? lane.budget(Objects.requireNonNull(metric.budget()))
-					: shared == null ? null : shared.budget(Objects.requireNonNull(metric.budget()));
-				yield usage != null && usage.available();
-			}
-			case MEMORY -> shared != null && shared.memory() != null;
-			case SUMMARY -> false;
-		};
-	}
-
-	private static Component join(Collection<Component> cells) {
+	private static Component join(List<Component> cells, Labels labels, Format separator) {
 		MutableComponent result = Component.empty();
 		boolean first = true;
 		for (Component cell : cells) {
-			if (!first) result.append(tr("format.separator"));
+			if (!first) result.append(labels.format(separator));
 			result.append(cell); first = false;
 		}
 		return result;
 	}
 
-	private static boolean active(ClientMonitorState.View view, Scope scope) {
-		return scope.source() == Source.LOCAL || switch (scope.source()) {
-			case SERVER -> (scope.lane() == Lane.PREVIEW ? view.previewStatus() : view.trackingStatus()) == ClientMonitorState.Status.ACTIVE;
-			case SHARED -> view.sharedStatus() == ClientMonitorState.Status.ACTIVE;
-			case LOCAL -> true;
+	private static ClientMonitorState.Status status(ClientMonitorState.View view, Scope scope) {
+		return switch (scope.source()) {
+			case SERVER -> scope.lane() == Lane.PREVIEW ? view.previewStatus() : view.trackingStatus();
+			case SHARED -> view.sharedStatus();
+			case LOCAL -> ClientMonitorState.Status.ACTIVE;
 		};
 	}
-	private static int group(Scope scope) { return scope.source() == Source.LOCAL ? 3
-		: scope.source() == Source.SHARED ? 2 : scope.lane() == Lane.PREVIEW ? 0 : 1; }
-	private static Scope groupScope(int group) { return switch (group) {
-		case 0 -> Scope.SERVER_PREVIEW; case 1 -> Scope.SERVER_TRACKING; case 2 -> Scope.SHARED;
-		default -> throw new IllegalArgumentException("local has independent lanes");
-	}; }
 	private static @Nullable MonitorSample sample(ClientMonitorState.View view, Scope scope) {
 		return scope.source() == Source.LOCAL ? view.local() : view.remote();
 	}
 
-	/** One field only. Inclusive phases are never added; every rate uses its own endpoint's window. */
+	/** Compatibility value formatter, backed by the same field and exact-number preparation. */
 	public static Component format(Metric metric, @Nullable MonitorSample sample, boolean rate) {
-		if (sample == null) return unavailable();
+		Labels labels = MonitorHudLabels.DEFAULT;
+		Field field = field(baseMetric(metric), sample, metric.kind() != Metric.Kind.TIMING_MAX,
+			metric.kind() == Metric.Kind.TIMING_MAX, !rate, rate, labels, false);
+		if (field.text() == null) return labels.unavailable();
+		return field.missing() ? join(List.of(field.text(), labels.unavailable()), labels, Format.DETAIL_SEPARATOR) : field.text();
+	}
+
+	@NotNullByDefault
+	private record Field(@Nullable Component text, boolean missing) {}
+
+	/** The only mutable builder is preparation-local; no missing placeholder enters a field. */
+	@NotNullByDefault
+	private static final class Details {
+		private final Labels labels;
+		private final List<Component> values = new ArrayList<>();
+		private boolean missing;
+		private Details(Labels labels) { this.labels = labels; }
+		private void add(Result result) { add(result, null); }
+		private void add(Result result, @Nullable Stat stat) {
+			if (!result.available()) { missing = true; return; }
+			Component value = Component.literal(result.text());
+			values.add(stat == null ? value : labels.format(Format.STAT, labels.stat(stat), value));
+		}
+		private Field finish(Metric metric, boolean includeLabel) {
+			if (values.isEmpty()) return new Field(null, true);
+			Component value = join(values, labels, Format.DETAIL_SEPARATOR);
+			return new Field(includeLabel ? labels.format(Format.ENTRY, labels.field(metric), value) : value, missing);
+		}
+	}
+
+	private static Field field(Metric metric, @Nullable MonitorSample sample, boolean main, boolean peak,
+		boolean explicit, boolean rate, Labels labels, boolean includeLabel) {
 		Scope scope = Objects.requireNonNull(metric.scope(), "raw metric");
-		@Nullable LaneSample lane = scope.source() == Source.SHARED ? null
-			: scope.lane() == Lane.PREVIEW ? sample.preview() : sample.tracking();
+		if (sample == null) return new Field(null, true);
+		@Nullable LaneSample lane = scope.source() == Source.SHARED ? null : scope.lane() == Lane.PREVIEW ? sample.preview() : sample.tracking();
 		@Nullable SharedSample shared = scope.source() == Source.SHARED ? sample.shared() : null;
-		if (lane != null && lane.source() != scope.source()) return unavailable();
-		return switch (metric.kind()) {
-			case TIMING, TIMING_MAX -> {
+		if (lane != null && lane.source() != scope.source()) return new Field(null, true);
+		Details details = new Details(labels);
+		switch (metric.kind()) {
+			case TIMING -> {
 				@Nullable TimingStats stats = lane == null ? null : lane.timing(Objects.requireNonNull(metric.phase()));
-				if (stats == null) yield unavailable();
-				if (metric.kind() == Metric.Kind.TIMING_MAX) yield tr("format.peak", decimal(stats.maxNs() / 1_000_000.0));
-				OptionalDouble mean = stats.meanNs();
-				yield tr("format.timing", stats.saturated() ? tr("format.lower_bound", decimal(stats.totalNs() / 1_000_000.0))
-					: decimal(stats.totalNs() / 1_000_000.0), stats.count() == Long.MAX_VALUE
-						? tr("format.lower_bound", Long.toString(stats.count())) : Long.toString(stats.count()),
-					mean.isPresent() ? Component.literal(decimal(mean.getAsDouble() / 1_000_000.0)) : unavailable());
+				if (stats == null) return new Field(null, true);
+				if (main) details.add(MonitorNumberFormat.timeNs(stats.count() == 0 || stats.saturated() ? null
+					: new Value(BigInteger.valueOf(stats.totalNs()), BigInteger.valueOf(stats.count()), Quality.EXACT)), Stat.AVG);
+				if (peak) details.add(MonitorNumberFormat.timeNs(stats.count() == 0 ? null : value(stats.maxNs(), timingQuality(stats.maxNs()))), Stat.PEAK);
+				if (main && explicit) {
+					details.add(MonitorNumberFormat.timeNs(value(stats.totalNs(), timingQuality(stats.totalNs()))), Stat.TOTAL);
+					details.add(MonitorNumberFormat.number(value(stats.count(), timingQuality(stats.count()))), Stat.COUNT);
+				}
 			}
 			case COUNTER -> {
 				Counter counter = Objects.requireNonNull(metric.counter());
 				@Nullable CounterReading reading = lane != null ? lane.counter(counter) : shared == null ? null : shared.counter(counter);
-				if (reading == null) yield unavailable();
-				Component value;
-				if (rate) {
-					OptionalDouble measuredRate = sample.ratePerSecond(reading);
-					if (measuredRate.isEmpty()) yield unavailable();
-					value = tr("format.rate", decimal(measuredRate.getAsDouble()));
-				} else value = tr("format.counter", Long.toString(reading.value()));
-				// Known bytes remain a lower bound when any handoff was unobserved.
-				@Nullable CounterReading unknown = lane == null ? null : lane.counter(Counter.UNOBSERVED_HANDOFF_FRAMES);
-				if (reading.saturated() || counter == Counter.HANDOFF_BYTES && (unknown == null || unknown.value() > 0))
-					yield tr("format.lower_bound", value);
-				yield value;
+				if (reading == null) return new Field(null, true);
+				Quality quality = reading.saturated() ? Quality.SATURATED : Quality.EXACT;
+				if (counter == Counter.HANDOFF_BYTES && quality == Quality.EXACT) {
+					@Nullable CounterReading unknown = lane == null ? null : lane.counter(Counter.UNOBSERVED_HANDOFF_FRAMES);
+					if (unknown == null || unknown.saturated() || unknown.value() > 0) quality = Quality.LOWER_BOUND;
+				}
+				Value total = value(reading.value(), quality);
+				boolean bytes = byteCounter(counter);
+				if (rate) details.add(MonitorNumberFormat.ratePerSecond(total, sample.elapsedNs(), bytes));
+				if (!rate || explicit) details.add(bytes ? MonitorNumberFormat.bytes(total) : MonitorNumberFormat.number(total),
+					rate ? Stat.TOTAL : null);
 			}
 			case GAUGE -> {
 				@Nullable GaugeReading reading = lane != null ? lane.gauge(Objects.requireNonNull(metric.gauge()))
 					: shared == null ? null : shared.gauge(Objects.requireNonNull(metric.gauge()));
-				yield reading == null ? unavailable() : metric.gauge() == nx.pingwheel.common.monitor.MonitorSchema.Gauge.BUFFER_ESTIMATED_BYTES
-					? tr("format.bytes", Long.toString(reading.value())) : tr("format.counter", Long.toString(reading.value()));
+				if (reading == null) return new Field(null, true);
+				details.add(metric.gauge() == Gauge.BUFFER_ESTIMATED_BYTES ? MonitorNumberFormat.bytes(value(reading.value()))
+					: MonitorNumberFormat.number(value(reading.value())));
 			}
 			case BUDGET -> {
 				@Nullable BudgetUsage usage = lane != null ? lane.budget(Objects.requireNonNull(metric.budget()))
 					: shared == null ? null : shared.budget(Objects.requireNonNull(metric.budget()));
-				yield usage == null || !usage.available() ? unavailable() : tr("format.budget", Long.toString(usage.used()),
-					Long.toString(usage.limit()), Long.toString(usage.reserved()), Long.toString(usage.remaining()), Long.toString(usage.admissibleRemaining()));
+				if (usage == null || !usage.available()) return new Field(null, true);
+				boolean bytes = metric.budget() == Budget.WIRE_BYTES;
+				details.add(MonitorNumberFormat.percent(value(usage.used()), value(usage.limit())));
+				details.add(MonitorNumberFormat.ratio(value(usage.used()), value(usage.limit()), bytes));
+				if (explicit) {
+					details.add(amount(usage.reserved(), bytes), Stat.RESERVED);
+					details.add(amount(usage.remaining(), bytes), Stat.REMAINING);
+					details.add(amount(usage.admissibleRemaining(), bytes), Stat.ADMISSIBLE);
+				}
 			}
 			case MEMORY -> {
 				@Nullable MemoryUsage memory = shared == null ? null : shared.memory();
-				yield memory == null ? unavailable() : tr("format.memory", tr("format.bytes", Long.toString(memory.retained())),
-					tr("format.bytes", Long.toString(memory.reserved())), tr("format.bytes", Long.toString(memory.cap())),
-					tr("format.bytes", Long.toString(memory.remaining())));
+				if (memory == null) return new Field(null, true);
+				Value occupied = new Value(BigInteger.valueOf(memory.retained()).add(BigInteger.valueOf(memory.reserved())), BigInteger.ONE, Quality.EXACT);
+				Result percent = MonitorNumberFormat.percent(occupied, value(memory.cap()));
+				Result triplet = MonitorNumberFormat.byteTriplet(value(memory.retained()), occupied, value(memory.cap()));
+				details.add(triplet);
+				if (explicit) details.add(MonitorNumberFormat.bytes(value(memory.remaining())), Stat.REMAINING);
+				Component value = join(details.values, labels, Format.DETAIL_SEPARATOR);
+				if (includeLabel) return new Field(percent.available()
+					? labels.format(Format.MEMORY, labels.field(metric), Component.literal(percent.text()), value)
+					: labels.format(Format.ENTRY, labels.field(metric), value), !percent.available() || details.missing);
+				if (percent.available()) details.values.addFirst(Component.literal(percent.text()));
+				details.missing |= !percent.available();
 			}
-			case SUMMARY -> throw new IllegalArgumentException("summary is not a measurement");
-		};
+			case TIMING_MAX, SUMMARY -> throw new IllegalArgumentException("field requires a raw base metric");
+		}
+		return details.finish(metric, includeLabel);
 	}
 
-	private static Component unavailable() { return tr("status.unavailable"); }
-	private static String decimal(double value) { return String.format(Locale.ROOT, "%.2f", value); }
-	private static Component tr(String suffix, Object... args) { return Component.translatable(PREFIX + suffix, args); }
+	private static Result amount(long amount, boolean bytes) {
+		return bytes ? MonitorNumberFormat.bytes(value(amount)) : MonitorNumberFormat.number(value(amount));
+	}
+	private static Value value(long value) { return value(value, Quality.EXACT); }
+	private static Value value(long value, Quality quality) { return MonitorNumberFormat.integer(value, quality); }
+	private static Quality timingQuality(long value) { return value == Long.MAX_VALUE ? Quality.SATURATED : Quality.EXACT; }
+	private static boolean byteCounter(Counter counter) {
+		return counter == Counter.BUDGET_CHARGED_BYTES || counter == Counter.HANDOFF_BYTES || counter == Counter.UNOBSERVED_HANDOFF_CANDIDATE_BYTES;
+	}
+	private static Metric baseMetric(Metric metric) {
+		return metric.kind() == Metric.Kind.TIMING_MAX ? Objects.requireNonNull(Metric.byId(metric.id().substring(0, metric.id().length() - 4))) : metric;
+	}
+	private static int category(Metric metric) {
+		return switch (metric.kind()) {
+			case TIMING, TIMING_MAX -> 0;
+			case BUDGET -> 2;
+			case MEMORY -> 3;
+			case GAUGE -> metric.gauge() == Gauge.BUFFER_ESTIMATED_BYTES || metric.gauge() == Gauge.OUTSTANDING_LEASES ? 3 : 1;
+			case COUNTER -> Objects.requireNonNull(metric.counter()).id().startsWith("sync.") ? 4 : 1;
+			case SUMMARY -> throw new IllegalArgumentException("raw field required");
+		};
+	}
+	private static int fieldOrder(Metric metric) {
+		if (metric.gauge() == Gauge.REQUESTS_OPEN) return 0;
+		if (metric.counter() == Counter.REQUESTS_RECEIVED) return 1;
+		if (metric.counter() == Counter.REQUESTS_ADMITTED) return 2;
+		if (metric.counter() == Counter.ACCEPTED) return 3;
+		if (metric.counter() == Counter.REJECTED) return 4;
+		if (metric.gauge() != null) return 200 + metric.gauge().wireId();
+		if (metric.counter() != null) return 100 + metric.counter().wireId();
+		return metric.wireId();
+	}
 }
