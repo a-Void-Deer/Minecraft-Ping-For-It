@@ -3,6 +3,7 @@ package nx.pingwheel.common;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Camera;
+import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
@@ -192,6 +193,68 @@ public class CommonClient {
 	}
 
 	/**
+	 * Receives a raw down/up transition from {@code KeyMapping.setDown}.
+	 *
+	 * <p>This is the compatibility anchor for input mods that cancel
+	 * {@code KeyMapping.click}/{@code KeyMapping.set} at {@code HEAD} and
+	 * re-dispatch physical edges through {@code setDown} (AMEcs does this for
+	 * key modifiers and priority key bindings). Vanilla also calls
+	 * {@code setDown} from {@code KeyMapping.set}, and the shared claimed-input
+	 * state guarantees each physical edge is handled exactly once across all
+	 * three callbacks.</p>
+	 */
+	public void onKeyMappingSetDown(KeyMapping mapping, boolean isDown) {
+		Game = Minecraft.getInstance();
+
+		if (Game == null || mapping == null) {
+			return;
+		}
+
+		// KeyMapping has no public key getter in 1.20.1. saveString() returns the
+		// configured key name, and getKey(String) resolves it without a shadowed
+		// field (which would need its own production refmap entry on Forge).
+		InputConstants.Key rawKey = InputConstants.getKey(mapping.saveString());
+		long eventTimeMillis = INTERACTION_TIME_SOURCE.nowMillis();
+
+		if (!isDown) {
+			if (InputUtils.observeKeyState(rawKey, false) && pingRuntime != null) {
+				pingRuntime.onRelease();
+			}
+			return;
+		}
+
+		// Toggles share the same physical edge; ToggleInputState dedupes the
+		// later vanilla click callback for the same held key.
+		InputUtils.handleToggleClick(rawKey, eventTimeMillis);
+
+		if (mapping != KEY_BINDING_PING || InputUtils.isPingHotkeyDown()) {
+			return;
+		}
+
+		if (Game.screen != null) {
+			abortInteractionIfActive(false);
+			return;
+		}
+
+		if (!InputUtils.claimPingEdge(rawKey)) {
+			return;
+		}
+
+		if (pingRuntime == null) {
+			pingRuntime = createPingRuntimeIfInWorld();
+		}
+
+		if (pingRuntime != null) {
+			pingRuntime.onPress(eventTimeMillis);
+			if (Game.level == null || Game.player == null) {
+				InputUtils.resetPingHold();
+			}
+		} else {
+			InputUtils.resetPingHold();
+		}
+	}
+
+	/**
 	 * Aborts the current interaction when Minecraft clears all key mappings,
 	 * such as on focus loss. No default ping is produced.
 	 */
@@ -372,19 +435,20 @@ public class CommonClient {
 	 * pass consults to avoid doubling.
 	 */
 	public void renderModelOutlines(
+		org.joml.Matrix4f cameraPose,
 		Camera camera,
 		float builtInPartialTick,
 		float flywheelPartialTick
 	) {
 		Minecraft game = Game;
 
-		if (game == null || game.level == null) {
+		if (game == null || game.level == null || cameraPose == null) {
 			return;
 		}
 
 		VirtualBlockDisplayRenderer.INSTANCE.render(
-			game.level, camera, builtInPartialTick, flywheelPartialTick,
-			BlockOutlineState.INSTANCE, BlockModelOutlineState.INSTANCE);
+			cameraPose, game.level, camera, builtInPartialTick, flywheelPartialTick,
+			BlockModelOutlineState.INSTANCE);
 	}
 
 	/**
@@ -521,11 +585,8 @@ public class CommonClient {
 			VertexConsumer lines = bufferSource.getBuffer(BlockOutlineRenderType.BLOCK_OUTLINE);
 			BlockOutlineRenderer.render(
 				game.level, camera, frame.cameraPosition(), lines,
-				BlockOutlineState.INSTANCE,
 				BlockModelOutlineState.INSTANCE.presentations(),
-				BlockModelOutlineState.INSTANCE.successKeys(),
-				BlockModelOutlineState.INSTANCE.externalSuccessKeys(),
-				frame.partialTick());
+				BlockModelOutlineState.INSTANCE.successKeys());
 			bufferSource.endBatch(BlockOutlineRenderType.BLOCK_OUTLINE);
 		});
 	}

@@ -56,8 +56,6 @@ import nx.pingwheel.common.interaction.wheel.WheelSelection;
 import nx.pingwheel.common.client.LongPressCompatibilityController;
 import nx.pingwheel.common.integration.DistantHorizonsIntegration;
 import nx.pingwheel.common.integration.ModContext;
-import nx.pingwheel.common.integration.SableIntegration;
-import nx.pingwheel.common.integration.sable.client.SableClientProvider;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerRejectReason;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
@@ -756,44 +754,6 @@ public final class ClientPingRuntime {
 			return;
 		}
 
-		boolean sableCaptureAttempted = ModContext.HasSable && hitResult.getType() == HitResult.Type.BLOCK;
-
-		if (sableCaptureAttempted) {
-			Optional<TargetSnapshot> sableCandidate = SableClientProvider.capture(
-				level,
-				(BlockHitResult) hitResult,
-				rayOrigin,
-				rayOrigin.add(cameraDirection.scale(distance)));
-
-			if (sableCandidate.isPresent()) {
-				completeCapture(token, sableCandidate.get(), pressRay);
-				return;
-			}
-
-			var projected = SableIntegration.projectOutOfSubLevel(game.level, hitResult.getLocation());
-
-			// If the provider cannot positively resolve the local block, preserve
-			// the pre-existing projected-location fallback.
-			if (projected.isPresent()) {
-				var projectedPos = projected.get();
-				SableClientProvider.logCaptureFallback(
-					"PROJECTED_LOCATION", "external-capture-failed", "projection",
-					"hit_location", hitResult.getLocation(),
-					"projected_position", projectedPos);
-				completeCapture(token, TargetSnapshotFactory.location(
-					game.level.dimension().location().toString(),
-					projectedPos.x, projectedPos.y, projectedPos.z), pressRay);
-				return;
-			}
-		}
-
-		if (sableCaptureAttempted) {
-			SableClientProvider.logCaptureFallback(
-				"VANILLA_TARGET_FACTORY", "external-and-projected-capture-failed", "vanilla-target-factory",
-				"hit_location", hitResult.getLocation(),
-				"block_pos", hitResult instanceof BlockHitResult blockHit ? blockHit.getBlockPos() : null);
-		}
-
 		completeCapture(token, raycastSelection
 			.map(selection -> MinecraftTargetSnapshotFactory.from(game.level, selection))
 			.orElseGet(() -> MinecraftTargetSnapshotFactory.from(game.level, hitResult)), pressRay);
@@ -925,20 +885,6 @@ public final class ClientPingRuntime {
 				var topCenter = EntityMarkerPoint.forLiveEntity(entity, 1.0F);
 				return new WorldVector(topCenter.x, topCenter.y, topCenter.z);
 			}
-		} else if (target instanceof Target.ExternalBlockTarget external
-			&& Game != null && Game.level != null
-			&& currentDimension.equals(Game.level.dimension().location().toString())) {
-			Optional<Vec3> livePosition = SableClientProvider.resolvePosition(Game.level, external, 1.0F);
-
-			if (livePosition.isPresent()) {
-				Vec3 position = livePosition.get();
-				return new WorldVector(position.x, position.y, position.z);
-			}
-
-			// A provider miss is temporary presentation unavailability, not a
-			// local invalidation. Use the authoritative server fallback directly
-			// rather than retaining a stale sub-level render position.
-			return anchorPosition;
 		}
 
 		return MarkerCandidatePosition.resolve(
@@ -1261,11 +1207,12 @@ public final class ClientPingRuntime {
 	}
 
 	private static TargetKind targetKindOf(TargetKey targetKey) {
-		return switch (targetKey) {
-			case TargetKey.EntityKey ignored -> TargetKind.ENTITY;
-			case TargetKey.BlockKey ignored -> TargetKind.BLOCK;
-			case TargetKey.ExternalBlockKey ignored -> TargetKind.BLOCK;
-			case TargetKey.LocationKey ignored -> TargetKind.LOCATION;
-		};
+		if (targetKey instanceof TargetKey.EntityKey) {
+			return TargetKind.ENTITY;
+		}
+		if (targetKey instanceof TargetKey.BlockKey || targetKey instanceof TargetKey.ExternalBlockKey) {
+			return TargetKind.BLOCK;
+		}
+		return TargetKind.LOCATION;
 	}
 }

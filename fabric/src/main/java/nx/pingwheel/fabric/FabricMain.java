@@ -1,109 +1,84 @@
 package nx.pingwheel.fabric;
 
 import net.fabricmc.api.ModInitializer;
-import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.game.ClientboundCustomPayloadPacket;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerPlayer;
 import nx.pingwheel.common.CommonServer;
+import nx.pingwheel.common.network.ChannelRegistrationPayload;
 import nx.pingwheel.common.network.MarkerCreateC2SPacket;
-import nx.pingwheel.common.network.MarkerCreatedS2CPacket;
-import nx.pingwheel.common.network.MarkerRejectedS2CPacket;
 import nx.pingwheel.common.network.MarkerRemoveC2SPacket;
-import nx.pingwheel.common.network.MarkerRemovedS2CPacket;
-import nx.pingwheel.common.network.MarkerWinnerChangedS2CPacket;
 import nx.pingwheel.common.network.PingLocationC2SPacket;
-import nx.pingwheel.common.network.PingLocationS2CPacket;
-import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
-import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
-import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
+
+import java.util.function.Function;
 
 public class FabricMain implements ModInitializer {
 
-	private static final StreamCodec<FriendlyByteBuf, PingLocationS2CPacket> PING_LOCATION_S2C_CODEC = StreamCodec.ofMember(PingLocationS2CPacket::write, PingLocationS2CPacket::readSafe);
-	private static final StreamCodec<FriendlyByteBuf, PingLocationC2SPacket> PING_LOCATION_C2S_CODEC = StreamCodec.ofMember(PingLocationC2SPacket::write, PingLocationC2SPacket::readSafe);
-	private static final StreamCodec<FriendlyByteBuf, UpdateChannelC2SPacket> UPDATE_CHANNEL_C2S_CODEC = StreamCodec.ofMember(UpdateChannelC2SPacket::write, UpdateChannelC2SPacket::readSafe);
-	private static final StreamCodec<FriendlyByteBuf, MarkerCreateC2SPacket> MARKER_CREATE_C2S_CODEC = StreamCodec.ofMember(MarkerCreateC2SPacket::write, MarkerCreateC2SPacket::readSafe);
-	private static final StreamCodec<FriendlyByteBuf, MarkerRemoveC2SPacket> MARKER_REMOVE_C2S_CODEC = StreamCodec.ofMember(MarkerRemoveC2SPacket::write, MarkerRemoveC2SPacket::readSafe);
-	private static final StreamCodec<FriendlyByteBuf, MarkerCreatedS2CPacket> MARKER_CREATED_S2C_CODEC = StreamCodec.ofMember(MarkerCreatedS2CPacket::write, MarkerCreatedS2CPacket::readSafe);
-	private static final StreamCodec<FriendlyByteBuf, MarkerRemovedS2CPacket> MARKER_REMOVED_S2C_CODEC = StreamCodec.ofMember(MarkerRemovedS2CPacket::write, MarkerRemovedS2CPacket::readSafe);
-	private static final StreamCodec<FriendlyByteBuf, MarkerRejectedS2CPacket> MARKER_REJECTED_S2C_CODEC = StreamCodec.ofMember(MarkerRejectedS2CPacket::write, MarkerRejectedS2CPacket::readSafe);
-	private static final StreamCodec<FriendlyByteBuf, MarkerWinnerChangedS2CPacket> MARKER_WINNER_CHANGED_S2C_CODEC = StreamCodec.ofMember(MarkerWinnerChangedS2CPacket::write, MarkerWinnerChangedS2CPacket::readSafe);
-	private static final StreamCodec<FriendlyByteBuf, RateLimitPolicyS2CPacket> RATE_LIMIT_POLICY_S2C_CODEC = StreamCodec.ofMember(RateLimitPolicyS2CPacket::write, RateLimitPolicyS2CPacket::readSafe);
-	private static final StreamCodec<FriendlyByteBuf, SyncDurationPolicyS2CPacket> SYNC_DURATION_POLICY_S2C_CODEC = StreamCodec.ofMember(SyncDurationPolicyS2CPacket::write, SyncDurationPolicyS2CPacket::readSafe);
-	private static final StreamCodec<FriendlyByteBuf, ServerConfigRequestC2SPacket> SERVER_CONFIG_REQUEST_C2S_CODEC = StreamCodec.ofMember(ServerConfigRequestC2SPacket::write, ServerConfigRequestC2SPacket::readSafe);
-	private static final StreamCodec<FriendlyByteBuf, ServerConfigUpdateC2SPacket> SERVER_CONFIG_UPDATE_C2S_CODEC = StreamCodec.ofMember(ServerConfigUpdateC2SPacket::write, ServerConfigUpdateC2SPacket::readSafe);
-	private static final StreamCodec<FriendlyByteBuf, ServerConfigSnapshotS2CPacket> SERVER_CONFIG_SNAPSHOT_S2C_CODEC = StreamCodec.ofMember(ServerConfigSnapshotS2CPacket::write, ServerConfigSnapshotS2CPacket::readSafe);
+	/**
+	 * Decodes a client packet inside the networking callback and runs the
+	 * server handler on the main server thread.
+	 *
+	 * <p>The legacy receiver runs on a Netty event loop; the handler reads the
+	 * world, block entities and player state, so it must never run there.</p>
+	 */
+	private static <T> void receive(
+		ResourceLocation packetId,
+		Function<FriendlyByteBuf, T> reader,
+		PacketHandler<T> handler
+	) {
+		ServerPlayNetworking.registerGlobalReceiver(packetId, (server, player, networking, buf, responseSender) -> {
+			T packet = reader.apply(buf);
+			server.execute(() -> handler.handle(server, player, packet));
+		});
+	}
+
+	@FunctionalInterface
+	private interface PacketHandler<T> {
+		void handle(MinecraftServer server, ServerPlayer player, T packet);
+	}
 
 	@Override
 	public void onInitialize() {
 		CommonServer.INSTANCE.onInit();
 
-		PayloadTypeRegistry.playS2C().register(PingLocationS2CPacket.PACKET_TYPE, PING_LOCATION_S2C_CODEC);
-		PayloadTypeRegistry.playC2S().register(PingLocationC2SPacket.PACKET_TYPE, PING_LOCATION_C2S_CODEC);
-		PayloadTypeRegistry.playC2S().register(UpdateChannelC2SPacket.PACKET_TYPE, UPDATE_CHANNEL_C2S_CODEC);
-		PayloadTypeRegistry.playC2S().register(MarkerCreateC2SPacket.PACKET_TYPE, MARKER_CREATE_C2S_CODEC);
-		PayloadTypeRegistry.playC2S().register(MarkerRemoveC2SPacket.PACKET_TYPE, MARKER_REMOVE_C2S_CODEC);
-		PayloadTypeRegistry.playS2C().register(MarkerCreatedS2CPacket.PACKET_TYPE, MARKER_CREATED_S2C_CODEC);
-		PayloadTypeRegistry.playS2C().register(MarkerRemovedS2CPacket.PACKET_TYPE, MARKER_REMOVED_S2C_CODEC);
-		PayloadTypeRegistry.playS2C().register(MarkerRejectedS2CPacket.PACKET_TYPE, MARKER_REJECTED_S2C_CODEC);
-		PayloadTypeRegistry.playS2C().register(MarkerWinnerChangedS2CPacket.PACKET_TYPE, MARKER_WINNER_CHANGED_S2C_CODEC);
-		PayloadTypeRegistry.playS2C().register(RateLimitPolicyS2CPacket.PACKET_TYPE, RATE_LIMIT_POLICY_S2C_CODEC);
-		PayloadTypeRegistry.playS2C().register(SyncDurationPolicyS2CPacket.PACKET_TYPE, SYNC_DURATION_POLICY_S2C_CODEC);
-		PayloadTypeRegistry.playC2S().register(ServerConfigRequestC2SPacket.PACKET_TYPE, SERVER_CONFIG_REQUEST_C2S_CODEC);
-		PayloadTypeRegistry.playC2S().register(ServerConfigUpdateC2SPacket.PACKET_TYPE, SERVER_CONFIG_UPDATE_C2S_CODEC);
-		PayloadTypeRegistry.playS2C().register(ServerConfigSnapshotS2CPacket.PACKET_TYPE, SERVER_CONFIG_SNAPSHOT_S2C_CODEC);
+		// Forge 47.2.0 does not commit the final unterminated channel in a
+		// Fabric register payload. Send a second, terminated announcement after
+		// Fabric's initial one so a Forge client sees every C2S channel. The
+		// delayed task runs after ServerPlayNetworkAddon's initial registration.
+		ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+			ServerPlayer player = handler.player;
 
-		ServerPlayNetworking.registerGlobalReceiver(
-			PingLocationC2SPacket.PACKET_TYPE,
-			(packet, context) -> {
-				final var player = context.player();
-				final var server = context.server();
-				server.execute(() -> CommonServer.INSTANCE.onPingLocationPacket(server, player, packet));
-			}
-		);
-		ServerPlayNetworking.registerGlobalReceiver(
-			UpdateChannelC2SPacket.PACKET_TYPE,
-			(packet, context) -> {
-				final var player = context.player();
-				final var server = context.server();
-				server.execute(() -> CommonServer.INSTANCE.onChannelUpdatePacket(server, player, packet));
-			}
-		);
-		ServerPlayNetworking.registerGlobalReceiver(
-			MarkerCreateC2SPacket.PACKET_TYPE,
-			(packet, context) -> {
-				final var player = context.player();
-				final var server = context.server();
-				server.execute(() -> CommonServer.INSTANCE.onMarkerCreatePacket(server, player, packet));
-			}
-		);
-		ServerPlayNetworking.registerGlobalReceiver(
-			MarkerRemoveC2SPacket.PACKET_TYPE,
-			(packet, context) -> {
-				final var player = context.player();
-				final var server = context.server();
-				server.execute(() -> CommonServer.INSTANCE.onMarkerRemovePacket(server, player, packet));
-			}
-		);
-		ServerPlayNetworking.registerGlobalReceiver(
-			ServerConfigRequestC2SPacket.PACKET_TYPE,
-			(packet, context) -> {
-				final var player = context.player();
-				final var server = context.server();
-				server.execute(() -> CommonServer.INSTANCE.onServerConfigRequestPacket(server, player, packet));
-			}
-		);
-		ServerPlayNetworking.registerGlobalReceiver(
-			ServerConfigUpdateC2SPacket.PACKET_TYPE,
-			(packet, context) -> {
-				final var player = context.player();
-				final var server = context.server();
-				server.execute(() -> CommonServer.INSTANCE.onServerConfigUpdatePacket(server, player, packet));
-			}
-		);
+			server.execute(() -> {
+				var channels = ServerPlayNetworking.getReceived(player);
+
+				if (channels.isEmpty()) {
+					return;
+				}
+
+				player.connection.send(new ClientboundCustomPayloadPacket(
+					new ResourceLocation("minecraft", "register"),
+					ChannelRegistrationPayload.encode(channels)));
+			});
+		});
+
+		receive(PingLocationC2SPacket.PACKET_ID,
+			PingLocationC2SPacket::readSafe, CommonServer.INSTANCE::onPingLocationPacket);
+		receive(UpdateChannelC2SPacket.PACKET_ID,
+			UpdateChannelC2SPacket::readSafe, CommonServer.INSTANCE::onChannelUpdatePacket);
+		receive(MarkerCreateC2SPacket.PACKET_ID,
+			MarkerCreateC2SPacket::readSafe, CommonServer.INSTANCE::onMarkerCreatePacket);
+		receive(MarkerRemoveC2SPacket.PACKET_ID,
+			MarkerRemoveC2SPacket::readSafe, CommonServer.INSTANCE::onMarkerRemovePacket);
+		receive(ServerConfigRequestC2SPacket.PACKET_ID,
+			ServerConfigRequestC2SPacket::readSafe, CommonServer.INSTANCE::onServerConfigRequestPacket);
+		receive(ServerConfigUpdateC2SPacket.PACKET_ID,
+			ServerConfigUpdateC2SPacket::readSafe, CommonServer.INSTANCE::onServerConfigUpdatePacket);
 	}
 }

@@ -40,6 +40,15 @@ wheel and no screen is open. Live ownership synchronization defers while a
 screen is open, and disposal may relinquish pending wheel ownership rather than
 stealing the cursor from a screen or another owner.
 
+Re-grabbing intentionally does not use `MouseHandler.grabMouse()`. On 1.20.1
+that method always calls `Minecraft.setScreen(null)`, even when no screen is
+open. Vanilla ignores the redundant transition, but any `setScreen` listener
+still observes it: the Blur mod, for example, starts its configured fade-out
+blur after such a notification and made the whole view blur briefly whenever
+the wheel closed. The wheel therefore applies the same cursor-state changes
+through a loader-neutral accessor that leaves the screen and key mappings
+untouched. This is a required behavior, not an implementation detail.
+
 ## Cancel Marker selection
 
 The client-side candidate collection and the server's active cancellable set are

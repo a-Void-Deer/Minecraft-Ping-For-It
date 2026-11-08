@@ -2,10 +2,11 @@ package nx.pingwheel.forge.platform;
 
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.protocol.game.ClientboundCustomPayloadPacket;
+import net.minecraft.network.protocol.game.ServerboundCustomPayloadPacket;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.network.EventNetworkChannel;
-import net.minecraftforge.network.PacketDistributor;
+import net.minecraftforge.network.event.EventNetworkChannel;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 
@@ -35,20 +36,20 @@ public class PlatformNetworkServiceImpl implements IPlatformNetworkService {
 		var buf = new FriendlyByteBuf(Unpooled.buffer());
 		packet.write(buf);
 
-		chan.send(buf, PacketDistributor.SERVER.noArg());
+		connection.send(new ServerboundCustomPayloadPacket(packet.getId(), buf));
 	}
 
 	@Override
 	public void sendToClient(IPacket packet, ServerPlayer player) {
 		var chan = CHANNEL_MAP.get(packet.getId());
 
-		if (chan == null || !chan.isRemotePresent(player.connection.getConnection())) {
+		if (chan == null || !chan.isRemotePresent(player.connection.connection)) {
 			return;
 		}
 
 		var buf = new FriendlyByteBuf(Unpooled.buffer());
 		packet.write(buf);
 
-		chan.send(buf, PacketDistributor.PLAYER.with(player));
+		player.connection.send(new ClientboundCustomPayloadPacket(packet.getId(), buf));
 	}
 }

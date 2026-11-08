@@ -12,15 +12,15 @@ class EntitySelectionBlacklistDefaultRuleTest {
 	@Test
 	void simulatedHoneyGlueRegistryIdIsIgnored() {
 		assertTrue(EntitySelectionBlacklist.isDefaultIgnoredEntityId(
-			ResourceLocation.fromNamespaceAndPath("simulated", "honey_glue")));
+			new ResourceLocation("simulated", "honey_glue")));
 	}
 
 	@Test
 	void otherRegistryIdsAreNotIgnored() {
 		assertFalse(EntitySelectionBlacklist.isDefaultIgnoredEntityId(
-			ResourceLocation.fromNamespaceAndPath("simulated", "honey_glue_entity")));
+			new ResourceLocation("simulated", "honey_glue_entity")));
 		assertFalse(EntitySelectionBlacklist.isDefaultIgnoredEntityId(
-			ResourceLocation.fromNamespaceAndPath("minecraft", "honey_glue")));
+			new ResourceLocation("minecraft", "honey_glue")));
 		assertFalse(EntitySelectionBlacklist.isDefaultIgnoredEntityId(null));
 	}
 }

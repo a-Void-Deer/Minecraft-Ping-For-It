@@ -56,6 +56,88 @@ public final class BlockOutlineFrameState {
 		renderWithFrame(frame, RenderSystemAccess.INSTANCE, renderer);
 	}
 
+	/**
+	 * Runs a camera-relative draw with the given camera-rotation view matrix as
+	 * the global model view. The ambient projection is deliberately left
+	 * untouched: during the world pass the projection is already the world
+	 * projection, and the model-outline flushes must only add the missing
+	 * camera rotation.
+	 *
+	 * <p>The previous model view is restored on every exit path, including an
+	 * exceptional one, so a failed attempt can never leak a rotated view into
+	 * the vanilla outline flush that follows.</p>
+	 */
+	public static void withCameraRotation(Matrix4f cameraRotation, Runnable renderer) {
+		try (CameraRotationScope ignored = openCameraRotation(cameraRotation)) {
+			renderer.run();
+		}
+	}
+
+	/**
+	 * Opens a camera-rotation model-view scope that covers every submission
+	 * made while it is open, including automatic flushes performed by
+	 * {@code MultiBufferSource.BufferSource.getBuffer()} when the render type
+	 * changes. The previous model view is restored on
+	 * {@link CameraRotationScope#close()}.
+	 */
+	public static CameraRotationScope openCameraRotation(Matrix4f cameraRotation) {
+		return new CameraRotationScope(cameraRotation, RenderSystemAccess.INSTANCE);
+	}
+
+	/** Visible to focused package tests through a small render-state seam. */
+	static CameraRotationScope openCameraRotation(
+		Matrix4f cameraRotation, RenderStateAccess renderState
+	) {
+		return new CameraRotationScope(cameraRotation, renderState);
+	}
+
+	/** Visible to focused package tests through a small render-state seam. */
+	static void withCameraRotation(
+		Matrix4f cameraRotation, RenderStateAccess renderState, Runnable renderer
+	) {
+		Objects.requireNonNull(renderer, "renderer");
+
+		try (CameraRotationScope ignored = openCameraRotation(cameraRotation, renderState)) {
+			renderer.run();
+		}
+	}
+
+	/** Scope handle returned by {@link #openCameraRotation(Matrix4f)}. */
+	public static final class CameraRotationScope implements AutoCloseable {
+		private final RenderStateAccess renderState;
+		private boolean closed;
+
+		private CameraRotationScope(Matrix4f cameraRotation, RenderStateAccess renderState) {
+			Objects.requireNonNull(cameraRotation, "cameraRotation");
+			this.renderState = Objects.requireNonNull(renderState, "renderState");
+
+			this.renderState.pushModelView();
+
+			try {
+				this.renderState.setModelView(cameraRotation);
+				this.renderState.applyModelView();
+			} catch (RuntimeException | Error failure) {
+				close();
+				throw failure;
+			}
+		}
+
+		@Override
+		public void close() {
+			if (this.closed) {
+				return;
+			}
+
+			this.closed = true;
+
+			try {
+				this.renderState.popModelView();
+			} finally {
+				this.renderState.applyModelView();
+			}
+		}
+	}
+
 	/** Visible to focused package tests through a small render-state seam. */
 	static void renderWithFrame(
 		FrameTransform frame, RenderStateAccess renderState, Runnable renderer
@@ -111,12 +193,13 @@ public final class BlockOutlineFrameState {
 
 		@Override
 		public void pushModelView() {
-			RenderSystem.getModelViewStack().pushMatrix();
+			RenderSystem.getModelViewStack().pushPose();
 		}
 
 		@Override
 		public void setModelView(Matrix4f matrix) {
-			RenderSystem.getModelViewStack().set(matrix);
+			RenderSystem.getModelViewStack().setIdentity();
+			RenderSystem.getModelViewStack().mulPoseMatrix(matrix);
 		}
 
 		@Override
@@ -126,7 +209,7 @@ public final class BlockOutlineFrameState {
 
 		@Override
 		public void popModelView() {
-			RenderSystem.getModelViewStack().popMatrix();
+			RenderSystem.getModelViewStack().popPose();
 		}
 
 		@Override

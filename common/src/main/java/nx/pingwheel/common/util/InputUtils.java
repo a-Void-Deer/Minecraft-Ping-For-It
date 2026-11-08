@@ -78,6 +78,52 @@ public class InputUtils {
 	}
 
 	/**
+	 * Claims one physical press observed through {@link KeyMapping#setDown}.
+	 *
+	 * <p>This is the compatibility path for mods that cancel
+	 * {@link KeyMapping#click} and {@link KeyMapping#set} at {@code HEAD} and
+	 * re-dispatch physical edges through {@code setDown} (AMEcs does exactly
+	 * this to implement key modifiers and priority key bindings). The click
+	 * counter may therefore be zero even for a real press, so this path claims
+	 * the raw edge itself instead of requiring {@code consumeClick()} to
+	 * succeed.</p>
+	 *
+	 * <p>The existing click-counter path stays authoritative when it runs: the
+	 * caller only reaches this method while the hold is not yet armed, and a
+	 * later {@link #claimPingClick(InputConstants.Key)} callback sees the armed
+	 * state and merely drains counters.</p>
+	 */
+	public static boolean claimPingEdge(InputConstants.Key rawKey) {
+		if (rawKey == null || !matchesPingBinding(rawKey)) {
+			return false;
+		}
+
+		if (Game == null || Game.options == null || PING_INPUT_STATE.isArmed()) {
+			return false;
+		}
+
+		boolean sharedWithPick = KEY_BINDING_PING.same(Game.options.keyPickItem);
+		boolean currentlyEligible = !sharedWithPick || isSharedPickEligible();
+		PingClickArbitration.Plan plan = PingClickArbitration.plan(sharedWithPick, currentlyEligible);
+
+		if (!plan.mayClaim()) {
+			return false;
+		}
+
+		// Best effort: when both mappings were queued, drain Pick Block so the
+		// claimed edge cannot also trigger vanilla pick-block. Under AMEcs the
+		// custom counter may be incremented after this callback; the next edge
+		// drains it here before arming again.
+		if (plan.consumePick()) {
+			Game.options.keyPickItem.consumeClick();
+		}
+		KEY_BINDING_PING.consumeClick();
+
+		arm(rawKey);
+		return true;
+	}
+
+	/**
 	 * Handles one mapping click for the persistent target-selection toggles.
 	 * Mapping clicks can be repeated by GLFW while a key is held, so the raw
 	 * physical key is remembered until its matching release edge is observed.

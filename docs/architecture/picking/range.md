@@ -32,12 +32,6 @@ the same segment through the common raycast request. Create transforms that
 already-bounded segment into its local space and scans its frozen local shapes;
 it does not reuse Create's interaction picker or add a second range.
 
-The Sable capture attempt occurs only after that native route yielded a block
-hit. It receives the native hit plus the same origin and endpoint of the
-effective segment; Sable candidate projection requires the transformed point to
-lie on that segment, with only the integration's small projection epsilon. It
-therefore has no independent range expansion.
-
 After a native miss, Distant Horizons is a separate optional asynchronous route.
 It receives the frozen press origin and direction but calls its API with an
 integration-specific fixed range. This route is not clipped by client
@@ -67,12 +61,12 @@ from a client capture distance.
 
 For a large Create contraption this means a client may select a nearby exact
 surface but still be rejected if the whole entity's authoritative anchor is too
-far away. For Sable, provider validation first supplies a normalized,
-nonallocating candidate/match context and logical-pose **validation anchor**;
-the server range-checks that anchor. Only later can materialization replace it
-with committed target/anchor values. There is no second range check on that
-replacement anchor. The two-phase provider transaction and its release handling
-are owned by [Sable server validation and materialization](../../integrations/sable.md#server-validation-and-materialization).
+far away. For an explicit external target, provider validation first supplies a
+normalized, nonallocating candidate/match context and logical-pose **validation
+anchor**; the server range-checks that anchor. Only later can materialization
+replace it with committed target/anchor values. There is no second range check
+on that replacement anchor. The two-phase provider transaction and its release
+handling are owned by the external-block protocol.
 See [target validation](../authority/target_validation.md) for the admission and
 ordinary lifecycle contract.
 
@@ -82,7 +76,7 @@ ordinary lifecycle contract.
 | --- | --- | --- | --- |
 | Vanilla blocks, fluids, entities | Frozen finite press segment | `min(client raycastDistance, client pingDistance)` | Native hit or location miss |
 | Create contraption local shapes | Same finite segment passed through the common entity-candidate request and transformed locally | Reuses the native effective segment; no Create interaction-picker range | Exact whole-entity hit, or owned miss/unavailable/failure with no coarse-AABB revival |
-| Sable external candidate | Native block hit plus that same segment's frozen origin/end | Reuses native effective segment; point must project onto the segment | External candidate only after provider checks; otherwise existing projected/location or vanilla fallback |
+| Explicit external candidate | Native block hit plus that same segment's frozen origin/end | Reuses native effective segment; point must project onto the segment | External candidate only after provider checks; otherwise existing projected/location or vanilla fallback |
 | Distant Horizons | Frozen origin/direction after native miss | Integration-specific fixed API trace, independent of both client fields | Distant block hit or original native location miss |
 | Server validator | Current server player eye and authoritative validation anchor | Server `pingDistance` | Accept or `OUT_OF_RANGE`, independently of client capture; an external candidate's provider validation anchor is checked before later materialization |
 

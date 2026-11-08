@@ -81,48 +81,61 @@ class OutlineOnlyBufferSourceTest {
 		}
 
 		@Override
-		public VertexConsumer addVertex(float x, float y, float z) {
+		public VertexConsumer vertex(double x, double y, double z) {
 			if (throwOnAddVertex) {
-				throw new IllegalStateException("delegate addVertex failed");
+				throw new IllegalStateException("delegate vertex failed");
 			}
 			vertices++;
-			calls.add("addVertex");
+			calls.add("vertex");
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setColor(int red, int green, int blue, int alpha) {
+		public VertexConsumer color(int red, int green, int blue, int alpha) {
 			colors.add(new int[] { red, green, blue, alpha });
-			calls.add("setColor");
+			calls.add("color");
 			if (throwOnColor) {
-				throw new IllegalStateException("delegate setColor failed");
+				throw new IllegalStateException("delegate color failed");
 			}
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setUv(float u, float v) {
+		public VertexConsumer uv(float u, float v) {
 			uvCalls++;
-			calls.add("setUv");
+			calls.add("uv");
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setUv1(int u, int v) {
+		public VertexConsumer overlayCoords(int u, int v) {
 			uv1Calls++;
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setUv2(int u, int v) {
+		public VertexConsumer uv2(int u, int v) {
 			uv2Calls++;
 			return this;
 		}
 
 		@Override
-		public VertexConsumer setNormal(float normalX, float normalY, float normalZ) {
+		public VertexConsumer normal(float normalX, float normalY, float normalZ) {
 			normalCalls++;
 			return this;
+		}
+
+		@Override
+		public void endVertex() {
+			calls.add("endVertex");
+		}
+
+		@Override
+		public void defaultColor(int red, int green, int blue, int alpha) {
+		}
+
+		@Override
+		public void unsetDefaultColor() {
 		}
 	}
 
@@ -177,7 +190,7 @@ class OutlineOnlyBufferSourceTest {
 			source, 0xFF123456, TextureAtlas.LOCATION_BLOCKS, -1);
 
 		VertexConsumer issued = adapter.getBuffer(RenderType.lines());
-		issued.addVertex(1.0F, 2.0F, 3.0F);
+		issued.vertex(1.0F, 2.0F, 3.0F);
 
 		assertSame(NoOpVertexConsumer.INSTANCE, issued);
 		assertEquals(0, source.requested.size());
@@ -242,12 +255,12 @@ class OutlineOnlyBufferSourceTest {
 		assertEquals(0, consumer.vertices());
 
 		consumer
-			.addVertex(0.0F, 0.0F, 0.0F)
-			.setUv(0.0F, 0.0F)
-			.addVertex(1.0F, 0.0F, 0.0F)
-			.setUv(1.0F, 0.0F)
-			.addVertex(1.0F, 1.0F, 0.0F)
-			.addVertex(0.0F, 1.0F, 0.0F);
+			.vertex(0.0F, 0.0F, 0.0F)
+			.uv(0.0F, 0.0F)
+			.vertex(1.0F, 0.0F, 0.0F)
+			.uv(1.0F, 0.0F)
+			.vertex(1.0F, 1.0F, 0.0F)
+			.vertex(0.0F, 1.0F, 0.0F);
 
 		assertEquals(4, consumer.vertices());
 		assertEquals(4, delegate.vertices);
@@ -263,8 +276,8 @@ class OutlineOnlyBufferSourceTest {
 		VertexCountingConsumer first = new VertexCountingConsumer(new RecordingVertexConsumer(), 1, 2, 3);
 		VertexCountingConsumer second = new VertexCountingConsumer(new RecordingVertexConsumer(), 1, 2, 3);
 
-		first.addVertex(0.0F, 0.0F, 0.0F);
-		first.addVertex(1.0F, 0.0F, 0.0F);
+		first.vertex(0.0F, 0.0F, 0.0F);
+		first.vertex(1.0F, 0.0F, 0.0F);
 
 		assertEquals(2, first.vertices());
 		assertEquals(0, second.vertices());
@@ -277,12 +290,12 @@ class OutlineOnlyBufferSourceTest {
 		RecordingVertexConsumer delegate = new RecordingVertexConsumer();
 		VertexCountingConsumer consumer = new VertexCountingConsumer(delegate, 0x12, 0x34, 0x56);
 
-		consumer.addVertex(1.0F, 2.0F, 3.0F);
+		consumer.vertex(1.0F, 2.0F, 3.0F);
 
 		assertEquals(1, delegate.vertices);
 		assertEquals(1, delegate.colors.size());
 		assertArrayEquals(new int[] { 0x12, 0x34, 0x56, 255 }, delegate.colors.get(0));
-		assertEquals(List.of("addVertex", "setColor"), delegate.calls);
+		assertEquals(List.of("vertex", "color"), delegate.calls);
 	}
 
 	@Test
@@ -293,7 +306,7 @@ class OutlineOnlyBufferSourceTest {
 		VertexCountingConsumer consumer = (VertexCountingConsumer) adapter.getBuffer(
 			RenderType.entitySolid(TextureAtlas.LOCATION_BLOCKS));
 
-		assertThrows(IllegalStateException.class, () -> consumer.addVertex(1.0F, 2.0F, 3.0F));
+		assertThrows(IllegalStateException.class, () -> consumer.vertex(1.0F, 2.0F, 3.0F));
 
 		assertEquals(0, consumer.vertices());
 		assertEquals(0, adapter.vertexCount());
@@ -309,7 +322,7 @@ class OutlineOnlyBufferSourceTest {
 		VertexCountingConsumer consumer = (VertexCountingConsumer) adapter.getBuffer(
 			RenderType.entitySolid(TextureAtlas.LOCATION_BLOCKS));
 
-		assertThrows(IllegalStateException.class, () -> consumer.addVertex(1.0F, 2.0F, 3.0F));
+		assertThrows(IllegalStateException.class, () -> consumer.vertex(1.0F, 2.0F, 3.0F));
 
 		assertEquals(1, consumer.vertices());
 		assertEquals(1, adapter.vertexCount());
@@ -322,7 +335,7 @@ class OutlineOnlyBufferSourceTest {
 		RecordingVertexConsumer delegate = new RecordingVertexConsumer();
 		VertexCountingConsumer consumer = new VertexCountingConsumer(delegate, 0x12, 0x34, 0x56);
 
-		consumer.setColor(9, 8, 7, 6);
+		consumer.color(9, 8, 7, 6);
 
 		assertEquals(0, delegate.colors.size());
 		assertEquals(0, delegate.calls.size());
@@ -333,12 +346,12 @@ class OutlineOnlyBufferSourceTest {
 		RecordingVertexConsumer delegate = new RecordingVertexConsumer();
 		VertexCountingConsumer consumer = new VertexCountingConsumer(delegate, 0x12, 0x34, 0x56);
 
-		consumer.setUv(0.5F, 0.25F);
+		consumer.uv(0.5F, 0.25F);
 		assertEquals(1, delegate.uvCalls);
 
-		consumer.setUv1(1, 2);
-		consumer.setUv2(3, 4);
-		consumer.setNormal(0.0F, 1.0F, 0.0F);
+		consumer.overlayCoords(1, 2);
+		consumer.uv2(3, 4);
+		consumer.normal(0.0F, 1.0F, 0.0F);
 
 		assertEquals(0, delegate.uv1Calls);
 		assertEquals(0, delegate.uv2Calls);
@@ -349,12 +362,12 @@ class OutlineOnlyBufferSourceTest {
 	void chainingPreservesTheConsumerInstance() {
 		VertexCountingConsumer consumer = new VertexCountingConsumer(new RecordingVertexConsumer(), 1, 2, 3);
 
-		assertSame(consumer, consumer.addVertex(0.0F, 0.0F, 0.0F));
-		assertSame(consumer, consumer.setColor(1, 2, 3, 4));
-		assertSame(consumer, consumer.setUv(0.0F, 0.0F));
-		assertSame(consumer, consumer.setUv1(0, 0));
-		assertSame(consumer, consumer.setUv2(0, 0));
-		assertSame(consumer, consumer.setNormal(0.0F, 1.0F, 0.0F));
+		assertSame(consumer, consumer.vertex(0.0F, 0.0F, 0.0F));
+		assertSame(consumer, consumer.color(1, 2, 3, 4));
+		assertSame(consumer, consumer.uv(0.0F, 0.0F));
+		assertSame(consumer, consumer.overlayCoords(0, 0));
+		assertSame(consumer, consumer.uv2(0, 0));
+		assertSame(consumer, consumer.normal(0.0F, 1.0F, 0.0F));
 	}
 
 	// --- no-op ---
@@ -363,12 +376,12 @@ class OutlineOnlyBufferSourceTest {
 	void noOpConsumerAcceptsAndDiscardsEverything() {
 		NoOpVertexConsumer consumer = NoOpVertexConsumer.INSTANCE;
 
-		assertSame(consumer, consumer.addVertex(0.0F, 0.0F, 0.0F));
-		assertSame(consumer, consumer.setColor(1, 2, 3, 4));
-		assertSame(consumer, consumer.setUv(0.5F, 0.5F));
-		assertSame(consumer, consumer.setUv1(1, 2));
-		assertSame(consumer, consumer.setUv2(3, 4));
-		assertSame(consumer, consumer.setNormal(0.0F, 1.0F, 0.0F));
+		assertSame(consumer, consumer.vertex(0.0F, 0.0F, 0.0F));
+		assertSame(consumer, consumer.color(1, 2, 3, 4));
+		assertSame(consumer, consumer.uv(0.5F, 0.5F));
+		assertSame(consumer, consumer.overlayCoords(1, 2));
+		assertSame(consumer, consumer.uv2(3, 4));
+		assertSame(consumer, consumer.normal(0.0F, 1.0F, 0.0F));
 	}
 
 	// --- routing into the supplied caller-owned source ---
@@ -406,7 +419,7 @@ class OutlineOnlyBufferSourceTest {
 
 			// The issued consumer wraps the source's own consumer: vertices
 			// flow through, counted, with the fixed opaque marker color.
-			issued.addVertex(0.0F, 0.0F, 0.0F);
+			issued.vertex(0.0F, 0.0F, 0.0F);
 
 			assertEquals(1, adapter.vertexCount());
 			assertEquals(1, source.delegate.vertices);
@@ -430,7 +443,7 @@ class OutlineOnlyBufferSourceTest {
 			assertEquals(0, source.requested.size());
 			assertEquals(0, adapter.vertexCount());
 
-			issued.addVertex(1.0F, 2.0F, 3.0F);
+			issued.vertex(1.0F, 2.0F, 3.0F);
 			assertEquals(0, adapter.vertexCount());
 		}
 	}
@@ -445,7 +458,7 @@ class OutlineOnlyBufferSourceTest {
 			source, 0xFF0000FF, TextureAtlas.LOCATION_BLOCKS, -1);
 		VertexConsumer issued = adapter.getBuffer(lineStrip);
 
-		issued.addVertex(1.0F, 2.0F, 3.0F).addVertex(4.0F, 5.0F, 6.0F);
+		issued.vertex(1.0F, 2.0F, 3.0F).vertex(4.0F, 5.0F, 6.0F);
 
 		assertSame(NoOpVertexConsumer.INSTANCE, issued);
 		assertEquals(0, source.requested.size());
@@ -458,14 +471,14 @@ class OutlineOnlyBufferSourceTest {
 		RenderType debugLine = RenderType.debugLineStrip(1.0D);
 		assertNotEquals(VertexFormat.Mode.QUADS, debugLine.mode());
 		assertTrue(debugLine.format().getElements().stream().noneMatch(element ->
-			element.usage() == VertexFormatElement.Usage.UV && element.index() == 0));
+			element.getUsage() == VertexFormatElement.Usage.UV && element.getIndex() == 0));
 
 		RecordingBufferSource source = new RecordingBufferSource();
 		OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(
 			source, 0xFF0000FF, TextureAtlas.LOCATION_BLOCKS, -1);
 		VertexConsumer issued = adapter.getBuffer(debugLine);
 
-		issued.addVertex(1.0F, 2.0F, 3.0F).setUv(0.25F, 0.75F).addVertex(4.0F, 5.0F, 6.0F);
+		issued.vertex(1.0F, 2.0F, 3.0F).uv(0.25F, 0.75F).vertex(4.0F, 5.0F, 6.0F);
 
 		assertSame(NoOpVertexConsumer.INSTANCE, issued);
 		assertEquals(0, source.requested.size());
@@ -489,7 +502,7 @@ class OutlineOnlyBufferSourceTest {
 		assertSame(expected, source.requested.get(0));
 		assertTrue(expected.isOutline());
 
-		issued.addVertex(1.0F, 2.0F, 3.0F);
+		issued.vertex(1.0F, 2.0F, 3.0F);
 		assertEquals(1, adapter.vertexCount());
 		assertEquals(1, source.delegate.vertices);
 		assertArrayEquals(new int[] { 0x12, 0x34, 0x56, 255 }, source.delegate.colors.get(0));
@@ -501,8 +514,8 @@ class OutlineOnlyBufferSourceTest {
 		OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(
 			source, 0xFF0000FF, TextureAtlas.LOCATION_BLOCKS, -1);
 
-		adapter.getBuffer(RenderType.text(TextureAtlas.LOCATION_BLOCKS)).addVertex(0.0F, 0.0F, 0.0F);
-		adapter.getBuffer(RenderType.entitySolid(TextureAtlas.LOCATION_BLOCKS)).addVertex(1.0F, 1.0F, 1.0F);
+		adapter.getBuffer(RenderType.text(TextureAtlas.LOCATION_BLOCKS)).vertex(0.0F, 0.0F, 0.0F);
+		adapter.getBuffer(RenderType.entitySolid(TextureAtlas.LOCATION_BLOCKS)).vertex(1.0F, 1.0F, 1.0F);
 
 		assertEquals(2, adapter.vertexCount());
 	}
@@ -531,13 +544,13 @@ class OutlineOnlyBufferSourceTest {
 
 		VertexConsumer consumer = adapter.getBuffer(RenderType.text(TextureAtlas.LOCATION_BLOCKS));
 		for (int i = 0; i < 4; i++) {
-			consumer.addVertex(i, 0.0F, 0.0F);
+			consumer.vertex(i, 0.0F, 0.0F);
 		}
 		assertEquals(4, adapter.vertexCount());
 
 		OutlineOnlyBufferSource.BudgetExceededException thrown = assertThrows(
 			OutlineOnlyBufferSource.BudgetExceededException.class,
-			() -> consumer.addVertex(5, 0.0F, 0.0F));
+			() -> consumer.vertex(5, 0.0F, 0.0F));
 		assertEquals(5, thrown.attemptedVertices());
 		assertEquals(4, thrown.maxVertices());
 		assertEquals(4, ((VertexCountingConsumer) consumer).vertices());
@@ -551,12 +564,12 @@ class OutlineOnlyBufferSourceTest {
 		OutlineOnlyBufferSource adapter = new OutlineOnlyBufferSource(
 			source, 0xFF0000FF, TextureAtlas.LOCATION_BLOCKS, 3);
 
-		adapter.getBuffer(RenderType.text(TextureAtlas.LOCATION_BLOCKS)).addVertex(0.0F, 0.0F, 0.0F);
-		adapter.getBuffer(RenderType.text(TextureAtlas.LOCATION_BLOCKS)).addVertex(1.0F, 0.0F, 0.0F);
-		adapter.getBuffer(RenderType.entitySolid(TextureAtlas.LOCATION_BLOCKS)).addVertex(2.0F, 0.0F, 0.0F);
+		adapter.getBuffer(RenderType.text(TextureAtlas.LOCATION_BLOCKS)).vertex(0.0F, 0.0F, 0.0F);
+		adapter.getBuffer(RenderType.text(TextureAtlas.LOCATION_BLOCKS)).vertex(1.0F, 0.0F, 0.0F);
+		adapter.getBuffer(RenderType.entitySolid(TextureAtlas.LOCATION_BLOCKS)).vertex(2.0F, 0.0F, 0.0F);
 
 		assertThrows(OutlineOnlyBufferSource.BudgetExceededException.class,
-			() -> adapter.getBuffer(RenderType.text(TextureAtlas.LOCATION_BLOCKS)).addVertex(3.0F, 0.0F, 0.0F));
+			() -> adapter.getBuffer(RenderType.text(TextureAtlas.LOCATION_BLOCKS)).vertex(3.0F, 0.0F, 0.0F));
 		assertEquals(3, adapter.vertexCount());
 	}
 
@@ -568,7 +581,7 @@ class OutlineOnlyBufferSourceTest {
 
 		VertexConsumer consumer = adapter.getBuffer(RenderType.text(TextureAtlas.LOCATION_BLOCKS));
 		for (int i = 0; i < 1000; i++) {
-			consumer.addVertex(i, 0.0F, 0.0F);
+			consumer.vertex(i, 0.0F, 0.0F);
 		}
 		assertEquals(1000, adapter.vertexCount());
 	}

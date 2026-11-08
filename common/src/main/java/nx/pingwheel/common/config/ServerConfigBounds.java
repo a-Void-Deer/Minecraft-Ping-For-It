@@ -1,5 +1,7 @@
 package nx.pingwheel.common.config;
 
+import net.minecraft.util.Mth;
+
 /**
  * Pure boundary clamps for the server-authoritative marker settings in
  * {@link ServerConfig}.
@@ -41,7 +43,7 @@ public final class ServerConfigBounds {
 	 * Clamps a ping duration in seconds to {@code [1, 60]}.
 	 */
 	public static int clampSyncDuration(int value) {
-		return Math.clamp(value, MIN_PING_DURATION, MAX_PING_DURATION);
+		return Mth.clamp(value, MIN_PING_DURATION, MAX_PING_DURATION);
 	}
 
 	/**
@@ -56,6 +58,6 @@ public final class ServerConfigBounds {
 	 * Clamps a ping distance in blocks to {@code [1, 2048]}.
 	 */
 	public static int clampPingDistance(int value) {
-		return Math.clamp(value, MIN_PING_DISTANCE, MAX_PING_DISTANCE);
+		return Mth.clamp(value, MIN_PING_DISTANCE, MAX_PING_DISTANCE);
 	}
 }

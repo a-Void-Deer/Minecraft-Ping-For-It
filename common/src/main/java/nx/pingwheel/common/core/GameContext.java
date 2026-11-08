@@ -84,13 +84,12 @@ public class GameContext {
 			return null;
 		}
 
-		return switch (locator) {
-			case EntityLocator.UUID uuid -> getEntity(uuid.value());
-			case EntityLocator.RuntimeId runtimeId -> {
-				Entity entity = Game.level.getEntity(runtimeId.value());
-				yield entity instanceof ExperienceOrb ? entity : null;
-			}
-		};
+		if (locator instanceof EntityLocator.UUID uuid) {
+			return getEntity(uuid.value());
+		}
+		EntityLocator.RuntimeId runtimeId = (EntityLocator.RuntimeId) locator;
+		Entity entity = Game.level.getEntity(runtimeId.value());
+		return entity instanceof ExperienceOrb ? entity : null;
 	}
 
 	/** Starts the independent render-world-pass UUID lookup epoch. */
@@ -112,13 +111,12 @@ public class GameContext {
 			return null;
 		}
 
-		return switch (locator) {
-			case EntityLocator.UUID uuid -> getEntityForRender(uuid.value());
-			case EntityLocator.RuntimeId runtimeId -> {
-				Entity entity = Game.level.getEntity(runtimeId.value());
-				yield entity instanceof ExperienceOrb ? entity : null;
-			}
-		};
+		if (locator instanceof EntityLocator.UUID uuid) {
+			return getEntityForRender(uuid.value());
+		}
+		EntityLocator.RuntimeId runtimeId = (EntityLocator.RuntimeId) locator;
+		Entity entity = Game.level.getEntity(runtimeId.value());
+		return entity instanceof ExperienceOrb ? entity : null;
 	}
 
 	/** Resolves a UUID for a render consumer through the current pass cache. */

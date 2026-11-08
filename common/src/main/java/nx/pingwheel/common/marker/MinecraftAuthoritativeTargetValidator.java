@@ -137,12 +137,16 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.TARGET_GONE);
 		}
 
-		return switch (requestedTarget) {
-			case Target.EntityTarget entity -> validateEntity(requesterPlayer, level, dimensionId, entity);
-			case Target.BlockTarget block -> validateBlock(requesterPlayer, level, dimensionId, block);
-			case Target.ExternalBlockTarget external -> validateExternalBlock(requesterPlayer, level, external);
-			case Target.LocationTarget location -> validateLocation(requesterPlayer, dimensionId, location);
-		};
+		if (requestedTarget instanceof Target.EntityTarget entity) {
+			return validateEntity(requesterPlayer, level, dimensionId, entity);
+		}
+		if (requestedTarget instanceof Target.BlockTarget block) {
+			return validateBlock(requesterPlayer, level, dimensionId, block);
+		}
+		if (requestedTarget instanceof Target.ExternalBlockTarget external) {
+			return validateExternalBlock(requesterPlayer, level, external);
+		}
+		return validateLocation(requesterPlayer, dimensionId, (Target.LocationTarget) requestedTarget);
 	}
 
 	private AuthoritativeTargetValidation validateExternalBlock(

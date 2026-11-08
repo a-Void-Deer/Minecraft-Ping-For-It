@@ -1,10 +1,12 @@
 package nx.pingwheel.common.mixin;
 
-import net.minecraft.client.DeltaTracker;
+import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.LightTexture;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.client.outline.BlockOutlineFrameState;
+import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -21,7 +23,7 @@ public abstract class GameRendererMixin {
 	private Minecraft minecraft;
 
 	@Inject(method = "render", at = @At("HEAD"))
-	private void pingforit$advanceInteraction(DeltaTracker deltaTracker, boolean renderLevel, CallbackInfo callbackInfo) {
+	private void pingforit$advanceInteraction(float partialTick, long nanoTime, boolean renderLevel, CallbackInfo callbackInfo) {
 		CommonClient.INSTANCE.onRenderFrame();
 	}
 
@@ -30,8 +32,8 @@ public abstract class GameRendererMixin {
 	 * prior pass ineligible. The matching post-world hook consumes the current
 	 * frame before any later pass can see it.
 	 */
-	@Inject(method = "renderLevel(Lnet/minecraft/client/DeltaTracker;)V", at = @At("HEAD"), require = 1)
-	private void pingforit$clearBlockOutlineFrame(DeltaTracker deltaTracker, CallbackInfo callbackInfo) {
+	@Inject(method = "renderLevel(FJLcom/mojang/blaze3d/vertex/PoseStack;)V", at = @At("HEAD"), require = 1)
+	private void pingforit$clearBlockOutlineFrame(float partialTick, long nanoTime, com.mojang.blaze3d.vertex.PoseStack poseStack, CallbackInfo callbackInfo) {
 		BlockOutlineFrameState.INSTANCE.clear();
 	}
 
@@ -42,17 +44,18 @@ public abstract class GameRendererMixin {
 	 * The captured world transform is restored around the immediate batch flush.
 	 */
 	@Inject(
-		method = "renderLevel(Lnet/minecraft/client/DeltaTracker;)V",
+		method = "renderLevel(FJLcom/mojang/blaze3d/vertex/PoseStack;)V",
 		at = @At(
 			value = "INVOKE",
 			target = "Lnet/minecraft/client/renderer/LevelRenderer;renderLevel("
-				+ "Lnet/minecraft/client/DeltaTracker;ZLnet/minecraft/client/Camera;"
+				+ "Lcom/mojang/blaze3d/vertex/PoseStack;FJZ"
+				+ "Lnet/minecraft/client/Camera;"
 				+ "Lnet/minecraft/client/renderer/GameRenderer;"
 				+ "Lnet/minecraft/client/renderer/LightTexture;"
-				+ "Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;)V",
+				+ "Lorg/joml/Matrix4f;)V",
 			shift = At.Shift.AFTER),
 		require = 1)
-	private void pingforit$renderBlockOutlines(DeltaTracker deltaTracker, CallbackInfo callbackInfo) {
+	private void pingforit$renderBlockOutlines(float partialTick, long nanoTime, com.mojang.blaze3d.vertex.PoseStack poseStack, CallbackInfo callbackInfo) {
 		BlockOutlineFrameState.FrameTransform frame = BlockOutlineFrameState.INSTANCE.consume();
 
 		if (frame == null) {

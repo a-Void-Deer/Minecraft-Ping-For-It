@@ -11,8 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BlockDisplayPolicyTest {
-	private static final ResourceLocation STONE = ResourceLocation.fromNamespaceAndPath("minecraft", "stone");
-	private static final ResourceLocation CHEST = ResourceLocation.fromNamespaceAndPath("minecraft", "chest");
+	private static final ResourceLocation STONE = new ResourceLocation("minecraft", "stone");
+	private static final ResourceLocation CHEST = new ResourceLocation("minecraft", "chest");
 
 	@Test
 	void whitelistAndBlacklistTruthTableCoversBothBlockTargetTypes() {

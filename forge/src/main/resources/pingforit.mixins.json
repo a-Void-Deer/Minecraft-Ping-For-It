@@ -6,13 +6,14 @@
 	"client": [
 		"KeyMappingMixin",
 		"MinecraftMixin",
+		"MouseHandlerMixin",
 		"GameRendererMixin",
-		"GuiMixin",
 		"LevelRendererMixin",
 		"DisplayBlockDisplayAccessor",
 		"ModelBlockRendererMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
-	}
+	},
+	"refmap": "${mod_id}.refmap.json"
 }

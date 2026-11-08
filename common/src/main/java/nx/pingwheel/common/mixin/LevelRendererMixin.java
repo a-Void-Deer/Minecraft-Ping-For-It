@@ -1,7 +1,6 @@
 package nx.pingwheel.common.mixin;
 
 import net.minecraft.client.Camera;
-import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.GameRenderer;
 import net.minecraft.client.renderer.LevelRenderer;
@@ -9,6 +8,7 @@ import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.PostChain;
 import net.minecraft.client.renderer.RenderBuffers;
 import com.mojang.blaze3d.systems.RenderSystem;
+import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.world.entity.Entity;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.client.outline.BlockOutlineFrameState;
@@ -52,25 +52,39 @@ public abstract class LevelRendererMixin {
 	@Shadow
 	protected abstract boolean shouldShowEntityOutlines();
 
-	@Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/systems/RenderSystem;applyModelViewMatrix()V", ordinal = 0, shift = At.Shift.AFTER))
-	private void onStartRenderLevel(DeltaTracker deltaTracker, boolean bl, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f modelViewMatrix, Matrix4f projectionMatrix, CallbackInfo ci) {
-		// Prepares the overlay, entity outline, and block outline state for
-		// this frame. Runs right after the ordinal-0 applyModelViewMatrix
-		// anchor: the camera-relative model-view matrix is applied and the
-		// call happens before the entity loop below, so the entity outline
-		// state is already prepared when the outline redirects fire. Also
-		// resets the per-frame model-outline processed flag and the model
-		// outline success record.
+	/**
+	 * Prepares the overlay, entity outline, block outline, and model-outline
+	 * success state for this frame.
+	 *
+	 * <p>This must run at {@code HEAD}, before the entity loop and the later
+	 * {@code endOutlineBatch()} model pass. In 1.20.1 the
+	 * {@code applyModelViewMatrix()} calls occur after {@code endOutlineBatch},
+	 * so anchoring here previously ran {@link
+	 * nx.pingwheel.common.client.outline.BlockModelOutlineState#beginFrame()}
+	 * after the model pass: the success record generated this frame was cleared
+	 * immediately, the VoxelShape fallback was never suppressed, and entity
+	 * outline state was one frame late.</p>
+	 */
+	@Inject(method = "renderLevel", at = @At("HEAD"), require = 1)
+	private void onStartRenderLevel(PoseStack poseStack, float partialTick, long finishNanoTime, boolean renderBlockOutline, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f projectionMatrix, CallbackInfo ci) {
 		this.modelOutlinesProcessed = false;
-		// The late VoxelShape pass must use this exact applied world transform,
-		// not mutable camera or RenderSystem state from a later render hook.
+
+		// 1.20.1 GameRenderer has already applied the camera X/Y rotation to
+		// this PoseStack before calling renderLevel; it is rotation-only and
+		// never contains the camera translation. That is exactly the view
+		// matrix camera-relative geometry needs, and it is the same matrix
+		// vanilla uses for clouds and billboards. Do not use the ambient
+		// RenderSystem model view: it does not carry this rotation.
+		Matrix4f cameraPose = new Matrix4f(poseStack.last().pose());
+
 		BlockOutlineFrameState.INSTANCE.capture(
-			RenderSystem.getModelViewMatrix(),
-			RenderSystem.getProjectionMatrix(),
+			cameraPose,
+			projectionMatrix,
 			RenderSystem.getVertexSorting(),
 			camera.getPosition(),
-			deltaTracker.getGameTimeDeltaPartialTick(true));
-		CommonClient.INSTANCE.onRenderWorld(WorldRenderContext.of(modelViewMatrix, projectionMatrix, deltaTracker.getGameTimeDeltaPartialTick(true), camera));
+			partialTick);
+		CommonClient.INSTANCE.onRenderWorld(
+			WorldRenderContext.of(cameraPose, projectionMatrix, partialTick, camera));
 	}
 
 	/**
@@ -87,21 +101,26 @@ public abstract class LevelRendererMixin {
 	 * model source can establish the outline pipeline too.
 	 */
 	@Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/OutlineBufferSource;endOutlineBatch()V"))
-	private void pingForItRenderBlockModels(DeltaTracker deltaTracker, boolean bl, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f modelViewMatrix, Matrix4f projectionMatrix, CallbackInfo ci) {
+	private void pingForItRenderBlockModels(PoseStack poseStack, float partialTick, long finishNanoTime, boolean renderBlockOutline, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f projectionMatrix, CallbackInfo ci) {
 		boolean outlinePipelineAvailable = this.shouldShowEntityOutlines()
 			|| CommonClient.INSTANCE.entityOutlineRequestSucceededThisFrame();
 
 		if (outlinePipelineAvailable) {
+			// The model pass writes camera-relative vertices, so its local
+			// buffer flushes must add the same camera rotation used for the
+			// late VoxelShape pass. The pose stack base pose is unchanged at
+			// this anchor (vanilla verifies it with checkPoseStack()).
 			CommonClient.INSTANCE.renderModelOutlines(
+				new Matrix4f(poseStack.last().pose()),
 				camera,
-				deltaTracker.getGameTimeDeltaPartialTick(true),
-				deltaTracker.getGameTimeDeltaPartialTick(false));
+				partialTick,
+				partialTick);
 		}
 
 		if (outlinePipelineAvailable) {
 			CommonClient.INSTANCE.renderEntityOutlines(
 				camera,
-				deltaTracker.getGameTimeDeltaPartialTick(true),
+				partialTick,
 				this.renderBuffers.outlineBufferSource());
 		}
 	}
@@ -115,7 +134,7 @@ public abstract class LevelRendererMixin {
 	 * silently disappearing.
 	 */
 	@Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/OutlineBufferSource;endOutlineBatch()V", shift = At.Shift.AFTER))
-	private void pingForItProcessBlockModelOutlines(DeltaTracker deltaTracker, boolean bl, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f modelViewMatrix, Matrix4f projectionMatrix, CallbackInfo ci) {
+	private void pingForItProcessBlockModelOutlines(PoseStack poseStack, float partialTick, long finishNanoTime, boolean renderBlockOutline, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f projectionMatrix, CallbackInfo ci) {
 		if (!CommonClient.INSTANCE.modelOutlinesEmittedThisFrame()) {
 			return;
 		}
@@ -125,7 +144,7 @@ public abstract class LevelRendererMixin {
 			return;
 		}
 
-		this.entityEffect.process(deltaTracker.getGameTimeDeltaTicks());
+		this.entityEffect.process(partialTick);
 		this.minecraft.getMainRenderTarget().bindWrite(false);
 		this.modelOutlinesProcessed = true;
 	}

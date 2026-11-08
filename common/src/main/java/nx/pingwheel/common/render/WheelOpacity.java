@@ -1,5 +1,7 @@
 package nx.pingwheel.common.render;
 
+import net.minecraft.util.Mth;
+
 /**
  * Pure alpha handling for the wheel overlay.
  *
@@ -16,7 +18,7 @@ public final class WheelOpacity {
 	private WheelOpacity() {}
 
 	public static int clampPercent(int percent) {
-		return Math.clamp(percent, MIN_PERCENT, MAX_PERCENT);
+		return Mth.clamp(percent, MIN_PERCENT, MAX_PERCENT);
 	}
 
 	/**
@@ -41,7 +43,7 @@ public final class WheelOpacity {
 		}
 
 		int baseAlpha = (argb >>> 24) & 0xFF;
-		int alpha = Math.clamp((int) Math.round(baseAlpha * percent / 100.0), 0, 0xFF);
+		int alpha = Mth.clamp((int) Math.round(baseAlpha * percent / 100.0), 0, 0xFF);
 		return (argb & 0x00FFFFFF) | (alpha << 24);
 	}
 

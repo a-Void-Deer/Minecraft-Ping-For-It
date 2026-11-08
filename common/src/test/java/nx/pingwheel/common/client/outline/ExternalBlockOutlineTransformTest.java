@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ExternalBlockOutlineTransformTest {
 
 	@Test
-	void keepsSableOutlineAtHugePlotCoordinatesWithoutEarlyFloatTranslation() {
+	void keepsExternalProviderOutlineAtHugePlotCoordinatesWithoutEarlyFloatTranslation() {
 		BlockPos localBlockPos = new BlockPos(7, -2, 11);
 		Vec3[] cameras = {
 			new Vec3(20_481_029.25, 10.5, 20_481_034.25),

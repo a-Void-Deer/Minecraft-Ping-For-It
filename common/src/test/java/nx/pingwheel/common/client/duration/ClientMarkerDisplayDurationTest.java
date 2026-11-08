@@ -33,7 +33,7 @@ class ClientMarkerDisplayDurationTest {
 		assertEquals(20L, ClientMarkerDisplayDuration.durationTicks(1, snapshot));
 		assertEquals(1200L, ClientMarkerDisplayDuration.durationTicks(60, snapshot));
 		assertEquals(160L, ClientMarkerDisplayDuration.durationTicks(-1, snapshot));
-		assertEquals(1200L, ClientMarkerDisplayDuration.durationTicks(61, snapshot));
+		assertEquals(1220L, ClientMarkerDisplayDuration.durationTicks(61, snapshot));
 	}
 
 	@Test

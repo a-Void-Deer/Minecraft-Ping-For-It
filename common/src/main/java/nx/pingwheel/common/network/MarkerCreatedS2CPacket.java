@@ -2,7 +2,6 @@ package nx.pingwheel.common.network;
 
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.resources.ResourceLocation;
-import org.jetbrains.annotations.NotNull;
 
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.name.TargetNameJson;
@@ -13,8 +12,7 @@ public record MarkerCreatedS2CPacket(
 	MarkerSnapshot snapshot, TargetNameJson targetName, String ownerName
 ) implements IPacket {
 
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "marker-created");
-	public static final Type<MarkerCreatedS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
+	public static final ResourceLocation PACKET_ID = new ResourceLocation(S2C_NAMESPACE, "marker-created");
 
 	public MarkerCreatedS2CPacket() {
 		this(null, null, null);
@@ -49,10 +47,5 @@ public record MarkerCreatedS2CPacket(
 
 	public static MarkerCreatedS2CPacket readSafe(FriendlyByteBuf buf) {
 		return PacketHandler.readSafe(buf, MarkerCreatedS2CPacket.class);
-	}
-
-	@Override
-	public @NotNull Type<MarkerCreatedS2CPacket> type() {
-		return PACKET_TYPE;
 	}
 }

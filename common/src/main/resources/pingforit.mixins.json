@@ -6,6 +6,7 @@
 	"client": [
 		"KeyMappingMixin",
 		"MinecraftMixin",
+		"MouseHandlerMixin",
 		"GameRendererMixin",
 		"GuiMixin",
 		"LevelRendererMixin",

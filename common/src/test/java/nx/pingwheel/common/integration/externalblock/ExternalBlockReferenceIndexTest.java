@@ -12,9 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ExternalBlockReferenceIndexTest {
 
 	private static final ExternalBlockReferenceIndex.LocatorKey FIRST =
-		new ExternalBlockReferenceIndex.LocatorKey("sable", "locator-a", "minecraft:chest", true);
+		new ExternalBlockReferenceIndex.LocatorKey("external-test", "locator-a", "minecraft:chest", true);
 	private static final ExternalBlockReferenceIndex.LocatorKey SECOND =
-		new ExternalBlockReferenceIndex.LocatorKey("sable", "locator-b", "minecraft:chest", true);
+		new ExternalBlockReferenceIndex.LocatorKey("external-test", "locator-b", "minecraft:chest", true);
 
 	@Test
 	void uncommittedPrepareCanBeRolledBackWithoutLeavingAnEntry() {

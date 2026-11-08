@@ -44,7 +44,7 @@ class BlockModelOutlineStateTest {
 		BlockPresentation direct = directPresentation(1, 2, 3, "direct");
 		BlockPresentation second = directPresentation(4, 5, 6, "other");
 		TargetKey.ExternalBlockKey sable = new TargetKey.ExternalBlockKey(
-			DIMENSION, "sable", "plot-block", "minecraft:stone");
+			DIMENSION, "external-test", "plot-block", "minecraft:stone");
 
 		state.beginFrame();
 		assertFalse(state.emitted());
@@ -98,9 +98,9 @@ class BlockModelOutlineStateTest {
 		BlockPresentationSuccessKey secondKey =
 			second.renderSubjects().get(0).successKey(second.sourceSpec());
 		TargetKey.ExternalBlockKey firstExternal = new TargetKey.ExternalBlockKey(
-			DIMENSION, "sable", "first", "minecraft:stone");
+			DIMENSION, "external-test", "first", "minecraft:stone");
 		TargetKey.ExternalBlockKey secondExternal = new TargetKey.ExternalBlockKey(
-			DIMENSION, "sable", "second", "minecraft:stone");
+			DIMENSION, "external-test", "second", "minecraft:stone");
 
 		state.setPresentations(List.of(first, second));
 		state.addSuccess(firstKey);
@@ -137,7 +137,7 @@ class BlockModelOutlineStateTest {
 		state.setPresentations(List.of(presentation));
 		state.addSuccess(success);
 		state.addExternalSuccess(new TargetKey.ExternalBlockKey(
-			DIMENSION, "sable", "plot-block", "minecraft:stone"));
+			DIMENSION, "external-test", "plot-block", "minecraft:stone"));
 
 		state.beginFrame();
 
@@ -219,7 +219,7 @@ class BlockModelOutlineStateTest {
 		BlockOutlineState outlines = BlockOutlineState.INSTANCE;
 		outlines.clear();
 		TargetKey.ExternalBlockKey externalKey = new TargetKey.ExternalBlockKey(
-			DIMENSION, "sable", "plot-block", "minecraft:stone");
+			DIMENSION, "external-test", "plot-block", "minecraft:stone");
 		state.setPresentations(List.of());
 		state.addExternalSuccess(externalKey);
 

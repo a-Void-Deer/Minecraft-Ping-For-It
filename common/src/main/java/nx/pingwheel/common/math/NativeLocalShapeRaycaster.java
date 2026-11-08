@@ -61,16 +61,9 @@ public final class NativeLocalShapeRaycaster {
 			return Optional.empty();
 		}
 
-		ClipContext context = new ClipContext(
-			localStart,
-			localEnd,
-			policy.blockMode() == RaycastPolicy.BlockMode.OUTLINE
-				? ClipContext.Block.OUTLINE
-				: ClipContext.Block.VISUAL,
-			policy.fluidMode() == RaycastPolicy.FluidMode.ANY
-				? ClipContext.Fluid.ANY
-				: ClipContext.Fluid.NONE,
-			localCollisionContext);
+		final ClipContext.Block blockShape = policy.blockMode() == RaycastPolicy.BlockMode.OUTLINE
+			? ClipContext.Block.OUTLINE
+			: ClipContext.Block.VISUAL;
 		Candidate best = null;
 
 		for (BlockPos suppliedPos : localPositions) {
@@ -83,7 +76,7 @@ public final class NativeLocalShapeRaycaster {
 
 			BlockState state = view.getBlockState(localPos);
 			best = chooseBetter(best, traceNativeShape(
-				context.getBlockShape(state, view, localPos),
+				blockShape.get(state, view, localPos, localCollisionContext),
 				localStart,
 				localEnd,
 				localPos,
@@ -97,7 +90,7 @@ public final class NativeLocalShapeRaycaster {
 
 				if (!fluidState.isEmpty()) {
 					best = chooseBetter(best, traceNativeShape(
-						context.getFluidShape(fluidState, view, localPos),
+						fluidState.getShape(view, localPos),
 						localStart,
 						localEnd,
 						localPos,

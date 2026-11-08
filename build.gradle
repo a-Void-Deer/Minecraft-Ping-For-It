@@ -1,9 +1,19 @@
 plugins {
     // see https://fabricmc.net/develop/ for new versions
     id "fabric-loom" version "${loom_version}" apply false
-    // see https://projects.neoforged.net/neoforged/moddevgradle for new versions
-    id "net.neoforged.moddev" version "${mod_dev_gradle_version}" apply false
 }
+
+allprojects {
+    tasks.withType(Javadoc).configureEach {
+        options.encoding = 'UTF-8'
+        options.addStringOption('Xdoclint:none', '-quiet')
+    }
+}
+
+// The 1.20.1 branch ships Fabric and Forge only. NeoForge 47.1.x is an early
+// Forge fork and would require the separate legacyforge toolchain, old-style
+// mods.toml metadata, and a different networking API; it is intentionally out
+// of scope for this branch.
 
 // Aggregated identity verification (docs/testing/verification.md#build-source-set-and-artifact-verification).
 // Adds no build dependencies and only inspects the final shippable jars, so
@@ -13,7 +23,7 @@ tasks.register("verifyModIdentity") {
     group = "verification"
     description = "Verifies every shippable loader jar carries the Ping For It identity and no stale original-mod references."
 
-    dependsOn(":fabric:build", ":forge:build", ":neoforge:build")
+    dependsOn(":fabric:build", ":forge:build")
 
     doLast {
         def expectedModId = providers.gradleProperty("mod_id").get()
@@ -23,7 +33,7 @@ tasks.register("verifyModIdentity") {
         def minecraftVersion = providers.gradleProperty("minecraft_version").get()
         def failures = new ArrayList<String>()
 
-        ["fabric", "forge", "neoforge"].each { loader ->
+        ["fabric", "forge"].each { loader ->
             def libsDir = project(":${loader}").layout.buildDirectory.dir("libs").get().asFile
             def expectedJarName = "${expectedArchiveName}-${expectedVersion}-${loader}-${minecraftVersion}.jar"
             def shippable = libsDir.listFiles()?.findAll {
@@ -40,7 +50,7 @@ tasks.register("verifyModIdentity") {
         if (!failures.isEmpty()) {
             throw new GradleException("verifyModIdentity failed:\n - " + failures.join("\n - "))
         }
-        logger.lifecycle("verifyModIdentity: fabric/forge/neoforge jars carry the Ping For It identity (mod_id=${expectedModId}, mod_name=${expectedModName}, mod_version=${expectedVersion}).")
+        logger.lifecycle("verifyModIdentity: fabric/forge jars carry the Ping For It identity (mod_id=${expectedModId}, mod_name=${expectedModName}, mod_version=${expectedVersion}).")
     }
 }
 
