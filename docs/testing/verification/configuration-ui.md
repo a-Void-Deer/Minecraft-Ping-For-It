@@ -453,7 +453,7 @@ timing, without naming `DEBUG` or hinting at the activation gesture, plus a
 read-only server viewer seeing `DEBUG` without editing.
 
 `SettingsCategoryCatalogTest` verifies the logging controls' Debug-category
-placement and the approved catalogue totals: 75 entries, 73 value controls, and
+placement and the approved catalogue totals: 78 entries, 76 value controls, and
 24 server Performance rows. `SettingsLocalizationCoverageTest` requires
 localized labels and tooltips for both logging rows in all eight bundled
 locales. `ServerConfigVarNumbersTest` covers logging-profile tags
@@ -468,6 +468,145 @@ above (`LoggingProfileConfigTest`, `ServerConfigLoggingProfileTest`,
 `SettingsCategoryCatalogTest`, `ServerConfigVarNumbersTest`). None of these
 fixtures establishes live native mouse or keyboard delivery, rendered tooltip
 layout, a live client/server profile switch or remote persistence.
+
+## Performance monitor coverage
+
+The [performance monitor controls](../../UI/settings-screen.md#performance-monitor-controls)
+and their headless assertions are covered by the earlier P1-P6 passing final
+combined-tree test and build execution. This section inventories that coverage;
+it is not a live-screen or multiplayer acceptance record. Production sampling and client
+runtime evidence are owned by
+[inventory verification](inventory.md#performance-monitoring-coverage-and-production-evidence);
+live scenarios remain in the
+[manual performance-monitor matrix](manual-integration.md#performance-monitor).
+
+- `SettingsCategoryCatalogTest` fixes the production catalog at 78 settings and
+  76 value controls while the existing eight client and six server navigation
+  categories stay unchanged. It places one conditional Performance monitor
+  subgroup at the end of each Debug category and checks the three fixed boolean
+  rows: the client HUD switch and the two server collection switches. It asserts
+  descriptor order, membership and visibility classification, not native
+  placement, widget input or live profile evaluation.
+- `SettingsNavigationModelTest` keeps the eight client and six server category
+  identities and independent page routing; it does not add a monitor navigation
+  level. `LoggingProfileScreenTest` then mounts the production screen's rows and
+  finds one native selector for every one of the 121 closed display metrics.
+- `ServerSettingsMonitorTest` covers the model beneath the server rows:
+  independent long dirty bits for Preview and Tracking, all four enable
+  combinations, draft-only plans, final-profile gating when DEBUG and a switch
+  are enabled together, read-only/revocation/stale-response/disconnect fences,
+  isolation from the numeric invalid mask, and refusal of partial plans. It does
+  not construct widgets or exchange packets.
+- `LoggingProfileScreenTest` assembles the production screen with native
+  `CycleButton<Boolean>` rows and an injected language. Client rows follow the
+  current handler's DEBUG value and current config object even when that object
+  is replaced while the leaf is open; the same mounted HUD and metric controls
+  read and write the replacement. The HUD switch starts off, turning it off
+  retains metric preferences, and metric rows stay editable while the HUD is
+  off. Leaving DEBUG closes the HUD and hides the subgroup; re-entering DEBUG
+  does not restore the HUD. Server rows show the draft only, remain read-only but
+  visible for a known snapshot, hide for an unknown or non-DEBUG draft, clear on
+  DEBUG exit and do not restore on re-entry; an applied server OFF neither closes
+  the local HUD nor clears metric checkboxes. Native `keyPressed` Space and mouse
+  click/release activate the mounted logging row through the deferred-action
+  coordinator, focus survives the replaced row tree, and resize and back
+  navigation preserve the current values and visibility. This is a headless
+  widget/input fixture with deterministic measurements and a stubbed physical
+  modifier read, not a live window, native font, GPU, real permission provider or
+  multiplayer session.
+- `SettingsLocalizationCoverageTest` derives the 76 value controls' required
+  labels and help from the production catalog and checks the six monitor display
+  group headings plus shared selector help in all eight bundled locales.
+  The historical `MonitorLabelsLocalizationTest` result checked the
+  pre-redesign `MonitorLabels` vocabulary used by selectors and the then-prepared
+  HUD: every displayed metric's full label, short label and tooltip, every scope
+  component, 121 metric selectors and five default summaries, format signatures,
+  OFF-only red styling and memory/sync measurement-limit help. It resolved the
+  then-prepared model for every bundled language and every
+  `ClientMonitorState.Status` value. Settings full labels and the HUD
+  compact-label provider remain separately tested; the later 69-case joint HUD
+  run covers the compact labels, display model and formatter, not the settings
+  full-label catalog. The historical check did not review translation semantics,
+  render a live locale or measure font fit.
+- The earlier P5 companion locale parity check covered 131 monitor/UI keys per
+  locale with strict JSON without duplicate keys, nonblank values, matching
+  placeholder signatures and no replacement characters. Its source match
+  covered the 16 literal format/source keys and all eight client status names.
+  The later compact-HUD resource audit adds 81 HUD-only keys and verifies the
+  unchanged 116 full-vocabulary entries; this remains a resource check, not
+  translation quality or live font fit.
+
+The recorded isolated P5 execution passed 368 tests across all 30 screen test
+classes, `MonitorLabelsLocalizationTest` and the unchanged
+`ClientConfigLocalizationTest`. That historical result covers an external
+classpath only. The earlier P1-P6 combined-tree rerun executed the Common Test
+task with these screen, catalog and localization tests included and reported
+6,122 Common tests with zero failures or errors (6,120 passed and 2 skipped);
+the 78-setting/76-value-control catalog and 121 mounted metric selectors above
+are part of that passing task. All loader
+builds and `verifyModIdentity` also passed. The run is recorded in
+[build checks](build-checks.md#performance-monitor-implementation-and-final-acceptance).
+The later UX whole-tree run supersedes this P1-P6 test result for the HUD UX
+coverage below. This remains not a live game, native-screen, font,
+permission-provider, socket/loader-lifecycle or multiplayer run.
+
+### HUD UX redesign coverage
+
+The compact-label vocabulary and the formatter, display-model, layout, cache
+and ABI preparation have headless and full-Common evidence. The current
+per-field `N/A`, per-row backing and reserved-height coverage is inventoried in
+[inventory verification](inventory.md#stable-hud-reservoir-ux-coverage). The
+live screen remains pending.
+
+- `MonitorHudLabels` adds 81 HUD-only `monitor.pingforit.hud.*` keys in each of
+  the eight bundled locales. `MonitorHudLabelsLocalizationTest` contributed 17
+  tests in the earlier UX full Common XML and now contributes 18 after the
+  wrapping case; the added case checks fixed group boundaries across the eight
+  locales. It derives the finite key set from the closed schema enums and checks
+  duplicate-free JSON, identical placeholder and format signatures, every raw
+  field and presentation token, the five scope prefixes, ASCII punctuation and
+  the fixed English/Chinese prefix and status vocabulary. A
+  repository-resource joint execution passed 69/69 across the four classes
+  (17 new HUD locale, 7 existing selector locale, 27 display model and 18
+  formatter); that joint run predates the wrapping case. The initial joint run
+  failed three HUD cases: the zh_cn/zh_tw
+  accepted-count label collided with the phase label and de_de carried a ratio
+  space. The approved resource-only repair changed the accepted labels to
+  `已应用`/`已套用` while the phase labels remain `应用`/`套用`; the rerun then
+  passed 69/69. This is a headless resource/format result, not a live locale,
+  font-fit or translation-quality review.
+- `MonitorLabelsLocalizationTest` and the P5 control coverage above still test
+  the full/short selector vocabulary and the prior prepared HUD. The compact HUD
+  labels remain HUD-only: settings full names and selector text are not replaced.
+  The eight locale files retain the 116 existing full-vocabulary entries, and
+  the 121 selector identities and default selections are unchanged.
+- The prior lower-left/reserved/visible-row HUD result recorded under [inventory
+  verification](inventory.md#hud-ux-redesign-coverage) is historical and does
+  not cover the redesign. The formatter, display-model and joint locale
+  evidence is also inventoried there.
+- The fixed upper-left/no-reserve projection, right-wrap paint path, font-option
+  cache and bottom-layer hook have full-Common coverage. The preceding run
+  recorded `InventoryMonitorHudTest` 5 (including the fixed semantic group paint
+  case), `InventoryMonitorHudAbiTest` 5, `InventoryMonitorHudCacheTest` 2 and
+  `InventoryMonitorHudStateTest` 1; the current ABI, state, preparation, layout
+  and reservoir coverage is inventoried in [inventory
+  verification](inventory.md#stable-hud-reservoir-ux-coverage). The preceding
+  fixed semantic grouping and wrapping evidence remains in [stable semantic HUD
+  wrapping coverage](inventory.md#stable-semantic-hud-wrapping-coverage). The
+  three loaders each passed four static ABI tests plus an actual Mixin
+  transformer apply over the loader-transformed `GameRenderer`, reproduced in
+  the independent review directory. No GL context, pixel, GPU/font or
+  loader-launch result is claimed.
+- Live screen, native font and locale checks remain in the [manual
+  matrix](manual-integration.md#performance-monitor). The projection contract is
+  [HUD projection and
+  presentation](../../architecture/presentation/inventory.md#hud-projection-and-presentation).
+
+The full Common task is part of the [HUD UX whole-tree
+run](build-checks.md#hud-ux-final-whole-tree-verification). The earlier
+disabled-path allocation evidence covers only the sampled monitor APIs; it does
+not establish zero allocation or CPU for the new HUD GL queries or the whole
+frame.
 
 ## Server performance contract verification
 
@@ -553,8 +692,8 @@ below describe source-reviewed coverage rather than a recorded full-suite run:
   `ServerSettingsModel` draft across navigation, and keeping a server leaf open
   when a permission revocation retains a viewable snapshot while forcing the
   scope overview without one;
-- `SettingsCategoryCatalogTest` covers all 75 catalog entries exactly once in
-  their approved categories, including the 73 value controls and two non-value
+- `SettingsCategoryCatalogTest` covers all 78 catalog entries exactly once in
+  their approved categories, including the 76 value controls and two non-value
   entries. Independent expectations check section headings, section/row order,
   flattened order, the confirmed semantic pairs rather than unrelated packing,
   and singleton rows for ordinary server controls. It checks nonempty sections,
@@ -681,7 +820,7 @@ below describe source-reviewed coverage rather than a recorded full-suite run:
   contracts. Retired timeout and obsolete inventory-sensitivity resources stay
   excluded. These are resource expectations, not a guarantee of translation
   quality. The fixture does not assemble or render screen labels;
-- `SettingsLocalizationCoverageTest` derives the 73 value controls' required
+- `SettingsLocalizationCoverageTest` derives the 76 value controls' required
   nonblank labels and generic help from the production catalog/key builder. It
   checks all category descriptions and section headings, scope/navigation/action
   and presentation-editor help, used enum/state value labels, units, and visible
@@ -873,6 +1012,15 @@ or wrapping.
   scheduler consumption and selector integration remain unexercised by them;
 - live server-settings UI, permission, read-only viewing below the required
   level, request/response, update, and persistence behavior;
+- performance-monitor controls, mounted rows, compact labels and HUD
+  layout/cache/ABI have the headless coverage above and passed the final
+  combined-tree test and build, but live native screen and font rendering,
+  GL/pixel output, actual permission-provider transitions, real socket/loader
+  lifecycle and multiplayer persistence remain unexercised. Production sampling
+  and HUD evidence is inventoried under
+  [inventory verification](inventory.md#performance-monitoring-coverage-and-production-evidence),
+  and live scenarios remain in the
+  [manual matrix](manual-integration.md#performance-monitor);
 - the assembled settings-screen label for the local marker display duration
   option: `ClientConfigLocalizationTest` and `SettingsLocalizationCoverageTest`
   check resource keys, values and placeholder contracts, and

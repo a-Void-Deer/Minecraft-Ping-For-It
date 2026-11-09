@@ -1817,6 +1817,577 @@ the earlier phases are under the sibling `central-01`, `server-focused-02` and
 [terminal Preview evidence](inventory.md#terminal-preview-evidence-and-active-demand)
 and [client creation admission capacity](inventory.md#client-creation-admission-capacity).
 
+### Performance monitor implementation and final acceptance
+
+Recorded executions: 2026-11-08 on branch `agent/perf-fix`. Phase one executed the
+monitor configuration, model/core and transport-capability checks with the
+Gradle invocation below. The accepted run used Git HEAD
+`776a243ee88ef16b60aa43ecd5cfc00c76f91bfa` plus the then-uncommitted
+monitor-foundation worktree; commit
+`f24b5b3037c91e5876511641a9c4e849124cc939` records the passed code. It ran from
+PowerShell with UTF-8 Gradle and console encoding:
+
+```powershell
+.\gradlew.bat --no-daemon --continue check build verifyModIdentity --console=plain
+```
+
+The command exited 0 with `BUILD SUCCESSFUL` in 9m 14s: 56 actionable tasks,
+35 executed and 21 up-to-date. All four Test tasks passed with 645 suites and
+6,630 tests: Common 5,976, Fabric 108, Forge 93 and NeoForge 453, with zero
+failures, zero errors and 16 skips. The skips are the existing native-classpath
+limitation: two Common `InventoryFluidLoaderIntegrationTest` cases and 14 Forge
+fluid-presentation, amount, registry and freezer cases. All three loader builds
+and `verifyModIdentity` passed; `mod_id=pingforit`, `mod_name=Ping For It` and
+`mod_version=0.5.0-pfi-beta2` were unchanged. The command's stdout, stderr and
+exit code are retained at
+`C:\Users\Void_Deer\AppData\Local\Temp\opencode\pingforit-monitor-phase1`.
+
+#### First phase-two whole-tree attempt
+
+Recorded execution date: 2026-11-08. The run used Git HEAD
+`f24b5b3037c91e5876511641a9c4e849124cc939` plus the then-uncommitted
+phase-two monitor route, coordinator, client and HUD worktree; the phase-one
+result above remains a separate passed input. Repository file-hash manifests
+contained the same 1,572 files before and after the invocation, so this failure
+is tied to that recorded workspace state.
+
+The PowerShell invocation used UTF-8 Gradle and console encoding, `--no-daemon`,
+`--continue` and separate stdout/stderr files:
+
+```powershell
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+.\gradlew.bat --no-daemon --continue check build verifyModIdentity --console=plain > $stdout 2> $stderr
+```
+
+It exited 1 with `BUILD FAILED` after 3 minutes 33 seconds: 51 actionable tasks,
+34 executed and 17 up-to-date. Six tasks failed: `:common:javadoc`,
+`:common:test`, `:fabric:javadoc`, `:forge:javadoc`, `:forge:test` and
+`:neoforge:javadoc`. Dependent `:common:check`, `:common:build`, `:forge:check`,
+`:forge:build`, `:fabric:build`, `:neoforge:build`, root `check`/`build` and
+`verifyModIdentity` did not execute. This attempt therefore provides no loader
+build or artifact-identity acceptance result; generated main jars are not
+accepted or hashed here. The logs and exit metadata are retained at
+`C:\Users\Void_Deer\AppData\Local\Temp\opencode\pingforit-monitor-final`.
+
+The executed test tasks reported 668 suites and 6,780 tests: 6,750 passed, 14
+failed, 0 errored and 16 skipped:
+
+| Module | Suites | Tests | Failed | Errors | Skipped |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Common | 568 | 6,118 | 10 | 0 | 2 |
+| Fabric | 15 | 111 | 0 | 0 | 0 |
+| Forge | 16 | 96 | 4 | 0 | 14 |
+| NeoForge | 69 | 455 | 0 | 0 | 0 |
+| Total | 668 | 6,780 | 14 | 0 | 16 |
+
+All four main and all four test compilation tasks executed successfully; the
+failure categories were:
+
+- **Javadoc.** All four `javadoc` tasks failed on the same `ClientMonitorState`
+  Javadoc comment: the literal `&&` was parsed as an HTML entity. The saved
+  doclint probe reproduced the failure with the bare comment and passed with an
+  escaped form. The local follow-up wraps it as `{@code DEBUG && HUD}`, but this
+  invocation did not validate that edit.
+- **Common tests.** Nine `InventoryCreationSnapshotIntegrationTest` failures
+  cover four parameterized
+  `selectedFiveChatsImmediatelyThenRealTrackingNineOnlyChangesHud` variants
+  (`actual backend/publisher must close fresh Tracking`, expected `true` but was
+  `false`), four parameterized
+  `twentyFourNormalHellosLeaveOldDenyButCreationStillChatsBeforeQueuedAllow`
+  variants (`the old deny hint was actually advertised`, expected
+  `Optional[false]` but was `Optional.empty`) and
+  `soundCallbackLanePolicyCannotRevokeTheFrozenCreationGrantOrDuplicateChat`
+  (expected `true` but was `false`). The shared creation fixture still mirrors
+  only the legacy send path rather than the new observed-send path; the fixture
+  repair followed in the final rerun. One further failure in the unchanged
+  `InventoryS2CPacketTest.measurementAllocatesNoDisplaySizedBuffersAndWorkspaceScalesWithActualPacket`
+  expected zero warmed allocations but observed 424 bytes. No exact object-level
+  trace exists for that original event; the later reproduced cause and repair
+  are recorded under
+  [hot-allocation and clock evidence](inventory.md#hot-allocation-and-clock-evidence).
+- **Forge tests.** Four transport tests failed with duplicate global channel
+  registration: three `EncodedCreatedTransportTest` methods
+  (`missingOrUnnegotiatedChannelHasNoHandoffAndSendThrowDoesNotRetainCallerBuffer`,
+  `actualForgeProtocolQueuesOwnedEncoderWithExactlyExistingEventChannelBody`
+  and `unchangedEventChannelEncodesNormalBasicAndOtherPacketsWithoutNewFraming`)
+  reported `Channel pingforit-s2c:presentation-v2 already registered`, and
+  `ServerConfigTransportDiagnosticsTest.snapshotRouteAndActualDispatchUseOneTerminalDecision`
+  reported `Channel pingforit-s2c:server-config-snapshot-v5 already registered`.
+  The duplicate registration arose after the newly added registration coverage
+  in the same task; the shared harness/global-registry repair followed and the
+  final rerun passes both tested channel orders.
+
+The 16 skips are the existing native-classpath matrix: two Common
+`InventoryFluidLoaderIntegrationTest` cases and 14 Forge fluid cases. They are
+the unchanged, non-passing scenarios inventoried in the
+[existing native-classpath skip table](#provider-trust-and-frozen-authorization-final-verification).
+No Minecraft client or server, loader launch, HUD rendering, multiplayer,
+manual interaction or live performance measurement was performed; those
+scenarios remain in the
+[manual performance-monitor matrix](manual-integration.md#performance-monitor).
+
+#### Final acceptance rerun
+
+The accepted rerun used Git HEAD
+`f24b5b3037c91e5876511641a9c4e849124cc939` plus the then-uncommitted phase-two
+worktree. The tested working-tree code is identical to commit
+`251f58c53e7e50392e507af05d336da7b50678be`, whose parent is `f24b5b3`; that
+commit records the monitor implementation, tests and resources, and only
+documentation changes remain outside it in the working tree. The PowerShell
+invocation repeated the UTF-8, `--no-daemon`, `--continue`, redirected-output
+and no-explicit-timeout boundary above.
+
+It exited 0 with `BUILD SUCCESSFUL` in 5m 28s: 56 actionable tasks, 27 executed
+and 29 up-to-date. The four Test tasks reported 668 suites and 6,784 tests:
+6,768 passed, zero failed, zero errored and 16 skipped.
+
+| Module | Suites | Tests | Passed | Failed | Errors | Skipped |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Common | 568 | 6,122 | 6,120 | 0 | 0 | 2 |
+| Fabric | 15 | 111 | 111 | 0 | 0 | 0 |
+| Forge | 16 | 96 | 82 | 0 | 0 | 14 |
+| NeoForge | 69 | 455 | 455 | 0 | 0 | 0 |
+| Total | 668 | 6,784 | 6,768 | 0 | 0 | 16 |
+
+Common and Forge Test tasks executed in this rerun. The Fabric and NeoForge
+Test tasks were `UP-TO-DATE`; their passing 111 and 455 results came from the
+immediately preceding whole-tree attempt on the same code input and are not
+claimed as fresh rerun executions. The four main compilation tasks, all four
+Javadoc tasks, all three loader builds and `verifyModIdentity` executed and
+passed. Identity remained `pingforit` / `Ping For It` / `0.5.0-pfi-beta2`. The
+three shippable Minecraft 1.21.1 loader jars inspected by `verifyModIdentity`
+had these sizes and SHA-256 digests after the run:
+
+| Loader | Artifact | Bytes | SHA-256 |
+| --- | --- | ---: | --- |
+| Fabric | `Ping-For-It-0.5.0-pfi-beta2-fabric-1.21.1.jar` | 3,745,662 | `4A145E605EDB7A21001C7336C22013856EDCC869F383D2FF24939D1F71ABEBDA` |
+| Forge | `Ping-For-It-0.5.0-pfi-beta2-forge-1.21.1.jar` | 3,694,891 | `58CF03942EA439BE991D9740932A0B23E0BAF60996553B3EADF076A48782B5A1` |
+| NeoForge | `Ping-For-It-0.5.0-pfi-beta2-neoforge-1.21.1.jar` | 4,001,527 | `976C07F1D95EC9511CD029D833C800FA2854878361087DADEB2113E6E01327AD` |
+
+The 16 skips remain the existing native-classpath assumptions rather than
+passes. A supplemental patched-first Forge experiment was not acceptance: both
+directions failed 56 tests plus one bootstrap container because the fixture
+lacked the Forge ModLauncher/mixins bootstrap. That is a non-standard fixture
+failure; it neither establishes nor replaces native-loader coverage, and the 16
+native assumptions remain gaps.
+
+All follow-ups named by the failed first phase-two attempt were resolved before
+this rerun: the Javadoc `&&` was escaped, the creation fixture mirrors
+`sendObserved`, the Forge transport fixture's duplicate global-channel
+registration is repaired and its two tested channel orders pass in the isolated
+integration run, and the packet-allocation test passes under its unchanged
+strict-zero assertion. The failure record above remains as historical evidence
+and is not converted into a pass.
+
+The 424-byte allocation failure was later traced to cold C2 string-constant
+resolution in the test and reader rather than a per-call production allocation.
+The repair adds off-measurement warmup while retaining the original measured
+region and strict zero assertion; the reproduced mechanism, controls and limits
+are owned by
+[inventory verification](inventory.md#hot-allocation-and-clock-evidence).
+
+This rerun is the current whole-tree test/build acceptance for the monitor
+input. The phase-one result remains a separate earlier input. Neither result
+establishes a live Minecraft client or server, loader launch, GPU/HUD
+rendering, native provider, runtime handshake, multiplayer, manual interaction,
+heap/TPS/CPU/GC measurement or whole-path allocation; those scenarios remain in
+the [manual performance-monitor matrix](manual-integration.md#performance-monitor).
+
+### HUD UX final whole-tree verification
+
+Recorded executions: 2026-11-09 on branch `agent/perf-fix`. The accepted run
+used Git HEAD `251f58c53e7e50392e507af05d336da7b50678be` plus the dirty HUD-UX
+worktree, not a clean commit. After execution, commit
+`c2fc8756f350a81460a2f12f9e745e5262f4a306` on parent `251f58c5` records the
+same 23 tested code/resource/test paths; the commit was not retested. The
+14 pre-existing uncommitted documentation paths are outside the Java/build
+input scope and are included in the all-file manifest only. This
+documentation-only close-out is later than the run and changes no tested
+Java/build input.
+
+The first whole-tree attempt ran from 06:25:18 (+08:00) with the standard
+PowerShell harness and exited 1 after 2m31s (`BUILD FAILED`; 55 actionable
+tasks, 39 executed, 16 up-to-date). `:common:compileTestJava` failed with two
+Gson `Strictness` errors in the new `MonitorHudLabelsLocalizationTest`; the
+resolved Common test classpath has Gson 2.10.1, which lacks that API.
+`:common:test` did not execute, and the existing 568-suite/6,122-test Common
+XML was stale and is not evidence for this input. The three loader Test tasks
+did execute and passed 662 tests (Fabric 111, Forge 96 with 14 skips, NeoForge
+455); all three loader builds, the four Javadoc tasks and `verifyModIdentity`
+executed and passed. The 1,579-file before/after manifest was stable at
+`4EF8CFB0EFC34ADFAE34E4BF8E8C929C104803EEE0615AF8C1D9C08095FB2476`.
+
+The only repair changed the new test from the absent Gson `Strictness` import
+and `setStrictness(STRICT)` to `reader.setLenient(false)`; it loosened no
+assertion and upgraded no dependency. The repaired test passed 17/17 in the
+final Common run.
+
+The accepted rerun ran from 06:38:55 to 06:39:45 (+08:00), 50.6 seconds, with
+UTF-8 Gradle and console encoding, `--no-daemon`, `--continue`, redirected
+stdout/stderr and no explicit timeout:
+
+```powershell
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+.\gradlew.bat --no-daemon --continue check build verifyModIdentity --console=plain > $stdout 2> $stderr
+```
+
+It exited 0 with `BUILD SUCCESSFUL` in 50 seconds: 56 actionable tasks, 7
+executed and 49 up-to-date. The 1,579-file manifest remained stable at
+`0E0D0D09CB3D187E38F7E6F7724329424E172F650994A2478017CACA738495C4`.
+The current result set is 673 suites and 6,850 tests: 6,834 passed, zero
+failed, zero errored and 16 skipped.
+
+| Module | Suites | Tests | Passed | Skipped | Execution |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Common | 573 | 6,188 | 6,186 | 2 | Fresh, 26.990s. |
+| Fabric | 15 | 111 | 111 | 0 | `UP-TO-DATE`; same-input reuse of the first UX run's fresh passing XML. |
+| Forge | 16 | 96 | 82 | 14 | `UP-TO-DATE`; same-input reuse. |
+| NeoForge | 69 | 455 | 455 | 0 | `UP-TO-DATE`; same-input reuse. |
+| Total | 673 | 6,850 | 6,834 | 16 | Zero failures and errors. |
+
+The reused loader XML was produced by the first attempt's fresh loader runs
+(mtimes 06:26:50, 06:27:12 and 06:27:52); it is not the older pre-UX monitor
+result. The 16 skips are the existing native-classpath matrix: two Common
+`InventoryFluidLoaderIntegrationTest` cases and 14 Forge patched-first
+fluid-presentation, amount, registry and freezer cases. They are not passes.
+
+All three loader builds and their Javadocs had executed successfully in the
+first attempt; in the rerun the three loader `build` tasks, the four Javadoc
+tasks and the loader Test tasks were `UP-TO-DATE`, so the rerun reuses that
+passed build evidence rather than rebuilding. The Forge mixin-jar tasks
+executed and left the final Forge jar hash unchanged. `:common:compileTestJava`,
+`:common:testClasses`, `:common:test`, `:common:check`, `:common:build` and
+`verifyModIdentity` executed in the rerun. Identity verification passed for
+`pingforit` / `Ping For It` / `0.5.0-pfi-beta2`.
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `Ping-For-It-0.5.0-pfi-beta2-fabric-1.21.1.jar` | 3,778,454 | `43FFAA507D7F21484C37BCF5CFF2B824819FE2EFAE7EBBC0F9F99B553CB616E6` |
+| `Ping-For-It-0.5.0-pfi-beta2-forge-1.21.1.jar` | 3,727,261 | `61BDC72115A469CDA5927B8EFB4A150C327AA7DD5713F2CB1AEAADE8B4731245` |
+| `Ping-For-It-0.5.0-pfi-beta2-neoforge-1.21.1.jar` | 4,033,897 | `339263AB6CB861C90BADBCE6BDBAC76D1D1CCB26C085DEECCE6571911BD52FDE` |
+| `Ping-For-It-0.5.0-pfi-beta2.jar` | 3,660,031 | `FB439B33513C78E642A12BA57C1BF48C904C3277A319ABD7166EA11145CCDE71` |
+
+The NeoForge dependency remains `21.0.143`, the existing Minecraft 1.21-line
+boundary; the `1.21.1` archive label is not a runtime 1.21.1 claim. No
+sampling, protocol/route, configuration-key/default, selector-catalog or
+mod/loader version changed in this UX set. The HUD coverage that these tests
+establish is inventoried under [HUD UX redesign
+coverage](inventory.md#hud-ux-redesign-coverage) and [configuration
+verification](configuration-ui.md#hud-ux-redesign-coverage).
+
+The run retained existing Javadoc missing-tag, mapping, deprecated-API,
+annotation-processor and Gradle deprecation warnings; it is not warning-clean.
+No Minecraft client or server, loader launch, GPU context/pixel check, native
+font/locale, live layer, multiplayer or performance session was performed.
+
+### Inventory monitor queue/publication/read accounting verification
+
+Recorded executions: 2026-11-09 on branch `agent/perf-fix`. This record covers
+the queue, publication, cut and read-attempt monitor counters. The separate
+[fixed semantic HUD wrapping final
+verification](#fixed-semantic-hud-wrapping-final-verification) is recorded below
+and is not part of this acceptance.
+
+The initial whole-tree run used Git HEAD
+`c2fc8756f350a81460a2f12f9e745e5262f4a306` plus the then-uncommitted
+counter-fix worktree. It ran from PowerShell with UTF-8 Gradle and console
+encoding, `--no-daemon`, `--continue`, redirected stdout/stderr and no explicit
+timeout:
+
+```powershell
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+.\gradlew.bat --no-daemon --continue check build verifyModIdentity --console=plain > $stdout 2> $stderr
+```
+
+It exited 0 with `BUILD SUCCESSFUL` in 8m 34s: 56 actionable tasks,
+35 executed and 21 up-to-date. All four Test tasks and all three loader builds
+executed and passed; `verifyModIdentity` passed with unchanged
+`pingforit` / `Ping For It` / `0.5.0-pfi-beta2` identity. The test XML
+contained 674 suites and 6,904 tests with zero failures, zero errors and 16
+skips. The 1,580-file before/after manifest was stable at
+`8C9A0C4B9DC874ACB79DC09B26718210AB38E48151B99AB9037055C970C8A5DD`.
+
+That pass was a real result but not accepted as final for this change.
+Independent review found two defects: publisher observer ownership when a send
+callback cancels or replaces the current context, and runtime ledger rotation.
+The initial result is retained as historical evidence and is not replaced.
+
+The repair added 17 regressions. Five `InventoryMonitorPublisherTest` cases
+cover same-callback cancel, replacement, withdrawal and rebase observer
+ownership without subtracting a surviving peer or promoting an old cut; 12
+`InventoryMonitorReadAttemptsTest` invocations cover physical read accounting
+across old/new ledger rotations, nested selection scopes, an unsettled native
+step and preservation of the original fatal witness object identity. The red
+publisher selection reported five failures in 27 cases; the red rotation
+selection reported four failures among its enabled variants; the repaired
+isolated runs passed 113 owner tests (27 publisher) and 236 runtime tests
+including probes. Independent review selections passed 90 publisher and 80
+runtime cases. The 17 added invocations account for the 6,904-to-6,921
+test-count difference.
+
+The final whole-tree rerun repeated the PowerShell boundary above and exited 0
+with `BUILD SUCCESSFUL` in 6m 43s: 56 actionable tasks, 28 executed and 28
+up-to-date. All four Test tasks executed freshly. Its stdout, stderr, exit
+metadata, XML copies, manifests and jar hashes are retained at
+`C:\Users\Void_Deer\AppData\Local\Temp\opencode\pingforit-monitor-counters-rerun`.
+
+| Module | Suites | Tests | Passed | Skipped |
+| --- | ---: | ---: | ---: | ---: |
+| Common | 574 | 6,259 | 6,257 | 2 |
+| Fabric | 15 | 111 | 111 | 0 |
+| Forge | 16 | 96 | 82 | 14 |
+| NeoForge | 69 | 455 | 455 | 0 |
+| Total | 674 | 6,921 | 6,905 | 16 |
+
+Zero tests failed and zero errored. The final Common XML contains 27
+`InventoryMonitorPublisherTest`, 40 `InventoryMonitorReadAttemptsTest` and 9
+`InventoryMonitorSharedTest` invocations, all passing. Their connected coverage
+is inventoried in [inventory
+verification](inventory.md#monitor-queuepublicationread-accounting-verification).
+
+All three loader builds and `verifyModIdentity` executed and passed; loader,
+mod and protocol versions are unchanged. The three shippable loader jars had
+these sizes and SHA-256 digests:
+
+| Loader | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Fabric | 3,782,572 | `4070982D7A02405A8557414A10744ECF2F1BEBF0394E513247FA79F10CC758F8` |
+| Forge | 3,731,305 | `8675DC65F1A810C3D06CC54308F2104C190BFD2E4FF9CEF8E0F522AB2F9422E3` |
+| NeoForge | 4,037,941 | `A938E04AF547FE4BE6918F7A30D72DE157E0AFFF4C2E7764E4B0CF1388330DE3` |
+
+The rerun used HEAD `c2fc8756` plus the then-uncommitted repair worktree;
+commit `9bcbd76a` on parent `c2fc8756` records the same six tested code/test
+paths and was not retested. A commit audit compared 1,508 non-documentation
+inputs with their tested before/after hashes; all matched, and the 14 dirty
+documentation paths were not staged.
+
+An all-file manifest contained 1,580 files before and after the rerun. The six
+tested code/test files were byte-identical. The whole tree was not
+byte-identical: `docs/testing/verification/inventory.md` changed by 153 bytes
+(229,875 to 229,722) when local process narration was removed during the run
+window. The other 1,579 files were unchanged, so this result is not a
+whole-tree-identical claim.
+
+The 16 skips are the existing native-classpath gaps: two Common
+`InventoryFluidLoaderIntegrationTest` cases and 14 Forge fluid-presentation,
+amount, registry and freezer cases. They are not passes. The run performed no
+Minecraft client or server, loader launch, real socket, installed provider,
+multiplayer, live HUD/GPU/font, heap/GC/CPU/TPS, allocation-rate or wall-clock
+measurement. The enabled shared `SELECT` path permits small per-operation scope
+allocations; the earlier disabled-path zero-allocation result does not
+generalize to that enabled path. The later HUD wrapping implementation and its
+headless execution are recorded in the [fixed semantic HUD wrapping final
+verification](#fixed-semantic-hud-wrapping-final-verification); live paint
+remains outside this record.
+
+### Fixed semantic HUD wrapping final verification
+
+Recorded execution: 2026-11-09 on branch `agent/perf-fix`. The tested input was
+HEAD `9bcbd76a8d4cb472a979dd619b8ff2d189f9293b` plus the four-file wrapping
+worktree; commit `447f7415a95147d168f6c34b097065f5a802fe7d` on that parent
+contains exactly those four paths (406 insertions and 25 deletions). The 14 dirty
+documentation paths remained unstaged and were outside the tested code input. The
+four-file before/after diff is byte-identical at SHA-256
+`1f2d05521a493c5e9704ae8c5a8a8f8ecbb865ded4158f571a7aff8ec79aca08`, so this
+execution matches the committed code input; no Gradle rerun followed the commit.
+The earlier counter-fix run whose tested input became commit `9bcbd76a` remains
+historical evidence for its own input and is not replaced.
+
+The command ran from PowerShell with UTF-8 Gradle and console encoding,
+`--no-daemon`, `--continue`, redirected stdout/stderr and no explicit timeout:
+
+```powershell
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+.\gradlew.bat --no-daemon --continue check build verifyModIdentity --console=plain > $stdout 2> $stderr
+```
+
+It exited 0 with `BUILD SUCCESSFUL` in 6m 35s: 56 actionable tasks, 31 executed
+and 25 up-to-date. All four Test tasks ran freshly and all 674 XML suites are
+new. `verifyModIdentity` passed with unchanged `pingforit` / `Ping For It` /
+`0.5.0-pfi-beta2` identity. Stdout, stderr, exit metadata, task list, XML counts,
+manifests and artifact hashes are retained at
+`C:\Users\Void_Deer\AppData\Local\Temp\opencode\pingforit-monitor-stable-wrap-full`.
+
+| Module | Suites | Tests | Passed | Skipped |
+| --- | ---: | ---: | ---: | ---: |
+| Common | 574 | 6,267 | 6,265 | 2 |
+| Fabric | 15 | 111 | 111 | 0 |
+| Forge | 16 | 96 | 82 | 14 |
+| NeoForge | 69 | 455 | 455 | 0 |
+| Total | 674 | 6,929 | 6,913 | 16 |
+
+Zero tests failed and zero errored. The 16 skips are the existing
+native-classpath gaps: two Common `InventoryFluidLoaderIntegrationTest` cases
+and 14 Forge fluid-presentation, amount, registry and freezer cases. They are
+not passes. The five affected HUD classes ran freshly in the final Common XML
+with 81 tests: 33 display-model, 18 HUD-label localization, 7 selector-label
+localization, 18 number-format and 5 painter. Their isolated source compile and
+run passed 81/81, an independent rerun passed 81/81, and the eight added
+wrapping cases account for the 6,921-to-6,929 test-count increase. Their coverage
+is inventoried in [stable semantic HUD wrapping
+coverage](inventory.md#stable-semantic-hud-wrapping-coverage); this section owns
+the execution record and does not restate the grouping rules.
+
+All four modules executed `compileJava`, `compileTestJava`, `javadoc`, `check`
+and `build`. The three loader builds, Fabric `remapJar` and `remapSourcesJar`,
+and `verifyModIdentity` executed and passed. The three loader `javadocJar` tasks
+and the Common `javadocJar` were up-to-date; they are not fresh packaging
+evidence. The three shippable loader jars and their sources jars were fresh:
+
+| Loader | Jar bytes | SHA-256 |
+| --- | ---: | --- |
+| Fabric | 3,787,364 | `28F904ECE4E751E5F1A39A78D598DCE6747F0AEB17290A4FECA1F62A3D59AFEA` |
+| Forge | 3,736,074 | `251FD51BE2F216406E915CE5D08B066D0C916FE4671B747C3FA29F3F919BCDA5` |
+| NeoForge | 4,042,710 | `835867B2DE15806D3B07AE517726812DAB9D53517767C87A2A029D9BEFFE6382` |
+
+The NeoForge dependency remains `21.0.143`, the existing Minecraft 1.21-line
+boundary; the `1.21.1` archive label is not a runtime 1.21.1 claim. No sampling,
+protocol/route, configuration-key/default, selector-catalog or mod/loader version
+changed in this wrapping set.
+
+An all-file manifest contained 1,580 files before and after. The four tested
+code/test paths were byte-identical. The only before/after difference was
+`docs/testing/verification/inventory.md` (2ffd0d93 to 274d5207), a pure
+ownership-wording edit made during the run window; the other 1,579 paths were
+stable. This is not a whole-tree-identical claim.
+
+These are headless test, compile, build and artifact-identity results. No
+Minecraft client or server, loader launch, real socket, installed provider,
+multiplayer, live GPU/font/window/layer paint, heap/GC/CPU/TPS, allocation-rate
+or wall-clock measurement was performed. The 427x240 viewport in the painter
+test is a computed headless reference, not a live window observation. The live
+HUD and performance scenarios remain pending in the [manual
+matrix](manual-integration.md#performance-monitor).
+
+### Stable HUD reservoir UX whole-tree verification
+
+Recorded execution: 2026-11-09 on branch `agent/perf-fix`. The tested input was
+HEAD `447f7415a95147d168f6c34b097065f5a802fe7d` plus 11 uncommitted Java paths:
+four production paths (`CommonClient`, `MonitorDisplayModel`, new
+`MonitorLayoutState`, `InventoryMonitorHud`) and seven test paths
+(`MonitorDisplayModelTest`, `MonitorLayoutStateTest`,
+`MonitorHudLabelsLocalizationTest`, `InventoryMonitorHudCacheTest`,
+`InventoryMonitorHudAbiTest`, `InventoryMonitorHudStateTest`,
+`InventoryMonitorHudPreparationTest`). The unchanged `InventoryMonitorHudTest`
+five cases also passed. The tested input was later committed without a Gradle
+rerun as `27778fd711c72a9132e149a7ce6e1718c7bc348e` on parent
+`447f7415a95147d168f6c34b097065f5a802fe7d`, tree
+`15f0e06a67f97bea7c39bbd0bd73b475a0c344ce`, message
+`fix: preserve performance HUD rows and style titles`; it contains the same 11
+paths (1,255 insertions and 192 deletions). This is a hash-equivalence result,
+not a commit retest. The 14 pre-existing dirty documentation paths remain
+uncommitted outside the tested code input.
+
+The command ran once from PowerShell 7.6.6 with JDK 21.0.12.1, UTF-8 Gradle and
+console encoding, `--no-daemon`, `--continue`, redirected stdout/stderr and no
+explicit timeout:
+
+```powershell
+$env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+.\gradlew.bat --no-daemon --continue check build verifyModIdentity --console=plain > $stdout 2> $stderr
+```
+
+It exited 0 with `BUILD SUCCESSFUL` in 6m 31s: 56 actionable tasks, 34 executed
+and 22 up-to-date. All four Test tasks executed freshly and all 676 XML suites
+were rewritten. Results: 6,953 tests, 6,937 passed, zero failed, zero errored
+and 16 known skips.
+
+| Module | Suites | Tests | Passed | Skipped |
+| --- | ---: | ---: | ---: | ---: |
+| Common | 576 | 6,291 | 6,289 | 2 |
+| Fabric | 15 | 111 | 111 | 0 |
+| Forge | 16 | 96 | 82 | 14 |
+| NeoForge | 69 | 455 | 455 | 0 |
+| Total | 676 | 6,953 | 6,937 | 16 |
+
+All four modules executed `compileJava`, `check`, `build`, `javadoc`,
+`javadocJar`, `sourcesJar` and `jar`. Common, Forge and NeoForge executed
+`compileTestJava`; Fabric's `compileTestJava` was `UP-TO-DATE` while its `test`
+task still executed freshly. Fabric `remapJar`/`remapSourcesJar` and
+`verifyModIdentity` passed for `pingforit` / `Ping For It` /
+`0.5.0-pfi-beta2`. The four fresh main artifacts were:
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `Ping-For-It-0.5.0-pfi-beta2.jar` | 3,679,457 | `33BD02C4D16C8D9EF368F06E9E0E1D043812DD9D831D3FCA2681CFBFA8B4B47A` |
+| `Ping-For-It-0.5.0-pfi-beta2-fabric-1.21.1.jar` | 3,798,212 | `3F45F26BAE27F100E12A45EFA35D5236C962EFB05CC18FB9CFE57EC49416DC16` |
+| `Ping-For-It-0.5.0-pfi-beta2-forge-1.21.1.jar` | 3,746,687 | `5A1006BEEA36C72951A79BF284BABBF36011712C12FC6048DBF0F8ADCA434D05` |
+| `Ping-For-It-0.5.0-pfi-beta2-neoforge-1.21.1.jar` | 4,053,323 | `FC507958F59A1AFF57CD0D5511A1D21880CACD130A9936E88FB61529F344CE74` |
+
+The 1,583-file tracked-plus-untracked nonignored manifest was byte-identical
+before and after at
+`d9f12d7467c1d9e3c67b0e41cf5c258c78f61d7774bc8200f50c37585770fe1e`; the
+11-file code subset was stable at
+`7bbd6aa1e7d38f2a056f59db97f521e2ea8cc16f0bd936cab4fa3d20e4f38fee`. The 14
+pre-existing dirty documentation paths were preserved and no concurrent
+documentation writer changed them during the run. This documentation close-out
+is later than the run and changes no tested Java/build input; the manifest
+statement covers the run window, not the final documentation tree. The run logs,
+XML counts, manifests and jar hashes are retained at
+`C:\Users\Void_Deer\AppData\Local\Temp\opencode\pingforit-monitor-reserved-hud-full`.
+
+The commit audit at
+`C:\Users\Void_Deer\AppData\Local\Temp\opencode\pingforit-hud-git-integration-20261109-171100-504`
+verified 11/11 current working files against the accepted raw SHA-256 list,
+11/11 commit blobs under the existing `core.autocrlf=true` policy, and 1,511
+non-documentation inputs against the accepted run. The 11-file code manifest
+remains
+`7bbd6aa1e7d38f2a056f59db97f521e2ea8cc16f0bd936cab4fa3d20e4f38fee`.
+Ten committed blobs are raw-identical; `CommonClient.java` differs only by 764
+CRLF pairs normalized to LF by the existing Git clean policy, with no logic
+change. The index is empty, the code worktree is clean, the 14 documentation
+paths remain uncommitted, and nothing was pushed.
+
+Focused source-connected selections also passed: A's 93/93
+model/layout/label/cache selection; B's Common 20/20, Fabric 20/20, Forge 19/19
+and NeoForge 19/19 renderer/ABI/state selections; and the final current combined
+A+B selection 128/128. The earlier 127/127 combined run is superseded by that
+128/128 result. These selections overlap among themselves and with the 83
+changed/added whole-tree cases: 43 display-model, 5 layout-state, 18 HUD-label
+localization, 2 cache, 7 ABI, 3 HUD state and 5 preparation cases. They are not
+additional unique repository tests. The whole-tree total is +24 tests and +2
+suites over the preceding 6,929-test/674-suite fixed-group run.
+
+B's external Forge and NeoForge runner excluded only the executable gate
+truth-table case that requires a bootstrapped `LoadingModList`; Common and Fabric
+executed all 64 gate combinations, and six static ABI cases ran against each
+mapped target. The final Gradle Common run executed all seven ABI cases. No
+running loader, actual Mixin application or GL context is claimed. The focused
+scripts and logs remain under
+`C:\Users\Void_Deer\AppData\Local\Temp\opencode\monitor-ux-a` and
+`C:\Users\Void_Deer\AppData\Local\Temp\opencode\monitor-ux-b-renderer`.
+
+The independent model-review probe final run at
+`C:\Users\Void_Deer\AppData\Local\Temp\opencode\review-a-probe\final\run.log`
+reports `CHECKS=86 FAILURES=0` and exit 0. The eight earlier red checks were
+corrected probe-oracle expectations, not implementation defects; the correction
+is retained in `final/oracle-correction.diff`, with the original red log
+preserved. The final case set includes a non-null old remote sample followed by
+`OFF`, `UNAUTHORIZED` and `WAITING`, then `ACTIVE` with a short value; it shows
+compact rows suppress stale values and padding while `ACTIVE` reuses reserved
+rows without reusing values. This is a headless read-only source probe, not a
+GL, window, loader-launch or runtime test.
+
+These are headless test, compile, build and artifact-identity results. No
+Minecraft client or server, real GL context or pixel output, native
+font/resource reload, real window or GUI-scale layer, running loader/Mixin,
+multiplayer, heap/GC/CPU/TPS, allocation-rate or wall-clock measurement was
+performed. The 16 skips are the existing native-classpath gaps: two Common
+`InventoryFluidLoaderIntegrationTest` cases and 14 Forge fluid-presentation,
+amount, registry and freezer cases. They are not passes. NeoForge remains
+`21.0.143` on the Minecraft 1.21 line; the archive `1.21.1` label is not a
+runtime 1.21.1 claim. The mod remains `0.5.0-pfi-beta2` and no protocol version
+changed. This record establishes the automated whole-tree result, commit
+equivalence and independent probe receipt; it does not establish live behavior.
+The [inventory coverage](inventory.md#stable-hud-reservoir-ux-coverage)
+summarizes the test relations and the [manual
+matrix](manual-integration.md#performance-monitor) retains the live gaps.
+
 ## Verification limitations
 
 The 2026-10-27 combined invocation's stderr was empty; stdout retained the Gradle 9

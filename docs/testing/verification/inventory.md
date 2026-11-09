@@ -2656,6 +2656,573 @@ not live transport, elapsed-time, allocation, CPU or throughput measurements; no
 N-times benefit is established. The helper adds no service-provider interface or
 cross-tick completed-content cache.
 
+## Performance monitoring coverage and production evidence
+
+The [performance monitor
+contract](../../architecture/presentation/inventory.md#performance-monitoring)
+owns measurement meaning, lane and shared attribution, non-interference and
+sampling lifetime. Persisted keys and selector grammar are owned by [client
+configuration](../../config/client.md#performance-monitor) and [server
+configuration](../../config/server.md#persisted-fields); HUD controls and
+control-state presentation by [settings
+screen](../../UI/settings-screen.md#performance-monitor-controls); HUD
+source-state presentation by [HUD projection and
+presentation](../../architecture/presentation/inventory.md#hud-projection-and-presentation);
+numeric authority by [server configuration
+authority](../../architecture/authority/server-config.md#remote-performance-telemetry);
+and monitor message grammar by
+[network protocol](../../architecture/network/protocol.md).
+
+### Monitor-core evidence
+
+At input `f24b5b3`, 22 independent monitor-core test methods passed.
+`MonitorSchemaTest` covers the closed scope and selector-identity catalogues,
+summary expansion without child-timing or shared-memory double counting,
+defensive copies, missing-field unavailability, saturation, negative memory
+remaining and endpoint-separated means and rates. `MonitorAccumulatorTest`
+covers the four enable combinations, bounded rolling windows and latest-only
+reads, explicit gauge and budget invalidation, generation and lifecycle
+clearing, saturation, warm-up, idle-gap and clock boundaries, local-only phases
+and a rolling-history oracle. `MonitorDemandTest` covers transmission-demand
+derivation without enabling collection.
+
+These are headless schema, accumulator and demand results, not server or client
+sampling, protocol, HUD, multiplayer or live performance evidence. Configuration
+persistence and selector coverage remain with
+[configuration verification](configuration-ui.md#performance-monitor-coverage).
+The phase-one execution record is owned by
+[build checks](build-checks.md#performance-monitor-implementation-and-final-acceptance).
+
+### Production monitor evidence
+
+The current workspace's recorded isolated P3 execution passed 14 new methods in
+`InventoryMonitorBackendTest`, `InventoryMonitorPublisherTest` and
+`InventoryMonitorSharedTest`; a separate 279-test selected neighboring
+regression run also passed. That 14-method result remains the historical
+isolated record. The latest P3 report on the timing repair counts 30 passing new
+cases, those 14 plus 16 `InventoryMonitorAttributionTest` invocations, and
+records the same 279-test selected regression run passing. The recorded isolated
+P4 run passed 333 tests: 29 new methods in
+`ClientMonitorCollectorTest`, `ClientMonitorStateTest`,
+`MonitorDisplayModelTest`, `ClientInventoryMonitorTest`,
+`ClientPingRuntimeMonitorTest` and `InventoryMonitorHudTest`, plus 304 existing
+client-runtime, interaction and receipt invocations. The later P4 outcome
+repair ended at 346 passing selected tests, including the final 13 outcome
+cases for stale, held, reentrant, duplicate and pre-baseline accept/reject
+transitions and their positive and duplicate controls. Independent review
+returned PASS for the P3 timing repair, the P4 outcome repair and the P6
+respawn repair. These remain selected headless runs from external classpaths;
+the earlier P1-P6 combined-tree Gradle acceptance passed and is recorded in
+[build checks](build-checks.md#performance-monitor-implementation-and-final-acceptance),
+and they still do not establish actual sockets, loader launches, live GPU/font
+output or performance measurements.
+
+**Server sampling.** `InventoryMonitorBackendTest` drives real ingress, runtime,
+selection, retry and close paths:
+
+- both switches off read no monitor clock and retain no sample through open,
+  tick, failed selection retry, close and reconnect;
+- each of the four enable combinations exposes only its enabled lanes, and an
+  existing request acquires a fresh baseline instead of replaying earlier work;
+  reopening with a new server generation resets the baseline and both-off
+  produces no sample or clock read;
+- real nested intervals use business-advanced time, a bounded read step is not
+  counted per getter, inclusive parent and child values are not summed, requests
+  are not sessions, and lane/shared readings retain their independent
+  attribution;
+- a detached capture is timed once and later decode does not recapture; a
+  retry-only tick includes its publication, while same-tick sink reentry and a
+  nested tick cannot erase or double count the outer interval;
+- a deferred round's capture belongs to the lane currently preparing, an actual
+  publication reservation is visible before reset, and repeated ticks do not
+  accumulate usage; physical and logical period identifiers settle at their
+  owning periods.
+
+`InventoryMonitorPublisherTest` runs the real publisher with a recording
+transport. Fixed-key packets, checksums, queue depths, charges and retained
+bytes remain identical with monitoring off and on. Every normal handoff outcome
+sends one complete packet and classifies only observed handoff bytes; unknown
+handoff bytes stay omitted rather than becoming zero, and no extra retry or
+monitor encode appears. A throwing send keeps the conservative charge and retry,
+separates known from unknown handoff, and uses one existing body measurement per
+attempt. Sequential ledger snapshots retain remaining values of -10, -5 and 15
+without rewriting earlier snapshots. Activating monitoring while a baseline is
+already queued exposes the existing logical queue cost but no invented
+charged-byte counter.
+
+`InventoryMonitorSharedTest` composes the production runtime/backend planner: a
+paid prefix replay adds no physical charge and only a newly visited tail is
+charged; a fresh ledger is not treated as cumulative history; one tracking seed
+is detached-encoded once and fanned out to two recipients without recapturing
+completed Preview work.
+
+**Client sampling, state and paint.** `ClientInventoryMonitorTest` accepts actual
+Preview, snapshot and stream packets and measures one inclusive APPLY per packet
+across nested commit paths. The production store's direct fragment and
+replacement methods are instrumented when used that way, and a disabled
+collector neither reads its clock nor changes accepted counts.
+`ClientPingRuntimeMonitorTest` exercises real runtime ingress, selector
+preparation/draw and inventory-tracking preparation/draw as separate local
+phases; disabled early returns read no clock, local data is present without
+remote telemetry, and the HUD painter is not sampled. `ClientMonitorCollectorTest`
+collapses nested same-lane intervals, keeps lanes and phases separate, and
+cannot publish an interval disabled mid-span.
+
+`ClientMonitorStateTest` covers the status/sample fences: a sample cannot
+establish authorization, an ACTIVE status waits for
+its first sample, expiry is STALE at the exact bound rather than OFF or
+UNSUPPORTED, and permission, collection, server-generation, demand-revision,
+reconnect and capability transitions clear or reject the correct remote state.
+Authoritative OFF remains public without disabling local collection or clearing
+selectors; local-only selection creates no remote demand; shared state reports a
+dependency-off condition rather than an invented zero. `MonitorDisplayModelTest`
+keeps the five default summaries compact and deduplicated, does not sum
+inclusive phases, renders missing measurements as unavailable rather than zero,
+retains negative shared memory and lower-bound/saturated meaning, styles only
+the OFF token red, keeps other statuses normal, produces no rows for a disabled
+view, and preserves metric identity and immutable prepared text through wrapping.
+The historical `InventoryMonitorHudTest` result for the prior lower-left layout
+painted only the prepared model in a GUI-scaled viewport, reserved chat/notice
+clearance, clipped visible rows without mutating the model, and handled
+zero-size and empty models. It does not cover the pending upper-left, no-reserve
+projection. These are headless runtime, state and painter seams, not live GPU,
+native font, window, socket, loader or multiplayer evidence. Independent review
+of P3/P4 is not part of this evidence.
+
+### Timing attribution evidence
+
+`InventoryMonitorAttributionTest` drives real ingress, tick, runtime, selection,
+publication and source-close callbacks with a business-advanced clock; it does
+not synthesize monitor events. Its 16 invocations cover:
+
+- a real Preview source close triggered by session revocation is charged to
+  Preview TICK_WORK as one 29-ns interval without an invented INGRESS reading,
+  and the disabled Tracking peer is not charged;
+- neutral session-refresh work with no lane owner is charged to neither lane,
+  even though the enclosing business interval advances;
+- nested Tracking work inside a Preview tick stays separately attributed, while
+  nested HELLOs from the same or a different player remain one INGRESS union
+  with one count and max equal to total;
+- SELECT-create callbacks that nest a HELLO keep Preview and Tracking ingress
+  separate even when only one lane is enabled, and a nested tick inside ingress
+  is recorded in both intervals' own unions, so the readings overlap rather than
+  form disjoint costs;
+- a `SELECTED` or `REJECT` outcome's measure and publish work belongs to
+  Tracking, while the attribution fixture confirms its existing control-byte
+  counter stays with the originating Preview wire ledger; the P3 sampling
+  assertions separately time the retried `SELECTED` publication under Tracking;
+- an over-depth HELLO recursion exhausts the bounded timing scope, omits the
+  affected INGRESS timing rather than a partial exact reading, still completes
+  every packet, and the next ingress measures exactly; with monitoring disabled
+  the same recursion performs no clock read.
+
+An earlier red run on the pre-fix code selected 21 P3 and attribution cases and
+recorded 6 failures. After repair, the green rerun reports all 30 new cases
+passing (14 plus 16) and the 279-test regression selection passing. The red and
+green runs are selected executions; the historical isolated 14-method record
+above is not replaced by the later count, and the latest 30-plus-279 report does
+not imply that every recorded execution repeated both selections.
+
+**Respawn and connection continuity.** The isolated P6 integration selection
+passed 36 tests. A respawned player with the same UUID and listener keeps the
+current watch and receives later samples through the current player object; a
+replacement listener does not inherit the prior watch without a fresh
+subscription; post-respawn delivery and capability use the current player's
+permissions rather than the old entity's. Independent reviews returned PASS for
+these results. This is headless connection composition, not a real socket,
+loader launch or multiplayer run.
+
+### Hot-allocation and clock evidence
+
+An external harness recorded a focused owner-thread hot-path check over nine
+captured actual sources: `ServerInventoryMonitor`, `ClientMonitorCollector`,
+`MonitorAccumulator`, `MonitorSchema`, `MonitorTuning`, `TransportHandoff`,
+`CostLedger`, `RetainedMemoryLedger` and `LedgerTicket`. The input is Git HEAD
+`f24b5b3` plus the captured working tree; before/after SHA-256 lists and the
+final repository recheck report all nine sources unchanged. The harness
+compiled byte-for-byte source copies with JDK 21 `javac --release 21` and ran
+from the isolated compiled classes with only the annotations jar added to the
+classpath, without repository class outputs, a Gradle invocation or a
+domain-suite run. It used Eclipse Temurin `21.0.12.1+1-LTS` on Windows x64.
+`ThreadMXBean` current-thread allocated-memory support and enablement were both
+true; repeated current-thread and by-id reads agreed and allocated zero, while
+an escaped 4096 x `byte[256]` control reported 1,114,112 bytes.
+
+Three independent JVMs passed 13 scenarios each (39 result rows): two normal
+runs with different seeds and one `-XX:-DoEscapeAnalysis` run with `dontinline`
+for the three target classes and the harness hot helpers. Every hot case used
+two 500,000-iteration warmups and eight measured 500,000-iteration batches.
+Disabled measured batches alternated never-configured default-off objects with
+objects that had been enabled and published then switched off, so the same
+methods saw both disabled states. Across every JVM and batch:
+
+- the disabled server set (ingress, tick, lane-work and phase scopes, end,
+  count, gauge and invalidation, budget, memory, shared gauge and budget, sent
+  outcomes, tick completion and latest) allocated zero bytes, read the injected
+  clock zero times and produced no sample;
+- the disabled client collector set (begin/end across APPLY, PREPARE and DRAW,
+  count, gauge, latest and tick completion) and the disabled accumulator set
+  (duration, count, gauge, budget and shared recording, invalidation, latest and
+  snapshot) each allocated zero bytes, read the clock zero times and produced no
+  sample;
+- enabled primitive server and client paths also allocated zero bytes while
+  proving execution: the server measured 7,000,000 injected clock calls and the
+  client 2,000,000 per 500,000-iteration batch, with returned tokens, counters
+  and independently timed nesting checked; direct accumulator recording with
+  pre-supplied durations allocated zero and retained the expected counts;
+- duplicate completion of the same tick allocated zero, read no clock and
+  produced no new sample in each of the server, client and accumulator cases.
+
+The enabled scalar budget, memory and shared-budget wrapper combination is a
+separate diagnostic: those production methods construct budget and memory
+reading records and therefore allocate for the tested combination, with no clock
+read or sample during the interval. Enabled small-window publication used an
+explicit test-only two-ticks-per-bucket, four-bucket window with two
+16,384-tick warmups and eight 4,096-tick measured batches; every batch read the
+clock 4,096 times, published 2,048 escaping samples and retained exactly the
+last eight real one-per-tick observations. The observed allocations are
+therefore consistent with periodic immutable publication samples and the scalar
+wrapper records; they are not disabled-path violations. The whole context's 358
+fixed arrays and 5,374 cells, together with the four accumulator bucket slots,
+kept their identities and lengths across every case; this is bounded storage
+reuse, not a retained-heap measurement. The two-tick/four-bucket window is a
+test input, not production tuning.
+
+Constructor, configuration, reset and other setup allocation are outside every
+measured interval and are not claimed zero. The check does not establish whole
+Backend, client-frame, rendering or GPU allocation, heap use, live allocation
+rate, GC, CPU/TPS or wall-clock performance, and no `nanoTime` or ns-per-op
+comparison was made; the concurrent Gradle build was not measured or used as
+evidence. It also does not establish live-session overhead, actual sockets,
+loader launches or HUD behavior.
+
+Reproduction is recorded in the external `inventory-monitor-hotalloc-20261108`
+artifact. `RESULTS.md` retains the environment and final table, while
+`METHODS.md` retains the method inventory and exclusions;
+`check-support.ps1`, `run.ps1` and `summarize.ps1` passed. Full JVM commands are
+in `default-1.command.txt`, `default-2.command.txt` and
+`noea-noinline.command.txt`, the compile sequence is recorded by `run.ps1`, and
+per-batch logs, `results.csv`, `results.json` and source/harness hashes are
+retained alongside:
+
+```powershell
+$root = 'C:\Users\Void_Deer\AppData\Local\Temp\opencode\inventory-monitor-hotalloc-20261108'
+& "$root\check-support.ps1"
+& "$root\run.ps1"
+& "$root\summarize.ps1"
+```
+
+A separate packet-measurement failure in the failed whole-tree attempt is also
+resolved. The original 424-byte event has no exact object-level trace, but the
+reproduced family is cold C2 string-constant resolution in the test and
+`ThreadMXBean` reader at the measurement threshold: uninstrumented single-JVM
+repetitions failed at 5,496 bytes and at a 1,648-byte prewarm threshold, and
+JFR plus a sampled native agent placed the allocations in the test method beside
+its first C2 compilation. Interning the production or test class strings,
+excluding only the test method's compilation, or running other test methods
+first each removed the failure. The repair adds 100,000 off-measurement small
+`OFFER` encode calls and counter reads before the original 200 large warmups;
+the original 64 measurements, checksum consumption, workspace assertions and
+strict `allocated == 0` assertion are unchanged. Injected `byte[1]` and
+`byte[4096]` per-call allocations still fail at 1,536 and 263,168 bytes, so the
+oracle remains sensitive. The final Common Test task reported 6,122 tests with
+6,120 passing and 2 skipped, and this case passed its strict zero assertion.
+
+This closes the listed hot-API and measurement-test isolation evidence only. It
+does not establish whole production-path allocation, retained heap, live
+allocation rate, GC, CPU/TPS, transport cost or wall-clock performance. The
+external `inventory-packet-allocation-20261108` artifact retains the handoff,
+reproductions, JFR/native traces, positive controls and source hashes.
+
+### Monitor queue/publication/read accounting verification
+
+The measurement definitions in [work, queue and memory
+readings](../../architecture/presentation/inventory.md#work-queue-and-memory-readings)
+and [sync and transport
+measurement](../../architecture/presentation/inventory.md#sync-and-transport-measurement)
+require source-connected evidence that the earlier monitor executions above do
+not provide. The previously recorded 6,784- and 6,850-test whole-tree results
+are historical and do not cover these queue, publication, cut or read-attempt
+connections. The final whole-tree run recorded in [build
+checks](build-checks.md#inventory-monitor-queuepublicationread-accounting-verification)
+establishes that evidence from three current-source suites:
+`InventoryMonitorPublisherTest` contributes 27 passing invocations,
+`InventoryMonitorReadAttemptsTest` 40 and `InventoryMonitorSharedTest` 9. They
+drive the production publisher, runtime, queue, shared-source and transport
+seams with a recording transport and a business-advanced clock, not schema or
+accumulator proxies.
+
+- Queue gauges: per-context merged pending absolute entries; admitted cut part
+  count minus the business-advanced part, excluding a successful sent prefix;
+  an older admitted cut and newer pending entries counted together; queue cost
+  retained until the last part; observed empty as zero; missing baseline as
+  unavailable; `CREATED` staging and standalone controls excluded. Reentrant
+  cancel, replacement, withdrawal, rebase, partial success and thrown sends
+  keep the surviving peer's admitted frame, avoid a negative gauge and do not
+  promote an old cut.
+- Publication and cut accounting: `InventoryMonitorPublisherTest` and
+  `InventoryMonitorSharedTest` exercise bootstrap and unchanged-revision
+  installation, multipart and empty/unchanged cuts, and duplicate, deferred,
+  invalid, retry, failure, cancellation, withdrawal and rebase scenarios. The
+  counter semantics and exclusions are defined by [sync and transport
+  measurement](../../architecture/presentation/inventory.md#sync-and-transport-measurement).
+  Fixed-key packets, checksums, queue depths, charges and retained bytes remain
+  identical with monitoring off and on, and an already queued baseline or
+  unique retained memory stays immutable across cap reduction and release.
+- Read attempts: native, legacy/adapter, certified pooled and `SELECT` witness
+  attempts, including a failed getter, a typed failure after a validated
+  prefix, a pooled page failure that commits only a prefix or nothing, an
+  opaque conservative grant, a detached decode failure and an uninitialized
+  runtime that reports unavailable rather than an observed zero;
+  charged attempts rather than returned slots, READ timing or successful
+  journal entries; paid replay excluded; `capture_reads`, validation, probes
+  and provider work separate; one shared reading not multiplied across lane,
+  consumer or recipient combinations; rolling counter distinct from the
+  current-period budget; no disable-to-enable backfill; a baseline gauge may
+  include backlog that already existed. Collection and generation changes and
+  nested selection scopes fence old operations without replay, and ledger
+  rotation preserves the original fatal witness object identity.
+- Handoff invariance: `HANDED_OFF`, `NOT_HANDED_OFF` and `UNOBSERVED` keep the
+  legacy business progress and retry decisions, while unknown handoff bytes
+  remain omitted rather than becoming zero.
+
+The initial whole-tree pass of 6,904 tests remains a historical actual pass, but
+independent review found two defects in this change: publisher same-callback
+cancel/replacement observer ownership and runtime ledger rotation. The repair
+added 17 regressions: five publisher cases for same-callback
+cancel/replacement/withdrawal/rebase and 12 runtime ledger-rotation invocations,
+including preservation of the original fatal witness object identity. The red runs
+recorded the affected enabled variants failing before repair; the final source
+passes them. The final whole-tree rerun reported 6,921 tests with 6,905 passing
+and 16 skipped; its execution record, the manifest exception and artifact
+hashes are in [build
+checks](build-checks.md#inventory-monitor-queuepublicationread-accounting-verification).
+
+These are headless source-connected assertions. They do not establish live
+sockets, loader launch, live game, multiplayer, actual HUD paint, installed
+provider behavior, whole-path allocation, heap, GC, CPU/TPS or wall-clock
+performance. The enabled shared `SELECT` path permits small per-operation scope
+allocations; the earlier disabled-path zero-allocation result does not extend to
+it. The later [stable semantic HUD
+wrapping coverage](#stable-semantic-hud-wrapping-coverage) is recorded separately
+and is not part of this accounting result.
+
+### Pending production test matrix
+
+The following monitor boundaries remain outside the headless P3/P4/P6 seams,
+the earlier P1-P6 combined-tree acceptance and the scoped hot-allocation check
+above.
+The named production tests and external measurements verify their own stated
+contracts; they do not establish the live or integrated behavior in this table.
+
+| Acceptance surface | Pending monitor-specific evidence | Existing fixture base |
+| --- | --- | --- |
+| Actual client/server route | SUBSCRIBE, STATUS and SAMPLE exchange over a real negotiated connection and runtime handshake, including latest-only delivery, corrupt/stale rejection and live permission/collection generation transitions. | P2 packet and coordinator fixtures are headless; P6's 36-test respawn and connection-continuity selection passed independent review but is not a real negotiated connection. |
+| Loader lifecycle and registration | Each loader's actual optional-payload registration, dispatch and client callback under a loader launch, including dedicated and integrated server startup and stop. | Isolated registration/dispatch checks do not launch a loader. |
+| Actual subscriber set | Zero, one and many subscribed clients through the live service, including subscription changes that do not alter collection and cleanup on disconnect or permission loss. | Coordinator/backend composition fixtures are headless, not an actual socket or permission provider. |
+| Live HUD (headless coverage only) | Fixed upper-left GPU/font rendering at multiple GUI scales and window sizes, no chat/heart/notice reserve, all prepared rows submitted and naturally framebuffer-clipped, right-wrapping long CJK/Latin tokens with the scope-title, field and `OFF` colors, per-visual-row backing alpha and glyph width, reserved blank rows, active-layout retention and reset, control-state compaction, unified byte/time formatting, compact labels in eight locales, font options and resource reloads, zero/narrow viewports, GL state and pixel output, and bottom-layer behavior under totem/F3/chat/inventory/pause. | Headless formatter, display-model, label, layout, cache, preparation and ABI tests cover the current projection, including the per-field `N/A`, per-row backing and reserved-height relations. The prior lower-left/reserved/visible-row painter result is historical and does not exercise the redesign; no live GPU/font/window/layer run exists. |
+| Live performance | External-profiler comparison, TPS/GC/allocation-rate results, measured transport bytes, real-session overhead and the added HUD pass's CPU cost. | The scoped external hot-allocation check covers only the listed monitor APIs on the owner thread; whole production-path allocation, HUD GL-query allocation, heap, live allocation rate, GC, CPU/TPS and wall-clock remain unmeasured. |
+
+Real server and client sampling have headless production-seam evidence, and the
+scoped external check covers the listed disabled monitor APIs plus enabled
+primitive, duplicate-completion and publication shapes. Monitor route
+interoperability, native provider behavior, runtime handshake, loader lifecycle,
+actual subscriber integration, live HUD, and whole-production or live
+performance remain pending. The complete scenarios remain in the
+[manual performance-monitor matrix](manual-integration.md#performance-monitor).
+The earlier monitor P1-P6 combined-tree build/loader acceptance passed and is
+recorded in
+[build checks](build-checks.md#performance-monitor-implementation-and-final-acceptance).
+
+### HUD UX redesign coverage
+
+The preceding redesign has headless source, full-Common and isolated classpath
+evidence for its formatter, display model, compact labels, layout, cache and
+Mixin ABI. The current per-field `N/A`, per-row backing and reserved-height
+coverage is inventoried in [stable HUD reservoir UX
+coverage](#stable-hud-reservoir-ux-coverage). Live
+GPU/font/locale/window/layer acceptance remains pending.
+
+- `MonitorNumberFormatTest` contributes 18 tests in the full Common XML. An
+  independent external oracle exercised 256,989 exact comparisons, 113,589
+  lower-bound inequality assertions and 169,937 byte syntax/cap assertions
+  without using production formatting helpers or `BigDecimal`. Coverage
+  includes the strict `>8192` unit boundary, one-pass carry and digit-cap
+  re-evaluation, non-byte integer and two-decimal precision, rational rates,
+  ratios and percentages, lower-bound/saturation/unknown handling and
+  signed-long-scale inputs. The isolated execution and oracle are retained in
+  the external `monitor-number-readonly-review-20261109-4e3bd5a2` artifact;
+  they are headless pure-code results, not paint or locale evidence.
+- `MonitorDisplayModelTest` contributed 27 tests in the earlier UX full Common
+  XML for the labels-based, scope-first `MonitorDisplayModel.prepare` output;
+  the preceding wrapping stage's class contributed 33. The current class
+  contributes 43 under [stable HUD reservoir UX
+  coverage](#stable-hud-reservoir-ux-coverage). An independent review probe
+  passed 283 assertions and 116 raw selectors.
+  Coverage includes same-scope field deduplication, peak-only and
+  actual-interval timing means,
+  the memory triplet and percentage/unit honesty, the preceding one-`N/A`-
+  per-scope behavior, status and OFF-token styling, immutable prepared text and
+  native-width wrapping. No
+  live paint, font, GPU or screen result is implied.
+- The compact vocabulary adds 81 HUD-only `monitor.pingforit.hud.*` keys in each
+  of the eight bundled locales. `MonitorHudLabelsLocalizationTest` contributed
+  17 tests in the earlier UX full Common XML and now contributes 18 after the
+  wrapping case below. A repository-resource joint execution passed 69/69
+  across the four classes (17 new HUD locale, 7 existing selector locale, 27
+  display model and 18 formatter); that joint run predates the wrapping case.
+  The initial joint run failed three HUD cases: the zh_cn/zh_tw accepted-count
+  label collided with the phase label and
+  de_de carried a ratio space. The approved resource-only repair changed the
+  accepted labels to `已应用`/`已套用` while the phase labels remain
+  `应用`/`套用`, then the repository rerun passed 69/69. The eight locale files
+  retain the 116 existing full-vocabulary entries; the 121 selector identities
+  and default selections are unchanged. This is resource/format evidence, not a
+  live locale, translation-quality or font-fit review.
+- The four HUD classes contributed 12 tests in the earlier UX full Common XML:
+  `InventoryMonitorHudAbiTest` 5, `InventoryMonitorHudCacheTest` 2,
+  `InventoryMonitorHudStateTest` 1 and `InventoryMonitorHudTest` 4; the current
+  `InventoryMonitorHudTest` contributes 5 after the wrapping case below. The
+  layout tests cover the fixed top-left margin, all prepared rows painted
+  including rows below the framebuffer, height-only resize, zero/narrow/extreme
+  widths, native glyph wrapping of long Latin/CJK tokens with OFF-only red
+  styling,
+  cache invalidation for view, width, scale, font, language and font options,
+  and scalar GL-state restoration. The ABI tests check the unique typed
+  `GuiGraphics` store, strict type-only hook, original graphics return,
+  separate frame HEAD, removal of the old late `GuiMixin` paint,
+  resource-reload identity, manifest placement and the executable gate truth
+  table. The three loaders each passed four static ABI tests plus an actual
+  Mixin transformer apply over the loader-transformed `GameRenderer`; the same
+  results were reproduced in the independent review directory. These are
+  bytecode/reflection and transformer smoke results, not a GL context, pixel
+  check, loader launch or Mixin application in a running game.
+- The prior lower-left/reserved/visible-row `InventoryMonitorHudTest` and
+  `MonitorDisplayModelTest` results are historical coverage of the replaced
+  layout. They are not evidence for the fixed upper-left/no-reserve projection
+  and are not counted as new-redesign proof.
+
+The full Common test task is part of the [HUD UX whole-tree
+run](build-checks.md#hud-ux-final-whole-tree-verification). The earlier
+disabled-path hot-allocation evidence covers only the sampled monitor APIs; it
+does not establish zero allocation, GL-query cost or whole-frame CPU for the
+new HUD. Mirroring painter state does not create a GL context or validate
+pixels. Live GUI scale, window size, native font/locale, resource reload,
+layering under totem/F3/chat/inventory or pause, multiplayer and performance
+checks remain in the [manual performance-monitor
+matrix](manual-integration.md#performance-monitor).
+
+The projected contract is [HUD projection and
+presentation](../../architecture/presentation/inventory.md#hud-projection-and-presentation).
+
+### Stable semantic HUD wrapping coverage
+
+The [HUD projection contract](../../architecture/presentation/inventory.md#hud-projection-and-presentation)
+owns fixed semantic breaks within one scope logical row. This section records the
+preceding semantic-wrap stage; its isolated 81-test and final 6,929-test
+whole-tree results do not cover the subsequent per-field `N/A`, per-row backing
+or reserved-height UX. That contract now has separate headless coverage in
+[stable HUD reservoir UX coverage](#stable-hud-reservoir-ux-coverage). Live paint
+remains pending for both.
+
+The five affected classes were compiled from source with JDK 21
+`javac --release 21 -Xlint:all -Werror` on an external classpath and run
+together: 81 tests passed, comprising `MonitorDisplayModelTest` 33,
+`MonitorHudLabelsLocalizationTest` 18, `MonitorLabelsLocalizationTest` 7,
+`MonitorNumberFormatTest` 18 and `InventoryMonitorHudTest` 5. An independent
+rerun passed 81/81. The final whole-tree Common XML re-executed those classes
+freshly with the same counts; the eight added wrapping cases account for the
+6,921-to-6,929 total-test increase. That execution is recorded in [build
+checks](build-checks.md#fixed-semantic-hud-wrapping-final-verification).
+
+- Fixed groups: each selected timing phase, every independent budget, the
+  non-sync requests/queue/work/state segment, memory and sync start a new visual
+  line at the same left margin. Two views whose values differ in digit and unit
+  width keep those group starts across multiple widths, so a value-width change
+  cannot pull a following group onto an earlier line. The scope prefix appeared
+  once, the preceding contract's one `N/A` covered the scope, and the logical row
+  text and its metric IDs remained available. The test re-formed groups from the
+  current view; that stateless-fit behavior is superseded by the reservation
+  contract below.
+- Locale and width: the five-group structure is asserted across the eight
+  bundled locale resources, including Latin and CJK fixtures; each locale keeps
+  one scope prefix and loses no non-separator content at fixed breaks or native
+  wrap points. Actual localized rows are also fitted at 18, 43 and 97
+  native-width units. Group metadata is not recovered by parsing a localized
+  field separator.
+- Fallback and paint: an over-wide group wraps natively and may push later groups
+  down; absolute line numbers are not fixed. Narrow widths and extreme non-byte
+  integers retain complete display without truncation or abbreviation. Every
+  fitted line is submitted as one painted row at the unchanged top margin, row
+  height and row spacing, including lines below the 427x240 headless reference
+  bottom; no line is dropped, only `OFF` is red, and a non-active status row
+  still runs through the existing native-wrap path. The painter and hook/state
+  paths were not modified; the painter test exercises the fitted output through
+  the existing paint loop.
+- Scope: no new compact label key, setting, sampling site or protocol message was
+  added. The existing 81 HUD-only keys in each locale, selector catalog and
+  defaults remain unchanged.
+
+This is headless source-connected and painter-seam evidence for the preceding
+stage. It does not cover the newer per-field `N/A`, per-row backing or
+reserved-height contract, and it does not establish live GPU/font rendering, a
+real window or layer paint, loader launch, multiplayer or performance; the
+427x240 viewport is a computed reference, not a live observation. Those
+scenarios remain pending in the [manual performance monitor
+matrix](manual-integration.md#performance-monitor).
+
+### Stable HUD reservoir UX coverage
+
+The [HUD projection and
+presentation](../../architecture/presentation/inventory.md#hud-projection-and-presentation)
+contract owns per-field `N/A`, per-row text backing, the scope-title color and
+the active-layout reservation. This section summarizes current headless
+coverage; the [whole-tree execution
+record](build-checks.md#stable-hud-reservoir-ux-whole-tree-verification) owns the
+command, result totals, manifest and artifact identities. Exact title and backing
+values remain architecture-owned and are not repeated here.
+
+- Model and reservation: `MonitorDisplayModelTest` contributes 43 tests.
+  Current-source cases cover selected-field and pair/triplet subvalue `N/A`
+  slots with labels and group positions retained, known-zero and partial-known
+  values, principal-only summary fields, `2 -> missing -> 2` group retention,
+  `1 -> 3 -> 1` high-water growth, blank rows without stale text, compact control
+  rows and `ACTIVE` recovery. They also cover TITLE, `OFF` and ordinary runs
+  through literal, reordered, duplicate-text and native-wrap grammar.
+  `MonitorLayoutStateTest` contributes 5 tests for normalized order/duplicate
+  selection, view/status/sample/availability/control and HUD-off behavior,
+  identity-boundary clearing, disabled-selection round trips and connection
+  reset even when a server generation is reused.
+- Localization: `MonitorHudLabelsLocalizationTest` contributes 18 tests for the
+  five fixed scope prefixes, localized field/status vocabulary, ASCII grammar,
+  only-`OFF` red styling, actual localized missing slots and known zeros, and
+  native CJK/Latin wrapping without deriving group boundaries from labels.
+- Renderer and paint seams: `InventoryMonitorHudPreparationTest` contributes 5
+  tests for one native-width measurement per nonblank visual row, one background
+  submission before each text row across actual cached row widths, reserved
+  blank rows that emit no text or background, horizontal shadow/padding clamping
+  without bottom culling, and TITLE/`OFF`/ordinary runs without label parsing.
+  `InventoryMonitorHudCacheTest` contributes 2 tests for retained-layout
+  invalidation and resource-reload language identity;
+  `InventoryMonitorHudAbiTest` contributes 7 tests for the typed graphics store,
+  type-only hook, native two-pass background/text ordering, depth and
+  resource-reload seams; `InventoryMonitorHudStateTest` contributes 3 tests for
+  state restoration after normal, boundary and flush-failure paths, empty
+  preparation and scissor padding. The unchanged `InventoryMonitorHudTest`
+  contributes its existing 5 painter cases, including top-left paint, fixed
+  groups, height-only resize and native wrapping.
+
+These are headless source, model, painter and ABI seams. An independent
+read-only source probe also recorded 86/86 checks, including non-null old remote
+data followed by compact control states and a short `ACTIVE` value, confirming
+no stale values or padding and no value reuse; it is headless, not GL evidence.
+These seams do not establish a real GL context, pixel output, native
+font/resource reload, window or GUI-scale layout,
+totem/F3/chat/inventory/pause layering, a running loader or Mixin application,
+multiplayer or performance/allocation behavior. The existing 16 native-classpath
+skips remain gaps and are not passes. Live scenarios remain in the [manual
+performance-monitor matrix](manual-integration.md#performance-monitor).
+
 ## Known automated gaps
 
 - live loader/Mixin application, GPU/font/UI and narrow-window rendering,

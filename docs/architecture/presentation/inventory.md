@@ -5,7 +5,9 @@ preview, tracking, incremental reads, detached source snapshot capture and
 schema, the bounded creation snapshot carried by an atomic inventory receipt,
 item and fluid variant identity, exact quantities, zero and identity-fallback
 rules, budget and sync policy, the session lane policy hint and its refresh
-boundary, and source recovery deadlines. The generic
+boundary, source recovery deadlines, and the performance monitor's measurement
+meaning, lane attribution, non-interference, sampling lifetime, and HUD
+projection and presentation. The generic
 mechanism — source access, capture results, cost accounting, and sync publication — is
 owned by [shared sources](shared_sources.md). The reason a tracked inventory
 keeps the live Ping and original target identity instead of a source-instance
@@ -1680,3 +1682,568 @@ open inventory list legitimately loading. The selector's cancellation and close
 response to a request that is no longer present is owned by
 [wheel](../picking/wheel.md#inventory-selection-stay-open); the inventory topic
 does not restate it.
+
+## Performance monitoring
+
+This section owns the Inventory performance monitor's measurement meaning, lane
+and shared attribution, non-interference and sampling lifetime. The persisted
+server collection switches and client HUD and selector keys are owned by [server
+configuration](../../config/server.md#persisted-fields) and [client
+configuration](../../config/client.md#performance-monitor); the complete
+selector grammar by [metric selector
+identifiers](../../config/client.md#metric-selector-identifiers); HUD controls by
+[settings screen](../../UI/settings-screen.md#performance-monitor-controls); HUD
+projection and presentation by [HUD projection and
+presentation](#hud-projection-and-presentation); numeric authority by [server
+configuration authority](../authority/server-config.md#remote-performance-telemetry);
+and the monitor wire routes and message family by
+[network protocol](../network/protocol.md).
+The collection-versus-viewing boundary is recorded in
+[D0020](../../decisions/D0020-monitor-collection-boundary.md).
+Coverage, final automated acceptance and remaining live evidence are inventoried
+in
+[performance monitoring verification](../../testing/verification/inventory.md#performance-monitoring-coverage-and-production-evidence).
+
+### Collection lanes and sampling lifetime
+
+Server Preview and Tracking collection lanes are independent. Either lane can be
+enabled alone, and enabling a lane collects its bounded values even with no
+viewer or subscriber. Subscription, HUD state and client metric selection
+establish transmission and display demand only; they never enable, disable, gate
+or reset collection. With both lanes off, no new numeric server sample is
+produced.
+
+One server period produces at most one immutable latest sample regardless of the
+number of subscribers. The accumulator keeps a bounded rolling window; transfers
+carry only the latest sample, with no per-subscriber sampling, retained history
+or fan-out. Shared values require at least one enabled server lane and are
+sampled once for the whole server. Reading the latest sample does not advance
+the window or trigger sampling.
+
+The accumulator is instance-owned by its endpoint and runs on that endpoint's
+thread; local and server accumulators never share a clock, sample or aggregate.
+A server lifecycle reset advances the server and collection generations; an
+actual enable-mask change advances the collection generation. Either clears
+pending events, the rolling window and the latest sample. A client disconnect,
+server replacement or permission-generation change clears the mirrored server
+readings rather than carrying them across connections. Control status is separate
+from numeric data; its control summary is owned by the [settings
+screen](../../UI/settings-screen.md#performance-monitor-controls) and its authority
+and availability by [server configuration
+authority](../authority/server-config.md#remote-performance-telemetry), while
+HUD source-state presentation is owned by [HUD projection and
+presentation](#hud-projection-and-presentation).
+
+### Elapsed phases and attribution
+
+Elapsed values are monotonic durations measured on the owning endpoint, not
+absolute timestamps. Every timing reading carries total, count and max; the mean
+is derived. Repeated synchronous nesting of the same lane and phase is one
+inclusive union, not a separate reading per nesting level. A finer same-lane
+phase remains inside its containing phase's inclusive total; parent and child
+readings are not added together.
+
+Server timing phases are ingress, tick work, capture, read, detached encode,
+measure and publish, recorded at the existing packet-ingress, backend-tick,
+capture, source-read, detached-encoding, frame-measurement and publisher
+boundaries. Ingress and tick work are separate top-level intervals, each with
+its own union, and neither represents the whole Minecraft server tick or MSPT.
+A synchronous callback can nest one boundary inside the other; each interval
+keeps its own union, so the intervals can overlap and are not combined as
+disjoint costs. The remaining phases are inclusive detail within inventory work,
+not additional summary totals.
+
+Work that synchronously enters another lane's scope is excluded from the caller
+lane's phase and boundary timing and charged to the lane that actually executes
+it. A lane disabled while its peer is enabled still fences attribution: its
+nested interval is not charged to the enabled peer, and the disabled lane
+records no sample. Cleanup of known lane state is charged to that lane even when
+a neutral session refresh triggers it; work with no known lane owner is assigned
+to neither lane. Lane timings therefore measure attributed inventory work, not
+complete backend CPU time.
+
+A `SELECTED` or `REJECT` outcome's measure and publish work belongs to the
+Tracking lane because it is Tracking's operation, even when the original
+Preview request's wire ledger owns its byte and budget charge. Those existing
+counters stay with that ledger and are not moved between lanes by timing
+attribution. A timing scope that exceeds its bounded nesting capacity makes the
+affected readings unavailable rather than a partial exact total; in-flight
+intervals are discarded and the next top-level interval starts clean. A
+saturated timing total remains a lower bound, as described below.
+
+Local timing phases are apply, prepare and draw at the existing client
+boundaries. They use the client clock and stay separate from every server timing;
+a local and a server duration are never summed.
+
+### Work, queue and memory readings
+
+Work accounting preserves units. Per-lane logical slot consumption belongs to
+that lane's client or target quota subject for the period. Shared physical slot
+or decode work, capture reads, probes, provider work, processing charge and
+publication work are charged once for the shared operation; the charge rules
+remain owned by [shared sources](shared_sources.md#cost-accounting) and [budgets,
+queues and memory](#budgets-queues-and-memory). Logical, physical, processing,
+byte and memory units are never weighted, converted or summed into one
+utilization figure, and logical consumption is not multiplied by recipients.
+
+The shared read-attempt counter records the attempted slot or retained-decode
+units charged by the existing source-step paths: native, legacy, certified
+pooled and `SELECT` witness reads, including a failed attempt, a typed failure
+after a validated prefix and an opaque source's conservative grant. It records
+the attempt actually charged by the source pipeline, not returned slots, READ
+timing intervals or successful journal entries, and is therefore an accounting
+attempt rather than an exact live physical-getter count. A paid journal replay
+charges logical consumption but adds neither another physical slot charge nor
+another read-attempt event. Whole-capture read work keeps its separate
+`capture_reads` budget; validation, probes and provider work are not read
+attempts. A defer advances no completion state.
+
+The read-attempt counter is a rolling shared event total, not the
+current-period `physical_slots` budget reading. It is not filtered by which
+server lane is enabled: shared work is collected once for the whole server, not
+repeated per consumer, recipient or enabled lane. A disable-to-enable transition
+does not backfill counter events from the disabled interval; a gauge that
+establishes its baseline can still include backlog that already existed.
+
+Budget readings are the authoritative ledger's current period reading for its
+limit, used, reserved, remaining and admissible remaining. The reading is taken
+before that period's ledger reset; it is not a sum of the rolling monitor
+window. Admissible remaining can be lower than remaining because another guard
+applies; it is not reconstructed as limit minus used. An unavailable budget
+remains unavailable.
+
+Queue gauges report each lane's regular recipient-context queues.
+Pending-entry and admitted-frame values are lane totals over those contexts, not
+per-request or per-recipient values. `pending_entries` is the number of pending
+absolute entries awaiting admission into a publication batch, after entries for
+the same key are merged within their context; it is not a request, context,
+recipient, payload-size or byte count. `admitted_frames` is the immutable
+admitted cut's part count minus its business-advanced part position: frames not
+yet sent, not the successful prefix already sent. The whole cut's logical queue
+cost can remain charged until its last part completes, so the cost, pending
+entries and admitted frames are independent and none is derived from another.
+Pending entries and admitted frames can both be nonzero at once. An observed
+empty queue is zero; without an observed baseline the reading is unavailable,
+not zero. The initial atomic `CREATED` receipt's staging contributes only its
+existing logical queue cost and is outside both regular counts, as are
+standalone controls. Logical queue cost is not unacknowledged network bytes, a
+request count or a channel count; an unobserved queue or channel is unavailable,
+not zero.
+
+Shared memory is one unique accounted retained and reserved reading with its cap
+and remaining capacity. It is not JVM heap, allocation rate, GC state or
+transport bytes. A live cap reduction can make remaining negative while retained
+and reserved ownership remains; admissible remaining is then zero. The
+client-local buffer estimate keeps its own local scope and unit and is never
+added to shared accounting.
+
+### Sync and transport measurement
+
+Counters are event totals over the rolling window, never gauges or inferred
+backlog. Repeated acceptance of the same control or data is not a new
+publication. A saturated counter is a lower bound and not an exact rate input;
+its rate is unavailable.
+
+`publications_installed` counts each successful transition that actually
+installs a new publication in a regular recipient context. Acceptance alone is
+not installation: a duplicate or old-revision acceptance, a publication defer
+and an `INVALID` acceptance add nothing. A regular bootstrap or a new revision
+with no quantity delta still counts once for its successful installation
+transition. The event belongs to the recipient context that actually installs
+it; publisher scans and received messages are not installation counts.
+
+`cuts_completed` counts delivered cut progress. One whole multipart cut counts
+once when its last admitted part succeeds, independent of its part count; a
+Tracking completion summary for the same cut adds no second completion. An empty
+or quantity-unchanged cut that advances a newly installed publication through a
+successful completion control also counts once. The initial fence, heartbeat,
+failure, cancellation, withdrawal and rebase are not completed cuts. A thrown
+send and its retry add no completion until the cut actually completes.
+
+In the first server sync accounting, the frame and byte counters cover only
+regular inventory-v2 Preview frames and Tracking snapshot/stream frames and
+their bytes. They do not claim all inventory-related traffic or all connection
+traffic; the independent atomic `CREATED` creation receipt remains outside
+those counters.
+The receipt's shared work and memory stay visible through the existing shared
+work and memory ledgers, and monitoring adds no creation budget charge.
+
+Local frame counters are receptions, not applications: each legally decoded
+Preview, snapshot, or stream frame that enters domain handling is counted,
+including one later rejected, held, or recognized as a duplicate, while apply
+success counts only an actually applied state, domain rejection is counted
+separately, a held or unchanged result is neither success nor rejection, and
+internal buffer replay is not a new reception.
+
+Budget-charged bytes are the existing wire-budget charge. Handoff bytes are a
+separate observation at the loader's irreversible transport boundary. A
+`HANDED_OFF` observation contributes known sent body bytes as a lower bound;
+`NOT_HANDED_OFF` contributes no sent bytes; `UNOBSERVED` or a thrown send cannot
+be classified and keeps candidate bytes explicit rather than counting them as
+sent. Handoff bytes are neither client receipt nor compressed physical traffic.
+The observed body-byte measurement reuses the existing encoded-body measurement
+and performs no extra encode for monitoring.
+
+The observed send path preserves the legacy send path's business progress for
+every outcome. An exception still propagates to the existing retry behavior;
+monitoring neither retries nor falls back, and it cannot turn an unobserved
+outcome into a successful handoff.
+
+### Availability, summaries and non-interference
+
+A metric absent from a sample is unavailable, not zero. A zero-elapsed warm-up
+sample has unavailable rates. A saturated counter or timing total is a lower
+bound; the affected rate or mean is unavailable rather than exact. A lane absent
+because it is disabled or was not requested is unavailable; disablement is
+control state, not a measured zero. Shared readings are not divided, copied or
+attributed to either lane. A local row with no server-side counterpart,
+including a server budget the local endpoint does not own, is omitted rather
+than synthesized as zero.
+
+The closed vocabulary makes summaries projections over existing raw selectors,
+not additional measurement sites. The five default summaries are:
+
+- processing: server ingress and tick work plus local apply, prepare and draw;
+- requests and queue: request, admission, local acceptance, rejection and repair
+  outcomes, and queue, buffer or state readings;
+- budget: the independent logical, wire and shared work readings, each in its
+  own unit;
+- memory: the unique shared accounting value plus the separate local buffer
+  estimate;
+- sync rate: publication, frame, handoff and byte counters over the sample's
+  elapsed interval.
+
+Timing peaks and detailed raw readings are opt-in. Selecting a summary and an
+included detail never duplicates a raw field.
+
+With both server lanes off, the monitor path is a constant O(1) gate: it adds no
+clock read, allocation, inventory traversal or encoding. When enabled, sampling
+reads existing scalar ledger and gauge values and borrows existing complete loops
+for its gauge baseline; it adds no inventory-content traversal, second encode or
+new business-budget charge. A gauge with no valid observation remains unavailable
+rather than fabricated as zero. The HUD is pure paint over cached local and
+mirrored data: it performs no sampling, source access, encoding or network IO.
+
+No observer clock, callback or allocation is inserted between final business
+authorization and transport handoff. Monitoring does not change source getters,
+budget decisions and settlements, cursor or watermark advancement, route
+selection, retry behavior or permissions, and it adds no second inventory
+runtime. Persisted keys and selector grammar remain with their linked owners;
+HUD projection and presentation are owned by
+[HUD projection and presentation](#hud-projection-and-presentation).
+
+### HUD projection and presentation
+
+The HUD projects the selected local readings and the accepted server mirror into
+compact rows. It owns source/lane grouping, the HUD label vocabulary, text and
+row styling, value and unit formatting, missing-value and source-state
+presentation, layout, wrapping and render layer. Metric selection and
+preferences are owned by [client
+configuration](../../config/client.md#performance-monitor); measurement meaning
+and availability by the sections above; numeric authority by [server
+configuration authority](../authority/server-config.md#remote-performance-telemetry);
+and wire acceptance by [network protocol](../network/protocol.md). It adds no
+measurement site.
+
+#### Scope groups and compact labels
+
+The HUD uses five logical groups in this fixed order:
+
+1. `Server - Inv Prev`
+2. `Server - Inv Track`
+3. `Server - Inv Shared`
+4. `Client - Inv Prev`
+5. `Client - Inv Track`
+
+These are the compact English display labels, using title case and ` - ` as the
+only separator between source and lane. All eight bundled locales provide the
+equivalent compact label rather than the full selector name. These labels are
+HUD presentation vocabulary only: the projection does not rename, abbreviate or
+replace configuration selectors, identifiers or defaults.
+
+The source/lane scope prefix is the only HUD title text and is drawn exactly in
+`#01F7F7`. Field labels and values keep the ordinary HUD text color; only the
+`OFF` token uses the red error style. No field text, value or non-`OFF` state
+token uses the title color.
+
+`LOCAL` readings belong only to a Client group. Server Preview and Tracking
+readings belong only to their matching Server group. `SHARED` readings belong
+only to `Server - Inv Shared`; they are server-wide shared data, not client-local
+data, and are never attached to a lane or to a Client group. Values from
+different sources or endpoint clocks are never added, averaged or presented as
+one cross-source total.
+
+Each scope group remains one logical row. All selected summary and detail fields
+for that scope are composed into fixed semantic visual segments in the order
+time, requests/queue, budgets, memory, sync. A timing phase is one segment,
+including its selected maximum and raw detail. The non-sync request, queue,
+work-counter, state and buffer-count counters and gauges, including read
+attempts, form one segment. Each independent budget is its own segment, not one
+combined budget segment. The memory-class readings form one segment, and sync
+readings form one segment. Segment membership follows the selected metric's
+semantic identity and existing category ordering, not the current value width,
+availability or a previous frame. A selected field keeps its segment position
+when its value is unavailable; a selection change establishes a new layout
+identity under [layout identity and reserved
+height](#layout-identity-and-reserved-height).
+
+Every segment begins on a new visual line at the same left x as the scope label.
+A segment that fits stays on one line, so a value-width change cannot merge it
+with an adjacent segment; a segment that exceeds the available native width wraps
+within itself at native glyph width, and its extra lines may move later segments
+down. The scope label is written once at the start of the first visual line and
+is not repeated on a segment or continuation line; continuation lines add no
+indentation. A detail field stays in its segment rather than creating another
+heading or row. A summary's category name is not repeated per field. The fixed
+breaks may use more vertical space than one unsplit row, including at a wide
+viewport, and are not merged back to save height.
+
+Within a group, each field label is reduced to the shortest text that still
+distinguishes it from the other displayed fields. Label text is localized;
+units remain English abbreviations. HUD punctuation is ASCII half-width:
+`-`, `:`, `;`, `/`, `&`, `(`, `)`, `<`, `>=`, `%` and `.` as the decimal mark.
+Chinese display text may remain Chinese where localized. A value is attached
+directly to its unit and a ratio has no space before `%`; `; ` separates fields
+with one space, and `/` joins the values of one pair or triplet without spaces.
+
+#### Summary, detail and timing values
+
+A selected summary is projected over its existing raw selectors and adds no new
+measurement. The default selection is unchanged; selecting a detail does not
+enable its peak, and selecting a summary does not force a detailed field to
+appear. The projection follows the no-duplicate rule above. Omitting a duplicate
+from the row does not remove the detailed reading from the cached sample or from
+the client's selection.
+
+For a timing phase, the main value is `total/count` over the actual sample
+interval: the actual in-scope mean of recorded intervals, not an assumed tick
+duration. A zero count leaves the mean unavailable rather than presenting a
+zero-duration measurement. A selected peak is the maximum recorded interval and
+is placed immediately beside that phase's main value in the same field. When the peak is
+the only selected timing statistic, the HUD shows only the peak. When a raw
+timing detail is selected, its total and count may remain as compact same-field
+detail; they are not added to the mean, to a parent phase, or to another source's
+clock. Parent and child phases remain inclusive, not additive.
+
+Durations below `1000ms` use `ms`; `1000ms` and above use `s`. Count is an
+interval count, not a tick count, and is never relabelled as ticks. Timing stays
+phase-by-phase. This contract adds no whole-sample per-tick total or peak and no
+`ms/t` value. The server tick-work field is the actual in-scope interval average;
+its label and units do not imply a whole-tick total or `ms/t`, and it does not
+claim complete server tick coverage merely from a sample's first and last tick.
+
+Request readings are the existing server open, received and admitted request
+counts and the existing local applied and rejected outcomes. The HUD does not
+invent a Pending request value, derive a rejected count as received minus
+admitted, or present queue logical cost as a request count. Queue cost, pending
+entries, admitted frames and request counts remain distinct fields.
+
+Each independent budget keeps its own unit and accounting period. The HUD does
+not convert, combine or total readings from different budgets or periods, and a
+shared unit never hides a different period. Byte budgets follow the byte rules
+below, and a displayed percentage belongs to that budget's own ratio. Large
+dimensionless work counts follow the full-integer rule below.
+
+#### Byte quantities
+
+All byte quantities, including memory, wire and handoff bytes, byte budgets,
+local buffer estimates and byte rates, use base-1024 quantities with the English
+unit abbreviations `B`, `KB`, `MB`, `GB`, `TB`, `PB` and `EB`. A byte rate
+appends `/s` and uses the sample's actual elapsed interval; it is never replaced
+by `/t`. Memory is not relabelled as JVM heap, and transport budget or handoff
+bytes are not relabelled as compressed physical network traffic.
+
+The displayed unit is chosen from the unrounded original magnitude. A quantity
+upgrades to the next unit only when its strict unrounded magnitude exceeds
+`8192` of the current unit, so `8192KB` remains `8192KB` while `8193KB` becomes
+`8MB`. The unit is never chosen from the rounded display value. A pair or
+triplet of byte values uses one common unit selected by the maximum absolute
+component, so the values are not shown with different units.
+
+Each displayed byte number, including the numerator of a byte rate, has at most
+four digits, excluding sign, decimal point and comparison operator, and at most
+two decimal places. Round half up, trim trailing zeros, and do not pad integer
+digits with leading zeros. The four-digit capacity is shared with the decimal
+places: as integer digits grow, decimal places shrink, and the capacity is
+re-evaluated after a carry; `999.95KB` therefore rounds to `1000KB`, not
+`999.9KB`. Examples include `1111`, `111.1`, `11.11`, `1.11` and `25.2`. A true
+zero remains zero. A positive nonzero value below the selected unit's display
+precision is shown as `<0.01<unit>`, and a common-unit series may show
+`<0.01/128/512MB`. A negative nonzero value keeps its sign and a meaningful
+direction and is never displayed as zero.
+
+Negative remaining values and percentages above `100%` are not clamped. A known
+lower bound, byte or non-byte, is marked with `>=` and rounded so that the
+displayed value does not overstate the true lower bound; ordinary half-up
+rounding is not used for that case. Aggregated sums and ratios are computed
+exactly: extreme values do not overflow or lose precision through binary
+floating point.
+
+#### Other numeric values and memory
+
+Non-byte integers are shown in full: they have no four-digit limit and never use
+`K`, `M` or `G` abbreviation. Non-byte decimals, including duration, percentage
+and dimensionless rates, use at most two decimal places, round half up and trim
+trailing zeros; they have no four-digit limit, and an integer value is not forced
+to `.00`. Duration uses the `ms`/`s` switch above; a positive nonzero duration
+below `0.01ms` is shown as `<0.01ms`. A rate already defined per tick may retain
+its `t` denominator, and a count has no unit. The byte four-digit capacity never
+applies to a non-byte value: `999.95s` remains `999.95s`, and a non-byte lower
+bound keeps its full digits and two decimals, so `>=999.95/s` is not shortened to
+`>=999.9/s`. These are display rules only; they change no sampling, stored value
+or protocol precision.
+
+Shared memory is shown as `retained/(retained+reserved)/cap`, with
+`percent=(retained+reserved)/cap`; the percentage precedes the three byte values
+and never trails them, with locale-required spacing before it. The three values
+use one common byte unit. The compact value never silently drops reserved ownership; the complete
+tooltip carries retained, reserved, cap and remaining. When cap is zero, the
+recorded quantities remain and the undefined percentage is `N/A`, not zero or
+infinity. For example:
+
+`服务器 - Inv共享: 槽50% 256/512; 内存25% 96/128/512MB`
+
+The example shows a budget pair and shared memory; `Mem 25% 96/128/512MB` is the
+equivalent English-shaped field.
+
+#### Missing values and source states
+
+A displayed field that has no value is not shown as zero. For an active
+source/lane, every selected field represented in the compact row keeps its
+label, semantic segment and group position; a value with no reading is written
+as `N/A` in that value's own position, including each selected component of a
+pair or triplet. Known values, including a known zero, remain in their
+positions. A partially known field therefore shows its known components and
+`N/A` only for the missing ones. No
+`N/A` is shared across fields or hoisted to a scope-level summary, and a selected
+field or group is not dropped because it is unavailable.
+
+A selected summary displays only the fields it actually represents. A
+non-displayed constituent does not create an `N/A` and is not expanded into the
+row. A maximum-only timing selection creates no mean value position. The
+projection adds no derived metric to fill an `N/A` position.
+
+The remote source states are distinct: `OFF` (the applied lane collection switch
+is off), `WAITING` (before the first accepted sample), `UNKNOWN` (no resolved
+response), `STALE` (the last sample is beyond its expiry), `UNSUPPORTED` (the
+connection has no monitor capability), `UNAUTHORIZED` (numeric server telemetry
+is not permitted), and `Shared dependency off` when both applied server lanes
+are off. A non-active source/lane shows only its localized state and no values
+or additional `N/A`; an active source/lane shows values without an `ACTIVE`
+token. The other states and the dependency-off state use neutral styling, and
+all captions are localized in the eight bundled locales.
+
+A lane known to be explicitly off remains `OFF` for a viewer without numeric
+authority; an enabled lane the viewer may not observe numerically shows
+`UNAUTHORIZED`. A timeout never becomes `OFF`. Local rows remain visible
+independently of every server state and of numeric server authority; losing
+authority removes server numeric values and shared values without turning off
+the HUD, clearing selections or removing local rows.
+
+#### Layout identity and reserved height
+
+An active scope's visual layout is identified by the normalized selected metric
+set that established it, the effective logical width, the Font/Language identity
+with its glyph options and line height, and the connection/session identity. A
+change to any of these starts a new identity and an empty reservation. Numeric
+values, a new sample, the current view state, availability, height, or a
+GUI-scale change that leaves the effective width, glyph metrics and line height
+unchanged are not identity inputs and do not clear the reservation.
+
+While a scope is ACTIVE and its identity is unchanged, each selected semantic
+group reserves the greater of its previous reserved visual-line count and its
+current native-wrapped line count. The reservation is per group, not one scope
+total. A value becoming shorter or unavailable therefore keeps its group's
+existing row height, while longer text may grow the group and push later groups
+down. Rows inside the reservation that have no current text are blank and paint
+no stale value, field text or row backing. The reservation is presentation
+metadata only: it holds selected identifiers, group boundaries and line counts,
+not prior values, samples, availability or authority. Drawing always uses the
+current projected values; the reservation only supplies height.
+
+这可以使这部分数据的值在有 / 无时，屏幕上所有数据所在的行不变。
+
+That stability is limited to an ACTIVE scope whose selected metrics, effective
+width, Font/Language identity, glyph options, line height and connection/session
+identity are unchanged and whose current text does not exceed the existing
+reserved height. Longer text may grow its group and push later groups down, and
+token positions inside the same group may still change. The control-state
+compact exception below is outside this guarantee. The contract does not promise
+fixed word or line coordinates for arbitrary data or widths.
+
+Hiding the HUD or turning it off does not by itself clear an active reservation,
+and showing it again under the same identity may restore the existing heights.
+The identity changes above clear the reservation even while the HUD is hidden. A
+disconnect or genuinely new connection clears it; a same-connection respawn does
+not.
+
+A control state such as `OFF`, `WAITING`, `UNAUTHORIZED`, `UNKNOWN`, `STALE`,
+`UNSUPPORTED` or the shared dependency-off state compacts only that scope's
+status row. It paints the scope prefix and localized state token without the
+active field layout, reserved padding, field labels or stale values, so later
+scope rows may move up. A later return to `ACTIVE` may restore the reservation
+the scope already held, so a low-frequency control-state change can move later
+scope rows without being a layout reset. Control state neither clears the
+reservation nor authorizes stale values.
+
+#### Layout and render layer
+
+The first visual line is fixed at the top-left native GUI-scaled margin. Each
+painted visual text row draws its own black backing across that row's drawn glyph
+width, using ARGB `0x26000000` (alpha `38/255`, about 15%); this is a per-row
+backing, not one rectangle behind the HUD or a semantic group. The existing font
+shadow and inter-field gap remain. A reserved row with no current text paints
+neither backing nor glyphs. The HUD adds no anchor, position or scale preference,
+reserves no space for vanilla chat, hearts or notices, and does not move or
+shrink when those elements appear or are repositioned.
+
+Within one scope logical row, each fixed semantic segment starts a new visual
+line. A segment wraps at native glyph width, including long unspaced tokens, so
+the right edge does not overflow; a segment that fits is not merged with an
+adjacent segment because of value width. A necessary horizontal clip guard may
+protect the framebuffer, but it must preserve metric identity and the `OFF`
+styling. Every visual line that fits the width after wrapping is painted;
+vertical overflow past the bottom is accepted as natural framebuffer clipping.
+There is no height budget, ellipsis, row-dropping or merge-back rule. A
+non-active state row is not divided into semantic segments and keeps ordinary
+native wrapping.
+
+A 2560x1440 framebuffer at GUI scale 6, giving a 427x240 GUI viewport, is a
+reference example only. It is not a hardcoded size or a forced window scale;
+every other window and GUI scale uses the native width. Fixed semantic breaks
+can put more lines below that reference bottom; the HUD does not drop or merge
+them to fit it.
+
+The HUD is the bottom layer: vanilla HUD, chat, F3, notices and
+screens/overlays draw over it. Being covered is acceptable; the HUD does not
+yield, re-anchor or raise itself. Existing F1 and player-level gating
+remain unchanged, and this contract adds no top overlay after screens. The
+cached pure-paint boundary above applies: a visible frame must restore render
+state so the original HUD remains unaffected. The layout identity above owns
+reset and cache invalidation; a height change or a numeric or availability change
+does not reduce, ellipsize or drop reserved rows or their wrapped lines.
+
+#### Presentation examples
+
+Layout and compact-label examples for the same field order. Line breaks mark the
+fixed semantic segments; a segment still wraps natively if it exceeds the
+viewport:
+
+```text
+Server - Inv Prev: 12.4ms Peak 98.6ms
+Open 2 Recv 12 Admitted 9; QCost 34/64
+Slots 7/64
+Sync 4 12KB/s
+
+Server - Inv Shared: Slots 50% 256/512
+Mem 25% 96/128/512MB
+
+Client - Inv Prev: 0.42ms Peak 1.1ms
+Applied 8 Rejected 1
+Buf 2.5KB
+```
+
+These examples are layout illustrations, not defaults or additional metrics.
+`QCost` is queue logical cost and is not a request count. The labels, selected
+fields and values are illustrative; the real rows contain only selected metrics
+and use the localized compact vocabulary.

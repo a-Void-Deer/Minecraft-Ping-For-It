@@ -17,8 +17,8 @@ independently configure server behavior. The client file has a separate
 `pingDistance` key; the two configuration objects are distinct even where names
 match.
 
-The seven top-level scalar fields other than `pingDistance`, and the twenty-three
-`inventory` administration settings, can also be changed over the
+The nine top-level scalar fields other than `pingDistance`, and the
+twenty-three `inventory` administration settings, can also be changed over the
 client/server connection through
 [changing server configuration](../architecture/config/changing-server-config.md).
 Within the `presentation` object, the per-target-type `white`, `black`, and
@@ -41,9 +41,23 @@ exposes the remote settings and the presentation policy controls.
 | `syncDuration` | number, seconds | Server-held marker synchronization lifetime used for an accepted create's frozen expiry. | Server-authoritative. A valid positive duration after validation; it has no zero sentinel. Lifetime behavior is owned by [marker lifecycle](../architecture/authority/marker_lifecycle.md). |
 | `budgetDelayNotificationsEnabled` | boolean | Enables administrator system messages for continuously resource-delayed work; disabling it does not disable WARN diagnostics. | Server-authoritative. Message eligibility, timing and lifetime behavior are owned by [shared source monitoring](../architecture/presentation/shared_sources.md#budget-delay-monitoring). |
 | `loggingProfile` | string; canonical values `NORMAL`, `DEEP`, `DEBUG` | Server-side disclosure profile for diagnostic reports. | Server-authoritative and remotely editable. The server default is `NORMAL`; a missing, explicit `null`, or unknown persisted value resolves to `NORMAL` without a same-version rewrite. Disclosure and runtime publication are owned by [diagnostics and logging](../architecture/logging.md). |
+| `previewMonitorEnabled` | boolean; default `false` | Enables bounded server-side Preview performance-monitor collection for its lane. | Server-authoritative and remotely editable. The mask, merge and apply relationship are owned by [changing server configuration](../architecture/config/changing-server-config.md); numeric telemetry authority is owned by [server configuration authority](../architecture/authority/server-config.md). |
+| `trackingMonitorEnabled` | boolean; default `false` | Enables bounded server-side Tracking performance-monitor collection for its lane. | Server-authoritative and remotely editable. The mask, merge and apply relationship are owned by [changing server configuration](../architecture/config/changing-server-config.md); numeric telemetry authority is owned by [server configuration authority](../architecture/authority/server-config.md). |
 | `pingDistance` | number, blocks | Server acceptance range measured from the requester's eye to the authoritative target anchor. | Server-authoritative acceptance setting. It is not a client advertised capture cap; capture composition and acceptance are owned by [range](../architecture/picking/range.md). |
 | `presentation` | object | Per-target-type presentation field policy, sampling limits, and permission/interval overrides for the versioned presentation snapshot. | Server-authoritative. Projection, authorization, and demand-driven capture are owned by [presentation snapshot](../architecture/presentation/presentation_snapshot.md); the nested shape is catalogued below. |
 | `inventory` | object | Server-authoritative inventory preview and tracking budgets, caps, independent send-byte multipliers, finite display/frame size scalars, and Tracking pool partition switches. | Server-authoritative. Budget, unlimited-mode, multiplier, size-scalar, pooling and tracking-deadline semantics are owned by [inventory preview and tracking](../architecture/presentation/inventory.md); the nested shape is catalogued below. |
+
+The two monitor switches default to `false`; a missing or explicit `null`
+persisted value uses that default without a same-version rewrite. They are
+independent; either lane can be enabled alone. They are resolved from the final
+validated `loggingProfile`, so a load-time publication of a temporary `NORMAL`
+profile does not clear a legitimately loaded `DEBUG` document. A final validated profile other than `DEBUG` clears both
+effective switches, and returning to `DEBUG` does not restore either. A client
+HUD state, metric selection, or monitor subscription never enables, disables, or
+gates server collection: enabling a lane collects its bounded values even with
+no viewer, while subscription controls transfer only. The remote selection and
+merge transaction is owned by
+[changing server configuration](../architecture/config/changing-server-config.md).
 
 ## Presentation policy object
 
@@ -258,6 +272,8 @@ Illustrative partial document; the values are examples, not defaults.
   "syncDuration": 15,
   "budgetDelayNotificationsEnabled": true,
   "loggingProfile": "NORMAL",
+  "previewMonitorEnabled": false,
+  "trackingMonitorEnabled": false,
   "pingDistance": 128,
   "presentation": {
     "targetTypes": {

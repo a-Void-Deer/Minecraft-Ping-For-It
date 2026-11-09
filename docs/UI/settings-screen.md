@@ -91,7 +91,8 @@ The client scope has eight categories:
   followed by the configuration-file action under its own heading.
 - **Performance**: a Wheel options subgroup with Precise Selection Capture
   Period.
-- **Debug**: Logging Detail under a Logging subgroup.
+- **Debug**: Logging Detail under a Logging subgroup, then a Performance monitor
+  subgroup with the HUD master switch and metric-selection controls.
 
 The server scope has six categories:
 
@@ -110,12 +111,13 @@ The server scope has six categories:
   Multiplier, Tracking Global Byte Multiplier, Resync Cooldown, Heartbeat
   Cadence, and Byte Smoothing Window.
 - **Server Presentation**: Server Policy.
-- **Debug**: Server Logging Detail under a Logging subgroup.
+- **Debug**: Server Logging Detail under a Logging subgroup, then a Performance
+  monitor subgroup with independent Preview and Tracking collection switches.
 
 All ordinary server controls occupy full-width rows, including the Monitoring,
-Logging, Shared inventory budgets, Inventory preview, and Inventory tracking
-subgroups. The independent Server Policy editor retains its native controls and
-related Allow/Block pairs.
+Logging, Performance monitor, Shared inventory budgets, Inventory preview, and
+Inventory tracking subgroups. The independent Server Policy editor retains its
+native controls and related Allow/Block pairs.
 
 Each option's value semantics and persisted form remain owned by the
 configuration catalogues. This page owns their UI placement, layout and help,
@@ -143,7 +145,8 @@ All fourteen category buttons have scope-appropriate descriptions of what the
 category contains. The client and server Performance descriptions distinguish
 local capture work from server monitoring and inventory administration, and the
 client and server Debug descriptions distinguish local logging detail from
-server logging detail.
+server logging detail and identify each scope's independently visible
+performance monitor.
 
 Navigation and action controls also provide native hover and keyboard-focus
 help. Scope/category navigation and Back distinguish navigation from final
@@ -223,6 +226,60 @@ bundled locale. The help identifies the client or server scope, distinguishes
 the redacted `NORMAL` profile from unredacted detailed profiles, and states when
 the edit takes effect. It does not mention `DEBUG` or hint at the activation
 modifier.
+
+## Performance monitor controls
+
+The client and server Debug categories each contain a plain-text,
+non-interactive Performance monitor subgroup. The subgroup adds no category or
+navigation level, so the client scope has eight categories and the server scope
+has six.
+
+Each side's subgroup is visible only while that side's logging profile is
+`DEBUG`. The client subgroup follows the current client runtime
+`loggingProfile`. The server subgroup follows the server settings page's draft
+when editable, and the known authoritative snapshot for a read-only viewer. The
+two profiles control their subgroups independently; one side's `DEBUG` does not
+reveal the other side's subgroup.
+[Diagnostics and logging](../architecture/logging.md#profiles-and-disclosure)
+owns profile meaning, while [client configuration](../config/client.md) and
+[server configuration](../config/server.md) own persisted defaults and the
+profile-derived clearing relationship.
+
+Leaving `DEBUG` hides that side's subgroup. On the client it also turns the HUD
+off and retains the metric-selection preferences; returning to `DEBUG` does not
+turn the HUD back on. On an editable server page it sets both collection
+switches off in the ordinary server-settings draft, and actual collection
+changes only when that draft is accepted; returning to `DEBUG` does not restore
+either switch. A read-only server viewer changes no collection state.
+
+The server subgroup has two independent collection switches, Preview and
+Tracking, each off by default. Either lane can be enabled alone, and a switch is
+an ordinary server-settings draft leaf: a draft edit does not start collection,
+and an accepted update decides the applied value. The two lanes collect
+independently. Measurement meaning and accounting remain owned by [inventory
+performance monitoring](../architecture/presentation/inventory.md#performance-monitoring);
+HUD grouping, formatting and state presentation are owned by [HUD projection
+and presentation](../architecture/presentation/inventory.md#hud-projection-and-presentation).
+
+The client subgroup has a HUD master switch, off by default, and the
+metric-selection preferences. Turning the HUD on enables the local monitor
+display. The selections control what the client displays and requests; they do
+not enable or disable server collection. The default summary selection and
+opt-in detail and peak behavior remain owned by
+[client configuration](../config/client.md#performance-monitor); HUD placement
+and its remaining presentation contract are owned by [HUD projection and
+presentation](../architecture/presentation/inventory.md#hud-projection-and-presentation).
+
+Server numeric rows and Shared values follow
+[server configuration authority](../architecture/authority/server-config.md#remote-performance-telemetry).
+Their display states, including local-row continuity on lost authority, are
+owned by [HUD projection and
+presentation](../architecture/presentation/inventory.md#hud-projection-and-presentation).
+
+Manual scenarios remain pending in the
+[manual performance-monitor matrix](../testing/verification/manual-integration.md#performance-monitor);
+automated coverage and final combined-tree acceptance are recorded in
+[configuration verification](../testing/verification/configuration-ui.md#performance-monitor-coverage).
 
 ## Server performance category
 
@@ -366,8 +423,9 @@ so the screen does not promise that the server applied or persisted an update.
 The ordinary server settings are one shared session within the screen, not a
 per-category or per-visit section. This session covers the Channel & Players,
 Send Rate, Marker Duration, Performance, and Debug categories, including the
-monitoring toggle, the server logging-profile control, and the twenty-three
-inventory administration leaves. Entering the server
+monitoring toggle, the performance-monitor Preview and Tracking collection
+switches, the server logging-profile control, and the twenty-three inventory
+administration leaves. Entering the server
 scope shows its overview and requests the current server configuration when the
 client holds a live connection and the session holds no loaded or in-flight
 snapshot. The loaded snapshot, the draft, and any in-flight request are retained
