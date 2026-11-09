@@ -460,7 +460,7 @@
   ,"settings.pingforit.item_icon_visible.tooltip": "Ikony przedmiotów na znacznikach.\nWyłączone: używaj zwykłej ikony pingu.\nWłączone: pokazuj ikonę przedmiotu, gdy jest dostępna."
   ,"settings.pingforit.direction_indicator_visible.tooltip": "Wskaźniki kierunku do znaczników poza ekranem.\nWyłączone: ukryj je.\nWłączone: wskazuj znaczniki poza ekranem."
   ,"settings.pingforit.mark_transparent_blocks.tooltip": "Wybieraj bloki według kształtu obrysu.\nWyłączone: używaj kształtu widocznego w Minecrafcie.\nWłączone: używaj kształtu obrysu, dzięki czemu można wybierać dekoracje."
-  ,"settings.pingforit.mark_blacklisted_targets.tooltip": "Czy encje z czarnej listy mogą być wybierane?\nWyłączone: pomijaj encje z czarnej listy.\nWłączone: można je wybierać; widzowie nadal są wykluczeni."
+  ,"settings.pingforit.mark_blacklisted_targets.tooltip": "Czy encje z czarnej listy mogą być wybierane?\nWyłączone: pomijaj encje z czarnej listy.\nWłączone: można je wybierać."
   ,"settings.pingforit.mark_fluids.tooltip": "Czy płyny mogą być wybierane?\nWyłączone: ignoruj płyny.\nWłączone: można wybierać płyny."
   ,"settings.pingforit.player_info_mode.tooltip": "Informacje o osobie, która wysłała znacznik."
   ,"settings.pingforit.player_info_mode.disabled.tooltip": "Ukryj informacje o autorze; nazwa celu i odległość pozostają widoczne."

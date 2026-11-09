@@ -47,7 +47,7 @@
 	"settings.pingforit.mark_transparent_blocks": "标记透明方块",
 	"settings.pingforit.mark_transparent_blocks.tooltip": "按轮廓形状选择方块。\n关闭：使用 Minecraft 中看到的形状。\n开启：使用轮廓形状，可选中装饰物。",
 	"settings.pingforit.mark_blacklisted_targets": "标记黑名单目标",
-	"settings.pingforit.mark_blacklisted_targets.tooltip": "黑名单实体是否可被选择。\n关闭：跳过黑名单实体。\n开启：可选择它们；旁观者仍排除。",
+	"settings.pingforit.mark_blacklisted_targets.tooltip": "黑名单实体是否可被选择。\n关闭：跳过黑名单实体。\n开启：可选择它们。",
 	"settings.pingforit.mark_fluids": "标记流体",
 	"settings.pingforit.mark_fluids.tooltip": "流体是否可被选择。\n关闭：忽略流体。\n开启：可选择流体。",
 	"settings.pingforit.ping_size": "标记点尺寸: %s",

@@ -47,7 +47,7 @@
 	"settings.pingforit.mark_transparent_blocks": "Transparente Blöcke markieren",
 	"settings.pingforit.mark_transparent_blocks.tooltip": "Blöcke nach ihrer Umrissform auswählen.\nAus: die sichtbare Form von Minecraft verwenden.\nAn: die Umrissform verwenden, sodass Dekorationen auswählbar sind.",
 	"settings.pingforit.mark_blacklisted_targets": "Blacklist-Ziele markieren",
-	"settings.pingforit.mark_blacklisted_targets.tooltip": "Ob Entitäten auf der Blacklist ausgewählt werden können.\nAus: Entitäten auf der Blacklist überspringen.\nAn: auswählbar machen; Zuschauer bleiben ausgeschlossen.",
+	"settings.pingforit.mark_blacklisted_targets.tooltip": "Ob Entitäten auf der Blacklist ausgewählt werden können.\nAus: Entitäten auf der Blacklist überspringen.\nAn: auswählbar machen.",
 	"settings.pingforit.mark_fluids": "Flüssigkeiten markieren",
 	"settings.pingforit.mark_fluids.tooltip": "Ob Flüssigkeiten ausgewählt werden können.\nAus: Flüssigkeiten ignorieren.\nAn: Flüssigkeiten auswählbar machen.",
 	"settings.pingforit.player_info_mode": "Spieler Info",

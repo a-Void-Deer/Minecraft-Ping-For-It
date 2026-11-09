@@ -47,7 +47,7 @@
 	"settings.pingforit.mark_transparent_blocks": "Mark Transparent Blocks",
 	"settings.pingforit.mark_transparent_blocks.tooltip": "Select blocks by their outline shape.\nOff: use Minecraft's visible shape.\nOn: use the outline shape, so decorations can be selected.",
 	"settings.pingforit.mark_blacklisted_targets": "Mark Blacklisted Targets",
-	"settings.pingforit.mark_blacklisted_targets.tooltip": "Whether blacklisted entities can be selected.\nOff: skip blacklisted entities.\nOn: allow selecting them; spectators stay excluded.",
+	"settings.pingforit.mark_blacklisted_targets.tooltip": "Whether blacklisted entities can be selected.\nOff: skip blacklisted entities.\nOn: allow selecting them.",
 	"settings.pingforit.mark_fluids": "Mark Fluids",
 	"settings.pingforit.mark_fluids.tooltip": "Whether fluids can be selected.\nOff: ignore fluids.\nOn: allow selecting fluids.",
 	"settings.pingforit.player_info_mode": "Player Info",

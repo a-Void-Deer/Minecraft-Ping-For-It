@@ -462,7 +462,7 @@
   ,"settings.pingforit.item_icon_visible.tooltip": "標記上的物品圖示。\n關閉：使用一般標記圖示。\n開啟：有物品圖示時顯示該物品的圖示。"
   ,"settings.pingforit.direction_indicator_visible.tooltip": "畫面外標記的方向指示。\n關閉：隱藏方向指示。\n開啟：指向畫面外的標記。"
   ,"settings.pingforit.mark_transparent_blocks.tooltip": "依外框形狀選擇方塊。\n關閉：使用 Minecraft 中看到的形狀。\n開啟：使用外框形狀，可選中裝飾物。"
-  ,"settings.pingforit.mark_blacklisted_targets.tooltip": "黑名單實體是否可被選擇。\n關閉：略過黑名單實體。\n開啟：可選擇它們；旁觀者仍排除。"
+  ,"settings.pingforit.mark_blacklisted_targets.tooltip": "黑名單實體是否可被選擇。\n關閉：略過黑名單實體。\n開啟：可選擇它們。"
   ,"settings.pingforit.mark_fluids.tooltip": "流體是否可被選擇。\n關閉：忽略流體。\n開啟：可選擇流體。"
   ,"settings.pingforit.player_info_mode.tooltip": "標記發送者的資訊。"
   ,"settings.pingforit.player_info_mode.disabled.tooltip": "隱藏作者資訊；保留目標名稱與距離。"

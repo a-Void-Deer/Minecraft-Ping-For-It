@@ -47,7 +47,7 @@
 	"settings.pingforit.mark_transparent_blocks": "Marcar bloques transparentes",
 	"settings.pingforit.mark_transparent_blocks.tooltip": "Seleccionar bloques por su forma de contorno.\nDesactivado: usar la forma visible de Minecraft.\nActivado: usar la forma de contorno, para poder seleccionar decoraciones.",
 	"settings.pingforit.mark_blacklisted_targets": "Marcar objetivos de la lista negra",
-	"settings.pingforit.mark_blacklisted_targets.tooltip": "Si se pueden seleccionar las entidades de la lista negra.\nDesactivado: omitir las entidades de la lista negra.\nActivado: permitir seleccionarlas; los espectadores siguen excluidos.",
+	"settings.pingforit.mark_blacklisted_targets.tooltip": "Si se pueden seleccionar las entidades de la lista negra.\nDesactivado: omitir las entidades de la lista negra.\nActivado: permitir seleccionarlas.",
 	"settings.pingforit.mark_fluids": "Marcar fluidos",
 	"settings.pingforit.mark_fluids.tooltip": "Si se pueden seleccionar fluidos.\nDesactivado: ignorar los fluidos.\nActivado: permitir seleccionar fluidos.",
 	"settings.pingforit.player_info_mode": "Información del jugador",

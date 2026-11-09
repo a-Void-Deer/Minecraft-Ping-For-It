@@ -460,7 +460,7 @@
   ,"settings.pingforit.item_icon_visible.tooltip": "İşaretçilerde eşya simgeleri.\nKapalı: normal ping simgesini kullanır.\nAçık: eşya simgesi varsa o eşyanın simgesini gösterir."
   ,"settings.pingforit.direction_indicator_visible.tooltip": "Ekran dışındaki işaretçiler için yön göstergeleri.\nKapalı: bunları gizler.\nAçık: ekran dışındaki işaretçilere yönelir."
   ,"settings.pingforit.mark_transparent_blocks.tooltip": "Blokları dış çizgi şekillerine göre seçer.\nKapalı: Minecraft'ta görünen şekli kullanır.\nAçık: dış çizgi şeklini kullanır; süslemeler seçilebilir."
-  ,"settings.pingforit.mark_blacklisted_targets.tooltip": "Kara listedeki varlıkların seçilip seçilemeyeceği.\nKapalı: kara listedeki varlıkları atlar.\nAçık: seçilmelerine izin verir; izleyiciler yine hariç tutulur."
+  ,"settings.pingforit.mark_blacklisted_targets.tooltip": "Kara listedeki varlıkların seçilip seçilemeyeceği.\nKapalı: kara listedeki varlıkları atlar.\nAçık: seçilmelerine izin verir."
   ,"settings.pingforit.mark_fluids.tooltip": "Sıvıların seçilip seçilemeyeceği.\nKapalı: sıvıları yok sayar.\nAçık: sıvıların seçilmesine izin verir."
   ,"settings.pingforit.player_info_mode.tooltip": "İşaretçiyi gönderen kişinin bilgisi."
   ,"settings.pingforit.player_info_mode.disabled.tooltip": "Yazar bilgisini gizler; hedef adı ve mesafe görünür kalır."
