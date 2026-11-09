@@ -2784,10 +2784,16 @@ view, and preserves metric identity and immutable prepared text through wrapping
 The historical `InventoryMonitorHudTest` result for the prior lower-left layout
 painted only the prepared model in a GUI-scaled viewport, reserved chat/notice
 clearance, clipped visible rows without mutating the model, and handled
-zero-size and empty models. It does not cover the pending upper-left, no-reserve
-projection. These are headless runtime, state and painter seams, not live GPU,
-native font, window, socket, loader or multiplayer evidence. Independent review
-of P3/P4 is not part of this evidence.
+zero-size and empty models. It does not cover the subsequent upper-left
+projection, which reserves no space for vanilla chat, hearts or notices; that
+projection and its later per-group reserved-height behavior have separate
+headless coverage in [stable HUD reservoir UX
+coverage](#stable-hud-reservoir-ux-coverage). These are
+headless runtime, state and painter seams, not live GPU, native font, window,
+socket, loader or multiplayer evidence; those live scenarios remain pending in
+the [manual performance-monitor
+matrix](manual-integration.md#performance-monitor). Independent review of P3/P4
+is not part of this evidence.
 
 ### Timing attribution evidence
 
@@ -3068,7 +3074,11 @@ GPU/font/locale/window/layer acceptance remains pending.
 - The compact vocabulary adds 81 HUD-only `monitor.pingforit.hud.*` keys in each
   of the eight bundled locales. `MonitorHudLabelsLocalizationTest` contributed
   17 tests in the earlier UX full Common XML and now contributes 18 after the
-  wrapping case below. A repository-resource joint execution passed 69/69
+  wrapping case below. It derives the finite key set from the closed schema
+  enums and checks duplicate-free JSON, identical placeholder and format
+  signatures, every raw field and presentation token, the five scope prefixes,
+  ASCII punctuation and the fixed English/Chinese prefix and status vocabulary.
+  A repository-resource joint execution passed 69/69
   across the four classes (17 new HUD locale, 7 existing selector locale, 27
   display model and 18 formatter); that joint run predates the wrapping case.
   The initial joint run failed three HUD cases: the zh_cn/zh_tw accepted-count

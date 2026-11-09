@@ -491,13 +491,13 @@ budget        = 4000 + 100*scopeId + budgetId
 shared.memory = 5001
 ```
 
-Summary selectors use IDs `1` through `5`: `summary.processing`,
-`summary.requests_queue`, `summary.budget`, `summary.memory` and
-`summary.sync_rate`. They expand on the client and are never transmitted. A
-watch expands selected summaries, removes `LOCAL` entries, collapses duplicates
-and sorts the remaining known remote raw IDs ascending. The closed remote raw
-catalogue has 85 entries, which bounds `metricCount`; a summary, local, unknown
-or non-ascending ID rejects the frame rather than being normalized.
+Summary selectors are client-side groupings owned by
+[client configuration](../../config/client.md#performance-monitor); they expand
+on the client and are never transmitted. A watch expands selected summaries,
+removes `LOCAL` entries, collapses duplicates and sorts the remaining known
+remote raw IDs ascending. The closed remote raw catalogue has 85 entries, which
+bounds `metricCount`; a summary, local, unknown or non-ascending ID rejects the
+frame rather than being normalized.
 
 The whole-body decode ceilings are 4096 bytes for `SUBSCRIBE`, 128 for `STATUS`
 and 16384 for `SAMPLE`, checked before list allocation; the sample encoder also
@@ -643,8 +643,9 @@ SNAPSHOT = requestId, canEdit, defaultChannelMode, playerTrackingEnabled,
 ```
 
 `requestId` is a positive canonical varlong. `changedFields` is a canonical
-nonnegative varlong carrying the field mask; bits 0 through 31 are defined and
-every higher bit is unknown. The channel-mode ordinal (`AUTO`, `DISABLED`,
+nonnegative varlong carrying the field mask; its defined bits are owned by
+[changing server configuration](../config/changing-server-config.md#update-surface).
+The channel-mode ordinal (`AUTO`, `DISABLED`,
 `GLOBAL`, `TEAM_ONLY` in that order), the original numeric settings and
 `loggingProfile` are canonical non-negative varints. The logging profile tags
 are `0` for `NORMAL`, `1` for `DEEP`, and `2` for `DEBUG`; any other tag is
@@ -682,9 +683,6 @@ and is carried regardless of the field mask. A SNAPSHOT whose logging profile
 is not `DEBUG` must carry both monitor booleans as `false`; a true value rejects
 that frame because the snapshot reports normalized authoritative state rather
 than a pre-normalization candidate. REQUEST has no added field.
-The field mask and its numeric, monitoring, Tracking partition,
-logging-profile and monitor-collection bits are owned by
-[changing server configuration](../config/changing-server-config.md#update-surface).
 
 Overflow, overlong or non-canonical numbers, a negative or overflowing mask,
 unknown mask bits, invalid enum or inventory values, invalid logging-profile

@@ -524,17 +524,17 @@ live scenarios remain in the
   OFF-only red styling and memory/sync measurement-limit help. It resolved the
   then-prepared model for every bundled language and every
   `ClientMonitorState.Status` value. Settings full labels and the HUD
-  compact-label provider remain separately tested; the later 69-case joint HUD
-  run covers the compact labels, display model and formatter, not the settings
+  compact-label provider remain separately tested; the later joint HUD run
+  covers the compact labels, display model and formatter, not the settings
   full-label catalog. The historical check did not review translation semantics,
   render a live locale or measure font fit.
 - The earlier P5 companion locale parity check covered 131 monitor/UI keys per
   locale with strict JSON without duplicate keys, nonblank values, matching
   placeholder signatures and no replacement characters. Its source match
   covered the 16 literal format/source keys and all eight client status names.
-  The later compact-HUD resource audit adds 81 HUD-only keys and verifies the
-  unchanged 116 full-vocabulary entries; this remains a resource check, not
-  translation quality or live font fit.
+  The later compact-HUD locale resource audit is owned by [inventory HUD UX
+  redesign coverage](inventory.md#hud-ux-redesign-coverage). This remains a
+  resource check, not translation quality or live font fit.
 
 The recorded isolated P5 execution passed 368 tests across all 30 screen test
 classes, `MonitorLabelsLocalizationTest` and the unchanged
@@ -552,61 +552,29 @@ permission-provider, socket/loader-lifecycle or multiplayer run.
 
 ### HUD UX redesign coverage
 
-The compact-label vocabulary and the formatter, display-model, layout, cache
-and ABI preparation have headless and full-Common evidence. The current
-per-field `N/A`, per-row backing and reserved-height coverage is inventoried in
-[inventory verification](inventory.md#stable-hud-reservoir-ux-coverage). The
-live screen remains pending.
+The HUD-side compact-label vocabulary, formatter, display model, layout, cache,
+paint and ABI evidence, including execution counts and limits, is owned by
+[inventory HUD UX redesign coverage](inventory.md#hud-ux-redesign-coverage).
+The current per-field `N/A`, per-row backing and reserved-height coverage is in
+[stable HUD reservoir UX coverage](inventory.md#stable-hud-reservoir-ux-coverage);
+the preceding fixed semantic grouping and wrapping evidence is in [stable
+semantic HUD wrapping
+coverage](inventory.md#stable-semantic-hud-wrapping-coverage).
 
-- `MonitorHudLabels` adds 81 HUD-only `monitor.pingforit.hud.*` keys in each of
-  the eight bundled locales. `MonitorHudLabelsLocalizationTest` contributed 17
-  tests in the earlier UX full Common XML and now contributes 18 after the
-  wrapping case; the added case checks fixed group boundaries across the eight
-  locales. It derives the finite key set from the closed schema enums and checks
-  duplicate-free JSON, identical placeholder and format signatures, every raw
-  field and presentation token, the five scope prefixes, ASCII punctuation and
-  the fixed English/Chinese prefix and status vocabulary. A
-  repository-resource joint execution passed 69/69 across the four classes
-  (17 new HUD locale, 7 existing selector locale, 27 display model and 18
-  formatter); that joint run predates the wrapping case. The initial joint run
-  failed three HUD cases: the zh_cn/zh_tw
-  accepted-count label collided with the phase label and de_de carried a ratio
-  space. The approved resource-only repair changed the accepted labels to
-  `已应用`/`已套用` while the phase labels remain `应用`/`套用`; the rerun then
-  passed 69/69. This is a headless resource/format result, not a live locale,
-  font-fit or translation-quality review.
-- `MonitorLabelsLocalizationTest` and the P5 control coverage above still test
-  the full/short selector vocabulary and the prior prepared HUD. The compact HUD
-  labels remain HUD-only: settings full names and selector text are not replaced.
-  The eight locale files retain the 116 existing full-vocabulary entries, and
-  the 121 selector identities and default selections are unchanged.
-- The prior lower-left/reserved/visible-row HUD result recorded under [inventory
-  verification](inventory.md#hud-ux-redesign-coverage) is historical and does
-  not cover the redesign. The formatter, display-model and joint locale
-  evidence is also inventoried there.
-- The fixed upper-left/no-reserve projection, right-wrap paint path, font-option
-  cache and bottom-layer hook have full-Common coverage. The preceding run
-  recorded `InventoryMonitorHudTest` 5 (including the fixed semantic group paint
-  case), `InventoryMonitorHudAbiTest` 5, `InventoryMonitorHudCacheTest` 2 and
-  `InventoryMonitorHudStateTest` 1; the current ABI, state, preparation, layout
-  and reservoir coverage is inventoried in [inventory
-  verification](inventory.md#stable-hud-reservoir-ux-coverage). The preceding
-  fixed semantic grouping and wrapping evidence remains in [stable semantic HUD
-  wrapping coverage](inventory.md#stable-semantic-hud-wrapping-coverage). The
-  three loaders each passed four static ABI tests plus an actual Mixin
-  transformer apply over the loader-transformed `GameRenderer`, reproduced in
-  the independent review directory. No GL context, pixel, GPU/font or
-  loader-launch result is claimed.
-- Live screen, native font and locale checks remain in the [manual
-  matrix](manual-integration.md#performance-monitor). The projection contract is
-  [HUD projection and
-  presentation](../../architecture/presentation/inventory.md#hud-projection-and-presentation).
+`MonitorLabelsLocalizationTest` and the P5 control coverage above still test the
+full/short selector vocabulary and the prior prepared HUD. The compact HUD
+labels remain HUD-only: settings full names and selector text are not replaced.
+The historical check did not review translation semantics, render a live locale
+or measure font fit.
 
 The full Common task is part of the [HUD UX whole-tree
-run](build-checks.md#hud-ux-final-whole-tree-verification). The earlier
-disabled-path allocation evidence covers only the sampled monitor APIs; it does
-not establish zero allocation or CPU for the new HUD GL queries or the whole
-frame.
+run](build-checks.md#hud-ux-final-whole-tree-verification); the
+disabled-path allocation boundary is owned by [inventory HUD UX redesign
+coverage](inventory.md#hud-ux-redesign-coverage). Live screen, native font and
+locale checks remain in the [manual
+matrix](manual-integration.md#performance-monitor). The projection contract is
+[HUD projection and
+presentation](../../architecture/presentation/inventory.md#hud-projection-and-presentation).
 
 ## Server performance contract verification
 

@@ -1731,7 +1731,7 @@ After execution, commit `02ec9aafd1178cae664d1ca2414b96b9adb4726f` (tree
 `fix: preserve preview reset lifecycle and stale replacement admission`
 committed exactly the six Java paths: four production and two test. Only those
 six paths were committed; documentation, build metadata, version and evidence
-files were not staged, and no push occurred. The accepted Gradle runs remain the
+files were not staged. The accepted Gradle runs remain the
 old HEAD plus the dirty six-file worktree, not a clean-commit retest. Before
 staging, after staging and after commit, all 1,429 input hashes and all nine
 recorded jar hashes were unchanged, and each worktree blob equalled its committed
@@ -1803,9 +1803,9 @@ The 16 ordinary skips are the unchanged native-classpath limitation: two Common
 amount, registry and freezer cases. No native-fluid supplement ran because those
 adapters and profiles were unchanged; historical native passes are not claimed
 as current same-run coverage. No separate lint, formatter or static-analysis task
-is configured. The timeout proposal remained read-only and no timeout test ran.
-No live game, loader launch, dedicated server, manual interaction, rendering,
-multiplayer, heap/TPS/latency or other performance evidence was produced.
+is configured. No live game, loader launch, dedicated server, manual
+interaction, rendering, multiplayer, heap/TPS/latency or other performance
+evidence was produced.
 Documentation changes during the runs are outside the source/build scope; any
 later source/test/build edit invalidates this input-specific record.
 
@@ -2340,8 +2340,8 @@ remains
 `7bbd6aa1e7d38f2a056f59db97f521e2ea8cc16f0bd936cab4fa3d20e4f38fee`.
 Ten committed blobs are raw-identical; `CommonClient.java` differs only by 764
 CRLF pairs normalized to LF by the existing Git clean policy, with no logic
-change. The index is empty, the code worktree is clean, the 14 documentation
-paths remain uncommitted, and nothing was pushed.
+change. The index is empty, the code worktree is clean, and the 14 documentation
+paths remain uncommitted.
 
 Focused source-connected selections also passed: A's 93/93
 model/layout/label/cache selection; B's Common 20/20, Fabric 20/20, Forge 19/19

@@ -253,7 +253,7 @@ changes only when that draft is accepted; returning to `DEBUG` does not restore
 either switch. A read-only server viewer changes no collection state.
 
 The server subgroup has two independent collection switches, Preview and
-Tracking, each off by default. Either lane can be enabled alone, and a switch is
+Tracking. Either lane can be enabled alone, and a switch is
 an ordinary server-settings draft leaf: a draft edit does not start collection,
 and an accepted update decides the applied value. The two lanes collect
 independently. Measurement meaning and accounting remain owned by [inventory
@@ -261,8 +261,8 @@ performance monitoring](../architecture/presentation/inventory.md#performance-mo
 HUD grouping, formatting and state presentation are owned by [HUD projection
 and presentation](../architecture/presentation/inventory.md#hud-projection-and-presentation).
 
-The client subgroup has a HUD master switch, off by default, and the
-metric-selection preferences. Turning the HUD on enables the local monitor
+The client subgroup has a HUD master switch and the metric-selection
+preferences. Turning the HUD on enables the local monitor
 display. The selections control what the client displays and requests; they do
 not enable or disable server collection. The default summary selection and
 opt-in detail and peak behavior remain owned by

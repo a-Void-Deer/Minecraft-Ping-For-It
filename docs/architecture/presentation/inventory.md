@@ -1860,11 +1860,10 @@ successful completion control also counts once. The initial fence, heartbeat,
 failure, cancellation, withdrawal and rebase are not completed cuts. A thrown
 send and its retry add no completion until the cut actually completes.
 
-In the first server sync accounting, the frame and byte counters cover only
-regular inventory-v2 Preview frames and Tracking snapshot/stream frames and
-their bytes. They do not claim all inventory-related traffic or all connection
-traffic; the independent atomic `CREATED` creation receipt remains outside
-those counters.
+The frame and byte counters cover only regular inventory-v2 Preview frames and
+Tracking snapshot/stream frames and their bytes. They do not claim all
+inventory-related traffic or all connection traffic; the independent atomic
+`CREATED` creation receipt remains outside those counters.
 The receipt's shared work and memory stay visible through the existing shared
 work and memory ledgers, and monitoring adds no creation budget charge.
 
@@ -1987,16 +1986,12 @@ when its value is unavailable; a selection change establishes a new layout
 identity under [layout identity and reserved
 height](#layout-identity-and-reserved-height).
 
-Every segment begins on a new visual line at the same left x as the scope label.
-A segment that fits stays on one line, so a value-width change cannot merge it
-with an adjacent segment; a segment that exceeds the available native width wraps
-within itself at native glyph width, and its extra lines may move later segments
-down. The scope label is written once at the start of the first visual line and
-is not repeated on a segment or continuation line; continuation lines add no
+The [layout and render layer](#layout-and-render-layer) below owns visual line
+breaks, native wrapping, alignment, clipping and vertical overflow for these
+segments. The scope label is written once at the start of the first visual line
+and is not repeated on a segment or continuation line; continuation lines add no
 indentation. A detail field stays in its segment rather than creating another
-heading or row. A summary's category name is not repeated per field. The fixed
-breaks may use more vertical space than one unsplit row, including at a wide
-viewport, and are not merged back to save height.
+heading or row. A summary's category name is not repeated per field.
 
 Within a group, each field label is reduced to the shortest text that still
 distinguishes it from the other displayed fields. Label text is localized;
@@ -2009,11 +2004,10 @@ with one space, and `/` joins the values of one pair or triplet without spaces.
 #### Summary, detail and timing values
 
 A selected summary is projected over its existing raw selectors and adds no new
-measurement. The default selection is unchanged; selecting a detail does not
-enable its peak, and selecting a summary does not force a detailed field to
-appear. The projection follows the no-duplicate rule above. Omitting a duplicate
-from the row does not remove the detailed reading from the cached sample or from
-the client's selection.
+measurement. Selecting a detail does not enable its peak, and selecting a
+summary does not force a detailed field to appear. The projection follows the
+no-duplicate rule above. Omitting a duplicate from the row does not remove the
+detailed reading from the cached sample or from the client's selection.
 
 For a timing phase, the main value is `total/count` over the actual sample
 interval: the actual in-scope mean of recorded intervals, not an assumed tick
@@ -2163,13 +2157,12 @@ current projected values; the reservation only supplies height.
 
 这可以使这部分数据的值在有 / 无时，屏幕上所有数据所在的行不变。
 
-That stability is limited to an ACTIVE scope whose selected metrics, effective
-width, Font/Language identity, glyph options, line height and connection/session
-identity are unchanged and whose current text does not exceed the existing
-reserved height. Longer text may grow its group and push later groups down, and
-token positions inside the same group may still change. The control-state
-compact exception below is outside this guarantee. The contract does not promise
-fixed word or line coordinates for arbitrary data or widths.
+That stability is limited to an ACTIVE scope whose layout identity above is
+unchanged and whose current text does not exceed the existing reserved height.
+Longer text may grow its group and push later groups down, and token positions
+inside the same group may still change. The control-state compact exception
+below is outside this guarantee. The contract does not promise fixed word or
+line coordinates for arbitrary data or widths.
 
 Hiding the HUD or turning it off does not by itself clear an active reservation,
 and showing it again under the same identity may restore the existing heights.
@@ -2198,15 +2191,17 @@ reserves no space for vanilla chat, hearts or notices, and does not move or
 shrink when those elements appear or are repositioned.
 
 Within one scope logical row, each fixed semantic segment starts a new visual
-line. A segment wraps at native glyph width, including long unspaced tokens, so
-the right edge does not overflow; a segment that fits is not merged with an
-adjacent segment because of value width. A necessary horizontal clip guard may
-protect the framebuffer, but it must preserve metric identity and the `OFF`
-styling. Every visual line that fits the width after wrapping is painted;
-vertical overflow past the bottom is accepted as natural framebuffer clipping.
-There is no height budget, ellipsis, row-dropping or merge-back rule. A
-non-active state row is not divided into semantic segments and keeps ordinary
-native wrapping.
+line at the same left x as the scope label. A segment wraps at native glyph
+width, including long unspaced tokens, so the right edge does not overflow; a
+segment that fits is not merged with an adjacent segment because of value width,
+and a wrapped segment's extra lines may move later segments down. A necessary
+horizontal clip guard may protect the framebuffer, but it must preserve metric
+identity and the `OFF` styling. Every visual line that fits the width after
+wrapping is painted; vertical overflow past the bottom is accepted as natural
+framebuffer clipping. Fixed breaks may use more vertical space than one unsplit
+row, including at a wide viewport; there is no height budget, ellipsis,
+row-dropping or merge-back rule. A non-active state row is not divided into
+semantic segments and keeps ordinary native wrapping.
 
 A 2560x1440 framebuffer at GUI scale 6, giving a 427x240 GUI viewport, is a
 reference example only. It is not a hardcoded size or a forced window scale;
