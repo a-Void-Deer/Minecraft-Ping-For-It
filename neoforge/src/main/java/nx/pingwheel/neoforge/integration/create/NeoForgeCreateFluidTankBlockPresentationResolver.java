@@ -45,6 +45,13 @@ public final class NeoForgeCreateFluidTankBlockPresentationResolver implements B
 		var subjects = new ArrayList<BlockRenderSubject>(verified.cells().size());
 		for (var cell : verified.cells()) {
 			var offset = cell.position().subtract(verified.controller());
+			// A strictly interior cell has no exterior face. Its baked model strips
+			// those faces and commits no vertices, so exposing the cell to any source
+			// or the late shape fallback would outline an invisible cell. The complete
+			// topology above has already validated every member, including these cells.
+			if (offset.getX() > 0 && offset.getX() < verified.width() - 1
+				&& offset.getY() > 0 && offset.getY() < verified.height() - 1
+				&& offset.getZ() > 0 && offset.getZ() < verified.width() - 1) continue;
 			subjects.add(new BlockRenderSubject("tank/" + offset.getX() + "/" + offset.getY() + "/" + offset.getZ(),
 				cell.position(), cell.state(), CreateFluidTankTopology.TANK_ID, context.sourceSpec().targetTypeId(), BlockPresentationRelation.COMPOSITE));
 		}
