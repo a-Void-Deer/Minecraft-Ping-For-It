@@ -6,12 +6,12 @@ import java.util.Objects;
 import java.util.function.Supplier;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.ShaderInstance;
-import net.minecraft.locale.Language;
-import nx.pingwheel.common.monitor.client.ClientMonitorState;
 import nx.pingwheel.common.monitor.client.MonitorDisplayModel;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.lwjgl.BufferUtils;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL14;
@@ -23,6 +23,8 @@ public final class InventoryMonitorHud {
 	private static final int MARGIN = 4;
 	private static final int GAP = 2;
 	private static final int SHADOW_WIDTH = 1;
+	private static final int PADDING = 1;
+	private static final int BACKGROUND = 0x26000000;
 	private static final TextState NATIVE_TEXT_STATE = new TextState();
 	private static final Supplier<@Nullable ShaderInstance> RESTORE_SHADER = () -> NATIVE_TEXT_STATE.shader;
 	private static final NativePainter NATIVE_PAINTER = new NativePainter();
@@ -38,6 +40,30 @@ public final class InventoryMonitorHud {
 
 	@NotNullByDefault
 	public record Layout(int left, int top, int right, int rowCount, int rowHeight) {}
+
+	/** Immutable fitted rows and native visual widths; no glyph measurement during paint. */
+	@NotNullByDefault
+	public static final class Prepared {
+		public static final Prepared EMPTY = new Prepared(MonitorDisplayModel.EMPTY, new int[0]);
+		private final MonitorDisplayModel model;
+		private final int @Unmodifiable [] widths;
+
+		private Prepared(MonitorDisplayModel model, int @Unmodifiable [] widths) {
+			this.model = model; this.widths = widths;
+		}
+		public MonitorDisplayModel model() { return model; }
+	}
+
+	/** Called only after native fitting, when view/font/layout preparation is invalidated. */
+	public static Prepared prepare(MonitorDisplayModel fittedModel, Font font) {
+		if (fittedModel.rows().isEmpty()) return Prepared.EMPTY;
+		int[] widths = new int[fittedModel.rows().size()];
+		for (int index = 0; index < widths.length; index++) {
+			var row = fittedModel.rows().get(index);
+			if (!row.isBlank()) widths[index] = font.width(row.text().getVisualOrderText());
+		}
+		return new Prepared(fittedModel, widths);
+	}
 
 	/** Width fitting reserves the shadow as well as the native left/right margin. */
 	public static int availableTextWidth(int guiWidth) {
@@ -56,42 +82,102 @@ public final class InventoryMonitorHud {
 	@FunctionalInterface
 	public interface Painter { void row(MonitorDisplayModel.Row row, int x, int y, int maximumWidth); }
 
+	/** The same two passes as native paint, including the background submission boundary. */
+	@NotNullByDefault
+	public interface PreparedPainter extends Painter {
+		void background(int left, int top, int right, int bottom, int color);
+		void backgroundsComplete();
+	}
+
 	public static void paint(MonitorDisplayModel model, Viewport viewport, int lineHeight, Painter painter) {
 		Objects.requireNonNull(painter, "painter");
 		if (lineHeight < 1 || lineHeight > Integer.MAX_VALUE - GAP) throw new IllegalArgumentException("line height");
 		int maximumWidth = availableTextWidth(viewport.width());
-		for (int index = 0; index < model.rows().size(); index++)
-			painter.row(model.rows().get(index), MARGIN, MARGIN + index * (lineHeight + GAP), maximumWidth);
+		for (int index = 0; index < model.rows().size(); index++) {
+			var row = model.rows().get(index);
+			if (!row.isBlank()) painter.row(row, MARGIN, MARGIN + index * (lineHeight + GAP), maximumWidth);
+		}
 	}
 
-	public static void draw(GuiGraphics graphics, Font font, MonitorDisplayModel model, Viewport viewport) {
-		if (model.rows().isEmpty()) return;
-		NATIVE_TEXT_STATE.capture(NATIVE_STATE);
+	public static void paint(Prepared prepared, Viewport viewport, int lineHeight, PreparedPainter painter) {
+		Objects.requireNonNull(painter, "painter");
+		if (lineHeight < 1 || lineHeight > Integer.MAX_VALUE - GAP) throw new IllegalArgumentException("line height");
+		int maximumWidth = availableTextWidth(viewport.width());
+		int left = Math.min(MARGIN - PADDING, viewport.width());
+		for (int index = 0; index < prepared.model.rows().size(); index++) {
+			if (prepared.model.rows().get(index).isBlank()) continue;
+			int y = MARGIN + index * (lineHeight + GAP);
+			int right = Math.min(viewport.width(), MARGIN + Math.min(prepared.widths[index], maximumWidth) + SHADOW_WIDTH + PADDING);
+			painter.background(left, y - PADDING, right, y + lineHeight + PADDING, BACKGROUND);
+		}
+		painter.backgroundsComplete();
+		paint(prepared.model, viewport, lineHeight, painter);
+	}
+
+	public static void draw(GuiGraphics graphics, Font font, Prepared prepared, Viewport viewport) {
+		if (prepared.model.rows().isEmpty()) return;
+		NATIVE_PAINTER.graphics = graphics; NATIVE_PAINTER.font = font;
 		try {
-			graphics.enableScissor(Math.min(MARGIN, viewport.width()), 0,
-				Math.min(viewport.width(), MARGIN + availableTextWidth(viewport.width()) + SHADOW_WIDTH), viewport.height());
-			try {
-				RenderSystem.disableDepthTest();
-				RenderSystem.setShaderColor(1, 1, 1, 1);
-				// SEE_THROUGH is the native font's no-depth-write text pass. NORMAL
-				// would leave monitor depth in front of the later totem animation.
-				// Neither pose nor the world/GUI projections are changed here.
-				NATIVE_PAINTER.graphics = graphics; NATIVE_PAINTER.font = font;
-				try { paint(model, viewport, font.lineHeight, NATIVE_PAINTER); }
-				finally { NATIVE_PAINTER.graphics = null; NATIVE_PAINTER.font = null; }
-			} finally {
-				// Finish while the horizontal guard is active, before any vanilla
-				// overlay can enqueue its own geometry. No per-row unmanaged flush.
-				try { graphics.flush(); }
-				finally { graphics.disableScissor(); }
-			}
-		} finally { NATIVE_TEXT_STATE.restore(NATIVE_STATE); }
+			draw(prepared, viewport, font.lineHeight, NATIVE_TEXT_STATE, NATIVE_STATE, NATIVE_PAINTER);
+		} finally { NATIVE_PAINTER.graphics = null; NATIVE_PAINTER.font = null; }
 	}
 
 	@NotNullByDefault
-	private static final class NativePainter implements Painter {
+	interface DrawAccess extends PreparedPainter {
+		void enableScissor(int left, int right, int height);
+		void flush();
+		void disableScissor();
+	}
+
+	/** Native lifecycle with scalar/recording ports; tests exercise its finally boundaries without GL. */
+	static void draw(Prepared prepared, Viewport viewport, int lineHeight, TextState state, StateAccess host, DrawAccess painter) {
+		if (prepared.model.rows().isEmpty()) return;
+		state.capture(host);
+		try {
+			painter.enableScissor(Math.min(MARGIN - PADDING, viewport.width()),
+				Math.min(viewport.width(), MARGIN + availableTextWidth(viewport.width()) + SHADOW_WIDTH + PADDING), viewport.height());
+			try {
+				host.depthTest(false);
+				host.color(1, 1, 1, 1);
+				// SEE_THROUGH is the native font's no-depth-write text pass. NORMAL
+				// would leave monitor depth in front of the later totem animation.
+				// Neither pose nor the world/GUI projections are changed here.
+				paint(prepared, viewport, lineHeight, painter);
+			} finally {
+				// Finish while the horizontal guard is active, before any vanilla
+				// overlay can enqueue its own geometry. No per-row unmanaged flush.
+				try { painter.flush(); }
+				finally { painter.disableScissor(); }
+			}
+		} finally { state.restore(host); }
+	}
+
+	@NotNullByDefault
+	private static final class NativePainter implements DrawAccess {
 		private @Nullable GuiGraphics graphics;
 		private @Nullable Font font;
+
+		@Override public void enableScissor(int left, int right, int height) {
+			Objects.requireNonNull(graphics).enableScissor(left, 0, right, height);
+		}
+		@Override public void background(int left, int top, int right, int bottom, int color) {
+			GuiGraphics target = Objects.requireNonNull(graphics);
+			var pose = target.pose().last().pose();
+			var vertices = target.bufferSource().getBuffer(RenderType.guiOverlay());
+			vertices.addVertex(pose, right, bottom, 0).setColor(color);
+			vertices.addVertex(pose, right, top, 0).setColor(color);
+			vertices.addVertex(pose, left, top, 0).setColor(color);
+			vertices.addVertex(pose, left, bottom, 0).setColor(color);
+		}
+		@Override public void backgroundsComplete() {
+			Objects.requireNonNull(graphics).bufferSource().endBatch(RenderType.guiOverlay());
+			// NO_DEPTH_TEST is a native no-op shard, not a disable operation.
+			// Submission can clear render shards, so reassert the text prerequisites.
+			RenderSystem.disableDepthTest();
+			RenderSystem.setShaderColor(1, 1, 1, 1);
+		}
+		@Override public void flush() { Objects.requireNonNull(graphics).flush(); }
+		@Override public void disableScissor() { Objects.requireNonNull(graphics).disableScissor(); }
 
 		@Override public void row(MonitorDisplayModel.Row row, int x, int y, int maximumWidth) {
 			GuiGraphics target = Objects.requireNonNull(graphics);
@@ -100,7 +186,7 @@ public final class InventoryMonitorHud {
 		}
 	}
 
-	/** Only the scalar state changed by native SEE_THROUGH text and GUI flush. */
+	/** Only the scalar state changed by native guiOverlay/SEE_THROUGH text and GUI flush. */
 	@NotNullByDefault
 	interface StateAccess {
 		boolean depthTest();
@@ -187,28 +273,4 @@ public final class InventoryMonitorHud {
 		}
 	}
 
-	/** The monitor's preparation identity, not a general-purpose or height-dependent layout cache. */
-	@NotNullByDefault
-	public static final class PreparationKey {
-		private @Nullable ClientMonitorState.View view;
-		private @Nullable Font font;
-		private @Nullable Language language;
-		private int width = -1;
-		private double guiScale = -1;
-		private boolean forceUnicodeFont;
-		private boolean japaneseGlyphVariants;
-
-		/** Called only during frame/tick/packet preparation; unchanged frames allocate nothing. */
-		public boolean update(ClientMonitorState.View nextView, int nextWidth, double nextGuiScale, Font nextFont,
-			Language nextLanguage, boolean nextForceUnicodeFont, boolean nextJapaneseGlyphVariants) {
-			if (view == nextView && width == nextWidth && guiScale == nextGuiScale && font == nextFont
-				&& language == nextLanguage && forceUnicodeFont == nextForceUnicodeFont
-				&& japaneseGlyphVariants == nextJapaneseGlyphVariants) return false;
-			view = nextView; width = nextWidth; guiScale = nextGuiScale; font = nextFont; language = nextLanguage;
-			forceUnicodeFont = nextForceUnicodeFont; japaneseGlyphVariants = nextJapaneseGlyphVariants;
-			return true;
-		}
-
-		public void clear() { view = null; font = null; language = null; }
-	}
 }

@@ -379,6 +379,7 @@ class MonitorHudLabelsLocalizationTest {
 					}
 					assertCompactGrammar(locale, text);
 					assertRedText(row, "");
+					assertTitleText(row, prefix);
 				}
 				Row preview = model.rows().get(0);
 				Row tracking = model.rows().get(1);
@@ -447,7 +448,7 @@ class MonitorHudLabelsLocalizationTest {
 	}
 
 	@Test
-	void actualLocalizedMissingValuesMergeOnceAndDoNotReplaceMeasuredZeros() throws IOException {
+	void actualLocalizedMissingValuesKeepTheirSelectedFieldSlotsAndDoNotReplaceMeasuredZeros() throws IOException {
 		Language previous = Language.getInstance();
 		try {
 			var selected = List.of(metric("server.preview.requests.received"), metric("server.preview.requests.admitted"),
@@ -463,11 +464,20 @@ class MonitorHudLabelsLocalizationTest {
 				Row row = mixed.rows().getFirst();
 				assertCell(root, locale, row, "server.preview.requests.received", "0");
 				assertTrue(row.text().getString().contains(stat(root, locale, "avg", "0ms")), locale);
-				assertEquals(1, occurrences(row.text().getString(), "N/A"), locale);
-				assertEquals("N/A", cells(row).getLast(), locale);
+				assertEquals(2, occurrences(row.text().getString(), "N/A"), locale);
+				assertCell(root, locale, row, "server.preview.requests.open", "N/A");
+				assertCell(root, locale, row, "server.preview.requests.admitted", "N/A");
 				var absent = MonitorDisplayModel.prepare(new ClientMonitorState.View(true, selected, ClientMonitorState.Status.ACTIVE,
 					ClientMonitorState.Status.ACTIVE, ClientMonitorState.Status.ACTIVE, null, null), MonitorHudLabels.DEFAULT);
-				assertEquals(List.of("N/A"), cells(absent.rows().getFirst()), locale);
+				Row missing = absent.rows().getFirst();
+				assertEquals(row.metricIds(), missing.metricIds(), locale);
+				assertEquals(4, cells(missing).size(), locale);
+				for (String id : List.of("server.preview.requests.received", "server.preview.requests.admitted", "server.preview.requests.open")) {
+					assertCell(root, locale, missing, id, "N/A");
+				}
+				assertTrue(missing.text().getString().contains(stat(root, locale, "avg", "N/A")), locale);
+				assertTrue(missing.text().getString().contains(stat(root, locale, "total", "N/A")), locale);
+				assertTrue(missing.text().getString().contains(stat(root, locale, "count", "N/A")), locale);
 				assertCompactGrammar(locale, row.text().getString());
 			}
 		} finally {
@@ -521,6 +531,7 @@ class MonitorHudLabelsLocalizationTest {
 						assertTrue(row.metricIds().isEmpty(), locale);
 						assertEquals(rowStatus == ClientMonitorState.Status.OFF ? caption : "", offText(row), locale);
 						assertRedText(row, rowStatus == ClientMonitorState.Status.OFF ? caption : "");
+						assertTitleText(row, labels.prefix(PREFIX_SCOPES.get(index)).getString());
 					}
 					for (int index : List.of(3, 4)) {
 						assertEquals(active.rows().get(index).text().getString(), model.rows().get(index).text().getString(), locale);
@@ -562,6 +573,8 @@ class MonitorHudLabelsLocalizationTest {
 							assertGroupedWrapPreservesText(logical.text().getString(), String.join("",
 								lines.stream().map(row -> row.text().getString()).toList()), locale);
 							assertEquals(offText(logical), String.join("", lines.stream().map(MonitorHudLabelsLocalizationTest::offText).toList()), locale);
+							String prefix = titleText(logical);
+							assertEquals(prefix.replaceAll("\\s+", ""), String.join("", lines.stream().map(MonitorHudLabelsLocalizationTest::titleText).toList()).replaceAll("\\s+", ""), locale);
 							for (Row line : lines) {
 								assertTrue(splitter.stringWidth(line.text()) <= width, locale + ": right overflow " + line.text().getString());
 								assertRedText(line, offText(line));
@@ -709,6 +722,17 @@ class MonitorHudLabelsLocalizationTest {
 	}
 	private static String offText(Row row) {
 		return String.join("", row.segments().stream().filter(segment -> segment.tone() == Tone.OFF).map(segment -> segment.text().getString()).toList());
+	}
+	private static String titleText(Row row) {
+		return String.join("", row.segments().stream().filter(segment -> segment.tone() == Tone.TITLE).map(segment -> segment.text().getString()).toList());
+	}
+	private static void assertTitleText(Row row, String expected) {
+		var title = new StringBuilder();
+		row.text().visit((style, text) -> {
+			if (style.getColor() != null && style.getColor().getValue() == 0x01F7F7) title.append(text);
+			return Optional.empty();
+		}, Style.EMPTY);
+		assertEquals(expected, title.toString(), row.id());
 	}
 	private static void assertRedText(Row row, String expected) {
 		var red = new StringBuilder();

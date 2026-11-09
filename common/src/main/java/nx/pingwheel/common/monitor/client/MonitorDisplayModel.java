@@ -61,15 +61,15 @@ public final class MonitorDisplayModel {
 		Scope.SERVER_TRACKING, Scope.SHARED, Scope.LOCAL_PREVIEW, Scope.LOCAL_TRACKING);
 
 	@NotNullByDefault
-	public enum Tone { NORMAL, OFF }
+	public enum Tone { NORMAL, TITLE, OFF }
 
 	@NotNullByDefault
 	public record Segment(Component text, Tone tone) {
 		public Segment {
 			// Resolve translations and nested numeric grammar at preparation,
 			// not on the first render. Rebuild explicitly after a locale update.
-			text = new CachedText(text.getString(), Style.EMPTY, List.of());
 			Objects.requireNonNull(tone, "tone");
+			text = new CachedText(text.getString(), style(tone), List.of());
 		}
 	}
 
@@ -78,28 +78,75 @@ public final class MonitorDisplayModel {
 		private final String id;
 		private final @Unmodifiable List<Segment> segments;
 		private final @Unmodifiable List<String> metricIds;
-		private final @Unmodifiable List<Component> groups;
+		private final @Unmodifiable List<Group> groups;
 		private final Component text;
 
-		private Row(String id, List<Segment> segments, List<String> metricIds) {
+		public Row(String id, List<Segment> segments, List<String> metricIds) {
 			this(id, segments, metricIds, List.of());
 		}
-		private Row(String id, List<Segment> segments, List<String> metricIds, List<Component> groups) {
-			this.id = id; this.segments = List.copyOf(segments); this.metricIds = List.copyOf(metricIds);
+		private Row(String id, List<Segment> segments, List<String> metricIds, List<Group> groups) {
+			this.id = Objects.requireNonNull(id); this.segments = List.copyOf(segments); this.metricIds = List.copyOf(metricIds);
 			this.groups = List.copyOf(groups);
-			@Unmodifiable List<Component> leaves = segments.stream().map(segment -> (Component) new CachedText(segment.text().getString(),
-				segment.tone() == Tone.OFF ? Style.EMPTY.withColor(ChatFormatting.RED) : Style.EMPTY, List.of())).toList();
+			@Unmodifiable List<Component> leaves = segments.stream().map(Segment::text).toList();
 			text = new CachedText("", Style.EMPTY, leaves);
 		}
 		public String id() { return id; }
 		public @Unmodifiable List<Segment> segments() { return segments; }
 		public @Unmodifiable List<String> metricIds() { return metricIds; }
 		public Component text() { return text; }
+		/** Reserved vertical space contains no text, segments or metric identities. */
+		public boolean isBlank() { return segments.isEmpty() && metricIds.isEmpty() && text.getString().isEmpty(); }
+	}
+
+	/** Heights only: never retain old values, components, availability or source state. */
+	@NotNullByDefault
+	public static final class Reservations {
+		public static final Reservations EMPTY = new Reservations(Map.of());
+		private final @Unmodifiable Map<GroupId, Integer> heights;
+		private Reservations(Map<GroupId, Integer> heights) { this.heights = Map.copyOf(heights); }
+	}
+
+	@NotNullByDefault
+	public record FitResult(MonitorDisplayModel model, Reservations nextReservations) {
+		public FitResult {
+			Objects.requireNonNull(model); Objects.requireNonNull(nextReservations);
+		}
 	}
 
 	private final @Unmodifiable List<Row> rows;
 	private MonitorDisplayModel(List<Row> rows) { this.rows = List.copyOf(rows); }
 	public @Unmodifiable List<Row> rows() { return rows; }
+
+	private static Style style(Tone tone) {
+		return switch (tone) {
+			case NORMAL -> Style.EMPTY.withColor(ChatFormatting.WHITE);
+			case TITLE -> Style.EMPTY.withColor(0x01F7F7);
+			case OFF -> Style.EMPTY.withColor(ChatFormatting.RED);
+		};
+	}
+
+	private static Component freeze(Component component) {
+		List<Component> leaves = new ArrayList<>();
+		component.visit((style, text) -> {
+			leaves.add(new CachedText(text, style, List.of()));
+			return java.util.Optional.empty();
+		}, Style.EMPTY);
+		return new CachedText("", Style.EMPTY, leaves);
+	}
+
+	private static @Unmodifiable List<Segment> segments(Component component) {
+		List<Segment> result = new ArrayList<>();
+		component.visit((style, text) -> {
+			if (!text.isEmpty()) {
+				@Nullable var color = style.getColor();
+				Tone tone = color != null && color.getValue() == 0x01F7F7 ? Tone.TITLE
+					: color != null && ChatFormatting.RED.getColor().equals(color.getValue()) ? Tone.OFF : Tone.NORMAL;
+				result.add(new Segment(Component.literal(text), tone));
+			}
+			return java.util.Optional.empty();
+		}, Style.EMPTY);
+		return List.copyOf(result);
+	}
 
 	@NotNullByDefault
 	private static final class CachedText implements Component {
@@ -125,23 +172,38 @@ public final class MonitorDisplayModel {
 
 	/**
 	 * View-update preparation for the actual GUI width. Native font wrapping is
-	 * performed here, not in draw; it retains OFF's token style. Re-run when GUI
-	 * scale, viewport, locale or font resources change, without altering demand.
+	 * performed here, not in draw; it retains title and OFF token styles. The
+	 * layout owner decides when width/font/locale identity drops reservations.
 	 */
 	public MonitorDisplayModel fit(int maximumWidth, StringSplitter splitter) {
-		if (maximumWidth < 1 || rows.isEmpty()) return EMPTY;
+		return fit(maximumWidth, splitter, Reservations.EMPTY).model();
+	}
+
+	public FitResult fit(int maximumWidth, StringSplitter splitter, Reservations previous) {
+		Objects.requireNonNull(splitter); Objects.requireNonNull(previous);
+		if (maximumWidth < 1 || rows.isEmpty()) return new FitResult(EMPTY, previous);
 		List<Row> fitted = new ArrayList<>();
+		@Nullable Map<GroupId, Integer> heights = null;
 		for (Row row : rows) {
 			if (row.groups.isEmpty()) {
 				appendLines(fitted, row, row.text(), maximumWidth, splitter, 0);
 				continue;
 			}
+			if (heights == null) heights = new LinkedHashMap<>(previous.heights);
 			int lineIndex = 0;
-			for (Component group : row.groups) {
-				lineIndex = appendLines(fitted, row, group, maximumWidth, splitter, lineIndex);
+			for (Group group : row.groups) {
+				int firstLine = lineIndex;
+				lineIndex = appendLines(fitted, row, group.text(), maximumWidth, splitter, lineIndex);
+				int count = lineIndex - firstLine;
+				int reserved = Math.max(count, previous.heights.getOrDefault(group.id(), 0));
+				heights.put(group.id(), reserved);
+				while (lineIndex - firstLine < reserved) {
+					fitted.add(new Row(row.id() + ".line." + lineIndex++, List.of(), List.of()));
+				}
 			}
 		}
-		return new MonitorDisplayModel(fitted);
+		Reservations next = heights == null || heights.equals(previous.heights) ? previous : new Reservations(heights);
+		return new FitResult(new MonitorDisplayModel(fitted), next);
 	}
 
 	/**
@@ -152,14 +214,13 @@ public final class MonitorDisplayModel {
 		StringSplitter splitter, int firstLineIndex) {
 		List<FormattedText> lines = splitter.splitLines(source, maximumWidth, Style.EMPTY);
 		for (int index = 0; index < lines.size(); index++) {
-			List<Segment> segments = new ArrayList<>();
-			lines.get(index).visit((style, text) -> {
-				segments.add(new Segment(Component.literal(text), ChatFormatting.RED.getColor().equals(
-					style.getColor() == null ? null : style.getColor().getValue()) ? Tone.OFF : Tone.NORMAL));
+			MutableComponent text = Component.empty();
+			lines.get(index).visit((style, value) -> {
+				text.append(Component.literal(value).setStyle(style));
 				return java.util.Optional.empty();
 			}, Style.EMPTY);
 			int lineIndex = firstLineIndex + index;
-			fitted.add(new Row(row.id() + ".line." + lineIndex, segments, lineIndex == 0 ? row.metricIds() : List.of()));
+			fitted.add(new Row(row.id() + ".line." + lineIndex, segments(text), lineIndex == 0 ? row.metricIds() : List.of()));
 		}
 		return firstLineIndex + lines.size();
 	}
@@ -189,7 +250,6 @@ public final class MonitorDisplayModel {
 			}
 			List<GroupedField> fields = new ArrayList<>();
 			List<String> ids = new ArrayList<>();
-			boolean missing = false;
 			for (Metric metric : metrics) {
 				Metric base = baseMetric(metric);
 				if (metric.kind() == Metric.Kind.TIMING_MAX && displayed.contains(base)) continue;
@@ -197,12 +257,11 @@ public final class MonitorDisplayModel {
 				@Nullable Metric peak = base.kind() == Metric.Kind.TIMING ? Metric.byId(base.id() + ".max") : null;
 				boolean showPeak = peak != null && displayed.contains(peak);
 				Field field = field(base, sample(view, scope), main, showPeak, view.selected().contains(base), rates.contains(base), labels, true);
-				if (field.text() != null) fields.add(new GroupedField(groupKey(base), field.text()));
-				missing |= field.missing();
+				fields.add(new GroupedField(groupKey(base), field.text()));
 				if (main) ids.add(base.id());
 				if (showPeak) ids.add(Objects.requireNonNull(peak).id());
 			}
-			@Unmodifiable List<Component> groups = groupTexts(scope, fields, missing || fields.isEmpty(), labels);
+			@Unmodifiable List<Group> groups = groupTexts(scope, fields, labels);
 			rows.add(groupedRow("scope." + scope.id(), groups, ids, labels));
 		}
 		return new MonitorDisplayModel(rows);
@@ -247,6 +306,12 @@ public final class MonitorDisplayModel {
 	private record GroupKey(GroupKind kind, String id) {}
 
 	@NotNullByDefault
+	private record GroupId(Scope scope, GroupKey key) {}
+
+	@NotNullByDefault
+	private record Group(GroupId id, Component text) {}
+
+	@NotNullByDefault
 	private record GroupedField(GroupKey key, Component text) {}
 
 	private static final GroupKey REQUESTS_GROUP = new GroupKey(GroupKind.REQUESTS, "");
@@ -274,41 +339,50 @@ public final class MonitorDisplayModel {
 	}
 
 	/** Group metadata stays private; Row.text() remains the complete logical text. */
-	private static @Unmodifiable List<Component> groupTexts(Scope scope, List<GroupedField> fields,
-		boolean unavailable, Labels labels) {
+	private static @Unmodifiable List<Group> groupTexts(Scope scope, List<GroupedField> fields, Labels labels) {
 		Map<GroupKey, List<Component>> grouped = new LinkedHashMap<>();
 		for (GroupedField field : fields) grouped.computeIfAbsent(field.key(), key -> new ArrayList<>()).add(field.text());
-		List<List<Component>> groups = new ArrayList<>(grouped.values());
-		if (groups.isEmpty()) groups.add(new ArrayList<>());
-		if (unavailable) groups.getLast().add(labels.unavailable());
-		List<Component> result = new ArrayList<>(groups.size());
-		for (int index = 0; index < groups.size(); index++) {
-			Component joined = join(groups.get(index), labels, Format.FIELD_SEPARATOR);
-			Component text = index == 0 ? labels.format(Format.ROW, labels.prefix(scope), joined) : joined;
-			result.add(new CachedText(text.getString(), Style.EMPTY, List.of()));
+		List<Group> result = new ArrayList<>(grouped.size());
+		for (var entry : grouped.entrySet()) {
+			Component joined = join(entry.getValue(), labels, Format.FIELD_SEPARATOR);
+			Component text = result.isEmpty() ? scopeText(scope, joined, labels) : joined;
+			result.add(new Group(new GroupId(scope, entry.getKey()), freeze(text)));
 		}
 		return List.copyOf(result);
 	}
 
-	private static Row groupedRow(String id, List<Component> groups, List<String> ids, Labels labels) {
-		return new Row(id, List.of(new Segment(join(groups, labels, Format.FIELD_SEPARATOR), Tone.NORMAL)), ids, groups);
+	private static Row groupedRow(String id, List<Group> groups, List<String> ids, Labels labels) {
+		return new Row(id, segments(join(groups.stream().map(Group::text).toList(), labels, Format.FIELD_SEPARATOR)), ids, groups);
 	}
 
 	private static Row statusRow(Scope scope, ClientMonitorState.Status status, Labels labels) {
-		// Row grammar remains localized while the exact OFF token alone is red.
-		Component token = labels.status(status);
-		// Resolve localized grammar with a sentinel so OFF remains independently
-		// styled even in locales whose value precedes the label.
-		String sentinel = "\u0001";
-		String grammar = labels.format(Format.ROW, labels.prefix(scope), sentinel).getString();
-		String @Unmodifiable [] parts = grammar.split(sentinel, -1);
-		List<Segment> segments = new ArrayList<>();
-		for (int index = 0; index < parts.length; index++) {
-			segments.add(new Segment(Component.literal(parts[index]), Tone.NORMAL));
-			if (index < parts.length - 1) segments.add(new Segment(token, status == ClientMonitorState.Status.OFF ? Tone.OFF : Tone.NORMAL));
+		Component token = new CachedText(labels.status(status).getString(),
+			style(status == ClientMonitorState.Status.OFF ? Tone.OFF : Tone.NORMAL), List.of());
+		return new Row("status." + scope.id(), segments(scopeText(scope, token, labels)), List.of());
+	}
+
+	private static Component scopeText(Scope scope, Component value, Labels labels) {
+		Component prefix = new CachedText(labels.prefix(scope).getString(), style(Tone.TITLE), List.of());
+		return styledFormat(labels, Format.ROW, List.of(prefix, value));
+	}
+
+	/** Preserve argument runs even for a label provider that resolves grammar to a literal. */
+	private static Component styledFormat(Labels labels, Format format, List<Component> arguments) {
+		Object[] markers = new Object[arguments.size()];
+		for (int index = 0; index < markers.length; index++) markers[index] = "\u0001" + index + "\u0002";
+		String grammar = labels.format(format, markers).getString();
+		MutableComponent result = Component.empty();
+		int cursor = 0;
+		while (cursor < grammar.length()) {
+			int marker = grammar.indexOf('\u0001', cursor);
+			if (marker < 0) { result.append(grammar.substring(cursor)); break; }
+			if (marker > cursor) result.append(grammar.substring(cursor, marker));
+			int end = grammar.indexOf('\u0002', marker + 1);
+			int argument = Integer.parseInt(grammar.substring(marker + 1, end));
+			result.append(arguments.get(argument));
+			cursor = end + 1;
 		}
-		if (parts.length == 1) segments.add(new Segment(token, status == ClientMonitorState.Status.OFF ? Tone.OFF : Tone.NORMAL));
-		return new Row("status." + scope.id(), segments, List.of());
+		return freeze(result);
 	}
 
 	private static Component join(List<Component> cells, Labels labels, Format separator) {
@@ -337,57 +411,59 @@ public final class MonitorDisplayModel {
 		Labels labels = MonitorHudLabels.DEFAULT;
 		Field field = field(baseMetric(metric), sample, metric.kind() != Metric.Kind.TIMING_MAX,
 			metric.kind() == Metric.Kind.TIMING_MAX, !rate, rate, labels, false);
-		if (field.text() == null) return labels.unavailable();
-		return field.missing() ? join(List.of(field.text(), labels.unavailable()), labels, Format.DETAIL_SEPARATOR) : field.text();
+		return field.text();
 	}
 
 	@NotNullByDefault
-	private record Field(@Nullable Component text, boolean missing) {}
+	private record Field(Component text) {}
 
-	/** The only mutable builder is preparation-local; no missing placeholder enters a field. */
+	/** Selected detail slots retain their order, including an unavailable value. */
 	@NotNullByDefault
 	private static final class Details {
 		private final Labels labels;
 		private final List<Component> values = new ArrayList<>();
-		private boolean missing;
 		private Details(Labels labels) { this.labels = labels; }
 		private void add(Result result) { add(result, null); }
 		private void add(Result result, @Nullable Stat stat) {
-			if (!result.available()) { missing = true; return; }
-			Component value = Component.literal(result.text());
+			Component value = result.available() ? Component.literal(result.text()) : labels.unavailable();
 			values.add(stat == null ? value : labels.format(Format.STAT, labels.stat(stat), value));
 		}
 		private Field finish(Metric metric, boolean includeLabel) {
-			if (values.isEmpty()) return new Field(null, true);
 			Component value = join(values, labels, Format.DETAIL_SEPARATOR);
-			return new Field(includeLabel ? labels.format(Format.ENTRY, labels.field(metric), value) : value, missing);
+			return new Field(includeLabel ? labels.format(Format.ENTRY, labels.field(metric), value) : value);
 		}
+	}
+
+	private static Field unavailable(Metric metric, Labels labels, boolean includeLabel) {
+		return new Field(includeLabel ? labels.format(Format.ENTRY, labels.field(metric), labels.unavailable()) : labels.unavailable());
 	}
 
 	private static Field field(Metric metric, @Nullable MonitorSample sample, boolean main, boolean peak,
 		boolean explicit, boolean rate, Labels labels, boolean includeLabel) {
 		Scope scope = Objects.requireNonNull(metric.scope(), "raw metric");
-		if (sample == null) return new Field(null, true);
-		@Nullable LaneSample lane = scope.source() == Source.SHARED ? null : scope.lane() == Lane.PREVIEW ? sample.preview() : sample.tracking();
-		@Nullable SharedSample shared = scope.source() == Source.SHARED ? sample.shared() : null;
-		if (lane != null && lane.source() != scope.source()) return new Field(null, true);
+		@Nullable LaneSample lane = sample == null || scope.source() == Source.SHARED ? null : scope.lane() == Lane.PREVIEW ? sample.preview() : sample.tracking();
+		@Nullable SharedSample shared = sample != null && scope.source() == Source.SHARED ? sample.shared() : null;
+		if (lane != null && lane.source() != scope.source()) lane = null;
 		Details details = new Details(labels);
 		switch (metric.kind()) {
 			case TIMING -> {
 				@Nullable TimingStats stats = lane == null ? null : lane.timing(Objects.requireNonNull(metric.phase()));
-				if (stats == null) return new Field(null, true);
-				if (main) details.add(MonitorNumberFormat.timeNs(stats.count() == 0 || stats.saturated() ? null
+				if (main) details.add(MonitorNumberFormat.timeNs(stats == null || stats.count() == 0 || stats.saturated() ? null
 					: new Value(BigInteger.valueOf(stats.totalNs()), BigInteger.valueOf(stats.count()), Quality.EXACT)), Stat.AVG);
-				if (peak) details.add(MonitorNumberFormat.timeNs(stats.count() == 0 ? null : value(stats.maxNs(), timingQuality(stats.maxNs()))), Stat.PEAK);
+				if (peak) details.add(MonitorNumberFormat.timeNs(stats == null || stats.count() == 0 ? null : value(stats.maxNs(), timingQuality(stats.maxNs()))), Stat.PEAK);
 				if (main && explicit) {
-					details.add(MonitorNumberFormat.timeNs(value(stats.totalNs(), timingQuality(stats.totalNs()))), Stat.TOTAL);
-					details.add(MonitorNumberFormat.number(value(stats.count(), timingQuality(stats.count()))), Stat.COUNT);
+					details.add(MonitorNumberFormat.timeNs(stats == null ? null : value(stats.totalNs(), timingQuality(stats.totalNs()))), Stat.TOTAL);
+					details.add(MonitorNumberFormat.number(stats == null ? null : value(stats.count(), timingQuality(stats.count()))), Stat.COUNT);
 				}
 			}
 			case COUNTER -> {
 				Counter counter = Objects.requireNonNull(metric.counter());
 				@Nullable CounterReading reading = lane != null ? lane.counter(counter) : shared == null ? null : shared.counter(counter);
-				if (reading == null) return new Field(null, true);
+				if (reading == null) {
+					details.add(MonitorNumberFormat.number(null));
+					if (rate && explicit) details.add(MonitorNumberFormat.number(null), Stat.TOTAL);
+					return details.finish(metric, includeLabel);
+				}
 				Quality quality = reading.saturated() ? Quality.SATURATED : Quality.EXACT;
 				if (counter == Counter.HANDOFF_BYTES && quality == Quality.EXACT) {
 					@Nullable CounterReading unknown = lane == null ? null : lane.counter(Counter.UNOBSERVED_HANDOFF_FRAMES);
@@ -395,21 +471,21 @@ public final class MonitorDisplayModel {
 				}
 				Value total = value(reading.value(), quality);
 				boolean bytes = byteCounter(counter);
-				if (rate) details.add(MonitorNumberFormat.ratePerSecond(total, sample.elapsedNs(), bytes));
+				if (rate) details.add(MonitorNumberFormat.ratePerSecond(total, Objects.requireNonNull(sample).elapsedNs(), bytes));
 				if (!rate || explicit) details.add(bytes ? MonitorNumberFormat.bytes(total) : MonitorNumberFormat.number(total),
 					rate ? Stat.TOTAL : null);
 			}
 			case GAUGE -> {
 				@Nullable GaugeReading reading = lane != null ? lane.gauge(Objects.requireNonNull(metric.gauge()))
 					: shared == null ? null : shared.gauge(Objects.requireNonNull(metric.gauge()));
-				if (reading == null) return new Field(null, true);
+				if (reading == null) return unavailable(metric, labels, includeLabel);
 				details.add(metric.gauge() == Gauge.BUFFER_ESTIMATED_BYTES ? MonitorNumberFormat.bytes(value(reading.value()))
 					: MonitorNumberFormat.number(value(reading.value())));
 			}
 			case BUDGET -> {
 				@Nullable BudgetUsage usage = lane != null ? lane.budget(Objects.requireNonNull(metric.budget()))
 					: shared == null ? null : shared.budget(Objects.requireNonNull(metric.budget()));
-				if (usage == null || !usage.available()) return new Field(null, true);
+				if (usage == null || !usage.available()) return unavailable(metric, labels, includeLabel);
 				boolean bytes = metric.budget() == Budget.WIRE_BYTES;
 				details.add(MonitorNumberFormat.percent(value(usage.used()), value(usage.limit())));
 				details.add(MonitorNumberFormat.ratio(value(usage.used()), value(usage.limit()), bytes));
@@ -421,18 +497,16 @@ public final class MonitorDisplayModel {
 			}
 			case MEMORY -> {
 				@Nullable MemoryUsage memory = shared == null ? null : shared.memory();
-				if (memory == null) return new Field(null, true);
+				if (memory == null) return unavailable(metric, labels, includeLabel);
 				Value occupied = new Value(BigInteger.valueOf(memory.retained()).add(BigInteger.valueOf(memory.reserved())), BigInteger.ONE, Quality.EXACT);
 				Result percent = MonitorNumberFormat.percent(occupied, value(memory.cap()));
 				Result triplet = MonitorNumberFormat.byteTriplet(value(memory.retained()), occupied, value(memory.cap()));
 				details.add(triplet);
 				if (explicit) details.add(MonitorNumberFormat.bytes(value(memory.remaining())), Stat.REMAINING);
 				Component value = join(details.values, labels, Format.DETAIL_SEPARATOR);
-				if (includeLabel) return new Field(percent.available()
-					? labels.format(Format.MEMORY, labels.field(metric), Component.literal(percent.text()), value)
-					: labels.format(Format.ENTRY, labels.field(metric), value), !percent.available() || details.missing);
-				if (percent.available()) details.values.addFirst(Component.literal(percent.text()));
-				details.missing |= !percent.available();
+				Component percentage = percent.available() ? Component.literal(percent.text()) : labels.unavailable();
+				if (includeLabel) return new Field(labels.format(Format.MEMORY, labels.field(metric), percentage, value));
+				details.values.addFirst(percentage);
 			}
 			case TIMING_MAX, SUMMARY -> throw new IllegalArgumentException("field requires a raw base metric");
 		}

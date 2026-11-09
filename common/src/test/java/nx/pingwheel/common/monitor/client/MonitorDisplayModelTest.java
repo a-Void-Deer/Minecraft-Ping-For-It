@@ -76,6 +76,10 @@ class MonitorDisplayModelTest {
 		return String.join("", rows.stream().map(row -> row.text().getString()).toList());
 	}
 	private static String withoutWhitespace(String text) { return text.replaceAll("\\s+", ""); }
+	private static String toneText(MonitorDisplayModel model, MonitorDisplayModel.Tone tone) {
+		return String.join("", model.rows().stream().flatMap(row -> row.segments().stream())
+			.filter(segment -> segment.tone() == tone).map(segment -> segment.text().getString()).toList());
+	}
 
 	@Test void scopeFirstRowsKeepFiveGroupsAndEndpointLanesIndependent() {
 		var local = sample(timed(Source.LOCAL, Lane.PREVIEW, Phase.APPLY, 2_000_000, 1, 2_000_000),
@@ -85,9 +89,10 @@ class MonitorDisplayModelTest {
 		var model = prepare(List.of(Metric.SUMMARY_PROCESSING, Metric.SUMMARY_MEMORY), local, remote);
 		assertEquals(List.of("scope.server.preview", "scope.server.tracking", "scope.shared", "scope.local.preview", "scope.local.tracking"),
 			model.rows().stream().map(MonitorDisplayModel.Row::id).toList());
-		assertEquals(List.of("ServerPrev: Ingress Avg 4ms; N/A", "ServerTrack: Tick Avg 7ms; N/A",
-			"ServerShared: Mem 25% 96/128/512MB", "ClientPrev: Apply Avg 2ms; N/A", "ClientTrack: Apply Avg 3ms; N/A"),
-			model.rows().stream().map(row -> row.text().getString()).toList());
+		for (int index = 0; index < model.rows().size(); index++) {
+			String expected = List.of("Ingress Avg 4ms", "Tick Avg 7ms", "Mem 25% 96/128/512MB", "Apply Avg 2ms", "Apply Avg 3ms").get(index);
+			assertTrue(model.rows().get(index).text().getString().contains(expected));
+		}
 		for (var row : model.rows()) {
 			assertEquals(1, occurrences(row.text().getString(), ": "));
 			assertFalse(row.text().getString().contains("summary."));
@@ -105,7 +110,8 @@ class MonitorDisplayModelTest {
 			metric("server.preview.budget.logical_slots")), null, sample(preview, null, null));
 		String text = model.rows().getFirst().text().getString();
 		assertEquals("scope.server.preview", model.rows().getFirst().id());
-		assertEquals("ServerPrev: Ingress Avg 4ms; Open 2; Recv 12; Admitted 9; QCost 34; Slots 10.94% 7/64 Reserved 3 Rem 57 Admissible 49; PreviewFrames 4/s; N/A", text);
+		assertTrue(text.startsWith("ServerPrev: Ingress Avg 4ms; Tick Avg N/A; Open 2; Recv 12; Admitted 9; QCost 34; Slots 10.94% 7/64 Reserved 3 Rem 57 Admissible 49; PreviewFrames 4/s"));
+		assertTrue(text.contains("Handoff N/A"));
 		assertFalse(text.contains("Pending"));
 		assertEquals(1, occurrences(text, "ServerPrev"));
 		assertTrue(model.rows().getFirst().metricIds().contains("server.preview.requests.admitted"));
@@ -146,13 +152,13 @@ class MonitorDisplayModelTest {
 			sample(timed(Source.SERVER, Lane.PREVIEW, Phase.TICK_WORK, 3_000_000_000L, 2, 2_000_000_000L), null, null))));
 	}
 
-	@Test void missingSelectedFieldsMergeOnceWithoutSuppressingKnownZeros() {
+	@Test void missingSelectedFieldsKeepLabelsAndOrderWithoutSuppressingKnownZeros() {
 		var remote = sample(lane(Source.SERVER, Lane.PREVIEW, List.of(), List.of(new CounterReading(Counter.REQUESTS_RECEIVED, 0, false))), null, null);
-		assertEquals("ServerPrev: Recv 0; N/A", onlyText(prepare(metrics("server.preview.requests.received", "server.preview.requests.admitted",
+		assertEquals("ServerPrev: Open N/A; Recv 0; Admitted N/A", onlyText(prepare(metrics("server.preview.requests.received", "server.preview.requests.admitted",
 			"server.preview.requests.open"), null, remote)));
-		assertEquals("ServerPrev: N/A", onlyText(prepare(metrics("server.preview.requests.admitted", "server.preview.requests.open"), null, remote)));
+		assertEquals("ServerPrev: Open N/A; Admitted N/A", onlyText(prepare(metrics("server.preview.requests.admitted", "server.preview.requests.open"), null, remote)));
 		assertEquals("ServerPrev: Recv 0", onlyText(prepare(metrics("server.preview.requests.received"), null, remote)));
-		assertEquals("ServerPrev: N/A", onlyText(prepare(metrics("server.preview.requests.received"), null, null)));
+		assertEquals("ServerPrev: Recv N/A", onlyText(prepare(metrics("server.preview.requests.received"), null, null)));
 	}
 
 	@Test void nonDisplayedSummaryConstituentsDoNotCreateUnavailableFields() {
@@ -194,7 +200,12 @@ class MonitorDisplayModelTest {
 			model.rows().subList(0, 3).stream().map(row -> row.text().getString()).toList());
 		for (var row : model.rows()) for (var segment : row.segments()) {
 			if (segment.tone() == MonitorDisplayModel.Tone.OFF) assertEquals("OFF", segment.text().getString());
-			assertNull(segment.text().getStyle().getColor());
+			assertNotNull(segment.text().getStyle().getColor());
+			assertEquals(switch (segment.tone()) {
+				case NORMAL -> ChatFormatting.WHITE.getColor().intValue();
+				case TITLE -> 0x01F7F7;
+				case OFF -> ChatFormatting.RED.getColor().intValue();
+			}, segment.text().getStyle().getColor().getValue());
 		}
 		List<String> redText = new ArrayList<>();
 		model.rows().getFirst().text().visit((style, value) -> {
@@ -206,7 +217,7 @@ class MonitorDisplayModelTest {
 
 	@Test void unselectedScopesAndDisabledViewProduceNoExtraStatusRows() {
 		var view = new ClientMonitorState.View(true, metrics("local.preview.apply.accepted"), OFF, OFF, DEPENDENCY_OFF, null, null);
-		assertEquals("ClientPrev: N/A", onlyText(MonitorDisplayModel.prepare(view, LABELS)));
+		assertEquals("ClientPrev: Applied N/A", onlyText(MonitorDisplayModel.prepare(view, LABELS)));
 		assertTrue(prepare(List.of(), null, null).rows().isEmpty());
 		assertSame(MonitorDisplayModel.EMPTY, MonitorDisplayModel.prepare(new ClientMonitorState.View(false, Metric.defaults(), OFF, OFF, OFF, null, null), LABELS));
 	}
@@ -218,7 +229,7 @@ class MonitorDisplayModelTest {
 	}
 
 	@Test void memoryCapZeroOverCapacityNegativeRemainingAndBigIntegerOccupiedStayHonest() {
-		assertEquals("ServerShared: Mem 10/15/0B Rem -15B; N/A", onlyText(prepare(metrics("shared.memory"), null,
+		assertEquals("ServerShared: Mem N/A 10/15/0B Rem -15B", onlyText(prepare(metrics("shared.memory"), null,
 			sample(null, null, shared(MemoryUsage.accounted(10, 5, 0))))));
 		assertEquals("ServerShared: Mem 187.5% 10/15/8B Rem -7B", onlyText(prepare(metrics("shared.memory"), null,
 			sample(null, null, shared(MemoryUsage.accounted(10, 5, 8))))));
@@ -240,7 +251,7 @@ class MonitorDisplayModelTest {
 		var preview = new LaneSample(Source.SERVER, Lane.PREVIEW, List.of(), List.of(), List.of(), List.of(
 			new BudgetReading(Budget.LOGICAL_SLOTS, BudgetUsage.unavailable()),
 			new BudgetReading(Budget.WIRE_BYTES, new BudgetUsage(true, 27, 0, 0, 0, 0, 0))));
-		assertEquals("ServerPrev: Wire 0/0B Reserved 0B Rem 0B Admissible 0B; N/A", onlyText(prepare(
+		assertEquals("ServerPrev: Slots N/A; Wire N/A 0/0B Reserved 0B Rem 0B Admissible 0B", onlyText(prepare(
 			metrics("server.preview.budget.logical_slots", "server.preview.budget.wire_bytes"), null, sample(preview, null, null))));
 	}
 
@@ -250,16 +261,15 @@ class MonitorDisplayModelTest {
 	}
 
 	@Test void zeroCountAndSaturatedTimingNeverBecomeAFalseMeanButRawTotalRemains() {
-		assertEquals("ServerPrev: Ingress Total 0ms N 0; N/A", onlyText(prepare(metrics("server.preview.timing.ingress"), null,
+		assertEquals("ServerPrev: Ingress Avg N/A Total 0ms N 0", onlyText(prepare(metrics("server.preview.timing.ingress"), null,
 			sample(timed(Source.SERVER, Lane.PREVIEW, Phase.INGRESS, 0, 0, 0), null, null))));
 		String saturated = onlyText(prepare(metrics("server.preview.timing.ingress", "server.preview.timing.ingress.max"), null,
 			sample(timed(Source.SERVER, Lane.PREVIEW, Phase.INGRESS, Long.MAX_VALUE, 2, Long.MAX_VALUE), null, null)));
-		assertEquals("ServerPrev: Ingress Peak >=9223372036.85s Total >=9223372036.85s N 2; N/A", saturated);
-		assertFalse(saturated.contains("Avg"));
+		assertEquals("ServerPrev: Ingress Avg N/A Peak >=9223372036.85s Total >=9223372036.85s N 2", saturated);
 	}
 
 	@Test void peakNeedsAnObservedIntervalWhileMeasuredZeroDurationIsStillZero() {
-		assertEquals("ServerPrev: N/A", onlyText(prepare(metrics("server.preview.timing.ingress.max"), null,
+		assertEquals("ServerPrev: Ingress Peak N/A", onlyText(prepare(metrics("server.preview.timing.ingress.max"), null,
 			sample(timed(Source.SERVER, Lane.PREVIEW, Phase.INGRESS, 0, 0, 0), null, null))));
 		assertEquals("ServerPrev: Ingress Avg 0ms Peak 0ms Total 0ms N 1", onlyText(prepare(
 			metrics("server.preview.timing.ingress", "server.preview.timing.ingress.max"), null,
@@ -281,7 +291,7 @@ class MonitorDisplayModelTest {
 		var remote = sample(lane(Source.SERVER, Lane.PREVIEW, List.of(), List.of(
 			new CounterReading(Counter.HANDOFF_BYTES, 100, false), new CounterReading(Counter.FRAMES_PREVIEW, 0, false))), null, null);
 		assertEquals("ServerPrev: PreviewFrames 0; Handoff >=100B", onlyText(prepare(metrics("server.preview.sync.handoff_bytes", "server.preview.sync.frames_preview"), null, remote)));
-		assertEquals("ServerPrev: N/A", onlyText(prepare(metrics("server.preview.sync.handoff_bytes"), null,
+		assertEquals("ServerPrev: Handoff N/A", onlyText(prepare(metrics("server.preview.sync.handoff_bytes"), null,
 			sample(lane(Source.SERVER, Lane.PREVIEW, List.of(), List.of()), null, null))));
 		assertEquals("ServerPrev: Handoff >=0B", onlyText(prepare(metrics("server.preview.sync.handoff_bytes"), null,
 			sample(lane(Source.SERVER, Lane.PREVIEW, List.of(), List.of(new CounterReading(Counter.HANDOFF_BYTES, 0, false))), null, null))));
@@ -300,16 +310,26 @@ class MonitorDisplayModelTest {
 			new CounterReading(Counter.FRAMES_PREVIEW, Long.MAX_VALUE, true), new CounterReading(Counter.HANDOFF_BYTES, Long.MAX_VALUE, true),
 			new CounterReading(Counter.UNOBSERVED_HANDOFF_FRAMES, 0, false)));
 		var model = prepare(List.of(Metric.SUMMARY_SYNC_RATE, metric("server.preview.sync.frames_preview")), null, sample(preview, null, null));
-		assertEquals("ServerPrev: PreviewFrames Total >=9223372036854775807; UnknownHandoff 0/s; N/A", model.rows().getFirst().text().getString());
+		assertEquals("ServerPrev: PreviewFrames N/A Total >=9223372036854775807; Handoff N/A; UnknownHandoff 0/s", model.rows().getFirst().text().getString());
 		var warmup = new MonitorSample(1, 1, 1, 10, 10, 0, lane(Source.SERVER, Lane.PREVIEW, List.of(),
 			List.of(new CounterReading(Counter.FRAMES_PREVIEW, 20, false))), null, null);
-		assertEquals("ServerPrev: PreviewFrames Total 20; N/A", prepare(List.of(Metric.SUMMARY_SYNC_RATE,
+		assertEquals("ServerPrev: PreviewFrames N/A Total 20; Handoff N/A; UnknownHandoff N/A", prepare(List.of(Metric.SUMMARY_SYNC_RATE,
 			metric("server.preview.sync.frames_preview")), null, warmup).rows().getFirst().text().getString());
+	}
+
+	@Test void missingRateAndExplicitTotalKeepTheirSlotsBetweenKnownZeroAndRestoredSamples() {
+		var selected = List.of(Metric.SUMMARY_SYNC_RATE, metric("server.preview.sync.frames_preview"));
+		var measured = sample(lane(Source.SERVER, Lane.PREVIEW, List.of(), List.of(new CounterReading(Counter.FRAMES_PREVIEW, 0, false))), null, null);
+		String known = prepare(selected, null, measured).rows().getFirst().text().getString();
+		String missing = prepare(selected, null, null).rows().getFirst().text().getString();
+		assertTrue(known.startsWith("ServerPrev: PreviewFrames 0/s Total 0;"));
+		assertTrue(missing.startsWith("ServerPrev: PreviewFrames N/A Total N/A;"));
+		assertEquals(known, prepare(selected, null, measured).rows().getFirst().text().getString());
 	}
 
 	@Test void wrongEndpointSampleCannotLeakLocalReadingsIntoServerRow() {
 		var wrong = sample(lane(Source.LOCAL, Lane.PREVIEW, List.of(), List.of(new CounterReading(Counter.ACCEPTED, 7, false))), null, null);
-		assertEquals("ServerPrev: N/A", onlyText(prepare(metrics("server.preview.requests.received"), null, wrong)));
+		assertEquals("ServerPrev: Recv N/A", onlyText(prepare(metrics("server.preview.requests.received"), null, wrong)));
 	}
 
 	@Test void nativeWidthWrappingSplitsLongUnicodeTokensByCodePointAndKeepsMetricIds() {
@@ -479,14 +499,15 @@ class MonitorDisplayModelTest {
 			"server.preview.sync.frames_preview");
 		var model = prepare(selected, null, sample(preview, null, null));
 		var fitted = model.fit(10_000, new StringSplitter((code, style) -> 1f));
-		assertEquals(List.of("Recv", "PreviewFrames"), groupStarts(fitted), "the missing phase leaves no empty group");
-		assertEquals(2, fitted.rows().size());
-		assertEquals(1, occurrences(joinedText(fitted), "N/A"), "one scope-level N/A only");
-		assertTrue(fitted.rows().getLast().text().getString().endsWith("; N/A"));
+		assertEquals(List.of("Ingress", "Recv", "PreviewFrames"), groupStarts(fitted), "the selected missing phase keeps its group");
+		assertEquals(3, fitted.rows().size());
+		assertEquals(3, occurrences(joinedText(fitted), "N/A"));
+		assertTrue(fitted.rows().getFirst().text().getString().endsWith("Ingress Avg N/A Total N/A N N/A"));
 		assertTrue(fitted.rows().stream().noneMatch(row -> row.text().getString().isBlank()));
 		var absent = prepare(selected, null, null).fit(10_000, new StringSplitter((code, style) -> 1f));
-		assertEquals(1, absent.rows().size());
-		assertEquals("ServerPrev: N/A", absent.rows().getFirst().text().getString());
+		assertEquals(3, absent.rows().size());
+		assertEquals(List.of("Ingress", "Recv", "PreviewFrames"), groupStarts(absent));
+		assertEquals(5, occurrences(joinedText(absent), "N/A"));
 		var narrowed = prepare(metrics("server.preview.requests.received"), null, sample(preview, null, null))
 			.fit(10_000, new StringSplitter((code, style) -> 1f));
 		assertEquals(List.of("Recv"), groupStarts(narrowed), "a new selection does not retain earlier groups");
@@ -516,8 +537,8 @@ class MonitorDisplayModelTest {
 		assertTrue(fitted.rows().stream().anyMatch(row -> row.text().getString().startsWith("PreviewFrames")),
 			"the sync group still starts a new visual line after native wrapping");
 		assertEquals(model.rows().getFirst().metricIds(), fitted.rows().stream().flatMap(row -> row.metricIds().stream()).toList());
-		assertTrue(fitted.rows().stream().flatMap(row -> row.segments().stream())
-			.allMatch(segment -> segment.tone() == MonitorDisplayModel.Tone.NORMAL));
+		assertEquals("ServerPrev", String.join("", fitted.rows().stream().flatMap(row -> row.segments().stream())
+			.filter(segment -> segment.tone() == MonitorDisplayModel.Tone.TITLE).map(segment -> segment.text().getString()).toList()));
 	}
 
 	@Test void publishedTextAndVisualOrderAreCachedImmutableWithoutCallingLabelsDuringRead() {
@@ -529,7 +550,7 @@ class MonitorDisplayModelTest {
 			OFF, OFF, OFF, null, null), counting);
 		int preparedCalls = calls[0];
 		var row = model.rows().getFirst();
-		assertEquals("ClientPrev: N/A", row.text().getString());
+		assertEquals("ClientPrev: Applied N/A", row.text().getString());
 		assertSame(row.text().getVisualOrderText(), row.text().getVisualOrderText());
 		assertEquals(preparedCalls, calls[0]);
 		assertFalse(row.text() instanceof MutableComponent);
@@ -568,6 +589,241 @@ class MonitorDisplayModelTest {
 		assertEquals(expected, onlyText(adapted));
 		assertEquals(MonitorHudLabels.DEFAULT.format(Format.STAT, MonitorHudLabels.DEFAULT.stat(Stat.PEAK), Component.literal("8ms")).getString(),
 			MonitorDisplayModel.format(metric("server.preview.timing.ingress.max"), remote, false).getString());
+	}
+
+	@Test void selectedSkeletonSurvivesPresentAbsentPresentForEveryRawPhaseBudgetAndGauge() {
+		var selected = Metric.rawMetrics();
+		var remote = completeSample(Source.SERVER);
+		var local = completeSample(Source.LOCAL);
+		var present = prepare(selected, local, remote);
+		var absent = prepare(selected, null, null);
+		var restored = prepare(selected, local, remote);
+		var splitter = new StringSplitter((code, style) -> 1f);
+		assertEquals(present.rows().stream().map(MonitorDisplayModel.Row::metricIds).toList(),
+			absent.rows().stream().map(MonitorDisplayModel.Row::metricIds).toList());
+		assertEquals(present.fit(100_000, splitter).rows().size(), absent.fit(100_000, splitter).rows().size());
+		assertEquals(present.rows().stream().map(row -> row.text().getString()).toList(),
+			restored.rows().stream().map(row -> row.text().getString()).toList());
+		assertEquals(selected.stream().map(Metric::id).sorted().toList(), absent.rows().stream()
+			.flatMap(row -> row.metricIds().stream()).sorted().toList(), "every selected raw identity occurs once, even without any sample");
+		for (var row : absent.rows()) {
+			for (String id : row.metricIds()) assertTrue(row.text().getString().contains(LABELS.field(baseForTest(metric(id))).getString()), id);
+			assertFalse(row.isBlank());
+		}
+		assertTrue(absent.rows().getFirst().text().getString().contains("Ingress Avg N/A Peak N/A Total N/A N N/A"));
+	}
+
+	@Test void summaryMissingSkeletonKeepsOnlyPrincipalFieldsRatherThanExpandingEveryRawSelector() {
+		var model = prepare(Metric.defaults(), null, null);
+		var selected = model.rows().stream().flatMap(row -> row.metricIds().stream()).toList();
+		assertTrue(selected.contains("server.preview.timing.ingress"));
+		assertTrue(selected.contains("shared.memory"));
+		assertFalse(selected.contains("server.preview.timing.capture"));
+		assertFalse(selected.contains("server.preview.queue.pending_entries"));
+		assertFalse(selected.contains("server.preview.sync.budget_charged_bytes"));
+		assertFalse(selected.stream().anyMatch(id -> id.endsWith(".max")));
+		assertTrue(selected.size() < Metric.rawMetrics().size());
+		assertFalse(joinedText(model).contains("Total"));
+		assertFalse(joinedText(model).contains("Peak"));
+		assertEquals(5, model.rows().size());
+	}
+
+	@Test void everyRawScopeStartCannotMoveUpAfterPresentAbsentPresentWithoutIdentityReset() {
+		var splitter = new StringSplitter((code, style) -> 1f);
+		var present = prepare(Metric.rawMetrics(), completeSample(Source.LOCAL), completeSample(Source.SERVER));
+		var absent = prepare(Metric.rawMetrics(), null, null);
+		var first = present.fit(30, splitter, MonitorDisplayModel.Reservations.EMPTY);
+		var missing = absent.fit(30, splitter, first.nextReservations());
+		var restored = present.fit(30, splitter, missing.nextReservations());
+		for (String id : List.of("server.preview.timing.ingress", "server.tracking.timing.ingress", "shared.work.defer_attempts",
+			"local.preview.timing.apply", "local.tracking.timing.apply")) {
+			int initial = indexContainingMetric(first.model(), id), grown = indexContainingMetric(missing.model(), id);
+			assertTrue(grown >= initial, id);
+			assertEquals(grown, indexContainingMetric(restored.model(), id), id + ": later scope moved up after values returned");
+		}
+		assertEquals(missing.model().rows().size(), restored.model().rows().size());
+		assertTrue(restored.model().rows().stream().anyMatch(MonitorDisplayModel.Row::isBlank));
+	}
+	private static int indexContainingMetric(MonitorDisplayModel model, String id) {
+		for (int index = 0; index < model.rows().size(); index++) if (model.rows().get(index).metricIds().contains(id)) return index;
+		throw new AssertionError("missing metric: " + id);
+	}
+
+	private static Metric baseForTest(Metric metric) {
+		return metric.kind() == Metric.Kind.TIMING_MAX ? metric(metric.id().substring(0, metric.id().length() - 4)) : metric;
+	}
+	private static MonitorSample completeSample(Source source) {
+		return sample(completeLane(new Scope(source, Lane.PREVIEW)), completeLane(new Scope(source, Lane.TRACKING)),
+			source != Source.SERVER ? null : new SharedSample(
+				java.util.Arrays.stream(Counter.values()).filter(value -> value.supports(Scope.SHARED)).map(value -> new CounterReading(value, 0, false)).toList(),
+				java.util.Arrays.stream(Gauge.values()).filter(value -> value.supports(Scope.SHARED)).map(value -> new GaugeReading(value, 0)).toList(),
+				java.util.Arrays.stream(Budget.values()).filter(value -> value.supports(Scope.SHARED))
+					.map(value -> new BudgetReading(value, new BudgetUsage(true, 1, 10, 0, 0, 10, 10))).toList(), MemoryUsage.accounted(0, 0, 10)));
+	}
+	private static LaneSample completeLane(Scope scope) {
+		return lane(scope.source(), Objects.requireNonNull(scope.lane()),
+			java.util.Arrays.stream(Phase.values()).filter(value -> value.supports(scope)).map(value -> new Timing(value, new TimingStats(0, 1, 0))).toList(),
+			java.util.Arrays.stream(Counter.values()).filter(value -> value.supports(scope)).map(value -> new CounterReading(value, 0, false)).toList(),
+			java.util.Arrays.stream(Gauge.values()).filter(value -> value.supports(scope)).map(value -> new GaugeReading(value, 0)).toList(),
+			java.util.Arrays.stream(Budget.values()).filter(value -> value.supports(scope))
+				.map(value -> new BudgetReading(value, new BudgetUsage(true, 1, 10, 0, 0, 10, 10))).toList());
+	}
+
+	@Test void titleAndOffRunsSurviveLiteralReorderedGrammarDuplicateTextAndNativeWrapping() {
+		String prefix = "重名";
+		Labels reordered = new FixtureLabels() {
+			@Override public Component prefix(Scope scope) { return Component.literal(prefix); }
+			@Override public Component field(Metric metric) { return Component.literal(prefix); }
+			@Override public Component format(Format format, Object... args) {
+				return switch (format) {
+					case ROW -> Component.literal("[" + text(args[1]) + "] ← " + text(args[0]));
+					case ENTRY -> Component.literal(text(args[1]) + "=" + text(args[0]));
+					default -> super.format(format, args);
+				};
+			}
+			private String text(Object value) { return value instanceof Component component ? component.getString() : value.toString(); }
+		};
+		var splitter = new StringSplitter((code, style) -> code > 127 ? 2f : 1f);
+		for (var status : List.of(ACTIVE, OFF, UNAUTHORIZED)) {
+			var logical = MonitorDisplayModel.prepare(new ClientMonitorState.View(true, metrics("server.preview.requests.received"),
+				status, status, status, null, null), reordered);
+			assertEquals(prefix, toneText(logical, MonitorDisplayModel.Tone.TITLE));
+			var fitted = logical.fit(4, splitter);
+			assertEquals(prefix, toneText(fitted, MonitorDisplayModel.Tone.TITLE));
+			assertEquals(status == OFF ? "OFF" : "", toneText(fitted, MonitorDisplayModel.Tone.OFF));
+			for (var row : fitted.rows()) row.text().visit((style, text) -> {
+				assertNotNull(style.getColor());
+				if (text.contains("[") || text.contains("]") || text.contains("←") || text.contains("="))
+					assertEquals(ChatFormatting.WHITE.getColor(), style.getColor().getValue());
+				return java.util.Optional.empty();
+			}, net.minecraft.network.chat.Style.EMPTY);
+		}
+	}
+
+	@Test void highWaterPadsShrinkingGroupsWithoutRetainingOldValuesAndControlRowsStayCompact() {
+		Labels compact = new FixtureLabels() {
+			@Override public Component prefix(Scope scope) { return Component.literal("S"); }
+			@Override public Component field(Metric metric) { return Component.literal("R"); }
+		};
+		var selected = metrics("server.preview.requests.received", "server.preview.sync.frames_preview", "local.preview.apply.accepted");
+		var splitter = new StringSplitter((code, style) -> 1f);
+		var smallView = highWaterView(selected, 1, ACTIVE);
+		var bigView = highWaterView(selected, Long.MAX_VALUE, ACTIVE);
+		var first = MonitorDisplayModel.prepare(smallView, compact).fit(10, splitter, MonitorDisplayModel.Reservations.EMPTY);
+		var grown = MonitorDisplayModel.prepare(bigView, compact).fit(10, splitter, first.nextReservations());
+		var shrunk = MonitorDisplayModel.prepare(smallView, compact).fit(10, splitter, grown.nextReservations());
+		assertEquals(3, first.model().rows().size());
+		assertEquals(5, grown.model().rows().size());
+		assertEquals(5, shrunk.model().rows().size());
+		assertEquals(grown.model().rows().getLast().id(), shrunk.model().rows().getLast().id());
+		assertTrue(shrunk.model().rows().get(1).isBlank()); assertTrue(shrunk.model().rows().get(2).isBlank());
+		for (var row : shrunk.model().rows().stream().filter(MonitorDisplayModel.Row::isBlank).toList()) {
+			assertEquals("", row.text().getString()); assertTrue(row.segments().isEmpty()); assertTrue(row.metricIds().isEmpty());
+		}
+		assertFalse(joinedText(shrunk.model()).contains(Long.toString(Long.MAX_VALUE)));
+		assertEquals(3, MonitorDisplayModel.prepare(smallView, compact).fit(10, splitter, first.nextReservations()).model().rows().size(),
+			"growing a later immutable reservation does not mutate a previous one");
+		for (var status : List.of(OFF, WAITING, UNAUTHORIZED, UNKNOWN, STALE, UNSUPPORTED, DEPENDENCY_OFF)) {
+			var control = MonitorDisplayModel.prepare(highWaterView(selected, Long.MAX_VALUE, status), compact)
+				.fit(100, splitter, grown.nextReservations());
+			assertEquals(2, control.model().rows().size());
+			assertTrue(control.model().rows().stream().noneMatch(MonitorDisplayModel.Row::isBlank));
+			assertSame(grown.nextReservations(), control.nextReservations());
+			assertFalse(joinedText(control.model()).contains(Long.toString(Long.MAX_VALUE)));
+			assertEquals(5, MonitorDisplayModel.prepare(smallView, compact).fit(10, splitter, control.nextReservations()).model().rows().size());
+		}
+		var hidden = MonitorDisplayModel.prepare(smallView, compact).fit(0, splitter, grown.nextReservations());
+		assertSame(MonitorDisplayModel.EMPTY, hidden.model()); assertSame(grown.nextReservations(), hidden.nextReservations());
+	}
+
+	@Test void absentRequestKeepsTwoReservedLinesAndKnownZeroSyncStartsAtTheSameIndex() {
+		var selected = metrics("server.preview.requests.received", "server.preview.sync.frames_preview");
+		var splitter = new StringSplitter((code, style) -> 1f);
+		var present = MonitorDisplayModel.prepare(requestView(selected, 9_007_199_254_740_993L), new RelationshipLabels())
+			.fit(12, splitter, MonitorDisplayModel.Reservations.EMPTY);
+		var absent = MonitorDisplayModel.prepare(requestView(selected, null), new RelationshipLabels())
+			.fit(12, splitter, present.nextReservations());
+		var restored = MonitorDisplayModel.prepare(requestView(selected, 9_007_199_254_740_993L), new RelationshipLabels())
+			.fit(12, splitter, absent.nextReservations());
+		for (var result : List.of(present, absent, restored)) {
+			assertEquals(3, result.model().rows().size());
+			assertEquals("F=0", result.model().rows().get(2).text().getString());
+			assertEquals(selected.stream().map(Metric::id).toList(), result.model().rows().stream().flatMap(row -> row.metricIds().stream()).toList());
+		}
+		assertEquals("S|R=N/A", absent.model().rows().getFirst().text().getString());
+		assertTrue(absent.model().rows().get(1).isBlank());
+		assertFalse(joinedText(absent.model()).contains("9007199254740993"));
+		assertEquals(withoutWhitespace(joinedText(present.model())), withoutWhitespace(joinedText(restored.model())));
+	}
+
+	@Test void wideIntegerGrowthReservesOneThenThreeThenThreeAtWidthEightAcrossScopes() {
+		var selected = metrics("server.preview.requests.received", "server.preview.sync.frames_preview", "local.preview.apply.accepted");
+		var splitter = new StringSplitter((code, style) -> 1f);
+		var first = MonitorDisplayModel.prepare(highWaterView(selected, 1, ACTIVE), new RelationshipLabels())
+			.fit(8, splitter, MonitorDisplayModel.Reservations.EMPTY);
+		var grown = MonitorDisplayModel.prepare(highWaterView(selected, Long.MAX_VALUE, ACTIVE), new RelationshipLabels())
+			.fit(8, splitter, first.nextReservations());
+		var shrunk = MonitorDisplayModel.prepare(highWaterView(selected, 1, ACTIVE), new RelationshipLabels())
+			.fit(8, splitter, grown.nextReservations());
+		assertEquals(3, first.model().rows().size());
+		assertEquals(5, grown.model().rows().size()); assertEquals(5, shrunk.model().rows().size());
+		assertEquals("F=1", grown.model().rows().get(3).text().getString());
+		assertEquals("F=1", shrunk.model().rows().get(3).text().getString());
+		assertEquals("S|R=1", shrunk.model().rows().get(4).text().getString(), "later scope starts at the grown Y");
+		assertTrue(shrunk.model().rows().get(1).isBlank()); assertTrue(shrunk.model().rows().get(2).isBlank());
+		assertEquals(1, occurrences(joinedText(shrunk.model()), "F=1"));
+	}
+
+	@Test void timingSlotsIndependentlyKeepUndefinedMeanObservedPeakSaturatedTotalsAndRealZero() {
+		var selected = metrics("server.preview.timing.ingress", "server.preview.timing.ingress.max");
+		long @Unmodifiable [] @Unmodifiable [] values = {{12_000_000, 3, 8_000_000}, {12_000_000, Long.MAX_VALUE, 8_000_000},
+			{Long.MAX_VALUE, 2, Long.MAX_VALUE}, {0, 0, 0}, {0, 1, 0}};
+		String @Unmodifiable [] expected = {"Ingress Avg 4ms Peak 8ms Total 12ms N 3",
+			"Ingress Avg N/A Peak 8ms Total 12ms N >=9223372036854775807",
+			"Ingress Avg N/A Peak >=9223372036.85s Total >=9223372036.85s N 2",
+			"Ingress Avg N/A Peak N/A Total 0ms N 0", "Ingress Avg 0ms Peak 0ms Total 0ms N 1"};
+		String @Unmodifiable [] peakExpected = {"8ms", "8ms", ">=9223372036.85s", "N/A", "0ms"};
+		for (int index = 0; index < values.length; index++) {
+			var reading = values[index];
+			var remote = sample(timed(Source.SERVER, Lane.PREVIEW, Phase.INGRESS, reading[0], reading[1], reading[2]), null, null);
+			assertEquals("ServerPrev: " + expected[index], onlyText(prepare(selected, null, remote)));
+			assertEquals("ServerPrev: Ingress Peak " + peakExpected[index], onlyText(prepare(List.of(selected.getLast()), null, remote)));
+		}
+	}
+
+	@NotNullByDefault
+	private static final class RelationshipLabels extends FixtureLabels {
+		@Override public Component prefix(Scope scope) { return Component.literal("S"); }
+		@Override public Component field(Metric metric) { return Component.literal(metric.counter() == Counter.FRAMES_PREVIEW ? "F" : "R"); }
+		@Override public Component format(Format format, Object... args) {
+			return switch (format) {
+				case ROW -> Component.literal(value(args[0]) + "|" + value(args[1]));
+				case ENTRY -> Component.literal(value(args[0]) + "=" + value(args[1]));
+				default -> super.format(format, args);
+			};
+		}
+		private static String value(Object argument) { return argument instanceof Component component ? component.getString() : argument.toString(); }
+	}
+	private static ClientMonitorState.View requestView(List<Metric> selected, @Nullable Long received) {
+		var counters = new ArrayList<>(List.of(new CounterReading(Counter.FRAMES_PREVIEW, 0, false)));
+		if (received != null) counters.add(new CounterReading(Counter.REQUESTS_RECEIVED, received, false));
+		return new ClientMonitorState.View(true, selected, ACTIVE, ACTIVE, ACTIVE, null,
+			sample(lane(Source.SERVER, Lane.PREVIEW, List.of(), counters), null, null));
+	}
+	private static ClientMonitorState.View highWaterView(List<Metric> selected, long received, ClientMonitorState.Status status) {
+		var preview = lane(Source.SERVER, Lane.PREVIEW, List.of(), List.of(new CounterReading(Counter.REQUESTS_RECEIVED, received, false),
+			new CounterReading(Counter.FRAMES_PREVIEW, 1, false)));
+		var local = lane(Source.LOCAL, Lane.PREVIEW, List.of(), List.of(new CounterReading(Counter.ACCEPTED, 1, false)));
+		return new ClientMonitorState.View(true, selected, status, status, status, sample(local, null, null), sample(preview, null, null));
+	}
+
+	@Test void publicThreeArgumentRowKeepsImmutableLegacyConstructionAndBlankContract() {
+		var values = new ArrayList<>(List.of(new MonitorDisplayModel.Segment(Component.literal("legacy"), MonitorDisplayModel.Tone.NORMAL)));
+		var ids = new ArrayList<>(List.of("metric"));
+		var row = new MonitorDisplayModel.Row("legacy", values, ids);
+		values.clear(); ids.clear();
+		assertEquals("legacy", row.text().getString()); assertEquals(List.of("metric"), row.metricIds()); assertFalse(row.isBlank());
+		assertTrue(new MonitorDisplayModel.Row("blank", List.of(), List.of()).isBlank());
 	}
 
 	@NotNullByDefault

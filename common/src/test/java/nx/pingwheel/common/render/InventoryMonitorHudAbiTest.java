@@ -34,6 +34,7 @@ import org.objectweb.asm.ClassReader;
 import org.objectweb.asm.ClassWriter;
 import org.objectweb.asm.Opcodes;
 import org.objectweb.asm.tree.AnnotationNode;
+import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.FieldNode;
@@ -134,6 +135,66 @@ class InventoryMonitorHudAbiTest {
 				&& field.name.equals("SEE_THROUGH"))));
 	}
 
+	@Test void nativeBackgroundUsesTranslucentColorOnlyGuiOverlayAndFinishesBeforeText() throws IOException {
+		var renderTypes = read(RenderType.class);
+		var overlay = renderTypes.methods.stream().filter(method -> method.name.equals("<clinit>")).findFirst().orElseThrow();
+		var states = new HashSet<String>();
+		boolean inOverlay = false;
+		for (var instruction : overlay.instructions) {
+			if (instruction instanceof LdcInsnNode literal && "gui_overlay".equals(literal.cst)) inOverlay = true;
+			if (inOverlay && instruction instanceof FieldInsnNode field) {
+				states.add(field.name);
+				if (field.getOpcode() == Opcodes.PUTSTATIC && field.name.equals("GUI_OVERLAY")) break;
+			}
+		}
+		assertTrue(inOverlay);
+		assertTrue(states.containsAll(List.of("POSITION_COLOR", "QUADS", "TRANSLUCENT_TRANSPARENCY", "NO_DEPTH_TEST", "COLOR_WRITE")));
+		assertFalse(states.contains("LEQUAL_DEPTH_TEST"));
+		var accessor = renderTypes.methods.stream().filter(method -> method.name.equals("guiOverlay")).findFirst().orElseThrow();
+		assertTrue(java.util.stream.StreamSupport.stream(accessor.instructions.spliterator(), false)
+			.anyMatch(instruction -> instruction instanceof FieldInsnNode field && field.name.equals("GUI_OVERLAY")));
+		var painter = readNested("NativePainter");
+		var background = painter.methods.stream().filter(method -> method.name.equals("background")).findFirst().orElseThrow();
+		assertEquals(4, calls(background).stream().filter(call -> call.name.equals("addVertex")).count());
+		assertEquals(4, calls(background).stream().filter(call -> call.name.equals("setColor")).count());
+		assertTrue(calls(background).stream().anyMatch(call -> call.owner.equals("net/minecraft/client/renderer/RenderType") && call.name.equals("guiOverlay")));
+		assertFalse(calls(background).stream().anyMatch(call -> call.name.equals("fill") || call.name.equals("flush")), "no GUI depth-writing fill or per-row flush");
+		var boundary = painter.methods.stream().filter(method -> method.name.equals("backgroundsComplete")).findFirst().orElseThrow();
+		var sequence = calls(boundary);
+		int submitted = -1, disabled = -1;
+		for (int index = 0; index < sequence.size(); index++) {
+			if (sequence.get(index).name.equals("endBatch")) submitted = index;
+			if (sequence.get(index).name.equals("disableDepthTest")) disabled = index;
+		}
+		assertTrue(submitted >= 0 && disabled > submitted, "NO_DEPTH_TEST is not a disable operation; text prerequisites are reasserted after submission");
+		var rows = painter.methods.stream().filter(method -> method.name.equals("row")).findFirst().orElseThrow();
+		var nativeText = calls(rows).stream().filter(call -> call.name.equals("drawInBatch")).findFirst().orElseThrow();
+		var light = previousOpcode(nativeText);
+		assertInstanceOf(LdcInsnNode.class, light);
+		assertEquals(15728880, ((LdcInsnNode) light).cst);
+		assertEquals(Opcodes.ICONST_0, previousOpcode(light).getOpcode(),
+			"Font backgroundColor remains zero: one explicit background, not shadow/main double backgrounds");
+		assertFalse(calls(rows).stream().anyMatch(call -> call.name.equals("width")), "paint cannot measure glyphs");
+	}
+
+	@Test void productionDrawHasOnlyThePreparedContractAndPaintCannotRefitOrMeasureGlyphs() throws IOException {
+		var hud = read(InventoryMonitorHud.class);
+		var nativeDraws = hud.methods.stream().filter(method -> method.name.equals("draw") && (method.access & Opcodes.ACC_PUBLIC) != 0).toList();
+		assertEquals(1, nativeDraws.size());
+		assertEquals("(Lnet/minecraft/client/gui/GuiGraphics;Lnet/minecraft/client/gui/Font;Lnx/pingwheel/common/render/InventoryMonitorHud$Prepared;Lnx/pingwheel/common/render/InventoryMonitorHud$Viewport;)V",
+			nativeDraws.getFirst().desc, "no lazy model-based production fallback");
+		for (var owner : List.of(hud, readNested("NativePainter"))) {
+			for (var method : owner.methods) {
+				if (!List.of("draw", "paint", "row", "background", "backgroundsComplete").contains(method.name)) continue;
+				for (var call : calls(method)) {
+					assertFalse(call.owner.equals("net/minecraft/client/gui/Font") && call.name.equals("width"));
+					assertFalse(call.owner.equals("nx/pingwheel/common/monitor/client/MonitorDisplayModel")
+						&& List.of("fit", "prepare").contains(call.name));
+				}
+			}
+		}
+	}
+
 	@Test void resourceReloadInstallsNewLanguageIdentityAndClientManifestsKeepTheHookOffDedicatedPaths() throws IOException {
 		var reload = read(LanguageManager.class).methods.stream().filter(method -> method.name.equals("onResourceManagerReload")).findFirst().orElseThrow();
 		assertTrue(calls(reload).stream().anyMatch(call -> call.owner.equals("net/minecraft/client/resources/language/ClientLanguage") && call.name.equals("loadFrom")));
@@ -166,16 +227,19 @@ class InventoryMonitorHudAbiTest {
 		probe.getField("minecraft").set(instance, game);
 		probe.getField("Game").set(null, game);
 		probe.getField("monitorViewport").set(null, new InventoryMonitorHud.Viewport(427, 240));
-		var prepared = MonitorDisplayModel.prepare(new ClientMonitorState.View(true, Metric.defaults(), ClientMonitorState.Status.OFF,
+		var model = MonitorDisplayModel.prepare(new ClientMonitorState.View(true, Metric.defaults(), ClientMonitorState.Status.OFF,
 			ClientMonitorState.Status.OFF, ClientMonitorState.Status.DEPENDENCY_OFF, null, null), MonitorHudLabels.DEFAULT);
-		assertFalse(prepared.rows().isEmpty());
+		var prepared = InventoryMonitorHud.prepare(model, new Font(ignored -> { throw new AssertionError("width override must not request glyphs"); }, false) {
+			@Override public int width(net.minecraft.util.FormattedCharSequence text) { return 1; }
+		});
+		assertFalse(prepared.model().rows().isEmpty());
 		var hook = probe.getMethod("pingforit$renderMonitorBelowGui", GuiGraphics.class, DeltaTracker.class, boolean.class);
 		for (int mask = 0; mask < 64; mask++) {
 			boolean loaded = (mask & 1) != 0, renderLevel = (mask & 2) != 0, hasWorld = (mask & 4) != 0;
 			boolean hasPlayer = (mask & 8) != 0, hideGui = (mask & 16) != 0, hasRows = (mask & 32) != 0;
 			ready.setBoolean(game, loaded); game.level = hasWorld ? world : null; game.player = hasPlayer ? player : null;
 			game.options.hideGui = hideGui;
-			probe.getField("monitorModel").set(null, hasRows ? prepared : MonitorDisplayModel.EMPTY);
+			probe.getField("monitorPrepared").set(null, hasRows ? prepared : InventoryMonitorHud.Prepared.EMPTY);
 			NativeDraw.calls = 0;
 			assertSame(graphics, hook.invoke(instance, graphics, DeltaTracker.ZERO, renderLevel));
 			assertEquals(loaded && renderLevel && hasWorld && hasPlayer && !hideGui && hasRows ? 1 : 0, NativeDraw.calls,
@@ -187,7 +251,7 @@ class InventoryMonitorHudAbiTest {
 	@NotNullByDefault
 	public static final class NativeDraw {
 		static int calls;
-		public static void draw(GuiGraphics graphics, Font font, MonitorDisplayModel model, InventoryMonitorHud.Viewport viewport) { calls++; }
+		public static void draw(GuiGraphics graphics, Font font, InventoryMonitorHud.Prepared prepared, InventoryMonitorHud.Viewport viewport) { calls++; }
 	}
 
 	private static Class<?> executableGates() throws IOException, IllegalAccessException {
@@ -196,7 +260,7 @@ class InventoryMonitorHudAbiTest {
 		node.version = Opcodes.V21; node.access = Opcodes.ACC_PUBLIC; node.name = name; node.superName = "java/lang/Object";
 		node.fields.add(new FieldNode(Opcodes.ACC_PUBLIC, "minecraft", "Lnet/minecraft/client/Minecraft;", null, null));
 		var common = read(CommonClient.class);
-		for (var field : common.fields) if (List.of("Game", "monitorModel", "monitorViewport").contains(field.name))
+		for (var field : common.fields) if (List.of("Game", "monitorPrepared", "monitorViewport").contains(field.name))
 			node.fields.add(new FieldNode(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, field.name, field.desc, null, null));
 		var constructor = new MethodNode(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null);
 		constructor.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
@@ -236,10 +300,24 @@ class InventoryMonitorHudAbiTest {
 		return node;
 	}
 
+	private static ClassNode readNested(String name) throws IOException {
+		var node = new ClassNode();
+		try (var bytes = InventoryMonitorHud.class.getResourceAsStream("InventoryMonitorHud$" + name + ".class")) {
+			assertNotNull(bytes); new ClassReader(bytes).accept(node, 0);
+		}
+		return node;
+	}
+
 	private static List<MethodInsnNode> calls(MethodNode method) {
 		var calls = new ArrayList<MethodInsnNode>();
 		for (var instruction : method.instructions) if (instruction instanceof MethodInsnNode call) calls.add(call);
 		return calls;
+	}
+
+	private static AbstractInsnNode previousOpcode(AbstractInsnNode instruction) {
+		@Nullable AbstractInsnNode previous = instruction.getPrevious();
+		while (previous != null && previous.getOpcode() < 0) previous = previous.getPrevious();
+		return java.util.Objects.requireNonNull(previous);
 	}
 
 	private static List<AnnotationNode> annotations(MethodNode method) {

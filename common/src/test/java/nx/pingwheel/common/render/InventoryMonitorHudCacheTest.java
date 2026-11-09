@@ -9,6 +9,7 @@ import net.minecraft.server.packs.resources.MultiPackResourceManager;
 import net.minecraft.util.FormattedCharSequence;
 import nx.pingwheel.common.monitor.MonitorSchema.Metric;
 import nx.pingwheel.common.monitor.client.ClientMonitorState;
+import nx.pingwheel.common.monitor.client.MonitorLayoutState;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
@@ -17,27 +18,27 @@ import static org.junit.jupiter.api.Assertions.*;
 @NotNullByDefault
 class InventoryMonitorHudCacheTest {
 
-	@Test void retainedKeyInvalidatesViewWidthScaleFontLanguageAndSameFontGlyphOptions() {
-		var key = new InventoryMonitorHud.PreparationKey();
+	@Test void retainedLayoutInvalidatesViewWidthFontLanguageAndSameFontGlyphOptions() {
+		var key = new MonitorLayoutState();
 		var view = view();
 		var font = font();
 		var language = new TestLanguage();
-		assertTrue(key.update(view, 427, 6, font, language, false, false));
-		assertFalse(key.update(view, 427, 6, font, language, false, false));
-		assertTrue(key.update(view, 320, 6, font, language, false, false));
-		assertTrue(key.update(view, 320, 5, font, language, false, false));
-		assertTrue(key.update(view, 320, 5, font, language, true, false), "Force Unicode mutates glyph metrics without replacing Font");
-		assertFalse(key.update(view, 320, 5, font, language, true, false));
-		assertTrue(key.update(view, 320, 5, font, language, true, true), "Japanese variants also mutate the retained Font");
+		assertTrue(key.update(view, 6, 427, font, language, false, false));
+		assertFalse(key.update(view, 6, 427, font, language, false, false));
+		assertTrue(key.update(view, 6, 320, font, language, false, false));
+		assertFalse(key.update(view, 6, 320, font, language, false, false), "pure scale/height changes are not layout identities");
+		assertTrue(key.update(view, 6, 320, font, language, true, false), "Force Unicode mutates glyph metrics without replacing Font");
+		assertFalse(key.update(view, 6, 320, font, language, true, false));
+		assertTrue(key.update(view, 6, 320, font, language, true, true), "Japanese variants also mutate the retained Font");
 		font = font();
-		assertTrue(key.update(view, 320, 5, font, language, true, true));
+		assertTrue(key.update(view, 6, 320, font, language, true, true));
 		language = new TestLanguage();
-		assertTrue(key.update(view, 320, 5, font, language, true, true), "same-locale resource reload installs a new Language");
+		assertTrue(key.update(view, 6, 320, font, language, true, true), "same-locale resource reload installs a new Language");
 		view = view();
-		assertTrue(key.update(view, 320, 5, font, language, true, true), "new immutable view rebuilds even if record-equal");
-		assertFalse(key.update(view, 320, 5, font, language, true, true));
-		key.clear();
-		assertTrue(key.update(view, 320, 5, font, language, true, true), "disable/disconnect cannot retain prepared identity");
+		assertTrue(key.update(view, 6, 320, font, language, true, true), "new immutable view rebuilds even if record-equal");
+		assertFalse(key.update(view, 6, 320, font, language, true, true));
+		key.reset();
+		assertTrue(key.update(view, 6, 320, font, language, true, true), "disconnect cannot retain prepared identity");
 	}
 
 	private static ClientMonitorState.View view() {
@@ -53,17 +54,17 @@ class InventoryMonitorHudCacheTest {
 			var manager = new LanguageManager("en_us", ignored -> {});
 			manager.setSelected("en_us");
 			var font = font();
-			var key = new InventoryMonitorHud.PreparationKey();
+			var key = new MonitorLayoutState();
 			var view = view();
 			manager.onResourceManagerReload(resources);
 			Language first = Language.getInstance();
-			assertTrue(key.update(view, 427, 6, font, first, false, false));
-			assertFalse(key.update(view, 427, 6, font, first, false, false));
+			assertTrue(key.update(view, 6, 427, font, first, false, false));
+			assertFalse(key.update(view, 6, 427, font, first, false, false));
 			manager.onResourceManagerReload(resources);
 			Language second = Language.getInstance();
 			assertNotSame(first, second);
 			assertEquals("en_us", manager.getSelected());
-			assertTrue(key.update(view, 427, 6, font, second, false, false));
+			assertTrue(key.update(view, 6, 427, font, second, false, false));
 		} finally { Language.inject(previous); i18nLanguage.invoke(null, previous); }
 	}
 
