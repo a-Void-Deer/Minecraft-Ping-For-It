@@ -397,9 +397,13 @@ dedicated model, persistence, transaction, widget and strict-wire assertions:
   selected logging profile is published before the attempt.
 - `InventoryPerformanceOptionTest` constructs both actual full-width native
   toggle factories, checks help presence, exactly-own-leaf dirty/revert and stale
-  callbacks after revocation/disconnect. Catalog and eight-locale resource
-  fixtures cover placement and Off/On, current authority and next-scan help;
-  they do not establish assembled live tooltip delivery or translation quality.
+  callbacks after revocation/disconnect. Its tooltip assertion is presence only;
+  placement is covered by `SettingsCategoryCatalogTest`, and the eight-locale
+  three-line and placeholder checks by `InventorySettingsLocalizationTest`, both
+  inventoried under
+  [Settings-screen navigation, catalog, layout and localization](#settings-screen-navigation-catalog-layout-and-localization).
+  These checks do not establish assembled live tooltip delivery or translation
+  quality.
 
 No saved execution acceptance record yet covers these added logging/diagnostic
 coverage items; that evidence remains pending. The
@@ -447,10 +451,10 @@ It checks that dropping Alt after a `DEBUG` selection leaves the configuration
 and caption unchanged while the next activation exits to `NORMAL`, that the
 client row publishes immediately and the server row edits only the draft
 without publishing the server runtime, and that navigation and resize do not
-carry the temporary Alt candidate. It also covers native tooltip narration
-containing only scope, redacted `NORMAL` versus unredacted detail, and apply
-timing, without naming `DEBUG` or hinting at the activation gesture, plus a
-read-only server viewer seeing `DEBUG` without editing.
+carry the temporary Alt candidate. It also covers both mounted rows exposing
+nonblank native help while retaining their `Logging Detail` and
+`Server Logging Detail` labels, with no `DEBUG`, Alt, Shift or unlock hint, plus
+a read-only server viewer seeing `DEBUG` without editing.
 
 `SettingsCategoryCatalogTest` verifies the logging controls' Debug-category
 placement and the approved catalogue totals: 78 entries, 76 value controls, and
@@ -781,27 +785,30 @@ below describe source-reviewed coverage rather than a recorded full-suite run:
   settings, all category entrances, server-status, entity-block-mode, and
   target-gone resource keys, required format placeholders, category entrance
   ellipses, and the exact local feedback prefix. It checks the active client-file
-  action's restart-required help, current transparent-selection label and
-  tooltip with retired selection resources absent, distinct localized title
-  segments, independent wheel/target opacity labels, and the complete
-  spatial-selector resource set with numeric/boolean and unit placeholder
-  contracts. Retired timeout and obsolete inventory-sensitivity resources stay
-  excluded. These are resource expectations, not a guarantee of translation
-  quality. The fixture does not assemble or render screen labels;
+  action's restart help through a locale-specific restart stem rather than a
+  fixed sentence, the current transparent-selection label and tooltip with
+  retired selection resources absent, distinct localized title segments,
+  independent wheel/target opacity labels, and the complete spatial-selector
+  resource set with numeric/boolean and unit placeholder contracts. Retired
+  timeout and obsolete inventory-sensitivity resources stay excluded. These are
+  resource expectations, not a guarantee of translation quality. The fixture
+  does not assemble or render screen labels;
 - `SettingsLocalizationCoverageTest` derives the 76 value controls' required
   nonblank labels and generic help from the production catalog/key builder. It
   checks all category descriptions and section headings, scope/navigation/action
   and presentation-editor help, used enum/state value labels, units, and visible
   format resources across all eight bundled locales. Eleven dynamic enum-mode
   tooltips have explicit signatures, including two string arguments for HOLD
-  help. Label, unit, name/value, truncation and title templates retain their
-  expected argument slots and types; argument-bearing templates are validated
-  with a formatter. Zero-argument prose accepts bare or escaped literal percent
-  signs but rejects consuming placeholders, with headless translatable-component
-  fixtures distinguishing literal text from strict argument templates. The
-  locale reader rejects duplicate JSON keys. This is resource/format coverage,
-  not semantic translation review, complete tooltip assembly, actual font fit,
-  hover/focus delivery or tooltip wrapping;
+  help; the Reset template also requires two string arguments, and its reset/all
+  fragments are checked as literal zero-argument resources. Label, unit,
+  name/value, truncation and title templates retain their expected argument slots
+  and types; argument-bearing templates are validated with a formatter.
+  Zero-argument prose accepts bare or escaped literal percent signs but rejects
+  consuming placeholders, with headless translatable-component fixtures
+  distinguishing literal text from strict argument templates. The locale reader
+  rejects duplicate JSON keys. This is resource/format coverage, not semantic
+  translation review, complete tooltip assembly, native color styling, actual
+  font fit, hover/focus delivery or tooltip wrapping;
 - `ConfigEnumLocalizationTest` covers locale-independent resource-key generation
   under ROOT, US and Turkish (`tr-TR`) JVM defaults. Every `PlayerInfoMode`,
   `TeamColorMode` and `ChannelMode` value label, and every player/team dynamic
@@ -815,8 +822,9 @@ below describe source-reviewed coverage rather than a recorded full-suite run:
   the inventory settings label/tooltip key alignment and placeholder rules, the
   performance category entrance, the inventory group headings, the shared
   name/value label,
-  numeric tooltip lines with localized decrease/increase prefixes and separate
-  four-line boolean help for the Tracking partitions,
+  numeric tooltip lines with localized decrease/increase prefixes and three-line
+  boolean help for the Tracking partitions with a nonblank leading line,
+  localized Off/On prefixes and no placeholders,
   distinct zero labels, removal of obsolete control resources, and the two size
   sliders' physical-KiB labels and adjustment notice; it does not render or
   assemble screen labels or establish translation semantic accuracy or live
@@ -842,15 +850,14 @@ below describe source-reviewed coverage rather than a recorded full-suite run:
 - `SpatialSelectorSettingsLocalizationTest` covers the eight bundled locale
   files for the gesture shortcut, minimum wait, content-intent setting and root
   marker-removal label: gesture labels and tooltips are nonblank, the minimum
-  wait label has exactly one value placeholder, both gesture tooltips state
-  next-hold application, and the confirmed Chinese gesture-toggle label is
-  pinned; for content intent and marker removal, the
-  label and tooltip exist non-blank without placeholders and differ, every
-  locale's tooltip states next-hold application, only the expected two
-  content-intent keys exist with no stale variants, and the stable root cancel
-  key keeps its identity while every locale states marker removal, with the
-  confirmed Chinese content-intent label and the English removal word pinned
-  exactly; it does not render or assemble screen labels; and
+  wait label has exactly one value placeholder, the timing tooltip has no
+  placeholder, and the confirmed Chinese gesture-toggle label is pinned; for
+  content intent and marker removal, the
+  label and tooltip exist non-blank without placeholders and differ, only the
+  expected two content-intent keys exist with no stale variants, and the stable
+  root cancel key keeps its identity while every locale states marker removal,
+  with the confirmed Chinese content-intent label and the English removal word
+  pinned exactly; it does not render or assemble screen labels; and
 - `PresentationSettingsLocalizationTest` covers the eight bundled locale files,
   every presentation key present, non-blank, and with an identical key set
   across them, the approved English presentation labels, key placeholders,
@@ -949,9 +956,9 @@ or wrapping.
   coverage above, with execution evidence scoped separately; the game render/input
   lifecycle remains unexercised. Live GUI-scale/window resizing,
   footer traversal, text-entry dispatch, actual font-driven pair stacking,
-  rendered heading clipping/help, hover/keyboard-focus tooltip delivery and wrapping,
-  translation accuracy, and multiplayer read-only permission transitions remain
-  pending in the
+  rendered heading clipping/help, hover/keyboard-focus tooltip delivery, wrapping
+  and color styling, translation accuracy without native-speaker review, and
+  multiplayer read-only permission transitions remain pending in the
   [manual matrix](manual-integration.md#settings-and-server-performance);
 - the server Performance factory, model, handler, codec and localization seams
   [passed the combined-tree run](#server-performance-contract-verification), but
