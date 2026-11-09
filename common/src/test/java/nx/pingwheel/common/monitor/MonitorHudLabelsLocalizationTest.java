@@ -557,9 +557,10 @@ class MonitorHudLabelsLocalizationTest {
 							assertFalse(lines.isEmpty(), locale);
 							assertEquals(logical.metricIds(), lines.getFirst().metricIds(), locale);
 							assertTrue(lines.stream().skip(1).allMatch(row -> row.metricIds().isEmpty()), locale);
-							// Native wrapping may consume a break-space, but never a label, number or punctuation.
-							assertEquals(withoutWhitespace(logical.text().getString()), withoutWhitespace(String.join("",
-								lines.stream().map(row -> row.text().getString()).toList())), locale);
+							// Fixed group breaks may consume one separator per boundary; native
+							// wrapping may consume a break-space, never a label, number or other punctuation.
+							assertGroupedWrapPreservesText(logical.text().getString(), String.join("",
+								lines.stream().map(row -> row.text().getString()).toList()), locale);
 							assertEquals(offText(logical), String.join("", lines.stream().map(MonitorHudLabelsLocalizationTest::offText).toList()), locale);
 							for (Row line : lines) {
 								assertTrue(splitter.stringWidth(line.text()) <= width, locale + ": right overflow " + line.text().getString());
@@ -567,6 +568,38 @@ class MonitorHudLabelsLocalizationTest {
 							}
 						}
 					}
+				}
+			}
+		} finally {
+			Language.inject(previous);
+		}
+	}
+
+	@Test
+	void fixedGroupBoundariesDoNotDependOnLocalizedLabels() throws IOException {
+		Language previous = Language.getInstance();
+		try {
+			int expectedGroups = -1;
+			for (String locale : LOCALES) {
+				JsonObject root = read(locale);
+				Language.inject(new BundledLanguage(root));
+				var model = MonitorDisplayModel.prepare(activeView(Metric.defaults()), MonitorHudLabels.DEFAULT);
+				assertEquals(5, model.rows().size(), locale + ": prepare keeps five logical rows");
+				var fitted = model.fit(100_000, new StringSplitter((code, style) -> 1f));
+				assertTrue(fitted.rows().size() > model.rows().size(), locale);
+				if (expectedGroups < 0) expectedGroups = fitted.rows().size();
+				else assertEquals(expectedGroups, fitted.rows().size(), locale + ": localized text changed fixed groups");
+				for (Row logical : model.rows()) {
+					@Unmodifiable List<Row> lines = fitted.rows().stream()
+						.filter(row -> row.id().startsWith(logical.id() + ".line.")).toList();
+					assertFalse(lines.isEmpty(), locale);
+					String text = logical.text().getString();
+					String prefix = text.substring(0, text.indexOf(": ")) + ": ";
+					assertTrue(lines.getFirst().text().getString().startsWith(prefix), locale + ": missing scope prefix");
+					assertTrue(lines.stream().skip(1).noneMatch(row -> row.text().getString().startsWith(prefix)),
+						locale + ": repeated scope prefix");
+					assertGroupedWrapPreservesText(text, String.join("",
+						lines.stream().map(row -> row.text().getString()).toList()), locale);
 				}
 			}
 		} finally {
@@ -631,6 +664,25 @@ class MonitorHudLabelsLocalizationTest {
 	private static Metric metric(String id) { return Objects.requireNonNull(Metric.byId(id), id); }
 	private static long occurrences(String text, String token) { return (text.length() - text.replace(token, "").length()) / token.length(); }
 	private static String withoutWhitespace(String text) { return text.replaceAll("\\s+", ""); }
+	/** Visual text may omit a field separator at a fixed group boundary, never other content. */
+	private static void assertGroupedWrapPreservesText(String logical, String visual, String locale) {
+		String expected = withoutWhitespace(logical);
+		String actual = withoutWhitespace(visual);
+		int source = 0;
+		for (int index = 0; index < actual.length(); index++) {
+			char value = actual.charAt(index);
+			while (source < expected.length() && expected.charAt(source) != value) {
+				assertEquals(';', expected.charAt(source), () -> locale + ": wrapped text lost non-separator content");
+				source++;
+			}
+			assertTrue(source < expected.length(), () -> locale + ": wrapped text gained or reordered content");
+			source++;
+		}
+		while (source < expected.length()) {
+			assertEquals(';', expected.charAt(source), () -> locale + ": wrapped text lost non-separator content");
+			source++;
+		}
+	}
 	private static @Unmodifiable List<String> cells(Row row) {
 		String text = row.text().getString();
 		assertTrue(text.contains(": "), text);

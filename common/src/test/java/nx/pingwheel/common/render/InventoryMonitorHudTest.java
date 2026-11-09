@@ -7,8 +7,7 @@ import net.minecraft.client.StringSplitter;
 import net.minecraft.network.chat.Component;
 import nx.pingwheel.common.monitor.MonitorHudLabels;
 import nx.pingwheel.common.monitor.MonitorHudLabels.Labels;
-import nx.pingwheel.common.monitor.MonitorSchema.Scope;
-import nx.pingwheel.common.monitor.MonitorSchema.Metric;
+import nx.pingwheel.common.monitor.MonitorSchema.*;
 import nx.pingwheel.common.monitor.client.ClientMonitorState;
 import nx.pingwheel.common.monitor.client.MonitorDisplayModel;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -25,6 +24,15 @@ class InventoryMonitorHudTest {
 			var fitted = model.fit(InventoryMonitorHud.availableTextWidth(viewport.width()), splitter());
 			assertAllRowsPainted(fitted, viewport);
 		}
+	}
+
+	@Test void fixedSemanticGroupsAreAllPaintedAtTheSameMarginIncludingBelowTheViewport() {
+		var model = activeModel();
+		var viewport = new InventoryMonitorHud.Viewport(427, 1);
+		var fitted = model.fit(InventoryMonitorHud.availableTextWidth(viewport.width()), splitter());
+		assertTrue(fitted.rows().size() > model.rows().size(), "fixed groups start new visual rows");
+		assertTrue(fitted.rows().size() > 5, "the reference viewport is not squeezed back into five logical rows");
+		assertAllRowsPainted(fitted, viewport);
 	}
 
 	@Test void heightOnlyResizeNeverReanchorsOrDropsRowsIncludingRowsBelowTheFramebuffer() {
@@ -103,6 +111,43 @@ class InventoryMonitorHudTest {
 		var placed = new ArrayList<Placed>();
 		InventoryMonitorHud.paint(model, viewport, 9, (row, x, y, width) -> placed.add(new Placed(row, x, y, width)));
 		return placed;
+	}
+
+	private static MonitorDisplayModel activeModel() {
+		var remote = new MonitorSample(1, 1, 1, 10, 14, 5_000_000_000L, serverLane(Lane.PREVIEW),
+			serverLane(Lane.TRACKING), new SharedSample(List.of(),
+				List.of(new GaugeReading(Gauge.CONSUMERS, 4)), List.of(
+					new BudgetReading(Budget.PHYSICAL_SLOTS, new BudgetUsage(true, 1, 512, 256, 0, 256, 256)),
+					new BudgetReading(Budget.PROCESSING_CHARGE, new BudgetUsage(true, 2, 12, 3, 0, 9, 9))),
+				MemoryUsage.accounted(96 * 1024 * 1024, 32 * 1024 * 1024, 512 * 1024 * 1024)));
+		var local = new MonitorSample(1, 1, 1, 10, 14, 2_000_000_000L, localLane(Lane.PREVIEW),
+			localLane(Lane.TRACKING), null);
+		return MonitorDisplayModel.prepare(new ClientMonitorState.View(true, Metric.defaults(),
+			ClientMonitorState.Status.ACTIVE, ClientMonitorState.Status.ACTIVE, ClientMonitorState.Status.ACTIVE, local, remote),
+			MonitorHudLabels.DEFAULT);
+	}
+
+	private static LaneSample serverLane(Lane lane) {
+		boolean preview = lane == Lane.PREVIEW;
+		return new LaneSample(Source.SERVER, lane, List.of(new Timing(Phase.INGRESS,
+				new TimingStats(preview ? 12_000_000 : 18_000_000, 3, preview ? 8_000_000 : 10_000_000))),
+			List.of(new CounterReading(Counter.REQUESTS_RECEIVED, preview ? 12 : 7, false),
+				new CounterReading(Counter.REQUESTS_ADMITTED, preview ? 9 : 5, false),
+				new CounterReading(Counter.HANDOFF_BYTES, preview ? 20_480 : 40_960, false),
+				new CounterReading(Counter.UNOBSERVED_HANDOFF_FRAMES, preview ? 0 : 1, false)),
+			List.of(new GaugeReading(Gauge.REQUESTS_OPEN, preview ? 2 : 0)),
+			List.of(new BudgetReading(Budget.LOGICAL_SLOTS, new BudgetUsage(true, 1, 64, 7, 0, 57, 57)),
+				new BudgetReading(Budget.WIRE_BYTES, new BudgetUsage(true, 1, 20_480, 10_240, 0, 10_240, 10_240))));
+	}
+
+	private static LaneSample localLane(Lane lane) {
+		boolean preview = lane == Lane.PREVIEW;
+		return new LaneSample(Source.LOCAL, lane, List.of(new Timing(Phase.APPLY,
+				new TimingStats(preview ? 2_000_000 : 9_000_000, preview ? 2 : 3, preview ? 1_500_000 : 4_000_000))),
+			List.of(new CounterReading(Counter.ACCEPTED, preview ? 8 : 6, false),
+				new CounterReading(Counter.REJECTED, preview ? 1 : 2, false),
+				new CounterReading(preview ? Counter.FRAMES_PREVIEW : Counter.FRAMES_SNAPSHOT, preview ? 4 : 6, false)),
+			List.of(new GaugeReading(Gauge.BUFFER_ESTIMATED_BYTES, preview ? 2560 : 10_240)), List.of());
 	}
 
 	private static MonitorDisplayModel model() {

@@ -4,7 +4,9 @@ import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Function;
@@ -76,10 +78,15 @@ public final class MonitorDisplayModel {
 		private final String id;
 		private final @Unmodifiable List<Segment> segments;
 		private final @Unmodifiable List<String> metricIds;
+		private final @Unmodifiable List<Component> groups;
 		private final Component text;
 
 		private Row(String id, List<Segment> segments, List<String> metricIds) {
+			this(id, segments, metricIds, List.of());
+		}
+		private Row(String id, List<Segment> segments, List<String> metricIds, List<Component> groups) {
 			this.id = id; this.segments = List.copyOf(segments); this.metricIds = List.copyOf(metricIds);
+			this.groups = List.copyOf(groups);
 			@Unmodifiable List<Component> leaves = segments.stream().map(segment -> (Component) new CachedText(segment.text().getString(),
 				segment.tone() == Tone.OFF ? Style.EMPTY.withColor(ChatFormatting.RED) : Style.EMPTY, List.of())).toList();
 			text = new CachedText("", Style.EMPTY, leaves);
@@ -125,18 +132,36 @@ public final class MonitorDisplayModel {
 		if (maximumWidth < 1 || rows.isEmpty()) return EMPTY;
 		List<Row> fitted = new ArrayList<>();
 		for (Row row : rows) {
-			List<FormattedText> lines = splitter.splitLines(row.text(), maximumWidth, Style.EMPTY);
-			for (int lineIndex = 0; lineIndex < lines.size(); lineIndex++) {
-				List<Segment> segments = new ArrayList<>();
-				lines.get(lineIndex).visit((style, text) -> {
-					segments.add(new Segment(Component.literal(text), ChatFormatting.RED.getColor().equals(
-						style.getColor() == null ? null : style.getColor().getValue()) ? Tone.OFF : Tone.NORMAL));
-					return java.util.Optional.empty();
-				}, Style.EMPTY);
-				fitted.add(new Row(row.id() + ".line." + lineIndex, segments, lineIndex == 0 ? row.metricIds() : List.of()));
+			if (row.groups.isEmpty()) {
+				appendLines(fitted, row, row.text(), maximumWidth, splitter, 0);
+				continue;
+			}
+			int lineIndex = 0;
+			for (Component group : row.groups) {
+				lineIndex = appendLines(fitted, row, group, maximumWidth, splitter, lineIndex);
 			}
 		}
 		return new MonitorDisplayModel(fitted);
+	}
+
+	/**
+	 * A fixed semantic group starts on its own visual line. Native glyph wrapping
+	 * remains the inner fallback and may push later groups down, never merge them.
+	 */
+	private static int appendLines(List<Row> fitted, Row row, Component source, int maximumWidth,
+		StringSplitter splitter, int firstLineIndex) {
+		List<FormattedText> lines = splitter.splitLines(source, maximumWidth, Style.EMPTY);
+		for (int index = 0; index < lines.size(); index++) {
+			List<Segment> segments = new ArrayList<>();
+			lines.get(index).visit((style, text) -> {
+				segments.add(new Segment(Component.literal(text), ChatFormatting.RED.getColor().equals(
+					style.getColor() == null ? null : style.getColor().getValue()) ? Tone.OFF : Tone.NORMAL));
+				return java.util.Optional.empty();
+			}, Style.EMPTY);
+			int lineIndex = firstLineIndex + index;
+			fitted.add(new Row(row.id() + ".line." + lineIndex, segments, lineIndex == 0 ? row.metricIds() : List.of()));
+		}
+		return firstLineIndex + lines.size();
 	}
 
 	/** Compose selected fields once per endpoint/lane; neither selection nor sampling is changed. */
@@ -162,7 +187,7 @@ public final class MonitorDisplayModel {
 				rows.add(statusRow(scope, status, labels));
 				continue;
 			}
-			List<Component> fields = new ArrayList<>();
+			List<GroupedField> fields = new ArrayList<>();
 			List<String> ids = new ArrayList<>();
 			boolean missing = false;
 			for (Metric metric : metrics) {
@@ -172,14 +197,13 @@ public final class MonitorDisplayModel {
 				@Nullable Metric peak = base.kind() == Metric.Kind.TIMING ? Metric.byId(base.id() + ".max") : null;
 				boolean showPeak = peak != null && displayed.contains(peak);
 				Field field = field(base, sample(view, scope), main, showPeak, view.selected().contains(base), rates.contains(base), labels, true);
-				if (field.text() != null) fields.add(field.text());
+				if (field.text() != null) fields.add(new GroupedField(groupKey(base), field.text()));
 				missing |= field.missing();
 				if (main) ids.add(base.id());
 				if (showPeak) ids.add(Objects.requireNonNull(peak).id());
 			}
-			if (missing || fields.isEmpty()) fields.add(labels.unavailable());
-			rows.add(normalRow("scope." + scope.id(), labels.format(Format.ROW, labels.prefix(scope),
-				join(fields, labels, Format.FIELD_SEPARATOR)), ids));
+			@Unmodifiable List<Component> groups = groupTexts(scope, fields, missing || fields.isEmpty(), labels);
+			rows.add(groupedRow("scope." + scope.id(), groups, ids, labels));
 		}
 		return new MonitorDisplayModel(rows);
 	}
@@ -216,6 +240,60 @@ public final class MonitorDisplayModel {
 		return true;
 	}
 
+	@NotNullByDefault
+	private enum GroupKind { TIMING, REQUESTS, BUDGET, MEMORY, SYNC }
+
+	@NotNullByDefault
+	private record GroupKey(GroupKind kind, String id) {}
+
+	@NotNullByDefault
+	private record GroupedField(GroupKey key, Component text) {}
+
+	private static final GroupKey REQUESTS_GROUP = new GroupKey(GroupKind.REQUESTS, "");
+	private static final GroupKey MEMORY_GROUP = new GroupKey(GroupKind.MEMORY, "");
+	private static final GroupKey SYNC_GROUP = new GroupKey(GroupKind.SYNC, "");
+
+	/**
+	 * Fixed semantic identity, not display width or localized prose: a phase is
+	 * one group, each budget one group, and the non-sync work, memory and sync
+	 * classes each one group.
+	 */
+	private static GroupKey groupKey(Metric metric) {
+		return switch (metric.kind()) {
+			case TIMING -> new GroupKey(GroupKind.TIMING, metric.id());
+			case BUDGET -> new GroupKey(GroupKind.BUDGET, metric.id());
+			case MEMORY -> MEMORY_GROUP;
+			case GAUGE, COUNTER -> switch (category(metric)) {
+				case 1 -> REQUESTS_GROUP;
+				case 3 -> MEMORY_GROUP;
+				case 4 -> SYNC_GROUP;
+				default -> throw new IllegalArgumentException("unexpected HUD group category: " + metric.id());
+			};
+			case TIMING_MAX, SUMMARY -> throw new IllegalArgumentException("field requires a raw base metric");
+		};
+	}
+
+	/** Group metadata stays private; Row.text() remains the complete logical text. */
+	private static @Unmodifiable List<Component> groupTexts(Scope scope, List<GroupedField> fields,
+		boolean unavailable, Labels labels) {
+		Map<GroupKey, List<Component>> grouped = new LinkedHashMap<>();
+		for (GroupedField field : fields) grouped.computeIfAbsent(field.key(), key -> new ArrayList<>()).add(field.text());
+		List<List<Component>> groups = new ArrayList<>(grouped.values());
+		if (groups.isEmpty()) groups.add(new ArrayList<>());
+		if (unavailable) groups.getLast().add(labels.unavailable());
+		List<Component> result = new ArrayList<>(groups.size());
+		for (int index = 0; index < groups.size(); index++) {
+			Component joined = join(groups.get(index), labels, Format.FIELD_SEPARATOR);
+			Component text = index == 0 ? labels.format(Format.ROW, labels.prefix(scope), joined) : joined;
+			result.add(new CachedText(text.getString(), Style.EMPTY, List.of()));
+		}
+		return List.copyOf(result);
+	}
+
+	private static Row groupedRow(String id, List<Component> groups, List<String> ids, Labels labels) {
+		return new Row(id, List.of(new Segment(join(groups, labels, Format.FIELD_SEPARATOR), Tone.NORMAL)), ids, groups);
+	}
+
 	private static Row statusRow(Scope scope, ClientMonitorState.Status status, Labels labels) {
 		// Row grammar remains localized while the exact OFF token alone is red.
 		Component token = labels.status(status);
@@ -231,10 +309,6 @@ public final class MonitorDisplayModel {
 		}
 		if (parts.length == 1) segments.add(new Segment(token, status == ClientMonitorState.Status.OFF ? Tone.OFF : Tone.NORMAL));
 		return new Row("status." + scope.id(), segments, List.of());
-	}
-
-	private static Row normalRow(String id, Component text, List<String> ids) {
-		return new Row(id, List.of(new Segment(text, Tone.NORMAL)), ids);
 	}
 
 	private static Component join(List<Component> cells, Labels labels, Format separator) {
