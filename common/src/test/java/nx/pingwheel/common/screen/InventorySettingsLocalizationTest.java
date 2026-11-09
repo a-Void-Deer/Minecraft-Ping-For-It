@@ -69,32 +69,29 @@ class InventorySettingsLocalizationTest {
 	}
 
 	@Test
-	void trackingBooleanHelpExplainsBothModesCurrentAuthorityAndNextScanInEveryLocale() throws IOException {
+	void trackingBooleanHelpExplainsOffAndOnInThreeLinesInEveryLocale() throws IOException {
 		for (String locale : LOCALES) {
 			JsonObject root = read(locale);
-			String @Unmodifiable [] semantics = switch (locale) {
-				case "de_de" -> new String[] {"Aus:", "An:", "gleichwertigen", "Spielerrechte", "nächsten Scan", "laufende Scans"};
-				case "es_ar" -> new String[] {"Desactivado:", "Activado:", "equivalentes", "permisos actuales", "próximo escaneo", "escaneos en curso"};
-				case "fr_fr" -> new String[] {"Désactivé :", "Activé :", "équivalence", "permissions actuelles", "prochaine analyse", "analyses en cours"};
-				case "pl_pl" -> new String[] {"Wyłączone:", "Włączone:", "równoważności", "uprawnienia", "następnego skanowania", "trwające skanowania"};
-				case "tr_tr" -> new String[] {"Kapalı:", "Açık:", "eşdeğerliği", "oyuncu izinleri", "sonraki taramaya", "süren taramalar"};
-				case "zh_cn" -> new String[] {"关闭：", "开启：", "已证实等价", "当前权限", "下一次扫描", "进行中的扫描"};
-				case "zh_tw" -> new String[] {"關閉：", "開啟：", "已證實等價", "目前權限", "下一次掃描", "進行中的掃描"};
-				default -> new String[] {"Off:", "On:", "proven equivalent", "current player permissions", "next scan", "running scans"};
+			String @Unmodifiable [] modePrefixes = switch (locale) {
+				case "de_de" -> new String[] {"Aus:", "An:"};
+				case "es_ar" -> new String[] {"Desactivado:", "Activado:"};
+				case "fr_fr" -> new String[] {"Désactivé :", "Activé :"};
+				case "pl_pl" -> new String[] {"Wyłączone:", "Włączone:"};
+				case "tr_tr" -> new String[] {"Kapalı:", "Açık:"};
+				case "zh_cn" -> new String[] {"关闭：", "开启："};
+				case "zh_tw" -> new String[] {"關閉：", "開啟："};
+				default -> new String[] {"Off:", "On:"};
 			};
 			for (String field : List.of("tracking_distinguish_faces", "tracking_distinguish_players")) {
 				String key = "settings.pingforit.inventory." + field;
 				String tooltip = root.get(key + ".tooltip").getAsString();
 				String @Unmodifiable [] lines = tooltip.split("\n", -1);
-				assertEquals(4, lines.length, locale + ": " + key);
-				assertTrue(lines[1].startsWith(semantics[0]), locale);
-				assertTrue(lines[2].startsWith(semantics[1]), locale);
-				assertTrue(lines[1].contains(semantics[2]), locale);
-				assertTrue(lines[0].contains(semantics[3]), locale);
-				assertTrue(lines[3].contains(semantics[4]), locale);
-				assertTrue(lines[3].contains(semantics[5]), locale);
-				assertEquals(0, placeholders(root, key), locale);
-				assertEquals(0, placeholders(root, key + ".tooltip"), locale);
+				assertEquals(3, lines.length, locale + ": " + key);
+				assertFalse(lines[0].isBlank(), locale + ": " + key);
+				assertTrue(lines[1].startsWith(modePrefixes[0]), locale + ": " + key);
+				assertTrue(lines[2].startsWith(modePrefixes[1]), locale + ": " + key);
+				assertEquals(0, placeholders(root, key), locale + ": " + key);
+				assertEquals(0, placeholders(root, key + ".tooltip"), locale + ": " + key);
 			}
 			assertNotEquals(root.get("settings.pingforit.inventory.tracking_distinguish_faces").getAsString(),
 				root.get("settings.pingforit.inventory.tracking_distinguish_players").getAsString(), locale);

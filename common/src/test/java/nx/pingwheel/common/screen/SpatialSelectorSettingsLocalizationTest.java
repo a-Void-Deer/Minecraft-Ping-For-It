@@ -19,12 +19,13 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Localization boundaries for the content-intent setting and the root
- * marker-removal label: every bundled locale carries the new setting's label
- * and tooltip, the tooltip states next-hold application, and the stable root
- * cancel key keeps its identity while its value states marker removal instead
- * of a generic cancellation. Exact non-English wording is not asserted; only
- * the confirmed Chinese label and English removal word are pinned.
+ * Localization boundaries for the gesture and content-intent settings and the
+ * root marker-removal label: every bundled locale carries the setting labels
+ * and tooltips, numeric labels keep exactly one value slot, and the stable
+ * root cancel key keeps its identity while its value states marker removal
+ * instead of a generic cancellation. Exact non-English wording is not
+ * asserted; only the confirmed Chinese labels and English removal word are
+ * pinned.
  */
 class SpatialSelectorSettingsLocalizationTest {
 	private static final List<String> LOCALES = List.of(
@@ -32,17 +33,6 @@ class SpatialSelectorSettingsLocalizationTest {
 	private static final String LABEL_KEY = "settings.pingforit.spatial_selector.content_intent_enabled";
 	private static final String TOOLTIP_KEY = LABEL_KEY + ".tooltip";
 	private static final String CANCEL_KEY = "pingforit.spatial.cancel";
-
-	/** Each locale's established phrase for applying a preference on the next hold. */
-	private static final Map<String, String> NEXT_HOLD_MARKERS = Map.of(
-		"de_de", "nächsten halten",
-		"en_us", "next hold",
-		"es_ar", "mantener pulsado de nuevo",
-		"fr_fr", "prochain maintien",
-		"pl_pl", "następnego przytrzymania",
-		"tr_tr", "sonraki basılı tutmada",
-		"zh_cn", "下次按住生效",
-		"zh_tw", "下次按住生效");
 
 	/** Each locale's marker-removal wording for the root cancel label. */
 	private static final Map<String, String> REMOVAL_MARKERS = Map.of(
@@ -64,8 +54,6 @@ class SpatialSelectorSettingsLocalizationTest {
 			assertFalse(label.contains("%"), () -> "boolean label must not be formatted: " + locale);
 			assertFalse(tooltip.contains("%"), () -> "tooltip must not be formatted: " + locale);
 			assertFalse(label.equals(tooltip), () -> "label and tooltip must differ: " + locale);
-			assertTrue(lowered(tooltip).contains(NEXT_HOLD_MARKERS.get(locale)),
-				() -> "tooltip must state next-hold application: " + locale);
 		}
 		assertEquals("为内容启用意图目标指示",
 			nonBlank(read("zh_cn"), "zh_cn", LABEL_KEY),
@@ -83,8 +71,6 @@ class SpatialSelectorSettingsLocalizationTest {
 			assertFalse(label.contains("%")); assertFalse(tooltip.contains("%"));
 			assertEquals(1, timing.split("%s", -1).length - 1, "numeric label has exactly one value slot: " + locale);
 			assertFalse(timingTooltip.contains("%"));
-			assertTrue(lowered(tooltip).contains(NEXT_HOLD_MARKERS.get(locale)));
-			assertTrue(lowered(timingTooltip).contains(NEXT_HOLD_MARKERS.get(locale)));
 		}
 		assertEquals("手势跳过长按", nonBlank(read("zh_cn"), "zh_cn", "settings.pingforit.spatial_selector.gesture_skip_hold_enabled"));
 	}

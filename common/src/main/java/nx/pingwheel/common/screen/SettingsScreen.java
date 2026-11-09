@@ -243,7 +243,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			ignored -> this.openResetConfirmation())
 			.bounds(0, 0, SettingsScreenLayout.RESET_BUTTON_WIDTH, SettingsScreenLayout.RESET_BUTTON_HEIGHT)
 			.build();
-		this.resetAllButton.setTooltip(Tooltip.create(LanguageUtils.settings("reset_all.tooltip").get()));
+		this.resetAllButton.setTooltip(Tooltip.create(resetAllTooltip()));
 		this.addRenderableWidget(this.resetAllButton);
 
 		this.primaryButton = Button.builder(this.primaryButtonText(), ignored -> this.onPrimaryButton())
@@ -252,6 +252,17 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.addRenderableWidget(this.primaryButton);
 
 		this.rebuildPage(false);
+	}
+
+	/**
+	 * Builds the Reset All tooltip from a template whose action and scope words
+	 * are separate arguments, so every locale owns its word order and both words
+	 * keep the confirmed light-red emphasis instead of resource color codes.
+	 */
+	private static Component resetAllTooltip() {
+		return LanguageUtils.settings("reset_all").path("tooltip").get(
+			LanguageUtils.settings("reset_all").path("tooltip", "reset").get().withStyle(ChatFormatting.RED),
+			LanguageUtils.settings("reset_all").path("tooltip", "all").get().withStyle(ChatFormatting.RED));
 	}
 
 	@Override

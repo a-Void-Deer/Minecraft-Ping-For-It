@@ -5,7 +5,7 @@
 	"pingforit.inventory.group.fluid": "Fluides",
 	"pingforit.inventory.unknown_fluid": "Fluide inconnu",
 	"settings.pingforit.presentation.field.pingforit_inventory_fluids.name": "Fluides de l’inventaire",
-	"settings.pingforit.presentation.field.pingforit_inventory_fluids.description": "Aperçu des fluides et suivi du fluide sélectionné, autorisés par le serveur. Activés par défaut.",
+	"settings.pingforit.presentation.field.pingforit_inventory_fluids.description": "Contenu en fluides des conteneurs.",
 	"presentation.pingforit.format.fluid_amount": "%s — %s",
 	"pingforit.inventory.quantity.scale_style": "western",
 	"pingforit.inventory.quantity.approximate": "≈%s",
@@ -37,75 +37,77 @@
 	"settings.pingforit.server_settings.confirm.discard": "Abandonner",
 	"settings.pingforit.server_settings.confirm.cancel": "Continuer la modification",
 	"settings.pingforit.ping_volume": "Volume du Ping : %s",
-	"settings.pingforit.ping_volume.tooltip": "Volume local du son des pings.\nDiminuer : alertes plus discrètes ; 0 les rend muettes.\nAugmenter : alertes plus fortes ; le volume des autres joueurs ne change pas.",
+	"settings.pingforit.ping_volume.tooltip": "Volume du son des pings.\nDiminuer : plus discret ; 0 coupe le son.\nAugmenter : plus fort.",
 	"settings.pingforit.ping_distance": "Distance du Ping : %s",
-	"settings.pingforit.ping_distance.tooltip": "Portée locale de capture native et de la sélection Précis au prochain maintien ; le tracé natif a aussi son propre plafond. Les tracés lointains optionnels gardent leur propre portée.\nDiminuer : sélectionner des cibles plus proches.\nAugmenter : autoriser des candidats plus éloignés ; la portée acceptée par le serveur ne change pas.",
+	"settings.pingforit.ping_distance.tooltip": "Distance maximale à laquelle une cible peut être marquée.\nDiminuer : choisir des cibles plus proches.\nAugmenter : marquer des cibles plus éloignées.",
 	"settings.pingforit.item_icon_visible": "Icônes d'Objets",
-	"settings.pingforit.item_icon_visible.tooltip": "Icônes d'objets sur les marqueurs.\nDésactivé : utiliser l'icône de ping ordinaire.\nActivé : afficher une icône d'objet si des données d'objet autorisées sont disponibles.",
+	"settings.pingforit.item_icon_visible.tooltip": "Icônes d'objets sur les marqueurs.\nDésactivé : utiliser l'icône de ping ordinaire.\nActivé : afficher l'icône de l'objet quand elle est disponible.",
 	"settings.pingforit.direction_indicator_visible": "Indicateur de Direction",
-	"settings.pingforit.direction_indicator_visible.tooltip": "Guidage au bord de l'écran vers les marqueurs hors champ.\nDésactivé : masquer les indicateurs de direction.\nActivé : afficher des indicateurs pointant vers les marqueurs hors champ.",
+	"settings.pingforit.direction_indicator_visible.tooltip": "Indicateurs de direction vers les marqueurs hors champ.\nDésactivé : les masquer.\nActivé : pointer vers les marqueurs hors champ.",
 	"settings.pingforit.mark_transparent_blocks": "Marquer les blocs transparents",
-	"settings.pingforit.mark_transparent_blocks.tooltip": "Formes de blocs utilisées pour la sélection au prochain maintien ; ce n'est pas un filtre général d'opacité.\nDésactivé : utiliser les formes visuelles de Minecraft.\nActivé : utiliser les formes de contour, y compris les décorations sélectionnables sans collision.",
+	"settings.pingforit.mark_transparent_blocks.tooltip": "Sélectionner les blocs selon leur forme de contour.\nDésactivé : utiliser la forme visible dans Minecraft.\nActivé : utiliser la forme de contour, pour pouvoir sélectionner les décorations.",
 	"settings.pingforit.mark_blacklisted_targets": "Marquer les cibles de la liste noire",
-	"settings.pingforit.mark_blacklisted_targets.tooltip": "Sélection des entités au prochain maintien ; sans rapport avec les listes d'affichage des blocs.\nDésactivé : ignorer les entités sur liste noire.\nActivé : les inclure parmi les candidats ; les spectateurs restent exclus.",
+	"settings.pingforit.mark_blacklisted_targets.tooltip": "Les entités sur liste noire peuvent-elles être sélectionnées ?\nDésactivé : ignorer les entités sur liste noire.\nActivé : permettre de les sélectionner ; les spectateurs restent exclus.",
 	"settings.pingforit.mark_fluids": "Marquer les fluides",
-	"settings.pingforit.mark_fluids.tooltip": "Sélection des fluides au prochain maintien.\nDésactivé : ignorer les fluides dans le rayon de sélection.\nActivé : inclure les fluides parmi les cibles sélectionnables.",
+	"settings.pingforit.mark_fluids.tooltip": "Les fluides peuvent-ils être sélectionnés ?\nDésactivé : ignorer les fluides.\nActivé : permettre de sélectionner les fluides.",
 	"settings.pingforit.ping_size": "Taille du Ping : %s",
-	"settings.pingforit.ping_size.tooltip": "Taille locale des marqueurs et des indicateurs de direction.\nDiminuer : des éléments plus petits masquent moins la vue.\nAugmenter : des éléments plus grands se remarquent davantage, mais masquent plus la vue.",
+	"settings.pingforit.ping_size.tooltip": "Taille des marqueurs et des indicateurs de direction.\nDiminuer : masquer moins la vue.\nAugmenter : se remarquer davantage.",
 	"settings.pingforit.wheel_opacity": "Opacité de la roue : %s",
-	"settings.pingforit.wheel_opacity.tooltip": "Opacité du fond du sélecteur au prochain maintien ; les libellés ont leur propre réglage.\nDiminuer : laisser voir davantage le monde ; 0 masque le fond.\nAugmenter : rendre le fond plus opaque.",
+	"settings.pingforit.wheel_opacity.tooltip": "Opacité du fond de la roue.\nDiminuer : révéler davantage le monde ; 0 masque le fond.\nAugmenter : rendre le fond plus opaque.",
 	"settings.pingforit.wheel_target_opacity": "Opacité de la cible de la roue : %s",
-	"settings.pingforit.wheel_target_opacity.tooltip": "Opacité des cadres de texte du sélecteur et de leurs libellés au prochain maintien.\nDiminuer : estomper cadres et texte ; 0 les rend invisibles.\nAugmenter : rendre cadres et texte plus visibles ; le fond ne change pas.",
+	"settings.pingforit.wheel_target_opacity.tooltip": "Opacité des cadres et libellés des options.\nDiminuer : estomper les cadres et le texte ; 0 les masque.\nAugmenter : rendre les cadres et le texte plus visibles.",
 	"settings.pingforit.wheel_font_size": "Taille de police des options de la roue : %s",
-	"settings.pingforit.wheel_font_size.tooltip": "Taille du texte des options du sélecteur au prochain maintien.\nDiminuer : utiliser un texte d'option plus petit.\nAugmenter : utiliser un texte d'option plus grand, qui demande plus de place.",
+	"settings.pingforit.wheel_font_size.tooltip": "Taille du texte des options de la roue.\nDiminuer : texte d'option plus petit.\nAugmenter : texte d'option plus grand.",
 	"settings.pingforit.wheel_target_font_size": "Taille de police de la cible de la roue : %s",
-	"settings.pingforit.wheel_target_font_size.tooltip": "Taille du texte de la cible du sélecteur au prochain maintien.\nDiminuer : utiliser un texte de cible plus petit.\nAugmenter : utiliser un texte de cible plus grand, qui demande plus de place.",
+	"settings.pingforit.wheel_target_font_size.tooltip": "Taille du texte du nom de la cible.\nDiminuer : texte de cible plus petit.\nAugmenter : texte de cible plus grand.",
 	"settings.pingforit.reset_all": "Tout réinitialiser",
 	"settings.pingforit.reset_all.title": "Réinitialiser tous les paramètres ?",
 	"settings.pingforit.reset_all.message": "Réinitialiser tous les paramètres du client à leurs valeurs par défaut ? La configuration du serveur ne sera pas réinitialisée.",
-	"settings.pingforit.reset_all.tooltip": "Réinitialiser toutes les préférences du client, y compris les canaux mémorisés, après confirmation.\nNe réinitialise pas la configuration du serveur ; abandonne tout brouillon non envoyé des paramètres serveur ordinaires.\nLes fichiers protégés peuvent empêcher l'enregistrement.",
+	"settings.pingforit.reset_all.tooltip": "%1$s %2$s paramètres du client.",
+	"settings.pingforit.reset_all.tooltip.reset": "Réinitialiser",
+	"settings.pingforit.reset_all.tooltip.all": "tous les",
 	"settings.pingforit.wheel_hold_millis": "Durée de maintien pour la roue : %s",
-	"settings.pingforit.wheel_hold_millis.tooltip": "Maintien ordinaire nécessaire pour ouvrir le sélecteur, à partir du prochain appui. Réduire ce délai peut aussi raccourcir l'intervalle de compatibilité.\nDiminuer : ouvrir plus tôt ; les appuis brefs ont moins de temps avant l'ouverture.\nAugmenter : attendre davantage avant l'ouverture ; le raccourci gestuel optionnel reste indépendant.",
+	"settings.pingforit.wheel_hold_millis.tooltip": "Durée de maintien avant l'ouverture du sélecteur.\nDiminuer : ouvrir plus tôt.\nAugmenter : attendre plus longtemps avant l'ouverture.",
 	"settings.pingforit.cancel_half_cone_angle_degrees": "Demi-angle du cône d'annulation : %s",
-	"settings.pingforit.cancel_half_cone_angle_degrees.tooltip": "Cône de visée pour retirer votre propre marqueur le plus proche ; le serveur vérifie toujours sa propriété et son activité.\nDiminuer : exiger une visée plus précise.\nAugmenter : inclure les marqueurs plus éloignés de la direction de l'appui ; la distance la plus courte reste prioritaire.",
+	"settings.pingforit.cancel_half_cone_angle_degrees.tooltip": "Lors d'une annulation, écart maximal entre le marqueur et votre visée.\nDiminuer : exiger une visée plus précise.\nAugmenter : inclure des marqueurs plus loin de votre visée ; le plus proche reste choisi.",
 	"settings.pingforit.channel": "Canal de Ping",
-	"settings.pingforit.channel.tooltip": "Canal préféré mémorisé pour ce serveur et envoyé lors de l'enregistrement des paramètres.\nNon vide : échanger des pings avec les joueurs du même canal.\nVide : utiliser la politique de canal par défaut du serveur ; le texte indicatif n'est qu'une aide.",
+	"settings.pingforit.channel.tooltip": "Canal mémorisé pour ce serveur.\nRempli : échanger des pings avec les joueurs du même canal.\nVide : utiliser les règles de canal par défaut du serveur.",
 	"settings.pingforit.channel.placeholder": "Synchronisé avec %s",
 	"settings.pingforit.open_block_shape_blacklist_config": "Enregistrer, fermer et ouvrir la configuration des formes de blocs...",
-	"settings.pingforit.open_block_shape_blacklist_config.tooltip": "Enregistre et ferme les paramètres avant d’ouvrir le fichier de configuration client. Les modifications des listes externes prennent effet après le redémarrage du client.",
+	"settings.pingforit.open_block_shape_blacklist_config.tooltip": "Enregistrer et fermer les paramètres, puis ouvrir le fichier de configuration client.\nLes modifications prennent effet après le redémarrage du client.",
 	"settings.pingforit.logging_profile": "Détail de journalisation",
-	"settings.pingforit.logging_profile.tooltip": "Détail du journal client.\nNormal : diagnostics essentiels uniquement, valeurs sensibles masquées.\nDétaillé : plus de contexte, sans masquage.\nS'applique immédiatement.",
+	"settings.pingforit.logging_profile.tooltip": "Quantité d'informations écrites dans le journal client.\nNormal : masque les informations sensibles.\nDétaillé : inclut les informations sensibles et plus de détails.",
 	"settings.pingforit.server_logging_profile": "Détail de journalisation du serveur",
-	"settings.pingforit.server_logging_profile.tooltip": "Détail du journal serveur.\nNormal : diagnostics essentiels uniquement, valeurs sensibles masquées.\nDétaillé : plus de contexte, sans masquage.\nEnvoyé à la fermeture des paramètres ; appliqué après acceptation du serveur.",
+	"settings.pingforit.server_logging_profile.tooltip": "Quantité d'informations écrites dans le journal serveur.\nNormal : masque les informations sensibles.\nDétaillé : inclut les informations sensibles et plus de détails.",
 	"settings.pingforit.group.logging": "Journalisation",
 	"value.pingforit.normal": "Normal",
 	"value.pingforit.deep": "Détaillé",
 	"value.pingforit.debug": "Débogage",
 	"settings.pingforit.entity_block_render_mode": "Géométrie des blocs-entités",
-	"settings.pingforit.entity_block_render_mode.tooltip": "Sources des contours de blocs-entités ; s'applique au prochain essai de rendu, pas à la sélection des cibles.\nToutes : sources intégrées et optionnelles enregistrées. Compatible : moteurs intégrés et modèles adaptés au chargeur uniquement.\nVoxelShape uniquement : ignorer les sources normales et utiliser les formes natives ; les autres modes y reviennent si aucune source ne produit de rendu.",
-	"settings.pingforit.entity_block_render_mode.all.tooltip": "Pour les contours de blocs-entités, essayer les moteurs et modèles intégrés ainsi que les sources de géométrie optionnelles enregistrées.\nPeut inclure davantage de géométrie ; les formes natives restent le recours si aucune source ne produit de rendu. S'applique au prochain essai de rendu.",
-	"settings.pingforit.entity_block_render_mode.compatible.tooltip": "Pour les contours de blocs-entités, essayer uniquement les moteurs intégrés et les modèles adaptés au chargeur ; ignorer les sources optionnelles.\nLes formes natives restent le recours si aucune source ne produit de rendu. S'applique au prochain essai de rendu.",
-	"settings.pingforit.entity_block_render_mode.voxel_shape_only.tooltip": "Pour les contours de blocs-entités, ignorer les sources de géométrie normales et utiliser la voie native VoxelShape.\nModifie la géométrie des contours, pas la sélection des cibles. S'applique au prochain essai de rendu.",
+	"settings.pingforit.entity_block_render_mode.tooltip": "Apparence des contours sur les blocs-entités.",
+	"settings.pingforit.entity_block_render_mode.all.tooltip": "Essayer toutes les méthodes de contour disponibles, y compris celles fournies par d'autres mods. Meilleure chance d'obtenir un contour détaillé.",
+	"settings.pingforit.entity_block_render_mode.compatible.tooltip": "Utiliser le contour normal pour la plupart des blocs, y compris les blocs de mods.",
+	"settings.pingforit.entity_block_render_mode.voxel_shape_only.tooltip": "Dessiner les contours à partir de la forme de base de chaque bloc. La méthode la plus fiable, mais les blocs complexes paraissent plus simples.",
 	"settings.pingforit.player_info_mode": "Informations du joueur",
-	"settings.pingforit.player_info_mode.tooltip": "Informations sur l'auteur du marqueur, pas sur le joueur ciblé.\nMaintenir : afficher nom et tête pendant le maintien de la touche de liste des joueurs. Toujours : les garder visibles.\nCompact : placer la tête à côté de la distance. Désactivé : masquer les informations de l'auteur.",
-	"settings.pingforit.player_info_mode.hold.tooltip": "Afficher le nom et la tête de l'auteur du marqueur tant que « %s » (%s) est maintenu.\nRelâcher la touche masque les informations de l'auteur.",
-	"settings.pingforit.player_info_mode.disabled.tooltip": "Masquer le nom et la tête de l'auteur du marqueur.\nLe nom de la cible et la distance restent visibles.",
-	"settings.pingforit.player_info_mode.always.tooltip": "Garder le nom et la tête de l'auteur du marqueur visibles.\nUtilise un libellé supplémentaire sous le marqueur.",
-	"settings.pingforit.player_info_mode.compact.tooltip": "Afficher la tête de l'auteur à côté de la distance plutôt que dans un libellé de nom séparé.",
+	"settings.pingforit.player_info_mode.tooltip": "Informations sur la personne qui a envoyé le marqueur.",
+	"settings.pingforit.player_info_mode.hold.tooltip": "Afficher le nom et la tête de l'auteur du marqueur tant que « %s » (%s) est maintenu.",
+	"settings.pingforit.player_info_mode.disabled.tooltip": "Masquer les informations de l'auteur ; le nom de la cible et la distance restent visibles.",
+	"settings.pingforit.player_info_mode.always.tooltip": "Garder le nom et la tête de l'auteur visibles.\nUtiliser un libellé séparé sous le marqueur.",
+	"settings.pingforit.player_info_mode.compact.tooltip": "Afficher la tête de l'auteur à côté de la distance.",
 	"settings.pingforit.team_color_mode": "Couleur de l'équipe",
-	"settings.pingforit.team_color_mode.tooltip": "Mise en forme d'équipe du libellé détaillé de l'auteur, sans recolorer les marqueurs.\nComplet et Étiquettes uniquement conservent cette mise en forme ; Désactivé et Ping uniquement la retirent.\nLa couleur des marqueurs dépend du type de ping ; les textes de cible et de distance restent blancs.",
-	"settings.pingforit.team_color_mode.full.tooltip": "Complet a le même effet qu'Étiquettes uniquement : conserver la mise en forme d'équipe du libellé détaillé de l'auteur.\nLa couleur des marqueurs dépend toujours du type de ping ; les textes de cible et de distance restent blancs.",
-	"settings.pingforit.team_color_mode.disabled.tooltip": "Désactivé a le même effet que Ping uniquement : retirer la mise en forme d'équipe du libellé détaillé de l'auteur.\nLa couleur des marqueurs dépend toujours du type de ping ; les textes de cible et de distance restent blancs.",
-	"settings.pingforit.team_color_mode.ping_only.tooltip": "Ping uniquement a le même effet que Désactivé : retirer la mise en forme d'équipe du libellé détaillé de l'auteur.\nNe recolore pas les marqueurs, dont la couleur dépend du type de ping. Les textes de cible et de distance restent blancs.",
-	"settings.pingforit.team_color_mode.labels_only.tooltip": "Étiquettes uniquement a le même effet que Complet : conserver la mise en forme d'équipe du libellé détaillé de l'auteur.\nLa couleur des marqueurs dépend toujours du type de ping ; les textes de cible et de distance restent blancs.",
+	"settings.pingforit.team_color_mode.tooltip": "Mise en forme d'équipe du libellé de l'auteur.",
+	"settings.pingforit.team_color_mode.full.tooltip": "Mettre en forme le libellé de l'auteur avec les couleurs d'équipe ; la couleur des marqueurs suit toujours le type de ping.",
+	"settings.pingforit.team_color_mode.disabled.tooltip": "Utiliser le libellé simple de l'auteur ; la couleur des marqueurs suit toujours le type de ping.",
+	"settings.pingforit.team_color_mode.ping_only.tooltip": "Utiliser le libellé simple de l'auteur ; la couleur des marqueurs suit toujours le type de ping.",
+	"settings.pingforit.team_color_mode.labels_only.tooltip": "Mettre en forme le libellé de l'auteur avec les couleurs d'équipe ; la couleur des marqueurs suit toujours le type de ping.",
 	"settings.pingforit.default_channel_mode": "Mode du canal par défaut",
-	"settings.pingforit.default_channel_mode.tooltip": "Politique par défaut pour les expéditeurs au canal vide ; les canaux nommés ne changent pas.\nAuto : même contexte d'équipe ; les joueurs sans équipe partagent un contexte. Global : tous les joueurs au canal vide.\nÉquipe uniquement : exiger une équipe et utiliser son contexte. Désactivé : refuser les créations de pings au canal vide.",
+	"settings.pingforit.default_channel_mode.tooltip": "Comment les joueurs sans canal sont regroupés.\nAuto : les coéquipiers sont groupés ; les joueurs sans équipe forment un groupe.\nGlobal : tous les joueurs sans canal partagent un groupe.\nÉquipe uniquement : exige une équipe et regroupe par équipe.\nDésactivé : n'accepte pas les pings des joueurs sans canal.",
 	"settings.pingforit.player_tracking_enabled": "Suivi des joueurs",
-	"settings.pingforit.player_tracking_enabled.tooltip": "Représentation par le serveur des nouvelles demandes ciblant un joueur.\nDésactivé : convertir les cibles joueurs en leur position actuelle faisant autorité sur le serveur.\nActivé : conserver les cibles en tant qu'entités joueurs pour que leurs marqueurs suivent leurs déplacements.",
+	"settings.pingforit.player_tracking_enabled.tooltip": "Les marqueurs suivent-ils le joueur ?\nDésactivé : le marqueur reste à l'endroit où le joueur était.\nActivé : le marqueur suit le joueur.",
 	"settings.pingforit.ms_to_regenerate": "Temps de régénération (ms)",
-	"settings.pingforit.ms_to_regenerate.tooltip": "Millisecondes pour récupérer un droit de création ; la limite de fréquence fixe la réserve pour les rafales.\nDiminuer : récupérer les droits plus vite ; 0 désactive le contrôle préventif du client, sans contourner inconditionnellement celui du serveur.\nAugmenter : récupérer les droits plus lentement.",
+	"settings.pingforit.ms_to_regenerate.tooltip": "Délai avant de pouvoir renvoyer un ping après utilisation.\nDiminuer : renvoyer plus vite ; 0 supprime l'attente.\nAugmenter : attendre plus longtemps avant de renvoyer.",
 	"settings.pingforit.rate_limit": "Limite de fréquence",
-	"settings.pingforit.rate_limit.tooltip": "Réserve de créations de marqueurs en rafale par joueur, renouvelée selon le temps de régénération.\nDiminuer : autoriser moins de créations en rafale ; 0 désactive le contrôle de fréquence, pas les pings.\nAugmenter : autoriser plus de créations en rafale ; la récupération de chaque droit ne change pas.",
+	"settings.pingforit.rate_limit.tooltip": "Nombre de pings que chaque joueur peut envoyer d'affilée.\nDiminuer : moins de pings d'affilée ; 0 supprime la limite.\nAugmenter : plus de pings d'affilée.",
 
 	"value.pingforit.vanilla_team": "Équipe vanilla",
 	"value.pingforit.auto": "Auto",
@@ -166,13 +168,13 @@
 	"pingforit.target.here": "ICI",
 	"pingforit.target.unknown": "Cible inconnue"
   ,"settings.pingforit.long_press_compatibility_mode": "Mode de compatibilité d'appui long"
-  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Compatibilité des clics rapides et de la capture différée ; l'activer efface le raccourci gestuel et l'angle de danger sans les rétablir ensuite.\nDésactivé : utiliser les appuis ordinaires et les gestes explicitement réactivés.\nActivé : des clics rapprochés peuvent former un maintien virtuel ; une capture en attente peut retenir un nouvel appui."
+  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Traiter des clics rapprochés comme un seul appui long.\nDésactivé : utiliser les appuis ordinaires.\nActivé : des clics rapprochés peuvent agir comme un maintien ; le raccourci gestuel et l'angle de Danger sont effacés."
   ,"settings.pingforit.long_press_compatibility_slice_millis": "Intervalle de compatibilité : %s"
-  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Écart entre clics consécutifs utilisé uniquement en mode de compatibilité, plafonné à la moitié du seuil de maintien.\nDiminuer : exiger des clics plus rapprochés pour prolonger un maintien virtuel.\nAugmenter : autoriser des écarts plus grands entre clics consécutifs."
+  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Écart maximal entre deux clics en mode de compatibilité, au plus la moitié du temps de maintien.\nDiminuer : les clics doivent être plus rapprochés.\nAugmenter : autoriser un écart plus large."
   ,"settings.pingforit.sync_duration": "Durée de synchronisation (secondes)"
-  ,"settings.pingforit.sync_duration.tooltip": "Durée de vie serveur figée à la création des nouveaux marqueurs ; l'affichage local est indépendant. 0 n'est pas un mode désactivé.\nDiminuer : les nouveaux marqueurs expirent plus tôt sur le serveur.\nAugmenter : les nouveaux marqueurs restent actifs plus longtemps ; les échéances existantes ne changent pas."
+  ,"settings.pingforit.sync_duration.tooltip": "Durée pendant laquelle le serveur conserve un nouveau marqueur.\nDiminuer : les nouveaux marqueurs expirent plus tôt.\nAugmenter : les nouveaux marqueurs restent plus longtemps."
   ,"settings.pingforit.marker_display_duration": "Durée d'affichage du marqueur : %s"
-  ,"settings.pingforit.marker_display_duration.tooltip": "Durée d'affichage local des nouveaux marqueurs reçus ; 0 suit la durée serveur figée de chaque marqueur.\nDiminuer : les nouveaux marqueurs disparaissent localement plus tôt.\nAugmenter : les nouveaux marqueurs restent visibles plus longtemps ; la durée de vie serveur et les marqueurs existants ne changent pas."
+  ,"settings.pingforit.marker_display_duration.tooltip": "Durée d'affichage des nouveaux marqueurs reçus ; 0 utilise la durée définie par le serveur pour chaque marqueur.\nDiminuer : disparaître plus vite.\nAugmenter : rester visible plus longtemps."
   ,"value.pingforit.follow_server": "Suivre le serveur"
   ,"unit.pingforit.seconds": "%ss"
   ,"notice.pingforit.mark_transparent_blocks": "Marquer les blocs transparents : "
@@ -181,7 +183,7 @@
   ,"notice.pingforit.on": "Activé"
   ,"notice.pingforit.off": "Désactivé"
   ,"settings.pingforit.configuration_notice_size": "Taille de l’avis de configuration : %s"
-  ,"settings.pingforit.configuration_notice_size.tooltip": "Taille des avis locaux lors du basculement des options de sélection des cibles.\nDiminuer : avis plus petits ; 0 les masque sans désactiver les options.\nAugmenter : des avis plus grands masquent davantage la vue."
+  ,"settings.pingforit.configuration_notice_size.tooltip": "Taille des avis affichés quand vous changez la sélection des cibles.\nDiminuer : avis plus petits ; 0 les masque ; les options restent utilisables.\nAugmenter : avis plus grands."
   ,"settings.pingforit.category.display": "Marqueurs et portée"
   ,"settings.pingforit.category.display.button": "Marqueurs et portée..."
   ,"settings.pingforit.category.selection": "Sélection des cibles"
@@ -216,14 +218,14 @@
   ,"settings.pingforit.server_status.read_only": "Les paramètres du serveur sont en lecture seule pour vous. Les valeurs actuelles sont affichées."
   ,"settings.pingforit.reset_all.server_draft_warning": "Cela supprimera aussi le brouillon serveur non enregistré."
   ,"settings.pingforit.open_client_config": "Enregistrer, fermer et ouvrir la configuration client..."
-  ,"settings.pingforit.open_client_config.tooltip": "Enregistrer les paramètres locaux et envoyer tout brouillon valide des paramètres serveur ordinaires, puis fermer les paramètres et ouvrir le fichier client complet.\nSi l'enregistrement ou la validation échoue, le fichier n'est pas ouvert.\nLes modifications externes exigent un redémarrage du client ; rouvrir les paramètres ne recharge pas le fichier."
+  ,"settings.pingforit.open_client_config.tooltip": "Enregistrer et fermer les paramètres, puis ouvrir le fichier de configuration client.\nLes modifications prennent effet après le redémarrage du client."
 	,"settings.pingforit.category.server_presentation": "Présentation du serveur"
 	,"settings.pingforit.category.server_presentation.button": "Présentation du serveur..."
   ,"settings.pingforit.presentation.server.title": "Politique du serveur"
   ,"settings.pingforit.presentation.white": "Liste blanche"
   ,"settings.pingforit.presentation.black": "Liste noire"
   ,"settings.pingforit.presentation.whitelist_only": "Liste blanche uniquement"
-  ,"settings.pingforit.presentation.whitelist_only.tooltip": "Comportement des champs ne correspondant à aucune liste du type de cible sélectionné.\nDésactivé : utiliser la valeur par défaut déclarée par chaque champ dans le catalogue.\nActivé : refuser les champs sans correspondance ; les autorisations restent prioritaires sur les blocages."
+  ,"settings.pingforit.presentation.whitelist_only.tooltip": "Traitement des champs absents des deux listes.\nDésactivé : utiliser le réglage par défaut de chaque champ.\nActivé : n'autoriser que les champs correspondant à la liste blanche."
   ,"settings.pingforit.presentation.selector": "Sélecteur (namespace:path)"
   ,"settings.pingforit.presentation.add": "Ajouter"
   ,"settings.pingforit.presentation.remove": "Retirer"
@@ -272,42 +274,42 @@
   ,"settings.pingforit.presentation.field.now": "Maintenant : %s"
   ,"settings.pingforit.presentation.field.matching_white": "Règles d'autorisation correspondantes : %s"
   ,"settings.pingforit.presentation.field.matching_black": "Règles de blocage correspondantes : %s"
-  ,"settings.pingforit.presentation.rule.allow.tooltip": "Basculer cet ID de champ exact dans la liste d'autorisation du type sélectionné.\nDésactivé : retirer uniquement cette règle exacte ; les autorisations avec jokers peuvent encore s'appliquer.\nActivé : autoriser ce champ avant les règles de blocage ; les permissions et restrictions sur les sous-éléments restent applicables."
-  ,"settings.pingforit.presentation.rule.block.tooltip": "Basculer cet ID de champ exact dans la liste de blocage du type sélectionné.\nDésactivé : retirer uniquement cette règle exacte ; les autres règles et valeurs par défaut restent applicables.\nActivé : bloquer ce champ sauf si un sélecteur d'autorisation correspond."
+  ,"settings.pingforit.presentation.rule.allow.tooltip": "Activer ou désactiver ce champ dans la liste blanche du type sélectionné.\nDésactivé : retirer cette règle ; les règles avec * peuvent encore autoriser le champ.\nActivé : autoriser ce champ avant les règles de blocage."
+  ,"settings.pingforit.presentation.rule.block.tooltip": "Activer ou désactiver ce champ dans la liste noire du type sélectionné.\nDésactivé : retirer cette règle.\nActivé : bloquer ce champ ; les règles d'autorisation correspondantes restent prioritaires."
   ,"settings.pingforit.presentation.field.minecraft_target_name.name": "Nom de la cible"
-  ,"settings.pingforit.presentation.field.minecraft_target_name.description": "Nom de la cible signalée."
+  ,"settings.pingforit.presentation.field.minecraft_target_name.description": "Nom de la cible marquée."
   ,"settings.pingforit.presentation.field.minecraft_entity_type.name": "Type d'entité"
-  ,"settings.pingforit.presentation.field.minecraft_entity_type.description": "ID de registre du type d'entité."
+  ,"settings.pingforit.presentation.field.minecraft_entity_type.description": "Type de l'entité."
   ,"settings.pingforit.presentation.field.minecraft_entity_health.name": "Points de vie"
-  ,"settings.pingforit.presentation.field.minecraft_entity_health.description": "Points de vie actuels d'une entité vivante."
+  ,"settings.pingforit.presentation.field.minecraft_entity_health.description": "Points de vie actuels de l'entité vivante."
   ,"settings.pingforit.presentation.field.minecraft_entity_max_health.name": "Points de vie maximum"
-  ,"settings.pingforit.presentation.field.minecraft_entity_max_health.description": "Points de vie maximum d'une entité vivante."
+  ,"settings.pingforit.presentation.field.minecraft_entity_max_health.description": "Points de vie maximum de l'entité vivante."
   ,"settings.pingforit.presentation.field.minecraft_item_id.name": "Objet"
-  ,"settings.pingforit.presentation.field.minecraft_item_id.description": "ID de registre de l'objet d'une pile au sol."
+  ,"settings.pingforit.presentation.field.minecraft_item_id.description": "Quel est l'objet au sol."
   ,"settings.pingforit.presentation.field.minecraft_item_count.name": "Quantité"
-  ,"settings.pingforit.presentation.field.minecraft_item_count.description": "Taille de la pile d'un objet au sol."
+  ,"settings.pingforit.presentation.field.minecraft_item_count.description": "Nombre d'objets dans la pile au sol."
   ,"settings.pingforit.presentation.field.minecraft_item_icon.name": "Icône d'objet"
   ,"settings.pingforit.presentation.field.minecraft_item_icon.description": "Indique si une icône d'objet est disponible."
   ,"settings.pingforit.presentation.field.minecraft_block_state.name": "État du bloc"
-  ,"settings.pingforit.presentation.field.minecraft_block_state.description": "Propriétés d'état du bloc signalé."
+  ,"settings.pingforit.presentation.field.minecraft_block_state.description": "État du bloc, par exemple l'orientation ou l'état allumé/éteint."
   ,"settings.pingforit.presentation.field.create_kinetic_speed.name": "Vitesse de rotation (tr/min)"
-  ,"settings.pingforit.presentation.field.create_kinetic_speed.description": "Vitesse cinétique de rotation. Disponibilité selon le type de cible et les règles du serveur."
+  ,"settings.pingforit.presentation.field.create_kinetic_speed.description": "Vitesse de rotation du bloc cinétique."
   ,"settings.pingforit.presentation.field.create_kinetic_has_network.name": "Réseau cinétique"
-  ,"settings.pingforit.presentation.field.create_kinetic_has_network.description": "Indique si le bloc cinétique est relié à un réseau."
+  ,"settings.pingforit.presentation.field.create_kinetic_has_network.description": "Indique si le bloc cinétique est connecté à un réseau."
   ,"settings.pingforit.presentation.field.create_kinetic_overstressed.name": "Surchargé"
   ,"settings.pingforit.presentation.field.create_kinetic_overstressed.description": "Indique si le réseau cinétique est surchargé."
   ,"settings.pingforit.presentation.field.create_kinetic_stress.name": "Charge utilisée"
-  ,"settings.pingforit.presentation.field.create_kinetic_stress.description": "Charge actuelle du réseau cinétique."
+  ,"settings.pingforit.presentation.field.create_kinetic_stress.description": "Charge actuellement utilisée par le réseau cinétique."
   ,"settings.pingforit.presentation.field.create_kinetic_capacity.name": "Capacité de charge totale"
-  ,"settings.pingforit.presentation.field.create_kinetic_capacity.description": "Capacité de charge du réseau cinétique."
+  ,"settings.pingforit.presentation.field.create_kinetic_capacity.description": "Charge totale que le réseau cinétique peut supporter."
   ,"settings.pingforit.presentation.field.create_kinetic_available_capacity.name": "Charge disponible"
-  ,"settings.pingforit.presentation.field.create_kinetic_available_capacity.description": "Capacité de charge disponible du réseau cinétique ; peut être négative en cas de surcharge."
+  ,"settings.pingforit.presentation.field.create_kinetic_available_capacity.description": "Charge restante dans le réseau cinétique ; peut être négative en cas de surcharge."
   ,"settings.pingforit.presentation.field.create_inventory_summary.name": "Contenu de l'inventaire"
-  ,"settings.pingforit.presentation.field.create_inventory_summary.description": "Résumé du contenu d'un inventaire Create. Désactivé par défaut."
+  ,"settings.pingforit.presentation.field.create_inventory_summary.description": "Résumé du contenu d'un inventaire Create."
   ,"settings.pingforit.presentation.field.create_fluid_summary.name": "Contenu du réservoir"
-  ,"settings.pingforit.presentation.field.create_fluid_summary.description": "Résumé du contenu d'un réservoir Create. Désactivé par défaut."
+  ,"settings.pingforit.presentation.field.create_fluid_summary.description": "Résumé du contenu d'un réservoir de fluide Create."
   ,"settings.pingforit.presentation.field.pingforit_inventory_items.name": "Objets de l'inventaire"
-  ,"settings.pingforit.presentation.field.pingforit_inventory_items.description": "Contenu en objets de l'inventaire marqué."
+  ,"settings.pingforit.presentation.field.pingforit_inventory_items.description": "Contenu en objets du conteneur."
   ,"settings.pingforit.presentation.target_type.dropped_item": "Politique des objets au sol"
   ,"settings.pingforit.presentation.target_type.entity": "Politique des entités"
   ,"settings.pingforit.presentation.target_type.entity_block": "Politique des blocs-entités"
@@ -342,33 +344,33 @@
   ,"presentation.pingforit.no": "Non"
   ,"settings.pingforit.group.spatial_selector": "Gestes du sélecteur spatial"
   ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled": "Geste sans appui long"
-  ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled.tooltip": "Ouverture anticipée optionnelle au prochain maintien ; la compatibilité la désactive sans la rétablir ensuite.\nDésactivé : utiliser l'ouverture ordinaire par appui long.\nActivé : après avoir maintenu la touche Ping configurée pendant la durée physique minimale, sortir de la zone morte centrale pour ouvrir plus tôt."
+  ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled.tooltip": "Maintenir Ping et bouger pour ouvrir le menu avant la fin du maintien habituel ; le mode de compatibilité désactive cette option.\nDésactivé : ouvrir avec le maintien normal.\nActivé : après le maintien minimal, bouger pour ouvrir plus tôt."
   ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis": "Maintien minimal du geste : %s"
-  ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis.tooltip": "Maintien physique continu minimal avant l'ouverture par le raccourci gestuel activé ; s'applique au prochain maintien. L'appui long ordinaire reste indépendant.\nDiminuer : le mouvement peut être pris en compte plus tôt.\nAugmenter : exiger un maintien physique plus long avant de pouvoir ouvrir plus tôt par mouvement."
+  ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis.tooltip": "Durée de maintien de Ping avant que le déplacement puisse ouvrir le menu plus tôt.\nDiminuer : remplir la condition plus tôt.\nAugmenter : maintenir plus longtemps avant de bouger."
   ,"settings.pingforit.spatial_selector.deadzone": "Zone morte centrale : %s"
-  ,"settings.pingforit.spatial_selector.deadzone.tooltip": "Centre d'annulation radial et distance d'activation latérale de l'inventaire au prochain maintien. Dans les listes, la distance part du cadre latéral extérieur du panneau, ou à défaut du bord de l'écran.\nDiminuer : centre d'annulation plus petit ; focus latéral plus précoce.\nAugmenter : centre d'annulation plus grand ; focus latéral exigeant plus de mouvement."
+  ,"settings.pingforit.spatial_selector.deadzone.tooltip": "Zone centrale d'annulation et distance à parcourir latéralement dans la liste d'inventaire.\nDiminuer : zone d'annulation plus petite ; le déplacement latéral se déclenche plus tôt.\nAugmenter : zone d'annulation plus grande ; le déplacement latéral demande plus de distance."
   ,"settings.pingforit.spatial_selector.stroke": "Longueur du trait d'entrée : %s"
-  ,"settings.pingforit.spatial_selector.stroke.tooltip": "Trajet avant l'entrée dans un sous-menu par pause ou virage admissible, et distance de navigation latérale de l'inventaire au prochain maintien. Les listes mesurent depuis le même cadre ou bord, sans ajouter la zone morte.\nDiminuer : moins de mouvement nécessaire pour entrer ou naviguer latéralement.\nAugmenter : exiger un trajet plus long avant l'entrée ou la navigation latérale."
+  ,"settings.pingforit.spatial_selector.stroke.tooltip": "Distance à parcourir pour entrer dans un sous-menu ou se déplacer latéralement dans la liste d'inventaire.\nDiminuer : entrer ou naviguer plus tôt.\nAugmenter : exiger plus de mouvement."
   ,"settings.pingforit.spatial_selector.dwell_millis": "Pause d'entrée : %s"
-  ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "Pause après un trajet suffisant avant l'entrée dans un sous-menu au prochain maintien.\nDiminuer : entrer plus tôt lors d'une pause.\nAugmenter : exiger une pause plus longue ; l'entrée par virage admissible reste une voie distincte."
+  ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "Temps de pause sur une option avant l'ouverture de son sous-menu.\nDiminuer : ouvrir plus tôt.\nAugmenter : exiger une pause plus longue."
   ,"settings.pingforit.spatial_selector.root_distance": "Distance du menu racine : %s"
-  ,"settings.pingforit.spatial_selector.root_distance.tooltip": "Distance visuelle des choix racine au centre au prochain maintien. La zone morte et le trait d'entrée ne changent pas.\nDiminuer : rapprocher les choix racine du centre.\nAugmenter : éloigner les choix racine du centre."
+  ,"settings.pingforit.spatial_selector.root_distance.tooltip": "Distance entre les choix du menu racine et le centre.\nDiminuer : rapprocher les choix racine.\nAugmenter : écarter les choix racine."
   ,"settings.pingforit.spatial_selector.submenu_radius_scale": "Taille du sous-menu : %s"
-  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "Échelle visuelle de tous les menus radiaux hors racine, y compris ceux des objets, au prochain maintien. La distance racine et les seuils gestuels ne changent pas.\nDiminuer : rendre les sous-menus plus compacts.\nAugmenter : espacer davantage les choix des sous-menus."
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "Taille des sous-menus radiaux, y compris les menus d'objets.\nDiminuer : sous-menus plus compacts.\nAugmenter : choix des sous-menus plus espacés."
   ,"settings.pingforit.spatial_selector.inventory_max_width_fraction": "Largeur maximale de l'inventaire : %s"
-  ,"settings.pingforit.spatial_selector.inventory_max_width_fraction.tooltip": "Plafond de largeur du panneau d'inventaire relatif à la zone visible de l'interface au prochain maintien. Le contenu et les minima de lisibilité restent applicables.\nDiminuer : autoriser un panneau plus étroit.\nAugmenter : autoriser un panneau plus large ; ce n'est pas une largeur fixe."
+  ,"settings.pingforit.spatial_selector.inventory_max_width_fraction.tooltip": "Largeur maximale du panneau d'inventaire, en proportion de l'écran.\nDiminuer : utiliser moins d'espace à l'écran.\nAugmenter : accueillir un contenu plus large."
   ,"settings.pingforit.spatial_selector.inventory_max_height_fraction": "Hauteur maximale de l'inventaire : %s"
-  ,"settings.pingforit.spatial_selector.inventory_max_height_fraction.tooltip": "Plafond de hauteur du panneau d'inventaire relatif à la zone visible de l'interface, pas une hauteur fixe ; s'applique au prochain maintien. Le contenu et les minima de lisibilité restent applicables.\nDiminuer : autoriser un panneau plus bas, pouvant montrer moins de lignes.\nAugmenter : autoriser un panneau plus haut, pouvant montrer plus de lignes."
+  ,"settings.pingforit.spatial_selector.inventory_max_height_fraction.tooltip": "Hauteur maximale du panneau d'inventaire, en proportion de l'écran.\nDiminuer : utiliser moins d'espace à l'écran.\nAugmenter : afficher plus de lignes."
   ,"settings.pingforit.spatial_selector.hover_enabled": "Exiger un survol continu pour revenir"
-  ,"settings.pingforit.spatial_selector.hover_enabled.tooltip": "Navigation de retour au prochain maintien.\nDésactivé : utiliser le geste Retour ordinaire.\nActivé : exiger un focus continu sur Retour pendant le délai configuré ; quitter puis reprendre le focus pour revenir à nouveau."
+  ,"settings.pingforit.spatial_selector.hover_enabled.tooltip": "Revenir au menu précédent en survolant Retour.\nDésactivé : utiliser l'action Retour normale.\nActivé : survoler Retour pendant la durée définie pour revenir."
   ,"settings.pingforit.spatial_selector.hover_millis": "Délai du retour par survol : %s"
-  ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "Focus continu sur Retour nécessaire lorsque le retour par survol est activé ; s'applique au prochain maintien.\nDiminuer : revenir plus tôt après avoir focalisé Retour.\nAugmenter : exiger un focus plus long sur Retour ; sans effet si le retour par survol est désactivé."
+  ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "Durée de survol de Retour avant de revenir.\nDiminuer : revenir plus vite.\nAugmenter : exiger un survol plus long."
   ,"settings.pingforit.spatial_selector.show_trail": "Afficher la trace du geste"
-  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Trace du pointeur et de l'option active au prochain maintien ; la sélection ne change pas.\nDésactivé : masquer les deux traces.\nActivé : dessiner leur trace de mouvement partagée."
+  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Afficher une trace qui suit le pointeur et l'option sélectionnée.\nDésactivé : masquer la trace.\nActivé : afficher la trace."
   ,"settings.pingforit.spatial_selector.reduce_motion": "Réduire les mouvements du sélecteur"
-  ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "Animation du sélecteur au prochain maintien ; le rythme gestuel et la sélection ne changent pas.\nDésactivé : utiliser l'animation normale du sélecteur.\nActivé : réduire les mouvements du sélecteur."
+  ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "Réduire les animations de la roue.\nDésactivé : utiliser les animations complètes.\nActivé : utiliser des animations plus calmes."
   ,"settings.pingforit.spatial_selector.content_intent_enabled": "Activer la sélection d'intention pour le contenu"
-  ,"settings.pingforit.spatial_selector.content_intent_enabled.tooltip": "Menus de type de ping supplémentaires pour les propriétés et objets d'inventaire sous Contenu au prochain maintien. Le type de ping du marqueur entier ne change pas.\nDésactivé : valider directement le contenu sélectionnable avec Attention.\nActivé : proposer un menu supplémentaire pour choisir le type de ping du contenu."
+  ,"settings.pingforit.spatial_selector.content_intent_enabled.tooltip": "Choisir le type de ping d'un objet ou d'une propriété.\nDésactivé : envoyer directement Attention.\nActivé : choisir le type de ping avant l'envoi."
   ,"pingforit.spatial.inventory.updating": "Mise à jour…"
   ,"pingforit.spatial.inventory.unknown": "Inconnu"
   ,"pingforit.spatial.inventory.uncertain": "Incertain"
@@ -401,7 +403,7 @@
   ,"settings.pingforit.category.debug.button": "Débogage..."
   ,"settings.pingforit.group.monitoring": "Surveillance"
   ,"settings.pingforit.budget_delay_notifications_enabled": "Notifications de retard lié aux budgets"
-  ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "Avis aux administrateurs pour les attentes de ressources persistantes ; les diagnostics WARN restent actifs.\nDésactivé : moins de messages ; les retards passent plus facilement inaperçus.\nActivé : indique les tâches en attente et aide à choisir le budget à ajuster."
+  ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "Prévient les administrateurs quand le travail du serveur tarde.\nDésactivé : aucun avis de ce type.\nActivé : un message dans le chat quand le traitement tarde."
   ,"message.pingforit.budget_delay": "[ping for it] Retards persistants liés aux budgets pour %s. Vérifiez les budgets de performances ou les listes noires du serveur."
   ,"message.pingforit.budget_delay.module.presentation": "présentation des informations"
   ,"message.pingforit.budget_delay.module.inventory_preview": "aperçu de l'inventaire"
@@ -414,54 +416,54 @@
   ,"settings.pingforit.inventory.resync_no_cooldown": "Sans contrôle du délai"
   ,"settings.pingforit.inventory.heartbeat_disabled": "Contrôle périodique désactivé"
   ,"settings.pingforit.inventory.physical_slots_per_tick": "Cases physiques par tick"
-  ,"settings.pingforit.inventory.physical_slots_per_tick.tooltip": "Lectures réelles de cases par tick serveur, partagées entre aperçu et suivi.\nDiminuer : moins de travail par tick ; les grands conteneurs peuvent se mettre à jour plus lentement.\nAugmenter : davantage de lectures peuvent avancer par tick ; la charge serveur peut croître."
+  ,"settings.pingforit.inventory.physical_slots_per_tick.tooltip": "Nombre de cases d'inventaire que le serveur traite à chaque tick.\nDiminuer : réduire le coût en performances.\nAugmenter : permettre de traiter plus de contenu."
   ,"settings.pingforit.inventory.pending_memory_mib": "Mémoire en attente (MiB)"
-  ,"settings.pingforit.inventory.pending_memory_mib.tooltip": "Mémoire des données en attente pour l'aperçu et le suivi de tout le serveur.\nDiminuer : soulage la mémoire ; grands conteneurs et nombreuses cibles peuvent se mettre à jour plus lentement.\nAugmenter : conserve plus de données et réduit les attentes par manque de mémoire ; la mémoire utilisée peut croître."
+  ,"settings.pingforit.inventory.pending_memory_mib.tooltip": "Mémoire disponible pour l'Aperçu et le Suivi sur tout le serveur.\nDiminuer : utiliser moins de mémoire.\nAugmenter : garder plus de données de conteneurs."
   ,"settings.pingforit.inventory.display_byte_multiplier": "Taille d'affichage : %s"
-  ,"settings.pingforit.inventory.display_byte_multiplier.tooltip": "Données d'un objet affiché, limitées par la taille du cadre.\nDiminuer : entrées plus légères ; les détails d'objets complexes peuvent être simplifiés.\nAugmenter : conserve davantage de détails ; chaque entrée peut demander plus de données et de traitement."
+  ,"settings.pingforit.inventory.display_byte_multiplier.tooltip": "Niveau de détail affiché pour chaque objet.\nDiminuer : utiliser moins de données.\nAugmenter : afficher plus de détails."
   ,"settings.pingforit.inventory.frame_byte_multiplier": "Taille du cadre : %s"
-  ,"settings.pingforit.inventory.frame_byte_multiplier.tooltip": "Données contenues dans un paquet d'inventaire.\nDiminuer : paquets plus petits ; davantage de fragments et un affichage d'objet réduit peuvent être nécessaires.\nAugmenter : plus de données par paquet ; chaque paquet peut être plus lourd."
+  ,"settings.pingforit.inventory.frame_byte_multiplier.tooltip": "Contenu d'inventaire envoyé en une fois.\nDiminuer : envoyer moins de contenu à la fois.\nAugmenter : envoyer plus de contenu d'inventaire à la fois."
   ,"settings.pingforit.inventory.size_adjusted": "Taille d'affichage réduite à %s pour tenir dans le cadre d'inventaire de %s."
   ,"settings.pingforit.inventory.preview_period_ticks": "Période de l'aperçu (ticks)"
-  ,"settings.pingforit.inventory.preview_period_ticks.tooltip": "Intervalle de renouvellement des quotas d'aperçu.\nDiminuer : renouvellement plus fréquent pouvant réduire l'attente ; traitement et trafic peuvent croître.\nAugmenter : renouvellement moins fréquent et moins de travail ; les aperçus peuvent attendre davantage."
+  ,"settings.pingforit.inventory.preview_period_ticks.tooltip": "Attente entre les lots d'aperçu pendant le traitement d'un grand inventaire.\nDiminuer : terminer l'aperçu plus vite.\nAugmenter : moins solliciter le serveur."
   ,"settings.pingforit.inventory.preview_max_variants_per_client_period": "Variantes par période client"
-  ,"settings.pingforit.inventory.preview_max_variants_per_client_period.tooltip": "Quota de variantes d'objets par joueur et période d'aperçu.\nDiminuer : moins de données et de traitement des listes ; des variantes peuvent manquer dans l'aperçu.\nAugmenter : davantage de variantes peuvent apparaître ; le volume des listes et leur traitement peuvent croître."
+  ,"settings.pingforit.inventory.preview_max_variants_per_client_period.tooltip": "Variantes d'objets que chaque joueur peut prévisualiser par tour.\nDiminuer : traiter moins de variantes.\nAugmenter : afficher plus de variantes."
   ,"settings.pingforit.inventory.preview_max_slots_per_client": "Cases d'aperçu par client"
-  ,"settings.pingforit.inventory.preview_max_slots_per_client.tooltip": "Progression des cases par joueur et période d'aperçu.\nDiminuer : moins de travail par joueur ; les grands conteneurs peuvent prendre plus de temps.\nAugmenter : les aperçus d'un joueur peuvent avancer davantage ; le travail serveur peut croître."
+  ,"settings.pingforit.inventory.preview_max_slots_per_client.tooltip": "Cases d'inventaire que l'Aperçu peut traiter pour un joueur à chaque tour.\nDiminuer : moins de travail par joueur.\nAugmenter : terminer plus vite les grands inventaires."
   ,"settings.pingforit.inventory.preview_max_slots_server": "Cases d'aperçu du serveur"
-  ,"settings.pingforit.inventory.preview_max_slots_server.tooltip": "Progression des cases de tout le serveur par période d'aperçu.\nDiminuer : moins de travail total ; les aperçus simultanés peuvent attendre davantage.\nAugmenter : plus d'aperçus peuvent avancer ensemble ; la charge serveur peut croître."
+  ,"settings.pingforit.inventory.preview_max_slots_server.tooltip": "Cases d'inventaire que l'Aperçu peut traiter sur tout le serveur à chaque tour.\nDiminuer : moins de travail d'aperçu au total.\nAugmenter : faire progresser plus d'aperçus ensemble."
   ,"settings.pingforit.inventory.preview_max_targets_per_client": "Cibles d'aperçu par client"
-  ,"settings.pingforit.inventory.preview_max_targets_per_client.tooltip": "Demandes d'aperçu simultanées par joueur.\nDiminuer : moins de demandes actives consomment des ressources ; parcourir plusieurs cibles peut prendre plus de temps.\nAugmenter : permet de demander plus de cibles ensemble ; mémoire et traitement peuvent croître."
+  ,"settings.pingforit.inventory.preview_max_targets_per_client.tooltip": "Cibles que chaque joueur peut prévisualiser en même temps.\nDiminuer : utiliser moins de ressources.\nAugmenter : parcourir plus de cibles à la fois."
   ,"settings.pingforit.inventory.preview_client_byte_multiplier": "Multiplicateur d'octets client"
-  ,"settings.pingforit.inventory.preview_client_byte_multiplier.tooltip": "Données d'aperçu envoyées par joueur et période.\nDiminuer : moins de trafic par joueur ; les grands aperçus peuvent arriver plus lentement.\nAugmenter : plus de données peuvent partir par période ; la bande passante utilisée peut croître."
+  ,"settings.pingforit.inventory.preview_client_byte_multiplier.tooltip": "Données d'aperçu envoyées à chaque joueur par tour.\nDiminuer : réduire le trafic.\nAugmenter : envoyer plus de données d'aperçu."
   ,"settings.pingforit.inventory.preview_global_byte_multiplier": "Multiplicateur global de l'aperçu"
-  ,"settings.pingforit.inventory.preview_global_byte_multiplier.tooltip": "Données d'aperçu par période et capacité de file d'envoi de tout le serveur.\nDiminuer : moins de trafic total et de données en attente ; les aperçus simultanés peuvent attendre davantage.\nAugmenter : permet de mettre en file et d'envoyer plus de données ; bande passante et mémoire utilisées peuvent croître."
+  ,"settings.pingforit.inventory.preview_global_byte_multiplier.tooltip": "Données d'aperçu que le serveur peut envoyer par tour.\nDiminuer : réduire le trafic.\nAugmenter : envoyer plus de données d'aperçu à la fois."
   ,"settings.pingforit.inventory.tracking_period_ticks": "Période de suivi (ticks)"
   ,"settings.pingforit.inventory.tracking_distinguish_faces": "Séparer le suivi par face"
-  ,"settings.pingforit.inventory.tracking_distinguish_faces.tooltip": "Suivi d'inventaire du serveur ; les permissions actuelles et les emplacements visibles par face restent vérifiés.\nDésactivé : réutilise les observations entre faces uniquement pour des vues dont l'équivalence est prouvée.\nActivé : garde les observations séparées par face.\nS'applique à la prochaine analyse ; les analyses en cours se terminent avec le réglage précédent."
+  ,"settings.pingforit.inventory.tracking_distinguish_faces.tooltip": "Chaque face d'un conteneur est-elle suivie séparément ?\nDésactivé : moins de charge serveur quand le contenu est identique.\nActivé : suivre chaque face séparément."
   ,"settings.pingforit.inventory.tracking_distinguish_players": "Séparer le suivi par joueur"
-  ,"settings.pingforit.inventory.tracking_distinguish_players.tooltip": "Suivi d'inventaire du serveur ; les permissions actuelles et les emplacements visibles par face restent vérifiés.\nDésactivé : réutilise les observations entre joueurs uniquement pour des vues dont l'équivalence est prouvée.\nActivé : garde les observations séparées par joueur.\nS'applique à la prochaine analyse ; les analyses en cours se terminent avec le réglage précédent."
-  ,"settings.pingforit.inventory.tracking_period_ticks.tooltip": "Intervalle des quotas de suivi et pause après une analyse complète de l'inventaire.\nDiminuer : quotas et analyses plus fréquents pouvant réduire l'attente ; traitement et trafic peuvent croître.\nAugmenter : quotas et analyses moins fréquents réduisent le travail ; les changements peuvent apparaître plus tard."
+  ,"settings.pingforit.inventory.tracking_distinguish_players.tooltip": "La vue de chaque joueur est-elle suivie séparément ?\nDésactivé : moins de charge serveur quand le contenu est identique.\nActivé : suivre chaque joueur séparément."
+  ,"settings.pingforit.inventory.tracking_period_ticks.tooltip": "Attente après la fin d'une analyse de Suivi avant la suivante.\nDiminuer : les mises à jour arrivent plus vite.\nAugmenter : moins solliciter le serveur."
   ,"settings.pingforit.inventory.tracking_max_variants_per_target": "Variantes suivies par cible"
-  ,"settings.pingforit.inventory.tracking_max_variants_per_target.tooltip": "Sélections actives de variantes d'objets suivies sur une même cible.\nDiminuer : moins de sélections consomment des ressources ; moins de variantes peuvent être suivies ensemble.\nAugmenter : conserve plus de variantes suivies ensemble ; mémoire et travail de mise à jour peuvent croître."
+  ,"settings.pingforit.inventory.tracking_max_variants_per_target.tooltip": "Variantes d'objets qu'une cible peut suivre en même temps.\nDiminuer : utiliser moins de ressources.\nAugmenter : suivre plus de variantes à la fois."
   ,"settings.pingforit.inventory.tracking_max_slots_per_target": "Cases suivies par cible"
-  ,"settings.pingforit.inventory.tracking_max_slots_per_target.tooltip": "Progression des cases par cible et période de suivi.\nDiminuer : moins de travail par cible ; les changements de grands conteneurs peuvent apparaître plus tard.\nAugmenter : chaque analyse peut avancer davantage ; le travail serveur peut croître."
+  ,"settings.pingforit.inventory.tracking_max_slots_per_target.tooltip": "Cases d'inventaire que le Suivi peut traiter pour une cible à chaque tour.\nDiminuer : moins de travail par cible.\nAugmenter : analyser chaque cible plus loin."
   ,"settings.pingforit.inventory.tracking_max_slots_server": "Cases suivies du serveur"
-  ,"settings.pingforit.inventory.tracking_max_slots_server.tooltip": "Progression des cases de tout le serveur par période de suivi.\nDiminuer : moins de travail total ; de nombreuses cibles actives peuvent se mettre à jour plus lentement.\nAugmenter : plus de cibles peuvent avancer ensemble ; la charge serveur peut croître."
+  ,"settings.pingforit.inventory.tracking_max_slots_server.tooltip": "Cases d'inventaire que le Suivi peut traiter sur tout le serveur à chaque tour.\nDiminuer : moins de travail de Suivi au total.\nAugmenter : faire progresser plus de cibles ensemble."
   ,"settings.pingforit.inventory.tracking_stream_byte_multiplier": "Multiplicateur d'octets du flux"
-  ,"settings.pingforit.inventory.tracking_stream_byte_multiplier.tooltip": "Données de changements envoyées par joueur et cible à chaque période de suivi.\nDiminuer : moins de trafic de changements ; les conteneurs très actifs peuvent se mettre à jour plus lentement.\nAugmenter : plus de changements peuvent partir par période ; la bande passante utilisée peut croître."
+  ,"settings.pingforit.inventory.tracking_stream_byte_multiplier.tooltip": "Changements envoyés à chaque joueur pour chaque cible à chaque tour.\nDiminuer : réduire le trafic de mise à jour.\nAugmenter : envoyer plus de changements par tour."
   ,"settings.pingforit.inventory.tracking_snapshot_byte_multiplier": "Multiplicateur d'octets des instantanés"
-  ,"settings.pingforit.inventory.tracking_snapshot_byte_multiplier.tooltip": "Taille des fragments et total des instantanés par joueur sur toutes les cibles à chaque période.\nDiminuer : fragments plus petits et moins de trafic ; l'affichage initial et les réparations peuvent prendre plus de temps.\nAugmenter : plus de données peuvent partir par période ; paquets et bande passante utilisée peuvent croître."
+  ,"settings.pingforit.inventory.tracking_snapshot_byte_multiplier.tooltip": "Contenu envoyé quand un inventaire suivi apparaît ou est restauré, par joueur et par tour.\nDiminuer : réduire le trafic.\nAugmenter : afficher ou restaurer le contenu plus vite."
   ,"settings.pingforit.inventory.tracking_global_byte_multiplier": "Multiplicateur global du suivi"
-  ,"settings.pingforit.inventory.tracking_global_byte_multiplier.tooltip": "Données de suivi par période et capacité de file d'envoi de tout le serveur.\nDiminuer : moins de trafic total et de données en attente ; les cibles très actives peuvent attendre davantage.\nAugmenter : permet de mettre en file et d'envoyer plus de données ; bande passante et mémoire utilisées peuvent croître."
+  ,"settings.pingforit.inventory.tracking_global_byte_multiplier.tooltip": "Données de Suivi que le serveur peut envoyer par tour.\nDiminuer : réduire le trafic.\nAugmenter : envoyer plus de données de Suivi à la fois."
   ,"settings.pingforit.inventory.tracking_resync_min_periods": "Délai de resynchronisation (périodes)"
-  ,"settings.pingforit.inventory.tracking_resync_min_periods.tooltip": "Intervalle minimal entre les demandes de réparation du suivi.\nDiminuer : réparations plus fréquentes et récupération potentiellement plus rapide ; le trafic de réparation peut croître.\nAugmenter : moins de demandes répétées réduisent le trafic ; la récupération peut prendre plus de temps."
+  ,"settings.pingforit.inventory.tracking_resync_min_periods.tooltip": "Attente avant de réessayer le Suivi après une erreur ; 0 supprime cette attente.\nDiminuer : récupérer plus vite.\nAugmenter : moins de nouvelles tentatives."
   ,"settings.pingforit.inventory.tracking_heartbeat_periods": "Cadence de contrôle (périodes)"
-  ,"settings.pingforit.inventory.tracking_heartbeat_periods.tooltip": "Les valeurs positives règlent l'intervalle des contrôles périodiques de suivi.\nDiminuer : les contrôles fréquents peuvent détecter les écarts plus tôt ; le travail peut croître.\nAugmenter : moins de contrôles réduisent le travail ; les écarts peuvent être détectés plus tard."
+  ,"settings.pingforit.inventory.tracking_heartbeat_periods.tooltip": "Fréquence à laquelle on vérifie que le contenu suivi est bien synchronisé ; 0 désactive ces vérifications.\nDiminuer : remarquer plus tôt un contenu désynchronisé.\nAugmenter : réduire le coût des vérifications."
   ,"settings.pingforit.inventory.tracking_grace_periods": "Fenêtre de lissage des octets"
-  ,"settings.pingforit.inventory.tracking_grace_periods.tooltip": "Fenêtre de lissage du trafic de suivi de tout le serveur.\nDiminuer : pics brefs plus faibles ; les mises à jour groupées peuvent prendre plus de temps à envoyer.\nAugmenter : les mises à jour groupées passent plus facilement en rafales courtes ; les pics peuvent être plus importants."
+  ,"settings.pingforit.inventory.tracking_grace_periods.tooltip": "Durée pendant laquelle le trafic de Suivi peut être regroupé en une courte rafale.\nDiminuer : envoyer des rafales plus petites.\nAugmenter : regrouper plus de mises à jour en une courte rafale."
   ,"settings.pingforit.spatial_selector.precise_capture_period_ticks": "Intervalle de capture précise : %s"
-  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks.tooltip": "Intervalle de capture des candidats en direct quand Précis est actif ; s'applique au prochain maintien.\nDiminuer : actualiser les candidats plus souvent ; 1 capture à chaque tick et peut demander plus de travail.\nAugmenter : actualiser moins souvent ; les changements de candidats peuvent apparaître plus tard."
+  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks.tooltip": "Fréquence à laquelle Précis cherche les cibles.\nDiminuer : mettre à jour plus tôt ; 1 vérifie à chaque tick.\nAugmenter : mettre à jour moins souvent."
   ,"settings.pingforit.group.wheel_options": "Options de la roue"
   ,"unit.pingforit.kib": "%s Kio"
   ,"unit.pingforit.ticks": "%st"
@@ -475,32 +477,32 @@
   ,"pingforit.chat.content.item_count": "%s × %s"
   ,"pingforit.chat.content.quality": "%s (%s)"
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.name": "Nom personnalisé"
-  ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "Nom personnalisé de la cible signalée."
+  ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "Nom personnalisé de la cible marquée."
   ,"presentation.pingforit.content.group.create": "Propriétés de Create..."
   ,"presentation.pingforit.content.group.stress": "Charge..."
   ,"settings.pingforit.spatial_selector.trail_length": "Longueur de la trace : %s"
-  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "Points de trace conservés au prochain maintien.\nDiminuer : conserver moins de points pour une trace potentiellement plus courte.\nAugmenter : conserver plus de points pour une trace potentiellement plus longue si le mouvement est suffisant."
+  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "Longueur maximale de la trace du geste.\nDiminuer : trace plus courte.\nAugmenter : trace plus longue."
   ,"settings.pingforit.spatial_selector.trail_opacity": "Opacité de la trace : %s"
-  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Visibilité de la trace seule au prochain maintien ; roue, options, guides et connecteur ne changent pas.\nDiminuer : estomper la trace ; 0 la masque sans changer l'historique ni la sélection.\nAugmenter : rendre la trace plus opaque."
+  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Visibilité de la trace du geste.\nDiminuer : trace plus discrète ; 0 la masque.\nAugmenter : trace plus visible."
   ,"unit.pingforit.points": "%s points"
   ,"value.pingforit.off": "Désactivé"
   ,"settings.pingforit.double_click_danger_window_millis": "Fenêtre de danger de double-clic : %s"
-  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "Délai entre appuis consécutifs d'une séquence de danger répété ; s'applique au prochain appui. Le premier appui bref n'est pas retardé.\nDiminuer : exiger des appuis répétés plus rapides.\nAugmenter : autoriser des appuis répétés plus lents ; les répétitions admissibles réutilisent la première cible."
+  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "Écart maximal entre deux clics pour un ping Danger répété.\nDiminuer : cliquer plus vite.\nAugmenter : autoriser des clics plus lents."
   ,"settings.pingforit.double_click_danger_angle_degrees": "Angle de danger de double-clic : %s"
-  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "Rotation active de la souris autorisée depuis le premier appui pour répéter Danger ; s'applique au prochain appui. 0 désactive ce geste et la compatibilité remet ce réglage à 0.\nDiminuer : exiger une visée plus stable ; 0 désactive le geste.\nAugmenter : autoriser plus de rotation de souris ; les répétitions admissibles utilisent toujours la première cible."
+  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "De combien la souris peut tourner entre deux clics pendant un Danger répété ; 0 désactive ce geste.\nDiminuer : garder une visée plus stable.\nAugmenter : autoriser un plus grand mouvement de souris."
   ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled": "Garder la sélection d'inventaire ouverte"
-  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "Comportement au relâchement dans la liste d'inventaire et le menu d'objet au prochain maintien.\nDésactivé : relâcher valide ou ferme selon le comportement ordinaire.\nActivé : le premier relâchement garde le menu ouvert ; les appuis brefs suivants valident et maintenir annule la sélection sans retirer de marqueur."
-  ,"settings.pingforit.scope.client.tooltip": "Modifier les préférences de ce client ; l'autorité du serveur ne change pas."
-  ,"settings.pingforit.scope.server.tooltip": "Consulter les paramètres du serveur ; leur modification exige le niveau de permission 3. Les changements ordinaires sont envoyés à la fermeture finale ; les règles de présentation suivent une voie immédiate distincte."
-  ,"settings.pingforit.navigation.back.tooltip": "Revenir à la vue d'ensemble de cette section sans envoyer le brouillon des paramètres serveur ordinaires."
-  ,"settings.pingforit.navigation.done.tooltip": "Enregistrer les paramètres client, puis envoyer les changements serveur ordinaires valides et fermer. Leur application par le serveur n'est pas confirmée."
-  ,"settings.pingforit.presentation.server.tooltip": "Règles serveur des champs pour le type de cible sélectionné ; chaque modification est envoyée séparément, sans attendre la fermeture des paramètres.\nLes autorisations l'emportent sur les blocages ; permissions des champs et disponibilité des données restent applicables.\nLa modification exige le niveau de permission 3 ; les restrictions sur les sous-éléments se règlent uniquement dans le fichier."
-  ,"settings.pingforit.presentation.target_type.tooltip": "Choisir le type de cible dont les règles seront consultées et modifiées.\nChanger de type ne modifie pas la politique et n'efface pas le texte saisi dans une autre liste."
-  ,"settings.pingforit.presentation.selector.tooltip": "Saisir un sélecteur d'ID de champ tel que minecraft:entity.health ou create:kinetic.*.\n* correspond dans une partie espace de noms ou chemin, jamais au-delà de ':' ; les ID d'adaptateurs ne sélectionnent pas leurs champs.\nLa saisie n'applique aucune règle ; utiliser Ajouter."
-  ,"settings.pingforit.presentation.add.tooltip": "Envoyer immédiatement ce sélecteur à la liste courante du type sélectionné.\nUn ajout réussi efface uniquement la saisie inchangée de cette liste ; les erreurs conservent le texte."
-  ,"settings.pingforit.presentation.remove.tooltip": "Demander immédiatement le retrait de ce sélecteur de cette liste.\nLes autres sélecteurs correspondants, le mode liste blanche uniquement et les valeurs par défaut restent applicables."
-  ,"settings.pingforit.presentation.refresh.tooltip": "Demander une nouvelle vue de la politique serveur sans modifier les règles.\nConserve la saisie et la dernière vue connue ; réessayer après expiration du délai d'une demande."
-  ,"settings.pingforit.presentation.advanced.tooltip": "Afficher ou masquer les listes de sélecteurs et le mode liste blanche uniquement pour ce type de cible.\nModifie seulement la vue de l'éditeur, pas la politique du serveur."
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "Comportement au relâchement pour la liste d'inventaire et le menu d'objet.\nDésactivé : relâcher valide ou ferme comme d'ordinaire.\nActivé : le premier relâchement garde le menu ouvert ; les appuis suivants valident, un maintien annule la sélection."
+  ,"settings.pingforit.scope.client.tooltip": "Modifier les paramètres de ce client."
+  ,"settings.pingforit.scope.server.tooltip": "Consulter les paramètres du serveur ; leur modification exige le niveau de permission 3."
+  ,"settings.pingforit.navigation.back.tooltip": "Revenir à la vue d'ensemble de cette section."
+  ,"settings.pingforit.navigation.done.tooltip": "Enregistrer les paramètres client, envoyer les changements serveur et fermer."
+  ,"settings.pingforit.presentation.server.tooltip": "Règles de champs du type de cible sélectionné ; la modification exige le niveau de permission 3."
+  ,"settings.pingforit.presentation.target_type.tooltip": "Choisir le type de cible à consulter et modifier."
+  ,"settings.pingforit.presentation.selector.tooltip": "Sélecteur d'ID de champ, par exemple minecraft:entity.health ou create:kinetic.*.\n* correspond uniquement dans un même espace de noms ou segment de chemin et ne traverse jamais le caractère :.\nUtiliser Ajouter pour appliquer le sélecteur."
+  ,"settings.pingforit.presentation.add.tooltip": "Ajouter le sélecteur saisi à la liste courante."
+  ,"settings.pingforit.presentation.remove.tooltip": "Retirer ce sélecteur de la liste courante."
+  ,"settings.pingforit.presentation.refresh.tooltip": "Relire les règles les plus récentes depuis le serveur."
+  ,"settings.pingforit.presentation.advanced.tooltip": "Afficher ou masquer les règles avancées."
   ,"unit.pingforit.multiplier": "%1$s×"
   ,"settings.pingforit.format.name_value": "%1$s : %2$s"
   ,"settings.pingforit.presentation.advanced.with_counts": "%1$s (%2$s)"
@@ -520,20 +522,20 @@
   ,"settings.pingforit.group.marker_cancellation": "Retrait des marqueurs"
   ,"settings.pingforit.group.content_selection": "Sélection de contenu et d'inventaire"
   ,"settings.pingforit.group.sound_notices": "Son et notifications"
-  ,"settings.pingforit.category.client.display.tooltip": "Choisir la portée locale de capture, la durée d'affichage des marqueurs, leurs icônes, leur taille et les informations de l'auteur. Ne modifie ni la portée ni la durée de vie côté serveur."
-  ,"settings.pingforit.category.client.selection.tooltip": "Choisir si la capture inclut les formes de contour des blocs, les entités sur liste noire et les fluides. S'applique au prochain maintien, pas aux listes d'affichage des blocs."
-  ,"settings.pingforit.category.client.wheel_appearance.tooltip": "Ajuster la disposition de la roue et de l'inventaire, le texte, l'opacité, les traces et les mouvements au prochain maintien. L'apparence ne remplace pas les seuils gestuels."
-  ,"settings.pingforit.category.client.input.tooltip": "Régler l'ouverture, la compatibilité, les appuis Danger répétés, la visée de retrait, les gestes de navigation et la sélection du contenu. La compatibilité efface les choix gestuels incompatibles."
-  ,"settings.pingforit.category.client.channel_notices.tooltip": "Choisir un canal pour ce serveur et ajuster le volume local des pings ainsi que la taille des avis de basculement. Un canal vide suit la politique du serveur."
-  ,"settings.pingforit.category.client.geometry_config.tooltip": "Choisir les sources de contours de blocs-entités ou enregistrer, fermer et ouvrir le fichier client complet. Les modifications externes exigent un redémarrage du client."
-  ,"settings.pingforit.category.client.performance.tooltip": "Régler la fréquence de capture des candidats en direct lorsque Précis est actif. Des intervalles plus courts actualisent plus tôt, mais peuvent demander plus de travail ; s'applique au prochain maintien."
-  ,"settings.pingforit.category.client.debug.tooltip": "Choisir le détail du journal de ce client et, en Debug, son HUD et ses mesures de performances. Les modifications s'appliquent immédiatement sans affecter le journal ni la collecte du serveur."
-  ,"settings.pingforit.category.server.channel_players.tooltip": "Définir le comportement du serveur pour les canaux vides et les nouvelles demandes ciblant un joueur. Les modifications ordinaires restent un brouillon jusqu'à la fermeture finale."
-  ,"settings.pingforit.category.server.send_rate.tooltip": "Définir la réserve de créations de marqueurs en rafale et son délai de récupération pour chaque joueur. Une limite de fréquence nulle désactive le contrôle de fréquence, pas les pings."
-  ,"settings.pingforit.category.server.marker_duration.tooltip": "Définir la durée de vie serveur figée à la création des nouveaux marqueurs. Les échéances existantes et les préférences indépendantes d'affichage client ne changent pas."
-  ,"settings.pingforit.category.server.performance.tooltip": "Contrôler les avis de retard aux administrateurs et les budgets d'inventaire partagés, d'aperçu et de suivi. Équilibrer consommation de ressources, progression, délais de livraison et détails des objets."
-  ,"settings.pingforit.category.server.server_presentation.tooltip": "Consulter et modifier les règles de champs par type de cible à partir du catalogue de cette connexion. Les modifications suivent une voie serveur immédiate distincte et exigent le niveau de permission 3."
-  ,"settings.pingforit.category.server.debug.tooltip": "Choisir le détail du journal du serveur et, en Debug, la collecte d'Aperçu et de Suivi. Les modifications restent dans le brouillon jusqu'à la fermeture finale ; la vue en lecture seule affiche les valeurs actuelles.",
+  ,"settings.pingforit.category.client.display.tooltip": "Régler l'apparence des marqueurs et la distance à laquelle vous pouvez marquer."
+  ,"settings.pingforit.category.client.selection.tooltip": "Choisir les cibles qui peuvent être marquées."
+  ,"settings.pingforit.category.client.wheel_appearance.tooltip": "Ajuster la disposition et l'apparence de la roue."
+  ,"settings.pingforit.category.client.input.tooltip": "Configurer les commandes et les gestes."
+  ,"settings.pingforit.category.client.channel_notices.tooltip": "Configurer le canal et les avis locaux."
+  ,"settings.pingforit.category.client.geometry_config.tooltip": "Choisir l'apparence des contours de blocs et ouvrir le fichier de configuration client."
+  ,"settings.pingforit.category.client.performance.tooltip": "Régler la fréquence à laquelle Précis cherche les cibles."
+  ,"settings.pingforit.category.client.debug.tooltip": "Options de débogage de ce client."
+  ,"settings.pingforit.category.server.channel_players.tooltip": "Configurer le canal et le comportement des joueurs côté serveur."
+  ,"settings.pingforit.category.server.send_rate.tooltip": "Configurer la fréquence d'envoi des marqueurs du serveur."
+  ,"settings.pingforit.category.server.marker_duration.tooltip": "Configurer la durée de vie des marqueurs sur le serveur."
+  ,"settings.pingforit.category.server.performance.tooltip": "Ajuster la surveillance des performances du serveur et le traitement des inventaires."
+  ,"settings.pingforit.category.server.server_presentation.tooltip": "Configurer les règles de champs par type de cible."
+  ,"settings.pingforit.category.server.debug.tooltip": "Options de débogage du mod.",
 	"monitor.pingforit.source.local": "Local",
 	"monitor.pingforit.source.server": "Serveur",
 	"monitor.pingforit.source.shared": "Partagé",
@@ -634,13 +636,13 @@
 	"monitor.pingforit.tooltip.sync": "Les compteurs de synchronisation décrivent uniquement le trafic inventory-v2 ordinaire, pas tout le trafic de connexion ni le reçu de création CREATED.",
 	"settings.pingforit.group.monitor": "Moniteur de performances",
 	"settings.pingforit.monitor.hud_enabled": "HUD du moniteur",
-	"settings.pingforit.monitor.hud_enabled.tooltip": "Affiche la superposition locale du moniteur de performances tant que ce profil de journalisation client est Debug.\nLa désactivation conserve toutes les sélections de métriques ; la réactivation ne demande pas de les resélectionner.\nLes changements s'appliquent immédiatement et n'activent ni ne désactivent jamais la collecte du serveur.",
+	"settings.pingforit.monitor.hud_enabled.tooltip": "Afficher les informations de performance à l'écran.\nDésactivé : les masquer ; vos choix de métriques sont conservés.\nActivé : afficher les métriques choisies.",
 	"settings.pingforit.monitor.preview_enabled": "Surveillance de l'aperçu",
-	"settings.pingforit.monitor.preview_enabled.tooltip": "Collecte des métriques de performances d'aperçu bornées sur le serveur tant que le profil de journalisation du serveur est Debug.\nL'interrupteur reste dans le brouillon des paramètres du serveur jusqu'à la fermeture finale ; il ne démarre pas la collecte avant que le serveur accepte la mise à jour.\nL'Aperçu et le Suivi collectent indépendamment.",
+	"settings.pingforit.monitor.preview_enabled.tooltip": "Informations de performance sur l'aperçu des inventaires du serveur.\nDésactivé : ne pas les enregistrer.\nActivé : les enregistrer.",
 	"settings.pingforit.monitor.tracking_enabled": "Surveillance du suivi",
-	"settings.pingforit.monitor.tracking_enabled.tooltip": "Collecte des métriques de performances de suivi bornées sur le serveur tant que le profil de journalisation du serveur est Debug.\nL'interrupteur reste dans le brouillon des paramètres du serveur jusqu'à la fermeture finale ; il ne démarre pas la collecte avant que le serveur accepte la mise à jour.\nL'Aperçu et le Suivi collectent indépendamment.",
+	"settings.pingforit.monitor.tracking_enabled.tooltip": "Informations de performance sur le suivi des inventaires du serveur.\nDésactivé : ne pas les enregistrer.\nActivé : les enregistrer.",
 	"settings.pingforit.monitor.metric": "Métrique du moniteur",
-	"settings.pingforit.monitor.metric.tooltip": "La sélection d'une métrique ne contrôle que l'affichage local et la demande sortante. Elle n'active ni ne désactive jamais la collecte du serveur ; la sélection actuelle est conservée lorsque le HUD est désactivé.",
+	"settings.pingforit.monitor.metric.tooltip": "Choisir ce que le moniteur affiche.\nVos choix sont conservés quand le moniteur est désactivé.",
 	"settings.pingforit.monitor.group.summary": "Résumé",
 	"settings.pingforit.monitor.group.server_preview": "Aperçu du serveur",
 	"settings.pingforit.monitor.group.server_tracking": "Suivi du serveur",

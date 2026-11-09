@@ -162,14 +162,13 @@ class LoggingProfileScreenTest {
 	}
 
 	@Test
-	void loggingRowsExposeShortScopeHelpWithoutUnlockOrDebugHints() throws Exception {
+	void loggingRowsExposeNativeHelpWithoutUnlockOrDebugHints() throws Exception {
 		withScreen(new ClientConfig(), (screen, client) -> {
 			openCategory(screen, Category.CLIENT_DEBUG);
 			LoggingProfileButton clientRow = loggingProfileButton(screen);
 			assertTrue(clientRow.getMessage().getString().contains("Logging Detail"));
 			String clientHelp = tooltipText(clientRow);
-			assertTrue(clientHelp.contains("Client log detail."));
-			assertTrue(clientHelp.contains("Applies immediately."));
+			assertFalse(clientHelp.isBlank(), "the client row exposes native help");
 			assertNoUnlockHint(clientHelp);
 
 			backButton(screen).onPress();
@@ -181,8 +180,7 @@ class LoggingProfileScreenTest {
 			LoggingProfileButton serverRow = loggingProfileButton(screen);
 			assertTrue(serverRow.getMessage().getString().contains("Server Logging Detail"));
 			String serverHelp = tooltipText(serverRow);
-			assertTrue(serverHelp.contains("Server log detail."));
-			assertTrue(serverHelp.contains("Submitted when settings close"));
+			assertFalse(serverHelp.isBlank(), "the server row exposes native help");
 			assertNoUnlockHint(serverHelp);
 		});
 	}

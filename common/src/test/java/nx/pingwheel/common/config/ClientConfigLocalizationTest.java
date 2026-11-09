@@ -14,6 +14,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
@@ -75,15 +76,19 @@ class ClientConfigLocalizationTest {
 		"settings.pingforit.reset_all.server_draft_warning",
 		"settings.pingforit.open_client_config",
 		"settings.pingforit.open_client_config.tooltip");
-	private static final Map<String, String> EXTERNAL_LIST_RESTART_MARKERS = Map.of(
-		"de_de", "Neustart des Clients",
-		"en_us", "restarting the client",
-		"es_ar", "reiniciar el cliente",
-		"fr_fr", "redémarrage du client",
-		"pl_pl", "ponownym uruchomieniu klienta",
-		"tr_tr", "istemci yeniden başlatıldıktan sonra",
-		"zh_cn", "重启客户端后",
-		"zh_tw", "重新啟動用戶端後");
+	/**
+	 * Restart stems, not full phrases: the tooltip may be reworded as long as
+	 * every locale still states that external edits need a client restart.
+	 */
+	private static final @Unmodifiable Map<String, String> EXTERNAL_LIST_RESTART_STEMS = Map.of(
+		"de_de", "neustart",
+		"en_us", "restart",
+		"es_ar", "reinici",
+		"fr_fr", "redémarr",
+		"pl_pl", "uruchom",
+		"tr_tr", "yeniden başlat",
+		"zh_cn", "重启",
+		"zh_tw", "重新啟動");
 
 	@Test
 	void englishLocaleContainsInteractionSettingsAndUnits() throws IOException {
@@ -341,7 +346,8 @@ class ClientConfigLocalizationTest {
 			String tooltip = readTranslation(locale,
 				"settings.pingforit.open_client_config.tooltip");
 			assertTrue(
-				tooltip.contains(EXTERNAL_LIST_RESTART_MARKERS.get(locale)),
+				tooltip.toLowerCase(java.util.Locale.ROOT)
+					.contains(EXTERNAL_LIST_RESTART_STEMS.get(locale)),
 				() -> "external list tooltip must require a client restart: " + locale);
 		}
 	}
