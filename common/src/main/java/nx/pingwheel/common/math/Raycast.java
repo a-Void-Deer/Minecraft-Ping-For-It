@@ -109,20 +109,8 @@ public class Raycast {
 			.getBoundingBox()
 			.expandTowards(direction.scale(maxDistance))
 			.inflate(1.0, 1.0, 1.0);
-		var fluidMode = switch (policy.fluidMode()) {
-			case NONE -> ClipContext.Fluid.NONE;
-			case ANY -> ClipContext.Fluid.ANY;
-		};
-
 		var blockHitResult = cameraEntity.level().clip(
-			new ClipContext(
-				rayStartVec,
-				rayEndVec,
-				policy.blockMode() == RaycastPolicy.BlockMode.OUTLINE
-					? ClipContext.Block.OUTLINE
-					: ClipContext.Block.VISUAL,
-				fluidMode,
-				cameraEntity)
+			PingClipContext.create(rayStartVec, rayEndVec, policy, cameraEntity)
 		);
 
 		CollisionContext collisionContext = CollisionContext.of(cameraEntity);
@@ -225,10 +213,7 @@ public class Raycast {
 		}
 		try {
 			boolean[] providerComplete = {true};
-			ClipContext context = new ClipContext(start, end,
-				policy.blockMode() == RaycastPolicy.BlockMode.OUTLINE ? ClipContext.Block.OUTLINE : ClipContext.Block.VISUAL,
-				policy.fluidMode() == RaycastPolicy.FluidMode.ANY ? ClipContext.Fluid.ANY : ClipContext.Fluid.NONE,
-				collisionContext);
+			ClipContext context = PingClipContext.create(start, end, policy, collisionContext);
 			LoadedCandidateBlockView view = new LoadedCandidateBlockView(level, budget);
 			boolean complete = NativeBlockCandidateScan.scan(view, level::isLoaded,
 				context, budget, hit -> {

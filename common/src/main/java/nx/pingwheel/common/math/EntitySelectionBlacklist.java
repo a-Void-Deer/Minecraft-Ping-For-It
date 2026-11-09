@@ -3,11 +3,14 @@ package nx.pingwheel.common.math;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.function.Predicate;
 
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.Entity;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Common entity-selection blacklist seam for optional integrations.
@@ -21,15 +24,19 @@ public final class EntitySelectionBlacklist {
 
 	private static final ResourceLocation SIMULATED_HONEY_GLUE_ID =
 		ResourceLocation.fromNamespaceAndPath("simulated", "honey_glue");
-	private static final Predicate<Entity> DEFAULT_SIMULATED_HONEY_GLUE_RULE =
-		EntitySelectionBlacklist::isSimulatedHoneyGlue;
+	private static final ResourceLocation TIAB_ACCELERATOR_ID =
+		ResourceLocation.fromNamespaceAndPath("tiab", "accelerator");
+	private static final @Unmodifiable Set<ResourceLocation> DEFAULT_IGNORED_ENTITY_IDS =
+		Set.of(SIMULATED_HONEY_GLUE_ID, TIAB_ACCELERATOR_ID);
+	private static final Predicate<Entity> DEFAULT_IGNORED_ENTITY_RULE =
+		EntitySelectionBlacklist::isDefaultIgnoredEntity;
 
 	/** The global blacklist used by the client raycast. */
 	public static final EntitySelectionBlacklist INSTANCE = new EntitySelectionBlacklist();
 
 	private final Object lock = new Object();
 	private final List<Registration> registrations = new ArrayList<>();
-	private volatile List<Predicate<Entity>> snapshot = List.of(DEFAULT_SIMULATED_HONEY_GLUE_RULE);
+	private volatile @Unmodifiable List<Predicate<Entity>> snapshot = List.of(DEFAULT_IGNORED_ENTITY_RULE);
 
 	/**
 	 * Registers one entity predicate.  A matching predicate excludes the entity
@@ -80,16 +87,16 @@ public final class EntitySelectionBlacklist {
 
 	private void publishSnapshot() {
 		var predicates = new ArrayList<Predicate<Entity>>(registrations.size() + 1);
-		predicates.add(DEFAULT_SIMULATED_HONEY_GLUE_RULE);
+		predicates.add(DEFAULT_IGNORED_ENTITY_RULE);
 		predicates.addAll(registrations.stream().map(Registration::predicate).toList());
 		snapshot = List.copyOf(predicates);
 	}
 
-	static boolean isDefaultIgnoredEntityId(ResourceLocation entityTypeId) {
-		return SIMULATED_HONEY_GLUE_ID.equals(entityTypeId);
+	static boolean isDefaultIgnoredEntityId(@Nullable ResourceLocation entityTypeId) {
+		return entityTypeId != null && DEFAULT_IGNORED_ENTITY_IDS.contains(entityTypeId);
 	}
 
-	private static boolean isSimulatedHoneyGlue(Entity entity) {
+	private static boolean isDefaultIgnoredEntity(Entity entity) {
 		return isDefaultIgnoredEntityId(BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()));
 	}
 
