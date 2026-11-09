@@ -172,6 +172,9 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		boolean baseline = true, complete, control, deliveryIncomplete, fencePending;
 		/** Bootstrap is retained presentation, never completed source evidence. */
 		boolean bootstrap, bootstrapClosed;
+		/** A newly installed offer can finish without data, unlike an unrelated status control. */
+		boolean offeredCutPending;
+		long queueGeneration = -1, monitoredPending, monitoredAdmitted;
 		State(Context context, Route route, RetainedMemoryLedger.Ticket memory) {
 			this.context = context; this.route = route; this.memory = memory; fencePending = route.markerId() != null;
 			module = route.markerId() == null ? Module.INVENTORY_PREVIEW : Module.INVENTORY_TRACKING;
@@ -199,6 +202,8 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	private InventorySettings settings;
 	private InventoryWireWindow window;
 	private long trackingPeriod = -1, previewGlobal, previewQueued, trackingQueued;
+	private long queueGeneration = -1, previewPending, previewAdmitted, trackingPending, trackingAdmitted;
+	private boolean queueBaseline;
 	private long windowBase;
 	private int windowGrace;
 	private int drainCursor;
@@ -227,17 +232,62 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	/** Existing logical queue cost, not estimated unsent wire bytes; includes existing initial staging. */
 	void sampleMonitor() {
 		if (!monitor.enabled() || settings == null) return;
+		prepareMonitorQueues();
 		if (monitor.enabled(Lane.PREVIEW)) {
+			monitor.count(Lane.PREVIEW, Counter.PUBLICATIONS_INSTALLED, 0); monitor.count(Lane.PREVIEW, Counter.CUTS_COMPLETED, 0);
 			monitor.gauge(Lane.PREVIEW, Gauge.QUEUE_LOGICAL_COST, previewQueued);
 			monitor.gauge(Lane.PREVIEW, Gauge.QUEUE_CAP, settings.previewQueueBytes());
+			sampleMonitorQueues(Lane.PREVIEW, previewPending, previewAdmitted);
 			monitor.budget(Lane.PREVIEW, Budget.WIRE_BYTES, previewClock.period(), settings.previewGlobalPeriodBytes(),
 				previewGlobal, settings.previewGlobalPeriodBytes() - previewGlobal);
 		}
 		if (monitor.enabled(Lane.TRACKING)) {
+			monitor.count(Lane.TRACKING, Counter.PUBLICATIONS_INSTALLED, 0); monitor.count(Lane.TRACKING, Counter.CUTS_COMPLETED, 0);
 			monitor.gauge(Lane.TRACKING, Gauge.QUEUE_LOGICAL_COST, trackingQueued);
 			monitor.gauge(Lane.TRACKING, Gauge.QUEUE_CAP, settings.trackingRollingQueueBytes());
+			sampleMonitorQueues(Lane.TRACKING, trackingPending, trackingAdmitted);
 			if (window != null) monitor.budget(Lane.TRACKING, Budget.WIRE_BYTES, trackingClock.period(),
 				windowBase * (windowGrace + 1L), window.spent(), window.remaining());
+		}
+	}
+	/** No scan on collection changes: the next existing complete tick loop establishes the baseline. */
+	private boolean prepareMonitorQueues() {
+		if (!monitor.enabled()) return false;
+		long generation = monitor.collectionGeneration();
+		if (queueGeneration != generation) {
+			queueGeneration = generation; queueBaseline = false;
+			previewPending = previewAdmitted = trackingPending = trackingAdmitted = 0;
+		}
+		if (states.isEmpty()) {
+			previewPending = previewAdmitted = trackingPending = trackingAdmitted = 0;
+			queueBaseline = true;
+		}
+		return true;
+	}
+	/** Actual map/frame sizes, not contexts, payload size or a conversion from logical queue cost. */
+	private void observeMonitorQueue(State state) {
+		if (!monitor.enabled() || states.get(key(state.context)) != state) return;
+		// A reentrant withdraw/rebase can retire the cut before the old send returns
+		// and advances its legacy cursor. No admitted cut owns that stale cursor.
+		updateMonitorQueue(state, state.pending.size(), state.admitted.isEmpty() ? 0 : state.admitted.size() - state.part);
+	}
+	private void updateMonitorQueue(State state, long pending, long admitted) {
+		if (!prepareMonitorQueues()) return;
+		Lane lane = state.route.markerId() == null ? Lane.PREVIEW : Lane.TRACKING;
+		if (!monitor.enabled(lane)) return;
+		long pendingDelta = pending, admittedDelta = admitted;
+		if (state.queueGeneration == queueGeneration) {
+			pendingDelta -= state.monitoredPending; admittedDelta -= state.monitoredAdmitted;
+		}
+		if (lane == Lane.PREVIEW) { previewPending += pendingDelta; previewAdmitted += admittedDelta; }
+		else { trackingPending += pendingDelta; trackingAdmitted += admittedDelta; }
+		state.queueGeneration = queueGeneration; state.monitoredPending = pending; state.monitoredAdmitted = admitted;
+	}
+	private void sampleMonitorQueues(Lane lane, long pending, long admitted) {
+		if (queueBaseline) {
+			monitor.gauge(lane, Gauge.PENDING_ENTRIES, pending); monitor.gauge(lane, Gauge.ADMITTED_FRAMES, admitted);
+		} else {
+			monitor.invalidateGauge(lane, Gauge.PENDING_ENTRIES); monitor.invalidateGauge(lane, Gauge.ADMITTED_FRAMES);
 		}
 	}
 	private long cycle(State state) { return periodId(state.module); }
@@ -372,11 +422,14 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		}
 		if (tick != now) {
 			tick = now;
+			boolean monitorQueues = prepareMonitorQueues();
 			for (State state : states.values()) {
 				state.publicationDelay.beginTick(cycle(state)); state.batchDelay.beginTick(cycle(state));
 				state.dataDelay.beginTick(cycle(state)); state.controlDelay.beginTick(cycle(state));
 				state.heartbeatDelay.beginTick(cycle(state));
+				if (monitorQueues) observeMonitorQueue(state);
 			}
+			if (monitorQueues) queueBaseline = true;
 		}
 		if (settings.getTracking().getHeartbeatPeriods() == 0) for (State state : states.values()) state.heartbeatDelay.cancel();
 	}
@@ -572,6 +625,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		for (int index = 0; index < values.size(); index++) state.entryMemory.put(values.get(index), granted.get(index));
 		state.pending = pending; state.offered = offered;
 		if (tracking) trackingQueued += delta; else previewQueued += delta;
+		observeMonitorQueue(state);
 		state.restageLatest = false;
 		installed = true;
 		for (var value : values) if (value.replaceGroup()) state.retiringGroups.remove(value.itemId());
@@ -585,6 +639,8 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		state.status = state.deliveryIncomplete || !state.retiringGroups.isEmpty() ? InventoryS2CPacket.Status.INCOMPLETE : lifecycle;
 		state.control = true;
 		state.publicationDelay.progress(cycle(state));
+		state.offeredCutPending = true;
+		monitor.count(tracking ? Lane.TRACKING : Lane.PREVIEW, Counter.PUBLICATIONS_INSTALLED, 1);
 		return new Outcome.Accepted();
 		} finally {
 			if (!installed) {
@@ -645,8 +701,9 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			if (state.route.markerId() == null) previewQueued -= cost(entry); else trackingQueued -= cost(entry);
 			iterator.remove();
 		}
+		observeMonitorQueue(state);
 		// No completion/digest for the superseded cut while replacement waits.
-		state.complete = false; state.control = false;
+		state.complete = false; state.control = false; state.offeredCutPending = false;
 		if (!state.fencePending) state.controlDelay.cancel();
 		state.heartbeatDelay.cancel();
 		releaseUnretainedEntries(state);
@@ -669,6 +726,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			withdraw(state); state.complete = false;
 		}
 		state.status = status; state.control = true;
+		if (status == InventoryS2CPacket.Status.INCOMPLETE) state.offeredCutPending = false;
 	}
 	public boolean pending(Context context) {
 		State state = states.get(key(context));
@@ -772,6 +830,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 					InventoryS2CPacket packet = state.admitted.get(state.part);
 					if (!send(state, packet, false)) break;
 					state.part++;
+					observeMonitorQueue(state);
 				}
 				if (!state.admitted.isEmpty() && state.part == state.admitted.size()) {
 					for (var packet : state.admitted) for (var entry : packet.entries()) {
@@ -787,13 +846,21 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 					// index zero at the client and falsely close its multipart barrier.
 					if (state.route.markerId() == null && state.admittedWatermark == state.offeredWatermark) state.control = false;
 					state.admitted = List.of(); state.admittedChecksum = 0; state.part = 0; state.baseline = false;
+					observeMonitorQueue(state);
+					if (state.admittedWatermark == state.offeredWatermark) state.offeredCutPending = false;
 					if (state.admittedEvidence != null) { state.admittedEvidence.close(); state.admittedEvidence = null; }
 					if (state.batchMemory != null) { state.batchMemory.close(); state.batchMemory = null; }
 					releaseUnretainedEntries(state);
+					monitor.count(state.route.markerId() == null ? Lane.PREVIEW : Lane.TRACKING, Counter.CUTS_COMPLETED, 1);
 				}
 				if (state.control && state.pending.isEmpty() && state.admitted.isEmpty()) {
+					long delivered = state.deliveredWatermark;
 					if (sendControl(state, () -> packet(state, true, List.of(), 0, 1))) {
 						state.control = false; state.deliveredWatermark = state.offeredWatermark; replaceDeliveredEvidence(state, state.offeredEvidence);
+						if (state.offeredCutPending && state.deliveredWatermark > delivered
+							&& state.status != InventoryS2CPacket.Status.INVALID && state.status != InventoryS2CPacket.Status.INCOMPLETE)
+							monitor.count(state.route.markerId() == null ? Lane.PREVIEW : Lane.TRACKING, Counter.CUTS_COMPLETED, 1);
+						state.offeredCutPending = false;
 					}
 				}
 			}
@@ -865,7 +932,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		state.batchMemory = reservation.get();
 		state.batchDelay.progress(cycle(state));
 		retained = true;
-		} finally { if (!retained) reservation.get().close(); }
+		} finally { observeMonitorQueue(state); if (!retained) reservation.get().close(); }
 	}
 	private InventoryS2CPacket packet(State state, boolean control, List<InventoryS2CPacket.Entry> entries, int part, int parts) {
 		return packet(state, control, entries, part, parts, checksum(state, state.offered.values()));
@@ -1007,6 +1074,9 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	@Override public void cancel(Context context) {
 		State state = states.get(key(context));
 		if (state == null || !state.context.equals(context)) return;
+		// Retire exactly this registered owner's contribution before removal. The
+		// old drain may resume later, even after an equal context has registered anew.
+		updateMonitorQueue(state, 0, 0);
 		states.remove(key(context));
 		if (state != null) {
 			withdraw(state);
@@ -1033,6 +1103,8 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		for (var packet : state.admitted) bytes += packet.entries().stream().mapToLong(InventorySyncPublisher::cost).sum();
 		if (state.route.markerId() == null) previewQueued -= bytes; else trackingQueued -= bytes;
 		state.pending.clear(); state.admitted = List.of(); state.admittedChecksum = 0; state.part = 0;
+		state.offeredCutPending = false;
+		observeMonitorQueue(state);
 		if (state.admittedEvidence != null) { state.admittedEvidence.close(); state.admittedEvidence = null; }
 		if (state.batchMemory != null) { state.batchMemory.close(); state.batchMemory = null; }
 		releaseUnretainedEntries(state);

@@ -151,6 +151,10 @@ public final class ServerInventoryMonitor {
 		if (!enabled()) return;
 		checkOwner(); accumulator.setSharedGauge(gauge, value);
 	}
+	public void sharedCount(Counter counter, long delta) {
+		if (!enabled()) return;
+		checkOwner(); accumulator.recordSharedCount(counter, delta);
+	}
 	/** Fixed code-owned counter reads, including outstanding reservations, not an entry traversal. */
 	public void sharedBudget(Budget budget, long period, CostLedger ledger, CostLedger.Counter counter, long admissible) {
 		if (!enabled()) return;

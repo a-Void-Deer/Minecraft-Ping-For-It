@@ -331,6 +331,19 @@ public final class InventoryRuntime implements AutoCloseable {
 	private final DisplayReprojector reprojector;
 	private final BudgetDelaySink sink;
 	private final ServerInventoryMonitor monitor;
+	private @Nullable SelectionReadScope selectionReadScope;
+	/** Fixed-size enabled-only metadata, scoped to the actual witness call and its immutable ledger identity. */
+	@NotNullByDefault
+	private static final class SelectionReadScope {
+		final @Nullable SelectionReadScope parent;
+		final CostLedger ledger;
+		final long generation, before;
+		long nestedCharged;
+		SelectionReadScope(@Nullable SelectionReadScope parent, CostLedger ledger, long generation) {
+			this.parent = parent; this.ledger = ledger; this.generation = generation;
+			before = ledger.used(InventorySourceAccess.PHYSICAL);
+		}
+	}
 	private long consumerSequence;
 	private final List<Consumer> consumers = new ArrayList<>();
 	private final Map<LookupKey, Round> rounds = new LinkedHashMap<>();
@@ -378,6 +391,12 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	public RetainedMemoryLedger memory() { return memory; }
 	public ServerInventoryMonitor monitor() { return monitor; }
+	private void recordReadAttempts(long generation, CostLedger ledger, long attempted, long charged) {
+		if (!monitor.enabled() || generation != monitor.collectionGeneration()) return;
+		for (@Nullable SelectionReadScope scope = selectionReadScope; scope != null; scope = scope.parent)
+			if (scope.ledger == ledger && scope.generation == generation) scope.nestedCharged += charged;
+		monitor.sharedCount(Counter.READ_ATTEMPTS, attempted);
+	}
 	/** Callback-free fixed scalar reads; called after publication reservations have settled. */
 	void sampleMonitor() {
 		if (!monitor.enabled()) return;
@@ -385,6 +404,8 @@ public final class InventoryRuntime implements AutoCloseable {
 		monitor.sharedGauge(Gauge.CONSUMERS, consumers.size());
 		monitor.sharedGauge(Gauge.ACTIVE_OBSERVATIONS, scanningRounds);
 		if (settings == null || physical == null) return;
+		// This initialized Runtime observes the source-step ledger, including ticks with no new attempts.
+		monitor.sharedCount(Counter.READ_ATTEMPTS, 0);
 		if (monitor.enabled(Lane.PREVIEW)) monitor.budget(Lane.PREVIEW, Budget.LOGICAL_SLOTS, previewPeriodId(),
 			settings.getPreview().effectiveMaxSlotsServer(), previewGlobal, (long) settings.getPreview().effectiveMaxSlotsServer() - previewGlobal);
 		if (monitor.enabled(Lane.TRACKING)) monitor.budget(Lane.TRACKING, Budget.LOGICAL_SLOTS, trackingPeriodId(),
@@ -673,6 +694,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		return false;
 	}
 	public boolean selectionPresent(InventorySourceInput input, InventorySelection selection, int witness) {
+		long readGeneration = monitor.enabled() ? monitor.collectionGeneration() : -1;
 		int displayCap = effectiveDisplayCap();
 		long fixed = checkedAdd(InventoryCatalogAdmission.METADATA_BYTES, checkedAdd(authorityWorkspaceBytes(), liveCatalogUpperBound()));
 		long result = InventoryItemBudget.retainedUpperBound(displayCap);
@@ -708,7 +730,20 @@ public final class InventoryRuntime implements AutoCloseable {
 						try (var readGrant = read.get()) {
 							// The outer operation owns close even when slot/provider admission refuses before resolver invocation.
 							var borrowed = new AdmittedSource(source, false, memory, monitor, Lane.TRACKING);
-							return new InventorySourceAccess(input, i -> Optional.of(borrowed)).selectionPresent(selection, witness, bound, physical, catalog, allowance);
+							var access = new InventorySourceAccess(input, i -> Optional.of(borrowed));
+							CostLedger readLedger = physical;
+							@Nullable SelectionReadScope scope = readGeneration >= 0 && monitor.enabled() && readGeneration == monitor.collectionGeneration()
+								? new SelectionReadScope(selectionReadScope, readLedger, readGeneration) : null;
+							if (scope != null) selectionReadScope = scope;
+							try { return access.selectionPresent(selection, witness, bound, readLedger, catalog, allowance); }
+							finally {
+								if (scope != null) {
+									selectionReadScope = scope.parent;
+									// Only committed descendants on this exact ledger are included in its used delta.
+									long own = readLedger.used(InventorySourceAccess.PHYSICAL) - scope.before - scope.nestedCharged;
+									recordReadAttempts(readGeneration, readLedger, own, own);
+								}
+							}
 						}
 					}
 					}
@@ -1931,6 +1966,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		return handoff.preparation == null ? prepare(consumer, allowance) : handoff.preparation;
 	}
 	private Optional<Observation> step(Consumer consumer, int slotBound, @Nullable ProbeAttempt attempt) {
+		long readGeneration = monitor.enabled() ? monitor.collectionGeneration() : -1;
 		if (slotBound < 1 || slotBound > InventorySourceAccess.MAX_STEP) throw new IllegalArgumentException("inventory step bound");
 		if (consumer.closed) return Optional.empty();
 		if (consumer.invalidObservation != null) return Optional.of(consumer.invalidObservation);
@@ -1988,7 +2024,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (available == 0) {
 			if (round.journal != null && round.sweep == null && consumer.cursor == round.size() && round.handle.pendingNativeValidation()
 				&& (round.last == null || round.last.completeness() == CaptureResult.Completeness.CONTINUE)) {
-				if (!readNative(consumer, 0, operationAllowance)) return Optional.empty();
+				if (!readNative(consumer, 0, operationAllowance, readGeneration)) return Optional.empty();
 				if (consumer.invalidObservation != null) return Optional.of(consumer.invalidObservation);
 				consumer.logicalDelay.progress(cycle(consumer));
 				return Optional.of(new Observation(java.util.Objects.requireNonNull(round.last), List.of(), round.sweepEvidence));
@@ -2019,7 +2055,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			return Optional.of(new Observation(result, List.of(), round.sweepEvidence));
 		}
 		if (round.journal != null && consumer.cursor >= round.size() && (round.last == null || round.last.completeness() == CaptureResult.Completeness.CONTINUE)) {
-			if (!readNative(consumer, available, operationAllowance)) return Optional.empty();
+			if (!readNative(consumer, available, operationAllowance, readGeneration)) return Optional.empty();
 			if (consumer.invalidObservation != null) return Optional.of(consumer.invalidObservation);
 		}
 		if (round.journal == null && consumer.cursor >= round.size() && (round.last == null || round.last.completeness() == CaptureResult.Completeness.CONTINUE)) {
@@ -2068,7 +2104,8 @@ public final class InventoryRuntime implements AutoCloseable {
 			} else {
 			long workBound = (bounded + 1L) * InventorySourceAccess.PROVIDER_CALL_WORK;
 			long itemWork = checkedMultiply(bounded, readWork);
-			var grant = physical.tryReserve(Map.of(InventorySourceAccess.PHYSICAL, (long) bounded, InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, workBound, ITEM_WORK, itemWork));
+			CostLedger readLedger = physical;
+			var grant = readLedger.tryReserve(Map.of(InventorySourceAccess.PHYSICAL, (long) bounded, InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, workBound, ITEM_WORK, itemWork));
 			if (grant.isEmpty()) { physicalDelay(consumer, scanReasons(bounded, readDisplayCap), -1); workspace.get().close(); return Optional.empty(); }
 			SourceAccess.StepOutcome result;
 			try (var physicalTicket = grant.get()) {
@@ -2078,13 +2115,18 @@ public final class InventoryRuntime implements AutoCloseable {
 				var validation = validation(round.handle.stepValidationCost(bounded), operationAllowance, rootWorkspace);
 				if (validation.isEmpty()) { physicalDelay(consumer, Reason.PROVIDER_WORK.bit() | Reason.MEMORY.bit(), -1); return Optional.empty(); }
 				try (var operation = validation.get()) { result = readStep(consumer, step, catalogAdmission, operation.allowance); }
-				finally { physicalTicket.commit(Map.of(InventorySourceAccess.PHYSICAL, bounded - step.remaining(InventorySourceAccess.PHYSICAL),
+				finally {
+					long attempted = bounded - step.remaining(InventorySourceAccess.PHYSICAL);
+					boolean committed = false;
+					try { physicalTicket.commit(Map.of(InventorySourceAccess.PHYSICAL, attempted,
 					InventorySourceAccess.PROBES, 1L - step.remaining(InventorySourceAccess.PROBES), InventorySourceAccess.PROVIDER_WORK, workBound - step.remaining(InventorySourceAccess.PROVIDER_WORK),
 					// Keep the existing attempted-slot envelope for source authority,
 					// returned-stack processing and page encoding, even on lazy reads.
 					// Catalog pays its actual cumulative attempt ONCE inside U, not U+C.
-					ITEM_WORK, checkedAdd(checkedMultiply(bounded - step.remaining(InventorySourceAccess.PHYSICAL),
-						InventoryItemBudget.freezeWorkUpperBound(readDisplayCap)), catalogAdmission.attemptedWork()))); }
+					ITEM_WORK, checkedAdd(checkedMultiply(attempted,
+						InventoryItemBudget.freezeWorkUpperBound(readDisplayCap)), catalogAdmission.attemptedWork()))); committed = true; }
+					finally { if (readGeneration >= 0) recordReadAttempts(readGeneration, readLedger, attempted, committed ? attempted : 0); }
+				}
 			}
 			if (result instanceof SourceAccess.StepOutcome.Deferred) { workspace.get().close(); return Optional.empty(); }
 			round.last = ((SourceAccess.StepOutcome.Captured) result).result();
@@ -2190,9 +2232,9 @@ public final class InventoryRuntime implements AutoCloseable {
 		return round.sweep == null ? round.handle.nativeCatalogGrowthUpperBound() : round.sweep.catalog == null
 			? InventoryItemCodec.Catalog.firstReadGrowthUpperBound(displayBytes(round)) : round.sweep.catalog.retainedGrowthUpperBound();
 	}
-	private boolean readNative(Consumer consumer, int available, InventoryValidationBudget.Allowance allowance) {
+	private boolean readNative(Consumer consumer, int available, InventoryValidationBudget.Allowance allowance, long readGeneration) {
 		Round round = consumer.round;
-		if (round.sweep != null) return readPooled(consumer, available, allowance);
+		if (round.sweep != null) return readPooled(consumer, available, allowance, readGeneration);
 		InventorySlotJournal journal = java.util.Objects.requireNonNull(round.journal);
 		int bound = (int) Math.min(Math.min(available, physicalRemaining()), Math.max(0, physical.remaining(InventorySourceAccess.PROVIDER_WORK) / InventorySourceAccess.PROVIDER_CALL_WORK - 1));
 		bound = round.handle.pendingNativeValidation() ? 0
@@ -2221,7 +2263,8 @@ public final class InventoryRuntime implements AutoCloseable {
 				long provider = (bound + 1L) * InventorySourceAccess.PROVIDER_CALL_WORK;
 				var limits = Map.of(InventorySourceAccess.PHYSICAL, (long) bound, InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, provider);
 				var work = new LinkedHashMap<>(limits); work.put(ITEM_WORK, checkedMultiply(bound, InventoryItemBudget.workUpperBound(display)));
-				var admitted = physical.tryReserve(work);
+				CostLedger readLedger = physical;
+				var admitted = readLedger.tryReserve(work);
 				if (admitted.isEmpty()) { physicalDelay(consumer, scanReasons(bound, display), -1); return false; }
 				try (var grant = admitted.get()) {
 					var step = new CostLedger(limits);
@@ -2233,9 +2276,14 @@ public final class InventoryRuntime implements AutoCloseable {
 					long timing = monitor.enabled() ? monitor.beginPhase(lane(consumer), Phase.READ) : 0;
 					try (var operation = validation.get()) { outcome = round.handle.stepInventory(step, catalogAdmission, operation.allowance); }
 					finally {
-						try { grant.commit(Map.of(InventorySourceAccess.PHYSICAL, step.used(InventorySourceAccess.PHYSICAL), InventorySourceAccess.PROBES, step.used(InventorySourceAccess.PROBES),
-							InventorySourceAccess.PROVIDER_WORK, step.used(InventorySourceAccess.PROVIDER_WORK), ITEM_WORK, checkedAdd(checkedMultiply(step.used(InventorySourceAccess.PHYSICAL), InventoryItemBudget.freezeWorkUpperBound(display)), catalogAdmission.attemptedWork()))); }
-						finally { monitor.end(timing); }
+						long attempted = step.used(InventorySourceAccess.PHYSICAL);
+						boolean committed = false;
+						try { grant.commit(Map.of(InventorySourceAccess.PHYSICAL, attempted, InventorySourceAccess.PROBES, step.used(InventorySourceAccess.PROBES),
+							InventorySourceAccess.PROVIDER_WORK, step.used(InventorySourceAccess.PROVIDER_WORK), ITEM_WORK, checkedAdd(checkedMultiply(attempted, InventoryItemBudget.freezeWorkUpperBound(display)), catalogAdmission.attemptedWork()))); committed = true; }
+						finally {
+							if (readGeneration >= 0) recordReadAttempts(readGeneration, readLedger, attempted, committed ? attempted : 0);
+							monitor.end(timing);
+						}
 					}
 					if (outcome instanceof InventoryStep.Outcome.Deferred) return false;
 					InventoryStep result = ((InventoryStep.Outcome.Captured) outcome).step();
@@ -2317,7 +2365,8 @@ public final class InventoryRuntime implements AutoCloseable {
 		consumer.zeroAdmissionRefused = false;
 		if (consumer.round.sweep != null) {
 			Association association = java.util.Objects.requireNonNull(consumer.scanningAssociation);
-			if (association.expected.graph().slots() != 0 || !readPooled(consumer, 0, allowance) || consumer.invalidated()) return new SourceAccess.StepOutcome.Deferred();
+			// An empty certified graph cannot attempt a content read; sampling observes its zero.
+			if (association.expected.graph().slots() != 0 || !readPooled(consumer, 0, allowance, -1) || consumer.invalidated()) return new SourceAccess.StepOutcome.Deferred();
 			return new SourceAccess.StepOutcome.Captured(java.util.Objects.requireNonNull(consumer.round.last));
 		}
 		Map<CostLedger.Counter, Long> limits = Map.of(InventorySourceAccess.PHYSICAL, 0L, InventorySourceAccess.PROBES, 1L,
@@ -2404,7 +2453,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			&& (peer.round == round || peer.completedRound == round)) return true;
 		return false;
 	}
-	private boolean readPooled(Consumer consumer, int available, InventoryValidationBudget.Allowance allowance) {
+	private boolean readPooled(Consumer consumer, int available, InventoryValidationBudget.Allowance allowance, long readGeneration) {
 		Round round = consumer.round;
 		Association association = java.util.Objects.requireNonNull(consumer.scanningAssociation);
 		InventorySharedRead.Port port = association.lease.port;
@@ -2438,7 +2487,8 @@ public final class InventoryRuntime implements AutoCloseable {
 					var limits = Map.of(InventorySourceAccess.PHYSICAL, (long) bound, InventorySourceAccess.PROBES, 1L,
 						InventorySourceAccess.PROVIDER_WORK, (bound + 1L) * InventorySourceAccess.PROVIDER_CALL_WORK,
 						ITEM_WORK, checkedMultiply(bound, InventoryItemBudget.workUpperBound(catalog.displayBytes())));
-					var admission = physical.tryReserve(limits);
+					CostLedger readLedger = physical;
+					var admission = readLedger.tryReserve(limits);
 					if (admission.isEmpty()) return false;
 					int attempted = 0;
 					var catalogAdmission = new InventoryCatalogAdmission(InventoryItemBudget.workspaceUpperBound(catalog.displayBytes()),
@@ -2477,9 +2527,11 @@ public final class InventoryRuntime implements AutoCloseable {
 							warnPooled("pooled-read", consumer, round, association.expected, "pooled-read", failure);
 							pooledFailure(consumer, association, InventorySharedRead.Check.UNAVAILABLE); return true;
 						} finally {
-							grant.commit(Map.of(InventorySourceAccess.PHYSICAL, (long) attempted, InventorySourceAccess.PROBES, 1L,
+							boolean committed = false;
+							try { grant.commit(Map.of(InventorySourceAccess.PHYSICAL, (long) attempted, InventorySourceAccess.PROBES, 1L,
 								InventorySourceAccess.PROVIDER_WORK, (attempted + 1L) * InventorySourceAccess.PROVIDER_CALL_WORK,
-								ITEM_WORK, checkedAdd(checkedMultiply(attempted, InventoryItemBudget.freezeWorkUpperBound(catalog.displayBytes())), catalogAdmission.attemptedWork())));
+								ITEM_WORK, checkedAdd(checkedMultiply(attempted, InventoryItemBudget.freezeWorkUpperBound(catalog.displayBytes())), catalogAdmission.attemptedWork()))); committed = true; }
+							finally { if (readGeneration >= 0) recordReadAttempts(readGeneration, readLedger, attempted, committed ? attempted : 0); }
 						}
 					}
 				}
