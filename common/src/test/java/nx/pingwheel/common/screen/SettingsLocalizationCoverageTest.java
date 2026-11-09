@@ -188,6 +188,17 @@ class SettingsLocalizationCoverageTest {
 	}
 
 	@Test
+	void monitorMetricGroupsAndSharedSelectorHelpAreLocalizedAndLiteral() throws IOException {
+		for (String locale : LOCALES) {
+			JsonObject root = read(locale);
+			for (String group : List.of("summary", "server_preview", "server_tracking", "shared", "local_preview", "local_tracking")) {
+				assertLocalizedFormat(root, locale, LanguageUtils.settings("monitor").path("group", group).getKey(), List.of());
+			}
+			assertLocalizedFormat(root, locale, LanguageUtils.settings("monitor").path("metric", "tooltip").getKey(), List.of());
+		}
+	}
+
+	@Test
 	void everyStructuralHelpTooltipIsLocalizedAndLiteral() throws IOException {
 		for (String locale : LOCALES) {
 			JsonObject root = read(locale);
@@ -317,6 +328,7 @@ class SettingsLocalizationCoverageTest {
 		ids.add("global");
 		ids.add("follow_server");
 		ids.add("enabled");
+		ids.add("disabled");
 		ids.add("off");
 		ids.add("hidden");
 		ids.add("infinite");

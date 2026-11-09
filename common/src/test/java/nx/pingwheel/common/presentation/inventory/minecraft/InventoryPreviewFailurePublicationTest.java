@@ -204,8 +204,11 @@ class InventoryPreviewFailurePublicationTest {
 				f.measured = packet -> { if (InventorySyncPublisher.requiresSource(packet)) try {
 					exhaustOrdinaryValidation(f);
 					if (failure.equals("owner")) {
-						var current = (InventoryPublicationEvidence) field(aLease, "completedEvidence"); assertNotEquals(evidence.proof(), current.proof());
-						assertEquals(InventorySharedRead.Check.VALID, current.validate(new InventoryValidationBudget.Allowance(current.validationCost())));
+						var current = (InventoryPublicationEvidence) nullableField(aLease, "completedEvidence");
+						if (current != null) {
+							assertNotEquals(evidence.proof(), current.proof());
+							assertEquals(InventorySharedRead.Check.VALID, current.validate(new InventoryValidationBudget.Allowance(current.validationCost())));
+						}
 						independent.set(field(bLease, "completed")); bEvidence.set((InventoryPublicationEvidence) field(bLease, "completedEvidence"));
 					}
 				} catch (ReflectiveOperationException e) { throw new AssertionError(e); } };

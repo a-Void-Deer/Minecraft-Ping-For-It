@@ -40,9 +40,11 @@ import nx.pingwheel.common.presentation.PresentationAdapter;
 import nx.pingwheel.common.presentation.inventory.InventoryBackend;
 import nx.pingwheel.common.presentation.inventory.InventoryDomainCodec;
 import nx.pingwheel.common.presentation.inventory.InventoryRuntime;
+import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.inventory.InventoryScanner;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
+import nx.pingwheel.common.presentation.inventory.InventoryTestGrants;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout.Member;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout.Segment;
 import nx.pingwheel.common.presentation.source.CaptureResult;
@@ -198,6 +200,13 @@ class InventoryMinecraftSourcesTest {
 		final List<InventoryS2CPacket> sent = new java.util.ArrayList<>();
 		PreviewHost(ChestWorld world) { this.world = world; }
 		@Override public Optional<InventoryBackend.Policy> policy(UUID player) { return Optional.of(new InventoryBackend.Policy(100, 1, java.util.Set.of("entity_block"))); }
+		@Override public Optional<InventoryBackend.SessionAccess> session(UUID player) {
+			return Optional.of(new InventoryBackend.SessionAccess(100, 1, InventoryTestGrants.both()));
+		}
+		@Override public Optional<nx.pingwheel.common.marker.ServerMarker> activeMarker(MarkerId marker) { return Optional.empty(); }
+		@Override public java.util.Set<InventoryResourceKind> freezeInventoryPreviewLanes(UUID owner, String targetTypeId) {
+			return java.util.Set.of(InventoryResourceKind.ITEM);
+		}
 		@Override public Optional<InventoryBackend.Opened> open(UUID player, Target target) { return Optional.of(new InventoryBackend.Opened(world.input.target(), "entity_block", "attention")); }
 		@Override public boolean annotationAllowed(InventorySourceInput input, String type) { return true; }
 		@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) { throw new AssertionError("preview never creates a marker"); }

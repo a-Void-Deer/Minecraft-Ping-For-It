@@ -2,8 +2,6 @@ package nx.pingwheel.common.presentation.inventory.minecraft;
 
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -39,7 +37,6 @@ import nx.pingwheel.common.presentation.minecraft.MinecraftBlockReadSources;
 import nx.pingwheel.common.presentation.source.SourceKey;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
-import org.jetbrains.annotations.Unmodifiable;
 import org.apache.logging.log4j.Level;
 
 /** Static fluid sources. Only detached metadata/object witnesses survive an external operation. */
@@ -49,6 +46,7 @@ public final class InventoryFluidSources {
 	private static final InventoryValidationBudget.Cost BIND = new InventoryValidationBudget.Cost(8192, 8192, 2048);
 	private static final InventoryValidationBudget.Cost MEMBER = new InventoryValidationBudget.Cost(1024, 1024, 512);
 	private static final InventoryValidationBudget.Cost INDEX_LOOKUP = new InventoryValidationBudget.Cost(0, 0, 16);
+	private static final InventoryValidationBudget.Cost TARGET_IDENTITY = FluidAddressWitness.profile(WitnessUse.COMPARE, 1).ownedCost();
 	private static OperationProfile owned(InventoryValidationBudget.Cost cost) { return new OperationProfile(cost, 0, 0, 0); }
 	/** Outer Runtime bookkeeping only. Actual shape, callbacks and locks get additional genuine grants. */
 	public static InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput input) { return InventoryValidationBudget.NONE; }
@@ -131,22 +129,24 @@ public final class InventoryFluidSources {
 	private static boolean registryMatches(String expected, @Nullable ResourceLocation current) {
 		return current != null && (long) current.getNamespace().length() + current.getPath().length() + 1 <= 256 && expected.equals(current.toString());
 	}
+	/** Frozen target-level identities for the root and, when declared, the source's necessary controller. */
 	@NotNullByDefault
-	private record Witness(BlockPos position, String blockId, String entityId) {}
+	private record Unit(@Nullable BlockPos controller, @Nullable String rootEntityId,
+		@Nullable String controllerBlockId, @Nullable String controllerEntityId) {}
 	@NotNullByDefault
 	private static final class Source implements InventorySourceAccess.Source {
-		// Own the stable facade, not its server. Resolved bindings and their member callbacks stay operation-local.
+		// Own the stable facade, not its server. Resolved bindings and their target callbacks stay operation-local.
 		private final World world;
 		private final IPlatformFluidService service;
 		private final InventorySourceInput input;
 		private final BlockReadSource descriptor;
 		private final InventorySnapshotLayout layout;
 		private final Optional<String> alias;
-		private final Witness @Unmodifiable [] members;
-		// External metadata never owns a BE, Level, Access or native-address graph. Ordinary fluid
-		// handles keep their existing resident member ownership; ITEM sources are not involved.
-		private final BlockEntity @Nullable @Unmodifiable [] ordinaryMembers;
-		private final @Nullable FluidAddressWitness memberWitness;
+		private final String expectedBlockId;
+		private @Nullable Unit unit;
+		private @Nullable BlockPos declaredController;
+		private final @Nullable FluidAddressWitness rootWitness;
+		private final @Nullable FluidAddressWitness controllerWitness;
 		private final FluidAddressWitness addressWitness;
 		private final SourceKey key;
 		private final boolean stable, external;
@@ -155,14 +155,17 @@ public final class InventoryFluidSources {
 		private IPlatformFluidService.@Nullable Access ordinaryAccess;
 		private int displayBytes;
 		private @Nullable InventoryFluidCodec.Catalog catalog;
-		private boolean closed, scopeTransition, frozen;
+		private boolean closed, scopeTransition;
 		private boolean validationRejectionReported;
 		Source(World world, IPlatformFluidService service, InventorySourceInput input, int displayBytes, InventoryValidationBudget.Allowance allowance) {
 			this.world = world; this.service = service; this.input = input; this.displayBytes = displayBytes;
 			external = input.target() instanceof Target.ExternalBlockTarget;
+			expectedBlockId = expectedRegistryId(input.target());
 			try (var admission = open(allowance)) {
 				Binding binding = bind(admission);
 				descriptor = binding.resolved().descriptor();
+				if (InventoryFluidStrictValidation.requiresStrictValidation(descriptor))
+					throw unavailable("fluid target requires specialized validation");
 				IPlatformFluidService.@Nullable Access access = acquire(binding, admission);
 				try {
 					layout = access.layout(); alias = access.alias(); stable = access.stableCursor(); slots = access.slots();
@@ -170,34 +173,41 @@ public final class InventoryFluidSources {
 						throw unavailable("fluid address bound");
 					long bytes = 2048L + 256L * layout.members().size() + 2L * (layout.layoutData().length() + layout.layoutId().length());
 					var cost = new InventoryValidationBudget.Cost(bytes * 2, bytes * 2, 1024L + 64L * layout.members().size() + slots);
-					var memberCapture = external ? FluidAddressWitness.profile(WitnessUse.CAPTURE, layout.members().size()) : OperationProfile.NONE;
-					try (var operation = admission.enter(new OperationProfile(cost.overlap(memberCapture.ownedCost()).plus(INDEX_LOOKUP),
-						layout.members().size(), layout.members().size(), Math.addExact(bytes, memberCapture.retainedBytes())))) {
+					try (var operation = admission.enter(new OperationProfile(cost.plus(INDEX_LOOKUP), 0, 0, 0))) {
 						operation.allowance().debit(cost);
-						var captured = new Witness[layout.members().size()]; int index = 0, addresses = 0;
+						int addresses = 0;
+						@Nullable InventorySnapshotLayout.Member rootMember = null, controllerMember = null;
 						for (var member : layout.members()) {
-							captured[index++] = new Witness(member.position(), member.blockId(), member.blockEntityId());
+							if (member.position().equals(binding.root())) rootMember = member;
+							if (layout.controller() != null && member.position().equals(layout.controller())) controllerMember = member;
 							for (var segment : member.segments()) {
 								if (!IPlatformFluidService.ADDRESS_SCHEMA.equals(segment.schemaId())) throw unavailable("fluid address schema");
 								addresses = Math.addExact(addresses, segment.visibleSlots().size());
 							}
 						}
-						Arrays.sort(captured, Comparator.comparingLong(witness -> witness.position().asLong())); members = captured;
-						operation.allowance().requireAvailable(memberCapture.ownedCost());
-						Object @Nullable [] current = external ? new Object[members.length] : null;
-						ordinaryMembers = external ? null : new BlockEntity[members.length]; index = 0;
-						for (Witness member : members) {
-							if (!memberGate(binding, member.position(), operation, false) || !authority(binding, operation)) throw unavailable("fluid member gate");
-							BlockEntity entity = Objects.requireNonNull(world.existingEntity(binding.level(), member.position()));
-							if (!registryMatches(member.blockId(), BuiltInRegistries.BLOCK.getKey(entity.getBlockState().getBlock()))
-								|| !registryMatches(member.entityId(), BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType()))) throw unavailable("fluid registry identity");
-							if (current != null) current[index] = entity; else Objects.requireNonNull(ordinaryMembers)[index] = entity;
-							index++;
-						}
-						memberWitness = current == null ? null : FluidAddressWitness.capture(FluidAddressWitness.Schema.COMMON_MEMBERS_V1, current, operation);
-						frozen = true;
-						if (stable && addresses != slots || find(binding.root(), operation) == null) throw unavailable("fluid root/address layout");
+						if (stable && addresses != slots || stable && rootMember == null
+							|| layout.controller() != null && controllerMember == null)
+							throw unavailable("fluid root/address layout");
+						unit = new Unit(layout.controller(), rootMember == null ? null : rootMember.blockEntityId(),
+							controllerMember == null ? null : controllerMember.blockId(),
+							controllerMember == null ? null : controllerMember.blockEntityId());
+						@Nullable BlockPos declared = declaredController;
+						if (declared != null && !declared.equals(layout.controller()))
+							throw unavailable("fluid controller declaration mismatch");
+						if (layout.controller() != null && !layout.controller().equals(binding.root()) && declared == null)
+							throw unavailable("fluid controller target gate unavailable");
 					}
+					// Target-level strong objects (root and necessary controller) are frozen once.
+					// Internal provider members are not copied or re-gated here.
+					@Nullable BlockEntity rootEntity = world.existingEntity(binding.level(), binding.root());
+					if (rootEntity == null) throw unavailable("fluid target identity");
+					rootWitness = captureTarget(rootEntity, admission);
+					@Nullable Unit target = unit;
+					@Nullable BlockEntity controllerEntity = target == null || target.controller() == null
+						|| target.controller().equals(binding.root()) ? null : world.existingEntity(binding.level(), target.controller());
+					if (target != null && target.controller() != null && !target.controller().equals(binding.root()) && controllerEntity == null)
+						throw unavailable("fluid controller identity");
+					controllerWitness = controllerEntity == null ? null : captureTarget(controllerEntity, admission);
 					// Capture the original route once, into the same independent metadata ownership as
 					// the detached index. Reacquisition/publication must never capture a replacement proof.
 					try (var operation = admission.enter(access.validationProfile())) {
@@ -217,10 +227,19 @@ public final class InventoryFluidSources {
 				} finally { if (access != null) access.close(); }
 			}
 		}
+		private static String expectedRegistryId(Target target) {
+			if (target instanceof Target.BlockTarget block) return block.blockRegistryId();
+			if (target instanceof Target.ExternalBlockTarget external) return external.expectedBlockRegistryId();
+			throw unavailable("fluid target kind");
+		}
 		private InventoryFluidAdmission open(InventoryValidationBudget.Allowance allowance) {
 			return allowance.fluidGrants().open(allowance, memberCost(), authorityCost());
 		}
-		private InventoryValidationBudget.Cost memberCost() { return MEMBER.plus(INDEX_LOOKUP).plus(world.membershipCost()); }
+		private InventoryValidationBudget.Cost memberCost() {
+			// Each profiled member callback may gate the root or controller. Prepay its
+			// current identity comparison with that callback, not another retained grant.
+			return MEMBER.plus(INDEX_LOOKUP).plus(world.membershipCost()).plus(TARGET_IDENTITY);
+		}
 		private InventoryValidationBudget.Cost authorityCost() { return MEMBER.plus(world.bindingCost()); }
 		private Binding bind(InventoryFluidAdmission admission) {
 			try (var operation = admission.enter(owned(world.bindingCost()))) {
@@ -231,7 +250,8 @@ public final class InventoryFluidSources {
 		}
 		private IPlatformFluidService.Access acquire(Binding binding, InventoryFluidAdmission admission) {
 			var context = new IPlatformFluidService.Context(binding.level(), binding.root(), Direction.valueOf(input.face().name()), input.readOwner(),
-				(pos, operation) -> memberGate(binding, pos, operation, frozen), operation -> authority(binding, operation));
+				(pos, operation) -> memberGate(binding, pos, operation), this::unitAuthority,
+				(controller, operation) -> controllerGate(binding, controller, operation));
 			var profile = service.probeProfile().plus(new OperationProfile(InventoryValidationBudget.NONE, 2, 2, 0));
 			IPlatformFluidService.@Nullable Access access = null;
 			try (var operation = admission.enter(profile)) {
@@ -253,43 +273,84 @@ public final class InventoryFluidSources {
 			@Nullable BlockEntity root = world.existingEntity(current.level(), current.root());
 			return root != null && readable(root, operation);
 		}
-		private boolean memberGate(Binding binding, BlockPos pos, Operation operation, boolean historical) {
-			operation.allowance().debit(MEMBER);
-			if (!world.onServerThread()) return memberDenied("server-thread", pos, historical);
-			if (!world.contains(binding, pos, operation.allowance())) return memberDenied("membership", pos, historical);
-			if (!world.loaded(binding.level(), pos)) return memberDenied("unloaded", pos, historical);
-			@Nullable BlockEntity entity = world.existingEntity(binding.level(), pos);
-			if (entity == null) return memberDenied("entity-missing", pos, historical);
-			if (entity.getLevel() != binding.level()) return memberDenied("level-changed", pos, historical);
-			if (!entity.getBlockPos().equals(pos)) return memberDenied("position-changed", pos, historical);
-			if (entity.getBlockState().getBlock() != world.blockState(binding.level(), pos).getBlock()) return memberDenied("block-changed", pos, historical);
-			if (!readable(entity, operation)) return memberDenied("read-authority", pos, historical);
-			if (!historical) return true;
-			operation.allowance().debit(INDEX_LOOKUP); int index = findIndex(pos);
-			@Nullable Witness witness = index < 0 ? null : members[index];
-			if (witness == null) return memberDenied("member-not-captured", pos, true);
-			if (ordinaryMembers != null && entity != ordinaryMembers[index]) return memberDenied("member-replaced", pos, true);
-			if (!registryMatches(witness.blockId(), BuiltInRegistries.BLOCK.getKey(world.blockState(binding.level(), pos).getBlock())))
-				return memberDenied("block-registry-changed", pos, true);
-			if (!registryMatches(witness.entityId(), BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType())))
-				return memberDenied("entity-registry-changed", pos, true);
+		/**
+		 * Cheap source callback used by provider internals. The root and a declared controller keep
+		 * their full target-level gate. Every other physical member is provider-owned: no Ping root
+		 * binding, owner-lock/loot or membership traversal is repeated for it.
+		 */
+		private boolean memberGate(Binding binding, BlockPos pos, Operation operation) {
+			if (!world.onServerThread()) return denied("server-thread", "member", pos, operation);
+			if (pos.equals(binding.root())) {
+				if (!targetGate(binding, pos, expectedBlockId, unit == null ? null : unit.rootEntityId(), true, "root", operation))
+					return false;
+				// The guarded wrapper invokes this root gate before and after each real provider
+				// call, so the current binding/owner check encloses those calls without a
+				// per-member root bind.
+				if (!authority(binding, operation)) return denied("authority", "root", pos, operation);
+				return true;
+			}
+			@Nullable Unit current = unit;
+			@Nullable BlockPos controller = current == null ? declaredController : current.controller();
+			if (controller != null && pos.equals(controller))
+				return targetGate(binding, pos, current == null ? null : current.controllerBlockId(),
+					current == null ? null : current.controllerEntityId(), true, "controller", operation);
+			operation.allowance().debit(INDEX_LOOKUP);
 			return true;
 		}
-		private boolean memberDenied(String reason, BlockPos position, boolean historical) {
-			// Context.require used to turn this false into the same expected failure. Retain its
-			// first rejected member before that boundary loses the already-evaluated stage.
-			throw new InventorySourceUnavailableException("fluid access outside current owner/member scope",
-				() -> "stage=member-gate reason=" + reason + " member=" + position.toShortString()
-					+ " historical=" + historical + " owner=" + input.readOwner() + " face=" + input.face());
+		/** Provider-declared non-root controller; scope applies here exactly as it does to the root. */
+		private boolean controllerGate(Binding binding, BlockPos controller, Operation operation) {
+			if (!world.onServerThread()) return denied("server-thread", "controller", controller, operation);
+			@Nullable Unit current = unit;
+			if (current != null && (current.controller() == null || !controller.equals(current.controller())))
+				return denied("controller-mismatch", "controller", controller, operation);
+			declaredController = controller.immutable();
+			return targetGate(binding, controller, current == null ? null : current.controllerBlockId(),
+				current == null ? null : current.controllerEntityId(), true, "controller", operation);
 		}
-		private @Nullable Witness find(BlockPos pos, Operation operation) {
-			operation.allowance().debit(INDEX_LOOKUP); int index = findIndex(pos); return index < 0 ? null : members[index];
+		/** Root/controller applicability only: scope, loaded object, expected registry and source-owner read authority. */
+		private boolean targetGate(Binding binding, BlockPos pos, @Nullable String blockId, @Nullable String entityId,
+			boolean rootScope, String scope, Operation operation) {
+			operation.allowance().debit(MEMBER);
+			if (!world.onServerThread()) return denied("server-thread", scope, pos, operation);
+			if (rootScope && !world.contains(binding, pos, operation.allowance())) return denied("membership", scope, pos, operation);
+			if (!world.loaded(binding.level(), pos)) return denied("unloaded", scope, pos, operation);
+			@Nullable BlockEntity entity = world.existingEntity(binding.level(), pos);
+			if (entity == null) return denied("entity-missing", scope, pos, operation);
+			if (entity.getLevel() != binding.level()) return denied("level-changed", scope, pos, operation);
+			if (!entity.getBlockPos().equals(pos)) return denied("position-changed", scope, pos, operation);
+			if (entity.isRemoved()) return denied("entity-removed", scope, pos, operation);
+			BlockState currentState = world.blockState(binding.level(), pos);
+			if (entity.getBlockState().getBlock() != currentState.getBlock()) return denied("block-changed", scope, pos, operation);
+			if (blockId != null && !registryMatches(blockId, BuiltInRegistries.BLOCK.getKey(currentState.getBlock())))
+				return denied("block-registry-changed", scope, pos, operation);
+			if (entityId != null && !registryMatches(entityId, BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(entity.getType())))
+				return denied("entity-registry-changed", scope, pos, operation);
+			if (!readable(entity, operation)) return denied("read-authority", scope, pos, operation);
+			@Nullable Unit currentUnit = unit;
+			@Nullable FluidAddressWitness witness = pos.equals(binding.root()) ? rootWitness
+				: currentUnit != null && pos.equals(currentUnit.controller()) ? controllerWitness : null;
+			if (witness != null) {
+				operation.allowance().requireAvailable(TARGET_IDENTITY);
+				requireSame(witness.compare(FluidAddressWitness.Schema.COMMON_MEMBERS_V1, new Object[] {entity}, operation));
+			}
+			return true;
 		}
-		private int findIndex(BlockPos pos) {
-			int low = 0, high = members.length - 1; long key = pos.asLong();
-			while (low <= high) { int middle = (low + high) >>> 1; long value = members[middle].position().asLong();
-				if (value == key) return middle; if (value < key) low = middle + 1; else high = middle - 1; }
-			return -1;
+		/** One frozen target-level object witness; provider-internal members are not included. */
+		private static FluidAddressWitness captureTarget(BlockEntity entity, InventoryFluidAdmission admission) {
+			try (var operation = admission.enter(FluidAddressWitness.profile(WitnessUse.CAPTURE, 1))) {
+				return FluidAddressWitness.capture(FluidAddressWitness.Schema.COMMON_MEMBERS_V1, new Object[] {entity}, operation);
+			}
+		}
+		/** Root authorization is applied once around the provider operation by the source and guarded wrapper. */
+		private boolean unitAuthority(Operation operation) {
+			Objects.requireNonNull(operation).allowance();
+			return world.onServerThread();
+		}
+		private boolean denied(String reason, String scope, BlockPos position, Operation operation) {
+			operation.allowance().debit(INDEX_LOOKUP);
+			throw new InventorySourceUnavailableException("fluid access outside current target scope",
+				() -> "stage=member-gate reason=" + reason + " scope=" + scope + " member=" + position.toShortString()
+					+ " owner=" + input.readOwner() + " face=" + input.face());
 		}
 		private boolean readable(BlockEntity entity, Operation operation) {
 			@Nullable ItemStack held = world.ownerKey(input);
@@ -314,7 +375,7 @@ public final class InventoryFluidSources {
 						&& descriptor.blockTarget().equals(binding.resolved().descriptor().blockTarget())
 						&& !descriptor.subLevelId().equals(binding.resolved().descriptor().subLevelId());
 					if (changedScope) try (var operation = admission.enter(new OperationProfile(InventoryValidationBudget.NONE, 1, 1, 0))) {
-						changedScope = memberGate(binding, binding.root(), operation, false) && authority(binding, operation);
+						changedScope = memberGate(binding, binding.root(), operation);
 					}
 					if (changedScope) try (var current = acquire(binding, admission)) {
 						changedScope = validate(binding, current, admission);
@@ -332,50 +393,40 @@ public final class InventoryFluidSources {
 			return layout.equals(access.layout()) && alias.equals(access.alias()) && stable == access.stableCursor() && slots == access.slots();
 		}
 		private boolean validate(Binding binding, IPlatformFluidService.Access access, InventoryFluidAdmission admission) {
-			try (var operation = admission.enter(new OperationProfile(InventoryValidationBudget.NONE, members.length + 1L, members.length + 1L, 0))) {
-				if (!memberGate(binding, binding.root(), operation, true)) return validationRejected("root-member-gate", binding.root(), -1);
-				if (!authority(binding, operation)) return validationRejected("root-authority", binding.root(), -1);
-				for (int index = 0; index < members.length; index++) {
-					BlockPos position = members[index].position();
-					if (!memberGate(binding, position, operation, true)) return validationRejected("member-gate", position, index);
-					if (!authority(binding, operation)) return validationRejected("member-authority", position, index);
-				}
+			try (var operation = admission.enter(new OperationProfile(InventoryValidationBudget.NONE, 2, 1, 0))) {
+				if (!memberGate(binding, binding.root(), operation)) return validationRejected("root-member-gate", binding.root());
+				@Nullable Unit current = unit;
+				if (current != null && current.controller() != null && !current.controller().equals(binding.root())
+					&& !memberGate(binding, current.controller(), operation))
+					return validationRejected("controller-member-gate", current.controller());
 			}
 			// A provider that consumes an exception into false owns that failure's detailed report.
 			try (var operation = admission.enter(access.validationProfile())) { if (!access.valid(operation)) return false; }
-			if (!sameLayout(access)) return validationRejected("layout-changed", binding.root(), -1);
-			if (memberWitness != null) {
-				var profile = FluidAddressWitness.profile(WitnessUse.COMPARE, members.length);
-				// One callback-free loaded-map lookup per member, separate from the helper's vector
-				// construction/comparison cost. All existing member/authority/native checks above stay.
-				var lookups = new InventoryValidationBudget.Cost(256, 256, 16L + 8L * members.length);
-				try (var operation = admission.enter(profile.plus(owned(lookups)))) {
-					operation.allowance().debit(lookups);
-					operation.allowance().requireAvailable(profile.ownedCost());
-					Object[] current = new Object[members.length];
-					// A later member/authority callback can replace an earlier member. Build the vector
-					// only after ALL checks, from the loaded-existing-BE map (no provider callbacks).
-					for (int index = 0; index < members.length; index++) {
-						@Nullable BlockEntity entity = world.existingEntity(binding.level(), members[index].position());
-						if (entity == null) return validationRejected("member-missing-after-checks", members[index].position(), index);
-						current[index] = entity;
-					}
-					requireSame(memberWitness.compare(FluidAddressWitness.Schema.COMMON_MEMBERS_V1, current, operation));
-				}
-			}
+			if (!sameLayout(access)) return validationRejected("layout-changed", binding.root());
+			if (rootWitness != null) compareTarget(rootWitness, binding.root(), binding, admission);
+			@Nullable Unit currentUnit = unit;
+			if (controllerWitness != null && currentUnit != null && currentUnit.controller() != null)
+				compareTarget(controllerWitness, currentUnit.controller(), binding, admission);
 			try (var operation = admission.enter(access.witnessProfile(WitnessUse.COMPARE))) {
 				requireSame(access.compareWitness(addressWitness, operation));
 			}
 			validationRejectionReported = false;
 			return true;
 		}
-		private boolean validationRejected(String reason, BlockPos position, int index) {
+		private void compareTarget(FluidAddressWitness witness, BlockPos position, Binding binding, InventoryFluidAdmission admission) {
+			@Nullable BlockEntity entity = world.existingEntity(binding.level(), position);
+			if (entity == null) throw unavailable("fluid target identity changed");
+			try (var operation = admission.enter(FluidAddressWitness.profile(WitnessUse.COMPARE, 1))) {
+				requireSame(witness.compare(FluidAddressWitness.Schema.COMMON_MEMBERS_V1, new Object[] {entity}, operation));
+			}
+		}
+		private boolean validationRejected(String reason, BlockPos position) {
 			if (!validationRejectionReported) {
 				validationRejectionReported = true;
 				Diagnostics.server().atDebug().event(Level.DEBUG,
 					"inventory/fluid/valid", reason,
-					() -> "operation=fluid/valid stage=validate member=" + position.toShortString() + " index=" + index
-						+ " members=" + members.length + " layout=" + layout.layoutId() + " slots=" + slots
+					() -> "operation=fluid/valid stage=validate member=" + position.toShortString()
+						+ " members=" + layout.members().size() + " layout=" + layout.layoutId() + " slots=" + slots
 						+ " owner=" + input.readOwner() + " face=" + input.face() + " target=" + input.target());
 			}
 			return false;

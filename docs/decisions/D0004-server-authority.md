@@ -11,8 +11,9 @@ target against its own state, reclassifies the normalized target, validates the
 selected Ping Type, and derives owner, authoritative name/color, channel,
 audience, arrival and lifetime. MarkerRemove is accepted only for an active
 marker owned by the requester. Same-target winner selection is server-owned and
-recipient-scoped: latest server arrival wins, with larger Marker ID as the
-equal-arrival tie-breaker. Losing markers remain active.
+recipient-scoped; the exact authoritative ordering is owned by
+[ping winner](../architecture/authority/ping_winner.md). Losing markers remain
+active.
 
 The server enforces create rate limits for every client. The client token bucket
 is only a create-time courtesy gate; rejected courtesy creates are dropped and

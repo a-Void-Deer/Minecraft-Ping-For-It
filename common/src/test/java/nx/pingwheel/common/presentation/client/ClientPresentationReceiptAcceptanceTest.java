@@ -15,6 +15,7 @@ import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationReceiptContent;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.presentation.TestContentGrants;
 import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
 import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
@@ -35,6 +36,8 @@ class ClientPresentationReceiptAcceptanceTest {
 	private static final MarkerSnapshot SNAPSHOT = new MarkerSnapshot(ID, new UUID(1, 2),
 		new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest"), "entity_block", "attention",
 		new MarkerAnchor(1, 2, 3), 1, 100);
+	private static Set<String> grantedBasic = Set.of(PresentationBasic.NAME, PresentationBasic.HEALTH);
+	private static Set<InventoryResourceKind> grantedInventory = Set.of(InventoryResourceKind.ITEM, InventoryResourceKind.FLUID);
 
 	@Test void deniedOrUnacceptedSelectionRejectsBeforeAtomicStoreMutation() {
 		ClientPresentation denied = ready(PresentationBasic.fields(), Set.of(PresentationBasic.NAME));
@@ -114,7 +117,7 @@ class ClientPresentationReceiptAcceptanceTest {
 			2, marker, "Replacement", fault.equals("ref") ? HEALTH : NAME, content, section);
 		var candidate = new PresentationS2CPacket(base.kind(), fault.equals("version") ? base.protocol() + 1 : base.protocol(),
 			base.epoch(), base.view(), base.revision(), base.manifest(), base.schemas(), base.mask(), base.childBlack(), base.snapshot(),
-			base.ownerName(), base.defaultRef(), base.content(), fault.equals("basic-frame") ? new byte[] {(byte) 255} : base.sectionBytes(),
+			base.ownerName(), base.defaultRef(), base.markerGrant(), base.content(), fault.equals("basic-frame") ? new byte[] {(byte) 255} : base.sectionBytes(),
 			fault.equals("marker-id") ? new MarkerId(99) : base.markerId(), base.removalReason(), base.targetKey(), base.winnerId(),
 			base.requestId(), base.requestKind(), base.rejectReason());
 		assertFalse(client.initial(candidate));
@@ -144,6 +147,9 @@ class ClientPresentationReceiptAcceptanceTest {
 			InventoryPresentation.SCHEMA + (fault.equals("schema") ? 1 : 0)))));
 		assertTrue(client.reset(PresentationS2CPacket.reset(81, 1, Map.of("entity_block", Map.of(BASIC,
 			fault.equals("denied-name") ? Set.of(PresentationBasic.HEALTH) : Set.of(PresentationBasic.NAME))))));
+		grantedBasic = fault.equals("denied-name") ? Set.of(PresentationBasic.HEALTH) : Set.of(PresentationBasic.NAME);
+		grantedInventory = fault.equals("lane") ? Set.of(InventoryResourceKind.FLUID)
+			: Set.of(InventoryResourceKind.ITEM, InventoryResourceKind.FLUID);
 		return client;
 	}
 
@@ -152,10 +158,19 @@ class ClientPresentationReceiptAcceptanceTest {
 		client.tick(true);
 		assertTrue(client.offer(PresentationS2CPacket.offer(81, Map.of(BASIC, offeredFields), Map.of(BASIC, 1))));
 		assertTrue(client.reset(PresentationS2CPacket.reset(81, 1, Map.of("entity_block", Map.of(BASIC, allowed)))));
+		grantedBasic = Set.copyOf(allowed);
+		grantedInventory = Set.of();
 		return client;
 	}
 	private static PresentationS2CPacket created(long revision, PresentationReceiptContent content, PresentationSection basic) {
-		return PresentationS2CPacket.created(81, 1, revision, SNAPSHOT, "Owner", NAME, content, basic);
+		var allowed = new java.util.LinkedHashMap<String, Set<String>>();
+		allowed.put(BASIC, grantedBasic);
+		if (!grantedInventory.isEmpty()) allowed.put(InventoryPresentation.ADAPTER_ID,
+			grantedInventory.stream().map(InventoryResourceKind::fieldId)
+				.collect(java.util.stream.Collectors.toSet()));
+		InventoryResourceKind kind = content.inventorySnapshot() == null ? null : content.inventorySnapshot().resourceKind();
+		return PresentationS2CPacket.created(81, 1, revision, SNAPSHOT, "Owner", NAME,
+			new nx.pingwheel.common.presentation.MarkerContentGrant(TestContentGrants.fromAllowed(allowed), kind), content, basic);
 	}
 	private static PresentationSection basic(boolean health) {
 		return new PresentationSection(BASIC, 1, health ? Map.of(PresentationBasic.NAME,

@@ -73,8 +73,8 @@ class SettingsNavigationModelTest {
 		var client = SettingsNavigationModel.categories(Scope.CLIENT);
 		var server = SettingsNavigationModel.categories(Scope.SERVER);
 
-		assertEquals(7, client.size());
-		assertEquals(5, server.size());
+		assertEquals(8, client.size());
+		assertEquals(6, server.size());
 		assertEquals(
 			List.of(
 				"display",
@@ -83,10 +83,11 @@ class SettingsNavigationModelTest {
 				"input",
 				"channel_notices",
 				"geometry_config",
-				"performance"),
+				"performance",
+				"debug"),
 			client.stream().map(Category::id).toList());
 		assertEquals(
-			List.of("channel_players", "send_rate", "marker_duration", "performance", "server_presentation"),
+			List.of("channel_players", "send_rate", "marker_duration", "performance", "server_presentation", "debug"),
 			server.stream().map(Category::id).toList());
 		assertThrows(UnsupportedOperationException.class, () -> client.add(Category.MARKER_DISPLAY));
 

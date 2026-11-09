@@ -17,8 +17,8 @@ independently configure server behavior. The client file has a separate
 `pingDistance` key; the two configuration objects are distinct even where names
 match.
 
-The seven top-level scalar fields other than `pingDistance`, and the twenty-three
-`inventory` administration settings, can also be changed over the
+The nine top-level scalar fields other than `pingDistance`, and the
+twenty-three `inventory` administration settings, can also be changed over the
 client/server connection through
 [changing server configuration](../architecture/config/changing-server-config.md).
 Within the `presentation` object, the per-target-type `white`, `black`, and
@@ -41,9 +41,23 @@ exposes the remote settings and the presentation policy controls.
 | `syncDuration` | number, seconds | Server-held marker synchronization lifetime used for an accepted create's frozen expiry. | Server-authoritative. A valid positive duration after validation; it has no zero sentinel. Lifetime behavior is owned by [marker lifecycle](../architecture/authority/marker_lifecycle.md). |
 | `budgetDelayNotificationsEnabled` | boolean | Enables administrator system messages for continuously resource-delayed work; disabling it does not disable WARN diagnostics. | Server-authoritative. Message eligibility, timing and lifetime behavior are owned by [shared source monitoring](../architecture/presentation/shared_sources.md#budget-delay-monitoring). |
 | `loggingProfile` | string; canonical values `NORMAL`, `DEEP`, `DEBUG` | Server-side disclosure profile for diagnostic reports. | Server-authoritative and remotely editable. The server default is `NORMAL`; a missing, explicit `null`, or unknown persisted value resolves to `NORMAL` without a same-version rewrite. Disclosure and runtime publication are owned by [diagnostics and logging](../architecture/logging.md). |
+| `previewMonitorEnabled` | boolean; default `false` | Enables bounded server-side Preview performance-monitor collection for its lane. | Server-authoritative and remotely editable. The mask, merge and apply relationship are owned by [changing server configuration](../architecture/config/changing-server-config.md); numeric telemetry authority is owned by [server configuration authority](../architecture/authority/server-config.md). |
+| `trackingMonitorEnabled` | boolean; default `false` | Enables bounded server-side Tracking performance-monitor collection for its lane. | Server-authoritative and remotely editable. The mask, merge and apply relationship are owned by [changing server configuration](../architecture/config/changing-server-config.md); numeric telemetry authority is owned by [server configuration authority](../architecture/authority/server-config.md). |
 | `pingDistance` | number, blocks | Server acceptance range measured from the requester's eye to the authoritative target anchor. | Server-authoritative acceptance setting. It is not a client advertised capture cap; capture composition and acceptance are owned by [range](../architecture/picking/range.md). |
 | `presentation` | object | Per-target-type presentation field policy, sampling limits, and permission/interval overrides for the versioned presentation snapshot. | Server-authoritative. Projection, authorization, and demand-driven capture are owned by [presentation snapshot](../architecture/presentation/presentation_snapshot.md); the nested shape is catalogued below. |
 | `inventory` | object | Server-authoritative inventory preview and tracking budgets, caps, independent send-byte multipliers, finite display/frame size scalars, and Tracking pool partition switches. | Server-authoritative. Budget, unlimited-mode, multiplier, size-scalar, pooling and tracking-deadline semantics are owned by [inventory preview and tracking](../architecture/presentation/inventory.md); the nested shape is catalogued below. |
+
+The two monitor switches default to `false`; a missing or explicit `null`
+persisted value uses that default without a same-version rewrite. They are
+independent; either lane can be enabled alone. They are resolved from the final
+validated `loggingProfile`, so a load-time publication of a temporary `NORMAL`
+profile does not clear a legitimately loaded `DEBUG` document. A final validated profile other than `DEBUG` clears both
+effective switches, and returning to `DEBUG` does not restore either. A client
+HUD state, metric selection, or monitor subscription never enables, disables, or
+gates server collection: enabling a lane collects its bounded values even with
+no viewer, while subscription controls transfer only. The remote selection and
+merge transaction is owned by
+[changing server configuration](../architecture/config/changing-server-config.md).
 
 ## Presentation policy object
 
@@ -52,14 +66,14 @@ file has no presentation policy shape.
 
 | Member | JSON form | Meaning |
 | --- | --- | --- |
-| `targetTypes` | object mapping each of the five target-type IDs (`dropped_item`, `entity`, `entity_block`, `block`, `location`) to a rule object | Per-target-type field authorization. A missing or malformed target-type entry denies every field of that type instead of widening access. |
+| `targetTypes` | object mapping each of the five target-type IDs (`dropped_item`, `entity`, `entity_block`, `block`, `location`) to a rule object | Per-target-type field authorization resolved at a new creation. A missing or malformed target-type entry denies every field of that type instead of widening access. |
 | `targetTypes.<type>.white` | array of selector strings | Allow selectors for that target type. An empty list grants nothing by itself; an advertised field's manifest default still applies unless whitelist-only mode denies it. |
 | `targetTypes.<type>.black` | array of selector strings | Deny selectors for that target type; a matching field is denied unless an allow selector also matches, because an allow match wins. |
 | `targetTypes.<type>.childBlack` | array of child-reference objects | Exact record-child deny references for that target type; each object carries `adapterId`, `fieldId`, and a nonempty `recordPath` array of literal record keys. |
 | `targetTypes.<type>.whitelistOnly` | boolean | When true, a field that matches neither list for that target type is denied even when its manifest default is enabled. |
 | `minUpdateIntervalTicks` | number, ticks | Global minimum sampling interval; an adapter is never polled faster than this or its declared minimum. |
 | `scanBudget` | number | Per-capture source-scan allowance; `0` disables capture. |
-| `permissionLevels` | object mapping field ID to a vanilla level `0`–`4` | Per-field replacement of the manifest's required permission level. |
+| `permissionLevels` | object mapping field ID to a vanilla level `0`–`4` | Per-field replacement of the manifest's required permission level when a new creation resolves its authorization. |
 | `updateIntervals` | object mapping adapter ID to ticks | Per-adapter override that can only raise an adapter's declared sampling interval, not lower it. |
 
 A field selector is a field-ID pattern written as `namespace:path`; it matches
@@ -99,9 +113,17 @@ An explicit empty array is a deliberate opt-out and stays empty, and an explicit
 nonempty list is retained rather than overwritten. A target-type entry missing
 from the map keeps its deny-all outcome instead of receiving defaults.
 
-Each rule set applies to the marker's exact target type. Evaluation precedence,
-recipient masks, child-deny application, and client consequences are owned by
+Each rule set applies to a new creation's exact target type. Evaluation
+precedence, creation-time recipient authorization, child-deny application, and
+client consequences are owned by
 [presentation snapshot](../architecture/presentation/presentation_snapshot.md#per-target-type-field-policy).
+The selector, whitelist-only, permission override and child deny values are
+authorization inputs when a Ping is successfully created. A later edit affects
+later creations and does not re-evaluate an existing Ping's
+[frozen recipient content authorization](../architecture/presentation/presentation_snapshot.md#frozen-recipient-content-authorization).
+Sampling intervals and `scanBudget` remain current runtime settings; their
+fingerprint changes do not re-judge an existing marker's content
+authorization.
 Property Ping override selectors are a different grammar that matches a
 target's registry ID or tags rather than field IDs; it is owned by
 [presentation snapshot](../architecture/presentation/presentation_snapshot.md#property-ping).
@@ -250,6 +272,8 @@ Illustrative partial document; the values are examples, not defaults.
   "syncDuration": 15,
   "budgetDelayNotificationsEnabled": true,
   "loggingProfile": "NORMAL",
+  "previewMonitorEnabled": false,
+  "trackingMonitorEnabled": false,
   "pingDistance": 128,
   "presentation": {
     "targetTypes": {

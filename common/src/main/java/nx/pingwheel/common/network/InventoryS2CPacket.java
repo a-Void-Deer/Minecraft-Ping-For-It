@@ -42,8 +42,10 @@ import static nx.pingwheel.common.Global.S2C_NAMESPACE;
 public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, long requestId, @Nullable MarkerId markerId,
 	long baselineId, long statusRevision, long watermark, int partIndex, int partCount, boolean completeScan,
 	@Nullable Status status, long checksum, @Unmodifiable List<Entry> entries, @Nullable Offer offer, long presentationEpoch, long view,
-	@Unmodifiable Set<String> allowedTypes, long commitId, @Nullable MarkerRejectReason rejection, InventoryResourceKind resourceKind) implements IPacket {
-	public enum Kind { OFFER, POLICY, SELECTED, REJECT, PREVIEW, SNAPSHOT, STREAM, STATUS, HEARTBEAT }
+	@Unmodifiable Set<String> allowedTypes, long commitId, @Nullable MarkerRejectReason rejection, InventoryResourceKind resourceKind,
+	int laneBits) implements IPacket {
+	/** {@code OPENED} is appended: existing kind ordinals and names are unchanged. */
+	public enum Kind { OFFER, POLICY, SELECTED, REJECT, PREVIEW, SNAPSHOT, STREAM, STATUS, HEARTBEAT, OPENED }
 	public enum Status { UPDATING, READY, UNCERTAIN, INCOMPLETE, INVALID, COMPONENT_TOO_LONG }
 
 	public static final int VERSION = 2;
@@ -147,6 +149,9 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 		if (entries.size() > MAX_ENTRIES) {
 			throw new IllegalArgumentException("inventory entry count");
 		}
+		if (laneBits < 0 || laneBits > 3 || kind != Kind.OPENED && laneBits != 0) {
+			throw new IllegalArgumentException("inventory opened lane bits");
+		}
 	}
 	/** Source bridge only: every former full constructor is ITEM. Wire accepts v2 only. */
 	public InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, long requestId, @Nullable MarkerId markerId,
@@ -154,7 +159,7 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 		@Nullable Status status, long checksum, List<Entry> entries, @Nullable Offer offer, long presentationEpoch, long view,
 		Set<String> allowedTypes, long commitId, @Nullable MarkerRejectReason rejection) {
 		this(kind, protocol, epoch, requestId, markerId, baselineId, statusRevision, watermark, partIndex, partCount,
-			completeScan, status, checksum, entries, offer, presentationEpoch, view, allowedTypes, commitId, rejection, InventoryResourceKind.ITEM);
+			completeScan, status, checksum, entries, offer, presentationEpoch, view, allowedTypes, commitId, rejection, InventoryResourceKind.ITEM, 0);
 	}
 	public InventoryS2CPacket() {
 		this(null, 0, 0, 0, null, 0, 0, 0, 0, 1, false, null, 0, List.of(), null);
@@ -170,17 +175,17 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 		this(packet.kind, packet.protocol, packet.epoch, packet.requestId, packet.markerId, packet.baselineId,
 			packet.statusRevision, packet.watermark, packet.partIndex, packet.partCount, packet.completeScan,
 			packet.status, packet.checksum, packet.entries, packet.offer, packet.presentationEpoch, packet.view,
-			packet.allowedTypes, packet.commitId, packet.rejection, packet.resourceKind);
+			packet.allowedTypes, packet.commitId, packet.rejection, packet.resourceKind, packet.laneBits);
 	}
 	public InventoryS2CPacket stamp(long presentationEpoch, long view) {
 		return new InventoryS2CPacket(kind, protocol, epoch, requestId, markerId, baselineId, statusRevision, watermark, partIndex, partCount,
-			completeScan, status, checksum, entries, offer, presentationEpoch, view, allowedTypes, commitId, rejection, resourceKind);
+			completeScan, status, checksum, entries, offer, presentationEpoch, view, allowedTypes, commitId, rejection, resourceKind, laneBits);
 	}
 	/** One homogeneous lane, including empty data/status and policy frames. OFFER alone is session-wide. */
 	public InventoryS2CPacket withResourceKind(InventoryResourceKind resourceKind) {
-		if (kind == Kind.OFFER && resourceKind != InventoryResourceKind.ITEM) throw new IllegalArgumentException("OFFER is session-wide");
+		if ((kind == Kind.OFFER || kind == Kind.OPENED) && resourceKind != InventoryResourceKind.ITEM) throw new IllegalArgumentException("OFFER is session-wide");
 		return new InventoryS2CPacket(kind, protocol, epoch, requestId, markerId, baselineId, statusRevision, watermark, partIndex, partCount,
-			completeScan, status, checksum, entries, offer, presentationEpoch, view, allowedTypes, commitId, rejection, resourceKind);
+			completeScan, status, checksum, entries, offer, presentationEpoch, view, allowedTypes, commitId, rejection, resourceKind, laneBits);
 	}
 	public static InventoryS2CPacket policy(InventoryResourceKind resourceKind, long epoch, long presentationEpoch, long view, Set<String> allowedTypes) {
 		return policy(epoch, presentationEpoch, view, allowedTypes).withResourceKind(resourceKind);
@@ -200,6 +205,12 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 
 	public static InventoryS2CPacket offer(long epoch, Offer offer) {
 		return new InventoryS2CPacket(Kind.OFFER, VERSION, epoch, 0, null, 0, 0, 0, 0, 1, false, null, 0, List.of(), offer);
+	}
+
+	/** Complete immutable Preview request entitlement: a zero mask is valid and denies every lane. */
+	public static InventoryS2CPacket opened(long epoch, long presentationEpoch, long view, long requestId, int laneBits) {
+		return new InventoryS2CPacket(Kind.OPENED, VERSION, epoch, requestId, null, 0, 0, 0, 0, 1, false, null, 0, List.of(), null,
+			presentationEpoch, view, Set.of(), 0, null, InventoryResourceKind.ITEM, laneBits);
 	}
 
 	/** One fragment of preview, snapshot or stream data. */
@@ -273,7 +284,7 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 	 */
 	public int encodedSize(int displayBytes, int frameBytes) {
 		requireBudgets(displayBytes, frameBytes);
-		int size = enumSize(kind) + varIntSize(protocol) + 32 + (kind == Kind.OFFER ? 0 : 1);
+		int size = enumSize(kind) + varIntSize(protocol) + 32 + (kind == Kind.OFFER || kind == Kind.OPENED ? 0 : 1);
 		size += switch (kind) {
 			case POLICY -> {
 				int policy = varIntSize(allowedTypes.size());
@@ -282,6 +293,7 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 				yield policy;
 			}
 			case SELECTED, REJECT -> 8 + markerSize() + (kind == Kind.REJECT ? enumSize(rejection) : 0);
+			case OPENED -> 1;
 			case OFFER -> varIntSize(offer.previewPeriodTicks()) + varIntSize(offer.trackingPeriodTicks())
 				+ varIntSize(offer.resyncMinPeriods()) + varIntSize(offer.heartbeatPeriods())
 				+ varIntSize(offer.effectiveDisplayBytes()) + varIntSize(offer.effectiveFrameBytes());
@@ -363,7 +375,7 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 		buf.writeLong(requestId);
 		buf.writeLong(presentationEpoch);
 		buf.writeLong(view);
-		if (kind != Kind.OFFER) buf.writeByte(resourceKind.wireId());
+		if (kind != Kind.OFFER && kind != Kind.OPENED) buf.writeByte(resourceKind.wireId());
 		switch (kind) {
 			case POLICY -> {
 				buf.writeVarInt(allowedTypes.size());
@@ -374,6 +386,7 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 				buf.writeLong(commitId); writeMarkerId(buf);
 				if (kind == Kind.REJECT) writeEnum(buf, rejection);
 			}
+			case OPENED -> buf.writeByte(laneBits);
 			case OFFER -> {
 				buf.writeVarInt(offer.previewPeriodTicks());
 				buf.writeVarInt(offer.trackingPeriodTicks());
@@ -428,12 +441,13 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 		long epoch = buf.readLong();
 		long requestId = buf.readLong();
 		long presentationEpoch = buf.readLong(), view = buf.readLong(), commitId = 0;
-		InventoryResourceKind resourceKind = kind == Kind.OFFER ? InventoryResourceKind.ITEM : InventoryResourceKind.fromWireId(buf.readUnsignedByte());
+		InventoryResourceKind resourceKind = kind == Kind.OFFER || kind == Kind.OPENED ? InventoryResourceKind.ITEM : InventoryResourceKind.fromWireId(buf.readUnsignedByte());
 		Set<String> allowedTypes = Set.of();
 		@Nullable MarkerRejectReason rejection = null;
 		if (requestId < 0) {
 			throw new IllegalArgumentException("Negative inventory request id");
 		}
+		int laneBits = 0;
 		@Nullable MarkerId markerId = null;
 		long baselineId = 0;
 		long statusRevision = 0;
@@ -455,6 +469,10 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 			case SELECTED, REJECT -> {
 				commitId = buf.readLong(); markerId = readMarkerId(buf);
 				if (kind == Kind.REJECT) rejection = InventoryWireCodec.readEnum(buf, MarkerRejectReason.class);
+			}
+			case OPENED -> {
+				laneBits = buf.readUnsignedByte();
+				if (laneBits < 0 || laneBits > 3) throw new IllegalArgumentException("Unknown inventory lane bits");
 			}
 			case OFFER -> offer = readOffer(buf);
 			case PREVIEW, SNAPSHOT, STREAM -> {
@@ -495,7 +513,7 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 			throw new IllegalArgumentException("Trailing inventory response");
 		}
 		return new InventoryS2CPacket(kind, protocol, epoch, requestId, markerId, baselineId, statusRevision, watermark,
-			partIndex, partCount, completeScan, status, checksum, entries, offer, presentationEpoch, view, allowedTypes, commitId, rejection, resourceKind);
+			partIndex, partCount, completeScan, status, checksum, entries, offer, presentationEpoch, view, allowedTypes, commitId, rejection, resourceKind, laneBits);
 	}
 
 	private static Offer readOffer(FriendlyByteBuf buf) {
@@ -637,19 +655,23 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 
 	@Override public boolean isCorrupt() {
 		if (kind == Kind.OFFER && resourceKind != InventoryResourceKind.ITEM) return true;
+		if (kind == Kind.OPENED && resourceKind != InventoryResourceKind.ITEM) return true;
 		if (kind == null || protocol != VERSION) {
 			return true;
 		}
+		if (laneBits < 0 || laneBits > 3 || kind != Kind.OPENED && laneBits != 0) return true;
 		if (epoch == 0 || requestId < 0 || baselineId < 0 || statusRevision < 0 || watermark < 0 || view < 0 || commitId < 0) {
 			return true;
 		}
-		if (kind != Kind.OFFER && offer != null) {
+		if (kind != Kind.OFFER && kind != Kind.OPENED && offer != null) {
 			return true;
 		}
 		return switch (kind) {
-			case POLICY -> markerId != null || !entries.isEmpty();
-			case SELECTED -> markerId == null || commitId <= 0 || rejection != null || !entries.isEmpty();
-			case REJECT -> markerId != null || commitId <= 0 || rejection == null || !entries.isEmpty();
+			case POLICY -> markerId != null || !entries.isEmpty() || offer != null;
+			case SELECTED -> markerId == null || commitId <= 0 || rejection != null || !entries.isEmpty() || offer != null;
+			case REJECT -> markerId != null || commitId <= 0 || rejection == null || !entries.isEmpty() || offer != null;
+			case OPENED -> requestId <= 0 || markerId != null || !entries.isEmpty() || offer != null || status != null
+				|| completeScan || baselineId != 0 || statusRevision != 0 || watermark != 0 || checksum != 0;
 			case OFFER -> offer == null || markerId != null || !entries.isEmpty();
 			case PREVIEW -> markerId != null || status == null || !validParts() || hasDuplicateKeys();
 			case SNAPSHOT, STREAM -> markerId == null || status == null || !validParts() || hasDuplicateKeys();

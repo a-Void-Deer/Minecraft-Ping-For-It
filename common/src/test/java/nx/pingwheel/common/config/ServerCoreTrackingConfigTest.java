@@ -91,7 +91,7 @@ class ServerCoreTrackingConfigTest {
 				| ServerConfigUpdate.RATE_LIMIT, ChannelMode.AUTO, true, 0, 99, 7,
 				InventoryConfigValues.defaults().with(Field.TRACKING_DISTINGUISH_PLAYERS, Value.scalar(2)));
 			ServerCore.onServerConfigUpdate(server, player, malicious);
-			ServerCore.onServerConfigUpdate(server, player, new ServerConfigUpdateC2SPacket(1 << 30,
+			ServerCore.onServerConfigUpdate(server, player, new ServerConfigUpdateC2SPacket(1L << 32,
 				ChannelMode.AUTO, true, 0, 99, 7, InventoryConfigValues.defaults()));
 			assertEquals(authoritative, ServerConfigSnapshot.from(config, true));
 			var deniedProfile = new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE,
@@ -111,7 +111,7 @@ class ServerCoreTrackingConfigTest {
 			ServerCore.onServerConfigUpdate(server, player, unselectedProfile);
 			assertEquals(LoggingProfile.DEEP, config.getLoggingProfile());
 			assertEquals(LoggingProfile.DEEP, Diagnostics.profile(DiagnosticSide.SERVER));
-			var invalidMixedProfile = new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE | (1 << 30),
+			var invalidMixedProfile = new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE | (1L << 32),
 				ChannelMode.AUTO, true, 0, 5, 7, InventoryConfigValues.defaults(), false, LoggingProfile.DEBUG);
 			ServerCore.onServerConfigUpdate(server, player, invalidMixedProfile);
 			assertEquals(LoggingProfile.DEEP, config.getLoggingProfile());
@@ -126,6 +126,38 @@ class ServerCoreTrackingConfigTest {
 				assertFalse(snapshot.inventory().value(Field.TRACKING_DISTINGUISH_FACES).booleanValue());
 				assertTrue(snapshot.inventory().value(Field.TRACKING_DISTINGUISH_PLAYERS).booleanValue());
 			} finally { buf.release(); }
+
+			var enable = wire(new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE
+				| ServerConfigUpdate.PREVIEW_MONITOR_ENABLED | ServerConfigUpdate.TRACKING_MONITOR_ENABLED,
+				ChannelMode.AUTO, true, 1, 2, 7, InventoryConfigValues.defaults(), true, LoggingProfile.DEBUG, true, true));
+			player.permission = 2;
+			ServerCore.onServerConfigUpdate(server, player, enable);
+			assertFalse(config.isPreviewMonitorEnabled());
+			assertFalse(config.isTrackingMonitorEnabled());
+			player.permission = 3;
+			ServerCore.onServerConfigUpdate(server, player, enable);
+			assertTrue(config.isPreviewMonitorEnabled());
+			assertTrue(config.isTrackingMonitorEnabled());
+			assertEquals(LoggingProfile.DEBUG, config.getLoggingProfile());
+			// An unselected NORMAL payload profile must not disable DEBUG authority.
+			var previewOnly = wire(new ServerConfigUpdateC2SPacket(ServerConfigUpdate.PREVIEW_MONITOR_ENABLED,
+				ChannelMode.AUTO, true, 1, 2, 7, InventoryConfigValues.defaults(), true, LoggingProfile.NORMAL, false, false));
+			ServerCore.onServerConfigUpdate(server, player, previewOnly);
+			assertFalse(config.isPreviewMonitorEnabled());
+			assertTrue(config.isTrackingMonitorEnabled());
+			assertEquals(LoggingProfile.DEBUG, config.getLoggingProfile());
+			var monitorSnapshot = ServerConfigSnapshot.from(config, true);
+			assertTrue(new ServerConfigSnapshotS2CPacket(19, monitorSnapshot).snapshot().trackingMonitorEnabled());
+			var downgrade = wire(new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE,
+				ChannelMode.AUTO, true, 1, 2, 7, InventoryConfigValues.defaults(), true, LoggingProfile.NORMAL, true, true));
+			ServerCore.onServerConfigUpdate(server, player, downgrade);
+			assertFalse(config.isPreviewMonitorEnabled());
+			assertFalse(config.isTrackingMonitorEnabled());
+			var reenter = wire(new ServerConfigUpdateC2SPacket(ServerConfigUpdate.LOGGING_PROFILE,
+				ChannelMode.AUTO, true, 1, 2, 7, InventoryConfigValues.defaults(), true, LoggingProfile.DEBUG, true, true));
+			ServerCore.onServerConfigUpdate(server, player, reenter);
+			assertFalse(config.isPreviewMonitorEnabled());
+			assertFalse(config.isTrackingMonitorEnabled());
 		} finally {
 			configField.set(handler, previousConfig);
 			hashField.setInt(handler, previousHash);

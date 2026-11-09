@@ -83,6 +83,9 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 				() -> "position=" + position.toShortString() + ";chunk=" + (position.getX() >> 4) + "," + (position.getZ() >> 4));
 			context.require(position, operation);
 		}
+		@Override public void requireController(BlockPos position, Operation operation) {
+			context.requireController(position, operation);
+		}
 		@Override public FluidCapabilityAccess.Block block(BlockPos position, Operation operation) {
 			require(position, operation);
 			var chunk = context.level().getChunkSource().getChunkNow(position.getX() >> 4, position.getZ() >> 4);

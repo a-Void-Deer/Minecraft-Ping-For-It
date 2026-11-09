@@ -248,9 +248,9 @@ moves with the pattern, and the existing view translation then centers
 whichever origin is active, so the established GUI-center contract is
 unchanged and no screen-pixel anchor or native warp is added. A user return
 clears any stale turn candidate or pending automatic placement, resets the
-returned parent's travel, arms its fresh-stroke requirement, seeds a fresh
-trail epoch, clears the list's Back-side focus when the return lands back on a
-menu surface, and leaves the shared held-Back block as it was; when the
+returned parent's travel, arms its fresh-stroke requirement, and seeds a fresh
+trail epoch. When the return lands back on a menu surface, it clears the list's
+Back-side focus; it leaves the shared held-Back block as it was. When the
 returned parent is a radial menu, an immediate release at the returned origin
 is a deadzone release and abandons with no action. A programmatic return such
 as data revocation or root pruning keeps the old placement and is not user

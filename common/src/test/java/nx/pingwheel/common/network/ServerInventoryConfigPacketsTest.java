@@ -211,7 +211,7 @@ class ServerInventoryConfigPacketsTest {
 		writeTrailer(buf);
 		assertTrue(ServerConfigUpdateC2SPacket.readSafe(buf).isCorrupt());
 		buf.release();
-		var unknown = new ServerConfigUpdateC2SPacket(1 << 30, ChannelMode.AUTO, true, 0, 0, 7);
+		var unknown = new ServerConfigUpdateC2SPacket(1L << 32, ChannelMode.AUTO, true, 0, 0, 7);
 		assertTrue(roundTrip(unknown, ServerConfigUpdateC2SPacket::readSafe).isCorrupt());
 		assertTrue(new ServerConfigSnapshotS2CPacket(1, true, ChannelMode.AUTO, true, 0, 0, 7, null).isCorrupt());
 		assertTrue(new ServerConfigUpdateC2SPacket(1, ChannelMode.AUTO, true, 0, 0, 7, null).isCorrupt());
@@ -276,10 +276,12 @@ class ServerInventoryConfigPacketsTest {
 	private static void writeTrailer(FriendlyByteBuf buf) {
 		buf.writeBoolean(true); // administrator notifications
 		buf.writeVarInt(0); // stable NORMAL tag, independent of the production codec
+		buf.writeBoolean(false); // Preview monitor
+		buf.writeBoolean(false); // Tracking monitor, then exact end
 	}
-	private static FriendlyByteBuf updatePrefix(int mask) {
+	private static FriendlyByteBuf updatePrefix(long mask) {
 		var buf = buffer();
-		buf.writeVarInt(mask); buf.writeVarInt(0); buf.writeBoolean(true);
+		buf.writeVarLong(mask); buf.writeVarInt(0); buf.writeBoolean(true);
 		buf.writeVarInt(1000); buf.writeVarInt(5); buf.writeVarInt(7);
 		return buf;
 	}

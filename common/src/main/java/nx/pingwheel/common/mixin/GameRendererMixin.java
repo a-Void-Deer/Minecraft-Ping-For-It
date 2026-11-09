@@ -2,6 +2,7 @@ package nx.pingwheel.common.mixin;
 
 import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.renderer.GameRenderer;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.client.outline.BlockOutlineFrameState;
@@ -10,6 +11,7 @@ import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /** Advances the interaction machine once per rendered frame, independent of HUD visibility. */
@@ -23,6 +25,24 @@ public abstract class GameRendererMixin {
 	@Inject(method = "render", at = @At("HEAD"))
 	private void pingforit$advanceInteraction(DeltaTracker deltaTracker, boolean renderLevel, CallbackInfo callbackInfo) {
 		CommonClient.INSTANCE.onRenderFrame();
+	}
+
+	/**
+	 * The one native GuiGraphics store is after world rendering and 2D projection,
+	 * before confusion, item activation, Gui, screens and overlays. STORE already
+	 * selects the point after assignment; type-only discrimination avoids a local
+	 * slot/name/ordinal dependency. The store itself precedes vanilla's world gate.
+	 */
+	@ModifyVariable(
+		method = "render(Lnet/minecraft/client/DeltaTracker;Z)V",
+		at = @At("STORE"),
+		require = 1,
+		allow = 1)
+	private GuiGraphics pingforit$renderMonitorBelowGui(GuiGraphics graphics, DeltaTracker deltaTracker, boolean renderLevel) {
+		if (renderLevel && this.minecraft.isGameLoadFinished() && this.minecraft.level != null) {
+			CommonClient.INSTANCE.onRenderMonitor(graphics);
+		}
+		return graphics;
 	}
 
 	/**

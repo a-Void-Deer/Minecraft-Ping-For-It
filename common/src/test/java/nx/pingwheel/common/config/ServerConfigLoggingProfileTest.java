@@ -39,7 +39,7 @@ class ServerConfigLoggingProfileTest {
 		assertEquals(19, merged.rateLimit());
 		assertEquals(LoggingProfile.DEBUG, merged.loggingProfile());
 		assertEquals(current.inventory(), merged.inventory());
-		for (int mask : new int[] {ServerConfigUpdate.RATE_LIMIT, ServerConfigUpdate.LOGGING_PROFILE}) {
+		for (long mask : new long[] {ServerConfigUpdate.RATE_LIMIT, ServerConfigUpdate.LOGGING_PROFILE}) {
 			var invalid = new ServerConfigUpdate(mask, ChannelMode.AUTO, true, 1, 19, 7, current.inventory(), true, null);
 			assertFalse(invalid.isValid());
 			assertEquals(current, ServerConfigUpdateService.apply(true, current, invalid).snapshot());
@@ -93,7 +93,7 @@ class ServerConfigLoggingProfileTest {
 			assertEquals(LoggingProfile.NORMAL, previous.loggingProfile());
 		}
 		assertEquals(1 << 29, ServerConfigUpdate.LOGGING_PROFILE);
-		assertEquals(30, Integer.bitCount(ServerConfigUpdate.ALL_FIELDS));
+		assertEquals(32, Long.bitCount(ServerConfigUpdate.ALL_FIELDS));
 		assertEquals(0, ServerConfigUpdate.ALL_INVENTORY_FIELDS & ServerConfigUpdate.LOGGING_PROFILE);
 	}
 

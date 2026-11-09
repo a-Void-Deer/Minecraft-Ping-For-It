@@ -31,11 +31,18 @@ public record ServerMarker(
 	long arrivalTick,
 	long expiresAtTick,
 	@Unmodifiable List<UUID> recipients,
-	@Unmodifiable List<PresentationPropertySelection> properties
+	@Unmodifiable List<PresentationPropertySelection> properties,
+	PingAuthorization authorization
 ) {
 	public ServerMarker(MarkerId id, UUID owner, Target target, TargetKey targetKey, TargetType targetType, PingType pingType,
 		MarkerAnchor anchor, long arrivalTick, long expiresAtTick, List<UUID> recipients) {
 		this(id, owner, target, targetKey, targetType, pingType, anchor, arrivalTick, expiresAtTick, recipients, List.of());
+	}
+	public ServerMarker(MarkerId id, UUID owner, Target target, TargetKey targetKey, TargetType targetType, PingType pingType,
+		MarkerAnchor anchor, long arrivalTick, long expiresAtTick, List<UUID> recipients,
+		List<PresentationPropertySelection> properties) {
+		this(id, owner, target, targetKey, targetType, pingType, anchor, arrivalTick, expiresAtTick, recipients, properties,
+			PingAuthorization.denied(recipients));
 	}
 	public ServerMarker(MarkerId id, UUID owner, Target target, TargetType targetType, PingType pingType,
 		MarkerAnchor anchor, long arrivalTick, long expiresAtTick, List<UUID> recipients) {
@@ -87,6 +94,9 @@ public record ServerMarker(
 		if (properties.size() > PresentationCodec.MAX_PROPERTIES
 			|| properties.stream().map(PresentationPropertySelection::ref).distinct().count() != properties.size())
 			throw new IllegalArgumentException("duplicate or excessive property selections");
+		authorization = Objects.requireNonNull(authorization, "authorization");
+		if (!authorization.recipients().keySet().equals(java.util.Set.copyOf(recipients)))
+			throw new IllegalArgumentException("authorization recipients must match marker audience");
 	}
 
 	/**

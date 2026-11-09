@@ -9,6 +9,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.players.PlayerList;
 import nx.pingwheel.common.config.ChannelMode;
+import nx.pingwheel.common.config.InventorySettings;
 import nx.pingwheel.common.config.ServerConfig;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.ServerConfigUpdate;
@@ -37,6 +38,7 @@ import nx.pingwheel.common.marker.ServerMarker;
 import nx.pingwheel.common.marker.ServerMarkerStore;
 import nx.pingwheel.common.name.MinecraftTargetNameResolver;
 import nx.pingwheel.common.network.InventoryC2SPacket;
+import nx.pingwheel.common.network.InventoryMonitorSubscribeC2SPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
 import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
@@ -205,7 +207,14 @@ public class ServerCore {
 			MarkerCreationLogger.global(),
 			externalProviders,
 			nameResolver,
-			new MinecraftTargetGroupingResolver(server));
+			new MinecraftTargetGroupingResolver(server),
+			(target, targetTypeId, owner, audience) ->
+				PresentationServer.freezeForCreate(server, target, targetTypeId, owner, audience));
+	}
+
+	/** Read-only canonical lookup used by the dedicated inventory host. */
+	public static java.util.Optional<ServerMarker> activeMarker(MarkerId marker) {
+		return marker == null ? java.util.Optional.empty() : markerStore().find(marker);
 	}
 
 	public static void onChannelUpdate(ServerPlayer player, UpdateChannelC2SPacket packet) {
@@ -306,7 +315,7 @@ public class ServerCore {
 		final boolean loggingSelected = (update.changedFields() & ServerConfigUpdate.LOGGING_PROFILE) != 0;
 		final boolean profileOnly = update.changedFields() == ServerConfigUpdate.LOGGING_PROFILE;
 		final @Nullable LoggingProfile selectedProfile = loggingSelected ? mergedSnapshot.loggingProfile() : null;
-		final var inventoryCandidate = (update.changedFields() & ServerConfigUpdate.ALL_INVENTORY_FIELDS) != 0
+		final @Nullable InventorySettings inventoryCandidate = (update.changedFields() & ServerConfigUpdate.ALL_INVENTORY_FIELDS) != 0
 			? plan.snapshot().inventory().toSettings() : null;
 
 		if ((update.changedFields() & ServerConfigUpdate.DEFAULT_CHANNEL_MODE) != 0) {
@@ -332,6 +341,10 @@ public class ServerCore {
 		if ((update.changedFields() & ServerConfigUpdate.LOGGING_PROFILE) != 0) {
 			config.setLoggingProfile(mergedSnapshot.loggingProfile());
 		}
+		// The merge already selected and normalized all three dependent leaves.
+		// Assign the final flags after the final profile, not payload defaults.
+		config.setPreviewMonitorEnabled(mergedSnapshot.previewMonitorEnabled());
+		config.setTrackingMonitorEnabled(mergedSnapshot.trackingMonitorEnabled());
 		config.validate();
 		if (loggingSelected) {
 			Diagnostics.setProfile(DiagnosticSide.SERVER, config.getLoggingProfile());
@@ -349,7 +362,7 @@ public class ServerCore {
 			() -> updateContext(update.changedFields(), true, profileOnly, selectedProfile));
 	}
 
-	private static String updateContext(int mask, boolean trustedPermission, boolean profileOnly,
+	private static String updateContext(long mask, boolean trustedPermission, boolean profileOnly,
 		@Nullable LoggingProfile selectedProfile) {
 		return "mask=" + mask + "; trustedPermission=" + trustedPermission + "; profileOnly=" + profileOnly
 			+ (selectedProfile == null ? "" : "; selectedProfile=" + selectedProfile);
@@ -505,6 +518,12 @@ public class ServerCore {
 		InventoryServer.handle(server, player, packet);
 	}
 
+	public static void onInventoryMonitorSubscribe(MinecraftServer server, ServerPlayer player, InventoryMonitorSubscribeC2SPacket packet) {
+		if (!server.isSameThread() || packet.isCorrupt() || server.getPlayerList().getPlayer(player.getUUID()) != player) return;
+		ensureMarkerStore(server);
+		InventoryServer.subscribeMonitor(server, player, packet);
+	}
+
 	public static void onPresentationPacket(MinecraftServer server, ServerPlayer player, PresentationC2SPacket packet) {
 		PresentationServer.activate(server);
 		if (packet == null || packet.isCorrupt()) return;
@@ -631,10 +650,24 @@ public class ServerCore {
 		List<UUID> audience = snapshotRecipients(server.getPlayerList(), player, channel, mode);
 		long now = server.getTickCount();
 		var outcome = markerService(server).createDedicated(player.serverLevel(), player.getUUID(), frozen.target(), frozen.defaultPingType(),
-			now, now + serverConfig.getSyncDuration() * (long) TICKS_PER_SECOND, audience, (target, targetKey, type, owner, recipients) -> {
-				@Nullable var policy = PresentationServer.inventoryPolicy(owner).orElse(null);
-				@Nullable MarkerRejectReason rejection = policy == null || !policy.types(kind).contains(type) ? MarkerRejectReason.INVALID_REQUEST : admission.prepare(target, targetKey, type, recipients);
-				return rejection == null ? MarkerCreationService.AdmissionResult.accepted(List.of(), Map.of()) : MarkerCreationService.AdmissionResult.rejected(rejection);
+			now, now + serverConfig.getSyncDuration() * (long) TICKS_PER_SECOND, audience,
+			new MarkerCreationService.DedicatedAdmission() {
+				@Override public MarkerCreationService.AdmissionResult admit(Target target, nx.pingwheel.common.marker.TargetKey targetKey,
+					String type, UUID owner, List<UUID> recipients) {
+					@Nullable MarkerRejectReason rejection = admission.prepare(target, targetKey, type, recipients);
+					return rejection == null ? MarkerCreationService.AdmissionResult.accepted(List.of(), Map.of())
+						: MarkerCreationService.AdmissionResult.rejected(rejection);
+				}
+
+				@Override public @Nullable MarkerRejectReason finishAuthorization(nx.pingwheel.common.marker.PingAuthorization authorization) {
+					// The owner is always a creation-audience member. The frozen
+					// dedicated field is the actual committed kind, not a re-read of
+					// the current lane policy.
+					if (!authorization.forRecipient(player.getUUID())
+						.allowsField(nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID, kind.fieldId()))
+						return MarkerRejectReason.INVALID_REQUEST;
+					return admission.finishAuthorization(authorization);
+				}
 			});
 		if (!outcome.isAccepted()) return new InventoryBackend.Created(null, outcome.rejectReason().orElseThrow());
 		var creation = outcome.creation().orElseThrow();
@@ -788,7 +821,7 @@ public class ServerCore {
 		PLAYER_CHANNELS.remove(player.getUUID());
 		PLAYER_RATES.remove(player.getUUID());
 		PresentationServer.disconnect(player.getUUID());
-		InventoryServer.disconnect(player.getUUID());
+		InventoryServer.disconnect(player);
 	}
 
 	/**

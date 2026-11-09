@@ -50,14 +50,30 @@ class InventoryPooledVaultBackendTest {
 			for (UUID owner : List.of(A, B)) { var client = new ClientInventory(packet -> {}); client.presentationReset(100, 1); clients.put(owner, client); backend.handle(owner, InventoryC2SPacket.hello(), 0, settings); }
 		}
 		@Override public Optional<InventoryBackend.Policy> policy(UUID player) { return Optional.of(new InventoryBackend.Policy(100, 1, Set.of("entity_block"))); }
+		@Override public Optional<InventoryBackend.SessionAccess> session(UUID player) {
+			return Optional.of(new InventoryBackend.SessionAccess(100, 1, Set.of(InventoryResourceKind.ITEM)));
+		}
+		@Override public Optional<ServerMarker> activeMarker(MarkerId marker) { return markers.find(marker); }
+		@Override public Set<InventoryResourceKind> freezeInventoryPreviewLanes(UUID owner, String targetTypeId) {
+			return Set.of(InventoryResourceKind.ITEM);
+		}
 		@Override public Optional<InventoryBackend.Opened> open(UUID player, Target requested) { return Optional.of(new InventoryBackend.Opened(requested, "entity_block", "attention")); }
 		@Override public boolean annotationAllowed(InventorySourceInput input, String pingType) { return pingType.equals("danger"); }
 		@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
 			var type = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow(); var group = new TargetKey.VaultKey("minecraft:overworld", 0, 0, 0, "create:item_vault");
-			@Nullable var rejection = admission.prepare(frozen.target(), group, type.id(), List.of(A, B));
-			return rejection != null ? new InventoryBackend.Created(null, rejection) : new InventoryBackend.Created(markers.create(player, frozen.target(), group, type, type.defaultPingType(), new MarkerAnchor(0, 0, 0), 0, 10000, List.of(A, B)).marker(), null);
+			var audience = List.of(A, B);
+			@Nullable var rejection = admission.prepare(frozen.target(), group, type.id(), audience);
+			if (rejection != null) return new InventoryBackend.Created(null, rejection);
+			var authorization = InventoryTestGrants.allowAll(audience);
+			rejection = admission.finishAuthorization(authorization);
+			if (rejection != null) return new InventoryBackend.Created(null, rejection);
+			return new InventoryBackend.Created(markers.create(player, frozen.target(), group, type, type.defaultPingType(),
+				new MarkerAnchor(0, 0, 0), 0, 10000, audience, List.of(), authorization).marker(), null);
 		}
-		@Override public void publishCreated(InventoryBackend.Created created) { for (var client : clients.values()) client.markerCreated(MarkerSnapshot.from(created.marker())); }
+		@Override public void publishCreated(InventoryBackend.Created created) {
+			for (var entry : clients.entrySet()) entry.getValue().markerCreated(MarkerSnapshot.from(created.marker()),
+				InventoryTestGrants.content(created.marker(), entry.getKey(), InventoryResourceKind.ITEM));
+		}
 		@Override public boolean knows(UUID player, MarkerId marker) { return markers.allMarkers().stream().anyMatch(value -> value.id().equals(marker)); }
 		@Override public boolean authorized(SyncPublisher.Context context) { return true; }
 		@Override public int encodedBytes(InventoryS2CPacket packet) { throw new AssertionError("legacy measurement"); }

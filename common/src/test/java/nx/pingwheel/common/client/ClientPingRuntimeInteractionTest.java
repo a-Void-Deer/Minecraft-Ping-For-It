@@ -291,7 +291,9 @@ class ClientPingRuntimeInteractionTest {
 		long request() { return sent.stream().filter(p -> p instanceof InventoryC2SPacket i && i.kind() == InventoryC2SPacket.Kind.OPEN)
 			.map(p -> ((InventoryC2SPacket) p).requestId()).reduce((a, b) -> b).orElseThrow(); }
 		void inventoryRows() {
-			runtime.onInventoryPacket(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, request(), null, 9, 1, 1, 0, 1, true,
+			long request = request();
+			runtime.onInventoryPacket(InventoryS2CPacket.opened(7, 100, 1, request, 3));
+			runtime.onInventoryPacket(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, request, null, 9, 1, 1, 0, 1, true,
 				InventoryS2CPacket.Status.READY, 0, List.of(new InventoryS2CPacket.Entry("opaque", "minecraft:stone", "Stone", null, 7, 1, false, null))).stamp(100, 1));
 		}
 		void openList() {
@@ -694,32 +696,43 @@ class ClientPingRuntimeInteractionTest {
 		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
 	}
 
-	@Test void resetRevocationClosesAStayingSelectorBeforeAnyStaleRowCanSubmit() {
+	@Test void resetRevocationKeepsTheFrozenStayButAnyStaleRowCannotSubmit() {
 		ClientConfig.HANDLER.getConfig().getSpatialSelector().setInventorySelectionStayOpenEnabled(true);
 		Fixture f = new Fixture(); f.openList();
 		f.release(700);
 		f.reset(2, Set.of());
 
-		assertTrue(f.runtime.selectorSnapshot().isEmpty());
+		assertTrue(f.runtime.selectorSnapshot().isPresent(),
+			"a same-epoch reset re-fences the view but keeps the frozen Preview request");
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, f.runtime.phase());
+		assertFalse(f.access.grabbed, "the staying selector keeps its mouse ownership");
+		f.press(800);
+		f.release(810);
+		assertTrue(f.runtime.selectorSnapshot().isEmpty(), "a stale old-view row cannot submit");
 		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
-		assertTrue(f.access.grabbed, "revocation restores the mouse ownership released by the selector");
-		f.release(800);
+		assertTrue(f.access.grabbed);
 		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
 		assertEquals(0, f.access.cancellations);
 	}
 
-	@Test void policyPurgeOfThePreviewRequestClosesAStayingSelector() {
+	@Test void policyPurgeKeepsTheFrozenStayAndReleaseUsesItsGrant() {
 		ClientConfig.HANDLER.getConfig().getSpatialSelector().setInventorySelectionStayOpenEnabled(true);
 		Fixture f = new Fixture(); f.openList();
+		long request = f.request();
 		f.release(700);
 		f.runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 100, 1, Set.of("block", "entity")).stamp(100, 1));
 		f.runtime.onInventoryPacket(InventoryS2CPacket.policy(nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID,
 			7, 100, 1, Set.of("block", "entity")).stamp(100, 1));
 
-		assertTrue(f.runtime.selectorSnapshot().isEmpty());
-		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
-		f.release(800);
-		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
+		assertTrue(f.runtime.selectorSnapshot().isPresent(),
+			"POLICY is only a hint and cannot close an accepted Preview grant");
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, f.runtime.phase());
+		f.press(800);
+		f.release(810);
+		assertEquals(1, f.selects().size(), "the held release still uses the frozen Preview grant");
+		assertEquals("opaque", f.selects().getFirst().entryKey());
+		assertEquals(request, f.selects().getFirst().requestId());
+		assertTrue(f.creates().isEmpty());
 	}
 	@Test void allInvalidPreviewLanesExitStayOpenButOneInvalidLaneKeepsTheOtherNavigable() {
 		ClientConfig.HANDLER.getConfig().getSpatialSelector().setInventorySelectionStayOpenEnabled(true);
@@ -744,9 +757,11 @@ class ClientPingRuntimeInteractionTest {
 		f.press(800);
 		f.reset(2, Set.of());
 
-		assertTrue(f.runtime.selectorSnapshot().isEmpty());
+		assertTrue(f.runtime.selectorSnapshot().isPresent(),
+			"a same-epoch reset cannot revoke the frozen request under a held stay tap");
 		f.release(810);
 		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
+		assertTrue(f.runtime.selectorSnapshot().isEmpty(), "the swallowed release closes without submitting");
 		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
 		assertEquals(0, f.access.cancellations);
 	}
@@ -943,6 +958,7 @@ class ClientPingRuntimeInteractionTest {
 		Fixture f = new Fixture(new ClientRateLimitPolicy(1, 1000), true);
 		f.openList();
 		long other = f.inventory.open((nx.pingwheel.common.domain.Target.BlockTarget) CHEST.target(), BlockFace.NORTH, "entity_block");
+		f.runtime.onInventoryPacket(InventoryS2CPacket.opened(7, 100, 1, other, 3));
 		f.runtime.onInventoryPacket(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, other, null, 8, 1, 1, 0, 1, true,
 			InventoryS2CPacket.Status.READY, 0, List.of(new InventoryS2CPacket.Entry("other", "minecraft:stone", "Stone", null, 4, 1, false, null))).stamp(100, 1));
 		assertEquals(ClientInventory.DispatchOutcome.SENT, f.runtime.dispatchInventory(f.inventory.selectable(other).getFirst(), "attention"));

@@ -324,7 +324,9 @@ class InventoryCreationSnapshotPacketsTest {
 		FriendlyByteBuf wire = buffer(); wire.writeVarInt(2); wire.writeVarInt(2);
 		wire.writeLong(7); wire.writeLong(3); wire.writeLong(5);
 		MarkerPacketCodec.writeMarkerSnapshot(wire, MARKER); MarkerPacketCodec.writeOwnerName(wire, "Owner");
-		PresentationCodec.writePropertyRef(wire, NAME); wire.writeVarInt(receiptKind); wire.writeVarInt(refs);
+		PresentationCodec.writePropertyRef(wire, NAME);
+		PresentationGrantCodec.write(wire, MarkerContentGrant.denied(null));
+		wire.writeVarInt(receiptKind); wire.writeVarInt(refs);
 		if (refs != 0) PresentationCodec.writePropertyRef(wire, NAME);
 		return wire;
 	}

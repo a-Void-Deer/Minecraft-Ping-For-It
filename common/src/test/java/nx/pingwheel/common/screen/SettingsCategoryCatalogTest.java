@@ -47,6 +47,7 @@ class SettingsCategoryCatalogTest {
 	private static final String SOUND_NOTICES_HEADING = GROUP_PREFIX + "sound_notices";
 	private static final String GEOMETRY_HEADING = GROUP_PREFIX + "geometry";
 	private static final String LOGGING_HEADING = GROUP_PREFIX + "logging";
+	private static final String MONITOR_HEADING = GROUP_PREFIX + "monitor";
 	private static final String CLIENT_CONFIG_FILE_HEADING = GROUP_PREFIX + "client_config_file";
 	private static final String WHEEL_OPTIONS_HEADING = GROUP_PREFIX + "wheel_options";
 	private static final String CHANNEL_PLAYERS_HEADING = GROUP_PREFIX + "channel_players";
@@ -92,7 +93,7 @@ class SettingsCategoryCatalogTest {
 
 	@Test
 	void everySettingAppearsExactlyOnceInItsApprovedCategory() {
-		assertEquals(75, Setting.values().length, "the approved catalog has 75 entries");
+		assertEquals(78, Setting.values().length, "the approved catalog has 78 entries");
 		assertEquals(EnumSet.allOf(Category.class), EnumSet.copyOf(EXPECTED_SECTIONS.keySet()),
 			"the approved section map must cover every settings category");
 
@@ -113,9 +114,9 @@ class SettingsCategoryCatalogTest {
 		}
 
 		assertEquals(EnumSet.allOf(Setting.class), all);
-		assertEquals(73L, all.stream()
+		assertEquals(76L, all.stream()
 			.filter(setting -> setting != Setting.OPEN_CLIENT_CONFIG && setting != Setting.PRESENTATION_SERVER_POLICY)
-			.count(), "only the file action and presentation editor are outside the 73 value controls");
+			.count(), "only the file action and presentation editor are outside the 76 value controls");
 	}
 
 	@Test
@@ -206,12 +207,41 @@ class SettingsCategoryCatalogTest {
 		assertEquals(PERFORMANCE_HEADINGS, sections.stream().map(Section::headingKey).toList());
 
 		var rows = sections.stream().flatMap(section -> section.rows().stream()).toList();
-		assertEquals(25, rows.size(), "Performance contains monitoring, logging, 21 numeric leaves and two tracking toggles");
+		assertEquals(24, rows.size(), "Performance contains monitoring, 21 numeric leaves and two tracking toggles");
 		assertTrue(rows.stream().allMatch(row -> row.settings().size() == 1),
 			"server Performance controls must not be paired into shared rows");
 		assertEquals(
 			SettingsCategoryCatalog.settings(Category.PERFORMANCE),
 			rows.stream().flatMap(row -> row.settings().stream()).toList());
+	}
+
+	@Test
+	void monitorSectionsAreConditionalDebugContentWithoutANewNavigationCategory() {
+		assertEquals(8, SettingsNavigationModel.categories(SettingsNavigationModel.Scope.CLIENT).size());
+		assertEquals(6, SettingsNavigationModel.categories(SettingsNavigationModel.Scope.SERVER).size());
+
+		var clientSections = SettingsCategoryCatalog.sections(Category.CLIENT_DEBUG);
+		var clientMonitor = clientSections.getLast();
+		assertEquals(MONITOR_HEADING, clientMonitor.headingKey());
+		assertEquals(SettingsCategoryCatalog.Visibility.DEBUG_PROFILE, clientMonitor.visibility());
+		assertEquals(SettingsCategoryCatalog.Content.CLIENT_METRICS, clientMonitor.content());
+		assertEquals(List.of(Setting.MONITOR_HUD_ENABLED),
+			clientMonitor.rows().stream().flatMap(row -> row.settings().stream()).toList());
+
+		var serverSections = SettingsCategoryCatalog.sections(Category.SERVER_DEBUG);
+		var serverMonitor = serverSections.getLast();
+		assertEquals(MONITOR_HEADING, serverMonitor.headingKey());
+		assertEquals(SettingsCategoryCatalog.Visibility.DEBUG_PROFILE, serverMonitor.visibility());
+		assertEquals(SettingsCategoryCatalog.Content.SETTINGS, serverMonitor.content());
+		assertEquals(List.of(Setting.PREVIEW_MONITOR_ENABLED, Setting.TRACKING_MONITOR_ENABLED),
+			serverMonitor.rows().stream().flatMap(row -> row.settings().stream()).toList());
+
+		for (Category category : Category.values()) {
+			if (category != Category.CLIENT_DEBUG && category != Category.SERVER_DEBUG) {
+				assertTrue(SettingsCategoryCatalog.sections(category).stream()
+					.allMatch(section -> section.visibility() == SettingsCategoryCatalog.Visibility.ALWAYS));
+			}
+		}
 	}
 
 	@Test
@@ -308,7 +338,6 @@ class SettingsCategoryCatalogTest {
 		// the other shared budgets rather than at the end of the catalogue.
 		assertEquals(List.of(
 			Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED,
-			Setting.SERVER_LOGGING_PROFILE,
 			Setting.INVENTORY_PHYSICAL_SLOTS_PER_TICK,
 			Setting.INVENTORY_PENDING_MEMORY_MIB,
 			Setting.INVENTORY_DISPLAY_BYTE_MULTIPLIER,
@@ -417,13 +446,16 @@ class SettingsCategoryCatalogTest {
 		expected.put(Category.GEOMETRY_CONFIG, List.of(
 			section(GEOMETRY_HEADING,
 				row(Setting.ENTITY_BLOCK_RENDER_MODE)),
-			section(LOGGING_HEADING,
-				row(Setting.LOGGING_PROFILE)),
 			section(CLIENT_CONFIG_FILE_HEADING,
 				row(Setting.OPEN_CLIENT_CONFIG))));
 		expected.put(Category.CLIENT_PERFORMANCE, List.of(
 			section(WHEEL_OPTIONS_HEADING,
 				row(Setting.PRECISE_CAPTURE_PERIOD_TICKS))));
+		expected.put(Category.CLIENT_DEBUG, List.of(
+			section(LOGGING_HEADING,
+				row(Setting.LOGGING_PROFILE)),
+			section(MONITOR_HEADING,
+				row(Setting.MONITOR_HUD_ENABLED))));
 		expected.put(Category.CHANNEL_PLAYERS, List.of(
 			section(CHANNEL_PLAYERS_HEADING,
 				row(Setting.DEFAULT_CHANNEL_MODE),
@@ -437,8 +469,7 @@ class SettingsCategoryCatalogTest {
 				row(Setting.SYNC_DURATION))));
 		expected.put(Category.PERFORMANCE, List.of(
 			section(MONITORING_HEADING,
-				row(Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED),
-				row(Setting.SERVER_LOGGING_PROFILE)),
+				row(Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED)),
 			section(INVENTORY_SHARED_HEADING,
 				row(Setting.INVENTORY_PHYSICAL_SLOTS_PER_TICK),
 				row(Setting.INVENTORY_PENDING_MEMORY_MIB),
@@ -468,6 +499,12 @@ class SettingsCategoryCatalogTest {
 		expected.put(Category.SERVER_PRESENTATION, List.of(
 			section(PRESENTATION_HEADING,
 				row(Setting.PRESENTATION_SERVER_POLICY))));
+		expected.put(Category.SERVER_DEBUG, List.of(
+			section(LOGGING_HEADING,
+				row(Setting.SERVER_LOGGING_PROFILE)),
+			section(MONITOR_HEADING,
+				row(Setting.PREVIEW_MONITOR_ENABLED),
+				row(Setting.TRACKING_MONITOR_ENABLED))));
 		return Map.copyOf(expected);
 	}
 

@@ -7,6 +7,7 @@ import nx.pingwheel.common.core.ServerCore;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.integration.ModContext;
 import nx.pingwheel.common.network.InventoryC2SPacket;
+import nx.pingwheel.common.network.InventoryMonitorSubscribeC2SPacket;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationPreviewC2SPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
@@ -52,12 +53,17 @@ public class CommonServer {
 		ServerCore.onPresentationPreview(server, player, packet);
 	}
 	public void onServerStopped(MinecraftServer server) {
+		nx.pingwheel.common.presentation.inventory.minecraft.InventoryServer.stopped(server);
 		nx.pingwheel.common.presentation.minecraft.PresentationServer.stopped(server);
 		nx.pingwheel.common.presentation.minecraft.BudgetDelayMonitoring.stopped(server);
 	}
 
 	public void onInventoryPacket(MinecraftServer server, ServerPlayer player, InventoryC2SPacket packet) {
 		ServerCore.onInventoryPacket(server, player, packet);
+	}
+
+	public void onInventoryMonitorSubscribe(MinecraftServer server, ServerPlayer player, InventoryMonitorSubscribeC2SPacket packet) {
+		ServerCore.onInventoryMonitorSubscribe(server, player, packet);
 	}
 
 	public void onServerConfigRequestPacket(MinecraftServer server, ServerPlayer player, ServerConfigRequestC2SPacket packet) {

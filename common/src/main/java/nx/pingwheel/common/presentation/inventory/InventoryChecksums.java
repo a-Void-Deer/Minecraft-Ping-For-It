@@ -6,6 +6,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.IntConsumer;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -75,10 +76,19 @@ public final class InventoryChecksums {
 	}
 	/** Frame-level kind fences even an empty digest; the original ITEM digest remains unchanged. */
 	public static long checksum(InventoryResourceKind kind, Collection<Sample> samples) {
+		return checksum(kind, samples, null);
+	}
+	/**
+	 * Package-visible deterministic accounting for the bounded test oracle. The
+	 * visitor is called once with the number of canonical samples, never once
+	 * per produced part or per hasher byte.
+	 */
+	static long checksum(InventoryResourceKind kind, Collection<Sample> samples, @Nullable IntConsumer sampleVisitor) {
 		Objects.requireNonNull(kind, "kind");
 		Objects.requireNonNull(samples, "samples");
 		List<Sample> canonical = new ArrayList<>(samples);
 		canonical.sort(BY_KEY);
+		if (sampleVisitor != null) sampleVisitor.accept(canonical.size());
 		Hasher hasher = new Hasher(kind);
 		@Nullable String previousKey = null;
 		for (Sample sample : canonical) {
@@ -96,6 +106,11 @@ public final class InventoryChecksums {
 		return checksumEntries(InventoryResourceKind.ITEM, entries);
 	}
 	public static long checksumEntries(InventoryResourceKind kind, Collection<InventoryS2CPacket.Entry> entries) {
+		return checksumEntries(kind, entries, null);
+	}
+	/** Package-visible traversal accounting for one immutable cut. */
+	static long checksumEntries(InventoryResourceKind kind, Collection<InventoryS2CPacket.Entry> entries,
+		@Nullable IntConsumer sampleVisitor) {
 		Objects.requireNonNull(entries, "entries");
 		List<Sample> samples = new ArrayList<>(entries.size());
 		for (InventoryS2CPacket.Entry entry : entries) {
@@ -103,7 +118,7 @@ public final class InventoryChecksums {
 			samples.add(new Sample(checked.key(), checked.itemId(), checked.count(),
 				checked.quality() == null ? null : checked.quality().name(), checked.fallback()));
 		}
-		return checksum(kind, samples);
+		return checksum(kind, samples, sampleVisitor);
 	}
 
 	/** Incremental builder; {@link Builder#checksum()} re-sorts by key like the list form. */

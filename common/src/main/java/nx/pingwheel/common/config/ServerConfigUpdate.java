@@ -11,7 +11,7 @@ import java.util.Optional;
  * without constructing a Minecraft server.
  */
 public record ServerConfigUpdate(
-	int changedFields,
+	long changedFields,
 	@Nullable ChannelMode defaultChannelMode,
 	boolean playerTrackingEnabled,
 	int msToRegenerate,
@@ -19,7 +19,9 @@ public record ServerConfigUpdate(
 	int syncDuration,
 	@Nullable InventoryConfigValues inventory,
 	boolean budgetDelayNotificationsEnabled,
-	@Nullable LoggingProfile loggingProfile
+	@Nullable LoggingProfile loggingProfile,
+	boolean previewMonitorEnabled,
+	boolean trackingMonitorEnabled
 ) {
 	public static final int DEFAULT_CHANNEL_MODE = 1;
 	public static final int PLAYER_TRACKING_ENABLED = 1 << 1;
@@ -52,17 +54,21 @@ public record ServerConfigUpdate(
 	public static final int ALL_INVENTORY_FIELDS = InventoryConfigValues.allFieldMask();
 	public static final int BUDGET_DELAY_NOTIFICATIONS_ENABLED = 1 << 26;
 	public static final int LOGGING_PROFILE = 1 << 29;
-	public static final int ALL_FIELDS = DEFAULT_CHANNEL_MODE
+	public static final long PREVIEW_MONITOR_ENABLED = 1L << 30;
+	public static final long TRACKING_MONITOR_ENABLED = 1L << 31;
+	public static final long ALL_FIELDS = DEFAULT_CHANNEL_MODE
 		| PLAYER_TRACKING_ENABLED
 		| MS_TO_REGENERATE
 		| RATE_LIMIT
 		| SYNC_DURATION
 		| ALL_INVENTORY_FIELDS
 		| BUDGET_DELAY_NOTIFICATIONS_ENABLED
-		| LOGGING_PROFILE;
+		| LOGGING_PROFILE
+		| PREVIEW_MONITOR_ENABLED
+		| TRACKING_MONITOR_ENABLED;
 
 	public ServerConfigUpdate(
-		int changedFields,
+		long changedFields,
 		@Nullable ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled,
 		int msToRegenerate,
@@ -73,7 +79,7 @@ public record ServerConfigUpdate(
 
 	/** Source-compatible constructor for callers selecting the original five fields. */
 	public ServerConfigUpdate(
-		int changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		long changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
 		int msToRegenerate, int rateLimit, int syncDuration) {
 		this(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
 			syncDuration, InventoryConfigValues.defaults());
@@ -81,7 +87,7 @@ public record ServerConfigUpdate(
 
 	/** Source-compatible constructor; existing Java callers enable administrator notices. */
 	public ServerConfigUpdate(
-		int changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		long changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
 		int msToRegenerate, int rateLimit, int syncDuration, @Nullable InventoryConfigValues inventory) {
 		this(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
 			syncDuration, inventory, ConfigDefaults.Server.BUDGET_DELAY_NOTIFICATIONS_ENABLED);
@@ -99,7 +105,7 @@ public record ServerConfigUpdate(
 	}
 
 	public static Optional<ServerConfigUpdate> validated(
-		int changedFields,
+		long changedFields,
 		@Nullable ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled,
 		int msToRegenerate,
@@ -109,7 +115,7 @@ public record ServerConfigUpdate(
 	}
 
 	public static Optional<ServerConfigUpdate> validated(
-		int changedFields,
+		long changedFields,
 		@Nullable ChannelMode defaultChannelMode,
 		boolean playerTrackingEnabled,
 		int msToRegenerate,
@@ -120,14 +126,14 @@ public record ServerConfigUpdate(
 	}
 
 	public static Optional<ServerConfigUpdate> validated(
-		int changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		long changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
 		int msToRegenerate, int rateLimit, int syncDuration, @Nullable InventoryConfigValues inventory) {
 		return validated(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate,
 			rateLimit, syncDuration, inventory, ConfigDefaults.Server.BUDGET_DELAY_NOTIFICATIONS_ENABLED);
 	}
 
 	public static Optional<ServerConfigUpdate> validated(
-		int changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		long changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
 		int msToRegenerate, int rateLimit, int syncDuration, @Nullable InventoryConfigValues inventory,
 		boolean budgetDelayNotificationsEnabled) {
 		return validated(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate,
@@ -136,7 +142,7 @@ public record ServerConfigUpdate(
 
 	/** Source compatibility only; remote updates always include a logging profile. */
 	public ServerConfigUpdate(
-		int changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		long changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
 		int msToRegenerate, int rateLimit, int syncDuration, @Nullable InventoryConfigValues inventory,
 		boolean budgetDelayNotificationsEnabled) {
 		this(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
@@ -144,9 +150,27 @@ public record ServerConfigUpdate(
 	}
 
 	public static Optional<ServerConfigUpdate> validated(
-		int changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		long changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
 		int msToRegenerate, int rateLimit, int syncDuration, @Nullable InventoryConfigValues inventory,
 		boolean budgetDelayNotificationsEnabled, @Nullable LoggingProfile loggingProfile) {
+		return validated(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate,
+			rateLimit, syncDuration, inventory, budgetDelayNotificationsEnabled, loggingProfile, false, false);
+	}
+
+	/** Source compatibility only; wire updates always carry both monitor flags. */
+	public ServerConfigUpdate(
+		long changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		int msToRegenerate, int rateLimit, int syncDuration, @Nullable InventoryConfigValues inventory,
+		boolean budgetDelayNotificationsEnabled, @Nullable LoggingProfile loggingProfile) {
+		this(changedFields, defaultChannelMode, playerTrackingEnabled, msToRegenerate, rateLimit,
+			syncDuration, inventory, budgetDelayNotificationsEnabled, loggingProfile, false, false);
+	}
+
+	public static Optional<ServerConfigUpdate> validated(
+		long changedFields, @Nullable ChannelMode defaultChannelMode, boolean playerTrackingEnabled,
+		int msToRegenerate, int rateLimit, int syncDuration, @Nullable InventoryConfigValues inventory,
+		boolean budgetDelayNotificationsEnabled, @Nullable LoggingProfile loggingProfile,
+		boolean previewMonitorEnabled, boolean trackingMonitorEnabled) {
 		var update = new ServerConfigUpdate(
 			changedFields,
 			defaultChannelMode,
@@ -156,7 +180,9 @@ public record ServerConfigUpdate(
 			syncDuration,
 			inventory,
 			budgetDelayNotificationsEnabled,
-			loggingProfile);
+			loggingProfile,
+			previewMonitorEnabled,
+			trackingMonitorEnabled);
 		return update.isValid() ? Optional.of(update) : Optional.empty();
 	}
 
@@ -186,6 +212,15 @@ public record ServerConfigUpdate(
 			return Optional.empty();
 		}
 
+		// Select the complete final preference state before applying the DEBUG
+		// relationship. An unselected payload profile cannot disable authority,
+		// and a selected DEBUG profile can enable monitors in the same update.
+		@Nullable LoggingProfile mergedProfile = (changedFields & LOGGING_PROFILE) != 0
+			? loggingProfile : current.loggingProfile();
+		boolean mergedPreview = (changedFields & PREVIEW_MONITOR_ENABLED) != 0
+			? previewMonitorEnabled : current.previewMonitorEnabled();
+		boolean mergedTracking = (changedFields & TRACKING_MONITOR_ENABLED) != 0
+			? trackingMonitorEnabled : current.trackingMonitorEnabled();
 		return Optional.of(new ServerConfigSnapshot(
 			current.canEdit(),
 			(changedFields & DEFAULT_CHANNEL_MODE) != 0 ? defaultChannelMode : current.defaultChannelMode(),
@@ -198,6 +233,8 @@ public record ServerConfigUpdate(
 			mergedInventory,
 			(changedFields & BUDGET_DELAY_NOTIFICATIONS_ENABLED) != 0
 				? budgetDelayNotificationsEnabled : current.budgetDelayNotificationsEnabled(),
-			(changedFields & LOGGING_PROFILE) != 0 ? loggingProfile : current.loggingProfile()));
+			mergedProfile,
+			mergedProfile == LoggingProfile.DEBUG && mergedPreview,
+			mergedProfile == LoggingProfile.DEBUG && mergedTracking));
 	}
 }

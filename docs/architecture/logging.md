@@ -97,18 +97,20 @@ One terminal report follows this order:
 5. evaluate admitted context and format the report; and
 6. submit one bounded string to the backend.
 
-One limited ordering exception applies to three existing inventory gates whose
-established backend-disabled semantics consume an opportunity. For those
-terminals, one effective-profile snapshot and minimum check run first; the same
-report invocation then runs its existing domain admission callback; only after
-that does the terminal prepare the backend and check its enabled severity; the
-original snapshot context and failure are formatted last. A callback that returns
-null rejects the report without consulting the backend. A below-minimum site
-does not run the callback. A backend-disabled result leaves the callback's consumption in
-effect and does not roll it back. This exception adds no channel, rate limit or
-public admission permit, and retains neither the callback nor the original
-throwable. Ordinary explicit domain channels retain the after-backend admission
-order described below.
+One limited ordering exception applies only to three existing inventory gate
+terminals—`inventory/snapshot`, `inventory/fluid-route`, and
+`inventory/snapshot-discovery`—whose established backend-disabled semantics
+consume an opportunity. For those terminals, one effective-profile snapshot and
+minimum check run first; the same report invocation then runs its existing
+domain admission callback; only after that does the terminal prepare the backend
+and check its enabled severity; the original snapshot context and failure are
+formatted last. A callback that returns null rejects the report without
+consulting the backend. A below-minimum site does not run the callback. A
+backend-disabled result leaves the callback's consumption in effect and does not
+roll it back. This exception adds no channel, rate limit or public admission
+permit, and retains neither the callback nor the original throwable. Ordinary
+explicit domain channels retain the after-backend admission order described
+below.
 
 A report uses the profile snapshot taken when it starts; a concurrent profile
 change applies to later reports. The backend enabled check is a hint: it does not

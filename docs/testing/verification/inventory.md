@@ -21,7 +21,7 @@ The [patch-only contract](../../architecture/presentation/inventory.md#item-vari
 has test-source assertions inventoried below. Reading those assertions does not
 establish that they passed; the completed integration run and remaining live
 verification gaps are scoped
-[below](#patch-only-identity-and-display-verification-pending).
+[below](#patch-only-identity-and-display-coverage-and-live-gaps).
 
 ## Fluid inventory coverage
 
@@ -77,6 +77,24 @@ The matrix records automated coverage on that final input.
 | Create | `CreateFluidTankArchiveTest`, `CreateFluidTankMetadataTest` and `CreateFluidTankAccessTest`: tested-version/archive gates, controller/member/scope/mode checks, controller-only frozen-face reads, denied creative/boiler/virtual routes without fallback, shape/capacity admission, topology/handler replacement and postchecks. These are archive/headless seams, not installed Create gameplay. |
 | Sable membership and fluid-only transition | `ExternalBlockMembershipTest` and `SablePhysicalMembershipTest` cover positive/negative/unknown physical membership. `InventoryFluidWorldTest`, `InventoryFluidScopeFramesTest`, `InventoryFluidServerContextTest` and `ClientInventoryLanesTest` cover continuous scope-only `UPDATING` with retained quantity, fresh complete replacement, old-cut/seed/partial fencing, and real failure/expiry controls. Simultaneous scope/identity/layout change still invalidates. Installed Sable remains pending. |
 | Formal regression/build | Completed on the identified final input; exact execution and loader-native skip handling belong to the linked build record. |
+
+Outside that historical matrix, `FluidIdentityAdmissionScalingTest` adds five
+current-source cases. They compose the production common fluid source, the
+Fabric indexed provider adapter and the production runtime ledgers, with the
+native world, storage and block entity as fixtures: a 2,048-address sweep
+completes under the default pending-memory and operation budgets without
+replaying an address or restarting the source; the maximum legal address count
+advances one address per tick for three ticks without ownership exhaustion; a
+real runtime memory refusal before metadata or reads invokes no getter or count
+callback and later recovery reads the first address; an already-admitted
+metadata callback that lowers the remaining budget refuses the next source phase
+before a content getter; and a root replacement injected at the final count or
+underlying-view callback is rejected before the native getter and leaves no
+reservation. All five passed in the
+[final combined execution](build-checks.md#inventory-initial-admission-and-terminal-reset-final-verification).
+These are deterministic admission, cursor and ownership assertions from a
+Fabric test-source-set fixture; they are not heap measurements, throughput
+benchmarks, loader launches or evidence for every native or mod provider.
 
 ### Native fluid boundary regressions
 
@@ -177,6 +195,12 @@ loader APIs and the Create tea archive to
 [integration verification](integrations.md#native-fluid-presentation).
 
 ### Production lane policy and native amount regressions
+
+Historical evidence note: the lane-policy and recipient assertions below
+exercised dynamic permission and lane behavior at their recorded input.
+[D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md)
+changes new-Ping recipient/content authorization timing; these passing results
+remain historical and do not establish the frozen policy.
 
 These regressions passed in the
 [lane-policy, native-amount and icon-opacity execution](build-checks.md#lane-policy-native-amount-and-icon-opacity-verification),
@@ -318,88 +342,95 @@ through public packet, tick and memory-ledger seams:
   Fixture cleanup balances every resolved source and retained/reserved charge.
 
 `InventoryRuntimeTest` covers the production runtime's exact legacy/unsupported
-source seam: one admitted slot prefix, covering adapter snapshot decode or live
-slot reads, charged once against the shared scan allowance and shared by
-preview, duplicate-preview and tracking consumers while
-client and target logical subjects stay independent and finite; a memory defer
-performs no resolver or read and retained lifetime ends with the paid period;
-cursorless enumeration cannot invent continuation;
-owner and frozen face split live sharing; repeated tracking Pings share one
-target quota while a fresh select skips an older preview sweep; live cadence
-and cap changes cannot refund spent usage; invalid rounds retire all shared
-handles once without closing consumers and unrelated work progresses; a
-throwing read or close releases all retained and reserved memory; a live
-scan-allowance reduction preserves already-spent slots and blocks reads or
-selection past the new cap; and zero-allowance provider validation defers after
-the fixed provider-work budget is exhausted. With an explicit snapshot adapter,
-preparation captures once and fixes the route independently of the remaining
-slot allowance; a zero remaining slot allowance cannot consume non-empty
-snapshot slots; the frozen slots decode across later periods under a low
-per-tick allowance, keep their captured values after live contents change,
-never fall back to live reads, and release the retained snapshot on the last
-consumer close; an already-delivered cached empty snapshot completes another
-consumer without revalidation, capture, or read; and a snapshot-memory defer
-retries later and admits the capture once capacity returns. A restarted sweep
-cannot reattach an older peer's incomplete round; an invalid probe retires the
-shared round while paid quotas survive until fresh tracking recovery; a
-rejected completed sweep does not replace the still-published previous result,
-and terminal publication uses retained evidence rather than a fresh
-self-consistent wrapper; publication-evidence admission defers before any
-provider call and never invalidates on budget pressure; the evidence lease
-releases pages at the last scanner restart and closes only when replaced or
-when the last consumer leaves; and the bounded retained-evidence-lease set
-allows a fresh replacement without an unbounded cache. A second batch of new
-consumers cannot consume the replacement reserve: with normal new-observation
-admission full, their preparations defer before resolver work, retain no memory
-and cannot turn into replacement leases, while the existing consumers'
-replacements proceed across periods and keep their prior publication evidence
-until an accepted replacement; releasing the prior leases lets the waiting
-consumers enter, and closing evidence never refunds the current target's paid
-progress. Compatible aliased inputs still share one physical round when normal
-observation admission is full, because the bounded round guard counts physical
-rounds rather than a compatible consumer's references, and per-target-key
-quotas stay independent. On that exact path, owner and frozen face remain part
-of the source key: one original block resolves separately for a different owner or face
-instead of reusing a same-binding shortcut, and retiring an invalid origin
-input invalidates only the handle bound to that input while a different
-owner's and a different face's handles stay active. A shared physical
-replacement hands off from a
-predecessor to its successor: same-owner, same-subject peers skewed across
-periods share the one replacement, a fast peer's accepted successor stays
-serviceable to a slow peer that can consume it without a second physical
-sweep, and the handoff is counted in the bounded scan admission so another
-handoff cannot fork before the slow peer advances. Rejected, invalid or merged
-successors detach their handoff, and closing, retiring or merging peers cancel
-handoff-only references without dropping independently owned old publication
-evidence or refunding paid target progress; a successor's cached-validity
-admission defers before provider work and cannot authorize an invalid cached
-successor. Handoff completion and close leave no reserved or retained leak. A
-configured display cap threads into new observations and an invalid requested
-cap normalizes into the bounded range; lowering reprojects retained metadata
-monotonically through a bounded, deferrable pass that keeps its cursor with no
-ticket or progress loss, and a later increase cannot resurrect an omitted
-display through the same snapshot. A released completed sweep ends its
-deferred tightening pass while keeping its cumulative projection summary,
-a tighter ceiling mid-pass restarts the walk from the first retained slot, the
-still-referenced encoded page stays charged until its round is released, and
-closing a consumer during a deferred pass leaves no workspace and rejects
-later work. Additional admission tests cover refusal before resolver, lock,
-witness or content callbacks; mapped exact and aggregate witness helpers; charged
-cursorless blank visits and throwing attempts; attempted capture work remaining
-paid without spending decode-slot allowance; and discovery grants propagated
-through plan lookup and validity checks with attempted-prefix settlement on
-defer or exception. Retained-input reprojection tests refuse before parsing,
-preserve the cursor and exact long count, release temporary workspace, and retry
-after work returns. These synthetic admission seams do not prove ordinary
-native-container serviceability by themselves. Separate native-read wiring tests
-exercise complete single- and double-chest preview, a direct live-witness helper and
-fresh tracking under unchanged default memory, with exact read counts and no
-outstanding reservations. Lazy-consumption tests refuse a read without fresh
-scratch after capture scratch has closed; caller-wiring tests cover shared
-Catalog grants and attempted work settlement without resetting the allowance for
-each item. Exceptional cursorless-prefix tests cover actual attempted visits,
-including blank views and a throwing handoff, for both scanning and selection;
-unobserved legacy callbacks retain their conservative accounting boundary.
+source seam. Its assertions group by capability:
+
+- **Shared access and quotas.** One admitted slot prefix covers adapter snapshot
+  decode or live slot reads, charged once against the shared scan allowance and
+  shared by preview, duplicate-preview and tracking consumers while client and
+  target logical subjects stay independent and finite. A memory defer performs
+  no resolver or read and retained lifetime ends with the paid period; cursorless
+  enumeration cannot invent continuation. Owner and frozen face split live
+  sharing; repeated tracking Pings share one target quota while a fresh select
+  skips an older preview sweep; live cadence and cap changes cannot refund spent
+  usage. Invalid rounds retire all shared handles once without closing consumers
+  and unrelated work progresses; a throwing read or close releases all retained
+  and reserved memory; a live scan-allowance reduction preserves already-spent
+  slots and blocks reads or selection past the new cap. Compatible aliased
+  inputs still share one physical round when normal observation admission is
+  full, because the bounded round guard counts physical rounds rather than a
+  compatible consumer's references, and per-target-key quotas stay independent.
+  On that exact path, owner and frozen face remain part of the source key: one
+  original block resolves separately for a different owner or face instead of
+  reusing a same-binding shortcut, and retiring an invalid origin input
+  invalidates only the handle bound to that input while a different owner's and
+  a different face's handles stay active.
+- **Explicit snapshots.** With an explicit snapshot adapter, preparation captures
+  once and fixes the route independently of the remaining slot allowance; a zero
+  remaining slot allowance cannot consume non-empty snapshot slots. The frozen
+  slots decode across later periods under a low per-tick allowance, keep their
+  captured values after live contents change, never fall back to live reads, and
+  release the retained snapshot on the last consumer close. An already-delivered
+  cached empty snapshot completes another consumer without revalidation, capture,
+  or read; a snapshot-memory defer retries later and admits the capture once
+  capacity returns.
+- **Publication evidence and successor handoff.** A restarted sweep cannot
+  reattach an older peer's incomplete round; an invalid probe retires the shared
+  round while paid quotas survive until fresh tracking recovery. A rejected
+  completed sweep does not replace the still-published previous result, and
+  terminal publication uses retained evidence rather than a fresh
+  self-consistent wrapper. Publication-evidence admission defers before any
+  provider call and never invalidates on budget pressure; the evidence lease
+  releases pages at the last scanner restart and closes only when replaced or
+  when the last consumer leaves; the bounded retained-evidence-lease set allows
+  a fresh replacement without an unbounded cache. A second batch of new
+  consumers cannot consume the replacement reserve: with normal new-observation
+  admission full, their preparations defer before resolver work, retain no
+  memory and cannot turn into replacement leases, while the existing consumers'
+  replacements proceed across periods and keep their prior publication evidence
+  until an accepted replacement; releasing the prior leases lets the waiting
+  consumers enter, and closing evidence never refunds the current target's paid
+  progress. A shared physical replacement hands off from a predecessor to its
+  successor: same-owner, same-subject peers skewed across periods share the one
+  replacement, a fast peer's accepted successor stays serviceable to a slow peer
+  that can consume it without a second physical sweep, and the handoff is counted
+  in the bounded scan admission so another handoff cannot fork before the slow
+  peer advances. Rejected, invalid or merged successors detach their handoff,
+  and closing, retiring or merging peers cancel handoff-only references without
+  dropping independently owned old publication evidence or refunding paid target
+  progress; a successor's cached-validity admission defers before provider work
+  and cannot authorize an invalid cached successor. Handoff completion and close
+  leave no reserved or retained leak.
+- **Display tightening.** A configured display cap threads into new observations
+  and an invalid requested cap normalizes into the bounded range; lowering
+  reprojects retained metadata monotonically through a bounded, deferrable pass
+  that keeps its cursor with no ticket or progress loss, and a later increase
+  cannot resurrect an omitted display through the same snapshot. A released
+  completed sweep ends its deferred tightening pass while keeping its cumulative
+  projection summary, a tighter ceiling mid-pass restarts the walk from the first
+  retained slot, the still-referenced encoded page stays charged until its round
+  is released, and closing a consumer during a deferred pass leaves no workspace
+  and rejects later work.
+- **Admission and native reads.** Additional admission tests cover refusal before
+  resolver, lock, witness or content callbacks; mapped exact and aggregate
+  witness helpers; charged cursorless blank visits and throwing attempts;
+  attempted capture work remaining paid without spending decode-slot allowance;
+  and discovery grants propagated through plan lookup and validity checks with
+  attempted-prefix settlement on defer or exception. Zero-allowance provider
+  validation defers after the fixed provider-work budget is exhausted.
+  Retained-input reprojection tests refuse before parsing, preserve the cursor and
+  exact long count, release temporary workspace, and retry after work returns.
+  These synthetic admission seams do not prove ordinary native-container
+  serviceability by themselves. Separate native-read wiring tests exercise
+  complete single- and double-chest preview, a direct live-witness helper and
+  fresh tracking under unchanged default memory, with exact read counts and no
+  outstanding reservations. Lazy-consumption tests refuse a read without fresh
+  scratch after capture scratch has closed; caller-wiring tests cover shared
+  Catalog grants and attempted work settlement without resetting the allowance
+  for each item. Exceptional cursorless-prefix tests cover actual attempted
+  visits, including blank views and a throwing handoff, for both scanning and
+  selection; unobserved legacy callbacks retain their conservative accounting
+  boundary.
+
 `InventorySourceSnapshotTest` covers explicit-adapter source-access snapshot
 preparation and decode headlessly: capture stays lazy until preparation and the prepared
 route is fixed for the handle lifetime; explicit atomic-detached evidence
@@ -796,7 +827,7 @@ tombstones. Explicit nested container, bundle, projectile and food-conversion
 patches retain sanitized sparse child displays. A local-default-drift fixture
 decodes one sparse patch against different server and client defaults and
 restores the registry afterward. Execution evidence and its limits are scoped
-[below](#patch-only-identity-and-display-verification-pending).
+[below](#patch-only-identity-and-display-coverage-and-live-gaps).
 
 `InventoryDomainCodecTest` covers the closed code-owned inventory observation
 codec: the absolute display envelope round-trips within its bound, a display
@@ -1657,7 +1688,48 @@ These additions passed the focused and full Java 21 executions recorded in the
 which also built all three loaders. They add no live UI, window, provider-launch
 or multiplayer evidence.
 
+`InventoryTerminalPreviewResetTest` adds five current-source cases for a terminal
+Preview control across same-epoch presentation rebuilds. They cover
+transport-deferred `INVALID` through two resets and a normal-tick retry, a real
+byte-budget defer with retry when the next period reopens, retained-memory
+context-registration refusal through two resets and recovery to a current-view
+`INVALID`, close-before-handoff retirement, and a non-terminal completed Preview
+that keeps its closed value and selectable row. The transport, byte-budget and
+registration retries assert no new source read or validation, and the
+registration case uses the real `RetainedMemoryLedger` and records its real
+projection `MEMORY` delay. All five
+passed in the
+[final combined execution](build-checks.md#inventory-initial-admission-and-terminal-reset-final-verification).
+Related Backend, lifecycle, reconfiguration and client-inventory coverage
+belongs to the same boundary and execution record. These are headless backend,
+publisher, wire and client-session assertions, not a live client UI run.
+
+`InventoryPreviewResetLifecycleTest` adds three current-source cases for the
+same-epoch `CLOSE` and replacement-`OPENED` boundaries. They drive both `CLOSE`
+races: one after the server tick has rebuilt the view and one where ingress
+discovers the advance. Both use the previous view to retire the retained
+request, release ownership immediately and prevent a late replacement `OPENED`
+from recreating the client request; both request slots reopen after the next
+eligible period. Wrong inventory or presentation epochs, a future view, an
+unknown request, another authenticated recipient, an old connection's same-ID
+`CLOSE` after reconnect and stale `OPEN`/`SELECT` are rejected, while accepted
+action fences still require the current view. The ninety-one-session case
+saturates the real generic control queue on legal wire capacity: terminal
+`INVALID` remains pending with its request state until the replacement
+`OPENED` handoff, then the same request hands off `OPENED` before `INVALID`; the
+real client preview becomes invalid and unselectable without another source
+probe or read. The cases call the real client presentation-reset interface but
+do not cover the complete presentation `RESET` network path or live
+multiplayer. Their execution evidence is recorded in the
+[inventory reset regression final verification](build-checks.md#inventory-reset-regression-final-verification).
+
 ### Recipientless Tracking and successor continuity
+
+Historical evidence note: these successor and permission-suspension cases
+exercised dynamic recipient permission at their recorded input.
+[D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md)
+changes new-Ping recipient/content authorization timing; the passing results
+remain evidence for the behavior they drove, not for the frozen policy.
 
 Three additional `InventoryPooledBackendTest` cases exercise recurring Tracking
 through the production backend, certified native source, publisher and encoded
@@ -2046,6 +2118,12 @@ bodies and initialized native locals, checking method signatures/bytecode with
 isolated optional ancestors and a stand-in `ServerLevel`. It is not a composed
 coordinated content read, installed-mod launch or whole-game benchmark.
 
+The later ITEM baseline-to-after comparison over this workload is recorded in
+[build checks](build-checks.md#item-redundant-work-final-verification). It
+observed unchanged actual operation counters, certified modeled retained bytes
+`+2` and small allocation deltas; it is a matched observation, not a new
+performance baseline or an overall speedup claim.
+
 ### Fixed metadata and coordinated-validation coverage
 
 `CreateVaultMetadataPortTest` checks lazy tested-version gating, defining-loader
@@ -2150,14 +2228,15 @@ has headless source-to-encoded-client and publication coverage:
   chest controls progress on the next eligible tick. These tests pass production
   bytes into the client, then cover seed retirement, fresh zero recovery and
   expiry without a live world or loader launch.
-- `InventoryBackendTest` distinguishes the current retained exact-key count
-  from the last delivered row, and the current folded-key count from another
-  all-ID subtotal. Missing counts, forged/retired tokens, owner, baseline, state
-  and current-invalidity failures reject without a content read. The patch-flow,
-  authority-order and `SableInventoryHandoffTest` fixtures cover distinct exact
-  identities, current binding, rollback and one materialization/store/outcome
-  under replay. Sable alias/revocation fixtures remain scoped to recording
-  providers, not a live sub-level.
+- `InventoryBackendTest` covers missing counts, forged/retired tokens, owner,
+  baseline, state and current-invalidity failures rejecting without a content
+  read. The retained exact-key count versus the last delivered row and the
+  retained folded-key count versus another all-ID subtotal are consolidated
+  under [creation snapshot server coverage](#creation-snapshot-server-coverage).
+  The patch-flow, authority-order and `SableInventoryHandoffTest` fixtures cover
+  distinct exact identities, current binding, rollback and one
+  materialization/store/outcome under replay. Sable alias/revocation fixtures
+  remain scoped to recording providers, not a live sub-level.
 - Native backend/client cases cover Basic-before-seed delivery, independent
   recipient baselines without recipient previews, current owner lock/layout
   checks, display-cap repair without recapture or restored detail, first-scan
@@ -2197,8 +2276,9 @@ has headless source-to-encoded-client and publication coverage:
 
 ### Creation snapshot server coverage
 
-`InventoryBackendTest` covers the selected retained exact or folded count rather
-than the last client frame, missing-reference rejection without a zero, aggregate
+`InventoryBackendTest` distinguishes the current retained exact-key count from
+the last delivered row and the current folded-key count from another all-ID
+subtotal; it also covers missing-reference rejection without a zero, aggregate
 display, and selection outcomes preserved across transport refusal.
 `InventoryCreationPublicationTest` covers the current fully handed cumulative
 Preview-cut completion proof, initial staging that shares Tracking capacity, and
@@ -2226,6 +2306,39 @@ Named review-fix cases include `sourceCallbackCannotLeakRevokedBasicCustomName`,
 `deferredKnownRefreshCoalescesToLatestCanonicalLocatorAndAnchor` and
 `successfulOlderHandoffCannotClearAReentrantNewerMetadataRefresh`.
 
+`InventoryProductionPolicyTest` adds four parameterized current-source methods
+(15 cases) for the frozen initial boundary.
+`frozenDeniedInitialCannotBypassPublicationAdmission` covers ITEM and FLUID
+memory, detached operation-work and initial-staging refusal without a `CREATED`
+send, a session revision advance or a known-record advance; recovery admits the
+payload-free suppressed initial for the denied recipient while the owner keeps
+its source-backed snapshot, and the later permission change does not widen the
+frozen denial. `suppressedInitialPaysItsEncodedEnvelopeWithoutSourceValidationOrContentReads`
+checks both lanes' exact encoded-body and workspace charges through handoff,
+with no extra source validation or content read and no staging retained after
+the owner publishes. `suppressedInitialRechecksCanonicalLifecycleAfterEncodingAndReleasesAdmission`
+covers audience, expiry, view, removal and disconnect changes after encoding and
+releases staging and admission.
+`lateReadyFrozenDeniedAudienceNeedsAdmissionAndDisconnectCannotRestoreIt`
+checks both lanes' first late-recipient and cached-metadata refreshes still pay
+admission, and a true disconnect cannot restore the receipt.
+
+Two further ITEM/FLUID methods add four cases for callback-time removal during
+the first suppressed encoding.
+`canonicalRemovalDuringSuppressedInitialCannotResurrectRemainingAudience`
+removes the real canonical marker and backend sidecar after that encoding: no
+later owner or remaining peer receives a `CREATED`, their session revisions and
+known records do not advance, and staging, reservation and publishing ownership
+are released. `sidecarOnlyRemovalDuringSuppressedInitialPreservesRemainingAudienceFallback`
+removes only the backend sidecar and keeps the current fan-out's ordinary
+fallback for the remaining audience. These cases exercise the seeded-Basic
+fan-out path; the alternative `sourceSeeds.isEmpty()` path was reviewed
+statically for the same canonical-audience guard but is not independently
+exercised dynamically, so this coverage does not generalize to every real
+audience or source combination. The class's 118 cases (99 prior plus 19 new:
+15 initial-admission and four removal/fan-out cases) passed in the
+[final combined execution](build-checks.md#inventory-initial-admission-and-terminal-reset-final-verification).
+
 `InventoryAuthorityOrderTest` covers committed Preview evidence and annotation
 before storage without a content witness, receipt-binding metadata revalidation
 that pays failed metadata without reading contents, and publication failure that
@@ -2234,20 +2347,41 @@ memory defer as retryable while unavailable, unsafe, empty and bounded
 continuation outcomes are not delayed, including expiry, revocation and eligible
 counterpart pressure.
 
-These are headless owner executions. The current-input combined execution and
-artifact checks are recorded in
-[build checks](build-checks.md#final-combined-tree-acceptance-and-artifact-verification).
+These are headless owner executions. The combined execution and artifact checks
+for the current-source admission and lifecycle additions above are recorded in
+[build checks](build-checks.md#inventory-initial-admission-and-terminal-reset-final-verification);
+the earlier creation-snapshot cases remain in the
+[provider-trust final verification](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
 Cross-boundary client chat and transport coverage is in
 [presentation verification](presentation.md#immediate-inventory-creation-snapshot-coverage).
 
-Execution results are recorded in the
-[automated verification results](build-checks.md#automated-verification-results).
 These headless tests and builds do not establish live Create/Refined Storage
 behavior, the cause of the reported Vault import/export failure,
 live multiplayer, GPU rendering
 or performance. Those remain [manual scenarios](manual-integration.md#inventory).
 
-## Patch-only identity and display verification pending
+### Client creation admission capacity
+
+`ClientInventoryCreationCapacityTest` adds 13 current-source wire-decoded
+client-admission cases. It fills the finite metadata-channel capacity with real
+initial receipts while no tracking channels are active, then replaces an old
+same-logical-target marker whose local fallback has gone stale but whose server
+expiry is not due. The replacement uses a frozen double-chest key across
+different physical members and owners, is admitted net-zero, and keeps the
+accepted marker and its frozen creation snapshot, including a long amount above
+the exact-integer boundary. A timely `EXPIRED` control releases the slot.
+
+Four ineligible scenarios reject without store, presentation, name, seed or
+feedback effects. Invalid epoch, view, name and revision creates have no effects
+while the same revision remains retryable; a same-ID stale or newer refresh
+preserves the old metadata and visual deadline; and the prospective check visits
+actual unique metadata entries without releasing a slot. The class uses the real
+wire envelope and client runtime only; it does not cover server-side eviction or
+capacity, live expiry or clock skew, the complete presentation `RESET` network
+path, or live multiplayer. Its execution evidence is recorded in the
+[inventory reset regression final verification](build-checks.md#inventory-reset-regression-final-verification).
+
+## Patch-only identity and display coverage and live gaps
 
 The [inventory owner](../../architecture/presentation/inventory.md#item-variants-and-component-fallback)
 and [D0012](../../decisions/D0012-explicit-patch-identity-and-display.md) define the
@@ -2255,8 +2389,9 @@ accepted boundary. The test-source inventory above includes the shared-reader,
 native patch oracle, server projection, client explicit-value/default-inheritance,
 pre-frozen-key backend flow and publisher scheduling assertions.
 
-The completed integration run used Java 21 from PowerShell with UTF-8 output and
-redirected logs. It exited zero with `BUILD SUCCESSFUL` for:
+**Automated coverage.** The completed integration run used Java 21 from
+PowerShell with UTF-8 output and redirected logs. It exited zero with
+`BUILD SUCCESSFUL` for:
 
 ```powershell
 .\gradlew.bat --no-daemon --console=plain --continue :common:test :fabric:test :forge:test :neoforge:test :fabric:build :forge:build :neoforge:build verifyModIdentity
@@ -2309,9 +2444,11 @@ resolver fixtures are complementary seams, not one native-container-to-live-row
 test. The publisher budget fixture starts from preprojected data, and the client
 wrapper fixture models a local default map rather than installing owo; the
 separate real-jar probe has only the baseline and construction scope above.
-Automatic Mixins, live installed-mod behavior, loader lifecycle, default drift across real
-installations, delayed transport, GUI rows, tracking HUD and GPU behavior remain
-outside that source evidence. Live scenarios remain in the
+
+**Pending live evidence.** Automatic Mixins, live installed-mod behavior, loader
+lifecycle, default drift across real installations, delayed transport, GUI rows,
+tracking HUD and GPU behavior remain outside that source evidence. Live
+scenarios remain in the
 [manual matrix](manual-integration.md#inventory).
 
 ## Resynchronization and budget policy verification
@@ -2359,6 +2496,742 @@ Execution scope is recorded in the
 [automated verification results](build-checks.md#automated-verification-results).
 Live timing and multiplayer repair remain pending in the
 [manual matrix](manual-integration.md#inventory).
+
+## Frozen recipient authorization and fluid provider trust coverage and live gaps
+
+The passing lane-policy, recipientless tracking, certified-pool, member-gate and
+creation-snapshot cases above remain evidence for the dynamic permission and
+per-member gates they exercised. They do not establish
+[D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md).
+
+**Automated coverage.** Current-source automated cases cover inventory-specific
+boundaries.
+`InventoryFrozenControlTest` covers the first `HELLO` using live host session
+authority, same-epoch reset isolation between recipients, a normal same-epoch
+reset republishing Preview, and `CLOSE` removing a deferred `OPENED` retry.
+`InventoryOpenedPacketTest` covers the `OPENED` wire kind, its lane-bit
+authorization, session-wide shape, exact size, and malformed, truncated or
+trailing rejection; the
+[inventory-v2 protocol](../../architecture/network/protocol.md#inventory-previewtracking-route-inventory-v2)
+owns that grammar. `FrozenInitialAdmissionTest` covers inventory first-delivery
+admission at capacity without mutation and reopening after removal. These cases
+passed in the final combined execution recorded in
+[build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
+
+**Pending live evidence.** The following scenarios remain pending:
+
+- Inventory Preview authorization at request start and a separate new
+  authorization for the `SELECT` create, without inheriting the Preview result;
+- inventory creation snapshot and receipt behavior under the frozen rule,
+  including de-op/re-op where old Pings keep their create-time result and new
+  Pings use the new result;
+- the global field/selector/child, `RESET`, metadata and same-type Ping grant
+  scenarios in the
+  [presentation coverage](presentation.md#frozen-recipient-content-authorization-coverage-and-live-gaps);
+  and
+- fluid validation through the target provider, whose boundary and any
+  stricter-validation exceptions remain owned by the
+  [inventory provider contract](../../architecture/presentation/inventory.md#fluid-provider-trust-and-validation-exceptions).
+  No dedicated-provider implementation or measured live performance benefit is
+  recorded.
+
+The [manual matrix](manual-integration.md#frozen-recipient-authorization-and-provider-trust)
+owns the pending live checks. The final combined automated acceptance is recorded
+in [build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
+
+## Idle source health scheduling coverage and live gaps
+
+**Automated coverage.** `InventoryIdleHealthSchedulingTest` contains six
+current-source headless cases over the production backend and runtime with
+counted source-validation and read callbacks. They cover a completed Preview's
+period and a deferred overdue retry, an active Tracking sweep probing while an
+idle lease waits, a live Tracking period change, `INVALID` recovery retaining its
+per-tick attempts, a late-joining recipient's immediate check and completed
+handoff, and a pending handoff validating immediately before send without a
+separate health probe. These current-source cases passed in the final combined
+execution recorded in
+[build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
+They are deterministic seam checks, not a live timing measurement.
+
+**Pending live evidence.** Live timing remains pending. The
+[idle source health scheduling contract](../../architecture/presentation/inventory.md#idle-source-health-scheduling)
+owns the behavior.
+
+## Lane policy hint refresh verification
+
+`InventoryPolicyFrozenDemandRegressionTest` has current-source cases over the
+production backend and server. They cover the on-demand
+[lane policy hint refresh contract](../../architecture/presentation/inventory.md#lane-policy-hint-and-refresh):
+a replaceable provider changing a lane without a provider replacement leaves the
+cached hint stale, while the next `OPEN` and create resolve current authority and
+keep the accepted Preview's `OPEN` lanes and the existing Ping's creation-frozen
+content and Tracking. In steady state with a frozen Preview and Tracking, ticks
+perform zero permission callbacks for the two Inventory fields while SECTION-mask
+callbacks and live quantity/source reads continue; a later SECTION-mask change
+evaluates its own fields without clearing either frozen lane. An explicit
+provider replacement refreshes the queued hint once and budget retries do not
+re-evaluate it.
+
+`InventoryProductionPolicyTest` passing cases include the first-HELLO
+OFFER-before-POLICY initial hint, deferred-offer/data gate, transport-failure
+retry, queued-owner retention across retry/reconfiguration/view/epoch
+boundaries, provider-callback refresh and session-replacement/token cases. A new
+inventory create still resolves its own audience and content authorization; it
+does not inherit a Preview's frozen lanes, target type or retained hint. These
+are behavioral authorization and ownership assertions, not a measured
+performance claim. The cases passed in the
+[final ITEM execution](build-checks.md#item-redundant-work-final-verification).
+
+## Resident scope and certified mapping boundary verification
+
+`ResidentScopeReadBoundaryTest` exists in the common test source set and in the
+Fabric, Forge and NeoForge loader test source sets, and those cases pass in the
+final suite. They verify the baseline authority safe fallback: the explicit
+current-authority gate remains the whole-source check at mutable-callback
+boundaries; frozen membership and mapping are not a current authority token, and
+the production membership/mapping boundaries retain the existing nested authority
+checks and refuse a foreign delegate. The loader cases count the explicit loader
+gates without replacing them with frozen lookups. The Forge and NeoForge
+`ResidentScopeReadBoundaryLoaderTest` cases use the actual native wrapper,
+install a removal hook in the final callback and assert zero content getters;
+they also check that a refused caller allowance invokes no world key or native
+wrapper and that an admitted prefix remains paid.
+
+`CertifiedChestFrozenMappingTest` passes in the final execution and covers the
+retained P3 certificate: the single- and double-chest ordered address mapping
+(27 and 54 pairs) is proved once at construction, the view owns immutable entity,
+slot-address and member copies, a malformed or reversed mapping is refused, and
+later current validation rechecks live identity, pairing, size, owner, lock and
+grant without consulting producer-owned address lists. The baseline authority
+gates and existing conservative cost accounting remain unchanged; the old cost
+is not lowered. The frozen mapping remains layout evidence under [the certified
+pool contract](../../architecture/presentation/inventory.md#certified-tracking-observation-pools),
+and the resident-scope authority boundary remains under [provider
+safety](../../architecture/presentation/inventory.md#provider-layer-and-safety).
+
+P2 lookup deduplication was withdrawn from this phase because the evaluated
+`valid()` callback paths did not establish callback-free closure. The new tests
+protect the retained baseline authority sequence and add no unpaid extra
+authority pass. P2 is not a delivered optimization and has no completion,
+performance or allocation claim.
+
+## Immutable publication work reuse verification
+
+The [publication authority and progress contract](../../architecture/presentation/inventory.md#publication-authority-and-progress)
+owns inventory cut authorization and progress, and the
+[sync publication contract](../../architecture/presentation/shared_sources.md#sync-publication)
+owns the generic immutable cut and cost mechanics. The cases below exercise
+inventory-specific reuse of one detached encoding within a publication operation
+and pass in the [final ITEM execution](build-checks.md#item-redundant-work-final-verification).
+
+`CutWorkReuseTest` covers the detached encoded-fragment helper: one immutable
+fragment backs independent recipient results without exposing mutable bytes, and
+a cross-lane value is refused before encoding. `InventoryChecksumsTest` covers
+independent ITEM and FLUID golden vectors over non-ASCII canonical samples,
+including input-order independence, lane-domain separation, wire-entry
+projection and one whole-cut sample visit. FNV-1a checksum bytes and the v2 wire
+format are unchanged.
+
+`InventorySyncPublisherTest` covers multipart cut cases: the admitted
+cut's checksum is computed once and reused across its parts, a newer offer cannot
+rewrite it, retry reuses the immutable packet without another admission
+traversal, delivery freezes a separate delivered-map checksum for heartbeat, and
+withdrawal plus rebase starts a fresh cut rather than carrying the old digest.
+The admitted workspace stays charged through delivery and releases at
+completion.
+
+`InventoryFanoutEncodingReuseTest` covers the operation-local fan-out: within
+one publication operation, an identical tracking projection encodes once across
+recipients without sharing
+proof, authorization or session state; each recipient retains its own admission
+and current checks, and distinct fold projections use separate encodings. The
+provisional seed and completed cut are distinct publication operations, and each
+case observes its own actual publication rather than merging the two into one
+tick. A blocked recipient keeps its previously delivered closed value, and the
+shared encoding does not substitute for that recipient's proof or delivery
+admission.
+
+These are headless helper, publisher, backend, frame and accounting assertions,
+not live transport, elapsed-time, allocation, CPU or throughput measurements; no
+N-times benefit is established. The helper adds no service-provider interface or
+cross-tick completed-content cache.
+
+## Performance monitoring coverage and production evidence
+
+The [performance monitor
+contract](../../architecture/presentation/inventory.md#performance-monitoring)
+owns measurement meaning, lane and shared attribution, non-interference and
+sampling lifetime. Persisted keys and selector grammar are owned by [client
+configuration](../../config/client.md#performance-monitor) and [server
+configuration](../../config/server.md#persisted-fields); HUD controls and
+control-state presentation by [settings
+screen](../../UI/settings-screen.md#performance-monitor-controls); HUD
+source-state presentation by [HUD projection and
+presentation](../../architecture/presentation/inventory.md#hud-projection-and-presentation);
+numeric authority by [server configuration
+authority](../../architecture/authority/server-config.md#remote-performance-telemetry);
+and monitor message grammar by
+[network protocol](../../architecture/network/protocol.md).
+
+### Monitor-core evidence
+
+At input `f24b5b3`, 22 independent monitor-core test methods passed.
+`MonitorSchemaTest` covers the closed scope and selector-identity catalogues,
+summary expansion without child-timing or shared-memory double counting,
+defensive copies, missing-field unavailability, saturation, negative memory
+remaining and endpoint-separated means and rates. `MonitorAccumulatorTest`
+covers the four enable combinations, bounded rolling windows and latest-only
+reads, explicit gauge and budget invalidation, generation and lifecycle
+clearing, saturation, warm-up, idle-gap and clock boundaries, local-only phases
+and a rolling-history oracle. `MonitorDemandTest` covers transmission-demand
+derivation without enabling collection.
+
+These are headless schema, accumulator and demand results, not server or client
+sampling, protocol, HUD, multiplayer or live performance evidence. Configuration
+persistence and selector coverage remain with
+[configuration verification](configuration-ui.md#performance-monitor-coverage).
+The phase-one execution record is owned by
+[build checks](build-checks.md#performance-monitor-implementation-and-final-acceptance).
+
+### Production monitor evidence
+
+The current workspace's recorded isolated P3 execution passed 14 new methods in
+`InventoryMonitorBackendTest`, `InventoryMonitorPublisherTest` and
+`InventoryMonitorSharedTest`; a separate 279-test selected neighboring
+regression run also passed. That 14-method result remains the historical
+isolated record. The latest P3 report on the timing repair counts 30 passing new
+cases, those 14 plus 16 `InventoryMonitorAttributionTest` invocations, and
+records the same 279-test selected regression run passing. The recorded isolated
+P4 run passed 333 tests: 29 new methods in
+`ClientMonitorCollectorTest`, `ClientMonitorStateTest`,
+`MonitorDisplayModelTest`, `ClientInventoryMonitorTest`,
+`ClientPingRuntimeMonitorTest` and `InventoryMonitorHudTest`, plus 304 existing
+client-runtime, interaction and receipt invocations. The later P4 outcome
+repair ended at 346 passing selected tests, including the final 13 outcome
+cases for stale, held, reentrant, duplicate and pre-baseline accept/reject
+transitions and their positive and duplicate controls. Independent review
+returned PASS for the P3 timing repair, the P4 outcome repair and the P6
+respawn repair. These remain selected headless runs from external classpaths;
+the earlier P1-P6 combined-tree Gradle acceptance passed and is recorded in
+[build checks](build-checks.md#performance-monitor-implementation-and-final-acceptance),
+and they still do not establish actual sockets, loader launches, live GPU/font
+output or performance measurements.
+
+**Server sampling.** `InventoryMonitorBackendTest` drives real ingress, runtime,
+selection, retry and close paths:
+
+- both switches off read no monitor clock and retain no sample through open,
+  tick, failed selection retry, close and reconnect;
+- each of the four enable combinations exposes only its enabled lanes, and an
+  existing request acquires a fresh baseline instead of replaying earlier work;
+  reopening with a new server generation resets the baseline and both-off
+  produces no sample or clock read;
+- real nested intervals use business-advanced time, a bounded read step is not
+  counted per getter, inclusive parent and child values are not summed, requests
+  are not sessions, and lane/shared readings retain their independent
+  attribution;
+- a detached capture is timed once and later decode does not recapture; a
+  retry-only tick includes its publication, while same-tick sink reentry and a
+  nested tick cannot erase or double count the outer interval;
+- a deferred round's capture belongs to the lane currently preparing, an actual
+  publication reservation is visible before reset, and repeated ticks do not
+  accumulate usage; physical and logical period identifiers settle at their
+  owning periods.
+
+`InventoryMonitorPublisherTest` runs the real publisher with a recording
+transport. Fixed-key packets, checksums, queue depths, charges and retained
+bytes remain identical with monitoring off and on. Every normal handoff outcome
+sends one complete packet and classifies only observed handoff bytes; unknown
+handoff bytes stay omitted rather than becoming zero, and no extra retry or
+monitor encode appears. A throwing send keeps the conservative charge and retry,
+separates known from unknown handoff, and uses one existing body measurement per
+attempt. Sequential ledger snapshots retain remaining values of -10, -5 and 15
+without rewriting earlier snapshots. Activating monitoring while a baseline is
+already queued exposes the existing logical queue cost but no invented
+charged-byte counter.
+
+`InventoryMonitorSharedTest` composes the production runtime/backend planner: a
+paid prefix replay adds no physical charge and only a newly visited tail is
+charged; a fresh ledger is not treated as cumulative history; one tracking seed
+is detached-encoded once and fanned out to two recipients without recapturing
+completed Preview work.
+
+**Client sampling, state and paint.** `ClientInventoryMonitorTest` accepts actual
+Preview, snapshot and stream packets and measures one inclusive APPLY per packet
+across nested commit paths. The production store's direct fragment and
+replacement methods are instrumented when used that way, and a disabled
+collector neither reads its clock nor changes accepted counts.
+`ClientPingRuntimeMonitorTest` exercises real runtime ingress, selector
+preparation/draw and inventory-tracking preparation/draw as separate local
+phases; disabled early returns read no clock, local data is present without
+remote telemetry, and the HUD painter is not sampled. `ClientMonitorCollectorTest`
+collapses nested same-lane intervals, keeps lanes and phases separate, and
+cannot publish an interval disabled mid-span.
+
+`ClientMonitorStateTest` covers the status/sample fences: a sample cannot
+establish authorization, an ACTIVE status waits for
+its first sample, expiry is STALE at the exact bound rather than OFF or
+UNSUPPORTED, and permission, collection, server-generation, demand-revision,
+reconnect and capability transitions clear or reject the correct remote state.
+Authoritative OFF remains public without disabling local collection or clearing
+selectors; local-only selection creates no remote demand; shared state reports a
+dependency-off condition rather than an invented zero. `MonitorDisplayModelTest`
+keeps the five default summaries compact and deduplicated, does not sum
+inclusive phases, renders missing measurements as unavailable rather than zero,
+retains negative shared memory and lower-bound/saturated meaning, styles only
+the OFF token red, keeps other statuses normal, produces no rows for a disabled
+view, and preserves metric identity and immutable prepared text through wrapping.
+The historical `InventoryMonitorHudTest` result for the prior lower-left layout
+painted only the prepared model in a GUI-scaled viewport, reserved chat/notice
+clearance, clipped visible rows without mutating the model, and handled
+zero-size and empty models. It does not cover the subsequent upper-left
+projection, which reserves no space for vanilla chat, hearts or notices; that
+projection and its later per-group reserved-height behavior have separate
+headless coverage in [stable HUD reservoir UX
+coverage](#stable-hud-reservoir-ux-coverage). These are
+headless runtime, state and painter seams, not live GPU, native font, window,
+socket, loader or multiplayer evidence; those live scenarios remain pending in
+the [manual performance-monitor
+matrix](manual-integration.md#performance-monitor). Independent review of P3/P4
+is not part of this evidence.
+
+### Timing attribution evidence
+
+`InventoryMonitorAttributionTest` drives real ingress, tick, runtime, selection,
+publication and source-close callbacks with a business-advanced clock; it does
+not synthesize monitor events. Its 16 invocations cover:
+
+- a real Preview source close triggered by session revocation is charged to
+  Preview TICK_WORK as one 29-ns interval without an invented INGRESS reading,
+  and the disabled Tracking peer is not charged;
+- neutral session-refresh work with no lane owner is charged to neither lane,
+  even though the enclosing business interval advances;
+- nested Tracking work inside a Preview tick stays separately attributed, while
+  nested HELLOs from the same or a different player remain one INGRESS union
+  with one count and max equal to total;
+- SELECT-create callbacks that nest a HELLO keep Preview and Tracking ingress
+  separate even when only one lane is enabled, and a nested tick inside ingress
+  is recorded in both intervals' own unions, so the readings overlap rather than
+  form disjoint costs;
+- a `SELECTED` or `REJECT` outcome's measure and publish work belongs to
+  Tracking, while the attribution fixture confirms its existing control-byte
+  counter stays with the originating Preview wire ledger; the P3 sampling
+  assertions separately time the retried `SELECTED` publication under Tracking;
+- an over-depth HELLO recursion exhausts the bounded timing scope, omits the
+  affected INGRESS timing rather than a partial exact reading, still completes
+  every packet, and the next ingress measures exactly; with monitoring disabled
+  the same recursion performs no clock read.
+
+An earlier red run on the pre-fix code selected 21 P3 and attribution cases and
+recorded 6 failures. After repair, the green rerun reports all 30 new cases
+passing (14 plus 16) and the 279-test regression selection passing. The red and
+green runs are selected executions; the historical isolated 14-method record
+above is not replaced by the later count, and the latest 30-plus-279 report does
+not imply that every recorded execution repeated both selections.
+
+**Respawn and connection continuity.** The isolated P6 integration selection
+passed 36 tests. A respawned player with the same UUID and listener keeps the
+current watch and receives later samples through the current player object; a
+replacement listener does not inherit the prior watch without a fresh
+subscription; post-respawn delivery and capability use the current player's
+permissions rather than the old entity's. Independent reviews returned PASS for
+these results. This is headless connection composition, not a real socket,
+loader launch or multiplayer run.
+
+### Hot-allocation and clock evidence
+
+An external harness recorded a focused owner-thread hot-path check over nine
+captured actual sources: `ServerInventoryMonitor`, `ClientMonitorCollector`,
+`MonitorAccumulator`, `MonitorSchema`, `MonitorTuning`, `TransportHandoff`,
+`CostLedger`, `RetainedMemoryLedger` and `LedgerTicket`. The input is Git HEAD
+`f24b5b3` plus the captured working tree; before/after SHA-256 lists and the
+final repository recheck report all nine sources unchanged. The harness
+compiled byte-for-byte source copies with JDK 21 `javac --release 21` and ran
+from the isolated compiled classes with only the annotations jar added to the
+classpath, without repository class outputs, a Gradle invocation or a
+domain-suite run. It used Eclipse Temurin `21.0.12.1+1-LTS` on Windows x64.
+`ThreadMXBean` current-thread allocated-memory support and enablement were both
+true; repeated current-thread and by-id reads agreed and allocated zero, while
+an escaped 4096 x `byte[256]` control reported 1,114,112 bytes.
+
+Three independent JVMs passed 13 scenarios each (39 result rows): two normal
+runs with different seeds and one `-XX:-DoEscapeAnalysis` run with `dontinline`
+for the three target classes and the harness hot helpers. Every hot case used
+two 500,000-iteration warmups and eight measured 500,000-iteration batches.
+Disabled measured batches alternated never-configured default-off objects with
+objects that had been enabled and published then switched off, so the same
+methods saw both disabled states. Across every JVM and batch:
+
+- the disabled server set (ingress, tick, lane-work and phase scopes, end,
+  count, gauge and invalidation, budget, memory, shared gauge and budget, sent
+  outcomes, tick completion and latest) allocated zero bytes, read the injected
+  clock zero times and produced no sample;
+- the disabled client collector set (begin/end across APPLY, PREPARE and DRAW,
+  count, gauge, latest and tick completion) and the disabled accumulator set
+  (duration, count, gauge, budget and shared recording, invalidation, latest and
+  snapshot) each allocated zero bytes, read the clock zero times and produced no
+  sample;
+- enabled primitive server and client paths also allocated zero bytes while
+  proving execution: the server measured 7,000,000 injected clock calls and the
+  client 2,000,000 per 500,000-iteration batch, with returned tokens, counters
+  and independently timed nesting checked; direct accumulator recording with
+  pre-supplied durations allocated zero and retained the expected counts;
+- duplicate completion of the same tick allocated zero, read no clock and
+  produced no new sample in each of the server, client and accumulator cases.
+
+The enabled scalar budget, memory and shared-budget wrapper combination is a
+separate diagnostic: those production methods construct budget and memory
+reading records and therefore allocate for the tested combination, with no clock
+read or sample during the interval. Enabled small-window publication used an
+explicit test-only two-ticks-per-bucket, four-bucket window with two
+16,384-tick warmups and eight 4,096-tick measured batches; every batch read the
+clock 4,096 times, published 2,048 escaping samples and retained exactly the
+last eight real one-per-tick observations. The observed allocations are
+therefore consistent with periodic immutable publication samples and the scalar
+wrapper records; they are not disabled-path violations. The whole context's 358
+fixed arrays and 5,374 cells, together with the four accumulator bucket slots,
+kept their identities and lengths across every case; this is bounded storage
+reuse, not a retained-heap measurement. The two-tick/four-bucket window is a
+test input, not production tuning.
+
+Constructor, configuration, reset and other setup allocation are outside every
+measured interval and are not claimed zero. The check does not establish whole
+Backend, client-frame, rendering or GPU allocation, heap use, live allocation
+rate, GC, CPU/TPS or wall-clock performance, and no `nanoTime` or ns-per-op
+comparison was made; the concurrent Gradle build was not measured or used as
+evidence. It also does not establish live-session overhead, actual sockets,
+loader launches or HUD behavior.
+
+Reproduction is recorded in the external `inventory-monitor-hotalloc-20261108`
+artifact. `RESULTS.md` retains the environment and final table, while
+`METHODS.md` retains the method inventory and exclusions;
+`check-support.ps1`, `run.ps1` and `summarize.ps1` passed. Full JVM commands are
+in `default-1.command.txt`, `default-2.command.txt` and
+`noea-noinline.command.txt`, the compile sequence is recorded by `run.ps1`, and
+per-batch logs, `results.csv`, `results.json` and source/harness hashes are
+retained alongside:
+
+```powershell
+$root = 'C:\Users\Void_Deer\AppData\Local\Temp\opencode\inventory-monitor-hotalloc-20261108'
+& "$root\check-support.ps1"
+& "$root\run.ps1"
+& "$root\summarize.ps1"
+```
+
+A separate packet-measurement failure in the failed whole-tree attempt is also
+resolved. The original 424-byte event has no exact object-level trace, but the
+reproduced family is cold C2 string-constant resolution in the test and
+`ThreadMXBean` reader at the measurement threshold: uninstrumented single-JVM
+repetitions failed at 5,496 bytes and at a 1,648-byte prewarm threshold, and
+JFR plus a sampled native agent placed the allocations in the test method beside
+its first C2 compilation. Interning the production or test class strings,
+excluding only the test method's compilation, or running other test methods
+first each removed the failure. The repair adds 100,000 off-measurement small
+`OFFER` encode calls and counter reads before the original 200 large warmups;
+the original 64 measurements, checksum consumption, workspace assertions and
+strict `allocated == 0` assertion are unchanged. Injected `byte[1]` and
+`byte[4096]` per-call allocations still fail at 1,536 and 263,168 bytes, so the
+oracle remains sensitive. The final Common Test task reported 6,122 tests with
+6,120 passing and 2 skipped, and this case passed its strict zero assertion.
+
+This closes the listed hot-API and measurement-test isolation evidence only. It
+does not establish whole production-path allocation, retained heap, live
+allocation rate, GC, CPU/TPS, transport cost or wall-clock performance. The
+external `inventory-packet-allocation-20261108` artifact retains the handoff,
+reproductions, JFR/native traces, positive controls and source hashes.
+
+### Monitor queue/publication/read accounting verification
+
+The measurement definitions in [work, queue and memory
+readings](../../architecture/presentation/inventory.md#work-queue-and-memory-readings)
+and [sync and transport
+measurement](../../architecture/presentation/inventory.md#sync-and-transport-measurement)
+require source-connected evidence that the earlier monitor executions above do
+not provide. The previously recorded 6,784- and 6,850-test whole-tree results
+are historical and do not cover these queue, publication, cut or read-attempt
+connections. The final whole-tree run recorded in [build
+checks](build-checks.md#inventory-monitor-queuepublicationread-accounting-verification)
+establishes that evidence from three current-source suites:
+`InventoryMonitorPublisherTest` contributes 27 passing invocations,
+`InventoryMonitorReadAttemptsTest` 40 and `InventoryMonitorSharedTest` 9. They
+drive the production publisher, runtime, queue, shared-source and transport
+seams with a recording transport and a business-advanced clock, not schema or
+accumulator proxies.
+
+- Queue gauges: per-context merged pending absolute entries; admitted cut part
+  count minus the business-advanced part, excluding a successful sent prefix;
+  an older admitted cut and newer pending entries counted together; queue cost
+  retained until the last part; observed empty as zero; missing baseline as
+  unavailable; `CREATED` staging and standalone controls excluded. Reentrant
+  cancel, replacement, withdrawal, rebase, partial success and thrown sends
+  keep the surviving peer's admitted frame, avoid a negative gauge and do not
+  promote an old cut.
+- Publication and cut accounting: `InventoryMonitorPublisherTest` and
+  `InventoryMonitorSharedTest` exercise bootstrap and unchanged-revision
+  installation, multipart and empty/unchanged cuts, and duplicate, deferred,
+  invalid, retry, failure, cancellation, withdrawal and rebase scenarios. The
+  counter semantics and exclusions are defined by [sync and transport
+  measurement](../../architecture/presentation/inventory.md#sync-and-transport-measurement).
+  Fixed-key packets, checksums, queue depths, charges and retained bytes remain
+  identical with monitoring off and on, and an already queued baseline or
+  unique retained memory stays immutable across cap reduction and release.
+- Read attempts: native, legacy/adapter, certified pooled and `SELECT` witness
+  attempts, including a failed getter, a typed failure after a validated
+  prefix, a pooled page failure that commits only a prefix or nothing, an
+  opaque conservative grant, a detached decode failure and an uninitialized
+  runtime that reports unavailable rather than an observed zero;
+  charged attempts rather than returned slots, READ timing or successful
+  journal entries; paid replay excluded; `capture_reads`, validation, probes
+  and provider work separate; one shared reading not multiplied across lane,
+  consumer or recipient combinations; rolling counter distinct from the
+  current-period budget; no disable-to-enable backfill; a baseline gauge may
+  include backlog that already existed. Collection and generation changes and
+  nested selection scopes fence old operations without replay, and ledger
+  rotation preserves the original fatal witness object identity.
+- Handoff invariance: `HANDED_OFF`, `NOT_HANDED_OFF` and `UNOBSERVED` keep the
+  legacy business progress and retry decisions, while unknown handoff bytes
+  remain omitted rather than becoming zero.
+
+The initial whole-tree pass of 6,904 tests remains a historical actual pass, but
+independent review found two defects in this change: publisher same-callback
+cancel/replacement observer ownership and runtime ledger rotation. The repair
+added 17 regressions: five publisher cases for same-callback
+cancel/replacement/withdrawal/rebase and 12 runtime ledger-rotation invocations,
+including preservation of the original fatal witness object identity. The red runs
+recorded the affected enabled variants failing before repair; the final source
+passes them. The final whole-tree rerun reported 6,921 tests with 6,905 passing
+and 16 skipped; its execution record, the manifest exception and artifact
+hashes are in [build
+checks](build-checks.md#inventory-monitor-queuepublicationread-accounting-verification).
+
+These are headless source-connected assertions. They do not establish live
+sockets, loader launch, live game, multiplayer, actual HUD paint, installed
+provider behavior, whole-path allocation, heap, GC, CPU/TPS or wall-clock
+performance. The enabled shared `SELECT` path permits small per-operation scope
+allocations; the earlier disabled-path zero-allocation result does not extend to
+it. The later [stable semantic HUD
+wrapping coverage](#stable-semantic-hud-wrapping-coverage) is recorded separately
+and is not part of this accounting result.
+
+### Pending production test matrix
+
+The following monitor boundaries remain outside the headless P3/P4/P6 seams,
+the earlier P1-P6 combined-tree acceptance and the scoped hot-allocation check
+above.
+The named production tests and external measurements verify their own stated
+contracts; they do not establish the live or integrated behavior in this table.
+
+| Acceptance surface | Pending monitor-specific evidence | Existing fixture base |
+| --- | --- | --- |
+| Actual client/server route | SUBSCRIBE, STATUS and SAMPLE exchange over a real negotiated connection and runtime handshake, including latest-only delivery, corrupt/stale rejection and live permission/collection generation transitions. | P2 packet and coordinator fixtures are headless; P6's 36-test respawn and connection-continuity selection passed independent review but is not a real negotiated connection. |
+| Loader lifecycle and registration | Each loader's actual optional-payload registration, dispatch and client callback under a loader launch, including dedicated and integrated server startup and stop. | Isolated registration/dispatch checks do not launch a loader. |
+| Actual subscriber set | Zero, one and many subscribed clients through the live service, including subscription changes that do not alter collection and cleanup on disconnect or permission loss. | Coordinator/backend composition fixtures are headless, not an actual socket or permission provider. |
+| Live HUD (headless coverage only) | Fixed upper-left GPU/font rendering at multiple GUI scales and window sizes, no chat/heart/notice reserve, all prepared rows submitted and naturally framebuffer-clipped, right-wrapping long CJK/Latin tokens with the scope-title, field and `OFF` colors, per-visual-row backing alpha and glyph width, reserved blank rows, active-layout retention and reset, control-state compaction, unified byte/time formatting, compact labels in eight locales, font options and resource reloads, zero/narrow viewports, GL state and pixel output, and bottom-layer behavior under totem/F3/chat/inventory/pause. | Headless formatter, display-model, label, layout, cache, preparation and ABI tests cover the current projection, including the per-field `N/A`, per-row backing and reserved-height relations. The prior lower-left/reserved/visible-row painter result is historical and does not exercise the redesign; no live GPU/font/window/layer run exists. |
+| Live performance | External-profiler comparison, TPS/GC/allocation-rate results, measured transport bytes, real-session overhead and the added HUD pass's CPU cost. | The scoped external hot-allocation check covers only the listed monitor APIs on the owner thread; whole production-path allocation, HUD GL-query allocation, heap, live allocation rate, GC, CPU/TPS and wall-clock remain unmeasured. |
+
+Real server and client sampling have headless production-seam evidence, and the
+scoped external check covers the listed disabled monitor APIs plus enabled
+primitive, duplicate-completion and publication shapes. Monitor route
+interoperability, native provider behavior, runtime handshake, loader lifecycle,
+actual subscriber integration, live HUD, and whole-production or live
+performance remain pending. The complete scenarios remain in the
+[manual performance-monitor matrix](manual-integration.md#performance-monitor).
+The earlier monitor P1-P6 combined-tree build/loader acceptance passed and is
+recorded in
+[build checks](build-checks.md#performance-monitor-implementation-and-final-acceptance).
+
+### HUD UX redesign coverage
+
+The preceding redesign has headless source, full-Common and isolated classpath
+evidence for its formatter, display model, compact labels, layout, cache and
+Mixin ABI. The current per-field `N/A`, per-row backing and reserved-height
+coverage is inventoried in [stable HUD reservoir UX
+coverage](#stable-hud-reservoir-ux-coverage). Live
+GPU/font/locale/window/layer acceptance remains pending.
+
+- `MonitorNumberFormatTest` contributes 18 tests in the full Common XML. An
+  independent external oracle exercised 256,989 exact comparisons, 113,589
+  lower-bound inequality assertions and 169,937 byte syntax/cap assertions
+  without using production formatting helpers or `BigDecimal`. Coverage
+  includes the strict `>8192` unit boundary, one-pass carry and digit-cap
+  re-evaluation, non-byte integer and two-decimal precision, rational rates,
+  ratios and percentages, lower-bound/saturation/unknown handling and
+  signed-long-scale inputs. The isolated execution and oracle are retained in
+  the external `monitor-number-readonly-review-20261109-4e3bd5a2` artifact;
+  they are headless pure-code results, not paint or locale evidence.
+- `MonitorDisplayModelTest` contributed 27 tests in the earlier UX full Common
+  XML for the labels-based, scope-first `MonitorDisplayModel.prepare` output;
+  the preceding wrapping stage's class contributed 33. The current class
+  contributes 43 under [stable HUD reservoir UX
+  coverage](#stable-hud-reservoir-ux-coverage). An independent review probe
+  passed 283 assertions and 116 raw selectors.
+  Coverage includes same-scope field deduplication, peak-only and
+  actual-interval timing means,
+  the memory triplet and percentage/unit honesty, the preceding one-`N/A`-
+  per-scope behavior, status and OFF-token styling, immutable prepared text and
+  native-width wrapping. No
+  live paint, font, GPU or screen result is implied.
+- The compact vocabulary adds 81 HUD-only `monitor.pingforit.hud.*` keys in each
+  of the eight bundled locales. `MonitorHudLabelsLocalizationTest` contributed
+  17 tests in the earlier UX full Common XML and now contributes 18 after the
+  wrapping case below. It derives the finite key set from the closed schema
+  enums and checks duplicate-free JSON, identical placeholder and format
+  signatures, every raw field and presentation token, the five scope prefixes,
+  ASCII punctuation and the fixed English/Chinese prefix and status vocabulary.
+  A repository-resource joint execution passed 69/69
+  across the four classes (17 new HUD locale, 7 existing selector locale, 27
+  display model and 18 formatter); that joint run predates the wrapping case.
+  The initial joint run failed three HUD cases: the zh_cn/zh_tw accepted-count
+  label collided with the phase label and
+  de_de carried a ratio space. The approved resource-only repair changed the
+  accepted labels to `已应用`/`已套用` while the phase labels remain
+  `应用`/`套用`, then the repository rerun passed 69/69. The eight locale files
+  retain the 116 existing full-vocabulary entries; the 121 selector identities
+  and default selections are unchanged. This is resource/format evidence, not a
+  live locale, translation-quality or font-fit review.
+- The four HUD classes contributed 12 tests in the earlier UX full Common XML:
+  `InventoryMonitorHudAbiTest` 5, `InventoryMonitorHudCacheTest` 2,
+  `InventoryMonitorHudStateTest` 1 and `InventoryMonitorHudTest` 4; the current
+  `InventoryMonitorHudTest` contributes 5 after the wrapping case below. The
+  layout tests cover the fixed top-left margin, all prepared rows painted
+  including rows below the framebuffer, height-only resize, zero/narrow/extreme
+  widths, native glyph wrapping of long Latin/CJK tokens with OFF-only red
+  styling,
+  cache invalidation for view, width, scale, font, language and font options,
+  and scalar GL-state restoration. The ABI tests check the unique typed
+  `GuiGraphics` store, strict type-only hook, original graphics return,
+  separate frame HEAD, removal of the old late `GuiMixin` paint,
+  resource-reload identity, manifest placement and the executable gate truth
+  table. The three loaders each passed four static ABI tests plus an actual
+  Mixin transformer apply over the loader-transformed `GameRenderer`; the same
+  results were reproduced in the independent review directory. These are
+  bytecode/reflection and transformer smoke results, not a GL context, pixel
+  check, loader launch or Mixin application in a running game.
+- The prior lower-left/reserved/visible-row `InventoryMonitorHudTest` and
+  `MonitorDisplayModelTest` results are historical coverage of the replaced
+  layout. They are not evidence for the fixed upper-left/no-reserve projection
+  and are not counted as new-redesign proof.
+
+The full Common test task is part of the [HUD UX whole-tree
+run](build-checks.md#hud-ux-final-whole-tree-verification). The earlier
+disabled-path hot-allocation evidence covers only the sampled monitor APIs; it
+does not establish zero allocation, GL-query cost or whole-frame CPU for the
+new HUD. Mirroring painter state does not create a GL context or validate
+pixels. Live GUI scale, window size, native font/locale, resource reload,
+layering under totem/F3/chat/inventory or pause, multiplayer and performance
+checks remain in the [manual performance-monitor
+matrix](manual-integration.md#performance-monitor).
+
+The projected contract is [HUD projection and
+presentation](../../architecture/presentation/inventory.md#hud-projection-and-presentation).
+
+### Stable semantic HUD wrapping coverage
+
+The [HUD projection contract](../../architecture/presentation/inventory.md#hud-projection-and-presentation)
+owns fixed semantic breaks within one scope logical row. This section records the
+preceding semantic-wrap stage; its isolated 81-test and final 6,929-test
+whole-tree results do not cover the subsequent per-field `N/A`, per-row backing
+or reserved-height UX. That contract now has separate headless coverage in
+[stable HUD reservoir UX coverage](#stable-hud-reservoir-ux-coverage). Live paint
+remains pending for both.
+
+The five affected classes were compiled from source with JDK 21
+`javac --release 21 -Xlint:all -Werror` on an external classpath and run
+together: 81 tests passed, comprising `MonitorDisplayModelTest` 33,
+`MonitorHudLabelsLocalizationTest` 18, `MonitorLabelsLocalizationTest` 7,
+`MonitorNumberFormatTest` 18 and `InventoryMonitorHudTest` 5. An independent
+rerun passed 81/81. The final whole-tree Common XML re-executed those classes
+freshly with the same counts; the eight added wrapping cases account for the
+6,921-to-6,929 total-test increase. That execution is recorded in [build
+checks](build-checks.md#fixed-semantic-hud-wrapping-final-verification).
+
+- Fixed groups: each selected timing phase, every independent budget, the
+  non-sync requests/queue/work/state segment, memory and sync start a new visual
+  line at the same left margin. Two views whose values differ in digit and unit
+  width keep those group starts across multiple widths, so a value-width change
+  cannot pull a following group onto an earlier line. The scope prefix appeared
+  once, the preceding contract's one `N/A` covered the scope, and the logical row
+  text and its metric IDs remained available. The test re-formed groups from the
+  current view; that stateless-fit behavior is superseded by the reservation
+  contract below.
+- Locale and width: the five-group structure is asserted across the eight
+  bundled locale resources, including Latin and CJK fixtures; each locale keeps
+  one scope prefix and loses no non-separator content at fixed breaks or native
+  wrap points. Actual localized rows are also fitted at 18, 43 and 97
+  native-width units. Group metadata is not recovered by parsing a localized
+  field separator.
+- Fallback and paint: an over-wide group wraps natively and may push later groups
+  down; absolute line numbers are not fixed. Narrow widths and extreme non-byte
+  integers retain complete display without truncation or abbreviation. Every
+  fitted line is submitted as one painted row at the unchanged top margin, row
+  height and row spacing, including lines below the 427x240 headless reference
+  bottom; no line is dropped, only `OFF` is red, and a non-active status row
+  still runs through the existing native-wrap path. The painter and hook/state
+  paths were not modified; the painter test exercises the fitted output through
+  the existing paint loop.
+- Scope: no new compact label key, setting, sampling site or protocol message was
+  added. The existing 81 HUD-only keys in each locale, selector catalog and
+  defaults remain unchanged.
+
+This is headless source-connected and painter-seam evidence for the preceding
+stage. It does not cover the newer per-field `N/A`, per-row backing or
+reserved-height contract, and it does not establish live GPU/font rendering, a
+real window or layer paint, loader launch, multiplayer or performance; the
+427x240 viewport is a computed reference, not a live observation. Those
+scenarios remain pending in the [manual performance monitor
+matrix](manual-integration.md#performance-monitor).
+
+### Stable HUD reservoir UX coverage
+
+The [HUD projection and
+presentation](../../architecture/presentation/inventory.md#hud-projection-and-presentation)
+contract owns per-field `N/A`, per-row text backing, the scope-title color and
+the active-layout reservation. This section summarizes current headless
+coverage; the [whole-tree execution
+record](build-checks.md#stable-hud-reservoir-ux-whole-tree-verification) owns the
+command, result totals, manifest and artifact identities. Exact title and backing
+values remain architecture-owned and are not repeated here.
+
+- Model and reservation: `MonitorDisplayModelTest` contributes 43 tests.
+  Current-source cases cover selected-field and pair/triplet subvalue `N/A`
+  slots with labels and group positions retained, known-zero and partial-known
+  values, principal-only summary fields, `2 -> missing -> 2` group retention,
+  `1 -> 3 -> 1` high-water growth, blank rows without stale text, compact control
+  rows and `ACTIVE` recovery. They also cover TITLE, `OFF` and ordinary runs
+  through literal, reordered, duplicate-text and native-wrap grammar.
+  `MonitorLayoutStateTest` contributes 5 tests for normalized order/duplicate
+  selection, view/status/sample/availability/control and HUD-off behavior,
+  identity-boundary clearing, disabled-selection round trips and connection
+  reset even when a server generation is reused.
+- Localization: `MonitorHudLabelsLocalizationTest` contributes 18 tests for the
+  five fixed scope prefixes, localized field/status vocabulary, ASCII grammar,
+  only-`OFF` red styling, actual localized missing slots and known zeros, and
+  native CJK/Latin wrapping without deriving group boundaries from labels.
+- Renderer and paint seams: `InventoryMonitorHudPreparationTest` contributes 5
+  tests for one native-width measurement per nonblank visual row, one background
+  submission before each text row across actual cached row widths, reserved
+  blank rows that emit no text or background, horizontal shadow/padding clamping
+  without bottom culling, and TITLE/`OFF`/ordinary runs without label parsing.
+  `InventoryMonitorHudCacheTest` contributes 2 tests for retained-layout
+  invalidation and resource-reload language identity;
+  `InventoryMonitorHudAbiTest` contributes 7 tests for the typed graphics store,
+  type-only hook, native two-pass background/text ordering, depth and
+  resource-reload seams; `InventoryMonitorHudStateTest` contributes 3 tests for
+  state restoration after normal, boundary and flush-failure paths, empty
+  preparation and scissor padding. The unchanged `InventoryMonitorHudTest`
+  contributes its existing 5 painter cases, including top-left paint, fixed
+  groups, height-only resize and native wrapping.
+
+These are headless source, model, painter and ABI seams. An independent
+read-only source probe also recorded 86/86 checks, including non-null old remote
+data followed by compact control states and a short `ACTIVE` value, confirming
+no stale values or padding and no value reuse; it is headless, not GL evidence.
+These seams do not establish a real GL context, pixel output, native
+font/resource reload, window or GUI-scale layout,
+totem/F3/chat/inventory/pause layering, a running loader or Mixin application,
+multiplayer or performance/allocation behavior. The existing 16 native-classpath
+skips remain gaps and are not passes. Live scenarios remain in the [manual
+performance-monitor matrix](manual-integration.md#performance-monitor).
 
 ## Known automated gaps
 
@@ -2411,9 +3284,11 @@ Live timing and multiplayer repair remain pending in the
   the actual wrapper/default-root WATER and handler/freezer cases. These are
   patched-first or classpath adapter checks, not installed dedicated-server or
   real-FML evidence; they neither widen the audited registration trust nor
-  supply a fallback key for an unregistered fluid. The current-input execution
-  passed the Forge source integration cases; installed-server and real-FML
-  behavior remain manual gaps;
+  supply a fallback key for an unregistered fluid. The supplemental
+  native-classpath run passed the Forge source integration and previously
+  skipped patched-first cases
+  ([execution record](build-checks.md#supplemental-native-classpath-verification));
+  installed-server and real-FML behavior remain manual gaps;
 - inventory call-site logging coverage is limited to the
   [diagnostic seams above](#failure-diagnostic-seams). Other runtime
   probe/projection branches, capture-handle source-close and standalone
@@ -2441,7 +3316,7 @@ Live timing and multiplayer repair remain pending in the
 - generic registered-component compatibility, external-context and owned-tree
   assertions do not establish installed Offroad or other mod runtime
   compatibility, or live preview-to-tracking identity fidelity. The
-  [patch-only transition](#patch-only-identity-and-display-verification-pending)
+  [patch-only transition](#patch-only-identity-and-display-coverage-and-live-gaps)
   passed the complete integration run. Client hook and explicit-value
   text-snapshot fixtures remain local seams, not safety guarantees for arbitrary
   hooks, inherited defaults or asynchronous component mutation;
@@ -2484,9 +3359,11 @@ Live timing and multiplayer repair remain pending in the
   scenarios;
 - headless provider-confirmed external inventory coverage is inventoried above,
   including `SableInventorySourceTest` alias/source independence and the Create
-  Vault member-access tests. No automated test exercises live provider
-  membership, a real loaded sub-level, a real provider layout or capability, or
-  loader/runtime integration;
+  Vault member-access tests. Pending live evidence for the external and Sable
+  provider source is: live membership and sub-level checks, a real provider
+  layout or capability, member-gate revocation between operations, getter-free
+  selection and the preview-to-tracking handoff, inventory reads on the three
+  supported loaders, and loader/runtime integration;
 - item-display safety has headless decode, cache, row and callback-baseline
   evidence, not GPU or live profile-service evidence. Native nested decoding may
   create PROFILE callbacks before icon eligibility is known; selected detached
@@ -2506,9 +3383,4 @@ Live timing and multiplayer repair remain pending in the
   live GUI row, an installed mod's local item defaults, client/server default
   drift across real installations, asynchronous component mutation, multiplayer
   transport or transport timing; the full send-queue and byte-budget path
-  remains manual/integration evidence;
-- the provider-confirmed external inventory source against a live Sable runtime
-  and world: live membership and sub-level checks, a real provider layout or
-  capability, member-gate revocation between operations, getter-free selection
-  and the preview-to-tracking handoff, and inventory reads on the three
-  supported loaders;
+  remains manual/integration evidence.

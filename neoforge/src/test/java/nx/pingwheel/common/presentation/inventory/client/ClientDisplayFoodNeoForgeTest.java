@@ -246,6 +246,7 @@ class ClientDisplayFoodNeoForgeTest {
 		long request = inventory.open(new nx.pingwheel.common.domain.Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest"),
 			nx.pingwheel.common.domain.BlockFace.NORTH, "entity_block");
 		inventory.accept(nx.pingwheel.common.network.InventoryS2CPacket.offer(7, new nx.pingwheel.common.network.InventoryS2CPacket.Offer(10, 10, 3, 5)).stamp(100, 1));
+		inventory.accept(nx.pingwheel.common.network.InventoryS2CPacket.opened(7, 100, 1, request, 3));
 		inventory.accept(nx.pingwheel.common.network.InventoryS2CPacket.policy(7, 100, 1, java.util.Set.of("entity_block")));
 		String json = "{\"id\":\"minecraft:stone\"}";
 		var entry = new nx.pingwheel.common.network.InventoryS2CPacket.Entry("exact-food", "minecraft:stone", "fallback", json, 9007199254740993L, 1, false, null);

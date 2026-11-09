@@ -89,7 +89,9 @@ public final class CreateFluidTankAccess {
 		if (found == null) throw unavailable("Create fluid controller missing",
 			() -> blockContext(root, face, block));
 		BlockPos controller = found.immutable();
-		// world.block applies its own entry gate; no callback lies between the controller lookup and it.
+		// The controller is a target-level access subject: scope/loaded/readable are checked before
+		// its metadata or capability is touched, without treating every prism member this way.
+		world.requireController(controller, operation);
 		var master = new FluidCapabilityAccess.Member(controller, world.block(controller, operation));
 		requireStatic(world, metadata, master, operation);
 		world.require(controller, operation);
@@ -171,6 +173,7 @@ public final class CreateFluidTankAccess {
 					+ ";expectedController=" + masterPosition.toShortString()
 					+ ";observedController=" + pos(rootController));
 			// The preceding controller callback ended before this callback-free block entry gate.
+			world.requireController(masterPosition, operation);
 			var currentMaster = world.block(masterPosition, operation);
 			if (!master.block().same(currentMaster)) throw unavailable("Create fluid probe controller replaced",
 				() -> "position=" + masterPosition.toShortString() + ";face=" + frozenFace.getName()
@@ -232,7 +235,8 @@ public final class CreateFluidTankAccess {
 				members.add(member);
 			}
 			String alias = world.dimension(operation) + "|fluid-tank|" + masterPosition.toShortString() + "|" + ID;
-			return new TankRoute(world, frozenFace, masterPosition, List.copyOf(members), metadata, frozenWidth, frozenHeight, alias);
+			return new TankRoute(world, frozenFace, masterPosition, List.copyOf(members), root, master, metadata,
+				frozenWidth, frozenHeight, alias);
 		}
 	}
 	@NotNullByDefault
@@ -336,12 +340,13 @@ public final class CreateFluidTankAccess {
 
 	@NotNullByDefault
 	private record TankRoute(FluidCapabilityAccess.World world, Direction face, BlockPos capabilityPosition,
-		@Unmodifiable List<FluidCapabilityAccess.Member> members, Metadata metadata, int width, int height,
+		@Unmodifiable List<FluidCapabilityAccess.Member> members, FluidCapabilityAccess.Member root,
+		FluidCapabilityAccess.Member master, Metadata metadata, int width, int height,
 		String physicalAlias) implements FluidCapabilityAccess.Route {
 		@Override public Optional<String> alias() { return Optional.of(physicalAlias); }
 		@Override public boolean accepts(IFluidHandler handler, Operation operation) {
 			world.require(capabilityPosition, operation);
-			return metadata.storedHandler(entity(members.getFirst()), handler);
+			return metadata.storedHandler(entity(master), handler);
 		}
 		@Override public String description() { return "create:static-fluid;axis=Y;width=" + width + ";height=" + height + ";face=" + face.getName(); }
 		@Override public OperationProfile acceptanceProfile() {
@@ -351,6 +356,74 @@ public final class CreateFluidTankAccess {
 		@Override public OperationProfile checkProfile() {
 			return memberProfile(world).times(members.size()).plus(world.requireProfile().times(2))
 				.plus(FluidCapabilityAccess.profile(2048, 2048, 128, 0, 0));
+		}
+		/**
+		 * Current target applicability only. The verified structure's internal member layout and
+		 * handler relationship stay provider-owned; only the original hit root, the current
+		 * controller and its mode/identity are rechecked on every current validation.
+		 */
+		@Override public boolean targetMatches(Operation operation) {
+			if (!world.createAvailable())
+				throw unavailable("fluid capability route changed", () -> "reason=create-unavailable;" + description());
+			var currentRoot = world.block(root.position(), operation);
+			if (!root.block().same(currentRoot))
+				throw unavailable("fluid capability route changed",
+					() -> "reason=root-replaced;member=" + root.position().toShortString());
+			requireStatic(world, metadata, root, operation);
+			@Nullable BlockPos observedController = controller(world, metadata, root, operation);
+			if (!capabilityPosition.equals(observedController))
+				throw unavailable("fluid capability route changed",
+					() -> "reason=controller-changed;member=" + root.position().toShortString()
+						+ ";expectedController=" + capabilityPosition.toShortString()
+						+ ";observedController=" + pos(observedController));
+			world.requireController(capabilityPosition, operation);
+			var currentMaster = world.block(capabilityPosition, operation);
+			if (!master.block().same(currentMaster))
+				throw unavailable("fluid capability route changed",
+					() -> "reason=controller-replaced;member=" + capabilityPosition.toShortString());
+			requireStatic(world, metadata, master, operation);
+			world.require(capabilityPosition, operation);
+			if (!metadata.isController(entity(master)))
+				throw unavailable("fluid capability route changed",
+					() -> "reason=controller-role;member=" + capabilityPosition.toShortString());
+			@Nullable BlockPos observedMaster = controller(world, metadata, master, operation);
+			if (!capabilityPosition.equals(observedMaster))
+				throw unavailable("fluid capability route changed",
+					() -> "reason=controller-changed;member=" + capabilityPosition.toShortString()
+						+ ";observedController=" + pos(observedMaster));
+			requireStoredFluids(world, metadata, master, operation);
+			world.require(capabilityPosition, operation);
+			if (metadata.width(entity(master)) != width)
+				throw unavailable("fluid capability route changed",
+					() -> "reason=width-changed;member=" + capabilityPosition.toShortString());
+			world.require(capabilityPosition, operation);
+			if (metadata.height(entity(master)) != height)
+				throw unavailable("fluid capability route changed",
+					() -> "reason=height-changed;member=" + capabilityPosition.toShortString());
+			world.require(capabilityPosition, operation);
+			if (metadata.axis(entity(master)) != Direction.Axis.Y)
+				throw unavailable("fluid capability route changed",
+					() -> "reason=axis-changed;member=" + capabilityPosition.toShortString());
+			return true;
+		}
+		@Override public OperationProfile targetCheckProfile() {
+			// Root/master metadata plus the explicit controller gate before master access.
+			return memberProfile(world).times(2).plus(world.requireProfile().times(3));
+		}
+		/** No World.block calls: only the cached root/master identities, mode metadata and pure access gates. */
+		@Override public boolean authorityMatches(Operation operation) {
+			world.require(root.position(), operation);
+			world.requireController(capabilityPosition, operation);
+			if (!metadata.isController(entity(master))) return false;
+			@Nullable BlockPos observed = controller(world, metadata, master, operation);
+			if (!capabilityPosition.equals(observed)) return false;
+			if (metadata.activeBoiler(entity(master))) return false;
+			if (metadata.width(entity(master)) != width) return false;
+			if (metadata.height(entity(master)) != height) return false;
+			return metadata.axis(entity(master)) == Direction.Axis.Y;
+		}
+		@Override public OperationProfile authorityProfile() {
+			return world.requireProfile().times(3).plus(FluidCapabilityAccess.profile(1024, 1024, 128, 0, 0));
 		}
 		@Override public boolean matches(Operation operation) {
 			BlockPos controllerPosition = capabilityPosition;

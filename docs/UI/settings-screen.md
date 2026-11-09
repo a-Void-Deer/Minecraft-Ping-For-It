@@ -55,7 +55,7 @@ category. Paired controls are marked explicitly; all other controls are
 full-width singletons. Localized category labels retain their stable navigation
 identities.
 
-The client scope has seven categories:
+The client scope has eight categories:
 
 - **Markers & Range**:
   - Reach and display duration: Ping Distance, then Marker Display Duration.
@@ -88,35 +88,36 @@ The client scope has seven categories:
   Channel, followed by Ping Volume and Configuration Notice Size under Sound
   and notices.
 - **Rendering & Config**: Entity Block Geometry under entity-block rendering,
-  followed by Logging Detail under its own Logging subgroup, then the
-  configuration-file action under its own heading.
+  followed by the configuration-file action under its own heading.
 - **Performance**: a Wheel options subgroup with Precise Selection Capture
   Period.
+- **Debug**: Logging Detail under a Logging subgroup, then a Performance monitor
+  subgroup with the HUD master switch and metric-selection controls.
 
-The server scope has five categories:
+The server scope has six categories:
 
 - **Channel & Players**: Default Channel Mode and Player Tracking.
 - **Send Rate**: Regeneration Time and Rate Limit.
 - **Marker Duration**: Sync Duration.
-- **Performance**: a Monitoring subgroup with Budget Delay Notifications and
-  Server Logging Detail, in that order; a Shared inventory budgets subgroup with
-  Physical Slots per Tick, Pending Memory, Display Byte Size, and Frame Byte
-  Size; an Inventory preview subgroup with Preview Period, Preview Variants per
-  Client Period, Preview Slots per Client, Preview Slots Server-wide, Preview
-  Targets per
-  Client, Preview Client Byte Multiplier, and Preview Global Byte Multiplier;
-  and an Inventory tracking subgroup with Tracking Period, Separate Tracking by
-  Face, Separate Tracking by Player, Tracking Variants per Target, Tracking Slots
-  per Target, Tracking Slots Server-wide, Tracking
-  Stream Byte Multiplier, Tracking Snapshot Byte Multiplier, Tracking Global
-  Byte Multiplier, Resync Cooldown, Heartbeat Cadence, and Byte Smoothing
-  Window.
+- **Performance**: a Monitoring subgroup with Budget Delay Notifications; a
+  Shared inventory budgets subgroup with Physical Slots per Tick, Pending
+  Memory, Display Byte Size, and Frame Byte Size; an Inventory preview subgroup
+  with Preview Period, Preview Variants per Client Period, Preview Slots per
+  Client, Preview Slots Server-wide, Preview Targets per Client, Preview Client
+  Byte Multiplier, and Preview Global Byte Multiplier; and an Inventory tracking
+  subgroup with Tracking Period, Separate Tracking by Face, Separate Tracking by
+  Player, Tracking Variants per Target, Tracking Slots per Target, Tracking
+  Slots Server-wide, Tracking Stream Byte Multiplier, Tracking Snapshot Byte
+  Multiplier, Tracking Global Byte Multiplier, Resync Cooldown, Heartbeat
+  Cadence, and Byte Smoothing Window.
 - **Server Presentation**: Server Policy.
+- **Debug**: Server Logging Detail under a Logging subgroup, then a Performance
+  monitor subgroup with independent Preview and Tracking collection switches.
 
 All ordinary server controls occupy full-width rows, including the Monitoring,
-Shared inventory budgets, Inventory preview, and Inventory tracking subgroups.
-The independent Server Policy editor retains its native controls and related
-Allow/Block pairs.
+Logging, Performance monitor, Shared inventory budgets, Inventory preview, and
+Inventory tracking subgroups. The independent Server Policy editor retains its
+native controls and related Allow/Block pairs.
 
 Each option's value semantics and persisted form remain owned by the
 configuration catalogues. This page owns their UI placement, layout and help,
@@ -140,9 +141,12 @@ settings, and when edits take effect, including next-hold application where
 applicable. It must not promise a distinction that the implementation does not
 produce.
 
-All twelve category buttons have scope-appropriate descriptions of what the
+All fourteen category buttons have scope-appropriate descriptions of what the
 category contains. The client and server Performance descriptions distinguish
-local capture work from server monitoring and inventory administration.
+local capture work from server monitoring and inventory administration, and the
+client and server Debug descriptions distinguish local logging detail from
+server logging detail and identify each scope's independently visible
+performance monitor.
 
 Navigation and action controls also provide native hover and keyboard-focus
 help. Scope/category navigation and Back distinguish navigation from final
@@ -223,16 +227,68 @@ the redacted `NORMAL` profile from unredacted detailed profiles, and states when
 the edit takes effect. It does not mention `DEBUG` or hint at the activation
 modifier.
 
+## Performance monitor controls
+
+The client and server Debug categories each contain a plain-text,
+non-interactive Performance monitor subgroup. The subgroup adds no category or
+navigation level, so the client scope has eight categories and the server scope
+has six.
+
+Each side's subgroup is visible only while that side's logging profile is
+`DEBUG`. The client subgroup follows the current client runtime
+`loggingProfile`. The server subgroup follows the server settings page's draft
+when editable, and the known authoritative snapshot for a read-only viewer. The
+two profiles control their subgroups independently; one side's `DEBUG` does not
+reveal the other side's subgroup.
+[Diagnostics and logging](../architecture/logging.md#profiles-and-disclosure)
+owns profile meaning, while [client configuration](../config/client.md) and
+[server configuration](../config/server.md) own persisted defaults and the
+profile-derived clearing relationship.
+
+Leaving `DEBUG` hides that side's subgroup. On the client it also turns the HUD
+off and retains the metric-selection preferences; returning to `DEBUG` does not
+turn the HUD back on. On an editable server page it sets both collection
+switches off in the ordinary server-settings draft, and actual collection
+changes only when that draft is accepted; returning to `DEBUG` does not restore
+either switch. A read-only server viewer changes no collection state.
+
+The server subgroup has two independent collection switches, Preview and
+Tracking. Either lane can be enabled alone, and a switch is
+an ordinary server-settings draft leaf: a draft edit does not start collection,
+and an accepted update decides the applied value. The two lanes collect
+independently. Measurement meaning and accounting remain owned by [inventory
+performance monitoring](../architecture/presentation/inventory.md#performance-monitoring);
+HUD grouping, formatting and state presentation are owned by [HUD projection
+and presentation](../architecture/presentation/inventory.md#hud-projection-and-presentation).
+
+The client subgroup has a HUD master switch and the metric-selection
+preferences. Turning the HUD on enables the local monitor
+display. The selections control what the client displays and requests; they do
+not enable or disable server collection. The default summary selection and
+opt-in detail and peak behavior remain owned by
+[client configuration](../config/client.md#performance-monitor); HUD placement
+and its remaining presentation contract are owned by [HUD projection and
+presentation](../architecture/presentation/inventory.md#hud-projection-and-presentation).
+
+Server numeric rows and Shared values follow
+[server configuration authority](../architecture/authority/server-config.md#remote-performance-telemetry).
+Their display states, including local-row continuity on lost authority, are
+owned by [HUD projection and
+presentation](../architecture/presentation/inventory.md#hud-projection-and-presentation).
+
+Manual scenarios remain pending in the
+[manual performance-monitor matrix](../testing/verification/manual-integration.md#performance-monitor);
+automated coverage and final combined-tree acceptance are recorded in
+[configuration verification](../testing/verification/configuration-ui.md#performance-monitor-coverage).
+
 ## Server performance category
 
 The Performance category begins with a plain-text, non-interactive Monitoring
-subgroup and two full-width rows: the Budget Delay Notifications server-value
-toggle, then Server Logging Detail. The notice toggle's tooltip identifies
-administrator budget-delay notices and the effect of enabling or disabling
-them; value semantics and the persisted key are owned by
-[server configuration](../config/server.md#persisted-fields). The logging row's
-profile, activation and disclosure behavior is owned by
-[Logging profile controls](#logging-profile-controls).
+subgroup and one full-width row: the Budget Delay Notifications server-value
+toggle. The notice toggle's tooltip identifies administrator budget-delay
+notices and the effect of enabling or disabling them; value semantics and the
+persisted key are owned by
+[server configuration](../config/server.md#persisted-fields).
 
 The inventory administration controls follow in three
 plain-text, non-interactive subgroups: Shared inventory budgets, Inventory
@@ -366,8 +422,9 @@ so the screen does not promise that the server applied or persisted an update.
 
 The ordinary server settings are one shared session within the screen, not a
 per-category or per-visit section. This session covers the Channel & Players,
-Send Rate, Marker Duration, and Performance categories, including the monitoring
-toggle, the server logging-profile control, and the twenty-three inventory
+Send Rate, Marker Duration, Performance, and Debug categories, including the
+monitoring toggle, the performance-monitor Preview and Tracking collection
+switches, the server logging-profile control, and the twenty-three inventory
 administration leaves. Entering the server
 scope shows its overview and requests the current server configuration when the
 client holds a live connection and the session holds no loaded or in-flight
@@ -398,17 +455,17 @@ and [security](../architecture/security.md) own.
 
 The draft begins when an editable authoritative snapshot is accepted. Controls
 are inert unless `canEdit` holds. Each control recomputes dirty bits against the
-authoritative snapshot. The original numeric fields must parse as non-negative
-integers; inventory booleans use their two toggle states, while each numeric
-inventory leaf validates under its own kind, bounds and,
-for decimal settings, exact grid and size-pair constraints. An empty, malformed
-or out-of-range draft, or a decimal draft outside its exact grid, remains dirty
-but makes the update plan unavailable; an in-range integer between UI-only
-adjustment stops is valid and retained exactly. A draft that returns every
-edited value to its authoritative value has no dirty bits and produces no
-update plan. Thus no-change and invalid-draft states do not dispatch a settings
-update merely because a page is open. The field-masked merge and the
-no-update-result consequence are owned by
+authoritative snapshot. The Regeneration Time, Rate Limit, and Sync Duration
+fields must parse as non-negative integers; inventory booleans use their two
+toggle states, while each numeric inventory leaf validates under its own kind,
+bounds and, for decimal settings, exact grid and size-pair constraints. An
+empty, malformed or out-of-range draft, or a decimal draft outside its exact
+grid, remains dirty but makes the update plan unavailable; an in-range integer
+between UI-only adjustment stops is valid and retained exactly. A draft that
+returns every edited value to its authoritative value has no dirty bits and
+produces no update plan. Thus no-change and invalid-draft states do not
+dispatch a settings update merely because a page is open. The field-masked merge
+and the no-update-result consequence are owned by
 [changing server configuration](../architecture/config/changing-server-config.md#no-update-result).
 
 Category, scope-tab, and overview navigation neither dispatches an update nor

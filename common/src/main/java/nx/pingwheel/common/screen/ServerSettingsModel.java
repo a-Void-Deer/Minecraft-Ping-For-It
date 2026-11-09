@@ -37,6 +37,8 @@ public final class ServerSettingsModel {
 	private boolean playerTrackingEnabled;
 	private boolean budgetDelayNotificationsEnabled;
 	private LoggingProfile loggingProfile = ConfigDefaults.Server.LOGGING_PROFILE;
+	private boolean previewMonitorEnabled;
+	private boolean trackingMonitorEnabled;
 	private String msToRegenerate = "";
 	private String rateLimit = "";
 	private String syncDuration = "";
@@ -44,7 +46,7 @@ public final class ServerSettingsModel {
 	private final EnumMap<Field, Boolean> inventoryUnlimited = new EnumMap<>(Field.class);
 	private final EnumMap<Field, InventoryPerformanceScale> inventoryScales = new EnumMap<>(Field.class);
 	private @Nullable SizeAdjustment sizeAdjustment;
-	private int dirtyFields;
+	private long dirtyFields;
 
 	public ServerSettingsModel(boolean clientPermission) {
 		this.clientPermission = clientPermission;
@@ -92,7 +94,7 @@ public final class ServerSettingsModel {
 		return clientPermission && !authoritativeAccessDenied && loaded() && authoritative.canEdit();
 	}
 
-	public int dirtyFields() {
+	public long dirtyFields() {
 		return dirtyFields;
 	}
 
@@ -127,6 +129,30 @@ public final class ServerSettingsModel {
 		}
 
 		this.loggingProfile = java.util.Objects.requireNonNull(loggingProfile, "loggingProfile");
+		if (loggingProfile != LoggingProfile.DEBUG) {
+			previewMonitorEnabled = false;
+			trackingMonitorEnabled = false;
+		}
+		recomputeDirtyFields();
+	}
+
+	public boolean previewMonitorEnabled() {
+		return previewMonitorEnabled;
+	}
+
+	public boolean trackingMonitorEnabled() {
+		return trackingMonitorEnabled;
+	}
+
+	public void setPreviewMonitorEnabled(boolean enabled) {
+		if (!canEdit()) return;
+		previewMonitorEnabled = enabled && loggingProfile == LoggingProfile.DEBUG;
+		recomputeDirtyFields();
+	}
+
+	public void setTrackingMonitorEnabled(boolean enabled) {
+		if (!canEdit()) return;
+		trackingMonitorEnabled = enabled && loggingProfile == LoggingProfile.DEBUG;
 		recomputeDirtyFields();
 	}
 
@@ -564,7 +590,9 @@ public final class ServerSettingsModel {
 			parseNonNegative(syncDuration).orElseThrow(),
 			new InventoryConfigValues(inventory),
 			budgetDelayNotificationsEnabled,
-			loggingProfile));
+			loggingProfile,
+			previewMonitorEnabled,
+			trackingMonitorEnabled));
 	}
 
 	public void markClean() {
@@ -577,6 +605,8 @@ public final class ServerSettingsModel {
 		budgetDelayNotificationsEnabled = authoritative.budgetDelayNotificationsEnabled();
 		loggingProfile = authoritative.loggingProfile() == null
 			? ConfigDefaults.Server.LOGGING_PROFILE : authoritative.loggingProfile();
+		previewMonitorEnabled = authoritative.previewMonitorEnabled();
+		trackingMonitorEnabled = authoritative.trackingMonitorEnabled();
 		msToRegenerate = Integer.toString(authoritative.msToRegenerate());
 		rateLimit = Integer.toString(authoritative.rateLimit());
 		syncDuration = Integer.toString(authoritative.syncDuration());
@@ -593,6 +623,8 @@ public final class ServerSettingsModel {
 		playerTrackingEnabled = false;
 		budgetDelayNotificationsEnabled = false;
 		loggingProfile = ConfigDefaults.Server.LOGGING_PROFILE;
+		previewMonitorEnabled = false;
+		trackingMonitorEnabled = false;
 		msToRegenerate = "";
 		rateLimit = "";
 		syncDuration = "";
@@ -608,7 +640,7 @@ public final class ServerSettingsModel {
 			return;
 		}
 
-		int fields = 0;
+		long fields = 0;
 		if (defaultChannelMode != authoritative.defaultChannelMode()) {
 			fields |= ServerConfigUpdate.DEFAULT_CHANNEL_MODE;
 		}
@@ -622,6 +654,12 @@ public final class ServerSettingsModel {
 			? ConfigDefaults.Server.LOGGING_PROFILE : authoritative.loggingProfile();
 		if (loggingProfile != authoritativeProfile) {
 			fields |= ServerConfigUpdate.LOGGING_PROFILE;
+		}
+		if (previewMonitorEnabled != authoritative.previewMonitorEnabled()) {
+			fields |= ServerConfigUpdate.PREVIEW_MONITOR_ENABLED;
+		}
+		if (trackingMonitorEnabled != authoritative.trackingMonitorEnabled()) {
+			fields |= ServerConfigUpdate.TRACKING_MONITOR_ENABLED;
 		}
 		if (!matchesAuthoritative(msToRegenerate, authoritative.msToRegenerate())) {
 			fields |= ServerConfigUpdate.MS_TO_REGENERATE;

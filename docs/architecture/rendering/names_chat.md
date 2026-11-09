@@ -149,11 +149,11 @@ list and HUD, independently of All variants identity quality.
 
 Only created-marker updates accepted under
 [network protocol](../network/protocol.md), the negotiated
-[presentation snapshot](../presentation/presentation_snapshot.md) receive
-policy, and [client marker state](../markers/client-state.md) reach receipt
-evaluation. The chat target name is that marker's receive-authorized Basic name;
-an absent or denied name uses the unknown-name form instead of any superseded
-marker packet.
+[presentation snapshot](../presentation/presentation_snapshot.md) marker-scoped
+authorization, and [client marker state](../markers/client-state.md) reach
+receipt evaluation. The chat target name is that marker's frozen-authorized
+Basic name; an absent or creation-denied name uses the unknown-name form instead
+of any superseded marker packet.
 Before upserting an accepted update, the client checks whether its ID is absent
 from the **current** local store. Only such a newly seen marker is eligible for the
 sound and chat hooks. An update to an ID that is still locally known—including
@@ -177,7 +177,7 @@ Eligibility attempts do not guarantee an audible sound or a visible chat line.
 
 An ordinary newly seen marker keeps the immediate ordinary receipt line. A
 content marker replaces it with the content message family and derives its
-selection kind from the accepted server-authorized atomic initial, never from a
+selection kind from the accepted creation-frozen atomic initial, never from a
 preview observation or a client-uploaded claim.
 
 A property content marker waits for its complete content and emits exactly one
@@ -196,26 +196,33 @@ uncertain. A complete Preview is not marked uncertain solely because the first
 Tracking scan has not completed.
 
 A pending property receipt is bounded client state. It exists only while its
-marker is a current live member of the local store under the current
-presentation epoch/view; it holds no world handle, starts no second capture, and
-creates no audience, lease, or other server state.
+marker is a current live member of the local store in the current presentation
+session; it holds no world handle, starts no second capture, and creates no
+audience, lease, or other server state.
 
-A pending property receipt consumes current authorized Basic and non-Basic
-section values. A stale or superseded value or a mask-excluded field never
-completes it. The inventory snapshot is already part of the accepted atomic
-initial and is not a pending input. A denied selection suppresses the whole
-message without disclosing the denied reference, and a denied target-name input
-cancels the pending receipt; neither case shows a partial line, and the ordinary
-line's unknown-name form is unchanged.
+A pending property receipt consumes Basic and non-Basic section values
+authorized by the marker's
+[frozen effective set](../presentation/presentation_snapshot.md#frozen-recipient-content-authorization).
+A stale or superseded value, a field outside that set, or a field the current
+schema cannot decode never completes it. The inventory snapshot is already part of the accepted atomic
+initial and is not a pending input. A property selection or target-name input
+outside the frozen set suppresses the property message at creation without
+disclosing the denied reference; a later policy denial neither suppresses nor
+revives it. Neither case shows a partial line, and the ordinary line's
+unknown-name form is unchanged.
 
 A pending property receipt is cancelled while its complete content is still
-missing by a presentation `RESET` or other authorization revocation, an
-authoritative marker removal ([marker lifecycle](../authority/marker_lifecycle.md))
-including `EXPIRED`, local eviction, or disconnect. A sent inventory message is
-immutable in chat history across those events and is never revised by later
-Tracking data. A same-ID refresh or replay cannot restart a pending receipt or
-repeat a resolved one; only a genuinely new local membership follows the
-original new-marker rule. A locally elapsed visual deadline is not server
-expiry and does not by itself cancel or complete the receipt. Coverage and
+missing by a true session-epoch replacement, an authoritative marker removal
+([marker lifecycle](../authority/marker_lifecycle.md)) including `EXPIRED`,
+local eviction, or disconnect. A same-epoch presentation `RESET` or later
+recipient policy change does not cancel it or withdraw its frozen inputs;
+current schema compatibility and session validity still gate whether a value
+can complete it, and an incompatible, stale or superseded value never does. A
+sent inventory message is immutable in chat history across those events and is
+never revised by later Tracking data. A same-ID refresh or replay cannot restart
+a pending receipt or repeat a resolved one; only a genuinely new local
+membership follows the original new-marker rule. A locally elapsed visual
+deadline is not server expiry and does not by itself cancel or complete the
+receipt. Coverage and
 pending runtime evidence for live chat delivery and logging are owned by
 [testing and verification](../../testing/verification/presentation.md#content-receipt-chat-and-pending-completion).

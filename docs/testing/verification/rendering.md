@@ -112,9 +112,11 @@ both entries, quiet missing-service behavior, and one discovery per uncached
 call without a negative cache. Loader API and actual tea-asset assertions are
 inventoried under
 [native fluid presentation](integrations.md#native-fluid-presentation). The
-added diagnostic cases are included in the current
-[logging-coverage audit final acceptance](build-checks.md#logging-coverage-audit-final-acceptance);
-the earlier [combined-tree execution](build-checks.md#native-fluid-boundary-and-presentation-verification)
+added diagnostic cases remain automated coverage inventoried above; no saved
+execution acceptance record yet covers them, and that evidence remains pending.
+The [shared diagnostics evidence note](integrations.md#shared-exception-diagnostics)
+owns the cross-domain gap. The earlier
+[combined-tree execution](build-checks.md#native-fluid-boundary-and-presentation-verification)
 remains historical evidence for its pre-existing headless results.
 
 ### Low-opacity quad regressions
@@ -142,26 +144,30 @@ from these repository CPU/fake-state seams.
 ## Selector overlay layout and frame rendering
 
 `SpatialOverlayRendererTimingTest` covers renderer timing models.
-`SpatialOverlayTransitionsTest`,
-`SpatialInventoryLayoutTest`, `SpatialOverlayRendererStyleTest`,
-`SpatialOverlayRendererSectorTest`, `SpatialOverlayRendererBorderTest` and
-`SpatialSquareProgressTest` cover the CPU
-overlay models: appearance,
-exit, reappearance, retargeting, reduced motion, rewind and bounded churn, including a synchronized non-input
-relayout that commits Cartesian anchors together while scale and both coverage
-channels keep easing, and a shared geometry rebase that keeps detached paint
-and the current follower on one center without advancing time; row
-layout and coordinate conversion with status separate from rows and unknown
-counts; caller style overrides, legacy font scaling, alpha arithmetic, the
-independent wheel-underlay and target-frame opacity split, the per-layer gate
-that keeps only the transition-faded chrome when both opacity preferences are
-zero and drops every underlay or text-bearing frame, and the Back progress path
-tracing the frame's actually painted pixel extents and never leaving them;
-half-scale child-orbit bounds, the non-root submenu-radius multiplier with the
-root distance and legacy forms unchanged, and selected offsets; the square
-progress walk's last-painted extents and the inventory view's immutable
-back-affordance state; and sector scanline geometry, adjacent-sector tiling,
-shared disabled/reserved alpha, and paint ordering;
+`SpatialOverlayTransitionsTest`, `SpatialInventoryLayoutTest`,
+`SpatialOverlayRendererStyleTest`, `SpatialOverlayRendererSectorTest`,
+`SpatialOverlayRendererBorderTest` and `SpatialSquareProgressTest` cover the CPU
+overlay models:
+
+- appearance, exit, reappearance, retargeting, reduced motion, rewind and bounded
+  churn, including a synchronized non-input relayout that commits Cartesian
+  anchors together while scale and both coverage channels keep easing, and a
+  shared geometry rebase that keeps detached paint and the current follower on
+  one center without advancing time;
+- row layout and coordinate conversion with status separate from rows and
+  unknown counts;
+- caller style overrides, legacy font scaling, alpha arithmetic, the independent
+  wheel-underlay and target-frame opacity split, the per-layer gate that keeps
+  only the transition-faded chrome when both opacity preferences are zero and
+  drops every underlay or text-bearing frame, and the Back progress path tracing
+  the frame's actually painted pixel extents and never leaving them;
+- half-scale child-orbit bounds, the non-root submenu-radius multiplier with the
+  root distance and legacy forms unchanged, and selected offsets;
+- the square progress walk's last-painted extents and the inventory view's
+  immutable back-affordance state; and
+- sector scanline geometry, adjacent-sector tiling, shared disabled/reserved
+  alpha, and paint ordering.
+
 `SpatialOverlayRendererGuideTest` covers the radial center guides headlessly:
 one divider per true shared boundary, each emitted exactly once, across the
 root's unequal spans, equal spans including Back, and the pair wrapping past
@@ -336,8 +342,9 @@ visible, allows an eligible visible item follower to hide it, restores the
 parent radial deadzone feedback on leaving the list, and checks an inactive
 exit after that parent frame without connectors or choice acknowledgement.
 Across moving follower poses, a connector is recorded only when painted frames
-and previews do not already cover the remaining circle-to-title segment; an
-independent segment-over-rectangle oracle over the recorded poses and layouts. These are recording-painter frame checks;
+and previews do not already cover the remaining circle-to-title segment. The
+checks use an independent segment-over-rectangle oracle over the recorded poses
+and layouts. These are recording-painter frame checks;
 they do not establish the complete animated crosshair handoff or crosshair/trail
 behavior during a direct active-list detached exit. The panel and row
 remeasurement fixture above does not establish those feedback paths. The

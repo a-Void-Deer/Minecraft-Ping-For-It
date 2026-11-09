@@ -64,6 +64,9 @@ public final class SettingsCategoryCatalog {
 		SPATIAL_CONTENT_INTENT_ENABLED("spatial_selector.content_intent_enabled"),
 		SPATIAL_INVENTORY_SELECTION_STAY_OPEN_ENABLED("spatial_selector.inventory_selection_stay_open_enabled"),
 		PRECISE_CAPTURE_PERIOD_TICKS("spatial_selector.precise_capture_period_ticks"),
+		MONITOR_HUD_ENABLED("monitor.hud_enabled"),
+		PREVIEW_MONITOR_ENABLED("monitor.preview_enabled"),
+		TRACKING_MONITOR_ENABLED("monitor.tracking_enabled"),
 		CHANNEL("channel"),
 		PING_VOLUME("ping_volume"),
 		CONFIGURATION_NOTICE_SIZE("configuration_notice_size"),
@@ -142,13 +145,36 @@ public final class SettingsCategoryCatalog {
 		}
 	}
 
+	/** When a section is rendered for its owning category. */
+	@NotNullByDefault
+	public enum Visibility {
+		/** Always rendered while its category is viewable. */
+		ALWAYS,
+		/** Rendered only while the owning side's logging profile is DEBUG. */
+		DEBUG_PROFILE
+	}
+
+	/** Extra controls that follow a section's fixed native rows. */
+	@NotNullByDefault
+	public enum Content {
+		/** Only the declared fixed rows. */
+		SETTINGS,
+		/** The client's closed per-metric selector rows follow the fixed HUD switch. */
+		CLIENT_METRICS
+	}
+
 	/** A localized, non-interactive heading followed by ordered semantic rows. */
 	@NotNullByDefault
-	public record Section(String headingKey, @Unmodifiable List<Row> rows) {
+	public record Section(String headingKey, @Unmodifiable List<Row> rows, Visibility visibility, Content content) {
 		public Section {
 			if (headingKey.isBlank()) throw new IllegalArgumentException("blank section heading");
 			rows = List.copyOf(rows);
 			if (rows.isEmpty()) throw new IllegalArgumentException("empty settings section");
+		}
+
+		/** Ordinary always-visible section used by most categories. */
+		public Section(String headingKey, @Unmodifiable List<Row> rows) {
+			this(headingKey, rows, Visibility.ALWAYS, Content.SETTINGS);
 		}
 	}
 
@@ -195,6 +221,11 @@ public final class SettingsCategoryCatalog {
 		return new Section("settings.pingforit.group." + suffix, List.of(rows));
 	}
 
+	private static Section debugMonitorSection(Content content, Row... rows) {
+		return new Section("settings.pingforit.group.monitor", List.of(rows),
+			Visibility.DEBUG_PROFILE, content);
+	}
+
 	private static @Unmodifiable Map<Category, @Unmodifiable List<Section>> createSections() {
 		var sections = new EnumMap<Category, @Unmodifiable List<Section>>(Category.class);
 		sections.put(Category.MARKER_DISPLAY, List.of(
@@ -222,15 +253,15 @@ public final class SettingsCategoryCatalog {
 		sections.put(Category.CHANNEL_NOTICES, List.of(section("channel", Row.single(Setting.CHANNEL)),
 			section("sound_notices", Row.single(Setting.PING_VOLUME), Row.single(Setting.CONFIGURATION_NOTICE_SIZE))));
 		sections.put(Category.GEOMETRY_CONFIG, List.of(section("geometry", Row.single(Setting.ENTITY_BLOCK_RENDER_MODE)),
-			section("logging", Row.single(Setting.LOGGING_PROFILE)),
 			section("client_config_file", Row.single(Setting.OPEN_CLIENT_CONFIG))));
 		sections.put(Category.CLIENT_PERFORMANCE, List.of(section("wheel_options", Row.single(Setting.PRECISE_CAPTURE_PERIOD_TICKS))));
+		sections.put(Category.CLIENT_DEBUG, List.of(section("logging", Row.single(Setting.LOGGING_PROFILE)),
+			debugMonitorSection(Content.CLIENT_METRICS, Row.single(Setting.MONITOR_HUD_ENABLED))));
 		sections.put(Category.CHANNEL_PLAYERS, List.of(section("channel_players", Row.single(Setting.DEFAULT_CHANNEL_MODE), Row.single(Setting.PLAYER_TRACKING_ENABLED))));
 		sections.put(Category.SEND_RATE, List.of(section("send_rate", Row.single(Setting.MS_TO_REGENERATE), Row.single(Setting.RATE_LIMIT))));
 		sections.put(Category.MARKER_DURATION, List.of(section("marker_duration", Row.single(Setting.SYNC_DURATION))));
 		sections.put(Category.PERFORMANCE, List.of(
-			section("monitoring", Row.single(Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED),
-				Row.single(Setting.SERVER_LOGGING_PROFILE)),
+			section("monitoring", Row.single(Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED)),
 			section("inventory_shared", Row.single(Setting.INVENTORY_PHYSICAL_SLOTS_PER_TICK), Row.single(Setting.INVENTORY_PENDING_MEMORY_MIB),
 				Row.single(Setting.INVENTORY_DISPLAY_BYTE_MULTIPLIER), Row.single(Setting.INVENTORY_FRAME_BYTE_MULTIPLIER)),
 			section("inventory_preview", Row.single(Setting.INVENTORY_PREVIEW_PERIOD_TICKS), Row.single(Setting.INVENTORY_PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD),
@@ -244,6 +275,9 @@ public final class SettingsCategoryCatalog {
 				Row.single(Setting.INVENTORY_TRACKING_RESYNC_MIN_PERIODS), Row.single(Setting.INVENTORY_TRACKING_HEARTBEAT_PERIODS), Row.single(Setting.INVENTORY_TRACKING_GRACE_PERIODS))));
 		sections.put(Category.SERVER_PRESENTATION, List.of(new Section("settings.pingforit.presentation.server.title",
 			List.of(Row.single(Setting.PRESENTATION_SERVER_POLICY)))));
+		sections.put(Category.SERVER_DEBUG, List.of(section("logging", Row.single(Setting.SERVER_LOGGING_PROFILE)),
+			debugMonitorSection(Content.SETTINGS, Row.single(Setting.PREVIEW_MONITOR_ENABLED),
+				Row.single(Setting.TRACKING_MONITOR_ENABLED))));
 		validate(sections);
 		return Map.copyOf(sections);
 	}

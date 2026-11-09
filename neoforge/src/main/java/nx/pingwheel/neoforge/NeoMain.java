@@ -3,17 +3,28 @@ package nx.pingwheel.neoforge;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.network.ServerGamePacketListenerImpl;
+import net.minecraft.network.Connection;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.loading.FMLEnvironment;
 import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
 import net.neoforged.neoforge.network.registration.PayloadRegistrar;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.server.ServerStoppedEvent;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.CommonServer;
+import nx.pingwheel.common.monitor.integration.MonitorPacketDispatch;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
+import nx.pingwheel.common.network.IPacket;
+import nx.pingwheel.common.network.InventoryMonitorSubscribeC2SPacket;
+import nx.pingwheel.common.network.InventoryMonitorStatusS2CPacket;
+import nx.pingwheel.common.network.InventoryMonitorSampleS2CPacket;
 import nx.pingwheel.common.network.EncodedPresentationPayload;
 import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
@@ -27,6 +38,10 @@ import nx.pingwheel.common.network.ServerPresentationPolicyC2SPacket;
 import nx.pingwheel.common.network.ServerPresentationPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.neoforge.platform.PlatformContextServiceImpl;
+import org.apache.logging.log4j.util.TriConsumer;
+import org.jetbrains.annotations.Nullable;
+import java.util.function.BiConsumer;
+import java.util.function.LongConsumer;
 
 import static nx.pingwheel.common.Global.MOD_ID;
 
@@ -43,6 +58,9 @@ public class NeoMain {
 	private static final StreamCodec<FriendlyByteBuf, PresentationC2SPacket> PRESENTATION_C2S_CODEC = StreamCodec.ofMember(PresentationC2SPacket::write, PresentationC2SPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, InventoryC2SPacket> INVENTORY_C2S_CODEC = StreamCodec.ofMember(InventoryC2SPacket::write, InventoryC2SPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, InventoryS2CPacket> INVENTORY_S2C_CODEC = StreamCodec.ofMember(InventoryS2CPacket::write, InventoryS2CPacket::readSafe);
+	private static final StreamCodec<FriendlyByteBuf, InventoryMonitorSubscribeC2SPacket> INVENTORY_MONITOR_SUBSCRIBE_C2S_CODEC = StreamCodec.ofMember(InventoryMonitorSubscribeC2SPacket::write, InventoryMonitorSubscribeC2SPacket::readSafe);
+	private static final StreamCodec<FriendlyByteBuf, InventoryMonitorStatusS2CPacket> INVENTORY_MONITOR_STATUS_S2C_CODEC = StreamCodec.ofMember(InventoryMonitorStatusS2CPacket::write, InventoryMonitorStatusS2CPacket::readSafe);
+	private static final StreamCodec<FriendlyByteBuf, InventoryMonitorSampleS2CPacket> INVENTORY_MONITOR_SAMPLE_S2C_CODEC = StreamCodec.ofMember(InventoryMonitorSampleS2CPacket::write, InventoryMonitorSampleS2CPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, PresentationPreviewC2SPacket> PRESENTATION_PREVIEW_C2S_CODEC = StreamCodec.ofMember(PresentationPreviewC2SPacket::write, PresentationPreviewC2SPacket::readSafe);
 	private static final StreamCodec<FriendlyByteBuf, PresentationPreviewS2CPacket> PRESENTATION_PREVIEW_S2C_CODEC = StreamCodec.ofMember(PresentationPreviewS2CPacket::write, PresentationPreviewS2CPacket::readSafe);
 
@@ -64,6 +82,9 @@ public class NeoMain {
 	}
 
 	static void registerPackets(PayloadRegistrar registrar) {
+		registerMonitorPackets(registrar, CommonServer.INSTANCE::onInventoryMonitorSubscribe,
+			(token, packet) -> CommonClient.INSTANCE.onMonitorStatus(token, packet),
+			(token, packet) -> CommonClient.INSTANCE.onMonitorSample(token, packet));
 		registrar.playToServer(UpdateChannelC2SPacket.PACKET_TYPE, UPDATE_CHANNEL_C2S_CODEC, (payload, context) -> {
 			context.enqueueWork(() -> CommonServer.INSTANCE.onChannelUpdatePacket(context.player().getServer(), (ServerPlayer)context.player(), payload));
 		});
@@ -113,5 +134,34 @@ public class NeoMain {
 		registrar.playToClient(PresentationPreviewS2CPacket.PACKET_TYPE, PRESENTATION_PREVIEW_S2C_CODEC, (payload, context) -> {
 			context.enqueueWork(() -> CommonClient.INSTANCE.onPresentationPreview(payload));
 		});
+	}
+
+	static void registerMonitorPackets(PayloadRegistrar registrar,
+		TriConsumer<MinecraftServer, ServerPlayer, InventoryMonitorSubscribeC2SPacket> subscribe,
+		BiConsumer<Long, InventoryMonitorStatusS2CPacket> status, BiConsumer<Long, InventoryMonitorSampleS2CPacket> sample) {
+		registrar.playToServer(InventoryMonitorSubscribeC2SPacket.PACKET_TYPE, INVENTORY_MONITOR_SUBSCRIBE_C2S_CODEC,
+			(packet, context) -> {
+				if (!(context.player() instanceof ServerPlayer player)) return;
+				@Nullable MinecraftServer server = player.getServer();
+				@Nullable ServerGamePacketListenerImpl listener = player.connection;
+				if (server != null && listener != null && listener == context.listener()) {
+					MonitorPacketDispatch.server(action -> context.enqueueWork(action), server, player, listener, packet,
+						current -> subscribe.accept(server, current, packet));
+				}
+			});
+		registrar.playToClient(InventoryMonitorStatusS2CPacket.PACKET_TYPE, INVENTORY_MONITOR_STATUS_S2C_CODEC,
+			(packet, context) -> dispatchMonitorClient(packet, context, token -> status.accept(token, packet)));
+		registrar.playToClient(InventoryMonitorSampleS2CPacket.PACKET_TYPE, INVENTORY_MONITOR_SAMPLE_S2C_CODEC,
+			(packet, context) -> dispatchMonitorClient(packet, context, token -> sample.accept(token, packet)));
+	}
+
+	private static void dispatchMonitorClient(IPacket packet, IPayloadContext context, LongConsumer receive) {
+		Connection connection = context.connection();
+		long token = CommonClient.INSTANCE.monitorConnectionToken();
+		MonitorPacketDispatch.client(action -> context.enqueueWork(action), connection, () -> {
+			@Nullable Minecraft client = Minecraft.getInstance();
+			@Nullable ClientPacketListener current = client == null ? null : client.getConnection();
+			return current == null ? null : current.getConnection();
+		}, packet, () -> receive.accept(token));
 	}
 }

@@ -63,7 +63,7 @@ Numbers use JSON numeric form. Units are stated where meaningful.
 | `directionIndicatorVisible` | boolean | Whether the off-screen direction indicator is visible. |
 | `pingSize` | number | Local visual scale for marker and direction-indicator presentation. |
 | `configurationNoticeSize` | number | Local visual size for target-selection toggle notices. |
-| `markerDisplayDuration` | number | Local marker-display-duration preference. Serialized `0` means each marker follows its frozen server-side duration, rather than a literal zero-duration display; [client marker state](../architecture/markers/client-state.md) owns the resulting state behavior. |
+| `markerDisplayDuration` | integer, seconds | Local marker-display-duration preference. A nonzero value is the local display duration in seconds; serialized `0` means each marker follows its frozen server-side duration, rather than a literal zero-duration display. [Client marker state](../architecture/markers/client-state.md) owns the resulting state behavior. |
 | `raycastDistance` | number | Native local raycast cap; [range](../architecture/picking/range.md) owns capture-range composition. Its current screen exposure is owned by the [configuration UI](../UI/settings-screen.md). |
 
 ### Press, wheel, and cancellation interaction
@@ -198,6 +198,120 @@ resolves to `NORMAL`. The field is additive: a same-version document without it
 loads the default without a shape migration or rewrite. The model setter stores
 the preference only; runtime publication and disclosure effects are owned by
 [diagnostics and logging](../architecture/logging.md).
+
+### Performance monitor
+
+| Key | JSON form | Local meaning |
+| --- | --- | --- |
+| `monitorHudEnabled` | boolean; default `false` | Local performance-monitor HUD master switch. It is effective only while the final validated client `loggingProfile` is `DEBUG`; a final validated profile other than `DEBUG` clears it, and returning to `DEBUG` does not restore it. |
+| `monitorMetrics` | object with an `overrides` object | Client-local metric-selection preferences. Each metric is selected independently; the default selects only the summary metrics described under the sparse override grammar below. |
+
+`monitorMetrics` persists selection state only through its `overrides` member.
+`overrides` is a JSON object mapping a metric identifier to a JSON boolean and
+is sparse: an entry is stored only when the choice differs from that metric's
+default. A serialized `monitorMetrics` always contains `overrides`, empty when
+no choice differs from its default. The five default-selected summary
+identifiers are
+`summary.processing`, `summary.requests_queue`, `summary.budget`,
+`summary.memory`, and `summary.sync_rate`; every detailed metric and per-item
+peak defaults to unselected. An explicit entry equal to its default is accepted
+on load but is not retained as typed override state, so a later actual save omits
+it. The five summary identifiers above plus the closed patterns under
+[Metric selector identifiers](#metric-selector-identifiers) are the complete
+legal identifier set; any other identifier is invalid.
+
+Missing or `null` `monitorMetrics` or `overrides`, and a `null` override value,
+use the corresponding defaults. A non-object `monitorMetrics` or `overrides`, or
+a value other than a JSON boolean or `null` for a known identifier, makes the
+client file invalid and follows
+[invalid-file recovery](../architecture/config/revisioning.md#invalid-file-recovery-differs-by-config-type).
+Unknown members of `monitorMetrics` and unknown identifiers in `overrides` are
+ignored regardless of their raw values. They never enter the selection model,
+have no display or demand meaning, and cannot be selected; they are not an
+extension mechanism.
+
+For example, this document fragment disables one default-selected summary and
+enables one detailed metric while leaving the other summary selections in
+effect:
+
+```json
+{
+  "pingforit-version": "0.5.0-pfi-beta1",
+  "loggingProfile": "DEBUG",
+  "monitorHudEnabled": true,
+  "monitorMetrics": {
+    "overrides": {
+      "summary.processing": false,
+      "local.preview.timing.apply.max": true
+    }
+  }
+}
+```
+
+Both fields are additive. Missing or explicit `null` values use the
+model-initialized defaults without a same-version shape migration or rewrite.
+The HUD clear uses the final resolved client profile, so a temporary load-time
+`NORMAL` publication does not clear a legitimately loaded `DEBUG` document.
+Turning the HUD off, leaving `DEBUG`, or changing a metric selection does not
+reset the other preference.
+
+The selections affect local display and outgoing demand only. They never enable,
+disable, or gate server Preview or Tracking collection; that server authority is
+owned by [server configuration](server.md) and its remote transaction by
+[changing server configuration](../architecture/config/changing-server-config.md).
+
+A guarded writeback, whether ordered version migration or a same-version
+normalization conflict, preserves unknown top-level members, unknown
+`monitorMetrics` members, and unknown `overrides` identifiers and values from
+its source. Known override identifiers are replaced by the sparse serialized
+state, so a known override reverted to its default is removed rather than
+restored from the preservation base. When an ordinary save writes, it serializes
+only modeled state and does not preserve unknown members or unknown identifiers.
+The guard, changed-source check, and future-version protection remain owned by
+[configuration revisioning](../architecture/config/revisioning.md#ordered-migration-and-writeback).
+
+#### Metric selector identifiers
+
+Each `overrides` key is a metric identifier. Identifiers are case-sensitive
+lowercase dotted strings. The five summary identifiers listed above and the
+following forms are the complete legal set; a combination absent from the table
+is invalid.
+
+- `<scope>.timing.<phase>` and the separate peak form
+  `<scope>.timing.<phase>.max`;
+- `<scope>.<counter>`;
+- `<scope>.<gauge>`;
+- `<scope>.budget.<budget>`; and
+- `shared.memory`.
+
+`<scope>` is exactly `local.preview`, `local.tracking`, `server.preview`,
+`server.tracking`, or `shared`. Only timing identifiers have a `.max` form. The
+table gives the legal scope combinations and leaf names for every form; a leaf
+listed for a scope is concatenated using that form. The memory row is already
+the complete identifier.
+
+| Form | Allowed scopes | Allowed leaf names |
+| --- | --- | --- |
+| timing | `server.preview`, `server.tracking` | `ingress`, `tick_work`, `capture`, `read`, `detached_encode`, `measure`, `publish` |
+| timing | `local.preview`, `local.tracking` | `apply`, `prepare`, `draw` |
+| counter | `server.preview`, `server.tracking` | `requests.received`, `requests.admitted`, `work.consumers`, `work.defer_attempts`, `work.logical_slots`, `sync.publications_installed`, `sync.cuts_completed`, `sync.budget_charged_bytes`, `sync.handoff_bytes`, `sync.handoff_frames`, `sync.not_handed_off_frames`, `sync.unobserved_handoff_frames`, `sync.unobserved_handoff_candidate_bytes` |
+| counter | `local.preview`, `local.tracking` | `apply.accepted`, `apply.rejected`, `sync.repair_requests` |
+| counter | `local.preview`, `server.preview` | `sync.frames_preview` |
+| counter | `local.tracking`, `server.tracking` | `sync.frames_snapshot`, `sync.frames_stream` |
+| counter | `shared` | `work.defer_attempts`, `work.read_attempts`, `work.read_failures` |
+| gauge | `server.preview`, `server.tracking` | `requests.open`, `queue.logical_cost`, `queue.cap`, `queue.pending_entries`, `queue.admitted_frames` |
+| gauge | `local.preview`, `local.tracking` | `state.channels`, `state.sessions`, `buffer.frames`, `buffer.entries`, `buffer.estimated_bytes` |
+| gauge | `shared` | `state.sessions`, `state.consumers`, `state.active_observations`, `memory.outstanding_leases` |
+| budget | `server.preview`, `server.tracking` | `logical_slots`, `wire_bytes` |
+| budget | `shared` | `physical_slots`, `capture_reads`, `probes`, `provider_work`, `processing_charge`, `publication_work` |
+| memory | `shared` | exact identifier `shared.memory` |
+
+No timing identifier uses a `shared` scope, and no budget identifier uses a
+`local` scope. Timing selects a phase timing and its optional peak; counter,
+gauge, and budget select their raw ledger entries; `shared.memory` selects the
+shared retained-memory entry; and the five summary identifiers are aggregate
+selectors. This page owns only selector syntax and values; measurement meaning
+and summary composition are outside it.
 
 ### Obsolete keys
 

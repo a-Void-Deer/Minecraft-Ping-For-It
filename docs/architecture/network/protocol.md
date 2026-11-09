@@ -6,14 +6,24 @@ semantics; the versioned presentation snapshot and presentation policy routes
 it registers are owned by
 [presentation snapshot](../presentation/presentation_snapshot.md). The
 dedicated inventory preview/tracking route, the one-shot presentation preview
-route, and the server-configuration request, update, and snapshot routes
-recorded below are registered here as well; their route grammar and acceptance
-belong to this topic, while inventory status, zero, baseline and budget
-semantics are owned by [inventory](../presentation/inventory.md), preview field
-authorization, provenance and fallback by
+route, the optional inventory monitor subscription/status/sample family, and the
+server-configuration request, update, and snapshot routes recorded below are
+registered here as well; their route grammar and acceptance belong to this
+topic, while inventory status, zero, baseline and budget semantics are owned by
+[inventory](../presentation/inventory.md), preview field authorization,
+provenance and fallback by
 [presentation snapshot](../presentation/presentation_snapshot.md), and the
 server-configuration transaction by
-[changing server configuration](../config/changing-server-config.md).
+[changing server configuration](../config/changing-server-config.md). Monitor
+measurement meaning and sampling lifetime are owned by
+[inventory performance monitoring](../presentation/inventory.md#performance-monitoring),
+numeric telemetry authority by
+[server configuration authority](../authority/server-config.md#remote-performance-telemetry),
+metric-selector grammar by [client configuration](../../config/client.md#performance-monitor),
+control presentation by
+[settings screen](../../UI/settings-screen.md#performance-monitor-controls), and
+HUD projection and presentation by [inventory HUD
+presentation](../presentation/inventory.md#hud-projection-and-presentation).
 It is not a wire-format catalogue and does not promise interoperability with the
 original mod. The supported loader set and the original-mod compatibility policy
 are owned by [compatibility](../../compatibility.md).
@@ -22,21 +32,25 @@ are owned by [compatibility](../../compatibility.md).
 
 All three supported loader entry points—Fabric, Forge, and NeoForge—register the
 channel-update and rate-policy routes, the versioned presentation snapshot
-route, the presentation policy route, the inventory
-preview/tracking route, the presentation preview route, and the
-server-configuration request, update, and snapshot routes, and dispatch them
-through the common handlers. Marker creation enters only through the negotiated
-presentation `CREATE` (including pure location targets) or dedicated inventory
+route, the presentation policy route, the inventory preview/tracking route, the
+inventory monitor subscription, status, and sample routes, the presentation
+preview route, and the server-configuration request, update, and snapshot
+routes, and dispatch them through the common handlers. Marker creation enters
+only through the negotiated presentation `CREATE` (including pure location
+targets) or dedicated inventory
 `SELECT` intents; removal enters through presentation `REMOVE`.
 
 | Packet family and direction | Registered route | Server-side effect | Current client acceptance and presentation |
 | --- | --- | --- | --- |
-| Presentation `PresentationC2SPacket` (C2S): `HELLO`, `CREATE`, `REMOVE` | Fabric, Forge, and NeoForge common server handler. | The versioned route negotiates presentation sessions, answers `HELLO` with an offer and a server-selected authorization mask, and carries marker create/remove intents with the negotiated epoch; a create may carry property selections. Session negotiation, manifest, mask, policy, property, and projection semantics are owned by [presentation snapshot](../presentation/presentation_snapshot.md); accepted intents enter the admission and removal rules owned by [target validation](../authority/target_validation.md); rejections are sent to the requester. | Not applicable on C2S. |
-| Presentation `PresentationS2CPacket` (S2C): `OFFER`, `RESET`, `CREATED`, `SECTION`, `REMOVED`, `WINNER`, `REJECT` | Fabric, Forge, and NeoForge common client handler. | Accepted marker creation, removal, and winner changes are projected per recipient; a rejection is sent only to its requester. | Accepted only for the negotiated session epoch/view. The atomic Basic initial, receipt content descriptor, default display reference, retained values, and mask and child-deny pruning are owned by [presentation snapshot](../presentation/presentation_snapshot.md); marker record state and visual lifetime are owned by [client marker state](../markers/client-state.md); rejection presentation remains owned by [ping feedback](../../UI/ping-feedback.md). Corrupt packets, or packets received without a runtime, are safely dropped. |
+| Presentation `PresentationC2SPacket` (C2S): `HELLO`, `CREATE`, `REMOVE` | Fabric, Forge, and NeoForge common server handler. | The versioned route negotiates presentation sessions, answers `HELLO` with an offer and a server-selected current field mask, and carries marker create/remove intents with the negotiated epoch; a create may carry property selections. Session negotiation, manifest, mask, policy, property, and projection semantics are owned by [presentation snapshot](../presentation/presentation_snapshot.md); accepted intents enter the admission and removal rules owned by [target validation](../authority/target_validation.md); rejections are sent to the requester. | Not applicable on C2S. |
+| Presentation `PresentationS2CPacket` (S2C): `OFFER`, `RESET`, `CREATED`, `SECTION`, `REMOVED`, `WINNER`, `REJECT` | Fabric, Forge, and NeoForge common client handler. | Accepted marker creation, removal, and winner changes are projected per recipient; a rejection is sent only to its requester. | Accepted only for the negotiated session epoch/view. The atomic Basic initial, marker content grant, receipt content descriptor, default display reference, retained values, and mask, child-deny and marker-scoped authorization rules are owned by [presentation snapshot](../presentation/presentation_snapshot.md); marker record state and visual lifetime are owned by [client marker state](../markers/client-state.md); rejection presentation remains owned by [ping feedback](../../UI/ping-feedback.md). Corrupt packets, or packets received without a runtime, are safely dropped. |
 | Presentation policy `ServerPresentationPolicyC2SPacket` (C2S): `READ`, `ADD_WHITE`, `REMOVE_WHITE`, `ADD_BLACK`, `REMOVE_BLACK`, `SET_WHITELIST_ONLY` | Fabric, Forge, and NeoForge common server handler. | The versioned route carries the correlated read of all five per-target-type rule views, each including its persisted child deny list, and the bounded selector and whitelist-only mutations for a selected target type, which leave the child deny list unchanged. Disclosure, revision, transaction, and broadcast semantics are owned by [presentation snapshot](../presentation/presentation_snapshot.md); authority and server-side enforcement are owned by [server configuration authority](../authority/server-config.md) and [security](../security.md#server-configuration-update-enforcement). | Not applicable on C2S. |
 | Presentation policy `ServerPresentationPolicyS2CPacket` (S2C) | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted into the connection-scoped rule-view mirror under the correlation and revision rules owned by [presentation snapshot](../presentation/presentation_snapshot.md); it does not mutate marker state, overlay/outline state, or presentation field values. |
-| Inventory `InventoryC2SPacket` (C2S): `HELLO`, `OPEN`, `CLOSE`, `RESYNC`, `SELECT` | Fabric, Forge, and NeoForge common server handler. | `HELLO` creates or renews the per-player preview session and answers with an offer of server-selected periods, the effective display and frame byte budgets, and the inventory target-type policy view; every other kind runs only under the session epoch and the current presentation epoch/view fence. `OPEN` binds one bounded preview request to a server-validated ordinary block target or uncommitted external provider candidate with its carried real local face, `CLOSE` releases it, `RESYNC` schedules repair for its required marker ID, and `SELECT` resolves one opaque retained entry reference under its baseline/state fences into a correlated selection outcome. The request carries no player identity, item count, or client-supplied authoritative target. Inventory domain semantics are owned by [inventory](../presentation/inventory.md). | Not applicable on C2S. |
-| Inventory `InventoryS2CPacket` (S2C): `OFFER`, `POLICY`, `SELECTED`, `REJECT`, `PREVIEW`, `SNAPSHOT`, `STREAM`, `STATUS`, `HEARTBEAT` | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted into the connection-scoped inventory session only under the negotiated epoch and the current presentation epoch/view: `OFFER` establishes the epoch, the periods, and the effective display and frame byte budgets, `POLICY` carries the inventory target-type policy view, `SELECTED`/`REJECT` are accepted only against a pending commit with the matching request id, `PREVIEW` is request-scoped, and `SNAPSHOT`/`STREAM`/`STATUS`/`HEARTBEAT` are marker-scoped tracking frames. Coverage and pending runtime evidence for native input and HUD consumption of the session are owned by [testing and verification](../../testing/verification/inventory.md). Inventory domain semantics are owned by [inventory](../presentation/inventory.md). |
+| Inventory `InventoryC2SPacket` (C2S): `HELLO`, `OPEN`, `CLOSE`, `RESYNC`, `SELECT` | Fabric, Forge, and NeoForge common server handler. | `HELLO` creates or renews the per-player preview session and answers with an offer of server-selected periods, the effective display and frame byte budgets, and the inventory target-type policy view; every other kind runs under the session epoch and presentation epoch, with view acceptance and the narrow same-request cancellation exception owned by the [inventory route](#inventory-previewtracking-route-inventory-v2). `OPEN` binds one bounded preview request to a server-validated ordinary block target or uncommitted external provider candidate with its carried real local face, `CLOSE` releases it, `RESYNC` schedules repair for its required marker ID, and `SELECT` resolves one opaque retained entry reference under its baseline/state fences into a correlated selection outcome. The request carries no player identity, item count, or client-supplied authoritative target. Inventory domain semantics are owned by [inventory](../presentation/inventory.md). | Not applicable on C2S. |
+| Inventory `InventoryS2CPacket` (S2C): `OFFER`, `POLICY`, `SELECTED`, `REJECT`, `PREVIEW`, `SNAPSHOT`, `STREAM`, `STATUS`, `HEARTBEAT`, `OPENED` | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted into the connection-scoped inventory session only under the negotiated epoch and the current presentation epoch/view: `OFFER` establishes the epoch, the periods, and the effective display and frame byte budgets, `POLICY` carries the inventory target-type policy view, `OPENED` grants one Preview request's lane authorization before any of its `PREVIEW` data, `SELECTED`/`REJECT` are accepted only against a pending commit with the matching request id, `PREVIEW` is request-scoped, and `SNAPSHOT`/`STREAM`/`STATUS`/`HEARTBEAT` are marker-scoped tracking frames. Coverage and pending runtime evidence for native input and HUD consumption of the session are owned by [testing and verification](../../testing/verification/inventory.md). Inventory domain semantics are owned by [inventory](../presentation/inventory.md). |
+| Inventory monitor `InventoryMonitorSubscribeC2SPacket` (C2S) | Fabric, Forge, and NeoForge common server handler. | Carries one positive demand revision and the latest remote raw metric selection. A watch with no selected metrics is valid, and a stop is explicit rather than a zero-metric watch. Subscription changes transfer demand only; it never enables, disables or resets collection. | Not applicable on C2S. |
+| Inventory monitor `InventoryMonitorStatusS2CPacket` (S2C) | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Control summary for the current demand, carrying no numeric telemetry. Accepted only under the demand-revision and generation fences in the [monitor route](#inventory-monitor-routes-inventory-monitor-v1); control-state presentation is owned by [settings screen](../../UI/settings-screen.md#performance-monitor-controls), and HUD source-state presentation by [inventory HUD presentation](../presentation/inventory.md#hud-projection-and-presentation). |
+| Inventory monitor `InventoryMonitorSampleS2CPacket` (S2C) | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Latest numeric sample. Accepted only after a matching authorized status and generation fences; stale, replayed or unselected values are dropped. Measurement meaning is owned by [inventory performance monitoring](../presentation/inventory.md#performance-monitoring). |
 | Presentation preview `PresentationPreviewC2SPacket` (C2S): `READ`, `CANCEL` | Fabric, Forge, and NeoForge common server handler. | A bounded one-shot hint, not a subscription or authority: `READ` asks only for presentation fields the client cannot observe locally and is answered only under the current accepted presentation epoch/view and an accepted adapter schema and field authorization; `CANCEL` withdraws the pending request. It creates no marker, lease, winner slot, or lifetime. Field authorization, provenance, and fallback are owned by [presentation snapshot](../presentation/presentation_snapshot.md). | Not applicable on C2S. |
 | Presentation preview `PresentationPreviewS2CPacket` (S2C): `RESULT`, `UNAVAILABLE`, `DEFERRED`, `REJECTED` | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted only against the current request authorization: `RESULT` carries one framed presentation section that stays undecoded until the accepted adapter schema and field authorization are available, and the control statuses carry no section. Corrupt packets are safely dropped. Field authorization, provenance, and fallback are owned by [presentation snapshot](../presentation/presentation_snapshot.md). |
 | Server-configuration `ServerConfigRequestC2SPacket` (C2S) | Fabric, Forge, and NeoForge common server handler. | Carries one positive request identifier and asks for the server's current authoritative configuration snapshot; any connected player may send one. The response is correlated to that identifier. Transaction semantics are owned by [changing server configuration](../config/changing-server-config.md). | Not applicable on C2S. |
@@ -50,10 +64,10 @@ and `pingforit-s2c:presentation-v2` server-to-client) carries the session
 negotiation and marker mutation frames listed above. Every frame declares
 protocol version two, and the route ID is version-bound: it does not decode
 another presentation wire version, and no fallback reinterprets one.
-Session negotiation, manifest, mask, child deny, projection and
-receipt-descriptor policy remain owned by
+Session negotiation, manifest, mask, child deny, projection, marker content grant
+policy and receipt-descriptor policy remain owned by
 [presentation snapshot](../presentation/presentation_snapshot.md); this section
-owns the wire grammar.
+owns the wire grammar and marker-grant replay rule.
 
 The marker snapshot in `CREATED` carries a mandatory logical `targetKey`
 immediately after its physical `target`. `WINNER` addresses that same key shape.
@@ -88,10 +102,26 @@ trailing bytes are rejected rather than normalized, and a missing target type
 can never decode as an empty deny list. The mask and the child deny map travel
 in one frame and become observable together.
 
+The `RESET` mask and child deny map are the session's current advertised
+view. They bound the independent
+[target content preview](../presentation/presentation_snapshot.md#target-content-preview)
+and its client-side current interaction hints; they are not an input to a
+successful Ping's creation-time frozen authorization, which the server resolves
+from its own policy, permission and child results without waiting for a `RESET`
+or recipient readiness, and they do not re-authorize an existing marker. A
+marker's
+[frozen recipient content authorization](../presentation/presentation_snapshot.md#frozen-recipient-content-authorization)
+is per Ping, so two markers of one target type can carry different frozen sets
+and a session-wide mask cannot express them. `CREATED` carries that per-Ping
+grant directly; runtime acceptance of the grant and its replay behavior remain
+pending and are owned by
+[testing and verification](../../testing/verification/presentation.md#frozen-recipient-content-authorization-coverage-and-live-gaps).
+
 The atomic `CREATED` frame carries, in order, the canonical marker snapshot, the
-owner name, the default property ref, the receipt content descriptor, and the
-framed Basic section; a `CREATED` frame without the descriptor is corrupt, and
-no other frame kind carries one. The descriptor is one kind tag (`WHOLE`,
+owner name, the default property ref, the marker content grant, the receipt
+content descriptor, and the framed Basic section; a `CREATED` frame without the
+grant or descriptor is corrupt, and no other frame kind carries either. The
+descriptor is one kind tag (`WHOLE`,
 `PROPERTIES`, `INVENTORY`, or `SUPPRESSED`) followed by a ref count, that many
 property refs in the same bounded shape as a create selection, and, only for
 `INVENTORY`, exactly one length-prefixed creation snapshot payload.
@@ -104,6 +134,60 @@ missing or extra snapshot, and trailing bytes are rejected rather than
 normalized. Property descriptors never carry values, annotations, item counts,
 content types, or client-uploaded content; those remain in the existing
 authorized stores.
+
+The marker content grant is the wire form of that marker's
+[frozen recipient content authorization](../presentation/presentation_snapshot.md#frozen-recipient-content-authorization).
+The server retains the complete resolved set; the encoded grant is the
+recipient's session projection, intersected with that recipient's negotiated
+adapter catalogue and accepted schemas and field kinds. The projection can omit
+a field the recipient cannot decode, but it never adds a permission and never
+replaces the canonical grant. The encoded grant is not the server's current
+policy and is not a new `RESET` advertisement. A `CREATED` without the grant is
+never completed from the current mask, a prior initial, earlier `SECTION`
+values, or the Basic section's fields. A field still requires the recipient's
+currently accepted compatible
+schema and kind to decode; the grant authorizes content but does not bypass that
+compatibility gate. No other `PresentationS2CPacket` kind carries a grant;
+`SECTION` is projected only through the retained grant. A replay or baseline
+re-delivery of an already-known marker carries the same grant; a changed grant
+is rejected without replacing the marker's retained grant or values.
+
+The grant body has this fixed order; it is not independently length-prefixed,
+so its declared structure ends where the receipt descriptor begins.
+
+```text
+grant     = adapterCount, adapter*, childDenyCount, childDeny*,
+            trackingPresent, [trackingKind]
+adapter   = adapterId, schema, fieldCount, field*
+field     = fieldId, kind
+childDeny = adapterId, fieldId, pathDepth, pathKey*
+```
+
+`adapterCount` is at most 32 and each adapter is written once in strictly
+ascending adapter-ID order; each ID is a grammar-valid namespaced ID of at most
+193 characters. `schema` is a canonical varint from 1 through 255. `fieldCount`
+is at most 48 per adapter and at most 256 fields are written across the grant;
+each adapter's field IDs are strictly ascending, grammar-valid IDs of at most
+193 characters. `kind` is the canonical varint ordinal of `TEXT`, `NUMBER`,
+`FLAG`, `SEQUENCE`, `RECORD` in that order. `childDenyCount` is at most 256;
+each entry is a nested, unique reference in strictly ascending canonical
+property-reference order (adapter ID, field ID, the record-path key sequence,
+then path length), with a path depth of at most four and nonblank record keys of
+at most 128 UTF-8 bytes. A root reference is invalid here. `trackingPresent`
+occupies one strict boolean byte; when true, exactly one canonical varint
+follows as the tracking-kind wire id (`0` `ITEM`, `1` `FLUID`) and any other
+value rejects. The tracking kind records the marker's immutable inventory
+domain, not an authorization bit: it remains present when the receipt is
+suppressed, and ordinary or Property markers keep it absent even when their
+grant includes an inventory field. Zero adapters and zero child denials are
+valid and encode an explicit deny-all grant; they are not an absent grant.
+
+Strings use canonical bounded UTF-8: a non-negative length prefix, valid UTF-8
+without malformed or unmappable bytes, and the character bound. Over-capacity
+counts, a duplicate or out-of-order entry, a noncanonical number, a malformed or
+overlong string, an unknown kind or tracking id, truncation, and an invalid
+reference reject the whole frame before the receipt or Basic section is read or
+applied.
 
 The creation snapshot payload starts with one resource-lane byte (`0` for
 `ITEM`, `1` for `FLUID`), followed by the bounded UTF opaque key, resource ID
@@ -121,8 +205,9 @@ encoding and the unchanged 1048576-byte `CREATED` body ceiling still applies.
 The snapshot reader validates display against the closed item or fluid
 projection grammar without a native component codec, rich-text decode or
 registry lookup. Known Ping Type IDs are accepted structurally; target-specific
-annotation eligibility remains server-owned. The frame version remains presentation version two, and inventory
-version two, inventory schema two and the mod version are unchanged.
+annotation eligibility remains server-owned. The frame version remains
+presentation version two, and inventory version two, inventory schema two and
+the mod version are unchanged.
 
 ## Inventory preview/tracking route (`inventory-v2`)
 
@@ -135,18 +220,27 @@ never reinterpreted.
 The response side carries the effective size budgets.
 `HELLO` is the epoch-zero handshake; every other request runs under the
 negotiated nonzero epoch and a non-negative request id, and only while the
-current presentation epoch/view fence matches. `OFFER` and `POLICY` are
-session messages; `OPEN`, `CLOSE`, `SELECT`, and the `PREVIEW` response are
-request-scoped; `RESYNC` and the `SNAPSHOT`, `STREAM`, `STATUS`, and `HEARTBEAT`
-responses are marker-scoped.
+current presentation epoch/view fence matches, with one exception: a `CLOSE`
+for an existing Preview request may carry the current view or an earlier one
+when the request belongs to the same authenticated connection and the same
+inventory and presentation epochs; a later view is rejected like any other
+fenced request. The exception applies only to `CLOSE`; the request ID keeps its
+established meaning, and no request changes its target. A same-epoch view
+rebuild retains the request, so an in-flight `CLOSE` carrying the previous view
+is still honored. `OPEN`, `SELECT`, and `RESYNC` remain strictly bound to the
+current view. `OFFER` and `POLICY` are session messages; `OPEN`, `CLOSE`,
+`SELECT`, the `OPENED` response, and the `PREVIEW` response are request-scoped;
+`RESYNC` and the `SNAPSHOT`, `STREAM`, `STATUS`, and `HEARTBEAT` responses are
+marker-scoped.
 
 The resource-lane byte is `0` for `ITEM` and `1` for `FLUID`; any other value
 rejects the whole frame. C2S `SELECT` and `RESYNC` carry it immediately after
 the common kind/version/epoch/presentation-epoch/view header and before the
 request ID. C2S `HELLO`, `OPEN` and `CLOSE` carry no lane byte. Every S2C kind
-except the session-wide `OFFER` carries one after its common
-kind/version/epoch/request-ID/presentation-epoch/view header, including empty
-data, policy, selection outcomes and status controls. A frame is homogeneous:
+except the session-wide `OFFER` and the request-scoped `OPENED` carries one
+after its common kind/version/epoch/request-ID/presentation-epoch/view header,
+including empty data, policy, selection outcomes and status controls. A frame is
+homogeneous:
 its lane alone chooses the resource registry, amount unit and display decoder;
 an entry cannot override that interpretation.
 
@@ -173,7 +267,13 @@ ID, or trailing bytes.
 stateRevision, entryKey, pingType)` carries one opaque retained entry reference
 and the commit/baseline/state fences; the server derives the authoritative
 target and count from its own retained reference and answers `SELECTED` or `REJECT`
-correlated by request, commit ID and lane. Commit replay is shared across the
+correlated by request, commit ID and lane. A successful selection is a Ping
+creation and resolves that marker's own
+[frozen recipient content authorization](../presentation/presentation_snapshot.md#frozen-recipient-content-authorization),
+not an inherited Preview freeze or an older marker's grant; the inventory domain
+owns the exact Preview and selection freeze points in
+[inventory](../presentation/inventory.md#receiver-authorization-freeze-points).
+Commit replay is shared across the
 request: changing the lane cannot execute a second selection under an already
 used commit ID. A repeated `SELECT` replays its stored outcome instead of
 re-running materialization, marker storage or rate charging. Cross-lane entry
@@ -191,6 +291,25 @@ relationship remain owned by
 [server configuration](../../config/server.md#inventory-policy-object) and
 [inventory](../presentation/inventory.md). `POLICY` carries its lane's inventory
 target-type policy view.
+`OPENED` is the final inventory S2C kind after `HEARTBEAT`; the complete wire
+kind order is `OFFER`, `POLICY`, `SELECTED`, `REJECT`, `PREVIEW`, `SNAPSHOT`,
+`STREAM`, `STATUS`, `HEARTBEAT`, `OPENED`, and each kind retains its established
+encoding. It answers an accepted `OPEN` as the request-scoped Preview grant:
+after the common header it carries one lane-bit byte and no resource-lane byte,
+marker, entries or other body. Its request id must be positive, and `laneBits`
+is one byte from `0` through `3`, where the low two bits independently authorize
+the `ITEM` and `FLUID` lanes in wire-id order
+(`0` is valid and grants no lane); any other value rejects the frame. The client
+accepts a request's `PREVIEW` data only after its `OPENED` grant, so `OPENED`
+precedes any `PREVIEW` fragment for that request and a data frame cannot widen
+the grant. A repeated `OPENED` with the same session epoch, presentation epoch,
+view, request id and lane bits is idempotent; a conflicting repeat is rejected
+rather than merged, and the accepted grant neither widens nor narrows. A later
+`POLICY` frame updates only the lane policy view and does not revoke, widen or
+replace an accepted `OPENED` grant. `OPENED` neither establishes the inventory
+session nor replaces the `OFFER` data gate. It is an inventory version-two S2C
+kind; no additional version or schema applies.
+
 `PREVIEW`, `SNAPSHOT` and `STREAM` each carry one fragment under an independent
 `(resourceKind, epoch, requestId, markerId, baselineId)` identity plus `statusRevision`,
 `watermark`, `partIndex`/`partCount`, `completeScan`, a status, a checksum, and
@@ -237,6 +356,227 @@ boundary is owned by
 and inventory status, zero/fallback, baseline and budget semantics are owned by
 [inventory](../presentation/inventory.md).
 
+## Inventory monitor routes (`inventory-monitor-v1`)
+
+The optional monitor family uses three dedicated version-one routes:
+`pingforit-c2s:inventory-monitor-subscribe-v1` client-to-server,
+`pingforit-s2c:inventory-monitor-status-v1` server-to-client, and
+`pingforit-s2c:inventory-monitor-sample-v1` server-to-client. Each route ID is
+version-bound: a frame from another monitor wire version is not decoded, and no
+other route or version is a fallback. Subscription is latest transmission
+demand, never a collection or configuration command; collection is server-owned
+and independent of viewers, as recorded in
+[inventory performance monitoring](../presentation/inventory.md#performance-monitoring).
+Numeric telemetry authority is owned by
+[server configuration authority](../authority/server-config.md#remote-performance-telemetry),
+metric selection and its string selector grammar by
+[client configuration](../../config/client.md#performance-monitor),
+control presentation by
+[settings screen](../../UI/settings-screen.md#performance-monitor-controls), and
+HUD projection and presentation by [inventory HUD
+presentation](../presentation/inventory.md#hud-projection-and-presentation).
+This section owns the wire grammar and acceptance.
+
+The three bodies have this fixed order:
+
+```text
+SUBSCRIBE = version, revision, watching, metricCount, metricWireId*
+STATUS    = version, revision, serverGeneration, collectionGeneration,
+            permissionGeneration, authorized, sampleCapability,
+            previewEnabled, trackingEnabled
+SAMPLE    = version, revision, serverGeneration, collectionGeneration,
+            permissionGeneration, sequence, firstTick, lastTick, elapsedNs,
+            regionCount, region*
+REGION    = scopeId, timingCount, (phaseId, totalNs, count, maxNs)*,
+            counterCount, (counterId, value, saturated)*,
+            gaugeCount, (gaugeId, value)*,
+            budgetCount, (budgetId, available, periodId, limit, used,
+                          reserved, remaining, admissibleRemaining)*,
+            memoryPresent, [retained, reserved, cap, remaining]
+```
+
+`version` is `1` in every monitor body. `revision`, `serverGeneration`,
+`collectionGeneration`, `permissionGeneration` and `sequence` are positive
+canonical varlongs; counts, IDs and all other numbers are canonical nonnegative
+varints or varlongs. The two `remaining` fields are fixed-width signed 64-bit
+big-endian values and may be negative, including the minimum value. Every boolean
+is exactly one byte, `0` or `1`. A zero is valid for `firstTick`, `lastTick`,
+`elapsedNs`, timing totals, counts and peaks, and counter and gauge values;
+`lastTick` must not precede `firstTick`, and zero elapsed is valid warm-up.
+`memoryPresent` is a strict boolean, and its four fields are present exactly when
+it is true; a false `memoryPresent` has no memory fields.
+
+The closed wire identities are explicit values, not enum ordinals:
+
+| Scope ID | Scope | Wire use |
+| ---: | --- | --- |
+| 1 | `local.preview` | Client-only; rejected in a monitor frame |
+| 2 | `local.tracking` | Client-only; rejected in a monitor frame |
+| 3 | `server.preview` | Accepted in a region |
+| 4 | `server.tracking` | Accepted in a region |
+| 5 | `shared` | Accepted in a region |
+
+| Phase ID | Phase | Allowed remote scopes |
+| ---: | --- | --- |
+| 1 | ingress | 3, 4 |
+| 2 | tick_work | 3, 4 |
+| 3 | capture | 3, 4 |
+| 4 | read | 3, 4 |
+| 5 | detached_encode | 3, 4 |
+| 6 | measure | 3, 4 |
+| 7 | publish | 3, 4 |
+| 8 | apply | None; client-only |
+| 9 | prepare | None; client-only |
+| 10 | draw | None; client-only |
+
+| Counter ID | Counter | Allowed remote scopes |
+| ---: | --- | --- |
+| 1 | requests.received | 3, 4 |
+| 2 | requests.admitted | 3, 4 |
+| 3 | work.consumers | 3, 4 |
+| 4 | work.defer_attempts | 3, 4, 5 |
+| 5 | work.logical_slots | 3, 4 |
+| 6 | sync.publications_installed | 3, 4 |
+| 7 | sync.cuts_completed | 3, 4 |
+| 8 | sync.frames_preview | 3 |
+| 9 | sync.frames_snapshot | 4 |
+| 10 | sync.frames_stream | 4 |
+| 11 | sync.budget_charged_bytes | 3, 4 |
+| 12 | sync.handoff_bytes | 3, 4 |
+| 13 | sync.handoff_frames | 3, 4 |
+| 14 | sync.not_handed_off_frames | 3, 4 |
+| 15 | sync.unobserved_handoff_frames | 3, 4 |
+| 16 | sync.unobserved_handoff_candidate_bytes | 3, 4 |
+| 17 | apply.accepted | None; client-only |
+| 18 | apply.rejected | None; client-only |
+| 19 | sync.repair_requests | None; client-only |
+| 20 | work.read_attempts | 5 |
+| 21 | work.read_failures | 5 |
+
+| Gauge ID | Gauge | Allowed remote scopes |
+| ---: | --- | --- |
+| 1 | requests.open | 3, 4 |
+| 2 | queue.logical_cost | 3, 4 |
+| 3 | queue.cap | 3, 4 |
+| 4 | queue.pending_entries | 3, 4 |
+| 5 | queue.admitted_frames | 3, 4 |
+| 6 | state.channels | None; client-only |
+| 7 | state.sessions | 5 |
+| 8 | buffer.frames | None; client-only |
+| 9 | buffer.entries | None; client-only |
+| 10 | buffer.estimated_bytes | None; client-only |
+| 11 | state.consumers | 5 |
+| 12 | state.active_observations | 5 |
+| 13 | memory.outstanding_leases | 5 |
+
+| Budget ID | Budget | Allowed remote scopes |
+| ---: | --- | --- |
+| 1 | logical_slots | 3, 4 |
+| 2 | wire_bytes | 3, 4 |
+| 3 | physical_slots | 5 |
+| 4 | capture_reads | 5 |
+| 5 | probes | 5 |
+| 6 | provider_work | 5 |
+| 7 | processing_charge | 5 |
+| 8 | publication_work | 5 |
+
+A raw metric's wire ID is derived from its scope and leaf ID:
+
+```text
+timing        = 1000 + 100*scopeId + 2*phaseId
+timing.max    = 1001 + 100*scopeId + 2*phaseId
+counter       = 2000 + 100*scopeId + counterId
+gauge         = 3000 + 100*scopeId + gaugeId
+budget        = 4000 + 100*scopeId + budgetId
+shared.memory = 5001
+```
+
+Summary selectors are client-side groupings owned by
+[client configuration](../../config/client.md#performance-monitor); they expand
+on the client and are never transmitted. A watch expands selected summaries,
+removes `LOCAL` entries, collapses duplicates and sorts the remaining known
+remote raw IDs ascending. The closed remote raw catalogue has 85 entries, which
+bounds `metricCount`; a summary, local, unknown or non-ascending ID rejects the
+frame rather than being normalized.
+
+The whole-body decode ceilings are 4096 bytes for `SUBSCRIBE`, 128 for `STATUS`
+and 16384 for `SAMPLE`, checked before list allocation; the sample encoder also
+enforces its ceiling. Exact-end is required. Counts are bounded by the closed
+catalogue sizes (10 phases, 21 counters, 13 gauges and 8 budgets), and every
+entry must support its region's scope. Regions are at most three, ordered by
+ascending scope, at most one per scope, and at least one is present. `SHARED`
+timing count is zero; lane regions carry `memoryPresent=false`, while `SHARED`
+may carry memory. Timing `totalNs`, `count` and `maxNs` are nonnegative;
+`count=0` requires both other values to be zero, `maxNs` may not exceed
+`totalNs`, and `ceil(totalNs/count)` may not exceed `maxNs` when the count is
+positive. A saturated counter is exactly `Long.MAX_VALUE`; a false saturation
+flag does not require that value. Budget `periodId`, `limit`, `used`, `reserved`
+and `admissibleRemaining` are nonnegative; an unavailable budget carries zero in
+all six numeric fields; `admissibleRemaining` may not exceed
+`max(0, remaining)`. Memory `retained`, `reserved` and `cap` are nonnegative, and
+`remaining` must equal `cap - retained - reserved` exactly, without overflow.
+Unknown IDs, a
+leaf/scope mismatch, an unknown capability tag, a non-strict boolean,
+noncanonical or overflowing numbers, missing or truncated fields, and trailing
+bytes reject the whole frame; safe decoding drains and drops it.
+
+`revision` is the client's positive latest-demand revision and strictly
+increases per connection. Gaps are valid, and an equal or lower revision cannot
+replace the accepted demand. `watching=true` may carry zero metrics: that watch
+receives the control `STATUS` but requests no numeric `SAMPLE`. `watching=false`
+is an explicit stop and requires `metricCount=0`; it unregisters the watch,
+produces no further `STATUS` or `SAMPLE` for that demand, and retains its
+revision as a per-connection tombstone so a repeated or lower demand cannot
+re-register. A higher revision may watch again. A stop with metric IDs or any
+invalid metric list rejects the frame. Disconnect, connection replacement and
+server lifecycle reset clear the tombstone and all monitor state, so the next
+connection has no prior demand.
+
+A `STATUS` reports the current control summary for the echoed revision.
+`authorized` is the current numeric telemetry authority, and
+`permissionGeneration` changes with it. `previewEnabled` and `trackingEnabled`
+report the server collection lanes, not client metric selection.
+`sampleCapability` is the tag `0` for `UNKNOWN`, `1` for `AVAILABLE` and `2` for
+`UNAVAILABLE`; `UNKNOWN` is an unresolved capability, `UNAVAILABLE` is an
+observed absent `SAMPLE` route, and neither permits numeric data. An absent
+optional monitor family is unsupported, while a present family without an
+accepted status remains unknown; no other route or wire version supplies that
+state. The control `STATUS` remains available to any authenticated watching
+client; numeric `SAMPLE` is administrator-only and rechecked before numeric
+handoff, as owned by
+[server configuration authority](../authority/server-config.md#remote-performance-telemetry).
+
+A client accepts a `STATUS` only for the current connection and demand
+revision, with positive generations, and only while its server, collection and
+permission generations do not move backward within their epochs. A
+server-generation change starts new collection and permission epochs; otherwise
+collection and permission may not move backward. A conflicting `authorized`,
+`previewEnabled` or `trackingEnabled` value at unchanged generations rejects the
+frame. An accepted status with `authorized=false`, a sample capability other
+than `AVAILABLE`, or both lanes disabled clears numeric values but remains a
+valid control status.
+
+A client accepts a `SAMPLE` only after an accepted `STATUS` for the same
+connection and demand revision, with numeric authorization, `AVAILABLE` sample
+capability, at least one enabled collection lane, and at least one selected
+server or shared metric. The sample's server, collection and permission
+generations must match that status, its `sequence` must be positive and strictly
+greater than the last accepted sequence under the current status generations.
+Each present lane region must match a selected lane demand and enabled lane, and
+a shared region must be selected. A sample before that status, before
+authorization, after stop or reset, from a replaced connection, with a stale
+generation or replayed sequence, or with an unselected or disabled region is
+dropped, never applied. Numeric data cannot establish
+authorization. Queued callbacks are bound to the connection that received them
+and cannot apply to a replacement connection.
+
+Samples are latest-only. The server projects only readings implied by the
+current raw selection and enabled lanes; unobserved fields are omitted,
+unavailable budgets are not projected, and a lane with no selected reading is
+omitted. Delivery cadence and coalescing are implementation scheduling; the
+protocol promises no fixed interval, retained history, retry or acknowledgement.
+A sample carries no string labels or units.
+
 ## Presentation preview route (`presentation-preview-v1`)
 
 The dedicated presentation preview route (`pingforit-c2s:presentation-preview-v1`
@@ -252,7 +592,11 @@ excluded from this route and keeps its own route.
 
 The server answers only under fresh authorization for the same epoch, view,
 and target type, and only for an accepted adapter whose accepted fields contain
-every requested field. `RESULT` carries one framed presentation section;
+every requested field. The accepted mask intersection, advertised/fresh child
+denial union, and promotion after a new `RESET` remain the no-Ping preview
+authorization owned by
+[presentation snapshot](../presentation/presentation_snapshot.md#target-content-preview).
+`RESULT` carries one framed presentation section;
 `UNAVAILABLE`, `DEFERRED` and `REJECTED` are control statuses without a
 section. The section bytes stay undecoded until the current request
 authorization is available, and are then decoded strictly against that
@@ -290,18 +634,23 @@ The complete packet bodies have this fixed order:
 REQUEST  = requestId
 UPDATE   = changedFields, defaultChannelMode, playerTrackingEnabled,
            msToRegenerate, rateLimit, syncDuration, inventory,
-           budgetDelayNotificationsEnabled, loggingProfile
+           budgetDelayNotificationsEnabled, loggingProfile,
+           previewMonitorEnabled, trackingMonitorEnabled
 SNAPSHOT = requestId, canEdit, defaultChannelMode, playerTrackingEnabled,
            msToRegenerate, rateLimit, syncDuration, inventory,
-           budgetDelayNotificationsEnabled, loggingProfile
+           budgetDelayNotificationsEnabled, loggingProfile,
+           previewMonitorEnabled, trackingMonitorEnabled
 ```
 
-`requestId` is a positive canonical varlong. The mask, channel-mode ordinal
-(`AUTO`, `DISABLED`, `GLOBAL`, `TEAM_ONLY` in that order), the original numeric
-settings and `loggingProfile` are canonical non-negative varints. The logging
-profile tags are `0` for `NORMAL`, `1` for `DEEP`, and `2` for `DEBUG`; any
-other tag is invalid. Booleans occupy exactly one byte, `0` or `1`. `inventory`
-supplies all leaves, regardless of the update mask, in this order:
+`requestId` is a positive canonical varlong. `changedFields` is a canonical
+nonnegative varlong carrying the field mask; its defined bits are owned by
+[changing server configuration](../config/changing-server-config.md#update-surface).
+The channel-mode ordinal (`AUTO`, `DISABLED`,
+`GLOBAL`, `TEAM_ONLY` in that order), the original numeric settings and
+`loggingProfile` are canonical non-negative varints. The logging profile tags
+are `0` for `NORMAL`, `1` for `DEEP`, and `2` for `DEBUG`; any other tag is
+invalid. Booleans occupy exactly one byte, `0` or `1`. `inventory` supplies all
+leaves, regardless of the update mask, in this order:
 
 ```text
 physicalSlotsPerTick, pendingMemoryMiB,
@@ -328,22 +677,29 @@ Legal numeric forms and relationships belong to
 [server configuration](../../config/server.md#inventory-policy-object).
 The strict `budgetDelayNotificationsEnabled` byte follows the complete
 inventory block in both UPDATE and SNAPSHOT, and the `loggingProfile` tag
-follows that byte. REQUEST has no added field.
-The field mask and its numeric, monitoring, Tracking partition and
-logging-profile bits are owned by
-[changing server configuration](../config/changing-server-config.md#update-surface).
+follows that byte. The two monitor booleans follow `loggingProfile` in the same
+Preview, Tracking order in both bodies; each is a strict one-byte `0` or `1`
+and is carried regardless of the field mask. A SNAPSHOT whose logging profile
+is not `DEBUG` must carry both monitor booleans as `false`; a true value rejects
+that frame because the snapshot reports normalized authoritative state rather
+than a pre-normalization candidate. REQUEST has no added field.
 
-Overflow, overlong or non-canonical numbers, invalid enum or inventory values,
-invalid logging-profile tags, unknown mask bits, missing fields, non-boolean
-bytes, and trailing bytes are rejected in full before any value is applied.
-Exact-end validation follows `loggingProfile`. A missing or invalid profile tag
-rejects the whole frame even when the update mask does not select the profile.
-An UPDATE or SNAPSHOT without either Tracking partition byte, the memory mode
-byte, the final monitoring boolean or the logging-profile tag is corrupt rather
-than defaulted or accepted as a prefix; safe rejection drains the frame. All
-three route IDs are version-bound, including the unchanged request body. Other
-server-configuration route versions are not fallbacks, and payloads are never
-reinterpreted across route versions.
+Overflow, overlong or non-canonical numbers, a negative or overflowing mask,
+unknown mask bits, invalid enum or inventory values, invalid logging-profile
+tags, missing fields, non-boolean bytes, and trailing bytes are rejected in full
+before any value is applied. Exact-end validation follows the second monitor
+boolean. A missing or invalid profile tag rejects the whole frame even when the
+update mask does not select the profile; a missing or invalid monitor boolean
+rejects it even when its bit is unselected. An UPDATE or SNAPSHOT without either
+Tracking partition byte, the memory mode byte, `budgetDelayNotificationsEnabled`,
+either monitor boolean, or the logging-profile tag is corrupt rather than
+defaulted or accepted as a prefix; safe rejection drains the frame. All three
+route IDs are version-bound, including the unchanged request body. There is one
+current version-five body shape: an earlier unreleased development version-five
+shape is not accepted, a released version-four payload is not parsed as version
+five, and a frame is never completed from its remaining bytes or a default
+monitor value. Other server-configuration route versions are not fallbacks, and
+payloads are never reinterpreted across route versions.
 Remote settings GUI endpoints must match this
 configuration protocol; this does not change the independent presentation,
 inventory, preview or presentation-policy routes, persisted configuration version

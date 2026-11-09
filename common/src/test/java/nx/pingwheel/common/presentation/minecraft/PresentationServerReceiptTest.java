@@ -9,27 +9,33 @@ import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
 import nx.pingwheel.common.marker.MarkerAnchor;
+import nx.pingwheel.common.marker.PingAuthorization;
 import nx.pingwheel.common.marker.ServerMarker;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.presentation.PresentationAdapter;
 import nx.pingwheel.common.presentation.PresentationBasic;
 import nx.pingwheel.common.presentation.PresentationField;
+import nx.pingwheel.common.presentation.PresentationGrant;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationPropertySelection;
 import nx.pingwheel.common.presentation.PresentationReceiptContent;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.presentation.TestContentGrants;
 import nx.pingwheel.common.presentation.client.ClientPresentation;
 import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
+import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Atomic-initial receipt projection at the production initial-sending seam:
- * every initial exit computes the descriptor from the marker's explicit
- * selections against the recipient's accepted manifest, mask and fresh
- * authorization, and a denied input suppresses the whole content message.
+ * every initial exit projects the marker's frozen grant against the accepted
+ * manifest/schema, and absence of a required creation snapshot or an
+ * incompatible decoder suppresses the whole content message.
  */
 class PresentationServerReceiptTest {
 	private static final UUID OWNER = new UUID(0, 1);
@@ -48,6 +54,9 @@ class PresentationServerReceiptTest {
 	private static final PresentationPropertyRef CUSTOM =
 		PresentationPropertyRef.root(BASIC, PresentationBasic.CUSTOM_NAME);
 
+	@BeforeEach void activatePresentation() { PresentationServerHeadlessFixture.activate(); }
+	@AfterEach void resetPresentation() { PresentationServerHeadlessFixture.reset(); }
+
 	private static ServerMarker marker(List<PresentationPropertySelection> properties) {
 		var type = TargetTypeCatalog.builtIn().findById(TYPE).orElseThrow();
 		return new ServerMarker(new MarkerId(1), OWNER,
@@ -62,11 +71,34 @@ class PresentationServerReceiptTest {
 	private static PresentationServer.Session session(List<PresentationField> advertised) {
 		var session = new PresentationServer.Session(37,
 			Map.of(BASIC, 1), Map.of(BASIC, advertised));
+		session.recipient = VIEWER;
 		session.mask = Map.of(TYPE, Map.of(BASIC, Set.of(PresentationBasic.NAME, PresentationBasic.HEALTH,
 			PresentationBasic.MAX_HEALTH, PresentationBasic.ITEM_COUNT)));
 		session.ready = true;
 		session.view = 1;
 		return session;
+	}
+
+	private static ServerMarker authorized(ServerMarker marker, PresentationGrant grant) {
+		return new ServerMarker(marker.id(), marker.owner(), marker.target(), marker.targetKey(),
+			marker.targetType(), marker.pingType(), marker.anchor(), marker.arrivalTick(), marker.expiresAtTick(),
+			marker.recipients(), marker.properties(),
+			new PingAuthorization(Map.of(VIEWER, grant)));
+	}
+
+	private static PresentationGrant explicitGrant(PresentationServer.Session session, Set<String> basicAllowed) {
+		PresentationGrant basic = TestContentGrants.basic(basicAllowed);
+		return new PresentationGrant(basic.adapters(),
+			Set.copyOf(session.childBlack.getOrDefault(TYPE, List.of())));
+	}
+
+	private static ServerMarker authorizedInventory(ServerMarker marker, Set<String> basicAllowed,
+		Set<InventoryResourceKind> lanes) {
+		Map<String, Set<String>> allowed = new java.util.LinkedHashMap<>();
+		allowed.put(BASIC, basicAllowed);
+		allowed.put(INVENTORY_ADAPTER, lanes.stream().map(InventoryResourceKind::fieldId)
+			.collect(java.util.stream.Collectors.toSet()));
+		return authorized(marker, TestContentGrants.fromAllowed(allowed));
 	}
 
 	private static PresentationServer.Lease lease(ServerMarker marker) {
@@ -92,6 +124,7 @@ class PresentationServerReceiptTest {
 		var session = new PresentationServer.Session(37,
 			Map.of(BASIC, 1, INVENTORY_ADAPTER, InventoryPresentation.SCHEMA),
 			Map.of(BASIC, PresentationBasic.fields()));
+		session.recipient = VIEWER;
 		session.mask = Map.of(TYPE, Map.of(BASIC, Set.of(PresentationBasic.NAME)));
 		session.inventoryTypes = Set.of(TYPE);
 		session.ready = true;
@@ -120,8 +153,10 @@ class PresentationServerReceiptTest {
 	private static List<PresentationS2CPacket> send(PresentationServer.Session session, ServerMarker marker,
 		Set<String> basicAllowed, Set<String> freshAllowed) {
 		var packets = new ArrayList<PresentationS2CPacket>();
-		PresentationServer.sendInitial(session, lease(marker), new BasicAdapter(), basicAllowed, packets::add,
-			adapter -> adapter.adapterId().equals(BASIC) ? freshAllowed : Set.of());
+		// One explicit fixture grant is fixed at this marker construction. The
+		// production send seam then reads only the canonical marker grant.
+		ServerMarker explicit = authorized(marker, explicitGrant(session, basicAllowed));
+		PresentationServer.sendInitial(session, lease(explicit), new BasicAdapter(), Set.of(), packets::add);
 		return packets;
 	}
 
@@ -194,7 +229,8 @@ class PresentationServerReceiptTest {
 		var allowed = Set.of(PresentationBasic.NAME, PresentationBasic.BLOCK_STATE);
 		session.mask = Map.of(TYPE, Map.of(BASIC, allowed)); session.childBlack = Map.of(TYPE, List.of(child));
 		var record = new PresentationValue.RecordValue(Map.of("lit", new PresentationValue.Flag(true), "facing", new PresentationValue.Text("north")));
-		var lease = lease(marker(List.of(PresentationPropertySelection.of(child, "attention"))));
+		var grant = new PresentationGrant(TestContentGrants.basic(allowed).adapters(), Set.of(child));
+		var lease = lease(authorized(marker(List.of(PresentationPropertySelection.of(child, "attention"))), grant));
 		lease.sources.get(BASIC).value = new PresentationSection(BASIC, 1, Map.of(
 			PresentationBasic.NAME, new PresentationValue.Text("{\"text\":\"Chest\"}"), PresentationBasic.BLOCK_STATE, record), false);
 		var packets = new ArrayList<PresentationS2CPacket>();
@@ -219,12 +255,13 @@ class PresentationServerReceiptTest {
 			"the ordinary receipt keeps its unknown-name behavior");
 	}
 
-	@Test void maskManifestAndKindIncompatibilitySuppressTheContentReceipt() {
+	@Test void acceptedManifestAndKindIncompatibilitySuppressButAnOldMaskDoesNot() {
 		var missingMask = session();
 		missingMask.mask = Map.of(TYPE, Map.of(BASIC, Set.of(PresentationBasic.NAME)));
 		var content = contentOf(send(missingMask, marker(List.of(PresentationPropertySelection.of(ITEM_COUNT, "attention"))),
 			Set.of(PresentationBasic.NAME, PresentationBasic.ITEM_COUNT), Set.of(PresentationBasic.NAME, PresentationBasic.ITEM_COUNT)));
-		assertEquals(PresentationReceiptContent.Kind.SUPPRESSED, content.kind());
+		assertEquals(PresentationReceiptContent.Kind.PROPERTIES, content.kind(),
+			"a same-epoch current mask does not re-authorize an existing marker");
 
 		var missingManifest = session(List.of());
 		var manifestContent = contentOf(send(missingManifest, marker(List.of(PresentationPropertySelection.of(ITEM_COUNT, "attention"))),
@@ -245,51 +282,56 @@ class PresentationServerReceiptTest {
 		assertEquals(List.of(HEALTH), withMax.selectedRefs());
 	}
 
-	@Test void productionSendInitialWithoutCreationSnapshotSuppressesEvenWithFreshInventoryGrant() {
+	@Test void productionSendInitialWithoutCreationSnapshotSuppressesEvenWithFrozenInventoryGrant() {
 		var session = inventorySession();
-		var lease = lease(marker(List.of()));
+		var lease = lease(authorizedInventory(marker(List.of()), Set.of(PresentationBasic.NAME),
+			Set.of(InventoryResourceKind.ITEM)));
 		var allowedPackets = new ArrayList<PresentationS2CPacket>();
 		PresentationServer.sendInitial(session, lease, new BasicAdapter(), Set.of(PresentationBasic.NAME),
 			allowedPackets::add, adapter -> Set.of(), true, Set.of(TYPE));
 		assertEquals(PresentationReceiptContent.Kind.SUPPRESSED, contentOf(allowedPackets).kind(),
-			"a boolean discriminator without the selected creation snapshot cannot disclose content");
+			"a frozen inventory lane without the selected creation snapshot cannot disclose content");
 
-		// Inventory permission is revoked after the last RESET; the session's
-		// cached inventoryTypes still advertises the type for this recipient.
+		// A marker whose frozen grant lacks the inventory field stays suppressed
+		// even when a later fresh hint advertises the lane.
 		var deniedPackets = new ArrayList<PresentationS2CPacket>();
-		PresentationServer.sendInitial(session, lease, new BasicAdapter(), Set.of(PresentationBasic.NAME),
-			deniedPackets::add, adapter -> Set.of(), true, Set.of());
+		PresentationServer.sendInitial(session, lease(authorized(marker(List.of()), explicitGrant(session,
+				Set.of(PresentationBasic.NAME)))), new BasicAdapter(), Set.of(PresentationBasic.NAME),
+			deniedPackets::add, adapter -> Set.of(), true, Set.of(TYPE));
 		var denied = contentOf(deniedPackets);
 		assertEquals(PresentationReceiptContent.Kind.SUPPRESSED, denied.kind(),
-			"a fresh inventory denial must suppress the content message");
+			"a fresh inventory hint cannot widen the marker's frozen grant");
 		assertNotEquals(PresentationReceiptContent.Kind.INVENTORY, denied.kind());
 		assertNotEquals(PresentationReceiptContent.Kind.WHOLE, denied.kind());
 		assertTrue(denied.selectedRefs().isEmpty(), "a suppressed inventory receipt leaks no refs");
 		assertEquals(Set.of(TYPE), session.inventoryTypes,
-			"the cached advertised view is not rewritten by the fresh denial");
+			"the cached advertised view is not rewritten by delivery");
 		assertEquals(0, lease.sources.get(BASIC).nextSample, "the atomic initial never samples a source");
 	}
 
 	@Test void productionCachedInitialWithoutCreationSnapshotCannotFabricateInventoryReceipt() {
 		var session = inventorySession();
-		var marker = marker(List.of());
+		var frozenLane = authorizedInventory(marker(List.of()), Set.of(PresentationBasic.NAME),
+			Set.of(InventoryResourceKind.ITEM));
 		var allowedPackets = new ArrayList<PresentationS2CPacket>();
-		PresentationServer.sendCachedInitial(session, marker, "Owner", new BasicAdapter(), cachedBasic(),
+		PresentationServer.sendCachedInitial(session, frozenLane, "Owner", new BasicAdapter(), cachedBasic(),
 			Set.of(PresentationBasic.NAME), allowedPackets::add, adapter -> Set.of(), true, Set.of(TYPE));
 		assertEquals(PresentationReceiptContent.Kind.SUPPRESSED, contentOf(allowedPackets).kind(),
 			"a cached boolean discriminator is not creation history");
 
 		var deniedPackets = new ArrayList<PresentationS2CPacket>();
-		PresentationServer.sendCachedInitial(session, marker, "Owner", new BasicAdapter(), cachedBasic(),
-			Set.of(PresentationBasic.NAME), deniedPackets::add, adapter -> Set.of(), true, Set.of());
+		PresentationServer.sendCachedInitial(session,
+			authorized(marker(List.of()), explicitGrant(session, Set.of(PresentationBasic.NAME))),
+			"Owner", new BasicAdapter(), cachedBasic(),
+			Set.of(PresentationBasic.NAME), deniedPackets::add, adapter -> Set.of(), true, Set.of(TYPE));
 		var denied = contentOf(deniedPackets);
 		assertEquals(PresentationReceiptContent.Kind.SUPPRESSED, denied.kind(),
-			"a fresh inventory denial must suppress the cached re-baseline too");
+			"a fresh inventory hint cannot widen the cached replay's frozen grant");
 		assertNotEquals(PresentationReceiptContent.Kind.INVENTORY, denied.kind());
 		assertNotEquals(PresentationReceiptContent.Kind.WHOLE, denied.kind());
 		assertTrue(denied.selectedRefs().isEmpty(), "a suppressed inventory receipt leaks no refs");
 		assertEquals(Set.of(TYPE), session.inventoryTypes,
-			"the cached advertised view is not rewritten by the fresh denial");
+			"the cached advertised view is not rewritten by delivery");
 	}
 
 	private static final class BasicAdapter implements PresentationAdapter {

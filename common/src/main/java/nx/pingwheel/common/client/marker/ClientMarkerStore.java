@@ -16,6 +16,7 @@ import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Client-side, main-thread-confined bookkeeping for active markers.
@@ -627,6 +628,17 @@ public final class ClientMarkerStore {
 				&& key.equals(marker.targetKey()));
 	}
 
+	/** Read-only projection of the stale sibling removal performed by {@link #onCreated}. */
+	public boolean isSupersededByCreation(MarkerId id, MarkerSnapshot incoming) {
+		@Nullable ClientMarker marker = markers.get(id);
+		return !authoritativeRemovedIds.contains(incoming.id()) && marker != null
+			&& isStaleSibling(marker, incoming.targetKey(), incoming.id());
+	}
+
+	private static boolean isStaleSibling(ClientMarker marker, TargetKey key, MarkerId exceptId) {
+		return !marker.id().equals(exceptId) && marker.isStale() && key.equals(marker.targetKey());
+	}
+
 	private List<ClientMarker> removeStaleForKey(TargetKey key, MarkerId exceptId) {
 		return removeStaleForKey(key, exceptId, null);
 	}
@@ -634,14 +646,12 @@ public final class ClientMarkerStore {
 	private List<ClientMarker> removeStaleForKey(
 		TargetKey key,
 		MarkerId exceptId,
-		Set<TargetKey> removedWinnerKeys
+		@Nullable Set<TargetKey> removedWinnerKeys
 	) {
 		List<ClientMarker> removed = new ArrayList<>();
 
 		for (ClientMarker marker : markers.values().stream().toList()) {
-			if (!marker.id().equals(exceptId)
-				&& marker.isStale()
-				&& key.equals(marker.targetKey())) {
+			if (isStaleSibling(marker, key, exceptId)) {
 				if (removedWinnerKeys != null
 					&& marker.id().equals(authoritativeWinnerByKey.get(marker.targetKey()))) {
 					removedWinnerKeys.add(marker.targetKey());

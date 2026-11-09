@@ -15,8 +15,10 @@ import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.presentation.PresentationBasic;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
+import nx.pingwheel.common.presentation.PresentationReceiptContent;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
+import nx.pingwheel.common.presentation.TestContentGrants;
 import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
 import org.junit.jupiter.api.Test;
 
@@ -30,6 +32,8 @@ class ClientDedicatedDeliveryTest {
 	private static final long EPOCH = 77;
 	private static final MarkerId ID = new MarkerId(9);
 	private static final PresentationPropertyRef DEFAULT = PresentationPropertyRef.root(BASIC, NAME);
+	private static final nx.pingwheel.common.presentation.MarkerContentGrant GRANT =
+		TestContentGrants.content(TestContentGrants.basic(Set.of(NAME)));
 
 	private final List<IPacket> sent = new ArrayList<>();
 	private final ClientPresentation client = new ClientPresentation(sent::add);
@@ -68,7 +72,8 @@ class ClientDedicatedDeliveryTest {
 		var snapshot = new MarkerSnapshot(ID, UUID.randomUUID(),
 			new Target.LocationTarget("minecraft:overworld", 1, 2, 3), "entity", "attention", new MarkerAnchor(1, 2, 3), 1, 100);
 		var basic = new PresentationSection(BASIC, 1, Map.of(NAME, new PresentationValue.Text("{\"text\":\"Basic\"}")), false);
-		assertTrue(client.initial(PresentationS2CPacket.created(EPOCH, 1, 1, snapshot, "Owner", DEFAULT, basic)));
+		assertTrue(client.initial(PresentationS2CPacket.created(EPOCH, 1, 1, snapshot, "Owner", DEFAULT, GRANT,
+			PresentationReceiptContent.whole(), basic)));
 		assertEquals(basic.fields().get(NAME), client.view(ID).field(BASIC, NAME));
 		var updated = new PresentationSection(BASIC, 1, Map.of(NAME, new PresentationValue.Text("{\"text\":\"Updated\"}")), false);
 		assertTrue(client.section(PresentationS2CPacket.section(EPOCH, 1, 2, ID, updated)));
@@ -86,7 +91,8 @@ class ClientDedicatedDeliveryTest {
 			new MarkerAnchor(1, 2, 3), 1, 100);
 		var basic = new PresentationSection(BASIC, 1,
 			Map.of(NAME, new PresentationValue.Text("{\"text\":\"Chest\"}")), false);
-		assertTrue(client.initial(PresentationS2CPacket.created(EPOCH, 1, 1, snapshot, "Owner", DEFAULT, basic)));
+		assertTrue(client.initial(PresentationS2CPacket.created(EPOCH, 1, 1, snapshot, "Owner", DEFAULT, GRANT,
+			PresentationReceiptContent.whole(), basic)));
 
 		assertFalse(client.section(PresentationS2CPacket.section(EPOCH, 1, 2, ID,
 			new PresentationSection(InventoryPresentation.ADAPTER_ID, InventoryPresentation.SCHEMA,

@@ -130,7 +130,7 @@ class InventoryConfigValuesTest {
 		}
 		assertEquals(23, Field.values().length);
 		assertEquals((((1 << 26) - 1) & ~31) | (1 << 27) | (1 << 28), mask);
-		assertEquals((1 << 30) - 1, ServerConfigUpdate.ALL_FIELDS);
+		assertEquals(4294967295L, ServerConfigUpdate.ALL_FIELDS);
 		for (Field field : Field.values()) {
 			if (!field.isBoolean()) assertEquals(1 << (field.ordinal() + 5), field.mask());
 		}

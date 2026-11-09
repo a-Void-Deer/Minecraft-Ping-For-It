@@ -6,6 +6,7 @@ import net.minecraft.network.FriendlyByteBuf;
 import nx.pingwheel.common.config.*;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.network.InventoryS2CPacket;
+import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
 import nx.pingwheel.common.presentation.source.*;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -34,11 +35,24 @@ class InventorySyncPublisherTest {
 	static SyncPublisher.Context context(String id, long baseline) { return new SyncPublisher.Context(id, new UUID(1, 1), "100/1", 1, baseline); }
 	static InventorySyncPublisher.Route route(MarkerId marker, String target) { return new InventorySyncPublisher.Route(7, 100, 1, 0, marker, target, "danger"); }
 	static CaptureResult capture(long revision, int entries, int display) {
+		return capture(revision, entries, display, 0L);
+	}
+	static CaptureResult capture(long revision, int entries, int display, long countBase) {
 		Map<String, CaptureResult.OpaqueValue> values = new LinkedHashMap<>();
-		for (int i = 0; i < entries; i++) values.put("k" + i, InventoryDomainCodec.encode(new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "v" + i), i,
+		for (int i = 0; i < entries; i++) values.put("k" + i, InventoryDomainCodec.encode(new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "v" + i), countBase + i,
 			"stone", "d".repeat(display), false)));
 		return new CaptureResult(Optional.of(new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, values)),
 			new CaptureResult.Coverage("inventory", revision, entries, OptionalLong.of(entries)), CaptureResult.Availability.READABLE,
+			CaptureResult.Completeness.COMPLETE, CaptureResult.Consistency.EVENTUAL, Optional.empty(), Optional.empty());
+	}
+	static CaptureResult goldenCapture() {
+		Map<String, CaptureResult.OpaqueValue> values = new LinkedHashMap<>();
+		values.put("a", InventoryDomainCodec.encode(new InventoryDomainCodec.Item(
+			new InventoryScanner.Key("minecraft:stone", "exact"), 1L, "stone", null, false)));
+		values.put("é", InventoryDomainCodec.encode(new InventoryDomainCodec.Item(
+			new InventoryScanner.Key("minecraft:dirt", ""), 2L, "dirt", null, true)));
+		return new CaptureResult(Optional.of(new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, values)),
+			new CaptureResult.Coverage("inventory", 1, 2, OptionalLong.of(2)), CaptureResult.Availability.READABLE,
 			CaptureResult.Completeness.COMPLETE, CaptureResult.Consistency.EVENTUAL, Optional.empty(), Optional.empty());
 	}
 	static void publish(InventorySyncPublisher publisher, SyncPublisher.Context context, CaptureResult result) {
@@ -150,6 +164,100 @@ class InventorySyncPublisherTest {
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 	}
+	@Test void multipartCutHashesOnceAndKeepsTheOldAdmittedChecksumAcrossNewOfferAndRetry() {
+		InventorySettings settings = InventorySettings.serverDefaults();
+		Transport transport = new Transport();
+		RetainedMemoryLedger memory = new RetainedMemoryLedger(16_000_000);
+		int[] visits = {0};
+		int[] samples = {0};
+		try (InventorySyncPublisher publisher = new InventorySyncPublisher(memory, transport, BudgetDelaySink.NONE,
+			count -> { visits[0]++; samples[0] += count; })) {
+			publisher.advance(0, settings);
+			SyncPublisher.Context context = context("tracking/1", 1);
+			assertTrue(publisher.register(context, route(new MarkerId(1), "target")));
+			publisher.drain(); // initial fence only; it is not the admitted cut
+			visits[0] = 0; samples[0] = 0;
+			publish(publisher, context, capture(1, 3, 2500, 0L));
+			transport.failNextSend = true;
+			publisher.drain();
+			assertEquals(1, visits[0], "the admitted cut hashes once before its first part");
+			assertEquals(3, samples[0]);
+
+			// The old admitted cut stays immutable while a newer offered revision
+			// is installed. Its parts must carry the old cut's checksum.
+			publish(publisher, context, capture(2, 3, 2500, 100L));
+			assertEquals(1, visits[0], "a new offer does not rehash the admitted cut");
+			publisher.drain();
+			var snapshots = transport.sent.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.SNAPSHOT).toList();
+			assertEquals(3, snapshots.size(), "the cut is multipart");
+			long expected = InventoryChecksums.checksumEntries(InventoryResourceKind.ITEM,
+				snapshots.stream().flatMap(packet -> packet.entries().stream()).toList());
+			assertTrue(snapshots.stream().allMatch(packet -> packet.checksum() == expected));
+			assertEquals(2, visits[0], "one admission pass and one delivered-promotion pass, never one per part");
+			assertEquals(6, samples[0]);
+		}
+		assertEquals(0, memory.retained());
+		assertEquals(0, memory.reserved());
+	}
+
+	@Test void wireSnapshotChecksumMatchesIndependentGoldenVector() {
+		InventorySettings settings = InventorySettings.serverDefaults();
+		Transport transport = new Transport();
+		RetainedMemoryLedger memory = new RetainedMemoryLedger(16_000_000);
+		try (InventorySyncPublisher publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings);
+			SyncPublisher.Context context = context("tracking/golden", 1);
+			assertTrue(publisher.register(context, route(new MarkerId(1), "golden")));
+			publisher.drain(); // initial fence
+			publish(publisher, context, goldenCapture());
+			publisher.drain();
+			var snapshots = transport.sent.stream()
+				.filter(packet -> packet.kind() == InventoryS2CPacket.Kind.SNAPSHOT).toList();
+			assertEquals(2, snapshots.size());
+			assertTrue(snapshots.stream().allMatch(packet -> packet.checksum() == InventoryChecksumsTest.ITEM_GOLDEN_CHECKSUM),
+				"wire checksum is the externally derived ITEM golden vector");
+		}
+		assertEquals(0, memory.retained());
+		assertEquals(0, memory.reserved());
+	}
+
+	@Test void withdrawAndRebaseCannotCarryAnAdmittedChecksumIntoAFreshCut() {
+		InventorySettings settings = InventorySettings.serverDefaults();
+		Transport transport = new Transport();
+		RetainedMemoryLedger memory = new RetainedMemoryLedger(16_000_000);
+		int[] visits = {0};
+		try (InventorySyncPublisher publisher = new InventorySyncPublisher(memory, transport, BudgetDelaySink.NONE,
+			count -> visits[0]++)) {
+			publisher.advance(0, settings);
+			SyncPublisher.Context context = context("tracking/1", 1);
+			assertTrue(publisher.register(context, route(new MarkerId(1), "target")));
+			publish(publisher, context, capture(1, 2, 2500, 0L));
+			publisher.drain();
+			assertTrue(visits[0] >= 2);
+			long oldChecksum = transport.sent.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.SNAPSHOT)
+				.findFirst().orElseThrow().checksum();
+			visits[0] = 0;
+
+			publisher.withdraw(context);
+			publisher.rebase(context, 2);
+			publisher.advance(3, settings);
+			int start = transport.sent.size();
+			SyncPublisher.Context rebased = new SyncPublisher.Context(context.consumerId(), context.recipient(),
+				context.sessionView(), 2, context.baseline());
+			publish(publisher, rebased, capture(2, 2, 2500, 100L));
+			publisher.drain();
+			var snapshots = transport.sent.subList(start, transport.sent.size()).stream()
+				.filter(packet -> packet.kind() == InventoryS2CPacket.Kind.SNAPSHOT).toList();
+			assertFalse(snapshots.isEmpty());
+			long expected = InventoryChecksums.checksumEntries(InventoryResourceKind.ITEM,
+				snapshots.stream().flatMap(packet -> packet.entries().stream()).toList());
+			assertNotEquals(oldChecksum, expected);
+			assertTrue(snapshots.stream().allMatch(packet -> packet.checksum() == expected));
+		}
+		assertEquals(0, memory.retained());
+		assertEquals(0, memory.reserved());
+	}
+
 	@Test void invalidationCancelsPartialBatchAndHasPriorityOverAnotherConsumersItems() {
 		var settings = InventorySettings.serverDefaults(); settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(.25)));
 		var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);

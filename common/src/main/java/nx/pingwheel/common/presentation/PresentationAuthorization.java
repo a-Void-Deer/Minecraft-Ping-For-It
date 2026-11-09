@@ -16,6 +16,7 @@ public interface PresentationAuthorization {
 		private static final PresentationAuthorization VANILLA =
 			(recipient, field, actualLevel, requiredLevel) -> actualLevel >= requiredLevel;
 		private static volatile PresentationAuthorization provider = VANILLA;
+		private static volatile long providerRevision;
 		private Holder() {}
 	}
 
@@ -51,8 +52,17 @@ public interface PresentationAuthorization {
 		}
 	}
 
+	/**
+	 * Monotonic explicit replacement event. A provider object changing its own
+	 * internal state without another replacement is deliberately invisible here.
+	 */
+	public static long providerRevision() {
+		return Holder.providerRevision;
+	}
+
 	/** Replace the permission provider; null restores vanilla permission-level comparison. */
 	static void setProvider(@Nullable PresentationAuthorization provider) {
 		Holder.provider = provider == null ? Holder.VANILLA : provider;
+		Holder.providerRevision++;
 	}
 }

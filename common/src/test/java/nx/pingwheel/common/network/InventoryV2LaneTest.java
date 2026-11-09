@@ -46,6 +46,14 @@ class InventoryV2LaneTest {
 			} finally { buf.release(); }
 		}
 	}
+	@Test void openedEntitlementIsSessionWideAndNeverBecomesAFluidLane() {
+		var opened = InventoryS2CPacket.opened(1, 2, 3, 4, 3);
+		assertEquals(InventoryResourceKind.ITEM, opened.resourceKind());
+		assertEquals(3, opened.laneBits());
+		assertFalse(opened.isCorrupt());
+		assertThrows(IllegalArgumentException.class, () -> opened.withResourceKind(InventoryResourceKind.FLUID),
+			"OPENED carries a lane mask, not one homogeneous resource lane");
+	}
 	@Test void fluidDisplayDecodesAfterWireRoundTripWhileBadDisplayCannotEraseAuthoritativeEntryMetadata() {
 		String namedDisplay = InventoryFluidDisplayCodec.encode(new InventoryFluidDisplayCodec.Projection("minecraft:water", "Spring water"));
 		for (var entry : List.of(

@@ -5,6 +5,7 @@ import net.minecraft.Util;
 import net.minecraft.client.OptionInstance;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.CycleButton;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.ComponentPath;
@@ -40,6 +41,9 @@ import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.integration.TeamContext;
 import nx.pingwheel.common.integration.TeamContextHandler;
+import nx.pingwheel.common.monitor.MonitorLabels;
+import nx.pingwheel.common.monitor.MonitorSchema;
+import nx.pingwheel.common.monitor.MonitorSchema.Metric;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
@@ -104,6 +108,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	private @Nullable EditBox serverSyncDurationField;
 	private @Nullable SettingsTitleWidget pageTitle;
 	private @Nullable StringWidget serverStatusWidget;
+	private @Nullable ClientConfig monitorPageConfig;
 	private boolean serverRequestDeferred;
 	private boolean tabBarRegistered;
 	private boolean syncingScopeTab;
@@ -137,6 +142,23 @@ public class SettingsScreen extends OptionsSubScreen {
 	@NotNullByDefault
 	private record PresentationQuickAction(String panelKey) {
 	}
+
+	@NotNullByDefault
+	private record MonitorGroup(String id, @Nullable MonitorSchema.Scope scope) {
+		private boolean contains(Metric metric) {
+			return this.scope == null
+				? metric.kind() == Metric.Kind.SUMMARY
+				: metric.kind() != Metric.Kind.SUMMARY && this.scope.equals(metric.scope());
+		}
+	}
+
+	private static final @Unmodifiable List<MonitorGroup> MONITOR_GROUPS = List.of(
+		new MonitorGroup("summary", null),
+		new MonitorGroup("server_preview", MonitorSchema.Scope.SERVER_PREVIEW),
+		new MonitorGroup("server_tracking", MonitorSchema.Scope.SERVER_TRACKING),
+		new MonitorGroup("shared", MonitorSchema.Scope.SHARED),
+		new MonitorGroup("local_preview", MonitorSchema.Scope.LOCAL_PREVIEW),
+		new MonitorGroup("local_tracking", MonitorSchema.Scope.LOCAL_TRACKING));
 
 	private static void registerCurrent(SettingsScreen screen) {
 		currentSettingsScreen = new WeakReference<>(screen);
@@ -240,6 +262,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	@Override
 	public void tick() {
 		this.updatePermissionState(true);
+		this.refreshMonitorSection();
 		// An offer may arrive while a presentation page is open; rebuild only
 		// when the accepted-catalog metadata actually changed.
 		this.updatePresentationCatalogStamp();
@@ -542,6 +565,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.serverRateLimitField = null;
 		this.serverSyncDurationField = null;
 		this.serverStatusWidget = null;
+		this.monitorPageConfig = null;
 		this.presentationGeneralFeedbackWidget = null;
 		this.presentationSlotFeedbackWidgets.clear();
 		this.presentationSelectorFields.clear();
@@ -633,15 +657,80 @@ public class SettingsScreen extends OptionsSubScreen {
 		}
 
 		for (var section : SettingsCategoryCatalog.sections(category)) {
+			if (!this.sectionVisible(category, section)) continue;
 			var heading = this.addHeading(Component.translatable(section.headingKey()));
 			if (category == Category.SERVER_PRESENTATION) {
 				heading.setTooltip(Tooltip.create(LanguageUtils.settings("presentation.server.tooltip").get()));
 			}
 			for (Row row : section.rows()) this.addSettingRow(row);
+			if (section.content() == SettingsCategoryCatalog.Content.CLIENT_METRICS) {
+				this.addClientMonitorMetricRows();
+			}
 		}
 		if (category.scope() == Scope.SERVER && category != Category.SERVER_PRESENTATION && this.serverValidationMessage != null) {
 			this.addFullWidth("server_validation", this.createServerValidationLabel());
 		}
+	}
+
+	private boolean sectionVisible(Category category, SettingsCategoryCatalog.Section section) {
+		if (section.visibility() == SettingsCategoryCatalog.Visibility.ALWAYS) {
+			return true;
+		}
+		return category.scope() == Scope.CLIENT
+			? this.loggingConfigSupplier.get().getLoggingProfile() == LoggingProfile.DEBUG
+			: this.serverSettings.loggingProfile() == LoggingProfile.DEBUG;
+	}
+
+	private void refreshMonitorSection() {
+		if (!this.navigation.isLeaf()) return;
+		final Category category = this.navigation.current().category().orElseThrow();
+		final Setting toggle;
+		final boolean visible;
+		if (category == Category.CLIENT_DEBUG) {
+			toggle = Setting.MONITOR_HUD_ENABLED;
+			final ClientConfig current = this.loggingConfigSupplier.get();
+			visible = current.getLoggingProfile() == LoggingProfile.DEBUG;
+			if (visible && this.monitorPageConfig != current) {
+				this.rebuildPage(true);
+				return;
+			}
+		} else if (category == Category.SERVER_DEBUG) {
+			toggle = Setting.PREVIEW_MONITOR_ENABLED;
+			visible = this.serverSettings.canView() && this.serverSettings.loggingProfile() == LoggingProfile.DEBUG;
+		} else {
+			return;
+		}
+		if (this.keyedWidgets.containsKey(toggle.id()) != visible) this.rebuildPage(true);
+	}
+
+	private void addClientMonitorMetricRows() {
+		this.monitorPageConfig = this.loggingConfigSupplier.get();
+		final @Unmodifiable List<Metric> displayMetrics = Metric.displayMetrics();
+		for (MonitorGroup group : MONITOR_GROUPS) {
+			final @Unmodifiable List<Metric> metrics = displayMetrics.stream().filter(group::contains).toList();
+			if (metrics.isEmpty()) continue;
+			this.addHeading(LanguageUtils.settings("monitor").path("group", group.id()).get());
+			for (Metric metric : metrics) {
+				this.addFullWidth(metricWidgetKey(metric), this.createMonitorMetricWidget(metric));
+			}
+		}
+	}
+
+	private static String metricWidgetKey(Metric metric) {
+		return "monitor.metric." + metric.id();
+	}
+
+	private AbstractWidget createMonitorMetricWidget(Metric metric) {
+		final MutableComponent label = MonitorLabels.metric(metric);
+		final MutableComponent tooltip = MonitorLabels.tooltip(metric).append("\n")
+			.append(LanguageUtils.settings("monitor").path("metric", "tooltip").get());
+		final AbstractWidget widget = this.monitorBooleanWidget(label, tooltip,
+			() -> this.loggingConfigSupplier.get().getMonitorMetrics().isSelected(metric.id()),
+			selected -> this.loggingConfigSupplier.get().getMonitorMetrics().setSelected(metric.id(), selected));
+		// Metric choice remains editable while the HUD is off; it never gates
+		// server collection and is retained independently of HUD state.
+		widget.active = true;
+		return widget;
 	}
 
 	private void addSettingRow(Row row) {
@@ -677,6 +766,15 @@ public class SettingsScreen extends OptionsSubScreen {
 		if (setting == Setting.DEFAULT_CHANNEL_MODE) return this.createServerChannelModeButton();
 		if (setting == Setting.PLAYER_TRACKING_ENABLED) return this.createServerPlayerTrackingButton();
 		if (setting == Setting.BUDGET_DELAY_NOTIFICATIONS_ENABLED) return this.createServerBudgetDelayNotificationsButton();
+		if (setting == Setting.MONITOR_HUD_ENABLED) return this.createClientMonitorHudButton();
+		if (setting == Setting.PREVIEW_MONITOR_ENABLED) {
+			return this.createServerMonitorButton(setting, this.serverSettings::previewMonitorEnabled,
+				this.serverSettings::setPreviewMonitorEnabled);
+		}
+		if (setting == Setting.TRACKING_MONITOR_ENABLED) {
+			return this.createServerMonitorButton(setting, this.serverSettings::trackingMonitorEnabled,
+				this.serverSettings::setTrackingMonitorEnabled);
+		}
 		final OptionInstance<?> option = switch (setting) {
 			case PING_DISTANCE -> this.getPingDistanceOption();
 			case MARKER_DISPLAY_DURATION -> this.getMarkerDisplayDurationOption();
@@ -1714,6 +1812,10 @@ public class SettingsScreen extends OptionsSubScreen {
 			} else {
 				this.applyClientLoggingProfile(profile);
 			}
+			// Entering or leaving DEBUG adds or removes the monitor subgroup. Keep
+			// the structural change outside the native button callback so the
+			// native focus update finishes before its widget tree is replaced.
+			this.inputActions.runAfterDispatch(this::refreshMonitorSection);
 		};
 		final LoggingProfileButton button = new LoggingProfileButton(
 			() -> this.loggingProfileRowText(label, current.get()),
@@ -1767,6 +1869,60 @@ public class SettingsScreen extends OptionsSubScreen {
 			this.serverSettings::toggleBudgetDelayNotifications);
 		button.active = this.serverSettings.canEdit();
 		return button;
+	}
+
+	private AbstractWidget createClientMonitorHudButton() {
+		final Setting setting = Setting.MONITOR_HUD_ENABLED;
+		final Supplier<ClientConfig> current = this.loggingConfigSupplier;
+		final AbstractWidget widget = this.monitorBooleanOption(
+			setting,
+			() -> current.get().isMonitorHudEnabled(),
+			enabled -> current.get().setMonitorHudEnabled(enabled));
+		// The metric preferences stay editable with the HUD off; no extra lock
+		// is introduced beyond the ordinary checkbox behavior.
+		widget.active = true;
+		return widget;
+	}
+
+	private AbstractWidget createServerMonitorButton(
+		Setting setting,
+		Supplier<Boolean> getter,
+		Consumer<Boolean> setter
+	) {
+		final AbstractWidget widget = this.monitorBooleanOption(setting, getter, setter);
+		widget.active = this.serverSettings.canEdit();
+		return widget;
+	}
+
+	private AbstractWidget monitorBooleanOption(
+		Setting setting,
+		Supplier<Boolean> getter,
+		Consumer<Boolean> setter
+	) {
+		final MutableComponent label = LanguageUtils.settings(setting.id()).get();
+		final MutableComponent tooltip = LanguageUtils.settings(setting.id()).path("tooltip").get();
+		return this.monitorBooleanWidget(label, tooltip, getter, setter);
+	}
+
+	private AbstractWidget monitorBooleanWidget(
+		Component label,
+		Component tooltip,
+		Supplier<Boolean> getter,
+		Consumer<Boolean> setter
+	) {
+		return CycleButton.<Boolean>builder(enabled -> LanguageUtils.settings("format.name_value").get(label,
+				LanguageUtils.of("value", enabled ? "enabled" : "disabled").get()))
+			.withValues(false, true)
+			.withInitialValue(getter.get())
+			.withTooltip(value -> Tooltip.create(tooltip))
+			.displayOnlyValue()
+			.create(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT, label,
+				(button, ignored) -> {
+					// The handler may have replaced its config since this control was
+					// mounted. Toggle the current value, not the widget's stale copy.
+					setter.accept(!getter.get());
+					button.setValue(getter.get());
+				});
 	}
 
 	private void addServerIntegerRow(Setting setting) {

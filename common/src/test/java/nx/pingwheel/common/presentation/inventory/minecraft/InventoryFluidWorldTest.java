@@ -60,16 +60,16 @@ public class InventoryFluidWorldTest {
 		public String scope = "one";
 		public String layoutToken = "stable";
 		public boolean authorized = true, loaded = true, inside, unknown, failFinish, failClose;
-		public boolean refuseAdditional;
+		public boolean refuseAdditional, nonRootController;
 		public boolean cursorless;
 		public boolean unsupportedWitness;
 		public Object routeIdentity = new Object();
 		public final List<Object> addresses = new ArrayList<>();
 		public final List<FluidAddressWitness> witnesses = new ArrayList<>();
 		public ItemStack held = ItemStack.EMPTY;
-		public int reads, probes, closes, liveAccess, maxLiveAccess, binds, notices, witnessCaptures, witnessCompares;
+		public int reads, probes, finishes, closes, liveAccess, maxLiveAccess, binds, notices, witnessCaptures, witnessCompares;
 		public int memberChecks;
-		public @Nullable BlockPos deniedMember;
+		public @Nullable BlockPos deniedMember, unloadedAt;
 		public long amount = 81;
 		public java.util.function.IntFunction<Entry> entryAt = slot -> amount == 0 ? Entry.empty() : new Entry(new Nbt(Fluids.WATER, null), amount);
 		public Runnable afterRead = () -> {};
@@ -105,7 +105,7 @@ public class InventoryFluidWorldTest {
 		}
 		@Override public @Nullable BlockEntity existingEntity(ServerLevel level, BlockPos pos) { return entities.get(pos); }
 		@Override public BlockState blockState(ServerLevel level, BlockPos pos) { return Blocks.CHEST.defaultBlockState(); }
-		@Override public boolean loaded(ServerLevel level, BlockPos pos) { return loaded; }
+		@Override public boolean loaded(ServerLevel level, BlockPos pos) { return loaded && !pos.equals(unloadedAt); }
 		@Override public boolean contains(InventoryFluidSources.Binding binding, BlockPos pos, InventoryValidationBudget.Allowance allowance) {
 			memberChecks++;
 			return !pos.equals(deniedMember) && InventoryFluidSources.World.super.contains(binding, pos, allowance);
@@ -120,23 +120,34 @@ public class InventoryFluidWorldTest {
 		@Override public Optional<Probe> probe(Context context, Operation operation) {
 			if (refuseAdditional) operation.requireAdditional(new InventoryValidationBudget.Cost(1_000_000_000L, 1_000_000_000L, 1));
 			operation.allowance().debit(probeProfile().ownedCost()); context.require(root, operation); probes++;
+			@Nullable BlockPos controller = nonRootController ? root.east() : null;
+			if (controller != null) context.requireController(controller, operation);
 			return Optional.of(new Probe() {
 				boolean done;
 				@Override public Shape shape() { return new Shape(memberCount, OptionalInt.of(cursorless ? 0 : tanks), !cursorless); }
-				@Override public OperationProfile finishProfile() { return profile(8192 + memberCount * 512L + tanks * 128L,
-					8192 + memberCount * 512L + tanks * 128L, 4096 + 512L * memberCount + 32L * tanks, memberCount, 8192 + 1024L * memberCount + 256L * tanks); }
+				@Override public OperationProfile finishProfile() {
+					long gates = memberCount + (nonRootController ? 1 : 0);
+					return profile(8192 + memberCount * 512L + tanks * 128L,
+						8192 + memberCount * 512L + tanks * 128L, 4096 + 512L * memberCount + 32L * tanks,
+						gates, 8192 + 1024L * memberCount + 256L * tanks);
+				}
 				@Override public Optional<Access> finish(Admission admission) {
-					if (done) throw new IllegalStateException("probe reused"); done = true;
+					if (done) throw new IllegalStateException("probe reused"); done = true; finishes++;
 					try (var finish = admission.enter(finishProfile())) {
 						finish.allowance().debit(finishProfile().ownedCost());
+						@Nullable BlockPos controller = nonRootController ? root.east() : null;
+						if (controller != null) context.requireController(controller, finish);
 						for (int i = 0; i < memberCount; i++) context.require(root.offset(i, 0, 0), finish);
 						if (failFinish) throw new IllegalStateException("metadata failed");
 						var members = new ArrayList<InventorySnapshotLayout.Member>();
 						var mapping = new ArrayList<Integer>(); for (int i = 0; i < (cursorless ? 0 : tanks); i++) mapping.add(i);
-						for (int i = 0; i < memberCount; i++) members.add(new InventorySnapshotLayout.Member(root.offset(i, 0, 0),
-							"minecraft:chest", "minecraft:chest", i == 0 ? "controller" : "member", i == 0 ? List.of(
-							new InventorySnapshotLayout.Segment("tanks", ADDRESS_SCHEMA, cursorless ? 0 : tanks, mapping)) : List.of()));
-						var layout = new InventorySnapshotLayout("test:fluid", layoutToken, root, members);
+						for (int i = 0; i < memberCount; i++) {
+							boolean controllerMember = nonRootController ? i == 1 : i == 0;
+							members.add(new InventorySnapshotLayout.Member(root.offset(i, 0, 0),
+								"minecraft:chest", "minecraft:chest", controllerMember ? "controller" : "member", controllerMember ? List.of(
+								new InventorySnapshotLayout.Segment("tanks", ADDRESS_SCHEMA, cursorless ? 0 : tanks, mapping)) : List.of()));
+						}
+						var layout = new InventorySnapshotLayout("test:fluid", layoutToken, nonRootController ? root.east() : root, members);
 						Object route = routeIdentity; var ordered = List.copyOf(addresses);
 						liveAccess++; maxLiveAccess = Math.max(maxLiveAccess, liveAccess);
 						return Optional.of(new Access() {
@@ -197,9 +208,13 @@ public class InventoryFluidWorldTest {
 		public void replaceMember(BlockPos pos) { var chest = new Chest(pos); chest.setLevel(level); entities.put(pos, chest); }
 		public void clearMemberWitness() {
 			// The last resolved source can be a closed temporary publication-binding probe.
-			// Invalidate every live source proof, rather than depending on incidental resolution order.
-			for (var source : sources) if (!(boolean) field(source, "closed"))
-				clearWitness((FluidAddressWitness) field(source, "memberWitness"), 0);
+			// Invalidate every live target witness, rather than depending on incidental resolution order.
+			for (var source : sources) if (!(boolean) field(source, "closed")) {
+				@Nullable Object root = field(source, "rootWitness");
+				if (root != null) clearWitness((FluidAddressWitness) root, 0);
+				@Nullable Object controller = field(source, "controllerWitness");
+				if (controller != null) clearWitness((FluidAddressWitness) controller, 0);
+			}
 		}
 		@Override public void close() { runtime.close(); assertEquals(0, liveAccess); assertEquals(0, runtime.memory().reserved()); assertEquals(0, runtime.memory().retained()); }
 	}
@@ -209,17 +224,17 @@ public class InventoryFluidWorldTest {
 			Diagnostics.setProfile(DiagnosticSide.SERVER, profile);
 			var consumer = f.attach();
 			assertEquals(CaptureResult.Completeness.COMPLETE, f.runtime.step(consumer).orElseThrow().result().completeness());
-			f.deniedMember = f.root.offset(2, 0, 0);
+			f.deniedMember = f.root;
 			int before = f.memberChecks, reads = f.reads;
 			assertEquals(Optional.of(false), f.runtime.probe(consumer));
-			assertEquals(4, f.memberChecks - before, "root plus ordered members; diagnostics add no gate reads");
+			assertEquals(1, f.memberChecks - before, "only the target root is independently gated; internal members are provider-owned");
 			assertEquals(reads, f.reads, "metadata rejection starts no content getter");
 			var rejected = logs.events().stream().map(event -> event.getMessage().getFormattedMessage())
 				.filter(message -> message.contains("site=inventory/fluid/valid")).toList();
 			if (profile == LoggingProfile.DEBUG) {
 				assertEquals(1, rejected.size(), logs.events().toString());
 				String message = rejected.getFirst();
-				assertTrue(message.contains("stage=member-gate reason=membership member=3, 64, 3"), message);
+				assertTrue(message.contains("stage=member-gate reason=membership scope=root member=1, 64, 3"), message);
 				assertTrue(message.contains("face=NORTH"), message);
 			} else assertTrue(rejected.isEmpty(), "common expected denial is DEBUG-only");
 			assertEquals(Optional.of(false), f.runtime.probe(consumer));
@@ -227,17 +242,15 @@ public class InventoryFluidWorldTest {
 				event.getMessage().getFormattedMessage().contains("site=inventory/fluid/valid")).count());
 		}
 	}
-	@Test void initialNonRootMemberDenialKeepsItsPositionAndStageThroughTheRealCommonConstructor() {
+	@Test void initialNonRootMemberDenialIsDelegatedToProviderWithoutCommonTargetRejection() {
 		try (var logs = new DiagnosticLogCapture(LoggingProfile.DEBUG); var f = new Fixture(1, 3, false)) {
 			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEBUG);
 			f.deniedMember = f.root.offset(2, 0, 0);
 			f.runtime.advance(0, f.settings);
-			assertEquals(Optional.of(false), f.runtime.probe(f.input));
+			assertEquals(Optional.of(true), f.runtime.probe(f.input));
 			assertEquals(0, f.reads);
-			var rejected = logs.events().stream().map(event -> event.getMessage().getFormattedMessage())
-				.filter(message -> message.contains("site=inventory/runtime/input-probe")).toList();
-			assertEquals(1, rejected.size());
-			assertTrue(rejected.getFirst().contains("stage=member-gate reason=membership member=3, 64, 3 historical=false"), rejected.getFirst());
+			assertTrue(logs.events().stream().map(event -> event.getMessage().getFormattedMessage())
+				.noneMatch(message -> message.contains("stage=member-gate reason=membership member=3, 64, 3")));
 		}
 	}
 	@Test void separateSourcesBothReportTheirFirstValidationRejectionWithoutResettingDiagnosticChannels() {
@@ -247,14 +260,14 @@ public class InventoryFluidWorldTest {
 			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEBUG);
 			var firstConsumer = first.attach(); var secondConsumer = second.attach();
 			first.runtime.step(firstConsumer).orElseThrow(); second.runtime.step(secondConsumer).orElseThrow();
-			first.deniedMember = first.root.offset(2, 0, 0); second.deniedMember = second.root.offset(2, 0, 0);
+			first.deniedMember = first.root; second.deniedMember = second.root;
 			assertEquals(Optional.of(false), first.runtime.probe(firstConsumer));
 			assertEquals(Optional.of(false), second.runtime.probe(secondConsumer));
 			var rejected = logs.events().stream().map(event -> event.getMessage().getFormattedMessage())
 				.filter(message -> message.contains("site=inventory/fluid/valid")).toList();
 			assertEquals(2, rejected.size(), rejected.toString());
-			assertTrue(rejected.stream().anyMatch(message -> message.contains("member=3, 64, 3")));
-			assertTrue(rejected.stream().anyMatch(message -> message.contains("member=22, 64, 3")));
+			assertTrue(rejected.stream().anyMatch(message -> message.contains("member=1, 64, 3")));
+			assertTrue(rejected.stream().anyMatch(message -> message.contains("member=20, 64, 3")));
 		}
 	}
 	@Test void stableNativeHandlerWith257CompleteFluidKeysAnd129NbtEncodingsEndsExplicitlyIncomplete() {
@@ -290,6 +303,77 @@ public class InventoryFluidWorldTest {
 			assertNotNull(last); assertEquals(CaptureResult.Completeness.COMPLETE, last.result().completeness()); assertEquals(shape[0], f.reads);
 			assertEquals(shape[0], last.slots().size()); assertEquals(1, f.maxLiveAccess);
 		}
+	}
+	@Test void commonTargetChecksDoNotScaleWithProviderInternalMemberCount() {
+		for (boolean external : new boolean[] {false, true}) for (int tanks : new int[] {1, 2}) {
+			int one = memberChecksAfterFirstStep(tanks, 1, external);
+			int many = memberChecksAfterFirstStep(tanks, 108, external);
+			assertEquals(one, many, "common access checks must depend on the target unit, not its internal member count");
+			assertTrue(many < 128, "only root/controller applicability is a common access check: " + many);
+		}
+	}
+	private static int memberChecksAfterFirstStep(int tanks, int members, boolean external) {
+		try (var f = new Fixture(tanks, members, external)) {
+			var consumer = f.attach(); f.memberChecks = 0;
+			f.runtime.step(consumer).orElseThrow();
+			assertEquals(tanks, f.reads);
+			return f.memberChecks;
+		}
+	}
+	@Test void nonRootMemberReplacementIsDelegatedToTheProvider() {
+		for (boolean external : new boolean[] {false, true}) try (var f = new Fixture(1, 4, external)) {
+			var consumer = f.attach(); f.runtime.step(consumer).orElseThrow();
+			f.replaceMember(f.root.east());
+			assertEquals(Optional.of(true), f.runtime.probe(consumer),
+				"internal member layout remains provider-owned instead of becoming a common root/target failure");
+		}
+	}
+	@Test void externalRootUnknownMembershipRejectsBeforeProviderOrContentWork() {
+		try (var f = new Fixture(1, 1, true)) {
+			var consumer = f.attach(); f.unknown = true; f.runtime.advance(0, f.settings);
+			assertEquals(Optional.of(false), f.runtime.probe(consumer));
+			assertEquals(0, f.reads);
+		}
+	}
+	@Test void providerDeclaredControllerIsTargetGatedBeforeCapabilityAccess() {
+		for (boolean external : new boolean[] {false, true}) for (String denial : List.of("scope", "lock", "removed", "unloaded"))
+			try (var f = new Fixture(1, 3, external)) {
+				f.nonRootController = true;
+				switch (denial) {
+					case "scope" -> f.deniedMember = f.root.east();
+					case "lock" -> {
+						var controller = (Chest) Objects.requireNonNull(f.entities.get(f.root.east()));
+						controller.lock = new LockCode("key");
+						f.held = new ItemStack(Items.STICK);
+						f.held.set(net.minecraft.core.component.DataComponents.CUSTOM_NAME, net.minecraft.network.chat.Component.literal("wrong"));
+					}
+					case "removed" -> f.entities.remove(f.root.east());
+					case "unloaded" -> f.unloadedAt = f.root.east();
+					default -> fail(denial);
+				}
+				f.runtime.advance(0, f.settings);
+				assertEquals(Optional.of(false), f.runtime.probe(f.input), denial);
+				assertEquals(0, f.finishes, "controller denial must precede provider finish/capability: " + denial);
+				assertEquals(0, f.reads, denial);
+			}
+	}
+	@Test void rootAuthorizedUnitStillDelegatesInternalMemberAccess() {
+		for (boolean external : new boolean[] {false, true}) try (var f = new Fixture(1, 3, external)) {
+			f.nonRootController = true; f.deniedMember = f.root.offset(2, 0, 0);
+			f.runtime.advance(0, f.settings);
+			assertEquals(Optional.of(true), f.runtime.probe(f.input));
+			// Construction finishes one probe. An external source cannot retain that
+			// operation-local access, so its validation reacquires and finishes one more.
+			assertEquals(external ? 2 : 1, f.finishes);
+			assertEquals(f.probes, f.finishes, "every started provider probe is finished");
+			assertEquals(0, f.reads);
+		}
+	}
+	@Test void strictValidationExceptionSetIsExplicitlyEmpty() {
+		assertTrue(InventoryFluidStrictValidation.codeOwnedTargets().isEmpty());
+		var block = new Target.BlockTarget("minecraft:overworld", 1, 64, 3, "minecraft:chest");
+		var descriptor = new BlockReadSource(block, "minecraft", "", block, new MarkerAnchor(1, 64, 3));
+		assertFalse(InventoryFluidStrictValidation.requiresStrictValidation(descriptor));
 	}
 	@Test void externalAccessNeverSurvivesOperationAndScopeTransitionRequiresFreshAuthority() {
 		try (var f = new Fixture(2, 1, true)) {
@@ -471,12 +555,9 @@ public class InventoryFluidWorldTest {
 			assertNotNull(last); assertEquals(CaptureResult.Completeness.COMPLETE, last.result().completeness());
 			assertEquals(shape[0], f.reads); assertEquals(0, f.liveAccess); assertEquals(1, f.maxLiveAccess);
 			var source = Objects.requireNonNull(f.lastSource);
-			assertNull(field(source, "ordinaryAccess")); assertNull(field(source, "ordinaryMembers"));
-			Object[] members = (Object[]) Objects.requireNonNull(field(source, "members")); assertEquals(shape[1], members.length);
-			for (var component : members[0].getClass().getRecordComponents())
-				assertTrue(component.getType() == BlockPos.class || component.getType() == String.class);
+			assertNull(field(source, "ordinaryAccess"));
 			var ownership = (InventoryFluidAdmission.Ownership) field(source, "ownership");
-			assertNotNull(ownership); assertTrue(ownership.bytes() >= FluidAddressWitness.retainedBytes(shape[1]) + FluidAddressWitness.retainedBytes(shape[0] + 1));
+			assertNotNull(ownership); assertTrue(ownership.bytes() >= FluidAddressWitness.retainedBytes(1) + FluidAddressWitness.retainedBytes(shape[0] + 1));
 			assertEquals(1, f.witnessCaptures); assertTrue(f.witnessCompares > 1);
 		}
 	}

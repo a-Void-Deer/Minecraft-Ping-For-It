@@ -43,7 +43,9 @@ import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.presentation.PresentationAdapter;
+import nx.pingwheel.common.presentation.MarkerContentGrant;
 import nx.pingwheel.common.presentation.PresentationBasic;
+import nx.pingwheel.common.presentation.TestContentGrants;
 import nx.pingwheel.common.presentation.PresentationField;
 import nx.pingwheel.common.presentation.PresentationKineticFormat;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
@@ -218,8 +220,9 @@ class ClientPingRuntimeContentReceiptTest {
 	}
 
 	@ParameterizedTest
-	@ValueSource(strings = {"deny", "suppressed", "schema", "reset", "remove", "expiry", "disconnect", "fallback-delete"})
-	void creationSeedAndAuthorityArePurgedAndSameMembershipReplayCannotRestoreThem(String event) {
+	@CsvSource({"deny,true", "suppressed,true", "schema,false", "reset,true", "remove,false", "expiry,false",
+		"disconnect,false", "fallback-delete,false"})
+	void frozenSeedSurvivesPolicyOrSameEpochResetAndIsPurgedByActualEndEvents(String event, boolean retained) {
 		Fixture f = new Fixture(200);
 		var receipt = inventoryReceipt(5, false, true);
 		f.created(receipt, basic(false));
@@ -238,11 +241,17 @@ class ClientPingRuntimeContentReceiptTest {
 			case "disconnect" -> { f.runtime.close(); f.inventory.reset(); }
 			default -> fail(event);
 		}
-		assertNull(f.inventory.creationSnapshot(ID));
-		assertTrue(f.inventory.tracking(ID).entries().isEmpty());
+		if (retained) {
+			assertNotNull(f.inventory.creationSnapshot(ID),
+				"later policy, same-epoch reset or a suppressed replay cannot revoke the creation seed");
+			assertFalse(f.inventory.tracking(ID).entries().isEmpty());
+		} else {
+			assertNull(f.inventory.creationSnapshot(ID));
+			assertTrue(f.inventory.tracking(ID).entries().isEmpty());
+		}
 		f.created(3, SNAPSHOT, "Replay", receipt, basic(false));
-		assertNull(f.inventory.creationSnapshot(ID));
-		assertTrue(f.inventory.tracking(ID).entries().isEmpty());
+		if (retained) assertNotNull(f.inventory.creationSnapshot(ID), "a known replay cannot replace the retained seed");
+		else assertNull(f.inventory.creationSnapshot(ID));
 		assertEquals(1, f.feedback.content.size());
 		assertEquals("5", countArgument(f.feedback.content.getFirst()));
 		f.assertNoSourceOrNetworkWork();
@@ -331,18 +340,18 @@ class ClientPingRuntimeContentReceiptTest {
 		f.assertNoSourceOrNetworkWork();
 	}
 
-	@Test void laneRevocationReenteredFromReceiptSoundCannotBeOverriddenByLaterSeedInstallation() {
+	@Test void lanePolicyDenialDuringReceiptSoundCannotRevokeTheFrozenCreationSeedOrChat() {
 		Fixture f = new Fixture(200);
 		f.feedback.onPlay = () -> f.runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 81, 1, Set.of()));
 		f.created(inventoryReceipt(5, false, true), basic(false));
 		assertTrue(f.runtime.store().marker(ID).isPresent());
-		assertNull(f.inventory.creationSnapshot(ID));
-		assertTrue(f.inventory.tracking(ID).entries().isEmpty());
-		assertTrue(f.feedback.content.isEmpty());
+		assertNotNull(f.inventory.creationSnapshot(ID), "POLICY only changes future tracking input");
+		assertFalse(f.inventory.tracking(ID).entries().isEmpty(), "the frozen creation seed stays displayable");
+		assertEquals(1, f.feedback.content.size());
 		f.runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 81, 1, Set.of("entity_block")));
 		f.created(2, SNAPSHOT, "Replay", inventoryReceipt(5, false, true), basic(false));
-		assertNull(f.inventory.creationSnapshot(ID));
-		assertTrue(f.feedback.content.isEmpty());
+		assertNotNull(f.inventory.creationSnapshot(ID));
+		assertEquals(1, f.feedback.content.size(), "a known replay does not repeat snapshot chat");
 		assertEquals(1, f.feedback.sounds.size());
 		f.assertNoSourceOrNetworkWork();
 	}
@@ -393,7 +402,7 @@ class ClientPingRuntimeContentReceiptTest {
    InventoryS2CPacket.Status.UPDATING, nx.pingwheel.common.presentation.inventory.InventoryChecksums.checksumEntries(kind, List.of(seed)), List.of(seed)).stamp(81, 1);
   f.runtime.onInventoryPacket(wire(packet));
   assertEquals(80, f.inventory.tracking(ID).entries().getFirst().count(), "CREATED seed is independent of lane POLICY");
-  assertEquals(0, f.inventory.stats().trackedChannels(), "ITEM authorization cannot admit FLUID tracking data");
+  assertEquals(1, f.inventory.stats().trackedChannels(), "the frozen FLUID creation grant admits its own tracking domain");
   assertEquals(1, f.feedback.content.size());
   f.runtime.onInventoryPacket(InventoryS2CPacket.policy(kind, 7, 81, 1, Set.of("entity_block")));
   f.runtime.onInventoryPacket(wire(packet));
@@ -412,7 +421,7 @@ class ClientPingRuntimeContentReceiptTest {
   assertEquals(1, f.feedback.content.size()); assertTrue(f.feedback.ordinary.isEmpty()); f.assertNoSourceOrNetworkWork();
  }
 
- @Test void laterLaneDenialPurgesSeedButDoesNotRewriteOrRepeatSentChat() {
+ @Test void laterLaneDenialKeepsFrozenSeedButDoesNotRewriteOrRepeatSentChat() {
   Fixture f = new Fixture(200);
   var fluid = nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID;
   f.runtime.onInventoryPacket(InventoryS2CPacket.policy(fluid, 7, 81, 1, Set.of("entity_block")));
@@ -420,9 +429,10 @@ class ClientPingRuntimeContentReceiptTest {
 		assertEquals(Optional.of(InventoryResourceKind.ITEM), f.inventory.trackingKind(ID), "CREATED binds only its scoped lane and seed");
   for (var kind : nx.pingwheel.common.presentation.inventory.InventoryResourceKind.values())
    f.runtime.onInventoryPacket(InventoryS2CPacket.policy(kind, 7, 81, 1, Set.of()));
-  assertEquals(Optional.of(false), f.inventory.receiptAuthorization(ID, 81, 1, "entity_block"));
-  assertNull(f.inventory.creationSnapshot(ID));
-  assertTrue(f.inventory.tracking(ID).entries().isEmpty());
+  assertEquals(Optional.of(true), f.inventory.receiptAuthorization(ID, 81, 1, "entity_block"),
+    "POLICY denial is not a marker content grant revocation");
+  assertNotNull(f.inventory.creationSnapshot(ID));
+  assertEquals(80, f.inventory.tracking(ID).entries().getFirst().count());
   f.runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 81, 1, Set.of("entity_block")));
   f.runtime.onInventoryPacket(data(InventoryS2CPacket.Kind.SNAPSHOT, 0, 1, 1, List.of(item(96, 1)), 1));
   assertTrue(f.inventory.tracking(ID).complete(), "fresh tracking remains independently authorized after re-allow");
@@ -461,8 +471,8 @@ class ClientPingRuntimeContentReceiptTest {
   var fresh = wire(InventoryS2CPacket.data(kind, InventoryS2CPacket.Kind.SNAPSHOT, 7, 0, ID, 4, 1, 1, 0, 1,
    true, InventoryS2CPacket.Status.READY, InventoryChecksums.checksumEntries(kind, List.of(entry)), List.of(entry)).stamp(81, 1));
   f.runtime.onInventoryPacket(fresh);
-  assertEquals(0, f.inventory.stats().trackedChannels(), "the receipt must not grant ordinary tracking access");
-  assertEquals(5, f.inventory.tracking(ID).entries().getFirst().count());
+  assertEquals(1, f.inventory.stats().trackedChannels(), "the frozen receipt grant admits its own tracking domain");
+  assertEquals(9, f.inventory.tracking(ID).entries().getFirst().count());
   f.runtime.onInventoryPacket(InventoryS2CPacket.policy(kind, 7, 81, 1, Set.of("entity_block")));
   f.created(2, SNAPSHOT, "Refresh", receipt, basic(false));
   if (statusFirst) {
@@ -518,7 +528,8 @@ class ClientPingRuntimeContentReceiptTest {
  @Test void inventorySchemaMismatchSuppressesContentWithoutDisablingBasicReceipts() {
   Fixture f = new Fixture(0, null, false);
   f.created(inventoryReceipt(80, true, false), basic(false));
-  assertTrue(f.inventory.schemaUnavailable()); assertFalse(f.inventory.ready());
+  assertTrue(f.inventory.schemaUnavailable()); assertTrue(f.inventory.ready());
+  assertFalse(f.inventory.ready(InventoryResourceKind.ITEM));
   assertEquals(ClientInventory.NO_REQUEST, f.inventory.open(TARGET, BlockFace.NORTH, "entity_block"));
   f.runtime.onInventoryPacket(data(InventoryS2CPacket.Kind.SNAPSHOT, 0, 1, 1, List.of(item(96, 1)), 1));
   assertTrue(f.feedback.content.isEmpty()); assertTrue(f.inventory.tracking(ID).entries().isEmpty());
@@ -531,7 +542,7 @@ class ClientPingRuntimeContentReceiptTest {
 
  @ParameterizedTest
  @ValueSource(strings = {"minecraft:chest", "minecraft:trapped_chest", "create:item_vault"})
-  void groupedInventorySeedIsClearedByResetOrRemovalWhileSentChatRemains(String registry) {
+  void groupedInventorySeedSurvivesSameEpochResetAndExpiryFencesLateData(String registry) {
   for (boolean reset : new boolean[] {true, false}) {
    Fixture f = new Fixture(200);
    MarkerSnapshot grouped = groupedSnapshot(registry);
@@ -547,11 +558,14 @@ class ClientPingRuntimeContentReceiptTest {
     assertTrue(f.runtime.store().marker(ID).orElseThrow().isStale());
     assertEquals(grouped.targetKey(), f.runtime.store().marker(ID).orElseThrow().targetKey());
    }
-   f.runtime.onInventoryPacket(wire(data(InventoryS2CPacket.Kind.SNAPSHOT, 0, 1, 2,
-    List.of(item(97, 2)), f.presentation.sessionView())));
+   f.runtime.onInventoryPacket(wire(InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, 7, 0, ID,
+    reset ? 9 : 4, 1, 2, 0, 1, true, InventoryS2CPacket.Status.READY, 0, List.of(item(97, 2)))
+     .stamp(81, f.presentation.sessionView())));
    f.tick();
    if (reset) assertTrue(f.inventory.tracking(ID).complete(), "new-view accepted data still cannot restart a receipt");
    else assertTrue(f.inventory.tracking(ID).entries().isEmpty(), "expiry fences late tracking data");
+   if (reset) assertNotNull(f.inventory.creationSnapshot(ID), "same-epoch reset keeps the frozen creation seed");
+   else assertNull(f.inventory.creationSnapshot(ID));
    assertEquals(1, f.feedback.content.size()); assertEquals("80", countArgument(f.feedback.content.getFirst()));
    assertTrue(f.feedback.ordinary.isEmpty());
    assertEquals(1, f.feedback.sounds.size()); f.assertNoSourceOrNetworkWork();
@@ -761,6 +775,7 @@ class ClientPingRuntimeContentReceiptTest {
   f.created(inventoryReceipt(80, true, false), basic(false));
   assertEquals(1, f.feedback.sounds.size()); assertTrue(f.feedback.ordinary.isEmpty());
   long preview = f.inventory.open(TARGET, BlockFace.NORTH, "entity_block");
+  f.runtime.onInventoryPacket(InventoryS2CPacket.opened(7, 81, 1, preview, 3));
   f.runtime.onInventoryPacket(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, preview, null,
    2, 1, 1, 0, 1, true, InventoryS2CPacket.Status.READY, 0, List.of(item(123, 1))).stamp(81, 1));
   assertEquals(123, f.inventory.preview(preview).entries().getFirst().count());
@@ -780,7 +795,7 @@ class ClientPingRuntimeContentReceiptTest {
   f.assertNoSourceOrNetworkWork();
  }
 
- @Test void resetCancelsImmediatelyAndKnownSameIdReplayCannotRestartOnLateSection() {
+ @Test void sameEpochResetKeepsPendingReceiptAndStillFencesOldViewPackets() {
   Fixture f = new Fixture(200);
   f.created(PresentationReceiptContent.properties(List.of(HEALTH)), basic(false));
   f.runtime.onPresentationPacket(PresentationS2CPacket.reset(81, 1, Map.of()));
@@ -789,7 +804,9 @@ class ClientPingRuntimeContentReceiptTest {
   f.section(2, ID, basic(true), 1); // old view
   f.created(2, SNAPSHOT, "New owner", PresentationReceiptContent.properties(List.of(HEALTH)), basic(true));
   f.section(3, ID, basic(true), 2);
-  f.tick(); assertTrue(f.feedback.content.isEmpty()); assertTrue(f.feedback.ordinary.isEmpty());
+  f.tick(); assertEquals(1, f.feedback.content.size(),
+   "a same-epoch reset does not cancel an in-flight marker receipt");
+  assertTrue(f.feedback.ordinary.isEmpty());
   assertEquals(1, f.feedback.sounds.size()); f.assertNoSourceOrNetworkWork();
  }
 
@@ -975,7 +992,7 @@ class ClientPingRuntimeContentReceiptTest {
   f.assertNoSourceOrNetworkWork(); inventory.assertNoSourceOrNetworkWork();
  }
 
- @Test void optionalStressCapacityIsNotRequiredAndCurrentMaskNeverExposesDeniedCapacity() {
+ @Test void optionalStressCapacityIsNotRequiredAndFrozenGrantRetainsCapacityExcludedByCurrentMask() {
   Fixture f = new Fixture(200);
   f.runtime.onPresentationPacket(PresentationS2CPacket.reset(81, 2, Map.of("entity_block", Map.of(BASIC, BASIC_FIELDS,
    EXTRA, Set.of(PresentationKineticFormat.STRESS_FIELD)))));
@@ -984,9 +1001,11 @@ class ClientPingRuntimeContentReceiptTest {
   f.section(1, ID, extra(Map.of(PresentationKineticFormat.STRESS_FIELD, new PresentationValue.NumberValue(12),
    PresentationKineticFormat.CAPACITY_FIELD, new PresentationValue.NumberValue(10)), Map.of(stress, "request")));
   assertEquals(1, f.feedback.content.size());
-  assertEquals(1, translationCount(f.feedback.content.getFirst(), "presentation.pingforit.format.su"));
-  assertEquals(0, translationCount(f.feedback.content.getFirst(), "presentation.pingforit.format.su_percent"));
-  assertNull(f.presentation.view(ID).field(EXTRA, PresentationKineticFormat.CAPACITY_FIELD));
+  assertEquals(0, translationCount(f.feedback.content.getFirst(), "presentation.pingforit.format.su"));
+  assertEquals(1, translationCount(f.feedback.content.getFirst(), "presentation.pingforit.format.su_percent"));
+  assertEquals(new PresentationValue.NumberValue(10),
+    f.presentation.view(ID).field(EXTRA, PresentationKineticFormat.CAPACITY_FIELD),
+    "a later current mask cannot strip a field retained by the marker's frozen grant");
   f.assertNoSourceOrNetworkWork();
  }
 
@@ -1044,6 +1063,7 @@ class ClientPingRuntimeContentReceiptTest {
   final ClientPresentation presentation = new ClientPresentation(sent::add, List.of(new ExtraAdapter()));
   final ClientInventory inventory = new ClientInventory(sent::add);
   final ClientPingRuntime runtime;
+  Set<String> basicGranted = BASIC_FIELDS;
   Fixture(long visualDuration) { this(visualDuration, null); }
   Fixture(long visualDuration, ContentChatComposer.TemplateSource templates) {
    this(visualDuration, templates, true);
@@ -1062,16 +1082,27 @@ class ClientPingRuntimeContentReceiptTest {
    reset(1, BASIC_FIELDS);
    runtime.onInventoryPacket(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(10, 10, 3, 0)).stamp(81, 1));
    runtime.onInventoryPacket(InventoryS2CPacket.policy(7, 81, 1, Set.of("entity_block")));
-    assertTrue(presentation.ready()); assertEquals(compatibleInventory, inventory.ready()); sent.clear();
+    assertTrue(presentation.ready()); assertEquals(!compatibleInventory, inventory.schemaUnavailable()); sent.clear();
   }
    void reset(long view, Set<String> basicFields) {
+    basicGranted = Set.copyOf(basicFields);
     runtime.onPresentationPacket(wire(PresentationS2CPacket.reset(81, view,
      Map.of("entity_block", Map.of(BASIC, basicFields, EXTRA, Set.of(FIRST, SECOND,
       PresentationKineticFormat.STRESS_FIELD, PresentationKineticFormat.CAPACITY_FIELD))))));
   }
   void created(PresentationReceiptContent content, PresentationSection basic) { created(1, SNAPSHOT, "Owner", content, basic); }
   void created(long revision, MarkerSnapshot marker, String author, PresentationReceiptContent content, PresentationSection basic) {
-    runtime.onPresentationPacket(wire(PresentationS2CPacket.created(81, presentation.sessionView(), revision, marker, author, NAME, content, basic)));
+    Map<String, Set<String>> allowed = new LinkedHashMap<>();
+    allowed.put(BASIC, basicGranted);
+    allowed.put(EXTRA, Set.of(FIRST, SECOND, PresentationKineticFormat.STRESS_FIELD, PresentationKineticFormat.CAPACITY_FIELD));
+    @Nullable InventoryCreationSnapshot creation = content.inventorySnapshot();
+    if (creation != null) allowed.put(nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID,
+      Set.of(creation.resourceKind().fieldId()));
+    MarkerContentGrant grant = new MarkerContentGrant(TestContentGrants.fromAllowed(allowed,
+      presentation.manifest().stream().collect(java.util.stream.Collectors.toMap(
+        PresentationAdapter::adapterId, PresentationAdapter::fields))),
+      creation == null ? null : creation.resourceKind());
+    runtime.onPresentationPacket(wire(PresentationS2CPacket.created(81, presentation.sessionView(), revision, marker, author, NAME, grant, content, basic)));
   }
   void section(long revision, MarkerId id, PresentationSection section) { section(revision, id, section, presentation.sessionView()); }
   void section(long revision, MarkerId id, PresentationSection section, long view) {

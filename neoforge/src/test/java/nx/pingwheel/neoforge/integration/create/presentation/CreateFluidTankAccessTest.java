@@ -185,10 +185,10 @@ class CreateFluidTankAccessTest {
 		}
 	}
 
-	@Test void capabilityOrLastTankMetadataCannotRevokeASiblingThenReachAContentGetter() {
+	@Test void capabilityOrLastTankMetadataCannotRevokeTheControllerThenReachAContentGetter() {
 		for (boolean atCapability : new boolean[] {true, false}) {
 			var world = new World(2, 1); var access = access(world, BlockPos.ZERO, Direction.NORTH);
-			Runnable revoke = () -> world.allowed.remove(new BlockPos(1, 0, 1));
+			Runnable revoke = () -> world.allowed.remove(BlockPos.ZERO);
 			if (atCapability) world.afterCapability = revoke; else world.handler.afterMetadata = revoke;
 			assertThrows(InventorySourceUnavailableException.class, () -> access.consume(0, entry -> fail("revoked sibling")));
 			assertEquals(0, world.handler.reads);
@@ -234,6 +234,67 @@ class CreateFluidTankAccessTest {
 		}
 	}
 
+	@Test void finalCountCallbackCannotRevokeRootOrControllerBeforeTheGetter() {
+		for (String change : List.of("root-removed", "controller-mode")) {
+			var world = new World(2, 1); BlockPos hit = new BlockPos(1, 0, 1);
+			var access = access(world, hit, Direction.NORTH);
+			var originalRoot = world.blocks.get(hit); var originalController = world.blocks.get(BlockPos.ZERO);
+			var revocations = new AtomicInteger();
+			// Construction already consumed two counts; start the observed interval at zero
+			// so the callback runs exactly on the post-capacity final count.
+			world.handler.countReads = 0;
+			world.handler.afterMetadata = () -> {
+				if (world.handler.countReads != 2) return;
+				revocations.incrementAndGet();
+				if (change.equals("root-removed")) { world.blocks.remove(hit); world.entities.remove(hit); }
+				else world.entities.get(BlockPos.ZERO).active = true;
+			};
+			assertFalse(access.valid(), change + ": the post-count target check must see the changed root/controller");
+			assertEquals(1, revocations.get(), change + ": the final count callback must have run once");
+			assertEquals(0, world.handler.reads);
+			world.blocks.put(hit, originalRoot); world.blocks.put(BlockPos.ZERO, originalController);
+			world.entities.put(hit, (Member) originalRoot.entity());
+			world.entities.put(BlockPos.ZERO, (Member) originalController.entity());
+			world.entities.get(BlockPos.ZERO).active = false; world.handler.countReads = 0;
+			assertThrows(InventorySourceUnavailableException.class,
+				() -> access.consume(0, entry -> fail("content getter ran after final-count revocation")), change);
+			assertEquals(2, revocations.get(), change + ": the restored consume path must be revoked by the same callback");
+			assertEquals(0, world.handler.reads);
+		}
+	}
+	@Test void currentValidationChecksOnlyRootAndControllerForALargeStructure() {
+		var world = new World(3, 32); BlockPos hit = new BlockPos(2, 31, 2);
+		var access = access(world, hit, Direction.NORTH);
+		world.requireAllBeforeCapability = false;
+		world.blockReads.clear(); world.requireCalls = 0;
+		assertTrue(access.valid());
+		assertEquals(Set.of(hit, BlockPos.ZERO), new HashSet<>(world.blockReads));
+		assertTrue(world.requireCalls < 256, "current target validation must not scale with 288 internal members");
+		assertEquals(0, world.handler.reads);
+		world.blockReads.clear(); world.requireCalls = 0;
+		var paid = new InventoryValidationBudget.Allowance(access.readCost());
+		assertTrue(access.consume(0, entry -> { assertEquals(81_000, entry.amount()); return true; }, paid));
+		assertEquals(Set.of(hit, BlockPos.ZERO), new HashSet<>(world.blockReads));
+		assertTrue(world.requireCalls < 256);
+		assertEquals(1, world.handler.reads);
+	}
+	@Test void currentValidationKeepsRootControllerAndModeButDelegatesInternalMemberChangesToTheProvider() {
+		for (String change : List.of("root-removed", "controller-removed", "boiler")) {
+			var world = new World(3, 32); BlockPos hit = new BlockPos(2, 31, 2);
+			var access = access(world, hit, Direction.NORTH);
+			switch (change) {
+				case "root-removed" -> world.blocks.remove(hit);
+				case "controller-removed" -> world.blocks.remove(BlockPos.ZERO);
+				case "boiler" -> world.entities.get(BlockPos.ZERO).active = true;
+				default -> fail(change);
+			}
+			assertFalse(access.valid(), change);
+		}
+		var world = new World(3, 32); BlockPos hit = new BlockPos(2, 31, 2);
+		var access = access(world, hit, Direction.NORTH);
+		world.entities.put(new BlockPos(1, 0, 0), new Member());
+		assertTrue(access.valid(), "an internal member replacement is provider-owned, not an independent Ping target gate");
+	}
 	@Test void createSingleTankAdvancesWithOnlyItsAdmittedMetadataScratchRemaining() {
 		var world = new World(1, 1); var access = access(world, BlockPos.ZERO, Direction.NORTH);
 		var settings = nx.pingwheel.common.config.InventorySettings.serverDefaults();
@@ -282,6 +343,7 @@ class CreateFluidTankAccessTest {
 			assertEquals(IPlatformFluidService.TopologyEvidence.EXPLICIT_STRUCTURE, access.routeInfo().topology());
 			assertTrue(world.queryPositions.stream().allMatch(BlockPos.ZERO::equals)); assertEquals(0, world.handler.reads);
 			try (var validation = a.enter(access.validationProfile())) { assertTrue(access.valid(validation)); }
+			world.requireAllBeforeCapability = false;
 			world.requireCalls = 0; world.metadataCalls = 0; world.blockReads.clear(); int capacities = world.handler.capacityReads;
 			try (var read = a.enter(access.readProfile())) {
 				assertSame(op.allowance(), read.allowance()); long before = read.allowance().attemptedWorkUnits();
@@ -291,7 +353,8 @@ class CreateFluidTankAccessTest {
 					read.allowance().attemptedWorkUnits() - before);
 			}
 			assertEquals(1, world.handler.reads); assertEquals(4, world.handler.capacityReads - capacities);
-			assertEquals(world.blocks.keySet(), new HashSet<>(world.blockReads), "read pre/postchecks visit every member");
+			assertEquals(Set.of(hit, BlockPos.ZERO), new HashSet<>(world.blockReads),
+				"current validation checks only the target root and necessary controller, never every internal member");
 			assertTrue(world.requireCalls <= access.readProfile().memberGateCalls());
 			ownership = a.retain();
 			assertEquals(profiles.stream().mapToLong(IPlatformFluidService.OperationProfile::retainedBytes).sum() + 768, ownership.bytes());
@@ -565,9 +628,9 @@ class CreateFluidTankAccessTest {
 		}
 	}
 
-	@Test void consumedValidationFailureReportsOnceWithRouteAndMemberContext() {
+	@Test void consumedValidationFailureReportsOnceWithRouteAndControllerContext() {
 		var world = new World(2, 1); var access = access(world, new BlockPos(1, 0, 1), Direction.NORTH);
-		world.entities.get(new BlockPos(1, 0, 0)).controller = new BlockPos(20, 0, 0);
+		world.entities.get(BlockPos.ZERO).controller = new BlockPos(20, 0, 0);
 		try (var capture = new CreateDiagnosticCapture(Level.DEBUG, LoggingProfile.DEBUG)) {
 			assertFalse(access.valid());
 			assertEquals(1, capture.events.size());
@@ -579,7 +642,7 @@ class CreateFluidTankAccessTest {
 			assertTrue(message.contains("count=1"), message);
 			assertTrue(message.contains("ctx="), message);
 			assertTrue(message.contains("reason=controller-changed"), message);
-			assertTrue(message.contains("member=1, 0, 0"), message);
+			assertTrue(message.contains("member=0, 0, 0"), message);
 			assertFalse(access.valid());
 			assertEquals(1, capture.events.size(), "same invalid access reports its first rejection once");
 		}
@@ -659,7 +722,8 @@ class CreateFluidTankAccessTest {
 		@Override public void require(BlockPos position, Operation operation) {
 			operation.allowance().debit(memberCost); operation.allowance().debit(authorityCost);
 			requireCalls++;
-			if (!allowed.contains(position) || !loaded.contains(position)) throw new InventorySourceUnavailableException("denied/unloaded tank member");
+			if (!allowed.contains(position) || !loaded.contains(position) || !blocks.containsKey(position))
+				throw new InventorySourceUnavailableException("denied/unloaded/missing tank member");
 		}
 		@Override public FluidCapabilityAccess.Block block(BlockPos position, Operation operation) {
 			require(position, operation); blockReads.add(position); @Nullable var block = blocks.get(position);

@@ -1,7 +1,10 @@
 package nx.pingwheel.neoforge.platform;
 
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
 import net.neoforged.neoforge.network.PacketDistributor;
 import nx.pingwheel.common.diagnostics.Diagnostics;
@@ -10,11 +13,15 @@ import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.network.ServerConfigTransportDiagnostics;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
+import nx.pingwheel.common.platform.RouteSupport;
+import nx.pingwheel.common.platform.TransportHandoff;
 import nx.pingwheel.common.presentation.minecraft.InventoryCreationReceiptTransport.EncodedTransport;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.function.BiConsumer;
 import java.util.function.BiPredicate;
+import java.util.function.Predicate;
 
 import static nx.pingwheel.common.CommonClient.Game;
 
@@ -58,16 +65,42 @@ public class PlatformNetworkServiceImpl implements IPlatformNetworkService, Enco
 
 	@Override
 	public void sendToClient(IPacket packet, ServerPlayer player) {
-		var kind = ServerConfigTransportDiagnostics.kindOf(packet);
+		sendToClientObserved(packet, player);
+	}
+
+	@Override
+	public TransportHandoff sendToClientObserved(IPacket packet, ServerPlayer player) {
+		@Nullable ServerConfigTransportDiagnostics.Kind kind = ServerConfigTransportDiagnostics.kindOf(packet);
 		if (!canSend.test(player, packet)) {
 			ServerConfigTransportDiagnostics.decision(Diagnostics.server(), kind,
 				ServerConfigTransportDiagnostics.Decision.ROUTE_UNAVAILABLE);
-			return;
+			return TransportHandoff.NOT_HANDED_OFF;
 		}
 
 		send.accept(player, packet);
 		ServerConfigTransportDiagnostics.decision(Diagnostics.server(), kind,
 			ServerConfigTransportDiagnostics.Decision.SEND_DISPATCHED);
+		return TransportHandoff.HANDED_OFF;
+	}
+
+	@Override
+	public RouteSupport serverboundSupport(ResourceLocation routeId) {
+		@Nullable Minecraft client = Game;
+		@Nullable ClientPacketListener connection = client == null ? null : client.getConnection();
+		if (connection == null || !connection.isAcceptingMessages()) return RouteSupport.UNKNOWN;
+		return routeSupport(routeId, true, connection::hasChannel);
+	}
+
+	@Override
+	public RouteSupport clientboundSupport(ServerPlayer player, ResourceLocation routeId) {
+		if (player.connection == null || !player.connection.isAcceptingMessages()) return RouteSupport.UNKNOWN;
+		return routeSupport(routeId, true, player.connection::hasChannel);
+	}
+
+	static RouteSupport routeSupport(ResourceLocation routeId, boolean ready, Predicate<ResourceLocation> hasChannel) {
+		// NeoForge finishes payload negotiation before entering the play listener.
+		if (!ready) return RouteSupport.UNKNOWN;
+		return hasChannel.test(routeId) ? RouteSupport.AVAILABLE : RouteSupport.UNAVAILABLE;
 	}
 
 	@Override

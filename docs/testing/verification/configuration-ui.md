@@ -100,27 +100,32 @@ pair legality, frame-priority reconcile and ordered position stepping.
 For the Performance controls' coverage, see
 [Server performance contract verification](#server-performance-contract-verification).
 `SpatialSelectorSettingsTest` covers the spatial-selector settings snapshot and
-bounds. A missing, explicit-null or fresh-file center deadzone initializes the
-current confirmed default while representative valid saved deadzone values,
-including both bounds, are retained literally without rescaling and a held
-snapshot keeps its frozen deadzone, the
-distance and timing clamps preserve the valid interval and saturate on both
-sides, every supported stroke can leave every supported center deadzone, and
-null and out-of-range nested values validate without throwing, the opt-in
-Back-hover default stays disabled,
-a missing or explicit-null submenu radius scale gains the confirmed default and
-the value clamps and freezes into the snapshot, the precise capture period
-clamps to its persisted range and freezes into the snapshot, the content-intent
-choice defaults disabled for fresh, missing and
-null values, an explicit choice is retained and freezes into the held snapshot
-while the live setter supplies the next snapshot, the canonical snapshot
-constructor carries the choice while every previous constructor form defaults
-it, the previous snapshot constructor forms remain compatible and default
-the submenu radius scale and precise capture period, raw-JSON validation and a
-frozen snapshot clamp every value without resetting boolean choices, a frozen
-session snapshot never follows later config edits, root distance and gesture
-preferences stay independent in both mutation directions, and fresh defaults do
-not alias another client's mutable preferences.
+bounds:
+
+- **Initialization and saved values.** A missing, explicit-null or fresh-file
+  center deadzone initializes the current confirmed default; representative
+  valid saved deadzone values, including both bounds, are retained literally
+  without rescaling; a held snapshot keeps its frozen deadzone; the opt-in
+  Back-hover default stays disabled; a missing or explicit-null submenu radius
+  scale gains the confirmed default and the value clamps and freezes into the
+  snapshot; the precise capture period clamps to its persisted range and freezes
+  into the snapshot; and the content-intent choice defaults disabled for fresh,
+  missing and null values.
+- **Clamps and validation.** The distance and timing clamps preserve the valid
+  interval and saturate on both sides; every supported stroke can leave every
+  supported center deadzone; null and out-of-range nested values validate
+  without throwing; and raw-JSON validation and a frozen snapshot clamp every
+  value without resetting boolean choices.
+- **Snapshot construction and isolation.** An explicit content-intent choice is
+  retained and freezes into the held snapshot while the live setter supplies
+  the next snapshot; the canonical snapshot constructor carries the choice
+  while every previous constructor form defaults it; the previous snapshot
+  constructor forms remain compatible and default the submenu radius scale and
+  precise capture period; a frozen session snapshot never follows later config
+  edits; root distance and gesture preferences stay independent in both
+  mutation directions; and fresh defaults do not alias another client's mutable
+  preferences.
+
 `SpatialSelectorMigrationTest` contains filesystem-backed cases for the obsolete
 preference catalogued by
 [client configuration](../../config/client.md#obsolete-keys): fresh output omits
@@ -366,9 +371,7 @@ channel rather than another dependency. These are headless loader send seams,
 not live connection or multiplayer transport evidence.
 
 The Tracking partition additions, including the later stage-report case, have
-dedicated model, persistence, transaction, widget and strict-wire assertions in
-the current
-[logging-coverage audit final acceptance](build-checks.md#logging-coverage-audit-final-acceptance):
+dedicated model, persistence, transaction, widget and strict-wire assertions:
 
 - `InventorySettingsPersistenceTest` checks absent/null defaults, all four
   independent boolean pairs, explicit sibling preservation, unchanged
@@ -397,6 +400,11 @@ the current
   callbacks after revocation/disconnect. Catalog and eight-locale resource
   fixtures cover placement and Off/On, current authority and next-scan help;
   they do not establish assembled live tooltip delivery or translation quality.
+
+No saved execution acceptance record yet covers these added logging/diagnostic
+coverage items; that evidence remains pending. The
+[shared diagnostics evidence note](integrations.md#shared-exception-diagnostics)
+owns the cross-domain gap.
 
 ## Logging-profile configuration and controls
 
@@ -444,11 +452,11 @@ containing only scope, redacted `NORMAL` versus unredacted detail, and apply
 timing, without naming `DEBUG` or hinting at the activation gesture, plus a
 read-only server viewer seeing `DEBUG` without editing.
 
-`SettingsCategoryCatalogTest` verifies the logging controls' placement and the
-approved catalogue totals: 75 entries, 73 value controls, and 25 server
-Performance rows. `SettingsLocalizationCoverageTest` requires localized labels
-and tooltips for both logging rows in all eight bundled locales.
-`ServerConfigVarNumbersTest` covers logging-profile tags
+`SettingsCategoryCatalogTest` verifies the logging controls' Debug-category
+placement and the approved catalogue totals: 78 entries, 76 value controls, and
+24 server Performance rows. `SettingsLocalizationCoverageTest` requires
+localized labels and tooltips for both logging rows in all eight bundled
+locales. `ServerConfigVarNumbersTest` covers logging-profile tags
 `0`/`1`/`2`, mask bit 29, preservation when unselected, and rejection of missing,
 unknown, noncanonical, truncated and trailing forms even when unselected.
 
@@ -460,6 +468,113 @@ above (`LoggingProfileConfigTest`, `ServerConfigLoggingProfileTest`,
 `SettingsCategoryCatalogTest`, `ServerConfigVarNumbersTest`). None of these
 fixtures establishes live native mouse or keyboard delivery, rendered tooltip
 layout, a live client/server profile switch or remote persistence.
+
+## Performance monitor coverage
+
+The [performance monitor controls](../../UI/settings-screen.md#performance-monitor-controls)
+and their headless assertions are covered by the earlier P1-P6 passing final
+combined-tree test and build execution. This section inventories that coverage;
+it is not a live-screen or multiplayer acceptance record. Production sampling and client
+runtime evidence are owned by
+[inventory verification](inventory.md#performance-monitoring-coverage-and-production-evidence);
+live scenarios remain in the
+[manual performance-monitor matrix](manual-integration.md#performance-monitor).
+
+- `SettingsCategoryCatalogTest` fixes the production catalog at 78 settings and
+  76 value controls while the existing eight client and six server navigation
+  categories stay unchanged. It places one conditional Performance monitor
+  subgroup at the end of each Debug category and checks the three fixed boolean
+  rows: the client HUD switch and the two server collection switches. It asserts
+  descriptor order, membership and visibility classification, not native
+  placement, widget input or live profile evaluation.
+- `SettingsNavigationModelTest` keeps the eight client and six server category
+  identities and independent page routing; it does not add a monitor navigation
+  level. `LoggingProfileScreenTest` then mounts the production screen's rows and
+  finds one native selector for every one of the 121 closed display metrics.
+- `ServerSettingsMonitorTest` covers the model beneath the server rows:
+  independent long dirty bits for Preview and Tracking, all four enable
+  combinations, draft-only plans, final-profile gating when DEBUG and a switch
+  are enabled together, read-only/revocation/stale-response/disconnect fences,
+  isolation from the numeric invalid mask, and refusal of partial plans. It does
+  not construct widgets or exchange packets.
+- `LoggingProfileScreenTest` assembles the production screen with native
+  `CycleButton<Boolean>` rows and an injected language. Client rows follow the
+  current handler's DEBUG value and current config object even when that object
+  is replaced while the leaf is open; the same mounted HUD and metric controls
+  read and write the replacement. The HUD switch starts off, turning it off
+  retains metric preferences, and metric rows stay editable while the HUD is
+  off. Leaving DEBUG closes the HUD and hides the subgroup; re-entering DEBUG
+  does not restore the HUD. Server rows show the draft only, remain read-only but
+  visible for a known snapshot, hide for an unknown or non-DEBUG draft, clear on
+  DEBUG exit and do not restore on re-entry; an applied server OFF neither closes
+  the local HUD nor clears metric checkboxes. Native `keyPressed` Space and mouse
+  click/release activate the mounted logging row through the deferred-action
+  coordinator, focus survives the replaced row tree, and resize and back
+  navigation preserve the current values and visibility. This is a headless
+  widget/input fixture with deterministic measurements and a stubbed physical
+  modifier read, not a live window, native font, GPU, real permission provider or
+  multiplayer session.
+- `SettingsLocalizationCoverageTest` derives the 76 value controls' required
+  labels and help from the production catalog and checks the six monitor display
+  group headings plus shared selector help in all eight bundled locales.
+  The historical `MonitorLabelsLocalizationTest` result checked the
+  pre-redesign `MonitorLabels` vocabulary used by selectors and the then-prepared
+  HUD: every displayed metric's full label, short label and tooltip, every scope
+  component, 121 metric selectors and five default summaries, format signatures,
+  OFF-only red styling and memory/sync measurement-limit help. It resolved the
+  then-prepared model for every bundled language and every
+  `ClientMonitorState.Status` value. Settings full labels and the HUD
+  compact-label provider remain separately tested; the later joint HUD run
+  covers the compact labels, display model and formatter, not the settings
+  full-label catalog. The historical check did not review translation semantics,
+  render a live locale or measure font fit.
+- The earlier P5 companion locale parity check covered 131 monitor/UI keys per
+  locale with strict JSON without duplicate keys, nonblank values, matching
+  placeholder signatures and no replacement characters. Its source match
+  covered the 16 literal format/source keys and all eight client status names.
+  The later compact-HUD locale resource audit is owned by [inventory HUD UX
+  redesign coverage](inventory.md#hud-ux-redesign-coverage). This remains a
+  resource check, not translation quality or live font fit.
+
+The recorded isolated P5 execution passed 368 tests across all 30 screen test
+classes, `MonitorLabelsLocalizationTest` and the unchanged
+`ClientConfigLocalizationTest`. That historical result covers an external
+classpath only. The earlier P1-P6 combined-tree rerun executed the Common Test
+task with these screen, catalog and localization tests included and reported
+6,122 Common tests with zero failures or errors (6,120 passed and 2 skipped);
+the 78-setting/76-value-control catalog and 121 mounted metric selectors above
+are part of that passing task. All loader
+builds and `verifyModIdentity` also passed. The run is recorded in
+[build checks](build-checks.md#performance-monitor-implementation-and-final-acceptance).
+The later UX whole-tree run supersedes this P1-P6 test result for the HUD UX
+coverage below. This remains not a live game, native-screen, font,
+permission-provider, socket/loader-lifecycle or multiplayer run.
+
+### HUD UX redesign coverage
+
+The HUD-side compact-label vocabulary, formatter, display model, layout, cache,
+paint and ABI evidence, including execution counts and limits, is owned by
+[inventory HUD UX redesign coverage](inventory.md#hud-ux-redesign-coverage).
+The current per-field `N/A`, per-row backing and reserved-height coverage is in
+[stable HUD reservoir UX coverage](inventory.md#stable-hud-reservoir-ux-coverage);
+the preceding fixed semantic grouping and wrapping evidence is in [stable
+semantic HUD wrapping
+coverage](inventory.md#stable-semantic-hud-wrapping-coverage).
+
+`MonitorLabelsLocalizationTest` and the P5 control coverage above still test the
+full/short selector vocabulary and the prior prepared HUD. The compact HUD
+labels remain HUD-only: settings full names and selector text are not replaced.
+The historical check did not review translation semantics, render a live locale
+or measure font fit.
+
+The full Common task is part of the [HUD UX whole-tree
+run](build-checks.md#hud-ux-final-whole-tree-verification); the
+disabled-path allocation boundary is owned by [inventory HUD UX redesign
+coverage](inventory.md#hud-ux-redesign-coverage). Live screen, native font and
+locale checks remain in the [manual
+matrix](manual-integration.md#performance-monitor). The projection contract is
+[HUD projection and
+presentation](../../architecture/presentation/inventory.md#hud-projection-and-presentation).
 
 ## Server performance contract verification
 
@@ -531,31 +646,31 @@ below describe source-reviewed coverage rather than a recorded full-suite run:
 
 - `SettingsNavigationModelTest` covers the initial client overview, per-scope
   overview selection, each category opening its own leaf page within its scope,
-  the immutable seven-category client and five-category server order including
-  the client Performance and server Performance categories, the client
-  Performance category opening independently of the server Performance
-  category, the server Presentation category opening without
-  ordinary-server permission, the
-  separate Server Presentation leaf, independent ordinary-server and
-  presentation-policy view access, and independent per-page viewport and focus
-  retention; it also covers rejection of a
-  foreign-scope category without navigating, Back to the owning overview with a
-  root that reports itself as not closable, per-page scroll and focus retention
-  across back, scope switching and forced routing, clamping of negative scroll,
-  routing an invalid server draft mask to the category that owns its first
-  invalid field, retaining a shared `ServerSettingsModel` draft across
-  navigation, and keeping a server leaf open when a permission revocation
-  retains a viewable snapshot while forcing the scope overview without one;
-- `SettingsCategoryCatalogTest` covers all 75 catalog entries exactly once in
-  their approved categories, including the 73 value controls and two non-value
+  the immutable eight-category client and six-category server order including
+  both scopes' Performance and Debug categories, the client Performance
+  category opening independently of the server Performance category, the server
+  Presentation category opening without ordinary-server permission, the separate
+  Server Presentation leaf, independent ordinary-server and presentation-policy
+  view access, and independent per-page viewport and focus retention; it also
+  covers rejection of a foreign-scope category without navigating, Back to the
+  owning overview with a root that reports itself as not closable, per-page
+  scroll and focus retention across back, scope switching and forced routing,
+  clamping of negative scroll, routing an invalid server draft mask to the
+  category that owns its first invalid field, retaining a shared
+  `ServerSettingsModel` draft across navigation, and keeping a server leaf open
+  when a permission revocation retains a viewable snapshot while forcing the
+  scope overview without one;
+- `SettingsCategoryCatalogTest` covers all 78 catalog entries exactly once in
+  their approved categories, including the 76 value controls and two non-value
   entries. Independent expectations check section headings, section/row order,
   flattened order, the confirmed semantic pairs rather than unrelated packing,
   and singleton rows for ordinary server controls. It checks nonempty sections,
   defensive copies and immutable descriptor collections, and rejection of blank
   headings, empty sections/rows, oversized rows, and duplicate members in a
   pair. Every category has a distinct description key, including scope-distinct
-  Performance keys. Inventory leaves remain server-only, and invalid-inventory
-  routing skips the monitoring toggle and follows the owning control order.
+  Performance and Debug keys. Inventory leaves remain server-only, and
+  invalid-inventory routing skips the monitoring toggle and follows the owning
+  control order.
   This is descriptor coverage, not native placement or focus dispatch; the
   [UI contract](../../UI/settings-screen.md#category-layout) owns the detailed
   category and grouping rules;
@@ -673,7 +788,7 @@ below describe source-reviewed coverage rather than a recorded full-suite run:
   contracts. Retired timeout and obsolete inventory-sensitivity resources stay
   excluded. These are resource expectations, not a guarantee of translation
   quality. The fixture does not assemble or render screen labels;
-- `SettingsLocalizationCoverageTest` derives the 73 value controls' required
+- `SettingsLocalizationCoverageTest` derives the 76 value controls' required
   nonblank labels and generic help from the production catalog/key builder. It
   checks all category descriptions and section headings, scope/navigation/action
   and presentation-editor help, used enum/state value labels, units, and visible
@@ -865,6 +980,15 @@ or wrapping.
   scheduler consumption and selector integration remain unexercised by them;
 - live server-settings UI, permission, read-only viewing below the required
   level, request/response, update, and persistence behavior;
+- performance-monitor controls, mounted rows, compact labels and HUD
+  layout/cache/ABI have the headless coverage above and passed the final
+  combined-tree test and build, but live native screen and font rendering,
+  GL/pixel output, actual permission-provider transitions, real socket/loader
+  lifecycle and multiplayer persistence remain unexercised. Production sampling
+  and HUD evidence is inventoried under
+  [inventory verification](inventory.md#performance-monitoring-coverage-and-production-evidence),
+  and live scenarios remain in the
+  [manual matrix](manual-integration.md#performance-monitor);
 - the assembled settings-screen label for the local marker display duration
   option: `ClientConfigLocalizationTest` and `SettingsLocalizationCoverageTest`
   check resource keys, values and placeholder contracts, and

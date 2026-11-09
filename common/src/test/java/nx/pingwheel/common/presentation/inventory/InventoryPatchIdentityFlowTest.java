@@ -189,6 +189,20 @@ class InventoryPatchIdentityFlowTest {
 			return Optional.ofNullable(policies.get(player));
 		}
 
+		@Override public Optional<InventoryBackend.SessionAccess> session(UUID player) {
+			@Nullable InventoryBackend.Policy policy = policies.get(player);
+			return policy == null ? Optional.empty()
+				: Optional.of(new InventoryBackend.SessionAccess(policy.epoch(), policy.view(), InventoryTestGrants.both()));
+		}
+
+		@Override public Optional<ServerMarker> activeMarker(MarkerId marker) {
+			return store.allMarkers().stream().filter(stored -> stored.id().equals(marker)).findFirst();
+		}
+
+		@Override public java.util.Set<InventoryResourceKind> freezeInventoryPreviewLanes(UUID owner, String targetTypeId) {
+			return InventoryTestGrants.both();
+		}
+
 		@Override public Optional<InventoryBackend.Opened> open(UUID player, Target requested) {
 			return Optional.of(new InventoryBackend.Opened(TARGET, "entity_block", "attention"));
 		}
@@ -227,8 +241,11 @@ class InventoryPatchIdentityFlowTest {
 			TargetType type = TargetTypeCatalog.builtIn().findById(frozen.targetType()).orElseThrow();
 			@org.jetbrains.annotations.Nullable var rejection = admission.prepare(frozen.target(), nx.pingwheel.common.marker.TargetKey.from(frozen.target()), type.id(), List.of(A, B));
 			if (rejection != null) return new InventoryBackend.Created(null, rejection);
-			ServerMarker marker = store.create(player, frozen.target(), type, type.defaultPingType(),
-				new MarkerAnchor(1, 2, 3), 1, 80, List.of(A, B)).marker();
+			var authorization = InventoryTestGrants.allowAll(List.of(A, B));
+			rejection = admission.finishAuthorization(authorization);
+			if (rejection != null) return new InventoryBackend.Created(null, rejection);
+			ServerMarker marker = store.create(player, frozen.target(), nx.pingwheel.common.marker.TargetKey.from(frozen.target()),
+				type, type.defaultPingType(), new MarkerAnchor(1, 2, 3), 1, 80, List.of(A, B), List.of(), authorization).marker();
 			return new InventoryBackend.Created(marker, null);
 		}
 

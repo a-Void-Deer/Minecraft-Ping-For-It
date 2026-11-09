@@ -73,8 +73,8 @@ property, child-deny, codec, admission, and lease-refresh/capture-budget seams:
   `Target.LocationTarget` create round-tripping without properties, `REMOVE`
   round trips
   and a targetless `CREATE` being corrupt, `OFFER` manifest round trips,
-  `RESET` carrying the authoritative mask with an empty mask denying
-  everything, `CREATED` carrying the default ref beside the annotated section
+  `RESET` carrying the advertised field mask, including an explicit empty mask,
+  `CREATED` carrying the default ref beside the annotated section
   (and being corrupt without one), `REMOVED`/`REJECT` round trips, and an
   unsupported protocol value rejected on both directions with the frame fully
   drained;
@@ -149,19 +149,24 @@ property, child-deny, codec, admission, and lease-refresh/capture-budget seams:
   not live-world fairness, latency or heap/TPS measurements;
 - `ClientPresentationTest` covers the version-two presentation client session:
   `HELLO`/`OFFER`/`RESET`
-  epoch and view guards without any client preference, a tighter reset mask
-  pruning frozen fields and annotations without resurrection, accepted metadata
-  being preserved but never treated as an authorization mask, `CREATED`
-  initializing the stored target type and default while sections carry nested
-  annotations, masks authorizing each marker by its stored type rather than
-  its adapter or name, a reset's child deny map pruning a stored frozen
-  annotation and a denied default reference while the parent field keeps its
-  complete value and its descendants stay selectable, a denied annotation
-  dropped before storage so neither a later loosening nor a frozen section can
-  resurrect it,
-  a `CREATED` selection naming a denied child rejecting atomically with the
-  marker insertion, a zero-view reset rejected without publishing authority,
-  and a soft-removed tombstone exposing an empty projection;
+  epoch and view guards without any client preference, a same-epoch tighter
+  reset retaining a frozen field and annotation rather than pruning them,
+  accepted metadata being preserved but never treated as an authorization mask,
+  `CREATED` initializing the stored target type and default while sections carry
+  nested annotations, masks authorizing each marker by its stored type rather
+  than its adapter or name, a reset's child deny map dropping a stored frozen
+  annotation while retaining the frozen default reference and the parent field's
+  complete value with its descendants selectable, a denied annotation dropped
+  before storage so neither a later loosening nor a frozen section can
+  resurrect it, a `CREATED` selection naming a denied child rejecting atomically
+  with the marker insertion, a zero-view reset rejected without publishing
+  authority, and a soft-removed tombstone exposing an empty projection.
+  Historical dynamic-policy cases exercised a tighter reset pruning frozen
+  fields and annotations without resurrection, and a child-only reset pruning a
+  denied default reference; they remain evidence for their recorded input only.
+  Current frozen-grant projection, including tighter and looser reset behavior,
+  is inventoried under
+  [frozen recipient content authorization](#frozen-recipient-content-authorization-coverage-and-live-gaps).
 - `PresentationReceiptContentTest` covers the receipt content
   descriptor as a strict codec: the non-property kinds carry no references, a
   property descriptor requires a non-empty sorted unique bounded reference list in a
@@ -703,8 +708,17 @@ playback, resource reload or locale switching, or multiplayer behavior.
 
 ### Immediate inventory creation snapshot coverage
 
-`InventoryCreationSnapshotIntegrationTest` covers 17 parameterized cases across
-eight methods:
+Historical evidence note: these cases passed with the dynamic lane and receipt
+authorization of their recorded input, and the names and counts below describe
+that input.
+[D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md)
+changes new-Ping authorization timing; the revised current-source variants passed
+in the final combined execution recorded in
+[build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
+The live limits below remain.
+
+`InventoryCreationSnapshotIntegrationTest` covered 17 parameterized cases across
+eight methods on that recorded input:
 
 - `selectedFiveChatsImmediatelyThenRealTrackingNineOnlyChangesHud` (4 lane and
   completeness cases) covers immediate chat value 5 with HUD `UPDATING` at 5,
@@ -723,12 +737,14 @@ eight methods:
 - `deferredCreationRemovedBeforeHandoffCannotEmitLateChat` (2 for `EXPIRED` and
   `CANCELLED`).
 
-These cases passed in the JDK21 current-source headless common run using actual
-codecs and injected final send/chat sinks. They do not establish a real socket,
-FML/game client or GPU pixels; the combined execution is linked below.
-Supporting unit coverage includes `ClientInventoryLanesTest` for marker-scoped
-creation authority before an inventory handshake and isolation from older lane
-denials, and `ClientDisplayTextTest` for detached bounded component-text freeze.
+Those recorded cases passed in the JDK21 headless common run using actual codecs
+and injected final send/chat sinks. Their current-source variants passed in the
+[final combined execution](build-checks.md#provider-trust-and-frozen-authorization-final-verification);
+the frozen-authorization section below records the new coverage. The cases do not
+establish a real socket, FML/game client or GPU pixels. Supporting unit
+coverage includes `ClientInventoryLanesTest` for marker-scoped creation authority
+before an inventory handshake and isolation from older lane denials, and
+`ClientDisplayTextTest` for detached bounded component-text freeze.
 
 `InventoryCreationSnapshotPacketsTest` covers the literal `CREATED` inventory
 receipt wire, exactly one snapshot with no refs, and strict malformed, truncated
@@ -743,8 +759,67 @@ multiplayer connection.
 Server-side freeze, missing-row rejection, replay, retirement and budget
 coverage is owned by
 [inventory verification](inventory.md#creation-snapshot-server-coverage).
-The current-input combined execution and artifact checks are recorded in
-[build checks](build-checks.md#final-combined-tree-acceptance-and-artifact-verification).
+The final combined execution is recorded in
+[build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification).
+
+### Frozen recipient content authorization coverage and live gaps
+
+The dynamic recipient, field, child and receipt checks inventoried above remain
+historical evidence for their recorded inputs. They do not establish
+[D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md)'s
+create-time policy.
+
+**Automated coverage.** The current-source cases below passed in the final
+combined execution recorded in
+[build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification);
+they establish the frozen-grant boundary headlessly, and the remaining live
+scenarios stay pending.
+
+- `FrozenGrantReplayTest` covers client projection against the `CREATED` grant:
+  per-marker opposite fields and exact child denials, same-epoch tighter and
+  looser `RESET` values neither pruning nor widening an existing grant, later
+  `SECTION` values projected through each marker's grant, a changed-grant replay
+  rejected without mutation, a same-grant replay accepted, a differing-view
+  replay rejected by the view fence, close and new-epoch fences, and no
+  restoration of old grants;
+- `FrozenGrantCompatibilityTest` covers the client typed gate: a mismatched
+  adapter schema or field kind rejects `CREATED` before a marker grant or value
+  is retained, a matching schema and kind accepts, and a property receipt
+  reference cannot be authorized by a mismatched inventory adapter schema;
+- `FrozenInitialAdmissionTest` covers a zero-adapter deny-all grant that still
+  admits marker identity without retaining a denied field, mismatched schema or
+  kind behavior, and projected grant sizing equal to wire filtering with inert
+  child references ignored. Its inventory admission case is inventoried under
+  [inventory](inventory.md#frozen-recipient-authorization-and-fluid-provider-trust-coverage-and-live-gaps).
+- `FrozenGrantMalformedFrameTest` covers the grant codec boundary: canonical
+  round trips, every truncation, duplicate or non-canonical adapter/field order,
+  unknown kinds, root child references, bounded counts before reading their
+  bodies, malformed UTF, an oversized write that emits no bytes, and complete
+  body consumption.
+
+The server creation cut, the per-recipient authorization value and the actual
+initial/baseline/refreshed/cached send-entry delivery case are inventoried under
+[identity and authority](identity-authority.md#frozen-recipient-authorization-coverage-and-live-gaps).
+
+The `CREATED` marker-content-grant grammar is owned by the
+[presentation-v2 protocol](../../architecture/network/protocol.md#presentation-snapshot-route-presentation-v2);
+the inventory Preview request grant is the session-wide `OPENED` control in the
+[inventory-v2 protocol](../../architecture/network/protocol.md#inventory-previewtracking-route-inventory-v2).
+
+**Pending live evidence.** Remaining pending evidence covers live delivery and
+repair of a create-time result for Basic, Property, SECTION, Inventory and
+receipt content over a real connection; the ready/`HELLO` gate for an original
+audience member that was not ready at create; true disconnect behavior; later
+`RESET` and metadata changes applying only to new authorization and new Pings,
+while the no-Ping preview continues to require the accepted `RESET` mask and
+advertised/fresh child union; and content updates under current source, session,
+schema, expiry and resource gates with source-read revocation still rejecting. The
+[immediate creation snapshot coverage](#immediate-inventory-creation-snapshot-coverage)
+records that path's historical scope.
+
+The final combined execution passed for the current-source cases above; the
+live scenarios remain pending in the
+[manual matrix](manual-integration.md#frozen-recipient-authorization-and-provider-trust).
 
 ## Names and chat
 
@@ -767,14 +842,19 @@ Name-composition and rendering evidence is recorded under
 - live loader registration/network transport for the presentation snapshot and
   policy routes;
 - a live two-sided presentation session: negotiation and reset over a real
-  connection, per-recipient permission projection, a reset's child deny map
-  pruning retained annotations and default references, policy changes advancing
-  the view, and delivery of Basic/adapter values across the loader transport;
+  connection, per-recipient permission projection, same-epoch `RESET` retaining
+  an old Ping's frozen child/default-reference result without retroactive
+  pruning or expansion under the
+  [global frozen authorization rule](../../architecture/presentation/presentation_snapshot.md#frozen-recipient-content-authorization),
+  the epoch/view fence still governing a reset, policy changes advancing the view
+  for new creates, and delivery of Basic/adapter values across the loader
+  transport;
 - external-refresh and client-receipt behavior under live conditions: those
   seams are headless, so no automated test exercises a real Minecraft or Sable
   world (logical anchor or render pose), a loaded sublevel, world-backed
-  projection, source sampling cost, packet-level ordering or an authorization
-  change between snapshot and delivery, or the rendered client marker;
+  projection, source sampling cost, packet-level ordering, a policy change between
+  snapshot and delivery that must not alter the Ping's frozen recipient/content
+  result, or the rendered client marker;
 - content receipt descriptor, projection, server initial-sending and client
   acceptance, pending content-chat completion and content chat composition have
   the headless model, codec, store and port coverage inventoried above. No

@@ -258,6 +258,13 @@ class InventoryBackendLifecycleTest {
 		private int opens;
 
 		@Override public Optional<InventoryBackend.Policy> policy(UUID player) { return Optional.of(policy); }
+		@Override public Optional<InventoryBackend.SessionAccess> session(UUID player) {
+			return Optional.of(new InventoryBackend.SessionAccess(policy.epoch(), policy.view(), InventoryTestGrants.both()));
+		}
+		@Override public Optional<nx.pingwheel.common.marker.ServerMarker> activeMarker(MarkerId marker) { return Optional.empty(); }
+		@Override public java.util.Set<InventoryResourceKind> freezeInventoryPreviewLanes(UUID owner, String targetTypeId) {
+			return Set.of(InventoryResourceKind.ITEM);
+		}
 		@Override public Optional<InventoryBackend.Opened> open(UUID player, Target requested) {
 			opens++;
 			return Optional.of(new InventoryBackend.Opened(requested, "entity_block", "attention"));

@@ -247,7 +247,10 @@ public final class PendingContentChatController {
 	}
 
 	private static boolean matches(Pending capture, @Nullable Current current) {
-		return current != null && current.epoch() == capture.epoch() && current.view() == capture.view()
+		// A same-epoch presentation reset re-fences packet views for new data but
+		// does not cancel an existing marker or its in-flight receipt. Epoch and
+		// stable marker identity are the lifetime fence.
+		return current != null && current.epoch() == capture.epoch()
 			&& current.live() && capture.identity().equals(current.identity());
 	}
 

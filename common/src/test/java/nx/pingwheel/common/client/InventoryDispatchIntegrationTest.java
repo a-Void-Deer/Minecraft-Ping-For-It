@@ -20,6 +20,9 @@ import nx.pingwheel.common.marker.MarkerRequestKind;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.network.*;
 import nx.pingwheel.common.presentation.*;
+import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
+import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
+import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
@@ -51,6 +54,7 @@ class InventoryDispatchIntegrationTest {
 		}
 		ClientInventory.PreviewEntryReference preview() {
 			long request = inventory.open(TARGET, BlockFace.WEST, "entity_block");
+			runtime.onInventoryPacket(InventoryS2CPacket.opened(7, 100, 1, request, 1));
 			runtime.onInventoryPacket(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, request, null, request, 1, 1,
 				0, 1, true, InventoryS2CPacket.Status.UNCERTAIN, 0, List.of(entry())).stamp(100, 1));
 			return inventory.selectable(request).getFirst();
@@ -101,8 +105,15 @@ class InventoryDispatchIntegrationTest {
 			InventoryS2CPacket.Status.UNCERTAIN, 0, List.of(Fixture.entry())).stamp(100, 1);
 		f.runtime.onInventoryPacket(data); assertTrue(f.inventory.tracking(marker).entries().isEmpty());
 		var snapshot = new MarkerSnapshot(marker, new UUID(1, 1), TARGET, "entity_block", "attention", new MarkerAnchor(1, 2, 3), 0, 30);
+		var grant = new MarkerContentGrant(TestContentGrants.fromAllowed(Map.of(
+			PresentationBasic.ID, Set.of(PresentationBasic.NAME),
+			InventoryPresentation.ADAPTER_ID, Set.of(InventoryResourceKind.ITEM.fieldId()))),
+			InventoryResourceKind.ITEM);
+		var content = PresentationReceiptContent.inventory(new InventoryCreationSnapshot(InventoryResourceKind.ITEM,
+			"selected", "minecraft:stone", "Stone", null, 7, false, "attention", true, false));
 		f.runtime.onPresentationPacket(PresentationS2CPacket.created(100, 1, 1, snapshot, "Owner",
-			PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.NAME), new PresentationSection(PresentationBasic.ID, 1,
+			PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.NAME), grant, content,
+			new PresentationSection(PresentationBasic.ID, 1,
 			Map.of(PresentationBasic.NAME, new PresentationValue.Text("{\"text\":\"Chest\"}")), false)));
 		f.runtime.onInventoryPacket(data); assertEquals(7, f.inventory.tracking(marker).entries().getFirst().count());
 		f.runtime.onPresentationPacket(PresentationS2CPacket.removed(100, 1, marker, MarkerRemovalReason.EXPIRED));

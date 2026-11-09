@@ -23,6 +23,8 @@ The remote update surface contains these top-level fields:
 - `syncDuration`
 - `budgetDelayNotificationsEnabled`
 - `loggingProfile`
+- `previewMonitorEnabled`
+- `trackingMonitorEnabled`
 
 plus `inventory` administration settings catalogued by
 [server configuration](../../config/server.md#inventory-policy-object). Each
@@ -61,18 +63,27 @@ are numbered from zero, starting at the least significant bit:
 | 27 | `inventory.tracking.distinguishFaces` |
 | 28 | `inventory.tracking.distinguishPlayers` |
 | 29 | `loggingProfile` |
+| 30 | `previewMonitorEnabled` |
+| 31 | `trackingMonitorEnabled` |
 
-The complete valid mask spans bits 0 through 29. The inventory-only mask
-contains exactly bits 5–25, 27 and 28; the monitoring and logging-profile bits
-remain outside it. Existing numeric, monitoring and partition bits retain their
-meanings.
+The complete valid mask spans bits 0 through 31 and is a nonnegative 64-bit
+selection; bit 31 is the highest defined bit, and every bit above it is unknown.
+The complete all-fields selection is `4294967295`. The inventory-only mask
+contains exactly bits 5–25, 27 and 28; the monitoring, logging-profile and
+monitor-collection bits remain outside it. Existing numeric, monitoring,
+partition and logging-profile bits retain their meanings.
 Bit 6 selects both the pending-memory mode and its retained finite value.
+Bits 30 and 31 each select one independent server monitor collection boolean;
+the complete fixed-shape payload still carries both values when unselected.
 The mask identifies which leaves the sender changed; it is not a partial
 snapshot. The complete fixed-shape values must remain valid even when their bit
 is unselected. A missing, zero, unknown, or malformed selection, or an otherwise
 invalid update, performs no mutation. Which fields become dirty and when a plan
 is produced are UI planning details owned by
-[configuration UI](../../UI/settings-screen.md).
+[configuration UI](../../UI/settings-screen.md). Wire encoding and rejection
+of non-canonical, negative, overflowing, overlong, or unknown-bit selections
+are owned by
+[network protocol](../network/protocol.md#server-configuration-routes-server-config-request-v5-server-config-update-v5-server-config-snapshot-v5).
 
 ## Separate policy selector route
 
@@ -120,13 +131,27 @@ stale-response rules above continue to govern when a response is accepted.
 
 The server merges a valid update into the current authoritative snapshot. Fields
 selected by the update replace the authoritative value; every unselected field
-is preserved from that snapshot, including every unselected inventory leaf and
-the logging profile. A rate-limit-only update therefore does not replace the
-channel mode, player-tracking flag, regeneration interval, synchronization
-duration, or any inventory administration value, and a
-synchronization-duration-only update likewise leaves the other selected-surface
-fields intact; an inventory-only update leaves all top-level fields at their
-current authoritative values.
+is preserved from that snapshot, including every unselected inventory leaf, the
+logging profile, and both monitor collection switches, subject to the
+profile-derived relationship below. A rate-limit-only update therefore does not
+replace the channel mode, player-tracking flag, regeneration interval,
+synchronization duration, monitor switches, or any inventory administration
+value, and a synchronization-duration-only update likewise leaves the other
+selected-surface fields intact; an inventory-only update leaves all top-level
+fields at their current authoritative values.
+
+The final logging profile and both monitor switches are selected from the
+update's selected values or the current authoritative snapshot before their
+relationship is resolved. A monitor-only update may therefore enable a switch
+when the current authoritative profile is already `DEBUG`, and an update that
+selects `DEBUG` and a true switch in the same packet may enable it. The resolved
+candidate is then normalized: if its final profile is not `DEBUG`, both monitor
+switches become `false` even when their bits are unselected, and that normalized
+candidate is validated and may be assigned. A later update that selects `DEBUG`
+does not restore a switch that this relationship already cleared. The derived
+clear is an explicit relationship exception to the ordinary preservation of
+unselected fields.
+
 A malformed, missing, unknown, or zero field selection has no effect. If no
 current authoritative snapshot exists when a valid update arrives, the merge
 produces no result and no mutation.
@@ -143,6 +168,10 @@ priority.
 
 ## Server apply order and persistence
 
+A client draft, including a profile change that clears either monitor switch in
+that draft, is planning state only: it changes no authoritative value and starts
+or stops no collection until a valid update reaches this path.
+
 The packet-facing server path processes an update in this order:
 
 1. a corrupt or structurally invalid packet is rejected without reaching any
@@ -151,9 +180,10 @@ The packet-facing server path processes an update in this order:
    configuration state is touched ([security](../security.md));
 3. the update is validated and merged; a rejected update leaves the
    authoritative values unchanged; and
-4. for an applied update, the selected fields are assigned, the configuration
-   is validated, a selected logging profile is published to the server logging
-   runtime, and a persistence write is attempted.
+4. for an applied update, the selected fields and the profile-derived monitor
+   state are assigned, the configuration is validated, a selected logging
+   profile is published to the server logging runtime, and a persistence write
+   is attempted.
 
 Packet acceptance follows the [network protocol](../network/protocol.md); a
 structurally invalid frame is rejected before the transaction.
@@ -184,6 +214,7 @@ Applying a mixed update can also trigger the handler's update notification
 subsequent persistence attempt fails. A logging-profile-only update publishes
 the selected profile and attempts persistence without that domain update
 notification. A persistence failure is not reported back to the client, and the
-already-applied assignment, including a published profile, is not rolled back.
-Persisted-state recovery, migration, and future-version protection are owned by
+already-applied assignment, including a published profile and any
+profile-derived monitor clear, is not rolled back. Persisted-state recovery,
+migration, and future-version protection are owned by
 [configuration revisioning](revisioning.md).

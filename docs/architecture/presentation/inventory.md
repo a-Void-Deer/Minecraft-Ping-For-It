@@ -4,7 +4,10 @@ This topic owns the inventory domain of the versioned presentation subsystem:
 preview, tracking, incremental reads, detached source snapshot capture and
 schema, the bounded creation snapshot carried by an atomic inventory receipt,
 item and fluid variant identity, exact quantities, zero and identity-fallback
-rules, budget and sync policy, and source recovery deadlines. The generic
+rules, budget and sync policy, the session lane policy hint and its refresh
+boundary, source recovery deadlines, and the performance monitor's measurement
+meaning, lane attribution, non-interference, sampling lifetime, and HUD
+projection and presentation. The generic
 mechanism — source access, capture results, cost accounting, and sync publication — is
 owned by [shared sources](shared_sources.md). The reason a tracked inventory
 keeps the live Ping and original target identity instead of a source-instance
@@ -25,6 +28,9 @@ caches, is recorded in
 observation pooling and active-prefix admission without shared authority are
 explained by
 [D0017](../../decisions/D0017-certified-tracking-observation-pools.md).
+Provider-owned fluid validation and the separation between frozen recipient
+content authorization and current source authority are explained by
+[D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md).
 
 Coverage scope and pending runtime evidence for the ordinary-block and
 provider-confirmed external preview and tracking, item-choice create and native
@@ -44,10 +50,13 @@ Marker lifetime remains owned by
 The inventory domain has two closed resource lanes, `ITEM` and `FLUID`. One
 preview request opens both authorized lanes for the same frozen target and face;
 it does not open a second target or session for fluid. Each lane has its own
-field authorization, source binding, status, baseline, revisions, checksum,
-completion barrier and historical publication proof. Equal registry IDs, opaque
-entry keys or baseline numbers in different lanes never identify the same data.
-Revoking, invalidating or repairing one lane cannot clear or complete the other.
+recipient field authorization, source binding, status, baseline, revisions,
+checksum, completion barrier and historical publication proof. Equal registry
+IDs, opaque entry keys or baseline numbers in different lanes never identify
+the same data.
+Invalidating or repairing one lane cannot clear or complete the other, and a
+later recipient content-authorization change does not retroactively clear an
+already frozen lane.
 The shared request, commit replay and close boundary is owned by
 [network protocol](../network/protocol.md#inventory-previewtracking-route-inventory-v2),
 and field declarations by
@@ -68,6 +77,79 @@ entity/private-inventory context or new Target Type. A provider-confirmed
 external block remains eligible only in the already supported target contexts;
 the [Sable binding](../../integrations/sable.md#server-information-sampling)
 does not enable moving or otherwise unsupported storage by itself.
+
+## Receiver authorization freeze points
+
+The [global frozen recipient content authorization](presentation_snapshot.md#frozen-recipient-content-authorization)
+contract owns the complete effective set, its resolution inputs, and the effects
+of later grants and revocations. Inventory owns only when its own recipient set
+freezes:
+
+- Opening a Preview request resolves and freezes that request's recipient
+  content authorization for each lane it opens. The request-scoped `OPENED`
+  response carries that per-lane grant before any Preview data; its wire
+  grammar is owned by
+  [network protocol](../network/protocol.md#inventory-previewtracking-route-inventory-v2).
+  The Preview set is independent of any Ping.
+- A successful `SELECT` resolves and freezes the new Ping's recipient content
+  authorization at creation, including the creation snapshot receipt and later
+  Inventory Tracking content. The new Ping's set is independent of the Preview
+  that supplied its selection.
+
+A later lane denial or configuration change that only changes recipient content
+authorization does not retroactively clear an existing Preview lane or Ping.
+Current session and view validity, known-marker eligibility, marker expiry and
+source-owner read authority remain current gates. Those source-owner checks
+cover actual read conditions such as world state, lock or key, loot table, lease
+and read scope; they do not re-evaluate a presentation field permission that was
+already frozen. Resource-budget refusal and source failure remain separate
+outcomes.
+
+When the recipient is also the source owner, the source-owner recheck remains
+only the independent read conditions above; revoking that recipient's
+presentation field permission does not terminate the old Ping through that
+recheck. [D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md)
+explains the low-overhead and timeliness trade-offs.
+
+## Lane policy hint and refresh
+
+The per-lane `POLICY` view is a future-input hint for the inventory session: it
+advertises which target types may open a new Preview or submit a new selection
+in that resource lane. It is not the authorization of an accepted Preview or an
+existing Ping. The Preview freeze at `OPEN` and the Ping freeze at creation are
+owned by [receiver authorization freeze points](#receiver-authorization-freeze-points);
+a hint refresh neither clears nor widens either.
+
+The server re-evaluates the hint at future-input boundaries: a `HELLO` that
+creates or renews the session, a new `OPEN`, a new `SELECT` that creates a Ping,
+a presentation session or compatible-schema change that changes the session view
+or the lane's decode eligibility, and an explicit configuration change or
+permission-provider replacement that can change the lane's target-type
+authorization. A new `OPEN` resolves its actual target type and a new create
+resolves its actual audience from current authorization; neither is authorized
+by the retained hint. Current source-owner read authority, read scope, source
+identity, marker expiry and resource budgets remain live checks at their
+existing points.
+
+Between those triggers, the session may retain the last generated hint. A
+replaceable permission provider whose internal state changes without a
+replacement or another observable trigger is not polled merely to keep the hint
+current; the hint and any diagnostics derived from it may report the old view
+until a trigger refreshes it. A stale hint is not authority for a new Preview or
+create; each resolves its own authorization.
+
+A newly generated hint supersedes an older queued hint for the same resource
+lane. A queued hint is delivered only while the inventory session that owns it
+and its final epoch/view stamp remain current; an older or fenced hint is
+discarded rather than advertised. The existing `POLICY` kind and the current
+inventory route and schema versions are unchanged; the
+[inventory-v2 route](../network/protocol.md#inventory-previewtracking-route-inventory-v2)
+owns the wire grammar.
+
+This refresh boundary governs only the inventory lane hint. The independent
+non-Ping Property preview keeps its advertised/fresh intersection under
+[target content preview](presentation_snapshot.md#target-content-preview), and
+the session `SECTION` mask and property-preview checks remain separate work.
 
 ## Source identity, invalidation and recovery
 
@@ -152,9 +234,9 @@ or tracking consumers must not reactivate an expired consumer.
 External providers keep their established stable target IDs, leases and removal
 rules. The ordinary-block replacement tolerance neither extends nor revives an
 expired external lease, and it does not rewrite target identity globally. A
-committed source whose tracking point moved or whose member topology changed
-invalidates the old observation, except for the separately owned
-[Sable fluid sub-level transition](../../integrations/sable.md#fluid-sub-level-transition).
+committed source whose tracking point moved or whose provider-visible member
+topology changed invalidates the old observation, except for the separately
+owned [Sable fluid sub-level transition](../../integrations/sable.md#fluid-sub-level-transition).
 Recovery re-resolves and reauthorizes the current provider-confirmed binding;
 an arbitrary wrong sub-level or tracking point is rejected rather than adopted.
 Ordinary recovery uses a fresh baseline and complete observation, never the old cut or
@@ -178,12 +260,21 @@ support for other containers is not implied.
 Certification is admitted metadata work, with no content read or cached
 permission result. It establishes the concrete route, current world and registry
 objects, exact member objects, ordered membership, segment boundaries and every
-ordered member-local visible address. Matching aliases, slot totals or hashes
-alone are insufficient. Hit-relative roles and face labels may be normalized
-only after the physical address sequence is proven identical. Each participant
-retains its own exact binding, proof and owner-authorized read port for scanning
-and completed evidence; one participant's successful check never authorizes
-another.
+ordered member-local visible address. For a supported vanilla chest route, the
+certificate is built over an owned snapshot of its entity, ordered slot-address
+and member lists, so later producer-side mutation cannot rewrite the certified
+route. The ordered address mapping is proved once when the certificate is built.
+The immutable mapping establishes layout evidence, not a permission or content
+result: later current validation still checks the live world and registry, exact
+member identity and loaded state, chest pairing and container size, and the
+source owner's read authority and lock conditions. Current validation does not
+re-walk the frozen mapping or consult producer-owned address lists, and the
+mapping never substitutes for those live checks. Matching aliases, slot totals or
+hashes alone are insufficient. Hit-relative roles and face labels may be
+normalized only after the physical address sequence is proven identical. Each
+participant retains its own exact binding, proof and owner-authorized read port
+for scanning and completed evidence; one participant's successful check never
+authorizes another.
 
 The pool key combines the certified graph and the round's frozen partition
 policy. It additionally includes the owner when player separation is enabled and
@@ -262,7 +353,9 @@ seed, reset a baseline, refund paid work or alter marker lifetime.
 Inventory preview and tracking are enabled by default; no separate user
 opt-in switch gates them. Each request passes the existing server gates:
 target and field permission, range acceptance, lock state, and safe-read
-validation. The preview resolves accepted ordinary-block targets and
+validation. Opening the request freezes its per-lane recipient content
+authorization under [receiver authorization freeze points](#receiver-authorization-freeze-points).
+The preview resolves accepted ordinary-block targets and
 uncommitted provider-confirmed external candidates; entity, private-inventory,
 and committed-external contexts report unavailable until their owning contracts
 exist.
@@ -288,6 +381,18 @@ provider reference or tracking state and resolves no marker group key. The
 request identity scopes preview state and publication within the inventory
 session; quota accounting is owned by [Budgets, queues and memory](#budgets-queues-and-memory).
 
+A retained Preview request keeps its logical request identity, lanes, and any
+pending terminal status across a same-epoch presentation view rebuild. Waiting
+for the rebuilt view's replacement `OPENED` grant is temporary and preserves
+that request and status, not an old publication context: publication is
+re-established for the rebuilt view and baseline, and earlier fences are
+retired. The rebuild does not permanently revoke the request. No `PREVIEW` frame
+for that request, including the terminal `INVALID` status, is handed off until
+the replacement `OPENED` grant has successfully handed off. Cancellation and a
+true presentation epoch change keep their existing release boundaries and are
+not extended by this retention rule; cancellation remains owned by
+[network protocol](../network/protocol.md#inventory-previewtracking-route-inventory-v2).
+
 The preview-to-tracking handoff follows the existing create authority first:
 the server materializes an external candidate once, then binds the preview's
 original input to the committed target through both current provider-confirmed
@@ -295,10 +400,10 @@ physical read bindings. An ordinary block must match its original identity
 exactly; an external candidate's current source and the committed source must
 resolve to the same provider, sub-level, physical root block and registry, so
 same-registry candidates and different hit roots cannot cross-bind. The
-owner's current read authority and the preview's original source/layout evidence
-are revalidated through metadata checks, the selection reference and annotation
-are checked, and retained memory is admitted before the tracking lease is
-stored. Any failure releases the acquired reference and stores nothing.
+owner's current source read conditions and the preview's original source/layout
+evidence are revalidated through metadata checks, the selection reference and
+annotation are checked, and retained memory is admitted before the tracking
+lease is stored. Any failure releases the acquired reference and stores nothing.
 
 Selection expresses intent to track the selected resource at an authorized source,
 not proof that its previously observed slot still contains it. Ordinary input
@@ -337,11 +442,14 @@ An exact reference takes only its exact key's current server-retained count;
 an aggregate reference takes only the current folded key's count, never a
 different resource-ID subtotal or a retired exact entry. The preview may still be
 partial, and the retained count may be newer than the last row delivered to the
-client. No client-screen quantity authorizes the seed. Current target, source,
-owner/face binding, read permission, annotation, rate, channel, audience,
-selection-capacity and memory gates still apply. Resource absence at the old
-observed slot does not veto an otherwise valid selection: the complete tracking
-observation decides the subsequent count. The new Ping's whole-marker type is the
+client. No client-screen quantity authorizes the seed. The create resolves the
+new Ping's recipient content authorization afresh and freezes it at creation
+under [receiver authorization freeze points](#receiver-authorization-freeze-points);
+current target, source, owner/face binding, source read conditions, annotation,
+rate, channel, audience, selection-capacity and memory gates still apply.
+Resource absence at the old observed slot does not veto an otherwise valid
+selection: the complete tracking observation decides the subsequent count. The
+new Ping's whole-marker type is the
 frozen Target Type's default Ping Type; the chosen Ping Type travels as a
 separate resource annotation rather than as the whole-marker type. The item
 annotation's eligible Ping Type set is the target's effective
@@ -395,8 +503,8 @@ authoritative long amount, aggregate mode and admitted annotation. A missing
 retained row rejects the create and never becomes a zero or an empty entry. The
 snapshot is made from server-retained data, not a client-uploaded quantity, a
 recipient cache or a later Tracking result; current source and token validation,
-target and source binding, owner/face read permission, annotation eligibility,
-rate, range, audience and marker-lifetime gates still apply.
+target and source binding, owner/face source read conditions, annotation
+eligibility, rate, range, audience and marker-lifetime gates still apply.
 
 `previewComplete` describes whether the server handed off the current complete
 Preview cumulative cut. A client acknowledgement, an empty publisher queue or a
@@ -445,9 +553,11 @@ The initial tracking publication carries that quantity with `UPDATING` and
 `completeScan=false`, even if the preview itself completed. An exact seed is not
 grey merely because it is updating; an aggregate keeps its independent All
 variants qualifier and grey identity quality. Publication follows the committed
-Basic notification and each recipient's current authorization and known-marker
-gate; a recipient needs no preview of its own. The owner's metadata/read gates
-are checked again after creation callbacks and before retained data sends.
+Basic notification, the Ping's creation-frozen recipient content authorization,
+and each recipient's current session, known-marker and expiry gates; a recipient
+needs no preview of its own. The owner's current source-read and metadata
+conditions are checked again after creation callbacks and before retained data
+sends.
 Marker storage, sidecar installation, Basic notification and the correlated
 selection outcome remain synchronous. Seed quantities wait for the next
 eligible normal publication tick and its current budgeted source validation;
@@ -509,20 +619,22 @@ completed totals remain displayed while a replacement is partial; partial
 replacement counts never overwrite them. A slow consumer keeps its paid
 observation and progress instead of being starved by newer sweeps.
 
-The sampling owner's container read condition is the sampling authority: the
+The sampling owner's container read condition is the source-read authority: the
 preview requester, or for tracking the bound Ping owner, is checked for lock,
 loot-table, loaded, block-identity and view-topology state, and those checks
 continue to run on every read, cache consumption and recovery probe. The
 sampled data is delivered to the Ping's normal frozen
 [audience snapshot](../authority/target_validation.md#audience-snapshot-at-create)
-under the existing per-target-type
+under the Ping's
+[frozen recipient content authorization](presentation_snapshot.md#frozen-recipient-content-authorization),
+which resolves the per-target-type
 [field policy](presentation_snapshot.md#per-target-type-field-policy). A
 recipient does not need to hold the container's key or reproduce the owner's
 look or read condition, and no new inventory distance or audience policy is
 introduced: the marker's established audience and acceptance range remain
-authoritative. The owner's read condition is checked again before cached or
+authoritative. The same source-read condition is checked again before cached or
 queued valid inventory is published: if it no longer holds, that data is not
-sent to a recipient even when the recipient's field permission remains. This
+sent even when the recipient's frozen content authorization includes it. This
 send-time check asks nothing of the recipient and changes no audience or
 distance rule. Ordinary content changes do not rewrite already retained slot
 observations or invalidate the source topology; unread native slots follow
@@ -531,11 +643,9 @@ detached snapshot keeps its captured contents.
 
 Apart from the selected-preview bootstrap above, only a complete scan produces
 a normal valid quantity update. One logical batch may span several periods and
-may contain more entries than one fragment
-carries; it must not rescan the inventory once per fragment. Stream updates are
-revisioned per item key, so a late item for one key is not discarded by a
-packet-global revision for another key. A key that has not been received stays
-unchanged.
+may contain more entries than one fragment carries; it must not rescan the
+inventory once per fragment. Per-key revision and sparse updates follow
+[sync publication](shared_sources.md#sync-publication).
 
 A selected item that is absent from a complete, successful, authoritative scan
 is reported as zero even when the container holds other items; an empty
@@ -570,15 +680,13 @@ Scheduling must prevent unbounded restart or starvation against a stable,
 serviceable source, but completion is not guaranteed under sustained overload
 or insufficient bandwidth.
 
-Baseline assembly is bounded. A temporarily displayed value does not mean the
-baseline is complete, and a per-item stream is applied item by item rather than
-as one atomic batch. Checksums are computed over the recipient's authorized
-selected projection, its identity mode, and explicit zeros; offered and
-delivered or transmitted watermarks are distinct, and a checksum must not
-compare partial fragments with a future state. A gap or mismatch schedules a
-snapshot repair under the cooldown and waiting rules above. Writing an update into the send queue is not proof
-that the client applied it, and a mismatch alone does not justify a TCP-loss
-conclusion.
+Baseline assembly is bounded. Checksums are computed over the recipient's
+selected projection under its frozen content authorization, its identity mode,
+and explicit zeros; a checksum must not compare partial fragments with a future
+state. A gap or mismatch schedules a snapshot repair under the cooldown and
+waiting rules above; a mismatch alone does not justify a TCP-loss conclusion.
+Baseline fragmentation, item-by-item application and offered-versus-delivered
+watermarks follow [sync publication](shared_sources.md#sync-publication).
 
 ### Publication authority and progress
 
@@ -601,11 +709,13 @@ follow the provider's separate continuity contract rather than a weak match
 authorizing a new scope.
 
 Every quantity-bearing frame, including a provisional seed, and every
-success-bearing completion, checksum or heartbeat receives a fresh owner/source
-check immediately before irreversible transport handoff. It runs after actual
-encoding/budget measurement and wire eligibility, with current recipient,
-session, known-marker and expiry checks. An earlier same-tick approval is not a
-permission cache. Failure-only controls need no successful source grant. A
+success-bearing completion, checksum or heartbeat receives a fresh source-owner
+read-condition check immediately before irreversible transport handoff. It runs
+after actual encoding/budget measurement and wire eligibility, together with
+current session, known-marker and expiry checks. The recipient content
+authorization is the owning Preview request's or Ping's frozen set and is not
+re-evaluated here; an earlier same-tick source approval is not a read-condition
+cache. Failure-only controls need no successful source grant. A
 defer advances no part index, delivered watermark or heartbeat and spends no
 wire bytes for an unhanded frame; attempted validation remains paid. Source
 failures are latched. Affected valid publications are withdrawn through normal
@@ -617,12 +727,49 @@ seed-retirement and grey history rules above.
 Before scan or ingress work on each new tick, one rotating pending valid-frame
 context may reserve validation capacity from the existing probe, provider-work,
 item-work and workspace ledgers. Same-tick ingress neither resets the ledgers
-nor creates another protected opportunity. Reservation is not permission: the
-actual outgoing cut is checked fresh at handoff. Other frames use remaining
-capacity, and newly queued work may wait until the next tick. This adds no
+nor creates another protected opportunity. Reservation is not a source-read
+grant: the actual outgoing cut's source conditions are checked fresh at
+handoff. Other frames use remaining capacity, and newly queued work may wait
+until the next tick. This adds no
 unmetered budget or guarantee under insufficient memory/wire capacity or an
-unserviceable proof. Fewer shared getters do not remove per-player authority
-metadata work or promise lower CPU, memory or allocation rate.
+unserviceable proof. Fewer shared getters do not remove per-participant
+source-read metadata work or promise lower CPU, memory or allocation rate.
+
+## Idle source health scheduling
+
+Only a completed Preview or Tracking observation is eligible for the periodic
+source health check: a completed Tracking observation is idle between sweeps,
+and a completed Preview is idle after its single scan. A newly admitted consumer
+or late join performs its own initial check immediately; once idle, its later
+checks are due one corresponding configured period after its last completed
+check, using the Preview period for Preview and the Tracking period for
+Tracking. A completed Preview is not recaptured, restarted or repopulated by an
+idle check. Tracking keeps its established next-sweep due time independently.
+
+An active or incomplete sweep continues to advance under the existing per-tick
+budget; idle scheduling does not gate, replace or reset its progress. If a due
+health check or sweep cannot run within the current budget, it remains due and
+is retried at the next eligible opportunity rather than moving a full period
+later. A live period change recalculates the next health-check due from the
+consumer's last completed check under the new period.
+
+Each consumer's check history is its own. A newly admitted, late-joined or
+renewed association does not inherit another consumer's last-check time,
+health-check evidence or validity result. Tracking with no recipients retains
+its existing skip. Expiry, removal or close clears the consumer's idle-health
+state.
+
+An `INVALID` consumer keeps the existing per-tick eligible recovery attempt
+rather than waiting for an idle check. The schedule does not add a hard
+wall-clock invalidation deadline: a budget-deferred check may be delayed, and no
+fixed-time or strict-freshness detection is guaranteed.
+
+Actual source reads, cache or queued-value consumption, recovery probes and
+publication handoffs still perform their current source, owner, scope and
+read-condition checks at the time they run. The idle check is an additional
+opportunity to detect invalidity, not a permission cache or a substitute for
+those checks. It reuses existing periods and tick budgets, favors low overhead
+and timely detection over strict freshness, and introduces no new configuration.
 
 ## Item variants and component fallback
 
@@ -1012,6 +1159,8 @@ frequency with the reason and the source context.
 
 ## Budgets, queues and memory
 
+### Quota scopes and size ceilings
+
 Preview and tracking keep separate period, byte, slot and quota accounting, and
 the server keeps a shared source-scan allowance plus per-recipient wire-byte
 accounting. Quota identity is preview-client for preview and target for
@@ -1087,6 +1236,8 @@ current status width, not a provisional single-part size. An indivisible entry
 that cannot fit is dropped whole with explicit incompleteness rather than left
 permanently pending; other entries still obey their normal delivery budgets.
 
+### Scan, validation and admission
+
 The shared scan allowance is configurable and measured in slots. Native
 incremental reads charge actual live slot visits, including empty and throwing
 attempts, together with their admitted item-processing work; budgeting only a
@@ -1098,12 +1249,12 @@ the structure guard and finite shared memory. That exception does not exempt
 native live getters from the slot allowance.
 
 One caller-backed validation allowance is admitted before initial source
-resolution and follows the operation through nested discovery, validity,
-member, mapping and read checks. Production ITEM discovery admits the paid root
-probe first, then the actual container or provider-lookup route, then the actual
-returned-layout finish, each before the callbacks it authorizes, instead of
-reserving one generic worst case up front; legacy non-staged entry points keep
-the complete profile.
+resolution and follows the operation through the applicable nested discovery,
+validity, provider/member, mapping and read checks. Production ITEM discovery
+admits the paid root probe first, then the actual container or provider-lookup
+route, then the actual returned-layout finish, each before the callbacks it
+authorizes, instead of reserving one generic worst case up front; legacy
+non-staged entry points keep the complete profile.
 It is not reset at each helper or item. Attempted work remains paid after
 denial, a defer or an exception; unused admission is released without
 refunding work already attempted. A stage refusal or budget defer does not
@@ -1140,6 +1291,8 @@ the finite internal work and memory guard and both logical quotas survive, and
 unlimited is never implemented as a sentinel, integer overflow, unbounded array,
 or unbounded work loop.
 
+### Retained memory and creation state
+
 Pending memory is one server-wide bound covering preview and tracking together,
 with a finite configurable value or explicit unlimited mode. Unlimited mode uses
 a finite internal memory guard. It is not a per-queue bound, and every finite
@@ -1165,6 +1318,8 @@ fan-out and staging capacity. It enters neither the Preview send queue nor the
 Tracking baseline, and it carries no guarantee that every recipient receives
 the initial in the same tick. Insufficient admission may reject the create or
 leave bounded retry work; it is not an authorization denial.
+
+### Source metadata and validation accounting
 
 Owned source metadata, including frozen views, member layouts and slot mappings,
 has a retained charge separate from fixed round state. Discovery admission holds
@@ -1204,6 +1359,8 @@ and [Create fluid tank](../../integrations/create.md#fluid-tank-inventory-provid
 generic audited-operation semantics by
 [shared sources](shared_sources.md#source-access); generic certified chests,
 legacy and external reads retain their previous path.
+
+### Scratch, journals and retained capacity
 
 Item processing keeps effect-copy descriptors and encoding-planner scratch local
 to one root, allocating each group only when used. Descriptor ranges preserve
@@ -1245,6 +1402,8 @@ Slot capacity and catalogue variant/payload capacity are independent
 finite guards: admitting a large repeated-item inventory does not promise the
 same slot count of arbitrary distinct variants. Capacity exhaustion is explicit
 incompleteness, never a completed total or an absence-derived zero.
+
+### Wire, queue and delivery accounting
 
 Global wire accounting uses excess smoothing. With a period
 base `B`, actual sends `s_i` in a period, and excess
@@ -1317,11 +1476,12 @@ intervening callback are merged.
 The native [mixed-time sweep boundary](#native-incremental-reads) applies to
 movement between fluid addresses as it does to item slots.
 
-Every fluid lookup, held-handler read and publication rechecks the original
-root/member identities, expected registry, current route and topology, owner
-authority, loaded scope and frozen real face. Historical identity evidence is
-non-owning; it does not preserve an old handler as a content-read route. Equal
-count or capacity is not a certificate of unchanged addressing. Generic opaque
+Every fluid lookup, held-handler read and publication applies the target-level
+checks owned by
+[fluid provider trust and validation exceptions](#fluid-provider-trust-and-validation-exceptions).
+Historical identity evidence is non-owning; it does not preserve an old handler
+as a content-read route. Equal count or capacity is not a certificate of
+unchanged addressing. Generic opaque
 providers can detect only changes exposed by their public native identities,
 route, address count and capacity metadata. A matching weak witness does not
 make a hidden same-identity, same-capacity remap detectable. Generic
@@ -1332,10 +1492,10 @@ not certified pooling or atomicity. Notice content and failure isolation follow
 
 Fabric may reacquire a new public wrapper for the same stable native underlying
 storage when bounded validation establishes that continuity. Reads use the
-current wrapper, not a retained old view, and this grants no new face, member
-scope or permission. A merge, detachment or changed underlying mapping
-invalidates the old observation. Create's specialized tank gates and controller
-quantity ownership are owned by
+current wrapper, not a retained old view, and this grants no new face, provider
+scope or source-read authority. A merge, detachment or changed underlying
+mapping invalidates the old observation. Create's specialized tank gates and
+controller quantity ownership are owned by
 [Create](../../integrations/create.md#fluid-tank-inventory-provider).
 
 Audited adapters preserve the selected face, ordered member and segment-local
@@ -1354,12 +1514,23 @@ is not retried. This process-local port retains no mutable world data, and expli
 injected ports remain independent.
 
 Optional resident-scope evidence is supplied lazily after the source's eager
-member and owner prechecks. The compatibility path invokes the supplier once and
-dispatches through the existing scope overload, preserving legacy overrides.
-Guarded access rechecks its current gate around delegation and guards the returned
-access. A provider owning complete resident validation may decline the factory,
-but cannot retain it or postpone source authority checks; mod-specific use is
-owned by [Create](../../integrations/create.md#vault-inventory-provider).
+member and owner prechecks. The current-authority verdict remains the full-source
+gate at mutable-callback boundaries; evaluating it rechecks the current source and
+every admitted member, may execute provider or lock callbacks, and is not a
+callback-free metadata read. Frozen membership, audited classification and
+member-local address mapping are metadata about the admitted source/layout, not a
+token that carries a prior current-authority result. They do not waive the
+current check: the established membership and mapping boundaries still run their
+nested authority checks, and the caller still performs its explicit current check
+before and after mutable callbacks; a successful lookup does not by itself admit
+an unknown member, wrapper or delegate. The compatibility path invokes the
+supplier once and dispatches through the existing scope overload, preserving
+legacy overrides. Guarded access rechecks its current gate around delegation and
+guards the returned access, while the existing ITEM all-member prechecks and
+per-read current checks remain in force. A provider owning complete resident
+validation may decline the factory, but cannot retain it or postpone source
+authority checks; mod-specific use is owned by
+[Create](../../integrations/create.md#vault-inventory-provider).
 
 Existing unverified mod-provider live support remains available under explicit
 external trust in the provider's getter and lookup internals. Its admitted call
@@ -1391,13 +1562,16 @@ empty result.
 
 A provider-confirmed external candidate uses the same frozen local face, one of
 the six block directions, and never an unsided or look-inferred direction. Its
-membership scope is resolved fresh for each operation and is never retained
-across ticks; a stale or cross-tick predicate never authorizes a read. Source
+provider binding is resolved fresh for each operation and is never retained
+across ticks; a stale or cross-tick binding never authorizes a read. Source
 movement and topology transitions follow the
-[recovery contract](#source-identity-invalidation-and-recovery). Every supported
-loader's capability route is entered only under that same frozen local face,
-and a capability read is re-checked against the current membership scope, so a
-revoked member or handler is unavailable rather than read.
+[recovery contract](#source-identity-invalidation-and-recovery). For an `ITEM`
+candidate, the loader capability route is entered only under that same frozen
+local face, and its current item membership scope is re-checked so a revoked
+member or handler is unavailable rather than read. A `FLUID` candidate uses the
+provider's positive scope endorsement for its internal storage unit under
+[fluid provider trust and validation exceptions](#fluid-provider-trust-and-validation-exceptions),
+including that section's target-level checks and root gate.
 
 A double chest is read as the pair, never either half alone. The pair is a
 valid source only when both halves are loaded, share the same container type,
@@ -1408,8 +1582,8 @@ under the same frozen face as one consistent source view, each contributing
 the slots that face permits; a pairing or mapping change is the view-topology
 invalidity owned by
 [source identity, invalidation and recovery](#source-identity-invalidation-and-recovery),
-not a completed mixed view. Any registered member source follows the same
-all-members precheck: every member is gated before any member content is read,
+not a completed mixed view. Any registered `ITEM` member source follows the same
+all-member precheck: every item member is gated before member content is read,
 and a failing member makes the source unavailable rather than partially empty.
 Initial and final certified checks, catalogue creation and reads gate loaded
 members and a chest's cross-chunk partner before querying their state; no
@@ -1425,6 +1599,40 @@ Source reads must not trigger loot-table generation, force-load chunks, or
 modify the world. If a read cannot satisfy those gates, the source reports
 unavailable instead of pretending that every private provider API is supported.
 The same safety rules apply to recovery probing.
+
+### Fluid provider trust and validation exceptions
+
+The inventory domain treats a `FLUID` source as one provider-scoped access unit.
+It does not require every physical member to pass an independent Ping
+access-authorization check, and the target provider owns its internal member
+layout, storage relationships and handler view. Ping validates the target-level
+applicability conditions: the target context and expected registry match; the
+source is loaded and readable on the server thread; the frozen face applies; the
+source owner's current read conditions hold; and the provider's current route
+accepts the operation. A provider's own metadata structure rules, such as a
+controller or mode requirement, remain source applicability rules; they are not
+recipient content authorization.
+
+The root gate is unchanged. An ordinary Minecraft block root must be positively
+`OUTSIDE` any external/Sable provider scope; an external block root must be
+positively `INSIDE` the matching provider scope. `UNKNOWN` membership rejects the
+source in either case.
+
+Provider trust begins after that gate resolves positively and does not require
+the root to prove every internal member address.
+
+Source validity, read-only behavior, the frozen face, variant identity, checked
+arithmetic and finite resource budgets remain unchanged. Existing `ITEM` rules,
+including certified double-chest and
+[Vault](../../integrations/create.md#vault-inventory-provider) all-member
+validation, are not relaxed.
+
+The code-owned, hardcoded target set requiring specialized validation is empty;
+a future built-in or external plugin that provides a custom provider for such
+targets is a product direction whose API, matching, registration priority and
+fallback remain undecided. [D0019](../../decisions/D0019-provider-trust-and-frozen-recipient-authorization.md)
+explains the low-performance-cost priority and the timeliness/correctness
+trade-off.
 
 ## Status presentation
 
@@ -1474,3 +1682,563 @@ open inventory list legitimately loading. The selector's cancellation and close
 response to a request that is no longer present is owned by
 [wheel](../picking/wheel.md#inventory-selection-stay-open); the inventory topic
 does not restate it.
+
+## Performance monitoring
+
+This section owns the Inventory performance monitor's measurement meaning, lane
+and shared attribution, non-interference and sampling lifetime. The persisted
+server collection switches and client HUD and selector keys are owned by [server
+configuration](../../config/server.md#persisted-fields) and [client
+configuration](../../config/client.md#performance-monitor); the complete
+selector grammar by [metric selector
+identifiers](../../config/client.md#metric-selector-identifiers); HUD controls by
+[settings screen](../../UI/settings-screen.md#performance-monitor-controls); HUD
+projection and presentation by [HUD projection and
+presentation](#hud-projection-and-presentation); numeric authority by [server
+configuration authority](../authority/server-config.md#remote-performance-telemetry);
+and the monitor wire routes and message family by
+[network protocol](../network/protocol.md).
+The collection-versus-viewing boundary is recorded in
+[D0020](../../decisions/D0020-monitor-collection-boundary.md).
+Coverage, final automated acceptance and remaining live evidence are inventoried
+in
+[performance monitoring verification](../../testing/verification/inventory.md#performance-monitoring-coverage-and-production-evidence).
+
+### Collection lanes and sampling lifetime
+
+Server Preview and Tracking collection lanes are independent. Either lane can be
+enabled alone, and enabling a lane collects its bounded values even with no
+viewer or subscriber. Subscription, HUD state and client metric selection
+establish transmission and display demand only; they never enable, disable, gate
+or reset collection. With both lanes off, no new numeric server sample is
+produced.
+
+One server period produces at most one immutable latest sample regardless of the
+number of subscribers. The accumulator keeps a bounded rolling window; transfers
+carry only the latest sample, with no per-subscriber sampling, retained history
+or fan-out. Shared values require at least one enabled server lane and are
+sampled once for the whole server. Reading the latest sample does not advance
+the window or trigger sampling.
+
+The accumulator is instance-owned by its endpoint and runs on that endpoint's
+thread; local and server accumulators never share a clock, sample or aggregate.
+A server lifecycle reset advances the server and collection generations; an
+actual enable-mask change advances the collection generation. Either clears
+pending events, the rolling window and the latest sample. A client disconnect,
+server replacement or permission-generation change clears the mirrored server
+readings rather than carrying them across connections. Control status is separate
+from numeric data; its control summary is owned by the [settings
+screen](../../UI/settings-screen.md#performance-monitor-controls) and its authority
+and availability by [server configuration
+authority](../authority/server-config.md#remote-performance-telemetry), while
+HUD source-state presentation is owned by [HUD projection and
+presentation](#hud-projection-and-presentation).
+
+### Elapsed phases and attribution
+
+Elapsed values are monotonic durations measured on the owning endpoint, not
+absolute timestamps. Every timing reading carries total, count and max; the mean
+is derived. Repeated synchronous nesting of the same lane and phase is one
+inclusive union, not a separate reading per nesting level. A finer same-lane
+phase remains inside its containing phase's inclusive total; parent and child
+readings are not added together.
+
+Server timing phases are ingress, tick work, capture, read, detached encode,
+measure and publish, recorded at the existing packet-ingress, backend-tick,
+capture, source-read, detached-encoding, frame-measurement and publisher
+boundaries. Ingress and tick work are separate top-level intervals, each with
+its own union, and neither represents the whole Minecraft server tick or MSPT.
+A synchronous callback can nest one boundary inside the other; each interval
+keeps its own union, so the intervals can overlap and are not combined as
+disjoint costs. The remaining phases are inclusive detail within inventory work,
+not additional summary totals.
+
+Work that synchronously enters another lane's scope is excluded from the caller
+lane's phase and boundary timing and charged to the lane that actually executes
+it. A lane disabled while its peer is enabled still fences attribution: its
+nested interval is not charged to the enabled peer, and the disabled lane
+records no sample. Cleanup of known lane state is charged to that lane even when
+a neutral session refresh triggers it; work with no known lane owner is assigned
+to neither lane. Lane timings therefore measure attributed inventory work, not
+complete backend CPU time.
+
+A `SELECTED` or `REJECT` outcome's measure and publish work belongs to the
+Tracking lane because it is Tracking's operation, even when the original
+Preview request's wire ledger owns its byte and budget charge. Those existing
+counters stay with that ledger and are not moved between lanes by timing
+attribution. A timing scope that exceeds its bounded nesting capacity makes the
+affected readings unavailable rather than a partial exact total; in-flight
+intervals are discarded and the next top-level interval starts clean. A
+saturated timing total remains a lower bound, as described below.
+
+Local timing phases are apply, prepare and draw at the existing client
+boundaries. They use the client clock and stay separate from every server timing;
+a local and a server duration are never summed.
+
+### Work, queue and memory readings
+
+Work accounting preserves units. Per-lane logical slot consumption belongs to
+that lane's client or target quota subject for the period. Shared physical slot
+or decode work, capture reads, probes, provider work, processing charge and
+publication work are charged once for the shared operation; the charge rules
+remain owned by [shared sources](shared_sources.md#cost-accounting) and [budgets,
+queues and memory](#budgets-queues-and-memory). Logical, physical, processing,
+byte and memory units are never weighted, converted or summed into one
+utilization figure, and logical consumption is not multiplied by recipients.
+
+The shared read-attempt counter records the attempted slot or retained-decode
+units charged by the existing source-step paths: native, legacy, certified
+pooled and `SELECT` witness reads, including a failed attempt, a typed failure
+after a validated prefix and an opaque source's conservative grant. It records
+the attempt actually charged by the source pipeline, not returned slots, READ
+timing intervals or successful journal entries, and is therefore an accounting
+attempt rather than an exact live physical-getter count. A paid journal replay
+charges logical consumption but adds neither another physical slot charge nor
+another read-attempt event. Whole-capture read work keeps its separate
+`capture_reads` budget; validation, probes and provider work are not read
+attempts. A defer advances no completion state.
+
+The read-attempt counter is a rolling shared event total, not the
+current-period `physical_slots` budget reading. It is not filtered by which
+server lane is enabled: shared work is collected once for the whole server, not
+repeated per consumer, recipient or enabled lane. A disable-to-enable transition
+does not backfill counter events from the disabled interval; a gauge that
+establishes its baseline can still include backlog that already existed.
+
+Budget readings are the authoritative ledger's current period reading for its
+limit, used, reserved, remaining and admissible remaining. The reading is taken
+before that period's ledger reset; it is not a sum of the rolling monitor
+window. Admissible remaining can be lower than remaining because another guard
+applies; it is not reconstructed as limit minus used. An unavailable budget
+remains unavailable.
+
+Queue gauges report each lane's regular recipient-context queues.
+Pending-entry and admitted-frame values are lane totals over those contexts, not
+per-request or per-recipient values. `pending_entries` is the number of pending
+absolute entries awaiting admission into a publication batch, after entries for
+the same key are merged within their context; it is not a request, context,
+recipient, payload-size or byte count. `admitted_frames` is the immutable
+admitted cut's part count minus its business-advanced part position: frames not
+yet sent, not the successful prefix already sent. The whole cut's logical queue
+cost can remain charged until its last part completes, so the cost, pending
+entries and admitted frames are independent and none is derived from another.
+Pending entries and admitted frames can both be nonzero at once. An observed
+empty queue is zero; without an observed baseline the reading is unavailable,
+not zero. The initial atomic `CREATED` receipt's staging contributes only its
+existing logical queue cost and is outside both regular counts, as are
+standalone controls. Logical queue cost is not unacknowledged network bytes, a
+request count or a channel count; an unobserved queue or channel is unavailable,
+not zero.
+
+Shared memory is one unique accounted retained and reserved reading with its cap
+and remaining capacity. It is not JVM heap, allocation rate, GC state or
+transport bytes. A live cap reduction can make remaining negative while retained
+and reserved ownership remains; admissible remaining is then zero. The
+client-local buffer estimate keeps its own local scope and unit and is never
+added to shared accounting.
+
+### Sync and transport measurement
+
+Counters are event totals over the rolling window, never gauges or inferred
+backlog. Repeated acceptance of the same control or data is not a new
+publication. A saturated counter is a lower bound and not an exact rate input;
+its rate is unavailable.
+
+`publications_installed` counts each successful transition that actually
+installs a new publication in a regular recipient context. Acceptance alone is
+not installation: a duplicate or old-revision acceptance, a publication defer
+and an `INVALID` acceptance add nothing. A regular bootstrap or a new revision
+with no quantity delta still counts once for its successful installation
+transition. The event belongs to the recipient context that actually installs
+it; publisher scans and received messages are not installation counts.
+
+`cuts_completed` counts delivered cut progress. One whole multipart cut counts
+once when its last admitted part succeeds, independent of its part count; a
+Tracking completion summary for the same cut adds no second completion. An empty
+or quantity-unchanged cut that advances a newly installed publication through a
+successful completion control also counts once. The initial fence, heartbeat,
+failure, cancellation, withdrawal and rebase are not completed cuts. A thrown
+send and its retry add no completion until the cut actually completes.
+
+The frame and byte counters cover only regular inventory-v2 Preview frames and
+Tracking snapshot/stream frames and their bytes. They do not claim all
+inventory-related traffic or all connection traffic; the independent atomic
+`CREATED` creation receipt remains outside those counters.
+The receipt's shared work and memory stay visible through the existing shared
+work and memory ledgers, and monitoring adds no creation budget charge.
+
+Local frame counters are receptions, not applications: each legally decoded
+Preview, snapshot, or stream frame that enters domain handling is counted,
+including one later rejected, held, or recognized as a duplicate, while apply
+success counts only an actually applied state, domain rejection is counted
+separately, a held or unchanged result is neither success nor rejection, and
+internal buffer replay is not a new reception.
+
+Budget-charged bytes are the existing wire-budget charge. Handoff bytes are a
+separate observation at the loader's irreversible transport boundary. A
+`HANDED_OFF` observation contributes known sent body bytes as a lower bound;
+`NOT_HANDED_OFF` contributes no sent bytes; `UNOBSERVED` or a thrown send cannot
+be classified and keeps candidate bytes explicit rather than counting them as
+sent. Handoff bytes are neither client receipt nor compressed physical traffic.
+The observed body-byte measurement reuses the existing encoded-body measurement
+and performs no extra encode for monitoring.
+
+The observed send path preserves the legacy send path's business progress for
+every outcome. An exception still propagates to the existing retry behavior;
+monitoring neither retries nor falls back, and it cannot turn an unobserved
+outcome into a successful handoff.
+
+### Availability, summaries and non-interference
+
+A metric absent from a sample is unavailable, not zero. A zero-elapsed warm-up
+sample has unavailable rates. A saturated counter or timing total is a lower
+bound; the affected rate or mean is unavailable rather than exact. A lane absent
+because it is disabled or was not requested is unavailable; disablement is
+control state, not a measured zero. Shared readings are not divided, copied or
+attributed to either lane. A local row with no server-side counterpart,
+including a server budget the local endpoint does not own, is omitted rather
+than synthesized as zero.
+
+The closed vocabulary makes summaries projections over existing raw selectors,
+not additional measurement sites. The five default summaries are:
+
+- processing: server ingress and tick work plus local apply, prepare and draw;
+- requests and queue: request, admission, local acceptance, rejection and repair
+  outcomes, and queue, buffer or state readings;
+- budget: the independent logical, wire and shared work readings, each in its
+  own unit;
+- memory: the unique shared accounting value plus the separate local buffer
+  estimate;
+- sync rate: publication, frame, handoff and byte counters over the sample's
+  elapsed interval.
+
+Timing peaks and detailed raw readings are opt-in. Selecting a summary and an
+included detail never duplicates a raw field.
+
+With both server lanes off, the monitor path is a constant O(1) gate: it adds no
+clock read, allocation, inventory traversal or encoding. When enabled, sampling
+reads existing scalar ledger and gauge values and borrows existing complete loops
+for its gauge baseline; it adds no inventory-content traversal, second encode or
+new business-budget charge. A gauge with no valid observation remains unavailable
+rather than fabricated as zero. The HUD is pure paint over cached local and
+mirrored data: it performs no sampling, source access, encoding or network IO.
+
+No observer clock, callback or allocation is inserted between final business
+authorization and transport handoff. Monitoring does not change source getters,
+budget decisions and settlements, cursor or watermark advancement, route
+selection, retry behavior or permissions, and it adds no second inventory
+runtime. Persisted keys and selector grammar remain with their linked owners;
+HUD projection and presentation are owned by
+[HUD projection and presentation](#hud-projection-and-presentation).
+
+### HUD projection and presentation
+
+The HUD projects the selected local readings and the accepted server mirror into
+compact rows. It owns source/lane grouping, the HUD label vocabulary, text and
+row styling, value and unit formatting, missing-value and source-state
+presentation, layout, wrapping and render layer. Metric selection and
+preferences are owned by [client
+configuration](../../config/client.md#performance-monitor); measurement meaning
+and availability by the sections above; numeric authority by [server
+configuration authority](../authority/server-config.md#remote-performance-telemetry);
+and wire acceptance by [network protocol](../network/protocol.md). It adds no
+measurement site.
+
+#### Scope groups and compact labels
+
+The HUD uses five logical groups in this fixed order:
+
+1. `Server - Inv Prev`
+2. `Server - Inv Track`
+3. `Server - Inv Shared`
+4. `Client - Inv Prev`
+5. `Client - Inv Track`
+
+These are the compact English display labels, using title case and ` - ` as the
+only separator between source and lane. All eight bundled locales provide the
+equivalent compact label rather than the full selector name. These labels are
+HUD presentation vocabulary only: the projection does not rename, abbreviate or
+replace configuration selectors, identifiers or defaults.
+
+The source/lane scope prefix is the only HUD title text and is drawn exactly in
+`#01F7F7`. Field labels and values keep the ordinary HUD text color; only the
+`OFF` token uses the red error style. No field text, value or non-`OFF` state
+token uses the title color.
+
+`LOCAL` readings belong only to a Client group. Server Preview and Tracking
+readings belong only to their matching Server group. `SHARED` readings belong
+only to `Server - Inv Shared`; they are server-wide shared data, not client-local
+data, and are never attached to a lane or to a Client group. Values from
+different sources or endpoint clocks are never added, averaged or presented as
+one cross-source total.
+
+Each scope group remains one logical row. All selected summary and detail fields
+for that scope are composed into fixed semantic visual segments in the order
+time, requests/queue, budgets, memory, sync. A timing phase is one segment,
+including its selected maximum and raw detail. The non-sync request, queue,
+work-counter, state and buffer-count counters and gauges, including read
+attempts, form one segment. Each independent budget is its own segment, not one
+combined budget segment. The memory-class readings form one segment, and sync
+readings form one segment. Segment membership follows the selected metric's
+semantic identity and existing category ordering, not the current value width,
+availability or a previous frame. A selected field keeps its segment position
+when its value is unavailable; a selection change establishes a new layout
+identity under [layout identity and reserved
+height](#layout-identity-and-reserved-height).
+
+The [layout and render layer](#layout-and-render-layer) below owns visual line
+breaks, native wrapping, alignment, clipping and vertical overflow for these
+segments. The scope label is written once at the start of the first visual line
+and is not repeated on a segment or continuation line; continuation lines add no
+indentation. A detail field stays in its segment rather than creating another
+heading or row. A summary's category name is not repeated per field.
+
+Within a group, each field label is reduced to the shortest text that still
+distinguishes it from the other displayed fields. Label text is localized;
+units remain English abbreviations. HUD punctuation is ASCII half-width:
+`-`, `:`, `;`, `/`, `&`, `(`, `)`, `<`, `>=`, `%` and `.` as the decimal mark.
+Chinese display text may remain Chinese where localized. A value is attached
+directly to its unit and a ratio has no space before `%`; `; ` separates fields
+with one space, and `/` joins the values of one pair or triplet without spaces.
+
+#### Summary, detail and timing values
+
+A selected summary is projected over its existing raw selectors and adds no new
+measurement. Selecting a detail does not enable its peak, and selecting a
+summary does not force a detailed field to appear. The projection follows the
+no-duplicate rule above. Omitting a duplicate from the row does not remove the
+detailed reading from the cached sample or from the client's selection.
+
+For a timing phase, the main value is `total/count` over the actual sample
+interval: the actual in-scope mean of recorded intervals, not an assumed tick
+duration. A zero count leaves the mean unavailable rather than presenting a
+zero-duration measurement. A selected peak is the maximum recorded interval and
+is placed immediately beside that phase's main value in the same field. When the peak is
+the only selected timing statistic, the HUD shows only the peak. When a raw
+timing detail is selected, its total and count may remain as compact same-field
+detail; they are not added to the mean, to a parent phase, or to another source's
+clock. Parent and child phases remain inclusive, not additive.
+
+Durations below `1000ms` use `ms`; `1000ms` and above use `s`. Count is an
+interval count, not a tick count, and is never relabelled as ticks. Timing stays
+phase-by-phase. This contract adds no whole-sample per-tick total or peak and no
+`ms/t` value. The server tick-work field is the actual in-scope interval average;
+its label and units do not imply a whole-tick total or `ms/t`, and it does not
+claim complete server tick coverage merely from a sample's first and last tick.
+
+Request readings are the existing server open, received and admitted request
+counts and the existing local applied and rejected outcomes. The HUD does not
+invent a Pending request value, derive a rejected count as received minus
+admitted, or present queue logical cost as a request count. Queue cost, pending
+entries, admitted frames and request counts remain distinct fields.
+
+Each independent budget keeps its own unit and accounting period. The HUD does
+not convert, combine or total readings from different budgets or periods, and a
+shared unit never hides a different period. Byte budgets follow the byte rules
+below, and a displayed percentage belongs to that budget's own ratio. Large
+dimensionless work counts follow the full-integer rule below.
+
+#### Byte quantities
+
+All byte quantities, including memory, wire and handoff bytes, byte budgets,
+local buffer estimates and byte rates, use base-1024 quantities with the English
+unit abbreviations `B`, `KB`, `MB`, `GB`, `TB`, `PB` and `EB`. A byte rate
+appends `/s` and uses the sample's actual elapsed interval; it is never replaced
+by `/t`. Memory is not relabelled as JVM heap, and transport budget or handoff
+bytes are not relabelled as compressed physical network traffic.
+
+The displayed unit is chosen from the unrounded original magnitude. A quantity
+upgrades to the next unit only when its strict unrounded magnitude exceeds
+`8192` of the current unit, so `8192KB` remains `8192KB` while `8193KB` becomes
+`8MB`. The unit is never chosen from the rounded display value. A pair or
+triplet of byte values uses one common unit selected by the maximum absolute
+component, so the values are not shown with different units.
+
+Each displayed byte number, including the numerator of a byte rate, has at most
+four digits, excluding sign, decimal point and comparison operator, and at most
+two decimal places. Round half up, trim trailing zeros, and do not pad integer
+digits with leading zeros. The four-digit capacity is shared with the decimal
+places: as integer digits grow, decimal places shrink, and the capacity is
+re-evaluated after a carry; `999.95KB` therefore rounds to `1000KB`, not
+`999.9KB`. Examples include `1111`, `111.1`, `11.11`, `1.11` and `25.2`. A true
+zero remains zero. A positive nonzero value below the selected unit's display
+precision is shown as `<0.01<unit>`, and a common-unit series may show
+`<0.01/128/512MB`. A negative nonzero value keeps its sign and a meaningful
+direction and is never displayed as zero.
+
+Negative remaining values and percentages above `100%` are not clamped. A known
+lower bound, byte or non-byte, is marked with `>=` and rounded so that the
+displayed value does not overstate the true lower bound; ordinary half-up
+rounding is not used for that case. Aggregated sums and ratios are computed
+exactly: extreme values do not overflow or lose precision through binary
+floating point.
+
+#### Other numeric values and memory
+
+Non-byte integers are shown in full: they have no four-digit limit and never use
+`K`, `M` or `G` abbreviation. Non-byte decimals, including duration, percentage
+and dimensionless rates, use at most two decimal places, round half up and trim
+trailing zeros; they have no four-digit limit, and an integer value is not forced
+to `.00`. Duration uses the `ms`/`s` switch above; a positive nonzero duration
+below `0.01ms` is shown as `<0.01ms`. A rate already defined per tick may retain
+its `t` denominator, and a count has no unit. The byte four-digit capacity never
+applies to a non-byte value: `999.95s` remains `999.95s`, and a non-byte lower
+bound keeps its full digits and two decimals, so `>=999.95/s` is not shortened to
+`>=999.9/s`. These are display rules only; they change no sampling, stored value
+or protocol precision.
+
+Shared memory is shown as `retained/(retained+reserved)/cap`, with
+`percent=(retained+reserved)/cap`; the percentage precedes the three byte values
+and never trails them, with locale-required spacing before it. The three values
+use one common byte unit. The compact value never silently drops reserved ownership; the complete
+tooltip carries retained, reserved, cap and remaining. When cap is zero, the
+recorded quantities remain and the undefined percentage is `N/A`, not zero or
+infinity. For example:
+
+`服务器 - Inv共享: 槽50% 256/512; 内存25% 96/128/512MB`
+
+The example shows a budget pair and shared memory; `Mem 25% 96/128/512MB` is the
+equivalent English-shaped field.
+
+#### Missing values and source states
+
+A displayed field that has no value is not shown as zero. For an active
+source/lane, every selected field represented in the compact row keeps its
+label, semantic segment and group position; a value with no reading is written
+as `N/A` in that value's own position, including each selected component of a
+pair or triplet. Known values, including a known zero, remain in their
+positions. A partially known field therefore shows its known components and
+`N/A` only for the missing ones. No
+`N/A` is shared across fields or hoisted to a scope-level summary, and a selected
+field or group is not dropped because it is unavailable.
+
+A selected summary displays only the fields it actually represents. A
+non-displayed constituent does not create an `N/A` and is not expanded into the
+row. A maximum-only timing selection creates no mean value position. The
+projection adds no derived metric to fill an `N/A` position.
+
+The remote source states are distinct: `OFF` (the applied lane collection switch
+is off), `WAITING` (before the first accepted sample), `UNKNOWN` (no resolved
+response), `STALE` (the last sample is beyond its expiry), `UNSUPPORTED` (the
+connection has no monitor capability), `UNAUTHORIZED` (numeric server telemetry
+is not permitted), and `Shared dependency off` when both applied server lanes
+are off. A non-active source/lane shows only its localized state and no values
+or additional `N/A`; an active source/lane shows values without an `ACTIVE`
+token. The other states and the dependency-off state use neutral styling, and
+all captions are localized in the eight bundled locales.
+
+A lane known to be explicitly off remains `OFF` for a viewer without numeric
+authority; an enabled lane the viewer may not observe numerically shows
+`UNAUTHORIZED`. A timeout never becomes `OFF`. Local rows remain visible
+independently of every server state and of numeric server authority; losing
+authority removes server numeric values and shared values without turning off
+the HUD, clearing selections or removing local rows.
+
+#### Layout identity and reserved height
+
+An active scope's visual layout is identified by the normalized selected metric
+set that established it, the effective logical width, the Font/Language identity
+with its glyph options and line height, and the connection/session identity. A
+change to any of these starts a new identity and an empty reservation. Numeric
+values, a new sample, the current view state, availability, height, or a
+GUI-scale change that leaves the effective width, glyph metrics and line height
+unchanged are not identity inputs and do not clear the reservation.
+
+While a scope is ACTIVE and its identity is unchanged, each selected semantic
+group reserves the greater of its previous reserved visual-line count and its
+current native-wrapped line count. The reservation is per group, not one scope
+total. A value becoming shorter or unavailable therefore keeps its group's
+existing row height, while longer text may grow the group and push later groups
+down. Rows inside the reservation that have no current text are blank and paint
+no stale value, field text or row backing. The reservation is presentation
+metadata only: it holds selected identifiers, group boundaries and line counts,
+not prior values, samples, availability or authority. Drawing always uses the
+current projected values; the reservation only supplies height.
+
+这可以使这部分数据的值在有 / 无时，屏幕上所有数据所在的行不变。
+
+That stability is limited to an ACTIVE scope whose layout identity above is
+unchanged and whose current text does not exceed the existing reserved height.
+Longer text may grow its group and push later groups down, and token positions
+inside the same group may still change. The control-state compact exception
+below is outside this guarantee. The contract does not promise fixed word or
+line coordinates for arbitrary data or widths.
+
+Hiding the HUD or turning it off does not by itself clear an active reservation,
+and showing it again under the same identity may restore the existing heights.
+The identity changes above clear the reservation even while the HUD is hidden. A
+disconnect or genuinely new connection clears it; a same-connection respawn does
+not.
+
+A control state such as `OFF`, `WAITING`, `UNAUTHORIZED`, `UNKNOWN`, `STALE`,
+`UNSUPPORTED` or the shared dependency-off state compacts only that scope's
+status row. It paints the scope prefix and localized state token without the
+active field layout, reserved padding, field labels or stale values, so later
+scope rows may move up. A later return to `ACTIVE` may restore the reservation
+the scope already held, so a low-frequency control-state change can move later
+scope rows without being a layout reset. Control state neither clears the
+reservation nor authorizes stale values.
+
+#### Layout and render layer
+
+The first visual line is fixed at the top-left native GUI-scaled margin. Each
+painted visual text row draws its own black backing across that row's drawn glyph
+width, using ARGB `0x26000000` (alpha `38/255`, about 15%); this is a per-row
+backing, not one rectangle behind the HUD or a semantic group. The existing font
+shadow and inter-field gap remain. A reserved row with no current text paints
+neither backing nor glyphs. The HUD adds no anchor, position or scale preference,
+reserves no space for vanilla chat, hearts or notices, and does not move or
+shrink when those elements appear or are repositioned.
+
+Within one scope logical row, each fixed semantic segment starts a new visual
+line at the same left x as the scope label. A segment wraps at native glyph
+width, including long unspaced tokens, so the right edge does not overflow; a
+segment that fits is not merged with an adjacent segment because of value width,
+and a wrapped segment's extra lines may move later segments down. A necessary
+horizontal clip guard may protect the framebuffer, but it must preserve metric
+identity and the `OFF` styling. Every visual line that fits the width after
+wrapping is painted; vertical overflow past the bottom is accepted as natural
+framebuffer clipping. Fixed breaks may use more vertical space than one unsplit
+row, including at a wide viewport; there is no height budget, ellipsis,
+row-dropping or merge-back rule. A non-active state row is not divided into
+semantic segments and keeps ordinary native wrapping.
+
+A 2560x1440 framebuffer at GUI scale 6, giving a 427x240 GUI viewport, is a
+reference example only. It is not a hardcoded size or a forced window scale;
+every other window and GUI scale uses the native width. Fixed semantic breaks
+can put more lines below that reference bottom; the HUD does not drop or merge
+them to fit it.
+
+The HUD is the bottom layer: vanilla HUD, chat, F3, notices and
+screens/overlays draw over it. Being covered is acceptable; the HUD does not
+yield, re-anchor or raise itself. Existing F1 and player-level gating
+remain unchanged, and this contract adds no top overlay after screens. The
+cached pure-paint boundary above applies: a visible frame must restore render
+state so the original HUD remains unaffected. The layout identity above owns
+reset and cache invalidation; a height change or a numeric or availability change
+does not reduce, ellipsize or drop reserved rows or their wrapped lines.
+
+#### Presentation examples
+
+Layout and compact-label examples for the same field order. Line breaks mark the
+fixed semantic segments; a segment still wraps natively if it exceeds the
+viewport:
+
+```text
+Server - Inv Prev: 12.4ms Peak 98.6ms
+Open 2 Recv 12 Admitted 9; QCost 34/64
+Slots 7/64
+Sync 4 12KB/s
+
+Server - Inv Shared: Slots 50% 256/512
+Mem 25% 96/128/512MB
+
+Client - Inv Prev: 0.42ms Peak 1.1ms
+Applied 8 Rejected 1
+Buf 2.5KB
+```
+
+These examples are layout illustrations, not defaults or additional metrics.
+`QCost` is queue logical cost and is not a request count. The labels, selected
+fields and values are illustrative; the real rows contain only selected metrics
+and use the localized compact vocabulary.

@@ -62,6 +62,13 @@ class CertifiedVault1620BackendTest {
 			finally { buffer.release(); }
 		}
 		@Override public Optional<InventoryBackend.Policy> policy(UUID player) { return Optional.of(new InventoryBackend.Policy(100, 1, Set.of("entity_block"))); }
+		@Override public Optional<InventoryBackend.SessionAccess> session(UUID player) {
+			return Optional.of(new InventoryBackend.SessionAccess(100, 1, Set.of(InventoryResourceKind.ITEM)));
+		}
+		@Override public Optional<ServerMarker> activeMarker(MarkerId marker) { return markers.find(marker); }
+		@Override public Set<InventoryResourceKind> freezeInventoryPreviewLanes(UUID owner, String targetTypeId) {
+			return Set.of(InventoryResourceKind.ITEM);
+		}
 		@Override public Optional<InventoryBackend.Opened> open(UUID player, Target requested) { return Optional.of(new InventoryBackend.Opened(requested, "entity_block", "attention")); }
 		@Override public boolean annotationAllowed(InventorySourceInput input, String pingType) {
 			if (deferJoin) deferNextResolution = true;
@@ -91,14 +98,21 @@ class CertifiedVault1620BackendTest {
 		@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
 			var type = TargetTypeCatalog.builtIn().findById("entity_block").orElseThrow();
 			var group = new TargetKey.VaultKey("minecraft:overworld", 0, 0, 0, "create:item_vault");
-			@Nullable var rejection = admission.prepare(frozen.target(), group, type.id(), List.of(OWNER));
+			var audience = List.of(OWNER);
+			@Nullable var rejection = admission.prepare(frozen.target(), group, type.id(), audience);
+			if (rejection != null) return new InventoryBackend.Created(null, rejection);
+			var authorization = InventoryTestGrants.allowAll(audience);
+			rejection = admission.finishAuthorization(authorization);
 			if (rejection != null) return new InventoryBackend.Created(null, rejection);
 			if (rejectAfterAdmission) return new InventoryBackend.Created(null, MarkerRejectReason.INVALID_REQUEST);
 			var hit = (Target.BlockTarget) frozen.target();
 			return new InventoryBackend.Created(markers.create(player, hit, group, type, type.defaultPingType(),
-				new MarkerAnchor(hit.x() + .5, hit.y() + .5, hit.z() + .5), tick, tick + 1000, List.of(OWNER)).marker(), null);
+				new MarkerAnchor(hit.x() + .5, hit.y() + .5, hit.z() + .5), tick, tick + 1000, audience, List.of(), authorization).marker(), null);
 		}
-		@Override public void publishCreated(InventoryBackend.Created created) { client.markerCreated(MarkerSnapshot.from(created.marker())); }
+		@Override public void publishCreated(InventoryBackend.Created created) {
+			client.markerCreated(MarkerSnapshot.from(created.marker()),
+				InventoryTestGrants.content(created.marker(), OWNER, InventoryResourceKind.ITEM));
+		}
 		@Override public boolean knows(UUID player, MarkerId marker) { return markers.find(marker).isPresent(); }
 		@Override public boolean authorized(SyncPublisher.Context context) { return true; }
 		@Override public int encodedBytes(InventoryS2CPacket packet) { throw new AssertionError("effective budgets required"); }

@@ -75,7 +75,7 @@ class ServerConfigPacketsTest {
 		assertFalse(valid.isCorrupt());
 
 		assertTrue(new ServerConfigUpdateC2SPacket(0, ChannelMode.AUTO, true, 0, 0).isCorrupt());
-		assertTrue(new ServerConfigUpdateC2SPacket(1 << 30, ChannelMode.AUTO, true, 0, 0).isCorrupt());
+		assertTrue(new ServerConfigUpdateC2SPacket(1L << 32, ChannelMode.AUTO, true, 0, 0).isCorrupt());
 		assertTrue(new ServerConfigUpdateC2SPacket(1, ChannelMode.AUTO, true, -1, 0).isCorrupt());
 		assertTrue(new ServerConfigUpdateC2SPacket(1, null, true, 0, 0).isCorrupt());
 	}
@@ -125,6 +125,8 @@ class ServerConfigPacketsTest {
 			assertTrue(snapshot.snapshot().budgetDelayNotificationsEnabled());
 			assertEquals(LoggingProfile.NORMAL, snapshot.loggingProfile());
 			assertEquals(LoggingProfile.NORMAL, snapshot.snapshot().loggingProfile());
+			assertFalse(snapshot.previewMonitorEnabled());
+			assertFalse(snapshot.trackingMonitorEnabled());
 		}
 		for (var update : List.of(
 			new ServerConfigUpdateC2SPacket(1, ChannelMode.AUTO, true, 1, 2),
@@ -135,6 +137,8 @@ class ServerConfigPacketsTest {
 			assertTrue(update.update().budgetDelayNotificationsEnabled());
 			assertEquals(LoggingProfile.NORMAL, update.loggingProfile());
 			assertEquals(LoggingProfile.NORMAL, update.update().loggingProfile());
+			assertFalse(update.previewMonitorEnabled());
+			assertFalse(update.trackingMonitorEnabled());
 		}
 		assertTrue(new ServerConfigUpdateC2SPacket(1, ChannelMode.AUTO, true, 1, 2, 7, inventory, true, null).isCorrupt());
 		assertTrue(new ServerConfigSnapshotS2CPacket(1L, true, ChannelMode.AUTO, true, 1, 2, 7, inventory, true, null).isCorrupt());

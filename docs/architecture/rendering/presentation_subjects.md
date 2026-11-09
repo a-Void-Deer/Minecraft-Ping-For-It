@@ -21,15 +21,10 @@ Server-side logical grouping is a separate creation decision under the
 
 ## Required contract and current external conformance
 
-This document states a required presentation contract; it is not a claim that
-every optional or external integration has completed every route. D0003 remains
-uniformly applicable: canonical marker identity and lifecycle stay separate
-from presentation, and normal sources plus VoxelShape fallback use the same
-resolved subject list and subject-level type decisions. There is no external
-integration exemption from that contract.
-
-For the current Sable external path, conformance with that contract remains an
-open verification gap rather than a product exception; see
+D0003 remains uniformly applicable to every optional or external integration;
+there is no conformance exemption from the presentation-subject rules owned
+here. For the current Sable external path, conformance remains an open
+verification gap rather than a product exception; see
 [Sable coverage and pending scenarios](../../testing/verification/integrations.md#sable-integration-coverage).
 
 ## Render-target type rules

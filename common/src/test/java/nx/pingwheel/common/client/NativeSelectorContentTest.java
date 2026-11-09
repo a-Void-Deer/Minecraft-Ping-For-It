@@ -67,6 +67,10 @@ class NativeSelectorContentTest {
 		inventory.accept(InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(5, 3, 5, 0)).stamp(100, 1));
 		inventory.accept(InventoryS2CPacket.policy(7, 100, 1, Set.of("entity_block")));
 	}
+	/** Answers one actually sent local OPEN with its complete Preview lane grant. */
+	private static void opened(ClientInventory inventory, long request) {
+		inventory.accept(InventoryS2CPacket.opened(7, 100, 1, request, 3));
+	}
 	private static InventoryS2CPacket.Entry entry(String key, long count, boolean folded, long group) {
 		return new InventoryS2CPacket.Entry(key, "minecraft:stone", "Stone", null, count, 1, folded,
 			folded ? InventoryS2CPacket.Status.COMPONENT_TOO_LONG : null, group, folded, null);
@@ -76,7 +80,7 @@ class NativeSelectorContentTest {
 		var capture = capture();
 		var content = new NativeSelectorContent(capture, null, () -> inventory,
 			ignored -> List.of(PingTypeCatalog.builtIn().findById("attention").orElseThrow()), ref -> Component.literal(ref.fieldId()), json -> null);
-		content.begin(new Object()); long request = content.requestId();
+		content.begin(new Object()); long request = content.requestId(); opened(inventory, request);
 		var target = new SpatialSelectorSession.CapturedTarget("ordinary", capture.resolvedTarget(), capture.blockHitFace(), Optional.empty());
 		var fence = new SpatialSelectorSession.ContentFence(1, request, 1, "ordinary");
 		var initial = content.read(target, fence);
@@ -234,6 +238,7 @@ class NativeSelectorContentTest {
 			content = new NativeSelectorContent(capture, null, () -> inventory, ignored -> List.of(ping("attention")),
 				ref -> Component.literal(ref.fieldId()), json -> Component.literal("Chest"));
 			content.begin(new Object());
+			opened(inventory, content.requestId());
 			publish(InventoryResourceKind.ITEM, 9, 1, 1, InventoryS2CPacket.Status.READY, List.of(
 				new InventoryS2CPacket.Entry("opaque:A", "minecraft:stone", "Stone", null, 50, 1, false, null),
 				new InventoryS2CPacket.Entry("opaque:B", "minecraft:diamond", "Diamond", null, 30, 1, false, null)));
@@ -285,7 +290,7 @@ class NativeSelectorContentTest {
 		var content = new NativeSelectorContent(capture, null, () -> inventory,
 			ignored -> List.of(ping("attention")), ignored -> List.of(ping("take"), ping("attention")),
 			ref -> Component.literal(ref.fieldId()), json -> Component.literal("Chest"));
-		content.begin(new Object()); long request = content.requestId();
+		content.begin(new Object()); long request = content.requestId(); opened(inventory, request);
 		inventory.accept(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, request, null, 9, 1, 1, 0, 1, true,
 			InventoryS2CPacket.Status.READY, 0, List.of(entry("same", 4, false, 0))).stamp(100, 1));
 		inventory.accept(InventoryS2CPacket.data(fluidKind, InventoryS2CPacket.Kind.PREVIEW, 7, request, null, 9, 1, 1, 0, 1, true,
@@ -646,7 +651,7 @@ class NativeSelectorContentTest {
 				PingTypeCatalog.builtIn().findById("take").orElseThrow()),
 			ref -> Component.literal(ref.fieldId()), json -> null);
 		content.begin(context.level);
-		long request = content.requestId();
+		long request = content.requestId(); opened(inventory, request);
 		inventory.accept(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, request, null, 9, 1, 1, 0, 1, true,
 			InventoryS2CPacket.Status.READY, 0, List.of(entry("exact", 1, false, 1))).stamp(100, 1));
 		var projection = content.read(previewTarget(capture), previewFence(content));
@@ -667,6 +672,7 @@ class NativeSelectorContentTest {
 		var content = new NativeSelectorContent(capture, null, () -> inventory, ignored -> List.of(ping("attention")),
 			ref -> Component.literal(ref.fieldId()), json -> Component.literal("Chest"));
 		content.begin(context.level);
+		opened(inventory, content.requestId());
 		ItemStack stack = new ItemStack(Items.GUNPOWDER);
 		stack.set(DataComponents.CUSTOM_NAME, Component.literal("Named"));
 		String encoded = ItemStack.SINGLE_ITEM_CODEC
@@ -700,7 +706,7 @@ class NativeSelectorContentTest {
 			ignored -> List.of(PingTypeCatalog.builtIn().findById("request").orElseThrow()),
 			ref -> Component.literal(ref.fieldId()), json -> null);
 		content.begin(new Object());
-		long request = content.requestId();
+		long request = content.requestId(); opened(inventory, request);
 		inventory.accept(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, request, null, 9, 1, 1, 0, 1, true,
 			InventoryS2CPacket.Status.READY, 0, List.of(entry("exact", 1, false, 1))).stamp(100, 1));
 		var projection = content.read(previewTarget(capture), previewFence(content));
@@ -950,8 +956,11 @@ class NativeSelectorContentTest {
 			ignored -> List.of(ping("attention")), ref -> Component.literal(ref.fieldId()),
 			json -> Component.literal("Chest"));
 		content.begin(context.level);
-		if (inventory != null) inventory.accept(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, content.requestId(),
-			null, 9, 1, 1, 0, 1, true, InventoryS2CPacket.Status.READY, 0, List.of(entry("exact", 1, false, 1))).stamp(100, 1));
+		if (inventory != null) {
+			opened(inventory, content.requestId());
+			inventory.accept(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, content.requestId(),
+				null, 9, 1, 1, 0, 1, true, InventoryS2CPacket.Status.READY, 0, List.of(entry("exact", 1, false, 1))).stamp(100, 1));
+		}
 		return content;
 	}
 

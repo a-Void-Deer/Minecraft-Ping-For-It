@@ -111,18 +111,15 @@ configuration is next serialized.
 Load-time normalization is separate from ordered version migration and also
 runs for a same-version or older load, composed after the ordered steps and
 before typed deserialization. It reconciles the persisted server shapes and the
-explicitly conflicting client preference relations described below, failing
-closed on a malformed presentation shape:
+explicitly conflicting client preference relations described below:
 
 - A server document whose `presentation.targetTypes` map is present keeps that
   map and drops the obsolete flat `presentation.white`, `presentation.black`,
   and `presentation.whitelistOnly` members. When the map is absent, the flat
   members' values are copied to every one of the five target-type rule sets and
   the flat members are removed.
-- A malformed `presentation` object or malformed `targetTypes` map normalizes to
-  a deny-all rule for every target type. A malformed individual rule object
-  denies only its own target type. A malformed global permission override
-  normalizes to a global deny-all policy.
+- A malformed presentation shape fails closed under the
+  [presentation policy object's failure outcomes](../../config/server.md#presentation-policy-object).
 - Unrelated server settings and every well-formed target-type rule survive
   normalization; an existing new-shape map wins over the obsolete flat members.
 - An integer numeric scalar at the server inventory's pending-memory member is

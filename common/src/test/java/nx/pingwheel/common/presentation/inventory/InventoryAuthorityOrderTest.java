@@ -9,6 +9,7 @@ import nx.pingwheel.common.config.InventorySettings;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.domain.ResolvedTarget;
+import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
 import nx.pingwheel.common.marker.AuthoritativeTargetValidation;
 import nx.pingwheel.common.marker.MarkerAnchor;
@@ -59,7 +60,13 @@ class InventoryAuthorityOrderTest {
 				events.add("target");
 				return targetGone ? AuthoritativeTargetValidation.rejected(MarkerRejectReason.TARGET_GONE)
 					: AuthoritativeTargetValidation.accepted(new ValidatedMarkerTarget(target, TargetMatchContext.none(), new MarkerAnchor(1, 2, 3), new TargetNameJson("{\"text\":\"Chest\"}")));
-			});
+			}, nx.pingwheel.common.marker.MarkerCreationLogger.noop(),
+				new nx.pingwheel.common.integration.externalblock.ExternalBlockServerProviderRegistry(),
+				null, nx.pingwheel.common.marker.TargetGroupingResolver.exact(),
+				(target, targetTypeId, owner, audience) -> InventoryTestGrants.allowAll(audience));
+		}
+		@Override public java.util.Set<InventoryResourceKind> freezeInventoryPreviewLanes(UUID owner, String targetTypeId) {
+			return java.util.Set.of(InventoryResourceKind.ITEM);
 		}
 		@Override public boolean annotationAllowed(InventorySourceInput input, String type) {
 			events.add("annotation"); if (revokeAtAnnotation) readable = false; return annotation;
@@ -69,10 +76,17 @@ class InventoryAuthorityOrderTest {
 			events.add("channel"); if (channelDisabled) return new InventoryBackend.Created(null, MarkerRejectReason.CHANNEL_DISABLED);
 			events.add("audience");
 			var result = service.createDedicated(null, player, frozen.target(), frozen.defaultPingType(), 1, 80, List.of(InventoryBackendTest.A, InventoryBackendTest.B),
-				(target, key, type, owner, audience) -> {
-					events.add("dedicated"); assertEquals(0, store.size(), "sidecar must prepare before storage even with no SECTION intents");
-					@Nullable var rejected = admission.prepare(target, key, type, audience);
-					return rejected == null ? MarkerCreationService.AdmissionResult.accepted(List.of(), java.util.Map.of()) : MarkerCreationService.AdmissionResult.rejected(rejected);
+				new MarkerCreationService.DedicatedAdmission() {
+					@Override public MarkerCreationService.AdmissionResult admit(Target target, nx.pingwheel.common.marker.TargetKey key,
+						String type, UUID owner, List<UUID> audience) {
+						events.add("dedicated"); assertEquals(0, store.size(), "sidecar must prepare before storage even with no SECTION intents");
+						@Nullable var rejected = admission.prepare(target, key, type, audience);
+						return rejected == null ? MarkerCreationService.AdmissionResult.accepted(List.of(), java.util.Map.of()) : MarkerCreationService.AdmissionResult.rejected(rejected);
+					}
+					@Override public @Nullable MarkerRejectReason finishAuthorization(
+						nx.pingwheel.common.marker.PingAuthorization authorization) {
+						return admission.finishAuthorization(authorization);
+					}
 				});
 			if (!result.isAccepted()) return new InventoryBackend.Created(null, result.rejectReason().orElseThrow());
 			var ledger = ledger(backend().runtime());

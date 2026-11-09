@@ -164,14 +164,20 @@ provider-confirmed physical position and logical range anchor, and neither
 force-loads a chunk or sublevel; the generic binding rules are owned by the
 [generic contract](../architecture/presentation/presentation_snapshot.md#external-block-basic-sampling).
 
-The inventory source uses these same bindings. A preview request reads a
-candidate's members only under its provider-confirmed scope, and a tracking
-lease follows the committed tracking point; every member position is gated
-before its state, block entity, capability or content is read. A moved source
-or a changed member topology follows ordinary invalidation and fresh-baseline
-recovery, except for the narrow fluid transition below. An expired or released
-external lease is never resurrected by ordinary-block recovery tolerance. Inventory
-identity, read-scope and recovery rules are owned by
+The inventory source uses these same bindings. An `ITEM` preview request reads a
+candidate's members only under its provider-confirmed positive scope, and a
+tracking lease follows the committed tracking point; every item member position
+is gated before its state, block entity, capability or content is read. A
+`FLUID` source uses the provider's positive scope endorsement for its internal
+storage unit under
+[fluid provider trust](../architecture/presentation/inventory.md#fluid-provider-trust-and-validation-exceptions),
+without independently gating every member; the target-level checks remain owned
+by that contract. `UNKNOWN` root membership is never a positive endorsement. A
+moved source or a changed member topology follows ordinary invalidation and
+fresh-baseline recovery, except for the narrow fluid transition below; internal
+member-layout evidence for a `FLUID` unit remains provider-owned. An expired or
+released external lease is never resurrected by ordinary-block recovery
+tolerance. Inventory identity, read-scope and recovery rules are owned by
 [inventory](../architecture/presentation/inventory.md).
 
 The resolved Sable sublevel must expose the same `ServerLevel` as the marker's

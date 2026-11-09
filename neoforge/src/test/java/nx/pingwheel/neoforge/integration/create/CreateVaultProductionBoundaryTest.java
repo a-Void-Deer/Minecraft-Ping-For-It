@@ -185,11 +185,15 @@ class CreateVaultProductionBoundaryTest {
 				try (var unsupported = new Mods("6.0.11")) { load.invoke(null); assertEquals("unsupported-version", field(client, "lastCreateVaultResolverState").get(null)); }
 				try (var absent = new Mods(null)) { load.invoke(null); assertEquals("not-detected", field(client, "lastCreateVaultResolverState").get(null)); }
 			} finally {
-				((BlockPresentationResolverRegistry.Registration) field(resolver, "registration").get(null)).close();
-				field(resolver, "registration").set(null, null);
-				var tankResolver = f.loader.loadClass("nx.pingwheel.neoforge.integration.create.NeoForgeCreateFluidTankBlockPresentationResolver");
-				((BlockPresentationResolverRegistry.Registration) field(tankResolver, "registration").get(null)).close();
-				field(tankResolver, "registration").set(null, null);
+				try {
+					VaultOptionalHarness.closeCreateAdapters(client);
+				} finally {
+					((BlockPresentationResolverRegistry.Registration) field(resolver, "registration").get(null)).close();
+					field(resolver, "registration").set(null, null);
+					var tankResolver = f.loader.loadClass("nx.pingwheel.neoforge.integration.create.NeoForgeCreateFluidTankBlockPresentationResolver");
+					((BlockPresentationResolverRegistry.Registration) field(tankResolver, "registration").get(null)).close();
+					field(tankResolver, "registration").set(null, null);
+				}
 			}
 		}
 	}

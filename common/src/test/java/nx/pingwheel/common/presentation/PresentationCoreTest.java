@@ -89,7 +89,7 @@ class PresentationCoreTest {
 	}
 
 	@Test
-	void generationClearsOnlyActiveSectionsAndPreservesKnownMarkersAndFrozenSnapshots() {
+	void generationRetainsActiveAndFrozenSectionsAndPreservesKnownMarkers() {
 		var store = new PresentationStore();
 		store.reset(7);
 		initial(store, 7, 0, 10, section(BASIC, "pingforit:first"));
@@ -101,10 +101,14 @@ class PresentationCoreTest {
 		assertFalse(store.clearSection(7, 0, 10, EXTRA, 20));
 		store.generation(7, 1);
 		assertEquals(2, store.sections(10).size());
-		assertEquals(Map.of(), store.sections(11));
+		assertEquals(Set.of("pingforit:first"),
+			store.sections(11).get(BASIC).section().fields().keySet(),
+			"a same-epoch generation cannot prune retained marker fields");
 		assertTrue(store.isKnown(11));
 		initial(store, 7, 1, 11, section(BASIC, "pingforit:late"));
-		assertTrue(store.sections(11).isEmpty());
+		assertEquals(Set.of("pingforit:first"),
+			store.sections(11).get(BASIC).section().fields().keySet(),
+			"a known marker still refuses a duplicate initial");
 		assertTrue(store.replace(7, 1, 11, 1, section(EXTRA, "create:contents")));
 		assertFalse(store.replace(7, 0, 11, 9, section(EXTRA, "create:old")));
 		assertEquals(1, store.viewGeneration());
@@ -142,8 +146,8 @@ class PresentationCoreTest {
 		assertTrue(store.sections(20).isEmpty());
 		initial(store, 1, 0, 21, section(BASIC, "pingforit:value"));
 		store.clear(1, 21, 2, true);
-		store.restrict(Map.of(TARGET_TYPE, Map.of(BASIC, Set.of())));
-		assertTrue(store.sections(21).get(BASIC).section().fields().isEmpty());
+		assertFalse(store.sections(21).get(BASIC).section().fields().isEmpty(),
+			"expiry retains the existing read-only section until the marker is removed");
 		assertFalse(store.replace(1, 0, 21, 99, section(EXTRA, "create:more")));
 		store.evict(21);
 		initial(store, 1, 0, 21, section(BASIC, "pingforit:late"));
@@ -158,7 +162,7 @@ class PresentationCoreTest {
 	}
 
 	@Test
-	void serverMaskPrunesToAllowedFieldsAndKeepsMarkerIdentity() {
+	void sameEpochGenerationRetainsRetainedFieldsAndMarkerIdentity() {
 		var store = new PresentationStore();
 		store.reset(3);
 		var basic = new PresentationSection(BASIC, 1, Map.of(
@@ -169,11 +173,14 @@ class PresentationCoreTest {
 		assertEquals(TARGET_TYPE, store.targetTypeId(5));
 		assertEquals(defaultRef(), store.defaultRef(5));
 
-		store.restrict(Map.of(TARGET_TYPE, Map.of(BASIC, Set.of("pingforit:name"))));
-		assertEquals(Set.of("pingforit:name"), store.sections(5).get(BASIC).section().fields().keySet());
+		store.generation(3, 1);
+		assertEquals(Set.of("pingforit:name", "pingforit:extra"),
+			store.sections(5).get(BASIC).section().fields().keySet(),
+			"a same-epoch reset updates the packet view but cannot prune retained marker content");
 
-		store.restrict(Map.of());
-		assertTrue(store.sections(5).get(BASIC).section().fields().isEmpty());
+		store.generation(3, 2);
+		assertEquals(Set.of("pingforit:name", "pingforit:extra"),
+			store.sections(5).get(BASIC).section().fields().keySet());
 		assertTrue(store.isKnown(5));
 	}
 

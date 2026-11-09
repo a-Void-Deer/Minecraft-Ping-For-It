@@ -92,6 +92,10 @@ import nx.pingwheel.common.presentation.preview.client.PreviewLocalReaders;
 import nx.pingwheel.common.presentation.InventoryItemPingTypes;
 import nx.pingwheel.common.presentation.PresentationPropertyPingTypes;
 import nx.pingwheel.common.network.PresentationPreviewS2CPacket;
+import nx.pingwheel.common.monitor.client.ClientMonitorState;
+import nx.pingwheel.common.monitor.client.ClientMonitorCollector;
+import nx.pingwheel.common.monitor.MonitorSchema.Lane;
+import nx.pingwheel.common.monitor.MonitorSchema.Phase;
 import nx.pingwheel.common.render.SpatialOverlayRenderer;
 import nx.pingwheel.common.interaction.wheel.WheelSelection;
 import nx.pingwheel.common.client.LongPressCompatibilityController;
@@ -296,6 +300,14 @@ public final class ClientPingRuntime {
 	private Object observedWorldIdentity;
 	private Object observedScreenIdentity;
 	private List<nx.pingwheel.common.render.InventoryTrackingRenderer.MarkerLines> trackingPaint = List.of();
+	private ClientMonitorState monitor = new ClientMonitorState();
+
+	/** P6 owns final client-profile configuration and the separate monitor transport. */
+	public ClientMonitorState monitor() { return monitor; }
+	public void monitor(ClientMonitorState state) {
+		monitor = Objects.requireNonNull(state, "state");
+		if (inventory != null) inventory.monitor(monitor.collector());
+	}
 
 	/** Production-used Minecraft boundary; recordings exercise the same runtime/coordinator/selector path. */
 	interface InteractionAccess {
@@ -582,6 +594,10 @@ public final class ClientPingRuntime {
 		if (preciseRefresh != null) preciseRefresh.tick(localTick);
 		expireFallbackMarkers();
 		reconcileContentReceipts();
+		if (monitor.enabled()) {
+			if (inventory != null) inventory.observeMonitorState();
+			monitor.tick(localTick);
+		}
 	}
 
 	/** Handles a claimed physical press immediately on the client thread. */
@@ -721,6 +737,8 @@ public final class ClientPingRuntime {
 		observedScreenIdentity = null;
 		trackingPaint = List.of();
 		observedDimension = null;
+		monitor.configure(false, monitor.selected());
+		monitor.resetConnection();
 	}
 
 	/**
@@ -1266,10 +1284,22 @@ public final class ClientPingRuntime {
 	 */
 	private void prepareInventoryGeometry(NativeSelectorInput.Frame frame, long nowMillis) {
 		if (selector == null || selectorStyle == null) return;
-		selector.prepareInventoryGeometry(view -> interactionAccess.listGeometry(selectorStyle, frame, view),
-			interactionAccess::inventoryDisplay, nowMillis);
+		ClientMonitorCollector collector = monitor.collector();
+		boolean measuring = collector.enabled();
+		if (measuring) collector.begin(Lane.PREVIEW, Phase.PREPARE);
+		try {
+			selector.prepareInventoryGeometry(view -> interactionAccess.listGeometry(selectorStyle, frame, view),
+				interactionAccess::inventoryDisplay, nowMillis);
+		} finally { if (measuring) collector.end(Lane.PREVIEW, Phase.PREPARE); }
 	}
 	public void drawSelector(GuiGraphics graphics) {
+		ClientMonitorCollector collector = monitor.collector();
+		boolean measuring = collector.enabled();
+		if (measuring) collector.begin(Lane.PREVIEW, Phase.DRAW);
+		try { drawSelectorUnmeasured(graphics); }
+		finally { if (measuring) collector.end(Lane.PREVIEW, Phase.DRAW); }
+	}
+	private void drawSelectorUnmeasured(GuiGraphics graphics) {
 		var inputFrame = interactionAccess.inputFrame();
 		if (inputFrame.isEmpty()) return;
 		if (selectorStyle == null || (selector == null && !selectorPaint.isAnimating())) return;
@@ -1313,6 +1343,13 @@ public final class ClientPingRuntime {
 		else preciseRefresh.leave();
 	}
 	public void prepareInventoryTracking(nx.pingwheel.common.render.WorldRenderContext frame) {
+		ClientMonitorCollector collector = monitor.collector();
+		boolean measuring = collector.enabled();
+		if (measuring) collector.begin(Lane.TRACKING, Phase.PREPARE);
+		try { prepareInventoryTrackingUnmeasured(frame); }
+		finally { if (measuring) collector.end(Lane.TRACKING, Phase.PREPARE); }
+	}
+	private void prepareInventoryTrackingUnmeasured(nx.pingwheel.common.render.WorldRenderContext frame) {
 		if (inventory == null || Game == null || Game.level == null) { trackingPaint = List.of(); return; }
 		String dimension = Game.level.dimension().location().toString();
 		var lines = new java.util.ArrayList<nx.pingwheel.common.render.InventoryTrackingRenderer.MarkerLines>();
@@ -1332,7 +1369,11 @@ public final class ClientPingRuntime {
 		trackingPaint = List.copyOf(lines);
 	}
 	public void drawInventoryTracking(GuiGraphics graphics) {
-		nx.pingwheel.common.render.InventoryTrackingRenderer.draw(graphics, trackingPaint);
+		ClientMonitorCollector collector = monitor.collector();
+		boolean measuring = collector.enabled();
+		if (measuring) collector.begin(Lane.TRACKING, Phase.DRAW);
+		try { nx.pingwheel.common.render.InventoryTrackingRenderer.draw(graphics, trackingPaint); }
+		finally { if (measuring) collector.end(Lane.TRACKING, Phase.DRAW); }
 	}
 	public void onPresentationPreview(PresentationPreviewS2CPacket packet) {
 		if (contentPreview != null && selectorContent != null && observeInteractionLifecycle()) contentPreview.accept(packet);
@@ -2020,8 +2061,12 @@ public final class ClientPingRuntime {
 				if (presentation.offer(packet)) syncInventorySchemas();
 			}
 			case RESET -> {
+				long previousEpoch = presentation.epoch();
 				if (presentation.reset(packet)) {
-					contentChat.reset();
+					// Only a true epoch change clears pending receipt chat. A
+					// same-epoch reset re-fences the packet view but not the
+					// marker's frozen content or an in-flight receipt.
+					if (packet.epoch() != previousEpoch) contentChat.clear();
 					if (inventory != null) inventory.presentationReset(packet.epoch(), packet.view());
 					syncPresentationNames();
 				}
@@ -2029,8 +2074,18 @@ public final class ClientPingRuntime {
 			case CREATED -> {
 				if (!presentation.current(packet) || packet.markerId() == null
 					|| markerStore.isAuthoritativelyRemoved(packet.markerId())) return;
-				if (packet.content() != null && packet.content().kind() == PresentationReceiptContent.Kind.INVENTORY
-					&& inventory != null && !inventory.acceptsCreationSnapshot(packet.markerId(), packet.content().inventorySnapshot())) return;
+				// The optional inventory sidecar must be installable before any
+				// presentation/name/main-marker or receipt effect. This admission is
+				// pure and credits metadata removed by the accepted create's stale
+				// sibling cleanup. Ordinary markers admit without a new restriction.
+				if (inventory != null && !inventory.admitsCreation(packet.snapshot(), packet.markerGrant(),
+					packet.content() == null ? null : packet.content().inventorySnapshot(),
+					id -> packet.snapshot() != null && markerStore.isSupersededByCreation(id, packet.snapshot()))) return;
+				// presentation.initial validates the complete CREATED frame,
+				// frozen grant and receipt (including an inventory snapshot's
+				// accepted schema/kind/domain) before mutating any client store.
+				// Inventory marker and seed installation therefore follows that
+				// acceptance instead of requiring a marker that does not exist yet.
 				if (!presentation.initial(packet)) return;
 				updatePresentationName(packet.markerId());
 				applyPresentationCreated(packet);
@@ -2070,7 +2125,9 @@ public final class ClientPingRuntime {
 	}
 	private @Nullable ClientInventory inventory;
 	public void inventory(@Nullable ClientInventory inventory) {
+		if (this.inventory != null && this.inventory != inventory) this.inventory.monitor(null);
 		this.inventory = inventory;
+		if (inventory != null) inventory.monitor(monitor.collector());
 		syncInventorySchemas();
 		if (inventory != null && presentation.ready()) {
 			inventory.presentationReset(presentation.epoch(), presentation.sessionView());
@@ -2090,6 +2147,14 @@ public final class ClientPingRuntime {
 		inventory.acceptedSchemas(accepted);
 	}
 	public void onInventoryPacket(nx.pingwheel.common.network.@Nullable InventoryS2CPacket packet) {
+		if (inventory == null) return;
+		ClientMonitorCollector collector = monitor.collector();
+		@Nullable Lane lane = collector.enabled() ? ClientInventory.monitorLane(packet) : null;
+		if (lane != null) collector.begin(lane, Phase.APPLY);
+		try { onInventoryPacketUnmeasured(packet); }
+		finally { if (lane != null) collector.end(lane, Phase.APPLY); }
+	}
+	private void onInventoryPacketUnmeasured(nx.pingwheel.common.network.@Nullable InventoryS2CPacket packet) {
 		if (inventory == null) return;
 		ClientInventory.@Nullable SelectionResult previous = packet == null ? null : inventory.selectionResult(packet.commitId());
 		inventory.accept(packet);
@@ -2126,10 +2191,15 @@ public final class ClientPingRuntime {
 			presentation.evict(marker.id());
 			if (inventory != null) inventory.markerRemoved(marker.id());
 		}
-		if (inventory != null) inventory.markerCreated(snapshot);
+		boolean inventoryKnown = inventory != null && inventory.trackingKind(snapshot.id()).isPresent();
+		if (inventory != null) inventory.markerCreated(snapshot, packet.markerGrant());
 		if (newlySeen) {
 			nx.pingwheel.common.presentation.inventory.@Nullable InventoryCreationSnapshot creation = packet.content().inventorySnapshot();
 			boolean seeded = inventory != null && creation != null && inventory.creationSnapshot(snapshot.id(), creation);
+			// The frame was fully validated before presentation acceptance. Keep
+			// the adjacent inventory marker all-or-nothing if its seed cannot be
+			// retained for a local capacity/policy reason.
+			if (creation != null && !seeded && !inventoryKnown && inventory != null) inventory.markerRemoved(snapshot.id());
 			presentationReceiptFeedback.play(snapshot);
 			if (packet.content().kind() == PresentationReceiptContent.Kind.WHOLE)
 				presentationReceiptFeedback.chat(ownerName, snapshot, presentationTargetName(snapshot.id()));
@@ -2149,8 +2219,7 @@ public final class ClientPingRuntime {
 	private PendingContentChatController.Current currentContentReceipt(MarkerId id) {
 		@Nullable ClientMarker marker = markerStore.marker(id).orElse(null);
 		Map<String, Set<String>> fields = new LinkedHashMap<>();
-		if (marker != null) presentation.previewAccess(marker.targetTypeId()).ifPresent(access ->
-			access.adapters().forEach((adapter, descriptor) -> fields.put(adapter, descriptor.fields().keySet())));
+		if (marker != null) fields.putAll(presentation.markerAllowedFields(id));
 		var authorization = inventory == null || marker == null ? Optional.<Boolean>empty()
 			: inventory.receiptAuthorization(id, presentation.epoch(), presentation.sessionView(), marker.targetTypeId());
 		return new PendingContentChatController.Current(presentation.epoch(),

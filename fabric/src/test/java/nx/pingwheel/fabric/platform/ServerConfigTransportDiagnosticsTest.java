@@ -20,6 +20,7 @@ import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
+import nx.pingwheel.common.platform.TransportHandoff;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LogEvent;
@@ -82,8 +83,9 @@ class ServerConfigTransportDiagnosticsTest {
 		var recipient = recipient();
 		try (var capture = new Capture()) {
 			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEEP);
-			new PlatformNetworkServiceImpl((player, packet) -> { routeChecks.incrementAndGet(); return false; },
-				(player, packet) -> fail("unavailable route must not send")).sendToClient(snapshot, recipient);
+			assertEquals(TransportHandoff.NOT_HANDED_OFF,
+				new PlatformNetworkServiceImpl((player, packet) -> { routeChecks.incrementAndGet(); return false; },
+					(player, packet) -> fail("unavailable route must not send")).sendToClientObserved(snapshot, recipient));
 			assertEquals(1, routeChecks.get());
 			assertTrue(capture.events.isEmpty());
 
@@ -96,7 +98,7 @@ class ServerConfigTransportDiagnosticsTest {
 
 			var sending = new PlatformNetworkServiceImpl((player, packet) -> { routeChecks.incrementAndGet(); return true; },
 				(player, packet) -> sent.add(packet));
-			sending.sendToClient(snapshot, recipient);
+			assertEquals(TransportHandoff.HANDED_OFF, sending.sendToClientObserved(snapshot, recipient));
 			assertEquals(3, routeChecks.get());
 			assertEquals(1, sent.size());
 			assertSame(snapshot, sent.getFirst());

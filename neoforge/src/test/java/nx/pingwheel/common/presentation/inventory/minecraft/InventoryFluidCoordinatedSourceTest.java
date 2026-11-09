@@ -77,14 +77,24 @@ class InventoryFluidCoordinatedSourceTest {
 			assertEquals(1, fixture.handler.contentReads, "one address is exactly one native getter");
 			// Two wrapper/delegate full validations, never the removed consume-internal pair.
 			assertEquals(3, fixture.level.capabilityCalls);
-			// One withAccess binding, four explicit common root/member authority checks, and
-			// every nested production Context.require rebinds current owner authority again.
+			// Every root target gate keeps its current binding; internal member callbacks do not.
 			assertEquals(fixture.world.contains + 1, fixture.world.binds);
 			assertTrue(fixture.world.contains > 4);
 			assertEquals(1, fixture.world.used);
 		}
 	}
 
+	@Test void finalCountCallbackCannotReplaceHistoricalRootObjectWithSameRegistry() {
+		try (var fixture = new Fixture(false)) {
+			fixture.reset();
+			var original = Objects.requireNonNull(fixture.level.entity);
+			fixture.handler.onCount = () -> { if (fixture.handler.tankReads == 2) fixture.replaceRootEntity(); };
+			assertThrows(InventorySourceUnavailableException.class, fixture::read);
+			assertEquals(0, fixture.handler.contentReads);
+			assertEquals(0, fixture.world.used);
+			java.lang.ref.Reference.reachabilityFence(original);
+		}
+	}
 	@Test void externalBindingKeepsLegacyStandaloneChecksAndTheSameOutcome() {
 		try (var fixture = new Fixture(true)) {
 			var value = Objects.requireNonNull(fixture.read());
@@ -169,7 +179,7 @@ class InventoryFluidCoordinatedSourceTest {
 		}
 	}
 
-	@Test void guardedTailAuthorityCannotRemoveSiblingAndStillReachTheGetter() {
+	@Test void providerTargetCheckRejectsSiblingRemovalBeforeGetterAfterGuardedTailAuthority() {
 		try (var fixture = new Fixture(false, false, true)) {
 			fixture.handler.onCount = () -> {
 				if (fixture.handler.tankReads == 2) fixture.world.tailBindings = 3;
@@ -267,6 +277,9 @@ class InventoryFluidCoordinatedSourceTest {
 		private void reset() {
 			level.capabilityCalls = 0; handler.contentReads = 0; handler.tankReads = 0; handler.capacityReads = 0;
 			world.binds = 0; world.contains = 0; world.used = 0; world.registryReads = 0;
+		}
+		private void replaceRootEntity() {
+			var replacement = new BeaconBlockEntity(ROOT, level.state()); replacement.setLevel(level); level.entity = replacement;
 		}
 		@Override public void close() {
 			source.close();
@@ -428,7 +441,13 @@ class InventoryFluidCoordinatedSourceTest {
 				@Override public @Unmodifiable List<FluidCapabilityAccess.Member> members() { return members; }
 				@Override public Optional<String> alias() { return Optional.empty(); }
 				@Override public String description() { return "headless-two-member"; }
-				@Override public boolean matches(Operation op) { for (var member : members) if (!member.block().same(world.block(member.position(), op))) return false; return true; }
+				@Override public boolean matches(Operation op) {
+					for (var member : members) {
+						if (!member.block().same(world.block(member.position(), op))) return false;
+						if (member.block().entity() instanceof BlockEntity entity && entity.isRemoved()) return false;
+					}
+					return true;
+				}
 				@Override public OperationProfile checkProfile() { return world.blockProfile().times(2); }
 				@Override public TopologyEvidence topology() { return TopologyEvidence.EXPLICIT_STRUCTURE; }
 			};

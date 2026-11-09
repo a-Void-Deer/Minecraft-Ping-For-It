@@ -73,6 +73,7 @@ class InventoryPublicationReviewTest {
 					((ChestBlockEntity) entity).setItem(0, new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.STONE, 10));
 			}
 			int[] proofCalls = {0}; long[] before = {-1}; boolean[] revoked = {false};
+			boolean frozenPolicy = boundary.equals("policy");
 			int[] revocationStart = {-1};
 			var delivered = new AtomicReference<@Nullable Delivery>();
 			f.beforeValidation = (context, packet) -> {
@@ -85,7 +86,7 @@ class InventoryPublicationReviewTest {
 							before[0] = spent(f, InventoryPublicationBackendFixture.A);
 							for (Object state : ((Map<?, ?>) field(publisher(f), "states")).values()) if (context.equals(field(state, "context"))) delivered.set(Delivery.capture(state));
 						} catch (ReflectiveOperationException failure) { throw new AssertionError(failure); }
-						revoked[0] = !boundary.equals("none");
+						revoked[0] = !boundary.equals("none") && !frozenPolicy;
 						switch (boundary) {
 							case "policy" -> f.currentPolicy = player -> Optional.of(new InventoryBackend.Policy(100, 1, player.equals(InventoryPublicationBackendFixture.A) ? Set.of() : Set.of("entity_block")));
 							case "view" -> f.currentPolicy = player -> Optional.of(new InventoryBackend.Policy(100, player.equals(InventoryPublicationBackendFixture.A) ? 2 : 1, Set.of("entity_block")));
@@ -101,7 +102,13 @@ class InventoryPublicationReviewTest {
 			assertTrue(proofCalls[0] > 0, "mutation ran inside the outgoing frame's final metadata proof, not encodedBytes");
 			long handed = 0;
 			for (int index = revocationStart[0]; index < f.frames.size(); index++) if (f.recipients.get(index).equals(InventoryPublicationBackendFixture.A) && marker.equals(f.frames.get(index).markerId()) && InventorySyncPublisher.requiresSource(f.frames.get(index))) handed++;
-			if (revoked[0]) {
+			if (frozenPolicy) {
+				// A later presentation policy edit is not a creation-frozen marker
+				// revocation; the existing cut still hands off unchanged.
+				assertTrue(handed > 0, "later policy cannot rewrite frozen recipient content");
+				assertTrue(f.clients.get(InventoryPublicationBackendFixture.A).tracking(marker).complete());
+			}
+			else if (revoked[0]) {
 				assertEquals(0, handed, "post-proof recipient revocation must fence quantities and certificates");
 				assertEquals(before[0], spent(f, InventoryPublicationBackendFixture.A), "denied recipient frame spends no wire allowance");
 				Delivery atProof = java.util.Objects.requireNonNull(delivered.get());

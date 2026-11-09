@@ -23,6 +23,7 @@ class InventoryBackendDiagnosticsTest {
 		try (var fixture = new InventoryBackendTest.Fixture();
 			var logs = new InventoryDiagnosticsTestCapture(Level.ALL)) {
 			Diagnostics.setProfile(DiagnosticSide.SERVER, LoggingProfile.DEBUG);
+			fixture.settings.getPreview().setPeriodTicks(1);
 			fixture.host.policies.replaceAll((player, policy) -> new InventoryBackend.Policy(policy.epoch(), policy.view(), policy.types(), policy.types()));
 			fixture.open();
 			var opened = siteMessages(logs, "inventory/preview/open");

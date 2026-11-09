@@ -29,6 +29,8 @@ import static nx.pingwheel.common.CommonClient.Game;
 @EqualsAndHashCode
 public class ClientConfig implements IConfig {
 	@Nullable LoggingProfile loggingProfile = ConfigDefaults.Client.LOGGING_PROFILE;
+	boolean monitorHudEnabled = ConfigDefaults.Client.MONITOR_HUD_ENABLED;
+	@Nullable MonitorMetricSelections monitorMetrics = new MonitorMetricSelections();
 	int pingVolume = ConfigDefaults.Client.PING_VOLUME;
 	int pingDistance = ConfigDefaults.Client.PING_DISTANCE;
 	boolean itemIconVisible = ConfigDefaults.Client.ITEM_ICON_VISIBLE;
@@ -181,9 +183,24 @@ public class ClientConfig implements IConfig {
 		return loggingProfile == null ? ConfigDefaults.Client.LOGGING_PROFILE : loggingProfile;
 	}
 
-	/** Stores the preference only; the runtime lifecycle owns publishing logging policy. */
+	/** Stores local preferences; runtime publication remains owned by the logging lifecycle. */
 	public void setLoggingProfile(@Nullable LoggingProfile loggingProfile) {
 		this.loggingProfile = loggingProfile == null ? ConfigDefaults.Client.LOGGING_PROFILE : loggingProfile;
+		if (getLoggingProfile() != LoggingProfile.DEBUG) monitorHudEnabled = false;
+	}
+
+	/** Local HUD eligibility never changes the retained metric selection preferences. */
+	public void setMonitorHudEnabled(boolean enabled) {
+		monitorHudEnabled = enabled && getLoggingProfile() == LoggingProfile.DEBUG;
+	}
+
+	public MonitorMetricSelections getMonitorMetrics() {
+		if (monitorMetrics == null) monitorMetrics = new MonitorMetricSelections();
+		return monitorMetrics;
+	}
+
+	public void setMonitorMetrics(@Nullable MonitorMetricSelections selections) {
+		monitorMetrics = selections == null ? new MonitorMetricSelections() : selections;
 	}
 
 	public void setConfigurationNoticeSize(int configurationNoticeSize) {
@@ -262,6 +279,8 @@ public class ClientConfig implements IConfig {
 
 	void validate(ClampWarningSink warningSink) {
 		loggingProfile = getLoggingProfile();
+		if (loggingProfile != LoggingProfile.DEBUG) monitorHudEnabled = false;
+		if (monitorMetrics == null) monitorMetrics = new MonitorMetricSelections();
 		// Gson maps unknown enum names to null. Recover them locally so malformed
 		// client data never selects a new geometry route accidentally.
 		entityBlockRenderMode = EntityBlockRenderMode.effective(entityBlockRenderMode);

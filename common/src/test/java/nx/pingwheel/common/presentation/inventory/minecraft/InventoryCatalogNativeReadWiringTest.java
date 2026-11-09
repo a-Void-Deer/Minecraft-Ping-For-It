@@ -33,6 +33,7 @@ import nx.pingwheel.common.presentation.inventory.InventorySelection;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
 import nx.pingwheel.common.presentation.inventory.InventoryStep;
+import nx.pingwheel.common.presentation.inventory.InventoryTestGrants;
 import nx.pingwheel.common.presentation.inventory.InventoryBackend;
 import nx.pingwheel.common.presentation.inventory.InventoryPublicationTicks;
 import nx.pingwheel.common.network.InventoryC2SPacket;
@@ -645,15 +646,31 @@ class InventoryCatalogNativeReadWiringTest {
 		boolean blockData, permitted = true;
 		long expiry = 300;
 		@Override public Optional<InventoryBackend.Policy> policy(UUID player) { return Optional.of(new InventoryBackend.Policy(100, permitted ? 1 : 2, permitted ? java.util.Set.of("entity_block") : java.util.Set.of())); }
+		@Override public Optional<InventoryBackend.SessionAccess> session(UUID player) {
+			return Optional.of(new InventoryBackend.SessionAccess(100, permitted ? 1 : 2,
+				InventoryTestGrants.both()));
+		}
+		@Override public Optional<nx.pingwheel.common.marker.ServerMarker> activeMarker(nx.pingwheel.common.domain.MarkerId marker) {
+			return store.find(marker);
+		}
+		@Override public java.util.Set<nx.pingwheel.common.presentation.inventory.InventoryResourceKind> freezeInventoryPreviewLanes(
+			UUID owner, String targetTypeId) {
+			return permitted ? java.util.Set.of(nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM) : java.util.Set.of();
+		}
 		@Override public Optional<InventoryBackend.Opened> open(UUID player, Target requested) { return Optional.of(new InventoryBackend.Opened(requested, "entity_block", "attention")); }
 		@Override public boolean annotationAllowed(InventorySourceInput input, String type) { return true; }
 		@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
 			var type = nx.pingwheel.common.domain.TargetTypeCatalog.builtIn().findById(frozen.targetType()).orElseThrow();
 			@org.jetbrains.annotations.Nullable var rejected = admission.prepare(frozen.target(), nx.pingwheel.common.marker.TargetKey.from(frozen.target()), type.id(), audience);
 			if (rejected != null) return new InventoryBackend.Created(null, rejected);
-			return new InventoryBackend.Created(store.create(player, frozen.target(), type, type.defaultPingType(), new nx.pingwheel.common.marker.MarkerAnchor(0, 0, 0), 1, expiry, audience).marker(), null);
+			var authorization = InventoryTestGrants.allowAll(audience);
+			rejected = admission.finishAuthorization(authorization);
+			if (rejected != null) return new InventoryBackend.Created(null, rejected);
+			return new InventoryBackend.Created(store.create(player, frozen.target(), nx.pingwheel.common.marker.TargetKey.from(frozen.target()),
+				type, type.defaultPingType(), new nx.pingwheel.common.marker.MarkerAnchor(0, 0, 0), 1, expiry, audience,
+				List.of(), authorization).marker(), null);
 		}
-		@Override public boolean knows(UUID player, nx.pingwheel.common.domain.MarkerId marker) { return !delayedBasic.contains(player)
+		@Override public boolean knows(UUID player, nx.pingwheel.common.domain.MarkerId marker) { return permitted && !delayedBasic.contains(player)
 			&& store.allMarkers().stream().anyMatch(value -> value.id().equals(marker) && value.recipients().contains(player)); }
 		@Override public boolean authorized(SyncPublisher.Context context) { return true; }
 		@Override public void publishCreated(InventoryBackend.Created outcome) {
@@ -701,7 +718,9 @@ class InventoryCatalogNativeReadWiringTest {
 			var preview = client.preview(1);
 			var chosen = preview.entries().stream().filter(entry -> entry.itemId().equals(id)).findFirst().orElseThrow();
 			backend.handle(input().readOwner(), InventoryC2SPacket.select(epoch, 100, 1, 1, 1, preview.baselineId(), preview.statusRevision(), chosen.key(), "danger"), tick, settings);
-			assertEquals(1, host.store.size()); client.markerCreated(MarkerSnapshot.from(host.store.allMarkers().getFirst())); drain();
+			assertEquals(1, host.store.size()); var canonical = host.store.allMarkers().getFirst();
+			client.markerCreated(MarkerSnapshot.from(canonical), InventoryTestGrants.content(canonical, input().readOwner(),
+				nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM)); drain();
 			backend.handle(input().readOwner(), InventoryC2SPacket.close(epoch, 1).stamp(100, 1), tick, settings); drain();
 			// SELECT commits and answers synchronously; data waits for a normal
 			// tick. Spend only scan slots so this fixture can inspect the seed
@@ -732,7 +751,9 @@ class InventoryCatalogNativeReadWiringTest {
 			var selected = InventoryC2SPacket.select(f.epoch, 100, 1, 1, 1, preview.baselineId(), preview.statusRevision(), preview.entries().getFirst().key(), "danger");
 			f.host.blockData = true; int reads = world.reads();
 			backend.handle(input().readOwner(), selected, 1, f.settings);
-			var marker = f.host.store.allMarkers().getFirst(); f.client.markerCreated(MarkerSnapshot.from(marker)); f.drain();
+			var marker = f.host.store.allMarkers().getFirst(); f.client.markerCreated(MarkerSnapshot.from(marker),
+				InventoryTestGrants.content(marker, input().readOwner(),
+					nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM)); f.drain();
 			assertEquals(1, f.host.created.size()); assertTrue(backend.tracksInventory(marker.id()));
 			assertEquals(reads, world.reads(), "creation remains synchronous with no item witness");
 			assertTrue(f.host.packets.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.SELECTED && p.commitId() == 1), "terminal result does not wait for seed transport");
@@ -886,7 +907,9 @@ class InventoryCatalogNativeReadWiringTest {
 			f.repair(backend, 1); f.tick(backend, 1);
 			assertEquals(LargeNative.LARGE_AMOUNT, f.client.tracking(marker.id()).entries().getFirst().count());
 			f.settings.setDisplayByteMultiplier(new java.math.BigDecimal("0.25")); f.tick(backend, 2); f.tick(backend, 3);
-			f.host.delayedBasic.remove(other); second.markerCreated(MarkerSnapshot.from(marker)); f.tick(backend, 4);
+			f.host.delayedBasic.remove(other); second.markerCreated(MarkerSnapshot.from(marker),
+				InventoryTestGrants.content(marker, other,
+					nx.pingwheel.common.presentation.inventory.InventoryResourceKind.ITEM)); f.tick(backend, 4);
 			for (; secondCursor[0] < f.host.packets.size(); secondCursor[0]++) if (f.host.deliveries.get(secondCursor[0]).equals(other)) second.accept(f.host.packets.get(secondCursor[0]));
 			var first = f.client.tracking(marker.id()); var delayed = second.tracking(marker.id());
 			assertEquals(first.entries().getFirst().count(), delayed.entries().getFirst().count()); assertFalse(delayed.complete());

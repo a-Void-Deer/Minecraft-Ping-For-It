@@ -115,7 +115,14 @@ class MarkerCreationServiceTest {
 		store = new ServerMarkerStore(new MarkerIdSource());
 		validator = new RecordingValidator();
 		resolver = new RecordingResolver();
-		service = new MarkerCreationService(store, resolver, PING_TYPES, validator);
+		service = new MarkerCreationService(store, resolver, PING_TYPES, validator,
+			MarkerCreationLogger.noop(), new nx.pingwheel.common.integration.externalblock.ExternalBlockServerProviderRegistry(),
+			null, TargetGroupingResolver.exact(), (target, type, owner, audience) -> {
+				Map<UUID, nx.pingwheel.common.presentation.PresentationGrant> grants = new java.util.LinkedHashMap<>();
+				for (UUID recipient : audience) grants.put(recipient,
+					nx.pingwheel.common.presentation.TestContentGrants.basicAll());
+				return new PingAuthorization(grants);
+			});
 	}
 
 	private MarkerCreateOutcome create(Target requested, String pingTypeId) {

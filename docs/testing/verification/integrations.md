@@ -80,12 +80,15 @@ the `Global` side selector at `NORMAL` and `DEEP`, disabled accessor laziness,
 one bounded original graph per call, and repeated calls without implicit
 suppression.
 
-These profile, self-fault, backend and public-route fixtures are covered by the
-current source-input acceptance recorded under
-[logging-coverage audit final acceptance](build-checks.md#logging-coverage-audit-final-acceptance).
-That acceptance covers the named automated scopes only; loader builds are
-included, while live appender/loader/game behavior and manual scenarios remain
-pending.
+These profile, self-fault, backend and public-route fixtures include added
+logging/diagnostic coverage items that have no saved source-input execution
+acceptance record yet; that evidence remains pending. The earlier
+[logging-profile common execution](build-checks.md#logging-profile-common-execution),
+[loader execution](build-checks.md#logging-profile-loader-execution) and
+[final combined acceptance](build-checks.md#logging-profile-final-combined-acceptance)
+record earlier inputs and are not a substitute for that pending record. The
+listed scopes remain automated-seam coverage only; live appender/loader/game
+behavior and manual scenarios remain pending.
 
 The focused `Log4jDiagnosticOutputBoundaryTest` execution is recorded under the
 same [common execution](build-checks.md#logging-profile-common-execution) entry.
@@ -162,13 +165,13 @@ presentation call sites:
   reflection entries with Create present and absent, side-bound availability,
   client/authoritative adapter fields, and no collector load.
 
-The current loader build/test execution for this group, including the newer
-diagnostic cases above, is recorded under
-[logging-coverage audit final acceptance](build-checks.md#logging-coverage-audit-final-acceptance).
-Earlier loader and combined records remain historical assertions only. These
-are headless or constructed compiled fixtures with injected sinks; they do
-not establish live loader launch, installed Create, GPU presentation,
-multiplayer or mixed-version behavior.
+The newer diagnostic cases above have no saved loader build/test execution
+record yet; that evidence remains pending. As noted under
+[shared exception diagnostics](#shared-exception-diagnostics), earlier loader
+and combined records cover earlier inputs and remain historical assertions only,
+not a substitute for that record. These are headless or constructed compiled
+fixtures with injected sinks; they do not establish live loader launch,
+installed Create, GPU presentation, multiplayer or mixed-version behavior.
 
 ## Create presentation adapters
 
@@ -563,24 +566,18 @@ and successful compilation are not substitutes for exercising them.
   and emergency-writer behavior under a launched game remain unverified; the
   shared diagnostic fixtures use test sinks, test appenders and injected output
   streams;
-- installed-Create presentation sampling and display remain unexercised in-game:
-  automated seams cover the summary adapter's shape, work and version gates,
-  detached registry-ID aggregation, the derived available-capacity projection,
-  the constructed ASM field-shape gate for the cached network accessor, the
-  real-loader gate decisions over the actual Create archive bytes, the
-  Create-free cached-kinetic-preview receipt/network/accessor and per-field
-  fallback rules, the kinetic-method bytecode failure harness and diagnostic
-  callback seams above, and the external-block `observeSource`
-  position/demand/budget route and candidate preview entry with recording
-  access, but no automated test runs the production collector's own per-member
-  checks or captures a real Create collector's vault or tank controller/member
-  structure or samples a live block capability; a real Create collector or
-  handler, the applied Create cached-accessor and receipt mixins under a
-  launched game's live loader environment, an installed Create block
-  entity read, the Sable API, an in-game goggles/game-HUD label line, and
-  manual evidence for the freshness of a last-synchronized cached network total
-  remain pending, so a last reliable client sync may be stale until an
-  authoritative recapture;
+- installed-Create presentation sampling and display remain unexercised in-game.
+  Automated adapter, loader-gate, cached-accessor, receipt and external-block
+  route seams are inventoried under
+  [Create presentation adapters](#create-presentation-adapters); they do not run
+  the production collector's own per-member checks, capture a real Create
+  collector's vault or tank controller/member structure, or sample a live block
+  capability. A real Create collector or handler, the applied Create
+  cached-accessor and receipt mixins under a launched game's live loader
+  environment, an installed Create block entity read, the Sable API, an in-game
+  goggles/game-HUD label line, and manual evidence for the freshness of a
+  last-synchronized cached network total remain pending, so a last reliable
+  client sync may be stale until an authoritative recapture;
 - full-report construction and delivery in the private Create entity-outline
   diagnostic path; its admission gate and separate backend probe have the
   headless coverage above.

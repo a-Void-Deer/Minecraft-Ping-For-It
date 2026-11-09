@@ -21,7 +21,13 @@ import nx.pingwheel.common.name.MinecraftTargetNameResolver;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
-import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
+import nx.pingwheel.common.platform.TransportHandoff;
+import nx.pingwheel.common.monitor.MonitorSchema.Lane;
+import nx.pingwheel.common.monitor.server.ServerInventoryMonitor;
+import nx.pingwheel.common.monitor.server.ServerMonitorCoordinator.CollectionState;
+import nx.pingwheel.common.monitor.integration.ServerMonitorService;
+import nx.pingwheel.common.network.InventoryMonitorSubscribeC2SPacket;
+import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.presentation.inventory.InventoryBackend;
 import nx.pingwheel.common.presentation.inventory.InventoryRuntime;
 import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
@@ -42,9 +48,11 @@ import org.jetbrains.annotations.Nullable;
 /** Minecraft-facing inventory ingress. All world handles stay on the active server thread. */
 public final class InventoryServer {
 
-	private static MinecraftServer active;
-	private static InventoryBackend backend;
+	private static @Nullable MinecraftServer active;
+	private static @Nullable InventoryBackend backend;
 	private static long epochSeed = 1;
+	private static long monitorGeneration;
+	private static @Nullable ServerMonitorService monitorService;
 
 	private InventoryServer() {}
 
@@ -53,6 +61,10 @@ public final class InventoryServer {
 		reset();
 		active = server;
 		epochSeed = Math.addExact(epochSeed, 2048);
+		var monitor = new ServerInventoryMonitor();
+		monitor.resetGeneration(Math.incrementExact(monitorGeneration));
+		monitorGeneration = monitor.serverGeneration();
+		configureMonitor(monitor);
 		var sink = BudgetDelayMonitoring.sink(server);
 		InventoryRuntime.DisplayReprojector reprojector = (display, displayBytes) ->
 			InventoryItemCodec.reproject(display, server.registryAccess(), displayBytes);
@@ -68,27 +80,58 @@ public final class InventoryServer {
 				}
 			},
 			ServerConfig.HANDLER.getConfig().getInventory().pendingMemoryBytes(),
-			reprojector, sink, true);
+			reprojector, sink, true, monitor);
 		backend = new InventoryBackend(new Host(server, runtime, reprojector), runtime, epochSeed, sink);
+		monitorService = new ServerMonitorService(server, IPlatformNetworkService.INSTANCE, monitor::latest,
+			() -> new CollectionState(monitor.serverGeneration(), monitor.collectionGeneration(),
+				monitor.enabled(Lane.PREVIEW), monitor.enabled(Lane.TRACKING)));
 	}
 
 	public static void reset() {
 		InventoryFluidRouteDiagnostics.clear();
+		if (monitorService != null) monitorService.close();
+		monitorService = null;
 		if (backend != null) backend.close();
 		backend = null;
 		active = null;
 	}
 
+	public static void stopped(MinecraftServer server) {
+		if (active == server) reset();
+	}
+
 	public static void handle(MinecraftServer server, ServerPlayer player, InventoryC2SPacket packet) {
 		if (!server.isSameThread() || player.serverLevel().getServer() != server) return;
 		activate(server);
+		configureMonitor(backend.monitor());
 		backend.handle(player.getUUID(), packet, server.getTickCount(), ServerConfig.HANDLER.getConfig().getInventory());
 	}
 
 	public static void tick(MinecraftServer server) {
 		if (!server.isSameThread()) return;
 		activate(server);
+		configureMonitor(backend.monitor());
 		backend.tick(server.getTickCount(), ServerConfig.HANDLER.getConfig().getInventory());
+		backend.completeMonitorTick(server.getTickCount());
+		if (monitorService != null) monitorService.tick(server.getTickCount());
+	}
+
+	private static void configureMonitor(ServerInventoryMonitor monitor) {
+		ServerConfig config = ServerConfig.HANDLER.getConfig();
+		boolean debug = config.getLoggingProfile() == LoggingProfile.DEBUG;
+		monitor.configure(debug && config.isPreviewMonitorEnabled(), debug && config.isTrackingMonitorEnabled());
+	}
+
+	public static void subscribeMonitor(MinecraftServer server, ServerPlayer player, InventoryMonitorSubscribeC2SPacket packet) {
+		if (!server.isSameThread() || packet.isCorrupt() || server.getPlayerList().getPlayer(player.getUUID()) != player) return;
+		activate(server);
+		configureMonitor(backend.monitor());
+		if (monitorService != null) monitorService.subscribe(player, packet);
+	}
+
+	public static void disconnect(ServerPlayer player) {
+		if (monitorService != null) monitorService.disconnect(player);
+		disconnect(player.getUUID());
 	}
 
 	public static void disconnect(UUID player) {
@@ -119,15 +162,67 @@ public final class InventoryServer {
 	public static Optional<InventoryBackend.InitialEnvelope> reserveInitialEnvelope(long wireBytes, long workspace) {
 		return backend == null ? Optional.empty() : backend.reserveInitialEnvelope(wireBytes, workspace);
 	}
-	public static boolean initialMarkerActive(MarkerId marker, UUID recipient) { return backend != null && backend.initialMarkerActive(marker, recipient); }
+	public static boolean initialAudienceActive(MarkerId marker, UUID recipient) { return backend != null && backend.initialAudienceActive(marker, recipient); }
+	public static boolean initialCanonicalAudienceActive(MarkerId marker, UUID recipient, long now) {
+		return backend != null && backend.initialCanonicalAudienceActive(marker, recipient, now);
+	}
 	public static void suppressCreation(MarkerId marker, UUID recipient) { if (backend != null) backend.suppressCreation(marker, recipient); }
 
 	private record Host(MinecraftServer server, InventoryRuntime runtime, InventoryRuntime.DisplayReprojector reprojector) implements InventoryBackend.Host {
 		@Override public Optional<InventoryRuntime.DisplayReprojector> displayReprojector() { return Optional.of(reprojector); }
 		@Override public Optional<InventoryBackend.Policy> policy(UUID player) {
-			return PresentationServer.inventoryPolicy(player).map(p -> new InventoryBackend.Policy(p.epoch(), p.view(), p.types(), p.fluidTypes()));
+			return PresentationServer.inventoryPolicy(player).map(p -> new InventoryBackend.Policy(
+				p.epoch(), p.view(), p.types(), p.fluidTypes(), p.revision()));
 		}
-		@Override public boolean authorized(SyncPublisher.Context context) { return policy(context.recipient()).map(p -> (p.epoch() + "/" + p.view()).equals(context.sessionView())).orElse(false); }
+		@Override public void policyDemand(UUID player) {
+			PresentationServer.refreshInventoryPolicy(player);
+		}
+		@Override public InventoryBackend.PolicyToken policyToken(UUID player) {
+			var token = PresentationServer.inventoryHintToken(player);
+			return new InventoryBackend.PolicyToken(token.owner(), token.sessionEpoch(), token.sessionView(),
+				token.hintGeneration(), token.revision(), token.providerRevision());
+		}
+		@Override public InventoryBackend.PreviewLaneGrant freezeInventoryPreviewGrant(UUID owner, String targetTypeId) {
+			var grant = PresentationServer.freezeInventoryPreviewGrant(owner, targetTypeId);
+			return new InventoryBackend.PreviewLaneGrant(grant.lanes(), new InventoryBackend.PolicyToken(
+				grant.token().owner(), grant.token().sessionEpoch(), grant.token().sessionView(),
+				grant.token().hintGeneration(), grant.token().revision(), grant.token().providerRevision()));
+		}
+		@Override public void adoptPreviewPolicy(UUID player, String targetTypeId,
+			java.util.Set<nx.pingwheel.common.presentation.inventory.InventoryResourceKind> lanes) {
+			PresentationServer.adoptInventoryPolicyLanes(player, targetTypeId, lanes);
+		}
+		@Override public void adoptPreviewPolicy(UUID player, String targetTypeId, InventoryBackend.PreviewLaneGrant grant) {
+			PresentationServer.adoptInventoryPolicyLanes(player, targetTypeId, grant.lanes(),
+				new PresentationServer.InventoryHintToken(grant.token().owner(), grant.token().sessionEpoch(),
+					grant.token().sessionView(), grant.token().hintGeneration(),
+					grant.token().hintRevision(), grant.token().providerRevision()));
+		}
+		@Override public void adoptCreatePolicy(UUID player, String targetTypeId,
+			nx.pingwheel.common.presentation.inventory.InventoryResourceKind kind, boolean allowed) {
+			PresentationServer.adoptInventoryPolicyLane(player, targetTypeId, kind, allowed);
+		}
+		@Override public void adoptCreatePolicy(UUID player, String targetTypeId,
+			nx.pingwheel.common.presentation.inventory.InventoryResourceKind kind, boolean allowed,
+			InventoryBackend.PolicyToken token) {
+			PresentationServer.adoptInventoryPolicyLane(player, targetTypeId, kind, allowed,
+				new PresentationServer.InventoryHintToken(token.owner(), token.sessionEpoch(), token.sessionView(),
+					token.hintGeneration(), token.hintRevision(), token.providerRevision()));
+		}
+		@Override public Optional<InventoryBackend.SessionAccess> session(UUID player) {
+			return PresentationServer.sessionAccess(player).map(s -> new InventoryBackend.SessionAccess(
+				s.epoch(), s.view(), s.compatibleInventoryKinds()));
+		}
+		@Override public Optional<nx.pingwheel.common.marker.ServerMarker> activeMarker(MarkerId marker) {
+			return ServerCore.activeMarker(marker);
+		}
+		@Override public java.util.Set<nx.pingwheel.common.presentation.inventory.InventoryResourceKind> freezeInventoryPreviewLanes(
+			UUID owner, String targetTypeId) {
+			return PresentationServer.freezeInventoryPreviewLanes(owner, targetTypeId);
+		}
+		@Override public boolean authorized(SyncPublisher.Context context) {
+			return session(context.recipient()).map(s -> s.stamp().equals(context.sessionView())).orElse(false);
+		}
 		@Override public boolean knows(UUID player, MarkerId marker) { return PresentationServer.inventoryKnows(player, marker); }
 		@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
 			return ServerCore.createInventory(server, server.getPlayerList().getPlayer(player), frozen, admission);
@@ -210,16 +305,6 @@ public final class InventoryServer {
 			}
 			var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.global(nx.pingwheel.common.diagnostics.Diagnostics.server()))
 				.resolve(validated.normalizedTarget(), validated.matchContext());
-			int level = 0;
-			for (int candidate = 1; candidate <= 4; candidate++) if (player.hasPermissions(candidate)) level = candidate;
-			var allowed = InventoryPresentation.allowed(config.getPresentation(), playerId, level, resolved.targetType().id());
-			int permissionLevel = level;
-			if (!allowed.contains(InventoryPresentation.ITEMS) && !allowed.contains(InventoryPresentation.FLUIDS)) {
-				debugOpen("presentation", playerId, requested, resolved.target(), resolved.targetType().id(),
-					() -> "items=" + allowed.contains(InventoryPresentation.ITEMS) + " fluids=" + allowed.contains(InventoryPresentation.FLUIDS)
-						+ " permissionLevel=" + permissionLevel);
-				return Optional.empty();
-			}
 			debugOpen("opened", playerId, requested, resolved.target(), resolved.targetType().id(),
 				() -> "defaultPingType=" + resolved.targetType().defaultPingType().id());
 			return Optional.of(new InventoryBackend.Opened(resolved.target(),
@@ -288,9 +373,15 @@ public final class InventoryServer {
 
 		@Override
 		public void send(UUID playerId, InventoryS2CPacket packet) {
-			ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+			@Nullable ServerPlayer player = server.getPlayerList().getPlayer(playerId);
 			if (player == null) throw new IllegalStateException("inventory recipient disconnected");
 			IPlatformNetworkService.INSTANCE.sendToClient(packet, player);
+		}
+		@Override
+		public TransportHandoff sendObserved(UUID playerId, InventoryS2CPacket packet) {
+			@Nullable ServerPlayer player = server.getPlayerList().getPlayer(playerId);
+			if (player == null) throw new IllegalStateException("inventory recipient disconnected");
+			return IPlatformNetworkService.INSTANCE.sendToClientObserved(packet, player);
 		}
 	}
 }

@@ -41,6 +41,13 @@ import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.interaction.MinecraftEntityTargetAdapter;
 import nx.pingwheel.common.name.ClientTargetNameDecoder;
 import nx.pingwheel.common.network.InventoryS2CPacket;
+import nx.pingwheel.common.network.InventoryMonitorStatusS2CPacket;
+import nx.pingwheel.common.network.InventoryMonitorSampleS2CPacket;
+import nx.pingwheel.common.monitor.MonitorHudLabels;
+import nx.pingwheel.common.monitor.client.MonitorDisplayModel;
+import nx.pingwheel.common.monitor.client.MonitorLayoutState;
+import nx.pingwheel.common.monitor.integration.ClientMonitorService;
+import nx.pingwheel.common.render.InventoryMonitorHud;
 import nx.pingwheel.common.network.PresentationS2CPacket;
 import nx.pingwheel.common.network.RateLimitPolicyS2CPacket;
 import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
@@ -69,7 +76,7 @@ import static nx.pingwheel.common.util.InputUtils.KEY_BINDING_SETTINGS;
 public class CommonClient {
 
 	public static final CommonClient INSTANCE = new CommonClient();
-	public static Minecraft Game = null;
+	public static @Nullable Minecraft Game = null;
 
 	private static @Nullable ClientPingRuntime pingRuntime;
 	private static ClientRateLimitPolicy storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
@@ -85,6 +92,12 @@ public class CommonClient {
 	 * can leak across connections; null while not connected.
 	 */
 	private static @Nullable ClientInventory inventory;
+	private static @Nullable ClientMonitorService monitorService;
+	/** Network callbacks capture only this published scalar; mutable state remains client-thread confined. */
+	private static volatile long monitorConnectionGeneration = -1;
+	private static InventoryMonitorHud.Prepared monitorPrepared = InventoryMonitorHud.Prepared.EMPTY;
+	private static final MonitorLayoutState MONITOR_LAYOUT = new MonitorLayoutState();
+	private static InventoryMonitorHud.Viewport monitorViewport = new InventoryMonitorHud.Viewport(0, 0);
 
 	/** Runs the registered entity-outline sources over the production registry. */
 	private static final EntityOutlineRunner ENTITY_OUTLINE_RUNNER =
@@ -118,6 +131,10 @@ public class CommonClient {
 		// world is in.
 		storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
 		pingRuntime = createPingRuntimeIfInWorld();
+		if (monitorService != null) {
+			monitorService.resetConnection();
+			monitorConnectionGeneration = pingRuntime == null ? -1 : pingRuntime.monitor().connectionGeneration();
+		}
 		inventory = new ClientInventory(IPlatformNetworkService.INSTANCE::sendToServer);
 		if (pingRuntime != null) pingRuntime.inventory(inventory);
 
@@ -133,11 +150,15 @@ public class CommonClient {
 	}
 
 	public void onLeaveServer() {
+		monitorConnectionGeneration = -1;
 		if (pingRuntime != null) {
 			pingRuntime.close();
 		}
 
 		pingRuntime = null;
+		monitorService = null;
+		monitorPrepared = InventoryMonitorHud.Prepared.EMPTY;
+		MONITOR_LAYOUT.reset();
 		storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
 		if (inventory != null) {
 			inventory.reset();
@@ -255,6 +276,8 @@ public class CommonClient {
 	public void onTickStart() {
 		Game = Minecraft.getInstance();
 		GameContext.updateDimension();
+		if (pingRuntime == null) pingRuntime = createPingRuntimeIfInWorld();
+		if (monitorService != null) monitorService.configure(ClientConfig.HANDLER.getConfig());
 
 		// Expire a presentation policy request that outlived the bounded timeout
 		// so the settings UI can retry instead of waiting forever.
@@ -274,6 +297,7 @@ public class CommonClient {
 		if (pingRuntime != null) {
 			pingRuntime.onTick();
 		}
+		prepareMonitorView();
 
 		if (Game.level == null || Game.player == null) {
 			// onTick() aborts the runtime interaction when the world disappears;
@@ -604,9 +628,54 @@ public class CommonClient {
 			INTERACTION_TIME_SOURCE.nowMillis());
 	}
 
+	/** Bottom-layer paint consumes only prepared text; screen/overlay presence does not hide it. */
+	public void onRenderMonitor(GuiGraphics graphics) {
+		if (monitorPrepared.model().rows().isEmpty() || Game == null || Game.options.hideGui || Game.level == null || Game.player == null) return;
+		InventoryMonitorHud.draw(graphics, Game.font, monitorPrepared, monitorViewport);
+	}
+
+	private static void prepareMonitorView() {
+		if (pingRuntime == null || Game == null) {
+			monitorPrepared = InventoryMonitorHud.Prepared.EMPTY; MONITOR_LAYOUT.reset(); return;
+		}
+		if (Game.font == null) {
+			monitorPrepared = InventoryMonitorHud.Prepared.EMPTY; MONITOR_LAYOUT.invalidatePrepared(); return;
+		}
+		var state = pingRuntime.monitor();
+		int width = Game.getWindow().getGuiScaledWidth();
+		int height = Game.getWindow().getGuiScaledHeight();
+		if (monitorViewport.width() != width || monitorViewport.height() != height) {
+			monitorViewport = new InventoryMonitorHud.Viewport(width, height);
+		}
+		var language = net.minecraft.locale.Language.getInstance();
+		// LanguageManager installs a fresh Language on every resource reload, even
+		// when the locale code is unchanged. Font options can change glyph metrics
+		// on the same Font instance without changing that Language identity.
+		int maximumWidth = InventoryMonitorHud.availableTextWidth(width);
+		boolean rebuild = MONITOR_LAYOUT.update(state.view(), state.connectionGeneration(), maximumWidth, Game.font, language,
+			Game.options.forceUnicodeFont().get(), Game.options.japaneseGlyphVariants().get());
+		if (!state.enabled()) { monitorPrepared = InventoryMonitorHud.Prepared.EMPTY; return; }
+		if (!rebuild) return;
+		var fitted = MonitorDisplayModel.prepare(state.view(), MonitorHudLabels.DEFAULT)
+			.fit(maximumWidth, Game.font.getSplitter(), MONITOR_LAYOUT.reservations());
+		monitorPrepared = InventoryMonitorHud.prepare(fitted.model(), Game.font);
+		MONITOR_LAYOUT.commit(fitted.nextReservations());
+	}
+
+	/** Captured before loader enqueue, together with its original transport identity. */
+	public long monitorConnectionToken() {
+		return monitorConnectionGeneration;
+	}
+	public void onMonitorStatus(long token, InventoryMonitorStatusS2CPacket packet) {
+		if (pingRuntime != null && pingRuntime.monitor().accept(token, packet)) prepareMonitorView();
+	}
+	public void onMonitorSample(long token, InventoryMonitorSampleS2CPacket packet) {
+		if (pingRuntime != null && pingRuntime.monitor().accept(token, packet)) prepareMonitorView();
+	}
 	/** Advances interaction timing once from the GameRenderer frame boundary. */
 	public void onRenderFrame() {
 		Game = Minecraft.getInstance();
+		prepareMonitorView();
 
 		if (Game.level == null) {
 			GameContext.clearRenderEntityLookupCache();
@@ -778,10 +847,14 @@ public class CommonClient {
 	}
 
 	private static ClientPingRuntime createPingRuntime() {
-		return ClientPingRuntime.create(
+		var runtime = ClientPingRuntime.create(
 			new MinecraftLocalErrorSink(),
 			IPlatformNetworkService.INSTANCE::sendToServer,
 			storedRateLimitPolicy,
 			INTERACTION_TIME_SOURCE);
+		monitorService = new ClientMonitorService(runtime.monitor(), IPlatformNetworkService.INSTANCE);
+		monitorService.resetConnection();
+		monitorConnectionGeneration = runtime.monitor().connectionGeneration();
+		return runtime;
 	}
 }

@@ -29,6 +29,7 @@ import nx.pingwheel.common.platform.IPlatformInventoryService;
 import nx.pingwheel.common.presentation.inventory.InventoryBackend;
 import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
+import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.topology.DoubleChestFixture;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -40,20 +41,25 @@ import static org.junit.jupiter.api.Assertions.*;
 class InventoryProductionCreateTest {
 	private static final UUID OWNER = new UUID(700, 1);
 	@BeforeAll static void bootstrap() { net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap(); }
-	@Test void productionHostAndServerCoreAdmitFluidOnlyPolicyAndRejectItemBeforeAdmission() throws Exception {
+	@Test void productionHostFreezesCurrentPermissionsInsteadOfSessionAdvertisedLaneTypes() throws Exception {
 		var server = DoubleChestFixture.allocate(Server.class); var level = DoubleChestFixture.allocate(World.class);
 		var player = DoubleChestFixture.allocate(Player.class); var players = DoubleChestFixture.allocate(Players.class);
 		server.players = players; players.player = player; player.level = level; level.server = server;
 		var position = net.minecraft.world.entity.Entity.class.getDeclaredField("position"); position.setAccessible(true); position.set(player, new Vec3(1.5, 64.5, 3.5));
 		var config = ServerConfig.HANDLER.getConfig(); int oldRate = config.getRateLimit(); ChannelMode oldMode = config.getDefaultChannelMode();
+		var presentation = config.getPresentation(); var savedPresentation = presentation.deepCopy();
 		var active = field(ServerCore.class, "ACTIVE_SERVER"); var storeField = field(ServerCore.class, "MARKER_STORE");
-		var presentationActive = field(PresentationServer.class, "activeServer");
-		@Nullable Object oldActive = active.get(null), oldStore = storeField.get(null), oldPresentation = presentationActive.get(null);
+		@Nullable Object oldActive = active.get(null), oldStore = storeField.get(null);
 		@SuppressWarnings("unchecked") Map<UUID, PresentationServer.Session> sessions = (Map<UUID, PresentationServer.Session>) field(PresentationServer.class, "SESSIONS").get(null);
-		@Nullable PresentationServer.Session oldSession = sessions.get(OWNER);
 		var store = new ServerMarkerStore(new MarkerIdSource());
 		try {
-			config.setRateLimit(0); config.setDefaultChannelMode(ChannelMode.GLOBAL); active.set(null, server); storeField.set(null, store); presentationActive.set(null, server);
+			config.setRateLimit(0); config.setDefaultChannelMode(ChannelMode.GLOBAL); presentation.copyFrom(PresentationSettings.serverDefaults());
+			active.set(null, server); storeField.set(null, store);
+			// The production create freeze reads PresentationServer's registry, so
+			// activation must run the real registration path instead of only
+			// replacing the active-server field.
+			PresentationServer.reset();
+			PresentationServer.activate(server);
 			var session = new PresentationServer.Session(100, Map.of(InventoryPresentation.ADAPTER_ID, InventoryPresentation.SCHEMA), Map.of());
 			session.ready = true; session.view = 1; session.inventoryTypes = Set.of(); session.fluidTypes = Set.of("entity_block"); sessions.put(OWNER, session);
 			assertEquals(Set.of("entity_block"), PresentationServer.inventoryPolicy(OWNER).orElseThrow().fluidTypes());
@@ -63,14 +69,28 @@ class InventoryProductionCreateTest {
 				var host = (InventoryBackend.Host) ctor.newInstance(server, runtime, nx.pingwheel.common.presentation.inventory.InventoryRuntime.DisplayReprojector.none());
 				var frozen = new InventoryBackend.Opened(new Target.BlockTarget("minecraft:overworld", 1, 64, 3, "minecraft:chest"), "entity_block", "attention");
 				var admissions = new AtomicInteger();
+				// The session's stale empty ITEM advertisement is a hint, not authority:
+				// a fresh create uses current permission and admits both default lanes.
 				var item = host.create(OWNER, frozen, InventoryResourceKind.ITEM, (t,k,type,a) -> { admissions.incrementAndGet(); return null; });
-				assertNull(item.marker()); assertEquals(0, admissions.get());
+				assertNotNull(item.marker()); assertEquals(1, admissions.get()); assertEquals(1, store.size());
 				var fluid = host.create(OWNER, frozen, InventoryResourceKind.FLUID, (t,k,type,a) -> { admissions.incrementAndGet(); return null; });
-				assertNotNull(fluid.marker()); assertEquals(1, admissions.get()); assertEquals(1, store.size());
+				assertNotNull(fluid.marker()); assertEquals(2, admissions.get()); assertEquals(2, store.size());
+
+				// A later permission requirement is resolved inside the new create:
+				// admission is entered, then the owner frozen-kind check rejects ITEM
+				// without storing, while FLUID remains allowed.
+				presentation.setPermissionLevels(Map.of(InventoryPresentation.ITEMS, 2));
+				assertFalse(player.hasPermissions(2));
+				var deniedItem = host.create(OWNER, frozen, InventoryResourceKind.ITEM, (t,k,type,a) -> { admissions.incrementAndGet(); return null; });
+				assertNull(deniedItem.marker()); assertEquals(3, admissions.get()); assertEquals(2, store.size());
+				var allowedFluid = host.create(OWNER, frozen, InventoryResourceKind.FLUID, (t,k,type,a) -> { admissions.incrementAndGet(); return null; });
+				assertNotNull(allowedFluid.marker()); assertEquals(4, admissions.get()); assertEquals(3, store.size());
 			}
 		} finally {
-			config.setRateLimit(oldRate); config.setDefaultChannelMode(oldMode); active.set(null, oldActive); storeField.set(null, oldStore); presentationActive.set(null, oldPresentation);
-			if (oldSession == null) sessions.remove(OWNER); else sessions.put(OWNER, oldSession);
+			config.setRateLimit(oldRate); config.setDefaultChannelMode(oldMode); presentation.copyFrom(savedPresentation);
+			active.set(null, oldActive); storeField.set(null, oldStore);
+			PresentationServer.reset();
+			BudgetDelayMonitoring.reset();
 		}
 	}
 	private static java.lang.reflect.Field field(Class<?> owner, String name) throws Exception { var field = owner.getDeclaredField(name); field.setAccessible(true); return field; }

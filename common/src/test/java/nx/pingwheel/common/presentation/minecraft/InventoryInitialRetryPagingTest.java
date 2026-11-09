@@ -15,6 +15,7 @@ import nx.pingwheel.common.marker.MarkerIdSource;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
 import nx.pingwheel.common.marker.ServerMarkerStore;
 import nx.pingwheel.common.marker.ServerMarker;
+import nx.pingwheel.common.presentation.inventory.InventoryTestGrants;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -27,9 +28,12 @@ class InventoryInitialRetryPagingTest {
 		UUID a = new UUID(900, 1), b = new UUID(900, 2), owner = new UUID(900, 3);
 		var store = new ServerMarkerStore(new MarkerIdSource());
 		var type = TargetTypeCatalog.builtIn().findById("block").orElseThrow();
-		Supplier<ServerMarker> create = () -> store.create(owner,
-			new Target.BlockTarget("minecraft:overworld", 1, 64, 3, "minecraft:chest"), type, type.defaultPingType(),
-			new MarkerAnchor(1, 64, 3), 0, 100000, List.of(a, b)).marker();
+		Supplier<ServerMarker> create = () -> {
+			var target = new Target.BlockTarget("minecraft:overworld", 1, 64, 3, "minecraft:chest");
+			var audience = List.of(a, b);
+			return store.create(owner, target, nx.pingwheel.common.marker.TargetKey.from(target), type, type.defaultPingType(),
+				new MarkerAnchor(1, 64, 3), 0, 100000, audience, List.of(), InventoryTestGrants.allowAll(audience)).marker();
+		};
 		var first = create.get(); var second = create.get();
 		var sessions = Map.of(a, session(), b, session());
 		var ordinary = new java.util.ArrayDeque<MarkerId>();
@@ -93,8 +97,12 @@ class InventoryInitialRetryPagingTest {
 		UUID a = new UUID(803,1), b = new UUID(803,2), owner = new UUID(803,3);
 		var store = new ServerMarkerStore(new MarkerIdSource());
 		var type = TargetTypeCatalog.builtIn().findById("block").orElseThrow();
-		for (int i=0;i<620;i++) store.create(owner,new Target.BlockTarget("minecraft:overworld",i,1,1,"minecraft:stone"),
-			type,type.defaultPingType(),new MarkerAnchor(i,1,1),0,i==4?2:10000,i==5?List.of(owner):List.of(a,b));
+		for (int i=0;i<620;i++) {
+			var target=new Target.BlockTarget("minecraft:overworld",i,1,1,"minecraft:stone");
+			var audience=i==5?List.of(owner):List.of(a,b);
+			store.create(owner,target,nx.pingwheel.common.marker.TargetKey.from(target),type,type.defaultPingType(),
+				new MarkerAnchor(i,1,1),0,i==4?2:10000,audience,List.of(),InventoryTestGrants.allowAll(audience));
+		}
 		var first = session(); var second = session(); var sessions = Map.of(a,first,b,second);
 		PresentationServer.startBaseline(first,store); PresentationServer.startBaseline(second,store);
 		var attempts = new HashMap<String,Integer>(); var delivered = new ArrayList<String>();
@@ -123,8 +131,12 @@ class InventoryInitialRetryPagingTest {
 	@Test void removedExpiredAudienceAndViewReplacedWaitsClearWithoutExtendingLifetime() {
 		UUID recipient=new UUID(804,1), owner=new UUID(804,2);
 		var store=new ServerMarkerStore(new MarkerIdSource()); var type=TargetTypeCatalog.builtIn().findById("block").orElseThrow();
-		for(int i=0;i<3;i++) store.create(owner,new Target.BlockTarget("minecraft:overworld",i,1,1,"minecraft:stone"),type,type.defaultPingType(),
-			new MarkerAnchor(i,1,1),0,i==1?2:10000,i==2?List.of(owner):List.of(recipient));
+		for(int i=0;i<3;i++) {
+			var target=new Target.BlockTarget("minecraft:overworld",i,1,1,"minecraft:stone");
+			var audience=i==2?List.of(owner):List.of(recipient);
+			store.create(owner,target,nx.pingwheel.common.marker.TargetKey.from(target),type,type.defaultPingType(),
+				new MarkerAnchor(i,1,1),0,i==1?2:10000,audience,List.of(),InventoryTestGrants.allowAll(audience));
+		}
 		var session=session(); PresentationServer.startBaseline(session,store); session.blockedInitial=0;
 		store.removeByServer(new MarkerId(0),MarkerRemovalReason.CANCELLED);
 		PresentationServer.baselineTick(store,Map.of(recipient,session),null,3,256,id->true,(id,marker)->fail("all remaining records are expired or outside audience"));
@@ -136,9 +148,12 @@ class InventoryInitialRetryPagingTest {
 		UUID recipient = new UUID(901, 1), owner = new UUID(901, 2);
 		var store = new ServerMarkerStore(new MarkerIdSource());
 		var type = TargetTypeCatalog.builtIn().findById("block").orElseThrow();
-		for (int index = 0; index < 4; index++) store.create(owner,
-			new Target.BlockTarget("minecraft:overworld", index, 1, 1, "minecraft:stone"), type, type.defaultPingType(),
-			new MarkerAnchor(index, 1, 1), 0, 10000, List.of(recipient));
+		for (int index = 0; index < 4; index++) {
+			var target = new Target.BlockTarget("minecraft:overworld", index, 1, 1, "minecraft:stone");
+			var audience = List.of(recipient);
+			store.create(owner, target, nx.pingwheel.common.marker.TargetKey.from(target), type, type.defaultPingType(),
+				new MarkerAnchor(index, 1, 1), 0, 10000, audience, List.of(), InventoryTestGrants.allowAll(audience));
+		}
 		var session = session(); PresentationServer.startBaseline(session, store);
 		var sent = new PresentationServer.SentMarker("owner"); sent.deliveredView = session.view;
 		session.sent.put(0L, sent);
@@ -161,9 +176,12 @@ class InventoryInitialRetryPagingTest {
 	@Test void directSuccessOfEarliestFailureDoesNotDiscardLaterFailedWork() throws ReflectiveOperationException {
 		UUID recipient = new UUID(902, 1), owner = new UUID(902, 2);
 		var store = new ServerMarkerStore(new MarkerIdSource()); var type = TargetTypeCatalog.builtIn().findById("block").orElseThrow();
-		for (int index = 0; index < 4; index++) store.create(owner,
-			new Target.BlockTarget("minecraft:overworld", index, 1, 1, "minecraft:stone"), type, type.defaultPingType(),
-			new MarkerAnchor(index, 1, 1), 0, 10000, List.of(recipient));
+		for (int index = 0; index < 4; index++) {
+			var target = new Target.BlockTarget("minecraft:overworld", index, 1, 1, "minecraft:stone");
+			var audience = List.of(recipient);
+			store.create(owner, target, nx.pingwheel.common.marker.TargetKey.from(target), type, type.defaultPingType(),
+				new MarkerAnchor(index, 1, 1), 0, 10000, audience, List.of(), InventoryTestGrants.allowAll(audience));
+		}
 		var session = session(); PresentationServer.startBaseline(session, store);
 		PresentationServer.baselineTick(store, Map.of(recipient, session), null, 1, 2, id -> true,
 			(id, marker) -> defer(session, marker));
