@@ -23,7 +23,12 @@ again.
 The names describe the established UI intent, not a general opacity classifier:
 `VISUAL` and `OUTLINE` are Minecraft shape strategies. `VISUAL` follows each
 block's implementation rather than making every translucent model pass-through;
-`OUTLINE` can select decorations with an empty collision shape. Native
+`OUTLINE` can select decorations with an empty collision shape. Three exact
+Cyclic connected-glass block IDs—`cyclic:glass_connected`, `cyclic:glass_dark`,
+and `cyclic:glass_dark_connected`—are a compatibility exception: they pass
+through under `VISUAL` and retain their native selectable shape under `OUTLINE`.
+The exception is an exact registry-ID comparison shared by the ordinary trace,
+Precise candidate scanning, and entity-local native-shape scans. Native
 block/fluid competition is owned by [local geometry](local_geometry.md#distance-and-native-local-shapes).
 Create's represented block/fluid-state rules are owned by the
 [Create supplement](../../integrations/create-contraption-raycast.md#existing-target-selection-settings).
@@ -61,13 +66,13 @@ that sequence is owned by
 [long-press compatibility](../input/long-press-compatibility.md).
 
 Spectator entities are always excluded, including when
-`markBlacklistedTargets` is true. The shared entity blacklist starts with a
-built-in entity-type rule for `simulated:honey_glue`; that rule is present in
-the global client raycast from initialization, not only after an optional
-integration registers. Additional optional-integration predicates can join the
-same blacklist. It is applied to every live entity candidate before either
-ordinary entity intersection or an entity-local geometry owner's narrow-phase
-trace. Setting `markBlacklistedTargets` to true includes these ignored entity
+`markBlacklistedTargets` is true. The shared entity blacklist starts with
+built-in entity-type rules for `simulated:honey_glue` and `tiab:accelerator`;
+those rules are present in the global client raycast from initialization, not
+only after an optional integration registers. Additional optional-integration
+predicates can join the same blacklist. It is applied to every live entity
+candidate before either ordinary entity intersection or an entity-local
+geometry owner's narrow-phase trace. Setting `markBlacklistedTargets` to true includes these ignored entity
 candidates, but does not affect the spectator rule.
 
 This entity-selection blacklist is distinct from `blockShapeBlacklist` in the

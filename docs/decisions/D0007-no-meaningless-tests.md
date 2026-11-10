@@ -4,9 +4,9 @@
 
 Confirmed decision. It defines the purpose boundary and
 oracle requirements for automated tests; it is not a coverage inventory and
-does not assert that every existing test already satisfies it. Coverage and
-known gaps remain owned by
-[testing and verification](../testing/verification/README.md).
+does not assert that every existing test already satisfies it. The
+[testing and verification entry](../testing/verification/README.md) routes to
+the pages that own coverage and known gaps.
 
 ## Decision
 

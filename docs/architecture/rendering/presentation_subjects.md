@@ -78,7 +78,7 @@ resolution uses the direct source subject and physical grouping fallback. Each
 chest BER draws its own half; a successful half never grants whole-pair coverage.
 
 Supported Create Vaults and fluid tanks use the integration-owned
-[topology and per-cell presentation contract](../../integrations/create.md#metadata-only-topology-access).
+[topology and published-subject presentation contract](../../integrations/create.md#metadata-only-topology-access).
 
 ## Source-conditioned coverage
 

@@ -748,5 +748,6 @@ the non-blank dimension requirement are owned by the
 
 ## Evidence
 
-Existing coverage inventory and remaining integration gaps are owned by
-[testing and verification](../../testing/verification/README.md).
+Coverage and remaining integration gaps are recorded in the verification set;
+its [entry page](../../testing/verification/README.md) routes to their owning
+evidence pages.

@@ -1,9 +1,17 @@
 # Testing and verification
 
-This document separates three kinds of evidence: automated coverage known to
-exist, gaps that remain, and manual/integration scenarios that are still
-pending. An inventory statement records established coverage scope; it is not a
-claim that a test, build or game session was run for the current change.
+This page explains what verification evidence means and routes to the files
+that own it. The verification set separates automated coverage known to exist,
+gaps that remain, and manual/integration scenarios that are still pending. An
+inventory statement records established coverage scope; it is not a claim that
+a test, build or game session was run for the current change.
+
+Each verification page owns the established coverage, limitations and known
+gaps for its scope. [Build checks](build-checks.md) owns build, source-set and
+artifact evidence; [manual and integration
+verification](manual-integration.md) owns pending scenarios; the topic pages own
+automated coverage and gaps for their subsystems. This page is not an index of
+every task or run.
 
 For implementation changes, the tracked verification expectations are to:
 
@@ -14,7 +22,10 @@ For implementation changes, the tracked verification expectations are to:
   shippable artifact set is in scope; and
 - report every command actually run and its result, every applicable check not
   run and the exact reason, manual validation actually performed, and remaining
-  manual or integration gaps.
+  manual or integration gaps in the change's task report. The report is
+  change-specific; persistent verification pages record only coverage, gaps and
+  durable evidence under
+  [Recording future evidence](#recording-future-evidence).
 
 Use the public commands and task orientation in the
 [repository README](../../../README.md#install-build-and-verify). Local maintainer
@@ -28,64 +39,52 @@ fenced blocks, and affected coverage statements. Report those checks as the
 commands or review actually performed; document review alone is not runtime,
 build, multiplayer, rendering, or manual gameplay validation.
 
-## Verification navigation
+## Evidence responsibilities
 
-The [documentation guide](../../README.md) routes product behavior to its
-normative topic owners. The pages in this directory own evidence inventories,
-their limitations and gaps, not those product contracts.
+Each page below owns a stable part of the evidence set; the
+[documentation guide](../../README.md) routes product behavior to its normative
+topic owners. These pages own evidence, limitations and gaps, not product
+contracts.
 
-| Page | Evidence responsibility |
+| Page | Responsibility |
 | --- | --- |
-| [Testing and verification](README.md) | Global evidence rules, check selection, topic routing, and recording future evidence. |
-| [Build checks](build-checks.md#build-source-set-and-artifact-verification) | Source-set, build-task and artifact-identity evidence and its limits; [final fluid combined-tree execution](build-checks.md#fluid-inventory-final-combined-tree-verification); [tank grouping and presentation execution](build-checks.md#fluid-tank-grouping-and-presentation-verification); [native fluid boundary/presentation execution](build-checks.md#native-fluid-boundary-and-presentation-verification); [lane policy/native amount/icon opacity execution](build-checks.md#lane-policy-native-amount-and-icon-opacity-verification); [provider trust and frozen authorization final verification](build-checks.md#provider-trust-and-frozen-authorization-final-verification); [ITEM redundant-work final verification](build-checks.md#item-redundant-work-final-verification); [inventory initial-admission and terminal-reset final verification](build-checks.md#inventory-initial-admission-and-terminal-reset-final-verification); [inventory reset regression final verification](build-checks.md#inventory-reset-regression-final-verification); [logging-profile common execution](build-checks.md#logging-profile-common-execution); [logging-profile loader execution](build-checks.md#logging-profile-loader-execution); [logging-profile final combined acceptance](build-checks.md#logging-profile-final-combined-acceptance); [performance monitor final acceptance](build-checks.md#performance-monitor-implementation-and-final-acceptance); [HUD UX final whole-tree verification](build-checks.md#hud-ux-final-whole-tree-verification); [fixed semantic HUD wrapping final verification](build-checks.md#fixed-semantic-hud-wrapping-final-verification); [stable HUD reservoir UX whole-tree verification](build-checks.md#stable-hud-reservoir-ux-whole-tree-verification); added logging/diagnostic execution evidence remains pending ([shared diagnostics note](integrations.md#shared-exception-diagnostics)); [standalone documentation tooling](build-checks.md#documentation-tooling-coverage). |
+| [Build checks](build-checks.md) | Source-set, build-task, artifact-identity and documentation-tooling evidence and its limits; durable execution evidence for identified inputs. |
 | [Manual and integration verification](manual-integration.md#pending-manual-and-integration-matrix) | Pending manual/integration scenarios; listing a scenario does not record a completed run. |
-
-## Existing automated coverage inventory
+| [Identity and authority](identity-authority.md) | Domain and target identity, authority, client marker runtime and rate-policy coverage. |
+| [Presentation](presentation.md) | Presentation negotiation, policy, adapters, wire projection, content preview and receipt coverage. |
+| [Interaction](interaction.md) | Capture, wheel, cancellation, selection, picking seams and client interaction runtime coverage. |
+| [Configuration and settings UI](configuration-ui.md) | Configuration grammar, server-settings, logging-profile, HUD and settings-screen coverage. |
+| [Shared sources](shared-sources.md) | Shared-source identity, access, capture results, sync publication and cost accounting coverage. |
+| [Inventory](inventory.md) | Inventory preview/tracking, logical containers, pools, budgets, snapshots, HUD and performance coverage. |
+| [Rendering](rendering.md) | Names, geometry outcomes, presentation subjects, overlay layout and renderer seams. |
+| [Integrations](integrations.md) | Diagnostics, Create, Sable, Simulated and optional-rendering coverage. |
 
 Each topic page keeps its coverage and local known automated gaps together.
 
-| Topic page | Coverage sections | Gaps |
-| --- | --- | --- |
-| [Identity and authority](identity-authority.md) | [Domain, identity and authority](identity-authority.md#domain-identity-and-authority); [logical container identity and authority](identity-authority.md#logical-container-identity-and-authority); [client marker runtime coverage](identity-authority.md#client-marker-runtime-coverage); [rate-policy courtesy behavior](identity-authority.md#rate-policy-courtesy-behavior). | [Known automated gaps](identity-authority.md#known-automated-gaps) |
-| [Presentation](presentation.md) | [Presentation snapshot negotiation, policy and adapters](presentation.md#presentation-snapshot-negotiation-policy-and-adapters); [logical target wire coverage](presentation.md#logical-target-wire-coverage); [target content preview](presentation.md#target-content-preview); [content receipt chat and pending completion](presentation.md#content-receipt-chat-and-pending-completion). | [Known automated gaps](presentation.md#known-automated-gaps) |
-| [Interaction](interaction.md) | [Capture, wheel and cancellation](interaction.md#capture-wheel-and-cancellation); [Precise live candidate capture](interaction.md#precise-live-candidate-capture); [selection-policy and input-state seams](interaction.md#selection-policy-and-input-state-seams); [exact entity-local picking and Create raycast seams](interaction.md#exact-entity-local-picking-and-create-raycast-seams); [capture and acceptance range](interaction.md#capture-and-acceptance-range); [Back-hover return state](interaction.md#back-hover-return-state); [headless spatial radial menu](interaction.md#headless-spatial-radial-menu); [native client interaction runtime](interaction.md#native-client-interaction-runtime); [inventory-list gestures and navigation](interaction.md#inventory-list-gestures-and-navigation); [double-click Danger and inventory stay-open](interaction.md#double-click-danger-and-inventory-stay-open). | [Known automated gaps](interaction.md#known-automated-gaps) |
-| [Configuration and settings UI](configuration-ui.md) | [Configuration recovery and selection grammar](configuration-ui.md#configuration-recovery-and-selection-grammar); [inventory and spatial-selector configuration](configuration-ui.md#inventory-and-spatial-selector-configuration); [double-click Danger and inventory stay-open configuration](configuration-ui.md#double-click-danger-and-inventory-stay-open-configuration); [server-settings snapshots and updates](configuration-ui.md#server-settings-snapshots-and-updates); [logging-profile configuration and controls](configuration-ui.md#logging-profile-configuration-and-controls); [performance monitor coverage](configuration-ui.md#performance-monitor-coverage); [HUD UX redesign coverage](configuration-ui.md#hud-ux-redesign-coverage); [settings-screen navigation, catalog, layout and localization](configuration-ui.md#settings-screen-navigation-catalog-layout-and-localization). | [Known automated gaps](configuration-ui.md#known-automated-gaps) |
-| [Assembled settings-screen resize](configuration-ui.md#assembled-settings-screen-resize) | `SettingsScreenResizeTest`. | [Known automated gaps](configuration-ui.md#known-automated-gaps) |
-| [Shared sources](shared-sources.md) | [Shared source identity and capture results](shared-sources.md#shared-source-identity-and-capture-results); [shared source access contract](shared-sources.md#shared-source-access-contract); [shared source sync publication contract](shared-sources.md#shared-source-sync-publication-contract); [shared source cost ledger](shared-sources.md#shared-source-cost-ledger). | [Known automated gaps](shared-sources.md#known-automated-gaps) |
-| [Inventory](inventory.md) | [Fluid inventory automated coverage](inventory.md#fluid-inventory-coverage); [inventory preview and tracking foundation](inventory.md#inventory-preview-and-tracking-foundation); [logical container quotas and scan sharing](inventory.md#logical-container-quotas-and-scan-sharing); [certified Tracking pools and publication](inventory.md#certified-tracking-pool-and-publication-coverage); [native incremental sweep coverage](inventory.md#native-incremental-sweep-coverage); [Vault tracking performance evidence](inventory.md#vault-tracking-performance-evidence); [preview-seeded tracking coverage](inventory.md#preview-seeded-tracking-coverage); [performance monitoring coverage and production evidence](inventory.md#performance-monitoring-coverage-and-production-evidence); [HUD UX redesign coverage](inventory.md#hud-ux-redesign-coverage); [stable semantic HUD wrapping coverage](inventory.md#stable-semantic-hud-wrapping-coverage); [stable HUD reservoir UX coverage](inventory.md#stable-hud-reservoir-ux-coverage). | [Known automated gaps](inventory.md#known-automated-gaps) |
-| [Rendering](rendering.md) | [Name and geometry outcomes](rendering.md#name-and-geometry-outcomes); [container presentation subjects](rendering.md#container-presentation-subjects); [selector overlay layout and frame rendering](rendering.md#selector-overlay-layout-and-frame-rendering); [render entity lookup and locator resolver seams](rendering.md#render-entity-lookup-and-locator-resolver-seams); [focused native block-outline regression coverage](rendering.md#focused-native-block-outline-regression-coverage). | [Known automated gaps](rendering.md#known-automated-gaps) |
-| [Integrations](integrations.md) | [Shared exception diagnostics](integrations.md#shared-exception-diagnostics); [optional failure diagnostics](integrations.md#optional-failure-diagnostics); [Create presentation adapters](integrations.md#create-presentation-adapters); [Vault topology, grouping and presentation](integrations.md#vault-topology-grouping-and-presentation); [fluid-tank topology, grouping and presentation](integrations.md#fluid-tank-topology-grouping-and-presentation); [Create content preview](integrations.md#create-content-preview); [Create raycast seams](integrations.md#create-raycast-seams); [Sable integration coverage](integrations.md#sable-integration-coverage); [Simulated integration coverage](integrations.md#simulated-integration-coverage); [optional rendering structural coverage](integrations.md#optional-rendering-structural-coverage). | [Known automated gaps](integrations.md#known-automated-gaps), including [Sable-specific gaps](integrations.md#sable-specific-gaps) |
+## Known gaps
 
-Create-time recipient/content authorization and fluid provider validation are not
-established by the historical passing tests above. Current-source automated cases
-are inventoried in
-[identity and authority](identity-authority.md#frozen-recipient-authorization-coverage-and-live-gaps)
-for recipient authorization, [presentation](presentation.md#frozen-recipient-content-authorization-coverage-and-live-gaps)
-for global content authorization and wire replay, and
-[inventory](inventory.md#frozen-recipient-authorization-and-fluid-provider-trust-coverage-and-live-gaps)
-for inventory freeze points and provider validation. Those cases passed in the
-final combined execution recorded in
-[build checks](build-checks.md#provider-trust-and-frozen-authorization-final-verification);
-that result is headless, and live evidence remains pending in
-[manual and integration verification](manual-integration.md#frozen-recipient-authorization-and-provider-trust).
-
-## Known automated gaps
-
-The gaps linked in the [coverage inventory](#existing-automated-coverage-inventory)
-remain open until direct evidence closes them.
-
-Build evidence is scoped separately in [build checks](build-checks.md), and
-pending live scenarios remain in the
+The gaps owned by each topic page remain open until a named automated check or
+an actually performed manual/integration scenario closes them. Compilation,
+document review, optional-API loading or unit-test seams alone do not convert a
+pending manual scenario into completed validation. Build evidence is scoped in
+[build checks](build-checks.md); pending live scenarios remain in the
 [manual and integration matrix](manual-integration.md#pending-manual-and-integration-matrix).
 
 ## Recording future evidence
 
 - Add or update focused tests in the same change as behavior where practical.
-- Record a gap as closed only when a named automated check or an actually
-  performed manual/integration scenario covers it.
+- Record execution evidence in a verification page only when it remains useful
+  beyond the change: retain the input and scope, commands or scenario, result,
+  material limitations, and sufficient traceability such as revision,
+  environment, or artifact identity to interpret the record.
+- Durable evidence retains any failure, unexecuted check, or material input
+  difference not represented by another record.
+- Keep raw logs and full execution histories in the change's external evidence
+  report. Do not use a personal account path or temporary directory as the
+  shared locator for evidence, and do not promise that externally held logs
+  remain available. Required toolchain facts such as JDK, platform, and
+  dependency versions are legitimate evidence, not personal information.
 - Keep automated coverage, commands actually run, and manual observations as
   separate claims in implementation reports.
 - Update the owning topic contract when expected behavior changes; changing a
   test alone does not redefine the product.
-- Do not convert pending manual scenarios into completed validation based on
-  compilation, document review, optional-API loading or unit-test seams alone.

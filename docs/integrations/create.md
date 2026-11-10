@@ -419,16 +419,16 @@ Absent Create, an untested version or optional linkage failure takes the same
 normal fallback. Server platform dispatch and client resolver registration are
 lazy; client registration keeps independent state from other Create routes.
 
-For presentation, each verified cell contributes one ordered COMPOSITE subject
-with a controller-relative identity and the source Target Type. The original
-physical hit remains the source. Normal sources and late shape fallback consume
-one shared per-frame subject snapshot under
+For presentation, each published verified cell contributes one ordered COMPOSITE
+subject with a controller-relative identity and the source Target Type. The
+original physical hit remains the source. Normal sources and late shape fallback
+consume one shared per-frame subject snapshot under
 [presentation subjects](../architecture/rendering/presentation_subjects.md).
-Every cell's baked model owns that cell; controller BER or one cell's geometry
-does not cover sibling cells. Metadata is resolved within the bounded structure
-for each frame rather than caching live block entities. Client metadata may lag
-or arrive out of order, so a later frame can recover from direct fallback without
-changing the marker's frozen group or lifetime.
+Every published cell's baked model owns that cell; controller BER or one cell's
+geometry does not cover sibling cells. Metadata is resolved within the bounded
+structure for each frame rather than caching live block entities. Client metadata
+may lag or arrive out of order, so a later frame can recover from direct
+fallback without changing the marker's frozen group or lifetime.
 
 ### Vault logical target and presentation topology
 
@@ -451,7 +451,20 @@ controller/member role. The original hit must belong to the complete verified
 structure. `create:creative_fluid_tank` is a different registry identity and does
 not participate.
 
-Every verified tank cell presents as an `entity_block` subject. Boiler activity
+Topology verification covers the entire prism and its detached result retains
+every verified cell, including cells that are not published for presentation.
+After verification succeeds, a 3-wide tank of height at least 3 omits its strict
+interior cells from presentation: the center X/Z column below the top layer and
+above the bottom layer. The center cells on the bottom and top layers remain
+published. A tank without such a cell publishes every verified cell. The omission
+is determined by structural coordinates only, not by surrounding real air, and
+adds no general occlusion; a shell cell against a wall retains the existing
+through-block outline. Normal sources and late VoxelShape fallback consume the
+same published subject list, so a strict interior cell invokes neither a normal
+source nor fallback. The omission changes only the subject list; it creates no
+rendered outcome and no coverage relation.
+
+Every published shell cell presents as an `entity_block` subject. Boiler activity
 does not gate this geometry. Logical identity is owned by the
 [target model](../architecture/identity/target_model.md#frozen-logical-block-groups),
 and fluid read eligibility by the
