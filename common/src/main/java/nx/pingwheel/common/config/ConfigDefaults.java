@@ -50,6 +50,8 @@ public final class ConfigDefaults {
 		public static final int WHEEL_TARGET_FONT_SIZE = 100;
 		/** Zero follows each marker's frozen server-side duration, not a zero lifetime. */
 		public static final int MARKER_DISPLAY_DURATION = 0;
+		/** Local placement of the courtesy-cooldown notice; hidden suppresses only that notice. */
+		public static final CooldownFeedbackMode COOLDOWN_FEEDBACK = CooldownFeedbackMode.ACTIONBAR;
 
 		public static final @Unmodifiable List<String> BLOCK_DISPLAY_WHITELIST = List.of("*:*");
 		public static final @Unmodifiable List<String> BLOCK_SHAPE_BLACKLIST = List.of();

@@ -797,5 +797,10 @@
 	"monitor.pingforit.hud.format.stat": "%1$s %2$s",
 	"monitor.pingforit.hud.format.memory": "%1$s %2$s %3$s",
 	"monitor.pingforit.hud.format.field_separator": "; ",
-	"monitor.pingforit.hud.format.detail_separator": " "
+	"monitor.pingforit.hud.format.detail_separator": " ",
+	"settings.pingforit.cooldown_feedback": "Powiadomienie o odnowieniu",
+	"settings.pingforit.cooldown_feedback.tooltip": "Gdzie pokazywać lokalne powiadomienie, gdy ping się odnawia.\nPasek akcji: nad paskiem szybkiego wyboru.\nCzat: na czacie.\nUkryte: nie pokazuj.",
+	"value.pingforit.actionbar": "Pasek akcji",
+	"value.pingforit.chat": "Czat",
+	"pingforit.chat.create_cooldown": "Ping jest w trakcie odnowienia..."
 }

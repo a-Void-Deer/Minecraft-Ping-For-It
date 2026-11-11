@@ -799,5 +799,10 @@
 	"monitor.pingforit.hud.format.stat": "%1$s%2$s",
 	"monitor.pingforit.hud.format.memory": "%1$s%2$s %3$s",
 	"monitor.pingforit.hud.format.field_separator": "; ",
-	"monitor.pingforit.hud.format.detail_separator": " "
+	"monitor.pingforit.hud.format.detail_separator": " ",
+	"settings.pingforit.cooldown_feedback": "冷卻提示",
+	"settings.pingforit.cooldown_feedback.tooltip": "冷卻中的標記提示要顯示在哪裡。\n動作列：快捷列上方。\n聊天欄：聊天欄中。\n隱藏：不顯示。",
+	"value.pingforit.actionbar": "動作列",
+	"value.pingforit.chat": "聊天欄",
+	"pingforit.chat.create_cooldown": "標記仍在冷卻中..."
 }

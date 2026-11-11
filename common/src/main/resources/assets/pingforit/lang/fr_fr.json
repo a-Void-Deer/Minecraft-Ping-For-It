@@ -802,5 +802,10 @@
 	"monitor.pingforit.hud.format.stat": "%1$s %2$s",
 	"monitor.pingforit.hud.format.memory": "%1$s %2$s %3$s",
 	"monitor.pingforit.hud.format.field_separator": "; ",
-	"monitor.pingforit.hud.format.detail_separator": " "
+	"monitor.pingforit.hud.format.detail_separator": " ",
+	"settings.pingforit.cooldown_feedback": "Avis de recharge",
+	"settings.pingforit.cooldown_feedback.tooltip": "Où afficher l'avis local lorsqu'un ping est en recharge.\nBarre d'action : au-dessus de la barre rapide.\nChat : dans le chat.\nMasqué : ne pas l'afficher.",
+	"value.pingforit.actionbar": "Barre d'action",
+	"value.pingforit.chat": "Chat",
+	"pingforit.chat.create_cooldown": "Le ping est en recharge..."
 }

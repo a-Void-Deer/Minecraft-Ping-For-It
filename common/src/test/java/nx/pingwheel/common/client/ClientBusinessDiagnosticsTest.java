@@ -53,7 +53,10 @@ class ClientBusinessDiagnosticsTest {
 			var dispatcher = new ClientPingActionDispatcher(packet -> {
 				attempts[0]++;
 				throw new IllegalStateException("create-transport-sentinel", new IllegalArgumentException("send-root-sentinel"));
-			}, (key, color) -> fail("no local error"), PingInteractionLogger.noop(), tracker,
+			}, new ClientPingActionDispatcher.LocalErrorSink() {
+				@Override public void showLocalError(String messageKey, int color) { fail("no local error"); }
+				@Override public void showCreateCooldown(String messageKey, int color) { }
+			}, PingInteractionLogger.noop(), tracker,
 				new ClientCreateRateLimiter(() -> 0, new ClientRateLimitPolicy(1, 1000)), readyPresentation());
 			var snapshot = TargetSnapshotFactory.location("minecraft:overworld", 1, 2, 3);
 			var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.noop()).resolve(snapshot.target(), snapshot.matchContext());

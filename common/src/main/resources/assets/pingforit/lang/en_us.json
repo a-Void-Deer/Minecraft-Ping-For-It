@@ -803,5 +803,10 @@
 	"monitor.pingforit.hud.format.stat": "%1$s %2$s",
 	"monitor.pingforit.hud.format.memory": "%1$s %2$s %3$s",
 	"monitor.pingforit.hud.format.field_separator": "; ",
-	"monitor.pingforit.hud.format.detail_separator": " "
+	"monitor.pingforit.hud.format.detail_separator": " ",
+	"settings.pingforit.cooldown_feedback": "Cooldown Feedback",
+	"settings.pingforit.cooldown_feedback.tooltip": "Where to show the local notice when a ping is on cooldown.\nAction Bar: above the hotbar.\nChat: in the chat.\nHidden: do not show it.",
+	"value.pingforit.actionbar": "Action Bar",
+	"value.pingforit.chat": "Chat",
+	"pingforit.chat.create_cooldown": "Ping is on cooldown..."
 }

@@ -49,8 +49,11 @@ class ClientPingRuntimeTest {
 	void factorySharesNegotiatedSessionWithDispatchAndDropsUnreadyLocationCreatesWithoutSpendingAllowance() {
 		List<IPacket> sent = new ArrayList<>();
 		List<String> errors = new ArrayList<>();
-		var runtime = ClientPingRuntime.create((key, color) -> errors.add(key), sent::add,
-			new ClientRateLimitPolicy(1, 1000), () -> 0);
+		List<String> cooldowns = new ArrayList<>();
+		var runtime = ClientPingRuntime.create(new ClientPingActionDispatcher.LocalErrorSink() {
+			@Override public void showLocalError(String key, int color) { errors.add(key); }
+			@Override public void showCreateCooldown(String key, int color) { cooldowns.add(key); }
+		}, sent::add, new ClientRateLimitPolicy(1, 1000), () -> 0);
 		var active = new ActiveInteraction();
 		var unready = locationCreate(active.begin(), 1);
 		runtime.dispatchPropertyPing(unready, List.of());
@@ -89,6 +92,7 @@ class ClientPingRuntimeTest {
 		var throttled = locationCreate(active.begin(), 4);
 		runtime.dispatchPropertyPing(throttled, List.of());
 		assertEquals(1, sent.size());
+		assertEquals(List.of(ClientPingActionDispatcher.CREATE_COOLDOWN_MESSAGE_KEY), cooldowns);
 		for (var unsent : List.of(unready, offered, throttled))
 			runtime.handleRejected(unsent.context().token().sequence(), MarkerRequestKind.CREATE, MarkerRejectReason.TARGET_GONE);
 		assertTrue(errors.isEmpty(), "discarded or throttled creates must not replace the actual-send receipt");

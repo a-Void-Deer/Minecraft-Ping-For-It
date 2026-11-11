@@ -2,7 +2,11 @@ package nx.pingwheel.common.client;
 
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.contents.TranslatableContents;
+import nx.pingwheel.common.config.CooldownFeedbackMode;
 import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.List;
 
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
 import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
@@ -49,6 +53,32 @@ class MinecraftLocalErrorSinkTest {
 	@Test
 	void prefixKeyIsTheStableChatResourceKey() {
 		assertEquals("pingforit.chat.local_error.prefix", MinecraftLocalErrorSink.PREFIX_KEY);
+	}
+
+	@Test
+	void cooldownFeedbackUsesThePrefixMessageAndConfiguredPlacementOnly() {
+		Component message = MinecraftLocalErrorSink.componentFor(
+			ClientPingActionDispatcher.CREATE_COOLDOWN_MESSAGE_KEY,
+			ClientPingActionDispatcher.CREATE_COOLDOWN_COLOR);
+
+		assertEquals(MinecraftLocalErrorSink.PREFIX_KEY, assertTranslatable(message).getKey());
+		var parts = message.getSiblings();
+		assertEquals(1, parts.size());
+		assertEquals(ClientPingActionDispatcher.CREATE_COOLDOWN_MESSAGE_KEY, assertTranslatable(parts.getFirst()).getKey());
+		assertEquals(0xFF5555, message.getStyle().getColor().getValue());
+
+		List<Component> actionBar = new ArrayList<>();
+		List<Component> chat = new ArrayList<>();
+		MinecraftLocalErrorSink.presentCooldown(message, CooldownFeedbackMode.ACTIONBAR, actionBar::add, chat::add);
+		assertEquals(List.of(message), actionBar);
+		assertTrue(chat.isEmpty());
+
+		MinecraftLocalErrorSink.presentCooldown(message, CooldownFeedbackMode.CHAT, actionBar::add, chat::add);
+		assertEquals(List.of(message), chat);
+
+		MinecraftLocalErrorSink.presentCooldown(message, CooldownFeedbackMode.HIDDEN, actionBar::add, chat::add);
+		assertEquals(1, actionBar.size());
+		assertEquals(1, chat.size());
 	}
 
 	private static TranslatableContents assertTranslatable(Component component) {

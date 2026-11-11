@@ -802,5 +802,10 @@
 	"monitor.pingforit.hud.format.stat": "%1$s %2$s",
 	"monitor.pingforit.hud.format.memory": "%1$s %2$s %3$s",
 	"monitor.pingforit.hud.format.field_separator": "; ",
-	"monitor.pingforit.hud.format.detail_separator": " "
+	"monitor.pingforit.hud.format.detail_separator": " ",
+	"settings.pingforit.cooldown_feedback": "Aviso de enfriamiento",
+	"settings.pingforit.cooldown_feedback.tooltip": "Dónde mostrar el aviso local cuando un ping está en enfriamiento.\nBarra de acción: sobre la barra rápida.\nChat: en el chat.\nOculto: no mostrarlo.",
+	"value.pingforit.actionbar": "Barra de acción",
+	"value.pingforit.chat": "Chat",
+	"pingforit.chat.create_cooldown": "El ping está en enfriamiento..."
 }

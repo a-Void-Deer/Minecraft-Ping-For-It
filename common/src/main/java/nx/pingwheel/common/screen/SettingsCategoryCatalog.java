@@ -70,6 +70,7 @@ public final class SettingsCategoryCatalog {
 		CHANNEL("channel"),
 		PING_VOLUME("ping_volume"),
 		CONFIGURATION_NOTICE_SIZE("configuration_notice_size"),
+		COOLDOWN_FEEDBACK("cooldown_feedback"),
 		ENTITY_BLOCK_RENDER_MODE("entity_block_render_mode"),
 		LOGGING_PROFILE("logging_profile"),
 		OPEN_CLIENT_CONFIG("open_client_config"),
@@ -251,7 +252,8 @@ public final class SettingsCategoryCatalog {
 				Row.pair(Setting.SPATIAL_HOVER_ENABLED, Setting.SPATIAL_HOVER_MILLIS)),
 			section("content_selection", Row.single(Setting.SPATIAL_CONTENT_INTENT_ENABLED), Row.single(Setting.SPATIAL_INVENTORY_SELECTION_STAY_OPEN_ENABLED))));
 		sections.put(Category.CHANNEL_NOTICES, List.of(section("channel", Row.single(Setting.CHANNEL)),
-			section("sound_notices", Row.single(Setting.PING_VOLUME), Row.single(Setting.CONFIGURATION_NOTICE_SIZE))));
+			section("sound_notices", Row.single(Setting.PING_VOLUME), Row.single(Setting.CONFIGURATION_NOTICE_SIZE),
+				Row.single(Setting.COOLDOWN_FEEDBACK))));
 		sections.put(Category.GEOMETRY_CONFIG, List.of(section("geometry", Row.single(Setting.ENTITY_BLOCK_RENDER_MODE)),
 			section("client_config_file", Row.single(Setting.OPEN_CLIENT_CONFIG))));
 		sections.put(Category.CLIENT_PERFORMANCE, List.of(section("wheel_options", Row.single(Setting.PRECISE_CAPTURE_PERIOD_TICKS))));

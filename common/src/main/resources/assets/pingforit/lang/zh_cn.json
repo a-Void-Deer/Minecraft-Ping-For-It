@@ -801,5 +801,10 @@
 	"monitor.pingforit.hud.format.stat": "%1$s%2$s",
 	"monitor.pingforit.hud.format.memory": "%1$s%2$s %3$s",
 	"monitor.pingforit.hud.format.field_separator": "; ",
-	"monitor.pingforit.hud.format.detail_separator": " "
+	"monitor.pingforit.hud.format.detail_separator": " ",
+	"settings.pingforit.cooldown_feedback": "冷却提示",
+	"settings.pingforit.cooldown_feedback.tooltip": "冷却中的标记提示显示在哪里。\n动作栏：快捷栏上方。\n聊天栏：聊天栏中。\n隐藏：不显示。",
+	"value.pingforit.actionbar": "动作栏",
+	"value.pingforit.chat": "聊天栏",
+	"pingforit.chat.create_cooldown": "标记仍在冷却中..."
 }

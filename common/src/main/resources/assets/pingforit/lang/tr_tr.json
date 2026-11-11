@@ -797,5 +797,10 @@
 	"monitor.pingforit.hud.format.stat": "%1$s %2$s",
 	"monitor.pingforit.hud.format.memory": "%1$s %2$s %3$s",
 	"monitor.pingforit.hud.format.field_separator": "; ",
-	"monitor.pingforit.hud.format.detail_separator": " "
+	"monitor.pingforit.hud.format.detail_separator": " ",
+	"settings.pingforit.cooldown_feedback": "Bekleme Bildirimi",
+	"settings.pingforit.cooldown_feedback.tooltip": "Bir ping bekleme süresindeyken yerel bildirimin nerede gösterileceğini seçer.\nEylem Çubuğu: hızlı çubuğun üstünde.\nSohbet: sohbet penceresinde.\nGizli: gösterme.",
+	"value.pingforit.actionbar": "Eylem Çubuğu",
+	"value.pingforit.chat": "Sohbet",
+	"pingforit.chat.create_cooldown": "Ping bekleme süresinde..."
 }

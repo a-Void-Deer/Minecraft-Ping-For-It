@@ -37,11 +37,14 @@ class InventoryDispatchIntegrationTest {
 	static final Target.BlockTarget TARGET = new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest");
 	@NotNullByDefault
 	static class Fixture {
-		final List<IPacket> sent = new ArrayList<>(); final List<String> errors = new ArrayList<>(); boolean fail;
+		final List<IPacket> sent = new ArrayList<>(); final List<String> errors = new ArrayList<>(); final List<String> cooldowns = new ArrayList<>(); boolean fail;
 		boolean failAfterSelection;
 		Consumer<InventoryC2SPacket> selectionHandoff = ignored -> {};
 		final ClientInventory inventory = new ClientInventory(sent::add);
-		final ClientPingRuntime runtime = ClientPingRuntime.create((key, color) -> errors.add(key), packet -> {
+		final ClientPingRuntime runtime = ClientPingRuntime.create(new ClientPingActionDispatcher.LocalErrorSink() {
+			@Override public void showLocalError(String key, int color) { errors.add(key); }
+			@Override public void showCreateCooldown(String key, int color) { cooldowns.add(key); }
+		}, packet -> {
 			if (fail && packet instanceof InventoryC2SPacket) throw new IllegalStateException("transport"); sent.add(packet);
 			if (packet instanceof InventoryC2SPacket selection && selection.kind() == InventoryC2SPacket.Kind.SELECT) {
 				selectionHandoff.accept(selection);
@@ -93,6 +96,7 @@ class InventoryDispatchIntegrationTest {
 			"at a fixed clock the sole allowance belongs to SELECT, so the later ordinary create must be dropped");
 		f.runtime.handleRejected(create.context().token().sequence(), MarkerRequestKind.CREATE, MarkerRejectReason.TARGET_GONE);
 		assertTrue(f.errors.isEmpty(), "the throttled ordinary create must not overwrite the inventory receipt");
+		assertEquals(List.of(ClientPingActionDispatcher.CREATE_COOLDOWN_MESSAGE_KEY), f.cooldowns);
 	}
 	@Test void actualSendAndCourtesyLimiterAreSingleUseAndCorrelatedRejectionOnlySurfacesOnce() {
 		Fixture f = new Fixture(); var first = f.preview(); assertEquals(ClientInventory.DispatchOutcome.SENT, f.runtime.dispatchInventory(first, "danger"));

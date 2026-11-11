@@ -48,6 +48,10 @@ public final class ClientPingActionDispatcher {
 		DiagnosticChannel.interval("client-send-create-transport", Duration.ofSeconds(10));
 	private static final DiagnosticChannel SELECT_TRANSPORT_FAILURE =
 		DiagnosticChannel.interval("client-send-select-transport", Duration.ofSeconds(10));
+	/** The language-resource key of the local courtesy-cooldown notice. */
+	public static final String CREATE_COOLDOWN_MESSAGE_KEY = "pingforit.chat.create_cooldown";
+	/** The same local failure color used by the other create-time local feedback. */
+	public static final int CREATE_COOLDOWN_COLOR = 0xFF5555;
 
 	/** Local sender outcome, never server acceptance. */
 	public enum DispatchOutcome { CREATE_SENT, OTHER, NOT_READY, THROTTLED, TRANSPORT_FAILED }
@@ -72,6 +76,15 @@ public final class ClientPingActionDispatcher {
 	public interface LocalErrorSink {
 
 		void showLocalError(String messageKey, int color);
+
+		/**
+		 * Shows the courtesy-cooldown notice for a committed create that was not
+		 * sent. Implementations may choose a local placement; the default keeps
+		 * the established chat presentation for existing fakes and adapters.
+		 */
+		default void showCreateCooldown(String messageKey, int color) {
+			showLocalError(messageKey, color);
+		}
 
 		default void showTrackingFailure(InventoryFailureReason reason) {
 			showLocalError(reason.translationKey(), PingInteractionAction.TargetGone.TARGET_GONE_COLOR);
@@ -145,6 +158,7 @@ public final class ClientPingActionDispatcher {
 		var target = create.context().resolvedTarget().target();
 		var policy = createRateLimiter.policy();
 		if (!createRateLimiter.tryAcquire()) {
+			errorSink.showCreateCooldown(CREATE_COOLDOWN_MESSAGE_KEY, CREATE_COOLDOWN_COLOR);
 			logger.debugCreateThrottled(requestId, policy.rateLimit(), policy.msToRegenerate());
 			return DispatchOutcome.THROTTLED;
 		}

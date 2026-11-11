@@ -17,7 +17,9 @@ import java.util.stream.Collectors;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
+import nx.pingwheel.common.client.ClientPingActionDispatcher;
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
+import nx.pingwheel.common.config.CooldownFeedbackMode;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
 import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Category;
@@ -442,6 +444,27 @@ class ClientConfigLocalizationTest {
 				() -> "the local feedback prefix must be the exact marker resource: " + locale);
 			nonBlankTranslation(json, locale, messageKey);
 		}
+	}
+
+	@Test
+	void everyBundledLocaleContainsCooldownFeedbackSettingValuesAndMessage() throws IOException {
+		for (String locale : BUNDLED_LOCALES) {
+			JsonObject json = readLocaleJson(locale);
+			for (String key : List.of(
+				"settings.pingforit.cooldown_feedback",
+				"settings.pingforit.cooldown_feedback.tooltip",
+				ClientPingActionDispatcher.CREATE_COOLDOWN_MESSAGE_KEY)) {
+				String value = nonBlankTranslation(json, locale, key);
+				assertFalse(ARGUMENT_PLACEHOLDER.matcher(value.replace("%%", "")).find(), locale + ":" + key);
+			}
+			for (CooldownFeedbackMode mode : CooldownFeedbackMode.values()) {
+				String value = nonBlankTranslation(json, locale, "value.pingforit." + mode);
+				assertFalse(ARGUMENT_PLACEHOLDER.matcher(value.replace("%%", "")).find(), locale + ":" + mode);
+			}
+		}
+
+		assertEquals("Ping is on cooldown...",
+			readTranslation("en_us", ClientPingActionDispatcher.CREATE_COOLDOWN_MESSAGE_KEY));
 	}
 
 	@Test

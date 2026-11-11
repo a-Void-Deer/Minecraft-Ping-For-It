@@ -6,6 +6,7 @@ import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import net.minecraft.network.chat.Component;
 import nx.pingwheel.common.config.ChannelMode;
+import nx.pingwheel.common.config.CooldownFeedbackMode;
 import nx.pingwheel.common.config.EntityBlockRenderMode;
 import nx.pingwheel.common.config.PlayerInfoMode;
 import nx.pingwheel.common.config.TeamColorMode;
@@ -327,6 +328,7 @@ class SettingsLocalizationCoverageTest {
 		for (TeamColorMode mode : TeamColorMode.values()) ids.add(mode.toString());
 		for (ChannelMode mode : ChannelMode.values()) ids.add(mode.toString());
 		for (EntityBlockRenderMode mode : EntityBlockRenderMode.values()) ids.add(mode.toString());
+		for (CooldownFeedbackMode mode : CooldownFeedbackMode.values()) ids.add(mode.toString());
 		for (LoggingProfile profile : LoggingProfile.values()) ids.add(profile.name().toLowerCase(Locale.ROOT));
 		ids.add(TeamContext.VANILLA_TEAM.toString());
 		ids.add("global");
