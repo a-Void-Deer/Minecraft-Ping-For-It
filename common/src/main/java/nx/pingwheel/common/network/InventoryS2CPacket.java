@@ -530,7 +530,8 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 
 	private static InventoryS2CPacket decode(FriendlyByteBuf buf) {
 		if (buf.readableBytes() > MAX_FRAME_BYTES) {
-			throw new IllegalArgumentException("Inventory frame exceeds budget");
+			throw new InventoryWireLimitException(InventoryWireLimitException.Bound.S2C_FRAME,
+				buf.readableBytes(), MAX_FRAME_BYTES);
 		}
 		Kind kind = InventoryWireCodec.readEnum(buf, Kind.class);
 		int protocol = StrictPacketCodec.readVarInt(buf);
@@ -593,7 +594,10 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 				watermark = buf.readLong();
 				partIndex = StrictPacketCodec.readVarInt(buf);
 				partCount = StrictPacketCodec.readVarInt(buf);
-				if (partIndex < 0 || partCount < 1 || partCount > MAX_PARTS || partIndex >= partCount) {
+				if (partCount > MAX_PARTS) {
+					throw new InventoryWireLimitException(InventoryWireLimitException.Bound.PART_COUNT, partCount, MAX_PARTS);
+				}
+				if (partIndex < 0 || partCount < 1 || partIndex >= partCount) {
 					throw new IllegalArgumentException("Invalid inventory part range");
 				}
 				completeScan = StrictPacketCodec.readBoolean(buf);
@@ -676,7 +680,13 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 
 	private static List<Entry> readEntries(FriendlyByteBuf buf) {
 		int length = StrictPacketCodec.readVarInt(buf);
-		if (length < 0 || length > MAX_FRAME_BYTES || length > buf.readableBytes()) {
+		if (length < 0) {
+			throw new IllegalArgumentException("Inventory entries payload length");
+		}
+		if (length > MAX_FRAME_BYTES) {
+			throw new InventoryWireLimitException(InventoryWireLimitException.Bound.S2C_ENTRY_PAYLOAD, length, MAX_FRAME_BYTES);
+		}
+		if (length > buf.readableBytes()) {
 			throw new IllegalArgumentException("Inventory entries payload length");
 		}
 		byte[] payload = new byte[length];
@@ -684,8 +694,11 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 		FriendlyByteBuf entriesBuf = new FriendlyByteBuf(Unpooled.wrappedBuffer(payload));
 		try {
 			int count = StrictPacketCodec.readVarInt(entriesBuf);
-			if (count < 0 || count > MAX_ENTRIES) {
+			if (count < 0) {
 				throw new IllegalArgumentException("Inventory entry count");
+			}
+			if (count > MAX_ENTRIES) {
+				throw new InventoryWireLimitException(InventoryWireLimitException.Bound.ENTRY_COUNT, count, MAX_ENTRIES);
 			}
 			List<Entry> entries = new ArrayList<>(count);
 			Set<String> keys = new HashSet<>();
@@ -707,11 +720,15 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 
 	private static Entry readEntry(FriendlyByteBuf buf) {
 		int start = buf.readerIndex();
-		String key = InventoryWireCodec.readUtf(buf, MAX_KEY_BYTES);
-		String itemId = InventoryWireCodec.readUtf(buf, MAX_ITEM_ID_BYTES);
-		String label = InventoryWireCodec.readUtf(buf, MAX_LABEL_BYTES);
+		String key = InventoryWireCodec.readUtf(buf, MAX_KEY_BYTES, MAX_KEY_BYTES,
+			InventoryWireLimitException.Bound.KEY_BYTES);
+		String itemId = InventoryWireCodec.readUtf(buf, MAX_ITEM_ID_BYTES, MAX_ITEM_ID_BYTES,
+			InventoryWireLimitException.Bound.ID_BYTES);
+		String label = InventoryWireCodec.readUtf(buf, MAX_LABEL_BYTES, MAX_LABEL_BYTES,
+			InventoryWireLimitException.Bound.LABEL_BYTES);
 		@Nullable String displayJson = StrictPacketCodec.readBoolean(buf)
-			? InventoryWireCodec.readUtf(buf, MAX_DISPLAY_BYTES, MAX_DISPLAY_BYTES) : null;
+			? InventoryWireCodec.readUtf(buf, MAX_DISPLAY_BYTES, MAX_DISPLAY_BYTES,
+				InventoryWireLimitException.Bound.DISPLAY_BYTES) : null;
 		long count = buf.readLong();
 		long itemRevision = buf.readLong();
 		boolean fallback = StrictPacketCodec.readBoolean(buf);
@@ -720,9 +737,13 @@ public record InventoryS2CPacket(@Nullable Kind kind, int protocol, long epoch, 
 			throw new IllegalArgumentException("Negative inventory entry count");
 		}
 		long groupRevision = buf.readLong(); boolean replaceGroup = StrictPacketCodec.readBoolean(buf);
-		@Nullable String itemPingType = StrictPacketCodec.readBoolean(buf) ? InventoryWireCodec.readUtf(buf, 256) : null;
+		@Nullable String itemPingType = StrictPacketCodec.readBoolean(buf)
+			? InventoryWireCodec.readUtf(buf, 256, 256, InventoryWireLimitException.Bound.ANNOTATION_BYTES) : null;
 		@Nullable InventoryFailureReason qualityReason = readReason(buf);
-		if (buf.readerIndex() - start > MAX_ENTRY_BYTES) throw new IllegalArgumentException("inventory entry size");
+		if (buf.readerIndex() - start > MAX_ENTRY_BYTES) {
+			throw new InventoryWireLimitException(InventoryWireLimitException.Bound.ENTRY_BYTES,
+				buf.readerIndex() - start, MAX_ENTRY_BYTES);
+		}
 		return new Entry(key, itemId, label, displayJson, count, itemRevision, fallback, quality, groupRevision, replaceGroup, itemPingType, qualityReason);
 	}
 

@@ -106,7 +106,7 @@ class InventoryV2LaneTest {
 			req.readUtf(); req.readVarInt(); req.skipBytes(24 + 1 + 32); assertEquals(2, req.readVarInt());
 			req.setByte(req.readerIndex(), 0xc0); req.setByte(req.readerIndex() + 1, 0xaf);
 			res.readUtf(); res.readVarInt(); res.skipBytes(32 + 1 + 1 + 24);
-			res.readVarInt(); res.readVarInt(); res.readBoolean(); res.readUtf(); res.readLong();
+			res.readVarInt(); res.readVarInt(); res.readBoolean(); res.readUtf(); assertFalse(res.readBoolean()); res.readLong();
 			res.readVarInt(); res.readVarInt(); res.readUtf(); res.readUtf(); res.readUtf(); assertTrue(res.readBoolean()); assertEquals(2, res.readVarInt());
 			res.setByte(res.readerIndex(), 0xc0); res.setByte(res.readerIndex() + 1, 0xaf);
 			req.readerIndex(0); res.readerIndex(0);

@@ -6,6 +6,7 @@ import nx.pingwheel.common.diagnostics.DiagnosticLogger;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
+import java.lang.reflect.InvocationTargetException;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
@@ -16,6 +17,8 @@ public class PacketHandler {
 	 * Finite, class-keyed decode routes. The actual packet class selects its own
 	 * channel, so one protocol family cannot suppress another and malformed input
 	 * cannot create channels. Unknown caller classes share one fallback route.
+	 * A typed inventory wire-limit exception keeps its own finite bound channel
+	 * and is reported once here before the same corrupt fallback.
 	 */
 	private enum DecodeRoute {
 		PRESENTATION_C2S(PresentationC2SPacket.class, "presentation-c2s"),
@@ -50,9 +53,16 @@ public class PacketHandler {
 		try {
 			try {
 				return packetClass.getDeclaredConstructor(FriendlyByteBuf.class).newInstance(buf);
+			} catch (InvocationTargetException e) {
+				@Nullable InventoryWireLimitException limit = wireLimit(e);
+				if (limit == null) reportCorrupt(consumer, packetClass, e);
+				else limit.report(consumer);
+				return corruptFallback(packetClass);
+			} catch (InventoryWireLimitException e) {
+				e.report(consumer);
+				return corruptFallback(packetClass);
 			} catch (ReflectiveOperationException | RuntimeException e) {
-				consumer.atDebug().rateLimited(channel(packetClass)).debug("packet-decode", "corrupt-fallback", e,
-					() -> "packetClass=" + packetClass.getName());
+				reportCorrupt(consumer, packetClass, e);
 				return corruptFallback(packetClass);
 			}
 		} finally {
@@ -60,6 +70,16 @@ public class PacketHandler {
 				buf.readerIndex(buf.readerIndex() + buf.readableBytes());
 			}
 		}
+	}
+
+	/** One bounded unwrap: only the constructor invocation itself may carry the typed limit. */
+	private static @Nullable InventoryWireLimitException wireLimit(InvocationTargetException failure) {
+		return failure.getCause() instanceof InventoryWireLimitException limit ? limit : null;
+	}
+
+	private static void reportCorrupt(DiagnosticLogger consumer, Class<?> packetClass, Throwable failure) {
+		consumer.atDebug().rateLimited(channel(packetClass)).debug("packet-decode", "corrupt-fallback", failure,
+			() -> "packetClass=" + packetClass.getName());
 	}
 
 	private static DiagnosticChannel channel(Class<?> packetClass) {
