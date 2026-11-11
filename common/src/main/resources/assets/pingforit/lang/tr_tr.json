@@ -1,6 +1,6 @@
 {
 	"pingforit.inventory.quantity.decimal_separator": ",",
-	"pingforit.inventory.group.contents": "İçerik",
+	"pingforit.inventory.group.contents": "Envanter",
 	"pingforit.inventory.group.item": "Eşyalar",
 	"pingforit.inventory.group.fluid": "Sıvılar",
 	"pingforit.inventory.unknown_fluid": "Bilinmeyen sıvı",
@@ -402,7 +402,7 @@
   ,"pingforit.spatial.inventory.back": "Geri"
   ,"pingforit.spatial.inventory.forward": "İleri"
   ,"pingforit.spatial.reserved": "Ayrılmış"
-  ,"pingforit.spatial.content": "İçerik"
+  ,"pingforit.spatial.content": "Ayrıntılar"
   ,"pingforit.spatial.cancel": "İşaretçiyi kaldır"
   ,"pingforit.spatial.precise": "Kesin"
   ,"pingforit.spatial.intent": "Niyet"

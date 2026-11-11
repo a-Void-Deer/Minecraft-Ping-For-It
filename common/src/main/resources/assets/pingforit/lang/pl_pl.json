@@ -1,6 +1,6 @@
 {
 	"pingforit.inventory.quantity.decimal_separator": ",",
-	"pingforit.inventory.group.contents": "Zawartość",
+	"pingforit.inventory.group.contents": "Ekwipunek",
 	"pingforit.inventory.group.item": "Przedmioty",
 	"pingforit.inventory.group.fluid": "Płyny",
 	"pingforit.inventory.unknown_fluid": "Nieznany płyn",
@@ -402,7 +402,7 @@
   ,"pingforit.spatial.inventory.back": "Wstecz"
   ,"pingforit.spatial.inventory.forward": "Dalej"
   ,"pingforit.spatial.reserved": "Zarezerwowane"
-  ,"pingforit.spatial.content": "Zawartość"
+  ,"pingforit.spatial.content": "Szczegóły"
   ,"pingforit.spatial.cancel": "Usuń znacznik"
   ,"pingforit.spatial.precise": "Precyzyjne"
   ,"pingforit.spatial.intent": "Zamiar"

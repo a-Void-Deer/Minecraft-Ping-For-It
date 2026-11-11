@@ -1,6 +1,6 @@
 {
 	"pingforit.inventory.quantity.decimal_separator": ".",
-	"pingforit.inventory.group.contents": "Contents",
+	"pingforit.inventory.group.contents": "Inventory",
 	"pingforit.inventory.group.item": "Items",
 	"pingforit.inventory.group.fluid": "Fluids",
 	"pingforit.inventory.unknown_fluid": "Unknown fluid",
@@ -440,7 +440,7 @@
   ,"pingforit.spatial.inventory.back": "Back"
   ,"pingforit.spatial.inventory.forward": "Forward"
   ,"pingforit.spatial.reserved": "Reserved"
-  ,"pingforit.spatial.content": "Content"
+  ,"pingforit.spatial.content": "Details"
   ,"pingforit.spatial.cancel": "Unping"
   ,"pingforit.spatial.precise": "Precise"
   ,"pingforit.spatial.intent": "Intent"

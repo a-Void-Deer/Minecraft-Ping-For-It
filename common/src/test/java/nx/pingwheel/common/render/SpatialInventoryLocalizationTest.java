@@ -19,8 +19,9 @@ import static org.junit.jupiter.api.Assertions.*;
 class SpatialInventoryLocalizationTest {
 	private static final List<String> LOCALES = List.of(
 		"de_de", "en_us", "es_ar", "fr_fr", "pl_pl", "tr_tr", "zh_cn", "zh_tw");
-	/** Keys passed to {@code Component.translatable} by the inventory list panel. */
+	/** Keys passed to {@code Component.translatable} by the inventory list panel and its bridge. */
 	private static final List<String> RENDERED_KEYS = List.of(
+		"pingforit.inventory.group.contents",
 		"pingforit.spatial.inventory.updating",
 		"pingforit.spatial.inventory.back",
 		"pingforit.spatial.inventory.forward");

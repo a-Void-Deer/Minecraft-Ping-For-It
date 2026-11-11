@@ -43,7 +43,11 @@ class InventoryPreviewLifecycleTest {
 		}
 		void control(long wire, long revision, long progress, InventoryS2CPacket.PreviewCondition condition,
 			@Nullable InventoryFailureReason reason) {
-			client.accept(InventoryS2CPacket.previewState(InventoryResourceKind.ITEM, 7, 100, 1, wire,
+			control(InventoryResourceKind.ITEM, wire, revision, progress, condition, reason);
+		}
+		void control(InventoryResourceKind kind, long wire, long revision, long progress,
+			InventoryS2CPacket.PreviewCondition condition, @Nullable InventoryFailureReason reason) {
+			client.accept(InventoryS2CPacket.previewState(kind, 7, 100, 1, wire,
 				revision, progress, InventoryS2CPacket.PreviewPhase.SCAN, condition, reason));
 		}
 		void data(long wire, InventoryResourceKind kind, long watermark, int part, int parts, boolean complete,
@@ -51,6 +55,82 @@ class InventoryPreviewLifecycleTest {
 			client.accept(InventoryS2CPacket.data(kind, InventoryS2CPacket.Kind.PREVIEW, 7, wire, null, 1, 1,
 				watermark, part, parts, complete, status, 0, entries, reason).stamp(100, 1));
 		}
+	}
+	@Test void sourceUnavailableRejectionIsTerminalWithoutRetryAndDoesNotBlacklistLaterHolds() {
+		Fixture f = new Fixture(); InventoryPreviewLifecycle preview = f.open(); long local = preview.localId(), wire = preview.requestId();
+		f.reject(preview, InventoryFailureReason.SOURCE_UNAVAILABLE);
+		assertTrue(preview.stopped()); assertFalse(preview.retrying()); assertFalse(preview.waiting());
+		assertEquals(local, preview.localId()); assertEquals(ClientInventory.NO_REQUEST, preview.requestId());
+		assertEquals(wire, f.packets(InventoryC2SPacket.Kind.CLOSE).getFirst().requestId());
+		assertEquals(0, preview.retriesUsed()); assertEquals(1, preview.attempts());
+		assertEquals(InventoryFailureReason.SOURCE_UNAVAILABLE, preview.failureReason());
+		assertEquals(1, f.packets(InventoryC2SPacket.Kind.OPEN).size());
+		f.advance(1_000_000);
+		assertEquals(1, f.packets(InventoryC2SPacket.Kind.OPEN).size(), "source unavailability starts no retry");
+		InventoryPreviewLifecycle next = f.open();
+		assertNotEquals(ClientInventory.NO_REQUEST, next.requestId(), "a later held Preview is a new attempt, not a blacklist");
+		assertEquals(1, next.attempts());
+	}
+	@Test void streamedSourceUnavailableOutranksALaterSiblingReasonAndStillDoesNotRetry() {
+		for (boolean sourceFirst : List.of(true, false)) {
+			Fixture f = new Fixture(); InventoryPreviewLifecycle preview = f.open(); long wire = preview.requestId();
+			ClientInventoryV2Test.opened(f.client, wire, 3);
+			InventoryResourceKind first = sourceFirst ? InventoryResourceKind.ITEM : InventoryResourceKind.FLUID;
+			InventoryResourceKind second = sourceFirst ? InventoryResourceKind.FLUID : InventoryResourceKind.ITEM;
+			f.control(first, wire, 1, 0, InventoryS2CPacket.PreviewCondition.FAILED, InventoryFailureReason.SOURCE_UNAVAILABLE);
+			assertFalse(preview.stopped(), "an available sibling lane still owns the held Preview");
+			f.control(second, wire, 1, 0, InventoryS2CPacket.PreviewCondition.FAILED, InventoryFailureReason.REQUEST_CAPACITY);
+			assertTrue(preview.stopped()); assertFalse(preview.retrying()); assertFalse(preview.waiting());
+			assertEquals(0, preview.retriesUsed());
+			assertEquals(InventoryFailureReason.SOURCE_UNAVAILABLE, preview.failureReason(),
+				"a later sibling cause cannot downgrade exact source loss into a retry");
+			assertTrue(f.client.selectable(wire).isEmpty());
+			f.advance(1_000_000); assertEquals(1, preview.attempts()); assertEquals(1, f.packets(InventoryC2SPacket.Kind.OPEN).size());
+		}
+	}
+	@Test void sourceUnavailableInvalidatesOnlyItsLaneAndItsRowsAreNotSelectable() {
+		Fixture f = new Fixture(); InventoryPreviewLifecycle preview = f.open(); long wire = preview.requestId();
+		ClientInventoryV2Test.opened(f.client, wire, 3);
+		f.data(wire, InventoryResourceKind.ITEM, 1, 0, 1, true, InventoryS2CPacket.Status.READY, List.of(entry("item")), null);
+		f.data(wire, InventoryResourceKind.FLUID, 1, 0, 1, true, InventoryS2CPacket.Status.READY, List.of(entry("fluid")), null);
+		assertFalse(f.client.selectable(wire, InventoryResourceKind.ITEM).isEmpty());
+		assertFalse(f.client.selectable(wire, InventoryResourceKind.FLUID).isEmpty());
+		ClientInventory.PreviewEntryReference oldItem = f.client.selectable(wire, InventoryResourceKind.ITEM).getFirst();
+		f.control(InventoryResourceKind.ITEM, wire, 1, 0, InventoryS2CPacket.PreviewCondition.FAILED,
+			InventoryFailureReason.SOURCE_UNAVAILABLE);
+		assertFalse(preview.stopped());
+		assertEquals(List.of(InventoryResourceKind.FLUID), f.client.selectable(wire, InventoryResourceKind.FLUID).stream()
+			.map(ClientInventory.PreviewEntryReference::resourceKind).toList());
+		assertEquals(InventoryS2CPacket.Status.INVALID, f.client.preview(wire, InventoryResourceKind.ITEM).status());
+		assertEquals(InventoryS2CPacket.Status.READY, f.client.preview(wire, InventoryResourceKind.FLUID).status());
+		assertEquals(ClientInventory.DispatchOutcome.STALE_REFERENCE, f.client.select(oldItem, "attention",
+			packet -> { throw new AssertionError("invalidated ITEM reference dispatched"); }));
+		assertTrue(f.packets(InventoryC2SPacket.Kind.SELECT).isEmpty());
+		ClientInventory.PreviewEntryReference fluid = f.client.selectable(wire, InventoryResourceKind.FLUID).getFirst();
+		assertEquals(ClientInventory.DispatchOutcome.SENT, f.client.select(fluid, "attention", packet -> {
+			f.sent.add(packet); return ClientInventory.DispatchOutcome.SENT;
+		}));
+		assertEquals(InventoryResourceKind.FLUID, f.packets(InventoryC2SPacket.Kind.SELECT).getFirst().resourceKind());
+	}
+	@Test void dataInvalidSourceUnavailableRetiresLaneRowsAndNeverRetries() {
+		Fixture f = new Fixture(); InventoryPreviewLifecycle preview = f.open(); long wire = preview.requestId();
+		ClientInventoryV2Test.opened(f.client, wire, 3);
+		f.data(wire, InventoryResourceKind.ITEM, 1, 0, 1, true, InventoryS2CPacket.Status.READY, List.of(entry("item")), null);
+		f.data(wire, InventoryResourceKind.FLUID, 1, 0, 1, true, InventoryS2CPacket.Status.READY, List.of(entry("fluid")), null);
+		assertEquals(List.of("item"), f.client.preview(wire, InventoryResourceKind.ITEM).entries().stream()
+			.map(ClientInventory.EntryView::key).toList(), "the ITEM lane starts with a retained READY row");
+		f.data(wire, InventoryResourceKind.ITEM, 2, 0, 1, false, InventoryS2CPacket.Status.INVALID, List.of(),
+			InventoryFailureReason.SOURCE_UNAVAILABLE);
+		assertTrue(f.client.preview(wire, InventoryResourceKind.ITEM).entries().isEmpty(),
+			"same-baseline INVALID source loss retires the retained row, not only selection");
+		assertTrue(f.client.selectable(wire, InventoryResourceKind.ITEM).isEmpty());
+		assertFalse(f.client.selectable(wire, InventoryResourceKind.FLUID).isEmpty());
+		assertEquals(InventoryS2CPacket.Status.INVALID, f.client.preview(wire, InventoryResourceKind.ITEM).status());
+		f.data(wire, InventoryResourceKind.FLUID, 2, 0, 1, false, InventoryS2CPacket.Status.INVALID, List.of(),
+			InventoryFailureReason.SOURCE_UNAVAILABLE);
+		assertTrue(preview.stopped()); assertFalse(preview.retrying()); assertEquals(0, preview.retriesUsed());
+		assertEquals(InventoryFailureReason.SOURCE_UNAVAILABLE, preview.failureReason());
+		f.advance(1_000_000); assertEquals(1, preview.attempts());
 	}
 	@Test void retryUsesRealFiveSecondsStableHandleNewWireAndNoCatchupBurst() {
 		Fixture f = new Fixture(); InventoryPreviewLifecycle preview = f.open();

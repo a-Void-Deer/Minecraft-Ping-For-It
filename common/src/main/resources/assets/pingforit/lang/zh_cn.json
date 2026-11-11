@@ -1,6 +1,6 @@
 {
 	"pingforit.inventory.quantity.decimal_separator": ".",
-	"pingforit.inventory.group.contents": "内容",
+	"pingforit.inventory.group.contents": "库存",
 	"pingforit.inventory.group.item": "物品",
 	"pingforit.inventory.group.fluid": "流体",
 	"pingforit.inventory.unknown_fluid": "未知流体",
@@ -438,7 +438,7 @@
   ,"pingforit.spatial.inventory.back": "返回"
   ,"pingforit.spatial.inventory.forward": "前进"
   ,"pingforit.spatial.reserved": "预留"
-  ,"pingforit.spatial.content": "内容"
+  ,"pingforit.spatial.content": "详情"
   ,"pingforit.spatial.cancel": "移除标记"
   ,"pingforit.spatial.precise": "精确"
   ,"pingforit.spatial.intent": "意图"

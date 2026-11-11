@@ -79,7 +79,13 @@ class InventoryTerminalPreviewResetTest {
 			f.host.failInvalidPreviewSend = true;
 			f.tick(1);
 			endpoint.drain(f.host);
-			assertFalse(endpoint.client.selectable(request).isEmpty(), "a deferred INVALID leaves the old rows visible");
+			assertTrue(endpoint.client.preview(request).invalid(),
+				"the delivered FAILED SOURCE_UNAVAILABLE control retires the partial prefix before INVALID data");
+			assertEquals(InventoryFailureReason.SOURCE_UNAVAILABLE, endpoint.client.preview(request).failureReason());
+			assertTrue(endpoint.client.selectable(request).isEmpty(),
+				"the control makes the retired partial prefix unselectable");
+			assertFalse(f.hasPreviewStatus(A, request, InventoryS2CPacket.Status.INVALID, 0),
+				"the INVALID data frame remains transport-deferred");
 			int reads = f.reads.get();
 			int validations = f.validations.get();
 
@@ -92,9 +98,12 @@ class InventoryTerminalPreviewResetTest {
 				endpoint.drain(f.host);
 			}
 
+			int handoffStart = f.host.packets.size();
 			f.host.failInvalidPreviewSend = false;
 			f.tick(4);
 			endpoint.drain(f.host);
+			assertTrue(f.hasPreviewStatus(A, request, InventoryS2CPacket.Status.INVALID, handoffStart),
+				"the transport-deferred INVALID data frame is finally handed off");
 
 			var rebuilt = endpoint.client.preview(request);
 			assertTrue(rebuilt.invalid(), "the rebuilt terminal request must receive INVALID, not INCOMPLETE");

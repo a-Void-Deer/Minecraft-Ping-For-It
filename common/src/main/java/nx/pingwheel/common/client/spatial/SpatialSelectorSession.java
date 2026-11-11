@@ -3,6 +3,7 @@ package nx.pingwheel.common.client.spatial;
 import net.minecraft.network.chat.Component;
 
 import java.util.ArrayList;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventoryDiagnostics;
 import org.jetbrains.annotations.Nullable;
@@ -137,10 +138,16 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	/** Rows may be a sparse discovery/update batch; status owns completeness independently. */
 	public record InventoryPreview<R>(String labelKey, Status status, @Unmodifiable List<InventoryRow<R>> rows,
 		@Unmodifiable List<PingType> allowedItemTypes, @Nullable PingType defaultItemType,
-		@Unmodifiable List<InventoryGroup> resourceGroups, @Nullable Component statusMessage) {
+		@Unmodifiable List<InventoryGroup> resourceGroups, @Nullable Component statusMessage,
+		@Nullable InventoryFailureReason terminalReason) {
 		public InventoryPreview(String labelKey, Status status, List<InventoryRow<R>> rows, List<PingType> allowedItemTypes,
 			@Nullable PingType defaultItemType, List<InventoryGroup> resourceGroups) {
-			this(labelKey, status, List.copyOf(rows), List.copyOf(allowedItemTypes), defaultItemType, List.copyOf(resourceGroups), null);
+			this(labelKey, status, List.copyOf(rows), List.copyOf(allowedItemTypes), defaultItemType, List.copyOf(resourceGroups), null, null);
+		}
+		public InventoryPreview(String labelKey, Status status, List<InventoryRow<R>> rows, List<PingType> allowedItemTypes,
+			@Nullable PingType defaultItemType, List<InventoryGroup> resourceGroups, @Nullable Component statusMessage) {
+			this(labelKey, status, List.copyOf(rows), List.copyOf(allowedItemTypes), defaultItemType, List.copyOf(resourceGroups),
+				statusMessage, null);
 		}
 		public InventoryPreview(String labelKey, Status status, List<InventoryRow<R>> rows, List<PingType> allowedItemTypes, @Nullable PingType defaultItemType) {
 			this(labelKey, status, rows, allowedItemTypes, defaultItemType, List.of());
@@ -400,12 +407,14 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		int previousSize = list.size(), previousIndex = list.selectedIndex();
 		revisionSeen = true; revision = update.revision();
 		boolean unavailable = unavailable(update.status());
+		boolean sourceUnavailable = update.inventory() != null
+			&& update.inventory().terminalReason() == InventoryFailureReason.SOURCE_UNAVAILABLE;
 		boolean statusOnly = update.inventory() != null && unavailable(update.inventory().status())
 			&& update.inventory().statusMessage() != null;
 		if (update.reset() || unavailable || update.inventory() == null || unavailable(update.inventory().status())) {
 			rows.clear();
 			displays.clear();
-			if (statusOnly && !unavailable) list.applyProjection(List.of(), Set.of(), Set.of());
+			if (statusOnly && !unavailable && !sourceUnavailable) list.applyProjection(List.of(), Set.of(), Set.of());
 			else list.close();
 			if (itemKey != null && itemMenu().equals(activeMenuId())) radial.backProgrammatically(nowMillis);
 		}
@@ -429,6 +438,12 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 			list.setStatus(preview.status() == Status.READY ? InventoryListModel.Status.COMPLETE : InventoryListModel.Status.UPDATING);
 		}
 		radial.replaceRoot(buildRoot(), nowMillis);
+		if (sourceUnavailable) {
+			// A terminally invalid inventory path leaves its external ancestry for
+			// the nearest valid ancestor while its failure reason remains published.
+			for (int guard = 0; inventoryPathActive() && guard < 8; guard++) radial.backProgrammatically(nowMillis);
+			list.close(); listWasActive = false; itemKey = null; itemAnchorY = Double.NaN;
+		}
 		if (itemKey != null && itemMenu().equals(activeMenuId())) {
 			if (!rows.containsKey(itemKey) || preview == null || allowedFor(itemKey).isEmpty()) radial.backProgrammatically(nowMillis);
 			else radial.replaceExternalMenu(buildItemMenu(itemKey), nowMillis);
@@ -598,6 +613,8 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 
 	private @Nullable String inventoryDisabledReason(InventoryPreview<R> currentPreview, boolean eligible) {
 		if (!eligible) return "inventory-ineligible";
+		if (currentPreview.terminalReason() == InventoryFailureReason.SOURCE_UNAVAILABLE)
+			return "preview-source-unavailable";
 		if (currentPreview.statusMessage() != null) return null;
 		Status status = currentPreview.status();
 		if (status == Status.INVALID) return "preview-invalid";

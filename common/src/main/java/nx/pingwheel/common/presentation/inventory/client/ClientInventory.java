@@ -891,7 +891,10 @@ public final class ClientInventory {
 		lifecycle.lastReason = reason;
 		long wire = lifecycle.wireRequest;
 		lifecycle.wireRequest = NO_REQUEST;
-		if (lifecycle.retriesUsed >= InventoryPreviewLifecycle.MAX_RETRIES) lifecycle.stopped = true;
+		// Exact source unavailability is terminal for this held Preview. Retrying
+		// is intentionally not attempted; no cross-interaction blacklist is kept.
+		if (reason == InventoryFailureReason.SOURCE_UNAVAILABLE || lifecycle.retriesUsed >= InventoryPreviewLifecycle.MAX_RETRIES)
+			lifecycle.stopped = true;
 		else {
 			lifecycle.retriesUsed++;
 			lifecycle.waiting = true;
@@ -943,9 +946,20 @@ public final class ClientInventory {
 		if (lifecycle == null || !request.opened || previewPending(request)) return;
 		for (PreviewState state : previews.values()) if (state.request == request
 			&& (state.completeScan || state.serverSeen && state.status != InventoryS2CPacket.Status.INVALID && !state.entries.isEmpty())) return;
+		failPreview(lifecycle, previewFailureReason(request));
+	}
+
+	/** One terminal cause for a whole held Preview; exact source loss outranks a later sibling reason. */
+	private InventoryFailureReason previewFailureReason(PreviewRequest request) {
+		for (PreviewState state : previews.values())
+			if (state.request == request && state.failureReason == InventoryFailureReason.SOURCE_UNAVAILABLE)
+				return InventoryFailureReason.SOURCE_UNAVAILABLE;
 		InventoryFailureReason reason = request.laneMask == 0 ? InventoryFailureReason.FIELD_DENIED : InventoryFailureReason.STALL_TIMEOUT;
-		for (PreviewState state : previews.values()) if (state.request == request && state.failureReason != null) { reason = state.failureReason; break; }
-		failPreview(lifecycle, reason);
+		for (PreviewState state : previews.values()) if (state.request == request && state.failureReason != null) {
+			reason = state.failureReason;
+			break;
+		}
+		return reason;
 	}
 
 	/** Releases a preview request and forgets its partial list. */
@@ -1460,7 +1474,11 @@ public final class ClientInventory {
 
 	private ApplyOutcome acceptPreviewControl(InventoryS2CPacket packet) {
 		@Nullable PreviewState state = previews.get(new PreviewKey(packet.requestId(), packet.resourceKind()));
-		boolean revocation = packet.condition() == InventoryS2CPacket.PreviewCondition.UNSUPPORTED
+		boolean sourceUnavailable = packet.failureReason() == InventoryFailureReason.SOURCE_UNAVAILABLE
+			&& (packet.condition() == InventoryS2CPacket.PreviewCondition.FAILED
+				|| packet.condition() == InventoryS2CPacket.PreviewCondition.UNSUPPORTED);
+		boolean revocation = sourceUnavailable
+			|| packet.condition() == InventoryS2CPacket.PreviewCondition.UNSUPPORTED
 			|| packet.condition() == InventoryS2CPacket.PreviewCondition.FAILED
 				&& (packet.failureReason() == InventoryFailureReason.FIELD_DENIED
 					|| packet.failureReason() == InventoryFailureReason.SOURCE_AUTHORITY_DENIED
@@ -1469,7 +1487,7 @@ public final class ClientInventory {
 		if (state == null || state.request.released || !ready(state.resourceKind)
 			|| state.request.opened && (state.request.laneMask & (1 << state.resourceKind.wireId())) == 0
 			|| packet.controlRevision() <= state.controlRevision
-			|| (state.terminal || state.completeScan) && !(state.watchdogStopped && revocation)) {
+			|| (state.terminal || state.completeScan) && !(state.watchdogStopped && revocation) && !sourceUnavailable) {
 			fencedPackets++; return ApplyOutcome.REJECTED;
 		}
 		state.controlRevision = packet.controlRevision();
@@ -1477,6 +1495,16 @@ public final class ClientInventory {
 			state.status = InventoryS2CPacket.Status.INVALID;
 			state.failureReason = packet.failureReason();
 			state.entries.clear(); state.itemRevisions.clear(); state.groups.clear(); state.bytes = 0;
+			evaluatePreview(state.request);
+			return ApplyOutcome.APPLIED;
+		}
+		if (sourceUnavailable) {
+			// The lane's retained rows and references are invalid, not a usable
+			// partial result, and its sibling lanes keep their own status.
+			state.status = InventoryS2CPacket.Status.INVALID;
+			state.failureReason = InventoryFailureReason.SOURCE_UNAVAILABLE;
+			state.terminal = true; state.completeScan = false; state.awaitingReplacementCut = false;
+			retirePreviewLane(state);
 			evaluatePreview(state.request);
 			return ApplyOutcome.APPLIED;
 		}
@@ -1582,8 +1610,11 @@ public final class ClientInventory {
 				state.status = packet.status();
 			state.failureReason = packet.failureReason();
 		}
-
-		ApplyOutcome entryOutcome = state.watchdogStopped ? ApplyOutcome.UNCHANGED : applyPreviewEntries(state, packet.entries());
+		boolean terminalSourceUnavailable = current && state.status == InventoryS2CPacket.Status.INVALID
+			&& state.failureReason == InventoryFailureReason.SOURCE_UNAVAILABLE;
+		if (terminalSourceUnavailable) retirePreviewLane(state);
+		ApplyOutcome entryOutcome = state.watchdogStopped || terminalSourceUnavailable ? ApplyOutcome.UNCHANGED
+			: applyPreviewEntries(state, packet.entries());
 		boolean entriesAccepted = entryOutcome != ApplyOutcome.REJECTED;
 		if (current && !entriesAccepted)
 			state.groupRejected = true;
@@ -1610,6 +1641,11 @@ public final class ClientInventory {
 				state.statusRevision);
 		return !entriesAccepted ? ApplyOutcome.REJECTED : changed || entryOutcome == ApplyOutcome.APPLIED
 			? ApplyOutcome.APPLIED : ApplyOutcome.UNCHANGED;
+	}
+
+	/** Retires one lane's rows and references without touching its sibling lane. */
+	private static void retirePreviewLane(PreviewState state) {
+		state.entries.clear(); state.itemRevisions.clear(); state.groups.clear(); state.bytes = 0;
 	}
 
 	/** Merges one packet's absolute deltas per key; a rejected key makes the group incomplete. */

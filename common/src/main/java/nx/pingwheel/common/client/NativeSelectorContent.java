@@ -249,7 +249,8 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 				message = Component.translatable("pingforit.inventory.retry", reason, handle.retriesUsed());
 			if (handle.waiting()) overall = Status.UPDATING;
 			list = new SpatialSelectorSession.InventoryPreview<>("pingforit.inventory.group.contents", overall, rows,
-				allTypes, allTypes.isEmpty() ? null : allTypes.getFirst(), lanes, message);
+				allTypes, allTypes.isEmpty() ? null : allTypes.getFirst(), lanes, message,
+				handle.stopped() ? handle.failureReason() : null);
 		}
 		var next = new SpatialSelectorSession.ContentProjection<>(fence, revision + 1, wireChanged,
 			Status.READY, properties, list, groups);
