@@ -1,5 +1,7 @@
 package nx.pingwheel.common.client.spatial;
 
+import net.minecraft.network.chat.Component;
+
 import java.util.ArrayList;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventoryDiagnostics;
@@ -124,13 +126,22 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		}
 	}
 	public record InventoryGroup(InventoryResourceKind resourceKind, String labelKey, Status status,
-		@Unmodifiable List<PingType> allowedTypes, @Nullable PingType defaultType, boolean reset) {
+		@Unmodifiable List<PingType> allowedTypes, @Nullable PingType defaultType, boolean reset, @Nullable Component statusMessage) {
+		public InventoryGroup(InventoryResourceKind resourceKind, String labelKey, Status status,
+			List<PingType> allowedTypes, @Nullable PingType defaultType, boolean reset) {
+			this(resourceKind, labelKey, status, List.copyOf(allowedTypes), defaultType, reset, null);
+		}
 		public InventoryGroup { allowedTypes = checkedTypes(allowedTypes, defaultType); }
 	}
 
 	/** Rows may be a sparse discovery/update batch; status owns completeness independently. */
 	public record InventoryPreview<R>(String labelKey, Status status, @Unmodifiable List<InventoryRow<R>> rows,
-		@Unmodifiable List<PingType> allowedItemTypes, @Nullable PingType defaultItemType, @Unmodifiable List<InventoryGroup> resourceGroups) {
+		@Unmodifiable List<PingType> allowedItemTypes, @Nullable PingType defaultItemType,
+		@Unmodifiable List<InventoryGroup> resourceGroups, @Nullable Component statusMessage) {
+		public InventoryPreview(String labelKey, Status status, List<InventoryRow<R>> rows, List<PingType> allowedItemTypes,
+			@Nullable PingType defaultItemType, List<InventoryGroup> resourceGroups) {
+			this(labelKey, status, List.copyOf(rows), List.copyOf(allowedItemTypes), defaultItemType, List.copyOf(resourceGroups), null);
+		}
 		public InventoryPreview(String labelKey, Status status, List<InventoryRow<R>> rows, List<PingType> allowedItemTypes, @Nullable PingType defaultItemType) {
 			this(labelKey, status, rows, allowedItemTypes, defaultItemType, List.of());
 		}
@@ -161,7 +172,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	 * chain, and a group path that no property references is inert.
 	 */
 	public record ContentProjection<R>(ContentFence fence, long revision, boolean reset, Status status,
-		List<Property> properties, InventoryPreview<R> inventory, List<ContentGroup> groups) {
+		List<Property> properties, @Nullable InventoryPreview<R> inventory, List<ContentGroup> groups) {
 		public ContentProjection {
 			Objects.requireNonNull(fence); Objects.requireNonNull(status); properties = List.copyOf(properties);
 			groups = List.copyOf(Objects.requireNonNull(groups));
@@ -183,7 +194,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 
 		/** Convenience for a projection without navigation groups. */
 		public ContentProjection(ContentFence fence, long revision, boolean reset, Status status,
-			List<Property> properties, InventoryPreview<R> inventory) {
+			List<Property> properties, @Nullable InventoryPreview<R> inventory) {
 			this(fence, revision, reset, status, properties, inventory, List.of());
 		}
 	}
@@ -259,7 +270,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	private Function<SpatialInventoryView, ListGeometry> geometryMeasurement;
 	private record PreparedDisplay(String itemId, String label, String json, SpatialInventoryView.RowDisplay display) {}
 	private ContentProjection<R> projection;
-	private InventoryPreview<R> preview;
+	private @Nullable InventoryPreview<R> preview;
 	private boolean opened;
 	private boolean active;
 	private boolean revisionSeen;
@@ -383,16 +394,19 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 	}
 
 	/** Push an immutable port update; late/wrong-fence/non-advancing updates are inert. */
-	public boolean updateContent(ContentProjection<R> update, long nowMillis) {
+	public boolean updateContent(@Nullable ContentProjection<R> update, long nowMillis) {
 		if (!active || update == null || !fence.equals(update.fence())
 			|| (revisionSeen && update.revision() <= revision)) return false;
 		int previousSize = list.size(), previousIndex = list.selectedIndex();
 		revisionSeen = true; revision = update.revision();
 		boolean unavailable = unavailable(update.status());
+		boolean statusOnly = update.inventory() != null && unavailable(update.inventory().status())
+			&& update.inventory().statusMessage() != null;
 		if (update.reset() || unavailable || update.inventory() == null || unavailable(update.inventory().status())) {
 			rows.clear();
 			displays.clear();
-			list.close();
+			if (statusOnly && !unavailable) list.applyProjection(List.of(), Set.of(), Set.of());
+			else list.close();
 			if (itemKey != null && itemMenu().equals(activeMenuId())) radial.backProgrammatically(nowMillis);
 		}
 		projection = unavailable ? new ContentProjection<>(fence, revision, true, update.status(), List.of(), null) : update;
@@ -584,6 +598,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 
 	private @Nullable String inventoryDisabledReason(InventoryPreview<R> currentPreview, boolean eligible) {
 		if (!eligible) return "inventory-ineligible";
+		if (currentPreview.statusMessage() != null) return null;
 		Status status = currentPreview.status();
 		if (status == Status.INVALID) return "preview-invalid";
 		if (status == Status.UNAVAILABLE) return "preview-unavailable";
@@ -857,7 +872,8 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 			state.selectedIndex(), state.windowFirst(), geometry.visibleRows(),
 			state.direction().back() == InventoryListModel.Side.LEFT, previewStatus(), state.axisX(), state.glideBaseY());
 		if (preview != null) view = view.withResourceGroups(preview.resourceGroups().stream()
-			.map(group -> new SpatialInventoryView.ResourceGroup(group.resourceKind(), group.labelKey(), group.status())).toList());
+			.map(group -> new SpatialInventoryView.ResourceGroup(group.resourceKind(), group.labelKey(), group.status(), group.statusMessage())).toList())
+			.withStatusMessage(preview.statusMessage());
 		boolean backFocused = isListActive() && gesture.isBackSideFocused();
 		view = view.withBackAffordance(backFocused, backFocused ? radial.snapshot().hoverProgress() : 0.0);
 		if (itemKey != null) view = view.withSelectedRowCenterY(itemAnchorY);

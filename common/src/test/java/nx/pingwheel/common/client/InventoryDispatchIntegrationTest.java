@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.MarkerId;
@@ -23,19 +24,29 @@ import nx.pingwheel.common.presentation.*;
 import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
 import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import org.junit.jupiter.api.Test;
+import org.jetbrains.annotations.NotNullByDefault;
 import static org.junit.jupiter.api.Assertions.*;
 
+@NotNullByDefault
 class InventoryDispatchIntegrationTest {
 	static final Target.BlockTarget TARGET = new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest");
+	@NotNullByDefault
 	static class Fixture {
 		final List<IPacket> sent = new ArrayList<>(); final List<String> errors = new ArrayList<>(); boolean fail;
+		boolean failAfterSelection;
+		Consumer<InventoryC2SPacket> selectionHandoff = ignored -> {};
 		final ClientInventory inventory = new ClientInventory(sent::add);
 		final ClientPingRuntime runtime = ClientPingRuntime.create((key, color) -> errors.add(key), packet -> {
 			if (fail && packet instanceof InventoryC2SPacket) throw new IllegalStateException("transport"); sent.add(packet);
+			if (packet instanceof InventoryC2SPacket selection && selection.kind() == InventoryC2SPacket.Kind.SELECT) {
+				selectionHandoff.accept(selection);
+				if (failAfterSelection) throw new IllegalStateException("after synchronous terminal response");
+			}
 		}, new ClientRateLimitPolicy(1, 1000), () -> 0, marker -> 100, new ClientPingRuntime.PresentationReceiptFeedback() {
 			@Override public void play(MarkerSnapshot snapshot) {}
 			@Override public void chat(String owner, MarkerSnapshot snapshot, net.minecraft.network.chat.Component name) {}
@@ -89,7 +100,8 @@ class InventoryDispatchIntegrationTest {
 		var second = f.preview(); assertEquals(ClientInventory.DispatchOutcome.THROTTLED, f.runtime.dispatchInventory(second, "danger"));
 		assertEquals(ClientInventory.DispatchOutcome.ALREADY_RELEASED, f.runtime.dispatchInventory(second, "danger"));
 		var reject = InventoryS2CPacket.selected(7, selected.requestId(), selected.commitId(), null, MarkerRejectReason.TARGET_GONE).stamp(100, 1);
-		f.runtime.onInventoryPacket(reject); f.runtime.onInventoryPacket(reject); assertEquals(1, f.errors.size());
+		f.runtime.onInventoryPacket(reject); f.runtime.onInventoryPacket(reject);
+		assertEquals(List.of(InventoryFailureReason.RATE_LIMITED.translationKey(), InventoryFailureReason.TARGET_GONE.translationKey()), f.errors);
 		assertEquals(1, f.sent.stream().filter(p -> p instanceof InventoryC2SPacket i && i.kind() == InventoryC2SPacket.Kind.SELECT).count());
 	}
 	@Test void transportFailureIsNotARequestAndCannotRetrySameRelease() {
@@ -97,7 +109,52 @@ class InventoryDispatchIntegrationTest {
 		assertEquals(ClientInventory.DispatchOutcome.TRANSPORT_FAILED, f.runtime.dispatchInventory(reference, "attention"));
 		assertEquals(ClientInventory.DispatchOutcome.ALREADY_RELEASED, f.runtime.dispatchInventory(reference, "attention"));
 		f.runtime.onInventoryPacket(InventoryS2CPacket.selected(7, reference.requestId(), 1, null, MarkerRejectReason.TARGET_GONE).stamp(100, 1));
+		assertEquals(List.of(InventoryFailureReason.TRANSPORT_FAILURE.translationKey()), f.errors);
+	}
+	@Test void synchronousMatchingRejectThenSenderThrowKeepsOnlyTheAuthoritativeReason() {
+		Fixture f = new Fixture(); var reference = f.preview(); f.failAfterSelection = true;
+		f.selectionHandoff = selection -> f.runtime.onInventoryPacket(InventoryS2CPacket.selected(7,
+			selection.requestId(), selection.commitId(), null, MarkerRejectReason.INVALID_REQUEST,
+			InventoryFailureReason.SOURCE_AUTHORITY_DENIED).stamp(100, 1));
+		assertEquals(ClientInventory.DispatchOutcome.SENT, f.runtime.dispatchInventory(reference, "attention"));
+		assertEquals(List.of(InventoryFailureReason.SOURCE_AUTHORITY_DENIED.translationKey()), f.errors);
+		var selection = (InventoryC2SPacket) f.sent.stream().filter(packet -> packet instanceof InventoryC2SPacket p
+			&& p.kind() == InventoryC2SPacket.Kind.SELECT).findFirst().orElseThrow();
+		assertEquals(InventoryFailureReason.SOURCE_AUTHORITY_DENIED, f.inventory.selectionResult(selection.commitId()).failureReason());
+		f.selectionHandoff.accept(selection);
+		assertEquals(1, f.errors.size(), "terminal replay cannot add another line");
+		assertEquals(ClientInventory.DispatchOutcome.ALREADY_RELEASED, f.runtime.dispatchInventory(reference, "attention"));
+		assertEquals(1, f.sent.stream().filter(packet -> packet instanceof InventoryC2SPacket p && p.kind() == InventoryC2SPacket.Kind.SELECT).count());
+	}
+	@Test void synchronousMatchingSelectedThenSenderThrowDoesNotReportCreationFailure() {
+		Fixture f = new Fixture(); var reference = f.preview(); f.failAfterSelection = true; MarkerId marker = new MarkerId(91);
+		f.selectionHandoff = selection -> f.runtime.onInventoryPacket(InventoryS2CPacket.selected(7,
+			selection.requestId(), selection.commitId(), marker, null).stamp(100, 1));
+		assertEquals(ClientInventory.DispatchOutcome.SENT, f.runtime.dispatchInventory(reference, "attention"));
 		assertTrue(f.errors.isEmpty());
+		var selection = (InventoryC2SPacket) f.sent.stream().filter(packet -> packet instanceof InventoryC2SPacket p
+			&& p.kind() == InventoryC2SPacket.Kind.SELECT).findFirst().orElseThrow();
+		assertEquals(marker, f.inventory.selectionResult(selection.commitId()).markerId());
+		assertNull(f.inventory.selectionResult(selection.commitId()).rejection());
+		f.runtime.onInventoryPacket(InventoryS2CPacket.selected(7, selection.requestId(), selection.commitId(), null,
+			MarkerRejectReason.TARGET_GONE).stamp(100, 1));
+		assertTrue(f.errors.isEmpty(), "a later contradictory result cannot replace the consumed success");
+	}
+	@Test void staleSynchronousResponseDoesNotHideActualTransportFailure() {
+		Fixture f = new Fixture(); var reference = f.preview(); f.failAfterSelection = true;
+		f.selectionHandoff = selection -> f.runtime.onInventoryPacket(InventoryS2CPacket.selected(7,
+			selection.requestId(), selection.commitId(), new MarkerId(91), null).stamp(100, 0));
+		assertEquals(ClientInventory.DispatchOutcome.TRANSPORT_FAILED, f.runtime.dispatchInventory(reference, "attention"));
+		assertEquals(List.of(InventoryFailureReason.TRANSPORT_FAILURE.translationKey()), f.errors);
+	}
+	@Test void synchronousSuccessThenSessionResetAndSenderThrowKeepsTheAcceptedTerminalLatch() {
+		Fixture f = new Fixture(); var reference = f.preview(); f.failAfterSelection = true;
+		f.selectionHandoff = selection -> {
+			f.runtime.onInventoryPacket(InventoryS2CPacket.selected(7, selection.requestId(), selection.commitId(), new MarkerId(91), null).stamp(100, 1));
+			f.inventory.reset();
+		};
+		assertEquals(ClientInventory.DispatchOutcome.SENT, f.runtime.dispatchInventory(reference, "attention"));
+		assertTrue(f.errors.isEmpty(), "an accepted terminal cannot become a transport failure when its session cache is cleared reentrantly");
 	}
 	@Test void acceptedBasicDeliveryAuthorizesTrackingAndMarkerExpiryEndsInventoryEvenIfBasicIsRetainedStale() {
 		Fixture f = new Fixture(); var marker = new MarkerId(3);

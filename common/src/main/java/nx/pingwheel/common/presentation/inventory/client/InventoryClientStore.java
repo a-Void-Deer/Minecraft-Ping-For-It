@@ -8,6 +8,14 @@ import java.util.OptionalLong;
 import nx.pingwheel.common.monitor.client.ClientMonitorCollector;
 import nx.pingwheel.common.monitor.MonitorSchema.Lane;
 import nx.pingwheel.common.monitor.MonitorSchema.Phase;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.presentation.inventory.InventoryDiagnosticDetail;
+import nx.pingwheel.common.presentation.inventory.InventoryDiagnosticSite;
+import nx.pingwheel.common.presentation.inventory.InventoryDiagnostics;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
+import nx.pingwheel.common.presentation.inventory.InventoryImpact;
+import nx.pingwheel.common.presentation.inventory.InventoryOperation;
+import nx.pingwheel.common.presentation.inventory.InventoryOutcome;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -47,7 +55,7 @@ public final class InventoryClientStore {
 	public static final long NO_BASELINE = -1L;
 
 	/** Engineering channel bound for the two-argument convenience constructor. */
-	public static final int DEFAULT_MAX_CHANNELS = 128;
+	public static final int DEFAULT_MAX_CHANNELS = 512;
 
 	private static final int MAX_KEY_BYTES = 256;
 	private static final int MAX_QUALITY_BYTES = 64;
@@ -200,8 +208,10 @@ public final class InventoryClientStore {
 			return Outcome.IGNORED_INVALID;
 
 		if (state == null) {
-			if (channels.size() >= maxChannels)
+			if (channels.size() >= maxChannels) {
+				reportBound(channel, InventoryOperation.SNAPSHOT, InventoryDiagnosticSite.CLIENT_STORE_SNAPSHOT_CHANNELS, InventoryFailureReason.TRACKING_CAPACITY, true, channels.size() + 1L, channels.size(), maxChannels);
 				return Outcome.REJECTED_BOUND;
+			}
 		} else {
 			@Nullable Outcome stale = fenceOutcome(state, baselineId, stateRevision);
 			if (stale != null)
@@ -211,8 +221,10 @@ public final class InventoryClientStore {
 				return Outcome.APPLIED;
 		}
 
-		if ((long) copy.size() > maxEntries)
+		if ((long) copy.size() > maxEntries) {
+			reportBound(channel, InventoryOperation.SNAPSHOT, InventoryDiagnosticSite.CLIENT_STORE_SNAPSHOT_ENTRIES, InventoryFailureReason.ENTRY_LIMIT, true, copy.size(), 0, maxEntries);
 			return Outcome.REJECTED_BOUND;
+		}
 
 		if (state == null) {
 			state = new ChannelState();
@@ -265,8 +277,10 @@ public final class InventoryClientStore {
 			if (!state.values.containsKey(update.getKey()) || removed.contains(update.getKey()))
 				newKeys++;
 		}
-		if ((long) state.values.size() - removed.stream().filter(state.values::containsKey).count() + newKeys > maxEntries)
+		if ((long) state.values.size() - removed.stream().filter(state.values::containsKey).count() + newKeys > maxEntries) {
+			reportBound(channel, InventoryOperation.UPDATE, InventoryDiagnosticSite.CLIENT_STORE_UPDATE_ENTRIES, InventoryFailureReason.ENTRY_LIMIT, true, newKeys, state.values.size(), maxEntries);
 			return Outcome.REJECTED_BOUND;
+		}
 		removed.forEach(state.values::remove);
 
 		for (Map.Entry<String, Value> update : copy.entrySet()) {
@@ -290,8 +304,10 @@ public final class InventoryClientStore {
 		@Nullable ChannelState state = channels.get(channel);
 
 		if (state == null) {
-			if (channels.size() >= maxChannels)
+			if (channels.size() >= maxChannels) {
+				reportBound(channel, InventoryOperation.UPDATE, InventoryDiagnosticSite.CLIENT_STORE_INVALIDATE_CHANNELS, InventoryFailureReason.TRACKING_CAPACITY, true, channels.size() + 1L, channels.size(), maxChannels);
 				return false;
+			}
 			state = new ChannelState();
 			channels.put(channel, state);
 			state.invalid = true;
@@ -326,8 +342,10 @@ public final class InventoryClientStore {
 		@Nullable ChannelState state = channels.get(channel);
 
 		if (state == null) {
-			if (channels.size() >= maxChannels)
+			if (channels.size() >= maxChannels) {
+				reportBound(channel, InventoryOperation.UPDATE, InventoryDiagnosticSite.CLIENT_STORE_REBASE_CHANNELS, InventoryFailureReason.TRACKING_CAPACITY, true, channels.size() + 1L, channels.size(), maxChannels);
 				return false;
+			}
 			state = new ChannelState();
 			channels.put(channel, state);
 			state.baselineId = newBaselineId;
@@ -401,13 +419,18 @@ public final class InventoryClientStore {
 		requireRevision(stateRevision);
 		if (startTick < 0L)
 			throw new IllegalArgumentException("startTick must be non-negative");
-		if (totalParts < 1 || totalParts > maxParts)
+		if (totalParts < 1 || totalParts > maxParts) {
+			reportBound(channel, InventoryOperation.SNAPSHOT, InventoryDiagnosticSite.CLIENT_STORE_SNAPSHOT_PARTS,
+				totalParts < 1 ? InventoryFailureReason.INVALID_REQUEST : InventoryFailureReason.SNAPSHOT_LIMIT, totalParts > maxParts, totalParts, 0, maxParts);
 			return PartOutcome.REJECTED_BOUND;
+		}
 
 		@Nullable ChannelState state = channels.get(channel);
 		if (state == null) {
-			if (channels.size() >= maxChannels)
+			if (channels.size() >= maxChannels) {
+				reportBound(channel, InventoryOperation.SNAPSHOT, InventoryDiagnosticSite.CLIENT_STORE_ASSEMBLY_CHANNELS, InventoryFailureReason.TRACKING_CAPACITY, true, channels.size() + 1L, channels.size(), maxChannels);
 				return PartOutcome.REJECTED_BOUND;
+			}
 		} else {
 			if (state.invalid)
 				return PartOutcome.IGNORED_INVALID;
@@ -466,8 +489,10 @@ public final class InventoryClientStore {
 		@Nullable Assembly assembly = state.assembly;
 		if (assembly == null || assembly.baselineId != baselineId || assembly.stateRevision != stateRevision)
 			return PartOutcome.NO_ASSEMBLY;
-		if (partIndex < 0 || partIndex >= assembly.totalParts)
+		if (partIndex < 0 || partIndex >= assembly.totalParts) {
+			reportBound(channel, InventoryOperation.SNAPSHOT, InventoryDiagnosticSite.CLIENT_STORE_PART_INDEX, InventoryFailureReason.INVALID_REQUEST, false, partIndex, assembly.parts.size(), assembly.totalParts);
 			return PartOutcome.REJECTED_BOUND;
+		}
 
 		@Nullable Map<String, Value> existing = assembly.parts.get(partIndex);
 		if (existing != null)
@@ -478,8 +503,10 @@ public final class InventoryClientStore {
 				return PartOutcome.CONFLICT_PART;
 		}
 
-		if (assembly.entryCount + copy.size() > maxEntries)
+		if (assembly.entryCount + copy.size() > maxEntries) {
+			reportBound(channel, InventoryOperation.SNAPSHOT, InventoryDiagnosticSite.CLIENT_STORE_ASSEMBLY_ENTRIES, InventoryFailureReason.ENTRY_LIMIT, true, copy.size(), assembly.entryCount, maxEntries);
 			return PartOutcome.REJECTED_BOUND;
+		}
 
 		assembly.parts.put(partIndex, copy);
 		for (String key : copy.keySet())
@@ -595,6 +622,12 @@ public final class InventoryClientStore {
 	private static void requireBaseline(long baselineId) {
 		if (baselineId < 0L)
 			throw new IllegalArgumentException("baseline id must be non-negative");
+	}
+	private static void reportBound(Channel channel, InventoryOperation operation, InventoryDiagnosticSite site,
+		InventoryFailureReason reason, boolean limitHit, long requested, long used, long limit) {
+		InventoryDiagnostics.report(DiagnosticSide.CLIENT, site, operation, reason,
+			InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED, limitHit,
+			() -> new InventoryDiagnosticDetail(site.code(), channel.id(), -1, channel.tracking() ? "tracking" : "preview", requested, used, limit), null);
 	}
 
 	private static void requireRevision(long stateRevision) {

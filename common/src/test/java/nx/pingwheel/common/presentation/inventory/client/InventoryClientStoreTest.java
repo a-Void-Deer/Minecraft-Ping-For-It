@@ -15,6 +15,28 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class InventoryClientStoreTest {
+	@Test
+	void defaultStoreRetains512IndependentChannelsAndRejectsTheNextWithoutMutation() {
+		var store = new InventoryClientStore(1024, 128);
+		for (int i = 0; i < 512; i++) assertEquals(Outcome.APPLIED,
+			store.snapshot(Channel.tracked(i), i + 1L, 1, map("selected", value(i, 1))));
+		assertEquals(Outcome.REJECTED_BOUND, store.snapshot(Channel.tracked(512), 513, 1, map("selected", value(999, 1))));
+		for (int i = 0; i < 512; i++) assertEquals(i, store.values(Channel.tracked(i)).get("selected").count());
+		assertFalse(store.hasChannel(Channel.tracked(512)));
+	}
+	@Test
+	void supplied1024PartBoundCommitsOnlyAfterTheEntireCut() {
+		var store = new InventoryClientStore(1024, 1024);
+		var channel = Channel.preview(1);
+		assertEquals(PartOutcome.STARTED, store.beginSnapshot(channel, 1, 1, 1024, 0));
+		for (int i = 0; i < 1024; i++) {
+			assertEquals(i == 1023 ? PartOutcome.COMMITTED : PartOutcome.ACCEPTED,
+				store.part(channel, 1, 1, i, map("entry" + i, value(i, 1)), i));
+			if (i < 1023) assertTrue(store.values(channel).isEmpty());
+		}
+		assertEquals(1024, store.values(channel).size());
+		assertEquals(1023, store.values(channel).get("entry1023").count());
+	}
 
 	private static Value value(long count, long revision) {
 		return new Value(count, revision, "valid");

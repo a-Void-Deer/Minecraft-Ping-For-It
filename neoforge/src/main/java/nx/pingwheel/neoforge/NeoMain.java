@@ -126,7 +126,11 @@ public class NeoMain {
 		});
 
 		registrar.playToClient(InventoryS2CPacket.PACKET_TYPE, INVENTORY_S2C_CODEC, (payload, context) -> {
-			context.enqueueWork(() -> CommonClient.INSTANCE.onInventoryPacket(payload));
+			Connection origin = context.connection();
+			context.enqueueWork(() -> {
+				@Nullable ClientPacketListener current = Minecraft.getInstance().getConnection();
+				if (current != null && current.getConnection() == origin && origin.isConnected()) CommonClient.INSTANCE.onInventoryPacket(payload);
+			});
 		});
 		registrar.playToServer(PresentationPreviewC2SPacket.PACKET_TYPE, PRESENTATION_PREVIEW_C2S_CODEC, (payload, context) -> {
 			context.enqueueWork(() -> CommonServer.INSTANCE.onPresentationPreview(context.player().getServer(), (ServerPlayer) context.player(), payload));

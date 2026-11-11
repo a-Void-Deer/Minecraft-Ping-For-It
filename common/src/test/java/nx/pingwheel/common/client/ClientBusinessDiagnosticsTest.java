@@ -68,17 +68,20 @@ class ClientBusinessDiagnosticsTest {
 
 	@Test void selectFailureReportsOriginalCauseWithoutRecordingOrRefunding() {
 		try (var logs = new DiagnosticLogCapture(LoggingProfile.DEEP)) {
+			java.util.List<String> errors = new java.util.ArrayList<>();
 			var presentation = readyPresentation();
 			var tracker = new CreateRequestTracker();
 			tracker.onCreateDispatched(CreateRequestTracker.Route.PRESENTATION, 42);
 			var dispatcher = new ClientPingActionDispatcher(packet -> {
 				throw new IllegalStateException("select-transport-sentinel", new IllegalArgumentException("select-root-sentinel"));
-			}, (key, color) -> fail("no local error"), PingInteractionLogger.noop(), tracker,
+			}, (key, color) -> errors.add(key), PingInteractionLogger.noop(), tracker,
 				new ClientCreateRateLimiter(() -> 0, new ClientRateLimitPolicy(1, 1000)), presentation);
 			var packet = InventoryC2SPacket.select(7, 31, 1, 55, 3, 1, 1, "entry", "attention");
 			assertEquals(ClientInventory.DispatchOutcome.TRANSPORT_FAILED, dispatcher.dispatchInventory(packet));
 			assertTrue(tracker.isLatest(CreateRequestTracker.Route.PRESENTATION, 42));
 			assertEquals(ClientInventory.DispatchOutcome.THROTTLED, dispatcher.dispatchInventory(packet));
+			assertEquals(java.util.List.of(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.TRANSPORT_FAILURE.translationKey()), errors,
+				"one failed commit gets one local line even if dispatch is called again");
 			assertReport(logs, "client-send/select", "select-transport-sentinel", "select-root-sentinel");
 		}
 	}

@@ -2,6 +2,7 @@ package nx.pingwheel.common.client;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
 
 /**
  * The Minecraft adapter of {@link ClientPingActionDispatcher.LocalErrorSink}.
@@ -40,5 +41,14 @@ public final class MinecraftLocalErrorSink implements ClientPingActionDispatcher
 		return Component.translatable(PREFIX_KEY)
 			.append(Component.translatable(messageKey))
 			.withColor(color);
+	}
+	@Override
+	public void showTrackingFailure(InventoryFailureReason reason) {
+		Minecraft game = Minecraft.getInstance();
+		if (game.player != null) game.player.displayClientMessage(trackingFailureComponent(reason), false);
+	}
+	public static Component trackingFailureComponent(InventoryFailureReason reason) {
+		return Component.translatable("pingforit.inventory.tracking_failed", Component.translatable(reason.translationKey()))
+			.withColor(0xFF5555);
 	}
 }

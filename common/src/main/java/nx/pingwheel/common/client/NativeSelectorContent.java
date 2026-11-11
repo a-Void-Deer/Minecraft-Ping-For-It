@@ -22,14 +22,18 @@ import nx.pingwheel.common.presentation.PresentationKineticFormat;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.presentation.inventory.client.InventoryPreviewLifecycle;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.preview.ClientPresentationPreview;
 import nx.pingwheel.common.presentation.preview.PreviewPropertyEntries;
 import nx.pingwheel.common.render.SpatialInventoryView.Status;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 
 /** One held target's authorized observation adapter. No marker data or sender is exposed to the facade. */
+@NotNullByDefault
 final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<ClientInventory.PreviewEntryReference> {
 	/** Stable navigation-group identities for the confirmed Create properties content hierarchy. */
 	static final String CREATE_GROUP_STEP = "create";
@@ -37,33 +41,35 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 	static final String CREATE_GROUP_LABEL_KEY = "presentation.pingforit.content.group.create";
 	static final String STRESS_GROUP_LABEL_KEY = "presentation.pingforit.content.group.stress";
 	private static final String CREATE_FIELD_NAMESPACE = "create:";
-	private static final List<String> CREATE_GROUP_PATH = List.of(CREATE_GROUP_STEP);
-	private static final List<String> STRESS_GROUP_PATH = List.of(CREATE_GROUP_STEP, STRESS_GROUP_STEP);
-	private static final Set<String> STRESS_FIELDS = Set.of(PresentationKineticFormat.STRESS_FIELD,
+	private static final @Unmodifiable List<String> CREATE_GROUP_PATH = List.of(CREATE_GROUP_STEP);
+	private static final @Unmodifiable List<String> STRESS_GROUP_PATH = List.of(CREATE_GROUP_STEP, STRESS_GROUP_STEP);
+	private static final @Unmodifiable Set<String> STRESS_FIELDS = Set.of(PresentationKineticFormat.STRESS_FIELD,
 		PresentationKineticFormat.CAPACITY_FIELD, PresentationKineticFormat.AVAILABLE_CAPACITY_FIELD);
 	private final CapturedPingContext capture;
-	private final ClientPresentationPreview preview;
-	private final Supplier<ClientInventory> inventory;
+	private final @Nullable ClientPresentationPreview preview;
+	private final Supplier<@Nullable ClientInventory> inventory;
 	private final Function<CapturedPingContext, List<PingType>> propertyTypes;
 	private final Function<CapturedPingContext, List<PingType>> inventoryTypes;
 	private final Function<PresentationPropertyRef, Component> fieldLabel;
 	private final Function<String, Component> targetName;
 	private final Map<String, Component> labels = new LinkedHashMap<>();
-	private long request = ClientInventory.NO_REQUEST;
+	private @Nullable ClientInventory inventoryOwner;
+	private @Nullable InventoryPreviewLifecycle inventoryHandle;
+	private long previousWire = ClientInventory.NO_REQUEST;
 	private long revision;
 	private final Map<InventoryResourceKind, ClientInventory.Preview> previousInventory = new java.util.EnumMap<>(InventoryResourceKind.class);
-	private SpatialSelectorSession.ContentProjection<ClientInventory.PreviewEntryReference> previous;
+	private SpatialSelectorSession.@Nullable ContentProjection<ClientInventory.PreviewEntryReference> previous;
 	private boolean closed;
 
-	NativeSelectorContent(CapturedPingContext capture, ClientPresentationPreview preview,
-		Supplier<ClientInventory> inventory, Function<CapturedPingContext, List<PingType>> propertyTypes,
+	NativeSelectorContent(CapturedPingContext capture, @Nullable ClientPresentationPreview preview,
+		Supplier<@Nullable ClientInventory> inventory, Function<CapturedPingContext, List<PingType>> propertyTypes,
 		Function<PresentationPropertyRef, Component> fieldLabel,
 		Function<String, Component> targetName) {
 		this(capture, preview, inventory, propertyTypes, propertyTypes, fieldLabel, targetName);
 	}
 
-	NativeSelectorContent(CapturedPingContext capture, ClientPresentationPreview preview,
-		Supplier<ClientInventory> inventory, Function<CapturedPingContext, List<PingType>> propertyTypes,
+	NativeSelectorContent(CapturedPingContext capture, @Nullable ClientPresentationPreview preview,
+		Supplier<@Nullable ClientInventory> inventory, Function<CapturedPingContext, List<PingType>> propertyTypes,
 		Function<CapturedPingContext, List<PingType>> inventoryTypes,
 		Function<PresentationPropertyRef, Component> fieldLabel,
 		Function<String, Component> targetName) {
@@ -82,26 +88,30 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 			if (preview != null) preview.begin(new ClientPresentationPreview.Binding(capture.token(),
 				capture.resolvedTarget().target(), capture.resolvedTarget().targetType().id(), levelIdentity));
 		} finally {
-			if (!closed) {
-				ClientInventory current = inventory.get();
+			if (!closed && inventoryHandle == null) {
+				@Nullable ClientInventory current = inventory.get();
 				if (current != null) {
-					long opened = current.open(capture);
-					if (closed) current.close(opened);
-					else request = opened;
+					@Nullable InventoryPreviewLifecycle opened = current.openPreview(capture);
+					if (opened != null) {
+						if (closed) opened.close();
+						else { inventoryOwner = current; inventoryHandle = opened; }
+					}
 				}
 			}
 		}
 	}
 
-	long requestId() { return request; }
+	long requestId() { return inventoryHandle == null ? ClientInventory.NO_REQUEST : inventoryHandle.localId(); }
+	void releaseInventory() {
+		if (inventoryOwner != null && inventoryHandle != null) inventoryOwner.releasePreview(inventoryHandle);
+	}
 	void tick() { if (!closed && preview != null) preview.tick(); }
 	void close() {
 		if (closed) return;
 		closed = true;
 		try { if (preview != null) preview.abort(); }
 		finally {
-			ClientInventory current = inventory.get();
-			if (current != null && request != ClientInventory.NO_REQUEST) current.close(request);
+			if (inventoryHandle != null) inventoryHandle.close();
 			labels.clear(); previous = null; previousInventory.clear();
 		}
 	}
@@ -116,21 +126,22 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 	}
 
 	@Override
-	public SpatialSelectorSession.ContentProjection<ClientInventory.PreviewEntryReference> read(
+	public SpatialSelectorSession.@Nullable ContentProjection<ClientInventory.PreviewEntryReference> read(
 		SpatialSelectorSession.CapturedTarget target, SpatialSelectorSession.ContentFence fence) {
 		if (closed) return null;
-		if (!capture.resolvedTarget().equals(target.resolvedTarget()) || !target.candidateId().equals(fence.candidateId())) return null;
+		if (!capture.resolvedTarget().equals(target.resolvedTarget()) || !target.candidateId().equals(fence.candidateId())
+			|| fence.requestId() != requestId()) return null;
 		List<PingType> types = propertyTypes.apply(capture);
-		PingType defaultType = types.isEmpty() ? null : types.getFirst();
+		@Nullable PingType defaultType = types.isEmpty() ? null : types.getFirst();
 		List<SpatialSelectorSession.Property> properties = new ArrayList<>();
 		List<SpatialSelectorSession.ContentGroup> groups = new ArrayList<>();
 		labels.clear();
 		if (preview != null) preview.projection().ifPresent(projection -> {
-			String blockStateStep = null;
+			@Nullable String blockStateStep = null;
 			int blockStateAnchor = -1;
-			Component blockStateLabel = null;
-			PresentationPropertyRef blockStateRef = null;
-			PresentationValue blockStateValue = null;
+			@Nullable Component blockStateLabel = null;
+			@Nullable PresentationPropertyRef blockStateRef = null;
+			@Nullable PresentationValue blockStateValue = null;
 			boolean blockStateMember = false;
 			boolean createMember = false;
 			boolean stressMember = false;
@@ -183,14 +194,19 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 			if (stressMember)
 				groups.add(new SpatialSelectorSession.ContentGroup(STRESS_GROUP_PATH, STRESS_GROUP_LABEL_KEY));
 		});
-		@Nullable ClientInventory current = inventory.get();
-		// A purged request is absent, not an empty UPDATING preview. Keeping the
-		// distinction lets normal initial loading stay on the list while a
-		// revoked/reset authorization removes the inventory branch entirely.
+		@Nullable ClientInventory current = inventoryOwner;
+		@Nullable InventoryPreviewLifecycle handle = inventoryHandle;
+		boolean live = current != null && handle != null && current.hasPreview(handle);
+		long request = live ? handle.requestId() : ClientInventory.NO_REQUEST;
+		boolean wireChanged = previous != null && request != previousWire;
+		previousWire = request;
+		if (wireChanged || !live) previousInventory.clear();
+		// The logical handle retains the status area while no wire attempt owns rows.
 		SpatialSelectorSession.@Nullable InventoryPreview<ClientInventory.PreviewEntryReference> list = null;
-		if (current != null && request != ClientInventory.NO_REQUEST && current.hasPreview(request)) {
+		if (current != null && handle != null && live) {
 			List<SpatialSelectorSession.InventoryRow<ClientInventory.PreviewEntryReference>> rows = new ArrayList<>();
 			List<SpatialSelectorSession.InventoryGroup> lanes = new ArrayList<>();
+			boolean pending = false;
 			for (InventoryResourceKind kind : InventoryResourceKind.values()) {
 				if (!current.hasPreview(request, kind)) continue;
 				ClientInventory.Preview state = current.preview(request, kind);
@@ -200,6 +216,7 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 						.containsAll(prior.entries().stream().map(ClientInventory.EntryView::key).toList()));
 				Map<String, ClientInventory.PreviewEntryReference> references = new LinkedHashMap<>();
 				current.selectable(request, kind).forEach(reference -> references.put(reference.entryKey(), reference));
+				if (prior != null && !prior.entries().isEmpty() && references.isEmpty()) laneReset = true;
 				for (var entry : state.entries()) {
 					ClientInventory.@Nullable PreviewEntryReference reference = references.get(entry.key());
 					if (reference != null) rows.add(new SpatialSelectorSession.InventoryRow<>(kind, kind.name() + ":" + entry.key(), entry.label(),
@@ -210,28 +227,41 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 				Status status = state.completeScan() && state.status() == InventoryS2CPacket.Status.READY ? Status.READY
 					: Status.fromName(state.status().name());
 				if (!state.completeScan() && status == Status.READY) status = Status.UPDATING;
+				if (!state.completeScan() && status != Status.INVALID
+					&& (status != Status.INCOMPLETE || state.receivedParts() < state.totalParts())) pending = true;
 				@Unmodifiable List<PingType> itemTypes = List.copyOf(kind == InventoryResourceKind.ITEM ? inventoryTypes.apply(capture) : propertyTypes.apply(capture));
 				@Nullable PingType defaultItemType = itemTypes.isEmpty() ? null : itemTypes.getFirst();
 				lanes.add(new SpatialSelectorSession.InventoryGroup(kind, "pingforit.inventory.group." + kind.name().toLowerCase(java.util.Locale.ROOT),
-					status, itemTypes, defaultItemType, laneReset));
+					status, itemTypes, defaultItemType, laneReset, failureLabel(state.failureReason())));
 				previousInventory.put(kind, state);
 			}
 			@Unmodifiable List<SpatialSelectorSession.InventoryGroup> available = lanes.stream().filter(lane -> lane.status() != Status.INVALID
 				&& lane.status() != Status.UNAVAILABLE && lane.status() != Status.EXPIRED).toList();
 			@Unmodifiable List<PingType> allTypes = available.stream().flatMap(lane -> lane.allowedTypes().stream()).distinct().toList();
 			Status overall = available.isEmpty() ? Status.INVALID
-				: available.stream().allMatch(lane -> lane.status() == Status.READY) ? Status.READY : Status.UPDATING;
+				: pending ? Status.UPDATING
+				: available.stream().allMatch(lane -> lane.status() == Status.READY) ? Status.READY
+				: available.stream().anyMatch(lane -> lane.status() == Status.INCOMPLETE) ? Status.INCOMPLETE : Status.UNCERTAIN;
+			@Nullable Component message = null;
+			@Nullable Component reason = failureLabel(handle.failureReason());
+			if (reason != null && handle.stopped()) message = reason;
+			else if (reason != null && handle.retrying() && (handle.waiting() || lanes.isEmpty() || pending))
+				message = Component.translatable("pingforit.inventory.retry", reason, handle.retriesUsed());
+			if (handle.waiting()) overall = Status.UPDATING;
 			list = new SpatialSelectorSession.InventoryPreview<>("pingforit.inventory.group.contents", overall, rows,
-				allTypes, allTypes.isEmpty() ? null : allTypes.getFirst(), lanes);
+				allTypes, allTypes.isEmpty() ? null : allTypes.getFirst(), lanes, message);
 		}
-		var next = new SpatialSelectorSession.ContentProjection<>(fence, revision + 1, false,
+		var next = new SpatialSelectorSession.ContentProjection<>(fence, revision + 1, wireChanged,
 			Status.READY, properties, list, groups);
-		if (previous != null && Objects.equals(previous.properties(), next.properties())
+		if (!wireChanged && previous != null && Objects.equals(previous.properties(), next.properties())
 			&& Objects.equals(previous.inventory(), next.inventory())
 			&& Objects.equals(previous.groups(), next.groups())) return null;
 		revision++;
 		previous = next;
 		return next;
+	}
+	private static @Nullable Component failureLabel(@Nullable InventoryFailureReason reason) {
+		return reason == null ? null : Component.translatable(reason.translationKey());
 	}
 
 	/**
@@ -243,7 +273,7 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 	 * network and overstress flags and every other Create field stay directly
 	 * under Create.
 	 */
-	private static List<String> contentGroupPath(PresentationPropertyRef ref, String blockStateStep) {
+	private static @Unmodifiable List<String> contentGroupPath(PresentationPropertyRef ref, @Nullable String blockStateStep) {
 		if (ref.fieldId().equals(PresentationBasic.BLOCK_STATE) && !ref.recordPath().isEmpty() && blockStateStep != null)
 			return List.of(blockStateStep);
 		if (ref.fieldId().startsWith(CREATE_FIELD_NAMESPACE))
@@ -251,7 +281,7 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 		return List.of();
 	}
 
-	private Component propertyLabel(ClientPresentationPreview.Projection projection, PresentationPropertyRef ref,
+	private @Nullable Component propertyLabel(ClientPresentationPreview.Projection projection, PresentationPropertyRef ref,
 		PresentationValue value, Component name) {
 		if (ref.isRoot() && ref.fieldId().equals("minecraft:target.name") && value instanceof PresentationValue.Text json)
 			return targetName.apply(json.value());
@@ -267,14 +297,14 @@ final class NativeSelectorContent implements SpatialSelectorSession.ContentPort<
 				.map(entry -> Component.translatable("presentation.pingforit.format.item_count", itemName, valueLabel(entry.value())))
 				.orElseGet(() -> Component.translatable("presentation.pingforit.format.item", itemName));
 		}
-		Component kinetic = PresentationKineticFormat.value(ref, value,
+		@Nullable Component kinetic = PresentationKineticFormat.value(ref, value,
 			capacity -> projection.property(capacity).map(observation -> observation.value()).orElse(null));
 		if (kinetic != null) return name.copy().append(": ").append(kinetic);
 		return name.copy().append(": ").append(valueLabel(value));
 	}
 
 	private static Component itemName(String value) {
-		ResourceLocation id = ResourceLocation.tryParse(value);
+		@Nullable ResourceLocation id = ResourceLocation.tryParse(value);
 		return id != null && BuiltInRegistries.ITEM.containsKey(id)
 			? BuiltInRegistries.ITEM.get(id).getDescription() : Component.literal(shortText(value));
 	}

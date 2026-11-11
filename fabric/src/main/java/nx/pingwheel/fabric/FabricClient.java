@@ -69,7 +69,14 @@ public class FabricClient implements ClientModInitializer {
 			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onPresentationPacket(packet)));
 		ClientPlayNetworking.registerGlobalReceiver(
 			InventoryS2CPacket.PACKET_TYPE,
-			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onInventoryPacket(packet)));
+			(packet, context) -> {
+				Minecraft client = context.client();
+				@Nullable ClientPacketListener origin = client.getConnection();
+				if (origin == null || context.responseSender() != ClientPlayNetworking.getSender()) return;
+				client.execute(() -> {
+					if (client.getConnection() == origin && origin.isAcceptingMessages()) CommonClient.INSTANCE.onInventoryPacket(packet);
+				});
+			});
 		ClientPlayNetworking.registerGlobalReceiver(PresentationPreviewS2CPacket.PACKET_TYPE,
 			(packet, context) -> context.client().execute(() -> CommonClient.INSTANCE.onPresentationPreview(packet)));
 

@@ -135,7 +135,11 @@ public class CommonClient {
 			monitorService.resetConnection();
 			monitorConnectionGeneration = pingRuntime == null ? -1 : pingRuntime.monitor().connectionGeneration();
 		}
-		inventory = new ClientInventory(IPlatformNetworkService.INSTANCE::sendToServer);
+		@Nullable net.minecraft.client.multiplayer.ClientPacketListener inventoryOrigin = Game.getConnection();
+		inventory = new ClientInventory(packet -> {
+			if (inventoryOrigin != null && Game.getConnection() == inventoryOrigin && inventoryOrigin.isAcceptingMessages())
+				IPlatformNetworkService.INSTANCE.sendToServer(packet);
+		}, nx.pingwheel.common.interaction.state.InteractionTimeSource.system());
 		if (pingRuntime != null) pingRuntime.inventory(inventory);
 
 		// A fresh connection-scoped policy view starts unknown and asks the

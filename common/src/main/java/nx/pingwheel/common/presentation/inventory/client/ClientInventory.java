@@ -16,10 +16,13 @@ import java.util.HashSet;
 import java.util.function.Function;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.function.BiFunction;
+import java.util.function.BooleanSupplier;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.interaction.CapturedPingContext;
+import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.MarkerRejectReason;
 import nx.pingwheel.common.network.IPacket;
@@ -35,6 +38,11 @@ import nx.pingwheel.common.presentation.PresentationGrant;
 import nx.pingwheel.common.presentation.inventory.InventoryChecksums;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.inventory.InventoryCreationSnapshot;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
+import nx.pingwheel.common.presentation.inventory.InventoryDiagnosticSite;
+import nx.pingwheel.common.presentation.inventory.InventoryOperation;
+import nx.pingwheel.common.presentation.inventory.InventoryImpact;
+import nx.pingwheel.common.presentation.inventory.InventoryOutcome;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -72,26 +80,31 @@ public final class ClientInventory {
 	/** Returned by {@link #open(Target)} when no preview channel could be created. */
 	public static final long NO_REQUEST = -1L;
 
-	public static final int MAX_PREVIEW_CHANNELS = 32;
-	public static final int MAX_TRACKED_CHANNELS = 128;
-	public static final int MAX_PREVIEW_ENTRIES = 256;
+	public static final int MAX_PREVIEW_CHANNELS = 64;
+	public static final int MAX_TRACKED_CHANNELS = 512;
+	public static final int MAX_PREVIEW_ENTRIES = 1024;
 	public static final int MAX_METADATA_ENTRIES = 128;
 	public static final int MAX_UNKNOWN_SESSIONS = 4;
 	public static final int MAX_UNKNOWN_ENTRIES = 256;
 	public static final int MAX_UNKNOWN_BYTES = 65536;
+	public static final int MAX_UNKNOWN_SINGLETON_BYTES = 262144;
 	public static final int MAX_METADATA_BYTES_PER_CHANNEL = 262144;
-	public static final int MAX_PREVIEW_BYTES = 262144;
+	public static final int MAX_PREVIEW_BYTES = 2 * 1024 * 1024;
 
 	private static final int HELLO_RETRY_TICKS = 40;
 	private static final int MAX_HELLO_ATTEMPTS = 5;
-	private static final int MAX_ASSEMBLY_PARTS = 256;
+	private static final int MAX_ASSEMBLY_PARTS = 1024;
 	private static final int MAX_TRACKING_BATCHES = 8;
 	private static final long FALLBACK_UNKNOWN_WINDOW_TICKS = 1200L;
-	private static final int STORE_CHANNELS = 128;
+	private static final int STORE_CHANNELS = 512;
 
 	/** Rendering projection of one committed entry; metadata may be absent for a fallback. */
 	public record EntryView(InventoryResourceKind resourceKind, String key, String itemId, String label, @Nullable String displayJson, long count,
-		boolean fallback, InventoryS2CPacket.@Nullable Status quality, @Nullable String itemPingType) {
+		boolean fallback, InventoryS2CPacket.@Nullable Status quality, @Nullable String itemPingType, @Nullable InventoryFailureReason qualityReason) {
+		public EntryView(InventoryResourceKind resourceKind, String key, String itemId, String label, @Nullable String displayJson, long count,
+			boolean fallback, InventoryS2CPacket.@Nullable Status quality, @Nullable String itemPingType) {
+			this(resourceKind, key, itemId, label, displayJson, count, fallback, quality, itemPingType, null);
+		}
 		public EntryView(String key, String itemId, String label, @Nullable String displayJson, long count, boolean fallback, InventoryS2CPacket.@Nullable Status quality) {
 			this(InventoryResourceKind.ITEM, key, itemId, label, displayJson, count, fallback, quality, null);
 		}
@@ -112,7 +125,8 @@ public final class ClientInventory {
 	 * HELD fragments/controls and unchanged replays are neither successful applies nor rejects.
 	 */
 	private enum ApplyOutcome { APPLIED, REJECTED, HELD, UNCHANGED }
-	public record SelectionResult(InventoryResourceKind resourceKind, long commitId, long requestId, @Nullable MarkerId markerId, @Nullable MarkerRejectReason rejection) {}
+	public record SelectionResult(InventoryResourceKind resourceKind, long commitId, long requestId, @Nullable MarkerId markerId,
+		@Nullable MarkerRejectReason rejection, @Nullable InventoryFailureReason failureReason) {}
 
 	/**
 	 * Immutable preview projection. {@code entries} may be partial and is
@@ -121,8 +135,13 @@ public final class ClientInventory {
 	 */
 	public record Preview(InventoryResourceKind resourceKind, long requestId, InventoryS2CPacket.Status status, boolean completeScan,
 		int receivedParts, int totalParts, long baselineId, long statusRevision, long watermark,
-		boolean invalid, @Unmodifiable List<EntryView> entries) {
+		boolean invalid, @Unmodifiable List<EntryView> entries, @Nullable InventoryFailureReason failureReason) {
 		public Preview { entries = List.copyOf(entries); }
+		public Preview(InventoryResourceKind resourceKind, long requestId, InventoryS2CPacket.Status status, boolean completeScan,
+			int receivedParts, int totalParts, long baselineId, long statusRevision, long watermark,
+			boolean invalid, List<EntryView> entries) {
+			this(resourceKind, requestId, status, completeScan, receivedParts, totalParts, baselineId, statusRevision, watermark, invalid, List.copyOf(entries), null);
+		}
 
 		public static Preview empty(long requestId) {
 			return empty(requestId, InventoryResourceKind.ITEM);
@@ -135,8 +154,12 @@ public final class ClientInventory {
 
 	/** Live per-key projection; {@code watermark} is the closed digest cut, not the newest live item. */
 	public record Tracking(@Nullable InventoryResourceKind resourceKind, @Nullable MarkerId markerId, InventoryS2CPacket.Status status, boolean grey, boolean complete,
-		long baselineId, long statusRevision, long watermark, @Unmodifiable List<EntryView> entries) {
+		long baselineId, long statusRevision, long watermark, @Unmodifiable List<EntryView> entries, @Nullable InventoryFailureReason failureReason) {
 		public Tracking { entries = List.copyOf(entries); }
+		public Tracking(@Nullable InventoryResourceKind resourceKind, @Nullable MarkerId markerId, InventoryS2CPacket.Status status, boolean grey, boolean complete,
+			long baselineId, long statusRevision, long watermark, List<EntryView> entries) {
+			this(resourceKind, markerId, status, grey, complete, baselineId, statusRevision, watermark, List.copyOf(entries), null);
+		}
 		public Tracking(@Nullable MarkerId markerId, InventoryS2CPacket.Status status, boolean grey, boolean complete,
 			long baselineId, long statusRevision, long watermark, List<EntryView> entries) {
 			this(InventoryResourceKind.ITEM, markerId, status, grey, complete, baselineId, statusRevision, watermark, List.copyOf(entries));
@@ -155,7 +178,15 @@ public final class ClientInventory {
 		long capRejectedPackets, long capFencedStates, int helloAttempts, boolean ready, long epoch) {}
 
 	private record PreviewKey(long requestId, InventoryResourceKind kind) {}
-	private record PendingCommit(long requestId, InventoryResourceKind kind) {}
+	@NotNullByDefault
+	private static final class PendingCommit {
+		final long requestId;
+		final InventoryResourceKind kind;
+		boolean terminalAccepted;
+		PendingCommit(long requestId, InventoryResourceKind kind) { this.requestId = requestId; this.kind = kind; }
+		long requestId() { return requestId; }
+		InventoryResourceKind kind() { return kind; }
+	}
 	/** Bounded by known-marker retention; refreshes cannot restart receipt eligibility. */
 	private static final class MarkerMetadata {
 		final String targetType;
@@ -188,7 +219,11 @@ public final class ClientInventory {
 		boolean sent;
 		/** False until the server's complete OPENED entitlement; no lane data is accepted before it. */
 		boolean opened;
+		/** Only the first grant starts the scan phase clock; regrants are transport fencing. */
+		boolean firstGrantSeen;
 		int laneMask;
+		long sendEpoch, sendPresentationEpoch, sendView;
+		@Nullable InventoryPreviewLifecycle lifecycle;
 		PreviewRequest(Target target, BlockFace face, String targetType) { this.target = target; this.face = face; this.targetType = targetType; }
 	}
 	private static final class PreviewState {
@@ -211,7 +246,17 @@ public final class ClientInventory {
 		boolean groupRejected;
 		boolean completeScan;
 		boolean serverSeen;
+		/** Prior-view rows are display history only until replacement data installs its own fences. */
+		boolean awaitingRegrant;
+		/** Same-view replacement publication must follow the regrant's empty INCOMPLETE fence. */
+		boolean awaitingReplacementCut;
 		int bytes;
+		long controlRevision = -1L;
+		long progressRevision;
+		boolean terminal;
+		/** A local inactivity stop lasts for this wire attempt, including same-epoch view rebuilds. */
+		boolean watchdogStopped;
+		@Nullable InventoryFailureReason failureReason;
 
 		PreviewState(InventoryResourceKind resourceKind, PreviewRequest request, long requestId, Target target, BlockFace face, String targetType) {
 			this.resourceKind = resourceKind;
@@ -251,6 +296,7 @@ public final class ClientInventory {
 		@Nullable @Unmodifiable List<EntryView> historical;
 		InventoryS2CPacket.@Nullable Status historicalFailure;
 		boolean closedCut;
+		@Nullable InventoryFailureReason failureReason;
 
 		TrackingState(InventoryResourceKind resourceKind, MarkerId markerId, InventoryClientStore.Channel channel) {
 			this.resourceKind = resourceKind;
@@ -303,6 +349,7 @@ public final class ClientInventory {
 		InventoryS2CPacket.Status status() {
 			return parts.get(totalParts - 1).status();
 		}
+		@Nullable InventoryFailureReason failureReason() { return parts.get(totalParts - 1).failureReason(); }
 		boolean sourceComplete() {
 			return complete() && parts.values().stream().anyMatch(InventoryS2CPacket::completeScan);
 		}
@@ -322,6 +369,10 @@ public final class ClientInventory {
 	}
 
 	private final Consumer<IPacket> sender;
+	private final InteractionTimeSource time;
+	private final Map<Long, InventoryPreviewLifecycle> previewLifecycles = new LinkedHashMap<>();
+	private long nextPreviewId = 1L;
+	private Consumer<InventoryFailureReason> trackingFailure = ignored -> {};
 	private final InventoryClientStore store;
 	private @Nullable ClientMonitorCollector monitor;
 	private final Map<PreviewKey, PreviewState> previews = new LinkedHashMap<>();
@@ -347,6 +398,7 @@ public final class ClientInventory {
 	private final Map<MarkerId, InventoryResourceKind> markerKinds = new LinkedHashMap<>();
 	private final Map<Long, PendingCommit> pendingCommits = new LinkedHashMap<>();
 	private final Map<Long, SelectionResult> selectionResults = new LinkedHashMap<>();
+	private final Set<Long> releasedSelections = new java.util.LinkedHashSet<>();
 	private int invalidPackets;
 	private long staleEpochPackets;
 	private long fencedPackets;
@@ -359,9 +411,14 @@ public final class ClientInventory {
 	private long capFencedStates;
 
 	public ClientInventory(Consumer<IPacket> sender) {
+		this(sender, InteractionTimeSource.system());
+	}
+	public ClientInventory(Consumer<IPacket> sender, InteractionTimeSource time) {
 		this.sender = Objects.requireNonNull(sender, "sender");
+		this.time = Objects.requireNonNull(time, "time");
 		this.store = new InventoryClientStore(MAX_ASSEMBLY_PARTS, MAX_METADATA_ENTRIES, STORE_CHANNELS);
 	}
+	public void trackingFailureSink(Consumer<InventoryFailureReason> sink) { trackingFailure = Objects.requireNonNull(sink); }
 
 	/** Whether the inventory transport has an OFFER and a current presentation session. */
 	public boolean ready() {
@@ -450,7 +507,7 @@ public final class ClientInventory {
 	public static @Nullable Lane monitorLane(@Nullable InventoryS2CPacket packet) {
 		if (packet == null || packet.kind() == null) return null;
 		return switch (packet.kind()) {
-			case PREVIEW, OPENED, POLICY, SELECTED, REJECT -> Lane.PREVIEW;
+			case PREVIEW, OPENED, OPEN_REJECTED, PREVIEW_STATE, POLICY, SELECTED, REJECT -> Lane.PREVIEW;
 			case SNAPSHOT, STREAM, STATUS, HEARTBEAT -> Lane.TRACKING;
 			case OFFER -> null;
 		};
@@ -487,7 +544,12 @@ public final class ClientInventory {
 			// Each real entry is credited once, never the incoming ID itself.
 			for (MarkerId id : knownMarkers.keySet())
 				if (!id.equals(snapshot.id()) && superseded.test(id)) retained--;
-			if (retained >= MAX_TRACKED_CHANNELS) return false;
+			if (retained >= MAX_TRACKED_CHANNELS) {
+				ClientInventoryDiagnostics.limit(InventoryDiagnosticSite.CLIENT_CREATION_METADATA, InventoryOperation.SELECT,
+					InventoryFailureReason.TRACKING_CAPACITY, InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED,
+					-1, retained + 1L, retained, MAX_TRACKED_CHANNELS);
+				return false;
+			}
 		}
 		@Nullable InventoryResourceKind existing = markerKinds.get(snapshot.id());
 		return existing == null || existing == kind;
@@ -559,6 +621,12 @@ public final class ClientInventory {
 	 */
 	public void presentationReset(long epoch, long view) {
 		if (epoch == 0 || view < 0 || (epoch == presentationEpoch && view <= presentationView)) return;
+		if (presentationEpoch == 0) {
+			presentationEpoch = epoch; presentationView = view; policyViews.clear(); allowedTypes.clear();
+			for (PreviewState state : List.copyOf(previews.values()))
+				if (requests.containsKey(state.requestId) && ready(state.resourceKind)) sendOpen(state);
+			return;
+		}
 		if (epoch != presentationEpoch) {
 			purgeViews(); selectionResults.clear();
 			presentationEpoch = epoch; presentationView = view; policyViews.clear(); allowedTypes.clear(); return;
@@ -569,8 +637,14 @@ public final class ClientInventory {
 				request.retiredBaselines.merge(state.resourceKind, state.baselineId, Math::max);
 				state.receivedPartIndexes.clear(); state.groupComplete = false; state.groupRejected = false; state.completeScan = false;
 				state.serverSeen = false;
+				state.awaitingRegrant = true;
+				state.awaitingReplacementCut = true;
+				state.terminal = state.watchdogStopped;
+				// Transport revisions restart; attempt work evidence and inactivity time do not.
+				state.controlRevision = -1;
 			}
 			request.opened = false;
+			if (request.sent) request.sendView = view;
 		}
 		for (TrackingState state : tracking.values()) {
 			@Nullable MarkerMetadata marker = knownMarkers.get(state.markerId);
@@ -592,7 +666,13 @@ public final class ClientInventory {
 	}
 	/** Installs the one complete per-marker grant and its immutable dedicated domain. */
 	public void markerCreated(@Nullable MarkerSnapshot marker, @Nullable MarkerContentGrant content) {
-		if (marker == null || content == null || knownMarkers.size() >= MAX_TRACKED_CHANNELS && !knownMarkers.containsKey(marker.id())) return;
+		if (marker == null || content == null) return;
+		if (knownMarkers.size() >= MAX_TRACKED_CHANNELS && !knownMarkers.containsKey(marker.id())) {
+			ClientInventoryDiagnostics.limit(InventoryDiagnosticSite.CLIENT_KNOWN_MARKER_METADATA, InventoryOperation.TRACKING,
+				InventoryFailureReason.TRACKING_CAPACITY, InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED,
+				-1, knownMarkers.size() + 1L, knownMarkers.size(), MAX_TRACKED_CHANNELS);
+			return;
+		}
 		if (knownMarkers.containsKey(marker.id())) return;
 		@Nullable InventoryResourceKind domain = content.trackingKind();
 		if (domain != null) {
@@ -609,6 +689,8 @@ public final class ClientInventory {
 	}
 	public @Nullable SelectionResult selectionResult(long commitId) { return selectionResults.get(commitId); }
 	private void purgeViews() {
+		cancelPreviewLifecycles();
+		releasedSelections.clear();
 		previews.clear(); requests.clear(); for (TrackingState state : tracking.values()) store.expire(state.channel);
 		tracking.clear(); unknown.clear(); knownMarkers.clear(); markerKinds.clear(); pendingCommits.clear();
 	}
@@ -631,14 +713,18 @@ public final class ClientInventory {
 	 * Skipped entirely when not connected so no packet is produced off-line.
 	 */
 	public void tick(boolean connected) {
-		if (!connected)
+		if (!connected) {
+			cancelPreviewLifecycles();
 			return;
+		}
 		ticks++;
 		if (!offered && helloAttempts < MAX_HELLO_ATTEMPTS
 			&& (helloAttempts == 0 || ticks % HELLO_RETRY_TICKS == 0)) {
-			send(InventoryC2SPacket.hello());
+			try { send(InventoryC2SPacket.hello()); }
+			catch (RuntimeException failed) { ClientInventoryDiagnostics.transportFailed("hello", failed); }
 			helloAttempts++;
 		}
+		advancePreviewLifecycles();
 		expireUnknownSessions();
 		for (TrackingState state : tracking.values()) {
 			compareCompletion(state);
@@ -651,6 +737,7 @@ public final class ClientInventory {
 
 	/** Clears every channel, metadata map and unknown-baseline buffer. */
 	public void reset() {
+		cancelPreviewLifecycles();
 		previews.clear();
 		requests.clear();
 		schemaDisabled.clear();
@@ -668,6 +755,7 @@ public final class ClientInventory {
 		offered = false;
 		presentationEpoch = presentationView = 0; policyViews.clear(); nextCommitId = 1; allowedTypes.clear();
 		knownMarkers.clear(); markerKinds.clear(); pendingCommits.clear(); selectionResults.clear();
+		releasedSelections.clear();
 	}
 
 	/**
@@ -709,6 +797,10 @@ public final class ClientInventory {
 		return open(target, frozen.blockHitFace().get(), frozen.resolvedTarget().targetType().id());
 	}
 	public long open(@Nullable Target target, @Nullable BlockFace face, String targetType) {
+		return openAttempt(target, face, targetType, null);
+	}
+	private long openAttempt(@Nullable Target target, @Nullable BlockFace face, String targetType,
+		@Nullable InventoryPreviewLifecycle lifecycle) {
 		@Nullable String rejection = face == null ? "missing-face"
 			: !isOpenTarget(target) ? "unsupported-target"
 			: !nx.pingwheel.common.presentation.PresentationSettings.isKnownTargetType(targetType) ? "unknown-target-type"
@@ -721,6 +813,8 @@ public final class ClientInventory {
 		}
 		long requestId = nextRequestId++;
 		PreviewRequest request = new PreviewRequest(Objects.requireNonNull(target), Objects.requireNonNull(face, "face"), targetType);
+		request.lifecycle = lifecycle;
+		if (lifecycle != null) lifecycle.wireRequest = requestId;
 		requests.put(requestId, request);
 		for (InventoryResourceKind kind : InventoryResourceKind.values()) {
 			if (schemaDisabled.contains(kind)) {
@@ -737,12 +831,130 @@ public final class ClientInventory {
 		return requestId;
 	}
 
+	/** Opens one logical held Preview. Retries replace only its wire attempt, never its frozen input. */
+	public @Nullable InventoryPreviewLifecycle openPreview(@Nullable CapturedPingContext frozen) {
+		if (frozen == null || frozen.blockHitFace().isEmpty() || !isOpenTarget(frozen.resolvedTarget().target())) return null;
+		return openPreview(frozen.resolvedTarget().target(), frozen.blockHitFace().get(), frozen.resolvedTarget().targetType().id());
+	}
+	public @Nullable InventoryPreviewLifecycle openPreview(Target target, BlockFace face, String targetType) {
+		if (!isOpenTarget(target) || !nx.pingwheel.common.presentation.PresentationSettings.isKnownTargetType(targetType)) return null;
+		if (previewLifecycles.size() >= MAX_PREVIEW_CHANNELS) {
+			ClientInventoryDiagnostics.limit(InventoryDiagnosticSite.CLIENT_LOGICAL_PREVIEW_HANDLE, InventoryOperation.PREVIEW,
+				InventoryFailureReason.REQUEST_CAPACITY, InventoryImpact.PING_UNAVAILABLE, InventoryOutcome.REJECTED, nextPreviewId,
+				previewLifecycles.size() + 1L, previewLifecycles.size(), MAX_PREVIEW_CHANNELS);
+			return null;
+		}
+		InventoryPreviewLifecycle lifecycle = new InventoryPreviewLifecycle(this, nextPreviewId++, target, face, targetType, time.nowMillis());
+		previewLifecycles.put(lifecycle.localId(), lifecycle);
+		startPreviewAttempt(lifecycle);
+		return lifecycle;
+	}
+	private void startPreviewAttempt(InventoryPreviewLifecycle lifecycle) {
+		if (lifecycle.cancelled || lifecycle.released || lifecycle.stopped) return;
+		lifecycle.waiting = false;
+		lifecycle.lastProgressMillis = time.nowMillis();
+		lifecycle.attempts++;
+		long request = openAttempt(lifecycle.target, lifecycle.face, lifecycle.targetType, lifecycle);
+		if (request == NO_REQUEST) failPreview(lifecycle,
+			schemaUnavailable() ? InventoryFailureReason.UNSUPPORTED_LANE : InventoryFailureReason.REQUEST_CAPACITY);
+	}
+	public boolean hasPreview(InventoryPreviewLifecycle lifecycle) {
+		return lifecycle.owner() == this && previewLifecycles.get(lifecycle.localId()) == lifecycle && !lifecycle.cancelled;
+	}
+	public void closePreview(InventoryPreviewLifecycle lifecycle) {
+		if (lifecycle.owner() != this || lifecycle.cancelled) return;
+		lifecycle.cancelled = true;
+		lifecycle.waiting = false;
+		previewLifecycles.remove(lifecycle.localId());
+		long wire = lifecycle.wireRequest;
+		lifecycle.wireRequest = NO_REQUEST;
+		close(wire);
+	}
+	/** Must run before dispatch, but leaves the current reference alive until SELECT then CLOSE. */
+	public void releasePreview(InventoryPreviewLifecycle lifecycle) {
+		if (lifecycle.owner() != this) return;
+		lifecycle.released = true;
+		lifecycle.waiting = false;
+	}
+	private void cancelPreviewLifecycles() {
+		for (InventoryPreviewLifecycle lifecycle : previewLifecycles.values()) {
+			lifecycle.cancelled = true;
+			lifecycle.waiting = false;
+			requests.remove(lifecycle.wireRequest);
+			previews.keySet().removeIf(key -> key.requestId() == lifecycle.wireRequest);
+			lifecycle.wireRequest = NO_REQUEST;
+		}
+		previewLifecycles.clear();
+	}
+	private void failPreview(InventoryPreviewLifecycle lifecycle, InventoryFailureReason reason) {
+		if (!hasPreview(lifecycle) || lifecycle.released || lifecycle.waiting || lifecycle.stopped) return;
+		lifecycle.lastReason = reason;
+		long wire = lifecycle.wireRequest;
+		lifecycle.wireRequest = NO_REQUEST;
+		if (lifecycle.retriesUsed >= InventoryPreviewLifecycle.MAX_RETRIES) lifecycle.stopped = true;
+		else {
+			lifecycle.retriesUsed++;
+			lifecycle.waiting = true;
+			lifecycle.retryDeadlineMillis = time.nowMillis() + InventoryPreviewLifecycle.RETRY_DELAY_MILLIS;
+		}
+		// Retire rows and references before courtesy CLOSE or any reentrant transport callback.
+		close(wire);
+		ClientInventoryDiagnostics.previewFailed(lifecycle.localId(), wire, reason, lifecycle.retriesUsed, lifecycle.stopped);
+	}
+	private void advancePreviewLifecycles() {
+		long now = time.nowMillis();
+		for (InventoryPreviewLifecycle lifecycle : List.copyOf(previewLifecycles.values())) {
+			if (lifecycle.cancelled || lifecycle.released || lifecycle.stopped) continue;
+			if (lifecycle.waiting) {
+				if (now >= lifecycle.retryDeadlineMillis) startPreviewAttempt(lifecycle);
+				continue; // One attempt at most per advance; never catch up missed deadlines.
+			}
+			@Nullable PreviewRequest request = requests.get(lifecycle.wireRequest);
+			if (request == null) continue;
+			if (request.opened && !previewPending(request)) continue;
+			long timeout = Math.max(InventoryPreviewLifecycle.MIN_INACTIVITY_MILLIS,
+				offer == null ? 0L : waitingWindowTicks() * 50L);
+			if (now - lifecycle.lastProgressMillis < timeout) continue;
+			InventoryFailureReason reason = !ready() ? InventoryFailureReason.SESSION_TIMEOUT
+				: !request.opened ? InventoryFailureReason.OPEN_TIMEOUT : InventoryFailureReason.STALL_TIMEOUT;
+			if (request.opened) {
+				for (PreviewState state : previews.values()) if (state.request == request && !state.terminal
+					&& (!state.awaitingRegrant || state.controlRevision >= 0) && state.failureReason != null) {
+					reason = state.failureReason;
+					break;
+				}
+			}
+			if (request.opened) {
+				for (PreviewState state : previews.values()) if (state.request == request && !state.terminal && !state.completeScan) {
+					state.failureReason = state.awaitingRegrant && state.controlRevision < 0 || state.failureReason == null ? reason : state.failureReason;
+					state.terminal = true;
+					state.watchdogStopped = true;
+					state.status = !state.serverSeen || state.entries.isEmpty() ? InventoryS2CPacket.Status.INVALID : InventoryS2CPacket.Status.INCOMPLETE;
+				}
+				evaluatePreview(request);
+			} else failPreview(lifecycle, reason);
+		}
+	}
+	private boolean previewPending(PreviewRequest request) {
+		return previews.values().stream().anyMatch(state -> state.request == request && !state.terminal && !state.completeScan);
+	}
+	private void evaluatePreview(PreviewRequest request) {
+		@Nullable InventoryPreviewLifecycle lifecycle = request.lifecycle;
+		if (lifecycle == null || !request.opened || previewPending(request)) return;
+		for (PreviewState state : previews.values()) if (state.request == request
+			&& (state.completeScan || state.serverSeen && state.status != InventoryS2CPacket.Status.INVALID && !state.entries.isEmpty())) return;
+		InventoryFailureReason reason = request.laneMask == 0 ? InventoryFailureReason.FIELD_DENIED : InventoryFailureReason.STALL_TIMEOUT;
+		for (PreviewState state : previews.values()) if (state.request == request && state.failureReason != null) { reason = state.failureReason; break; }
+		failPreview(lifecycle, reason);
+	}
+
 	/** Releases a preview request and forgets its partial list. */
 	public void close(long requestId) {
 		@Nullable PreviewRequest request = requests.remove(requestId);
 		previews.keySet().removeIf(key -> key.requestId() == requestId);
 		if (request != null && request.sent && offered) {
-			 send(InventoryC2SPacket.close(epoch, requestId).stamp(presentationEpoch, presentationView));
+			try { send(InventoryC2SPacket.close(request.sendEpoch, requestId).stamp(request.sendPresentationEpoch, request.sendView)); }
+			catch (RuntimeException failed) { ClientInventoryDiagnostics.transportFailed("close", failed); }
 		}
 	}
 
@@ -765,23 +977,57 @@ public final class ClientInventory {
 	}
 	/** Single-use release. The injected dispatcher owns the shared courtesy limiter and transport result. */
 	public DispatchOutcome select(@Nullable PreviewEntryReference reference, String itemPingType, Function<InventoryC2SPacket, DispatchOutcome> dispatch) {
-		if (reference == null || !ready(reference.resourceKind())) return DispatchOutcome.NOT_READY;
+		return select(reference, itemPingType, (packet, terminalAccepted) -> dispatch.apply(packet));
+	}
+	/** The attempt-local terminal latch survives reentrant view resets or result-cache eviction. */
+	public DispatchOutcome select(@Nullable PreviewEntryReference reference, String itemPingType,
+		BiFunction<InventoryC2SPacket, BooleanSupplier, DispatchOutcome> dispatch) {
+		if (reference != null && releasedSelections.contains(reference.requestId())) return DispatchOutcome.ALREADY_RELEASED;
+		if (reference == null || !ready(reference.resourceKind())) {
+			trackingFailure.accept(InventoryFailureReason.SESSION_TIMEOUT);
+			return DispatchOutcome.NOT_READY;
+		}
 		@Nullable PreviewState state = previews.get(new PreviewKey(reference.requestId(), reference.resourceKind()));
-		if (state == null || !state.request.opened || (state.request.laneMask & (1 << reference.resourceKind().wireId())) == 0
+		if (state == null || !state.serverSeen || !state.request.opened || (state.request.laneMask & (1 << reference.resourceKind().wireId())) == 0
 			|| state.baselineId != reference.baselineId() || state.statusRevision != reference.stateRevision()
-			|| !state.entries.containsKey(reference.entryKey()) || !bounded(itemPingType)) return DispatchOutcome.STALE_REFERENCE;
-		if (state.request.released) return DispatchOutcome.ALREADY_RELEASED;
-		state.request.released = true;
-		if (state.status == InventoryS2CPacket.Status.INVALID)
+			|| !state.entries.containsKey(reference.entryKey()) || !bounded(itemPingType)) {
+			trackingFailure.accept(InventoryFailureReason.RETIRED_SELECTION);
 			return DispatchOutcome.STALE_REFERENCE;
+		}
+		if (state.request.released) return DispatchOutcome.ALREADY_RELEASED;
+		if (pendingCommits.size() >= 64) {
+			if (state.request.lifecycle != null) releasePreview(state.request.lifecycle);
+			ClientInventoryDiagnostics.limit(InventoryDiagnosticSite.CLIENT_PENDING_SELECTIONS, InventoryOperation.SELECT,
+				InventoryFailureReason.CONTROL_CAPACITY, InventoryImpact.PING_UNAVAILABLE, InventoryOutcome.REJECTED, state.requestId, 65, 64, 64);
+			trackingFailure.accept(InventoryFailureReason.CONTROL_CAPACITY);
+			return DispatchOutcome.NOT_READY;
+		}
+		if (state.request.lifecycle != null) releasePreview(state.request.lifecycle);
+		state.request.released = true;
+		releasedSelections.add(state.requestId);
+		while (releasedSelections.size() > 64) releasedSelections.remove(releasedSelections.iterator().next());
+		if (state.status == InventoryS2CPacket.Status.INVALID) {
+			trackingFailure.accept(state.failureReason == null ? InventoryFailureReason.INVALID_SELECTION : state.failureReason);
+			return DispatchOutcome.STALE_REFERENCE;
+		}
 		long commit = nextCommitId++;
 		var packet = InventoryC2SPacket.select(state.resourceKind, epoch, presentationEpoch, presentationView, commit, state.requestId,
 			reference.baselineId(), reference.stateRevision(), reference.entryKey(), itemPingType);
-		DispatchOutcome outcome = dispatch.apply(packet);
-		if (outcome == DispatchOutcome.SENT) {
-			pendingCommits.put(commit, new PendingCommit(state.requestId, state.resourceKind));
-			while (pendingCommits.size() > 64) pendingCommits.remove(pendingCommits.keySet().iterator().next());
+		PendingCommit pending = new PendingCommit(state.requestId, state.resourceKind);
+		pendingCommits.put(commit, pending);
+		DispatchOutcome outcome;
+		try { outcome = dispatch.apply(packet, () -> pending.terminalAccepted); }
+		catch (RuntimeException failed) {
+			ClientInventoryDiagnostics.transportFailed("select", failed);
+			if (pending.terminalAccepted) return DispatchOutcome.SENT;
+			pendingCommits.remove(commit);
+			close(state.requestId);
+			trackingFailure.accept(InventoryFailureReason.TRANSPORT_FAILURE);
+			return DispatchOutcome.TRANSPORT_FAILED;
 		}
+		if (pending.terminalAccepted) return DispatchOutcome.SENT;
+		if (outcome != DispatchOutcome.SENT) pendingCommits.remove(commit);
+		if (outcome == DispatchOutcome.TRANSPORT_FAILED) close(state.requestId);
 		return outcome;
 	}
 
@@ -808,7 +1054,7 @@ public final class ClientInventory {
 		return new Preview(kind, state.requestId, state.status, state.completeScan,
 			state.receivedPartIndexes.cardinality(),
 			state.totalParts, state.baselineId, state.statusRevision, state.watermark,
-			state.status == InventoryS2CPacket.Status.INVALID, List.copyOf(state.entries.values()));
+			state.status == InventoryS2CPacket.Status.INVALID, List.copyOf(state.entries.values()), state.failureReason);
 	}
 
 	/**
@@ -830,7 +1076,7 @@ public final class ClientInventory {
 			InventoryClientStore.@Nullable Value value = committed.get(view.key());
 			entries.add(value == null ? view
 				: new EntryView(view.resourceKind(), view.key(), view.itemId(), view.label(), view.displayJson(), value.count(),
-					view.fallback(), view.quality(), view.itemPingType()));
+					view.fallback(), view.quality(), view.itemPingType(), view.qualityReason()));
 		}
 		boolean history = !state.sourceComplete && state.historical != null;
 		if (!state.sourceComplete && state.committed && state.closedCut) {
@@ -848,7 +1094,7 @@ public final class ClientInventory {
 		}
 		return new Tracking(state.resourceKind, markerId, displayStatus,
 			store.isInvalid(state.channel) || (history && !sableFluidUpdating(state, displayStatus)) || isPreviewTerminalFailure(state.status), state.sourceComplete,
-			store.baselineId(state.channel), state.statusRevision, state.watermark, history ? state.historical : List.copyOf(entries));
+			store.baselineId(state.channel), state.statusRevision, state.watermark, history ? state.historical : List.copyOf(entries), state.failureReason);
 	}
 	private Tracking seededTracking(MarkerId markerId, @Nullable TrackingState state) {
 		@Nullable MarkerMetadata metadata = knownMarkers.get(markerId);
@@ -862,7 +1108,7 @@ public final class ClientInventory {
 		return new Tracking(seed.resourceKind(), markerId, status,
 			state != null && (store.isInvalid(state.channel) || state.historicalFailure != null
 				|| isPreviewTerminalFailure(state.status)), false, state == null ? InventoryClientStore.NO_BASELINE : state.baselineId,
-			state == null ? -1L : state.statusRevision, state == null ? 0L : state.watermark, List.of(entry));
+			state == null ? -1L : state.statusRevision, state == null ? 0L : state.watermark, List.of(entry), state == null ? null : state.failureReason);
 	}
 	private boolean sableFluidUpdating(TrackingState state, InventoryS2CPacket.Status displayStatus) {
 		// Server UPDATING starts a fresh scope cut without declaring the old source
@@ -949,13 +1195,26 @@ public final class ClientInventory {
 				return ApplyOutcome.UNCHANGED;
 			}
 			request.opened = true; request.laneMask = packet.laneBits();
+			if (!request.firstGrantSeen && request.lifecycle != null) request.lifecycle.lastProgressMillis = time.nowMillis();
+			request.firstGrantSeen = true;
 			for (InventoryResourceKind kind : InventoryResourceKind.values())
 				if ((request.laneMask & (1 << kind.wireId())) == 0) {
 					@Nullable PreviewState denied = previews.remove(new PreviewKey(packet.requestId(), kind));
 					if (denied != null) { request.retiredBaselines.merge(kind, denied.baselineId, Math::max); denied.entries.clear(); }
 				}
+			evaluatePreview(request);
 			return ApplyOutcome.APPLIED;
 		}
+		if (packet.kind() == InventoryS2CPacket.Kind.OPEN_REJECTED) {
+			@Nullable PreviewRequest request = requests.get(packet.requestId());
+			if (request == null || request.released || request.opened) { fencedPackets++; return ApplyOutcome.REJECTED; }
+			if (request.lifecycle != null) failPreview(request.lifecycle, Objects.requireNonNull(packet.failureReason()));
+			else for (PreviewState state : previews.values()) if (state.request == request) {
+				state.status = InventoryS2CPacket.Status.INVALID; state.failureReason = packet.failureReason(); state.terminal = true;
+			}
+			return ApplyOutcome.APPLIED;
+		}
+		if (packet.kind() == InventoryS2CPacket.Kind.PREVIEW_STATE) return acceptPreviewControl(packet);
 		if (packet.kind() == InventoryS2CPacket.Kind.SELECTED || packet.kind() == InventoryS2CPacket.Kind.REJECT) {
 			@Nullable PendingCommit pending = pendingCommits.get(packet.commitId());
 			if (pending == null || pending.requestId() != packet.requestId() || pending.kind() != packet.resourceKind()) return ApplyOutcome.REJECTED;
@@ -964,9 +1223,16 @@ public final class ClientInventory {
 				@Nullable InventoryResourceKind previous = markerKinds.putIfAbsent(packet.markerId(), packet.resourceKind());
 				if (previous != null && previous != packet.resourceKind()) { fencedPackets++; return ApplyOutcome.REJECTED; }
 			}
+			pending.terminalAccepted = true;
 			pendingCommits.remove(packet.commitId());
-			selectionResults.put(packet.commitId(), new SelectionResult(packet.resourceKind(), packet.commitId(), pending.requestId(), packet.markerId(), packet.rejection()));
+			@Nullable InventoryFailureReason reason = packet.failureReason() != null ? packet.failureReason()
+				: packet.rejection() == null ? null : InventoryFailureReason.from(packet.rejection());
+			selectionResults.put(packet.commitId(), new SelectionResult(packet.resourceKind(), packet.commitId(), pending.requestId(), packet.markerId(), packet.rejection(), reason));
 			while (selectionResults.size() > 64) selectionResults.remove(selectionResults.keySet().iterator().next());
+			if (packet.kind() == InventoryS2CPacket.Kind.REJECT && reason != null) {
+				ClientInventoryDiagnostics.selectionRejected(pending.requestId(), packet.commitId(), reason);
+				trackingFailure.accept(reason);
+			}
 			return ApplyOutcome.APPLIED;
 		}
 		if (!ready(packet.resourceKind())) { fencedPackets++; return ApplyOutcome.REJECTED; }
@@ -978,16 +1244,30 @@ public final class ClientInventory {
 		if (packet.kind() == InventoryS2CPacket.Kind.PREVIEW) {
 			@Nullable PreviewState state = previews.get(new PreviewKey(packet.requestId(), packet.resourceKind()));
 			@Nullable PreviewRequest request = requests.get(packet.requestId());
-			if (state == null || request == null || !request.opened || (request.laneMask & (1 << packet.resourceKind().wireId())) == 0) { fencedPackets++; return ApplyOutcome.REJECTED; }
+			if (state == null || request == null || request.released || !request.opened || (request.laneMask & (1 << packet.resourceKind().wireId())) == 0) { fencedPackets++; return ApplyOutcome.REJECTED; }
 		}
-		if (isData(packet.kind()) && !withinEffectiveCaps(packet, effectiveDisplayBytes, effectiveFrameBytes)) { capRejectedPackets++; return ApplyOutcome.REJECTED; }
+		if (isData(packet.kind()) && !withinEffectiveCaps(packet, effectiveDisplayBytes, effectiveFrameBytes)) {
+			capRejectedPackets++;
+			ClientInventoryDiagnostics.limit(InventoryDiagnosticSite.CLIENT_EFFECTIVE_FRAME, InventoryOperation.ROUTE,
+				effectiveCapReason(packet, effectiveDisplayBytes), InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED, packet.requestId(), -1, -1, effectiveFrameBytes);
+			if (packet.kind() == InventoryS2CPacket.Kind.PREVIEW) {
+				@Nullable PreviewState state = previews.get(new PreviewKey(packet.requestId(), packet.resourceKind()));
+				if (state != null) {
+					state.failureReason = InventoryFailureReason.FRAME_LIMIT;
+					state.terminal = true;
+					state.status = state.entries.isEmpty() ? InventoryS2CPacket.Status.INVALID : InventoryS2CPacket.Status.INCOMPLETE;
+					evaluatePreview(state.request);
+				}
+			}
+			return ApplyOutcome.REJECTED;
+		}
 		acceptedPackets++;
 		return switch (packet.kind()) {
 			case PREVIEW -> acceptPreview(packet);
 			case SNAPSHOT, STREAM -> acceptTrackedData(packet);
 			case STATUS -> acceptStatus(packet);
 			case HEARTBEAT -> acceptHeartbeat(packet);
-			case OFFER, POLICY, SELECTED, REJECT, OPENED -> ApplyOutcome.UNCHANGED;
+			case OFFER, POLICY, SELECTED, REJECT, OPENED, OPEN_REJECTED, PREVIEW_STATE -> ApplyOutcome.UNCHANGED;
 		};
 	}
 
@@ -1039,10 +1319,12 @@ public final class ClientInventory {
 			if (stripOversizedDisplays(state.entries, displayBytes)) {
 				state.bytes = metadataBytes(state.entries);
 				capFencedStates++;
+				reportCapFence(InventoryDiagnosticSite.CLIENT_EFFECTIVE_CAP_FENCE, InventoryFailureReason.DISPLAY_LIMIT, state.requestId, displayBytes);
 			}
 		}
 		for (TrackingState state : tracking.values()) {
 			if (state.pending != null && !batchWithinCaps(state.pending, displayBytes, frameBytes)) {
+				reportCapFence(InventoryDiagnosticSite.CLIENT_EFFECTIVE_PENDING_FENCE, batchCapReason(state.pending, displayBytes), state.serverRequestId, frameBytes);
 				state.pending = null;
 				store.discardAssembly(state.channel);
 				capFencedStates++;
@@ -1053,23 +1335,30 @@ public final class ClientInventory {
 				if (batchWithinCaps(batch.getValue(), displayBytes, frameBytes))
 					continue;
 				state.batchBytes -= batch.getValue().bytes;
+				reportCapFence(InventoryDiagnosticSite.CLIENT_EFFECTIVE_BATCH_FENCE, batchCapReason(batch.getValue(), displayBytes), state.serverRequestId, frameBytes);
 				batches.remove();
 				capFencedStates++;
 			}
-			if (stripOversizedDisplays(state.metadata, displayBytes))
+			if (stripOversizedDisplays(state.metadata, displayBytes)) {
 				capFencedStates++;
+				reportCapFence(InventoryDiagnosticSite.CLIENT_EFFECTIVE_METADATA_FENCE, InventoryFailureReason.DISPLAY_LIMIT, state.serverRequestId, displayBytes);
+			}
 			for (var closed : state.closedEntries.entrySet()) {
 				var entry = closed.getValue();
 				if (entry.displayJson() != null && entry.displayJson().getBytes(StandardCharsets.UTF_8).length > displayBytes) {
 					closed.setValue(new InventoryS2CPacket.Entry(entry.key(), entry.itemId(), entry.label(), null,
-						entry.count(), entry.itemRevision(), entry.fallback(), entry.quality(), entry.groupRevision(), entry.replaceGroup(), entry.itemPingType()));
+						entry.count(), entry.itemRevision(), entry.fallback(), entry.quality(), entry.groupRevision(), entry.replaceGroup(), entry.itemPingType(), entry.qualityReason()));
 					capFencedStates++;
+					reportCapFence(InventoryDiagnosticSite.CLIENT_EFFECTIVE_CLOSED_DISPLAY_FENCE, InventoryFailureReason.DISPLAY_LIMIT, state.serverRequestId, displayBytes);
 				}
 			}
 			if (state.historical != null && !state.historical.isEmpty()) {
 				Map<String, EntryView> history = new LinkedHashMap<>();
 				for (var entry : state.historical) history.put(entry.key(), entry);
-				if (stripOversizedDisplays(history, displayBytes)) { state.historical = List.copyOf(history.values()); capFencedStates++; }
+				if (stripOversizedDisplays(history, displayBytes)) {
+					state.historical = List.copyOf(history.values()); capFencedStates++;
+					reportCapFence(InventoryDiagnosticSite.CLIENT_EFFECTIVE_HISTORY_FENCE, InventoryFailureReason.DISPLAY_LIMIT, state.serverRequestId, displayBytes);
+				}
 			}
 		}
 		var sessions = unknown.entrySet().iterator();
@@ -1080,9 +1369,22 @@ public final class ClientInventory {
 					continue;
 				sessions.remove();
 				capFencedStates++;
+				reportCapFence(InventoryDiagnosticSite.CLIENT_EFFECTIVE_UNKNOWN_FENCE, effectiveCapReason(fragment, displayBytes), fragment.requestId(), frameBytes);
 				break;
 			}
 		}
+	}
+	private static InventoryFailureReason effectiveCapReason(InventoryS2CPacket packet, int displayBytes) {
+		return packet.entries().stream().anyMatch(entry -> entry.displayJson() != null && utf8Length(entry.displayJson()) > displayBytes)
+			? InventoryFailureReason.DISPLAY_LIMIT : InventoryFailureReason.FRAME_LIMIT;
+	}
+	private static InventoryFailureReason batchCapReason(TrackingBatch batch, int displayBytes) {
+		return batch.parts.values().stream().anyMatch(packet -> effectiveCapReason(packet, displayBytes) == InventoryFailureReason.DISPLAY_LIMIT)
+			? InventoryFailureReason.DISPLAY_LIMIT : InventoryFailureReason.FRAME_LIMIT;
+	}
+	private static void reportCapFence(InventoryDiagnosticSite site, InventoryFailureReason reason, long request, long limit) {
+		ClientInventoryDiagnostics.limit(site, InventoryOperation.ROUTE, reason, InventoryImpact.DEGRADED,
+			InventoryOutcome.TRUNCATED, request, -1, -1, limit);
 	}
 
 	/** Discards only the display payload of a view whose JSON exceeds the new cap. */
@@ -1093,7 +1395,7 @@ public final class ClientInventory {
 			if (view.displayJson() == null || utf8Length(view.displayJson()) <= displayBytes)
 				continue;
 			entry.setValue(new EntryView(view.resourceKind(), view.key(), view.itemId(), view.label(), null, view.count(),
-				view.fallback(), view.quality(), view.itemPingType()));
+				view.fallback(), view.quality(), view.itemPingType(), view.qualityReason()));
 			changed = true;
 		}
 		return changed;
@@ -1132,7 +1434,17 @@ public final class ClientInventory {
 	private void sendOpen(PreviewState state) {
 		if (state.request.sent) return;
 		state.request.sent = true;
-		send(InventoryC2SPacket.open(epoch, presentationEpoch, presentationView, state.requestId, state.target, state.face));
+		state.request.sendEpoch = epoch;
+		state.request.sendPresentationEpoch = presentationEpoch;
+		state.request.sendView = presentationView;
+		if (state.request.lifecycle != null) state.request.lifecycle.lastProgressMillis = time.nowMillis();
+		try { send(InventoryC2SPacket.open(epoch, presentationEpoch, presentationView, state.requestId, state.target, state.face)); }
+		catch (RuntimeException failed) {
+			if (state.request.lifecycle != null) failPreview(state.request.lifecycle, InventoryFailureReason.TRANSPORT_FAILURE);
+			else close(state.requestId);
+			ClientInventoryDiagnostics.transportFailed("open", failed);
+			return;
+		}
 		ClientInventoryDiagnostics.openSent(state.requestId, state.resourceKind, state.target, state.face);
 	}
 
@@ -1146,6 +1458,49 @@ public final class ClientInventory {
 		sender.accept(packet);
 	}
 
+	private ApplyOutcome acceptPreviewControl(InventoryS2CPacket packet) {
+		@Nullable PreviewState state = previews.get(new PreviewKey(packet.requestId(), packet.resourceKind()));
+		boolean revocation = packet.condition() == InventoryS2CPacket.PreviewCondition.UNSUPPORTED
+			|| packet.condition() == InventoryS2CPacket.PreviewCondition.FAILED
+				&& (packet.failureReason() == InventoryFailureReason.FIELD_DENIED
+					|| packet.failureReason() == InventoryFailureReason.SOURCE_AUTHORITY_DENIED
+					|| packet.failureReason() == InventoryFailureReason.TARGET_GONE
+					|| packet.failureReason() == InventoryFailureReason.SOURCE_CHANGED);
+		if (state == null || state.request.released || !ready(state.resourceKind)
+			|| state.request.opened && (state.request.laneMask & (1 << state.resourceKind.wireId())) == 0
+			|| packet.controlRevision() <= state.controlRevision
+			|| (state.terminal || state.completeScan) && !(state.watchdogStopped && revocation)) {
+			fencedPackets++; return ApplyOutcome.REJECTED;
+		}
+		state.controlRevision = packet.controlRevision();
+		if (state.watchdogStopped) {
+			state.status = InventoryS2CPacket.Status.INVALID;
+			state.failureReason = packet.failureReason();
+			state.entries.clear(); state.itemRevisions.clear(); state.groups.clear(); state.bytes = 0;
+			evaluatePreview(state.request);
+			return ApplyOutcome.APPLIED;
+		}
+		if (packet.condition() == InventoryS2CPacket.PreviewCondition.PROGRESS
+			&& packet.progressRevision() > state.progressRevision) {
+			state.progressRevision = packet.progressRevision();
+			state.failureReason = packet.failureReason();
+			if (state.request.opened && state.request.lifecycle != null) state.request.lifecycle.lastProgressMillis = time.nowMillis();
+		} else if (packet.condition() == InventoryS2CPacket.PreviewCondition.DEFERRED) {
+			state.failureReason = packet.failureReason();
+		} else if (packet.condition() == InventoryS2CPacket.PreviewCondition.FAILED
+			|| packet.condition() == InventoryS2CPacket.PreviewCondition.UNSUPPORTED) {
+			state.failureReason = packet.failureReason();
+			if (packet.condition() == InventoryS2CPacket.PreviewCondition.FAILED && state.serverSeen
+				&& state.status == InventoryS2CPacket.Status.INCOMPLETE
+				&& packet.phase() == InventoryS2CPacket.PreviewPhase.DELIVERY
+				&& (state.awaitingReplacementCut || state.receivedPartIndexes.cardinality() < state.totalParts)) return ApplyOutcome.APPLIED;
+			state.terminal = true;
+			state.status = !state.serverSeen || state.entries.isEmpty() ? InventoryS2CPacket.Status.INVALID : InventoryS2CPacket.Status.INCOMPLETE;
+			evaluatePreview(state.request);
+		}
+		return ApplyOutcome.APPLIED;
+	}
+
 	private ApplyOutcome acceptPreview(InventoryS2CPacket packet) {
 		@Nullable PreviewState state = previews.get(new PreviewKey(packet.requestId(), packet.resourceKind()));
 		if (state == null) {
@@ -1155,29 +1510,41 @@ public final class ClientInventory {
 		InventoryS2CPacket.Status previousStatus = state.status;
 		if (packet.baselineId() <= state.request.retiredBaselines.getOrDefault(state.resourceKind, -1L)) { fencedPackets++; return ApplyOutcome.REJECTED; }
 		if (packet.statusRevision() < state.statusRevision
-			|| state.status == InventoryS2CPacket.Status.INVALID && packet.statusRevision() == state.statusRevision
+			|| state.serverSeen && state.status == InventoryS2CPacket.Status.INVALID && packet.statusRevision() == state.statusRevision
 				&& packet.status() != InventoryS2CPacket.Status.INVALID
 			|| (packet.statusRevision() == state.statusRevision && state.serverSeen
 				&& packet.baselineId() < state.baselineId)) {
 			fencedPackets++;
 			return ApplyOutcome.REJECTED;
 		}
+		// A late valid cut cannot undo a local stop or alter its retained selectable prefix.
+		// INVALID still retires that prefix under the ordinary baseline/status fences above.
+		if (state.watchdogStopped && packet.status() != InventoryS2CPacket.Status.INVALID) {
+			fencedPackets++;
+			return ApplyOutcome.REJECTED;
+		}
 		if (packet.partCount() > MAX_ASSEMBLY_PARTS) {
 			boundRejects++;
+			ClientInventoryDiagnostics.limit(InventoryDiagnosticSite.CLIENT_PREVIEW_PARTS, InventoryOperation.PREVIEW,
+				InventoryFailureReason.SNAPSHOT_LIMIT, InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED,
+				packet.requestId(), packet.partCount(), 0, MAX_ASSEMBLY_PARTS);
 			return ApplyOutcome.REJECTED;
 		}
 
+		boolean replacementFence = state.awaitingReplacementCut && packet.entries().isEmpty()
+			&& !packet.completeScan() && packet.status() == InventoryS2CPacket.Status.INCOMPLETE;
 		boolean resetChannel = !state.serverSeen
 			|| packet.baselineId() != state.baselineId
 			|| packet.statusRevision() != state.statusRevision;
 		boolean newerWatermark = !resetChannel && packet.watermark() > state.watermark;
 		boolean current = resetChannel || packet.watermark() >= state.watermark;
+		boolean progress = resetChannel || newerWatermark || current && !state.receivedPartIndexes.get(packet.partIndex());
 		boolean changed = monitoring() && (resetChannel || newerWatermark || packet.watermark() == state.watermark
 			&& packet.partCount() > state.totalParts || current && (!state.receivedPartIndexes.get(packet.partIndex())
 				|| packet.completeScan() && !state.groupComplete || packet.status() != null && packet.status() != state.status));
 
 		if (resetChannel) {
-			if (state.serverSeen && packet.baselineId() != state.baselineId) {
+			if (state.awaitingRegrant || state.serverSeen && packet.baselineId() != state.baselineId) {
 				state.entries.clear();
 				state.itemRevisions.clear();
 				state.groups.clear();
@@ -1201,6 +1568,9 @@ public final class ClientInventory {
 		}
 
 		state.serverSeen = true;
+		state.awaitingRegrant = false;
+		if (!packet.entries().isEmpty() || packet.completeScan() || packet.status() != InventoryS2CPacket.Status.INCOMPLETE)
+			state.awaitingReplacementCut = false;
 		state.baselineId = packet.baselineId();
 		state.statusRevision = packet.statusRevision();
 
@@ -1210,9 +1580,10 @@ public final class ClientInventory {
 				state.groupComplete = true;
 			if (packet.status() != null)
 				state.status = packet.status();
+			state.failureReason = packet.failureReason();
 		}
 
-		ApplyOutcome entryOutcome = applyPreviewEntries(state, packet.entries());
+		ApplyOutcome entryOutcome = state.watchdogStopped ? ApplyOutcome.UNCHANGED : applyPreviewEntries(state, packet.entries());
 		boolean entriesAccepted = entryOutcome != ApplyOutcome.REJECTED;
 		if (current && !entriesAccepted)
 			state.groupRejected = true;
@@ -1225,7 +1596,15 @@ public final class ClientInventory {
 				state.completeScan = true;
 			if (state.groupRejected || isPreviewTerminalFailure(state.status))
 				state.completeScan = false;
+			// INCOMPLETE describes the source result, not receipt of its multipart projection.
+			// Later parts may carry the first selectable row; keep that explicit barrier pending.
+			state.terminal = state.status == InventoryS2CPacket.Status.INVALID
+				|| state.status == InventoryS2CPacket.Status.INCOMPLETE && !state.awaitingReplacementCut && (allParts || state.groupRejected);
 		}
+		if (!state.watchdogStopped && !replacementFence && (progress || entryOutcome == ApplyOutcome.APPLIED)
+			&& entriesAccepted && state.request.lifecycle != null)
+			state.request.lifecycle.lastProgressMillis = time.nowMillis();
+		evaluatePreview(state.request);
 		if (previousStatus != state.status)
 			ClientInventoryDiagnostics.previewStatus(state.requestId, state.resourceKind, previousStatus, state.status,
 				state.statusRevision);
@@ -1236,7 +1615,6 @@ public final class ClientInventory {
 	/** Merges one packet's absolute deltas per key; a rejected key makes the group incomplete. */
 	private ApplyOutcome applyPreviewEntries(PreviewState state, List<InventoryS2CPacket.Entry> entries) {
 		boolean allAccepted = true;
-		boolean measuring = monitoring();
 		boolean changed = false;
 		for (InventoryS2CPacket.Entry entry : entries) {
 			@Nullable Long group = state.groups.get(entry.itemId());
@@ -1253,12 +1631,19 @@ public final class ClientInventory {
 			if (nextBytes > MAX_PREVIEW_BYTES
 				|| (previous == null && state.entries.size() - removed.size() >= MAX_PREVIEW_ENTRIES)) {
 				boundRejects++;
+				state.failureReason = nextBytes > MAX_PREVIEW_BYTES ? InventoryFailureReason.MEMORY_LIMIT : InventoryFailureReason.ENTRY_LIMIT;
+				ClientInventoryDiagnostics.limit(nextBytes > MAX_PREVIEW_BYTES ? InventoryDiagnosticSite.CLIENT_PREVIEW_RETENTION_BYTES
+					: InventoryDiagnosticSite.CLIENT_PREVIEW_RETENTION_ENTRIES, InventoryOperation.PREVIEW,
+					state.failureReason, InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED, state.requestId,
+					nextBytes > MAX_PREVIEW_BYTES ? nextBytes : state.entries.size() + 1L,
+					nextBytes > MAX_PREVIEW_BYTES ? state.bytes : state.entries.size(),
+					nextBytes > MAX_PREVIEW_BYTES ? MAX_PREVIEW_BYTES : MAX_PREVIEW_ENTRIES);
 				allAccepted = false;
 				continue;
 			}
 			state.bytes = nextBytes;
-			if (measuring && (!view.equals(previous) || !removed.isEmpty()
-				|| knownRevision == null || knownRevision != entry.itemRevision())) changed = true;
+			if (!view.equals(previous) || !removed.isEmpty()
+				|| knownRevision == null || knownRevision != entry.itemRevision()) changed = true;
 			for (String key : removed) { state.entries.remove(key); state.itemRevisions.remove(key); }
 			if (entry.replaceGroup()) state.groups.put(entry.itemId(), entry.groupRevision());
 			state.entries.put(view.key(), view);
@@ -1279,7 +1664,9 @@ public final class ClientInventory {
 		state.serverRequestId = packet.requestId();
 		InventoryS2CPacket.@Nullable Status status = packet.status();
 		if (status == InventoryS2CPacket.Status.INVALID) {
-			return invalidateTracking(state, packet.statusRevision());
+			ApplyOutcome outcome = invalidateTracking(state, packet.statusRevision());
+			if (outcome != ApplyOutcome.REJECTED) state.failureReason = packet.failureReason();
+			return outcome;
 		}
 		if (packet.statusRevision() < state.statusRevision) {
 			fencedPackets++;
@@ -1299,6 +1686,8 @@ public final class ClientInventory {
 		}
 		if (packet.partCount() > MAX_ASSEMBLY_PARTS) {
 			boundRejects++;
+			ClientInventoryDiagnostics.limit(InventoryDiagnosticSite.CLIENT_TRACKING_PARTS, InventoryOperation.TRACKING,
+				InventoryFailureReason.SNAPSHOT_LIMIT, InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED, packet.requestId(), packet.partCount(), 0, MAX_ASSEMBLY_PARTS);
 			scheduleRepair(state);
 			return ApplyOutcome.REJECTED;
 		}
@@ -1342,6 +1731,9 @@ public final class ClientInventory {
 			if (begin == InventoryClientStore.PartOutcome.REJECTED_BOUND
 				|| begin == InventoryClientStore.PartOutcome.CONFLICT)
 				boundRejects++;
+			if (begin == InventoryClientStore.PartOutcome.CONFLICT)
+				ClientInventoryDiagnostics.nonLimit(InventoryDiagnosticSite.CLIENT_TRACKING_ASSEMBLY_CONFLICT, InventoryOperation.TRACKING,
+					InventoryFailureReason.INVALID_REQUEST, InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED, packet.requestId(), packet.partCount(), 0, MAX_ASSEMBLY_PARTS);
 			return ApplyOutcome.REJECTED;
 		}
 		InventoryClientStore.PartOutcome outcome = store.part(state.channel, packet.baselineId(),
@@ -1350,6 +1742,9 @@ public final class ClientInventory {
 			|| outcome == InventoryClientStore.PartOutcome.CONFLICT
 			|| outcome == InventoryClientStore.PartOutcome.CONFLICT_PART) {
 			boundRejects++;
+			if (outcome != InventoryClientStore.PartOutcome.REJECTED_BOUND)
+				ClientInventoryDiagnostics.nonLimit(InventoryDiagnosticSite.CLIENT_TRACKING_PART_CONFLICT, InventoryOperation.TRACKING,
+					InventoryFailureReason.INVALID_REQUEST, InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED, packet.requestId(), packet.partIndex(), 0, packet.partCount());
 			return ApplyOutcome.REJECTED;
 		}
 		if (outcome != InventoryClientStore.PartOutcome.ACCEPTED
@@ -1373,7 +1768,7 @@ public final class ClientInventory {
 			return group == null || entry.fallback() && entry.groupRevision() >= group;
 		}).toList();
 		packet = InventoryS2CPacket.data(packet.resourceKind(), packet.kind(), packet.epoch(), packet.requestId(), packet.markerId(), packet.baselineId(), packet.statusRevision(),
-			packet.watermark(), packet.partIndex(), packet.partCount(), packet.completeScan(), packet.status(), packet.checksum(), permitted).stamp(packet.presentationEpoch(), packet.view());
+			packet.watermark(), packet.partIndex(), packet.partCount(), packet.completeScan(), packet.status(), packet.checksum(), permitted, packet.failureReason()).stamp(packet.presentationEpoch(), packet.view());
 		@Nullable TrackingBatch batch = state.batches.get(packet.watermark());
 		@Nullable TrackingBatch closed = state.closedBatches.get(packet.watermark());
 		if (closed != null) {
@@ -1389,6 +1784,8 @@ public final class ClientInventory {
 		if (batch == null) {
 			if (!historical && state.batches.size() >= MAX_TRACKING_BATCHES) {
 				boundRejects++;
+				ClientInventoryDiagnostics.limit(InventoryDiagnosticSite.CLIENT_TRACKING_OPEN_BATCHES, InventoryOperation.TRACKING,
+					InventoryFailureReason.QUEUE_LIMIT, InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED, packet.requestId(), state.batches.size() + 1L, state.batches.size(), MAX_TRACKING_BATCHES);
 				scheduleRepair(state);
 				return ApplyOutcome.REJECTED;
 			}
@@ -1399,6 +1796,8 @@ public final class ClientInventory {
 		long bytes = packetBytes(packet);
 		if (!historical && state.batchBytes + bytes > MAX_METADATA_BYTES_PER_CHANNEL) {
 			boundRejects++;
+			ClientInventoryDiagnostics.limit(InventoryDiagnosticSite.CLIENT_TRACKING_BATCH_BYTES, InventoryOperation.TRACKING,
+				InventoryFailureReason.MEMORY_LIMIT, InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED, packet.requestId(), bytes, state.batchBytes, MAX_METADATA_BYTES_PER_CHANNEL);
 			scheduleRepair(state);
 			return ApplyOutcome.REJECTED;
 		}
@@ -1423,7 +1822,8 @@ public final class ClientInventory {
 			if (previous != null && entry.itemRevision() == previous.revision()) {
 				EntryView accepted = state.metadata.get(entry.key());
 				cutEntries.add(new InventoryS2CPacket.Entry(accepted.key(), accepted.itemId(), accepted.label(),
-					accepted.displayJson(), previous.count(), previous.revision(), accepted.fallback(), accepted.quality()));
+					accepted.displayJson(), previous.count(), previous.revision(), accepted.fallback(), accepted.quality(),
+					entry.groupRevision(), entry.replaceGroup(), accepted.itemPingType(), accepted.qualityReason()));
 			} else {
 				cutEntries.add(entry);
 			}
@@ -1437,6 +1837,13 @@ public final class ClientInventory {
 		if (nextMetadata.size() > MAX_METADATA_ENTRIES || nextBytes > MAX_METADATA_BYTES_PER_CHANNEL
 			|| entryBytes(nextCut) > MAX_METADATA_BYTES_PER_CHANNEL) {
 			boundRejects++;
+			ClientInventoryDiagnostics.limit(nextMetadata.size() > MAX_METADATA_ENTRIES ? InventoryDiagnosticSite.CLIENT_TRACKING_METADATA_ENTRIES
+				: nextBytes > MAX_METADATA_BYTES_PER_CHANNEL ? InventoryDiagnosticSite.CLIENT_TRACKING_METADATA_BYTES
+				: InventoryDiagnosticSite.CLIENT_TRACKING_PROJECTED_CUT_BYTES, InventoryOperation.TRACKING,
+				nextMetadata.size() > MAX_METADATA_ENTRIES ? InventoryFailureReason.ENTRY_LIMIT : InventoryFailureReason.MEMORY_LIMIT,
+				InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED,
+				packet.requestId(), nextMetadata.size() > MAX_METADATA_ENTRIES ? nextMetadata.size() : Math.max(nextBytes, entryBytes(nextCut)), 0,
+				nextMetadata.size() > MAX_METADATA_ENTRIES ? MAX_METADATA_ENTRIES : MAX_METADATA_BYTES_PER_CHANNEL);
 			scheduleRepair(state);
 			return ApplyOutcome.REJECTED;
 		}
@@ -1490,6 +1897,7 @@ public final class ClientInventory {
 		state.statusRevision = batch.statusRevision;
 		state.watermark = batch.watermark;
 		state.status = batch.status();
+		state.failureReason = batch.failureReason();
 		state.sourceComplete |= batch.sourceComplete();
 		if (state.sourceComplete) { state.historical = null; state.historicalFailure = null; state.failureWatermark = -1; retireCreationDisplay(state); }
 		state.committed = true;
@@ -1506,6 +1914,8 @@ public final class ClientInventory {
 		boolean baseline) {
 		if (!batch.matches(packet)) {
 			boundRejects++;
+			ClientInventoryDiagnostics.nonLimit(InventoryDiagnosticSite.CLIENT_TRACKING_BATCH_CONFLICT, InventoryOperation.TRACKING,
+				InventoryFailureReason.INVALID_REQUEST, InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED, packet.requestId(), packet.partCount(), 0, batch.totalParts);
 			scheduleRepair(state);
 			return ApplyOutcome.REJECTED;
 		}
@@ -1513,6 +1923,8 @@ public final class ClientInventory {
 		if (previous != null) {
 			if (!samePart(previous, packet)) {
 				boundRejects++;
+				ClientInventoryDiagnostics.nonLimit(InventoryDiagnosticSite.CLIENT_TRACKING_REPLAY_CONFLICT, InventoryOperation.TRACKING,
+					InventoryFailureReason.INVALID_REQUEST, InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED, packet.requestId(), packet.partIndex(), 0, batch.totalParts);
 				scheduleRepair(state);
 				return ApplyOutcome.REJECTED;
 			}
@@ -1522,6 +1934,8 @@ public final class ClientInventory {
 			for (InventoryS2CPacket.Entry entry : packet.entries()) {
 				if (batch.entries.containsKey(entry.key())) {
 					boundRejects++;
+					ClientInventoryDiagnostics.nonLimit(InventoryDiagnosticSite.CLIENT_TRACKING_DUPLICATE_KEY, InventoryOperation.TRACKING,
+						InventoryFailureReason.INVALID_REQUEST, InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED, packet.requestId(), packet.entries().size(), batch.entries.size(), MAX_METADATA_ENTRIES);
 					scheduleRepair(state);
 					return ApplyOutcome.REJECTED;
 				}
@@ -1531,6 +1945,8 @@ public final class ClientInventory {
 				InventoryS2CPacket.@Nullable Entry known = batch.entries.get(entry.key());
 				if (known != null && known.itemRevision() == entry.itemRevision() && !known.equals(entry)) {
 					boundRejects++;
+					ClientInventoryDiagnostics.nonLimit(InventoryDiagnosticSite.CLIENT_TRACKING_ENTRY_CONFLICT, InventoryOperation.TRACKING,
+						InventoryFailureReason.INVALID_REQUEST, InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED, packet.requestId(), packet.entries().size(), batch.entries.size(), MAX_METADATA_ENTRIES);
 					scheduleRepair(state);
 					return ApplyOutcome.REJECTED;
 				}
@@ -1542,6 +1958,13 @@ public final class ClientInventory {
 			|| batch.bytes + packetBytes(packet) > MAX_METADATA_BYTES_PER_CHANNEL
 			|| entryBytes(entries) > MAX_METADATA_BYTES_PER_CHANNEL) {
 			boundRejects++;
+			ClientInventoryDiagnostics.limit(entries.size() > MAX_METADATA_ENTRIES ? InventoryDiagnosticSite.CLIENT_TRACKING_PART_RETENTION_ENTRIES
+				: batch.bytes + packetBytes(packet) > MAX_METADATA_BYTES_PER_CHANNEL ? InventoryDiagnosticSite.CLIENT_TRACKING_PART_RETENTION_BYTES
+				: InventoryDiagnosticSite.CLIENT_TRACKING_PART_PROJECTED_BYTES, InventoryOperation.TRACKING,
+				entries.size() > MAX_METADATA_ENTRIES ? InventoryFailureReason.ENTRY_LIMIT : InventoryFailureReason.MEMORY_LIMIT,
+				InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED,
+				packet.requestId(), entries.size() > MAX_METADATA_ENTRIES ? entries.size() : Math.max(batch.bytes + packetBytes(packet), entryBytes(entries)), 0,
+				entries.size() > MAX_METADATA_ENTRIES ? MAX_METADATA_ENTRIES : MAX_METADATA_BYTES_PER_CHANNEL);
 			scheduleRepair(state);
 			return ApplyOutcome.REJECTED;
 		}
@@ -1563,6 +1986,12 @@ public final class ClientInventory {
 			mergeEntries(next, first.entries.values());
 			if (next.size() > MAX_METADATA_ENTRIES || entryBytes(next) > MAX_METADATA_BYTES_PER_CHANNEL) {
 				boundRejects++;
+				ClientInventoryDiagnostics.limit(next.size() > MAX_METADATA_ENTRIES ? InventoryDiagnosticSite.CLIENT_TRACKING_CLOSED_CUT_ENTRIES
+					: InventoryDiagnosticSite.CLIENT_TRACKING_CLOSED_CUT_BYTES, InventoryOperation.TRACKING,
+					next.size() > MAX_METADATA_ENTRIES ? InventoryFailureReason.ENTRY_LIMIT : InventoryFailureReason.MEMORY_LIMIT,
+					InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED,
+					first.requestId, next.size() > MAX_METADATA_ENTRIES ? next.size() : entryBytes(next), 0,
+					next.size() > MAX_METADATA_ENTRIES ? MAX_METADATA_ENTRIES : MAX_METADATA_BYTES_PER_CHANNEL);
 				scheduleRepair(state);
 				break;
 			}
@@ -1571,6 +2000,7 @@ public final class ClientInventory {
 			if (first.watermark > state.watermark) {
 				state.watermark = first.watermark;
 				state.status = first.status();
+				state.failureReason = first.failureReason();
 				state.sourceComplete |= first.sourceComplete();
 				if (state.sourceComplete) { state.historical = null; state.historicalFailure = null; state.failureWatermark = -1; retireCreationDisplay(state); }
 			}
@@ -1661,7 +2091,9 @@ public final class ClientInventory {
 			return ApplyOutcome.REJECTED;
 		}
 		if (status == InventoryS2CPacket.Status.INVALID) {
-			return invalidateTracking(state, packet.statusRevision());
+			ApplyOutcome outcome = invalidateTracking(state, packet.statusRevision());
+			if (outcome != ApplyOutcome.REJECTED) state.failureReason = packet.failureReason();
+			return outcome;
 		}
 		if (packet.statusRevision() == state.statusRevision && packet.baselineId() == state.baselineId
 			&& (store.isInvalid(state.channel) || packet.watermark() < state.watermark
@@ -1709,6 +2141,7 @@ public final class ClientInventory {
 			retireUnknownBefore(state.markerId, packet.baselineId(), packet.statusRevision(), false);
 		}
 		state.status = status == null ? state.status : status;
+		state.failureReason = packet.failureReason();
 		if (isPreviewTerminalFailure(state.status)) {
 			state.failureWatermark = Math.max(state.failureWatermark, Math.max(state.watermark, packet.watermark()));
 			if (!state.sourceComplete) { retainHistory(state); state.historicalFailure = state.status; }
@@ -1818,6 +2251,8 @@ public final class ClientInventory {
 		if (session == null) {
 			if (unknown.size() >= MAX_UNKNOWN_SESSIONS) {
 				boundRejects++;
+				ClientInventoryDiagnostics.limit(InventoryDiagnosticSite.CLIENT_UNKNOWN_SESSIONS, InventoryOperation.SNAPSHOT,
+					InventoryFailureReason.SESSION_CAPACITY, InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED, packet.requestId(), unknown.size() + 1L, unknown.size(), MAX_UNKNOWN_SESSIONS);
 				scheduleRepair(state);
 				return ApplyOutcome.REJECTED;
 			}
@@ -1826,9 +2261,17 @@ public final class ClientInventory {
 		}
 		long size = packetBytes(packet);
 		long count = packet.entries().size();
-		if (session.entries + count > MAX_UNKNOWN_ENTRIES || session.bytes + size > MAX_UNKNOWN_BYTES) {
+		long byteLimit = session.fragments.isEmpty() && count == 1 ? MAX_UNKNOWN_SINGLETON_BYTES : MAX_UNKNOWN_BYTES;
+		if (session.entries + count > MAX_UNKNOWN_ENTRIES || session.bytes + size > byteLimit) {
 			unknown.remove(key);
 			droppedUnknownSessions++;
+			ClientInventoryDiagnostics.limit(session.entries + count > MAX_UNKNOWN_ENTRIES ? InventoryDiagnosticSite.CLIENT_UNKNOWN_OVERFLOW_ENTRIES
+				: session.fragments.isEmpty() && count == 1 ? InventoryDiagnosticSite.CLIENT_UNKNOWN_SINGLETON_BYTES : InventoryDiagnosticSite.CLIENT_UNKNOWN_OVERFLOW_BYTES,
+				InventoryOperation.SNAPSHOT, session.entries + count > MAX_UNKNOWN_ENTRIES ? InventoryFailureReason.ENTRY_LIMIT : InventoryFailureReason.MEMORY_LIMIT,
+				InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED,
+				packet.requestId(), session.entries + count > MAX_UNKNOWN_ENTRIES ? count : size,
+				session.entries + count > MAX_UNKNOWN_ENTRIES ? session.entries : session.bytes,
+				session.entries + count > MAX_UNKNOWN_ENTRIES ? MAX_UNKNOWN_ENTRIES : byteLimit);
 			scheduleRepair(state);
 			return ApplyOutcome.REJECTED;
 		}
@@ -1880,6 +2323,8 @@ public final class ClientInventory {
 			return existing.resourceKind == kind ? existing : null;
 		if (tracking.size() >= MAX_TRACKED_CHANNELS) {
 			boundRejects++;
+			ClientInventoryDiagnostics.limit(InventoryDiagnosticSite.CLIENT_TRACKING_CHANNELS, InventoryOperation.TRACKING,
+				InventoryFailureReason.TRACKING_CAPACITY, InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED, -1, tracking.size() + 1L, tracking.size(), MAX_TRACKED_CHANNELS);
 			return null;
 		}
 		if (markerKinds.containsKey(markerId) && markerKinds.get(markerId) != kind) return null;
@@ -1962,7 +2407,7 @@ public final class ClientInventory {
 	}
 	private static EntryView viewOf(InventoryResourceKind kind, InventoryS2CPacket.Entry entry) {
 		return new EntryView(kind, entry.key(), entry.itemId(), entry.label(), entry.displayJson(), entry.count(),
-			entry.fallback(), entry.quality(), entry.itemPingType());
+			entry.fallback(), entry.quality(), entry.itemPingType(), entry.qualityReason());
 	}
 
 	private static @Nullable String qualityToken(InventoryS2CPacket.@Nullable Status quality) {

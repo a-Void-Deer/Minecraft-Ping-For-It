@@ -829,7 +829,7 @@ public final class SpatialOverlayRenderer {
 				origin != null && inventory != null && inventory.open() && inventory.retainedRowKey() != null
 					? radial.menus().getLast().menuId() : null, origin,
 				SpatialInventoryLayout.measure(inventory, guiWidth, guiHeight, painter.lineHeight(), style.inventoryTextScale(),
-					style.inventoryMaxWidthFraction(), style.inventoryMaxHeightFraction(), painter::width));
+					style.inventoryMaxWidthFraction(), style.inventoryMaxHeightFraction(), inventoryWidths(inventory, painter::width)));
 			boolean relayout = geometry.relayoutFrom(frameGeometry);
 			if (frameGeometry != null && (guiWidth != frameGeometry.width() || guiHeight != frameGeometry.height())
 				&& (origin != null || inventory != null && inventory.open())) {
@@ -1492,7 +1492,7 @@ public final class SpatialOverlayRenderer {
 	private static void addInventory(List<SpatialOverlayTransitions.Target<VisualKey, Paint>> targets,
 		SpatialInventoryView view, FramePainter painter, Style style, double guiWidth, double guiHeight, boolean listActive) {
 		var metrics = SpatialInventoryLayout.measure(view, guiWidth, guiHeight, painter.lineHeight(), style.inventoryTextScale(),
-			style.inventoryMaxWidthFraction(), style.inventoryMaxHeightFraction(), painter::width);
+			style.inventoryMaxWidthFraction(), style.inventoryMaxHeightFraction(), inventoryWidths(view, painter::width));
 		view = metrics.window(view);
 		SpatialInventoryLayout layout = metrics.layout(view, guiWidth / 2.0, guiHeight / 2.0);
 		var source = new InventoryGeometry(view, metrics.layout(view, 0, 0));
@@ -1513,7 +1513,7 @@ public final class SpatialOverlayRenderer {
 		String position = view.selectedIndex() >= 0 && view.selectedIndex() < view.rows().size()
 			? (view.selectedIndex() + 1) + " / " + view.rows().size() : "";
 		double headerY = y - layout.height() / 2.0 + headerHeight / 2.0;
-		add(targets, new VisualKey("header", owner, view.status().name()), x, headerY, 1.0, 1.0, surfaceCoverage,
+		add(targets, new VisualKey("header", owner, ""), x, headerY, 1.0, 1.0, surfaceCoverage,
 			x, headerY + 4.0, new HeaderPaint(layout.width(), headerHeight, position, view.status(), source));
 		// The complete window, header and footer keep their full layout; while an
 		// item submenu is active only the entered row is planned at all.
@@ -1577,7 +1577,7 @@ public final class SpatialOverlayRenderer {
 		if (source == null) return state;
 		var next = layouts.computeIfAbsent(source, value -> SpatialInventoryLayout.measure(value.view(), width, height,
 			painter.lineHeight(), style.inventoryTextScale(), style.inventoryMaxWidthFraction(), style.inventoryMaxHeightFraction(),
-			painter::width).layout(value.view(), 0, 0));
+			inventoryWidths(value.view(), painter::width)).layout(value.view(), 0, 0));
 		var previous = source.layout();
 		if (next.equals(previous) && !(state.data() instanceof InventoryBackPaint)
 			&& !(state.data() instanceof InventoryBackSectorPaint)) return state;
@@ -1644,8 +1644,17 @@ public final class SpatialOverlayRenderer {
 	public static SpatialInventoryLayout inventoryLayout(SpatialInventoryView view, double guiWidth, double guiHeight,
 		int fontLineHeight, Style style, ToIntFunction<FormattedText> widths) {
 		return SpatialInventoryLayout.measure(view, guiWidth, guiHeight, fontLineHeight, style.inventoryTextScale(),
-			style.inventoryMaxWidthFraction(), style.inventoryMaxHeightFraction(), widths)
+			style.inventoryMaxWidthFraction(), style.inventoryMaxHeightFraction(), inventoryWidths(view, widths))
 			.layout(view, guiWidth / 2.0, guiHeight / 2.0);
+	}
+	private static ToIntFunction<FormattedText> inventoryWidths(@org.jetbrains.annotations.Nullable SpatialInventoryView view,
+		ToIntFunction<FormattedText> widths) {
+		if (view == null || view.statusMessage() == null || !view.resourceGroups().isEmpty()) return widths;
+		@org.jetbrains.annotations.Nullable String key = view.status().translationKey();
+		if (key == null) return widths;
+		Component fallback = Component.translatable(key);
+		Component message = view.statusMessage();
+		return text -> widths.applyAsInt(fallback.equals(text) ? message : text);
 	}
 
 	/**
@@ -1742,20 +1751,22 @@ public final class SpatialOverlayRenderer {
 			} else if (state.data() instanceof HeaderPaint header) {
 				double left = -header.width() / 2.0 + 4.0;
 				double top = -header.height() / 2.0 + 3.0;
-				drawInventoryText(graphics, font, Component.literal(header.position()), left, top, header.width() - 8.0,
+				@org.jetbrains.annotations.Nullable SpatialInventoryView view = header.geometry() == null ? null : header.geometry().view();
+				@org.jetbrains.annotations.Nullable Component message = view == null ? null : view.statusMessage();
+				boolean grouped = view != null && !view.resourceGroups().isEmpty();
+				Component position = Component.literal(header.position());
+				if (grouped && message != null) position = position.copy().append(" | ").append(message);
+				drawInventoryText(graphics, font, position, left, top, header.width() - 8.0,
 					style.inventoryTextScale(), TEXT_DIMMED_COLOR, alpha);
-				String key = header.status().translationKey();
-				if (header.geometry() != null && !header.geometry().view().resourceGroups().isEmpty()) {
+				@org.jetbrains.annotations.Nullable String key = header.status().translationKey();
+				if (view != null && grouped) {
 					int groupIndex = 1;
-					for (var group : header.geometry().view().resourceGroups()) {
-						Component text = Component.translatable(group.labelKey());
-						if (group.status().translationKey() != null)
-							text = text.copy().append(": ").append(Component.translatable(group.status().translationKey()));
-						drawInventoryText(graphics, font, text, left, top + groupIndex++ * font.lineHeight * style.inventoryTextScale() + 2,
+					for (var group : view.resourceGroups()) {
+						drawInventoryText(graphics, font, group.headerText(), left, top + groupIndex++ * font.lineHeight * style.inventoryTextScale() + 2,
 							header.width() - 8, style.inventoryTextScale(), group.status().grey() ? TEXT_DISABLED_COLOR : TEXT_DIMMED_COLOR, alpha);
 					}
-				} else if (key != null) {
-					drawInventoryText(graphics, font, Component.translatable(key), left,
+				} else if (message != null || key != null) {
+					drawInventoryText(graphics, font, message != null ? message : Component.translatable(key), left,
 						top + font.lineHeight * style.inventoryTextScale() + 2.0, header.width() - 8.0,
 						style.inventoryTextScale(), TEXT_DIMMED_COLOR, alpha);
 				}

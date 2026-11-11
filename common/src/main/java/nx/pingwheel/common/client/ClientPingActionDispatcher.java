@@ -3,6 +3,9 @@ package nx.pingwheel.common.client;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.LinkedHashSet;
+import java.util.Set;
+import java.util.function.BooleanSupplier;
 
 import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
 import nx.pingwheel.common.domain.MarkerId;
@@ -19,6 +22,8 @@ import nx.pingwheel.common.presentation.client.ClientPresentation;
 import nx.pingwheel.common.presentation.PresentationPropertyIntent;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.presentation.inventory.client.ClientInventoryDiagnostics;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
 import org.jetbrains.annotations.Unmodifiable;
 
 /**
@@ -67,6 +72,10 @@ public final class ClientPingActionDispatcher {
 	public interface LocalErrorSink {
 
 		void showLocalError(String messageKey, int color);
+
+		default void showTrackingFailure(InventoryFailureReason reason) {
+			showLocalError(reason.translationKey(), PingInteractionAction.TargetGone.TARGET_GONE_COLOR);
+		}
 	}
 
 	private final PacketSender packetSender;
@@ -75,6 +84,8 @@ public final class ClientPingActionDispatcher {
 	private final CreateRequestTracker createRequestTracker;
 	private final ClientCreateRateLimiter createRateLimiter;
 	private final ClientPresentation presentation;
+	private record InventoryFailureKey(long epoch, long view, long commit) {}
+	private final Set<InventoryFailureKey> inventoryFailures = new LinkedHashSet<>();
 
 	/** The production route requires a negotiated presentation session. */
 	public ClientPingActionDispatcher(
@@ -153,19 +164,26 @@ public final class ClientPingActionDispatcher {
 		return DispatchOutcome.CREATE_SENT;
 	}
 	public ClientInventory.DispatchOutcome dispatchInventory(@Nullable InventoryC2SPacket packet) {
+		return dispatchInventory(packet, () -> false);
+	}
+	/** An accepted synchronous response takes precedence over an exception after transport handoff. */
+	public ClientInventory.DispatchOutcome dispatchInventory(@Nullable InventoryC2SPacket packet, BooleanSupplier terminalAccepted) {
 		if (packet == null || packet.isCorrupt() || packet.kind() != InventoryC2SPacket.Kind.SELECT)
 			return ClientInventory.DispatchOutcome.NOT_READY;
 		long revision = presentation.epoch();
 		if (!presentation.ready()) {
 			rejectSelectorRelease(SelectorReleaseRejection.PRESENTATION_NOT_READY, packet.commitId(), revision, "inventory");
+			inventoryFailure(packet, InventoryFailureReason.SESSION_TIMEOUT);
 			return ClientInventory.DispatchOutcome.NOT_READY;
 		}
 		if (packet.presentationEpoch() != presentation.epoch() || packet.view() != presentation.sessionView()) {
 			rejectSelectorRelease(SelectorReleaseRejection.INVENTORY_VIEW_MISMATCH, packet.commitId(), revision, "inventory");
+			inventoryFailure(packet, InventoryFailureReason.RETIRED_SELECTION);
 			return ClientInventory.DispatchOutcome.NOT_READY;
 		}
 		if (!createRateLimiter.tryAcquire()) {
 			rejectSelectorRelease(SelectorReleaseRejection.COURTESY_THROTTLED, packet.commitId(), revision, "inventory");
+			inventoryFailure(packet, InventoryFailureReason.RATE_LIMITED);
 			return ClientInventory.DispatchOutcome.THROTTLED;
 		}
 		try { packetSender.sendToServer(packet); }
@@ -174,10 +192,22 @@ public final class ClientPingActionDispatcher {
 				"client-send/select", "transport",
 				() -> "commitId=" + packet.commitId() + " epoch=" + packet.presentationEpoch() + " view=" + packet.view(),
 				failed);
+			if (terminalAccepted.getAsBoolean()) {
+				createRequestTracker.onCreateDispatched(CreateRequestTracker.Route.INVENTORY, packet.commitId());
+				return ClientInventory.DispatchOutcome.SENT;
+			}
+			inventoryFailure(packet, InventoryFailureReason.TRANSPORT_FAILURE);
 			return ClientInventory.DispatchOutcome.TRANSPORT_FAILED;
 		}
 		createRequestTracker.onCreateDispatched(CreateRequestTracker.Route.INVENTORY, packet.commitId());
 		return ClientInventory.DispatchOutcome.SENT;
+	}
+	private void inventoryFailure(InventoryC2SPacket packet, InventoryFailureReason reason) {
+		if (!inventoryFailures.add(new InventoryFailureKey(packet.presentationEpoch(), packet.view(), packet.commitId()))) return;
+		while (inventoryFailures.size() > 64) inventoryFailures.remove(inventoryFailures.iterator().next());
+		if (reason != InventoryFailureReason.TRANSPORT_FAILURE)
+			ClientInventoryDiagnostics.selectionRejected(packet.requestId(), packet.commitId(), reason);
+		errorSink.showTrackingFailure(reason);
 	}
 
 	private void dispatchCancel(PingInteractionAction.CancelMarker cancel) {
