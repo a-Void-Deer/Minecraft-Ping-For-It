@@ -61,6 +61,34 @@ compared directly.
   still-authorized preview and tracking state. Permission updates delayed by
   send budgets or discarded after a permission change are retried, allowing
   restored access to synchronize without resetting the other resource.
+- Inventory Previews now use one stable held handle across retries: after the
+  first failed attempt the client makes at most three further attempts, one per
+  fixed five-second delay, showing the localized cause with the current retry
+  ordinal and then only the cause on the final failure. A healthy scan is not
+  cut off by a total-duration limit, and a stalled attempt that already has
+  usable rows keeps them and ends its lane as incomplete. Late regrants,
+  duplicate data and repeated deferrals cannot extend an attempt or reopen a
+  stopped one. See
+  [preview attempts, retry and no-progress watchdog](docs/architecture/presentation/inventory.md#preview-attempts-retry-and-no-progress-watchdog).
+- A Preview lane whose typed failure reason is exactly `SOURCE_UNAVAILABLE`
+  stops immediately instead of spending the retry sequence, retires that lane's
+  rows and references, and leaves an available sibling lane usable. When no lane
+  remains usable or pending, the Details inventory entry is disabled, an open
+  inventory list closes, and the selector leaves the inventory path for its
+  nearest valid ancestor; a later hold may request the source again. Inventory
+  Tracking keeps its own recovery rules. See
+  [inventory list](docs/architecture/picking/wheel.md#inventory-list).
+- An inventory selection that cannot create its tracking target shows exactly
+  one localized `[pingforit]` chat line for typed server rejections and local
+  pre-dispatch, courtesy or transport refusals. Duplicate or replayed outcomes
+  do not repeat the line, nothing resends automatically, and a marker stored
+  before a later publication failure is not reported as a creation failure. See
+  [inventory tracking creation failure](docs/UI/ping-feedback.md#inventory-tracking-creation-failure).
+- Raised the item and fluid variant catalogues from 256 to 1024 definitions,
+  set a 1 MiB retained bound for both, and widened component traversal and
+  display validation to 8192 nodes and visits, so large modded containers
+  truncate less. See
+  [item variants and component fallback](docs/architecture/presentation/inventory.md#item-variants-and-component-fallback).
 
 ### Fluid preview and tracking
 
@@ -82,6 +110,11 @@ compared directly.
   unavailable.
 - Fluid icons fade smoothly when the interface opens or closes and when opacity
   changes, instead of disappearing abruptly at low opacity.
+- The NeoForge fluid capability layout, used by supported static Create fluid
+  tanks, now verifies up to 4096 member cells instead of 1024, so a 3-wide tank
+  that fits the build height no longer hits the former member bound. Width
+  remains 1 through 3 and the whole prism must still fit the build height. See
+  [fluid tank logical target and presentation topology](docs/integrations/create.md#fluid-tank-logical-target-and-presentation-topology).
 
 ### Server controls and Create optimizations
 
@@ -99,6 +132,28 @@ compared directly.
   and removing duplicate validation work on the audited ordinary path. Current
   handlers, topology and owner authority still require checks; contents and
   successful permission checks are not cached.
+- Inventory scan admission now offers an optional due-Preview or
+  input-protection opportunity that draws its reservation from the same
+  physical-work, work and memory ledgers as the work it protects. A refused
+  reservation consumes nothing, an oversized one-shot capture is rejected
+  before capture work, and no new unmetered allowance is added. See
+  [source capacity, catalogue growth and registration](docs/architecture/presentation/inventory.md#source-capacity-catalogue-growth-and-registration).
+- Raised the finite upper bounds of the existing inventory settings without
+  adding keys or changing defaults: `physicalSlotsPerTick` 1024 to 4096,
+  `preview.maxSlotsPerClient` 1024 to 16384, `preview.maxSlotsServer` 1024 to
+  65536, `preview.maxTargetsPerClient` 8 to 16, `tracking.maxVariantsPerTarget`
+  32 to 128, `tracking.maxSlotsPerTarget` 1024 to 16384,
+  `tracking.maxSlotsServer` 16384 to 262144 and `pendingMemoryMiB` 1024 to
+  2048 MiB. The preview variant ceiling remains 1024; finite-only and
+  unlimited-mode rules are unchanged. See
+  [inventory policy object](docs/config/server.md#inventory-policy-object).
+- Raised the code-owned per-scope byte bases behind the five inventory
+  send-byte multipliers: preview client 4 KiB to 1 MiB, preview global 32 KiB
+  to 2 MiB, tracking stream 2 KiB to 1 MiB, and tracking snapshot and global
+  16 KiB to 1 MiB each. With the default multiplier of 1, the default per-scope
+  allowances grow by 64 to 512 times; the multipliers, their defaults, legal
+  ranges and the unlimited-mode guard stay as they are. See
+  [budgets, queues and memory](docs/architecture/presentation/inventory.md#budgets-queues-and-memory).
 
 ### Diagnostics and logging
 
@@ -115,6 +170,20 @@ compared directly.
   reachable only while Alt (Option on macOS) is held, and a row left at `DEBUG`
   exits to `NORMAL` on its next activation without the modifier. Releasing the
   modifier does not itself change the selected value.
+- Inventory limits, deferrals, truncation, unsupported lanes and quality
+  degradation now share one stable positive reason vocabulary across decisions,
+  wire metadata and localized text. Each fixed site reports one outcome:
+  `NORMAL` keeps the stable summary, `DEEP` adds short stage and lane handling,
+  and `DEBUG` adds numeric request, commit, requested, used and limit
+  associations. At an effective `DEBUG` profile, a request that triggered limit
+  handling reports every occurrence instead of waiting for its interval
+  channel. See
+  [limit and failure diagnostics](docs/architecture/presentation/inventory.md#limit-and-failure-diagnostics).
+- Oversized inventory frames, keys, labels, displays, entry and part counts and
+  provider structures now report the actual required value and its limiting
+  bound through a typed failure reason instead of the generic corrupt-packet
+  fallback. Malformed or truncated input still uses that fallback. See
+  [limit and failure diagnostics](docs/architecture/presentation/inventory.md#limit-and-failure-diagnostics).
 
 ### Performance monitor
 
@@ -143,6 +212,17 @@ compared directly.
   Spectator exclusion is unchanged. See
   [raycast use and blacklist boundary](docs/architecture/picking/selection_policy.md#raycast-use-and-blacklist-boundary).
 
+### Spatial selector menus
+
+- Renamed the root selector entry from **Content** to **Details** and the
+  inventory list's group heading from **Contents** to **Inventory** in all
+  locales. The persisted `spatialSelector.contentIntentEnabled` key is
+  unchanged. See [Details](docs/architecture/picking/wheel.md#details).
+- An item row's radial submenu now opens diagonally forward and below its
+  selected row. The row stays the parent and return anchor, and Back remains
+  directed at that row through clearance updates and GUI resize. See
+  [inventory list](docs/architecture/picking/wheel.md#inventory-list).
+
 ### Settings and help
 
 - Renamed three client categories to **Markers & Range**, **Controls & Gestures**,
@@ -157,6 +237,16 @@ compared directly.
   Policy mutations sent on activation from ordinary server drafts submitted on
   final close; typing a selector alone sends no mutation.
 - Updated labels, headings, help and assembled UI messages in all locales.
+- Added **Cooldown Feedback** (`cooldownFeedback`, default `ACTIONBAR`) under
+  **Channel, Sound & Notices**, with **Action Bar**, **Chat** and **Hidden**.
+  A committed ordinary create rejected by the local courtesy gate now shows
+  `Ping is on cooldown...` in the chosen place using the existing local failure
+  color. **Hidden** suppresses only this notice; the courtesy gate and the
+  separate tracking-creation failure line are unchanged. See
+  [courtesy cooldown notice](docs/UI/ping-feedback.md#courtesy-cooldown-notice)
+  and [client configuration](docs/config/client.md#persisted-field-catalogue).
+- The default **Double-Click Danger Window** is now 160 ms instead of 100 ms;
+  an existing stored value is unchanged.
 
 ### Network compatibility
 
@@ -174,3 +264,12 @@ compared directly.
   inventory sources use `INVALID`. inventory `UNAVAILABLE` and `EXPIRED` statuses
   are removed, with expiry handled by marker lifecycle. Inventory `RESYNC` now
   requires a marker ID; the unused request-only form is removed.
+- Within the existing `inventory-v2` route, `OPEN_REJECTED` and `PREVIEW_STATE`
+  are added server-to-client kinds, `REJECT`, `PREVIEW`, `SNAPSHOT`, `STREAM`,
+  `STATUS` and per-entry quality carry an optional typed failure reason, and
+  every admitted `OPEN` owns exactly one `OPENED` or `OPEN_REJECTED` outcome.
+  The route identity, protocol version, adapter schema, server-configuration
+  version and mod version are unchanged, but frames missing the current presence
+  fields are rejected rather than completed, so mixed builds remain incompatible.
+  See
+  [inventory route](docs/architecture/network/protocol.md#inventory-previewtracking-route-inventory-v2).
