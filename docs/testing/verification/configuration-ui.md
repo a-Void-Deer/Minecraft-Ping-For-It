@@ -78,11 +78,19 @@ own scope and queues following their global allowances, the five byte
 multipliers staying independent, the snapshot-fragment and per-client period
 scopes staying equal, unlimited byte multipliers staying finite, step helpers
 crossing boundaries and saturating, pending-memory steps following piecewise
-stops, and independent defaults. Its isolation fixture exercises all nine caps
+stops, and independent defaults. The added compiled-base scaling cases use
+Preview per-client 1 MiB, Preview global 2 MiB, and Tracking stream, snapshot
+and global 1 MiB as inputs. `InventorySettingsTest` executed 19/19 in the
+`20261111-153119-432` final snapshot. `InventoryConfigRangeTest` executed
+28/28, `InventoryConfigValuesTest` 82/82 and
+`InventorySettingsPersistenceTest` 84/84 in the same snapshot. Multiplier
+defaults, legal ranges and the pending-memory minimum are unchanged by those
+inputs; this record does not cover later live/manual scenarios.
+Its isolation fixture exercises all nine caps
 and five send-byte multipliers within and across fresh settings, later
 construction not inheriting mutations, and null nested objects restoring
-non-aliased fresh-equivalent values. These isolation cases are source-reviewed
-automated coverage, with no passing run recorded here. The two finite size
+non-aliased fresh-equivalent values. These isolation cases executed as part of
+the `InventorySettingsTest` 19/19 class result. The two finite size
 leaves have exact byte/quanta conversion and repair a conflicting pair downward
 with frame priority and reserved metadata headroom without raising the frame;
 they remain independent of the five send-byte multipliers.
@@ -503,9 +511,13 @@ constructs the production native options list and exercises overview/editor
 reflow, retained selector text, caret, focus, scroll and list/entry dragging,
 callback suppression, unusable-size focus fencing and native keyboard
 adjustment recovery. `SettingsEnumOptionTest` constructs native `CycleButton`
-controls from the Player Info, Team Color and Entity Block Geometry factories,
-checks captions, narration, tooltip components and unchanged configuration
-values. `SettingsTitleWidgetTest` covers localized title identity, breadcrumb and
+controls from the Player Info, Team Color, Entity Block Geometry and Cooldown
+Feedback factories, checks captions, narration, tooltip components, the cooldown
+row's shared help and unchanged configuration values.
+`ClientConfigValidationTest` covers the `cooldownFeedback` preference's default
+placement, uppercase serialized spelling, a saved `CHAT` round trip, and explicit
+`null` or unknown input recovering to the default before and after validation.
+`SettingsTitleWidgetTest` covers localized title identity, breadcrumb and
 scope-tab formats, injected language separators and argument order, explicit
 bounds, wrapped title height, header reservation, and word/code-point wrapping.
 `DeferredActionCoordinatorTest` covers the native dispatch seam, nested dispatch
@@ -522,10 +534,12 @@ live permission transition, networking or persistence.
 
 `ClientConfigLocalizationTest` covers the eight bundled locale files and the
 settings, category entrance, server-status, entity-block-mode and target-gone
-keys, placeholders, ellipses, feedback prefix, active-file restart help,
-transparent-selection labels and tooltips, title segments, wheel and target
-opacity labels, and the spatial-selector resource set. `SettingsLocalizationCoverageTest`
-derives required labels and help from the production catalog for all value
+keys, the cooldown-feedback label, tooltip, mode values and message with its
+pinned English text, placeholders, ellipses, feedback prefix, active-file
+restart help, transparent-selection labels and tooltips, title segments, wheel
+and target opacity labels, and the spatial-selector resource set.
+`SettingsLocalizationCoverageTest` derives required labels and help from the
+production catalog for all value
 controls, checks category descriptions, section headings, navigation and action
 help, enum/state labels, units and format resources across all eight bundled
 locales, validates argument-bearing templates with a formatter, rejects duplicate

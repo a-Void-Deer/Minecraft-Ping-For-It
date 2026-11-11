@@ -85,8 +85,8 @@ The client scope has eight categories:
   - Content selection: Content Intent Selection, then Inventory Selection Stay
     Open.
 - **Channel, Sound & Notices**: Ping Channel as a full-width text input under
-  Channel, followed by Ping Volume and Configuration Notice Size under Sound
-  and notices.
+  Channel, followed by Ping Volume, Configuration Notice Size, and Cooldown
+  Feedback under Sound and notices.
 - **Rendering & Config**: Entity Block Geometry under entity-block rendering,
   followed by the configuration-file action under its own heading.
 - **Performance**: a Wheel options subgroup with Precise Selection Capture

@@ -128,10 +128,19 @@ bypass, and corrupt-policy handling. `InventoryDispatchIntegrationTest` covers
 the shared courtesy allowance in both orders: either route can throttle the
 following one, each case observes only the first route's send, and the throttled
 ordinary create cannot overwrite the inventory receipt.
+`ClientPingActionDispatcherTest` covers one local cooldown notice for a throttled
+committed create, no notice for a sent create, a cancellation or an unready
+create, and the existing `reason=courtesy-throttled` `sent=false` `DEBUG` line;
+`ClientPingRuntimeTest` and `InventoryDispatchIntegrationTest` carry the notice
+through the runtime and the shared-allowance order, where an inventory throttle
+keeps its separate tracking-failure line. `MinecraftLocalErrorSinkTest` checks
+the prefixed cooldown-message composition, the shared `#FF5555` color, and
+action-bar, chat and hidden placement through the headless placement helper.
 `ClientRateLimitPolicyTest` covers the initial fallback matching a fresh
 validated server configuration, an applied policy replacing it, and a fresh
 limiter retaining the fallback independently. These are headless or
-source-reviewed fixtures, with no passing run recorded here for the policy test;
+source-reviewed fixtures, with no passing run recorded here for these cases;
+live action-bar or chat delivery, runtime reading of the configured placement,
 server publication, reconnect, live configuration changes and real
 dedicated-server initialization remain unexercised. Narrow isolated
 server-default initialization coverage is under

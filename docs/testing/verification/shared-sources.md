@@ -19,10 +19,16 @@ independent; and opaque evidence and cursor tokens stay bounded and detached.
 beyond a double, a domain display value larger than the generic text bound,
 defensive construction and access copies, tagged and untagged value bounds,
 codec-identity matching, byte comparison, exact ordinary bounds and rejection of
-invalid values, keys and codecs, an independent opaque page bound, and
-payload-carrying readable results. These are model seams only: no real source
-step, provider read, shared-consumer accounting, transport or running server
-path exercises them.
+invalid values, keys and codecs, an independent opaque page bound, the closed
+codec descriptor's fixed entry-page allowance, the registered ITEM and FLUID
+observation pages admitting 1024 fully tagged same-domain entries at the bound
+and rejecting one more, the ordinary and untagged page retaining 256, mixed or
+mismatched tagged-domain pages being rejected, and payload-carrying readable
+results. `OpaqueKeyedPayloadTest` executed 12/12 with the new closed-allowance
+cases in the `20261111-153119-432` final snapshot; this does not cover later
+live/manual scenarios. These are model seams
+only: no real source step, provider read, shared-consumer accounting, transport
+or running server path exercises them.
 
 ## Shared source access contract
 
@@ -55,7 +61,12 @@ frozen authorized projection; state-fence rebase and cancel are isolated per
 consumer; budget defer keeps the observation valid and publishes nothing;
 unavailable control results are accepted as status and never become data or a
 fake zero; and context and projection bounds are validated and frozen. The fake
-is not a transport or production implementer. Production ordering and repair are
+is not a transport or production implementer. The inventory-side
+`CutWorkReuseTest` adds the encoded-fragment registered-page case; the class
+executed 4/4 in the `20261111-153119-432` final snapshot, with detail under
+[inventory verification](inventory.md#immutable-publication-work-reuse-verification).
+This does not cover later live/manual scenarios.
+Production ordering and repair are
 exercised separately by `InventoryPublicationIntegrationTest` with a recording
 transport and real encoded frames; no live transport, integrated runtime or
 world read applies.
@@ -125,20 +136,23 @@ cross-domain gap. No live server, notification, heap/TPS or soak result follows.
 
 ## Certified pool delay diagnostics
 
-`InventoryPooledChestRuntimeTest` adds seven source-reviewed cases across three
-methods through the production certified chest runtime and `BudgetDelayMonitor`,
-using 27-slot chests and the legal normalized physical cap of 16. They cover
-physical exhaustion before the first page and after a retained 16-slot page
-(27 or 11 known remaining physical slots), page-memory, provider-work, item-work
-and combined exhaustion after one paid slot (26 known remaining, applicable
-reason only, prefix preserved, resume when permitted), and already-paid
-shared-journal replay with no remaining physical allowance and no duplicate
-charge. Reason counts and quantities are checked on closed-cycle summaries;
-cleanup releases retained and reserved memory. These assertions passed the full
-Java 21 execution recorded in the
-[combined Java run](build-checks.md#recipientless-tracking-diagnostics-and-caption-reflow-verification),
-separate from the earlier Common results. They do not capture live WARN output or
-administrator messages; wider pool coverage remains under
+`InventoryPooledChestRuntimeTest` covers the production certified chest runtime
+and `BudgetDelayMonitor`, using 27-slot chests and the legal normalized physical
+cap of 16; it executed 8/8 in the `20261111-153119-432` final snapshot. Cases
+cover physical exhaustion before the first page and after a retained 16-slot
+page (27 or 11 known remaining physical slots); page-memory, provider-work and
+combined exhaustion after one paid slot (26 known remaining, applicable reason
+only, prefix preserved, resume when permitted); item-work exhaustion before the
+native getter, where the fixture pays the pre-getter association validation but
+requests or observes no physical slot, so the summary has one unknown quantity
+and empty physical quantities rather than 26 known remaining physical slots and
+is not a claim that no work was paid; and already-paid shared-journal replay
+with no remaining physical allowance and no duplicate charge. Reason counts and
+quantities are checked on closed-cycle summaries; cleanup releases retained and
+reserved memory. Execution totals are in the
+[final full-tree verification](build-checks.md#final-full-tree-verification-2026-11-11).
+They do not capture live WARN output or administrator messages; wider pool
+coverage remains under
 [inventory verification](inventory.md#certified-tracking-pool-and-publication-coverage).
 
 ## Known automated gaps

@@ -486,8 +486,9 @@ recovery suppression and silent `NORMAL`/`DEEP`/disabled. `InventoryBackendDiagn
 OPEN fences, one INVALID per lane, non-memory preflight naming, policy-skipped
 lane reasons, repeated INVALID transitions, below-minimum/disabled laziness,
 enabled `DEBUG` site/reason, grey-reason changes and fluid member-gate rejection
-context without extra reads. These `DEBUG` reports leave earlier direct-seam
-silence and `WARN` suppression unchanged.
+context without extra reads. These `DEBUG` reports keep expected denials distinct
+from unexpected failures; test appenders do not establish production delivery or
+live soak.
 
 `InventoryCertifiedFailureDiagnosticsTest` drives the real certified native port
 through retirement: codec callback failure retains one graph with
@@ -499,13 +500,14 @@ leaves an authorized peer usable; read failure plus revocation retains cause and
 detaches only that owner. `InventoryItemFailureDiagnosticsTest`,
 `InventoryFluidFreezerTest`, `InventoryGenericComponentCompatibilityTest`,
 `InventoryNbtSnapshotTest` and `ClientItemDisplayOpaqueComponentsTest` cover
-quiet expected canonical-byte/display/fluid-identity refusals, one
-all-variants-native-codec-rejected or empty-icon-registry-label `WARN` with
-trusted stage only at higher disclosure, no native error-message supplier
-evaluation, original structural refusal as cause, throwing name-hook causes without
-attached throwables, and cached-construction runtime fallback/eviction versus
-linkage propagation, without asserting Ping traversal or inherited-default
-revalidation.
+typed detailed reasons for canonical-byte, display and native traversal refusals
+without payloads or native error-message evaluation, a shared reason channel for
+non-limit display degradation, one detailed
+all-variants-native-codec-rejected or empty-icon-registry-label report with
+trusted stage only at higher disclosure, original structural refusal as cause,
+throwing name-hook causes without attached throwables, and cached-construction
+runtime fallback/eviction versus linkage propagation, without asserting Ping
+traversal or inherited-default revalidation.
 
 `InventoryMinecraftDiagnosticsTest`, `InventoryMinecraftSnapshotCaptureTest`,
 `InventoryContainerReadsTest` and each loader's `PlatformInventoryDiagnosticsTest`
@@ -1363,7 +1365,11 @@ owns inventory cut authorization/progress; the
 [sync publication contract](../../architecture/presentation/shared_sources.md#sync-publication)
 owns generic immutable cut/cost mechanics. `CutWorkReuseTest` covers the detached
 encoded-fragment helper: one immutable fragment backs independent recipients
-without mutable bytes, and a cross-lane value is refused before encoding.
+without mutable bytes, and a cross-lane value is refused before encoding. Its
+registered-page case—an ITEM encoded fragment admitting the code-owned page with
+fully tagged values and rejecting one more—executed 4/4 with the class in the
+`20261111-153119-432` final snapshot. This does not cover later live/manual
+scenarios.
 `InventoryChecksumsTest` covers independent ITEM/FLUID golden vectors over
 non-ASCII samples, input-order independence, lane-domain separation, wire-entry
 projection and one whole-cut visit; FNV-1a bytes and v2 wire format are unchanged.
@@ -1771,6 +1777,85 @@ totem/F3/chat/inventory/pause layering, running loader/Mixin, multiplayer or
 performance/allocation behavior. The existing 16 native-classpath skips remain
 gaps, not passes. Live scenarios remain in the
 [manual performance-monitor matrix](manual-integration.md#performance-monitor).
+
+## Current preview retry, typed outcome and tracking feedback coverage
+
+The test sources below are the current written inventory for the Preview retry,
+typed outcome, tracking-create feedback and limit-diagnostic contracts. The final
+full snapshot `20261111-153119-432` executed the selections listed after the
+table and passed; those counts certify only that snapshot. Full totals, loader
+task reuse and identity are in the
+[final full-tree verification](build-checks.md#final-full-tree-verification-2026-11-11).
+
+| Acceptance surface | Written test source |
+| --- | --- |
+| Preview retry and stable handle | `InventoryPreviewLifecycleTest` covers the stable logical handle with a fresh wire request id per attempt, old-request `CLOSE` and row retirement, one attempt at most per elapsed retry deadline without catch-up, the three retry displays and cause-only terminal state, and cancellation by close, disconnect, true presentation epoch change and selection release. `NativeSelectorContentTest` keeps the list/status area and stable selector fence through retries, and closes through the original inventory owner after the supplier changes. `InventoryDispatchIntegrationTest` keeps one feedback occurrence per commit and no automatic resend. |
+| No-progress watchdog | `InventoryPreviewLifecycleTest` separates session, open and scan stalls; repeated `DEFERRED`, duplicate data, retired attempts, zero progress revisions and old views do not refresh the watchdog; a newer progress revision or new data part does; a same-epoch regrant preserves the progress clock and a local watchdog stop installs a terminal fence so late non-`INVALID` data or an ordinary regrant cannot reopen the lane, while `INVALID` and terminal `UNSUPPORTED` outcomes remain processable; a healthy multi-round scan continues past whole-round deadlines; a stalled optional `FLUID` lane preserves a completed `ITEM` lane, and a failed attempt with a usable partial row preserves that row. |
+| Typed wire grammar | `InventoryFailurePacketsTest` covers `OPEN_REJECTED` and `PREVIEW_STATE` bodies, lane scoping, reason presence, independent control/progress revisions, condition/reason rules, strict unknown/zero/noncanonical reason rejection, current data/status/entry-quality reason fields, and rejection of earlier bodies rather than completion from remaining bytes. `InventoryFailureReasonTest` checks explicit stable ids, codes and translation keys; `InventoryDecisionTest` keeps accept, defer, unsupported and reject mutually exclusive with an impact supplied by the decision. |
+| Server outcome ownership | `InventoryBackendLifecycleTest` covers typed `OPEN_REJECTED` under memory pressure and a full control queue, retained outcome ownership across a failed handoff, restamping without repeated admission, mailbox cancellation by the exact old-view `CLOSE`, unchanged `DEFERRED` progress revisions, and a maximum-category Preview retaining its admitted backing. `InventoryBackendTest` keeps the specific create cause alongside the generic marker rejection, replays without another creation attempt, and preserves a post-store failure as `SELECTED`. `InventoryBackendDiagnosticsTest` checks the typed rejection diagnostic. |
+| Tracking feedback and localization | `MinecraftLocalErrorSinkTest` checks the dedicated `[pingforit]` template, localized cause and shared failure color; `InventoryFailureLocalizationTest` checks every bundled locale for the complete reason set, the retry placeholders and the separate tracking-failure template. |
+| Limit diagnostics | `InventoryDiagnosticsTest` covers the fixed `NORMAL` summary, `DEEP` short context, `DEBUG` numeric detail, per-occurrence limit bypass only at effective `DEBUG`, interval control otherwise, domain-gate retention, summary retention when detail fails, independent reasons, and impact-selected minimums. `DiagnosticPolicyTest` adds profile snapshot, bypass marking, no suppressed count on bypass, and no channel/detail work when minimum or backend rejects. `ClientInventoryDiagnosticsTest`, `InventoryItemFailureDiagnosticsTest` and `ClientItemDisplayTest` exercise repeated debug-bound refusals without admission changes. |
+| Capacity and ledger separation | `InventoryRuntimeScaleTest` covers source total capacity versus per-tick work and the separate one-shot capture bound, terminal oversized capture before capture work, independent consumer capacity, atomic ledger decisions and single-use operation protection. `InventorySyncPublisherTest` and `InventoryMemoryBudgetIntegrationTest` exercise bounded registration/growth, replacement/retirement charging and no-refund behavior. `InventoryConfigRangeTest`, `InventoryConfigValuesTest`, `InventorySettingsTest` and `InventorySettingsPersistenceTest` are written for the existing finite leaves, defaults and unlimited-only guards. |
+
+Final snapshot selections executed and passed:
+
+- `InventoryMinimumBudgetServiceabilityTest` 18/18,
+  `InventoryRuntimeScaleTest` 11/11 and `MultiVaultPipelineTest` 7/7.
+- `InventoryPreviewLifecycleTest` 33/33, `NativeSelectorContentTest` 37/37 and
+  `InventoryDispatchIntegrationTest` 9/9 for retry, watchdog/regrant and local
+  feedback.
+- `InventoryFailurePacketsTest` 7/7, `InventoryFailureReasonTest` 3/3 and
+  `InventoryDecisionTest` 4/4 for the typed wire/model boundary.
+- `InventoryBackendTest` 40/40, `InventoryBackendLifecycleTest` 21/21,
+  `InventorySyncPublisherTest` 56/56 and
+  `InventoryPublicationIntegrationTest` 25/25 for create causes, outcome
+  ownership and publication binding/retirement.
+- `InventoryDiagnosticsTest` 9/9, `DiagnosticPolicyTest` 28/28,
+  `ClientInventoryDiagnosticsTest` 10/10, `InventoryItemFailureDiagnosticsTest`
+  11/11, `InventoryFailureLocalizationTest` 1/1,
+  `MinecraftLocalErrorSinkTest` 4/4, `InventoryProviderLimitsTest` 7/7 and
+  `InventoryWireLimitDiagnosticsTest` 6/6 for diagnostics and localization.
+- `InventoryPooledChestRuntimeTest` 8/8,
+  `InventoryCatalogNativeReadWiringTest` 50/50,
+  `InventoryCreationSnapshotIntegrationTest` 22/22 and
+  `InventoryMonitorIntegrationTest` 4/4 for the remaining executed selections.
+- The configuration range, value and persistence suites also passed; exact
+  counts and inputs are under
+  [configuration verification](configuration-ui.md#inventory-and-spatial-selector-configuration).
+
+Representative current cases include
+`watchdogStopSurvivesRegrantAndCannotInstallReplacementValidRows`,
+`watchdogStoppedPartialRejectsLateCutAndProgressButStillAcceptsInvalidation`,
+`repeatedLegitimateRegrantsAndDefersCannotExtendAnyAttemptOrItsRetryBudget`,
+`typedEvidenceKeepsReasonAndBoundsWithoutProviderText`,
+`malformedSnapshotMappingIsNotReportedAsCapacity`,
+`partAndEntryCountCapPlusOneAreTyped`,
+`ordinaryMalformedFramesStillUseTheCorruptFallbackGate` and
+`backendRetiresTrackingBaselineAfterItsFenceHandsOffWhileExactDataIsStillAdmitted`.
+The narrow wire/provider capacity-reporting contract remains broader than these
+selections; the passes do not cover every future provider or decode path.
+
+These are headless seams. They do not establish live transport, installed
+providers, multiplayer, memory/heap behavior, TPS or GPU/HUD rendering.
+
+### Minimum-budget complete-delivery acceptance evidence
+
+The 18-case `InventoryMinimumBudgetServiceabilityTest` selection passed 18/18
+in final snapshot `20261111-153119-432`. It covers the requested minimum finite
+memory/bandwidth/multiplier profiles and the same minimum settings with maximum
+display and frame sizes, including a native 128 KiB display end-to-end
+Preview→`SELECT`/`CREATED`→`STREAM` with source versions 7→11 and resync. This
+certifies complete delivery for that snapshot: an `INCOMPLETE` cut, an exhausted
+retry sequence, a sustained or permanent `DEFER`, or a terminal control without
+the complete data would not have substituted for it.
+
+The final full-tree invocation passed and is recorded with its exact HEAD,
+uncommitted-tree fingerprint and artifact identity in the
+[final full-tree verification](build-checks.md#final-full-tree-verification-2026-11-11).
+Live/manual, heap, TPS and multiplayer evidence remain separate gaps. If a
+future minimum base is insufficient, measured evidence and explicit user
+approval are still required before raising it; the requirement is not silently
+relaxed.
 
 ## Known automated gaps
 

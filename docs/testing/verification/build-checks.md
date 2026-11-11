@@ -802,6 +802,74 @@ or wall-clock measurement was performed; the 16 skips are native gaps. NeoForge
 remains `21.0.143` on the Minecraft 1.21 line; the archive `1.21.1` label is not
 a runtime claim, and the mod version is unchanged.
 
+#### Stable full verification (2026-11-11)
+
+Stable snapshot `20261111-113705-205` ran
+`.\gradlew.bat --no-daemon --continue --console=plain :common:check :common:javadoc :fabric:test :fabric:build :forge:test :forge:build :neoforge:test :neoforge:build verifyModIdentity`
+on HEAD `fe8313c63162df61c2181fae229b8f5bc1af1864` plus the working-tree change.
+The tracked/untracked tree manifest SHA-256
+`2E735E9A3873CB9D8A87B6326CF5D607BA99EE67576258F763796DE25C535A8D` and tracked
+diff SHA-256 `1875DBE120865B6997E32AC1F83D1DE2A111AE10ADF925666B18F3575F7C1BD8`
+were identical before and after.
+
+The invocation exited 1 after 52 tasks (35 executed, 17 up-to-date); this is not
+a whole-tree pass. It recorded 7,140 tests: 7,081 passed, 43 failed, 16 skipped
+and no XML errors. Common was 6,467 total (6,424 passed, 41 failed, 2 skipped),
+Fabric 111 passed, Forge 96 total (82 passed, 14 skipped) and NeoForge 466 total
+(464 passed, 2 failed). All four main and test compilations and Javadocs
+executed successfully. Fabric and Forge builds succeeded. Common check and
+NeoForge check/build were blocked by test failures, so `verifyModIdentity` did
+not execute because its NeoForge dependency did not complete.
+
+The same snapshot executed the targeted acceptance selections: the 18-case
+minimum-budget serviceability set 18/18 (including native 128 KiB end-to-end
+Preview→`SELECT`/`CREATED`→`STREAM` source versions 7→11 and resync),
+`InventoryRuntimeScaleTest` 9/9, and `MultiVaultPipelineTest` 7/7. This failing
+snapshot was superseded by the final full-tree verification below.
+
+#### Final full-tree verification (2026-11-11)
+
+Final snapshot `20261111-153119-432` ran one invocation on HEAD
+`7d64670cc18e70b89dc417cc65ce06797647f3d9`, tree
+`abc349cda5174741b85bdeb7c1d45413d4bc6a64`, and exited 0 (`BUILD SUCCESSFUL`).
+The tracked/untracked manifest SHA-256
+`85B9B7A87349F9DA4B7003726DE3A8681A06A20E1BA6528CD05FE39F9A12FFCA` and diff
+SHA-256 `E80DFA3F998BA85D091B4BC2F3F5A5B34BCD9E0C371CEBC803D19FDAC7DD368A`
+were unchanged before and after.
+
+```text
+.\gradlew.bat --no-daemon --continue --console=plain '-Dorg.gradle.jvmargs=-Xmx3G -Dfile.encoding=UTF-8 -Dstdout.encoding=UTF-8 -Dstderr.encoding=UTF-8 -XX:TieredStopAtLevel=1' :common:check :common:javadoc :fabric:test :fabric:build :forge:test :forge:build :neoforge:test :neoforge:build verifyModIdentity
+```
+
+Common executed fresh: 588 suites, 6,512 tests, 6,510 passed, 0 failed, 2
+skipped (the two loader-native fluid cases). Fabric, Forge and NeoForge test and
+build tasks were `UP-TO-DATE` from `20261111-143456-509-final-full-tree-tier1`,
+which shares the production source hashes: Fabric 111/111, Forge 96 total with
+82 passed and 14 skipped, NeoForge 466/466, and all three builds passed.
+MultiVault 7/7 is prior full-tree evidence, not common XML in the final command.
+The combined unique result is 7,185 tests, 7,169 passed, 16 skipped, 0 failed
+(6,512 + 111 + 96 + 466; 6,510 + 111 + 82 + 466).
+
+Acceptance actual in the final snapshot: minimum-budget 18/18, Preview lifecycle
+and retry 33/33, RuntimeScale 11/11, provider limits 7/7, wire-limit diagnostics
+6/6, publication integration 25/25, monitor integration 4/4, backend lifecycle
+21/21, pooled-chest runtime 8/8, catalog native read wiring 50/50, and creation
+snapshot integration 22/22. `verifyModIdentity` executed and passed: all three
+jars carry `pingforit` / `Ping For It` / `0.5.0-pfi-beta2`. Common Javadoc was
+`UP-TO-DATE` after its earlier actual pass.
+
+PowerShell was 7.6.6 on Temurin `21.0.12.1`; `JAVA_TOOL_OPTIONS` was absent before
+and after, and the daemon-only JVM arguments retained `-Xmx3G`, UTF-8 flags and
+`-XX:TieredStopAtLevel=1`. An earlier attempt (`20261111-143107-941`) hit a JDK 21
+C2/javac crash before tests. A temporary `JAVA_TOOL_OPTIONS` Tier-1 workaround was
+later found to pollute an `EmergencyWriter` subprocess stderr path and caused one
+failure; the final run removed it and left build configuration and the JDK
+unchanged. This is an engineering validation limitation of the workaround, not a
+production bug or performance measurement.
+
+No live client/server, multiplayer, GPU/render, heap/GC/TPS or performance result
+follows from these Gradle invocations.
+
 ### Native-classpath, GPU and independent probes
 
 #### Supplemental native-classpath verification

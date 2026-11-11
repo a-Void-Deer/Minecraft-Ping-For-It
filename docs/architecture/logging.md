@@ -32,9 +32,13 @@ A site selects a minimum profile; the profile in effect for the logical side mus
 include that minimum. A selected minimum is only an eligibility condition. The
 effective profile controls the disclosure of the resulting report, so a failure
 reported through a normal minimum emits one report whose detail expands under
-`DEEP` or `DEBUG` instead of emitting a separate summary and detail pair. The
-minimum profile, backend severity and explicit channel are independent decisions;
-none substitutes for another.
+`DEEP` or `DEBUG` instead of emitting a separate summary and detail pair. A
+stable caller-owned summary, when the site supplies one, is present at every
+profile; higher disclosure adds context and exception detail rather than
+replacing that summary. If optional detail generation fails, that summary
+remains and the detail is marked unavailable. The minimum profile, backend
+severity and explicit channel are independent decisions; none substitutes for
+another.
 
 Backend severity remains assigned by the domain. `DEBUG` describes expected
 probing, ordinary absence, rejection or recovery detail when the domain calls
@@ -97,20 +101,25 @@ One terminal report follows this order:
 5. evaluate admitted context and format the report; and
 6. submit one bounded string to the backend.
 
-One limited ordering exception applies only to three existing inventory gate
-terminals—`inventory/snapshot`, `inventory/fluid-route`, and
-`inventory/snapshot-discovery`—whose established backend-disabled semantics
-consume an opportunity. For those terminals, one effective-profile snapshot and
-minimum check run first; the same report invocation then runs its existing
-domain admission callback; only after that does the terminal prepare the backend
-and check its enabled severity; the original snapshot context and failure are
-formatted last. A callback that returns null rejects the report without
-consulting the backend. A below-minimum site does not run the callback. A
-backend-disabled result leaves the callback's consumption in effect and does not
-roll it back. This exception adds no channel, rate limit or public admission
-permit, and retains neither the callback nor the original throwable. Ordinary
-explicit domain channels retain the after-backend admission order described
-below.
+One limited ordering exception applies only to the two remaining inventory gate
+terminals—`inventory/fluid-route` and `inventory/snapshot-discovery`—whose
+established backend-disabled semantics consume an opportunity. For those
+terminals, one effective-profile snapshot and minimum check run first; the same
+report invocation then runs its existing domain admission callback; only after
+that does the terminal prepare the backend and check its enabled severity; the
+original snapshot context and failure are formatted last. A callback that
+returns null rejects the report without consulting the backend. A
+below-minimum site does not run the callback. A backend-disabled result leaves
+the callback's consumption in effect and does not roll it back. This exception
+adds no channel, rate limit or public admission permit, and retains neither the
+callback nor the original throwable. Ordinary explicit domain channels retain
+the after-backend admission order described below.
+
+`inventory/snapshot` is not one of those terminals. Its limit reporting uses the
+inventory limit report path, which keeps the fixed site/reason and the
+effective-`DEBUG` interval-only bypass; it must not be routed back through the
+legacy domain gate, because that ordering would suppress the required
+per-occurrence limit reports.
 
 A report uses the profile snapshot taken when it starts; a concurrent profile
 change applies to later reports. The backend enabled check is a hint: it does not
@@ -148,6 +157,16 @@ next admitted report includes the accumulated count. Frequency control does not
 replace or remove detail permitted by the effective profile. The channel retains
 only bounded counters and timing facts, never an exception, world, provider
 handle or deferred context.
+
+A limit-handling site may report every occurrence only at effective `DEBUG` by
+bypassing an interval channel. The bypass consumes no interval admission and
+adds no suppressed count, and the report marks it explicitly. A domain channel
+is never bypassed and still runs its admission callback for every report,
+including through the inventory limit helper. Below
+`DEBUG`, the same site remains interval-limited. This opt-in changes neither the
+minimum profile nor backend severity, applies only to an occurrence that
+actually triggered limit handling, and keeps the one summary-plus-detail report
+structure. A successful or ordinary non-limit occurrence does not use it.
 
 An explicit domain channel runs its admission callback once after the terminal
 report passes the profile and backend checks. It adds no interval, clock or

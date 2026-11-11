@@ -3,8 +3,11 @@
 This topic owns the inventory domain of the versioned presentation subsystem:
 preview, tracking, incremental reads, detached source snapshot capture and
 schema, the bounded creation snapshot carried by an atomic inventory receipt,
-item and fluid variant identity, exact quantities, zero and identity-fallback
-rules, budget and sync policy, the session lane policy hint and its refresh
+the held Preview's attempt, retry and no-progress lifecycle, typed lane
+conditions and selection-failure feedback boundary, item and fluid variant
+identity, exact quantities, zero and identity-fallback
+rules, budget and sync policy, capacity and retained-structure admission, the
+session lane policy hint and its refresh
 boundary, source recovery deadlines, and the performance monitor's measurement
 meaning, lane attribution, non-interference, sampling lifetime, and HUD
 projection and presentation. The generic
@@ -393,6 +396,56 @@ true presentation epoch change keep their existing release boundaries and are
 not extended by this retention rule; cancellation remains owned by
 [network protocol](../network/protocol.md#inventory-previewtracking-route-inventory-v2).
 
+### Preview attempts, retry and no-progress watchdog
+
+A held Preview is one stable logical handle for its frozen target, face and
+target type. Each wire attempt has its own request id; a retry never changes the
+frozen input or reuses the failed request. Failure retires the attempt's rows,
+references and request ownership before the replacement is opened, so bounded
+retries do not accumulate request or lane quota. The selector's stable fence and
+status area belong to the logical handle, not to any one request id.
+
+After the first failed attempt, the client makes at most three additional
+attempts, one per fixed five-second retry delay measured on its monotonic clock
+from the preceding failure. A late tick starts at most one replacement attempt
+and does not catch up several missed deadlines in a burst. During the wait and
+the replacement attempt, the localized status shows the cause followed by the
+current retry ordinal and the maximum of three retries, for example
+`reason: Retrying...(1/3)`. The final failed attempt stops retrying and shows
+only the localized cause; it starts no further request and leaves no pending
+retry.
+
+An attempt also fails after a finite period without real progress while it is
+waiting for the session, opening, scanning or delivering. The attempt's first
+`OPENED` grant initializes the progress clock; a same-epoch view regrant
+preserves it rather than refreshing it. Only a newly accepted progress revision
+or a newly received data part refreshes that no-progress watchdog; a zero
+progress revision only declares the phase, and a repeated `DEFERRED` notice, a
+duplicate packet, a superseded attempt or an older presentation view cannot
+refresh the clock. A healthy large source is not cut off by a total-duration
+limit merely because its bounded scan spans many watchdog periods; per-tick
+work, memory, queue and wire budgets still apply. A stalled attempt that
+already has usable partial rows ends the affected lane as incomplete and keeps
+those rows instead of reopening and discarding them; only an attempt without a
+usable result consumes the retry sequence.
+
+A local watchdog stop installs a terminal fence on that same attempt. Late
+non-`INVALID` data, an ordinary same-epoch regrant or a stale progress notice
+cannot reopen the lane or return it to updating. A necessary `INVALID` outcome
+is still processed and retires the retained prefix, and a terminal
+`UNSUPPORTED` control for the stopped lane remains processable.
+
+A complete empty result, a usable partial row and a successful sibling lane are
+not failures and are not retried. A missing, stalled or unsupported optional
+`FLUID` lane does not reopen a completed or progressing `ITEM` lane; each lane's
+terminal state is independent.
+
+Cancellation, a target or selection change, selection release, a true
+presentation epoch change and disconnect stop the handle immediately. A queued
+retry is discarded, and no later attempt is opened. Wire `CLOSE` and the
+same-request cancellation exception remain owned by
+[network protocol](../network/protocol.md#inventory-previewtracking-route-inventory-v2).
+
 The preview-to-tracking handoff follows the existing create authority first:
 the server materializes an external candidate once, then binds the preview's
 original input to the committed target through both current provider-confirmed
@@ -492,6 +545,31 @@ absolute value per item key including zero. Dropping one sparse batch must not
 lose another key's latest value and must not repackage duplicates. Preview
 selection references support both normal and component-fallback forms, and
 component identity must work in both.
+
+### Selection outcome and tracking creation failure
+
+A selection attempt has one correlated terminal outcome, matched by its request
+and commit rather than only against the latest pending selection. A delayed
+outcome for an older commit still reports that attempt's own result and cannot
+be hidden by a newer selection. A repeated `SELECT` replays the stored outcome;
+it never materializes, stores or rate-charges a second time.
+
+A failed tracking creation shows exactly one dedicated localized failure line
+through [ping feedback](../../UI/ping-feedback.md#inventory-tracking-creation-failure),
+with the localized cause after its literal `[pingforit]` marker. This includes a
+typed server rejection and a local pre-dispatch refusal or transport failure.
+Duplicate or replayed outcomes do not repeat the line, and nothing automatically
+resends the selection. The cause is the stable inventory failure reason. The
+existing generic marker rejection remains unchanged for shared causes and the
+inventory-specific cause travels separately, as owned by
+[network protocol](../network/protocol.md#inventory-previewtracking-route-inventory-v2).
+
+A failure after marker storage is not a creation failure. The committed marker,
+its success outcome, atomic `CREATED` initial, receipt and lifetime are not
+undone or re-created by a later publication or delivery failure; only ordinary
+committed-state diagnostics apply. Synchronous `SELECT`, the atomic creation
+receipt, and the range, rate, channel, audience and marker-lifetime gates remain
+as defined by their owners.
 
 ## Creation snapshot receipt
 
@@ -1319,6 +1397,44 @@ Tracking baseline, and it carries no guarantee that every recipient receives
 the initial in the same tick. Insufficient admission may reject the create or
 leave bounded retry work; it is not an authorization denial.
 
+### Source capacity, catalogue growth and registration
+
+A source's total address capacity, its per-tick physical work and the explicit
+one-shot capture bound are independent. Total capacity is the maximum
+addressable source view, not a per-tick or per-request allowance. A healthy
+source may finish a bounded scan across as many ticks or periods as its actual
+progress and its memory, queue and wire budgets permit; it has no total-duration
+cutoff. Raising source capacity does not raise the tick allowance, the one-shot
+capture bound, either logical quota or any memory limit.
+
+Retained source, backend and publisher structures charge a finite base plus
+bounded growth admitted for the work and backing that is actually about to
+exist, rather than a maximum-key worst case up front. A replacement capacity
+reserves the complete new backing and the full old-to-new copy while the old
+backing keeps its existing charge; the old charge is released only by the
+ordinary replacement or retirement transition. Retired references, fold
+markers, journal capacity and consumer progress remain part of the admitted
+structure. Failed or refused growth, attempted copies and retirement keep their
+attempted work paid and do not refund an existing charge.
+
+A Tracking recipient's publisher registration charges its own bounded base plus
+the selected key and the bounded exact-to-aggregate overlap, then grows only for
+keys actually admitted. It does not reserve every key a Preview could produce,
+another consumer's lifetime keys or a whole-map maximum up front.
+
+An optional due-Preview or input-protection opportunity draws its reservation
+from the same runtime physical-work, work and memory ledgers used by the work it
+protects. It adds no unmetered budget or separate allowance and never queues or
+prioritizes a `SELECT` behind publication.
+
+The expanded finite ranges for these capacities remain the existing
+configuration leaves; no new key or mode is introduced, defaults stay unchanged,
+and finite-only and unlimited-mode rules keep their existing guards. An explicit
+unlimited mode removes only that leaf's configurable cap, while the finite
+internal work and memory guards and both logical quotas remain. The exact finite
+values, defaults and leaf-specific guards are owned by code and by
+[server configuration](../../config/server.md#inventory-policy-object).
+
 ### Source metadata and validation accounting
 
 Owned source metadata, including frozen views, member layouts and slot mappings,
@@ -1682,6 +1798,61 @@ open inventory list legitimately loading. The selector's cancellation and close
 response to a request that is no longer present is owned by
 [wheel](../picking/wheel.md#inventory-selection-stay-open); the inventory topic
 does not restate it.
+
+## Limit and failure diagnostics
+
+Inventory limits, deferrals, truncation, unsupported lanes and quality
+degradation use one inventory-owned stable reason vocabulary. A reason is a code
+identity, not provider text or an exception class; wire use is an explicit
+positive id, and local presentation uses its localized text. A reason carries no
+impact: the deciding operation supplies the observed consequence because the
+same cause can be a whole-Ping failure at one site and detail-only loss at
+another. The whole-Ping-unavailable impact uses the `NORMAL` minimum and retains
+its domain `WARN` severity; performance or quality degradation uses `DEEP`;
+detail-only loss uses `DEBUG`. Backend severity remains independent of the
+minimum profile and the reason. Within that one report, `DEEP` adds only short
+stage and lane handling, while `DEBUG` also adds the numeric request, commit,
+requested, used and limit associations. The summary stays short at every layer.
+
+Each reported failure condition has one fixed owning site and reason; the same
+condition is not reattributed to a capacity site at another call point. Each
+operation and reason at that site has its own fixed frequency channel; different
+sites, operations or reasons do not suppress one another. One event produces one
+report: a stable fixed summary plus the permitted higher-disclosure detail,
+never a separate summary and detail report. The stable summary remains when
+detail generation fails. Profiles, channel admission, bypass marking, disclosure
+and output isolation are owned by [diagnostics and logging](../logging.md).
+
+Losing locally retained client data under a client bound is a `DEEP` quality
+degradation, not a whole-Ping-unavailable `NORMAL` event: the Ping remains
+available with an incomplete local projection. A purely malformed or internally
+conflicting fragment uses its own invalid-input site and channel; it is never
+reported as capacity or a resource-limit event merely because a numeric bound
+appears in its detail.
+
+On wire and provider surfaces, a capacity diagnostic requires an actual positive
+size or count that exceeds a known maximum. The report carries a typed finite
+failure reason at its fixed bound/limit site. When decode is the sole consumer
+of that over-limit occurrence, it reports once at every `DEBUG` limit occurrence
+rather than deferring to a forwarding layer, and the event keeps the actual
+required value associated with the limiting value. Ordinary malformed,
+truncated or unknown-enum input remains the ordinary corrupt-packet channel; it
+is not promoted to `NORMAL` and never dumps its payload. Provider caps use
+independent fixed sites; a provider-actual required/limit pair is retained, a
+quality-route degradation is `DEEP`, and ordinary absence, a negative value or
+an invalid schema is not a capacity event.
+
+`NORMAL` and `DEEP` reports remain interval-limited. At effective `DEBUG`, a
+request that actually triggered limit handling reports every occurrence by
+bypassing its interval channel, and the report marks that bypass; the bypass
+consumes no interval admission and adds no suppressed count. A domain gate is
+never bypassed. A report without a limit trigger remains interval-limited at
+`DEBUG` as well. Limit handling does not change authority, admission, fallback,
+retry, publication or backend severity.
+
+Normal successful work is not a failure event. A lossless cache or replay
+eviction is not a rejection, and work that exactly reaches a legal maximum
+succeeds without a limit or rejection report.
 
 ## Performance monitoring
 

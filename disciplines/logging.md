@@ -238,12 +238,17 @@ replaces domain cadence, lifecycle, retry or recovery. Report at the consuming
 boundary while the exception is available; do not repeat consumed failures.
 
 `domainBeforeBackend` is not general-purpose and must not be chosen for a new
-site. Only the three existing inventory terminals use it to preserve
-backend-disabled opportunity semantics: profile snapshot first, existing gate,
-backend preparation and severity, then context/failure formatting. Null denies;
+site. Only the two remaining inventory terminals use it to preserve
+backend-disabled opportunity semantics: `inventory/fluid-route` and
+`inventory/snapshot-discovery`. Profile snapshot first, existing gate, backend
+preparation and severity, then context/failure formatting. Null denies;
 backend-disabled output does not refund the gate; it cannot combine with a
-channel. Follow the [report pipeline exception](../docs/architecture/logging.md#report-pipeline)
-rather than copying a gate algorithm or adding a fourth helper.
+channel. `inventory/snapshot` is not one of them: its limit reporting uses the
+inventory limit path with a fixed site/reason and effective-`DEBUG`
+interval-only bypass, and a legacy domain gate must not be restored there. The
+limit helper never bypasses a domain channel. Follow the
+[report pipeline exception](../docs/architecture/logging.md#report-pipeline)
+rather than copying a gate algorithm or adding another domain-gate helper.
 
 ## Profile publication and runtime ownership
 
