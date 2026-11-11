@@ -101,6 +101,7 @@ class InventoryS2CPacketTest {
 		buf.writeBoolean(false);
 		buf.writeBoolean(false);
 		buf.writeLong(0L); buf.writeBoolean(false); buf.writeBoolean(false);
+		buf.writeBoolean(false); // no quality reason
 	}
 
 	private static void writeStreamPrefix(FriendlyByteBuf frame, int partIndex, int partCount) {
@@ -118,6 +119,7 @@ class InventoryS2CPacketTest {
 		frame.writeVarInt(partCount);
 		frame.writeBoolean(false);
 		MarkerPacketCodec.writeEnum(frame, InventoryS2CPacket.Status.READY);
+		frame.writeBoolean(false); // no lane failure reason
 		frame.writeLong(0L);
 	}
 
@@ -174,6 +176,7 @@ class InventoryS2CPacketTest {
 			frame.writeBoolean(true);
 		}
 		frame.writeUtf(status);
+		frame.writeBoolean(false); // no lane failure reason
 		frame.writeLong(8); // checksum
 		if (!kind.equals("STATUS")) {
 			FriendlyByteBuf payload = buffer();
@@ -192,6 +195,7 @@ class InventoryS2CPacketTest {
 					payload.writeLong(11); // group revision
 					payload.writeBoolean(false); // no group replacement
 					payload.writeBoolean(false); // no ping type
+					payload.writeBoolean(false); // no quality reason
 				}
 				frame.writeVarInt(payload.readableBytes());
 				frame.writeBytes(payload);
@@ -248,8 +252,9 @@ class InventoryS2CPacketTest {
 		assertEquals("pingforit-s2c:inventory-v2", InventoryS2CPacket.PACKET_ID.toString());
 		assertEquals(List.of(InventoryS2CPacket.Kind.OFFER, InventoryS2CPacket.Kind.POLICY, InventoryS2CPacket.Kind.SELECTED, InventoryS2CPacket.Kind.REJECT, InventoryS2CPacket.Kind.PREVIEW,
 			InventoryS2CPacket.Kind.SNAPSHOT, InventoryS2CPacket.Kind.STREAM,
-			InventoryS2CPacket.Kind.STATUS, InventoryS2CPacket.Kind.HEARTBEAT, InventoryS2CPacket.Kind.OPENED),
-			Arrays.asList(InventoryS2CPacket.Kind.values()), "OPENED is appended without changing an existing ordinal");
+			InventoryS2CPacket.Kind.STATUS, InventoryS2CPacket.Kind.HEARTBEAT, InventoryS2CPacket.Kind.OPENED,
+			InventoryS2CPacket.Kind.OPEN_REJECTED, InventoryS2CPacket.Kind.PREVIEW_STATE),
+			Arrays.asList(InventoryS2CPacket.Kind.values()), "new controls are appended without changing an existing ordinal");
 		assertEquals(List.of(InventoryS2CPacket.Status.UPDATING, InventoryS2CPacket.Status.READY,
 			InventoryS2CPacket.Status.UNCERTAIN, InventoryS2CPacket.Status.INCOMPLETE,
 			InventoryS2CPacket.Status.INVALID, InventoryS2CPacket.Status.COMPONENT_TOO_LONG),
@@ -961,7 +966,8 @@ class InventoryS2CPacketTest {
 	@Test void exactMeasurementMatchesIndependentVanillaUtfCodecForEveryKindAndMaximalMultibyteEntries() {
 		var max = new InventoryS2CPacket.Entry("é".repeat(128), "中".repeat(85), "😀".repeat(256),
 			"é中😀".repeat(14563) + "éé", Long.MAX_VALUE, Long.MAX_VALUE, true,
-			InventoryS2CPacket.Status.COMPONENT_TOO_LONG, Long.MAX_VALUE, true, "é".repeat(128));
+			InventoryS2CPacket.Status.COMPONENT_TOO_LONG, Long.MAX_VALUE, true, "é".repeat(128),
+			nx.pingwheel.common.presentation.inventory.InventoryFailureReason.DISPLAY_LIMIT);
 		assertEquals(InventoryS2CPacket.MAX_DISPLAY_BYTES - 1, io.netty.buffer.ByteBufUtil.utf8Bytes(max.displayJson()));
 		var entries = List.of(max, entry("plain", "minecraft:stone", 0, 0),
 			new InventoryS2CPacket.Entry("surrogates", "minecraft:stone", "\ud800\ud800\udc00", "\ud800é\udc00", 1, 1, false, null));
@@ -969,13 +975,20 @@ class InventoryS2CPacketTest {
 			InventoryS2CPacket.offer(1, new InventoryS2CPacket.Offer(10, 10, 10, 0)),
 			InventoryS2CPacket.policy(1, 100, 1, java.util.Set.of("location", "entity_block", "dropped_item", "block", "entity")),
 			InventoryS2CPacket.selected(1, 2, 3, new MarkerId(4), null),
-			InventoryS2CPacket.selected(1, 2, 3, null, nx.pingwheel.common.marker.MarkerRejectReason.TARGET_GONE),
+			InventoryS2CPacket.selected(1, 2, 3, null, nx.pingwheel.common.marker.MarkerRejectReason.TARGET_GONE,
+				nx.pingwheel.common.presentation.inventory.InventoryFailureReason.TARGET_GONE),
 			InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 1, 2, null, 3, 4, 5, 127, 128, true, InventoryS2CPacket.Status.READY, 6, entries),
 			InventoryS2CPacket.data(InventoryS2CPacket.Kind.SNAPSHOT, 1, 2, new MarkerId(4), 3, 4, 5, 128, 129, true, InventoryS2CPacket.Status.UNCERTAIN, 6, entries),
-			InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, 1, 2, new MarkerId(4), 3, 4, 5, 0, 1, false, InventoryS2CPacket.Status.UPDATING, 6, List.of()),
-			InventoryS2CPacket.status(1, 2, new MarkerId(4), 3, 4, 5, InventoryS2CPacket.Status.INVALID, 6),
+			InventoryS2CPacket.data(InventoryS2CPacket.Kind.STREAM, 1, 2, new MarkerId(4), 3, 4, 5, 0, 1, false,
+				InventoryS2CPacket.Status.INCOMPLETE, 6, List.of(), nx.pingwheel.common.presentation.inventory.InventoryFailureReason.VARIANT_LIMIT),
+			InventoryS2CPacket.status(1, 2, new MarkerId(4), 3, 4, 5, InventoryS2CPacket.Status.INVALID, 6,
+				nx.pingwheel.common.presentation.inventory.InventoryFailureReason.SOURCE_CHANGED),
 			InventoryS2CPacket.heartbeat(1, 2, new MarkerId(4), 3, 4, 5, 6),
-			InventoryS2CPacket.opened(1, 100, 1, 2, 3));
+			InventoryS2CPacket.opened(1, 100, 1, 2, 3),
+			InventoryS2CPacket.openRejected(1, 100, 1, 2, nx.pingwheel.common.presentation.inventory.InventoryFailureReason.REQUEST_CAPACITY),
+			InventoryS2CPacket.previewState(nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID,
+				1, 100, 1, 2, 1, 0, InventoryS2CPacket.PreviewPhase.ADMISSION, InventoryS2CPacket.PreviewCondition.DEFERRED,
+				nx.pingwheel.common.presentation.inventory.InventoryFailureReason.MEMORY_LIMIT));
 		for (var packet : packets) {
 			var vanilla = buffer(); var actual = buffer();
 			try {
@@ -1201,7 +1214,8 @@ class InventoryS2CPacketTest {
 	private static void writeVanillaFrame(FriendlyByteBuf buf, InventoryS2CPacket packet) {
 		MarkerPacketCodec.writeEnum(buf, packet.kind()); buf.writeVarInt(packet.protocol());
 		buf.writeLong(packet.epoch()); buf.writeLong(packet.requestId()); buf.writeLong(packet.presentationEpoch()); buf.writeLong(packet.view());
-		if (packet.kind() != InventoryS2CPacket.Kind.OFFER && packet.kind() != InventoryS2CPacket.Kind.OPENED)
+		if (packet.kind() != InventoryS2CPacket.Kind.OFFER && packet.kind() != InventoryS2CPacket.Kind.OPENED
+			&& packet.kind() != InventoryS2CPacket.Kind.OPEN_REJECTED)
 			buf.writeByte(packet.resourceKind().wireId());
 		switch (packet.kind()) {
 			case OFFER -> {
@@ -1210,6 +1224,13 @@ class InventoryS2CPacketTest {
 				buf.writeVarInt(offer.effectiveDisplayBytes()); buf.writeVarInt(offer.effectiveFrameBytes());
 			}
 			case OPENED -> buf.writeByte(packet.laneBits());
+			case OPEN_REJECTED -> buf.writeVarInt(packet.failureReason().wireId());
+			case PREVIEW_STATE -> {
+				buf.writeLong(packet.controlRevision()); buf.writeLong(packet.progressRevision());
+				MarkerPacketCodec.writeEnum(buf, packet.phase()); MarkerPacketCodec.writeEnum(buf, packet.condition());
+				buf.writeBoolean(packet.failureReason() != null);
+				if (packet.failureReason() != null) buf.writeVarInt(packet.failureReason().wireId());
+			}
 			case POLICY -> {
 				buf.writeVarInt(packet.allowedTypes().size());
 				for (String type : packet.allowedTypes().stream().sorted().toList()) buf.writeUtf(type, 256);
@@ -1218,7 +1239,11 @@ class InventoryS2CPacketTest {
 				buf.writeLong(packet.commitId());
 				buf.writeBoolean(packet.markerId() != null);
 				if (packet.markerId() != null) buf.writeLong(packet.markerId().value());
-				if (packet.kind() == InventoryS2CPacket.Kind.REJECT) MarkerPacketCodec.writeEnum(buf, packet.rejection());
+				if (packet.kind() == InventoryS2CPacket.Kind.REJECT) {
+					MarkerPacketCodec.writeEnum(buf, packet.rejection());
+					buf.writeBoolean(packet.failureReason() != null);
+					if (packet.failureReason() != null) buf.writeVarInt(packet.failureReason().wireId());
+				}
 			}
 			case STATUS, HEARTBEAT, PREVIEW, SNAPSHOT, STREAM -> {
 				buf.writeBoolean(packet.markerId() != null);
@@ -1226,7 +1251,11 @@ class InventoryS2CPacketTest {
 				buf.writeLong(packet.baselineId()); buf.writeLong(packet.statusRevision()); buf.writeLong(packet.watermark());
 				boolean data = packet.kind() == InventoryS2CPacket.Kind.PREVIEW || packet.kind() == InventoryS2CPacket.Kind.SNAPSHOT || packet.kind() == InventoryS2CPacket.Kind.STREAM;
 				if (data) { buf.writeVarInt(packet.partIndex()); buf.writeVarInt(packet.partCount()); buf.writeBoolean(packet.completeScan()); }
-				if (packet.kind() != InventoryS2CPacket.Kind.HEARTBEAT) MarkerPacketCodec.writeEnum(buf, packet.status());
+				if (packet.kind() != InventoryS2CPacket.Kind.HEARTBEAT) {
+					MarkerPacketCodec.writeEnum(buf, packet.status());
+					buf.writeBoolean(packet.failureReason() != null);
+					if (packet.failureReason() != null) buf.writeVarInt(packet.failureReason().wireId());
+				}
 				buf.writeLong(packet.checksum());
 				if (data) {
 					var payload = buffer();
@@ -1239,6 +1268,8 @@ class InventoryS2CPacketTest {
 							payload.writeBoolean(entry.quality() != null); if (entry.quality() != null) MarkerPacketCodec.writeEnum(payload, entry.quality());
 							payload.writeLong(entry.groupRevision()); payload.writeBoolean(entry.replaceGroup()); payload.writeBoolean(entry.itemPingType() != null);
 							if (entry.itemPingType() != null) payload.writeUtf(entry.itemPingType(), 256);
+							payload.writeBoolean(entry.qualityReason() != null);
+							if (entry.qualityReason() != null) payload.writeVarInt(entry.qualityReason().wireId());
 						}
 						buf.writeVarInt(payload.readableBytes()); buf.writeBytes(payload);
 					} finally { payload.release(); }

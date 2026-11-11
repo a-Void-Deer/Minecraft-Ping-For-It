@@ -58,6 +58,11 @@ public final class DiagnosticChannel {
 		return name;
 	}
 
+	/** Only interval channels may be bypassed by an every-occurrence DEBUG report. */
+	boolean isInterval() {
+		return domainGate == null;
+	}
+
 	Admission admit(DiagnosticSide side) {
 		if (domainGate != null) {
 			return domainGate.getAsBoolean() ? new Admission(true, 0) : new Admission(false, 0);
