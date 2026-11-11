@@ -415,6 +415,20 @@ current retry ordinal and the maximum of three retries, for example
 only the localized cause; it starts no further request and leaves no pending
 retry.
 
+A failure whose typed reason is exactly `SOURCE_UNAVAILABLE` — the source is
+missing or otherwise unavailable for this Preview, not an empty result — is
+terminal for its resource lane in the current held Preview. The handle stops
+retrying that lane immediately: it shows the localized cause without a retry
+ordinal, starts no replacement attempt, and presents the lane as unavailable
+instead of consuming the remaining retry sequence. Only the affected lane stops;
+a sibling lane that is available or still pending keeps its own lane state and
+remains usable, and the stop neither closes the logical handle nor cancels that
+sibling. Inventory Tracking is unchanged: an existing Ping follows the
+[source identity, invalidation and recovery](#source-identity-invalidation-and-recovery)
+rules, including recovery before its hard deadline. A later held interaction
+opens a fresh logical Preview and may request the same source again; the stopped
+lane never resumes within the current handle.
+
 An attempt also fails after a finite period without real progress while it is
 waiting for the session, opening, scanning or delivering. The attempt's first
 `OPENED` grant initializes the progress clock; a same-epoch view regrant

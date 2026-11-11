@@ -4,6 +4,7 @@
 
 Additional requirements for this file: 
 - Clear manual retest steps (or multiple step groups) should be provided to facilitate retesting.
+- User may delete the relevant entries after completing manual verification. Do not take this as a signal that further writing is not allowed.
 - This document follows the style requirements of docs/AGENTS.md.
 
 ## Pending manual and integration matrix

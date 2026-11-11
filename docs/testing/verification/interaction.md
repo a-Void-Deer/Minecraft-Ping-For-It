@@ -358,7 +358,10 @@ an oblique slot entry, other GUI scales and deadzone radii, translation to the
 returned centre, one trail seed, stationary-frame and deadzone behavior, OFF
 content intent, item-clearance repositioning, ancestor breadcrumbs, qualified
 turn entry, content measurement reuse, GUI-scale handoff, font/capacity refresh,
-and custom fractions in both orientations. These are source-reviewed
+and custom fractions in both orientations. Item-submenu placement checks that
+the child centre stays diagonally below the selected row by the measured
+clearance on entry, clearance update and resize, while the row remains the
+return anchor. These are source-reviewed
 session/input/layout fixtures, not recorded test runs or native-window delivery.
 The fixture does not instantiate the complete `ClientPingRuntime`, a GLFW
 window, `GuiGraphics` or GPU submission; native-window and gameplay confirmation

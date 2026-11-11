@@ -119,7 +119,7 @@ validation and the preference relationships below.
 | `spatialSelector.trailOpacity` | integer, percent | Independent opacity multiplier applied only to the trail. Zero makes the trail fully invisible without changing its history or gesture selection. |
 | `spatialSelector.reduceMotion` | boolean | Reduces selector animation without changing gesture timing or selection. |
 | `spatialSelector.preciseCapturePeriodTicks` | positive integer, ticks | Live candidate capture period for the Precise branch while it is active. A change applies to the next hold, not to the running one. |
-| `spatialSelector.contentIntentEnabled` | boolean | Whether the Content hierarchy offers its additional property and inventory-item Ping Type selection menus; while disabled, an otherwise selectable property or a directly released inventory item requests the Attention annotation instead, without changing the whole-marker Ping Type. Frozen into the held gesture's snapshot like the other selector preferences. |
+| `spatialSelector.contentIntentEnabled` | boolean | Whether the Details hierarchy offers its additional property and inventory-item Ping Type selection menus; while disabled, an otherwise selectable property or a directly released inventory item requests the Attention annotation instead, without changing the whole-marker Ping Type. Frozen into the held gesture's snapshot like the other selector preferences. |
 | `spatialSelector.inventorySelectionStayOpenEnabled` | boolean | Opt-in stay-open session for an open selector's inventory list and item menu, disabled by default. [Wheel](../architecture/picking/wheel.md#inventory-selection-stay-open) owns the behavior. |
 
 The [inventory-list sizing contract](../architecture/picking/wheel.md#inventory-list)

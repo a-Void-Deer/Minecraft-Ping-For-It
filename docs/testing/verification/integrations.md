@@ -522,7 +522,7 @@ Sable-specific gaps remain for:
   loaded-member checks, a live multi-member content capability, and the
   content-read diagnostics; the client received-chunk and pending-prediction
   gates on a provider-resolved physical block and content preview through the
-  wheel's content branch in a live client/server session, including the bounded
+  wheel's Details branch in a live client/server session, including the bounded
   server fallback and its GUI and network delivery, remain unexercised;
 - provider materialization, tracking-point reference counting, rollback and
   release, including the existing empty-audience cleanup path documented under

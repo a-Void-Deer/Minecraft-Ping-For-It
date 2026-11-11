@@ -21,7 +21,7 @@ When the snapshot is ready, resolve its Target Type under the
 [catalog matching rules](../identity/catalogs.md). Freeze the resolved Target
 and Target Type for the rest of the interaction. Camera motion, target motion,
 and another entity entering the crosshair must not retarget or change the
-ordinary short-press, Danger, Intent, Content, or Cancel action. Release and
+ordinary short-press, Danger, Intent, Details, or Cancel action. Release and
 selection do not initiate a new selection ray. The Precise branch is the
 confirmed exception: its candidates are captured live from the current camera
 ray while that branch is active
