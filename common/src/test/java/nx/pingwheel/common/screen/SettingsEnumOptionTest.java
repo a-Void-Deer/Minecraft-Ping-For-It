@@ -12,6 +12,7 @@ import net.minecraft.network.chat.FormattedText;
 import net.minecraft.network.chat.contents.TranslatableContents;
 import net.minecraft.util.FormattedCharSequence;
 import nx.pingwheel.common.config.ClientConfig;
+import nx.pingwheel.common.config.CooldownFeedbackMode;
 import nx.pingwheel.common.config.EntityBlockRenderMode;
 import nx.pingwheel.common.config.PlayerInfoMode;
 import nx.pingwheel.common.config.TeamColorMode;
@@ -35,12 +36,14 @@ class SettingsEnumOptionTest {
 			"settings.pingforit.format.name_value", "%1$s: %2$s",
 			"settings.pingforit.player_info_mode", "Author label",
 			"settings.pingforit.team_color_mode", "Team formatting",
-			"settings.pingforit.entity_block_render_mode", "Entity geometry")));
+			"settings.pingforit.entity_block_render_mode", "Entity geometry",
+			"settings.pingforit.cooldown_feedback", "Cooldown notice")));
 		try {
 			var config = new ClientConfig();
 			config.setPlayerInfoMode(PlayerInfoMode.ALWAYS);
 			config.setTeamColorMode(TeamColorMode.FULL);
 			config.setEntityBlockRenderMode(EntityBlockRenderMode.ALL);
+			config.setCooldownFeedback(CooldownFeedbackMode.CHAT);
 			var screen = new SettingsScreen(config, null);
 			assertEnum(screen.getPlayerInfoModeOption(), "settings.pingforit.player_info_mode", "Author label",
 				PlayerInfoMode.DISABLED, PlayerInfoMode.ALWAYS, PlayerInfoMode.COMPACT);
@@ -48,11 +51,29 @@ class SettingsEnumOptionTest {
 				TeamColorMode.values());
 			assertEnum(screen.getEntityBlockRenderModeOption(), "settings.pingforit.entity_block_render_mode", "Entity geometry",
 				EntityBlockRenderMode.values());
+			assertEnumWithSharedTooltip(screen.getCooldownFeedbackOption(),
+				"settings.pingforit.cooldown_feedback.tooltip", "Cooldown notice", CooldownFeedbackMode.values());
 			assertEquals(PlayerInfoMode.ALWAYS, config.getPlayerInfoMode());
 			assertEquals(TeamColorMode.FULL, config.getTeamColorMode());
 			assertEquals(EntityBlockRenderMode.ALL, config.getEntityBlockRenderMode());
+			assertEquals(CooldownFeedbackMode.CHAT, config.getCooldownFeedback());
 		} finally {
 			Language.inject(previous);
+		}
+	}
+
+	@SafeVarargs
+	private static <E extends Enum<E>> void assertEnumWithSharedTooltip(OptionInstance<E> option,
+		String tooltipKey, String caption, E @Unmodifiable ... values) {
+		CycleButton<?> nativeButton = assertInstanceOf(CycleButton.class, option.createButton(null, 0, 0, 310));
+		CycleButton<E> button = typedButton(nativeButton);
+		assertCaption(button, caption, option.get());
+		for (E value : values) {
+			button.setValue(value);
+			assertCaption(button, caption, value);
+			var tooltip = assertInstanceOf(Tooltip.class, button.getTooltip());
+			Component help = tooltipMessage(tooltip);
+			assertEquals(tooltipKey, assertInstanceOf(TranslatableContents.class, help.getContents()).getKey());
 		}
 	}
 

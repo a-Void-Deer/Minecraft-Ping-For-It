@@ -24,6 +24,7 @@ import nx.pingwheel.common.network.InventoryS2CPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.platform.TransportHandoff;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -40,6 +41,7 @@ class InventoryMonitorIntegrationTest {
 		var monitor = new ServerInventoryMonitor(new MonitorTuning(1, 4), () -> 0);
 		monitor.resetGeneration(1); monitor.configure(true, false);
 		var reads = new AtomicInteger(); var sends = new AtomicInteger();
+		var attemptedPackets = new java.util.ArrayList<InventoryS2CPacket>();
 		var settings = InventorySettings.serverDefaults();
 		try (var f = new InventoryPublicationBackendFixture((input, display) -> Optional.of(
 			new InventoryRuntimeTest.Source(input, reads, 1)), settings, TargetKey.from(InventoryRuntimeTest.TARGET), monitor)) {
@@ -48,20 +50,43 @@ class InventoryMonitorIntegrationTest {
 				@Override public void sendToServer(IPacket packet) { fail("unexpected C2S"); }
 				@Override public void sendToClient(IPacket packet, ServerPlayer recipient) { fail("no legacy fallback"); }
 				@Override public TransportHandoff sendToClientObserved(IPacket packet, ServerPlayer recipient) {
-					assertSame(player, recipient); sends.incrementAndGet(); return outcome;
+					assertSame(player, recipient); sends.incrementAndGet();
+					attemptedPackets.add(assertInstanceOf(InventoryS2CPacket.class, packet)); return outcome;
 				}
 			};
 			f.observed = (recipient, packet) -> {
-				f.send(recipient, packet);
-				return network.sendToClientObserved(packet, player);
+				TransportHandoff handoff = network.sendToClientObserved(packet, player);
+				if (handoff != TransportHandoff.NOT_HANDED_OFF) f.send(recipient, packet);
+				return handoff;
 			};
 			f.open(InventoryPublicationBackendFixture.A, InventoryRuntimeTest.TARGET, BlockFace.NORTH, 0);
 			f.backend.tick(0, settings);
 			var first = Objects.requireNonNull(f.backend.completeMonitorTick(0));
-			assertTrue(sends.get() > 0); assertTrue(f.frames.stream().anyMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW));
+			assertTrue(sends.get() > 0);
+			assertEquals(outcome != TransportHandoff.NOT_HANDED_OFF, f.frames.stream().anyMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW));
 			int attempts = sends.get();
+			int attemptStart = attemptedPackets.size();
+			var opened = attemptedPackets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OPENED).findFirst().orElseThrow();
 			f.backend.tick(1, settings); f.backend.completeMonitorTick(1);
-			assertEquals(attempts, sends.get(), "normal observation must not add retry or fallback publication");
+			if (outcome == TransportHandoff.NOT_HANDED_OFF) {
+				@Unmodifiable List<InventoryS2CPacket> retriedOpened = attemptedPackets.subList(attemptStart, attemptedPackets.size()).stream()
+					.filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OPENED && packet.requestId() == opened.requestId()).toList();
+				assertFalse(retriedOpened.isEmpty());
+				assertTrue(retriedOpened.stream().allMatch(packet -> packet == opened), "every retry keeps the exact pre-encoding OPENED owner");
+				assertEquals(attemptedPackets.size() - attemptStart, sends.get() - attempts); assertEquals(0, reads.get());
+				assertTrue(f.frames.stream().noneMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.OPENED),
+					"a refused attempt reaches neither the wire endpoint nor the client's grant");
+				f.observed = (recipient, packet) -> {
+					attemptedPackets.add(packet); f.send(recipient, packet); sends.incrementAndGet(); return TransportHandoff.HANDED_OFF;
+				};
+				for (int tick = 2; tick <= 12 && f.frames.stream().noneMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW); tick++) f.backend.tick(tick, settings);
+				assertTrue(f.frames.stream().anyMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW)); assertEquals(1, reads.get());
+				assertTrue(attemptedPackets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OPENED)
+					.allMatch(packet -> packet == opened), "the eventual handoff still belongs to the retained owner");
+				f.backend.tick(13, settings);
+				assertEquals(1, f.frames.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OPENED).count(),
+					"successful handoff retires this owner exactly once");
+			} else assertEquals(attempts, sends.get(), "accepted or legacy-unobserved progress is not retried");
 			var counter = outcome == TransportHandoff.HANDED_OFF ? Counter.HANDOFF_FRAMES
 				: outcome == TransportHandoff.NOT_HANDED_OFF ? Counter.NOT_HANDED_OFF_FRAMES : Counter.UNOBSERVED_HANDOFF_FRAMES;
 			assertTrue(first.preview().counter(counter).value() > 0);

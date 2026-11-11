@@ -63,6 +63,7 @@ Numbers use JSON numeric form. Units are stated where meaningful.
 | `directionIndicatorVisible` | boolean | Whether the off-screen direction indicator is visible. |
 | `pingSize` | number | Local visual scale for marker and direction-indicator presentation. |
 | `configurationNoticeSize` | number | Local visual size for target-selection toggle notices. |
+| `cooldownFeedback` | `ACTIONBAR`, `CHAT`, or `HIDDEN` | Local placement of the courtesy-cooldown notice: the action bar, the chat, or no visible notice. This is a display preference and does not change the courtesy gate; [ping feedback](../UI/ping-feedback.md#courtesy-cooldown-notice) owns the notice's trigger, text, and color. Its persisted spelling uses the uppercase enum value. When decoding persisted input, an explicit `null` or unknown value normalizes to the default placement; a missing field is initialized by the config model. |
 | `markerDisplayDuration` | integer, seconds | Local marker-display-duration preference. A nonzero value is the local display duration in seconds; serialized `0` means each marker follows its frozen server-side duration, rather than a literal zero-duration display. [Client marker state](../architecture/markers/client-state.md) owns the resulting state behavior. |
 | `raycastDistance` | number | Native local raycast cap; [range](../architecture/picking/range.md) owns capture-range composition. Its current screen exposure is owned by the [configuration UI](../UI/settings-screen.md). |
 
@@ -118,7 +119,7 @@ validation and the preference relationships below.
 | `spatialSelector.trailOpacity` | integer, percent | Independent opacity multiplier applied only to the trail. Zero makes the trail fully invisible without changing its history or gesture selection. |
 | `spatialSelector.reduceMotion` | boolean | Reduces selector animation without changing gesture timing or selection. |
 | `spatialSelector.preciseCapturePeriodTicks` | positive integer, ticks | Live candidate capture period for the Precise branch while it is active. A change applies to the next hold, not to the running one. |
-| `spatialSelector.contentIntentEnabled` | boolean | Whether the Content hierarchy offers its additional property and inventory-item Ping Type selection menus; while disabled, an otherwise selectable property or a directly released inventory item requests the Attention annotation instead, without changing the whole-marker Ping Type. Frozen into the held gesture's snapshot like the other selector preferences. |
+| `spatialSelector.contentIntentEnabled` | boolean | Whether the Details hierarchy offers its additional property and inventory-item Ping Type selection menus; while disabled, an otherwise selectable property or a directly released inventory item requests the Attention annotation instead, without changing the whole-marker Ping Type. Frozen into the held gesture's snapshot like the other selector preferences. |
 | `spatialSelector.inventorySelectionStayOpenEnabled` | boolean | Opt-in stay-open session for an open selector's inventory list and item menu, disabled by default. [Wheel](../architecture/picking/wheel.md#inventory-selection-stay-open) owns the behavior. |
 
 The [inventory-list sizing contract](../architecture/picking/wheel.md#inventory-list)

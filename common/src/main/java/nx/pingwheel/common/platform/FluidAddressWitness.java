@@ -18,7 +18,7 @@ import org.jetbrains.annotations.Unmodifiable;
  */
 @NotNullByDefault
 public final class FluidAddressWitness {
-	public static final int MAX_REFERENCES = 4097;
+	public static final int MAX_REFERENCES = 16385;
 
 	/** Code-fixed vector interpretations; these are not wire or persistent schema identifiers. */
 	@NotNullByDefault

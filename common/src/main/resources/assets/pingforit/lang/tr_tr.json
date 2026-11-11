@@ -1,11 +1,11 @@
 {
 	"pingforit.inventory.quantity.decimal_separator": ",",
-	"pingforit.inventory.group.contents": "İçerik",
+	"pingforit.inventory.group.contents": "Envanter",
 	"pingforit.inventory.group.item": "Eşyalar",
 	"pingforit.inventory.group.fluid": "Sıvılar",
 	"pingforit.inventory.unknown_fluid": "Bilinmeyen sıvı",
 	"settings.pingforit.presentation.field.pingforit_inventory_fluids.name": "Envanter sıvıları",
-	"settings.pingforit.presentation.field.pingforit_inventory_fluids.description": "Sunucu tarafından yetkilendirilen sıvı önizlemesi ve seçilen sıvının takibi. Varsayılan olarak etkin.",
+	"settings.pingforit.presentation.field.pingforit_inventory_fluids.description": "Kapların sıvı içeriği.",
 	"presentation.pingforit.format.fluid_amount": "%s — %s",
 	"pingforit.inventory.quantity.scale_style": "western",
 	"pingforit.inventory.quantity.approximate": "≈%s",
@@ -18,6 +18,61 @@
 	"pingforit.inventory.quantity.cjk_4": "%s万 B",
 	"pingforit.inventory.quantity.cjk_8": "%s亿 B",
 	"pingforit.inventory.quantity.cjk_12": "%s万亿 B",
+	"pingforit.inventory.reason.target_gone": "Hedef kayboldu",
+	"pingforit.inventory.reason.out_of_range": "Menzil dışında",
+	"pingforit.inventory.reason.field_denied": "Alan erişimi reddedildi",
+	"pingforit.inventory.reason.source_authority_denied": "Kaynak izni yok",
+	"pingforit.inventory.reason.unsupported_context": "Desteklenmeyen bağlam",
+	"pingforit.inventory.reason.unsupported_lane": "Desteklenmeyen kaynak türü",
+	"pingforit.inventory.reason.source_unavailable": "Kaynak kullanılamıyor",
+	"pingforit.inventory.reason.source_changed": "Kaynak değişti",
+	"pingforit.inventory.reason.provider_failure": "Sağlayıcı hatası",
+	"pingforit.inventory.reason.session_capacity": "Oturum kapasitesi doldu",
+	"pingforit.inventory.reason.request_capacity": "İstek kapasitesi doldu",
+	"pingforit.inventory.reason.target_capacity": "Hedef kapasitesi doldu",
+	"pingforit.inventory.reason.tracking_capacity": "Takip kapasitesi doldu",
+	"pingforit.inventory.reason.consumer_capacity": "Tüketici kapasitesi doldu",
+	"pingforit.inventory.reason.round_capacity": "Tur kapasitesi doldu",
+	"pingforit.inventory.reason.publisher_capacity": "Yayın kapasitesi doldu",
+	"pingforit.inventory.reason.control_capacity": "Kontrol kapasitesi doldu",
+	"pingforit.inventory.reason.memory_limit": "Bellek sınırına ulaşıldı",
+	"pingforit.inventory.reason.probe_limit": "Yoklama sınırına ulaşıldı",
+	"pingforit.inventory.reason.provider_work_limit": "Sağlayıcı çalışma sınırına ulaşıldı",
+	"pingforit.inventory.reason.item_work_limit": "Öğe çalışma sınırına ulaşıldı",
+	"pingforit.inventory.reason.physical_slot_limit": "Fiziksel yuva sınırına ulaşıldı",
+	"pingforit.inventory.reason.logical_slot_limit": "Mantıksal yuva sınırına ulaşıldı",
+	"pingforit.inventory.reason.variant_limit": "Varyant sınırına ulaşıldı",
+	"pingforit.inventory.reason.catalog_bytes_limit": "Katalog bayt sınırına ulaşıldı",
+	"pingforit.inventory.reason.journal_limit": "Günlük sınırına ulaşıldı",
+	"pingforit.inventory.reason.snapshot_limit": "Anlık görüntü sınırına ulaşıldı",
+	"pingforit.inventory.reason.entry_limit": "Girdi sınırına ulaşıldı",
+	"pingforit.inventory.reason.display_limit": "Görüntüleme sınırına ulaşıldı",
+	"pingforit.inventory.reason.frame_limit": "Çerçeve sınırına ulaşıldı",
+	"pingforit.inventory.reason.queue_limit": "Kuyruk sınırına ulaşıldı",
+	"pingforit.inventory.reason.wire_limit": "İletim sınırına ulaşıldı",
+	"pingforit.inventory.reason.native_list_limit": "Yerel liste sınırına ulaşıldı",
+	"pingforit.inventory.reason.native_node_limit": "Yerel düğüm sınırına ulaşıldı",
+	"pingforit.inventory.reason.native_array_limit": "Yerel dizi sınırına ulaşıldı",
+	"pingforit.inventory.reason.native_map_limit": "Yerel eşleme sınırına ulaşıldı",
+	"pingforit.inventory.reason.native_work_limit": "Yerel çalışma sınırına ulaşıldı",
+	"pingforit.inventory.reason.native_depth_limit": "Yerel derinlik sınırına ulaşıldı",
+	"pingforit.inventory.reason.invalid_selection": "Geçersiz seçim",
+	"pingforit.inventory.reason.retired_selection": "Seçim artık kullanılamıyor",
+	"pingforit.inventory.reason.amount_overflow": "Miktar taşması",
+	"pingforit.inventory.reason.session_timeout": "Oturum zaman aşımına uğradı",
+	"pingforit.inventory.reason.open_timeout": "Açma zaman aşımına uğradı",
+	"pingforit.inventory.reason.stall_timeout": "Tarama durdu",
+	"pingforit.inventory.reason.transport_failure": "İletim hatası",
+	"pingforit.inventory.reason.rate_limited": "Hız sınırı uygulandı",
+	"pingforit.inventory.reason.channel_disabled": "Kanal devre dışı",
+	"pingforit.inventory.reason.invalid_request": "Geçersiz istek",
+	"pingforit.inventory.reason.not_owner": "Sahibi değil",
+	"pingforit.inventory.reason.not_found": "Bulunamadı",
+	"pingforit.inventory.reason.invalid_ping_type": "Geçersiz ping türü",
+	"pingforit.inventory.reason.publication_work_limit": "Yayın çalışma sınırına ulaşıldı",
+	"pingforit.inventory.reason.capture_read_limit": "Yakalama okuma sınırına ulaşıldı",
+	"pingforit.inventory.retry": "%s: Yeniden deneniyor... (%s/3)",
+	"pingforit.inventory.tracking_failed": "[pingforit] Takip hedefi oluşturulamadı: %s",
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "Konumu Pingle",
 	"key.pingforit.toggle_mark_transparent_blocks": "Şeffaf Blokları İşaretlemeyi Aç/Kapat",
@@ -52,34 +107,34 @@
 	"settings.pingforit.reset_all.title": "Tüm ayarlar sıfırlansın mı?",
 	"settings.pingforit.reset_all.message": "Tüm istemci ayarları varsayılanlarına sıfırlansın mı? Sunucu yapılandırması sıfırlanmaz.",
 	"settings.pingforit.channel": "Ping Kanalı",
-	"settings.pingforit.channel.tooltip": "Bu sunucu için hatırlanan kanal tercihi; ayarlar kaydedilirken gönderilir.\nDolu: aynı kanalı kullanan oyuncularla ping alışverişi yapın.\nBoş: sunucunun varsayılan kanal ilkesini kullanın; yer tutucu yalnızca ipucudur.",
+	"settings.pingforit.channel.tooltip": "Bu sunucu için hatırlanan kanal.\nDolu: aynı kanaldaki oyuncularla ping alışverişi yapılır.\nBoş: sunucunun varsayılan kanal kuralları kullanılır.",
 	"settings.pingforit.channel.placeholder": "%s ile eşzamanlandı",
 	"settings.pingforit.open_block_shape_blacklist_config": "Kaydet, Kapat ve Blok Şekli Yapılandırmasını Aç...",
-	"settings.pingforit.open_block_shape_blacklist_config.tooltip": "İstemci yapılandırma dosyasını açmadan önce ayarları kaydeder ve kapatır. Harici listelerdeki değişiklikler istemci yeniden başlatıldıktan sonra uygulanır.",
+	"settings.pingforit.open_block_shape_blacklist_config.tooltip": "Ayarları kaydedip kapatır, ardından istemci yapılandırma dosyasını açar.\nDeğişiklikler istemci yeniden başlatıldıktan sonra uygulanır.",
 	"settings.pingforit.logging_profile": "Günlük ayrıntısı",
-	"settings.pingforit.logging_profile.tooltip": "İstemci günlük ayrıntısı.\nNormal: yalnızca temel tanılama, hassas değerler gizlenir.\nAyrıntılı: daha fazla bağlam, gizleme olmadan.\nHemen uygulanır.",
+	"settings.pingforit.logging_profile.tooltip": "Bu istemcinin günlüğe ne kadar ayrıntı yazacağı.\nNormal: hassas bilgileri gizler.\nAyrıntılı: hassas bilgileri ve daha fazla ayrıntıyı içerir.",
 	"settings.pingforit.server_logging_profile": "Sunucu günlük ayrıntısı",
-	"settings.pingforit.server_logging_profile.tooltip": "Sunucu günlük ayrıntısı.\nNormal: yalnızca temel tanılama, hassas değerler gizlenir.\nAyrıntılı: daha fazla bağlam, gizleme olmadan.\nAyarlar kapanınca gönderilir; sunucu kabul ettikten sonra uygulanır.",
+	"settings.pingforit.server_logging_profile.tooltip": "Sunucunun günlüğe ne kadar ayrıntı yazacağı.\nNormal: hassas bilgileri gizler.\nAyrıntılı: hassas bilgileri ve daha fazla ayrıntıyı içerir.",
 	"settings.pingforit.group.logging": "Günlük",
 	"value.pingforit.normal": "Normal",
 	"value.pingforit.deep": "Ayrıntılı",
 	"value.pingforit.debug": "Hata ayıklama",
 	"settings.pingforit.entity_block_render_mode": "Varlık Blok Geometrisi",
-	"settings.pingforit.entity_block_render_mode.tooltip": "Varlık bloğu dış çizgilerinin kaynakları; sonraki çizim denemesinde uygulanır, hedef seçimini değiştirmez.\nTümü: yerleşik ve kayıtlı isteğe bağlı kaynaklar. Uyumlu: yalnızca yerleşik çiziciler ve mod yükleyicisine uyumlu modeller.\nYalnızca VoxelShape: normal kaynakları atlayıp yerel şekilleri kullanır; diğer modlar hiçbir kaynak çizim yapmazsa bu şekillere döner.",
-	"settings.pingforit.entity_block_render_mode.all.tooltip": "Varlık bloğu dış çizgileri için yerleşik çizici ve modellerin yanında kayıtlı isteğe bağlı geometri kaynaklarını da dener.\nDaha fazla kaynak geometrisi içerebilir; hiçbiri çizim yapmazsa yerel şekil yedeği kullanılır. Sonraki çizim denemesinde uygulanır.",
-	"settings.pingforit.entity_block_render_mode.compatible.tooltip": "Varlık bloğu dış çizgileri için yalnızca yerleşik çizicileri ve mod yükleyicisine uyumlu modelleri dener; isteğe bağlı geometri kaynaklarını atlar.\nHiçbiri çizim yapmazsa yerel şekil yedeği kullanılır. Sonraki çizim denemesinde uygulanır.",
-	"settings.pingforit.entity_block_render_mode.voxel_shape_only.tooltip": "Varlık bloğu dış çizgileri için normal geometri kaynaklarını atlar ve yerel VoxelShape yolunu kullanır.\nHedef seçimini değil, dış çizgi geometrisini değiştirir. Sonraki çizim denemesinde uygulanır.",
+	"settings.pingforit.entity_block_render_mode.tooltip": "Varlık bloklarında dış çizgilerin nasıl görüneceği.",
+	"settings.pingforit.entity_block_render_mode.all.tooltip": "Diğer modların desteği dâhil mevcut tüm dış çizgi yöntemlerini dener. Ayrıntılı dış çizgi olasılığı en yüksektir.",
+	"settings.pingforit.entity_block_render_mode.compatible.tooltip": "Çoğu blokta, modlu bloklar dâhil normal dış çizgiyi kullanır.",
+	"settings.pingforit.entity_block_render_mode.voxel_shape_only.tooltip": "Dış çizgileri her bloğun temel şekline göre çizer. En güvenilir yöntemdir, ancak karmaşık bloklar daha basit görünür.",
 	"settings.pingforit.player_info_mode": "Oyuncu Bilgisi",
-	"settings.pingforit.player_info_mode.hold.tooltip": "\"%s\" (%s) basılı tutulurken işaretçiyi oluşturan oyuncunun adı ve kafası gösterilir.\nOluşturanın bilgisini gizlemek için tuşu bırakın.",
+	"settings.pingforit.player_info_mode.hold.tooltip": "\"%s\" (%s) basılı tutulurken işaretçi yazarının adı ve kafası gösterilir.",
 	"settings.pingforit.team_color_mode": "Takım Rengi",
 	"settings.pingforit.default_channel_mode": "Varsayılan Kanal Modu",
-	"settings.pingforit.default_channel_mode.tooltip": "Kanalı boş olan göndericiler için varsayılan ilke; adlandırılmış kanallar değişmez.\nOtomatik: aynı takım bağlamı; takımsız oyuncular ortak bağlamı paylaşır. Global: kanalı boş olan tüm oyuncular.\nSadece Takım: takım üyeliği gerektirir ve o bağlamı kullanır. Kapalı: boş kanaldan işaretçi oluşturmayı reddeder.",
+	"settings.pingforit.default_channel_mode.tooltip": "Kanalsız oyuncuların nasıl gruplanacağı.\nOtomatik: aynı takımdakiler bir grupta; takımsız oyuncular tek grupta.\nGlobal: kanalı olmayan tüm oyuncular tek grupta.\nSadece Takım: takım gerektirir ve takıma göre gruplar.\nKapalı: kanalsız oyunculardan gelen pingleri kabul etmez.",
 	"settings.pingforit.player_tracking_enabled": "Oyuncu Takibi",
-	"settings.pingforit.player_tracking_enabled.tooltip": "Sunucunun yeni isteklerdeki oyuncu hedeflerini nasıl temsil edeceği.\nKapalı: oyuncu hedeflerini sunucunun belirlediği mevcut konumlarına dönüştürür.\nAçık: oyuncuları varlık hedefi olarak tutar; işaretçileri hareketlerini takip edebilir.",
+	"settings.pingforit.player_tracking_enabled.tooltip": "İşaretçilerin oyuncuyu takip edip etmeyeceği.\nKapalı: işaretçi oyuncunun o andaki konumunda kalır.\nAçık: işaretçi oyuncuyu takip eder.",
 	"settings.pingforit.ms_to_regenerate": "Yenilenme Süresi (ms)",
-	"settings.pingforit.ms_to_regenerate.tooltip": "Bir işaretçi oluşturma hakkının yenilenmesi için gereken milisaniye; Hız Sınırı seri oluşturma hakkını belirler.\nAzalt: haklar daha çabuk yenilenir; 0 istemcinin ön sınırlamasını kapatır, sunucu denetimini koşulsuz aşmaz.\nArtır: haklar daha yavaş yenilenir.",
+	"settings.pingforit.ms_to_regenerate.tooltip": "Kullanılan bir pingin yeniden kullanılabilir olması için geçen süre.\nAzalt: daha erken tekrar gönderirsiniz; 0 beklemeyi kaldırır.\nArtır: tekrar göndermek için daha uzun beklersiniz.",
 	"settings.pingforit.rate_limit": "Hız Sınırı",
-	"settings.pingforit.rate_limit.tooltip": "Oyuncu başına seri işaretçi oluşturma hakkı; hakların yenilenmesini Yenilenme Süresi belirler.\nAzalt: art arda daha az işaretçiye izin verir; 0 pingleri değil, hız denetimini kapatır.\nArtır: art arda daha fazla işaretçiye izin verir; tek hakkın yenilenme süresi değişmez.",
+	"settings.pingforit.rate_limit.tooltip": "Her oyuncunun arka arkaya kaç ping gönderebileceği.\nAzalt: arka arkaya daha az ping; 0 sınırı kaldırır.\nArtır: arka arkaya daha fazla ping.",
 
 	"value.pingforit.auto": "Otomatik",
 	"value.pingforit.disabled": "Kapalı",
@@ -132,13 +187,13 @@
 	"pingforit.target.here": "BURASI",
 	"pingforit.target.unknown": "Bilinmeyen hedef"
   ,"settings.pingforit.long_press_compatibility_mode": "Uzun basma uyumluluk modu"
-  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Hızlı tıklama ve ertelenen hedef yakalama uyumluluğu; açmak hareket kısayolunu kapatır ve Tehlike açısını sıfırlar, sonradan geri getirmez.\nKapalı: normal basışları ve elle yeniden açılmış hareketleri kullanır.\nAçık: yakın tıklamalar sanal basılı tutma oluşturabilir; bekleyen yakalama bir yeni basışı saklayabilir."
+  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "Yakın aralıklı tıklamaları tek bir uzun basış olarak değerlendirir.\nKapalı: normal basışları kullanır.\nAçık: birbirine yakın tıklamalar basılı tutma sayılır; bu, hareket kısayolunu ve Tehlike açısını siler."
   ,"settings.pingforit.long_press_compatibility_slice_millis": "Uyumluluk zaman aralığı: %s"
-  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Yalnızca uyumluluk modunda kullanılan ardışık tıklama aralığı; basılı tutma eşiğinin yarısını aşamaz.\nAzalt: sanal basılı tutmayı sürdürmek için daha yakın tıklamalar gerekir.\nArtır: ardışık tıklamalar arasında daha uzun boşluklara izin verir."
+  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "Uyumluluk modunda tıklamalar arasındaki en büyük aralık; en fazla basılı tutma süresinin yarısı kadardır.\nAzalt: tıklamaların birbirine daha yakın olması gerekir.\nArtır: daha geniş bir aralığa izin verir."
   ,"settings.pingforit.sync_duration": "Senkronizasyon Süresi (saniye)"
-  ,"settings.pingforit.sync_duration.tooltip": "Yeni işaretçiler oluşturulurken sabitlenen sunucu ömrü; yerel görüntüleme süresi ayrıdır. 0 bir kapatma modu değildir.\nAzalt: yeni işaretçilerin sunucudaki süresi daha erken dolar.\nArtır: yeni işaretçiler daha uzun etkin kalır; mevcut bitiş zamanları değişmez."
+  ,"settings.pingforit.sync_duration.tooltip": "Sunucunun yeni bir işaretçiyi ne kadar süre tuttuğu.\nAzalt: yeni işaretçiler daha erken sona erer.\nArtır: yeni işaretçiler daha uzun kalır."
   ,"settings.pingforit.marker_display_duration": "İşaretçi Görüntüleme Süresi: %s"
-  ,"settings.pingforit.marker_display_duration.tooltip": "Yeni alınan işaretçilerin yerel görüntüleme süresi; 0 her işaretçinin sabitlenmiş sunucu süresini izler.\nAzalt: yeni işaretçiler yerel olarak daha erken kaybolur.\nArtır: yeni işaretçiler daha uzun görünür; sunucu ömrü ve mevcut işaretçiler değişmez."
+  ,"settings.pingforit.marker_display_duration.tooltip": "Yeni alınan işaretçilerin ne kadar görünür kalacağı; 0 her işaretçinin sunucu süresini kullanır.\nAzalt: daha erken kaybolur.\nArtır: daha uzun görünür."
   ,"value.pingforit.follow_server": "Sunucuyu takip et"
   ,"unit.pingforit.seconds": "%ss"
   ,"notice.pingforit.mark_transparent_blocks": "Şeffaf blokları işaretle: "
@@ -181,14 +236,14 @@
   ,"settings.pingforit.server_status.read_only": "Sunucu ayarları sizin için salt okunur. Geçerli değerler gösterilir."
   ,"settings.pingforit.reset_all.server_draft_warning": "Bu işlem kaydedilmemiş sunucu taslağını da siler."
   ,"settings.pingforit.open_client_config": "Kaydet, kapat ve istemci yapılandırmasını aç..."
-  ,"settings.pingforit.open_client_config.tooltip": "Yerel ayarları kaydedip geçerli normal sunucu taslağını gönderir, ardından Ayarları kapatıp istemci dosyasının tamamını açar.\nKaydetme veya doğrulama başarısız olursa dosya açılmaz.\nHarici değişiklikler ancak istemci yeniden başlatıldıktan sonra uygulanır; Ayarları yeniden açmak dosyayı yeniden yüklemez."
+  ,"settings.pingforit.open_client_config.tooltip": "Ayarları kaydedip kapatır, ardından istemci yapılandırma dosyasını açar.\nDeğişiklikler istemci yeniden başlatıldıktan sonra uygulanır."
 	,"settings.pingforit.category.server_presentation": "Sunucu Sunumu"
 	,"settings.pingforit.category.server_presentation.button": "Sunucu Sunumu..."
   ,"settings.pingforit.presentation.server.title": "Sunucu İlkesi"
   ,"settings.pingforit.presentation.white": "Beyaz liste"
   ,"settings.pingforit.presentation.black": "Kara liste"
   ,"settings.pingforit.presentation.whitelist_only": "Yalnızca beyaz liste"
-  ,"settings.pingforit.presentation.whitelist_only.tooltip": "Seçili hedef türünde iki listeyle de eşleşmeyen alanlar için davranış.\nKapalı: eşleşmeyen her alanın katalogdaki varsayılanını kullanır.\nAçık: eşleşmeyen alanları reddeder; izin eşleşmeleri yine engel eşleşmelerinden önce gelir."
+  ,"settings.pingforit.presentation.whitelist_only.tooltip": "İki listede de bulunmayan alanların nasıl işleneceği.\nKapalı: her alanın varsayılan ayarını kullanır.\nAçık: yalnızca beyaz listeyle eşleşen alanlara izin verir."
   ,"settings.pingforit.presentation.selector": "Seçici (namespace:path)"
   ,"settings.pingforit.presentation.add": "Ekle"
   ,"settings.pingforit.presentation.remove": "Kaldır"
@@ -237,42 +292,42 @@
   ,"settings.pingforit.presentation.field.now": "Şimdi: %s"
   ,"settings.pingforit.presentation.field.matching_white": "Eşleşen izin kuralları: %s"
   ,"settings.pingforit.presentation.field.matching_black": "Eşleşen engel kuralları: %s"
-  ,"settings.pingforit.presentation.rule.allow.tooltip": "Bu alanın tam kimliğini seçili türün izin listesinde açıp kapatır.\nKapalı: yalnızca bu tam kimlik kuralını kaldırır; joker karakterli izin kuralları hâlâ geçerli olabilir.\nAçık: engel kurallarından önce bu alana izin verir; izin düzeyleri ve alt alan kısıtlamaları yine geçerlidir."
-  ,"settings.pingforit.presentation.rule.block.tooltip": "Bu alanın tam kimliğini seçili türün engel listesinde açıp kapatır.\nKapalı: yalnızca bu tam kimlik kuralını kaldırır; diğer kurallar ve varsayılanlar geçerliliğini korur.\nAçık: herhangi bir izin seçicisi eşleşmedikçe alanı engeller."
+  ,"settings.pingforit.presentation.rule.allow.tooltip": "Bu alanı seçili türün beyaz listesinde açıp kapatır.\nKapalı: bu kuralı kaldırır; joker karakterli kurallar alanı yine de izin verebilir.\nAçık: kara liste kurallarından önce bu alana izin verir."
+  ,"settings.pingforit.presentation.rule.block.tooltip": "Bu alanı seçili türün kara listesinde açıp kapatır.\nKapalı: bu kuralı kaldırır.\nAçık: bu alanı engeller; eşleşen beyaz liste kuralları yine önceliklidir."
   ,"settings.pingforit.presentation.field.minecraft_target_name.name": "Hedef adı"
   ,"settings.pingforit.presentation.field.minecraft_target_name.description": "İşaretlenen hedefin adı."
   ,"settings.pingforit.presentation.field.minecraft_entity_type.name": "Varlık türü"
-  ,"settings.pingforit.presentation.field.minecraft_entity_type.description": "Varlık türü kayıt kimliği."
+  ,"settings.pingforit.presentation.field.minecraft_entity_type.description": "Varlığın türü."
   ,"settings.pingforit.presentation.field.minecraft_entity_health.name": "Can"
   ,"settings.pingforit.presentation.field.minecraft_entity_health.description": "Canlı bir varlığın mevcut canı."
   ,"settings.pingforit.presentation.field.minecraft_entity_max_health.name": "Maksimum can"
   ,"settings.pingforit.presentation.field.minecraft_entity_max_health.description": "Canlı bir varlığın maksimum canı."
   ,"settings.pingforit.presentation.field.minecraft_item_id.name": "Eşya"
-  ,"settings.pingforit.presentation.field.minecraft_item_id.description": "Yerdeki eşya yığınındaki eşyanın kayıt kimliği."
+  ,"settings.pingforit.presentation.field.minecraft_item_id.description": "Düşen eşyanın hangi eşya olduğu."
   ,"settings.pingforit.presentation.field.minecraft_item_count.name": "Adet"
-  ,"settings.pingforit.presentation.field.minecraft_item_count.description": "Yerdeki eşya yığınının boyutu."
+  ,"settings.pingforit.presentation.field.minecraft_item_count.description": "Düşen yığında kaç eşya olduğu."
   ,"settings.pingforit.presentation.field.minecraft_item_icon.name": "Eşya simgesi"
-  ,"settings.pingforit.presentation.field.minecraft_item_icon.description": "Eşya simgesinin mevcut olup olmadığı."
+  ,"settings.pingforit.presentation.field.minecraft_item_icon.description": "Eşya simgesinin olup olmadığı."
   ,"settings.pingforit.presentation.field.minecraft_block_state.name": "Blok durumu"
-  ,"settings.pingforit.presentation.field.minecraft_block_state.description": "İşaretlenen bloğun durum özellikleri."
+  ,"settings.pingforit.presentation.field.minecraft_block_state.description": "Bloğun durumu; örneğin yönü veya açık/kapalı olması."
   ,"settings.pingforit.presentation.field.create_kinetic_speed.name": "Dönüş hızı (RPM)"
-  ,"settings.pingforit.presentation.field.create_kinetic_speed.description": "Kinetik dönüş hızı. Kullanılabilirliği hedef türüne ve sunucu kurallarına bağlıdır."
+  ,"settings.pingforit.presentation.field.create_kinetic_speed.description": "Kinetik bloğun dönüş hızı."
   ,"settings.pingforit.presentation.field.create_kinetic_has_network.name": "Kinetik ağ"
   ,"settings.pingforit.presentation.field.create_kinetic_has_network.description": "Kinetik bloğun bir ağa bağlı olup olmadığı."
   ,"settings.pingforit.presentation.field.create_kinetic_overstressed.name": "Aşırı yük"
   ,"settings.pingforit.presentation.field.create_kinetic_overstressed.description": "Kinetik ağın aşırı yüklü olup olmadığı."
   ,"settings.pingforit.presentation.field.create_kinetic_stress.name": "Kullanılan yük"
-  ,"settings.pingforit.presentation.field.create_kinetic_stress.description": "Kinetik ağın mevcut yükü."
+  ,"settings.pingforit.presentation.field.create_kinetic_stress.description": "Kinetik ağın şu anda kullandığı yük."
   ,"settings.pingforit.presentation.field.create_kinetic_capacity.name": "Toplam yük kapasitesi"
-  ,"settings.pingforit.presentation.field.create_kinetic_capacity.description": "Kinetik ağın yük kapasitesi."
+  ,"settings.pingforit.presentation.field.create_kinetic_capacity.description": "Kinetik ağın kaldırabileceği toplam yük."
   ,"settings.pingforit.presentation.field.create_kinetic_available_capacity.name": "Kullanılabilir yük"
-  ,"settings.pingforit.presentation.field.create_kinetic_available_capacity.description": "Kinetik ağın kullanılabilir yük kapasitesi; aşırı yüklendiğinde negatif olabilir."
+  ,"settings.pingforit.presentation.field.create_kinetic_available_capacity.description": "Kinetik ağda kalan yük; aşırı yüklendiğinde negatif olabilir."
   ,"settings.pingforit.presentation.field.create_inventory_summary.name": "Envanter içeriği"
-  ,"settings.pingforit.presentation.field.create_inventory_summary.description": "Create envanterinin içerik özeti. Varsayılan olarak devre dışı."
+  ,"settings.pingforit.presentation.field.create_inventory_summary.description": "Create envanterinin içerik özeti."
   ,"settings.pingforit.presentation.field.create_fluid_summary.name": "Sıvı içeriği"
-  ,"settings.pingforit.presentation.field.create_fluid_summary.description": "Create sıvı tankının içerik özeti. Varsayılan olarak devre dışı."
+  ,"settings.pingforit.presentation.field.create_fluid_summary.description": "Create sıvı tankının içerik özeti."
   ,"settings.pingforit.presentation.field.pingforit_inventory_items.name": "Envanter eşyaları"
-  ,"settings.pingforit.presentation.field.pingforit_inventory_items.description": "İşaretlenen envanterin eşya içeriği."
+  ,"settings.pingforit.presentation.field.pingforit_inventory_items.description": "Kabın eşya içeriği."
   ,"settings.pingforit.presentation.target_type.dropped_item": "Düşen eşya ilkesi"
   ,"settings.pingforit.presentation.target_type.entity": "Varlık ilkesi"
   ,"settings.pingforit.presentation.target_type.entity_block": "Blok varlığı ilkesi"
@@ -307,33 +362,33 @@
   ,"presentation.pingforit.no": "Hayır"
   ,"settings.pingforit.group.spatial_selector": "Uzamsal seçici hareketleri"
   ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled": "Hareketle uzun basmayı atla"
-  ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled.tooltip": "Sonraki basılı tutmada isteğe bağlı erken açılma; uyumluluk bunu kapatır ve sonradan geri açmaz.\nKapalı: normal uzun basmayla açılır.\nAçık: atanmış Ping tuşunu asgari fiziksel süre boyunca basılı tuttuktan sonra merkez ölü bölgesini aşan hareketle erken açılır."
+  ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled.tooltip": "Ping tuşunu basılı tutup hareket ederek menüyü normal basılı tutma bitmeden açın; uyumluluk modu bunu kapatır.\nKapalı: normal basılı tutmayla açılır.\nAçık: en kısa süre basılı tuttuktan sonra hareket ederek erken açın."
   ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis": "En kısa hareket basılı tutma süresi: %s"
-  ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis.tooltip": "Etkin hareket kısayoluyla açılmadan önce gereken en kısa kesintisiz fiziksel basılı tutma; sonraki basılı tutmada uygulanır. Normal uzun basma bağımsızdır.\nAzalt: hareket daha erken yeterli olabilir.\nArtır: hareketle erken açılmadan önce daha uzun fiziksel basılı tutma gerekir."
+  ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis.tooltip": "Menüyü erken açmak için Ping tuşuna ne kadar basılı tutulacağı.\nAzalt: daha erken yeterli olur.\nArtır: hareket etmeden önce daha uzun basılı tutun."
   ,"settings.pingforit.spatial_selector.deadzone": "Merkez ölü bölgesi: %s"
-  ,"settings.pingforit.spatial_selector.deadzone.tooltip": "Dairesel iptal merkezi ve envanterin yan seçim mesafesi; sonraki basılı tutmada uygulanır. Liste mesafesi panelin dış yan çerçevesinden, yoksa ekran kenarından başlar.\nAzalt: daha küçük iptal merkezi; yan odak daha erken başlar.\nArtır: daha büyük iptal merkezi; yan odak için daha fazla hareket gerekir."
+  ,"settings.pingforit.spatial_selector.deadzone.tooltip": "Hareket edince iptal eden merkez alanı ve envanter listesinde yana ne kadar hareket edileceği.\nAzalt: daha küçük iptal merkezi; yan hareket daha erken tetiklenir.\nArtır: daha büyük iptal merkezi; yan hareket için daha fazla mesafe gerekir."
   ,"settings.pingforit.spatial_selector.stroke": "Giriş hareketi uzunluğu: %s"
-  ,"settings.pingforit.spatial_selector.stroke.tooltip": "Duraklama veya uygun dönüşle alt menüye girmeden önceki hareket ve envanterin yan gezinme mesafesi; sonraki basılı tutmada uygulanır. Listede aynı çerçeve/kenar başlangıcı kullanılır, ölü bölge eklenmez.\nAzalt: giriş veya yan gezinme için daha az hareket yeterlidir.\nArtır: giriş veya yan gezinmeden önce daha uzun hareket gerekir."
+  ,"settings.pingforit.spatial_selector.stroke.tooltip": "Alt menüye girmek veya envanter listesinde yana hareket etmek için ne kadar ilerlemek gerektiği.\nAzalt: daha erken girer veya hareket eder.\nArtır: daha fazla hareket gerekir."
   ,"settings.pingforit.spatial_selector.dwell_millis": "Giriş bekleme süresi: %s"
-  ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "Yeterli hareketten sonra alt menüye girmeden önceki duraklama; sonraki basılı tutmada uygulanır.\nAzalt: duraklayınca daha erken girilir.\nArtır: daha uzun duraklama gerekir; uygun dönüşle giriş ayrı bir yoldur."
+  ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "Bir seçeneğin alt menüsü açılmadan önce üzerinde ne kadar durulacağı.\nAzalt: daha erken açılır.\nArtır: daha uzun duraklama gerekir."
   ,"settings.pingforit.spatial_selector.root_distance": "Kök menü uzaklığı: %s"
-  ,"settings.pingforit.spatial_selector.root_distance.tooltip": "Kök seçeneklerin merkezden görsel uzaklığı; sonraki basılı tutmada uygulanır. Ölü bölge ve giriş hareketi değişmez.\nAzalt: kök seçenekleri merkeze yaklaştırır.\nArtır: kök seçenekleri dışa doğru uzaklaştırır."
+  ,"settings.pingforit.spatial_selector.root_distance.tooltip": "Kök menü seçeneklerinin merkezden ne kadar uzakta durduğu.\nAzalt: kök seçenekleri merkeze yaklaştırır.\nArtır: kök seçenekleri dışa doğru yayar."
   ,"settings.pingforit.spatial_selector.submenu_radius_scale": "Alt menü boyutu: %s"
-  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "Eşya menüleri dâhil tüm kök dışı dairesel menülerin görsel ölçeği; sonraki basılı tutmada uygulanır. Kök uzaklığı ve hareket eşikleri değişmez.\nAzalt: alt menüleri daha sıkı yerleştirir.\nArtır: alt menü seçeneklerini birbirinden uzaklaştırır."
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "Eşya menüleri dâhil dairesel alt menülerin boyutu.\nAzalt: alt menüler daha kompakt olur.\nArtır: alt menü seçenekleri arasındaki boşluk artar."
   ,"settings.pingforit.spatial_selector.inventory_max_width_fraction": "Envanter azami genişliği: %s"
-  ,"settings.pingforit.spatial_selector.inventory_max_width_fraction.tooltip": "GUI görünüm alanına göre envanter paneli genişlik sınırı; sonraki basılı tutmada uygulanır. İçerik miktarı ve okunabilir asgari boyut yine geçerlidir.\nAzalt: daha dar panele izin verir.\nArtır: daha geniş panele izin verir; sabit genişlik belirlemez."
+  ,"settings.pingforit.spatial_selector.inventory_max_width_fraction.tooltip": "Envanter panelinin ekran genişliğinin en fazla ne kadarını kaplayacağı.\nAzalt: daha az ekran alanı kullanır.\nArtır: daha geniş içeriği sığdırır."
   ,"settings.pingforit.spatial_selector.inventory_max_height_fraction": "Envanter azami yüksekliği: %s"
-  ,"settings.pingforit.spatial_selector.inventory_max_height_fraction.tooltip": "GUI görünüm alanına göre envanter paneli yükseklik sınırı, sabit yükseklik değil; sonraki basılı tutmada uygulanır. İçerik ve okunabilir asgari boyut yine geçerlidir.\nAzalt: daha kısa panele izin verir; daha az satır görünebilir.\nArtır: daha uzun panele izin verir; daha fazla satır görünebilir."
+  ,"settings.pingforit.spatial_selector.inventory_max_height_fraction.tooltip": "Envanter panelinin ekran yüksekliğinin en fazla ne kadarını kaplayacağı.\nAzalt: daha az ekran alanı kullanır.\nArtır: daha fazla satır gösterir."
   ,"settings.pingforit.spatial_selector.hover_enabled": "Dönüş için sürekli üzerinde bekleme gerektir"
-  ,"settings.pingforit.spatial_selector.hover_enabled.tooltip": "Sonraki basılı tutmada Geri gezinmesi.\nKapalı: normal Geri hareketini kullanır.\nAçık: belirlenen bekleme süresince kesintisiz Geri odağı gerekir; tekrar dönmek için çıkıp yeniden odaklanın."
+  ,"settings.pingforit.spatial_selector.hover_enabled.tooltip": "Geri'nin üzerinde bekleyerek önceki menüye dönün.\nKapalı: normal Geri işlemini kullanır.\nAçık: ayarlanan süre boyunca Geri üzerinde bekleyince döner."
   ,"settings.pingforit.spatial_selector.hover_millis": "Geri bekleme süresi: %s"
-  ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "Üzerinde bekleyerek dönüş açıkken gereken kesintisiz Geri odağı; sonraki basılı tutmada uygulanır.\nAzalt: Geri'ye odaklanınca daha erken döner.\nArtır: daha uzun Geri odağı gerekir; üzerinde bekleyerek dönüş kapalıyken etkisizdir."
+  ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "Dönmeden önce Geri üzerinde ne kadar bekleneceği.\nAzalt: daha hızlı döner.\nArtır: daha uzun bekleme gerekir."
   ,"settings.pingforit.spatial_selector.show_trail": "Hareket izini göster"
-  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "Sonraki basılı tutmada imleç ve etkin seçeneğin izi; seçim değişmez.\nKapalı: her iki izi gizler.\nAçık: ortak hareket izlerini çizer."
+  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "İmlecinizi ve seçili seçeneği takip eden bir iz gösterir.\nKapalı: izi gizler.\nAçık: izi gösterir."
   ,"settings.pingforit.spatial_selector.reduce_motion": "Seçici hareketini azalt"
-  ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "Sonraki basılı tutmada seçici animasyonu; hareket zamanlaması ve seçim değişmez.\nKapalı: normal seçici animasyonunu kullanır.\nAçık: seçicinin hareketini azaltır."
+  ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "Çark animasyonlarını azaltır.\nKapalı: tam animasyonları kullanır.\nAçık: daha sakin animasyonlar kullanır."
   ,"settings.pingforit.spatial_selector.content_intent_enabled": "İçerik için niyet seçimini etkinleştir"
-  ,"settings.pingforit.spatial_selector.content_intent_enabled.tooltip": "İçerik altındaki özellik ve envanter eşyaları için ek Ping Türü menüleri; sonraki basılı tutmada uygulanır. İşaretçinin genel Ping Türü değişmez.\nKapalı: seçilebilir içerik doğrudan Dikkat olarak işaretlenir.\nAçık: içeriğin Ping Türünü seçmek için ek menü sunar."
+  ,"settings.pingforit.spatial_selector.content_intent_enabled.tooltip": "Bir eşya veya özellik için Ping Türünü seçin.\nKapalı: doğrudan Dikkat gönderir.\nAçık: göndermeden önce Ping Türünü seçersiniz."
   ,"pingforit.spatial.inventory.updating": "Güncelleniyor…"
   ,"pingforit.spatial.inventory.unknown": "Bilinmiyor"
   ,"pingforit.spatial.inventory.uncertain": "Belirsiz"
@@ -347,7 +402,7 @@
   ,"pingforit.spatial.inventory.back": "Geri"
   ,"pingforit.spatial.inventory.forward": "İleri"
   ,"pingforit.spatial.reserved": "Ayrılmış"
-  ,"pingforit.spatial.content": "İçerik"
+  ,"pingforit.spatial.content": "Ayrıntılar"
   ,"pingforit.spatial.cancel": "İşaretçiyi kaldır"
   ,"pingforit.spatial.precise": "Kesin"
   ,"pingforit.spatial.intent": "Niyet"
@@ -366,7 +421,7 @@
   ,"settings.pingforit.category.debug.button": "Hata ayıklama..."
   ,"settings.pingforit.group.monitoring": "İzleme"
   ,"settings.pingforit.budget_delay_notifications_enabled": "Bütçe gecikmesi bildirimleri"
-  ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "Uzayan kaynak beklemeleri için yönetici bildirimleri; WARN tanı kayıtları açık kalır.\nKapalı: daha az sohbet mesajı; gecikmeler gözden kaçabilir.\nAçık: bekleyen işleri göstererek ayarlanacak bütçeyi seçmeye yardımcı olur."
+  ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "Sunucu işleri uzun süre geciktiğinde yöneticileri bilgilendirir.\nKapalı: bu tür bildirim gönderilmez.\nAçık: işleme uzun süre geciktiğinde sohbette bildirim alırsınız."
   ,"message.pingforit.budget_delay": "[ping for it] %s için sürekli bütçe gecikmeleri var. Sunucunun performans bütçelerini veya kara listelerini gözden geçirin."
   ,"message.pingforit.budget_delay.module.presentation": "bilgi sunumu"
   ,"message.pingforit.budget_delay.module.inventory_preview": "envanter önizlemesi"
@@ -379,54 +434,54 @@
   ,"settings.pingforit.inventory.resync_no_cooldown": "Bekleme süresi denetimi yok"
   ,"settings.pingforit.inventory.heartbeat_disabled": "Dönemsel kontrol kapalı"
   ,"settings.pingforit.inventory.physical_slots_per_tick": "Tick başına fiziksel yuva"
-  ,"settings.pingforit.inventory.physical_slots_per_tick.tooltip": "Önizleme ve takibin paylaştığı, sunucu tick'i başına gerçek envanter yuvası okumaları.\nAzalt: tick başına daha az iş; büyük kaplar daha yavaş güncellenebilir.\nArtır: tick başına daha fazla okuma ilerleyebilir; sunucu yükü artabilir."
+  ,"settings.pingforit.inventory.physical_slots_per_tick.tooltip": "Sunucunun her tick işlediği envanter yuvası sayısı.\nAzalt: daha az performans maliyeti.\nArtır: daha fazla içeriğin işlenmesine izin verir."
   ,"settings.pingforit.inventory.pending_memory_mib": "Bekleyen bellek (MiB)"
-  ,"settings.pingforit.inventory.pending_memory_mib.tooltip": "Sunucu genelinde önizleme ve takibin bekleyen veri belleği.\nAzalt: bellek baskısını azaltır; büyük kaplar ve çok sayıda hedef daha yavaş güncellenebilir.\nArtır: daha fazla kap verisini tutup bellek yetersizliği beklemelerini azaltır; bellek kullanımı artabilir."
+  ,"settings.pingforit.inventory.pending_memory_mib.tooltip": "Sunucu genelinde Önizleme ve Takip için kullanılabilir bellek.\nAzalt: daha az bellek kullanır.\nArtır: daha fazla kap verisi tutar."
   ,"settings.pingforit.inventory.display_byte_multiplier": "Görüntüleme boyutu: %s"
-  ,"settings.pingforit.inventory.display_byte_multiplier.tooltip": "Görüntülenen tek öğenin, çerçeve boyutuyla sınırlanan veri boyutu.\nAzalt: daha hafif öğe verisi; karmaşık öğe ayrıntıları sadeleştirilebilir.\nArtır: daha çok ayrıntıyı korur; her kaydın veri ve işleme yükü artabilir."
+  ,"settings.pingforit.inventory.display_byte_multiplier.tooltip": "Her öğe için gösterilen ayrıntı.\nAzalt: daha az veri kullanır.\nArtır: daha fazla öğe ayrıntısı gösterir."
   ,"settings.pingforit.inventory.frame_byte_multiplier": "Çerçeve boyutu: %s"
-  ,"settings.pingforit.inventory.frame_byte_multiplier.tooltip": "Tek envanter paketine sığan veri miktarı.\nAzalt: daha küçük paketler; daha çok parça gerekebilir ve öğe görüntüleme boyutu küçülebilir.\nArtır: pakete daha çok veri sığar; tek paket daha ağır olabilir."
+  ,"settings.pingforit.inventory.frame_byte_multiplier.tooltip": "Tek seferde gönderilen envanter içeriği.\nAzalt: tek seferde daha az gönderir.\nArtır: tek seferde daha fazla envanter içeriği gönderir."
   ,"settings.pingforit.inventory.size_adjusted": "Görüntüleme boyutu %s değerine düşürüldü; %s envanter çerçevesine sığdırıldı."
   ,"settings.pingforit.inventory.preview_period_ticks": "Önizleme dönemi (tick)"
-  ,"settings.pingforit.inventory.preview_period_ticks.tooltip": "Önizleme kotalarının yenilenme aralığı.\nAzalt: daha sık yenileme beklemeleri kısaltabilir; işleme ve trafik artabilir.\nArtır: daha seyrek yenileme yükü azaltır; önizlemeler daha uzun bekleyebilir."
+  ,"settings.pingforit.inventory.preview_period_ticks.tooltip": "Büyük bir envanter işlenirken Önizleme grupları arasındaki bekleme.\nAzalt: Önizleme daha erken biter.\nArtır: daha az sunucu işi kullanır."
   ,"settings.pingforit.inventory.preview_max_variants_per_client_period": "İstemci dönemi başına varyant"
-  ,"settings.pingforit.inventory.preview_max_variants_per_client_period.tooltip": "Oyuncu ve önizleme dönemi başına öğe varyantı kotası.\nAzalt: daha az liste verisi ve işleme; önizleme listelerinde bazı varyantlar eksik kalabilir.\nArtır: daha çok varyant görünebilir; liste verisi ve işleme yükü artabilir."
+  ,"settings.pingforit.inventory.preview_max_variants_per_client_period.tooltip": "Her oyuncunun tur başına önizleyebileceği öğe varyantı.\nAzalt: daha az varyant işler.\nArtır: daha fazla varyant gösterir."
   ,"settings.pingforit.inventory.preview_max_slots_per_client": "İstemci başına önizleme yuvası"
-  ,"settings.pingforit.inventory.preview_max_slots_per_client.tooltip": "Oyuncu ve önizleme dönemi başına envanter yuvası ilerlemesi.\nAzalt: oyuncu başına daha az önizleme işi; büyük kaplar daha uzun sürebilir.\nArtır: oyuncunun önizlemeleri daha fazla ilerleyebilir; sunucu işi artabilir."
+  ,"settings.pingforit.inventory.preview_max_slots_per_client.tooltip": "Bir oyuncunun Önizlemesinin tur başına işleyebileceği envanter yuvası.\nAzalt: oyuncu başına daha az iş.\nArtır: büyük envanterleri daha erken bitirir."
   ,"settings.pingforit.inventory.preview_max_slots_server": "Sunucu genelinde önizleme yuvası"
-  ,"settings.pingforit.inventory.preview_max_slots_server.tooltip": "Önizleme dönemi başına sunucu genelinde envanter yuvası ilerlemesi.\nAzalt: daha az toplam önizleme işi; eşzamanlı önizlemeler daha uzun bekleyebilir.\nArtır: daha çok önizleme birlikte ilerleyebilir; sunucu yükü artabilir."
+  ,"settings.pingforit.inventory.preview_max_slots_server.tooltip": "Önizlemenin tur başına sunucu genelinde işleyebileceği envanter yuvası.\nAzalt: daha az toplam Önizleme işi.\nArtır: daha fazla Önizleme birlikte ilerler."
   ,"settings.pingforit.inventory.preview_max_targets_per_client": "İstemci başına önizleme hedefi"
-  ,"settings.pingforit.inventory.preview_max_targets_per_client.tooltip": "Oyuncu başına eşzamanlı önizleme isteği sayısı.\nAzalt: daha az etkin istek kaynak kullanır; birçok hedefe bakmak daha uzun sürebilir.\nArtır: daha çok hedef birlikte istenebilir; bellek ve işleme yükü artabilir."
+  ,"settings.pingforit.inventory.preview_max_targets_per_client.tooltip": "Her oyuncunun aynı anda önizleyebileceği hedef sayısı.\nAzalt: daha az kaynak kullanır.\nArtır: aynı anda daha fazla hedefe bakabilirsiniz."
   ,"settings.pingforit.inventory.preview_client_byte_multiplier": "Önizleme istemci bayt çarpanı"
-  ,"settings.pingforit.inventory.preview_client_byte_multiplier.tooltip": "Oyuncu ve önizleme dönemi başına gönderilen önizleme verisi.\nAzalt: oyuncu başına daha az trafik; büyük önizlemeler daha yavaş gelebilir.\nArtır: dönem başına daha çok veri gönderilebilir; bant genişliği kullanımı artabilir."
+  ,"settings.pingforit.inventory.preview_client_byte_multiplier.tooltip": "Her tura oyuncu başına gönderilen Önizleme verisi.\nAzalt: daha az trafik kullanır.\nArtır: daha fazla Önizleme verisi gönderir."
   ,"settings.pingforit.inventory.preview_global_byte_multiplier": "Önizleme genel bayt çarpanı"
-  ,"settings.pingforit.inventory.preview_global_byte_multiplier.tooltip": "Sunucu genelinde dönem başına önizleme verisi ve gönderim kuyruğu kotası.\nAzalt: daha az toplam trafik ve kuyruk verisi; eşzamanlı önizlemeler daha uzun bekleyebilir.\nArtır: daha çok veri kuyruğa alınıp gönderilebilir; bant genişliği ve bellek kullanımı artabilir."
+  ,"settings.pingforit.inventory.preview_global_byte_multiplier.tooltip": "Sunucunun tur başına gönderebileceği Önizleme verisi.\nAzalt: daha az trafik kullanır.\nArtır: tek seferde daha fazla Önizleme verisi gönderir."
   ,"settings.pingforit.inventory.tracking_period_ticks": "Takip dönemi (tick)"
   ,"settings.pingforit.inventory.tracking_distinguish_faces": "Takibi yüze göre ayır"
-  ,"settings.pingforit.inventory.tracking_distinguish_faces.tooltip": "Sunucu envanter takibi; güncel oyuncu izinleri ve yüzün gösterdiği yuvalar yine denetlenir.\nKapalı: takip gözlemlerini yüzler arasında yalnızca eşdeğerliği kanıtlanmış görünümler için yeniden kullanır.\nAçık: takip gözlemlerini yüze göre ayrı tutar.\nDeğişiklik sonraki taramaya uygulanır; süren taramalar önceki ayarla tamamlanır."
+  ,"settings.pingforit.inventory.tracking_distinguish_faces.tooltip": "Kabın her yüzü ayrı takip edilsin mi?\nKapalı: içerikler aynı olduğunda sunucu yükü azalır.\nAçık: her yüzü ayrı takip eder."
   ,"settings.pingforit.inventory.tracking_distinguish_players": "Takibi oyuncuya göre ayır"
-  ,"settings.pingforit.inventory.tracking_distinguish_players.tooltip": "Sunucu envanter takibi; güncel oyuncu izinleri ve yüzün gösterdiği yuvalar yine denetlenir.\nKapalı: takip gözlemlerini oyuncular arasında yalnızca eşdeğerliği kanıtlanmış görünümler için yeniden kullanır.\nAçık: takip gözlemlerini oyuncuya göre ayrı tutar.\nDeğişiklik sonraki taramaya uygulanır; süren taramalar önceki ayarla tamamlanır."
-  ,"settings.pingforit.inventory.tracking_period_ticks.tooltip": "Takip kotası aralığı ve tam envanter taramasından sonraki bekleme.\nAzalt: daha sık yenileme ve tarama beklemeleri kısaltabilir; işleme ve trafik artabilir.\nArtır: daha seyrek yenileme ve tarama yükü azaltır; değişiklikler daha geç görünebilir."
+  ,"settings.pingforit.inventory.tracking_distinguish_players.tooltip": "Her oyuncunun gördüğü içerik ayrı takip edilsin mi?\nKapalı: içerikler aynı olduğunda sunucu yükü azalır.\nAçık: her oyuncuyu ayrı takip eder."
+  ,"settings.pingforit.inventory.tracking_period_ticks.tooltip": "Bir Takip taraması bittikten sonra bir sonraki taramaya kadar bekleme.\nAzalt: güncellemeler daha erken ulaşır.\nArtır: daha az sunucu işi kullanır."
   ,"settings.pingforit.inventory.tracking_max_variants_per_target": "Hedef başına takip varyantı"
-  ,"settings.pingforit.inventory.tracking_max_variants_per_target.tooltip": "Aynı hedefte etkin olarak takip edilen öğe varyantı seçimleri.\nAzalt: daha az seçim kaynak kullanır; aynı anda daha az varyant takip edilebilir.\nArtır: daha çok varyant birlikte takipte kalabilir; bellek ve güncelleme işi artabilir."
+  ,"settings.pingforit.inventory.tracking_max_variants_per_target.tooltip": "Bir hedefin aynı anda takip edebileceği öğe varyantı sayısı.\nAzalt: daha az kaynak kullanır.\nArtır: aynı anda daha fazla varyant takip eder."
   ,"settings.pingforit.inventory.tracking_max_slots_per_target": "Hedef başına takip yuvası"
-  ,"settings.pingforit.inventory.tracking_max_slots_per_target.tooltip": "Hedef ve takip dönemi başına envanter yuvası ilerlemesi.\nAzalt: hedef başına daha az iş; büyük kap değişiklikleri daha geç görünebilir.\nArtır: her hedefin taraması daha fazla ilerleyebilir; sunucu işi artabilir."
+  ,"settings.pingforit.inventory.tracking_max_slots_per_target.tooltip": "Bir hedefin Takibinin tur başına işleyebileceği envanter yuvası.\nAzalt: hedef başına daha az iş.\nArtır: her hedefi daha fazla tarar."
   ,"settings.pingforit.inventory.tracking_max_slots_server": "Sunucu genelinde takip yuvası"
-  ,"settings.pingforit.inventory.tracking_max_slots_server.tooltip": "Takip dönemi başına sunucu genelinde envanter yuvası ilerlemesi.\nAzalt: daha az toplam takip işi; çok sayıda etkin hedef daha yavaş güncellenebilir.\nArtır: daha çok hedef birlikte tarama ilerlemesi yapabilir; sunucu yükü artabilir."
+  ,"settings.pingforit.inventory.tracking_max_slots_server.tooltip": "Takibin tur başına sunucu genelinde işleyebileceği envanter yuvası.\nAzalt: daha az toplam Takip işi.\nArtır: daha fazla hedef birlikte ilerler."
   ,"settings.pingforit.inventory.tracking_stream_byte_multiplier": "Takip akışı bayt çarpanı"
-  ,"settings.pingforit.inventory.tracking_stream_byte_multiplier.tooltip": "Her takip döneminde oyuncu ve hedef başına gönderilen değişiklik verisi.\nAzalt: daha az değişiklik trafiği; yoğun kaplar daha yavaş güncellenebilir.\nArtır: dönem başına daha çok değişiklik gönderilebilir; bant genişliği kullanımı artabilir."
+  ,"settings.pingforit.inventory.tracking_stream_byte_multiplier.tooltip": "Her turda oyuncu ve hedef başına gönderilen değişiklikler.\nAzalt: daha az güncelleme trafiği kullanır.\nArtır: tur başına daha fazla değişiklik gönderir."
   ,"settings.pingforit.inventory.tracking_snapshot_byte_multiplier": "Anlık görüntü bayt çarpanı"
-  ,"settings.pingforit.inventory.tracking_snapshot_byte_multiplier.tooltip": "Anlık görüntü parça boyutu ve dönem başına tüm hedeflerde oyuncunun toplam görüntü verisi.\nAzalt: daha küçük parçalar ve daha az trafik; ilk görünüm ve onarım daha uzun sürebilir.\nArtır: dönem başına daha çok görüntü verisi gönderilebilir; paketler ve bant genişliği kullanımı büyüyebilir."
+  ,"settings.pingforit.inventory.tracking_snapshot_byte_multiplier.tooltip": "Takip edilen envanter ilk göründüğünde veya geri yüklendiğinde oyuncu ve tur başına gönderilen içerik.\nAzalt: daha az trafik kullanır.\nArtır: içeriği daha erken gösterir veya geri yükler."
   ,"settings.pingforit.inventory.tracking_global_byte_multiplier": "Takip genel bayt çarpanı"
-  ,"settings.pingforit.inventory.tracking_global_byte_multiplier.tooltip": "Sunucu genelinde dönem başına takip verisi ve gönderim kuyruğu kotası.\nAzalt: daha az toplam trafik ve kuyruk verisi; yoğun hedefler daha uzun bekleyebilir.\nArtır: daha çok veri kuyruğa alınıp gönderilebilir; bant genişliği ve bellek kullanımı artabilir."
+  ,"settings.pingforit.inventory.tracking_global_byte_multiplier.tooltip": "Sunucunun tur başına gönderebileceği Takip verisi.\nAzalt: daha az trafik kullanır.\nArtır: tek seferde daha fazla Takip verisi gönderir."
   ,"settings.pingforit.inventory.tracking_resync_min_periods": "Yeniden eşitleme aralığı (dönem)"
-  ,"settings.pingforit.inventory.tracking_resync_min_periods.tooltip": "Takip onarım istekleri arasındaki en kısa aralık.\nAzalt: daha sık onarıma ve daha erken toparlanmaya izin verir; onarım trafiği artabilir.\nArtır: daha az yinelenen istek trafiği azaltır; toparlanma daha uzun sürebilir."
+  ,"settings.pingforit.inventory.tracking_resync_min_periods.tooltip": "Takip hatasından sonra yeniden denemeden önce bekleme; 0 bu beklemeyi kaldırır.\nAzalt: daha erken toparlanır.\nArtır: daha az yeniden deneme."
   ,"settings.pingforit.inventory.tracking_heartbeat_periods": "Kontrol sıklığı (dönem)"
-  ,"settings.pingforit.inventory.tracking_heartbeat_periods.tooltip": "Pozitif değerler dönemsel takip denetimlerinin aralığını belirler.\nAzalt: daha sık denetimler tutarsızlıkları erken bulabilir; yük artabilir.\nArtır: daha az denetim yükü azaltır; tutarsızlıklar daha geç bulunabilir."
+  ,"settings.pingforit.inventory.tracking_heartbeat_periods.tooltip": "Takip edilen içeriklerin senkron olup olmadığını ne sıklıkta denetleyeceğiniz; 0 bu denetimleri kapatır.\nAzalt: senkron sorunlarını daha erken fark eder.\nArtır: denetim maliyetini azaltır."
   ,"settings.pingforit.inventory.tracking_grace_periods": "Bayt yumuşatma penceresi"
-  ,"settings.pingforit.inventory.tracking_grace_periods.tooltip": "Sunucu genelinde takip trafiğini yumuşatma penceresi.\nAzalt: daha küçük kısa süreli zirveler; toplu güncellemelerin gönderimi uzayabilir.\nArtır: toplu güncellemeler kısa patlamalara daha kolay sığar; trafik zirveleri daha büyük olabilir."
+  ,"settings.pingforit.inventory.tracking_grace_periods.tooltip": "Takip trafiğinin kısa patlamalar hâlinde ne kadar süre toplanabileceği.\nAzalt: daha küçük patlamalar kullanır.\nArtır: kısa patlamalarda daha fazla güncellemeye izin verir."
   ,"settings.pingforit.spatial_selector.precise_capture_period_ticks": "Kesin Seçim Yakalama Aralığı: %s"
-  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks.tooltip": "Kesin dalı etkinken canlı adayları yakalama aralığı; sonraki basılı tutmada uygulanır.\nAzalt: adayları daha sık yeniler; 1 her tick yakalar ve yakalama işini artırabilir.\nArtır: daha seyrek yeniler; aday değişiklikleri daha geç görünebilir."
+  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks.tooltip": "Kesin modun hedefleri ne sıklıkta aradığı.\nAzalt: daha erken günceller; 1 her tick denetler.\nArtır: daha seyrek günceller."
   ,"settings.pingforit.group.wheel_options": "Çark seçenekleri"
   ,"unit.pingforit.kib": "%s KiB"
   ,"unit.pingforit.ticks": "%st"
@@ -444,53 +499,55 @@
   ,"presentation.pingforit.content.group.create": "Create özellikleri..."
   ,"presentation.pingforit.content.group.stress": "Yük..."
   ,"settings.pingforit.spatial_selector.trail_length": "İz uzunluğu: %s"
-  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "Sonraki basılı tutmada saklanacak iz noktaları.\nAzalt: daha az nokta saklar; oluşabilecek iz kısalır.\nArtır: daha fazla nokta saklar; yeterli hareket varsa daha uzun iz oluşabilir."
+  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "Hareket izinin en fazla ne kadar uzayabileceği.\nAzalt: daha kısa iz çizer.\nArtır: daha uzun iz çizer."
   ,"settings.pingforit.spatial_selector.trail_opacity": "İz opaklığı: %s"
-  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Sonraki basılı tutmada yalnızca izin görünürlüğü; çark, seçenekler, kılavuzlar ve bağlayıcı değişmez.\nAzalt: izi soluklaştırır; 0 geçmişi veya seçimi değiştirmeden gizler.\nArtır: izi daha opak yapar."
+  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "Hareket izinin ne kadar görünür olduğu.\nAzalt: iz daha soluk; 0 izi gizler.\nArtır: iz daha belirgin."
   ,"unit.pingforit.points": "%s nokta"
   ,"value.pingforit.off": "Kapalı"
   ,"settings.pingforit.double_click_danger_window_millis": "Çift Tıklama Tehlike Aralığı: %s"
-  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "Tekrarlı Tehlike dizisindeki ardışık basışlar arasındaki süre; sonraki basışa uygulanır. İlk kısa basış geciktirilmez.\nAzalt: daha hızlı tekrarlı basışlar gerekir.\nArtır: daha yavaş tekrarlara izin verir; koşulları sağlayan tekrarlar ilk hedefi kullanır."
+  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "Tekrarlı Tehlike pingi için tıklamalar arasındaki en uzun süre.\nAzalt: daha hızlı tıklayın.\nArtır: daha yavaş tıklamalara izin verir."
   ,"settings.pingforit.double_click_danger_angle_degrees": "Çift Tıklama Tehlike Açısı: %s"
-  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "Tekrarlı Tehlike için ilk basıştan itibaren fareyle izin verilen dönüş; sonraki basışa uygulanır. 0 hareketi kapatır, uyumluluk bunu 0'a sıfırlar.\nAzalt: daha sabit nişan gerekir; 0 hareketi kapatır.\nArtır: daha fazla fare dönüşüne izin verir; koşulları sağlayan tekrarlar yine ilk hedefi kullanır."
+  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "Tekrarlı Tehlike'de tıklamalar arasında farenin ne kadar dönebileceği; 0 hareketi kapatır.\nAzalt: nişanı daha sabit tutmanız gerekir.\nArtır: daha fazla fare dönüşüne izin verir."
   ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled": "Envanter Seçimini Açık Tut"
-  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "Envanter listesi ve eşya menüsünde tuşu bırakma davranışı; sonraki basılı tutmada uygulanır.\nKapalı: bırakma, normal onaylama veya kapatma davranışını izler.\nAçık: ilk bırakma menüyü açık tutar; sonraki kısa basışlar onaylar, basılı tutmak işaretçiyi kaldırmadan seçimi iptal eder."
-  ,"settings.pingforit.ping_volume.tooltip": "Yerel ping sesi düzeyi.\nAzalt: daha sessiz uyarılar; 0 sesi kapatır.\nArtır: daha yüksek sesli uyarılar; diğer oyuncuların sesi değişmez."
-  ,"settings.pingforit.ping_distance.tooltip": "Sonraki basılı tutmada yerel standart ve Kesin hedef yakalama menzili; standart ışının ayrıca bir üst sınırı vardır. İsteğe bağlı uzak ışınlar kendi menzilini korur.\nAzalt: daha yakın hedefleri seçer.\nArtır: daha uzak adaylara izin verir; sunucunun kabul menzili değişmez."
-  ,"settings.pingforit.item_icon_visible.tooltip": "İşaretçilerde eşya simgesi gösterimi.\nKapalı: normal ping simgesini kullanır.\nAçık: izin verilen eşya verileri mevcutsa eşya simgesini gösterir."
-  ,"settings.pingforit.direction_indicator_visible.tooltip": "Ekran dışındaki işaretçiler için ekran kenarı yönlendirmesi.\nKapalı: yön göstergelerini gizler.\nAçık: ekran dışındaki işaretçilere yönelen göstergeleri gösterir."
-  ,"settings.pingforit.mark_transparent_blocks.tooltip": "Sonraki basılı tutmada blok şekli seçimi; genel bir opaklık filtresi değildir.\nKapalı: Minecraft'ın görsel şekillerini kullanır.\nAçık: çarpışması olmayan seçilebilir süslemeler dâhil dış çizgi şekillerini kullanır."
-  ,"settings.pingforit.mark_blacklisted_targets.tooltip": "Sonraki basılı tutmada varlık hedefi seçimi; blok görüntüleme listeleriyle ilgisizdir.\nKapalı: kara listedeki varlıkları atlar.\nAçık: bunları adaylara dâhil eder; izleyiciler yine hariç tutulur."
-  ,"settings.pingforit.mark_fluids.tooltip": "Sonraki basılı tutmada sıvı hedefi seçimi.\nKapalı: seçim ışını sıvıları yok sayar.\nAçık: sıvıları seçilebilir isabetlere dâhil eder."
-  ,"settings.pingforit.player_info_mode.tooltip": "Hedef oyuncunun değil, işaretçiyi oluşturan oyuncunun bilgisi.\nBasılı Tut: oyuncu listesi tuşu tutulurken ad ve kafa görünür. Her Zaman: görünür kalırlar.\nÖzet: kafa mesafenin yanına yerleştirilir. Kapalı: oluşturanın bilgisi gizlenir."
-  ,"settings.pingforit.player_info_mode.disabled.tooltip": "İşaretçiyi oluşturan oyuncunun adını ve kafasını gizler.\nHedef adı ve mesafe görünür kalır."
-  ,"settings.pingforit.player_info_mode.always.tooltip": "İşaretçiyi oluşturan oyuncunun adını ve kafasını görünür tutar.\nİşaretçinin altında ek bir etiket kullanır."
-  ,"settings.pingforit.player_info_mode.compact.tooltip": "Ayrı bir ad etiketi yerine oluşturan oyuncunun kafasını mesafenin yanında gösterir."
-  ,"settings.pingforit.team_color_mode.tooltip": "Ayrıntılı oluşturan etiketinin takım biçimlendirmesi; işaretçiyi yeniden renklendirmez.\nTam ve Yalnızca Etiketler takım biçimlendirmesini korur; Kapalı ve Yalnızca Ping kaldırır.\nİşaretçi rengi Ping Türüne bağlıdır; hedef ve mesafe yazısı beyaz kalır."
-  ,"settings.pingforit.team_color_mode.full.tooltip": "Tam, Yalnızca Etiketler ile aynı etkiye sahiptir: ayrıntılı oluşturan etiketinin takım biçimlendirmesini korur.\nİşaretçi rengi yine Ping Türüne bağlıdır; hedef ve mesafe yazısı beyaz kalır."
-  ,"settings.pingforit.team_color_mode.disabled.tooltip": "Kapalı, Yalnızca Ping ile aynı etkiye sahiptir: ayrıntılı oluşturan etiketinden takım biçimlendirmesini kaldırır.\nİşaretçi rengi yine Ping Türüne bağlıdır; hedef ve mesafe yazısı beyaz kalır."
-  ,"settings.pingforit.team_color_mode.ping_only.tooltip": "Yalnızca Ping, Kapalı ile aynı etkiye sahiptir: ayrıntılı oluşturan etiketinden takım biçimlendirmesini kaldırır.\nİşaretçileri yeniden renklendirmez; renkleri Ping Türüne bağlıdır. Hedef ve mesafe yazısı beyaz kalır."
-  ,"settings.pingforit.team_color_mode.labels_only.tooltip": "Yalnızca Etiketler, Tam ile aynı etkiye sahiptir: ayrıntılı oluşturan etiketinin takım biçimlendirmesini korur.\nİşaretçi rengi yine Ping Türüne bağlıdır; hedef ve mesafe yazısı beyaz kalır."
-  ,"settings.pingforit.ping_size.tooltip": "İşaretçilerin ve yön göstergelerinin yerel boyutu.\nAzalt: küçük kaplamalar görüşü daha az örter.\nArtır: büyük kaplamalar daha belirgindir, ancak görüşü daha fazla örter."
-  ,"settings.pingforit.wheel_opacity.tooltip": "Sonraki basılı tutmada seçici arka planının opaklığı; etiketlerin ayrı ayarı vardır.\nAzalt: dünya daha fazla görünür; 0 arka planı gizler.\nArtır: arka planı daha opak yapar."
-  ,"settings.pingforit.wheel_target_opacity.tooltip": "Seçicinin yazı içeren çerçeveleri ve etiketlerinin opaklığı; sonraki basılı tutmada uygulanır.\nAzalt: çerçeve ve yazıyı soluklaştırır; 0 görünmez yapar.\nArtır: çerçeve ve yazıyı belirginleştirir; arka plan değişmez."
-  ,"settings.pingforit.wheel_font_size.tooltip": "Sonraki basılı tutmada seçici seçenek etiketlerinin yazı boyutu.\nAzalt: daha küçük seçenek yazısı kullanır.\nArtır: daha fazla yer isteyen büyük seçenek yazısı kullanır."
-  ,"settings.pingforit.wheel_target_font_size.tooltip": "Sonraki basılı tutmada seçici hedef etiketinin yazı boyutu.\nAzalt: daha küçük hedef yazısı kullanır.\nArtır: daha fazla yer isteyen büyük hedef yazısı kullanır."
-  ,"settings.pingforit.reset_all.tooltip": "Onaydan sonra hatırlanan kanallar dâhil tüm istemci tercihlerini sıfırlar.\nSunucu yapılandırmasını sıfırlamaz; gönderilmemiş normal sunucu taslağını siler.\nKorumalı dosyalar diske kaydetmeyi engelleyebilir."
-  ,"settings.pingforit.wheel_hold_millis.tooltip": "Seçiciyi açmak için gereken normal basılı tutma; sonraki basışa uygulanır. Düşürmek uyumluluk aralığını da kısaltabilir.\nAzalt: daha erken açılır; açılmadan önce kısa basış için daha az zaman kalır.\nArtır: açılmadan önce daha uzun bekler; isteğe bağlı hareket kısayolu bağımsızdır."
-  ,"settings.pingforit.cancel_half_cone_angle_degrees.tooltip": "Kendi en yakın işaretçinizi kaldırmak için seçim nişan konisi; sunucunun sahiplik ve etkinlik denetimleri yine geçerlidir.\nAzalt: daha hassas nişan gerekir.\nArtır: basış yönünden daha uzaktaki işaretçileri kapsar; yine en yakın mesafe kazanır."
-  ,"settings.pingforit.configuration_notice_size.tooltip": "Yerel hedef seçimi aç/kapat bildirimlerinin boyutu.\nAzalt: daha küçük bildirimler; 0 seçenekleri devre dışı bırakmadan bildirimleri gizler.\nArtır: daha büyük bildirimler görüşü daha fazla örter."
-  ,"settings.pingforit.scope.client.tooltip": "Bu istemcinin tercihlerini düzenleyin; sunucunun yetkisi değişmez."
-  ,"settings.pingforit.scope.server.tooltip": "Sunucu ayarlarını görüntüleyin; düzenleme için 3. izin düzeyi gerekir. Normal değişiklikler son kapatmada gönderilir; sunum kuralları ayrı bir yoldan hemen gönderilir."
-  ,"settings.pingforit.navigation.back.tooltip": "Normal sunucu taslağını göndermeden bu kapsamın genel görünümüne dönün."
-  ,"settings.pingforit.navigation.done.tooltip": "İstemci ayarlarını kaydeder, ardından geçerli normal sunucu değişikliklerini gönderip kapatır. Sunucunun uyguladığına dair onay alınmaz."
-  ,"settings.pingforit.presentation.server.tooltip": "Seçili hedef türünün sunucu alan kuralları; her düzenleme Ayarlar kapanırken değil, ayrı olarak gönderilir.\nİzin eşleşmeleri engel eşleşmelerinden önce gelir; alan izinleri ve veri kullanılabilirliği yine geçerlidir.\nDüzenleme için 3. izin düzeyi gerekir; alt alan kısıtlamaları yalnızca dosyadan ayarlanır."
-  ,"settings.pingforit.presentation.target_type.tooltip": "Kurallarını görüntüleyip düzenlemek istediğiniz hedef türünü seçin.\nTür değiştirmek ilkeyi değiştirmez veya başka bir listenin yazılmış metnini silmez."
-  ,"settings.pingforit.presentation.selector.tooltip": "minecraft:entity.health veya create:kinetic.* gibi bir alan kimliği seçicisi girin.\n* yalnızca ad alanı ya da yol kısmının içinde eşleşir, ':' üzerinden geçmez; bağdaştırıcı kimlikleri alanlarını seçmez.\nYazmak kuralı uygulamaz; Ekle'yi kullanın."
-  ,"settings.pingforit.presentation.add.tooltip": "Bu seçiciyi seçili türün geçerli listesine hemen gönderin.\nBaşarılı ekleme yalnızca bu listenin gönderimden beri değişmemiş girdisini temizler; hatalarda metin korunur."
-  ,"settings.pingforit.presentation.remove.tooltip": "Bu seçicinin bu listeden kaldırılmasını hemen isteyin.\nDiğer eşleşen seçiciler, yalnızca beyaz liste modu ve varsayılanlar geçerliliğini korur."
-  ,"settings.pingforit.presentation.refresh.tooltip": "Kuralları değiştirmeden güncel sunucu ilkesi görünümünü isteyin.\nYazılan girdiyi ve son bilinen görünümü korur; istek zaman aşımından sonra yeniden deneyebilirsiniz."
-  ,"settings.pingforit.presentation.advanced.tooltip": "Bu hedef türünün seçici listelerini ve yalnızca beyaz liste modunu gösterin veya gizleyin.\nYalnızca düzenleyici görünümünü değiştirir, sunucu ilkesini değil."
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "Envanter listesi ve eşya menüsünün bırakma davranışı.\nKapalı: bırakmak her zamanki gibi onaylar veya kapatır.\nAçık: ilk bırakma açık tutar; sonraki kısa basışlar onaylar, basılı tutma seçimi iptal eder."
+  ,"settings.pingforit.ping_volume.tooltip": "Ping ses düzeyi.\nAzalt: daha sessiz; 0 sesi kapatır.\nArtır: daha yüksek ses."
+  ,"settings.pingforit.ping_distance.tooltip": "Bir hedefin işaretlenebileceği en uzak mesafe.\nAzalt: daha yakın hedefleri seçer.\nArtır: daha uzak hedefleri işaretler."
+  ,"settings.pingforit.item_icon_visible.tooltip": "İşaretçilerde eşya simgeleri.\nKapalı: normal ping simgesini kullanır.\nAçık: eşya simgesi varsa o eşyanın simgesini gösterir."
+  ,"settings.pingforit.direction_indicator_visible.tooltip": "Ekran dışındaki işaretçiler için yön göstergeleri.\nKapalı: bunları gizler.\nAçık: ekran dışındaki işaretçilere yönelir."
+  ,"settings.pingforit.mark_transparent_blocks.tooltip": "Blokları dış çizgi şekillerine göre seçer.\nKapalı: Minecraft'ta görünen şekli kullanır.\nAçık: dış çizgi şeklini kullanır; süslemeler seçilebilir."
+  ,"settings.pingforit.mark_blacklisted_targets.tooltip": "Kara listedeki varlıkların seçilip seçilemeyeceği.\nKapalı: kara listedeki varlıkları atlar.\nAçık: seçilmelerine izin verir."
+  ,"settings.pingforit.mark_fluids.tooltip": "Sıvıların seçilip seçilemeyeceği.\nKapalı: sıvıları yok sayar.\nAçık: sıvıların seçilmesine izin verir."
+  ,"settings.pingforit.player_info_mode.tooltip": "İşaretçiyi gönderen kişinin bilgisi."
+  ,"settings.pingforit.player_info_mode.disabled.tooltip": "Yazar bilgisini gizler; hedef adı ve mesafe görünür kalır."
+  ,"settings.pingforit.player_info_mode.always.tooltip": "Yazarın adını ve kafasını görünür tutar.\nİşaretçinin altında ayrı bir etiket kullanır."
+  ,"settings.pingforit.player_info_mode.compact.tooltip": "Yazarın kafasını mesafenin yanında gösterir."
+  ,"settings.pingforit.team_color_mode.tooltip": "Yazar etiketinin takım biçimlendirmesi."
+  ,"settings.pingforit.team_color_mode.full.tooltip": "Yazar etiketi takım renkleriyle biçimlendirilir; işaretçi renkleri yine Ping Türüne bağlıdır."
+  ,"settings.pingforit.team_color_mode.disabled.tooltip": "Yazar etiketi düz biçimde gösterilir; işaretçi renkleri yine Ping Türüne bağlıdır."
+  ,"settings.pingforit.team_color_mode.ping_only.tooltip": "Yazar etiketi düz biçimde gösterilir; işaretçi renkleri yine Ping Türüne bağlıdır."
+  ,"settings.pingforit.team_color_mode.labels_only.tooltip": "Yazar etiketi takım renkleriyle biçimlendirilir; işaretçi renkleri yine Ping Türüne bağlıdır."
+  ,"settings.pingforit.ping_size.tooltip": "İşaretçilerin ve yön göstergelerinin boyutu.\nAzalt: görüşte daha az yer kaplar.\nArtır: daha belirgin görünür."
+  ,"settings.pingforit.wheel_opacity.tooltip": "Çark arka planının opaklığı.\nAzalt: dünyayı daha fazla gösterir; 0 arka planı gizler.\nArtır: arka planı daha opak yapar."
+  ,"settings.pingforit.wheel_target_opacity.tooltip": "Seçenek kutusu ve etiket opaklığı.\nAzalt: seçenek kutularını ve yazıyı soluklaştırır; 0 gizler.\nArtır: seçenek kutularını ve yazıyı daha belirgin yapar."
+  ,"settings.pingforit.wheel_font_size.tooltip": "Çark seçeneklerinin yazı boyutu.\nAzalt: daha küçük seçenek yazısı.\nArtır: daha büyük seçenek yazısı."
+  ,"settings.pingforit.wheel_target_font_size.tooltip": "Hedef adının yazı boyutu.\nAzalt: daha küçük hedef yazısı.\nArtır: daha büyük hedef yazısı."
+  ,"settings.pingforit.reset_all.tooltip": "%2$s istemci ayarlarını %1$s."
+  ,"settings.pingforit.reset_all.tooltip.reset": "sıfırla"
+  ,"settings.pingforit.reset_all.tooltip.all": "Tüm"
+  ,"settings.pingforit.wheel_hold_millis.tooltip": "Seçici açılmadan önce ne kadar basılı tutulacağı.\nAzalt: daha erken açılır.\nArtır: açılmadan önce daha uzun beklenir."
+  ,"settings.pingforit.cancel_half_cone_angle_degrees.tooltip": "İşaretçiyi kaldırırken, işaretçinin nişan aldığınız yerden ne kadar uzakta olabileceği.\nAzalt: daha hassas nişan gerekir.\nArtır: nişanınızdan daha uzaktaki işaretçileri kapsar; yine en yakın olan seçilir."
+  ,"settings.pingforit.configuration_notice_size.tooltip": "Hedef seçimini açıp kapatırken gösterilen bildirimlerin boyutu.\nAzalt: daha küçük bildirimler; 0 bildirimleri gizler, seçenekler çalışmaya devam eder.\nArtır: daha büyük bildirimler."
+  ,"settings.pingforit.scope.client.tooltip": "Bu istemcinin ayarlarını düzenleyin."
+  ,"settings.pingforit.scope.server.tooltip": "Sunucu ayarlarını görüntüleyin; düzenleme için 3. izin düzeyi gerekir."
+  ,"settings.pingforit.navigation.back.tooltip": "Bu kapsamın genel görünümüne dönün."
+  ,"settings.pingforit.navigation.done.tooltip": "İstemci ayarlarını kaydeder, sunucu değişikliklerini gönderir ve kapatır."
+  ,"settings.pingforit.presentation.server.tooltip": "Seçili hedef türünün alan kuralları; düzenleme için 3. izin düzeyi gerekir."
+  ,"settings.pingforit.presentation.target_type.tooltip": "Kurallarını görüntüleyip düzenleyeceğiniz hedef türünü seçin."
+  ,"settings.pingforit.presentation.selector.tooltip": "minecraft:entity.health veya create:kinetic.* gibi bir alan kimliği seçicisi.\n* yalnızca tek bir ad alanı veya yol parçası içinde eşleşir, : üzerinden geçmez.\nSeçiciyi uygulamak için Ekle'yi kullanın."
+  ,"settings.pingforit.presentation.add.tooltip": "Girilen seçiciyi geçerli listeye ekler."
+  ,"settings.pingforit.presentation.remove.tooltip": "Bu seçiciyi geçerli listeden kaldırır."
+  ,"settings.pingforit.presentation.refresh.tooltip": "Sunucudaki en güncel kuralları yeniden okur."
+  ,"settings.pingforit.presentation.advanced.tooltip": "Gelişmiş kuralları gösterir veya gizler."
   ,"unit.pingforit.multiplier": "%1$s×"
   ,"settings.pingforit.format.name_value": "%1$s: %2$s"
   ,"settings.pingforit.presentation.advanced.with_counts": "%1$s (%2$s)"
@@ -510,20 +567,20 @@
   ,"settings.pingforit.group.marker_cancellation": "İşaretçi kaldırma"
   ,"settings.pingforit.group.content_selection": "İçerik ve envanter seçimi"
   ,"settings.pingforit.group.sound_notices": "Ses ve bildirimler"
-  ,"settings.pingforit.category.client.display.tooltip": "Yerel hedef yakalama menzilini, işaretçi görüntüleme süresini, simgeleri, boyutu ve oluşturan bilgisini seçin. Sunucunun menzilini veya işaretçi ömrünü değiştirmez."
-  ,"settings.pingforit.category.client.selection.tooltip": "Yakalamanın dış çizgi şekilli blokları, kara listedeki varlıkları ve sıvıları içerip içermeyeceğini seçin. Sonraki basılı tutmada uygulanır; blok görüntüleme listelerini değiştirmez."
-  ,"settings.pingforit.category.client.wheel_appearance.tooltip": "Sonraki basılı tutma için çark ve envanter düzenini, yazıyı, opaklığı, izleri ve hareketi ayarlayın. Görünüm ayarları hareket eşiklerinin yerine geçmez."
-  ,"settings.pingforit.category.client.input.tooltip": "Açılmayı, uyumluluğu, tekrarlı Tehlike basışlarını, işaretçi kaldırma nişanını, gezinme hareketlerini ve içerik seçimini ayarlayın. Uyumluluk, çakışan hareket tercihlerini temizler."
-  ,"settings.pingforit.category.client.channel_notices.tooltip": "Bu sunucu için kanal seçin; yerel ping sesini ve aç/kapat bildirimi boyutunu ayarlayın. Boş kanal sunucu ilkesini kullanır."
-  ,"settings.pingforit.category.client.geometry_config.tooltip": "Varlık bloğu dış çizgi kaynaklarını seçin veya kaydedip kapatarak istemci dosyasının tamamını açın. Harici dosya değişiklikleri istemcinin yeniden başlatılmasını gerektirir."
-  ,"settings.pingforit.category.client.performance.tooltip": "Etkin Kesin dalının canlı adayları ne sıklıkta yakalayacağını ayarlayın. Kısa aralıklar daha erken yeniler, ancak yakalama işini artırabilir; sonraki basılı tutmada uygulanır."
-  ,"settings.pingforit.category.client.debug.tooltip": "Bu istemcinin günlük ayrıntısını ve Debug modunda performans izleyici HUD'sini ve ölçümlerini seçin. Değişiklikler hemen uygulanır; sunucu günlüklerini veya veri toplamayı etkilemez."
-  ,"settings.pingforit.category.server.channel_players.tooltip": "Boş kanallar ve yeni isteklerdeki oyuncu hedefleri için sunucu davranışını ayarlayın. Normal düzenlemeler son kapatmaya kadar taslak olarak kalır."
-  ,"settings.pingforit.category.server.send_rate.tooltip": "Her oyuncunun seri işaretçi oluşturma hakkını ve yenilenme aralığını ayarlayın. Sıfır hız sınırı pingleri değil, hız denetimini kapatır."
-  ,"settings.pingforit.category.server.marker_duration.tooltip": "Yeni işaretçiler oluşturulurken sabitlenecek sunucu ömrünü ayarlayın. Mevcut bitiş zamanları ve bağımsız istemci görüntüleme tercihleri değişmez."
-  ,"settings.pingforit.category.server.performance.tooltip": "Yönetici gecikme bildirimlerini ve ortak, önizleme, takip envanter bütçelerini yönetin. Kaynak kullanımını ilerleme, iletim beklemeleri ve eşya ayrıntılarıyla dengeleyin."
-  ,"settings.pingforit.category.server.server_presentation.tooltip": "Bu bağlantının kataloğundan hedef türüne göre alan kurallarını görüntüleyin ve düzenleyin. Düzenlemeler ayrı bir sunucu yolundan hemen gönderilir; 3. izin düzeyi gerekir."
-  ,"settings.pingforit.category.server.debug.tooltip": "Sunucu günlük ayrıntısını ve Debug modunda Önizleme ve Takip veri toplamayı seçin. Değişiklikler son kapatmaya kadar taslakta kalır; salt okunur görünüm geçerli değerleri gösterir."
+  ,"settings.pingforit.category.client.display.tooltip": "İşaretçilerin görünümünü ve işaretleyebileceğiniz mesafeyi ayarlayın."
+  ,"settings.pingforit.category.client.selection.tooltip": "Hangi hedeflerin işaretlenebileceğini seçin."
+  ,"settings.pingforit.category.client.wheel_appearance.tooltip": "Çark düzenini ve görünümünü ayarlayın."
+  ,"settings.pingforit.category.client.input.tooltip": "Kontrolleri ve hareketleri yapılandırın."
+  ,"settings.pingforit.category.client.channel_notices.tooltip": "Kanalı ve yerel bildirimleri yapılandırın."
+  ,"settings.pingforit.category.client.geometry_config.tooltip": "Blok dış çizgilerinin görünümünü seçin ve istemci yapılandırma dosyasını açın."
+  ,"settings.pingforit.category.client.performance.tooltip": "Kesin modun hedefleri ne sıklıkta aradığını ayarlayın."
+  ,"settings.pingforit.category.client.debug.tooltip": "Bu istemcinin hata ayıklama seçenekleri."
+  ,"settings.pingforit.category.server.channel_players.tooltip": "Sunucu kanalını ve oyuncu davranışını yapılandırın."
+  ,"settings.pingforit.category.server.send_rate.tooltip": "Sunucunun işaretçi gönderim hızını yapılandırın."
+  ,"settings.pingforit.category.server.marker_duration.tooltip": "Sunucu işaretçi ömrünü yapılandırın."
+  ,"settings.pingforit.category.server.performance.tooltip": "Sunucu performans izlemesini ve envanter işlemesini ayarlayın."
+  ,"settings.pingforit.category.server.server_presentation.tooltip": "Hedef türü başına alan kurallarını yapılandırın."
+  ,"settings.pingforit.category.server.debug.tooltip": "Mod hata ayıklama seçenekleri."
   ,"settings.pingforit.wheel_hold_millis": "Çarkı Açma Basılı Tutma Süresi: %s"
   ,"settings.pingforit.cancel_half_cone_angle_degrees": "Kaldırma Konisi Yarı Açısı: %s"
   ,"unit.pingforit.degrees": "%s°"
@@ -629,13 +686,13 @@
 	"monitor.pingforit.tooltip.sync": "Eşitleme sayaçları yalnızca normal inventory-v2 trafiğini açıklar; tüm bağlantı trafiğini veya CREATED oluşturma makbuzunu değil.",
 	"settings.pingforit.group.monitor": "Performans monitörü",
 	"settings.pingforit.monitor.hud_enabled": "Monitör HUD'u",
-	"settings.pingforit.monitor.hud_enabled.tooltip": "Bu istemci günlük profili Debug iken yerel performans monitörü katmanını gösterir.\nKapatmak tüm metrik seçimlerini korur; yeniden açmak bunların tekrar seçilmesini gerektirmez.\nDeğişiklikler hemen uygulanır ve sunucu toplamasını asla açmaz veya kapatmaz.",
+	"settings.pingforit.monitor.hud_enabled.tooltip": "Ekranda performans bilgilerini gösterir.\nKapalı: gizler; metrik seçimleriniz korunur.\nAçık: seçilen metrikleri gösterir.",
 	"settings.pingforit.monitor.preview_enabled": "Önizleme izleme",
-	"settings.pingforit.monitor.preview_enabled.tooltip": "Sunucu günlük profili Debug iken sunucuda sınırlı Önizleme performans metrikleri toplar.\nAnahtar son kapanışa kadar sunucu ayarları taslağında kalır; sunucu güncellemeyi kabul etmeden toplamayı başlatmaz.\nÖnizleme ve Takip bağımsız olarak toplar.",
+	"settings.pingforit.monitor.preview_enabled.tooltip": "Sunucu envanter önizlemeleriyle ilgili performans bilgileri.\nKapalı: kaydetmez.\nAçık: kaydeder.",
 	"settings.pingforit.monitor.tracking_enabled": "Takip izleme",
-	"settings.pingforit.monitor.tracking_enabled.tooltip": "Sunucu günlük profili Debug iken sunucuda sınırlı Takip performans metrikleri toplar.\nAnahtar son kapanışa kadar sunucu ayarları taslağında kalır; sunucu güncellemeyi kabul etmeden toplamayı başlatmaz.\nÖnizleme ve Takip bağımsız olarak toplar.",
+	"settings.pingforit.monitor.tracking_enabled.tooltip": "Sunucu envanter takibiyle ilgili performans bilgileri.\nKapalı: kaydetmez.\nAçık: kaydeder.",
 	"settings.pingforit.monitor.metric": "Monitör metriği",
-	"settings.pingforit.monitor.metric.tooltip": "Bir metriği seçmek yalnızca yerel görüntülemeyi ve giden talebi kontrol eder. Sunucu toplamasını asla açmaz veya kapatmaz; HUD kapalıyken geçerli seçim korunur.",
+	"settings.pingforit.monitor.metric.tooltip": "Monitörün ne göstereceğini seçin.\nMonitör kapalıyken seçimleriniz korunur.",
 	"settings.pingforit.monitor.group.summary": "Özet",
 	"settings.pingforit.monitor.group.server_preview": "Sunucu Önizlemesi",
 	"settings.pingforit.monitor.group.server_tracking": "Sunucu Takibi",
@@ -740,5 +797,10 @@
 	"monitor.pingforit.hud.format.stat": "%1$s %2$s",
 	"monitor.pingforit.hud.format.memory": "%1$s %2$s %3$s",
 	"monitor.pingforit.hud.format.field_separator": "; ",
-	"monitor.pingforit.hud.format.detail_separator": " "
+	"monitor.pingforit.hud.format.detail_separator": " ",
+	"settings.pingforit.cooldown_feedback": "Bekleme Bildirimi",
+	"settings.pingforit.cooldown_feedback.tooltip": "Bir ping bekleme süresindeyken yerel bildirimin nerede gösterileceğini seçer.\nEylem Çubuğu: hızlı çubuğun üstünde.\nSohbet: sohbet penceresinde.\nGizli: gösterme.",
+	"value.pingforit.actionbar": "Eylem Çubuğu",
+	"value.pingforit.chat": "Sohbet",
+	"pingforit.chat.create_cooldown": "Ping bekleme süresinde..."
 }

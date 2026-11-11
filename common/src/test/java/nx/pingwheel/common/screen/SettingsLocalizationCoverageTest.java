@@ -6,6 +6,7 @@ import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import net.minecraft.network.chat.Component;
 import nx.pingwheel.common.config.ChannelMode;
+import nx.pingwheel.common.config.CooldownFeedbackMode;
 import nx.pingwheel.common.config.EntityBlockRenderMode;
 import nx.pingwheel.common.config.PlayerInfoMode;
 import nx.pingwheel.common.config.TeamColorMode;
@@ -121,7 +122,9 @@ class SettingsLocalizationCoverageTest {
 		"scope.server.tooltip",
 		"navigation.back.tooltip",
 		"navigation.done.tooltip",
-		"reset_all.tooltip",
+		// Reset help itself is a two-argument template; these are its literal fragments.
+		"reset_all.tooltip.reset",
+		"reset_all.tooltip.all",
 		"open_client_config.tooltip",
 		"presentation.server.tooltip",
 		"presentation.target_type.tooltip",
@@ -139,17 +142,19 @@ class SettingsLocalizationCoverageTest {
 	 * or with a separate value formatter. The signature records the type and
 	 * cardinality independently of translation order.
 	 */
-	private static final @Unmodifiable Map<String, @Unmodifiable List<String>> SETTINGS_FORMAT_SIGNATURES = Map.of(
-		LanguageUtils.settings("inventory").path("value").getKey(), List.of("1:s", "2:s"),
-		LanguageUtils.settings("inventory").path("size_adjusted").getKey(), List.of("1:s", "2:s"),
-		LanguageUtils.settings("channel").path("placeholder").getKey(), List.of("1:s"),
-		LanguageUtils.settings("presentation").path("advanced", "counts").getKey(), List.of("1:s", "2:s"),
-		LanguageUtils.settings("format").path("name_value").getKey(), List.of("1:s", "2:s"),
-		LanguageUtils.settings("presentation").path("advanced", "with_counts").getKey(), List.of("1:s", "2:s"),
-		LanguageUtils.settings("format").path("truncated").getKey(), List.of("1:s"),
-		LanguageUtils.settings("title").path("breadcrumb").getKey(), List.of("1:s", "2:s", "3:s"),
-		LanguageUtils.settings("title").path("scope").getKey(), List.of("1:s", "2:s"),
-		LanguageUtils.settings("presentation").path("selector_separator").getKey(), List.of());
+	private static final @Unmodifiable Map<String, @Unmodifiable List<String>> SETTINGS_FORMAT_SIGNATURES = Map.ofEntries(
+		Map.entry(LanguageUtils.settings("inventory").path("value").getKey(), List.of("1:s", "2:s")),
+		Map.entry(LanguageUtils.settings("inventory").path("size_adjusted").getKey(), List.of("1:s", "2:s")),
+		Map.entry(LanguageUtils.settings("channel").path("placeholder").getKey(), List.of("1:s")),
+		Map.entry(LanguageUtils.settings("presentation").path("advanced", "counts").getKey(), List.of("1:s", "2:s")),
+		Map.entry(LanguageUtils.settings("format").path("name_value").getKey(), List.of("1:s", "2:s")),
+		Map.entry(LanguageUtils.settings("presentation").path("advanced", "with_counts").getKey(), List.of("1:s", "2:s")),
+		Map.entry(LanguageUtils.settings("format").path("truncated").getKey(), List.of("1:s")),
+		Map.entry(LanguageUtils.settings("title").path("breadcrumb").getKey(), List.of("1:s", "2:s", "3:s")),
+		Map.entry(LanguageUtils.settings("title").path("scope").getKey(), List.of("1:s", "2:s")),
+		// Reset help takes its two red fragments as arguments; the fragments are literal.
+		Map.entry(LanguageUtils.settings("reset_all").path("tooltip").getKey(), List.of("1:s", "2:s")),
+		Map.entry(LanguageUtils.settings("presentation").path("selector_separator").getKey(), List.<String>of()));
 
 	@Test
 	void everyCatalogValueControlHasLocalizedLabelAndTooltipInEveryLocale() throws IOException {
@@ -199,7 +204,7 @@ class SettingsLocalizationCoverageTest {
 	}
 
 	@Test
-	void everyStructuralHelpTooltipIsLocalizedAndLiteral() throws IOException {
+	void everyStructuralHelpResourceIsLocalizedAndLiteral() throws IOException {
 		for (String locale : LOCALES) {
 			JsonObject root = read(locale);
 			for (String id : STRUCTURAL_HELP_IDS) {
@@ -323,6 +328,7 @@ class SettingsLocalizationCoverageTest {
 		for (TeamColorMode mode : TeamColorMode.values()) ids.add(mode.toString());
 		for (ChannelMode mode : ChannelMode.values()) ids.add(mode.toString());
 		for (EntityBlockRenderMode mode : EntityBlockRenderMode.values()) ids.add(mode.toString());
+		for (CooldownFeedbackMode mode : CooldownFeedbackMode.values()) ids.add(mode.toString());
 		for (LoggingProfile profile : LoggingProfile.values()) ids.add(profile.name().toLowerCase(Locale.ROOT));
 		ids.add(TeamContext.VANILLA_TEAM.toString());
 		ids.add("global");

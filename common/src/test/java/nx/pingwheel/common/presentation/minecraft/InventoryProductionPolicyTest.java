@@ -52,6 +52,7 @@ import nx.pingwheel.common.presentation.PresentationSettings;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.inventory.InventoryBackend;
 import nx.pingwheel.common.presentation.inventory.InventoryDomainCodec;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
 import nx.pingwheel.common.presentation.inventory.InventoryPresentation;
 import nx.pingwheel.common.presentation.inventory.InventoryReprojectionSummary;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceCodec;
@@ -450,6 +451,7 @@ class InventoryProductionPolicyTest {
 			if (partial) { f.states.get(lane).slots = 8; f.settings.setPhysicalSlotsPerTick(IntLimit.finite(lane == InventoryResourceKind.ITEM ? 1 : 2)); }
 			long request = f.open();
 			f.settings.getPreview().setGlobalByteMultiplier(nx.pingwheel.common.config.ByteMultiplier.finite(new java.math.BigDecimal("0.125")));
+			f.policyWirePressure();
 			for (int index = 0; index < 24; index++) f.join(new UUID(800, index));
 			Player recipient = f.players.others.values().iterator().next();
 			var recipientSession = sessions().get(recipient.getUUID());
@@ -639,8 +641,12 @@ class InventoryProductionPolicyTest {
 			f.player.permission = 2; f.tick(2);
 			assertEquals(initial, f.client.preview(request, InventoryResourceKind.FLUID), "reallow cannot widen, reopen or rebaseline it");
 			assertEquals(1, f.states.get(InventoryResourceKind.FLUID).reads); assertEquals(1, f.states.get(InventoryResourceKind.ITEM).reads);
+			int beforeRejectedOpen = f.packets.size();
 			f.backend.handle(OWNER, InventoryC2SPacket.open(f.client.epoch(), f.session().epoch, f.session().view, 2, TARGET, BlockFace.NORTH), 2, f.settings);
-			f.tick(2); assertTrue(f.packets.stream().noneMatch(p -> p.requestId() == 2));
+			f.tick(2);
+			var rejected = f.packets.subList(beforeRejectedOpen, f.packets.size()).stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.OPEN_REJECTED
+				&& p.requestId() == 2).toList();
+			assertEquals(1, rejected.size()); assertEquals(InventoryFailureReason.TARGET_CAPACITY, rejected.getFirst().failureReason());
 			f.client.close(request); f.backend.handle(OWNER, f.requests.getLast(), 2, f.settings);
 			int getters = f.states.values().stream().mapToInt(state -> state.reads).sum();
 			f.tick(3); assertEquals(getters, f.states.values().stream().mapToInt(state -> state.reads).sum());
@@ -825,6 +831,7 @@ class InventoryProductionPolicyTest {
 			f.tick(1);
 			assertEquals(Optional.of(!allow), f.client.authorization(lane, epoch, view, "entity_block"));
 			// Legitimate HELLO traffic spends the existing shared preview/control byte window.
+			f.policyWirePressure();
 			for (int i = 0; i < 100; i++) f.backend.handle(OWNER, InventoryC2SPacket.hello(), 1, f.settings);
 			f.player.permission = allow ? 2 : 0; f.demand(); f.tick(2);
 			@Nullable var queued = f.queuedPolicy(lane);
@@ -842,6 +849,8 @@ class InventoryProductionPolicyTest {
 			assertNull(f.queuedPolicy(lane), "fresh authority rejects the queued old control");
 			assertEquals(sent, f.packets.size(), "a fresh-fenced control is never sent");
 			f.player.permission = allow ? 2 : 0; f.demand();
+			f.policyWireRestore();
+			f.policyWireRestore();
 			int processed = f.requests.size(), largestLaneQueue = 0;
 			for (int tick = 3; tick <= 150; tick++) {
 				f.tick(tick); f.client.tick(true);
@@ -870,9 +879,10 @@ class InventoryProductionPolicyTest {
 		try (var f = new Fixture(Map.of(lane.fieldId(), 2))) {
 			f.open();
 			if (allow) { f.player.permission = 0; f.demand(); f.tick(1); }
+			f.policyWirePressure();
 			for (int i = 0; i < 100; i++) f.backend.handle(OWNER, InventoryC2SPacket.hello(), 1, f.settings);
 			f.player.permission = allow ? 2 : 0; f.demand(); f.tick(2);
-			var original = f.pendingPolicy(lane); Object queued = Objects.requireNonNull(f.queuedPolicy(lane));
+			var original = Objects.requireNonNull(f.pendingPolicy(lane)); Object queued = Objects.requireNonNull(f.queuedPolicy(lane));
 			var handoff = f.controlHandoff();
 			int sent = f.packets.size();
 			for (int i = 0; i < 40; i++) {
@@ -881,18 +891,28 @@ class InventoryProductionPolicyTest {
 				assertTrue(f.queuedPolicyCount() <= 2); assertTrue(f.pendingPolicies().size() <= 2);
 			}
 			assertEquals(sent, f.packets.size(), "budget-deferred drains never report a handoff or replace the queued owner");
+			// Keep every replacement pending, including the shorter denial hint.
+			// Already paid negotiation bytes exceed this explicit test cap.
+			assertTrue((long) value(f.publisher(), "previewGlobal") > 1);
+			Fixture.invokeFixture(f.publisher(), "previewGlobalFixture", new Class<?>[] {long.class}, 1L);
 			f.player.permission = allow ? 0 : 2; f.demand(); f.tick(2);
-			handoff.accepted(OWNER, original);
+			assertFalse(handoff.accepted(OWNER, original));
 			assertNotSame(original, f.pendingPolicy(lane),
 				"a completion under changed fresh authority cannot retain the old desired owner");
-			var superseding = f.pendingPolicy(lane); assertNotSame(original, superseding);
+			var superseding = Objects.requireNonNull(f.pendingPolicy(lane)); assertNotSame(original, superseding);
+			assertTrue(f.publisher().controlQueued(OWNER, superseding));
 			handoff.accepted(OWNER, original); assertSame(superseding, f.pendingPolicy(lane));
 			f.player.permission = allow ? 2 : 0; f.demand(); f.tick(2);
-			var latest = f.pendingPolicy(lane);
+			var latest = Objects.requireNonNull(f.pendingPolicy(lane));
 			assertEquals(original, latest); assertNotSame(original, latest, "returning to the same value is a new desired owner");
 			handoff.accepted(OWNER, original); assertSame(latest, f.pendingPolicy(lane), "an old equal-valued completion cannot clear the replacement");
+			assertTrue(f.publisher().controlQueued(OWNER, latest));
+			assertEquals(sent, f.packets.size(), "stale callbacks cannot drain any desired owner");
+			f.policyWireRestore();
 			f.tick(10);
 			assertTrue(f.pendingPolicies().isEmpty()); assertEquals(0, f.queuedPolicyCount());
+			assertEquals(1, f.packets.subList(sent, f.packets.size()).stream().filter(packet -> packet == latest).count());
+			assertTrue(f.packets.subList(sent, f.packets.size()).stream().noneMatch(packet -> packet == original || packet == superseding));
 			assertEquals(Optional.of(allow), f.client.authorization(lane, f.session().epoch, f.session().view, "entity_block"));
 		}
 	}
@@ -903,6 +923,7 @@ class InventoryProductionPolicyTest {
 		try (var f = new Fixture(Map.of(lane.fieldId(), 2))) {
 			f.open();
 			if (allow) { f.player.permission = 0; f.demand(); f.tick(1); }
+			f.policyWirePressure();
 			for (int i = 0; i < 100; i++) f.backend.handle(OWNER, InventoryC2SPacket.hello(), 1, f.settings);
 			f.player.permission = allow ? 2 : 0; f.demand(); f.tick(2);
 			var desired = f.pendingPolicy(lane);
@@ -911,6 +932,7 @@ class InventoryProductionPolicyTest {
 				f.afterSend = null; f.player.permission = allow ? 0 : 2; f.demand();
 				PresentationServer.tick(f.server, f.store);
 			};
+			f.policyWireRestore();
 			f.tick(10);
 			@Nullable var afterSuccessful = f.pendingPolicy(lane);
 			assertNotSame(desired, afterSuccessful,
@@ -929,6 +951,7 @@ class InventoryProductionPolicyTest {
 	void retiredPolicyCompletionCannotClearOrReviveWorkAcrossLifecycleBoundaries(InventoryResourceKind lane, String boundary) throws Exception {
 		try (var f = new Fixture(Map.of(lane.fieldId(), 2))) {
 			f.open(); f.player.permission = 0; f.demand(); f.tick(1);
+			f.policyWirePressure();
 			for (int i = 0; i < 100; i++) f.backend.handle(OWNER, InventoryC2SPacket.hello(), 1, f.settings);
 			f.player.permission = 2; f.demand(); f.tick(2);
 			var retired = f.pendingPolicy(lane); var handoff = f.controlHandoff(); int sent = f.packets.size();
@@ -949,6 +972,7 @@ class InventoryProductionPolicyTest {
 				handoff.accepted(OWNER, retired);
 				assertEquals(desired.size(), f.pendingPolicies().size());
 				for (var entry : desired.entrySet()) assertSame(entry.getValue(), f.pendingPolicies().get(entry.getKey()));
+				f.policyWireRestore();
 				f.tick(10); assertTrue(f.pendingPolicies().isEmpty()); assertEquals(0, f.queuedPolicyCount());
 			}
 			assertTrue(f.packets.subList(sent, f.packets.size()).stream().noneMatch(packet -> packet == retired), "retired queued POLICY cannot send after the boundary");
@@ -1643,6 +1667,21 @@ class InventoryProductionPolicyTest {
 		void tick(int tick) { server.now = tick; PresentationServer.tick(server, store); backend.tick(tick, settings); }
 		void demand() { PresentationServer.refreshInventoryPolicy(OWNER); }
 		void demand(UUID id) { PresentationServer.refreshInventoryPolicy(id); }
+		void policyWirePressure() throws ReflectiveOperationException {
+			Object publisher = publisher();
+			invokeFixture(publisher, "wireBudgetFixture", new Class<?>[] {long.class, long.class}, 4096L, 4096L);
+			invokeFixture(publisher, "previewGlobalFixture", new Class<?>[] {long.class}, 4096L);
+			invokeFixture(publisher, "previewQueueFixture", new Class<?>[] {long.class}, 32 * 1024L);
+		}
+		void policyWireRestore() throws ReflectiveOperationException {
+			Object publisher = publisher();
+			invokeFixture(publisher, "wireBudgetFixture", new Class<?>[] {long.class, long.class}, settings.previewClientPeriodBytes(), settings.trackingSnapshotClientPeriodBytes());
+			invokeFixture(publisher, "previewGlobalFixture", new Class<?>[] {long.class}, settings.previewGlobalPeriodBytes());
+			invokeFixture(publisher, "previewQueueFixture", new Class<?>[] {long.class}, settings.previewQueueBytes());
+		}
+		private static void invokeFixture(Object publisher, String name, Class<?>[] types, Object... args) throws ReflectiveOperationException {
+			var method = publisher.getClass().getDeclaredMethod(name, types); method.setAccessible(true); method.invoke(publisher, args);
+		}
 		void negotiatePresentation() { PresentationServer.negotiate(server, player, PresentationC2SPacket.hello(Map.of(
 			PresentationBasic.ID, 1, InventoryPresentation.ADAPTER_ID, InventoryPresentation.SCHEMA)), store); }
 		void join(UUID id) {

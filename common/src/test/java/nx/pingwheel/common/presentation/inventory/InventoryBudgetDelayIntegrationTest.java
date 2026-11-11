@@ -445,11 +445,11 @@ class InventoryBudgetDelayIntegrationTest {
 				return Optional.of(new InventorySourceAccess.SnapshotPlan() {
 					int attempted;
 					@Override public long memoryUpperBoundBytes() { return 1024; }
-					@Override public int physicalReadUpperBound() { return InventorySourceAccess.MAX_SLOTS; }
-					@Override public long itemWorkUpperBoundUnits() { return Math.multiplyExact(InventorySourceAccess.MAX_SLOTS, InventoryItemBudget.workUpperBound(4096)); }
+					@Override public int physicalReadUpperBound() { return InventorySourceAccess.CAPTURE_MAX_SLOTS; }
+					@Override public long itemWorkUpperBoundUnits() { return Math.multiplyExact(InventorySourceAccess.CAPTURE_MAX_SLOTS, InventoryItemBudget.workUpperBound(4096)); }
 					@Override public int attemptedPhysicalReads() { return attempted; }
 					@Override public Optional<InventorySourceAccess.InventorySnapshot> capture() {
-						captures.incrementAndGet(); attempted = InventorySourceAccess.MAX_SLOTS;
+						captures.incrementAndGet(); attempted = InventorySourceAccess.CAPTURE_MAX_SLOTS;
 						throw new nx.pingwheel.common.presentation.inventory.minecraft.InventoryObservationSnapshot.LimitException("capture rollback");
 					}
 				});
@@ -457,9 +457,15 @@ class InventoryBudgetDelayIntegrationTest {
 		}), settings, sink)) {
 			runtime.advance(0, settings); var first = runtime.attach(InventoryRuntimeTest.input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
 			assertEquals(CaptureResult.Completeness.INCOMPLETE, runtime.step(first).orElseThrow().result().completeness()); assertTrue(sink.events.isEmpty());
+			assertEquals(InventoryFailureReason.SNAPSHOT_LIMIT, first.currentReason());
 			var next = runtime.attach(InventoryRuntimeTest.input(owner), new InventoryRuntime.PreviewSubject(owner)).orElseThrow();
 			assertEquals(InventorySourceAccess.Preparation.DEFERRED, runtime.prepare(next)); assertEquals(1, captures.get()); assertEquals(0, reads.get());
-			assertTrue(sink.sawReason(Module.INVENTORY_PREVIEW, Reason.CAPTURE_COUNT)); assertTrue(runtime.delayed(Module.INVENTORY_PREVIEW));
+			// Both capture reads and item work are exhausted; reservation map order may select either first.
+			@Nullable var reason = next.currentReason();
+			assertTrue(reason == InventoryFailureReason.CAPTURE_READ_LIMIT || reason == InventoryFailureReason.ITEM_WORK_LIMIT);
+			var bucket = reason == InventoryFailureReason.CAPTURE_READ_LIMIT ? Reason.CAPTURE_COUNT : Reason.PUBLICATION_WORK;
+			assertEquals(1, sink.events.size()); assertEquals(bucket.bit(), sink.events.getFirst().newReasonBits());
+			assertEquals(Module.INVENTORY_PREVIEW, sink.events.getFirst().module()); assertTrue(runtime.delayed(Module.INVENTORY_PREVIEW));
 			runtime.advance(1, settings); assertEquals(InventorySourceAccess.Preparation.INCOMPLETE, runtime.prepare(next));
 			assertEquals(2, captures.get()); assertFalse(runtime.delayed(Module.INVENTORY_PREVIEW));
 		}
@@ -500,10 +506,12 @@ class InventoryBudgetDelayIntegrationTest {
 		var sink = new RecordingSink(); var settings = explicitSettings(10, 10); settings.getPreview().setGlobalByteMultiplier(ByteMultiplier.finite(new BigDecimal("0.25")));
 		var memory = new RetainedMemoryLedger(64_000_000); var transport = new InventorySyncPublisherTest.Transport();
 		try (var publisher = new InventorySyncPublisher(memory, transport, sink)) {
+			publisher.previewQueueFixture(32 * 1024);
 			publisher.advance(0, settings); var context = InventorySyncPublisherTest.context("preview/1", 1); assertTrue(publisher.register(context, InventorySyncPublisherTest.route(null, "target")));
 			var capture = InventorySyncPublisherTest.capture(1, 32, 1024);
 			assertInstanceOf(SyncPublisher.Outcome.Deferred.class, offer(publisher, context, capture, 256)); assertTrue(sink.sawReason(Module.INVENTORY_PREVIEW, Reason.QUEUE_CAPACITY));
 			settings.getPreview().setGlobalByteMultiplier(ByteMultiplier.finite(BigDecimal.valueOf(4))); publisher.advance(1, settings);
+			publisher.previewQueueFixture(settings.previewQueueBytes());
 			assertInstanceOf(SyncPublisher.Outcome.Accepted.class, offer(publisher, context, capture, 256)); assertFalse(publisher.delayed(Module.INVENTORY_PREVIEW)); assertTrue(publisher.pending(context));
 		}
 	}
@@ -511,12 +519,13 @@ class InventoryBudgetDelayIntegrationTest {
 		var sink = new RecordingSink(); var settings = explicitSettings(10, 10); settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(new BigDecimal("0.25")));
 		var transport = new InventorySyncPublisherTest.Transport(); var memory = new RetainedMemoryLedger(16_000_000);
 		try (var publisher = new InventorySyncPublisher(memory, transport, sink)) {
+			publisher.wireBudgetFixture(4096, 4096);
 			publisher.advance(0, settings); var context = InventorySyncPublisherTest.context("tracking/1", 1); assertTrue(publisher.register(context, InventorySyncPublisherTest.route(new MarkerId(1), "target")));
 			InventorySyncPublisherTest.publish(publisher, context, InventorySyncPublisherTest.capture(1, 3, 2500)); publisher.drain();
 			assertTrue(publisher.pending(context)); assertTrue(sink.sawReason(Module.INVENTORY_TRACKING, Reason.WIRE_CLIENT_OR_STREAM));
 			assertTrue(sink.events.stream().filter(event -> event.hasReason(Reason.WIRE_CLIENT_OR_STREAM)).allMatch(event -> event.quantity().known() && event.quantity().unit() == Unit.BYTE));
 			assertFalse(sink.events.stream().anyMatch(event -> event.hasReason(Reason.PHYSICAL_SLOTS) || event.hasReason(Reason.LOGICAL_GLOBAL)));
-			settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(BigDecimal.valueOf(4))); publisher.advance(1, settings); publisher.drain();
+			settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(BigDecimal.valueOf(4))); publisher.wireBudgetFixture(4096, 64 * 1024); publisher.advance(1, settings); publisher.drain();
 			assertFalse(publisher.pending(context)); assertFalse(publisher.delayed(Module.INVENTORY_TRACKING));
 		}
 	}
@@ -526,12 +535,13 @@ class InventoryBudgetDelayIntegrationTest {
 		settings.getPreview().setGlobalByteMultiplier(ByteMultiplier.finite(new BigDecimal("0.25")));
 		var transport = new InventorySyncPublisherTest.Transport(); var memory = new RetainedMemoryLedger(16_000_000);
 		try (var publisher = new InventorySyncPublisher(memory, transport, sink)) {
+			publisher.wireBudgetFixture(32 * 1024, 4096); publisher.previewGlobalFixture(8192);
 			publisher.advance(0, settings); var context = InventorySyncPublisherTest.context("preview/1", 1); assertTrue(publisher.register(context, InventorySyncPublisherTest.route(null, "target")));
 			InventorySyncPublisherTest.publish(publisher, context, InventorySyncPublisherTest.capture(1, 3, 3000)); publisher.drain();
 			assertTrue(publisher.pending(context)); assertTrue(sink.sawReason(Module.INVENTORY_PREVIEW, Reason.WIRE_GLOBAL));
 			assertFalse(sink.sawReason(Module.INVENTORY_PREVIEW, Reason.WIRE_CLIENT_OR_STREAM));
 			assertTrue(sink.events.stream().filter(event -> event.hasReason(Reason.WIRE_GLOBAL)).allMatch(event -> event.quantity().known() && event.quantity().unit() == Unit.BYTE));
-			settings.getPreview().setGlobalByteMultiplier(ByteMultiplier.finite(BigDecimal.valueOf(4))); publisher.advance(1, settings); publisher.drain();
+			settings.getPreview().setGlobalByteMultiplier(ByteMultiplier.finite(BigDecimal.valueOf(4))); publisher.previewGlobalFixture(128 * 1024); publisher.advance(1, settings); publisher.drain();
 			assertFalse(publisher.pending(context)); assertFalse(publisher.delayed(Module.INVENTORY_PREVIEW));
 		}
 	}

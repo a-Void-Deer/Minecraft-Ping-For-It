@@ -22,6 +22,7 @@ import nx.pingwheel.common.integration.sable.server.SableExternalBlockLocator;
 import nx.pingwheel.common.interaction.TargetSnapshotFactory;
 import nx.pingwheel.common.interaction.cancel.WorldVector;
 import nx.pingwheel.common.interaction.candidate.*;
+import nx.pingwheel.common.math.PingClipContext;
 import nx.pingwheel.common.math.RaycastPolicy;
 import nx.pingwheel.common.resolve.BlockEntityClassification;
 
@@ -93,9 +94,7 @@ final class SableSupplementalRaycaster {
 			@Override public int getHeight() { return loadedView.getHeight(); }
 			@Override public int getMinBuildHeight() { return loadedView.getMinBuildHeight(); }
 		};
-		ClipContext ray = new ClipContext(localStart, localEnd,
-			policy.blockMode() == RaycastPolicy.BlockMode.OUTLINE ? ClipContext.Block.OUTLINE : ClipContext.Block.VISUAL,
-			policy.fluidMode() == RaycastPolicy.FluidMode.ANY ? ClipContext.Fluid.ANY : ClipContext.Fluid.NONE, localContext);
+		ClipContext ray = PingClipContext.create(localStart, localEnd, policy, localContext);
 		boolean[] unloaded = {false};
 		boolean complete = NativeBlockCandidateScan.scan(view, pos -> {
 			if (!subLevel.contains().test(pos)) return false;

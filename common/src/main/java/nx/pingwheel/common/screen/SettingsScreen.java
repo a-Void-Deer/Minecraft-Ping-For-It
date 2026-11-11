@@ -28,6 +28,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.config.ClientConfig;
+import nx.pingwheel.common.config.CooldownFeedbackMode;
 import nx.pingwheel.common.config.EntityBlockRenderMode;
 import nx.pingwheel.common.config.PlayerInfoMode;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
@@ -243,7 +244,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			ignored -> this.openResetConfirmation())
 			.bounds(0, 0, SettingsScreenLayout.RESET_BUTTON_WIDTH, SettingsScreenLayout.RESET_BUTTON_HEIGHT)
 			.build();
-		this.resetAllButton.setTooltip(Tooltip.create(LanguageUtils.settings("reset_all.tooltip").get()));
+		this.resetAllButton.setTooltip(Tooltip.create(resetAllTooltip()));
 		this.addRenderableWidget(this.resetAllButton);
 
 		this.primaryButton = Button.builder(this.primaryButtonText(), ignored -> this.onPrimaryButton())
@@ -252,6 +253,17 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.addRenderableWidget(this.primaryButton);
 
 		this.rebuildPage(false);
+	}
+
+	/**
+	 * Builds the Reset All tooltip from a template whose action and scope words
+	 * are separate arguments, so every locale owns its word order and both words
+	 * keep the confirmed light-red emphasis instead of resource color codes.
+	 */
+	private static Component resetAllTooltip() {
+		return LanguageUtils.settings("reset_all").path("tooltip").get(
+			LanguageUtils.settings("reset_all").path("tooltip", "reset").get().withStyle(ChatFormatting.RED),
+			LanguageUtils.settings("reset_all").path("tooltip", "all").get().withStyle(ChatFormatting.RED));
 	}
 
 	@Override
@@ -816,6 +828,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			case PRECISE_CAPTURE_PERIOD_TICKS -> this.getPreciseCapturePeriodTicksOption();
 			case PING_VOLUME -> this.getPingVolumeOption();
 			case CONFIGURATION_NOTICE_SIZE -> this.getConfigurationNoticeSizeOption();
+			case COOLDOWN_FEEDBACK -> this.getCooldownFeedbackOption();
 			case ENTITY_BLOCK_RENDER_MODE -> this.getEntityBlockRenderModeOption();
 			default -> throw new IllegalArgumentException("setting needs a dedicated row adapter: " + setting);
 		};
@@ -2835,6 +2848,16 @@ public class SettingsScreen extends OptionsSubScreen {
 			mode -> text.path(mode.toString(), "tooltip").get(),
 			config::getEntityBlockRenderMode,
 			config::setEntityBlockRenderMode);
+	}
+
+	OptionInstance<CooldownFeedbackMode> getCooldownFeedbackOption() {
+		final var text = LanguageUtils.settings("cooldown_feedback");
+		return OptionUtils.ofEnum(text.getKey(),
+			CooldownFeedbackMode.class,
+			mode -> LanguageUtils.of("value", mode.toString()).get(),
+			mode -> text.path("tooltip").get(),
+			config::getCooldownFeedback,
+			config::setCooldownFeedback);
 	}
 
 	private Button createServerValueButton(String key, Supplier<Component> value, Runnable action) {

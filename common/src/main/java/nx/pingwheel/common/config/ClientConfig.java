@@ -60,6 +60,8 @@ public class ClientConfig implements IConfig {
 	int wheelTargetFontSize = ConfigDefaults.Client.WHEEL_TARGET_FONT_SIZE;
 	/** Zero means that each marker uses its frozen server-side duration. */
 	int markerDisplayDuration = ConfigDefaults.Client.MARKER_DISPLAY_DURATION;
+	/** Local placement of the courtesy-cooldown notice; never changes limiter behavior. */
+	@Nullable CooldownFeedbackMode cooldownFeedback = ConfigDefaults.Client.COOLDOWN_FEEDBACK;
 	@Setter(AccessLevel.NONE)
 	@Nullable List<@Nullable String> blockDisplayWhitelist = ConfigDefaults.Client.BLOCK_DISPLAY_WHITELIST;
 	@Setter(AccessLevel.NONE)
@@ -160,6 +162,19 @@ public class ClientConfig implements IConfig {
 
 	public void setMarkerDisplayDuration(int markerDisplayDuration) {
 		this.markerDisplayDuration = ClientConfigBounds.clampMarkerDisplayDuration(markerDisplayDuration);
+	}
+
+	/**
+	 * Returns the local cooldown-notice placement with the safe fallback even if
+	 * an older deserializer or reflective path supplied {@code null}.
+	 */
+	public CooldownFeedbackMode getCooldownFeedback() {
+		return CooldownFeedbackMode.effective(cooldownFeedback);
+	}
+
+	/** Stores the local presentation preference; the courtesy gate is unaffected. */
+	public void setCooldownFeedback(@Nullable CooldownFeedbackMode mode) {
+		cooldownFeedback = CooldownFeedbackMode.effective(mode);
 	}
 
 	/**
@@ -280,6 +295,7 @@ public class ClientConfig implements IConfig {
 	void validate(ClampWarningSink warningSink) {
 		loggingProfile = getLoggingProfile();
 		if (loggingProfile != LoggingProfile.DEBUG) monitorHudEnabled = false;
+		cooldownFeedback = getCooldownFeedback();
 		if (monitorMetrics == null) monitorMetrics = new MonitorMetricSelections();
 		// Gson maps unknown enum names to null. Recover them locally so malformed
 		// client data never selects a new geometry route accidentally.

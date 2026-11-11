@@ -310,8 +310,14 @@ class SpatialViewOffsetProjectionTest {
 		var itemOrigin = SpatialOverlayRenderer.activeOrigin(session.snapshot().radial());
 		assertNotNull(itemOrigin);
 		var itemView = session.snapshot().inventoryView();
-		assertEquals(itemOrigin.y(), itemView.selectedRowCenterY(), 1.0e-9,
-			"the item menu stays anchored to the logical selected row");
+		var itemMenu = session.snapshot().radial().menus().getLast();
+		assertEquals(itemView.selectedRowCenterY() + GEOMETRY.childClearance(), itemOrigin.y(), 1.0e-9,
+			"the item menu sits one clearance below the logical selected row");
+		assertEquals(itemView.selectedRowCenterY(), itemMenu.parentOrigin().y(), 1.0e-9,
+			"the logical selected row remains the return anchor");
+		assertEquals(itemView.axisX(), itemMenu.parentOrigin().x(), 1.0e-9);
+		assertEquals(List.of(itemOrigin), session.snapshot().radial().trail(),
+			"entry seeds only the item origin without a joining stroke");
 		var itemLayout = SpatialOverlayRenderer.inventoryLayout(itemView, GUI_WIDTH, GUI_HEIGHT,
 			FONT_LINE_HEIGHT, SpatialOverlayRenderer.Style.NATIVE);
 		int selected = session.snapshot().inventory().selectedIndex();
@@ -319,8 +325,8 @@ class SpatialViewOffsetProjectionTest {
 		SpatialOverlayRenderer.sampleViewOffset(offset, itemOrigin, 3 * DURATION, false);
 		assertEquals(0.0, itemOrigin.x() + offset.x(), 1.0e-9, "the item menu origin is centered");
 		assertEquals(0.0, itemOrigin.y() + offset.y(), 1.0e-9);
-		assertEquals(GUI_HEIGHT / 2.0, itemLayout.rowCenterY(selected) + offset.y(), 1.0e-9,
-			"the selected row stays at the item menu anchor under the same translation");
+		assertEquals(GUI_HEIGHT / 2.0 - GEOMETRY.childClearance(), itemLayout.rowCenterY(selected) + offset.y(), 1.0e-9,
+			"the selected row stays one clearance above the centered item menu");
 		assertEquals(GUI_WIDTH / 2.0 - forward * (GEOMETRY.width() / 2.0 + GEOMETRY.childClearance()),
 			itemLayout.centerX() + offset.x(), 1.0e-9,
 			"the list keeps its logical displacement from the centered item menu");

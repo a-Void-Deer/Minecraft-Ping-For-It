@@ -6,6 +6,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Pure-JVM cost ledger for the shared source mechanism. Admission reserves a
@@ -19,6 +22,7 @@ import java.util.Optional;
  *
  * <p>Owner-thread confined; no synchronization is provided.
  */
+@NotNullByDefault
 public final class CostLedger {
 
 	public enum Unit {
@@ -58,7 +62,16 @@ public final class CostLedger {
 		void close();
 	}
 
-	private final Map<Counter, Long> limits;
+	/** Attempt-local atomic admission evidence; querying it never retries admission. */
+	@NotNullByDefault
+	public record ReservationDecision(@Nullable Ticket ticket, @Nullable Counter limitingCounter) {
+		public ReservationDecision {
+			if ((ticket == null) == (limitingCounter == null)) throw new IllegalArgumentException("one reservation outcome is required");
+		}
+		public boolean accepted() { return ticket != null; }
+	}
+
+	private final @Unmodifiable Map<Counter, Long> limits;
 	private final Map<Counter, Long> reserved = new HashMap<>();
 	private final Map<Counter, Long> used = new HashMap<>();
 
@@ -95,6 +108,11 @@ public final class CostLedger {
 	 * is deducted in that case.
 	 */
 	public Optional<Ticket> tryReserve(Map<Counter, Long> request) {
+		return Optional.ofNullable(tryReserveDecision(request).ticket());
+	}
+
+	/** The first insufficient counter is returned from the same all-or-none attempt. */
+	public ReservationDecision tryReserveDecision(Map<Counter, Long> request) {
 		Objects.requireNonNull(request, "request");
 		if (request.isEmpty()) throw new IllegalArgumentException("reservation must request at least one counter");
 		Map<Counter, Long> amounts = new LinkedHashMap<>();
@@ -106,17 +124,17 @@ public final class CostLedger {
 			amounts.put(counter, amount);
 		}
 		for (Map.Entry<Counter, Long> entry : amounts.entrySet()) {
-			if (entry.getValue() > remaining(entry.getKey())) return Optional.empty();
+			if (entry.getValue() > remaining(entry.getKey())) return new ReservationDecision(null, entry.getKey());
 		}
 		for (Map.Entry<Counter, Long> entry : amounts.entrySet()) {
 			reserved.merge(entry.getKey(), entry.getValue(), Long::sum);
 		}
-		return Optional.of(new Reservation(amounts));
+		return new ReservationDecision(new Reservation(amounts), null);
 	}
 
 	private long require(Counter counter) {
 		Objects.requireNonNull(counter, "counter");
-		Long configured = limits.get(counter);
+		@Nullable Long configured = limits.get(counter);
 		if (configured == null) throw new IllegalArgumentException("counter is not configured: " + counter);
 		return configured;
 	}
@@ -131,7 +149,7 @@ public final class CostLedger {
 	}
 
 	private final class Reservation implements Ticket {
-		private final Map<Counter, Long> granted;
+		private final @Unmodifiable Map<Counter, Long> granted;
 		private boolean settled;
 
 		Reservation(Map<Counter, Long> granted) {
@@ -147,7 +165,7 @@ public final class CostLedger {
 				Counter counter = Objects.requireNonNull(entry.getKey(), "counter");
 				Long amount = Objects.requireNonNull(entry.getValue(), "amount");
 				if (amount < 0L) throw new IllegalArgumentException("measured use must be non-negative: " + counter);
-				Long grantedAmount = granted.get(counter);
+				@Nullable Long grantedAmount = granted.get(counter);
 				if (grantedAmount == null) throw new IllegalArgumentException("counter was not reserved: " + counter);
 				if (amount > grantedAmount) throw new IllegalArgumentException("measured use exceeds the reservation: " + counter);
 				measured.put(counter, amount);

@@ -221,9 +221,20 @@ keys map to deeply immutable opaque bytes, never a live or producer-owned
 buffer, under a code-registered codec identity. An untagged opaque value keeps
 the ordinary engineering value bound; a value tagged through the closed,
 code-owned allowance set may use that allowance's larger bounded detached size
-instead. The detached inventory observation form is one such allowance; its
-encoding, display width and byte bound are owned by [inventory](inventory.md)
-and the [network protocol](../network/protocol.md), not by this contract. A
+instead. Each closed codec token also fixes its own bounded fragment page. An
+ordinary or untagged page, and an unknown codec id, keep the generic opaque page
+bound. A page whose values carry another or mixed tagged codec domain is
+rejected rather than using any page allowance; only a fragment whose codec id
+names a registered allowance and whose every value carries that same token may
+use the larger page. The registered ITEM and FLUID inventory observation codecs
+own a larger closed page bound only for such a fully tagged same-domain page,
+while the ordinary or untagged page keeps the ordinary closed opaque page bound.
+The codec descriptor owns the exact bounds; the generic page is not widened.
+The allowance does not widen the generic page, the record-value entry bound,
+another codec's page or any tagged value-byte bound. The detached inventory
+observation form is one such allowance; its encoding, display width and byte
+bound are owned by [inventory](inventory.md) and the
+[network protocol](../network/protocol.md), not by this contract. A
 fragment rejects a tagged value whose codec identity does not equal the
 fragment's codec identity even when the carried bytes are small or empty; no
 caller supplies an arbitrary identity, size, or descriptor. The generic layer
@@ -232,7 +243,7 @@ normalization, validation and its own stricter encoding bounds. The opaque form
 lets a domain carry lossless values, such as an exact integer count or a display
 string beyond the presentation text bound, without widening the existing
 presentation-value or section bounds. The larger tagged allowance is still one
-finite, bounded, detached value.
+finite, bounded, detached value carried in one finite page.
 No payload form carries live components, item stacks, or raw NBT, and none
 enlarges the existing global record-value bounds. A `SnapshotRecord` may carry
 scalar or record replacement for related units, but this introduces no general

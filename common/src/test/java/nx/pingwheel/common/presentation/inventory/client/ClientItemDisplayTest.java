@@ -76,6 +76,39 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 @NotNullByDefault
 class ClientItemDisplayTest {
+	@Test void sharedDisplayValidationAdmits8192VisitsAndRefusesTheNextWithoutResettingChildren() {
+		var budget = new ClientItemDisplay.Validation(8192, 4096);
+		for (int i = 0; i < 8192; i++) budget.visit(0);
+		assertEquals(8192, ClientItemDisplay.validationVisits());
+		assertEquals(0, budget.remainingVisits());
+		assertThrows(ClientItemDisplay.UnsafeDisplay.class, () -> budget.visit(0));
+		assertEquals(8192, ClientItemDisplay.validationVisits());
+		assertTrue(ClientItemDisplay.validationWorkExhausted());
+	}
+	@Test void workingCopyUsesTheEnlargedVisitAllowanceAndOwnsAFormerlyOverBudgetArray() {
+		var data = new CompoundTag(); data.putByteArray("data", new byte[5000]);
+		var source = new ItemStack(Items.STONE); source.set(DataComponents.CUSTOM_DATA, CustomData.of(data));
+		var copy = ClientDisplayWorkingCopy.stack(source, 0, new ClientItemDisplay.Validation());
+		assertTrue(ClientItemDisplay.validationVisits() > 4096);
+		assertTrue(ClientItemDisplay.validationVisits() <= 8192);
+		var sourceArray = source.get(DataComponents.CUSTOM_DATA).getUnsafe().getByteArray("data");
+		var copiedArray = copy.get(DataComponents.CUSTOM_DATA).getUnsafe().getByteArray("data");
+		assertArrayEquals(sourceArray, copiedArray); assertNotSame(sourceArray, copiedArray);
+		sourceArray[0] = 7; assertEquals(0, copiedArray[0]);
+	}
+	@Test void oversizedDisplayReportsEachDebugCapRefusalAndKeepsTheEmptyIcon() {
+		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture(org.apache.logging.log4j.Level.DEBUG)) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT,
+				nx.pingwheel.common.diagnostics.LoggingProfile.DEBUG);
+			for (int attempt = 0; attempt < 2; attempt++) {
+				var display = ClientItemDisplay.resolve(RegistryAccess.EMPTY, "minecraft:stone", "block.minecraft.stone",
+					"x".repeat(InventoryS2CPacket.MAX_DISPLAY_BYTES + 1));
+				assertTrue(display.stack().isEmpty());
+			}
+			assertEquals(2, logs.events().size()); assertTrue(logs.messages().contains("reason=display-limit"));
+			assertTrue(logs.messages().contains("limitHit=true"));
+		}
+	}
 
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 

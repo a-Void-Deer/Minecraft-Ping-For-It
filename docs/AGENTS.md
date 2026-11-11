@@ -68,6 +68,17 @@ completed fix. Decision records may include relevant decision context and
 status; verification records may include coverage, results, limitations, and
 gaps.
 
+Before adding documentation for a fact, check whether an existing document or
+section already owns it; update that owner rather than creating a parallel
+entry, and move any fact that has no other owner to the responsible page rather
+than dropping it during consolidation. Put change-specific commands, results,
+unexecuted checks, and manual observations in the change's report; persistent
+verification pages follow the retention and locator rules in
+`testing/verification/README.md`. For persistent verification records, a pure
+rerun need not add or update body text; replace superseded records rather than
+stacking them, and remove a fully superseded record only when its unique failure,
+unexecuted check, or material input difference is retained.
+
 Assess test changes separately under
 [D0007: No meaningless tests](decisions/D0007-no-meaningless-tests.md).
 

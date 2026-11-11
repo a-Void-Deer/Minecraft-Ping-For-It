@@ -283,7 +283,7 @@ final class InventoryCertifiedRead {
 			InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) {
 			Objects.checkIndex(slot, proof.graph().slots());
 			allowance.debit(readCosts[1]); // the entire operation is admitted before any callback/getter
-			admission.requireNativeRead(catalog.displayBytes());
+			admission.requireNativeRead(catalog.displayBytes(), catalog.entriesUpperBound());
 			if (coordinated == null) return readAdmitted(slot, expected, catalog, admission);
 			if (reading) {
 				readRejected = true;

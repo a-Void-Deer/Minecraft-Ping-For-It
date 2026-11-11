@@ -148,14 +148,16 @@ class InventoryPreviewResetLifecycleTest {
 	@Test
 	void globalResetOfNinetyOneSessionsRetainsTerminalUntilReplacementOpenedHandoff() throws Exception {
 		try (var f = new InventoryTerminalPreviewResetTest.Fixture(4)) {
+			f.settings.setPendingMemoryMiB(64);
+			publisher(f).controlCapacityFixture(256);
 			f.settings.getPreview().setPeriodTicks(PERIOD);
 			f.settings.setPhysicalSlotsPerTick(IntLimit.finite(InventoryLimits.MIN_ORDINARY_COUNT));
 			f.settings.getPreview().setGlobalByteMultiplier(ByteMultiplier.finite(new BigDecimal("0.125")));
 			f.settings.validate();
 			List<UUID> players = new ArrayList<>();
 			// All 91 sessions complete ordinary HELLO handshakes. Only the last
-			// owns a Preview: this reaches the real global control bound without
-			// inflating memory limits or injecting transport failures.
+			// owns a Preview. The explicit queue cap makes 91 * 3 controls overflow
+			// without exceeding the separate session bound or its prepaid memory.
 			for (int index = 0; index < 90; index++) {
 				UUID player = new UUID(91, index);
 				players.add(player); f.host.policies.put(player, policy(1));
@@ -166,11 +168,14 @@ class InventoryPreviewResetLifecycleTest {
 			long now = 90L * PERIOD;
 			var endpoint = new InventoryTerminalPreviewResetTest.Endpoint(A);
 			f.hello(A, now); endpoint.drain(f.host);
+			assertEquals(players.size(), ((Map<?, ?>) InventoryBackendTest.field(f.backend, "sessions")).size(),
+				"all session owners must exist before queue pressure is applied");
 			long request = endpoint.open();
 			handle(f, A, endpoint.last(InventoryC2SPacket.Kind.OPEN), now);
 			f.tick(now); endpoint.drain(f.host);
 			assertFalse(endpoint.client.selectable(request).isEmpty());
 			assertTrue(endpoint.client.preview(request).completeScan());
+			publisher(f).previewGlobalFixture(4096);
 			// This completed Preview checks idle health only once per period. In
 			// its next due period, legitimate negotiation traffic consumes the wire
 			// budget before the source check; it does not advance Preview sampling.
@@ -190,6 +195,7 @@ class InventoryPreviewResetLifecycleTest {
 			// period before resetting, so they cannot alter control admission order.
 			f.settings.getPreview().setGlobalByteMultiplier(ByteMultiplier.finite(BigDecimal.ONE));
 			f.settings.validate();
+			publisher(f).previewGlobalFixture(f.settings.previewGlobalPeriodBytes());
 			long resetTick = now + 2L * PERIOD;
 			int periodStart = f.host.packets.size();
 			f.hello(A, resetTick);
@@ -198,15 +204,15 @@ class InventoryPreviewResetLifecycleTest {
 			endpoint.drain(f.host);
 			for (UUID player : players) f.host.policies.put(player, policy(2));
 			endpoint.reset(2);
-			// Wire capacity remains available; the refusal is the actual 256-entry
-			// generic control queue (91 * 3 session controls + OPENED).
+			// Wire capacity remains available; the explicit 256-entry control cap
+			// refuses OPENED after the earlier sessions queue their three controls.
 			int resetStart = f.host.packets.size();
 			f.tick(resetTick);
 			endpoint.drain(f.host);
 			assertEquals(-1, packetIndex(f, A, request, InventoryS2CPacket.Kind.OPENED, resetStart));
 			assertFalse(f.hasPreviewStatus(A, request, InventoryS2CPacket.Status.INVALID, resetStart),
 				"terminal PREVIEW must not precede its request's replacement OPENED");
-			assertEquals(256, f.host.packets.size() - resetStart, "the real saturated generic queue drains successfully");
+			assertEquals(256, f.host.packets.size() - resetStart, "the admitted full queue drains successfully at the fixture cap");
 			SyncPublisher.Context terminal = context(f, A);
 			assertTrue(publisher(f).controlPending(terminal), "waiting for OPENED must retain both terminal context and pending status");
 			long encodedBytes = f.host.packets.subList(periodStart, f.host.packets.size()).stream()

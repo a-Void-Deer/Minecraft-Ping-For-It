@@ -22,11 +22,15 @@ import nx.pingwheel.common.platform.IPlatformFluidService.Operation;
 import nx.pingwheel.common.platform.IPlatformFluidService.OperationProfile;
 import nx.pingwheel.common.platform.IPlatformFluidService.WitnessMatch;
 import nx.pingwheel.common.platform.IPlatformFluidService.WitnessUse;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
+import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission;
 import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimitException;
+import nx.pingwheel.common.presentation.inventory.minecraft.ProviderLimitSite;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -335,7 +339,7 @@ public class PlatformFluidServiceTest {
 	}
 
 	@Test void capacityWitnessValidationHasLinearMetadataCostWithoutAllocatingANewAddressTable() {
-		for (int count : new int[] {1, 16, 4096}) {
+		for (int count : new int[] {1, 16, 16384}) {
 			var world = new World(); var handler = world.handler(); handler.count = count;
 			handler.capacities = new int[count]; java.util.Arrays.fill(handler.capacities, 1000);
 			var access = resolve(world, BlockPos.ZERO, Direction.NORTH).orElseThrow();
@@ -366,12 +370,12 @@ public class PlatformFluidServiceTest {
 
 	@Test void oversizedNativeRegistryIdsAreRejectedBeforeStringCopyWithBoundedFailureAllocation() {
 		var id = net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("test", "x".repeat(3_000_000));
-		assertThrows(InventorySourceUnavailableException.class, () -> PlatformFluidServiceImpl.boundedId(id));
+		assertThrows(InventoryProviderLimitException.class, () -> PlatformFluidServiceImpl.boundedId(id));
 		var bean = (com.sun.management.ThreadMXBean) java.lang.management.ManagementFactory.getThreadMXBean();
 		assertTrue(bean.isThreadAllocatedMemorySupported()); bean.setThreadAllocatedMemoryEnabled(true);
 		long thread = Thread.currentThread().threadId(), before = bean.getThreadAllocatedBytes(thread);
 		try { PlatformFluidServiceImpl.boundedId(id); fail("oversized native identity"); }
-		catch (InventorySourceUnavailableException failure) { assertEquals("fluid registry identity bound", failure.getMessage()); }
+		catch (InventoryProviderLimitException failure) { assertEquals(ProviderLimitSite.NEOFORGE_FLUID_REGISTRY_ID, failure.site()); }
 		long rejected = bean.getThreadAllocatedBytes(thread) - before;
 		assertTrue(rejected < 65536, "guard must not allocate/copy the 3MB input: " + rejected);
 		before = bean.getThreadAllocatedBytes(thread); String copied = id.toString();
@@ -379,10 +383,10 @@ public class PlatformFluidServiceTest {
 		assertEquals(3_000_005, copied.length());
 		assertEquals("test:tank", PlatformFluidServiceImpl.boundedId(net.minecraft.resources.ResourceLocation.parse("test:tank")));
 		assertThrows(InventorySourceUnavailableException.class, () -> PlatformFluidServiceImpl.boundedId(null));
-		assertThrows(InventorySourceUnavailableException.class, () -> PlatformFluidServiceImpl.boundedId(
+		assertThrows(InventoryProviderLimitException.class, () -> PlatformFluidServiceImpl.boundedId(
 			net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("x".repeat(3_000_000), "tank")));
 		assertEquals(256, PlatformFluidServiceImpl.boundedId(net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("test", "x".repeat(251))).length());
-		assertThrows(InventorySourceUnavailableException.class, () -> PlatformFluidServiceImpl.boundedId(
+		assertThrows(InventoryProviderLimitException.class, () -> PlatformFluidServiceImpl.boundedId(
 			net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("test", "x".repeat(252))));
 	}
 
@@ -403,7 +407,7 @@ public class PlatformFluidServiceTest {
 				var finish = probe.finishProfile(); assertSame(finish, probe.finishProfile()); assertEquals(callbacks, world.callbacks);
 				if (count == 8) {
 					assertTrue(finish.ownedCost().workUnits() > previous.ownedCost().workUnits());
-					assertEquals(128L * 7, finish.retainedBytes() - previous.retainedBytes());
+					assertEquals((128L + 2 * 11) * 7, finish.retainedBytes() - previous.retainedBytes());
 				}
 				previous = finish;
 				long before = op.allowance().attemptedWorkUnits();
@@ -526,10 +530,22 @@ public class PlatformFluidServiceTest {
 	}
 
 	@Test void invalidNativeCountIsRejectedInProbeWithoutCapacityOrContentCalls() {
-		for (int count : new int[] {-1, 4097, Integer.MAX_VALUE}) {
+		for (int count : new int[] {-1, 16385, Integer.MAX_VALUE}) {
 			var world = new World(); world.handler().count = count;
 			try (var a = admission(); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE)) {
-				assertThrows(InventorySourceUnavailableException.class, () -> PlatformFluidServiceImpl.probe(world, BlockPos.ZERO, Direction.NORTH, op));
+				if (count < 0) {
+					// A negative native count is unavailable provider state, not a finite cap.
+					assertThrows(InventorySourceUnavailableException.class,
+						() -> PlatformFluidServiceImpl.probe(world, BlockPos.ZERO, Direction.NORTH, op));
+				} else {
+					// A positive over-cap count is a typed finite provider limit; it keeps site, reason and bound.
+					var failure = assertThrows(InventoryProviderLimitException.class,
+						() -> PlatformFluidServiceImpl.probe(world, BlockPos.ZERO, Direction.NORTH, op));
+					assertEquals(ProviderLimitSite.NEOFORGE_FLUID_ADDRESSES, failure.site());
+					assertEquals(InventoryFailureReason.PHYSICAL_SLOT_LIMIT, failure.reason());
+					assertEquals(count, failure.required()); assertEquals(InventorySourceAccess.MAX_SLOTS, failure.limit());
+				}
+				assertEquals(1, world.handler().countReads);
 				assertEquals(0, world.handler().capacityReads); assertEquals(0, world.handler().reads);
 			}
 		}
@@ -623,7 +639,7 @@ public class PlatformFluidServiceTest {
 	}
 
 	@Test void cachedK1WitnessProfilesDebitExactlyOnceAndInvokeNoNativeMemberOrAuthorityCallbacks() {
-		for (int count : new int[] {0, 2, 4096}) {
+		for (int count : new int[] {0, 2, 16384}) {
 			var world = new World(); var handler = world.handler(); handler.count = count; handler.capacities = new int[count];
 			try (var access = resolve(world, BlockPos.ZERO, Direction.NORTH).orElseThrow(); var a = admission()) {
 				var capture = access.witnessProfile(WitnessUse.CAPTURE); var compare = access.witnessProfile(WitnessUse.COMPARE);

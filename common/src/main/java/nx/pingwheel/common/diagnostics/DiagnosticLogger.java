@@ -49,7 +49,32 @@ public final class DiagnosticLogger {
 
 	/** A hint only: never touches a channel or consumes an admission. */
 	public boolean isEnabled(Level severity) {
-		return attempt(severity, false, true, null, null, null, null, null, null);
+		return attempt(severity, false, true, null, null, null, null, null, false, null, null, null);
+	}
+
+	/**
+	 * One profile-aware report. The terminal takes one effective-profile snapshot,
+	 * checks the selected minimum and backend, and then applies the explicit
+	 * channel below DEBUG. When {@code everyOccurrenceAtDebug} is set, a DEBUG
+	 * report bypasses an interval channel without consuming admission, but never
+	 * bypasses a domain channel. NORMAL never evaluates detail. DEEP and DEBUG
+	 * receive the effective profile for precision selection. The stable summary is
+	 * a fixed template with audited safe scalars and remains present at every
+	 * profile, including when the detail supplier fails. The original throwable is
+	 * rendered only by the shared bounded formatter.
+	 */
+	public boolean reportByProfile(Level severity, String stableSite, String handling,
+		@Nullable NormalSummary normalSummary, @Nullable ProfileDetail detail, @Nullable Throwable failure,
+		boolean everyOccurrenceAtDebug) {
+		return site(stableSite).attempt(severity, false, false, null, null,
+			DiagnosticText.controlled(handling), normalSummary, detail, everyOccurrenceAtDebug,
+			null, failure, null);
+	}
+
+	/** Defaults to cadence-limited reporting at every profile. */
+	public boolean reportByProfile(Level severity, String stableSite, String handling,
+		@Nullable NormalSummary normalSummary, @Nullable ProfileDetail detail, @Nullable Throwable failure) {
+		return reportByProfile(severity, stableSite, handling, normalSummary, detail, failure, false);
 	}
 
 	public void debug(String template, SafeDiagnosticValue @Unmodifiable ... values) { event(Level.DEBUG, template, values); }
@@ -79,11 +104,11 @@ public final class DiagnosticLogger {
 
 	/** Template must be caller-controlled prose, not provider/request text. Only explicit safe scalars interpolate. */
 	public void event(Level severity, String template, SafeDiagnosticValue @Unmodifiable ... values) {
-		attempt(severity, false, false, template, values, null, null, null, null);
+		attempt(severity, false, false, template, values, null, null, null, false, null, null, null);
 	}
 
 	public void detail(Level severity, Supplier<@Nullable String> detail) {
-		attempt(severity, true, false, null, null, null, Objects.requireNonNull(detail, "detail"), null, null);
+		attempt(severity, true, false, null, null, null, null, null, false, Objects.requireNonNull(detail, "detail"), null, null);
 	}
 
 	/**
@@ -94,13 +119,15 @@ public final class DiagnosticLogger {
 	public void failure(Level severity, String stableSite, String handling,
 		@Nullable Supplier<@Nullable String> detail, @Nullable Throwable failure) {
 		DiagnosticLogger selected = site(stableSite);
-		selected.attempt(severity, false, false, null, null, DiagnosticText.controlled(handling), detail, failure, null);
+		selected.attempt(severity, false, false, null, null, DiagnosticText.controlled(handling), null, null, false,
+			detail, failure, null);
 	}
 
 	/** Scalar-only counterpart; raw provider reasons belong only in the lazy detail. */
 	public void event(Level severity, String stableSite, String safeReason, @Nullable Supplier<@Nullable String> detail) {
 		DiagnosticLogger selected = site(stableSite);
-		selected.attempt(severity, false, false, null, null, DiagnosticText.controlled(safeReason), detail, null, null);
+		selected.attempt(severity, false, false, null, null, DiagnosticText.controlled(safeReason), null, null, false,
+			detail, null, null);
 	}
 
 	/**
@@ -112,7 +139,7 @@ public final class DiagnosticLogger {
 	 * cannot be combined with a channel or a second admission policy.
 	 */
 	public void domainBeforeBackend(Level severity, String stableSite, Supplier<@Nullable DomainReport> admission) {
-		site(stableSite).attempt(severity, false, false, null, null, null, null, null,
+		site(stableSite).attempt(severity, false, false, null, null, null, null, null, false, null, null,
 			Objects.requireNonNull(admission, "admission"));
 	}
 
@@ -120,8 +147,29 @@ public final class DiagnosticLogger {
 	@NotNullByDefault
 	public record DomainReport(String handling, @Nullable Throwable failure, @Nullable Supplier<@Nullable String> detail) {}
 
+	/**
+	 * Fixed caller-owned summary template and finite audited scalars, shown at
+	 * every profile. The template is fixed prose; provider, request or other
+	 * arbitrary text is not a permitted summary value.
+	 */
+	@NotNullByDefault
+	public record NormalSummary(String template, SafeDiagnosticValue @Unmodifiable [] values) {
+		public NormalSummary {
+			Objects.requireNonNull(template, "template");
+			Objects.requireNonNull(values, "values");
+		}
+	}
+
+	/** Profile-aware lazy detail for {@link #reportByProfile}; NORMAL never invokes it. */
+	@NotNullByDefault
+	@FunctionalInterface
+	public interface ProfileDetail {
+		@Nullable String format(LoggingProfile profile);
+	}
+
 	private boolean attempt(Level severity, boolean detailOnly, boolean hint, @Nullable String template,
 		@Nullable SafeDiagnosticValue @Nullable @Unmodifiable [] values, @Nullable String handling,
+		@Nullable NormalSummary normalSummary, @Nullable ProfileDetail profileDetail, boolean everyOccurrenceAtDebug,
 		@Nullable Supplier<@Nullable String> detail, @Nullable Throwable failure,
 		@Nullable Supplier<@Nullable DomainReport> domainAdmission) {
 		@Nullable Attempt outer = REPORTING.get();
@@ -154,8 +202,10 @@ public final class DiagnosticLogger {
 			stage = DiagnosticFaultReporter.Stage.ENABLED;
 			if (!backend.isEnabled(side, severity)) return false;
 			if (hint) return true;
+			boolean bypassedInterval = channel != null && channel.isInterval()
+				&& everyOccurrenceAtDebug && effective == LoggingProfile.DEBUG;
 			long suppressed = 0;
-			if (channel != null) {
+			if (channel != null && !bypassedInterval) {
 				stage = DiagnosticFaultReporter.Stage.ADMISSION;
 				DiagnosticChannel.Admission admission = channel.admit(side);
 				if (!admission.allowed()) return false;
@@ -163,27 +213,36 @@ public final class DiagnosticLogger {
 			}
 			String header = Diagnostics.PREFIX + "side=" + side.name() + " site=" + site
 				+ (handling == null ? "" : " handling=" + handling)
-				+ (channel == null ? "" : " channel=" + channel.name() + " suppressed=" + suppressed);
+				+ (channel == null ? "" : bypassedInterval
+					? " channel=" + channel.name() + " bypass=debug-every-occurrence"
+					: " channel=" + channel.name() + " suppressed=" + suppressed);
 			String body;
 			stage = DiagnosticFaultReporter.Stage.FORMAT;
+			@Nullable String summary = normalSummary == null ? null
+				: renderTemplate(normalSummary.template(), normalSummary.values());
 			if (template != null) {
 				body = template(template, values);
 			} else if (effective == LoggingProfile.NORMAL) {
-				body = failure == null ? "event" : "failure=" + NormalFailureType.token(failure);
+				if (summary == null) {
+					body = failure == null ? "event" : "failure=" + NormalFailureType.token(failure);
+				} else {
+					body = DiagnosticText.scalar(summary, SafeExceptionReport.MAX_CONTEXT_CHARACTERS)
+						+ (failure == null ? "" : " failure=" + NormalFailureType.token(failure));
+				}
 			} else {
 				@Nullable String context = null;
-				if (detail != null) {
-					try {
-						context = detail.get();
-					} catch (RuntimeException | LinkageError contextFailure) {
-						Diagnostics.faults().report(side, site, DiagnosticFaultReporter.Stage.CONTEXT, effective, contextFailure);
-						context = "[context unavailable]";
-					}
+				try {
+					if (profileDetail != null) context = profileDetail.format(effective);
+					else if (detail != null) context = detail.get();
+				} catch (RuntimeException | LinkageError contextFailure) {
+					Diagnostics.faults().report(side, site, DiagnosticFaultReporter.Stage.CONTEXT, effective, contextFailure);
+					context = "[context unavailable]";
 				}
+				@Nullable String combined = combine(summary, context);
 				if (failure == null) {
-					body = DiagnosticText.scalar(context, SafeExceptionReport.MAX_CONTEXT_CHARACTERS);
+					body = DiagnosticText.scalar(combined, SafeExceptionReport.MAX_CONTEXT_CHARACTERS);
 				} else {
-					body = Diagnostics.formatter().format(context, failure, (accessor, accessorFailure) ->
+					body = Diagnostics.formatter().format(combined, failure, (accessor, accessorFailure) ->
 						Diagnostics.faults().report(side, site, DiagnosticFaultReporter.Stage.ACCESSOR, effective, accessorFailure));
 				}
 			}
@@ -231,6 +290,11 @@ public final class DiagnosticLogger {
 	}
 
 	private static String template(String template, @Nullable SafeDiagnosticValue @Nullable @Unmodifiable [] values) {
+		return DiagnosticText.scalar(renderTemplate(template, values), SafeExceptionReport.MAX_CONTEXT_CHARACTERS);
+	}
+
+	private static String renderTemplate(String template,
+		@Nullable SafeDiagnosticValue @Nullable @Unmodifiable [] values) {
 		StringBuilder result = new StringBuilder();
 		int argument = 0;
 		int index = 0;
@@ -245,6 +309,12 @@ public final class DiagnosticLogger {
 			}
 		}
 		if (index < template.length()) result.append("[truncated]");
-		return DiagnosticText.scalar(result.toString(), SafeExceptionReport.MAX_CONTEXT_CHARACTERS);
+		return result.toString();
+	}
+
+	private static @Nullable String combine(@Nullable String summary, @Nullable String detail) {
+		if (summary == null || summary.isEmpty()) return detail;
+		if (detail == null || detail.isEmpty()) return summary;
+		return summary + " " + detail;
 	}
 }

@@ -104,7 +104,9 @@ class InventoryResourceLanesTest {
 			f.backend.handle(InventoryBackendTest.A, InventoryC2SPacket.open(f.host.epoch(InventoryBackendTest.A), 100, 1, 2,
 				InventoryRuntimeTest.TARGET, BlockFace.NORTH), 1, f.settings);
 			f.backend.tick(1, f.settings);
-			assertTrue(f.host.packets.stream().noneMatch(p -> p.requestId() == 2));
+			var outcomes = f.host.packets.stream().filter(p -> p.requestId() == 2).toList();
+			assertEquals(1, outcomes.size()); assertEquals(InventoryS2CPacket.Kind.OPEN_REJECTED, outcomes.getFirst().kind());
+			assertEquals(InventoryFailureReason.TARGET_CAPACITY, outcomes.getFirst().failureReason());
 		}
 	}
 	@Test void siblingPolicyChangesPreserveCompleteAndInProgressTrackingBaselineAndQueuedCutBothDirections() {

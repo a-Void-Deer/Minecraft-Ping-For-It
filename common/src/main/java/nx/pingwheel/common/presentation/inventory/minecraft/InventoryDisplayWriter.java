@@ -12,12 +12,14 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import nx.pingwheel.common.config.InventoryLimits;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
 
 /** Owned display data only. Null is unavailable; size exhaustion has a distinct ID-only terminal. */
 @NotNullByDefault
 public final class InventoryDisplayWriter {
 
 	private static final int DEPTH = 48;
+	private static final int DEPTH_REFUSAL = -2;
 	// A structural-work refusal remains unavailable, not a size terminal. This
 	// admits native primitive-array JSON expansions beyond the resident node cap.
 	private static final int VALIDATION_NODES = InventoryLimits.MAX_DISPLAY_BYTES;
@@ -152,7 +154,9 @@ public final class InventoryDisplayWriter {
 		int members = components == null ? 0 : components.size();
 		// Structural admission is independent of the requested display size. An
 		// unvalidated over-cap input must never become a successful default icon.
-		if (members > InventoryItemBudget.MAX_COLLECTION + 2) return null;
+		if (members > InventoryItemBudget.MAX_MAP + 2) {
+			refuse(InventoryFailureReason.NATIVE_MAP_LIMIT, budget); return null;
+		}
 		allocate(budget, 0, 0, members, 1); String[] keys = new String[members];
 		if (components != null) {
 			allocate(budget, 4, 0, 3, 2);
@@ -185,9 +189,15 @@ public final class InventoryDisplayWriter {
 		Output out = new Output(cap, budget);
 		for (int pass = 0; pass < 3; pass++) {
 			out.reset();
-			if (tree(out, components, keys, id, count, pass)) return out.result();
+			if (tree(out, components, keys, id, count, pass)) {
+				String result = out.result();
+				if (pass != 0) degraded(InventoryFailureReason.DISPLAY_LIMIT, true, "size-suppression", budget);
+				return result;
+			}
 		}
-		return defaultIcon(out, id);
+		String result = defaultIcon(out, id);
+		degraded(InventoryFailureReason.DISPLAY_LIMIT, true, "default-icon", budget);
+		return result;
 	}
 
 	private static String defaultIcon(Output out, String id) {
@@ -201,7 +211,8 @@ public final class InventoryDisplayWriter {
 	/** Complete legal-JSON/depth admission before any size-short-circuited pass. */
 	private static boolean validValue(@Nullable JsonElement value, int depth, int[] nodes, @Nullable InventoryItemBudget budget) {
 		work(budget, 32);
-		if (depth > DEPTH || ++nodes[0] > VALIDATION_NODES) return false;
+		if (depth > DEPTH) { refuse(InventoryFailureReason.NATIVE_DEPTH_LIMIT, budget); return false; }
+		if (++nodes[0] > VALIDATION_NODES) { refuse(InventoryFailureReason.NATIVE_NODE_LIMIT, budget); return false; }
 		if (value == null || value.isJsonNull()) return true;
 		if (value.isJsonPrimitive()) {
 			JsonPrimitive primitive = value.getAsJsonPrimitive();
@@ -217,16 +228,16 @@ public final class InventoryDisplayWriter {
 			}
 			return false;
 		}
-		if (depth == DEPTH) return false;
+		if (depth == DEPTH) { refuse(InventoryFailureReason.NATIVE_DEPTH_LIMIT, budget); return false; }
 		if (value.isJsonArray()) {
 			var array = value.getAsJsonArray();
-			if (array.size() > VALIDATION_NODES - nodes[0]) return false;
+			if (array.size() > VALIDATION_NODES - nodes[0]) { refuse(InventoryFailureReason.NATIVE_NODE_LIMIT, budget); return false; }
 			for (int i = 0; i < array.size(); i++) if (!validValue(array.get(i), depth + 1, nodes, budget)) return false;
 			return true;
 		}
 		allocate(budget, 4, 0, 3, 2);
 		var object = value.getAsJsonObject();
-		if (object.size() > VALIDATION_NODES - nodes[0]) return false;
+		if (object.size() > VALIDATION_NODES - nodes[0]) { refuse(InventoryFailureReason.NATIVE_NODE_LIMIT, budget); return false; }
 		for (var entry : object.entrySet()) {
 			work(budget, entry.getKey().length() + 32L);
 			if (!validValue(entry.getValue(), depth + 1, nodes, budget)) return false;
@@ -265,28 +276,50 @@ public final class InventoryDisplayWriter {
 
 	/** OLD bytes and complete syntax/depth are checked without allocating parser scratch. */
 	static @Nullable String reproject(@Nullable String ownedJson, String id, int cap) {
+		return reprojectResult(ownedJson, id, cap).json();
+	}
+	@NotNullByDefault
+	record Reprojection(@Nullable String json, @Nullable InventoryFailureReason reason, boolean limitHit, String stage) {}
+	/** Collected during the paid validation pass; diagnostics never rescan retained payloads. */
+	static Reprojection reprojectResult(@Nullable String ownedJson, String id, int cap) {
 		cap(cap);
-		if (ownedJson == null || ownedJson.length() > InventoryLimits.MAX_DISPLAY_BYTES
-			|| !validItemId(id)) return null;
-		if (isDefaultIcon(id, ownedJson)) return ownedJson;
+		if (ownedJson == null) return new Reprojection(null, null, false, "unavailable");
+		if (ownedJson.length() > InventoryLimits.MAX_DISPLAY_BYTES)
+			return new Reprojection(null, InventoryFailureReason.DISPLAY_LIMIT, true, "retained-characters");
+		if (!validItemId(id)) return new Reprojection(null, InventoryFailureReason.PROVIDER_FAILURE, false, "retained-item-id");
+		if (isDefaultIcon(id, ownedJson)) return new Reprojection(ownedJson, null, false, "default-icon");
 		long bytes = utf8(ownedJson);
-		if (bytes > InventoryLimits.MAX_DISPLAY_BYTES) return null;
+		if (bytes > InventoryLimits.MAX_DISPLAY_BYTES)
+			return new Reprojection(null, InventoryFailureReason.DISPLAY_LIMIT, true, "retained-bytes");
 		int end = scan(ownedJson, white(ownedJson, 0), 0);
-		if (end < 0 || white(ownedJson, end) != ownedJson.length()) return null;
+		if (end == DEPTH_REFUSAL) return new Reprojection(null, InventoryFailureReason.NATIVE_DEPTH_LIMIT, true, "retained-depth");
+		if (end < 0 || white(ownedJson, end) != ownedJson.length())
+			return new Reprojection(null, InventoryFailureReason.PROVIDER_FAILURE, false, "retained-syntax");
 		Spans spans = new Spans(ownedJson, (int) bytes);
-		if (!spans.read(id)) return null;
+		if (!spans.read(id)) return new Reprojection(null, InventoryFailureReason.PROVIDER_FAILURE, false, "retained-structure");
 		// Tightening needs at most OLD bytes; the fixed minimum also accommodates
 		// mandatory markers on a small, otherwise valid envelope.
 		Output out = new Output(Math.min(cap, Math.max(1024, (int) bytes + 128)));
 		for (int pass = 0; pass < 3; pass++) {
 			out.reset();
-			if (spans.emit(out, id, pass)) return out.result();
+			if (spans.emit(out, id, pass)) {
+				String result = out.result();
+				return new Reprojection(result, pass == 0 ? null : InventoryFailureReason.DISPLAY_LIMIT, pass != 0, "retained-size-suppression");
+			}
 		}
-		return defaultIcon(out, id);
+		String result = defaultIcon(out, id);
+		return new Reprojection(result, InventoryFailureReason.DISPLAY_LIMIT, true, "retained-default-icon");
 	}
 
 	private static void cap(int cap) {
 		if (cap < 1024 || cap > InventoryLimits.MAX_DISPLAY_BYTES) throw new IllegalArgumentException("inventory display cap");
+	}
+	private static void refuse(InventoryFailureReason reason, @Nullable InventoryItemBudget budget) {
+		if (budget != null) throw new InventoryItemBudget.RootLimitException(reason, "display structure bound");
+	}
+	private static void degraded(InventoryFailureReason reason, boolean limitHit, String stage, @Nullable InventoryItemBudget budget) {
+		if (budget == null) InventoryItemDiagnostics.displayDegraded(reason, limitHit, stage);
+		else budget.displayDegraded(reason, limitHit, stage);
 	}
 
 	private static boolean resource(String key, int start) {
@@ -650,11 +683,12 @@ public final class InventoryDisplayWriter {
 	// JSON's escaped UTF-16 units may be isolated, as Gson/Java permit; raw isolated
 	// units use the existing one-byte wire replacement. A pair is counted as four bytes.
 	private static int scan(String json, int at, int depth) {
-		if (at >= json.length() || depth > DEPTH) return -1;
+		if (depth > DEPTH) return DEPTH_REFUSAL;
+		if (at >= json.length()) return -1;
 		char c = json.charAt(at);
 		if (c == '"') return string(json, at);
 		if (c == '{' || c == '[') {
-			if (depth == DEPTH) return -1;
+			if (depth == DEPTH) return DEPTH_REFUSAL;
 			boolean object = c == '{'; char close = object ? '}' : ']';
 			at = white(json, at + 1);
 			if (at < json.length() && json.charAt(at) == close) return at + 1;
@@ -664,7 +698,7 @@ public final class InventoryDisplayWriter {
 					at = white(json, at); if (at == json.length() || json.charAt(at++) != ':') return -1;
 					at = white(json, at);
 				}
-				at = scan(json, at, depth + 1); if (at < 0) return -1;
+				at = scan(json, at, depth + 1); if (at < 0) return at;
 				at = white(json, at); if (at == json.length()) return -1;
 				c = json.charAt(at++); if (c == close) return at;
 				if (c != ',') return -1;

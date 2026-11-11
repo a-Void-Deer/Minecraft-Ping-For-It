@@ -209,7 +209,12 @@ A limit object has the stable JSON form
 multipliers are independent: the preview client and global multipliers and the
 tracking stream, snapshot and global multipliers each control only their own
 scope, and a multiplier is a server-authoritative accounting scale rather than
-a client display preference. The snapshot multiplier is the single multiplier
+a client display preference. Each multiplier scales a compiled, code-owned base
+for its scope; that base is not a persisted or remotely editable value. The
+compiled base is separate from the multiplier default and legal range, the
+size-scalar grids, the pending-memory minimum and every unlimited-mode guard;
+changing the base changes only the per-scope byte amount.
+The snapshot multiplier is the single multiplier
 behind both the per-fragment cap and the per-client period total. The two
 display/frame size scalars are not multiplier objects: each is a finite plain
 number with no unlimited mode, normalized on its own code-defined grid.

@@ -40,6 +40,7 @@ import nx.pingwheel.common.presentation.PresentationAdapter;
 import nx.pingwheel.common.presentation.inventory.InventoryBackend;
 import nx.pingwheel.common.presentation.inventory.InventoryDomainCodec;
 import nx.pingwheel.common.presentation.inventory.InventoryRuntime;
+import nx.pingwheel.common.presentation.inventory.InventorySyncPublisher;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.inventory.InventoryScanner;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
@@ -225,11 +226,13 @@ class InventoryMinecraftSourcesTest {
 		}
 		long epoch() { return sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.OFFER).findFirst().orElseThrow().epoch(); }
 	}
-	@Test void completedDoubleChestPreviewWithdrawsCrossPeriodEncodedBatchWhenOriginalHitHalfBecomesLegalSingle() {
+	@Test void completedDoubleChestPreviewWithdrawsCrossPeriodEncodedBatchWhenOriginalHitHalfBecomesLegalSingle() throws Exception {
 		ChestWorld world = new ChestWorld(); var host = new PreviewHost(world); var settings = InventorySettings.serverDefaults();
 		settings.getPreview().setClientByteMultiplier(ByteMultiplier.finite(new java.math.BigDecimal("0.25")));
+		long periodBytes = 512;
 		var runtime = new InventoryRuntime(i -> Optional.of(world.resolve(i)), 16_000_000);
 		try (var backend = new InventoryBackend(host, runtime, 1)) {
+			wirePressure(backend, periodBytes);
 			backend.handle(world.input.readOwner(), InventoryC2SPacket.hello(), 0, settings);
 			backend.handle(world.input.readOwner(), InventoryC2SPacket.open(host.epoch(), 100, 1, 1, world.input.target(), world.input.face()), 0, settings);
 			int period = settings.getPreview().getPeriodTicks(), visibleSlots = 2 * 27, variants = 12;
@@ -249,6 +252,7 @@ class InventoryMinecraftSourcesTest {
 			assertEquals(0, world.saves()); assertEquals(54, world.reads());
 			assertTrue(cut.completeScan()); assertEquals(InventoryS2CPacket.Status.READY, cut.status());
 			assertEquals(variants, cut.partCount()); assertEquals(0, cut.partIndex());
+			assertCrossPeriodBudget(cut, periodBytes);
 			java.util.function.Predicate<InventoryS2CPacket> belongsToCut = p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()
 				&& p.baselineId() == cut.baselineId() && p.statusRevision() == cut.statusRevision()
 				&& p.watermark() == cut.watermark() && p.partCount() == cut.partCount();
@@ -269,10 +273,12 @@ class InventoryMinecraftSourcesTest {
 		}
 		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
 	}
-	@Test void normalContentChangesDoNotRebaseOrRecaptureAStableCrossPeriodDoubleChestPreview() {
+	@Test void normalContentChangesDoNotRebaseOrRecaptureAStableCrossPeriodDoubleChestPreview() throws Exception {
 		ChestWorld world = new ChestWorld(); var host = new PreviewHost(world); var settings = InventorySettings.serverDefaults();
 		settings.getPreview().setClientByteMultiplier(ByteMultiplier.finite(new java.math.BigDecimal("0.25")));
+		long periodBytes = 512;
 		try (var backend = new InventoryBackend(host, new InventoryRuntime(i -> Optional.of(world.resolve(i)), 16_000_000), 1)) {
+			wirePressure(backend, periodBytes);
 			backend.handle(world.input.readOwner(), InventoryC2SPacket.hello(), 0, settings);
 			backend.handle(world.input.readOwner(), InventoryC2SPacket.open(host.epoch(), 100, 1, 1, world.input.target(), world.input.face()), 0, settings);
 			int period = settings.getPreview().getPeriodTicks(), visibleSlots = 2 * 27, variants = 12;
@@ -292,6 +298,7 @@ class InventoryMinecraftSourcesTest {
 			assertEquals(0, world.saves()); assertEquals(54, world.reads());
 			assertTrue(cut.completeScan()); assertEquals(InventoryS2CPacket.Status.READY, cut.status());
 			assertEquals(variants, cut.partCount()); assertEquals(0, cut.partIndex());
+			assertCrossPeriodBudget(cut, periodBytes);
 			java.util.function.Predicate<InventoryS2CPacket> belongsToCut = p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()
 				&& p.baselineId() == cut.baselineId() && p.statusRevision() == cut.statusRevision()
 				&& p.watermark() == cut.watermark() && p.partCount() == cut.partCount();
@@ -303,6 +310,8 @@ class InventoryMinecraftSourcesTest {
 			assertEquals(cut.partCount(), parts.size(), "this immutable complete cut finishes once instead of restarting each period");
 			assertEquals(java.util.stream.IntStream.range(0, cut.partCount()).boxed().toList(), parts.stream().map(InventoryS2CPacket::partIndex).sorted().toList());
 			assertTrue(parts.stream().allMatch(p -> p.completeScan() && p.status() == InventoryS2CPacket.Status.READY && p.checksum() == cut.checksum()));
+			assertTrue(parts.stream().mapToLong(InventoryMinecraftSourcesTest::encodedBytes).sum() > periodBytes,
+				"the real encoded complete cut exceeds a whole client byte period");
 			assertTrue(host.sent.subList(cutStart, host.sent.size()).stream().filter(p -> !p.entries().isEmpty()).allMatch(belongsToCut), "ordinary mutation creates no replacement cut or new baseline/state");
 			assertTrue(host.sent.subList(cutStart, host.sent.size()).stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.partIndex() == p.partCount() - 1
 				&& p.baselineId() == cut.baselineId() && p.statusRevision() == cut.statusRevision() && p.watermark() == cut.watermark()
@@ -314,6 +323,25 @@ class InventoryMinecraftSourcesTest {
 			assertTrue(host.sent.stream().noneMatch(p -> p.status() == InventoryS2CPacket.Status.INVALID));
 			assertEquals(0, world.saves()); assertEquals(0, world.reads());
 		}
+	}
+	private static void wirePressure(InventoryBackend backend, long bytes) throws Exception {
+		var publisherField = InventoryBackend.class.getDeclaredField("publisher"); publisherField.setAccessible(true);
+		InventorySyncPublisher publisher = (InventorySyncPublisher) publisherField.get(backend);
+		var method = InventorySyncPublisher.class.getDeclaredMethod("wireBudgetFixture", long.class, long.class);
+		method.setAccessible(true); method.invoke(publisher, bytes, bytes);
+	}
+	private static void assertCrossPeriodBudget(InventoryS2CPacket part, long periodBytes) {
+		assertTrue(encodedBytes(part) < periodBytes, "one real native row fits within a client byte period");
+		var envelope = InventoryS2CPacket.data(part.resourceKind(), part.kind(), part.epoch(), part.requestId(), null,
+			part.baselineId(), part.statusRevision(), part.watermark(), part.partIndex(), part.partCount(),
+			part.completeScan(), part.status(), part.checksum(), List.of()).stamp(part.presentationEpoch(), part.view());
+		assertTrue((long) encodedBytes(envelope) * part.partCount() > periodBytes,
+			"even the real encoded envelopes without rows require multiple periods");
+	}
+	private static int encodedBytes(InventoryS2CPacket packet) {
+		var buffer = new FriendlyByteBuf(Unpooled.buffer());
+		try { packet.write(buffer); return buffer.readableBytes(); }
+		finally { buffer.release(); }
 	}
 	@Test void terminalEvidenceDetectsSameAliasSameCountSnapshotLayoutChangeEvenWhenAccessRemainsSelfValid() {
 		var settings = InventorySettings.serverDefaults(); var owner = new UUID(5, 5);

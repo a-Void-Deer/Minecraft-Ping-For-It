@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
@@ -531,6 +532,185 @@ class DiagnosticPolicyTest {
 		}
 	}
 
+	@Test
+	void reportByProfileDoesNotReadDetailAtNormalAndUsesTheFixedSummary() {
+		try (Fixture fixture = new Fixture()) {
+			AtomicInteger reads = new AtomicInteger();
+			assertTrue(Diagnostics.client().atNormal().reportByProfile(Level.WARN, "profile-normal", "deferred",
+				summary("reason={} impact={} limitHit={}", SafeDiagnosticValue.code("request-capacity"),
+					SafeDiagnosticValue.code("ping-unavailable"), SafeDiagnosticValue.bool(true)),
+				profile -> { reads.incrementAndGet(); return "precision=" + profile.name(); },
+				new RuntimeException("normal-secret")));
+			assertEquals(0, reads.get());
+			String text = fixture.sink.events.getLast().text;
+			assertTrue(text.contains("site=profile-normal handling=deferred"));
+			assertTrue(text.contains("reason=request-capacity impact=ping-unavailable limitHit=true"));
+			assertTrue(text.contains("failure=runtime-failure"));
+			assertFalse(text.contains("normal-secret"));
+			assertThrows(IllegalArgumentException.class, () -> Diagnostics.client().reportByProfile(Level.WARN,
+				"profile-normal", "raw handling", summary("reason={}", SafeDiagnosticValue.code("deferred")), null, null));
+		}
+	}
+
+	@Test
+	void reportByProfileUsesOneSnapshotAndSelectsDeepPrecision() {
+		try (Fixture fixture = new Fixture()) {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEEP);
+			AtomicInteger reads = new AtomicInteger();
+			assertTrue(Diagnostics.client().atNormal().reportByProfile(Level.DEBUG, "profile-snapshot", "truncated",
+				summary("reason={}", SafeDiagnosticValue.code("snapshot-limit")), profile -> {
+					reads.incrementAndGet();
+					Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.NORMAL);
+					return "precision=" + profile.name();
+				}, null));
+			assertEquals(1, reads.get());
+			assertTrue(fixture.sink.events.getLast().text.contains("reason=snapshot-limit precision=DEEP"));
+			assertEquals(LoggingProfile.NORMAL, Diagnostics.profile(DiagnosticSide.CLIENT),
+				"The terminal must not re-snapshot after detail selection");
+		}
+	}
+
+	@Test
+	void reportByProfileBypassesOnlyIntervalChannelsAtDebugAndSharesThemBelowDebug() {
+		try (Fixture fixture = new Fixture()) {
+			AtomicLong clock = new AtomicLong();
+			DiagnosticChannel channel = DiagnosticChannel.interval("profile-channel", Duration.ofSeconds(10), clock::get);
+			DiagnosticLogger logger = Diagnostics.client().atNormal().rateLimited(channel);
+			DiagnosticLogger.NormalSummary reportSummary = summary("reason={}", SafeDiagnosticValue.code("rejected"));
+			AtomicInteger reads = new AtomicInteger();
+			assertTrue(logger.reportByProfile(Level.DEBUG, "profile-channel", "rejected", reportSummary,
+				profile -> { reads.incrementAndGet(); return "precision=" + profile.name(); }, null, true));
+			assertFalse(logger.reportByProfile(Level.DEBUG, "profile-channel", "rejected", reportSummary,
+				profile -> { reads.incrementAndGet(); return "precision=" + profile.name(); }, null, true));
+			assertEquals(0, reads.get());
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEEP);
+			assertFalse(logger.reportByProfile(Level.DEBUG, "profile-channel", "rejected", reportSummary,
+				profile -> { reads.incrementAndGet(); return "precision=" + profile.name(); }, null, true));
+			clock.set(Duration.ofSeconds(10).toNanos());
+			assertTrue(logger.reportByProfile(Level.DEBUG, "profile-channel", "rejected", reportSummary,
+				profile -> { reads.incrementAndGet(); return "precision=" + profile.name(); }, null, true));
+			assertEquals(1, reads.get());
+			assertTrue(fixture.sink.events.getLast().text.contains("precision=DEEP"));
+			assertTrue(fixture.sink.events.getLast().text.contains("suppressed="));
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEBUG);
+			assertTrue(logger.reportByProfile(Level.DEBUG, "profile-channel", "rejected", reportSummary,
+				profile -> { reads.incrementAndGet(); return "precision=" + profile.name(); }, null, true));
+			assertTrue(logger.reportByProfile(Level.DEBUG, "profile-channel", "rejected", reportSummary,
+				profile -> { reads.incrementAndGet(); return "precision=" + profile.name(); }, null, true));
+			assertEquals(3, reads.get());
+			assertEquals(4, fixture.sink.events.size());
+			for (int index = 2; index < 4; index++) {
+				String bypassed = fixture.sink.events.get(index).text;
+				assertTrue(bypassed.contains("bypass=debug-every-occurrence"));
+				assertFalse(bypassed.contains("suppressed="));
+			}
+		}
+	}
+
+	@Test
+	void reportByProfileDefaultsToCadenceControlAtDebug() {
+		try (Fixture fixture = new Fixture()) {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEBUG);
+			AtomicLong clock = new AtomicLong();
+			DiagnosticChannel channel = DiagnosticChannel.interval("profile-default", Duration.ofSeconds(10), clock::get);
+			DiagnosticLogger logger = Diagnostics.client().atNormal().rateLimited(channel);
+			DiagnosticLogger.NormalSummary reportSummary = summary("reason={}", SafeDiagnosticValue.code("rejected"));
+			assertTrue(logger.reportByProfile(Level.DEBUG, "profile-default", "rejected", reportSummary,
+				profile -> "detail", null));
+			assertFalse(logger.reportByProfile(Level.DEBUG, "profile-default", "rejected", reportSummary,
+				profile -> "detail", null));
+			assertEquals(1, fixture.sink.events.size());
+			assertTrue(fixture.sink.events.getFirst().text.contains("suppressed=0"));
+		}
+	}
+
+	@Test
+	void reportByProfileUsesTheSharedBoundedFailureFormatterAtDeep() {
+		try (Fixture fixture = new Fixture()) {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEEP);
+			assertTrue(Diagnostics.client().atNormal().reportByProfile(Level.WARN, "profile-failure", "rejected",
+				summary("reason={} impact={}", SafeDiagnosticValue.code("transport-failure"),
+					SafeDiagnosticValue.code("degraded")),
+				profile -> "detail", new RuntimeException("deep-secret")));
+			String text = fixture.sink.events.getLast().text;
+			assertTrue(text.contains("reason=transport-failure impact=degraded"));
+			assertTrue(text.contains("detail"));
+			assertTrue(text.contains("deep-secret"));
+			assertTrue(text.contains("exception"));
+		}
+	}
+
+	@Test
+	void reportByProfileKeepsTheSummaryAndContainsDetailFailures() {
+		try (Fixture fixture = new Fixture()) {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEEP);
+			assertTrue(Diagnostics.client().atNormal().reportByProfile(Level.DEBUG, "profile-context", "fallback",
+				summary("reason={} impact={} limitHit={}", SafeDiagnosticValue.code("snapshot-limit"),
+					SafeDiagnosticValue.code("degraded"), SafeDiagnosticValue.bool(true)),
+				profile -> { throw new IllegalStateException("detail-secret"); }, null));
+			String text = fixture.sink.events.getLast().text;
+			assertTrue(text.contains("reason=snapshot-limit impact=degraded limitHit=true"));
+			assertTrue(text.contains("context unavailable"));
+			assertFalse(text.contains("detail-secret"));
+			assertEquals(1, fixture.faults.observations().size());
+			assertEquals(DiagnosticFaultReporter.Stage.CONTEXT, fixture.faults.observations().getFirst().key().stage());
+		}
+	}
+
+	@Test
+	void reportByProfileDebugEveryOccurrenceNeverBypassesADomainChannelOrItsDetailBoundary() {
+		try (Fixture fixture = new Fixture()) {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEBUG);
+			AtomicInteger admissions = new AtomicInteger();
+			AtomicInteger reads = new AtomicInteger();
+			AtomicBoolean allow = new AtomicBoolean();
+			DiagnosticLogger logger = Diagnostics.client().rateLimited(DiagnosticChannel.domain("profile-domain", () -> {
+				admissions.incrementAndGet();
+				return allow.get();
+			}));
+			DiagnosticLogger.NormalSummary reportSummary =
+				summary("reason={}", SafeDiagnosticValue.code("provider-failure"));
+			assertFalse(logger.reportByProfile(Level.DEBUG, "profile-domain", "rejected", reportSummary,
+				profile -> { reads.incrementAndGet(); return "detail"; }, null, true));
+			assertEquals(1, admissions.get());
+			assertEquals(0, reads.get());
+			allow.set(true);
+			assertTrue(logger.reportByProfile(Level.DEBUG, "profile-domain", "rejected", reportSummary,
+				profile -> { reads.incrementAndGet(); return "detail"; }, null, true));
+			assertEquals(2, admissions.get(), "Every DEBUG report runs the domain gate");
+			assertEquals(1, reads.get(), "Detail remains behind domain admission");
+			assertFalse(fixture.sink.events.getLast().text.contains("bypass="),
+				"A domain channel has no every-occurrence bypass");
+		}
+	}
+
+	@Test
+	void reportByProfileDoesNotReachChannelOrDetailWhenBackendOrMinimumRejects() {
+		try (Fixture fixture = new Fixture()) {
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.DEBUG);
+			AtomicInteger clockReads = new AtomicInteger();
+			AtomicInteger reads = new AtomicInteger();
+			DiagnosticChannel channel = DiagnosticChannel.interval("profile-disabled", Duration.ofSeconds(1), () -> {
+				clockReads.incrementAndGet();
+				return 0;
+			});
+			DiagnosticLogger logger = Diagnostics.client().atNormal().rateLimited(channel);
+			DiagnosticLogger.NormalSummary reportSummary = summary("reason={}", SafeDiagnosticValue.code("queue-limit"));
+			fixture.sink.enabled = false;
+			assertFalse(logger.reportByProfile(Level.DEBUG, "profile-disabled", "deferred", reportSummary,
+				profile -> { reads.incrementAndGet(); return "detail"; }, null, true));
+			assertEquals(0, clockReads.get());
+			assertEquals(0, reads.get());
+			fixture.sink.enabled = true;
+			Diagnostics.setProfile(DiagnosticSide.CLIENT, LoggingProfile.NORMAL);
+			assertFalse(Diagnostics.client().atDetailed().reportByProfile(Level.DEBUG, "profile-minimum", "deferred",
+				reportSummary, profile -> { reads.incrementAndGet(); return "detail"; }, null, true));
+			assertEquals(0, clockReads.get());
+			assertEquals(0, reads.get());
+			assertTrue(fixture.sink.events.isEmpty());
+		}
+	}
+
 	private static void await(CountDownLatch latch) {
 		try {
 			assertTrue(latch.await(5, TimeUnit.SECONDS));
@@ -542,6 +722,11 @@ class DiagnosticPolicyTest {
 
 	private static DiagnosticLogger select(DiagnosticLogger logger, LoggingProfile profile) {
 		return switch (profile) { case NORMAL -> logger.atNormal(); case DEEP -> logger.atDetailed(); case DEBUG -> logger.atDebug(); };
+	}
+
+	private static DiagnosticLogger.NormalSummary summary(String template,
+		SafeDiagnosticValue @Unmodifiable ... values) {
+		return new DiagnosticLogger.NormalSummary(template, values);
 	}
 
 	private static Throwable hostile(AtomicInteger reads) {

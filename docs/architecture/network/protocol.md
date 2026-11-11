@@ -46,8 +46,8 @@ targets) or dedicated inventory
 | Presentation `PresentationS2CPacket` (S2C): `OFFER`, `RESET`, `CREATED`, `SECTION`, `REMOVED`, `WINNER`, `REJECT` | Fabric, Forge, and NeoForge common client handler. | Accepted marker creation, removal, and winner changes are projected per recipient; a rejection is sent only to its requester. | Accepted only for the negotiated session epoch/view. The atomic Basic initial, marker content grant, receipt content descriptor, default display reference, retained values, and mask, child-deny and marker-scoped authorization rules are owned by [presentation snapshot](../presentation/presentation_snapshot.md); marker record state and visual lifetime are owned by [client marker state](../markers/client-state.md); rejection presentation remains owned by [ping feedback](../../UI/ping-feedback.md). Corrupt packets, or packets received without a runtime, are safely dropped. |
 | Presentation policy `ServerPresentationPolicyC2SPacket` (C2S): `READ`, `ADD_WHITE`, `REMOVE_WHITE`, `ADD_BLACK`, `REMOVE_BLACK`, `SET_WHITELIST_ONLY` | Fabric, Forge, and NeoForge common server handler. | The versioned route carries the correlated read of all five per-target-type rule views, each including its persisted child deny list, and the bounded selector and whitelist-only mutations for a selected target type, which leave the child deny list unchanged. Disclosure, revision, transaction, and broadcast semantics are owned by [presentation snapshot](../presentation/presentation_snapshot.md); authority and server-side enforcement are owned by [server configuration authority](../authority/server-config.md) and [security](../security.md#server-configuration-update-enforcement). | Not applicable on C2S. |
 | Presentation policy `ServerPresentationPolicyS2CPacket` (S2C) | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted into the connection-scoped rule-view mirror under the correlation and revision rules owned by [presentation snapshot](../presentation/presentation_snapshot.md); it does not mutate marker state, overlay/outline state, or presentation field values. |
-| Inventory `InventoryC2SPacket` (C2S): `HELLO`, `OPEN`, `CLOSE`, `RESYNC`, `SELECT` | Fabric, Forge, and NeoForge common server handler. | `HELLO` creates or renews the per-player preview session and answers with an offer of server-selected periods, the effective display and frame byte budgets, and the inventory target-type policy view; every other kind runs under the session epoch and presentation epoch, with view acceptance and the narrow same-request cancellation exception owned by the [inventory route](#inventory-previewtracking-route-inventory-v2). `OPEN` binds one bounded preview request to a server-validated ordinary block target or uncommitted external provider candidate with its carried real local face, `CLOSE` releases it, `RESYNC` schedules repair for its required marker ID, and `SELECT` resolves one opaque retained entry reference under its baseline/state fences into a correlated selection outcome. The request carries no player identity, item count, or client-supplied authoritative target. Inventory domain semantics are owned by [inventory](../presentation/inventory.md). | Not applicable on C2S. |
-| Inventory `InventoryS2CPacket` (S2C): `OFFER`, `POLICY`, `SELECTED`, `REJECT`, `PREVIEW`, `SNAPSHOT`, `STREAM`, `STATUS`, `HEARTBEAT`, `OPENED` | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted into the connection-scoped inventory session only under the negotiated epoch and the current presentation epoch/view: `OFFER` establishes the epoch, the periods, and the effective display and frame byte budgets, `POLICY` carries the inventory target-type policy view, `OPENED` grants one Preview request's lane authorization before any of its `PREVIEW` data, `SELECTED`/`REJECT` are accepted only against a pending commit with the matching request id, `PREVIEW` is request-scoped, and `SNAPSHOT`/`STREAM`/`STATUS`/`HEARTBEAT` are marker-scoped tracking frames. Coverage and pending runtime evidence for native input and HUD consumption of the session are owned by [testing and verification](../../testing/verification/inventory.md). Inventory domain semantics are owned by [inventory](../presentation/inventory.md). |
+| Inventory `InventoryC2SPacket` (C2S): `HELLO`, `OPEN`, `CLOSE`, `RESYNC`, `SELECT` | Fabric, Forge, and NeoForge common server handler. | `HELLO` creates or renews the per-player preview session and answers with an offer of server-selected periods, the effective display and frame byte budgets, and the inventory target-type policy view; every other kind runs under the session epoch and presentation epoch, with view acceptance and the narrow same-request cancellation exception owned by the [inventory route](#inventory-previewtracking-route-inventory-v2). `OPEN` binds one bounded preview request to a server-validated ordinary block target or uncommitted external provider candidate with its carried real local face, and an admitted request owns exactly one typed `OPENED` or `OPEN_REJECTED` outcome; `CLOSE` releases it, `RESYNC` schedules repair for its required marker ID, and `SELECT` resolves one opaque retained entry reference under its baseline/state fences into a correlated selection outcome. The request carries no player identity, item count, or client-supplied authoritative target. Inventory domain semantics are owned by [inventory](../presentation/inventory.md). | Not applicable on C2S. |
+| Inventory `InventoryS2CPacket` (S2C): `OFFER`, `POLICY`, `SELECTED`, `REJECT`, `PREVIEW`, `SNAPSHOT`, `STREAM`, `STATUS`, `HEARTBEAT`, `OPENED`, `OPEN_REJECTED`, `PREVIEW_STATE` | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Accepted into the connection-scoped inventory session only under the negotiated epoch and the current presentation epoch/view: `OFFER` establishes the epoch, the periods, and the effective display and frame byte budgets, `POLICY` carries the inventory target-type policy view, `OPENED` grants one Preview request's lane authorization before any of its `PREVIEW` data, `OPEN_REJECTED` is the paired whole-request typed admission rejection, `PREVIEW_STATE` carries lane-scoped progress or condition control without rows or completion, `SELECTED`/`REJECT` are accepted only against a pending commit with the matching request id, `PREVIEW` is request-scoped, and `SNAPSHOT`/`STREAM`/`STATUS`/`HEARTBEAT` are marker-scoped tracking frames. Coverage and pending runtime evidence for native input and HUD consumption of the session are owned by [testing and verification](../../testing/verification/inventory.md). Inventory domain semantics are owned by [inventory](../presentation/inventory.md). |
 | Inventory monitor `InventoryMonitorSubscribeC2SPacket` (C2S) | Fabric, Forge, and NeoForge common server handler. | Carries one positive demand revision and the latest remote raw metric selection. A watch with no selected metrics is valid, and a stop is explicit rather than a zero-metric watch. Subscription changes transfer demand only; it never enables, disables or resets collection. | Not applicable on C2S. |
 | Inventory monitor `InventoryMonitorStatusS2CPacket` (S2C) | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Control summary for the current demand, carrying no numeric telemetry. Accepted only under the demand-revision and generation fences in the [monitor route](#inventory-monitor-routes-inventory-monitor-v1); control-state presentation is owned by [settings screen](../../UI/settings-screen.md#performance-monitor-controls), and HUD source-state presentation by [inventory HUD presentation](../presentation/inventory.md#hud-projection-and-presentation). |
 | Inventory monitor `InventoryMonitorSampleS2CPacket` (S2C) | Fabric, Forge, and NeoForge common client handler. | No server ingress effect. | Latest numeric sample. Accepted only after a matching authorized status and generation fences; stale, replayed or unselected values are dropped. Measurement meaning is owned by [inventory performance monitoring](../presentation/inventory.md#performance-monitoring). |
@@ -229,7 +229,8 @@ established meaning, and no request changes its target. A same-epoch view
 rebuild retains the request, so an in-flight `CLOSE` carrying the previous view
 is still honored. `OPEN`, `SELECT`, and `RESYNC` remain strictly bound to the
 current view. `OFFER` and `POLICY` are session messages; `OPEN`, `CLOSE`,
-`SELECT`, the `OPENED` response, and the `PREVIEW` response are request-scoped;
+`SELECT`, the `OPENED` and `OPEN_REJECTED` responses, `PREVIEW_STATE`, and the
+`PREVIEW` response are request-scoped;
 `RESYNC` and the `SNAPSHOT`, `STREAM`, `STATUS`, and `HEARTBEAT` responses are
 marker-scoped.
 
@@ -237,10 +238,11 @@ The resource-lane byte is `0` for `ITEM` and `1` for `FLUID`; any other value
 rejects the whole frame. C2S `SELECT` and `RESYNC` carry it immediately after
 the common kind/version/epoch/presentation-epoch/view header and before the
 request ID. C2S `HELLO`, `OPEN` and `CLOSE` carry no lane byte. Every S2C kind
-except the session-wide `OFFER` and the request-scoped `OPENED` carries one
-after its common kind/version/epoch/request-ID/presentation-epoch/view header,
-including empty data, policy, selection outcomes and status controls. A frame is
-homogeneous:
+except the session-wide `OFFER` and the request-scoped `OPENED` and
+`OPEN_REJECTED` carries one after its common
+kind/version/epoch/request-ID/presentation-epoch/view header, including empty
+data, policy, selection outcomes, status controls and lane state notices. A
+frame is homogeneous:
 its lane alone chooses the resource registry, amount unit and display decoder;
 an entry cannot override that interpretation.
 
@@ -267,7 +269,10 @@ ID, or trailing bytes.
 stateRevision, entryKey, pingType)` carries one opaque retained entry reference
 and the commit/baseline/state fences; the server derives the authoritative
 target and count from its own retained reference and answers `SELECTED` or `REJECT`
-correlated by request, commit ID and lane. A successful selection is a Ping
+correlated by request, commit ID and lane. `REJECT` retains the existing generic
+marker rejection and adds the inventory-specific failure cause separately; the
+generic rejection vocabulary is not extended by inventory reasons. A successful
+selection is a Ping
 creation and resolves that marker's own
 [frozen recipient content authorization](../presentation/presentation_snapshot.md#frozen-recipient-content-authorization),
 not an inherited Preview freeze or an older marker's grant; the inventory domain
@@ -291,14 +296,14 @@ relationship remain owned by
 [server configuration](../../config/server.md#inventory-policy-object) and
 [inventory](../presentation/inventory.md). `POLICY` carries its lane's inventory
 target-type policy view.
-`OPENED` is the final inventory S2C kind after `HEARTBEAT`; the complete wire
-kind order is `OFFER`, `POLICY`, `SELECTED`, `REJECT`, `PREVIEW`, `SNAPSHOT`,
-`STREAM`, `STATUS`, `HEARTBEAT`, `OPENED`, and each kind retains its established
-encoding. It answers an accepted `OPEN` as the request-scoped Preview grant:
-after the common header it carries one lane-bit byte and no resource-lane byte,
-marker, entries or other body. Its request id must be positive, and `laneBits`
-is one byte from `0` through `3`, where the low two bits independently authorize
-the `ITEM` and `FLUID` lanes in wire-id order
+`OPENED` follows `HEARTBEAT` in the current kind order; the complete order is
+`OFFER`, `POLICY`, `SELECTED`, `REJECT`, `PREVIEW`, `SNAPSHOT`, `STREAM`,
+`STATUS`, `HEARTBEAT`, `OPENED`, `OPEN_REJECTED`, `PREVIEW_STATE`, and each kind
+retains its established encoding. `OPENED` answers an accepted `OPEN` as the
+request-scoped Preview grant: after the common header it carries one lane-bit
+byte and no resource-lane byte, marker, entries or other body. Its request id
+must be positive, and `laneBits` is one byte from `0` through `3`, where the low
+two bits independently authorize the `ITEM` and `FLUID` lanes in wire-id order
 (`0` is valid and grants no lane); any other value rejects the frame. The client
 accepts a request's `PREVIEW` data only after its `OPENED` grant, so `OPENED`
 precedes any `PREVIEW` fragment for that request and a data frame cannot widen
@@ -307,21 +312,71 @@ view, request id and lane bits is idempotent; a conflicting repeat is rejected
 rather than merged, and the accepted grant neither widens nor narrows. A later
 `POLICY` frame updates only the lane policy view and does not revoke, widen or
 replace an accepted `OPENED` grant. `OPENED` neither establishes the inventory
-session nor replaces the `OFFER` data gate. It is an inventory version-two S2C
-kind; no additional version or schema applies.
+session nor replaces the `OFFER` data gate.
+
+`OPEN_REJECTED` is the paired whole-request admission rejection for the same
+request id. Like `OPENED` it is session/request scoped and carries no
+resource-lane byte, marker, status, entries or completion field, and it grants
+no lane. After the common header its body is exactly one positive failure-reason
+wire id; zero, an unknown id and a noncanonical id reject the entire frame.
+Every admitted `OPEN` owns exactly one typed outcome, `OPENED` or
+`OPEN_REJECTED`, and the server retains that owner until a successful control
+handoff or `CLOSE`. A transport deferral retries the same typed outcome; it does
+not rerun admission or create a second outcome for the request id.
+
+`PREVIEW_STATE` is one lane-scoped control and progress notice. After the common
+header and its resource-lane byte, its body is the positive `controlRevision`
+and non-negative `progressRevision` as fixed-width signed 64-bit longs, the
+`ADMISSION`, `SCAN` or `DELIVERY` phase, the `PROGRESS`, `DEFERRED`,
+`UNSUPPORTED` or `FAILED` condition, and a strict reason-presence byte followed
+by one positive failure-reason id when present. A non-`PROGRESS` condition
+requires a reason; `PROGRESS` may omit it. A repeated or older
+`controlRevision` for the same request and lane is rejected. Only a strictly
+newer `PROGRESS` `progressRevision` records real progress; a repeated
+`DEFERRED`, a duplicate notice or a stale attempt does not advance it.
+`PREVIEW_STATE` never grants a lane, installs rows or declares source
+completion: `DEFERRED` is a scheduling condition, `UNSUPPORTED` reports an
+unavailable lane, and `FAILED` reports a terminal lane failure, while data
+completion remains with the data frames and their `completeScan` and status. An
+accepted `OPENED` grant or accepted data is not widened by a later state
+notice.
+
+The current inventory body also carries explanatory failure metadata. `REJECT`
+follows its existing generic marker rejection with one optional inventory
+failure reason. `PREVIEW`, `SNAPSHOT`, `STREAM` and `STATUS` carry one optional
+failure reason after their status. An entry's optional quality may carry its own
+optional quality reason only when a quality value is present. Each reason uses a
+strict presence byte and one positive explicit wire id; unknown, zero,
+noncanonical and unscoped reason ids reject the whole frame. The generic marker
+rejection vocabulary is not extended: shared causes remain that marker
+rejection, and the inventory-specific cause travels separately in the inventory
+field. Failure and quality metadata never changes keys, counts, revisions,
+checksum domains or completion evidence.
+
+There is one current inventory version-two body. A frame missing a current
+presence field or reason slot is corrupt; it is never completed from its
+remaining bytes, a default reason or an earlier unreleased inventory body, and
+`inventory-v1` remains unregistered. The route, protocol version two, inventory
+adapter schema two, server-configuration version five and the mod version are
+unchanged. This route's established kind bodies carry no wire version or schema
+of their own beyond the route version.
 
 `PREVIEW`, `SNAPSHOT` and `STREAM` each carry one fragment under an independent
 `(resourceKind, epoch, requestId, markerId, baselineId)` identity plus `statusRevision`,
-`watermark`, `partIndex`/`partCount`, `completeScan`, a status, a checksum, and
-a bounded entry list; `markerId` is required for `SNAPSHOT`/`STREAM` and absent
-for `PREVIEW`, `SNAPSHOT` is the baseline fragment, and `STREAM` continues it.
-`STATUS` carries the same state fields without entries. `HEARTBEAT` carries
+`watermark`, `partIndex`/`partCount`, `completeScan`, a status, a checksum, an
+optional failure reason, and a bounded entry list; `markerId` is required for
+`SNAPSHOT`/`STREAM` and absent for `PREVIEW`, `SNAPSHOT` is the baseline
+fragment, and `STREAM` continues it. `STATUS` carries the same state fields,
+including the optional failure reason, without entries. `HEARTBEAT` carries
 state and checksum without items and never resends values. Entry fields are
 `key`, `itemId`, `label`, optional `displayJson`, `count`, `itemRevision`,
-`fallback`, an optional per-entry `quality` status, `groupRevision`,
-`replaceGroup`, and an optional `itemPingType`; duplicate keys, negative
+`fallback`, an optional per-entry `quality` status, an optional `qualityReason`
+present only with that quality, `groupRevision`, `replaceGroup`, and an optional
+`itemPingType`; duplicate keys, negative
 counts, unknown kinds or statuses, invalid part ranges, oversized frames and
-trailing bytes are rejected. Status values are `UPDATING`, `READY`,
+trailing bytes are rejected. `partCount` describes the multipart cut, not an
+entry allowance for one frame: the per-frame entry bound remains independent of
+the number of parts. Status values are `UPDATING`, `READY`,
 `UNCERTAIN`, `INCOMPLETE`, `INVALID` and `COMPONENT_TOO_LONG`. Status and optional
 entry quality use UTF names rather than ordinals; `UNAVAILABLE` and `EXPIRED`
 are rejected in data-frame status, control-frame status and entry quality alike.
@@ -330,7 +385,8 @@ resource revision and annotation in their containing lane: `count` is an item
 count in `ITEM` and exact `U` in `FLUID`. The fluid unit and closed display
 grammar are owned by
 [inventory](../presentation/inventory.md#fluid-variants-and-quantities), not an
-ItemStack decoder. Checksum domains include the lane, including an empty cut.
+ItemStack decoder. Checksum domains include the lane, including an empty cut;
+failure and quality reasons are outside the checksum domain.
 
 `completeScan` describes source-scan completion, not receipt of all
 `partIndex`/`partCount` fragments. A marker-scoped selected-preview bootstrap
@@ -748,5 +804,6 @@ the non-blank dimension requirement are owned by the
 
 ## Evidence
 
-Existing coverage inventory and remaining integration gaps are owned by
-[testing and verification](../../testing/verification/README.md).
+Coverage and remaining integration gaps are recorded in the verification set;
+its [entry page](../../testing/verification/README.md) routes to their owning
+evidence pages.

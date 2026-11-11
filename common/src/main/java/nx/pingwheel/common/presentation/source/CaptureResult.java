@@ -12,6 +12,7 @@ import nx.pingwheel.common.presentation.PresentationIds;
 import nx.pingwheel.common.presentation.PresentationLimits;
 import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationValue;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * One detached, immutable observation produced by a bounded source step.
@@ -186,27 +187,32 @@ public record CaptureResult(
 
 	/**
 	 * The closed, code-owned allowance of approved opaque value codecs. Each
-	 * token fixes one stable codec id and its own engineering byte bound; a
-	 * caller can never supply an arbitrary id, size, or descriptor. A value
-	 * admitted by a token is valid only inside an
-	 * {@link OpaqueKeyedFragment} whose {@code codecId} names the same token.
+	 * token fixes one stable codec id, its own engineering byte bound and its
+	 * own bounded fragment page; a caller can never supply an arbitrary id,
+	 * size, bound, or descriptor. A value admitted by a token is valid only
+	 * inside an {@link OpaqueKeyedFragment} whose {@code codecId} names the
+	 * same token.
 	 */
 	public enum OpaqueCodec {
 
 		/**
 		 * Detached inventory observation codec. The bound envelopes the
-		 * absolute 128 KiB display budget plus its bounded entry metadata.
+		 * absolute 128 KiB display budget plus its bounded entry metadata, and
+		 * the page matches the publisher's closed 1024-key cut.
 		 */
-		INVENTORY_OBSERVATION_V1("pingforit:inventory.observation.v1", 133120),
+		INVENTORY_OBSERVATION_V1("pingforit:inventory.observation.v1", 133120, 1024),
 		/** Independent detached fluid observation; never decoded through the item codec. */
-		INVENTORY_FLUID_OBSERVATION_V1("pingforit:inventory.fluid_observation.v1", 133120);
+		INVENTORY_FLUID_OBSERVATION_V1("pingforit:inventory.fluid_observation.v1", 133120, 1024);
 
 		private final String id;
 		private final int bound;
+		private final int maxEntries;
 
-		OpaqueCodec(String id, int bound) {
+		OpaqueCodec(String id, int bound, int maxEntries) {
+			if (maxEntries < 1) throw new IllegalArgumentException("opaque codec page entries");
 			this.id = id;
 			this.bound = bound;
+			this.maxEntries = maxEntries;
 		}
 
 		/** The fixed codec id carried by an opaque fragment. */
@@ -217,6 +223,11 @@ public record CaptureResult(
 		/** The engineering byte bound for one value of this codec. */
 		public int bound() {
 			return bound;
+		}
+
+		/** The engineering entry-page allowance for a fragment admitted by this codec. */
+		public int maxEntries() {
+			return maxEntries;
 		}
 	}
 
@@ -274,7 +285,7 @@ public record CaptureResult(
 		}
 
 		/** The code-owned allowance that admitted this value, or null for the ordinary form. */
-		public OpaqueCodec codec() {
+		public @Nullable OpaqueCodec codec() {
 			return codec;
 		}
 
@@ -304,29 +315,44 @@ public record CaptureResult(
 	 * normalization and its own stricter encoding limits.
 	 *
 	 * <p>{@code codecId} names a code-registered encoding, not a dynamic plugin
-	 * type. A missing key means unchanged or unknown, never zero, and an
-	 * explicit value stays explicit. A value tagged with an {@link OpaqueCodec}
-	 * allowance is accepted only when its token id equals {@code codecId}; the
-	 * ordinary untagged form keeps its value-bound behavior.
+	 * type. An ordinary page carries at most {@link #MAX_ENTRIES} entries and
+	 * admits the ordinary untagged value form. A larger page is admitted only
+	 * when {@code codecId} names an {@link OpaqueCodec} whose own entry-page
+	 * allowance covers it and every value is tagged with that same codec;
+	 * untagged, mixed, mismatched and over-allowance pages are rejected, so the
+	 * generic page bound is never widened globally. A missing key means
+	 * unchanged or unknown, never zero, and an explicit value stays explicit.
+	 * A value tagged with an {@link OpaqueCodec} allowance is accepted only
+	 * when its token id equals {@code codecId}; the ordinary untagged form
+	 * keeps its value-bound behavior.
 	 */
 	public record OpaqueKeyedFragment(String codecId, Map<String, OpaqueValue> entries) implements CapturePayload {
 
 		/**
-		 * Engineering bound for one opaque fragment page. It is independent of
-		 * the record-value entry bound and of any domain page quota; it is not
-		 * a product default.
+		 * Engineering bound for one ordinary opaque fragment page. It is
+		 * independent of the record-value entry bound and of any domain page
+		 * quota; a registered inventory codec has its own larger closed
+		 * allowance. It is not a product default.
 		 */
 		static final int MAX_ENTRIES = 256;
 
 		public OpaqueKeyedFragment {
 			codecId = SourceKey.requireToken(codecId, "codecId");
 			Objects.requireNonNull(entries, "entries");
-			if (entries.size() > MAX_ENTRIES)
+			int pageEntries = MAX_ENTRIES;
+			for (OpaqueCodec codec : OpaqueCodec.values())
+				if (codec.id().equals(codecId)) pageEntries = codec.maxEntries();
+			if (entries.size() > pageEntries)
 				throw new IllegalArgumentException("opaque fragment exceeds the page bound");
+			// A registered codec may extend only a fully tagged page; the
+			// ordinary untagged page keeps the generic bound.
+			boolean extended = entries.size() > MAX_ENTRIES;
 			Map<String, OpaqueValue> copy = new LinkedHashMap<>();
 			for (Map.Entry<String, OpaqueValue> entry : entries.entrySet()) {
 				String key = SourceKey.requireToken(entry.getKey(), "opaque key");
 				OpaqueValue value = Objects.requireNonNull(entry.getValue(), "opaque value");
+				if (extended && value.codec() == null)
+					throw new IllegalArgumentException("an extended opaque page requires values tagged with its codec");
 				if (value.codec() != null && !value.codec().id().equals(codecId)) {
 					throw new IllegalArgumentException("opaque value codec does not match the fragment codec");
 				}

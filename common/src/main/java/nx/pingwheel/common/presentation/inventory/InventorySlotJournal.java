@@ -19,7 +19,7 @@ import org.jetbrains.annotations.Nullable;
 public final class InventorySlotJournal implements AutoCloseable {
 	public static final int CHUNK_SLOTS = 32;
 	private static final int MAX_DEFINITIONS = InventoryItemCodec.DEFAULT_MAX_ENTRIES;
-	private static final int INDEX_CAPACITY = 512;
+	private static final int INDEX_CAPACITY = 2048;
 	private static final long METADATA_BYTES = 160, DEFINITION_BYTES = 72 + 80; // definition plus one certified Item, no copied strings
 	private static final long CHUNK_BYTES = 72 + arrayBytes(CHUNK_SLOTS, 8) + arrayBytes(CHUNK_SLOTS, 2);
 	private final int firstSlot;
@@ -90,6 +90,12 @@ public final class InventorySlotJournal implements AutoCloseable {
 		for (int capacity = chunks.length; capacity < chunkCount + addedChunks; capacity *= 2) bytes += arrayBytes(capacity * 2, 8);
 		for (int capacity = definitions.length; capacity < nextDefinitions; capacity *= 2) bytes += arrayBytes(capacity * 2, 8);
 		return bytes;
+	}
+	/** Hashing, worst-case open-address probing and full replacement-directory initialization/copy. */
+	public long batchWorkUpperBound(int slots) {
+		if (slots < 0 || slots > InventorySourceAccess.MAX_STEP) throw new IllegalArgumentException("journal work batch");
+		long probes = Math.min(MAX_DEFINITIONS, definitionCount + slots) + 1L;
+		return 4096L + slots * (4096L + 2048L * probes) + 8L * batchAllocationUpperBound(slots);
 	}
 	private long appendGrowth(boolean allocation) {
 		requireOpen();

@@ -93,7 +93,7 @@ class SettingsCategoryCatalogTest {
 
 	@Test
 	void everySettingAppearsExactlyOnceInItsApprovedCategory() {
-		assertEquals(78, Setting.values().length, "the approved catalog has 78 entries");
+		assertEquals(79, Setting.values().length, "the approved catalog has 79 entries");
 		assertEquals(EnumSet.allOf(Category.class), EnumSet.copyOf(EXPECTED_SECTIONS.keySet()),
 			"the approved section map must cover every settings category");
 
@@ -114,9 +114,9 @@ class SettingsCategoryCatalogTest {
 		}
 
 		assertEquals(EnumSet.allOf(Setting.class), all);
-		assertEquals(76L, all.stream()
+		assertEquals(77L, all.stream()
 			.filter(setting -> setting != Setting.OPEN_CLIENT_CONFIG && setting != Setting.PRESENTATION_SERVER_POLICY)
-			.count(), "only the file action and presentation editor are outside the 76 value controls");
+			.count(), "only the file action and presentation editor are outside the 77 value controls");
 	}
 
 	@Test
@@ -442,7 +442,8 @@ class SettingsCategoryCatalogTest {
 				row(Setting.CHANNEL)),
 			section(SOUND_NOTICES_HEADING,
 				row(Setting.PING_VOLUME),
-				row(Setting.CONFIGURATION_NOTICE_SIZE))));
+				row(Setting.CONFIGURATION_NOTICE_SIZE),
+				row(Setting.COOLDOWN_FEEDBACK))));
 		expected.put(Category.GEOMETRY_CONFIG, List.of(
 			section(GEOMETRY_HEADING,
 				row(Setting.ENTITY_BLOCK_RENDER_MODE)),

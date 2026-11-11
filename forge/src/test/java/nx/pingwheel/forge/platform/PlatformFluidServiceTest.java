@@ -39,6 +39,8 @@ import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimitException;
+import nx.pingwheel.common.presentation.inventory.minecraft.ProviderLimitSite;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
@@ -295,8 +297,8 @@ class PlatformFluidServiceTest {
 		for (ResourceLocation id : List.of(ResourceLocation.fromNamespaceAndPath("n", "p".repeat(255)),
 			ResourceLocation.fromNamespaceAndPath("n".repeat(255), "p"),
 			ResourceLocation.fromNamespaceAndPath("n".repeat(256), "p"))) {
-			assertEquals("fluid registry identity length bound", assertThrows(InventorySourceUnavailableException.class,
-				() -> PlatformFluidServiceImpl.boundedRegistryId(id)).getMessage());
+			assertEquals(ProviderLimitSite.FORGE_FLUID_REGISTRY_ID, assertThrows(InventoryProviderLimitException.class,
+				() -> PlatformFluidServiceImpl.boundedRegistryId(id)).site());
 		}
 		var bean = java.lang.management.ManagementFactory.getThreadMXBean();
 		org.junit.jupiter.api.Assumptions.assumeTrue(bean instanceof com.sun.management.ThreadMXBean);
@@ -308,7 +310,7 @@ class PlatformFluidServiceTest {
 			String huge = "a".repeat(2_000_000);
 			var id = ResourceLocation.fromNamespaceAndPath(oversizedNamespace ? huge : "n", oversizedNamespace ? "p" : huge);
 			long before = allocations.getThreadAllocatedBytes(thread);
-			assertThrows(InventorySourceUnavailableException.class, () -> PlatformFluidServiceImpl.boundedRegistryId(id));
+			assertThrows(InventoryProviderLimitException.class, () -> PlatformFluidServiceImpl.boundedRegistryId(id));
 			assertTrue(allocations.getThreadAllocatedBytes(thread) - before < 65536,
 				"rejection allocated a combined ID or copied resident namespace/path");
 			before = allocations.getThreadAllocatedBytes(thread);
@@ -348,7 +350,7 @@ class PlatformFluidServiceTest {
 		var memory = new RetainedMemoryLedger(settings.pendingMemoryBytes());
 		var workCounter = new CostLedger.Counter("inventory/item_work", CostLedger.Unit.WORK);
 		var work = new CostLedger(Map.of(workCounter,
-			InventorySourceAccess.MAX_SLOTS * InventoryItemBudget.workUpperBound(Math.toIntExact(settings.effectiveDisplayBytes())),
+			InventorySourceAccess.CAPTURE_MAX_SLOTS * InventoryItemBudget.workUpperBound(Math.toIntExact(settings.effectiveDisplayBytes())),
 			InventorySourceAccess.PHYSICAL, (long) settings.effectivePhysicalSlotsPerTick()));
 		var fixture = new Fixture(Direction.NORTH);
 		IPlatformFluidService.Access access;
@@ -406,7 +408,7 @@ class PlatformFluidServiceTest {
 		try (var admission = fixture.admission(10_000_000); var operation = admission.enter(fixture.service.probeProfile());
 			var probe = fixture.service.probe(fixture.context, operation).orElseThrow()) {
 			int before = fixture.authorityChecks; var profile = probe.finishProfile();
-			assertEquals(1_327_808, profile.ownedCost().allocationBytes()); assertEquals(360_640, profile.retainedBytes());
+			assertEquals(5_284_544, profile.ownedCost().allocationBytes()); assertEquals(1_417_408, profile.retainedBytes());
 			var access = probe.finish(admission).orElseThrow();
 			assertEquals(profile.currentAuthorityCalls(), fixture.authorityChecks - before);
 			assertEquals(2L * tanks, fixture.calls.stream().filter("capacity"::equals).count());
@@ -671,10 +673,10 @@ class PlatformFluidServiceTest {
 			}
 			String description = access.layout().layoutData();
 			assertEquals("north;capacities=".length() + 11 * InventorySourceAccess.MAX_SLOTS, description.length());
-			assertTrue(description.length() < 65536); assertTrue(description.startsWith("north;capacities=2147483647,"));
+			assertTrue(description.length() <= 2048 + 11 * 16384); assertTrue(description.startsWith("north;capacities=2147483647,"));
 			assertTrue(description.endsWith("2147483647,"));
 			assertEquals(2L * InventorySourceAccess.MAX_SLOTS, fixture.calls.stream().filter("capacity"::equals).count());
-			assertEquals(1_327_808, finish.ownedCost().allocationBytes()); assertEquals(627_072, finish.ownedCost().workUnits());
+			assertEquals(5_284_544, finish.ownedCost().allocationBytes()); assertEquals(2_494_848, finish.ownedCost().workUnits());
 			try (var operation = admission.enter(access.witnessProfile(IPlatformFluidService.WitnessUse.CAPTURE))) { expected = access.captureWitness(operation); }
 			ownership = admission.retain(); assertEquals(finish.retainedBytes() + 592 + 512 + 256, ownership.bytes());
 		}

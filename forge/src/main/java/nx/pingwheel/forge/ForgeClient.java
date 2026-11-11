@@ -56,7 +56,7 @@ public class ForgeClient {
 		registerPacketHandler(SERVER_CONFIG_SNAPSHOT_CHANNEL_S2C, ServerConfigSnapshotS2CPacket::readSafe, CommonClient.INSTANCE::onServerConfigSnapshotPacket);
 		registerPacketHandler(SERVER_PRESENTATION_POLICY_CHANNEL_S2C, ServerPresentationPolicyS2CPacket::readSafe, CommonClient.INSTANCE::onServerPresentationPolicyPacket);
 		registerPacketHandler(PRESENTATION_CHANNEL_S2C, PresentationS2CPacket::readSafe, CommonClient.INSTANCE::onPresentationPacket);
-		registerPacketHandler(INVENTORY_CHANNEL_S2C, InventoryS2CPacket::readSafe, CommonClient.INSTANCE::onInventoryPacket);
+		registerInventoryReceiver(INVENTORY_CHANNEL_S2C);
 		registerMonitorReceiver(INVENTORY_MONITOR_STATUS_CHANNEL_S2C, InventoryMonitorStatusS2CPacket::readSafe, CommonClient.INSTANCE::onMonitorStatus);
 		registerMonitorReceiver(INVENTORY_MONITOR_SAMPLE_CHANNEL_S2C, InventoryMonitorSampleS2CPacket::readSafe, CommonClient.INSTANCE::onMonitorSample);
 		registerPacketHandler(PRESENTATION_PREVIEW_CHANNEL_S2C, PresentationPreviewS2CPacket::readSafe, CommonClient.INSTANCE::onPresentationPreview);
@@ -102,6 +102,22 @@ public class ForgeClient {
 					@Nullable ClientPacketListener current = client == null ? null : client.getConnection();
 					return current == null ? null : current.getConnection();
 				}, packet, () -> receiver.accept(token, packet));
+			}
+			context.setPacketHandled(true);
+		});
+	}
+
+	private static void registerInventoryReceiver(EventNetworkChannel channel) {
+		channel.addListener(event -> {
+			var context = event.getSource();
+			var payload = event.getPayload();
+			if (context.isClientSide() && payload != null) {
+				InventoryS2CPacket packet = InventoryS2CPacket.readSafe(payload);
+				Connection origin = context.getConnection();
+				context.enqueueWork(() -> {
+					@Nullable ClientPacketListener current = Minecraft.getInstance().getConnection();
+					if (current != null && current.getConnection() == origin && origin.isConnected()) CommonClient.INSTANCE.onInventoryPacket(packet);
+				});
 			}
 			context.setPacketHandled(true);
 		});

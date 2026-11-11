@@ -31,10 +31,15 @@ public final class InventoryFluidCodec {
 	public static final CaptureResult.OpaqueCodec CODEC = CaptureResult.OpaqueCodec.INVENTORY_FLUID_OBSERVATION_V1;
 	public static final int MAX_BYTES = CODEC.bound(), MAX_CANONICAL_BYTES = 65536;
 	public static final int MAX_DISPLAY_BYTES = InventoryLimits.MAX_DISPLAY_BYTES, MAX_LABEL_BYTES = 1024;
+	public static final int MAX_CATALOG_ENTRIES = 1024;
+	public static final long MAX_CATALOG_RETAINED_BYTES = 1024L * 1024;
+	private static final int CATALOG_TABLE_CAPACITY = 2048;
 	private InventoryFluidCodec() {}
 	@NotNullByDefault
 	public static final class CapacityException extends IllegalStateException {
-		private CapacityException() { super("fluid catalogue capacity reached"); }
+		private final InventoryFailureReason reason;
+		private CapacityException(InventoryFailureReason reason) { super("fluid catalogue capacity reached"); this.reason = reason; }
+		public InventoryFailureReason reason() { return reason; }
 		@Override public synchronized Throwable fillInStackTrace() { return this; }
 	}
 
@@ -65,21 +70,36 @@ public final class InventoryFluidCodec {
 	public static final class Catalog {
 		// Both tables stay within the caller's existing fixed catalogue admission envelope;
 		// no sequence of intermediate resize allocations is hidden by a capacity refusal.
-		private final Map<String, byte @Unmodifiable []> identities = new HashMap<>(512);
-		private final Set<InventoryScanner.Key> definitions = new HashSet<>(512);
+		private final Map<String, byte @Unmodifiable []> identities = new HashMap<>(CATALOG_TABLE_CAPACITY);
+		private final Set<InventoryScanner.Key> definitions = new HashSet<>(CATALOG_TABLE_CAPACITY);
 		private long retainedBytes;
 		public long retainedBytes() { return retainedBytes; }
+		/** Pure count metadata, not cached fluid contents or source authority. */
+		public int entriesUpperBound() { return Math.max(identities.size(), definitions.size()); }
+		public int entriesUpperBound(int attempts) {
+			if (attempts < 1) throw new IllegalArgumentException("fluid catalogue attempts");
+			return (int) Math.min(MAX_CATALOG_ENTRIES, entriesUpperBound() + (long) attempts - 1);
+		}
 		public long modeledRetainedBytes() {
-			long tables = (identities.isEmpty() ? 0 : 40L + 512L * 8) + (definitions.isEmpty() ? 0 : 40L + 512L * 8);
+			long tables = (identities.isEmpty() ? 0 : 40L + CATALOG_TABLE_CAPACITY * 8L)
+				+ (definitions.isEmpty() ? 0 : 40L + CATALOG_TABLE_CAPACITY * 8L);
 			return 512L + tables + retainedBytes + 4096L * definitions.size();
 		}
 		public static long retainedGrowthUpperBound() {
-			return 32768L + MAX_CANONICAL_BYTES + 4L * InventoryFluidDisplayCodec.MAX_BYTES + 2L * MAX_LABEL_BYTES;
+			return 2L * (40 + 8L * CATALOG_TABLE_CAPACITY) + 4096 + MAX_CANONICAL_BYTES
+				+ 4L * InventoryFluidDisplayCodec.MAX_BYTES + 2L * MAX_LABEL_BYTES;
+		}
+		/** Cold batch envelope; the two tables are prepaid once and remain below their load threshold. */
+		public static long retainedGrowthUpperBound(int attempts) {
+			if (attempts < 0) throw new IllegalArgumentException("fluid catalogue attempts");
+			if (attempts == 0) return 0;
+			long tables = 2L * (40 + 8L * CATALOG_TABLE_CAPACITY);
+			return Math.addExact(tables, Math.multiplyExact((long) attempts, retainedGrowthUpperBound() - tables));
 		}
 		public InventoryFluidValue intern(String fluidId, long amount, Identity identity, InventoryFluidValue.Display display,
 			nx.pingwheel.common.presentation.inventory.minecraft.InventoryCatalogAdmission admission) {
 			admission.admitFluid(identity.canonical == null ? 0 : identity.canonical.length, fluidId.length(), display.label().length(),
-				display.displayJson() == null ? 0 : display.displayJson().length());
+				display.displayJson() == null ? 0 : display.displayJson().length(), entriesUpperBound());
 			return intern(fluidId, amount, identity, display);
 		}
 		public InventoryFluidValue intern(String fluidId, long amount, Identity identity, InventoryFluidValue.Display display) {
@@ -98,9 +118,9 @@ public final class InventoryFluidCodec {
 			// The journal indexes complete keys, not canonical encodings. Different fluid IDs
 			// and refused-identity aggregates each consume a definition, even with shared bytes.
 			// Admit both independent guards before retaining any part of a new definition.
-			if (newDefinition && definitions.size() == 256) throw new CapacityException();
+			if (newDefinition && definitions.size() == MAX_CATALOG_ENTRIES) throw new CapacityException(InventoryFailureReason.VARIANT_LIMIT);
 			long next = canonical == null || previous != null ? retainedBytes : Math.addExact(retainedBytes, 256L + canonical.length);
-			if (next > 262144) throw new CapacityException();
+			if (next > MAX_CATALOG_RETAINED_BYTES) throw new CapacityException(InventoryFailureReason.CATALOG_BYTES_LIMIT);
 			if (canonical != null && previous == null) { identities.put(digest, canonical); retainedBytes = next; }
 			if (newDefinition) definitions.add(key);
 			// Canonical equality does not license replacing this observation's

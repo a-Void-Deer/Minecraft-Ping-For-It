@@ -18,7 +18,7 @@ class InventorySlotJournalTest {
 			(proxy, method, arguments) -> { throw new AssertionError("unexpected callback: " + method); }));
 	}
 	private static InventoryItemCodec.Catalog catalog() {
-		return new InventoryItemCodec.Catalog(trap(HolderLookup.Provider.class), 256, 262144, 4096,
+		return new InventoryItemCodec.Catalog(trap(HolderLookup.Provider.class), 1024, 1048576, 4096,
 			trap(InventoryResidentAccess.class), trap(InventoryItemNativeAccess.class));
 	}
 	private static InventoryCatalogAdmission grant() { return new InventoryCatalogAdmission(Long.MAX_VALUE, Long.MAX_VALUE); }
@@ -76,23 +76,23 @@ class InventorySlotJournalTest {
 		var catalog = catalog();
 		try (var journal = new InventorySlotJournal()) {
 			InventoryItemCodec.Encoded first = intern(catalog, "test:value", 0);
-			for (int index = 0; index < 256; index++) {
+			for (int index = 0; index < 1024; index++) {
 				long before = journal.modeledRetainedBytes(), bound = journal.appendRetainedGrowthUpperBound();
 				journal.append(index, intern(catalog, "test:value", index), index);
 				assertTrue(journal.modeledRetainedBytes() - before <= bound);
 			}
 			long before = journal.modeledRetainedBytes();
 			var extra = intern(catalog(), "test:extra", 1000);
-			assertThrows(InventorySlotJournal.CapacityException.class, () -> journal.append(256, extra, 1));
-			assertEquals(256, journal.size()); assertEquals(before, journal.modeledRetainedBytes());
-			journal.append(256, first, Long.MAX_VALUE); journal.append(257, null, 0);
-			assertEquals(Long.MAX_VALUE, journal.amount(256)); assertNull(journal.read(257));
+			assertThrows(InventorySlotJournal.CapacityException.class, () -> journal.append(1024, extra, 1));
+			assertEquals(1024, journal.size()); assertEquals(before, journal.modeledRetainedBytes());
+			journal.append(1024, first, Long.MAX_VALUE); journal.append(1025, null, 0);
+			assertEquals(Long.MAX_VALUE, journal.amount(1024)); assertNull(journal.read(1025));
 		}
-		var journal = new InventorySlotJournal(4095);
-		journal.append(4095, null, 0); assertEquals(4096, journal.endSlot());
-		assertThrows(IllegalArgumentException.class, () -> journal.append(4096, null, 0));
+		var journal = new InventorySlotJournal(16383);
+		journal.append(16383, null, 0); assertEquals(16384, journal.endSlot());
+		assertThrows(IllegalArgumentException.class, () -> journal.append(16384, null, 0));
 		journal.close(); journal.close(); assertEquals(0, journal.modeledRetainedBytes());
-		assertThrows(IllegalStateException.class, () -> journal.read(4095));
+		assertThrows(IllegalStateException.class, () -> journal.read(16383));
 	}
 
 	@Test void collidingJavaHashesDoNotCollapseDifferentItemDefinitions() {

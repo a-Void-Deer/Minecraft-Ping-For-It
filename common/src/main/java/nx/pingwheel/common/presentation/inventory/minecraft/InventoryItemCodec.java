@@ -43,6 +43,7 @@ import nx.pingwheel.common.config.InventoryLimits;
 import nx.pingwheel.common.config.InventorySizeScale;
 import nx.pingwheel.common.presentation.inventory.InventoryScanner;
 import nx.pingwheel.common.presentation.inventory.InventoryReprojectionSummary;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -115,18 +116,16 @@ public final class InventoryItemCodec {
 	}
 
 	/**
-	 * Default catalogue variant cap. Finite and aligned with the 256-entry
-	 * preview entry quota so a source catalogue never admits more variants than
-	 * a preview can consume.
+	 * Finite catalogue definition cap, independent of physical slot capacity and
+	 * each consumer's configured variant quota.
 	 */
-	public static final int DEFAULT_MAX_ENTRIES = 256;
+	public static final int DEFAULT_MAX_ENTRIES = 1024;
 
 	/**
-	 * Default retained catalogue byte cap. Finite and aligned with the 256 KiB
-	 * preview byte bound; it covers canonical identity bytes and display bytes
-	 * together.
+	 * Finite retained catalogue payload cap, covering canonical identity bytes
+	 * and display metadata together, independent of period throughput.
 	 */
-	public static final long DEFAULT_MAX_RETAINED_BYTES = 262144L;
+	public static final long DEFAULT_MAX_RETAINED_BYTES = 1024L * 1024;
 
 	private static final String DIGEST_ALGORITHM = "SHA-256";
 	// Acquired and warmed ONCE at class initialization, never per resident input.
@@ -224,10 +223,18 @@ public final class InventoryItemCodec {
 	 * observed. Callers must report the source unavailable instead of guessing
 	 * an identity or merging variants.
 	 */
+	@NotNullByDefault
 	public static class IdentityUnavailableException extends IllegalStateException {
+		private final InventoryFailureReason reason;
+		private final boolean limitHit;
 		public IdentityUnavailableException(String message) {
-			super(message);
+			this(InventoryFailureReason.PROVIDER_FAILURE, message, false);
 		}
+		public IdentityUnavailableException(InventoryFailureReason reason, String message, boolean limitHit) {
+			super(message); this.reason = Objects.requireNonNull(reason); this.limitHit = limitHit;
+		}
+		public InventoryFailureReason reason() { return reason; }
+		public boolean limitHit() { return limitHit; }
 		@Override public synchronized Throwable fillInStackTrace() { return this; }
 	}
 
@@ -237,7 +244,8 @@ public final class InventoryItemCodec {
 	public static final class CapacityExceededException extends IdentityUnavailableException {
 		private final CatalogLimit limit;
 		private CapacityExceededException(CatalogLimit limit) {
-			super(limit == CatalogLimit.ENTRIES ? "item catalogue entry bound reached" : "item catalogue byte bound reached");
+			super(limit == CatalogLimit.ENTRIES ? InventoryFailureReason.VARIANT_LIMIT : InventoryFailureReason.CATALOG_BYTES_LIMIT,
+				limit == CatalogLimit.ENTRIES ? "item catalogue entry bound reached" : "item catalogue byte bound reached", true);
 			this.limit = limit;
 		}
 		public CatalogLimit limit() { return limit; }
@@ -364,6 +372,20 @@ public final class InventoryItemCodec {
 			return 3 * TABLE_BYTES + 3 * NODE_BYTES + 40L + MAX_CANONICAL_BYTES + textCost(64)
 				+ definitionCost(256, 262, requireDisplayBytes(displayBytes)) + textCost(64);
 		}
+		/** Cold batch bound: lazy tables are allocated once, not once per attempted slot. */
+		public static long firstReadGrowthUpperBound(int displayBytes, int attempts) {
+			if (attempts < 0) throw new IllegalArgumentException("catalogue attempts");
+			if (attempts == 0) return 0;
+			long first = firstReadGrowthUpperBound(displayBytes);
+			return Math.addExact(3 * TABLE_BYTES, Math.multiplyExact((long) attempts, first - 3 * TABLE_BYTES));
+		}
+		/** O(1) count metadata only; no hashing, callbacks, parsing or catalogue construction. */
+		public int entriesUpperBound() { return Math.max(displays.size(), Math.max(canonicalByDigest.size(), conflicts.size())); }
+		/** Occupancy before any one of the admitted attempts, including all preceding possible insertions. */
+		public int entriesUpperBound(int attempts) {
+			if (attempts < 1) throw new IllegalArgumentException("catalogue attempts");
+			return (int) Math.min(DEFAULT_MAX_ENTRIES, entriesUpperBound() + (long) attempts - 1);
+		}
 		/** Allocates one fixed four-long metadata record; use the scalar total on hot settlement paths. */
 		public RetainedCost retainedCost() { return new RetainedCost(canonicalCost, projectionCost, indexCost, ambiguityCost); }
 
@@ -374,6 +396,23 @@ public final class InventoryItemCodec {
 		 * modeledRetainedBytes delta, even on a sticky collision failure.
 		 */
 		public long retainedGrowthUpperBound() { return growthBound(MAX_CANONICAL_BYTES, 256, 262, displayBytes); }
+		/** Full bounded possible batch growth, including one-time lazy tables and collision evidence. */
+		public long retainedGrowthUpperBound(int attempts) {
+			if (attempts < 0) throw new IllegalArgumentException("catalogue attempts");
+			if (attempts == 0) return 0;
+			// Larger caller-trusted legacy guards can resize. Every attempt pays
+			// three possible final-capacity tables, including replacements.
+			if (maxEntries > DEFAULT_MAX_ENTRIES) {
+				long capacity = InventoryCatalogAdmission.TABLE_CAPACITY;
+				long finalEntries = Math.max(Math.max(canonicalByDigest.size(), displays.size()), conflicts.size()) + (long) attempts;
+				while (finalEntries > capacity * 3 / 4 && capacity < (1L << 30)) capacity *= 2;
+				long perAttempt = Math.addExact(3 * (40 + 8L * capacity), firstReadGrowthUpperBound(displayBytes) - 3 * TABLE_BYTES);
+				return Math.multiplyExact((long) attempts, perAttempt);
+			}
+			long tables = (canonicalByDigest.isEmpty() ? TABLE_BYTES : 0) + (displays.isEmpty() ? TABLE_BYTES : 0)
+				+ (conflicts.isEmpty() ? TABLE_BYTES : 0);
+			return Math.addExact(tables, Math.multiplyExact((long) attempts, firstReadGrowthUpperBound(displayBytes) - 3 * TABLE_BYTES));
+		}
 		/** Pure actual-input bound: lengths only, no hash, UTF scan, parse or provider access. */
 		public long retainedGrowthUpperBound(InventoryDetachedItem input) {
 			Objects.requireNonNull(input, "input");
@@ -528,7 +567,7 @@ public final class InventoryItemCodec {
 				admission.admit(0, InventoryCatalogAdmission.scanWorkUpperBound(units, detached.itemId().length(), input.label().length()));
 				int bytes = units == 0 ? 0 : InventoryReprojectionSummary.utf8Bytes(json);
 				if (bytes > InventoryLimits.MAX_DISPLAY_BYTES) bytes = 0; // fixed OLD byte refusal, no parser scratch
-				int count = Math.max(displays.size(), Math.max(canonicalByDigest.size(), conflicts.size()));
+				int count = entriesUpperBound();
 				int length = canonical == null ? 0 : canonical.length;
 				admission.admit(InventoryCatalogAdmission.workspaceUpperBound(length, bytes, count),
 					InventoryCatalogAdmission.operationWorkUpperBound(length, bytes, count));
@@ -700,11 +739,14 @@ public final class InventoryItemCodec {
 		Objects.requireNonNull(registries, "registries");
 		requireDisplayBytes(displayBytes);
 		if (retained.displayJson() == null) return retained;
-		String json = InventoryDisplayWriter.reproject(retained.displayJson(), retained.itemId(), displayBytes);
+		InventoryDisplayWriter.Reprojection projection = InventoryDisplayWriter.reprojectResult(retained.displayJson(), retained.itemId(), displayBytes);
+		@Nullable String json = projection.json();
 		// Retained projections are monotone even for malformed/legacy envelopes
 		// whose mandatory suppression would otherwise grow a shorter old value.
 		if (json != null && json.length() > retained.displayJson().length()) json = null;
 		if (Objects.equals(json, retained.displayJson())) return retained;
+		if (projection.reason() != null) InventoryItemDiagnostics.displayDegraded(projection.reason(), projection.limitHit(), projection.stage());
+		else if (json == null) InventoryItemDiagnostics.displayDegraded(InventoryFailureReason.DISPLAY_LIMIT, true, "retained-monotone-refusal");
 		return new Display(retained.itemId(), retained.label(), json, retained.aggregateRequired());
 	}
 

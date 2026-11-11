@@ -49,7 +49,7 @@ public final class InventoryObservationSnapshot implements InventorySourceAccess
 	public static long memoryUpperBound(InventorySnapshotLayout layout, int displayBytes, boolean provider, boolean vault, long locks) {
 		long validation = InventoryValidationBudget.capture(layout, provider, vault, locks).workspaceBytes();
 		return add(envelope(layout), add(validation, add(InventoryItemBudget.workspaceUpperBound(displayBytes),
-			add(retentionLimit(layout, displayBytes), catalogReserve()))));
+			add(retentionLimit(layout, displayBytes), catalogReserve(layout, displayBytes)))));
 	}
 	/**
 	 * Fixed capture-owned validation passes beside the per-slot authority pass:
@@ -81,13 +81,15 @@ public final class InventoryObservationSnapshot implements InventorySourceAccess
 	private static long retentionLimit(InventorySnapshotLayout layout, int displayBytes) {
 		return Math.min(multiply(visibleSlots(layout), InventoryItemBudget.retainedUpperBound(displayBytes)), InventoryItemCodec.DEFAULT_MAX_RETAINED_BYTES);
 	}
-	private static long catalogReserve() {
-		// Catalog's byte cap bounds canonical/display UTF-8 payload. UTF-16 display
-		// ownership may cost twice UTF-8, plus a canonical clone: three payload caps.
-		// Per entry: key, digest String+array, map nodes/table slots, conflict marker,
-		// display record: 16 modeled objects (40 bytes), 32 references (8 bytes).
-		return add(multiply(3, InventoryItemCodec.DEFAULT_MAX_RETAINED_BYTES),
-			add(multiply(InventoryItemCodec.DEFAULT_MAX_ENTRIES, 16L * 40 + 32L * 8), 16L * 40));
+	private static long catalogReserve(InventorySnapshotLayout layout, int displayBytes) {
+		// At most one new definition per visible slot. Lazy fixed-capacity tables
+		// are still paid in full, while the byte cap bounds canonical/display
+		// payload and its UTF-16 representation independently of address capacity.
+		long entries = Math.min(visibleSlots(layout), InventoryItemCodec.DEFAULT_MAX_ENTRIES);
+		long complete = add(multiply(3, InventoryItemCodec.DEFAULT_MAX_RETAINED_BYTES),
+			add(multiply(entries, 4096L), 3L * (40 + 8L * InventoryCatalogAdmission.TABLE_CAPACITY)));
+		return add(InventoryItemCodec.Catalog.initialModeledBytes(), Math.min(complete,
+			InventoryItemCodec.Catalog.firstReadGrowthUpperBound(displayBytes, visibleSlots(layout))));
 	}
 	private static long envelope(InventorySnapshotLayout layout) {
 		// Retained layout strings/records plus capture and final reference arrays,
@@ -121,11 +123,12 @@ public final class InventoryObservationSnapshot implements InventorySourceAccess
 		HolderLookup.Provider registries, int displayBytes, long admittedBytes,
 		ResidentReader read, BooleanSupplier valid, InventoryValidationBudget.Allowance validation) {
 		Objects.requireNonNull(read); Objects.requireNonNull(valid);
+		if (visibleSlots(layout) > InventorySourceAccess.CAPTURE_MAX_SLOTS) throw new LimitException("one-shot capture slot bound");
 		boolean containsTarget = false;
 		for (int index = 0; index < layout.members().size(); index++) if (layout.members().get(index).position().equals(target)) containsTarget = true;
 		if (!containsTarget) throw new IllegalArgumentException("target outside capture layout");
 		long upper = add(envelope(layout), add(validationStructureBytes(layout), add(InventoryItemBudget.workspaceUpperBound(displayBytes),
-			add(retentionLimit(layout, displayBytes), catalogReserve()))));
+			add(retentionLimit(layout, displayBytes), catalogReserve(layout, displayBytes)))));
 		if (upper > admittedBytes) throw new LimitException("observation reservation is too small");
 		int count = visibleSlots(layout);
 		long visited = count + layout.members().size();
@@ -182,7 +185,7 @@ public final class InventoryObservationSnapshot implements InventorySourceAccess
 		if (!valid.getAsBoolean()) throw new IllegalStateException("capture final authority or topology revoked");
 		structure.charge(3L * 40 + 16L * members.size());
 		return new InventoryObservationSnapshot(layout, target, List.copyOf(members), registries,
-			displayBytes, count, add(envelope(layout), add(retained, catalogReserve())), summary.build());
+			displayBytes, count, add(envelope(layout), add(retained, catalogReserve(layout, displayBytes))), summary.build());
 	}
 	private InventoryObservationSnapshot(InventorySnapshotLayout layout, BlockPos target, List<Member> members,
 		HolderLookup.Provider registries, int displayBytes, int slots, long accounted, InventoryReprojectionSummary summary) {

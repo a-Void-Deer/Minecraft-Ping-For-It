@@ -272,9 +272,18 @@ class SpatialSelectorSessionTest {
 		assertEquals(trail, session.snapshot().radial().trail());
 		session.moveGui(1, 0, 300);
 		assertEquals(listMenu, current(session).menuId(), "the projection's former displacement is never inherited as progress");
+		double forward = session.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
+		double axis = session.snapshot().inventory().axisX();
+		double rowAnchorY = GEOMETRY.layout(session.snapshot().inventoryView())
+			.rowCenterY(session.snapshot().inventory().selectedIndex());
 		session.moveGui(98, 0, 310); // 8px to the panel edge, then the full 90px exterior stroke
 		assertTrue(current(session).menuId().contains(":item:"), "a full fresh raw stroke still enters an item");
-		assertPointer(session, 535, -24);
+		var entered = current(session);
+		assertEquals(axis + forward * (GEOMETRY.width() / 2.0 + GEOMETRY.childClearance()),
+			entered.origin().x(), 1e-9);
+		assertEquals(rowAnchorY + GEOMETRY.childClearance(), entered.origin().y(), 1e-9);
+		var confined = session.snapshot().viewport().confine(entered.origin());
+		assertPointer(session, confined.x(), confined.y());
 		assertEquals(1, session.snapshot().radial().trail().size(), "external row rebase seeds exactly one point");
 	}
 
@@ -759,12 +768,22 @@ class SpatialSelectorSessionTest {
 		assertEquals("b", list.selectedKey());
 		double expectedY = GEOMETRY.layout(session.snapshot().inventoryView()).rowCenterY(list.selectedIndex());
 		double forward = list.direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
+		double clearance = GEOMETRY.childClearance();
+		double panelEdgeX = list.axisX() + forward * GEOMETRY.width() / 2.0;
 		session.moveGui(forward * 200, 35, 300);
 		var submenu = current(session);
-		assertEquals(expectedY, submenu.origin().y());
+		assertEquals(clearance, forward * (submenu.origin().x() - panelEdgeX), 1e-9,
+			"the child centre keeps its clearance from the panel's forward edge");
+		assertEquals(clearance, submenu.origin().y() - expectedY, 1e-9,
+			"the same clearance offsets the child centre below the selected row");
+		assertEquals(list.axisX(), submenu.parentOrigin().x(), 1e-9);
 		assertEquals(expectedY, submenu.parentOrigin().y(), "Back faces the row, not panel centre");
 		assertEquals(1, session.snapshot().radial().trail().size(), "entry does not paint a warp stroke");
 		var back = submenu.choices().stream().filter(SpatialController.ChoiceView::back).findFirst().orElseThrow();
+		double expectedBack = (Math.toDegrees(Math.atan2(submenu.parentOrigin().x() - submenu.origin().x(),
+			submenu.origin().y() - submenu.parentOrigin().y())) + 360.0) % 360.0;
+		assertEquals(expectedBack, (back.startDegrees() + back.spanDegrees() / 2.0 + 360.0) % 360.0, 1e-9,
+			"Back stays centred on the bearing from the child origin to its row anchor");
 		focus(session, back.id(), 310); session.tick(430);
 		assertEquals("b", session.snapshot().inventory().selectedKey());
 		assertTrue(current(session).menuId().endsWith(":inventory"));
@@ -772,7 +791,12 @@ class SpatialSelectorSessionTest {
 		session.tick(1000);
 		assertTrue(current(session).menuId().endsWith(":inventory"), "stationary return cannot reenter");
 		session.moveGui(forward * 200, 0, 1010);
-		focus(session, current(session).menuId() + ":request", 1020);
+		var item = current(session);
+		assertTrue(item.menuId().contains(":item:"), "the list re-enters the item submenu before the input focus");
+		session.constrainPointer(new SpatialController.Viewport(1200, 201, -item.origin().x(), -item.origin().y()), 1015);
+		focus(session, item.menuId() + ":request", 1020);
+		assertEquals(item.menuId() + ":request", session.snapshot().radial().focusId(),
+			"the centered item projection keeps the lower request sector reachable");
 		var intent = assertInstanceOf(SelectorIntent.SelectInventory.class, session.releaseIntent(1021));
 		assertEquals("opaque:b", intent.reference());
 		assertEquals("attention", intent.mainType().id());
@@ -940,7 +964,7 @@ class SpatialSelectorSessionTest {
 		var session = openedList(false, new Content());
 		double forward = session.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
 		session.moveGui(forward * 200, 0, 290);
-		double anchor = current(session).origin().y();
+		double anchor = current(session).parentOrigin().y();
 		session.updateContent(inventory(target, 2, false, List.of(row("new", 1000L))), 300);
 		assertEquals(anchor, GEOMETRY.layout(session.snapshot().inventoryView()).rowCenterY(session.snapshot().inventory().selectedIndex()), 1e-9);
 		String menu = current(session).menuId();
@@ -1079,9 +1103,14 @@ class SpatialSelectorSessionTest {
 		assertEquals(InventoryListModel.Side.LEFT, session.snapshot().inventory().direction().forward());
 		double axis = session.snapshot().inventory().axisX();
 		session.moveGui(-200, 0, 290);
-		assertTrue(current(session).origin().x() < axis, "item submenu opens on frozen forward side");
-		var back = current(session).choices().stream().filter(SpatialController.ChoiceView::back).findFirst().orElseThrow();
-		focus(session, back.id(), 300); session.tick(420);
+		var item = current(session);
+		assertTrue(item.origin().x() < axis, "item submenu opens on frozen forward side");
+		var back = item.choices().stream().filter(SpatialController.ChoiceView::back).findFirst().orElseThrow();
+		session.constrainPointer(new SpatialController.Viewport(1200, 201, -item.origin().x(), -item.origin().y()), 295);
+		focus(session, back.id(), 300);
+		assertEquals(back.id(), session.snapshot().radial().focusId(),
+			"the centered item projection keeps the Back sector reachable");
+		session.tick(420);
 		assertTrue(current(session).menuId().endsWith(":inventory"));
 		session.moveGui(200, 0, 430);
 		assertFalse(current(session).menuId().endsWith(":inventory"), "right stroke returns to content");
@@ -1644,12 +1673,20 @@ class SpatialSelectorSessionTest {
 		var session = openedList(false, new Content());
 		session.updateItemClearance(120, 290); // before entry: caches only
 		double forward = session.snapshot().inventory().direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
+		double rowAnchorY = GEOMETRY.layout(session.snapshot().inventoryView())
+			.rowCenterY(session.snapshot().inventory().selectedIndex());
 		session.moveGui(forward * 200, 0, 291);
 		var item = current(session);
 		assertTrue(item.menuId().contains(":item:"));
 		double axis = session.snapshot().inventory().axisX();
 		assertEquals(axis + forward * (GEOMETRY.width() / 2 + 120), item.origin().x(), 1e-9,
 			"entry uses the prepared clearance metric");
+		assertEquals(rowAnchorY + 120, item.origin().y(), 1e-9,
+			"entry adds the prepared clearance below the row anchor");
+		assertEquals(new SpatialController.Point(axis, rowAnchorY), item.parentOrigin(),
+			"the selected row remains the return origin");
+		assertEquals(List.of(item.origin()), session.snapshot().radial().trail(),
+			"entry reseeds the trail at the item origin without a joining stroke");
 		var pointer = session.snapshot().radial().pointer();
 		var trail = session.snapshot().radial().trail();
 
@@ -1657,7 +1694,10 @@ class SpatialSelectorSessionTest {
 		var moved = current(session);
 		assertTrue(moved.menuId().contains(":item:"));
 		assertEquals(axis + forward * (GEOMETRY.width() / 2 + 160), moved.origin().x(), 1e-9);
-		assertEquals(item.origin().y(), moved.origin().y(), 1e-9, "the frozen row anchor is kept");
+		assertEquals(rowAnchorY + 160, moved.origin().y(), 1e-9,
+			"the updated clearance moves the origin down by the same amount");
+		assertEquals(new SpatialController.Point(axis, rowAnchorY), moved.parentOrigin(),
+			"the frozen row anchor is kept");
 		assertEquals(pointer, session.snapshot().radial().pointer(), "a pure metric update moves no pointer");
 		assertEquals(trail, session.snapshot().radial().trail(), "a pure metric update adds no trail");
 		assertEquals(0.0, session.snapshot().radial().hoverProgress(), "a pure metric update pays no hover travel");

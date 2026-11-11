@@ -86,7 +86,7 @@ The root presents the fixed eight-sector layout:
 | Bearing | Span | Root entry |
 | ---: | ---: | --- |
 | 0 | 55 | Danger — enabled only when the resolved Target Type allows `danger`; otherwise disabled |
-| 45 | 35 | Content |
+| 45 | 35 | Details |
 | 90 | 55 | Reserved placeholder, disabled |
 | 135 | 35 | Reserved placeholder, disabled |
 | 180 | 55 | Unping |
@@ -296,7 +296,7 @@ them, including disabled and reserved ones, are hidden. The retained
 breadcrumb entry is no longer a follower: its frame is placed at that
 ancestor's own origin, and its own sector underlay is hidden along with its
 siblings'. Each ancestor level applies this independently, and every retained
-frame targets its own level's origin. The Content menu keeps its
+frame targets its own level's origin. The Details menu keeps its
 inventory-display entry as the breadcrumb when the inventory list opens, and
 the list itself stays visible while an item's radial submenu is open. The
 hidden frames and sectors fade out and back in with the existing
@@ -361,7 +361,7 @@ centered on the bearing from the child origin back to its parent origin, and an
 automatically appended Back takes that same parent-centered position and
 carries the localized Back label rather than an unlabeled frame; siblings keep
 their declared order and tile with equal spans, subject only to the top-level
-[Content inventory placement](#content).
+[Details inventory placement](#details).
 
 ### Intent
 
@@ -408,9 +408,9 @@ preview moves, scales and fades with its node and follows the target opacity
 layer, and an exit tail keeps the name it was painted with. The separate Back
 entry is navigation and is never a candidate.
 
-### Content
+### Details
 
-The content branch presents the captured target's authorized observations
+The Details branch presents the captured target's authorized observations
 client-first: the client shows its own authorized local observation and falls
 back to the server's bounded preview only for an allowed field with no local
 observation. Detailed property selection, per-target-type policy and the
@@ -419,7 +419,7 @@ session value store are owned by
 inventory list's data, status, count and ordering rules are owned by
 [inventory preview and tracking](../presentation/inventory.md).
 
-Within the equal-sector, parent-centered Back geometry, the top-level Content
+Within the equal-sector, parent-centered Back geometry, the top-level Details
 menu places its inventory choice as close to due right as the non-Back slots
 permit. When a non-Back slot contains the 90-degree bearing, that is the
 inventory slot. It does not force that slot's center to 90 degrees or rotate
@@ -429,11 +429,11 @@ due-right stroke focuses inventory rather than its neighbor. Other properties
 and navigation groups keep their relative order; without an inventory choice
 there is no reordering, a disabled inventory choice retains its slot, and
 nested groups are unaffected.
-The root's upper-right Content entry followed by a rightward gesture can
+The root's upper-right Details entry followed by a rightward gesture can
 therefore reach inventory when the ordinary branch-entry gates admit it; this
 placement bypasses no stroke, dwell or turn requirement.
 
-Whether the content hierarchy offers its additional property and item Ping
+Whether the Details hierarchy offers its additional property and item Ping
 Type menus is frozen per hold from the client's content-intent preference
 ([client configuration](../../config/client.md#spatial-selector-interaction)).
 While it is enabled, every otherwise selectable property carries its allowed
@@ -455,7 +455,7 @@ inventing permission. The preference freezes with the hold's snapshot, while
 the ordinary live preview, reference and release authorization fences remain
 live and are never frozen or bypassed.
 
-The content menu presents property entries in a navigation hierarchy. The
+The Details menu presents property entries in a navigation hierarchy. The
 `minecraft:block.state` record summary is an actionless navigation group:
 its nested choices are that record's state property entries, such as
 `snowy:false`, while the summary itself carries no default release action
@@ -476,7 +476,7 @@ returns one level.
 
 ### Inventory list
 
-The content branch's inventory preview opens a rectangular list surface. Its
+The Details branch's inventory preview opens a rectangular list surface. Its
 single panel groups item and fluid rows under distinct localized resource
 headings from one shared preview request. Group headings are navigation-free
 labels, not selectable resource entries. Each row retains its resource lane in
@@ -484,7 +484,12 @@ selection, submenu and dispatch identity; equal opaque keys in different groups
 cannot select each other. Each group's authorization and status come from its
 own inventory lane, so an unavailable or updating group does not complete or
 erase the other. Resource lifecycle, ordering and quantities remain owned by
-[inventory](../presentation/inventory.md#resource-lanes-and-scope).
+[inventory](../presentation/inventory.md#resource-lanes-and-scope). When
+terminal failure leaves no resource lane available or pending, the Details
+inventory entry is disabled, and an active inventory path exits under the
+existing inventory-path exit rules for a revoked or unavailable path. Terminal
+classification and retry behavior are owned by
+[inventory preview and tracking](../presentation/inventory.md#preview-attempts-retry-and-no-progress-watchdog).
 The existing item-menu gestures below apply to a fluid row's resource menu as
 well; the lane's annotation policy still decides its allowed choices.
 
@@ -502,19 +507,19 @@ resulting logical panel metrics, so the configured caps also govern row
 capacity, panel-edge side intent and item-menu placement; they do not change
 the held deadzone or stroke distances.
 
-Navigation is parent-relative: the selected row's Y is the child origin for
-that row's item menu, so an item submenu is anchored to its row rather than the
-list center, and its pointer rebase starts a fresh trail without a synthetic
-stroke.
-The item menu's center is measured outward from the inventory panel's forward
-edge by a clearance that keeps the child menu's outer sector and the child
-menu's actual localized Back title frame disjoint from the panel: the
-edge-to-center minimum is at least the child menu's outer sector radius and
-also covers the measured extent of that Back frame toward the panel, so
-neither the sector underlay nor the full Back frame, not merely its label
-text, can intersect the panel. The measurement follows the current GUI
-dimensions; a GUI resize updates the placement through the non-input relayout
-described in
+Navigation is parent-relative: the selected row remains the parent and return
+anchor for its item menu, and pointer rebase starts a fresh trail without a
+synthetic stroke. The child menu centre is offset forward from the inventory
+panel edge and downward from the selected row by the same measured clearance,
+placing it diagonally below and ahead of its row while Back remains directed
+toward that row.
+The horizontal clearance keeps the child menu's outer sector and actual
+localized Back title frame disjoint from the panel: the edge-to-centre minimum
+is at least the child menu's outer sector radius and also covers the measured
+extent of that Back frame toward the panel, so neither the sector underlay nor
+the full Back frame, not merely its label text, can intersect the panel. The
+measurement follows the current GUI dimensions; a GUI resize updates the
+placement through the non-input relayout described in
 [submenu centering and view translation](#submenu-centering-and-view-translation),
 so the disjointness holds across the resize's first and intermediate frames,
 not only at settled geometry.
@@ -527,7 +532,7 @@ changes. An outward-facing semicircular underlay sits behind it and is enhanced
 while Back is focused; the rectangular frame and its progress remain distinct
 from the underlay. A Forward stroke enters the selected row's
 item menu while content intent is enabled, and has no effect while it is
-disabled ([Content](#content)). Back uses the stroke when hover is disabled and
+disabled ([Details](#details)). Back uses the stroke when hover is disabled and
 the shared Back-hover timer when enabled; either returns one level.
 Once the [inventory selection stay-open](#inventory-selection-stay-open)
 handling leaves it to the ordinary result, a release with a selected row commits
@@ -564,10 +569,10 @@ selection or collapses the panel. While content intent is disabled there is no
 item submenu and every ordinary row paints.
 
 A user Back from the list, by Back stroke or Back-hover, returns to the parent
-Content menu through the general user-return alignment
+Details menu through the general user-return alignment
 ([submenu centering and view translation](#submenu-centering-and-view-translation)):
 the logical pointer stays fixed while the remaining radial pattern is rigidly
-translated so the returned Content origin lands on the pointer. Leaving the
+translated so the returned Details origin lands on the pointer. Leaving the
 inventory navigation path closes the list and clears its rows and selection.
 The old programmatic placement, the logical pointer on the circumference of
 the returned menu's center deadzone in the frozen direction of the
@@ -586,7 +591,7 @@ the automatic alignment.
 The active list draws a moving virtual crosshair from the controller's sole
 logical pointer. It never exposes a native cursor or hands camera look back to
 vanilla; [mouse ownership](#mouse-ownership) remains in force. An item's radial
-submenu and a return to Content use the
+submenu and a return to Details use the
 [ordinary radial crosshair rules](#native-selector-presentation), so a
 qualifying painted follower can hide the crosshair there. List input is not
 radial gesture travel; trail ownership remains as described in that section.
@@ -647,8 +652,8 @@ only when Back-hover is disabled; with hover enabled, the shared
 [Back-hover state](#back-hover-return-state) exclusively controls that return
 and the stroke cannot preempt its timer or held-focus block. On the Forward
 side, reaching the stroke distance can enter the selected item's menu only
-under [Content's intent gate](#content). A disabled Forward path creates no new
-release-cancellation behavior: it does not turn that side into Back.
+under [the Details intent gate](#details). A disabled Forward path creates
+no new release-cancellation behavior: it does not turn that side into Back.
 
 Screen confinement does not make a list side unreachable. After an actual
 panel-edge crossing, authorized raw outward GUI deltas can continue bounded
@@ -686,7 +691,7 @@ available, and an item submenu's Back return to the list preserves the session.
 An inventory path exit cancels the whole stay-open selector and closes it,
 without sending a marker cancellation: this covers a list Back that leaves the
 inventory ancestry, a content revocation, and a permission revocation. The
-selector never remains open on Content after such an exit, and no stale row may
+selector never remains open on Details after such an exit, and no stale row may
 submit. Focus loss, a screen transition, a world or level discontinuity, and a
 connection discontinuity abort it under
 [capture](capture.md#interaction-lifecycle-aborts). A committing release keeps

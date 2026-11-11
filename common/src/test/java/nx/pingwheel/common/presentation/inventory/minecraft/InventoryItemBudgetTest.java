@@ -6,6 +6,38 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Admission/lifecycle seam only; does not establish a native codec certificate. */
 class InventoryItemBudgetTest {
+	@Test void expandedNodeAndContainerOccurrencesRemainIndependentlyBoundedAndPaid() {
+		var budget = InventoryItemBudget.root(4096); budget.begin(4096);
+		try {
+			for (int i = 0; i < 8192; i++) { budget.node(0); budget.container(); }
+			long before = budget.attemptedWork();
+			assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.NATIVE_NODE_LIMIT,
+				assertThrows(InventoryItemBudget.RootLimitException.class, () -> budget.node(0)).reason());
+			assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.NATIVE_NODE_LIMIT,
+				assertThrows(InventoryItemBudget.RootLimitException.class, budget::container).reason());
+			assertEquals(before + 2, budget.attemptedWork());
+			assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.NATIVE_DEPTH_LIMIT,
+				assertThrows(InventoryItemBudget.RootLimitException.class, () -> budget.node(49)).reason());
+		} finally { budget.end(); }
+	}
+	@Test void enlargedStructuralCeilingsDoNotRelaxIdentityOrDisplayPhaseBudgets() {
+		var budget = InventoryItemBudget.root(4096); budget.begin(4096);
+		try {
+			budget.allocate(2L * 1024 * 1024, 0, 0, 0);
+			assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.MEMORY_LIMIT,
+				assertThrows(InventoryItemBudget.RootLimitException.class, () -> budget.allocate(1, 0, 0, 0)).reason());
+			budget.work(10L * 1024 * 1024);
+			assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.NATIVE_WORK_LIMIT,
+				assertThrows(InventoryItemBudget.RootLimitException.class, () -> budget.work(1)).reason());
+			budget.beginDisplay(); budget.allocate(1024L * 1024, 0, 0, 0);
+			assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.MEMORY_LIMIT,
+				assertThrows(InventoryItemBudget.RootLimitException.class, () -> budget.allocate(1, 0, 0, 0)).reason());
+			budget.work(11L * 1024 * 1024);
+			assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.NATIVE_WORK_LIMIT,
+				assertThrows(InventoryItemBudget.RootLimitException.class, () -> budget.work(1)).reason());
+			assertEquals(3L * 1024 * 1024, budget.rootAllocatedBytes());
+		} finally { budget.end(); }
+	}
 	private static final int DISPLAY = InventoryItemCodec.MAX_DISPLAY_BYTES;
 
 	@Test void captureWorkAndRetentionAreCumulativeAcrossRootScratchRelease() {

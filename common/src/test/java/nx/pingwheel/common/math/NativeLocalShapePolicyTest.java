@@ -13,6 +13,7 @@ import java.util.function.Predicate;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.Blocks;
@@ -81,6 +82,37 @@ class NativeLocalShapePolicyTest {
 				}
 			}
 		}
+	}
+
+	@Test
+	void cyclicConnectedGlassPassesThroughVisuallyButKeepsOutlineSelectionAndBehindTargets() {
+		BlockPos cyclicPos = new BlockPos(2, 0, 0);
+		BlockPos dirtPos = new BlockPos(4, 0, 0);
+		BlockGetter view = localBlockGetter(Map.of(
+			cyclicPos, Blocks.STONE.defaultBlockState(),
+			dirtPos, Blocks.DIRT.defaultBlockState()));
+		Vec3 start = new Vec3(0.0, 0.5, 0.5);
+		Vec3 end = new Vec3(8.0, 0.5, 0.5);
+		PingClipContext.BlockIdResolver resolver = state ->
+			state.getBlock() == Blocks.STONE
+				? ResourceLocation.fromNamespaceAndPath("cyclic", "glass_connected")
+				: ResourceLocation.fromNamespaceAndPath("minecraft", "dirt");
+
+		RaycastPolicy visualPolicy = RaycastPolicy.from(false, false, false);
+		LocalGeometryHit visualHit = NativeLocalShapeRaycaster.traceWithContext(
+			start, end, visualPolicy, view, List.of(dirtPos, cyclicPos), ignored -> false,
+			PingClipContext.create(start, end, visualPolicy, CollisionContext.empty(), resolver))
+			.orElseThrow();
+		assertHit(visualHit, dirtPos, LocalGeometryKind.BLOCK, "minecraft:dirt", Optional.empty(),
+			0.5, new Vec3(4.0, 0.5, 0.5));
+
+		RaycastPolicy outlinePolicy = RaycastPolicy.from(true, false, false);
+		LocalGeometryHit outlineHit = NativeLocalShapeRaycaster.traceWithContext(
+			start, end, outlinePolicy, view, List.of(dirtPos, cyclicPos), ignored -> false,
+			PingClipContext.create(start, end, outlinePolicy, CollisionContext.empty(), resolver))
+			.orElseThrow();
+		assertHit(outlineHit, cyclicPos, LocalGeometryKind.BLOCK, "minecraft:stone", Optional.empty(),
+			0.25, new Vec3(2.0, 0.5, 0.5));
 	}
 
 	@Test

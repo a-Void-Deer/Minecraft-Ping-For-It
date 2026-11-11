@@ -1,5 +1,8 @@
 package nx.pingwheel.neoforge.integration.create.presentation;
 
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimitException;
+import nx.pingwheel.common.presentation.inventory.minecraft.ProviderLimitSite;
+
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -83,6 +86,19 @@ class CreateVaultInventoryAccessTest {
 		var layout = access.snapshotLayout().orElseThrow(); assertEquals(900, access.slots());
 		assertEquals(900, layout.members().stream().flatMap(member -> member.segments().stream()).mapToInt(segment -> segment.visibleSlots().size()).sum());
 		assertEquals(5, access.readResident(899).amount()); assertSame(layout, access.snapshotLayout().orElseThrow());
+	}
+	@Test void sixteenThousandSlotBoundaryPreservesMemberLocalAddressesAndRejectsOneExtra() {
+		World world = World.pair(); var other = new BlockPos(1, 0, 0);
+		world.members.get(BlockPos.ZERO).handler = new Handler(8192);
+		var last = new Handler(8192); last.setStackInSlot(8191, new ItemStack(Items.STONE, 19));
+		world.members.get(other).handler = last;
+		var access = CreateVaultInventoryAccess.find(world, other, Direction.NORTH).orElseThrow();
+		assertEquals(16384, access.slots()); assertEquals(19, access.readResident(16383).amount());
+		assertEquals(2, access.snapshotLayout().orElseThrow().members().size());
+		world.members.get(other).handler = new Handler(8193);
+		var failure = assertThrows(InventoryProviderLimitException.class, () -> CreateVaultInventoryAccess.find(world, other, Direction.NORTH));
+		assertEquals(ProviderLimitSite.VAULT_SLOTS, failure.site());
+		assertEquals(16385, failure.required()); assertEquals(16384, failure.limit());
 	}
 	@Test void frozenDescriptorIsReusedWhileEveryValidationStillRechecksMembersAndLocalBoundaries() {
 		World world = World.pair();
@@ -230,8 +246,9 @@ class CreateVaultInventoryAccessTest {
 	@Test void unloadedAndMalformedTopologyFailsBeforeAnyLocalSegmentIsRequested() {
 		World world = World.pair(); world.members.remove(new BlockPos(1, 0, 0));
 		assertTrue(CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH).isEmpty()); assertEquals(0, world.members.get(BlockPos.ZERO).localCalls);
-		world = World.pair(); world.members.get(BlockPos.ZERO).width = 4;
-		assertTrue(CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH).isEmpty()); assertEquals(0, world.members.get(BlockPos.ZERO).localCalls);
+		var oversized = World.pair(); oversized.members.get(BlockPos.ZERO).width = 4;
+		var limit = assertThrows(InventoryProviderLimitException.class, () -> CreateVaultInventoryAccess.find(oversized, BlockPos.ZERO, Direction.NORTH));
+		assertEquals(ProviderLimitSite.VAULT_WIDTH, limit.site()); assertEquals(0, oversized.members.get(BlockPos.ZERO).localCalls);
 		world = World.pair(); world.members.get(new BlockPos(1, 0, 0)).controller = new BlockPos(8, 0, 0);
 		assertTrue(CreateVaultInventoryAccess.find(world, BlockPos.ZERO, Direction.NORTH).isEmpty()); assertEquals(0, world.members.get(BlockPos.ZERO).localCalls);
 		assertTrue(CreateVaultInventoryAccess.find(world, BlockPos.ZERO, null).isEmpty());

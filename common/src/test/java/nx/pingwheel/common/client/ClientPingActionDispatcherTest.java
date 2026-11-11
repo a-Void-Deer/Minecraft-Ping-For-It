@@ -64,11 +64,19 @@ class ClientPingActionDispatcherTest {
 
 		final List<String> messages = new ArrayList<>();
 		final List<Integer> colors = new ArrayList<>();
+		final List<String> cooldowns = new ArrayList<>();
+		final List<Integer> cooldownColors = new ArrayList<>();
 
 		@Override
 		public void showLocalError(String message, int color) {
 			messages.add(message);
 			colors.add(color);
+		}
+
+		@Override
+		public void showCreateCooldown(String message, int color) {
+			cooldowns.add(message);
+			cooldownColors.add(color);
 		}
 	}
 
@@ -139,6 +147,7 @@ class ClientPingActionDispatcherTest {
 
 		assertEquals(1, h.sender.sent.size());
 		assertTrue(h.sink.messages.isEmpty());
+		assertTrue(h.sink.cooldowns.isEmpty());
 
 		PresentationC2SPacket packet = assertInstanceOf(PresentationC2SPacket.class, h.sender.sent.get(0));
 		assertFalse(packet.isCorrupt());
@@ -196,8 +205,62 @@ class ClientPingActionDispatcherTest {
 		assertEquals(1, h.sender.sent.size());
 		assertTrue(tracker.isLatest(first.context().token().sequence()));
 		assertEquals(1, h.logger.throttled.size());
+		assertEquals(List.of(ClientPingActionDispatcher.CREATE_COOLDOWN_MESSAGE_KEY), h.sink.cooldowns);
+		assertEquals(List.of(ClientPingActionDispatcher.CREATE_COOLDOWN_COLOR), h.sink.cooldownColors);
+		assertTrue(h.sink.messages.isEmpty(), "the cooldown notice is not the target-gone local error");
 		time.now = 1000;
 		assertEquals(1, h.sender.sent.size(), "a dropped action must not be queued for later");
+		assertEquals(1, h.sink.cooldowns.size(), "one rejected commit must produce exactly one notice");
+	}
+
+	@Test
+	void normalCreateAndCancelNeverShowTheCooldownNotice() {
+		Harness h = harness();
+		ActiveInteraction interaction = new ActiveInteraction();
+
+		assertEquals(ClientPingActionDispatcher.DispatchOutcome.CREATE_SENT,
+			h.dispatcher.dispatchOutcome(createAction(interaction.begin())));
+		h.dispatcher.dispatch(new PingInteractionAction.CancelMarker(new MarkerId(8L)));
+
+		assertEquals(2, h.sender.sent.size());
+		assertTrue(h.sink.cooldowns.isEmpty());
+	}
+
+	@Test
+	void notReadyCreateNeverShowsTheCooldownNotice() {
+		var sink = new RecordingErrorSink();
+		var dispatcher = new ClientPingActionDispatcher(new RecordingPacketSender(), sink,
+			PingInteractionLogger.noop(), new CreateRequestTracker(),
+			new ClientCreateRateLimiter(new ManualTime(), new ClientRateLimitPolicy(1, 1000)),
+			new ClientPresentation(packet -> {}));
+
+		assertEquals(ClientPingActionDispatcher.DispatchOutcome.NOT_READY,
+			dispatcher.dispatchOutcome(createAction(new ActiveInteraction().begin())));
+
+		assertTrue(sink.cooldowns.isEmpty());
+		assertTrue(sink.messages.isEmpty());
+	}
+
+	@Test
+	void defaultThrottleLogReportsTheDropWithoutACountNotice() {
+		List<String> rendered = new ArrayList<>();
+		PingInteractionLogger capture = (message, args) -> rendered.add(render(message, args));
+		Harness h = harness();
+		var dispatcher = new ClientPingActionDispatcher(h.sender, h.sink, capture,
+			new CreateRequestTracker(),
+			new ClientCreateRateLimiter(new ManualTime(), new ClientRateLimitPolicy(1, 1000)),
+			h.presentation);
+		ActiveInteraction interaction = new ActiveInteraction();
+
+		dispatcher.dispatch(createAction(interaction.begin()));
+		dispatcher.dispatch(createAction(interaction.begin()));
+
+		var throttleLines = rendered.stream()
+			.filter(line -> line.contains("reason=courtesy-throttled"))
+			.toList();
+		assertEquals(1, throttleLines.size());
+		assertTrue(throttleLines.getFirst().contains("sent=false"), throttleLines.getFirst());
+		assertEquals(1, h.sink.cooldowns.size());
 	}
 
 	@Test

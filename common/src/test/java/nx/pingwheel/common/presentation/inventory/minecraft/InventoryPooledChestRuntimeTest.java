@@ -72,6 +72,15 @@ class InventoryPooledChestRuntimeTest {
 		assertEquals(java.util.Set.of(Unit.PHYSICAL_SLOT), summary.quantities().keySet());
 		assertEquals(slots, summary.quantities().get(Unit.PHYSICAL_SLOT).amount()); assertEquals(0, summary.unknownQuantities().amount());
 	}
+	private static void preGetterWorkSummary(BudgetDelayMonitor.CycleSummary summary) {
+		assertEquals(Module.INVENTORY_TRACKING, summary.module()); assertEquals(1, summary.observedWorkItems().amount());
+		assertFalse(summary.observedWorkItems().saturated()); assertEquals(1, summary.samples().size());
+		assertEquals(java.util.Set.of(Reason.PUBLICATION_WORK), summary.reasons().keySet());
+		summary.reasons().values().forEach(count -> { assertEquals(1, count.amount()); assertFalse(count.saturated()); });
+		// Item work is withheld before the native getter, so no physical slot is requested or observed.
+		assertTrue(summary.quantities().isEmpty()); assertEquals(1, summary.unknownQuantities().amount());
+		assertFalse(summary.unknownQuantities().saturated());
+	}
 	@ParameterizedTest @ValueSource(booleans = {false, true})
 	void certifiedPhysicalRefusalReportsOnlyTheExhaustedSlotBudgetWithFreshOrRetainedCoverage(boolean previousPage) {
 		var world = singleChests(); var settings = diagnosticSettings(); var warnings = new ArrayList<BudgetDelayMonitor.CycleSummary>();
@@ -108,20 +117,35 @@ class InventoryPooledChestRuntimeTest {
 			runtime.advance(0, settings); var consumer = attach(runtime, world, BlockPos.ZERO, 1);
 			assertEquals(1, runtime.step(consumer, 1).orElseThrow().slots().size()); int audits = world.audits;
 			runtime.advance(1, settings);
+			var itemWork = new CostLedger.Counter("inventory/item_work", CostLedger.Unit.WORK);
+			long itemUsed = 0, itemRemaining = 0, itemRequired = 0, itemRevalidation = 0;
 			if (limit.contains("memory")) runtime.memory().setCap(runtime.memory().retained() + runtime.stepMemoryUpperBound(consumer, 1) - 1);
 			if (limit.contains("provider")) spend(physical(runtime), InventorySourceAccess.PROVIDER_WORK,
 				physical(runtime).remaining(InventorySourceAccess.PROVIDER_WORK) - InventorySourceAccess.PROVIDER_CALL_WORK);
 			if (limit.equals("item")) {
 				var association = InventoryPooledBackendTest.state(consumer, "scanningAssociation");
 				var port = (InventorySharedRead.Port) InventoryPooledBackendTest.state(InventoryPooledBackendTest.state(association, "lease"), "port");
-				var itemWork = new CostLedger.Counter("inventory/item_work", CostLedger.Unit.WORK);
-				spend(physical(runtime), itemWork, physical(runtime).remaining(itemWork) - port.validationCost().workUnits());
+				// The one-slot envelope covers the content transaction; the step also
+				// revalidates the pooled association before it can reach that transaction.
+				itemRevalidation = port.validationCost().workUnits();
+				itemRequired = runtime.stepBudget(consumer, 1).itemWork();
+				spend(physical(runtime), itemWork, physical(runtime).remaining(itemWork) - (itemRequired - 1));
+				itemUsed = physical(runtime).used(itemWork); itemRemaining = physical(runtime).remaining(itemWork);
 			}
 			assertTrue(runtime.step(consumer).isEmpty()); assertEquals(1, InventoryPooledBackendTest.state(consumer, "cursor"));
+			if (limit.equals("item")) {
+				assertEquals(InventoryFailureReason.ITEM_WORK_LIMIT, consumer.currentReason());
+				assertEquals(1, itemRequired - itemRemaining, "the fixture leaves the real one-slot item-work envelope one unit short");
+				assertEquals(itemUsed + itemRevalidation, physical(runtime).used(itemWork),
+					"the pre-getter refusal still pays the actual pooled metadata revalidation");
+				assertEquals(itemRemaining - itemRevalidation, physical(runtime).remaining(itemWork),
+					"attempted validation is charged, never refunded, and no unexecuted content read is paid");
+			}
 			assertEquals(audits, world.audits); assertEquals(0, physical(runtime).used(InventorySourceAccess.PHYSICAL));
 			monitor.endCycle(Module.INVENTORY_TRACKING, runtime.trackingPeriodId(), 1); assertEquals(1, warnings.size());
 			if (limit.equals("memory")) summary(warnings.getFirst(), 26, Reason.MEMORY);
 			else if (limit.equals("memory+provider")) summary(warnings.getFirst(), 26, Reason.MEMORY, Reason.PROVIDER_WORK);
+			else if (limit.equals("item")) preGetterWorkSummary(warnings.getFirst());
 			else summary(warnings.getFirst(), 26, Reason.PROVIDER_WORK);
 			runtime.advance(2, settings); assertEquals(16, runtime.step(consumer).orElseThrow().slots().size());
 			runtime.advance(3, settings); var completed = runtime.step(consumer).orElseThrow();

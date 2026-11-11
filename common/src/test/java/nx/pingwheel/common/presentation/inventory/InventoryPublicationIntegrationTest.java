@@ -20,6 +20,7 @@ import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
 import nx.pingwheel.common.presentation.source.CaptureResult;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
+import org.apache.logging.log4j.core.LogEvent;
 import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -77,12 +78,12 @@ class InventoryPublicationIntegrationTest {
 		net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap();
 		var catalog = new nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.Catalog(net.minecraft.core.RegistryAccess.EMPTY);
 		var rejected = new net.minecraft.world.item.ItemStack(net.minecraft.world.item.Items.STONE);
-		var payload = new net.minecraft.nbt.CompoundTag(); payload.putString("data", "\u0800".repeat(23000));
+		var payload = new net.minecraft.nbt.CompoundTag(); payload.putByteArray("data", new byte[60 * 1024 + 1]);
 		rejected.set(net.minecraft.core.component.DataComponents.CUSTOM_DATA, net.minecraft.world.item.component.CustomData.of(payload));
 		var host = new ItemHost(); var settings = InventorySettings.serverDefaults();
 		settings.getPreview().setPeriodTicks(1); settings.setPhysicalSlotsPerTick(nx.pingwheel.common.config.IntLimit.finite(1));
 		var reads = new java.util.concurrent.atomic.AtomicInteger(); long firstAmount = 9_007_199_254_740_993L;
-		try (var logs = new InventoryDiagnosticsTestCapture(); var backend = new InventoryBackend(host,
+		try (var logs = new InventoryDiagnosticsTestCapture(org.apache.logging.log4j.Level.DEBUG); var backend = new InventoryBackend(host,
 			new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 2) {
 				@Override public InventoryDomainCodec.Item read(int slot) {
 					reads.incrementAndGet();
@@ -91,20 +92,35 @@ class InventoryPublicationIntegrationTest {
 					return new InventoryDomainCodec.Item(encoded.key(), slot == 0 ? firstAmount : 7, display.label(), display.displayJson(), display.aggregateRequired());
 				}
 			}), 16_000_000), 1)) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.DEEP);
 			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.hello(), 0, settings);
 			long epoch = host.epoch(InventoryBackendTest.A);
 			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.open(epoch, 100, 1, 1, InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH), 0, settings);
 			backend.tick(0, settings);
 			var old = host.packets.stream().filter(packet -> !packet.entries().isEmpty()).findFirst().orElseThrow();
 			assertFalse(old.entries().getFirst().fallback());
-			backend.tick(1, settings);
+			int diagnosticStart = logs.events().size(); backend.tick(1, settings);
+			@org.jetbrains.annotations.Unmodifiable List<LogEvent> rootReports = logs.events().subList(diagnosticStart, logs.events().size());
+			@org.jetbrains.annotations.Unmodifiable List<LogEvent> nativeLimits = rootReports.stream()
+				.filter(event -> event.getMessage().getFormattedMessage().contains("reason=native-array-limit")).toList();
+			assertEquals(1, nativeLimits.size(), "the intentional root guard reports its exact consuming boundary");
+			assertEquals(org.apache.logging.log4j.Level.DEBUG, nativeLimits.getFirst().getLevel());
+			assertTrue(nativeLimits.getFirst().getMessage().getFormattedMessage().contains("limitHit=true"));
+			assertTrue(rootReports.stream().noneMatch(event -> event.getLevel().isMoreSpecificThan(org.apache.logging.log4j.Level.WARN)),
+				"a real owned array bound reports at DEEP with DEBUG severity, without a native codec WARN");
 			var folded = host.packets.stream().filter(packet -> packet.entries().stream().anyMatch(InventoryS2CPacket.Entry::fallback)).reduce((a, b) -> b).orElseThrow();
 			assertEquals(1, folded.entries().size()); assertEquals(firstAmount + 7, folded.entries().getFirst().count());
 			assertNotEquals(old.entries().getFirst().key(), folded.entries().getFirst().key());
+			int selectionStart = logs.events().size();
 			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.select(epoch, 100, 1, 1, 1, old.baselineId(), old.statusRevision(), old.entries().getFirst().key(), "danger"), 2, settings);
 			assertEquals(0, host.store.size()); assertEquals(2, reads.get(), "a retired exact reference is rejected before a new witness");
 			assertTrue(host.packets.stream().anyMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.REJECT));
-			assertTrue(logs.events().isEmpty(), "the deliberate identity bound refusal is not an unexpected codec failure");
+			@org.jetbrains.annotations.Unmodifiable List<LogEvent> selectionReports = logs.events().subList(selectionStart, logs.events().size());
+			assertEquals(1, selectionReports.size());
+			assertEquals(org.apache.logging.log4j.Level.WARN, selectionReports.getFirst().getLevel());
+			assertTrue(selectionReports.getFirst().getMessage().getFormattedMessage().contains("reason=retired-selection"),
+				"the later whole-Ping selection refusal owns its independent WARN");
 		}
 	}
 
@@ -205,7 +221,7 @@ class InventoryPublicationIntegrationTest {
 		var unlimited = nx.pingwheel.common.config.IntLimit.unlimited(1024);
 		settings.getPreview().setMaxVariantsPerClientPeriod(unlimited); settings.getPreview().setMaxSlotsPerClient(unlimited); settings.getPreview().setMaxSlotsServer(unlimited);
 		var reads = new java.util.concurrent.atomic.AtomicInteger();
-		try (var backend = new InventoryBackend(host, new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 260) {
+		try (var backend = new InventoryBackend(host, new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 1030) {
 			@Override public InventoryDomainCodec.Item read(int slot) {
 				reads.incrementAndGet(); boolean aggregate = slot % 2 != 0;
 				return new InventoryDomainCodec.Item(new InventoryScanner.Key("test:group_" + slot / 2, aggregate ? "" : "aggregate"), 1, "group", null, aggregate);
@@ -216,7 +232,7 @@ class InventoryPublicationIntegrationTest {
 			host.packets.forEach(packet -> client.accept(wire(packet))); client.open(InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH, "entity_block");
 			int cursor = host.packets.size();
 			backend.handle(InventoryBackendTest.A, (InventoryC2SPacket) requests.getFirst(), 0, settings);
-			for (int tick = 0; tick < 270; tick++) {
+			for (int tick = 0; tick < 1040; tick++) {
 				backend.tick(tick, settings);
 				for (; cursor < host.packets.size(); cursor++) client.accept(wire(host.packets.get(cursor)));
 			}
@@ -224,13 +240,13 @@ class InventoryPublicationIntegrationTest {
 			Object session = ((Map<?, ?>) sessionsField.get(backend)).get(InventoryBackendTest.A);
 			var previewsField = session.getClass().getDeclaredField("previews"); previewsField.setAccessible(true);
 			Object preview = ((Map<?, ?>) previewsField.get(session)).values().iterator().next();
-			var categories = preview.getClass().getDeclaredField("categories"); categories.setAccessible(true); assertEquals(256, categories.getInt(preview));
-			var keys = preview.getClass().getDeclaredField("keys"); keys.setAccessible(true); assertEquals(256, ((Map<?, ?>) keys.get(preview)).size());
-			var retired = preview.getClass().getDeclaredField("retired"); retired.setAccessible(true); assertEquals(128, ((Set<?>) retired.get(preview)).size());
+			var categories = preview.getClass().getDeclaredField("categories"); categories.setAccessible(true); assertEquals(1024, categories.getInt(preview));
+			var keys = preview.getClass().getDeclaredField("keys"); keys.setAccessible(true); assertEquals(1024, ((Map<?, ?>) keys.get(preview)).size());
+			var retired = preview.getClass().getDeclaredField("retired"); retired.setAccessible(true); assertEquals(512, ((Set<?>) retired.get(preview)).size());
 			var view = client.preview(1); assertEquals(InventoryS2CPacket.Status.INCOMPLETE, view.status()); assertFalse(view.completeScan());
-			assertEquals(128, view.entries().size()); assertTrue(view.entries().stream().allMatch(entry -> entry.fallback() && entry.count() == 2));
-			assertTrue(view.entries().stream().noneMatch(entry -> entry.itemId().equals("test:group_128")), "retirement never refunds history capacity for new groups");
-			assertEquals(257, reads.get(), "the first category beyond the lifetime limit terminates the paid scan");
+			assertEquals(512, view.entries().size()); assertTrue(view.entries().stream().allMatch(entry -> entry.fallback() && entry.count() == 2));
+			assertTrue(view.entries().stream().noneMatch(entry -> entry.itemId().equals("test:group_512")), "retirement never refunds history capacity for new groups");
+			assertEquals(1025, reads.get(), "the first category beyond the lifetime limit terminates the paid scan");
 		}
 	}
 
@@ -285,7 +301,10 @@ class InventoryPublicationIntegrationTest {
 			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.hello(), 0, settings); long epoch = host.epoch(InventoryBackendTest.A);
 			backend.handle(InventoryBackendTest.A, InventoryC2SPacket.open(epoch, 100, 1, 1, InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH), 0, settings); backend.tick(0, settings);
 			var old = host.packets.stream().filter(packet -> !packet.entries().isEmpty()).findFirst().orElseThrow(); int start = host.packets.size();
-			backend.tick(1, settings); assertEquals(0, runtime.memory().cap()); assertEquals(start, host.packets.size(), "retirement fences the original cut even when Backend cannot encode its replacement");
+			backend.tick(1, settings); assertEquals(0, runtime.memory().cap());
+			assertEquals(1, host.packets.size() - start, "one real deferred-progress control remains serviceable");
+			assertTrue(host.packets.subList(start, host.packets.size()).stream().allMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW_STATE
+				&& packet.entries().isEmpty()), "retirement fences quantities/completion while prepaid progress controls remain serviceable");
 			int before = reads.get(); var stale = InventoryC2SPacket.select(epoch, 100, 1, 1, 1, old.baselineId(), old.statusRevision(), old.entries().getFirst().key(), "danger");
 			backend.handle(InventoryBackendTest.A, stale, 2, settings); backend.handle(InventoryBackendTest.A, stale, 2, settings);
 			assertEquals(before, reads.get()); assertEquals(0, host.store.size());
@@ -574,6 +593,7 @@ class InventoryPublicationIntegrationTest {
 		var settings = InventorySettings.serverDefaults(); settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(.25))); settings.getTracking().setHeartbeatPeriods(1);
 		var transport = new InventorySyncPublisherTest.Transport(); var memory = new RetainedMemoryLedger(16000000); var marker = new MarkerId(1); var endpoint = negotiated(marker, settings);
 		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.wireBudgetFixture(4096, 4096);
 			var context = InventorySyncPublisherTest.context("tracking/1", 1); publisher.advance(0, settings); publisher.register(context, InventorySyncPublisherTest.route(marker, "target"));
 			InventorySyncPublisherTest.publish(publisher, context, InventorySyncPublisherTest.capture(1, 12, 2500));
 			int received = 0;
@@ -722,7 +742,7 @@ class InventoryPublicationIntegrationTest {
 				.allMatch(p -> p.baselineId() == baseline), "defer neither invalidates nor resets a healthy baseline");
 		}
 	}
-	@Test void queuedFoldReplacementRetiresExactCutAndKeepsLatestRowsThroughQueueAndTransportRecoveryWithoutRecapture() {
+	@Test void queuedFoldReplacementRetiresExactCutAndKeepsLatestRowsThroughQueueAndTransportRecoveryWithoutRecapture() throws Exception {
 		class Host extends ItemHost {
 			boolean blocked;
 			final List<InventoryS2CPacket> attempts = new ArrayList<>();
@@ -773,26 +793,31 @@ class InventoryPublicationIntegrationTest {
 			assertTrue(host.attempts.stream().anyMatch(packet -> packet.entries().stream().anyMatch(entry -> entry.key().equals(retiredKey) && entry.count() == 9_007_199_254_741_000L)),
 				"the newer exact cut was admitted and attempted before identity refusal");
 			settings.getPreview().setGlobalByteMultiplier(ByteMultiplier.finite(new java.math.BigDecimal("0.125")));
+			var publisher = (InventorySyncPublisher) InventoryBackendTest.field(backend, "publisher");
+			publisher.previewQueueFixture(16 * 1024);
 			int refusedPackets = host.packets.size(), retiredAttempts = host.attempts.size();
 			backend.tick(10, settings);
 			assertEquals(11, reads.get()); assertEquals(1, captures.get());
 			assertTrue(delays.sawReason(nx.pingwheel.common.presentation.budget.BudgetDelaySink.Module.INVENTORY_PREVIEW,
 				nx.pingwheel.common.presentation.budget.BudgetDelaySink.Reason.QUEUE_CAPACITY), "the complete retained replacement must actually encounter queue admission pressure");
-			assertEquals(refusedPackets, host.packets.size()); assertEquals(retiredAttempts, host.attempts.size(), "discovery immediately fences the admitted exact cut before replacement admission");
+			assertEquals(0, host.packets.size() - refusedPackets, "the unchanged queue defer preserves the prior progress revision without another notice");
+			assertTrue(host.packets.subList(refusedPackets, host.packets.size()).stream().allMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW_STATE));
+			assertEquals(retiredAttempts, host.attempts.size(), "discovery immediately fences the admitted exact cut before replacement admission");
 			long offers = host.packets.stream().filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OFFER).count();
 			for (int tick : new int[] {11, 12, 25, 26, 40}) {
 				backend.tick(tick, settings);
-				assertEquals(refusedPackets, host.packets.size()); assertEquals(retiredAttempts, host.attempts.size(),
+				assertTrue(host.packets.subList(refusedPackets, host.packets.size()).stream().allMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW_STATE));
+				assertEquals(retiredAttempts, host.attempts.size(),
 					"queue refusal neither retries retired exact parts nor sends their completion");
 				assertEquals(11, reads.get()); assertEquals(1, captures.get(), "queue refusal keeps the original observation and paid cursor");
 			}
-			settings.getPreview().setGlobalByteMultiplier(ByteMultiplier.one()); backend.tick(41, settings);
+			settings.getPreview().setGlobalByteMultiplier(ByteMultiplier.one()); publisher.previewQueueFixture(settings.previewQueueBytes()); backend.tick(41, settings);
 			assertTrue(host.attempts.size() > retiredAttempts, "restoring queue capacity admits the retained replacement");
 			long admittedWatermark = host.attempts.getLast().watermark();
 			for (int tick : new int[] {42, 43, 56}) {
 				int attempts = host.attempts.size(); backend.tick(tick, settings);
 				assertTrue(host.attempts.size() > attempts, "transport still refuses the admitted replacement");
-				assertEquals(refusedPackets, host.packets.size());
+				assertTrue(host.packets.subList(refusedPackets, host.packets.size()).stream().allMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW_STATE));
 				assertEquals(admittedWatermark, host.attempts.getLast().watermark(), "normal ticks resume the immutable admitted cut");
 			}
 			int deliveredStart = host.packets.size(); host.blocked = false; backend.tick(57, settings);

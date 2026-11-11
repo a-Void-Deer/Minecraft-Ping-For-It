@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import org.jetbrains.annotations.Nullable;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
 
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.DynamicOps;
@@ -290,7 +291,7 @@ final class InventoryComponentCertificate {
 			var enchantments = (ItemEnchantments) value;
 			var map = raw.enchantments(enchantments);
 			exact(map, it.unimi.dsi.fastutil.objects.Object2IntOpenHashMap.class);
-			int size = map.size(); cardinality(size);
+			int size = map.size(); mapCardinality(size);
 			budget.allocate(9 + 4L * size, 0, 3L * size + 3, size + 3L);
 			var levels = new ArrayList<EnchantmentLevel>(size);
 			if (size != 0) {
@@ -571,7 +572,7 @@ final class InventoryComponentCertificate {
 	EffectCost effectCopy(MobEffectInstance value, int depth) {
 		exact(value, MobEffectInstance.class); budget.node(depth); holder(value.getEffect(), Registries.MOB_EFFECT);
 		if (value.getAmplifier() < 0 || value.getAmplifier() > 255) refuse();
-		if (effectCopyCount == InventoryItemBudget.MAX_NODES) refuse();
+		if (effectCopyCount == InventoryItemBudget.MAX_NODES) throw new InventoryItemBudget.RootLimitException(InventoryFailureReason.NATIVE_NODE_LIMIT, "effect descriptor cardinality");
 		budget.allocate(40, 0, 0, 1); // EffectCost's five long fields
 		// First use only, but still before cure inspection or any native copy.
 		// The fixed cardinality and append order survive identity/display passes.
@@ -584,12 +585,12 @@ final class InventoryComponentCertificate {
 		if (cures != null) {
 			exact(cures, CURE_SET); if (!InventoryNativeTraversal.runtimeSupported()) refuse();
 			budget.allocate(524, 0, 65, 33); budget.work(290);
-			int size = cures.size(); cardinality(size);
+			int size = cures.size(); mapCardinality(size);
 			// IdentityHashMap's empty iterator still scans retained capacity during
 			// native copy.addAll. Probe it even when no cure is currently present.
 			var probe = cures.spliterator(); long cells = 2;
 			for (int split = 0; ; split++) {
-				if (cells > budget.remainingTraversalWork() || split > 29) refuse();
+				if (cells > budget.remainingTraversalWork() || split > 29) throw new InventoryItemBudget.RootLimitException(InventoryFailureReason.NATIVE_WORK_LIMIT, "effect cure traversal bound");
 				var lower = probe.trySplit(); if (lower == null) break; probe = lower; cells <<= 1;
 			}
 			if (size != 0) {
@@ -750,7 +751,7 @@ final class InventoryComponentCertificate {
 		exact(profile.properties(), com.mojang.authlib.properties.PropertyMap.class);
 		budget.work(InventoryExternalFields.READ_WORK);
 		var delegate = raw.profile(profile.properties()); exact(delegate, PROPERTY_DELEGATE);
-		int size = delegate.size(); cardinality(size); bounds.nativeTraversal(size);
+		int size = delegate.size(); mapCardinality(size); bounds.nativeTraversal(size);
 		budget.allocate(0, 0, 5, 3); // values view and linked iterators on this guard pass
 		listPass(size); copyPass(size); // resident values().stream().toList then owned ListCodec
 		for (var property : delegate.values()) { exact(property, com.mojang.authlib.properties.Property.class);
@@ -843,6 +844,11 @@ final class InventoryComponentCertificate {
 		}
 	}
 	static void exact(Object value, Class<?> expected) { if (value == null || value.getClass() != expected) refuse(); }
-	private static void cardinality(int size) { if (size < 0 || size > InventoryItemBudget.MAX_COLLECTION) refuse(); }
+	private static void cardinality(int size) {
+		if (size < 0 || size > InventoryItemBudget.MAX_LIST) throw new InventoryItemBudget.RootLimitException(InventoryFailureReason.NATIVE_LIST_LIMIT, "native collection cardinality");
+	}
+	private static void mapCardinality(int size) {
+		if (size < 0 || size > InventoryItemBudget.MAX_MAP) throw new InventoryItemBudget.RootLimitException(InventoryFailureReason.NATIVE_MAP_LIMIT, "native map cardinality");
+	}
 	static void refuse() { throw new InventoryItemBudget.RootLimitException("uncertified inventory component shape"); }
 }

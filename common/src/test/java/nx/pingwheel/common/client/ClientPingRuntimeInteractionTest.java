@@ -206,7 +206,7 @@ class ClientPingRuntimeInteractionTest {
 		final List<String> errors = new ArrayList<>();
 		final List<ResolvedTarget> validations = new ArrayList<>();
 		final ClientPresentation presentation = new ClientPresentation(this::send);
-		final ClientInventory inventory = new ClientInventory(this::send);
+		final ClientInventory inventory = new ClientInventory(this::send, clock);
 		final ClientPresentationPreview preview;
 		final ClientPingRuntime runtime;
 		final RecordingLogger pingLogger = new RecordingLogger();
@@ -734,7 +734,7 @@ class ClientPingRuntimeInteractionTest {
 		assertEquals(request, f.selects().getFirst().requestId());
 		assertTrue(f.creates().isEmpty());
 	}
-	@Test void allInvalidPreviewLanesExitStayOpenButOneInvalidLaneKeepsTheOtherNavigable() {
+	@Test void allInvalidPreviewLanesKeepRetryStatusWhileOneInvalidLaneKeepsTheOtherNavigable() {
 		ClientConfig.HANDLER.getConfig().getSpatialSelector().setInventorySelectionStayOpenEnabled(true);
 		Fixture f = new Fixture(); f.openList();
 		var fluid = nx.pingwheel.common.presentation.inventory.InventoryResourceKind.FLUID;
@@ -745,9 +745,17 @@ class ClientPingRuntimeInteractionTest {
 		assertTrue(f.runtime.selectorSnapshot().isPresent()); assertTrue(f.snapshot().inventory().open());
 		assertEquals("ITEM:opaque", f.snapshot().inventory().selectedKey());
 		f.runtime.onInventoryPacket(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, f.request(), null, 10, 2, 2, 0, 1,
-			false, InventoryS2CPacket.Status.INVALID, 0, List.of()).stamp(100, 1));
-		assertTrue(f.runtime.selectorSnapshot().isEmpty()); assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
-		f.release(800); assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
+			false, InventoryS2CPacket.Status.INVALID, 0, List.of(), nx.pingwheel.common.presentation.inventory.InventoryFailureReason.SOURCE_CHANGED).stamp(100, 1));
+		assertTrue(f.runtime.selectorSnapshot().isPresent()); assertEquals(PingInteractionPhase.WHEEL_OPEN, f.runtime.phase());
+		assertTrue(f.snapshot().inventoryView().open()); assertTrue(f.snapshot().inventoryView().rows().isEmpty());
+		assertEquals(net.minecraft.network.chat.Component.translatable("pingforit.inventory.retry",
+			net.minecraft.network.chat.Component.translatable(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.SOURCE_CHANGED.translationKey()), 1),
+			f.snapshot().inventoryView().statusMessage());
+		long retired = f.request(); f.clock.value = 5_700; f.inventory.tick(true); f.frame(5_700, false);
+		assertNotEquals(retired, f.request()); assertTrue(f.snapshot().inventoryView().open());
+		assertTrue(f.snapshot().inventoryView().rows().isEmpty()); assertFalse(f.snapshot().inventoryView().selectedRowCommittable());
+		f.press(5_800); f.release(5_810);
+		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
 	}
 
 	@Test void revokingWhileAStayingTapIsHeldSwallowsItsRemainingRelease() {

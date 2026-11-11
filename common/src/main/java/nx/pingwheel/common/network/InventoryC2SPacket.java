@@ -149,7 +149,8 @@ public record InventoryC2SPacket(@Nullable Kind kind, int protocol, long epoch, 
 	}
 
 	private static InventoryC2SPacket decode(FriendlyByteBuf buf) {
-		if (buf.readableBytes() > MAX_FRAME_BYTES) throw new IllegalArgumentException("inventory request frame");
+		if (buf.readableBytes() > MAX_FRAME_BYTES)
+			throw new InventoryWireLimitException(InventoryWireLimitException.Bound.C2S_FRAME, buf.readableBytes(), MAX_FRAME_BYTES);
 		Kind kind = InventoryWireCodec.readEnum(buf, Kind.class);
 		int protocol = StrictPacketCodec.readVarInt(buf);
 		if (protocol != VERSION) {
@@ -180,8 +181,10 @@ public record InventoryC2SPacket(@Nullable Kind kind, int protocol, long epoch, 
 				commitId = readRequestId(buf);
 				baselineId = readRequestId(buf);
 				stateRevision = readRequestId(buf);
-				entryKey = InventoryWireCodec.readUtf(buf, MAX_ID_BYTES);
-				pingType = InventoryWireCodec.readUtf(buf, MAX_ID_BYTES);
+				entryKey = InventoryWireCodec.readUtf(buf, MAX_ID_BYTES, MAX_ID_BYTES,
+					InventoryWireLimitException.Bound.KEY_BYTES);
+				pingType = InventoryWireCodec.readUtf(buf, MAX_ID_BYTES, MAX_ID_BYTES,
+					InventoryWireLimitException.Bound.ANNOTATION_BYTES);
 			}
 		}
 		if (buf.isReadable()) {

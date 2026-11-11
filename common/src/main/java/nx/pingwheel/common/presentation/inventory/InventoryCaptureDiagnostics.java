@@ -1,6 +1,5 @@
 package nx.pingwheel.common.presentation.inventory;
 
-import java.util.concurrent.atomic.AtomicLongArray;
 import java.util.function.Supplier;
 
 import org.apache.logging.log4j.Level;
@@ -15,6 +14,7 @@ import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnava
 import nx.pingwheel.common.presentation.source.SourceKey;
 import nx.pingwheel.common.diagnostics.DiagnosticLogger;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
 
 /**
  * Low-frequency inventory source diagnostics. Unexpected failures retain their
@@ -113,22 +113,15 @@ final class InventoryCaptureDiagnostics {
 		return site == null ? logger : logger.rateLimited(site.channel);
 	}
 
-	private enum Reason {
-		BOUND_EXCEEDED("bound-exceeded"),
-		MEMORY_DEFERRED("memory-deferred");
-
-		private final String token;
-
-		Reason(String token) {
-			this.token = token;
-		}
-	}
-
-	/** Ordinary reason gates advance after profile eligibility even while backend output is disabled. */
-	private static final long MIN_INTERVAL_NANOS = 10_000_000_000L;
-	private static final AtomicLongArray LAST_LOGGED = new AtomicLongArray(Reason.values().length);
-
 	private InventoryCaptureDiagnostics() {}
+
+	/** Limit evidence is supplied by the deciding branch, never inferred from exception text. */
+	static void limit(@Nullable InventorySourceInput input, InventoryDiagnosticSite site, InventoryOperation operation,
+		InventoryFailureReason reason, InventoryOutcome outcome, String stage, long requested, long used, long limit,
+		@Nullable Throwable failure) {
+		InventoryDiagnostics.report(DiagnosticSide.SERVER, site, operation, reason, InventoryImpact.DEGRADED, outcome, true,
+			() -> new InventoryDiagnosticDetail(stage, -1, -1, input == null ? null : input.resourceKind().name(), requested, used, limit), failure);
+	}
 
 	static void captureFailed(InventorySourceInput input, Throwable failure) {
 		warn("capture-failed", input, null, () -> "stage=snapshot-prepare", failure);
@@ -150,19 +143,22 @@ final class InventoryCaptureDiagnostics {
 	}
 
 	static boolean expectedFailure(Throwable failure) {
+		if (providerLimit(failure) != null) return true;
 		if (failure instanceof InventorySharedRead.ReadFailure typed) {
 			@Nullable Throwable cause = typed.failure();
-			return cause == null || cause instanceof nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.CapacityExceededException
-				|| expectedFailure(cause);
+			if (cause == null || cause instanceof nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.CapacityExceededException) return true;
+			failure = cause;
 		}
 		@Nullable Throwable reason = failure instanceof InventorySourceAccess.CursorlessReadFailure ? failure.getCause() : failure;
 		return reason instanceof InventoryItemBudget.CaptureLimitException
 			|| reason instanceof InventoryObservationSnapshot.LimitException
+			|| reason instanceof nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnsupportedException
 			|| reason instanceof InventorySourceUnavailableException;
 	}
 
 	/** Narrower than {@link #expectedFailure}: only the expected unavailability boundary changes disclosure. */
 	static boolean expectedSourceUnavailable(@Nullable Throwable failure) {
+		if (providerLimit(failure) != null) return true;
 		if (failure instanceof InventorySharedRead.ReadFailure typed) failure = typed.failure();
 		if (failure instanceof InventorySourceAccess.CursorlessReadFailure) failure = failure.getCause();
 		return failure instanceof InventorySourceUnavailableException;
@@ -175,6 +171,8 @@ final class InventoryCaptureDiagnostics {
 	 */
 	static void sourceUnavailable(String operation, InventorySourceInput input, @Nullable Supplier<String> source,
 		String stage, @Nullable Throwable failure) {
+		// Native guard sites already reported this event with its exact finite site.
+		if (providerLimit(failure) != null) return;
 		@Nullable ExpectedSourceSite site = ExpectedSourceSite.forOperation(operation);
 		if (site == null) return;
 		DiagnosticLogger logger = Diagnostics.server().atDebug();
@@ -256,33 +254,62 @@ final class InventoryCaptureDiagnostics {
 	}
 
 	static void boundExceeded(InventorySourceInput input, String detail) {
-		boundExceeded(input, () -> detail);
+		InventoryFailureReason reason = switch (detail) {
+			case "negative-memory-bound", "snapshot-slots", "retained-bytes", "capture-work-or-structure", "snapshot-discovery" -> InventoryFailureReason.SNAPSHOT_LIMIT;
+			case "native-journal-capacity" -> InventoryFailureReason.JOURNAL_LIMIT;
+			default -> InventoryFailureReason.NATIVE_WORK_LIMIT;
+		};
+		limit(input, InventoryDiagnosticSite.CAPTURE, InventoryOperation.READ, reason,
+			InventoryOutcome.TRUNCATED, detail, -1, -1, -1, null);
 	}
 
 	static void boundExceeded(InventorySourceInput input, Supplier<String> detail) {
-		log(Reason.BOUND_EXCEEDED, input, detail, null);
+		InventoryDiagnostics.report(DiagnosticSide.SERVER, InventoryDiagnosticSite.SNAPSHOT, InventoryOperation.SNAPSHOT,
+			InventoryFailureReason.SNAPSHOT_LIMIT, InventoryImpact.DEGRADED, InventoryOutcome.TRUNCATED, true,
+			() -> new InventoryDiagnosticDetail(detail.get(), -1, -1, input.resourceKind().name(), -1, -1, -1), null);
+	}
+
+	/** Only audited wrappers, each unwrapped at most once; never search an arbitrary cause graph. */
+	static nx.pingwheel.common.presentation.inventory.minecraft.@Nullable InventoryProviderLimitException providerLimit(@Nullable Throwable failure) {
+		boolean sharedSeen = false, cursorlessSeen = false, invocationSeen = false;
+		for (int wrapper = 0; wrapper < 3; wrapper++) {
+			if (!sharedSeen && failure instanceof InventorySharedRead.ReadFailure shared) { sharedSeen = true; failure = shared.failure(); }
+			else if (!cursorlessSeen && failure instanceof InventorySourceAccess.CursorlessReadFailure) { cursorlessSeen = true; failure = failure.getCause(); }
+			else if (!invocationSeen && failure instanceof java.lang.reflect.InvocationTargetException) { invocationSeen = true; failure = failure.getCause(); }
+			else break;
+		}
+		return failure instanceof nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimitException limit ? limit : null;
+	}
+	static InventoryFailureReason sourceReason(Throwable failure) {
+		@Nullable var limit = providerLimit(failure);
+		return limit != null ? limit.reason() : expectedSourceUnavailable(failure)
+			? InventoryFailureReason.SOURCE_UNAVAILABLE : InventoryFailureReason.PROVIDER_FAILURE;
 	}
 
 	static void boundExceeded(InventorySourceInput input, String detail, Throwable failure) {
-		log(Reason.BOUND_EXCEEDED, input, () -> detail, failure);
+		InventoryFailureReason reason = boundReason(failure);
+		limit(input, InventoryDiagnosticSite.CAPTURE, InventoryOperation.READ, reason,
+			InventoryOutcome.TRUNCATED, detail, -1, -1, -1, null);
+	}
+
+	/** Typed evidence only; wrappers preserve their actual refusing operation. */
+	static InventoryFailureReason boundReason(Throwable failure) {
+		@Nullable var provider = providerLimit(failure);
+		if (provider != null) return provider.reason();
+		if (failure instanceof InventorySourceAccess.CursorlessReadFailure) {
+			@Nullable Throwable cause = failure.getCause();
+			if (cause != null) failure = cause;
+		}
+		return failure instanceof InventorySlotJournal.CapacityException ? InventoryFailureReason.JOURNAL_LIMIT
+			: failure instanceof InventoryObservationSnapshot.LimitException ? InventoryFailureReason.SNAPSHOT_LIMIT
+			: failure instanceof nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec.CapacityExceededException item ? item.reason()
+			: failure instanceof InventoryFluidCodec.CapacityException fluid ? fluid.reason()
+			: failure instanceof InventoryItemBudget.CaptureLimitException budget ? budget.reason() : InventoryFailureReason.SNAPSHOT_LIMIT;
 	}
 
 	static void memoryDeferred(InventorySourceInput input) {
-		log(Reason.MEMORY_DEFERRED, input, () -> "retained-capacity", null);
+		limit(input, InventoryDiagnosticSite.SNAPSHOT, InventoryOperation.SNAPSHOT, InventoryFailureReason.MEMORY_LIMIT,
+			InventoryOutcome.DEFERRED, "retained-capacity", -1, -1, -1, null);
 	}
 
-	private static void log(Reason reason, InventorySourceInput input, Supplier<String> detail, @Nullable Throwable failure) {
-		boolean debug = reason == Reason.MEMORY_DEFERRED;
-		Level level = debug ? Level.DEBUG : Level.WARN;
-		DiagnosticLogger logger = debug ? Diagnostics.server().atDebug() : Diagnostics.server().atDetailed();
-		logger.domainBeforeBackend(level, "inventory/snapshot", () -> {
-			long now = System.nanoTime();
-			int index = reason.ordinal();
-			long last = LAST_LOGGED.get(index);
-			if (last != 0L && now - last < MIN_INTERVAL_NANOS) return null;
-			if (!LAST_LOGGED.compareAndSet(index, last, now)) return null;
-			return new DiagnosticLogger.DomainReport(reason.token, failure,
-				() -> context(input) + " detail=" + detail.get());
-		});
-	}
 }

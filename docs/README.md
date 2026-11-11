@@ -11,7 +11,7 @@ require reading every document. These documents describe the existing Minecraft
 | [Repository README](../README.md) | Tracked public entry point for project orientation, supported build/source sets, and install/build/verify commands. |
 | Topic documents and focused architecture contracts below | Normative, executable product contracts for their named subsystem. |
 | [Geometry-pipeline overview](architecture/geometry/geometry-pipeline.md) and decisions | Explanatory concepts, boundaries, and rationale. They link to, but do not replace, executable topic contracts. |
-| [Testing and verification](testing/verification/README.md) | Existing automated-coverage inventory, known gaps, evidence rules and pending manual/integration scenarios. |
+| [Testing and verification](testing/verification/README.md) | Evidence rules and routes to subsystem coverage and gaps, build execution evidence, and pending manual/integration scenarios. |
 
 Focused architecture contracts are normative for their named subsystem
 throughout input, picking, identity, authority, configuration, geometry, and

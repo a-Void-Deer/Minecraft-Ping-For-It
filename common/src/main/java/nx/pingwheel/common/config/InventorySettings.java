@@ -98,7 +98,7 @@ public final class InventorySettings {
 			InventorySizeScale.FRAME.normalize(frameByteMultiplier));
 	}
 
-	/** Preview per-client period bytes: 4 KiB scaled by the preview client multiplier. */
+	/** Preview per-client period bytes: the owned base scaled by the preview client multiplier. */
 	public long previewClientPeriodBytes() {
 		return preview.clientByteMultiplier.appliedTo(
 			InventoryLimits.PREVIEW_CLIENT_BASE_BYTES,
@@ -106,7 +106,7 @@ public final class InventorySettings {
 			ByteMultiplierGrid.CLIENT, ConfigDefaults.Inventory.Preview.CLIENT_BYTE_MULTIPLIER);
 	}
 
-	/** Preview global period bytes: 32 KiB scaled by the preview global multiplier. */
+	/** Preview global period bytes: the owned base scaled by the preview global multiplier. */
 	public long previewGlobalPeriodBytes() {
 		return preview.globalByteMultiplier.appliedTo(
 			InventoryLimits.PREVIEW_GLOBAL_BASE_BYTES,
@@ -119,7 +119,7 @@ public final class InventorySettings {
 		return InventoryLimits.PREVIEW_QUEUE_GLOBAL_PERIODS * previewGlobalPeriodBytes();
 	}
 
-	/** Tracking stream bytes per client+target period: 2 KiB scaled by the stream multiplier. */
+	/** Tracking stream bytes per client+target period: the owned base scaled by the stream multiplier. */
 	public long trackingStreamPeriodBytesPerClientTarget() {
 		return tracking.streamByteMultiplier.appliedTo(
 			InventoryLimits.TRACKING_STREAM_BASE_BYTES,
@@ -127,7 +127,7 @@ public final class InventorySettings {
 			ByteMultiplierGrid.CLIENT, ConfigDefaults.Inventory.Tracking.STREAM_BYTE_MULTIPLIER);
 	}
 
-	/** Tracking snapshot per-fragment bytes: 16 KiB scaled by the snapshot multiplier. */
+	/** Tracking snapshot per-fragment bytes: the owned base scaled by the snapshot multiplier. */
 	public long trackingSnapshotFragmentBytes() {
 		return tracking.snapshotByteMultiplier.appliedTo(
 			InventoryLimits.TRACKING_SNAPSHOT_BASE_BYTES,
@@ -140,7 +140,7 @@ public final class InventorySettings {
 		return trackingSnapshotFragmentBytes();
 	}
 
-	/** Tracking global period bytes: 16 KiB scaled by the tracking global multiplier. */
+	/** Tracking global period bytes: the owned base scaled by the tracking global multiplier. */
 	public long trackingGlobalPeriodBytes() {
 		return tracking.globalByteMultiplier.appliedTo(
 			InventoryLimits.TRACKING_GLOBAL_BASE_BYTES,

@@ -200,8 +200,9 @@ class ServerConfigVarNumbersTest {
 		assertCorruptAndDrained(replace(SNAPSHOT, 9, new byte[0]), ServerConfigSnapshotS2CPacket::readSafe);
 		// Even with unlimited selected, the retained finite memory value must be legal.
 		assertRejectedUpdate(replace(UPDATE, 9, hex("0f")));
-		assertRejectedUpdate(replace(UPDATE, 9, hex("81 08")));
-		assertRejectedUpdate(replace(UPDATE, 7, hex("81 08")));
+		// One past the finite pending-memory and ordinary-slot caps stays illegal.
+		assertRejectedUpdate(replace(UPDATE, 9, hex("81 10")));
+		assertRejectedUpdate(replace(UPDATE, 7, hex("81 20")));
 	}
 
 	@Test

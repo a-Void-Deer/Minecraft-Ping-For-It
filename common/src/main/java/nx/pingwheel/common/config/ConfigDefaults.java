@@ -42,7 +42,7 @@ public final class ConfigDefaults {
 		public static final boolean LONG_PRESS_COMPATIBILITY_MODE = false;
 		public static final int LONG_PRESS_COMPATIBILITY_SLICE_MILLIS = 20;
 		public static final int CANCEL_HALF_CONE_ANGLE_DEGREES = 5;
-		public static final int DOUBLE_CLICK_DANGER_WINDOW_MS = 100;
+		public static final int DOUBLE_CLICK_DANGER_WINDOW_MS = 160;
 		public static final double DOUBLE_CLICK_DANGER_ANGLE_DEGREES = 3.5d;
 		public static final int WHEEL_OPACITY = 75;
 		public static final int WHEEL_TARGET_OPACITY = 100;
@@ -50,6 +50,8 @@ public final class ConfigDefaults {
 		public static final int WHEEL_TARGET_FONT_SIZE = 100;
 		/** Zero follows each marker's frozen server-side duration, not a zero lifetime. */
 		public static final int MARKER_DISPLAY_DURATION = 0;
+		/** Local placement of the courtesy-cooldown notice; hidden suppresses only that notice. */
+		public static final CooldownFeedbackMode COOLDOWN_FEEDBACK = CooldownFeedbackMode.ACTIONBAR;
 
 		public static final @Unmodifiable List<String> BLOCK_DISPLAY_WHITELIST = List.of("*:*");
 		public static final @Unmodifiable List<String> BLOCK_SHAPE_BLACKLIST = List.of();

@@ -43,6 +43,8 @@ import nx.pingwheel.common.presentation.PresentationPropertyRef;
 import nx.pingwheel.common.presentation.PresentationSection;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
+import nx.pingwheel.common.presentation.inventory.client.InventoryPreviewLifecycle;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
 import nx.pingwheel.common.presentation.inventory.InventoryResourceKind;
 import nx.pingwheel.common.presentation.preview.ClientPresentationPreview;
 import nx.pingwheel.common.presentation.preview.PreviewFieldAccess;
@@ -327,11 +329,10 @@ class NativeSelectorContentTest {
 		inventory.accept(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, request, null, 10, 2, 2, 0, 1,
 			false, InventoryS2CPacket.Status.INVALID, 0, List.of()).stamp(100, 1));
 		session.tick(400);
-		assertFalse(session.inventoryPathActive(), "both invalid groups end inventory ancestry instead of staying UPDATING forever");
-		assertFalse(session.snapshot().inventory().open());
-		var invalidChoice = session.snapshot().radial().menus().getLast().choices().stream()
-			.filter(value -> value.id().endsWith(":inventory")).findFirst().orElseThrow();
-		assertTrue(invalidChoice.disabled()); assertFalse(invalidChoice.branch());
+		assertTrue(session.inventoryPathActive(), "whole failure retains the original status area through retry");
+		assertTrue(session.snapshot().inventoryView().open());
+		assertTrue(session.snapshot().inventoryView().rows().isEmpty());
+		assertNotNull(session.snapshot().inventoryView().statusMessage());
 		content.close();
 		assertEquals(1, sent.stream().filter(packet -> packet instanceof InventoryC2SPacket p && p.kind() == InventoryC2SPacket.Kind.OPEN).count());
 		assertEquals(1, sent.stream().filter(packet -> packet instanceof InventoryC2SPacket p && p.kind() == InventoryC2SPacket.Kind.CLOSE).count());
@@ -400,6 +401,127 @@ class NativeSelectorContentTest {
 
 	private static SpatialSelectorSession.ContentFence previewFence(NativeSelectorContent content) {
 		return new SpatialSelectorSession.ContentFence(1, content.requestId(), 1, "ordinary");
+	}
+	private static long lastOpenRequest(List<IPacket> sent) {
+		return sent.reversed().stream().filter(InventoryC2SPacket.class::isInstance).map(InventoryC2SPacket.class::cast)
+			.filter(packet -> packet.kind() == InventoryC2SPacket.Kind.OPEN).findFirst().orElseThrow().requestId();
+	}
+	@Test void retryKeepsTheListAndStableFenceThroughTheFinalReason() {
+		List<IPacket> sent = new ArrayList<>();
+		var clock = new java.util.concurrent.atomic.AtomicLong();
+		var inventory = new ClientInventory(sent::add, clock::get); ready(inventory);
+		var capture = capture(); inventory.close(inventory.open(capture));
+		var content = new NativeSelectorContent(capture, null, () -> inventory, ignored -> List.of(ping("attention")),
+			ref -> Component.literal(ref.fieldId()), json -> Component.literal("Chest"));
+		content.begin(new Object()); var fence = previewFence(content); long wire = lastOpenRequest(sent);
+		assertNotEquals(fence.requestId(), wire);
+		var session = new SpatialSelectorSession<>(previewTarget(capture), Map.of(), intentSettings(), fence, content, SELECTOR_GEOMETRY);
+		session.open(0); enter(session, "content", 10); enter(session, firstNonBack(session), 150);
+		var reason = InventoryFailureReason.REQUEST_CAPACITY;
+		for (int failure = 1; failure <= 4; failure++) {
+			inventory.accept(InventoryS2CPacket.openRejected(7, 100, 1, wire, reason)); session.tick(300 + clock.get());
+			var view = session.snapshot().inventoryView();
+			assertTrue(view.open()); assertTrue(view.rows().isEmpty()); assertFalse(view.selectedRowCommittable());
+			assertEquals(fence.requestId(), content.requestId());
+			Component expected = failure < 4 ? Component.translatable("pingforit.inventory.retry", Component.translatable(reason.translationKey()), failure)
+				: Component.translatable(reason.translationKey());
+			assertEquals(expected, view.statusMessage());
+			if (failure == 4) assertEquals(Status.INVALID, view.status(), "terminal cause remains a failure on the retained status surface");
+			clock.addAndGet(InventoryPreviewLifecycle.RETRY_DELAY_MILLIS); inventory.tick(true); session.tick(300 + clock.get());
+			long next = lastOpenRequest(sent);
+			if (failure < 4) assertNotEquals(wire, next); else assertEquals(wire, next);
+			assertEquals(expected, session.snapshot().inventoryView().statusMessage());
+			assertTrue(session.snapshot().inventoryView().open(), "the status surface survives later idle ticks, including retry exhaustion"); wire = next;
+		}
+		content.close();
+	}
+	@Test void terminalSourceUnavailableDisablesInventoryAndExitsAnOpenPathWithoutRetry() {
+		List<IPacket> sent = new ArrayList<>();
+		var clock = new java.util.concurrent.atomic.AtomicLong();
+		var inventory = new ClientInventory(sent::add, clock::get); ready(inventory);
+		var capture = capture();
+		var content = new NativeSelectorContent(capture, null, () -> inventory, ignored -> List.of(ping("attention")),
+			ref -> Component.literal(ref.fieldId()), json -> Component.literal("Chest"));
+		content.begin(new Object()); long wire = lastOpenRequest(sent); opened(inventory, wire);
+		var session = new SpatialSelectorSession<>(previewTarget(capture), Map.of(), intentSettings(), previewFence(content), content, SELECTOR_GEOMETRY);
+		session.open(0); enter(session, "content", 10); enter(session, firstNonBack(session), 150);
+		assertTrue(session.inventoryPathActive());
+		for (InventoryResourceKind kind : InventoryResourceKind.values()) {
+			inventory.accept(InventoryS2CPacket.previewState(kind, 7, 100, 1, wire, 2, 0,
+				InventoryS2CPacket.PreviewPhase.SCAN, InventoryS2CPacket.PreviewCondition.FAILED,
+				InventoryFailureReason.SOURCE_UNAVAILABLE));
+			session.tick(300 + clock.get());
+		}
+		assertFalse(session.inventoryPathActive(), "the invalid inventory path leaves for its nearest valid ancestor");
+		var view = session.snapshot().inventoryView();
+		assertFalse(view.open()); assertEquals(Status.INVALID, view.status());
+		assertEquals(Component.translatable(InventoryFailureReason.SOURCE_UNAVAILABLE.translationKey()), view.statusMessage());
+		var menu = session.snapshot().radial().menus().getLast();
+		assertTrue(menu.menuId().endsWith(":content"));
+		var entry = menu.choices().stream().filter(choice -> choice.id().endsWith(":inventory")).findFirst().orElseThrow();
+		assertTrue(entry.disabled(), "a terminal source loss disables the Inventory entry");
+		clock.addAndGet(InventoryPreviewLifecycle.RETRY_DELAY_MILLIS); inventory.tick(true); session.tick(1_000 + clock.get());
+		assertEquals(1, sent.stream().filter(packet -> packet instanceof InventoryC2SPacket p && p.kind() == InventoryC2SPacket.Kind.OPEN).count());
+		assertEquals(wire, sent.stream().filter(packet -> packet instanceof InventoryC2SPacket p && p.kind() == InventoryC2SPacket.Kind.CLOSE)
+			.map(InventoryC2SPacket.class::cast).findFirst().orElseThrow().requestId());
+		content.close();
+	}
+	@Test void invalidatingTheEnteredItemLaneReturnsToTheSurvivingList() {
+		var fixture = new MixedInventorySession();
+		double forward = fixture.session.snapshot().inventory().direction().forward()
+			== nx.pingwheel.common.client.spatial.InventoryListModel.Side.RIGHT ? 1 : -1;
+		fixture.session.moveGui(forward * 200, 0, 290);
+		assertTrue(fixture.session.snapshot().radial().menus().getLast().menuId().contains(":item:"));
+		fixture.inventory.accept(InventoryS2CPacket.previewState(InventoryResourceKind.ITEM, 7, 100, 1,
+			fixture.content.requestId(), 2, 0, InventoryS2CPacket.PreviewPhase.SCAN,
+			InventoryS2CPacket.PreviewCondition.FAILED, InventoryFailureReason.SOURCE_UNAVAILABLE));
+		fixture.session.tick(300);
+		assertTrue(fixture.session.inventoryPathActive(), "the healthy sibling keeps the list path open");
+		assertTrue(fixture.session.snapshot().radial().menus().getLast().menuId().endsWith(":inventory"),
+			"the invalid item menu exits to the nearest valid ancestor");
+		assertEquals(List.of("FLUID:opaque:A"), fixture.session.snapshot().inventory().entries().stream()
+			.map(nx.pingwheel.common.client.spatial.InventoryListModel.Entry::key).toList());
+		assertEquals("FLUID:opaque:A", fixture.session.snapshot().inventory().selectedKey());
+		fixture.inventory.accept(InventoryS2CPacket.previewState(InventoryResourceKind.FLUID, 7, 100, 1,
+			fixture.content.requestId(), 2, 0, InventoryS2CPacket.PreviewPhase.SCAN,
+			InventoryS2CPacket.PreviewCondition.FAILED, InventoryFailureReason.SOURCE_UNAVAILABLE));
+		fixture.session.tick(310);
+		assertFalse(fixture.session.inventoryPathActive(), "whole source loss exits the inventory ancestry");
+		fixture.content.close();
+	}
+	@Test void closeUsesOriginalOwnerAfterInventorySupplierChanges() {
+		List<IPacket> originalPackets = new ArrayList<>(), replacementPackets = new ArrayList<>();
+		var original = new ClientInventory(originalPackets::add); ready(original);
+		var replacement = new ClientInventory(replacementPackets::add); ready(replacement);
+		var supplier = new java.util.concurrent.atomic.AtomicReference<ClientInventory>(original);
+		var content = new NativeSelectorContent(capture(), null, supplier::get, ignored -> List.of(ping("attention")),
+			ref -> Component.literal(ref.fieldId()), json -> Component.literal("Chest"));
+		content.begin(new Object()); long wire = lastOpenRequest(originalPackets); supplier.set(replacement); content.close();
+		assertTrue(originalPackets.stream().anyMatch(packet -> packet instanceof InventoryC2SPacket p && p.kind() == InventoryC2SPacket.Kind.CLOSE && p.requestId() == wire));
+		assertTrue(replacementPackets.isEmpty());
+	}
+	@Test void viewRebuildRemovesOldRowReferencesBeforeReplacementDataArrives() {
+		List<IPacket> sent = new ArrayList<>(); var inventory = new ClientInventory(sent::add); ready(inventory);
+		var capture = capture();
+		var content = new NativeSelectorContent(capture, null, () -> inventory, ignored -> List.of(ping("attention")),
+			ref -> Component.literal(ref.fieldId()), json -> Component.literal("Chest"));
+		content.begin(new Object()); long wire = lastOpenRequest(sent);
+		inventory.accept(InventoryS2CPacket.opened(7, 100, 1, wire, 1));
+		inventory.accept(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, wire, null, 9, 1, 1, 0, 1, false,
+			InventoryS2CPacket.Status.INCOMPLETE, 0, List.of(entry("old", 4, false, 0)), InventoryFailureReason.VARIANT_LIMIT).stamp(100, 1));
+		var session = new SpatialSelectorSession<>(previewTarget(capture), Map.of(), intentSettings(), previewFence(content), content, SELECTOR_GEOMETRY);
+		session.open(0); enter(session, "content", 10); enter(session, firstNonBack(session), 150);
+		assertEquals(1, session.snapshot().inventoryView().rows().size());
+		inventory.presentationReset(100, 2); session.tick(300);
+		assertTrue(session.inventoryPathActive()); assertTrue(session.snapshot().inventoryView().rows().isEmpty());
+		assertFalse(session.snapshot().inventoryView().selectedRowCommittable());
+		inventory.accept(InventoryS2CPacket.opened(7, 100, 2, wire, 1)); session.tick(310);
+		assertTrue(session.snapshot().inventoryView().rows().isEmpty());
+		inventory.accept(InventoryS2CPacket.data(InventoryS2CPacket.Kind.PREVIEW, 7, wire, null, 10, 1, 1, 0, 1, true,
+			InventoryS2CPacket.Status.READY, 0, List.of(entry("fresh", 5, false, 0))).stamp(100, 2));
+		session.tick(320);
+		assertEquals(List.of("ITEM:fresh"), session.snapshot().inventoryView().rows().stream().map(nx.pingwheel.common.render.SpatialInventoryView.Row::key).toList());
+		content.close();
 	}
 
 	private static SpatialSelectorSession.Property projectedProperty(
@@ -1038,7 +1160,8 @@ class NativeSelectorContentTest {
 			assertEquals(List.of("Create properties...", "minecraft:block.state: 1", "minecraft:entity.type: minecraft:chest",
 				"Chest", "Back"), top.stream().filter(choice -> !choice.id().endsWith(":inventory")).map(fixture::label).toList(),
 				"generic fields stay outside the Create group in their declared relative order");
-			assertEquals(List.of("Contents"), top.stream().filter(choice -> choice.id().endsWith(":inventory"))
+			assertEquals(List.of(Component.translatable("pingforit.inventory.group.contents").getString()),
+				top.stream().filter(choice -> choice.id().endsWith(":inventory"))
 				.map(fixture::label).toList(), "the inventory entry stays directly under Content regardless of its preferred slot");
 			var create = top.getFirst();
 			assertTrue(create.branch());

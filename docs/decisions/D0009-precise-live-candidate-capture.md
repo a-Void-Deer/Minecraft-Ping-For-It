@@ -10,7 +10,7 @@ The Precise branch captures its candidate set live from the current camera ray
 while that branch is active, on the persisted
 [precise capture period](../config/client.md#spatial-selector-interaction),
 instead of the press-frozen ordinary ray. Ordinary short-press, Danger, Intent,
-Content, and Cancel actions keep their press-time freeze; only Precise is live.
+Details, and Cancel actions keep their press-time freeze; only Precise is live.
 
 All candidates of one fixed Target Type compete by nearest actual hit from the
 live ray origin. A scan that cannot complete disables that type's leaf even when

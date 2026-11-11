@@ -146,6 +146,80 @@ class InventoryBackendTest {
 			int reads = f.reads.get(); f.backend.tick(5, f.settings); assertTrue(f.reads.get() > reads, "CLOSE releases preview, not tracking");
 		}
 	}
+	@Test void selectionFailureRetainsGenericAndDetailedCauseAndAReplayNeverRetriesCreation() {
+		try (Fixture f = new Fixture()) {
+			f.open(); var request = f.select(1);
+			f.valid = false; f.backend.handle(A, request, 1, f.settings);
+			var rejected = f.host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.REJECT).findFirst().orElseThrow();
+			assertEquals(MarkerRejectReason.INVALID_REQUEST, rejected.rejection());
+			assertNotNull(rejected.failureReason());
+			assertNotEquals(InventoryFailureReason.INVALID_REQUEST, rejected.failureReason(), "source detail is not replaced by the generic marker reason");
+			int resolutions = f.resolutions.get();
+			f.valid = true; f.backend.handle(A, request, 1, f.settings);
+			assertEquals(0, f.host.store.size()); assertEquals(resolutions, f.resolutions.get());
+			assertEquals(rejected.failureReason(), f.host.packets.getLast().failureReason());
+		}
+	}
+	@Test void bindingProviderLimitKeepsGenericRejectionAndTypedReasonWithoutReplay() {
+		@org.jetbrains.annotations.NotNullByDefault
+		class BindingFailureHost extends Host {
+			boolean failBinding;
+			@Override public boolean annotationAllowed(InventorySourceInput input, String type) {
+				boolean allowed = super.annotationAllowed(input, type); failBinding = true; return allowed;
+			}
+		}
+		var host = new BindingFailureHost(); var settings = InventorySettings.serverDefaults();
+		var reads = new AtomicInteger(); var resolutions = new AtomicInteger(); var validations = new AtomicInteger();
+		try (var logs = new InventoryDiagnosticsTestCapture(org.apache.logging.log4j.Level.ALL);
+			var backend = new InventoryBackend(host, new InventoryRuntime(input -> {
+			resolutions.incrementAndGet();
+			return Optional.of(new InventoryRuntimeTest.Source(input, reads, 1) {
+				@Override public boolean valid() {
+					validations.incrementAndGet();
+					if (host.failBinding) throw nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimits.exceeded(
+						nx.pingwheel.common.presentation.inventory.minecraft.ProviderLimitSite.CONTAINER_LOCAL_SLOTS, 65, 64);
+					return true;
+				}
+			});
+		}, 16_000_000), 1)) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
+			backend.handle(A, InventoryC2SPacket.hello(), 0, settings);
+			backend.handle(A, InventoryC2SPacket.open(host.epoch(A), 100, 1, 1, InventoryRuntimeTest.TARGET, BlockFace.NORTH), 0, settings);
+			backend.tick(0, settings);
+			var preview = host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
+			var request = InventoryC2SPacket.select(host.epoch(A), 100, 1, 1, 1, preview.baselineId(), preview.statusRevision(), preview.entries().getFirst().key(), "danger");
+			int readBefore = reads.get();
+			backend.handle(A, request, 1, settings);
+			var rejected = host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.REJECT).findFirst().orElseThrow();
+			assertEquals(MarkerRejectReason.INVALID_REQUEST, rejected.rejection());
+			assertEquals(InventoryFailureReason.PHYSICAL_SLOT_LIMIT, rejected.failureReason());
+			assertTrue(logs.messages().contains("reason=physical-slot-limit"), logs.messages());
+			assertFalse(logs.messages().contains("reason=provider-failure"), logs.messages());
+			assertEquals(readBefore, reads.get()); assertEquals(0, backend.runtime().memory().reserved());
+			int resolved = resolutions.get(); int validated = validations.get();
+			host.failBinding = false; backend.handle(A, request, 1, settings);
+			assertEquals(0, host.store.size()); assertEquals(resolved, resolutions.get()); assertEquals(validated, validations.get());
+			assertEquals(rejected.failureReason(), host.packets.getLast().failureReason());
+		}
+	}
+	@Test void postStoreFailureIsStillACommittedSelectionAndCannotCreateAgain() {
+		class FailingPublicationHost extends Host {
+			@Override public void publishCreated(InventoryBackend.Created created) { throw new IllegalStateException("post-store delivery"); }
+		}
+		var host = new FailingPublicationHost(); var settings = InventorySettings.serverDefaults();
+		var reads = new AtomicInteger();
+		try (var backend = new InventoryBackend(host, new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 1)), 16_000_000), 1)) {
+			backend.handle(A, InventoryC2SPacket.hello(), 0, settings);
+			backend.handle(A, InventoryC2SPacket.open(host.epoch(A), 100, 1, 1, InventoryRuntimeTest.TARGET, BlockFace.NORTH), 0, settings);
+			backend.tick(0, settings);
+			var preview = host.packets.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty()).findFirst().orElseThrow();
+			var select = InventoryC2SPacket.select(host.epoch(A), 100, 1, 1, 1, preview.baselineId(), preview.statusRevision(), preview.entries().getFirst().key(), "attention");
+			backend.handle(A, select, 1, settings); backend.handle(A, select, 1, settings);
+			assertEquals(1, host.store.size()); assertEquals(InventoryS2CPacket.Kind.SELECTED, host.packets.getLast().kind());
+			assertNull(host.packets.getLast().failureReason());
+		}
+	}
 	@Test void unsupportedFluidLaneCannotResolveAnItemReferenceOrConsumeItsCommitFence() {
 		try (Fixture f = new Fixture()) {
 			f.open(); var preview = f.preview(); int reads = f.reads.get();
@@ -300,6 +374,7 @@ class InventoryBackendTest {
 		try (Fixture f = new Fixture()) {
 			f.open(); long epoch = f.host.epoch(A); f.backend.handle(A, f.select(1), 1, f.settings);
 			int start = f.host.packets.size();
+			var pressure = f.backend.runtime().memory().tryReserve(5L * 1024 * 1024).orElseThrow(); pressure.commit(5L * 1024 * 1024);
 			f.settings.getTracking().setPeriodTicks(7); f.settings.setPendingMemoryMiB(4); f.backend.tick(2, f.settings);
 			assertTrue(f.backend.runtime().memory().remaining() < 0);
 			assertTrue(f.host.packets.subList(start, f.host.packets.size()).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.OFFER));
@@ -308,7 +383,7 @@ class InventoryBackendTest {
 			assertEquals(epoch, f.host.epoch(A));
 			assertEquals(80, f.host.store.allMarkers().getFirst().expiresAtTick());
 			assertEquals(4L * 1024 * 1024, f.backend.runtime().memory().cap());
-			f.settings.setPendingMemoryMiB(16); f.backend.tick(4, f.settings);
+			pressure.close(); f.settings.setPendingMemoryMiB(16); f.backend.tick(4, f.settings);
 			var offers = f.host.packets.subList(start, f.host.packets.size()).stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.OFFER).toList();
 			assertFalse(offers.isEmpty());
 			assertTrue(offers.stream().allMatch(p -> p.offer().trackingPeriodTicks() == 9), "recovery advertises only the latest settings");
@@ -333,7 +408,9 @@ class InventoryBackendTest {
 			int start = f.host.packets.size(); f.amount = 0;
 			f.backend.handle(A, selection, 1, f.settings); f.backend.tick(2, f.settings);
 			assertEquals(0, f.host.store.size()); assertEquals(0, f.backend.runtime().memory().reserved());
-			assertTrue(f.host.packets.subList(start, f.host.packets.size()).stream().noneMatch(p -> p.commitId() == 1));
+			assertEquals(1, f.host.packets.subList(start, f.host.packets.size()).stream().filter(p -> p.commitId() == 1
+				&& p.kind() == InventoryS2CPacket.Kind.REJECT && p.failureReason() == InventoryFailureReason.MEMORY_LIMIT).count(),
+				"the prepaid result owner reports memory refusal even while the ledger is full");
 			// Source recovery cannot turn the recorded rejection into another create attempt.
 			f.amount = 7; padding.close(); f.settings.setPendingMemoryMiB(16);
 			f.backend.tick(3, f.settings); f.backend.tick(4, f.settings);
@@ -413,11 +490,15 @@ class InventoryBackendTest {
 			assertNotEquals(InventoryS2CPacket.Status.INCOMPLETE, second.status()); assertEquals(7, second.entries().getFirst().count());
 		}
 	}
-	@Test void invalidPreviewWithoutCloseReleasesPhysicalRoundAndEntriesSoUnrelatedPreviewCanProgress() {
+	@Test void invalidPreviewWithoutCloseReleasesPhysicalRoundAndEntriesSoUnrelatedPreviewCanProgress() throws Exception {
 		try (Fixture f = new Fixture()) {
 			f.settings.getPreview().setPeriodTicks(1);
-			f.open(); long before = f.backend.runtime().memory().retained(); f.valid = false; f.backend.tick(1, f.settings);
-			assertTrue(f.backend.runtime().memory().retained() < before - 280000, "probe invalidation releases provider round/pages and preview entries without CLOSE");
+			f.open(); Object preview = retainedPreview(f.backend);
+			long payload = ((List<?>) field(preview, "entries")).size();
+			assertTrue(payload > 0); Object backing = java.util.Objects.requireNonNull(field(preview, "categoryMemory"));
+			f.valid = false; f.backend.tick(1, f.settings);
+			assertTrue(((List<?>) field(preview, "entries")).isEmpty()); assertTrue(((Map<?, ?>) field(preview, "counts")).isEmpty());
+			assertSame(backing, field(preview, "categoryMemory"), "invalidation releases payloads and retains admitted backing capacity");
 			assertTrue(f.host.packets.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && p.status() == InventoryS2CPacket.Status.INVALID));
 			f.valid = true; f.backend.handle(B, InventoryC2SPacket.open(f.host.epoch(B), 100, 1, 1, InventoryRuntimeTest.TARGET, BlockFace.SOUTH), 2, f.settings); f.backend.tick(2, f.settings);
 			assertTrue(f.host.packets.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW && !p.entries().isEmpty() && p.epoch() == f.host.epoch(B)));

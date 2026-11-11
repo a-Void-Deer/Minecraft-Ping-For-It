@@ -30,6 +30,64 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @NotNullByDefault
 class InventoryCaptureDiagnosticsTest {
+	@Test void providerLimitClassificationOnlyUnwrapsEachAuditedWrapperOnce() {
+		try (var logs = new InventoryDiagnosticsTestCapture(Level.DEBUG)) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.DEBUG);
+			var limit = nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimits.exceeded(
+				nx.pingwheel.common.presentation.inventory.minecraft.ProviderLimitSite.REFLECTION_INHERITANCE, 33, 32);
+			var wrapped = new java.lang.reflect.InvocationTargetException(new InventorySourceAccess.CursorlessReadFailure(1,
+				new InventorySharedRead.ReadFailure(InventorySharedRead.Check.UNAVAILABLE, limit)));
+			assertEquals(limit, InventoryCaptureDiagnostics.providerLimit(wrapped));
+			assertEquals(InventoryFailureReason.NATIVE_DEPTH_LIMIT, InventoryCaptureDiagnostics.sourceReason(wrapped));
+			assertTrue(InventoryCaptureDiagnostics.expectedFailure(wrapped));
+			assertTrue(InventoryCaptureDiagnostics.expectedSourceUnavailable(wrapped));
+			assertNull(InventoryCaptureDiagnostics.providerLimit(new java.lang.reflect.InvocationTargetException(wrapped)));
+			var unknown = new IllegalStateException("opaque provider wrapper", limit) {
+				@Override public synchronized @Nullable Throwable getCause() { throw new AssertionError("unknown cause accessor"); }
+			};
+			assertNull(InventoryCaptureDiagnostics.providerLimit(unknown));
+			assertEquals(InventoryFailureReason.PROVIDER_FAILURE, InventoryCaptureDiagnostics.sourceReason(unknown));
+			assertEquals(1, logs.events().size(), "classification must not repeat the native limit report");
+		}
+	}
+	@Test void typedBoundsKeepIndependentReasonsAndEveryDebugRepeatWithoutPayloadDisclosure() {
+		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "private:block"), new UUID(51, 92), BlockFace.NORTH);
+		var memory = assertThrows(InventoryItemBudget.CaptureLimitException.class, () ->
+			new nx.pingwheel.common.presentation.inventory.minecraft.InventoryCatalogAdmission(0, Long.MAX_VALUE).admitFluid(0, 15, 5, 0, 0));
+		var work = assertThrows(InventoryItemBudget.CaptureLimitException.class, () ->
+			new nx.pingwheel.common.presentation.inventory.minecraft.InventoryCatalogAdmission(Long.MAX_VALUE, 0).admitFluid(0, 15, 5, 0, 0));
+		var catalog = new InventoryFluidCodec.Catalog();
+		for (int index = 0; index < 15; index++) {
+			byte[] bytes = new byte[65536]; bytes[0] = (byte) index;
+			catalog.intern("minecraft:water", 1, InventoryFluidCodec.Identity.exact(bytes), new InventoryFluidValue.Display("minecraft:water", "private-label", null));
+		}
+		byte[] tail = new byte[65536]; tail[0] = 16;
+		var payload = assertThrows(InventoryFluidCodec.CapacityException.class, () -> catalog.intern("minecraft:water", 1,
+			InventoryFluidCodec.Identity.exact(tail), new InventoryFluidValue.Display("minecraft:water", "private-label", null)));
+		var definitions = new InventoryFluidCodec.Catalog();
+		for (int index = 0; index < 1024; index++) {
+			String id = "test:fluid_" + index;
+			definitions.intern(id, 1, InventoryFluidCodec.Identity.refused(), new InventoryFluidValue.Display(id, "private-label", null));
+		}
+		var entries = assertThrows(InventoryFluidCodec.CapacityException.class, () -> definitions.intern("test:overflow", 1,
+			InventoryFluidCodec.Identity.refused(), new InventoryFluidValue.Display("test:overflow", "private-label", null)));
+		var failures = java.util.Map.of(InventoryFailureReason.MEMORY_LIMIT, memory, InventoryFailureReason.ITEM_WORK_LIMIT, work,
+			InventoryFailureReason.VARIANT_LIMIT, entries, InventoryFailureReason.CATALOG_BYTES_LIMIT, payload, InventoryFailureReason.SNAPSHOT_LIMIT,
+			new nx.pingwheel.common.presentation.inventory.minecraft.InventoryObservationSnapshot.LimitException("private-payload"));
+		try (var logs = new InventoryDiagnosticsTestCapture(Level.DEBUG)) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.DEBUG);
+			failures.forEach((reason, failure) -> {
+				int before = logs.events().size();
+				for (int repeat = 0; repeat < 2; repeat++) InventoryCaptureDiagnostics.boundExceeded(input, "typed-bound", failure);
+				assertEquals(before + 2, logs.events().size());
+				assertTrue(logs.events().getLast().getMessage().getFormattedMessage().contains("reason=" + reason.code()));
+			});
+			assertTrue(logs.events().stream().allMatch(event -> event.getMessage().getFormattedMessage().contains("limitHit=true")));
+			assertTrue(!logs.messages().contains("private-label")); assertTrue(!logs.messages().contains("private:block"));
+		}
+	}
 	@Test void normalProfileDoesNotEvaluateUnexpectedFailureContext() {
 		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "private:block"), new UUID(51, 2), BlockFace.NORTH);
 		try (var logs = new InventoryDiagnosticsTestCapture()) {
@@ -45,42 +103,31 @@ class InventoryCaptureDiagnosticsTest {
 		}
 	}
 
-	@Test void belowMinimumProfileDoesNotConsumeReasonGateAndFirstDeepAttemptStillReports() throws ReflectiveOperationException {
-		var field = InventoryCaptureDiagnostics.class.getDeclaredField("LAST_LOGGED"); field.setAccessible(true);
-		var gate = (java.util.concurrent.atomic.AtomicLongArray) field.get(null);
-		long[] previous = new long[gate.length()];
-		for (int index = 0; index < gate.length(); index++) previous[index] = gate.getAndSet(index, 0);
+	@Test void belowMinimumProfileSkipsDetailAndDebugReportsEveryLimitAttempt() {
 		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 4, 5, 6, "private:block"), new UUID(51, 4), BlockFace.NORTH);
-		try (var logs = new InventoryDiagnosticsTestCapture()) {
+		try (var logs = new InventoryDiagnosticsTestCapture(Level.DEBUG)) {
 			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
 				nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
 			InventoryCaptureDiagnostics.boundExceeded(input, () -> { throw new AssertionError("below-minimum detail"); });
-			assertEquals(0L, gate.get(0), "a below-minimum diagnostic must not consume the domain gate");
 			assertTrue(logs.events().isEmpty());
 			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
-				nx.pingwheel.common.diagnostics.LoggingProfile.DEEP);
+				nx.pingwheel.common.diagnostics.LoggingProfile.DEBUG);
 			InventoryCaptureDiagnostics.boundExceeded(input, "first-eligible");
-			assertTrue(gate.get(0) != 0);
 			assertEquals(1, logs.events().size());
-			assertTrue(logs.messages().contains("detail=first-eligible"));
+			assertTrue(logs.messages().contains("stage=first-eligible"));
 			InventoryCaptureDiagnostics.boundExceeded(input, "repeat");
-			assertEquals(1, logs.events().size(), "the existing reason interval still suppresses a same-window repeat");
-		} finally { for (int index = 0; index < gate.length(); index++) gate.set(index, previous[index]); }
+			assertEquals(2, logs.events().size()); assertTrue(logs.messages().contains("limitHit=true"));
+		}
 	}
 
-	@Test void backendDisabledAtEligibleProfileStillAdvancesReasonGateWithoutFormatting() throws ReflectiveOperationException {
-		var field = InventoryCaptureDiagnostics.class.getDeclaredField("LAST_LOGGED"); field.setAccessible(true);
-		var gate = (java.util.concurrent.atomic.AtomicLongArray) field.get(null);
-		long[] previous = new long[gate.length()];
-		for (int index = 0; index < gate.length(); index++) previous[index] = gate.getAndSet(index, 0);
+	@Test void backendDisabledAtEligibleProfileDoesNotFormatLimitDetail() {
 		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 4, 5, 6, "private:block"), new UUID(51, 5), BlockFace.NORTH);
 		try (var logs = new InventoryDiagnosticsTestCapture(Level.OFF)) {
 			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
 				nx.pingwheel.common.diagnostics.LoggingProfile.DEEP);
 			InventoryCaptureDiagnostics.boundExceeded(input, () -> { throw new AssertionError("backend-disabled detail"); });
-			assertTrue(gate.get(0) != 0, "the established backend-disabled reason semantics advance the domain gate");
 			assertTrue(logs.events().isEmpty());
-		} finally { for (int index = 0; index < gate.length(); index++) gate.set(index, previous[index]); }
+		}
 	}
 
 	@Test void externalCaptureFailureKeepsProviderIdentityAndOriginalDetailsWithoutPhysicalCoordinates() {
@@ -145,24 +192,20 @@ class InventoryCaptureDiagnosticsTest {
 		}
 	}
 
-	@Test void existingBoundReasonGateUsesApprovedBackendRatherThanTheFullGeneralWindow() throws ReflectiveOperationException {
+	@Test void debugLimitReportsBypassOtherReportVolumeAndKeepIndependentReasons() {
 		var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 4, 5, 6, "minecraft:chest"), new UUID(51, 4), BlockFace.NORTH);
-		var field = InventoryCaptureDiagnostics.class.getDeclaredField("LAST_LOGGED"); field.setAccessible(true);
-		var gate = (java.util.concurrent.atomic.AtomicLongArray) field.get(null);
-		long[] previous = new long[gate.length()];
-		for (int index = 0; index < gate.length(); index++) previous[index] = gate.getAndSet(index, 0);
-		try (var logs = new InventoryDiagnosticsTestCapture()) {
+		try (var logs = new InventoryDiagnosticsTestCapture(Level.DEBUG)) {
 			for (int index = 0; index < 65; index++) nx.pingwheel.common.diagnostics.Diagnostics.server().atDetailed().event(Level.WARN,
 				"inventory/test-window", "filled", () -> "unrelated");
 			int before = logs.events().size();
 			InventoryCaptureDiagnostics.boundExceeded(input, "native-refusal");
 			InventoryCaptureDiagnostics.boundExceeded(input, "repeat-refusal");
-			assertEquals(before + 1, logs.events().size());
-			assertTrue(logs.messages().contains("detail=native-refusal"));
+			InventoryCaptureDiagnostics.memoryDeferred(input);
+			assertEquals(before + 3, logs.events().size());
+			assertTrue(logs.messages().contains("stage=native-refusal"));
+			assertTrue(logs.messages().contains("reason=memory-limit")); assertTrue(logs.messages().contains("reason=native-work-limit"));
 			assertTrue(logs.events().getLast().getMessage().getFormattedMessage().startsWith("[PingForIt] "));
 			assertNull(logs.events().getLast().getThrown());
-		} finally {
-			for (int index = 0; index < gate.length(); index++) gate.set(index, previous[index]);
 		}
 	}
 

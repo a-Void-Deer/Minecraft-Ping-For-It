@@ -34,6 +34,48 @@ import static org.junit.jupiter.api.Assertions.*;
 /** UNRUN staged tests; no numerical A1 certificate is inferred from these fixtures. */
 class InventoryObservationSnapshotTest {
 	@BeforeAll static void bootstrap() { net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap(); }
+	@Test void singleSlotSnapshotActuallyCompletesAtSixteenMiBWithMinimumAndMaximumDisplay() {
+		for (int cap : new int[] {1024, 131072}) {
+			var topology = new InventorySnapshotLayout("minecraft:container", "", BlockPos.ZERO, List.of(
+				new InventorySnapshotLayout.Member(BlockPos.ZERO, "minecraft:chest", "minecraft:chest", "member", List.of(
+					new InventorySnapshotLayout.Segment("Items", InventorySnapshotSchemas.ITEMS, 1, List.of(0))))));
+			var settings = InventorySettings.serverDefaults(); settings.setPendingMemoryMiB(16);
+			settings.setDisplayByteMultiplier(java.math.BigDecimal.valueOf(cap / 4096.0));
+			settings.setFrameByteMultiplier(java.math.BigDecimal.valueOf(16)); settings.validate();
+			assertEquals(cap, settings.effectiveDisplayBytes());
+			var input = new InventorySourceInput(new Target.BlockTarget("minecraft:overworld", 0, 0, 0, "minecraft:chest"),
+				new UUID(191, cap), BlockFace.NORTH);
+			var reads = new AtomicInteger();
+			var source = new InventorySourceAccess.Source() {
+				@Override public SourceKey key() { return new SourceKey("test", "inventory", "tiny-capture", input.viewKey()); }
+				@Override public boolean valid() { return true; }
+				@Override public boolean stableCursor() { return true; }
+				@Override public int slots() { return 1; }
+				@Override public int displayBytes() { return cap; }
+				@Override public nx.pingwheel.common.presentation.inventory.InventoryDomainCodec.Item read(int slot) { throw new AssertionError("live read"); }
+				@Override public Optional<InventorySourceAccess.SnapshotPlan> snapshotPlan() { return Optional.of(new InventorySourceAccess.SnapshotPlan() {
+					@Override public long memoryUpperBoundBytes() { return InventoryObservationSnapshot.memoryUpperBound(topology, cap); }
+					@Override public int physicalReadUpperBound() { return 1; }
+					@Override public long itemWorkUpperBoundUnits() { return InventoryItemBudget.workUpperBound(cap, 0); }
+					@Override public int attemptedPhysicalReads() { return reads.get(); }
+					@Override public Optional<InventorySourceAccess.InventorySnapshot> capture() {
+						return Optional.of(InventoryObservationSnapshot.capture(topology, BlockPos.ZERO, RegistryAccess.EMPTY, cap,
+							memoryUpperBoundBytes(), slot -> { reads.incrementAndGet(); return new IPlatformInventoryService.ResidentEntry(
+								new InventoryResidentItem.Stack(new ItemStack(Items.STONE)), 7); }, () -> true));
+					}
+				}); }
+			};
+			try (var runtime = new InventoryRuntime(ignored -> Optional.of(source), settings.pendingMemoryBytes())) {
+				runtime.advance(0, settings);
+				var consumer = runtime.attach(input, new InventoryRuntime.PreviewSubject(input.readOwner())).orElseThrow();
+				var result = runtime.step(consumer, 1).orElseThrow();
+				assertEquals(CaptureResult.Completeness.COMPLETE, result.result().completeness());
+				assertEquals(7, result.slots().getFirst().amount()); assertEquals(1, reads.get());
+				consumer.close(); assertEquals(1024, runtime.memory().retained(), "the period's paid logical subject remains until reset");
+				assertEquals(0, runtime.memory().reserved()); runtime.close(); assertEquals(0, runtime.memory().retained());
+			}
+		}
+	}
 	private static InventorySnapshotLayout layout() {
 		var segment = new InventorySnapshotLayout.Segment("Items", InventorySnapshotSchemas.ITEMS, 3, List.of(2, 0));
 		return new InventorySnapshotLayout("test:resident", "face=north", BlockPos.ZERO, List.of(

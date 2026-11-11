@@ -74,6 +74,41 @@ class ClientConfigValidationTest {
 	}
 
 	@Test
+	void cooldownFeedbackDefaultsToActionBarAndPersistsItsUppercaseName() {
+		ClientConfig config = new ClientConfig();
+
+		assertEquals(CooldownFeedbackMode.ACTIONBAR, config.getCooldownFeedback());
+		assertTrue(new Gson().toJson(config).contains("\"cooldownFeedback\":\"ACTIONBAR\""));
+		assertEquals(CooldownFeedbackMode.CHAT, CooldownFeedbackMode.get("chat"));
+		assertEquals("actionbar", CooldownFeedbackMode.ACTIONBAR.toString());
+
+		config.setCooldownFeedback(CooldownFeedbackMode.CHAT);
+		ClientConfig restored = new Gson().fromJson(new Gson().toJson(config), ClientConfig.class);
+		restored.validate((key, supplied, effective) -> {});
+
+		assertEquals(CooldownFeedbackMode.CHAT, restored.getCooldownFeedback());
+		assertTrue(new Gson().toJson(restored).contains("\"cooldownFeedback\":\"CHAT\""));
+	}
+
+	@Test
+	void nullAndUnknownCooldownFeedbackModesRecoverToActionBar() {
+		for (String json : List.of(
+			"{\"cooldownFeedback\":null}",
+			"{\"cooldownFeedback\":\"unknown\"}")) {
+			ClientConfig config = new Gson().fromJson(json, ClientConfig.class);
+
+			assertEquals(CooldownFeedbackMode.ACTIONBAR, config.getCooldownFeedback(),
+				"the runtime getter must be safe before validation: " + json);
+			config.validate((key, supplied, effective) -> {});
+			assertEquals(CooldownFeedbackMode.ACTIONBAR, config.getCooldownFeedback(), json);
+		}
+
+		ClientConfig config = new ClientConfig();
+		config.setCooldownFeedback(null);
+		assertEquals(CooldownFeedbackMode.ACTIONBAR, config.getCooldownFeedback());
+	}
+
+	@Test
 	void oldJsonWithoutTheNewListsKeepsTheirDefaults() {
 		ClientConfig config = new Gson().fromJson("{\"pingVolume\":42}", ClientConfig.class);
 

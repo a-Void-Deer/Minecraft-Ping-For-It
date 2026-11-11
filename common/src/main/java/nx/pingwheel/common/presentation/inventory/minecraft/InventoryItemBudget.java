@@ -1,6 +1,9 @@
 package nx.pingwheel.common.presentation.inventory.minecraft;
 
 import nx.pingwheel.common.config.InventoryLimits;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Admission envelope and attempted-work ledger for sequential item freezes.
@@ -8,16 +11,20 @@ import nx.pingwheel.common.config.InventoryLimits;
  * separately admit its call-graph vector BEFORE it runs; this ledger is not a
  * certificate for an arbitrary codec. Refused roots do not refund attempted work.
  */
+@NotNullByDefault
 public final class InventoryItemBudget {
 	// Supported conservative layout weights: 32-byte object/array header, 8-byte
 	// references, two-byte UTF-16 units, and seven bytes alignment per object.
 	static final long OBJECT_BYTES = 40;
 	static final long REFERENCE_BYTES = 8;
 	static final int MAX_DEPTH = 48;
-	static final int MAX_NODES = 4096;
+	static final int MAX_NODES = 8192;
 	static final int MAX_UTF16 = 131072;
-	static final int MAX_ARRAY_BYTES = 49152;
-	static final int MAX_COLLECTION = 256;
+	static final int MAX_ARRAY_BYTES = 60 * 1024;
+	static final int MAX_LIST = 512;
+	/** Arbitrary output keys keep their independent collision-work ceiling. */
+	static final int MAX_MAP = 256;
+	static final int MAX_REGISTRY_MAP = 512;
 	static final long MAX_NATIVE_TRAVERSAL = 262144;
 	// Fixed cumulative scratch envelope. Writers/certificates charge every full
 	// growth array and written-prefix copy, including discarded attempts; a
@@ -46,6 +53,7 @@ public final class InventoryItemBudget {
 	private long phaseAllocated;
 	private long phaseWork;
 	private boolean display;
+	private boolean displayReported;
 	private int nodes;
 	private int utf16;
 	private int arrayBytes;
@@ -70,7 +78,8 @@ public final class InventoryItemBudget {
 		// even at non-power-of-two caps. Reset retains storage, never refunds it.
 		// Old/new arrays during growth and final canonical/display overlap are
 		// therefore already inside the unchanged cumulative phase reservations.
-		// outside-phase ledger/input/refusals use <512B (94B/7R/4O).
+		// Outside-phase ledger/input/refusals use <512B, including typed
+		// reason fields and one root-local display-report flag.
 		// The separate sequential Catalog pass uses its own admission bound;
 		// it must not be added as simultaneous phase scratch or hidden in here.
 		return add(IDENTITY_ALLOCATION_BYTES + DISPLAY_ALLOCATION_BYTES, add(32768, multiply(6, cap)));
@@ -91,6 +100,10 @@ public final class InventoryItemBudget {
 	public static long workUpperBound(int displayBytes) {
 		return add(freezeWorkUpperBound(displayBytes), InventoryCatalogAdmission.workUpperBound(displayBytes));
 	}
+	/** Actual/admitted catalogue occupancy changes only the sequential catalogue allowance, never phase caps. */
+	public static long workUpperBound(int displayBytes, int catalogEntries) {
+		return add(freezeWorkUpperBound(displayBytes), InventoryCatalogAdmission.workUpperBound(displayBytes, catalogEntries));
+	}
 
 	/** OLD-input span arrays, decoded keys, output and final String; no Gson parse tree. */
 	public static long reprojectionWorkspaceUpperBound(int retainedUtf8Bytes) {
@@ -98,7 +111,8 @@ public final class InventoryItemBudget {
 			throw new IllegalArgumentException("retained display bound");
 		// m=floor(B/4)+1, Q<=B+1024, L<=Q. Actual vector:
 		// (25m+3L+52, B+Q+20, 12, 15), including Output's logical cap and possible compact-String
-		// attempt and UTF-16 backing. Componentwise 25% padding fits this bound.
+		// attempt and UTF-16 backing. The fixed 8192 also covers one 72-byte
+		// typed reprojection result; componentwise 25% padding fits this bound.
 		return add(8192, multiply(18, retainedUtf8Bytes));
 	}
 
@@ -130,12 +144,13 @@ public final class InventoryItemBudget {
 	void begin(int requestedDisplayBytes) {
 		if (active || displayCap(requestedDisplayBytes) != displayBytes)
 			throw new IllegalStateException("inventory root budget lifecycle");
-		if (roots >= maxRoots) throw new CaptureLimitException("inventory capture root limit");
+		if (roots >= maxRoots) throw new CaptureLimitException(InventoryFailureReason.SNAPSHOT_LIMIT, "inventory capture root limit");
 		roots++;
 		active = true;
 		rootWork = 0;
 		rootAllocated = 0;
 		phaseAllocated = phaseWork = 0; display = false;
+		displayReported = false;
 		nodes = utf16 = arrayBytes = 0;
 		containers = 0;
 	}
@@ -144,9 +159,9 @@ public final class InventoryItemBudget {
 		requireActive();
 		if (units < 0) throw new IllegalArgumentException("negative inventory work");
 		long nextPhase = add(phaseWork, units);
-		if (nextPhase > (display ? DISPLAY_WORK : IDENTITY_WORK)) throw new RootLimitException("inventory root work limit");
+		if (nextPhase > (display ? DISPLAY_WORK : IDENTITY_WORK)) throw new RootLimitException(InventoryFailureReason.NATIVE_WORK_LIMIT, "inventory root work limit");
 		long next = add(attemptedWork, units);
-		if (next > workLimit) throw new CaptureLimitException("inventory capture work limit");
+		if (next > workLimit) throw new CaptureLimitException(InventoryFailureReason.ITEM_WORK_LIMIT, "inventory capture work limit");
 		attemptedWork = next;
 		rootWork = add(rootWork, units);
 		phaseWork = nextPhase;
@@ -156,7 +171,7 @@ public final class InventoryItemBudget {
 		requireActive();
 		long cost = allocationCost(bytes, chars, references, objects);
 		long next = add(phaseAllocated, cost);
-		if (next > (display ? DISPLAY_ALLOCATION_BYTES : IDENTITY_ALLOCATION_BYTES)) throw new RootLimitException("inventory root allocation limit");
+		if (next > (display ? DISPLAY_ALLOCATION_BYTES : IDENTITY_ALLOCATION_BYTES)) throw new RootLimitException(InventoryFailureReason.MEMORY_LIMIT, "inventory root allocation limit");
 		// Allocation also consumes cumulative attempted work: zero-initialized
 		// array cells and object construction sites, not a memory-ledger refund.
 		// Repeated discarded roots therefore cannot hide allocation attempts.
@@ -169,6 +184,12 @@ public final class InventoryItemBudget {
 		requireActive(); if (display) throw new IllegalStateException("inventory display lifecycle");
 		display = true; phaseAllocated = phaseWork = 0;
 	}
+	/** One root's final display degradation owns one report across its projection ladder. */
+	void displayDegraded(InventoryFailureReason reason, boolean limitHit, String stage) {
+		if (displayReported) return;
+		displayReported = true;
+		InventoryItemDiagnostics.displayDegraded(reason, limitHit, stage);
+	}
 
 	static long allocationCost(long bytes, long chars, long references, long objects) {
 		if (bytes < 0 || chars < 0 || references < 0 || objects < 0)
@@ -178,23 +199,25 @@ public final class InventoryItemBudget {
 
 	void node(int depth) {
 		work(1);
-		if (depth > MAX_DEPTH || ++nodes > MAX_NODES) throw new RootLimitException("inventory native tree bound");
+		if (depth > MAX_DEPTH) throw new RootLimitException(InventoryFailureReason.NATIVE_DEPTH_LIMIT, "inventory native tree depth");
+		if (++nodes > MAX_NODES) throw new RootLimitException(InventoryFailureReason.NATIVE_NODE_LIMIT, "inventory native tree nodes");
 	}
 
-	void container() { work(1); if (++containers > MAX_NODES) throw new RootLimitException("inventory container occurrences"); }
+	void container() { work(1); if (++containers > MAX_NODES) throw new RootLimitException(InventoryFailureReason.NATIVE_NODE_LIMIT, "inventory container occurrences"); }
 
-	void string(String value) {
+	void string(@Nullable String value) {
 		requireActive();
 		if (value == null) throw new RootLimitException("null inventory string");
 		int length = value.length();
-		if (length > MAX_UTF16 - utf16) throw new RootLimitException("inventory string bound");
+		if (length > MAX_UTF16 - utf16) throw new RootLimitException(InventoryFailureReason.NATIVE_WORK_LIMIT, "inventory string bound");
 		utf16 += length;
 		work(length);
 	}
 
 	void array(long bytes) {
 		requireActive();
-		if (bytes < 0 || bytes > MAX_ARRAY_BYTES - arrayBytes) throw new RootLimitException("inventory array bound");
+		work(1);
+		if (bytes < 0 || bytes > MAX_ARRAY_BYTES - arrayBytes) throw new RootLimitException(InventoryFailureReason.NATIVE_ARRAY_LIMIT, "inventory array bound");
 		arrayBytes += (int) bytes;
 		work(bytes);
 	}
@@ -204,9 +227,9 @@ public final class InventoryItemBudget {
 
 	void retain(long bytes) {
 		requireActive();
-		if (bytes < 0 || bytes > retainedUpperBound(displayBytes)) throw new RootLimitException("inventory retained root bound");
+		if (bytes < 0 || bytes > retainedUpperBound(displayBytes)) throw new RootLimitException(InventoryFailureReason.MEMORY_LIMIT, "inventory retained root bound");
 		long next = add(retainedBytes, bytes);
-		if (next > retainedLimit) throw new CaptureLimitException("inventory capture retention limit");
+		if (next > retainedLimit) throw new CaptureLimitException(InventoryFailureReason.MEMORY_LIMIT, "inventory capture retention limit");
 		retainedBytes = next;
 	}
 
@@ -226,14 +249,14 @@ public final class InventoryItemBudget {
 	static long add(long left, long right) {
 		// Refusal must not first construct Math.addExact's stack-bearing error.
 		long result = left + right;
-		if (((left ^ result) & (right ^ result)) < 0) throw new RootLimitException("inventory bound overflow");
+		if (((left ^ result) & (right ^ result)) < 0) throw new RootLimitException(InventoryFailureReason.NATIVE_WORK_LIMIT, "inventory bound overflow");
 		return result;
 	}
 
 	static long multiply(long left, long right) {
 		long result = left * right;
 		if ((left != 0 && result / left != right) || (left == -1 && right == Long.MIN_VALUE))
-			throw new RootLimitException("inventory bound overflow");
+			throw new RootLimitException(InventoryFailureReason.NATIVE_WORK_LIMIT, "inventory bound overflow");
 		return result;
 	}
 
@@ -244,14 +267,27 @@ public final class InventoryItemBudget {
 	}
 
 	/** Root identity refusal, distinct from aborting the entire atomic capture. */
+	@NotNullByDefault
 	static class RootLimitException extends IllegalStateException {
-		RootLimitException(String reason) { super(reason); }
+		private final InventoryFailureReason reason;
+		private final boolean limitHit;
+		RootLimitException(String message) { this(InventoryFailureReason.PROVIDER_FAILURE, message, false); }
+		RootLimitException(InventoryFailureReason reason, String message) { this(reason, message, true); }
+		RootLimitException(InventoryFailureReason reason, String message, boolean limitHit) {
+			super(message); this.reason = reason; this.limitHit = limitHit;
+		}
+		public InventoryFailureReason reason() { return reason; }
+		public boolean limitHit() { return limitHit; }
 		@Override public synchronized Throwable fillInStackTrace() { return this; }
 	}
 
 	/** Caller must abandon the complete capture, never publish a mixed partial payload. */
+	@NotNullByDefault
 	public static class CaptureLimitException extends IllegalStateException {
-		CaptureLimitException(String reason) { super(reason); }
+		private final InventoryFailureReason reason;
+		CaptureLimitException(String message) { this(InventoryFailureReason.ITEM_WORK_LIMIT, message); }
+		CaptureLimitException(InventoryFailureReason reason, String message) { super(message); this.reason = reason; }
+		public InventoryFailureReason reason() { return reason; }
 		@Override public synchronized Throwable fillInStackTrace() { return this; }
 	}
 }

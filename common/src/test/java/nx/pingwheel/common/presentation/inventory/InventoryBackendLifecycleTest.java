@@ -13,10 +13,13 @@ import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.network.InventoryC2SPacket;
 import nx.pingwheel.common.network.InventoryS2CPacket;
+import nx.pingwheel.common.platform.TransportHandoff;
+import nx.pingwheel.common.presentation.inventory.client.ClientInventory;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.common.presentation.source.SourceKey;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
 import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -38,6 +41,281 @@ class InventoryBackendLifecycleTest {
 	private static final UUID OWNER = new UUID(71, 1), OTHER = new UUID(71, 2);
 	private static final Target.BlockTarget TARGET = new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest");
 	private static final int PERIOD = 4;
+
+	@Test void reentrantAdmissionTickCannotPublishTheClaimedPlaceholderAcrossAViewRebuild() {
+		try (Fixture f = new Fixture(1)) {
+			long epoch = f.hello(OWNER, 0);
+			f.host.duringOpen = () -> { f.host.view = 2; f.backend.tick(0, f.settings); };
+			f.open(OWNER, epoch, 1, 0);
+			var outcomes = f.host.sent.stream().map(Delivery::packet).filter(packet -> packet.requestId() == 1
+				&& (packet.kind() == InventoryS2CPacket.Kind.OPENED || packet.kind() == InventoryS2CPacket.Kind.OPEN_REJECTED)).toList();
+			assertEquals(1, outcomes.size()); assertEquals(InventoryS2CPacket.Kind.OPENED, outcomes.getFirst().kind());
+			assertEquals(2, outcomes.getFirst().view()); assertEquals(1, f.host.opens);
+			f.tick(1); assertTrue(f.complete(OWNER, epoch, 1));
+		}
+	}
+
+	@Test void admissionCallbackCancellationNeverResurrectsItsOutcomeOrLane() {
+		for (boolean disconnect : List.of(false, true)) try (Fixture f = new Fixture(1)) {
+			long epoch = f.hello(OWNER, 0);
+			f.host.duringOpen = () -> {
+				if (disconnect) f.backend.disconnect(OWNER);
+				else f.closeRequest(OWNER, epoch, 1, 0);
+			};
+			int start = f.host.sent.size(); f.open(OWNER, epoch, 1, 0); f.tick(1);
+			assertTrue(f.host.sent.subList(start, f.host.sent.size()).stream().noneMatch(delivery -> delivery.packet().requestId() == 1));
+			assertEquals(0, f.state.resolutions); assertEquals(0, f.memory().reserved());
+		}
+	}
+
+	@Test void openedHandoffCallbackDisconnectCannotAttachAnOrphanLane() throws Exception {
+		try (Fixture f = new Fixture(1)) {
+			long epoch = f.hello(OWNER, 0);
+			f.host.duringOpenedHandoff = () -> f.backend.disconnect(OWNER);
+			f.open(OWNER, epoch, 1, 0); f.tick(1);
+			assertEquals(0, f.state.resolutions); assertEquals(0, f.memory().reserved());
+			assertTrue(((java.util.Map<?, ?>) InventoryBackendTest.field(f.backend, "sessions")).isEmpty());
+			Object publisher = java.util.Objects.requireNonNull(InventoryBackendTest.field(f.backend, "publisher"));
+			assertTrue(((java.util.Map<?, ?>) InventoryBackendTest.field(publisher, "states")).isEmpty());
+		}
+	}
+
+	@Test void activeAndPendingOnlyOutcomesShareTheSame64OwnerWindow() {
+		try (Fixture f = new Fixture(1)) {
+			long epoch = f.hello(OWNER, 0); f.open(OWNER, epoch, 1, 0);
+			f.host.handoff = TransportHandoff.NOT_HANDED_OFF;
+			for (int request = 2; request <= 64; request++) f.open(OWNER, epoch, request, 0);
+			f.open(OWNER, epoch, 65, 0);
+			f.closeRequest(OWNER, epoch, 5, 1);
+			f.host.handoff = TransportHandoff.HANDED_OFF;
+			f.open(OWNER, epoch, 65, 1); f.tick(1);
+			var rejected = f.host.sent.stream().map(Delivery::packet).filter(packet -> packet.kind() == InventoryS2CPacket.Kind.OPEN_REJECTED).toList();
+			assertEquals(60, rejected.size());
+			assertTrue(rejected.stream().noneMatch(packet -> packet.requestId() == 5));
+			assertEquals(1, rejected.stream().filter(packet -> packet.requestId() == 65 && packet.failureReason() == InventoryFailureReason.TARGET_CAPACITY).count());
+			assertEquals(4, f.host.opens, "mailbox refusal cannot advance the fence for the later retry of request 65");
+		}
+	}
+
+	@Test void terminalLaneNoticeWaitsForReplacementOpenedAndKeepsItsProgressRevision() {
+		try (Fixture f = new Fixture(1)) {
+			f.host.bothLanes = true;
+			long epoch = f.hello(OWNER, 0); f.open(OWNER, epoch, 1, 0);
+			int start = f.host.sent.size(); f.host.view = 2;
+			f.state.fluidFailure = InventoryFailureReason.UNSUPPORTED_LANE;
+			f.host.handoff = TransportHandoff.NOT_HANDED_OFF; f.tick(1);
+			assertEquals(start, f.host.sent.size());
+			f.host.handoff = TransportHandoff.HANDED_OFF; f.tick(2); f.tick(3);
+			var replacement = f.host.sent.subList(start, f.host.sent.size()).stream().map(Delivery::packet).toList();
+			int opened = -1, unsupported = -1;
+			for (int i = 0; i < replacement.size(); i++) {
+				var packet = replacement.get(i);
+				if (packet.kind() == InventoryS2CPacket.Kind.OPENED && packet.requestId() == 1) opened = i;
+				if (packet.kind() == InventoryS2CPacket.Kind.PREVIEW_STATE && packet.resourceKind() == InventoryResourceKind.FLUID
+					&& packet.condition() == InventoryS2CPacket.PreviewCondition.UNSUPPORTED) {
+					unsupported = i; assertEquals(0, packet.progressRevision()); assertEquals(2, packet.view());
+					assertEquals(InventoryFailureReason.UNSUPPORTED_LANE, packet.failureReason());
+				}
+			}
+			assertTrue(opened >= 0 && unsupported > opened, "the retained terminal notice follows its replacement grant");
+		}
+	}
+
+	@Test void readableIncompletePrefixKeepsDeliveryAliveBeforeTheFirstRowHandoff() {
+		try (Fixture f = new Fixture(2)) {
+			f.state.unique = true;
+			f.settings.getPreview().setMaxVariantsPerClientPeriod(IntLimit.finite(1));
+			long epoch = f.hello(OWNER, 0); f.open(OWNER, epoch, 1, 0);
+			int start = f.host.sent.size(); f.tick(0);
+			var sequence = f.host.sent.subList(start, f.host.sent.size()).stream().map(Delivery::packet).toList();
+			assertTrue(sequence.stream().anyMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW
+				&& !packet.entries().isEmpty() && packet.status() == InventoryS2CPacket.Status.INCOMPLETE && !packet.completeScan()));
+			assertTrue(sequence.stream().noneMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW_STATE
+				&& packet.condition() == InventoryS2CPacket.PreviewCondition.FAILED), "a usable prefix cannot tell a row-less client to abandon its data barrier");
+			assertTrue(sequence.stream().anyMatch(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW_STATE
+				&& packet.phase() == InventoryS2CPacket.PreviewPhase.DELIVERY && packet.failureReason() == InventoryFailureReason.VARIANT_LIMIT));
+			assertEquals(2, f.state.reads);
+		}
+	}
+
+	@Test void pendingPageRetriesKeepTheSamePaidOwnerAndNeverReadOrCountItTwice() throws Exception {
+		try (Fixture f = new Fixture(2)) {
+			long epoch = f.hello(OWNER, 0); f.open(OWNER, epoch, 1, 0);
+			var sessions = (java.util.Map<?, ?>) InventoryBackendTest.field(f.backend, "sessions");
+			Object session = java.util.Objects.requireNonNull(sessions.get(OWNER));
+			var previews = (java.util.Map<?, ?>) InventoryBackendTest.field(session, "previews");
+			Object preview = previews.values().iterator().next();
+			var consumer = (InventoryRuntime.Consumer) InventoryBackendTest.field(preview, "consumer");
+			var page = f.backend.runtime().step(consumer, 1).orElseThrow();
+			assertEquals(1, f.state.reads);
+			var pageOwner = f.memory().tryReserve(65536).orElseThrow(); pageOwner.commit(65536);
+			var pageField = preview.getClass().getDeclaredField("pendingObservation"); pageField.setAccessible(true); pageField.set(preview, page);
+			var ownerField = preview.getClass().getDeclaredField("pendingMemory"); ownerField.setAccessible(true); ownerField.set(preview, pageOwner);
+			long remaining = f.memory().remaining();
+			try (var pressure = f.memory().tryReserve(remaining).orElseThrow()) {
+				pressure.commit(remaining); f.tick(1); f.tick(2);
+				assertTrue(pageOwner == ownerField.get(preview)); assertTrue(page == pageField.get(preview));
+				assertEquals(1, f.state.reads);
+			}
+			f.tick(PERIOD); f.tick(2L * PERIOD);
+			assertTrue(f.complete(OWNER, epoch, 1)); assertEquals(2, f.state.reads);
+			assertEquals(3, f.latestEntry(OWNER, epoch, 1).count());
+			assertTrue(ownerField.get(preview) == null && pageField.get(preview) == null);
+		}
+	}
+
+	@Test void optionalFluidUnsupportedRequiresTheExactTypedReason() {
+		for (InventoryFailureReason cause : List.of(InventoryFailureReason.UNSUPPORTED_LANE, InventoryFailureReason.SOURCE_UNAVAILABLE,
+			InventoryFailureReason.PROVIDER_FAILURE)) try (Fixture f = new Fixture(1)) {
+			f.host.bothLanes = true; f.state.fluidFailure = cause;
+			long epoch = f.hello(OWNER, 0); f.open(OWNER, epoch, 1, 0); f.tick(0);
+			var states = f.host.sent.stream().map(Delivery::packet).filter(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW_STATE
+				&& packet.resourceKind() == InventoryResourceKind.FLUID && packet.failureReason() == cause).toList();
+			assertFalse(states.isEmpty());
+			assertTrue(states.stream().allMatch(packet -> packet.condition() == (cause == InventoryFailureReason.UNSUPPORTED_LANE
+				? InventoryS2CPacket.PreviewCondition.UNSUPPORTED : InventoryS2CPacket.PreviewCondition.FAILED)));
+			assertTrue(f.complete(OWNER, epoch, 1), "a failed optional lane cannot erase ITEM completion");
+		}
+	}
+
+	@Test void pendingPageDisplayTighteningReplacesItsPaidVersionWithoutAnotherGetter() throws Exception {
+		try (Fixture f = new Fixture(1)) {
+			long epoch = f.hello(OWNER, 0); f.open(OWNER, epoch, 1, 0);
+			var sessions = (java.util.Map<?, ?>) InventoryBackendTest.field(f.backend, "sessions");
+			Object session = java.util.Objects.requireNonNull(sessions.get(OWNER));
+			var previews = (java.util.Map<?, ?>) InventoryBackendTest.field(session, "previews");
+			Object preview = previews.values().iterator().next();
+			var consumer = (InventoryRuntime.Consumer) InventoryBackendTest.field(preview, "consumer");
+			var observed = f.backend.runtime().step(consumer, 1).orElseThrow();
+			InventoryResourceValue value = java.util.Objects.requireNonNull(observed.slots().getFirst());
+			var large = InventoryResourceCodec.value(value.key(), value.amount(), value.label(), "{\"label\":\"" + "x".repeat(1200) + "\"}", false);
+			var page = new InventoryRuntime.Observation(observed.result(), List.of(large), observed.inventorySweepEvidence());
+			var owner = f.memory().tryReserve(65536).orElseThrow(); owner.commit(65536);
+			InventoryBackendTest.field(preview, "pendingObservation", page); InventoryBackendTest.field(preview, "pendingMemory", owner);
+			f.settings.setDisplayByteMultiplier(new java.math.BigDecimal("0.25"));
+			for (int tick = 1; tick <= 12 && !f.complete(OWNER, epoch, 1); tick++) f.tick(tick);
+			assertTrue(f.complete(OWNER, epoch, 1)); assertEquals(1, f.state.reads);
+			assertTrue(f.latestEntry(OWNER, epoch, 1).displayJson() == null, "an unavailable projection port uses the bounded default display");
+			assertTrue(InventoryBackendTest.field(preview, "pendingObservation") == null);
+			assertTrue(InventoryBackendTest.field(preview, "pendingMemory") == null);
+		}
+	}
+
+	@Test void openRejectionUsesPrepaidMailboxUnderMemoryPressureAndDoesNotOccupyATarget() {
+		try (Fixture f = new Fixture(1)) {
+			long epoch = f.hello(OWNER, 0);
+			long remaining = f.memory().remaining();
+			try (var pressure = f.memory().tryReserve(remaining).orElseThrow()) {
+				pressure.commit(remaining);
+				f.open(OWNER, epoch, 1, 0);
+				InventoryS2CPacket rejected = f.host.sent.getLast().packet();
+				assertEquals(InventoryS2CPacket.Kind.OPEN_REJECTED, rejected.kind());
+				assertEquals(InventoryFailureReason.MEMORY_LIMIT, rejected.failureReason());
+				assertEquals(0, f.host.opens); assertEquals(0, f.state.resolutions);
+			}
+			f.open(OWNER, epoch, 2, 1); f.tick(1);
+			assertTrue(f.complete(OWNER, epoch, 2));
+			assertEquals(1, f.host.opens, "a rejection never occupied active target capacity");
+		}
+	}
+
+	@Test void notHandedOffOutcomeIsRestampedWithoutRepeatingAdmissionAndExactOldViewCloseCancelsMailboxOnly() {
+		try (Fixture f = new Fixture(1)) {
+			long epoch = f.hello(OWNER, 0);
+			f.host.openFailure = InventoryFailureReason.OUT_OF_RANGE; f.host.handoff = TransportHandoff.NOT_HANDED_OFF;
+			f.open(OWNER, epoch, 1, 0); assertEquals(1, f.host.opens);
+			assertTrue(f.host.sent.stream().noneMatch(d -> d.packet().kind() == InventoryS2CPacket.Kind.OPEN_REJECTED));
+			f.host.view = 2; f.tick(1); assertEquals(1, f.host.opens);
+			f.backend.handle(OWNER, InventoryC2SPacket.close(epoch, 1).stamp(100, 0), 1, f.settings);
+			f.host.handoff = TransportHandoff.HANDED_OFF; f.tick(2);
+			var rejected = f.host.sent.stream().map(Delivery::packet).filter(p -> p.kind() == InventoryS2CPacket.Kind.OPEN_REJECTED).toList();
+			assertEquals(1, rejected.size()); assertEquals(2, rejected.getFirst().view());
+			assertEquals(InventoryFailureReason.OUT_OF_RANGE, rejected.getFirst().failureReason());
+			f.host.handoff = TransportHandoff.NOT_HANDED_OFF;
+			f.backend.handle(OWNER, InventoryC2SPacket.open(epoch, 100, 2, 2, TARGET, BlockFace.NORTH), 2, f.settings);
+			f.host.view = 3; f.tick(3);
+			f.backend.handle(OWNER, InventoryC2SPacket.close(epoch, 2).stamp(100, 2), 3, f.settings);
+			f.host.handoff = TransportHandoff.HANDED_OFF; f.tick(4);
+			assertTrue(f.host.sent.stream().noneMatch(d -> d.packet().kind() == InventoryS2CPacket.Kind.OPEN_REJECTED && d.packet().requestId() == 2));
+			assertEquals(2, f.host.opens);
+		}
+	}
+
+	@Test void repeatedDeferredControlsNeverAdvanceTheRealProgressRevision() {
+		try (Fixture f = new Fixture(2)) {
+			long epoch = f.hello(OWNER, 0); f.open(OWNER, epoch, 1, 0);
+			long occupied = f.memory().remaining();
+			try (var pressure = f.memory().tryReserve(occupied).orElseThrow()) {
+				pressure.commit(occupied); f.tick(0); f.tick(80); f.tick(160);
+				var notices = f.host.sent.stream().map(Delivery::packet).filter(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW_STATE
+					&& p.condition() == InventoryS2CPacket.PreviewCondition.DEFERRED).toList();
+				assertTrue(notices.size() >= 2);
+				assertTrue(notices.stream().allMatch(p -> p.progressRevision() == 0 && p.failureReason() == InventoryFailureReason.MEMORY_LIMIT));
+				assertEquals(0, f.state.reads);
+			}
+			f.tick(161);
+			assertTrue(f.host.sent.stream().map(Delivery::packet).anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.PREVIEW_STATE && p.progressRevision() > 0));
+		}
+	}
+
+	@Test void controlFullRetainsOpenOutcomeUntilQueueSpaceReturnsWithoutRepeatingAuthority() throws Exception {
+		try (Fixture f = new Fixture(1)) {
+			long epoch = f.hello(OWNER, 0); f.host.openFailure = InventoryFailureReason.OUT_OF_RANGE;
+			f.host.handoff = TransportHandoff.NOT_HANDED_OFF;
+			var field = InventoryBackend.class.getDeclaredField("publisher"); field.setAccessible(true);
+			var publisher = (InventorySyncPublisher) field.get(f.backend);
+			for (int i = 1; i <= 64; i++) assertTrue(publisher.controlPrepaid(OWNER,
+				InventoryS2CPacket.selected(epoch, 1, i, new MarkerId(i), null).stamp(100, 1)));
+			f.open(OWNER, epoch, 1, 0);
+			assertEquals(1, f.host.opens);
+			publisher.cancelControls(OWNER); f.host.handoff = TransportHandoff.HANDED_OFF; f.tick(1);
+			var outcomes = f.host.sent.stream().map(Delivery::packet).filter(p -> p.kind() == InventoryS2CPacket.Kind.OPEN_REJECTED).toList();
+			assertEquals(1, outcomes.size()); assertEquals(InventoryFailureReason.OUT_OF_RANGE, outcomes.getFirst().failureReason());
+			assertEquals(1, f.host.opens, "mailbox retry never reruns OPEN admission");
+		}
+	}
+	@Test void a1024CategoryPreviewCompletesItsRealCumulativeCutAndBackingSurvivesInvalidClear() throws Exception {
+		try (Fixture f = new Fixture(1024)) {
+			f.state.unique = true;
+			f.settings.getPreview().setMaxVariantsPerClientPeriod(IntLimit.finite(1024));
+			f.settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1024));
+			f.settings.getPreview().setMaxSlotsServer(IntLimit.finite(1024));
+			long epoch = f.hello(OWNER, 0);
+			var requests = new ArrayList<InventoryC2SPacket>();
+			ClientInventory client = new ClientInventory(packet -> requests.add((InventoryC2SPacket) packet));
+			client.presentationReset(100, 1);
+			f.host.sent.stream().map(Delivery::packet).map(InventoryPublicationIntegrationTest::wire).forEach(client::accept);
+			assertEquals(Optional.of(true), client.authorization(100, 1, "entity_block"));
+			long request = client.open(TARGET, BlockFace.NORTH, "entity_block"); assertEquals(1, request);
+			assertEquals(1, requests.size()); assertEquals(InventoryC2SPacket.Kind.OPEN, requests.getFirst().kind());
+			assertEquals(epoch, requests.getFirst().epoch());
+			int openedStart = f.host.sent.size();
+			f.backend.handle(OWNER, requests.getFirst(), 0, f.settings);
+			f.host.sent.subList(openedStart, f.host.sent.size()).stream().map(Delivery::packet)
+				.map(InventoryPublicationIntegrationTest::wire).forEach(client::accept);
+			for (int tick = 0; tick < 600 && !client.preview(request).completeScan(); tick++) {
+				int before = f.host.sent.size(); f.tick(tick);
+				f.host.sent.subList(before, f.host.sent.size()).stream().map(Delivery::packet)
+					.map(InventoryPublicationIntegrationTest::wire).forEach(client::accept);
+			}
+			assertTrue(client.preview(request).completeScan(), "the ClientInventory multipart completion barrier must close");
+			assertEquals(1024, f.state.reads);
+			assertEquals(1024, client.preview(request).entries().stream().map(ClientInventory.EntryView::key).distinct().count());
+			assertEquals(1024L * 1025 / 2, client.preview(request).entries().stream().mapToLong(ClientInventory.EntryView::count).sum(),
+				"all 1024 distinct fixture amounts reach the client unchanged");
+			var sessionsField = InventoryBackend.class.getDeclaredField("sessions"); sessionsField.setAccessible(true);
+			Object session = java.util.Objects.requireNonNull(((java.util.Map<?, ?>) sessionsField.get(f.backend)).get(OWNER));
+			var previewsField = session.getClass().getDeclaredField("previews"); previewsField.setAccessible(true);
+			Object preview = ((java.util.Map<?, ?>) previewsField.get(session)).values().iterator().next();
+			var capacityField = preview.getClass().getDeclaredField("categoryCapacity"); capacityField.setAccessible(true);
+			assertEquals(1024, capacityField.getInt(preview));
+			var ticketField = preview.getClass().getDeclaredField("categoryMemory"); ticketField.setAccessible(true);
+			Object ticket = java.util.Objects.requireNonNull(ticketField.get(preview));
+			f.state.valid = false; f.tick(604);
+			assertEquals(1024, capacityField.getInt(preview));
+			assertTrue(ticket == ticketField.get(preview), "clear keeps the admitted backing owner, including below-cap retirement headroom");
+		}
+	}
 
 	@Test
 	void duplicateOpenDoesNotRestartPaidProgressAndLastCloseStopsAllSourceWork() {
@@ -256,18 +534,30 @@ class InventoryBackendLifecycleTest {
 		private final List<Delivery> sent = new ArrayList<>();
 		private final InventoryBackend.Policy policy = new InventoryBackend.Policy(100, 1, Set.of("entity_block"));
 		private int opens;
+		private long view = 1;
+		private boolean bothLanes;
+		private @Nullable InventoryFailureReason openFailure;
+		private TransportHandoff handoff = TransportHandoff.HANDED_OFF;
+		private Runnable duringOpen = () -> {};
+		private Runnable duringOpenedHandoff = () -> {};
 
 		@Override public Optional<InventoryBackend.Policy> policy(UUID player) { return Optional.of(policy); }
 		@Override public Optional<InventoryBackend.SessionAccess> session(UUID player) {
-			return Optional.of(new InventoryBackend.SessionAccess(policy.epoch(), policy.view(), InventoryTestGrants.both()));
+			return Optional.of(new InventoryBackend.SessionAccess(policy.epoch(), view, InventoryTestGrants.both()));
 		}
 		@Override public Optional<nx.pingwheel.common.marker.ServerMarker> activeMarker(MarkerId marker) { return Optional.empty(); }
 		@Override public java.util.Set<InventoryResourceKind> freezeInventoryPreviewLanes(UUID owner, String targetTypeId) {
-			return Set.of(InventoryResourceKind.ITEM);
+			return bothLanes ? InventoryTestGrants.both() : Set.of(InventoryResourceKind.ITEM);
 		}
 		@Override public Optional<InventoryBackend.Opened> open(UUID player, Target requested) {
 			opens++;
 			return Optional.of(new InventoryBackend.Opened(requested, "entity_block", "attention"));
+		}
+		@Override public InventoryDecision<InventoryBackend.Opened> openDecision(UUID player, Target requested) {
+			duringOpen.run();
+			if (openFailure == null) return InventoryDecision.accept(open(player, requested).orElseThrow());
+			opens++;
+			return InventoryDecision.reject(openFailure, InventoryImpact.PING_UNAVAILABLE);
 		}
 		@Override public boolean annotationAllowed(InventorySourceInput input, String pingType) { return false; }
 		@Override public InventoryBackend.Created create(UUID player, InventoryBackend.Opened frozen, InventoryBackend.Admission admission) {
@@ -282,11 +572,18 @@ class InventoryBackendLifecycleTest {
 			assertFalse(packet.isCorrupt());
 			sent.add(new Delivery(recipient, packet));
 		}
+		@Override public TransportHandoff sendObserved(UUID recipient, InventoryS2CPacket packet) {
+			if (packet.kind() == InventoryS2CPacket.Kind.OPENED) duringOpenedHandoff.run();
+			if (handoff == TransportHandoff.HANDED_OFF) send(recipient, packet);
+			return handoff;
+		}
 	}
 
 	@NotNullByDefault
 	private static final class State {
 		private int resolutions, validations, reads, releases, liveSources;
+		private boolean unique, valid = true;
+		private @Nullable InventoryFailureReason fluidFailure;
 	}
 
 	@NotNullByDefault
@@ -304,9 +601,17 @@ class InventoryBackendLifecycleTest {
 		@Override public boolean valid() {
 			assertFalse(closed, "released source evidence cannot be probed");
 			state.validations++;
-			return true;
+			return state.valid;
 		}
 		@Override public boolean stableCursor() { return true; }
+		@Override public InventoryDecision<Boolean> validationDecision(
+			nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Allowance allowance) {
+			if (input.resourceKind() != InventoryResourceKind.FLUID || state.fluidFailure == null)
+				return valid() ? InventoryDecision.accept(true) : InventoryDecision.reject(InventoryFailureReason.SOURCE_UNAVAILABLE, InventoryImpact.DEGRADED);
+			return state.fluidFailure == InventoryFailureReason.UNSUPPORTED_LANE
+				? InventoryDecision.unsupported(state.fluidFailure, InventoryImpact.DETAIL_ONLY)
+				: InventoryDecision.reject(state.fluidFailure, InventoryImpact.DEGRADED);
+		}
 		@Override public int slots() { return slots; }
 		@Override public int displayBytes() { return displayBytes; }
 		@Override public InventoryReprojectionSummary reprojectionSummary(int ceiling) { return InventoryReprojectionSummary.EMPTY; }
@@ -314,7 +619,7 @@ class InventoryBackendLifecycleTest {
 			assertFalse(closed, "released source evidence cannot be read");
 			assertTrue(slot >= 0 && slot < slots);
 			state.reads++;
-			return new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "plain"), slot + 1L, "stone", null, false);
+			return new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", state.unique ? "variant_" + slot : "plain"), slot + 1L, "stone", null, false);
 		}
 		@Override public void close() {
 			assertFalse(closed, "every resolved source has exactly one owner and one release");

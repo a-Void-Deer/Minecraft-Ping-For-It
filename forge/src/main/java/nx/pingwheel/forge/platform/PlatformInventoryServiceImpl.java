@@ -23,6 +23,7 @@ import net.minecraft.world.WorldlyContainer;
 
 import nx.pingwheel.common.platform.IPlatformInventoryService;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimitException;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.diagnostics.DiagnosticChannel;
 import java.time.Duration;
@@ -82,7 +83,8 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 			if (!memberGate.test(pos)) return Optional.empty();
 			BlockPos position = pos.immutable();
 			return handler.map(found -> new HandlerAccess(found, () -> memberGate.test(position)));
-		} catch (RuntimeException | LinkageError failure) {
+		} catch (InventoryProviderLimitException limit) { throw limit; }
+		catch (RuntimeException | LinkageError failure) {
 			if (!(failure instanceof InventorySourceUnavailableException))
 				Diagnostics.server().atNormal().rateLimited(FIND_DIAGNOSTICS).warn("inventory-capability-find", "source-unavailable",
 					failure, () -> "position=" + pos + " face=" + side + " worldClass=" + world.getClass().getName()

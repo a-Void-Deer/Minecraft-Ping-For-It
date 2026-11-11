@@ -649,12 +649,14 @@ public class ServerCore {
 			return new InventoryBackend.Created(null, MarkerRejectReason.CHANNEL_DISABLED);
 		List<UUID> audience = snapshotRecipients(server.getPlayerList(), player, channel, mode);
 		long now = server.getTickCount();
+		var inventoryReason = new java.util.concurrent.atomic.AtomicReference<nx.pingwheel.common.presentation.inventory.InventoryFailureReason>();
 		var outcome = markerService(server).createDedicated(player.serverLevel(), player.getUUID(), frozen.target(), frozen.defaultPingType(),
 			now, now + serverConfig.getSyncDuration() * (long) TICKS_PER_SECOND, audience,
 			new MarkerCreationService.DedicatedAdmission() {
 				@Override public MarkerCreationService.AdmissionResult admit(Target target, nx.pingwheel.common.marker.TargetKey targetKey,
 					String type, UUID owner, List<UUID> recipients) {
 					@Nullable MarkerRejectReason rejection = admission.prepare(target, targetKey, type, recipients);
+					if (rejection != null) inventoryReason.set(admission.failureReason());
 					return rejection == null ? MarkerCreationService.AdmissionResult.accepted(List.of(), Map.of())
 						: MarkerCreationService.AdmissionResult.rejected(rejection);
 				}
@@ -664,12 +666,16 @@ public class ServerCore {
 					// dedicated field is the actual committed kind, not a re-read of
 					// the current lane policy.
 					if (!authorization.forRecipient(player.getUUID())
-						.allowsField(nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID, kind.fieldId()))
+						.allowsField(nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID, kind.fieldId())) {
+						inventoryReason.set(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.FIELD_DENIED);
 						return MarkerRejectReason.INVALID_REQUEST;
-					return admission.finishAuthorization(authorization);
+					}
+					@Nullable MarkerRejectReason rejection = admission.finishAuthorization(authorization);
+					if (rejection != null) inventoryReason.set(admission.failureReason());
+					return rejection;
 				}
 			});
-		if (!outcome.isAccepted()) return new InventoryBackend.Created(null, outcome.rejectReason().orElseThrow());
+		if (!outcome.isAccepted()) return new InventoryBackend.Created(null, outcome.rejectReason().orElseThrow(), null, List.of(), inventoryReason.get());
 		var creation = outcome.creation().orElseThrow();
 		// Committed storage only: the backend installs the tracking sidecar and
 		// publishes the CREATED/winner changes after it exists.

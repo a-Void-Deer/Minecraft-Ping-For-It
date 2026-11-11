@@ -565,7 +565,7 @@ provider performs no network or source work.
 
 ## Target content preview
 
-The wheel's content branch may present a captured target's authorized
+The wheel's Details branch may present a captured target's authorized
 observations before any Ping exists. It is client-first: it shows a value the
 client can observe locally and falls back to the bounded server preview only
 for a field it cannot observe locally. The preview is a presentation read: it
@@ -594,7 +594,7 @@ are owned by [testing and verification](../../testing/verification/presentation.
   unioned with the fresh policy. A newly denied nested reference is therefore
   immediately ineligible even when its root field is eligible, while a newly
   allowed reference becomes eligible only after a `RESET` advertises the wider
-  map. Denied references are filtered from the content branch's property
+  map. Denied references are filtered from the Details branch's property
   entries and dispatchable intents and cannot become selections. Dedicated
   adapters, including inventory, are excluded from this preview; inventory's
   own list, stream and variant rules stay owned by [inventory](inventory.md).

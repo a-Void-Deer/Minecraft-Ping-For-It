@@ -285,12 +285,15 @@ class ClientInventoryTest {
 
 		String display = "d".repeat(4096);
 		List<InventoryS2CPacket.Entry> fill = new ArrayList<>();
-		for (int i = 0; i < 62; i++) {
+		for (int i = 0; i < 501; i++) {
 			fill.add(new InventoryS2CPacket.Entry("k" + i, "minecraft:stone", "", display, 1L, 1L, false, null));
 		}
 		fill.add(new InventoryS2CPacket.Entry("small", "minecraft:stone", "", null, 1L, 1L, false, null));
-		session.accept(previewData(requestId, 1L, 1L, 1L, 0, 1, false, InventoryS2CPacket.Status.UPDATING, fill));
-		assertEquals(63, session.preview(requestId).entries().size());
+		// Approach the 2 MiB retained projection using individually serviceable frames.
+		for (int first = 0; first < fill.size(); first += 62)
+			session.accept(previewData(requestId, 1L, 1L, 1L, 0, 1, false, InventoryS2CPacket.Status.UPDATING,
+				fill.subList(first, Math.min(fill.size(), first + 62))));
+		assertEquals(502, session.preview(requestId).entries().size());
 		long rejectsBefore = session.stats().boundRejects();
 
 		session.accept(previewData(requestId, 1L, 1L, 2L, 0, 1, false, InventoryS2CPacket.Status.UPDATING,
@@ -304,7 +307,7 @@ class ClientInventoryTest {
 
 		session.accept(previewData(requestId, 1L, 1L, 3L, 0, 1, false, InventoryS2CPacket.Status.UPDATING,
 			List.of(new InventoryS2CPacket.Entry("extra", "minecraft:stone", "", null, 1L, 3L, false, null))));
-		assertEquals(64, session.preview(requestId).entries().size(),
+		assertEquals(503, session.preview(requestId).entries().size(),
 			"the retained total still admits an entry that fits the bound");
 	}
 
@@ -428,22 +431,18 @@ class ClientInventoryTest {
 		offer();
 		sent.clear();
 
-		List<InventoryS2CPacket.Entry> first = new ArrayList<>();
-		List<InventoryS2CPacket.Entry> second = new ArrayList<>();
-		for (int i = 0; i < 128; i++) {
-			first.add(entry("a" + i, 1L, 1L));
-			second.add(entry("b" + i, 1L, 1L));
+		for (int batch = 0; batch < ClientInventory.MAX_PREVIEW_ENTRIES / 128; batch++) {
+			List<InventoryS2CPacket.Entry> entries = new ArrayList<>();
+			for (int i = 0; i < 128; i++) entries.add(entry("row" + (batch * 128 + i), 1L, 1L));
+			session.accept(previewData(requestId, 1L, 1L, 3L, 0, 1, batch == 0, InventoryS2CPacket.Status.UPDATING, entries));
 		}
-
-		session.accept(previewData(requestId, 1L, 1L, 3L, 0, 1, true, InventoryS2CPacket.Status.UPDATING, first));
-		session.accept(previewData(requestId, 1L, 1L, 3L, 0, 1, false, InventoryS2CPacket.Status.UPDATING, second));
 		long rejectsBefore = session.stats().boundRejects();
 
 		session.accept(previewData(requestId, 1L, 1L, 3L, 0, 1, false, InventoryS2CPacket.Status.UPDATING,
 			List.of(entry("overflow", 1L, 1L))));
 
 		assertTrue(session.stats().boundRejects() > rejectsBefore);
-		assertEquals(256, session.preview(requestId).entries().size());
+		assertEquals(ClientInventory.MAX_PREVIEW_ENTRIES, session.preview(requestId).entries().size());
 
 		session.accept(previewData(requestId, 1L, 1L, 3L, 0, 1, true, InventoryS2CPacket.Status.READY,
 			List.of()));

@@ -614,17 +614,19 @@ class InventoryReconfigurationTest {
 			assertEquals(0, f.host.store.size(), "a SELECT during DEFERRED reprojection never installs an oversized tracking presentation");
 			assertTrue(f.backend.runtime().memory().remaining() < 0);
 			assertEquals(0, f.backend.runtime().memory().reserved());
-			assertTrue(f.host.after(A, change).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.REJECT || p.kind() == InventoryS2CPacket.Kind.SELECTED),
-				"the recorded result's wire enqueue waits for resource recovery");
+			var refusals = f.host.after(A, change).stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.REJECT || p.kind() == InventoryS2CPacket.Kind.SELECTED).toList();
+			assertEquals(1, refusals.size(), "the prepaid result remains serviceable under retained-memory pressure");
+			assertEquals(InventoryS2CPacket.Kind.REJECT, refusals.getFirst().kind());
+			assertEquals(InventoryFailureReason.RETIRED_SELECTION, refusals.getFirst().failureReason());
 			var sessionsField = InventoryBackend.class.getDeclaredField("sessions"); sessionsField.setAccessible(true);
 			Object session = ((Map<?, ?>) sessionsField.get(f.backend)).get(A);
 			var commitsField = session.getClass().getDeclaredField("commits"); commitsField.setAccessible(true);
 			Object result = ((Map<?, ?>) commitsField.get(session)).get(1L);
-			assertNotNull(result, "the bounded committed-result owner survives refused queue admission");
+			assertNotNull(result, "the bounded replay owner survives successful prepaid handoff");
 			var pendingField = result.getClass().getDeclaredField("pending"); pendingField.setAccessible(true);
 			var queuedField = result.getClass().getDeclaredField("queued"); queuedField.setAccessible(true);
 			var packetField = result.getClass().getDeclaredField("packet"); packetField.setAccessible(true);
-			assertTrue(pendingField.getBoolean(result)); assertFalse(queuedField.getBoolean(result));
+			assertFalse(pendingField.getBoolean(result)); assertFalse(queuedField.getBoolean(result));
 			assertEquals(InventoryS2CPacket.Kind.REJECT, ((InventoryS2CPacket) packetField.get(result)).kind());
 			assertTrue(f.host.after(A, change).stream().noneMatch(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT));
 
@@ -633,7 +635,7 @@ class InventoryReconfigurationTest {
 			for (int i = 0; i < 8; i++) f.tick();
 			var rejected = f.host.after(A, change).stream().map(InventoryPublicationIntegrationTest::wire)
 				.filter(p -> p.kind() == InventoryS2CPacket.Kind.REJECT || p.kind() == InventoryS2CPacket.Kind.SELECTED).toList();
-			assertEquals(1, rejected.size(), "the stored outcome retries without another SELECT and clears after handoff");
+			assertEquals(1, rejected.size(), "resource recovery does not repeat an already handed-off outcome");
 			assertEquals(InventoryS2CPacket.Kind.REJECT, rejected.getFirst().kind());
 			assertEquals(1, rejected.getFirst().commitId());
 			assertEquals(reference.requestId(), rejected.getFirst().requestId());

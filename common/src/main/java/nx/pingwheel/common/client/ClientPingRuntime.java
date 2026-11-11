@@ -2125,9 +2125,15 @@ public final class ClientPingRuntime {
 	}
 	private @Nullable ClientInventory inventory;
 	public void inventory(@Nullable ClientInventory inventory) {
-		if (this.inventory != null && this.inventory != inventory) this.inventory.monitor(null);
+		if (this.inventory != null && this.inventory != inventory) {
+			this.inventory.monitor(null);
+			this.inventory.trackingFailureSink(ignored -> {});
+		}
 		this.inventory = inventory;
-		if (inventory != null) inventory.monitor(monitor.collector());
+		if (inventory != null) {
+			inventory.monitor(monitor.collector());
+			inventory.trackingFailureSink(errorSink::showTrackingFailure);
+		}
 		syncInventorySchemas();
 		if (inventory != null && presentation.ready()) {
 			inventory.presentationReset(presentation.epoch(), presentation.sessionView());
@@ -2135,8 +2141,10 @@ public final class ClientPingRuntime {
 	}
 	public nx.pingwheel.common.presentation.inventory.client.ClientInventory.DispatchOutcome dispatchInventory(
 		nx.pingwheel.common.presentation.inventory.client.ClientInventory.PreviewEntryReference reference, String itemPingType) {
-		return inventory == null ? nx.pingwheel.common.presentation.inventory.client.ClientInventory.DispatchOutcome.NOT_READY
-			: inventory.select(reference, itemPingType, dispatcher::dispatchInventory);
+		if (selectorContent != null) selectorContent.releaseInventory();
+		@Nullable ClientInventory owner = inventory;
+		return owner == null ? nx.pingwheel.common.presentation.inventory.client.ClientInventory.DispatchOutcome.NOT_READY
+			: owner.select(reference, itemPingType, (packet, terminalAccepted) -> dispatcher.dispatchInventory(packet, terminalAccepted));
 	}
 	private void syncInventorySchemas() {
 		if (inventory == null || !presentation.catalogOffered()) return;
@@ -2156,15 +2164,10 @@ public final class ClientPingRuntime {
 	}
 	private void onInventoryPacketUnmeasured(nx.pingwheel.common.network.@Nullable InventoryS2CPacket packet) {
 		if (inventory == null) return;
-		ClientInventory.@Nullable SelectionResult previous = packet == null ? null : inventory.selectionResult(packet.commitId());
 		inventory.accept(packet);
 		// The packet can have been rejected: only the post-accept stores supply data.
 		if (packet != null && packet.markerId() != null) attemptContentReceipt(packet.markerId());
 		else reconcileContentReceipts();
-		if (previous == null && packet != null && !packet.isCorrupt() && packet.kind() == nx.pingwheel.common.network.InventoryS2CPacket.Kind.REJECT
-			&& inventory.selectionResult(packet.commitId()) != null && packet.rejection() == MarkerRejectReason.TARGET_GONE
-			&& createRequestTracker.isLatest(CreateRequestTracker.Route.INVENTORY, packet.commitId()))
-			errorSink.showLocalError(PingInteractionAction.TargetGone.TARGET_GONE_MESSAGE_KEY, PingInteractionAction.TargetGone.TARGET_GONE_COLOR);
 		if (inventorySelectionStay.active()) refreshInventoryStayPath(timeSource.nowMillis());
 	}
 

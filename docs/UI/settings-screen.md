@@ -85,8 +85,8 @@ The client scope has eight categories:
   - Content selection: Content Intent Selection, then Inventory Selection Stay
     Open.
 - **Channel, Sound & Notices**: Ping Channel as a full-width text input under
-  Channel, followed by Ping Volume and Configuration Notice Size under Sound
-  and notices.
+  Channel, followed by Ping Volume, Configuration Notice Size, and Cooldown
+  Feedback under Sound and notices.
 - **Rendering & Config**: Entity Block Geometry under entity-block rendering,
   followed by the configuration-file action under its own heading.
 - **Performance**: a Wheel options subgroup with Precise Selection Capture
@@ -132,38 +132,58 @@ user-facing reload control.
 
 ## Contextual help and localization
 
-Every exposed value control provides native hover and keyboard-focus help that
-identifies its scope and explains the effect the player can observe. Numeric
-help explains decreasing and increasing the value; boolean help explains both
-off and on; enum help explains every mode rather than relying on mode names.
-Help preserves meaningful zero or unlimited states, interactions with related
-settings, and when edits take effect, including next-hold application where
-applicable. It must not promise a distinction that the implementation does not
-produce.
+Every exposed value control provides native hover and keyboard-focus help. Help
+answers what the setting changes for the player before anything else: what the
+player can see, how the game feels or behaves, or what the player can do. It
+uses ordinary language and gives only the information needed to choose a value.
+Implementation mechanics, protocol or authority boundaries, shared-budget
+accounting, and sampling, frame, stream, or snapshot internals stay out of value
+help. A term is not banned merely because it is technical: when a technical
+concept is the setting itself, help explains what choosing it changes. Debugging
+and performance options still state accurately what the choice shows or changes.
 
-All fourteen category buttons have scope-appropriate descriptions of what the
-category contains. The client and server Performance descriptions distinguish
-local capture work from server monitoring and inventory administration, and the
-client and server Debug descriptions distinguish local logging detail from
-server logging detail and identify each scope's independently visible
-performance monitor.
+Numeric controls give each direction's benefit, boolean controls explain Off and
+On, and enum controls explain every mode by its effect. A direction states a
+cost only when that cost does not follow from the opposite direction's benefit.
+When the setting is itself a behavior, such as the Double-Click Danger window,
+both directions may describe the resulting feel instead of only a benefit. For
+example, Physical Slots per Tick help says that decreasing uses less performance
+and increasing allows more processing content. Ping Distance help says the
+farthest distance at which a target can be marked.
+
+Help includes a meaningful zero or unlimited value, a related-setting
+interaction, a genuine restart requirement, or an irreversible consequence only
+where the choice depends on it. The option or confirmation that owns it carries
+that fact, rather than every control. Save timing and when a mechanic takes
+effect remain with their owning contracts.
+
+All fourteen category buttons state the category's purpose in a short phrase
+rather than listing its controls; draft, permission, and save timing stay with
+the owning screen contracts. The category title and current scope supply
+client/server context, so client and server counterparts may each use a short
+purpose phrase; for example, the server Debug button may say
+`Options for debugging the mod`, and the client button may use the
+same-purpose client-scoped phrase.
 
 Navigation and action controls also provide native hover and keyboard-focus
-help. Scope/category navigation and Back distinguish navigation from final
-close; Done describes the close-time persistence attempt without promising
-server acknowledgement. Reset and configuration-file help explain the
-consequences in [File action and reset](#file-action-and-reset), including the
-client-only reset scope, draft discard, and save/close/open-file behavior;
-file-action help also explains external-edit reload timing. Presentation-editor
-help distinguishes changing the displayed view or requesting a refresh from
-sending a mutation through its independent route.
+help. Scope tabs, category buttons, and Back identify where they lead and
+distinguish navigation from final close. Done names the save-and-close action;
+the persistence attempt and its outcome are owned by
+[Client configuration loading, edits, and close](#client-configuration-loading-edits-and-close).
+Reset help is one short action sentence naming the action and its client-wide
+scope. In the Chinese locale it reads `重置客户端的全部设置项`, where the
+localized fragments `重置` and `全部` use native red (`ChatFormatting.RED`,
+`#FF5555`) and are passed as component arguments so each locale controls word
+order; the confirmation dialog carries the consequences. The configuration-file
+action describes its save, close, and open result and retains the client-restart
+requirement for external edits. Presentation-editor help distinguishes a
+view-only action and a refresh request from an action that changes policy.
 
 Labels, subgroup headings, tooltips, notices, and assembled visible format
-strings, including presentation field outcomes and name/value text, are
-localized in every bundled locale. Technical field IDs and selectors retain
-their literal identities. Help uses native tooltip behavior, not a custom
-tooltip renderer. Configuration catalogues remain the owners of detailed value
-meanings.
+strings, including presentation field descriptions, outcomes, and name/value
+text, are localized in every bundled locale. Technical field IDs and selectors
+retain their literal identities. Help uses native tooltip behavior.
+Configuration catalogues remain the owners of detailed value meanings.
 
 ## Input interaction controls
 
@@ -172,12 +192,11 @@ inventory-side gestures; there is no separate inventory vertical
 mouse-sensitivity control. Their value semantics and persisted form are owned
 by [client configuration](../config/client.md#spatial-selector-interaction).
 
-The gesture controls' tooltips state that edits apply to the next hold. While
-compatibility mode is enabled, the gesture toggle displays OFF and both gesture
-controls are disabled; changing compatibility refreshes their displayed value and
-availability on the same page. Leaving compatibility mode makes them editable
-again without turning the toggle back on. The persisted preference-clearing
-relationship is owned by
+While compatibility mode is enabled, the gesture toggle displays OFF and both
+gesture controls are disabled; changing compatibility refreshes their displayed
+value and availability on the same page. Leaving compatibility mode makes them
+editable again without turning the toggle back on. The persisted
+preference-clearing relationship is owned by
 [client configuration](../config/client.md#spatial-selector-interaction), and
 gesture timing is owned by
 [long-press timing](../architecture/input/long-press.md#optional-physical-hold-gesture).
@@ -192,7 +211,7 @@ a non-zero value is presented as that setting's degree value. While compatibilit
 mode is enabled the control is disabled and shows the same disabled label.
 Inventory Selection Stay Open is the
 [inventory stay-open](../architecture/picking/wheel.md#inventory-selection-stay-open)
-preference, and its tooltip states that a change applies to the next hold.
+preference.
 
 ## Logging profile controls
 
@@ -222,10 +241,9 @@ A read-only server viewer sees the authoritative value, including `DEBUG`, but
 cannot activate the row.
 
 Both rows provide native hover and keyboard-focus help localized in every
-bundled locale. The help identifies the client or server scope, distinguishes
-the redacted `NORMAL` profile from unredacted detailed profiles, and states when
-the edit takes effect. It does not mention `DEBUG` or hint at the activation
-modifier.
+bundled locale. The help distinguishes the redacted `NORMAL` profile from
+unredacted detailed profiles and keeps `DEBUG` and the activation modifier
+undisclosed.
 
 ## Performance monitor controls
 
@@ -285,9 +303,9 @@ automated coverage and final combined-tree acceptance are recorded in
 
 The Performance category begins with a plain-text, non-interactive Monitoring
 subgroup and one full-width row: the Budget Delay Notifications server-value
-toggle. The notice toggle's tooltip identifies administrator budget-delay
-notices and the effect of enabling or disabling them; value semantics and the
-persisted key are owned by
+toggle. The notice toggle's help states that enabling it tells administrators
+when server work is held up for a sustained period, and disabling it stops those
+notices; value semantics and the persisted key are owned by
 [server configuration](../config/server.md#persisted-fields).
 
 The inventory administration controls follow in three
@@ -308,9 +326,9 @@ so selecting it again can revert the leaf to clean.
 Separate Tracking by Face and Separate Tracking by Player are native boolean
 toggles immediately after Tracking Period, in that order, each in its own
 full-width row. Their native hover and keyboard-focus help is localized in all
-bundled locales and explains Off and On, current player permissions and
-face-visible slots, and next-scan application while running scans finish under
-the previous setting. Keys and defaults remain owned by
+bundled locales and explains Off and On by their result: Off uses less server
+work when player or face views match, and On tracks each player or face
+separately. Keys and defaults remain owned by
 [server configuration](../config/server.md#inventory-policy-object), and certified
 view reuse and transition semantics by
 [inventory pools](../architecture/presentation/inventory.md#certified-tracking-observation-pools).
@@ -366,9 +384,8 @@ state instead of a selector list, and a silent or timed-out request is never
 reported as an unsupported route. Once a view is known, its field outcome labels
 and retained selectors remain visible with their state while a request is
 pending or the last response failed; only a known empty list is rendered as
-empty. The displayed outcome is that field's effective outcome under the
-selected type's rule, and it describes the configured rule outcome only; it does
-not guarantee that target data, timing, or permission will produce a value.
+empty. A field's description states the value it represents, and its displayed
+outcome states how the selected target type treats the field.
 When the viewer may edit, the field rows keep their paired allow and block
 toggles, and the advanced lists offer Add and Remove and a whitelist-only
 control for the selected target type; otherwise those controls are inert. Each
@@ -378,8 +395,7 @@ that list's unchanged draft, while a failed, denied, or timed-out add keeps its
 text for correction. Refresh asks the server for a fresh correlated rule-view
 read and is available again for retry after a bounded no-response timeout.
 Policy mutation actions send their requests when activated rather than waiting
-for final root close; typing a selector draft alone sends no mutation. Their
-help makes this distinction from the ordinary server-settings draft explicit.
+for final root close; typing a selector draft alone sends no mutation.
 
 The rule-view route, its disclosure, correlation, revision, and pending
 lifecycle are owned by

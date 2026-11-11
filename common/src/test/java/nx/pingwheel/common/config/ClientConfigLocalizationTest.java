@@ -14,9 +14,12 @@ import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
+import nx.pingwheel.common.client.ClientPingActionDispatcher;
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
+import nx.pingwheel.common.config.CooldownFeedbackMode;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
 import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Category;
@@ -75,15 +78,19 @@ class ClientConfigLocalizationTest {
 		"settings.pingforit.reset_all.server_draft_warning",
 		"settings.pingforit.open_client_config",
 		"settings.pingforit.open_client_config.tooltip");
-	private static final Map<String, String> EXTERNAL_LIST_RESTART_MARKERS = Map.of(
-		"de_de", "Neustart des Clients",
-		"en_us", "restarting the client",
-		"es_ar", "reiniciar el cliente",
-		"fr_fr", "redémarrage du client",
-		"pl_pl", "ponownym uruchomieniu klienta",
-		"tr_tr", "istemci yeniden başlatıldıktan sonra",
-		"zh_cn", "重启客户端后",
-		"zh_tw", "重新啟動用戶端後");
+	/**
+	 * Restart stems, not full phrases: the tooltip may be reworded as long as
+	 * every locale still states that external edits need a client restart.
+	 */
+	private static final @Unmodifiable Map<String, String> EXTERNAL_LIST_RESTART_STEMS = Map.of(
+		"de_de", "neustart",
+		"en_us", "restart",
+		"es_ar", "reinici",
+		"fr_fr", "redémarr",
+		"pl_pl", "uruchom",
+		"tr_tr", "yeniden başlat",
+		"zh_cn", "重启",
+		"zh_tw", "重新啟動");
 
 	@Test
 	void englishLocaleContainsInteractionSettingsAndUnits() throws IOException {
@@ -341,7 +348,8 @@ class ClientConfigLocalizationTest {
 			String tooltip = readTranslation(locale,
 				"settings.pingforit.open_client_config.tooltip");
 			assertTrue(
-				tooltip.contains(EXTERNAL_LIST_RESTART_MARKERS.get(locale)),
+				tooltip.toLowerCase(java.util.Locale.ROOT)
+					.contains(EXTERNAL_LIST_RESTART_STEMS.get(locale)),
 				() -> "external list tooltip must require a client restart: " + locale);
 		}
 	}
@@ -436,6 +444,27 @@ class ClientConfigLocalizationTest {
 				() -> "the local feedback prefix must be the exact marker resource: " + locale);
 			nonBlankTranslation(json, locale, messageKey);
 		}
+	}
+
+	@Test
+	void everyBundledLocaleContainsCooldownFeedbackSettingValuesAndMessage() throws IOException {
+		for (String locale : BUNDLED_LOCALES) {
+			JsonObject json = readLocaleJson(locale);
+			for (String key : List.of(
+				"settings.pingforit.cooldown_feedback",
+				"settings.pingforit.cooldown_feedback.tooltip",
+				ClientPingActionDispatcher.CREATE_COOLDOWN_MESSAGE_KEY)) {
+				String value = nonBlankTranslation(json, locale, key);
+				assertFalse(ARGUMENT_PLACEHOLDER.matcher(value.replace("%%", "")).find(), locale + ":" + key);
+			}
+			for (CooldownFeedbackMode mode : CooldownFeedbackMode.values()) {
+				String value = nonBlankTranslation(json, locale, "value.pingforit." + mode);
+				assertFalse(ARGUMENT_PLACEHOLDER.matcher(value.replace("%%", "")).find(), locale + ":" + mode);
+			}
+		}
+
+		assertEquals("Ping is on cooldown...",
+			readTranslation("en_us", ClientPingActionDispatcher.CREATE_COOLDOWN_MESSAGE_KEY));
 	}
 
 	@Test

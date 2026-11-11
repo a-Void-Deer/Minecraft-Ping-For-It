@@ -29,6 +29,9 @@ import nx.pingwheel.common.monitor.integration.ServerMonitorService;
 import nx.pingwheel.common.network.InventoryMonitorSubscribeC2SPacket;
 import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.presentation.inventory.InventoryBackend;
+import nx.pingwheel.common.presentation.inventory.InventoryDecision;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
+import nx.pingwheel.common.presentation.inventory.InventoryImpact;
 import nx.pingwheel.common.presentation.inventory.InventoryRuntime;
 import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemCodec;
@@ -157,10 +160,15 @@ public final class InventoryServer {
 	}
 	public static Optional<InventoryBackend.InitialPublication> reserveInitial(MarkerId marker, UUID recipient,
 		long epoch, long view, long wireBytes, long encodingWorkspace) {
+		prepareInitialAdmission();
 		return backend == null ? Optional.empty() : backend.reserveInitial(marker, recipient, epoch, view, wireBytes, encodingWorkspace);
 	}
 	public static Optional<InventoryBackend.InitialEnvelope> reserveInitialEnvelope(long wireBytes, long workspace) {
+		prepareInitialAdmission();
 		return backend == null ? Optional.empty() : backend.reserveInitialEnvelope(wireBytes, workspace);
+	}
+	private static void prepareInitialAdmission() {
+		if (backend != null && active != null) backend.prepareInitialAdmission(active.getTickCount());
 	}
 	public static boolean initialAudienceActive(MarkerId marker, UUID recipient) { return backend != null && backend.initialAudienceActive(marker, recipient); }
 	public static boolean initialCanonicalAudienceActive(MarkerId marker, UUID recipient, long now) {
@@ -272,17 +280,21 @@ public final class InventoryServer {
 		 */
 		@Override
 		public Optional<InventoryBackend.Opened> open(UUID playerId, Target requested) {
+			return Optional.ofNullable(openDecision(playerId, requested).value());
+		}
+		@Override
+		public InventoryDecision<InventoryBackend.Opened> openDecision(UUID playerId, Target requested) {
 			@Nullable ServerPlayer player = server.getPlayerList().getPlayer(playerId);
 			if (player == null) {
 				debugOpen("player", playerId, requested);
-				return Optional.empty();
+				return InventoryDecision.reject(InventoryFailureReason.TARGET_GONE, InventoryImpact.PING_UNAVAILABLE);
 			}
 			// Entity/private inventory and committed external contexts require their separate owning contracts.
 			boolean openable = requested instanceof Target.BlockTarget
 				|| requested instanceof Target.ExternalBlockTarget external && external.isCandidate();
 			if (!openable) {
 				debugOpen("context", playerId, requested);
-				return Optional.empty();
+				return InventoryDecision.unsupported(InventoryFailureReason.UNSUPPORTED_CONTEXT, InventoryImpact.PING_UNAVAILABLE);
 			}
 			ServerConfig config = ServerConfig.HANDLER.getConfig();
 			var validation = new MinecraftAuthoritativeTargetValidator(server, config.getPingDistance(),
@@ -291,7 +303,7 @@ public final class InventoryServer {
 			if (!validation.isAccepted()) {
 				debugOpen("validation", playerId, requested, null, null,
 					() -> "rejection=" + validation.rejectReason().map(reason -> reason.name()).orElse("unknown"));
-				return Optional.empty();
+				return InventoryDecision.reject(InventoryFailureReason.from(validation.rejectReason().orElseThrow()), InventoryImpact.PING_UNAVAILABLE);
 			}
 			var validated = validation.validatedTarget().orElseThrow();
 			// The validator may correct a candidate's classification, but a
@@ -301,13 +313,13 @@ public final class InventoryServer {
 			if (requested instanceof Target.ExternalBlockTarget external && external.isCandidate()
 				&& !InventoryBackend.sameCandidateNormalization(requested, validated.normalizedTarget())) {
 				debugOpen("normalize", playerId, requested, validated.normalizedTarget(), null, null);
-				return Optional.empty();
+				return InventoryDecision.reject(InventoryFailureReason.SOURCE_CHANGED, InventoryImpact.PING_UNAVAILABLE);
 			}
 			var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.global(nx.pingwheel.common.diagnostics.Diagnostics.server()))
 				.resolve(validated.normalizedTarget(), validated.matchContext());
 			debugOpen("opened", playerId, requested, resolved.target(), resolved.targetType().id(),
 				() -> "defaultPingType=" + resolved.targetType().defaultPingType().id());
-			return Optional.of(new InventoryBackend.Opened(resolved.target(),
+			return InventoryDecision.accept(new InventoryBackend.Opened(resolved.target(),
 				resolved.targetType().id(), resolved.targetType().defaultPingType().id()));
 		}
 

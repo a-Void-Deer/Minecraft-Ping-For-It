@@ -89,19 +89,19 @@ class InventoryMonitorPublisherTest {
 		@Override public void close() { publisher.close(); assertEquals(0, memory.retained()); assertEquals(0, memory.reserved()); }
 	}
 
-	@Test void allNormalHandoffOutcomesPreserveBusinessProgressAndDoNotInventUnknownBytes() {
+	@Test void handoffOutcomesAdvanceOnlyAcceptedOrUnobservedPartsAndDoNotInventUnknownBytes() {
 		@Nullable InventoryS2CPacket expected = null;
 		for (TransportHandoff outcome : TransportHandoff.values()) try (var f = new Fixture(true)) {
 			f.transport.handoff = outcome; f.publish(1, 7); f.publisher.drain();
-			assertFalse(f.publisher.pending(f.context)); assertEquals(1, f.transport.sent.size());
+			assertEquals(outcome == TransportHandoff.NOT_HANDED_OFF, f.publisher.pending(f.context)); assertEquals(1, f.transport.sent.size());
 			var packet = f.transport.sent.getFirst();
 			if (expected == null) expected = packet; else assertEquals(expected, packet, "full packet, including keys and checksum");
-			f.publisher.drain(); assertEquals(1, f.transport.sent.size(), "NOT and UNOBSERVED are observations, not a new retry policy");
 			var sample = f.sample(0); var lane = sample.preview(); long bytes = packet.encodedSize(f.publisher.effectiveDisplayBytes(), f.publisher.effectiveFrameBytes());
 			assertEquals(bytes, lane.counter(Counter.BUDGET_CHARGED_BYTES).value());
 			assertEquals(1, lane.counter(Counter.FRAMES_PREVIEW).value());
 			assertEquals(1, lane.counter(Counter.PUBLICATIONS_INSTALLED).value());
-			assertEquals(1, lane.counter(Counter.CUTS_COMPLETED).value());
+			if (outcome == TransportHandoff.NOT_HANDED_OFF) assertEquals(0, lane.counter(Counter.CUTS_COMPLETED).value());
+			else assertEquals(1, lane.counter(Counter.CUTS_COMPLETED).value());
 			if (outcome == TransportHandoff.HANDED_OFF) {
 				assertEquals(bytes, lane.counter(Counter.HANDOFF_BYTES).value()); assertEquals(1, lane.counter(Counter.HANDOFF_FRAMES).value());
 			} else {
@@ -111,6 +111,11 @@ class InventoryMonitorPublisherTest {
 			if (outcome == TransportHandoff.UNOBSERVED) assertEquals(bytes, lane.counter(Counter.UNOBSERVED_HANDOFF_CANDIDATE_BYTES).value());
 			else { assertNull(lane.counter(Counter.UNOBSERVED_HANDOFF_FRAMES)); assertNull(lane.counter(Counter.UNOBSERVED_HANDOFF_CANDIDATE_BYTES)); }
 			if (outcome != TransportHandoff.NOT_HANDED_OFF) assertNull(lane.counter(Counter.NOT_HANDED_OFF_FRAMES));
+			if (outcome == TransportHandoff.NOT_HANDED_OFF) {
+				f.transport.handoff = TransportHandoff.HANDED_OFF; f.publisher.advance(f.settings.getPreview().getPeriodTicks(), f.settings); f.publisher.drain();
+				assertFalse(f.publisher.pending(f.context)); assertEquals(2, f.transport.sent.size());
+				assertSame(packet, f.transport.sent.getLast(), "retry keeps the same immutable part");
+			} else { f.publisher.drain(); assertEquals(1, f.transport.sent.size()); }
 		}
 	}
 
@@ -251,7 +256,8 @@ class InventoryMonitorPublisherTest {
 
 	@Test void oversizedPreviewDropClearsEntriesAndNeverCompletesTheIncompleteControl() {
 		try (var f = new Fixture(true)) {
-			InventorySyncPublisherTest.publish(f.publisher, f.context, InventorySyncPublisherTest.capture(1, 1, 4096));
+			f.publisher.wireBudgetFixture(4096, 4096);
+			InventorySyncPublisherTest.publish(f.publisher, f.context, InventorySyncPublisherTest.capture(1, 1, 64 * 1024));
 			assertQueues(f.sample(0), Lane.PREVIEW, 1, 0); f.publisher.drain();
 			var sample = f.sample(1); assertQueues(sample, Lane.PREVIEW, 0, 0);
 			assertEquals(InventoryS2CPacket.Status.INCOMPLETE, f.transport.sent.getLast().status());

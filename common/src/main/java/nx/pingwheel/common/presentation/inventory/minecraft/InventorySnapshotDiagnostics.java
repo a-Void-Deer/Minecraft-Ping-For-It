@@ -11,6 +11,14 @@ import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.presentation.inventory.InventorySourceInput;
 import nx.pingwheel.common.diagnostics.DiagnosticLogger;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
+import nx.pingwheel.common.presentation.inventory.InventoryDiagnosticDetail;
+import nx.pingwheel.common.presentation.inventory.InventoryDiagnosticSite;
+import nx.pingwheel.common.presentation.inventory.InventoryDiagnostics;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
+import nx.pingwheel.common.presentation.inventory.InventoryImpact;
+import nx.pingwheel.common.presentation.inventory.InventoryOperation;
+import nx.pingwheel.common.presentation.inventory.InventoryOutcome;
 
 /** Low-frequency snapshot discovery/failure diagnostics; never captures or serializes snapshot data for logging. */
 @NotNullByDefault
@@ -20,7 +28,7 @@ final class InventorySnapshotDiagnostics {
 		SOURCE_RESOLVE, EXTERNAL_RESOLVE, RESIDENT_VALID, PROVIDER_LAYOUT, SOURCE_VALID, AUTHORITY, EXTERNAL_VALID, CERTIFIED_CREATE;
 		final nx.pingwheel.common.diagnostics.DiagnosticChannel channel = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-snapshot-" + name(), java.time.Duration.ofSeconds(10));
 	}
-	private static nx.pingwheel.common.diagnostics.DiagnosticLogger failureLogger(String operation) {
+	private static DiagnosticLogger failureLogger(String operation) {
 		@Nullable FailureSite site = switch (operation) {
 			case "inventory-source-resolve" -> FailureSite.SOURCE_RESOLVE;
 			case "inventory-external-resolve" -> FailureSite.EXTERNAL_RESOLVE;
@@ -43,18 +51,32 @@ final class InventorySnapshotDiagnostics {
 
 	/** Only the boundary converting an exception into unavailable/fallback reports it. */
 	static void failure(String operation, InventorySourceInput input, @Nullable Object provider, Supplier<String> detail, Throwable failure) {
-		if (failure instanceof InventorySourceUnavailableException || failure instanceof InventoryItemBudget.CaptureLimitException) return;
+		if (failure instanceof InventorySourceUnavailableException) return;
 		if (failure instanceof nx.pingwheel.common.presentation.inventory.InventorySharedRead.ReadFailure typed && typed.failure() == null) return;
-		var target = input.target();
 		String handling = switch (operation) {
 			case "inventory-provider-snapshot-layout" -> "live-read-fallback";
 			case "inventory-certified-create" -> "exact-read-fallback";
 			case "inventory-snapshot-authority", "inventory-resident-scope-valid" -> "deny-read";
 			default -> "invalidate-read";
 		};
-		failureLogger(operation).failure(Level.WARN, operation, handling,
-			() -> "owner=" + input.readOwner() + " face=" + input.face() + " providerClass=" + (provider == null ? "minecraft" : provider.getClass().getName())
-				+ " " + detail.get() + " target=" + target, failure);
+		InventoryFailureReason reason = failure instanceof InventoryItemBudget.CaptureLimitException capture ? capture.reason()
+			: failure instanceof InventoryItemCodec.CapacityExceededException itemCapacity ? itemCapacity.reason()
+			: failure instanceof nx.pingwheel.common.presentation.inventory.InventoryFluidCodec.CapacityException fluidCapacity ? fluidCapacity.reason()
+			: InventoryFailureReason.PROVIDER_FAILURE;
+		boolean limit = failure instanceof InventoryItemBudget.CaptureLimitException
+			|| failure instanceof InventoryItemCodec.CapacityExceededException
+			|| failure instanceof nx.pingwheel.common.presentation.inventory.InventoryFluidCodec.CapacityException;
+		boolean fallback = handling.equals("live-read-fallback") || handling.equals("exact-read-fallback");
+		if (!limit) {
+			failureLogger(operation).failure(Level.WARN, operation, handling,
+				() -> "owner=" + input.readOwner() + " face=" + input.face() + " providerClass=" + (provider == null ? "minecraft" : provider.getClass().getName())
+					+ " " + detail.get() + " target=" + input.target(), failure);
+			return;
+		}
+		InventoryDiagnostics.report(DiagnosticSide.SERVER, InventoryDiagnosticSite.SNAPSHOT, InventoryOperation.READ,
+			reason, fallback ? InventoryImpact.DEGRADED : InventoryImpact.PING_UNAVAILABLE,
+			fallback ? InventoryOutcome.DEGRADED : InventoryOutcome.FAILED, limit,
+			() -> new InventoryDiagnosticDetail(handling, -1, -1, null, -1, -1, -1), failure);
 	}
 
 	static void unsupported(InventorySourceInput input, String detail) {

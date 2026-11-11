@@ -19,6 +19,9 @@ import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLay
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import nx.pingwheel.common.diagnostics.Diagnostics;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimits;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimitException;
+import nx.pingwheel.common.presentation.inventory.minecraft.ProviderLimitSite;
 
 /**
  * Loader bridge for item sources that expose a native, read-only inventory
@@ -352,6 +355,7 @@ public interface IPlatformInventoryService {
 		@Override public Optional<InventorySnapshotLayout> snapshotLayout() { return checked(delegate::snapshotLayout); }
 		@Override public boolean valid() {
 			try { return checked(delegate::valid); }
+			catch (InventoryProviderLimitException limit) { throw limit; }
 			catch (RuntimeException | LinkageError unavailable) {
 				if (!(unavailable instanceof InventorySourceUnavailableException))
 					Diagnostics.server().atDetailed().rateLimited(DiagnosticChannels.VALID).failure(org.apache.logging.log4j.Level.WARN, "inventory-guarded-access-valid", "invalid-access",
@@ -411,13 +415,22 @@ public interface IPlatformInventoryService {
 		}
 		private ResidentReads() {}
 		/** Before reflection can allocate a missing-member signature/message. */
-		public static boolean reflectionShape(Class<?> type, String name, Class<?>... arguments) {
-			if (type == null || type.getName().length() > MAX_TYPE_NAME_CHARS || name == null
-				|| name.length() > MAX_MEMBER_NAME_CHARS || arguments.length > MAX_REFLECTION_PARAMETERS)
-				return false;
+		public static boolean reflectionShape(@org.jetbrains.annotations.Nullable Class<?> type, @org.jetbrains.annotations.Nullable String name, @org.jetbrains.annotations.Nullable Class<?> @org.jetbrains.annotations.Unmodifiable ... arguments) {
+			if (type == null || name == null) return false;
+			if (type.getName().length() > MAX_TYPE_NAME_CHARS) {
+				InventoryProviderLimits.report(ProviderLimitSite.REFLECTION_TYPE_NAME, type.getName().length(), MAX_TYPE_NAME_CHARS); return false;
+			}
+			if (name.length() > MAX_MEMBER_NAME_CHARS) {
+				InventoryProviderLimits.report(ProviderLimitSite.REFLECTION_MEMBER_NAME, name.length(), MAX_MEMBER_NAME_CHARS); return false;
+			}
+			if (arguments.length > MAX_REFLECTION_PARAMETERS) {
+				InventoryProviderLimits.report(ProviderLimitSite.REFLECTION_PARAMETERS, arguments.length, MAX_REFLECTION_PARAMETERS); return false;
+			}
 			for (int index = 0; index < arguments.length; index++)
-				if (arguments[index] == null || arguments[index].getName().length() > MAX_TYPE_NAME_CHARS)
-					return false;
+				if (arguments[index] == null) return false;
+				else if (arguments[index].getName().length() > MAX_TYPE_NAME_CHARS) {
+					InventoryProviderLimits.report(ProviderLimitSite.REFLECTION_TYPE_NAME, arguments[index].getName().length(), MAX_TYPE_NAME_CHARS); return false;
+				}
 			return true;
 		}
 		public static void requireReflectionShape(Class<?> type, String name, Class<?>... arguments) {
@@ -450,6 +463,7 @@ public interface IPlatformInventoryService {
 					return MethodOwnership.UNCLASSIFIED;
 				}
 			}
+			if (type != null) InventoryProviderLimits.report(ProviderLimitSite.REFLECTION_INHERITANCE, MAX_INHERITANCE_DEPTH + 1L, MAX_INHERITANCE_DEPTH);
 			return MethodOwnership.UNCLASSIFIED;
 		}
 

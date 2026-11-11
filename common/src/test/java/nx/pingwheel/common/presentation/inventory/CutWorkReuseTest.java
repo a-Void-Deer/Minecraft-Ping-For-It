@@ -1,6 +1,7 @@
 package nx.pingwheel.common.presentation.inventory;
 
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -63,6 +64,23 @@ class CutWorkReuseTest {
 			false);
 		assertThrows(IllegalArgumentException.class, () -> InventoryEncodedFragment.encode(
 			InventoryResourceKind.ITEM, Map.of("selected", fluid)));
+	}
+
+	@Test
+	void encodedInventoryFragmentAdmitsTheCodeOwnedPageAndRejectsOneMore() {
+		Map<String, InventoryResourceValue> items = new LinkedHashMap<>();
+		for (int index = 0; index < InventoryDomainCodec.CODEC.maxEntries(); index++)
+			items.put("item/" + index, new InventoryDomainCodec.Item(
+				new InventoryScanner.Key("minecraft:stone", "variant_" + index), index, "stone", null, false));
+
+		InventoryEncodedFragment encoded = InventoryEncodedFragment.encode(InventoryResourceKind.ITEM, items);
+		assertEquals(InventoryDomainCodec.CODEC.maxEntries(), encoded.entries().size());
+		assertTrue(encoded.entries().values().stream().allMatch(value -> value.codec() == InventoryDomainCodec.CODEC));
+
+		items.put("item/overflow", new InventoryDomainCodec.Item(
+			new InventoryScanner.Key("minecraft:stone", "overflow"), 0L, "stone", null, false));
+		assertThrows(IllegalArgumentException.class,
+			() -> InventoryEncodedFragment.encode(InventoryResourceKind.ITEM, items));
 	}
 
 	private static CaptureResult result(InventoryEncodedFragment encoded, long revision) {

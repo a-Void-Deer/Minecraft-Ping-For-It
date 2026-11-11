@@ -8,70 +8,60 @@ Pending gameplay checks remain in the
 
 ## Name and geometry outcomes
 
-The current suite covers:
+The name and geometry suites cover wheel sector colors; entity-block source modes
+and per-attempt `RENDERED`/`EMPTY`/`FAILED` outcomes with fallback consequences;
+and behavioral native-edge rendering. `TargetNameComposerTest` covers custom
+color/italic stripping and base-component identity; its event-named case does not
+construct click or hover fixtures, so it is not event-specific regression
+coverage. `TargetNamePlainTextTest` covers the UTF-8 byte bound: every cut keeps
+whole supplementary code points, never turns a truncated surrogate into a
+replacement byte, and the presentation bound admits the maximum whole emoji
+prefix without dropping punctuation or adding base text.
 
-- wheel sector colors;
-- entity-block source modes and per-attempt `RENDERED`/`EMPTY`/`FAILED`
-  outcomes, including fallback consequences;
-- behavioral native-edge rendering.
-
-`TargetNameComposerTest` covers custom color/italic stripping and base-component
-identity. Its event-named case does not construct click or hover event fixtures,
-so it is not event-specific regression coverage. `TargetNamePlainTextTest`
-covers the plain-text reduction's UTF-8 byte bound: every cut keeps whole
-supplementary code points and never turns a truncated surrogate into a
-replacement byte, and the presentation text bound admits the maximum whole
-emoji prefix without dropping literal punctuation or adding base text.
-
-`ClientTargetNameDecoderTest` covers valid component decoding, malformed JSON
-falling back to the unknown translatable name, and valid input emitting no
-diagnostic. Its injected synchronous logger receives one bounded report with
-the marker ID, exception details and decode source frame, without an additional
-throwable argument. This callback fixture does not exercise production logger
-admission or the no-op formatting bypass, and does not infer custom callbacks'
-internal DEBUG enablement. Shared production-helper evidence is inventoried in
+`ClientTargetNameDecoderTest` covers valid decoding, malformed JSON falling back
+to the unknown translatable name, and valid input emitting no diagnostic. Its
+injected synchronous logger receives one bounded marker-ID report with exception
+details and the decode source frame, without an additional throwable argument.
+This callback fixture does not exercise production logger admission or the no-op
+formatting bypass. Shared production-helper evidence is inventoried in
 [shared exception diagnostics](integrations.md#shared-exception-diagnostics).
 
 `TargetNameDiagnosticsTest` covers the injected client entity-name lookup seam:
-expected absence returns the unknown name without a warning, while a throwing
-lookup keeps that fallback, consumes the getter once and emits one content-free
-`NORMAL` warning with the unknown-name handling. Higher disclosure retains the
-original message and cause without an attached throwable. The server-side
-helper has the same `NORMAL` fallback summary. These cases do not exercise the
-real client-world getters, block/external lookup, server name encoding or the
-decoder's production logger admission.
+expected absence returns the unknown name without a warning; a throwing lookup
+keeps that fallback, consumes the getter once and emits one content-free `NORMAL`
+warning. Higher disclosure retains the original message and cause without an
+attached throwable; the server-side helper has the same `NORMAL` summary. These
+cases do not exercise real client-world getters, block or external lookup,
+server name encoding or the decoder's production logger admission.
 
-`OutlineDiagnosticsTest` covers common production runner and registry seams:
-throwing model claims allow the next adapter and a later retry, null outcomes
-and throwing observers retain the successful sibling result with independent
-once-only warnings, and a failed source ID or rejected duplicate cannot
-displace an accepted registration. `NORMAL` reports carry finite category and
-handling codes; a source attempt or null outcome is `ERROR`, while context,
-observer, probe and registration failures are `WARN`.
-The source-render report states fallback eligibility and does not claim an
-applied fallback even when a later source renders or the native shape is empty.
-A world-aware failure keeps its once key on the real block registry identity and
-reuses the registration-validated adapter ID for admitted detail instead of
-calling the adapter again. Higher disclosure retains the original cause in one
-bounded string without an attached throwable; a throwing sink consumes only the
-report opportunity, not later source attempts, and log-level changes do not
-reset an already emitted warning. `BlockPresentationResolverTest` also asserts
-cause-bearing warnings while a failed resolver leaves later resolution or the
-ordinary direct subject usable. These are headless source, resolver and logging
-seams, not render-frame or GPU execution. Optional Flywheel and Create
+`OutlineDiagnosticsTest` covers runner and registry seams: throwing model claims
+allow the next adapter and a later retry; null outcomes and throwing observers
+retain the successful sibling with independent once-only warnings; a failed
+source ID or rejected duplicate cannot displace an accepted registration.
+`NORMAL` reports carry finite category and handling codes; source attempts and
+null outcomes are `ERROR`, while context, observer, probe and registration
+failures are `WARN`. The source-render report states fallback eligibility without
+claiming an applied fallback. A world-aware failure keeps its once key on the
+real block registry identity and reuses the registration-validated adapter ID for
+admitted detail. Higher disclosure retains the original cause in one bounded
+string; a throwing sink consumes only the report opportunity, and log-level
+changes do not reset an emitted warning. `BlockPresentationResolverTest` also
+checks cause-bearing warnings while a failed resolver leaves later resolution or
+the ordinary direct subject usable. These are headless source, resolver and
+logging seams, not render-frame or GPU execution. Optional Flywheel and Create
 diagnostic seams are inventoried under
 [optional rendering coverage](integrations.md#optional-rendering-structural-coverage).
 
 ## Container presentation subjects
 
-`VanillaChestPresentationTest` exercises production loaded-state adapters and
-the common resolver for normal/trapped chests, every horizontal facing and
-either hit. LEFT/RIGHT ordering preserves type and physical source; malformed,
-missing or single pairs fall back to the valid direct hit. An unavailable or
-registry-replaced source yields no subject, without inventory reads or chunk
-loading. Native frame preparation and the metadata port use the same resolver.
-Normal sources and late fallback consume one ordered snapshot, and geometry
-from one half leaves the other eligible for fallback. These are headless
+`VanillaChestPresentationTest` exercises production loaded-state adapters and the
+common resolver for normal/trapped chests, every horizontal facing and either
+hit. LEFT/RIGHT ordering preserves type and physical source; malformed, missing
+or single pairs fall back to the valid direct hit. An unavailable or
+registry-replaced source yields no subject without inventory reads or chunk
+loading. Native frame preparation and the metadata port use the same resolver;
+normal sources and late fallback consume one ordered snapshot, and geometry from
+one half leaves the other eligible for fallback. These are headless
 resolution/frame seams, not actual chest BER or GPU output.
 
 NeoForge Vault registration, archive-backed metadata and complete per-cell
@@ -84,40 +74,38 @@ live synchronization, installed models or whole-structure outline appearance.
 `BlockPresentationContextTest` covers loaded-state source gates for known
 containers without ordinary block-entity lookup, and an unavailable or replaced
 tank source stopping before optional resolution or direct replacement rendering.
-Tank per-cell dispatch, shared frame snapshot and exact native-edge fallback
+Tank shell-subject dispatch, shared frame snapshot and exact native-edge fallback
 assertions are inventoried under
 [tank topology verification](integrations.md#fluid-tank-topology-grouping-and-presentation).
 
 ## Base-fluid icon presentation
 
-`SpatialFluidIconRendererTest` records the production draw dispatch without a
-GPU: a fluid whose legacy block is air still uses its native still sprite;
-null, missing, wrong-atlas and throwing native routes try a non-air legacy
-particle sprite once before text-only fallback. Ordinary unusable or absent
-sprites stay quiet; a native failure with a legacy replacement is a `WARN`
-legacy-sprite handling, terminal text-only resolution has its own `WARN`, and a
-failed GPU submission is `ERROR` with separate draw-failed handling. `NORMAL`
-summaries stay content-free while `DEEP` retains both original causes without
-mutating them, and suppressed or disabled reports read neither again. Production
-discovery and native-port failures cross `FluidSprites.lookupStillSprite`
-unchanged and are reported only by the renderer after it selects a fallback;
-the compatibility `stillSprite` entry still returns null after exactly its own
-lookup, absence stays null and only a successful service is cached. The
-recorded draw preserves existing alpha/tint composition. Replacing supplied
-sprite resources is observed on the next draw, and a failed lookup does not
-prevent later recovery. This simulates resource replacement, not a live client
-reload. `FluidSpritesTest` separately covers current native, linkage and service
-configuration failures keeping their identity, fatal errors propagating from
-both entries, quiet missing-service behavior, and one discovery per uncached
-call without a negative cache. Loader API and actual tea-asset assertions are
+`SpatialFluidIconRendererTest` records production draw dispatch without a GPU: a
+fluid whose legacy block is air still uses its native still sprite; null, missing,
+wrong-atlas and throwing native routes try a non-air legacy particle sprite once
+before text-only fallback. Ordinary unusable or absent sprites stay quiet; a
+native failure with a legacy replacement is a `WARN` legacy-sprite handling,
+terminal text-only resolution has its own `WARN`, and a failed GPU submission is
+`ERROR` with separate draw-failed handling. `NORMAL` summaries stay content-free
+while `DEEP` retains both original causes without mutating them; suppressed or
+disabled reports read neither again. Production discovery and native-port
+failures cross `FluidSprites.lookupStillSprite` unchanged and are reported only
+after the renderer selects a fallback; the compatibility `stillSprite` entry
+returns null after exactly its own lookup, absence stays null, and only a
+successful service is cached. Recorded draws preserve alpha/tint composition;
+replaced supplied sprite resources appear on the next draw, and a failed lookup
+does not prevent later recovery. This simulates resource replacement, not a live
+client reload. `FluidSpritesTest` covers native, linkage and service
+configuration failures keeping their identity, fatal errors propagating from both
+entries, quiet missing-service behavior, and one discovery per uncached call
+without a negative cache. Loader API and actual tea-asset assertions are
 inventoried under
-[native fluid presentation](integrations.md#native-fluid-presentation). The
-added diagnostic cases remain automated coverage inventoried above; no saved
-execution acceptance record yet covers them, and that evidence remains pending.
-The [shared diagnostics evidence note](integrations.md#shared-exception-diagnostics)
-owns the cross-domain gap. The earlier
+[native fluid presentation](integrations.md#native-fluid-presentation). The added
+diagnostic cases have no saved execution acceptance record; the
+[shared diagnostics note](integrations.md#shared-exception-diagnostics) owns that
+cross-domain gap, and the earlier
 [combined-tree execution](build-checks.md#native-fluid-boundary-and-presentation-verification)
-remains historical evidence for its pre-existing headless results.
+remains historical.
 
 ### Low-opacity quad regressions
 
@@ -126,295 +114,186 @@ GameRenderer binding for the stock entity-translucent-emissive shader with
 `NEW_ENTITY`. Texture-alpha discard precedes transition opacity; a CPU oracle
 using production vertex/uniform values retains a nonzero contribution from an
 opaque texel at 5% opacity. Production mesh assertions preserve pose, UVs, tint
-and vertex attributes, while submission-order checks keep shader-local opacity
-after default uniforms.
-
-Recording submission and fake GL-state seams cover flush/submission failures,
-resource disposal, caller-state and explicitly overridden uniform restoration,
-and subsequent-icon recovery. A missing shader cannot produce an opaque fallback.
-`SpatialFluidIconRendererTest` also records water tint, zero-opacity lookup
-suppression and text-only fallback with later recovery after submission failure.
-The
-[combined-tree execution](build-checks.md#lane-policy-native-amount-and-icon-opacity-verification)
-records their passing headless results. The separate
-[stock-GUI GPU probe](build-checks.md#stock-gui-gpu-probe)
-records native framebuffer, following-draw and focused JUnit results, distinct
-from these repository CPU/fake-state seams.
+and vertex attributes; submission-order checks keep shader-local opacity after
+default uniforms. Recording submission and fake GL-state seams cover
+flush/submission failures, resource disposal, caller-state and explicitly
+overridden uniform restoration, and later recovery; a missing shader cannot
+produce an opaque fallback. The same renderer tests water tint, zero-opacity
+lookup suppression and text-only fallback with recovery after submission failure.
+The [combined-tree execution](build-checks.md#lane-policy-native-amount-and-icon-opacity-verification)
+records their passing headless results; the separate
+[stock-GUI GPU probe](build-checks.md#stock-gui-gpu-probe) records native
+framebuffer, following-draw and focused JUnit results distinct from these
+CPU/fake-state seams.
 
 ## Selector overlay layout and frame rendering
 
-`SpatialOverlayRendererTimingTest` covers renderer timing models.
-`SpatialOverlayTransitionsTest`, `SpatialInventoryLayoutTest`,
-`SpatialOverlayRendererStyleTest`, `SpatialOverlayRendererSectorTest`,
-`SpatialOverlayRendererBorderTest` and `SpatialSquareProgressTest` cover the CPU
-overlay models:
+`SpatialOverlayRendererTimingTest` covers timing models. The transition, layout,
+style, sector and square-progress suites cover CPU overlay models: appearance,
+exit, retargeting, reduced motion, rewind and bounded churn; synchronized
+non-input relayout and a shared geometry rebase; row/status coordinates; style
+overrides, font scaling, alpha and independent wheel/target opacity, zero-opacity
+layer gating, and Back progress within painted extents; child-orbit,
+submenu-radius and selected offsets; square-progress extents and immutable
+back-affordance state; and sector scanline geometry, tiling,
+disabled/reserved alpha and paint order.
 
-- appearance, exit, reappearance, retargeting, reduced motion, rewind and bounded
-  churn, including a synchronized non-input relayout that commits Cartesian
-  anchors together while scale and both coverage channels keep easing, and a
-  shared geometry rebase that keeps detached paint and the current follower on
-  one center without advancing time;
-- row layout and coordinate conversion with status separate from rows and
-  unknown counts;
-- caller style overrides, legacy font scaling, alpha arithmetic, the independent
-  wheel-underlay and target-frame opacity split, the per-layer gate that keeps
-  only the transition-faded chrome when both opacity preferences are zero and
-  drops every underlay or text-bearing frame, and the Back progress path tracing
-  the frame's actually painted pixel extents and never leaving them;
-- half-scale child-orbit bounds, the non-root submenu-radius multiplier with the
-  root distance and legacy forms unchanged, and selected offsets;
-- the square progress walk's last-painted extents and the inventory view's
-  immutable back-affordance state; and
-- sector scanline geometry, adjacent-sector tiling, shared disabled/reserved
-  alpha, and paint ordering.
+`SpatialOverlayRendererGuideTest` covers radial guides: one divider per true
+shared boundary, including unequal, equal, Back and wrapped spans, with none for
+a full disc or gap; the frozen deadzone circle and controller-provided deadzones;
+menu-origin placement under rigid translation, ancestor dimming and child
+radial-entry; and guide alpha following only the menu transition, independent of
+opacity preferences and focus/selection/release, with reduced motion and exit
+handled by the shared transition. Endpoints use independently computed geometry;
+no painted stroke or GPU submission is claimed.
 
-`SpatialOverlayRendererGuideTest` covers the radial center guides headlessly:
-one divider per true shared boundary, each emitted exactly once, across the
-root's unequal spans, equal spans including Back, and the pair wrapping past
-zero, while a single full disc or a gap between neighbors gains no phantom
-divider; the closed deadzone circle as a clockwise polyline at the frozen
-radius, with a non-positive or non-finite radius yielding none; non-default
-frozen deadzones reaching that geometry through the controller read model;
-guides placed at each menu's own origin under the rigid translation,
-with an ancestor menu's guides dimming with that menu and a child menu's guides
-on the child origin and a radially entered child records the radial entry
-that opened it; and guide alpha following only the menu's own transition
-fade, independent of both opacity preferences and of focus, selection or
-release, with reduced motion and the exit tail handled by the shared transition
-model, painted after the sector underlay and before the inventory panels. Every
-endpoint is checked against geometry computed independently in the test; no
-painted stroke, GuiGraphics or GPU submission is claimed.
-`SpatialOverlayRendererFocusScaleTest` drives the production frame path through
-recording paint and font-metrics ports: an eligible focused action or branch
-selects the focused emphasis and sibling de-emphasis scales through the
-existing finite interval from the displayed resting pose, a new follower starts
-within its appearance fade, Back, disabled, reserved and deadzone focus keep the
-established scales with no emphasis mode, an actionless branch focuses the same
-way, reduced motion snaps, and inventory-list rows keep their own scale.
-`SpatialOverlayTransitionsBackgroundTest` and
-`SpatialOverlayRendererBackgroundTest` cover the independent
-background-coverage channel: historical constructors delegate the channel from
-the foreground alpha, bounds validate as a normalized channel, appearance
-starts at zero coverage on its own finite interval, retargeting eases from the
-displayed coverage and a separate alpha edit never restarts it, exit fades to
-zero while detached data keeps its deadline and reappearance resumes from the
-displayed coverage, reduced motion snaps and drops the exit tail, rewind cannot
-rewind the displayed coverage, resting coverage uses the fractional base
-coverages, eligible radial focus applies the confirmed sector and box gains to
-the focused entry and its siblings, radial Back, disabled, reserved and deadzone focus
-keep every resting gain, ancestor levels apply structural dimming and omit the
-ancestor breadcrumb sector without repeating the foreground unselected factor,
-the final byte rounds exactly once, each opacity knob reaches only its own
-background layer, background-only paint is admitted but never acknowledges,
-frame backgrounds fade with their own channel through a detached exit, the
-active list and an empty active list emphasize their panel and header, the
-selected row emphasizes only while direct release is committable with no Back
-focus, retained-row filtering keeps only the entered item row while the
-panel/window model stays complete and detached sibling tails are suppressed
-before the return restores the window, a selection change draws the old
-overlay's fade and the new overlay's growth without ever filling a
-never-selected row, and the row-overlay draw honors reduced motion, opacity
-zero and quantized zero.
+`SpatialOverlayRendererFocusScaleTest` drives the production frame through
+recording ports: focused actions and branches use the focused emphasis and
+sibling de-emphasis scales through the finite interval; Back, disabled, reserved
+and deadzone focus keep established scales; actionless branches focus the same
+way; reduced motion snaps; inventory rows keep their own scale.
 
-`RadialGradientTest` records the production vertex emitter with independent
-geometry and alpha expectations: center coverage and unchanged RGB, an outward
-fade with soft shoulders and a transparent rim, fractional coverage and opacity
-until final-byte rounding, clockwise sector and Back-half orientation, exact
-shared edges for unequal and wrapped sectors, full-disc winding and
-non-overlapping topology, bounded radius-independent work, and inert invalid or
-quantized-zero inputs. The radial-route cases in
-`SpatialOverlayRendererBackgroundTest` connect production frame planning to
-that emitter through recording ports: root, submenu, ancestor Back, inventory
-Back halves, item menus and detached exit paint use the same underlay route;
-rectangular surfaces and foreground stay separate; wheel and target opacity
-retain their independent scopes; background-peak admission is independent of
-foreground alpha; and one underlay batch is bracketed before later layers.
-These are source-reviewed emitter and recording-painter fixtures, not a
-recorded test run, native GUI batching or GPU submission evidence.
+`SpatialOverlayTransitionsBackgroundTest` and the background renderer cover the
+independent coverage channel: constructor delegation and normalized bounds;
+appearance, retargeting and reappearance from displayed coverage; exit while
+detached data keeps its deadline; reduced motion and rewind; radial focus gains,
+ancestor dimming and breadcrumb omission; final-byte rounding and per-knob layer
+scope; background-only admission without acknowledgement; frame backgrounds;
+active/empty panel and header emphasis; committable selected-row emphasis;
+retained-row filtering without mutating the window model; old-fade/new-growth
+selection change; and row-overlay reduced-motion/zero handling.
 
-`SpatialInventoryLayoutTest` covers content-driven panel measurement before the
-viewport cap: detached row names, icon slots, full-sized quantities, status,
-position headers and Forward chrome contribute their natural width, with all
-bounded discovered rows measured independently of selection and the visible
-window. Empty or short content does not fill the maximum. Header, footer and
-whole-row capacity share the current GUI budget; a tiny GUI retains readable
-metrics and a whole row rather than shrinking the pattern, and a retained
-item-row anchor survives capacity and font relayout. Explicit-fraction fixtures
-check independent width and whole-row capacity caps, finite off-grid caller
-values without quantization, unchanged text metrics, viewport remeasurement
-with the same fractions, rejection of non-positive or non-finite fractions in
-both measurement forms, and compatibility overloads delegating to model
-initialization. Exact-decimal budget fixtures use independent literal geometry
-to check the whole-pixel width boundary and the last fitting complete row;
-adjacent smaller and larger fraction or viewport inputs neither borrow boundary
-geometry nor admit an extra pixel or row. Maximum-capacity assertions require
-the measured panel to fit the independent budget while one more whole row
-exceeds it. `SpatialOverlayRendererStyleTest` checks model-default delegation
-for a previous style form, custom fractions through the explicit legacy-font
-factory without changing supplied font, submenu or trail values, and rejection
-of non-positive or non-finite fractions in either dimension. These are
-source-reviewed layout and style fixtures, not recorded test runs.
-The detached-display case in `SpatialInventoryRowDisplayTest` checks that
-measurement and painting consume
-the same transmitted name and owned icon rather than a short fallback label.
-`SpatialInventoryTextTest` covers the production clipping plan for long
-quantities, header/status text, Forward and tiny slots: configured scale stays
-fixed, fitting text stays whole, and an ellipsis must itself fit the available
-slot. These are layout, display-projection and clipping-plan seams, not native
-text or scissor submission evidence.
+`RadialGradientTest` records the production emitter: center coverage/RGB, outward
+fade with soft shoulders and transparent rim, fractional coverage/opacity to
+rounding, clockwise sector/Back orientation, exact shared edges, full-disc
+winding and non-overlap, bounded work, and inert invalid or quantized-zero
+inputs. Background radial-route cases connect production planning to the emitter:
+all menu and detached-exit underlays use that route, rectangular and foreground
+paint stay separate, opacity scopes stay independent, and one underlay batch is
+bracketed. These are source-reviewed fixtures, not a recorded run or GPU evidence.
+
+`SpatialInventoryLayoutTest` covers content-driven measurement before the viewport
+cap: natural row, icon, quantity, status, header and Forward widths; selection-
+and window-independent discovered rows; no maximum fill for short content; shared
+GUI budget; readable tiny GUI; and retained anchors across relayout. Fraction
+fixtures cover independent caps, finite off-grid values, unchanged text metrics,
+remeasurement, fraction rejection and compatibility overloads. Decimal fixtures
+check the whole-pixel boundary, last fitting row and adjacent inputs without
+borrowing geometry. Style delegation, detached name/icon reuse in
+`SpatialInventoryRowDisplayTest`, and fixed-scale whole-text/ellipsis clipping in
+`SpatialInventoryTextTest` are separate. These are layout/display/clipping seams,
+not native text or scissor submission.
 
 `SpatialInventoryQuantityPriorityTest` records production row-text submission
-with supplied font metrics. At a 320×240 GUI, the complete `12.345 B` quantity
-takes width before the Water name. Approximate/sub-mB indicators and localized
-large units survive across scales; exact fits at 1.7 and the eight tested
-text scales stay whole, while a genuinely smaller slot remains bounded.
-An overfull quantity receives the full text slot after the name yields, without
-font shrinking or panel expansion, and item rows retain their own allocation.
-These assertions passed in the
+with supplied font metrics. At 320×240, the complete `12.345 B` quantity takes
+width before the Water name; approximate/sub-mB indicators and localized large
+units survive across scales; exact fits at 1.7 and the eight tested text scales
+stay whole while a smaller slot remains bounded. An overfull quantity receives
+the full text slot after the name yields, without font shrinking or panel
+expansion, and item rows retain their allocation. These assertions passed in the
 [combined-tree execution](build-checks.md#native-fluid-boundary-and-presentation-verification)
 and do not establish native font fitting.
 
-The mirrored-side cases in `SpatialInventoryBackTest` record a complete Back
-title frame outside the panel's actual parent-facing edge at its vertical
-midpoint, its outward semicircle, and progress along the measured rectangular
-frame's painted extents. Focus enhances only the underlay coverage, without
-changing the title's geometry, scale or own background channel; wheel opacity
-reaches the underlay independently, and navigation paint acknowledges no
-fabricated choice. These are production-frame recording and perimeter-helper
-checks, not native window or graphics submission evidence.
+`SpatialInventoryBackTest` records a complete mirrored-side Back title frame
+outside the panel's parent-facing edge at its vertical midpoint, its outward
+semicircle, and progress along the measured rectangular frame's painted extents;
+focus enhances only underlay coverage, wheel opacity reaches the underlay
+independently, and navigation paint acknowledges no fabricated choice. These are
+production-frame recording and perimeter-helper checks, not native window or
+graphics submission.
 
-`SpatialOverlayRendererAncestorBreadcrumbTest` drives the production radial
-planning and frame seams through recording paint and font-metrics ports: each
-ancestor of the active path plans only its entry breadcrumb and Back
-navigation, with its other option frames and sectors, including disabled and
-reserved siblings, filtered from planning; each retained breadcrumb frame and
-its entry/exit
-anchor sit at that ancestor's own origin with no pointer ray, and the
-breadcrumb's own sector is omitted while the ancestor Back keeps its frame and
-sector; a lone breadcrumb contributes no
-hidden divider while the defined centre guide stays; entering fades hidden
-siblings through the ordinary exit and returning fades them back in, reduced
-motion snaps both ways, a disabled sibling's frame and sector settle hidden and
-restore with their disabled styling, including a mid-fade restore, a hidden
-ancestor never acknowledges and a breadcrumb is never an active
-acknowledgement, and the logical stack and selection geometry are never
-mutated.
-`SpatialInventoryClearanceTest` covers the item-menu clearance metric and
-paint geometry: the pinned viewport uses the independent maximum of the
-outer-sector coverage bound and the measured toward-panel Back frame bound
-including the selected push, a short label stays at the sector bound while a
-long localized label widens the distance, the frame follows the option text
-scale and never the inventory scale, a taller font line grows the measured
-extent, intermediate resize dimensions stay finite and never shrink, the full
-Back frame stays clear of the panel in both orientations, actual first, mid and
-settled paint keeps the sector and measured Back frame disjoint through
-enlarge and shrink with the first frame committing the new panel-to-menu
-clearance, the follower ray, guide, connector and actual title acknowledgement
-stay on one geometry, a longer Back label at the same viewport relayouts the
-whole pattern before the new frame paints, and a resize rebases a different
-prior list's detached panel with the same pattern instead of leaving its old
-GUI center. That mirrored-side fixture uses custom frozen fractions and a long
-row, asserts the detached panel's newly measured width rather than a default
-cap at the first frame, and checks first, intermediate and settled clearance;
-invalid inputs are rejected. The content-shrink cases in
-`SpatialInventoryNavigationIntegrationTest` exercise a quantity reduction and
-new-row discovery together while an item menu is active, in both mirrored
-orientations with normal motion. First, intermediate and settled frames check
-every actually painted present or detached panel against the full child-sector
-bounds and complete Back title frame, require nonempty panel and sector paints,
-and confirm that the settled surface uses the smaller shared content width.
-These are recording-painter geometry checks, not native rendering evidence.
-`SpatialInventoryNavigationIntegrationTest` checks the production active-list
-chrome through its recording painter: list entry exposes the moving virtual
-crosshair, including while side intent suppresses vertical selection. Its
-custom-fraction cases compare the session's logical metrics with recorded panel
-width, height and whole-row capacity, and keep the complete exterior Back frame
-outside that panel. A direct list release followed by resize records the actual
-detached panel at its newly measured dimensions, only the rows within the new
-capacity, and a still-visible finite exit. These are source-reviewed
-recording-painter fixtures, not recorded test runs, native GUI-scale callbacks,
-GLFW or GPU evidence. Its selection and item-return coverage is inventoried in
+`SpatialOverlayRendererAncestorBreadcrumbTest` drives production radial planning
+and frame seams through recording paint and metrics ports: each active-path
+ancestor plans only its entry breadcrumb and Back navigation, filtering its other
+option frames and sectors including disabled and reserved siblings; each
+retained breadcrumb frame and its entry/exit anchor sit at that ancestor's origin
+with no pointer ray, and its own sector is omitted while ancestor Back keeps its
+frame and sector; a lone breadcrumb contributes no hidden divider while the
+defined centre guide stays; entering fades hidden siblings through the ordinary
+exit and returning fades them back, reduced motion snaps both ways, and disabled
+sibling frames/sectors settle hidden and restore with styling, including
+mid-fade. A hidden ancestor never acknowledges, a breadcrumb is never an active
+acknowledgement, and the logical stack and selection geometry are unchanged.
+
+`SpatialInventoryClearanceTest` covers item-menu clearance: the pinned viewport
+uses the independent maximum of outer-sector coverage and the toward-panel Back
+frame bound including selected push; long labels widen the distance; the frame
+follows option text scale, not inventory; taller font grows the extent;
+intermediate resizes stay finite; the full Back frame stays clear in both
+orientations; first, mid and settled paint stay disjoint, committing new clearance
+on the first frame; follower ray, guide, connector and title acknowledgement stay
+on one geometry; a longer Back label relayouts the pattern; and resize rebases a
+prior detached panel. The mirrored fixture checks newly measured width and
+clearance with invalid-input rejection. Content-shrink cases in the navigation
+suite check every painted panel against child-sector and Back title bounds with
+nonempty paints and smaller settled width. These are recording-painter checks,
+not native rendering.
+`SpatialInventoryNavigationIntegrationTest` checks active-list chrome through its
+recording painter: list entry exposes the moving virtual crosshair, including
+while side intent suppresses vertical selection; custom-fraction cases compare
+logical metrics with recorded panel width, height and row capacity and keep the
+complete exterior Back frame outside the panel; a direct list release followed by
+resize records the detached panel at its newly measured dimensions, only rows
+within the new capacity and a still-visible finite exit. Selection and item-return
+coverage is inventoried in
 [interaction verification](interaction.md#inventory-list-gestures-and-navigation).
-`SpatialOverlayRendererFollowerTest` additionally checks active-list crosshair
-visibility with both frame opacity preferences at zero, including a return from
-an eligible item follower. The same case keeps the item Back/deadzone pointer
-visible, allows an eligible visible item follower to hide it, restores the
-parent radial deadzone feedback on leaving the list, and checks an inactive
-exit after that parent frame without connectors or choice acknowledgement.
-Across moving follower poses, a connector is recorded only when painted frames
-and previews do not already cover the remaining circle-to-title segment. The
-checks use an independent segment-over-rectangle oracle over the recorded poses
-and layouts. These are recording-painter frame checks;
-they do not establish the complete animated crosshair handoff or crosshair/trail
-behavior during a direct active-list detached exit. The panel and row
-remeasurement fixture above does not establish those feedback paths. The
-[wheel owner](../../architecture/picking/wheel.md#inventory-list)
-defines the list/radial presentation handoff; recording paint does not establish
-native cursor visibility, `GuiGraphics` or GPU submission.
-`SpatialVisualTrailTest` covers the production shared-history model headlessly:
-one bounded history serves both the logical pointer and the certified
-follower; native raw pointer batches are consumed once and follower-era samples
-never replay on return; an ownership change or an interrupted owner starts from
-the last displayed endpoint through a finite handoff that reaches the current
-target, while a settled owner samples its target without a second lag filter; a
-projection correction fences old points while keeping post-correction callbacks
-and adds no stroke, an explicit rebase starts fresh by identity even at
-coincident coordinates, and a rigid pan alone appends nothing; reduced motion, a
-hard reset, a quick reopen, a rewound clock, and rapid retargeting stay bounded;
-and a missing departing paint freezes the history while `clear` empties it.
-`SpatialOverlayRendererTrailTest` drives the actual production paint/commit
-order with independently recorded node centres: the painted payload is an
-immutable history taken before this frame's node paints and committed after
-them, painted above the sector underlay and guides and below every
-text-bearing paint, so the history committed after this frame's paints enters
-the next frame's payload, with handoff endpoints easing toward the certified
-painted centre; only a successful paint of the actual animated pose with
-a visible title frame admits a follower sample, while a failed paint, a
-disabled or Back focus, an omitted active node, or an actual offscreen pose
-cannot certify a predicted owner or borrow a detached duplicate; an inventory
-list hides every trail paint including a prior tail and its rows never own it;
-moving the shared list pointer records no trail samples, and system alignment
-fences the prior tail without recording its seed. A list-to-item rebase is not
-a joining stroke, and the item radial keeps the shared history below text
-under the ordinary crosshair rule; a fractional
-projection change or
-rigid pan appends nothing, and trail visibility and its independent opacity
-reach only the trail; an ordinary release fades with the exact departing
-follower key without acknowledgement, connectors, or a snap to the origin, and
-a new hold or reset discards the history; the retained bound holds under rapid
-retargeting without changing paint admission; and overlapping rounded-square
-pixels take maximum alpha with no duplicate coverage. An interrupted
-pointer-to-follower or follower-to-follower handoff survives an ordinary
-same-clock release and continues its original finite interval toward that
-departing key's moving painted pose, never the outgoing duplicate's, while a
-missing departing paint retains the displayed history and a later paint resumes
-the same interval without retiming; only reduced motion, a hard reset, or a new
-hold clears it. The release frame still paints the previously committed
-immutable history, and a GUI resize during the exit tail reprojects from the
-actual detached trail origin, so the committed endpoint matches the recorded
-painted pose instead of being displaced by the new GUI center. These are
-production-frame recording-painter and CPU-model seams, not `GuiGraphics`, GPU,
-GLFW-window, or multiplayer evidence.
-`SpatialOverlayRendererBorderTest` projects the real facade's typed border
-color in both focus states, keeps the untyped and legacy `ping:` action
-fallbacks, verifies the cancellation action's focus-independent color, and
-retains the detached color through the exit transition.
-`SpatialInventoryBorderTest` drives the production list planner and row-fill
+These are source-reviewed recording-painter fixtures, not recorded runs, native
+GUI-scale callbacks, GLFW or GPU evidence.
+
+`SpatialOverlayRendererFollowerTest` checks active-list crosshair visibility with
+both frame opacity preferences at zero, including a return from an eligible item
+follower; the item Back/deadzone pointer stays visible, an eligible visible item
+follower hides it, parent radial deadzone feedback restores on leaving the list,
+and an inactive exit after that parent frame has no connectors or choice
+acknowledgement. Across moving follower poses, a connector is recorded only when
+painted frames and previews do not already cover the remaining circle-to-title
+segment, using an independent segment-over-rectangle oracle. These are
+recording-painter frame checks; they do not establish the complete animated
+crosshair handoff or feedback during a direct active-list detached exit, nor
+native cursor visibility or GPU submission. The
+[wheel owner](../../architecture/picking/wheel.md#inventory-list) defines the
+list/radial presentation handoff.
+`SpatialVisualTrailTest` covers the shared-history model: one bounded history for
+the logical pointer and certified follower; native pointer batches consumed once
+with no follower-era replay; ownership/interruption handoff from the last
+displayed endpoint; settled owner sampling without a second lag filter;
+projection-correction fencing with no added stroke; identity-based explicit
+rebase; rigid pan appending nothing; bounded reduced motion, reset, quick reopen,
+rewound clock and retargeting; and missing-paint freeze/clear.
+
+`SpatialOverlayRendererTrailTest` drives paint/commit order: an immutable history
+captured before node paints and committed after them, above underlays/guides and
+below text; only a successful actual-pose paint with a visible title admits a
+follower sample; failed, disabled/Back, omitted or offscreen cases cannot certify
+or borrow a duplicate; inventory lists hide the trail and never own it; shared
+list-pointer movement records no samples; alignment fences without seeding; a
+list-to-item rebase is not a joining stroke; fractional projection/pan appends
+nothing; trail visibility/opacity reach only the trail; release fades the exact
+departing follower without acknowledgement, connectors or origin snap; new hold
+or reset discards; the retained bound holds; overlapping rounded pixels take
+maximum alpha. Interrupted handoffs survive a same-clock release toward the
+departing painted pose, not the outgoing duplicate; missing departing paint
+retains history and resumes without retiming; only reduced motion, hard reset or
+a new hold clears. The release frame paints committed history, and exit-tail
+resize reprojects from the detached origin. These are recording-painter/CPU
+seams, not native graphics, window or multiplayer evidence.
+`SpatialOverlayRendererBorderTest` projects the real facade's typed border color
+in both focus states, keeps untyped and legacy `ping:` fallbacks, verifies the
+cancellation action's focus-independent color, and retains detached color through
+exit. `SpatialInventoryBorderTest` drives the production list planner and row-fill
 seam: only the selected committable row carries a complete annotation-colored
-rectangle, including with grey data quality. An unselected row retains its
-annotation capability in the row data but paints neither that border nor an
-added fill. Back focus, a retained item row and a noncommittable selected row
-suppress direct-send decoration. `SpatialInventoryNavigationIntegrationTest`
-drives native-normalized input through the real session and recorded production
-frame: selection changes within one visible window move the border to the
-current item key, and a scroll-window jump leaves the old selected row fading
-without an outline. Ordinary close retains the current row's border through its
-exit fade while the old row continues its original fade without regaining an
-outline. Reselecting a departing row restores its authorized border on that
-current key alone. These are headless input and recording-painter seams, not
-live window or GPU evidence.
-`SpatialSelectorSessionTest` checks distinct non-grey local-action colors
-without inventing Ping actions, item annotation colors independently of the
+rectangle, including with grey data quality; an unselected row retains its
+annotation capability but paints neither border nor added fill; Back focus, a
+retained item row and a noncommittable selected row suppress direct-send
+decoration. `SpatialInventoryNavigationIntegrationTest` drives native-normalized
+input through the real session and recorded frame: selection changes within one
+visible window move the border to the current item key, a scroll-window jump
+leaves the old row fading without an outline, ordinary close retains the current
+row's border through its fade while the old row continues its original fade, and
+reselecting a departing row restores its authorized border on that key alone.
+These are headless input and recording-painter seams, not live window or GPU
+evidence. `SpatialSelectorSessionTest` checks distinct non-grey local-action
+colors without inventing Ping actions, item annotation colors independent of the
 whole-marker default, missing Attention authorization under content-intent OFF,
 and live annotation-policy changes without changing selection.
 
@@ -423,120 +302,91 @@ collision resolution, fixed focus, resistance to small pointer jitter,
 sector-preserving unsolvable crowds and reset. `SpatialOverlayReadabilityTest`
 uses the production frame path with explicit font metrics: an English shallow
 overlap separates while text dimensions and controller state remain unchanged;
-the current focused node paints last among text-bearing nodes and detached old
-focus does not retain that priority; movement follows the finite transition and
-reset discards placement memory; connector segment subtraction leaves title
-rectangles uncovered; and all bundled locales keep full single-line text,
-horizontal anchors, bounded vertical offsets and sector membership across
-viewport sizes. The existing follower, Precise, breadcrumb and inventory
-clearance suites retain their own geometry coverage. These are CPU layout,
-recording-painter and fill-seam checks, not evidence of native GUI batching,
-resource-pack font readability or visual comfort during live input.
-`SpatialViewOffsetTest` and
-`SpatialViewOffsetProjectionTest` cover the selector's single rigid view
-translation: exact endpoints, continuous re-aiming, an unchanged origin never
-restarting its interval, reduced-motion snapping, an inert rewound clock and a
-hard clear, and, driven through the real headless controller and selector
-session, every active menu origin — root, pushed child, nested child and Back
-return — projecting onto the GUI center while pointer, trail and menu vectors
-stay rigid; the open inventory list centers on its active origin and an item
-submenu keeps the selected row's logical anchor under the same translation; and
-an inactive frame freezes the last displayed exit translation that a quick
-reopen re-aims from. The interaction frame publishes that projection once, and
-confinement, paint, release and resize read it unchanged: an intermediate pan
-sample confines the pointer and the displayed pointer center stays within the
-inclusive GUI pixel bounds even at fractional offsets; paint neither resamples
-the pan nor mutates interaction; navigation inside the frame re-aims from its
-single sample and snaps under reduced motion; a resize reuses the last
-published offset; and the pointer chrome follows the published center rather
-than a stale interpolated GUI center, while an exit-transition chrome state
-keeps its detached paint geometry.
-`SpatialOverlayRendererNodeLayoutTest` drives real controller snapshots through
-the production radial planning, node layout, bounded label avoidance and frame
-recording. Every title frame measures its complete single-line label at the
-configured title scale and the production frame receives that complete label;
-an external candidate preview consumes only the finite preview cell, so it
-never resizes, shrinks or clips the title frame it is previewed beneath, and a
-title or target font preference stays independent while its row has room.
-Solvable fixtures keep the recorded frames and previews separated using actual
-rounded bounds, including the disabled border's inclusive endpoint.
-Budget-exceeding fixtures spanning multiple viewports, enlarged option text,
-mixed or fully available menus, submenu-radius tiers and full rotation sweeps
-in both language fixtures record complete localized titles, the configured
-title scale, unchanged horizontal anchors and bounded vertical offsets whose
-centers stay in their original sectors, while selected, focused and following
-poses are not moved by avoidance. Those budget-exceeding cases accept residual
-overlap rather than shrinking, clipping or unbounded spreading.
+the focused node paints last among text-bearing nodes and detached old focus
+does not retain that priority; movement follows the finite transition and reset
+discards placement memory; connector segment subtraction leaves title rectangles
+uncovered; and all bundled locales keep full single-line text, horizontal
+anchors, bounded vertical offsets and sector membership across viewport sizes.
+The existing follower, Precise, breadcrumb and inventory-clearance suites retain
+their own geometry coverage. These are CPU layout, recording-painter and
+fill-seam checks, not native GUI batching, resource-pack font readability or
+visual comfort during live input.
 
-The preview-specific checks preserve the name's visible cap, whole-code-point
-and style handling, including supplementary code points split across component
-segments and legacy formatting that resolves to vanilla's painted order and
-styles; a formatting-only detail allocates no area, and capping never reads the
-overflow tail. A name within its visible cap is shown whole and wrapped in the
-preview cell rather than cut to the title frame's width, while an over-cap name
-keeps its retained visible text plus one ellipsis. The centered preview lines
-paint outside and below the frame at the readable floor; a larger title font
-preference can only reduce their clearance and scale down to that floor without
-changing their visible text. The smallest viewport with large fonts keeps
-complete titles and nonblank preview, Back and disabled-type text, and
-Back-hover progress keeps tracing the title frame when a preview is supplied.
-The painted preview retains every capped glyph, the preview budget never
-changes the title's configured scale or complete text, and the preview adds no
-opacity or admission layer while an exit transition retains its detached
-component and its painted preview. An overfull glyph-width stress case keeps
-the readable floor and applies no second truncation; arbitrary resource-pack
-font metrics remain a gap. A selected or following node intentionally leaves
-the resting layout, so these resting collision checks do not apply to its
-moving frame or preview. These are CPU layout and production-frame
-recording-painter checks: no `GuiGraphics`, GPU, native callback, gameplay frame
-or manual visual validation is involved.
+`SpatialViewOffsetTest` and its projection suite cover the single rigid view
+translation: exact endpoints, continuous re-aiming, unchanged-origin interval
+continuity, reduced-motion snap, inert rewound clock and hard clear; through the
+real headless controller/session, every active menu origin projects to the GUI
+center while pointer, trail and menu vectors stay rigid; the inventory list and
+item submenu keep their active origin and selected-row anchor; an inactive frame
+freezes the displayed exit translation for quick reopen. The interaction frame
+publishes the projection once; confinement, paint, release and resize read it
+unchanged, fractional pans stay within inclusive GUI pixel bounds, paint does not
+resample or mutate, resize reuses the last offset, and chrome follows the
+published center while exit chrome keeps detached geometry.
+
+`SpatialOverlayRendererNodeLayoutTest` drives controller snapshots through radial
+planning, node layout, bounded avoidance and frame recording: every title measures
+its complete single-line label at the configured scale; an external candidate
+preview consumes only the preview cell, never resizing or clipping the title; font
+preferences stay independent while the row has room; solvable frames/previews use
+actual rounded bounds including disabled-border endpoints; budget-exceeding
+viewports, enlarged text, menu availability, radius tiers and rotation sweeps in
+both languages keep complete localized titles, anchors and sector-contained
+offsets while selected/focused/following poses are not moved, accepting residual
+overlap instead of shrinking or clipping.
+
+Preview checks preserve the visible cap, whole code points and styles, including
+supplementary splits and legacy formatting; formatting-only detail allocates
+nothing, capping never reads the overflow tail; within-cap names are whole and
+wrapped in the cell, over-cap names keep visible text plus one ellipsis; centered
+lines paint below the frame at the readable floor, and larger title fonts only
+reduce clearance/scale; the smallest viewport with large fonts keeps complete
+titles and nonblank preview/Back/disabled text; Back-hover progress still traces
+the frame; the painted preview retains capped glyphs, the budget changes no title
+text/scale, and exit retains the detached preview; overfull glyph stress keeps the
+floor without second truncation, while arbitrary resource-pack metrics remain a
+gap. Selected/following nodes intentionally leave resting layout. These are CPU
+layout and recording-painter checks, not native callback, gameplay frame or manual
+validation.
 
 Tracking-line projection and its provider/runtime limitations are inventoried in
 [inventory verification](inventory.md#inventory-preview-and-tracking-foundation).
 
 ## Render entity lookup and locator resolver seams
 
-`RenderEntityLookupCacheTest` and focused locator-resolver unit seams cover the
-render-only lookup algorithm and locator resolver boundary. The cache tests
-exercise idle passes without scans; distinct,
-repeated-hit, and miss UUID requests sharing one cold index; first-valid
-duplicate selection; simulated HUD/outline warm reuse across passes; a different
-world object with the same dimension; removed or unloaded entries; runtime-ID
-reuse and UUID mutation; same-UUID replacement and a spawn after index creation
-becoming visible in a later pass; an invalid warm entry causing one scan and
-index build; pruning without touching an old entry during validation; clear/null-frame
-handling; and null-world and null-UUID safety.
-
-`EntityOutlineLocatorResolverTest` covers UUID and XP locators, runtime
-non-orb rejection, gone/null/mismatched entities, map lookup, and the raw-cache
-entity-mismatch seam. Neither this cache test nor these resolver tests are a
-dragon-renderer test or establish canonicalization integration beyond their
-stated seams. The cache fakes and access counters establish lookup-algorithm
-behavior only: they are not actual Minecraft frame hooks, HUD callers, or
-renderers, and they do not automatically cover the fresh non-render lookup
-bypass. Source inspection remains useful for those call-site boundaries but is
-not automated runtime coverage.
+`RenderEntityLookupCacheTest` covers the render-only lookup algorithm: idle
+passes without scans; distinct, repeated-hit and miss UUID requests sharing one
+cold index; first-valid duplicate selection; simulated HUD/outline warm reuse
+across passes; a different world object with the same dimension; removed or
+unloaded entries; runtime-ID reuse and UUID mutation; same-UUID replacement and a
+spawn after index creation becoming visible later; an invalid warm entry causing
+one scan and index build; pruning without touching an old entry during validation;
+clear/null-frame handling; and null-world/null-UUID safety.
+`EntityOutlineLocatorResolverTest` covers UUID and XP locators, runtime non-orb
+rejection, gone/null/mismatched entities, map lookup and the raw-cache
+entity-mismatch seam. Neither establishes a dragon-renderer test or
+canonicalization integration beyond these seams. The cache fakes and counters are
+not actual frame hooks, HUD callers or renderers, and do not automatically cover
+the fresh non-render lookup bypass; source inspection remains useful but is not
+automated runtime coverage.
 
 ## Focused native block-outline regression coverage
 
-The native VoxelShape route requires complementary checks rather than one broad
-"outline works" assertion:
+The native VoxelShape route requires complementary checks:
 
 1. Production render-state coverage pins `BlockOutlineRenderType` to
    `VertexFormat.Mode.LINES`, vanilla `rendertype_lines`, a fixed width wider
-   than vanilla selection lines,
-   `NO_DEPTH_TEST`/`GL_ALWAYS`, color-only writes and late composite
-   submission.
-2. Native geometry coverage pins the live
-   `BlockState#getShape`-to-`VoxelShape#forAllEdges` edge route so a full-cube,
-   polygon or shape-equivalent substitute cannot satisfy the regression.
-3. Render-frame snapshot coverage separately exercises late submission and
-   frame ownership.
+   than vanilla selection lines, `NO_DEPTH_TEST`/`GL_ALWAYS`, color-only writes
+   and late composite submission.
+2. Native geometry coverage pins the live `BlockState#getShape`-to-
+   `VoxelShape#forAllEdges` edge route so a full-cube, polygon or
+   shape-equivalent substitute cannot satisfy the regression.
+3. Render-frame snapshot coverage separately exercises late submission and frame
+   ownership.
 
-Native-glow whitelist/eligibility coverage is separate from these VoxelShape
-checks. Passing either side alone does not prove the other, and structural or
-behavioral tests do not by themselves prove actual visibility through occluders
-or from arbitrary in-game camera angles.
+Native-glow whitelist/eligibility coverage is separate; passing either side does
+not prove the other, and structural or behavioral tests do not prove actual
+visibility through occluders or from arbitrary camera angles.
 
 ## Known automated gaps
 

@@ -24,8 +24,23 @@ public record SpatialInventoryView(String listKey, boolean open, @Unmodifiable L
 	int selectedIndex, int windowFirst, int visibleRows, boolean backLeft, Status status,
 	double axisX, double glideBaseY, double selectedRowCenterY, BackAffordance backAffordance,
 	@Nullable String retainedRowKey, boolean forwardAvailable, boolean selectedRowCommittable,
-	@Unmodifiable List<ResourceGroup> resourceGroups) {
-	public record ResourceGroup(InventoryResourceKind resourceKind, String labelKey, Status status) {}
+	@Unmodifiable List<ResourceGroup> resourceGroups, @Nullable Component statusMessage) {
+	public record ResourceGroup(InventoryResourceKind resourceKind, String labelKey, Status status, @Nullable Component statusMessage) {
+		public ResourceGroup(InventoryResourceKind resourceKind, String labelKey, Status status) { this(resourceKind, labelKey, status, null); }
+		public Component headerText() {
+			var label = Component.translatable(labelKey);
+			@Nullable String key = status.translationKey();
+			@Nullable Component message = statusMessage != null ? statusMessage : key == null ? null : Component.translatable(key);
+			return message == null ? label : label.append(": ").append(message);
+		}
+	}
+	public SpatialInventoryView(String listKey, boolean open, List<Row> rows,
+		int selectedIndex, int windowFirst, int visibleRows, boolean backLeft, Status status,
+		double axisX, double glideBaseY, double selectedRowCenterY, BackAffordance backAffordance,
+		@Nullable String retainedRowKey, boolean forwardAvailable, boolean selectedRowCommittable, List<ResourceGroup> resourceGroups) {
+		this(listKey, open, List.copyOf(rows), selectedIndex, windowFirst, visibleRows, backLeft, status, axisX, glideBaseY,
+			selectedRowCenterY, backAffordance, retainedRowKey, forwardAvailable, selectedRowCommittable, List.copyOf(resourceGroups), null);
+	}
 	public SpatialInventoryView(String listKey, boolean open, List<Row> rows,
 		int selectedIndex, int windowFirst, int visibleRows, boolean backLeft, Status status,
 		double axisX, double glideBaseY, double selectedRowCenterY, BackAffordance backAffordance,
@@ -83,21 +98,21 @@ public record SpatialInventoryView(String listKey, boolean open, @Unmodifiable L
 	public SpatialInventoryView withSelectedRowCenterY(double centerRelativeY) {
 		return new SpatialInventoryView(listKey, open, rows, selectedIndex, windowFirst, visibleRows,
 			backLeft, status, axisX, glideBaseY, centerRelativeY, backAffordance,
-			retainedRowKey, forwardAvailable, selectedRowCommittable, resourceGroups);
+			retainedRowKey, forwardAvailable, selectedRowCommittable, resourceGroups, statusMessage);
 	}
 
 	/** A non-input capacity/window relayout; every identity, permission and row anchor is retained. */
 	public SpatialInventoryView withWindow(int first, int capacity) {
 		return new SpatialInventoryView(listKey, open, rows, selectedIndex, first, capacity,
 			backLeft, status, axisX, glideBaseY, selectedRowCenterY, backAffordance,
-			retainedRowKey, forwardAvailable, selectedRowCommittable, resourceGroups);
+			retainedRowKey, forwardAvailable, selectedRowCommittable, resourceGroups, statusMessage);
 	}
 
 	/** Caller supplies timer output; rendering owns no hover timer or navigation. */
 	public SpatialInventoryView withBackAffordance(boolean focused, double progress) {
 		return new SpatialInventoryView(listKey, open, rows, selectedIndex, windowFirst, visibleRows,
 			backLeft, status, axisX, glideBaseY, selectedRowCenterY, new BackAffordance(focused, progress),
-			retainedRowKey, forwardAvailable, selectedRowCommittable, resourceGroups);
+			retainedRowKey, forwardAvailable, selectedRowCommittable, resourceGroups, statusMessage);
 	}
 
 	/**
@@ -110,18 +125,22 @@ public record SpatialInventoryView(String listKey, boolean open, @Unmodifiable L
 		boolean selectedRowCommittable) {
 		return new SpatialInventoryView(listKey, open, rows, selectedIndex, windowFirst, visibleRows,
 			backLeft, status, axisX, glideBaseY, selectedRowCenterY, backAffordance,
-			retainedRowKey, forwardAvailable, selectedRowCommittable, resourceGroups);
+			retainedRowKey, forwardAvailable, selectedRowCommittable, resourceGroups, statusMessage);
 	}
 	public SpatialInventoryView withResourceGroups(List<ResourceGroup> groups) {
 		return new SpatialInventoryView(listKey, open, rows, selectedIndex, windowFirst, visibleRows, backLeft, status,
-			axisX, glideBaseY, selectedRowCenterY, backAffordance, retainedRowKey, forwardAvailable, selectedRowCommittable, List.copyOf(groups));
+			axisX, glideBaseY, selectedRowCenterY, backAffordance, retainedRowKey, forwardAvailable, selectedRowCommittable, List.copyOf(groups), statusMessage);
+	}
+	public SpatialInventoryView withStatusMessage(@Nullable Component message) {
+		return new SpatialInventoryView(listKey, open, rows, selectedIndex, windowFirst, visibleRows, backLeft, status,
+			axisX, glideBaseY, selectedRowCenterY, backAffordance, retainedRowKey, forwardAvailable, selectedRowCommittable, resourceGroups, message);
 	}
 	public Component groupSummary() {
 		Component result = Component.empty();
+		if (statusMessage != null) result = result.copy().append(statusMessage);
 		for (ResourceGroup group : resourceGroups) {
 			if (!result.getString().isEmpty()) result = result.copy().append(" | ");
-			result = result.copy().append(Component.translatable(group.labelKey()));
-			if (group.status().translationKey() != null) result = result.copy().append(": ").append(Component.translatable(group.status().translationKey()));
+			result = result.copy().append(group.headerText());
 		}
 		return result;
 	}

@@ -145,7 +145,7 @@ class InventoryFluidFreezerTest {
 			assertTrue(InventoryFluidDisplayCodec.decode("minecraft:water", refused.displayJson()).isPresent());
 		}
 	}
-	@Test void unexpectedFluidCodecFailureWarnsOnceIndependentlyOfItemIdentityAndPreservesFallback() throws ReflectiveOperationException {
+	@Test void unexpectedFluidCodecFailureWarnsAtDetailedProfilesAndSharesItsTupleChannelWithItemIdentity() throws ReflectiveOperationException {
 		for (var profile : nx.pingwheel.common.diagnostics.LoggingProfile.values()) {
 			try (var registration = new InventoryCertifiedReadTest.CallbackComponent();
 				var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
@@ -159,22 +159,39 @@ class InventoryFluidFreezerTest {
 				var second = InventoryFluidFreezer.freeze(entry, registries, 1024, new InventoryFluidCodec.Catalog(), admission(), fluid -> null);
 				assertNotNull(first); assertNotNull(second); assertTrue(first.aggregateRequired()); assertEquals(first.key(), second.key());
 				assertEquals(9007199254740993L, first.amount()); assertEquals("minecraft:water", first.resourceId()); assertEquals(first.display(), second.display());
-				assertEquals(2, calls.get()); assertEquals(1, logs.events().size());
-				assertTrue(logs.messages().contains("site=inventory/fluid-identity")); assertTrue(logs.messages().contains("handling=all-variants"));
-				if (profile == nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL) assertFalse(logs.messages().contains("private-"));
-				else assertTrue(logs.messages().contains("private-fluid-root"));
+				assertEquals(2, calls.get());
+				int expectedReports = profile == nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL ? 0 : 1;
+				assertEquals(expectedReports, logs.events().size());
+				if (expectedReports == 0) assertFalse(logs.messages().contains("private-"));
+				else {
+					assertEquals(org.apache.logging.log4j.Level.WARN, logs.events().getFirst().getLevel());
+					assertTrue(logs.messages().contains("site=native")); assertTrue(logs.messages().contains("handling=degraded"));
+					assertTrue(logs.messages().contains("reason=provider-failure")); assertTrue(logs.messages().contains("stage=all-variants"));
+					assertTrue(logs.messages().contains("lane=fluid")); assertTrue(logs.messages().contains("private-fluid-root"));
+					assertNull(logs.events().getFirst().getThrown());
+				}
 				InventoryItemDiagnostics.refusal("inventory/item-identity", "private:item", new IllegalStateException("private-item-codec"));
-				assertEquals(2, logs.events().size(), "fluid and item identity have independent admission channels");
+				assertEquals(expectedReports, logs.events().size(), "equal site/operation/reason tuples share interval admission across lanes");
+				InventoryItemDiagnostics.refusal("inventory/item-display", "private:item", new IllegalStateException("private-display-codec"));
+				assertEquals(expectedReports * 2, logs.events().size(), "a distinct display site admits its own first non-limit failure");
 			}
 		}
 	}
-	@Test void expectedFluidIdentityBoundRefusalStaysQuietAtEveryProfile() {
+	@Test void expectedFluidIdentityBoundRefusalIsDetailedAndReportsEveryDebugLimitOccurrence() {
 		var tag = new CompoundTag(); tag.putString("native", "x".repeat(InventoryFluidCodec.MAX_CANONICAL_BYTES + 1));
 		for (var profile : nx.pingwheel.common.diagnostics.LoggingProfile.values()) {
-			try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
+			try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture(org.apache.logging.log4j.Level.DEBUG)) {
 				nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER, profile);
-				var value = nbt(tag, Long.MAX_VALUE); assertTrue(value.aggregateRequired()); assertEquals(Long.MAX_VALUE, value.amount());
-				assertTrue(logs.events().isEmpty());
+				for (int attempt = 0; attempt < 2; attempt++) {
+					var value = nbt(tag, Long.MAX_VALUE); assertTrue(value.aggregateRequired()); assertEquals(Long.MAX_VALUE, value.amount());
+				}
+				int expected = switch (profile) { case NORMAL -> 0; case DEEP -> 1; case DEBUG -> 2; };
+				assertEquals(expected, logs.events().size());
+				if (expected > 0) {
+					assertTrue(logs.events().stream().allMatch(event -> event.getLevel() == org.apache.logging.log4j.Level.DEBUG));
+					assertTrue(logs.messages().contains("reason=entry-limit")); assertTrue(logs.messages().contains("limitHit=true"));
+				}
+				assertFalse(logs.messages().contains("x".repeat(100)));
 			}
 		}
 	}

@@ -28,6 +28,8 @@ import nx.pingwheel.common.presentation.inventory.InventoryQuantities;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimits;
+import nx.pingwheel.common.presentation.inventory.minecraft.ProviderLimitSite;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -57,6 +59,19 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 
 	@Override public OperationProfile probeProfile() { return PROBE; }
 	@Override public Optional<Probe> probe(Context context, Operation operation) {
+		try { return probeAvailable(context, operation); }
+		catch (nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnsupportedException absent) { return Optional.empty(); }
+	}
+	@Override public nx.pingwheel.common.presentation.inventory.InventoryDecision<Probe> probeDecision(Context context, Operation operation) {
+		try { return probeAvailable(context, operation).map(nx.pingwheel.common.presentation.inventory.InventoryDecision::accept)
+			.orElseGet(() -> nx.pingwheel.common.presentation.inventory.InventoryDecision.reject(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.SOURCE_UNAVAILABLE,
+				nx.pingwheel.common.presentation.inventory.InventoryImpact.DEGRADED)); }
+		catch (nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnsupportedException absent) {
+			return nx.pingwheel.common.presentation.inventory.InventoryDecision.unsupported(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.UNSUPPORTED_LANE,
+				nx.pingwheel.common.presentation.inventory.InventoryImpact.DEGRADED);
+		}
+	}
+	private Optional<Probe> probeAvailable(Context context, Operation operation) {
 		Objects.requireNonNull(context);
 		Objects.requireNonNull(operation).allowance().debit(PROBE.ownedCost());
 		return probeAdmitted(context, new MinecraftWorld(context.level()), operation);
@@ -90,7 +105,8 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 	static Optional<Probe> probe(Context context, World world, Operation operation) {
 		Objects.requireNonNull(context); Objects.requireNonNull(world);
 		Objects.requireNonNull(operation).allowance().debit(PROBE.ownedCost());
-		return probeAdmitted(context, world, operation);
+		try { return probeAdmitted(context, world, operation); }
+		catch (nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnsupportedException absent) { return Optional.empty(); }
 	}
 	private static Optional<Probe> probeAdmitted(Context context, World world, Operation operation) {
 		BlockPos root = context.root();
@@ -108,10 +124,11 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 		context.require(root, operation);
 		Optional<IFluidHandler> resolved = capability.resolve();
 		context.require(root, operation);
-		if (resolved.isEmpty()) return Optional.empty();
+		if (resolved.isEmpty()) throw new nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnsupportedException();
 		IFluidHandler handler = resolved.orElseThrow();
 		int tanks = handler.getTanks();
 		context.require(root, operation);
+		if (tanks > InventorySourceAccess.MAX_SLOTS) throw InventoryProviderLimits.exceeded(ProviderLimitSite.FORGE_FLUID_ADDRESSES, tanks, InventorySourceAccess.MAX_SLOTS);
 		if (tanks < 0 || tanks > InventorySourceAccess.MAX_SLOTS)
 			throw new IllegalStateException("fluid tank address bound");
 		return Optional.of(new HandlerProbe(new Route(context, world, state, entity, capability, handler), tanks, operation));
@@ -146,9 +163,9 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 				int tanks = shape.indexedSlots().orElseThrow();
 				if (!held.current(operation)) throw new InventorySourceUnavailableException("fluid capability route changed before finish");
 				int count = held.handler().getTanks(); held.gate(operation);
+				if (count > InventorySourceAccess.MAX_SLOTS) throw InventoryProviderLimits.exceeded(ProviderLimitSite.FORGE_FLUID_ADDRESSES, count, InventorySourceAccess.MAX_SLOTS);
 				if (count != tanks) throw new InventorySourceUnavailableException("fluid tank count changed before finish");
 				int descriptionBound = capacityDescriptionBound(tanks);
-				if (descriptionBound > 65536) throw new InventorySourceUnavailableException("fluid capacity description bound");
 				var description = new StringBuilder(descriptionBound).append(held.context().face().getName()).append(";capacities=");
 				int[] capacities = new int[tanks];
 				var addresses = new ArrayList<Integer>(tanks);
@@ -165,7 +182,7 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 				if (entityId == null) throw new InventorySourceUnavailableException("unregistered fluid block entity");
 				String blockEntityId = boundedRegistryId(entityId);
 				String provider = held.handler().getClass().getName();
-				if (provider.length() > 1024) throw new InventorySourceUnavailableException("fluid provider class length bound");
+				if (provider.length() > 1024) throw InventoryProviderLimits.exceeded(ProviderLimitSite.FORGE_FLUID_CLASS, provider.length(), 1024);
 				var routeInfo = new RouteInfo(TopologyEvidence.PUBLIC_ADDRESS_ONLY, provider);
 				@Unmodifiable List<Integer> mapping = List.copyOf(addresses);
 				var layout = new InventorySnapshotLayout("forge:fluid_handler", description.toString(), null, List.of(
@@ -184,7 +201,8 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 		int namespace = id.getNamespace().length();
 		// Subtraction after the first comparison avoids overflowing namespace + ':' + path.
 		if (namespace >= MAX_REGISTRY_ID_CHARS || id.getPath().length() > MAX_REGISTRY_ID_CHARS - 1 - namespace)
-			throw new InventorySourceUnavailableException("fluid registry identity length bound");
+			throw InventoryProviderLimits.exceeded(ProviderLimitSite.FORGE_FLUID_REGISTRY_ID,
+				(long) namespace + id.getPath().length() + 1, MAX_REGISTRY_ID_CHARS);
 		return id.toString();
 	}
 
@@ -319,6 +337,7 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 		private boolean current(Route held, Operation operation) {
 			if (!held.current(operation)) return false;
 			int count = held.handler().getTanks(); held.gate(operation);
+			if (count > InventorySourceAccess.MAX_SLOTS) throw InventoryProviderLimits.exceeded(ProviderLimitSite.FORGE_FLUID_ADDRESSES, count, InventorySourceAccess.MAX_SLOTS);
 			if (count != capacities.length) return false;
 			for (int tank = 0; tank < capacities.length; tank++) {
 				held.gate(operation); int currentCapacity = capacity(held.handler(), tank); held.gate(operation);
@@ -328,6 +347,7 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 			// Capacity and closing-route callbacks can change the count without changing earlier values.
 			// Recheck once, not another capacity walk, before accepting this frozen address graph.
 			int closingCount = held.handler().getTanks(); held.gate(operation);
+			if (closingCount > InventorySourceAccess.MAX_SLOTS) throw InventoryProviderLimits.exceeded(ProviderLimitSite.FORGE_FLUID_ADDRESSES, closingCount, InventorySourceAccess.MAX_SLOTS);
 			return closingCount == capacities.length;
 		}
 		private void requireCurrent(Route held, Operation operation) {

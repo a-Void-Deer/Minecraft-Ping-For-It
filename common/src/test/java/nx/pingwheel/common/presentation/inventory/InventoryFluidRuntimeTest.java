@@ -112,7 +112,7 @@ class InventoryFluidRuntimeTest {
 	@Test void nativeCatalogCapacityKeepsOnlyValidatedPrefixAndPaysFailingVisitAndRetainedEvidence() {
 		var settings = InventorySettings.serverDefaults(); var reads = new AtomicInteger();
 		try (var runtime = new InventoryRuntime((request, cap) -> {
-			var source = new Source(request, reads, 300); source.unique = true; return Optional.of(source);
+			var source = new Source(request, reads, 1100); source.unique = true; return Optional.of(source);
 		}, settings.pendingMemoryBytes())) {
 			runtime.advance(0, settings); var input = input(new UUID(19, 1), BlockFace.NORTH);
 			var consumer = runtime.attach(input, new InventoryRuntime.PreviewSubject(input.readOwner())).orElseThrow();
@@ -126,7 +126,7 @@ class InventoryFluidRuntimeTest {
 			}
 			assertNotNull(last); assertEquals(CaptureResult.Availability.READABLE, last.result().availability());
 			assertEquals(CaptureResult.Completeness.INCOMPLETE, last.result().completeness());
-			assertEquals(256, values.size()); assertEquals(257, reads.get(), "the failed catalogue admission is a paid physical attempt");
+			assertEquals(1024, values.size()); assertEquals(1025, reads.get(), "the failed catalogue admission is a paid physical attempt");
 			assertTrue(values.stream().allMatch(value -> value != null && value.amount() == 9007199254740993L && !value.aggregateRequired()));
 			long retained = runtime.memory().retained();
 			try (var evidence = runtime.publicationEvidence(consumer, InventoryRuntime.EvidenceScope.SCANNING).orElseThrow()) {

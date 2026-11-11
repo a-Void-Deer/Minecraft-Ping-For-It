@@ -1,11 +1,11 @@
 {
 	"pingforit.inventory.quantity.decimal_separator": ".",
-	"pingforit.inventory.group.contents": "內容",
+	"pingforit.inventory.group.contents": "庫存",
 	"pingforit.inventory.group.item": "物品",
 	"pingforit.inventory.group.fluid": "流體",
 	"pingforit.inventory.unknown_fluid": "未知流體",
 	"settings.pingforit.presentation.field.pingforit_inventory_fluids.name": "容器流體",
-	"settings.pingforit.presentation.field.pingforit_inventory_fluids.description": "伺服器授權的流體預覽與單流體追蹤。預設啟用。",
+	"settings.pingforit.presentation.field.pingforit_inventory_fluids.description": "容器中的流體內容。",
 	"presentation.pingforit.format.fluid_amount": "%s — %s",
 	"pingforit.inventory.quantity.scale_style": "cjk",
 	"pingforit.inventory.quantity.approximate": "≈%s",
@@ -18,6 +18,61 @@
 	"pingforit.inventory.quantity.cjk_4": "%s萬 B",
 	"pingforit.inventory.quantity.cjk_8": "%s億 B",
 	"pingforit.inventory.quantity.cjk_12": "%s萬億 B",
+	"pingforit.inventory.reason.target_gone": "目標已消失",
+	"pingforit.inventory.reason.out_of_range": "超出範圍",
+	"pingforit.inventory.reason.field_denied": "欄位存取遭拒",
+	"pingforit.inventory.reason.source_authority_denied": "無權讀取資料來源",
+	"pingforit.inventory.reason.unsupported_context": "不支援的情境",
+	"pingforit.inventory.reason.unsupported_lane": "不支援的資源類型",
+	"pingforit.inventory.reason.source_unavailable": "資料來源無法使用",
+	"pingforit.inventory.reason.source_changed": "資料來源已變更",
+	"pingforit.inventory.reason.provider_failure": "提供者失敗",
+	"pingforit.inventory.reason.session_capacity": "已達到工作階段上限",
+	"pingforit.inventory.reason.request_capacity": "已達到請求上限",
+	"pingforit.inventory.reason.target_capacity": "已達到目標上限",
+	"pingforit.inventory.reason.tracking_capacity": "已達到追蹤上限",
+	"pingforit.inventory.reason.consumer_capacity": "已達到消費者上限",
+	"pingforit.inventory.reason.round_capacity": "已達到輪次上限",
+	"pingforit.inventory.reason.publisher_capacity": "已達到發佈上限",
+	"pingforit.inventory.reason.control_capacity": "已達到控制上限",
+	"pingforit.inventory.reason.memory_limit": "已達到記憶體上限",
+	"pingforit.inventory.reason.probe_limit": "已達到探測上限",
+	"pingforit.inventory.reason.provider_work_limit": "已達到提供者工作量上限",
+	"pingforit.inventory.reason.item_work_limit": "已達到物品工作量上限",
+	"pingforit.inventory.reason.physical_slot_limit": "已達到實體欄位上限",
+	"pingforit.inventory.reason.logical_slot_limit": "已達到邏輯欄位上限",
+	"pingforit.inventory.reason.variant_limit": "已達到變體上限",
+	"pingforit.inventory.reason.catalog_bytes_limit": "已達到目錄位元組上限",
+	"pingforit.inventory.reason.journal_limit": "已達到掃描紀錄上限",
+	"pingforit.inventory.reason.snapshot_limit": "已達到快照上限",
+	"pingforit.inventory.reason.entry_limit": "已達到項目上限",
+	"pingforit.inventory.reason.display_limit": "已達到顯示上限",
+	"pingforit.inventory.reason.frame_limit": "已達到影格上限",
+	"pingforit.inventory.reason.queue_limit": "已達到佇列上限",
+	"pingforit.inventory.reason.wire_limit": "已達到傳輸上限",
+	"pingforit.inventory.reason.native_list_limit": "已達到原生清單上限",
+	"pingforit.inventory.reason.native_node_limit": "已達到原生節點上限",
+	"pingforit.inventory.reason.native_array_limit": "已達到原生陣列上限",
+	"pingforit.inventory.reason.native_map_limit": "已達到原生映射上限",
+	"pingforit.inventory.reason.native_work_limit": "已達到原生工作量上限",
+	"pingforit.inventory.reason.native_depth_limit": "已達到原生深度上限",
+	"pingforit.inventory.reason.invalid_selection": "無效的選擇",
+	"pingforit.inventory.reason.retired_selection": "選擇已失效",
+	"pingforit.inventory.reason.amount_overflow": "數量溢位",
+	"pingforit.inventory.reason.session_timeout": "工作階段逾時",
+	"pingforit.inventory.reason.open_timeout": "開啟逾時",
+	"pingforit.inventory.reason.stall_timeout": "掃描停滯",
+	"pingforit.inventory.reason.transport_failure": "傳輸失敗",
+	"pingforit.inventory.reason.rate_limited": "已觸發速率限制",
+	"pingforit.inventory.reason.channel_disabled": "通道已停用",
+	"pingforit.inventory.reason.invalid_request": "無效的請求",
+	"pingforit.inventory.reason.not_owner": "不是擁有者",
+	"pingforit.inventory.reason.not_found": "找不到",
+	"pingforit.inventory.reason.invalid_ping_type": "無效的 Ping 類型",
+	"pingforit.inventory.reason.publication_work_limit": "已達到發佈工作量上限",
+	"pingforit.inventory.reason.capture_read_limit": "已達到擷取讀取上限",
+	"pingforit.inventory.retry": "%s: 正在重試...(%s/3)",
+	"pingforit.inventory.tracking_failed": "[pingforit] 追蹤目標建立失敗: %s",
 	"key.category.pingforit.name": "Ping For It",
 	"key.pingforit.ping_location": "標記位置",
 	"key.pingforit.toggle_mark_transparent_blocks": "切換標記透明方塊",
@@ -52,34 +107,34 @@
 	"settings.pingforit.reset_all.title": "要重設所有設定嗎？",
 	"settings.pingforit.reset_all.message": "要將所有用戶端設定恢復為預設值嗎？伺服器設定不會重設。",
 	"settings.pingforit.channel": "標記頻道",
-	"settings.pingforit.channel.tooltip": "為此伺服器記住的頻道偏好，儲存設定時會傳送。\n非空白：與使用相同頻道的玩家互相傳送標記。\n空白：使用伺服器的預設頻道規則；輸入框中的提示僅供參考。",
+	"settings.pingforit.channel.tooltip": "為此伺服器記住的頻道。\n已填寫：與相同頻道的玩家互通標記。\n留空：使用伺服器的預設頻道規則。",
 	"settings.pingforit.channel.placeholder": "已與 %s 同步",
 	"settings.pingforit.open_block_shape_blacklist_config": "儲存、關閉並開啟方塊形狀設定...",
-	"settings.pingforit.open_block_shape_blacklist_config.tooltip": "開啟用戶端設定檔前會儲存並關閉設定。外部清單的編輯內容會在重新啟動用戶端後生效。",
+	"settings.pingforit.open_block_shape_blacklist_config.tooltip": "儲存並關閉設定，然後開啟用戶端設定檔。\n修改在重新啟動用戶端後生效。",
 	"settings.pingforit.logging_profile": "日誌詳細程度",
-	"settings.pingforit.logging_profile.tooltip": "用戶端日誌詳細程度。\n普通：僅記錄必要的診斷資訊，敏感值去識別化。\n深度：更多脈絡，不去識別化。\n立即生效。",
+	"settings.pingforit.logging_profile.tooltip": "此用戶端寫入日誌的詳細程度。\n普通：隱藏敏感資訊。\n深度：包含敏感資訊與更多細節。",
 	"settings.pingforit.server_logging_profile": "伺服器日誌詳細程度",
-	"settings.pingforit.server_logging_profile.tooltip": "伺服器日誌詳細程度。\n普通：僅記錄必要的診斷資訊，敏感值去識別化。\n深度：更多脈絡，不去識別化。\n關閉設定時提交，伺服器接受後生效。",
+	"settings.pingforit.server_logging_profile.tooltip": "伺服器寫入日誌的詳細程度。\n普通：隱藏敏感資訊。\n深度：包含敏感資訊與更多細節。",
 	"settings.pingforit.group.logging": "日誌",
 	"value.pingforit.normal": "普通",
 	"value.pingforit.deep": "深度",
 	"value.pingforit.debug": "偵錯",
 	"settings.pingforit.entity_block_render_mode": "方塊實體幾何",
-	"settings.pingforit.entity_block_render_mode.tooltip": "方塊實體的外框來源；下次嘗試繪製時生效，不影響目標選擇。\n全部：內建及已註冊的選用來源。相容：僅內建繪製器與支援模組載入器的模型。\n僅 VoxelShape：略過一般來源，使用原生形狀；其他模式在沒有來源繪製時也會改用原生形狀。",
-	"settings.pingforit.entity_block_render_mode.all.tooltip": "繪製方塊實體外框時，嘗試內建繪製器、模型及已註冊的選用幾何來源。\n可涵蓋更多來源的幾何；沒有來源繪製時仍會使用原生形狀備援。下次嘗試繪製時生效。",
-	"settings.pingforit.entity_block_render_mode.compatible.tooltip": "繪製方塊實體外框時，僅嘗試內建繪製器與支援模組載入器的模型，略過選用幾何來源。\n沒有來源繪製時仍會使用原生形狀備援。下次嘗試繪製時生效。",
-	"settings.pingforit.entity_block_render_mode.voxel_shape_only.tooltip": "繪製方塊實體外框時，略過一般幾何來源，使用原生 VoxelShape。\n只改變外框幾何，不影響目標選擇。下次嘗試繪製時生效。",
+	"settings.pingforit.entity_block_render_mode.tooltip": "實體方塊外框的顯示方式。",
+	"settings.pingforit.entity_block_render_mode.all.tooltip": "嘗試所有可用的外框方式，包括其他模組提供的支援。最有可能得到細緻的外框。",
+	"settings.pingforit.entity_block_render_mode.compatible.tooltip": "大多數方塊（包括模組方塊）使用一般外框。",
+	"settings.pingforit.entity_block_render_mode.voxel_shape_only.tooltip": "依方塊的基礎形狀繪製外框。最穩定，但複雜方塊看起來較簡單。",
 	"settings.pingforit.player_info_mode": "玩家資訊",
-	"settings.pingforit.player_info_mode.hold.tooltip": "按住「%s」（%s）時，顯示標記發起者的名稱與頭像。\n放開按鍵便會隱藏發起者資訊。",
+	"settings.pingforit.player_info_mode.hold.tooltip": "按住「%s」（%s）時顯示標記作者的名字與頭像。",
 	"settings.pingforit.team_color_mode": "隊伍顏色",
 	"settings.pingforit.default_channel_mode": "預設頻道模式",
-	"settings.pingforit.default_channel_mode.tooltip": "傳送者頻道留空時的預設規則；具名頻道不受影響。\n自動：依相同隊伍環境分組，無隊伍玩家共用一組。全域：所有頻道留空的玩家。\n僅限隊伍：必須加入隊伍，並使用該隊伍環境。已停用：拒絕頻道留空的標記建立請求。",
+	"settings.pingforit.default_channel_mode.tooltip": "沒有填寫頻道的玩家如何分組。\n自動：同隊玩家一組；沒有隊伍的玩家同在一組。\n全域：所有沒有填寫頻道的玩家互通。\n僅限隊伍：必須有隊伍，並依隊伍分組。\n已停用：不接收未填寫頻道玩家發來的標記。",
 	"settings.pingforit.player_tracking_enabled": "玩家追蹤",
-	"settings.pingforit.player_tracking_enabled.tooltip": "伺服器如何處理新請求中的玩家目標。\n關閉：將玩家目標轉換為伺服器認定的當下位置。\n開啟：保留玩家實體目標，讓標記能隨玩家移動。",
+	"settings.pingforit.player_tracking_enabled.tooltip": "標記是否跟隨玩家移動。\n關閉：標記留在玩家當時的位置。\n開啟：標記跟隨玩家移動。",
 	"settings.pingforit.ms_to_regenerate": "恢復時間（毫秒）",
-	"settings.pingforit.ms_to_regenerate.tooltip": "恢復一次標記建立額度所需的毫秒數；頻率限制決定可連續建立的額度。\n減少值：額度恢復更快；0 會停用用戶端的預先限流，但不代表無條件略過伺服器檢查。\n增加值：額度恢復更慢。",
+	"settings.pingforit.ms_to_regenerate.tooltip": "一次標記發送後，需要多久才能再次發送。\n減少值：更快恢復；0 取消等待。\n增加值：需要等待更久。",
 	"settings.pingforit.rate_limit": "頻率限制",
-	"settings.pingforit.rate_limit.tooltip": "每位玩家可連續建立標記的額度，恢復速度由「恢復時間」決定。\n減少值：可連續建立的標記較少；0 會停用頻率檢查，而非停用標記功能。\n增加值：可連續建立的標記較多；每次額度的恢復時間不變。",
+	"settings.pingforit.rate_limit.tooltip": "每位玩家可以連續發送多少個標記。\n減少值：連續發送的標記較少；0 不限制。\n增加值：連續發送的標記較多。",
 
 	"value.pingforit.auto": "自動",
 	"value.pingforit.disabled": "已停用",
@@ -134,13 +189,13 @@
 	"pingforit.target.here": "此處",
 	"pingforit.target.unknown": "未知目標"
   ,"settings.pingforit.long_press_compatibility_mode": "長按相容模式"
-  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "快速連點與延後目標擷取的相容處理；啟用時會關閉手勢捷徑並將危險角度歸零，之後不會自動恢復。\n關閉：使用一般按鍵操作，以及手動重新啟用的手勢。\n開啟：密集點按可形成虛擬長按；等待中的目標擷取可保留一次新的按下操作。"
+  ,"settings.pingforit.long_press_compatibility_mode.tooltip": "把密集點擊視為一次長按。\n關閉：使用一般按壓。\n開啟：間隔很短的點擊可當作長按；這會清除手勢跳過長按與雙擊危險角度。"
   ,"settings.pingforit.long_press_compatibility_slice_millis": "相容時間片：%s"
-  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "僅在相容模式使用的相鄰點按間隔，上限為長按門檻的一半。\n減少值：必須更密集點按，才能延續虛擬長按。\n增加值：允許相鄰點按相隔更久。"
+  ,"settings.pingforit.long_press_compatibility_slice_millis.tooltip": "相容模式下兩次點擊之間允許的最大間隔，最多為長按時間的一半。\n減少值：兩次點擊需要更接近。\n增加值：允許更大的間隔。"
   ,"settings.pingforit.sync_duration": "同步持續時間（秒）"
-  ,"settings.pingforit.sync_duration.tooltip": "新標記建立時固定的伺服器存續時間；本機顯示時間另行設定。0 不代表停用。\n減少值：新標記會更早在伺服器上到期。\n增加值：新標記可維持更久；既有標記的到期時間不變。"
+  ,"settings.pingforit.sync_duration.tooltip": "伺服器為新標記保留多長時間。\n減少值：新標記更快過期。\n增加值：新標記保留更久。"
   ,"settings.pingforit.marker_display_duration": "標記顯示時間：%s"
-  ,"settings.pingforit.marker_display_duration.tooltip": "新收到標記的本機顯示時間；0 會採用該標記已固定的伺服器存續時間。\n減少值：新標記會更早在本機消失。\n增加值：新標記可顯示更久；伺服器存續時間與既有標記不受影響。"
+  ,"settings.pingforit.marker_display_duration.tooltip": "新收到的標記顯示多久；0 依伺服器為每個標記設定的時間顯示。\n減少值：更快消失。\n增加值：顯示更久。"
   ,"value.pingforit.follow_server": "跟隨伺服器"
   ,"unit.pingforit.seconds": "%ss"
   ,"notice.pingforit.mark_transparent_blocks": "標記透明方塊: "
@@ -183,14 +238,14 @@
   ,"settings.pingforit.server_status.read_only": "伺服器設定對你為唯讀。顯示的是目前的值。"
   ,"settings.pingforit.reset_all.server_draft_warning": "這也會捨棄未儲存的伺服器設定草稿。"
   ,"settings.pingforit.open_client_config": "儲存、關閉並開啟用戶端設定..."
-  ,"settings.pingforit.open_client_config.tooltip": "儲存本機設定並傳送有效的一般伺服器設定草稿，接著關閉設定畫面並開啟完整的用戶端設定檔。\n若儲存或驗證失敗，就不會開啟檔案。\n外部編輯會在重新啟動用戶端後生效；重新開啟設定畫面不會重新載入檔案。"
+  ,"settings.pingforit.open_client_config.tooltip": "儲存並關閉設定，然後開啟用戶端設定檔。\n修改在重新啟動用戶端後生效。"
 	,"settings.pingforit.category.server_presentation": "伺服器呈現"
 	,"settings.pingforit.category.server_presentation.button": "伺服器呈現..."
   ,"settings.pingforit.presentation.server.title": "伺服器策略"
   ,"settings.pingforit.presentation.white": "白名單"
   ,"settings.pingforit.presentation.black": "黑名單"
   ,"settings.pingforit.presentation.whitelist_only": "僅白名單"
-  ,"settings.pingforit.presentation.whitelist_only.tooltip": "所選目標類型中，兩份清單都未符合的欄位所採用的規則。\n關閉：使用各未符合欄位在目錄中的預設值。\n開啟：拒絕未符合的欄位；符合的允許規則仍優先於阻擋規則。"
+  ,"settings.pingforit.presentation.whitelist_only.tooltip": "兩個清單都沒有提到的欄位如何處理。\n關閉：使用各欄位的預設設定。\n開啟：只允許符合白名單的欄位。"
   ,"settings.pingforit.presentation.selector": "選擇器（namespace:path）"
   ,"settings.pingforit.presentation.add": "新增"
   ,"settings.pingforit.presentation.remove": "移除"
@@ -239,42 +294,42 @@
   ,"settings.pingforit.presentation.field.now": "目前：%s"
   ,"settings.pingforit.presentation.field.matching_white": "符合的允許規則：%s"
   ,"settings.pingforit.presentation.field.matching_black": "符合的阻擋規則：%s"
-  ,"settings.pingforit.presentation.rule.allow.tooltip": "切換此欄位的完整 ID 是否列在所選類型的允許清單中。\n關閉：只移除這條精確規則；萬用字元允許規則仍可能適用。\n開啟：優先允許此欄位，不受阻擋規則限制；權限與子欄位限制仍然適用。"
-  ,"settings.pingforit.presentation.rule.block.tooltip": "切換此欄位的完整 ID 是否列在所選類型的阻擋清單中。\n關閉：只移除這條精確規則；其他規則與預設值仍然適用。\n開啟：阻擋此欄位，但符合任何允許選擇器時除外。"
+  ,"settings.pingforit.presentation.rule.allow.tooltip": "在所選類型的白名單中切換此欄位。\n關閉：移除此規則；萬用字元規則仍可能允許此欄位。\n開啟：允許此欄位，並優先於黑名單規則。"
+  ,"settings.pingforit.presentation.rule.block.tooltip": "在所選類型的黑名單中切換此欄位。\n關閉：移除此規則。\n開啟：阻擋此欄位；符合的白名單規則仍然優先。"
   ,"settings.pingforit.presentation.field.minecraft_target_name.name": "目標名稱"
-  ,"settings.pingforit.presentation.field.minecraft_target_name.description": "所標記目標的名稱。"
+  ,"settings.pingforit.presentation.field.minecraft_target_name.description": "被標記目標的名稱。"
   ,"settings.pingforit.presentation.field.minecraft_entity_type.name": "實體類型"
-  ,"settings.pingforit.presentation.field.minecraft_entity_type.description": "實體類型的註冊 ID。"
+  ,"settings.pingforit.presentation.field.minecraft_entity_type.description": "實體的類型。"
   ,"settings.pingforit.presentation.field.minecraft_entity_health.name": "生命值"
-  ,"settings.pingforit.presentation.field.minecraft_entity_health.description": "活體實體的目前生命值。"
+  ,"settings.pingforit.presentation.field.minecraft_entity_health.description": "生物目前的生命值。"
   ,"settings.pingforit.presentation.field.minecraft_entity_max_health.name": "最大生命值"
-  ,"settings.pingforit.presentation.field.minecraft_entity_max_health.description": "活體實體的最大生命值。"
+  ,"settings.pingforit.presentation.field.minecraft_entity_max_health.description": "生物的最大生命值。"
   ,"settings.pingforit.presentation.field.minecraft_item_id.name": "物品"
-  ,"settings.pingforit.presentation.field.minecraft_item_id.description": "掉落物堆中物品的註冊 ID。"
+  ,"settings.pingforit.presentation.field.minecraft_item_id.description": "掉落物是哪種物品。"
   ,"settings.pingforit.presentation.field.minecraft_item_count.name": "數量"
-  ,"settings.pingforit.presentation.field.minecraft_item_count.description": "掉落物的堆疊數量。"
+  ,"settings.pingforit.presentation.field.minecraft_item_count.description": "掉落物有多少個。"
   ,"settings.pingforit.presentation.field.minecraft_item_icon.name": "物品圖示"
-  ,"settings.pingforit.presentation.field.minecraft_item_icon.description": "是否有可用的物品圖示。"
+  ,"settings.pingforit.presentation.field.minecraft_item_icon.description": "是否有物品圖示。"
   ,"settings.pingforit.presentation.field.minecraft_block_state.name": "方塊狀態"
-  ,"settings.pingforit.presentation.field.minecraft_block_state.description": "所標記方塊的方塊狀態屬性。"
+  ,"settings.pingforit.presentation.field.minecraft_block_state.description": "方塊的狀態，例如朝向或開關。"
   ,"settings.pingforit.presentation.field.create_kinetic_speed.name": "轉速（RPM）"
-  ,"settings.pingforit.presentation.field.create_kinetic_speed.description": "動力旋轉速度；是否可用取決於目標類型與伺服器規則。"
+  ,"settings.pingforit.presentation.field.create_kinetic_speed.description": "動力方塊的轉速。"
   ,"settings.pingforit.presentation.field.create_kinetic_has_network.name": "動力網路"
-  ,"settings.pingforit.presentation.field.create_kinetic_has_network.description": "動力方塊是否連接到網路。"
+  ,"settings.pingforit.presentation.field.create_kinetic_has_network.description": "動力方塊是否接入動力網路。"
   ,"settings.pingforit.presentation.field.create_kinetic_overstressed.name": "過載"
   ,"settings.pingforit.presentation.field.create_kinetic_overstressed.description": "動力網路是否過載。"
   ,"settings.pingforit.presentation.field.create_kinetic_stress.name": "已用應力"
-  ,"settings.pingforit.presentation.field.create_kinetic_stress.description": "動力網路的目前應力。"
+  ,"settings.pingforit.presentation.field.create_kinetic_stress.description": "動力網路目前使用的應力。"
   ,"settings.pingforit.presentation.field.create_kinetic_capacity.name": "總應力容量"
-  ,"settings.pingforit.presentation.field.create_kinetic_capacity.description": "動力網路的應力容量。"
+  ,"settings.pingforit.presentation.field.create_kinetic_capacity.description": "動力網路能承受的總應力。"
   ,"settings.pingforit.presentation.field.create_kinetic_available_capacity.name": "可用應力"
-  ,"settings.pingforit.presentation.field.create_kinetic_available_capacity.description": "動力網路的可用應力；過載時可能為負。"
+  ,"settings.pingforit.presentation.field.create_kinetic_available_capacity.description": "動力網路剩餘的應力；過載時可能為負。"
   ,"settings.pingforit.presentation.field.create_inventory_summary.name": "物品欄內容"
-  ,"settings.pingforit.presentation.field.create_inventory_summary.description": "Create 物品欄的內容摘要。預設停用。"
+  ,"settings.pingforit.presentation.field.create_inventory_summary.description": "Create 物品欄的內容摘要。"
   ,"settings.pingforit.presentation.field.create_fluid_summary.name": "流體內容"
-  ,"settings.pingforit.presentation.field.create_fluid_summary.description": "Create 流體儲罐的內容摘要。預設停用。"
+  ,"settings.pingforit.presentation.field.create_fluid_summary.description": "Create 流體儲罐的內容摘要。"
   ,"settings.pingforit.presentation.field.pingforit_inventory_items.name": "物品欄物品"
-  ,"settings.pingforit.presentation.field.pingforit_inventory_items.description": "已標記物品欄的物品內容。"
+  ,"settings.pingforit.presentation.field.pingforit_inventory_items.description": "容器中的物品內容。"
   ,"settings.pingforit.presentation.target_type.dropped_item": "掉落物策略"
   ,"settings.pingforit.presentation.target_type.entity": "實體策略"
   ,"settings.pingforit.presentation.target_type.entity_block": "方塊實體策略"
@@ -309,33 +364,33 @@
   ,"presentation.pingforit.no": "否"
   ,"settings.pingforit.group.spatial_selector": "空間選擇手勢"
   ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled": "手勢跳過長按"
-  ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled.tooltip": "下次按住生效的選用提前開啟功能；相容模式會強制關閉，之後不會自動恢復。\n關閉：使用一般長按開啟。\n開啟：實際按住所綁定的標記按鍵達最短時間後，移出中心死區即可提前開啟。"
+  ,"settings.pingforit.spatial_selector.gesture_skip_hold_enabled.tooltip": "按住 Ping 並移動，可在一般長按完成前開啟選單；相容模式會關閉此功能。\n關閉：使用一般長按開啟。\n開啟：按住達到最短時間後，移動即可提前開啟。"
   ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis": "手勢最短按住時間：%s"
-  ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis.tooltip": "啟用手勢捷徑時，提前開啟前需持續實際按住的最短時間；下次按住生效。一般長按獨立運作。\n減少值：移動可更早符合開啟條件。\n增加值：需實際按住更久，才能透過移動提前開啟。"
+  ,"settings.pingforit.spatial_selector.gesture_skip_hold_millis.tooltip": "按住 Ping 多久後，移動才能提前開啟選單。\n減少值：更快符合條件。\n增加值：需要按住更久。"
   ,"settings.pingforit.spatial_selector.deadzone": "中心死區：%s"
-  ,"settings.pingforit.spatial_selector.deadzone.tooltip": "圓形選單的中央取消區與物品欄側向選擇距離；下次按住生效。清單距離從面板側框外緣起算，無法使用時改從螢幕邊緣起算。\n減少值：中央取消區較小，側向焦點較早出現。\n增加值：中央取消區較大，需移動更遠才會出現側向焦點。"
+  ,"settings.pingforit.spatial_selector.deadzone.tooltip": "移動即可取消的中心範圍，以及物品欄列表中向側面移動的距離。\n減少值：取消中心較小，側向操作更快觸發。\n增加值：取消中心較大，側向操作需要更多移動。"
   ,"settings.pingforit.spatial_selector.stroke": "進入手勢長度：%s"
-  ,"settings.pingforit.spatial_selector.stroke.tooltip": "停頓或有效轉向進入子選單前的移動距離，也是物品欄的側向導覽距離；下次按住生效。清單使用相同側框或螢幕邊緣起點，不加上死區距離。\n減少值：較短移動即可符合進入或側向導覽條件。\n增加值：進入或側向導覽前需移動更遠。"
+  ,"settings.pingforit.spatial_selector.stroke.tooltip": "進入子選單或在物品欄列表中向側面移動所需的距離。\n減少值：更快進入或移動。\n增加值：需要更多移動。"
   ,"settings.pingforit.spatial_selector.dwell_millis": "進入停頓時間：%s"
-  ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "完成足夠移動後，進入子選單前的停頓時間；下次按住生效。\n減少值：停頓後更快進入。\n增加值：需停頓更久；有效轉向是另一種進入方式。"
+  ,"settings.pingforit.spatial_selector.dwell_millis.tooltip": "停留在選項上多久才開啟子選單。\n減少值：更快開啟。\n增加值：需要停留更久。"
   ,"settings.pingforit.spatial_selector.root_distance": "主選單距離：%s"
-  ,"settings.pingforit.spatial_selector.root_distance.tooltip": "主選單選項與中心的顯示距離；下次按住生效。中心死區與進入手勢長度不變。\n減少值：主選單選項更靠近中心。\n增加值：主選單選項向外分布得更遠。"
+  ,"settings.pingforit.spatial_selector.root_distance.tooltip": "主選單選項與中心的距離。\n減少值：主選單更靠近中心。\n增加值：主選單更向外展開。"
   ,"settings.pingforit.spatial_selector.submenu_radius_scale": "子選單大小：%s"
-  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "所有非主選單的圓形選單顯示倍率，包括物品選單；下次按住生效。主選單距離與手勢門檻不變。\n減少值：子選單更緊密。\n增加值：子選單選項之間的距離更大。"
+  ,"settings.pingforit.spatial_selector.submenu_radius_scale.tooltip": "環狀子選單的大小，包括物品選單。\n減少值：子選單更緊湊。\n增加值：子選單選項更分散。"
   ,"settings.pingforit.spatial_selector.inventory_max_width_fraction": "物品欄最大寬度：%s"
-  ,"settings.pingforit.spatial_selector.inventory_max_width_fraction.tooltip": "物品欄面板相對於介面可視區域的寬度上限；下次按住生效。實際大小仍受內容與最小可讀尺寸影響。\n減少值：允許的面板寬度較窄。\n增加值：允許的面板寬度較寬，並非固定寬度。"
+  ,"settings.pingforit.spatial_selector.inventory_max_width_fraction.tooltip": "物品欄面板最多占螢幕寬度的多少。\n減少值：占用較少畫面空間。\n增加值：可容納更寬的內容。"
   ,"settings.pingforit.spatial_selector.inventory_max_height_fraction": "物品欄最大高度：%s"
-  ,"settings.pingforit.spatial_selector.inventory_max_height_fraction.tooltip": "物品欄面板相對於介面可視區域的高度上限，並非固定高度；下次按住生效。實際大小仍受內容與最小可讀尺寸影響。\n減少值：允許較矮的面板，可能顯示較少列。\n增加值：允許較高的面板，可能顯示較多列。"
+  ,"settings.pingforit.spatial_selector.inventory_max_height_fraction.tooltip": "物品欄面板最多占螢幕高度的多少。\n減少值：占用較少畫面空間。\n增加值：可顯示更多列。"
   ,"settings.pingforit.spatial_selector.hover_enabled": "返回需持續停留"
-  ,"settings.pingforit.spatial_selector.hover_enabled.tooltip": "下次按住時的返回操作。\n關閉：使用一般返回手勢。\n開啟：需持續選中「返回」達指定時間；若要再次返回，請先移開再重新選中。"
+  ,"settings.pingforit.spatial_selector.hover_enabled.tooltip": "將游標停留在返回項以回到上一層。\n關閉：使用一般返回操作。\n開啟：停留於返回項達設定時間後返回。"
   ,"settings.pingforit.spatial_selector.hover_millis": "返回停留時間：%s"
-  ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "啟用停留返回時，需持續選中「返回」的時間；下次按住生效。\n減少值：選中「返回」後更快返回。\n增加值：需選中「返回」更久；停留返回關閉時不生效。"
+  ,"settings.pingforit.spatial_selector.hover_millis.tooltip": "停留在返回項多久後返回。\n減少值：返回更快。\n增加值：需要停留更久。"
   ,"settings.pingforit.spatial_selector.show_trail": "顯示手勢軌跡"
-  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "下次按住時的指標與作用中選項軌跡；不改變選擇。\n關閉：隱藏兩者的軌跡。\n開啟：繪製兩者共用的移動軌跡。"
+  ,"settings.pingforit.spatial_selector.show_trail.tooltip": "顯示跟隨指標與目前選項的軌跡。\n關閉：隱藏軌跡。\n開啟：顯示軌跡。"
   ,"settings.pingforit.spatial_selector.reduce_motion": "減少選擇器動畫"
-  ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "下次按住時的選擇器動畫；手勢時間與選擇不變。\n關閉：使用一般選擇器動畫。\n開啟：減少選擇器的動態效果。"
+  ,"settings.pingforit.spatial_selector.reduce_motion.tooltip": "減少輪盤動畫。\n關閉：使用完整動畫。\n開啟：使用較平緩的動畫。"
   ,"settings.pingforit.spatial_selector.content_intent_enabled": "啟用內容意圖選擇"
-  ,"settings.pingforit.spatial_selector.content_intent_enabled.tooltip": "在「內容」下提供額外的屬性與物品欄物品標記類型選單；下次按住生效。整個標記的類型不變。\n關閉：可選內容直接以「注意」送出。\n開啟：提供額外選單，讓你選擇內容的標記類型。"
+  ,"settings.pingforit.spatial_selector.content_intent_enabled.tooltip": "為物品或屬性選擇標記類型。\n關閉：直接發送注意標記。\n開啟：發送前選擇標記類型。"
   ,"pingforit.spatial.inventory.updating": "更新中…"
   ,"pingforit.spatial.inventory.unknown": "未知"
   ,"pingforit.spatial.inventory.uncertain": "不確定"
@@ -349,7 +404,7 @@
   ,"pingforit.spatial.inventory.back": "返回"
   ,"pingforit.spatial.inventory.forward": "前進"
   ,"pingforit.spatial.reserved": "保留"
-  ,"pingforit.spatial.content": "內容"
+  ,"pingforit.spatial.content": "詳細資訊"
   ,"pingforit.spatial.cancel": "移除標記"
   ,"pingforit.spatial.precise": "精確"
   ,"pingforit.spatial.intent": "意圖"
@@ -368,7 +423,7 @@
   ,"settings.pingforit.category.debug.button": "偵錯..."
   ,"settings.pingforit.group.monitoring": "監控"
   ,"settings.pingforit.budget_delay_notifications_enabled": "預算延遲通知"
-  ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "管理員接收的持續資源等待通知；WARN 診斷記錄仍會啟用。\n關閉：減少聊天訊息；持續等待更容易被忽略。\n開啟：提示哪些工作正在等待，協助選擇要調整的預算。"
+  ,"settings.pingforit.budget_delay_notifications_enabled.tooltip": "伺服器處理持續延遲時通知管理員。\n關閉：不發送這類通知。\n開啟：處理持續延遲時在聊天欄提醒。"
   ,"message.pingforit.budget_delay": "[ping for it] %s 持續受到預算限制而延遲。請檢查伺服器效能預算或黑名單設定。"
   ,"message.pingforit.budget_delay.module.presentation": "資訊呈現"
   ,"message.pingforit.budget_delay.module.inventory_preview": "物品欄預覽"
@@ -381,54 +436,54 @@
   ,"settings.pingforit.inventory.resync_no_cooldown": "不檢查冷卻"
   ,"settings.pingforit.inventory.heartbeat_disabled": "關閉週期心跳"
   ,"settings.pingforit.inventory.physical_slots_per_tick": "每 tick 實體槽位"
-  ,"settings.pingforit.inventory.physical_slots_per_tick.tooltip": "預覽與追蹤共用的每 tick 庫存真實讀取量。\n減少值：減輕每 tick 的處理負擔；大容器更新可能更慢。\n增加值：每 tick 可推進更多讀取；伺服器負載可能增加。"
+  ,"settings.pingforit.inventory.physical_slots_per_tick.tooltip": "伺服器每 tick 處理多少個物品欄槽位。\n減少值：效能占用較小。\n增加值：允許處理更多內容。"
   ,"settings.pingforit.inventory.pending_memory_mib": "待處理記憶體（MiB）"
-  ,"settings.pingforit.inventory.pending_memory_mib.tooltip": "全伺服器預覽與追蹤的待處理資料記憶體。\n減少值：減輕記憶體壓力；大容器和多目標更新可能更慢。\n增加值：可保留更多容器資料，減少記憶體不足造成的等待；記憶體占用可能增加。"
+  ,"settings.pingforit.inventory.pending_memory_mib.tooltip": "伺服器上預覽與追蹤可用的記憶體。\n減少值：記憶體占用較少。\n增加值：可保留更多容器資料。"
   ,"settings.pingforit.inventory.display_byte_multiplier": "顯示大小：%s"
-  ,"settings.pingforit.inventory.display_byte_multiplier.tooltip": "單一展示物品的資料大小，受物品欄訊框大小約束。\n減少值：減輕單筆物品資料負擔；複雜物品的細節可能被簡化。\n增加值：可保留更多物品細節；單筆資料和處理開銷可能增加。"
+  ,"settings.pingforit.inventory.display_byte_multiplier.tooltip": "每個物品顯示的細節量。\n減少值：資料占用較小。\n增加值：顯示更多物品細節。"
   ,"settings.pingforit.inventory.frame_byte_multiplier": "物品欄訊框大小：%s"
-  ,"settings.pingforit.inventory.frame_byte_multiplier.tooltip": "單一物品欄封包可容納的資料量。\n減少值：單包更小；更新可能需要更多分片，物品顯示大小也可能被調低。\n增加值：單包可容納更多資料；單次封包負擔可能增加。"
+  ,"settings.pingforit.inventory.frame_byte_multiplier.tooltip": "一次傳送多少物品欄內容。\n減少值：每次傳送的內容較少。\n增加值：每次可傳送更多物品欄內容。"
   ,"settings.pingforit.inventory.size_adjusted": "顯示大小已降至 %s，以配合 %s 的物品欄訊框。"
   ,"settings.pingforit.inventory.preview_period_ticks": "預覽週期（tick）"
-  ,"settings.pingforit.inventory.preview_period_ticks.tooltip": "庫存預覽額度的補充間隔。\n減少值：額度補充更頻繁，可減少預覽等待；處理和流量開銷可能增加。\n增加值：額度補充更稀疏，可減少開銷；預覽等待可能更長。"
+  ,"settings.pingforit.inventory.preview_period_ticks.tooltip": "處理大型物品欄時，各批預覽之間的等待時間。\n減少值：預覽更快完成。\n增加值：伺服器負擔較小。"
   ,"settings.pingforit.inventory.preview_max_variants_per_client_period": "每用戶端週期預覽變體"
-  ,"settings.pingforit.inventory.preview_max_variants_per_client_period.tooltip": "每位玩家每預覽週期的物品變體種類額度。\n減少值：減少清單處理和資料量；預覽清單可能缺少物品種類。\n增加值：預覽可展示更多種類；清單處理和資料量可能增加。"
+  ,"settings.pingforit.inventory.preview_max_variants_per_client_period.tooltip": "每位玩家每輪預覽能處理多少種物品變體。\n減少值：處理的變體較少。\n增加值：可顯示更多變體。"
   ,"settings.pingforit.inventory.preview_max_slots_per_client": "每用戶端預覽槽位"
-  ,"settings.pingforit.inventory.preview_max_slots_per_client.tooltip": "每位玩家每預覽週期可推進的庫存槽位數。\n減少值：減少單一玩家的預覽工作量；大容器預覽可能更慢。\n增加值：單一玩家的預覽可推進更多；伺服器處理負擔可能增加。"
+  ,"settings.pingforit.inventory.preview_max_slots_per_client.tooltip": "每位玩家每輪預覽能處理多少個物品欄槽位。\n減少值：每位玩家工作量較小。\n增加值：大型物品欄更快預覽完成。"
   ,"settings.pingforit.inventory.preview_max_slots_server": "全伺服器預覽槽位"
-  ,"settings.pingforit.inventory.preview_max_slots_server.tooltip": "全伺服器每預覽週期可推進的庫存槽位總數。\n減少值：減少全服預覽工作量；多人同時預覽時可能等待更久。\n增加值：可同時推進更多預覽；伺服器負載可能增加。"
+  ,"settings.pingforit.inventory.preview_max_slots_server.tooltip": "全伺服器每輪預覽能處理多少個物品欄槽位。\n減少值：全伺服器預覽工作量較小。\n增加值：更多預覽可同時推進。"
   ,"settings.pingforit.inventory.preview_max_targets_per_client": "每用戶端預覽目標"
-  ,"settings.pingforit.inventory.preview_max_targets_per_client.tooltip": "每位玩家可並行請求預覽的目標數。\n減少值：減少同時請求的資源占用；連續查看多個目標可能等待更久。\n增加值：可同時請求更多目標；記憶體和處理開銷可能增加。"
+  ,"settings.pingforit.inventory.preview_max_targets_per_client.tooltip": "每位玩家最多能同時預覽多少個目標。\n減少值：資源占用較少。\n增加值：可同時瀏覽更多目標。"
   ,"settings.pingforit.inventory.preview_client_byte_multiplier": "預覽用戶端位元組倍率"
-  ,"settings.pingforit.inventory.preview_client_byte_multiplier.tooltip": "每位玩家每預覽週期可傳送的預覽資料量。\n減少值：減少單一玩家的流量；大型預覽可能接收更慢。\n增加值：每週期可傳送更多預覽資料；頻寬占用可能增加。"
+  ,"settings.pingforit.inventory.preview_client_byte_multiplier.tooltip": "每輪傳送給每位玩家的預覽資料量。\n減少值：流量較小。\n增加值：可傳送更多預覽資料。"
   ,"settings.pingforit.inventory.preview_global_byte_multiplier": "預覽全域位元組倍率"
-  ,"settings.pingforit.inventory.preview_global_byte_multiplier.tooltip": "全伺服器每週期預覽資料量與傳送佇列額度。\n減少值：減少總流量與排隊資料；多人預覽可能等待更久。\n增加值：可排隊和傳送更多預覽資料；頻寬與記憶體占用可能增加。"
+  ,"settings.pingforit.inventory.preview_global_byte_multiplier.tooltip": "伺服器每輪最多可傳送多少預覽資料。\n減少值：流量較小。\n增加值：可同時傳送更多預覽資料。"
   ,"settings.pingforit.inventory.tracking_period_ticks": "追蹤週期（tick）"
   ,"settings.pingforit.inventory.tracking_distinguish_faces": "區分不同面"
-  ,"settings.pingforit.inventory.tracking_distinguish_faces.tooltip": "伺服端庫存追蹤；仍會檢查每位玩家的目前權限和對應面實際可見的欄位。\n關閉：僅在視圖已證實等價時，跨不同面重用追蹤觀測。\n開啟：按不同面隔離追蹤觀測。\n修改從下一次掃描開始生效；進行中的掃描按原設定完成。"
+  ,"settings.pingforit.inventory.tracking_distinguish_faces.tooltip": "是否分別追蹤容器的每個面。\n關閉：內容相同時，伺服器負擔較小。\n開啟：分別追蹤每個面。"
   ,"settings.pingforit.inventory.tracking_distinguish_players": "區分不同玩家"
-  ,"settings.pingforit.inventory.tracking_distinguish_players.tooltip": "伺服端庫存追蹤；仍會檢查每位玩家的目前權限和對應面實際可見的欄位。\n關閉：僅在視圖已證實等價時，跨不同玩家重用追蹤觀測。\n開啟：按不同玩家隔離追蹤觀測。\n修改從下一次掃描開始生效；進行中的掃描按原設定完成。"
-  ,"settings.pingforit.inventory.tracking_period_ticks.tooltip": "追蹤額度的補充間隔，以及完整掃描後的等待間隔。\n減少值：額度補充和掃描更頻繁，可減少更新等待；處理和流量開銷可能增加。\n增加值：額度補充和掃描更稀疏，可減少開銷；物品變化可能更晚顯示。"
+  ,"settings.pingforit.inventory.tracking_distinguish_players.tooltip": "是否分別追蹤每位玩家看到的內容。\n關閉：內容相同時，伺服器負擔較小。\n開啟：分別追蹤每位玩家。"
+  ,"settings.pingforit.inventory.tracking_period_ticks.tooltip": "追蹤掃描完成後，等待多久再進行下一次掃描。\n減少值：更新更快送達。\n增加值：伺服器負擔較小。"
   ,"settings.pingforit.inventory.tracking_max_variants_per_target": "每目標追蹤變體"
-  ,"settings.pingforit.inventory.tracking_max_variants_per_target.tooltip": "同一目標上同時活躍的物品變體追蹤選擇數。\n減少值：減少活躍選擇的資源占用；可同時追蹤的物品種類更少。\n增加值：可同時保留更多種類的追蹤；記憶體和更新工作量可能增加。"
+  ,"settings.pingforit.inventory.tracking_max_variants_per_target.tooltip": "每個目標最多能同時追蹤多少種物品變體。\n減少值：資源占用較少。\n增加值：可同時追蹤更多變體。"
   ,"settings.pingforit.inventory.tracking_max_slots_per_target": "每目標追蹤槽位"
-  ,"settings.pingforit.inventory.tracking_max_slots_per_target.tooltip": "每個目標每追蹤週期可推進的庫存槽位數。\n減少值：減少單一目標的處理量；大容器變化可能更晚顯示。\n增加值：單一目標的掃描可推進更多；伺服器處理負擔可能增加。"
+  ,"settings.pingforit.inventory.tracking_max_slots_per_target.tooltip": "每個目標每輪追蹤能處理多少個物品欄槽位。\n減少值：單一目標工作量較小。\n增加值：單一目標掃描推進更多。"
   ,"settings.pingforit.inventory.tracking_max_slots_server": "全伺服器追蹤槽位"
-  ,"settings.pingforit.inventory.tracking_max_slots_server.tooltip": "全伺服器每追蹤週期可推進的庫存槽位總數。\n減少值：減少全服追蹤工作量；多目標同時活躍時更新可能更慢。\n增加值：更多目標可同時推進掃描；伺服器負載可能增加。"
+  ,"settings.pingforit.inventory.tracking_max_slots_server.tooltip": "全伺服器每輪追蹤能處理多少個物品欄槽位。\n減少值：全伺服器追蹤工作量較小。\n增加值：更多目標可同時推進。"
   ,"settings.pingforit.inventory.tracking_stream_byte_multiplier": "追蹤串流位元組倍率"
-  ,"settings.pingforit.inventory.tracking_stream_byte_multiplier.tooltip": "每位玩家每個目標每追蹤週期可傳送的變化資料量。\n減少值：減少變化流量；頻繁變化的容器可能更新更慢。\n增加值：每週期可傳送更多變化；頻寬占用可能增加。"
+  ,"settings.pingforit.inventory.tracking_stream_byte_multiplier.tooltip": "每位玩家每個目標每輪能收到多少變化內容。\n減少值：更新流量較小。\n增加值：每輪可傳送更多變化。"
   ,"settings.pingforit.inventory.tracking_snapshot_byte_multiplier": "追蹤快照位元組倍率"
-  ,"settings.pingforit.inventory.tracking_snapshot_byte_multiplier.tooltip": "快照分片大小，以及每位玩家每週期跨所有目標的快照總量。\n減少值：分片更小、流量更少；首次顯示和修復可能更慢。\n增加值：每週期可傳送更多快照資料；封包和頻寬占用可能增加。"
+  ,"settings.pingforit.inventory.tracking_snapshot_byte_multiplier.tooltip": "追蹤的物品欄首次出現或恢復時，每位玩家每輪最多可收到多少內容。\n減少值：流量較小。\n增加值：更快顯示或恢復內容。"
   ,"settings.pingforit.inventory.tracking_global_byte_multiplier": "追蹤全域位元組倍率"
-  ,"settings.pingforit.inventory.tracking_global_byte_multiplier.tooltip": "全伺服器每週期追蹤資料量與傳送佇列額度。\n減少值：減少總流量與排隊資料；繁忙目標可能等待更久。\n增加值：可排隊和傳送更多追蹤資料；頻寬與記憶體占用可能增加。"
+  ,"settings.pingforit.inventory.tracking_global_byte_multiplier.tooltip": "伺服器每輪最多可傳送多少追蹤資料。\n減少值：流量較小。\n增加值：可同時傳送更多追蹤資料。"
   ,"settings.pingforit.inventory.tracking_resync_min_periods": "重新同步冷卻（週期）"
-  ,"settings.pingforit.inventory.tracking_resync_min_periods.tooltip": "追蹤修復請求之間的最短間隔。\n減少值：允許更密集地修復，可能更早恢復；修復流量可能增加。\n增加值：減少重複請求和流量；恢復可能更慢。"
+  ,"settings.pingforit.inventory.tracking_resync_min_periods.tooltip": "追蹤出錯後，等待多久再嘗試恢復；0 取消這段等待。\n減少值：更快恢復。\n增加值：重試次數較少。"
   ,"settings.pingforit.inventory.tracking_heartbeat_periods": "心跳間隔（週期）"
-  ,"settings.pingforit.inventory.tracking_heartbeat_periods.tooltip": "正數表示追蹤週期校驗的間隔。\n減少值：校驗更頻繁，可能更早發現異常；校驗開銷可能增加。\n增加值：校驗更稀疏，可減少開銷；異常可能更晚發現。"
+  ,"settings.pingforit.inventory.tracking_heartbeat_periods.tooltip": "多久檢查一次追蹤內容是否同步；0 關閉這類檢查。\n減少值：更快發現內容不同步。\n增加值：檢查負擔較小。"
   ,"settings.pingforit.inventory.tracking_grace_periods": "位元組平滑視窗（週期）"
-  ,"settings.pingforit.inventory.tracking_grace_periods.tooltip": "全伺服器追蹤流量的平滑視窗。\n減少值：短時流量峰值更小；集中更新可能需要更久才能傳完。\n增加值：集中更新更容易在短時間內傳出；流量突發可能更大。"
+  ,"settings.pingforit.inventory.tracking_grace_periods.tooltip": "追蹤流量可以在多長時間內集中發送。\n減少值：每次集中發送的內容較少。\n增加值：允許在短時間內集中發送更多更新。"
   ,"settings.pingforit.spatial_selector.precise_capture_period_ticks": "精確選擇擷取週期：%s"
-  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks.tooltip": "「精確」分支作用時即時擷取候選目標的間隔；下次按住生效。\n減少值：更常更新候選目標；1 代表每 tick 擷取，可能增加擷取負擔。\n增加值：更新較少，候選目標變化可能較晚出現。"
+  ,"settings.pingforit.spatial_selector.precise_capture_period_ticks.tooltip": "精確模式多久尋找一次目標。\n減少值：更新更快；1 為每 tick 尋找。\n增加值：更新更慢。"
   ,"settings.pingforit.group.wheel_options": "輪盤選項"
   ,"unit.pingforit.kib": "%s KiB"
   ,"unit.pingforit.ticks": "%st"
@@ -442,57 +497,59 @@
   ,"pingforit.chat.content.item_count": "%s × %s"
   ,"pingforit.chat.content.quality": "%s（%s）"
   ,"settings.pingforit.presentation.field.minecraft_target_custom_name.name": "自訂名稱"
-  ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "所標記目標的自訂名稱。"
+  ,"settings.pingforit.presentation.field.minecraft_target_custom_name.description": "被標記目標的自訂名稱。"
   ,"presentation.pingforit.content.group.create": "Create 屬性..."
   ,"presentation.pingforit.content.group.stress": "應力..."
   ,"settings.pingforit.spatial_selector.trail_length": "軌跡長度：%s"
-  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "下次按住時保留的軌跡點數。\n減少值：保留較少點，軌跡可延伸的長度較短。\n增加值：保留較多點，移動足夠時可繪製更長的軌跡。"
+  ,"settings.pingforit.spatial_selector.trail_length.tooltip": "手勢軌跡最長能延伸多遠。\n減少值：軌跡較短。\n增加值：軌跡較長。"
   ,"settings.pingforit.spatial_selector.trail_opacity": "軌跡不透明度：%s"
-  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "僅控制下次按住時的軌跡可見度；輪盤、選項、導引線與連接線不變。\n減少值：軌跡更淡；0 會隱藏軌跡，不影響歷史紀錄或選擇。\n增加值：軌跡更不透明。"
+  ,"settings.pingforit.spatial_selector.trail_opacity.tooltip": "手勢軌跡的明顯程度。\n減少值：軌跡較淡；0 隱藏軌跡。\n增加值：軌跡更明顯。"
   ,"unit.pingforit.points": "%s 點"
   ,"value.pingforit.off": "已關閉"
   ,"settings.pingforit.double_click_danger_window_millis": "雙擊危險時間窗：%s"
-  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "連續「危險」操作中相鄰按下之間的時間；下次按下生效。第一次輕點不會延遲。\n減少值：必須更快重複按下。\n增加值：允許較慢重複按下；符合條件的重複操作會沿用第一個目標。"
+  ,"settings.pingforit.double_click_danger_window_millis.tooltip": "連續點擊形成危險標記時，兩次點擊之間允許的最長間隔。\n減少值：需要點得更快。\n增加值：允許點得更慢。"
   ,"settings.pingforit.double_click_danger_angle_degrees": "雙擊危險角度：%s"
-  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "連續「危險」操作中，自第一次按下起允許的滑鼠主動轉向角度；下次按下生效。0 會停用此手勢，相容模式會將其歸零。\n減少值：需更穩定瞄準；0 會關閉手勢。\n增加值：允許更多滑鼠轉向；符合條件的重複操作仍沿用第一個目標。"
+  ,"settings.pingforit.double_click_danger_angle_degrees.tooltip": "連續點擊危險標記時，滑鼠可以轉動多大角度；0 關閉此手勢。\n減少值：需要更穩定的瞄準。\n增加值：允許更大的轉動。"
   ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled": "保持物品欄選擇開啟"
-  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "物品欄清單與物品選單中放開按鍵的行為；下次按住生效。\n關閉：放開時依一般規則送出或關閉。\n開啟：首次放開保持開啟，之後輕點送出；按住會取消選擇，不會移除標記。"
-  ,"settings.pingforit.ping_volume.tooltip": "本機標記提示音的音量。\n減少值：提示音較小；0 為靜音。\n增加值：提示音較大；其他玩家的音量不變。"
-  ,"settings.pingforit.ping_distance.tooltip": "下次按住時，本機原生與「精確」模式的目標擷取範圍；原生射線另有上限。選用的遠距射線維持各自的範圍。\n減少值：選擇較近的目標。\n增加值：允許較遠的候選目標；伺服器接受的範圍不變。"
-  ,"settings.pingforit.item_icon_visible.tooltip": "標記上的物品圖示顯示方式。\n關閉：使用一般標記圖示。\n開啟：有權取得的物品資料可用時，顯示物品圖示。"
-  ,"settings.pingforit.direction_indicator_visible.tooltip": "在螢幕邊緣指引畫面外的標記位置。\n關閉：隱藏方向指示器。\n開啟：顯示指向畫面外標記的指示器。"
-  ,"settings.pingforit.mark_transparent_blocks.tooltip": "下次按住時的方塊形狀選擇規則，並非通用的不透明度篩選。\n關閉：使用 Minecraft 的視覺形狀。\n開啟：使用外框形狀，也包含無碰撞但可選取的裝飾物。"
-  ,"settings.pingforit.mark_blacklisted_targets.tooltip": "下次按住時的實體目標選擇規則，與方塊顯示清單無關。\n關閉：略過黑名單中的實體。\n開啟：將這些實體納入候選；旁觀者仍會排除。"
-  ,"settings.pingforit.mark_fluids.tooltip": "下次按住時的流體目標選擇規則。\n關閉：選擇射線忽略流體。\n開啟：流體命中也可成為選取目標。"
-  ,"settings.pingforit.player_info_mode.tooltip": "標記發起者的資訊，而非目標玩家的資訊。\n按住：按住玩家清單按鍵時顯示名稱與頭像。永遠：持續顯示。\n精簡：將頭像放在距離旁。已停用：隱藏發起者資訊。"
-  ,"settings.pingforit.player_info_mode.disabled.tooltip": "隱藏標記發起者的名稱與頭像。\n目標名稱與距離仍會顯示。"
-  ,"settings.pingforit.player_info_mode.always.tooltip": "持續顯示標記發起者的名稱與頭像。\n在標記下方使用額外標籤。"
-  ,"settings.pingforit.player_info_mode.compact.tooltip": "將發起者頭像顯示在距離旁，不另設名稱標籤。"
-  ,"settings.pingforit.team_color_mode.tooltip": "詳細發起者標籤的隊伍格式，不會改變標記顏色。\n「完整」與「僅標籤」保留隊伍格式；「已停用」與「僅標記」移除隊伍格式。\n標記顏色依標記類型決定；目標名稱與距離文字維持白色。"
-  ,"settings.pingforit.team_color_mode.full.tooltip": "「完整」與「僅標籤」效果相同：保留詳細發起者標籤的隊伍格式。\n標記顏色仍依標記類型決定；目標名稱與距離文字維持白色。"
-  ,"settings.pingforit.team_color_mode.disabled.tooltip": "「已停用」與「僅標記」效果相同：移除詳細發起者標籤的隊伍格式。\n標記顏色仍依標記類型決定；目標名稱與距離文字維持白色。"
-  ,"settings.pingforit.team_color_mode.ping_only.tooltip": "「僅標記」與「已停用」效果相同：移除詳細發起者標籤的隊伍格式。\n不會替標記重新上色，顏色仍依標記類型決定；目標名稱與距離文字維持白色。"
-  ,"settings.pingforit.team_color_mode.labels_only.tooltip": "「僅標籤」與「完整」效果相同：保留詳細發起者標籤的隊伍格式。\n標記顏色仍依標記類型決定；目標名稱與距離文字維持白色。"
-  ,"settings.pingforit.ping_size.tooltip": "本機標記與方向指示器的大小。\n減少值：圖示較小，遮住的畫面較少。\n增加值：圖示較大、更醒目，但遮住的畫面較多。"
-  ,"settings.pingforit.wheel_opacity.tooltip": "下次按住時的選擇器底層不透明度；標籤另有設定。\n減少值：可看見更多世界畫面；0 會隱藏底層。\n增加值：底層更不透明。"
-  ,"settings.pingforit.wheel_target_opacity.tooltip": "選擇器文字框與標籤的不透明度；下次按住生效。\n減少值：框與文字更淡；0 會使其不可見。\n增加值：框與文字更清楚；底層不變。"
-  ,"settings.pingforit.wheel_font_size.tooltip": "下次按住時，選擇器選項標籤的文字大小。\n減少值：選項文字較小。\n增加值：選項文字較大，需要更多空間。"
-  ,"settings.pingforit.wheel_target_font_size.tooltip": "下次按住時，選擇器目標標籤的文字大小。\n減少值：目標文字較小。\n增加值：目標文字較大，需要更多空間。"
-  ,"settings.pingforit.reset_all.tooltip": "確認後重設所有用戶端偏好，包含記住的頻道。\n不會重設伺服器設定；會捨棄尚未傳送的一般伺服器設定草稿。\n受保護的檔案可能無法寫入。"
-  ,"settings.pingforit.wheel_hold_millis.tooltip": "一般開啟選擇器所需的長按時間；下次按下生效。調低時也可能縮短相容時間片。\n減少值：更早開啟，開啟前可輕點放開的時間較短。\n增加值：需等更久才開啟；選用的手勢捷徑仍獨立運作。"
-  ,"settings.pingforit.cancel_half_cone_angle_degrees.tooltip": "選取最近自身標記以移除時的瞄準錐；伺服器仍會檢查擁有權與標記是否有效。\n減少值：需更精準瞄準。\n增加值：納入偏離按下時方向更遠的標記；仍優先選取距離最近者。"
-  ,"settings.pingforit.configuration_notice_size.tooltip": "本機目標選擇開關的提示大小。\n減少值：提示較小；0 會隱藏提示，不會停用開關功能。\n增加值：提示較大，遮住的畫面較多。"
-  ,"settings.pingforit.scope.client.tooltip": "編輯此用戶端的偏好；伺服器的決定權不變。"
-  ,"settings.pingforit.scope.server.tooltip": "檢視伺服器設定；編輯需要權限等級 3。一般變更在最後關閉時傳送；呈現規則透過獨立管道立即傳送。"
-  ,"settings.pingforit.navigation.back.tooltip": "返回此範圍的設定總覽，不會傳送一般伺服器設定草稿。"
-  ,"settings.pingforit.navigation.done.tooltip": "儲存用戶端設定，再傳送有效的一般伺服器設定變更並關閉。伺服器不會回覆是否已套用。"
-  ,"settings.pingforit.presentation.server.tooltip": "所選目標類型的伺服器欄位規則；每次編輯都獨立傳送，不會等到關閉設定。\n符合的允許規則優先於阻擋規則；欄位權限與資料可用性仍然適用。\n編輯需要權限等級 3；子欄位限制只能在檔案中設定。"
-  ,"settings.pingforit.presentation.target_type.tooltip": "選擇要檢視及編輯規則的目標類型。\n切換類型不會修改規則，也不會捨棄其他清單中已輸入的文字。"
-  ,"settings.pingforit.presentation.selector.tooltip": "輸入欄位 ID 選擇器，例如 minecraft:entity.health 或 create:kinetic.*。\n* 僅在命名空間或路徑部分內比對，不會跨越 ':'；轉接器 ID 不會選取其欄位。\n輸入文字不會套用規則，請按「新增」。"
-  ,"settings.pingforit.presentation.add.tooltip": "立即將此選擇器傳送至所選類型的目前清單。\n新增成功只會清除此清單自傳送後未再變動的輸入文字；發生錯誤時會保留文字。"
-  ,"settings.pingforit.presentation.remove.tooltip": "立即請求從此清單移除此選擇器。\n其他符合的選擇器、僅白名單模式與預設值仍然適用。"
-  ,"settings.pingforit.presentation.refresh.tooltip": "請求最新的伺服器規則檢視，不會修改規則。\n保留輸入文字與最後已知的檢視；請求逾時後可重試。"
-  ,"settings.pingforit.presentation.advanced.tooltip": "顯示或隱藏此目標類型的選擇器清單與僅白名單模式。\n只改變編輯器畫面，不會修改伺服器規則。"
+  ,"settings.pingforit.spatial_selector.inventory_selection_stay_open_enabled.tooltip": "物品欄清單與物品選單的放開行為。\n關閉：放開時照常送出或關閉。\n開啟：第一次放開保持開啟；之後點按送出，按住取消選擇。"
+  ,"settings.pingforit.ping_volume.tooltip": "標記提示音音量。\n減少值：音量較低；0 為靜音。\n增加值：音量較高。"
+  ,"settings.pingforit.ping_distance.tooltip": "能標記的目標最遠距離。\n減少值：選擇較近的目標。\n增加值：能標記更遠的目標。"
+  ,"settings.pingforit.item_icon_visible.tooltip": "標記上的物品圖示。\n關閉：使用一般標記圖示。\n開啟：有物品圖示時顯示該物品的圖示。"
+  ,"settings.pingforit.direction_indicator_visible.tooltip": "畫面外標記的方向指示。\n關閉：隱藏方向指示。\n開啟：指向畫面外的標記。"
+  ,"settings.pingforit.mark_transparent_blocks.tooltip": "依外框形狀選擇方塊。\n關閉：使用 Minecraft 中看到的形狀。\n開啟：使用外框形狀，可選中裝飾物。"
+  ,"settings.pingforit.mark_blacklisted_targets.tooltip": "黑名單實體是否可被選擇。\n關閉：略過黑名單實體。\n開啟：可選擇它們。"
+  ,"settings.pingforit.mark_fluids.tooltip": "流體是否可被選擇。\n關閉：忽略流體。\n開啟：可選擇流體。"
+  ,"settings.pingforit.player_info_mode.tooltip": "標記發送者的資訊。"
+  ,"settings.pingforit.player_info_mode.disabled.tooltip": "隱藏作者資訊；保留目標名稱與距離。"
+  ,"settings.pingforit.player_info_mode.always.tooltip": "持續顯示作者名字與頭像。\n使用標記下方的獨立標籤。"
+  ,"settings.pingforit.player_info_mode.compact.tooltip": "在距離旁顯示作者頭像。"
+  ,"settings.pingforit.team_color_mode.tooltip": "作者標籤的隊伍格式。"
+  ,"settings.pingforit.team_color_mode.full.tooltip": "作者標籤使用隊伍格式；標記顏色仍依標記類型。"
+  ,"settings.pingforit.team_color_mode.disabled.tooltip": "作者標籤使用一般格式；標記顏色仍依標記類型。"
+  ,"settings.pingforit.team_color_mode.ping_only.tooltip": "作者標籤使用一般格式；標記顏色仍依標記類型。"
+  ,"settings.pingforit.team_color_mode.labels_only.tooltip": "作者標籤使用隊伍格式；標記顏色仍依標記類型。"
+  ,"settings.pingforit.ping_size.tooltip": "標記與方向指示器的大小。\n減少值：占用視野較小。\n增加值：更醒目。"
+  ,"settings.pingforit.wheel_opacity.tooltip": "輪盤背景的不透明度。\n減少值：露出更多世界畫面；0 隱藏背景。\n增加值：背景更不透明。"
+  ,"settings.pingforit.wheel_target_opacity.tooltip": "選項框與標籤的不透明度。\n減少值：選項框與文字較淡；0 隱藏。\n增加值：選項框與文字更清晰。"
+  ,"settings.pingforit.wheel_font_size.tooltip": "輪盤選項的文字大小。\n減少值：選項文字較小。\n增加值：選項文字較大。"
+  ,"settings.pingforit.wheel_target_font_size.tooltip": "目標名稱的文字大小。\n減少值：目標文字較小。\n增加值：目標文字較大。"
+  ,"settings.pingforit.reset_all.tooltip": "%1$s用戶端的%2$s設定項"
+  ,"settings.pingforit.reset_all.tooltip.reset": "重設"
+  ,"settings.pingforit.reset_all.tooltip.all": "全部"
+  ,"settings.pingforit.wheel_hold_millis.tooltip": "按住多久後開啟選擇器。\n減少值：更快開啟。\n增加值：需要等待更久。"
+  ,"settings.pingforit.cancel_half_cone_angle_degrees.tooltip": "移除標記時，標記可以偏離瞄準方向多遠。\n減少值：需要更精確的瞄準。\n增加值：允許標記更偏離瞄準方向；仍選擇最近者。"
+  ,"settings.pingforit.configuration_notice_size.tooltip": "切換目標選擇時顯示的提示大小。\n減少值：提示較小；0 隱藏提示，開關仍可使用。\n增加值：提示較大。"
+  ,"settings.pingforit.scope.client.tooltip": "編輯此用戶端的設定。"
+  ,"settings.pingforit.scope.server.tooltip": "檢視伺服器設定；編輯需要權限等級 3。"
+  ,"settings.pingforit.navigation.back.tooltip": "返回此範圍的總覽。"
+  ,"settings.pingforit.navigation.done.tooltip": "儲存用戶端設定，傳送伺服器變更並關閉。"
+  ,"settings.pingforit.presentation.server.tooltip": "所選目標類型的欄位規則；編輯需要權限等級 3。"
+  ,"settings.pingforit.presentation.target_type.tooltip": "選擇要檢視和編輯規則的目標類型。"
+  ,"settings.pingforit.presentation.selector.tooltip": "欄位 ID 選擇器，例如 minecraft:entity.health 或 create:kinetic.*。\n* 只符合同一命名空間或路徑段內的內容，不能跨過 :。\n使用「新增」套用選擇器。"
+  ,"settings.pingforit.presentation.add.tooltip": "將輸入的選擇器加入目前清單。"
+  ,"settings.pingforit.presentation.remove.tooltip": "從目前清單移除此選擇器。"
+  ,"settings.pingforit.presentation.refresh.tooltip": "重新從伺服器讀取最新規則。"
+  ,"settings.pingforit.presentation.advanced.tooltip": "顯示或隱藏進階規則。"
   ,"unit.pingforit.multiplier": "%1$s 倍"
   ,"settings.pingforit.format.name_value": "%1$s：%2$s"
   ,"settings.pingforit.presentation.advanced.with_counts": "%1$s（%2$s）"
@@ -512,20 +569,20 @@
   ,"settings.pingforit.group.marker_cancellation": "移除標記"
   ,"settings.pingforit.group.content_selection": "內容與物品欄選擇"
   ,"settings.pingforit.group.sound_notices": "音效與提示"
-  ,"settings.pingforit.category.client.display.tooltip": "設定本機目標擷取範圍、標記顯示時間、圖示、大小與發起者資訊，不會改變伺服器的範圍或存續時間。"
-  ,"settings.pingforit.category.client.selection.tooltip": "選擇擷取時是否包含方塊外框形狀、黑名單實體與流體。下次按住生效，不會修改方塊顯示清單。"
-  ,"settings.pingforit.category.client.wheel_appearance.tooltip": "調整下次按住時的輪盤與物品欄配置、文字、不透明度、軌跡及動畫。外觀設定不會取代手勢門檻。"
-  ,"settings.pingforit.category.client.input.tooltip": "調整開啟方式、相容性、連續危險操作、移除標記的瞄準範圍、導覽手勢及內容選擇。相容模式會清除衝突的手勢設定。"
-  ,"settings.pingforit.category.client.channel_notices.tooltip": "為此伺服器選擇頻道，並調整本機標記音量與開關提示大小。頻道留空時使用伺服器規則。"
-  ,"settings.pingforit.category.client.geometry_config.tooltip": "選擇方塊實體的外框來源，或儲存、關閉並開啟完整的用戶端設定檔。外部檔案編輯需重新啟動用戶端才會生效。"
-  ,"settings.pingforit.category.client.performance.tooltip": "設定作用中的「精確」分支擷取即時候選目標的頻率。間隔較短可更快更新，但可能增加擷取負擔；下次按住生效。"
-  ,"settings.pingforit.category.client.debug.tooltip": "調整此用戶端的日誌詳細程度，以及 Debug 下的效能監視器 HUD 與指標。變更立即生效，不影響伺服器日誌或收集。"
-  ,"settings.pingforit.category.server.channel_players.tooltip": "設定伺服器如何處理空白頻道與新請求中的玩家目標。一般編輯會保留為草稿，直到最後關閉設定才傳送。"
-  ,"settings.pingforit.category.server.send_rate.tooltip": "設定每位玩家可連續建立標記的額度與恢復間隔。頻率限制為零會停用頻率檢查，而非停用標記功能。"
-  ,"settings.pingforit.category.server.marker_duration.tooltip": "設定新標記建立時固定的伺服器存續時間。既有到期時間與獨立的用戶端顯示偏好不變。"
-  ,"settings.pingforit.category.server.performance.tooltip": "管理管理員延遲通知，以及物品欄的共用、預覽與追蹤預算。在資源使用、處理進度、傳送等待與物品細節之間取得平衡。"
-  ,"settings.pingforit.category.server.server_presentation.tooltip": "依目標類型檢視及編輯此連線目錄中的欄位規則。編輯透過獨立伺服器管道立即傳送，且需要權限等級 3。"
-  ,"settings.pingforit.category.server.debug.tooltip": "調整伺服器日誌詳細程度，以及 Debug 下的預覽與追蹤收集開關。變更會保留在伺服器設定草稿中，直到最後關閉設定；唯讀檢視會顯示目前的值。"
+  ,"settings.pingforit.category.client.display.tooltip": "設定標記的外觀與可標記距離。"
+  ,"settings.pingforit.category.client.selection.tooltip": "用於選擇可被標記的目標。"
+  ,"settings.pingforit.category.client.wheel_appearance.tooltip": "用於調整輪盤配置與外觀。"
+  ,"settings.pingforit.category.client.input.tooltip": "用於設定操作與手勢。"
+  ,"settings.pingforit.category.client.channel_notices.tooltip": "用於設定頻道與本機提示。"
+  ,"settings.pingforit.category.client.geometry_config.tooltip": "設定方塊外框的顯示方式，並開啟用戶端設定檔。"
+  ,"settings.pingforit.category.client.performance.tooltip": "設定精確模式尋找目標的頻率。"
+  ,"settings.pingforit.category.client.debug.tooltip": "用於偵錯此用戶端的設定項。"
+  ,"settings.pingforit.category.server.channel_players.tooltip": "用於設定伺服器頻道與玩家行為。"
+  ,"settings.pingforit.category.server.send_rate.tooltip": "用於設定伺服器標記傳送速率。"
+  ,"settings.pingforit.category.server.marker_duration.tooltip": "用於設定伺服器標記存續時間。"
+  ,"settings.pingforit.category.server.performance.tooltip": "調整伺服器效能監控與物品欄處理。"
+  ,"settings.pingforit.category.server.server_presentation.tooltip": "用於設定各目標類型的欄位規則。"
+  ,"settings.pingforit.category.server.debug.tooltip": "用於偵錯模組的設定項。"
   ,"settings.pingforit.wheel_hold_millis": "輪盤長按時間：%s"
   ,"settings.pingforit.cancel_half_cone_angle_degrees": "移除標記錐形半角：%s"
   ,"unit.pingforit.degrees": "%s°"
@@ -631,13 +688,13 @@
 	"monitor.pingforit.tooltip.sync": "同步計數只描述一般 inventory-v2 流量，不代表全部連線流量或 CREATED 建立回執。",
 	"settings.pingforit.group.monitor": "效能監視器",
 	"settings.pingforit.monitor.hud_enabled": "監視器 HUD",
-	"settings.pingforit.monitor.hud_enabled.tooltip": "當此用戶端日誌設定為 Debug 時顯示本機效能監視器疊加層。\n關閉後保留所有指標選擇；重新開啟時無需再次選擇。\n變更立即生效，且絕不啟用或停用伺服器收集。",
+	"settings.pingforit.monitor.hud_enabled.tooltip": "在畫面上顯示效能資訊。\n關閉：隱藏；保留指標選擇。\n開啟：顯示所選指標。",
 	"settings.pingforit.monitor.preview_enabled": "預覽監視",
-	"settings.pingforit.monitor.preview_enabled.tooltip": "當伺服器日誌設定為 Debug 時，在伺服器上收集有界的預覽效能指標。\n開關會保留在伺服器設定草稿中，直到最終關閉；伺服器接受更新前不會開始收集。\n預覽與追蹤獨立收集。",
+	"settings.pingforit.monitor.preview_enabled.tooltip": "伺服器物品欄預覽的效能資訊。\n關閉：不記錄。\n開啟：記錄。",
 	"settings.pingforit.monitor.tracking_enabled": "追蹤監視",
-	"settings.pingforit.monitor.tracking_enabled.tooltip": "當伺服器日誌設定為 Debug 時，在伺服器上收集有界的追蹤效能指標。\n開關會保留在伺服器設定草稿中，直到最終關閉；伺服器接受更新前不會開始收集。\n預覽與追蹤獨立收集。",
+	"settings.pingforit.monitor.tracking_enabled.tooltip": "伺服器物品欄追蹤的效能資訊。\n關閉：不記錄。\n開啟：記錄。",
 	"settings.pingforit.monitor.metric": "監視指標",
-	"settings.pingforit.monitor.metric.tooltip": "選擇指標只控制本機顯示和送出的需求，絕不啟用或停用伺服器收集；HUD 關閉時目前選擇仍會保留。",
+	"settings.pingforit.monitor.metric.tooltip": "選擇監視器顯示的內容。\n監視器關閉時保留選擇。",
 	"settings.pingforit.monitor.group.summary": "摘要",
 	"settings.pingforit.monitor.group.server_preview": "伺服器預覽",
 	"settings.pingforit.monitor.group.server_tracking": "伺服器追蹤",
@@ -742,5 +799,10 @@
 	"monitor.pingforit.hud.format.stat": "%1$s%2$s",
 	"monitor.pingforit.hud.format.memory": "%1$s%2$s %3$s",
 	"monitor.pingforit.hud.format.field_separator": "; ",
-	"monitor.pingforit.hud.format.detail_separator": " "
+	"monitor.pingforit.hud.format.detail_separator": " ",
+	"settings.pingforit.cooldown_feedback": "冷卻提示",
+	"settings.pingforit.cooldown_feedback.tooltip": "冷卻中的標記提示要顯示在哪裡。\n動作列：快捷列上方。\n聊天欄：聊天欄中。\n隱藏：不顯示。",
+	"value.pingforit.actionbar": "動作列",
+	"value.pingforit.chat": "聊天欄",
+	"pingforit.chat.create_cooldown": "標記仍在冷卻中..."
 }

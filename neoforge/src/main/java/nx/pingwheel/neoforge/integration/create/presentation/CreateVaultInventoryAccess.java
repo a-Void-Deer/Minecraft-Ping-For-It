@@ -19,6 +19,9 @@ import nx.pingwheel.common.platform.IPlatformInventoryService;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotSchemas;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimitException;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimits;
+import nx.pingwheel.common.presentation.inventory.minecraft.ProviderLimitSite;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import nx.pingwheel.common.presentation.inventory.InventorySharedRead;
 import nx.pingwheel.common.diagnostics.Diagnostics;
@@ -115,10 +118,10 @@ public final class CreateVaultInventoryAccess {
 	/** Declaration evidence only: no backing field read or resident list audit. */
 	private static boolean certifiedLocal(IItemHandler handler) {
 		IItemHandler local = handler instanceof GatedHandler gated ? gated.delegate() : handler;
-		return local instanceof ItemStackHandler && localOwnership.get(local.getClass());
+		return local instanceof ItemStackHandler && ownsLocal(local.getClass());
 	}
 	static boolean nativeLocal(IItemHandler handler, nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess raw) {
-		return handler instanceof ItemStackHandler local && localOwnership.get(handler.getClass())
+		return handler instanceof ItemStackHandler local && ownsLocal(handler.getClass())
 			&& IPlatformInventoryService.ResidentReads.nativeStacks(LocalStacks.read(local), raw);
 	}
 	/** Fixed native declaration only. Never retains a handler, backing value or successful audit. */
@@ -148,24 +151,37 @@ public final class CreateVaultInventoryAccess {
 		}
 	}
 	/** Only declaration ownership is class-stable. Backing storage, scope and current local handler are always rechecked. */
-	private static final ClassValue<Boolean> localOwnership = new ClassValue<>() {
-		@Override protected Boolean computeValue(Class<?> type) {
-			return inherits(type, "getSlots") && inherits(type, "getStackInSlot", int.class) && inherits(type, "validateSlotIndex", int.class);
+	private static boolean ownsLocal(Class<?> type) {
+		if (type.getName().length() > IPlatformInventoryService.ResidentReads.MAX_TYPE_NAME_CHARS) {
+			InventoryProviderLimits.report(ProviderLimitSite.REFLECTION_TYPE_NAME, type.getName().length(), IPlatformInventoryService.ResidentReads.MAX_TYPE_NAME_CHARS);
+			return false;
 		}
-		private boolean inherits(Class<?> type, String name, Class<?>... parameters) {
+		int ownership = localOwnership.get(type);
+		if (ownership < 0) InventoryProviderLimits.report(ProviderLimitSite.VAULT_OWNERSHIP_DEPTH, 33, 32);
+		return ownership > 0;
+	}
+	private static final ClassValue<Integer> localOwnership = new ClassValue<>() {
+		@Override protected Integer computeValue(Class<?> type) {
+			int slots = inherits(type, "getSlots");
+			if (slots != 1) return slots;
+			int stack = inherits(type, "getStackInSlot", int.class);
+			return stack == 1 ? inherits(type, "validateSlotIndex", int.class) : stack;
+		}
+		private int inherits(Class<?> type, String name, Class<?> @org.jetbrains.annotations.Unmodifiable ... parameters) {
 			@org.jetbrains.annotations.Nullable Class<?> current = type;
 			for (int depth = 0; current != null && depth < 32; depth++, current = current.getSuperclass()) {
-				if (!IPlatformInventoryService.ResidentReads.reflectionShape(current, name, parameters)) return false;
-				try { return current.getDeclaredMethod(name, parameters).getDeclaringClass() == ItemStackHandler.class; }
+				if (!IPlatformInventoryService.ResidentReads.reflectionShape(current, name, parameters)) return 0;
+				try { return current.getDeclaredMethod(name, parameters).getDeclaringClass() == ItemStackHandler.class ? 1 : 0; }
 				catch (NoSuchMethodException absent) { /* bounded parent walk */ }
-				catch (SecurityException unavailable) { return false; }
+				catch (SecurityException unavailable) { return 0; }
 			}
-			return false;
+			return current == null ? 0 : -1;
 		}
 	};
 	static Optional<IPlatformInventoryService.Access> find(World world, BlockPos original, Direction face) {
 		if (face == null) return Optional.empty();
 		try { return Optional.of(new Segmented(world, original, layout(world, original))); }
+		catch (InventoryProviderLimitException limit) { throw limit; }
 		catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
 			failure("inventory-vault-find", world, original, () -> "face=" + face, unavailable);
 			return Optional.empty();
@@ -173,7 +189,7 @@ public final class CreateVaultInventoryAccess {
 	}
 	private static void failure(String operation, @org.jetbrains.annotations.Nullable World world, BlockPos original, java.util.function.Supplier<String> detail, Throwable failure) {
 		@org.jetbrains.annotations.Nullable Throwable reason = failure instanceof java.lang.reflect.InvocationTargetException ? failure.getCause() : failure;
-		if (reason instanceof InventorySourceUnavailableException) return;
+		if (reason instanceof InventorySourceUnavailableException || reason instanceof InventoryProviderLimitException) return;
 		CreatePresentationDiagnostics.failure(Diagnostics.server(), operation,
 			"vault-inventory-source-unavailable", () -> "provider=create:item_vault position=" + original + " worldClass="
 				+ (world == null ? "none" : world.getClass().getName()) + " " + detail.get(), failure);
@@ -254,8 +270,10 @@ public final class CreateVaultInventoryAccess {
 		if (!master.isController() || !controller.equals(master.controller()) || !"create:item_vault".equals(master.blockId())) throw new InventorySourceUnavailableException("Vault controller relation");
 		int width = master.width(), length = master.length();
 		Direction.@Nullable Axis axis = master.axis();
-		if (width < 1 || width > 3 || length < 1 || length > 3 * width || (axis != Direction.Axis.X && axis != Direction.Axis.Z))
+		if (width < 1 || length < 1 || (axis != Direction.Axis.X && axis != Direction.Axis.Z))
 			throw new InventorySourceUnavailableException("Vault bounded topology");
+		if (width > 3) throw InventoryProviderLimits.exceeded(ProviderLimitSite.VAULT_WIDTH, width, 3);
+		if (length > 3 * width) throw InventoryProviderLimits.exceeded(ProviderLimitSite.VAULT_LENGTH, length, 3L * width);
 		List<BlockPos> members = new ArrayList<>(width * width * length);
 		for (int x = 0; x < (axis == Direction.Axis.X ? length : width); x++) for (int y = 0; y < width; y++)
 			for (int z = 0; z < (axis == Direction.Axis.Z ? length : width); z++) {
@@ -272,7 +290,11 @@ public final class CreateVaultInventoryAccess {
 			IItemHandler local = world.loaded(pos).local();
 			certified &= certifiedLocal(local);
 			int count = local.getSlots();
-			if (count < 0 || count > 4096 - slots) throw new IllegalStateException("Vault finite slots");
+			if (count < 0) throw new IllegalStateException("negative Vault local slots");
+			if (count > nx.pingwheel.common.presentation.inventory.InventorySourceAccess.MAX_SLOTS - slots) {
+				throw InventoryProviderLimits.exceeded(ProviderLimitSite.VAULT_SLOTS,
+					slots + (long) count, nx.pingwheel.common.presentation.inventory.InventorySourceAccess.MAX_SLOTS);
+			}
 			slots += count;
 			counts.add(count);
 		}
@@ -438,7 +460,7 @@ public final class CreateVaultInventoryAccess {
 				if (currentAuthority != null && (!world.currentRoute() || !certifiedLocal(live))) throw new InventorySourceUnavailableException("Vault shared local declaration changed");
 				boolean audited = member.auditedLocal(live); // classify before getter; unknown getters remain LIVE/EXTERNAL_TRUST
 				IItemHandler backing = live instanceof GatedHandler gated ? gated.delegate() : live;
-				if (!audited && backing instanceof ItemStackHandler && localOwnership.get(backing.getClass()))
+				if (!audited && backing instanceof ItemStackHandler && ownsLocal(backing.getClass()))
 					throw new InventorySourceUnavailableException("Vault native local backing changed");
 				if (live.getSlots() != count) throw new InventorySourceUnavailableException("Vault local mapping changed");
 				requireMembersHeld(); // the final local metadata callback cannot authorize a now-revoked sibling

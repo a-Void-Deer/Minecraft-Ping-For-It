@@ -41,7 +41,7 @@ class InventoryNativeFluidBoundaryTest {
 		final boolean bypassCatalog;
 		InventorySourceInput input = INPUT;
 		@Nullable InventoryRuntime runtime;
-		boolean starveFinal, finalDenied, finalThrows, repeatIdentity;
+		boolean starveFinal, finalDenied, finalThrows, repeatIdentity, largeIdentity, genericFinalDefer;
 		int reads, closes, finalChecks;
 		Source(int slots, IntFunction<String> ids, boolean aggregate, boolean bypassCatalog) {
 			this.slots = slots; this.ids = ids; this.aggregate = aggregate; this.bypassCatalog = bypassCatalog;
@@ -49,6 +49,7 @@ class InventoryNativeFluidBoundaryTest {
 		@Override public SourceKey key() { return new SourceKey("test", "fluid", "boundary", input.viewKey()); }
 		@Override public boolean valid() { throw new AssertionError("current checks require the caller's actual grant"); }
 		@Override public boolean valid(InventoryValidationBudget.Allowance allowance) {
+			if (reads == slots && genericFinalDefer && finalChecks++ == 0) throw InventoryValidationBudget.itemResolutionDeferred();
 			if (reads == slots && starveFinal) {
 				finalChecks++;
 				try (var admission = allowance.fluidGrants().open(allowance, InventoryValidationBudget.NONE, LOCK_CHECK);
@@ -65,6 +66,8 @@ class InventoryNativeFluidBoundaryTest {
 		@Override public InventorySourceAccess.ReadMode readMode() { return InventorySourceAccess.ReadMode.NATIVE_INCREMENTAL; }
 		@Override public long nativeResourceRetainedBytes() { return bypassCatalog ? 0 : catalog.modeledRetainedBytes(); }
 		@Override public long nativeCatalogGrowthUpperBound() { return InventoryFluidCodec.Catalog.retainedGrowthUpperBound(); }
+		@Override public long nativeCatalogGrowthUpperBound(int attempts) { return InventoryFluidCodec.Catalog.retainedGrowthUpperBound(attempts); }
+		@Override public int nativeCatalogEntriesUpperBound(int attempts) { return catalog.entriesUpperBound(Math.max(1, attempts)); }
 		@Override public boolean certifiedResourceSharing() { return false; }
 		@Override public InventoryReprojectionSummary reprojectionSummary(int cap) { return InventoryReprojectionSummary.EMPTY; }
 		@Override public InventoryDomainCodec.@Nullable Item read(int slot) { throw new AssertionError("fluid must not use item getters"); }
@@ -72,11 +75,15 @@ class InventoryNativeFluidBoundaryTest {
 			InventoryValidationBudget.Allowance allowance) {
 			assertEquals(reads, slot, "a paid cursor must not restart"); reads++;
 			String id = ids.apply(slot);
+			int variant = repeatIdentity ? 0 : slot / 2;
 			var display = new InventoryFluidValue.Display(id, "fluid", null);
+			byte[] canonical = largeIdentity ? new byte[65536]
+				: new byte[] {10, 3, 0, 1, 'v', 0, 0, (byte) (variant >>> 8), (byte) variant, 0};
+			if (largeIdentity) { canonical[0] = (byte) (slot >>> 8); canonical[1] = (byte) slot; }
 			try {
 				return bypassCatalog ? new InventoryFluidValue(new InventoryScanner.Key(InventoryResourceKind.FLUID, id, "exact"), slot + 1L, display, false)
 					: catalog.intern(id, slot + 1L, aggregate ? InventoryFluidCodec.Identity.refused()
-						: InventoryFluidCodec.Identity.exact(new byte[] {10, 3, 0, 1, 'v', 0, 0, 0, (byte) (repeatIdentity ? 0 : slot / 2), 0}), display,
+						: InventoryFluidCodec.Identity.exact(canonical), display,
 						java.util.Objects.requireNonNull(admission));
 			} finally {
 				if (starveFinal && reads == slots) {
@@ -114,9 +121,43 @@ class InventoryNativeFluidBoundaryTest {
 		}
 		throw new AssertionError("native source did not reach a terminal observation");
 	}
-	@Test void twoFluidIdsWith129EncodingsReachTheCompleteDefinitionGuardWithoutEscapingTheTick() {
+	@Test void payloadGuardBeforeSixteenDefinitionsRetainsItsReasonThroughConsumerReplay() {
 		var settings = InventorySettings.serverDefaults();
-		var source = new Source(257, slot -> (slot & 1) == 0 ? "minecraft:water" : "minecraft:lava", false, false);
+		var source = new Source(17, slot -> "minecraft:water", false, false); source.largeIdentity = true;
+		try (var runtime = runtime(source, settings)) {
+			runtime.advance(0, settings);
+			var consumer = runtime.attach(INPUT, new InventoryRuntime.PreviewSubject(INPUT.readOwner())).orElseThrow();
+			var values = new ArrayList<@Nullable InventoryResourceValue>();
+			var terminal = finish(runtime, consumer, settings, values);
+			assertEquals(CaptureResult.Completeness.INCOMPLETE, terminal.result().completeness());
+			assertEquals(15, values.size()); assertEquals(16, source.reads);
+			assertEquals(InventoryFailureReason.CATALOG_BYTES_LIMIT, consumer.currentReason());
+			runtime.advance(101, settings);
+			assertEquals(CaptureResult.Completeness.INCOMPLETE, runtime.step(consumer).orElseThrow().result().completeness());
+			assertEquals(InventoryFailureReason.CATALOG_BYTES_LIMIT, consumer.currentReason()); assertEquals(16, source.reads);
+			assertSettled(runtime);
+		}
+	}
+	@Test void genericBudgetDeferralAtFinalCheckRetainsPaidPrefixInsteadOfBecomingProviderFailure() {
+		var settings = InventorySettings.serverDefaults();
+		var source = new Source(1, slot -> "minecraft:water", false, false); source.genericFinalDefer = true;
+		try (var runtime = runtime(source, settings)) {
+			runtime.advance(0, settings); var consumer = runtime.attach(INPUT, new InventoryRuntime.PreviewSubject(INPUT.readOwner())).orElseThrow();
+			var prefix = runtime.step(consumer).orElseThrow();
+			assertEquals(CaptureResult.Availability.READABLE, prefix.result().availability());
+			assertEquals(CaptureResult.Completeness.CONTINUE, prefix.result().completeness()); assertEquals(1, prefix.slots().size());
+			assertNotEquals(InventoryFailureReason.PROVIDER_FAILURE, consumer.currentReason());
+			runtime.advance(1, settings);
+			assertEquals(source.evidenceValidationCost().workUnits(), runtime.stepBudget(consumer, 1).itemWork(),
+				"pending final validation reserves no getter, journal batch or empty replay work");
+			var terminal = runtime.step(consumer).orElseThrow();
+			assertEquals(CaptureResult.Completeness.COMPLETE, terminal.result().completeness());
+			assertEquals(1, source.reads); assertTrue(terminal.slots().isEmpty()); assertSettled(runtime);
+		}
+	}
+	@Test void twoFluidIdsWith513EncodingsReachTheCompleteDefinitionGuardWithoutEscapingTheTick() {
+		var settings = InventorySettings.serverDefaults();
+		var source = new Source(1025, slot -> (slot & 1) == 0 ? "minecraft:water" : "minecraft:lava", false, false);
 		var runtime = runtime(source, settings);
 		try (runtime) {
 			runtime.advance(0, settings);
@@ -124,9 +165,10 @@ class InventoryNativeFluidBoundaryTest {
 			var values = new ArrayList<@Nullable InventoryResourceValue>(); var terminal = finish(runtime, consumer, settings, values);
 			assertEquals(CaptureResult.Availability.READABLE, terminal.result().availability());
 			assertEquals(CaptureResult.Completeness.INCOMPLETE, terminal.result().completeness());
-			assertEquals(256, values.size()); assertEquals(257, source.reads);
-			assertEquals(256, terminal.result().coverage().scanned()); assertEquals(257, terminal.result().coverage().expected().orElseThrow());
-			for (int index = 0; index < 256; index++) assertEquals(index + 1L, java.util.Objects.requireNonNull(values.get(index)).amount());
+			assertEquals(InventoryFailureReason.VARIANT_LIMIT, consumer.currentReason());
+			assertEquals(1024, values.size()); assertEquals(1025, source.reads);
+			assertEquals(1024, terminal.result().coverage().scanned()); assertEquals(1025, terminal.result().coverage().expected().orElseThrow());
+			for (int index = 0; index < 1024; index++) assertEquals(index + 1L, java.util.Objects.requireNonNull(values.get(index)).amount());
 			assertThrows(IllegalStateException.class, consumer::retainCompleted);
 			assertSettled(runtime); assertTrue(runtime.memory().retained() > 0);
 		}
@@ -158,7 +200,7 @@ class InventoryNativeFluidBoundaryTest {
 	@Test void aggregateOnlyAndExtensionJournalExhaustionKeepTheValidatedPrefixAndOtherWorkServiceable() {
 		for (boolean bypass : new boolean[] {false, true}) {
 			var settings = InventorySettings.serverDefaults();
-			var source = new Source(257, slot -> "test:fluid_" + slot, true, bypass);
+			var source = new Source(1025, slot -> "test:fluid_" + slot, true, bypass);
 			var itemReads = new java.util.concurrent.atomic.AtomicInteger();
 			var runtime = new InventoryRuntime(input -> Optional.of(input.resourceKind() == InventoryResourceKind.FLUID ? source
 				: new InventoryRuntimeTest.Source(input, itemReads, 1)), settings.pendingMemoryBytes());
@@ -167,10 +209,10 @@ class InventoryNativeFluidBoundaryTest {
 				var consumer = runtime.attach(INPUT, new InventoryRuntime.TrackingSubject(TargetKey.from(INPUT.target()))).orElseThrow();
 				var values = new ArrayList<@Nullable InventoryResourceValue>(); var terminal = finish(runtime, consumer, settings, values);
 				assertEquals(CaptureResult.Completeness.INCOMPLETE, terminal.result().completeness());
-				assertEquals(256, terminal.result().coverage().scanned()); assertEquals(256, values.size()); assertEquals(257, source.reads);
+				assertEquals(1024, terminal.result().coverage().scanned()); assertEquals(1024, values.size()); assertEquals(1025, source.reads);
 				assertThrows(IllegalStateException.class, consumer::retainCompleted);
 				long paid = physical(runtime).used(InventorySourceAccess.PHYSICAL);
-				runtime.step(consumer); assertEquals(paid, physical(runtime).used(InventorySourceAccess.PHYSICAL)); assertEquals(257, source.reads);
+				runtime.step(consumer); assertEquals(paid, physical(runtime).used(InventorySourceAccess.PHYSICAL)); assertEquals(1025, source.reads);
 				var itemInput = new InventorySourceInput(INPUT.target(), INPUT.readOwner(), INPUT.face());
 				var item = runtime.attach(itemInput, new InventoryRuntime.TrackingSubject(TargetKey.from(INPUT.target()))).orElseThrow();
 				assertEquals(CaptureResult.Completeness.COMPLETE, runtime.step(item).orElseThrow().result().completeness());
@@ -196,21 +238,21 @@ class InventoryNativeFluidBoundaryTest {
 	}
 	@Test void definitionRefusalInTheMiddleOfOnePaidPagePublishesThatPagesCommittedPrefix() {
 		var settings = InventorySettings.serverDefaults();
-		var source = new Source(257, slot -> "test:fluid_" + slot, true, false); var runtime = runtime(source, settings);
+		var source = new Source(1025, slot -> "test:fluid_" + slot, true, false); var runtime = runtime(source, settings);
 		try (runtime) {
 			runtime.advance(0, settings); var consumer = runtime.attach(INPUT, new InventoryRuntime.PreviewSubject(INPUT.readOwner())).orElseThrow();
 			int retained = 0;
-			for (int tick = 0; tick < 60; tick++) {
+			for (int tick = 0; tick < 180; tick++) {
 				runtime.advance(tick, settings); var next = runtime.step(consumer, 7);
 				if (next.isEmpty()) continue;
 				retained += next.get().slots().size();
 				if (next.get().result().completeness() == CaptureResult.Completeness.CONTINUE) continue;
 				assertEquals(CaptureResult.Completeness.INCOMPLETE, next.get().result().completeness());
-				assertEquals(4, next.get().slots().size(), "252 prior addresses leave four usable definitions in this five-attempt page");
-				assertEquals(253, java.util.Objects.requireNonNull(next.get().slots().getFirst()).amount());
-				assertEquals(256, java.util.Objects.requireNonNull(next.get().slots().getLast()).amount());
-				assertEquals(256, retained); assertEquals(257, source.reads);
-				assertEquals(5, physical(runtime).used(InventorySourceAccess.PHYSICAL)); assertSettled(runtime);
+				assertEquals(2, next.get().slots().size(), "1022 prior addresses leave two usable definitions in this three-attempt page");
+				assertEquals(1023, java.util.Objects.requireNonNull(next.get().slots().getFirst()).amount());
+				assertEquals(1024, java.util.Objects.requireNonNull(next.get().slots().getLast()).amount());
+				assertEquals(1024, retained); assertEquals(1025, source.reads);
+				assertEquals(3, physical(runtime).used(InventorySourceAccess.PHYSICAL)); assertSettled(runtime);
 				return;
 			}
 			fail("capacity refusal never became an explicit terminal prefix");
@@ -243,22 +285,23 @@ class InventoryNativeFluidBoundaryTest {
 	}
 	@Test void capacityFailureWhoseFinalCheckDefersRetriesOnlyMetadataAndRemainsIncomplete() {
 		var settings = InventorySettings.serverDefaults();
-		var source = new Source(257, slot -> "test:fluid_" + slot, true, false); source.starveFinal = true;
+		var source = new Source(1025, slot -> "test:fluid_" + slot, true, false); source.starveFinal = true;
 		var runtime = runtime(source, settings);
 		try (runtime) {
 			runtime.advance(0, settings); var consumer = runtime.attach(INPUT, new InventoryRuntime.PreviewSubject(INPUT.readOwner())).orElseThrow();
 			var values = new ArrayList<@Nullable InventoryResourceValue>(); var terminal = finish(runtime, consumer, settings, values);
 			assertEquals(CaptureResult.Availability.READABLE, terminal.result().availability());
 			assertEquals(CaptureResult.Completeness.INCOMPLETE, terminal.result().completeness());
-			assertEquals(256, values.size()); assertEquals(256, terminal.result().coverage().scanned()); assertEquals(257, source.reads);
+			assertEquals(1024, values.size()); assertEquals(1024, terminal.result().coverage().scanned()); assertEquals(1025, source.reads);
 			assertEquals(2, source.finalChecks, "the capacity failure's deferred authority check must be resumed");
+			assertEquals(InventoryFailureReason.VARIANT_LIMIT, consumer.currentReason());
 			assertThrows(IllegalStateException.class, consumer::retainCompleted); assertSettled(runtime);
 		}
 		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
 	}
 	@Test void journalCapacityFailureCannotBeReopenedByTheSourcesPendingFinalCheck() {
-		var settings = InventorySettings.serverDefaults(); settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(257));
-		var source = new Source(257, slot -> "test:fluid_" + slot, false, true); source.starveFinal = true;
+		var settings = InventorySettings.serverDefaults(); settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1025));
+		var source = new Source(1025, slot -> "test:fluid_" + slot, false, true); source.starveFinal = true;
 		var runtime = runtime(source, settings);
 		try (runtime) {
 			runtime.advance(0, settings); var consumer = runtime.attach(INPUT, new InventoryRuntime.PreviewSubject(INPUT.readOwner())).orElseThrow();
@@ -266,13 +309,13 @@ class InventoryNativeFluidBoundaryTest {
 			// The extension's last paid source check is pending when journal admission fails.
 			var terminal = finish(runtime, consumer, settings, values);
 			assertEquals(CaptureResult.Completeness.INCOMPLETE, terminal.result().completeness());
-			settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(256));
+			settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(1024));
 			for (int retry = 0; retry < 3; retry++) {
 				runtime.advance(101 + retry, settings); var next = runtime.step(consumer);
 				assertTrue(next.isEmpty() || next.get().result().completeness() == CaptureResult.Completeness.INCOMPLETE);
 				assertThrows(IllegalStateException.class, consumer::retainCompleted);
 			}
-			assertEquals(257, source.reads); assertSettled(runtime);
+			assertEquals(1025, source.reads); assertSettled(runtime);
 		}
 		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
 	}
@@ -339,13 +382,16 @@ class InventoryNativeFluidBoundaryTest {
 		}
 		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
 	}
-	@Test void backendKeepsTheSelectedSeedHistoricalWhenCompleteDefinitionCapacityEndsTrackingIncomplete() {
+	@org.junit.jupiter.params.ParameterizedTest
+	@org.junit.jupiter.params.provider.ValueSource(booleans = {false, true})
+	void backendKeepsTheSelectedSeedHistoricalWhenCompleteDefinitionCapacityEndsTrackingIncomplete(boolean payload) {
 		var settings = InventorySettings.serverDefaults(); var host = new InventoryBackendTest.Host(); host.expiry = 200;
 		host.policies.replaceAll((owner, policy) -> new InventoryBackend.Policy(100, 1, java.util.Set.of(), java.util.Set.of("entity_block")));
 		var sources = new ArrayList<Source>();
 		var trackingScan = new java.util.concurrent.atomic.AtomicBoolean();
 		var runtime = new InventoryRuntime(input -> {
-			var source = new Source(trackingScan.get() ? 257 : 1, slot -> (slot & 1) == 0 ? "minecraft:water" : "minecraft:lava", false, false);
+			var source = new Source(trackingScan.get() ? payload ? 17 : 1025 : 1, slot -> (slot & 1) == 0 ? "minecraft:water" : "minecraft:lava", false, false);
+			source.largeIdentity = payload && trackingScan.get();
 			source.input = input; sources.add(source); return Optional.of(source);
 		}, settings.pendingMemoryBytes());
 		try (var backend = new InventoryBackend(host, runtime, 1)) {
@@ -361,10 +407,12 @@ class InventoryNativeFluidBoundaryTest {
 			for (int tick = 2; tick < 45; tick++) backend.tick(tick, settings);
 			@Unmodifiable List<InventoryS2CPacket> tracking = host.packets.stream().filter(packet -> packet.markerId() != null).toList();
 			assertTrue(tracking.stream().anyMatch(packet -> packet.status() == InventoryS2CPacket.Status.INCOMPLETE));
+			assertTrue(tracking.stream().filter(packet -> packet.status() == InventoryS2CPacket.Status.INCOMPLETE)
+				.allMatch(packet -> packet.failureReason() == (payload ? InventoryFailureReason.CATALOG_BYTES_LIMIT : InventoryFailureReason.VARIANT_LIMIT)));
 			assertTrue(tracking.stream().noneMatch(packet -> packet.completeScan() || packet.status() == InventoryS2CPacket.Status.READY));
 			assertTrue(tracking.stream().flatMap(packet -> packet.entries().stream()).allMatch(entry -> entry.amount() == 1),
 				() -> "a partial total must not overwrite the selected seed or become an absence-derived zero: " + tracking);
-			assertTrue(sources.stream().anyMatch(source -> source.reads == 257)); assertSettled(runtime);
+			assertTrue(sources.stream().anyMatch(source -> source.reads == (payload ? 16 : 1025))); assertSettled(runtime);
 		}
 		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
 	}

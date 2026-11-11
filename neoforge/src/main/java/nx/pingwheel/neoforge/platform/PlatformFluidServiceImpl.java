@@ -12,6 +12,8 @@ import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.fluids.capability.IFluidHandler;
 import nx.pingwheel.common.platform.IPlatformFluidService;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimits;
+import nx.pingwheel.common.presentation.inventory.minecraft.ProviderLimitSite;
 import nx.pingwheel.neoforge.integration.create.presentation.CreateFluidTankAccess;
 import net.minecraft.resources.ResourceLocation;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -26,8 +28,22 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 		Objects.requireNonNull(context);
 		return probe(new MinecraftWorld(context), context.root(), context.face(), operation);
 	}
+	@Override public nx.pingwheel.common.presentation.inventory.InventoryDecision<Probe> probeDecision(Context context, Operation operation) {
+		try { return probeAvailable(new MinecraftWorld(context), context.root(), context.face(), operation)
+			.map(nx.pingwheel.common.presentation.inventory.InventoryDecision::accept)
+			.orElseGet(() -> nx.pingwheel.common.presentation.inventory.InventoryDecision.reject(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.SOURCE_UNAVAILABLE,
+				nx.pingwheel.common.presentation.inventory.InventoryImpact.DEGRADED)); }
+		catch (nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnsupportedException absent) {
+			return nx.pingwheel.common.presentation.inventory.InventoryDecision.unsupported(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.UNSUPPORTED_LANE,
+				nx.pingwheel.common.presentation.inventory.InventoryImpact.DEGRADED);
+		}
+	}
 
 	static Optional<Probe> probe(FluidCapabilityAccess.World world, BlockPos root, Direction face, Operation operation) {
+		try { return probeAvailable(world, root, face, operation); }
+		catch (nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnsupportedException absent) { return Optional.empty(); }
+	}
+	private static Optional<Probe> probeAvailable(FluidCapabilityAccess.World world, BlockPos root, Direction face, Operation operation) {
 		Objects.requireNonNull(world); Objects.requireNonNull(root); Objects.requireNonNull(face);
 		operation.allowance().debit(FluidCapabilityAccess.PROBE_PROFILE.ownedCost());
 		root = root.immutable();
@@ -43,7 +59,7 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 			}
 			return Optional.of(CreateFluidTankAccess.probe(world, root, face, block, operation));
 		}
-		return FluidCapabilityAccess.probe(new OrdinaryRoute(world, face, root, List.of(new FluidCapabilityAccess.Member(root, block))), operation);
+		return FluidCapabilityAccess.probeAvailable(new OrdinaryRoute(world, face, root, List.of(new FluidCapabilityAccess.Member(root, block))), operation);
 	}
 	/** Guard native strings before toString concatenates/copies an unbounded registry ID. */
 	static String boundedId(@Nullable ResourceLocation id) {
@@ -52,9 +68,7 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 		int namespaceLength = id.getNamespace().length(), pathLength = id.getPath().length();
 		long totalLength = (long) namespaceLength + pathLength + 1;
 		if (namespaceLength > 255 || pathLength > 255 || totalLength > 256)
-			throw FluidSourceDiagnostics.unavailable("fluid registry identity bound",
-				() -> "namespaceLength=" + namespaceLength + ";pathLength=" + pathLength
-					+ ";totalLength=" + totalLength + ";max=256");
+			throw InventoryProviderLimits.exceeded(ProviderLimitSite.NEOFORGE_FLUID_REGISTRY_ID, totalLength, 256);
 		return id.toString();
 	}
 

@@ -166,6 +166,7 @@ public final class InventoryMinecraftSources {
 	private static boolean contains(Predicate<BlockPos> gate, BlockPos pos, Object binding, BlockFace face) {
 		try { return gate.test(pos); }
 		catch (InventoryItemBudget.CaptureLimitException deferred) { throw deferred; }
+		catch (InventoryProviderLimitException limit) { throw limit; }
 		catch (RuntimeException | LinkageError unavailable) {
 			if (!(unavailable instanceof InventorySourceUnavailableException) && !(unavailable instanceof InventoryItemBudget.CaptureLimitException))
 				Diagnostics.server().atNormal().rateLimited(MEMBER_FAILURE).warn("inventory-member-scope", "deny-member", unavailable,
@@ -209,6 +210,7 @@ public final class InventoryMinecraftSources {
 		void tightenDisplay(int ceiling) { displayBytes = Math.min(displayBytes, ceiling); if (catalog != null) catalog.tightenDisplay(ceiling); }
 		InventoryReprojectionSummary summary(int ceiling) { return catalog == null ? InventoryReprojectionSummary.EMPTY : catalog.reprojectionSummary(ceiling); }
 		void releaseReadData() { catalog = null; }
+		int entriesUpperBound() { return catalog == null ? 0 : catalog.entriesUpperBound(); }
 	}
 	/** No world/provider access: admission is possible before a Source or its member/slot metadata exists. */
 	public static InventoryValidationBudget.Cost resolutionValidationCost(InventorySourceInput input) {
@@ -230,17 +232,28 @@ public final class InventoryMinecraftSources {
 	private static final class ItemDiscovery implements AutoCloseable {
 		private final InventoryValidationBudget.Allowance allowance;
 		private final InventoryValidationBudget.@Nullable ItemResolutionGrants grants;
-		private InventoryValidationBudget.@Nullable ItemResolutionStage lookup, finish;
+		private InventoryValidationBudget.@Nullable ItemResolutionStage lookup, shape, finish;
 		ItemDiscovery(InventoryValidationBudget.Allowance allowance) { this.allowance = allowance; grants = allowance.itemResolutionGrants(); }
 		void container() {
-			if (grants != null) { var cost = InventoryValidationBudget.itemContainerResolution(); finish = grants.open(cost); allowance.debit(cost); }
+			if (grants != null) { var cost = InventoryValidationBudget.itemContainerProbe(); lookup = grants.open(cost); allowance.debit(cost); }
 		}
-		void lookup() {
-			if (grants != null) { var cost = InventoryValidationBudget.itemProviderLookup(); lookup = grants.open(cost); allowance.debit(cost); }
+		void containerFinish(int members, int slots, int largestLocal) {
+			if (grants != null) {
+				// Root/partner probe scratch has finished. Its tiny member references remain
+				// under the caller's root envelope; no mapping/source ownership exists yet.
+				// Closing the stage releases unused workspace, never its paid work ticket.
+				if (lookup != null) lookup.close();
+				var cost = InventoryValidationBudget.itemContainerFinish(members, slots, largestLocal); finish = grants.open(cost); allowance.debit(cost);
+			}
+		}
+		void lookup(boolean vault) {
+			if (grants != null) { var cost = InventoryValidationBudget.itemProviderLookup(vault); lookup = grants.open(cost); allowance.debit(cost); }
 		}
 		void finish(@Nullable InventorySnapshotLayout layout) {
 			if (grants != null) {
-				var cost = InventoryValidationBudget.itemProviderFinish(layout == null ? 0 : layout.members().size());
+				var shapeCost = InventoryValidationBudget.itemProviderShape(layout == null ? 0 : layout.members().size());
+				shape = grants.open(shapeCost); allowance.debit(shapeCost);
+				var cost = InventoryValidationBudget.itemProviderFinish(layout);
 				finish = grants.open(cost); allowance.debit(cost);
 			}
 		}
@@ -249,7 +262,7 @@ public final class InventoryMinecraftSources {
 		// plus the source reference8 and conservative alignment (<=192B).
 		void retain(Source source) { if (finish != null) source.metadataOwnership = finish.retain(Math.addExact(source.sourceRetainedBytes, 192)); }
 		void retain(ExternalSource source) { if (finish != null) source.metadataOwnership = finish.retain(Math.addExact(source.sourceRetainedBytes, 192)); }
-		@Override public void close() { try { if (finish != null) finish.close(); } finally { if (lookup != null) lookup.close(); } }
+		@Override public void close() { try { if (finish != null) finish.close(); } finally { try { if (shape != null) shape.close(); } finally { if (lookup != null) lookup.close(); } } }
 	}
 	public static Optional<InventorySourceAccess.Source> resolve(MinecraftServer server, InventorySourceInput input, int displayBytes,
 		InventoryValidationBudget.Allowance allowance) {
@@ -272,6 +285,7 @@ public final class InventoryMinecraftSources {
 			ProviderAccessLookup providers = (pos, face) -> IPlatformInventoryService.INSTANCE.find(level, pos, face);
 			return resolveOrdinary(world, input, providers, server::isSameThread, codec, displayBytes, codec::tightenDisplay, codec::summary, allowance);
 		} catch (InventoryItemBudget.CaptureLimitException deferred) { throw deferred; }
+		catch (InventoryProviderLimitException limit) { throw limit; }
 		catch (RuntimeException | LinkageError unavailable) {
 			InventorySnapshotDiagnostics.failure("inventory-source-resolve", input, null, () -> "displayBytes=" + displayBytes, unavailable);
 			return Optional.empty();
@@ -297,6 +311,7 @@ public final class InventoryMinecraftSources {
 			try { discovery.retain(source); return Optional.of(source); }
 			catch (RuntimeException | Error failure) { source.close(); throw failure; }
 		} catch (InventoryItemBudget.CaptureLimitException deferred) { throw deferred; }
+		catch (InventoryProviderLimitException limit) { throw limit; }
 		catch (RuntimeException | LinkageError unavailable) {
 			InventorySnapshotDiagnostics.failure("inventory-source-resolve", input, null, () -> "displayBytes=" + displayBytes, unavailable);
 			return Optional.empty();
@@ -365,6 +380,7 @@ public final class InventoryMinecraftSources {
 			try { discovery.retain(source); return Optional.of(source); }
 			catch (RuntimeException | Error failure) { source.close(); throw failure; }
 		} catch (InventoryItemBudget.CaptureLimitException deferred) { throw deferred; }
+		catch (InventoryProviderLimitException limit) { throw limit; }
 		catch (RuntimeException | LinkageError unavailable) {
 			InventorySnapshotDiagnostics.failure("inventory-external-resolve", input, bindings, () -> "displayBytes=" + displayBytes, unavailable);
 			return Optional.empty();
@@ -431,22 +447,45 @@ public final class InventoryMinecraftSources {
 			identity = VanillaInventorySource.chestAlias(target.dimensionId(), pos, partner, target.blockRegistryId());
 		} else entities.add(entity);
 		if (entity instanceof Container) {
+			int totalLocal = 0, largestLocal = 0;
+			int[] localSizes = new int[entities.size()];
+			if (enforceShape && (expected == null || expected.members().size() != entities.size()))
+				throw new InventorySourceUnavailableException("container member shape changed before mapping");
+			for (int index = 0; index < entities.size(); index++) {
+				BlockEntity half = entities.get(index);
+				if (!(half instanceof Container container) || !physical.contains(half.getBlockPos()))
+					throw new InventorySourceUnavailableException("missing container half");
+				int size = container.getContainerSize();
+				if (size > InventorySourceAccess.MAX_SLOTS) throw InventoryProviderLimits.exceeded(ProviderLimitSite.CONTAINER_LOCAL_SLOTS, size, InventorySourceAccess.MAX_SLOTS);
+				if (enforceShape && !expected.members().get(index).segments().isEmpty() && (expected.members().get(index).segments().size() != 1
+					|| expected.members().get(index).segments().getFirst().localSlots() != size))
+					throw new InventorySourceUnavailableException("container local shape changed before mapping");
+				if (size < 0) throw new InventorySourceUnavailableException("container local slot bound");
+				localSizes[index] = size; totalLocal += size; largestLocal = Math.max(largestLocal, size);
+			}
+			if (discovery != null) discovery.containerFinish(entities.size(), totalLocal, largestLocal);
 			List<InventorySnapshotLayout.Member> members = new ArrayList<>();
+			int memberIndex = 0;
 			for (BlockEntity half : entities) {
 				if (!(half instanceof Container container)) throw new InventorySourceUnavailableException("missing container half");
 				BlockPos memberPos = half.getBlockPos().immutable();
 				if (!physical.contains(memberPos)) throw new InventorySourceUnavailableException("inventory member outside the read scope");
-				int[] mapping = sidedSlots(container, face);
+				int mappingIndex = memberIndex++;
+				int expectedMapping = enforceShape && expected.members().get(mappingIndex).segments().size() == 1
+					? expected.members().get(mappingIndex).segments().getFirst().visibleSlots().size() : -1;
+				int[] mapping = sidedSlots(container, face, localSizes[mappingIndex], expectedMapping);
 				for (int slot : mapping) slots.add(new Slot(container, slot));
-				if (slots.size() > InventorySourceAccess.MAX_SLOTS) throw new IllegalStateException("container view exceeds finite bound");
+				if (slots.size() > InventorySourceAccess.MAX_SLOTS) throw InventoryProviderLimits.exceeded(ProviderLimitSite.CONTAINER_VISIBLE_SLOTS, slots.size(), InventorySourceAccess.MAX_SLOTS);
 				if (!physical.contains(memberPos)) throw new InventorySourceUnavailableException("inventory member outside the read scope");
 				BlockState memberState = world.blockState(memberPos);
 				String memberBlockId = BuiltInRegistries.BLOCK.getKey(memberState.getBlock()).toString();
 				String memberEntityId = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(half.getType()).toString();
 				String role = memberPos.equals(pos) ? "target" : "member";
+				int currentLocal = container.getContainerSize();
+				if (currentLocal != localSizes[mappingIndex]) throw new InventorySourceUnavailableException("container size changed after mapping");
 				List<InventorySnapshotLayout.Segment> segments = InventorySnapshotSchemas.registered(InventorySnapshotSchemas.ITEMS)
 					? List.of(new InventorySnapshotLayout.Segment("Items", InventorySnapshotSchemas.ITEMS,
-						container.getContainerSize(), java.util.Arrays.stream(mapping).boxed().toList())) : List.of();
+						currentLocal, java.util.Arrays.stream(mapping).boxed().toList())) : List.of();
 				members.add(new InventorySnapshotLayout.Member(memberPos, memberBlockId, memberEntityId, role, segments));
 			}
 			BlockPos controller = entities.size() == 1 ? pos.immutable() : null;
@@ -456,7 +495,7 @@ public final class InventoryMinecraftSources {
 			return new View(identity, List.copyOf(entities), List.copyOf(slots), null, layout, true);
 		}
 		// Only genuinely non-Container sources reach the native capability bridge.
-		if (discovery != null) discovery.lookup();
+		if (discovery != null) discovery.lookup(target.blockRegistryId().equals("create:item_vault"));
 		if (!physical.contains(pos)) throw new InventorySourceUnavailableException("inventory capability outside the read scope");
 		IPlatformInventoryService.Access access = providers.find(pos, face).orElseThrow(() -> new InventorySourceUnavailableException("inventory capability absent"));
 		if (input.target() instanceof Target.ExternalBlockTarget) {
@@ -502,6 +541,7 @@ public final class InventoryMinecraftSources {
 					return physical.contains(pos) && world.isLoaded(pos) && world.blockEntity(pos) == entity
 						&& InventoryReadSafety.readable(entity, world.heldKey());
 				} catch (InventoryItemBudget.CaptureLimitException exhausted) { throw exhausted; }
+				catch (InventoryProviderLimitException limit) { throw limit; }
 				catch (RuntimeException | LinkageError unavailable) {
 					InventorySnapshotDiagnostics.failure("inventory-resident-scope-valid", input, entity,
 						() -> "position=" + pos + " layout=" + (admittedLayout == null ? "live" : admittedLayout.layoutId()), unavailable);
@@ -575,6 +615,7 @@ public final class InventoryMinecraftSources {
 		@Nullable InventorySnapshotLayout layout;
 		try { layout = access.snapshotLayout().orElse(null); }
 		catch (InventoryItemBudget.CaptureLimitException exhausted) { throw exhausted; }
+		catch (InventoryProviderLimitException limit) { layout = null; }
 		catch (RuntimeException | LinkageError unsupported) {
 			InventorySnapshotDiagnostics.failure("inventory-provider-snapshot-layout", input, access, () -> "position=" + pos, unsupported);
 			layout = null;
@@ -614,11 +655,22 @@ public final class InventoryMinecraftSources {
 	}
 
 	static int[] sidedSlots(Container container, Direction face) {
+		return sidedSlots(container, face, -1);
+	}
+	private static int[] sidedSlots(Container container, Direction face, int expectedSize) {
+		return sidedSlots(container, face, expectedSize, -1);
+	}
+	private static int[] sidedSlots(Container container, Direction face, int expectedSize, int expectedMapping) {
 		int size = container.getContainerSize();
-		if (size < 0 || size > InventorySourceAccess.MAX_SLOTS) throw new IllegalStateException("container slot bound");
-		int[] source = container instanceof WorldlyContainer sided ? sided.getSlotsForFace(face) : null;
+		if (size > InventorySourceAccess.MAX_SLOTS) throw InventoryProviderLimits.exceeded(ProviderLimitSite.CONTAINER_LOCAL_SLOTS, size, InventorySourceAccess.MAX_SLOTS);
+		if (size < 0) throw new IllegalStateException("container slot bound");
+		if (expectedSize >= 0 && size != expectedSize) throw new InventorySourceUnavailableException("container size changed before mapping");
+		int @Nullable [] source = container instanceof WorldlyContainer sided ? sided.getSlotsForFace(face) : null;
 		if (source == null && container instanceof WorldlyContainer) throw new InventorySourceUnavailableException("missing sided mapping");
-		if (source != null && source.length > InventorySourceAccess.MAX_SLOTS) throw new IllegalStateException("sided slot bound");
+		if (source != null && source.length > InventorySourceAccess.MAX_SLOTS) throw InventoryProviderLimits.exceeded(ProviderLimitSite.CONTAINER_SIDED_MAPPING, source.length, InventorySourceAccess.MAX_SLOTS);
+		if (source != null && source.length > size) throw new InventorySourceUnavailableException("sided mapping exceeds local shape");
+		if (expectedMapping >= 0 && (source == null ? size : source.length) != expectedMapping)
+			throw new InventorySourceUnavailableException("container visible shape changed before copy");
 		int[] mapping = source == null && !(container instanceof WorldlyContainer) ? java.util.stream.IntStream.range(0, size).toArray()
 			: java.util.Objects.requireNonNull(source, "missing sided mapping").clone();
 		boolean[] seen = new boolean[size];
@@ -745,9 +797,16 @@ public final class InventoryMinecraftSources {
 			return world != null && originalStableCursor && testSnapshotCapture == null ? InventorySourceAccess.ReadMode.NATIVE_INCREMENTAL : InventorySourceAccess.ReadMode.ADAPTER;
 		}
 		@Override public InventoryItemCodec.@Nullable Catalog nativeCatalog() { return residentCatalog; }
+		@Override public int nativeCatalogEntriesUpperBound(int attempts) {
+			int entries = Math.max(residentCatalog == null ? 0 : residentCatalog.entriesUpperBound(), codec instanceof CompatibilityCodec compatibility ? compatibility.entriesUpperBound() : 0);
+			return (int) Math.min(InventoryItemCodec.DEFAULT_MAX_ENTRIES, entries + (long) Math.max(0, attempts - 1));
+		}
 		@Override public void releaseReadData() { residentCatalog = null; if (codec instanceof CompatibilityCodec compatibility) compatibility.releaseReadData(); }
 		@Override public long nativeCatalogGrowthUpperBound() {
 			return residentCatalog == null ? InventoryItemCodec.Catalog.initialModeledBytes() + InventoryItemCodec.Catalog.firstReadGrowthUpperBound(displayBytes) : residentCatalog.retainedGrowthUpperBound();
+		}
+		@Override public long nativeCatalogGrowthUpperBound(int attempts) {
+			return residentCatalog == null ? InventoryItemCodec.Catalog.initialModeledBytes() + InventoryItemCodec.Catalog.firstReadGrowthUpperBound(displayBytes, attempts) : residentCatalog.retainedGrowthUpperBound(attempts);
 		}
 		private InventoryItemCodec.Catalog catalog(HolderLookup.Provider registries) {
 			if (residentCatalog == null) residentCatalog = new InventoryItemCodec.Catalog(registries, displayBytes);
@@ -790,6 +849,7 @@ public final class InventoryMinecraftSources {
 				if (operationDepth != 0) liveAccess = current.access;
 				return true;
 			} catch (InventoryItemBudget.CaptureLimitException exhausted) { throw exhausted; }
+			catch (InventoryProviderLimitException limit) { throw limit; }
 			catch (RuntimeException | LinkageError unavailable) {
 				InventorySnapshotDiagnostics.failure("inventory-source-valid", input, original.access, () -> "source=" + original.identity, unavailable);
 				return false;
@@ -1172,7 +1232,8 @@ public final class InventoryMinecraftSources {
 						visibleIndex++;
 						return true;
 					}
-				} catch (RuntimeException | LinkageError unavailable) {
+				} catch (InventoryProviderLimitException limit) { throw limit; }
+				catch (RuntimeException | LinkageError unavailable) {
 					InventorySnapshotDiagnostics.failure("inventory-snapshot-authority", input, view.access,
 						() -> "source=" + view.identity + " member=" + memberIndex + " segment=" + segmentIndex + " visibleSlot=" + visibleIndex, unavailable);
 					return false;
@@ -1232,6 +1293,7 @@ public final class InventoryMinecraftSources {
 	static InventoryDomainCodec.@Nullable Item readFrozen(View view, IPlatformInventoryService.@Nullable Access access, int slot,
 		InventoryItemCodec.Catalog catalog, HolderLookup.Provider registries, int displayBytes, InventoryItemBudget budget,
 		@Nullable InventoryCatalogAdmission admission, @Nullable Runnable currentAuthority) {
+		if (admission != null) admission.requireNativeRead(displayBytes, catalog.entriesUpperBound());
 		@org.jetbrains.annotations.Nullable InventoryDomainCodec.Item[] result = new InventoryDomainCodec.Item[1];
 		IPlatformInventoryService.ResidentVisitor visitor = resident -> {
 			result[0] = freezeItem(catalog, registries, displayBytes, resident, budget, admission); return true;
@@ -1243,6 +1305,7 @@ public final class InventoryMinecraftSources {
 	private static boolean witnessSlot(View view, @org.jetbrains.annotations.Nullable IPlatformInventoryService.Access access,
 		int slot, InventorySelection selection, InventoryItemCodec.Catalog catalog, HolderLookup.Provider registries, int displayBytes,
 		InventoryItemBudget budget, @org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission) {
+		if (admission != null) admission.requireNativeRead(displayBytes, catalog.entriesUpperBound());
 		boolean[] present = {false};
 		consumeResident(view, access, slot, resident -> {
 			present[0] = witness(resident, selection, catalog, registries, displayBytes, budget, admission); return true;
@@ -1406,9 +1469,16 @@ public final class InventoryMinecraftSources {
 			return stableCursor ? InventorySourceAccess.ReadMode.NATIVE_INCREMENTAL : InventorySourceAccess.ReadMode.ADAPTER;
 		}
 		@Override public InventoryItemCodec.@Nullable Catalog nativeCatalog() { return residentCatalog; }
+		@Override public int nativeCatalogEntriesUpperBound(int attempts) {
+			int entries = Math.max(residentCatalog == null ? 0 : residentCatalog.entriesUpperBound(), codec instanceof CompatibilityCodec compatibility ? compatibility.entriesUpperBound() : 0);
+			return (int) Math.min(InventoryItemCodec.DEFAULT_MAX_ENTRIES, entries + (long) Math.max(0, attempts - 1));
+		}
 		@Override public void releaseReadData() { residentCatalog = null; if (codec instanceof CompatibilityCodec compatibility) compatibility.releaseReadData(); }
 		@Override public long nativeCatalogGrowthUpperBound() {
 			return residentCatalog == null ? InventoryItemCodec.Catalog.initialModeledBytes() + InventoryItemCodec.Catalog.firstReadGrowthUpperBound(displayBytes) : residentCatalog.retainedGrowthUpperBound();
+		}
+		@Override public long nativeCatalogGrowthUpperBound(int attempts) {
+			return residentCatalog == null ? InventoryItemCodec.Catalog.initialModeledBytes() + InventoryItemCodec.Catalog.firstReadGrowthUpperBound(displayBytes, attempts) : residentCatalog.retainedGrowthUpperBound(attempts);
 		}
 		@Override public InventoryReprojectionSummary reprojectionSummary(int displayBytes) {
 			int ceiling = requireDisplayBytes(displayBytes);
@@ -1434,6 +1504,7 @@ public final class InventoryMinecraftSources {
 			if (closed || !onThread.getAsBoolean()) return false;
 			try { current(); return true; }
 			catch (InventoryItemBudget.CaptureLimitException exhausted) { throw exhausted; }
+			catch (InventoryProviderLimitException limit) { throw limit; }
 			catch (RuntimeException | LinkageError unavailable) {
 				InventorySnapshotDiagnostics.failure("inventory-external-valid", input, bindings,
 					() -> "source=" + identity + " descriptor=" + descriptor, unavailable);

@@ -41,6 +41,7 @@ import nx.pingwheel.common.presentation.inventory.client.ClientItemDisplay.Valid
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryNativeTraversal;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryPatches;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -387,7 +388,7 @@ final class ClientDisplayWorkingCopy {
 			// all destination tables/clear/resize scans, array headers, and a
 			// quadratic identity-probe allowance for inserts plus all rehashes.
 			long cost = 2L * length + 2 * growth + 2L * size * (size + 1L);
-			if (cost > budget.remainingVisits()) throw new UnsafeDisplay();
+			if (cost > budget.remainingVisits()) throw new UnsafeDisplay(InventoryFailureReason.NATIVE_WORK_LIMIT);
 			budget.cells((int) cost);
 			int entries = 0;
 			for (int i = 0; i < length; i += 2) {
@@ -492,7 +493,12 @@ final class ClientDisplayWorkingCopy {
 		else {
 			budget.cells(InventoryNativeTraversal.MAX_INSPECTION_PORT_CALLS);
 			var inspection = InventoryNativeTraversal.inspect(source, budget.remainingVisits());
-			if (!inspection.accepted()) throw new UnsafeDisplay(); budget.cells((int) inspection.traversalWork());
+			if (!inspection.accepted()) {
+				if (inspection.refusal() == InventoryNativeTraversal.Refusal.WORK_LIMIT) throw new UnsafeDisplay(InventoryFailureReason.NATIVE_WORK_LIMIT);
+				if (inspection.refusal() == InventoryNativeTraversal.Refusal.PROBE_LIMIT) throw new UnsafeDisplay(InventoryFailureReason.PROBE_LIMIT);
+				throw new UnsafeDisplay(InventoryFailureReason.UNSUPPORTED_CONTEXT, false, null);
+			}
+			budget.cells((int) inspection.traversalWork());
 		}
 		// Hash-map creation/comparisons are bounded before insertion; no arbitrary
 		// keys are accepted by callers. Conservative collision allowance.

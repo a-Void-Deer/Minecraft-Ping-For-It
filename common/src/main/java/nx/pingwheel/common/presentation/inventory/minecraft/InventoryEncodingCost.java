@@ -1,6 +1,7 @@
 package nx.pingwheel.common.presentation.inventory.minecraft;
 
 import org.jetbrains.annotations.Nullable;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
 
 /**
  * Scalar E1–E5 event accumulator. One instance per freezer, no vector/row objects
@@ -8,7 +9,7 @@ import org.jetbrains.annotations.Nullable;
  * All totals are cumulative allocations, including discarded growth/reset arrays.
  */
 final class InventoryEncodingCost {
-	private static final int MAX_KEYS = 258;
+	private static final int MAX_KEYS = InventoryItemBudget.MAX_MAP + 2;
 	private static final int MAX_BUCKETS = 1024;
 	private final InventoryItemBudget budget;
 	private long bytes, chars, refs, objects, work;
@@ -246,7 +247,7 @@ final class InventoryEncodingCost {
 	void beginKeys() { keyCount = 0; longestKey = 0; }
 	int keyCount() { return keyCount; }
 	void mapKey(String key) {
-		if (keyCount == MAX_KEYS) throw new InventoryItemBudget.RootLimitException("owned map cardinality");
+		if (keyCount == MAX_KEYS) throw new InventoryItemBudget.RootLimitException(InventoryFailureReason.NATIVE_MAP_LIMIT, "owned map cardinality");
 		if (mapKeys == null) {
 			// Planner scratch is a direct debit, NOT a native output event.
 			budget.allocate(0, 0, MAX_KEYS, 1);
@@ -295,7 +296,7 @@ final class InventoryEncodingCost {
 		for (int i = 0; i < n; i++) mapKeys[i] = null;
 	}
 	private int resizeMap(int old, int capacity, int size) {
-		if (capacity > MAX_BUCKETS) throw new InventoryItemBudget.RootLimitException("owned map capacity");
+		if (capacity > MAX_BUCKETS) throw new InventoryItemBudget.RootLimitException(InventoryFailureReason.NATIVE_MAP_LIMIT, "owned map capacity");
 		budget.work(8L * capacity + 12L * size);
 		// Preserve old tree membership on each node while rebuilding bucket lists.
 		for (int i = 0; i < size; i++) if (old != 0 && tree[hash[i] & (old - 1)]) next[i] = -2; else next[i] = -1;

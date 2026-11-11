@@ -29,6 +29,55 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class InventoryMemoryBudgetIntegrationTest {
 
 	private static final long MIB = 1024L * 1024L;
+
+	@Test void presentationAdmissionRenewsAtTheNextTickAndNeverErasesSameTickPressure() {
+		var settings = InventorySettings.serverDefaults();
+		var runtime = new InventoryRuntime(input -> { throw new AssertionError("envelope admission must not resolve a source"); }, settings.pendingMemoryBytes());
+		try (var backend = new InventoryBackend(new InventoryBackendTest.Host(), runtime, 1)) {
+			backend.tick(0, settings); runtime.memory().setCap(runtime.memory().retained());
+			backend.prepareInitialAdmission(0);
+			assertTrue(backend.reserveInitialEnvelope(128, 1024).isEmpty(), "same-tick retry retains the actual refusal");
+			backend.prepareInitialAdmission(1);
+			try (var envelope = backend.reserveInitialEnvelope(128, 1024).orElseThrow()) { envelope.settle(128, 1024); }
+			assertEquals(settings.pendingMemoryBytes(), runtime.memory().cap()); assertEquals(0, runtime.memory().reserved());
+		}
+		assertEquals(0, runtime.memory().retained());
+	}
+
+	@Test void idleDualLanePreviewAndSelectedTrackingRegistrationsLeaveA16MiBServerServiceable() {
+		var settings = InventorySettings.serverDefaults(); settings.setPendingMemoryMiB(16);
+		var host = new InventoryBackendTest.Host();
+		host.frozenLanes = InventoryTestGrants.both();
+		var reads = new java.util.concurrent.atomic.AtomicInteger();
+		var runtime = new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 1) {
+			@Override public InventoryResourceValue readResource(int slot,
+				nx.pingwheel.common.presentation.inventory.minecraft.@org.jetbrains.annotations.Nullable InventoryCatalogAdmission admission,
+				nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Allowance allowance) {
+				if (input.resourceKind() == InventoryResourceKind.ITEM) return read(slot);
+				reads.incrementAndGet();
+				return new InventoryFluidValue(new InventoryScanner.Key(InventoryResourceKind.FLUID, "minecraft:water", "plain"), 81000,
+					new InventoryFluidValue.Display("minecraft:water", "water", null), false);
+			}
+		}), settings.pendingMemoryBytes());
+		try (var backend = new InventoryBackend(host, runtime, 1)) {
+			backend.handle(InventoryBackendTest.A, nx.pingwheel.common.network.InventoryC2SPacket.hello(), 0, settings);
+			backend.handle(InventoryBackendTest.A, nx.pingwheel.common.network.InventoryC2SPacket.open(host.epoch(InventoryBackendTest.A), 100, 1, 1,
+				InventoryRuntimeTest.TARGET, nx.pingwheel.common.domain.BlockFace.NORTH), 0, settings);
+			assertTrue(runtime.memory().retained() < 2 * MIB, "idle lanes own bases, not two 1024-category Preview and publisher maxima");
+			backend.tick(0, settings);
+			assertTrue(host.packets.stream().anyMatch(packet -> packet.kind() == nx.pingwheel.common.network.InventoryS2CPacket.Kind.PREVIEW
+				&& packet.resourceKind() == InventoryResourceKind.ITEM && !packet.entries().isEmpty()));
+			assertTrue(host.packets.stream().anyMatch(packet -> packet.kind() == nx.pingwheel.common.network.InventoryS2CPacket.Kind.PREVIEW
+				&& packet.resourceKind() == InventoryResourceKind.FLUID && !packet.entries().isEmpty()));
+			var item = host.packets.stream().filter(packet -> packet.kind() == nx.pingwheel.common.network.InventoryS2CPacket.Kind.PREVIEW
+				&& packet.resourceKind() == InventoryResourceKind.ITEM && !packet.entries().isEmpty()).findFirst().orElseThrow();
+			backend.handle(InventoryBackendTest.A, nx.pingwheel.common.network.InventoryC2SPacket.select(host.epoch(InventoryBackendTest.A), 100, 1, 1, 1,
+				item.baselineId(), item.statusRevision(), item.entries().getFirst().key(), "attention"), 1, settings);
+			assertEquals(1, host.store.size());
+			assertTrue(runtime.memory().retained() < 4 * MIB, "a single selected Tracking key does not reserve a Preview-sized slab");
+		}
+		assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
 	private static final long GIB = 1024L * MIB;
 	private static final Target.BlockTarget TARGET =
 		new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest");

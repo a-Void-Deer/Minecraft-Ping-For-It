@@ -7,6 +7,7 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
@@ -49,13 +50,12 @@ class PendingMemoryMigrationTest {
 	}
 
 	@ParameterizedTest
-	@ValueSource(ints = {-1, 0, 15, 1025, Integer.MAX_VALUE})
-	void scalarMigrationPersistsTheClampedFiniteValue(int stored, @TempDir Path directory) throws IOException {
+	@CsvSource({"-1,16", "0,16", "15,16", "16,16", "1025,1025", "2048,2048", "2049,2048", "2147483647,2048"})
+	void scalarMigrationPersistsTheClampedFiniteValue(int stored, int expected, @TempDir Path directory) throws IOException {
 		Path path = directory.resolve("server.json");
 		Files.writeString(path, scalarFile(VERSION, stored), StandardCharsets.UTF_8);
 		var handler = new ConfigHandler<>(ServerConfig.class, path, VERSION);
 		handler.load();
-		int expected = stored < 16 ? 16 : 1024;
 		assertEquals(expected, handler.getConfig().getInventory().getPendingMemoryMiB().getValue());
 		assertEquals(expected, root(path).getAsJsonObject("inventory").getAsJsonObject("pendingMemoryMiB").get("value").getAsInt());
 	}

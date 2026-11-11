@@ -16,6 +16,63 @@ import static org.junit.jupiter.api.Assertions.*;
 
 /** Front-guard primitives only. The production codec has not yet been routed through them. */
 class InventoryComponentBoundsTest {
+	@Test void registryMetadata512DoesNotWidenArbitraryMapsAndList513RefusesBeforeCopy() {
+		var metadata = new HashMap<Integer, Integer>();
+		for (int i = 0; i < 512; i++) metadata.put(i, i);
+		var budget = InventoryItemBudget.root(4096); budget.begin(4096);
+		try {
+			var bounds = new InventoryComponentBounds(budget, new InventoryResidentAccessFields());
+			assertEquals(512, bounds.registryMapPass(metadata));
+			assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.NATIVE_MAP_LIMIT,
+				assertThrows(InventoryItemBudget.RootLimitException.class, () -> bounds.mapPass(metadata)).reason());
+			metadata.put(512, 512);
+			assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.NATIVE_MAP_LIMIT,
+				assertThrows(InventoryItemBudget.RootLimitException.class, () -> bounds.registryMapPass(metadata)).reason());
+			var list = new ArrayList<>(java.util.Collections.nCopies(512, IntTag.valueOf(1)));
+			assertSame(list, bounds.list(list));
+			list.add(IntTag.valueOf(2)); long allocation = budget.rootAllocatedBytes(), work = budget.attemptedWork();
+			assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.NATIVE_LIST_LIMIT,
+				assertThrows(InventoryItemBudget.RootLimitException.class, () -> bounds.list(list)).reason());
+			assertEquals(allocation, budget.rootAllocatedBytes()); assertTrue(budget.attemptedWork() > work);
+		} finally { budget.end(); }
+	}
+
+	@Test void exactArrayCeilingCopiesOwnedBytesButOneOverRefusesBeforeAllocation() {
+		var budget = InventoryItemBudget.root(4096); budget.begin(4096);
+		try {
+			var bounds = new InventoryComponentBounds(budget, new InventoryResidentAccessFields());
+			var source = new ByteArrayTag(new byte[60 * 1024]);
+			var owned = (ByteArrayTag) bounds.ownedPersistentTag(source, 0);
+			assertArrayEquals(source.getAsByteArray(), owned.getAsByteArray()); assertNotSame(source.getAsByteArray(), owned.getAsByteArray());
+			long before = budget.rootAllocatedBytes();
+			assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.NATIVE_ARRAY_LIMIT,
+				assertThrows(InventoryItemBudget.RootLimitException.class, () -> bounds.ownedPersistentTag(new ByteArrayTag(new byte[1]), 0)).reason());
+			assertEquals(before, budget.rootAllocatedBytes());
+		} finally { budget.end(); }
+	}
+
+	@Test void returnedPersistentTreeAdmits8192ExpandedNodesAndRefuses8193BeforeCopyingThatNode() {
+		var root = new ListTag(); int remaining = 8191;
+		while (remaining > 0) {
+			var child = new ListTag(); int cells = Math.min(512, remaining - 1);
+			for (int i = 0; i < cells; i++) child.add(net.minecraft.nbt.ByteTag.ZERO);
+			root.add(child); remaining -= cells + 1;
+		}
+		var exact = InventoryItemBudget.root(4096); exact.begin(4096);
+		try {
+			Tag owned = new InventoryComponentBounds(exact, new InventoryResidentAccessFields()).ownedPersistentTag(root, 0);
+			assertArrayEquals(InventoryItemCodec.canonicalTag(root), InventoryItemCodec.canonicalTag(owned));
+		} finally { exact.end(); }
+		((ListTag) root.get(root.size() - 1)).add(net.minecraft.nbt.ByteTag.ZERO);
+		var refused = InventoryItemBudget.root(4096); refused.begin(4096);
+		try {
+			assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.NATIVE_NODE_LIMIT,
+				assertThrows(InventoryItemBudget.RootLimitException.class,
+					() -> new InventoryComponentBounds(refused, new InventoryResidentAccessFields()).ownedPersistentTag(root, 0)).reason());
+			assertTrue(refused.attemptedWork() >= 8192);
+		} finally { refused.end(); }
+	}
+
 	@Test void oversizedActualResidentCustomDataArrayRefusesWithoutCopying() {
 		// Construct the ordinary wrapper first, then mutate its actual resident
 		// payload. Setup must not discover size by copying the oversized value.

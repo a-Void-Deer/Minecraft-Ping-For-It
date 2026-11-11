@@ -16,11 +16,23 @@ class EntitySelectionBlacklistDefaultRuleTest {
 	}
 
 	@Test
+	void tiabAcceleratorRegistryIdIsIgnored() {
+		assertTrue(EntitySelectionBlacklist.isDefaultIgnoredEntityId(
+			ResourceLocation.fromNamespaceAndPath("tiab", "accelerator")));
+	}
+
+	@Test
 	void otherRegistryIdsAreNotIgnored() {
 		assertFalse(EntitySelectionBlacklist.isDefaultIgnoredEntityId(
 			ResourceLocation.fromNamespaceAndPath("simulated", "honey_glue_entity")));
 		assertFalse(EntitySelectionBlacklist.isDefaultIgnoredEntityId(
 			ResourceLocation.fromNamespaceAndPath("minecraft", "honey_glue")));
+		assertFalse(EntitySelectionBlacklist.isDefaultIgnoredEntityId(
+			ResourceLocation.fromNamespaceAndPath("tiab", "accelerator_entity")));
+		assertFalse(EntitySelectionBlacklist.isDefaultIgnoredEntityId(
+			ResourceLocation.fromNamespaceAndPath("tiab", "entity.tiab.accelerator")));
+		assertFalse(EntitySelectionBlacklist.isDefaultIgnoredEntityId(
+			ResourceLocation.fromNamespaceAndPath("other", "accelerator")));
 		assertFalse(EntitySelectionBlacklist.isDefaultIgnoredEntityId(null));
 	}
 }

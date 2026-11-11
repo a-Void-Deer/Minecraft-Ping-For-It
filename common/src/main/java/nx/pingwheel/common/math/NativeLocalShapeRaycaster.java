@@ -57,20 +57,41 @@ public final class NativeLocalShapeRaycaster {
 		Objects.requireNonNull(hiddenPredicate, "hiddenPredicate");
 		Objects.requireNonNull(localCollisionContext, "localCollisionContext");
 
+		return traceWithContext(
+			localStart,
+			localEnd,
+			policy,
+			view,
+			localPositions,
+			hiddenPredicate,
+			PingClipContext.create(localStart, localEnd, policy, localCollisionContext));
+	}
+
+	/**
+	 * Package-visible production seam for the exact same scanner with an
+	 * explicitly supplied selection context.
+	 */
+	static Optional<LocalGeometryHit> traceWithContext(
+		Vec3 localStart,
+		Vec3 localEnd,
+		RaycastPolicy policy,
+		BlockGetter view,
+		Iterable<BlockPos> localPositions,
+		Predicate<BlockPos> hiddenPredicate,
+		ClipContext context
+	) {
+		Objects.requireNonNull(localStart, "localStart");
+		Objects.requireNonNull(localEnd, "localEnd");
+		Objects.requireNonNull(policy, "policy");
+		Objects.requireNonNull(view, "view");
+		Objects.requireNonNull(localPositions, "localPositions");
+		Objects.requireNonNull(hiddenPredicate, "hiddenPredicate");
+		Objects.requireNonNull(context, "context");
+
 		if (!isFinite(localStart) || !isFinite(localEnd) || localStart.distanceToSqr(localEnd) == 0.0) {
 			return Optional.empty();
 		}
 
-		ClipContext context = new ClipContext(
-			localStart,
-			localEnd,
-			policy.blockMode() == RaycastPolicy.BlockMode.OUTLINE
-				? ClipContext.Block.OUTLINE
-				: ClipContext.Block.VISUAL,
-			policy.fluidMode() == RaycastPolicy.FluidMode.ANY
-				? ClipContext.Fluid.ANY
-				: ClipContext.Fluid.NONE,
-			localCollisionContext);
 		Candidate best = null;
 
 		for (BlockPos suppliedPos : localPositions) {

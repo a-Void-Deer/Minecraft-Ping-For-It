@@ -148,7 +148,18 @@ public final class InventoryValidationBudget {
 		ItemResolutionStage open(Cost cost);
 	}
 	public static InventoryItemBudget.CaptureLimitException itemResolutionDeferred() {
-		return new InventoryItemBudget.CaptureLimitException("item resolution admission deferred");
+		return itemResolutionDeferred(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.ITEM_WORK_LIMIT);
+	}
+	public static ItemResolutionDeferred itemResolutionDeferred(nx.pingwheel.common.presentation.inventory.InventoryFailureReason reason) {
+		return new ItemResolutionDeferred(reason);
+	}
+	@org.jetbrains.annotations.NotNullByDefault
+	public static final class ItemResolutionDeferred extends InventoryItemBudget.CaptureLimitException {
+		private final nx.pingwheel.common.presentation.inventory.InventoryFailureReason reason;
+		private ItemResolutionDeferred(nx.pingwheel.common.presentation.inventory.InventoryFailureReason reason) {
+			super("item resolution admission deferred"); this.reason = reason;
+		}
+		public nx.pingwheel.common.presentation.inventory.InventoryFailureReason reason() { return reason; }
 	}
 	/** Construction workspace becomes the source's one retained metadata ticket, without a release/reacquire gap. */
 	@org.jetbrains.annotations.NotNullByDefault
@@ -288,13 +299,13 @@ public final class InventoryValidationBudget {
 		boolean vault = blockId.equals("create:item_vault");
 		long members = chest ? 2 : vault ? 81 : InventorySnapshotLayout.MAX_MEMBERS;
 		Cost structure = changedLayoutCopy(members, vault || chest ? members : members * InventorySnapshotLayout.MAX_SEGMENTS_PER_MEMBER)
-			.overlap(fixed(null)).overlap(owned(4096L * (O + 2 * R) + 16 * list(members), 4096 + 32 * members));
+			.overlap(fixed(null)).overlap(owned(nx.pingwheel.common.presentation.inventory.InventorySourceAccess.MAX_SLOTS * (O + 2 * R) + 16 * list(members), 4096 + 32 * members));
 		// Optional native certificate, canonical member DTO, identity witnesses and cached read profiles.
 		// These remain under the original resolution ownership ticket, even when certification is declined.
 		if (chest || vault) {
 			// Existing discovery already holds the conservative full-slot DTO/source
 			// workspace. Certificates reuse that envelope, not extra spendable scratch.
-			Cost certificate = owned(8192 + members * 4096 + 4096 * 128L, 131072 + members * 4096)
+			Cost certificate = owned(8192 + members * 4096 + nx.pingwheel.common.presentation.inventory.InventorySourceAccess.MAX_SLOTS * 128L, 131072 + members * 4096)
 				.plus(vault ? vaultValidation(members).times(3).plus(localClassification(3 * members)) : locks(2));
 			structure = structure.plus(new Cost(certificate.allocationBytes(), 0, certificate.workUnits()));
 		}
@@ -311,6 +322,16 @@ public final class InventoryValidationBudget {
 	/** Native Container construction is bounded to the hit and its reciprocal chest partner, never a provider limit. */
 	public static Cost itemContainerResolution() {
 		return itemResolutionStructure(2, 2).overlap(locks(2)).overlap(itemResolutionCertificate(2, 2));
+	}
+	/** Root/partner metadata only; slot mapping ownership is admitted after current sizes are known. */
+	public static Cost itemContainerProbe() { return fixed(null).overlap(owned(32768, 65536)).overlap(locks(2)); }
+	public static Cost itemContainerFinish(long members, long slots, long largestLocal) {
+		if (members < 1 || members > 2 || slots < 0 || slots > members * nx.pingwheel.common.presentation.inventory.InventorySourceAccess.MAX_SLOTS
+			|| largestLocal < 0 || largestLocal > nx.pingwheel.common.presentation.inventory.InventorySourceAccess.MAX_SLOTS
+			|| largestLocal > slots) throw new IllegalArgumentException("container finish shape");
+		return fixed(null).overlap(changedLayoutCopy(members, members, slots, largestLocal))
+			.overlap(owned(65536 + slots * 384L + members * 16384L, 131072 + slots * 512L + members * 8192L))
+			.overlap(locks(members + 1)).overlap(itemResolutionCertificate(members, 2 * members, slots));
 	}
 	/** Before find/snapshotLayout: known bridge classification and possible native Vault DTO construction (81 members). */
 	public static Cost itemProviderLookup() {
@@ -329,17 +350,41 @@ public final class InventoryValidationBudget {
 		// shared segment texts/mappings a second time. Its two bounded metadata
 		// graphs must fit the finish ticket even for non-native custom layouts.
 		return itemResolutionStructure(m, segments).overlap(owned(segments * 4 * (1024L + 256L)
-			+ 4096L * (O + R + Integer.BYTES), segments * 2 * (1024L + 256L) + 4096))
+			+ nx.pingwheel.common.presentation.inventory.InventorySourceAccess.MAX_SLOTS * (O + R + Integer.BYTES), segments * 2 * (1024L + 256L) + 4096))
 			.overlap(locks(m + 1)).overlap(itemResolutionCertificate(m, 2 * m));
+	}
+	/** Only the fixed native Vault finder constructs an owned member/layout graph inside lookup. */
+	public static Cost itemProviderLookup(boolean vault) {
+		return vault ? itemProviderLookup() : classification(1, true).times(4).overlap(fixed(null)).overlap(owned(32768, 65536));
+	}
+	/** Admit before inspecting any returned immutable member/segment shape, without mapping traversal. */
+	public static Cost itemProviderShape(long members) {
+		if (members < 0 || members > InventorySnapshotLayout.MAX_MEMBERS) throw new IllegalArgumentException("provider shape member bound");
+		return owned(8192, 4096 + members * (1024L + InventorySnapshotLayout.MAX_SEGMENTS_PER_MEMBER * 256L));
+	}
+	/** Returned DTO is immutable; the paid lookup envelope covers this bounded shape-only inspection. */
+	public static Cost itemProviderFinish(@org.jetbrains.annotations.Nullable InventorySnapshotLayout layout) {
+		if (layout == null) return fixed(null).overlap(owned(32768, 65536)).overlap(locks(2));
+		long members = layout.members().size(), slots = InventoryObservationSnapshot.visibleSlots(layout);
+		long segments = 0;
+		for (var member : layout.members()) segments += member.segments().size();
+		// Current source lists/scope, a canonical certificate DTO, cached profiles, exact
+		// text/mapping ownership and one actual-shape replacement all overlap until transfer.
+		return layoutCopy(layout).overlap(fixed(layout)).overlap(owned(32768 + slots * 160L + members * 8192L
+			+ segments * 10240L, 65536 + slots * 256L + members * 8192L))
+			.overlap(locks(members + 1)).overlap(itemResolutionCertificate(members, 2 * members, slots));
 	}
 	private static Cost itemResolutionStructure(long members, long segments) {
 		return changedLayoutCopy(members, segments).overlap(fixed(null))
-			.overlap(owned(4096L * (O + 2 * R) + 16 * list(members), 4096 + 32 * members));
+			.overlap(owned(nx.pingwheel.common.presentation.inventory.InventorySourceAccess.MAX_SLOTS * (O + 2 * R) + 16 * list(members), 4096 + 32 * members));
 	}
 	private static Cost itemResolutionCertificate(long members, long locks) {
+		return itemResolutionCertificate(members, locks, nx.pingwheel.common.presentation.inventory.InventorySourceAccess.MAX_SLOTS);
+	}
+	private static Cost itemResolutionCertificate(long members, long locks, long slots) {
 		// Canonical DTO, witnesses, route/state arrays and both cached 0..MAX_STEP
 		// cost directories; three current native checks plus cold local discovery.
-		return owned(8192 + members * 4096 + 4096 * 128L, 131072 + members * 4096)
+		return owned(8192 + members * 4096 + slots * 128L, 131072 + members * 4096 + slots * 128)
 			.overlap(vaultValidation(members).times(3).plus(localClassification(3 * members))).overlap(locks(locks));
 	}
 	/** Fixed DTO rebuild: member/segment records, mappings, seen arrays, copies and position set. */
@@ -353,11 +398,8 @@ public final class InventoryValidationBudget {
 			seenTotal = add(seenTotal, array(segment.localSlots())); seenPeak = Math.max(seenPeak, array(segment.localSlots()));
 			work = add(work, n + segment.localSlots() + 1024L + 256L);
 		}
-		// An altered metadata getter may widen the returned mapping before the
-		// frozen-layout comparison refuses it. Owned boxing/copies still have to
-		// fit the finite global slot bound on that failed attempt.
-		bytes = add(bytes, 4096L * (O + 4 * R + 1));
-		work = add(work, 4096);
+		// Producer DTO construction is paid by its lookup stage. Common code compares
+		// immutable returned shapes before any expanded member/mapping copy.
 		// Bounded layout/identity strings (including layoutData) and stream/iterator state.
 		bytes = add(bytes, 2 * (65536L + 3 * 256L) + 32 * O);
 		return new Cost(add(bytes, seenTotal), add(bytes, seenPeak), work + 65536 + 3 * 256);
@@ -365,14 +407,17 @@ public final class InventoryValidationBudget {
 	/** Native ordinary/Vault rebuilds have at most two/81 members before comparison. */
 	private static Cost changedLayoutCopy(long members, long segments) {
 		long slots = nx.pingwheel.common.presentation.inventory.InventorySourceAccess.MAX_SLOTS;
+		return changedLayoutCopy(members, segments, slots, slots);
+	}
+	private static Cost changedLayoutCopy(long members, long segments, long slots, long largestLocal) {
 		long bytes = list(members) + copy(members) + list(2 * members) + O
 			+ members * (4 * O + 16 * R + 3 * (2 * O + 2 * 256L))
 			+ segments * (6 * O + list(0) + copy(0))
 			+ slots * (O + 4 * R + 1) + 2 * (65536L + 3 * 256L) + 32 * O;
 		// Segment's boolean seen array dies after each constructor. It is not
 		// retained alongside every other segment's seen array.
-		return new Cost(add(bytes, segments * array(slots)), add(bytes, array(slots)),
-			members + segments * slots + slots + 65536 + 3 * 256);
+		return new Cost(add(bytes, segments * array(largestLocal)), add(bytes, array(largestLocal)),
+			members + segments * largestLocal + slots + 65536 + 3 * 256);
 	}
 	private static boolean vanilla(@org.jetbrains.annotations.Nullable InventorySnapshotLayout layout) {
 		return layout != null && (layout.layoutId().equals("minecraft:container") || layout.layoutId().equals("minecraft:double_chest"));
@@ -391,7 +436,10 @@ public final class InventoryValidationBudget {
 		// Generic provider DTOs are compared with the frozen descriptor before
 		// owned member prechecks/scope arrays. A widened return never reaches a
 		// max-members * max-segments * max-local-slots allocation.
-		Cost dto = vanilla || vault ? changedLayoutCopy(attemptedMembers, attemptedMembers) : layoutCopy(layout);
+		long largestLocal = 0;
+		for (var member : layout.members()) for (var segment : member.segments()) largestLocal = Math.max(largestLocal, segment.localSlots());
+		Cost dto = vanilla && largestLocal > 0 ? changedLayoutCopy(attemptedMembers, attemptedMembers, n, largestLocal)
+			: vault ? changedLayoutCopy(attemptedMembers, attemptedMembers) : layoutCopy(layout);
 		Cost cost = dto.overlap(fixed(layout))
 			.overlap(owned(n * (O + 2 * R) + 8 * list(attemptedMembers), n + 8 * attemptedMembers));
 		// Retain the conservative scope/scratch bound for every provider. The
@@ -448,7 +496,7 @@ public final class InventoryValidationBudget {
 		return owned(2 * list(m) + 4 * O + 2 * 256L * m, 16 * m).overlap(locks(lockableMembers));
 	}
 	public static Cost authority(InventorySnapshotLayout layout, long lockableMembers) {
-		return members(layout, lockableMembers).overlap(owned(array(nx.pingwheel.common.presentation.inventory.InventorySourceAccess.MAX_SLOTS),
+		return members(layout, lockableMembers).overlap(owned(array(InventoryObservationSnapshot.visibleSlots(layout)),
 			InventoryObservationSnapshot.visibleSlots(layout)));
 	}
 	/** Discovery: one view validation and one capability classification. */

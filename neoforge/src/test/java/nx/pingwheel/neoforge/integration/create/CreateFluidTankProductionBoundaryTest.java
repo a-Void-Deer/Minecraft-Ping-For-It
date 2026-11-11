@@ -56,6 +56,10 @@ class CreateFluidTankProductionBoundaryTest {
 	private static BlockOutlineSpec spec(TankNativeFixture fixture, BlockPos hit) {
 		return new BlockOutlineSpec(new MarkerId(1), (TargetKey.BlockKey) TargetKey.from(fixture.target(hit)), "entity_block", "attention", -1);
 	}
+	private static int shellCount(int width, int height) {
+		int interiorWidth = Math.max(0, width - 2), interiorHeight = Math.max(0, height - 2);
+		return width * width * height - interiorWidth * interiorWidth * interiorHeight;
+	}
 
 	@Test void archiveMetadataIsReadOnlyAndItsWidthAndVerticalAxisMatchTheProductionPrism() throws Exception {
 		var tank = archive(TANK);
@@ -77,7 +81,7 @@ class CreateFluidTankProductionBoundaryTest {
 		assertThrows(NoSuchMethodException.class, () -> new CreateFluidTankTopology.Api(BlockEntity.class, Blocks.STONE.getClass(), BlockEntity.class));
 	}
 
-	@Test void everyLoadedMemberProducesOneControllerKeyAndIdenticalOrderedEntityBlockSubjects() throws Exception {
+	@Test void everyLoadedMemberHitProducesOneControllerKeyAndIdenticalOrderedShellSubjects() throws Exception {
 		try (var mods = new Mods("6.0.10-281")) {
 			for (int width = 1; width <= 3; width++) try (var fixture = new TankNativeFixture(width, 5, new BlockPos(15, -5, -17))) {
 				var expected = new TargetKey.CreateTankKey("minecraft:overworld", 15, -5, -17, "create:fluid_tank");
@@ -86,7 +90,7 @@ class CreateFluidTankProductionBoundaryTest {
 				assertEquals(expected, group(fixture, fixture.root), "null or matching last known positions are valid");
 				fixture.clientEntities(); var registry = new BlockPresentationResolverRegistry(false); registry.register(resolver(fixture.loader));
 				var first = registry.resolve(fixture.client, spec(fixture, fixture.root));
-				assertEquals(width * width * 5, first.renderSubjects().size()); assertTrue(first.coverageRelations().isEmpty());
+				assertEquals(shellCount(width, 5), first.renderSubjects().size()); assertTrue(first.coverageRelations().isEmpty());
 				for (BlockPos hit : fixture.states.keySet()) {
 					var source = spec(fixture, hit); var presentation = registry.resolve(fixture.client, source);
 					assertSame(source, presentation.sourceSpec()); assertEquals(first.renderSubjects(), presentation.renderSubjects());
@@ -97,6 +101,36 @@ class CreateFluidTankProductionBoundaryTest {
 				@Unmodifiable List<BlockPos> positions = first.renderSubjects().stream().map(BlockRenderSubject::blockPos).toList();
 				assertEquals(positions.stream().sorted(java.util.Comparator.<BlockPos>comparingInt(p -> p.getX()).thenComparingInt(p -> p.getY()).thenComparingInt(p -> p.getZ())).toList(), positions);
 				assertEquals(positions.size(), first.renderSubjects().stream().map(BlockRenderSubject::subjectId).distinct().count());
+			}
+		}
+	}
+
+	@Test void strictTankInteriorIsExcludedForEveryHeightWhileShortWidthsRemainComplete() throws Exception {
+		try (var mods = new Mods("6.0.10")) {
+			for (int height : new int[] {3, 4, 5}) try (var fixture = new TankNativeFixture(3, height, new BlockPos(15, -5, -17))) {
+				fixture.clientEntities();
+				var registry = new BlockPresentationResolverRegistry(false); registry.register(resolver(fixture.loader));
+				var expected = new ArrayList<BlockPos>();
+				for (int x = 0; x < 3; x++) for (int y = 0; y < height; y++) for (int z = 0; z < 3; z++)
+					if (x != 1 || z != 1 || y == 0 || y == height - 1) expected.add(fixture.root.offset(x, y, z));
+				assertEquals(switch (height) { case 3 -> 26; case 4 -> 34; default -> 42; }, expected.size());
+				var first = registry.resolve(fixture.client, spec(fixture, fixture.root));
+				var shell = first.renderSubjects().stream().map(BlockRenderSubject::blockPos).toList();
+				assertEquals(expected, shell);
+				assertTrue(shell.contains(fixture.root.offset(1, 0, 1)));
+				assertTrue(shell.contains(fixture.root.offset(1, height - 1, 1)));
+				for (int y = 1; y < height - 1; y++) assertFalse(shell.contains(fixture.root.offset(1, y, 1)));
+				for (var hit : fixture.states.keySet()) assertEquals(first.renderSubjects(), registry.resolve(fixture.client, spec(fixture, hit)).renderSubjects());
+			}
+			for (int height : new int[] {1, 2}) try (var fixture = new TankNativeFixture(3, height, BlockPos.ZERO)) {
+				fixture.clientEntities();
+				var registry = new BlockPresentationResolverRegistry(false); registry.register(resolver(fixture.loader));
+				assertEquals(3 * 3 * height, registry.resolve(fixture.client, spec(fixture, fixture.root)).renderSubjects().size());
+			}
+			for (int width : new int[] {1, 2}) try (var fixture = new TankNativeFixture(width, 5, BlockPos.ZERO)) {
+				fixture.clientEntities();
+				var registry = new BlockPresentationResolverRegistry(false); registry.register(resolver(fixture.loader));
+				assertEquals(width * width * 5, registry.resolve(fixture.client, spec(fixture, fixture.root)).renderSubjects().size());
 			}
 		}
 	}
@@ -263,6 +297,65 @@ class CreateFluidTankProductionBoundaryTest {
 					assertEquals(anchor, store.marker(new MarkerId(1)).orElseThrow().anchor());
 				} finally { models.clear(); outline.clear(); }
 			}
+		}
+	}
+
+	@Test void strictlyInteriorTankCellSkipsEverySourceAndNativeFallbackWhileShellsStillFallBack() throws Exception {
+		try (var mods = new Mods("6.0.10"); var fixture = new TankNativeFixture(3, 3, BlockPos.ZERO)) {
+			fixture.clientEntities();
+			try (var registration = BlockPresentationResolverRegistry.INSTANCE.register(resolver(fixture.loader))) {
+				var store = new ClientMarkerStore(0); var key = new TargetKey.CreateTankKey("minecraft:overworld", 0, 0, 0, "create:fluid_tank");
+				var hit = new BlockPos(1, 1, 1);
+				store.onCreated(new MarkerSnapshot(new MarkerId(1), VaultNativeFixture.OWNER, fixture.target(hit), key, "entity_block", "attention", new MarkerAnchor(1.5, 1.5, 1.5), 1, 30), 0);
+				store.onWinnerChanged(key, Optional.of(new MarkerId(1)));
+				var outline = BlockOutlineState.INSTANCE; var models = BlockModelOutlineState.INSTANCE;
+				try {
+					outline.prepare(store, "minecraft:overworld"); models.beginFrame(); models.preparePresentations(fixture.client, outline);
+					var presentation = models.presentations().getFirst();
+					assertTrue(presentation.coverageRelations().isEmpty(), "tank presentations declare no coverage relation");
+					var shell = presentation.renderSubjects().stream().map(BlockRenderSubject::blockPos).toList();
+					assertEquals(26, shell.size()); assertFalse(shell.contains(hit));
+					assertEquals(shell.stream().sorted(java.util.Comparator.<BlockPos>comparingInt(p -> p.getX()).thenComparingInt(p -> p.getY()).thenComparingInt(p -> p.getZ())).toList(), shell);
+					assertTrue(shell.contains(new BlockPos(1, 0, 1)) && shell.contains(new BlockPos(1, 2, 1)));
+					var visited = new ArrayList<BlockPos>();
+					TankPresentationTestPort.dispatch(presentation, subject -> fail("no shell source may report success"), (subject, observer) -> {
+						assertNull(observer, "a tank presentation declares no coverage relation");
+						visited.add(subject.blockPos());
+						return false;
+					});
+					assertEquals(shell, visited); assertFalse(visited.contains(hit)); assertTrue(models.successKeys().isEmpty());
+					fixture.renderReads = true; var vertices = new Vertices();
+					BlockOutlineRenderer.render(fixture.client, allocate(net.minecraft.client.Camera.class), net.minecraft.world.phys.Vec3.ZERO,
+						vertices, outline, models.presentations(), models.successKeys(), java.util.Set.of(), 0);
+					assertEquals(26 * 24, vertices.positions.size(), "each published shell subject whose model route declined keeps its own native edges");
+					for (var subject : presentation.renderSubjects()) models.addSuccess(subject.successKey(presentation.sourceSpec()));
+					assertEquals(26, models.successKeys().size()); models.clearSuccesses();
+					assertEquals(26, models.presentations().getFirst().renderSubjects().size());
+					vertices.positions.clear();
+					BlockOutlineRenderer.render(fixture.client, allocate(net.minecraft.client.Camera.class), net.minecraft.world.phys.Vec3.ZERO,
+						vertices, outline, models.presentations(), models.successKeys(), java.util.Set.of(), 0);
+					assertEquals(26 * 24, vertices.positions.size(), "cleared successes and the shape-only route cannot restore the interior");
+				} finally { fixture.renderReads = false; models.clear(); outline.clear(); }
+			}
+		}
+	}
+
+	@Test void missingOrReplacedInteriorCellInvalidatesTheWholeTopologyBeforeFilteringAndNextFrameRecovers() throws Exception {
+		try (var mods = new Mods("6.0.10"); var fixture = new TankNativeFixture(3, 3, BlockPos.ZERO)) {
+			fixture.clientEntities(); var registry = new BlockPresentationResolverRegistry(false); registry.register(resolver(fixture.loader));
+			var hit = new BlockPos(0, 1, 1); var source = spec(fixture, hit);
+			var full = registry.resolve(fixture.client, source); assertEquals(26, full.renderSubjects().size());
+			var interior = new BlockPos(1, 1, 1); var entity = java.util.Objects.requireNonNull(fixture.entities.remove(interior));
+			var missing = registry.resolve(fixture.client, source);
+			assertEquals(1, missing.renderSubjects().size()); assertEquals(hit, missing.renderSubjects().getFirst().blockPos());
+			assertEquals(BlockPresentationRelation.DIRECT, missing.renderSubjects().getFirst().relation());
+			fixture.entities.put(interior, entity);
+			var state = java.util.Objects.requireNonNull(fixture.states.put(interior, Blocks.STONE.defaultBlockState()));
+			var replaced = registry.resolve(fixture.client, source);
+			assertEquals(1, replaced.renderSubjects().size()); assertEquals(hit, replaced.renderSubjects().getFirst().blockPos());
+			assertEquals(BlockPresentationRelation.DIRECT, replaced.renderSubjects().getFirst().relation());
+			fixture.states.put(interior, state);
+			assertEquals(full.renderSubjects(), registry.resolve(fixture.client, source).renderSubjects(), "the next frame recovers the same shell");
 		}
 	}
 

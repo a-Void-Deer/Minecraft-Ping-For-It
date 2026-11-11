@@ -340,8 +340,8 @@ class InventoryCertifiedReadTest {
 		int callbacks = world.metadata;
 		assertThrows(InventoryItemBudget.CaptureLimitException.class, () -> port.read(0, port.proof(), catalog, new InventoryCatalogAdmission(0, 0), readGrant(port)));
 		assertEquals(callbacks, world.metadata);
-		long workspace = InventoryCatalogAdmission.workspaceUpperBound(InventoryItemCodec.MAX_CANONICAL_BYTES, 4096, InventoryItemCodec.DEFAULT_MAX_ENTRIES);
-		long work = InventoryCatalogAdmission.workUpperBound(4096);
+		long workspace = InventoryCatalogAdmission.workspaceUpperBound(InventoryItemCodec.MAX_CANONICAL_BYTES, 4096, catalog.entriesUpperBound());
+		long work = InventoryCatalogAdmission.workUpperBound(4096, catalog.entriesUpperBound());
 		for (var shortGrant : List.of(new InventoryCatalogAdmission(workspace - 1, work), new InventoryCatalogAdmission(workspace, work - 1))) {
 			assertThrows(InventoryItemBudget.CaptureLimitException.class, () -> port.read(0, port.proof(), catalog, shortGrant, readGrant(port)));
 			assertEquals(callbacks, world.metadata);
