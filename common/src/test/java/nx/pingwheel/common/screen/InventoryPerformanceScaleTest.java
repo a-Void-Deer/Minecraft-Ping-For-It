@@ -20,7 +20,14 @@ class InventoryPerformanceScaleTest {
 			assertEquals(new BigDecimal("16"), scale.finiteValueAt(0));
 			assertNeighbors(scale, "64", "62", "68");
 			assertNeighbors(scale, "256", "252", "264");
-			assertEquals(new BigDecimal("1024"), scale.finiteValueAt(scale.size() - 2));
+			int expectedMaximum = switch (field) {
+				case PHYSICAL_SLOTS_PER_TICK -> 4096;
+				case PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD -> 1024;
+				case PREVIEW_MAX_SLOTS_PER_CLIENT, TRACKING_MAX_SLOTS_PER_TARGET -> 16384;
+				case PREVIEW_MAX_SLOTS_SERVER -> 65536;
+				default -> throw new AssertionError(field);
+			};
+			assertEquals(BigDecimal.valueOf(expectedMaximum), scale.finiteValueAt(scale.size() - 2));
 			assertTrue(scale.isUnlimited(scale.size() - 1));
 		}
 	}
@@ -31,20 +38,20 @@ class InventoryPerformanceScaleTest {
 		assertEquals(new BigDecimal("128"), global.finiteValueAt(0));
 		assertNeighbors(global, "512", "480", "640");
 		assertNeighbors(global, "2048", "1920", "2560");
-		assertEquals(new BigDecimal("16384"), global.finiteValueAt(global.size() - 2));
+		assertEquals(new BigDecimal("262144"), global.finiteValueAt(global.size() - 2));
 
 		var memory = InventoryPerformanceScale.forField(Field.PENDING_MEMORY_MIB);
 		assertEquals(new BigDecimal("16"), memory.finiteValueAt(0));
 		assertNeighbors(memory, "64", "60", "72");
 		assertNeighbors(memory, "256", "248", "272");
-		assertEquals(new BigDecimal("1024"), memory.finiteValueAt(memory.size() - 2));
+		assertEquals(new BigDecimal("2048"), memory.finiteValueAt(memory.size() - 2));
 		assertTrue(memory.isUnlimited(memory.size() - 1));
 	}
 
 	@Test
 	void linearScalesDistinguishUnlimitedFromTheTwoZeroSentinels() {
-		assertLinear(Field.PREVIEW_MAX_TARGETS_PER_CLIENT, 1, 8, true);
-		assertLinear(Field.TRACKING_MAX_VARIANTS_PER_TARGET, 1, 32, true);
+		assertLinear(Field.PREVIEW_MAX_TARGETS_PER_CLIENT, 1, 16, true);
+		assertLinear(Field.TRACKING_MAX_VARIANTS_PER_TARGET, 1, 128, true);
 		assertLinear(Field.PREVIEW_PERIOD_TICKS, 1, 10, false);
 		assertLinear(Field.TRACKING_PERIOD_TICKS, 1, 10, false);
 		assertLinear(Field.TRACKING_RESYNC_MIN_PERIODS, 0, 10, false);
@@ -77,7 +84,7 @@ class InventoryPerformanceScaleTest {
 		assertNeighbors(extra, "66", "64", "72");
 		assertSame(extra, extra.including(Value.limit(true, 66)));
 		assertSame(extra, extra.including(Value.limit(false, 15)));
-		assertSame(extra, extra.including(Value.limit(false, 1025)));
+		assertSame(extra, extra.including(Value.limit(false, 2049)));
 		assertSame(extra, extra.including(new Value(false, new BigDecimal("66.5"))));
 		assertThrows(UnsupportedOperationException.class, () -> extra.finiteValues().add(BigDecimal.ZERO));
 	}

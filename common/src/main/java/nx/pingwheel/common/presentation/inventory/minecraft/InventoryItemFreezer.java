@@ -51,7 +51,7 @@ final class InventoryItemFreezer {
 		// One caught identity/display refusal may precede a capture-retention
 		// refusal. Each Throwable has depth int/five refs, no backtrace/message
 		// formatting; both allocation attempts are reserved, not just the last.
-		budget.allocate(8, 0, 10, 2);
+		budget.allocate(10, 0, 12, 2);
 		// Catalog summary/strict OLD parse/hash/map processing is separately
 		// admitted by InventoryCatalogAdmission, never charged to identity here.
 		if (input instanceof InventoryResidentItem.Stack stack) InventoryComponentCertificate.exact(stack.resident(), ItemStack.class);
@@ -83,6 +83,9 @@ final class InventoryItemFreezer {
 		try {
 			budget.allocate(0, 0, 2, 1); // RegistryOps.withParent JSON
 			json = InventoryDisplayWriter.project(plan.saved(nbtContext.withParent(JsonOps.INSTANCE), true, false), itemId, displayBytes, budget);
+			if (json == null) budget.displayDegraded(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.PROVIDER_FAILURE, false, "display-structure-refused");
+			else if (certificates.hasExternalComponents()) budget.displayDegraded(
+				nx.pingwheel.common.presentation.inventory.InventoryFailureReason.UNSUPPORTED_CONTEXT, false, "opaque-components-suppressed");
 		} catch (InventoryItemBudget.RootLimitException displayRefusal) {
 			InventoryItemDiagnostics.refusal("inventory/item-display", itemId, displayRefusal);
 			json = null;
@@ -198,7 +201,12 @@ final class InventoryItemFreezer {
 			if (type == DataComponents.CONTAINER) { InventoryComponentCertificate.exact(value, ItemContainerContents.class); resident = raw.container((ItemContainerContents) value); }
 			else if (type == DataComponents.BUNDLE_CONTENTS) { InventoryComponentCertificate.exact(value, BundleContents.class); resident = raw.bundle((BundleContents) value); }
 			else { InventoryComponentCertificate.exact(value, ChargedProjectiles.class); resident = raw.projectiles((ChargedProjectiles) value); }
-			List<?> list = certificates.list(resident); budget.allocate(8 + 4L * list.size(), 0, 3L * list.size() + 1, 2L * list.size() + 2);
+			List<?> list = certificates.list(resident);
+			// Native container slot addresses remain bytes (0..255); the larger
+			// ordinary-list guard cannot widen that persistent item schema.
+			if (type == DataComponents.CONTAINER && list.size() > 256)
+				throw new InventoryItemBudget.RootLimitException(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.NATIVE_LIST_LIMIT, "native container slot cardinality");
+			budget.allocate(8 + 4L * list.size(), 0, 3L * list.size() + 1, 2L * list.size() + 2);
 			var plans = new ArrayList<Slot>(list.size());
 			for (int index = 0; index < list.size(); index++) {
 				budget.work(32);

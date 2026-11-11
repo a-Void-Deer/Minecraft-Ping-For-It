@@ -12,6 +12,47 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
 class InventoryCanonicalWriterTest {
+	@Test void enlargedListsNodesAndArraysKeepTheExactIndependentEncodingAndSeparateMapBound() throws Exception {
+		var list = new ListTag();
+		for (int i = 0; i < 512; i++) list.add(IntTag.valueOf(i));
+		assertOracle(list);
+		list.add(IntTag.valueOf(512));
+		assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.NATIVE_LIST_LIMIT,
+			assertThrows(InventoryItemCodec.IdentityUnavailableException.class, () -> InventoryItemCodec.canonicalTag(list)).reason());
+		var nodes = new ListTag(); int remaining = 8191;
+		while (remaining > 0) {
+			var child = new ListTag(); int cells = Math.min(512, remaining - 1);
+			for (int i = 0; i < cells; i++) child.add(ByteTag.ZERO);
+			nodes.add(child); remaining -= cells + 1;
+		}
+		assertOracle(nodes);
+		((ListTag) nodes.get(nodes.size() - 1)).add(ByteTag.ZERO);
+		var refusedNodes = InventoryItemBudget.root(1024); refusedNodes.begin(1024);
+		try {
+			assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.NATIVE_NODE_LIMIT,
+				assertThrows(InventoryItemCodec.IdentityUnavailableException.class, () -> InventoryCanonicalWriter.write(nodes, refusedNodes)).reason());
+			assertTrue(refusedNodes.attemptedWork() >= 8192);
+		} finally { refusedNodes.end(); }
+		for (Tag array : java.util.List.of(new ByteArrayTag(new byte[60 * 1024]),
+			new IntArrayTag(new int[15 * 1024]), new LongArrayTag(new long[7680]))) assertOracle(array);
+		var refusedArray = InventoryItemBudget.root(1024); refusedArray.begin(1024);
+		try {
+			assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.NATIVE_ARRAY_LIMIT,
+				assertThrows(InventoryItemCodec.IdentityUnavailableException.class,
+					() -> InventoryCanonicalWriter.write(new ByteArrayTag(new byte[60 * 1024 + 1]), refusedArray)).reason());
+			assertTrue(refusedArray.attemptedWork() > 0); assertTrue(refusedArray.rootAllocatedBytes() < 1024);
+		} finally { refusedArray.end(); }
+		var map = new CompoundTag(); for (int i = 0; i < 257; i++) map.putInt("k" + i, i);
+		assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.NATIVE_MAP_LIMIT,
+			assertThrows(InventoryItemCodec.IdentityUnavailableException.class, () -> InventoryItemCodec.canonicalTag(map)).reason());
+	}
+	private static void assertOracle(Tag tag) throws Exception {
+		var bytes = new ByteArrayOutputStream(); var output = new DataOutputStream(bytes); original(tag, output); output.flush();
+		var budget = InventoryItemBudget.root(1024); budget.begin(1024);
+		try { assertArrayEquals(bytes.toByteArray(), InventoryCanonicalWriter.write(tag, budget)); }
+		finally { budget.end(); }
+	}
+
 	@Test void fixedWriterMatchesIndependentDataOutputForAllTagKindsAndUtfReplacement() throws Exception {
 		var root = new CompoundTag();
 		root.putByte("byte", (byte) -128); root.putShort("short", (short) -32768); root.putInt("int", Integer.MIN_VALUE);

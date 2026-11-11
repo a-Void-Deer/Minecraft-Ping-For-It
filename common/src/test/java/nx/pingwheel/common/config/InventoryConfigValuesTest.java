@@ -12,6 +12,33 @@ import java.util.EnumMap;
 import static org.junit.jupiter.api.Assertions.*;
 
 class InventoryConfigValuesTest {
+	@Test
+	void fieldSpecificFiniteCeilingsRoundTripAndRefuseOneOverWithoutWideningVariantQuota() {
+		var ceilings = new EnumMap<Field, Integer>(Field.class);
+		ceilings.put(Field.PHYSICAL_SLOTS_PER_TICK, 4096);
+		ceilings.put(Field.PENDING_MEMORY_MIB, 2048);
+		ceilings.put(Field.PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD, 1024);
+		ceilings.put(Field.PREVIEW_MAX_SLOTS_PER_CLIENT, 16384);
+		ceilings.put(Field.PREVIEW_MAX_SLOTS_SERVER, 65536);
+		ceilings.put(Field.PREVIEW_MAX_TARGETS_PER_CLIENT, 16);
+		ceilings.put(Field.TRACKING_MAX_VARIANTS_PER_TARGET, 128);
+		ceilings.put(Field.TRACKING_MAX_SLOTS_PER_TARGET, 16384);
+		ceilings.put(Field.TRACKING_MAX_SLOTS_SERVER, 262144);
+		for (var entry : ceilings.entrySet()) {
+			Field field = entry.getKey(); int maximum = entry.getValue();
+			assertEquals(maximum, field.maximum());
+			for (boolean unlimited : new boolean[] {false, true}) {
+				Value maximumValue = Value.limit(unlimited, maximum);
+				assertTrue(field.isSafe(maximumValue));
+				assertEquals(maximumValue, field.parse(Integer.toString(maximum), unlimited).orElseThrow());
+				assertFalse(field.isSafe(Value.limit(unlimited, maximum + 1)));
+				assertTrue(field.parse(Integer.toString(maximum + 1), unlimited).isEmpty());
+				var values = InventoryConfigValues.defaults().with(field, maximumValue);
+				assertEquals(values, InventoryConfigValues.from(values.toSettings()));
+			}
+		}
+	}
+
 	@ParameterizedTest
 	@EnumSource(Field.class)
 	void eachLeafMergePreservesEveryUnselectedCurrentValue(Field selected) {

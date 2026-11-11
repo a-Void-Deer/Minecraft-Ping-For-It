@@ -2,6 +2,8 @@ package nx.pingwheel.common.presentation.inventory.minecraft;
 
 import nx.pingwheel.common.config.InventoryLimits;
 import nx.pingwheel.common.presentation.inventory.InventoryReprojectionSummary;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
+import org.jetbrains.annotations.NotNullByDefault;
 
 /**
  * Scalar sub-allowance of reservations already held by the caller. This is not a
@@ -10,16 +12,19 @@ import nx.pingwheel.common.presentation.inventory.InventoryReprojectionSummary;
  * when an intern refuses identity or retention. Lazy snapshot reads need their
  * own live scratch reservation, not the expired freeze reservation.
  */
+@NotNullByDefault
 public final class InventoryCatalogAdmission {
 
-	static final int TABLE_CAPACITY = 512;
+	static final int TABLE_CAPACITY = 2048;
 	// Clone header40; digest/hex/both String coders408; Key+Encoded112;
-	// nullable replacement Display65; Builder+two summary records252;
-	// one stackless capacity-refusal Throwable88 (includes its typed limit).
+	// nullable replacement Display65; reprojection result72; Builder+two summary records252;
+	// one stackless capacity-refusal Throwable104 (typed limit/reason/flag).
 	// No input-proportional slack.
-	private static final long FIXED_BYTES = 40 + 408 + 112 + 65 + 252 + 88;
-	private static final InventoryItemBudget.CaptureLimitException EXHAUSTED =
-		new InventoryItemBudget.CaptureLimitException("inventory catalog admission exhausted");
+	private static final long FIXED_BYTES = 40 + 408 + 112 + 65 + 72 + 252 + 104;
+	private static final InventoryItemBudget.CaptureLimitException WORK_EXHAUSTED =
+		new InventoryItemBudget.CaptureLimitException(InventoryFailureReason.ITEM_WORK_LIMIT, "inventory catalog work admission exhausted");
+	private static final InventoryItemBudget.CaptureLimitException WORKSPACE_EXHAUSTED =
+		new InventoryItemBudget.CaptureLimitException(InventoryFailureReason.MEMORY_LIMIT, "inventory catalog workspace admission exhausted");
 	/** Four scalar longs; caller admits this metadata before constructing a grant. */
 	public static final long METADATA_BYTES = 72;
 	private final long workspaceBytes, workUnits;
@@ -34,18 +39,26 @@ public final class InventoryCatalogAdmission {
 	public long peakWorkspaceBytes() { return peakWorkspace; }
 	/** Fluid canonical/hash/index processing uses the same caller-owned global grant, never a second ledger. */
 	public void admitFluid(int canonicalBytes, int idUnits, int labelUnits, int displayUnits) {
+		admitFluid(canonicalBytes, idUnits, labelUnits, displayUnits, InventoryItemCodec.DEFAULT_MAX_ENTRIES);
+	}
+	/** Actual already-retained occupancy; the owning page separately admits possible growth before callbacks. */
+	public void admitFluid(int canonicalBytes, int idUnits, int labelUnits, int displayUnits, int entries) {
 		// Length metadata admits the subsequent scans and UTF allocation. Three
 		// bytes per UTF-16 unit also dominates surrogate pairs; malformed input is
 		// refused by the detached display contract, never silently canonicalized.
 		if (displayUnits < 0 || displayUnits > InventoryLimits.MAX_DISPLAY_BYTES) throw new IllegalArgumentException("fluid display span");
 		int bytes = (int) Math.min(InventoryLimits.MAX_DISPLAY_BYTES, 3L * displayUnits);
-		admit(workspaceUpperBound(canonicalBytes, bytes, InventoryItemCodec.DEFAULT_MAX_ENTRIES),
-			scanWorkUpperBound(displayUnits, idUnits, labelUnits) + operationWorkUpperBound(canonicalBytes, bytes, InventoryItemCodec.DEFAULT_MAX_ENTRIES));
+		admit(workspaceUpperBound(canonicalBytes, bytes, entries),
+			scanWorkUpperBound(displayUnits, idUnits, labelUnits) + operationWorkUpperBound(canonicalBytes, bytes, entries));
 	}
 	/** Preflight a certified native read before its first provider callback. Intern still pays actual attempted work. */
 	void requireNativeRead(int displayBytes) {
-		if (workspaceBytes < workspaceUpperBound(InventoryItemCodec.MAX_CANONICAL_BYTES, displayBytes, InventoryItemCodec.DEFAULT_MAX_ENTRIES)
-			|| workUnits - attemptedWork < workUpperBound(displayBytes)) throw EXHAUSTED;
+		requireNativeRead(displayBytes, InventoryItemCodec.DEFAULT_MAX_ENTRIES);
+	}
+	/** The caller's admitted per-attempt occupancy, never an authority or content cache. */
+	void requireNativeRead(int displayBytes, int entries) {
+		if (workspaceBytes < workspaceUpperBound(InventoryItemCodec.MAX_CANONICAL_BYTES, displayBytes, entries)) throw WORKSPACE_EXHAUSTED;
+		if (workUnits - attemptedWork < workUpperBound(displayBytes, entries)) throw WORK_EXHAUSTED;
 	}
 
 	/** Checked, allocation-free metadata, before the actual UTF-8 length scan. */
@@ -71,7 +84,7 @@ public final class InventoryCatalogAdmission {
 	public static long workspaceUpperBound(int canonicalBytes, int oldUtf8Bytes, int entries) {
 		inputs(canonicalBytes, oldUtf8Bytes, entries);
 		long parser = oldUtf8Bytes == 0 ? 0 : InventoryItemBudget.reprojectionWorkspaceUpperBound(oldUtf8Bytes);
-		// With capacity512 and no removal, a bin converts at exactly nine nodes;
+		// With capacity2048 and no removal, a bin converts at exactly nine nodes;
 		// it cannot grow a longer linked chain or later untreeify. Key is not
 		// Comparable and String has HashMap's explicit fast path, so neither
 		// comparableClassFor branch performs generic reflection or allocates.
@@ -105,15 +118,19 @@ public final class InventoryCatalogAdmission {
 
 	/** Whole ordinary native read envelope; actual-input callers can reserve less. */
 	public static long workUpperBound(int displayBytes) {
+		return workUpperBound(displayBytes, InventoryItemCodec.DEFAULT_MAX_ENTRIES);
+	}
+	/** One native read at a bounded occupancy; page callers include all possible prior insertions. */
+	public static long workUpperBound(int displayBytes, int entries) {
 		InventoryItemBudget.displayCap(displayBytes);
 		return Math.addExact(scanWorkUpperBound(displayBytes, 256, 262),
-			operationWorkUpperBound(InventoryItemCodec.MAX_CANONICAL_BYTES, displayBytes, InventoryItemCodec.DEFAULT_MAX_ENTRIES));
+			operationWorkUpperBound(InventoryItemCodec.MAX_CANONICAL_BYTES, displayBytes, entries));
 	}
 
 	void admit(long workspace, long work) {
 		if (workspace < 0 || work < 0) throw new IllegalArgumentException("catalog charge");
-		if (workspace > workspaceBytes || work > workUnits - attemptedWork)
-			throw EXHAUSTED;
+		if (workspace > workspaceBytes) throw WORKSPACE_EXHAUSTED;
+		if (work > workUnits - attemptedWork) throw WORK_EXHAUSTED;
 		attemptedWork += work; peakWorkspace = Math.max(peakWorkspace, workspace);
 	}
 

@@ -11,6 +11,7 @@ import nx.pingwheel.common.resource.LanguageUtils;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import java.math.BigDecimal;
@@ -21,6 +22,31 @@ import static org.junit.jupiter.api.Assertions.*;
 /** Exercises the same factory and native drag/key callbacks used by the Performance page. */
 @NotNullByDefault
 class InventoryPerformanceOptionTest {
+	@ParameterizedTest
+	@CsvSource({"PHYSICAL_SLOTS_PER_TICK,16,4096", "PENDING_MEMORY_MIB,16,2048",
+		"PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD,16,1024", "PREVIEW_MAX_SLOTS_PER_CLIENT,16,16384",
+		"PREVIEW_MAX_SLOTS_SERVER,16,65536", "PREVIEW_MAX_TARGETS_PER_CLIENT,1,16",
+		"TRACKING_MAX_VARIANTS_PER_TARGET,1,128", "TRACKING_MAX_SLOTS_PER_TARGET,16,16384",
+		"TRACKING_MAX_SLOTS_SERVER,128,262144"})
+	void countSlidersReachIndependentFiniteEndpointsAndRetainTheMaximumInUnlimitedMode(Field field, int minimum, int maximum) {
+		var model = loaded(field, Value.limit(false, minimum), true);
+		var slider = slider(field, model, new AtomicInteger());
+		slider.onClick(slider.getX() + slider.getWidth(), 0);
+		assertTrue(model.inventoryUnlimited(field));
+		assertEquals(Integer.toString(minimum), model.inventoryText(field));
+		slider.keyPressed(32, 0, 0);
+		slider.keyPressed(263, 0, 0);
+		assertFalse(model.inventoryUnlimited(field));
+		assertEquals(Integer.toString(maximum), model.inventoryText(field));
+		assertEquals(Value.limit(false, maximum), model.updatePlan().orElseThrow().inventory().value(field));
+		slider.keyPressed(262, 0, 0);
+		assertTrue(model.inventoryUnlimited(field));
+		assertEquals(Integer.toString(maximum), model.inventoryText(field));
+		slider.onDrag(slider.getX(), 0, -slider.getWidth(), 0);
+		assertEquals(Integer.toString(minimum), model.inventoryText(field));
+		assertFalse(model.dirty());
+	}
+
 	@ParameterizedTest
 	@EnumSource(value = SettingsCategoryCatalog.Setting.class, names = {
 		"INVENTORY_TRACKING_DISTINGUISH_FACES", "INVENTORY_TRACKING_DISTINGUISH_PLAYERS"})
@@ -117,7 +143,7 @@ class InventoryPerformanceOptionTest {
 		assertTrue(slider.keyPressed(32, 0, 0));
 		assertTrue(slider.keyPressed(263, 0, 0));
 		assertFalse(model.inventoryUnlimited(field));
-		assertEquals("1024", model.inventoryText(field));
+		assertEquals("2048", model.inventoryText(field));
 		slider.onDrag(slider.getX(), 0, -slider.getWidth(), 0);
 		assertEquals("16", model.inventoryText(field));
 		assertFalse(model.inventoryUnlimited(field));
@@ -179,7 +205,7 @@ class InventoryPerformanceOptionTest {
 		var model = loaded(field, Value.limit(true, 66), true);
 		var scale = model.inventoryScale(field);
 		model.selectInventoryPosition(field, scale.size() - 2);
-		assertEquals("1024", model.inventoryText(field));
+		assertEquals("2048", model.inventoryText(field));
 		assertFalse(model.inventoryUnlimited(field));
 		assertTrue(model.dirty());
 

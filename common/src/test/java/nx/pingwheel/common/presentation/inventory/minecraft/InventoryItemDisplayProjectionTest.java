@@ -252,7 +252,6 @@ class InventoryItemDisplayProjectionTest {
 
 		assertEquals(standard.key(), configured.key(), "the projection cap never changes variant identity");
 		assertEquals(InventoryItemCodec.MAX_CANONICAL_BYTES, 65536);
-		assertEquals(InventoryItemCodec.DEFAULT_MAX_RETAINED_BYTES, 262144L);
 		assertThrows(InventoryItemCodec.IdentityUnavailableException.class,
 			() -> InventoryItemCodec.canonicalTag(net.minecraft.nbt.StringTag.valueOf(
 				"x".repeat(InventoryItemCodec.MAX_CANONICAL_BYTES + 1))));

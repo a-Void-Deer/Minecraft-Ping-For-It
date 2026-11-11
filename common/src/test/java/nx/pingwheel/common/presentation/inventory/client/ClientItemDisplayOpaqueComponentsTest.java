@@ -506,14 +506,20 @@ class ClientItemDisplayOpaqueComponentsTest {
 		assertEquals(namesBefore, item.nameCalls, "constructor hook injection is rejected before name composition");
 	}
 
-	@Test void throwingNameHookReportsOriginalCauseOnceWhileNormalSafetySuppressionStaysSilent() {
-		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
+	@Test void nonLimitDisplayDegradationSharesItsReasonChannelWithoutPayloadTraversal() {
+		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture(org.apache.logging.log4j.Level.DEBUG)) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT, nx.pingwheel.common.diagnostics.LoggingProfile.DEBUG);
 			item.nameHook = stack -> stack.set(persistent, opaque);
-			assertUnavailable(resolve(payload(""))); assertTrue(logs.events().isEmpty());
+			assertUnavailable(resolve(payload(""))); assertEquals(1, logs.events().size());
+			item.nameHook = stack -> { throw new IllegalStateException("name hook failed", new RuntimeException("display hook root cause")); };
+			assertUnavailable(resolve(payload(""))); assertUnavailable(resolve(payload("")));
+			assertEquals(1, logs.events().size());
+			assertTrue(logs.messages().contains("site=display")); assertNull(logs.events().getFirst().getThrown());
+		}
+		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture(org.apache.logging.log4j.Level.DEBUG)) {
 			item.nameHook = stack -> { throw new IllegalStateException("name hook failed", new RuntimeException("display hook root cause")); };
 			assertUnavailable(resolve(payload(""))); assertUnavailable(resolve(payload("")));
 			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("display hook root cause"));
-			assertTrue(logs.messages().contains("site=inventory/client-display-resolve")); assertNull(logs.events().getFirst().getThrown());
 		}
 	}
 
@@ -521,11 +527,12 @@ class ClientItemDisplayOpaqueComponentsTest {
 		String encoded = payload("");
 		var runtime = new IllegalStateException("display constructor failed", new RuntimeException("constructor root cause"));
 		item.hook = stack -> { throw runtime; };
-		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
+		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture(org.apache.logging.log4j.Level.DEBUG)) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT, nx.pingwheel.common.diagnostics.LoggingProfile.DEBUG);
 			assertUnavailable(resolve(encoded));
 			assertTrue(ClientItemDisplay.decode(RegistryAccess.EMPTY, encoded).isEmpty());
 			assertTrue(ClientItemDisplay.decodeName(RegistryAccess.EMPTY, encoded).isEmpty());
-			assertEquals(3, logs.events().size()); assertTrue(logs.messages().contains("constructor root cause"));
+			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("constructor root cause"));
 		}
 		var linkage = new LinkageError("display constructor linkage failure");
 		item.hook = stack -> { throw linkage; };
@@ -555,9 +562,10 @@ class ClientItemDisplayOpaqueComponentsTest {
 		String encoded = payload("");
 		assertFalse(resolve(encoded).stack().isEmpty()); assertEquals(1, ClientItemDisplay.cachedEntryCount());
 		item.componentsReadHook = () -> { throw new IllegalStateException("cached defaults failed"); };
-		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
+		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture(org.apache.logging.log4j.Level.DEBUG)) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT, nx.pingwheel.common.diagnostics.LoggingProfile.DEBUG);
 			assertUnavailable(resolve(encoded)); assertEquals(0, ClientItemDisplay.cachedEntryCount());
-			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("site=inventory/client-display-resolve"));
+			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("site=display"));
 		}
 		item.componentsReadHook = () -> {};
 		assertFalse(resolve(encoded).stack().isEmpty()); assertEquals(1, ClientItemDisplay.cachedEntryCount());
@@ -581,11 +589,12 @@ class ClientItemDisplayOpaqueComponentsTest {
 					throw (LinkageError) failure;
 				}
 			};
-			try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture()) {
+			try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture(org.apache.logging.log4j.Level.DEBUG)) {
+				nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT, nx.pingwheel.common.diagnostics.LoggingProfile.DEBUG);
 				if (failure instanceof RuntimeException) {
 					assertUnavailable(ClientItemDisplay.resolve(provider, itemId(), "fallback.registry.label", encoded));
 					assertTrue(ClientItemDisplay.decode(provider, encoded).isEmpty()); assertTrue(ClientItemDisplay.decodeName(provider, encoded).isEmpty());
-					assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("site=inventory/client-display-codec"));
+					assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("site=display"));
 				} else {
 					assertSame(failure, assertThrows(LinkageError.class, () -> ClientItemDisplay.resolve(provider, itemId(), "fallback.registry.label", encoded)));
 					assertSame(failure, assertThrows(LinkageError.class, () -> ClientItemDisplay.decode(provider, encoded)));

@@ -9,6 +9,7 @@ import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.ServerConfigUpdate;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import java.math.BigDecimal;
@@ -19,6 +20,32 @@ class ServerInventoryDraftTest {
 	private static final ServerConfigSnapshot EDITABLE = new ServerConfigSnapshot(true, ChannelMode.AUTO, true, 1000, 5, 23);
 	private static final Field DISPLAY = Field.DISPLAY_BYTE_MULTIPLIER;
 	private static final Field FRAME = Field.FRAME_BYTE_MULTIPLIER;
+
+	@ParameterizedTest
+	@CsvSource({"PHYSICAL_SLOTS_PER_TICK,16,4096", "PENDING_MEMORY_MIB,16,2048",
+		"PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD,16,1024", "PREVIEW_MAX_SLOTS_PER_CLIENT,16,16384",
+		"PREVIEW_MAX_SLOTS_SERVER,16,65536", "PREVIEW_MAX_TARGETS_PER_CLIENT,1,16",
+		"TRACKING_MAX_VARIANTS_PER_TARGET,1,128", "TRACKING_MAX_SLOTS_PER_TARGET,16,16384",
+		"TRACKING_MAX_SLOTS_SERVER,128,262144"})
+	void countDraftsAcceptTheirOwnRangeAndRejectOnePastEachEndpointWithoutChangingOtherLeaves(Field field, int minimum, int maximum) {
+		var snapshot = new ServerConfigSnapshot(true, ChannelMode.AUTO, true, 1000, 5, 23,
+			EDITABLE.inventory().with(field, Value.limit(false, minimum)));
+		var model = loaded(true, snapshot);
+		model.setInventoryText(field, Integer.toString(maximum));
+		var plan = model.updatePlan().orElseThrow();
+		assertEquals(field.mask(), plan.changedFields());
+		assertEquals(Value.limit(false, maximum), plan.inventory().value(field));
+		for (Field other : Field.values()) {
+			if (other != field) assertEquals(snapshot.inventory().value(other), plan.inventory().value(other));
+		}
+		for (int invalid : new int[] {minimum - 1, maximum + 1}) {
+			model.setInventoryText(field, Integer.toString(invalid));
+			assertEquals(field.mask(), model.invalidFieldMask());
+			assertTrue(model.updatePlan().isEmpty());
+		}
+		model.setInventoryText(field, Integer.toString(minimum));
+		assertFalse(model.dirty());
+	}
 
 	@ParameterizedTest
 	@EnumSource(value = Field.class, names = {"TRACKING_DISTINGUISH_FACES", "TRACKING_DISTINGUISH_PLAYERS"}, mode = EnumSource.Mode.EXCLUDE)
@@ -144,7 +171,10 @@ class ServerInventoryDraftTest {
 		assertEquals("72", model.inventoryText(Field.PENDING_MEMORY_MIB));
 		model.setInventoryText(Field.PENDING_MEMORY_MIB, "1024");
 		model.stepInventoryValue(Field.PENDING_MEMORY_MIB, true);
-		assertEquals("1024", model.inventoryText(Field.PENDING_MEMORY_MIB));
+		assertEquals("1040", model.inventoryText(Field.PENDING_MEMORY_MIB));
+		model.setInventoryText(Field.PENDING_MEMORY_MIB, "2048");
+		model.stepInventoryValue(Field.PENDING_MEMORY_MIB, true);
+		assertEquals("2048", model.inventoryText(Field.PENDING_MEMORY_MIB));
 		assertEquals("4.5", model.inventoryText(Field.PREVIEW_CLIENT_BYTE_MULTIPLIER));
 	}
 

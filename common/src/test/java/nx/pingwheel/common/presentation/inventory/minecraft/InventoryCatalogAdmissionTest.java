@@ -110,7 +110,7 @@ class InventoryCatalogAdmissionTest {
 		assertTrue(InventoryCatalogAdmission.workspaceUpperBound(65536, 131072, 256)
 			+ InventoryCatalogAdmission.METADATA_BYTES <= InventoryItemBudget.workspaceUpperBound(131072));
 		assertThrows(IllegalArgumentException.class, () -> InventoryCatalogAdmission.workspaceUpperBound(65536, 131073, 256));
-		assertThrows(IllegalArgumentException.class, () -> InventoryCatalogAdmission.operationWorkUpperBound(65536, 131072, 257));
+		assertThrows(IllegalArgumentException.class, () -> InventoryCatalogAdmission.operationWorkUpperBound(65536, 131072, 1025));
 	}
 
 	@Test void canonicalCloneDuplicateNullAndAggregateKeepTheirExistingMeaning() throws ReflectiveOperationException {
@@ -224,6 +224,85 @@ class InventoryCatalogAdmissionTest {
 		var failure = assertThrows(InventoryItemCodec.CapacityExceededException.class,
 			() -> catalog.intern(item("test:other", null, ABC.clone()), grant()));
 		assertEquals(InventoryItemCodec.CatalogLimit.PAYLOAD_BYTES, failure.limit()); assertEquals(cost, catalog.modeledRetainedBytes());
+	}
+
+	@Test void expandedCatalogueAdmits1024CollidingDefinitionsDuplicatesAndRefuses1025BeforeMutation() {
+		var catalog = new InventoryItemCodec.Catalog(trap(HolderLookup.Provider.class), 1024, 1048576, 4096,
+			trap(InventoryResidentAccess.class), trap(InventoryItemNativeAccess.class));
+		String firstId = ""; int expectedHash = 0;
+		for (int value = 0; value < 1024; value++) {
+			var suffix = new StringBuilder();
+			for (int bit = 0; bit < 10; bit++) suffix.append((value & (1 << bit)) == 0 ? "an" : "c0");
+			String id = "test:" + suffix;
+			if (value == 0) { firstId = id; expectedHash = id.hashCode(); } else assertEquals(expectedHash, id.hashCode());
+			var input = item(id, null, ABC.clone()); long before = catalog.modeledRetainedBytes();
+			long growth = catalog.retainedGrowthUpperBound(input);
+			assertEquals(id, catalog.intern(input, grant()).key().itemId());
+			assertTrue(catalog.modeledRetainedBytes() - before <= growth);
+		}
+		assertEquals(1024, catalog.displays().size()); assertEquals(1024, catalog.entriesUpperBound());
+		long retained = catalog.modeledRetainedBytes();
+		assertEquals(firstId, catalog.intern(item(firstId, null, ABC.clone()), grant()).key().itemId());
+		assertEquals(retained, catalog.modeledRetainedBytes());
+		var refusal = assertThrows(InventoryItemCodec.CapacityExceededException.class,
+			() -> catalog.intern(item("test:one_over", null, ABC.clone()), grant()));
+		assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.VARIANT_LIMIT, refusal.reason());
+		assertEquals(retained, catalog.modeledRetainedBytes());
+	}
+
+	@Test void expandedPayloadAdmitsExactlyOneMiBAndRefusesTheNextByteOrDefinition() {
+		var catalog = new InventoryItemCodec.Catalog(trap(HolderLookup.Provider.class), 1024, 1048576, 4096,
+			trap(InventoryResidentAccess.class), trap(InventoryItemNativeAccess.class));
+		for (int index = 0; index < 15; index++) {
+			byte[] canonical = new byte[65536]; canonical[0] = (byte) index;
+			catalog.intern(item("test:full_" + index, null, canonical), grant());
+		}
+		String id = "test:tail"; int metadata = id.length() + "item.test.value".length();
+		int remaining = Math.toIntExact(1048576 - catalog.retainedBytes() - metadata);
+		assertTrue(remaining > 0 && remaining <= 65536);
+		byte[] tail = new byte[remaining]; tail[0] = 16;
+		var input = item(id, null, tail);
+		var oneOver = new InventoryItemCodec.Catalog(trap(HolderLookup.Provider.class), 1024, 1048576, 4096,
+			trap(InventoryResidentAccess.class), trap(InventoryItemNativeAccess.class));
+		// Independently reproduce the same paid prefix, then make only its final
+		// canonical payload one byte larger; no cap or identity oracle is changed.
+		for (int index = 0; index < 15; index++) {
+			byte[] canonical = new byte[65536]; canonical[0] = (byte) index;
+			oneOver.intern(item("test:full_" + index, null, canonical), grant());
+		}
+		long before = oneOver.modeledRetainedBytes();
+		var larger = java.util.Arrays.copyOf(tail, tail.length + 1);
+		assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.CATALOG_BYTES_LIMIT,
+			assertThrows(InventoryItemCodec.CapacityExceededException.class, () -> oneOver.intern(item(id, null, larger), grant())).reason());
+		assertEquals(before, oneOver.modeledRetainedBytes());
+		var exact = catalog.intern(input, grant()); assertEquals(1048576, catalog.retainedBytes());
+		assertSame(exact, catalog.intern(input, grant()));
+		assertThrows(InventoryItemCodec.CapacityExceededException.class, () -> catalog.intern(item("test:extra", null, ABC.clone()), grant()));
+		assertEquals(1048576, catalog.retainedBytes());
+	}
+
+	@Test void countAwareAdmissionAndBatchGrowthKeepColdAndPopulatedInputsPrepaidWithoutMaximumCapacityReservation() {
+		var catalog = new InventoryItemCodec.Catalog(trap(HolderLookup.Provider.class), 1024, 1048576, 4096,
+			trap(InventoryResidentAccess.class), trap(InventoryItemNativeAccess.class));
+		assertEquals(0, catalog.entriesUpperBound()); assertEquals(63, catalog.entriesUpperBound(64));
+		long batch = catalog.retainedGrowthUpperBound(64);
+		assertTrue(batch < 64 * catalog.retainedGrowthUpperBound());
+		long before = catalog.modeledRetainedBytes();
+		for (int i = 0; i < 64; i++) catalog.intern(item("test:batch_" + i, null, ABC.clone()), grant());
+		assertTrue(catalog.modeledRetainedBytes() - before <= batch);
+		assertEquals(64, catalog.entriesUpperBound()); assertEquals(127, catalog.entriesUpperBound(64));
+		long coldWork = InventoryCatalogAdmission.workUpperBound(4096, 0);
+		assertTrue(coldWork < InventoryCatalogAdmission.workUpperBound(4096));
+		long workspace = InventoryCatalogAdmission.workspaceUpperBound(65536, 4096, 0);
+		var exact = new InventoryCatalogAdmission(workspace, coldWork); exact.requireNativeRead(4096, 0);
+		assertThrows(InventoryItemBudget.CaptureLimitException.class,
+			() -> new InventoryCatalogAdmission(workspace, coldWork - 1).requireNativeRead(4096, 0));
+		assertThrows(InventoryItemBudget.CaptureLimitException.class,
+			() -> new InventoryCatalogAdmission(workspace - 1, coldWork).requireNativeRead(4096, 0));
+		assertTrue(InventoryItemBudget.workspaceUpperBound(4096) + InventoryItemCodec.Catalog.initialModeledBytes()
+			+ InventoryItemCodec.Catalog.firstReadGrowthUpperBound(4096, 1) + InventoryCatalogAdmission.METADATA_BYTES < 16L * 1024 * 1024);
+		assertTrue(InventoryCatalogAdmission.workspaceUpperBound(65536, 131072, 1024)
+			+ InventoryCatalogAdmission.METADATA_BYTES <= InventoryItemBudget.workspaceUpperBound(131072));
 	}
 
 	@Test void equalHashIdsCrossTreeificationWithoutMergingAndOldUtf8IsTheActualInput() {

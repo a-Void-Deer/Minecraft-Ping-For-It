@@ -18,6 +18,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /** Pure projector tests: Gson parses only small output/oracle fixtures, never production input. */
 @NotNullByDefault
 class InventoryDisplayWriterTest {
+	@Test void retainedDisplayRefusalPreservesTypedDepthAndSizeWithoutReparsingForDiagnostics() {
+		String id = "minecraft:stone";
+		String deep = "{\"id\":\"minecraft:stone\",\"components\":{\"minecraft:custom_data\":"
+			+ "[".repeat(48) + "0" + "]".repeat(48) + "}}";
+		var depth = InventoryDisplayWriter.reprojectResult(deep, id, 4096);
+		assertNull(depth.json()); assertTrue(depth.limitHit());
+		assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.NATIVE_DEPTH_LIMIT, depth.reason());
+		var bytes = InventoryDisplayWriter.reprojectResult("é".repeat(65537), id, 4096);
+		assertNull(bytes.json()); assertTrue(bytes.limitHit());
+		assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.DISPLAY_LIMIT, bytes.reason());
+	}
 
 	private static final String ID = "minecraft:stone";
 

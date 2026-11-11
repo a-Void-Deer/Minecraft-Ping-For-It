@@ -30,6 +30,7 @@ import net.minecraft.nbt.ShortTag;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
 import org.jetbrains.annotations.Nullable;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
 
 /**
  * Read-only resident-shape admission primitives, not permission to invoke a
@@ -92,7 +93,7 @@ final class InventoryComponentBounds {
 		}
 		budget.work(1);
 		int size = value.size();
-		if (size > InventoryItemBudget.MAX_COLLECTION) refuse("native list cardinality");
+		if (size < 0 || size > InventoryItemBudget.MAX_LIST) refuse(InventoryFailureReason.NATIVE_LIST_LIMIT, "native list cardinality");
 		residentListCells = InventoryItemBudget.add(residentListCells, size);
 		return value;
 	}
@@ -102,13 +103,22 @@ final class InventoryComponentBounds {
 	 * Empty maps authorize owned empty output only: do not call native forEach.
 	 */
 	int mapPass(Map<?, ?> value) {
+		return mapPass(value, InventoryItemBudget.MAX_MAP);
+	}
+
+	/** Registry metadata is not an arbitrary-key canonical output map. */
+	int registryMapPass(Map<?, ?> value) {
+		return mapPass(value, InventoryItemBudget.MAX_REGISTRY_MAP);
+	}
+
+	private int mapPass(Map<?, ?> value, int maximum) {
 		budget.work(48); // closed exact-class dispatch before any native method
 		if (value == null) refuse("null native map");
 		Class<?> type = value.getClass();
 		if (type == EMPTY_REFERENCE_MAP) { budget.work(1); return 0; }
 		if (type == MAP1 || type == MAPN || type == EMPTY_MAP || type == SINGLETON_MAP || type == GUAVA_MAP || type == GUAVA_MAP1) {
 			budget.work(1);
-			int size = value.size(); cardinality(size);
+			int size = value.size(); cardinality(size, maximum);
 			// Immutable MapN keeps at most four cells per live entry; native
 			// entry iterator scans that fixed-density table, unlike HashMap.
 			mapTraversal(5L * size);
@@ -118,7 +128,7 @@ final class InventoryComponentBounds {
 		if (type == Reference2ObjectArrayMap.class) {
 			budget.work(1);
 			int size = value.size();
-			cardinality(size);
+			cardinality(size, maximum);
 			mapTraversal(size);
 			// ArrayMap entrySet + iterator + one reusable fast entry, or one
 			// ordinary entry wrapper per element. Pay the latter conservative path.
@@ -128,7 +138,7 @@ final class InventoryComponentBounds {
 		if (type == Reference2ObjectOpenHashMap.class) {
 			budget.work(2);
 			int size = value.size();
-			cardinality(size);
+			cardinality(size, maximum);
 			if (size == 0) return 0;
 			budget.work(InventoryExternalFields.READ_WORK);
 			int capacity = raw.referenceMapCapacity(value);
@@ -141,6 +151,9 @@ final class InventoryComponentBounds {
 		}
 		if (type != HashMap.class && type != IdentityHashMap.class && type != LinkedHashMap.class)
 			refuse("unsupported native map implementation");
+		// Exact JDK size is constant-time. Refuse cardinality before allocating
+		// traversal-inspection state; registry and canonical limits stay separate.
+		budget.work(1); cardinality(value.size(), maximum);
 		// A0 vector: at most 33 objects, 65 reference fields, 524 scalar
 		// bytes; fixed helper/port operations are charged BEFORE inspect.
 		budget.allocate(524, 0, 65, InventoryNativeTraversal.MAX_INSPECTION_OBJECTS);
@@ -149,8 +162,17 @@ final class InventoryComponentBounds {
 		budget.work(128 + 48L * InventoryNativeTraversal.MAX_SPLIT_CALLS);
 		long remaining = Math.min(InventoryItemBudget.MAX_NATIVE_TRAVERSAL - nativeWork, budget.remainingTraversalWork() / 16);
 		var inspected = InventoryNativeTraversal.inspect(value, remaining);
-		if (!inspected.accepted()) refuse("native map traversal refusal");
-		cardinality(inspected.entryWork());
+		if (!inspected.accepted()) {
+			InventoryFailureReason reason = switch (inspected.refusal()) {
+				case WORK_LIMIT -> InventoryFailureReason.NATIVE_WORK_LIMIT;
+				case PROBE_LIMIT -> InventoryFailureReason.PROBE_LIMIT;
+				case UNSUPPORTED_IMPLEMENTATION, UNAUDITED_RUNTIME -> InventoryFailureReason.UNSUPPORTED_CONTEXT;
+				case NONE -> throw new IllegalStateException("accepted native traversal refusal");
+			};
+			throw new InventoryItemBudget.RootLimitException(reason, "native map traversal refusal",
+				inspected.refusal() == InventoryNativeTraversal.Refusal.WORK_LIMIT || inspected.refusal() == InventoryNativeTraversal.Refusal.PROBE_LIMIT);
+		}
+		cardinality(inspected.entryWork(), maximum);
 		mapTraversal(inspected.traversalWork());
 		if (inspected.entryWork() != 0) {
 			// Native entry view/iterator plus per-entry wrappers on IdentityHashMap.
@@ -197,9 +219,9 @@ final class InventoryComponentBounds {
 			return value; // Exact native scalar classes are immutable.
 		}
 		if (type == ByteArrayTag.class || type == IntArrayTag.class || type == LongArrayTag.class) {
-			byte[] bytesValue = type == ByteArrayTag.class ? ((ByteArrayTag) value).getAsByteArray() : null;
-			int[] intsValue = type == IntArrayTag.class ? ((IntArrayTag) value).getAsIntArray() : null;
-			long[] longsValue = type == LongArrayTag.class ? ((LongArrayTag) value).getAsLongArray() : null;
+			byte @Nullable [] bytesValue = type == ByteArrayTag.class ? ((ByteArrayTag) value).getAsByteArray() : null;
+			int @Nullable [] intsValue = type == IntArrayTag.class ? ((IntArrayTag) value).getAsIntArray() : null;
+			long @Nullable [] longsValue = type == LongArrayTag.class ? ((LongArrayTag) value).getAsLongArray() : null;
 			if (bytesValue == null && intsValue == null && longsValue == null) refuse("null persistent array");
 			long bytes = bytesValue != null ? bytesValue.length : intsValue != null ? 4L * intsValue.length : 8L * longsValue.length;
 			budget.array(bytes); budget.allocate(bytes + 4, 0, 1, 2); budget.work(bytes); // inherited AbstractList.modCount
@@ -376,7 +398,7 @@ final class InventoryComponentBounds {
 	void enter(Object value) {
 		// Eight local events per path cell; fixed16 includes matching leave.
 		budget.work(8L * activeDepth + 16);
-		if (activeDepth == active.length) refuse("native active depth");
+		if (activeDepth == active.length) refuse(InventoryFailureReason.NATIVE_DEPTH_LIMIT, "native active depth");
 		for (int index = 0; index < activeDepth; index++) if (active[index] == value) refuse("native value cycle");
 		active[activeDepth++] = value;
 	}
@@ -390,7 +412,7 @@ final class InventoryComponentBounds {
 	}
 
 	private void traversal(long units) {
-		if (units > InventoryItemBudget.MAX_NATIVE_TRAVERSAL - nativeWork) refuse("native traversal bound");
+		if (units > InventoryItemBudget.MAX_NATIVE_TRAVERSAL - nativeWork) refuse(InventoryFailureReason.NATIVE_WORK_LIMIT, "native traversal bound");
 		// Bucket/cell test+increment <=8; entry hasNext/next/dispatch <=16.
 		// Multiplicity remains visits, not bytes and not the work multiplier.
 		budget.work(InventoryItemBudget.multiply(16, units));
@@ -398,8 +420,12 @@ final class InventoryComponentBounds {
 	}
 
 	private static void cardinality(int size) {
-		if (size < 0 || size > InventoryItemBudget.MAX_COLLECTION) refuse("native map cardinality");
+		cardinality(size, InventoryItemBudget.MAX_MAP);
+	}
+	private static void cardinality(int size, int maximum) {
+		if (size < 0 || size > maximum) refuse(InventoryFailureReason.NATIVE_MAP_LIMIT, "native map cardinality");
 	}
 
 	private static void refuse(String reason) { throw new InventoryItemBudget.RootLimitException(reason); }
+	private static void refuse(InventoryFailureReason reason, String message) { throw new InventoryItemBudget.RootLimitException(reason, message); }
 }

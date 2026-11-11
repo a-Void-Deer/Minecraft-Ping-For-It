@@ -2,6 +2,7 @@ package nx.pingwheel.common.presentation.inventory.minecraft;
 
 import java.util.Map;
 import java.util.Optional;
+import org.jetbrains.annotations.Nullable;
 
 import com.mojang.serialization.Lifecycle;
 import net.minecraft.core.DefaultedMappedRegistry;
@@ -42,7 +43,7 @@ final class InventoryRegistryContext implements RegistryOps.RegistryInfoLookup {
 	private final HolderLookup.Provider provider;
 	private final InventoryResidentAccess raw;
 	private final InventoryComponentBounds bounds;
-	private RegistryOps<net.minecraft.nbt.Tag> externalOps;
+	private @Nullable RegistryOps<net.minecraft.nbt.Tag> externalOps;
 	private boolean audited;
 	private int size;
 
@@ -81,7 +82,7 @@ final class InventoryRegistryContext implements RegistryOps.RegistryInfoLookup {
 		Class<?> type = provider.getClass();
 		if (type == InventoryRegistryShapes.PROVIDER) {
 			Map<?, ?> entries = raw.builderEntries(provider);
-			int count = bounds.mapPass(entries);
+			int count = bounds.registryMapPass(entries);
 			if (count != 0) for (var entry : entries.entrySet()) {
 				budget.work(128);
 				InventoryComponentCertificate.exact(entry.getKey(), ResourceKey.class);
@@ -97,7 +98,7 @@ final class InventoryRegistryContext implements RegistryOps.RegistryInfoLookup {
 						|| raw.builderLifecycle(lookup) != info.elementsLifecycle()) InventoryComponentCertificate.refuse();
 					// Encode-only use never calls the getter. Still certify its captured
 					// map layout, without traversing holder values or lazy suppliers.
-					bounds.mapPass(raw.builderElements(lookup));
+					bounds.registryMapPass(raw.builderElements(lookup));
 					addInfo((ResourceKey<?>) entry.getKey(), info, budget);
 				} else {
 					Object lookup = info.owner();
@@ -116,7 +117,7 @@ final class InventoryRegistryContext implements RegistryOps.RegistryInfoLookup {
 			MappedRegistry<?> root = mapped(delegate);
 			InventoryComponentCertificate.exact(raw.registryKey(root), ResourceKey.class);
 			Map<ResourceKey<?>, Holder.Reference<?>> entries = raw.registryEntries(root);
-			int count = bounds.mapPass(entries);
+			int count = bounds.registryMapPass(entries);
 			if (count != 0) for (var entry : entries.entrySet()) {
 				budget.work(128);
 				InventoryComponentCertificate.exact(entry.getKey(), ResourceKey.class);
@@ -132,7 +133,7 @@ final class InventoryRegistryContext implements RegistryOps.RegistryInfoLookup {
 		}
 		if (type != RegistryAccess.ImmutableRegistryAccess.class && type != FROZEN) InventoryComponentCertificate.refuse();
 		Map<? extends ResourceKey<?>, ? extends Registry<?>> entries = raw.registries((RegistryAccess.ImmutableRegistryAccess) provider);
-		int count = bounds.mapPass(entries);
+		int count = bounds.registryMapPass(entries);
 		if (count != 0) for (var entry : entries.entrySet()) {
 			budget.work(128);
 			InventoryComponentCertificate.exact(entry.getKey(), ResourceKey.class);
@@ -196,7 +197,7 @@ final class InventoryRegistryContext implements RegistryOps.RegistryInfoLookup {
 		return new RegistryOps.RegistryInfo<>(owner, owner, lifecycle);
 	}
 
-	HolderOwner<?> owner(ResourceKey<?> key) {
+	@Nullable HolderOwner<?> owner(ResourceKey<?> key) {
 		requireAudited();
 		for (int index = 0; index < size; index++) {
 			budget.work(8);

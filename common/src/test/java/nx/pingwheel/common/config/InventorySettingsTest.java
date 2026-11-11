@@ -20,6 +20,41 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * scopes), not from copying incidental defaults.
  */
 class InventorySettingsTest {
+	@Test
+	void expandedFiniteCapsClampPerFieldWithoutChangingDefaultsOrUnlimitedGuards() {
+		var defaults = InventorySettings.serverDefaults();
+		assertEquals(256, defaults.getPhysicalSlotsPerTick().getValue());
+		assertEquals(64, defaults.getPendingMemoryMiB().getValue());
+		assertEquals(32, defaults.getPreview().getMaxVariantsPerClientPeriod().getValue());
+		assertEquals(256, defaults.getPreview().getMaxSlotsPerClient().getValue());
+		assertEquals(1024, defaults.getPreview().getMaxSlotsServer().getValue());
+		assertEquals(2, defaults.getPreview().getMaxTargetsPerClient().getValue());
+		assertEquals(8, defaults.getTracking().getMaxVariantsPerTarget().getValue());
+		assertEquals(512, defaults.getTracking().getMaxSlotsPerTarget().getValue());
+		assertEquals(1024, defaults.getTracking().getMaxSlotsServer().getValue());
+		var limits = InventoryConfigValues.defaults();
+		for (var field : InventoryConfigValues.Field.values()) {
+			if (field.kind() != InventoryConfigValues.Kind.LIMIT) continue;
+			for (boolean unlimited : new boolean[] {false, true}) {
+				var settings = limits.toSettings();
+				IntLimit cap = switch (field) {
+					case PHYSICAL_SLOTS_PER_TICK -> settings.getPhysicalSlotsPerTick();
+					case PENDING_MEMORY_MIB -> settings.getPendingMemoryMiB();
+					case PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD -> settings.getPreview().getMaxVariantsPerClientPeriod();
+					case PREVIEW_MAX_SLOTS_PER_CLIENT -> settings.getPreview().getMaxSlotsPerClient();
+					case PREVIEW_MAX_SLOTS_SERVER -> settings.getPreview().getMaxSlotsServer();
+					case PREVIEW_MAX_TARGETS_PER_CLIENT -> settings.getPreview().getMaxTargetsPerClient();
+					case TRACKING_MAX_VARIANTS_PER_TARGET -> settings.getTracking().getMaxVariantsPerTarget();
+					case TRACKING_MAX_SLOTS_PER_TARGET -> settings.getTracking().getMaxSlotsPerTarget();
+					case TRACKING_MAX_SLOTS_SERVER -> settings.getTracking().getMaxSlotsServer();
+					default -> throw new AssertionError(field);
+				};
+				cap.setValue(field.maximum() + 1); cap.setUnlimited(unlimited); settings.validate();
+				assertEquals(InventoryConfigValues.Value.limit(unlimited, field.maximum()), InventoryConfigValues.from(settings).value(field));
+			}
+		}
+	}
+
 
 	@Test
 	void explicitUnlimitedUsesTheCallerGuardAndKeepsTheFiniteValue() {
@@ -146,14 +181,29 @@ class InventorySettingsTest {
 		settings.getTracking().setGlobalByteMultiplier(ByteMultiplier.finite(new BigDecimal("0.125")));
 		settings.validate();
 
-		assertEquals(InventoryLimits.PREVIEW_CLIENT_BASE_BYTES / 4L, settings.previewClientPeriodBytes());
-		assertEquals(InventoryLimits.PREVIEW_GLOBAL_BASE_BYTES / 8L, settings.previewGlobalPeriodBytes());
-		assertEquals(4 * settings.previewGlobalPeriodBytes(), settings.previewQueueBytes());
-		assertEquals(InventoryLimits.TRACKING_STREAM_BASE_BYTES / 4L, settings.trackingStreamPeriodBytesPerClientTarget());
-		assertEquals(InventoryLimits.TRACKING_SNAPSHOT_BASE_BYTES / 4L, settings.trackingSnapshotFragmentBytes());
-		assertEquals(settings.trackingSnapshotFragmentBytes(), settings.trackingSnapshotClientPeriodBytes());
-		assertEquals(InventoryLimits.TRACKING_GLOBAL_BASE_BYTES / 8L, settings.trackingGlobalPeriodBytes());
-		assertEquals(8 * settings.trackingGlobalPeriodBytes(), settings.trackingRollingQueueBytes());
+		assertEquals(262144L, settings.previewClientPeriodBytes());
+		assertEquals(262144L, settings.previewGlobalPeriodBytes());
+		assertEquals(1048576L, settings.previewQueueBytes());
+		assertEquals(262144L, settings.trackingStreamPeriodBytesPerClientTarget());
+		assertEquals(262144L, settings.trackingSnapshotFragmentBytes());
+		assertEquals(262144L, settings.trackingSnapshotClientPeriodBytes());
+		assertEquals(131072L, settings.trackingGlobalPeriodBytes());
+		assertEquals(1048576L, settings.trackingRollingQueueBytes());
+
+		settings.getPreview().getClientByteMultiplier().setValue(new BigDecimal("16"));
+		settings.getPreview().getGlobalByteMultiplier().setValue(new BigDecimal("32"));
+		settings.getTracking().getStreamByteMultiplier().setValue(new BigDecimal("16"));
+		settings.getTracking().getSnapshotByteMultiplier().setValue(new BigDecimal("16"));
+		settings.getTracking().getGlobalByteMultiplier().setValue(new BigDecimal("32"));
+		settings.validate();
+		assertEquals(16777216L, settings.previewClientPeriodBytes());
+		assertEquals(67108864L, settings.previewGlobalPeriodBytes());
+		assertEquals(268435456L, settings.previewQueueBytes());
+		assertEquals(16777216L, settings.trackingStreamPeriodBytesPerClientTarget());
+		assertEquals(16777216L, settings.trackingSnapshotFragmentBytes());
+		assertEquals(16777216L, settings.trackingSnapshotClientPeriodBytes());
+		assertEquals(33554432L, settings.trackingGlobalPeriodBytes());
+		assertEquals(268435456L, settings.trackingRollingQueueBytes());
 	}
 
 	@Test

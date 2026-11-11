@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.google.gson.JsonParser;
 import com.mojang.serialization.JsonOps;
@@ -21,7 +22,9 @@ import net.minecraft.world.item.component.BlockItemStateProperties;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.item.component.DebugStickState;
 import net.minecraft.world.item.component.MapDecorations;
+import net.minecraft.world.item.component.ItemContainerContents;
 import net.minecraft.world.level.block.entity.BeehiveBlockEntity;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -128,6 +131,58 @@ class InventoryComponentFidelityTest {
 		oracle(DataComponents.BLOCK_STATE, new BlockItemStateProperties(Map.of("Aa", "first", "BB", "second", "", "empty")));
 		oracle(DataComponents.BLOCK_STATE, new BlockItemStateProperties(Map.of()));
 		oracle(DataComponents.DEBUG_STICK_STATE, new DebugStickState(Map.of()));
+	}
+	@Test void largerOrdinaryListsDoNotRaiseArbitraryMapOrEffectCureCardinality() {
+		var properties = new java.util.HashMap<String, String>();
+		for (int i = 0; i < 257; i++) properties.put("k" + i, "v");
+		var stack = new ItemStack(Items.STONE); stack.set(DataComponents.BLOCK_STATE, new BlockItemStateProperties(properties));
+		assertEquals(InventoryIdentityMode.ALL_VARIANTS, freeze(stack).identityMode());
+		var cures = java.util.Collections.newSetFromMap(new IdentityHashMap<Object, Boolean>());
+		for (int i = 0; i < 256; i++) cures.add("cure" + i);
+		var nativeAccess = new InventoryItemNativeAccess() {
+			@Override public @Nullable net.minecraft.world.effect.MobEffectInstance foodEffect(net.minecraft.world.food.FoodProperties.PossibleEffect value) {
+				return InventoryResidentAccessFields.field(value, "effect");
+			}
+			@Override public Set<?> effectCures(net.minecraft.world.effect.MobEffectInstance value) { return cures; }
+			@Override public @Nullable String effectCureName(Object value) { return value instanceof String name ? name : null; }
+		};
+		var budget = InventoryItemBudget.root(4096); budget.begin(4096);
+		try {
+			var certificate = new InventoryComponentCertificate(budget, new InventoryResidentAccessFields(),
+				nativeAccess, new InventoryComponentBounds(budget, new InventoryResidentAccessFields()));
+			var effect = new net.minecraft.world.effect.MobEffectInstance(net.minecraft.world.effect.MobEffects.POISON, 1, 1);
+			assertNotNull(certificate.effectCopy(effect, 0), "256 effect cures remain admitted independently of ordinary list capacity");
+			cures.add("overflow");
+			var refusal = assertThrows(InventoryItemBudget.RootLimitException.class, () -> certificate.effectCopy(effect, 0));
+			assertEquals(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.NATIVE_MAP_LIMIT, refusal.reason());
+			assertTrue(refusal.limitHit());
+		} finally { budget.end(); }
+	}
+	@Test void ordinaryListIncreaseDoesNotAdmitContainerAddressesBeyondNativeByteSchema() {
+		var source = new ArrayList<>(java.util.Collections.nCopies(256, ItemStack.EMPTY));
+		source.set(255, new ItemStack(Items.DIRT));
+		var container = ItemContainerContents.fromItems(source);
+		var stack = new ItemStack(Items.STONE); stack.set(DataComponents.CONTAINER, container);
+		var legal = freeze(stack);
+		assertEquals(InventoryIdentityMode.EXACT, legal.identityMode());
+		var nativeTag = net.minecraft.core.component.DataComponentPatch.CODEC.encodeStart(
+			registries.createSerializationContext(NbtOps.INSTANCE), stack.getComponentsPatch()).result().orElseThrow();
+		assertArrayEquals(InventoryItemCodec.canonicalTag(nativeTag), legal.canonicalForCatalog());
+		source.add(new ItemStack(Items.DIRT));
+		var raw = new InventoryResidentAccessFields() {
+			@Override public List<ItemStack> container(ItemContainerContents value) {
+				assertSame(container, value);
+				return source;
+			}
+		};
+		try (var logs = new nx.pingwheel.common.presentation.inventory.InventoryDiagnosticsTestCapture(org.apache.logging.log4j.Level.DEBUG)) {
+			var malformed = InventoryItemCodec.freeze(new InventoryResidentItem.Stack(stack), registries, 4096,
+				InventoryItemBudget.root(4096), raw, new InventoryTestNativeAccess());
+			assertEquals(InventoryIdentityMode.ALL_VARIANTS, malformed.identityMode());
+			assertNull(malformed.canonicalForCatalog());
+			assertEquals(1, logs.events().size());
+			assertTrue(logs.messages().contains("reason=native-list-limit"));
+		}
 	}
 
 	@Test void grownEmptyIdentityBackedBeeDataHasOwnedEmptyOutputWithoutNativeCopy() throws Exception {

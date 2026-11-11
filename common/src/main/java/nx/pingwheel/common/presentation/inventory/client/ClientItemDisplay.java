@@ -61,6 +61,7 @@ import nx.pingwheel.common.presentation.inventory.minecraft.InventoryDisplayWrit
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentAccess;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemDiagnostics;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryPatches;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -140,7 +141,7 @@ public final class ClientItemDisplay {
 	// Finite expanded occurrences, matching the existing item structure-guard
 	// scale. One public resolve/decode/name operation shares this allowance across
 	// JSON, explicit patch children, text and post-hook rechecks; no child resets it.
-	private static final int MAX_VALIDATION_VISITS = 4096;
+	private static final int MAX_VALIDATION_VISITS = 8192;
 	// Covers sequential predecode, naming and render rechecks of a legal wire
 	// value without making default/hook text work unbounded by total characters.
 	private static final int MAX_VALIDATION_CHARACTERS = 16 * InventoryS2CPacket.MAX_DISPLAY_BYTES;
@@ -278,14 +279,16 @@ public final class ClientItemDisplay {
 			ItemStack naming = snapshot.get().namingStack(budget);
 			Component name = checkedName(naming, budget);
 			// Lore/shulker redaction remains icon-only, not a name failure.
-			if (!safeIcon(naming, 0, budget)) return new Display(ItemStack.EMPTY, name);
+			if (!safeIcon(naming, 0, budget)) {
+				return new Display(ItemStack.EMPTY, name);
+			}
 			ItemStack working = snapshot.get().workingStack(budget);
 			if (!supportedComponents(working.getComponents(), 0, budget)) return rejectSnapshot(itemId, displayJson, label);
 			boolean safe = safeIcon(working, 0, budget);
 			budget.sameLanguage();
 			return new Display(safe ? working : ItemStack.EMPTY, name);
 		} catch (RuntimeException unavailable) {
-			failure("inventory/client-display-resolve", itemId, unavailable);
+			failure("resolve", unavailable, budget);
 			return rejectSnapshot(itemId, displayJson, label);
 		}
 	}
@@ -306,7 +309,7 @@ public final class ClientItemDisplay {
 			return decodeSnapshot(registryAccess, json, budget).map(snapshot -> snapshot.namingStack(budget))
 				.filter(stack -> supportedComponents(stack.getComponents(), 0, budget));
 		} catch (RuntimeException unavailable) {
-			failure("inventory/client-display-decode", null, unavailable);
+			failure("decode", unavailable, budget);
 			return Optional.empty();
 		}
 	}
@@ -320,7 +323,7 @@ public final class ClientItemDisplay {
 				.map(snapshot -> snapshot.namingStack(budget))
 				.map(stack -> checkedName(stack, budget));
 		} catch (RuntimeException unavailable) {
-			failure("inventory/client-display-name", null, unavailable);
+			failure("name", unavailable, budget);
 			return Optional.empty();
 		}
 	}
@@ -442,6 +445,8 @@ public final class ClientItemDisplay {
 
 	private static Optional<Snapshot> transmitted(HolderLookup.@Nullable Provider registryAccess, @Nullable String itemId, @Nullable String displayJson, Validation budget) {
 		if (registryAccess == null || displayJson == null || displayJson.length() > InventoryS2CPacket.MAX_DISPLAY_BYTES || displayJson.isBlank()) {
+			if (displayJson != null && displayJson.length() > InventoryS2CPacket.MAX_DISPLAY_BYTES)
+				budget.degraded(InventoryFailureReason.DISPLAY_LIMIT, true, "input-characters", null);
 			return Optional.empty();
 		}
 		budget.characters(displayJson);
@@ -459,7 +464,7 @@ public final class ClientItemDisplay {
 			try {
 				if (supportedSnapshot(cached, 0, budget)) return Optional.of(cached);
 			} catch (RuntimeException unavailable) {
-				failure("inventory/client-display-cache", itemId, unavailable);
+				failure("cache", unavailable, budget);
 				// A failed raw-patch inspection is not permission to reuse values.
 			}
 			DECODED.remove(key);
@@ -469,6 +474,7 @@ public final class ClientItemDisplay {
 		decodeMisses++;
 		Optional<Snapshot> decoded = decodeSnapshot(registryAccess, displayJson, budget)
 			.filter(snapshot -> matchesSuppliedItem(itemId, snapshot));
+		if (decoded.isEmpty()) budget.degraded(InventoryFailureReason.PROVIDER_FAILURE, false, "display-refused", null);
 		decoded.ifPresent(snapshot -> retain(key, snapshot));
 		return decoded;
 	}
@@ -481,37 +487,42 @@ public final class ClientItemDisplay {
 	 */
 	private static Optional<Snapshot> decodeSnapshot(HolderLookup.@Nullable Provider registryAccess, @Nullable String json, Validation budget) {
 		if (registryAccess == null || json == null || json.length() > InventoryS2CPacket.MAX_DISPLAY_BYTES || json.isBlank()) {
+			if (json != null && json.length() > InventoryS2CPacket.MAX_DISPLAY_BYTES)
+				budget.degraded(InventoryFailureReason.DISPLAY_LIMIT, true, "input-characters", null);
 			return Optional.empty();
 		}
 		// The approved wire bound is the shared decode guard; an oversized
 		// payload is never parsed on either the cache or the chat path.
 		if (utf8Length(json) > InventoryS2CPacket.MAX_DISPLAY_BYTES) {
+			budget.degraded(InventoryFailureReason.DISPLAY_LIMIT, true, "input-bytes", null);
 			return Optional.empty();
 		}
 		try {
 			admitSyntax(json, 0, budget);
 			JsonElement element = JsonParser.parseString(json);
-			if (!supportedAdditions(element, 0, budget)) return Optional.empty();
+			if (!supportedAdditions(element, 0, budget)) {
+				budget.degraded(InventoryFailureReason.PROVIDER_FAILURE, false, "unsupported-display", null);
+				return Optional.empty();
+			}
 			// A root without components is the size terminal only in its canonical
 			// wire spelling. Native nested item grammar still permits sparse children.
 			if (!element.getAsJsonObject().has("components")
 				&& !InventoryDisplayWriter.isDefaultIcon(element.getAsJsonObject().get("id").getAsString(), json)) return Optional.empty();
 			replaceFlat(element, 0, budget);
 			var decoded = SNAPSHOT_CODEC.parse(registryAccess.createSerializationContext(JsonOps.INSTANCE), element);
-			if (decoded.error().isPresent()) InventoryItemDiagnostics.codecRejected(nx.pingwheel.common.diagnostics.Diagnostics.client(), "inventory/client-display-codec", "persistent display patch");
-			return decoded.result()
-				.filter(snapshot -> supportedSnapshot(snapshot, 0, budget));
+			if (decoded.error().isPresent()) budget.degraded(InventoryFailureReason.PROVIDER_FAILURE, false, "persistent-display-codec", null);
+			Optional<Snapshot> result = decoded.result().filter(snapshot -> supportedSnapshot(snapshot, 0, budget));
+			if (result.isEmpty()) budget.degraded(InventoryFailureReason.PROVIDER_FAILURE, false, "display-decode-refused", null);
+			return result;
 		} catch (RuntimeException malformed) {
-			failure("inventory/client-display-codec", null, malformed);
+			failure("codec", malformed, budget);
 			return Optional.empty();
 		}
 	}
 
-	private static void failure(String operation, @Nullable String itemId, Throwable failure) {
-		// A normal safety/budget refusal is deliberate display suppression, as
-		// are Lore/shulker stripping and ceiling reprojection. Hooks and codecs
-		// throwing their own exceptions are unexpected failures.
-		if (!(failure instanceof UnsafeDisplay unsafe) || unsafe.failure != null) InventoryItemDiagnostics.displayFailure(nx.pingwheel.common.diagnostics.Diagnostics.client(), operation, itemId, failure);
+	private static void failure(String stage, Throwable failure, Validation budget) {
+		if (failure instanceof UnsafeDisplay unsafe) budget.degraded(unsafe.reason, unsafe.limitHit, stage, unsafe.failure);
+		else budget.degraded(InventoryFailureReason.PROVIDER_FAILURE, false, stage, failure);
 	}
 
 	/**
@@ -708,7 +719,7 @@ public final class ClientItemDisplay {
 			// has already passed its own item-bearing-position guard above.
 			replaceFlat(value, depth, budget);
 			var decoded = ComponentSerialization.CODEC.parse(JsonOps.INSTANCE, value);
-			if (decoded.error().isPresent()) InventoryItemDiagnostics.codecRejected(nx.pingwheel.common.diagnostics.Diagnostics.client(), "inventory/client-display-legacy-codec", "legacy display text");
+			if (decoded.error().isPresent()) budget.degraded(InventoryFailureReason.PROVIDER_FAILURE, false, "legacy-display-codec", null);
 			Optional<Component> text = decoded.result();
 			if (text.isEmpty() || !supportedText(text.get(), depth, budget)) return false;
 			String plain = ClientDisplayText.own(text.get(), depth, budget).plain();
@@ -757,8 +768,10 @@ public final class ClientItemDisplay {
 	}
 
 	/** One root owns all expanded occurrences; aliases are revisited, never memoized across item hooks. */
+	@NotNullByDefault
 	static final class Validation implements InventoryPatches.Admission {
 		private int visits, characters;
+		private boolean reported;
 		private final int visitLimit, characterLimit;
 		final Map<JsonElement, JsonElement> flat = new IdentityHashMap<>(), legacy = new IdentityHashMap<>();
 		final net.minecraft.locale.Language language = net.minecraft.locale.Language.getInstance();
@@ -770,32 +783,45 @@ public final class ClientItemDisplay {
 			validationVisits = 0; validationWorkExhausted = false;
 		}
 		void visit(int depth) {
-			if (depth > MAX_ICON_DEPTH) throw new UnsafeDisplay();
-			if (visits >= visitLimit) { validationWorkExhausted = true; throw new UnsafeDisplay(); }
+			if (depth > MAX_ICON_DEPTH) throw new UnsafeDisplay(InventoryFailureReason.NATIVE_DEPTH_LIMIT);
+			if (visits >= visitLimit) { validationWorkExhausted = true; throw new UnsafeDisplay(InventoryFailureReason.NATIVE_NODE_LIMIT); }
 			validationVisits = ++visits;
 		}
 		boolean characters(@Nullable String value) {
-			if (value == null || value.length() > characterLimit - characters) throw new UnsafeDisplay();
+			if (value == null) throw new UnsafeDisplay();
+			if (value.length() > characterLimit - characters) throw new UnsafeDisplay(InventoryFailureReason.DISPLAY_LIMIT);
 			characters += value.length();
 			return true;
 		}
 		void characterUnits(long count) {
-			if (count < 0 || count > characterLimit - characters) throw new UnsafeDisplay();
+			if (count < 0 || count > characterLimit - characters) throw new UnsafeDisplay(InventoryFailureReason.DISPLAY_LIMIT);
 			characters += (int) count;
 		}
 		void cells(int count) {
-			if (count < 0 || count > visitLimit - visits) { validationWorkExhausted = true; throw new UnsafeDisplay(); }
+			if (count < 0 || count > visitLimit - visits) { validationWorkExhausted = true; throw new UnsafeDisplay(InventoryFailureReason.NATIVE_WORK_LIMIT); }
 			visits += count; validationVisits = visits;
 		}
 		int remainingVisits() { return visitLimit - visits; }
+		void degraded(InventoryFailureReason reason, boolean limitHit, String stage, @Nullable Throwable failure) {
+			if (reported) return;
+			reported = true;
+			InventoryItemDiagnostics.clientDisplayDegraded(reason, limitHit, stage, failure);
+		}
 		void sameLanguage() { if (net.minecraft.locale.Language.getInstance() != language) throw new UnsafeDisplay(); }
 		@Override public void inspect() { visit(0); }
 		@Override public void traverse(int entries, int capacity) { cells(entries); cells(capacity); }
 	}
+	@NotNullByDefault
 	static final class UnsafeDisplay extends RuntimeException {
 		private final @Nullable Throwable failure;
-		UnsafeDisplay() { super(null, null, false, false); failure = null; }
-		UnsafeDisplay(Throwable cause) { super(null, cause, false, false); failure = cause; }
+		private final InventoryFailureReason reason;
+		private final boolean limitHit;
+		UnsafeDisplay() { this(InventoryFailureReason.PROVIDER_FAILURE, false, null); }
+		UnsafeDisplay(InventoryFailureReason reason) { this(reason, true, null); }
+		UnsafeDisplay(Throwable cause) { this(InventoryFailureReason.PROVIDER_FAILURE, false, cause); }
+		UnsafeDisplay(InventoryFailureReason reason, boolean limitHit, @Nullable Throwable cause) {
+			super(null, cause, false, false); failure = cause; this.reason = reason; this.limitHit = limitHit;
+		}
 	}
 
 	private static final @Unmodifiable Set<Class<?>> SAFE_LISTS = Set.of(ArrayList.class,
@@ -1107,7 +1133,7 @@ public final class ClientItemDisplay {
 			Minecraft game = Minecraft.getInstance();
 			return game == null || game.level == null ? null : game.level.registryAccess();
 		} catch (RuntimeException unavailable) {
-			failure("inventory/client-display-registry", null, unavailable);
+			InventoryItemDiagnostics.clientDisplayDegraded(InventoryFailureReason.PROVIDER_FAILURE, false, "registry", unavailable);
 			return null;
 		}
 	}

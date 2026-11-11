@@ -26,17 +26,17 @@ class InventoryConfigRangeTest {
 
 	private static Stream<Arguments> integerFields() {
 		return Stream.of(
-			Arguments.of(Field.PHYSICAL_SLOTS_PER_TICK, "physicalSlotsPerTick", 16, 1024, 17),
-			Arguments.of(Field.PENDING_MEMORY_MIB, "pendingMemoryMiB", 16, 1024, 65),
+			Arguments.of(Field.PHYSICAL_SLOTS_PER_TICK, "physicalSlotsPerTick", 16, 4096, 17),
+			Arguments.of(Field.PENDING_MEMORY_MIB, "pendingMemoryMiB", 16, 2048, 65),
 			Arguments.of(Field.PREVIEW_PERIOD_TICKS, "preview.periodTicks", 1, 10, 7),
 			Arguments.of(Field.PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD, "preview.maxVariantsPerClientPeriod", 16, 1024, 17),
-			Arguments.of(Field.PREVIEW_MAX_SLOTS_PER_CLIENT, "preview.maxSlotsPerClient", 16, 1024, 67),
-			Arguments.of(Field.PREVIEW_MAX_SLOTS_SERVER, "preview.maxSlotsServer", 16, 1024, 513),
-			Arguments.of(Field.PREVIEW_MAX_TARGETS_PER_CLIENT, "preview.maxTargetsPerClient", 1, 8, 3),
+			Arguments.of(Field.PREVIEW_MAX_SLOTS_PER_CLIENT, "preview.maxSlotsPerClient", 16, 16384, 67),
+			Arguments.of(Field.PREVIEW_MAX_SLOTS_SERVER, "preview.maxSlotsServer", 16, 65536, 513),
+			Arguments.of(Field.PREVIEW_MAX_TARGETS_PER_CLIENT, "preview.maxTargetsPerClient", 1, 16, 3),
 			Arguments.of(Field.TRACKING_PERIOD_TICKS, "tracking.periodTicks", 1, 10, 7),
-			Arguments.of(Field.TRACKING_MAX_VARIANTS_PER_TARGET, "tracking.maxVariantsPerTarget", 1, 32, 9),
-			Arguments.of(Field.TRACKING_MAX_SLOTS_PER_TARGET, "tracking.maxSlotsPerTarget", 16, 1024, 513),
-			Arguments.of(Field.TRACKING_MAX_SLOTS_SERVER, "tracking.maxSlotsServer", 128, 16384, 129),
+			Arguments.of(Field.TRACKING_MAX_VARIANTS_PER_TARGET, "tracking.maxVariantsPerTarget", 1, 128, 9),
+			Arguments.of(Field.TRACKING_MAX_SLOTS_PER_TARGET, "tracking.maxSlotsPerTarget", 16, 16384, 513),
+			Arguments.of(Field.TRACKING_MAX_SLOTS_SERVER, "tracking.maxSlotsServer", 128, 262144, 129),
 			Arguments.of(Field.TRACKING_RESYNC_MIN_PERIODS, "tracking.resyncMinPeriods", 0, 10, 7),
 			Arguments.of(Field.TRACKING_HEARTBEAT_PERIODS, "tracking.heartbeatPeriods", 0, 32, 17),
 			Arguments.of(Field.TRACKING_GRACE_PERIODS, "tracking.gracePeriods", 1, 32, 17));

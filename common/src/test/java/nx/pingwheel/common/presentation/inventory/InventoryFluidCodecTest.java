@@ -62,13 +62,13 @@ class InventoryFluidCodecTest {
 		for (boolean aggregate : new boolean[] {false, true}) {
 			var catalog = new InventoryFluidCodec.Catalog();
 			var identity = aggregate ? InventoryFluidCodec.Identity.refused() : InventoryFluidCodec.Identity.exact(new byte[] {0});
-			for (int index = 0; index < 256; index++) {
+			for (int index = 0; index < 1024; index++) {
 				String id = "test:fluid_" + index;
 				catalog.intern(id, 1, identity, new InventoryFluidValue.Display(id, "fluid", null));
 			}
 			long retained = catalog.modeledRetainedBytes();
-			assertThrows(InventoryFluidCodec.CapacityException.class, () -> catalog.intern("test:overflow", 1, identity,
-				new InventoryFluidValue.Display("test:overflow", "overflow", null)));
+			assertEquals(InventoryFailureReason.VARIANT_LIMIT, assertThrows(InventoryFluidCodec.CapacityException.class,
+				() -> catalog.intern("test:overflow", 1, identity, new InventoryFluidValue.Display("test:overflow", "overflow", null))).reason());
 			assertEquals(retained, catalog.modeledRetainedBytes(), "refusal must precede retained catalogue mutation");
 			var repeat = catalog.intern("test:fluid_0", Long.MAX_VALUE, identity, new InventoryFluidValue.Display("test:fluid_0", "other display", null));
 			assertEquals(Long.MAX_VALUE, repeat.amount()); assertEquals(retained, catalog.modeledRetainedBytes());
@@ -79,7 +79,7 @@ class InventoryFluidCodecTest {
 		var bare = new InventoryFluidValue.Display("test:fluid", "fluid", null);
 		var identity = InventoryFluidCodec.Identity.exact(new byte[] {0});
 		var first = catalog.intern("test:fluid", 1, identity, bare);
-		for (int index = 1; index < 256; index++) {
+		for (int index = 1; index < 1024; index++) {
 			String id = "test:other_" + index;
 			catalog.intern(id, index, InventoryFluidCodec.Identity.refused(), new InventoryFluidValue.Display(id, "fluid", null));
 		}
@@ -101,19 +101,51 @@ class InventoryFluidCodecTest {
 		var display = new InventoryFluidValue.Display("test:fluid", "fluid", null);
 		catalog.intern("test:fluid", 1, InventoryFluidCodec.Identity.exact(new byte[] {0}), display);
 		catalog.intern("test:fluid", 1, InventoryFluidCodec.Identity.refused(), display);
-		for (int index = 0; index < 254; index++) {
+		for (int index = 0; index < 1022; index++) {
 			String id = "test:other_" + index;
 			catalog.intern(id, 1, InventoryFluidCodec.Identity.refused(), new InventoryFluidValue.Display(id, "fluid", null));
 		}
 		assertThrows(InventoryFluidCodec.CapacityException.class, () -> catalog.intern("test:overflow", 1,
 			InventoryFluidCodec.Identity.refused(), new InventoryFluidValue.Display("test:overflow", "fluid", null)));
 		var payload = new InventoryFluidCodec.Catalog();
-		for (int index = 0; index < 3; index++) {
+		for (int index = 0; index < 15; index++) {
 			byte[] bytes = new byte[65536]; bytes[0] = (byte) index;
 			payload.intern("test:fluid", 1, InventoryFluidCodec.Identity.exact(bytes), display);
 		}
-		long retained = payload.modeledRetainedBytes(); byte[] fourth = new byte[65536]; fourth[0] = 3;
-		assertThrows(InventoryFluidCodec.CapacityException.class, () -> payload.intern("test:fluid", 1, InventoryFluidCodec.Identity.exact(fourth), display));
+		long retained = payload.modeledRetainedBytes(); byte[] sixteenth = new byte[65536]; sixteenth[0] = 15;
+		assertEquals(InventoryFailureReason.CATALOG_BYTES_LIMIT, assertThrows(InventoryFluidCodec.CapacityException.class,
+			() -> payload.intern("test:fluid", 1, InventoryFluidCodec.Identity.exact(sixteenth), display)).reason());
 		assertEquals(retained, payload.modeledRetainedBytes());
+	}
+	@Test void canonicalRetentionReachesExactlyOneMiBAndOneOverKeepsAllOwnersUnchanged() {
+		var catalog = new InventoryFluidCodec.Catalog(); var display = new InventoryFluidValue.Display("test:fluid", "fluid", null);
+		for (int i = 0; i < 15; i++) {
+			byte[] bytes = new byte[65536]; bytes[0] = (byte) i;
+			catalog.intern("test:fluid", 1, InventoryFluidCodec.Identity.exact(bytes), display);
+		}
+		int tailLength = Math.toIntExact(1048576 - catalog.retainedBytes() - 256);
+		byte[] tail = new byte[tailLength]; tail[0] = 16;
+		long before = catalog.modeledRetainedBytes();
+		byte[] larger = Arrays.copyOf(tail, tail.length + 1);
+		assertEquals(InventoryFailureReason.CATALOG_BYTES_LIMIT, assertThrows(InventoryFluidCodec.CapacityException.class,
+			() -> catalog.intern("test:fluid", 1, InventoryFluidCodec.Identity.exact(larger), display)).reason());
+		assertEquals(before, catalog.modeledRetainedBytes());
+		var identity = InventoryFluidCodec.Identity.exact(tail); var first = catalog.intern("test:fluid", 1, identity, display);
+		assertEquals(1048576, catalog.retainedBytes()); before = catalog.modeledRetainedBytes();
+		assertEquals(first.key(), catalog.intern("test:fluid", Long.MAX_VALUE, identity, display).key());
+		assertEquals(before, catalog.modeledRetainedBytes());
+	}
+	@Test void actualCountAdmissionStillPaysAtCapacityAndColdBatchStorageIsNotMultipliedTables() {
+		var catalog = new InventoryFluidCodec.Catalog();
+		assertEquals(0, catalog.entriesUpperBound()); assertEquals(63, catalog.entriesUpperBound(64));
+		assertTrue(InventoryFluidCodec.Catalog.retainedGrowthUpperBound(64) < 64 * InventoryFluidCodec.Catalog.retainedGrowthUpperBound());
+		var admission = new nx.pingwheel.common.presentation.inventory.minecraft.InventoryCatalogAdmission(4L * 1024 * 1024, Long.MAX_VALUE);
+		catalog.intern("test:fluid", 1, InventoryFluidCodec.Identity.exact(new byte[] {1}),
+			new InventoryFluidValue.Display("test:fluid", "fluid", null), admission);
+		long paid = admission.attemptedWork(), before = catalog.modeledRetainedBytes();
+		assertTrue(paid > 0); assertEquals(1, catalog.entriesUpperBound());
+		catalog.intern("test:fluid", 1, InventoryFluidCodec.Identity.exact(new byte[] {1}),
+			new InventoryFluidValue.Display("test:fluid", "fluid", null), admission);
+		assertTrue(admission.attemptedWork() > paid); assertEquals(before, catalog.modeledRetainedBytes());
 	}
 }

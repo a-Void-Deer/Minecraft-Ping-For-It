@@ -38,18 +38,22 @@ public final class InventoryLimits {
 	/** A finite cap is always positive; zero is not a disable sentinel for these caps. */
 	public static final int MIN_FINITE_LIMIT = 1;
 
-	/** Finite configured slot and ordinary variant-count range. */
+	/** Shared lower bound; each configurable count has its own finite ceiling. */
 	public static final int MIN_ORDINARY_COUNT = 16;
-	public static final int MAX_ORDINARY_COUNT = 1024;
-	public static final int MAX_PREVIEW_TARGETS_PER_CLIENT = 8;
-	public static final int MAX_TRACKING_VARIANTS_PER_TARGET = 32;
+	public static final int MAX_PHYSICAL_SLOTS_PER_TICK = 4096;
+	public static final int MAX_PREVIEW_VARIANTS_PER_CLIENT_PERIOD = 1024;
+	public static final int MAX_PREVIEW_SLOTS_PER_CLIENT = 16384;
+	public static final int MAX_PREVIEW_SLOTS_SERVER = 65536;
+	public static final int MAX_PREVIEW_TARGETS_PER_CLIENT = 16;
+	public static final int MAX_TRACKING_VARIANTS_PER_TARGET = 128;
+	public static final int MAX_TRACKING_SLOTS_PER_TARGET = 16384;
 	public static final int MIN_TRACKING_SLOTS_SERVER = 128;
-	public static final int MAX_TRACKING_SLOTS_SERVER = 16384;
+	public static final int MAX_TRACKING_SLOTS_SERVER = 262144;
 
 	/** Default server-wide pending-memory bound in MiB; explicit unlimited stays finite. */
 	public static final int DEFAULT_PENDING_MEMORY_MIB = ConfigDefaults.Inventory.PENDING_MEMORY_MIB;
 	public static final int MIN_PENDING_MEMORY_MIB = 16;
-	public static final int MAX_PENDING_MEMORY_MIB = 1024;
+	public static final int MAX_PENDING_MEMORY_MIB = 2048;
 	public static final int INTERNAL_PENDING_MEMORY_MIB_GUARD = 4096;
 
 	/** Finite accounting periods shared by preview and tracking. */
@@ -69,15 +73,15 @@ public final class InventoryLimits {
 	public static final int MAX_GRACE_PERIODS = 32;
 
 	/** Preview per-client period byte base, scaled by the client byte multiplier. */
-	public static final int PREVIEW_CLIENT_BASE_BYTES = 4 * 1024;
+	public static final int PREVIEW_CLIENT_BASE_BYTES = 1024 * 1024;
 	/** Preview global period byte base, scaled by the global byte multiplier. */
-	public static final int PREVIEW_GLOBAL_BASE_BYTES = 32 * 1024;
+	public static final int PREVIEW_GLOBAL_BASE_BYTES = 2048 * 1024;
 	/** Tracking stream byte base per client+target period, scaled by the client multiplier. */
-	public static final int TRACKING_STREAM_BASE_BYTES = 2 * 1024;
+	public static final int TRACKING_STREAM_BASE_BYTES = 1024 * 1024;
 	/** Tracking snapshot byte base per fragment and per client period, scaled by the client multiplier. */
-	public static final int TRACKING_SNAPSHOT_BASE_BYTES = 16 * 1024;
+	public static final int TRACKING_SNAPSHOT_BASE_BYTES = 1024 * 1024;
 	/** Tracking global period byte base, scaled by the global byte multiplier. */
-	public static final int TRACKING_GLOBAL_BASE_BYTES = 16 * 1024;
+	public static final int TRACKING_GLOBAL_BASE_BYTES = 1024 * 1024;
 
 	/**
 	 * Display byte base scaled by the finite display size multiplier. The

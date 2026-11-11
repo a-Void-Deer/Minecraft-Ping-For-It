@@ -235,6 +235,35 @@ class InventoryGenericComponentCompatibilityTest {
 		if (registration != null) registration.close();
 	}
 
+	@Test void cheap512ReturnedListAnd60KiBArrayKeepNativePatchIdentityWhile513Refuses() {
+		for (int size : new int[] {512, 513}) {
+			var value = new MutableTree("unused", 0); value.tag = new CompoundTag();
+			var list = new ListTag(); for (int i = 0; i < size; i++) list.add(IntTag.valueOf(i));
+			value.tag.put("list", list);
+			var stack = new ItemStack(Items.STONE); stack.set(mutableComponent, value);
+			var frozen = freeze(stack);
+			if (size == 512) assertExact(frozen, stack.getComponents(), registries);
+			else assertEquals(InventoryIdentityMode.ALL_VARIANTS, frozen.identityMode());
+		}
+		var value = new MutableTree("unused", 0); value.tag = new CompoundTag();
+		value.tag.putByteArray("array", new byte[60 * 1024]);
+		var stack = new ItemStack(Items.STONE); stack.set(mutableComponent, value);
+		assertExact(freeze(stack), stack.getComponents(), registries);
+		value.tag.putByteArray("array", new byte[60 * 1024 + 1]);
+		assertEquals(InventoryIdentityMode.ALL_VARIANTS, freeze(stack).identityMode());
+	}
+	@Test void inexpensiveExpandedReturnedTreeCrossesTheOldNodeCeilingWithNativePatchIdentity() {
+		var value = new MutableTree("unused", 0); value.tag = new CompoundTag();
+		var root = new ListTag();
+		for (int branch = 0; branch < 12; branch++) {
+			var children = new ListTag(); for (int i = 0; i < 512; i++) children.add(net.minecraft.nbt.ByteTag.ZERO);
+			root.add(children);
+		}
+		value.tag.put("nodes", root);
+		var stack = new ItemStack(Items.STONE); stack.set(mutableComponent, value);
+		assertExact(freeze(stack), stack.getComponents(), registries);
+	}
+
 	private static void initializeComponents() {
 		cachedInt = DataComponentType.<Integer>builder().persistent(CACHED_INT_CODEC).cacheEncoding().build();
 		recordComponent = DataComponentType.<TestRecord>builder().persistent(RECORD_CODEC).build();
@@ -375,8 +404,10 @@ class InventoryGenericComponentCompatibilityTest {
 			assertTrue(frozen.display().aggregateRequired());
 			assertFalse(frozen.display().displayJson().contains("partial-secret"));
 			assertEquals(0, ERROR_MESSAGE_CALLS.get(), "WARN admission cannot authorize a native error callback");
-			assertEquals(1, logs.events().size()); assertTrue(logs.messages().contains("stage=external component"));
-			assertTrue(logs.messages().contains("native error detail not evaluated"));
+			assertEquals(1, logs.events().size()); assertEquals(org.apache.logging.log4j.Level.WARN, logs.events().getFirst().getLevel());
+			assertTrue(logs.messages().contains("reason=provider-failure"));
+			assertTrue(logs.messages().contains("handling=degraded"));
+			assertTrue(logs.messages().contains("stage=native-codec-rejected-all-variants"));
 			assertFalse(logs.messages().contains("partial-secret")); assertNull(logs.events().getFirst().getThrown());
 		}
 	}

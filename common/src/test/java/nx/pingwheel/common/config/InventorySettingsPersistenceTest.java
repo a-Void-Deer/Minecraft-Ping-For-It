@@ -43,6 +43,29 @@ class InventorySettingsPersistenceTest {
 
 	private static final String CURRENT_VERSION = "0.4.0-pfi-beta1";
 
+	@Test
+	void expandedFiniteRangesLoadAtCurrentVersionWithoutMigrationOrWriteback(@TempDir Path directory) throws IOException {
+		Path path = directory.resolve("server.json");
+		byte[] original = ("{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"rateLimit\":17,\"inventory\":{"
+			+ "\"physicalSlotsPerTick\":{\"unlimited\":false,\"value\":4096},\"pendingMemoryMiB\":{\"unlimited\":false,\"value\":2048},"
+			+ "\"preview\":{\"maxVariantsPerClientPeriod\":{\"unlimited\":false,\"value\":1024},"
+			+ "\"maxSlotsPerClient\":{\"unlimited\":false,\"value\":16384},\"maxSlotsServer\":{\"unlimited\":false,\"value\":65536},"
+			+ "\"maxTargetsPerClient\":{\"unlimited\":false,\"value\":16}},\"tracking\":{"
+			+ "\"maxVariantsPerTarget\":{\"unlimited\":false,\"value\":128},\"maxSlotsPerTarget\":{\"unlimited\":false,\"value\":16384},"
+			+ "\"maxSlotsServer\":{\"unlimited\":false,\"value\":262144}}}}\n").getBytes(StandardCharsets.UTF_8);
+		Files.write(path, original);
+		var handler = new ConfigHandler<>(ServerConfig.class, path, CURRENT_VERSION); handler.load();
+		var values = InventoryConfigValues.from(handler.getConfig().getInventory());
+		assertNotNull(values); assertTrue(values.isSafe());
+		for (var field : InventoryConfigValues.Field.values()) {
+			if (field.kind() == InventoryConfigValues.Kind.LIMIT)
+				assertEquals(InventoryConfigValues.Value.limit(false, field.maximum()), values.value(field));
+		}
+		assertEquals(17, handler.getConfig().getRateLimit());
+		assertArrayEquals(original, Files.readAllBytes(path)); assertTrue(handler.saveSafely());
+		assertArrayEquals(original, Files.readAllBytes(path));
+	}
+
 	@ParameterizedTest
 	@ValueSource(strings = {"", ",\"inventory\":{}", ",\"inventory\":{\"tracking\":null}",
 		",\"inventory\":{\"tracking\":{}}",
@@ -332,19 +355,19 @@ class InventorySettingsPersistenceTest {
 	}
 
 	private static final @Unmodifiable List<MultiplierPath> MULTIPLIERS = List.of(
-		new MultiplierPath("preview", "clientByteMultiplier", new BigDecimal("0.5"), 4096,
+		new MultiplierPath("preview", "clientByteMultiplier", new BigDecimal("0.5"), 1048576,
 			new BigDecimal("0.25"), settings -> settings.getPreview().getClientByteMultiplier(),
 			InventorySettings::previewClientPeriodBytes),
-		new MultiplierPath("preview", "globalByteMultiplier", new BigDecimal("2"), 32768,
+		new MultiplierPath("preview", "globalByteMultiplier", new BigDecimal("2"), 2097152,
 			new BigDecimal("0.125"), settings -> settings.getPreview().getGlobalByteMultiplier(),
 			InventorySettings::previewGlobalPeriodBytes),
-		new MultiplierPath("tracking", "streamByteMultiplier", new BigDecimal("0.25"), 2048,
+		new MultiplierPath("tracking", "streamByteMultiplier", new BigDecimal("0.25"), 1048576,
 			new BigDecimal("0.25"), settings -> settings.getTracking().getStreamByteMultiplier(),
 			InventorySettings::trackingStreamPeriodBytesPerClientTarget),
-		new MultiplierPath("tracking", "snapshotByteMultiplier", new BigDecimal("4"), 16384,
+		new MultiplierPath("tracking", "snapshotByteMultiplier", new BigDecimal("4"), 1048576,
 			new BigDecimal("0.25"), settings -> settings.getTracking().getSnapshotByteMultiplier(),
 			InventorySettings::trackingSnapshotFragmentBytes),
-		new MultiplierPath("tracking", "globalByteMultiplier", new BigDecimal("0.125"), 16384,
+		new MultiplierPath("tracking", "globalByteMultiplier", new BigDecimal("0.125"), 1048576,
 			new BigDecimal("0.125"), settings -> settings.getTracking().getGlobalByteMultiplier(),
 			InventorySettings::trackingGlobalPeriodBytes));
 
