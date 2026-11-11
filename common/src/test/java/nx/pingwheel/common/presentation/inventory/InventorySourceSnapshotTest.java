@@ -29,6 +29,36 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class InventorySourceSnapshotTest {
+	@Test void zeroSlotAndProviderAndProbeRefusalsReportEachDebugAttemptWithoutGetters() {
+		for (boolean snapshot : new boolean[] {false, true}) for (var reason : List.of(InventoryFailureReason.PHYSICAL_SLOT_LIMIT,
+			InventoryFailureReason.PROVIDER_WORK_LIMIT, InventoryFailureReason.PROBE_LIMIT)) {
+			var source = new TestSource();
+			source.live.add(item(0));
+			if (snapshot) source.plan = new TestPlan(4096, () -> Optional.of(new TestSnapshot(items(1), 4096)));
+			try (var handle = open(source, grant(0)); var logs = new InventoryDiagnosticsTestCapture(Level.DEBUG)) {
+				assertEquals(InventorySourceAccess.Preparation.READY, handle.prepareSnapshot(new RetainedMemoryLedger(8192)));
+				nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+					nx.pingwheel.common.diagnostics.LoggingProfile.DEBUG);
+				var ledger = new CostLedger(Map.of(InventorySourceAccess.PHYSICAL, reason == InventoryFailureReason.PHYSICAL_SLOT_LIMIT ? 0L : 1L,
+					InventorySourceAccess.PROBES, reason == InventoryFailureReason.PROBE_LIMIT ? 0L : 1L,
+					InventorySourceAccess.PROVIDER_WORK, reason == InventoryFailureReason.PROVIDER_WORK_LIMIT ? 0L : 2 * InventorySourceAccess.PROVIDER_CALL_WORK));
+				int before = logs.events().size();
+				if (reason == InventoryFailureReason.PHYSICAL_SLOT_LIMIT) {
+					assertTrue(handle.stepCompletion(ledger, new nx.pingwheel.common.presentation.inventory.minecraft.InventoryCatalogAdmission(0, 0),
+						new nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.Allowance(
+							nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget.NONE)) instanceof SourceAccess.StepOutcome.Deferred);
+					assertEquals(before, logs.events().size(), "completion probing requests no physical read and cannot report its refusal");
+				}
+				for (int repeat = 0; repeat < 2; repeat++) {
+					assertTrue(handle.step(ledger) instanceof SourceAccess.StepOutcome.Deferred);
+					assertEquals(reason, handle.stepDeferralReason());
+				}
+				assertEquals(before + 2, logs.events().size());
+				assertTrue(logs.events().getLast().getMessage().getFormattedMessage().contains("reason=" + reason.code()));
+				assertTrue(!logs.messages().contains("minecraft:stone"));
+			}
+		}
+	}
 
 	private static final Target.BlockTarget BLOCK = new Target.BlockTarget("minecraft:overworld", 1, 2, 3, "minecraft:chest");
 	private static final InventorySourceInput INPUT = new InventorySourceInput(BLOCK, new UUID(1, 1), BlockFace.NORTH);
@@ -720,7 +750,7 @@ class InventorySourceSnapshotTest {
 		assertEquals(0, retained.liveReads.get());
 
 		var structural = new TestSource();
-		var oversized = new TestSnapshot(items(InventorySourceAccess.MAX_SLOTS + 1), 1024);
+		var oversized = new TestSnapshot(items(InventorySourceAccess.CAPTURE_MAX_SLOTS + 1), 1024);
 		structural.plan = new TestPlan(8192, () -> { structural.captures.incrementAndGet(); return Optional.of(oversized); });
 		var structuralMemory = new RetainedMemoryLedger(16000);
 		var structuralHandle = open(structural, grant(0));

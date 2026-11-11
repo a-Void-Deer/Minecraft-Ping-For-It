@@ -145,10 +145,11 @@ class InventoryItemDiscoveryAdmissionTest {
 					long root = InventoryValidationBudget.itemResolutionProbe().workUnits();
 					assertEquals(root, world.paid.get(world.callbacks.indexOf("entity")));
 					if (!container) {
-						long lookup = root + InventoryValidationBudget.itemProviderLookup().workUnits();
+						long lookup = root + InventoryValidationBudget.itemProviderLookup(false).workUnits();
 						assertEquals(lookup, world.paid.get(world.callbacks.indexOf("lookup")));
 						assertEquals(lookup, world.paid.get(world.callbacks.indexOf("layout")));
-						assertEquals(lookup + InventoryValidationBudget.itemProviderFinish(0).workUnits(), world.paid.get(world.callbacks.indexOf("alias")));
+						assertEquals(lookup + InventoryValidationBudget.itemProviderShape(world.layout == null ? 0 : world.layout.members().size()).workUnits()
+							+ InventoryValidationBudget.itemProviderFinish(world.layout).workUnits(), world.paid.get(world.callbacks.indexOf("alias")));
 					}
 					var consumer = runtime.attach(world.input, new InventoryRuntime.PreviewSubject(OWNER)).orElseThrow();
 					boolean complete = false;
@@ -196,12 +197,12 @@ class InventoryItemDiscoveryAdmissionTest {
 				world.runtime = runtime; runtime.advance(0, settings);
 				var consumer = runtime.attach(world.input, new InventoryRuntime.PreviewSubject(OWNER)).orElseThrow();
 				long allowed = stage == 0 ? InventoryValidationBudget.itemResolutionProbe().workUnits() - 1
-					: InventoryValidationBudget.itemResolutionProbe().workUnits() + (stage == 2 ? InventoryValidationBudget.itemProviderLookup().workUnits() : 0);
+					: InventoryValidationBudget.itemResolutionProbe().workUnits() + (stage == 2 ? InventoryValidationBudget.itemProviderLookup(false).workUnits() : 0);
 				var ledger = ledger(runtime); long used = ledger.remaining(WORK) - allowed;
 				try (var spent = ledger.tryReserve(Map.of(WORK, used)).orElseThrow()) { spent.commit(Map.of(WORK, used)); }
 				assertEquals(Optional.empty(), runtime.probe(world.input));
 				long attempted = stage == 0 ? 0 : InventoryValidationBudget.itemResolutionProbe().workUnits()
-					+ (stage == 2 ? InventoryValidationBudget.itemProviderLookup().workUnits() : 0);
+					+ (stage == 2 ? InventoryValidationBudget.itemProviderLookup(false).workUnits() : 0);
 				assertEquals(used + attempted, ledger.used(WORK), "rejection never refunds the already attempted prefix");
 				assertEquals(stage == 0 ? 0 : stage == 1 ? 0 : 1, world.lookups);
 				assertEquals(stage == 2 ? 1 : 0, world.layouts);
@@ -222,14 +223,17 @@ class InventoryItemDiscoveryAdmissionTest {
 				if (finish) world.afterLayout = () -> runtime.memory().setCap(runtime.memory().retained() + runtime.memory().reserved());
 				if (!finish) {
 					// Leave room for the fixed caller/root probe but not the known native lookup envelope.
-					runtime.memory().setCap(4 * 1024 * 1024);
+					long round = 4096 + nx.pingwheel.common.presentation.inventory.InventorySlotJournal.initialRetainedBytes();
+					long root = InventoryValidationBudget.itemResolutionProbe().workspaceBytes();
+					runtime.memory().setCap(Math.max(root, round + InventoryItemBudget.workspaceUpperBound(4096))
+						+ InventoryValidationBudget.itemProviderLookup(false).workspaceBytes() - 1);
 				}
 				// Runtime.advance normally publishes the configured cap; this operation deliberately
 				// models a lower shared remaining balance at an already admitted callback boundary.
 				assertEquals(Optional.empty(), runtime.probe(world.input));
 				assertEquals(finish ? 1 : 0, world.lookups); assertEquals(finish ? 1 : 0, world.layouts);
 				assertFalse(world.callbacks.contains("alias")); assertEquals(0, runtime.memory().reserved()); assertEquals(0, runtime.memory().retained());
-				long expected = InventoryValidationBudget.itemResolutionProbe().workUnits() + (finish ? InventoryValidationBudget.itemProviderLookup().workUnits() : 0);
+				long expected = InventoryValidationBudget.itemResolutionProbe().workUnits() + (finish ? InventoryValidationBudget.itemProviderLookup(false).workUnits() : 0);
 				assertEquals(expected, ledger(runtime).used(WORK));
 			}
 		}
@@ -313,12 +317,12 @@ class InventoryItemDiscoveryAdmissionTest {
 					assertEquals(1, world.layouts); assertEquals(1, world.lookups); assertEquals(0, world.contents);
 					assertEquals(members + 1, java.util.Collections.frequency(world.callbacks, "entity"), "root plus every admitted explicit member is checked");
 					int root = world.callbacks.indexOf("entity"), member = world.callbacks.subList(root + 1, world.callbacks.size()).indexOf("entity") + root + 1;
-					assertEquals(InventoryValidationBudget.itemResolutionProbe().workUnits() + InventoryValidationBudget.itemProviderLookup().workUnits()
-						+ InventoryValidationBudget.itemProviderFinish(members).workUnits(), world.paid.get(member));
+					assertEquals(InventoryValidationBudget.itemResolutionProbe().workUnits() + InventoryValidationBudget.itemProviderLookup(false).workUnits()
+						+ InventoryValidationBudget.itemProviderShape(members).workUnits() + InventoryValidationBudget.itemProviderFinish(world.layout).workUnits(), world.paid.get(member));
 				}
 				assertNull(allowance.itemResolutionGrants()); assertEquals(0, runtime.memory().reserved());
-				long work = InventoryValidationBudget.itemResolutionProbe().workUnits() + InventoryValidationBudget.itemProviderLookup().workUnits()
-					+ InventoryValidationBudget.itemProviderFinish(members).workUnits();
+				long work = InventoryValidationBudget.itemResolutionProbe().workUnits() + InventoryValidationBudget.itemProviderLookup(false).workUnits()
+					+ InventoryValidationBudget.itemProviderShape(members).workUnits() + InventoryValidationBudget.itemProviderFinish(world.layout).workUnits();
 				assertEquals(work, allowance.attemptedWorkUnits()); assertEquals(work, ledger(runtime).used(WORK));
 				source.close(); source.close(); assertEquals(0, runtime.memory().retained());
 			}

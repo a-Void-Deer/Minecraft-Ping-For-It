@@ -21,6 +21,8 @@ import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidReadOperation;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimits;
+import nx.pingwheel.common.presentation.inventory.minecraft.ProviderLimitSite;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -157,10 +159,15 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Coordi
 	/** Incremental N-sized allocation, only after an admitted count lookup. No maximum-slot reservation. */
 	public static OperationProfile addressProfile(Route route, int count) {
 		requireBound(count); long members = route.members().size();
+		long descriptionChars = Math.addExact(1056L, Math.multiplyExact(11L, count));
+		if (descriptionChars > 2048L + 11L * InventorySourceAccess.MAX_SLOTS)
+			throw InventoryProviderLimits.exceeded(ProviderLimitSite.FLUID_CAPACITY_DESCRIPTION, descriptionChars, 2048L + 11L * InventorySourceAccess.MAX_SLOTS);
+		var text = new OperationProfile(new InventoryValidationBudget.Cost(512 + 6 * descriptionChars,
+			512 + 6 * descriptionChars, 128 + 8 * descriptionChars), 0, 0, 128 + 2 * descriptionChars);
 		// Construction adds boxed indices/copies/seen(N), capacities(N), bounded decimal text (<=11N),
 		// member DTOs and position-set(M). Retained bytes cover only the newly acquired detached graph;
 		// the Create route/member witnesses themselves were already acquired by the M stage.
-		return currentProfile(route, count).plus(profile(8192 + 2048 * members + 256L * count,
+		return currentProfile(route, count).plus(text).plus(profile(8192 + 2048 * members + 256L * count,
 			4096 + 1024 * members + 128L * count, 1024 + 512 * members + 32L * count,
 			0, 2048 + 1024 * members + 128L * count));
 	}
@@ -178,7 +185,9 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Coordi
 			members.add(new InventorySnapshotLayout.Member(member.position(), member.block().blockId(), member.block().entityId(),
 				controller ? "controller" : "member", controller ? List.of(segment) : List.of()));
 		}
-		var description = new StringBuilder(route.description()).append(";capacities=");
+		String routeDescription = route.description();
+		if (routeDescription.length() > 1024) throw InventoryProviderLimits.exceeded(ProviderLimitSite.FLUID_ROUTE_DESCRIPTION, routeDescription.length(), 1024);
+		var description = new StringBuilder(Math.toIntExact(1056L + 11L * count)).append(routeDescription).append(";capacities=");
 		for (int index = 0; index < count; index++) { if (index > 0) description.append(','); description.append(capacities[index]); }
 		layout = new InventorySnapshotLayout("neoforge:fluid_capability", description.toString(), route.capabilityPosition(), members);
 		validationProfile = targetProfile(route, count);
@@ -186,8 +195,12 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Coordi
 	}
 
 	public static Optional<IPlatformFluidService.Probe> probe(Route route, Operation operation) {
+		try { return probeAvailable(route, operation); }
+		catch (nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnsupportedException absent) { return Optional.empty(); }
+	}
+	static Optional<IPlatformFluidService.Probe> probeAvailable(Route route, Operation operation) {
 		@Nullable IFluidHandler handler = acquire(route, operation);
-		if (handler == null) { FluidSourceDiagnostics.capabilityProbeAbsent(route); return Optional.empty(); }
+		if (handler == null) { FluidSourceDiagnostics.capabilityProbeAbsent(route); throw new nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnsupportedException(); }
 		route.world().require(route.capabilityPosition(), operation);
 		int count = handler.getTanks();
 		requireBound(count);
@@ -206,6 +219,7 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Coordi
 		route.world().require(route.capabilityPosition(), operation); int count = handler.getTanks(); requireBound(count); return count;
 	}
 	private static void requireBound(int count) {
+		if (count > InventorySourceAccess.MAX_SLOTS) throw InventoryProviderLimits.exceeded(ProviderLimitSite.NEOFORGE_FLUID_ADDRESSES, count, InventorySourceAccess.MAX_SLOTS);
 		if (count < 0 || count > InventorySourceAccess.MAX_SLOTS)
 			throw FluidSourceDiagnostics.unavailable("fluid capability address bound",
 				() -> "count=" + count + ";maxSlots=" + InventorySourceAccess.MAX_SLOTS);
@@ -293,6 +307,7 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Coordi
 		requireHeld(route, operation);
 		route.world().require(route.capabilityPosition(), operation);
 		int count = handler.getTanks();
+		requireBound(count);
 		if (count != expected) throw FluidSourceDiagnostics.unavailable("fluid capability layout changed",
 			() -> FluidSourceDiagnostics.describeRoute(route) + ";expected=" + expected + ";observed=" + count);
 		// Count follows the last state/entity/route callback. The closing pass rechecks current
@@ -303,6 +318,7 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Coordi
 	private static void requireCount(Route route, IFluidHandler handler, int expected, Operation operation) {
 		route.world().require(route.capabilityPosition(), operation);
 		int count = handler.getTanks();
+		requireBound(count);
 		// No World.block/route metadata here: that was the final-count callback that could change
 		// count or capacity after an earlier target check. Only cached authority/mode evidence and
 		// the pure root/controller closure run after this count.
@@ -311,6 +327,7 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Coordi
 				() -> FluidSourceDiagnostics.describeRoute(route));
 		int closureCount = handler.getTanks();
 		route.world().require(route.capabilityPosition(), operation);
+		requireBound(closureCount);
 		if (closureCount != count || closureCount != expected)
 			throw FluidSourceDiagnostics.unavailable("fluid capability layout changed",
 				() -> FluidSourceDiagnostics.describeRoute(route) + ";expected=" + expected
@@ -367,6 +384,7 @@ public final class FluidCapabilityAccess implements IPlatformFluidService.Coordi
 				+ ";currentHandler=" + FluidSourceDiagnostics.describeHandler(current) + ";count=" + count);
 		route.world().require(route.capabilityPosition(), operation);
 		int currentCount = current.getTanks();
+		requireBound(currentCount);
 		if (currentCount != count) throw FluidSourceDiagnostics.unavailable("fluid capability layout changed",
 			() -> FluidSourceDiagnostics.describeRoute(route) + ";expected=" + count + ";observed=" + currentCount);
 		requireCapacities(route, current, capacities, operation);

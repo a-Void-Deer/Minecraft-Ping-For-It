@@ -18,6 +18,8 @@ import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLay
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidReadOperation;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimits;
+import nx.pingwheel.common.presentation.inventory.minecraft.ProviderLimitSite;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -53,6 +55,11 @@ public interface IPlatformFluidService {
 		@Override public OperationProfile probeProfile() { return OperationProfile.NONE; }
 		@Override public Optional<Probe> probe(Context context, Operation operation) {
 			Objects.requireNonNull(context); Objects.requireNonNull(operation).allowance(); return Optional.empty();
+		}
+		@Override public nx.pingwheel.common.presentation.inventory.InventoryDecision<Probe> probeDecision(Context context, Operation operation) {
+			Objects.requireNonNull(context); Objects.requireNonNull(operation).allowance();
+			return nx.pingwheel.common.presentation.inventory.InventoryDecision.unsupported(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.UNSUPPORTED_LANE,
+				nx.pingwheel.common.presentation.inventory.InventoryImpact.DEGRADED);
 		}
 	};
 	IPlatformFluidService INSTANCE = ServiceLoader.load(IPlatformFluidService.class).findFirst().orElse(NONE);
@@ -94,8 +101,12 @@ public interface IPlatformFluidService {
 	record Shape(int members, OptionalInt indexedSlots, boolean stableCursor) {
 		public Shape {
 			Objects.requireNonNull(indexedSlots);
-			if (members < 1 || members > InventorySnapshotLayout.MAX_MEMBERS || indexedSlots.isPresent()
-				&& (indexedSlots.getAsInt() < 0 || indexedSlots.getAsInt() > InventorySourceAccess.MAX_SLOTS
+			if (members > InventorySnapshotLayout.MAX_FLUID_MEMBERS) throw InventoryProviderLimits.exceeded(
+				ProviderLimitSite.FLUID_SHAPE_MEMBERS, members, InventorySnapshotLayout.MAX_FLUID_MEMBERS);
+			if (indexedSlots.isPresent() && indexedSlots.getAsInt() > InventorySourceAccess.MAX_SLOTS) throw InventoryProviderLimits.exceeded(
+				ProviderLimitSite.FLUID_SHAPE_ADDRESSES, indexedSlots.getAsInt(), InventorySourceAccess.MAX_SLOTS);
+			if (members < 1 || indexedSlots.isPresent()
+				&& (indexedSlots.getAsInt() < 0
 					|| !stableCursor && indexedSlots.getAsInt() != 0)) throw new IllegalArgumentException("fluid probe shape bound");
 		}
 	}
@@ -109,7 +120,8 @@ public interface IPlatformFluidService {
 	record RouteInfo(TopologyEvidence topology, String providerClass) {
 		public RouteInfo {
 			Objects.requireNonNull(topology); Objects.requireNonNull(providerClass);
-			if (providerClass.isBlank() || providerClass.length() > 1024 || providerClass.chars().anyMatch(Character::isISOControl))
+			if (providerClass.length() > 1024) throw InventoryProviderLimits.exceeded(ProviderLimitSite.FLUID_PROVIDER_CLASS, providerClass.length(), 1024);
+			if (providerClass.isBlank() || providerClass.chars().anyMatch(Character::isISOControl))
 				throw new IllegalArgumentException("fluid provider class bound");
 		}
 	}
@@ -141,6 +153,17 @@ public interface IPlatformFluidService {
 	OperationProfile probeProfile();
 	/** Root/controller/count/size only: no full-member allocation, iterator/content getter or layout construction. */
 	Optional<Probe> probe(Context context, Operation operation);
+	/** Empty legacy probes mean unavailable. Only explicit provider absence may opt into unsupported. */
+	default nx.pingwheel.common.presentation.inventory.InventoryDecision<Probe> probeDecision(Context context, Operation operation) {
+		try {
+			return probe(context, operation).map(nx.pingwheel.common.presentation.inventory.InventoryDecision::accept)
+				.orElseGet(() -> nx.pingwheel.common.presentation.inventory.InventoryDecision.reject(
+					nx.pingwheel.common.presentation.inventory.InventoryFailureReason.SOURCE_UNAVAILABLE, nx.pingwheel.common.presentation.inventory.InventoryImpact.DEGRADED));
+		} catch (nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnsupportedException absent) {
+			return nx.pingwheel.common.presentation.inventory.InventoryDecision.unsupported(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.UNSUPPORTED_LANE,
+				nx.pingwheel.common.presentation.inventory.InventoryImpact.DEGRADED);
+		}
+	}
 	@NotNullByDefault
 	interface Probe extends AutoCloseable {
 		/** Pure frozen metadata, with no gate, capability lookup or allocation proportional to M/N. */

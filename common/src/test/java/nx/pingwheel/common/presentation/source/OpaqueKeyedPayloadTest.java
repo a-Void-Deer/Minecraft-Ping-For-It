@@ -91,6 +91,7 @@ class OpaqueKeyedPayloadTest {
 
 		assertEquals("pingforit:inventory.observation.v1", token.id());
 		assertEquals(133120, token.bound());
+		assertEquals(1024, token.maxEntries());
 		var tagged = CaptureResult.OpaqueValue.forCodec(token, new byte[token.bound()]);
 		assertEquals(token.bound(), tagged.size());
 		assertEquals(token, tagged.codec());
@@ -177,6 +178,53 @@ class OpaqueKeyedPayloadTest {
 		}
 		assertThrows(IllegalArgumentException.class,
 			() -> new CaptureResult.OpaqueKeyedFragment(CODEC, overPageBound));
+	}
+
+	@Test
+	void taggedInventoryPagesUseOnlyTheRegisteredCodeOwnedAllowance() {
+		for (var codec : new CaptureResult.OpaqueCodec[] {
+			CaptureResult.OpaqueCodec.INVENTORY_OBSERVATION_V1,
+			CaptureResult.OpaqueCodec.INVENTORY_FLUID_OBSERVATION_V1 }) {
+			assertEquals(1024, codec.maxEntries(), "the inventory allowance matches the publisher's closed key cut");
+			Map<String, CaptureResult.OpaqueValue> atBound = new LinkedHashMap<>();
+			for (int index = 0; index < codec.maxEntries(); index++)
+				atBound.put("test:item/" + index, CaptureResult.OpaqueValue.forCodec(codec, new byte[] {(byte) index}));
+
+			var payload = new CaptureResult.OpaqueKeyedFragment(codec.id(), atBound);
+			assertEquals(codec.maxEntries(), payload.entries().size());
+
+			atBound.put("test:item/overflow", CaptureResult.OpaqueValue.forCodec(codec, new byte[0]));
+			assertThrows(IllegalArgumentException.class,
+				() -> new CaptureResult.OpaqueKeyedFragment(codec.id(), atBound));
+		}
+	}
+
+	@Test
+	void ordinaryOpaquePagesStayAt256AndAnInventoryIdCannotWidenThem() {
+		assertEquals(256, CaptureResult.OpaqueKeyedFragment.MAX_ENTRIES, "the ordinary opaque page bound stays generic");
+		var codec = CaptureResult.OpaqueCodec.INVENTORY_OBSERVATION_V1;
+		Map<String, CaptureResult.OpaqueValue> ordinaryAtBound = new LinkedHashMap<>();
+		for (int index = 0; index < 256; index++)
+			ordinaryAtBound.put("test:item/" + index, new CaptureResult.OpaqueValue(new byte[] {(byte) index}));
+
+		assertEquals(256, new CaptureResult.OpaqueKeyedFragment(codec.id(), ordinaryAtBound).entries().size());
+		ordinaryAtBound.put("test:item/overflow", new CaptureResult.OpaqueValue(new byte[0]));
+		assertThrows(IllegalArgumentException.class,
+			() -> new CaptureResult.OpaqueKeyedFragment(codec.id(), ordinaryAtBound));
+
+		Map<String, CaptureResult.OpaqueValue> mixed = new LinkedHashMap<>();
+		for (int index = 0; index < 256; index++)
+			mixed.put("test:item/" + index, CaptureResult.OpaqueValue.forCodec(codec, new byte[] {(byte) index}));
+		mixed.put("test:item/ordinary", new CaptureResult.OpaqueValue(new byte[0]));
+		assertThrows(IllegalArgumentException.class,
+			() -> new CaptureResult.OpaqueKeyedFragment(codec.id(), mixed));
+
+		Map<String, CaptureResult.OpaqueValue> mixedDomains = new LinkedHashMap<>(mixed);
+		mixedDomains.remove("test:item/ordinary");
+		mixedDomains.put("test:item/fluid", CaptureResult.OpaqueValue.forCodec(
+			CaptureResult.OpaqueCodec.INVENTORY_FLUID_OBSERVATION_V1, new byte[0]));
+		assertThrows(IllegalArgumentException.class,
+			() -> new CaptureResult.OpaqueKeyedFragment(codec.id(), mixedDomains));
 	}
 
 	@Test

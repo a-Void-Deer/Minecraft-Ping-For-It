@@ -28,6 +28,8 @@ import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimits;
+import nx.pingwheel.common.presentation.inventory.minecraft.ProviderLimitSite;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
@@ -55,6 +57,19 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 
 	@Override public OperationProfile probeProfile() { return PROBE; }
 	@Override public Optional<Probe> probe(Context context, Operation operation) {
+		try { return probeAvailable(context, operation); }
+		catch (nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnsupportedException absent) { return Optional.empty(); }
+	}
+	@Override public nx.pingwheel.common.presentation.inventory.InventoryDecision<Probe> probeDecision(Context context, Operation operation) {
+		try { return probeAvailable(context, operation).map(nx.pingwheel.common.presentation.inventory.InventoryDecision::accept)
+			.orElseGet(() -> nx.pingwheel.common.presentation.inventory.InventoryDecision.reject(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.SOURCE_UNAVAILABLE,
+				nx.pingwheel.common.presentation.inventory.InventoryImpact.DEGRADED)); }
+		catch (nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnsupportedException absent) {
+			return nx.pingwheel.common.presentation.inventory.InventoryDecision.unsupported(nx.pingwheel.common.presentation.inventory.InventoryFailureReason.UNSUPPORTED_LANE,
+				nx.pingwheel.common.presentation.inventory.InventoryImpact.DEGRADED);
+		}
+	}
+	private Optional<Probe> probeAvailable(Context context, Operation operation) {
 		Objects.requireNonNull(context); operation.allowance().debit(PROBE.ownedCost());
 		context.require(context.root(), operation);
 		boolean loaded = context.level().isLoaded(context.root()); context.require(context.root(), operation);
@@ -65,11 +80,12 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 		if (entity == null || pendingLoot(context, entity, operation)) return Optional.empty();
 		context.require(context.root(), operation);
 		@Nullable Storage<FluidVariant> storage = lookup.find(context.level(), context.root(), context.face()); context.require(context.root(), operation);
-		if (storage == null) return Optional.empty();
+		if (storage == null) throw new nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnsupportedException();
 		boolean indexed = storage instanceof SlottedStorage<?>;
 		int count = 0;
 		if (storage instanceof SlottedStorage<FluidVariant> slotted) {
 			context.require(context.root(), operation); count = slotted.getSlotCount(); context.require(context.root(), operation);
+			if (count > MAX_SLOTS) throw InventoryProviderLimits.exceeded(ProviderLimitSite.FABRIC_FLUID_ADDRESSES, count, MAX_SLOTS);
 			if (count < 0 || count > MAX_SLOTS) throw unavailable("fluid slot count outside bound");
 		}
 		context.require(context.root(), operation);
@@ -77,7 +93,7 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 		// Class.getName is VM metadata, not a provider callback or reflective graph discovery.
 		// Refuse before scans/copies or diagnostics can expand an unbounded class name.
 		String name = storage.getClass().getName();
-		if (name.length() > 1024) throw unavailable("fluid provider class name outside bound");
+		if (name.length() > 1024) throw InventoryProviderLimits.exceeded(ProviderLimitSite.FABRIC_FLUID_CLASS, name.length(), 1024);
 		var route = new RouteInfo(TopologyEvidence.PUBLIC_ADDRESS_ONLY, name);
 		var shape = new Shape(1, indexed ? OptionalInt.of(count) : OptionalInt.empty(), indexed);
 		return Optional.of(new TransferProbe(new Binding(context, lookup, state, entity, storage), shape, route, operation, tick));
@@ -94,8 +110,9 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 		context.require(context.root(), operation); return pending;
 	}
 	static String registryId(@Nullable ResourceLocation id) {
-		if (id == null || (long) id.getNamespace().length() + id.getPath().length() + 1 > 256)
-			throw unavailable("fluid source registry identity unavailable");
+		if (id == null) throw unavailable("fluid source registry identity unavailable");
+		long length = (long) id.getNamespace().length() + id.getPath().length() + 1;
+		if (length > 256) throw InventoryProviderLimits.exceeded(ProviderLimitSite.FABRIC_FLUID_REGISTRY_ID, length, 256);
 		return id.toString();
 	}
 
@@ -114,6 +131,7 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 			if (current != storage) return false;
 			if (storage instanceof SlottedStorage<FluidVariant> slotted) {
 				gate(operation); int count = slotted.getSlotCount(); gate(operation);
+				if (count > MAX_SLOTS) throw InventoryProviderLimits.exceeded(ProviderLimitSite.FABRIC_FLUID_ADDRESSES, count, MAX_SLOTS);
 				if (count != shape.indexedSlots().orElseThrow()) return false;
 			}
 			return true;
@@ -125,7 +143,7 @@ public final class PlatformFluidServiceImpl implements IPlatformFluidService {
 				if (underlying == view) return view;
 				view = underlying;
 			}
-			throw unavailable("fluid underlying address chain outside bound");
+			throw InventoryProviderLimits.exceeded(ProviderLimitSite.FABRIC_FLUID_UNDERLYING_DEPTH, MAX_UNDERLYING_VIEWS + 1L, MAX_UNDERLYING_VIEWS);
 		}
 	}
 

@@ -75,12 +75,20 @@ class InventoryMonitorAttributionTest {
 			f.backend.handle(InventoryBackendTest.A, f.select(1, 1), 1, f.settings); f.backend.tick(2, f.settings); f.open(2, 3);
 			f.monitor.configure(previewEnabled, trackingEnabled); boolean[] nested = {false};
 			f.markerLookup = () -> { if (!nested[0]) { nested[0] = true; f.clock.time += 101; f.backend.tick(3, f.settings); } };
+			int frameStart = f.host.packets.size();
 			long started = f.clock.time; f.backend.tick(3, f.settings); var sample = f.sample(3);
-			assertTrue(nested[0]); assertEquals(187, f.clock.time - started, "101ns Tracking callback plus 86ns actual nested Preview work");
+			long progressControls = f.host.packets.subList(frameStart, f.host.packets.size()).stream()
+				.filter(packet -> packet.kind() == InventoryS2CPacket.Kind.PREVIEW_STATE).count();
+			assertEquals(1, progressControls, "one real scan/delivery progress notice");
+			long progressSendNs = progressControls * (11 + 13);
+			assertTrue(nested[0]); assertEquals(101 + 86 + progressSendNs, f.clock.time - started,
+				"Tracking callback, nested Preview work and independently counted progress-control measurement/handoff");
 			if (previewEnabled) {
 				assertEquals(41, sample.preview().timing(Phase.READ).totalNs());
-				assertEquals(31, sample.preview().timing(Phase.PUBLISH).totalNs());
-				assertEquals(86, sample.preview().timing(Phase.TICK_WORK).totalNs());
+				assertEquals(31 + progressSendNs, sample.preview().timing(Phase.PUBLISH).totalNs(),
+					"PUBLISH includes the measured PREVIEW_STATE encode and handoff");
+				assertEquals(86 + progressSendNs, sample.preview().timing(Phase.TICK_WORK).totalNs(),
+					"inclusive Preview tick work includes its independently observed progress-control callbacks");
 			} else assertNull(sample.preview());
 			if (trackingEnabled) assertEquals(101, sample.tracking().timing(Phase.TICK_WORK).totalNs(), "disabled or enabled Preview business time is never Tracking-owned");
 			else assertNull(sample.tracking());

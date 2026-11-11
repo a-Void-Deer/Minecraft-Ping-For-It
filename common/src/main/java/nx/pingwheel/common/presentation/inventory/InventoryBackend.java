@@ -79,15 +79,19 @@ public final class InventoryBackend implements AutoCloseable {
 	 * name and winner changes are the already-computed publication inputs the
 	 * host emits once the caller has installed the tracking sidecar.
 	 */
-	public record Created(ServerMarker marker, MarkerRejectReason rejection, TargetNameJson authoritativeName,
-		List<MarkerWinnerChange> winnerChanges) {
+	public record Created(@Nullable ServerMarker marker, @Nullable MarkerRejectReason rejection, @Nullable TargetNameJson authoritativeName,
+		@Unmodifiable List<MarkerWinnerChange> winnerChanges, @Nullable InventoryFailureReason failureReason) {
 		public Created {
 			if ((marker == null) == (rejection == null)) throw new IllegalArgumentException("create outcome");
 			winnerChanges = List.copyOf(winnerChanges == null ? List.of() : winnerChanges);
+			if (marker != null && failureReason != null) throw new IllegalArgumentException("committed inventory failure");
+			if (rejection != null && failureReason == null) failureReason = InventoryFailureReason.from(rejection);
 		}
+		public Created(@Nullable ServerMarker marker, @Nullable MarkerRejectReason rejection, @Nullable TargetNameJson name,
+			List<MarkerWinnerChange> changes) { this(marker, rejection, name, changes, null); }
 		/** Source-compatible outcome for hosts and fixtures that predate the publication split. */
-		public Created(ServerMarker marker, MarkerRejectReason rejection) { this(marker, rejection, null, List.of()); }
-		public Created(ServerMarker marker, MarkerRejectReason rejection, TargetNameJson authoritativeName) {
+		public Created(@Nullable ServerMarker marker, @Nullable MarkerRejectReason rejection) { this(marker, rejection, null, List.of(), null); }
+		public Created(@Nullable ServerMarker marker, @Nullable MarkerRejectReason rejection, @Nullable TargetNameJson authoritativeName) {
 			this(marker, rejection, authoritativeName, List.of());
 		}
 	}
@@ -95,6 +99,7 @@ public final class InventoryBackend implements AutoCloseable {
 		@Nullable MarkerRejectReason prepare(Target committed, TargetKey targetKey, String targetType, List<UUID> audience);
 		/** Runs once on the exact create result immediately before the atomic store commit. */
 		default @Nullable MarkerRejectReason finishAuthorization(PingAuthorization authorization) { return null; }
+		default @Nullable InventoryFailureReason failureReason() { return null; }
 	}
 	/** Current presentation session/schema availability; it carries no field-permission result. */
 	@org.jetbrains.annotations.NotNullByDefault
@@ -135,6 +140,10 @@ public final class InventoryBackend implements AutoCloseable {
 			return new PreviewLaneGrant(freezeInventoryPreviewLanes(owner, targetTypeId), policyToken(owner));
 		}
 		Optional<Opened> open(UUID player, Target requested);
+		default InventoryDecision<Opened> openDecision(UUID player, Target requested) {
+			return open(player, requested).map(InventoryDecision::accept)
+				.orElseGet(() -> InventoryDecision.reject(InventoryFailureReason.SOURCE_UNAVAILABLE, InventoryImpact.PING_UNAVAILABLE));
+		}
 		/**
 		 * Binds the preview's original input to the create's committed target.
 		 * The default keeps ordinary identity exact; a provider-backed host
@@ -201,36 +210,42 @@ public final class InventoryBackend implements AutoCloseable {
 		for (InventoryResourceKind kind : lanes) mask |= 1 << kind.wireId();
 		return mask;
 	}
-	private static final int MAX_SESSIONS = 128, MAX_TRACKING = 256, MAX_ENTRIES = 256, MAX_REPLAYS = 64;
-	private static final long SESSION_BYTES = 65536, LEASE_BYTES = 32768;
+	private static final int MAX_SESSIONS = 256, MAX_TRACKING = 512, MAX_ENTRIES = 1024, MAX_REPLAYS = 64;
+	// 64 OPEN outcomes and 64 commit results own bounded packets, queue nodes,
+	// retry wrappers and one reusable encoding workspace. 64 publisher control
+	// states at 4096 bytes, 256 mailbox/lane records at 768 bytes and 64 KiB
+	// for session indexes, snapshots and encoding fit the prepaid 512 KiB owner.
+	private static final long SESSION_BYTES = 512 * 1024, LEASE_BYTES = 32768;
 	/**
 	 * Per lifetime category: bounded identity/token strings (UTF-16), count/total/
 	 * witness/reference/key nodes, retired/fold markers, ticket and backing slots.
 	 * 40-byte objects and 8-byte references, with growth/alignment overlap, fit
-	 * within 4096. Reserving the whole small index slab makes retirement infallible
-	 * under later memory pressure. Variable displays have separate entry tickets.
+	 * within 4096. Capacity is admitted before adding a category, including its
+	 * future retirement; clear retains that charge. Displays use separate tickets.
 	 */
-	private static final long PREVIEW_BYTES = 8192L + MAX_ENTRIES * 4096L;
-	private static final long CLAIM_BYTES = 1024L + MAX_ENTRIES * 512L;
+	private static final long PREVIEW_BYTES = 8192L;
+	private static final long CLAIM_BYTES = 1024L;
 	private static final long REPROJECT_DISPLAY_FIXED_BYTES = 1024L;
 	private static final long AGGREGATE_DISPLAY_BYTES = 4096L, AGGREGATE_DISPLAY_WORK = 8192L;
 	private static final int AGGREGATE_JSON_BYTES = 327;
+	private static final long PREVIEW_CATEGORY_BYTES = 4096L, CLAIM_CATEGORY_BYTES = 512L;
 	/**
-	 * The existing 64 KiB Session slab includes the 64 bounded outcome packets,
-	 * map nodes/backing slots and these 40-byte-or-smaller retry wrappers (under
-	 * 3 KiB). No packet copy or separate pending index is retained for retry.
+		 * The Session slab includes bounded outcome packets, map nodes/backing slots
+		 * and retry wrappers. No additional ticket is required to report a refusal.
 	 */
 	private static final class CommitResult {
 		final long requestId, commitId;
 		final InventoryResourceKind resourceKind;
 		final @Nullable MarkerId markerId;
 		final @Nullable MarkerRejectReason rejection;
+		final @Nullable InventoryFailureReason failureReason;
 		InventoryS2CPacket packet;
 		boolean pending = true, queued;
 		CommitResult(InventoryS2CPacket packet, long requestId, long commitId, @Nullable MarkerId markerId,
 			@Nullable MarkerRejectReason rejection) {
 			this.packet = packet; this.requestId = requestId; this.commitId = commitId; this.resourceKind = packet.resourceKind();
 			this.markerId = markerId; this.rejection = rejection;
+			this.failureReason = packet.failureReason();
 		}
 		boolean selected() { return rejection == null; }
 	}
@@ -246,6 +261,9 @@ public final class InventoryBackend implements AutoCloseable {
 		final Map<InventoryResourceKind, Long> pendingPolicyRevisions = new EnumMap<>(InventoryResourceKind.class);
 		/** At most one complete OPEN result per request until that exact control is handed off. */
 		final Map<Long, InventoryS2CPacket> pendingOpened = new LinkedHashMap<>();
+		/** First accepted input view, retained across restamping; CLOSE cannot guess another old view. */
+		final Map<Long, Long> outcomeViews = new LinkedHashMap<>();
+		final Set<Long> decidingOpens = new HashSet<>();
 		InventoryS2CPacket.Offer offer;
 		/** Current requested cap generation; a handoff must match it, never a stale earlier OFFER. */
 		long offerGeneration, handoffGeneration;
@@ -271,11 +289,24 @@ public final class InventoryBackend implements AutoCloseable {
 		final RetainedMemoryLedger.Ticket memory;
 		/** Immutable OPEN-time lane entitlement, including an all-denied zero mask. */
 		final int laneMask;
+		final long inputView;
+		final Map<InventoryResourceKind, LaneState> lanes = new EnumMap<>(InventoryResourceKind.class);
 		long attempted;
 		boolean openedHandedOff;
-		PreviewRequest(long request, Opened frozen, nx.pingwheel.common.domain.BlockFace face, RetainedMemoryLedger.Ticket memory, int laneMask) {
+		PreviewRequest(long request, Opened frozen, nx.pingwheel.common.domain.BlockFace face, RetainedMemoryLedger.Ticket memory, int laneMask, long inputView) {
 			this.request = request; this.frozen = frozen; this.face = face; this.memory = memory; this.laneMask = laneMask;
+			this.inputView = inputView;
+			for (var kind : InventoryResourceKind.values()) lanes.put(kind, new LaneState());
 		}
+	}
+	@org.jetbrains.annotations.NotNullByDefault
+	private static final class LaneState {
+		long controlRevision, progressRevision, lastNotice = -1, scanned;
+		InventoryS2CPacket.PreviewPhase phase = InventoryS2CPacket.PreviewPhase.ADMISSION;
+		InventoryS2CPacket.PreviewCondition condition = InventoryS2CPacket.PreviewCondition.PROGRESS;
+		@Nullable InventoryFailureReason reason;
+		@Nullable InventoryS2CPacket pending;
+		boolean terminal, noticePending;
 	}
 	private static final class Preview {
 		final PreviewRequest parent;
@@ -289,21 +320,27 @@ public final class InventoryBackend implements AutoCloseable {
 		final RetainedMemoryLedger.Ticket memory;
 		SyncPublisher.Context context;
 		Map<InventoryScanner.Key, InventoryResourceValue> counts = new LinkedHashMap<>();
-		final Map<InventoryScanner.Key, Integer> witnesses = new LinkedHashMap<>();
+		Map<InventoryScanner.Key, Integer> witnesses = new LinkedHashMap<>();
 		Map<String, InventoryResourceValue> totals = new LinkedHashMap<>();
 		Map<String, InventorySelection> references = new LinkedHashMap<>();
-		final Map<String, String> keys = new LinkedHashMap<>();
-		final Set<String> folded = new HashSet<>();
+		Map<String, String> keys = new LinkedHashMap<>();
+		Set<String> folded = new HashSet<>();
 		/** Lifetime token/category bound includes retired identities, not just visible rows. */
-		final Set<String> retired = new HashSet<>();
+		Set<String> retired = new HashSet<>();
 		int categories;
+		int categoryCapacity;
+		RetainedMemoryLedger.@Nullable Ticket categoryMemory;
 		final List<RetainedMemoryLedger.Ticket> entries = new ArrayList<>();
 		/** Retained backend metadata reprojection state: ceiling, bounded pass flags and its ticket. */
 		int metadataCeiling = InventoryDomainCodec.MAX_DISPLAY_BYTES;
-		RetainedMemoryLedger.Ticket metadataMemory;
+		RetainedMemoryLedger.@Nullable Ticket metadataMemory;
 		boolean metadataChanged, rebaselineNeeded, fencePending, republishPending;
 		long revision;
 		boolean terminal;
+		@Nullable InventoryFailureReason failureReason;
+		/** One already-paid page awaiting Backend capacity; never read or replay its contents twice. */
+		InventoryRuntime.@Nullable Observation pendingObservation;
+		RetainedMemoryLedger.@Nullable Ticket pendingMemory;
 		@Nullable PublicationObservation last;
 		@Nullable InventoryPublicationEvidence publicationEvidence, deniedEvidence;
 		InventorySharedRead.Check deniedCheck = InventorySharedRead.Check.VALID;
@@ -353,6 +390,7 @@ public final class InventoryBackend implements AutoCloseable {
 		long count, total, completedCount, completedTotal, revision, state = 1, nextSweep;
 		boolean completedFolded;
 		boolean folded, invalid, scanning = true, audienceDemand, recomputingScope;
+		@Nullable InventoryFailureReason failureReason;
 		@Nullable PublicationObservation completed;
 		@Nullable InventoryPublicationEvidence completedEvidence, bootstrapEvidence, deniedEvidence;
 		InventorySharedRead.Check deniedCheck = InventorySharedRead.Check.VALID;
@@ -395,6 +433,8 @@ public final class InventoryBackend implements AutoCloseable {
 	private final Map<UUID, Integer> previewVariants = new LinkedHashMap<>();
 	private final Map<UUID, Set<String>> previewVariantClaims = new LinkedHashMap<>();
 	private final Map<UUID, RetainedMemoryLedger.Ticket> variantMemory = new LinkedHashMap<>();
+	private final Map<UUID, Integer> variantCapacities = new LinkedHashMap<>();
+	private final Map<UUID, RetainedMemoryLedger.Ticket> variantCapacityMemory = new LinkedHashMap<>();
 	private long epochSeed, baseline, tick;
 	private InventorySettings settings;
 	/** Last applied effective integer pair, not a mutable settings reference. */
@@ -402,6 +442,9 @@ public final class InventoryBackend implements AutoCloseable {
 	private long offerGeneration;
 	private int trackingCursor, previewCursor;
 	private long publicationOpportunityTick = -1;
+	private InventoryRuntime.@Nullable OperationGrant inputOpportunity, previewOpportunity;
+	private @Nullable Preview protectedPreview;
+	private int previewOpportunityCursor;
 	private InventoryRuntime.@Nullable PublicationGrant publicationOpportunity;
 	private SyncPublisher.@Nullable Context publicationOpportunityContext;
 	private boolean publishing, closeRequested;
@@ -428,7 +471,8 @@ public final class InventoryBackend implements AutoCloseable {
 					&& (packet.kind() != InventoryS2CPacket.Kind.POLICY
 						|| session.pendingPolicies.get(packet.resourceKind()) == packet && currentPolicyMatches(recipient, packet,
 							session.pendingPolicyRevisions.getOrDefault(packet.resourceKind(), -1L)))
-					&& (packet.kind() != InventoryS2CPacket.Kind.OPENED || session.pendingOpened.get(packet.requestId()) == packet);
+					&& (!openOutcome(packet) || !session.decidingOpens.contains(packet.requestId()) && session.pendingOpened.get(packet.requestId()) == packet)
+					&& (packet.kind() != InventoryS2CPacket.Kind.PREVIEW_STATE || previewStateCurrent(session, packet));
 			}
 			@Override public boolean admittedToSend(SyncPublisher.Context context) {
 				return publicationAllowed(context) && previewOpened(context); // waiting for OPENED defers, never revokes the context
@@ -442,6 +486,7 @@ public final class InventoryBackend implements AutoCloseable {
 			@Override public TransportHandoff sendObserved(UUID recipient, InventoryS2CPacket packet) { return host.sendObserved(recipient, packet); }
 		}, this.sink, monitor);
 		publisher.setControlHandoff(this::controlHandoffAccepted);
+		publisher.backingWork(runtime::claimDetachedItemWork);
 	}
 	public InventoryRuntime runtime() { return runtime; }
 	public ServerInventoryMonitor monitor() { return monitor; }
@@ -573,22 +618,30 @@ public final class InventoryBackend implements AutoCloseable {
 		if (publishing) return Optional.empty();
 		@Nullable Tracking lease = tracking.get(marker);
 		if (lease == null || !creationAllowed(lease, recipient, epoch, view) || lease.creationEvidence == null) return Optional.empty();
-		var staging = publisher.reserveInitial(wireBytes, encodingWorkspace);
-		if (staging.isEmpty()) return Optional.empty();
+		var initial = publisher.reserveInitialDecision(wireBytes, encodingWorkspace);
+		if (!initial.accepted()) {
+			initialDelay(java.util.Objects.requireNonNull(initial.reason()), "initial-staging"); return Optional.empty();
+		}
+		var staging = Optional.of(java.util.Objects.requireNonNull(initial.value()));
 		@Nullable InventoryRuntime.PublicationGrant source = lease.initialGrants.remove(recipient);
 		if (source == null) source = runtime.reservePublication(lease.creationEvidence).orElse(null);
-		if (source == null) { staging.get().close(); return Optional.empty(); }
-		if (!runtime.claimDetachedItemWork(encodingWorkspace)) { source.close(); staging.get().close(); return Optional.empty(); }
+		if (source == null) { initialDelay(InventoryFailureReason.PROVIDER_WORK_LIMIT, "initial-source"); staging.get().close(); return Optional.empty(); }
+		if (!runtime.claimDetachedItemWork(encodingWorkspace)) { initialDelay(InventoryFailureReason.ITEM_WORK_LIMIT, "initial-encode"); source.close(); staging.get().close(); return Optional.empty(); }
 		return Optional.of(new InitialPublication(lease, recipient, epoch, view, source, staging.get()));
 	}
 	/** Suppressed inventory initials still pay construction and transport workspace, but disclose no source data. */
 	public Optional<InitialEnvelope> reserveInitialEnvelope(long wireBytes, long workspace) {
 		if (publishing) return Optional.empty();
-		var held = publisher.reserveInitial(wireBytes, workspace);
-		if (held.isEmpty()) return Optional.empty();
-		if (!runtime.claimDetachedItemWork(workspace)) { held.get().close(); return Optional.empty(); }
+		var admission = publisher.reserveInitialDecision(wireBytes, workspace);
+		if (!admission.accepted()) { initialDelay(java.util.Objects.requireNonNull(admission.reason()), "initial-envelope"); return Optional.empty(); }
+		var held = Optional.of(java.util.Objects.requireNonNull(admission.value()));
+		if (!runtime.claimDetachedItemWork(workspace)) { initialDelay(InventoryFailureReason.ITEM_WORK_LIMIT, "initial-envelope-encode"); held.get().close(); return Optional.empty(); }
 		publishing = true;
 		return Optional.of(new InitialEnvelope(held.get()));
+	}
+	private static void initialDelay(InventoryFailureReason reason, String stage) {
+		report(InventoryDiagnosticSite.PUBLICATION, InventoryOperation.CREATE, reason, InventoryImpact.DEGRADED,
+			InventoryOutcome.DEFERRED, true, -1, stage, -1, -1, -1);
 	}
 	@org.jetbrains.annotations.NotNullByDefault
 	public final class InitialEnvelope implements AutoCloseable {
@@ -598,8 +651,13 @@ public final class InventoryBackend implements AutoCloseable {
 		public void settle(long wireBytes, long workspace) { staging.settle(wireBytes, workspace); }
 		@Override public void close() { if (!closed) { closed = true; try { staging.close(); } finally { finishInitialPublication(); } } }
 	}
+	/** Presentation initials retry before the ordinary Inventory tick. Renew only
+	 * at a new authoritative tick; a same-tick refusal must keep its paid pressure. */
+	public void prepareInitialAdmission(long now) {
+		if (!publishing && cyclesInitialized && now != tick) advance(now, settings);
+	}
 	private void advance(long now, InventorySettings settings) {
-		if (now != tick) closePublicationOpportunity(); // close against the OLD ledger before Runtime resets it
+		if (now != tick) { closePublicationOpportunity(); closeOperationOpportunities(); } // close OLD ledger owners before reset
 		tick = now; this.settings = settings; runtime.advance(now, settings); publisher.advance(now, settings);
 		if (publicationOpportunityTick != now) {
 			publicationOpportunityTick = now;
@@ -607,6 +665,18 @@ public final class InventoryBackend implements AutoCloseable {
 			if (pending.isPresent()) {
 				publicationOpportunityContext = pending.get().context();
 				publicationOpportunity = runtime.reservePublication(pending.get().evidence()).orElse(null);
+			}
+			// Protect one synchronous input gate and one rotating due Preview
+			// quantum from this same ledger. Tracking still executes first.
+			if (!tracking.isEmpty()) inputOpportunity = runtime.reserveOperation(runtime.preflightBudget()).value();
+			List<Preview> due = new ArrayList<>();
+			for (Session session : sessions.values()) for (Preview preview : session.previews.values())
+				if (session.access != null && preview.parent.openedHandedOff && !preview.terminal
+					&& preview.context.stateFence() == 1) due.add(preview);
+			if (!due.isEmpty() && !tracking.isEmpty()) {
+				Preview selected = due.get(Math.floorMod(previewOpportunityCursor++, due.size()));
+				previewOpportunity = runtime.reserveOperation(runtime.stepBudget(selected.consumer, 1)).value();
+				if (previewOpportunity != null) protectedPreview = selected;
 			}
 		}
 		// Clocks change without producer observations. Close the actual old open
@@ -634,7 +704,9 @@ public final class InventoryBackend implements AutoCloseable {
 			}
 		}
 		if (previewClock.advance(now, settings.getPreview().getPeriodTicks())) {
-			previewVariants.clear(); previewVariantClaims.clear(); variantMemory.values().forEach(RetainedMemoryLedger.Ticket::close); variantMemory.clear();
+			previewVariants.clear(); previewVariantClaims.values().forEach(Set::clear);
+			// Clearing a collection does not release its backing capacity. Reuse
+			// the paid owner until disconnect or backend shutdown.
 		}
 		// Reconfiguration can observe resource refusals even on ingress. Retire
 		// expired work before it, using the marker's existing hard deadline only.
@@ -651,7 +723,7 @@ public final class InventoryBackend implements AutoCloseable {
 		if (hook != InventorySyncPublisher.SendDecision.ALLOW) return hook;
 		if (packet.kind() == InventoryS2CPacket.Kind.OFFER || packet.kind() == InventoryS2CPacket.Kind.POLICY
 			|| packet.kind() == InventoryS2CPacket.Kind.SELECTED || packet.kind() == InventoryS2CPacket.Kind.REJECT
-			|| packet.kind() == InventoryS2CPacket.Kind.OPENED) {
+			|| openOutcome(packet) || packet.kind() == InventoryS2CPacket.Kind.PREVIEW_STATE) {
 			@Nullable Session session = sessions.get(context.recipient());
 			@Nullable SessionAccess access = currentSessionAccess(context.recipient());
 			return session != null && access != null && !closeRequested && !deferredDisconnects.contains(context.recipient())
@@ -659,7 +731,8 @@ public final class InventoryBackend implements AutoCloseable {
 				&& (packet.kind() != InventoryS2CPacket.Kind.POLICY
 					|| session.pendingPolicies.get(packet.resourceKind()) == packet && currentPolicyMatches(context.recipient(), packet,
 						session.pendingPolicyRevisions.getOrDefault(packet.resourceKind(), -1L)))
-				&& (packet.kind() != InventoryS2CPacket.Kind.OPENED || session.pendingOpened.get(packet.requestId()) == packet)
+				&& (!openOutcome(packet) || !session.decidingOpens.contains(packet.requestId()) && session.pendingOpened.get(packet.requestId()) == packet)
+				&& (packet.kind() != InventoryS2CPacket.Kind.PREVIEW_STATE || previewStateCurrent(session, packet))
 				? InventorySyncPublisher.SendDecision.ALLOW : InventorySyncPublisher.SendDecision.DENY;
 		}
 		if (!publicationAllowed(context)) return InventorySyncPublisher.SendDecision.DENY;
@@ -734,7 +807,8 @@ public final class InventoryBackend implements AutoCloseable {
 		}
 		for (Tracking lease : tracking.values()) if (lease.consumer.invalidated() && !lease.invalid) { invalidate(lease); changed = true; }
 		for (Session session : sessions.values()) for (Preview preview : session.previews.values())
-			if ((preview.consumer.invalidated() || publisher.sourceDenied(preview.context)) && preview.context.stateFence() == 1) {
+			if ((preview.consumer.invalidated() || publisher.sourceDenied(preview.context)) && preview.context.stateFence() == 1
+				&& preview.parent.lanes.get(preview.input.resourceKind()).condition != InventoryS2CPacket.PreviewCondition.UNSUPPORTED) {
 				invalidatePreview(session, preview); changed = true;
 			}
 		return changed;
@@ -771,11 +845,36 @@ public final class InventoryBackend implements AutoCloseable {
 		catch (RuntimeException | LinkageError ignored) { /* diagnostic isolation */ }
 	}
 	private void delay(InventoryBudgetDelayState stage, Module module, long id, String name, int reasons) {
+		if (module == Module.INVENTORY_TRACKING) for (Reason reason : Reason.values()) if ((reasons & reason.bit()) != 0)
+			report(InventoryDiagnosticSite.PUBLICATION, InventoryOperation.TRACKING, delayReason(reason.bit()), InventoryImpact.DEGRADED,
+				InventoryOutcome.DEFERRED, true, -1, name, -1, -1, -1);
 		stage.observe(sink, module == Module.INVENTORY_PREVIEW ? previewCycle : trackingCycle, tick, reasons,
 			() -> new WorkItem(module.name() + "/" + id + "/" + name, "Inventory " + id + " " + name), Quantity::unknown);
 	}
 	private void previewDelay(Preview preview, InventoryBudgetDelayState stage, String name, int reasons) {
 		delay(stage, Module.INVENTORY_PREVIEW, preview.context.baseline(), name, reasons);
+		@Nullable Session session = sessions.get(preview.input.readOwner());
+		if (session != null) laneState(session, preview.parent, preview.input.resourceKind(),
+			name.equals("sampling") ? InventoryS2CPacket.PreviewPhase.SCAN : InventoryS2CPacket.PreviewPhase.DELIVERY,
+			InventoryS2CPacket.PreviewCondition.DEFERRED, delayReason(reasons), false);
+	}
+	private void closeOperationOpportunities() {
+		if (inputOpportunity != null) { inputOpportunity.close(); inputOpportunity = null; }
+		if (previewOpportunity != null) { previewOpportunity.close(); previewOpportunity = null; }
+		protectedPreview = null;
+	}
+	private <T> T inputOperation(java.util.function.Supplier<T> action) {
+		InventoryRuntime.@Nullable OperationGrant grant = inputOpportunity; inputOpportunity = null;
+		return grant == null ? action.get() : grant.run(action);
+	}
+	private static InventoryFailureReason delayReason(int reasons) {
+		if ((reasons & Reason.MEMORY.bit()) != 0) return InventoryFailureReason.MEMORY_LIMIT;
+		if ((reasons & Reason.QUEUE_CAPACITY.bit()) != 0) return InventoryFailureReason.QUEUE_LIMIT;
+		if ((reasons & Reason.PUBLICATION_WORK.bit()) != 0) return InventoryFailureReason.ITEM_WORK_LIMIT;
+		if ((reasons & Reason.SUBJECT_CAPACITY.bit()) != 0) return InventoryFailureReason.CONSUMER_CAPACITY;
+		if ((reasons & Reason.FRAME_OR_FRAGMENT_UNSERVICEABLE.bit()) != 0) return InventoryFailureReason.FRAME_LIMIT;
+		if ((reasons & (Reason.WIRE_CLIENT_OR_STREAM.bit() | Reason.WIRE_GLOBAL.bit())) != 0) return InventoryFailureReason.WIRE_LIMIT;
+		return InventoryFailureReason.PROVIDER_WORK_LIMIT;
 	}
 	private void trackingDelay(Tracking lease, InventoryBudgetDelayState stage, String name, int reasons) {
 		delay(stage, Module.INVENTORY_TRACKING, lease.marker.id().value(), name, reasons);
@@ -823,10 +922,10 @@ public final class InventoryBackend implements AutoCloseable {
 		if (packet == null || packet.isCorrupt()) return;
 		if (packet.kind() == InventoryC2SPacket.Kind.HELLO) {
 			hello(player);
-			publisher.drainControls();
+			drainIngressControls();
 			// An accepted OFFER queues the deferred initial POLICY during the
 			// first drain; the second drain preserves OFFER-before-POLICY order.
-			publisher.drainControls();
+			drainIngressControls();
 			return;
 		}
 		@Nullable Session session = sessions.get(player);
@@ -835,9 +934,12 @@ public final class InventoryBackend implements AutoCloseable {
 		// Request IDs never repeat within an inventory session. A same-epoch
 		// view rebuild retains their ownership, so an in-flight cancellation may
 		// release its request even before the client receives the replacement view.
-		boolean cancellation = packet.kind() == InventoryC2SPacket.Kind.CLOSE && session.requests.containsKey(packet.requestId());
+		@Nullable PreviewRequest closing = session.requests.get(packet.requestId());
+		boolean cancellation = packet.kind() == InventoryC2SPacket.Kind.CLOSE
+			&& (closing != null && closing.inputView == packet.view()
+				|| java.util.Objects.equals(session.outcomeViews.get(packet.requestId()), packet.view()));
 		if (session.access == null || packet.epoch() != session.epoch || packet.presentationEpoch() != session.access.epoch()
-			|| packet.view() != session.access.view() && (!cancellation || packet.view() > session.access.view())) { publisher.drainControls(); return; }
+			|| packet.view() != session.access.view() && (!cancellation || packet.view() > session.access.view())) { drainIngressControls(); return; }
 		switch (packet.kind()) {
 			case OPEN -> open(player, session, packet);
 			case CLOSE -> closePreview(session, packet.requestId());
@@ -845,26 +947,40 @@ public final class InventoryBackend implements AutoCloseable {
 			case RESYNC -> resync(player, java.util.Objects.requireNonNull(packet.markerId()), packet.resourceKind());
 			case HELLO -> {}
 		}
-		publisher.drainControls();
+		drainIngressControls();
 		// OPENED has now been handed off, so this request's lanes may be registered.
 		// Registration performs no read; sampling still waits for the next tick.
 		openHandedOffLanes(player, session);
 	}
 	private void openHandedOffLanes(UUID player, Session session) {
-		if (session.access == null) return;
+		if (sessions.get(player) != session || session.access == null || closeRequested || deferredDisconnects.contains(player)) return;
 		for (PreviewRequest parent : session.requests.values()) for (var kind : InventoryResourceKind.values())
 			if (parent.attempted == 0 && parent.openedHandedOff && (parent.laneMask & (1 << kind.wireId())) != 0
 				&& session.access.compatibleKinds().contains(kind)
 				&& !session.previews.containsKey(new LaneKey(parent.request, kind))) openLane(player, session, parent, kind);
+	}
+	private void drainIngressControls() {
+		boolean previous = publishing; publishing = true;
+		try { publisher.drainControls(); }
+		finally { publishing = previous; if (!previous) finishInitialPublication(); }
 	}
 	private void hello(UUID player) {
 		@Nullable SessionAccess access = currentSessionAccess(player);
 		if (access == null) return; // presentation session/schema must be ready first
 		@Nullable Session session = sessions.get(player);
 		if (session == null) {
-			if (sessions.size() >= MAX_SESSIONS) return;
+			if (sessions.size() >= MAX_SESSIONS) {
+				report(InventoryDiagnosticSite.SESSION, InventoryOperation.OPEN, InventoryFailureReason.SESSION_CAPACITY,
+					InventoryImpact.PING_UNAVAILABLE, InventoryOutcome.REJECTED, true, -1, "hello", 1, sessions.size(), MAX_SESSIONS);
+				return;
+			}
 			var held = runtime.memory().tryReserve(SESSION_BYTES);
-			if (held.isEmpty()) return;
+			if (held.isEmpty()) {
+				report(InventoryDiagnosticSite.SESSION, InventoryOperation.OPEN, InventoryFailureReason.MEMORY_LIMIT,
+					InventoryImpact.PING_UNAVAILABLE, InventoryOutcome.REJECTED, true, -1, "hello", SESSION_BYTES,
+					runtime.memory().retained(), runtime.memory().cap());
+				return;
+			}
 			held.get().commit(SESSION_BYTES);
 			session = new Session(++epochSeed, player, access, null, held.get()); sessions.put(player, session);
 		}
@@ -896,7 +1012,8 @@ public final class InventoryBackend implements AutoCloseable {
 			session.access == null ? 0 : session.access.view(), parent.request, parent.laneMask);
 		parent.openedHandedOff = false;
 		session.pendingOpened.put(parent.request, packet);
-		publisher.control(player, packet);
+		session.outcomeViews.putIfAbsent(parent.request, parent.inputView);
+		publisher.controlPrepaid(player, packet);
 	}
 	/**
 	 * Current presentation session/schema is a live delivery gate; a policy change
@@ -911,6 +1028,7 @@ public final class InventoryBackend implements AutoCloseable {
 			for (long request : List.copyOf(session.requests.keySet())) closePreview(session, request);
 			cancelTrackingRecipients(player);
 			cancelPendingControls(player, session);
+			session.pendingOpened.clear(); session.outcomeViews.clear();
 			session.access = null;
 			updatePolicyHint(player, session, nextPolicy);
 			return;
@@ -925,6 +1043,7 @@ public final class InventoryBackend implements AutoCloseable {
 		session.access = nextAccess;
 		cancelPendingControls(player, session);
 		if (trueEpoch) {
+			session.pendingOpened.clear(); session.outcomeViews.clear();
 			// A true presentation epoch resets the client's complete inventory
 			// view. Drop request identities and recipient contexts so a later
 			// Basic replay re-registers from canonical state; never infer from
@@ -954,7 +1073,16 @@ public final class InventoryBackend implements AutoCloseable {
 			}
 		}
 		for (Tracking lease : tracking.values()) lease.creationDenied.remove(player);
-		for (PreviewRequest parent : session.requests.values()) queueOpened(player, session, parent);
+		for (PreviewRequest parent : session.requests.values()) {
+			queueOpened(player, session, parent);
+			for (LaneState state : parent.lanes.values()) if (state.pending != null)
+				state.pending = state.pending.stamp(nextAccess.epoch(), nextAccess.view());
+		}
+		for (var entry : List.copyOf(session.pendingOpened.entrySet())) {
+			InventoryS2CPacket restamped = entry.getValue().stamp(nextAccess.epoch(), nextAccess.view());
+			session.pendingOpened.put(entry.getKey(), restamped);
+			if (!session.decidingOpens.contains(entry.getKey())) publisher.controlPrepaid(player, restamped);
+		}
 		for (CommitResult result : session.commits.values()) {
 			result.queued = false;
 			// A refusal belongs to the request's old presentation view; it is not a
@@ -992,7 +1120,6 @@ public final class InventoryBackend implements AutoCloseable {
 		publisher.cancelControls(player);
 		session.pendingPolicies.clear();
 		session.pendingPolicyRevisions.clear();
-		session.pendingOpened.clear();
 		for (PreviewRequest parent : session.requests.values()) parent.openedHandedOff = false;
 		for (CommitResult result : session.commits.values()) result.queued = false;
 	}
@@ -1013,38 +1140,55 @@ public final class InventoryBackend implements AutoCloseable {
 			InventoryCaptureDiagnostics.previewOpen("request", "request-fence", request, requested, face);
 			return;
 		}
-		if (session.requests.size() >= settings.getPreview().effectiveMaxTargetsPerClient()) {
-			InventoryCaptureDiagnostics.previewOpen("capacity", "client-targets", request, requested, face);
+		long outcomeOwners = session.requests.size() + session.pendingOpened.keySet().stream().filter(id -> !session.requests.containsKey(id)).count();
+		if (outcomeOwners >= MAX_REPLAYS) {
+			report(InventoryDiagnosticSite.REQUEST, InventoryOperation.OPEN, InventoryFailureReason.REQUEST_CAPACITY,
+				InventoryImpact.PING_UNAVAILABLE, InventoryOutcome.REJECTED, true, request, "outcome-window", MAX_REPLAYS, outcomeOwners, MAX_REPLAYS);
+			return; // bounded mailbox window, client timeout is the fallback
+		}
+		// Claim the prepaid result owner BEFORE advancing the request fence or
+		// attempting any budget/authority work. Every admitted intent has an outcome.
+		session.lastRequest = request;
+		session.outcomeViews.put(request, packet.view());
+		SessionAccess openingAccess = java.util.Objects.requireNonNull(session.access);
+		session.pendingOpened.put(request, InventoryS2CPacket.openRejected(session.epoch, openingAccess.epoch(),
+			openingAccess.view(), request, InventoryFailureReason.PROVIDER_FAILURE)); // claimed owner, not yet enqueued
+		if (session.requests.size() >= Math.min(MAX_REPLAYS, settings.getPreview().effectiveMaxTargetsPerClient())) {
+			rejectOpen(player, session, request, InventoryFailureReason.TARGET_CAPACITY, true);
 			return;
 		}
-		session.lastRequest = request;
 		var held = runtime.memory().tryReserve(4096);
 		if (held.isEmpty()) {
-			InventoryCaptureDiagnostics.previewOpen("memory", "request-ticket", request, requested, face);
+			rejectOpen(player, session, request, InventoryFailureReason.MEMORY_LIMIT, true);
 			return;
 		}
 		boolean retained = false;
 		try {
-		boolean[] hostAttempted = {false};
-		var admission = runtime.preflight(() -> {
-			hostAttempted[0] = true;
-			return host.open(player, requested);
-		});
-		if (admission.isEmpty()) {
-			if (hostAttempted[0]) InventoryCaptureDiagnostics.previewOpen("host", "authority", request, requested, face);
-			else InventoryCaptureDiagnostics.previewOpen("admission", "preflight-deferred", request, requested, face);
+		session.decidingOpens.add(request);
+		var preflight = inputOperation(() -> runtime.preflightDecision(() -> Optional.of(host.openDecision(player, requested))));
+		if (sessions.get(player) != session || session.access == null || !session.pendingOpened.containsKey(request)) return;
+		if (!preflight.accepted()) {
+			rejectOpen(player, session, request, java.util.Objects.requireNonNull(preflight.reason()), preflight.deferred());
 			return;
 		}
-		Opened frozen = admission.get();
+		InventoryDecision<Opened> admission = java.util.Objects.requireNonNull(preflight.value());
+		if (!admission.accepted()) {
+			rejectOpen(player, session, request, java.util.Objects.requireNonNull(admission.reason()), admission.deferred());
+			return;
+		}
+		Opened frozen = java.util.Objects.requireNonNull(admission.value());
 		SessionAccess access = java.util.Objects.requireNonNull(session.access);
 		// The one OPEN-time freeze is final for this request. Later permission or
 		// configuration changes neither widen nor clear it; only current session
 		// schema availability gates actual lane delivery.
 		PreviewLaneGrant frozenGrant = host.freezeInventoryPreviewGrant(player, frozen.targetType());
+		if (sessions.get(player) != session || session.access == null || session.access.epoch() != access.epoch()
+			|| !session.pendingOpened.containsKey(request)) return;
+		access = session.access;
 		Set<InventoryResourceKind> frozenLanes = frozenGrant.lanes();
 		int mask = laneMask(frozenLanes) & laneMask(access.compatibleKinds());
 		held.get().commit(4096);
-		var parent = new PreviewRequest(packet.requestId(), frozen, packet.face(), held.get(), mask);
+		var parent = new PreviewRequest(packet.requestId(), frozen, packet.face(), held.get(), mask, packet.view());
 		session.requests.put(parent.request, parent);
 		if (monitor.enabled(Lane.PREVIEW)) {
 			monitor.count(Lane.PREVIEW, Counter.REQUESTS_ADMITTED, 1);
@@ -1058,15 +1202,53 @@ public final class InventoryBackend implements AutoCloseable {
 		Set<InventoryResourceKind> actual = new java.util.LinkedHashSet<>();
 		for (var kind : InventoryResourceKind.values()) if ((mask & (1 << kind.wireId())) != 0) actual.add(kind);
 		host.adoptPreviewPolicy(player, frozen.targetType(), new PreviewLaneGrant(Set.copyOf(actual), frozenGrant.token()));
+		} catch (RuntimeException | LinkageError failure) {
+			boolean outcomeOwned = session.pendingOpened.containsKey(request);
+			if (retained) closePreview(session, request);
+			if (outcomeOwned && sessions.get(player) == session && session.access != null) {
+				session.outcomeViews.put(request, packet.view());
+				rejectOpen(player, session, request, InventoryFailureReason.PROVIDER_FAILURE, false);
+			}
 		} finally {
+			session.decidingOpens.remove(request);
 			if (!retained) held.get().close();
 		}
 	}
+	private static boolean openOutcome(InventoryS2CPacket packet) {
+		return packet.kind() == InventoryS2CPacket.Kind.OPENED || packet.kind() == InventoryS2CPacket.Kind.OPEN_REJECTED;
+	}
+	private void rejectOpen(UUID player, Session session, long request, InventoryFailureReason reason, boolean limit) {
+		@Nullable InventoryS2CPacket old = session.pendingOpened.get(request);
+		if (old != null) publisher.cancelControl(player, old);
+		SessionAccess access = java.util.Objects.requireNonNull(session.access);
+		InventoryS2CPacket result = InventoryS2CPacket.openRejected(session.epoch, access.epoch(), access.view(), request, reason);
+		session.pendingOpened.put(request, result);
+		publisher.controlPrepaid(player, result);
+		report(InventoryDiagnosticSite.REQUEST, InventoryOperation.OPEN, reason, InventoryImpact.PING_UNAVAILABLE,
+			InventoryOutcome.REJECTED, limit, request, "admission", -1, -1, -1);
+	}
+	private static void report(InventoryDiagnosticSite site, InventoryOperation operation, InventoryFailureReason reason,
+		InventoryImpact impact, InventoryOutcome outcome, boolean limit, long request, String stage, long requested, long used, long cap) {
+		InventoryDiagnostics.report(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER, site, operation, reason, impact, outcome, limit,
+			() -> new InventoryDiagnosticDetail(stage, request, -1, null, requested, used, cap), null);
+	}
+	private static boolean isLimit(InventoryFailureReason reason) {
+		return switch (reason) {
+			case SESSION_CAPACITY, REQUEST_CAPACITY, TARGET_CAPACITY, TRACKING_CAPACITY, CONSUMER_CAPACITY, ROUND_CAPACITY,
+				PUBLISHER_CAPACITY, CONTROL_CAPACITY, MEMORY_LIMIT, PROBE_LIMIT, PROVIDER_WORK_LIMIT, ITEM_WORK_LIMIT,
+				PHYSICAL_SLOT_LIMIT, LOGICAL_SLOT_LIMIT, VARIANT_LIMIT, CATALOG_BYTES_LIMIT, JOURNAL_LIMIT, SNAPSHOT_LIMIT,
+				ENTRY_LIMIT, DISPLAY_LIMIT, FRAME_LIMIT, QUEUE_LIMIT, WIRE_LIMIT, NATIVE_LIST_LIMIT, NATIVE_NODE_LIMIT,
+				NATIVE_ARRAY_LIMIT, NATIVE_MAP_LIMIT, NATIVE_WORK_LIMIT, NATIVE_DEPTH_LIMIT -> true;
+			default -> false;
+		};
+	}
 	private void openLane(UUID player, Session session, PreviewRequest parent, InventoryResourceKind kind) {
 		if (session.access == null || !session.access.compatibleKinds().contains(kind)) return;
+		if (parent.lanes.get(kind).terminal) return;
 		var held = runtime.memory().tryReserve(PREVIEW_BYTES);
 		if (held.isEmpty()) {
-			InventoryCaptureDiagnostics.previewLaneRejected("memory", "lane-ticket", parent.request, kind, parent.frozen.target(), parent.face);
+			laneState(session, parent, kind, InventoryS2CPacket.PreviewPhase.ADMISSION,
+				InventoryS2CPacket.PreviewCondition.DEFERRED, InventoryFailureReason.MEMORY_LIMIT, false);
 			return;
 		}
 		InventoryRuntime.@Nullable Consumer attached = null;
@@ -1074,15 +1256,20 @@ public final class InventoryBackend implements AutoCloseable {
 		boolean retained = false;
 		try {
 			var input = new InventorySourceInput(parent.frozen.target(), player, parent.face, kind);
-			attached = runtime.attach(input, new InventoryRuntime.PreviewSubject(player)).orElse(null);
+			var attachment = runtime.attachDecision(input, new InventoryRuntime.PreviewSubject(player));
+			attached = attachment.value();
 			if (attached == null) {
-				InventoryCaptureDiagnostics.previewLaneRejected("attach", "runtime-consumer", parent.request, kind, parent.frozen.target(), parent.face);
+				laneState(session, parent, kind, InventoryS2CPacket.PreviewPhase.ADMISSION,
+					attachment.deferred() ? InventoryS2CPacket.PreviewCondition.DEFERRED
+						: attachment.reason() == InventoryFailureReason.UNSUPPORTED_LANE ? InventoryS2CPacket.PreviewCondition.UNSUPPORTED
+							: InventoryS2CPacket.PreviewCondition.FAILED, java.util.Objects.requireNonNull(attachment.reason()), false);
 				return;
 			}
 			attached.requirePublicationEvidence();
 			var context = context("preview/" + parent.request + "/" + kind, player, session.access, 1);
 			if (!publisher.register(context, route(session, parent.request, null, null, null, kind))) {
-				InventoryCaptureDiagnostics.previewLaneRejected("publisher", "register", parent.request, kind, parent.frozen.target(), parent.face);
+				laneState(session, parent, kind, InventoryS2CPacket.PreviewPhase.ADMISSION,
+					InventoryS2CPacket.PreviewCondition.DEFERRED, InventoryFailureReason.PUBLISHER_CAPACITY, false);
 				return;
 			}
 			registered = context; held.get().commit(PREVIEW_BYTES);
@@ -1090,7 +1277,37 @@ public final class InventoryBackend implements AutoCloseable {
 			preview.metadataCeiling = effectiveDisplayCeiling();
 			session.previews.put(new LaneKey(parent.request, kind), preview); retained = true;
 			InventoryCaptureDiagnostics.previewLaneOpened(parent.request, kind, parent.frozen.target(), parent.face);
+			laneState(session, parent, kind, InventoryS2CPacket.PreviewPhase.SCAN, InventoryS2CPacket.PreviewCondition.PROGRESS, null, false);
 		} finally { if (!retained) { if (registered != null) publisher.cancel(registered); try { if (attached != null) attached.close(); } finally { held.get().close(); } } }
+	}
+	private static boolean previewStateCurrent(Session session, InventoryS2CPacket packet) {
+		@Nullable PreviewRequest parent = session.requests.get(packet.requestId());
+		return parent != null && parent.openedHandedOff && parent.lanes.get(packet.resourceKind()).pending == packet;
+	}
+	private void laneState(Session session, PreviewRequest parent, InventoryResourceKind kind, InventoryS2CPacket.PreviewPhase phase,
+		InventoryS2CPacket.PreviewCondition condition, @Nullable InventoryFailureReason reason, boolean progress) {
+		LaneState state = parent.lanes.get(kind);
+		if (progress) state.progressRevision++;
+		boolean changed = state.phase != phase || state.condition != condition || state.reason != reason;
+		state.phase = phase; state.condition = condition; state.reason = reason;
+		state.terminal = condition == InventoryS2CPacket.PreviewCondition.FAILED || condition == InventoryS2CPacket.PreviewCondition.UNSUPPORTED;
+		boolean usableRows = session.previews.values().stream().anyMatch(preview -> preview.parent == parent && !preview.counts.isEmpty());
+		boolean allTerminal = parent.lanes.entrySet().stream().filter(entry -> (parent.laneMask & (1 << entry.getKey().wireId())) != 0)
+			.allMatch(entry -> entry.getValue().terminal);
+		if (reason != null) report(InventoryDiagnosticSite.REQUEST, InventoryOperation.PREVIEW,
+			reason, condition == InventoryS2CPacket.PreviewCondition.UNSUPPORTED ? InventoryImpact.DETAIL_ONLY
+				: allTerminal && !usableRows ? InventoryImpact.PING_UNAVAILABLE : InventoryImpact.DEGRADED,
+			condition == InventoryS2CPacket.PreviewCondition.DEFERRED ? InventoryOutcome.DEFERRED
+				: condition == InventoryS2CPacket.PreviewCondition.PROGRESS ? InventoryOutcome.TRUNCATED : InventoryOutcome.REJECTED,
+			isLimit(reason), parent.request, phase.name().toLowerCase(java.util.Locale.ROOT), -1, -1, -1);
+		if (session.access == null || !parent.openedHandedOff) { state.noticePending = true; return; }
+		if (!state.noticePending && !changed && state.lastNotice >= 0 && tick - state.lastNotice < 80) return;
+		state.noticePending = false;
+		if (state.pending != null) publisher.cancelControl(session.recipient, state.pending);
+		state.pending = InventoryS2CPacket.previewState(kind, session.epoch, session.access.epoch(), session.access.view(), parent.request,
+			++state.controlRevision, state.progressRevision, phase, condition, reason);
+		state.lastNotice = tick;
+		publisher.controlPrepaid(session.recipient, state.pending);
 	}
 	private void select(UUID player, Session session, InventoryC2SPacket packet) {
 		// A lane never offered by an existing OPEN cannot consume its shared
@@ -1115,8 +1332,9 @@ public final class InventoryBackend implements AutoCloseable {
 		if (packet.commitId() <= session.lastCommit) return;
 		if (preview == null && session.requests.containsKey(packet.requestId())) return;
 		session.lastCommit = packet.commitId();
-		MarkerRejectReason rejection = MarkerRejectReason.INVALID_REQUEST;
-		ServerMarker marker = null;
+		@Nullable MarkerRejectReason rejection = MarkerRejectReason.INVALID_REQUEST;
+		@Nullable InventoryFailureReason failureReason = InventoryFailureReason.INVALID_SELECTION;
+		@Nullable ServerMarker marker = null;
 		if (preview != null && preview.parent.attempted == 0) {
 			@Nullable InventorySelection ref = preview.references.get(packet.entryKey());
 			// The data gate holds item frames but never SELECT, so an affected pending
@@ -1127,6 +1345,7 @@ public final class InventoryBackend implements AutoCloseable {
 			// can still create the Ping; the commit id itself remains authoritative
 			// through the recorded replay below.
 			boolean staleCut = preview.retired.contains(packet.entryKey()) || supersededCut(ref);
+			if (staleCut) failureReason = InventoryFailureReason.RETIRED_SELECTION;
 			if (!staleCut) preview.parent.attempted = packet.commitId();
 			if (!staleCut && ref != null && packet.baselineId() == preview.context.baseline() && packet.stateRevision() == preview.context.stateFence()) {
 				Prepared prepared = new Prepared(preview, ref, packet.entryKey(), packet.pingType());
@@ -1134,8 +1353,10 @@ public final class InventoryBackend implements AutoCloseable {
 				try {
 					// The complete Prepared object carries both admission and the
 					// authorization finalizer; a method reference would drop it.
-					Created outcome = host.create(player, preview.frozen, preview.input.resourceKind(), prepared);
+					Created outcome = inputOperation(() -> host.create(player, preview.frozen, preview.input.resourceKind(), prepared));
 					rejection = outcome.rejection(); marker = outcome.marker();
+					failureReason = outcome.failureReason();
+					if (marker == null && prepared.failureReason() != null) failureReason = prepared.failureReason();
 					if (marker != null) {
 						// Storage is committed: install the sidecar, then publish the
 						// existing CREATED/winner changes, then attach the recipients
@@ -1160,15 +1381,26 @@ public final class InventoryBackend implements AutoCloseable {
 				} catch (RuntimeException | LinkageError failure) {
 					InventoryCaptureDiagnostics.warn("select-create", preview.input, null,
 						() -> "request=" + packet.requestId() + " commit=" + packet.commitId() + " owner=" + player, failure);
-					rejection = MarkerRejectReason.INVALID_REQUEST;
+					if (marker == null) { rejection = MarkerRejectReason.INVALID_REQUEST; failureReason = InventoryFailureReason.PROVIDER_FAILURE; }
+					else { rejection = null; failureReason = null; } // post-store side effects cannot undo creation
 				}
-				finally { prepared.close(); }
+				finally {
+					try { prepared.close(); }
+					catch (RuntimeException | LinkageError cleanupFailure) {
+						InventoryCaptureDiagnostics.warn("select-cleanup", preview.input, null,
+							() -> "request=" + packet.requestId() + " commit=" + packet.commitId(), cleanupFailure);
+					}
+				}
 			}
 		}
-		var result = InventoryS2CPacket.selected(packet.resourceKind(), session.epoch, packet.requestId(), packet.commitId(), marker == null ? null : marker.id(), rejection)
+		if (marker == null) report(InventoryDiagnosticSite.REQUEST, InventoryOperation.CREATE, java.util.Objects.requireNonNull(failureReason),
+			InventoryImpact.PING_UNAVAILABLE, InventoryOutcome.REJECTED, isLimit(failureReason), packet.requestId(), "select", -1, -1, -1);
+		var result = InventoryS2CPacket.selected(packet.resourceKind(), session.epoch, packet.requestId(), packet.commitId(), marker == null ? null : marker.id(), rejection, failureReason)
 			.stamp(session.access == null ? 0 : session.access.epoch(), session.access == null ? 0 : session.access.view());
 		if (session.commits.size() >= MAX_REPLAYS) {
 			CommitResult retired = session.commits.remove(session.commits.keySet().iterator().next());
+			if (retired.pending) report(InventoryDiagnosticSite.REQUEST, InventoryOperation.SELECT, InventoryFailureReason.REQUEST_CAPACITY,
+				InventoryImpact.DEGRADED, InventoryOutcome.DEGRADED, true, retired.requestId, "replay-evicted", 1, MAX_REPLAYS, MAX_REPLAYS);
 			if (retired.queued) publisher.cancelControl(player, retired.packet);
 		}
 		CommitResult committed = new CommitResult(result, packet.requestId(), packet.commitId(), marker == null ? null : marker.id(), rejection);
@@ -1186,9 +1418,9 @@ public final class InventoryBackend implements AutoCloseable {
 			// A committed outcome replays across a same-epoch view rebuild; it
 			// never repeats create, authorization or grant evaluation.
 			result.packet = InventoryS2CPacket.selected(result.resourceKind, session.epoch, result.requestId, result.commitId,
-				result.markerId, result.rejection).stamp(access.epoch(), access.view());
+				result.markerId, result.rejection, result.failureReason).stamp(access.epoch(), access.view());
 		}
-		result.queued = publisher.control(player, result.packet);
+		result.queued = publisher.controlPrepaid(player, result.packet);
 	}
 	/**
 	 * True when a retained preview reference can no longer be published under
@@ -1220,69 +1452,76 @@ public final class InventoryBackend implements AutoCloseable {
 		@Nullable InventorySyncPublisher.InitialStaging initialStaging;
 		final Map<UUID, InventoryRuntime.PublicationGrant> initialGrants = new LinkedHashMap<>();
 		@Nullable Tracking installed;
+		@Nullable InventoryFailureReason failureReason;
 		long leaseBytes, bootstrapCount;
 		final Map<UUID, RetainedMemoryLedger.Ticket> recipients = new LinkedHashMap<>();
 		Prepared(Preview preview, InventorySelection reference, String token, String pingType) {
 			this.preview = preview; this.reference = reference; this.token = token; this.pingType = pingType;
 			previewContext = preview.context; input = preview.input; frozen = preview.frozen;
 		}
+		@Override public @Nullable InventoryFailureReason failureReason() { return failureReason; }
+		private MarkerRejectReason reject(InventoryFailureReason reason) { failureReason = reason; return MarkerRejectReason.INVALID_REQUEST; }
 		@Override public @Nullable MarkerRejectReason prepare(Target committed, TargetKey targetKey, String type, List<UUID> audience) {
 			this.audience = List.copyOf(audience);
 			// The host invokes this only after create authority and any external materialization, never at SELECT ingress.
 			TargetKey.requireCompatible(committed, targetKey);
-			if (!frozen.targetType().equals(type)) return MarkerRejectReason.INVALID_REQUEST;
+			if (!frozen.targetType().equals(type)) return reject(InventoryFailureReason.SOURCE_CHANGED);
 			@Nullable InventorySourceInput bound = host.bindCommitted(input, committed).orElse(null);
 			// The host-returned input must describe the exact committed target
 			// payload and opaque locator before any validation, preview evidence,
 			// annotation or allocation; a returned candidate or another
 			// committed target must never authorize a different source.
 			if (bound == null || bound.resourceKind() != input.resourceKind() || bound.face() != input.face() || !bound.readOwner().equals(input.readOwner())
-				|| !BlockReadSource.sameTargetBinding(committed, bound.target())
-				|| !runtime.validate(bound) || !runtime.probe(preview.consumer).orElse(false))
-				return MarkerRejectReason.INVALID_REQUEST;
+				|| !BlockReadSource.sameTargetBinding(committed, bound.target())) return reject(InventoryFailureReason.SOURCE_CHANGED);
+			var boundDecision = runtime.probeDecision(bound);
+			if (!boundDecision.accepted()) return reject(java.util.Objects.requireNonNull(boundDecision.reason()));
+			var previewDecision = runtime.probeDecision(preview.consumer);
+			if (!previewDecision.accepted()) return reject(java.util.Objects.requireNonNull(previewDecision.reason()));
 			@Nullable Session session = sessions.get(input.readOwner());
 			if (session == null || session.previews.get(new LaneKey(preview.request, input.resourceKind())) != preview || !preview.context.equals(previewContext)
 				|| preview.context.stateFence() != 1 || preview.consumer.invalidated() || preview.retired.contains(token)
-				|| preview.references.get(token) != reference) return MarkerRejectReason.INVALID_REQUEST;
+				|| preview.references.get(token) != reference) return reject(InventoryFailureReason.RETIRED_SELECTION);
 			// A partial preview is sufficient, but a missing selected key is not zero.
 			@Nullable InventoryResourceValue retained = preview.counts.get(reference.aggregate()
 				? new InventoryScanner.Key(reference.kind(), reference.itemId(), "") : reference.exact());
-			if (retained == null || preview.folded.contains(reference.itemId()) != reference.aggregate()) return MarkerRejectReason.INVALID_REQUEST;
-			if (!runtime.preflight(() -> Optional.of(host.annotationAllowed(bound, pingType))).orElse(false))
-				return MarkerRejectReason.INVALID_PING_TYPE;
-			if (tracking.size() >= MAX_TRACKING) return MarkerRejectReason.INVALID_REQUEST;
+			if (retained == null || preview.folded.contains(reference.itemId()) != reference.aggregate()) return reject(InventoryFailureReason.INVALID_SELECTION);
+			var annotation = runtime.preflightDecision(() -> Optional.of(host.annotationAllowed(bound, pingType)));
+			if (!annotation.accepted()) return reject(java.util.Objects.requireNonNull(annotation.reason()));
+			if (!Boolean.TRUE.equals(annotation.value())) { failureReason = InventoryFailureReason.INVALID_SELECTION; return MarkerRejectReason.INVALID_PING_TYPE; }
+			if (tracking.size() >= MAX_TRACKING) return reject(InventoryFailureReason.TRACKING_CAPACITY);
 			Set<String> variants = new HashSet<>();
 			for (Tracking lease : tracking.values()) if (lease.marker.targetKey().equals(targetKey)) variants.add(identity(lease.selection));
 			variants.add(identity(reference));
-			if (variants.size() > settings.getTracking().effectiveMaxVariantsPerTarget()) return MarkerRejectReason.INVALID_REQUEST;
+			if (variants.size() > settings.getTracking().effectiveMaxVariantsPerTarget()) return reject(InventoryFailureReason.VARIANT_LIMIT);
 			// The lease slab owns bounded identity strings, the seed and its indexes;
 			// display lifetime is charged independently of the preview/catalogue.
 			leaseBytes = checkedAdd(checkedAdd(LEASE_BYTES + 512L, checkedMultiply(audience.size(), 128L)), reference.aggregate()
 				? REPROJECT_DISPLAY_FIXED_BYTES + 2L * AGGREGATE_JSON_BYTES : replacementActual(reference.displayJson()));
 			memory = runtime.memory().tryReserve(leaseBytes).orElse(null);
-			if (memory == null) return MarkerRejectReason.INVALID_REQUEST;
+			if (memory == null) return reject(InventoryFailureReason.MEMORY_LIMIT);
 			@Nullable String display = reference.displayJson();
 			if (reference.aggregate()) {
 				var workspace = runtime.memory().tryReserve(AGGREGATE_DISPLAY_BYTES);
-				if (workspace.isEmpty()) return MarkerRejectReason.INVALID_REQUEST;
+				if (workspace.isEmpty()) return reject(InventoryFailureReason.MEMORY_LIMIT);
 				try (var staging = workspace.get()) {
-					if (!runtime.claimDetachedItemWork(AGGREGATE_DISPLAY_WORK)) return MarkerRejectReason.INVALID_REQUEST;
+					if (!runtime.claimDetachedItemWork(AGGREGATE_DISPLAY_WORK)) return reject(InventoryFailureReason.ITEM_WORK_LIMIT);
 					display = aggregateJson(reference.kind(), reference.itemId(), reference.label());
 					if (utf8Bytes(display) > AGGREGATE_JSON_BYTES) throw new IllegalStateException("aggregate display exceeds admission");
 				}
 			}
 			selection = new InventorySelection(reference.kind(), reference.exact(), reference.itemId(), reference.label(), display, reference.aggregate(), pingType);
 			bootstrapCount = retained.amount();
-			consumer = runtime.attach(bound, new InventoryRuntime.TrackingSubject(targetKey)).orElse(null);
-			if (consumer == null) return MarkerRejectReason.INVALID_REQUEST;
+			var attachment = runtime.attachDecision(bound, new InventoryRuntime.TrackingSubject(targetKey));
+			consumer = attachment.value();
+			if (consumer == null) return reject(java.util.Objects.requireNonNull(attachment.reason()));
 			consumer.requirePublicationEvidence();
 			// Pin the paid active observation before detached receipt work consumes this tick's work envelope.
-			if (reference.kind() == InventoryResourceKind.ITEM && runtime.tryJoinInProgress(consumer) == InventoryRuntime.JoinResult.INVALID) return MarkerRejectReason.INVALID_REQUEST;
+			if (reference.kind() == InventoryResourceKind.ITEM && runtime.tryJoinInProgress(consumer) == InventoryRuntime.JoinResult.INVALID) return reject(InventoryFailureReason.SOURCE_CHANGED);
 			long snapshotWorkspace = InventoryCreationSnapshot.validationWorkspace(effectiveDisplayCeiling());
 			var validation = runtime.memory().tryReserve(snapshotWorkspace);
-			if (validation.isEmpty()) return MarkerRejectReason.INVALID_REQUEST;
+			if (validation.isEmpty()) return reject(InventoryFailureReason.MEMORY_LIMIT);
 			try (var workspace = validation.get()) {
-				if (!runtime.claimDetachedItemWork(snapshotWorkspace)) return MarkerRejectReason.INVALID_REQUEST;
+				if (!runtime.claimDetachedItemWork(snapshotWorkspace)) return reject(InventoryFailureReason.ITEM_WORK_LIMIT);
 				boolean complete = preview.last != null && preview.last.result().availability() == CaptureResult.Availability.READABLE
 					&& preview.last.result().completeness() == CaptureResult.Completeness.COMPLETE
 					&& !preview.rebaselineNeeded && !preview.fencePending && !preview.republishPending
@@ -1301,12 +1540,15 @@ public final class InventoryBackend implements AutoCloseable {
 				long retainedUpper = 512L + 2L * (token.length() + selected.resourceId().length() + selected.label().length()
 					+ pingType.length() + (selected.displayJson() == null ? 0 : selected.displayJson().length()));
 				creationMemory = runtime.memory().tryReserve(retainedUpper).orElse(null);
-				if (creationMemory == null) return MarkerRejectReason.INVALID_REQUEST;
+				if (creationMemory == null) return reject(InventoryFailureReason.MEMORY_LIMIT);
 				creationSnapshot = InventoryCreationSnapshot.fromRetained(token, selection, selected, complete, uncertain);
 				creationMemory.commit(creationSnapshot.retainedBytes());
 			}
 			var binding = runtime.acquirePublicationBinding(consumer);
-			if (binding.check() != InventorySharedRead.Check.VALID || binding.evidence() == null) return MarkerRejectReason.INVALID_REQUEST;
+			if (binding.check() != InventorySharedRead.Check.VALID || binding.evidence() == null) return reject(
+				binding.reason() != null ? binding.reason()
+					: binding.check() == InventorySharedRead.Check.AUTHORITY_DENIED ? InventoryFailureReason.SOURCE_AUTHORITY_DENIED
+					: binding.check() == InventorySharedRead.Check.DEFERRED ? InventoryFailureReason.PROVIDER_WORK_LIMIT : InventoryFailureReason.SOURCE_CHANGED);
 			creationEvidence = binding.evidence();
 			committedInput = bound;
 			admittedKey = targetKey;
@@ -1320,7 +1562,7 @@ public final class InventoryBackend implements AutoCloseable {
 		 */
 		@Override public @Nullable MarkerRejectReason finishAuthorization(PingAuthorization authorization) {
 			if (authorization == null || consumer == null || memory == null || committedInput == null || selection == null
-				|| creationSnapshot == null || creationEvidence == null) return MarkerRejectReason.INVALID_REQUEST;
+				|| creationSnapshot == null || creationEvidence == null) return reject(InventoryFailureReason.INVALID_SELECTION);
 			List<UUID> allowed = new ArrayList<>(audience.size());
 			java.util.Set<UUID> seen = new java.util.LinkedHashSet<>();
 			for (UUID recipient : audience)
@@ -1328,23 +1570,24 @@ public final class InventoryBackend implements AutoCloseable {
 			long snapshotBytes = nx.pingwheel.common.network.InventoryCreationSnapshotCodec.encodedSize(creationSnapshot);
 			for (UUID recipient : allowed) {
 				var source = runtime.reservePublication(creationEvidence);
-				if (source.isEmpty()) return MarkerRejectReason.INVALID_REQUEST;
+				if (source.isEmpty()) return reject(InventoryFailureReason.PROVIDER_WORK_LIMIT);
 				initialGrants.put(recipient, source.get());
 			}
 			// Precommit pays the actual snapshot fanout. The final packet's Basic/marker framing
 			// is measured and admitted separately at the single initial exit after storage.
-			initialStaging = publisher.reserveInitial(snapshotBytes * allowed.size(),
-				allowed.size() * (4096L + 8L * snapshotBytes)).orElse(null);
-			if (initialStaging == null) return MarkerRejectReason.INVALID_REQUEST;
+			var initial = publisher.reserveInitialDecision(checkedMultiply(snapshotBytes, allowed.size()),
+				checkedMultiply(allowed.size(), checkedAdd(4096L, checkedMultiply(8L, snapshotBytes))));
+			initialStaging = initial.value();
+			if (initialStaging == null) return reject(java.util.Objects.requireNonNull(initial.reason()));
 			for (UUID recipient : allowed) {
 				@Nullable SessionAccess access = currentSessionAccess(recipient);
 				if (access == null || !access.compatibleKinds().contains(reference.kind())) continue;
 				@Nullable Session recipientSession = sessions.get(recipient);
 				if (recipientSession == null || recipientSession.access == null
 					|| !recipientSession.access.stamp().equals(access.stamp())) continue;
-				if (recipients.size() >= publisher.remainingRegistrations()) return MarkerRejectReason.INVALID_REQUEST;
+				if (recipients.size() >= publisher.remainingRegistrations()) return reject(InventoryFailureReason.PUBLISHER_CAPACITY);
 				var ticket = publisher.reserveRegistration();
-				if (ticket.isEmpty()) return MarkerRejectReason.INVALID_REQUEST;
+				if (ticket.isEmpty()) return reject(InventoryFailureReason.MEMORY_LIMIT);
 				recipients.put(recipient, ticket.get());
 			}
 			return null;
@@ -1438,6 +1681,8 @@ public final class InventoryBackend implements AutoCloseable {
 	private void tickWork(long now, InventorySettings settings) {
 		if (publishing) return; // metadata/transport callbacks cannot recursively drain or reset an outstanding grant
 		advance(now, settings);
+		// The synchronous ingress headroom stays protected while Tracking work
+		// runs; it is returned with the other unused opportunities at this tick's end.
 		for (var entry : List.copyOf(sessions.entrySet())) {
 			refreshSession(entry.getKey(), entry.getValue());
 			Session session = entry.getValue();
@@ -1448,7 +1693,10 @@ public final class InventoryBackend implements AutoCloseable {
 			if (!session.policyAwaitingOffer) for (InventoryS2CPacket packet : List.copyOf(session.pendingPolicies.values()))
 				if (!publisher.controlQueued(entry.getKey(), packet)) publisher.control(entry.getKey(), packet);
 			for (InventoryS2CPacket packet : List.copyOf(session.pendingOpened.values()))
-				if (!publisher.controlQueued(entry.getKey(), packet)) publisher.control(entry.getKey(), packet);
+				if (!session.decidingOpens.contains(packet.requestId()) && !publisher.controlQueued(entry.getKey(), packet)) publisher.controlPrepaid(entry.getKey(), packet);
+			for (PreviewRequest parent : session.requests.values()) for (LaneState state : parent.lanes.values())
+				if (state.pending != null && parent.openedHandedOff && !publisher.controlQueued(entry.getKey(), state.pending))
+					publisher.controlPrepaid(entry.getKey(), state.pending);
 			for (CommitResult result : session.commits.values()) enqueueResult(entry.getKey(), session, result);
 		}
 		var leases = new ArrayList<>(tracking.values());
@@ -1510,8 +1758,12 @@ public final class InventoryBackend implements AutoCloseable {
 		if (!previews.isEmpty()) java.util.Collections.rotate(previews, -(previewCursor++ % previews.size()));
 		for (var entry : previews) {
 			Preview preview = entry.getValue();
+			if (protectedPreview == preview && previewOpportunity != null) {
+				previewOpportunity.close(); previewOpportunity = null; protectedPreview = null;
+			}
 			@Nullable Session previewSession = sessions.get(entry.getKey());
 			if (previewSession == null) continue;
+			if (preview.parent.lanes.get(preview.input.resourceKind()).condition == InventoryS2CPacket.PreviewCondition.UNSUPPORTED) continue;
 			preview.checkedTick = -1;
 			if (preview.context.stateFence() > 1) {
 				// A deferred INVALID is terminal: retry its context/fence on a normal
@@ -1524,10 +1776,24 @@ public final class InventoryBackend implements AutoCloseable {
 			if (!progressPreviewBaseline(previewSession, preview)) continue;
 			try (var attempt = runtime.beginProbe(preview.consumer)) {
 				var valid = attempt.result();
-				if (valid.isEmpty()) continue;
+				if (valid.isEmpty()) {
+					laneState(previewSession, preview.parent, preview.input.resourceKind(), InventoryS2CPacket.PreviewPhase.SCAN,
+						InventoryS2CPacket.PreviewCondition.DEFERRED, java.util.Objects.requireNonNull(attempt.decision().reason()), false);
+					continue;
+				}
 				preview.checkedTick = tick;
 				preview.healthChecked = true; preview.lastHealthCheckTick = tick;
-				if (!valid.get()) invalidatePreview(sessions.get(entry.getKey()), preview);
+				if (!valid.get()) {
+					InventoryFailureReason reason = java.util.Objects.requireNonNull(attempt.decision().reason());
+					if (reason == InventoryFailureReason.UNSUPPORTED_LANE) {
+						preview.terminal = true; preview.consumer.stopScanning();
+						laneState(previewSession, preview.parent, preview.input.resourceKind(), InventoryS2CPacket.PreviewPhase.ADMISSION,
+							InventoryS2CPacket.PreviewCondition.UNSUPPORTED, InventoryFailureReason.UNSUPPORTED_LANE, false);
+					} else {
+						preview.parent.lanes.get(preview.input.resourceKind()).reason = reason;
+						invalidatePreview(previewSession, preview);
+					}
+				}
 				else if (!preview.terminal) samplePreview(entry.getKey(), preview, attempt);
 				else if (preview.last != null) publishPreview(preview);
 			}
@@ -1537,7 +1803,8 @@ public final class InventoryBackend implements AutoCloseable {
 		// Cancel/rebase outside publisher traversal so no admitted old fragment can escape this tick.
 		for (Tracking lease : tracking.values()) if (lease.consumer.invalidated() && !lease.invalid) invalidate(lease);
 		for (Session session : sessions.values()) for (Preview preview : session.previews.values())
-			if (preview.consumer.invalidated() && preview.context.stateFence() == 1) invalidatePreview(session, preview);
+			if (preview.consumer.invalidated() && preview.context.stateFence() == 1
+				&& preview.parent.lanes.get(preview.input.resourceKind()).condition != InventoryS2CPacket.PreviewCondition.UNSUPPORTED) invalidatePreview(session, preview);
 		applyPublicationFailures();
 		publishing = true;
 		try {
@@ -1547,7 +1814,27 @@ public final class InventoryBackend implements AutoCloseable {
 			publisher.drainControls();
 			publisher.drain();
 		}
-		finally { publishing = false; closePublicationOpportunity(); }
+		finally { publishing = false; closePublicationOpportunity(); closeOperationOpportunities(); }
+		for (Session session : sessions.values()) for (PreviewRequest parent : session.requests.values())
+			for (var entry : parent.lanes.entrySet()) {
+				LaneState lane = entry.getValue();
+				if (lane.noticePending && parent.openedHandedOff) laneState(session, parent, entry.getKey(), lane.phase, lane.condition, lane.reason, false);
+			}
+		for (Session session : sessions.values()) for (Preview preview : session.previews.values()) {
+			LaneState lane = preview.parent.lanes.get(preview.input.resourceKind());
+			if (lane.terminal) continue;
+			long parts = publisher.deliveredParts(preview.context);
+			boolean advanced = parts > lane.scanned;
+			if (advanced) lane.scanned = parts;
+			@Nullable InventoryFailureReason deferred = publisher.deferredReason(preview.context);
+			@Nullable InventoryFailureReason partialReason = preview.terminal && preview.last != null
+				&& preview.last.result().completeness() == CaptureResult.Completeness.INCOMPLETE ? preview.failureReason : null;
+			if (publisher.pending(preview.context) || advanced) laneState(session, preview.parent, preview.input.resourceKind(),
+				InventoryS2CPacket.PreviewPhase.DELIVERY, !advanced && deferred != null ? InventoryS2CPacket.PreviewCondition.DEFERRED
+					: InventoryS2CPacket.PreviewCondition.PROGRESS, !advanced && deferred != null ? deferred : partialReason, advanced);
+		}
+		publishing = true;
+		try { publisher.drainControls(); } finally { publishing = false; }
 		// A proof rejected during drain enqueues its INVALID/withdrawal control after
 		// that traversal. Flush those failure controls in the same tick instead of
 		// leaving stale UPDATING/data state until the next ordinary tick.
@@ -1673,14 +1960,21 @@ public final class InventoryBackend implements AutoCloseable {
 		@Nullable Session session = sessions.get(recipient);
 		if (session == null) return false;
 		@Nullable SessionAccess access = currentSessionAccess(recipient);
-		if (packet.kind() == InventoryS2CPacket.Kind.OPENED) {
+		if (openOutcome(packet)) {
 			if (access != null && session.pendingOpened.get(packet.requestId()) == packet
 				&& packet.epoch() == session.epoch && packet.presentationEpoch() == access.epoch() && packet.view() == access.view()) {
 				session.pendingOpened.remove(packet.requestId());
+				session.outcomeViews.remove(packet.requestId());
 				@Nullable PreviewRequest parent = session.requests.get(packet.requestId());
-				if (parent != null && parent.laneMask == packet.laneBits()) parent.openedHandedOff = true;
+				if (packet.kind() == InventoryS2CPacket.Kind.OPENED && parent != null && parent.laneMask == packet.laneBits()) parent.openedHandedOff = true;
 			}
 			// An OPEN entitlement acknowledgement never releases the resource-data gate.
+			return false;
+		}
+		if (packet.kind() == InventoryS2CPacket.Kind.PREVIEW_STATE) {
+			@Nullable PreviewRequest parent = session.requests.get(packet.requestId());
+			if (parent != null && parent.lanes.get(packet.resourceKind()).pending == packet)
+				parent.lanes.get(packet.resourceKind()).pending = null;
 			return false;
 		}
 		if (packet.kind() == InventoryS2CPacket.Kind.POLICY) {
@@ -1881,10 +2175,12 @@ public final class InventoryBackend implements AutoCloseable {
 		}
 		preview.projectionDelay.progress(previewCycle);
 		preview.context = fresh;
+		preview.parent.lanes.get(preview.input.resourceKind()).scanned = 0;
 		preview.fencePending = true; preview.republishPending = true; preview.rebaselineNeeded = false;
 		// A retired source never returns to INCOMPLETE after a same-epoch view
 		// rebuild; its terminal INVALID must survive until transport handoff.
-		publisher.status(fresh, terminalInvalid ? InventoryS2CPacket.Status.INVALID : InventoryS2CPacket.Status.INCOMPLETE);
+		publisher.status(fresh, terminalInvalid ? InventoryS2CPacket.Status.INVALID : InventoryS2CPacket.Status.INCOMPLETE,
+			preview.failureReason);
 		return true;
 		} finally { monitor.end(timing); }
 	}
@@ -1979,7 +2275,7 @@ public final class InventoryBackend implements AutoCloseable {
 		replacement.folded = current.folded; replacement.resyncAt = current.resyncAt;
 		lease.recipients.put(recipient, replacement);
 		if (lease.bootstrap != null) lease.revision++;
-		publisher.status(fresh, trackingLifecycle(lease));
+		publisher.status(fresh, trackingLifecycle(lease), lease.failureReason);
 		publishTracking(lease, replacement);
 		return true;
 		} finally { monitor.end(timing); }
@@ -1989,18 +2285,40 @@ public final class InventoryBackend implements AutoCloseable {
 		try (var attempt = runtime.beginProbe(preview.consumer)) { samplePreview(player, preview, attempt); }
 	}
 	private void samplePreview(UUID player, Preview preview, InventoryRuntime.ProbeAttempt attempt) {
-		InventorySourceAccess.Preparation preparation = runtime.prepare(preview.consumer, attempt);
-		if (preparation == InventorySourceAccess.Preparation.DEFERRED) return;
+		InventoryRuntime.Progress beforeProgress = preview.consumer.progress();
+		boolean pendingPage = preview.pendingObservation != null;
+		if (!reprojectPendingPreview(preview)) return;
+		var preparationDecision = preview.pendingObservation == null ? runtime.prepareDecision(preview.consumer, attempt)
+			: InventoryDecision.accept(InventorySourceAccess.Preparation.READY);
+		InventorySourceAccess.Preparation preparation = preparationDecision.accepted()
+			? java.util.Objects.requireNonNull(preparationDecision.value()) : preparationDecision.deferred()
+				? InventorySourceAccess.Preparation.DEFERRED : InventorySourceAccess.Preparation.UNAVAILABLE;
+		if (preparationDecision.deferred()) {
+			@Nullable Session session = sessions.get(player);
+			if (session != null) laneState(session, preview.parent, preview.input.resourceKind(), InventoryS2CPacket.PreviewPhase.SCAN,
+				InventoryS2CPacket.PreviewCondition.DEFERRED, java.util.Objects.requireNonNull(preparationDecision.reason()), false);
+			return;
+		}
 		if (preparation != InventorySourceAccess.Preparation.READY) {
+			// step() retrieves the Runtime-owned terminal observation and resets its
+			// attempt-local reason; keep the typed preparation cause with this lane.
+			preview.failureReason = preparationDecision.reason();
+			if (preparationDecision.reason() == InventoryFailureReason.UNSUPPORTED_LANE) {
+				preview.terminal = true; preview.consumer.stopScanning();
+				laneState(java.util.Objects.requireNonNull(sessions.get(player)), preview.parent, preview.input.resourceKind(),
+					InventoryS2CPacket.PreviewPhase.ADMISSION, InventoryS2CPacket.PreviewCondition.UNSUPPORTED,
+					InventoryFailureReason.UNSUPPORTED_LANE, false);
+				return;
+			}
 			var observation = runtime.step(preview.consumer, 1);
-			if (observation.isEmpty()) return;
+			if (observation.isEmpty()) { previewRuntimeState(player, preview, beforeProgress); return; }
 			CaptureResult result = observation.get().result();
 			if (result.availability() != CaptureResult.Availability.READABLE) {
 				invalidatePreview(sessions.get(player), preview); return;
 			}
 			preview.last = new PublicationObservation(result, observation.get().inventorySweepEvidence()); preview.terminal = true; preview.revision++;
 			preview.samplingDelay.cancel(); preview.consumer.stopScanning();
-			publisher.status(preview.context, InventoryS2CPacket.Status.INCOMPLETE);
+			previewRuntimeState(player, preview, beforeProgress);
 			publishPreview(preview);
 			return;
 		}
@@ -2017,9 +2335,10 @@ public final class InventoryBackend implements AutoCloseable {
 		// canonical native arrays. Their bounded keys/indexes live in the slab.
 		long entryBytes = checkedMultiply(3L, checkedAdd(checkedMultiply(2L, cap), 4096L));
 		long previousBytes = previewRetainedBytes(preview);
-		int slotBound = InventorySourceAccess.MAX_STEP;
+		int slotBound = preview.pendingObservation == null ? InventorySourceAccess.MAX_STEP : Math.max(1, preview.pendingObservation.slots().size());
 		while (slotBound > 0 && checkedAdd(previousBytes, checkedAdd(checkedMultiply(slotBound, entryBytes),
-			runtime.stepMemoryUpperBound(preview.consumer, slotBound))) > runtime.memory().remaining()) slotBound--;
+			preview.pendingObservation == null ? runtime.stepMemoryUpperBound(preview.consumer, slotBound) : 0)) > runtime.memory().remaining()) slotBound--;
+		if (preview.pendingObservation != null && slotBound < preview.pendingObservation.slots().size()) slotBound = 0;
 		if (slotBound == 0) { previewDelay(preview, preview.samplingDelay, "sampling", Reason.MEMORY.bit()); return; }
 		var held = runtime.memory().tryReserve(checkedAdd(previousBytes, checkedMultiply(slotBound, entryBytes)));
 		if (held.isEmpty()) { previewDelay(preview, preview.samplingDelay, "sampling", Reason.MEMORY.bit()); return; }
@@ -2027,22 +2346,54 @@ public final class InventoryBackend implements AutoCloseable {
 		boolean retained = false;
 		try {
 			var reservation = held.get();
-			var observation = runtime.step(preview.consumer, slotBound);
-			if (observation.isEmpty()) return;
+			var observation = preview.pendingObservation == null ? runtime.step(preview.consumer, slotBound) : Optional.of(preview.pendingObservation);
+			if (observation.isEmpty()) { previewRuntimeState(player, preview, beforeProgress); return; }
 			CaptureResult result = observation.get().result();
 			if (result.availability() != CaptureResult.Availability.READABLE) {
 				invalidatePreview(sessions.get(player), preview); return;
+			}
+			// A past admission/delivery DEFER is not the cause of this new page.
+			preview.failureReason = preview.consumer.currentReason();
+			Set<InventoryScanner.Key> discovered = new HashSet<>();
+			Set<String> claims = new HashSet<>();
+			for (@Nullable InventoryResourceValue item : observation.get().slots()) if (item != null) {
+				InventoryScanner.Key key = item.aggregateRequired() || preview.folded.contains(item.resourceId())
+					? new InventoryScanner.Key(item.resourceKind(), item.resourceId(), "") : item.key();
+				if (!preview.counts.containsKey(key)) discovered.add(key);
+				String claim = variantClaim(key);
+				if (!previewVariantClaims.getOrDefault(player, Set.of()).contains(claim)) claims.add(claim);
+			}
+			var capacity = ensurePreviewCapacity(preview, Math.min(MAX_ENTRIES, preview.categories + discovered.size()));
+			var claimCapacity = capacity.accepted() ? ensureClaimCapacity(player, Math.min(MAX_ENTRIES,
+				previewVariants.getOrDefault(player, 0) + claims.size())) : capacity;
+			if (!claimCapacity.accepted()) {
+				preview.pendingObservation = observation.get();
+				if (preview.pendingMemory == null) {
+					reservation.commit(checkedMultiply(Math.max(1, observation.get().slots().size()), entryBytes));
+					preview.pendingMemory = reservation; retained = true;
+				}
+				previewRuntimeState(player, preview, beforeProgress);
+				previewDelay(preview, preview.samplingDelay, "sampling", claimCapacity.reason() == InventoryFailureReason.MEMORY_LIMIT
+					? Reason.MEMORY.bit() : Reason.PUBLICATION_WORK.bit());
+				return;
 			}
 			for (var item : observation.get().slots()) if (item != null && utf8Bytes(item.displayJson()) > cap)
 				throw new IllegalStateException("inventory observation exceeds admitted display ceiling");
 			int observedSlot = (int) result.coverage().scanned() - observation.get().slots().size();
 			try {
 				for (var item : observation.get().slots()) {
+					if (preview.terminal) break;
 					int witness = observedSlot++;
 					if (item == null) continue;
 					if (item.resourceKind() != preview.input.resourceKind()) throw new IllegalStateException("preview observation lane");
 					String id = item.key().itemId();
+					if (preview.categories >= MAX_ENTRIES && !preview.counts.containsKey(item.aggregateRequired() || preview.folded.contains(id)
+						? new InventoryScanner.Key(preview.input.resourceKind(), id, "") : item.key())) {
+						preview.failureReason = InventoryFailureReason.ENTRY_LIMIT;
+						preview.terminal = true; break;
+					}
 					if (item.aggregateRequired() && !preview.folded.contains(id) && preview.folded.size() >= MAX_ENTRIES) {
+						preview.failureReason = InventoryFailureReason.ENTRY_LIMIT;
 						preview.terminal = true; publisher.status(preview.context, InventoryS2CPacket.Status.INCOMPLETE); break;
 					}
 					// Compute both sums before installing either. A folded group consumes
@@ -2063,6 +2414,8 @@ public final class InventoryBackend implements AutoCloseable {
 					String claim = variantClaim(key);
 					boolean unclaimed = !previewVariantClaims.getOrDefault(player, Set.of()).contains(claim);
 					if (fresh && (preview.categories >= MAX_ENTRIES || unclaimed && previewVariants.getOrDefault(player, 0) >= Math.min(MAX_ENTRIES, settings.getPreview().effectiveMaxVariantsPerClientPeriod()))) {
+						preview.failureReason = preview.categories >= MAX_ENTRIES
+							? InventoryFailureReason.ENTRY_LIMIT : InventoryFailureReason.VARIANT_LIMIT;
 						preview.terminal = true; publisher.status(preview.context, InventoryS2CPacket.Status.INCOMPLETE); break;
 					}
 					if (fresh) {
@@ -2077,11 +2430,13 @@ public final class InventoryBackend implements AutoCloseable {
 					preview.totals.put(id, total);
 				}
 			} catch (ArithmeticException overflow) {
-				InventoryCaptureDiagnostics.warn("preview-count", preview.input, null, () -> "reason=count-overflow", overflow);
+				preview.failureReason = InventoryFailureReason.AMOUNT_OVERFLOW;
 				preview.terminal = true; publisher.status(preview.context, InventoryS2CPacket.Status.INCOMPLETE);
 			}
 			long actual = previewRetainedBytes(preview);
 			reservation.commit(actual); // never hide an underestimate with min(actual, upper)
+			preview.pendingObservation = null;
+			if (preview.pendingMemory != null) { preview.pendingMemory.close(); preview.pendingMemory = null; }
 			preview.entries.forEach(RetainedMemoryLedger.Ticket::close); preview.entries.clear();
 			if (preview.metadataMemory != null) { preview.metadataMemory.close(); preview.metadataMemory = null; }
 			if (actual > 0) { preview.entries.add(reservation); retained = true; }
@@ -2092,7 +2447,126 @@ public final class InventoryBackend implements AutoCloseable {
 			if (preview.terminal) preview.consumer.stopScanning();
 			if (preview.publicationEvidence == null) preview.publicationEvidence = runtime.publicationEvidence(preview.consumer, InventoryRuntime.EvidenceScope.SCANNING).orElse(null);
 			preview.revision++;
+			previewRuntimeState(player, preview, beforeProgress, pendingPage);
 			publishPreview(preview);
+		} finally { if (!retained) held.get().close(); }
+	}
+	private boolean reprojectPendingPreview(Preview preview) {
+		InventoryRuntime.@Nullable Observation pending = preview.pendingObservation;
+		if (pending == null) return true;
+		int cap = effectiveDisplayCeiling();
+		if (pending.slots().stream().noneMatch(item -> item != null && utf8Bytes(item.displayJson()) > cap)) return true;
+		InventoryRuntime.@Nullable DisplayReprojector port = host.displayReprojector().orElse(null);
+		long parser = 0, replacements = checkedAdd(8192L, checkedMultiply(pending.slots().size(), 4096L));
+		// This replacement is an ordered list, with no map-key collision walk.
+		long work = checkedAdd(4096L, checkedMultiply(pending.slots().size(), 4096L));
+		for (@Nullable InventoryResourceValue item : pending.slots()) if (item != null) {
+			parser = Math.max(parser, parserBound(item.displayJson(), cap));
+			replacements = checkedAdd(replacements, replacementBound(item.displayJson(), cap));
+			work = checkedAdd(work, InventoryRuntime.reprojectionWork(item.displayJson(), cap));
+		}
+		var held = runtime.memory().tryReserve(checkedAdd(parser, replacements));
+		if (held.isEmpty()) { previewDelay(preview, preview.projectionDelay, "projection", Reason.MEMORY.bit()); return false; }
+		boolean retained = false;
+		try {
+			if (!runtime.claimDetachedItemWork(work)) { previewDelay(preview, preview.projectionDelay, "projection", Reason.PUBLICATION_WORK.bit()); return false; }
+			List<@Nullable InventoryResourceValue> values = new ArrayList<>(pending.slots().size());
+			long actual = checkedAdd(8192L, checkedMultiply(pending.slots().size(), 4096L));
+			for (@Nullable InventoryResourceValue item : pending.slots()) {
+				@Nullable InventoryResourceValue projected = port == null
+					? item == null || utf8Bytes(item.displayJson()) <= cap ? null
+						: InventoryResourceCodec.value(item.key(), item.amount(), item.label(), null, item.aggregateRequired())
+					: reprojectItem(port, item, cap);
+				@Nullable InventoryResourceValue value = projected == null ? item : projected;
+				values.add(value); if (value != null) actual = checkedAdd(actual, replacementActual(value.displayJson()));
+			}
+			held.get().commit(actual);
+			CaptureResult source = pending.result();
+			// Backend consumes the detached cells and coverage only. Keeping the old
+			// encoded payload here would pin its pre-tightening display version too.
+			CaptureResult metadata = new CaptureResult(Optional.empty(), source.coverage(), source.availability(), source.completeness(),
+				source.consistency(), source.sourceVersion(), source.nextCursor());
+			preview.pendingObservation = new InventoryRuntime.Observation(metadata, values, pending.inventorySweepEvidence());
+			if (preview.pendingMemory != null) preview.pendingMemory.close();
+			preview.pendingMemory = held.get(); retained = true;
+			@Nullable Session session = sessions.get(preview.input.readOwner());
+			if (session != null) laneState(session, preview.parent, preview.input.resourceKind(), InventoryS2CPacket.PreviewPhase.DELIVERY,
+				InventoryS2CPacket.PreviewCondition.PROGRESS, null, true);
+			return true;
+		} finally { if (!retained) held.get().close(); }
+	}
+	private void previewRuntimeState(UUID player, Preview preview, InventoryRuntime.Progress before) {
+		previewRuntimeState(player, preview, before, false);
+	}
+	private void previewRuntimeState(UUID player, Preview preview, InventoryRuntime.Progress before, boolean projectionProgress) {
+		@Nullable Session session = sessions.get(player);
+		if (session == null) return;
+		InventoryRuntime.Progress after = preview.consumer.progress();
+		boolean progress = projectionProgress || (after.observationSequence() == before.observationSequence()
+			? after.consumedSlots() > before.consumedSlots() || after.capturedSlots() > before.capturedSlots()
+			: after.consumedSlots() > 0 || after.capturedSlots() > 0);
+		LaneState lane = preview.parent.lanes.get(preview.input.resourceKind());
+		@Nullable InventoryFailureReason reason = preview.failureReason != null && preview.terminal ? preview.failureReason : preview.consumer.currentReason();
+		if (preview.terminal && preview.last != null && preview.last.result().completeness() == CaptureResult.Completeness.INCOMPLETE) {
+			if (reason == null) reason = InventoryFailureReason.SOURCE_UNAVAILABLE;
+			preview.failureReason = reason;
+			publisher.status(preview.context, InventoryS2CPacket.Status.INCOMPLETE, reason);
+			// A readable prefix still has a real data barrier. A FAILED control can
+			// make a row-less client cancel before those earlier counts arrive.
+			boolean usablePrefix = !preview.counts.isEmpty();
+			laneState(session, preview.parent, preview.input.resourceKind(), usablePrefix
+				? InventoryS2CPacket.PreviewPhase.DELIVERY : InventoryS2CPacket.PreviewPhase.SCAN,
+				usablePrefix ? InventoryS2CPacket.PreviewCondition.PROGRESS : InventoryS2CPacket.PreviewCondition.FAILED, reason, progress);
+			return;
+		}
+		laneState(session, preview.parent, preview.input.resourceKind(), preview.terminal ? InventoryS2CPacket.PreviewPhase.DELIVERY : InventoryS2CPacket.PreviewPhase.SCAN,
+			progress || reason == null ? InventoryS2CPacket.PreviewCondition.PROGRESS : InventoryS2CPacket.PreviewCondition.DEFERRED,
+			progress ? null : reason, progress);
+	}
+	/** Growth pays the complete replacement and copy while the old owner remains charged. */
+	private InventoryDecision<Boolean> ensurePreviewCapacity(Preview preview, int needed) {
+		if (needed <= preview.categoryCapacity) return InventoryDecision.accept(true);
+		int capacity = Math.min(MAX_ENTRIES, Math.max(needed, Math.max(8, preview.categoryCapacity * 2)));
+		long bytes = capacity * PREVIEW_CATEGORY_BYTES;
+		var held = runtime.memory().tryReserve(bytes);
+		if (held.isEmpty()) return InventoryDecision.defer(InventoryFailureReason.MEMORY_LIMIT, InventoryImpact.DEGRADED);
+		boolean retained = false;
+		try {
+			if (!runtime.claimDetachedItemWork(bytes + preview.categoryCapacity * PREVIEW_CATEGORY_BYTES))
+				return InventoryDecision.defer(InventoryFailureReason.ITEM_WORK_LIMIT, InventoryImpact.DEGRADED);
+			var counts = new LinkedHashMap<InventoryScanner.Key, InventoryResourceValue>(capacity * 2); counts.putAll(preview.counts);
+			var witnesses = new LinkedHashMap<InventoryScanner.Key, Integer>(capacity * 2); witnesses.putAll(preview.witnesses);
+			var totals = new LinkedHashMap<String, InventoryResourceValue>(capacity * 2); totals.putAll(preview.totals);
+			var references = new LinkedHashMap<String, InventorySelection>(capacity * 2); references.putAll(preview.references);
+			var keys = new LinkedHashMap<String, String>(capacity * 2); keys.putAll(preview.keys);
+			var folded = new HashSet<String>(capacity * 2); folded.addAll(preview.folded);
+			var retired = new HashSet<String>(capacity * 2); retired.addAll(preview.retired);
+			held.get().commit(bytes);
+			if (preview.categoryMemory != null) preview.categoryMemory.close();
+			preview.categoryMemory = held.get(); preview.categoryCapacity = capacity; retained = true;
+			preview.counts = counts; preview.witnesses = witnesses; preview.totals = totals; preview.references = references;
+			preview.keys = keys; preview.folded = folded; preview.retired = retired;
+			return InventoryDecision.accept(true);
+		} finally { if (!retained) held.get().close(); }
+	}
+	private InventoryDecision<Boolean> ensureClaimCapacity(UUID player, int needed) {
+		int previous = variantCapacities.getOrDefault(player, 0);
+		if (needed <= previous) return InventoryDecision.accept(true);
+		int capacity = Math.min(MAX_ENTRIES, Math.max(needed, Math.max(8, previous * 2)));
+		long bytes = capacity * CLAIM_CATEGORY_BYTES;
+		var held = runtime.memory().tryReserve(bytes);
+		if (held.isEmpty()) return InventoryDecision.defer(InventoryFailureReason.MEMORY_LIMIT, InventoryImpact.DEGRADED);
+		boolean retained = false;
+		try {
+			if (!runtime.claimDetachedItemWork(bytes + previous * 512L))
+				return InventoryDecision.defer(InventoryFailureReason.ITEM_WORK_LIMIT, InventoryImpact.DEGRADED);
+			var claims = new HashSet<String>(capacity * 2); claims.addAll(previewVariantClaims.getOrDefault(player, Set.of()));
+			held.get().commit(bytes);
+			@Nullable RetainedMemoryLedger.Ticket old = variantCapacityMemory.put(player, held.get());
+			variantCapacities.put(player, capacity); retained = true;
+			previewVariantClaims.put(player, claims);
+			if (old != null) old.close();
+			return InventoryDecision.accept(true);
 		} finally { if (!retained) held.get().close(); }
 	}
 	/** Current detached versions; old selection references may still own older JSON. */
@@ -2152,7 +2626,10 @@ public final class InventoryBackend implements AutoCloseable {
 				// Aggregate selection needs only ID/amount; do not retain a second display owner after staging closes.
 				projection.put(key, item); preview.references.put(key, new InventorySelection(preview.input.resourceKind(), null, id, item.label(), null, true, "attention"));
 			}
-			return publish(preview.context, null, projection, preview.last, preview.revision, InventoryS2CPacket.Status.UPDATING, preview.publicationEvidence);
+			SyncPublisher.Outcome outcome = publish(preview.context, null, projection, preview.last, preview.revision, InventoryS2CPacket.Status.UPDATING, preview.publicationEvidence);
+			if (preview.terminal && preview.last != null && preview.last.result().completeness() == CaptureResult.Completeness.INCOMPLETE)
+				publisher.status(preview.context, InventoryS2CPacket.Status.INCOMPLETE, preview.failureReason);
+			return outcome;
 			}
 	}
 	private static InventoryResourceValue add(@Nullable InventoryResourceValue previous, InventoryResourceValue item) {
@@ -2162,6 +2639,15 @@ public final class InventoryBackend implements AutoCloseable {
 		long timing = monitor.enabled() ? monitor.beginLaneWork(Lane.PREVIEW) : 0;
 		try {
 		boolean invalidTransition = preview.context.stateFence() == 1;
+		@Nullable InventoryFailureReason failureReason = preview.consumer.currentReason();
+		if (preview.deniedCheck == InventorySharedRead.Check.AUTHORITY_DENIED) failureReason = InventoryFailureReason.SOURCE_AUTHORITY_DENIED;
+		else if (preview.deniedCheck == InventorySharedRead.Check.STRUCTURE_INVALID) failureReason = InventoryFailureReason.SOURCE_CHANGED;
+		if (failureReason == null && preview.parent.lanes.get(preview.input.resourceKind()).condition == InventoryS2CPacket.PreviewCondition.FAILED)
+			failureReason = preview.parent.lanes.get(preview.input.resourceKind()).reason;
+		if (failureReason == null) failureReason = InventoryFailureReason.SOURCE_UNAVAILABLE;
+		preview.failureReason = failureReason;
+		laneState(session, preview.parent, preview.input.resourceKind(), InventoryS2CPacket.PreviewPhase.SCAN,
+			InventoryS2CPacket.PreviewCondition.FAILED, failureReason, false);
 		preview.samplingDelay.cancel(); preview.projectionDelay.cancel(); preview.publicationDelay.cancel();
 		preview.consumer.discardObservation();
 		if (preview.publicationEvidence != null) { preview.publicationEvidence.close(); preview.publicationEvidence = null; }
@@ -2175,6 +2661,8 @@ public final class InventoryBackend implements AutoCloseable {
 			}
 		}
 		preview.terminal = true; preview.last = null; preview.references.clear(); preview.witnesses.clear(); preview.counts.clear();
+		preview.pendingObservation = null;
+		if (preview.pendingMemory != null) { preview.pendingMemory.close(); preview.pendingMemory = null; }
 		preview.totals.clear(); preview.keys.clear(); preview.folded.clear(); preview.retired.clear(); preview.categories = 0; preview.entries.forEach(RetainedMemoryLedger.Ticket::close); preview.entries.clear();
 		preview.rebaselineNeeded = !registered; preview.fencePending = false; preview.republishPending = false; preview.metadataChanged = false;
 		preview.metadataCeiling = effectiveDisplayCeiling();
@@ -2182,7 +2670,7 @@ public final class InventoryBackend implements AutoCloseable {
 		if (invalidTransition) InventoryCaptureDiagnostics.previewInvalidated(preview.request, preview.input.resourceKind(), preview.input.target(), preview.input.face());
 		// A failed registration must not silently drop the terminal control; the
 		// next normal tick retries this context while the consumer stays retired.
-		if (registered) publisher.status(preview.context, InventoryS2CPacket.Status.INVALID);
+		if (registered) publisher.status(preview.context, InventoryS2CPacket.Status.INVALID, failureReason);
 		} finally { monitor.end(timing); }
 	}
 	private InventoryResourceValue aggregate(InventoryResourceValue item) {
@@ -2219,16 +2707,15 @@ public final class InventoryBackend implements AutoCloseable {
 				lease.total = total; lease.count = count;
 			}
 		} catch (ArithmeticException overflow) {
-			InventoryCaptureDiagnostics.warn("tracking-count", lease.input, null, () -> "reason=count-overflow", overflow);
 			lease.consumer.stopScanning(); lease.scanning = false; lease.nextSweep = tick + settings.getTracking().getPeriodTicks();
-			incompleteTracking(lease);
+			incompleteTracking(lease, InventoryFailureReason.AMOUNT_OVERFLOW);
 			return;
 		}
 		if (result.completeness() == CaptureResult.Completeness.CONTINUE) return;
 		lease.consumer.stopScanning();
 		lease.scanning = false; lease.nextSweep = tick + settings.getTracking().getPeriodTicks();
 		if (result.completeness() != CaptureResult.Completeness.COMPLETE) {
-			incompleteTracking(lease); return;
+			incompleteTracking(lease, lease.consumer.currentReason() == null ? InventoryFailureReason.SOURCE_UNAVAILABLE : lease.consumer.currentReason()); return;
 		}
 		lease.consumer.retainCompleted();
 		if (lease.completedEvidence != null) lease.completedEvidence.close();
@@ -2239,6 +2726,7 @@ public final class InventoryBackend implements AutoCloseable {
 		if (lease.bootstrap != null) for (Recipient recipient : lease.recipients.values()) publisher.withdraw(recipient.context);
 		lease.revision++; lease.completed = new PublicationObservation(result, observed.get().inventorySweepEvidence());
 		lease.recomputingScope = false;
+		lease.failureReason = null;
 		lease.completedCount = lease.count; lease.completedTotal = lease.total; lease.completedFolded = lease.folded;
 		lease.bootstrap = null;
 		if (lease.bootstrapEvidence != null) { lease.bootstrapEvidence.close(); lease.bootstrapEvidence = null; }
@@ -2259,12 +2747,15 @@ public final class InventoryBackend implements AutoCloseable {
 		// this incomplete replacement scan. Never publish its partial accumulator.
 		if (lease.completed != null) { lease.completedFolded = true; lease.revision++; }
 	}
-	private void incompleteTracking(Tracking lease) {
+	private void incompleteTracking(Tracking lease, InventoryFailureReason reason) {
+		lease.failureReason = reason;
+		report(InventoryDiagnosticSite.CAPTURE, InventoryOperation.TRACKING, reason, InventoryImpact.DEGRADED,
+			InventoryOutcome.TRUNCATED, isLimit(reason), -1, "incomplete", -1, -1, -1);
 		if (lease.completed == null && lease.bootstrapLifecycle != InventoryS2CPacket.Status.INCOMPLETE) {
 			lease.bootstrapLifecycle = InventoryS2CPacket.Status.INCOMPLETE; lease.revision++;
 		}
 		for (Recipient recipient : lease.recipients.values()) {
-			publisher.status(recipient.context, InventoryS2CPacket.Status.INCOMPLETE);
+			publisher.status(recipient.context, InventoryS2CPacket.Status.INCOMPLETE, reason);
 			// Withdrawal must not be undone by the routine same-baseline replay.
 			// A fresh repair baseline can explicitly restage the retained seed.
 			recipient.bootstrapOffered = true;
@@ -2278,6 +2769,9 @@ public final class InventoryBackend implements AutoCloseable {
 		long timing = monitor.enabled() ? monitor.beginLaneWork(Lane.TRACKING) : 0;
 		try {
 		lease.creationClosed = true;
+		if (lease.consumer.currentReason() != null) lease.failureReason = lease.consumer.currentReason();
+		if (lease.failureReason == null) lease.failureReason = lease.deniedCheck == InventorySharedRead.Check.AUTHORITY_DENIED
+			? InventoryFailureReason.SOURCE_AUTHORITY_DENIED : InventoryFailureReason.SOURCE_UNAVAILABLE;
 		if (lease.consumer.scopeTransition()) { recomputeScope(lease); return; }
 		lease.recomputingScope = false;
 		lease.projectionDelay.cancel(); lease.registrationDelay.cancel();
@@ -2443,7 +2937,7 @@ public final class InventoryBackend implements AutoCloseable {
 			fragment = new CaptureResult.OpaqueKeyedFragment(InventoryResourceCodec.id(kind), payload);
 		}
 		var projection = new SyncPublisher.AuthorizedProjection(SyncPublisher.PublicationForm.KEYED_ABSOLUTE, fragment.entries().keySet());
-		var ledger = new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, 256L));
+		var ledger = new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, (long) fragment.entries().size()));
 		if (observation == null) return publisher.publishBootstrap(fragment, revision, bootstrapLifecycle, projection, context, ledger, evidence);
 		CaptureResult result = observation.result();
 		CaptureResult publication = new CaptureResult(Optional.of(fragment),
@@ -2540,7 +3034,7 @@ public final class InventoryBackend implements AutoCloseable {
 		// complete observation replaces that evidence.
 		if (lease.completed != null) recipient.folded = lease.completedFolded;
 		lease.recipients.put(player, recipient);
-		publisher.status(context, trackingLifecycle(lease));
+		publisher.status(context, trackingLifecycle(lease), lease.failureReason);
 		publishTracking(lease, recipient, fanout);
 	}
 	private void resetRecipients(Tracking lease) {
@@ -2635,10 +3129,12 @@ public final class InventoryBackend implements AutoCloseable {
 		long timing = monitor.enabled() ? monitor.beginLaneWork(Lane.PREVIEW) : 0;
 		try {
 		@Nullable InventoryS2CPacket pendingOpened = session.pendingOpened.remove(request);
+		session.outcomeViews.remove(request);
 		if (pendingOpened != null) publisher.cancelControl(session.recipient, pendingOpened);
 		for (var kind : InventoryResourceKind.values()) closeLane(session, new LaneKey(request, kind));
 		@Nullable PreviewRequest parent = session.requests.remove(request);
 		if (parent != null) {
+			for (LaneState state : parent.lanes.values()) if (state.pending != null) publisher.cancelControl(session.recipient, state.pending);
 			parent.openedHandedOff = false; parent.memory.close();
 			if (monitor.enabled(Lane.PREVIEW) && monitorBaselineGeneration == monitor.collectionGeneration()) monitorOpenRequests--;
 		}
@@ -2652,6 +3148,8 @@ public final class InventoryBackend implements AutoCloseable {
 		if (preview.publicationEvidence != null) preview.publicationEvidence.close();
 		if (preview.deniedEvidence != null) preview.deniedEvidence.close();
 		if (preview.metadataMemory != null) preview.metadataMemory.close();
+		if (preview.categoryMemory != null) preview.categoryMemory.close();
+		if (preview.pendingMemory != null) preview.pendingMemory.close();
 		} finally { monitor.end(timing); }
 	}
 	public void remove(MarkerId marker) {
@@ -2674,6 +3172,9 @@ public final class InventoryBackend implements AutoCloseable {
 		publisher.cancelControls(player);
 		publisher.releaseData(player); // a disconnected recipient keeps no pending gate
 		Session session = sessions.remove(player);
+		@Nullable RetainedMemoryLedger.Ticket claims = variantMemory.remove(player); if (claims != null) claims.close();
+		@Nullable RetainedMemoryLedger.Ticket capacity = variantCapacityMemory.remove(player); if (capacity != null) capacity.close();
+		variantCapacities.remove(player); previewVariants.remove(player); previewVariantClaims.remove(player);
 		if (session != null) { for (long request : List.copyOf(session.requests.keySet())) closePreview(session, request); session.memory.close(); }
 		for (Tracking lease : List.copyOf(tracking.values())) {
 			var initial = lease.initialGrants.remove(player); if (initial != null) initial.close();
@@ -2685,9 +3186,11 @@ public final class InventoryBackend implements AutoCloseable {
 	@Override public void close() {
 		if (publishing) { closeRequested = true; return; }
 		closePublicationOpportunity();
+		closeOperationOpportunities();
 		for (UUID player : List.copyOf(sessions.keySet())) disconnect(player);
 		for (MarkerId id : List.copyOf(tracking.keySet())) remove(id);
 		previewVariantClaims.clear(); previewVariants.clear(); variantMemory.values().forEach(RetainedMemoryLedger.Ticket::close); variantMemory.clear();
+		variantCapacityMemory.values().forEach(RetainedMemoryLedger.Ticket::close); variantCapacityMemory.clear(); variantCapacities.clear();
 		publisher.close(); runtime.close();
 	}
 }

@@ -28,6 +28,7 @@ import net.minecraft.world.item.Items;
 import nx.pingwheel.common.platform.IPlatformInventoryService;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryResidentItem;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimitException;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.diagnostics.DiagnosticChannel;
 import java.time.Duration;
@@ -91,7 +92,8 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 				return Optional.of(new SlottedAccess(slotted, gate));
 			}
 			return Optional.of(new EnumeratedAccess(storage, gate));
-		} catch (RuntimeException | LinkageError failure) {
+		} catch (InventoryProviderLimitException limit) { throw limit; }
+		catch (RuntimeException | LinkageError failure) {
 			if (!(failure instanceof InventorySourceUnavailableException))
 				Diagnostics.server().atNormal().rateLimited(FIND_DIAGNOSTICS).warn("inventory-capability-find", "source-unavailable",
 					failure, () -> "position=" + pos + " face=" + side + " worldClass=" + world.getClass().getName()
@@ -103,7 +105,8 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 	private static OptionalLong storageVersion(Storage<ItemVariant> storage) {
 		try {
 			return OptionalLong.of(storage.getVersion());
-		} catch (RuntimeException | LinkageError failure) {
+		} catch (InventoryProviderLimitException limit) { throw limit; }
+		catch (RuntimeException | LinkageError failure) {
 			if (!(failure instanceof InventorySourceUnavailableException))
 				Diagnostics.server().atNormal().rateLimited(VERSION_DIAGNOSTICS).warn("inventory-storage-version", "version-unavailable",
 					failure, () -> "storageClass=" + storage.getClass().getName());
@@ -306,6 +309,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 		@Override public Access scopedResidents(ResidentScope scope) { var access = new SlottedAccess(storage, memberGate, raw); access.residentScope = Objects.requireNonNull(scope); return access; }
 		@Override public boolean valid() {
 			try { return memberGate.getAsBoolean(); }
+			catch (InventoryProviderLimitException limit) { throw limit; }
 			catch (RuntimeException | LinkageError unavailable) {
 				if (!(unavailable instanceof InventorySourceUnavailableException))
 					Diagnostics.server().atNormal().rateLimited(VALID_DIAGNOSTICS).warn("inventory-storage-valid", "source-unavailable", unavailable,
@@ -431,6 +435,7 @@ public final class PlatformInventoryServiceImpl implements IPlatformInventorySer
 		@Override public Access scopedResidents(ResidentScope scope) { var access = new EnumeratedAccess(storage, memberGate, raw); access.residentScope = Objects.requireNonNull(scope); return access; }
 		@Override public boolean valid() {
 			try { return memberGate.getAsBoolean(); }
+			catch (InventoryProviderLimitException limit) { throw limit; }
 			catch (RuntimeException | LinkageError unavailable) {
 				if (!(unavailable instanceof InventorySourceUnavailableException))
 					Diagnostics.server().atNormal().rateLimited(VALID_DIAGNOSTICS).warn("inventory-storage-valid", "source-unavailable", unavailable,

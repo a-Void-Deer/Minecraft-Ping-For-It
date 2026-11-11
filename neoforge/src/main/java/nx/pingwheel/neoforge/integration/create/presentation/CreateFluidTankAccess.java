@@ -18,6 +18,8 @@ import nx.pingwheel.common.platform.IPlatformFluidService;
 import nx.pingwheel.common.platform.IPlatformFluidService.Operation;
 import nx.pingwheel.common.platform.IPlatformFluidService.OperationProfile;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimits;
+import nx.pingwheel.common.presentation.inventory.minecraft.ProviderLimitSite;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.neoforge.platform.FluidCapabilityAccess;
 import nx.pingwheel.neoforge.platform.FluidSourceDiagnostics;
@@ -109,18 +111,17 @@ public final class CreateFluidTankAccess {
 		world.require(controller, operation); Direction.@Nullable Axis axis = metadata.axis(entity(master));
 		// Preflight the WHOLE member table before allocating positions or probing any prism member.
 		// The common layout guard is finite even when Create's configurable max height is very large.
-		if (width < 1 || width > 3 || height < 1 || axis != Direction.Axis.Y)
+		if (width < 1 || height < 1 || axis != Direction.Axis.Y)
 			throw unavailable("Create fluid bounded static topology",
 				() -> "reason=invalid-shape;controller=" + controller.toShortString() + ";width=" + width
 					+ ";height=" + height + ";axis=" + axis(axis)
-					+ ";maxMembers=" + InventorySnapshotLayout.MAX_MEMBERS + ";" + blockContext(root, face, block));
+					+ ";maxMembers=" + InventorySnapshotLayout.MAX_FLUID_MEMBERS + ";" + blockContext(root, face, block));
+		if (width > 3) throw InventoryProviderLimits.exceeded(ProviderLimitSite.TANK_WIDTH, width, 3);
 		long size = (long) width * width * height;
 		boolean containsHit = contains(controller, root, width, height);
-		if (size > InventorySnapshotLayout.MAX_MEMBERS)
-			throw unavailable("Create fluid member limit exceeded (member-limit-exceeded)",
-				() -> "reason=member-limit-exceeded;controller=" + controller.toShortString()
-					+ ";width=" + width + ";height=" + height + ";members=" + size
-					+ ";maxMembers=" + InventorySnapshotLayout.MAX_MEMBERS + ";" + blockContext(root, face, block));
+		if (size > InventorySnapshotLayout.MAX_FLUID_MEMBERS) {
+			throw InventoryProviderLimits.exceeded(ProviderLimitSite.TANK_MEMBERS, size, InventorySnapshotLayout.MAX_FLUID_MEMBERS);
+		}
 		if (!containsHit)
 			throw unavailable("Create fluid hit outside structure (hit-outside-structure)",
 				() -> "reason=hit-outside-structure;controller=" + controller.toShortString()

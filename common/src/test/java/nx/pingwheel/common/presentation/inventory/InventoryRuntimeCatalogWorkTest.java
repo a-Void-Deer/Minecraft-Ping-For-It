@@ -28,7 +28,7 @@ class InventoryRuntimeCatalogWorkTest {
 		@Override public InventoryDomainCodec.Item read(int index, InventoryCatalogAdmission grant) { reads++; throw new IllegalStateException("throwing attempted source read"); }
 		@Override public boolean matchesSelection(int index, InventorySelection selection, InventoryCatalogAdmission grant) { witnesses++; return true; }
 	}
-	private static long periodWork() { return InventorySourceAccess.MAX_SLOTS * InventoryItemBudget.workUpperBound(4096); }
+	private static long periodWork() { return InventorySourceAccess.CAPTURE_MAX_SLOTS * InventoryItemBudget.workUpperBound(4096); }
 	@Test void exhaustedReadWorkPrecedesGetterAndSelectAndReturnsNextTickWithoutReadInflation() {
 		var source = new Source(); var settings = InventorySettings.serverDefaults(); int[] resolves = {0};
 		try (var runtime = new InventoryRuntime(ignored -> { resolves[0]++; return Optional.of(source); }, settings.pendingMemoryBytes())) {
@@ -65,8 +65,8 @@ class InventoryRuntimeCatalogWorkTest {
 		try (var runtime = new InventoryRuntime(ignored -> Optional.of(source), settings.pendingMemoryBytes())) {
 			runtime.advance(0, settings); var consumer = runtime.attach(INPUT, new InventoryRuntime.PreviewSubject(INPUT.readOwner())).orElseThrow();
 			var result = runtime.step(consumer, 1).orElseThrow(); assertEquals(1, result.result().coverage().scanned()); assertEquals(1, snapshotReads[0]);
-			assertTrue(runtime.claimDetachedItemWork(periodWork() - InventoryItemBudget.freezeWorkUpperBound(4096)),
-				"one source/page work envelope, no Catalog operation or duplicate debit in this synthetic lazy read");
+			assertTrue(runtime.claimDetachedItemWork(periodWork() - InventoryItemBudget.freezeWorkUpperBound(4096) - 5L * 4096),
+				"one source/page envelope plus initial paid-subject index growth; no Catalog operation ran in this synthetic lazy read");
 			assertFalse(runtime.claimDetachedItemWork(1)); assertEquals(0, runtime.memory().reserved());
 		}
 	}

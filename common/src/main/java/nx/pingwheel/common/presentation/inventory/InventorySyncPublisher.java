@@ -35,48 +35,12 @@ import nx.pingwheel.common.presentation.source.CaptureResult;
 import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
 import nx.pingwheel.common.presentation.source.SyncPublisher;
-import nx.pingwheel.common.diagnostics.Diagnostics;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 
 /** Actual bounded dedicated publication. Queued cuts remain immutable until fully transmitted. */
 public final class InventorySyncPublisher implements SyncPublisher, AutoCloseable {
-	@NotNullByDefault
-	private enum PacketKindChannel {
-		OFFER("offer"), POLICY("policy"), SELECTED("selected"), REJECT("reject"), PREVIEW("preview"),
-		SNAPSHOT("snapshot"), STREAM("stream"), STATUS("status"), HEARTBEAT("heartbeat");
-
-		private final nx.pingwheel.common.diagnostics.DiagnosticChannel controlHandoff;
-		private final nx.pingwheel.common.diagnostics.DiagnosticChannel transportSend;
-
-		PacketKindChannel(String suffix) {
-			controlHandoff = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval(
-				"inventory-publisher-control-handoff-" + suffix, java.time.Duration.ofSeconds(10));
-			transportSend = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval(
-				"inventory-publisher-transport-send-" + suffix, java.time.Duration.ofSeconds(10));
-		}
-
-		static @Nullable PacketKindChannel of(@Nullable InventoryS2CPacket.Kind kind) {
-			return kind == null ? null : switch (kind) {
-				case OFFER -> OFFER;
-				case POLICY -> POLICY;
-				case SELECTED -> SELECTED;
-				case REJECT -> REJECT;
-				case PREVIEW -> PREVIEW;
-				case SNAPSHOT -> SNAPSHOT;
-				case STREAM -> STREAM;
-				case STATUS -> STATUS;
-				case HEARTBEAT -> HEARTBEAT;
-				// No new production diagnostic channel for the appended control kind.
-				case OPENED -> null;
-			};
-		}
-	}
-	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel CONTROL_UNKNOWN =
-		nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-publisher-control-handoff-unknown", java.time.Duration.ofSeconds(10));
-	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel TRANSPORT_UNKNOWN =
-		nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-publisher-transport-send-unknown", java.time.Duration.ofSeconds(10));
 	public static final CostLedger.Counter PUBLICATIONS = new CostLedger.Counter("inventory/publication", CostLedger.Unit.WORK);
 	public interface Transport {
 		/** Last callback before accounting and irreversible host handoff; production must implement source authorization. */
@@ -96,7 +60,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			return packet.encodedSize(displayBytes, frameBytes);
 		}
 		void send(UUID recipient, InventoryS2CPacket packet);
-		/** Observation only: all three normal returns retain the legacy void-send progress semantics. */
+		/** NOT_HANDED_OFF retries the same owner; legacy void sends return UNOBSERVED. */
 		default TransportHandoff sendObserved(UUID recipient, InventoryS2CPacket packet) {
 			send(recipient, packet); return TransportHandoff.UNOBSERVED;
 		}
@@ -132,7 +96,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	}
 	private static final long STATE_MEMORY = 4096;
 	/**
-	 * Registration owns a finite slab before constructing State: per key, two
+	 * Each admitted backing-capacity growth owns a finite slab: per key, two
 	 * retirement set nodes + bounded UTF-16 id, offered/delivered/pending nodes,
 	 * overlapping identity-ticket nodes and backing/growth slots. Delivered and
 	 * admitted keys can overlap a newer projection. One slab slot also pays its
@@ -140,8 +104,22 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	 * 3072 uses 40-byte objects / 8-byte references with alignment headroom.
 	 * Retirement needs no later grant, even after the cap falls below live cost.
 	 */
-	private static final int MAX_KEYS = 256;
-	private static final long REGISTRATION_MEMORY = STATE_MEMORY + MAX_KEYS * 3072L;
+	private static final int MAX_KEYS = 1024, MAX_CONTEXTS = 2048;
+	private static final long REGISTRATION_MEMORY = STATE_MEMORY;
+	@NotNullByDefault
+	private static final class RegistrationTicket implements RetainedMemoryLedger.Ticket {
+		final RetainedMemoryLedger.Ticket base;
+		final RetainedMemoryLedger.@Nullable Ticket backing;
+		final int capacity;
+		RegistrationTicket(RetainedMemoryLedger.Ticket base, RetainedMemoryLedger.@Nullable Ticket backing, int capacity) {
+			this.base = base; this.backing = backing; this.capacity = capacity;
+		}
+		@Override public void commit(long actual) {
+			if (actual != REGISTRATION_MEMORY + capacity * 3072L) throw new IllegalArgumentException("inventory registration settlement");
+			base.commit(REGISTRATION_MEMORY); if (backing != null) backing.commit(capacity * 3072L);
+		}
+		@Override public void close() { base.close(); if (backing != null) backing.close(); }
+	}
 	/** Conservative fixed framing upper bounds for measured packet reservations; never a frame budget. */
 	private static final int FRAME_FIXED_BYTES = 128, ENTRY_FIXED_BYTES = 64;
 	private static final class State {
@@ -150,7 +128,13 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		boolean monitored = true;
 		Context context;
 		Route route;
-		final RetainedMemoryLedger.Ticket memory;
+		final RetainedMemoryLedger.@Nullable Ticket memory;
+		boolean prepaidControl;
+		int keyCapacity;
+		RetainedMemoryLedger.@Nullable Ticket keyMemory;
+		/** Lifetime identities pay their future retirement before entering any projection. */
+		Set<String> admittedKeys = new LinkedHashSet<>();
+		Set<String> admittedGroups = new LinkedHashSet<>();
 		Map<String, InventoryS2CPacket.Entry> offered = new LinkedHashMap<>();
 		final Map<String, InventoryS2CPacket.Entry> delivered = new LinkedHashMap<>();
 		Map<String, InventoryS2CPacket.Entry> pending = new LinkedHashMap<>();
@@ -170,12 +154,14 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		long offeredWatermark, deliveredWatermark, deliveredChecksum, lastHeartbeat = -1;
 		InventoryS2CPacket.Status status = InventoryS2CPacket.Status.UPDATING;
 		boolean baseline = true, complete, control, deliveryIncomplete, fencePending;
+		@Nullable InventoryFailureReason failureReason, deferredReason;
+		long deliveredParts;
 		/** Bootstrap is retained presentation, never completed source evidence. */
 		boolean bootstrap, bootstrapClosed;
 		/** A newly installed offer can finish without data, unlike an unrelated status control. */
 		boolean offeredCutPending;
 		long queueGeneration = -1, monitoredPending, monitoredAdmitted;
-		State(Context context, Route route, RetainedMemoryLedger.Ticket memory) {
+		State(Context context, Route route, RetainedMemoryLedger.@Nullable Ticket memory) {
 			this.context = context; this.route = route; this.memory = memory; fencePending = route.markerId() != null;
 			module = route.markerId() == null ? Module.INVENTORY_PREVIEW : Module.INVENTORY_TRACKING;
 			publicationDelay = new InventoryBudgetDelayState(module); batchDelay = new InventoryBudgetDelayState(module);
@@ -198,6 +184,9 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	/** Recipients whose item-data handoff stays blocked until a successful control handoff releases them. */
 	private final Set<UUID> dataGates = new LinkedHashSet<>();
 	private @Nullable ControlHandoff controlHandoff;
+	private java.util.function.LongPredicate backingWork = ignored -> true;
+	/** Production debits allocation/copy work from Runtime's existing processing ledger. */
+	void backingWork(java.util.function.LongPredicate admission) { backingWork = Objects.requireNonNull(admission); }
 	private boolean drainingControls;
 	private InventorySettings settings;
 	private InventoryWireWindow window;
@@ -209,6 +198,32 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	private int drainCursor;
 	private int validationCursor;
 	private int displayBytes = InventoryLimits.DISPLAY_BASE_BYTES, frameBytes = InventoryLimits.FRAME_BASE_BYTES;
+	/** Package-private deterministic boundary fixture; production uses configured budgets. */
+	private long fixturePreviewClientBytes = -1, fixtureSnapshotBytes = -1;
+	private long fixturePreviewQueueBytes = -1, fixturePreviewGlobalBytes = -1;
+	private int controlCapacity = 1024;
+	void wireBudgetFixture(long previewClientBytes, long snapshotBytes) {
+		if (previewClientBytes <= 0 || snapshotBytes <= 0) throw new IllegalArgumentException("fixture wire budgets");
+		fixturePreviewClientBytes = previewClientBytes; fixtureSnapshotBytes = snapshotBytes;
+	}
+	void previewQueueFixture(long bytes) {
+		if (bytes <= 0) throw new IllegalArgumentException("fixture queue budget");
+		fixturePreviewQueueBytes = bytes;
+	}
+	void previewGlobalFixture(long bytes) {
+		if (bytes <= 0) throw new IllegalArgumentException("fixture global budget");
+		fixturePreviewGlobalBytes = bytes;
+	}
+	/** Smaller deterministic queue pressure without allocating hundreds of session slabs. */
+	void controlCapacityFixture(int capacity) {
+		if (capacity <= 0 || capacity > 1024) throw new IllegalArgumentException("fixture control capacity");
+		controlCapacity = capacity;
+	}
+	private long previewQueueBytes() { return fixturePreviewQueueBytes < 0 ? settings.previewQueueBytes() : fixturePreviewQueueBytes; }
+	private long previewGlobalBytes() { return fixturePreviewGlobalBytes < 0 ? settings.previewGlobalPeriodBytes() : fixturePreviewGlobalBytes; }
+	private long previewClientBytes() { return fixturePreviewClientBytes < 0 ? settings.previewClientPeriodBytes() : fixturePreviewClientBytes; }
+	private long snapshotClientBytes() { return fixtureSnapshotBytes < 0 ? settings.trackingSnapshotClientPeriodBytes() : fixtureSnapshotBytes; }
+	private long snapshotFragmentBytes() { return fixtureSnapshotBytes < 0 ? settings.trackingSnapshotFragmentBytes() : fixtureSnapshotBytes; }
 	private final InventoryPeriodClock previewClock = new InventoryPeriodClock(), trackingClock = new InventoryPeriodClock();
 
 	public InventorySyncPublisher(RetainedMemoryLedger memory, Transport transport) { this(memory, transport, BudgetDelaySink.NONE); }
@@ -236,10 +251,10 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		if (monitor.enabled(Lane.PREVIEW)) {
 			monitor.count(Lane.PREVIEW, Counter.PUBLICATIONS_INSTALLED, 0); monitor.count(Lane.PREVIEW, Counter.CUTS_COMPLETED, 0);
 			monitor.gauge(Lane.PREVIEW, Gauge.QUEUE_LOGICAL_COST, previewQueued);
-			monitor.gauge(Lane.PREVIEW, Gauge.QUEUE_CAP, settings.previewQueueBytes());
+			monitor.gauge(Lane.PREVIEW, Gauge.QUEUE_CAP, previewQueueBytes());
 			sampleMonitorQueues(Lane.PREVIEW, previewPending, previewAdmitted);
-			monitor.budget(Lane.PREVIEW, Budget.WIRE_BYTES, previewClock.period(), settings.previewGlobalPeriodBytes(),
-				previewGlobal, settings.previewGlobalPeriodBytes() - previewGlobal);
+			monitor.budget(Lane.PREVIEW, Budget.WIRE_BYTES, previewClock.period(), previewGlobalBytes(),
+				previewGlobal, previewGlobalBytes() - previewGlobal);
 		}
 		if (monitor.enabled(Lane.TRACKING)) {
 			monitor.count(Lane.TRACKING, Counter.PUBLICATIONS_INSTALLED, 0); monitor.count(Lane.TRACKING, Counter.CUTS_COMPLETED, 0);
@@ -293,6 +308,19 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	private long cycle(State state) { return periodId(state.module); }
 	long periodId(Module module) { return module == Module.INVENTORY_PREVIEW ? previewClock.period() : trackingClock.period(); }
 	private void delay(State state, InventoryBudgetDelayState stage, int reasons, String name, Unit unit, long amount) {
+		for (Reason reason : Reason.values()) if ((reasons & reason.bit()) != 0) {
+			InventoryFailureReason failure = switch (reason) {
+				case MEMORY -> InventoryFailureReason.MEMORY_LIMIT;
+				case QUEUE_CAPACITY -> InventoryFailureReason.QUEUE_LIMIT;
+				case PUBLICATION_WORK -> InventoryFailureReason.ITEM_WORK_LIMIT;
+				case SUBJECT_CAPACITY -> InventoryFailureReason.PUBLISHER_CAPACITY;
+				case FRAME_OR_FRAGMENT_UNSERVICEABLE -> InventoryFailureReason.FRAME_LIMIT;
+				case WIRE_CLIENT_OR_STREAM, WIRE_GLOBAL -> InventoryFailureReason.WIRE_LIMIT;
+				default -> InventoryFailureReason.PROVIDER_WORK_LIMIT;
+			};
+			state.deferredReason = failure;
+			report(state, failure, InventoryOutcome.DEFERRED, true, name, amount, -1, -1, null);
+		}
 		if (!state.monitored) return; // generic negotiation/result controls have no module work identity
 		stage.observe(sink, cycle(state), tick, reasons,
 			() -> new WorkItem("recipient/" + state.context.recipient() + "/" + state.context.baseline() + "/" + name,
@@ -311,19 +339,38 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	}
 	/** Negotiation and correlated results are bounded control traffic, not a free transport side path. */
 	public boolean control(UUID recipient, InventoryS2CPacket packet) {
+		return control(recipient, packet, false);
+	}
+	/** Session-owned mailbox slots prepay their packet, queue wrapper and encoding scratch. */
+	public boolean controlPrepaid(UUID recipient, InventoryS2CPacket packet) {
+		return control(recipient, packet, true);
+	}
+	private boolean control(UUID recipient, InventoryS2CPacket packet, boolean prepaid) {
 		if (packet.isCorrupt() || packet.kind() != InventoryS2CPacket.Kind.OFFER && packet.kind() != InventoryS2CPacket.Kind.POLICY
 			&& packet.kind() != InventoryS2CPacket.Kind.SELECTED && packet.kind() != InventoryS2CPacket.Kind.REJECT
-			&& packet.kind() != InventoryS2CPacket.Kind.OPENED) return false;
+			&& packet.kind() != InventoryS2CPacket.Kind.OPENED && packet.kind() != InventoryS2CPacket.Kind.OPEN_REJECTED
+			&& packet.kind() != InventoryS2CPacket.Kind.PREVIEW_STATE) return false;
 		String key = controlKey(recipient, packet);
 		Control previous = controls.get(key);
-		if (previous != null) { controls.remove(key); previous.state.memory.close(); }
-		if (controls.size() >= 256 || controls.values().stream().filter(c -> c.state.context.recipient().equals(recipient)).count() >= 64) return false;
-		var held = memory.tryReserve(STATE_MEMORY);
-		if (held.isEmpty()) return false;
-		held.get().commit(STATE_MEMORY);
+		if (previous != null) { controls.remove(key); releaseControl(previous); }
+		if (controls.size() >= controlCapacity || controls.values().stream().filter(c -> c.state.context.recipient().equals(recipient)).count() >= 64) {
+			InventoryDiagnostics.report(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER, InventoryDiagnosticSite.PUBLICATION,
+				InventoryOperation.PUBLISH, InventoryFailureReason.CONTROL_CAPACITY, InventoryImpact.DEGRADED, InventoryOutcome.DEFERRED, true,
+				() -> new InventoryDiagnosticDetail("control", packet.requestId(), packet.commitId(), packet.resourceKind().name(), 1, controls.size(), controlCapacity), null);
+			return false;
+		}
+		RetainedMemoryLedger.@Nullable Ticket held = prepaid ? null : memory.tryReserve(STATE_MEMORY).orElse(null);
+		if (!prepaid && held == null) {
+			InventoryDiagnostics.report(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER, InventoryDiagnosticSite.PUBLICATION,
+				InventoryOperation.PUBLISH, InventoryFailureReason.MEMORY_LIMIT, InventoryImpact.DEGRADED, InventoryOutcome.DEFERRED, true,
+				() -> new InventoryDiagnosticDetail("control-admission", packet.requestId(), packet.commitId(), packet.resourceKind().name(), STATE_MEMORY,
+					memory.retained(), memory.cap()), null);
+			return false;
+		}
+		if (held != null) held.commit(STATE_MEMORY);
 		Context context = new Context("control", recipient, packet.presentationEpoch() + "/" + packet.view(), 1, 1);
-		State state = new State(context, new Route(packet.epoch(), packet.presentationEpoch(), packet.view(), packet.requestId(), null, "control", null, packet.resourceKind()), held.get());
-		state.monitored = false;
+		State state = new State(context, new Route(packet.epoch(), packet.presentationEpoch(), packet.view(), packet.requestId(), null, "control", null, packet.resourceKind()), held);
+		state.monitored = false; state.prepaidControl = prepaid;
 		controls.put(key, new Control(state, packet)); return true;
 	}
 	/** Exact queued owner only: admission is not a successful transport handoff. */
@@ -335,19 +382,19 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		if (drainingControls) return;
 		drainingControls = true;
 		try {
-		// At most 256 controls. New/replaced work belongs to the next drain;
+		// At most 1024 controls. New/replaced work belongs to the next drain;
 		// cancellation/close may remove snapshot members before their turn.
 		for (var entry : new LinkedHashMap<>(controls).entrySet()) {
 			Control control = entry.getValue();
 			if (controls.get(entry.getKey()) != control) continue;
 			if (!transport.authorizedControl(control.state.context.recipient(), control.packet)) {
-				if (controls.remove(entry.getKey(), control)) control.state.memory.close();
+				if (controls.remove(entry.getKey(), control)) releaseControl(control);
 				continue;
 			}
 			if (send(control.state, control.packet, true)) {
 				// Remove/refund accepted work BEFORE calling external code, even
 				// when that code cancels, closes, replaces or throws.
-				if (controls.remove(entry.getKey(), control)) control.state.memory.close();
+				if (controls.remove(entry.getKey(), control)) releaseControl(control);
 				@Nullable ControlHandoff handoff = controlHandoff;
 				if (handoff != null) {
 					boolean accepted;
@@ -361,14 +408,15 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	}
 	public void cancelControls(UUID recipient) {
 		var iterator = controls.values().iterator();
-		while (iterator.hasNext()) { var control = iterator.next(); if (control.state.context.recipient().equals(recipient)) { control.state.memory.close(); iterator.remove(); } }
+		while (iterator.hasNext()) { var control = iterator.next(); if (control.state.context.recipient().equals(recipient)) { releaseControl(control); iterator.remove(); } }
 	}
 	/** Retiring a bounded result owner also retires only its exact queued send. */
 	public void cancelControl(UUID recipient, InventoryS2CPacket packet) {
 		String key = controlKey(recipient, packet);
 		Control control = controls.get(key);
-		if (control != null && control.packet == packet && controls.remove(key, control)) control.state.memory.close();
+		if (control != null && control.packet == packet && controls.remove(key, control)) releaseControl(control);
 	}
+	private static void releaseControl(Control control) { if (control.state.memory != null) control.state.memory.close(); }
 	/**
 	 * Blocks every item-data handoff for one recipient until a successful
 	 * control handoff (see {@link #setControlHandoff}) authorizes release. A
@@ -387,19 +435,46 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		return new InventoryS2CPacket.Offer(previewPeriodTicks, trackingPeriodTicks, resyncMinPeriods, heartbeatPeriods, displayBytes, frameBytes);
 	}
 	public boolean register(Context context, Route route) {
-		var ticket = reserveRegistration();
+		var ticket = reserveRegistration(route.markerId() == null ? 0 : 2);
 		if (ticket.isEmpty()) return false;
 		return register(context, route, ticket.get());
 	}
 	public Optional<RetainedMemoryLedger.Ticket> reserveRegistration() {
-		return states.size() >= 512 ? Optional.empty() : memory.tryReserve(REGISTRATION_MEMORY);
+		return reserveRegistration(2); // one selected key and its exact-to-aggregate overlap
 	}
-	public int remainingRegistrations() { return 512 - states.size(); }
+	private Optional<RetainedMemoryLedger.Ticket> reserveRegistration(int keys) {
+		RetainedMemoryLedger.@Nullable Ticket base = states.size() >= MAX_CONTEXTS ? null : memory.tryReserve(REGISTRATION_MEMORY).orElse(null);
+		RetainedMemoryLedger.@Nullable Ticket backing = base == null || keys == 0 ? null : memory.tryReserve(keys * 3072L).orElse(null);
+		Optional<RetainedMemoryLedger.Ticket> held;
+		if (base == null || keys > 0 && backing == null) {
+			if (base != null) base.close();
+			held = Optional.empty();
+		} else held = Optional.of(new RegistrationTicket(base, backing, keys));
+		if (held.isEmpty()) InventoryDiagnostics.report(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER, InventoryDiagnosticSite.PUBLICATION,
+			InventoryOperation.PUBLISH, states.size() >= MAX_CONTEXTS ? InventoryFailureReason.PUBLISHER_CAPACITY : InventoryFailureReason.MEMORY_LIMIT,
+			InventoryImpact.DEGRADED, InventoryOutcome.DEFERRED, true,
+			() -> new InventoryDiagnosticDetail("registration", -1, -1, null, REGISTRATION_MEMORY, states.size(), MAX_CONTEXTS), null);
+		return held;
+	}
+	public int remainingRegistrations() { return MAX_CONTEXTS - states.size(); }
 	public boolean register(Context context, Route route, RetainedMemoryLedger.Ticket ticket) {
 		String key = key(context);
-		if (states.size() >= 512 || states.containsKey(key)) { ticket.close(); return false; }
-		ticket.commit(REGISTRATION_MEMORY);
-		try { states.put(key, new State(context, route, ticket)); return true; }
+		if (states.size() >= MAX_CONTEXTS || states.containsKey(key)) {
+			if (states.size() >= MAX_CONTEXTS) InventoryDiagnostics.report(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				InventoryDiagnosticSite.PUBLICATION, InventoryOperation.PUBLISH, InventoryFailureReason.PUBLISHER_CAPACITY,
+				InventoryImpact.DEGRADED, InventoryOutcome.DEFERRED, true,
+				() -> new InventoryDiagnosticDetail("registration-install", route.requestId(), -1, route.resourceKind().name(), 1, states.size(), MAX_CONTEXTS), null);
+			ticket.close(); return false;
+		}
+		int capacity = route.markerId() == null ? 0 : 2;
+		if (ticket instanceof RegistrationTicket registration) capacity = registration.capacity;
+		ticket.commit(REGISTRATION_MEMORY + capacity * 3072L);
+		try {
+			State state = new State(context, route, ticket instanceof RegistrationTicket registration ? registration.base : ticket);
+			state.keyCapacity = capacity;
+			if (ticket instanceof RegistrationTicket registration) state.keyMemory = registration.backing;
+			states.put(key, state); return true;
+		}
 		catch (RuntimeException | Error failure) { ticket.close(); throw failure; }
 	}
 	public void advance(long now, InventorySettings settings) {
@@ -450,12 +525,16 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	}
 	/** Temporary atomic-initial staging shares the existing Tracking queue capacity, without its wire clock. */
 	public Optional<InitialStaging> reserveInitial(long wireBytes, long encodingWorkspace) {
+		return Optional.ofNullable(reserveInitialDecision(wireBytes, encodingWorkspace).value());
+	}
+	public InventoryDecision<InitialStaging> reserveInitialDecision(long wireBytes, long encodingWorkspace) {
 		if (wireBytes < 0 || encodingWorkspace < 0) throw new IllegalArgumentException("initial staging bound");
-		if (settings == null || wireBytes > settings.trackingRollingQueueBytes() - trackingQueued) return Optional.empty();
+		if (settings == null || wireBytes > settings.trackingRollingQueueBytes() - trackingQueued)
+			return InventoryDecision.defer(InventoryFailureReason.QUEUE_LIMIT, InventoryImpact.DEGRADED);
 		var held = memory.tryReserve(checkedAdd(wireBytes, encodingWorkspace));
-		if (held.isEmpty()) return Optional.empty();
+		if (held.isEmpty()) return InventoryDecision.defer(InventoryFailureReason.MEMORY_LIMIT, InventoryImpact.DEGRADED);
 		trackingQueued += wireBytes;
-		return Optional.of(new InitialStaging(wireBytes, encodingWorkspace, held.get()));
+		return InventoryDecision.accept(new InitialStaging(wireBytes, encodingWorkspace, held.get()));
 	}
 	@NotNullByDefault
 	public final class InitialStaging implements AutoCloseable {
@@ -544,6 +623,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		if (workspace.isEmpty()) { delay(state, state.publicationDelay, Reason.MEMORY.bit(), "publication", Unit.ENTRY, payload.entries().size()); return new Outcome.Deferred(); }
 		try (var decoding = workspace.get()) {
 		List<InventoryS2CPacket.Entry> values = new ArrayList<>();
+		Set<String> nextKeys = new LinkedHashSet<>(state.admittedKeys), nextGroups = new LinkedHashSet<>(state.admittedGroups);
 		for (var entry : payload.entries().entrySet()) {
 			if (!projection.authorizedKeys().contains(entry.getKey())) continue;
 			@Nullable InventoryResourceValue item = InventoryResourceCodec.decode(state.route.resourceKind(), entry.getValue());
@@ -553,6 +633,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 				values.removeIf(value -> value.itemId().equals(item.key().itemId()) && !value.fallback());
 			}
 			if (!item.aggregateRequired() && state.retiredGroups.contains(item.key().itemId())) continue;
+			nextKeys.add(entry.getKey()); nextGroups.add(item.key().itemId());
 			boolean aggregate = item.aggregateRequired();
 			var value = new InventoryS2CPacket.Entry(entry.getKey(), item.key().itemId(), item.label(), item.displayJson(), item.amount(), revision,
 				aggregate, aggregate ? InventoryS2CPacket.Status.COMPONENT_TOO_LONG : quality,
@@ -572,7 +653,10 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			if (value.replaceGroup()) for (var old : state.offered.values()) if (old.itemId().equals(value.itemId())) projectedKeys.remove(old.key());
 			projectedKeys.add(value.key());
 		}
-		if (projectedKeys.size() > MAX_KEYS) return rejectPublication(state);
+		if (projectedKeys.size() > MAX_KEYS) {
+			report(state, InventoryFailureReason.ENTRY_LIMIT, InventoryOutcome.REJECTED, true, "projected-keys", projectedKeys.size(), state.offered.size(), MAX_KEYS, null);
+			return rejectPublication(state);
+		}
 		long queue = values.stream().mapToLong(InventorySyncPublisher::cost).sum();
 		boolean tracking = state.route.markerId() != null;
 		long pendingCost = values.stream().mapToLong(e -> state.pending.containsKey(e.key()) ? cost(state.pending.get(e.key())) : 0).sum();
@@ -587,8 +671,15 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			pendingCost = state.pending.values().stream().mapToLong(InventorySyncPublisher::cost).sum();
 			for (var old : state.offered.values()) if (values.stream().noneMatch(value -> value.key().equals(old.key()))) queue = checkedAdd(queue, cost(old));
 		}
-		if (checkedAdd(queue, tracking ? trackingQueued : previewQueued) - pendingCost > (tracking ? settings.trackingRollingQueueBytes() : settings.previewQueueBytes())) {
+		if (checkedAdd(queue, tracking ? trackingQueued : previewQueued) - pendingCost > (tracking ? settings.trackingRollingQueueBytes() : previewQueueBytes())) {
 			delay(state, state.publicationDelay, Reason.QUEUE_CAPACITY.bit(), "publication", Unit.ENTRY, values.size());
+			return new Outcome.Deferred();
+		}
+		var capacity = admitKeyCapacity(state, Math.max(nextKeys.size(), nextGroups.size()));
+		if (!capacity.accepted()) {
+			if (capacity.reason() == InventoryFailureReason.ENTRY_LIMIT) return rejectPublication(state);
+			delay(state, state.publicationDelay, capacity.reason() == InventoryFailureReason.MEMORY_LIMIT ? Reason.MEMORY.bit()
+				: Reason.PUBLICATION_WORK.bit(), "key-capacity", Unit.ENTRY, payload.entries().size());
 			return new Outcome.Deferred();
 		}
 		// Every new immutable version is admitted all-or-none before installing it.
@@ -624,11 +715,14 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		// just these newly granted versions; delivered/admitted owners stay intact.
 		for (int index = 0; index < values.size(); index++) state.entryMemory.put(values.get(index), granted.get(index));
 		state.pending = pending; state.offered = offered;
+		state.admittedKeys = nextKeys; state.admittedGroups = nextGroups;
 		if (tracking) trackingQueued += delta; else previewQueued += delta;
 		observeMonitorQueue(state);
 		state.restageLatest = false;
 		installed = true;
-		for (var value : values) if (value.replaceGroup()) state.retiringGroups.remove(value.itemId());
+		for (var value : values) if (value.replaceGroup()) {
+			state.retiredGroups.add(value.itemId()); state.retiringGroups.remove(value.itemId());
+		}
 		releaseUnretainedEntries(state);
 		state.offeredWatermark = Math.max(state.offeredWatermark, revision);
 		replaceOfferedEvidence(state, sourceEvidence);
@@ -637,6 +731,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		state.bootstrap = bootstrap;
 		if (complete) state.bootstrapClosed = true;
 		state.status = state.deliveryIncomplete || !state.retiringGroups.isEmpty() ? InventoryS2CPacket.Status.INCOMPLETE : lifecycle;
+		if (state.status != InventoryS2CPacket.Status.INVALID && state.status != InventoryS2CPacket.Status.INCOMPLETE) state.failureReason = null;
 		state.control = true;
 		state.publicationDelay.progress(cycle(state));
 		state.offeredCutPending = true;
@@ -649,6 +744,34 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			}
 		}
 		}
+	}
+	private InventoryDecision<Boolean> admitKeyCapacity(State state, int needed) {
+		if (needed > MAX_KEYS) {
+			report(state, InventoryFailureReason.ENTRY_LIMIT, InventoryOutcome.REJECTED, true, "lifetime-keys", needed, state.admittedKeys.size(), MAX_KEYS, null);
+			return InventoryDecision.reject(InventoryFailureReason.ENTRY_LIMIT, InventoryImpact.DEGRADED);
+		}
+		if (needed > state.keyCapacity) {
+			int capacity = Math.min(MAX_KEYS, Math.max(needed, Math.max(2, state.keyCapacity * 2)));
+			long bytes = capacity * 3072L;
+			var held = memory.tryReserve(bytes);
+			if (held.isEmpty()) return InventoryDecision.defer(InventoryFailureReason.MEMORY_LIMIT, InventoryImpact.DEGRADED);
+			boolean retained = false;
+			try {
+				if (!backingWork.test(bytes + state.keyCapacity * 3072L))
+					return InventoryDecision.defer(InventoryFailureReason.ITEM_WORK_LIMIT, InventoryImpact.DEGRADED);
+				// Admission workspace already pays full replacement indexes and copying;
+				// the old backing owner remains live until the replacement is installed.
+				Set<String> keys = new LinkedHashSet<>(capacity * 2);
+				keys.addAll(state.admittedKeys);
+				Set<String> groups = new LinkedHashSet<>(capacity * 2);
+				groups.addAll(state.admittedGroups);
+				held.get().commit(bytes);
+				if (state.keyMemory != null) state.keyMemory.close();
+				state.keyMemory = held.get(); state.keyCapacity = capacity;
+				state.admittedKeys = keys; state.admittedGroups = groups; retained = true;
+			} finally { if (!retained) held.get().close(); }
+		}
+		return InventoryDecision.accept(true);
 	}
 	private static InventoryS2CPacket.Status quantityStatus(CaptureResult result, InventoryStep.SweepEvidence evidence) {
 		// A stable-slot sweep is an accepted mixed-tick inventory count, not an atomic snapshot or a fabricated source version.
@@ -683,7 +806,9 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		if (state == null || !state.context.equals(context)) return false;
 		if (state.retiredGroups.contains(itemId)) return state.rebaselineRequired;
 		if (itemId == null || itemId.isBlank() || itemId.length() > 256) throw new IllegalArgumentException("inventory retirement id");
-		if (state.retiredGroups.size() >= MAX_KEYS) throw new IllegalStateException("inventory retirement bound");
+		// Unknown groups never owned an exact publication and require no tombstone.
+		if (!state.admittedGroups.contains(itemId)) return state.rebaselineRequired;
+		if (state.retiredGroups.size() >= state.keyCapacity) throw new IllegalStateException("inventory retirement bound");
 		state.retiredGroups.add(itemId); state.retiringGroups.add(itemId); state.retirementPending = true;
 		boolean affected = !state.admitted.isEmpty();
 		boolean exact = state.offered.values().stream().anyMatch(entry -> entry.itemId().equals(itemId) && !entry.fallback())
@@ -710,8 +835,12 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		return state.rebaselineRequired;
 	}
 	public void status(Context context, InventoryS2CPacket.Status status) {
+		status(context, status, null);
+	}
+	public void status(Context context, InventoryS2CPacket.Status status, @Nullable InventoryFailureReason reason) {
 		@Nullable State state = states.get(key(context));
 		if (state == null || !state.context.equals(context)) return;
+		state.failureReason = reason;
 		if (status == InventoryS2CPacket.Status.INVALID) {
 			withdraw(state); state.complete = false; state.retirementPending = false; state.rebaselineRequired = false;
 			releaseEvidence(state);
@@ -731,6 +860,14 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	public boolean pending(Context context) {
 		State state = states.get(key(context));
 		return state != null && state.context.equals(context) && (!state.pending.isEmpty() || !state.admitted.isEmpty());
+	}
+	public long deliveredParts(Context context) {
+		@Nullable State state = states.get(key(context));
+		return state == null || !state.context.equals(context) ? 0 : state.deliveredParts;
+	}
+	public @Nullable InventoryFailureReason deferredReason(Context context) {
+		@Nullable State state = states.get(key(context));
+		return state == null || !state.context.equals(context) ? null : state.deferredReason;
 	}
 	/**
 	 * Withdraws one context's queued and admitted item data without touching
@@ -799,14 +936,15 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			// fence must still precede every baseline part, and is not a completed cut.
 			if (!sendControl(state, () -> InventoryS2CPacket.status(state.route.resourceKind(), state.route.epoch(), 0, state.route.markerId(), state.context.baseline(),
 				state.context.stateFence(), 0, state.status == InventoryS2CPacket.Status.INVALID
-					? state.status : InventoryS2CPacket.Status.UPDATING, 0).stamp(state.route.presentationEpoch(), state.route.view()))) return;
+					? state.status : InventoryS2CPacket.Status.UPDATING, 0,
+				state.status == InventoryS2CPacket.Status.INVALID ? state.failureReason : null).stamp(state.route.presentationEpoch(), state.route.view()))) return;
 			state.fencePending = false;
 			if (!incomplete && !state.complete && state.pending.isEmpty() && state.admitted.isEmpty()) state.control = false;
 		}
 		if (incomplete) {
 			if (transport.admittedToSend(state.context) && sendControl(state, () -> InventoryS2CPacket.status(state.route.resourceKind(), state.route.epoch(), 0,
 				state.route.markerId(), state.context.baseline(), state.context.stateFence(), state.bootstrap ? state.offeredWatermark : 0,
-				InventoryS2CPacket.Status.INCOMPLETE, 0).stamp(state.route.presentationEpoch(), state.route.view()))) state.control = false;
+				InventoryS2CPacket.Status.INCOMPLETE, 0, state.failureReason).stamp(state.route.presentationEpoch(), state.route.view()))) state.control = false;
 			return;
 		}
 		if (!transport.admittedToSend(state.context) || !state.control || state.complete
@@ -830,6 +968,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 					InventoryS2CPacket packet = state.admitted.get(state.part);
 					if (!send(state, packet, false)) break;
 					state.part++;
+					state.deliveredParts++; state.deferredReason = null;
 					observeMonitorQueue(state);
 				}
 				if (!state.admitted.isEmpty() && state.part == state.admitted.size()) {
@@ -887,7 +1026,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		boolean retained = false;
 		try {
 		if (state.route.markerId() == null) {
-			long cap = settings.previewClientPeriodBytes();
+			long cap = previewClientBytes();
 			long capacity = cap - Math.min(cap, 128 + cap / 16);
 			// Measure actual multipart framing, including indexes >=128. A drop
 			// changes READY to the longer INCOMPLETE status, requiring one recheck.
@@ -897,6 +1036,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			for (int pass = 0; pass < 2 && !state.pending.isEmpty(); pass++) {
 				boolean removed = false, complete = state.complete;
 				InventoryS2CPacket.Status status = state.status;
+				@Nullable InventoryFailureReason reason = state.failureReason;
 				int parts = state.pending.size(), index = 0;
 				var iterator = state.pending.values().iterator();
 				while (iterator.hasNext()) {
@@ -907,13 +1047,15 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 						// for each candidate measurement. Actual parts get its real digest.
 						bytes = InventoryS2CPacket.data(state.route.resourceKind(), InventoryS2CPacket.Kind.PREVIEW, state.route.epoch(), state.route.requestId(), null,
 							state.context.baseline(), state.context.stateFence(), state.offeredWatermark, index++, parts,
-							complete, status, 0, List.of(entry)).stamp(state.route.presentationEpoch(), state.route.view()).encodedSize(displayBytes, frameBytes);
+							complete, status, 0, List.of(entry), reason).stamp(state.route.presentationEpoch(), state.route.view()).encodedSize(displayBytes, frameBytes);
 					} catch (IllegalArgumentException oversized) { bytes = Long.MAX_VALUE; }
 					if (bytes <= capacity) continue;
 					previewQueued -= cost(entry); iterator.remove(); removed = true;
+					report(state, InventoryFailureReason.FRAME_LIMIT, InventoryOutcome.TRUNCATED, true, "preview-entry", bytes, 0, capacity, null);
+					state.failureReason = InventoryFailureReason.FRAME_LIMIT;
 					state.deliveryIncomplete = true; state.complete = false; state.status = InventoryS2CPacket.Status.INCOMPLETE; state.control = true;
 				}
-				if (!removed || status == InventoryS2CPacket.Status.INCOMPLETE) break;
+				if (!removed || status == state.status && reason == state.failureReason) break;
 			}
 		}
 		if (state.pending.isEmpty()) { state.batchDelay.cancel(); state.dataDelay.cancel(); return; }
@@ -941,10 +1083,10 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		long checksum) {
 		Route route = state.route;
 		if (control && route.markerId() != null && !(state.baseline && state.complete && state.status != InventoryS2CPacket.Status.INVALID)) return InventoryS2CPacket.status(route.resourceKind(), route.epoch(), 0, route.markerId(), state.context.baseline(),
-			state.context.stateFence(), state.offeredWatermark, state.status, checksum).stamp(route.presentationEpoch(), route.view());
+			state.context.stateFence(), state.offeredWatermark, state.status, checksum, state.failureReason).stamp(route.presentationEpoch(), route.view());
 		return InventoryS2CPacket.data(route.resourceKind(), route.markerId() == null ? InventoryS2CPacket.Kind.PREVIEW : state.baseline ? InventoryS2CPacket.Kind.SNAPSHOT : InventoryS2CPacket.Kind.STREAM,
 			route.epoch(), route.markerId() == null ? route.requestId() : 0, route.markerId(), state.context.baseline(), state.context.stateFence(), state.offeredWatermark,
-			part, parts, state.complete, state.status, checksum, entries).stamp(route.presentationEpoch(), route.view());
+			part, parts, state.complete, state.status, checksum, entries, state.failureReason).stamp(route.presentationEpoch(), route.view());
 	}
 	private long checksum(State state, Collection<InventoryS2CPacket.Entry> entries) {
 		return InventoryChecksums.checksumEntries(state.route.resourceKind(), entries, checksumSamples);
@@ -999,33 +1141,33 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		long workspace;
 		try { workspace = packet.encodingWorkspace(displayBytes, frameBytes); }
 		catch (IllegalArgumentException overBudget) { delay(state, stage, Reason.FRAME_OR_FRAGMENT_UNSERVICEABLE.bit(), name, Unit.FRAME, 1); return false; }
-		var held = memory.tryReserve(workspace);
-		if (held.isEmpty()) { delay(state, stage, Reason.MEMORY.bit(), name, Unit.FRAME, 1); return false; }
-		try (var reserved = held.get()) {
+		RetainedMemoryLedger.@Nullable Ticket held = state.prepaidControl ? null : memory.tryReserve(workspace).orElse(null);
+		if (!state.prepaidControl && held == null) { delay(state, stage, Reason.MEMORY.bit(), name, Unit.FRAME, 1); return false; }
+		try (var reserved = held) {
 			int bytes;
 			try { bytes = measuredBytes(state, packet); }
 			catch (IllegalArgumentException overBudget) { delay(state, stage, Reason.FRAME_OR_FRAGMENT_UNSERVICEABLE.bit(), name, Unit.FRAME, 1); return false; }
 			if (bytes < 0 || bytes > InventoryS2CPacket.MAX_FRAME_BYTES) throw new IllegalArgumentException("encoded inventory frame");
 			boolean tracking = state.route.markerId() != null;
 			String client = (tracking ? "snapshot/" : "preview/") + state.context.recipient();
-			long cap = tracking ? state.baseline ? settings.trackingSnapshotClientPeriodBytes() : settings.trackingStreamPeriodBytesPerClientTarget() : settings.previewClientPeriodBytes();
+			long cap = tracking ? state.baseline ? snapshotClientBytes() : settings.trackingStreamPeriodBytesPerClientTarget() : previewClientBytes();
 			String stream = state.context.recipient() + "/" + state.route.targetQuota();
 			Map<String, Long> accounting = tracking && !state.baseline ? streamBytes : clientBytes;
 			String subject = tracking && !state.baseline ? stream : client;
 			String retainedSubject = tracking && !state.baseline ? "stream/" + subject : subject;
-			if (!wireSubjects.containsKey(retainedSubject)) {
-				if (wireSubjects.size() >= 1024) { delay(state, stage, Reason.SUBJECT_CAPACITY.bit(), name, Unit.BYTE, bytes); return false; }
+			if (!state.prepaidControl && !wireSubjects.containsKey(retainedSubject)) {
+				if (wireSubjects.size() >= 4096) { delay(state, stage, Reason.SUBJECT_CAPACITY.bit(), name, Unit.BYTE, bytes); return false; }
 				var cost = memory.tryReserve(1024); if (cost.isEmpty()) { delay(state, stage, Reason.MEMORY.bit(), name, Unit.BYTE, bytes); return false; }
 				cost.get().commit(1024); wireSubjects.put(retainedSubject, cost.get());
 			}
 			long used = accounting.getOrDefault(subject, 0L);
 			long reserve = control ? 0 : Math.min(cap, 128 + cap / 16);
-			if (bytes > cap - used - reserve || (tracking && state.baseline && bytes > settings.trackingSnapshotFragmentBytes())) {
+			if (bytes > cap - used - reserve || (tracking && state.baseline && bytes > snapshotFragmentBytes())) {
 				int reasons = Reason.WIRE_CLIENT_OR_STREAM.bit();
-				if (bytes > cap - reserve || tracking && state.baseline && bytes > settings.trackingSnapshotFragmentBytes()) reasons |= Reason.FRAME_OR_FRAGMENT_UNSERVICEABLE.bit();
+				if (bytes > cap - reserve || tracking && state.baseline && bytes > snapshotFragmentBytes()) reasons |= Reason.FRAME_OR_FRAGMENT_UNSERVICEABLE.bit();
 				delay(state, stage, reasons, name, Unit.BYTE, bytes); return false;
 			}
-			if (tracking ? bytes > window.remaining() - (control ? 0 : Math.min(windowBase, 128 + windowBase / 16)) : bytes > settings.previewGlobalPeriodBytes() - previewGlobal - reserve) {
+			if (tracking ? bytes > window.remaining() - (control ? 0 : Math.min(windowBase, 128 + windowBase / 16)) : bytes > previewGlobalBytes() - previewGlobal - reserve) {
 				delay(state, stage, Reason.WIRE_GLOBAL.bit(), name, Unit.BYTE, bytes); return false;
 			}
 			// Capture the collection fence BEFORE final authorization. No clock or observer may follow the proof until send returns.
@@ -1047,29 +1189,30 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			if (tracking) window.trySpend(bytes); else previewGlobal += bytes;
 			TransportHandoff handoff;
 			try { handoff = transport.sendObserved(state.context.recipient(), packet); }
-			catch (RuntimeException failure) {
+			catch (RuntimeException | LinkageError failure) {
 				observeSend(state, packet, bytes, TransportHandoff.UNOBSERVED, monitorGeneration);
 				warn("transport-send", state, packet, failure);
 				return false; // conservatively charged; same immutable part retries
 			}
 			observeSend(state, packet, bytes, handoff, monitorGeneration);
+			if (handoff == TransportHandoff.NOT_HANDED_OFF) {
+				report(state, InventoryFailureReason.TRANSPORT_FAILURE, InventoryOutcome.DEFERRED, false, "not-handed-off", bytes, -1, -1, null);
+				return false;
+			}
 			// Monitoring is callback-bearing too: it follows the irreversible handoff, never the final proof.
 			if (state.monitored) stage.progress(cycle(state));
 			return true;
 		}
 	}
 	private void warn(String operation, State state, InventoryS2CPacket packet, Throwable failure) {
-		boolean controlHandoff = operation.equals("control-handoff");
-		@Nullable PacketKindChannel packetKind = PacketKindChannel.of(packet.kind());
-		nx.pingwheel.common.diagnostics.DiagnosticChannel channel = packetKind == null
-			? controlHandoff ? CONTROL_UNKNOWN : TRANSPORT_UNKNOWN
-			: controlHandoff ? packetKind.controlHandoff : packetKind.transportSend;
-		Diagnostics.server().atNormal().rateLimited(channel).failure(org.apache.logging.log4j.Level.WARN, "inventory/publisher/" + operation,
-			controlHandoff ? "control-completed-callback-failed" : "retry-same-part-charged",
-			() -> "kind=" + packet.kind() + " request=" + packet.requestId() + " recipient=" + state.context.recipient()
-				+ " marker=" + packet.markerId() + " epoch=" + packet.epoch() + " presentationEpoch=" + packet.presentationEpoch()
-				+ " view=" + packet.view() + " baseline=" + packet.baselineId() + " stateRevision=" + packet.statusRevision()
-				+ " watermark=" + packet.watermark() + " part=" + packet.partIndex() + "/" + packet.partCount(), failure);
+		report(state, InventoryFailureReason.TRANSPORT_FAILURE, InventoryOutcome.DEFERRED, false, operation, -1, -1, -1, failure);
+	}
+	private static void report(State state, InventoryFailureReason reason, InventoryOutcome outcome, boolean limit, String stage,
+		long requested, long used, long cap, @Nullable Throwable failure) {
+		InventoryDiagnostics.report(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+			reason == InventoryFailureReason.TRANSPORT_FAILURE ? InventoryDiagnosticSite.TRANSPORT : InventoryDiagnosticSite.PUBLICATION,
+			InventoryOperation.PUBLISH, reason, InventoryImpact.DEGRADED, outcome, limit,
+			() -> new InventoryDiagnosticDetail(stage, state.route.requestId(), -1, state.route.resourceKind().name(), requested, used, cap), failure);
 	}
 	@Override public void cancel(Context context) {
 		State state = states.get(key(context));
@@ -1084,7 +1227,8 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 			state.cancelDelays();
 			state.offered.clear(); state.delivered.clear();
 			state.entryMemory.values().forEach(RetainedMemoryLedger.Ticket::close); state.entryMemory.clear();
-			state.memory.close();
+			if (state.memory != null) state.memory.close();
+			if (state.keyMemory != null) state.keyMemory.close();
 		}
 	}
 	@Override public void rebase(Context context, long newStateFence) {
@@ -1096,6 +1240,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		state.context = new Context(context.consumerId(), context.recipient(), context.sessionView(), newStateFence, context.baseline()); state.baseline = true;
 		state.offeredWatermark = state.deliveredWatermark = 0; state.deliveredChecksum = 0; state.complete = false; state.control = false; state.deliveryIncomplete = false; state.status = InventoryS2CPacket.Status.UPDATING;
 		state.retiredGroups.clear(); state.retiringGroups.clear(); state.restageLatest = false; state.rebaselineRequired = false; state.retirementPending = false;
+		state.admittedKeys.clear(); state.admittedGroups.clear(); // backing capacity remains charged
 	}
 	private void withdraw(State state) {
 		state.publicationDelay.cancel(); state.batchDelay.cancel(); state.dataDelay.cancel();
@@ -1210,7 +1355,8 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 	private static String key(Context context) { return context.recipient() + "/" + context.consumerId(); }
 	/** OPENED is one per request; other controls keep their commit/frame identity. */
 	private static String controlKey(UUID recipient, InventoryS2CPacket packet) {
-		long identity = packet.kind() == InventoryS2CPacket.Kind.OPENED ? packet.requestId() : packet.commitId();
+		long identity = packet.kind() == InventoryS2CPacket.Kind.OPENED || packet.kind() == InventoryS2CPacket.Kind.OPEN_REJECTED
+			|| packet.kind() == InventoryS2CPacket.Kind.PREVIEW_STATE ? packet.requestId() : packet.commitId();
 		return recipient + "/" + packet.kind() + "/" + packet.resourceKind() + "/" + identity;
 	}
 	private void releaseWireSubjects(String prefix) {
@@ -1218,7 +1364,7 @@ public final class InventorySyncPublisher implements SyncPublisher, AutoCloseabl
 		while (iterator.hasNext()) { var entry = iterator.next(); if (entry.getKey().startsWith(prefix)) { entry.getValue().close(); iterator.remove(); } }
 	}
 	@Override public void close() {
-		controls.values().forEach(c -> c.state.memory.close()); controls.clear();
+		controls.values().forEach(InventorySyncPublisher::releaseControl); controls.clear();
 		for (State state : List.copyOf(states.values())) cancel(state.context);
 		wireSubjects.values().forEach(RetainedMemoryLedger.Ticket::close); wireSubjects.clear(); clientBytes.clear(); streamBytes.clear();
 		dataGates.clear(); controlHandoff = null;

@@ -6,6 +6,7 @@ import java.util.OptionalInt;
 import java.util.concurrent.atomic.AtomicInteger;
 import nx.pingwheel.common.presentation.inventory.InventoryQuantities;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimitException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.CaptureLimitException;
@@ -34,10 +35,10 @@ class PlatformFluidServiceContractTest {
 		assertThrows(IllegalArgumentException.class, () -> new IPlatformFluidService.OperationProfile(InventoryValidationBudget.NONE, 0, -1, 0));
 		assertThrows(IllegalArgumentException.class, () -> new IPlatformFluidService.OperationProfile(InventoryValidationBudget.NONE, 0, 0, -1));
 		assertThrows(IllegalArgumentException.class, () -> new IPlatformFluidService.Shape(0, OptionalInt.empty(), true));
-		assertThrows(IllegalArgumentException.class, () -> new IPlatformFluidService.Shape(1, OptionalInt.of(4097), true));
+		assertThrows(InventoryProviderLimitException.class, () -> new IPlatformFluidService.Shape(1, OptionalInt.of(16385), true));
 		assertThrows(IllegalArgumentException.class, () -> new IPlatformFluidService.Shape(1, OptionalInt.of(1), false));
-		assertEquals(1_024, new IPlatformFluidService.Shape(1_024, OptionalInt.empty(), true).members());
-		assertThrows(IllegalArgumentException.class, () -> new IPlatformFluidService.Shape(1_025, OptionalInt.empty(), true));
+		assertEquals(4_096, new IPlatformFluidService.Shape(4_096, OptionalInt.of(16384), true).members());
+		assertThrows(InventoryProviderLimitException.class, () -> new IPlatformFluidService.Shape(4_097, OptionalInt.empty(), true));
 		assertEquals(OptionalInt.empty(), new IPlatformFluidService.Shape(81, OptionalInt.empty(), true).indexedSlots());
 		assertThrows(IllegalArgumentException.class, () -> new IPlatformFluidService.RouteInfo(IPlatformFluidService.TopologyEvidence.PUBLIC_ADDRESS_ONLY, "x\ny"));
 		assertThrows(ArithmeticException.class, () -> new IPlatformFluidService.OperationProfile(InventoryValidationBudget.NONE, Long.MAX_VALUE, 0, 0)

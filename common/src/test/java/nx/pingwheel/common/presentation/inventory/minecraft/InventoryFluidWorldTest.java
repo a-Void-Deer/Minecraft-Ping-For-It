@@ -270,8 +270,8 @@ public class InventoryFluidWorldTest {
 			assertTrue(rejected.stream().anyMatch(message -> message.contains("member=20, 64, 3")));
 		}
 	}
-	@Test void stableNativeHandlerWith257CompleteFluidKeysAnd129NbtEncodingsEndsExplicitlyIncomplete() {
-		try (var f = new Fixture(257, 1, false)) {
+	@Test void stableNativeHandlerWith1025CompleteFluidKeysAnd513NbtEncodingsEndsExplicitlyIncomplete() {
+		try (var f = new Fixture(1025, 1, false)) {
 			f.entryAt = slot -> {
 				var tag = new net.minecraft.nbt.CompoundTag(); tag.putInt("variant", slot / 2);
 				return new IPlatformFluidService.Entry(new IPlatformFluidService.Nbt((slot & 1) == 0 ? Fluids.WATER : Fluids.LAVA, tag), slot + 1L);
@@ -287,12 +287,33 @@ public class InventoryFluidWorldTest {
 			}
 			assertNotNull(terminal); assertEquals(CaptureResult.Availability.READABLE, terminal.result().availability());
 			assertEquals(CaptureResult.Completeness.INCOMPLETE, terminal.result().completeness());
-			assertEquals(257, f.reads); assertEquals(256, values.size()); assertEquals(256, terminal.result().coverage().scanned());
-			assertEquals(257, terminal.result().coverage().expected().orElseThrow());
-			assertEquals(32_896, values.stream().mapToLong(value -> java.util.Objects.requireNonNull(value).amount()).sum());
+			assertEquals(1025, f.reads); assertEquals(1024, values.size()); assertEquals(1024, terminal.result().coverage().scanned());
+			assertEquals(1025, terminal.result().coverage().expected().orElseThrow());
+			assertEquals(524_800, values.stream().mapToLong(value -> java.util.Objects.requireNonNull(value).amount()).sum());
 			assertTrue(values.stream().allMatch(value -> value != null && !value.aggregateRequired()));
 			assertThrows(IllegalStateException.class, consumer::retainCompleted);
 			assertEquals(0, f.runtime.memory().reserved());
+		}
+	}
+	@Test void former257KeyBoundaryWith129NbtEncodingsNowCompletesWithoutFolding() {
+		try (var f = new Fixture(257, 1, false)) {
+			f.entryAt = slot -> {
+				var tag = new net.minecraft.nbt.CompoundTag(); tag.putInt("variant", slot / 2);
+				return new IPlatformFluidService.Entry(new IPlatformFluidService.Nbt((slot & 1) == 0 ? Fluids.WATER : Fluids.LAVA, tag), slot + 1L);
+			};
+			var consumer = f.attach(); var values = new ArrayList<@Nullable InventoryResourceValue>();
+			InventoryRuntime.@Nullable Observation terminal = null;
+			for (int tick = 0; tick < 100; tick++) {
+				f.runtime.advance(tick, f.settings);
+				var next = f.runtime.step(consumer);
+				if (next.isEmpty()) continue;
+				values.addAll(next.get().slots());
+				if (next.get().result().completeness() != CaptureResult.Completeness.CONTINUE) { terminal = next.get(); break; }
+			}
+			assertNotNull(terminal); assertEquals(CaptureResult.Completeness.COMPLETE, terminal.result().completeness());
+			assertEquals(257, f.reads); assertEquals(257, values.size());
+			assertEquals(33_153, values.stream().mapToLong(value -> java.util.Objects.requireNonNull(value).amount()).sum());
+			assertTrue(values.stream().allMatch(value -> value != null && !value.aggregateRequired()));
 		}
 	}
 	@Test void defaultOneEightAndCreate108MemberSourcesFinishWithActualShapeAndSingleSlotAdmission() {

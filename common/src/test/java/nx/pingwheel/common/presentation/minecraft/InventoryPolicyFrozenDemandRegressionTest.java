@@ -243,6 +243,7 @@ class InventoryPolicyFrozenDemandRegressionTest {
 			// Repeated explicit HELLO requests are a legitimate shared-window spend.
 			// They leave the current allow hint queued behind the exhausted preview
 			// byte budget without changing any production behavior for this test.
+			f.wirePressure();
 			for (int request = 0; request < 512; request++)
 				f.backend.handle(OWNER, InventoryC2SPacket.hello(), 0, f.settings);
 			assertTrue(f.queuedPolicyCount() > 0, "the preview byte budget keeps the hint queued");
@@ -265,6 +266,7 @@ class InventoryPolicyFrozenDemandRegressionTest {
 				f.tick(tick);
 				f.publisher().drainControls();
 			}
+			f.restoreWireBudget();
 			assertEquals(refreshedCalls, deny.inventoryCalls.get(),
 				"budget retries never re-evaluate permission");
 			assertNotNull(f.queuedPolicy(InventoryResourceKind.ITEM),
@@ -395,6 +397,21 @@ class InventoryPolicyFrozenDemandRegressionTest {
 			server.now = tick;
 			PresentationServer.tick(server, store);
 			backend.tick(tick, settings);
+		}
+		void wirePressure() throws ReflectiveOperationException {
+			Object publisher = value(backend, "publisher");
+			var wire = publisher.getClass().getDeclaredMethod("wireBudgetFixture", long.class, long.class); wire.setAccessible(true); wire.invoke(publisher, 4096L, 4096L);
+			var global = publisher.getClass().getDeclaredMethod("previewGlobalFixture", long.class); global.setAccessible(true); global.invoke(publisher, 4096L);
+			var queue = publisher.getClass().getDeclaredMethod("previewQueueFixture", long.class); queue.setAccessible(true); queue.invoke(publisher, 32 * 1024L);
+		}
+		void restoreWireBudget() throws ReflectiveOperationException {
+			Object publisher = value(backend, "publisher");
+			var wire = publisher.getClass().getDeclaredMethod("wireBudgetFixture", long.class, long.class); wire.setAccessible(true);
+			wire.invoke(publisher, settings.previewClientPeriodBytes(), settings.trackingSnapshotClientPeriodBytes());
+			var global = publisher.getClass().getDeclaredMethod("previewGlobalFixture", long.class); global.setAccessible(true);
+			global.invoke(publisher, settings.previewGlobalPeriodBytes());
+			var queue = publisher.getClass().getDeclaredMethod("previewQueueFixture", long.class); queue.setAccessible(true);
+			queue.invoke(publisher, settings.previewQueueBytes());
 		}
 
 		void close(long request) {

@@ -46,6 +46,8 @@ import nx.pingwheel.common.platform.IPlatformFluidService.WitnessUse;
 import nx.pingwheel.common.presentation.inventory.InventorySourceAccess;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.CaptureLimitException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimitException;
+import nx.pingwheel.common.presentation.inventory.minecraft.ProviderLimitSite;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission;
 import nx.pingwheel.common.presentation.source.CostLedger;
@@ -612,8 +614,9 @@ class PlatformFluidServiceTest {
 		var maximum = net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("test", "x".repeat(251));
 		assertEquals(256, PlatformFluidServiceImpl.registryId(maximum).length());
 		var oversized = net.minecraft.resources.ResourceLocation.fromNamespaceAndPath("test", "x".repeat(65536));
-		var failure = assertThrows(InventorySourceUnavailableException.class, () -> PlatformFluidServiceImpl.registryId(oversized));
-		assertEquals("fluid source registry identity unavailable", failure.getMessage());
+		var failure = assertThrows(InventoryProviderLimitException.class, () -> PlatformFluidServiceImpl.registryId(oversized));
+		assertEquals(ProviderLimitSite.FABRIC_FLUID_REGISTRY_ID, failure.site());
+		assertEquals(65_541, failure.required()); assertEquals(256, failure.limit());
 		assertThrows(InventorySourceUnavailableException.class, () -> PlatformFluidServiceImpl.registryId(null));
 	}
 
@@ -642,7 +645,7 @@ class PlatformFluidServiceTest {
 		while (fixture.views.size() < fixture.count) fixture.views.add(new View(fixture));
 		Access access = fixture.open();
 		long defaultMemory = 1024L * 1024 * nx.pingwheel.common.config.InventoryLimits.DEFAULT_PENDING_MEMORY_MIB;
-		long tickWork = InventorySourceAccess.MAX_SLOTS * nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.workUpperBound(
+		long tickWork = InventorySourceAccess.CAPTURE_MAX_SLOTS * nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.workUpperBound(
 			nx.pingwheel.common.config.InventoryLimits.DISPLAY_BASE_BYTES);
 		assertTrue(fixture.service.probeProfile().ownedCost().workspaceBytes() < defaultMemory);
 		assertTrue(fixture.service.probeProfile().ownedCost().workUnits() < tickWork);
@@ -716,7 +719,8 @@ class PlatformFluidServiceTest {
 				case "throws" -> fixture.after = operation -> { if (operation.equals("underlying")) throw new IllegalArgumentException("native address failure"); };
 			}
 			if (shape.equals("throws")) assertThrows(IllegalArgumentException.class, fixture::open);
-			else assertThrows(InventorySourceUnavailableException.class, fixture::open);
+			else if (shape.equals("null")) assertThrows(InventorySourceUnavailableException.class, fixture::open);
+			else assertThrows(InventoryProviderLimitException.class, fixture::open);
 			assertTrue(fixture.called("underlying") <= PlatformFluidServiceImpl.MAX_UNDERLYING_VIEWS);
 			assertEquals(0, fixture.called("amount")); assertEquals(0, fixture.called("resource"));
 		}
@@ -798,7 +802,9 @@ class PlatformFluidServiceTest {
 	@Test void invalidCountsIndicesAndLimitsFailBeforeContentAndProfilesArePure() {
 		for (int count : List.of(-1, InventorySourceAccess.MAX_SLOTS + 1)) {
 			var fixture = new Fixture(true); fixture.count = count;
-			assertThrows(InventorySourceUnavailableException.class, fixture::open); assertEquals(0, fixture.called("slot"));
+			if (count < 0) assertThrows(InventorySourceUnavailableException.class, fixture::open);
+			else assertThrows(InventoryProviderLimitException.class, fixture::open);
+			assertEquals(0, fixture.called("slot"));
 		}
 		var fixture = new Fixture(true); Access access = fixture.open(); fixture.clear();
 		assertThrows(IndexOutOfBoundsException.class, () -> access.consume(-1, entry -> true));
@@ -811,7 +817,7 @@ class PlatformFluidServiceTest {
 
 	@Test void smallProbeDiscoversOnlyTheActualShapeBeforeFullMetadataAdmission() {
 		long previousAllocation = 0;
-		for (int count : List.of(1, 8, 4096)) {
+		for (int count : List.of(1, 8, 16384)) {
 			var fixture = new Fixture(true); fixture.count = count;
 			try (var operation = operation(fixture.service.probeProfile().ownedCost());
 				var probe = fixture.service.probe(fixture.context, operation).orElseThrow()) {
@@ -982,12 +988,12 @@ class PlatformFluidServiceTest {
 	}
 
 	@Test void realCallerAdmissionComposesCallbacksForSmallAndFullNativeShapesAndCleansOwnership() {
-		for (int count : List.of(1, 8, 4096)) {
+		for (int count : List.of(1, 8, 16384)) {
 			var fixture = new Fixture(true); fixture.count = count; fixture.freshWrappers = true;
 			while (fixture.views.size() < count) fixture.views.add(new View(fixture));
 			fixture.memberCost = new InventoryValidationBudget.Cost(32, 16, 3);
 			fixture.authorityCost = new InventoryValidationBudget.Cost(64, 32, 5);
-			long workLimit = InventorySourceAccess.MAX_SLOTS * nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.workUpperBound(4096);
+			long workLimit = InventorySourceAccess.CAPTURE_MAX_SLOTS * nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.workUpperBound(4096);
 			var ledger = new CostLedger(Map.of(WORK, workLimit)); var memory = new RetainedMemoryLedger(64L << 20);
 			InventoryFluidAdmission.Ownership ownership;
 			IPlatformFluidService.Access access;
@@ -1038,13 +1044,13 @@ class PlatformFluidServiceTest {
 		assertEquals(0, memory.reserved()); assertEquals(0, memory.retained());
 	}
 
-	@Test void currentSourceGateCostFitsDefaultCallerBudgetsAtN1N8AndN4096() {
-		for (int count : List.of(1, 8, 4096)) {
+	@Test void currentSourceGateCostFitsDefaultCallerBudgetsAtN1N8AndN16384() {
+		for (int count : List.of(1, 8, 16384)) {
 			var fixture = new Fixture(true); fixture.count = count; fixture.freshWrappers = true;
 			while (fixture.views.size() < count) fixture.views.add(new View(fixture));
 			fixture.memberCost = new InventoryValidationBudget.Cost(8192, 8192, 16384);
 			fixture.authorityCost = fixture.memberCost;
-			long work = InventorySourceAccess.MAX_SLOTS * nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.workUpperBound(4096);
+			long work = InventorySourceAccess.CAPTURE_MAX_SLOTS * nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.workUpperBound(4096);
 			var ledger = new CostLedger(Map.of(WORK, work)); var memory = new RetainedMemoryLedger(64L << 20);
 			try (var admission = new InventoryFluidAdmission(ledger, WORK, memory, fixture.memberCost, fixture.authorityCost);
 				var operation = admission.enter(fixture.service.probeProfile());

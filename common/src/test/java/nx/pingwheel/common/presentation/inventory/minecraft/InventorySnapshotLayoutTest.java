@@ -58,15 +58,17 @@ class InventorySnapshotLayoutTest {
 		@Unmodifiable List<InventorySnapshotLayout.Member> atLimit = members(1_024);
 		var layout = new InventorySnapshotLayout("test:layout", "", null, atLimit);
 		assertEquals(1_024, layout.members().size());
-		assertThrows(IllegalArgumentException.class,
+		var failure = assertThrows(InventoryProviderLimitException.class,
 			() -> new InventorySnapshotLayout("test:layout", "", null, members(1_025)));
+		assertEquals(ProviderLimitSite.SNAPSHOT_MEMBERS, failure.site());
+		assertEquals(1_025, failure.required()); assertEquals(1_024, failure.limit());
 	}
 
 	@Test
 	void totalVisibleBoundSpansAllMembersRatherThanEachMemberAlone() {
-		var full = segment(4096, IntStream.range(0, 4096).boxed().toList());
+		var full = segment(16384, IntStream.range(0, 16384).boxed().toList());
 		assertDoesNotThrow(() -> new InventorySnapshotLayout("test:layout", "", null, List.of(member(BlockPos.ZERO, List.of(full)))));
-		assertThrows(IllegalArgumentException.class, () -> new InventorySnapshotLayout("test:layout", "", null,
+		assertThrows(InventoryProviderLimitException.class, () -> new InventorySnapshotLayout("test:layout", "", null,
 			List.of(member(BlockPos.ZERO, List.of(full)), member(new BlockPos(1, 0, 0), List.of(segment(1, List.of(0)))))));
 	}
 

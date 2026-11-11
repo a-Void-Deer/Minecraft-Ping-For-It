@@ -16,6 +16,7 @@ import nx.pingwheel.common.presentation.budget.BudgetDelaySink;
 import nx.pingwheel.common.presentation.inventory.*;
 import nx.pingwheel.common.presentation.inventory.InventorySharedRead.*;
 import nx.pingwheel.common.presentation.source.CaptureResult;
+import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.SourceKey;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -48,8 +49,9 @@ class InventoryPooledRuntimeTest {
 		final List<Integer> addresses = new ArrayList<>();
 		final List<Source> sources = new ArrayList<>();
 		boolean supported = true, structure = true, failCapacity, differentWorlds, differentMembers, differentMaps;
-		boolean distinctVariants;
+		boolean distinctVariants, largeIdentity;
 		int catalogEntries = InventoryItemCodec.DEFAULT_MAX_ENTRIES;
+		long catalogBytes = InventoryItemCodec.DEFAULT_MAX_RETAINED_BYTES;
 		int callbacks, open, failAt = -1;
 		long amount = 3_000_003L;
 		@Nullable String json;
@@ -87,7 +89,7 @@ class InventoryPooledRuntimeTest {
 						callbacks++; duringCheck.run(); return check(expected);
 					}
 					@Override public InventoryItemCodec.Catalog createCatalog(int ceiling, InventoryValidationBudget.Allowance allowance) {
-						allowance.debit(VALIDATION); require(check(proof)); return new InventoryItemCodec.Catalog(RegistryAccess.EMPTY, catalogEntries, InventoryItemCodec.DEFAULT_MAX_RETAINED_BYTES, ceiling);
+						allowance.debit(VALIDATION); require(check(proof)); return new InventoryItemCodec.Catalog(RegistryAccess.EMPTY, catalogEntries, catalogBytes, ceiling);
 					}
 					@Override public InventoryDomainCodec.@Nullable Item read(int slot, Proof expected, InventoryItemCodec.Catalog catalog,
 						InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) {
@@ -105,8 +107,10 @@ class InventoryPooledRuntimeTest {
 			InventoryDomainCodec.Item value(int slot, InventoryItemCodec.Catalog catalog, InventoryCatalogAdmission admission) {
 				callbacks++; samplers.add(input); addresses.add(slot);
 				if (slot == failAt) { if (failCapacity) throw new InventoryItemBudget.CaptureLimitException("fixture item work"); throw new IllegalStateException("getter failure"); }
+				byte[] identity = largeIdentity ? new byte[65536] : new byte[] {(byte) (distinctVariants ? slot + 1 : 1)};
+				identity[0] = (byte) (distinctVariants ? slot + 1 : 1);
 				var detached = new InventoryDetachedItem("minecraft:stone", InventoryIdentityMode.EXACT,
-					new InventoryItemCodec.Display("minecraft:stone", "Stone", json, false), new byte[] {(byte) (distinctVariants ? slot + 1 : 1)}, 64 + (json == null ? 0 : json.length() * 2L));
+					new InventoryItemCodec.Display("minecraft:stone", "Stone", json, false), identity, 64L + identity.length + (json == null ? 0 : json.length() * 2L));
 				var encoded = catalog.intern(detached, admission);
 				return new InventoryDomainCodec.Item(encoded.key(), amount + slot, encoded.display().label(), encoded.display().displayJson(), false);
 			}
@@ -407,9 +411,64 @@ class InventoryPooledRuntimeTest {
 			runtime.advance(0, settings); var a = attach(runtime, input(1, BlockFace.NORTH)); var b = attach(runtime, input(2, BlockFace.SOUTH)); runtime.prepare(a); runtime.prepare(b);
 			var first = runtime.step(a, 3).orElseThrow(); assertEquals(CaptureResult.Completeness.INCOMPLETE, first.result().completeness());
 			assertEquals(CaptureResult.Availability.READABLE, first.result().availability()); assertEquals(2, first.slots().size());
-			var peer = runtime.step(b, 3).orElseThrow(); assertEquals(first.slots(), peer.slots()); assertEquals(CaptureResult.Completeness.INCOMPLETE, peer.result().completeness());
+			assertEquals(InventoryFailureReason.VARIANT_LIMIT, a.currentReason());
+			var prefix = runtime.step(b, 1).orElseThrow(); assertEquals(CaptureResult.Completeness.CONTINUE, prefix.result().completeness()); assertNull(b.currentReason());
+			runtime.advance(1, settings);
+			var peer = runtime.step(b, 3).orElseThrow(); assertEquals(first.slots().subList(1, 2), peer.slots()); assertEquals(CaptureResult.Completeness.INCOMPLETE, peer.result().completeness());
+			assertEquals(InventoryFailureReason.VARIANT_LIMIT, b.currentReason());
 			assertEquals(3, planner.addresses.size()); assertThrows(IllegalStateException.class, a::retainCompleted);
 		} assertEquals(0, planner.open); assertEquals(0, runtime.memory().retained()); assertEquals(0, runtime.memory().reserved());
+	}
+	@Test void sharedPayloadRefusalKeepsByteReasonAcrossPeerTerminalReplay() {
+		var planner = new Planner(); planner.largeIdentity = true; planner.distinctVariants = true; planner.catalogBytes = 70000;
+		var settings = settings(false, false);
+		try (var runtime = planner.runtime(settings)) {
+			runtime.advance(0, settings); var a = attach(runtime, input(1, BlockFace.NORTH)); var b = attach(runtime, input(2, BlockFace.SOUTH));
+			runtime.prepare(a); runtime.prepare(b);
+			var first = runtime.step(a, 3).orElseThrow();
+			assertEquals(CaptureResult.Completeness.INCOMPLETE, first.result().completeness()); assertEquals(1, first.slots().size());
+			assertEquals(InventoryFailureReason.CATALOG_BYTES_LIMIT, a.currentReason());
+			runtime.advance(1, settings); assertEquals(CaptureResult.Completeness.INCOMPLETE, runtime.step(b, 3).orElseThrow().result().completeness());
+			assertEquals(InventoryFailureReason.CATALOG_BYTES_LIMIT, b.currentReason()); assertEquals(2, planner.addresses.size());
+			assertEquals(0, runtime.memory().reserved());
+		}
+	}
+	@Test void pooledItemWorkOnlyRefusalDoesNotClaimProviderExhaustionOrAttemptAGetter() throws ReflectiveOperationException {
+		var planner = new Planner(); var settings = settings(false, false);
+		try (var runtime = planner.runtime(settings)) {
+			runtime.advance(0, settings); var consumer = attach(runtime, input(1, BlockFace.NORTH));
+			assertEquals(InventorySourceAccess.Preparation.READY, runtime.prepare(consumer));
+			var ledger = (CostLedger) field(runtime, "physical");
+			var work = new CostLedger.Counter("inventory/item_work", CostLedger.Unit.WORK);
+			long consumed = ledger.remaining(work) - 1000;
+			ledger.tryReserve(Map.of(work, consumed)).orElseThrow().commit(Map.of(work, consumed));
+			long provider = ledger.remaining(InventorySourceAccess.PROVIDER_WORK);
+			assertTrue(runtime.step(consumer, 3).isEmpty());
+			assertEquals(InventoryFailureReason.ITEM_WORK_LIMIT, consumer.currentReason());
+			assertTrue(ledger.remaining(InventorySourceAccess.PROVIDER_WORK) > 10000);
+			assertTrue(ledger.remaining(InventorySourceAccess.PROVIDER_WORK) <= provider);
+			assertTrue(planner.addresses.isEmpty()); assertEquals(0, runtime.memory().reserved());
+		}
+	}
+	@Test void pooledDirectoryRefusalReportsBothSameTickRequestsAtDebug() throws ReflectiveOperationException {
+		var planner = new Planner(); var settings = settings(false, false);
+		try (var runtime = planner.runtime(settings); var logs = new InventoryDiagnosticsTestCapture(org.apache.logging.log4j.Level.DEBUG)) {
+			nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.SERVER,
+				nx.pingwheel.common.diagnostics.LoggingProfile.DEBUG);
+			runtime.advance(0, settings);
+			var consumer = attach(runtime, input(1, BlockFace.NORTH));
+			var ledger = (CostLedger) field(runtime, "physical");
+			var work = new CostLedger.Counter("inventory/item_work", CostLedger.Unit.WORK);
+			long consumed = ledger.remaining(work);
+			ledger.tryReserve(Map.of(work, consumed)).orElseThrow().commit(Map.of(work, consumed));
+			for (int repeat = 0; repeat < 2; repeat++) {
+				assertEquals(InventorySourceAccess.Preparation.DEFERRED, runtime.prepare(consumer));
+				assertEquals(InventoryFailureReason.ITEM_WORK_LIMIT, consumer.currentReason());
+			}
+			assertEquals(2, logs.events().stream().filter(event -> event.getMessage().getFormattedMessage().contains("stage=pool-directory")
+				&& event.getMessage().getFormattedMessage().contains("reason=item-work-limit")).count());
+			assertTrue(planner.addresses.isEmpty()); assertEquals(0, runtime.memory().reserved());
+		}
 	}
 	@ParameterizedTest @CsvSource({"false,true", "true,true", "false,false", "true,false"})
 	void thirtyTwoAbandonedReplacementsReleaseCapacityWhileIdlePeersKeepCompletedEvidence(boolean incomplete, boolean pooling) throws ReflectiveOperationException {

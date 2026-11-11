@@ -64,9 +64,10 @@ class InventoryFluidPreparationRetryTest {
 				: new InventoryRuntime.PreviewSubject(storage.input.readOwner())).orElseThrow();
 		}
 		void leaveOneProviderCall() {
-			long available = ledger(runtime).remaining(InventorySourceAccess.PROVIDER_WORK) / InventorySourceAccess.PROVIDER_CALL_WORK;
-			for (long attempt = 1; attempt < available; attempt++)
-				assertEquals(Optional.of(true), runtime.preflight(() -> Optional.of(true)));
+			// Isolate provider work without also exhausting the independent probe cap.
+			long work = ledger(runtime).remaining(InventorySourceAccess.PROVIDER_WORK) - InventorySourceAccess.PROVIDER_CALL_WORK;
+			ledger(runtime).tryReserve(java.util.Map.of(InventorySourceAccess.PROVIDER_WORK, work)).orElseThrow()
+				.commit(java.util.Map.of(InventorySourceAccess.PROVIDER_WORK, work));
 			assertEquals(InventorySourceAccess.PROVIDER_CALL_WORK, ledger(runtime).remaining(InventorySourceAccess.PROVIDER_WORK));
 		}
 		void exhaustItemWork() {

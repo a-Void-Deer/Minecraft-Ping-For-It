@@ -164,18 +164,18 @@ class VaultCurrentSourceValidationTest {
 				assertThrows(InventoryItemBudget.CaptureLimitException.class, () -> source.valid(new InventoryValidationBudget.Allowance(shortCost)));
 				assertEquals(0, run.world.loaded + run.world.states + run.world.keys + run.world.vault.loaded);
 			}
-			long one = source.evidenceValidationCost().workUnits() * 2 + source.readValidationCost(1).workUnits();
-			for (long shortBy : new long[] {one, 1, 0}) {
+			for (int admissionCase = 0; admissionCase < 3; admissionCase++) {
 				run.policy.setPhysicalSlotsPerTick(IntLimit.finite(1)); run.runtime.advance(++run.tick, run.policy);
 				CostLedger ledger = (CostLedger) field.get(run.runtime);
-				long leave = one - shortBy + InventoryItemBudget.workUpperBound(source.displayBytes());
+				long required = run.runtime.stepBudget(run.consumer, 1).itemWork();
+				long leave = admissionCase == 0 ? 0 : required - (admissionCase == 1 ? 1 : 0);
 				long spend = ledger.remaining(WORK) - leave;
 				try (var paid = ledger.tryReserve(java.util.Map.of(WORK, spend)).orElseThrow()) {
 					paid.commit(java.util.Map.of(WORK, spend));
 				}
 				run.world.resetCounters();
 				var page = run.runtime.step(run.consumer, 1);
-				if (shortBy > 0) {
+				if (admissionCase < 2) {
 					assertTrue(page.isEmpty()); assertEquals(0, run.world.vault.getters);
 					assertEquals(0, run.world.vault.loaded + run.world.loaded); assertFalse(run.consumer.invalidated());
 				} else {

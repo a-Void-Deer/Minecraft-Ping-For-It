@@ -94,11 +94,13 @@ class InventoryBackendDiagnosticsTest {
 			fixture.backend.handle(InventoryBackendTest.A,
 				InventoryC2SPacket.open(fixture.host.epoch(InventoryBackendTest.A), 100, 1, 1,
 					InventoryRuntimeTest.TARGET, BlockFace.NORTH), 0, fixture.settings);
-			var rejected = siteMessages(logs, "inventory/preview/open");
+			var rejected = logs.events().stream().map(event -> event.getMessage().getFormattedMessage())
+				.filter(message -> message.contains("operation=open") && message.contains("handling=rejected")).toList();
 			assertEquals(1, rejected.size(), logs.messages());
-			assertTrue(rejected.getFirst().contains("handling=admission"), logs.messages());
-			assertTrue(rejected.getFirst().contains("stage=preflight-deferred"), logs.messages());
-			assertFalse(rejected.getFirst().contains("handling=memory"), logs.messages());
+			assertTrue(rejected.getFirst().contains("stage=admission"), logs.messages());
+			assertTrue(rejected.getFirst().contains("limitHit=true"), logs.messages());
+			assertFalse(rejected.getFirst().contains("reason=memory-limit"), logs.messages());
+			assertEquals(nx.pingwheel.common.network.InventoryS2CPacket.Kind.OPEN_REJECTED, fixture.host.packets.getLast().kind());
 		}
 	}
 

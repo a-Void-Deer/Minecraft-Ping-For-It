@@ -43,15 +43,11 @@ import org.jetbrains.annotations.Unmodifiable;
 /** One server-lifetime owner of physical rounds, logical coverage and retained admission. */
 public final class InventoryRuntime implements AutoCloseable {
 	private static final nx.pingwheel.common.diagnostics.DiagnosticChannel PREFLIGHT = nx.pingwheel.common.diagnostics.DiagnosticChannel.interval("inventory-preflight", java.time.Duration.ofSeconds(10));
-	private static final int MAX_CONSUMERS = 256, MAX_ROUNDS = 32;
+	private static final int MAX_CONSUMERS = 1024, MAX_ROUNDS = 64;
 	private static final int MAX_RETAINED_ROUNDS = MAX_ROUNDS * 2; // bounded replacement headroom for completed evidence leases
 	private static final long CONSUMER_MEMORY = 4096;
-	// Fixed round/handle/projection state (including scalar successor provenance); <=256 paid-map and tightened-set nodes
-	// (object40+five refs), paid boxed progress(object40+int4), two <=512-ref hash
-	// tables, and initial journal directories. Keys/subjects are borrowed. Source
-	// metadata, catalogue payloads and journal growth are not hidden in this slab.
-	private static final long ROUND_MEMORY = 4096 + MAX_CONSUMERS * (2L * (40 + 5 * 8) + 40 + 4)
-		+ 2L * (40 + 2 * MAX_CONSUMERS * 8) + InventorySlotJournal.initialRetainedBytes();
+	// Empty round state only. Subject/key indexes acquire tiered ownership before their first insertion.
+	private static final long ROUND_MEMORY = 4096 + InventorySlotJournal.initialRetainedBytes();
 	private static final int REPROJECT_BATCH = 64; // bounded retained-metadata walk per tightening call
 	private static final long PAGE_FIXED_BYTES = 4096L, PAGE_WORKSPACE_FIXED = 8192L;
 	// Bounded metadata/hash/index operations per copied entry, separate from the OLD parser.
@@ -103,7 +99,7 @@ public final class InventoryRuntime implements AutoCloseable {
 	 * remains empty for compatibility with existing callers.
 	 */
 	public record Reprojection(ReprojectionStatus status, int displayBytes,
-		List<InventoryScanner.Key> changedKeys, List<String> foldIds) {
+		@Unmodifiable List<InventoryScanner.Key> changedKeys, @Unmodifiable List<String> foldIds) {
 		public Reprojection {
 			changedKeys = List.copyOf(changedKeys);
 			foldIds = List.copyOf(foldIds);
@@ -115,6 +111,7 @@ public final class InventoryRuntime implements AutoCloseable {
 	public final class Consumer implements AutoCloseable {
 		/** Diagnostic-only input recovery transition, bounded by this consumer's lifecycle. */
 		private boolean inputRejectionReported;
+		private @Nullable InventoryFailureReason currentReason;
 		private final long diagnosticId = ++consumerSequence;
 		private final InventoryBudgetDelayState admissionDelay, probeDelay, logicalDelay, projectionDelay;
 		private boolean serviceableDemand = true;
@@ -129,10 +126,10 @@ public final class InventoryRuntime implements AutoCloseable {
 		private @Nullable Association scanningAssociation, completedAssociation;
 		private @Nullable Round successorEntitlement;
 		// A canonical source alias shares data, not the original input's lease or physical-binding authority.
-		private InventorySourceAccess.InventoryHandle bindingEvidence;
-		private RetainedMemoryLedger.Ticket bindingMemory;
-		private Observation invalidObservation;
-		private Observation pendingObservation;
+		private InventorySourceAccess.@Nullable InventoryHandle bindingEvidence;
+		private RetainedMemoryLedger.@Nullable Ticket bindingMemory;
+		private @Nullable Observation invalidObservation;
+		private @Nullable Observation pendingObservation;
 		private int cursor;
 		private boolean closed;
 		private long observationFloor;
@@ -147,6 +144,9 @@ public final class InventoryRuntime implements AutoCloseable {
 			firstRound = roundSequence + 1;
 		}
 		public InventorySourceInput input() { return input; }
+		public @Nullable InventoryFailureReason currentReason() { return currentReason; }
+		/** Existing paid progress only: no provider, world, source-count or content callback. */
+		public Progress progress() { return new Progress(round == null ? 0 : round.sequence, cursor, round == null ? 0 : round.size()); }
 		void requirePublicationEvidence() { publicationRequired = true; }
 		public boolean invalidated() { return invalidObservation != null; }
 		private boolean scopeTransition;
@@ -200,6 +200,8 @@ public final class InventoryRuntime implements AutoCloseable {
 			}
 		}
 	}
+	@NotNullByDefault
+	public record Progress(long observationSequence, int consumedSlots, int capturedSlots) {}
 	private static final class Round {
 		InventoryBudgetDelayState physicalDelay;
 		Module physicalModule;
@@ -219,9 +221,12 @@ public final class InventoryRuntime implements AutoCloseable {
 		InventorySourceAccess.@Nullable Preparation preparation;
 		final List<@Nullable InventoryResourceValue> slots = new ArrayList<>();
 		@Nullable InventorySlotJournal journal;
+		@Nullable InventoryFailureReason terminalReason;
 		RetainedMemoryLedger.@Nullable Ticket nativeMemory;
 		InventoryStep.SweepEvidence sweepEvidence = InventoryStep.SweepEvidence.NONE;
 		final Map<Subject, Integer> paid = new LinkedHashMap<>();
+		RetainedMemoryLedger.@Nullable Ticket bookkeepingMemory;
+		int paidCapacity, tightenedCapacity;
 		final List<RetainedMemoryLedger.Ticket> pages = new ArrayList<>();
 		final List<RetainedMemoryLedger.Ticket> catalogMemory = new ArrayList<>();
 		final List<RetainedMemoryLedger.Ticket> projectionMemory = new ArrayList<>();
@@ -277,10 +282,57 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	// Association records, lease, <=65 complete page profiles, map/key/proof reference overlap and entitlement bookkeeping.
 	private static final long LEASE_MEMORY = 16384, EVIDENCE_MEMORY = 256;
-	// Two bounded oldest-first searches across <=64 rounds, including <=256 exact Preview participants;
-	// full graph/proof equality, cached lease profiles and installation are admitted before metadata callbacks.
-	private static final InventoryValidationBudget.Cost POOL_BOOKKEEPING = new InventoryValidationBudget.Cost(16384, 16384,
-		64L * ((4096 + 81) * 32 + MAX_CONSUMERS * 2048L));
+	/** Two searches over actual admitted graphs/participants, not maximum-sized global slabs. */
+	private InventoryValidationBudget.Cost poolBookkeepingCost(InventorySharedRead.Port port) {
+		var proof = port.proof();
+		long shapeInspection = 4096 + proof.members().size() * 8192L;
+		for (Round round : liveRounds) if (round.sweep != null) shapeInspection = checkedAdd(shapeInspection, round.sweep.proof.members().size() * 8192L);
+		if (!claimDetachedItemWork(shapeInspection)) throw InventoryValidationBudget.itemResolutionDeferred(InventoryFailureReason.ITEM_WORK_LIMIT);
+		long incoming = graphComparisons(proof);
+		long work = checkedAdd(16384, checkedMultiply(incoming, 128));
+		for (Round round : liveRounds) if (round.sweep != null) {
+			long existing = graphComparisons(round.sweep.proof);
+			work = checkedAdd(work, checkedMultiply(64, checkedAdd(incoming, existing)));
+			work = checkedAdd(work, checkedMultiply(consumers.size(), 4096L));
+		}
+		return new InventoryValidationBudget.Cost(16384, 16384, work);
+	}
+	private static long graphComparisons(InventorySharedRead.Proof proof) {
+		long units = proof.members().size() + proof.graph().alias().length() + proof.graph().dimension().length() + proof.graph().provider().length()
+			+ proof.graph().layout().layoutId().length() + proof.graph().layout().layoutData().length();
+		for (var member : proof.graph().layout().members()) {
+			units += member.blockId().length() + member.blockEntityId().length() + member.role().length() + 16L;
+			for (var segment : member.segments()) units += segment.visibleSlots().size() + segment.fieldPath().length() + segment.schemaId().length() + 16L;
+		}
+		return units;
+	}
+	private static int bookkeepingCapacity(int required) {
+		if (required == 0) return 0;
+		int capacity = 4;
+		while (capacity < required) capacity *= 2;
+		return capacity;
+	}
+	/** Replacement cost includes full new allocation, initialization/copy and old/new overlap. */
+	private boolean growBookkeeping(Consumer consumer, Round round, int paidRequired, int keysRequired) {
+		if (paidRequired < 0 || paidRequired > MAX_CONSUMERS || keysRequired < 0 || keysRequired > InventorySourceAccess.MAX_SLOTS)
+			throw new IllegalArgumentException("round bookkeeping shape bound");
+		int paid = bookkeepingCapacity(paidRequired), keys = bookkeepingCapacity(keysRequired);
+		if (paid <= round.paidCapacity && keys <= round.tightenedCapacity) return true;
+		paid = Math.max(paid, round.paidCapacity); keys = Math.max(keys, round.tightenedCapacity);
+		long bytes = checkedAdd(256, checkedAdd(checkedMultiply(paid, 160L), checkedMultiply(keys, 128L)));
+		var retained = memory.tryReserve(bytes);
+		if (retained.isEmpty()) { consumer.currentReason = InventoryFailureReason.MEMORY_LIMIT; return false; }
+		try {
+			if (!claimDetachedItemWork(checkedAdd(4096, checkedMultiply(paid + (long) keys + round.paid.size()
+				+ (round.tightenedKeys == null ? 0 : round.tightenedKeys.size()), 4096L)))) {
+				consumer.currentReason = InventoryFailureReason.ITEM_WORK_LIMIT; return false;
+			}
+			retained.get().commit(bytes);
+			if (round.bookkeepingMemory != null) round.bookkeepingMemory.close();
+			round.bookkeepingMemory = retained.get(); round.paidCapacity = paid; round.tightenedCapacity = keys;
+			return true;
+		} finally { if (round.bookkeepingMemory != retained.get()) retained.get().close(); }
+	}
 	/** Exact input authority and metadata ownership, independently retained by scans, completions and publication cuts. */
 	@NotNullByDefault
 	private static final class BindingLease {
@@ -320,6 +372,8 @@ public final class InventoryRuntime implements AutoCloseable {
 			try { return lease.port.validate(expected, allowance); }
 			catch (InventoryItemBudget.CaptureLimitException deferred) { return InventorySharedRead.Check.DEFERRED; }
 			catch (RuntimeException | LinkageError unavailable) {
+				@Nullable var providerLimit = InventoryCaptureDiagnostics.providerLimit(unavailable);
+				if (providerLimit != null) throw providerLimit;
 				InventoryCaptureDiagnostics.warn("runtime/publication-validate", "deny-publication", lease.input, null,
 					() -> "stage=historical-metadata proofRoute=" + expected.graph().route() + " alias=" + expected.graph().alias(), unavailable);
 				return InventorySharedRead.Check.UNAVAILABLE;
@@ -346,6 +400,7 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	private long consumerSequence;
 	private final List<Consumer> consumers = new ArrayList<>();
+	private final List<OperationGrant> operationGrants = new ArrayList<>(2);
 	private final Map<LookupKey, Round> rounds = new LinkedHashMap<>();
 	private final List<Round> liveRounds = new ArrayList<>();
 	private final boolean certifiedPooling;
@@ -391,6 +446,62 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	public RetainedMemoryLedger memory() { return memory; }
 	public ServerInventoryMonitor monitor() { return monitor; }
+	/** One bounded scheduling opportunity held out of the existing ledgers. */
+	@NotNullByDefault
+	public record OperationBudget(int physicalSlots, int probeCalls, long providerWork, long itemWork, long workspaceBytes) {
+		public OperationBudget {
+			if (physicalSlots < 0 || physicalSlots > InventorySourceAccess.MAX_STEP || probeCalls < 0 || probeCalls > 256
+				|| providerWork < 0 || itemWork < 0 || workspaceBytes < 0) throw new IllegalArgumentException("inventory operation bound");
+		}
+	}
+	@NotNullByDefault
+	public final class OperationGrant implements AutoCloseable {
+		private final CostLedger.Ticket work;
+		private final RetainedMemoryLedger.Ticket workspace;
+		private final long reservedTick = tick;
+		private final Thread thread = Thread.currentThread();
+		private boolean closed;
+		private OperationGrant(CostLedger.Ticket work, RetainedMemoryLedger.Ticket workspace) { this.work = work; this.workspace = workspace; }
+		/** Releases only unused protection; the synchronous operation pays through its normal admission path. */
+		public <T> T run(java.util.function.Supplier<T> operation) {
+			if (closed || thread != Thread.currentThread() || reservedTick != tick) throw new IllegalStateException("inventory operation opportunity is not current");
+			close();
+			return operation.get();
+		}
+		@Override public void close() { if (!closed) { closed = true; operationGrants.remove(this); try { work.close(); } finally { workspace.close(); } } }
+	}
+	public OperationBudget preflightBudget() { return new OperationBudget(0, 1, InventorySourceAccess.PROVIDER_CALL_WORK, 0, authorityWorkspaceBytes()); }
+	public OperationBudget stepBudget(Consumer consumer, int slots) {
+		if (slots < 1 || slots > InventorySourceAccess.MAX_STEP) throw new IllegalArgumentException("inventory operation step bound");
+		@Nullable Round round = consumer.round;
+		int cap = round == null ? effectiveDisplayCap() : displayBytes(round);
+		InventoryValidationBudget.Cost validationCost = round == null ? resolver.resolutionProbeCost(consumer.input)
+			: round.sweep == null ? round.handle.stepValidationCost(slots) : java.util.Objects.requireNonNull(consumer.scanningAssociation).lease.pageCosts[slots];
+		long itemWork = checkedAdd(validationCost.workUnits(), checkedMultiply(slots,
+			InventoryItemBudget.workUpperBound(cap, round == null ? slots - 1 : nativeEntries(round, slots))));
+		if (round != null && round.journal != null) {
+			if (round.sweep == null && round.handle.pendingNativeValidation()) itemWork = validationCost.workUnits();
+			boolean reading = consumer.cursor >= round.size() && (round.last == null || round.last.completeness() == CaptureResult.Completeness.CONTINUE)
+				&& (round.sweep != null || !round.handle.pendingNativeValidation());
+			int capacity = round.sweep == null ? InventorySourceAccess.MAX_SLOTS : round.sweep.proof.graph().slots();
+			int appended = reading ? Math.min(slots, capacity - round.journal.endSlot()) : 0;
+			reading &= appended > 0;
+			itemWork = checkedAdd(itemWork, journalStepWorkUpperBound(consumer, slots, appended, reading));
+		}
+		return new OperationBudget(slots, 4, (slots + 4L) * InventorySourceAccess.PROVIDER_CALL_WORK,
+			itemWork,
+			Math.max(authorityWorkspaceBytes(), stepMemoryUpperBound(consumer, slots)));
+	}
+	public InventoryDecision<OperationGrant> reserveOperation(OperationBudget budget) {
+		if (operationGrants.size() == 2) return deferred(InventoryFailureReason.REQUEST_CAPACITY);
+		var workspace = memory.tryReserve(checkedAdd(1024, budget.workspaceBytes()));
+		if (workspace.isEmpty()) return deferred(InventoryFailureReason.MEMORY_LIMIT);
+		var admission = physical.tryReserveDecision(Map.of(InventorySourceAccess.PHYSICAL, (long) budget.physicalSlots(),
+			InventorySourceAccess.PROBES, (long) budget.probeCalls(), InventorySourceAccess.PROVIDER_WORK, budget.providerWork(), ITEM_WORK, budget.itemWork()));
+		if (!admission.accepted()) { workspace.get().close(); return deferred(counterReason(java.util.Objects.requireNonNull(admission.limitingCounter()))); }
+		var grant = new OperationGrant(java.util.Objects.requireNonNull(admission.ticket()), workspace.get());
+		operationGrants.add(grant); return InventoryDecision.accept(grant);
+	}
 	private void recordReadAttempts(long generation, CostLedger ledger, long attempted, long charged) {
 		if (!monitor.enabled() || generation != monitor.collectionGeneration()) return;
 		for (@Nullable SelectionReadScope scope = selectionReadScope; scope != null; scope = scope.parent)
@@ -424,7 +535,8 @@ public final class InventoryRuntime implements AutoCloseable {
 		@Nullable Association association = scope == EvidenceScope.COMPLETED ? consumer.completedAssociation : consumer.scanningAssociation;
 		if (consumer.closed || consumer.invalidated() || association == null) return Optional.empty();
 		var admission = memory.tryReserve(EVIDENCE_MEMORY);
-		if (admission.isEmpty()) return Optional.empty();
+		if (admission.isEmpty()) { InventoryCaptureDiagnostics.limit(consumer.input, InventoryDiagnosticSite.PUBLICATION, InventoryOperation.VALIDATE,
+			InventoryFailureReason.MEMORY_LIMIT, InventoryOutcome.DEFERRED, "publication-evidence", EVIDENCE_MEMORY, memory.retained(), memory.cap(), null); return Optional.empty(); }
 		admission.get().commit(EVIDENCE_MEMORY);
 		return Optional.of(new Evidence(association, admission.get()));
 	}
@@ -521,20 +633,24 @@ public final class InventoryRuntime implements AutoCloseable {
 			return !closed && !attempted && value.probeCalls() <= calls && requested.allocationBytes() <= cost.allocationBytes()
 				&& requested.workspaceBytes() <= cost.workspaceBytes() && requested.workUnits() <= cost.workUnits();
 		}
-		public InventorySharedRead.Check validate() { return validate(evidence); }
+		public InventorySharedRead.Check validate() { return validateResult().check(); }
+		public PublicationValidation validateResult() { return validateResult(evidence); }
 		/** A newer cut may use this context's opportunity only if its entire cached envelope fits; its own proof is still checked. */
-		public InventorySharedRead.Check validate(InventoryPublicationEvidence value) {
+		public InventorySharedRead.Check validate(InventoryPublicationEvidence value) { return validateResult(value).check(); }
+		public PublicationValidation validateResult(InventoryPublicationEvidence value) {
 			if (closed || attempted) throw new IllegalStateException("settled publication validation");
 			if (!forEvidence(value)) throw new IllegalArgumentException("publication evidence exceeds reserved opportunity");
 			attempted = true;
 			var allowance = new InventoryValidationBudget.Allowance(cost);
 			installFluidGrants(allowance);
-			try { return value.validate(allowance); }
-			catch (InventoryItemBudget.CaptureLimitException deferred) { return InventorySharedRead.Check.DEFERRED; }
+			try { return new PublicationValidation(value.validate(allowance), null); }
+			catch (InventoryItemBudget.CaptureLimitException deferred) { return new PublicationValidation(InventorySharedRead.Check.DEFERRED, deferReason(deferred)); }
 			catch (RuntimeException | LinkageError unavailable) {
+				@Nullable var providerLimit = InventoryCaptureDiagnostics.providerLimit(unavailable);
+				if (providerLimit != null) return new PublicationValidation(InventorySharedRead.Check.UNAVAILABLE, providerLimit.reason());
 				InventoryCaptureDiagnostics.publicationFailed(
 					() -> "stage=handoff-metadata probes=" + calls + " admittedWork=" + cost.workUnits(), unavailable);
-				return InventorySharedRead.Check.UNAVAILABLE;
+				return new PublicationValidation(InventorySharedRead.Check.UNAVAILABLE, null);
 			}
 			finally { work.commit(Map.of(ITEM_WORK, allowance.attemptedWorkUnits() - allowance.independentlyChargedWork(), InventorySourceAccess.PROBES, (long) value.probeCalls(),
 				InventorySourceAccess.PROVIDER_WORK, value.probeCalls() * InventorySourceAccess.PROVIDER_CALL_WORK)); }
@@ -552,41 +668,54 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (work.isEmpty()) { workspace.get().close(); return Optional.empty(); }
 		return Optional.of(new PublicationGrant(evidence, workspace.get(), work.get()));
 	}
-	/** A seed acquires only its own committed-input metadata on a normal budgeted tick, never preview capture. */
 	@NotNullByDefault
-	public record BindingEvidenceResult(InventorySharedRead.Check check, @Nullable InventoryPublicationEvidence evidence) {}
+	public record PublicationValidation(InventorySharedRead.Check check, @Nullable InventoryFailureReason reason) {}
+	@NotNullByDefault
+	public record BindingEvidenceResult(InventorySharedRead.Check check, @Nullable InventoryPublicationEvidence evidence,
+		@Nullable InventoryFailureReason reason) {}
+	/** A seed acquires only its own committed-input metadata on a normal budgeted tick, never preview capture. */
 	public BindingEvidenceResult acquirePublicationBinding(Consumer consumer) {
-		if (consumer.closed || consumer.invalidated()) return new BindingEvidenceResult(InventorySharedRead.Check.UNAVAILABLE, null);
-		var resolutionCost = resolver.resolutionProbeCost(consumer.input);
+		if (consumer.closed || consumer.invalidated()) return new BindingEvidenceResult(InventorySharedRead.Check.UNAVAILABLE, null, null);
+		InventoryValidationBudget.Cost resolutionCost;
+		try { resolutionCost = resolver.resolutionProbeCost(consumer.input); }
+		catch (InventoryItemBudget.CaptureLimitException deferred) {
+			return new BindingEvidenceResult(InventorySharedRead.Check.DEFERRED, null, deferReason(deferred));
+		}
+		catch (RuntimeException | LinkageError unavailable) {
+			return new BindingEvidenceResult(InventorySharedRead.Check.UNAVAILABLE, null, sourceReason(unavailable));
+		}
 		long upper = Math.max(authorityWorkspaceBytes(), resolutionCost.workspaceBytes());
 		var retained = memory.tryReserve(checkedAdd(upper, EVIDENCE_MEMORY));
-		if (retained.isEmpty()) return new BindingEvidenceResult(InventorySharedRead.Check.DEFERRED, null);
+		if (retained.isEmpty()) return new BindingEvidenceResult(InventorySharedRead.Check.DEFERRED, null, InventoryFailureReason.MEMORY_LIMIT);
 		InventorySourceAccess.@Nullable Source source = null;
 		boolean transferred = false;
 		try {
-			var resolution = validation(resolutionCost, new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE), upper);
-			if (resolution.isEmpty()) return new BindingEvidenceResult(InventorySharedRead.Check.DEFERRED, null);
-			try (var operation = resolution.get()) {
-				var probe = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
-				if (probe.isEmpty()) return new BindingEvidenceResult(InventorySharedRead.Check.DEFERRED, null);
-				try (var credit = probe.get()) {
+			var resolution = validationDecision(resolutionCost, new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE), upper);
+			if (!resolution.accepted()) return new BindingEvidenceResult(InventorySharedRead.Check.DEFERRED, null, resolution.reason());
+			try (var operation = java.util.Objects.requireNonNull(resolution.value())) {
+				var probe = physical.tryReserveDecision(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
+				if (!probe.accepted()) return new BindingEvidenceResult(InventorySharedRead.Check.DEFERRED, null,
+					counterReason(java.util.Objects.requireNonNull(probe.limitingCounter())));
+				try (var credit = java.util.Objects.requireNonNull(probe.ticket())) {
 					credit.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
 					source = resolver.resolve(consumer.input, effectiveDisplayCap(), operation.allowance).orElse(null);
 				}
 			}
-			if (source == null || consumer.closed || consumer.invalidated()) return new BindingEvidenceResult(InventorySharedRead.Check.UNAVAILABLE, null);
+			if (source == null || consumer.closed || consumer.invalidated()) return new BindingEvidenceResult(InventorySharedRead.Check.UNAVAILABLE, null, null);
 			if (source.sourceRetainedBytes() < 0 || source.sourceRetainedBytes() > upper) throw new IllegalStateException("binding metadata exceeds resolution grant");
 			var evidence = new LegacyPublicationEvidence(new MetadataOwner(source, true), retained.get());
 			var admission = reservePublication(evidence);
-			if (admission.isEmpty()) return new BindingEvidenceResult(InventorySharedRead.Check.DEFERRED, null);
-			InventorySharedRead.Check check;
-			try (var grant = admission.get()) { check = grant.validate(); }
-			if (check != InventorySharedRead.Check.VALID) return new BindingEvidenceResult(check, null);
+			if (admission.isEmpty()) return new BindingEvidenceResult(InventorySharedRead.Check.DEFERRED, null, null);
+			PublicationValidation validationResult;
+			try (var grant = admission.get()) { validationResult = grant.validateResult(); }
+			if (validationResult.check() != InventorySharedRead.Check.VALID) return new BindingEvidenceResult(validationResult.check(), null, validationResult.reason());
 			retained.get().commit(checkedAdd(EVIDENCE_MEMORY, source.sourceRetainedBytes()));
 			transferred = true;
-			return new BindingEvidenceResult(check, evidence);
-		} catch (InventoryItemBudget.CaptureLimitException deferred) { return new BindingEvidenceResult(InventorySharedRead.Check.DEFERRED, null); }
-		catch (RuntimeException | LinkageError unavailable) { return new BindingEvidenceResult(InventorySharedRead.Check.UNAVAILABLE, null); }
+			return new BindingEvidenceResult(validationResult.check(), evidence, null);
+		} catch (InventoryItemBudget.CaptureLimitException deferred) { return new BindingEvidenceResult(InventorySharedRead.Check.DEFERRED, null, deferReason(deferred)); }
+		catch (RuntimeException | LinkageError unavailable) {
+			return new BindingEvidenceResult(InventorySharedRead.Check.UNAVAILABLE, null, sourceReason(unavailable));
+		}
 		finally { if (!transferred) try { if (source != null) source.close(); } finally { retained.get().close(); } }
 	}
 	/** Detached processing shares item work; no source probe or root workspace is needed. */
@@ -635,12 +764,14 @@ public final class InventoryRuntime implements AutoCloseable {
 			? Quantity.of(Unit.LOGICAL_SLOT, Math.max(0, round.last.coverage().expected().getAsLong() - consumer.cursor)) : Quantity.unknown();
 	}
 	private void delay(Consumer consumer, InventoryBudgetDelayState stage, int reasons, String name) {
+		reportDelay(consumer, reasons, name);
 		stage.observe(sink, cycle(consumer), tick, reasons,
 			() -> new WorkItem("consumer/" + consumer.diagnosticId + "/" + name, "Inventory consumer " + consumer.diagnosticId + " " + name),
 			() -> stage == consumer.logicalDelay ? logicalQuantity(consumer) : Quantity.unknown());
 	}
 	private void physicalDelay(Consumer consumer, int reasons, long requestedSlots) {
 		if (reasons == 0) return;
+		reportDelay(consumer, reasons, "physical");
 		Round round = consumer.round;
 		if (round == null) { delay(consumer, consumer.admissionDelay, reasons, "admission"); return; }
 		if (round.physicalDelay == null) {
@@ -653,6 +784,51 @@ public final class InventoryRuntime implements AutoCloseable {
 				? Quantity.of(Unit.PHYSICAL_SLOT, Math.max(0, round.sweep.proof.graph().slots() - round.size()))
 				: round.last == null || round.last.coverage().expected().isEmpty() ? Quantity.unknown()
 				: Quantity.of(Unit.PHYSICAL_SLOT, Math.max(0, round.last.coverage().expected().getAsLong() - round.size())));
+	}
+	private void reportDelay(Consumer consumer, int reasons, String stage) {
+		if (reasons == 0) return;
+		for (Reason reason : Reason.values()) if ((reasons & reason.bit()) != 0) {
+			@Nullable InventoryFailureReason failure = switch (reason) {
+				case MEMORY -> InventoryFailureReason.MEMORY_LIMIT;
+				case PROBE_WORK -> InventoryFailureReason.PROBE_LIMIT;
+				case PROVIDER_WORK -> InventoryFailureReason.PROVIDER_WORK_LIMIT;
+				case PUBLICATION_WORK -> InventoryFailureReason.PUBLICATION_WORK_LIMIT;
+				case PHYSICAL_SLOTS -> InventoryFailureReason.PHYSICAL_SLOT_LIMIT;
+				case LOGICAL_CLIENT_OR_TARGET, LOGICAL_GLOBAL -> InventoryFailureReason.LOGICAL_SLOT_LIMIT;
+				case ROUND_CAPACITY -> InventoryFailureReason.ROUND_CAPACITY;
+				case SUBJECT_CAPACITY -> InventoryFailureReason.CONSUMER_CAPACITY;
+				case CAPTURE_COUNT -> InventoryFailureReason.CAPTURE_READ_LIMIT;
+				default -> null;
+			};
+			if (failure == null) continue;
+			consumer.currentReason = failure;
+			InventoryCaptureDiagnostics.limit(consumer.input, InventoryDiagnosticSite.CAPTURE, InventoryOperation.READ,
+				failure, InventoryOutcome.DEFERRED, stage, -1, -1, -1, null);
+		}
+	}
+	private void validationDelay(Consumer consumer, InventoryBudgetDelayState state, InventoryDecision<?> decision, String stage) {
+		var reason = java.util.Objects.requireNonNull(decision.reason());
+		observeTypedDelay(consumer, state, reason, stage);
+	}
+	/** One request report, followed by monitoring without a second bit-derived report. */
+	private void requestDelay(Consumer consumer, InventoryBudgetDelayState state, InventoryFailureReason reason, String stage,
+		long requested, long used, long limit) {
+		InventoryCaptureDiagnostics.limit(consumer.input, InventoryDiagnosticSite.CAPTURE, InventoryOperation.READ,
+			reason, InventoryOutcome.DEFERRED, stage, requested, used, limit, null);
+		observeTypedDelay(consumer, state, reason, stage);
+	}
+	private void observeTypedDelay(Consumer consumer, InventoryBudgetDelayState state, InventoryFailureReason reason, String stage) {
+		int bits = reason == InventoryFailureReason.MEMORY_LIMIT ? Reason.MEMORY.bit()
+			: reason == InventoryFailureReason.PROBE_LIMIT ? Reason.PROBE_WORK.bit()
+			: reason == InventoryFailureReason.PROVIDER_WORK_LIMIT ? Reason.PROVIDER_WORK.bit()
+			: reason == InventoryFailureReason.PHYSICAL_SLOT_LIMIT ? Reason.PHYSICAL_SLOTS.bit()
+			: reason == InventoryFailureReason.CAPTURE_READ_LIMIT ? Reason.CAPTURE_COUNT.bit() : Reason.PUBLICATION_WORK.bit();
+		// Validation already reported its exact typed decision. The monitor's
+		// coarser work bucket must neither replace that reason nor report it again.
+		consumer.currentReason = reason;
+		state.observe(sink, cycle(consumer), tick, bits,
+			() -> new WorkItem("consumer/" + consumer.diagnosticId + "/" + stage, "Inventory consumer " + consumer.diagnosticId + " " + stage),
+			Quantity::unknown);
 	}
 	private void physicalProgress(Round round) {
 		if (round.physicalDelay != null) round.physicalDelay.progress(cycle(round.physicalModule));
@@ -696,20 +872,20 @@ public final class InventoryRuntime implements AutoCloseable {
 	public boolean selectionPresent(InventorySourceInput input, InventorySelection selection, int witness) {
 		long readGeneration = monitor.enabled() ? monitor.collectionGeneration() : -1;
 		int displayCap = effectiveDisplayCap();
-		long fixed = checkedAdd(InventoryCatalogAdmission.METADATA_BYTES, checkedAdd(authorityWorkspaceBytes(), liveCatalogUpperBound()));
+		long fixed = checkedAdd(InventoryCatalogAdmission.METADATA_BYTES, authorityWorkspaceBytes());
 		long result = InventoryItemBudget.retainedUpperBound(displayCap);
-		int bound = (int) Math.min(physicalRemaining(), Math.min(InventorySourceAccess.MAX_STEP, Math.max(0, (memory.remaining() - fixed) / result)));
+		int bound = (int) Math.min(physicalRemaining(), InventorySourceAccess.MAX_STEP);
 		if (bound == 0) return false;
-		var workspace = memory.tryReserve(checkedAdd(fixed, checkedMultiply(bound, result)));
+		var workspace = memory.tryReserve(fixed);
 		if (workspace.isEmpty()) return false;
 		try (var held = workspace.get()) {
-			long work = checkedMultiply(bound, InventoryItemBudget.workUpperBound(displayCap));
+			long work = checkedMultiply(bound, InventoryItemBudget.workUpperBound(displayCap, Math.min(InventoryItemCodec.DEFAULT_MAX_ENTRIES, bound - 1)));
 			var workAdmission = physical.tryReserve(Map.of(ITEM_WORK, work));
 			if (workAdmission.isEmpty()) return false;
 			long before = physical.used(InventorySourceAccess.PHYSICAL);
 			try (var grant = workAdmission.get()) {
 				var catalog = new InventoryCatalogAdmission(InventoryItemBudget.workspaceUpperBound(displayCap),
-					checkedMultiply(bound, InventoryCatalogAdmission.workUpperBound(displayCap)));
+					checkedMultiply(bound, InventoryCatalogAdmission.workUpperBound(displayCap, Math.min(InventoryItemCodec.DEFAULT_MAX_ENTRIES, bound - 1))));
 				try {
 					var probe = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
 					if (probe.isEmpty()) return false;
@@ -725,7 +901,14 @@ public final class InventoryRuntime implements AutoCloseable {
 					}
 					if (source == null) return false;
 					try (source) {
-						var read = validation(source.evidenceValidationCost().plus(source.readValidationCost(source.stableCursor() ? 1 : bound)), allowance, authorityWorkspaceBytes());
+						int affordable = source.stableCursor() ? 1 : bound;
+						while (affordable > 0 && checkedAdd(liveCatalogGrowth(affordable, displayCap, 0), checkedMultiply(affordable, result)) > memory.remaining()) affordable--;
+						if (affordable == 0) return false;
+						final int observationBound = affordable;
+						var growth = memory.tryReserve(checkedAdd(liveCatalogGrowth(observationBound, displayCap, 0), checkedMultiply(observationBound, result)));
+						if (growth.isEmpty()) return false;
+						try (var growthGrant = growth.get()) {
+						var read = validation(source.evidenceValidationCost().plus(source.readValidationCost(observationBound)), allowance, authorityWorkspaceBytes());
 						if (read.isEmpty()) return false;
 						try (var readGrant = read.get()) {
 							// The outer operation owns close even when slot/provider admission refuses before resolver invocation.
@@ -735,7 +918,7 @@ public final class InventoryRuntime implements AutoCloseable {
 							@Nullable SelectionReadScope scope = readGeneration >= 0 && monitor.enabled() && readGeneration == monitor.collectionGeneration()
 								? new SelectionReadScope(selectionReadScope, readLedger, readGeneration) : null;
 							if (scope != null) selectionReadScope = scope;
-							try { return access.selectionPresent(selection, witness, bound, readLedger, catalog, allowance); }
+							try { return access.selectionPresent(selection, witness, observationBound, readLedger, catalog, allowance); }
 							finally {
 								if (scope != null) {
 									selectionReadScope = scope.parent;
@@ -744,6 +927,7 @@ public final class InventoryRuntime implements AutoCloseable {
 									recordReadAttempts(readGeneration, readLedger, own, own);
 								}
 							}
+						}
 						}
 					}
 					}
@@ -756,18 +940,54 @@ public final class InventoryRuntime implements AutoCloseable {
 			}
 		}
 	}
-	public <T> Optional<T> preflight(java.util.function.Supplier<Optional<T>> work) {
+	public <T> Optional<T> preflight(java.util.function.Supplier<@Nullable Optional<T>> work) {
+		return Optional.ofNullable(preflightDecision(work).value());
+	}
+	private static InventoryFailureReason counterReason(CostLedger.Counter counter) {
+		if (counter.equals(InventorySourceAccess.PROBES)) return InventoryFailureReason.PROBE_LIMIT;
+		if (counter.equals(InventorySourceAccess.PROVIDER_WORK)) return InventoryFailureReason.PROVIDER_WORK_LIMIT;
+		if (counter.equals(InventorySourceAccess.PHYSICAL)) return InventoryFailureReason.PHYSICAL_SLOT_LIMIT;
+		if (counter.equals(CAPTURE_READS)) return InventoryFailureReason.CAPTURE_READ_LIMIT;
+		return InventoryFailureReason.ITEM_WORK_LIMIT;
+	}
+	private static <T> InventoryDecision<T> deferred(InventoryFailureReason reason) {
+		InventoryCaptureDiagnostics.limit(null, InventoryDiagnosticSite.VALIDATION, InventoryOperation.VALIDATE, reason,
+			InventoryOutcome.DEFERRED, "runtime-admission", -1, -1, -1, null);
+		return InventoryDecision.defer(reason, InventoryImpact.DEGRADED);
+	}
+	private static InventoryFailureReason sourceReason(Throwable failure) {
+		@Nullable var provider = InventoryCaptureDiagnostics.providerLimit(failure);
+		if (provider != null) return provider.reason();
+		if (failure instanceof InventorySharedRead.ReadFailure typed) return switch (typed.check()) {
+			case AUTHORITY_DENIED -> InventoryFailureReason.SOURCE_AUTHORITY_DENIED;
+			case STRUCTURE_INVALID -> InventoryFailureReason.SOURCE_CHANGED;
+			default -> InventoryFailureReason.SOURCE_UNAVAILABLE;
+		};
+		return InventoryCaptureDiagnostics.sourceReason(failure);
+	}
+	private static InventoryFailureReason deferReason(InventoryItemBudget.CaptureLimitException failure) {
+		if (failure instanceof InventoryValidationBudget.ItemResolutionDeferred item) return item.reason();
+		if (failure instanceof nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission.Deferred fluid) return fluid.reason();
+		return failure.reason();
+	}
+	public <T> InventoryDecision<T> preflightDecision(java.util.function.Supplier<@Nullable Optional<T>> work) {
 		var workspace = memory.tryReserve(authorityWorkspaceBytes());
-		if (workspace.isEmpty()) return Optional.empty();
+		if (workspace.isEmpty()) return deferred(InventoryFailureReason.MEMORY_LIMIT);
 		try (var held = workspace.get()) {
-		var ticket = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
-		if (ticket.isEmpty()) return Optional.empty();
-		try (var grant = ticket.get()) {
-			grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK)); return work.get();
+		var ticket = physical.tryReserveDecision(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
+		if (!ticket.accepted()) return deferred(counterReason(java.util.Objects.requireNonNull(ticket.limitingCounter())));
+		try (var grant = java.util.Objects.requireNonNull(ticket.ticket())) {
+			grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
+			@Nullable Optional<T> result = work.get();
+			return result == null || result.isEmpty() ? InventoryDecision.reject(InventoryFailureReason.SOURCE_UNAVAILABLE, InventoryImpact.DEGRADED)
+				: InventoryDecision.accept(result.get());
 		} catch (RuntimeException | LinkageError failure) {
+			if (failure instanceof InventoryItemBudget.CaptureLimitException bounded) return deferred(deferReason(bounded));
+			if (failure instanceof nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnsupportedException)
+				return InventoryDecision.unsupported(InventoryFailureReason.UNSUPPORTED_LANE, InventoryImpact.DEGRADED);
 			if (!InventoryCaptureDiagnostics.expectedFailure(failure))
 				Diagnostics.server().atNormal().rateLimited(PREFLIGHT).warn("inventory/runtime/preflight", "reject-selection", failure, () -> "tick=" + tick);
-			return Optional.empty();
+			return InventoryDecision.reject(sourceReason(failure), InventoryImpact.DEGRADED);
 		}
 		}
 	}
@@ -784,6 +1004,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (previewClock.advance(now, settings.getPreview().getPeriodTicks())) { previewGlobal = 0; clearLogical(true); }
 		if (trackingClock.advance(now, settings.getTracking().getPeriodTicks())) { trackingGlobal = 0; clearLogical(false); }
 		if (now != tick) {
+			for (OperationGrant grant : List.copyOf(operationGrants)) grant.close();
 			tick = now;
 			for (Consumer consumer : consumers) {
 				consumer.admissionDelay.beginTick(cycle(consumer)); consumer.probeDelay.beginTick(cycle(consumer));
@@ -793,8 +1014,8 @@ public final class InventoryRuntime implements AutoCloseable {
 			}
 			physical = new CostLedger(Map.of(InventorySourceAccess.PHYSICAL, (long) settings.effectivePhysicalSlotsPerTick(),
 				InventorySourceAccess.PROBES, 256L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.MAX_PROVIDER_WORK_PER_TICK,
-				CAPTURE_READS, (long) InventorySourceAccess.MAX_SLOTS,
-				ITEM_WORK, checkedMultiply(InventorySourceAccess.MAX_SLOTS, InventoryItemBudget.workUpperBound(effectiveDisplayCap()))));
+				CAPTURE_READS, (long) InventorySourceAccess.CAPTURE_MAX_SLOTS,
+				ITEM_WORK, checkedMultiply(InventorySourceAccess.CAPTURE_MAX_SLOTS, InventoryItemBudget.workUpperBound(effectiveDisplayCap()))));
 		}
 	}
 	private long physicalRemaining() {
@@ -817,7 +1038,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		final CostLedger.Ticket work;
 		final long before;
 		final long workUpper;
-		private @Nullable ItemStageGrant first, second;
+		private @Nullable ItemStageGrant first, second, third;
 		private boolean closed;
 		ValidationOperation(InventoryValidationBudget.Cost cost, RetainedMemoryLedger.Ticket workspace, CostLedger.Ticket work, InventoryValidationBudget.Allowance allowance) {
 			this.allowance = allowance; before = allowance.attemptedOuterWorkUnits();
@@ -826,16 +1047,16 @@ public final class InventoryRuntime implements AutoCloseable {
 			allowance.itemResolutionGrants(this::openItemStage);
 		}
 		private InventoryValidationBudget.ItemResolutionStage openItemStage(InventoryValidationBudget.Cost cost) {
-			if (closed || second != null) throw new IllegalStateException("item resolution operation is not active");
+			if (closed || third != null) throw new IllegalStateException("item resolution operation is not active");
 			allowance.checkItemResolutionAdditional(cost); // arithmetic/scope preflight before either real ledger moves
-			var scratch = memory.tryReserve(cost.workspaceBytes()).orElseThrow(InventoryValidationBudget::itemResolutionDeferred);
+			var scratch = memory.tryReserve(cost.workspaceBytes()).orElseThrow(() -> InventoryValidationBudget.itemResolutionDeferred(InventoryFailureReason.MEMORY_LIMIT));
 			try {
-				var ticket = physical.tryReserve(Map.of(ITEM_WORK, cost.workUnits())).orElseThrow(InventoryValidationBudget::itemResolutionDeferred);
+				var ticket = physical.tryReserve(Map.of(ITEM_WORK, cost.workUnits())).orElseThrow(() -> InventoryValidationBudget.itemResolutionDeferred(InventoryFailureReason.ITEM_WORK_LIMIT));
 				try {
 					var stage = new InventoryValidationBudget.ItemResolutionStage(scratch, cost.workspaceBytes());
 					var grant = new ItemStageGrant(ticket, cost.workUnits(), stage);
 					allowance.admitAdditional(cost);
-					if (first == null) first = grant; else second = grant;
+					if (first == null) first = grant; else if (second == null) second = grant; else third = grant;
 					return stage;
 				} catch (RuntimeException | Error failure) { ticket.close(); throw failure; }
 			} catch (RuntimeException | Error failure) { scratch.close(); throw failure; }
@@ -847,11 +1068,12 @@ public final class InventoryRuntime implements AutoCloseable {
 				long used = Math.min(remaining, workUpper); remaining -= used; work.commit(Map.of(ITEM_WORK, used));
 				if (first != null) remaining = first.settle(remaining);
 				if (second != null) remaining = second.settle(remaining);
+				if (third != null) remaining = third.settle(remaining);
 				if (remaining != 0) throw new IllegalStateException("item validation work exceeds genuine grants");
 			} finally {
 				try { allowance.releaseUnusedAdmission(); }
 				finally {
-					try { try { if (first != null) first.close(); } finally { if (second != null) second.close(); } }
+					try { try { if (first != null) first.close(); } finally { try { if (second != null) second.close(); } finally { if (third != null) third.close(); } } }
 					finally { try { work.close(); } finally { workspace.close(); } }
 				}
 			}
@@ -880,11 +1102,14 @@ public final class InventoryRuntime implements AutoCloseable {
 		return validation(cost, allowance, 0);
 	}
 	private Optional<ValidationOperation> validation(InventoryValidationBudget.Cost cost, InventoryValidationBudget.Allowance allowance, long coveredWorkspace) {
+		return Optional.ofNullable(validationDecision(cost, allowance, coveredWorkspace).value());
+	}
+	private InventoryDecision<ValidationOperation> validationDecision(InventoryValidationBudget.Cost cost, InventoryValidationBudget.Allowance allowance, long coveredWorkspace) {
 		var workspace = memory.tryReserve(Math.max(0, cost.workspaceBytes() - coveredWorkspace));
-		if (workspace.isEmpty()) return Optional.empty();
+		if (workspace.isEmpty()) return deferred(InventoryFailureReason.MEMORY_LIMIT);
 		var work = physical.tryReserve(Map.of(ITEM_WORK, cost.workUnits()));
-		if (work.isEmpty()) { workspace.get().close(); return Optional.empty(); }
-		return Optional.of(new ValidationOperation(cost, workspace.get(), work.get(), allowance));
+		if (work.isEmpty()) { workspace.get().close(); return deferred(InventoryFailureReason.ITEM_WORK_LIMIT); }
+		return InventoryDecision.accept(new ValidationOperation(cost, workspace.get(), work.get(), allowance));
 	}
 	private InventorySourceAccess sourceAccess(InventorySourceInput input, int cap,
 		java.util.function.UnaryOperator<InventorySourceAccess.Source> decorate) {
@@ -914,8 +1139,8 @@ public final class InventoryRuntime implements AutoCloseable {
 			checkedMultiply(InventoryItemCodec.DEFAULT_MAX_ENTRIES, 4096L)));
 	}
 	private static long liveCatalogGrowth(int roots, int displayBytes, long held) {
-		long perRoot = checkedMultiply(2L, checkedAdd(checkedMultiply(3L, InventoryItemBudget.retainedUpperBound(displayBytes)), 4096L));
-		return Math.min(Math.max(0, liveCatalogUpperBound() - held), checkedMultiply(roots, perRoot));
+		return Math.min(Math.max(0, liveCatalogUpperBound() - held), checkedMultiply(2L,
+			checkedAdd(InventoryItemCodec.Catalog.initialModeledBytes(), InventoryItemCodec.Catalog.firstReadGrowthUpperBound(displayBytes, roots))));
 	}
 	private static int clampDisplayBytes(int displayBytes) {
 		return Math.clamp(displayBytes, InventoryItemCodec.minimumDisplayBytes(), InventoryDomainCodec.MAX_DISPLAY_BYTES);
@@ -972,6 +1197,8 @@ public final class InventoryRuntime implements AutoCloseable {
 		@Override public InventorySourceAccess.ReadMode readMode() { return delegate.readMode(); }
 		@Override public InventoryItemCodec.@Nullable Catalog nativeCatalog() { return delegate.nativeCatalog(); }
 		@Override public long nativeCatalogGrowthUpperBound() { return delegate.nativeCatalogGrowthUpperBound(); }
+		@Override public long nativeCatalogGrowthUpperBound(int attempts) { return delegate.nativeCatalogGrowthUpperBound(attempts); }
+		@Override public int nativeCatalogEntriesUpperBound(int attempts) { return delegate.nativeCatalogEntriesUpperBound(attempts); }
 		@Override public long nativeResourceRetainedBytes() { return delegate.nativeResourceRetainedBytes(); }
 		@Override public boolean certifiedResourceSharing() { return delegate.certifiedResourceSharing(); }
 		@Override public @Nullable InventoryResourceValue readResource(int slot) { return delegate.readResource(slot); }
@@ -979,6 +1206,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		@Override public InventorySourceAccess.ResourcePage enumerateResources(int limit, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance allowance) { return delegate.enumerateResources(limit, admission, allowance); }
 		@Override public boolean valid() { return delegate.valid(); }
 		@Override public boolean valid(InventoryValidationBudget.Allowance allowance) { return delegate.valid(allowance); }
+		@Override public InventoryDecision<Boolean> validationDecision(InventoryValidationBudget.Allowance allowance) { return delegate.validationDecision(allowance); }
 		@Override public InventoryValidationBudget.Cost discoveryValidationCost() { return delegate.discoveryValidationCost(); }
 		@Override public InventoryValidationBudget.Cost evidenceValidationCost() { return delegate.evidenceValidationCost(); }
 		@Override public InventoryValidationBudget.Cost readValidationCost(int slots) { return delegate.readValidationCost(slots); }
@@ -1110,10 +1338,12 @@ public final class InventoryRuntime implements AutoCloseable {
 				}
 			}
 		} catch (InventoryItemBudget.CaptureLimitException exceeded) {
+			consumer.currentReason = round.terminalReason = InventoryCaptureDiagnostics.boundReason(exceeded);
 			InventoryCaptureDiagnostics.boundExceeded(consumer.input, "snapshot-discovery", exceeded);
 			if (round.physicalDelay != null) round.physicalDelay.cancel();
 			return InventorySourceAccess.Preparation.INCOMPLETE;
 		} catch (RuntimeException | LinkageError unavailable) {
+			if (InventoryCaptureDiagnostics.providerLimit(unavailable) != null) consumer.currentReason = round.terminalReason = sourceReason(unavailable);
 			if (InventoryCaptureDiagnostics.expectedSourceUnavailable(unavailable))
 				InventoryCaptureDiagnostics.sourceUnavailable("runtime/snapshot-prepare", consumer.input,
 					() -> round.key.toString(), "snapshot-prepare", unavailable);
@@ -1128,22 +1358,32 @@ public final class InventoryRuntime implements AutoCloseable {
 		InventorySourceAccess.@org.jetbrains.annotations.Nullable SnapshotPlan plan = source.snapshotPlan(discovery).orElse(null);
 		long reads = plan == null ? 0 : plan.physicalReadUpperBound();
 		long work = plan == null ? 0 : plan.itemWorkUpperBoundUnits();
-		if (reads < 0 || reads > InventorySourceAccess.MAX_SLOTS || work < 0) {
-			InventoryCaptureDiagnostics.boundExceeded(consumer.input, () -> "snapshot-plan-reads-or-work reads=" + reads + " work=" + work);
+		if (reads < 0 || reads > InventorySourceAccess.CAPTURE_MAX_SLOTS) {
+			consumer.currentReason = round.terminalReason = InventoryFailureReason.CAPTURE_READ_LIMIT;
+			InventoryCaptureDiagnostics.limit(consumer.input, InventoryDiagnosticSite.SNAPSHOT, InventoryOperation.SNAPSHOT,
+				consumer.currentReason, InventoryOutcome.TRUNCATED, "snapshot-plan-reads", reads, physical.used(CAPTURE_READS), physical.limit(CAPTURE_READS), null);
 			return InventorySourceAccess.Preparation.INCOMPLETE;
 		}
-		var admission = physical.tryReserve(Map.of(CAPTURE_READS, reads, ITEM_WORK, work));
-		if (admission.isEmpty()) {
-			physicalDelay(consumer, (physical.remaining(CAPTURE_READS) < reads ? Reason.CAPTURE_COUNT.bit() : 0)
-				| (physical.remaining(ITEM_WORK) < work ? Reason.PROVIDER_WORK.bit() : 0), -1);
+		if (work < 0 || work > physical.limit(ITEM_WORK)) {
+			consumer.currentReason = round.terminalReason = InventoryFailureReason.ITEM_WORK_LIMIT;
+			InventoryCaptureDiagnostics.limit(consumer.input, InventoryDiagnosticSite.SNAPSHOT, InventoryOperation.SNAPSHOT,
+				consumer.currentReason, InventoryOutcome.TRUNCATED, "snapshot-plan-work", work, physical.used(ITEM_WORK), physical.limit(ITEM_WORK), null);
+			return InventorySourceAccess.Preparation.INCOMPLETE;
+		}
+		var admission = physical.tryReserveDecision(Map.of(CAPTURE_READS, reads, ITEM_WORK, work));
+		if (!admission.accepted()) {
+			var counter = java.util.Objects.requireNonNull(admission.limitingCounter());
+			requestDelay(consumer, consumer.admissionDelay, counterReason(counter), "snapshot-admission",
+				counter.equals(CAPTURE_READS) ? reads : work, physical.used(counter), physical.limit(counter));
 			return InventorySourceAccess.Preparation.DEFERRED;
 		}
 		int before = plan == null ? 0 : plan.attemptedPhysicalReads();
 		source.captureAttempted = false;
-		try (var grant = admission.get()) {
+		try (var grant = java.util.Objects.requireNonNull(admission.ticket())) {
 			try {
 				if (plan != null) discovery.admitAdditional(plan.validationCost());
 				var outcome = round.handle.prepareSnapshot(memory, discovery);
+				if (round.handle.terminalReason() != null) consumer.currentReason = round.terminalReason = round.handle.terminalReason();
 				// The handle's documented DEFERRED means plan memory refused before capture.
 				if (outcome == InventorySourceAccess.Preparation.DEFERRED) physicalDelay(consumer, Reason.MEMORY.bit(), -1);
 				else if (outcome == InventorySourceAccess.Preparation.READY) physicalProgress(round);
@@ -1161,13 +1401,22 @@ public final class InventoryRuntime implements AutoCloseable {
 		}
 	}
 	public Optional<Consumer> attach(InventorySourceInput input, Subject subject) {
-		if (consumers.size() >= MAX_CONSUMERS) return Optional.empty();
+		return Optional.ofNullable(attachDecision(input, subject).value());
+	}
+	private void limitRound(Consumer consumer, InventoryFailureReason reason, String stage) {
+		consumer.currentReason = reason;
+		if (consumer.round != null) consumer.round.terminalReason = reason;
+		InventoryCaptureDiagnostics.limit(consumer.input, InventoryDiagnosticSite.CAPTURE, InventoryOperation.READ, reason,
+			InventoryOutcome.TRUNCATED, stage, -1, -1, -1, null);
+	}
+	public InventoryDecision<Consumer> attachDecision(InventorySourceInput input, Subject subject) {
+		if (consumers.size() >= MAX_CONSUMERS) return deferred(InventoryFailureReason.CONSUMER_CAPACITY);
 		var admission = memory.tryReserve(CONSUMER_MEMORY);
-		if (admission.isEmpty()) return Optional.empty();
+		if (admission.isEmpty()) return deferred(InventoryFailureReason.MEMORY_LIMIT);
 		Consumer consumer = new Consumer(input, subject, admission.get());
 		admission.get().commit(CONSUMER_MEMORY);
 		consumers.add(consumer);
-		return Optional.of(consumer);
+		return InventoryDecision.accept(consumer);
 	}
 
 	/** Input-only authority for initial admission, recovery and live SELECT witnesses, not cached publication. */
@@ -1176,42 +1425,62 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	/** Empty is admission defer, not source invalidity. */
 	public Optional<Boolean> probe(InventorySourceInput input) {
-		return probe(input, true);
+		return legacyProbe(probeDecision(input));
 	}
 	private Optional<Boolean> probe(InventorySourceInput input, boolean reportRejection) {
+		return legacyProbe(probeDecision(input, reportRejection));
+	}
+	private static Optional<Boolean> legacyProbe(InventoryDecision<Boolean> decision) {
+		return decision.accepted() ? Optional.of(java.util.Objects.requireNonNull(decision.value())) : decision.deferred() ? Optional.empty() : Optional.of(false);
+	}
+	private static <T> InventoryDecision<T> failureDecision(InventoryDecision<?> decision) {
+		var reason = java.util.Objects.requireNonNull(decision.reason());
+		var impact = java.util.Objects.requireNonNull(decision.impact());
+		return switch (decision.kind()) {
+			case DEFER -> InventoryDecision.defer(reason, impact);
+			case UNSUPPORTED -> InventoryDecision.unsupported(reason, impact);
+			case REJECT -> InventoryDecision.reject(reason, impact);
+			case ACCEPT -> throw new IllegalArgumentException("accepted decision has no failure");
+		};
+	}
+	public InventoryDecision<Boolean> probeDecision(InventorySourceInput input) { return probeDecision(input, true); }
+	private InventoryDecision<Boolean> probeDecision(InventorySourceInput input, boolean reportRejection) {
 		var workspace = memory.tryReserve(authorityWorkspaceBytes());
-		if (workspace.isEmpty()) return Optional.empty();
+		if (workspace.isEmpty()) return deferred(InventoryFailureReason.MEMORY_LIMIT);
 		try (var reserved = workspace.get()) {
-		var ticket = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
-		if (ticket.isEmpty()) return Optional.empty();
+		var ticket = physical.tryReserveDecision(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
+		if (!ticket.accepted()) return deferred(counterReason(java.util.Objects.requireNonNull(ticket.limitingCounter())));
 		InventorySourceAccess.@org.jetbrains.annotations.Nullable Source resolved = null;
-		try (var grant = ticket.get()) {
+		try (var grant = java.util.Objects.requireNonNull(ticket.ticket())) {
 			grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
-			var resolution = validation(resolver.resolutionProbeCost(input), new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE), authorityWorkspaceBytes());
-			if (resolution.isEmpty()) return Optional.empty();
+			var resolution = validationDecision(resolver.resolutionProbeCost(input), new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE), authorityWorkspaceBytes());
+			if (!resolution.accepted()) return failureDecision(resolution);
 			InventoryValidationBudget.Allowance allowance;
-			try (var operation = resolution.get()) {
+			try (var operation = java.util.Objects.requireNonNull(resolution.value())) {
 				allowance = operation.allowance;
 				resolved = resolver.resolve(input, effectiveDisplayCap(), allowance).orElse(null);
 			}
 			try (var source = resolved) {
 				if (source == null) {
 					if (reportRejection) InventoryCaptureDiagnostics.sourceUnavailable("runtime/input-probe", input, null, "resolve-null", null);
-					retireInvalid(input); return Optional.of(false);
+					retireInvalid(input); return InventoryDecision.reject(InventoryFailureReason.SOURCE_UNAVAILABLE, InventoryImpact.DEGRADED);
 				}
-				var evidence = validation(source.evidenceValidationCost(), allowance, authorityWorkspaceBytes());
-				if (evidence.isEmpty()) return Optional.empty();
-				boolean valid;
-				try (var operation = evidence.get()) { valid = source.valid(allowance); }
+				var evidence = validationDecision(source.evidenceValidationCost(), allowance, authorityWorkspaceBytes());
+				if (!evidence.accepted()) return failureDecision(evidence);
+				InventoryDecision<Boolean> sourceValidation;
+				try (var operation = java.util.Objects.requireNonNull(evidence.value())) { sourceValidation = source.validationDecision(allowance); }
+				if (sourceValidation.deferred()) return sourceValidation;
+				boolean valid = sourceValidation.accepted() && Boolean.TRUE.equals(sourceValidation.value());
 				if (!valid) {
 					var probed = source;
 					if (reportRejection) InventoryCaptureDiagnostics.sourceUnavailable("runtime/input-probe", input, () -> probed.key().toString(), "valid-false", null);
 					retireInvalid(input);
 				}
-				return Optional.of(valid);
+				return valid ? InventoryDecision.accept(true) : sourceValidation.accepted()
+					? InventoryDecision.reject(InventoryFailureReason.SOURCE_UNAVAILABLE, InventoryImpact.DEGRADED) : sourceValidation;
 			}
 		} catch (InventoryItemBudget.CaptureLimitException deferred) {
-			return Optional.empty();
+			return deferred(deferReason(deferred));
 		} catch (RuntimeException | LinkageError unavailable) {
 			@org.jetbrains.annotations.Nullable InventorySourceAccess.Source failedSource = resolved;
 			if (InventoryCaptureDiagnostics.expectedSourceUnavailable(unavailable)) {
@@ -1219,19 +1488,44 @@ public final class InventoryRuntime implements AutoCloseable {
 					failedSource == null ? null : () -> failedSource.key().toString(), "input-valid", unavailable);
 			}
 			else InventoryCaptureDiagnostics.warn("runtime/input-probe", input, null, () -> "tick=" + tick, unavailable);
-			retireInvalid(input); return Optional.of(false);
+			retireInvalid(input);
+			return unavailable instanceof nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnsupportedException
+				? InventoryDecision.unsupported(InventoryFailureReason.UNSUPPORTED_LANE, InventoryImpact.DEGRADED)
+				: InventoryDecision.reject(sourceReason(unavailable), InventoryImpact.DEGRADED);
 		}
 		}
 	}
 	/** Recovery still performs the same input-only probe; only repeated diagnostic output is coalesced. */
 	public Optional<Boolean> probeRecovery(Consumer consumer) {
-		var result = probe(consumer.input, !consumer.inputRejectionReported);
+		return legacyProbe(probeRecoveryDecision(consumer));
+	}
+	public InventoryDecision<Boolean> probeRecoveryDecision(Consumer consumer) {
+		var decision = probeDecision(consumer.input, !consumer.inputRejectionReported);
+		var result = legacyProbe(decision);
 		if (result.isPresent()) consumer.inputRejectionReported = !result.get();
-		return result;
+		consumer.currentReason = decision.reason();
+		return decision;
 	}
 	/** Checks the actual observation being published, including the completed result retained during a new sweep. */
 	public Optional<Boolean> probe(Consumer consumer) {
-		try (var attempt = beginProbe(consumer, true, false, true)) { return attempt.result(); }
+		return legacyProbe(probeDecision(consumer));
+	}
+	public InventoryDecision<Boolean> probeDecision(Consumer consumer) {
+		try (var attempt = beginProbe(consumer, true, false, true)) { return attempt.decision(); }
+	}
+	public InventoryDecision<InventorySourceAccess.Preparation> prepareDecision(Consumer consumer) {
+		return preparationDecision(consumer, prepare(consumer));
+	}
+	public InventoryDecision<InventorySourceAccess.Preparation> prepareDecision(Consumer consumer, ProbeAttempt attempt) {
+		return preparationDecision(consumer, prepare(consumer, attempt));
+	}
+	private InventoryDecision<InventorySourceAccess.Preparation> preparationDecision(Consumer consumer, InventorySourceAccess.Preparation result) {
+		if (result == InventorySourceAccess.Preparation.READY) return InventoryDecision.accept(result);
+		@Nullable InventoryFailureReason reason = consumer.currentReason;
+		if (reason == null) reason = result == InventorySourceAccess.Preparation.INCOMPLETE ? InventoryFailureReason.SNAPSHOT_LIMIT
+			: result == InventorySourceAccess.Preparation.DEFERRED ? InventoryFailureReason.ROUND_CAPACITY : InventoryFailureReason.SOURCE_UNAVAILABLE;
+		return result == InventorySourceAccess.Preparation.DEFERRED ? InventoryDecision.defer(reason, InventoryImpact.DEGRADED)
+			: InventoryDecision.reject(reason, InventoryImpact.DEGRADED);
 	}
 	/**
 	 * One synchronous probe that may keep its resolved source for a later
@@ -1248,6 +1542,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		return attempt;
 	}
 	private ProbeAttempt beginProbe(Consumer consumer, boolean reportRejection, boolean retainCandidate, boolean cancelInputDelay) {
+		consumer.currentReason = null;
 		if (consumer.closed || consumer.invalidObservation != null)
 			return new ProbeAttempt(consumer, effectiveDisplayCap(), Optional.of(false), null, null, 0);
 		if (consumer.scanningAssociation != null || consumer.completedAssociation != null) {
@@ -1273,31 +1568,32 @@ public final class InventoryRuntime implements AutoCloseable {
 		var validationCost = consumer.bindingEvidence == null ? InventoryValidationBudget.NONE : consumer.bindingEvidence.evidenceValidationCost();
 		if (completed != null) validationCost = validationCost.plus(completed.handle.evidenceValidationCost());
 		if (scanning != null && scanning != completed) validationCost = validationCost.plus(scanning.handle.evidenceValidationCost());
-		var validation = validation(validationCost);
-		if (validation.isEmpty()) { delay(consumer, consumer.probeDelay, Reason.PROVIDER_WORK.bit() | Reason.MEMORY.bit(), "probe"); return Optional.empty(); }
-		try (var operation = validation.get()) {
+		var validation = validationDecision(validationCost, new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE), 0);
+		if (!validation.accepted()) { validationDelay(consumer, consumer.probeDelay, validation, "probe"); return Optional.empty(); }
+		try (var operation = java.util.Objects.requireNonNull(validation.value())) {
 		var workspace = memory.tryReserve(authorityWorkspaceBytes());
 		if (workspace.isEmpty()) { delay(consumer, consumer.probeDelay, Reason.MEMORY.bit(), "probe"); return Optional.empty(); }
 		try (var reserved = workspace.get()) {
-			var admission = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, (long) calls,
+			var admission = physical.tryReserveDecision(Map.of(InventorySourceAccess.PROBES, (long) calls,
 				InventorySourceAccess.PROVIDER_WORK, calls * InventorySourceAccess.PROVIDER_CALL_WORK));
-			if (admission.isEmpty()) { delay(consumer, consumer.probeDelay, providerReasons(calls, calls * InventorySourceAccess.PROVIDER_CALL_WORK), "probe"); return Optional.empty(); }
+			if (!admission.accepted()) { consumer.currentReason = counterReason(java.util.Objects.requireNonNull(admission.limitingCounter())); delay(consumer, consumer.probeDelay, providerReasons(calls, calls * InventorySourceAccess.PROVIDER_CALL_WORK), "probe"); return Optional.empty(); }
 			int used = 0;
-			try (var grant = admission.get()) {
+			try (var grant = java.util.Objects.requireNonNull(admission.ticket())) {
 				try {
 					if (consumer.bindingEvidence != null) {
 						used++;
 						try {
 							if (!bindingEvidenceValid(consumer, operation.allowance)) { consumer.discardObservation(); return Optional.of(false); }
-						} catch (InventoryItemBudget.CaptureLimitException deferred) { return Optional.empty(); }
+						} catch (InventoryItemBudget.CaptureLimitException deferred) { consumer.currentReason = deferReason(deferred); return Optional.empty(); }
 					}
 					for (Round round : completed == null ? List.of(scanning) : scanning == null || completed == scanning ? List.of(completed) : List.of(completed, scanning)) {
 						used++; // attempted validity calls remain charged, including exceptions and invalid retirement
 						boolean valid;
 						boolean reported = false;
 						try { valid = !round.closed && round.handle.evidenceValid(operation.allowance); }
-						catch (InventoryItemBudget.CaptureLimitException deferred) { return Optional.empty(); }
+						catch (InventoryItemBudget.CaptureLimitException deferred) { consumer.currentReason = deferReason(deferred); return Optional.empty(); }
 						catch (RuntimeException | LinkageError unavailable) {
+							if (InventoryCaptureDiagnostics.providerLimit(unavailable) != null) consumer.currentReason = sourceReason(unavailable);
 							if (InventoryCaptureDiagnostics.expectedSourceUnavailable(unavailable)) {
 								InventoryCaptureDiagnostics.sourceUnavailable("runtime/evidence-probe", consumer.input,
 									() -> round.key.toString(), "evidence-valid", unavailable);
@@ -1325,45 +1621,45 @@ public final class InventoryRuntime implements AutoCloseable {
 		}
 	}
 	private ProbeAttempt inputProbe(Consumer consumer, boolean reportRejection, boolean retainCandidate) {
+		consumer.currentReason = null;
 		InventorySourceInput input = consumer.input;
 		long probeTick = tick;
 		int displayCap = effectiveDisplayCap();
 		var resolutionCost = resolver.resolutionProbeCost(input);
-		if (retainCandidate && certifiedPooling && input.resourceKind() == InventoryResourceKind.ITEM)
-			resolutionCost = resolutionCost.plus(POOL_BOOKKEEPING);
 		long resolutionWorkspace = Math.max(InventoryItemBudget.workspaceUpperBound(displayCap), resolutionCost.workspaceBytes());
 		long envelope = retainCandidate ? checkedAdd(ROUND_MEMORY, resolutionWorkspace) : authorityWorkspaceBytes();
 		var workspaceAdmission = memory.tryReserve(envelope);
-		if (workspaceAdmission.isEmpty()) return new ProbeAttempt(consumer, displayCap, Optional.empty(), null, null, 0);
+		if (workspaceAdmission.isEmpty()) return failedProbe(consumer, displayCap, InventoryFailureReason.MEMORY_LIMIT, true);
 		RetainedMemoryLedger.Ticket workspace = workspaceAdmission.get();
-		var ticket = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
-		if (ticket.isEmpty()) { workspace.close(); return new ProbeAttempt(consumer, displayCap, Optional.empty(), null, null, 0); }
+		var ticket = physical.tryReserveDecision(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
+		if (!ticket.accepted()) { workspace.close(); return failedProbe(consumer, displayCap, counterReason(java.util.Objects.requireNonNull(ticket.limitingCounter())), true); }
 		InventorySourceAccess.@Nullable Source resolved = null;
 		RetainedMemoryLedger.@Nullable Ticket retained = null;
 		@Nullable Throwable primary = null;
 		boolean transferred = false;
-		try (var grant = ticket.get()) {
+		try (var grant = java.util.Objects.requireNonNull(ticket.ticket())) {
 			grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
-			var resolution = validation(resolutionCost, new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE), envelope);
-			if (resolution.isEmpty()) return new ProbeAttempt(consumer, displayCap, Optional.empty(), null, null, 0);
+			var resolution = validationDecision(resolutionCost, new InventoryValidationBudget.Allowance(InventoryValidationBudget.NONE), envelope);
+			if (!resolution.accepted()) { validationDelay(consumer, consumer.probeDelay, resolution, "probe"); return failedProbe(consumer, displayCap, java.util.Objects.requireNonNull(resolution.reason()), true); }
 			InventoryValidationBudget.Allowance allowance;
-			try (var operation = resolution.get()) {
+			try (var operation = java.util.Objects.requireNonNull(resolution.value())) {
 				allowance = operation.allowance;
-				if (retainCandidate && certifiedPooling && input.resourceKind() == InventoryResourceKind.ITEM) allowance.debit(POOL_BOOKKEEPING);
 				resolved = resolver.resolve(input, displayCap, allowance).orElse(null);
 			}
 			if (resolved == null) {
 				if (reportRejection) InventoryCaptureDiagnostics.sourceUnavailable("runtime/input-probe", input, null, "resolve-null", null);
-				retireInvalid(input); return new ProbeAttempt(consumer, displayCap, Optional.of(false), null, null, 0);
+				retireInvalid(input); return failedProbe(consumer, displayCap, InventoryFailureReason.SOURCE_UNAVAILABLE, false);
 			}
-			var evidence = validation(resolved.evidenceValidationCost(), allowance, envelope);
-			if (evidence.isEmpty()) return new ProbeAttempt(consumer, displayCap, Optional.empty(), null, null, 0);
-			boolean valid;
-			try (var operation = evidence.get()) { valid = resolved.valid(allowance); }
+			var evidence = validationDecision(resolved.evidenceValidationCost(), allowance, envelope);
+			if (!evidence.accepted()) { validationDelay(consumer, consumer.probeDelay, evidence, "probe"); return failedProbe(consumer, displayCap, java.util.Objects.requireNonNull(evidence.reason()), true); }
+			InventoryDecision<Boolean> sourceValidation;
+			try (var operation = java.util.Objects.requireNonNull(evidence.value())) { sourceValidation = resolved.validationDecision(allowance); }
+			if (sourceValidation.deferred()) return failedProbe(consumer, displayCap, java.util.Objects.requireNonNull(sourceValidation.reason()), true);
+			boolean valid = sourceValidation.accepted() && Boolean.TRUE.equals(sourceValidation.value());
 			if (!valid) {
 				var probed = resolved;
 				if (reportRejection) InventoryCaptureDiagnostics.sourceUnavailable("runtime/input-probe", input, () -> probed.key().toString(), "valid-false", null);
-				retireInvalid(input); return new ProbeAttempt(consumer, displayCap, Optional.of(false), null, null, 0);
+				retireInvalid(input); return failedProbe(consumer, displayCap, sourceValidation.reason() == null ? InventoryFailureReason.SOURCE_UNAVAILABLE : sourceValidation.reason(), false);
 			}
 			if (retainCandidate && (tick != probeTick || effectiveDisplayCap() != displayCap))
 				return new ProbeAttempt(consumer, displayCap, Optional.empty(), null, null, 0);
@@ -1378,7 +1674,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			return attempt;
 		} catch (InventoryItemBudget.CaptureLimitException deferred) {
 			primary = deferred;
-			return new ProbeAttempt(consumer, displayCap, Optional.empty(), null, null, 0);
+			return failedProbe(consumer, displayCap, deferReason(deferred), true);
 		} catch (RuntimeException | LinkageError unavailable) {
 			primary = unavailable;
 			@org.jetbrains.annotations.Nullable InventorySourceAccess.Source failedSource = resolved;
@@ -1387,7 +1683,13 @@ public final class InventoryRuntime implements AutoCloseable {
 					failedSource == null ? null : () -> failedSource.key().toString(), "input-valid", unavailable);
 			}
 			else InventoryCaptureDiagnostics.warn("runtime/input-probe", input, null, () -> "tick=" + tick, unavailable);
-			retireInvalid(input); return new ProbeAttempt(consumer, displayCap, Optional.of(false), null, null, 0);
+			retireInvalid(input);
+			if (InventoryCaptureDiagnostics.providerLimit(unavailable) != null) {
+				consumer.currentReason = sourceReason(unavailable);
+				return new ProbeAttempt(consumer, displayCap, Optional.of(false), null, null, 0);
+			}
+			return failedProbe(consumer, displayCap,
+				unavailable instanceof nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnsupportedException ? InventoryFailureReason.UNSUPPORTED_LANE : sourceReason(unavailable), false);
 		} catch (Error fatal) {
 			primary = fatal;
 			throw fatal;
@@ -1408,6 +1710,16 @@ public final class InventoryRuntime implements AutoCloseable {
 				else release.close();
 			}
 		}
+	}
+	private ProbeAttempt failedProbe(Consumer consumer, int cap, InventoryFailureReason reason, boolean defer) {
+		consumer.currentReason = reason;
+		// The source-unavailability boundary already owns its lazy cause/context
+		// report and consumer transition suppression. Scheduling limits have no
+		// source-failure report and use the shared limit terminal here.
+		if (defer || reason != InventoryFailureReason.SOURCE_UNAVAILABLE)
+			InventoryCaptureDiagnostics.limit(consumer.input, InventoryDiagnosticSite.VALIDATION, InventoryOperation.VALIDATE,
+				reason, defer ? InventoryOutcome.DEFERRED : InventoryOutcome.REJECTED, "input-probe", -1, -1, -1, null);
+		return new ProbeAttempt(consumer, cap, defer ? Optional.empty() : Optional.of(false), null, null, 0);
 	}
 	/** Releases an untransferred candidate exactly once; a failed close is an input-probe failure. */
 	private void closeProbeCandidate(Consumer owner, InventorySourceInput input, InventorySourceAccess.Source candidate, RetainedMemoryLedger.@Nullable Ticket ticket) {
@@ -1440,6 +1752,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		private final Thread thread = Thread.currentThread();
 		private final int displayCeiling;
 		private final Optional<Boolean> result;
+		private final InventoryDecision<Boolean> decision;
 		private final long metadataUpperBound;
 		private @Nullable InventorySourceAccess.Source source;
 		private @Nullable RetainedMemoryLedger.Ticket ticket;
@@ -1448,9 +1761,13 @@ public final class InventoryRuntime implements AutoCloseable {
 			@Nullable InventorySourceAccess.Source source, @Nullable RetainedMemoryLedger.Ticket ticket, long metadataUpperBound) {
 			this.consumer = consumer; this.input = consumer.input; this.tick = InventoryRuntime.this.tick;
 			this.displayCeiling = displayCeiling; this.result = result; this.source = source; this.ticket = ticket;
+			decision = consumer.currentReason == InventoryFailureReason.UNSUPPORTED_LANE ? InventoryDecision.unsupported(InventoryFailureReason.UNSUPPORTED_LANE, InventoryImpact.DEGRADED)
+				: result.isEmpty() ? InventoryDecision.defer(consumer.currentReason == null ? InventoryFailureReason.ITEM_WORK_LIMIT : consumer.currentReason, InventoryImpact.DEGRADED)
+				: result.get() ? InventoryDecision.accept(true) : InventoryDecision.reject(consumer.currentReason == null ? InventoryFailureReason.SOURCE_UNAVAILABLE : consumer.currentReason, InventoryImpact.DEGRADED);
 			this.metadataUpperBound = metadataUpperBound;
 		}
 		public Optional<Boolean> result() { return result; }
+		public InventoryDecision<Boolean> decision() { return decision; }
 		private Adoption take(Consumer expectedConsumer, long expectedTick, int expectedDisplayCeiling) {
 			if (closed) throw new IllegalStateException("closed inventory probe attempt");
 			if (transferred) throw new IllegalStateException("inventory probe attempt was already transferred");
@@ -1564,6 +1881,7 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	private InventorySourceAccess.Preparation prepareWithCandidate(Consumer consumer, InventoryValidationBudget.Allowance allowance,
 		boolean joinOnly, @Nullable Candidate candidate) {
+		consumer.currentReason = null;
 		boolean pooled = certifiedPooling && consumer.input.resourceKind() == InventoryResourceKind.ITEM;
 		if (consumer.closed) return InventorySourceAccess.Preparation.UNAVAILABLE;
 		if (consumer.invalidObservation != null || consumer.pendingObservation != null)
@@ -1572,10 +1890,13 @@ public final class InventoryRuntime implements AutoCloseable {
 		installFluidGrants(allowance);
 		@Nullable Round handoff = pooled ? consumer.successorEntitlement
 			: consumer.subject instanceof TrackingSubject && consumer.completedRound != null ? consumer.completedRound.successor : null;
-		if (consumer.round == null && consumer.completedRound != null && !consumer.completedRound.predecessors.isEmpty())
+		if (consumer.round == null && consumer.completedRound != null && !consumer.completedRound.predecessors.isEmpty()) {
+			delay(consumer, consumer.admissionDelay, Reason.ROUND_CAPACITY.bit(), "handoff");
 			return InventorySourceAccess.Preparation.DEFERRED; // finish the physical handoff before another replacement forks
-		if (pooled && consumer.round == null && consumer.completedRound != null && consumer.completedRound.incomingEntitlements != 0)
-			return InventorySourceAccess.Preparation.DEFERRED;
+		}
+		if (pooled && consumer.round == null && consumer.completedRound != null && consumer.completedRound.incomingEntitlements != 0) {
+			delay(consumer, consumer.admissionDelay, Reason.ROUND_CAPACITY.bit(), "handoff"); return InventorySourceAccess.Preparation.DEFERRED;
+		}
 		var bindingCheck = checkBindingEvidence(consumer, allowance);
 		if (bindingCheck != InventorySourceAccess.Preparation.READY) return bindingCheck;
 		if (consumer.round != null && consumer.round.sweep != null) return joinOnly ? InventorySourceAccess.Preparation.READY : preparePooledCatalog(consumer, allowance);
@@ -1602,7 +1923,7 @@ public final class InventoryRuntime implements AutoCloseable {
 				if (joinOnly) return InventorySourceAccess.Preparation.READY;
 				delay(consumer, consumer.admissionDelay, Reason.ROUND_CAPACITY.bit(), "admission"); return InventorySourceAccess.Preparation.DEFERRED;
 			}
-			var resolutionCost = resolver.resolutionProbeCost(consumer.input).plus(pooled ? POOL_BOOKKEEPING : InventoryValidationBudget.NONE);
+			var resolutionCost = resolver.resolutionProbeCost(consumer.input);
 			long resolutionWorkspace = Math.max(InventoryItemBudget.workspaceUpperBound(effectiveDisplayCap()), resolutionCost.workspaceBytes());
 			var retainedAdmission = candidate == null
 				? memory.tryReserve(checkedAdd(ROUND_MEMORY, resolutionWorkspace))
@@ -1630,25 +1951,25 @@ public final class InventoryRuntime implements AutoCloseable {
 					}
 					openedHandle = started.handle();
 				} else {
-					var resolution = validation(resolutionCost, allowance, resolutionWorkspace);
-					if (resolution.isEmpty()) { delay(consumer, consumer.admissionDelay, Reason.PROVIDER_WORK.bit() | Reason.MEMORY.bit(), "admission"); return InventorySourceAccess.Preparation.DEFERRED; }
-					SourceAccess.ResolveResult resolved;
-					try (var operation = resolution.get()) {
-						if (pooled) operation.allowance.debit(POOL_BOOKKEEPING);
-						resolved = access.resolve(MinecraftBlockReadSources.detached(consumer.input.target()), scope, physical, operation.allowance);
+					var resolution = validationDecision(resolutionCost, allowance, resolutionWorkspace);
+					if (!resolution.accepted()) { validationDelay(consumer, consumer.admissionDelay, resolution, "admission"); return InventorySourceAccess.Preparation.DEFERRED; }
+					InventoryDecision<SourceAccess.Descriptor> resolved;
+					try (var operation = java.util.Objects.requireNonNull(resolution.value())) {
+						resolved = access.resolveDecision(MinecraftBlockReadSources.detached(consumer.input.target()), scope, physical, operation.allowance);
 					}
-					if (!(resolved instanceof SourceAccess.ResolveResult.Available available)) {
-						if (resolved == SourceAccess.ResolveResult.Unresolved.DEFERRED) {
-							delay(consumer, consumer.admissionDelay, providerReasons(1, InventorySourceAccess.PROVIDER_CALL_WORK), "admission");
+					if (!resolved.accepted()) {
+						consumer.currentReason = resolved.reason();
+						if (resolved.deferred()) {
+							validationDelay(consumer, consumer.admissionDelay, resolved, "admission");
 							return InventorySourceAccess.Preparation.DEFERRED;
 						}
 						consumer.cancelDelays();
 						consumer.pendingObservation = unavailable(scope.viewKey());
 						InventoryCaptureDiagnostics.sourceUnavailable("runtime/prepare", consumer.input, null,
-							resolved == SourceAccess.ResolveResult.Unresolved.UNSUPPORTED ? "resolve-unsupported" : "resolve-unavailable", null);
+							resolved.unsupported() ? "resolve-unsupported" : "resolve-unavailable", null);
 						return InventorySourceAccess.Preparation.UNAVAILABLE;
 					}
-					var opened = access.open(available.descriptor(), scope, physical);
+					var opened = access.open(java.util.Objects.requireNonNull(resolved.value()), scope, physical);
 					if (!(opened instanceof SourceAccess.OpenResult.Started started)) {
 						if (opened == SourceAccess.OpenResult.Unstarted.DEFERRED) return InventorySourceAccess.Preparation.DEFERRED;
 						consumer.pendingObservation = unavailable(scope.viewKey());
@@ -1723,7 +2044,12 @@ public final class InventoryRuntime implements AutoCloseable {
 		}
 		Round round = consumer.round;
 		consumer.admissionDelay.progress(cycle(consumer));
-		if (round.preparation != null) return round.preparation;
+		if (round.preparation != null) {
+			if ((round.preparation == InventorySourceAccess.Preparation.INCOMPLETE || round.preparation == InventorySourceAccess.Preparation.UNAVAILABLE)
+				&& round.terminalReason != null) consumer.currentReason = round.terminalReason;
+			if (round.preparation == InventorySourceAccess.Preparation.INCOMPLETE && consumer.currentReason == null) consumer.currentReason = InventoryFailureReason.SNAPSHOT_LIMIT;
+			return round.preparation;
+		}
 		if (round.sourceProjectionUnsupported) return InventorySourceAccess.Preparation.READY;
 		var admission = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, 1L,
 			InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
@@ -1739,6 +2065,19 @@ public final class InventoryRuntime implements AutoCloseable {
 	private InventorySourceAccess.Preparation admitPooled(Consumer consumer, @Nullable Round entitlement, SourceKey key,
 		InventorySourceAccess.InventoryHandle handle, InventorySharedRead.Port port, RetainedMemoryLedger.Ticket leaseMemory,
 		boolean canCreate, InventoryValidationBudget.Allowance allowance, boolean joinOnly) {
+		// The pure cost-directory walk is itself bounded by actual retained rounds and members.
+		long directoryWork = 4096L + liveRounds.size() * 128L;
+		if (!claimDetachedItemWork(directoryWork)) { requestDelay(consumer, consumer.admissionDelay, InventoryFailureReason.ITEM_WORK_LIMIT,
+			"pool-directory", directoryWork, physical.used(ITEM_WORK), physical.limit(ITEM_WORK)); return InventorySourceAccess.Preparation.DEFERRED; }
+		InventoryValidationBudget.Cost bookkeepingCost;
+		try { bookkeepingCost = poolBookkeepingCost(port); }
+		catch (InventoryValidationBudget.ItemResolutionDeferred deferred) { requestDelay(consumer, consumer.admissionDelay, deferred.reason(),
+			"pool-bookkeeping", -1, -1, -1); return InventorySourceAccess.Preparation.DEFERRED; }
+		var bookkeeping = memory.tryReserve(bookkeepingCost.workspaceBytes());
+		if (bookkeeping.isEmpty()) { delay(consumer, consumer.admissionDelay, Reason.MEMORY.bit(), "pool-bookkeeping"); return InventorySourceAccess.Preparation.DEFERRED; }
+		try (var bookkeepingOperation = bookkeeping.get()) {
+		if (!claimDetachedItemWork(bookkeepingCost.workUnits())) { requestDelay(consumer, consumer.admissionDelay, InventoryFailureReason.ITEM_WORK_LIMIT,
+			"pool-bookkeeping", bookkeepingCost.workUnits(), physical.used(ITEM_WORK), physical.limit(ITEM_WORK)); return InventorySourceAccess.Preparation.DEFERRED; }
 		var frozen = entitlement == null ? policy : entitlement.policy;
 		var lookup = new PooledKey(port.proof().graph(), frozen, frozen.distinguishPlayers() ? consumer.input.readOwner() : null,
 			frozen.distinguishFaces() ? consumer.input.face() : null);
@@ -1747,24 +2086,35 @@ public final class InventoryRuntime implements AutoCloseable {
 			consumer.discardObservation(); return InventorySourceAccess.Preparation.UNAVAILABLE;
 		}
 		var expected = selected == null ? port.proof() : java.util.Objects.requireNonNull(selected.sweep).proof;
-		var validation = validation(port.validationCost(), allowance);
-		if (validation.isEmpty()) return InventorySourceAccess.Preparation.DEFERRED;
+		var validation = validationDecision(port.validationCost(), allowance, 0);
+		if (!validation.accepted()) { validationDelay(consumer, consumer.admissionDelay, validation, "pool-validation"); return InventorySourceAccess.Preparation.DEFERRED; }
 		InventorySharedRead.Check check;
-		try (var operation = validation.get()) {
-			var probe = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
-			if (probe.isEmpty()) return InventorySourceAccess.Preparation.DEFERRED;
-			try (var grant = probe.get()) {
+		try (var operation = java.util.Objects.requireNonNull(validation.value())) {
+			var probe = physical.tryReserveDecision(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
+			if (!probe.accepted()) { var counter = java.util.Objects.requireNonNull(probe.limitingCounter()); requestDelay(consumer, consumer.admissionDelay,
+				counterReason(counter), "pool-probe", counter.equals(InventorySourceAccess.PROBES) ? 1 : InventorySourceAccess.PROVIDER_CALL_WORK,
+				physical.used(counter), physical.limit(counter)); return InventorySourceAccess.Preparation.DEFERRED; }
+			try (var grant = java.util.Objects.requireNonNull(probe.ticket())) {
 				grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
 				check = port.validate(expected, operation.allowance);
 			}
 		}
-		catch (InventoryItemBudget.CaptureLimitException deferred) { check = InventorySharedRead.Check.DEFERRED; }
+		catch (InventoryItemBudget.CaptureLimitException deferred) { requestDelay(consumer, consumer.admissionDelay, deferred.reason(),
+			"pool-validation", -1, -1, -1); return InventorySourceAccess.Preparation.DEFERRED; }
 		catch (RuntimeException | LinkageError failure) {
 			warnPooled("metadata-validate", consumer, selected, expected, "pool-admission", failure);
+			if (InventoryCaptureDiagnostics.providerLimit(failure) != null) {
+				consumer.currentReason = sourceReason(failure);
+				if (selected != null) retire(selected, unavailable(consumer.input.viewKey()));
+				consumer.discardObservation(); return InventorySourceAccess.Preparation.UNAVAILABLE;
+			}
 			check = InventorySharedRead.Check.UNAVAILABLE;
 		}
-		if (check == InventorySharedRead.Check.DEFERRED) return InventorySourceAccess.Preparation.DEFERRED;
+		if (check == InventorySharedRead.Check.DEFERRED) { requestDelay(consumer, consumer.admissionDelay, InventoryFailureReason.ITEM_WORK_LIMIT,
+			"pool-validation", -1, -1, -1); return InventorySourceAccess.Preparation.DEFERRED; }
 		if (check != InventorySharedRead.Check.VALID) {
+			consumer.currentReason = check == InventorySharedRead.Check.AUTHORITY_DENIED ? InventoryFailureReason.SOURCE_AUTHORITY_DENIED
+				: check == InventorySharedRead.Check.STRUCTURE_INVALID ? InventoryFailureReason.SOURCE_CHANGED : InventoryFailureReason.SOURCE_UNAVAILABLE;
 			if (selected != null && check != InventorySharedRead.Check.AUTHORITY_DENIED) retire(selected, unavailable(consumer.input.viewKey()));
 			consumer.discardObservation(); return InventorySourceAccess.Preparation.UNAVAILABLE;
 		}
@@ -1780,12 +2130,12 @@ public final class InventoryRuntime implements AutoCloseable {
 			return InventorySourceAccess.Preparation.DEFERRED;
 		if (selected == null) {
 			if (joinOnly) return InventorySourceAccess.Preparation.READY;
-			if (!canCreate) return InventorySourceAccess.Preparation.DEFERRED;
+			if (!canCreate) { delay(consumer, consumer.admissionDelay, Reason.ROUND_CAPACITY.bit(), "pool-round"); return InventorySourceAccess.Preparation.DEFERRED; }
 			if (scanningRounds >= MAX_ROUNDS || retainedRounds >= (consumer.completedRound == null ? MAX_ROUNDS : MAX_RETAINED_ROUNDS))
 				return InventorySourceAccess.Preparation.DEFERRED;
 			// The kept proof remains owned after its original sampler departs. Charge its complete source-profile envelope independently.
 			var roundMemory = memory.tryReserve(checkedAdd(ROUND_MEMORY, port.retainedBytes()));
-			if (roundMemory.isEmpty()) return InventorySourceAccess.Preparation.DEFERRED;
+			if (roundMemory.isEmpty()) { delay(consumer, consumer.admissionDelay, Reason.MEMORY.bit(), "pool-round"); return InventorySourceAccess.Preparation.DEFERRED; }
 			roundMemory.get().commit(checkedAdd(ROUND_MEMORY, port.retainedBytes()));
 			selected = new Round(key, consumer.input, lookup, new PooledSweep(expected), roundMemory.get(), tick, ++roundSequence, effectiveDisplayCap());
 			retainedRounds++; scanningRounds++; liveRounds.add(selected); rounds.put(lookup, selected);
@@ -1796,6 +2146,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		consumer.scanningAssociation = new Association(selected, new BindingLease(consumer.input, handle, port, leaseMemory), port.proof());
 		join(consumer, selected);
 		return joinOnly ? InventorySourceAccess.Preparation.READY : preparePooledCatalog(consumer, allowance);
+		}
 	}
 	private @Nullable Round oldestPooledCandidate(Consumer consumer, PooledKey lookup, InventorySharedRead.Proof proof, SourceKey key) {
 		for (Round candidate : liveRounds) if (pooledCandidate(consumer, candidate, lookup, proof, key)) return candidate;
@@ -1815,15 +2166,17 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (sweep.catalog != null) return InventorySourceAccess.Preparation.READY;
 		Association association = java.util.Objects.requireNonNull(consumer.scanningAssociation);
 		var retained = memory.tryReserve(InventoryItemCodec.Catalog.initialModeledBytes());
-		if (retained.isEmpty()) return InventorySourceAccess.Preparation.DEFERRED;
+		if (retained.isEmpty()) { delay(consumer, consumer.admissionDelay, Reason.MEMORY.bit(), "pool-catalog"); return InventorySourceAccess.Preparation.DEFERRED; }
 		boolean transferred = false;
 		try {
-			var validation = validation(association.lease.port.catalogCreationCost(), allowance);
-			if (validation.isEmpty()) return InventorySourceAccess.Preparation.DEFERRED;
-			try (var operation = validation.get()) {
-				var probe = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
-				if (probe.isEmpty()) return InventorySourceAccess.Preparation.DEFERRED;
-				try (var grant = probe.get()) {
+			var validation = validationDecision(association.lease.port.catalogCreationCost(), allowance, 0);
+			if (!validation.accepted()) { validationDelay(consumer, consumer.admissionDelay, validation, "pool-catalog"); return InventorySourceAccess.Preparation.DEFERRED; }
+			try (var operation = java.util.Objects.requireNonNull(validation.value())) {
+				var probe = physical.tryReserveDecision(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
+				if (!probe.accepted()) { var counter = java.util.Objects.requireNonNull(probe.limitingCounter()); requestDelay(consumer, consumer.admissionDelay,
+					counterReason(counter), "pool-catalog-probe", counter.equals(InventorySourceAccess.PROBES) ? 1 : InventorySourceAccess.PROVIDER_CALL_WORK,
+					physical.used(counter), physical.limit(counter)); return InventorySourceAccess.Preparation.DEFERRED; }
+				try (var grant = java.util.Objects.requireNonNull(probe.ticket())) {
 					grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
 					sweep.catalog = association.lease.port.createCatalog(round.appliedBytes, operation.allowance);
 				}
@@ -1833,15 +2186,37 @@ public final class InventoryRuntime implements AutoCloseable {
 			return round.preparation;
 		} catch (InventorySharedRead.ReadFailure failure) {
 			warnPooled("catalog-create", consumer, round, association.expected, "catalog-create", failure);
-			pooledFailure(consumer, association, failure.check()); return InventorySourceAccess.Preparation.UNAVAILABLE;
+			if (providerFailure(consumer, association, failure)) return InventorySourceAccess.Preparation.UNAVAILABLE;
+			pooledFailure(consumer, association, failure.check()); return failure.check() == InventorySharedRead.Check.DEFERRED
+				? InventorySourceAccess.Preparation.DEFERRED : InventorySourceAccess.Preparation.UNAVAILABLE;
 		} catch (InventoryItemBudget.CaptureLimitException capacity) {
-			pooledFailure(consumer, association, InventorySharedRead.Check.UNAVAILABLE); return InventorySourceAccess.Preparation.UNAVAILABLE;
+			requestDelay(consumer, consumer.admissionDelay, capacity.reason(), "pool-catalog", -1, -1, -1);
+			return InventorySourceAccess.Preparation.DEFERRED;
 		} catch (RuntimeException | LinkageError failure) {
 			warnPooled("catalog-create", consumer, round, association.expected, "catalog-create", failure);
+			if (providerFailure(consumer, association, failure)) return InventorySourceAccess.Preparation.UNAVAILABLE;
 			pooledFailure(consumer, association, InventorySharedRead.Check.UNAVAILABLE); return InventorySourceAccess.Preparation.UNAVAILABLE;
 		} finally { if (!transferred) retained.get().close(); }
 	}
+	private boolean providerFailure(Consumer consumer, Association association, Throwable failure) {
+		@Nullable var limit = InventoryCaptureDiagnostics.providerLimit(failure);
+		if (limit == null) return false;
+		pooledFailure(consumer, association, InventorySharedRead.Check.UNAVAILABLE);
+		consumer.currentReason = limit.reason();
+		return true;
+	}
 	private void pooledFailure(Consumer consumer, Association association, InventorySharedRead.Check check) {
+		if (check == InventorySharedRead.Check.DEFERRED) {
+			requestDelay(consumer, consumer.probeDelay, InventoryFailureReason.ITEM_WORK_LIMIT, "pool-check", -1, -1, -1);
+			return;
+		}
+		consumer.currentReason = switch (check) {
+			case AUTHORITY_DENIED -> InventoryFailureReason.SOURCE_AUTHORITY_DENIED;
+			case STRUCTURE_INVALID -> InventoryFailureReason.SOURCE_CHANGED;
+			case DEFERRED -> InventoryFailureReason.ITEM_WORK_LIMIT;
+			case UNAVAILABLE -> InventoryFailureReason.SOURCE_UNAVAILABLE;
+			case VALID -> null;
+		};
 		if (check == InventorySharedRead.Check.AUTHORITY_DENIED) consumer.discardObservation();
 		else if (check != InventorySharedRead.Check.DEFERRED) {
 			for (Round affected : List.copyOf(liveRounds)) if (affected.sweep != null && affected.sweep.proof.equals(association.expected))
@@ -1860,15 +2235,16 @@ public final class InventoryRuntime implements AutoCloseable {
 	private boolean bindingEvidenceValid(Consumer consumer, InventoryValidationBudget.Allowance allowance) {
 		try { return consumer.bindingEvidence == null || consumer.bindingEvidence.evidenceValid(allowance); }
 		catch (InventoryItemBudget.CaptureLimitException deferred) { throw deferred; }
-		catch (RuntimeException | LinkageError unavailable) { warn("binding-probe", consumer, consumer.round, unavailable); return false; }
+		catch (RuntimeException | LinkageError unavailable) { if (InventoryCaptureDiagnostics.providerLimit(unavailable) != null) consumer.currentReason = sourceReason(unavailable);
+			warn("binding-probe", consumer, consumer.round, unavailable); return false; }
 	}
 	/** Cache consumption checks its own original binding, not only the peer whose physical sweep was shared. */
 	private InventorySourceAccess.Preparation checkBindingEvidence(Consumer consumer, InventoryValidationBudget.Allowance allowance) {
 		if (consumer.scanningAssociation != null || consumer.completedAssociation != null) return checkAssociations(consumer, allowance);
 		if (consumer.bindingEvidence == null) return InventorySourceAccess.Preparation.READY;
-		var validation = validation(consumer.bindingEvidence.evidenceValidationCost(), allowance);
-		if (validation.isEmpty()) { delay(consumer, consumer.probeDelay, Reason.PROVIDER_WORK.bit() | Reason.MEMORY.bit(), "probe"); return InventorySourceAccess.Preparation.DEFERRED; }
-		try (var operation = validation.get()) {
+		var validation = validationDecision(consumer.bindingEvidence.evidenceValidationCost(), allowance, 0);
+		if (!validation.accepted()) { validationDelay(consumer, consumer.probeDelay, validation, "probe"); return InventorySourceAccess.Preparation.DEFERRED; }
+		try (var operation = java.util.Objects.requireNonNull(validation.value())) {
 		var workspace = memory.tryReserve(authorityWorkspaceBytes());
 		if (workspace.isEmpty()) { delay(consumer, consumer.probeDelay, Reason.MEMORY.bit(), "probe"); return InventorySourceAccess.Preparation.DEFERRED; }
 		try (var reserved = workspace.get()) {
@@ -1879,7 +2255,7 @@ public final class InventoryRuntime implements AutoCloseable {
 				grant.commit(Map.of(InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
 				try {
 					if (!bindingEvidenceValid(consumer, operation.allowance)) { consumer.discardObservation(); return InventorySourceAccess.Preparation.UNAVAILABLE; }
-				} catch (InventoryItemBudget.CaptureLimitException deferred) { return InventorySourceAccess.Preparation.DEFERRED; }
+				} catch (InventoryItemBudget.CaptureLimitException deferred) { consumer.currentReason = deferReason(deferred); return InventorySourceAccess.Preparation.DEFERRED; }
 				consumer.probeDelay.progress(cycle(consumer));
 				return InventorySourceAccess.Preparation.READY;
 			}
@@ -1896,13 +2272,13 @@ public final class InventoryRuntime implements AutoCloseable {
 			if (association != null) { cost = cost.plus(association.lease.port.validationCost()); calls++; }
 			else if (round != null) { cost = cost.plus(round.handle.evidenceValidationCost()); calls++; }
 		}
-		var validation = validation(cost, allowance);
-		if (validation.isEmpty()) { delay(consumer, consumer.probeDelay, Reason.PROVIDER_WORK.bit() | Reason.MEMORY.bit(), "probe"); return InventorySourceAccess.Preparation.DEFERRED; }
-		try (var operation = validation.get()) {
-			var probe = physical.tryReserve(Map.of(InventorySourceAccess.PROBES, (long) calls, InventorySourceAccess.PROVIDER_WORK, calls * InventorySourceAccess.PROVIDER_CALL_WORK));
-			if (probe.isEmpty()) return InventorySourceAccess.Preparation.DEFERRED;
+		var validation = validationDecision(cost, allowance, 0);
+		if (!validation.accepted()) { validationDelay(consumer, consumer.probeDelay, validation, "probe"); return InventorySourceAccess.Preparation.DEFERRED; }
+		try (var operation = java.util.Objects.requireNonNull(validation.value())) {
+			var probe = physical.tryReserveDecision(Map.of(InventorySourceAccess.PROBES, (long) calls, InventorySourceAccess.PROVIDER_WORK, calls * InventorySourceAccess.PROVIDER_CALL_WORK));
+			if (!probe.accepted()) { consumer.currentReason = counterReason(java.util.Objects.requireNonNull(probe.limitingCounter())); return InventorySourceAccess.Preparation.DEFERRED; }
 			int attempted = 0;
-			try (var grant = probe.get()) {
+			try (var grant = java.util.Objects.requireNonNull(probe.ticket())) {
 				try {
 					for (int index = 0; index < 2; index++) {
 						@Nullable Round round = index == 0 ? consumer.completedRound : consumer.round;
@@ -1912,17 +2288,23 @@ public final class InventoryRuntime implements AutoCloseable {
 						if (association != null) {
 							InventorySharedRead.Check check;
 							try { check = association.lease.port.validate(association.expected, operation.allowance); }
+							catch (InventoryItemBudget.CaptureLimitException deferred) { consumer.currentReason = deferReason(deferred); return InventorySourceAccess.Preparation.DEFERRED; }
 							catch (RuntimeException | LinkageError failure) {
 								warnPooled("metadata-validate", consumer, round, association.expected, "association-validate", failure);
+								if (providerFailure(consumer, association, failure)) return InventorySourceAccess.Preparation.UNAVAILABLE;
 								check = InventorySharedRead.Check.UNAVAILABLE;
 							}
-							if (check == InventorySharedRead.Check.DEFERRED) return InventorySourceAccess.Preparation.DEFERRED;
-							if (check != InventorySharedRead.Check.VALID) { pooledFailure(consumer, association, check); return InventorySourceAccess.Preparation.UNAVAILABLE; }
+							if (check == InventorySharedRead.Check.DEFERRED) { consumer.currentReason = InventoryFailureReason.ITEM_WORK_LIMIT; return InventorySourceAccess.Preparation.DEFERRED; }
+							if (check != InventorySharedRead.Check.VALID) {
+								consumer.currentReason = check == InventorySharedRead.Check.AUTHORITY_DENIED ? InventoryFailureReason.SOURCE_AUTHORITY_DENIED
+									: check == InventorySharedRead.Check.STRUCTURE_INVALID ? InventoryFailureReason.SOURCE_CHANGED : InventoryFailureReason.SOURCE_UNAVAILABLE;
+								pooledFailure(consumer, association, check); return InventorySourceAccess.Preparation.UNAVAILABLE;
+							}
 						} else {
 							boolean valid;
 							try { valid = round.handle.evidenceValid(operation.allowance); }
-							catch (InventoryItemBudget.CaptureLimitException deferred) { return InventorySourceAccess.Preparation.DEFERRED; }
-							catch (RuntimeException | LinkageError failure) { valid = false; }
+							catch (InventoryItemBudget.CaptureLimitException deferred) { consumer.currentReason = deferReason(deferred); return InventorySourceAccess.Preparation.DEFERRED; }
+							catch (RuntimeException | LinkageError failure) { consumer.currentReason = sourceReason(failure); valid = false; }
 							if (!valid) { retire(round, unavailable(consumer.input.viewKey())); return InventorySourceAccess.Preparation.UNAVAILABLE; }
 						}
 					}
@@ -1935,9 +2317,9 @@ public final class InventoryRuntime implements AutoCloseable {
 	private InventorySourceAccess.Preparation prepareHandoff(Consumer consumer, Round handoff, InventoryValidationBudget.Allowance allowance) {
 		var bindingCheck = checkBindingEvidence(consumer, allowance);
 		if (bindingCheck != InventorySourceAccess.Preparation.READY) return bindingCheck;
-		var validation = validation(handoff.handle.evidenceValidationCost(), allowance);
-		if (validation.isEmpty()) { delay(consumer, consumer.probeDelay, Reason.PROVIDER_WORK.bit() | Reason.MEMORY.bit(), "probe"); return InventorySourceAccess.Preparation.DEFERRED; }
-		try (var operation = validation.get()) {
+		var validation = validationDecision(handoff.handle.evidenceValidationCost(), allowance, 0);
+		if (!validation.accepted()) { validationDelay(consumer, consumer.probeDelay, validation, "probe"); return InventorySourceAccess.Preparation.DEFERRED; }
+		try (var operation = java.util.Objects.requireNonNull(validation.value())) {
 		// A cached successor may be consumed after its original scanner's tick. Validate its
 		// own retained evidence, not just the slow peer's still-published predecessor.
 		var workspace = memory.tryReserve(authorityWorkspaceBytes());
@@ -1951,8 +2333,9 @@ public final class InventoryRuntime implements AutoCloseable {
 					InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK));
 				boolean valid;
 				try { valid = !handoff.closed && handoff.handle.evidenceValid(operation.allowance); }
-				catch (InventoryItemBudget.CaptureLimitException deferred) { return InventorySourceAccess.Preparation.DEFERRED; }
-				catch (RuntimeException | LinkageError unavailable) { warn("handoff-probe", consumer, handoff, unavailable); valid = false; }
+				catch (InventoryItemBudget.CaptureLimitException deferred) { consumer.currentReason = deferReason(deferred); return InventorySourceAccess.Preparation.DEFERRED; }
+				catch (RuntimeException | LinkageError unavailable) { if (InventoryCaptureDiagnostics.providerLimit(unavailable) != null) consumer.currentReason = sourceReason(unavailable);
+					warn("handoff-probe", consumer, handoff, unavailable); valid = false; }
 				if (!valid) {
 					Observation invalid = unavailable(consumer.input.viewKey());
 					retire(handoff, invalid); consumer.pendingObservation = invalid;
@@ -1966,6 +2349,21 @@ public final class InventoryRuntime implements AutoCloseable {
 		return handoff.preparation == null ? prepare(consumer, allowance) : handoff.preparation;
 	}
 	private Optional<Observation> step(Consumer consumer, int slotBound, @Nullable ProbeAttempt attempt) {
+		var outcome = stepOwned(consumer, slotBound, attempt);
+		@Nullable Round round = consumer.round;
+		if (round != null && outcome.isPresent()) {
+			if (round.terminalReason == null && round.handle != null) round.terminalReason = round.handle.terminalReason();
+			var result = outcome.get().result();
+			if (result.availability() == CaptureResult.Availability.READABLE) {
+				if (result.completeness() == CaptureResult.Completeness.INCOMPLETE && round.terminalReason != null)
+					consumer.currentReason = round.terminalReason;
+				else if (consumer.currentReason == round.terminalReason) consumer.currentReason = null;
+			}
+		}
+		return outcome;
+	}
+	private Optional<Observation> stepOwned(Consumer consumer, int slotBound, @Nullable ProbeAttempt attempt) {
+		consumer.currentReason = null;
 		long readGeneration = monitor.enabled() ? monitor.collectionGeneration() : -1;
 		if (slotBound < 1 || slotBound > InventorySourceAccess.MAX_STEP) throw new IllegalArgumentException("inventory step bound");
 		if (consumer.closed) return Optional.empty();
@@ -2060,15 +2458,15 @@ public final class InventoryRuntime implements AutoCloseable {
 		}
 		if (round.journal == null && consumer.cursor >= round.size() && (round.last == null || round.last.completeness() == CaptureResult.Completeness.CONTINUE)) {
 			int readDisplayCap = clampDisplayBytes(round.handle.displayBytes());
-			long readWork = InventoryItemBudget.workUpperBound(readDisplayCap);
 			long slotWorkspace = slotWorkspaceBytes(readDisplayCap);
 			long rootWorkspace = InventoryItemBudget.workspaceUpperBound(Math.max(effectiveDisplayCap(), readDisplayCap));
 			long fixed = checkedAdd(InventoryCatalogAdmission.METADATA_BYTES, checkedAdd(PAGE_WORKSPACE_FIXED, rootWorkspace));
 			int physicalBound = (int) Math.min(physicalRemaining(), Math.max(0, physical.remaining(InventorySourceAccess.PROVIDER_WORK) / InventorySourceAccess.PROVIDER_CALL_WORK - 1));
-			int limitingReasons = scanReasons(available, readDisplayCap);
+			int limitingReasons = scanReasons(available, readDisplayCap, nativeEntries(round, available));
 			int memoryBound = Math.min(available, Math.max(1, physicalBound));
 			if (round.input.resourceKind() == InventoryResourceKind.FLUID)
-				while (memoryBound > 0 && checkedAdd(round.handle.stepValidationCost(memoryBound).workUnits(), checkedMultiply(memoryBound, readWork)) > physical.remaining(ITEM_WORK)) memoryBound--;
+				while (memoryBound > 0 && checkedAdd(round.handle.stepValidationCost(memoryBound).workUnits(), checkedMultiply(memoryBound,
+					InventoryItemBudget.workUpperBound(readDisplayCap, nativeEntries(round, memoryBound)))) > physical.remaining(ITEM_WORK)) memoryBound--;
 			while (memoryBound > 0 && checkedAdd(fixed, checkedAdd(checkedMultiply(memoryBound, slotWorkspace),
 				round.source.captured ? 0 : liveCatalogGrowth(memoryBound, round.handle.displayBytes(), round.catalogBytes))) > memory.remaining()) memoryBound--;
 			if (memoryBound == 0) { physicalDelay(consumer, Reason.MEMORY.bit(), -1); return Optional.empty(); }
@@ -2085,7 +2483,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			if (bounded == 0) {
 				SourceAccess.StepOutcome outcome = zeroAllowanceAdmitted(consumer, operationAllowance);
 				if (outcome instanceof SourceAccess.StepOutcome.Deferred) {
-					physicalDelay(consumer, scanReasons(available, readDisplayCap), physicalRemaining() == 0 ? available : -1);
+					if (!observeHandleDeferral(consumer, round)) physicalDelay(consumer, scanReasons(available, readDisplayCap, nativeEntries(round, available)), physicalRemaining() == 0 ? available : -1);
 					workspace.get().close(); return Optional.empty();
 				}
 				CaptureResult zeroResult = ((SourceAccess.StepOutcome.Captured) outcome).result();
@@ -2093,7 +2491,7 @@ public final class InventoryRuntime implements AutoCloseable {
 					Observation invalid = new Observation(zeroResult, List.of());
 					workspace.get().close(); retire(round, invalid); return Optional.of(invalid);
 				}
-				if (!zeroCostEmptyCompletion(zeroResult)) { physicalDelay(consumer, scanReasons(available, readDisplayCap), physicalRemaining() == 0 ? available : -1); workspace.get().close(); return Optional.empty(); }
+				if (!zeroCostEmptyCompletion(zeroResult)) { physicalDelay(consumer, scanReasons(available, readDisplayCap, nativeEntries(round, available)), physicalRemaining() == 0 ? available : -1); workspace.get().close(); return Optional.empty(); }
 				round.last = zeroResult;
 				physicalProgress(round);
 				workspace.get().commit(PAGE_FIXED_BYTES); round.pages.add(workspace.get()); round.pageCount++; retainedPage = true;
@@ -2103,18 +2501,18 @@ public final class InventoryRuntime implements AutoCloseable {
 				// live handles defer before touching their source at zero allowance.
 			} else {
 			long workBound = (bounded + 1L) * InventorySourceAccess.PROVIDER_CALL_WORK;
-			long itemWork = checkedMultiply(bounded, readWork);
+			long itemWork = checkedMultiply(bounded, InventoryItemBudget.workUpperBound(readDisplayCap, nativeEntries(round, bounded)));
 			CostLedger readLedger = physical;
 			var grant = readLedger.tryReserve(Map.of(InventorySourceAccess.PHYSICAL, (long) bounded, InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, workBound, ITEM_WORK, itemWork));
-			if (grant.isEmpty()) { physicalDelay(consumer, scanReasons(bounded, readDisplayCap), -1); workspace.get().close(); return Optional.empty(); }
+			if (grant.isEmpty()) { physicalDelay(consumer, scanReasons(bounded, readDisplayCap, nativeEntries(round, bounded)), -1); workspace.get().close(); return Optional.empty(); }
 			SourceAccess.StepOutcome result;
 			try (var physicalTicket = grant.get()) {
 				CostLedger step = new CostLedger(Map.of(InventorySourceAccess.PHYSICAL, (long) bounded, InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, workBound));
 				var catalogAdmission = new InventoryCatalogAdmission(rootWorkspace,
-					checkedMultiply(bounded, InventoryCatalogAdmission.workUpperBound(readDisplayCap)));
-				var validation = validation(round.handle.stepValidationCost(bounded), operationAllowance, rootWorkspace);
-				if (validation.isEmpty()) { physicalDelay(consumer, Reason.PROVIDER_WORK.bit() | Reason.MEMORY.bit(), -1); return Optional.empty(); }
-				try (var operation = validation.get()) { result = readStep(consumer, step, catalogAdmission, operation.allowance); }
+					checkedMultiply(bounded, InventoryCatalogAdmission.workUpperBound(readDisplayCap, nativeEntries(round, bounded))));
+				var validation = validationDecision(round.handle.stepValidationCost(bounded), operationAllowance, rootWorkspace);
+				if (!validation.accepted()) { validationDelay(consumer, consumer.probeDelay, validation, "step-validation"); return Optional.empty(); }
+				try (var operation = java.util.Objects.requireNonNull(validation.value())) { result = readStep(consumer, step, catalogAdmission, operation.allowance); }
 				finally {
 					long attempted = bounded - step.remaining(InventorySourceAccess.PHYSICAL);
 					boolean committed = false;
@@ -2128,7 +2526,7 @@ public final class InventoryRuntime implements AutoCloseable {
 					finally { if (readGeneration >= 0) recordReadAttempts(readGeneration, readLedger, attempted, committed ? attempted : 0); }
 				}
 			}
-			if (result instanceof SourceAccess.StepOutcome.Deferred) { workspace.get().close(); return Optional.empty(); }
+			if (result instanceof SourceAccess.StepOutcome.Deferred) { observeHandleDeferral(consumer, round); workspace.get().close(); return Optional.empty(); }
 			round.last = ((SourceAccess.StepOutcome.Captured) result).result();
 			physicalProgress(round);
 			if (round.last.availability() != CaptureResult.Availability.READABLE) {
@@ -2178,10 +2576,16 @@ public final class InventoryRuntime implements AutoCloseable {
 			replay = admission.get();
 		}
 		try (var replayWorkspace = replay) {
-		if (round.journal != null && !claimDetachedItemWork(4096L + 2048L * (end - consumer.cursor))) {
-			delay(consumer, consumer.logicalDelay, Reason.PROVIDER_WORK.bit(), "logical"); return Optional.empty();
+		if (round.journal != null && !claimDetachedItemWork(journalReplayWork(end - consumer.cursor))) {
+			requestDelay(consumer, consumer.logicalDelay, InventoryFailureReason.ITEM_WORK_LIMIT, "journal-replay",
+				journalReplayWork(end - consumer.cursor), physical.used(ITEM_WORK), physical.limit(ITEM_WORK)); return Optional.empty();
 		}
 		int charge = Math.max(0, end - paid);
+		if (!growBookkeeping(consumer, round, round.paid.size() + (round.paid.containsKey(consumer.subject) ? 0 : 1),
+			round.tightenedKeys == null ? 0 : round.tightenedKeys.size())) {
+			delay(consumer, consumer.logicalDelay, consumer.currentReason == InventoryFailureReason.MEMORY_LIMIT ? Reason.MEMORY.bit()
+				: Reason.PUBLICATION_WORK.bit(), "bookkeeping-growth"); return Optional.empty();
+		}
 		CostLedger logical = new CostLedger(Map.of(new CostLedger.Counter("inventory/logical", CostLedger.Unit.LOGICAL_PROGRESS), (long) Math.max(0, allowance)));
 		var ticket = logical.tryReserve(Map.of(new CostLedger.Counter("inventory/logical", CostLedger.Unit.LOGICAL_PROGRESS), (long) charge)).orElseThrow();
 		ticket.commit(Map.of(new CostLedger.Counter("inventory/logical", CostLedger.Unit.LOGICAL_PROGRESS), (long) charge));
@@ -2210,7 +2614,7 @@ public final class InventoryRuntime implements AutoCloseable {
 			int count = Math.min(slots, InventorySourceAccess.MAX_SLOTS - round.journal.endSlot());
 			long workspace = round.sweep == null ? nativeWorkspace(round, slots) : pooledWorkspace(java.util.Objects.requireNonNull(consumer.scanningAssociation).lease, round, slots);
 			return checkedAdd(workspace, checkedAdd(nativeRetained(round), checkedAdd(
-				round.journal.batchAllocationUpperBound(count), checkedMultiply(slots, nativeGrowth(round)))));
+				round.journal.batchAllocationUpperBound(count), nativeGrowth(round, slots))));
 		}
 		int cap = round == null ? effectiveDisplayCap() : round.handle.displayBytes();
 		return checkedAdd(InventoryItemBudget.workspaceUpperBound(cap) + PAGE_WORKSPACE_FIXED + InventoryCatalogAdmission.METADATA_BYTES,
@@ -2228,9 +2632,38 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 	private static InventoryItemCodec.@Nullable Catalog nativeCatalog(Round round) { return round.sweep == null ? round.handle.nativeCatalog() : round.sweep.catalog; }
 	private static int displayBytes(Round round) { return round.sweep == null ? round.handle.displayBytes() : round.sweep.catalog == null ? round.appliedBytes : round.sweep.catalog.displayBytes(); }
-	private static long nativeGrowth(Round round) {
-		return round.sweep == null ? round.handle.nativeCatalogGrowthUpperBound() : round.sweep.catalog == null
-			? InventoryItemCodec.Catalog.firstReadGrowthUpperBound(displayBytes(round)) : round.sweep.catalog.retainedGrowthUpperBound();
+	private static long nativeGrowth(Round round, int attempts) {
+		if (round.sweep == null) {
+			long growth = round.handle.nativeCatalogGrowthUpperBound(attempts);
+			// Extension-native ITEM values can own their detached payload directly.
+			// Admit that payload even when no catalogue exists to own its strings.
+			return round.input.resourceKind() == InventoryResourceKind.ITEM && round.handle.nativeCatalog() == null
+				? Math.max(growth, InventoryItemCodec.Catalog.firstReadGrowthUpperBound(displayBytes(round), attempts)) : growth;
+		}
+		return round.sweep.catalog == null
+			? InventoryItemCodec.Catalog.firstReadGrowthUpperBound(displayBytes(round), attempts) : round.sweep.catalog.retainedGrowthUpperBound(attempts);
+	}
+	private static int nativeEntries(Round round, int attempts) {
+		return round.sweep == null ? round.handle.nativeCatalogEntriesUpperBound(attempts) : round.sweep.catalog == null
+			? Math.min(InventoryItemCodec.DEFAULT_MAX_ENTRIES, Math.max(0, attempts - 1)) : round.sweep.catalog.entriesUpperBound(Math.max(1, attempts));
+	}
+	private static long journalReplayWork(int slots) {
+		return slots == 0 ? 0 : checkedAdd(4096L, checkedMultiply(2048L, slots));
+	}
+	/** Pure journal shape and consumer cursor only; no provider callback or speculative slot read. */
+	private static long journalStepWorkUpperBound(Consumer consumer, int available, int appended, boolean reading) {
+		InventorySlotJournal journal = java.util.Objects.requireNonNull(java.util.Objects.requireNonNull(consumer.round).journal);
+		int end = Math.min(journal.endSlot() + appended, consumer.cursor + available);
+		return checkedAdd(reading ? journal.batchWorkUpperBound(appended) : 0,
+			journalReplayWork(Math.max(0, end - consumer.cursor)));
+	}
+	private static long nativeReadWorkUpperBound(Consumer consumer, int slots) {
+		Round round = java.util.Objects.requireNonNull(consumer.round);
+		long validation = round.sweep == null ? round.handle.stepValidationCost(slots).workUnits()
+			: java.util.Objects.requireNonNull(consumer.scanningAssociation).lease.pageCosts[slots].workUnits();
+		return checkedAdd(checkedAdd(validation, checkedMultiply(slots,
+			InventoryItemBudget.workUpperBound(displayBytes(round), nativeEntries(round, slots)))),
+			journalStepWorkUpperBound(consumer, slots, slots, true));
 	}
 	private boolean readNative(Consumer consumer, int available, InventoryValidationBudget.Allowance allowance, long readGeneration) {
 		Round round = consumer.round;
@@ -2241,40 +2674,47 @@ public final class InventoryRuntime implements AutoCloseable {
 			: Math.min(bound, Math.min(round.handle.remainingSlots(), InventorySourceAccess.MAX_SLOTS - journal.endSlot()));
 		if (bound == 0) {
 			var outcome = zeroAllowanceStep(consumer, allowance);
-			if (outcome instanceof SourceAccess.StepOutcome.Deferred) { physicalDelay(consumer, scanReasons(available, round.handle.displayBytes()), available); return false; }
+			if (outcome instanceof SourceAccess.StepOutcome.Deferred) { if (!observeHandleDeferral(consumer, round)) physicalDelay(consumer, scanReasons(available, round.handle.displayBytes(), nativeEntries(round, available)), available); return false; }
 			round.last = ((SourceAccess.StepOutcome.Captured) outcome).result();
 			round.sweepEvidence = InventoryStep.SweepEvidence.STABLE_SLOT_SWEEP;
 			if (round.last.availability() != CaptureResult.Availability.READABLE) retire(round, new Observation(round.last, List.of()));
 			return true;
 		}
 		while (bound > 0 && (stepMemoryUpperBound(consumer, bound) > memory.remaining()
-			|| checkedAdd(round.handle.stepValidationCost(bound).workUnits(), checkedMultiply(bound, InventoryItemBudget.workUpperBound(round.handle.displayBytes()))) > physical.remaining(ITEM_WORK))) bound--;
-		if (bound == 0) { physicalDelay(consumer, Reason.MEMORY.bit(), -1); return false; }
+				|| nativeReadWorkUpperBound(consumer, bound) > physical.remaining(ITEM_WORK))) bound--;
+		if (bound == 0) {
+			if (stepMemoryUpperBound(consumer, 1) > memory.remaining()) physicalDelay(consumer, Reason.MEMORY.bit(), -1);
+			long required = nativeReadWorkUpperBound(consumer, 1);
+			if (required > physical.remaining(ITEM_WORK)) requestDelay(consumer, consumer.probeDelay,
+				InventoryFailureReason.ITEM_WORK_LIMIT, "native-read-work", required, physical.used(ITEM_WORK), physical.limit(ITEM_WORK));
+			return false;
+		}
 		long oldRetained = nativeRetained(round);
-		long growth = journal.batchAllocationUpperBound(bound) + checkedMultiply(bound, round.handle.nativeCatalogGrowthUpperBound());
+		if (bound > 0 && !claimDetachedItemWork(journal.batchWorkUpperBound(bound))) { physicalDelay(consumer, Reason.PUBLICATION_WORK.bit(), -1); return false; }
+		long growth = journal.batchAllocationUpperBound(bound) + nativeGrowth(round, bound);
 		var retained = memory.tryReserve(checkedAdd(oldRetained, growth));
-		if (retained.isEmpty()) return false;
+		if (retained.isEmpty()) { physicalDelay(consumer, Reason.MEMORY.bit(), -1); return false; }
 		boolean transferred = false;
 		try {
 			var workspace = memory.tryReserve(nativeWorkspace(round, bound));
-			if (workspace.isEmpty()) return false;
+			if (workspace.isEmpty()) { physicalDelay(consumer, Reason.MEMORY.bit(), -1); return false; }
 			try (var held = workspace.get()) {
 				int display = round.handle.displayBytes();
 				long provider = (bound + 1L) * InventorySourceAccess.PROVIDER_CALL_WORK;
 				var limits = Map.of(InventorySourceAccess.PHYSICAL, (long) bound, InventorySourceAccess.PROBES, 1L, InventorySourceAccess.PROVIDER_WORK, provider);
-				var work = new LinkedHashMap<>(limits); work.put(ITEM_WORK, checkedMultiply(bound, InventoryItemBudget.workUpperBound(display)));
+				var work = new LinkedHashMap<>(limits); work.put(ITEM_WORK, checkedMultiply(bound, InventoryItemBudget.workUpperBound(display, nativeEntries(round, bound))));
 				CostLedger readLedger = physical;
 				var admitted = readLedger.tryReserve(work);
-				if (admitted.isEmpty()) { physicalDelay(consumer, scanReasons(bound, display), -1); return false; }
+				if (admitted.isEmpty()) { physicalDelay(consumer, scanReasons(bound, display, nativeEntries(round, bound)), -1); return false; }
 				try (var grant = admitted.get()) {
 					var step = new CostLedger(limits);
-					var catalogAdmission = new InventoryCatalogAdmission(InventoryItemBudget.workspaceUpperBound(display), checkedMultiply(bound, InventoryCatalogAdmission.workUpperBound(display)));
+					var catalogAdmission = new InventoryCatalogAdmission(InventoryItemBudget.workspaceUpperBound(display), checkedMultiply(bound, InventoryCatalogAdmission.workUpperBound(display, nativeEntries(round, bound))));
 					var validationCost = round.handle.stepValidationCost(bound);
-					var validation = validation(validationCost, allowance, validationCost.workspaceBytes());
-					if (validation.isEmpty()) return false;
+					var validation = validationDecision(validationCost, allowance, validationCost.workspaceBytes());
+					if (!validation.accepted()) { validationDelay(consumer, consumer.probeDelay, validation, "native-validation"); return false; }
 					InventoryStep.Outcome outcome;
 					long timing = monitor.enabled() ? monitor.beginPhase(lane(consumer), Phase.READ) : 0;
-					try (var operation = validation.get()) { outcome = round.handle.stepInventory(step, catalogAdmission, operation.allowance); }
+					try (var operation = java.util.Objects.requireNonNull(validation.value())) { outcome = round.handle.stepInventory(step, catalogAdmission, operation.allowance); }
 					finally {
 						long attempted = step.used(InventorySourceAccess.PHYSICAL);
 						boolean committed = false;
@@ -2285,24 +2725,27 @@ public final class InventoryRuntime implements AutoCloseable {
 							monitor.end(timing);
 						}
 					}
-					if (outcome instanceof InventoryStep.Outcome.Deferred) return false;
+					if (round.handle.terminalReason() != null) round.terminalReason = round.handle.terminalReason();
+					if (outcome instanceof InventoryStep.Outcome.Deferred) { observeHandleDeferral(consumer, round); return false; }
 					InventoryStep result = ((InventoryStep.Outcome.Captured) outcome).step();
 					round.last = result.metadata(); round.sweepEvidence = result.evidence(); physicalProgress(round);
 					if (round.last.availability() != CaptureResult.Availability.READABLE) {
+						consumer.currentReason = round.terminalReason;
 						retire(round, new Observation(round.last, List.of())); return true;
 					}
 					if (result.firstSlot() != journal.endSlot()) throw new IllegalStateException("native journal prefix mismatch");
 					InventoryItemCodec.@Nullable Catalog catalog = round.handle.nativeCatalog();
 					try {
 						for (@Nullable InventoryResourceValue item : result.slots()) {
-							InventoryItemCodec.@Nullable Encoded encoded = item == null || item.resourceKind() != InventoryResourceKind.ITEM ? null : java.util.Objects.requireNonNull(java.util.Objects.requireNonNull(catalog).retainedEncoded(item.key()));
+							InventoryItemCodec.@Nullable Encoded encoded = item == null || item.resourceKind() != InventoryResourceKind.ITEM || catalog == null
+								? null : java.util.Objects.requireNonNull(catalog.retainedEncoded(item.key()));
 							journal.appendResource(journal.endSlot(), encoded, item == null ? 0 : item.amount(), item);
 						}
 					} catch (InventorySlotJournal.CapacityException exhausted) {
+						limitRound(consumer, InventoryFailureReason.JOURNAL_LIMIT, "native-journal-capacity");
 						// Extension sources may not use the native catalogue's complete-key guard.
 						// Keep the append-only validated prefix and all paid attempts, never retry
 						// the source cursor or certify the unretained tail as a complete total.
-						InventoryCaptureDiagnostics.boundExceeded(round.input, "native-journal-capacity", exhausted);
 						CaptureResult prior = round.last;
 						round.last = new CaptureResult(Optional.empty(), new CaptureResult.Coverage(prior.coverage().demandStamp(),
 							journal.endSlot(), journal.endSlot(), prior.coverage().expected()), prior.availability(),
@@ -2322,18 +2765,35 @@ public final class InventoryRuntime implements AutoCloseable {
 			if (!transferred) retained.get().close();
 		}
 	}
-	private int scanReasons(int requested, int displayBytes) {
+	private int scanReasons(int requested, int displayBytes, int entries) {
 		return (physicalRemaining() < requested ? Reason.PHYSICAL_SLOTS.bit() : 0)
 			| providerReasons(1, (requested + 1L) * InventorySourceAccess.PROVIDER_CALL_WORK)
-			| (physical.remaining(ITEM_WORK) < checkedMultiply(requested, InventoryItemBudget.workUpperBound(displayBytes)) ? Reason.PROVIDER_WORK.bit() : 0);
+			| (physical.remaining(ITEM_WORK) < checkedMultiply(requested, InventoryItemBudget.workUpperBound(displayBytes, entries)) ? Reason.PUBLICATION_WORK.bit() : 0);
 	}
 	/** The real source step (including its native checks/freeze), not paid journal replay. */
 	private SourceAccess.StepOutcome readStep(Consumer consumer, CostLedger step, InventoryCatalogAdmission catalog,
 		InventoryValidationBudget.Allowance allowance) {
-		if (!monitor.enabled()) return consumer.round.handle.step(step, catalog, allowance);
-		long timing = monitor.beginPhase(lane(consumer), Phase.READ);
-		try { return consumer.round.handle.step(step, catalog, allowance); }
-		finally { monitor.end(timing); }
+		return readStep(consumer, step, catalog, allowance, false);
+	}
+	private SourceAccess.StepOutcome readStep(Consumer consumer, CostLedger step, InventoryCatalogAdmission catalog,
+		InventoryValidationBudget.Allowance allowance, boolean completionOnly) {
+		Round round = consumer.round;
+		long timing = monitor.enabled() ? monitor.beginPhase(lane(consumer), Phase.READ) : 0;
+		try { return completionOnly ? round.handle.stepCompletion(step, catalog, allowance) : round.handle.step(step, catalog, allowance); }
+		finally {
+			if (round.handle.terminalReason() != null) {
+				round.terminalReason = round.handle.terminalReason();
+				consumer.currentReason = round.terminalReason;
+			}
+			monitor.end(timing);
+		}
+	}
+	private boolean observeHandleDeferral(Consumer consumer, Round round) {
+		@Nullable InventoryFailureReason reason = round.handle.stepDeferralReason();
+		if (reason == null) return false;
+		// The handle already reported this exact attempted admission.
+		observeTypedDelay(consumer, consumer.probeDelay, reason, "source-read");
+		return true;
 	}
 	private void logicalRefusal(Consumer consumer, int cap, int globalCap, int global) {
 		int reasons = (logicalUsed.getOrDefault(consumer.subject, 0) >= cap ? Reason.LOGICAL_CLIENT_OR_TARGET.bit() : 0)
@@ -2379,12 +2839,13 @@ public final class InventoryRuntime implements AutoCloseable {
 		}
 		try (var grant = admission.get()) {
 			CostLedger step = new CostLedger(limits);
-			var validation = validation(consumer.round.handle.stepValidationCost(0), allowance);
-			if (validation.isEmpty()) { consumer.zeroAdmissionRefused = true; physicalDelay(consumer, Reason.PROVIDER_WORK.bit() | Reason.MEMORY.bit(), -1); return new SourceAccess.StepOutcome.Deferred(); }
+			var validation = validationDecision(consumer.round.handle.stepValidationCost(0), allowance, 0);
+			if (!validation.accepted()) { consumer.zeroAdmissionRefused = true; validationDelay(consumer, consumer.probeDelay, validation, "zero-validation"); return new SourceAccess.StepOutcome.Deferred(); }
 			SourceAccess.StepOutcome outcome;
-			try (var operation = validation.get()) {
-				outcome = readStep(consumer, step, new InventoryCatalogAdmission(InventoryItemBudget.workspaceUpperBound(effectiveDisplayCap()), 0), operation.allowance);
+			try (var operation = java.util.Objects.requireNonNull(validation.value())) {
+				outcome = readStep(consumer, step, new InventoryCatalogAdmission(InventoryItemBudget.workspaceUpperBound(effectiveDisplayCap()), 0), operation.allowance, true);
 			}
+			if (outcome instanceof SourceAccess.StepOutcome.Deferred && observeHandleDeferral(consumer, consumer.round)) consumer.zeroAdmissionRefused = true;
 			grant.commit(Map.of(InventorySourceAccess.PHYSICAL, 0L,
 				InventorySourceAccess.PROBES, 1L - step.remaining(InventorySourceAccess.PROBES),
 				InventorySourceAccess.PROVIDER_WORK, InventorySourceAccess.PROVIDER_CALL_WORK - step.remaining(InventorySourceAccess.PROVIDER_WORK)));
@@ -2462,38 +2923,48 @@ public final class InventoryRuntime implements AutoCloseable {
 		int bound = (int) Math.min(available, Math.min(physicalRemaining(), association.expected.graph().slots() - journal.endSlot()));
 		bound = Math.min(bound, InventorySourceAccess.MAX_STEP);
 		int limitingReasons = physicalRemaining() == 0 ? Reason.PHYSICAL_SLOTS.bit() : 0;
+		boolean itemWorkLimited = false;
 		// Admission shrinks to a serviceable page; do not wait for a page whose metadata cost exceeds a fresh tick.
 		while (bound > 0) {
+			itemWorkLimited = nativeReadWorkUpperBound(consumer, bound) > physical.remaining(ITEM_WORK);
 			int reasons = (stepMemoryUpperBound(consumer, bound) > memory.remaining() ? Reason.MEMORY.bit() : 0)
-				| (association.lease.pageCosts[bound].workUnits() + checkedMultiply(bound, InventoryItemBudget.workUpperBound(catalog.displayBytes())) > physical.remaining(ITEM_WORK)
-					|| (bound + 1L) * InventorySourceAccess.PROVIDER_CALL_WORK > physical.remaining(InventorySourceAccess.PROVIDER_WORK) ? Reason.PROVIDER_WORK.bit() : 0);
+				| (itemWorkLimited ? Reason.PUBLICATION_WORK.bit() : 0)
+				| ((bound + 1L) * InventorySourceAccess.PROVIDER_CALL_WORK > physical.remaining(InventorySourceAccess.PROVIDER_WORK) ? Reason.PROVIDER_WORK.bit() : 0);
 			if (reasons == 0) break;
 			limitingReasons = reasons; bound--;
 		}
 		if (bound == 0 && journal.endSlot() != association.expected.graph().slots()) {
-			physicalDelay(consumer, limitingReasons, available); return false;
+			if (itemWorkLimited) requestDelay(consumer, consumer.probeDelay, InventoryFailureReason.ITEM_WORK_LIMIT,
+				"pooled-read-work", nativeReadWorkUpperBound(consumer, 1),
+				physical.used(ITEM_WORK), physical.limit(ITEM_WORK));
+			int otherReasons = limitingReasons & ~Reason.PUBLICATION_WORK.bit();
+			if (otherReasons != 0) physicalDelay(consumer, otherReasons, available);
+			return false;
 		}
-		var retained = memory.tryReserve(checkedAdd(nativeRetained(round), journal.batchAllocationUpperBound(bound) + checkedMultiply(bound, nativeGrowth(round))));
-		if (retained.isEmpty()) return false;
+		if (bound > 0 && !claimDetachedItemWork(journal.batchWorkUpperBound(bound))) { physicalDelay(consumer, Reason.PUBLICATION_WORK.bit(), -1); return false; }
+		var retained = memory.tryReserve(checkedAdd(nativeRetained(round), journal.batchAllocationUpperBound(bound) + nativeGrowth(round, bound)));
+		if (retained.isEmpty()) { physicalDelay(consumer, Reason.MEMORY.bit(), -1); return false; }
 		boolean transferred = false;
 		try {
 			var workspace = memory.tryReserve(pooledWorkspace(association.lease, round, bound));
-			if (workspace.isEmpty()) return false;
+			if (workspace.isEmpty()) { physicalDelay(consumer, Reason.MEMORY.bit(), -1); return false; }
 			try (var held = workspace.get()) {
 				var cost = association.lease.pageCosts[bound];
-				var validation = validation(cost, allowance, cost.workspaceBytes());
-				if (validation.isEmpty()) return false;
-				try (var operation = validation.get()) {
+				var validation = validationDecision(cost, allowance, cost.workspaceBytes());
+				if (!validation.accepted()) { validationDelay(consumer, consumer.probeDelay, validation, "pooled-read"); return false; }
+				try (var operation = java.util.Objects.requireNonNull(validation.value())) {
 					var limits = Map.of(InventorySourceAccess.PHYSICAL, (long) bound, InventorySourceAccess.PROBES, 1L,
 						InventorySourceAccess.PROVIDER_WORK, (bound + 1L) * InventorySourceAccess.PROVIDER_CALL_WORK,
-						ITEM_WORK, checkedMultiply(bound, InventoryItemBudget.workUpperBound(catalog.displayBytes())));
+					ITEM_WORK, checkedMultiply(bound, InventoryItemBudget.workUpperBound(catalog.displayBytes(), catalog.entriesUpperBound(Math.max(1, bound)))));
 					CostLedger readLedger = physical;
-					var admission = readLedger.tryReserve(limits);
-					if (admission.isEmpty()) return false;
+					var admission = readLedger.tryReserveDecision(limits);
+					if (!admission.accepted()) { var counter = java.util.Objects.requireNonNull(admission.limitingCounter());
+						requestDelay(consumer, consumer.probeDelay, counterReason(counter), "pooled-read-admission", java.util.Objects.requireNonNull(limits.get(counter)),
+							readLedger.used(counter), readLedger.limit(counter)); return false; }
 					int attempted = 0;
 					var catalogAdmission = new InventoryCatalogAdmission(InventoryItemBudget.workspaceUpperBound(catalog.displayBytes()),
-						checkedMultiply(bound, InventoryCatalogAdmission.workUpperBound(catalog.displayBytes())));
-					try (var grant = admission.get()) {
+						checkedMultiply(bound, InventoryCatalogAdmission.workUpperBound(catalog.displayBytes(), catalog.entriesUpperBound(Math.max(1, bound)))));
+					try (var grant = java.util.Objects.requireNonNull(admission.ticket())) {
 						try {
 							InventorySharedRead.Check check = port.validate(association.expected, operation.allowance);
 							if (check != InventorySharedRead.Check.VALID) { pooledFailure(consumer, association, check); return check != InventorySharedRead.Check.DEFERRED; }
@@ -2505,7 +2976,9 @@ public final class InventoryRuntime implements AutoCloseable {
 									attempted++;
 									page.add(port.read(journal.endSlot() + page.size(), association.expected, catalog, catalogAdmission, operation.allowance));
 								}
-							} catch (InventoryItemBudget.CaptureLimitException | InventoryItemCodec.CapacityExceededException capacity) { incomplete = true; }
+							} catch (InventoryItemBudget.CaptureLimitException | InventoryItemCodec.CapacityExceededException capacity) {
+								limitRound(consumer, InventoryCaptureDiagnostics.boundReason(capacity), "pooled-read-capacity"); incomplete = true;
+							}
 							finally { monitor.end(timing); }
 							check = port.validate(association.expected, operation.allowance);
 							if (check != InventorySharedRead.Check.VALID) { pooledFailure(consumer, association, check); return check != InventorySharedRead.Check.DEFERRED; }
@@ -2522,9 +2995,11 @@ public final class InventoryRuntime implements AutoCloseable {
 							return true;
 						} catch (InventorySharedRead.ReadFailure failure) {
 							warnPooled("pooled-read", consumer, round, association.expected, "pooled-read", failure);
+							if (providerFailure(consumer, association, failure)) return true;
 							pooledFailure(consumer, association, failure.check()); return true;
 						} catch (RuntimeException | LinkageError failure) {
 							warnPooled("pooled-read", consumer, round, association.expected, "pooled-read", failure);
+							if (providerFailure(consumer, association, failure)) return true;
 							pooledFailure(consumer, association, InventorySharedRead.Check.UNAVAILABLE); return true;
 						} finally {
 							boolean committed = false;
@@ -2681,6 +3156,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		try { if (round.handle != null) round.handle.close(); } catch (Error failure) { fatal = failure; }
 		finally {
 			round.memory.close(); round.catalogMemory.forEach(RetainedMemoryLedger.Ticket::close); round.catalogMemory.clear();
+			if (round.bookkeepingMemory != null) { round.bookkeepingMemory.close(); round.bookkeepingMemory = null; }
 			if (round.nativeMemory != null) { round.nativeMemory.close(); round.nativeMemory = null; }
 			rounds.remove(round.lookupKey, round); liveRounds.remove(round); retainedRounds--;
 			releaseDecodedData(round);
@@ -2770,7 +3246,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		for (Round round : targets) {
 			if (round.sweep != null || round.handle.readMode() == InventorySourceAccess.ReadMode.NATIVE_INCREMENTAL) {
 				if (round.appliedBytes <= ceiling) continue;
-				int refusal = tightenNative(round, ceiling);
+				int refusal = tightenNative(consumer, round, ceiling);
 				if (refusal != 0) { delay(consumer, consumer.projectionDelay, refusal, "projection"); resourceBlocked = pending = true; continue; }
 				round.appliedBytes = ceiling; worked = true; continue;
 			}
@@ -2797,7 +3273,7 @@ public final class InventoryRuntime implements AutoCloseable {
 				int end = Math.min(round.reprojectEnd, round.reprojectCursor + REPROJECT_BATCH);
 				if (round.reprojectCursor < end) {
 					worked = true;
-					int refusal = reprojectSlots(round, round.passCeiling, end);
+					int refusal = reprojectSlots(consumer, round, round.passCeiling, end);
 					if (refusal != 0) { delay(consumer, consumer.projectionDelay, refusal, "projection"); resourceBlocked = pending = true; continue; }
 				}
 				if (round.reprojectCursor < round.reprojectEnd) { pending = true; continue; }
@@ -2815,9 +3291,11 @@ public final class InventoryRuntime implements AutoCloseable {
 			changedKeys(targets), foldIds(targets));
 	}
 	/** Catalogue projections are unique; repeated journal slots only keep ordinals and borrowed display references. */
-	private int tightenNative(Round round, int ceiling) {
+	private int tightenNative(Consumer consumer, Round round, int ceiling) {
 		@Nullable InventorySlotJournal journal = round.journal;
 		InventoryItemCodec.@Nullable Catalog catalog = nativeCatalog(round);
+		if (journal != null && !growBookkeeping(consumer, round, round.paid.size(), journal.definitionCount()))
+			return consumer.currentReason == InventoryFailureReason.MEMORY_LIMIT ? Reason.MEMORY.bit() : Reason.PUBLICATION_WORK.bit();
 		if (journal != null && !claimDetachedItemWork(reprojectionCopyWork(journal.definitionCount()))) return Reason.PUBLICATION_WORK.bit();
 		// A changed definition is certified once after reprojection, never on replay.
 		// Account its validation scan/UTF8 scratch independently of the catalogue parser.
@@ -2827,7 +3305,7 @@ public final class InventoryRuntime implements AutoCloseable {
 		if (journal != null && !claimDetachedItemWork(journal.refreshWorkUpperBound())) return Reason.PUBLICATION_WORK.bit();
 		int refusal = tightenSource(round, ceiling, () -> {
 			if (journal != null && catalog != null) {
-				// The fixed round slab owns <=256 reference/key-set bookkeeping; no second parser is run.
+			// The admitted key-index tier owns reference/set bookkeeping; no second parser is run.
 				if (round.tightenedKeys == null) round.tightenedKeys = new java.util.LinkedHashSet<>();
 				for (int ordinal = 0; ordinal < journal.definitionCount(); ordinal++) {
 					var definition = journal.definition(ordinal);
@@ -2894,7 +3372,7 @@ public final class InventoryRuntime implements AutoCloseable {
 	}
 
 	/** Zero succeeds; a resource reason defers before any parser or cursor movement. */
-	private int reprojectSlots(Round round, int ceiling, int end) {
+	private int reprojectSlots(Consumer consumer, Round round, int ceiling, int end) {
 		long parserBound = 0, replacementBound = 0;
 		long work = reprojectionCopyWork(end - round.reprojectCursor, round.slots.size());
 		for (int index = round.reprojectCursor; index < end; index++) {
@@ -2911,6 +3389,9 @@ public final class InventoryRuntime implements AutoCloseable {
 			round.reprojectCursor = end; // nothing in this batch exceeds the ceiling
 			return 0;
 		}
+		if (!growBookkeeping(consumer, round, round.paid.size(), Math.min(InventorySourceAccess.MAX_SLOTS,
+			(round.tightenedKeys == null ? 0 : round.tightenedKeys.size()) + end - round.reprojectCursor)))
+			return consumer.currentReason == InventoryFailureReason.MEMORY_LIMIT ? Reason.MEMORY.bit() : Reason.PUBLICATION_WORK.bit();
 		var workspace = memory.tryReserve(checkedAdd(PAGE_WORKSPACE_FIXED, checkedAdd(parserBound, replacementBound)));
 		if (workspace.isEmpty()) return Reason.MEMORY.bit();
 		boolean transferred = false;
@@ -2993,5 +3474,5 @@ public final class InventoryRuntime implements AutoCloseable {
 			var entry = iterator.next(); if ((entry.getKey() instanceof PreviewSubject) == preview) { entry.getValue().close(); iterator.remove(); }
 		}
 	}
-	@Override public void close() { for (Consumer consumer : List.copyOf(consumers)) consumer.close(); clearLogical(true); clearLogical(false); }
+	@Override public void close() { for (OperationGrant grant : List.copyOf(operationGrants)) grant.close(); for (Consumer consumer : List.copyOf(consumers)) consumer.close(); clearLogical(true); clearLogical(false); }
 }

@@ -112,13 +112,12 @@ class InventoryTerminalPreviewResetTest {
 	}
 
 	@Test
-	void byteBudgetDeferredInvalidSurvivesSameEpochViewResetAndRetriesWhenBudgetReopens() {
+	void byteBudgetDeferredInvalidSurvivesSameEpochViewResetAndRetriesWhenBudgetReopens() throws Exception {
 		try (Fixture f = new Fixture(4)) {
 			configureActivePreview(f);
 			f.settings.getPreview().setMaxTargetsPerClient(IntLimit.finite(4));
-			// A 2x client cap keeps the publisher's data reserve (640 bytes) below
-			// the 4 KiB minimum global budget; B's real 2.6 KiB display then leaves
-			// only the control reserve for this preview period.
+			// Explicit legal budgets; the measured transport seam below supplies
+			// pressure independently of the production byte bases.
 			f.settings.getPreview().setClientByteMultiplier(ByteMultiplier.finite(BigDecimal.valueOf(2)));
 			f.settings.getPreview().setGlobalByteMultiplier(ByteMultiplier.finite(new BigDecimal("0.125")));
 
@@ -131,8 +130,7 @@ class InventoryTerminalPreviewResetTest {
 			endpoint.drain(f.host);
 			assertFalse(endpoint.client.selectable(request).isEmpty());
 
-			// B's large retained display consumes almost the whole preview global
-			// period budget. Its own frame must still be handed off.
+			// B's real retained display must hand off before control pressure.
 			f.hello(B, 0);
 			f.open(B, 1, 1);
 			for (long now = 1; now <= 3 && !f.hasPreviewData(B, 1); now++) f.tick(now);
@@ -141,10 +139,15 @@ class InventoryTerminalPreviewResetTest {
 
 			// Extra negotiation controls consume the remaining control reserve, so
 			// the terminal INVALID cannot be written in this period.
+			f.calibratedWirePressure = true;
 			for (UUID filler : FILLERS) {
 				f.host.policies.put(filler, policy(1));
 				f.hello(filler, 3);
 			}
+			Object publisher = java.util.Objects.requireNonNull(InventoryBackendTest.field(f.backend, "publisher"));
+			long charged = (long) InventoryBackendTest.field(publisher, "previewGlobal");
+			assertTrue(charged > 0 && f.settings.previewGlobalPeriodBytes() - charged < 32 * 1024,
+				"actual measured charges leave too little global allowance for the terminal control");
 
 			int beforeInvalid = f.host.packets.size();
 			f.sourceValid.set(false);
@@ -163,7 +166,7 @@ class InventoryTerminalPreviewResetTest {
 
 			// The preview period reopens the byte budget; the retained terminal
 			// INVALID must be retried without a source probe or a fresh scan.
-			f.tick(20);
+			f.calibratedWirePressure = false; f.tick(20);
 			endpoint.drain(f.host);
 
 			var rebuilt = endpoint.client.preview(request);
@@ -216,7 +219,7 @@ class InventoryTerminalPreviewResetTest {
 			// less than one publisher registration available.
 			memory.setCap(originalCap);
 			long free = memory.remaining();
-			long keep = Math.max(0L, free - 512L * 1024L);
+			long keep = Math.max(0L, free - 4095L);
 			var extra = memory.tryReserve(keep).orElseThrow();
 			extra.commit(keep);
 			f.paddings.add(extra);
@@ -327,7 +330,15 @@ class InventoryTerminalPreviewResetTest {
 
 	@NotNullByDefault
 	static final class Fixture implements AutoCloseable {
-		final InventoryBackendTest.Host host = new InventoryBackendTest.Host();
+		boolean calibratedWirePressure;
+		final InventoryBackendTest.Host host = new InventoryBackendTest.Host() {
+			@Override public int encodedBytes(InventoryS2CPacket packet, int display, int frame) {
+				if (calibratedWirePressure && packet.kind() == InventoryS2CPacket.Kind.OFFER) return 16 * 1024;
+				if (calibratedWirePressure && (packet.status() == InventoryS2CPacket.Status.INVALID
+					|| packet.condition() == InventoryS2CPacket.PreviewCondition.FAILED)) return 32 * 1024;
+				return super.encodedBytes(packet, display, frame);
+			}
+		};
 		final InventorySettings settings = InventorySettings.serverDefaults();
 		final AtomicInteger reads = new AtomicInteger();
 		final AtomicInteger validations = new AtomicInteger();

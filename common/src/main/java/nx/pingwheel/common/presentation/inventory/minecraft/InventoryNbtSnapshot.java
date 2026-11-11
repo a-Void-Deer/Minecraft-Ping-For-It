@@ -56,7 +56,7 @@ public final class InventoryNbtSnapshot implements InventorySourceAccess.Invento
 
 	/** Explicit finite engineering cap; large NBT is rejected rather than truncated. */
 	public static long memoryUpperBound(int visibleSlots, int memberCount) {
-		if (visibleSlots < 0 || visibleSlots > InventorySourceAccess.MAX_SLOTS
+		if (visibleSlots < 0 || visibleSlots > InventorySourceAccess.CAPTURE_MAX_SLOTS
 			|| memberCount < 0 || memberCount > InventorySnapshotLayout.MAX_MEMBERS) throw new IllegalArgumentException("snapshot structure bound");
 		return add(FIXED_ALLOWANCE_BYTES, add(multiply(visibleSlots, SLOT_ALLOWANCE_BYTES), multiply(memberCount, MEMBER_ALLOWANCE_BYTES)));
 	}
@@ -91,6 +91,7 @@ public final class InventoryNbtSnapshot implements InventorySourceAccess.Invento
 			for (var segment : member.segments()) {
 				topology.add(segment);
 				slots = Math.addExact(slots, segment.visibleSlots().size());
+				if (slots > InventorySourceAccess.CAPTURE_MAX_SLOTS) throw new LimitException("one-shot snapshot slot bound");
 			}
 		}
 		if (payloads.size() != topology.size()) throw new IllegalArgumentException("snapshot requires every member segment payload");

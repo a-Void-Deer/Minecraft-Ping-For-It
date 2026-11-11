@@ -7,6 +7,14 @@ import java.util.Objects;
 import nx.pingwheel.common.platform.IPlatformFluidService;
 import nx.pingwheel.common.presentation.source.CostLedger;
 import nx.pingwheel.common.presentation.source.RetainedMemoryLedger;
+import nx.pingwheel.common.presentation.inventory.InventoryFailureReason;
+import nx.pingwheel.common.presentation.inventory.InventoryDiagnostics;
+import nx.pingwheel.common.presentation.inventory.InventoryDiagnosticDetail;
+import nx.pingwheel.common.presentation.inventory.InventoryDiagnosticSite;
+import nx.pingwheel.common.presentation.inventory.InventoryOperation;
+import nx.pingwheel.common.presentation.inventory.InventoryImpact;
+import nx.pingwheel.common.presentation.inventory.InventoryOutcome;
+import nx.pingwheel.common.diagnostics.DiagnosticSide;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.UnmodifiableView;
 
@@ -51,7 +59,8 @@ public final class InventoryFluidAdmission implements IPlatformFluidService.Admi
 	}
 	private void reserve(InventoryValidationBudget.Cost cost, long bytes, long scratch) {
 		requireOpen();
-		if (grants.size() == MAX_GRANTS || transferred) throw new IllegalStateException("fluid admission ownership bound");
+		if (transferred) throw new IllegalStateException("fluid admission ownership already transferred");
+		if (grants.size() == MAX_GRANTS) throw InventoryProviderLimits.exceeded(ProviderLimitSite.FLUID_ADMISSION_GRANTS, grants.size() + 1L, MAX_GRANTS);
 		// Sequential callbacks reuse scratch, but every admitted node remains live until settlement.
 		// Allocation/work are cumulative; reserving the whole lock scratch again for every gate would
 		// turn a bounded sequential operation into an artificial sum of simultaneous workspaces.
@@ -64,11 +73,11 @@ public final class InventoryFluidAdmission implements IPlatformFluidService.Admi
 		long nextRetained = Math.addExact(retainedBytes, chargedBytes);
 		// Check arithmetic BEFORE acquiring tickets or enlarging the cumulative allowance.
 		allowance.checkAdditional(total);
-		var workspace = memory.tryReserve(nextWorkspace - workspaceHeld).orElseThrow(InventoryFluidAdmission::deferred);
+		var workspace = memory.tryReserve(nextWorkspace - workspaceHeld).orElseThrow(() -> deferred(InventoryFailureReason.MEMORY_LIMIT));
 		try {
-			var ownership = memory.tryReserve(chargedBytes).orElseThrow(InventoryFluidAdmission::deferred);
+			var ownership = memory.tryReserve(chargedBytes).orElseThrow(() -> deferred(InventoryFailureReason.MEMORY_LIMIT));
 			try {
-				var work = ledger.tryReserve(Map.of(counter, total.workUnits())).orElseThrow(InventoryFluidAdmission::deferred);
+				var work = ledger.tryReserve(Map.of(counter, total.workUnits())).orElseThrow(() -> deferred(InventoryFailureReason.ITEM_WORK_LIMIT));
 				int index = grants.size();
 				int retainedCount = retained.size();
 				try {
@@ -113,12 +122,20 @@ public final class InventoryFluidAdmission implements IPlatformFluidService.Admi
 		}
 	}
 	private static Deferred deferred() {
-		return new Deferred();
+		return deferred(InventoryFailureReason.ITEM_WORK_LIMIT);
+	}
+	private static Deferred deferred(InventoryFailureReason reason) {
+		InventoryDiagnostics.report(DiagnosticSide.SERVER, InventoryDiagnosticSite.VALIDATION, InventoryOperation.READ,
+			reason, InventoryImpact.DEGRADED, InventoryOutcome.DEFERRED, true,
+			() -> new InventoryDiagnosticDetail("fluid-admission", -1, -1, "FLUID", -1, -1, -1), null);
+		return new Deferred(reason);
 	}
 	@NotNullByDefault
 	public static final class Deferred extends InventoryItemBudget.CaptureLimitException {
 		private static final long serialVersionUID = 1L;
-		private Deferred() { super("fluid operation admission deferred"); }
+		private final InventoryFailureReason reason;
+		private Deferred(InventoryFailureReason reason) { super("fluid operation admission deferred"); this.reason = reason; }
+		public InventoryFailureReason reason() { return reason; }
 	}
 	@NotNullByDefault
 	private record Grant(CostLedger.Ticket work, RetainedMemoryLedger.Ticket workspace, long workUnits, long retainedBytes) {}

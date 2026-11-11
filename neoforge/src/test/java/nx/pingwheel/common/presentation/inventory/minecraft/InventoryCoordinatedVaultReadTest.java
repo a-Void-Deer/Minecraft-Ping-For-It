@@ -169,7 +169,8 @@ class InventoryCoordinatedVaultReadTest {
 				assertThrows(InventoryItemBudget.CaptureLimitException.class, () -> port.read(0, port.proof(), catalog, catalogGrant(), new InventoryValidationBudget.Allowance(shortCost)));
 				assertEquals(callbacks, world.callbacks + world.vault.loads); assertNull(get(port, "activeOperation"));
 			}
-			long memory = InventoryCatalogAdmission.workspaceUpperBound(InventoryItemCodec.MAX_CANONICAL_BYTES, 4096, InventoryItemCodec.DEFAULT_MAX_ENTRIES), work = InventoryCatalogAdmission.workUpperBound(4096);
+			long memory = InventoryCatalogAdmission.workspaceUpperBound(InventoryItemCodec.MAX_CANONICAL_BYTES, 4096, catalog.entriesUpperBound()),
+				work = InventoryCatalogAdmission.workUpperBound(4096, catalog.entriesUpperBound());
 			for (var shortGrant : List.of(new InventoryCatalogAdmission(memory - 1, work), new InventoryCatalogAdmission(memory, work - 1))) {
 				assertThrows(InventoryItemBudget.CaptureLimitException.class, () -> port.read(0, port.proof(), catalog, shortGrant, grant(port)));
 				assertEquals(callbacks, world.callbacks + world.vault.loads);

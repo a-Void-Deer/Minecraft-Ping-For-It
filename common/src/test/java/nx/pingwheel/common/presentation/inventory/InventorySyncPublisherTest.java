@@ -16,6 +16,27 @@ import org.apache.logging.log4j.Level;
 import static org.junit.jupiter.api.Assertions.*;
 
 class InventorySyncPublisherTest {
+	@org.jetbrains.annotations.NotNullByDefault
+	private static final class TypedCapture implements AutoCloseable {
+		private final InventoryDiagnosticsTestCapture capture = new InventoryDiagnosticsTestCapture(Level.DEBUG);
+		private final java.util.concurrent.atomic.AtomicReferenceArray<?> channels;
+		private final @org.jetbrains.annotations.Nullable Object[] saved;
+		TypedCapture() {
+			try {
+				var field = InventoryDiagnostics.class.getDeclaredField("CHANNELS"); field.setAccessible(true);
+				channels = (java.util.concurrent.atomic.AtomicReferenceArray<?>) field.get(null);
+				saved = new Object[channels.length()];
+				for (int i = 0; i < saved.length; i++) saved[i] = channels.getAndSet(i, null);
+			} catch (ReflectiveOperationException failure) { capture.close(); throw new AssertionError(failure); }
+		}
+		@org.jetbrains.annotations.Unmodifiable List<org.apache.logging.log4j.core.LogEvent> events() { return capture.events(); }
+		String messages() { return capture.messages(); }
+		@Override @SuppressWarnings("unchecked") public void close() {
+			var mutable = (java.util.concurrent.atomic.AtomicReferenceArray<Object>) channels;
+			for (int i = 0; i < saved.length; i++) mutable.set(i, saved[i]);
+			capture.close();
+		}
+	}
 	static class Transport implements InventorySyncPublisher.Transport {
 		final List<InventoryS2CPacket> sent = new ArrayList<>(); boolean authorized = true; int encoded;
 		boolean failNextSend;
@@ -32,6 +53,12 @@ class InventorySyncPublisherTest {
 		}
 	}
 	static int bytes(InventoryS2CPacket packet) { var buf = new FriendlyByteBuf(Unpooled.buffer()); try { packet.write(buf); return buf.readableBytes(); } finally { buf.release(); } }
+	private static final long BOUNDARY_WIRE_BYTES = 4096;
+	private static InventorySyncPublisher boundaryPublisher(RetainedMemoryLedger memory, Transport transport) {
+		var publisher = new InventorySyncPublisher(memory, transport);
+		publisher.wireBudgetFixture(BOUNDARY_WIRE_BYTES, BOUNDARY_WIRE_BYTES);
+		return publisher;
+	}
 	static SyncPublisher.Context context(String id, long baseline) { return new SyncPublisher.Context(id, new UUID(1, 1), "100/1", 1, baseline); }
 	static InventorySyncPublisher.Route route(MarkerId marker, String target) { return new InventorySyncPublisher.Route(7, 100, 1, 0, marker, target, "danger"); }
 	static CaptureResult capture(long revision, int entries, int display) {
@@ -59,7 +86,7 @@ class InventorySyncPublisherTest {
 		var payload = (CaptureResult.OpaqueKeyedFragment) result.payload().orElseThrow();
 		assertInstanceOf(SyncPublisher.Outcome.Accepted.class, publisher.publish(result,
 			new SyncPublisher.AuthorizedProjection(SyncPublisher.PublicationForm.KEYED_ABSOLUTE, payload.entries().keySet()), context,
-			new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, 256L))));
+			new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, (long) payload.entries().size()))));
 	}
 	@Test void scopedSweepEvidenceControlsBothEntryQualityAndCompletionWithoutChangingGenericPublication() {
 		for (var evidence : InventoryStep.SweepEvidence.values()) for (var consistency : CaptureResult.Consistency.values())
@@ -115,14 +142,14 @@ class InventorySyncPublisherTest {
 	@Test void immutableBaselineSurvivesMoreThanFivePeriodsAndRecipientRepairIsIsolated() {
 		InventorySettings settings = InventorySettings.serverDefaults(); settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(.25)));
 		Transport transport = new Transport(); RetainedMemoryLedger memory = new RetainedMemoryLedger(16000000);
-		try (InventorySyncPublisher publisher = new InventorySyncPublisher(memory, transport)) {
+		try (InventorySyncPublisher publisher = boundaryPublisher(memory, transport)) {
 			publisher.advance(0, settings); var a = context("tracking/1", 1); var b = context("tracking/2", 2);
 			assertTrue(publisher.register(a, route(new MarkerId(1), "target-a"))); assertTrue(publisher.register(b, route(new MarkerId(2), "target-b")));
 			publish(publisher, a, capture(1, 12, 2500)); publish(publisher, b, capture(1, 1, 2500));
 			for (int period = 0; period < 20; period++) {
 				publisher.advance(period * 3L, settings); int start = transport.sent.size(); publisher.drain();
 				long snapshots = transport.sent.subList(start, transport.sent.size()).stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT).mapToLong(InventorySyncPublisherTest::bytes).sum();
-				assertTrue(snapshots <= settings.trackingSnapshotClientPeriodBytes(), "period sum covers all targets, not each part");
+				assertTrue(snapshots <= BOUNDARY_WIRE_BYTES, "period sum covers all targets, not each part");
 				if (period < 5) assertTrue(publisher.pending(a));
 			}
 			assertFalse(publisher.pending(a)); assertFalse(publisher.pending(b));
@@ -150,7 +177,7 @@ class InventorySyncPublisherTest {
 	@Test void newerOfferedCutCannotRewriteAnAdmittedBaselineAndHeartbeatUsesClosedDelivery() {
 		var settings = InventorySettings.serverDefaults(); settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(.25)));
 		settings.getTracking().setHeartbeatPeriods(1); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
-		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+		try (var publisher = boundaryPublisher(memory, transport)) {
 			publisher.advance(0, settings); var context = context("tracking/1", 1); publisher.register(context, route(new MarkerId(1), "target"));
 			var first = capture(1, 3, 2500); publish(publisher, context, first); publisher.drain();
 			assertEquals(1, transport.sent.stream().filter(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT).count());
@@ -261,7 +288,7 @@ class InventorySyncPublisherTest {
 	@Test void invalidationCancelsPartialBatchAndHasPriorityOverAnotherConsumersItems() {
 		var settings = InventorySettings.serverDefaults(); settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(.25)));
 		var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
-		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+		try (var publisher = boundaryPublisher(memory, transport)) {
 			publisher.advance(0, settings); var a = context("tracking/1", 1); var b = context("tracking/2", 2);
 			publisher.register(a, route(new MarkerId(1), "target-a")); publisher.register(b, route(new MarkerId(2), "target-b"));
 			publish(publisher, a, capture(1, 3, 2500)); publish(publisher, b, capture(1, 3, 2500)); publisher.drain();
@@ -274,12 +301,12 @@ class InventorySyncPublisherTest {
 	}
 	@Test void controlNegotiationAndReplayAreByteChargedAndCannotResetClientPeriodAllowance() {
 		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
-		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+		try (var publisher = boundaryPublisher(memory, transport)) {
 			publisher.advance(0, settings); UUID recipient = new UUID(1, 1);
 			var offer = InventoryS2CPacket.offer(7, new InventoryS2CPacket.Offer(5, 3, 5, 0)).stamp(100, 1);
 			for (int i = 0; i < 1000; i++) { publisher.control(recipient, offer); publisher.drainControls(); }
 			long bytes = transport.sent.stream().mapToLong(InventorySyncPublisherTest::bytes).sum();
-			assertTrue(bytes > 0 && bytes <= settings.previewClientPeriodBytes());
+			assertTrue(bytes > 0 && bytes <= BOUNDARY_WIRE_BYTES);
 			int count = transport.sent.size(); publisher.advance(1, settings); publisher.drainControls(); assertEquals(count, transport.sent.size());
 			publisher.advance(5, settings); publisher.drainControls(); assertEquals(count + 1, transport.sent.size());
 		}
@@ -287,7 +314,7 @@ class InventorySyncPublisherTest {
 	}
 	@Test void indivisibleOversizedPreviewBatchTerminatesIncompleteInsteadOfWaitingForever() {
 		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
-		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+		try (var publisher = boundaryPublisher(memory, transport)) {
 			publisher.advance(0, settings); var context = context("preview/1", 1);
 			publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null));
 			publish(publisher, context, capture(1, 1, 4096)); publisher.drain();
@@ -319,7 +346,10 @@ class InventorySyncPublisherTest {
 	private static InventoryDomainCodec.Item nativeAtFrameBytes(String key, int index, int parts, int target, InventoryS2CPacket.Status status) {
 		int nameLength = 3000;
 		for (int attempt = 0; attempt < 4; attempt++) {
-			var item = nativeNamedItem(nameLength); int size = bytes(previewFrame(key, item, index, parts, status));
+			var item = nativeNamedItem(nameLength);
+			var packet = previewFrame(key, item, index, parts, status);
+			if (status == InventoryS2CPacket.Status.INCOMPLETE) packet = packet.withFailureReason(InventoryFailureReason.FRAME_LIMIT);
+			int size = bytes(packet);
 			if (size == target) return item;
 			nameLength += target - size;
 		}
@@ -339,7 +369,7 @@ class InventorySyncPublisherTest {
 	void finalMultipartFramingAdmitsExactCapacityAndDropsOneByteOverWholeAtEarlyAndLateIndexes(int parts) {
 		for (int index : new int[] {0, parts - 1}) for (int over : new int[] {0, 1}) {
 			var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16_000_000);
-			long allowance = settings.previewClientPeriodBytes(); int capacity = Math.toIntExact(allowance - Math.min(allowance, 128 + allowance / 16));
+			long allowance = BOUNDARY_WIRE_BYTES; int capacity = Math.toIntExact(allowance - Math.min(allowance, 128 + allowance / 16));
 			Map<String, InventoryDomainCodec.Item> items = new LinkedHashMap<>();
 			for (int i = 0; i < parts; i++) items.put("k%03d".formatted(i),
 				new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "v" + i), 1, "stone", "{\"id\":\"minecraft:stone\"}", false));
@@ -350,7 +380,7 @@ class InventorySyncPublisherTest {
 			items.put(largeKey, large);
 			var result = entries(1, items);
 			assertEquals(order, ((CaptureResult.OpaqueKeyedFragment) result.payload().orElseThrow()).entries().keySet().stream().toList());
-			try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			try (var publisher = boundaryPublisher(memory, transport)) {
 				publisher.advance(0, settings); var context = context("preview/framing", 1);
 				assertTrue(publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null)));
 				publish(publisher, context, result);
@@ -374,14 +404,14 @@ class InventorySyncPublisherTest {
 	@ParameterizedTest @ValueSource(ints = {128, 256})
 	void provisionalSinglePartCapacityCannotStrandRealMultipartOrCorrectiveReplay(int parts) {
 		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16_000_000);
-		long allowance = settings.previewClientPeriodBytes(); int capacity = Math.toIntExact(allowance - Math.min(allowance, 128 + allowance / 16));
+		long allowance = BOUNDARY_WIRE_BYTES; int capacity = Math.toIntExact(allowance - Math.min(allowance, 128 + allowance / 16));
 		Map<String, InventoryDomainCodec.Item> items = new LinkedHashMap<>();
 		for (int i = 0; i < parts; i++) items.put("k%03d".formatted(i),
 			new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "v" + i), 1, "stone", null, false));
 		String key = ((CaptureResult.OpaqueKeyedFragment) entries(1, items).payload().orElseThrow()).entries().keySet().stream().toList().get(parts - 1);
 		var large = nativeAtFrameBytes(key, 0, 1, capacity); items.put(key, large);
 		assertTrue(bytes(previewFrame(key, large, parts - 1, parts)) > capacity);
-		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+		try (var publisher = boundaryPublisher(memory, transport)) {
 			publisher.advance(0, settings); var context = context("preview/provisional", 1);
 			assertTrue(publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null)));
 			for (int replay = 0; replay < 2; replay++) {
@@ -402,7 +432,7 @@ class InventorySyncPublisherTest {
 	void droppingAFrameRechecksLongerIncompleteStatusAndReindexesAcrossVarIntWidthChanges(int parts) {
 		for (boolean cascadingDrop : new boolean[] {false, true}) {
 			var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16_000_000);
-			long allowance = settings.previewClientPeriodBytes(); int capacity = Math.toIntExact(allowance - Math.min(allowance, 128 + allowance / 16));
+			long allowance = BOUNDARY_WIRE_BYTES; int capacity = Math.toIntExact(allowance - Math.min(allowance, 128 + allowance / 16));
 			Map<String, InventoryDomainCodec.Item> items = new LinkedHashMap<>();
 			for (int i = 0; i < parts; i++) items.put("k%03d".formatted(i),
 				new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "v" + i), 1, "stone", null, false));
@@ -411,7 +441,7 @@ class InventorySyncPublisherTest {
 			var boundary = cascadingDrop ? nativeAtFrameBytes(boundaryKey, 0, parts, capacity)
 				: nativeAtFrameBytes(boundaryKey, parts - 2, parts - 1, capacity, InventoryS2CPacket.Status.INCOMPLETE);
 			items.put(boundaryKey, boundary); items.put(droppedKey, nativeAtFrameBytes(droppedKey, 0, 1, capacity + 20));
-			try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			try (var publisher = boundaryPublisher(memory, transport)) {
 				publisher.advance(0, settings); var context = context("preview/reindex", 1);
 				publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null));
 				publish(publisher, context, entries(1, items));
@@ -459,13 +489,13 @@ class InventorySyncPublisherTest {
 	@ParameterizedTest @ValueSource(ints = {127, 128, 256})
 	void finalCumulativeCutUsesItsOwnMultipartWidthEvenWhenEveryEntryIsUnchanged(int parts) {
 		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16_000_000);
-		long allowance = settings.previewClientPeriodBytes(); int capacity = Math.toIntExact(allowance - Math.min(allowance, 128 + allowance / 16));
+		long allowance = BOUNDARY_WIRE_BYTES; int capacity = Math.toIntExact(allowance - Math.min(allowance, 128 + allowance / 16));
 		Map<String, InventoryDomainCodec.Item> items = new LinkedHashMap<>();
 		for (int i = 0; i < parts; i++) items.put("k%03d".formatted(i),
 			new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", "v" + i), 1, "stone", null, false));
 		String boundaryKey = ((CaptureResult.OpaqueKeyedFragment) entries(1, items).payload().orElseThrow()).entries().keySet().stream().toList().get(parts - 1);
 		items.put(boundaryKey, nativeAtFrameBytes(boundaryKey, 0, 1, capacity));
-		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+		try (var publisher = boundaryPublisher(memory, transport)) {
 			publisher.advance(0, settings); var context = context("preview/final-width", 1);
 			publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null));
 			publisher.gateData(context.recipient());
@@ -645,7 +675,7 @@ class InventorySyncPublisherTest {
 			}
 		}
 		var transport = new ThrowingTransport();
-		try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var publisher = new InventorySyncPublisher(memory, transport)) {
+		try (var logs = new TypedCapture(); var publisher = new InventorySyncPublisher(memory, transport)) {
 			publisher.advance(0, settings); var context = context("preview/transport-diagnostic", 43);
 			assertTrue(publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 41, null, "target", null)));
 			publish(publisher, context, capture(1, 1, 10));
@@ -654,16 +684,15 @@ class InventorySyncPublisherTest {
 			assertTrue(transport.sent.isEmpty()); assertTrue(publisher.pending(context)); assertEquals(0, memory.reserved());
 			var charges = (Map<?, ?>) InventoryBackendTest.field(publisher, "clientBytes");
 			assertEquals(2L * bytes(transport.attempts.getFirst()), charges.get("preview/" + context.recipient()), "a throwing handoff stays charged");
-			logs.report("publisher/transport-send", Level.WARN, failure.getMessage(), "java.lang.ClassCastException",
-				"at " + getClass().getName() + ".throwingTransportRetainsOriginalReport", "kind=PREVIEW", "request=41",
-				"recipient=" + context.recipient(), "marker=null", "epoch=7", "baseline=43", "part=0/1");
-			assertEquals(1, logs.events.size(), "the repeated same failure is rate-limited without suppressing the retry");
+			assertTrue(logs.messages().contains("reason=transport-failure")); assertTrue(logs.messages().contains(failure.getMessage()));
+			assertTrue(logs.messages().contains("stage=transport-send"));
+			assertEquals(1, logs.events().size(), "the repeated same failure is rate-limited without suppressing the retry");
 			transport.failing = false; publisher.advance(5, settings); publisher.drain();
 			assertTrue(transport.sent.stream().anyMatch(p -> !p.entries().isEmpty())); publisher.cancel(context);
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 	}
-	@Test void normalTransportWarningKeepsRetryPartAndIndependentPacketKindChannels() {
+	@Test void partialTransportFailureKeepsRetryPartAndDoesNotEscalateToWholePingFailureAtNormal() {
 		var settings = InventorySettings.serverDefaults(); var memory = new RetainedMemoryLedger(16000000);
 		var attempts = new ArrayList<InventoryS2CPacket>();
 		var transport = new Transport() {
@@ -677,10 +706,7 @@ class InventorySyncPublisherTest {
 			assertEquals(2, attempts.size()); assertSame(attempts.getFirst(), attempts.getLast()); assertTrue(publisher.pending(context));
 			assertTrue(publisher.control(context.recipient(), InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 16)).stamp(100, 1)));
 			publisher.drainControls(); assertEquals(3, attempts.size());
-			assertEquals(2, logs.events().size(), "PREVIEW failure cannot suppress an OFFER transport failure");
-			assertTrue(logs.messages().contains("handling=retry-same-part-charged")); assertFalse(logs.messages().contains("private-"));
-			assertFalse(logs.messages().contains(context.recipient().toString()));
-			logs.events().forEach(event -> { assertEquals(Level.WARN, event.getLevel()); assertNull(event.getThrown()); });
+			assertTrue(logs.events().isEmpty(), "retryable partial delivery is DEEP, while whole request failure owns NORMAL");
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 	}
@@ -688,7 +714,7 @@ class InventorySyncPublisherTest {
 		var settings = InventorySettings.serverDefaults();
 		settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(0.25)));
 		var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
-		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+		try (var publisher = boundaryPublisher(memory, transport)) {
 			publisher.advance(0, settings);
 			var context = context("tracking/1", 1);
 			assertTrue(publisher.register(context, route(new MarkerId(1), "target")));
@@ -696,7 +722,7 @@ class InventorySyncPublisherTest {
 			publisher.drain();
 			assertTrue(transport.sent.stream().noneMatch(p -> !p.entries().isEmpty()), "a frame beyond the independent fragment budget is not handed off");
 			assertTrue(publisher.pending(context));
-			settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.one());
+			settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.one()); publisher.wireBudgetFixture(BOUNDARY_WIRE_BYTES, 16 * 1024);
 			publisher.advance(3, settings); publisher.drain();
 			assertTrue(transport.sent.stream().anyMatch(p -> p.kind() == InventoryS2CPacket.Kind.SNAPSHOT && !p.entries().isEmpty()),
 				"the same retained cut sends once its independent budget allows");
@@ -755,17 +781,20 @@ class InventorySyncPublisherTest {
 			}
 			assertEquals(latest, memory.retained(), "historical versions cannot accumulate tickets");
 			publisher.rebase(context, 2);
-			assertEquals(registrationCost() + 1024, memory.retained(), "rebase releases every entry version and retains the prepaid state slab and current wire scope");
+			assertEquals(registrationCost() + 2 * 3072L + 1024, memory.retained(), "rebase releases payload versions and retains the two selected-key backing slots and wire scope");
 			publisher.cancel(new SyncPublisher.Context(context.consumerId(), context.recipient(), context.sessionView(), 2, context.baseline()));
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 	}
-	@Test void groupReplacementKeepsDeliveredVariantsChargedUntilTheGroupCommits() {
+	@Test void groupReplacementKeepsDeliveredVariantsChargedUntilTheGroupCommits() throws Exception {
 		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
 		try (var publisher = new InventorySyncPublisher(memory, transport)) {
 			publisher.advance(0, settings); var context = context("preview/1", 1);
 			assertTrue(publisher.register(context, new InventorySyncPublisher.Route(7, 100, 1, 1, null, "target", null)));
 			publish(publisher, context, capture(1, 2, 100)); publisher.drain();
+			Object state = ((Map<?, ?>) InventoryBackendTest.field(publisher, "states")).values().iterator().next();
+			var versions = (Map<?, ?>) InventoryBackendTest.field(state, "entryMemory");
+			List<?> oldVersions = List.copyOf(versions.keySet()); assertEquals(2, oldVersions.size());
 			long variants = memory.retained(); publisher.gateData(context.recipient());
 			var item = InventoryDomainCodec.encode(new InventoryDomainCodec.Item(new InventoryScanner.Key("minecraft:stone", ""), 1, "stone", null, true));
 			var result = new CaptureResult(Optional.of(new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, Map.of("fold", item))),
@@ -774,7 +803,8 @@ class InventorySyncPublisherTest {
 			publish(publisher, context, result);
 			assertTrue(memory.retained() > variants, "removing offered variants cannot release still-delivered variants");
 			publisher.releaseData(context.recipient()); publisher.advance(5, settings); publisher.drain();
-			assertTrue(memory.retained() < variants, "a committed replacement retires the old delivered group");
+			assertTrue(oldVersions.stream().noneMatch(versions::containsKey), "a committed replacement releases both old delivered payload tickets");
+			assertEquals(1, versions.size());
 			publisher.cancel(context);
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
@@ -782,7 +812,7 @@ class InventorySyncPublisherTest {
 	@Test void admittedVersionsRemainChargedUntilWithdrawAndOfferedVersionsSurvive() {
 		var settings = InventorySettings.serverDefaults(); settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(.25)));
 		var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
-		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+		try (var publisher = boundaryPublisher(memory, transport)) {
 			publisher.advance(0, settings); var context = context("tracking/1", 1); publisher.register(context, route(new MarkerId(1), "target"));
 			publish(publisher, context, capture(1, 3, 2500)); publisher.drain();
 			long admitted = memory.retained();
@@ -858,7 +888,7 @@ class InventorySyncPublisherTest {
 	@ValueSource(booleans = {false, true})
 	void callbackAddedControlsWaitForNextDrainAndCallbackFailureDoesNotRetryAcceptedWork(boolean linkage) {
 		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
-		try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var publisher = new InventorySyncPublisher(memory, transport)) {
+		try (var logs = new TypedCapture(); var publisher = new InventorySyncPublisher(memory, transport)) {
 			publisher.advance(0, settings); var recipient = context("control", 1).recipient(); publisher.gateData(recipient);
 			var offer = InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 0)).stamp(100, 1);
 			var policy = InventoryS2CPacket.policy(7, 100, 1, Set.of("block"));
@@ -873,29 +903,24 @@ class InventorySyncPublisherTest {
 			assertEquals(List.of(offer, policy), transport.sent, "new callback work cannot extend the current drain");
 			assertEquals(2, callbacks[0]); assertTrue(publisher.dataGated(recipient));
 			assertFalse(publisher.controlQueued(recipient, policy)); assertTrue(publisher.controlQueued(recipient, offer));
-			var failures = logs.events.stream().filter(e -> e.getMessage().getFormattedMessage().contains("site=inventory/publisher/control-handoff ")).toList();
-			assertEquals(2, failures.size(), "OFFER and POLICY each retain their own finite packet-kind admission channel");
+			var failures = logs.events().stream().filter(e -> e.getMessage().getFormattedMessage().contains("reason=transport-failure")).toList();
+			assertEquals(1, failures.size(), "non-limit transport failures share the typed site/operation/reason channel");
 			for (var event : failures) {
-				assertEquals(Level.WARN, event.getLevel()); var message = event.getMessage().getFormattedMessage();
+				assertEquals(Level.DEBUG, event.getLevel()); var message = event.getMessage().getFormattedMessage();
 				assertNull(event.getThrown(), "The backend receives no second, unbounded throwable");
-				assertTrue(message.contains("channel=inventory-publisher-control-handoff-"));
-				assertTrue(message.contains("callback failed after transport accepted")); assertTrue(message.contains("recipient=" + recipient));
+				assertTrue(message.contains("operation=publish"));
+				assertTrue(message.contains("callback failed after transport accepted")); assertTrue(message.contains("stage=control-handoff"));
 				assertTrue(message.contains("at " + getClass().getName() + ".lambda$callbackAddedControls"));
 			}
-			var failureTexts = failures.stream().map(event -> event.getMessage().getFormattedMessage()).toList();
-			assertTrue(failureTexts.stream().anyMatch(text -> text.contains("kind=OFFER")
-				&& text.contains("channel=inventory-publisher-control-handoff-offer suppressed=0")));
-			assertTrue(failureTexts.stream().anyMatch(text -> text.contains("kind=POLICY")
-				&& text.contains("channel=inventory-publisher-control-handoff-policy suppressed=0")));
 			publisher.setControlHandoff((player, packet) -> true); publisher.drainControls();
 			assertEquals(List.of(offer, policy, offer), transport.sent); assertFalse(publisher.dataGated(recipient));
 			publisher.drainControls(); assertEquals(3, transport.sent.size());
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 	}
-	@Test void controlHandoffFailureChannelsArePerKindAndSuppressSameKindRepeats() {
+	@Test void controlHandoffFailuresUseTheSharedTypedTransportChannel() {
 		var settings = InventorySettings.serverDefaults(); var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
-		try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var publisher = new InventorySyncPublisher(memory, transport)) {
+		try (var logs = new TypedCapture(); var publisher = new InventorySyncPublisher(memory, transport)) {
 			publisher.advance(0, settings);
 			var first = new UUID(2, 1); var second = new UUID(2, 2);
 			var offerFirst = InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 0)).stamp(100, 1);
@@ -910,23 +935,22 @@ class InventorySyncPublisherTest {
 			});
 			publisher.drainControls();
 			assertEquals(4, callbacks[0]);
-			var failures = logs.events.stream().filter(e -> e.getMessage().getFormattedMessage().contains("site=inventory/publisher/control-handoff ")).toList();
-			assertEquals(2, failures.size(), "each packet kind is visible once while its same-kind repeat is suppressed");
+			var failures = logs.events().stream().filter(e -> e.getMessage().getFormattedMessage().contains("reason=transport-failure")).toList();
+			assertEquals(1, failures.size(), "non-limit failures retain shared channel admission");
 			var texts = failures.stream().map(event -> event.getMessage().getFormattedMessage()).toList();
-			assertEquals(1, texts.stream().filter(text -> text.contains("channel=inventory-publisher-control-handoff-offer")).count());
-			assertEquals(1, texts.stream().filter(text -> text.contains("channel=inventory-publisher-control-handoff-policy")).count());
+			assertTrue(texts.stream().allMatch(text -> text.contains("stage=control-handoff") && text.contains("operation=publish")));
 		}
 		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
 	}
 
-	@Test void transportSendFailureChannelsArePerKindAndSuppressSameKindRepeats() {
+	@Test void transportSendFailuresKeepSameImmutableControlsRetryableAndUseSharedChannel() {
 		var settings = InventorySettings.serverDefaults(); var memory = new RetainedMemoryLedger(16000000);
 		var failure = new IllegalStateException("transport send refused");
 		class FailingTransport extends Transport {
 			@Override public void send(UUID recipient, InventoryS2CPacket packet) { throw failure; }
 		}
 		var transport = new FailingTransport();
-		try (var logs = new InventoryCaptureDiagnosticsTest.Capture(); var publisher = new InventorySyncPublisher(memory, transport)) {
+		try (var logs = new TypedCapture(); var publisher = new InventorySyncPublisher(memory, transport)) {
 			publisher.advance(0, settings);
 			var first = new UUID(3, 1); var second = new UUID(3, 2);
 			var offerFirst = InventoryS2CPacket.offer(7, publisher.offer(5, 3, 5, 0)).stamp(100, 1);
@@ -936,11 +960,10 @@ class InventorySyncPublisherTest {
 			assertTrue(publisher.control(first, offerFirst)); assertTrue(publisher.control(second, offerSecond));
 			assertTrue(publisher.control(first, policyFirst)); assertTrue(publisher.control(second, policySecond));
 			publisher.drainControls();
-			var failures = logs.events.stream().filter(e -> e.getMessage().getFormattedMessage().contains("site=inventory/publisher/transport-send ")).toList();
-			assertEquals(2, failures.size(), "transport-send keeps OFFER and POLICY independent and suppresses same-kind repeats");
+			var failures = logs.events().stream().filter(e -> e.getMessage().getFormattedMessage().contains("reason=transport-failure")).toList();
+			assertEquals(1, failures.size(), "transport exceptions are not resource-limit occurrences");
 			var texts = failures.stream().map(event -> event.getMessage().getFormattedMessage()).toList();
-			assertEquals(1, texts.stream().filter(text -> text.contains("channel=inventory-publisher-transport-send-offer")).count());
-			assertEquals(1, texts.stream().filter(text -> text.contains("channel=inventory-publisher-transport-send-policy")).count());
+			assertTrue(texts.stream().allMatch(text -> text.contains("stage=transport-send") && text.contains("limitHit=false")));
 			assertTrue(publisher.controlQueued(first, offerFirst)); assertTrue(publisher.controlQueued(second, offerSecond));
 			assertTrue(publisher.controlQueued(first, policyFirst)); assertTrue(publisher.controlQueued(second, policySecond));
 		}
@@ -1005,7 +1028,7 @@ class InventorySyncPublisherTest {
 	@Test void admittedGroupRetirementRequiresFreshTrackingBaselineAndReleasesAdmittedOnlyVersions() {
 		var settings = InventorySettings.serverDefaults(); settings.getTracking().setSnapshotByteMultiplier(ByteMultiplier.finite(java.math.BigDecimal.valueOf(.25)));
 		var transport = new Transport(); var memory = new RetainedMemoryLedger(16000000);
-		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+		try (var publisher = boundaryPublisher(memory, transport)) {
 			publisher.advance(0, settings); var context = context("tracking/1", 1); publisher.register(context, route(new MarkerId(1), "target"));
 			publish(publisher, context, capture(1, 3, 2500)); publisher.drain();
 			long variants = memory.retained();
@@ -1041,21 +1064,117 @@ class InventorySyncPublisherTest {
 		}
 	}
 
-	@Test void retirementSlabIsPaidAtRegistrationAndCannotGrowBeyondItsAdmittedOwner() {
+	@Test void actualAdmittedKeysPrepayRetirementAndClearingDoesNotRefundTheirBacking() {
 		var settings = InventorySettings.serverDefaults(); var memory = new RetainedMemoryLedger(16_000_000); var transport = new Transport();
 		try (var publisher = new InventorySyncPublisher(memory, transport)) {
 			publisher.advance(0, settings); var context = context("preview/metadata", 1);
-			assertTrue(publisher.register(context, route(null, "preview"))); long owner = memory.retained();
-			assertTrue(owner < settings.pendingMemoryBytes(), "finite metadata leaves default room for real item work");
+			assertTrue(publisher.register(context, route(null, "preview"))); long base = memory.retained();
+			assertEquals(4096, base, "an idle Preview does not allocate its maximum key slab");
+			Map<String, InventoryDomainCodec.Item> values = new LinkedHashMap<>();
+			for (int i = 0; i < 1024; i++) values.put("key_" + i,
+				new InventoryDomainCodec.Item(new InventoryScanner.Key("test:item_" + i, "exact"), 1, "item", null, false));
+			publish(publisher, context, entries(1, values));
+			long owner = memory.retained();
+			assertTrue(owner > base + 1024L * 3072L, "payload versions stay independently charged");
 			memory.setCap(owner);
-			// Request-lifetime retirement allowance, independent of 128-row wire frames.
-			for (int i = 0; i < 256; i++) assertFalse(publisher.retireGroup(context, "test:item_" + i));
-			assertEquals(owner, memory.retained(), "all retirement indexes were paid BEFORE the cap became full");
+			for (int i = 0; i < 1024; i++) assertFalse(publisher.retireGroup(context, "test:item_" + i));
+			long backing = memory.retained();
+			assertEquals(base + 1024L * 3072L, backing, "retired entries release payload versions, never backing capacity");
 			assertEquals(0, memory.reserved());
-			assertThrows(IllegalStateException.class, () -> publisher.retireGroup(context, "test:beyond_lifetime_bound"));
+			assertFalse(publisher.retireGroup(context, "test:never_admitted"), "unknown groups cannot grow a tombstone index");
 			publisher.status(context, InventoryS2CPacket.Status.READY); publisher.drain();
 			assertTrue(transport.sent.isEmpty(), "unreplaced retirement cannot become a completed digest");
-			publisher.cancel(context); assertEquals(0, memory.retained());
+			publisher.rebase(context, 2); assertEquals(backing, memory.retained(), "clear keeps backing charged");
+			publisher.cancel(context); assertEquals(backing, memory.retained(), "the retired state fence cannot cancel its replacement owner");
+			publisher.cancel(new SyncPublisher.Context(context.consumerId(), context.recipient(), context.sessionView(), 2, context.baseline()));
+			assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+		}
+	}
+
+	@Test void queueRefusedOffersDoNotConsumeLifetimeKeyOwners() throws Exception {
+		var settings = InventorySettings.serverDefaults(); var memory = new RetainedMemoryLedger(16_000_000);
+		try (var publisher = new InventorySyncPublisher(memory, new Transport())) {
+			publisher.advance(0, settings); var context = context("preview/refused-identities", 1);
+			assertTrue(publisher.register(context, route(null, "preview")));
+			var queued = InventorySyncPublisher.class.getDeclaredField("previewQueued"); queued.setAccessible(true);
+			queued.setLong(publisher, settings.previewQueueBytes());
+			try {
+				for (int i = 0; i < 1030; i++) {
+					var result = entries(1, Map.of("key_" + i, InventoryRuntimeTest.item(1)));
+					var fragment = (CaptureResult.OpaqueKeyedFragment) result.payload().orElseThrow();
+					assertInstanceOf(SyncPublisher.Outcome.Deferred.class, publisher.publish(result,
+						new SyncPublisher.AuthorizedProjection(SyncPublisher.PublicationForm.KEYED_ABSOLUTE, fragment.entries().keySet()), context,
+						new CostLedger(Map.of(InventorySyncPublisher.PUBLICATIONS, 1L))));
+				}
+			} finally { queued.setLong(publisher, 0); }
+			var states = (Map<?, ?>) InventoryBackendTest.field(publisher, "states");
+			Object state = states.values().iterator().next();
+			assertTrue(((Set<?>) InventoryBackendTest.field(state, "admittedKeys")).isEmpty());
+			assertTrue(((Set<?>) InventoryBackendTest.field(state, "admittedGroups")).isEmpty());
+			publish(publisher, context, capture(1, 1, 1)); publisher.drain(); assertFalse(publisher.pending(context));
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+
+	@Test void notHandedOffDataKeepsItsImmutablePartAndMakesNoDeliveryProgress() {
+		var settings = InventorySettings.serverDefaults(); var memory = new RetainedMemoryLedger(16_000_000);
+		class Observed extends Transport {
+			boolean handoff;
+			@Override public nx.pingwheel.common.platform.TransportHandoff sendObserved(UUID recipient, InventoryS2CPacket packet) {
+				if (!handoff) return nx.pingwheel.common.platform.TransportHandoff.NOT_HANDED_OFF;
+				send(recipient, packet); return nx.pingwheel.common.platform.TransportHandoff.HANDED_OFF;
+			}
+		}
+		var transport = new Observed();
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); var context = context("preview/not-handed-off", 1);
+			assertTrue(publisher.register(context, route(null, "preview")));
+			publish(publisher, context, entries(1, Map.of("a", InventoryRuntimeTest.item(1), "b", InventoryRuntimeTest.item(2))));
+			publisher.drain(); assertTrue(publisher.pending(context)); assertEquals(0, publisher.deliveredParts(context));
+			assertTrue(transport.sent.isEmpty());
+			transport.handoff = true; publisher.advance(settings.getPreview().getPeriodTicks(), settings); publisher.drain();
+			assertFalse(publisher.pending(context)); assertEquals(2, publisher.deliveredParts(context));
+			assertEquals(List.of(0, 1), transport.sent.stream().map(InventoryS2CPacket::partIndex).toList());
+			assertTrue(transport.sent.stream().allMatch(packet -> packet.partCount() == 2 && packet.completeScan()));
+		}
+		assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+	}
+
+	@Test void prepaidOpenControlSurvivesFullLedgerAndNotHandedOffUntilActualAcceptance() {
+		var settings = InventorySettings.serverDefaults(); var memory = new RetainedMemoryLedger(0);
+		class Observed extends Transport {
+			nx.pingwheel.common.platform.TransportHandoff handoff = nx.pingwheel.common.platform.TransportHandoff.NOT_HANDED_OFF;
+			@Override public nx.pingwheel.common.platform.TransportHandoff sendObserved(UUID recipient, InventoryS2CPacket packet) {
+				if (handoff == nx.pingwheel.common.platform.TransportHandoff.HANDED_OFF) send(recipient, packet);
+				return handoff;
+			}
+		}
+		var transport = new Observed();
+		try (var publisher = new InventorySyncPublisher(memory, transport)) {
+			publisher.advance(0, settings); UUID recipient = new UUID(44, 1);
+			var packet = InventoryS2CPacket.openRejected(7, 100, 1, 1, InventoryFailureReason.MEMORY_LIMIT);
+			int[] accepted = {0}; publisher.setControlHandoff((player, value) -> { accepted[0]++; return false; });
+			assertTrue(publisher.controlPrepaid(recipient, packet)); publisher.drainControls();
+			assertTrue(publisher.controlQueued(recipient, packet)); assertEquals(0, accepted[0]);
+			assertEquals(0, memory.retained()); assertEquals(0, memory.reserved());
+			transport.handoff = nx.pingwheel.common.platform.TransportHandoff.HANDED_OFF;
+			publisher.drainControls(); assertFalse(publisher.controlQueued(recipient, packet));
+			assertEquals(1, accepted[0]); assertEquals(List.of(packet), transport.sent);
+		}
+	}
+
+	@Test void controlCapacityIs1024GloballyAnd64PerRecipientWithIndependentCancellation() {
+		var memory = new RetainedMemoryLedger(16_000_000);
+		try (var publisher = new InventorySyncPublisher(memory, new Transport())) {
+			publisher.advance(0, InventorySettings.serverDefaults());
+			for (int owner = 0; owner < 16; owner++) for (int request = 1; request <= 64; request++)
+				assertTrue(publisher.controlPrepaid(new UUID(55, owner), InventoryS2CPacket.openRejected(7, 100, 1, request, InventoryFailureReason.TARGET_CAPACITY)));
+			var packet = InventoryS2CPacket.openRejected(7, 100, 1, 65, InventoryFailureReason.TARGET_CAPACITY);
+			assertFalse(publisher.controlPrepaid(new UUID(55, 0), packet));
+			assertFalse(publisher.controlPrepaid(new UUID(55, 17), packet));
+			publisher.cancelControls(new UUID(55, 0));
+			assertTrue(publisher.controlPrepaid(new UUID(55, 17), packet));
+			assertEquals(0, memory.retained());
 		}
 	}
 

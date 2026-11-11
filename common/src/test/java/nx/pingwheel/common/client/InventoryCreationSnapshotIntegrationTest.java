@@ -195,6 +195,7 @@ class InventoryCreationSnapshotIntegrationTest {
 			// A new generation is congested by the production byte budget; the
 			// remaining normal HELLOs share it fairly with that generation.
 			f.settings().getPreview().setGlobalByteMultiplier(ByteMultiplier.finite(new BigDecimal("0.125")));
+			f.wirePressure();
 			for (int index = 1; index < 24; index++) f.join(new UUID(800, index));
 			assertEquals(24, f.joined().size(), "24 distinct server players, one normal HELLO each");
 			assertEquals(Optional.of(false), f.client.authorization(lane), "the queued allow is not advertised before handoff");
@@ -488,7 +489,16 @@ class InventoryCreationSnapshotIntegrationTest {
 		MinecraftServer server() throws Exception { return (MinecraftServer) get(serverFixture, "server"); }
 		ServerMarkerStore store() throws Exception { return (ServerMarkerStore) get(serverFixture, "store"); }
 		InventorySyncPublisher publisher() throws Exception { return (InventorySyncPublisher) get(backend(), "publisher"); }
-		InventoryS2CPacket pending(UUID id, InventoryResourceKind lane) throws Exception { return (InventoryS2CPacket) call(serverFixture, "pendingPolicy", new Class<?>[] {UUID.class, InventoryResourceKind.class}, id, lane); }
+		void wirePressure() throws Exception {
+			InventorySyncPublisher publisher = publisher();
+			var wire = InventorySyncPublisher.class.getDeclaredMethod("wireBudgetFixture", long.class, long.class); wire.setAccessible(true); wire.invoke(publisher, 4096L, 4096L);
+			var global = InventorySyncPublisher.class.getDeclaredMethod("previewGlobalFixture", long.class); global.setAccessible(true); global.invoke(publisher, 4096L);
+			var queue = InventorySyncPublisher.class.getDeclaredMethod("previewQueueFixture", long.class); queue.setAccessible(true); queue.invoke(publisher, 32 * 1024L);
+		}
+		InventoryS2CPacket pending(UUID id, InventoryResourceKind lane) throws Exception {
+			Object session = Objects.requireNonNull(((Map<?, ?>) get(backend(), "sessions")).get(id));
+			return (InventoryS2CPacket) ((Map<?, ?>) get(session, "pendingPolicies")).get(lane);
+		}
 		Event created(MarkerId marker) { return events.stream().filter(e -> e.recipient().equals(recipient) && e.packet() instanceof PresentationS2CPacket p
 			&& p.kind() == PresentationS2CPacket.Kind.CREATED && p.snapshot().id().equals(marker)).findFirst().orElseThrow(); }
 		Component assertImmediate(MarkerId marker, boolean partial) {

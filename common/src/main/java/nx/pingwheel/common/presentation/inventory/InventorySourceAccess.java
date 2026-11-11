@@ -31,9 +31,16 @@ public final class InventorySourceAccess implements SourceAccess {
 	public static final CostLedger.Counter PHYSICAL = new CostLedger.Counter("inventory/physical", CostLedger.Unit.SLOT);
 	public static final CostLedger.Counter PROVIDER_WORK = new CostLedger.Counter("inventory/provider_work", CostLedger.Unit.WORK);
 	/** One resolution/validation/read may inspect a bounded Vault of 81 members several times. */
-	public static final long PROVIDER_CALL_WORK = 1024, MAX_PROVIDER_WORK_PER_TICK = 131072;
+	public static final long PROVIDER_CALL_WORK = 1024, MAX_PROVIDER_WORK_PER_TICK = 524288;
 	public static final int MAX_STEP = 64;
-	public static final int MAX_SLOTS = 4096;
+	public static final int MAX_SLOTS = 16384;
+	/** Contiguous adapter capture is independent of incremental source capacity. */
+	public static final int CAPTURE_MAX_SLOTS = 4096;
+	/** Provider-side scalar limit evidence; reporting never performs another native callback. */
+	public static void reportProviderLimit(InventoryFailureReason reason, String stage, long requested, long limit) {
+		InventoryCaptureDiagnostics.limit(null, InventoryDiagnosticSite.PROVIDER, InventoryOperation.ROUTE, reason,
+			InventoryOutcome.REJECTED, stage, requested, -1, limit, null);
+	}
 
 	/**
 	 * Lazy one-shot snapshot preparation outcome. {@code READY} fixes one route
@@ -107,6 +114,14 @@ public final class InventorySourceAccess implements SourceAccess {
 	 * the source offers no usable snapshot support.
 	 */
 	public interface InventoryHandle extends SourceAccess.Handle {
+		/** Reason owned by this handle's terminal observation, including a pending final check. */
+		default @Nullable InventoryFailureReason terminalReason() { return null; }
+		/** Attempt-local physical admission refusal; terminal replay does not manufacture a new refusal. */
+		default @Nullable InventoryFailureReason stepDeferralReason() { return null; }
+		/** Completion-only probe: no slot allowance is requested or refused by this operation. */
+		default StepOutcome stepCompletion(CostLedger ledger, InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance validation) {
+			return new StepOutcome.Deferred();
+		}
 		default boolean scopeTransition() { return false; }
 		default int remainingSlots() { return MAX_SLOTS; }
 		/** Paid native addresses await a current postcheck; retry needs metadata admission, not another slot. */
@@ -120,6 +135,10 @@ public final class InventorySourceAccess implements SourceAccess {
 		default ReadMode readMode() { return ReadMode.ADAPTER; }
 		default InventoryItemCodec.@Nullable Catalog nativeCatalog() { return null; }
 		default long nativeCatalogGrowthUpperBound() { return 0; }
+		default long nativeCatalogGrowthUpperBound(int attempts) { return Math.multiplyExact(attempts, nativeCatalogGrowthUpperBound()); }
+		default int nativeCatalogEntriesUpperBound(int attempts) {
+			var catalog = nativeCatalog(); return catalog == null ? Math.min(InventoryItemCodec.DEFAULT_MAX_ENTRIES, Math.max(0, attempts - 1)) : catalog.entriesUpperBound(Math.max(1, attempts));
+		}
 		default long nativeResourceRetainedBytes() { var catalog = nativeCatalog(); return catalog == null ? 0 : catalog.modeledRetainedBytes(); }
 		default boolean certifiedResourceSharing() { return true; }
 		default InventoryValidationBudget.Cost evidenceValidationCost() { return InventoryValidationBudget.NONE; }
@@ -164,6 +183,10 @@ public final class InventorySourceAccess implements SourceAccess {
 	}
 
 	public interface Source extends AutoCloseable {
+		/** Typed current validation; legacy false carries only unavailable evidence. Never re-runs a failed check. */
+		default InventoryDecision<Boolean> validationDecision(InventoryValidationBudget.Allowance allowance) {
+			return valid(allowance) ? InventoryDecision.accept(true) : InventoryDecision.reject(InventoryFailureReason.SOURCE_UNAVAILABLE, InventoryImpact.DEGRADED);
+		}
 		/** Narrow Sable FLUID same-lease scope transition, not a permission or topology failure. */
 		default boolean scopeTransition() { return false; }
 		/** Runtime-owned wrappers provide historical metadata lifetime for publication. */
@@ -178,6 +201,10 @@ public final class InventorySourceAccess implements SourceAccess {
 		/** Borrowed metadata only: never creates a catalogue or performs a provider callback. */
 		default InventoryItemCodec.@Nullable Catalog nativeCatalog() { return null; }
 		default long nativeCatalogGrowthUpperBound() { return 0; }
+		default long nativeCatalogGrowthUpperBound(int attempts) { return Math.multiplyExact(attempts, nativeCatalogGrowthUpperBound()); }
+		default int nativeCatalogEntriesUpperBound(int attempts) {
+			var catalog = nativeCatalog(); return catalog == null ? Math.min(InventoryItemCodec.DEFAULT_MAX_ENTRIES, Math.max(0, attempts - 1)) : catalog.entriesUpperBound(Math.max(1, attempts));
+		}
 		default long nativeResourceRetainedBytes() { var catalog = nativeCatalog(); return catalog == null ? 0 : catalog.modeledRetainedBytes(); }
 		default boolean certifiedResourceSharing() { return true; }
 		/** Independent resource seam; ITEM implementations retain their existing native/certified route. */
@@ -279,7 +306,7 @@ public final class InventorySourceAccess implements SourceAccess {
 	}
 	private final Resolver resolver;
 	private final InventorySourceInput input;
-	private Source prepared;
+	private @Nullable Source prepared;
 
 	public InventorySourceAccess(InventorySourceInput input, Function<InventorySourceInput, Optional<Source>> resolver) {
 		this(input, new Resolver() {
@@ -356,7 +383,7 @@ public final class InventorySourceAccess implements SourceAccess {
 			: !item.aggregateRequired() && item.key().equals(selection.exact()));
 	}
 	/** Close once while both failures are available, before expected outcomes are filtered. */
-	private void closeAttemptSource(String operation, Source source, Throwable primary, Supplier<String> detail) {
+	private void closeAttemptSource(String operation, @Nullable Source source, @Nullable Throwable primary, Supplier<String> detail) {
 		if (source == null) return;
 		try { source.close(); }
 		catch (RuntimeException | LinkageError cleanup) {
@@ -384,11 +411,22 @@ public final class InventorySourceAccess implements SourceAccess {
 		return resolve(target, scope, ledger, null);
 	}
 	public ResolveResult resolve(PresentationAdapter.DetachedTarget target, ReadScope scope, CostLedger ledger, InventoryValidationBudget.@Nullable Allowance validation) {
-		if (!scope.viewKey().equals(input.viewKey()) || !matches(target)) return ResolveResult.Unresolved.UNSUPPORTED;
-		var ticket = ledger.tryReserve(Map.of(PROBES, 1L, PROVIDER_WORK, PROVIDER_CALL_WORK));
-		if (ticket.isEmpty()) return ResolveResult.Unresolved.DEFERRED;
+		var decision = resolveDecision(target, scope, ledger, validation);
+		return decision.accepted() ? new ResolveResult.Available(Objects.requireNonNull(decision.value()))
+			: decision.deferred() ? ResolveResult.Unresolved.DEFERRED : decision.unsupported() ? ResolveResult.Unresolved.UNSUPPORTED : ResolveResult.Unresolved.UNAVAILABLE;
+	}
+	public InventoryDecision<Descriptor> resolveDecision(PresentationAdapter.DetachedTarget target, ReadScope scope, CostLedger ledger,
+		InventoryValidationBudget.@Nullable Allowance validation) {
+		if (!scope.viewKey().equals(input.viewKey()) || !matches(target)) return InventoryDecision.unsupported(InventoryFailureReason.UNSUPPORTED_CONTEXT, InventoryImpact.DEGRADED);
+		var ticket = ledger.tryReserveDecision(Map.of(PROBES, 1L, PROVIDER_WORK, PROVIDER_CALL_WORK));
+		if (!ticket.accepted()) {
+			var reason = Objects.requireNonNull(ticket.limitingCounter()).equals(PROBES) ? InventoryFailureReason.PROBE_LIMIT : InventoryFailureReason.PROVIDER_WORK_LIMIT;
+			InventoryCaptureDiagnostics.limit(input, InventoryDiagnosticSite.PROVIDER, InventoryOperation.ROUTE, reason,
+				InventoryOutcome.DEFERRED, "resolve-admission", -1, -1, -1, null);
+			return InventoryDecision.defer(reason, InventoryImpact.DEGRADED);
+		}
 		String sourceClass = "unresolved";
-		try (var grant = ticket.get()) {
+		try (var grant = Objects.requireNonNull(ticket.ticket())) {
 			grant.commit(Map.of(PROBES, 1L, PROVIDER_WORK, PROVIDER_CALL_WORK));
 			if (prepared != null) {
 				Source previous = prepared; prepared = null;
@@ -396,28 +434,34 @@ public final class InventorySourceAccess implements SourceAccess {
 			}
 			sourceClass = "unresolved";
 			prepared = (validation == null ? resolver.resolve(input) : resolver.resolve(input, validation)).orElse(null);
-			if (prepared == null) return ResolveResult.Unresolved.UNAVAILABLE;
+			if (prepared == null) return InventoryDecision.reject(InventoryFailureReason.SOURCE_UNAVAILABLE, InventoryImpact.DEGRADED);
 			sourceClass = prepared.getClass().getName();
 			if (!prepared.key().readScope().equals(scope.viewKey())) {
 				Source denied = prepared; prepared = null; denied.close();
-				return ResolveResult.Unresolved.UNAVAILABLE;
+				return InventoryDecision.reject(InventoryFailureReason.SOURCE_AUTHORITY_DENIED, InventoryImpact.DEGRADED);
 			}
-			return new ResolveResult.Available(new Descriptor(prepared.key(), 1,
+			return InventoryDecision.accept(new Descriptor(prepared.key(), 1,
 				new Capabilities(!prepared.stableCursor(), prepared.stableCursor(), prepared.version().isPresent())));
 		} catch (InventoryItemBudget.CaptureLimitException deferred) {
 			@Nullable Source failed = prepared; prepared = null;
 			closeAttemptSource("resolve-close", failed, deferred, () -> "stage=resolve-admission");
-			return ResolveResult.Unresolved.DEFERRED;
+			InventoryFailureReason reason = deferred instanceof InventoryValidationBudget.ItemResolutionDeferred item ? item.reason()
+				: deferred instanceof nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission.Deferred fluid ? fluid.reason() : deferred.reason();
+			InventoryCaptureDiagnostics.limit(input, InventoryDiagnosticSite.VALIDATION, InventoryOperation.ROUTE, reason,
+				InventoryOutcome.DEFERRED, "source-resolution", -1, -1, -1, null);
+			return InventoryDecision.defer(reason, InventoryImpact.DEGRADED);
 		} catch (RuntimeException | LinkageError unavailable) {
-			Source failed = prepared; prepared = null;
+			@Nullable Source failed = prepared; prepared = null;
 			closeAttemptSource("resolve-close", failed, unavailable, () -> "stage=resolve");
 			String failedClass = sourceClass;
 			if (InventoryCaptureDiagnostics.expectedSourceUnavailable(unavailable))
 				InventoryCaptureDiagnostics.sourceUnavailable("resolve", input, () -> failedClass, "resolve", unavailable);
 			else InventoryCaptureDiagnostics.warn("resolve", input, null, () -> "sourceClass=" + failedClass, unavailable);
-			return ResolveResult.Unresolved.UNAVAILABLE;
+			if (unavailable instanceof nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnsupportedException)
+				return InventoryDecision.unsupported(InventoryFailureReason.UNSUPPORTED_LANE, InventoryImpact.DEGRADED);
+			return InventoryDecision.reject(InventoryCaptureDiagnostics.sourceReason(unavailable), InventoryImpact.DEGRADED);
 		} catch (Error fatal) {
-			Source failed = prepared; prepared = null;
+			@Nullable Source failed = prepared; prepared = null;
 			closeAttemptSource("resolve-close", failed, fatal, () -> "stage=resolve");
 			throw fatal;
 		}
@@ -478,6 +522,7 @@ public final class InventorySourceAccess implements SourceAccess {
 		private final InventoryDisplayProjection snapshotProjection = new InventoryDisplayProjection();
 		private int cursor, expected = -1;
 		private boolean closed, terminal, versionStable = true;
+		private @Nullable InventoryFailureReason terminalReason, stepDeferralReason;
 		private CaptureResult.@Nullable Completeness nativePendingCompletion;
 		private OptionalLong firstVersion = OptionalLong.empty();
 		private Preparation preparation;
@@ -491,6 +536,8 @@ public final class InventorySourceAccess implements SourceAccess {
 			this.input = input; this.descriptor = descriptor; this.scope = scope; this.source = source;
 		}
 		@Override public Descriptor descriptor() { return descriptor; }
+		@Override public @Nullable InventoryFailureReason terminalReason() { return terminalReason; }
+		@Override public @Nullable InventoryFailureReason stepDeferralReason() { return stepDeferralReason; }
 		@Override public Optional<InventoryPublicationEvidence> publicationEvidence() { return closed ? Optional.empty() : source.publicationEvidence(); }
 		@Override public InventorySharedRead.@Nullable Port sharedRead() { return closed ? null : source.sharedRead(); }
 		@Override public long sourceRetainedBytes() { return source.sourceRetainedBytes(); }
@@ -500,6 +547,8 @@ public final class InventorySourceAccess implements SourceAccess {
 		@Override public ReadMode readMode() { return source.readMode(); }
 		@Override public InventoryItemCodec.@Nullable Catalog nativeCatalog() { return source.nativeCatalog(); }
 		@Override public long nativeCatalogGrowthUpperBound() { return source.nativeCatalogGrowthUpperBound(); }
+		@Override public long nativeCatalogGrowthUpperBound(int attempts) { return source.nativeCatalogGrowthUpperBound(attempts); }
+		@Override public int nativeCatalogEntriesUpperBound(int attempts) { return source.nativeCatalogEntriesUpperBound(attempts); }
 		@Override public long nativeResourceRetainedBytes() { return source.nativeResourceRetainedBytes(); }
 		@Override public boolean certifiedResourceSharing() { return input.resourceKind() == InventoryResourceKind.ITEM && source.certifiedResourceSharing(); }
 		@Override public InventoryValidationBudget.Cost discoveryValidationCost() {
@@ -559,8 +608,15 @@ public final class InventorySourceAccess implements SourceAccess {
 				if (readMode() == ReadMode.NATIVE_INCREMENTAL) return settleLiveRoute();
 				SnapshotPlan plan = source.snapshotPlan(discovery).orElse(null);
 				if (plan == null) return settleLiveRoute();
+				if (plan.physicalReadUpperBound() < 0 || plan.physicalReadUpperBound() > CAPTURE_MAX_SLOTS) {
+					terminalReason = InventoryFailureReason.CAPTURE_READ_LIMIT;
+					InventoryCaptureDiagnostics.limit(input, InventoryDiagnosticSite.SNAPSHOT, InventoryOperation.SNAPSHOT,
+						InventoryFailureReason.CAPTURE_READ_LIMIT, InventoryOutcome.TRUNCATED, "snapshot-capture-reads", plan.physicalReadUpperBound(), 0, CAPTURE_MAX_SLOTS, null);
+					return settle(Preparation.INCOMPLETE);
+				}
 				long upperBound = plan.memoryUpperBoundBytes();
 				if (upperBound < 0L) {
+					terminalReason = InventoryFailureReason.SNAPSHOT_LIMIT;
 					InventoryCaptureDiagnostics.boundExceeded(input, "negative-memory-bound");
 					return settle(Preparation.INCOMPLETE);
 				}
@@ -576,8 +632,9 @@ public final class InventorySourceAccess implements SourceAccess {
 				if (!source.valid(discovery)) return settle(Preparation.INVALID);
 				int slots = captured.slots();
 				long retained = captured.retainedBytes();
-				if (slots < 0 || slots > MAX_SLOTS || retained < 0L || retained > upperBound) {
-					InventoryCaptureDiagnostics.boundExceeded(input, slots < 0 || slots > MAX_SLOTS ? "snapshot-slots" : "retained-bytes");
+				if (slots < 0 || slots > CAPTURE_MAX_SLOTS || retained < 0L || retained > upperBound) {
+					terminalReason = InventoryFailureReason.SNAPSHOT_LIMIT;
+					InventoryCaptureDiagnostics.boundExceeded(input, slots < 0 || slots > CAPTURE_MAX_SLOTS ? "snapshot-slots" : "retained-bytes");
 					return settle(Preparation.INCOMPLETE);
 				}
 				SnapshotEvidence evidence = captured.evidence();
@@ -599,10 +656,12 @@ public final class InventorySourceAccess implements SourceAccess {
 			} catch (nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget.CaptureLimitException
 				| nx.pingwheel.common.presentation.inventory.minecraft.InventoryObservationSnapshot.LimitException failure) {
 				preparationFailure = failure;
+				terminalReason = InventoryCaptureDiagnostics.boundReason(failure);
 				InventoryCaptureDiagnostics.boundExceeded(input, "capture-work-or-structure", failure);
 				return settle(Preparation.INCOMPLETE);
 			} catch (RuntimeException | LinkageError failure) {
 				preparationFailure = failure;
+				terminalReason = InventoryCaptureDiagnostics.sourceReason(failure);
 				return settle(Preparation.UNAVAILABLE);
 			} finally {
 				// Fatal Errors propagate, but never strand a captured object or its
@@ -642,6 +701,14 @@ public final class InventorySourceAccess implements SourceAccess {
 		@Override public StepOutcome step(CostLedger ledger, @Nullable InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance validation) {
 			return stepOwned(ledger, admission, Objects.requireNonNull(validation));
 		}
+		@Override public StepOutcome stepCompletion(CostLedger ledger, InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance validation) {
+			stepDeferralReason = null;
+			if (preparation == null || preparation == Preparation.READY) {
+				if (snapshot != null ? cursor < snapshotSlots : readMode() != ReadMode.NATIVE_INCREMENTAL
+					|| nativePendingCompletion == null && source.slots() != 0) return new StepOutcome.Deferred();
+			}
+			return stepOwned(ledger, admission, validation);
+		}
 		@Override public InventoryStep.Outcome stepInventory(CostLedger ledger, InventoryCatalogAdmission admission, InventoryValidationBudget.Allowance validation) {
 			if (readMode() != ReadMode.NATIVE_INCREMENTAL) return InventoryStep.fromLegacy(stepOwned(ledger, admission, validation));
 			return nativeStep(ledger, admission, validation);
@@ -650,6 +717,7 @@ public final class InventorySourceAccess implements SourceAccess {
 			return stepInventory(ledger, admission, new InventoryValidationBudget.Allowance(stepValidationCost(MAX_STEP)));
 		}
 		private StepOutcome stepOwned(CostLedger ledger, @Nullable InventoryCatalogAdmission catalog, InventoryValidationBudget.@Nullable Allowance validation) {
+			stepDeferralReason = null;
 			if (readMode() == ReadMode.NATIVE_INCREMENTAL) {
 				// Generic callers request encoding explicitly; the typed route advances the cursor only once.
 				var outcome = nativeStep(ledger, catalog, validation);
@@ -666,6 +734,7 @@ public final class InventorySourceAccess implements SourceAccess {
 		}
 
 		private InventoryStep.Outcome nativeStep(CostLedger ledger, @Nullable InventoryCatalogAdmission catalog, InventoryValidationBudget.@Nullable Allowance validation) {
+			stepDeferralReason = null;
 			if (closed || terminal || planDeferred) return new InventoryStep.Outcome.Deferred();
 			if (preparation != null && preparation != Preparation.READY) {
 				terminal = true; return InventoryStep.fromLegacy(terminalFailure(preparation));
@@ -673,18 +742,20 @@ public final class InventorySourceAccess implements SourceAccess {
 			// Native source slots() is frozen resolution metadata. Generic extension routes keep their legacy semantics.
 			int slots = source.slots();
 			int bound = nativePendingCompletion != null ? 0 : (int) Math.min(Math.max(0, slots - cursor), Math.min(MAX_STEP, Math.min(ledger.remaining(PHYSICAL), Math.max(0, ledger.remaining(PROVIDER_WORK) / PROVIDER_CALL_WORK - 1))));
-			if (slots != 0 && bound == 0 && nativePendingCompletion == null) return new InventoryStep.Outcome.Deferred();
-			var admission = ledger.tryReserve(Map.of(PHYSICAL, (long) bound, PROBES, 1L, PROVIDER_WORK, (bound + 1L) * PROVIDER_CALL_WORK));
-			if (admission.isEmpty()) return new InventoryStep.Outcome.Deferred();
+			if (slots != 0 && bound == 0 && nativePendingCompletion == null) { physicalRefusal(ledger, "native-read-admission"); return new InventoryStep.Outcome.Deferred(); }
+			var admission = ledger.tryReserveDecision(Map.of(PHYSICAL, (long) bound, PROBES, 1L, PROVIDER_WORK, (bound + 1L) * PROVIDER_CALL_WORK));
+			if (!admission.accepted()) { physicalRefusal(ledger, Objects.requireNonNull(admission.limitingCounter()), bound, "native-read-admission"); return new InventoryStep.Outcome.Deferred(); }
 			int used = 0, first = cursor;
 			var items = new java.util.ArrayList<@Nullable InventoryResourceValue>(bound);
-			try (var ticket = admission.get()) {
+			try (var ticket = Objects.requireNonNull(admission.ticket())) {
 				try {
 					if (!(validation == null ? source.valid() : source.valid(validation))) {
+						terminalReason = InventoryFailureReason.SOURCE_UNAVAILABLE;
 						terminal = true; return nativeCaptured(cursor, java.util.List.of(), CaptureResult.Availability.INVALID, CaptureResult.Completeness.INCOMPLETE);
 					}
 					if (expected < 0) expected = slots;
 					if (slots < 0 || slots != expected) {
+						terminalReason = InventoryFailureReason.SOURCE_CHANGED;
 						terminal = true; return nativeCaptured(cursor, java.util.List.of(), CaptureResult.Availability.UNAVAILABLE, CaptureResult.Completeness.INCOMPLETE);
 					}
 					if (nativePendingCompletion != null) {
@@ -704,9 +775,16 @@ public final class InventorySourceAccess implements SourceAccess {
 						}
 						completion = cursor == expected ? CaptureResult.Completeness.COMPLETE : cursor == MAX_SLOTS
 							? CaptureResult.Completeness.INCOMPLETE : CaptureResult.Completeness.CONTINUE;
+						if (completion == CaptureResult.Completeness.INCOMPLETE) {
+							terminalReason = InventoryFailureReason.PHYSICAL_SLOT_LIMIT;
+							InventoryCaptureDiagnostics.limit(input,
+							InventoryDiagnosticSite.CAPTURE, InventoryOperation.READ, InventoryFailureReason.PHYSICAL_SLOT_LIMIT,
+							InventoryOutcome.TRUNCATED, "native-source-slots", expected, cursor, MAX_SLOTS, null);
+						}
 					} catch (InventoryItemCodec.CapacityExceededException | InventoryFluidCodec.CapacityException | InventoryItemBudget.CaptureLimitException exhausted) {
 						// A staged read defer is retryable, unlike catalogue/processing exhaustion.
 						if (exhausted instanceof nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission.Deferred deferred) throw deferred;
+						terminalReason = InventoryCaptureDiagnostics.boundReason(exhausted);
 						InventoryCaptureDiagnostics.boundExceeded(input, "native-catalog-capacity-or-work", exhausted);
 						completion = CaptureResult.Completeness.INCOMPLETE;
 					}
@@ -715,6 +793,7 @@ public final class InventorySourceAccess implements SourceAccess {
 						// but neither full coverage nor capacity refusal can manufacture completion.
 						nativePendingCompletion = completion;
 						if (!(validation == null ? source.valid() : source.valid(validation))) {
+							terminalReason = InventoryFailureReason.SOURCE_UNAVAILABLE;
 							terminal = true; return nativeCaptured(cursor, java.util.List.of(), CaptureResult.Availability.INVALID, CaptureResult.Completeness.INCOMPLETE);
 						}
 						nativePendingCompletion = null;
@@ -724,7 +803,14 @@ public final class InventorySourceAccess implements SourceAccess {
 				} catch (nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission.Deferred deferred) {
 					return items.isEmpty() ? new InventoryStep.Outcome.Deferred()
 						: nativeCaptured(first, items, CaptureResult.Availability.READABLE, CaptureResult.Completeness.CONTINUE);
+				} catch (InventoryItemBudget.CaptureLimitException deferred) {
+					stepDeferralReason = deferred.reason();
+					InventoryCaptureDiagnostics.limit(input, InventoryDiagnosticSite.VALIDATION, InventoryOperation.VALIDATE,
+						deferred.reason(), InventoryOutcome.DEFERRED, "native-current-check", -1, -1, -1, null);
+					return items.isEmpty() ? new InventoryStep.Outcome.Deferred()
+						: nativeCaptured(first, items, CaptureResult.Availability.READABLE, CaptureResult.Completeness.CONTINUE);
 				} catch (RuntimeException | LinkageError unavailable) {
+					terminalReason = InventoryCaptureDiagnostics.sourceReason(unavailable);
 					terminal = true;
 					InventoryCaptureDiagnostics.warn("native-step", input, descriptor.key(), () -> "cursor=" + cursor + " expected=" + expected, unavailable);
 					return nativeCaptured(cursor, java.util.List.of(), CaptureResult.Availability.UNAVAILABLE, CaptureResult.Completeness.INCOMPLETE);
@@ -759,11 +845,11 @@ public final class InventorySourceAccess implements SourceAccess {
 					: (int) Math.min(MAX_STEP, Math.min(ledger.remaining(PHYSICAL), Math.max(0, ledger.remaining(PROVIDER_WORK) / PROVIDER_CALL_WORK - 1)));
 				// A non-empty snapshot with no slot grant must not touch the live
 				// source. Empty snapshots still need one fixed validation call.
-				if (slots != 0 && allowance == 0) return new StepOutcome.Deferred();
-				var admission = ledger.tryReserve(Map.of(PHYSICAL, (long) allowance, PROBES, 1L, PROVIDER_WORK, (allowance + 1L) * PROVIDER_CALL_WORK));
-				if (admission.isEmpty()) return new StepOutcome.Deferred();
+				if (slots != 0 && allowance == 0) { physicalRefusal(ledger, "snapshot-read-admission"); return new StepOutcome.Deferred(); }
+				var admission = ledger.tryReserveDecision(Map.of(PHYSICAL, (long) allowance, PROBES, 1L, PROVIDER_WORK, (allowance + 1L) * PROVIDER_CALL_WORK));
+				if (!admission.accepted()) { physicalRefusal(ledger, Objects.requireNonNull(admission.limitingCounter()), allowance, "snapshot-read-admission"); return new StepOutcome.Deferred(); }
 				int used = 0;
-				try (var ticket = admission.get()) {
+				try (var ticket = Objects.requireNonNull(admission.ticket())) {
 					try {
 						if (!(validation == null ? source.valid() : source.valid(validation))) {
 							terminal = true;
@@ -785,11 +871,13 @@ public final class InventorySourceAccess implements SourceAccess {
 						return snapshotCaptured(new CaptureResult.OpaqueKeyedFragment(InventoryDomainCodec.ID, page), CaptureResult.Availability.READABLE,
 							complete ? CaptureResult.Completeness.COMPLETE : terminal ? CaptureResult.Completeness.INCOMPLETE : CaptureResult.Completeness.CONTINUE);
 					} catch (InventoryItemBudget.CaptureLimitException exhausted) {
+						terminalReason = InventoryCaptureDiagnostics.boundReason(exhausted);
 						InventoryCaptureDiagnostics.boundExceeded(input, "catalog-work-or-workspace", exhausted);
 						terminal = true;
 						releaseRetained(exhausted);
 						return snapshotCaptured(null, CaptureResult.Availability.READABLE, CaptureResult.Completeness.INCOMPLETE);
 					} catch (RuntimeException | LinkageError unavailable) {
+						terminalReason = InventoryCaptureDiagnostics.sourceReason(unavailable);
 						terminal = true;
 						releaseRetained(unavailable);
 						InventoryCaptureDiagnostics.warn("snapshot-step-failed", input, descriptor.key(), () -> "cursor=" + cursor + " slots=" + snapshotSlots, unavailable);
@@ -797,6 +885,7 @@ public final class InventorySourceAccess implements SourceAccess {
 					} finally { ticket.commit(Map.of(PHYSICAL, (long) used, PROBES, 1L, PROVIDER_WORK, (used + 1L) * PROVIDER_CALL_WORK)); }
 				}
 			} catch (RuntimeException | LinkageError unavailable) {
+				terminalReason = InventoryCaptureDiagnostics.sourceReason(unavailable);
 				terminal = true;
 				releaseRetained(unavailable);
 				InventoryCaptureDiagnostics.warn("snapshot-step-failed", input, descriptor.key(), () -> "cursor=" + cursor + " slots=" + snapshotSlots, unavailable);
@@ -820,11 +909,11 @@ public final class InventorySourceAccess implements SourceAccess {
 
 		private StepOutcome liveStep(CostLedger ledger, @Nullable InventoryCatalogAdmission catalog, InventoryValidationBudget.@Nullable Allowance validation) {
 			int allowance = (int) Math.min(MAX_STEP, Math.min(ledger.remaining(PHYSICAL), Math.max(0, ledger.remaining(PROVIDER_WORK) / PROVIDER_CALL_WORK - 1)));
-			if (allowance == 0) return new StepOutcome.Deferred();
-			var admission = ledger.tryReserve(Map.of(PHYSICAL, (long) allowance, PROBES, 1L, PROVIDER_WORK, (allowance + 1L) * PROVIDER_CALL_WORK));
-			if (admission.isEmpty()) return new StepOutcome.Deferred();
+			if (allowance == 0) { physicalRefusal(ledger, "live-read-admission"); return new StepOutcome.Deferred(); }
+			var admission = ledger.tryReserveDecision(Map.of(PHYSICAL, (long) allowance, PROBES, 1L, PROVIDER_WORK, (allowance + 1L) * PROVIDER_CALL_WORK));
+			if (!admission.accepted()) { physicalRefusal(ledger, Objects.requireNonNull(admission.limitingCounter()), allowance, "live-read-admission"); return new StepOutcome.Deferred(); }
 			int used = 0;
-			try (var ticket = admission.get()) {
+			try (var ticket = Objects.requireNonNull(admission.ticket())) {
 				try {
 					if (!(validation == null ? source.valid() : source.valid(validation))) { terminal = true; return captured(null, CaptureResult.Availability.INVALID, CaptureResult.Completeness.INCOMPLETE); }
 					if (expected < 0) { firstVersion = source.version(); expected = source.stableCursor() ? source.slots() : -1; }
@@ -862,18 +951,22 @@ public final class InventorySourceAccess implements SourceAccess {
 					used = Math.min(allowance, failure.attemptedVisits());
 					terminal = true;
 					if (failure.getCause() instanceof InventoryItemBudget.CaptureLimitException || failure.getCause() instanceof InventoryItemCodec.CapacityExceededException) {
+						terminalReason = InventoryCaptureDiagnostics.boundReason(failure);
 						InventoryCaptureDiagnostics.boundExceeded(input, "catalog-work-or-workspace", failure);
 						return captured(null, CaptureResult.Availability.READABLE, CaptureResult.Completeness.INCOMPLETE);
 					}
 					InventoryCaptureDiagnostics.warn("live-step", input, descriptor.key(), () -> "cursor=" + cursor + " expected=" + expected, failure);
+					terminalReason = InventoryCaptureDiagnostics.sourceReason(failure);
 					return captured(null, CaptureResult.Availability.UNAVAILABLE, CaptureResult.Completeness.INCOMPLETE);
 				} catch (nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission.Deferred deferred) {
 					return new StepOutcome.Deferred();
 				} catch (InventoryItemBudget.CaptureLimitException | InventoryItemCodec.CapacityExceededException | InventoryFluidCodec.CapacityException exhausted) {
+					terminalReason = InventoryCaptureDiagnostics.boundReason(exhausted);
 					InventoryCaptureDiagnostics.boundExceeded(input, "catalog-work-or-workspace", exhausted);
 					terminal = true;
 					return captured(null, CaptureResult.Availability.READABLE, CaptureResult.Completeness.INCOMPLETE);
 				} catch (RuntimeException | LinkageError unavailable) {
+					terminalReason = InventoryCaptureDiagnostics.sourceReason(unavailable);
 					InventoryCaptureDiagnostics.warn("live-step", input, descriptor.key(), () -> "cursor=" + cursor + " expected=" + expected, unavailable);
 					terminal = true;
 					return captured(null, CaptureResult.Availability.UNAVAILABLE, CaptureResult.Completeness.INCOMPLETE);
@@ -881,7 +974,18 @@ public final class InventorySourceAccess implements SourceAccess {
 			}
 		}
 
-		private StepOutcome captured(CaptureResult.CapturePayload payload, CaptureResult.Availability available, CaptureResult.Completeness completeness) {
+		private void physicalRefusal(CostLedger ledger, String stage) {
+			physicalRefusal(ledger, ledger.remaining(PHYSICAL) == 0 ? PHYSICAL : PROVIDER_WORK, 1, stage);
+		}
+		private void physicalRefusal(CostLedger ledger, CostLedger.Counter counter, int slots, String stage) {
+			InventoryFailureReason reason = counter.equals(PHYSICAL) ? InventoryFailureReason.PHYSICAL_SLOT_LIMIT
+				: counter.equals(PROBES) ? InventoryFailureReason.PROBE_LIMIT : InventoryFailureReason.PROVIDER_WORK_LIMIT;
+			stepDeferralReason = reason;
+			InventoryCaptureDiagnostics.limit(input, InventoryDiagnosticSite.CAPTURE, InventoryOperation.READ,
+				reason, InventoryOutcome.DEFERRED, stage, counter.equals(PROVIDER_WORK) ? (slots + 1L) * PROVIDER_CALL_WORK : counter.equals(PHYSICAL) ? slots : 1L,
+				ledger.used(counter), ledger.limit(counter), null);
+		}
+		private StepOutcome captured(CaptureResult.@Nullable CapturePayload payload, CaptureResult.Availability available, CaptureResult.Completeness completeness) {
 			return new StepOutcome.Captured(new CaptureResult(Optional.ofNullable(payload),
 				new CaptureResult.Coverage(scope.viewKey(), cursor, cursor, expected < 0 ? OptionalLong.empty() : OptionalLong.of(expected)),
 				available, completeness, versionStable && firstVersion.isPresent() ? CaptureResult.Consistency.VERIFIED : CaptureResult.Consistency.EVENTUAL,

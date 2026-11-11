@@ -22,6 +22,8 @@ import nx.pingwheel.neoforge.platform.PlatformFluidServiceTest.PaidAccess;
 import static nx.pingwheel.neoforge.platform.PlatformFluidServiceTest.*;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryItemBudget;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySnapshotLayout;
+import nx.pingwheel.common.presentation.inventory.minecraft.InventoryProviderLimitException;
+import nx.pingwheel.common.presentation.inventory.minecraft.ProviderLimitSite;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventorySourceUnavailableException;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryValidationBudget;
 import nx.pingwheel.common.presentation.inventory.minecraft.InventoryFluidAdmission;
@@ -141,7 +143,7 @@ class CreateFluidTankAccessTest {
 	@Test void enormousConfiguredStructureFailsPreflightBeforePrismAllocationOrMemberPrescan() {
 		var world = new World(1, 1); var controller = world.entities.get(BlockPos.ZERO);
 		controller.width = 3; controller.height = Integer.MAX_VALUE;
-		assertThrows(InventorySourceUnavailableException.class, () -> access(world, BlockPos.ZERO, Direction.UP));
+		assertThrows(InventoryProviderLimitException.class, () -> access(world, BlockPos.ZERO, Direction.UP));
 		assertTrue(world.blockReads.stream().allMatch(BlockPos.ZERO::equals), "only root/controller before finite shape preflight");
 		assertTrue(world.queryPositions.isEmpty());
 	}
@@ -309,7 +311,7 @@ class CreateFluidTankAccessTest {
 			+ " admissionHeadroom=" + needed + " defaultMemory=" + settings.pendingMemoryBytes());
 	}
 
-	@ParameterizedTest @CsvSource({"3,12,108", "3,113,1017", "2,256,1024"})
+	@ParameterizedTest @CsvSource({"3,12,108", "3,455,4095", "2,1024,4096"})
 	void stagedControllerTraversalReallyFinishesReadsAndReleasesCallerOwnership(int width, int height, int members) throws Exception {
 		// Headless metadata extents exercise admission, not Create's configurable live height limit.
 		var world = new World(width, height); BlockPos hit = new BlockPos(width - 1, height - 1, width - 1);
@@ -322,7 +324,7 @@ class CreateFluidTankAccessTest {
 		var settings = InventorySettings.serverDefaults();
 		var memory = new RetainedMemoryLedger(settings.pendingMemoryBytes());
 		// Same engineering work ledger used by Runtime, not the unrelated provider-call counter.
-		long work = (long) InventorySourceAccess.MAX_SLOTS * InventoryItemBudget.workUpperBound((int) settings.effectiveDisplayBytes());
+		long work = (long) InventorySourceAccess.CAPTURE_MAX_SLOTS * InventoryItemBudget.workUpperBound((int) settings.effectiveDisplayBytes());
 		var ledger = new CostLedger(Map.of(WORK, work));
 		InventoryFluidAdmission.Ownership ownership; IPlatformFluidService.Access access;
 		try (var a = new InventoryFluidAdmission(ledger, WORK, memory, world.memberCost, world.authorityCost);
@@ -537,12 +539,10 @@ class CreateFluidTankAccessTest {
 		assertTrue(context(boiler).contains("active=true"), context(boiler));
 
 		var shapeWorld = new World(1, 1); shapeWorld.entities.get(BlockPos.ZERO).width = 4;
-		var shape = assertThrows(InventorySourceUnavailableException.class,
+		var shape = assertThrows(InventoryProviderLimitException.class,
 			() -> access(shapeWorld, BlockPos.ZERO, Direction.NORTH));
-		assertEquals("Create fluid bounded static topology", shape.getMessage());
-		assertTrue(context(shape).contains("reason=invalid-shape"), context(shape));
-		assertTrue(context(shape).contains("width=4;height=1;axis=y"), context(shape));
-		assertTrue(context(shape).contains("maxMembers=" + InventorySnapshotLayout.MAX_MEMBERS), context(shape));
+		assertEquals(ProviderLimitSite.TANK_WIDTH, shape.site());
+		assertEquals(4, shape.required()); assertEquals(3, shape.limit());
 
 		var memberWorld = new World(2, 1); BlockPos hit = new BlockPos(1, 0, 1), other = new BlockPos(1, 0, 0);
 		memberWorld.entities.get(other).controller = new BlockPos(20, 0, 0);
@@ -553,32 +553,28 @@ class CreateFluidTankAccessTest {
 		assertTrue(context(member).contains("observedController=20, 0, 0"), context(member));
 	}
 
-	@Test void configuredMemberLimitAccepts1017AndExact1024ButRejects1026BeforeMemberOrCapabilityWork() {
-		var nearLimit = new World(3, 113);
+	@Test void configuredMemberLimitAccepts4095AndExact4096ButRejects4097BeforeMemberOrCapabilityWork() {
+		var nearLimit = new World(3, 455);
 		try (var a = admission(); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE);
-			var probe = probe(nearLimit, new BlockPos(2, 112, 2), Direction.NORTH, op)) {
-			assertEquals(1_017, probe.shape().members());
+			var probe = probe(nearLimit, new BlockPos(2, 454, 2), Direction.NORTH, op)) {
+			assertEquals(4_095, probe.shape().members());
 		}
 		assertTrue(nearLimit.queryPositions.isEmpty()); assertEquals(0, nearLimit.handler.countReads);
 		assertEquals(0, nearLimit.handler.capacityReads); assertEquals(0, nearLimit.handler.reads);
 		// Headless metadata math only: height 256 is not a claim about a live default Create configuration.
-		var exactLimit = new World(2, 256);
+		var exactLimit = new World(2, 1024);
 		try (var a = admission(); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE);
-			var probe = probe(exactLimit, new BlockPos(1, 255, 1), Direction.NORTH, op)) {
-			assertEquals(1_024, probe.shape().members());
+			var probe = probe(exactLimit, new BlockPos(1, 1023, 1), Direction.NORTH, op)) {
+			assertEquals(4_096, probe.shape().members());
 		}
 		assertTrue(exactLimit.queryPositions.isEmpty()); assertEquals(0, exactLimit.handler.countReads);
 		assertEquals(0, exactLimit.handler.capacityReads); assertEquals(0, exactLimit.handler.reads);
-		var overLimit = new World(3, 114); BlockPos hit = new BlockPos(2, 113, 2);
+		var overLimit = new World(1, 4097); BlockPos hit = new BlockPos(0, 4096, 0);
 		try (var a = admission(); var op = a.enter(FluidCapabilityAccess.PROBE_PROFILE)) {
-			var failure = assertThrows(InventorySourceUnavailableException.class,
+			var failure = assertThrows(InventoryProviderLimitException.class,
 				() -> probe(overLimit, hit, Direction.NORTH, op));
-			assertEquals("Create fluid member limit exceeded (member-limit-exceeded)", failure.getMessage());
-			String context = context(failure);
-			assertTrue(context.contains("reason=member-limit-exceeded"), context);
-			assertTrue(context.contains("controller=0, 0, 0"), context);
-			assertTrue(context.contains("width=3;height=114;members=1026;maxMembers=1024"), context);
-			assertTrue(context.contains("position=2, 113, 2"), context);
+			assertEquals(ProviderLimitSite.TANK_MEMBERS, failure.site());
+			assertEquals(4097, failure.required()); assertEquals(4096, failure.limit());
 			assertTrue(overLimit.blockReads.stream().allMatch(position -> position.equals(hit) || position.equals(BlockPos.ZERO)));
 			assertTrue(overLimit.queryPositions.isEmpty()); assertEquals(0, overLimit.handler.countReads);
 			assertEquals(0, overLimit.handler.capacityReads); assertEquals(0, overLimit.handler.reads);

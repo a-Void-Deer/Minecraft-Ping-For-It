@@ -127,7 +127,10 @@ public final class InventoryFluidSources {
 		return chunk == null ? null : chunk.getBlockEntities().get(pos);
 	}
 	private static boolean registryMatches(String expected, @Nullable ResourceLocation current) {
-		return current != null && (long) current.getNamespace().length() + current.getPath().length() + 1 <= 256 && expected.equals(current.toString());
+		if (current == null) return false;
+		long length = (long) current.getNamespace().length() + current.getPath().length() + 1;
+		if (length > 256) throw InventoryProviderLimits.exceeded(ProviderLimitSite.FLUID_SOURCE_REGISTRY_ID, length, 256);
+		return expected.equals(current.toString());
 	}
 	/** Frozen target-level identities for the root and, when declared, the source's necessary controller. */
 	@NotNullByDefault
@@ -169,6 +172,7 @@ public final class InventoryFluidSources {
 				IPlatformFluidService.@Nullable Access access = acquire(binding, admission);
 				try {
 					layout = access.layout(); alias = access.alias(); stable = access.stableCursor(); slots = access.slots();
+					if (slots > InventorySourceAccess.MAX_SLOTS) throw InventoryProviderLimits.exceeded(ProviderLimitSite.FLUID_SHAPE_ADDRESSES, slots, InventorySourceAccess.MAX_SLOTS);
 					if (slots < 0 || slots > InventorySourceAccess.MAX_SLOTS || !stable && slots != 0)
 						throw unavailable("fluid address bound");
 					long bytes = 2048L + 256L * layout.members().size() + 2L * (layout.layoutData().length() + layout.layoutId().length());
@@ -256,10 +260,17 @@ public final class InventoryFluidSources {
 			IPlatformFluidService.@Nullable Access access = null;
 			try (var operation = admission.enter(profile)) {
 				context.require(binding.root(), operation);
-				try (var probe = service.probe(context, operation).orElseThrow(() -> unavailable("no fluid capability"))) {
+				var decision = service.probeDecision(context, operation);
+				if (decision.unsupported()) {
+					if (acquiredOnce) throw unavailable("fluid capability disappeared");
+					throw new InventorySourceUnsupportedException();
+				}
+				if (!decision.accepted()) throw unavailable("fluid provider probe unavailable");
+				try (var probe = Objects.requireNonNull(decision.value())) {
 					access = probe.finish(admission).orElseThrow(() -> unavailable("no fluid capability"));
 				}
 				context.require(binding.root(), operation);
+				acquiredOnce = true;
 				return IPlatformFluidService.guarded(context, access);
 			} catch (RuntimeException | Error failure) {
 				if (access != null) try { access.close(); } catch (RuntimeException | Error cleanup) { failure.addSuppressed(cleanup); }
@@ -443,6 +454,8 @@ public final class InventoryFluidSources {
 		@Override public long sourceRetainedBytes() { return 0; } // already independently owned by the Runtime admission tickets
 		@Override public long nativeResourceRetainedBytes() { return catalog == null ? 0 : catalog.modeledRetainedBytes(); }
 		@Override public long nativeCatalogGrowthUpperBound() { return InventoryFluidCodec.Catalog.retainedGrowthUpperBound(); }
+		@Override public long nativeCatalogGrowthUpperBound(int attempts) { return InventoryFluidCodec.Catalog.retainedGrowthUpperBound(attempts); }
+		@Override public int nativeCatalogEntriesUpperBound(int attempts) { return catalog == null ? Math.min(1024, Math.max(0, attempts - 1)) : catalog.entriesUpperBound(Math.max(1, attempts)); }
 		@Override public InventoryValidationBudget.Cost evidenceValidationCost() { return InventoryValidationBudget.NONE; }
 		@Override public InventoryValidationBudget.Cost readValidationCost(int count) { return InventoryValidationBudget.NONE; }
 		@Override public boolean certifiedResourceSharing() { return false; }
@@ -469,6 +482,7 @@ public final class InventoryFluidSources {
 		}
 		@Override public InventoryDomainCodec.@Nullable Item read(int slot) { throw new UnsupportedOperationException("fluid resource admission required"); }
 		private boolean reading, readPoisoned;
+		private boolean acquiredOnce;
 		private @Nullable InventoryFluidReadOperation activeRead;
 		@Override public @Nullable InventoryResourceValue readResource(int slot, @Nullable InventoryCatalogAdmission catalogAdmission, InventoryValidationBudget.Allowance allowance) {
 			if (reading) {
@@ -477,6 +491,7 @@ public final class InventoryFluidSources {
 				throw unavailable("fluid source read reentered");
 			}
 			Objects.checkIndex(slot, slots); Objects.requireNonNull(catalogAdmission);
+			catalogAdmission.requireNativeRead(displayBytes, catalog == null ? 0 : catalog.entriesUpperBound());
 			reading = true;
 			try { return withAccess(allowance, (binding, access, admission) -> {
 				if (!external) {
@@ -534,6 +549,7 @@ public final class InventoryFluidSources {
 		}
 		@Override public InventorySourceAccess.ResourcePage enumerateResources(int limit, @Nullable InventoryCatalogAdmission catalogAdmission, InventoryValidationBudget.Allowance allowance) {
 			Objects.requireNonNull(catalogAdmission);
+			catalogAdmission.requireNativeRead(displayBytes, nativeCatalogEntriesUpperBound(limit));
 			return withAccess(allowance, (binding, access, admission) -> {
 				if (!validate(binding, access, admission)) throw unavailable("fluid source invalid before enumeration");
 				var values = new ArrayList<@Nullable InventoryResourceValue>(limit);
