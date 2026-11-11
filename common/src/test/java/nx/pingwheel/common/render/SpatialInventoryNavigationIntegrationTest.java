@@ -367,7 +367,11 @@ class SpatialInventoryNavigationIntegrationTest {
 		f.move(-sign * 2, 0, f.now + 1); f.settle();
 		assertTrue(f.menu().menuId().contains(":item:"));
 		assertEquals("k15", f.snapshot().inventoryView().retainedRowKey());
-		assertEquals(layout.rowCenterY(15) - 350, f.menu().origin().y(), 1e-9, "item Y is the measured selected-row anchor");
+		double rowAnchorY = layout.rowCenterY(15) - 350;
+		assertEquals(rowAnchorY + f.geometry.childClearance(), f.menu().origin().y(), 1e-9,
+			"item Y is one clearance below the measured selected-row anchor");
+		assertEquals(rowAnchorY, f.menu().parentOrigin().y(), 1e-9, "the row anchor remains the return point");
+		assertEquals(f.snapshot().inventory().axisX(), f.menu().parentOrigin().x(), 1e-9);
 		assertEquals(f.geometry.width() / 2 + f.geometry.childClearance(),
 			-sign * (f.menu().origin().x() - before.inventory().axisX()), 1e-9);
 		assertSharedInventoryPanel(f);
@@ -828,6 +832,11 @@ class SpatialInventoryNavigationIntegrationTest {
 		var item = f.menu();
 		assertTrue(item.menuId().contains(":item:"));
 		double axis = f.snapshot().inventory().axisX();
+		double rowAnchorY = item.parentOrigin().y();
+		assertEquals(f.snapshot().inventoryView().selectedRowCenterY(), rowAnchorY, 1e-9,
+			"the selected row is the frozen return anchor");
+		assertEquals(List.of(item.origin()), f.snapshot().radial().trail(),
+			"entry seeds only the item origin without a joining stroke");
 		var before = f.snapshot().radial();
 
 		f.session.updateItemClearance(140, f.now + 1);
@@ -835,7 +844,9 @@ class SpatialInventoryNavigationIntegrationTest {
 		var moved = f.menu();
 		assertTrue(moved.menuId().contains(":item:"));
 		assertEquals(axis + forward * (f.geometry.width() / 2 + 140), moved.origin().x(), 1e-9);
-		assertEquals(item.origin().y(), moved.origin().y(), 1e-9, "the frozen row anchor is kept");
+		assertEquals(rowAnchorY + 140, moved.origin().y(), 1e-9,
+			"the updated clearance moves the origin down by the same amount");
+		assertEquals(item.parentOrigin(), moved.parentOrigin(), "the frozen row anchor is kept");
 		var after = f.snapshot().radial();
 		assertEquals(before.pointer(), after.pointer(), "a pure metric update moves no pointer");
 		assertEquals(before.trail(), after.trail(), "a pure metric update adds no trail");
@@ -980,7 +991,14 @@ class SpatialInventoryNavigationIntegrationTest {
 		assertEquals(208, layout.width(), "resized paint and item placement use the custom held width");
 		assertEquals(7, after.inventoryView().visibleRows(), "resized list capacity uses the custom held height");
 		assertEquals(anchor, layout.rowCenterY(after.inventory().selectedIndex()) - 120, 1e-9);
-		assertEquals(layout.width() / 2 + f.geometry.childClearance(),
+		double clearance = f.geometry.childClearance();
+		assertEquals(anchor + clearance, f.menu().origin().y(), 1e-9,
+			"resize applies the same downward offset to the frozen row anchor");
+		assertEquals(anchor, f.menu().parentOrigin().y(), 1e-9, "the frozen row anchor remains the return point");
+		assertEquals(after.inventory().axisX(), f.menu().parentOrigin().x(), 1e-9);
+		assertEquals(clearance, forward * (f.menu().origin().x() - after.inventory().axisX()) - layout.width() / 2.0,
+			1e-9, "the horizontal clearance remains measured from the resized panel edge");
+		assertEquals(layout.width() / 2 + clearance,
 			forward * (f.menu().origin().x() - after.inventory().axisX()), 1e-9,
 			"the child and painter consume the same newly measured content edge");
 		assertEquals(List.of("k15"), f.painter.selectedRows, "only the frozen entered row paints");

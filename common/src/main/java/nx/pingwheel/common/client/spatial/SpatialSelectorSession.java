@@ -733,16 +733,29 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		if (!Double.isFinite(y)) return;
 		double sign = list.direction().forward() == InventoryListModel.Side.RIGHT ? 1 : -1;
 		SpatialController.Point anchor = new SpatialController.Point(layout.centerX(), y);
-		SpatialController.Point origin = new SpatialController.Point(anchor.x() + sign * (layout.width() / 2 + itemClearance), y);
+		SpatialController.Point origin = itemOrigin(anchor.x(), y, sign);
 		itemKey = list.selectedKey();
 		itemAnchorY = y;
 		radial.enterExternal(buildItemMenu(itemKey), origin, anchor, nowMillis);
 	}
 
 	/**
+	 * The item menu is anchored below and forward of its selected row: its
+	 * horizontal clearance is measured from the panel's forward edge, and the
+	 * same clearance is added below the row anchor. The row anchor itself stays
+	 * the return origin.
+	 */
+	private SpatialController.Point itemOrigin(double axisX, double rowAnchorY, double forwardSign) {
+		double clearance = itemClearance;
+		return new SpatialController.Point(axisX + forwardSign * (geometry.width() / 2.0 + clearance),
+			rowAnchorY + clearance);
+	}
+
+	/**
 	 * Prepares the frozen item-menu clearance before the first possible entry
-	 * and on every effective change. A positive finite distance from the panel's
-	 * forward edge to the item-menu centre is required; the renderer owns the
+	 * and on every effective change. A positive finite horizontal distance from
+	 * the panel's forward edge to the item-menu centre is required, and the same
+	 * distance offsets the centre below the row anchor; the renderer owns the
 	 * formula. While an item submenu is active, the frozen key and row anchor
 	 * stay and only the external placement is repositioned.
 	 */
@@ -786,7 +799,7 @@ public final class SpatialSelectorSession<R> implements NativeSelectorInput.Sink
 		InventoryListModel.Snapshot state = list.snapshot();
 		double sign = state.direction().forward() == InventoryListModel.Side.RIGHT ? 1.0 : -1.0;
 		double axisX = state.axisX();
-		var origin = new SpatialController.Point(axisX + sign * (geometry.width() / 2.0 + itemClearance), itemAnchorY);
+		var origin = itemOrigin(axisX, itemAnchorY, sign);
 		var anchor = new SpatialController.Point(axisX, itemAnchorY);
 		var menu = activeMenu();
 		if (origin.equals(menu.origin()) && anchor.equals(menu.parentOrigin())) return;
