@@ -784,10 +784,12 @@ server-active or removable.
    be within the configured half-angle, including the boundary; a zero-distance
    candidate is eligible.
 2. Resolve each candidate's current position without starting a new target ray:
-   a live entity uses its current rendered top-center; an external block uses a
-   currently resolved provider position or its authoritative anchor; other
-   markers use a matching presentation position when one exists and otherwise
-   their authoritative anchor.
+   a live entity uses its current trusted displayed top-center when that point
+   is available, otherwise the same matching presentation position or
+   authoritative-anchor fallback as other markers; an external block uses a
+   currently resolved provider position or its authoritative anchor. The live
+   point availability boundary is owned by
+   [client marker state](../markers/client-state.md#live-entity-display-position).
 3. Choose the nearest candidate by world-space distance. An exact distance tie
    chooses the larger Marker ID. If no candidate is eligible, cancellation is a
    silent no-op.

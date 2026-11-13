@@ -19,6 +19,11 @@ Flywheel and both outline backends. An owned candidate is accepted only after
 an exact local-shape `HIT`; owned non-hits never recover through the coarse
 entity AABB.
 
+The [Aeronautics rotor](aeronautics.md) is a separate optional exact owner, not
+a fifth Create ID. It shares the Create-free captured/native scanning engine but
+has its own mod gate, frame-aware transform and lifecycle; the four Create IDs
+in the linked supplement remain the complete Create owner set.
+
 The transform, immutable local-view, represented-fluid, cost and limitation
 contract is retained in [Create contraption ray targeting](create-contraption-raycast.md).
 The generic owner-result rules, native kernel and capture metadata are owned by
@@ -50,6 +55,17 @@ buffer through an outline-only buffer source. Use a fresh PoseStack, interpolate
 camera-relative position and yaw, the current partial tick, dispatcher light,
 the block-atlas texture fallback, and a fixed vertex budget that bounds the
 dispatch. The call runs inside the nesting-safe mask scope.
+
+A claimed exact rotor in a `CONTAINED` render frame uses its interpolated native
+base anchor. The fresh PoseStack receives
+`T(P(anchor) - camera) * R(parent)` exactly once, the dispatcher coordinate
+arguments are zero, and the renderer applies its own actual local model
+transform once. A world or unrelated entity keeps the camera-relative native
+coordinates and an identity pose. If the required frame is unavailable, skip
+that entity's dispatcher call and report `EMPTY` so normal fallback remains
+eligible. The rotor's exact frame and model formula are owned by
+[Aeronautics](aeronautics.md#geometry-and-native-shapes); this dispatcher does
+not select or warrant the optional source.
 
 Do not flush the shared buffer, call `endOutlineBatch`, mutate entity visibility
 or glowing state, or invoke separate state-mutating render helpers. The scope

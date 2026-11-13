@@ -57,7 +57,7 @@ contracts.
 | [Shared sources](shared-sources.md) | Shared-source identity, access, capture results, sync publication and cost accounting coverage. |
 | [Inventory](inventory.md) | Inventory preview/tracking, logical containers, pools, budgets, snapshots, HUD and performance coverage. |
 | [Rendering](rendering.md) | Names, geometry outcomes, presentation subjects, overlay layout and renderer seams. |
-| [Integrations](integrations.md) | Diagnostics, Create, Sable, Simulated and optional-rendering coverage. |
+| [Integrations](integrations.md) | Diagnostics, Create, Sable, Aeronautics, Simulated and optional-rendering coverage. |
 
 Each topic page keeps its coverage and local known automated gaps together.
 

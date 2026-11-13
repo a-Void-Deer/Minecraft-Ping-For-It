@@ -81,6 +81,11 @@ disables its leaf. Every live capture is bounded and generation-fenced: a late
 or stale asynchronous completion never publishes into the live set, the
 ordinary capture, or another interaction.
 
+A certified candidate needs a trusted world comparison point. A native block
+hit without that point contributes no location class and cannot create a
+certified acquisition. Native-result preservation and nearest-hit comparison
+are owned by [entity-local picking](local_geometry.md#distance-and-native-local-shapes).
+
 Live candidates follow ordinary capture. An entity candidate uses the
 same canonical locator as ordinary capture, including the established
 experience-orb runtime-ID and multipart canonicalization rules
@@ -167,9 +172,14 @@ second deferred-capture path.
 
 Each ray uses one immutable [entity-local geometry](local_geometry.md) owner
 snapshot. Exact Create results remain `EntityHitResult`, preserving the existing
-Sable/block and Distant Horizons/miss branching. Sable's external-block capture
-is described in [its integration contract](../../integrations/sable.md). The
-separate capture and server-acceptance limits, including native and optional
+Sable/block and Distant Horizons/miss branching. The selection keeps the native
+hit result separate from its trusted world comparison point under
+[entity-local picking](local_geometry.md#distance-and-native-local-shapes).
+An ordinary location fallback without a trusted point invalidates that
+interaction instead of publishing a fabricated plot-coordinate location.
+Sable's external-block capture and frozen proof rules are
+described in [its integration contract](../../integrations/sable.md#transformed-entity-frames-and-frozen-block-proof).
+The separate capture and server-acceptance limits, including native and optional
 integration paths, are owned by [capture range](range.md).
 
 Captured local detail is copied metadata attached only to its matching entity.

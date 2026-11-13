@@ -333,6 +333,41 @@ propagate unchanged. The shell-loading failure case in
 attached throwable. Neither seam exercises an installed Create contraption or
 live native bounds.
 
+## Aeronautics rotor coverage
+
+The [Aeronautics contract](../../integrations/aeronautics.md) owns behavior.
+`AeronauticsPropellerRaycastAdapterTest` covers the exact singleton rotor ID and
+`LOADED_EXACT` metadata, registration without optional-type resolution, lazy
+delegate failure retained as ownership, idempotent session lifecycle and
+re-registration, isolated class loading with Create, Flywheel, Sable and Aero
+packages hidden, owned non-hit rear-candidate selection, bounded diagnostics,
+and `NORMAL`/disabled accessor isolation.
+
+`AeronauticsPropellerRaycastEngineTest` covers an independent normal/gyro
+quarter-turn oracle, parent translation/rotation/nonuniform scale with
+anchor-only scaling, remote fractional native anchors, detached model and
+snapshot inputs, core/blade hits versus gaps and bounds misses, frozen hidden,
+block-entity and fluid state, transformed camera collision, entry-before-copy
+charges, exact shape/provider accounting, whole-candidate rejection after a
+provisional hit or later exhaustion, the legacy unlimited overload, and invalid
+or singular local matrices.
+
+`NeoClientAeronauticsLifecycleTest` covers absent or unrelated mods not
+resolving the owner, initialization/join registration, leave teardown, failed
+registration retry, and lifecycle state reporting. The
+[frame-aware marker and outline placement](rendering.md#frame-aware-marker-and-outline-placement)
+evidence covers the shared marker projection and direct dispatcher placement.
+Existing Create tests remain the regression guard for the four Create IDs.
+
+These are headless or virtual seams. They do not load Aeronautics, Create, Sable
+or Flywheel in a launched game, apply an actual Aeronautics virtual transform,
+or establish live normal/gyro, sublevel, marker, outline, content, multiplayer,
+unload or performance behavior. Source/API review covered Sable `2.0.5`/`2.0.6`,
+Sable Companion `1.6.0`, Aeronautics `1.3.2` and Create `6.0.10`; the installed
+runtime combination is unknown, not certified by these seams. The
+[manual matrix](manual-integration.md#aeronautics-rotors) requires the installed
+versions to be recorded.
+
 ## Sable integration coverage
 
 The linked [Sable integration](../../integrations/sable.md) topic remains the
@@ -375,6 +410,20 @@ diagnostic evidence:
   face copying, origin containment and faceless synthetic/inside/unobserved
   contacts, and nearer same- or different-locator contacts installing only their
   own face without changing the frozen ordinary face;
+- shared affine-frame and candidate-comparison coverage is inventoried under
+  [exact entity-local picking](interaction.md#exact-entity-local-picking-and-create-raycast-seams);
+- `SableEntityFramesTest` covers the server-safe logical facade without optional
+  API access for ordinary entities, copied logical pose with per-read charging,
+  exact `WORLD`/`UNAVAILABLE` boundaries, failure never becoming identity, and
+  class loading with Minecraft client and Companion classes hidden;
+- `SableClientEntityFramesTest` covers render interpolation forwarding, no
+  cross-tick caching, non-finite partial ticks, and linkage failure becoming
+  `UNAVAILABLE`;
+- `SablePickingAccessTest` covers detached frozen proof bound to its native hit,
+  face preservation, local-hit projection separate from the native result,
+  nested scope restoration, and unobserved or unusable poses yielding no trusted
+  point; `PickingFrameContextTest`'s acquisition and optional-scope fallback
+  coverage is inventoried in the linked interaction section;
 - `SableObservationFailureDiagnosticsTest` drives the production observation
   catch with an injected throwing reflective tracking-point stand-in: runtime
   and linkage failures return temporary unavailability with one cause-bearing
@@ -403,7 +452,10 @@ These seams do not load a Sable runtime or establish live provider reflection
 tracking-point reference lifecycle, live-sublevel membership and observation,
 the client chunk and prediction gates of a provider-resolved physical block, a
 live multi-member content capability, or refresh, multiplayer, GUI, network or
-in-game behavior described by those topic sections. The registry, content
+in-game behavior described by those topic sections. The transformed-frame and
+frozen-proof seams are also headless: they do not exercise installed Sable or
+Aeronautics containment, actual render/logical poses, or a Create-contraption
+native view. The registry, content
 resolver and stable-entry tests are narrow production-used seams with fake
 access and in-memory state; the observation-failure fixture installs reflective
 stand-ins into uninitialized provider, server and level tokens. The external

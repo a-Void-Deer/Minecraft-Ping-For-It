@@ -120,6 +120,22 @@ without an attached throwable, the prior receipt stays current, the next attempt
 remains throttled instead of refunding the courtesy token, and create performs
 one transport attempt. These are headless dispatcher and recording-log seams.
 
+## Entity logical-frame validation
+
+`MinecraftAuthoritativeTargetValidatorTest` exercises the production validator
+with a deterministic logical-frame seam and allocated server/player/level
+tokens. It covers a distant native plot position accepted through a nearby
+logical world frame, a near raw position not masking a distant logical anchor,
+equality accepted and strictly greater distance rejected across the range
+boundary, the base anchor rather than a top-center point, an unavailable frame
+rejected as `TARGET_GONE` without raw-position fallback, and the production frame
+facade retaining an ordinary entity's raw anchor. This is not a live server,
+Sable runtime, installed Aeronautics rotor or multiplayer validation.
+
+The validator's non-finite-point and throwing frame-resolver branches, and the
+player-tracking-disabled ordering relative to frame resolution, have source
+inspection only; no dedicated cases in this suite cover them.
+
 ## Rate-policy courtesy behavior
 
 The create-only client token-bucket gate covers dropping throttled committed

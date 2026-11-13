@@ -43,7 +43,10 @@ unverified. The abort-plus-late-completion seam is covered by
 selection, while `ClientMarkerStoreTest` covers owner and dimension retrieval.
 Those seams do not runtime-cover a retained stale or display-hidden marker
 reaching cancellation and then being rejected by the server without a local
-fallback. `ClientBusinessDiagnosticsTest` covers failed ordinary resolution and
+fallback. The runtime branch falling through from an unavailable live entity
+point to presentation/anchor cancellation positions is source-inspected, not
+covered by a dedicated case. `ClientBusinessDiagnosticsTest` covers failed
+ordinary resolution and
 optional candidate finalization warnings, restricted-capture context,
 incomplete or missing precise slots, selector preview and close failures, chat
 template lookup and marker-display consumption. A separate
@@ -178,10 +181,27 @@ source ID and priority visible only at higher disclosure, a disabled backend
 collecting nothing, and registration or snapshot progress while a warning sink
 is blocked.
 
+`EntityParentFrameTest` covers detached affine frame validation, remote
+fractional point projection and anchor-only parent scaling.
+`LoadedExactCandidateTest` covers native-first ordinary discovery, loaded
+supplement only for a first-owner `LOADED_EXACT` owner, identity deduplication,
+raw-visit-before-dedup Precise accounting, zero-budget iterator preservation,
+and exact endpoint exclusion. `EntityRaycastWorkTest` covers sticky exhaustion
+across counters and independent unlimited work. `NativeLocalShapeWorkTest`
+covers charged state/shape reads and discarding a provisional hit after later
+exhaustion. `PickingFrameContextTest` covers an ordinary-world block retaining
+its point under optional pose-scope failure, an unproven contained block
+retaining its native result without a world point or arbitrary entity
+replacement, and detached block proof. `RaycastCandidateFlowTest` covers
+projected native-block world competition while preserving the native face/proof
+and owned non-hit rejection.
+
 These tests preserve whole-entity identity and exercise the non-optional engine
-boundaries. They do not constitute an in-game Create validation. Create-specific
-coverage is under
-[Create raycast seams](integrations.md#create-raycast-seams).
+boundaries. They do not constitute in-game Create or Aeronautics validation.
+Create-specific coverage is under
+[Create raycast seams](integrations.md#create-raycast-seams); Aeronautics
+provider-specific coverage is under
+[Aeronautics rotor coverage](integrations.md#aeronautics-rotor-coverage).
 
 ## Capture and acceptance range
 

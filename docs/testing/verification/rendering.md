@@ -370,6 +370,28 @@ not actual frame hooks, HUD callers or renderers, and do not automatically cover
 the fresh non-render lookup bypass; source inspection remains useful but is not
 automated runtime coverage.
 
+## Frame-aware marker and outline placement
+
+`EntityMarkerPointTest` covers world-frame interpolated base top-center,
+contained-frame base projection with a world-up unscaled native bounding-box
+height, an unavailable or throwing render frame yielding no trusted point, and
+the existing anchor/last-live recovery after a later successful point.
+`EntityMarkerPositionTrackerTest` separately covers the fallback state sequence.
+`CreateEntityOutlineDispatchTest` covers the direct dispatcher's contained-rotor
+placement (projected and scaled anchor translation, parent rotation, zero
+dispatcher coordinates), world-entity identity placement, an unavailable frame
+skipping dispatch, and nesting-safe mask-scope restoration after success and
+failure. The [Aeronautics rotor contract](../../integrations/aeronautics.md#geometry-and-native-shapes)
+owns the frame and model formula; the [Create outline contract](../../integrations/create.md#contraption-and-package-dispatch)
+owns the single direct-dispatch requirement.
+
+These are CPU pose-construction and recording-sink seams. They do not establish
+live marker rendering, entity outline submission, loaded Sable/Aeronautics
+frames, GPU output or in-game visibility.
+
+The marker helper's rejection of a non-finite live point is source-inspected;
+no dedicated specific test covers that branch.
+
 ## Focused native block-outline regression coverage
 
 The native VoxelShape route requires complementary checks:

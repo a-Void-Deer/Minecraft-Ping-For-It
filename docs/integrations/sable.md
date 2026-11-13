@@ -51,6 +51,56 @@ guaranteed for those provider-local decisions, are recorded in
 [presentation subjects](../architecture/rendering/presentation_subjects.md) and the
 [verification inventory](../testing/verification/integrations.md#sable-integration-coverage).
 
+## Transformed entity frames and frozen block proof
+
+Sable can supply a detached optional parent frame for the exact retained rotor
+identity owned by [Aeronautics](aeronautics.md#scope-and-optional-boundary).
+The server-safe logical lookup and the client render lookup both require
+positive native containment of the entity's current base position. Their
+resolution has three states:
+
+| State | Meaning |
+| --- | --- |
+| `WORLD` | Sable is absent, the entity is outside the exact rotor scope, or native containment confirms no containing sub-level; the frame is identity. |
+| `CONTAINED` | The entity is positively contained; the result carries a copied affine parent frame and the sub-level ID. |
+| `UNAVAILABLE` | The exact rotor's containment or optional lookup/pose failed or produced unusable data. It is never converted to identity. |
+
+Positive containment only supplies the optional frame. It does not establish
+standing or support, server authority, a tracking reference, or any lease.
+The picking path uses a query-local frozen logical pose for the local native
+ray; the client marker path uses the current render pose at the render tick; the
+server uses the copied logical pose to project the rotor's native base position
+for authoritative acceptance. Repositioning the provider's live pose after a
+copy does not move the retained frame. Range and rejection behavior are owned by
+[range](../architecture/picking/range.md#server-acceptance) and [target
+validation](../architecture/authority/target_validation.md), and the marker
+fallback by [client marker state](../architecture/markers/client-state.md#live-entity-display-position).
+
+A Sable-scoped native clip can return a provider-local `BlockHitResult`. A
+successful clip freezes the queried logical pose and may attach a detached proof
+that binds the sub-level ID, immutable local block position, local hit location
+and frozen parent frame. The native hit result, face and local position are
+preserved; world comparison separately uses the proof frame's projection of the
+local hit location, never the native plot coordinate.
+
+When the optional pose scope cannot be used, the native clip runs unscoped; a
+failure while freezing a queried pose restores the previous scope before retry.
+A confirmed ordinary-world block still receives its ordinary world
+point, may occlude a farther entity and may create an ordinary candidate
+acquisition. A provider-local block without observed frozen proof, or a block
+whose containment lookup fails, has no trusted world point. Its preserved
+native result follows [local-geometry comparison](../architecture/picking/local_geometry.md#distance-and-native-local-shapes)
+and [capture eligibility](../architecture/picking/capture.md#precise-live-candidate-capture).
+A capture using a proof validates the current provider identity, local binding
+and loaded state, then uses the frozen proof rather than resolving a newer pose
+for the candidate.
+
+The transformed-frame capability is independently optional. Its absence or
+failure is isolated from the established external-block provider's capture,
+validation, materialization, leases, Basic observation, content reads and
+block/content link guard. Optional clip-scope failure also remains independent
+of stable entity-frame lookup.
+
 ## Supplemental transformed-behind discovery
 
 The native selector's Precise live candidate capture includes a separate

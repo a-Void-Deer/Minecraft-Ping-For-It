@@ -59,6 +59,24 @@ Changing the local setting therefore affects later insertions, not stored
 records; a same-ID retransmission or external-target refresh cannot extend that
 deadline.
 
+## Live entity display position
+
+For an entity target, the marker follows a live world point only when the render
+lookup and the optional current parent frame both yield a trusted finite point.
+An absent or removed entity, an unavailable render frame, or a non-finite
+projection leaves the existing position tracker at its last live point, or at
+the authoritative anchor before any live point has resolved. A later successful
+point resumes following; a frame failure is not a permanent invalidation.
+
+The render frame projects only the interpolated base position; the current
+native bounding-box height is added along world up and is not rotated or scaled
+by the parent. The cancellation candidate helper uses the same current-tick
+top-center definition. When that point is unavailable, cancellation falls
+through to the existing presentation/anchor fallback owned by
+[wheel](../picking/wheel.md#cancel-marker-selection). Parent-frame resolution and
+provider failure boundaries are owned by
+[Sable](../../integrations/sable.md#transformed-entity-frames-and-frozen-block-proof).
+
 ## Client record and visual-state transitions
 
 | From | Event or condition | Record result | Visual result |

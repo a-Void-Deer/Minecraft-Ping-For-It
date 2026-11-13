@@ -17,6 +17,10 @@ On Minecraft 1.21.1, the NeoForge integration refines ping targeting for these C
 | `create:carriage_contraption` | Carriage contraption |
 | `create:gantry_contraption` | Gantry contraption |
 
+This table is the complete Create-owned ID set. The Aeronautics rotor is a
+separate optional exact owner with its own mod gate and frame-aware transform,
+described by [Aeronautics](aeronautics.md); it is not a fifth Create ID.
+
 The adapter is compiled against Create `6.0.10-281`. Create remains optional. The adapter is independent of Flywheel and of the outline-rendering backend.
 
 A successful hit creates a marker for the exact contraption entity.
@@ -95,6 +99,11 @@ The exact-surface versus server-anchor distance distinction is owned by
 ## Cost and validation boundaries
 
 Snapshotting and scanning are approximately linear in captured entries plus native shape boxes, once per ping capture rather than every rendered frame. There is no fixed traversal-cell cap, persistent shape index, or global geometry cache in this integration. Very large overlapping contraptions require performance measurement; no latency guarantee is made.
+
+The separate Aeronautics owner shares this native kernel but consumes the
+request's work capability, including bounded Precise work. The four Create IDs
+keep their unlimited local-shape path. See
+[Aeronautics](aeronautics.md#discovery-work-and-failure).
 
 Discovery still depends on Create's entity bounds. Native selection shapes and Create transforms do not promise pixel-perfect agreement with GPU-rendered meshes or every render-only minecart correction.
 
