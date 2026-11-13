@@ -47,9 +47,8 @@ resolve a plausible ambiguity in the page.
 
 Where a positive rule can state the same contract more directly, prefer explicit
 scope, triggers, and state effects over an enumeration of excluded alternatives.
-Preserve a negative clarification when it adds a necessary boundary not already
-clear from the surrounding rules. A plausible excluded implementation alone does
-not justify restating an already established boundary.
+Preserve a negative clarification only in situations that readers cannot anticipate
+while reading documentation.
 
 After drafting or during reviewing, ask: "What useful information or connection
 would the reader lose if this sentence were removed?" Delete sentences with no
