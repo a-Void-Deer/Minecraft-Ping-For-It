@@ -1,14 +1,15 @@
 package nx.pingwheel.neoforge.integration.create;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
+import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.item.Item;
@@ -22,8 +23,16 @@ import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import nx.pingwheel.common.math.EntityLocalGeometryResult;
 import nx.pingwheel.common.math.EntityLocalRaycastRequest;
+import nx.pingwheel.common.math.EntityParentFrame;
+import nx.pingwheel.common.math.EntityRaycastWork;
 import nx.pingwheel.common.math.LocalGeometryHit;
 import nx.pingwheel.common.math.NativeLocalShapeRaycaster;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
+import org.joml.Matrix4d;
+import org.joml.Matrix4f;
+import org.joml.Vector3d;
 
 /**
  * Create-free native-shape execution and frozen local-view implementation.
@@ -33,6 +42,7 @@ import nx.pingwheel.common.math.NativeLocalShapeRaycaster;
  * portion Create-free makes both the shape path and its collision semantics
  * executable by NeoForge tests without optional runtime jars.</p>
  */
+@NotNullByDefault
 final class CreateContraptionRaycastEngine {
 
 	private CreateContraptionRaycastEngine() {}
@@ -40,9 +50,9 @@ final class CreateContraptionRaycastEngine {
 	static Optional<LocalRay> transform(EntityLocalRaycastRequest request, LocalTransform transform) {
 		Objects.requireNonNull(request, "request");
 		Objects.requireNonNull(transform, "transform");
-		Vec3 localStart = transform.toLocal(request.start());
-		Vec3 localEnd = transform.toLocal(request.end());
-		Vec3 localCameraFeet = transform.toLocal(request.cameraFeetPosition());
+		@Nullable Vec3 localStart = transform.toLocal(request.start());
+		@Nullable Vec3 localEnd = transform.toLocal(request.end());
+		@Nullable Vec3 localCameraFeet = transform.toLocal(request.cameraFeetPosition());
 
 		if (!finite(localStart) || !finite(localEnd) || !finite(localCameraFeet)) {
 			return Optional.empty();
@@ -52,8 +62,15 @@ final class CreateContraptionRaycastEngine {
 	}
 
 	static EntityLocalGeometryResult trace(EntityLocalRaycastRequest request, Snapshot snapshot) {
+		return trace(request, snapshot, EntityRaycastWork.unlimited());
+	}
+
+	static EntityLocalGeometryResult trace(
+		EntityLocalRaycastRequest request, Snapshot snapshot, EntityRaycastWork work
+	) {
 		Objects.requireNonNull(request, "request");
 		Objects.requireNonNull(snapshot, "snapshot");
+		if (!work.complete()) throw new EntityRaycastWork.Exhausted();
 
 		if (!request.hasNonDegenerateSegment()
 			|| snapshot.localStart().distanceToSqr(snapshot.localEnd()) == 0.0) {
@@ -68,8 +85,33 @@ final class CreateContraptionRaycastEngine {
 			snapshot.positions(),
 			snapshot.hiddenPositions()::contains,
 			new LocalCollisionContext(
-				request.collisionContext(), snapshot.localCameraFeet(), snapshot.preserveCollisionFallback()));
+				request.collisionContext(), snapshot.localCameraFeet(), snapshot.preserveCollisionFallback()), work);
 		return hit.map(EntityLocalGeometryResult::hit).orElseGet(EntityLocalGeometryResult::miss);
+	}
+
+	/**
+	 * Capture the actual virtual local-model operation, including gyro pivot
+	 * translations absent from inherited toLocalVector. Only local coordinates
+	 * enter the float pose stack; the native anchor and parent placement stay double.
+	 */
+	static Optional<LocalTransform> modelTransform(
+		EntityParentFrame parentFrame, Vec3 nativeAnchor, LocalModelTransform localModelTransform
+	) {
+		PoseStack stack = new PoseStack();
+		localModelTransform.apply(stack, 1.0F);
+		Matrix4f localModel = new Matrix4f(stack.last().pose());
+		if (!localModel.isFinite()) return Optional.empty();
+		Matrix4d modelToWorld = parentFrame.modelToWorld(nativeAnchor, localModel);
+		if (!modelToWorld.isFinite() || modelToWorld.m03() != 0 || modelToWorld.m13() != 0
+			|| modelToWorld.m23() != 0 || modelToWorld.m33() != 1) return Optional.empty();
+		double determinant = modelToWorld.determinant();
+		if (!Double.isFinite(determinant) || determinant == 0) return Optional.empty();
+		Matrix4d worldToModel = modelToWorld.invert();
+		if (!worldToModel.isFinite()) return Optional.empty();
+		return Optional.of(position -> {
+			Vector3d local = worldToModel.transformPosition(position.x, position.y, position.z, new Vector3d());
+			return new Vec3(local.x, local.y, local.z);
+		});
 	}
 
 	static Snapshot snapshot(
@@ -99,8 +141,8 @@ final class CreateContraptionRaycastEngine {
 			hidden.add(immutable(position, "hiddenPositions contains null position"));
 		}
 
-		Map<BlockPos, CapturedBlock> frozenBlocks = Map.copyOf(blocks);
-		Set<BlockPos> frozenHidden = Set.copyOf(hidden);
+		@Unmodifiable Map<BlockPos, CapturedBlock> frozenBlocks = Map.copyOf(blocks);
+		@Unmodifiable Set<BlockPos> frozenHidden = Set.copyOf(hidden);
 		return new Snapshot(
 			localRay.start(),
 			localRay.end(),
@@ -113,16 +155,32 @@ final class CreateContraptionRaycastEngine {
 
 	static Snapshot snapshotCaptured(
 		LocalRay localRay,
-		Iterable<CaptureEntry> capturedEntries,
+		Iterable<@Nullable CaptureEntry> capturedEntries,
 		int minBuildHeight,
 		int height,
 		boolean preserveCollisionFallback
+	) {
+		return snapshotCaptured(localRay, capturedEntries, minBuildHeight, height,
+			preserveCollisionFallback, EntityRaycastWork.unlimited());
+	}
+
+	static Snapshot snapshotCaptured(
+		LocalRay localRay,
+		Iterable<@Nullable CaptureEntry> capturedEntries,
+		int minBuildHeight,
+		int height,
+		boolean preserveCollisionFallback,
+		EntityRaycastWork work
 	) {
 		Objects.requireNonNull(capturedEntries, "capturedEntries");
 		Map<BlockPos, CapturedBlock> blocks = new HashMap<>();
 		Set<BlockPos> hiddenPositions = new HashSet<>();
 		int index = 0;
-		for (CaptureEntry entry : capturedEntries) {
+		Iterator<@Nullable CaptureEntry> entries = capturedEntries.iterator();
+		while (entries.hasNext()) {
+			// The live iterable maps its next native entry only after admission.
+			work.readLocalBlock();
+			@Nullable CaptureEntry entry = entries.next();
 			if (entry == null) {
 				throw new IllegalStateException(
 					"Create contraption capture contains a null entry at index " + index);
@@ -134,6 +192,7 @@ final class CreateContraptionRaycastEngine {
 			}
 			index++;
 		}
+		if (!work.complete()) throw new EntityRaycastWork.Exhausted();
 		return snapshot(localRay, blocks, hiddenPositions, minBuildHeight, height, preserveCollisionFallback);
 	}
 
@@ -142,7 +201,7 @@ final class CreateContraptionRaycastEngine {
 	 * malformed Create capture invalidates the whole resolver attempt rather
 	 * than allowing an earlier child hit to escape from a partial snapshot.
 	 */
-	static BlockPos requireCaptureEntry(BlockPos position, BlockState state) {
+	static BlockPos requireCaptureEntry(@Nullable BlockPos position, @Nullable BlockState state) {
 		if (position == null) {
 			throw new IllegalStateException("Create contraption capture contains a null local position");
 		}
@@ -158,14 +217,19 @@ final class CreateContraptionRaycastEngine {
 		return position.immutable();
 	}
 
-	private static boolean finite(Vec3 vector) {
+	private static boolean finite(@Nullable Vec3 vector) {
 		return vector != null && Double.isFinite(vector.x) && Double.isFinite(vector.y)
 			&& Double.isFinite(vector.z);
 	}
 
 	@FunctionalInterface
 	interface LocalTransform {
-		Vec3 toLocal(Vec3 worldPosition);
+		@Nullable Vec3 toLocal(Vec3 worldPosition);
+	}
+
+	@FunctionalInterface
+	interface LocalModelTransform {
+		void apply(PoseStack stack, float partialTick);
 	}
 
 	record LocalRay(Vec3 start, Vec3 end, Vec3 cameraFeet) {
@@ -176,21 +240,22 @@ final class CreateContraptionRaycastEngine {
 		}
 	}
 
-	record CapturedBlock(BlockState state, BlockEntity blockEntity) {
+	record CapturedBlock(BlockState state, @Nullable BlockEntity blockEntity) {
 		CapturedBlock {
 			Objects.requireNonNull(state, "state");
 		}
 	}
 
-	record CaptureEntry(BlockPos position, BlockState state, BlockEntity blockEntity, boolean hidden) {}
+	record CaptureEntry(@Nullable BlockPos position, @Nullable BlockState state,
+		@Nullable BlockEntity blockEntity, boolean hidden) {}
 
 	record Snapshot(
 		Vec3 localStart,
 		Vec3 localEnd,
 		Vec3 localCameraFeet,
 		BlockGetter view,
-		List<BlockPos> positions,
-		Set<BlockPos> hiddenPositions,
+		@Unmodifiable List<BlockPos> positions,
+		@Unmodifiable Set<BlockPos> hiddenPositions,
 		boolean preserveCollisionFallback
 	) {
 		Snapshot {
@@ -212,14 +277,14 @@ final class CreateContraptionRaycastEngine {
 	}
 
 	private static final class SnapshotBlockGetter implements BlockGetter {
-		private final Map<BlockPos, CapturedBlock> blocks;
-		private final Set<BlockPos> hiddenPositions;
+		private final @Unmodifiable Map<BlockPos, CapturedBlock> blocks;
+		private final @Unmodifiable Set<BlockPos> hiddenPositions;
 		private final int minBuildHeight;
 		private final int height;
 
 		private SnapshotBlockGetter(
-			Map<BlockPos, CapturedBlock> blocks,
-			Set<BlockPos> hiddenPositions,
+			@Unmodifiable Map<BlockPos, CapturedBlock> blocks,
+			@Unmodifiable Set<BlockPos> hiddenPositions,
 			int minBuildHeight,
 			int height
 		) {
@@ -230,11 +295,11 @@ final class CreateContraptionRaycastEngine {
 		}
 
 		@Override
-		public BlockEntity getBlockEntity(BlockPos position) {
+		public @Nullable BlockEntity getBlockEntity(BlockPos position) {
 			if (hiddenPositions.contains(position)) {
 				return null;
 			}
-			CapturedBlock block = blocks.get(position);
+			@Nullable CapturedBlock block = blocks.get(position);
 			return block == null ? null : block.blockEntity();
 		}
 
@@ -243,7 +308,7 @@ final class CreateContraptionRaycastEngine {
 			if (hiddenPositions.contains(position)) {
 				return Blocks.AIR.defaultBlockState();
 			}
-			CapturedBlock block = blocks.get(position);
+			@Nullable CapturedBlock block = blocks.get(position);
 			return block == null ? Blocks.AIR.defaultBlockState() : block.state();
 		}
 
@@ -284,7 +349,7 @@ final class CreateContraptionRaycastEngine {
 		}
 
 		@Override
-		public boolean isAbove(VoxelShape shape, BlockPos position, boolean defaultValue) {
+		public boolean isAbove(@Nullable VoxelShape shape, @Nullable BlockPos position, boolean defaultValue) {
 			if (preserveFallback || shape == null || shape.isEmpty() || position == null
 				|| !finite(localCameraFeet)) {
 				return originalContext.isAbove(shape, position, defaultValue);

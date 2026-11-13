@@ -53,4 +53,18 @@ class EntityMarkerPositionTrackerTest {
 
 		assertEquals(anchor, tracker.resolve(anchor, null));
 	}
+
+	@Test
+	void unavailableLivePointUsesAnchorThenLastLiveAndResumesOnRecovery() {
+		EntityMarkerPositionTracker tracker = new EntityMarkerPositionTracker();
+		EntityMarkerPositionTracker.Position anchor = position(1.0, 2.0, 3.0);
+		EntityMarkerPositionTracker.Position firstLive = position(10.0, 20.0, 30.0);
+		EntityMarkerPositionTracker.Position recovered = position(40.0, 50.0, 60.0);
+
+		assertEquals(anchor, tracker.resolve(anchor, null));
+		assertEquals(firstLive, tracker.resolve(anchor, firstLive));
+		assertEquals(firstLive, tracker.resolve(anchor, null));
+		assertEquals(recovered, tracker.resolve(anchor, recovered));
+		assertEquals(recovered, tracker.resolve(anchor, null));
+	}
 }

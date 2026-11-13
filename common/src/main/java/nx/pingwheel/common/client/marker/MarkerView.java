@@ -41,17 +41,20 @@ import static nx.pingwheel.common.CommonClient.Game;
  * <p>Every world render update:
  * <ul>
  *   <li>starts entity targets at the authoritative {@link MarkerAnchor} and
- *       remembers the latest live interpolated point;</li>
+ *       remembers the latest successful live world point;</li>
  *   <li>for an external block target, resolves the provider-owned local
  *       locator with its current smooth presentation pose and uses the
  *       authoritative anchor only while that observation is unavailable;</li>
  *   <li>resolves the owner's {@link PlayerInfo} from the current connection;</li>
  *   <li>for an entity target, resolves the live entity in the current
 	 *       dimension via {@link GameContext#getEntityForRender(nx.pingwheel.common.domain.EntityLocator)} and follows its current
-	 *       position; the item icon, when enabled and authorized, is built
+	 *       projected world point; the item icon, when enabled and authorized, is built
 	 *       from the presentation projection rather than a live entity;</li>
- *   <li>keeps the latest live point when the entity is absent, unloaded, or
- *       removed, using the anchor only until the entity first resolves live;</li>
+ *   <li>passes only a successful world point to the marker position tracker;
+ *       when the entity is absent, unloaded, removed, or its render frame is
+ *       unavailable, keeps the latest live point and uses the anchor only
+ *       until the entity first resolves live; a later successful point resumes
+ *       following;</li>
  *   <li>recomputes the screen position, distance, and scale render fields
  *       with the same world-to-screen, distance, and scale formulas the
  *       legacy ping view used.</li>
@@ -208,7 +211,7 @@ public final class MarkerView {
 
 		if (target instanceof Target.EntityTarget entityTarget) {
 			final var entity = GameContext.getEntityForRender(entityTarget.locator());
-			Vec3 livePosition = null;
+			@Nullable Vec3 livePosition = null;
 
 			if (entity != null && !entity.isRemoved()) {
 				livePosition = EntityMarkerPoint.forLiveEntity(entity, ctx.tickDelta);
