@@ -2,6 +2,7 @@ package nx.pingwheel.common.config;
 
 import com.google.gson.JsonObject;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -22,6 +23,13 @@ final class ConfigVersionUpdater {
 		SPATIAL_SELECTOR_INTRODUCED_VERSION;
 	private static final String LEGACY_TRANSPARENT_BLOCKS_KEY = "passThroughTransparentBlocks";
 	private static final String MARK_TRANSPARENT_BLOCKS_KEY = "markTransparentBlocks";
+	private static final String DOUBLE_CLICK_DANGER_WINDOW_KEY = "doubleClickDangerWindowMs";
+	private static final int LEGACY_DOUBLE_CLICK_DANGER_WINDOW_MS = 100;
+	private static final int MIGRATED_DOUBLE_CLICK_DANGER_WINDOW_MS = 160;
+	private static final PingForItVersion DOUBLE_CLICK_DANGER_WINDOW_REVISED_VERSION =
+		PingForItVersion.parse("0.5.1-pfi-beta2");
+	private static final PingForItVersion DOUBLE_CLICK_DANGER_WINDOW_LEGACY_MAX_VERSION =
+		PingForItVersion.parse("0.5.1-pfi-beta1");
 
 	private static final List<MigrationStep> MIGRATION_STEPS = orderedSteps(List.of(
 		new MigrationStep(
@@ -33,7 +41,12 @@ final class ConfigVersionUpdater {
 			SPATIAL_SELECTOR_INTRODUCED_VERSION,
 			ClientConfig.class,
 			ConfigVersionUpdater::migrateClientBeta1,
-			"client: retired wheel keys removed; transparent block selection renamed and inverted")
+			"client: retired wheel keys removed; transparent block selection renamed and inverted"),
+		new MigrationStep(
+			DOUBLE_CLICK_DANGER_WINDOW_REVISED_VERSION,
+			ClientConfig.class,
+			ConfigVersionUpdater::migrateClientBeta2,
+			"client: doubleClickDangerWindowMs legacy default 100 -> 160")
 	));
 
 	private ConfigVersionUpdater() {}
@@ -132,6 +145,48 @@ final class ConfigVersionUpdater {
 			}
 		}
 		removeLegacyTransparentBlockToggle(root);
+	}
+
+	/**
+	 * The revised default applies only to documents at or before the beta1
+	 * boundary. The marker remains the source version until every step has run.
+	 */
+	private static void migrateClientBeta2(JsonObject root) {
+		if (!isLegacyDoubleClickDangerWindowSourceVersion(root)) return;
+
+		var window = root.get(DOUBLE_CLICK_DANGER_WINDOW_KEY);
+		if (window == null
+			|| !window.isJsonPrimitive()
+			|| !window.getAsJsonPrimitive().isNumber()) {
+			return;
+		}
+
+		try {
+			// Compare the exact numeric value rather than truncating through
+			// getAsInt, so a value such as 100.5 is preserved.
+			if (window.getAsBigDecimal().compareTo(BigDecimal.valueOf(LEGACY_DOUBLE_CLICK_DANGER_WINDOW_MS)) == 0) {
+				root.addProperty(DOUBLE_CLICK_DANGER_WINDOW_KEY, MIGRATED_DOUBLE_CLICK_DANGER_WINDOW_MS);
+			}
+		} catch (RuntimeException ignored) {
+			// Leave a malformed numeric representation for typed deserialization
+			// and the existing invalid-file recovery path.
+		}
+	}
+
+	private static boolean isLegacyDoubleClickDangerWindowSourceVersion(JsonObject root) {
+		var marker = root.get(VERSION_KEY);
+		if (marker == null
+			|| !marker.isJsonPrimitive()
+			|| !marker.getAsJsonPrimitive().isString()) {
+			return false;
+		}
+
+		try {
+			return PingForItVersion.parse(marker.getAsString())
+				.compareTo(DOUBLE_CLICK_DANGER_WINDOW_LEGACY_MAX_VERSION) <= 0;
+		} catch (PingForItVersion.InvalidVersionException invalidVersion) {
+			return false;
+		}
 	}
 
 	static void removeLegacyTransparentBlockToggle(JsonObject root) {
