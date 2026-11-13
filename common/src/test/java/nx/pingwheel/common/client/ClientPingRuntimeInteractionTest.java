@@ -1107,6 +1107,21 @@ class ClientPingRuntimeInteractionTest {
 		assertTrue(f.creates().isEmpty()); assertTrue(f.validations.isEmpty()); assertEquals(0, f.access.cancellations);
 	}
 
+	@Test void incompleteNativeAcquisitionDisablesEveryPreciseLeafWithoutUnfreezingOrdinaryCapture() {
+		Fixture precise = new Fixture(); precise.press(0); precise.frame(250, true); precise.prime();
+		precise.access.preciseIncomplete = true; precise.enter("precise", 260);
+		for (String leaf : List.of("precise:dropped_item", "precise:entity", "precise:entity_block", "precise:block", "precise:location")) {
+			assertTrue(disabled(precise, leaf), leaf);
+		}
+		precise.release(470); assertTrue(precise.creates().isEmpty());
+		assertEquals(1, precise.access.captures);
+
+		Fixture ordinary = new Fixture(); ordinary.press(0); ordinary.access.preciseIncomplete = true;
+		ordinary.access.snapshot = STONE; ordinary.release(20);
+		assertEquals(CHEST.target(), ordinary.creates().getFirst().target());
+		assertTrue(ordinary.access.liveRequests.isEmpty());
+	}
+
 	@Test void partialNativeUpdateKeepsPendingDistantLocationAndItsOriginalRayAtRelease() {
 		Fixture f = new Fixture(); f.press(0); f.frame(250, true); f.prime(); f.access.distantPending = true;
 		CapturedRay rayA = f.access.ray; f.enter("precise", 260);

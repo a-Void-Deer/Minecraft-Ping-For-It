@@ -28,6 +28,8 @@ import org.jetbrains.annotations.Unmodifiable;
  * reviving a claimed entity.</p>
  */
 public final class EntityLocalGeometryRegistry {
+	/** Only explicit exact owners may bypass native-coordinate broad bounds. */
+	public enum CandidateAdmission { NATIVE_BOUNDS, LOADED_EXACT }
 
 	public static final EntityLocalGeometryRegistry INSTANCE = new EntityLocalGeometryRegistry();
 
@@ -53,9 +55,15 @@ public final class EntityLocalGeometryRegistry {
 		Collection<ResourceLocation> entityTypeIds,
 		EntityLocalGeometryResolver resolver
 	) {
+		return register(sourceId, priority, entityTypeIds, CandidateAdmission.NATIVE_BOUNDS, resolver);
+	}
+
+	public Registration register(ResourceLocation sourceId, int priority,
+		Collection<ResourceLocation> entityTypeIds, CandidateAdmission admission, EntityLocalGeometryResolver resolver) {
 		Objects.requireNonNull(sourceId, "sourceId");
 		Objects.requireNonNull(entityTypeIds, "entityTypeIds");
 		Objects.requireNonNull(resolver, "resolver");
+		Objects.requireNonNull(admission, "admission");
 
 		@Unmodifiable Set<ResourceLocation> exactTypeIds = copyExactTypeIds(entityTypeIds);
 
@@ -76,7 +84,7 @@ public final class EntityLocalGeometryRegistry {
 			}
 
 			if (!duplicateFound) {
-				Registration registration = new Registration(this, sourceId, priority, exactTypeIds, resolver, true);
+				Registration registration = new Registration(this, sourceId, priority, exactTypeIds, admission, resolver, true);
 				registrations.add(registration);
 				publishSnapshot();
 				return registration;
@@ -126,6 +134,7 @@ public final class EntityLocalGeometryRegistry {
 					registration.sourceId,
 					registration.priority,
 					registration.entityTypeIds,
+					registration.admission,
 					Objects.requireNonNull(registration.resolver)));
 			}
 		}
@@ -177,6 +186,10 @@ public final class EntityLocalGeometryRegistry {
 			this.entries = entries;
 		}
 
+		boolean hasLoadedExactOwners() {
+			return entries.stream().anyMatch(entry -> entry.admission() == CandidateAdmission.LOADED_EXACT);
+		}
+
 		@Nullable Claim firstOwner(Entity candidate) {
 			Objects.requireNonNull(candidate, "candidate");
 			@Nullable ResourceLocation entityTypeId = BuiltInRegistries.ENTITY_TYPE.getKey(candidate.getType());
@@ -209,9 +222,12 @@ public final class EntityLocalGeometryRegistry {
 			return entry.sourceId().toString();
 		}
 
+		CandidateAdmission admission() { return entry.admission(); }
+
 		EntityLocalGeometryResult trace(Entity candidate, EntityLocalRaycastRequest request) {
 			try {
 				@Nullable EntityLocalGeometryResult result = entry.resolver().trace(candidate, request);
+				if (!request.work().complete()) return EntityLocalGeometryResult.failed();
 				if (result == null) {
 					registry.warnOnce("null-result:" + entry.sourceId(),
 						"null-result-candidate-rejected", null,
@@ -220,7 +236,10 @@ public final class EntityLocalGeometryRegistry {
 					return EntityLocalGeometryResult.failed();
 				}
 				return result;
+			} catch (EntityRaycastWork.Exhausted exhausted) {
+				return EntityLocalGeometryResult.failed();
 			} catch (RuntimeException | LinkageError | AssertionError recoverableFailure) {
+				if (!request.work().complete()) return EntityLocalGeometryResult.failed();
 				registry.warnCallbackFailure(entry.sourceId(), entry.priority(), recoverableFailure);
 				return EntityLocalGeometryResult.failed();
 			}
@@ -231,6 +250,7 @@ public final class EntityLocalGeometryRegistry {
 		ResourceLocation sourceId,
 		int priority,
 		@Unmodifiable Set<ResourceLocation> entityTypeIds,
+		CandidateAdmission admission,
 		EntityLocalGeometryResolver resolver
 	) {}
 
@@ -241,6 +261,7 @@ public final class EntityLocalGeometryRegistry {
 		private final ResourceLocation sourceId;
 		private final int priority;
 		private final @Unmodifiable Set<ResourceLocation> entityTypeIds;
+		private final CandidateAdmission admission;
 		private final @Nullable EntityLocalGeometryResolver resolver;
 		private final boolean accepted;
 		private boolean closed;
@@ -250,6 +271,7 @@ public final class EntityLocalGeometryRegistry {
 			ResourceLocation sourceId,
 			int priority,
 			@Unmodifiable Set<ResourceLocation> entityTypeIds,
+			CandidateAdmission admission,
 			@Nullable EntityLocalGeometryResolver resolver,
 			boolean accepted
 		) {
@@ -257,12 +279,13 @@ public final class EntityLocalGeometryRegistry {
 			this.sourceId = sourceId;
 			this.priority = priority;
 			this.entityTypeIds = entityTypeIds;
+			this.admission = admission;
 			this.resolver = resolver;
 			this.accepted = accepted;
 		}
 
 		private static Registration rejected(EntityLocalGeometryRegistry registry, ResourceLocation sourceId) {
-			return new Registration(registry, sourceId, 0, Set.of(), null, false);
+			return new Registration(registry, sourceId, 0, Set.of(), CandidateAdmission.NATIVE_BOUNDS, null, false);
 		}
 
 		/** Whether this handle successfully registered a live source. */

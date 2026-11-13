@@ -25,6 +25,7 @@ import nx.pingwheel.common.integration.ModContext;
 import nx.pingwheel.common.integration.sable.SableDiagnostics;
 import nx.pingwheel.common.interaction.TargetSnapshot;
 import nx.pingwheel.common.integration.sable.server.SableExternalBlockLocator;
+import nx.pingwheel.common.math.SableBlockHitFrame;
 
 /**
  * Lazy, fail-soft client boundary for Sable external blocks.
@@ -43,11 +44,30 @@ public final class SableClientProvider {
 	private static volatile @Nullable SableClientCompanionAccess access;
 	private static volatile @Nullable SableClientCompanionAccess contentAccess;
 	private static volatile boolean contentUnavailable;
+	private static volatile @Nullable SableClientCompanionAccess framedCaptureAccess;
 	private static volatile SableDiagnostics diagnostics = SableDiagnostics.global(nx.pingwheel.common.diagnostics.Diagnostics.client());
 	private static final SablePresentationLogGate PRESENTATION_FAILURES =
 		new SablePresentationLogGate();
 
 	private SableClientProvider() {
+	}
+
+	/** Frozen-proof capture is an additive capability and cannot trip the established block/content guard. */
+	public static Optional<TargetSnapshot> capture(ClientLevel level, BlockHitResult hit,
+		Vec3 rayStart, Vec3 rayEnd, SableBlockHitFrame proof) {
+		if (!ModContext.HasSable || !proof.binds(hit)) return Optional.empty();
+		try {
+			@Nullable SableClientCompanionAccess current = framedCaptureAccess;
+			if (current == null) {
+				current = SableClientCompanionAccess.create(diagnostics);
+				framedCaptureAccess = current;
+			}
+			return current.capture(level, hit, rayStart, rayEnd, proof);
+		} catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
+			diagnostics.captureException("frozen-frame-capture", SableDiagnostics.OPERATION_UNAVAILABLE,
+				"proof-capture-unavailable", unavailable, "hit", hit);
+			return Optional.empty();
+		}
 	}
 
 	/**

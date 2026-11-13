@@ -129,7 +129,7 @@ public final class MinecraftTargetSnapshotFactory {
 	/** Additive selector adapter; legacy factory callers keep their previous values. */
 	public static TargetSnapshot fromCandidateSelection(Level level, RaycastSelection selection) {
 		TargetSnapshot snapshot = from(level, selection);
-		return withNativeCandidateHit(snapshot, selection.hitResult());
+		return withCandidatePoint(snapshot, selection);
 	}
 
 	/** Additive final-hit adapter, including a guarded DH completion's actual hit point. */
@@ -146,7 +146,17 @@ public final class MinecraftTargetSnapshotFactory {
 
 	/** Entity candidate adapter without any world lookup; canonicalization uses the shared adapter. */
 	public static TargetSnapshot fromEntityCandidateSelection(String dimensionId, RaycastSelection selection) {
-		return withNativeCandidateHit(fromEntitySelection(dimensionId, selection), selection.hitResult());
+		return withCandidatePoint(fromEntitySelection(dimensionId, selection), selection);
+	}
+
+	static TargetSnapshot withCandidatePoint(TargetSnapshot snapshot, RaycastSelection selection) {
+		return selection.worldPoint().map(point -> {
+			TargetSnapshot located = snapshot.target() instanceof nx.pingwheel.common.domain.Target.LocationTarget
+				? locationSnapshot(snapshot.target().dimensionId(), point.x, point.y, point.z) : snapshot;
+			return located.withCandidateHit(new nx.pingwheel.common.interaction.candidate.CandidateHit(
+				new WorldVector(point.x, point.y, point.z),
+				nx.pingwheel.common.interaction.candidate.CaptureEquivalenceKey.nativeTarget(located.target())));
+		}).orElse(snapshot);
 	}
 
 	private static TargetSnapshot withNativeCandidateHit(TargetSnapshot snapshot, HitResult hit) {

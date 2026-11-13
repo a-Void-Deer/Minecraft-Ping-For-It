@@ -41,6 +41,7 @@ import nx.pingwheel.common.integration.externalblock.ResolvedBlockReadSource;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.interaction.candidate.*;
 import nx.pingwheel.common.math.RaycastPolicy;
+import nx.pingwheel.common.math.SableBlockHitFrame;
 
 /** Direct Companion 1.6.0 calls, isolated from the common client runtime. */
 final class SableClientCompanionAccess {
@@ -88,6 +89,37 @@ final class SableClientCompanionAccess {
 
 	boolean hasInternalAccess() {
 		return internal != null;
+	}
+
+	Optional<TargetSnapshot> capture(ClientLevel level, BlockHitResult hit, Vec3 start, Vec3 end,
+		SableBlockHitFrame proof) throws ReflectiveOperationException {
+		if (internal == null || !proof.binds(hit)) return Optional.empty();
+		@Nullable SubLevelAccess containing = companion.getContaining(level, (Position) Vec3.atCenterOf(hit.getBlockPos()));
+		if (containing == null || !proof.subLevelId().equals(containing.getUniqueId())) return Optional.empty();
+		@Nullable Object current = internal.contentSubLevel(level, proof.subLevelId());
+		if (current == null || !level.isLoaded(proof.localPos())) return Optional.empty();
+		BlockState state = level.getBlockState(proof.localPos());
+		return captureFrozenBlock(level.dimension().location().toString(), hit, start, end, proof,
+			containing.getUniqueId(), state);
+	}
+
+	static Optional<TargetSnapshot> captureFrozenBlock(String dimensionId, BlockHitResult hit, Vec3 start, Vec3 end,
+		SableBlockHitFrame proof, @Nullable UUID containingId, BlockState state) {
+		if (!proof.binds(hit) || !proof.subLevelId().equals(containingId)) return Optional.empty();
+		@Nullable ResourceLocation blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+		if (state.isAir() || blockId == null) return Optional.empty();
+		Vec3 worldHit = proof.frame().toWorld(proof.localHit());
+		Vec3 ray = end.subtract(start);
+		if (!finite(start) || !finite(end) || ray.lengthSqr() <= 0
+			|| !rayPoint(start, ray, ray.lengthSqr(), worldHit).accepted()) return Optional.empty();
+		BlockPos pos = proof.localPos();
+		return Optional.of(TargetSnapshotFactory.externalBlockCandidate(dimensionId,
+			SableClientProvider.PROVIDER_ID, blockId.toString(),
+			new SableExternalBlockLocator(proof.subLevelId(), pos).encode(),
+			BlockEntityClassification.hasBlockEntity(state), observedLocalFace(hit))
+			.withCandidateHit(new CandidateHit(new nx.pingwheel.common.interaction.cancel.WorldVector(
+				worldHit.x, worldHit.y, worldHit.z), SableCaptureEquivalence.fromResolved(
+					dimensionId, proof.subLevelId(), pos.getX(), pos.getY(), pos.getZ(), blockId.toString()))));
 	}
 
 	Optional<TargetSnapshot> capture(

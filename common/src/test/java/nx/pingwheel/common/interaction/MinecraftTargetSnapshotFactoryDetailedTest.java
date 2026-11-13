@@ -76,6 +76,19 @@ class MinecraftTargetSnapshotFactoryDetailedTest {
 		assertTrue(snapshot.blockHitFace().isEmpty());
 	}
 
+	@Test
+	void candidateLocationUsesTrustedWorldPointAndUnknownPlotPointCannotCertifyLocation() {
+		var nativeHit = new net.minecraft.world.phys.BlockHitResult(new Vec3(30_000_000, 0, 0),
+			net.minecraft.core.Direction.WEST, new BlockPos(30_000_000, 0, 0), false);
+		var rawFallback = TargetSnapshotFactory.location("minecraft:overworld", 30_000_000, 0, 0);
+		var projected = new RaycastSelection(nativeHit, Optional.empty(), Optional.of(new Vec3(4, 2, 1)), Optional.empty());
+		var trusted = MinecraftTargetSnapshotFactory.withCandidatePoint(rawFallback, projected);
+		assertEquals(new Target.LocationTarget("minecraft:overworld", 4, 2, 1), trusted.target());
+		assertEquals(new WorldVector(4, 2, 1), trusted.candidateHit().orElseThrow().worldHit());
+		var unknown = new RaycastSelection(nativeHit, Optional.empty(), Optional.empty(), Optional.empty());
+		assertTrue(MinecraftTargetSnapshotFactory.withCandidatePoint(rawFallback, unknown).candidateHit().isEmpty());
+	}
+
 	private static final class TestEntity extends Entity {
 
 		private TestEntity(EntityType<?> type, Level level) {

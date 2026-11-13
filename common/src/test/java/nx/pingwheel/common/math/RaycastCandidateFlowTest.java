@@ -111,6 +111,23 @@ class RaycastCandidateFlowTest {
 	}
 
 	@Test
+	void projectedNativeBlockCompetesInWorldSpaceWithoutReplacingItsLocalFaceOrProof() {
+		TestEntity owner = entity(EntityType.PIG, 3);
+		RaycastSelection entity = RaycastSelection.withoutLocalGeometry(new EntityHitResult(owner, new Vec3(6, .5, 0)));
+		BlockHitResult nativeBlock = new BlockHitResult(new Vec3(30_000_000, .5, 0), Direction.WEST,
+			new BlockPos(30_000_000, 0, 0), false);
+		EntityParentFrame frame = EntityParentFrame.copyOf(new org.joml.Matrix4d().translation(-29_999_996, 0, 0), new org.joml.Quaterniond());
+		SableBlockHitFrame proof = new SableBlockHitFrame(java.util.UUID.randomUUID(), nativeBlock.getBlockPos(), nativeBlock.getLocation(), frame);
+		RaycastSelection block = new RaycastSelection(nativeBlock, Optional.empty(), Optional.of(new Vec3(4, .5, 0)), Optional.of(proof));
+		RaycastSelection selected = Raycast.selectNearestWorldOrEntity(START, block, Optional.of(entity)).orElseThrow();
+		assertSame(nativeBlock, selected.hitResult()); assertSame(proof, selected.blockFrame().orElseThrow());
+		assertEquals(Direction.WEST, ((BlockHitResult) selected.hitResult()).getDirection());
+		RaycastSelection unknown = new RaycastSelection(nativeBlock, Optional.empty(), Optional.empty(), Optional.empty());
+		assertSame(unknown, Raycast.selectNearestWorldOrEntity(START, unknown, Optional.of(entity)).orElseThrow());
+		assertSame(unknown, Raycast.selectNearestWorldOrEntity(START, unknown, Optional.empty()).orElseThrow());
+	}
+
+	@Test
 	void registryMutationDuringCandidateIterationChangesOnlyTheNextSnapshot() {
 		EntityLocalGeometryRegistry registry = new EntityLocalGeometryRegistry();
 		AtomicBoolean registered = new AtomicBoolean();

@@ -1704,21 +1704,23 @@ public final class ClientPingRuntime {
 		var trace = Raycast.traceDirectionalCandidates(inputs.token(), inputs.ray(), inputs.nativeDistance(),
 			inputs.pingDistance(), inputs.policy(), CandidateWorkLimits.defaults());
 		if (trace.isEmpty()) return PreciseCaptureRefresh.Scan.incomplete();
+		if (trace.orElseThrow().candidates().isEmpty()) return PreciseCaptureRefresh.Scan.incomplete();
 		var selection = trace.orElseThrow().ordinarySelection();
 		HitResult hit = selection.hitResult();
 		TargetSnapshot reference;
 		Vec3 origin = vector(inputs.ray().origin()), direction = vector(inputs.ray().direction());
 		if (hit.getType() == HitResult.Type.BLOCK && ModContext.HasSable) {
-			var external = SableClientProvider.capture(level, (BlockHitResult) hit, origin,
+			var external = captureSableSelection(level, selection, origin,
 				origin.add(direction.scale(inputs.nativeDistance())));
-			var projected = external.isPresent() ? Optional.<Vec3>empty() : SableIntegration.projectOutOfSubLevel(level, hit.getLocation());
+			var projected = external.isPresent() ? Optional.<Vec3>empty() : selection.blockFrame().isPresent()
+				? selection.worldPoint() : SableIntegration.projectOutOfSubLevel(level, hit.getLocation());
 			reference = external.orElseGet(() -> projected.map(point -> TargetSnapshotFactory.location(
 				level.dimension().location().toString(), point.x, point.y, point.z))
 				.orElseGet(() -> MinecraftTargetSnapshotFactory.fromCandidateSelection(level, selection)));
 		} else reference = MinecraftTargetSnapshotFactory.fromCandidateSelection(level, selection);
 		var resolver = DefaultTargetResolver.builtIn(TargetResolutionLogger.global(Diagnostics.client()));
 		var resolved = resolver.resolve(reference.target(), reference.matchContext());
-		var allocated = trace.orElseThrow().candidates().finish(reference, resolved, resolver);
+		var allocated = trace.orElseThrow().candidates().orElseThrow().finish(reference, resolved, resolver);
 		var nativeSlots = new java.util.EnumMap<PreciseTargetType, PreciseCaptureRefresh.Outcome>(PreciseTargetType.class);
 		for (var type : PreciseTargetType.values()) if (type != PreciseTargetType.LOCATION) {
 			var slot = allocated.slot(type);
@@ -1732,6 +1734,12 @@ public final class ClientPingRuntime {
 		return new PreciseCaptureRefresh.Scan(nativeSlots, location, hit.getType() == HitResult.Type.MISS && ModContext.HasDistantHorizons);
 	}
 	private static Vec3 vector(WorldVector value) { return new Vec3(value.x(), value.y(), value.z()); }
+	private static Optional<TargetSnapshot> captureSableSelection(ClientLevel level,
+		nx.pingwheel.common.math.RaycastSelection selection, Vec3 start, Vec3 end) {
+		BlockHitResult hit = (BlockHitResult) selection.hitResult();
+		return selection.blockFrame().map(proof -> SableClientProvider.capture(level, hit, start, end, proof))
+			.orElseGet(() -> SableClientProvider.capture(level, hit, start, end));
+	}
 	private boolean startPreciseDistant(PreciseCaptureRefresh.Request request,
 		java.util.function.Consumer<PreciseCaptureRefresh.Outcome> completion) {
 		Minecraft game = Game;
@@ -1783,11 +1791,11 @@ public final class ClientPingRuntime {
 		var trace = Raycast.traceDirectionalCandidates(token, pressRay, distance, selectorPingDistance, selectorPolicy,
 			CandidateWorkLimits.defaults());
 		var raycastSelection = trace.map(Raycast.SelectorTrace::ordinarySelection);
-		Optional<FrozenCandidateAcquisition> acquisition = trace.map(Raycast.SelectorTrace::candidates);
-		var hitResult = raycastSelection.map(nx.pingwheel.common.math.RaycastSelection::hitResult).orElse(null);
+		Optional<FrozenCandidateAcquisition> acquisition = trace.flatMap(Raycast.SelectorTrace::candidates);
+		@Nullable HitResult hitResult = raycastSelection.map(nx.pingwheel.common.math.RaycastSelection::hitResult).orElse(null);
 
 		if (hitResult == null || hitResult.getType() == HitResult.Type.MISS) {
-			HitResult missHit = hitResult;
+			@Nullable HitResult missHit = hitResult;
 
 			if (missHit == null) {
 				var missPoint = rayOrigin.add(cameraDirection.scale(distance));
@@ -1836,10 +1844,8 @@ public final class ClientPingRuntime {
 		boolean sableCaptureAttempted = ModContext.HasSable && hitResult.getType() == HitResult.Type.BLOCK;
 
 		if (sableCaptureAttempted) {
-			Optional<TargetSnapshot> sableCandidate = SableClientProvider.capture(
-				level,
-				(BlockHitResult) hitResult,
-				rayOrigin,
+			Optional<TargetSnapshot> sableCandidate = captureSableSelection(
+				level, raycastSelection.orElseThrow(), rayOrigin,
 				rayOrigin.add(cameraDirection.scale(distance)));
 
 			if (sableCandidate.isPresent()) {
@@ -1847,7 +1853,9 @@ public final class ClientPingRuntime {
 				return;
 			}
 
-			var projected = SableIntegration.projectOutOfSubLevel(game.level, hitResult.getLocation());
+			var projected = raycastSelection.orElseThrow().blockFrame().isPresent()
+				? raycastSelection.orElseThrow().worldPoint()
+				: SableIntegration.projectOutOfSubLevel(game.level, hitResult.getLocation());
 
 			// If the provider cannot positively resolve the local block, preserve
 			// the pre-existing projected-location fallback.
@@ -1871,9 +1879,16 @@ public final class ClientPingRuntime {
 				"block_pos", hitResult instanceof BlockHitResult blockHit ? blockHit.getBlockPos() : null);
 		}
 
-		completion.complete(raycastSelection
+		TargetSnapshot captured = raycastSelection
 			.map(selection -> MinecraftTargetSnapshotFactory.fromCandidateSelection(game.level, selection))
-			.orElseGet(() -> MinecraftTargetSnapshotFactory.fromCandidateHitResult(game.level, hitResult)), acquisition);
+			.orElseGet(() -> MinecraftTargetSnapshotFactory.fromCandidateHitResult(game.level, hitResult));
+		if (captured.target() instanceof Target.LocationTarget && raycastSelection.isPresent()
+			&& raycastSelection.orElseThrow().worldPoint().isEmpty()) {
+			activeInteraction.invalidate(token);
+			pendingRay = null;
+			return;
+		}
+		completion.complete(captured, acquisition);
 	}
 
 	/**
@@ -2005,8 +2020,8 @@ public final class ClientPingRuntime {
 				// Same top-center geometry the marker outline renders, using the
 				// current-tick position (partialTick 1.0F); the renderer may
 				// additionally sub-tick interpolate between positions.
-				var topCenter = EntityMarkerPoint.forLiveEntity(entity, 1.0F);
-				return new WorldVector(topCenter.x, topCenter.y, topCenter.z);
+				@Nullable Vec3 topCenter = EntityMarkerPoint.forLiveEntity(entity, 1.0F);
+				if (topCenter != null) return new WorldVector(topCenter.x, topCenter.y, topCenter.z);
 			}
 		} else if (target instanceof Target.ExternalBlockTarget external
 			&& Game != null && Game.level != null

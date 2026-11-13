@@ -12,6 +12,8 @@ import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import org.jetbrains.annotations.Nullable;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
@@ -49,6 +51,13 @@ public final class NativeLocalShapeRaycaster {
 		Predicate<BlockPos> hiddenPredicate,
 		CollisionContext localCollisionContext
 	) {
+		return trace(localStart, localEnd, policy, view, localPositions, hiddenPredicate,
+			localCollisionContext, EntityRaycastWork.unlimited());
+	}
+
+	public static Optional<LocalGeometryHit> trace(Vec3 localStart, Vec3 localEnd, RaycastPolicy policy,
+		BlockGetter view, Iterable<BlockPos> localPositions, Predicate<BlockPos> hiddenPredicate,
+		CollisionContext localCollisionContext, EntityRaycastWork work) {
 		Objects.requireNonNull(localStart, "localStart");
 		Objects.requireNonNull(localEnd, "localEnd");
 		Objects.requireNonNull(policy, "policy");
@@ -64,7 +73,7 @@ public final class NativeLocalShapeRaycaster {
 			view,
 			localPositions,
 			hiddenPredicate,
-			PingClipContext.create(localStart, localEnd, policy, localCollisionContext));
+			PingClipContext.create(localStart, localEnd, policy, localCollisionContext), work);
 	}
 
 	/**
@@ -80,6 +89,14 @@ public final class NativeLocalShapeRaycaster {
 		Predicate<BlockPos> hiddenPredicate,
 		ClipContext context
 	) {
+		return traceWithContext(localStart, localEnd, policy, view, localPositions, hiddenPredicate,
+			context, EntityRaycastWork.unlimited());
+	}
+
+	static Optional<LocalGeometryHit> traceWithContext(Vec3 localStart, Vec3 localEnd, RaycastPolicy policy,
+		BlockGetter source, Iterable<BlockPos> localPositions, Predicate<BlockPos> hiddenPredicate,
+		ClipContext context, EntityRaycastWork work) {
+		BlockGetter view = workView(source, work);
 		Objects.requireNonNull(localStart, "localStart");
 		Objects.requireNonNull(localEnd, "localEnd");
 		Objects.requireNonNull(policy, "policy");
@@ -87,12 +104,13 @@ public final class NativeLocalShapeRaycaster {
 		Objects.requireNonNull(localPositions, "localPositions");
 		Objects.requireNonNull(hiddenPredicate, "hiddenPredicate");
 		Objects.requireNonNull(context, "context");
+		if (!work.complete()) throw new EntityRaycastWork.Exhausted();
 
 		if (!isFinite(localStart) || !isFinite(localEnd) || localStart.distanceToSqr(localEnd) == 0.0) {
 			return Optional.empty();
 		}
 
-		Candidate best = null;
+		@Nullable Candidate best = null;
 
 		for (BlockPos suppliedPos : localPositions) {
 			Objects.requireNonNull(suppliedPos, "localPositions contains null");
@@ -111,7 +129,7 @@ public final class NativeLocalShapeRaycaster {
 				LocalGeometryKind.BLOCK,
 				state,
 				blockRegistryId(state),
-				Optional.empty()));
+				Optional.empty(), work));
 
 			if (policy.fluidMode() == RaycastPolicy.FluidMode.ANY) {
 				FluidState fluidState = view.getFluidState(localPos);
@@ -125,11 +143,12 @@ public final class NativeLocalShapeRaycaster {
 						LocalGeometryKind.FLUID,
 						state,
 						blockRegistryId(state),
-						fluidRegistryId(fluidState)));
+						fluidRegistryId(fluidState), work));
 				}
 			}
 		}
 
+		if (!work.complete()) throw new EntityRaycastWork.Exhausted();
 		return best == null ? Optional.empty() : Optional.of(best.hit());
 	}
 
@@ -142,15 +161,22 @@ public final class NativeLocalShapeRaycaster {
 	 * not expose.</p>
 	 */
 	static Optional<LocalGeometryHit> traceNativeShape(
-		VoxelShape shape,
+		@Nullable VoxelShape shape,
 		Vec3 start,
 		Vec3 end,
 		BlockPos localPos,
 		LocalGeometryKind kind,
 		BlockState state,
-		String blockRegistryId,
-		Optional<String> fluidRegistryId
+		@Nullable String blockRegistryId,
+		@Nullable Optional<String> fluidRegistryId
 	) {
+		return traceNativeShape(shape, start, end, localPos, kind, state, blockRegistryId,
+			fluidRegistryId, EntityRaycastWork.unlimited());
+	}
+
+	private static Optional<LocalGeometryHit> traceNativeShape(@Nullable VoxelShape shape, Vec3 start,
+		Vec3 end, BlockPos localPos, LocalGeometryKind kind, BlockState state,
+		@Nullable String blockRegistryId, @Nullable Optional<String> fluidRegistryId, EntityRaycastWork work) {
 		if (shape == null || shape.isEmpty() || blockRegistryId == null || fluidRegistryId == null
 			|| !isFinite(start) || !isFinite(end) || start.distanceToSqr(end) == 0.0) {
 			return Optional.empty();
@@ -168,6 +194,7 @@ public final class NativeLocalShapeRaycaster {
 
 		BestBox bestBox = new BestBox();
 		shape.forAllBoxes((minX, minY, minZ, maxX, maxY, maxZ) -> {
+			work.visitShapeBox();
 			OptionalDouble t = intersectSegment(start, end, new AABB(
 				minX + localPos.getX(), minY + localPos.getY(), minZ + localPos.getZ(),
 				maxX + localPos.getX(), maxY + localPos.getY(), maxZ + localPos.getZ()));
@@ -187,7 +214,7 @@ public final class NativeLocalShapeRaycaster {
 			t, localPos, kind, state, blockRegistryId, fluidRegistryId, localPoint));
 	}
 
-	private static Candidate chooseBetter(Candidate current, Optional<LocalGeometryHit> proposed) {
+	private static @Nullable Candidate chooseBetter(@Nullable Candidate current, Optional<LocalGeometryHit> proposed) {
 		if (proposed.isEmpty()) {
 			return current;
 		}
@@ -313,8 +340,8 @@ public final class NativeLocalShapeRaycaster {
 		return start.add(end.subtract(start).scale(t));
 	}
 
-	private static String blockRegistryId(BlockState state) {
-		ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+	private static @Nullable String blockRegistryId(BlockState state) {
+		@Nullable ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
 		return id == null ? null : id.toString();
 	}
 
@@ -325,6 +352,25 @@ public final class NativeLocalShapeRaycaster {
 
 	private static boolean isFinite(Vec3 vector) {
 		return Double.isFinite(vector.x) && Double.isFinite(vector.y) && Double.isFinite(vector.z);
+	}
+
+	/** All native shape callbacks, including neighbor and block-entity reads, use this charged view. */
+	private static BlockGetter workView(BlockGetter source, EntityRaycastWork work) {
+		Objects.requireNonNull(source, "source"); Objects.requireNonNull(work, "work");
+		if (work.isUnlimited()) return source;
+		return new BlockGetter() {
+			@Override public BlockState getBlockState(BlockPos pos) {
+				work.readLocalBlock(); return source.getBlockState(pos);
+			}
+			@Override public FluidState getFluidState(BlockPos pos) {
+				work.readLocalBlock(); return source.getFluidState(pos);
+			}
+			@Override public @Nullable BlockEntity getBlockEntity(BlockPos pos) {
+				work.readLocalBlock(); return source.getBlockEntity(pos);
+			}
+			@Override public int getHeight() { return source.getHeight(); }
+			@Override public int getMinBuildHeight() { return source.getMinBuildHeight(); }
+		};
 	}
 
 	private static boolean isFinite(AABB box) {
