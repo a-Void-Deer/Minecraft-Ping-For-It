@@ -1,7 +1,7 @@
 package nx.pingwheel.common.network;
 
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import org.jetbrains.annotations.NotNull;
 
 import static nx.pingwheel.common.Global.S2C_NAMESPACE;
@@ -11,7 +11,7 @@ import static nx.pingwheel.common.Global.S2C_NAMESPACE;
  */
 public record RateLimitPolicyS2CPacket(int rateLimit, int msToRegenerate) implements IPacket {
 
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "rate-limit-policy");
+	public static final Identifier PACKET_ID = Identifier.fromNamespaceAndPath(S2C_NAMESPACE, "rate-limit-policy");
 	public static final Type<RateLimitPolicyS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	/**
@@ -38,7 +38,7 @@ public record RateLimitPolicyS2CPacket(int rateLimit, int msToRegenerate) implem
 	}
 
 	@Override
-	public ResourceLocation getId() {
+	public Identifier getId() {
 		return PACKET_ID;
 	}
 

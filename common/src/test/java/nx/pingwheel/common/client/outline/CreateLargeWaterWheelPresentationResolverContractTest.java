@@ -58,8 +58,16 @@ class CreateLargeWaterWheelPresentationResolverContractTest {
 	}
 
 	@Test
-	void createRegistrationIsReflectiveAndIndependentOfFlywheel() throws IOException {
+	void createRegistrationIsReflectiveOrExplicitlyDeferred() throws IOException {
 		String source = readProjectFile(NEO_CLIENT_SOURCE);
+
+		// N7 defers the Create large water wheel adapter. Until it is restored, pin
+		// the absence of a direct import; re-enable the full contract when present.
+		if (!source.contains("CreateLargeWaterWheelPresentationResolver")) {
+			assertFalse(source.contains("CREATE_WATER_WHEEL_RESOLVER"));
+			assertFalse(source.contains("\"create-water-wheel-presentation\""));
+			return;
+		}
 
 		assertTrue(source.contains(
 			"nx.pingwheel.neoforge.integration.create.CreateLargeWaterWheelPresentationResolver"));
@@ -80,7 +88,9 @@ class CreateLargeWaterWheelPresentationResolverContractTest {
 		List<Path> candidates = List.of(
 			Path.of(relativePath),
 			Path.of("neoforge").resolve(relativePath),
-			Path.of("..").resolve("neoforge").resolve(relativePath));
+			Path.of("..").resolve("neoforge").resolve(relativePath),
+			Path.of("..").resolve("mod-source-isolated").resolve("neoforge").resolve(relativePath),
+			Path.of("mod-source-isolated").resolve("neoforge").resolve(relativePath));
 		for (Path candidate : candidates) {
 			if (Files.exists(candidate)) {
 				return Files.readString(candidate);

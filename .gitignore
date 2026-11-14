@@ -123,6 +123,7 @@ runs/
 /AGENTS.md
 plan.md
 spec.md
+.agents-work/
 
 # Eclipse Buildship
 .project

@@ -2,7 +2,7 @@ package nx.pingwheel.common.client.outline;
 
 import java.util.List;
 
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.block.RenderShape;
 import org.junit.jupiter.api.Test;
 
@@ -11,22 +11,22 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class BlockDisplayPolicyTest {
-	private static final ResourceLocation STONE = ResourceLocation.fromNamespaceAndPath("minecraft", "stone");
-	private static final ResourceLocation CHEST = ResourceLocation.fromNamespaceAndPath("minecraft", "chest");
+	private static final Identifier STONE = Identifier.fromNamespaceAndPath("minecraft", "stone");
+	private static final Identifier CHEST = Identifier.fromNamespaceAndPath("minecraft", "chest");
 
 	@Test
 	void whitelistAndBlacklistTruthTableCoversBothBlockTargetTypes() {
 		BlockTagLookup noTags = (tag, key) -> false;
 
 		assertTruthTable("block", STONE, false, RenderShape.MODEL, noTags);
-		assertTruthTable("entity_block", CHEST, true, RenderShape.ENTITYBLOCK_ANIMATED, noTags);
+		assertTruthTable("entity_block", CHEST, true, RenderShape.INVISIBLE, noTags);
 		assertFalse(BlockDisplayPolicy.compile(List.of("*:*"), List.of())
 			.shouldUseNativeGlow("location", STONE, false, RenderShape.MODEL, noTags));
 	}
 
 	private static void assertTruthTable(
 		String targetType,
-		ResourceLocation block,
+		Identifier block,
 		boolean hasBlockEntity,
 		RenderShape renderShape,
 		BlockTagLookup tagLookup) {

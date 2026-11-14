@@ -2,20 +2,16 @@ package nx.pingwheel.common.interaction;
 
 import java.util.Optional;
 
-import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.syncher.SynchedEntityData;
-import net.minecraft.server.Bootstrap;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.level.Level;
+import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import nx.pingwheel.common.client.outline.TestEntitySupport;
+import nx.pingwheel.common.client.outline.TestEntitySupport.TestEntity;
 import nx.pingwheel.common.math.EntityLocalHit;
 import nx.pingwheel.common.math.LocalGeometryHit;
 import nx.pingwheel.common.math.LocalGeometryKind;
@@ -29,14 +25,13 @@ class MinecraftTargetSnapshotFactoryDetailedTest {
 
 	@BeforeAll
 	static void bootStrap() {
-		SharedConstants.tryDetectVersion();
-		Bootstrap.bootStrap();
+		TestEntitySupport.bootStrap();
 	}
 
 	@Test
 	void detailedFactoryRetainsMetadataOnlyForTheExactEntityHitResultOwner() {
-		TestEntity entityA = new TestEntity(EntityType.PIG, null);
-		TestEntity entityB = new TestEntity(EntityType.PIG, null);
+		TestEntity entityA = TestEntitySupport.newEntity(EntityTypes.PIG);
+		TestEntity entityB = TestEntitySupport.newEntity(EntityTypes.PIG);
 		LocalGeometryHit geometry = new LocalGeometryHit(
 			0.25, BlockPos.ZERO, LocalGeometryKind.BLOCK, Blocks.STONE.defaultBlockState(),
 			"minecraft:stone", Optional.empty(), new Vec3(1, 2, 3));
@@ -59,21 +54,5 @@ class MinecraftTargetSnapshotFactoryDetailedTest {
 			"minecraft:overworld", fabricatedMismatch);
 
 		assertTrue(dropped.entityLocalGeometryMetadata().isEmpty());
-	}
-
-	private static final class TestEntity extends Entity {
-
-		private TestEntity(EntityType<?> type, Level level) {
-			super(type, level);
-		}
-
-		@Override
-		protected void defineSynchedData(SynchedEntityData.Builder builder) {}
-
-		@Override
-		protected void readAdditionalSaveData(CompoundTag tag) {}
-
-		@Override
-		protected void addAdditionalSaveData(CompoundTag tag) {}
 	}
 }

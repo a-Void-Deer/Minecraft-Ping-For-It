@@ -4,7 +4,7 @@ import java.util.Objects;
 
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.Level;
 
@@ -66,7 +66,7 @@ public final class MinecraftClientTargetValidator implements TargetValidator {
 		}
 
 		Level level = Game.level;
-		String currentDimensionId = level.dimension().location().toString();
+		String currentDimensionId = level.dimension().identifier().toString();
 		Target target = resolvedTarget.target();
 
 		if (!currentDimensionId.equals(target.dimensionId())) {
@@ -112,13 +112,13 @@ public final class MinecraftClientTargetValidator implements TargetValidator {
 			return TargetValidation.valid();
 		}
 
-		ResourceLocation capturedId = ResourceLocation.tryParse(blockTarget.blockRegistryId());
+		Identifier capturedId = Identifier.tryParse(blockTarget.blockRegistryId());
 
 		if (capturedId == null) {
 			return TargetValidation.gone(TargetGoneReason.BLOCK_REPLACED);
 		}
 
-		ResourceLocation currentId = BuiltInRegistries.BLOCK.getKey(
+		Identifier currentId = BuiltInRegistries.BLOCK.getKey(
 			level.getBlockState(position).getBlock());
 
 		if (currentId == null || !currentId.equals(capturedId)) {

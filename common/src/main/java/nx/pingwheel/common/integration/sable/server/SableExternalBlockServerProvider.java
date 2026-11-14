@@ -15,7 +15,7 @@ import dev.ryanhcode.sable.companion.math.Pose3dc;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Nameable;
@@ -162,7 +162,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		}
 
 		Optional<SableExternalBlockLocator> parsed = SableExternalBlockLocator.parse(candidate.providerLocator());
-		Optional<ResourceLocation> expectedId = parseBlockId(candidate.expectedBlockRegistryId());
+		Optional<Identifier> expectedId = parseBlockId(candidate.expectedBlockRegistryId());
 
 		if (parsed.isEmpty()) {
 			diagnostics.server(
@@ -263,7 +263,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		}
 
 		Optional<SableExternalBlockLocator> parsed = SableExternalBlockLocator.parse(candidate.providerLocator());
-		Optional<ResourceLocation> expectedId = parseBlockId(candidate.expectedBlockRegistryId());
+		Optional<Identifier> expectedId = parseBlockId(candidate.expectedBlockRegistryId());
 
 		if (parsed.isEmpty()) {
 			diagnostics.server(
@@ -489,7 +489,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		}
 
 		Optional<UUID> trackingId = parseUuid(committed.stableTargetId());
-		Optional<ResourceLocation> expectedId = parseBlockId(committed.expectedBlockRegistryId());
+		Optional<Identifier> expectedId = parseBlockId(committed.expectedBlockRegistryId());
 
 		if (trackingId.isEmpty()) {
 			return refreshInvalid(state, stableIdValue, committed, "tracking-id-decode-failure", null);
@@ -610,7 +610,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		}
 
 		Optional<SableExternalBlockLocator> parsed = SableExternalBlockLocator.parse(target.providerLocator());
-		Optional<ResourceLocation> expectedId = parseBlockId(target.expectedBlockRegistryId());
+		Optional<Identifier> expectedId = parseBlockId(target.expectedBlockRegistryId());
 
 		if (parsed.isEmpty()) {
 			diagnostics.server(
@@ -797,7 +797,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	}
 
 	private static boolean dimensionMatches(ServerLevel level, String dimensionId) {
-		return dimensionId != null && dimensionId.equals(level.dimension().location().toString());
+		return dimensionId != null && dimensionId.equals(level.dimension().identifier().toString());
 	}
 
 	private ValidationResult invalidValidation(String reason, Target.ExternalBlockTarget candidate) {
@@ -940,7 +940,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	}
 
 	private LiveResult resolveLive(
-		ServerLevel level, SableExternalBlockLocator locator, ResourceLocation expectedId
+		ServerLevel level, SableExternalBlockLocator locator, Identifier expectedId
 	) {
 		return resolveLive(level, locator, expectedId, true);
 	}
@@ -948,7 +948,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	private LiveResult resolveLive(
 		ServerLevel level,
 		SableExternalBlockLocator locator,
-		ResourceLocation expectedId,
+		Identifier expectedId,
 		boolean logExceptions
 	) {
 		try {
@@ -976,7 +976,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		Object subLevel,
 		UUID subLevelId,
 		BlockPos position,
-		ResourceLocation expectedId,
+		Identifier expectedId,
 		boolean logExceptions
 	) throws ReflectiveOperationException {
 		if (isRemoved(subLevel)) {
@@ -997,7 +997,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			return new LiveResult.Invalid("air-or-missing-state", null);
 		}
 
-		ResourceLocation actualId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+		Identifier actualId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
 		if (actualId == null || !expectedId.equals(actualId)) {
 			return new LiveResult.Invalid("registry-identity-mismatch", null);
 		}
@@ -1097,7 +1097,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	private static MaterializationResult materialized(LiveResult.Available available, UUID trackingId) {
 		return new MaterializationResult.Materialized(new MaterializedTarget(
 			Target.ExternalBlockTarget.committed(
-				available.level().dimension().location().toString(),
+				available.level().dimension().identifier().toString(),
 				PROVIDER_ID,
 				trackingId.toString(),
 				available.registryId().toString(),
@@ -1108,10 +1108,10 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	}
 
 	private static Target.ExternalBlockTarget candidate(
-		ServerLevel level, SableExternalBlockLocator locator, ResourceLocation registryId, boolean hasBlockEntity
+		ServerLevel level, SableExternalBlockLocator locator, Identifier registryId, boolean hasBlockEntity
 	) {
 		return Target.ExternalBlockTarget.candidate(
-			level.dimension().location().toString(),
+			level.dimension().identifier().toString(),
 			PROVIDER_ID,
 			registryId.toString(),
 			locator.encode(),
@@ -1122,11 +1122,11 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		ServerLevel level,
 		SableExternalBlockLocator locator,
 		UUID trackingId,
-		ResourceLocation registryId,
+		Identifier registryId,
 		boolean hasBlockEntity
 	) {
 		return Target.ExternalBlockTarget.committed(
-			level.dimension().location().toString(),
+			level.dimension().identifier().toString(),
 			PROVIDER_ID,
 			trackingId.toString(),
 			registryId.toString(),
@@ -1134,12 +1134,12 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			hasBlockEntity);
 	}
 
-	private static Optional<ResourceLocation> parseBlockId(String value) {
+	private static Optional<Identifier> parseBlockId(String value) {
 		if (value == null || value.length() > Target.ExternalBlockTarget.MAX_IDENTIFIER_LENGTH) {
 			return Optional.empty();
 		}
 
-		ResourceLocation parsed = ResourceLocation.tryParse(value);
+		Identifier parsed = Identifier.tryParse(value);
 		return parsed == null ? Optional.empty() : Optional.of(parsed);
 	}
 
@@ -1215,7 +1215,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			ServerLevel level,
 			BlockPos position,
 			BlockState state,
-			ResourceLocation registryId,
+			Identifier registryId,
 			boolean hasBlockEntity,
 			MarkerAnchor anchor,
 			SableExternalBlockLocator locator

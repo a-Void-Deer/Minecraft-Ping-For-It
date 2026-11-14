@@ -18,6 +18,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class BlockPresentationCoverageRelationTest {
 
+	private static final String BLOCK_ENTITY_RENDERER_SOURCE_ID = "pingforit:block_entity_renderer";
+	private static final String BAKED_MODEL_SOURCE_ID = "pingforit:baked_model";
+
 	@BeforeAll
 	static void bootstrapMinecraft() {
 		SharedConstants.tryDetectVersion();
@@ -40,21 +43,21 @@ class BlockPresentationCoverageRelationTest {
 			() -> presentation(List.of(relation("lower", "lower"))));
 		assertThrows(IllegalArgumentException.class,
 			() -> presentation(List.of(new BlockPresentationCoverageRelation(
-				"missing", EntityBlockGeometryRunner.BLOCK_ENTITY_RENDERER_SOURCE_ID, "upper"))));
+				"missing", BLOCK_ENTITY_RENDERER_SOURCE_ID, "upper"))));
 		assertThrows(IllegalArgumentException.class,
 			() -> presentation(List.of(relation("lower", "upper"), relation("lower", "upper"))));
 		assertThrows(IllegalArgumentException.class,
 			() -> presentation(List.of(
 				relation("lower", "upper"),
 				new BlockPresentationCoverageRelation(
-					"lower", EntityBlockGeometryRunner.BAKED_MODEL_SOURCE_ID, "upper"))));
+					"lower", BAKED_MODEL_SOURCE_ID, "upper"))));
 		assertThrows(IllegalArgumentException.class,
 			() -> new BlockPresentationCoverageRelation("lower", "not-a-source", "upper"));
 	}
 
 	private static BlockPresentationCoverageRelation relation(String owner, String covered) {
 		return new BlockPresentationCoverageRelation(
-			owner, EntityBlockGeometryRunner.BLOCK_ENTITY_RENDERER_SOURCE_ID, covered);
+			owner, BLOCK_ENTITY_RENDERER_SOURCE_ID, covered);
 	}
 
 	private static BlockPresentation presentation(List<BlockPresentationCoverageRelation> relations) {

@@ -23,6 +23,7 @@ import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.entity.BlockEntityTypes;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 
@@ -51,7 +52,7 @@ class SimulatedDockingConnectorPresentationResolverTest {
 		BlockPos ownerPos = pairedPos.relative(towardOwner);
 		BlockState pairedState = pairedState(towardOwner);
 		BlockState ownerState = ownerState(towardOwner.getOpposite(), true);
-		BlockEntity ownerBlockEntity = blockEntity(ownerTypeStandIn(), ownerPos, ownerState);
+		BlockEntity ownerBlockEntity = blockEntity(ownerTypeStandIn(), ownerPos);
 
 		BlockPresentationResolution resolution = resolve(
 			newResolver(), pairedPos, pairedState, ownerPos, ownerState, ownerBlockEntity);
@@ -158,7 +159,7 @@ class SimulatedDockingConnectorPresentationResolverTest {
 
 		assertHandledEmpty(resolve(
 			newResolver(), pairedPos, pairedState(towardOwner), ownerPos, ownerState,
-			blockEntity(BlockEntityType.BEACON, ownerPos, ownerState)));
+			blockEntity(BlockEntityTypes.BEACON, ownerPos)));
 	}
 
 	@Test
@@ -198,14 +199,15 @@ class SimulatedDockingConnectorPresentationResolverTest {
 	}
 
 	private static BlockEntityType<?> ownerTypeStandIn() {
-		return BlockEntityType.SIGN;
+		return BlockEntityTypes.SIGN;
 	}
 
-	private static BlockEntity blockEntity(
-		BlockEntityType<?> type,
-		BlockPos pos,
-		BlockState state
-	) {
+	private static BlockEntity blockEntity(BlockEntityType<?> type, BlockPos pos) {
+		// 26.3 validates the block state against the block entity type, so the
+		// fixture cannot pair e.g. a sign type with the observer owner state.
+		BlockState state = type == BlockEntityTypes.SIGN
+			? Blocks.OAK_SIGN.defaultBlockState()
+			: Blocks.BEACON.defaultBlockState();
 		return new BlockEntity(type, pos, state) {};
 	}
 

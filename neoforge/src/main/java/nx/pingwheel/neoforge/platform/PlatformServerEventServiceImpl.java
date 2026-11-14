@@ -16,10 +16,13 @@ public class PlatformServerEventServiceImpl implements IPlatformServerEventServi
 	public void registerPlayerLogoutEvent(Consumer<ServerPlayer> callback) {
 		NeoForge.EVENT_BUS.register(new PlayerLogoutEventHandler(callback));
 	}
+
 	private record PlayerLogoutEventHandler(Consumer<ServerPlayer> callback) {
 		@SubscribeEvent
 		public void onPlayerLogout(PlayerEvent.PlayerLoggedOutEvent event) {
-			callback.accept((ServerPlayer)event.getEntity());
+			if (event.getEntity() instanceof ServerPlayer player) {
+				callback.accept(player);
+			}
 		}
 	}
 

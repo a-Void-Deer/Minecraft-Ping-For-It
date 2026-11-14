@@ -4,7 +4,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 import net.minecraft.core.registries.Registries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.block.Block;
 
@@ -53,7 +53,7 @@ public sealed interface BlockDisplayWhitelistEntry permits BlockDisplayWhitelist
 	 * registry id of the candidate block and is {@code null} for unregistered
 	 * blocks (missing/absent registry ids fail false).
 	 */
-	boolean matches(ResourceLocation blockKey, BlockTagLookup tagLookup);
+	boolean matches(Identifier blockKey, BlockTagLookup tagLookup);
 
 	/**
 	 * The global block wildcard {@code *:*}. It matches every registered block
@@ -62,7 +62,7 @@ public sealed interface BlockDisplayWhitelistEntry permits BlockDisplayWhitelist
 	record Any() implements BlockDisplayWhitelistEntry {
 
 		@Override
-		public boolean matches(ResourceLocation blockKey, BlockTagLookup tagLookup) {
+		public boolean matches(Identifier blockKey, BlockTagLookup tagLookup) {
 			return blockKey != null;
 		}
 	}
@@ -70,14 +70,14 @@ public sealed interface BlockDisplayWhitelistEntry permits BlockDisplayWhitelist
 	/**
 	 * An exact block match: {@code namespace:block}.
 	 */
-	record Exact(ResourceLocation location) implements BlockDisplayWhitelistEntry {
+	record Exact(Identifier location) implements BlockDisplayWhitelistEntry {
 
 		public Exact {
 			Objects.requireNonNull(location, "location");
 		}
 
 		@Override
-		public boolean matches(ResourceLocation blockKey, BlockTagLookup tagLookup) {
+		public boolean matches(Identifier blockKey, BlockTagLookup tagLookup) {
 			return blockKey != null && blockKey.equals(location);
 		}
 	}
@@ -92,7 +92,7 @@ public sealed interface BlockDisplayWhitelistEntry permits BlockDisplayWhitelist
 		}
 
 		@Override
-		public boolean matches(ResourceLocation blockKey, BlockTagLookup tagLookup) {
+		public boolean matches(Identifier blockKey, BlockTagLookup tagLookup) {
 			return blockKey != null && blockKey.getNamespace().equals(namespace);
 		}
 	}
@@ -109,7 +109,7 @@ public sealed interface BlockDisplayWhitelistEntry permits BlockDisplayWhitelist
 		}
 
 		@Override
-		public boolean matches(ResourceLocation blockKey, BlockTagLookup tagLookup) {
+		public boolean matches(Identifier blockKey, BlockTagLookup tagLookup) {
 			return tagLookup.contains(tagKey, blockKey);
 		}
 	}
@@ -125,12 +125,12 @@ public sealed interface BlockDisplayWhitelistEntry permits BlockDisplayWhitelist
 		String path = tag.substring(colon + 1);
 
 		// No wildcard form exists for tags; '*' is also not a valid path char.
-		if (path.isEmpty() || path.equals("*") || !ResourceLocation.isValidNamespace(namespace)
-			|| !ResourceLocation.isValidPath(path)) {
+		if (path.isEmpty() || path.equals("*") || !Identifier.isValidNamespace(namespace)
+			|| !Identifier.isValidPath(path)) {
 			return Optional.empty();
 		}
 
-		return Optional.of(new Tag(TagKey.create(Registries.BLOCK, ResourceLocation.fromNamespaceAndPath(namespace, path))));
+		return Optional.of(new Tag(TagKey.create(Registries.BLOCK, Identifier.fromNamespaceAndPath(namespace, path))));
 	}
 
 	private static Optional<BlockDisplayWhitelistEntry> parseBlockId(String raw) {
@@ -147,7 +147,7 @@ public sealed interface BlockDisplayWhitelistEntry permits BlockDisplayWhitelist
 		String namespace = raw.substring(0, colon);
 		String path = raw.substring(colon + 1);
 
-		if (!ResourceLocation.isValidNamespace(namespace)) {
+		if (!Identifier.isValidNamespace(namespace)) {
 			return Optional.empty();
 		}
 
@@ -156,10 +156,10 @@ public sealed interface BlockDisplayWhitelistEntry permits BlockDisplayWhitelist
 		}
 
 		// '*' anywhere else in the path is invalid grammar.
-		if (path.isEmpty() || path.indexOf('*') >= 0 || !ResourceLocation.isValidPath(path)) {
+		if (path.isEmpty() || path.indexOf('*') >= 0 || !Identifier.isValidPath(path)) {
 			return Optional.empty();
 		}
 
-		return Optional.of(new Exact(ResourceLocation.fromNamespaceAndPath(namespace, path)));
+		return Optional.of(new Exact(Identifier.fromNamespaceAndPath(namespace, path)));
 	}
 }

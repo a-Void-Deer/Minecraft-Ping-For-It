@@ -3,7 +3,7 @@ package nx.pingwheel.common.client.outline;
 import java.util.Objects;
 
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.level.block.Block;
 
@@ -24,7 +24,7 @@ public interface BlockTagLookup {
 	 * Whether the block registered under {@code blockKey} is a member of
 	 * {@code tagKey}. An absent/unknown registry id must answer false.
 	 */
-	boolean contains(TagKey<Block> tagKey, ResourceLocation blockKey);
+	boolean contains(TagKey<Block> tagKey, Identifier blockKey);
 
 	/**
 	 * The production lookup backed by the vanilla 1.21.1 holder-based block

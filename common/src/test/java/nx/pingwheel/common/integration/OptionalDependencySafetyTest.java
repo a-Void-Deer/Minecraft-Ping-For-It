@@ -35,7 +35,7 @@ class OptionalDependencySafetyTest {
 		"nx/pingwheel/common/integration/sable/client/SableClientProvider",
 		"nx/pingwheel/common/client/marker/MarkerView",
 		"nx/pingwheel/common/name/ClientTargetNameResolver",
-		"nx/pingwheel/common/client/outline/BlockOutlineRenderer",
+		"nx/pingwheel/common/client/outline/BlockOutlinePass",
 		"nx/pingwheel/common/client/ClientPingRuntime",
 		"nx/pingwheel/common/integration/TeamContextHandler",
 		"nx/pingwheel/common/resolve/DefaultTargetResolver",

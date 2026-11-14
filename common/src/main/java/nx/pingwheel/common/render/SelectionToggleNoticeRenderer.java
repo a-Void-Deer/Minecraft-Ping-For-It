@@ -1,16 +1,23 @@
 package nx.pingwheel.common.render;
 
-import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.TextColor;
 import nx.pingwheel.common.client.SelectionToggleNoticeState;
 import nx.pingwheel.common.resource.LanguageUtils;
 
-/** Draws the latest target-selection toggle notice above the crosshair. */
+/**
+ * Draws the latest target-selection toggle notice above the crosshair.
+ *
+ * <p>26.3 has no {@code RenderSystem#setShaderColor}, so the fade that upstream
+ * applied around the whole batch is folded into the alpha byte of the colour
+ * handed to {@link GuiGraphicsExtractor#text}.  Vanilla keeps the style RGB and
+ * takes the alpha from that colour ({@code Font.PreparedTextBuilder#getTextColor}),
+ * so both runs still fade together exactly as before.
+ */
 public final class SelectionToggleNoticeRenderer {
 	private static final int WHITE = 0xFFFFFF;
 	private static final int LIGHT_GREEN = 0x55FF55;
@@ -19,11 +26,11 @@ public final class SelectionToggleNoticeRenderer {
 	private SelectionToggleNoticeRenderer() {}
 
 	public static void draw(
-		GuiGraphics guiGraphics,
+		GuiGraphicsExtractor graphics,
 		SelectionToggleNoticeState state,
 		int sizePercent,
 		long nowMillis) {
-		if (guiGraphics == null || state == null
+		if (graphics == null || state == null
 			|| !SelectionToggleNoticeRenderPolicy.isVisibleAtSize(sizePercent)) {
 			return;
 		}
@@ -48,25 +55,22 @@ public final class SelectionToggleNoticeRenderer {
 		final int stateWidth = font.width(stateWord);
 		final int totalWidth = prefixWidth + stateWidth;
 		final float scale = SelectionToggleNoticeRenderPolicy.scaleFor(sizePercent);
-		final float anchorX = SelectionToggleNoticeRenderPolicy.anchorX(guiGraphics.guiWidth());
-		final float anchorY = SelectionToggleNoticeRenderPolicy.anchorY(guiGraphics.guiHeight());
-		final float alpha = snapshot.alpha() / 255.0F;
+		final float anchorX = SelectionToggleNoticeRenderPolicy.anchorX(graphics.guiWidth());
+		final float anchorY = SelectionToggleNoticeRenderPolicy.anchorY(graphics.guiHeight());
+		final int alphaByte = snapshot.alpha();
+		final int prefixColor = (alphaByte << 24) | WHITE;
+		final int stateColor = (alphaByte << 24) | (snapshot.enabled() ? LIGHT_GREEN : LIGHT_RED);
 
-		final var pose = guiGraphics.pose();
-		pose.pushPose();
-		pose.translate(anchorX, anchorY, 0.0F);
-		pose.scale(scale, scale, 1.0F);
+		final var pose = graphics.pose();
+		pose.pushMatrix();
+		pose.translate(anchorX, anchorY);
+		pose.scale(scale, scale);
 
-		// Style colors supply the separate white/status colors.  Shader alpha is
-		// applied around both runs so a fade can never leave one run opaque.
-		RenderSystem.enableBlend();
-		RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, alpha);
 		try {
-			guiGraphics.drawString(font, prefix, -totalWidth / 2, -font.lineHeight / 2, WHITE, true);
-			guiGraphics.drawString(font, stateWord, -totalWidth / 2 + prefixWidth, -font.lineHeight / 2, WHITE, true);
+			graphics.text(font, prefix, -totalWidth / 2, -font.lineHeight / 2, prefixColor, true);
+			graphics.text(font, stateWord, -totalWidth / 2 + prefixWidth, -font.lineHeight / 2, stateColor, true);
 		} finally {
-			RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
-			pose.popPose();
+			pose.popMatrix();
 		}
 	}
 }

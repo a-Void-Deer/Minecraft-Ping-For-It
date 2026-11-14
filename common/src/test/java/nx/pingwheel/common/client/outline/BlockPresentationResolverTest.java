@@ -25,6 +25,7 @@ import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
+import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.Blocks;
@@ -598,7 +599,7 @@ class BlockPresentationResolverTest {
 			case PART -> bedState(BedPart.FOOT, Direction.EAST, false);
 			case FACING -> bedState(BedPart.HEAD, Direction.WEST, false);
 			case DIFFERENT_BLOCK -> withBedProperties(
-				Blocks.WHITE_BED.defaultBlockState(), BedPart.HEAD, Direction.EAST, false);
+				Blocks.BED.pick(DyeColor.WHITE).defaultBlockState(), BedPart.HEAD, Direction.EAST, false);
 		};
 	}
 
@@ -607,7 +608,7 @@ class BlockPresentationResolverTest {
 			case PART -> bedState(BedPart.HEAD, Direction.EAST, false);
 			case FACING -> bedState(BedPart.FOOT, Direction.WEST, false);
 			case DIFFERENT_BLOCK -> withBedProperties(
-				Blocks.WHITE_BED.defaultBlockState(), BedPart.FOOT, Direction.EAST, false);
+				Blocks.BED.pick(DyeColor.WHITE).defaultBlockState(), BedPart.FOOT, Direction.EAST, false);
 		};
 	}
 
@@ -639,7 +640,7 @@ class BlockPresentationResolverTest {
 	}
 
 	private static BlockState bedState(BedPart part, Direction facing, boolean occupied) {
-		return withBedProperties(Blocks.RED_BED.defaultBlockState(), part, facing, occupied);
+		return withBedProperties(Blocks.BED.pick(DyeColor.RED).defaultBlockState(), part, facing, occupied);
 	}
 
 	private static BlockState withBedProperties(

@@ -16,7 +16,6 @@ import nx.pingwheel.common.client.outline.BlockPresentationResolution;
 import nx.pingwheel.common.client.outline.BlockPresentationResolver;
 import nx.pingwheel.common.client.outline.BlockPresentationResolverRegistry;
 import nx.pingwheel.common.client.outline.BlockRenderSubject;
-import nx.pingwheel.common.client.outline.EntityBlockGeometryRunner;
 import nx.pingwheel.common.client.outline.VanillaDoorBlockPresentationResolver;
 
 /**
@@ -31,6 +30,7 @@ import nx.pingwheel.common.client.outline.VanillaDoorBlockPresentationResolver;
  */
 public final class CreateDoorPresentationResolver implements BlockPresentationResolver {
 	public static final String RESOLVER_ID = "pingforit:create_door_presentation";
+	private static final String BLOCK_ENTITY_RENDERER_SOURCE_ID = "pingforit:block_entity_renderer";
 
 	private static final Set<String> CREATE_DOOR_IDS = Set.of(
 		"create:andesite_door",
@@ -114,7 +114,7 @@ public final class CreateDoorPresentationResolver implements BlockPresentationRe
 			resolution.subjects(),
 			List.of(new BlockPresentationCoverageRelation(
 				lower.subjectId(),
-				EntityBlockGeometryRunner.BLOCK_ENTITY_RENDERER_SOURCE_ID,
+				BLOCK_ENTITY_RENDERER_SOURCE_ID,
 				upper.subjectId())));
 	}
 

@@ -118,6 +118,10 @@ public final class ClientPingActionDispatcher {
 
 		packetSender.sendToServer(new MarkerCreateC2SPacket(requestId, target, create.pingType().id()));
 
+		// M4 acceptance line: one INFO per dispatched create request.
+		logger.info("send ping: requestId=" + requestId
+			+ " kind=" + target.kind()
+			+ " pingType=" + create.pingType().id());
 		logger.debug("dispatch create: requestId={} kind={} pingType={}",
 			requestId, target.kind(), create.pingType().id());
 	}

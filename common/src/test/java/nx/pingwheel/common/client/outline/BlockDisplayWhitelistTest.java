@@ -3,7 +3,7 @@ package nx.pingwheel.common.client.outline;
 import java.util.List;
 import java.util.Optional;
 
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.world.level.block.RenderShape;
 import org.junit.jupiter.api.Test;
@@ -23,21 +23,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Vanilla {@code Block} construction is impossible in this headless JVM
  * ({@code SoundType} initialization fails), so evaluation goes through the
  * headless-safe core
- * ({@link BlockDisplayWhitelist#matches(ResourceLocation, boolean, RenderShape, BlockTagLookup)})
+ * ({@link BlockDisplayWhitelist#matches(Identifier, boolean, RenderShape, BlockTagLookup)})
  * with stable facts and an injectable {@link BlockTagLookup}; no fake
  * Minecraft language or resource files are used.
  */
 class BlockDisplayWhitelistTest {
 
-	private static final ResourceLocation STONE = ResourceLocation.fromNamespaceAndPath("minecraft", "stone");
-	private static final ResourceLocation DIRT = ResourceLocation.fromNamespaceAndPath("minecraft", "dirt");
-	private static final ResourceLocation CHEST = ResourceLocation.fromNamespaceAndPath("minecraft", "chest");
+	private static final Identifier STONE = Identifier.fromNamespaceAndPath("minecraft", "stone");
+	private static final Identifier DIRT = Identifier.fromNamespaceAndPath("minecraft", "dirt");
+	private static final Identifier CHEST = Identifier.fromNamespaceAndPath("minecraft", "chest");
 
-	private static boolean matches(BlockDisplayWhitelist whitelist, ResourceLocation key) {
+	private static boolean matches(BlockDisplayWhitelist whitelist, Identifier key) {
 		return whitelist.matches(key, false, RenderShape.MODEL, (tag, k) -> false);
 	}
 
-	private static boolean matches(BlockDisplayWhitelist whitelist, ResourceLocation key, BlockTagLookup tagLookup) {
+	private static boolean matches(BlockDisplayWhitelist whitelist, Identifier key, BlockTagLookup tagLookup) {
 		return whitelist.matches(key, false, RenderShape.MODEL, tagLookup);
 	}
 
@@ -51,7 +51,7 @@ class BlockDisplayWhitelistTest {
 		assertEquals(1, whitelist.parsedEntries().size());
 		assertTrue(matches(whitelist, STONE));
 		assertTrue(matches(whitelist, DIRT));
-		assertTrue(matches(whitelist, ResourceLocation.fromNamespaceAndPath("optional_mod", "special_block")));
+		assertTrue(matches(whitelist, Identifier.fromNamespaceAndPath("optional_mod", "special_block")));
 	}
 
 	// --- parsing ---
@@ -78,7 +78,7 @@ class BlockDisplayWhitelistTest {
 
 		assertTrue(entry instanceof BlockDisplayWhitelistEntry.Any);
 		assertTrue(entry.matches(STONE, (tag, key) -> false));
-		assertTrue(entry.matches(ResourceLocation.fromNamespaceAndPath("optional_mod", "special_block"), (tag, key) -> false));
+		assertTrue(entry.matches(Identifier.fromNamespaceAndPath("optional_mod", "special_block"), (tag, key) -> false));
 	}
 
 	@Test
@@ -149,7 +149,7 @@ class BlockDisplayWhitelistTest {
 
 		assertTrue(matches(whitelist, STONE));
 		assertTrue(matches(whitelist, DIRT));
-		assertFalse(matches(whitelist, ResourceLocation.fromNamespaceAndPath("modded", "anything")));
+		assertFalse(matches(whitelist, Identifier.fromNamespaceAndPath("modded", "anything")));
 	}
 
 	@Test
@@ -177,7 +177,7 @@ class BlockDisplayWhitelistTest {
 		BlockDisplayWhitelist whitelist = new BlockDisplayWhitelist(List.of("minecraft:chest", "minecraft:*"));
 
 		assertTrue(whitelist.matches(CHEST, true, RenderShape.MODEL, (tag, key) -> false));
-		assertTrue(whitelist.matches(CHEST, true, RenderShape.ENTITYBLOCK_ANIMATED, (tag, key) -> false));
+		assertTrue(whitelist.matches(CHEST, true, RenderShape.INVISIBLE, (tag, key) -> false));
 	}
 
 	@Test
@@ -185,7 +185,6 @@ class BlockDisplayWhitelistTest {
 		BlockDisplayWhitelist whitelist = new BlockDisplayWhitelist(List.of("minecraft:*"));
 
 		assertTrue(whitelist.matches(STONE, false, RenderShape.INVISIBLE, (tag, key) -> false));
-		assertTrue(whitelist.matches(STONE, false, RenderShape.ENTITYBLOCK_ANIMATED, (tag, key) -> false));
 	}
 
 	@Test

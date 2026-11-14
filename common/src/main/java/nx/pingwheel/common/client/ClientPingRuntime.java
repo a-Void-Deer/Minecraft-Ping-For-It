@@ -24,6 +24,7 @@ import nx.pingwheel.common.client.marker.MarkerOverlayState;
 import nx.pingwheel.common.client.duration.ClientMarkerDisplayDuration;
 import nx.pingwheel.common.client.rate.ClientCreateRateLimiter;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
+import nx.pingwheel.common.interaction.state.WheelSelectionDiagnostics;
 import nx.pingwheel.common.chat.PingChatBuilder;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
@@ -282,7 +283,8 @@ public final class ClientPingRuntime {
 				() -> ClientConfig.HANDLER.getConfig().getCancelHalfConeAngleDegrees()),
 			logger,
 			() -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis(),
-			() -> ClientConfig.HANDLER.getConfig().getWheelTimeoutMillis());
+			() -> ClientConfig.HANDLER.getConfig().getWheelTimeoutMillis(),
+			ClientPingRuntime::wheelSelectionDiagnostics);
 
 		return new ClientPingRuntime(
 			new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS, displayDurationPolicy),
@@ -448,7 +450,7 @@ public final class ClientPingRuntime {
 
 	private void observeWorldContinuity(Minecraft game) {
 		ClientLevel currentLevel = game.level;
-		String currentDimension = currentLevel.dimension().location().toString();
+		String currentDimension = currentLevel.dimension().identifier().toString();
 
 		if (observedLevel != null
 			&& (observedLevel != currentLevel || !Objects.equals(observedDimension, currentDimension))) {
@@ -659,11 +661,11 @@ public final class ClientPingRuntime {
 	private Optional<CapturedRay> capturePressRay() {
 		Minecraft game = Game;
 
-		if (game == null || game.cameraEntity == null || game.level == null) {
+		if (game == null || game.getCameraEntity() == null || game.level == null) {
 			return Optional.empty();
 		}
 
-		var cameraEntity = game.cameraEntity;
+		var cameraEntity = game.getCameraEntity();
 		var rayOrigin = cameraEntity.getEyePosition(1.0f);
 		var cameraDirection = cameraEntity.getViewVector(1.0f);
 
@@ -679,13 +681,13 @@ public final class ClientPingRuntime {
 	private void captureImmediately(InteractionToken token, CapturedRay pressRay) {
 		Minecraft game = Game;
 
-		if (game == null || game.cameraEntity == null || game.level == null) {
+		if (game == null || game.getCameraEntity() == null || game.level == null) {
 			activeInteraction.invalidate(token);
 			return;
 		}
 
 		ClientLevel level = game.level;
-		var cameraEntity = game.cameraEntity;
+		var cameraEntity = game.getCameraEntity();
 		var rayOrigin = new Vec3(
 			pressRay.origin().x(),
 			pressRay.origin().y(),
@@ -781,7 +783,7 @@ public final class ClientPingRuntime {
 					"hit_location", hitResult.getLocation(),
 					"projected_position", projectedPos);
 				completeCapture(token, TargetSnapshotFactory.location(
-					game.level.dimension().location().toString(),
+					game.level.dimension().identifier().toString(),
 					projectedPos.x, projectedPos.y, projectedPos.z), pressRay);
 				return;
 			}
@@ -874,7 +876,7 @@ public final class ClientPingRuntime {
 		var level = game.level;
 
 		UUID ownerId = player.getUUID();
-		String dimensionId = level.dimension().location().toString();
+		String dimensionId = level.dimension().identifier().toString();
 		CapturedRay frozenRay = pendingRay;
 
 		if (frozenRay == null && machine.phase() == PingInteractionPhase.WHEEL_OPEN) {
@@ -927,7 +929,7 @@ public final class ClientPingRuntime {
 			}
 		} else if (target instanceof Target.ExternalBlockTarget external
 			&& Game != null && Game.level != null
-			&& currentDimension.equals(Game.level.dimension().location().toString())) {
+			&& currentDimension.equals(Game.level.dimension().identifier().toString())) {
 			Optional<Vec3> livePosition = SableClientProvider.resolvePosition(Game.level, external, 1.0F);
 
 			if (livePosition.isPresent()) {
@@ -1003,6 +1005,11 @@ public final class ClientPingRuntime {
 			sendCreatedChat(packet, snapshot, targetName);
 		}
 
+		// M4 acceptance line: one INFO per applied marker so a normal launch proves
+		// the server-authoritative create reached the client store.
+		logger.info("marker created: markerId=" + snapshot.id().value()
+			+ " kind=" + snapshot.target().kind()
+			+ " pingType=" + snapshot.pingTypeId());
 		logger.debug("marker created applied: markerId={} kind={} targetType={} pingType={}",
 			snapshot.id().value(),
 			snapshot.target().kind(),
@@ -1021,7 +1028,7 @@ public final class ClientPingRuntime {
 			return;
 		}
 
-		if (!snapshot.target().dimensionId().equals(game.level.dimension().location().toString())) {
+		if (!snapshot.target().dimensionId().equals(game.level.dimension().identifier().toString())) {
 			return;
 		}
 
@@ -1084,7 +1091,7 @@ public final class ClientPingRuntime {
 
 			Component message = PingChatBuilder.build(
 				template, packet.ownerName(), pingType.get(), resolvedTargetName);
-			game.player.displayClientMessage(message, false);
+			game.player.sendSystemMessage(message);
 		} catch (RuntimeException exception) {
 			logger.debugException("marker chat display failed: malformed server payload", exception);
 		}
@@ -1258,6 +1265,34 @@ public final class ClientPingRuntime {
 		Objects.requireNonNull(store, "store");
 		Objects.requireNonNull(markerId, "markerId");
 		return store.marker(markerId).isEmpty();
+	}
+
+	/**
+	 * Presentation-only diagnostics for the INFO wheel-select line (M6.5): the
+	 * GUI scale factor and the cursor position in GUI-scaled coordinates, read
+	 * from the same {@code MouseHandler#getScaledXPos/YPos} source as the wheel
+	 * hit test, so a normal launch proves which scale the sector ran at.
+	 *
+	 * <p>Consulted once per committed wheel selection, never per frame.
+	 */
+	private static WheelSelectionDiagnostics wheelSelectionDiagnostics() {
+		Minecraft game = Minecraft.getInstance();
+
+		if (game == null || game.mouseHandler == null) {
+			return null;
+		}
+
+		var window = game.getWindow();
+
+		if (window.getScreenWidth() <= 0 || window.getScreenHeight() <= 0
+			|| window.getGuiScaledWidth() <= 0 || window.getGuiScaledHeight() <= 0) {
+			return null;
+		}
+
+		return new WheelSelectionDiagnostics(
+			window.getGuiScale(),
+			game.mouseHandler.getScaledXPos(window),
+			game.mouseHandler.getScaledYPos(window));
 	}
 
 	private static TargetKind targetKindOf(TargetKey targetKey) {

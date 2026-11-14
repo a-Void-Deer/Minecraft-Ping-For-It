@@ -6,17 +6,16 @@ import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import net.minecraft.SharedConstants;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.syncher.SynchedEntityData;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.Bootstrap;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.level.Level;
+import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.level.block.Blocks;
+
+import nx.pingwheel.common.client.outline.TestEntitySupport;
+import nx.pingwheel.common.client.outline.TestEntitySupport.TestEntity;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
@@ -37,13 +36,12 @@ class RaycastCandidateFlowTest {
 
 	@BeforeAll
 	static void bootStrap() {
-		SharedConstants.tryDetectVersion();
-		Bootstrap.bootStrap();
+		TestEntitySupport.bootStrap();
 	}
 
 	@Test
 	void unownedEntityUsesLegacyAabbWhileOwnedHitUsesPrecisePointAndSource() {
-		TestEntity unowned = entity(EntityType.COW, 3);
+		TestEntity unowned = entity(EntityTypes.COW, 3);
 		RaycastSelection legacy = trace(List.of(unowned), new EntityLocalGeometryRegistry()).orElseThrow();
 
 		assertSame(unowned, ((EntityHitResult) legacy.hitResult()).getEntity());
@@ -51,7 +49,7 @@ class RaycastCandidateFlowTest {
 		assertTrue(legacy.hitResult().getLocation().x < 3.0);
 
 		EntityLocalGeometryRegistry registry = new EntityLocalGeometryRegistry();
-		TestEntity owned = entity(EntityType.PIG, 5);
+		TestEntity owned = entity(EntityTypes.PIG, 5);
 		registry.register(id("precise"), 10, List.of(vanilla("pig")),
 			(entity, request) -> EntityLocalGeometryResult.hit(hit(0.6)));
 
@@ -75,15 +73,15 @@ class RaycastCandidateFlowTest {
 			registry.register(id("owned-" + index), 10, List.of(vanilla("pig")),
 				(entity, request) -> outcome);
 
-			assertTrue(trace(List.of(entity(EntityType.PIG, 3)), registry).isEmpty(), outcome.outcome().name());
+			assertTrue(trace(List.of(entity(EntityTypes.PIG, 3)), registry).isEmpty(), outcome.outcome().name());
 		}
 	}
 
 	@Test
 	void callbackFailureDoesNotReviveOwnerButASeparateEntityCanStillWin() {
 		EntityLocalGeometryRegistry registry = new EntityLocalGeometryRegistry();
-		TestEntity brokenOwner = entity(EntityType.PIG, 2);
-		TestEntity laterUnowned = entity(EntityType.COW, 5);
+		TestEntity brokenOwner = entity(EntityTypes.PIG, 2);
+		TestEntity laterUnowned = entity(EntityTypes.COW, 5);
 		registry.register(id("broken"), 10, List.of(vanilla("pig")), (entity, request) -> {
 			throw new IllegalStateException("contained callback failure");
 		});
@@ -96,7 +94,7 @@ class RaycastCandidateFlowTest {
 
 	@Test
 	void finalWorldComparisonUsesPreciseEntitySurfaceInsteadOfOwnerAabb() {
-		TestEntity owner = entity(EntityType.PIG, 3);
+		TestEntity owner = entity(EntityTypes.PIG, 3);
 		EntityLocalHit localHit = new EntityLocalHit(owner, "test:precise", hit(0.6));
 		RaycastSelection preciseEntity = new RaycastSelection(
 			new EntityHitResult(owner, new Vec3(6, 0.5, 0)), Optional.of(localHit));
@@ -115,8 +113,8 @@ class RaycastCandidateFlowTest {
 		EntityLocalGeometryRegistry registry = new EntityLocalGeometryRegistry();
 		AtomicBoolean registered = new AtomicBoolean();
 		AtomicInteger ownerCalls = new AtomicInteger();
-		TestEntity fartherPig = entity(EntityType.PIG, 8);
-		TestEntity nearerCow = entity(EntityType.COW, 3);
+		TestEntity fartherPig = entity(EntityTypes.PIG, 8);
+		TestEntity nearerCow = entity(EntityTypes.COW, 3);
 		Iterable<Entity> mutatingCandidates = () -> new Iterator<>() {
 			private final Iterator<Entity> delegate = List.<Entity>of(fartherPig, nearerCow).iterator();
 
@@ -166,7 +164,7 @@ class RaycastCandidateFlowTest {
 			return EntityLocalGeometryResult.hit(hit(0.3));
 		});
 
-		RaycastSelection selection = trace(List.of(entity(EntityType.PIG, 3)), registry).orElseThrow();
+		RaycastSelection selection = trace(List.of(entity(EntityTypes.PIG, 3)), registry).orElseThrow();
 
 		assertEquals("test:a-winner", selection.entityLocalHit().orElseThrow().sourceId());
 		assertEquals(1, winnerCalls.get());
@@ -210,32 +208,17 @@ class RaycastCandidateFlowTest {
 	}
 
 	private static TestEntity entity(EntityType<?> type, double x) {
-		TestEntity entity = new TestEntity(type, null);
+		TestEntity entity = TestEntitySupport.newEntity(type);
 		entity.setPos(x, 0, 0);
 		return entity;
 	}
 
-	private static ResourceLocation id(String path) {
-		return ResourceLocation.fromNamespaceAndPath("test", path);
+	private static Identifier id(String path) {
+		return Identifier.fromNamespaceAndPath("test", path);
 	}
 
-	private static ResourceLocation vanilla(String path) {
-		return ResourceLocation.withDefaultNamespace(path);
+	private static Identifier vanilla(String path) {
+		return Identifier.withDefaultNamespace(path);
 	}
 
-	private static final class TestEntity extends Entity {
-
-		private TestEntity(EntityType<?> type, Level level) {
-			super(type, level);
-		}
-
-		@Override
-		protected void defineSynchedData(SynchedEntityData.Builder builder) {}
-
-		@Override
-		protected void readAdditionalSaveData(CompoundTag tag) {}
-
-		@Override
-		protected void addAdditionalSaveData(CompoundTag tag) {}
-	}
 }

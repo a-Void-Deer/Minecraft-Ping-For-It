@@ -11,6 +11,5 @@ public interface IPlatformNetworkService {
 		.findFirst()
 		.orElseThrow(() -> new IllegalStateException("No IPlatformNetworkService implementation found!"));
 
-	void sendToServer(IPacket packet);
 	void sendToClient(IPacket packet, ServerPlayer player);
 }

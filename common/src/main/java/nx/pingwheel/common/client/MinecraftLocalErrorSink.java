@@ -7,8 +7,8 @@ import net.minecraft.network.chat.Component;
  * The Minecraft adapter of {@link ClientPingActionDispatcher.LocalErrorSink}.
  *
  * <p>Resolves the dispatcher's message key against the active language and
- * shows it in its exact 24-bit color as a client-side-only chat message via
- * {@code Minecraft.player.displayClientMessage(..., false)}. The visible line
+ * shows it in its exact 24-bit color as a client-side chat message via
+ * {@code LocalPlayer#sendSystemMessage(Component)} (26.3's chat entry point). The visible line
  * begins with the resource-supplied {@code [ping for it]} marker. This is the
  * only place in the phase-7 wiring that touches the Minecraft chat overlay;
  * the pure dispatcher remains testable without a game client.
@@ -27,7 +27,7 @@ public final class MinecraftLocalErrorSink implements ClientPingActionDispatcher
 		Minecraft game = Minecraft.getInstance();
 
 		if (game.player != null) {
-			game.player.displayClientMessage(componentFor(messageKey, color), false);
+			game.player.sendSystemMessage(componentFor(messageKey, color));
 		}
 	}
 

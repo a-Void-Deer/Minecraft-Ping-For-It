@@ -1,75 +1,138 @@
 plugins {
-    id "multiloader-loader"
-    id "net.neoforged.moddev"
+    id 'java-library'
+    id 'net.neoforged.moddev'
+}
+
+base {
+    archivesName = archive_name
+}
+
+version = mod_version
+
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(java_version)
 }
 
 repositories {
-    maven {
-        name = "Create"
-        url = uri("https://maven.createmod.net")
-    }
+    mavenCentral()
+    maven { url = uri('https://maven.neoforged.net/releases') }
 }
+
+// junit-fml:12.0.0 is only published on maven.neoforged.net. Keep the FML test
+// gate opt-in so offline builds do not resolve it during testRuntimeClasspath;
+// compileTestJava remains a normal compile gate. Enable explicitly when the
+// artifact is cached or the NeoForged Maven is reachable.
+def fmlUnitTests = providers.gradleProperty('pfi.fmlUnitTests')
+    .map { it.toBoolean() }
+    .getOrElse(false)
 
 neoForge {
     version = neoforge_version
-    // Automatically enable neoforge AccessTransformers if the file exists
-    def at = project(":common").file("src/main/resources/META-INF/accesstransformer.cfg")
-    if (at.exists()) {
-        accessTransformers.add(at.absolutePath)
-    }
-    parchment {
-        minecraftVersion = parchment_minecraft
-        mappingsVersion = parchment_version
-    }
-    runs {
-        configureEach {
-            systemProperty("neoforge.enabledGameTestNamespaces", mod_id)
-            ideName = "NeoForge ${it.name.capitalize()} (${project.path})" // Unify the run config names with fabric
+
+    mods {
+        pingforit {
+            sourceSet sourceSets.main
+            // FML's module classloader must see common classes inside the mod
+            // folder. Leaving them only on the legacy test classpath makes
+            // IPacket resolve against AppClassLoader and fail with
+            // IncompatibleClassChangeError for CustomPacketPayload.
+            sourceSet project(':common').sourceSets.main
         }
+    }
+
+    // FML JUnit bootstrap. Do not replace this with plain JUnit: SharedConstants
+    // needs an FML loader. The test runtime needs junit-fml from NeoForged Maven.
+    if (fmlUnitTests) {
+        unitTest {
+            testedMod = mods.pingforit
+            enable()
+        }
+    }
+
+    runs {
         client {
             client()
-        }
-        data {
-            data()
+            gameDirectory = rootProject.file('runs/neoforge-client')
+            // Keep the hand-maintained Application configuration in .idea.
+            // MDG would otherwise add a duplicate "neoforge - Client" on sync.
+            disableIdeRun()
         }
         server {
             server()
-        }
-    }
-    mods {
-        "${mod_id}" {
-            sourceSet sourceSets.main
+            gameDirectory = rootProject.file('runs/neoforge-server')
+            // Same as client: avoid a second "neoforge - Server" entry.
+            disableIdeRun()
         }
     }
 }
 
-sourceSets.main.resources { srcDir "src/generated/resources" }
+dependencies {
+    implementation(project(':common')) {
+        transitive = false
+    }
 
-def compiledMinecraft = tasks.named('createMinecraftArtifacts', net.neoforged.nfrtgradle.CreateMinecraftArtifacts).flatMap { it.compiledArtifact }
-def compiledMinecraftResources = tasks.named('createMinecraftArtifacts', net.neoforged.nfrtgradle.CreateMinecraftArtifacts).flatMap { it.resourcesArtifact }
+    testImplementation 'org.junit.jupiter:junit-jupiter:5.14.4'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.14.4'
+}
+
+// NeoForge is a single universal jar. Consume common classes and resources
+// once; the local mixin config must win over common's config.
+def expandProps = [
+    'mod_author'              : mod_author,
+    'mod_name'                : mod_name,
+    'mod_id'                  : mod_id,
+    'archive_name'            : archive_name,
+    'contributors'            : contributors,
+    'license'                 : license,
+    'description'             : description,
+    'link_home'               : link_home,
+    'link_src'                : link_src,
+    'link_issues'             : link_issues,
+    'version'                 : version,
+    'java_version'            : java_version,
+    'minecraft_version'       : minecraft_version,
+    'neoforge_version'        : neoforge_version,
+    'neoforge_loader_version' : neoforge_loader_version,
+    'neoforge_compatible_range': neoforge_compatible_range,
+]
+
+// Generate metadata through a dedicated Sync task instead of filesMatching/expand.
+// This keeps IntelliJ's Gradle sync from trying to resolve Gradle's internal
+// MatchingCopyAction, and mirrors the Fabric metadata template pattern.
+def generateModMetadata = tasks.register('generateModMetadata', Sync) {
+    from 'src/main/templates'
+    into layout.buildDirectory.dir('generated/modMetadata')
+    inputs.properties(expandProps)
+    expand(expandProps)
+}
+sourceSets.main.resources.srcDir(generateModMetadata.flatMap { it.destinationDirectory })
+
+processResources {
+    dependsOn generateModMetadata
+
+    from(project(':common').sourceSets.main.resources) {
+        exclude("${mod_id}.mixins.json")
+    }
+}
 
 jar {
-    archiveClassifier = "${project.name}-${minecraft_version}"
+    archiveClassifier = 'neoforge-26.3'
+
+    dependsOn project(':common').tasks.named('classes')
+    from project(':common').sourceSets.main.output.classesDirs
+
+    from(rootProject.file('LICENSE')) {
+        rename { it + '_pingforit' }
+    }
+    from(rootProject.file('THIRD-PARTY-NOTICES.md'))
 }
 
-// Soft optional integration: these jars are needed only to compile the
-// reflectively-loaded adapter. They are not shipped and no loader metadata
-// dependency is declared, so a client without Create/Flywheel remains valid.
-dependencies {
-    compileOnly "dev.engine-room.flywheel:flywheel-neoforge-1.21.1:${flywheel_version}"
-    compileOnly "com.simibubi.create:create-1.21.1:${create_version}"
+neoForge.addModdingDependenciesTo(sourceSets.test)
 
-    // Keep NeoForge resolver tests on the same Minecraft/JUnit test classpath
-    // used by the common behavioral tests. Simulated itself remains absent.
-    testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
-    testImplementation files(compiledMinecraft)
-    testRuntimeOnly files(compiledMinecraftResources)
-    testRuntimeOnly "net.neoforged:neoforge:${neoforge_version}"
-    testRuntimeOnly "net.neoforged.fancymodloader:loader:4.0.21"
-    testImplementation "net.neoforged:mergetool:2.0.3:api"
-    testImplementation "net.neoforged:minecraft-dependencies:1.21.1"
-}
-
+// Currently every NeoForge test needs the FML bootstrap. If pure-JDK tests are
+// added later, split them into a separate test task instead of re-enabling this
+// one globally.
 test {
     useJUnitPlatform()
+    enabled = fmlUnitTests
 }

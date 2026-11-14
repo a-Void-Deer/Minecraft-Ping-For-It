@@ -16,7 +16,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Position;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.Nameable;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -197,7 +197,7 @@ final class SableClientCompanionAccess {
 
 			SableClientInternalAccess.ResolvedSubLevel resolved = resolution.value().orElseThrow();
 			BlockState state = resolved.state();
-			ResourceLocation registryId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+			Identifier registryId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
 
 			if (state.isAir() || state.getBlock() == Blocks.AIR) {
 				diagnostics.capture(
@@ -380,7 +380,7 @@ final class SableClientCompanionAccess {
 			"ray_perpendicular_distance_squared", best.rayPoint().perpendicularDistanceSquared());
 
 		return Optional.of(TargetSnapshotFactory.externalBlockCandidate(
-			level.dimension().location().toString(),
+			level.dimension().identifier().toString(),
 			SableClientProvider.PROVIDER_ID,
 			best.registryId().toString(),
 			best.locator().encode(),
@@ -441,8 +441,8 @@ final class SableClientCompanionAccess {
 
 		SableClientInternalAccess.ResolvedSubLevel stateData = resolution.value().orElseThrow();
 		BlockState state = stateData.state();
-		ResourceLocation actualId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
-		ResourceLocation expectedId = ResourceLocation.tryParse(target.expectedBlockRegistryId());
+		Identifier actualId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+		Identifier expectedId = Identifier.tryParse(target.expectedBlockRegistryId());
 
 		if (actualId == null || expectedId == null || !actualId.equals(expectedId)
 			|| state.isAir() || state.getBlock() == Blocks.AIR) {
@@ -486,8 +486,8 @@ final class SableClientCompanionAccess {
 
 		SableClientInternalAccess.ResolvedSubLevel stateData = resolution.value().orElseThrow();
 		BlockState state = stateData.state();
-		ResourceLocation actualId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
-		ResourceLocation expectedId = ResourceLocation.tryParse(target.expectedBlockRegistryId());
+		Identifier actualId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+		Identifier expectedId = Identifier.tryParse(target.expectedBlockRegistryId());
 
 		if (actualId == null || expectedId == null || !actualId.equals(expectedId)
 			|| state.isAir() || state.getBlock() == Blocks.AIR
@@ -518,8 +518,8 @@ final class SableClientCompanionAccess {
 
 		SableClientInternalAccess.ResolvedSubLevel stateData = resolution.value().orElseThrow();
 		BlockState state = stateData.state();
-		ResourceLocation actualId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
-		ResourceLocation expectedId = ResourceLocation.tryParse(target.expectedBlockRegistryId());
+		Identifier actualId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+		Identifier expectedId = Identifier.tryParse(target.expectedBlockRegistryId());
 
 		if (actualId == null || expectedId == null || !actualId.equals(expectedId)
 			|| state.isAir() || state.getBlock() == Blocks.AIR) {
@@ -609,7 +609,7 @@ final class SableClientCompanionAccess {
 		ClientSubLevelAccess access,
 		SableClientInternalAccess.ResolvedSubLevel resolved,
 		UUID subLevelId,
-		ResourceLocation registryId,
+		Identifier registryId,
 		RayPoint rayPoint,
 		Vec3 worldHit,
 		Vec3 localHit,

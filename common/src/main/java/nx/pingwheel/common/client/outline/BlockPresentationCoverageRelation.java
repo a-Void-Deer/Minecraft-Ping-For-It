@@ -7,9 +7,9 @@ import java.util.Objects;
  * subject covers a later subject.
  *
  * <p>The relation is activated only when {@code ownerSubjectId} finishes the
- * exact {@code requiredRenderedSourceId} attempt with {@link
- * EntityBlockGeometryOutcome#RENDERED}. It never describes aggregate geometry
- * success, persists across frames, or implies transitive coverage.</p>
+ * exact {@code requiredRenderedSourceId} attempt successfully. It never
+ * describes aggregate geometry success, persists across frames, or implies
+ * transitive coverage.</p>
  */
 public record BlockPresentationCoverageRelation(
     String ownerSubjectId,

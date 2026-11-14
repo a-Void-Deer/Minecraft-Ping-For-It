@@ -22,7 +22,7 @@ class PingInteractionConfigValidationTest {
 			DefaultTargetResolver.builtIn(TargetResolutionLogger.noop()),
 			interaction,
 			PingCaptureLogger.noop());
-		AtomicLong holdMillis = new AtomicLong(99L);
+		AtomicLong holdMillis = new AtomicLong(49L);
 
 		PingInteractionStateMachine machine = new PingInteractionStateMachine(
 			coordinator,

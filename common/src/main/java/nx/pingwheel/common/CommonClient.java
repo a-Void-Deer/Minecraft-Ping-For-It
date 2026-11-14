@@ -1,40 +1,30 @@
 package nx.pingwheel.common;
 
 import com.mojang.blaze3d.platform.InputConstants;
-import com.mojang.blaze3d.vertex.VertexConsumer;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.math.Axis;
 import net.minecraft.client.Camera;
+import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.OutlineBufferSource;
-import net.minecraft.world.entity.Entity;
-
-import java.util.Map;
+import net.minecraft.client.renderer.state.GameRenderState;
+import net.minecraft.client.renderer.state.OptionsRenderState;
+import net.minecraft.client.renderer.state.level.CameraEntityRenderState;
+import net.minecraft.client.renderer.state.level.CameraRenderState;
+import net.minecraft.client.renderer.state.level.LevelRenderState;
+import net.minecraft.util.Mth;
+import org.joml.Matrix4f;
 
 import nx.pingwheel.common.client.ClientPingRuntime;
 import nx.pingwheel.common.client.MinecraftLocalErrorSink;
 import nx.pingwheel.common.client.SelectionToggleNoticeState;
 import nx.pingwheel.common.client.duration.ClientSyncDurationPolicy;
+import nx.pingwheel.common.client.hud.MarkerHudRenderer;
+import nx.pingwheel.common.client.hud.WheelHudRenderer;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
-import nx.pingwheel.common.client.outline.BlockModelOutlineState;
-import nx.pingwheel.common.client.outline.BlockOutlineFrameState;
-import nx.pingwheel.common.client.outline.BlockOutlineLogger;
-import nx.pingwheel.common.client.outline.BlockOutlineRenderer;
-import nx.pingwheel.common.client.outline.BlockOutlineRenderType;
-import nx.pingwheel.common.client.outline.BlockOutlineState;
-import nx.pingwheel.common.client.outline.EntityBlockGeometryOutcome;
-import nx.pingwheel.common.client.outline.EntityOutlineContext;
-import nx.pingwheel.common.client.outline.EntityOutlineFrameState;
-import nx.pingwheel.common.client.outline.EntityOutlineLocatorResolver;
-import nx.pingwheel.common.client.outline.EntityOutlineLogger;
-import nx.pingwheel.common.client.outline.EntityOutlineRunner;
-import nx.pingwheel.common.client.outline.EntityOutlineSourceRegistry;
-import nx.pingwheel.common.client.outline.EntityOutlineSpec;
-import nx.pingwheel.common.client.outline.EntityOutlineState;
-import nx.pingwheel.common.client.outline.LevelRendererOutlineRequest;
-import nx.pingwheel.common.client.outline.VirtualBlockDisplayRenderer;
+import nx.pingwheel.common.client.outline.BlockOutlinePass;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.core.GameContext;
 import nx.pingwheel.common.domain.EntityLocator;
@@ -50,13 +40,12 @@ import nx.pingwheel.common.network.ServerConfigSnapshotS2CPacket;
 import nx.pingwheel.common.network.SyncDurationPolicyS2CPacket;
 import nx.pingwheel.common.network.UpdateChannelC2SPacket;
 import nx.pingwheel.common.platform.IPlatformClientEventService;
+import nx.pingwheel.common.platform.IClientNetworkService;
+import nx.pingwheel.common.platform.IClientPlatformContextService;
 import nx.pingwheel.common.platform.IPlatformContextService;
-import nx.pingwheel.common.platform.IPlatformNetworkService;
 import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
-import nx.pingwheel.common.render.OverlayRenderer;
 import nx.pingwheel.common.render.SelectionToggleNoticeRenderer;
-import nx.pingwheel.common.render.WheelOverlayRenderer;
 import nx.pingwheel.common.render.WorldRenderContext;
 import nx.pingwheel.common.screen.SettingsScreen;
 import nx.pingwheel.common.util.InputUtils;
@@ -74,10 +63,9 @@ public class CommonClient {
 	private static ClientRateLimitPolicy storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
 	private static ClientSyncDurationPolicy storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
 	private static final InteractionTimeSource INTERACTION_TIME_SOURCE = InteractionTimeSource.system();
-
-	/** Runs the registered entity-outline sources over the production registry. */
-	private static final EntityOutlineRunner ENTITY_OUTLINE_RUNNER =
-		new EntityOutlineRunner(EntityOutlineSourceRegistry.INSTANCE);
+	/** One-shot guard so a failing HUD pass cannot spam the log every frame. */
+	private static boolean hudFailureLogged = false;
+	private static boolean toggleNoticeFailureLogged = false;
 
 	private CommonClient() {}
 
@@ -87,16 +75,24 @@ public class CommonClient {
 		IPlatformClientEventService.INSTANCE.registerTickStartEvent(this::onTickStart);
 		IPlatformClientEventService.INSTANCE.registerJoinServerEvent(this::onJoinServer);
 		IPlatformClientEventService.INSTANCE.registerLeaveServerEvent(this::onLeaveServer);
+		// The single per-frame interaction-timing hook (S1). It must not live in
+		// the HUD pass: 26.3 skips HUD elements while F1 hides the HUD. Registered
+		// exactly once here, so onRenderFrame() can never run twice per frame.
+		IPlatformClientEventService.INSTANCE.registerRenderFrameEvent(this::onRenderFrame);
 
-		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_PING);
-		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_TOGGLE_PASS_THROUGH_TRANSPARENT_BLOCKS);
-		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_TOGGLE_MARK_BLACKLISTED_TARGETS);
-		IPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_TOGGLE_MARK_FLUIDS);
-		IPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_SETTINGS);
+		// Render-pass hooks: create the outline pipeline, then let the loader map
+		// its native HUD / world-submit events onto these common callbacks.
+		BlockOutlinePass.register();
+		IPlatformClientEventService.INSTANCE.registerHudRenderEvent(this::onRenderHud);
+		IPlatformClientEventService.INSTANCE.registerHudRenderEvent((graphics, delta) -> onRenderToggleNotice(graphics));
+		IPlatformClientEventService.INSTANCE.registerWorldSubmitEvent(BlockOutlinePass::onWorldSubmit);
 
-		// The lazy global loggers only ever emit aggregate transition counts.
-		EntityOutlineState.setLogger(EntityOutlineLogger.global());
-		BlockOutlineState.setLogger(BlockOutlineLogger.global());
+		IClientPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_PING);
+		IClientPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_TOGGLE_PASS_THROUGH_TRANSPARENT_BLOCKS);
+		IClientPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_TOGGLE_MARK_BLACKLISTED_TARGETS);
+		IClientPlatformContextService.INSTANCE.registerKeyMapping(InputUtils.KEY_BINDING_TOGGLE_MARK_FLUIDS);
+		IClientPlatformContextService.INSTANCE.registerKeyMapping(KEY_BINDING_SETTINGS);
+
 		ClientTargetNameDecoder.setLogger(ClientTargetNameDecoder.Logger.global());
 	}
 
@@ -107,9 +103,14 @@ public class CommonClient {
 		// world is in.
 		storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
 		storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
+		// A new world deserves a fresh HUD failure report: a transient first-frame
+		// failure must not silence a later, different failure forever.
+		hudFailureLogged = false;
+		// Re-arm the wheel renderer's one-shot failure report for the new world.
+		WheelHudRenderer.resetFailureFlag();
 		pingRuntime = createPingRuntimeIfInWorld();
 
-		IPlatformNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(ClientConfig.HANDLER.getConfig().getChannel()));
+		IClientNetworkService.INSTANCE.sendToServer(new UpdateChannelC2SPacket(ClientConfig.HANDLER.getConfig().getChannel()));
 	}
 
 	public void onLeaveServer() {
@@ -120,14 +121,11 @@ public class CommonClient {
 		pingRuntime = null;
 		storedRateLimitPolicy = ClientRateLimitPolicy.DEFAULT;
 		storedSyncDurationPolicy = ClientSyncDurationPolicy.DEFAULT;
+		hudFailureLogged = false;
+		WheelHudRenderer.resetFailureFlag();
 		MarkerOverlayState.INSTANCE.clear();
-		EntityOutlineState.INSTANCE.clear();
-		BlockOutlineState.INSTANCE.clear();
-		BlockModelOutlineState.INSTANCE.clear();
-		BlockOutlineFrameState.INSTANCE.clear();
-		EntityOutlineFrameState.INSTANCE.clear();
 		GameContext.clearRenderEntityLookupCache();
-		VirtualBlockDisplayRenderer.INSTANCE.clear();
+		GameContext.clearLastWorld();
 		SelectionToggleNoticeState.INSTANCE.clear();
 
 		// A disconnect while the ping key is still held must not leak the
@@ -154,7 +152,8 @@ public class CommonClient {
 			return;
 		}
 
-		if (Game.screen != null) {
+		// 26.3: Minecraft#screen moved to Minecraft#gui.screen().
+		if (Game.gui.screen() != null) {
 			abortInteractionIfActive(false);
 			return;
 		}
@@ -207,7 +206,8 @@ public class CommonClient {
 	public void onScreenChanged(Screen nextScreen) {
 		Game = Minecraft.getInstance();
 
-		if (Game.screen == nextScreen) {
+		// 26.3: Minecraft#screen moved to Minecraft#gui.screen().
+		if (Game.gui.screen() == nextScreen) {
 			return;
 		}
 
@@ -251,300 +251,242 @@ public class CommonClient {
 		}
 
 		if (KEY_BINDING_SETTINGS.consumeClick()) {
-			Game.setScreen(new SettingsScreen());
+			Game.setScreenAndShow(new SettingsScreen());
 		}
 	}
 
+	/**
+	 * The M4/M6.5 HUD pass: the single per-frame client hook that exists in 26.3
+	 * before the M7 render rebuild.
+	 *
+	 * <p>It is registered as a Fabric {@code HudElement}
+	 * ({@code HudElementRegistry.addLast}) by the Fabric client initializer, so
+	 * it runs once per rendered frame while a level is present, after the world
+	 * has been extracted for that frame (the main camera is therefore already
+	 * updated).
+	 *
+	 * <p>Interaction timing is deliberately <em>not</em> advanced here: 26.3
+	 * skips HUD elements while {@code F1} hides the HUD, which would freeze the
+	 * hold/wheel timers. {@link #onRenderFrame()} is registered once from
+	 * {@link #onInit()} through
+	 * {@link IPlatformClientEventService#registerRenderFrameEvent(Runnable)}
+	 * (Fabric: {@code LevelExtractionEvents.END_EXTRACTION}, fired once per frame
+	 * in the extraction phase, i.e. before this HUD pass). This method only
+	 * prepares {@link MarkerOverlayState} and draws:
+	 * <ol>
+	 *   <li>{@link #onRenderWorld(WorldRenderContext)} rebuilds
+	 *       {@link MarkerOverlayState} for this frame from a view-projection
+	 *       matrix derived from the live camera;</li>
+	 *   <li>{@link MarkerHudRenderer} draws each projected marker: the 5x5
+	 *       45-degree diamond (or a 16x16 item icon), the distance and target
+	 *       name labels, and the safe-zone edge arrow for markers behind the
+	 *       camera or outside the viewport (M6.5, upstream
+	 *       {@code OverlayRenderer} / {@code PingLocationRenderer} /
+	 *       {@code DirectionIndicatorRenderer});</li>
+	 *   <li>{@link WheelHudRenderer} draws the ping-type wheel. It runs only in
+	 *       {@link PingInteractionPhase#WHEEL_OPEN} and is the 26.3 replacement
+	 *       for the deferred {@code WheelOverlayRenderer} (M6); it also feeds
+	 *       the current mouse selection back to the runtime, so the existing
+	 *       state machine keeps owning commit/cancel/timeout.</li>
+	 * </ol>
+	 *
+	 * <p>The toggle notice is not part of this pass: M8c registers it as a
+	 * second {@code HudElementRegistry.addLast} layer that runs after the marker
+	 * layer (see {@link #onRenderToggleNotice}), matching upstream's late HUD
+	 * pass.
+	 */
+	public void onRenderHud(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
+		Game = Minecraft.getInstance();
+
+		if (Game.level == null || Game.player == null) {
+			return;
+		}
+
+		try {
+			WorldRenderContext ctx = hudRenderContext(deltaTracker);
+
+			if (ctx == null) {
+				return;
+			}
+
+			onRenderWorld(ctx);
+			MarkerHudRenderer.render(graphics, MarkerOverlayState.INSTANCE.renderViews());
+			// M6: the wheel pass draws on top of the marker dots and is
+			// internally failure-isolated, so a broken wheel frame can never
+			// take the marker pass (or the frame) down with it.
+			WheelHudRenderer.render(graphics, pingRuntime);
+		} catch (RuntimeException failure) {
+			// A HUD pass must never crash the frame. Report once per session and
+			// keep the rest of the HUD (and the frame) alive.
+			if (!hudFailureLogged) {
+				hudFailureLogged = true;
+				Global.warnException("marker HUD pass failed", failure);
+			}
+		}
+	}
+
+	/**
+	 * Draws the latest target-selection toggle notice in a late HUD pass, after
+	 * the marker and wheel layers.
+	 *
+	 * <p>{@link SelectionToggleNoticeState#INSTANCE} owns the 2s opaque + 1s fade
+	 * timing; this method only forwards the frame clock, so a frame that draws
+	 * late still fades on the same schedule as upstream.
+	 *
+	 * <p>{@code INTERACTION_TIME_SOURCE} is the monotonic {@code System.nanoTime}
+	 * clock, which is the very same epoch {@code SelectionToggleNoticeState}
+	 * records its notices with.
+	 */
+	public void onRenderToggleNotice(GuiGraphicsExtractor graphics) {
+		try {
+			SelectionToggleNoticeRenderer.draw(
+				graphics,
+				SelectionToggleNoticeState.INSTANCE,
+				ClientConfig.HANDLER.getConfig().getConfigurationNoticeSize(),
+				INTERACTION_TIME_SOURCE.nowMillis());
+		} catch (RuntimeException failure) {
+			// Same rule as the marker pass: a HUD layer must never take the frame
+			// down, because one throw inside renderFrame freezes the whole window.
+			if (!toggleNoticeFailureLogged) {
+				toggleNoticeFailureLogged = true;
+				Global.warnException("toggle notice HUD pass failed", failure);
+			}
+		}
+	}
+
+	/**
+	 * Prepares the per-frame marker render state.
+	 */
 	public void onRenderWorld(WorldRenderContext ctx) {
+		Game = Minecraft.getInstance();
 		GameContext.beginRenderEntityLookupFrame();
 		MarkerOverlayState.INSTANCE.prepare(
 			ctx,
 			pingRuntime == null ? null : pingRuntime.store(),
 			pingRuntime == null ? null : pingRuntime.nameStore());
-		prepareEntityOutlines();
-		prepareBlockOutlines();
-
-		// Fresh per-frame bookkeeping must precede the reflection probe. The
-		// probe runs after both entity and block snapshots are prepared so a
-		// block-only frame can establish the shared outline pipeline too.
-		EntityOutlineFrameState.INSTANCE.beginFrame();
-		BlockModelOutlineState.INSTANCE.beginFrame();
-		prepareBlockPresentations();
-		requestEntityOutlineEffect();
 	}
 
 	/**
-	 * Synchronizes the entity outline state for this render frame from the
-	 * current runtime store and level dimension; clears it when the runtime or
-	 * level is absent. Runs on every world render frame, before the entity
-	 * pass of {@link net.minecraft.client.renderer.LevelRenderer#renderLevel}.
-	 */
-	private static void prepareEntityOutlines() {
-		Minecraft game = Game;
-
-		if (pingRuntime == null || game == null || game.level == null) {
-			EntityOutlineState.INSTANCE.clear();
-			return;
-		}
-
-		EntityOutlineState.INSTANCE.prepare(
-			pingRuntime.store(), game.level.dimension().location().toString());
-	}
-
-	/**
-	 * Synchronizes the block outline state for this render frame from the
-	 * current runtime store and level dimension; clears it when the runtime or
-	 * level is absent. Runs on every world render frame, right after
-	 * {@link #prepareEntityOutlines()} and before
-	 * {@link #renderBlockOutlines(Camera, MultiBufferSource.BufferSource,
-	 * BlockOutlineFrameState.FrameTransform)}.
-	 */
-	private static void prepareBlockOutlines() {
-		Minecraft game = Game;
-
-		if (pingRuntime == null || game == null || game.level == null) {
-			BlockOutlineState.INSTANCE.clear();
-			return;
-		}
-
-		BlockOutlineState.INSTANCE.prepare(
-			pingRuntime.store(), game.level.dimension().location().toString());
-	}
-
-	/**
-	 * Resolves ordinary block subjects once for this frame, after the source
-	 * outline snapshot and model-frame state have both been reset. The resulting
-	 * immutable list is shared by the model and late VoxelShape passes.
-	 */
-	private static void prepareBlockPresentations() {
-		Minecraft game = Game;
-
-		if (pingRuntime == null || game == null || game.level == null) {
-			return;
-		}
-
-		BlockModelOutlineState.INSTANCE.preparePresentations(
-			game.level, BlockOutlineState.INSTANCE);
-	}
-
-	/**
-	 * Invokes the cached reflection {@code requestOutlineEffect()} probe on the
-	 * current {@link LevelRenderer} once per frame, only while live entity
-	 * entity or block outlines exist. A missing method (the normal vanilla 1.21.1 case) records
-	 * {@code false}; a successful invocation records {@code true} on the frame
-	 * state so the model and entity-outline passes in {@code LevelRendererMixin}
-	 * can run even when vanilla's {@code shouldShowEntityOutlines()} gate is off.
-	 */
-	private static void requestEntityOutlineEffect() {
-		Minecraft game = Game;
-
-		if (game == null || game.levelRenderer == null
-			|| (!EntityOutlineState.INSTANCE.hasOutlines()
-				&& !BlockOutlineState.INSTANCE.hasOutlines())) {
-			EntityOutlineFrameState.INSTANCE.markRequestSucceeded(false);
-			return;
-		}
-
-		EntityOutlineFrameState.INSTANCE.markRequestSucceeded(
-			LevelRendererOutlineRequest.request(game.levelRenderer));
-	}
-
-	/**
-	 * Runs the model-outline pass (actual {@code BlockEntity} geometry and
-	 * virtual {@code BlockDisplay} glow) immediately before the vanilla
-	 * entity-outline {@code endOutlineBatch()} call inside
-	 * {@code renderLevel}.
+	 * Builds the frame's world render context from the live camera for the HUD
+	 * pass.
 	 *
-	 * <p>Built-in attempts still draw through their own attempt-local transient
-	 * buffers. The optional Create/Flywheel source first encodes a complete
-	 * immutable attempt-local mask, then commits its texture batches to the
-	 * vanilla outline buffer without flushing it; vanilla's existing
-	 * {@code endOutlineBatch()} call remains the sole flush point. A failure
-	 * before that commit cannot leave a partial shared-buffer mask.
+	 * <p>26.3 keeps no shared world-render matrices (the pre-port
+	 * {@code WorldRenderEvents} matrices are gone), and
+	 * {@code Camera#getViewRotationProjectionMatrix()} is only {@code P * V}: it
+	 * does <em>not</em> contain the view-bobbing pose, which
+	 * {@code GameRenderer#renderLevel} multiplies into the projection after the
+	 * render state was extracted. The markers are projected with this matrix, so
+	 * the bob pose has to be replayed here; without it the world sways with the
+	 * walk cycle while the HUD stays still.
 	 *
-	 * <p>The {@code LevelRendererMixin} gate ensures this only runs when the
-	 * vanilla entity-outline pipeline is available
-	 * ({@code shouldShowEntityOutlines()}); otherwise every block keeps its
-	 * VoxelShape fallback. Presentation subjects that emit at least one outline
-	 * vertex are recorded in {@link BlockModelOutlineState}, which the late
-	 * {@link #renderBlockOutlines(Camera, MultiBufferSource.BufferSource,
-	 * BlockOutlineFrameState.FrameTransform)}
-	 * pass consults to avoid doubling.
-	 */
-	public void renderModelOutlines(
-		Camera camera,
-		float builtInPartialTick,
-		float flywheelPartialTick
-	) {
-		Minecraft game = Game;
-
-		if (game == null || game.level == null) {
-			return;
-		}
-
-		VirtualBlockDisplayRenderer.INSTANCE.render(
-			game.level, camera, builtInPartialTick, flywheelPartialTick,
-			BlockOutlineState.INSTANCE, BlockModelOutlineState.INSTANCE);
-	}
-
-	/**
-	 * Runs the registered entity-outline sources for every live selected
-	 * entity, immediately before the vanilla {@code OutlineBufferSource
-	 * endOutlineBatch()} call, writing silhouette geometry into the shared
-	 * vanilla outline buffer (flushed by that same vanilla call).
+	 * <p>{@link nx.pingwheel.common.math.MathUtils#worldToScreen} expects
+	 * camera-relative coordinates, so the model-view matrix is the extracted view
+	 * rotation and the bob pose is folded into the projection:
+	 * {@code clip = (P * bob) * V * p}.
 	 *
-	 * <p>Each entity locator is resolved to its canonical live entity
-	 * ({@link EntityOutlineLocatorResolver}); unresolved or mismatched locators
-	 * are skipped. Every resolved entity gets one fresh
-	 * {@link EntityOutlineContext} carrying the selected
-	 * {@link EntityOutlineSpec}, the camera position, the frame partial tick,
-	 * the current frame id, and the shared outline buffer, then the runner
-	 * iterates the registry in order. If any source reports
-	 * {@link EntityBlockGeometryOutcome#RENDERED}, the frame state is marked
-	 * emitted so the combined post-process handoff runs the entity-outline
-	 * effect.
+	 * @return {@code null} while the camera has not been set up yet (for example
+	 *         in the first frame of a world), so nothing is drawn with a bogus
+	 *         matrix
 	 */
-	public void renderEntityOutlines(Camera camera, float partialTick, OutlineBufferSource outlineBuffer) {
-		Minecraft game = Game;
+	private static WorldRenderContext hudRenderContext(DeltaTracker deltaTracker) {
+		Camera camera = Game.gameRenderer.mainCamera();
 
-		if (game == null || game.level == null || outlineBuffer == null
-			|| !EntityOutlineState.INSTANCE.hasOutlines()) {
+		if (camera == null || !camera.isInitialized()) {
+			return null;
+		}
+
+		// Same partial tick the level render state was extracted with in
+		// GameRenderer#extract (getGameTimeDeltaPartialTick(false)).
+		float partialTick = deltaTracker.getGameTimeDeltaPartialTick(false);
+		GameRenderState renderState = Game.gameRenderer.gameRenderState();
+		LevelRenderState levelState = renderState == null ? null : renderState.levelRenderState;
+		CameraRenderState cameraState = levelState == null ? null : levelState.cameraRenderState;
+
+		if (cameraState == null || cameraState.entityRenderState == null || renderState.optionsRenderState == null
+			|| cameraState.projectionMatrix == null || cameraState.viewRotationMatrix == null) {
+			// Fallback: the pre-bob combined matrix (keeps the HUD alive if the render state is not ready).
+			Matrix4f combined = camera.getViewRotationProjectionMatrix(new Matrix4f());
+			return WorldRenderContext.of(new Matrix4f(), combined, partialTick, camera);
+		}
+
+		// GameRenderer#renderLevel multiplies the bob pose into the projection *after* it is extracted,
+		// which is why the world sways with the walk cycle and the HUD previously did not.
+		Matrix4f modelView = new Matrix4f(cameraState.viewRotationMatrix);
+		Matrix4f projection = new Matrix4f(cameraState.projectionMatrix);
+		PoseStack bob = new PoseStack();
+		pingforit$bobHurt(cameraState, bob, renderState.optionsRenderState);
+
+		if (renderState.optionsRenderState.bobView) {
+			pingforit$bobView(cameraState, bob);
+		}
+
+		projection.mul(bob.last().pose());
+
+		return WorldRenderContext.of(modelView, projection, partialTick, camera);
+	}
+
+	/**
+	 * Replays the hurt/death tilt that {@code GameRenderer#renderLevel} applies to
+	 * the projection. Copied from the 26.3 implementation (constants unchanged) so
+	 * the HUD sways exactly like the world.
+	 */
+	private static void pingforit$bobHurt(CameraRenderState state, PoseStack pose, OptionsRenderState options) {
+		CameraEntityRenderState entity = state.entityRenderState;
+
+		if (!entity.isLiving) {
 			return;
 		}
-		if (EntityOutlineSourceRegistry.INSTANCE.snapshot().isEmpty()) {
+
+		float hurtTime = entity.hurtTime;
+
+		if (entity.isDeadOrDying) {
+			float death = Math.min(20.0F, entity.deathTime);
+			pose.rotateDegrees(Axis.ZP, 40.0F - 8000.0F / (death + 200.0F));
+		}
+
+		if (hurtTime < 0.0F) {
 			return;
 		}
 
-		boolean emitted = false;
+		hurtTime /= (float) entity.hurtDuration;
+		hurtTime = Mth.sin(hurtTime * hurtTime * hurtTime * hurtTime * (float) Math.PI);
+		float hurtDir = entity.hurtDir;
+		pose.rotateDegrees(Axis.YP, -hurtDir);
+		// 26.3 keeps this product in double precision and narrows only at the end.
+		pose.rotateDegrees(Axis.ZP, (float) ((double) (-hurtTime) * 14.0 * options.damageTiltStrength));
+		pose.rotateDegrees(Axis.YP, hurtDir);
+	}
 
-		for (Map.Entry<EntityLocator, EntityOutlineSpec> entry
-			: EntityOutlineState.INSTANCE.snapshot().entrySet()) {
-			Entity entity = EntityOutlineLocatorResolver.resolve(entry.getKey(), GameContext::getEntityForRender);
+	/**
+	 * Replays the walk-cycle view bob that {@code GameRenderer#renderLevel} applies
+	 * to the projection. Copied from the 26.3 implementation (constants unchanged).
+	 */
+	private static void pingforit$bobView(CameraRenderState state, PoseStack pose) {
+		CameraEntityRenderState entity = state.entityRenderState;
 
-			if (entity == null) {
-				continue;
-			}
-
-			EntityOutlineContext context = new EntityOutlineContext(
-				game.level,
-				entity,
-				entry.getValue(),
-				camera.getPosition(),
-				partialTick,
-				EntityOutlineFrameState.INSTANCE.frameId(),
-				outlineBuffer);
-
-			if (ENTITY_OUTLINE_RUNNER.run(context) == EntityBlockGeometryOutcome.RENDERED) {
-				emitted = true;
-			}
+		if (!entity.isPlayer) {
+			return;
 		}
 
-		if (emitted) {
-			EntityOutlineFrameState.INSTANCE.markEmitted();
-		}
+		float walk = entity.backwardsInterpolatedWalkDistance;
+		float bob = entity.bob;
+		pose.translate(
+			Mth.sin(walk * (float) Math.PI) * bob * 0.5F,
+			-Math.abs(Mth.cos(walk * (float) Math.PI) * bob),
+			0.0F);
+		pose.rotateDegrees(Axis.ZP, Mth.sin(walk * (float) Math.PI) * bob * 3.0F);
+		pose.rotateDegrees(Axis.XP, Math.abs(Mth.cos(walk * (float) Math.PI - 0.2F) * bob) * 5.0F);
 	}
 
 	/**
-	 * Whether the cached reflection {@code requestOutlineEffect()} probe
-	 * succeeded this frame. The {@code LevelRendererMixin} entity-source gate
-	 * combines this with vanilla's {@code shouldShowEntityOutlines()} so the
-	 * entity-outline sources run when either path is live.
-	 */
-	public boolean entityOutlineRequestSucceededThisFrame() {
-		return EntityOutlineFrameState.INSTANCE.requestSucceeded();
-	}
-
-	/**
-	 * Whether the model-outline pass and/or the entity-outline sources emitted
-	 * at least one vertex this frame; the mixin AFTER the
-	 * {@code endOutlineBatch()} call uses this to decide whether the vanilla
-	 * entity-outline post-process must run even when no vanilla entity glowed.
-	 */
-	public boolean modelOutlinesEmittedThisFrame() {
-		return BlockModelOutlineState.INSTANCE.emitted()
-			|| EntityOutlineFrameState.INSTANCE.emitted();
-	}
-
-	/**
-	 * Drops the per-frame outline success records (model and entity); used
-	 * when the outline pipeline turned out to be unavailable after all, so
-	 * every block falls back to the VoxelShape outline instead of silently
-	 * disappearing. The already-resolved presentation list is retained so the
-	 * late fallback can still render it when the post-process is unavailable.
-	 */
-	public void resetModelOutlinesForFrame() {
-		BlockModelOutlineState.INSTANCE.clearSuccesses();
-		EntityOutlineFrameState.INSTANCE.beginFrame();
-	}
-
-	/**
-	 * Draws the prepared block outlines into the custom
-	 * {@link BlockOutlineRenderType#BLOCK_OUTLINE} buffer of the captured current
-	 * frame and flushes that batch explicitly.
+	 * Advances interaction timing once per rendered frame.
 	 *
-	 * <p>Called from {@code GameRendererMixin} immediately after
-	 * {@code LevelRenderer.renderLevel} returns, including all world-renderer
-	 * return hooks and composites. The captured world transform is reapplied only
-	 * around this draw, so the vertices remain camera-relative after the normal
-	 * world matrices have been popped. The batch is acquired only when
-	 * {@link BlockOutlineState#hasOutlines()} is true, so a frame without
-	 * block outlines never creates or flushes an empty batch; and the frame
-	 * is skipped entirely when every current block outline is already
-	 * covered by the model-outline success set (see
-	 * {@link BlockModelOutlineState#successKeys()}). The vanilla
-	 * {@code lines()} batch is never touched. Blocks whose model-outline pass
-	 * succeeded suppress only their VoxelShape geometry.
+	 * <p>Registered exactly once from {@link #onInit()} via
+	 * {@link IPlatformClientEventService#registerRenderFrameEvent(Runnable)}
+	 * (Fabric: {@code LevelExtractionEvents.END_EXTRACTION}), never from the HUD
+	 * pass, so it runs even while {@code F1} hides the HUD and can never run twice
+	 * in one frame.
 	 */
-	public void renderBlockOutlines(
-		Camera camera,
-		MultiBufferSource.BufferSource bufferSource,
-		BlockOutlineFrameState.FrameTransform frame
-	) {
-		Minecraft game = Game;
-
-		if (game == null || game.level == null || frame == null) {
-			return;
-		}
-
-		if (!BlockOutlineState.INSTANCE.hasOutlines()) {
-			return;
-		}
-
-		if (BlockOutlineState.INSTANCE.allCoveredBy(
-			BlockModelOutlineState.INSTANCE.presentations(),
-			BlockModelOutlineState.INSTANCE.successKeys(),
-			BlockModelOutlineState.INSTANCE.externalSuccessKeys())) {
-			return;
-		}
-
-		BlockOutlineFrameState.renderWithFrame(frame, () -> {
-			VertexConsumer lines = bufferSource.getBuffer(BlockOutlineRenderType.BLOCK_OUTLINE);
-			BlockOutlineRenderer.render(
-				game.level, camera, frame.cameraPosition(), lines,
-				BlockOutlineState.INSTANCE,
-				BlockModelOutlineState.INSTANCE.presentations(),
-				BlockModelOutlineState.INSTANCE.successKeys(),
-				BlockModelOutlineState.INSTANCE.externalSuccessKeys(),
-				frame.partialTick());
-			bufferSource.endBatch(BlockOutlineRenderType.BLOCK_OUTLINE);
-		});
-	}
-
-	public void onRenderGUI(GuiGraphics guiGraphics, float tickDelta) {
-		OverlayRenderer.draw(guiGraphics, tickDelta);
-		WheelOverlayRenderer.draw(guiGraphics, tickDelta);
-	}
-
-	/** Draws the latest toggle notice in a late HUD pass, after vanilla HUD layers. */
-	public void onRenderToggleNotice(GuiGraphics guiGraphics) {
-		SelectionToggleNoticeRenderer.draw(
-			guiGraphics,
-			SelectionToggleNoticeState.INSTANCE,
-			ClientConfig.HANDLER.getConfig().getConfigurationNoticeSize(),
-			INTERACTION_TIME_SOURCE.nowMillis());
-	}
-
-	/** Advances interaction timing once from the GameRenderer frame boundary. */
 	public void onRenderFrame() {
 		Game = Minecraft.getInstance();
 
@@ -595,9 +537,7 @@ public class CommonClient {
 	 * main thread, so the phase-7 {@link ClientPingRuntime} applies each
 	 * authoritative mutation directly to its main-thread-confined marker
 	 * store. A corrupt packet or a runtime that does not exist (not in a
-	 * world) is dropped safely. Detailed optional-render diagnostics may carry
-	 * complete target, component, payload, and exception data under their own
-	 * rate control.
+	 * world) is dropped safely.
 	 */
 	public void onMarkerCreatedPacket(MarkerCreatedS2CPacket packet) {
 		if (packet.isCorrupt() || pingRuntime == null) {
@@ -661,9 +601,7 @@ public class CommonClient {
 
 	/**
 	 * Applies the latest valid server duration policy to the connection-scoped
-	 * client model. Follow-server display behavior still uses each marker's
-	 * frozen arrival/expiry payload, while custom local display durations are
-	 * selected when each marker is received.
+	 * client model.
 	 */
 	public void onSyncDurationPolicyPacket(SyncDurationPolicyS2CPacket packet) {
 		if (packet.isCorrupt()) {
@@ -675,18 +613,13 @@ public class CommonClient {
 
 	/**
 	 * Returns the latest valid server duration policy for client-facing state.
-	 * Marker lifetimes in follow-server mode still use each marker snapshot's
-	 * frozen duration rather than this connection-level value.
 	 */
 	public ClientSyncDurationPolicy getSyncDurationPolicy() {
 		return storedSyncDurationPolicy;
 	}
 
 	/**
-	 * Routes server settings to the latest live settings session. No snapshot is
-	 * retained globally, so a later connection cannot inherit a previous
-	 * server's configuration; the session callback also works under a
-	 * confirmation screen.
+	 * Routes server settings to the latest live settings session.
 	 */
 	public void onServerConfigSnapshotPacket(ServerConfigSnapshotS2CPacket packet) {
 		if (packet.isCorrupt()) {
@@ -713,7 +646,7 @@ public class CommonClient {
 	private static ClientPingRuntime createPingRuntime() {
 		return ClientPingRuntime.create(
 			new MinecraftLocalErrorSink(),
-			IPlatformNetworkService.INSTANCE::sendToServer,
+			IClientNetworkService.INSTANCE::sendToServer,
 			storedRateLimitPolicy,
 			INTERACTION_TIME_SOURCE);
 	}

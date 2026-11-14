@@ -1,9 +1,13 @@
 package nx.pingwheel.common.name;
 
+import com.google.gson.JsonParser;
+import com.mojang.serialization.JsonOps;
 import java.util.Objects;
 
 import net.minecraft.core.HolderLookup;
 import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.ComponentSerialization;
+import net.minecraft.resources.RegistryOps;
 
 import nx.pingwheel.common.domain.MarkerId;
 
@@ -78,7 +82,9 @@ public final class ClientTargetNameDecoder {
 		Objects.requireNonNull(registryAccess, "registryAccess");
 
 		try {
-			return Component.Serializer.fromJson(json.value(), registryAccess);
+			return ComponentSerialization.CODEC
+				.parse(RegistryOps.create(JsonOps.INSTANCE, registryAccess), JsonParser.parseString(json.value()))
+				.getOrThrow();
 		} catch (RuntimeException e) {
 			logger.debug("target name decode failed: markerId={} reason={}",
 				markerId.value(), e.getClass().getSimpleName());

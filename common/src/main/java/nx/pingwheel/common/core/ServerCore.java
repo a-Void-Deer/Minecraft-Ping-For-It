@@ -3,10 +3,11 @@ package nx.pingwheel.common.core;
 import net.minecraft.network.chat.Component;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.resources.ResourceKey;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.server.permissions.Permissions;
 import net.minecraft.server.players.PlayerList;
 import net.minecraft.world.level.Level;
 import nx.pingwheel.common.config.ChannelMode;
@@ -191,12 +192,12 @@ public class ServerCore {
 
 	public static void onChannelUpdate(ServerPlayer player, UpdateChannelC2SPacket packet) {
 		if (packet.isCorrupt()) {
-			LOGGER.warn(() -> "invalid channel update from %s (%s)".formatted(player.getGameProfile().getName(), player.getUUID()));
-			player.displayClientMessage(Component.literal("§8" + MOD_PREFIX + "§cChannel couldn't be updated\n§fMake sure your version matches the server's version: §d" + MOD_VERSION), false);
+			LOGGER.warn(() -> "invalid channel update from %s (%s)".formatted(player.getGameProfile().name(), player.getUUID()));
+			player.sendSystemMessage(Component.literal("§8" + MOD_PREFIX + "§cChannel couldn't be updated\n§fMake sure your version matches the server's version: §d" + MOD_VERSION), false);
 			return;
 		}
 
-		ensureMarkerStore(player.serverLevel().getServer());
+		ensureMarkerStore(player.level().getServer());
 		updatePlayerChannel(player, packet.channel());
 		IPlatformNetworkService.INSTANCE.sendToClient(
 			new RateLimitPolicyS2CPacket(SERVER_CONFIG.getRateLimit(), SERVER_CONFIG.getMsToRegenerate()),
@@ -275,7 +276,7 @@ public class ServerCore {
 			return;
 		}
 
-		sendServerConfigSnapshot(player, player.hasPermissions(3), packet.requestId());
+		sendServerConfigSnapshot(player, player.permissions().hasPermission(Permissions.COMMANDS_ADMIN), packet.requestId());
 	}
 
 	/**
@@ -287,7 +288,7 @@ public class ServerCore {
 		MinecraftServer server,
 		ServerPlayer player,
 		ServerConfigUpdateC2SPacket packet) {
-		final boolean canEdit = player.hasPermissions(3);
+		final boolean canEdit = player.permissions().hasPermission(Permissions.COMMANDS_ADMIN);
 
 		if (packet.isCorrupt()) {
 			LOGGER.debug("server settings update rejected: invalid packet");
@@ -340,8 +341,8 @@ public class ServerCore {
 
 	public static void onPingLocation(MinecraftServer server, ServerPlayer player, PingLocationC2SPacket packet) {
 		if (packet.isCorrupt()) {
-			LOGGER.warn(() -> "invalid ping location from %s (%s)".formatted(player.getGameProfile().getName(), player.getUUID()));
-			player.displayClientMessage(Component.literal("§8" + MOD_PREFIX + "§cUnable to send ping\n§fMake sure your version matches the server's version: §d" + MOD_VERSION), false);
+			LOGGER.warn(() -> "invalid ping location from %s (%s)".formatted(player.getGameProfile().name(), player.getUUID()));
+			player.sendSystemMessage(Component.literal("§8" + MOD_PREFIX + "§cUnable to send ping\n§fMake sure your version matches the server's version: §d" + MOD_VERSION), false);
 			return;
 		}
 
@@ -356,12 +357,12 @@ public class ServerCore {
 		final var defaultChannelMode = SERVER_CONFIG.getDefaultChannelMode();
 
 		if (channel.isEmpty() && defaultChannelMode == ChannelMode.DISABLED) {
-			player.displayClientMessage(Component.literal("§8" + MOD_PREFIX + "§eMust be in a channel to ping location\n§fUse §a/" + CLIENT_COMMAND_ROOT + " channel§f to switch"), false);
+			player.sendSystemMessage(Component.literal("§8" + MOD_PREFIX + "§eMust be in a channel to ping location\n§fUse §a/" + CLIENT_COMMAND_ROOT + " channel§f to switch"), false);
 			return;
 		}
 
 		if (channel.isEmpty() && defaultChannelMode == ChannelMode.TEAM_ONLY && !TeamContextHandler.hasTeam(player)) {
-			player.displayClientMessage(Component.literal("§8" + MOD_PREFIX + "§eMust be in a team or channel to ping location\n§fUse §a/" + CLIENT_COMMAND_ROOT + " channel§f to switch"), false);
+			player.sendSystemMessage(Component.literal("§8" + MOD_PREFIX + "§eMust be in a team or channel to ping location\n§fUse §a/" + CLIENT_COMMAND_ROOT + " channel§f to switch"), false);
 			return;
 		}
 
@@ -455,7 +456,7 @@ public class ServerCore {
 		final long expiresAtTick = arrivalTick + SERVER_CONFIG.getSyncDuration() * (long) TICKS_PER_SECOND;
 
 		final var outcome = markerService(server).create(
-			player.serverLevel(),
+			player.level(),
 			player.getUUID(), packet.target(), packet.pingTypeId(), arrivalTick, expiresAtTick, recipients);
 
 		if (!outcome.isAccepted()) {
@@ -482,7 +483,7 @@ public class ServerCore {
 		// (marker, authoritative name, and authoritative owner profile name),
 		// then the winner changes. Chat is emitted client-side from the packet,
 		// so each recipient uses its selected language exactly once.
-		sendMarkerCreated(playerList, marker, targetName, player.getGameProfile().getName());
+		sendMarkerCreated(playerList, marker, targetName, player.getGameProfile().name());
 		sendWinnerChanges(playerList, creation.winnerChanges(), null);
 	}
 
@@ -567,7 +568,7 @@ public class ServerCore {
 	 * logged. No packets are ever sent to the disconnected session.
 	 */
 	public static void onPlayerDisconnect(ServerPlayer player) {
-		final var server = player.serverLevel().getServer();
+		final var server = player.level().getServer();
 		ensureMarkerStore(server);
 
 		final var store = markerStore();
@@ -654,7 +655,7 @@ public class ServerCore {
 				ServerPlayer owner = playerList.getPlayer(updated.owner());
 				if (owner != null) {
 					TargetNameJson targetName = nameResolver.resolveName(updated.owner(), updated.target());
-					sendMarkerCreated(playerList, updated, targetName, owner.getGameProfile().getName());
+					sendMarkerCreated(playerList, updated, targetName, owner.getGameProfile().name());
 				}
 
 				continue;
@@ -671,7 +672,7 @@ public class ServerCore {
 	}
 
 	private static ServerLevel levelFor(MinecraftServer server, String dimensionId) {
-		ResourceLocation location = ResourceLocation.tryParse(dimensionId);
+		Identifier location = Identifier.tryParse(dimensionId);
 		if (location == null) {
 			return null;
 		}
@@ -803,10 +804,10 @@ public class ServerCore {
 	private static void updatePlayerChannel(ServerPlayer player, String channel) {
 		if (channel.isEmpty()) {
 			PLAYER_CHANNELS.remove(player.getUUID());
-			LOGGER.info(() -> "Channel update: %s -> default".formatted(player.getGameProfile().getName()));
+			LOGGER.info(() -> "Channel update: %s -> default".formatted(player.getGameProfile().name()));
 		} else {
 			PLAYER_CHANNELS.put(player.getUUID(), channel);
-			LOGGER.info(() -> "Channel update: %s -> \"%s\"".formatted(player.getGameProfile().getName(), channel));
+			LOGGER.info(() -> "Channel update: %s -> \"%s\"".formatted(player.getGameProfile().name(), channel));
 		}
 	}
 }

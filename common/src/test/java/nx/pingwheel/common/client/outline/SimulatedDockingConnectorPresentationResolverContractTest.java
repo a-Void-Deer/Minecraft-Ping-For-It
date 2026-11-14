@@ -60,9 +60,9 @@ class SimulatedDockingConnectorPresentationResolverContractTest {
 		assertTrue(source.contains("ModList.get().isLoaded(\"simulated\")"));
 		assertTrue(source.contains("registerOptionalResolver("));
 		assertTrue(source.contains("Class.forName(className, true, NeoClient.class.getClassLoader())"));
-		assertTrue(source.contains("lastSimulatedResolverState"));
+		assertTrue(source.contains("String state = String.valueOf(resolver.getMethod(\"registrationState\").invoke(null))"));
 		assertTrue(source.contains(
-			"case \"simulated-docking-connector-presentation\" -> previous = lastSimulatedResolverState"));
+			"registerOptionalResolver(SIMULATED_DOCKING_CONNECTOR_RESOLVER, \"simulated-docking-connector-presentation\")"));
 		assertFalse(source.contains(
 			"import nx.pingwheel.neoforge.integration.simulated.SimulatedDockingConnectorPresentationResolver"));
 		assertFalse(source.contains("Class<SimulatedDockingConnectorPresentationResolver>"));
@@ -72,7 +72,9 @@ class SimulatedDockingConnectorPresentationResolverContractTest {
 		List<Path> candidates = List.of(
 			Path.of(relativePath),
 			Path.of("neoforge").resolve(relativePath),
-			Path.of("..").resolve("neoforge").resolve(relativePath));
+			Path.of("..").resolve("neoforge").resolve(relativePath),
+			Path.of("..").resolve("mod-source-isolated").resolve("neoforge").resolve(relativePath),
+			Path.of("mod-source-isolated").resolve("neoforge").resolve(relativePath));
 		for (Path candidate : candidates) {
 			if (Files.exists(candidate)) {
 				return Files.readString(candidate);

@@ -33,7 +33,6 @@ import nx.pingwheel.common.client.outline.BlockPresentationResolution;
 import nx.pingwheel.common.client.outline.BlockPresentationResolver;
 import nx.pingwheel.common.client.outline.BlockPresentationResolverRegistry;
 import nx.pingwheel.common.client.outline.BlockRenderSubject;
-import nx.pingwheel.common.client.outline.EntityBlockGeometryRunner;
 import nx.pingwheel.common.client.outline.VanillaDoorBlockPresentationResolver;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.marker.TargetKey;
@@ -192,7 +191,7 @@ class CreateDoorPresentationResolverTest {
 		assertSubject(resolution.subjects().get(1), "upper", upperPos, upper);
 		assertEquals(List.of(new BlockPresentationCoverageRelation(
 			"lower",
-			EntityBlockGeometryRunner.BLOCK_ENTITY_RENDERER_SOURCE_ID,
+			"pingforit:block_entity_renderer",
 			"upper")), resolution.coverageRelations());
 	}
 

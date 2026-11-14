@@ -56,7 +56,7 @@ public final class MinecraftTargetSnapshotFactory {
 		Objects.requireNonNull(level, "level");
 		Objects.requireNonNull(hitResult, "hitResult");
 
-		String dimensionId = level.dimension().location().toString();
+		String dimensionId = level.dimension().identifier().toString();
 
 		return switch (hitResult.getType()) {
 			case ENTITY -> entitySnapshot(dimensionId, (EntityHitResult) hitResult);

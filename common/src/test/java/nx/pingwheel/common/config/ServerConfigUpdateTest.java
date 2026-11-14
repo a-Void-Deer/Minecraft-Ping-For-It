@@ -50,7 +50,7 @@ class ServerConfigUpdateTest {
 			true,
 			1000,
 			5,
-			61);
+			ServerConfigBounds.MAX_PING_DURATION + 1);
 		assertEquals(ServerConfigBounds.MAX_PING_DURATION, high.applyTo(CURRENT).syncDuration());
 	}
 

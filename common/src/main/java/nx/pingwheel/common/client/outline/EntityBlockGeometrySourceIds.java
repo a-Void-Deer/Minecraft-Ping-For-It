@@ -1,6 +1,6 @@
 package nx.pingwheel.common.client.outline;
 
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 
 /**
  * Validates the stable identifiers used by the internal geometry seam.
@@ -28,7 +28,7 @@ final class EntityBlockGeometrySourceIds {
 			return null;
 		}
 
-		ResourceLocation parsed = ResourceLocation.tryParse(candidate);
+		Identifier parsed = Identifier.tryParse(candidate);
 		if (parsed == null) {
 			return null;
 		}
@@ -40,7 +40,7 @@ final class EntityBlockGeometrySourceIds {
 	static String require(String candidate) {
 		String validated = validate(candidate);
 		if (validated == null) {
-			throw new IllegalArgumentException("source id must be a namespaced ResourceLocation");
+			throw new IllegalArgumentException("source id must be a namespaced Identifier");
 		}
 		return validated;
 	}

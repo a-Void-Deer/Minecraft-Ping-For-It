@@ -2,18 +2,18 @@
 	"required": true,
 	"minVersion": "0.8",
 	"package": "nx.pingwheel.common.mixin",
-	"compatibilityLevel": "JAVA_17",
+	"compatibilityLevel": "JAVA_25",
 	"client": [
 		"KeyMappingMixin",
 		"MinecraftMixin",
-		"GameRendererMixin",
-		"GuiMixin",
-		"LevelRendererMixin",
-		"DisplayBlockDisplayAccessor",
-		"ModelBlockRendererMixin"
+		"RenderTypeAccessor",
+		"RenderPipelinesAccessor",
+		"SubmitNodeCollectionMixin",
+		"BlockEntityRenderDispatcherMixin",
+		"EntityRendererMixin",
+		"LevelExtractorMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1
-	},
-	"refmap": "Ping-For-It-refmap.json"
+	}
 }

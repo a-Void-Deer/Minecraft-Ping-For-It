@@ -101,7 +101,7 @@ public final class WheelMouseCapture {
 		Action action = nextAction(
 			phase == PingInteractionPhase.WHEEL_OPEN,
 			releasedByWheel,
-			game.screen != null,
+			game.gui.screen() != null,
 			game.mouseHandler.isMouseGrabbed());
 
 		switch (action) {
@@ -136,7 +136,7 @@ public final class WheelMouseCapture {
 
 		releasedByWheel = false;
 
-		if (game == null || game.screen != null) {
+		if (game == null || game.gui.screen() != null) {
 			return;
 		}
 

@@ -3,7 +3,7 @@ package nx.pingwheel.common.network;
 import java.util.Optional;
 
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import org.jetbrains.annotations.NotNull;
 
 import nx.pingwheel.common.domain.MarkerId;
@@ -13,7 +13,7 @@ import static nx.pingwheel.common.Global.S2C_NAMESPACE;
 
 public record MarkerWinnerChangedS2CPacket(TargetKey targetKey, Optional<MarkerId> winnerId) implements IPacket {
 
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(S2C_NAMESPACE, "marker-winner-changed");
+	public static final Identifier PACKET_ID = Identifier.fromNamespaceAndPath(S2C_NAMESPACE, "marker-winner-changed");
 	public static final Type<MarkerWinnerChangedS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public MarkerWinnerChangedS2CPacket() {
@@ -36,7 +36,7 @@ public record MarkerWinnerChangedS2CPacket(TargetKey targetKey, Optional<MarkerI
 		return targetKey == null || winnerId == null;
 	}
 
-	public ResourceLocation getId() {
+	public Identifier getId() {
 		return PACKET_ID;
 	}
 

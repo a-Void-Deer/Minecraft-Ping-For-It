@@ -64,7 +64,7 @@ public class Raycast {
 		Objects.requireNonNull(direction, "direction");
 		Objects.requireNonNull(policy, "policy");
 
-		var cameraEntity = Game.cameraEntity;
+		var cameraEntity = Game.getCameraEntity();
 
 		if (cameraEntity == null || cameraEntity.level() == null) {
 			return java.util.Optional.empty();

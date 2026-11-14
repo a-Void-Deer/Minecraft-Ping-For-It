@@ -32,7 +32,7 @@ class ServerConfigSerializationTest {
 		config.validate();
 		assertEquals(ServerConfigBounds.MIN_PING_DURATION, config.getSyncDuration());
 
-		config.setSyncDuration(61);
+		config.setSyncDuration(ServerConfigBounds.MAX_PING_DURATION + 1);
 		config.validate();
 		assertEquals(ServerConfigBounds.MAX_PING_DURATION, config.getSyncDuration());
 	}

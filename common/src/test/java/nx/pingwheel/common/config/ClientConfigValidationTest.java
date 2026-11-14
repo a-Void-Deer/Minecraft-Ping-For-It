@@ -40,11 +40,11 @@ class ClientConfigValidationTest {
 		assertFalse(config.isLongPressCompatibilityMode());
 		assertEquals(20, config.getLongPressCompatibilitySliceMillis());
 		assertEquals(20, config.getEffectiveLongPressCompatibilitySliceMillis());
-		assertEquals(14, config.getWheelInnerRadius());
-		assertEquals(39, config.getWheelOuterRadius());
-		assertEquals(100, config.getWheelOpacity());
-		assertEquals(100, config.getWheelFontSize());
-		assertEquals(100, config.getWheelTargetFontSize());
+		assertEquals(8, config.getWheelInnerRadius());
+		assertEquals(54, config.getWheelOuterRadius());
+		assertEquals(75, config.getWheelOpacity());
+		assertEquals(200, config.getWheelFontSize());
+		assertEquals(200, config.getWheelTargetFontSize());
 		assertEquals(0, config.getMarkerDisplayDuration());
 		assertEquals(0, config.getEffectiveMarkerDisplayDuration());
 		assertTrue(config.isFollowServerMarkerDisplayDuration());
@@ -121,8 +121,8 @@ class ClientConfigValidationTest {
 
 		config.setMarkerDisplayDuration(-1);
 		assertEquals(0, config.getMarkerDisplayDuration());
-		config.setMarkerDisplayDuration(61);
-		assertEquals(60, config.getMarkerDisplayDuration());
+		config.setMarkerDisplayDuration(ClientConfigBounds.MAX_MARKER_DISPLAY_DURATION + 1);
+		assertEquals(ClientConfigBounds.MAX_MARKER_DISPLAY_DURATION, config.getMarkerDisplayDuration());
 
 		config.markerDisplayDuration = Integer.MIN_VALUE;
 		List<ClampWarning> warnings = new ArrayList<>();
@@ -194,27 +194,26 @@ class ClientConfigValidationTest {
 		config.validate((key, suppliedValue, effectiveValue) ->
 			warnings.add(new ClampWarning(key, suppliedValue, effectiveValue)));
 
-		assertEquals(100, config.getWheelHoldMillis());
+		assertEquals(50, config.getWheelHoldMillis());
 		assertTrue(config.isLongPressCompatibilityMode());
-		assertEquals(50, config.getLongPressCompatibilitySliceMillis());
+		assertEquals(25, config.getLongPressCompatibilitySliceMillis());
 		assertEquals(30000, config.getWheelTimeoutMillis());
 		assertEquals(1, config.getCancelHalfConeAngleDegrees());
 		assertEquals(12, config.getWheelInnerRadius());
 		assertEquals(20, config.getWheelOuterRadius());
 		assertEquals(0, config.getWheelOpacity());
-		assertEquals(500, config.getWheelFontSize());
+		assertEquals(999, config.getWheelFontSize());
 		assertEquals(10, config.getWheelTargetFontSize());
 		assertTrue(config.getWheelOuterRadius() - config.getWheelInnerRadius() >= 8);
 		assertEquals(
 			List.of(
-				new ClampWarning("wheelHoldMillis", -1, 100),
-				new ClampWarning("longPressCompatibilitySliceMillis", 999, 50),
+				new ClampWarning("wheelHoldMillis", -1, 50),
+				new ClampWarning("longPressCompatibilitySliceMillis", 999, 25),
 				new ClampWarning("wheelTimeoutMillis", 99999, 30000),
 				new ClampWarning("cancelHalfConeAngleDegrees", 0, 1),
 				new ClampWarning("wheelInnerRadius", 1000, 12),
 				new ClampWarning("wheelOuterRadius", -100, 20),
 				new ClampWarning("wheelOpacity", -5, 0),
-				new ClampWarning("wheelFontSize", 999, 500),
 				new ClampWarning("wheelTargetFontSize", -1, 10)),
 			warnings);
 	}
@@ -237,7 +236,7 @@ class ClientConfigValidationTest {
 		config.validate((key, suppliedValue, effectiveValue) -> {});
 
 		assertEquals(250, config.getWheelFontSize());
-		assertEquals(100, config.getWheelTargetFontSize());
+		assertEquals(200, config.getWheelTargetFontSize());
 	}
 
 	@Test
@@ -275,7 +274,7 @@ class ClientConfigValidationTest {
 		ClientConfig config = new ClientConfig();
 
 		config.setWheelOuterRadius(20);
-		assertEquals(12, config.getWheelInnerRadius());
+		assertEquals(8, config.getWheelInnerRadius());
 		assertEquals(20, config.getWheelOuterRadius());
 
 		config.setWheelInnerRadius(30);
@@ -305,7 +304,7 @@ class ClientConfigValidationTest {
 		ClientConfig config = new ClientConfig();
 
 		config.setLongPressCompatibilitySliceMillis(Integer.MAX_VALUE);
-		assertEquals(150, config.getLongPressCompatibilitySliceMillis());
+		assertEquals(100, config.getLongPressCompatibilitySliceMillis());
 
 		config.setWheelHoldMillis(100);
 		assertEquals(100, config.getWheelHoldMillis());
@@ -316,7 +315,7 @@ class ClientConfigValidationTest {
 		assertEquals(10, config.getLongPressCompatibilitySliceMillis());
 
 		config.longPressCompatibilitySliceMillis = Integer.MAX_VALUE;
-		assertEquals(300, config.getEffectiveLongPressCompatibilitySliceMillis());
+		assertEquals(500, config.getEffectiveLongPressCompatibilitySliceMillis());
 	}
 
 	private record ClampWarning(String key, int suppliedValue, int effectiveValue) {}

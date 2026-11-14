@@ -1,0 +1,19 @@
+{
+	"required": true,
+	"minVersion": "0.8",
+	"package": "nx.pingwheel.common.mixin",
+	"compatibilityLevel": "JAVA_21",
+	"client": [
+		"KeyMappingMixin",
+		"MinecraftMixin",
+		"GameRendererMixin",
+		"GuiMixin",
+		"LevelRendererMixin",
+		"DisplayBlockDisplayAccessor",
+		"ModelBlockRendererMixin",
+		"CreateVisualizationManagerMixin"
+	],
+	"injectors": {
+		"defaultRequire": 1
+	}
+}

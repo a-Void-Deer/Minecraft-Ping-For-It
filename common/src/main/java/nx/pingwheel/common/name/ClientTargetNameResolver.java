@@ -8,7 +8,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.Nameable;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.item.ItemEntity;
@@ -116,13 +116,13 @@ public final class ClientTargetNameResolver {
 			}
 
 			if (entity instanceof Player player) {
-				return Optional.of(Component.literal(player.getGameProfile().getName()));
+				return Optional.of(Component.literal(player.getGameProfile().name()));
 			}
 
 			if (entity instanceof ItemEntity itemEntity) {
 				ItemStack stack = itemEntity.getItem();
 				Component customName = stack.get(DataComponents.CUSTOM_NAME);
-				Component baseName = Component.translatable(stack.getDescriptionId());
+				Component baseName = Component.translatable(stack.getItem().getDescriptionId());
 
 				return Optional.of(customName == null
 					? baseName
@@ -152,14 +152,14 @@ public final class ClientTargetNameResolver {
 				return Optional.empty();
 			}
 
-			ResourceLocation capturedId = ResourceLocation.tryParse(target.blockRegistryId());
+			Identifier capturedId = Identifier.tryParse(target.blockRegistryId());
 
 			if (capturedId == null) {
 				return Optional.empty();
 			}
 
 			BlockState state = level.getBlockState(position);
-			ResourceLocation currentId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+			Identifier currentId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
 
 			if (currentId == null || !currentId.equals(capturedId)) {
 				return Optional.empty();
@@ -186,7 +186,7 @@ public final class ClientTargetNameResolver {
 		}
 
 		private static boolean sameDimension(Level level, String targetDimensionId) {
-			return level.dimension().location().toString().equals(targetDimensionId);
+			return level.dimension().identifier().toString().equals(targetDimensionId);
 		}
 	}
 }

@@ -1,7 +1,7 @@
 package nx.pingwheel.common.network;
 
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import nx.pingwheel.common.config.ChannelMode;
 import nx.pingwheel.common.config.ServerConfigBounds;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
@@ -20,7 +20,7 @@ public record ServerConfigSnapshotS2CPacket(
 	int rateLimit,
 	int syncDuration
 ) implements IPacket {
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(
+	public static final Identifier PACKET_ID = Identifier.fromNamespaceAndPath(
 		S2C_NAMESPACE,
 		"server-config-snapshot");
 	public static final Type<ServerConfigSnapshotS2CPacket> PACKET_TYPE = new Type<>(PACKET_ID);
@@ -96,7 +96,7 @@ public record ServerConfigSnapshotS2CPacket(
 			syncDuration);
 	}
 
-	public ResourceLocation getId() {
+	public Identifier getId() {
 		return PACKET_ID;
 	}
 

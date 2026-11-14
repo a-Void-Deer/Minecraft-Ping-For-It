@@ -1,90 +1,90 @@
 package nx.pingwheel.common.client.outline;
 
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.LinkedHashMap;
-import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
-import java.util.Objects;
 
 import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.domain.Target;
-import nx.pingwheel.common.marker.TargetKey;
 
 /**
- * Pure, deterministic selection of entity outline specs from the store's
- * authoritative visible-winner map.
+ * M7b: turns the visible entity-marker winners of one dimension into a
+ * {@code locator -> ARGB colour} snapshot.
  *
- * <p>This is deliberately a pure JDK function: it consumes only the
- * {@link Map} produced by
- * {@link nx.pingwheel.common.client.marker.ClientMarkerStore#visibleWinnersInDimension}
- * (never the store directly) and the {@link PingTypeCatalog}, so it can be
- * unit tested without any game client.
- *
+ * <p>Mirrors the upstream selection rules:
  * <ul>
-	 *   <li>Only {@link TargetKey.EntityKey} entries whose marker target is a
-	 *       {@link Target.EntityTarget} with the same dimension and locator are
- *       selected; block, location, and mismatched entries are excluded even
- *       when the store already filtered them.</li>
- *   <li>Entries are processed in ascending {@link nx.pingwheel.common.domain.MarkerId}
- *       order, so the result map's iteration order is deterministic and, if
-	 *       two entries ever resolve to the same entity locator, the larger marker
- *       id wins — exactly one spec per entity.</li>
- *   <li>The color is the ping type's 24-bit outline color forced opaque;
- *       an unknown ping type id falls back to opaque white.</li>
+ *   <li>only {@link Target.EntityTarget} winners whose target dimension matches;</li>
+ *   <li>only target types that are rendered as entities ({@code entity},
+ *       {@code dropped_item}) — {@code entity_block} is a block target kind and is
+ *       excluded;</li>
+ *   <li>duplicate locators (canonicalisation can merge several parts of one entity)
+ *       keep the marker with the <em>largest</em> marker id;</li>
+ *   <li>colour is {@code 0xFF000000 | pingType.outlineColor()}, unknown ping types fall
+ *       back to opaque white.</li>
  * </ul>
+ *
+ * <p>Pure JDK + domain types: no {@code net.minecraft} references, so the rules stay
+ * testable without a game client.
  */
 public final class EntityOutlineSelection {
 
+	private static final PingTypeCatalog PING_TYPES = PingTypeCatalog.builtIn();
+	private static final int FALLBACK_COLOR = 0xFFFFFFFF;
+
+	private static final String TARGET_TYPE_ENTITY = "entity";
+	private static final String TARGET_TYPE_DROPPED_ITEM = "dropped_item";
+
 	private EntityOutlineSelection() {}
 
-	/**
-	 * Selects one {@link EntityOutlineSpec} per entity from {@code
-	 * visibleWinners}.
-	 *
-	 * @param visibleWinners the store's authoritative visible-winner map for
-	 *                       the current dimension
-	 * @param catalog        the catalog used to resolve ping type outline
-	 *                       colors
-	 * @return an unmodifiable map from entity locator to spec, ordered by
-	 *         ascending marker id
-	 */
-	public static Map<EntityLocator, EntityOutlineSpec> select(
-		Map<TargetKey, ClientMarker> visibleWinners,
-		PingTypeCatalog catalog
-	) {
-		Objects.requireNonNull(visibleWinners, "visibleWinners");
-		Objects.requireNonNull(catalog, "catalog");
+	/** Builds an immutable snapshot from the store's winners for {@code dimensionId}. */
+	public static Map<EntityLocator, Integer> select(Iterable<ClientMarker> winners, String dimensionId) {
+		if (winners == null || dimensionId == null) {
+			return Map.of();
+		}
 
-		List<Map.Entry<TargetKey, ClientMarker>> ordered = visibleWinners.entrySet().stream()
-			.sorted(Map.Entry.comparingByValue(Comparator.comparing(ClientMarker::id)))
-			.toList();
+		Map<EntityLocator, ClientMarker> best = new HashMap<>();
 
-		Map<EntityLocator, EntityOutlineSpec> selected = new LinkedHashMap<>();
-
-		for (Map.Entry<TargetKey, ClientMarker> entry : ordered) {
-			TargetKey key = entry.getKey();
-			ClientMarker marker = entry.getValue();
-
-			if (!(key instanceof TargetKey.EntityKey entityKey)
-				|| !(marker.target() instanceof Target.EntityTarget entityTarget)
-				|| !entityKey.dimensionId().equals(entityTarget.dimensionId())
-				|| !entityKey.locator().equals(entityTarget.locator())) {
+		for (ClientMarker marker : winners) {
+			if (marker == null || !acceptsForEntityRendering(marker.targetTypeId())) {
 				continue;
 			}
 
-			EntityLocator locator = entityTarget.locator();
-			int argbColor = 0xFF000000 | catalog.findById(marker.pingTypeId())
-				.map(pingType -> pingType.outlineColor())
-				.orElse(0xFFFFFF);
+			if (!(marker.target() instanceof Target.EntityTarget target)) {
+				continue;
+			}
 
-			selected.put(
-				locator,
-				new EntityOutlineSpec(marker.id(), locator, marker.pingTypeId(), argbColor));
+			if (!target.dimensionId().equals(dimensionId)) {
+				continue;
+			}
+
+			ClientMarker previous = best.get(target.locator());
+
+			if (previous == null || marker.id().compareTo(previous.id()) > 0) {
+				best.put(target.locator(), marker);
+			}
 		}
 
-		return Collections.unmodifiableMap(selected);
+		if (best.isEmpty()) {
+			return Map.of();
+		}
+
+		Map<EntityLocator, Integer> colors = new HashMap<>(best.size());
+
+		for (Map.Entry<EntityLocator, ClientMarker> entry : best.entrySet()) {
+			colors.put(entry.getKey(), resolveColor(entry.getValue().pingTypeId()));
+		}
+
+		return Map.copyOf(colors);
+	}
+
+	private static boolean acceptsForEntityRendering(String targetTypeId) {
+		return TARGET_TYPE_ENTITY.equals(targetTypeId) || TARGET_TYPE_DROPPED_ITEM.equals(targetTypeId);
+	}
+
+	private static int resolveColor(String pingTypeId) {
+		return PING_TYPES.findById(pingTypeId)
+			.map(pingType -> 0xFF000000 | pingType.outlineColor())
+			.orElse(FALLBACK_COLOR);
 	}
 }

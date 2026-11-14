@@ -7,7 +7,7 @@ import java.util.Objects;
 import java.util.Set;
 
 import net.minecraft.locale.Language;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.packs.resources.Resource;
 import net.minecraft.server.packs.resources.ResourceManager;
 
@@ -134,7 +134,7 @@ public final class SelectedLocaleTranslationKeyCache {
 
 		List<Resource> resources;
 		try {
-			ResourceLocation languageId = ResourceLocation.fromNamespaceAndPath(
+			Identifier languageId = Identifier.fromNamespaceAndPath(
 				Global.MOD_ID, "lang/" + selectedLanguageCode + ".json");
 			resources = resourceManager.getResourceStack(languageId);
 		} catch (RuntimeException exception) {

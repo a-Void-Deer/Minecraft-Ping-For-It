@@ -51,6 +51,14 @@ class NeoForgeWorldAwareBlockModelOutlineAdapterContractTest {
 	@Test
 	void genericRegistrationIsNotOwnedByCreateSessionTeardown() throws IOException {
 		String source = readSource(NEO_CLIENT_SOURCE);
+
+		// N7 defers the NeoForge WorldAware adapter. Until it is restored, pin
+		// that NeoClient does not reference the deferred adapter at all.
+		if (!source.contains("NeoForgeWorldAwareBlockModelOutlineAdapter.register();")) {
+			assertFalse(source.contains("NeoForgeWorldAwareBlockModelOutlineAdapter"));
+			return;
+		}
+
 		int genericRegistration = source.indexOf(
 			"NeoForgeWorldAwareBlockModelOutlineAdapter.register();");
 		int createLoading = source.indexOf("loadCreateAdapters();");
@@ -66,7 +74,9 @@ class NeoForgeWorldAwareBlockModelOutlineAdapterContractTest {
 	private static String readSource(String relativePath) throws IOException {
 		for (Path candidate : List.of(
 			Path.of(relativePath),
-			Path.of("..", relativePath))) {
+			Path.of("..", relativePath),
+			Path.of("..", "mod-source-isolated").resolve(relativePath),
+			Path.of("mod-source-isolated").resolve(relativePath))) {
 			if (Files.isRegularFile(candidate)) {
 				return Files.readString(candidate).replace("\r\n", "\n");
 			}

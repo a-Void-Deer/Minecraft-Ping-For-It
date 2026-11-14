@@ -1,41 +1,46 @@
 package nx.pingwheel.common.client.outline;
 
-import net.minecraft.SharedConstants;
-import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.syncher.SynchedEntityData;
-import net.minecraft.server.Bootstrap;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.storage.ValueInput;
+import net.minecraft.world.level.storage.ValueOutput;
+
+import nx.pingwheel.common.testing.TestLevel;
 
 /**
- * Headless {@link Entity} factory for tests that need a live-ish entity to
- * exercise {@code handles(Entity)}, the runner, and the locator resolver.
+ * Headless {@link Entity} factory shared by client and math tests.
  *
- * <p>Construction runs the plain vanilla registry bootstrap once (exactly like
- * {@code OutlineOnlyBufferSourceTest}) because {@code EntityType}'s class
- * initializer reaches the vanilla registries. A custom {@code EntityType}
- * cannot be built after the registry freeze (the {@code EntityType} constructor
- * creates an intrusive holder), so the produced entity reuses the already
- * registered {@link EntityType#PIG}; the entity is created with a
- * {@code null} level, which the vanilla {@code Entity} constructor tolerates.
+ * <p>The vanilla {@code Entity} constructor calls
+ * {@code level.getNextEntityId()}, so it needs a non-null Level. {@link TestLevel}
+ * provides the minimal headless Level; this helper keeps construction and the
+ * 26.3 save/hurt signatures in one place.</p>
  */
-final class TestEntitySupport {
+public final class TestEntitySupport {
 
-	private TestEntitySupport() {}
-
-	static void bootStrap() {
-		SharedConstants.tryDetectVersion();
-		Bootstrap.bootStrap();
+	private TestEntitySupport() {
 	}
 
-	static TestEntity newEntity() {
-		return new TestEntity(EntityType.PIG, null);
+	public static void bootStrap() {
+		TestLevel.ensureBootstrapped();
+	}
+
+	public static TestEntity newEntity() {
+		return newEntity(EntityTypes.PIG);
+	}
+
+	public static TestEntity newEntity(EntityType<?> type) {
+		return new TestEntity(type, TestLevel.get());
 	}
 
 	/** Minimal {@link Entity} subclass implementing only the abstract methods. */
-	static final class TestEntity extends Entity {
-		TestEntity(EntityType<?> type, Level level) {
+	public static final class TestEntity extends Entity {
+
+		public TestEntity(EntityType<?> type, Level level) {
 			super(type, level);
 		}
 
@@ -45,12 +50,17 @@ final class TestEntitySupport {
 		}
 
 		@Override
-		protected void readAdditionalSaveData(CompoundTag tag) {
+		public boolean hurtServer(ServerLevel level, DamageSource source, float amount) {
+			return false;
+		}
+
+		@Override
+		protected void readAdditionalSaveData(ValueInput input) {
 			// intentionally empty
 		}
 
 		@Override
-		protected void addAdditionalSaveData(CompoundTag tag) {
+		protected void addAdditionalSaveData(ValueOutput output) {
 			// intentionally empty
 		}
 	}

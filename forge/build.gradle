@@ -1,70 +1,36 @@
 plugins {
-    id "idea"
-    id "multiloader-loader"
-    id "net.minecraftforge.gradle" version "[6.0.24,6.2)"
-    id "org.spongepowered.mixin" version "0.7-SNAPSHOT"
+    id 'java-library'
+    id 'net.minecraftforge.gradle' version '7.0.40'
 }
 
-mixin {
-    config("${mod_id}.mixins.json")
+java {
+    toolchain.languageVersion = JavaLanguageVersion.of(java_version)
 }
 
 minecraft {
-    mappings channel: "official", version: minecraft_version
-
-    reobf = false
-    copyIdeResources = true
+    mappings channel: 'official', version: minecraft_version
 
     runs {
         client {
-            workingDirectory file("runs/client")
-            ideaModule "${rootProject.name}.${project.name}.main"
-            taskName "Client"
-            mods {
-                modClientRun {
-                    source sourceSets.main
-                }
-            }
+            workingDir = rootProject.file('runs/skeleton/forge-client')
         }
-
         server {
-            workingDirectory file("runs/server")
-            ideaModule "${rootProject.name}.${project.name}.main"
-            taskName "Server"
-            mods {
-                modServerRun {
-                    source sourceSets.main
-                }
-            }
-        }
-
-        data {
-            workingDirectory file("runs/data")
-            ideaModule "${rootProject.name}.${project.name}.main"
-            args "--mod", mod_id, "--all", "--output", file("src/generated/resources/"), "--existing", file("src/main/resources/")
-            taskName "Data"
-            mods {
-                modDataRun {
-                    source sourceSets.main
-                }
-            }
+            workingDir = rootProject.file('runs/skeleton/forge-server')
         }
     }
 }
 
-sourceSets.main.resources.srcDir "src/generated/resources"
+repositories {
+    minecraft.mavenizer(it)
+    maven fg.forgeMaven
+    maven fg.minecraftLibsMaven
+}
 
 dependencies {
-    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
-    implementation("net.sf.jopt-simple:jopt-simple:5.0.4") { version { strictly "5.0.4" } }
+    implementation minecraft.dependency("net.minecraftforge:forge:${minecraft_version}-${forge_version}")
 }
 
-sourceSets.each {
-    def dir = layout.buildDirectory.dir("sourcesSets/$it.name")
-    it.output.resourcesDir = dir
-    it.java.destinationDirectory = dir
-}
-
-jar {
-    archiveClassifier = "${project.name}-${minecraft_version}"
+// Skeleton phase: no mod sources, no mod tests.
+tasks.named('test') {
+    enabled = false
 }

@@ -7,7 +7,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -115,8 +115,8 @@ public final class MinecraftTargetNameResolver implements AuthoritativeTargetNam
 			return Resolution.unavailable(FallbackReason.REQUESTER_UNAVAILABLE);
 		}
 
-		ServerLevel level = player.serverLevel();
-		String dimensionId = level.dimension().location().toString();
+		ServerLevel level = player.level();
+		String dimensionId = level.dimension().identifier().toString();
 
 		if (!dimensionId.equals(normalizedTarget.dimensionId())) {
 			return Resolution.unavailable(FallbackReason.DIMENSION_MISMATCH);
@@ -156,13 +156,13 @@ public final class MinecraftTargetNameResolver implements AuthoritativeTargetNam
 		if (entity instanceof ServerPlayer player) {
 			// Plain profile name, deliberately unstyled: a player target never
 			// inherits a ping-type or team color.
-			return Resolution.of(Component.literal(player.getGameProfile().getName()));
+			return Resolution.of(Component.literal(player.getGameProfile().name()));
 		}
 
 		if (entity instanceof ItemEntity itemEntity) {
 			ItemStack stack = itemEntity.getItem();
 			Component customName = stack.get(DataComponents.CUSTOM_NAME);
-			Component baseName = Component.translatable(stack.getDescriptionId());
+			Component baseName = Component.translatable(stack.getItem().getDescriptionId());
 
 			return Resolution.of(customName != null
 				? TargetNameComposer.compose(customName, baseName)
@@ -191,7 +191,7 @@ public final class MinecraftTargetNameResolver implements AuthoritativeTargetNam
 		}
 
 		BlockState state = level.getBlockState(position);
-		ResourceLocation currentId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+		Identifier currentId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
 
 		if (currentId == null || !currentId.toString().equals(target.blockRegistryId())) {
 			return Resolution.unavailable(FallbackReason.BLOCK_TYPE_CHANGED);

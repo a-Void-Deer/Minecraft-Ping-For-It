@@ -1,13 +1,13 @@
 package nx.pingwheel.common.screen;
 
 import net.minecraft.ChatFormatting;
-import net.minecraft.Util;
 import net.minecraft.client.OptionInstance;
+import net.minecraft.client.gui.ActiveTextCollector;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.OptionsList;
-import net.minecraft.client.gui.components.StringWidget;
 import net.minecraft.client.gui.components.Tooltip;
 import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.components.tabs.Tab;
@@ -16,7 +16,18 @@ import net.minecraft.client.gui.components.tabs.TabNavigationBar;
 import net.minecraft.client.gui.navigation.ScreenRectangle;
 import net.minecraft.client.gui.screens.ConfirmScreen;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.components.AbstractStringWidget;
+import net.minecraft.client.gui.components.TabButton;
+import net.minecraft.client.gui.components.WidgetSprites;
+import net.minecraft.client.gui.layouts.GridLayout;
+import net.minecraft.client.gui.layouts.Layout;
+import com.mojang.blaze3d.Blaze3D;
+
 import net.minecraft.client.gui.screens.options.OptionsSubScreen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.renderer.RenderPipelines;
+import net.minecraft.util.Mth;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -27,11 +38,12 @@ import nx.pingwheel.common.config.ServerConfigSnapshot;
 import nx.pingwheel.common.config.ServerConfigUpdate;
 import nx.pingwheel.common.config.TeamColorMode;
 import nx.pingwheel.common.integration.TeamContext;
-import nx.pingwheel.common.integration.TeamContextHandler;
+import nx.pingwheel.common.client.ClientTeamContextHelper;
 import nx.pingwheel.common.network.ServerConfigRequestC2SPacket;
 import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
-import nx.pingwheel.common.platform.IPlatformNetworkService;
+import nx.pingwheel.common.platform.IClientNetworkService;
 import nx.pingwheel.common.resource.LanguageUtils;
+import net.minecraft.resources.Identifier;
 import nx.pingwheel.common.screen.SettingsCategoryCatalog.Setting;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Category;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Page;
@@ -49,6 +61,7 @@ import java.util.function.Supplier;
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.config.ClientConfig.*;
 import static nx.pingwheel.common.config.ClientConfigBounds.*;
+import static nx.pingwheel.common.Global.LOGGER;
 import static nx.pingwheel.common.Global.warnException;
 
 public class SettingsScreen extends OptionsSubScreen {
@@ -63,9 +76,10 @@ public class SettingsScreen extends OptionsSubScreen {
 	private final TabManager tabManager;
 	private final DeferredActionCoordinator inputActions = new DeferredActionCoordinator();
 
-	private Screen parent;
 	private SettingsOptionsList settingsList;
 	private TabNavigationBar scopeTabBar;
+	private ScopeTabButton clientTabButton;
+	private ScopeTabButton serverTabButton;
 	private Button primaryButton;
 	private Button resetAllButton;
 	private EditBox channelTextField;
@@ -73,7 +87,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	private EditBox serverRateLimitField;
 	private EditBox serverSyncDurationField;
 	private SettingsTitleWidget pageTitle;
-	private StringWidget serverStatusWidget;
+	private AbstractStringWidget serverStatusWidget;
 	private AbstractWidget pendingHalfWidth;
 	private boolean serverRequestDeferred;
 	private boolean tabBarRegistered;
@@ -109,14 +123,15 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	public SettingsScreen() {
-		super(null, null, LanguageUtils.settings("title").get());
-		this.config = ClientConfig.HANDLER.getConfig();
-		this.tabManager = new NavigationTabManager(this::addRenderableWidget, this::removeWidget);
+		this(null);
 	}
 
-	public SettingsScreen(Screen parent) {
-		this();
-		this.parent = parent;
+	// 26.3 keeps the opening screen in the final OptionsSubScreen#lastScreen field, so
+	// the parent has to travel through super(...) instead of being assigned here.
+	public SettingsScreen(Screen lastScreen) {
+		super(lastScreen, null, LanguageUtils.settings("title").get());
+		this.config = ClientConfig.HANDLER.getConfig();
+		this.tabManager = new NavigationTabManager(this::addRenderableWidget, this::removeWidget);
 	}
 
 	@Override
@@ -172,24 +187,24 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	@Override
-	public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-		return this.inputActions.dispatch(() -> this.dispatchKeyPressed(keyCode, scanCode, modifiers));
+	public boolean keyPressed(KeyEvent event) {
+		return this.inputActions.dispatch(() -> this.dispatchKeyPressed(event));
 	}
 
-	private boolean dispatchKeyPressed(int keyCode, int scanCode, int modifiers) {
-		if (keyCode == 256 && navigation.isLeaf()) {
+	private boolean dispatchKeyPressed(KeyEvent event) {
+		if (event.key() == 256 && navigation.isLeaf()) {
 			this.navigateBack();
 			return true;
 		}
-		if (navigation.isOverview() && this.scopeTabBar != null && this.scopeTabBar.keyPressed(keyCode)) {
+		if (navigation.isOverview() && this.scopeTabBar != null && this.scopeTabBar.keyPressed(event)) {
 			return true;
 		}
-		return super.keyPressed(keyCode, scanCode, modifiers);
+		return super.keyPressed(event);
 	}
 
 	@Override
-	public boolean mouseClicked(double mouseX, double mouseY, int button) {
-		return this.inputActions.dispatch(() -> super.mouseClicked(mouseX, mouseY, button));
+	public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+		return this.inputActions.dispatch(() -> super.mouseClicked(event, doubleClick));
 	}
 
 	@Override
@@ -243,35 +258,44 @@ public class SettingsScreen extends OptionsSubScreen {
 			return;
 		}
 
-		if (this.scopeTabBar != null) {
-			this.scopeTabBar.setWidth(this.width);
-			this.scopeTabBar.arrangeElements();
-		}
+		this.arrangeScopeTabBar();
 
+		final ScreenRectangle tabRectangle = this.scopeTabBar == null ? null : this.scopeTabBar.getRectangle();
 		final int titleY = navigation.isOverview()
-			? (this.scopeTabBar == null ? 4 : this.scopeTabBar.getRectangle().bottom() + 3)
+			? (tabRectangle == null ? 4 : tabRectangle.bottom() + 3)
 			: 6;
 		final int titleHeight = this.pageTitle.layout(
 			this.width,
 			titleY,
 			this.font.lineHeight,
 			this.font::width);
-		this.layout.setHeaderHeight(SettingsScreenLayout.headerHeightFor(
+		final int headerHeight = SettingsScreenLayout.headerHeightFor(
 			navigation.isLeaf(),
 			titleY,
-			titleHeight));
-		this.layout.setFooterHeight(SettingsScreenLayout.footerHeightFor(
+			titleHeight);
+		final int footerHeight = SettingsScreenLayout.footerHeightFor(
 			this.height,
-			this.layout.getHeaderHeight(),
-			navigation.isLeaf()));
+			headerHeight,
+			navigation.isLeaf());
+		this.layout.setHeaderHeight(headerHeight);
+		this.layout.setFooterHeight(footerHeight);
 
-		this.settingsList.updateSizeAndPosition(
+		final int listHeight = Math.max(0, this.height - headerHeight - footerHeight);
+		this.settingsList.updateSizeAndPosition(this.width, listHeight, headerHeight);
+		LOGGER.debug(
+			"settings layout: screen={}x{} tab={} titleY={} titleH={} header={} footer={} listY={} listH={}",
 			this.width,
-			Math.max(0, this.height - this.layout.getHeaderHeight() - this.layout.getFooterHeight()),
-			this.layout.getHeaderHeight());
+			this.height,
+			tabRectangle,
+			titleY,
+			titleHeight,
+			headerHeight,
+			footerHeight,
+			this.settingsList.getY(),
+			this.settingsList.getHeight());
 		this.tabManager.setTabArea(new ScreenRectangle(
 			0,
-			this.layout.getHeaderHeight(),
+			headerHeight,
 			this.width,
 			Math.max(0, this.height - this.layout.getHeaderHeight() - this.layout.getFooterHeight())));
 
@@ -281,9 +305,9 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	@Override
-	public void resize(net.minecraft.client.Minecraft minecraft, int width, int height) {
+	public void resize(int width, int height) {
 		this.saveCurrentViewState();
-		super.resize(minecraft, width, height);
+		super.resize(width, height);
 		this.restoreCurrentViewState();
 	}
 
@@ -291,11 +315,13 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.scopeTabs.clear();
 		this.scopeTabs.put(Scope.CLIENT, new ScopeTab(Scope.CLIENT));
 		this.scopeTabs.put(Scope.SERVER, new ScopeTab(Scope.SERVER));
-		this.scopeTabBar = TabNavigationBar.builder(this.tabManager, this.width)
-			.addTabs(this.scopeTabs.get(Scope.CLIENT), this.scopeTabs.get(Scope.SERVER))
+		this.clientTabButton = new ScopeTabButton(this.tabManager, this.scopeTabs.get(Scope.CLIENT));
+		this.serverTabButton = new ScopeTabButton(this.tabManager, this.scopeTabs.get(Scope.SERVER));
+		this.scopeTabBar = scopeTabBarBuilder(this.tabManager)
+			.addTab(this.clientTabButton, this.scopeTabs.get(Scope.CLIENT))
+			.addTab(this.serverTabButton, this.scopeTabs.get(Scope.SERVER))
 			.build();
-		this.scopeTabBar.setWidth(this.width);
-		this.scopeTabBar.arrangeElements();
+		this.arrangeScopeTabBar();
 
 		this.syncingScopeTab = true;
 		this.tabManager.setCurrentTab(this.scopeTabs.get(navigation.scope()), false);
@@ -536,26 +562,26 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	private void addSubgroup(String key) {
 		this.flushPendingHalfWidthRow();
-		final var heading = new StringWidget(
+		final var heading = new LeftTextWidget(
 			0,
 			0,
 			SettingsScreenLayout.LARGE_WIDGET_WIDTH,
 			SettingsScreenLayout.ROW_HEIGHT,
 			LanguageUtils.settings("group").path(key).get().withStyle(ChatFormatting.BOLD),
-			this.font).alignLeft();
+			this.font);
 		heading.active = false;
 		this.settingsList.addSmall(heading, null);
 	}
 
 	private void addChannelRow() {
 		this.addSubgroup("channel");
-		final var label = new StringWidget(
+		final var label = new LeftTextWidget(
 			0,
 			0,
 			SettingsScreenLayout.SMALL_WIDGET_WIDTH,
 			SettingsScreenLayout.ROW_HEIGHT,
 			LanguageUtils.settings("channel").get(),
-			this.font).alignLeft();
+			this.font);
 		label.active = false;
 		label.setTooltip(Tooltip.create(LanguageUtils.settings("channel.tooltip").get()));
 
@@ -624,13 +650,13 @@ public class SettingsScreen extends OptionsSubScreen {
 			default -> throw new IllegalArgumentException("not a server numeric field: " + setting);
 		}
 
-		final var label = new StringWidget(
+		final var label = new LeftTextWidget(
 			0,
 			0,
 			SettingsScreenLayout.LARGE_WIDGET_WIDTH,
 			SettingsScreenLayout.ROW_HEIGHT,
 			LanguageUtils.settings(key).get(),
-			this.font).alignLeft();
+			this.font);
 		label.active = false;
 		label.setTooltip(Tooltip.create(LanguageUtils.settings(tooltipKey).get()));
 		this.settingsList.addSmall(label, null);
@@ -648,13 +674,13 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	private void addServerStatus() {
 		this.flushPendingHalfWidthRow();
-		this.serverStatusWidget = new StringWidget(
+		this.serverStatusWidget = new CenterTextWidget(
 			0,
 			0,
 			SettingsScreenLayout.LARGE_WIDGET_WIDTH,
 			SettingsScreenLayout.ROW_HEIGHT,
 			this.serverStatusText().withStyle(this.serverSettings.canEdit() ? ChatFormatting.GRAY : ChatFormatting.YELLOW),
-			this.font).alignCenter();
+			this.font);
 		this.serverStatusWidget.active = false;
 		this.settingsList.addSmall(this.serverStatusWidget, null);
 	}
@@ -715,7 +741,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			return;
 		}
 		navigation.saveViewStateBeforeNavigation(
-			(int) Math.round(this.settingsList.getScrollAmount()),
+			(int) Math.round(this.settingsList.scrollAmount()),
 			focusKey);
 	}
 
@@ -733,7 +759,8 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void restoreCurrentViewState() {
-		this.settingsList.setClampedScrollAmount(navigation.scrollAmount());
+		this.settingsList.setScrollAmount(navigation.scrollAmount());
+		this.settingsList.refreshScrollAmount();
 		final AbstractWidget target = this.keyedWidgets.get(navigation.focusKey());
 		if (target == null) {
 			return;
@@ -743,7 +770,8 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.setFocused(this.settingsList);
 		// ContainerObjectSelectionList may scroll while it restores a child focus;
 		// the saved viewport is authoritative for a page revisit.
-		this.settingsList.setClampedScrollAmount(navigation.scrollAmount());
+		this.settingsList.setScrollAmount(navigation.scrollAmount());
+		this.settingsList.refreshScrollAmount();
 	}
 
 	@Override
@@ -797,9 +825,9 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void leaveSettingsScreen() {
-		if (parent != null && this.minecraft != null) {
+		if (this.lastScreen != null && this.minecraft != null) {
 			clearCurrent(this);
-			this.minecraft.setScreen(parent);
+			this.minecraft.setScreenAndShow(this.lastScreen);
 		} else {
 			clearCurrent(this);
 			super.onClose();
@@ -822,7 +850,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.suppressSaveOnClose = true;
 		this.leaveSettingsScreen();
 		try {
-			Util.getPlatform().openFile(ClientConfig.HANDLER.getConfigPath().toFile());
+			Blaze3D.openPath(ClientConfig.HANDLER.getConfigPath());
 		} catch (Exception | LinkageError failure) {
 			warnException("opening client config file failed", failure);
 		}
@@ -839,13 +867,17 @@ public class SettingsScreen extends OptionsSubScreen {
 		final long requestId = this.serverSettings.beginSessionIfNeeded();
 		if (requestId != NO_REQUEST) {
 			this.serverValidationMessage = null;
-			IPlatformNetworkService.INSTANCE.sendToServer(new ServerConfigRequestC2SPacket(requestId));
+			IClientNetworkService.INSTANCE.sendToServer(new ServerConfigRequestC2SPacket(requestId));
 		}
 	}
 
 	private void updatePermissionState(boolean rebuild) {
-		final boolean permission = this.hasLiveServerConnection()
-			&& this.minecraft.player.hasPermissions(3);
+		// 26.3 exposes no client-side permission data: LocalPlayer#permissions() is only
+		// written by LocalPlayer#setPermissions, which no vanilla or Fabric API path
+		// calls, so it always reports NO_PERMISSIONS.  The server owns the decision
+		// (ServerCore answers a request with a snapshot carrying canEdit, or with a
+		// denial), so reachability is the only client-side gate.
+		final boolean permission = this.hasLiveServerConnection();
 		if (permission == this.serverSettings.clientPermission()) {
 			return;
 		}
@@ -931,7 +963,7 @@ public class SettingsScreen extends OptionsSubScreen {
 
 		final var values = update.orElseThrow();
 		this.serverSettings.markClean();
-		IPlatformNetworkService.INSTANCE.sendToServer(new ServerConfigUpdateC2SPacket(
+		IClientNetworkService.INSTANCE.sendToServer(new ServerConfigUpdateC2SPacket(
 			values.changedFields(),
 			values.defaultChannelMode(),
 			values.playerTrackingEnabled(),
@@ -967,7 +999,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			message.append(" ").append(
 				LanguageUtils.settings("reset_all").path("server_draft_warning").get().withStyle(ChatFormatting.YELLOW));
 		}
-		this.minecraft.setScreen(new ConfirmScreen(
+		this.minecraft.setScreenAndShow(new ConfirmScreen(
 			this::handleResetConfirmation,
 			LanguageUtils.settings("reset_all").path("title").get(),
 			message));
@@ -983,9 +1015,9 @@ public class SettingsScreen extends OptionsSubScreen {
 			this.suppressSaveOnClose = true;
 			clearCurrent(this);
 			ClientConfig.HANDLER.resetToDefaults();
-			this.minecraft.setScreen(new SettingsScreen(this.parent));
+			this.minecraft.setScreenAndShow(new SettingsScreen(this.lastScreen));
 		} else {
-			this.minecraft.setScreen(this);
+			this.minecraft.setScreenAndShow(this);
 		}
 	}
 
@@ -1001,7 +1033,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		if (Game.player == null) {
 			return Component.empty();
 		}
-		final var teamContext = TeamContextHandler.getSelfContext();
+		final var teamContext = ClientTeamContextHelper.getSelfContext();
 		final MutableComponent placeholder = teamContext == TeamContext.NONE
 			? LanguageUtils.of("value", "global").get()
 			: LanguageUtils.settings("channel").path("placeholder")
@@ -1234,14 +1266,14 @@ public class SettingsScreen extends OptionsSubScreen {
 		return button;
 	}
 
-	private StringWidget createServerValidationLabel() {
-		final var label = new StringWidget(
+	private AbstractStringWidget createServerValidationLabel() {
+		final var label = new CenterTextWidget(
 			0,
 			0,
 			SettingsScreenLayout.LARGE_WIDGET_WIDTH,
 			SettingsScreenLayout.ROW_HEIGHT,
 			this.serverValidationMessage.copy().withStyle(ChatFormatting.RED),
-			this.font).alignCenter();
+			this.font);
 		label.active = false;
 		return label;
 	}
@@ -1259,20 +1291,137 @@ public class SettingsScreen extends OptionsSubScreen {
 			SettingsScreenLayout.SMALL_WIDGET_WIDTH,
 			SettingsScreenLayout.ROW_HEIGHT,
 			LanguageUtils.settings(narrationKey).get());
-		field.setMaxLength(Integer.toString(Integer.MAX_VALUE).length());
-		field.setFilter(text -> text.isEmpty()
-			|| text.chars().allMatch(character -> character >= '0' && character <= '9'));
+		final int maxLength = Integer.toString(Integer.MAX_VALUE).length();
+		field.setMaxLength(maxLength);
 		field.setValue(value);
 		field.setTooltip(Tooltip.create(LanguageUtils.settings(tooltipKey).get()));
+		// 26.3 removed EditBox#setFilter; dropping the whole edit in the responder keeps
+		// the upstream-visible behaviour of rejecting a non-digit insertion.
+		final String[] accepted = {value};
 		field.setResponder(text -> {
+			final boolean digitsOnly = text.isEmpty()
+				|| text.chars().allMatch(character -> character >= '0' && character <= '9');
+			if (!digitsOnly) {
+				field.setValue(accepted[0]);
+				return;
+			}
+			accepted[0] = text.length() > maxLength ? text.substring(0, maxLength) : text;
 			this.serverValidationMessage = null;
-			responder.accept(text);
+			responder.accept(accepted[0]);
 		});
 		return field;
 	}
 
 	private MutableComponent serverRowText(Component label, Component value) {
 		return Component.empty().append(label).append(": ").append(value);
+	}
+
+	private static final int TAB_BAR_HEIGHT = 24;
+	private static final int TAB_BAR_MAX_CONTENT_WIDTH = 400;
+	private static final int TAB_BAR_SIDE_MARGIN = 28;
+
+	private TabNavigationBar.Builder scopeTabBarBuilder(TabManager tabManager) {
+		return TabNavigationBar.builder(tabManager, 0, 0, this.width, TAB_BAR_HEIGHT);
+	}
+
+	/**
+	 * 26.3 moved the tab button sizing out of {@link TabNavigationBar#arrangeElements(int)}
+	 * into the menu bar, so the widths have to be assigned here.  The constants match the
+	 * vanilla menu bar ({@code Math.min(400, width) - 28} split evenly, rounded to two
+	 * pixels) because that is what upstream inherited from the 1.21.1 tab bar.
+	 */
+	private void arrangeScopeTabBar() {
+		if (this.scopeTabBar == null || this.clientTabButton == null || this.serverTabButton == null) {
+			return;
+		}
+
+		final int tabsWidth = Math.min(TAB_BAR_MAX_CONTENT_WIDTH, this.width) - TAB_BAR_SIDE_MARGIN;
+		final int tabWidth = Mth.roundToward(tabsWidth / 2, 2);
+		this.clientTabButton.setWidth(tabWidth);
+		this.serverTabButton.setWidth(tabWidth);
+		// The bar itself is only as wide as its tabs (vanilla moves the inner layout instead);
+		// sizing it to the screen would leave its rectangle hanging past the right edge.
+		this.scopeTabBar.setWidth(tabsWidth);
+		this.scopeTabBar.setX(Mth.roundToward((this.width - tabsWidth) / 2, 2));
+		this.scopeTabBar.arrangeElements(this.width);
+	}
+
+	/**
+	 * Plain-text line with explicit bounds and left alignment.  26.3 dropped
+	 * {@code StringWidget#alignLeft/alignCenter} and its built-in widget draws
+	 * flush left, so both alignments are supplied here with the vanilla
+	 * vertical centring ({@code (height - 9) / 2}).
+	 */
+	private static class LeftTextWidget extends AbstractStringWidget {
+		private LeftTextWidget(int x, int y, int width, int height, Component message, net.minecraft.client.gui.Font font) {
+			super(x, y, width, height, message, font);
+		}
+
+		@Override
+		public void visitLines(ActiveTextCollector collector) {
+			collector.accept(this.getX(), this.textY(), this.getMessage());
+		}
+
+		protected int textY() {
+			return this.getY() + (this.getHeight() - 9) / 2;
+		}
+	}
+
+	/** Same line, horizontally centred within its bounds. */
+	private static final class CenterTextWidget extends LeftTextWidget {
+		private CenterTextWidget(int x, int y, int width, int height, Component message, net.minecraft.client.gui.Font font) {
+			super(x, y, width, height, message, font);
+		}
+
+		@Override
+		public void visitLines(ActiveTextCollector collector) {
+			final int textX = this.getX() + (this.getWidth() - this.getFont().width(this.getMessage())) / 2;
+			collector.accept(textX, this.textY(), this.getMessage());
+		}
+	}
+
+	/**
+	 * Scope tab button.  26.3 made {@link TabButton} abstract and ships only the
+	 * menu-styled implementation, which paints the menu backdrop and a focus
+	 * underline on top of the tab sprite.  This keeps the classic tab sprites and
+	 * the label placement only.
+	 */
+	private static boolean degenerateLogged;
+
+	private static final class ScopeTabButton extends TabButton {
+		private static final WidgetSprites SPRITES = new WidgetSprites(
+			Identifier.withDefaultNamespace("widget/tab_selected"),
+			Identifier.withDefaultNamespace("widget/tab"),
+			Identifier.withDefaultNamespace("widget/tab_selected_highlighted"),
+			Identifier.withDefaultNamespace("widget/tab_highlighted"));
+
+		private ScopeTabButton(TabManager tabManager, Tab tab) {
+			super(tabManager, tab, 0, TAB_BAR_HEIGHT);
+		}
+
+		@Override
+		protected void extractWidgetRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
+			graphics.blitSprite(RenderPipelines.GUI_TEXTURED, SPRITES.get(this.isSelected(), this.isHoveredOrFocused()),
+				this.getX(), this.getY(), this.width, this.height);
+			final int left = this.getX() + 1;
+			final int right = this.getX() + this.width - 1;
+			final int top = this.getY() + (this.isSelected() ? 0 : 3);
+			final int bottom = this.getY() + this.getHeight();
+			// 26.3 takes (message, x1, x2, y1, y2) here; the scrolling variant pushes a
+			// scissor that is not clipped to the screen, and one throw inside renderFrame
+			// leaves the window surface acquired, freezing the game.  Degenerate boxes must
+			// never reach it, so the call is guarded.
+			if (this.width > 0 && this.getHeight() > 0 && left < right && top < bottom) {
+				graphics.textRendererForWidget(this, GuiGraphicsExtractor.HoveredTextEffects.NONE)
+					.acceptScrollingWithDefaultCenter(this.getMessage(), left, right, top, bottom);
+			} else if (!degenerateLogged) {
+				degenerateLogged = true;
+				LOGGER.warn(
+					"scope tab label box degenerated pos=({},{}) size={}x{}; skipping the label",
+					this.getX(), this.getY(), this.width, this.getHeight());
+			}
+			this.handleCursor(graphics);
+		}
 	}
 
 	private final class NavigationTabManager extends TabManager {
@@ -1303,6 +1452,11 @@ public class SettingsScreen extends OptionsSubScreen {
 		}
 
 		@Override
+		public Component getTabExtraNarration() {
+			return Component.empty();
+		}
+
+		@Override
 		public void visitChildren(Consumer<AbstractWidget> consumer) {
 			// The root tabs select navigation state; their content remains in the
 			// screen's single retained OptionsList.
@@ -1311,6 +1465,13 @@ public class SettingsScreen extends OptionsSubScreen {
 		@Override
 		public void doLayout(ScreenRectangle area) {
 			// The shared page list is laid out by the screen, not by either tab.
+		}
+
+		@Override
+		public Layout getLayout() {
+			// No 26.3 code path reads a scope tab's layout (TabManager only calls
+			// doLayout/visitChildren), so an empty layout keeps navigation inert.
+			return new GridLayout();
 		}
 	}
 
@@ -1325,14 +1486,14 @@ public class SettingsScreen extends OptionsSubScreen {
 
 		private AbstractWidget focusedWidget() {
 			final GuiEventListener focusedEntry = this.getFocused();
-			if (focusedEntry instanceof OptionsList.Entry entry && entry.getFocused() instanceof AbstractWidget widget) {
+			if (focusedEntry instanceof OptionsList.AbstractEntry entry && entry.getFocused() instanceof AbstractWidget widget) {
 				return widget;
 			}
 			return null;
 		}
 
 		private void focusWidget(AbstractWidget widget) {
-			for (OptionsList.Entry entry : this.children()) {
+			for (OptionsList.AbstractEntry entry : this.children()) {
 				if (entry.children().contains(widget)) {
 					entry.setFocused(widget);
 					this.setFocused(entry);

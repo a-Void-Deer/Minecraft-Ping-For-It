@@ -196,7 +196,7 @@ class ConfigHandlerVersionTest {
         assertFalse(persisted.get("passThroughTransparentBlocks").getAsBoolean());
         assertFalse(persisted.get("markBlacklistedTargets").getAsBoolean());
         assertFalse(persisted.get("markFluids").getAsBoolean());
-        assertEquals(100, persisted.get("configurationNoticeSize").getAsInt());
+        assertEquals(200, persisted.get("configurationNoticeSize").getAsInt());
         assertEquals(0, persisted.get("markerDisplayDuration").getAsInt());
         assertEquals("legacy", persisted.get("unknown").getAsJsonObject().get("source").getAsString());
         assertFalse(hasBrokenBackup(tempDir));

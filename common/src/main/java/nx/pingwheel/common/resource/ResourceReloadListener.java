@@ -2,7 +2,8 @@ package nx.pingwheel.common.resource;
 
 import net.minecraft.server.packs.resources.PreparableReloadListener;
 import net.minecraft.server.packs.resources.ResourceManager;
-import net.minecraft.util.profiling.ProfilerFiller;
+
+import nx.pingwheel.common.client.resource.PingTextureState;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -12,8 +13,8 @@ import static nx.pingwheel.common.resource.ResourceConstants.PING_TEXTURE_ID;
 public class ResourceReloadListener implements PreparableReloadListener {
 
 	@Override
-	public CompletableFuture<Void> reload(PreparationBarrier helper, ResourceManager resourceManager, ProfilerFiller loadProfiler, ProfilerFiller applyProfiler, Executor loadExecutor, Executor applyExecutor) {
-		return reloadTextures(helper, resourceManager, loadExecutor, applyExecutor);
+	public CompletableFuture<Void> reload(SharedState sharedState, Executor loadExecutor, PreparationBarrier barrier, Executor applyExecutor) {
+		return reloadTextures(barrier, sharedState.resourceManager(), loadExecutor, applyExecutor);
 	}
 
 	private static int numCustomTextures;
@@ -24,12 +25,11 @@ public class ResourceReloadListener implements PreparableReloadListener {
 
 	public static CompletableFuture<Void> reloadTextures(PreparationBarrier helper, ResourceManager resourceManager, Executor loadExecutor, Executor applyExecutor) {
 		return CompletableFuture
-			.supplyAsync(() -> {
-				numCustomTextures = resourceManager.getResourceStack(PING_TEXTURE_ID).size();
-
-				return true;
-			}, loadExecutor)
+			.supplyAsync(() -> resourceManager.getResourceStack(PING_TEXTURE_ID).size(), loadExecutor)
 			.thenCompose(helper::wait)
-			.thenAcceptAsync((ignored) -> {}, applyExecutor);
+			.thenAcceptAsync(count -> {
+				numCustomTextures = count;
+				PingTextureState.setHasCustomTexture(count > 1);
+			}, applyExecutor);
 	}
 }

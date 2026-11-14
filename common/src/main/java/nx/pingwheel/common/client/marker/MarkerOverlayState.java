@@ -120,7 +120,7 @@ public final class MarkerOverlayState {
 
 		syncNames(game.level.registryAccess(), nameStore);
 
-		String currentDimension = game.level.dimension().location().toString();
+		String currentDimension = game.level.dimension().identifier().toString();
 
 		for (MarkerView view : views.values()) {
 			if (view.getDimension().equals(currentDimension)) {

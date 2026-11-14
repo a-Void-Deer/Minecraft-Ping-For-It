@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(Minecraft.class)
 public abstract class MinecraftMixin {
 
-	@Inject(method = "setScreen", at = @At("HEAD"))
+	@Inject(method = "setScreenAndShow", at = @At("HEAD"))
 	private void pingforit$onSetScreen(Screen nextScreen, CallbackInfo callbackInfo) {
 		CommonClient.INSTANCE.onScreenChanged(nextScreen);
 	}

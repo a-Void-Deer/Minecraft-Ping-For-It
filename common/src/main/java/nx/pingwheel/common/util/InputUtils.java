@@ -2,35 +2,42 @@ package nx.pingwheel.common.util;
 
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.phys.HitResult;
 import nx.pingwheel.common.client.SelectionToggleNoticeState;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.resource.LanguageUtils;
-import org.lwjgl.glfw.GLFW;
 
 import static nx.pingwheel.common.CommonClient.Game;
+import static nx.pingwheel.common.Global.MOD_ID;
 
 public class InputUtils {
 	InputUtils() {}
 
-	private static final String SETTINGS_CATEGORY = LanguageUtils.keyOf("key.category", "name");
-	public static final KeyMapping KEY_BINDING_PING = new KeyMapping(LanguageUtils.keyOf("key", "ping_location"), InputConstants.Type.MOUSE, GLFW.GLFW_MOUSE_BUTTON_5, SETTINGS_CATEGORY);
+	// 26.3: a key-mapping category is a registered KeyMapping.Category, not a
+	// translation-key String.
+	private static final KeyMapping.Category SETTINGS_CATEGORY =
+		KeyMapping.Category.register(Identifier.fromNamespaceAndPath(MOD_ID, "name"));
+	public static final KeyMapping KEY_BINDING_PING = new KeyMapping(LanguageUtils.keyOf("key", "ping_location"), InputConstants.Type.MOUSE, InputConstants.MOUSE_BUTTON_5, SETTINGS_CATEGORY);
 	public static final KeyMapping KEY_BINDING_TOGGLE_PASS_THROUGH_TRANSPARENT_BLOCKS = new KeyMapping(
 		LanguageUtils.keyOf("key", "toggle_pass_through_transparent_blocks"),
-		InputConstants.Type.KEYSYM,
-		GLFW.GLFW_KEY_LEFT_SHIFT,
+		InputConstants.Type.KEYBOARD,
+		InputConstants.KEY_LSHIFT,
 		SETTINGS_CATEGORY);
 	public static final KeyMapping KEY_BINDING_TOGGLE_MARK_BLACKLISTED_TARGETS = new KeyMapping(
 		LanguageUtils.keyOf("key", "toggle_mark_blacklisted_targets"),
-		InputConstants.Type.KEYSYM,
-		GLFW.GLFW_KEY_LEFT_CONTROL,
+		InputConstants.Type.KEYBOARD,
+		InputConstants.KEY_LCONTROL,
 		SETTINGS_CATEGORY);
 	public static final KeyMapping KEY_BINDING_TOGGLE_MARK_FLUIDS = new KeyMapping(
 		LanguageUtils.keyOf("key", "toggle_mark_fluids"),
-		InputConstants.Type.KEYSYM,
-		GLFW.GLFW_KEY_LEFT_ALT,
+		InputConstants.Type.KEYBOARD,
+		InputConstants.KEY_LALT,
 		SETTINGS_CATEGORY);
-	public static final KeyMapping KEY_BINDING_SETTINGS = new KeyMapping(LanguageUtils.keyOf("key", "open_settings"), InputConstants.Type.KEYSYM, -1, SETTINGS_CATEGORY);
+	// 26.3 indexes the SDL scancode array by this value directly, so an unbound
+	// default must be UNKNOWN (0) - a literal -1 makes ByteBuffer#get(-1) throw
+	// IndexOutOfBoundsException from KeyMapping#setAll when a world finishes loading.
+	public static final KeyMapping KEY_BINDING_SETTINGS = new KeyMapping(LanguageUtils.keyOf("key", "open_settings"), InputConstants.Type.KEYBOARD, InputConstants.UNKNOWN.getValue(), SETTINGS_CATEGORY);
 
 	/** The physical key and armed state of the current claimed hold. */
 	private static final ClaimedInputState<ClaimedKey> PING_INPUT_STATE = new ClaimedInputState<>();
@@ -103,7 +110,7 @@ public class InputUtils {
 		// A press received by a screen is still claimed through its physical
 		// release. This prevents a GLFW repeat after the screen closes from
 		// becoming a fresh toggle edge.
-		if (Game != null && Game.screen != null) {
+		if (Game != null && Game.gui.screen() != null) {
 			TOGGLE_INPUT_STATE.suppressPress(key);
 			return;
 		}
@@ -124,11 +131,7 @@ public class InputUtils {
 	}
 
 	private static boolean matches(KeyMapping mapping, InputConstants.Key rawKey) {
-		return switch (rawKey.getType()) {
-			case MOUSE -> mapping.matchesMouse(rawKey.getValue());
-			case KEYSYM -> mapping.matches(rawKey.getValue(), InputConstants.UNKNOWN.getValue());
-			case SCANCODE -> mapping.matches(InputConstants.UNKNOWN.getValue(), rawKey.getValue());
-		};
+		return mapping.matches(rawKey);
 	}
 
 	private static void togglePassThroughTransparentBlocks(long eventTimeMillis) {
@@ -175,11 +178,7 @@ public class InputUtils {
 	}
 
 	private static boolean matchesPingBinding(InputConstants.Key rawKey) {
-		return switch (rawKey.getType()) {
-			case MOUSE -> KEY_BINDING_PING.matchesMouse(rawKey.getValue());
-			case KEYSYM -> KEY_BINDING_PING.matches(rawKey.getValue(), InputConstants.UNKNOWN.getValue());
-			case SCANCODE -> KEY_BINDING_PING.matches(InputConstants.UNKNOWN.getValue(), rawKey.getValue());
-		};
+		return KEY_BINDING_PING.matches(rawKey);
 	}
 
 	private static void arm(InputConstants.Key rawKey) {

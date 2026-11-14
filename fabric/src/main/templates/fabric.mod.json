@@ -1,0 +1,33 @@
+{
+	"schemaVersion": 1,
+	"id": "pingforit",
+	"version": "${version}",
+	"name": "Ping For It",
+	"description": "Mark locations similar to the ping mechanism found in modern co-op multiplayer games.",
+	"authors": ["Luken"],
+	"contributors": ["RXJpaw"],
+	"contact": {
+		"homepage": "https://github.com/a-Void-Deer/Minecraft-Ping-For-It",
+		"sources": "https://github.com/a-Void-Deer/Minecraft-Ping-For-It",
+		"issues": "https://github.com/a-Void-Deer/Minecraft-Ping-For-It/issues"
+	},
+	"license": "MIT",
+	"icon": "icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": ["nx.pingwheel.fabric.FabricMain"],
+		"client": ["nx.pingwheel.fabric.FabricClient"]
+	},
+	"mixins": [
+		{
+			"config": "pingforit.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.20.1",
+		"minecraft": "~26.3",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}

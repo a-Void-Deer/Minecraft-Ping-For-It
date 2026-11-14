@@ -18,6 +18,12 @@ public class GameContext {
 	@Getter
 	private static int dimension = 0;
 	private static ClientLevel lastWorld = null;
+
+	/** Drops the cached client level identity on disconnect/reconnect. */
+	public static void clearLastWorld() {
+		lastWorld = null;
+	}
+
 	private static final RenderEntityLookupCache<ClientLevel, Entity> RENDER_ENTITY_LOOKUP_CACHE =
 		new RenderEntityLookupCache<>(new RenderEntityLookupCache.Access<>() {
 			@Override
@@ -52,7 +58,7 @@ public class GameContext {
 		}
 
 		lastWorld = Game.level;
-		dimension = lastWorld.dimension().location().hashCode();
+		dimension = lastWorld.dimension().identifier().hashCode();
 	}
 
 	/**

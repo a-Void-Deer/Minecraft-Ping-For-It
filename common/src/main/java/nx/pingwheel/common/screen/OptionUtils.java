@@ -25,10 +25,10 @@ public class OptionUtils {
 				: (value) -> Tooltip.create(tooltipSupplier.get()),
 			(optionText, value) -> formatter.apply(getter.get()),
 			(new OptionInstance.IntRange(min / step, max / step))
-				.xmap((value) -> value * step, (value) -> value / step),
+				.xmap((value) -> value * step, (value) -> value / step, true),
 			Codec.intRange(min, max),
 			getter.get(),
-			setter
+			value -> setter.accept(value)
 		);
 	}
 
@@ -41,10 +41,10 @@ public class OptionUtils {
 			OptionInstance.noTooltip(),
 			(optionText, value) -> formatter.apply(getter.get()),
 			(new OptionInstance.IntRange(iMin, iMax))
-				.xmap((value) -> value * step, (value) -> (int) (value / step)),
+				.xmap((value) -> value * step, (value) -> (int) (value / step), true),
 			Codec.floatRange(iMin, iMax),
 			getter.get(),
-			setter
+			value -> setter.accept(value)
 		);
 	}
 
@@ -59,7 +59,7 @@ public class OptionUtils {
 				? OptionInstance.noTooltip()
 				: (value) -> Tooltip.create(tooltipSupplier.get()),
 			getter.get(),
-			setter
+			value -> setter.accept(value)
 		);
 	}
 
@@ -73,7 +73,7 @@ public class OptionUtils {
 				Enum::name
 			)),
 			getter.get(),
-			setter
+			value -> setter.accept(value)
 		);
 	}
 }

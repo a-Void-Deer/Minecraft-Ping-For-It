@@ -42,20 +42,20 @@ public class FabricMain implements ModInitializer {
 	public void onInitialize() {
 		CommonServer.INSTANCE.onInit();
 
-		PayloadTypeRegistry.playS2C().register(PingLocationS2CPacket.PACKET_TYPE, PING_LOCATION_S2C_CODEC);
-		PayloadTypeRegistry.playC2S().register(PingLocationC2SPacket.PACKET_TYPE, PING_LOCATION_C2S_CODEC);
-		PayloadTypeRegistry.playC2S().register(UpdateChannelC2SPacket.PACKET_TYPE, UPDATE_CHANNEL_C2S_CODEC);
-		PayloadTypeRegistry.playC2S().register(MarkerCreateC2SPacket.PACKET_TYPE, MARKER_CREATE_C2S_CODEC);
-		PayloadTypeRegistry.playC2S().register(MarkerRemoveC2SPacket.PACKET_TYPE, MARKER_REMOVE_C2S_CODEC);
-		PayloadTypeRegistry.playS2C().register(MarkerCreatedS2CPacket.PACKET_TYPE, MARKER_CREATED_S2C_CODEC);
-		PayloadTypeRegistry.playS2C().register(MarkerRemovedS2CPacket.PACKET_TYPE, MARKER_REMOVED_S2C_CODEC);
-		PayloadTypeRegistry.playS2C().register(MarkerRejectedS2CPacket.PACKET_TYPE, MARKER_REJECTED_S2C_CODEC);
-		PayloadTypeRegistry.playS2C().register(MarkerWinnerChangedS2CPacket.PACKET_TYPE, MARKER_WINNER_CHANGED_S2C_CODEC);
-		PayloadTypeRegistry.playS2C().register(RateLimitPolicyS2CPacket.PACKET_TYPE, RATE_LIMIT_POLICY_S2C_CODEC);
-		PayloadTypeRegistry.playS2C().register(SyncDurationPolicyS2CPacket.PACKET_TYPE, SYNC_DURATION_POLICY_S2C_CODEC);
-		PayloadTypeRegistry.playC2S().register(ServerConfigRequestC2SPacket.PACKET_TYPE, SERVER_CONFIG_REQUEST_C2S_CODEC);
-		PayloadTypeRegistry.playC2S().register(ServerConfigUpdateC2SPacket.PACKET_TYPE, SERVER_CONFIG_UPDATE_C2S_CODEC);
-		PayloadTypeRegistry.playS2C().register(ServerConfigSnapshotS2CPacket.PACKET_TYPE, SERVER_CONFIG_SNAPSHOT_S2C_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(PingLocationS2CPacket.PACKET_TYPE, PING_LOCATION_S2C_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(PingLocationC2SPacket.PACKET_TYPE, PING_LOCATION_C2S_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(UpdateChannelC2SPacket.PACKET_TYPE, UPDATE_CHANNEL_C2S_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(MarkerCreateC2SPacket.PACKET_TYPE, MARKER_CREATE_C2S_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(MarkerRemoveC2SPacket.PACKET_TYPE, MARKER_REMOVE_C2S_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(MarkerCreatedS2CPacket.PACKET_TYPE, MARKER_CREATED_S2C_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(MarkerRemovedS2CPacket.PACKET_TYPE, MARKER_REMOVED_S2C_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(MarkerRejectedS2CPacket.PACKET_TYPE, MARKER_REJECTED_S2C_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(MarkerWinnerChangedS2CPacket.PACKET_TYPE, MARKER_WINNER_CHANGED_S2C_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(RateLimitPolicyS2CPacket.PACKET_TYPE, RATE_LIMIT_POLICY_S2C_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(SyncDurationPolicyS2CPacket.PACKET_TYPE, SYNC_DURATION_POLICY_S2C_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(ServerConfigRequestC2SPacket.PACKET_TYPE, SERVER_CONFIG_REQUEST_C2S_CODEC);
+		PayloadTypeRegistry.serverboundPlay().register(ServerConfigUpdateC2SPacket.PACKET_TYPE, SERVER_CONFIG_UPDATE_C2S_CODEC);
+		PayloadTypeRegistry.clientboundPlay().register(ServerConfigSnapshotS2CPacket.PACKET_TYPE, SERVER_CONFIG_SNAPSHOT_S2C_CODEC);
 
 		ServerPlayNetworking.registerGlobalReceiver(
 			PingLocationC2SPacket.PACKET_TYPE,

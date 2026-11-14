@@ -3,10 +3,9 @@ package nx.pingwheel.common.client.marker;
 import java.util.Objects;
 import java.util.Optional;
 
-import lombok.Getter;
 import net.minecraft.client.multiplayer.PlayerInfo;
 import net.minecraft.network.chat.Component;
-import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.Vec3;
@@ -84,16 +83,31 @@ public final class MarkerView {
 
 	private ClientMarker marker;
 
-	@Getter
 	private @Nullable PlayerInfo playerInfo;
-	@Getter
 	private @Nullable ItemStack itemStack;
-	@Getter
 	private @Nullable ScreenPos screenPos;
-	@Getter
 	private double distance;
-	@Getter
 	private float scale;
+
+	public @Nullable PlayerInfo getPlayerInfo() {
+		return playerInfo;
+	}
+
+	public @Nullable ItemStack getItemStack() {
+		return itemStack;
+	}
+
+	public @Nullable ScreenPos getScreenPos() {
+		return screenPos;
+	}
+
+	public double getDistance() {
+		return distance;
+	}
+
+	public float getScale() {
+		return scale;
+	}
 
 	private Vec3 pos;
 	private boolean hasPresentationPosition;
@@ -190,7 +204,8 @@ public final class MarkerView {
 			Vec3 livePosition = null;
 
 			if (entity != null && !entity.isRemoved()) {
-				if (entity.getType() == EntityType.ITEM && config.isItemIconVisible()) {
+				// 26.3: EntityType constants moved to the EntityTypes holder.
+				if (entity.getType() == EntityTypes.ITEM && config.isItemIconVisible()) {
 					this.itemStack = ((ItemEntity)entity).getItem().copy();
 				}
 
@@ -209,8 +224,9 @@ public final class MarkerView {
 			this.entityPositionTracker.reset();
 		}
 
-		this.screenPos = MathUtils.worldToScreen(this.pos, ctx.modelViewMatrix, ctx.projectionMatrix);
-		this.distance = ctx.camera.getPosition().distanceTo(this.pos);
+		this.screenPos = MathUtils.worldToScreen(
+			this.pos, ctx.modelViewMatrix, ctx.projectionMatrix, ctx.camera);
+		this.distance = ctx.camera.position().distanceTo(this.pos);
 		this.calculateScale(config);
 		this.hasPresentationPosition = true;
 	}
@@ -250,7 +266,11 @@ public final class MarkerView {
 			return WHITE;
 		}
 
-		final var teamColor = this.playerInfo.getTeam().getColor().getColor();
+		// 26.3: Team#getColor() returns Optional<TeamColor>; TeamColor#rgb() is the
+		// packed 0xRRGGBB value ChatFormatting#getColor() used to provide.
+		final Integer teamColor = this.playerInfo.getTeam().getColor()
+			.map(teamColorValue -> teamColorValue.rgb())
+			.orElse(null);
 
 		if (teamColor == null) {
 			return WHITE;

@@ -3,19 +3,22 @@ package nx.pingwheel.common.client.outline;
 import java.util.List;
 import java.util.Objects;
 
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
 
-import static nx.pingwheel.common.client.outline.BlockModelOutlineRoute.TARGET_TYPE_BLOCK;
-import static nx.pingwheel.common.client.outline.BlockModelOutlineRoute.TARGET_TYPE_ENTITY_BLOCK;
-
 /**
- * Immutable, compiled client policy for native block glow versus the
- * shape-based outline. The parser is run when this object is constructed, not
- * during a render frame.
+ * The compiled block-display (glow) policy: a whitelist and a shape blacklist
+ * of {@link BlockDisplayWhitelist} entries, plus the per-target-type routing
+ * decision.
+ *
+ * <p>Restored from the 10/26 build (decompiled): the M3b placeholder only kept
+ * the source entries, so the native-glow routing decision had silently
+ * disappeared. Whitelist/blacklist evaluation is pure and headless-safe: it
+ * resolves block registry ids and {@code Block} tag keys only, never optional
+ * mod classes.
  */
 public final class BlockDisplayPolicy {
+
 	private final BlockDisplayWhitelist whitelist;
 	private final BlockDisplayWhitelist blacklist;
 
@@ -24,9 +27,6 @@ public final class BlockDisplayPolicy {
 		this.blacklist = Objects.requireNonNull(blacklist, "blacklist");
 	}
 
-	/**
-	 * Compiles and strictly validates both configured lists.
-	 */
 	public static BlockDisplayPolicy compile(List<String> whitelistEntries, List<String> blacklistEntries) {
 		BlockDisplayWhitelist.validateEntries(whitelistEntries, "blockDisplayWhitelist");
 		BlockDisplayWhitelist.validateEntries(blacklistEntries, "blockShapeBlacklist");
@@ -36,62 +36,50 @@ public final class BlockDisplayPolicy {
 			new BlockDisplayWhitelist(blacklistEntries));
 	}
 
-	/**
-	 * The default policy used before a client file is loaded.
-	 */
 	public static BlockDisplayPolicy defaults() {
 		return compile(BlockDisplayWhitelist.DEFAULT_ENTRIES, List.of());
 	}
 
 	public List<String> whitelistEntries() {
-		return whitelist.entries();
+		return this.whitelist.entries();
 	}
 
 	public List<String> blacklistEntries() {
-		return blacklist.entries();
+		return this.blacklist.entries();
 	}
 
-	/**
-	 * Decides whether the current block may use its native glow route. A
-	 * blacklist match always wins. Entity-block classification is checked here
-	 * as a target-safety gate; the renderer still validates the live
-	 * BlockEntity/renderer and falls back when that native path fails.
-	 */
 	public boolean shouldUseNativeGlow(String targetTypeId, BlockState state) {
 		Objects.requireNonNull(targetTypeId, "targetTypeId");
 		Objects.requireNonNull(state, "state");
 
 		boolean whitelistMatches = switch (targetTypeId) {
-			case TARGET_TYPE_BLOCK -> whitelist.matchesOrdinaryBlock(state, BlockTagLookup.minecraft());
-			case TARGET_TYPE_ENTITY_BLOCK -> whitelist.matchesEntityBlock(state, BlockTagLookup.minecraft());
+			case "block" -> this.whitelist.matchesOrdinaryBlock(state, BlockTagLookup.minecraft());
+			case "entity_block" -> this.whitelist.matchesEntityBlock(state, BlockTagLookup.minecraft());
 			default -> false;
 		};
 
-		return whitelistMatches && !blacklist.matches(state, BlockTagLookup.minecraft());
+		return whitelistMatches && !this.blacklist.matches(state, BlockTagLookup.minecraft());
 	}
 
-	/**
-	 * Headless truth-table seam for callers that already have stable block
-	 * facts and a deterministic tag lookup.
-	 */
 	public boolean shouldUseNativeGlow(
 		String targetTypeId,
-		ResourceLocation blockKey,
+		net.minecraft.resources.Identifier blockKey,
 		boolean hasBlockEntity,
 		RenderShape renderShape,
-		BlockTagLookup tagLookup) {
+		BlockTagLookup tagLookup
+	) {
 		Objects.requireNonNull(targetTypeId, "targetTypeId");
 		Objects.requireNonNull(renderShape, "renderShape");
 		Objects.requireNonNull(tagLookup, "tagLookup");
 
 		boolean whitelistMatches = switch (targetTypeId) {
-			case TARGET_TYPE_BLOCK -> !hasBlockEntity
+			case "block" -> !hasBlockEntity
 				&& renderShape == RenderShape.MODEL
-				&& whitelist.matches(blockKey, tagLookup);
-			case TARGET_TYPE_ENTITY_BLOCK -> hasBlockEntity && whitelist.matches(blockKey, tagLookup);
+				&& this.whitelist.matches(blockKey, tagLookup);
+			case "entity_block" -> hasBlockEntity && this.whitelist.matches(blockKey, tagLookup);
 			default -> false;
 		};
 
-		return whitelistMatches && !blacklist.matches(blockKey, tagLookup);
+		return whitelistMatches && !this.blacklist.matches(blockKey, tagLookup);
 	}
 }

@@ -1,7 +1,5 @@
 package nx.pingwheel.common.platform;
 
-import net.minecraft.client.KeyMapping;
-
 import java.nio.file.Path;
 import java.util.ServiceLoader;
 
@@ -14,6 +12,5 @@ public interface IPlatformContextService {
 	String getSelfModVersion();
 	Path resolveGameDir(String path);
 	Path resolveConfigDir(String path);
-	void registerKeyMapping(KeyMapping keyMapping);
 	boolean isModLoaded(String modId);
 }

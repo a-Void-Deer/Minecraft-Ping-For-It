@@ -5,7 +5,7 @@ import java.util.Optional;
 
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.boss.EnderDragonPart;
+import net.minecraft.world.entity.boss.enderdragon.EnderDragonPart;
 import net.minecraft.world.entity.ExperienceOrb;
 
 import nx.pingwheel.common.domain.EntityCaptureMetadata;

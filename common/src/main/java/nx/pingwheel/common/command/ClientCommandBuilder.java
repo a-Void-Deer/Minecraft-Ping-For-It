@@ -15,7 +15,7 @@ import org.apache.logging.log4j.util.TriConsumer;
 
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.Global.CLIENT_COMMAND_ROOT;
-import static nx.pingwheel.common.config.ClientConfig.MAX_CHANNEL_LENGTH;
+import static nx.pingwheel.common.network.ProtocolLimits.MAX_CHANNEL_LENGTH;
 
 public class ClientCommandBuilder {
 	private ClientCommandBuilder() {}
@@ -62,7 +62,7 @@ public class ClientCommandBuilder {
 
 		var cmdConfig = LiteralArgumentBuilder.<S>literal("config")
 			.executes((context) -> {
-				Game.tell(() -> Game.setScreen(new SettingsScreen()));
+				Game.execute(() -> Game.setScreenAndShow(new SettingsScreen()));
 				return 1;
 			});
 

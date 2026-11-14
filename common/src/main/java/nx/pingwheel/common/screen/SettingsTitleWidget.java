@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.function.ToIntFunction;
 
 import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
 import net.minecraft.network.chat.Component;
@@ -78,22 +78,22 @@ final class SettingsTitleWidget extends AbstractWidget {
 	}
 
 	@Override
-	protected void renderWidget(GuiGraphics graphics, int mouseX, int mouseY, float partialTick) {
+	protected void extractWidgetRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
 		if (this.font == null || this.lines.isEmpty()) {
 			return;
 		}
 
-		graphics.pose().pushPose();
-		graphics.pose().translate(0.0F, this.getY(), 0.0F);
-		graphics.pose().scale(TEXT_SCALE, TEXT_SCALE, 1.0F);
+		graphics.pose().pushMatrix();
+		graphics.pose().translate(0.0F, this.getY());
+		graphics.pose().scale(TEXT_SCALE, TEXT_SCALE);
 		for (int index = 0; index < this.lines.size(); index++) {
 			final String line = this.lines.get(index);
 			final float lineWidth = this.font.width(line);
 			final float x = (this.getWidth() / TEXT_SCALE - lineWidth) / 2.0F;
 			final float y = index * (this.lineHeight + LINE_GAP) / TEXT_SCALE;
-			graphics.drawString(this.font, line, Math.round(x), Math.round(y), TITLE_TEXT_COLOR, true);
+			graphics.text(this.font, line, Math.round(x), Math.round(y), TITLE_TEXT_COLOR, true);
 		}
-		graphics.pose().popPose();
+		graphics.pose().popMatrix();
 	}
 
 	@Override

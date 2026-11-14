@@ -5,20 +5,7 @@ import net.neoforged.neoforge.network.PacketDistributor;
 import nx.pingwheel.common.network.IPacket;
 import nx.pingwheel.common.platform.IPlatformNetworkService;
 
-import static nx.pingwheel.common.CommonClient.Game;
-
 public class PlatformNetworkServiceImpl implements IPlatformNetworkService {
-
-	@Override
-	public void sendToServer(IPacket packet) {
-		var connection = Game.getConnection();
-
-		if (connection == null || !connection.hasChannel(packet)) {
-			return;
-		}
-
-		PacketDistributor.sendToServer(packet);
-	}
 
 	@Override
 	public void sendToClient(IPacket packet, ServerPlayer player) {

@@ -1,177 +1,150 @@
 package nx.pingwheel.common.client.outline;
 
-import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Objects;
-import java.util.UUID;
 
-import nx.pingwheel.common.domain.EntityLocator;
+import net.minecraft.client.Minecraft;
+
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
-import nx.pingwheel.common.domain.PingTypeCatalog;
+import nx.pingwheel.common.domain.EntityLocator;
+
+import static nx.pingwheel.common.Global.LOGGER;
 
 /**
- * Main-thread-confined snapshot of the entities that currently control a
- * visible outline, prepared once per world render frame before the vanilla
- * entity pass.
+ * M7b: per-frame {@code EntityLocator -> ARGB colour} snapshot for entity outlines.
  *
- * <p>Every frame {@link #prepare} re-selects the entity outline specs from the
- * authoritative {@link ClientMarkerStore} visible-winner map of the current
- * dimension and swaps the immutable UUID→spec snapshot, preserving
- * {@link EntityOutlineSelection#select}'s deterministic ascending marker-id
- * iteration order. The snapshot carries no live position, so movement and
- * same-dimension teleports keep the same entity identity. The vanilla outline
- * renderer resolves the entity position and shape itself.
+ * <p>The snapshot is rebuilt from the marker store at the start of every level
+ * extraction, before render states are extracted, so the values a renderer reads are
+ * always from the current frame. The map is immutable and replaced wholesale, so a
+ * reader can never observe a half-built snapshot.
  *
- * <p>The render redirects in {@code LevelRendererMixin} query this state per
- * entity via {@link #shouldOutline} and {@link #colorFor}; no per-entity
- * render logging happens anywhere in this class.
- *
- * <p>Logging: only snapshot transitions are debug logged — the aggregate
- * counts {@code added/removed/changed/total} — never any UUID, dimension,
- * color, position, or name. A repeated identical prepare emits no log. The
- * default logger is a noop; production installs the lazy global logger via
- * {@link #setLogger}.
- *
- * <p>Thread safety: main-thread-confined, same as the {@link ClientMarkerStore}
- * it mirrors. Concurrent access is unsupported.
+ * <p>Failure policy: the hook warns once and then stays silent. Outlines are cosmetic,
+ * so a broken snapshot must never throw into the render loop.
  */
 public final class EntityOutlineState {
 
-	public static final EntityOutlineState INSTANCE = new EntityOutlineState();
+	/** Extractions with outlines pending but no entity hook before the warning fires. */
+	private static final int DIAG_AFTER_PREPARES = 60;
 
-	private static final PingTypeCatalog BUILT_IN_CATALOG = PingTypeCatalog.builtIn();
+	private static volatile Map<EntityLocator, Integer> outlines = Map.of();
+	private static volatile String dimensionId = "";
 
-	private static volatile EntityOutlineLogger logger = EntityOutlineLogger.noop();
-
-	private Map<EntityLocator, EntityOutlineSpec> specs = Map.of();
+	private static boolean activationLogged = false;
+	private static boolean disabled = false;
+	private static boolean failureLogged = false;
+	private static boolean hookWarned = false;
+	private static int preparesWithOutlines = 0;
+	private static int lastSize = -1;
 
 	private EntityOutlineState() {}
 
 	/**
-	 * Re-selects the entity outline specs for {@code dimensionId} from
-	 * {@code store} and, when the snapshot changed, replaces it and logs the
-	 * transition counts.
-	 *
-	 * <p>With a {@code null} store or dimension (no live runtime/level, or
-	 * after leaving the server) the state is cleared instead.
+	 * Rebuilds the snapshot for {@code dimensionId}. Must run on the render thread and
+	 * before entity render states are extracted.
 	 */
-	public void prepare(ClientMarkerStore store, String dimensionId) {
-		if (store == null || dimensionId == null) {
-			clear();
+	public static void prepare(ClientMarkerStore store, String currentDimensionId) {
+		if (disabled) {
 			return;
 		}
 
-		Map<EntityLocator, EntityOutlineSpec> next = EntityOutlineSelection.select(
-			store.visibleWinnersInDimension(dimensionId), BUILT_IN_CATALOG);
+		try {
+			if (store == null || currentDimensionId == null) {
+				clear();
+				return;
+			}
 
-		if (next.equals(specs)) {
-			return;
-		}
+			Map<EntityLocator, Integer> next = EntityOutlineSelection.select(
+				store.visibleWinnersInDimension(currentDimensionId).values(), currentDimensionId);
 
-		int added = 0;
-		int changed = 0;
+			diagnoseHook(next);
 
-		for (Map.Entry<EntityLocator, EntityOutlineSpec> entry : next.entrySet()) {
-			EntityOutlineSpec previous = specs.get(entry.getKey());
+			if (next.equals(outlines)) {
+				return;
+			}
 
-			if (previous == null) {
-				added++;
-			} else if (!previous.equals(entry.getValue())) {
-				changed++;
+			outlines = next;
+			dimensionId = currentDimensionId;
+
+			if (!activationLogged && !next.isEmpty()) {
+				activationLogged = true;
+				LOGGER.info("entity outline pass active (native glow channel via outlineColor)");
+			}
+
+			if (next.size() != lastSize) {
+				lastSize = next.size();
+				LOGGER.debug("entity outline: {} entit{} active", next.size(), next.size() == 1 ? "y" : "ies");
+			}
+		} catch (RuntimeException | LinkageError | AssertionError failure) {
+			disabled = true;
+			outlines = Map.of();
+
+			if (!failureLogged) {
+				failureLogged = true;
+				LOGGER.warn("entity outline: pass failed, disabled for this session ({})",
+					failure.getClass().getSimpleName());
 			}
 		}
+	}
 
-		int removed = 0;
+	/** ARGB colour for {@code locator}, or {@code null} when it must not be outlined. */
+	public static Integer colorFor(EntityLocator locator) {
+		return locator == null ? null : outlines.get(locator);
+	}
 
-		for (EntityLocator locator : specs.keySet()) {
-			if (!next.containsKey(locator)) {
-				removed++;
-			}
+	public static boolean shouldOutline(EntityLocator locator) {
+		return locator != null && outlines.containsKey(locator);
+	}
+
+	/** Dimension the current snapshot was built for. */
+	public static String dimensionId() {
+		return dimensionId;
+	}
+
+	public static boolean hasOutlines() {
+		return !outlines.isEmpty();
+	}
+
+	/** Drops the snapshot; used when leaving a world or when no runtime is present. */
+	public static void clear() {
+		if (!outlines.isEmpty()) {
+			outlines = Map.of();
+			lastSize = -1;
 		}
 
-		specs = Collections.unmodifiableMap(new LinkedHashMap<>(next));
-		logger.transition(added, removed, changed, next.size());
+		dimensionId = "";
 	}
 
-	/**
-	 * Whether the current snapshot contains at least one entity outline. The
-	 * frame bridge checks this before invoking the reflection
-	 * {@code requestOutlineEffect()} probe and before running the entity-outline
-	 * sources, so an empty frame never requests or renders anything.
-	 */
-	public boolean hasOutlines() {
-		return !specs.isEmpty();
-	}
-
-	/**
-	 * Whether the entity with {@code entityId} currently controls a visible
-	 * outline.
-	 */
-	public boolean shouldOutline(EntityLocator locator) {
-		return specs.containsKey(locator);
-	}
-
-	/** UUID convenience for callers that already have an ordinary locator. */
-	public boolean shouldOutline(UUID entityId) {
-		return shouldOutline(EntityLocator.uuid(entityId));
-	}
-
-	/**
-	 * The fully opaque ARGB outline color for {@code entityId}, or {@code 0}
-	 * when the entity currently has no outline.
-	 */
-	public int colorFor(EntityLocator locator) {
-		EntityOutlineSpec spec = specs.get(locator);
-
-		return spec == null ? 0 : spec.argbColor();
-	}
-
-	/** UUID convenience for callers that already have an ordinary locator. */
-	public int colorFor(UUID entityId) {
-		return colorFor(EntityLocator.uuid(entityId));
-	}
-
-	/**
-	 * The current snapshot as an unmodifiable map whose iteration order is the
-	 * ascending {@link nx.pingwheel.common.domain.MarkerId} order produced by
-	 * {@link EntityOutlineSelection#select}.
-	 *
-	 * <p>The frame bridge iterates this snapshot in this exact order to resolve
-	 * live entities and build per-entity source contexts; production callers
-	 * query per entity via {@link #shouldOutline} and {@link #colorFor}
-	 * instead.
-	 */
-	public Map<EntityLocator, EntityOutlineSpec> snapshot() {
-		return specs;
-	}
-
-	/**
-	 * Drops the whole snapshot; logs a single transition when it was
-	 * non-empty and does nothing (and logs nothing) otherwise.
-	 */
-	public void clear() {
-		if (specs.isEmpty()) {
+	private static void diagnoseHook(Map<EntityLocator, Integer> next) {
+		if (hookWarned || next.isEmpty() || EntityOutlineDiagnostics.extractionHookApplied()) {
 			return;
 		}
 
-		int removed = specs.size();
-		specs = Map.of();
-		logger.transition(0, removed, 0, 0);
+		// extractRenderState only runs for entities that survive culling. When the level
+		// holds no entities at all there is nothing that could ever have been extracted
+		// this frame, so an absent hook is not observable yet — stay quiet instead of
+		// reporting a hook that is in fact fine.
+		if (!hasRenderableEntities()) {
+			return;
+		}
+
+		preparesWithOutlines++;
+
+		if (preparesWithOutlines >= DIAG_AFTER_PREPARES) {
+			hookWarned = true;
+			LOGGER.warn("entity-outline extraction hook not observed after {} frames "
+					+ "(mixin inactive, or the outlined entities were never extracted); "
+					+ "entity outlines may be missing",
+				DIAG_AFTER_PREPARES);
+		}
 	}
 
-	/**
-	 * Replaces the transition logger; mainly a test seam. Production installs
-	 * the lazy global logger once during client initialization.
-	 */
-	public static void setLogger(EntityOutlineLogger newLogger) {
-		logger = Objects.requireNonNull(newLogger, "newLogger");
-	}
+	/** Cheap precondition: does the current level hold any entity at all? */
+	private static boolean hasRenderableEntities() {
+		Minecraft game = Minecraft.getInstance();
 
-	/**
-	 * Resets the transition logger to the noop default; mainly a test seam.
-	 */
-	public static void resetLogger() {
-		logger = EntityOutlineLogger.noop();
+		if (game == null || game.level == null) {
+			return false;
+		}
+
+		return game.level.entitiesForRendering().iterator().hasNext();
 	}
 }

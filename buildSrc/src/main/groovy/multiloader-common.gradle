@@ -26,19 +26,6 @@ repositories {
         filter { includeGroupAndSubgroups("org.spongepowered") }
     }
     exclusiveContent {
-        forRepositories(
-                maven {
-                    name = "ParchmentMC"
-                    url = "https://maven.parchmentmc.org/"
-                },
-                maven {
-                    name = "NeoForge"
-                    url = "https://maven.neoforged.net/releases"
-                }
-        )
-        filter { includeGroup("org.parchmentmc.data") }
-    }
-    exclusiveContent {
         forRepository {
             maven {
                 name "Cursemaven"
@@ -68,11 +55,11 @@ repositories {
 }
 
 dependencies {
-    implementation "org.jetbrains:annotations:24.1.0"
+    implementation "org.jetbrains:annotations:26.0.2"
 
     // Lombok
-    compileOnly "org.projectlombok:lombok:1.18.32"
-    annotationProcessor "org.projectlombok:lombok:1.18.32"
+    compileOnly "org.projectlombok:lombok:1.18.44"
+    annotationProcessor "org.projectlombok:lombok:1.18.44"
 
     // Distant Horizons
     // https://modrinth.com/mod/distanthorizonsapi

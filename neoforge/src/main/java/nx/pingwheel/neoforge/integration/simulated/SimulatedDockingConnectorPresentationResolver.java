@@ -6,7 +6,7 @@ import java.util.Objects;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.entity.BlockEntityType;
@@ -29,12 +29,12 @@ import nx.pingwheel.common.client.outline.BlockRenderSubject;
  */
 public final class SimulatedDockingConnectorPresentationResolver implements BlockPresentationResolver {
 	public static final String RESOLVER_ID = "pingforit:simulated_docking_connector_presentation";
-	private static final ResourceLocation PAIRED_BLOCK_ID =
-		ResourceLocation.parse("simulated:paired_docking_connector");
-	private static final ResourceLocation OWNER_BLOCK_ID =
-		ResourceLocation.parse("simulated:docking_connector");
-	private static final ResourceLocation OWNER_BLOCK_ENTITY_ID =
-		ResourceLocation.parse("simulated:docking_connector");
+	private static final Identifier PAIRED_BLOCK_ID =
+		Identifier.parse("simulated:paired_docking_connector");
+	private static final Identifier OWNER_BLOCK_ID =
+		Identifier.parse("simulated:docking_connector");
+	private static final Identifier OWNER_BLOCK_ENTITY_ID =
+		Identifier.parse("simulated:docking_connector");
 
 	private static BlockPresentationResolverRegistry.Registration registration;
 	private final RegistryEntries injectedEntries;
@@ -154,25 +154,25 @@ public final class SimulatedDockingConnectorPresentationResolver implements Bloc
 			OWNER_BLOCK_ENTITY_ID);
 	}
 
-	private static ResourceLocation registeredBlockId(Block block) {
+	private static Identifier registeredBlockId(Block block) {
 		return Objects.requireNonNull(BuiltInRegistries.BLOCK.getKey(block), "paired/owner block registry id");
 	}
 
-	private static ResourceLocation registeredBlockEntityId(BlockEntityType<?> blockEntityType) {
+	private static Identifier registeredBlockEntityId(BlockEntityType<?> blockEntityType) {
 		return Objects.requireNonNull(
 			BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(blockEntityType), "block entity registry id");
 	}
 
 	private record RegistryEntries(
 		Block pairedBlock,
-		ResourceLocation pairedBlockId,
+		Identifier pairedBlockId,
 		Block ownerBlock,
-		ResourceLocation ownerBlockId,
+		Identifier ownerBlockId,
 		BlockEntityType<?> ownerBlockEntityType,
-		ResourceLocation ownerBlockEntityId
+		Identifier ownerBlockEntityId
 	) {}
 
-	private static Block lookupBlock(ResourceLocation id) {
+	private static Block lookupBlock(Identifier id) {
 		try {
 			return BuiltInRegistries.BLOCK.getOptional(id).orElse(null);
 		} catch (Exception | LinkageError | AssertionError ignored) {
@@ -180,7 +180,7 @@ public final class SimulatedDockingConnectorPresentationResolver implements Bloc
 		}
 	}
 
-	private static BlockEntityType<?> lookupBlockEntityType(ResourceLocation id) {
+	private static BlockEntityType<?> lookupBlockEntityType(Identifier id) {
 		try {
 			return BuiltInRegistries.BLOCK_ENTITY_TYPE.getOptional(id).orElse(null);
 		} catch (Exception | LinkageError | AssertionError ignored) {

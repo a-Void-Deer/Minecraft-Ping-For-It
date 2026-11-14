@@ -1,7 +1,7 @@
 package nx.pingwheel.common.network;
 
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraft.resources.ResourceLocation;
+import net.minecraft.resources.Identifier;
 import org.jetbrains.annotations.NotNull;
 
 import nx.pingwheel.common.domain.Target;
@@ -10,7 +10,7 @@ import static nx.pingwheel.common.Global.C2S_NAMESPACE;
 
 public record MarkerCreateC2SPacket(long requestId, Target target, String pingTypeId) implements IPacket {
 
-	public static final ResourceLocation PACKET_ID = ResourceLocation.fromNamespaceAndPath(C2S_NAMESPACE, "marker-create");
+	public static final Identifier PACKET_ID = Identifier.fromNamespaceAndPath(C2S_NAMESPACE, "marker-create");
 	public static final Type<MarkerCreateC2SPacket> PACKET_TYPE = new Type<>(PACKET_ID);
 
 	public MarkerCreateC2SPacket() {
@@ -35,7 +35,7 @@ public record MarkerCreateC2SPacket(long requestId, Target target, String pingTy
 		return requestId < 0L || target == null || pingTypeId == null || pingTypeId.isBlank();
 	}
 
-	public ResourceLocation getId() {
+	public Identifier getId() {
 		return PACKET_ID;
 	}
 

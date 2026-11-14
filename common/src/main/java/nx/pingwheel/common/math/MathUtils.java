@@ -1,6 +1,7 @@
 package nx.pingwheel.common.math;
 
 import com.mojang.blaze3d.vertex.PoseStack;
+import net.minecraft.client.Camera;
 import net.minecraft.world.phys.Vec2;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
@@ -12,9 +13,26 @@ public class MathUtils {
 	private MathUtils() {}
 
 	public static ScreenPos worldToScreen(Vec3 worldPos, Matrix4f modelViewMatrix, Matrix4f projectionMatrix) {
+		// 26.3: GameRenderer#getMainCamera() became mainCamera().
+		return worldToScreen(worldPos, modelViewMatrix, projectionMatrix, Game.gameRenderer.mainCamera());
+	}
+
+	/**
+	 * Projects a world position with a caller-supplied camera.
+	 *
+	 * <p>Render callers already hold the frame's camera (for example in
+	 * {@link nx.pingwheel.common.render.WorldRenderContext#camera}); passing it in
+	 * avoids resolving {@code GameRenderer#mainCamera()} a second time inside the
+	 * same frame, so the projection can never mix two camera states.
+	 */
+	public static ScreenPos worldToScreen(
+		Vec3 worldPos,
+		Matrix4f modelViewMatrix,
+		Matrix4f projectionMatrix,
+		Camera camera
+	) {
 		var window = Game.getWindow();
-		var camera = Game.gameRenderer.getMainCamera();
-		var worldPosRel = new Vector4f(camera.getPosition().reverse().add(worldPos).toVector3f(), 1f);
+		var worldPosRel = new Vector4f(camera.position().reverse().add(worldPos).toVector3f(), 1f);
 		worldPosRel.mul(modelViewMatrix);
 		worldPosRel.mul(projectionMatrix);
 
@@ -48,32 +66,23 @@ public class MathUtils {
 
 		if (Math.abs(direction.x) < Math.abs(direction.y)) {
 			if (direction.y < 0) {
-				// top
 				var t = -cy / dy;
 				var x = cx + t * dx;
-
 				return new Vec2((float)x + leftTop.x, leftTop.y);
 			}
-
-			// bottom
 			var t = cy / dy;
 			var x = cx + t * dx;
-
 			return new Vec2((float)x + leftTop.x, rightBottom.y);
 		}
 
 		if (direction.x < 0) {
-			// left
 			var t = -cx / dx;
 			var y = cy + t * dy;
-
 			return new Vec2(leftTop.x, (float)y + leftTop.y);
 		}
 
-		// right
 		var t = cx / dx;
 		var y = cy + t * dy;
-
 		return new Vec2(rightBottom.x, (float)y + leftTop.y);
 	}
 }
