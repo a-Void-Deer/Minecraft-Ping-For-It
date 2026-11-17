@@ -98,7 +98,7 @@ class InventoryPooledVaultBackendTest {
 	void backendSelectionsForTwoRealOwnersShareOnlyApproved900SlotPolicyCohortsAndReachEncodedClients(boolean faces, boolean players, int expected) throws ReflectiveOperationException {
 		var world = new InventoryPooledVaultRuntimeTest.World(); var settings = InventorySettings.serverDefaults();
 		settings.setPendingMemoryMiB(256); settings.setPhysicalSlotsPerTick(IntLimit.finite(64)); settings.getPreview().setPeriodTicks(1);
-		settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(4096)); settings.getPreview().setMaxSlotsServer(IntLimit.finite(4096));
+		settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(2048)); settings.getPreview().setMaxSlotsServer(IntLimit.finite(4096));
 		settings.getTracking().setPeriodTicks(10); settings.getTracking().setMaxSlotsPerTarget(IntLimit.finite(4096)); settings.getTracking().setMaxSlotsServer(IntLimit.finite(4096));
 		settings.getTracking().setDistinguishFaces(faces); settings.getTracking().setDistinguishPlayers(players);
 		var target = new Target.BlockTarget("minecraft:overworld", 0, 0, 0, "create:item_vault");

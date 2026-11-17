@@ -199,8 +199,10 @@ class InventoryRuntimeScaleTest {
 	}
 	@Test void sixteenThousandAddressesFinishAcrossTicksWithoutIncreasingTickWork() throws Exception {
 		var settings = InventorySettings.serverDefaults(); settings.setPhysicalSlotsPerTick(IntLimit.finite(64));
-		settings.setPendingMemoryMiB(16); settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(16384));
-		settings.getPreview().setMaxSlotsServer(IntLimit.finite(16384));
+		settings.setPendingMemoryMiB(16); settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(2048));
+		settings.getPreview().setMaxSlotsServer(IntLimit.finite(8192));
+		assertTrue(java.util.Objects.requireNonNull(nx.pingwheel.common.config.InventoryConfigValues.from(settings)).isSafe(),
+			"the full source must complete under legal finite per-period quotas");
 		var owner = new UUID(73, 1); var reads = new AtomicInteger();
 		try (var runtime = new InventoryRuntime(input -> Optional.of(new InventoryRuntimeTest.Source(input, reads, 16384) {
 			@Override public InventorySourceAccess.ReadMode readMode() { return InventorySourceAccess.ReadMode.NATIVE_INCREMENTAL; }

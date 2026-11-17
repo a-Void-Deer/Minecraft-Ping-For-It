@@ -24,11 +24,11 @@ import static org.junit.jupiter.api.Assertions.*;
 @NotNullByDefault
 class InventoryPerformanceOptionTest {
 	@ParameterizedTest
-	@CsvSource({"PHYSICAL_SLOTS_PER_TICK,16,4096", "PENDING_MEMORY_MIB,16,2048",
-		"PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD,16,1024", "PREVIEW_MAX_SLOTS_PER_CLIENT,16,16384",
-		"PREVIEW_MAX_SLOTS_SERVER,16,65536", "PREVIEW_MAX_TARGETS_PER_CLIENT,1,16",
-		"TRACKING_MAX_VARIANTS_PER_TARGET,1,128", "TRACKING_MAX_SLOTS_PER_TARGET,16,16384",
-		"TRACKING_MAX_SLOTS_SERVER,128,262144"})
+	@CsvSource({"PHYSICAL_SLOTS_PER_TICK,16,2048", "PENDING_MEMORY_MIB,16,2048",
+		"PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD,16,1024", "PREVIEW_MAX_SLOTS_PER_CLIENT,16,2048",
+		"PREVIEW_MAX_SLOTS_SERVER,16,8192", "PREVIEW_MAX_TARGETS_PER_CLIENT,1,16",
+		"TRACKING_MAX_VARIANTS_PER_TARGET,1,128", "TRACKING_MAX_SLOTS_PER_TARGET,16,4096",
+		"TRACKING_MAX_SLOTS_SERVER,128,8192"})
 	void countSlidersReachIndependentFiniteEndpointsAndRetainTheMaximumInUnlimitedMode(Field field, int minimum, int maximum) {
 		var model = loaded(field, Value.limit(false, minimum), true);
 		var slider = slider(field, model, new AtomicInteger());
@@ -116,7 +116,7 @@ class InventoryPerformanceOptionTest {
 	void offGridSlotValuesSurviveConstructionRebuildNavigationAndMouseReturn() {
 		assertOffGridSlotValueSurvives(Field.PHYSICAL_SLOTS_PER_TICK, 264);
 		assertOffGridSlotValueSurvives(Field.TRACKING_MAX_SLOTS_SERVER, 4608);
-		assertOffGridSlotValueSurvives(Field.PREVIEW_MAX_SLOTS_SERVER, 65535);
+		assertOffGridSlotValueSurvives(Field.PREVIEW_MAX_SLOTS_SERVER, Field.PREVIEW_MAX_SLOTS_SERVER.maximum() - 1);
 	}
 
 	@ParameterizedTest

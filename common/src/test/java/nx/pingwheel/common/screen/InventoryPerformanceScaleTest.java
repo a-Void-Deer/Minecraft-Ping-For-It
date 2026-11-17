@@ -54,7 +54,6 @@ class InventoryPerformanceScaleTest {
 		assertEquals(new BigDecimal("128"), global.finiteValueAt(0));
 		assertNeighbors(global, "512", "480", "640");
 		assertNeighbors(global, "2048", "1920", "2560");
-		assertEquals(new BigDecimal("262144"), global.finiteValueAt(global.size() - 2));
 		assertDoublingRegions(Field.TRACKING_MAX_SLOTS_SERVER, global, 2048);
 
 		var memory = InventoryPerformanceScale.forField(Field.PENDING_MEMORY_MIB);

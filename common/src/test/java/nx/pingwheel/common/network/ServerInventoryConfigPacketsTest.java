@@ -57,8 +57,7 @@ class ServerInventoryConfigPacketsTest {
 
 	@ParameterizedTest
 	@EnumSource(Field.class)
-	void everyLeafAndExplicitUnlimitedFiniteValueRoundTrip(Field selected) {
-		var inventory = InventoryConfigValues.defaults();
+	void everyLeafAndBothLimitModesRoundTrip(Field selected) {
 		Value supplied;
 		if (selected.isSizeScale()) {
 			supplied = new Value(false, selected.sizeScale().maximumMultiplier());
@@ -67,13 +66,16 @@ class ServerInventoryConfigPacketsTest {
 		} else {
 			supplied = new Value(selected.supportsUnlimited(), BigDecimal.valueOf(selected.maximum()));
 		}
-		inventory = inventory.with(selected, supplied);
-		var snapshot = new ServerConfigSnapshotS2CPacket(77, true, ChannelMode.TEAM_ONLY, false, 0, 9, 23, inventory);
-		var update = new ServerConfigUpdateC2SPacket(new ServerConfigUpdate(selected.mask(), ChannelMode.AUTO, true, 1, 2, 3, inventory));
-		assertEquals(snapshot, roundTrip(snapshot, ServerConfigSnapshotS2CPacket::readSafe));
-		assertEquals(update, roundTrip(update, ServerConfigUpdateC2SPacket::readSafe));
-		assertEquals(inventory, snapshot.snapshot().inventory());
-		assertEquals(inventory, update.update().inventory());
+		for (boolean unlimited : new boolean[] {false, true}) {
+			if (unlimited && !selected.supportsUnlimited()) continue;
+			var inventory = InventoryConfigValues.defaults().with(selected, new Value(unlimited, supplied.value()));
+			var snapshot = new ServerConfigSnapshotS2CPacket(77, true, ChannelMode.TEAM_ONLY, false, 0, 9, 23, inventory);
+			var update = new ServerConfigUpdateC2SPacket(new ServerConfigUpdate(selected.mask(), ChannelMode.AUTO, true, 1, 2, 3, inventory));
+			assertEquals(snapshot, roundTrip(snapshot, ServerConfigSnapshotS2CPacket::readSafe));
+			assertEquals(update, roundTrip(update, ServerConfigUpdateC2SPacket::readSafe));
+			assertEquals(inventory, snapshot.snapshot().inventory());
+			assertEquals(inventory, update.update().inventory());
+		}
 	}
 
 	@ParameterizedTest
@@ -264,6 +266,45 @@ class ServerInventoryConfigPacketsTest {
 					assertEquals(0, buf.readableBytes());
 				} finally { buf.release(); }
 			}
+		}
+	}
+
+	@ParameterizedTest
+	@EnumSource(value = Field.class, names = {"PHYSICAL_SLOTS_PER_TICK", "PREVIEW_MAX_SLOTS_PER_CLIENT",
+		"PREVIEW_MAX_SLOTS_SERVER", "TRACKING_MAX_SLOTS_PER_TARGET", "TRACKING_MAX_SLOTS_SERVER"})
+	void excessiveSlotValuesRejectRawSnapshotsAndUpdatesEvenWhenUnselected(Field selected) {
+		for (boolean unlimited : new boolean[] {false, true}) {
+			var snapshotBytes = buffer();
+			try {
+				snapshotBytes.writeVarLong(77); snapshotBytes.writeBoolean(true);
+				snapshotBytes.writeVarInt(0); snapshotBytes.writeBoolean(true);
+				snapshotBytes.writeVarInt(1000); snapshotBytes.writeVarInt(5); snapshotBytes.writeVarInt(7);
+				writeInventoryWithSlotValue(snapshotBytes, selected, unlimited, selected.maximum() + 1);
+				writeTrailer(snapshotBytes);
+				var packet = ServerConfigSnapshotS2CPacket.readSafe(snapshotBytes);
+				assertTrue(packet.isCorrupt(), selected + " unlimited=" + unlimited);
+				assertFalse(packet.snapshot().isSafe());
+				assertEquals(0, snapshotBytes.readableBytes());
+			} finally { snapshotBytes.release(); }
+
+			// The existing selected-leaf boundary test covers selected updates. This
+			// rate-only frame proves the complete payload is checked before merging.
+			var updateBytes = updatePrefix(ServerConfigUpdate.RATE_LIMIT);
+			try {
+				writeInventoryWithSlotValue(updateBytes, selected, unlimited, selected.maximum() + 1);
+				writeTrailer(updateBytes);
+				var packet = ServerConfigUpdateC2SPacket.readSafe(updateBytes);
+				assertTrue(packet.isCorrupt(), selected + " unlimited=" + unlimited);
+				assertFalse(packet.update().isValid());
+				assertEquals(0, updateBytes.readableBytes());
+			} finally { updateBytes.release(); }
+		}
+	}
+
+	private static void writeInventoryWithSlotValue(FriendlyByteBuf buf, Field selected, boolean unlimited, int value) {
+		for (Field field : Field.values()) {
+			if (field.supportsUnlimited()) buf.writeBoolean(field == selected && unlimited);
+			buf.writeVarInt(field == selected ? value : encodedDefault(field));
 		}
 	}
 

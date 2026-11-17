@@ -37,7 +37,7 @@ class CreateVaultComposedSharingTest {
 		var settings = CreateVaultTrackingPerformanceTest.settings();
 		settings.setPhysicalSlotsPerTick(IntLimit.finite(32));
 		settings.getTracking().setPeriodTicks(1000); settings.getTracking().setMaxSlotsPerTarget(IntLimit.finite(4000)); settings.getTracking().setMaxSlotsServer(IntLimit.finite(8000));
-		settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(4000)); settings.getPreview().setMaxSlotsServer(IntLimit.finite(8000));
+		settings.getPreview().setMaxSlotsPerClient(IntLimit.finite(2048)); settings.getPreview().setMaxSlotsServer(IntLimit.finite(8000));
 		settings.validate(); return settings;
 	}
 	private static int logical(InventoryRuntime runtime, InventoryRuntime.Subject subject) throws Exception {
