@@ -413,7 +413,8 @@ the replacement attempt, the localized status shows the cause followed by the
 current retry ordinal and the maximum of three retries, for example
 `reason: Retrying...(1/3)`. The final failed attempt stops retrying and shows
 only the localized cause; it starts no further request and leaves no pending
-retry.
+retry. Retry exhaustion keeps the Details inventory entry available and an open
+list as a status-only panel showing the localized final cause.
 
 A failure whose typed reason is exactly `SOURCE_UNAVAILABLE` — the source is
 missing or otherwise unavailable for this Preview, not an empty result — is
@@ -423,7 +424,10 @@ ordinal, starts no replacement attempt, and presents the lane as unavailable
 instead of consuming the remaining retry sequence. Only the affected lane stops;
 a sibling lane that is available or still pending keeps its own lane state and
 remains usable, and the stop neither closes the logical handle nor cancels that
-sibling. Inventory Tracking is unchanged: an existing Ping follows the
+sibling. Once no sibling lane remains available or pending, the terminal source
+loss disables the Details inventory entry and exits an active inventory path to
+the nearest valid ancestor.
+Inventory Tracking is unchanged: an existing Ping follows the
 [source identity, invalidation and recovery](#source-identity-invalidation-and-recovery)
 rules, including recovery before its hard deadline. A later held interaction
 opens a fresh logical Preview and may request the same source again; the stopped

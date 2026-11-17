@@ -176,7 +176,9 @@ eligibility is under
 ## Double-click Danger and inventory stay-open configuration
 
 The two press preferences and the stay-open choice have source-reviewed model,
-handler, codec, catalog and resource coverage. None of it is a recorded run.
+handler, codec, catalog and resource coverage. The beta2 window migration
+fixtures also have a recorded focused configuration run; the other listed cases
+remain source-reviewed.
 
 `DoubleClickDangerConfigTest` covers explicit window and angle values independent
 of the cancel half-cone in both mutation directions; missing and null JSON values
@@ -191,6 +193,23 @@ trip; failed-write retry; changed-source reload; and typed invalid-file recovery
 with a broken-file backup, whose failed backup installs protection that declines
 angle writes. `ClientConfigBoundsTest` exercises direct window and angle clamps,
 including NaN and positive infinity.
+
+`DoubleClickDangerWindowMigrationTest` contains 13 focused model and
+filesystem-handler fixtures for the beta2 revision: client sources from earlier
+schemas through the beta1 boundary, the earlier client beta1 step retaining
+unknown data, exact legacy-value spellings and other numeric values retaining
+their source form, an intermediate beta1a qualifier outside the legacy boundary,
+a same-version beta2 intentional value retained under beta2 and a later running
+version, running versions before beta2 and server configuration staying
+unchanged, missing/null/non-number input left to typed load or recovery, handler
+persistence of the window and marker with unknown root and nested data, an older
+explicit non-legacy value surviving writeback, same-version beta2 save/reload,
+failed-write retry from the original bytes, and pending-migration reloads for
+changed same-version and future-version replacements. All 13 methods passed the
+focused configuration run (552 tests, 0 failures, 0 skips). These are headless
+model and handler fixtures, not live settings-screen or gameplay evidence. The
+transformation and exact values remain owned by
+[configuration revisioning](../../architecture/config/revisioning.md#ordered-migration-and-writeback).
 
 `SpatialSelectorSettingsTest` covers the inventory stay-open choice defaulting
 closed, missing and null members staying closed, the live setter affecting the

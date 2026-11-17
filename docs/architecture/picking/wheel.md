@@ -484,11 +484,9 @@ selection, submenu and dispatch identity; equal opaque keys in different groups
 cannot select each other. Each group's authorization and status come from its
 own inventory lane, so an unavailable or updating group does not complete or
 erase the other. Resource lifecycle, ordering and quantities remain owned by
-[inventory](../presentation/inventory.md#resource-lanes-and-scope). When
-terminal failure leaves no resource lane available or pending, the Details
-inventory entry is disabled, and an active inventory path exits under the
-existing inventory-path exit rules for a revoked or unavailable path. Terminal
-classification and retry behavior are owned by
+[inventory](../presentation/inventory.md#resource-lanes-and-scope). The effect
+of terminal failure on the Details inventory entry and on an active inventory
+path, together with terminal classification and retry behavior, is owned by
 [inventory preview and tracking](../presentation/inventory.md#preview-attempts-retry-and-no-progress-watchdog).
 The existing item-menu gestures below apply to a fluid row's resource menu as
 well; the lane's annotation policy still decides its allowed choices.
