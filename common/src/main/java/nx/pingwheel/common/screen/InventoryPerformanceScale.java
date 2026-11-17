@@ -42,10 +42,12 @@ final class InventoryPerformanceScale {
 
 	private static int step(Field field, int value) {
 		return switch (field) {
-			case PHYSICAL_SLOTS_PER_TICK, PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD,
-				PREVIEW_MAX_SLOTS_PER_CLIENT, PREVIEW_MAX_SLOTS_SERVER, TRACKING_MAX_SLOTS_PER_TARGET ->
-				value < 64 ? 2 : value < 256 ? 4 : 8;
-			case TRACKING_MAX_SLOTS_SERVER -> value < 512 ? 32 : value < 2048 ? 128 : 512;
+			case PHYSICAL_SLOTS_PER_TICK, PREVIEW_MAX_SLOTS_PER_CLIENT,
+				PREVIEW_MAX_SLOTS_SERVER, TRACKING_MAX_SLOTS_PER_TARGET ->
+				value < 64 ? 2 : value < 256 ? 4 : Integer.highestOneBit(value) / 16;
+			case PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD -> value < 64 ? 2 : value < 256 ? 4 : 8;
+			case TRACKING_MAX_SLOTS_SERVER ->
+				value < 512 ? 32 : value < 2048 ? 128 : Integer.highestOneBit(value) / 4;
 			case PENDING_MEMORY_MIB -> InventorySettings.pendingMemoryStepMiB(value);
 			default -> 1;
 		};

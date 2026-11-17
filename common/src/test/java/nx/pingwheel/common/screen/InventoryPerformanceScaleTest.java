@@ -6,29 +6,45 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.TreeMap;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
 class InventoryPerformanceScaleTest {
 	@Test
-	void ordinaryCountsCrossEachJointExactlyAndPutUnlimitedAfterTheLastFiniteStop() {
-		for (Field field : List.of(Field.PHYSICAL_SLOTS_PER_TICK, Field.PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD,
-			Field.PREVIEW_MAX_SLOTS_PER_CLIENT, Field.PREVIEW_MAX_SLOTS_SERVER, Field.TRACKING_MAX_SLOTS_PER_TARGET)) {
+	void slotCountsKeepFineLowStopsAndOneConstantStopCountPerFullDoublingRegion() {
+		var slots = List.of(Field.PHYSICAL_SLOTS_PER_TICK, Field.PREVIEW_MAX_SLOTS_PER_CLIENT,
+			Field.PREVIEW_MAX_SLOTS_SERVER, Field.TRACKING_MAX_SLOTS_PER_TARGET);
+		var variantsLow = finiteBelow(InventoryPerformanceScale.forField(
+			Field.PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD), 256);
+		for (Field field : slots) {
 			var scale = InventoryPerformanceScale.forField(field);
 			assertEquals(new BigDecimal("16"), scale.finiteValueAt(0));
 			assertNeighbors(scale, "64", "62", "68");
-			assertNeighbors(scale, "256", "252", "264");
-			int expectedMaximum = switch (field) {
-				case PHYSICAL_SLOTS_PER_TICK -> 4096;
-				case PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD -> 1024;
-				case PREVIEW_MAX_SLOTS_PER_CLIENT, TRACKING_MAX_SLOTS_PER_TARGET -> 16384;
-				case PREVIEW_MAX_SLOTS_SERVER -> 65536;
-				default -> throw new AssertionError(field);
-			};
-			assertEquals(BigDecimal.valueOf(expectedMaximum), scale.finiteValueAt(scale.size() - 2));
-			assertTrue(scale.isUnlimited(scale.size() - 1));
+			assertEquals(variantsLow, finiteBelow(scale, 256));
+			assertDoublingRegions(field, scale, 256);
+		}
+	}
+
+	@Test
+	void variantsRetainTheirEstablishedFineGridSeparateFromSlotGrouping() {
+		Field field = Field.PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD;
+		var scale = InventoryPerformanceScale.forField(field);
+		assertEquals(BigDecimal.valueOf(field.minimum()), scale.finiteValueAt(0));
+		assertEquals(BigDecimal.valueOf(field.maximum()), scale.finiteValueAt(scale.size() - 2));
+		assertTrue(scale.isUnlimited(scale.size() - 1));
+		assertStrictlyIncreasingLegal(field, scale);
+
+		var high = new ArrayList<BigDecimal>();
+		for (var value : scale.finiteValues()) {
+			if (value.compareTo(new BigDecimal("256")) >= 0) high.add(value);
+		}
+		assertEquals(new BigDecimal("256"), high.getFirst());
+		for (int index = 1; index < high.size(); index++) {
+			assertEquals(new BigDecimal("8"), high.get(index).subtract(high.get(index - 1)));
 		}
 	}
 
@@ -39,6 +55,7 @@ class InventoryPerformanceScaleTest {
 		assertNeighbors(global, "512", "480", "640");
 		assertNeighbors(global, "2048", "1920", "2560");
 		assertEquals(new BigDecimal("262144"), global.finiteValueAt(global.size() - 2));
+		assertDoublingRegions(Field.TRACKING_MAX_SLOTS_SERVER, global, 2048);
 
 		var memory = InventoryPerformanceScale.forField(Field.PENDING_MEMORY_MIB);
 		assertEquals(new BigDecimal("16"), memory.finiteValueAt(0));
@@ -93,6 +110,57 @@ class InventoryPerformanceScaleTest {
 		int index = scale.positionOf(new Value(false, new BigDecimal(value)));
 		assertEquals(new BigDecimal(previous), scale.finiteValueAt(index - 1));
 		assertEquals(new BigDecimal(next), scale.finiteValueAt(index + 1));
+	}
+
+	private static List<BigDecimal> finiteBelow(InventoryPerformanceScale scale, int exclusiveMaximum) {
+		var values = new ArrayList<BigDecimal>();
+		for (var value : scale.finiteValues()) {
+			if (value.compareTo(BigDecimal.valueOf(exclusiveMaximum)) < 0) values.add(value);
+		}
+		return List.copyOf(values);
+	}
+
+	private static void assertStrictlyIncreasingLegal(Field field, InventoryPerformanceScale scale) {
+		var values = scale.finiteValues();
+		for (int index = 0; index < values.size(); index++) {
+			assertTrue(field.isSafe(new Value(false, values.get(index))));
+			if (index > 0) assertTrue(values.get(index - 1).compareTo(values.get(index)) < 0);
+		}
+	}
+
+	/**
+	 * Every full power-of-two region has one spacing and the same stop count;
+	 * it intentionally does not pin the region count or the individual spacing.
+	 */
+	private static void assertDoublingRegions(Field field, InventoryPerformanceScale scale, int highStart) {
+		assertEquals(BigDecimal.valueOf(field.minimum()), scale.finiteValueAt(0));
+		assertEquals(BigDecimal.valueOf(field.maximum()), scale.finiteValueAt(scale.size() - 2));
+		assertTrue(scale.isUnlimited(scale.size() - 1));
+		assertStrictlyIncreasingLegal(field, scale);
+
+		var regions = new TreeMap<Integer, List<Integer>>();
+		for (var value : scale.finiteValues()) {
+			int integer = value.intValueExact();
+			if (integer < highStart) continue;
+			regions.computeIfAbsent(31 - Integer.numberOfLeadingZeros(integer), exponent -> new ArrayList<>())
+				.add(integer);
+		}
+		int expectedStops = -1;
+		int previousGap = -1;
+		for (var region : regions.entrySet()) {
+			if ((1L << (region.getKey() + 1)) > field.maximum()) continue;
+			var stops = region.getValue();
+			assertTrue(stops.size() > 1);
+			int gap = stops.get(1) - stops.getFirst();
+			for (int index = 2; index < stops.size(); index++) {
+				assertEquals(gap, stops.get(index) - stops.get(index - 1));
+			}
+			if (expectedStops < 0) expectedStops = stops.size();
+			else assertEquals(expectedStops, stops.size());
+			if (previousGap > 0) assertTrue(gap > previousGap);
+			previousGap = gap;
+		}
+		assertTrue(expectedStops > 1);
 	}
 
 	private static void assertLinear(Field field, int minimum, int maximum, boolean unlimited) {
