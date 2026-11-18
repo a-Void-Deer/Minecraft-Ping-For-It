@@ -79,7 +79,7 @@ public class ForgeClient {
 			var ctx = event.getSource();
 			var payload = event.getPayload();
 
-			if (payload != null) {
+			if (ctx.isClientSide() && payload != null) {
 				var packet = packetReader.apply(payload);
 				ctx.enqueueWork(() -> packetHandler.accept(packet));
 			}
