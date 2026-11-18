@@ -1,5 +1,6 @@
 package nx.pingwheel.forge;
 
+import net.minecraft.network.Connection;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
@@ -84,7 +85,7 @@ public class ForgeMain {
 		registerPacketHandler(SERVER_CONFIG_REQUEST_CHANNEL_C2S, ServerConfigRequestC2SPacket::readSafe, CommonServer.INSTANCE::onServerConfigRequestPacket);
 		registerPacketHandler(SERVER_CONFIG_UPDATE_CHANNEL_C2S, ServerConfigUpdateC2SPacket::readSafe, CommonServer.INSTANCE::onServerConfigUpdatePacket);
 		registerPacketHandler(SERVER_PRESENTATION_POLICY_CHANNEL_C2S, ServerPresentationPolicyC2SPacket::readSafe, CommonServer.INSTANCE::onServerPresentationPolicyPacket);
-		registerPacketHandler(PRESENTATION_CHANNEL_C2S, PresentationC2SPacket::readSafe, CommonServer.INSTANCE::onPresentationPacket);
+		registerPresentationReceiver(PRESENTATION_CHANNEL_C2S, CommonServer.INSTANCE::onPresentationPacket);
 		registerPacketHandler(INVENTORY_CHANNEL_C2S, InventoryC2SPacket::readSafe, CommonServer.INSTANCE::onInventoryPacket);
 		registerMonitorReceiver(INVENTORY_MONITOR_SUBSCRIBE_CHANNEL_C2S, CommonServer.INSTANCE::onInventoryMonitorSubscribe);
 		registerPacketHandler(PRESENTATION_PREVIEW_CHANNEL_C2S, PresentationPreviewC2SPacket::readSafe, CommonServer.INSTANCE::onPresentationPreview);
@@ -122,6 +123,27 @@ public class ForgeMain {
 				}
 			}
 			context.setPacketHandled(true);
+		});
+	}
+
+	static void registerPresentationReceiver(EventNetworkChannel channel,
+		TriConsumer<MinecraftServer, ServerPlayer, PresentationC2SPacket> receiver) {
+		channel.addListener(event -> {
+			var context = event.getSource();
+			context.setPacketHandled(true);
+			Connection connection = context.getConnection();
+			if (!context.isServerSide() || !(connection.getPacketListener() instanceof ServerGamePacketListenerImpl listener)) return;
+			@Nullable FriendlyByteBuf payload = event.getPayload();
+			if (payload == null) return;
+			var packet = PresentationC2SPacket.readSafe(payload);
+			context.enqueueWork(() -> {
+				if (connection.getPacketListener() != listener) return;
+				ServerPlayer player = listener.player;
+				@Nullable MinecraftServer server = player.getServer();
+				// enqueueWork already put us on the owner thread; apply the shared fence here.
+				if (server != null) MonitorPacketDispatch.server(Runnable::run, server, player, listener, packet,
+					current -> receiver.accept(server, current, packet));
+			});
 		});
 	}
 

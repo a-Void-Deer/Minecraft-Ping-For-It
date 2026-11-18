@@ -113,9 +113,7 @@ public class NeoMain {
 			context.enqueueWork(() -> CommonClient.INSTANCE.onServerPresentationPolicyPacket(payload));
 		});
 
-		registrar.playToServer(PresentationC2SPacket.PACKET_TYPE, PRESENTATION_C2S_CODEC, (payload, context) -> {
-			context.enqueueWork(() -> CommonServer.INSTANCE.onPresentationPacket(context.player().getServer(), (ServerPlayer) context.player(), payload));
-		});
+		registerPresentationReceiver(registrar, CommonServer.INSTANCE::onPresentationPacket);
 
 		registrar.playToClient(EncodedPresentationPayload.PACKET_TYPE, EncodedPresentationPayload.STREAM_CODEC, (payload, context) -> {
 			context.enqueueWork(() -> CommonClient.INSTANCE.onPresentationPacket((PresentationS2CPacket) payload));
@@ -157,6 +155,17 @@ public class NeoMain {
 			(packet, context) -> dispatchMonitorClient(packet, context, token -> status.accept(token, packet)));
 		registrar.playToClient(InventoryMonitorSampleS2CPacket.PACKET_TYPE, INVENTORY_MONITOR_SAMPLE_S2C_CODEC,
 			(packet, context) -> dispatchMonitorClient(packet, context, token -> sample.accept(token, packet)));
+	}
+
+	static void registerPresentationReceiver(PayloadRegistrar registrar,
+		TriConsumer<MinecraftServer, ServerPlayer, PresentationC2SPacket> receiver) {
+		registrar.playToServer(PresentationC2SPacket.PACKET_TYPE, PRESENTATION_C2S_CODEC, (packet, context) -> {
+			if (!(context.listener() instanceof ServerGamePacketListenerImpl listener)
+				|| !(context.player() instanceof ServerPlayer player)) return;
+			@Nullable MinecraftServer server = player.getServer();
+			if (server != null) MonitorPacketDispatch.server(action -> context.enqueueWork(action), server, player, listener, packet,
+				current -> receiver.accept(server, current, packet));
+		});
 	}
 
 	private static void dispatchMonitorClient(IPacket packet, IPayloadContext context, LongConsumer receive) {

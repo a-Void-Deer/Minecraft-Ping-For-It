@@ -2,6 +2,7 @@ package nx.pingwheel.fabric;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -13,6 +14,7 @@ import net.fabricmc.fabric.impl.networking.AbstractNetworkAddon;
 import net.fabricmc.fabric.impl.networking.client.ClientPlayNetworkAddon;
 import net.fabricmc.fabric.impl.networking.client.ClientNetworkingImpl;
 import net.fabricmc.fabric.impl.networking.server.ServerNetworkingImpl;
+import net.fabricmc.fabric.impl.networking.server.ServerPlayNetworkAddon;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientPacketListener;
@@ -34,6 +36,7 @@ import nx.pingwheel.common.network.InventoryMonitorStatusS2CPacket;
 import nx.pingwheel.common.network.InventoryMonitorSampleS2CPacket;
 import nx.pingwheel.common.network.InventoryMonitorStatusS2CPacket.SampleCapability;
 import nx.pingwheel.common.network.IPacket;
+import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.monitor.MonitorAccumulator;
 import nx.pingwheel.common.monitor.MonitorSchema.Source;
 import nx.pingwheel.common.monitor.MonitorTuning;
@@ -82,6 +85,48 @@ class InventoryMonitorDispatchTest {
 		} finally { ServerPlayNetworking.unregisterGlobalReceiver(InventoryMonitorSubscribeC2SPacket.PACKET_ID); }
 	}
 
+	@Test void registeredPresentationHelloChecksTheOwnerThreadAndListenerAtDelivery() {
+		PresentationPayloadRegistrationTest.registeredCodec();
+		var server = allocate(Server.class); server.tasks = new ArrayList<>(); server.players = allocate(Players.class);
+		var player = allocate(Player.class); var listener = allocate(Listener.class);
+		listener.addon = allocate(ServerPlayNetworkAddon.class);
+		player.connection = listener; server.players.player = player;
+		var hello = PresentationC2SPacket.hello(Map.of("minecraft:basic", 1));
+		var accepted = new ArrayList<ServerPlayer>();
+		ServerPlayNetworking.unregisterGlobalReceiver(PresentationC2SPacket.PACKET_ID);
+		try {
+			FabricMain.registerPresentationReceiver((owner, current, packet) -> {
+				assertSame(server, owner); assertEquals(hello, packet); accepted.add(current);
+			});
+			@SuppressWarnings("unchecked")
+			var handler = (ServerPlayNetworking.PlayPayloadHandler<PresentationC2SPacket>)
+				Objects.requireNonNull(ServerNetworkingImpl.PLAY.getHandler(PresentationC2SPacket.PACKET_ID));
+			var context = new Context(server, player, listener.getAddon());
+			handler.receive(hello, context);
+			assertTrue(accepted.isEmpty());
+			server.offThread = true;
+			server.tasks.removeFirst().run();
+			assertTrue(accepted.isEmpty(), "delivery requires the server owner thread");
+			server.offThread = false;
+
+			handler.receive(hello, context);
+			listener.closed = true;
+			server.tasks.removeFirst().run();
+			assertTrue(accepted.isEmpty(), "a listed player with a closed listener cannot negotiate");
+			server.players.player = null;
+
+			var replacement = allocate(Player.class);
+			var replacementListener = allocate(Listener.class);
+			replacementListener.addon = allocate(ServerPlayNetworkAddon.class);
+			replacement.connection = replacementListener; server.players.player = replacement;
+			var replacementContext = new Context(server, replacement, replacementListener.getAddon());
+			handler.receive(hello, replacementContext);
+			handler.receive(hello, replacementContext);
+			server.tasks.removeFirst().run(); server.tasks.removeFirst().run();
+			assertEquals(List.of(replacement, replacement), accepted, "new and repeated HELLO reach negotiation unchanged");
+		} finally { ServerPlayNetworking.unregisterGlobalReceiver(PresentationC2SPacket.PACKET_ID); }
+	}
+
 	@Test void actualClientHandlersFenceOriginatingAddonBeforeCapturingDynamicContextAndQueuedConnection() throws Exception {
 		PresentationPayloadRegistrationTest.registeredCodec();
 		var instance = Minecraft.class.getDeclaredField("instance"); instance.setAccessible(true);
@@ -126,8 +171,8 @@ class InventoryMonitorDispatchTest {
 	}
 
 	@NotNullByDefault
-	private record Context(MinecraftServer server, ServerPlayer player) implements ServerPlayNetworking.Context {
-		@Override public PacketSender responseSender() { return SENDER; }
+	private record Context(MinecraftServer server, ServerPlayer player, PacketSender responseSender) implements ServerPlayNetworking.Context {
+		private Context(MinecraftServer server, ServerPlayer player) { this(server, player, SENDER); }
 	}
 	private static final PacketSender SENDER = new PacketSender() {
 		@Override public Packet<?> createPacket(CustomPacketPayload payload) { throw new AssertionError("not a send test"); }
@@ -138,8 +183,9 @@ class InventoryMonitorDispatchTest {
 	private static final class Server extends DedicatedServer {
 		private @Nullable Players players;
 		private List<Runnable> tasks = new ArrayList<>();
+		private boolean offThread;
 		private Server() { super(null, null, null, null, null, null, null, null); }
-		@Override public boolean isSameThread() { return true; }
+		@Override public boolean isSameThread() { return !offThread; }
 		@Override public void execute(Runnable action) { tasks.add(action); }
 		@Override public DedicatedPlayerList getPlayerList() { return Objects.requireNonNull(players); }
 	}
@@ -155,9 +201,12 @@ class InventoryMonitorDispatchTest {
 		@Override public UUID getUUID() { return ID; }
 	}
 	@NotNullByDefault
-	private static final class Listener extends ServerGamePacketListenerImpl {
+	private static final class Listener extends ServerGamePacketListenerImpl implements NetworkHandlerExtensions {
+		private boolean closed;
+		private @Nullable ServerPlayNetworkAddon addon;
 		private Listener() { super(null, null, null, null); }
-		@Override public boolean isAcceptingMessages() { return true; }
+		@Override public boolean isAcceptingMessages() { return !closed; }
+		@Override public ServerPlayNetworkAddon getAddon() { return Objects.requireNonNull(addon); }
 	}
 	@NotNullByDefault
 	private static final class Client extends Minecraft {

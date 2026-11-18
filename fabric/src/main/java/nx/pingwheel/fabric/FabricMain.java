@@ -88,14 +88,7 @@ public class FabricMain implements ModInitializer {
 				server.execute(() -> CommonServer.INSTANCE.onServerPresentationPolicyPacket(server, player, packet));
 			}
 		);
-		ServerPlayNetworking.registerGlobalReceiver(
-			PresentationC2SPacket.PACKET_TYPE,
-			(packet, context) -> {
-				final var player = context.player();
-				final var server = context.server();
-				server.execute(() -> CommonServer.INSTANCE.onPresentationPacket(server, player, packet));
-			}
-		);
+		registerPresentationReceiver(CommonServer.INSTANCE::onPresentationPacket);
 		ServerPlayNetworking.registerGlobalReceiver(
 			InventoryC2SPacket.PACKET_TYPE,
 			(packet, context) -> {
@@ -137,6 +130,19 @@ public class FabricMain implements ModInitializer {
 			@Nullable ServerGamePacketListenerImpl listener = player.connection;
 			if (listener != null) MonitorPacketDispatch.server(server, server, player, listener, packet,
 				current -> receiver.accept(server, current, packet));
+		});
+	}
+
+	static void registerPresentationReceiver(TriConsumer<MinecraftServer, ServerPlayer, PresentationC2SPacket> receiver) {
+		ServerPlayNetworking.registerGlobalReceiver(PresentationC2SPacket.PACKET_TYPE, (packet, context) -> {
+			ServerPlayer player = context.player();
+			MinecraftServer server = context.server();
+			@Nullable ServerGamePacketListenerImpl listener = player.connection;
+			// The response sender is the addon that received the packet, even if its player has respawned.
+			if (listener != null && context.responseSender() == ServerPlayNetworking.getSender(listener)) {
+				MonitorPacketDispatch.server(server, server, player, listener, packet,
+					current -> receiver.accept(server, current, packet));
+			}
 		});
 	}
 }
