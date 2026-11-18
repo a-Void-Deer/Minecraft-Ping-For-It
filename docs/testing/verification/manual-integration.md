@@ -20,6 +20,23 @@ Additional requirements for this file:
   contract](../../architecture/picking/wheel.md#inventory-list) under live input
   on Forge. (NeoForge & Fabric done)
 
+### Distant Horizons
+
+Pending against an installed Distant Horizons runtime in both single-player and
+multiplayer for the
+[Distant Horizons range route](../../architecture/picking/range.md#integration-matrix);
+record the exact Minecraft, Distant Horizons and loader versions.
+
+1. Choose two distinct surfaces visible only through Distant Horizons, beyond
+   native capture range but within server range.
+2. With the ordinary ping, mark the first surface. Confirm the marker sits on
+   that surface, not at the native miss endpoint.
+3. While aiming at the first surface, hold to open **Precise**. Turn to the
+   second surface, wait for the live capture to update, then select **Location**.
+   Confirm the marker lands on the second surface.
+4. Switch world or dimension and repeat both checks on comparable surfaces.
+   Confirm neither check reuses a hit from the previous world.
+
 ### Aeronautics rotors
 
 Pending for the [Aeronautics contract](../../integrations/aeronautics.md) and

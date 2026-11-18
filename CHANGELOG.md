@@ -43,6 +43,14 @@ Changes since the `1.21.1` baseline (`a51a850b`).
   scan ends incomplete, the wheel disables the target types that depend on it
   rather than offering a partial result.
 
+### Distant Horizons
+
+- After the native trace misses, ordinary pings and **Precise** → **Location**
+  can pick a distant target in both single-player and multiplayer. That Distant
+  Horizons hit comes only from the world you were in when aiming, and the
+  server's own range check still applies. See
+  [Distant Horizons capture range](docs/architecture/picking/range.md#capture-pipeline-application).
+
 ### Server performance limits
 
 The five inventory slot sliders on the server **Performance** page have fewer

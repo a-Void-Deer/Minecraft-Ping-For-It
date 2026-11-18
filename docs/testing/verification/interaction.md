@@ -228,8 +228,31 @@ provider-specific coverage is under
 
 `ServerConfigBoundsTest` covers server range clamps,
 `RaycastCandidateFlowTest` covers native candidate and raycast seams, and
-`OptionalDependencySafetyTest` covers absent optional-integration safety. Source
-and focused seam evidence establish the native
+`OptionalDependencySafetyTest` covers absent optional-integration safety. Its
+isolated class loader proves the disabled Distant Horizons boundary resolves
+and returns no completion with the Distant Horizons API absent; the Common test
+runtime also carries the pinned Distant Horizons 5.1.0 test-scope API, so
+absence is not established by the whole test runtime.
+
+`DistantHorizonsWorldTraceTest` drives the production asynchronous adapter with
+recording API proxies for the pinned Distant Horizons API. It covers choosing the
+captured client world when another world of the same dimension type is loaded,
+single-player integrated-server and client-alias binding, no trace start when
+the match is not unique, and an unrelated, absent or disappearing world.
+Per-world terrain-cache isolation after replacement is also covered.
+
+On the same client level, a binding change before the client-thread callback
+does not publish the old result. A failed retired-cache cleanup does not block
+the replacement trace or overwrite a valid in-flight result, and the stale hit
+is still discarded by that binding fence. The [range
+contract](../../architecture/picking/range.md#capture-pipeline-application)
+owns world matching; the ordinary and Precise captures retain the generation and
+level fences described by
+[capture](../../architecture/picking/capture.md). These are headless API
+fixtures, not an installed Distant Horizons runtime or a live single-player or
+multiplayer session.
+
+Source and focused seam evidence establish the native
 `min(raycastDistance, pingDistance)` limit, the independent Distant Horizons
 trace, the server acceptance range, Create and Sable reuse of the finite native
 segment in the ordinary trace, and the hold-frozen client `pingDistance` bound

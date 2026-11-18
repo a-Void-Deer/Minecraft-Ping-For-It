@@ -12,6 +12,8 @@ final class DistantHorizonsDiagnosticChannels {
 		"distanthorizons/schedule", Duration.ofSeconds(10));
 	static final DiagnosticChannel TRACE_FAILURES = DiagnosticChannel.interval(
 		"distanthorizons/trace", Duration.ofSeconds(10));
+	static final DiagnosticChannel CACHE_RETIREMENT_FAILURES = DiagnosticChannel.interval(
+		"distanthorizons/cache-retirement", Duration.ofSeconds(10));
 
 	private DistantHorizonsDiagnosticChannels() {}
 }

@@ -95,7 +95,9 @@ root, ordinary and approved Sable reports remain independent, and the
 asynchronous case unwraps its cause, completes once with no hit, and lets a
 throwing completion callback propagate. These are direct guard and completion
 seams, not an installed Sable or Distant Horizons runtime, an actual
-asynchronous trace, loader startup or game-session evidence.
+asynchronous trace, loader startup or game-session evidence. Separate headless
+trace coverage is inventoried under
+[capture and acceptance range](interaction.md#capture-and-acceptance-range).
 
 `ExternalBlockRegistryDiagnosticsTest` covers throwing and null-result providers
 at validation, materialization, refresh, name, observation and candidate/committed

@@ -1,20 +1,30 @@
 package nx.pingwheel.common.integration;
 
+import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Executor;
+import java.util.function.Consumer;
 
 import nx.pingwheel.common.integration.sable.client.SableClientProvider;
 import nx.pingwheel.common.domain.Target;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Guards the optional-dependency boundaries: stable hot/core classes must
@@ -68,7 +78,7 @@ class OptionalDependencySafetyTest {
 	}
 
 	@Test
-	void boundariesAreNoOpsWhenFlagsDisabled() {
+	void boundariesAreNoOpsWhenFlagsDisabled() throws Throwable {
 		boolean distantHorizons = ModContext.HasDistantHorizons;
 		boolean sable = ModContext.HasSable;
 
@@ -77,7 +87,14 @@ class OptionalDependencySafetyTest {
 			ModContext.HasSable = false;
 
 			// Each call must short-circuit before touching the optional jars.
-			assertFalse(DistantHorizonsIntegration.traceDistantAsync(Vec3.ZERO, Vec3.ZERO, ignored -> {}));
+			ClassLoader noDistantHorizons = withoutDistantHorizonsApi();
+			assertThrows(ClassNotFoundException.class, () -> noDistantHorizons.loadClass("com.seibel.distanthorizons.api.DhApi"));
+			Class<?> adapter = noDistantHorizons.loadClass(DistantHorizonsIntegration.class.getName());
+			Consumer<Optional<BlockHitResult>> completion = ignored -> fail("disabled trace must not complete");
+			// Resolve only the public boundary, not private implementation signatures that use DH API types.
+			var trace = MethodHandles.publicLookup().findStatic(adapter, "traceDistantAsync",
+				MethodType.methodType(boolean.class, ClientLevel.class, boolean.class, Vec3.class, Vec3.class, Executor.class, Consumer.class));
+			assertFalse((boolean) trace.invokeExact((ClientLevel) null, false, Vec3.ZERO, Vec3.ZERO, (Executor) Runnable::run, completion));
 			assertTrue(SableIntegration.projectOutOfSubLevel(null, Vec3.ZERO).isEmpty());
 			assertTrue(SableClientProvider.capture(null, null, null, null).isEmpty());
 			Target.ExternalBlockTarget corrupt = Target.ExternalBlockTarget.committed(
@@ -88,6 +105,30 @@ class OptionalDependencySafetyTest {
 			ModContext.HasDistantHorizons = distantHorizons;
 			ModContext.HasSable = sable;
 		}
+	}
+
+	private static ClassLoader withoutDistantHorizonsApi() {
+		String adapterName = DistantHorizonsIntegration.class.getName();
+		return new ClassLoader(OptionalDependencySafetyTest.class.getClassLoader()) {
+			@Override protected Class<?> loadClass(String name, boolean resolve) throws ClassNotFoundException {
+				if (name.startsWith("com.seibel.distanthorizons.")) throw new ClassNotFoundException(name);
+				if (!name.equals(adapterName) && !name.startsWith(adapterName + "$")
+					&& !name.equals(DistantHorizonsDiagnosticChannels.class.getName())) return super.loadClass(name, resolve);
+				synchronized (getClassLoadingLock(name)) {
+					@Nullable Class<?> loaded = findLoadedClass(name);
+					if (loaded == null) {
+						try {
+							byte[] bytes = readClassBytes(name.replace('.', '/'));
+							loaded = defineClass(name, bytes, 0, bytes.length);
+						} catch (IOException error) {
+							throw new ClassNotFoundException(name, error);
+						}
+					}
+					if (resolve) resolveClass(loaded);
+					return loaded;
+				}
+			}
+		};
 	}
 
 	private static byte[] readClassBytes(String className) throws IOException {

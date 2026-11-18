@@ -1745,8 +1745,9 @@ public final class ClientPingRuntime {
 		if (game == null || game.level != inputs.level() || !ModContext.HasDistantHorizons) return false;
 		ClientLevel level = game.level;
 		try {
-			return DistantHorizonsIntegration.traceDistantAsync(vector(inputs.ray().origin()), vector(inputs.ray().direction()),
-				distant -> game.execute(() -> {
+			return DistantHorizonsIntegration.traceDistantAsync(level, game.hasSingleplayerServer(),
+				vector(inputs.ray().origin()), vector(inputs.ray().direction()), game,
+				distant -> {
 					if (game.level != level || baselineToken != inputs.token() || !activeInteraction.isCurrent(inputs.token())) return;
 					// A no-hit/failure uses this request's native miss, not the latest camera.
 					Vec3 point = distant.map(HitResult::getLocation).orElseGet(() -> vector(inputs.ray().origin())
@@ -1757,7 +1758,7 @@ public final class ClientPingRuntime {
 					completion.accept(PreciseCaptureRefresh.Outcome.available(new Candidate(0, resolved, worldPoint,
 						FrozenCandidateAcquisition.distance(inputs.ray().origin(), worldPoint), Optional.empty(), Optional.empty(),
 						CaptureEquivalenceKey.nativeTarget(resolved.target()))));
-				}));
+				});
 		} catch (LinkageError failure) {
 			ModContext.HasDistantHorizons = false;
 			DistantHorizonsIntegration.logUnguardedLinkFailure(failure);
@@ -1800,14 +1801,9 @@ public final class ClientPingRuntime {
 			}
 
 			if (ModContext.HasDistantHorizons) {
-				// The Distant Horizons completion runs on its completion thread:
-				// it only carries the client and level captured at press time
-				// and schedules onto the client's main thread, never reading
-				// CommonClient.Game from the pool thread. When the trace cannot
-				// be scheduled — a LinkageError disables the integration, any
-				// other scheduling rejection only debug logs — the vanilla miss
-				// is completed synchronously below, so the ping can never
-				// strand.
+				// DH returns completion on the captured client thread. If the
+				// captured world is unavailable or the trace cannot start, use
+				// the native miss synchronously below.
 				//
 				// An extreme LinkageError thrown while linking the trace call
 				// itself must never crash the tick: the integration is switched
@@ -1820,8 +1816,8 @@ public final class ClientPingRuntime {
 
 				try {
 					scheduled = DistantHorizonsIntegration.traceDistantAsync(
-						rayOrigin, cameraDirection,
-						distantHit -> completeDistantHit(game, level, token, fallbackMiss, pressRay, distantHit, acquisition, completion));
+						level, game.hasSingleplayerServer(), rayOrigin, cameraDirection, game,
+						distantHit -> completeDistantHit(game, level, token, fallbackMiss, distantHit, acquisition, completion));
 				} catch (LinkageError error) {
 					ModContext.HasDistantHorizons = false;
 					DistantHorizonsIntegration.logUnguardedLinkFailure(error);
@@ -1893,11 +1889,9 @@ public final class ClientPingRuntime {
 	 * main thread: a distant hit upgrades the miss, otherwise the original
 	 * vanilla miss is completed as a pure location target.
 	 *
-	 * <p>This callback runs on the Distant Horizons completion thread and must
-	 * never touch {@link nx.pingwheel.common.CommonClient.Game}: the
-	 * {@link Minecraft} client and the {@link ClientLevel} captured at press
-	 * time are the only live references it carries. On the client main thread a
-	 * stale (superseded) token is ignored. When the level is gone or no longer
+	 * <p>The {@link Minecraft} client and the {@link ClientLevel} captured at
+	 * press time are the only live references it carries. A stale (superseded)
+	 * token is ignored. When the level is gone or no longer
 	 * the level captured at press time, the interaction is abandoned for
 	 * exactly that token (the captured level is never snapshotted against) and
 	 * only a constant privacy-safe debug reason is logged: the cleared current
@@ -1909,27 +1903,24 @@ public final class ClientPingRuntime {
 		ClientLevel levelAtPress,
 		InteractionToken token,
 		HitResult vanillaMiss,
-		CapturedRay pressRay,
 		Optional<BlockHitResult> distantHit,
 		Optional<FrozenCandidateAcquisition> acquisition,
 		CaptureCompletion completion
 	) {
-		game.execute(() -> {
-			if (!activeInteraction.isCurrent(token)) {
-				return;
-			}
+		if (!activeInteraction.isCurrent(token)) {
+			return;
+		}
 
-			if (game.level == null || game.level != levelAtPress) {
-				activeInteraction.invalidate(token);
-				pendingRay = null;
-				logger.debug(DISTANT_HIT_ABANDONED_LEVEL_CHANGE);
-				return;
-			}
+		if (game.level != levelAtPress) {
+			activeInteraction.invalidate(token);
+			pendingRay = null;
+			logger.debug(DISTANT_HIT_ABANDONED_LEVEL_CHANGE);
+			return;
+		}
 
-			HitResult appliedHit = distantHit.map(hit -> (HitResult) hit).orElse(vanillaMiss);
+		HitResult appliedHit = distantHit.map(hit -> (HitResult) hit).orElse(vanillaMiss);
 
-			completion.complete(MinecraftTargetSnapshotFactory.fromCandidateHitResult(levelAtPress, appliedHit), acquisition);
-		});
+		completion.complete(MinecraftTargetSnapshotFactory.fromCandidateHitResult(levelAtPress, appliedHit), acquisition);
 	}
 
 	/**

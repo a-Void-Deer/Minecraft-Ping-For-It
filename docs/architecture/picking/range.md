@@ -45,14 +45,19 @@ epsilon. It therefore has no independent range expansion. Sable's separate
 transformed-behind discovery is the additive provider supplement bounded in
 [Selector candidate supplements](#selector-candidate-supplements).
 
-After a native miss, Distant Horizons is a separate optional asynchronous route.
-It receives the frozen press origin and direction but calls its API with an
-integration-specific fixed range. This route is not clipped by client
-`pingDistance` or the current hidden `raycastDistance` value/effective native
-segment. A distant hit replaces the native location-miss
-snapshot; a no-hit, failure, unavailable integration, or scheduling failure
-uses the original native miss/location fallback. The eventual target still faces
-the independent server acceptance check below.
+After a native miss, Distant Horizons can supply a distant hit asynchronously.
+It uses the frozen press ray for ordinary capture and the live camera ray of that
+cast for Precise Location. Both use a fixed integration range independent of the
+client `pingDistance` and the hidden `raycastDistance` cap.
+
+Single-player and multiplayer use different API lookups, but both trace only the
+one loaded Distant Horizons level that matches the exact client world captured
+for the cast. A distant hit replaces the native miss result only if that match,
+including the Distant Horizons data source, still holds at callback time. A
+missing, ambiguous or replaced match, a trace miss, an unavailable integration,
+or a scheduling or trace failure leaves the native fallback for that
+[capture path](capture.md) in place. The eventual target still faces the
+independent server acceptance check below.
 
 The deferred and rapid-click compatibility captures described in
 [long-press compatibility](../input/long-press-compatibility.md)
