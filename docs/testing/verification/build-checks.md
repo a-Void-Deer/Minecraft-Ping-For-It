@@ -870,6 +870,40 @@ production bug or performance measurement.
 No live client/server, multiplayer, GPU/render, heap/GC/TPS or performance result
 follows from these Gradle invocations.
 
+#### Slot-budget final full-tree verification (2026-11-17)
+
+2026-11-17 on `agent/multiple-fixes-1`, HEAD
+`a3b7f763c9ca7579cc86a51c009b6ad371c4ec32` (the 12-file tightened-cap
+implementation on parent `b486c932`), with no Java diff against HEAD and only
+the three parent-owned documentation files modified. One PowerShell Gradle
+invocation exited 0 (`BUILD SUCCESSFUL` in 8m 40s) after 53 actionable tasks,
+28 executed and 25 up-to-date:
+
+```text
+.\gradlew.bat --no-daemon --continue --console=plain :common:compileJava :common:compileTestJava :common:check :common:javadoc :fabric:compileJava :fabric:compileTestJava :fabric:check :fabric:build :forge:compileJava :forge:compileTestJava :forge:check :forge:build :neoforge:compileJava :neoforge:compileTestJava :neoforge:check :neoforge:build verifyModIdentity
+```
+
+All four Test tasks executed fresh: 704 suites and 7,306 tests, 7,290 passed,
+16 skipped, zero failures and zero errors (Common 599 suites/6,605 tests/2
+skipped; Fabric 15/111; Forge 16/96 with 14 skipped; NeoForge 74/494). The 16
+skips are the recurring native gaps: two `InventoryFluidLoaderIntegrationTest`
+cases and, under Forge, one `FluidPresentationServiceTest`, five
+`NativeFluidAmountTest`, one `NativeFluidRegistryFreezerTest` and seven
+`PlatformFluidRegistryServiceTest` cases. The final matrix adds seven tests
+over the interim b486c932 704/7,299 first-stage result: five network and two
+persistence.
+
+Common and NeoForge main/test compilation were `UP-TO-DATE` from the same-input
+targeted run; Fabric and Forge main/test compilation executed. All four modules
+executed check and Javadoc; all three loader builds, remapping, rebuilt sources
+and Javadoc jars, and `verifyModIdentity` passed. The shippable jars remain
+`Ping-For-It-0.5.1-pfi-beta1-{fabric|forge|neoforge}-1.21.1.jar`; `javap
+-constants` on each confirmed the tightened new maxima. Javadoc missing
+`@param`, mapping/Mixin and Gradle deprecation warnings remained with zero
+errors or failed tasks; diagnostic-fault `FAILURE` lines are expected test
+output, not build failures. No live client/server, GPU/render, multiplayer,
+manual UI or performance result follows.
+
 ### Native-classpath, GPU and independent probes
 
 #### Supplemental native-classpath verification

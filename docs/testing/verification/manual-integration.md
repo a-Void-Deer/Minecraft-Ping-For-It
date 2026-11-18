@@ -62,3 +62,41 @@ has not been validated.
 ### Settings and server performance
 
 On macOS and Linux (currently untested), on a live client and a dedicated or integrated server, with a Minecraft window and the platform modifier key (Option on macOS, Alt on Linux), exercise both logging rows through activation with the modifier held and released. Confirm that a current `DEBUG` value keeps its caption when the modifier is released, the next non-modifier activation exits to `NORMAL`, and `DEBUG` cannot be selected again without the modifier.
+
+The server Performance slot-count sliders (Physical Slots per Tick, Preview
+Slots per Client, Preview Slots Server-wide, Tracking Slots per Target, and
+Tracking Slots Server-wide) remain pending live verification:
+
+1. On each of the five sliders, drag around a commonly used value and through
+   the high range; confirm the handle follows the pointer and the intended value
+   can be selected.
+2. Repeat at a narrow window and at a different GUI scale; confirm stops near
+   both ends, a high-range boundary, and the unlimited tail remain reachable by
+   click and drag and the value caption stays legible.
+3. Use the arrow keys to adjust one stop at a time in the fine range, across a
+   high-range boundary, and at both ends.
+4. Move to the last finite stop, to unlimited, and back; confirm the caption,
+   handle and draft dirty/revert state match the selected mode.
+5. Load a server carrying a legal non-grid slot value, open the setting,
+   navigate away and back, then rebuild or reopen the screen; confirm the
+   original value remains selectable and clean until edited. Save an edit and
+   fetch the server configuration again; confirm the persisted value is
+   reported.
+
+Mixed-build checks for the finite upper bounds remain pending:
+
+- Load a server configuration written by the build with the earlier higher
+  bounds. Confirm each finite slot count above the current maximum is clamped
+  to that maximum on load, while an unlimited leaf remains unlimited and its
+  retained finite value is also clamped.
+- Run the build with the earlier higher bounds and the build with the lower
+  finite upper bounds against the same version-five server-configuration shape.
+  With the earlier server and the client with the lower bounds, confirm an
+  out-of-range snapshot is rejected as a whole, including an out-of-range
+  retained value on an unlimited leaf. With the server with the lower bounds and
+  the earlier client, confirm the corresponding out-of-range update is rejected,
+  including that unlimited-retained case, and a fetched snapshot still reports
+  the prior authoritative values. Confirm ordinary in-range values exchange
+  normally in both directions. Updates have no acknowledgement, so confirm the
+  applied or rejected state from a subsequent snapshot; a clean client draft
+  alone does not establish server acceptance.

@@ -1445,12 +1445,12 @@ from the same runtime physical-work, work and memory ledgers used by the work it
 protects. It adds no unmetered budget or separate allowance and never queues or
 prioritizes a `SELECT` behind publication.
 
-The expanded finite ranges for these capacities remain the existing
-configuration leaves; no new key or mode is introduced, defaults stay unchanged,
-and finite-only and unlimited-mode rules keep their existing guards. An explicit
-unlimited mode removes only that leaf's configurable cap, while the finite
-internal work and memory guards and both logical quotas remain. The exact finite
-values, defaults and leaf-specific guards are owned by code and by
+The finite bounds for these capacities are configured by the existing leaves; no
+new key or mode is introduced, defaults stay unchanged, and finite-only and
+unlimited-mode rules keep their existing guards. An explicit unlimited mode
+removes only that leaf's configurable cap, while the finite internal work and
+memory guards and both logical quotas remain. The exact finite values, bounds,
+defaults and leaf-specific guards are owned by code and by
 [server configuration](../../config/server.md#inventory-policy-object).
 
 ### Source metadata and validation accounting

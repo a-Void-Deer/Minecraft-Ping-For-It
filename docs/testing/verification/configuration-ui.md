@@ -462,7 +462,56 @@ zero and unlimited stops, and immutable extra integer stops. `InventoryConfigRan
 bounds for every integer leaf: files clamp without a shape rewrite, strict
 administration rejects a mixed invalid update atomically, and endpoints and
 in-range non-step integers survive parsing, persisted load and detached
-conversion exactly. `PendingMemoryMigrationTest` covers supported same-version
+conversion exactly.
+
+The five slot-count sliders additionally have native track coverage at compact
+and standard content widths: integer mouse clicks across the laid-out track
+reach every finite and unlimited stop in order, and the densest full-server
+preview slider is dragged to every stop in both directions. A legal non-grid
+authoritative slot value, including previously gridded values and a legal
+value adjacent to the finite maximum, remains an exact additional stop through
+slider construction and rebuild without an edit callback, dirty mark or update
+plan; after a real selection and a mouse scan back to that value, the draft is
+clean again. For the slot sliders that share the piecewise shape, scale
+fixtures check that the low range matches the preview-variants leaf's fine
+stops, every full high-range doubling region has one uniform spacing and the
+same stop count, spacing increases between regions, and both endpoints and the
+unlimited tail remain. The full-server tracking slider keeps its own low
+segmentation with the same doubling consistency, and the preview-variants leaf
+keeps its separate fine grid.
+
+The targeted two-class execution for the implementation committed as b486c932
+passed 56/56 with no failures, errors or skips (`InventoryPerformanceOptionTest`
+50/50 and `InventoryPerformanceScaleTest` 6/6). The same selection against the
+pre-fix implementation recorded 14 failures across its 56 tests. The slot
+extra-stop case reconstructs the slider rather than exercising live page
+navigation. The completed two-stage Common and loader matrix is owned by the
+[slot-budget final full-tree verification](build-checks.md#slot-budget-final-full-tree-verification-2026-11-17).
+
+The 12-file implementation commit `a3b7f763` tightens the five finite slot
+caps without changing their defaults, minima, unlimited guards, source capacity
+or protocol version. Focused headless coverage records the actual repaired
+behavior: an earlier file carrying finite or unlimited retained values above the
+new bounds clamps on load while preserving the mode and unrelated fields; a
+same-version/current-shape load and no-op save retain the original bytes, and a
+real edit writes the clamped values and survives reload. New endpoints
+round-trip in both modes; raw SNAPSHOT and unselected UPDATE values one above
+each bound are rejected across all five fields; the selected UPDATE boundary
+test remains. The high extra slider stop now uses the maximum minus one, and the
+existing native mouse/drag, rebuild and exact-revert regressions remain green.
+The runtime-scale fixture retains its 16,384-address source, 64 physical slots
+and 512-tick window with legal finite quotas and unchanged correctness
+assertions.
+
+The focused Common selection passed 555 tests with no failures, errors or skips
+across the range, values, persistence, settings, packet, draft, slider-option,
+scale, runtime-scale and pooled-backend classes; the NeoForge Vault selection
+passed 15/15. The persistence fixture is red on the old implementation (2/2
+failures), confirming the old over-limit behavior is detected. These are
+headless focused results: live navigation and a mixed-version client/server pair
+are not covered here.
+
+`PendingMemoryMigrationTest` covers supported same-version
 and older scalar normalization, clamped finite persistence, missing or null
 defaulting, explicit unlimited round trips, refusal to extend scalar acceptance,
 guarded normalization and failed-write retry preserving root and nested unknown
@@ -656,12 +705,13 @@ delivery, or wrapping.
   stacking, rendered heading clipping and help, hover or keyboard-focus tooltip
   delivery, wrapping, color styling, text-entry dispatch, footer traversal,
   GUI-scale and window resizing, live permission transitions, and multiplayer
-  read-only behavior. The server Performance factory, model, handler, codec and
-  localization seams passed the combined-tree run but do not establish that
-  screen's mouse dispatch, assembled localized tooltip layout, translation
-  quality without native-speaker review or remote persistence session; native
-  widget callbacks are exercised headlessly, not by gameplay. Execution evidence
-  is scoped separately, and live scenarios remain in the
+  read-only behavior. The earlier server Performance factory, model, handler,
+  codec and localization seams passed the combined-tree run but do not establish
+  that screen's mouse dispatch, assembled localized tooltip layout, translation
+  quality without native-speaker review, rendered legibility or feel of closely
+  spaced slider stops, or a remote persistence session; native widget callbacks
+  are exercised headlessly without a real window, GLFW delivery or gameplay.
+  Execution evidence is scoped separately, and live scenarios remain in the
   [manual matrix](manual-integration.md#settings-and-server-performance);
 - the assembled live screen coverage for the client inventory-cap sliders, the
   gesture controls' OFF/disabled presentation and live compatibility refresh, a
