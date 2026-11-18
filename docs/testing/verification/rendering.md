@@ -52,6 +52,22 @@ logging seams, not render-frame or GPU execution. Optional Flywheel and Create
 diagnostic seams are inventoried under
 [optional rendering coverage](integrations.md#optional-rendering-structural-coverage).
 
+## Direction-indicator placement
+
+`DirectionIndicatorGeometryTest` feeds the production placement seam from a real
+perspective projection, including points behind the camera with negative depth,
+and checks six CPU cases: arrows for targets that sit slightly above or below
+and behind the camera land on the default asymmetric safe rectangle's top and
+bottom edges at the expected bearing; arrows for horizontal targets behind the
+camera point outward from the projection center under asymmetric side insets; an
+arrow for a diagonal target behind the camera keeps its bearing on the top edge;
+forward off-screen arrows keep the established safe-zone-center bearing; and
+symmetric insets preserve the bearing of arrows for targets behind the camera.
+These are CPU geometry seams, not GPU submission, a live HUD frame, a game
+window or in-game visibility. The
+[direction-indicator safe area](../../config/client.md#direction-indicator-safe-area)
+owns the behavior.
+
 ## Container presentation subjects
 
 `VanillaChestPresentationTest` exercises production loaded-state adapters and the

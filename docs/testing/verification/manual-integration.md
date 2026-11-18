@@ -163,3 +163,14 @@ Mixed-build checks for the finite upper bounds remain pending:
   normally in both directions. Updates have no acknowledgement, so confirm the
   applied or rejected state from a subsequent snapshot; a clean client draft
   alone does not establish server acceptance.
+
+### Direction-indicator placement
+
+Pending on a live client for
+[direction-indicator placement](../../config/client.md#direction-indicator-safe-area).
+Set unequal left and right insets and make the bottom inset larger than the top,
+keeping the screen center inside the safe area. Mark a target slightly below
+eye level, then face directly away from it while looking level. Confirm the
+arrow appears at the bottom edge of the safe area and points down.
+The [rendering evidence](rendering.md#direction-indicator-placement) covers CPU
+placement only; GPU presentation remains pending.

@@ -94,6 +94,14 @@ still `0.5.1-pfi-beta1` and does not run this migration.
   tracking and per-player channel and rate-limit state. A late shutdown from
   an older server cannot clear the new session's [markers](docs/architecture/authority/marker_lifecycle.md#server-authoritative-record-lifetime).
 
+### Direction indicator
+
+- The arrow for a target behind you points in the target's direction even with
+  unequal safe-area insets. For example, if you look level and the target is
+  directly behind you and slightly below eye level, the arrow appears at the
+  bottom of the safe area and points down. See
+  [direction-indicator safe area](docs/config/client.md#direction-indicator-safe-area).
+
 ### Selection toggles
 
 - Pressing and holding **Mark Transparent Blocks**, **Mark Blacklisted Targets**

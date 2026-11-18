@@ -355,6 +355,11 @@ lifetime; those behaviors are owned by [wheel](../architecture/picking/wheel.md)
 | `safeZoneTop` | number, GUI-scaled inset | Top screen inset for off-screen direction-indicator placement. |
 | `safeZoneBottom` | number, GUI-scaled inset | Bottom inset, measured from screen height. |
 
+For a target behind the camera, the arrow uses the camera's projection center
+for its bearing and the safe-area boundary for its placement. For an off-screen
+target in front of the camera, the arrow uses the center of the safe area for its
+bearing instead.
+
 The [configuration UI](../UI/settings-screen.md) owns which file fields have
 interactive controls. `blockDisplayPolicy` is derived transient state, not a
 persisted key.
