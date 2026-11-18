@@ -91,20 +91,21 @@ public class ServerCore {
 	 * The shared, server-authoritative marker store. It is replaced on common
 	 * server initialization ({@link #initMarkers()}) and again whenever the
 	 * first server tick observes a different {@link MinecraftServer} instance
-	 * (e.g. an integrated world restart), so stale markers, expiries, and
-	 * winners can never carry across server instances. {@link #init()} never
-	 * touches it, so a live config reload keeps active markers.
+	 * (e.g. an integrated world restart), and dropped by {@link #stopped} when
+	 * the owning server shuts down, so stale markers, expiries, and winners can
+	 * never carry across server instances. {@link #init()} never touches it, so
+	 * a live config reload keeps active markers.
 	 */
-	private static ServerMarkerStore MARKER_STORE;
+	private static @Nullable ServerMarkerStore MARKER_STORE;
 
 	/**
 	 * Identity of the {@link MinecraftServer} instance the current
 	 * {@link #MARKER_STORE} belongs to, or {@code null} after a reset.
-	 * Written under the synchronized transition in {@link #ensureMarkerStore}
-	 * and {@link #initMarkers()}, read via the volatile fast path in
-	 * {@link #onServerTick(MinecraftServer)}.
+	 * Written under the synchronized transitions in {@link #ensureMarkerStore},
+	 * {@link #initMarkers()} and {@link #stopped(MinecraftServer)}, read via the
+	 * volatile fast path in {@link #onServerTick(MinecraftServer)}.
 	 */
-	private static volatile MinecraftServer ACTIVE_SERVER;
+	private static volatile @Nullable MinecraftServer ACTIVE_SERVER;
 
 	/**
 	 * Applies the live rate-limit configuration. Also invoked on every config
@@ -126,15 +127,54 @@ public class ServerCore {
 		BudgetDelayMonitoring.reset();
 		PresentationServer.reset();
 		InventoryServer.reset();
-		if (ACTIVE_SERVER != null && MARKER_STORE != null) {
-			releaseExternalMarkers(ACTIVE_SERVER, MARKER_STORE.allMarkers());
-			MARKER_STORE.clear();
-			ExternalBlockServerProviders.close(ACTIVE_SERVER);
-		}
+		releaseMarkerState();
 
 		MARKER_STORE = new ServerMarkerStore(new MarkerIdSource());
 		ACTIVE_SERVER = null;
 		PRESENTATION_POLICY_REVISION.set(0L);
+	}
+
+	/**
+	 * Ends the marker lifecycle of a stopped server instance. Returns every
+	 * committed marker's external provider reference and inventory sidecar
+	 * through the ordinary removal path, drops the store, closes defensive
+	 * provider state, and forgets the channel and rate state of that server's
+	 * connections. No recipient synchronization is performed because no
+	 * audience remains.
+	 *
+	 * <p>The transition is identity-guarded and therefore idempotent: a
+	 * repeated stop, or a late stop for an instance a newer server already
+	 * replaced, neither releases twice nor clears the current server's state.
+	 */
+	public static synchronized void stopped(@Nullable MinecraftServer server) {
+		if (server == null || ACTIVE_SERVER != server) {
+			return;
+		}
+
+		releaseMarkerState();
+		MARKER_STORE = null;
+		ACTIVE_SERVER = null;
+		PRESENTATION_POLICY_REVISION.set(0L);
+		PLAYER_CHANNELS.clear();
+		PLAYER_RATES.clear();
+	}
+
+	/**
+	 * Releases the marker-scoped state owned by the current active-server
+	 * identity without clearing that identity, so the caller can decide whether
+	 * to clear or replace it. Every committed marker is released exactly once
+	 * because the store is cleared afterwards, and provider-owned per-server
+	 * state receives its single close opportunity here.
+	 */
+	private static boolean releaseMarkerState() {
+		if (ACTIVE_SERVER == null || MARKER_STORE == null) {
+			return false;
+		}
+
+		releaseExternalMarkers(ACTIVE_SERVER, MARKER_STORE.allMarkers());
+		MARKER_STORE.clear();
+		ExternalBlockServerProviders.close(ACTIVE_SERVER);
+		return true;
 	}
 
 	/**
@@ -145,18 +185,16 @@ public class ServerCore {
 	 * and before disconnect cleanup; the volatile identity check in
 	 * {@link #onServerTick(MinecraftServer)} short-circuits the common case,
 	 * and the transition itself is synchronized so it can never interleave
-	 * with {@link #initMarkers()} or a concurrent marker handler. Emits
-	 * exactly one safe debug log per server instance.
+	 * with {@link #initMarkers()}, {@link #stopped(MinecraftServer)} or a
+	 * concurrent marker handler. Emits exactly one safe debug log per server
+	 * instance.
 	 */
 	private static synchronized void ensureMarkerStore(MinecraftServer server) {
 		if (ACTIVE_SERVER == server) {
 			return;
 		}
 
-		if (ACTIVE_SERVER != null && MARKER_STORE != null) {
-			releaseExternalMarkers(ACTIVE_SERVER, MARKER_STORE.allMarkers());
-			MARKER_STORE.clear();
-			ExternalBlockServerProviders.close(ACTIVE_SERVER);
+		if (releaseMarkerState()) {
 			PRESENTATION_POLICY_REVISION.set(0L);
 		}
 

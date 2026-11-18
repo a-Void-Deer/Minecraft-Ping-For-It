@@ -53,6 +53,10 @@ public class CommonServer {
 		ServerCore.onPresentationPreview(server, player, packet);
 	}
 	public void onServerStopped(MinecraftServer server) {
+		// Marker authority is released first: committed markers still own live
+		// inventory sidecars and external provider references at this point.
+		// The remaining presentation lifetimes keep their existing teardown order.
+		ServerCore.stopped(server);
 		nx.pingwheel.common.presentation.inventory.minecraft.InventoryServer.stopped(server);
 		nx.pingwheel.common.presentation.minecraft.PresentationServer.stopped(server);
 		nx.pingwheel.common.presentation.minecraft.BudgetDelayMonitoring.stopped(server);
