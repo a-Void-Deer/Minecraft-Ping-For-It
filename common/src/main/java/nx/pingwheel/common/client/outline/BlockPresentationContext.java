@@ -49,6 +49,9 @@ public record BlockPresentationContext(
 
 	/** Positive nonloading client lookup; synthetic BlockGetters supply their own finite states. */
 	public @Nullable BlockState loadedState(BlockPos pos) {
+		if (world instanceof ExternalBlockReadView external) {
+			return external.loadedState(pos);
+		}
 		if (world instanceof ClientLevel level) {
 			@Nullable LevelChunk chunk = level.getChunkSource().getChunk(pos.getX() >> 4, pos.getZ() >> 4, ChunkStatus.FULL, false);
 			return chunk == null ? null : chunk.getBlockState(pos);
@@ -57,7 +60,7 @@ public record BlockPresentationContext(
 	}
 
 	/** Reads the source block entity when one is currently present. */
-	public BlockEntity sourceBlockEntity() {
+	public @Nullable BlockEntity sourceBlockEntity() {
 		return world.getBlockEntity(sourcePos());
 	}
 

@@ -16,6 +16,11 @@ public interface BlockPresentationResolver {
 
 	BlockPresentationResolution resolve(BlockPresentationContext context);
 
+	/** Opts a known resolver into provider-scoped reads (no raw ClientLevel). */
+	default boolean supportsExternalScope() {
+		return false;
+	}
+
 	/** Alias for callers that describe the resolver id as its unique id. */
 	default String uniqueId() {
 		return id();

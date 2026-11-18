@@ -330,7 +330,7 @@ public class CommonClient {
 		// block-only frame can establish the shared outline pipeline too.
 		EntityOutlineFrameState.INSTANCE.beginFrame();
 		BlockModelOutlineState.INSTANCE.beginFrame();
-		prepareBlockPresentations();
+		prepareBlockPresentations(ctx.tickDelta);
 		requestEntityOutlineEffect();
 	}
 
@@ -373,19 +373,19 @@ public class CommonClient {
 	}
 
 	/**
-	 * Resolves ordinary block subjects once for this frame, after the source
+	 * Resolves ordinary and provider-owned block subjects once for this frame, after the source
 	 * outline snapshot and model-frame state have both been reset. The resulting
 	 * immutable list is shared by the model and late VoxelShape passes.
 	 */
-	private static void prepareBlockPresentations() {
-		Minecraft game = Game;
+	private static void prepareBlockPresentations(float renderPartialTick) {
+		@Nullable Minecraft game = Game;
 
 		if (pingRuntime == null || game == null || game.level == null) {
 			return;
 		}
 
 		BlockModelOutlineState.INSTANCE.preparePresentations(
-			game.level, BlockOutlineState.INSTANCE);
+			game.level, BlockOutlineState.INSTANCE, renderPartialTick);
 	}
 
 	/**
@@ -445,7 +445,7 @@ public class CommonClient {
 
 		VirtualBlockDisplayRenderer.INSTANCE.render(
 			game.level, camera, builtInPartialTick, flywheelPartialTick,
-			BlockOutlineState.INSTANCE, BlockModelOutlineState.INSTANCE);
+			BlockModelOutlineState.INSTANCE);
 	}
 
 	/**
@@ -571,10 +571,7 @@ public class CommonClient {
 			return;
 		}
 
-		if (BlockOutlineState.INSTANCE.allCoveredBy(
-			BlockModelOutlineState.INSTANCE.presentations(),
-			BlockModelOutlineState.INSTANCE.successKeys(),
-			BlockModelOutlineState.INSTANCE.externalSuccessKeys())) {
+		if (BlockModelOutlineState.INSTANCE.allCoveredByModels()) {
 			return;
 		}
 
@@ -582,11 +579,7 @@ public class CommonClient {
 			VertexConsumer lines = bufferSource.getBuffer(BlockOutlineRenderType.BLOCK_OUTLINE);
 			BlockOutlineRenderer.render(
 				game.level, camera, frame.cameraPosition(), lines,
-				BlockOutlineState.INSTANCE,
-				BlockModelOutlineState.INSTANCE.presentations(),
-				BlockModelOutlineState.INSTANCE.successKeys(),
-				BlockModelOutlineState.INSTANCE.externalSuccessKeys(),
-				frame.partialTick());
+				BlockModelOutlineState.INSTANCE);
 			bufferSource.endBatch(BlockOutlineRenderType.BLOCK_OUTLINE);
 		});
 	}

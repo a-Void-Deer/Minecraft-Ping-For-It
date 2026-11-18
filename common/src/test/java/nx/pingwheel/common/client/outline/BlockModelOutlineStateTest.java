@@ -16,6 +16,8 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.marker.TargetKey;
+import nx.pingwheel.common.client.outline.ExternalBlockFramePresentation.SuccessKey;
+import org.jetbrains.annotations.Unmodifiable;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -43,8 +45,7 @@ class BlockModelOutlineStateTest {
 		BlockModelOutlineState state = BlockModelOutlineState.INSTANCE;
 		BlockPresentation direct = directPresentation(1, 2, 3, "direct");
 		BlockPresentation second = directPresentation(4, 5, 6, "other");
-		TargetKey.ExternalBlockKey sable = new TargetKey.ExternalBlockKey(
-			DIMENSION, "sable", "plot-block", "minecraft:stone");
+		SuccessKey sable = externalSuccess("plot-block", "direct");
 
 		state.beginFrame();
 		assertFalse(state.emitted());
@@ -97,16 +98,14 @@ class BlockModelOutlineStateTest {
 			first.renderSubjects().get(0).successKey(first.sourceSpec());
 		BlockPresentationSuccessKey secondKey =
 			second.renderSubjects().get(0).successKey(second.sourceSpec());
-		TargetKey.ExternalBlockKey firstExternal = new TargetKey.ExternalBlockKey(
-			DIMENSION, "sable", "first", "minecraft:stone");
-		TargetKey.ExternalBlockKey secondExternal = new TargetKey.ExternalBlockKey(
-			DIMENSION, "sable", "second", "minecraft:stone");
+		SuccessKey firstExternal = externalSuccess("first", "direct");
+		SuccessKey secondExternal = externalSuccess("second", "direct");
 
 		state.setPresentations(List.of(first, second));
 		state.addSuccess(firstKey);
 		Set<BlockPresentationSuccessKey> publishedSuccesses = state.successKeys();
 		state.addExternalSuccess(firstExternal);
-		Set<TargetKey.ExternalBlockKey> publishedExternalSuccesses = state.externalSuccessKeys();
+		@Unmodifiable Set<SuccessKey> publishedExternalSuccesses = state.externalSuccessKeys();
 
 		assertFalse(state.allPresentationsCovered());
 		state.addSuccess(secondKey);
@@ -136,8 +135,7 @@ class BlockModelOutlineStateTest {
 			presentation.renderSubjects().get(0).successKey(presentation.sourceSpec());
 		state.setPresentations(List.of(presentation));
 		state.addSuccess(success);
-		state.addExternalSuccess(new TargetKey.ExternalBlockKey(
-			DIMENSION, "sable", "plot-block", "minecraft:stone"));
+		state.addExternalSuccess(externalSuccess("plot-block", "direct"));
 
 		state.beginFrame();
 
@@ -213,21 +211,8 @@ class BlockModelOutlineStateTest {
 		assertTrue(state.allPresentationsCovered());
 	}
 
-	@Test
-	void externalCoverageIsPreservedAlongsideOrdinarySubjects() {
-		BlockModelOutlineState state = BlockModelOutlineState.INSTANCE;
-		BlockOutlineState outlines = BlockOutlineState.INSTANCE;
-		outlines.clear();
-		TargetKey.ExternalBlockKey externalKey = new TargetKey.ExternalBlockKey(
-			DIMENSION, "sable", "plot-block", "minecraft:stone");
-		state.setPresentations(List.of());
-		state.addExternalSuccess(externalKey);
-
-		// This state seam is intentionally limited to its own ordinary snapshot;
-		// the external assertion is covered by the combined state method in the
-		// production caller.
-		assertTrue(state.allPresentationsCovered());
-		assertTrue(state.allCoveredBy(outlines));
+	private static SuccessKey externalSuccess(String stableTargetId, String subjectId) {
+		return new SuccessKey(new TargetKey.ExternalBlockKey(DIMENSION, "sable", stableTargetId, "minecraft:stone"), subjectId);
 	}
 
 	private static BlockPresentation directPresentation(int x, int y, int z, String subjectId) {

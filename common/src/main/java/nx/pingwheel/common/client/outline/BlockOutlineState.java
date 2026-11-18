@@ -2,10 +2,8 @@ package nx.pingwheel.common.client.outline;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 
 import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
@@ -132,37 +130,6 @@ public final class BlockOutlineState {
 	 */
 	public boolean hasOutlines() {
 		return !specs.isEmpty() || !externalSpecs.isEmpty();
-	}
-
-	/**
-	 * Whether every ordinary presentation subject and provider-owned key is
-	 * covered by the corresponding model-pass success sets. Empty subject lists
-	 * are intentionally vacuously covered.
-	 */
-	public boolean allCoveredBy(
-		List<BlockPresentation> presentations,
-		Set<BlockPresentationSuccessKey> succeeded,
-		Set<TargetKey.ExternalBlockKey> externalSucceeded
-	) {
-		Objects.requireNonNull(presentations, "presentations");
-		Objects.requireNonNull(succeeded, "succeeded");
-		Objects.requireNonNull(externalSucceeded, "externalSucceeded");
-
-		for (BlockPresentation presentation : presentations) {
-			for (BlockRenderSubject subject : presentation.renderSubjects()) {
-				if (!succeeded.contains(subject.successKey(presentation.sourceSpec()))) {
-					return false;
-				}
-			}
-		}
-
-		for (TargetKey.ExternalBlockKey blockKey : externalSpecs.keySet()) {
-			if (!externalSucceeded.contains(blockKey)) {
-				return false;
-			}
-		}
-
-		return true;
 	}
 
 	/**

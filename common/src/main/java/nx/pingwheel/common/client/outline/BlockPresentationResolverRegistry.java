@@ -122,6 +122,15 @@ public final class BlockPresentationResolverRegistry {
 
 	/** Resolves one already-constructed context against this registry. */
 	public BlockPresentation resolve(BlockPresentationContext context) {
+		return resolve(context, false);
+	}
+
+	/** Uses the same order, but never opts an ordinary-only resolver into external topology. */
+	BlockPresentation resolveExternal(BlockPresentationContext context) {
+		return resolve(context, true);
+	}
+
+	private BlockPresentation resolve(BlockPresentationContext context, boolean external) {
 		Objects.requireNonNull(context, "context");
 
 		if (!context.sourceBlockMatches()) {
@@ -131,6 +140,9 @@ public final class BlockPresentationResolverRegistry {
 		for (BlockPresentationResolver resolver : snapshot) {
 			@Nullable BlockPresentationResolution result;
 			try {
+				if (external && !resolver.supportsExternalScope()) {
+					continue;
+				}
 				result = resolver.resolve(context);
 			} catch (Exception | LinkageError | AssertionError failure) {
 				Diagnostics.client().atNormal().rateLimited(RESOLUTION_FAILURES).failure(Level.WARN, "block-presentation-resolve",

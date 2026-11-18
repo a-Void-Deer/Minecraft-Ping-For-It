@@ -7,9 +7,14 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.List;
 
+import dev.ryanhcode.sable.companion.ClientSubLevelAccess;
+import dev.ryanhcode.sable.companion.math.BoundingBox3ic;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
+import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -28,8 +33,9 @@ final class SableClientInternalAccess {
 	private final Method getSubLevel;
 	private final Method getLevel;
 	private final Method getBlockState;
-	private volatile SupplementalMethods supplementalMethods;
-	private volatile Method contentIsRemoved;
+	private volatile @Nullable SupplementalMethods supplementalMethods;
+	private volatile @Nullable Method contentIsRemoved;
+	private volatile @Nullable PlotMemberMethods plotMemberMethods;
 
 	private SableClientInternalAccess(
 		Method getContainer, Method getSubLevel, Method getLevel, Method getBlockState
@@ -109,9 +115,8 @@ final class SableClientInternalAccess {
 	private record SupplementalMethods(Method getAllSubLevels, Method isRemoved, Method getPlot,
 		Method plotContains, Method plotBounds) {}
 
-	/** Content-only live identity gate. Additive discovery cannot change ordinary capture's API gate. */
-	Object contentSubLevel(ClientLevel parent, UUID id) throws ReflectiveOperationException {
-		Method removed = contentIsRemoved;
+	private Method removedMethod() throws ReflectiveOperationException {
+		@Nullable Method removed = contentIsRemoved;
 		if (removed == null) {
 			Class<?> owner = Class.forName(SUB_LEVEL_CLASS, false, SableClientInternalAccess.class.getClassLoader());
 			removed = owner.getMethod("isRemoved");
@@ -120,12 +125,75 @@ final class SableClientInternalAccess {
 			}
 			contentIsRemoved = removed;
 		}
-		Object container = invoke(getContainer, null, parent);
-		Object subLevel = container == null ? null : invoke(getSubLevel, container, id);
-		if (!(subLevel instanceof dev.ryanhcode.sable.companion.ClientSubLevelAccess access)
+		return removed;
+	}
+
+	/** Live identity for Content and outline binding; independent of ordinary capture's API gate. */
+	@Nullable Object contentSubLevel(ClientLevel parent, UUID id) throws ReflectiveOperationException {
+		Method removed = removedMethod();
+		@Nullable Object container = invoke(getContainer, null, parent);
+		return activeSubLevel(parent, container, id, removed);
+	}
+
+	private @Nullable ClientSubLevelAccess activeSubLevel(ClientLevel parent, @Nullable Object container, UUID id,
+		Method removed) throws ReflectiveOperationException {
+		@Nullable Object subLevel = container == null ? null : invoke(getSubLevel, container, id);
+		if (!(subLevel instanceof ClientSubLevelAccess access)
 			|| !id.equals(access.getUniqueId()) || !Boolean.FALSE.equals(invoke(removed, subLevel))
 			|| invoke(getLevel, subLevel) != parent) return null;
-		return subLevel;
+		return access;
+	}
+
+	/** Binds one active sublevel; does not depend on the picking or inventory APIs. */
+	@Nullable BoundPlot bindPresentationPlot(ClientLevel parent, UUID id) throws ReflectiveOperationException {
+		@Nullable Object container = invoke(getContainer, null, parent);
+		Method removed = removedMethod();
+		@Nullable ClientSubLevelAccess subLevel = activeSubLevel(parent, container, id, removed);
+		if (container == null || subLevel == null) return null;
+		@Nullable PlotMemberMethods methods = plotMemberMethods;
+		if (methods == null) {
+			Class<?> owner = Class.forName(SUB_LEVEL_CLASS, false, SableClientInternalAccess.class.getClassLoader());
+			Method getPlot = owner.getMethod("getPlot");
+			Method containerPlot = container.getClass().getMethod("getPlot", ChunkPos.class);
+			Class<?> plotClass = getPlot.getReturnType();
+			Method toLocal = plotClass.getMethod("toLocal", ChunkPos.class);
+			Method getChunk = plotClass.getMethod("getChunk", ChunkPos.class);
+			Method getBounds = plotClass.getMethod("getBoundingBox");
+			if (Modifier.isStatic(getPlot.getModifiers()) || Modifier.isStatic(toLocal.getModifiers())
+				|| Modifier.isStatic(getChunk.getModifiers()) || Modifier.isStatic(containerPlot.getModifiers())
+				|| Modifier.isStatic(getBounds.getModifiers()) || toLocal.getReturnType() != ChunkPos.class
+				|| !LevelChunk.class.isAssignableFrom(getChunk.getReturnType())
+				|| !BoundingBox3ic.class.isAssignableFrom(getBounds.getReturnType())) {
+				throw new NoSuchMethodException("Sable plot member lookup");
+			}
+			methods = new PlotMemberMethods(getPlot, containerPlot, toLocal, getChunk, getBounds);
+			plotMemberMethods = methods;
+		}
+		@Nullable Object plot = invoke(methods.getPlot(), subLevel);
+		return plot == null ? null : new BoundPlot(parent, container, subLevel, plot, removed, methods);
+	}
+
+	@NotNullByDefault
+	private record PlotMemberMethods(Method getPlot, Method containerPlot, Method toLocal, Method getChunk, Method getBounds) {}
+
+	@NotNullByDefault
+	record BoundPlot(ClientLevel parent, Object container, ClientSubLevelAccess subLevel, Object plot,
+		Method removed, PlotMemberMethods methods) {
+		@Nullable LevelChunk loadedChunk(BlockPos pos) throws ReflectiveOperationException {
+			if (parent.isOutsideBuildHeight(pos) || !Boolean.FALSE.equals(invoke(removed, subLevel))) return null;
+			ChunkPos absolute = new ChunkPos(pos);
+			if (invoke(methods.containerPlot(), container, absolute) != plot) return null;
+			if (!(invoke(methods.getBounds(), plot) instanceof BoundingBox3ic bounds)
+				|| pos.getX() < bounds.minX() || pos.getX() > bounds.maxX()
+				|| pos.getY() < bounds.minY() || pos.getY() > bounds.maxY()
+				|| pos.getZ() < bounds.minZ() || pos.getZ() > bounds.maxZ()) return null;
+			// The plot table is indexed relatively, but LevelChunk's state and
+			// resident-BE keys use the original absolute plot block coordinates.
+			if (!(invoke(methods.toLocal(), plot, absolute) instanceof ChunkPos local)) return null;
+			if (!(invoke(methods.getChunk(), plot, local) instanceof LevelChunk chunk)
+				|| chunk.getLevel() != parent || !absolute.equals(chunk.getPos())) return null;
+			return chunk;
+		}
 	}
 
 	Resolution resolve(ClientLevel parent, UUID subLevelId, BlockPos localPos)
@@ -165,7 +233,7 @@ final class SableClientInternalAccess {
 		return Resolution.available(new ResolvedSubLevel(subLevel, clientLevel, state));
 	}
 
-	private static Object invoke(Method method, Object receiver, Object... arguments)
+	private static @Nullable Object invoke(Method method, @Nullable Object receiver, Object... arguments)
 		throws ReflectiveOperationException {
 		try {
 			return method.invoke(receiver, arguments);

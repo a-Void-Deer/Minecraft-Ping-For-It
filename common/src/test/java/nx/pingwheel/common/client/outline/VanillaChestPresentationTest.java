@@ -122,11 +122,11 @@ class VanillaChestPresentationTest {
 		clientStore.onWinnerChanged(key, java.util.Optional.of(new MarkerId(1)));
 		var outline = BlockOutlineState.INSTANCE; var models = BlockModelOutlineState.INSTANCE;
 		try {
-			outline.prepare(clientStore, "minecraft:overworld"); models.beginFrame(); models.preparePresentations(f.client, outline);
+			outline.prepare(clientStore, "minecraft:overworld"); models.beginFrame(); models.preparePresentations(f.client, outline, 0);
 			assertEquals(List.of(f.left, f.right), models.presentations().getFirst().renderSubjects().stream().map(BlockRenderSubject::blockPos).toList());
 			@Unmodifiable List<BlockPresentation> frozen = models.presentations(); f.unavailable.add(f.right);
-			models.preparePresentations(f.client, outline); assertSame(frozen, models.presentations(), "normal/fallback passes cannot resolve different topology in one frame");
-			models.beginFrame(); f.reads.clear(); models.preparePresentations(f.client, outline);
+			models.preparePresentations(f.client, outline, 0); assertSame(frozen, models.presentations(), "normal/fallback passes cannot resolve different topology in one frame");
+			models.beginFrame(); f.reads.clear(); models.preparePresentations(f.client, outline, 0);
 			assertTrue(models.presentations().getFirst().isEmpty()); assertTrue(f.reads.isEmpty());
 		} finally { outline.clear(); models.clear(); }
 	}

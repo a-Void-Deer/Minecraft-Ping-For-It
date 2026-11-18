@@ -20,6 +20,8 @@ import org.joml.Matrix4f;
 
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.client.outline.ExternalBlockOutlineTransform;
+import nx.pingwheel.common.client.outline.ExternalBlockFramePresentation;
+import nx.pingwheel.common.client.outline.ExternalBlockOutlineSpec;
 import nx.pingwheel.common.integration.IntegrationLinkGuard;
 import nx.pingwheel.common.integration.ModContext;
 import nx.pingwheel.common.integration.sable.SableDiagnostics;
@@ -243,6 +245,29 @@ public final class SableClientProvider {
 		ClientLevel level, Target.ExternalBlockTarget target, float partialTick
 	) {
 		return resolvePresentation(level, target, partialTick, CollisionContext.empty());
+	}
+
+	/** Binds one external winner's outline subjects before the model and shape passes. */
+	public static Optional<ExternalBlockFramePresentation> resolveFramePresentation(
+		ClientLevel level, ExternalBlockOutlineSpec spec, float partialTick
+	) {
+		Target.ExternalBlockTarget target = spec.target();
+		if (!enabled() || !PROVIDER_ID.equals(target.providerId())
+			|| !target.dimensionId().equals(level.dimension().location().toString())) return Optional.empty();
+		var locator = SableExternalBlockLocator.parse(target.providerLocator());
+		if (locator.isEmpty()) {
+			logPresentationFailure("outline-frame", "provider-locator-parse-failure", "target", target);
+			return Optional.empty();
+		}
+		try {
+			var result = getAccess().resolveFramePresentation(level, spec, locator.get(), partialTick);
+			if (result.isEmpty()) logPresentationFailure("outline-frame", "provider-unavailable", "target", target);
+			return result;
+		} catch (ReflectiveOperationException | RuntimeException | LinkageError | AssertionError unavailable) {
+			// Additive plot membership discovery must not trip the established block/content link guard.
+			logPresentationException("outline-frame", unavailable, "target", target);
+			return Optional.empty();
+		}
 	}
 
 	/**

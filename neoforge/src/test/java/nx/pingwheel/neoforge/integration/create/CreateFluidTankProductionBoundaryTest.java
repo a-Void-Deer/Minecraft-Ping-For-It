@@ -260,7 +260,7 @@ class CreateFluidTankProductionBoundaryTest {
 				store.onWinnerChanged(key, Optional.of(new MarkerId(1)));
 				var outline = BlockOutlineState.INSTANCE; var models = BlockModelOutlineState.INSTANCE;
 				try {
-					outline.prepare(store, "minecraft:overworld"); models.beginFrame(); models.preparePresentations(fixture.client, outline);
+					outline.prepare(store, "minecraft:overworld"); models.beginFrame(); models.preparePresentations(fixture.client, outline, 0);
 					var batch = models.presentations(); var presentation = batch.getFirst(); assertEquals(12, presentation.renderSubjects().size());
 					var visited = new ArrayList<BlockPos>(); var missingModel = new BlockPos(1, 1, 1);
 					TankPresentationTestPort.dispatch(presentation,
@@ -275,7 +275,7 @@ class CreateFluidTankProductionBoundaryTest {
 					assertEquals(List.of(missingModel), presentation.renderSubjects().stream().filter(s -> !models.successKeys().contains(s.successKey(presentation.sourceSpec()))).map(BlockRenderSubject::blockPos).toList());
 					fixture.renderReads = true; var vertices = new Vertices();
 					BlockOutlineRenderer.render(fixture.client, allocate(net.minecraft.client.Camera.class), net.minecraft.world.phys.Vec3.ZERO,
-						vertices, outline, batch, models.successKeys(), java.util.Set.of(), 0);
+						vertices, models);
 					assertEquals(24, vertices.positions.size(), "one missing cell model emits its own twelve native edges");
 					assertTrue(vertices.positions.stream().allMatch(v -> v.x >= 1 && v.x <= 2 && v.y >= 1 && v.y <= 2 && v.z >= 1 && v.z <= 2));
 					fixture.renderReads = false;
@@ -283,13 +283,13 @@ class CreateFluidTankProductionBoundaryTest {
 					models.addSuccess(presentation.renderSubjects().getFirst().successKey(presentation.sourceSpec()));
 					assertEquals(11, presentation.renderSubjects().stream().filter(s -> !models.successKeys().contains(s.successKey(presentation.sourceSpec()))).count());
 					fixture.entities.remove(fixture.root); int reads = fixture.mapReads;
-					models.preparePresentations(fixture.client, outline); assertSame(batch, models.presentations()); assertEquals(reads, fixture.mapReads);
-					models.beginFrame(); models.preparePresentations(fixture.client, outline);
+					models.preparePresentations(fixture.client, outline, 0); assertSame(batch, models.presentations()); assertEquals(reads, fixture.mapReads);
+					models.beginFrame(); models.preparePresentations(fixture.client, outline, 0);
 					var direct = models.presentations().getFirst().renderSubjects().getFirst();
 					assertEquals(hit, direct.blockPos()); assertEquals(BlockPresentationRelation.DIRECT, direct.relation());
 					fixture.renderReads = true; vertices.positions.clear();
 					BlockOutlineRenderer.render(fixture.client, allocate(net.minecraft.client.Camera.class), net.minecraft.world.phys.Vec3.ZERO,
-						vertices, outline, models.presentations(), java.util.Set.of(), java.util.Set.of(), 0);
+						vertices, models);
 					assertEquals(24, vertices.positions.size());
 					assertTrue(vertices.positions.stream().allMatch(v -> v.x >= hit.getX() && v.x <= hit.getX() + 1 && v.y >= hit.getY()
 						&& v.y <= hit.getY() + 1 && v.z >= hit.getZ() && v.z <= hit.getZ() + 1));
@@ -310,7 +310,7 @@ class CreateFluidTankProductionBoundaryTest {
 				store.onWinnerChanged(key, Optional.of(new MarkerId(1)));
 				var outline = BlockOutlineState.INSTANCE; var models = BlockModelOutlineState.INSTANCE;
 				try {
-					outline.prepare(store, "minecraft:overworld"); models.beginFrame(); models.preparePresentations(fixture.client, outline);
+					outline.prepare(store, "minecraft:overworld"); models.beginFrame(); models.preparePresentations(fixture.client, outline, 0);
 					var presentation = models.presentations().getFirst();
 					assertTrue(presentation.coverageRelations().isEmpty(), "tank presentations declare no coverage relation");
 					var shell = presentation.renderSubjects().stream().map(BlockRenderSubject::blockPos).toList();
@@ -326,14 +326,14 @@ class CreateFluidTankProductionBoundaryTest {
 					assertEquals(shell, visited); assertFalse(visited.contains(hit)); assertTrue(models.successKeys().isEmpty());
 					fixture.renderReads = true; var vertices = new Vertices();
 					BlockOutlineRenderer.render(fixture.client, allocate(net.minecraft.client.Camera.class), net.minecraft.world.phys.Vec3.ZERO,
-						vertices, outline, models.presentations(), models.successKeys(), java.util.Set.of(), 0);
+						vertices, models);
 					assertEquals(26 * 24, vertices.positions.size(), "each published shell subject whose model route declined keeps its own native edges");
 					for (var subject : presentation.renderSubjects()) models.addSuccess(subject.successKey(presentation.sourceSpec()));
 					assertEquals(26, models.successKeys().size()); models.clearSuccesses();
 					assertEquals(26, models.presentations().getFirst().renderSubjects().size());
 					vertices.positions.clear();
 					BlockOutlineRenderer.render(fixture.client, allocate(net.minecraft.client.Camera.class), net.minecraft.world.phys.Vec3.ZERO,
-						vertices, outline, models.presentations(), models.successKeys(), java.util.Set.of(), 0);
+						vertices, models);
 					assertEquals(26 * 24, vertices.positions.size(), "cleared successes and the shape-only route cannot restore the interior");
 				} finally { fixture.renderReads = false; models.clear(); outline.clear(); }
 			}

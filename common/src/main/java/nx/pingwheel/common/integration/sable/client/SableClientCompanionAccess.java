@@ -5,6 +5,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 import org.jetbrains.annotations.Nullable;
 
 import dev.ryanhcode.sable.companion.ClientSubLevelAccess;
@@ -22,6 +23,7 @@ import net.minecraft.world.Nameable;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
@@ -30,6 +32,10 @@ import org.joml.Matrix4d;
 import org.joml.Vector3d;
 
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.client.outline.ExternalBlockFramePresentation;
+import nx.pingwheel.common.client.outline.ExternalBlockOutlineSpec;
+import nx.pingwheel.common.client.outline.ExternalBlockOutlineTransform;
+import nx.pingwheel.common.client.outline.ExternalBlockReadView;
 import nx.pingwheel.common.integration.sable.server.SableExternalBlockLocator;
 import nx.pingwheel.common.integration.sable.SableDiagnostics;
 import nx.pingwheel.common.interaction.TargetSnapshot;
@@ -576,6 +582,45 @@ final class SableClientCompanionAccess {
 
 		return Optional.of(new SableClientProvider.ExternalBlockPresentation(
 			worldCenter, locator.blockPos(), state, stateData.level(), shape, poseMatrix));
+	}
+
+	/** The outline path needs the plot-owned loaded data, not a state or shape from the shared parent cache. */
+	Optional<ExternalBlockFramePresentation> resolveFramePresentation(ClientLevel parent, ExternalBlockOutlineSpec spec,
+		SableExternalBlockLocator locator, float partialTick) throws ReflectiveOperationException {
+		if (internal == null) return Optional.empty();
+		@Nullable SableClientInternalAccess.BoundPlot plot = internal.bindPresentationPlot(parent, locator.subLevelId());
+		if (plot == null) return Optional.empty();
+		@Nullable Pose3dc renderPose = plot.subLevel().renderPose(partialTick);
+		if (renderPose == null) return Optional.empty();
+		Matrix4d matrix = renderPose.bakeIntoMatrix(new Matrix4d());
+		if (!matrix.isFinite() || !finite(ExternalBlockOutlineTransform.worldBlockOrigin(matrix, locator.blockPos()))) {
+			return Optional.empty();
+		}
+
+		var view = new ExternalBlockReadView(parent,
+			pos -> readPresentationMember(plot, spec, pos, chunk -> chunk.getBlockState(pos)),
+			pos -> readPresentationMember(plot, spec, pos, chunk -> presentationBlockEntity(chunk, parent, pos)));
+		return ExternalBlockFramePresentation.resolve(spec, locator.blockPos(), view, matrix);
+	}
+
+	private static @Nullable BlockEntity presentationBlockEntity(LevelChunk chunk, ClientLevel parent, BlockPos pos) {
+		// Do not promote pending NBT or create a replacement BE through either
+		// ClientLevel.getBlockEntity or LevelChunk.getBlockEntity(CHECK).
+		@Nullable BlockEntity entity = chunk.getBlockEntities().get(pos);
+		return entity != null && !entity.isRemoved() && entity.getLevel() == parent
+			&& pos.equals(entity.getBlockPos()) && entity.getType().isValid(chunk.getBlockState(pos)) ? entity : null;
+	}
+
+	private static <T> @Nullable T readPresentationMember(SableClientInternalAccess.BoundPlot plot,
+		ExternalBlockOutlineSpec spec, BlockPos pos, Function<LevelChunk, @Nullable T> read) {
+		try {
+			@Nullable LevelChunk chunk = plot.loadedChunk(pos);
+			return chunk == null ? null : read.apply(chunk);
+		} catch (ReflectiveOperationException | RuntimeException | LinkageError | AssertionError unavailable) {
+			SableClientProvider.logPresentationException("outline-member-read", unavailable,
+				"target", spec.target(), "position", pos);
+			return null;
+		}
 	}
 
 	Optional<Vec3> resolvePosition(

@@ -2,6 +2,7 @@ package nx.pingwheel.common.client.outline;
 
 import java.util.List;
 import java.util.Objects;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Client-render-only presentation of one captured block outline.
@@ -11,8 +12,8 @@ import java.util.Objects;
  */
 public record BlockPresentation(
 	BlockOutlineSpec sourceSpec,
-	List<BlockRenderSubject> renderSubjects,
-	List<BlockPresentationCoverageRelation> coverageRelations
+	@Unmodifiable List<BlockRenderSubject> renderSubjects,
+	@Unmodifiable List<BlockPresentationCoverageRelation> coverageRelations
 ) {
 
 	public BlockPresentation {

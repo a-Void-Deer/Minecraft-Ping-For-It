@@ -17,6 +17,11 @@ public final class VanillaDoorBlockPresentationResolver implements BlockPresenta
 	}
 
 	@Override
+	public boolean supportsExternalScope() {
+		return true;
+	}
+
+	@Override
 	public BlockPresentationResolution resolve(BlockPresentationContext context) {
 		BlockState source = context.sourceState();
 		if (!(source.getBlock() instanceof DoorBlock)) {

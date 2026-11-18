@@ -94,6 +94,11 @@ public final class CreateDoorPresentationResolver implements BlockPresentationRe
 	}
 
 	@Override
+	public boolean supportsExternalScope() {
+		return true;
+	}
+
+	@Override
 	public BlockPresentationResolution resolve(BlockPresentationContext context) {
 		BlockState sourceState = context.sourceState();
 		if (sourceState == null
