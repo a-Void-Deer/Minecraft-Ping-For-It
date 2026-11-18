@@ -104,7 +104,7 @@ of stable entity-frame lookup.
 ## Supplemental transformed-behind discovery
 
 The native selector's Precise live candidate capture includes a separate
-Sable provider ray. It is the adopted bounded discovery of a Sable surface
+Sable provider ray. It is the adopted discovery route for a Sable surface
 behind a blocker or after a native miss, independently of the ordinary
 projected capture above; it never changes, replaces or extends that ordinary
 capture. Each live cast uses the current camera ray bounded by the hold-frozen
@@ -112,11 +112,10 @@ client `pingDistance` under the
 [range contract](../architecture/picking/range.md#selector-candidate-supplements)
 and the hold's frozen selection policy.
 
-The provider walks its raw loaded-sublevel list directly, charging every
-sublevel visit and provider call to the bounded candidate work budget and
-re-checking the list for stability before reporting completion. A removed,
-mismatched or unresolvable sublevel is skipped as positively empty or makes the
-attempt incomplete; it never becomes a candidate. For each visited sublevel,
+The provider walks its raw loaded-sublevel list directly, checking each entry it
+visits and rechecking the raw list size before reporting completion. It skips
+removed sublevels and plots whose local bounds are empty. A mismatched or
+unresolvable sublevel makes the attempt incomplete. For each visited sublevel,
 the logical pose is frozen for the attempt, the frozen world endpoints are
 inverse-transformed into local space, the local bounds are intersected, and the
 direct local native pick runs against that sublevel's own loaded local view

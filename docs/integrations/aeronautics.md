@@ -17,9 +17,9 @@ across initialization and join, closes on leave, and can register again on a
 later join.
 
 The owner keeps its exact claim through a missing, drifted or failing delegate.
-A delegate load or linkage failure makes the rotor `UNAVAILABLE`; a null result,
-runtime callback failure or exhausted work is `FAILED`. Candidate handling
-follows the shared [owned-result contract](../architecture/picking/local_geometry.md#immutable-ownership-and-candidate-admission).
+A delegate load or linkage failure makes the rotor `UNAVAILABLE`; a null result
+or runtime callback failure is `FAILED`. Candidate handling follows the shared
+[owned-result contract](../architecture/picking/local_geometry.md#immutable-ownership-and-candidate-admission).
 
 ## Geometry and native shapes
 
@@ -40,7 +40,7 @@ The rotor reuses the captured local view and collision context owned by
 and the native-shape kernel owned by
 [entity-local picking](../architecture/picking/local_geometry.md#distance-and-native-local-shapes).
 
-## Discovery, work and failure
+## Discovery, traversal and failure
 
 The rotor's native entity AABB is not an exactness or discovery gate. A parented
 rotor can remain at remote native plot coordinates or expose a broad native
@@ -48,13 +48,9 @@ bound unrelated to its placed geometry. The source therefore registers with
 `LOADED_EXACT` admission under the discovery and ordering rules owned by
 [entity-local picking](../architecture/picking/local_geometry.md#immutable-ownership-and-candidate-admission).
 
-Rotor traversal uses the request's work capability: bounded for Precise scans
-and unlimited for ordinary captures. Provider access, every live map entry
-before it is copied, frozen state/fluid/neighbor/block-entity reads, and every
-native shape box are charged to that capability. Exhaustion and incomplete
-traversal follow the shared [bounded-work contract](../architecture/picking/local_geometry.md#bounded-work-and-incomplete-traversal).
-The four legacy Create IDs retain the separate
-[unlimited path](create-contraption-raycast.md#cost-and-validation-boundaries).
+The Aeronautics adapter traces the captured geometry in the rotor's resolved
+local frame under the shared
+[traversal completion rules](../architecture/picking/local_geometry.md#traversal-completion-and-incomplete-attempts).
 
 ## Consumers
 

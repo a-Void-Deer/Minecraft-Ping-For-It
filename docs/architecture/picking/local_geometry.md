@@ -20,12 +20,12 @@ filters, excludes the camera entity, and deduplicates by object identity.
 Unowned loaded entities are not added, and a duplicate native object is not
 traced twice. With only legacy owners, no loaded supplement walk occurs.
 
-Precise live candidate capture keeps one lazy raw loaded view. Every raw entity
-and dragon-part visit consumes work before filtering and identity deduplication;
-a zero budget does not consume the iterator. A first-owner `LOADED_EXACT`
-candidate bypasses the native AABB relevance gates, while an unowned candidate keeps
-the existing broad-bound relevance. An incomplete raw visit prefix cannot
-certify a nearest candidate.
+Precise live candidate capture walks one lazy raw loaded view to its end,
+visiting every entity and dragon part. The established spectator, blacklist and
+camera-exclusion filters decide whether a visit is traced, and each eligible
+candidate object is traced at most once by object identity. A first-owner
+`LOADED_EXACT` candidate bypasses the native AABB relevance gates, while an
+unowned candidate keeps the existing broad-bound relevance.
 
 | Ownership/result | Candidate handling |
 | --- | --- |
@@ -35,21 +35,23 @@ certify a nearest candidate.
 | Owned `UNAVAILABLE` | Reject this candidate |
 | Owned `FAILED` | Reject this candidate |
 
-An owned non-hit never falls back to its coarse AABB. Recoverable capture/scan
-failure invalidates the whole candidate attempt, including provisional hits.
-Other entities and the world hit remain eligible; a hollow contraption must
-not hide a real target behind the hole merely because its broad bounds intersect.
+An owned non-hit never falls back to its coarse AABB.
 
-## Bounded work and incomplete traversal
+## Traversal completion and incomplete attempts
 
-A query carries one work capability. A bounded exact traversal charges provider
-access, local block reads, and native shape boxes; a legacy or ordinary route
-can instead use independent unlimited work. Exhaustion is sticky across all
-counters and cannot be cleared by catching it. A callback that has exhausted its
-work cannot return a certified hit even after observing one, and a scan with
-incomplete work cannot certify a nearest prefix or retain a provisional result.
-Each provider's own charging points and any legacy unlimited path remain in its
-integration contract.
+An exact owner's failed attempt rejects that candidate, including a provisional
+hit observed before the failure. Other candidates, including another entity of
+the same type, and the world hit remain eligible; a hollow contraption must not
+hide a real target behind the hole merely because its broad bounds intersect.
+Candidate-level rejection does not decide the category; category outcomes and
+leaf enablement are owned by
+[Precise live candidate capture](capture.md#precise-live-candidate-capture).
+
+The native cell scan reports incomplete when a padded endpoint is not
+representable, a crossing cannot advance, or a required block or fluid read
+fails; it never reads an illegal or wrapped cell. A stationary axis and a
+representable tiny delta component remain valid, and a zero-length ray may
+finish with no hit.
 
 ## Distance and native local shapes
 

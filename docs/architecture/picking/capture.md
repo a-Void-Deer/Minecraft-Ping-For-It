@@ -49,37 +49,41 @@ rules.
 
 ## Precise live candidate capture
 
-The native selector's precise branch captures its bounded candidate set live
-from the current camera ray while that branch is active, on the configured
-[capture period](../../config/client.md#spatial-selector-interaction); entering
-the branch starts capture and leaving it pauses capture. Each live cast uses
-the hold's frozen
+Entering Precise starts refreshing its Target Type slots from the current
+camera ray at the configured [capture period](../../config/client.md#spatial-selector-interaction).
+Leaving the branch pauses refreshes. Each cast uses the
 [selection policy](selection_policy.md#raycast-use-and-blacklist-boundary) and
-range snapshot, so a settings change applies to the next hold rather than the
-running one. Release and selection never initiate another live cast. The live
-scan's range and its independence from the ordinary native trace and the
-Distant Horizons route are owned by
-[capture range](range.md#selector-candidate-supplements). It traverses the
-established native and provider pick paths under
-[local geometry](local_geometry.md); it defines no separate collision or
-display-extent rule.
+[finite range](range.md#selector-candidate-supplements) frozen for that hold;
+changes to those settings take effect on the next hold. Within that segment,
+Precise sets no fixed limit on block reads, entity visits, provider calls or
+native shape boxes examined. It uses the established native and provider
+[picking paths](local_geometry.md). Neither choosing a leaf nor releasing the
+key starts another cast.
 
-All candidates of one fixed Target Type compete by nearest actual hit from the
-live ray origin. A more specific class consumes its identity first; a generic
-class may skip an identity already consumed by a more specific class and
-compete for the next nearest. A type's candidate is certified only when the
-established native or provider pick path completed its bounded traversal
-within the candidate work budget; certification is not coverage of every
-registered shape or of block-display/outline eligibility. A scan that cannot
-complete disables that type's leaf even when an ordinary target of that type
-exists; the leaf never falls back to the ordinary result. While a refresh is
-in progress the leaf keeps the last certified
-candidate selectable, and a leaf with no previously certified candidate is
-disabled. Native categories publish first; the Distant Horizons location
-candidate completes independently and a final missing or incomplete result
-disables its leaf. Every live capture is bounded and generation-fenced: a late
-or stale asynchronous completion never publishes into the live set, the
-ordinary capture, or another interaction.
+Each fixed Target Type slot holds at most one certified candidate. Candidates
+of one type compete by nearest actual hit from the live ray origin; a more
+specific class consumes its identity first, while a generic class may skip an
+identity already consumed by a more specific class and compete for the next
+nearest. An entity or block/provider scan certifies its slots only when it
+completes under the shared
+[completion contract](local_geometry.md#traversal-completion-and-incomplete-attempts).
+A pending refresh keeps the last certified candidate selectable, and a leaf with
+no previously certified candidate is disabled.
+
+A completed scan with no eligible candidate left for a slot leaves that slot
+missing. If the category scan is incomplete, its leaves are disabled even when
+the ordinary trace hit a matching target. Certification applies to picking,
+not to block-display or outline eligibility.
+
+Location is derived rather than scanned. For a concrete target it uses the
+retained world-space contact, which a nearer observed contact on the same
+target can refine. On a native miss, the miss endpoint is the fallback. When
+the Distant Horizons route is available, the native categories publish first
+and Location completes independently. A final missing or incomplete result
+disables the Location leaf.
+
+Every live capture is generation-fenced: a late or stale asynchronous completion
+never publishes into the live set, the ordinary capture, or another interaction.
 
 A certified candidate needs a trusted world comparison point. A native block
 hit without that point contributes no location class and cannot create a
@@ -91,14 +95,12 @@ same canonical locator as ordinary capture, including the established
 experience-orb runtime-ID and multipart canonicalization rules
 ([target model](../identity/target_model.md#ordinary-identities-and-lifecycle)).
 An external block candidate requires positive capture-local provider
-equivalence and never fabricates a server materialization ID. Sable's bounded
+equivalence and never fabricates a server materialization ID. Sable's
 transformed-behind discovery is owned by the
 [Sable integration](../../integrations/sable.md#supplemental-transformed-behind-discovery).
-The location class is derived rather than scanned: it uses the current concrete
-hit point when a live native trace has one and otherwise the independently
-completing Distant Horizons route. An exact-owned non-hit remains rejected
-under [local geometry](local_geometry.md); a candidate scan never revives its
-coarse bounds.
+An exact-owned non-hit remains rejected under
+[local geometry](local_geometry.md); a candidate scan never revives its coarse
+bounds.
 
 ## Baseline release and actual wheel opening
 

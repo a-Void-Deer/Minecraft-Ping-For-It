@@ -100,10 +100,9 @@ The exact-surface versus server-anchor distance distinction is owned by
 
 Snapshotting and scanning are approximately linear in captured entries plus native shape boxes, once per ping capture rather than every rendered frame. There is no fixed traversal-cell cap, persistent shape index, or global geometry cache in this integration. Very large overlapping contraptions require performance measurement; no latency guarantee is made.
 
-The separate Aeronautics owner shares this native kernel but consumes the
-request's work capability, including bounded Precise work. The four Create IDs
-keep their unlimited local-shape path. See
-[Aeronautics](aeronautics.md#discovery-work-and-failure).
+The separate Aeronautics owner shares this native kernel; its traversal and
+failure handling are owned by
+[Aeronautics](aeronautics.md#discovery-traversal-and-failure).
 
 Discovery still depends on Create's entity bounds. Native selection shapes and Create transforms do not promise pixel-perfect agreement with GPU-rendered meshes or every render-only minecart correction.
 

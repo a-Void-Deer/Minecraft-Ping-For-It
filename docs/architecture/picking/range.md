@@ -77,8 +77,8 @@ completion is owned by
 [Precise live candidate capture](capture.md#precise-live-candidate-capture).
 The same hold-frozen bound applies to provider supplements: Sable's
 transformed-behind discovery shares the live ray and the hold-frozen client
-`pingDistance`, and its bounded local traversal, completion and candidate rules
-are owned by the
+`pingDistance`, and its local traversal, completion and candidate rules are
+owned by the
 [Sable integration](../../integrations/sable.md#supplemental-transformed-behind-discovery).
 Leaf enablement, refresh retention and fallback for a missing, incomplete or
 failed result are owned by
@@ -119,7 +119,7 @@ ordinary lifecycle contract.
 | --- | --- | --- | --- |
 | Vanilla blocks, fluids, entities | Frozen finite press segment | `min(client raycastDistance, client pingDistance)` | Native hit or location miss |
 | Selector candidate supplements | Live current camera ray while the Precise branch is active; occluders allowed within the hold-frozen client ping distance | Hold-frozen client `pingDistance` | Nearest certified candidate per type, or incomplete/unavailable; leaf enablement follows [Precise live candidate capture](capture.md#precise-live-candidate-capture) |
-| Sable transformed-behind supplement | Live current camera ray; provider-local sublevel traversal | Hold-frozen client `pingDistance` | Provider candidate only when the bounded local trace completes; otherwise incomplete/unavailable |
+| Sable transformed-behind supplement | Live current camera ray; provider-local sublevel traversal | Hold-frozen client `pingDistance` | Provider candidate only when the local trace completes; otherwise incomplete/unavailable |
 | Create contraption local shapes | Ordinary trace passes the finite segment through the common entity-candidate request and transforms it locally; Precise live casts use the current ray | Ordinary trace reuses the native effective segment; Precise live casts use the hold-frozen range; no Create interaction-picker range | Exact whole-entity hit, or owned miss/unavailable/failure with no coarse-AABB revival |
 | Aeronautics normal/gyro rotor local shapes | Ordinary trace reuses the native effective segment; Precise live casts use the current ray; local native shapes come from the captured rotor view | No separate rotor capture range; the authoritative check uses the projected logical-world base anchor | Exact whole-entity hit, or owned miss/unavailable/failure with no coarse-AABB revival |
 | Sable external candidate (ordinary projection) | Native block hit plus that same segment's frozen origin/end | Reuses native effective segment; point must project onto the segment | External candidate only after provider checks; otherwise existing projected/location or vanilla fallback |

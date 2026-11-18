@@ -31,12 +31,9 @@ miss valid contained targets and would still expose regions the exact source
 did not hit. An explicit loaded-exact admission therefore separates discovery
 from the native AABB without making that AABB authoritative.
 
-A bounded exact traversal can observe a nearer hit and still exhaust before
-completing an unordered search. Its prefix is not a certified nearest result,
-and catching the exhaustion must not turn that prefix into a hit. Sticky work
-and whole-attempt rejection preserve the same exactness boundary as the
-coarse-AABB rule; the operational charging and ordering rules remain with the
-topic contracts.
+An incomplete exact traversal cannot establish the nearest hit: an unvisited
+shape may be closer than the provisional hit. Returning that partial result
+would break the same exactness boundary as coarse-AABB recovery.
 
 The finite-segment box kernel preserves actual native block/fluid surfaces,
 supports origin containment and boundary cases, and avoids assumptions about a
@@ -69,7 +66,7 @@ candidate cannot regress to coarse selection. Each ray uses one immutable owner
 snapshot. Exact local metadata may be retained only while it matches the
 resolved entity identity. Query-local parent frames are detached copies;
 later provider pose changes do not move retained placement, and a parent failure
-does not become world identity. A bounded traversal that cannot complete
+does not become world identity. A traversal that cannot complete
 invalidates the candidate rather than certifying a prefix. The server validates
 the whole entity and does not replay the client-local ray.
 

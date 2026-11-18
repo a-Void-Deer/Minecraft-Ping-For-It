@@ -347,10 +347,11 @@ and `NORMAL`/disabled accessor isolation.
 quarter-turn oracle, parent translation/rotation/nonuniform scale with
 anchor-only scaling, remote fractional native anchors, detached model and
 snapshot inputs, core/blade hits versus gaps and bounds misses, frozen hidden,
-block-entity and fluid state, transformed camera collision, entry-before-copy
-charges, exact shape/provider accounting, whole-candidate rejection after a
-provisional hit or later exhaustion, the legacy unlimited overload, and invalid
-or singular local matrices.
+block-entity and fluid state, transformed camera collision, and invalid or
+singular local matrices. The test puts the only hittable surface last in a
+20,001-entry scan and asserts that the trace hits it. A separate case confirms
+that a later capture failure rejects the rotor even though the first entry alone
+is hittable.
 
 `NeoClientAeronauticsLifecycleTest` covers absent or unrelated mods not
 resolving the owner, initialization/join registration, leave teardown, failed
@@ -405,15 +406,19 @@ diagnostic evidence:
   Companion poses and native shapes but recording sublevel ports: translated and
   rotated hits behind a blocker or after a miss, world-segment range under
   nonuniform scale, detached pose evidence, provider-local equivalence,
-  entry/shape-work admission, loaded/invalid-pose gates, selection-policy reuse,
-  removed entries and absent-Sable safety. It also covers provider-local native
-  face copying, origin containment and faceless synthetic/inside/unobserved
+  loaded/invalid-pose gates, selection-policy reuse, removed entries,
+  empty provider results when Sable is disabled, provider-local native
+  face copying, origin containment, faceless synthetic/inside/unobserved
   contacts, and nearer same- or different-locator contacts installing only their
-  own face without changing the frozen ordinary face;
+  own face without changing the frozen ordinary face. The scan finds the last
+  selectable entry in a 301-entry source. A size change during the scan leaves
+  the result incomplete. In one subnormal transform the grid traversal cannot
+  advance and reports an incomplete result before any grid or world read. A
+  four-block horizontal ray at large local coordinates still hits the chest.
 - shared affine-frame and candidate-comparison coverage is inventoried under
   [exact entity-local picking](interaction.md#exact-entity-local-picking-and-create-raycast-seams);
 - `SableEntityFramesTest` covers the server-safe logical facade without optional
-  API access for ordinary entities, copied logical pose with per-read charging,
+  API access for ordinary entities, copied logical pose,
   exact `WORLD`/`UNAVAILABLE` boundaries, failure never becoming identity, and
   class loading with Minecraft client and Companion classes hidden;
 - `SableClientEntityFramesTest` covers render interpolation forwarding, no
@@ -451,19 +456,21 @@ These seams do not load a Sable runtime or establish live provider reflection
 (including the additive content membership discovery), materialization,
 tracking-point reference lifecycle, live-sublevel membership and observation,
 the client chunk and prediction gates of a provider-resolved physical block, a
-live multi-member content capability, or refresh, multiplayer, GUI, network or
-in-game behavior described by those topic sections. The transformed-frame and
+live multi-member content capability, refresh, multiplayer, GUI, network or
+in-game behavior described by those topic sections. Wall-clock performance over
+a large live sublevel set remains unmeasured. The transformed-frame and
 frozen-proof seams are also headless: they do not exercise installed Sable or
 Aeronautics containment, actual render/logical poses, or a Create-contraption
-native view. The registry, content
-resolver and stable-entry tests are narrow production-used seams with fake
-access and in-memory state; the observation-failure fixture installs reflective
-stand-ins into uninitialized provider, server and level tokens. The external
-model and fallback routes resolve provider presentation independently, so they
-cannot guarantee that provider-local multipart or subject-type decisions came
-from one immutable shared snapshot. That is an implementation-conformance and
-automated-coverage gap, not an external exception to the shared-subject contract
-in [presentation subjects](../../architecture/rendering/presentation_subjects.md).
+native view.
+The registry, content resolver and stable-entry tests are narrow production-used
+seams with fake access and in-memory state; the observation-failure fixture
+installs reflective stand-ins into uninitialized provider, server and level
+tokens. The external model and fallback routes resolve provider presentation
+independently, so they cannot guarantee that provider-local multipart or
+subject-type decisions came from one immutable shared snapshot. That is an
+implementation-conformance and automated-coverage gap, not an external exception
+to the shared-subject contract in
+[presentation subjects](../../architecture/rendering/presentation_subjects.md).
 
 ## Simulated integration coverage
 

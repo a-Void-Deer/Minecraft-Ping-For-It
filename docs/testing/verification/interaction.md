@@ -82,30 +82,46 @@ remain pending. Configuration persistence is under
 
 ## Precise live candidate capture
 
-The [live-capture owner](../../architecture/picking/capture.md#precise-live-candidate-capture)
-has focused headless evidence across allocation, refresh-controller, session,
-release-admission and paint-admission seams:
+Headless tests cover
+[Precise live candidate capture](../../architecture/picking/capture.md#precise-live-candidate-capture):
 
 - `FrozenCandidateAcquisitionTest` and `CandidateCaptureLifecycleTest` cover
-  bounded allocation and de-duplication, retained class and face, nearest
+  allocation and de-duplication, retained class and face, nearest
   same-category competition and tie order, missing versus incomplete evidence,
-  specific and generic class consumption, provider-local equivalence, immutable
-  evidence and work guards, exhaustive-oracle agreement, near-contact
-  same-identity results, and same-token, duplicate, superseded, aborted and
-  reentrant completion fences with ordinary readiness when finalization fails.
+  an incomplete scanned class staying unavailable even when the ordinary result
+  matches it, specific and generic class consumption, provider-local equivalence,
+  immutable evidence, near-contact same-identity results, and same-token,
+  duplicate, superseded, aborted and reentrant completion fences with ordinary
+  readiness when finalization fails.
 - `NativeBlockCandidateScanTest`, `NativeBlockCandidateRegressionTest` and
   `NativeBoundaryFaceProvenanceTest` cover native block and fluid shapes behind
   blockers, finite-segment and loaded access gates, actual surface coordinates
-  and faces on long oblique rays, moving-piston access, bounded work, incomplete
-  rather than certified prefixes, origin containment, no adjacent owner
-  expansion, and boundary contact provenance through the production scan,
-  snapshot factory and frozen allocation.
-- `RaycastSupplementalCandidateTest` and `NativeEntityEnumerationBudgetTest`
-  cover farther entity candidates, exact-owned non-hit rejection without coarse
-  fallback, frozen geometry ownership, selection filters, canonical multipart
-  and XP locators, and bounded lazy enumeration charging nonmatches before
-  filtering; the exported report seams remain finite and failure-bounded. The
-  multipart case is a factory fixture, not a dragon-world or rendering test.
+  and faces on long oblique rays, moving-piston access, origin containment, no
+  adjacent owner expansion, and boundary contact provenance through the
+  production scan, snapshot factory and frozen allocation. The traversal cases
+  also reach late supported stone after many loaded neighbor reads and keep a
+  later hit on another axis reachable when one delta component is subnormal
+  within a cell. An endpoint outside the integer grid leaves the tested scan
+  incomplete before its first cell read. A malformed shape after a provisional
+  hit also leaves the scan incomplete.
+- `NativeEntityEnumerationTest` drives the raw visible entity lookup at fixture
+  level: the lazy `getAll` view returns off-ray entries without an
+  entity-section walk, and a real iterator fault after a usable provisional
+  entry propagates so the partial iteration is not treated as completion.
+- `RaycastSupplementalCandidateTest` covers farther entity candidates,
+  exact-owned non-hit rejection without coarse fallback, frozen geometry
+  ownership, selection filters, and canonical multipart and XP locators; the
+  exported report seams remain finite and failure-bounded. A later native read
+  failure leaves both scanned block categories incomplete. The ordinary trace
+  retains its original hit; the derived Location uses the nearer contact already
+  observed on the same block. The multipart case is a factory fixture, not a
+  dragon-world or rendering test.
+- `PreciseCandidateTraversalTest` drives the public `traceDirectionalCandidates`
+  path against a constructed headless client level: 2,048 raw entries repeat one
+  off-ray entity, the fixture registers no exact owner, and the only eligible
+  entity lies beyond the ordinary native segment. The ordinary result stays a
+  `MISS`, the certified supplemental hit carries that entity's identity, and the
+  duplicates add no candidate.
 - `PreciseCaptureRefreshTest` covers the production refresh controller:
   immediate entry then the frozen period, re-entry not duplicating the first
   scan, pause, restart and stop, native slots before the location request,
@@ -129,15 +145,14 @@ release-admission and paint-admission seams:
   choice. These are recording-port frame and helper checks, not `GuiGraphics` or
   GPU submission.
 
-These are allocation, capture, native-shape, enumeration, refresh-controller,
-session, paint-admission, production-frame recording-painter and runtime-port
-seams. The period key's config and persistence coverage is under
+The period key's config and persistence coverage is under
 [configuration verification](configuration-ui.md#inventory-and-spatial-selector-configuration),
 and the transformed Sable scanner has its own
-[integration evidence](integrations.md#sable-integration-coverage). Real
-GPU/render submission, game-world and chunk lifecycle, provider behavior,
-multiplayer, loader input callbacks and unbounded-geometry wall-clock behavior
-remain unexercised; the manual Precise scenarios remain pending.
+[integration evidence](integrations.md#sable-integration-coverage). Game-world
+and chunk lifecycle, full client ticks, installed-provider behavior,
+multiplayer, loader input callbacks and GPU/render submission remain
+unexercised; unbounded-geometry wall-clock behavior remains unmeasured, and the
+manual Precise scenarios remain pending.
 
 ## Selection-policy and input-state seams
 
@@ -183,18 +198,18 @@ is blocked.
 
 `EntityParentFrameTest` covers detached affine frame validation, remote
 fractional point projection and anchor-only parent scaling.
+`NativeLocalShapeTraversalTest` covers the native local-shape traversal: the
+nearest surface can come from the last of many disjoint native boxes on a long
+shape, and a later real neighbor-read failure rejects the earlier provisional
+local hit instead of returning it.
 `LoadedExactCandidateTest` covers native-first ordinary discovery, loaded
 supplement only for a first-owner `LOADED_EXACT` owner, identity deduplication,
-raw-visit-before-dedup Precise accounting, zero-budget iterator preservation,
-and exact endpoint exclusion. `EntityRaycastWorkTest` covers sticky exhaustion
-across counters and independent unlimited work. `NativeLocalShapeWorkTest`
-covers charged state/shape reads and discarding a provisional hit after later
-exhaustion. `PickingFrameContextTest` covers an ordinary-world block retaining
-its point under optional pose-scope failure, an unproven contained block
-retaining its native result without a world point or arbitrary entity
-replacement, and detached block proof. `RaycastCandidateFlowTest` covers
-projected native-block world competition while preserving the native face/proof
-and owned non-hit rejection.
+and exact endpoint exclusion. `PickingFrameContextTest` covers an
+ordinary-world block retaining its point under optional pose-scope failure, an
+unproven contained block retaining its native result without a world point or
+arbitrary entity replacement, and detached block proof.
+`RaycastCandidateFlowTest` covers projected native-block world competition
+while preserving the native face/proof and owned non-hit rejection.
 
 These tests preserve whole-entity identity and exercise the non-optional engine
 boundaries. They do not constitute in-game Create or Aeronautics validation.

@@ -50,10 +50,25 @@ has not been validated.
 5. Check ordinary-world and sub-level unload/rejoin, absent Aeronautics and
    disconnect/reconnect lifecycle, and a multiplayer client/server session with
    bystander viewers.
-6. With many captured entries, shape boxes and provider calls, drive Precise
-   refresh and confirm an exhausted or incomplete attempt rejects the candidate
-   rather than accepting a partial prefix. Record observed latency and any
-   stalls; no performance guarantee is established.
+6. Place two distinguishable rotors of the same entity type on one sight line.
+   Keep the test surfaces within client ping range and both rotor anchors within
+   server ping range. For each setup below, aim through both, choose the Entity
+   leaf in Precise, and note which rotor receives the marker.
+   - Normal selection: with local shape traversal order controllable, give the
+     large rotor a near surface late in that order and a far surface early in
+     it, and place the reference rotor's surface between them. Expect Precise
+     to select the large rotor. Its early surface alone is farther away than
+     the reference rotor's surface.
+   - Fault isolation: in a controlled fixture that fails a later state or shape
+     read after the large rotor's early far surface was observed, place the
+     reference rotor's surface farther than that early surface. The reference
+     rotor must be selected; leaking the failed rotor's provisional contact
+     would select the large rotor instead.
+   - If the live setup cannot control local shape traversal order or induce that
+     failure, record only the observable selection and leave the affected
+     sub-checks pending.
+   - Record observed latency and stalls; no performance guarantee is
+     established.
 
 ### Selector readability
 
