@@ -352,13 +352,14 @@ read-only server row refusing activation, and a server draft selection not
 publishing the runtime profile.
 
 `LoggingProfileScreenTest` covers the per-activation Alt read and current client
-handler, including a replaced handler read and written through the same mounted
-row; dropping Alt after a `DEBUG` selection; the client row publishing
-immediately while the server row edits only the draft; navigation and resize not
-carrying the temporary Alt candidate; nonblank native help on both mounted rows
-with their labels and no `DEBUG`, Alt, Shift or unlock hint; and a read-only
-server viewer seeing `DEBUG` without editing. `SettingsCategoryCatalogTest`
-verifies the controls' Debug-category placement and approved catalogue totals.
+handler, including a real guarded replacement that refreshes the mounted row and
+directs later activation to the replacement; dropping Alt after a `DEBUG`
+selection; the client row publishing immediately while the server row edits only
+the draft; navigation and resize not carrying the temporary Alt candidate;
+nonblank native help on both mounted rows with their labels and no `DEBUG`, Alt,
+Shift or unlock hint; and a read-only server viewer seeing `DEBUG` without
+editing. `SettingsCategoryCatalogTest` verifies the controls' Debug-category
+placement and approved catalogue totals.
 `SettingsLocalizationCoverageTest` requires localized labels and tooltips for
 both logging rows in all eight bundled locales. `ServerConfigVarNumbersTest`
 covers profile tags `0`, `1` and `2`, mask bit 29, preservation when unselected,
@@ -390,11 +391,12 @@ order and visibility. `SettingsNavigationModelTest` keeps the eight client and
 six server category identities and independent page routing without adding a
 monitor navigation level. `LoggingProfileScreenTest` mounts the production
 screen's rows, finds one native selector for every closed display metric, and
-covers current-handler DEBUG reads, HUD switch behavior, metric editability,
-DEBUG exit/entry visibility, read-only server drafts, native Space and
-mouse activation through the deferred-action coordinator, focus survival and
-resize/back preservation. `ServerSettingsMonitorTest` covers the server rows'
-independent Preview/Tracking dirty bits, all four enable combinations, draft-only
+covers current-handler DEBUG reads, HUD switch behavior, metric editability and
+selection after a handler replacement, DEBUG exit/entry visibility, read-only
+server drafts, native Space and mouse activation through the deferred-action
+coordinator, focus survival and resize/back preservation.
+`ServerSettingsMonitorTest` covers the server rows' independent Preview/Tracking
+dirty bits, all four enable combinations, draft-only
 plans, final-profile gating, read-only, revocation, stale-response and disconnect
 fences, isolation from the numeric invalid mask, and refusal of partial plans.
 `SettingsLocalizationCoverageTest` checks the monitor display group headings and
@@ -609,9 +611,10 @@ and target opacity labels, and the spatial-selector resource set.
 `SettingsLocalizationCoverageTest` derives required labels and help from the
 production catalog for all value
 controls, checks category descriptions, section headings, navigation and action
-help, enum/state labels, units and format resources across all eight bundled
-locales, validates argument-bearing templates with a formatter, rejects duplicate
-JSON keys, and distinguishes literal percent signs from strict templates.
+help, the local save-failure dialog's title, message, continue and exit text,
+enum/state labels, units and format resources across all eight bundled locales,
+validates argument-bearing templates with a formatter, rejects duplicate JSON
+keys, and distinguishes literal percent signs from strict templates.
 `ConfigEnumLocalizationTest` covers resource-key generation under ROOT, US and
 `tr-TR` JVM defaults for Player Info, Team Color and Channel Mode values and
 dynamic tooltip keys; it is source-reviewed with no passing execution recorded
@@ -638,11 +641,12 @@ The production screen routes native widget input through the deferred-action
 coordinator. None of these seams establishes a live game render/input lifecycle
 or focus traversal.
 
-## Assembled settings-screen caption reflow
+## Assembled settings-screen input and close coverage
 
 `SettingsScreenInputLayoutTest` assembles the production screen's widgets and
 dispatches native mouse, keyboard, wheel and slider-drag input headlessly. Its
-seven cases use bundled Turkish captions with deterministic text measurements.
+seven caption cases use bundled Turkish captions with deterministic text
+measurements.
 
 - **Reflow timing:** A Team Color caption crossing the half-width threshold stays
   paired through its native callback and held mouse gesture, then stacks in
@@ -664,15 +668,37 @@ seven cases use bundled Turkish captions with deterministic text measurements.
   without another edit, stale dragging cannot resume, and draft text and dirty
   fields remain unchanged.
 
+Additional headless cases cover the client binding and final-root close paths. A
+guarded file-action save that declines a replaced source refreshes the mounted
+page from the handler's replacement without opening the file, leaving the screen
+or showing the root failure dialog. A drag or channel edit in progress rebinds
+to a replacement before its next edit, cancelling the stale drag and retaining
+focus on the rebuilt control. An ordinary root save failure opens the failure
+dialog without a server update; continuing keeps the draft, mounted list and
+presentation-policy listener, and a later successful close sends once and
+leaves. Escape on a future-version or invalid protected source can exit to a
+null parent without another save or server update, discarding the draft while
+the in-memory client change remains. A successful local save followed by an
+invalid server draft routes to Rate Limit without showing the local failure
+dialog. Press-then-release dispatch also ensures a held Escape cannot continue
+or retry a close after a guarded reload until released, and a confirmation
+decision is spent before reentry, so late or reentrant buttons from one dialog
+cannot commit or abandon another dialog's draft. One-shot vetoed screen changes
+can be retried as pure navigation: the save-failure confirmation retries either
+choice without another save or update, and the reset confirmation retries only
+the screen change after its side effects already applied; these are headless
+simulations, not installed NeoForge event tests.
+
 The fixture preserves native screen removal, addition and retained-instance
-initialization while bypassing GPU, mouse/window and title work. Server-size
-cases inject accepted snapshot and permission state, not a connection or remote
-transaction. The seven cases passed the focused screen suite and subsequent full
-Java 21 verification recorded in the
+initialization while bypassing GPU, mouse/window and title work. Server-size and
+close cases inject accepted snapshot, permission, parent-screen, file-writer and
+failure state, not a real connection, remote transaction, disk fault or live
+GUI. The seven caption cases' execution is recorded in the
 [combined Java run](build-checks.md#recipientless-tracking-diagnostics-and-caption-reflow-verification),
-which also built all three loaders. These headless assertions do not exercise
-native glyph rendering, real GLFW input, hover or focus tooltip delivery,
-screen-close persistence or live translation readability.
+which also built all three loaders; the additional binding and close cases have
+no execution record here. These headless assertions do not exercise native glyph
+rendering, real GLFW input, hover or focus tooltip delivery, a real file dialog
+or opener, or live translation readability.
 
 ## Assembled settings-screen resize
 

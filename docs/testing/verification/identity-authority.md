@@ -51,8 +51,20 @@ server-configuration-v5 routes on Fabric, Forge and NeoForge. `ModIdentityTest`
 pins the fork identity and all thirteen registered packet IDs; focused packet
 tests pin the versioned families' version boundaries and codec shapes, and
 `PresentationPreviewWiringTest` statically confirms preview codec registration
-and main-thread handoff on every loader. No live cross-loader network test
-exists, and these checks do not establish server authority or live transport.
+and main-thread handoff on every loader. `ForgeClientPacketDirectionTest` covers
+the generic Forge client receiver shared by the five S2C packet registrations: a
+serverbound payload is neither decoded nor queued for client execution, while a
+clientbound payload decodes once and delivers through queued client work. No live
+cross-loader network test exists, and these checks do not establish server
+authority or live transport.
+
+`ServerCoreLifecycleTest` drives the real `CommonServer.onServerStopped` entry
+and the real first-tick activation with allocated servers. It covers release of
+the active server identity, marker store, external provider references and
+player channel/rate state; repeated stops and a late stop for an already
+replaced server neither release twice nor clear the replacement's state; and a
+replacement server starts with a fresh store. It is not a heap-retention
+measurement or a running dedicated-server result.
 
 ## Logical container identity and authority
 

@@ -416,21 +416,29 @@ Its value semantics are owned by
 
 ## Client configuration loading, edits, and close
 
-The client configuration loads at client initialization. Opening or reopening
-the screen edits the already-loaded in-memory configuration and does not reload
-an externally edited file. Client modifications are live in memory while the
-screen is open; client persistence happens on the final root leave, apart from
-the file action and reset behaviors below.
+The client configuration loads at client initialization. Client option widgets
+read and edit the configuration object the handler currently holds; opening or
+reopening the screen uses that already-loaded object and does not reload an
+externally edited file. If the handler reloads and replaces that object during a
+save attempt, the screen refreshes the displayed values and subsequent edits use
+the replacement. Client modifications are live in memory while the screen is
+open; client persistence happens on the final root leave, apart from the file
+action and reset behaviors below.
 
 On final root close, the screen first attempts local `saveSafely`; only if that
-succeeds does it commit any dirty server-settings draft. It remains open if
-either attempted step fails, and an invalid server-settings draft also blocks
-the close and routes to the owning category and first invalid field, checking
-Send Rate before Marker Duration before Performance so a draft with several
-invalid leaves lands deterministically. Because
-local persistence is attempted first, it can succeed before a later
-server-draft commit fails. The snapshot-request, correlation, field-mask, and
-no-acknowledgement transaction is owned by
+succeeds does it commit any dirty server-settings draft. On a failed local save,
+the screen reports the local save failure without claiming that the
+configuration file was written and offers the player a choice: continue
+editing, retaining the server-settings draft so the next explicit root close
+retries both steps, or leave without saving, which returns to the parent screen
+without sending the ordinary server-settings update and does not guarantee that
+already-applied in-memory client changes are rolled back. After a successful
+local save, an invalid server-settings draft blocks the close and routes to the
+owning category and first invalid field, checking Send Rate before Marker
+Duration before Performance so a draft with several invalid leaves lands
+deterministically. Because local persistence is attempted first, it can succeed
+before a later server-draft commit fails. The snapshot-request, correlation,
+field-mask, and no-acknowledgement transaction is owned by
 [changing server configuration](../architecture/config/changing-server-config.md),
 so the screen does not promise that the server applied or persisted an update.
 

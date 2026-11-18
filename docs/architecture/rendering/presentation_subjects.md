@@ -19,13 +19,20 @@ Server-side logical grouping is a separate creation decision under the
 [target model](../identity/target_model.md#frozen-logical-block-groups) and
 [D0016](../../decisions/D0016-logical-container-targets.md).
 
-## Required contract and current external conformance
+## Required contract and external conformance
 
 D0003 remains uniformly applicable to every optional or external integration;
 there is no conformance exemption from the presentation-subject rules owned
-here. For the current Sable external path, conformance remains an open
-verification gap rather than a product exception; see
-[Sable coverage and pending scenarios](../../testing/verification/integrations.md#sable-integration-coverage).
+here. An external presentation uses the same per-frame ordered subject and
+coverage contract as an ordinary presentation. The provider binds one loaded
+read scope and frozen render transform for that frame, and only resolvers that
+explicitly support provider-scoped reads participate; both normal sources and
+the late native fallback consume the shared snapshot.
+Ordinary-only topology resolvers, including Create Vault and fluid-tank
+specialization, are therefore not applied to an external target. The
+provider-owned plot, pose and read binding are recorded by each integration;
+[Sable](../../integrations/sable.md#client-capture-and-presentation) owns that
+boundary for its external blocks.
 
 ## Render-target type rules
 

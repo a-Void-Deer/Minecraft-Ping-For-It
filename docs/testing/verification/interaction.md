@@ -158,9 +158,15 @@ manual Precise scenarios remain pending.
 
 The [selection policy](../../architecture/picking/selection_policy.md) has
 focused unit and state-seam evidence:
-`ToggleInputStateTest` covers physical-press de-duplication until release,
-including repeated presses before the next release; GUI/screen eligibility is
-exercised at that seam; `ClientConfigTargetSelectionTest` covers
+`ToggleInputStateTest` covers the native callback `GLFW_PRESS` origin and the
+non-repeat gate: one press authorizes one vanilla mapping click; a screen at
+either the callback origin or the mapping destination prevents a toggle;
+`GLFW_REPEAT` and focus loss cannot become a new press; and a release permits a
+fresh focused press.
+`NativeSelectorMixinContractTest` adds the keyboard and mouse toggle hooks: the
+HEAD origin observes GLFW's action parameter before UI or loader consumption,
+the argument modification preserves the native key, and only the vanilla
+mapping click is gated. `ClientConfigTargetSelectionTest` covers
 model-initialized target-selection choices, block mode, JSON round trip and
 missing or null transparent-block choices. `EntitySelectionBlacklistTest` covers
 registration aggregation, idempotent removal and the optional Create boundary;
@@ -463,7 +469,8 @@ remain in the
   context, including the token invalidation and ownership-clear boundary; the
   headless abort-plus-late-completion seams are inventoried above;
 - live GUI and screen input callbacks and physical key-repeat behavior across
-  Fabric, Forge and NeoForge, beyond the input-state seams;
+  Fabric, Forge and NeoForge, beyond the raw callback and mapping-contract
+  seams, including GLFW/loader delivery and Mixin application;
 - the complete range pipeline across native, Distant Horizons, Create and Sable,
   packet transport and authoritative acceptance;
 - deterministic local-position ordering of equal-distance, same-kind local child

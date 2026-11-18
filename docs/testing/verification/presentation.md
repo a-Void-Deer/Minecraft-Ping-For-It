@@ -60,6 +60,15 @@ The suite groups are:
 Related optional-adapter evidence is recorded under
 [Create presentation adapters](integrations.md#create-presentation-adapters).
 
+`registeredPresentationHello*` cases in the Fabric and NeoForge
+`InventoryMonitorDispatchTest` suites and Forge's
+`InventoryMonitorPayloadRegistrationTest` exercise the actual registered
+presentation `HELLO` entry. Fabric checks owner-thread and live-listener
+delivery; NeoForge resolves the current player across a same-listener respawn
+and drops delivery after logout; Forge rejects a same-UUID connection
+replacement and keeps the replaced connection's queued work inert. These are
+registration-entry fixtures, not a real socket or launched loader.
+
 The refresh tests invoke production delivery, refresh and sampling methods
 through in-memory sessions and recording observation ports. The set does not
 establish live client/server negotiation, reset, mask or child-deny pruning over

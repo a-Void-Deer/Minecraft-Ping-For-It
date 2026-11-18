@@ -70,6 +70,25 @@ has not been validated.
    - Record observed latency and stalls; no performance guarantee is
      established.
 
+### Sable external blocks
+
+Pending against an installed Sable runtime for the
+[client presentation contract](../../integrations/sable.md#client-capture-and-presentation);
+record the exact Minecraft, Sable, Sable Companion and loader versions.
+
+1. Place a vanilla door, a vanilla bed, a normal double chest and a trapped
+   double chest on one Sable sub-level. Move and rotate the sub-level, then mark
+   each structure from both ends. Confirm the outline follows the local
+   structure under the current pose and covers both halves from either end; the
+   marker still uses its original identity, grouping and HUD anchor, and the
+   expected door/bed/chest render form.
+2. Repeat while the sub-level moves or rotates between marking and observation.
+   Confirm the outline stays aligned with the local structure and no half is
+   drawn twice.
+3. Unload or replace one half while the other remains. Confirm only the
+   remaining half is outlined, with no stale paired outline or invented second
+   half.
+
 ### Selector readability
 
 - Layouts in different language except en-US and zh-CN are not validated. May be truncated or missing translation.

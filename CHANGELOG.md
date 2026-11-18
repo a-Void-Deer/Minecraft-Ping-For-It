@@ -2,274 +2,104 @@
 
 ## Unreleased
 
-Changes between local `1.21.1` HEAD `3abf2c5d` (`0.5.0-pfi-beta2`) and current HEAD,
-compared directly.
+Changes from `1.21.1` (`a51a850b`) to `agent/multiple-fixes-1` (`6c4585d6`).
 
-### Grouped containers
+### Aeronautics rotors and Sable sub-levels
 
-- Either half of a vanilla normal or trapped double chest now addresses one
-  logical target. Supported [Create item vaults on NeoForge](docs/integrations/create.md#vault-logical-target-and-presentation-topology).
-- Same-target winner selection and HUD grouping use that logical container.
-  Markers still keep their original physical hit, anchor, owner, cancellation
-  rights and independent expiry.
-- Container presentation covers both verified chest halves or each verified
-  Vault cell. Missing, unloaded or inconsistent grouping metadata falls back to
-  the exact hit block. See the
-  [logical target model](docs/architecture/identity/target_model.md#frozen-logical-block-groups).
-- Extended logical grouping and whole-structure outlines to supported static
-  [Create fluid tanks on NeoForge](docs/integrations/create.md#fluid-tank-logical-target-and-presentation-topology),
-  with exact-hit fallback when the complete structure cannot be verified.
-- On supported Create fluid tanks with a strict interior, interior cells are
-  omitted from outline presentation while the bottom and top center cells remain
-  published. See
-  [fluid tank logical target and presentation topology](docs/integrations/create.md#fluid-tank-logical-target-and-presentation-topology).
+- On NeoForge, ordinary and Precise selection can now hit the actual block
+  shapes of assembled [Aeronautics rotors](docs/integrations/aeronautics.md),
+  both normal and gyro. Hitting a blade marks the whole rotor; aiming through
+  a gap can reach a target behind it.
+- On a moving or rotating Sable sub-level, the marker, cancel action and
+  supported Create outlines follow the rotor where it appears in the world.
+  The server checks range to the rotor's base in world coordinates and rejects
+  a new ping if it cannot locate that base. If the client temporarily loses
+  the rotor's position, the marker stays at its last known point.
+- A [Sable block hit](docs/integrations/sable.md#transformed-entity-frames-and-frozen-block-proof)
+  keeps the local block and face you aimed at. To compare distances, the game
+  projects the point you hit into world coordinates using the sub-level's pose
+  at the time of the hit. Without a verified world hit point, Precise cannot
+  offer that hit. If ordinary selection falls back to a location and cannot
+  determine its world coordinates, it sends no location ping.
+- On a [Sable sub-level](docs/integrations/sable.md#client-capture-and-presentation),
+  marking either half of a door, bed or double chest (ordinary or trapped) now
+  outlines the whole pair. If the other half is missing or unloaded, only the
+  marked half is outlined. If one half needs a wireframe, drawing the other
+  half's model no longer hides it. Sable also uses the existing
+  [outline rules](docs/architecture/rendering/presentation_subjects.md#required-contract-and-external-conformance)
+  for supported Create doors, large water wheels and Simulated docking connectors.
 
-### Inventory preview and tracking
+### Precise target selection
 
-- Certified native chest and ordinary NeoForge Create Vault views can reuse
-  physical inventory reads across independently authorized players and faces
-  when the provider proves their visible slots equivalent.
-- New Tracking consumers can join an eligible, still-active Preview or Tracking
-  scan while physical scanning demand remains.
-- Eligible Previews can borrow active Tracking scans, without enabling general
-  Preview-only cross-player or cross-face pooling. A completed Preview left open
-  no longer blocks later Tracking sweeps and does not periodically rescan itself.
-- An authorized single-resource inventory Ping now carries one server-frozen
-  creation snapshot in the same atomic initial as the marker. The client emits
-  that snapshot once in chat, marks an incomplete Preview or independently
-  uncertain quantity as uncertain, and later Tracking updates change only the
-  live marker display. See
-  [creation snapshot receipt](docs/architecture/presentation/inventory.md#creation-snapshot-receipt)
-  and [content receipt lifecycle](docs/architecture/rendering/names_chat.md#content-receipt-lifecycle).
-- Strengthened final send-time checks for current owner permissions, source,
-  session, recipient and marker validity. Revocation or failure withdraws queued
-  valid frames; an owner-only denial does not reset authorized sharing peers.
-- New Pings freeze their complete effective recipient content authorization at
-  successful creation, and an Inventory Preview freezes its per-lane
-  authorization when it opens. Existing Pings and Previews keep that frozen
-  grant; later recipient permission or policy changes affect only new Pings and
-  Previews, while source-owner read authority, source/session validity, budgets,
-  expiry and disconnect remain current checks. See
-  [frozen recipient content authorization](docs/architecture/presentation/presentation_snapshot.md#frozen-recipient-content-authorization)
-  and [receiver authorization freeze points](docs/architecture/presentation/inventory.md#receiver-authorization-freeze-points).
-- Marker removal or expiry clears local inventory state and rejects delayed
-  updates, preventing stale tracking data from returning. Detailed sharing and
-  publication boundaries remain in the [inventory contract](docs/architecture/presentation/inventory.md#certified-tracking-observation-pools).
-- Inventory-list updates preserve the selected row while its resource remains
-  available.
-- Revoking or restoring item or fluid permissions preserves the other resource's
-  still-authorized preview and tracking state. Permission updates delayed by
-  send budgets or discarded after a permission change are retried, allowing
-  restored access to synchronize without resetting the other resource.
-- Inventory Previews now use one stable held handle across retries: after the
-  first failed attempt the client makes at most three further attempts, one per
-  fixed five-second delay, showing the localized cause with the current retry
-  ordinal and then only the cause on the final failure. A healthy scan is not
-  cut off by a total-duration limit, and a stalled attempt that already has
-  usable rows keeps them and ends its lane as incomplete. Late regrants,
-  duplicate data and repeated deferrals cannot extend an attempt or reopen a
-  stopped one. See
-  [preview attempts, retry and no-progress watchdog](docs/architecture/presentation/inventory.md#preview-attempts-retry-and-no-progress-watchdog).
-- A Preview lane whose typed failure reason is exactly `SOURCE_UNAVAILABLE`
-  stops immediately instead of spending the retry sequence, retires that lane's
-  rows and references, and leaves an available sibling lane usable. When no lane
-  remains usable or pending, the Details inventory entry is disabled, an open
-  inventory list closes, and the selector leaves the inventory path for its
-  nearest valid ancestor; a later hold may request the source again. Inventory
-  Tracking keeps its own recovery rules. See
-  [inventory list](docs/architecture/picking/wheel.md#inventory-list).
-- An inventory selection that cannot create its tracking target shows exactly
-  one localized `[pingforit]` chat line for typed server rejections and local
-  pre-dispatch, courtesy or transport refusals. Duplicate or replayed outcomes
-  do not repeat the line, nothing resends automatically, and a marker stored
-  before a later publication failure is not reported as a creation failure. See
-  [inventory tracking creation failure](docs/UI/ping-feedback.md#inventory-tracking-creation-failure).
-- Raised the item and fluid variant catalogues from 256 to 1024 definitions,
-  set a 1 MiB retained bound for both, and widened component traversal and
-  display validation to 8192 nodes and visits, so large modded containers
-  truncate less. See
-  [item variants and component fallback](docs/architecture/presentation/inventory.md#item-variants-and-component-fallback).
+- Within the same ping range, Precise can now select eligible targets
+  encountered late in a crowded scene or large assembly. See
+  [Precise live candidate capture](docs/architecture/picking/capture.md#precise-live-candidate-capture).
+- Removed the fixed limits on block reads, entity visits, provider calls and
+  shape checks, including searches through loaded Sable sub-levels. While a
+  refresh is in progress, the last confirmed choices remain selectable. If a
+  scan ends incomplete, the wheel disables the target types that depend on it
+  rather than offering a partial result.
 
-### Fluid preview and tracking
+### Server performance limits
 
-- Added fluid preview, selection and marker tracking for static block storage
-  through Fabric Transfer and Forge/NeoForge fluid handlers, including supported
-  ordinary Create tanks on NeoForge. Items and fluids share one grouped preview
-  with independent permissions and state.
-- Fluid quantities use consistent millibucket and bucket formatting in the list,
-  tracking HUD and content chat, with approximate and sub-millibucket indicators.
-  Quantity text takes priority over names and retains exact fits at fractional
-  font scales.
-- Fluid names and still-texture icons use native loader support, including for
-  non-placeable fluids. Unavailable icons fall back to text-only display.
-- Scans can finish after final validation is delayed by processing budgets,
-  without rereading storage. Capacity-limited previews remain explicitly
-  incomplete rather than claiming complete totals.
-- Fixed negative native fluid amounts on Forge and NeoForge being mistaken for
-  empty tanks and replacing tracking results with zero; such reads are now
-  unavailable.
-- Fluid icons fade smoothly when the interface opens or closes and when opacity
-  changes, instead of disappearing abruptly at low opacity.
-- The NeoForge fluid capability layout, used by supported static Create fluid
-  tanks, now verifies up to 4096 member cells instead of 1024, so a 3-wide tank
-  that fits the build height no longer hits the former member bound. Width
-  remains 1 through 3 and the whole prism must still fit the build height. See
-  [fluid tank logical target and presentation topology](docs/integrations/create.md#fluid-tank-logical-target-and-presentation-topology).
+The five inventory slot sliders on the server **Performance** page have fewer
+high-end steps and lower finite limits:
 
-### Server controls and Create optimizations
+| Setting under `inventory` | Previous maximum | New maximum |
+| --- | ---: | ---: |
+| `physicalSlotsPerTick` | 4,096 | 2,048 |
+| `preview.maxSlotsPerClient` | 16,384 | 2,048 |
+| `preview.maxSlotsServer` | 65,536 | 8,192 |
+| `tracking.maxSlotsPerTarget` | 16,384 | 4,096 |
+| `tracking.maxSlotsServer` | 262,144 | 8,192 |
 
-- Added `inventory.tracking.distinguishFaces` and
-  `inventory.tracking.distinguishPlayers`, both defaulting to `false`, with
-  **Separate Tracking by Face** and **Separate Tracking by Player** toggles on
-  the server Performance page. Enable either to partition certified scan sharing
-  by that context
-- Changes to these switches affect subsequent scans. Running scans finish under
-  their previous policy without restarting or changing marker lifetimes. See
-  [server configuration](docs/config/server.md#inventory-policy-object).
-- Tracking's per-target quotas now span the frozen logical container group,
-  rather than granting separate allowances for different member hits.
-- Optimized supported Create Vault reads by reusing fixed reflection metadata
-  and removing duplicate validation work on the audited ordinary path. Current
-  handlers, topology and owner authority still require checks; contents and
-  successful permission checks are not cached.
-- Inventory scan admission now offers an optional due-Preview or
-  input-protection opportunity that draws its reservation from the same
-  physical-work, work and memory ledgers as the work it protects. A refused
-  reservation consumes nothing, an oversized one-shot capture is rejected
-  before capture work, and no new unmetered allowance is added. See
-  [source capacity, catalogue growth and registration](docs/architecture/presentation/inventory.md#source-capacity-catalogue-growth-and-registration).
-- Raised the finite upper bounds of the existing inventory settings without
-  adding keys or changing defaults: `physicalSlotsPerTick` 1024 to 4096,
-  `preview.maxSlotsPerClient` 1024 to 16384, `preview.maxSlotsServer` 1024 to
-  65536, `preview.maxTargetsPerClient` 8 to 16, `tracking.maxVariantsPerTarget`
-  32 to 128, `tracking.maxSlotsPerTarget` 1024 to 16384,
-  `tracking.maxSlotsServer` 16384 to 262144 and `pendingMemoryMiB` 1024 to
-  2048 MiB. The preview variant ceiling remains 1024; finite-only and
-  unlimited-mode rules are unchanged. See
-  [inventory policy object](docs/config/server.md#inventory-policy-object).
-- Raised the code-owned per-scope byte bases behind the five inventory
-  send-byte multipliers: preview client 4 KiB to 1 MiB, preview global 32 KiB
-  to 2 MiB, tracking stream 2 KiB to 1 MiB, and tracking snapshot and global
-  16 KiB to 1 MiB each. With the default multiplier of 1, the default per-scope
-  allowances grow by 64 to 512 times; the multipliers, their defaults, legal
-  ranges and the unlimited-mode guard stay as they are. See
-  [budgets, queues and memory](docs/architecture/presentation/inventory.md#budgets-queues-and-memory).
+Defaults and unlimited mode are unchanged. When loading an existing
+[server configuration](docs/config/server.md#inventory-policy-object), the
+server clamps values above the new limits, including the finite value kept in
+unlimited mode. Clamping alone does not rewrite the file. A client running
+this build rejects a settings snapshot that exceeds a limit; a server running
+this build rejects an update containing such a value.
 
-### Diagnostics and logging
+### Double-click Danger window migration
 
-- Added independent client and server logging profiles (`NORMAL`, `DEEP`,
-  `DEBUG`), exposed as **Logging Detail** and **Server Logging Detail**, both
-  defaulting to `NORMAL`. `NORMAL` keeps diagnostic reports redacted to stable
-  codes and failure classes; `DEEP` and `DEBUG` may include bounded original
-  exception detail, with `DEBUG` enabling additional highest-detail diagnostics.
-  The client applies its selection immediately, while a server selection applies
-  through the ordinary server-settings transaction. See
-  [profiles and disclosure](docs/architecture/logging.md#profiles-and-disclosure)
-  and [logging profile controls](docs/UI/settings-screen.md#logging-profile-controls).
-- On both settings pages, activation cycles `NORMAL` and `DEEP`; `DEBUG` is
-  reachable only while Alt (Option on macOS) is held, and a row left at `DEBUG`
-  exits to `NORMAL` on its next activation without the modifier. Releasing the
-  modifier does not itself change the selected value.
-- Inventory limits, deferrals, truncation, unsupported lanes and quality
-  degradation now share one stable positive reason vocabulary across decisions,
-  wire metadata and localized text. Each fixed site reports one outcome:
-  `NORMAL` keeps the stable summary, `DEEP` adds short stage and lane handling,
-  and `DEBUG` adds numeric request, commit, requested, used and limit
-  associations. At an effective `DEBUG` profile, a request that triggered limit
-  handling reports every occurrence instead of waiting for its interval
-  channel. See
-  [limit and failure diagnostics](docs/architecture/presentation/inventory.md#limit-and-failure-diagnostics).
-- Oversized inventory frames, keys, labels, displays, entry and part counts and
-  provider structures now report the actual required value and its limiting
-  bound through a typed failure reason instead of the generic corrupt-packet
-  fallback. Malformed or truncated input still uses that fallback. See
-  [limit and failure diagnostics](docs/architecture/presentation/inventory.md#limit-and-failure-diagnostics).
+Added a [client config migration](docs/architecture/config/revisioning.md#ordered-migration-and-writeback)
+for `0.5.1-pfi-beta2` or later. In a config from `0.5.1-pfi-beta1` or earlier,
+it changes `doubleClickDangerWindowMs` from exactly `100` to `160` ms; other
+values are preserved. The 160 ms default is unchanged. The current build is
+still `0.5.1-pfi-beta1` and does not run this migration.
 
-### Performance monitor
+### Connection handling
 
-- Added a client performance-monitor HUD under the client `DEBUG` profile. When
-  enabled, it defaults to summary readings and supports opt-in detail and peak
-  metrics; unavailable readings are shown as unavailable rather than zero. See
-  [performance monitor controls](docs/UI/settings-screen.md#performance-monitor-controls),
-  [client configuration](docs/config/client.md#performance-monitor), and
-  [HUD projection and presentation](docs/architecture/presentation/inventory.md#hud-projection-and-presentation).
-- Added independent server Preview and Tracking collection switches under the
-  server `DEBUG` profile; both default off. Collection is server-authoritative
-  and continues without viewers; subscription, HUD state and client metric
-  selection affect transfer and display only, and Server and Shared numeric
-  readings are administrator-only. See
-  [performance monitoring](docs/architecture/presentation/inventory.md#performance-monitoring).
+- Fixed a Forge LAN issue where a packet from a guest could be mistaken for a
+  server rate-limit update and prevent the host from placing pings.
+- On Fabric, Forge and NeoForge, a delayed handshake from a closed connection
+  no longer leaves pings unavailable when the same player reconnects.
+  Respawning on the same connection still works.
 
-### Target selection compatibility
+### Server shutdown cleanup
 
-- Cyclic's connected glass, dark glass, and dark connected glass blocks now
-  follow **Mark Transparent Blocks** consistently in ordinary, Precise and
-  entity-local native-shape selection: with the option off they pass through,
-  and with it on they can be selected by their native shape. See
-  [selection controls and bindings](docs/architecture/picking/selection_policy.md#selection-controls-and-bindings).
-- The default entity-selection blacklist now also ignores `tiab:accelerator`;
-  enabling **Mark Blacklisted Targets** lets it participate in selection.
-  Spectator exclusion is unchanged. See
-  [raycast use and blacklist boundary](docs/architecture/picking/selection_policy.md#raycast-use-and-blacklist-boundary).
+- Leaving a single-player world now releases Ping For It's reference to that
+  world as soon as the server stops. Shutdown also clears the server's marker
+  tracking and per-player channel and rate-limit state. A late shutdown from
+  an older server cannot clear the new session's [markers](docs/architecture/authority/marker_lifecycle.md#server-authoritative-record-lifetime).
 
-### Spatial selector menus
+### Selection toggles
 
-- Renamed the root selector entry from **Content** to **Details** and the
-  inventory list's group heading from **Contents** to **Inventory** in all
-  locales. The persisted `spatialSelector.contentIntentEnabled` key is
-  unchanged. See [Details](docs/architecture/picking/wheel.md#details).
-- An item row's radial submenu now opens diagonally forward and below its
-  selected row. The row stays the parent and return anchor, and Back remains
-  directed at that row through clearance updates and GUI resize. See
-  [inventory list](docs/architecture/picking/wheel.md#inventory-list).
+- Pressing and holding **Mark Transparent Blocks**, **Mark Blacklisted Targets**
+  or **Mark Fluids** in a menu no longer flips the setting when you return to
+  the game. Release the shortcut and press it again to toggle. See
+  [toggle input and attempted persistence](docs/architecture/picking/selection_policy.md#toggle-input-and-attempted-persistence).
 
-### Settings and help
+### Settings screen reload and save failures
 
-- Renamed three client categories to **Markers & Range**, **Controls & Gestures**,
-  and **Channel, Sound & Notices**.
-- Reorganized pages into semantic sections: related controls share rows and
-  singletons use full-width rows. Pairs stack vertically in order when the
-  viewport or translated labels require it, retaining scrollbar clearance and
-  a fixed footer. Presentation-editor pairs follow the same layout rules.
-- Added native hover and keyboard-focus help across value controls, categories,
-  navigation and actions. Help explains enum modes, Off/On effects, numeric
-  direction, scope and application timing. Action help distinguishes Server
-  Policy mutations sent on activation from ordinary server drafts submitted on
-  final close; typing a selector alone sends no mutation.
-- Updated labels, headings, help and assembled UI messages in all locales.
-- Added **Cooldown Feedback** (`cooldownFeedback`, default `ACTIONBAR`) under
-  **Channel, Sound & Notices**, with **Action Bar**, **Chat** and **Hidden**.
-  A committed ordinary create rejected by the local courtesy gate now shows
-  `Ping is on cooldown...` in the chosen place using the existing local failure
-  color. **Hidden** suppresses only this notice; the courtesy gate and the
-  separate tracking-creation failure line are unchanged. See
-  [courtesy cooldown notice](docs/UI/ping-feedback.md#courtesy-cooldown-notice)
-  and [client configuration](docs/config/client.md#persisted-field-catalogue).
-- The default **Double-Click Danger Window** is now 160 ms instead of 100 ms;
-  an existing stored value is unchanged.
-
-### Network compatibility
-
-- **Update clients and servers together.** Presentation moves from
-  `presentation-v1` to `presentation-v2`; inventory moves from `inventory-v1` to
-  `inventory-v2`; server-configuration request, update and snapshot routes move
-  from v4 to v5. Earlier routes have no fallback. The server derives and
-  transmits logical target keys.
-- Added the optional `inventory-monitor-v1` subscribe, status and sample route
-  family for the `DEBUG` performance monitor. These are additive monitor routes,
-  not a replacement or version bump for the existing `presentation-v2`,
-  `inventory-v2` or v5 server-configuration routes. See
-  [inventory monitor routes](docs/architecture/network/protocol.md#inventory-monitor-routes-inventory-monitor-v1).
-- Removed inactive legacy ping, marker and duration-policy routes. Unavailable
-  inventory sources use `INVALID`. inventory `UNAVAILABLE` and `EXPIRED` statuses
-  are removed, with expiry handled by marker lifecycle. Inventory `RESYNC` now
-  requires a marker ID; the unused request-only form is removed.
-- Within the existing `inventory-v2` route, `OPEN_REJECTED` and `PREVIEW_STATE`
-  are added server-to-client kinds, `REJECT`, `PREVIEW`, `SNAPSHOT`, `STREAM`,
-  `STATUS` and per-entry quality carry an optional typed failure reason, and
-  every admitted `OPEN` owns exactly one `OPENED` or `OPEN_REJECTED` outcome.
-  The route identity, protocol version, adapter schema, server-configuration
-  version and mod version are unchanged, but frames missing the current presence
-  fields are rejected rather than completed, so mixed builds remain incompatible.
-  See
-  [inventory route](docs/architecture/network/protocol.md#inventory-previewtracking-route-inventory-v2).
+- If loading or saving the client configuration replaces the in-memory config
+  while Settings is open, the client option pages now show the replacement's
+  values and later edits use it. A drag started on the old page is cancelled
+  instead of changing the old object.
+- If **Done** or **Esc** on the root page cannot save the client configuration,
+  Settings now reports the failure and offers **Keep Editing** or
+  **Exit Without Saving**. Keep Editing retains the server-settings draft for
+  the next close; Exit Without Saving closes without retrying the save or
+  sending the server update. Client changes already applied in memory are not
+  undone. See
+  [client configuration loading, edits, and close](docs/UI/settings-screen.md#client-configuration-loading-edits-and-close).

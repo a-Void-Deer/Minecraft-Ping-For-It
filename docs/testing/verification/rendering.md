@@ -78,6 +78,34 @@ Tank shell-subject dispatch, shared frame snapshot and exact native-edge fallbac
 assertions are inventoried under
 [tank topology verification](integrations.md#fluid-tank-topology-grouping-and-presentation).
 
+## External block frame presentation
+
+`ExternalBlockFramePresentationTest` exercises the production external frame
+path with a synthetic bound plot and frozen render pose. Its four cases cover
+vanilla door, bed, normal chest and trapped chest pairs from either end while
+preserving their render type; changed, foreign-plot or unloaded neighbors
+falling back to the direct subject; one shared ordered subject/coverage snapshot
+for the model and late native-shape passes; per-source and per-subject success
+without cross-winner coverage; frozen placement and late native edges only for
+uncovered subjects; shared resolver priority and declared BER coverage; and an
+unlike-registry proxy owner with owner identity, plus a handled-empty unavailable
+owner. `BlockModelOutlineStateTest` covers the per-subject external success set
+and ordinary state transitions; `BlockOutlineStateTest` retains marker/store
+preparation and separate external-spec snapshot tracking;
+`VanillaChestPresentationTest` keeps the ordinary chest resolver on one prepared
+snapshot. `CreateVaultProductionBoundaryTest` and
+`CreateFluidTankProductionBoundaryTest` drive their ordinary-only specialized
+topology through the same frame entry. These are headless resolution, state and
+native-edge seams, not installed Sable, a live plot or render pose, actual BER or
+baked-model submission, or GPU output.
+
+`EntityBlockGeometryTransformTest` checks large-coordinate placement and a single
+application of the local model offset in `createPoseStack`. It also checks that
+the origin guard rejects a non-finite projected point even when the transform
+matrix is finite. `BlockPresentationResolverTest` checks both public `resolve`
+entry points: ordinary-only resolvers run for ordinary views and are skipped for
+external read views.
+
 ## Base-fluid icon presentation
 
 `SpatialFluidIconRendererTest` records production draw dispatch without a GPU: a

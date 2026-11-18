@@ -402,6 +402,13 @@ diagnostic evidence:
   live identity and loaded state before content reads, member rejection outside
   the resolved sub-level, and a committed read that follows the current tracking
   point, leaves maps unchanged and cannot resolve after release;
+- `ExternalBlockFramePresentationTest` covers the production external frame path
+  with a synthetic bound plot: one shared ordered subject/coverage snapshot for
+  the model and late native passes, per-source/per-subject success, vanilla door,
+  bed and both chest pairs from either end, direct fallback for changed, foreign
+  or unloaded neighbors, and an unlike-registry proxy owner with handled-empty
+  unavailable state. Details are under
+  [external block frame presentation](rendering.md#external-block-frame-presentation);
 - `SableSupplementalRaycasterTest` covers the transformed scanner with real
   Companion poses and native shapes but recording sublevel ports: translated and
   rotated hits behind a blocker or after a miss, world-segment range under
@@ -465,12 +472,17 @@ native view.
 The registry, content resolver and stable-entry tests are narrow production-used
 seams with fake access and in-memory state; the observation-failure fixture
 installs reflective stand-ins into uninitialized provider, server and level
-tokens. The external model and fallback routes resolve provider presentation
-independently, so they cannot guarantee that provider-local multipart or
-subject-type decisions came from one immutable shared snapshot. That is an
-implementation-conformance and automated-coverage gap, not an external exception
-to the shared-subject contract in
-[presentation subjects](../../architecture/rendering/presentation_subjects.md).
+tokens. The external frame path resolves one bound plot/read scope, frozen render
+transform and ordered subject/coverage snapshot per frame; model and late
+fallback consume the shared snapshot, and success is tracked per external source
+and subject. The synthetic-plot fixture does not establish an installed Sable
+plot, a live render pose, parent-level chunk state, actual BER/baked-model
+submission or GPU output. It uses vanilla pairs and a synthetic scoped resolver;
+installed external presentations of the optional scoped Create door,
+large-water-wheel and Simulated docking-connector resolutions remain
+unexercised.
+The Vault and fluid-tank production boundary tests remain ordinary-topology
+coverage and add no external-target evidence.
 
 ## Simulated integration coverage
 
@@ -570,6 +582,8 @@ Sable-specific gaps remain for:
 - installed-Sable API compatibility and client capture/presentation against a
   live sublevel, including the established
   [logical-anchor/render-pose boundary](../../integrations/sable.md#client-capture-and-presentation);
+  the external frame fixture uses a synthetic plot and does not establish an
+  installed plot, live pose, parent-level chunk state or GPU output;
 - live server information sampling through the production registry and Sable
   provider against a real `ServerLevel` and loaded sublevel, including current
   tracking-point relocation, sublevel rotation/translation, state or registry

@@ -25,9 +25,10 @@ capture path; the separate supplemental transformed-behind discovery is
 described below.
 
 During server validation, Sable uses its logical pose to derive the external
-validation anchor. Client presentation separately applies the current render
-pose to live local block data. The validation and render-pose roles do not alter
-the candidate or committed identity defined below.
+validation anchor. Client presentation binds the current active local plot,
+freezes the frame's render pose, and applies that scope to live local block
+data. The validation and render-pose roles do not alter the candidate or
+committed identity defined below.
 
 A candidate that came from an actual native block hit carries that
 provider-local hit face; a synthetic miss, an inside hit or an unobserved
@@ -44,12 +45,20 @@ block-entity name without synchronization evidence is not a local value and the
 field falls back to the authorized server preview, owned by
 [target content preview](../architecture/presentation/presentation_snapshot.md#target-content-preview).
 
-The current external model route and external fallback independently resolve
-provider presentation. The required shared-subject and subject-type contract,
-and the fact that a single immutable frame snapshot is not currently
-guaranteed for those provider-local decisions, are recorded in
-[presentation subjects](../architecture/rendering/presentation_subjects.md) and the
-[verification inventory](../testing/verification/integrations.md#sable-integration-coverage).
+External outline presentation binds the marker's current active Sable sublevel
+and its actual loaded plot once per frame, freezes that frame's render pose, and
+supplies the resulting membership-proof read view and transform to the shared
+[presentation-subject contract](../architecture/rendering/presentation_subjects.md#required-contract-and-external-conformance).
+Every state or resident block-entity read proves the position still belongs to
+that plot and has a loaded local chunk; an unavailable plot yields no
+presentation instead of a parent-level read or a forced load.
+
+External targets still use the existing provider-scoped resolutions for vanilla
+beds and doors, ordinary and trapped double chests, the scoped Create door and
+large-water-wheel resolvers, and the Simulated docking-connector resolver; they
+do not promote a target into arbitrary multiblock topology. The marker and HUD anchor,
+canonical marker identity and grouping, and presentation wire protocol are
+unchanged.
 
 ## Transformed entity frames and frozen block proof
 
