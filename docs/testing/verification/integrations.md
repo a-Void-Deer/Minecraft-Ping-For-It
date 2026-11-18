@@ -376,8 +376,8 @@ behavior owner for [client capture and presentation](../../integrations/sable.md
 [server validation and materialization](../../integrations/sable.md#server-validation-and-materialization),
 [server information sampling](../../integrations/sable.md#server-information-sampling),
 and [refresh lifecycle](../../integrations/sable.md#refresh-lifecycle). Focused
-seams provide limited structural, locator-codec, provider-observation and
-diagnostic evidence:
+seams provide limited structural, locator-codec, provider-operation,
+observation and diagnostic evidence:
 
 - `SableClientCompanionAccessContractTest` statically parses the compiled
   access-class constant pool, requires the exact
@@ -392,6 +392,27 @@ diagnostic evidence:
   resolution select only their own provider method; unknown or legacy providers
   and a new-API `LinkageError` fail soft without materialization, observation or
   reference allocation, and a candidate read never materializes a reference;
+- `SableExternalBlockAuthorityTest` drives the production provider's validation,
+  materialization, refresh, observation and release operations:
+  - a loaded block in its own plot is accepted; a position in another plot or
+    the ordinary world is rejected during validation, materialization and name
+    resolution before reading either plot's chunk, block state, pose, block
+    entity or saved tracking data; and materialization repeats the plot proof
+    after validation;
+  - an unresolved sub-level or plot, or an unloaded plot chunk, is temporarily
+    unavailable; a loaded native chunk that does not match the requested plot
+    chunk is invalid without a content read; a containment-probe failure yields
+    an invalid result and a cause-bearing diagnostic, and a later validation
+    recovers;
+  - with the optional content-read discovery unavailable, validation,
+    materialization, refresh and Basic observation still work while the preview
+    read source stays empty;
+  - refresh follows a tracking point that has moved into another sub-level,
+    keeps the committed stable identity and updates the locator and anchor
+    without allocating a replacement tracking point; observation of a point in
+    another sub-level's plot stays
+    temporarily unavailable without a state or pose read; and release removes
+    the tracking point.
 - `SableExternalBlockObservationTest` covers the stable-entry helper selecting
   the committed tracking ID's current sublevel and local position without
   changing entry or reference maps, and failing closed for non-live references,
@@ -452,27 +473,28 @@ diagnostic evidence:
   `SableClientDiagnosticsTest` and `SablePresentationLogGateTest` cover recorded
   capture, server and refresh events, same-throwable identity, finite failure
   handling, provider fields lazy at `NORMAL`, under a disabled backend or under
-  suppression, a throwing descriptor supplier, the discovered
-  twelve-descriptor API list and a constructed linkage failure, absent-Sable
+  suppression, a throwing descriptor supplier, the complete discovered
+  descriptor list and a constructed linkage failure, absent-Sable
   empty capture with attempt-start and projected/vanilla fallback stages, a
   supplemental failure leaving the guard usable, and presentation cadence,
   capacity, repeated failure-class de-duplication, throwable identity and a
   disabled-debug status followed by one warning without an attached throwable.
 
-These seams do not load a Sable runtime or establish live provider reflection
-(including the additive content membership discovery), materialization,
-tracking-point reference lifecycle, live-sublevel membership and observation,
-the client chunk and prediction gates of a provider-resolved physical block, a
-live multi-member content capability, refresh, multiplayer, GUI, network or
-in-game behavior described by those topic sections. Wall-clock performance over
-a large live sublevel set remains unmeasured. The transformed-frame and
-frozen-proof seams are also headless: they do not exercise installed Sable or
-Aeronautics containment, actual render/logical poses, or a Create-contraption
-native view.
+These seams do not load a Sable runtime. They do not establish live provider
+reflection (including the additive content membership discovery), live
+materialization or tracking-point reference lifecycle, live-sublevel membership
+and observation, the client chunk and prediction gates of a provider-resolved
+physical block, a live multi-member content capability, live refresh,
+multiplayer, GUI, network or in-game behavior described by those topic sections.
+Wall-clock performance over a large live sublevel set remains unmeasured. The
+transformed-frame and frozen-proof seams are also headless: they do not exercise
+installed Sable or Aeronautics containment, actual render/logical poses, or a
+Create-contraption native view.
 The registry, content resolver and stable-entry tests are narrow production-used
-seams with fake access and in-memory state; the observation-failure fixture
-installs reflective stand-ins into uninitialized provider, server and level
-tokens. The external frame path resolves one bound plot/read scope, frozen render
+seams with fake access and in-memory state; the authority fixture substitutes a
+native plot index and tracking data, and the authority and observation-failure
+fixtures install reflective stand-ins into uninitialized provider, server and
+level tokens. The external frame path resolves one bound plot/read scope, frozen render
 transform and ordered subject/coverage snapshot per frame; model and late
 fallback consume the shared snapshot, and success is tracked per external source
 and subject. The synthetic-plot fixture does not establish an installed Sable
@@ -582,14 +604,11 @@ Sable-specific gaps remain for:
 - installed-Sable API compatibility and client capture/presentation against a
   live sublevel, including the established
   [logical-anchor/render-pose boundary](../../integrations/sable.md#client-capture-and-presentation);
-  the external frame fixture uses a synthetic plot and does not establish an
-  installed plot, live pose, parent-level chunk state or GPU output;
 - live server information sampling through the production registry and Sable
   provider against a real `ServerLevel` and loaded sublevel, including current
   tracking-point relocation, sublevel rotation/translation, state or registry
   identity change, unload/reload, no-force-load behavior, and marker/session
-  lifetime; the observation tests use fake world-access tokens, in-memory
-  entry/reference maps or an injected throwing reflective stand-in;
+  lifetime;
 - the additive content read source against a live Sable runtime: companion
   containment and unique-id membership reflection, live sub-level identity and
   loaded-member checks, a live multi-member content capability, and the
@@ -597,8 +616,9 @@ Sable-specific gaps remain for:
   gates on a provider-resolved physical block and content preview through the
   wheel's Details branch in a live client/server session, including the bounded
   server fallback and its GUI and network delivery, remain unexercised;
-- provider materialization, tracking-point reference counting, rollback and
-  release, including the existing empty-audience cleanup path documented under
+- live provider materialization, tracking-point reference counting, rollback
+  and release, including the existing empty-audience cleanup path documented
+  under
   [server validation and materialization](../../integrations/sable.md#server-validation-and-materialization);
 - live-sublevel refresh through the documented available, temporarily
   unavailable, and invalid outcomes in the

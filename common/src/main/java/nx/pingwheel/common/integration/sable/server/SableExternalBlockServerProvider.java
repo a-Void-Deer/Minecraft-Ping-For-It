@@ -19,13 +19,16 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Nameable;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.Vec3;
 import org.joml.Vector3d;
 import org.joml.Vector3dc;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetMatchContext;
@@ -553,21 +556,8 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 					"tracking-point-invalid", null);
 			}
 
-			Object container = invoke(api.getContainer, null, level);
-			if (container == null) {
-				return refreshTemporary(state, trackingId.get().toString(), committed,
-					"sublevel-container-unavailable");
-			}
-
-			Object subLevel = invoke(api.getSubLevel, container, currentSubLevelId);
-			if (subLevel == null || isRemoved(subLevel)) {
-				return refreshTemporary(state, trackingId.get().toString(), committed,
-					"sublevel-unresolved-or-removed");
-			}
-
 			BlockPos position = BlockPos.containing(currentPoint.x(), currentPoint.y(), currentPoint.z());
-			LiveResult live = resolveLive(
-				level, subLevel, currentSubLevelId, position, expectedId.get(), false);
+			LiveResult live = resolveLive(level, currentSubLevelId, position, expectedId.get(), false);
 
 			if (live instanceof LiveResult.TemporarilyUnavailable temporary) {
 				return refreshTemporary(
@@ -646,15 +636,8 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			LiveResult live = observeStableEntry(
 				committed, state.entries,
 				stableId -> state.references.references(stableId), entry, inSubLevel, subLevelIdValue, pointValue,
-				(currentSubLevelId, currentPosition) -> {
-					Object currentContainer = invoke(api.getContainer, null, level);
-					if (currentContainer == null) return new LiveResult.TemporarilyUnavailable("sublevel-container-unavailable");
-					Object currentSubLevel = invoke(api.getSubLevel, currentContainer, currentSubLevelId);
-					if (currentSubLevel == null || isRemoved(currentSubLevel))
-						return new LiveResult.TemporarilyUnavailable("sublevel-unresolved-or-removed");
-					return resolveLive(level, currentSubLevel, currentSubLevelId, currentPosition,
-						expectedId.get(), false);
-				});
+				(currentSubLevelId, currentPosition) ->
+					resolveLive(level, currentSubLevelId, currentPosition, expectedId.get(), false));
 			if (!(live instanceof LiveResult.Available available)) {
 				return new ObservationResult.TemporarilyUnavailable();
 			}
@@ -1275,27 +1258,8 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 	private LiveResult resolveLive(
 		ServerLevel level, SableExternalBlockLocator locator, ResourceLocation expectedId
 	) {
-		return resolveLive(level, locator, expectedId, true);
-	}
-
-	private LiveResult resolveLive(
-		ServerLevel level,
-		SableExternalBlockLocator locator,
-		ResourceLocation expectedId,
-		boolean logExceptions
-	) {
 		try {
-			Object container = invoke(api.getContainer, null, level);
-			if (container == null) {
-				return new LiveResult.TemporarilyUnavailable("sublevel-container-unavailable");
-			}
-
-			Object subLevel = invoke(api.getSubLevel, container, locator.subLevelId());
-			if (subLevel == null || isRemoved(subLevel)) {
-				return new LiveResult.TemporarilyUnavailable("sublevel-unresolved-or-removed");
-			}
-
-			return resolveLive(level, subLevel, locator.subLevelId(), locator.blockPos(), expectedId, logExceptions);
+			return resolveLive(level, locator.subLevelId(), locator.blockPos(), expectedId, true);
 		} catch (ReflectiveOperationException | RuntimeException failure) {
 			return new LiveResult.Invalid("live-resolution-exception", failure);
 		} catch (LinkageError failure) {
@@ -1306,36 +1270,70 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 
 	private LiveResult resolveLive(
 		ServerLevel parentLevel,
-		Object subLevel,
 		UUID subLevelId,
 		BlockPos position,
 		ResourceLocation expectedId,
-		boolean logExceptions
+		boolean logAvailable
 	) throws ReflectiveOperationException {
-		if (isRemoved(subLevel)) {
-			return new LiveResult.TemporarilyUnavailable("sublevel-removed");
+		@Nullable Object container = invoke(api.getContainer, null, parentLevel);
+		if (container == null) {
+			return new LiveResult.TemporarilyUnavailable("sublevel-container-unavailable");
 		}
 
-		Object localLevelObject = invoke(api.getLevel, subLevel);
+		@Nullable Object subLevel = invoke(api.getSubLevel, container, subLevelId);
+		if (subLevel == null || isRemoved(subLevel)) {
+			return new LiveResult.TemporarilyUnavailable("sublevel-unresolved-or-removed");
+		}
+
+		@Nullable Object localLevelObject = invoke(api.getLevel, subLevel);
 		if (!(localLevelObject instanceof ServerLevel localLevel) || localLevel != parentLevel) {
 			return new LiveResult.Invalid("sublevel-level-mismatch", null);
 		}
 
-		if (!localLevel.isLoaded(position)) {
-			return new LiveResult.TemporarilyUnavailable("unloaded-or-missing-state");
+		// Multiple plots share the parent ServerLevel. Use its native plot index,
+		// not the independently optional Companion content membership gate.
+		@Nullable Object expectedPlot = invoke(api.getPlot, subLevel);
+		if (expectedPlot == null) {
+			return new LiveResult.TemporarilyUnavailable("sublevel-plot-unavailable");
+		}
+		ChunkPos absoluteChunkPos = new ChunkPos(position);
+		@Nullable Object containingPlot = invoke(api.getContainingPlot, container, absoluteChunkPos);
+		if (containingPlot == null) {
+			return new LiveResult.Invalid("position-outside-sublevel-plots", null);
+		}
+		if (containingPlot != expectedPlot) {
+			return new LiveResult.Invalid("position-in-different-sublevel-plot", null);
 		}
 
-		BlockState state = localLevel.getBlockState(position);
+		if (localLevel.isOutsideBuildHeight(position)) {
+			return new LiveResult.TemporarilyUnavailable("position-outside-build-height");
+		}
+		@Nullable Object relative = invoke(api.toPlotLocal, expectedPlot, absoluteChunkPos);
+		if (!(relative instanceof ChunkPos localChunkPos)) {
+			return new LiveResult.Invalid("plot-local-chunk-position-unavailable", null);
+		}
+		@Nullable Object loadedChunk = invoke(api.getPlotChunk, expectedPlot, localChunkPos);
+		if (loadedChunk == null) {
+			return new LiveResult.TemporarilyUnavailable("plot-chunk-unloaded");
+		}
+		if (!(loadedChunk instanceof LevelChunk chunk) || chunk.getLevel() != localLevel
+			|| !absoluteChunkPos.equals(chunk.getPos())) {
+			return new LiveResult.Invalid("plot-chunk-mismatch", null);
+		}
+
+		// Sable's holder table is keyed by plot-relative chunk coordinates, but
+		// the LevelChunk stores blocks at the original plot-storage position.
+		@Nullable BlockState state = chunk.getBlockState(position);
 		if (state == null || state.isAir()) {
 			return new LiveResult.Invalid("air-or-missing-state", null);
 		}
 
-		ResourceLocation actualId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+		@Nullable ResourceLocation actualId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
 		if (actualId == null || !expectedId.equals(actualId)) {
 			return new LiveResult.Invalid("registry-identity-mismatch", null);
 		}
 
-		Object poseObject = invoke(api.logicalPose, subLevel);
+		@Nullable Object poseObject = invoke(api.logicalPose, subLevel);
 		if (!(poseObject instanceof Pose3dc pose)) {
 			return new LiveResult.Invalid("logical-pose-missing", null);
 		}
@@ -1359,7 +1357,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			new MarkerAnchor(globalCenter.x, globalCenter.y, globalCenter.z),
 			new SableExternalBlockLocator(subLevelId, position));
 
-		if (logExceptions) {
+		if (logAvailable) {
 			diagnostics.server(
 				"live-resolution",
 				"available",
@@ -1526,7 +1524,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			TRACKING_POINT_CLASS);
 	}
 
-	private static List<String> expectedMethods() {
+	private static @Unmodifiable List<String> expectedMethods() {
 		return List.of(
 			"SubLevelContainer#getContainer(ServerLevel|Level)",
 			"SubLevelContainer#getSubLevel(UUID)",
@@ -1539,7 +1537,11 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			"SubLevelTrackingPointSavedData#removeTrackingPoint(UUID)",
 			"TrackingPoint#inSubLevel()",
 			"TrackingPoint#subLevelID()",
-			"TrackingPoint#point()");
+			"TrackingPoint#point()",
+			"ServerSubLevel#getPlot()",
+			"SubLevelContainer#getPlot(ChunkPos)",
+			"LevelPlot#toLocal(ChunkPos)",
+			"LevelPlot#getChunk(ChunkPos)");
 	}
 
 	sealed interface LiveResult permits LiveResult.Available, LiveResult.TemporarilyUnavailable,
@@ -1601,7 +1603,11 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 		Method removeTrackingPoint,
 		Method inSubLevel,
 		Method subLevelId,
-		Method point
+		Method point,
+		Method getPlot,
+		Method getContainingPlot,
+		Method toPlotLocal,
+		Method getPlotChunk
 	) {
 
 		private static ReflectiveApi discover(SableDiagnostics diagnostics)
@@ -1610,6 +1616,8 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			Class<?> serverSubLevelClass = loadClass(SERVER_SUB_LEVEL_CLASS, diagnostics);
 			Class<?> trackingDataClass = loadClass(TRACKING_DATA_CLASS, diagnostics);
 			Class<?> trackingPointClass = loadClass(TRACKING_POINT_CLASS, diagnostics);
+			Method containingPlot = discovered(containerClass, "getPlot", Object.class, false, diagnostics, ChunkPos.class);
+			Class<?> plotClass = containingPlot.getReturnType();
 
 			return new ReflectiveApi(
 				containerLookup(containerClass, diagnostics),
@@ -1623,7 +1631,11 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				discovered(trackingDataClass, "removeTrackingPoint", void.class, false, diagnostics, UUID.class),
 				discovered(trackingPointClass, "inSubLevel", boolean.class, false, diagnostics),
 				discovered(trackingPointClass, "subLevelID", UUID.class, false, diagnostics),
-				discovered(trackingPointClass, "point", Vector3dc.class, false, diagnostics));
+				discovered(trackingPointClass, "point", Vector3dc.class, false, diagnostics),
+				discovered(serverSubLevelClass, "getPlot", plotClass, false, diagnostics),
+				containingPlot,
+				discovered(plotClass, "toLocal", ChunkPos.class, false, diagnostics, ChunkPos.class),
+				discovered(plotClass, "getChunk", LevelChunk.class, false, diagnostics, ChunkPos.class));
 		}
 
 		private static Class<?> loadClass(String name, SableDiagnostics diagnostics)
@@ -1671,7 +1683,7 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 			return method;
 		}
 
-		private List<String> signatures() {
+		private @Unmodifiable List<String> signatures() {
 			return List.of(
 				getContainer.toGenericString(),
 				getSubLevel.toGenericString(),
@@ -1684,7 +1696,11 @@ public final class SableExternalBlockServerProvider implements ExternalBlockServ
 				removeTrackingPoint.toGenericString(),
 				inSubLevel.toGenericString(),
 				subLevelId.toGenericString(),
-				point.toGenericString());
+				point.toGenericString(),
+				getPlot.toGenericString(),
+				getContainingPlot.toGenericString(),
+				toPlotLocal.toGenericString(),
+				getPlotChunk.toGenericString());
 		}
 
 		private static Method required(

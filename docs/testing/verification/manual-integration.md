@@ -89,6 +89,18 @@ record the exact Minecraft, Sable, Sable Companion and loader versions.
    remaining half is outlined, with no stale paired outline or invented second
    half.
 
+Pending against an installed Sable runtime for
+[server validation and materialization](../../integrations/sable.md#server-validation-and-materialization)
+and [refresh lifecycle](../../integrations/sable.md#refresh-lifecycle), using
+the same recorded versions.
+
+1. Place a block in each of two active sub-levels at similar local positions
+   and mark both. Move or rotate one sub-level. Confirm that its marker follows
+   the moved block and the other marker stays with its own block.
+2. With a Sable runtime where optional content-read discovery is unavailable,
+   place an ordinary ping on a Sable block. Confirm that the server accepts the
+   ping, the marker appears, and it follows the block when the sub-level moves.
+
 ### Selector readability
 
 - Layouts in different language except en-US and zh-CN are not validated. May be truncated or missing translation.

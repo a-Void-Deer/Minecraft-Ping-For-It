@@ -164,17 +164,25 @@ integration.
 
 ## Server validation and materialization
 
-Provider validation is the nonallocating first phase. It checks provider ID,
-candidate status, current dimension, locator encoding, expected registry ID,
-live sublevel/container, local level, loaded local block, non-air state,
-matching block registry ID, logical pose, and finite transformed validation
-anchor. The normal server range check uses that anchor. Validation allocates no
-tracking reference.
+Provider validation is the first phase and allocates no tracking reference.
+It checks provider ID, candidate status, current dimension, locator encoding and
+expected registry ID. It resolves the declared sub-level in the current parent
+level and confirms that the candidate's local position belongs to its plot.
+Validation reads block state only from the plot's matching resident chunk,
+without forcing a load. An unresolved sub-level or plot, or an unloaded plot
+chunk, makes the target temporarily unavailable. A position outside the resolved
+plot or a loaded chunk that does not match the plot chunk makes the target
+invalid.
+
+Validation checks for non-air state and a matching block registry ID, then uses
+the logical pose to compute a finite transformed validation anchor. The normal
+server range check uses that anchor.
 
 After validation, server marker creation first classifies the normalized
-target and checks the requested Ping Type's membership. Only then does provider
-materialization resolve live state again, create or reuse a tracking reference,
-and replace the target/anchor with committed values. The service reclassifies
+target and checks the requested Ping Type's membership. Only then does the
+provider recheck live state against the same plot and resident-chunk rule. On
+success, materialization creates or reuses a tracking reference and replaces the
+target/anchor with committed values. The service reclassifies
 that committed target and repeats the requested Ping Type membership check. It
 does **not** range-check the replacement anchor a second time. If the acquired
 materialization later fails reclassification, fails the post-materialization
@@ -187,7 +195,10 @@ reference retires the tracking point.
 
 ## Refresh lifecycle
 
-Committed external markers are refreshed periodically by the server:
+Committed external markers are refreshed periodically by the server. Refresh
+applies the
+[plot and resident-chunk checks](#server-validation-and-materialization)
+to the tracked local position before the existing outcomes below:
 
 - temporary provider unavailability retains the marker;
 - an available target with the same stable identity updates locator/anchor when
@@ -239,10 +250,12 @@ tolerance. Inventory identity, read-scope and recovery rules are owned by
 [inventory](../architecture/presentation/inventory.md).
 
 The resolved Sable sublevel must expose the same `ServerLevel` as the marker's
-parent server level. Its local coordinates remain distinct from the logical-pose
-world anchor used for authoritative validation. A removed, unloaded, mismatched,
-unregistered, or released source is unavailable, and observation never force-
-loads a chunk or sublevel.
+parent server level. Observation applies the
+[plot and resident-chunk checks](#server-validation-and-materialization) to the
+tracked local position. Its local coordinates remain distinct from the
+logical-pose world anchor used for authoritative validation. A removed, unloaded,
+mismatched, unregistered, or released source is unavailable, and observation
+never force-loads a chunk or sublevel.
 
 Observation cannot materialize a target, acquire, release, migrate an index,
 persist, or create provider tracking state, and it cannot create a new target

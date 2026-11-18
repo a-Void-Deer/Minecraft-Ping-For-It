@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Changes from `1.21.1` (`a51a850b`) to `agent/multiple-fixes-1` (`6c4585d6`).
+Changes since the `1.21.1` baseline (`a51a850b`).
 
 ### Aeronautics rotors and Sable sub-levels
 
@@ -28,6 +28,9 @@ Changes from `1.21.1` (`a51a850b`) to `agent/multiple-fixes-1` (`6c4585d6`).
   half's model no longer hides it. Sable also uses the existing
   [outline rules](docs/architecture/rendering/presentation_subjects.md#required-contract-and-external-conformance)
   for supported Create doors, large water wheels and Simulated docking connectors.
+- When you ping a Sable block, the server checks range and updates the marker
+  using the block's own sub-level, not a position in another sub-level. See
+  [Sable server validation](docs/integrations/sable.md#server-validation-and-materialization).
 
 ### Precise target selection
 

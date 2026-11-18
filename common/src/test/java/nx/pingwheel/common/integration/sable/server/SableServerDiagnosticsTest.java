@@ -1,15 +1,16 @@
 package nx.pingwheel.common.integration.sable.server;
 
 import java.lang.reflect.Method;
+import java.util.Arrays;
 import java.util.List;
 
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.integration.sable.SableDiagnostics;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SableServerDiagnosticsTest {
 
@@ -32,22 +33,21 @@ class SableServerDiagnosticsTest {
 	}
 
 	@Test
-	void discoveredApiKeepsItsCompleteTwelveDescriptorListWithoutEagerFormatting() throws ReflectiveOperationException {
-		Method[] methods = new Method[12];
+	void discoveredApiKeepsItsCompleteDescriptorListWithoutEagerFormatting() throws ReflectiveOperationException {
+		Class<?> apiType = Class.forName(SableExternalBlockServerProvider.class.getName() + "$ReflectiveApi");
+		Method[] methods = new Method[apiType.getRecordComponents().length];
 		for (int index = 0; index < methods.length; index++) {
 			methods[index] = DescriptorFixture.class.getDeclaredMethod("method" + index);
 		}
-		Class<?> apiType = Class.forName(SableExternalBlockServerProvider.class.getName() + "$ReflectiveApi");
 		var constructor = apiType.getDeclaredConstructors()[0];
 		constructor.setAccessible(true);
 		Object api = constructor.newInstance((Object[]) methods);
 		Method signatures = apiType.getDeclaredMethod("signatures");
 		signatures.setAccessible(true);
 		@SuppressWarnings("unchecked")
-		List<String> descriptors = (List<String>) signatures.invoke(api);
+		@Unmodifiable List<String> descriptors = (List<String>) signatures.invoke(api);
 
-		assertEquals(12, descriptors.size());
-		assertTrue(descriptors.stream().allMatch(value -> value != null && !value.isBlank()));
+		assertEquals(Arrays.stream(methods).map(Method::toGenericString).toList(), descriptors);
 	}
 
 	public static final class DescriptorFixture {
@@ -63,5 +63,9 @@ class SableServerDiagnosticsTest {
 		public static void method9() {}
 		public static void method10() {}
 		public static void method11() {}
+		public static void method12() {}
+		public static void method13() {}
+		public static void method14() {}
+		public static void method15() {}
 	}
 }
