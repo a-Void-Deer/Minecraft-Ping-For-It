@@ -12,6 +12,7 @@ import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.components.CycleButton;
+import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.events.ContainerEventHandler;
 import net.minecraft.client.gui.components.tabs.TabNavigationBar;
 import net.minecraft.client.gui.screens.ConfirmScreen;
@@ -19,6 +20,7 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.sounds.SoundEngine;
 import net.minecraft.client.sounds.SoundManager;
 import net.minecraft.locale.Language;
+import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.FormattedText;
 import net.minecraft.network.chat.contents.TranslatableContents;
@@ -27,19 +29,27 @@ import net.minecraft.util.FormattedCharSequence;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.config.ChannelMode;
+import nx.pingwheel.common.config.ConfigHandler;
+import nx.pingwheel.common.config.EntityBlockRenderMode;
 import nx.pingwheel.common.config.InventoryConfigValues;
 import nx.pingwheel.common.config.InventoryConfigValues.Field;
 import nx.pingwheel.common.config.InventoryConfigValues.Value;
 import nx.pingwheel.common.config.PlayerInfoMode;
 import nx.pingwheel.common.config.ServerConfigSnapshot;
+import nx.pingwheel.common.config.SpatialSelectorSettings;
 import nx.pingwheel.common.config.TeamColorMode;
+import nx.pingwheel.common.network.ServerConfigUpdateC2SPacket;
+import nx.pingwheel.common.presentation.client.ServerPresentationPolicyState;
 import nx.pingwheel.common.screen.SettingsNavigationModel.Category;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.parallel.ResourceLock;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.lwjgl.PointerBuffer;
 import org.lwjgl.system.CallbackI;
 import org.lwjgl.system.MemoryUtil;
@@ -49,13 +59,19 @@ import org.lwjgl.system.libffi.LibFFI;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.ref.Reference;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE;
 
 /** Production screen/native input with bundled Turkish text and supplied metrics, not live fonts or a window. */
 @NotNullByDefault
@@ -343,6 +359,411 @@ class SettingsScreenInputLayoutTest {
 		});
 	}
 
+	@Test
+	void guardedOpenFileFailureRefreshesMountedValueWithoutOpeningOrLeaving(@TempDir Path directory) throws Exception {
+		Path path = directory.resolve("client.json");
+		var failWrites = new AtomicBoolean(true);
+		var handler = loadedClientHandler(path, failWrites, """
+			{"pingforit-version":"0.4.0-pfi-beta1","entityBlockRenderMode":"ALL"}
+			""");
+		ClientConfig original = handler.getConfig();
+		withScreen(handler, null, fixture -> {
+			var screen = fixture.screen();
+			keyboardOpenCategory(screen, Category.GEOMETRY_CONFIG);
+			var originalOption = cycleButton(screen, EntityBlockRenderMode.ALL);
+			String replacement = """
+				{"pingforit-version":"0.5.0-pfi-beta1","entityBlockRenderMode":"COMPATIBLE"}
+				""";
+			Files.writeString(path, replacement);
+			click(screen, pageWidget(screen, "open_client_config", Button.class));
+
+			assertSame(screen, Minecraft.getInstance().screen, "the file action must not use the root exit dialog");
+			assertEquals(1, screen.saveAttempts);
+			assertEquals(0, screen.fileOpens);
+			assertEquals(replacement, Files.readString(path));
+			var newOption = cycleButton(screen, EntityBlockRenderMode.COMPATIBLE);
+			assertNotSame(originalOption, newOption, "even the already-mounted page must display the reloaded value");
+			keyboardFocus(screen, newOption);
+			assertTrue(screen.keyPressed(32, 0, 0));
+			assertEquals(EntityBlockRenderMode.VOXEL_SHAPE_ONLY, handler.getConfig().getEntityBlockRenderMode());
+			assertEquals(EntityBlockRenderMode.ALL, original.getEntityBlockRenderMode());
+
+			failWrites.set(false);
+			click(screen, pageWidget(screen, "open_client_config", Button.class));
+			assertNull(Minecraft.getInstance().screen);
+			assertEquals(2, screen.saveAttempts);
+			assertEquals(1, screen.fileOpens);
+			handler.load();
+			assertEquals(EntityBlockRenderMode.VOXEL_SHAPE_ONLY, handler.getConfig().getEntityBlockRenderMode());
+		});
+	}
+
+	@Test
+	void mountedDragAndChannelInputRebindBeforeEditingAReplacement(@TempDir Path directory) throws Exception {
+		Path path = directory.resolve("client.json");
+		var handler = loadedClientHandler(path, new AtomicBoolean(true), """
+			{"pingforit-version":"0.4.0-pfi-beta1","channel":"old","spatialSelector":{"deadzone":18}}
+			""");
+		ClientConfig original = handler.getConfig();
+		withScreen(handler, null, fixture -> {
+			var screen = fixture.screen();
+			keyboardOpenCategory(screen, Category.INPUT_INTERACTION);
+			String deadzone = "spatial_selector.deadzone";
+			var oldSlider = pageWidget(screen, deadzone, AbstractSliderButton.class);
+			keyboardFocus(screen, oldSlider);
+			Minecraft.getInstance().setLastInputType(InputType.MOUSE);
+			int x = oldSlider.getX() + 5;
+			int y = oldSlider.getY() + oldSlider.getHeight() / 2;
+			assertTrue(screen.mouseClicked(x, y, 0));
+			assertTrue(screen.isDragging());
+			int oldValue = original.getSpatialSelector().getDeadzone();
+
+			Files.writeString(path, """
+				{"pingforit-version":"0.5.0-pfi-beta1","channel":"new","longPressCompatibilityMode":true,
+				 "doubleClickDangerAngleDegrees":0,"spatialSelector":{"deadzone":24}}
+				""");
+			assertFalse(handler.saveSafely(), "guarded writeback must decline the replaced file");
+			ClientConfig replacement = handler.getConfig();
+			assertNotSame(original, replacement);
+			int savesBeforeRefresh = fixture.options().saves;
+			assertFalse(screen.mouseDragged(x + 25, y, 0, 25, 0), "a drag started on the old config may not resume");
+			assertGestureCancelled(screen);
+			var newSlider = pageWidget(screen, deadzone, AbstractSliderButton.class);
+			assertNotSame(oldSlider, newSlider);
+			assertTrue(newSlider.getMessage().getString().contains("24"));
+			assertFocused(screen, newSlider);
+			assertFalse(pageWidget(screen, "spatial_selector.gesture_skip_hold_millis", AbstractSliderButton.class).active);
+			assertFalse(pageWidget(screen, "double_click_danger_angle_degrees", AbstractSliderButton.class).active);
+			assertEquals(24, replacement.getSpatialSelector().getDeadzone());
+			assertEquals(savesBeforeRefresh, fixture.options().saves, "invalidating the old tree must not replay slider edits");
+
+			int right = newSlider.getRight() - 4;
+			assertTrue(screen.mouseClicked(right, newSlider.getY() + 10, 0));
+			screen.mouseReleased(right, newSlider.getY() + 10, 0);
+			assertEquals(SpatialSelectorSettings.MAX_DEADZONE, replacement.getSpatialSelector().getDeadzone());
+			assertEquals(oldValue, original.getSpatialSelector().getDeadzone());
+
+			assertTrue(screen.keyPressed(256, 0, 0));
+			releaseEscape(screen);
+			assertSame(screen, Minecraft.getInstance().screen);
+			assertEquals(0, screen.saveAttempts, "leaf Escape is Back, not local persistence");
+			keyboardOpenCategory(screen, Category.CHANNEL_NOTICES);
+			var oldChannel = pageWidget(screen, "channel", EditBox.class);
+			assertEquals("new", oldChannel.getValue());
+			keyboardFocus(screen, oldChannel);
+			Files.writeString(path, """
+				{"pingforit-version":"0.5.0-pfi-beta1","channel":"external"}
+				""");
+			handler.load();
+			assertTrue(screen.charTyped('x', 0));
+			var newChannel = pageWidget(screen, "channel", EditBox.class);
+			assertNotSame(oldChannel, newChannel);
+			assertEquals("externalx", newChannel.getValue());
+			assertEquals("externalx", handler.getConfig().getChannel());
+			assertEquals("new", replacement.getChannel());
+		});
+	}
+
+	@Test
+	void ordinaryRootSaveFailureCanContinueAndRetryWithoutLosingDraftOrListener(@TempDir Path directory) throws Exception {
+		Path path = directory.resolve("client.json");
+		String source = """
+			{"pingforit-version":"0.5.0-pfi-beta1","pingSize":100}
+			""";
+		var failWrites = new AtomicBoolean(true);
+		var handler = loadedClientHandler(path, failWrites, source);
+		var parent = new ConfirmScreen(ignored -> {}, Component.literal("Parent"), Component.empty());
+		handler.getConfig().setPingSize(150);
+		withScreen(handler, parent, fixture -> {
+			var screen = fixture.screen();
+			var client = Minecraft.getInstance();
+			ServerSettingsModel model = editableServerOverview(screen, InventoryConfigValues.defaults());
+			model.setRateLimitText("9");
+			screen.liveConnection = true;
+			var list = optionsList(screen);
+			click(screen, primaryButton(screen, CommonComponents.GUI_DONE));
+			var first = assertInstanceOf(ConfirmScreen.class, client.screen);
+			assertEquals(1, screen.saveAttempts);
+			assertEquals(source, Files.readString(path));
+			assertTrue(screen.serverUpdates.isEmpty(), "local failure must stop before the server commit");
+			client.setLastInputType(InputType.KEYBOARD_ARROW);
+			pressEscape(first);
+			assertSame(screen, client.screen, "a fresh Escape can cancel a confirmation opened by mouse Done");
+			pressEscape(screen);
+			assertEquals(1, screen.saveAttempts, "repeats of that Escape cannot try to close the restored screen");
+			releaseEscape(screen);
+			assertSame(list, optionsList(screen));
+			assertEquals("9", model.rateLimitText());
+			assertTrue(model.dirty());
+			assertTrue(listensToPresentationState(screen));
+
+			client.setLastInputType(InputType.KEYBOARD_ARROW);
+			pressEscape(screen);
+			var second = assertInstanceOf(ConfirmScreen.class, client.screen);
+			assertSame(screenButton(second, "settings.pingforit.save_failed.continue"), second.getFocused());
+			click(second, screenButton(second, "settings.pingforit.save_failed.continue"));
+			assertSame(screen, client.screen, "mouse Continue Editing can return while the opening Escape is still held");
+			pressEscape(screen);
+			assertSame(screen, client.screen, "mouse Continue Editing must not drop the held-key fence");
+			releaseEscape(screen);
+			assertEquals(2, screen.saveAttempts);
+			assertTrue(model.dirty());
+			assertTrue(listensToPresentationState(screen));
+
+			failWrites.set(false);
+			click(screen, primaryButton(screen, CommonComponents.GUI_DONE));
+			assertSame(parent, client.screen);
+			assertEquals(3, screen.saveAttempts);
+			assertEquals(9, screen.serverUpdates.getFirst().update().rateLimit());
+			assertEquals(1, screen.serverUpdates.size(), "successful close sends exactly once and immediately returns");
+			assertFalse(listensToPresentationState(screen));
+			handler.load();
+			assertEquals(150, handler.getConfig().getPingSize());
+		});
+	}
+
+	@Test
+	void heldEscapeCannotContinueOrRetryAfterGuardedReloadUntilReleased(@TempDir Path directory) throws Exception {
+		Path path = directory.resolve("client.json");
+		var failWrites = new AtomicBoolean(true);
+		var handler = loadedClientHandler(path, failWrites, """
+			{"pingforit-version":"0.4.0-pfi-beta1","pingSize":100}
+			""");
+		ClientConfig original = handler.getConfig();
+		String replacement = """
+			{"pingforit-version":"0.5.0-pfi-beta1","pingSize":170}
+			""";
+		withScreen(handler, null, fixture -> {
+			var screen = fixture.screen();
+			var client = Minecraft.getInstance();
+			var model = editableServerOverview(screen, InventoryConfigValues.defaults());
+			model.setRateLimitText("9");
+			screen.liveConnection = true;
+			Files.writeString(path, replacement);
+			failWrites.set(false);
+
+			pressEscape(screen);
+			var dialog = assertInstanceOf(ConfirmScreen.class, client.screen);
+			assertNotSame(original, handler.getConfig(), "the guard must reload, not fail the actual writer");
+			assertEquals(170, handler.getConfig().getPingSize());
+			for (int i = 0; i < 3; i++) {
+				pressEscape(dialog);
+				assertSame(dialog, client.screen, "repeat from the opening press cannot cancel the dialog");
+			}
+			assertEquals(1, screen.saveAttempts);
+			assertTrue(screen.serverUpdates.isEmpty());
+
+			releaseEscape(dialog);
+			pressEscape(dialog);
+			assertSame(screen, client.screen, "a separate press can return to editing");
+			for (int i = 0; i < 3; i++) {
+				pressEscape(screen);
+				assertSame(screen, client.screen, "repeat from the cancelling press cannot retry the close");
+			}
+			assertEquals(1, screen.saveAttempts);
+			assertTrue(model.dirty());
+			assertTrue(screen.serverUpdates.isEmpty());
+			assertEquals(replacement, Files.readString(path));
+
+			releaseEscape(screen);
+			pressEscape(screen);
+			assertNull(client.screen, "only a new press can close once the local config is usable");
+			assertEquals(2, screen.saveAttempts);
+			assertEquals(1, screen.serverUpdates.size());
+			assertEquals(9, screen.serverUpdates.getFirst().rateLimit());
+		});
+	}
+
+	@Test
+	void confirmationDecisionIsSpentBeforeReentryAndCannotBeAppliedToAnotherDialog(@TempDir Path directory) throws Exception {
+		Path path = directory.resolve("client.json");
+		var handler = loadedClientHandler(path, new AtomicBoolean(true), """
+			{"pingforit-version":"0.5.0-pfi-beta1","pingSize":100}
+			""");
+		handler.getConfig().setPingSize(150);
+		withScreen(handler, null, fixture -> {
+			var screen = fixture.screen();
+			var client = (HeadlessMinecraft) Minecraft.getInstance();
+			var model = editableServerOverview(screen, InventoryConfigValues.defaults());
+			model.setRateLimitText("9");
+			screen.liveConnection = true;
+			click(screen, primaryButton(screen, CommonComponents.GUI_DONE));
+			var first = assertInstanceOf(ConfirmScreen.class, client.screen);
+			var firstContinue = screenButton(first, "settings.pingforit.save_failed.continue");
+			var firstExit = screenButton(first, "settings.pingforit.save_failed.exit");
+			client.beforeScreenChange = () -> {
+				assertSame(first, client.screen);
+				firstExit.onPress();
+				assertSame(first, client.screen, "the decision is already spent before a screen-change hook can reenter");
+			};
+			click(first, firstContinue);
+			assertSame(screen, client.screen);
+			assertEquals("9", model.rateLimitText());
+
+			click(screen, primaryButton(screen, CommonComponents.GUI_DONE));
+			var second = assertInstanceOf(ConfirmScreen.class, client.screen);
+			assertNotSame(first, second);
+			firstExit.onPress();
+			firstContinue.onPress();
+			assertSame(second, client.screen, "late buttons from the first dialog have no decision on the second");
+			assertEquals("9", model.rateLimitText());
+			assertTrue(model.dirty());
+			assertEquals(2, screen.saveAttempts);
+			assertTrue(screen.serverUpdates.isEmpty());
+
+			click(second, screenButton(second, "settings.pingforit.save_failed.exit"));
+			assertNull(client.screen, "the second dialog still owns its own valid decision");
+			assertFalse(model.dirty());
+			assertEquals(2, screen.saveAttempts);
+			assertTrue(screen.serverUpdates.isEmpty());
+		});
+	}
+
+	@ParameterizedTest
+	@ValueSource(booleans = {false, true})
+	void saveFailureConfirmationCanRetryVetoedNavigationWithoutAnotherSaveOrUpdate(boolean exit, @TempDir Path directory)
+		throws Exception {
+		Path path = directory.resolve("client.json");
+		var handler = loadedClientHandler(path, new AtomicBoolean(true), """
+			{"pingforit-version":"0.5.0-pfi-beta1","pingSize":100}
+			""");
+		handler.getConfig().setPingSize(150);
+		var parent = new ConfirmScreen(ignored -> {}, Component.literal("Parent"), Component.empty());
+		withScreen(handler, parent, fixture -> {
+			var screen = fixture.screen();
+			var client = (HeadlessMinecraft) Minecraft.getInstance();
+			var model = editableServerOverview(screen, InventoryConfigValues.defaults());
+			model.setRateLimitText("9");
+			screen.liveConnection = true;
+			click(screen, primaryButton(screen, CommonComponents.GUI_DONE));
+			var dialog = assertInstanceOf(ConfirmScreen.class, client.screen);
+			var exitButton = screenButton(dialog, "settings.pingforit.save_failed.exit");
+			var continueButton = screenButton(dialog, "settings.pingforit.save_failed.continue");
+
+			client.vetoNextScreenChange = true;
+			client.beforeScreenChange = () -> {
+				(exit ? continueButton : exitButton).onPress();
+				assertSame(dialog, client.screen, "a different choice cannot reenter the attempt that is being vetoed");
+			};
+			if (exit) click(dialog, exitButton);
+			else pressEscape(dialog);
+			assertSame(dialog, client.screen, "the veto keeps the same active dialog without calling removed");
+			assertTrue(model.dirty());
+			assertTrue(listensToPresentationState(screen));
+			assertEquals(1, screen.saveAttempts);
+			assertTrue(screen.serverUpdates.isEmpty());
+
+			if (exit) {
+				click(dialog, exitButton);
+				assertSame(parent, client.screen);
+				assertFalse(model.dirty(), "abandon the draft only after the successful exit");
+			} else {
+				pressEscape(dialog);
+				assertSame(dialog, client.screen, "an Escape repeat is not a fresh decision after a veto");
+				releaseEscape(dialog);
+				pressEscape(dialog);
+				assertSame(screen, client.screen);
+				pressEscape(screen);
+				assertSame(screen, client.screen, "the successful retry still transfers the Escape fence");
+				releaseEscape(screen);
+				assertEquals("9", model.rateLimitText());
+				assertTrue(model.dirty());
+			}
+			assertEquals(1, screen.saveAttempts);
+			assertTrue(screen.serverUpdates.isEmpty());
+		});
+	}
+
+	@Test
+	void resetConfirmationRetriesOnlyNavigationWhenResetAlreadyApplied(@TempDir Path directory) throws Exception {
+		Path path = directory.resolve("client.json");
+		var handler = loadedClientHandler(path, new AtomicBoolean(false), """
+			{"pingforit-version":"0.5.0-pfi-beta1","pingSize":150}
+			""");
+		ClientConfig original = handler.getConfig();
+		withScreen(handler, null, fixture -> {
+			var screen = fixture.screen();
+			var client = (HeadlessMinecraft) Minecraft.getInstance();
+			click(screen, screenButton(screen, "settings.pingforit.reset_all"));
+			var dialog = assertInstanceOf(ConfirmScreen.class, client.screen);
+			var yes = screenButton(dialog, "gui.yes");
+			client.vetoNextScreenChange = true;
+			click(dialog, yes);
+			assertSame(dialog, client.screen);
+			assertEquals(1, screen.resetAttempts);
+			ClientConfig resetConfig = handler.getConfig();
+			assertNotSame(original, resetConfig);
+			assertEquals(new ClientConfig().getPingSize(), resetConfig.getPingSize());
+			String resetFile = Files.readString(path);
+			resetConfig.setPingSize(160);
+
+			click(dialog, yes);
+			assertNotSame(screen, assertInstanceOf(SettingsScreen.class, client.screen), "retry must still recreate the session");
+			assertEquals(1, screen.resetAttempts, "retry must not apply or save the reset again");
+			assertSame(resetConfig, handler.getConfig());
+			assertEquals(160, resetConfig.getPingSize());
+			assertEquals(resetFile, Files.readString(path));
+		});
+	}
+
+	@ParameterizedTest
+	@ValueSource(strings = {"{\"pingforit-version\":\"10.0.0-pfi-beta1\"}", "broken client config"})
+	void protectedRootEscapeCanExitToNullWithoutAnotherSaveOrServerUpdate(String protectedSource, @TempDir Path directory) throws Exception {
+		Path path = directory.resolve("client.json");
+		var handler = loadedClientHandler(path, new AtomicBoolean(false), protectedSource);
+		handler.getConfig().setPingSize(150);
+		withScreen(handler, null, fixture -> {
+			var screen = fixture.screen();
+			var model = editableServerOverview(screen, InventoryConfigValues.defaults());
+			model.setRateLimitText("9");
+			screen.liveConnection = true;
+			pressEscape(screen);
+			var dialog = assertInstanceOf(ConfirmScreen.class, Minecraft.getInstance().screen);
+			releaseEscape(dialog);
+			assertEquals(1, screen.saveAttempts);
+			assertTrue(model.dirty());
+			assertTrue(listensToPresentationState(screen));
+
+			click(dialog, screenButton(dialog, "settings.pingforit.save_failed.exit"));
+			assertNull(Minecraft.getInstance().screen);
+			assertEquals(1, screen.saveAttempts, "abandoning the failed close may not attempt another save");
+			assertEquals(0, fixture.options().saves);
+			assertTrue(screen.serverUpdates.isEmpty());
+			assertFalse(model.dirty());
+			assertFalse(listensToPresentationState(screen));
+			var session = assertInstanceOf(Reference.class, getField(SettingsScreen.class, null, "currentSettingsScreen"));
+			assertNotSame(screen, session.get());
+			assertEquals(protectedSource, Files.readString(path));
+			assertEquals(150, handler.getConfig().getPingSize(), "leaving does not undo changes already in memory");
+		});
+	}
+
+	@Test
+	void successfulLocalSaveStillRoutesAnInvalidServerDraftToItsFirstField(@TempDir Path directory) throws Exception {
+		Path path = directory.resolve("client.json");
+		var handler = loadedClientHandler(path, new AtomicBoolean(false), """
+			{"pingforit-version":"0.5.0-pfi-beta1","pingSize":100}
+			""");
+		handler.getConfig().setPingSize(150);
+		withScreen(handler, null, fixture -> {
+			var screen = fixture.screen();
+			var model = editableServerOverview(screen, InventoryConfigValues.defaults());
+			model.setRateLimitText("");
+			model.setSyncDurationText("");
+			screen.liveConnection = true;
+			click(screen, primaryButton(screen, CommonComponents.GUI_DONE));
+
+			assertSame(screen, Minecraft.getInstance().screen, "invalid server input must not show the local failure dialog");
+			assertEquals(1, screen.saveAttempts);
+			assertTrue(screen.serverUpdates.isEmpty());
+			assertTrue(model.dirty());
+			assertFocused(screen, pageWidget(screen, "rate_limit", EditBox.class));
+			assertNotNull(primaryButton(screen, CommonComponents.GUI_BACK));
+			handler.load();
+			assertEquals(150, handler.getConfig().getPingSize(), "local persistence precedes server validation");
+		});
+	}
+
 	private static void cancelResetAfterReleaseOnConfirmation(SettingsScreen screen) {
 		var list = optionsList(screen);
 		@Unmodifiable List<AbstractWidget> original = widgets(screen);
@@ -354,8 +775,9 @@ class SettingsScreenInputLayoutTest {
 		var confirmation = assertInstanceOf(ConfirmScreen.class, Minecraft.getInstance().screen);
 		confirmation.mouseReleased(x, y, 0);
 		Minecraft.getInstance().setLastInputType(InputType.KEYBOARD_ARROW);
-		assertTrue(confirmation.keyPressed(256, 0, 0));
+		pressEscape(confirmation);
 		assertSame(screen, Minecraft.getInstance().screen, "Escape cancels through the real Reset callback");
+		releaseEscape(screen);
 		assertSame(list, optionsList(screen), "native Screen.init must reposition the initialized screen, not recreate it");
 		assertEquals(original, widgets(screen));
 		assertSame(reset, screen.getFocused(), "gesture cancellation must not discard the retained native focus");
@@ -368,21 +790,62 @@ class SettingsScreenInputLayoutTest {
 	}
 
 	private static ServerSettingsModel openEditablePerformance(SettingsScreen screen) throws ReflectiveOperationException {
-		screen.children().stream().filter(TabNavigationBar.class::isInstance).map(TabNavigationBar.class::cast)
-			.findFirst().orElseThrow().selectTab(1, false);
-		var field = SettingsScreen.class.getDeclaredField("serverSettings");
-		field.setAccessible(true);
-		var model = Objects.requireNonNull((ServerSettingsModel) field.get(screen));
-		// Inject the accepted permission/snapshot seam, not a connection or server transport.
-		model.setClientPermission(true);
 		var inventory = InventoryConfigValues.defaults()
 			.with(Field.DISPLAY_BYTE_MULTIPLIER, new Value(false, new BigDecimal("7.5")))
 			.with(Field.FRAME_BYTE_MULTIPLIER, new Value(false, BigDecimal.ONE));
+		var model = editableServerOverview(screen, inventory);
+		keyboardOpenCategory(screen, Category.PERFORMANCE);
+		return model;
+	}
+
+	private static void pressEscape(Screen screen) {
+		assertTrue(screen.keyPressed(GLFW_KEY_ESCAPE, 0, 0));
+	}
+
+	private static void releaseEscape(Screen screen) {
+		screen.keyReleased(GLFW_KEY_ESCAPE, 0, 0);
+	}
+
+	private static ServerSettingsModel editableServerOverview(SettingsScreen screen, InventoryConfigValues inventory)
+		throws ReflectiveOperationException {
+		screen.children().stream().filter(TabNavigationBar.class::isInstance).map(TabNavigationBar.class::cast)
+			.findFirst().orElseThrow().selectTab(1, false);
+		var model = assertInstanceOf(ServerSettingsModel.class, getField(SettingsScreen.class, screen, "serverSettings"));
+		// Inject the accepted permission/snapshot seam, not a connection or server transport.
+		model.setClientPermission(true);
 		screen.onServerConfigSnapshot(model.beginSessionIfNeeded(),
 			new ServerConfigSnapshot(true, ChannelMode.AUTO, true, 1000, 5, 30, inventory));
 		assertTrue(model.canEdit());
-		keyboardOpenCategory(screen, Category.PERFORMANCE);
 		return model;
+	}
+
+	private static ConfigHandler<ClientConfig> loadedClientHandler(Path path, AtomicBoolean failWrites, String source)
+		throws Exception {
+		Files.writeString(path, source);
+		var handler = LoggingProfileScreenTest.newClientHandler(path, failWrites);
+		handler.load();
+		return handler;
+	}
+
+	private static boolean listensToPresentationState(SettingsScreen screen) throws ReflectiveOperationException {
+		var state = CommonClient.INSTANCE.getServerPresentationPolicyState();
+		var listener = Objects.requireNonNull(getField(SettingsScreen.class, screen, "presentationPolicyListener"));
+		return assertInstanceOf(List.class, getField(ServerPresentationPolicyState.class, state, "listeners")).contains(listener);
+	}
+
+	private static Button primaryButton(SettingsScreen screen, Component caption) {
+		return screen.children().stream().filter(Button.class::isInstance).map(Button.class::cast)
+			.filter(button -> button.getMessage().equals(caption)).findFirst().orElseThrow();
+	}
+
+	private static Button screenButton(Screen screen, String translationKey) {
+		return screen.children().stream().filter(Button.class::isInstance).map(Button.class::cast)
+			.filter(button -> hasKey(button, translationKey)).findFirst().orElseThrow();
+	}
+
+	private static <T extends AbstractWidget> T pageWidget(SettingsScreen screen, String id, Class<T> widgetType) {
+		return widgets(screen).stream().filter(widgetType::isInstance).map(widgetType::cast)
+			.filter(widget -> hasKey(widget, "settings.pingforit." + id)).findFirst().orElseThrow();
 	}
 
 	private static InventorySizeOption.InventorySizeSlider sizeSlider(SettingsScreen screen, Field field) {
@@ -415,12 +878,13 @@ class SettingsScreenInputLayoutTest {
 		click(screen, button);
 	}
 
-	private static void click(SettingsScreen screen, AbstractWidget widget) {
+	private static void click(Screen screen, AbstractWidget widget) {
 		Minecraft.getInstance().setLastInputType(InputType.MOUSE);
 		double x = widget.getX() + widget.getWidth() / 2.0;
 		double y = widget.getY() + widget.getHeight() / 2.0;
 		assertTrue(screen.mouseClicked(x, y, 0));
-		screen.mouseReleased(x, y, 0);
+		@Nullable Screen releaseTarget = Minecraft.getInstance().screen;
+		if (releaseTarget != null) releaseTarget.mouseReleased(x, y, 0);
 	}
 
 	private static boolean hasKey(AbstractWidget widget, String key) {
@@ -490,6 +954,11 @@ class SettingsScreenInputLayoutTest {
 	}
 
 	private static void withScreen(ScreenCheck check) throws Exception {
+		withScreen(null, null, check);
+	}
+
+	private static void withScreen(@Nullable ConfigHandler<ClientConfig> handler, @Nullable Screen parent, ScreenCheck check)
+		throws Exception {
 		var client = allocate(HeadlessMinecraft.class);
 		client.setLastInputType(InputType.MOUSE);
 		setField(Minecraft.class, client, "running", true);
@@ -509,7 +978,7 @@ class SettingsScreenInputLayoutTest {
 		config.setPlayerInfoMode(PlayerInfoMode.HOLD);
 		config.setTeamColorMode(TeamColorMode.FULL);
 		config.teamEdits = 0;
-		var screen = new HeadlessSettingsScreen(config);
+		var screen = new HeadlessSettingsScreen(config, handler, parent);
 		var instanceField = Minecraft.class.getDeclaredField("instance");
 		instanceField.setAccessible(true);
 		@Nullable Object previousClient = instanceField.get(null);
@@ -525,7 +994,9 @@ class SettingsScreenInputLayoutTest {
 			screen.initialize(client);
 			check.run(new Fixture(screen, config, options));
 		} finally {
-			screen.removed();
+			client.beforeScreenChange = null;
+			client.vetoNextScreenChange = false;
+			client.setScreen(null);
 			currentScreenField.set(null, previousScreen);
 			Language.inject(previousLanguage);
 			CommonClient.Game = previousGame;
@@ -546,6 +1017,12 @@ class SettingsScreenInputLayoutTest {
 		field.set(instance, value);
 	}
 
+	private static @Nullable Object getField(Class<?> owner, @Nullable Object instance, String name) throws ReflectiveOperationException {
+		var field = owner.getDeclaredField(name);
+		field.setAccessible(true);
+		return field.get(instance);
+	}
+
 	@NotNullByDefault
 	@FunctionalInterface
 	private interface ScreenCheck {
@@ -558,17 +1035,69 @@ class SettingsScreenInputLayoutTest {
 
 	@NotNullByDefault
 	private static final class HeadlessSettingsScreen extends SettingsScreen {
-		private HeadlessSettingsScreen(ClientConfig config) {
-			super(config, null);
+		private final @Nullable ConfigHandler<ClientConfig> handler;
+		private final List<ServerConfigUpdateC2SPacket> serverUpdates = new ArrayList<>();
+		private boolean liveConnection;
+		private int saveAttempts;
+		private int resetAttempts;
+		private int fileOpens;
+
+		private HeadlessSettingsScreen(ClientConfig config, @Nullable ConfigHandler<ClientConfig> handler, @Nullable Screen parent) {
+			super(handler == null ? () -> config : handler::getConfig, parent);
+			this.handler = handler;
 		}
 
 		private void initialize(Minecraft client) {
 			client.setScreen(this);
 		}
+
+		@Override
+		boolean saveClientConfig() {
+			this.saveAttempts++;
+			// Exercise the real handler without publishing a channel packet to a live game.
+			@Nullable Minecraft previous = CommonClient.Game;
+			try {
+				CommonClient.Game = null;
+				return Objects.requireNonNull(this.handler).saveSafely();
+			} finally {
+				CommonClient.Game = previous;
+			}
+		}
+
+		@Override
+		void resetClientConfig() {
+			this.resetAttempts++;
+			@Nullable Minecraft previous = CommonClient.Game;
+			try {
+				CommonClient.Game = null;
+				Objects.requireNonNull(this.handler).resetToDefaults();
+			} finally {
+				CommonClient.Game = previous;
+			}
+		}
+
+		@Override
+		boolean hasLiveServerConnection() {
+			return this.liveConnection;
+		}
+
+		@Override
+		void sendServerConfigUpdate(ServerConfigUpdateC2SPacket packet) {
+			this.serverUpdates.add(packet);
+		}
+
+		@Override
+		void openClientConfigFile() {
+			assertNull(Minecraft.getInstance().screen, "the file opens only after leaving Settings");
+			this.fileOpens++;
+		}
 	}
 
 	@NotNullByDefault
 	private static final class HeadlessMinecraft extends Minecraft {
+		private @Nullable Runnable beforeScreenChange;
+		private boolean vetoNextScreenChange;
+
 		private HeadlessMinecraft() {
 			super(null);
 			throw new AssertionError("allocate without starting Minecraft");
@@ -576,6 +1105,13 @@ class SettingsScreenInputLayoutTest {
 
 		@Override
 		public void setScreen(@Nullable Screen screen) {
+			final @Nullable Runnable hook = this.beforeScreenChange;
+			final boolean veto = this.vetoNextScreenChange;
+			this.beforeScreenChange = null;
+			this.vetoNextScreenChange = false;
+			if (hook != null) hook.run();
+			// Forge/NeoForge's opening event can cancel without calling removed().
+			if (veto) return;
 			// Preserve Minecraft.setScreen's screen lifecycle, including native
 			// Screen.init's retained-instance path; omit GPU, mouse/window and title work.
 			final @Nullable Screen previous = this.screen;
@@ -662,6 +1198,27 @@ class SettingsScreenInputLayoutTest {
 				case "Takım Rengi: Yalnızca Etiketler" -> 148;
 				default -> text.codePointCount(0, text.length()) * 5;
 			};
+		}
+
+		@Override
+		public String plainSubstrByWidth(String text, int maxWidth) {
+			return this.plainSubstrByWidth(text, maxWidth, false);
+		}
+
+		@Override
+		public String plainSubstrByWidth(String text, int maxWidth, boolean reverse) {
+			// EditBox scrolls in both directions. Find the longest fitting prefix or
+			// suffix using the same measurements without splitting a surrogate pair.
+			if (maxWidth <= 0) return "";
+			int start = 0;
+			int end = text.length();
+			while (start < end) {
+				String candidate = text.substring(start, end);
+				if (this.width(candidate) <= maxWidth) return candidate;
+				if (reverse) start = text.offsetByCodePoints(start, 1);
+				else end = text.offsetByCodePoints(end, -1);
+			}
+			return "";
 		}
 
 		@Override

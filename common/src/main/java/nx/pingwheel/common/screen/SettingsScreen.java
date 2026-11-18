@@ -1,5 +1,6 @@
 package nx.pingwheel.common.screen;
 
+import it.unimi.dsi.fastutil.booleans.BooleanConsumer;
 import net.minecraft.ChatFormatting;
 import net.minecraft.Util;
 import net.minecraft.client.OptionInstance;
@@ -73,6 +74,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.BiFunction;
@@ -84,13 +86,15 @@ import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.config.ClientConfig.*;
 import static nx.pingwheel.common.config.ClientConfigBounds.*;
 import static nx.pingwheel.common.config.SpatialSelectorSettings.*;
+import static org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE;
 
 public class SettingsScreen extends OptionsSubScreen {
 	private static final long NO_REQUEST = -1L;
 	private static WeakReference<@Nullable SettingsScreen> currentSettingsScreen = new WeakReference<>(null);
 
-	private final ClientConfig config;
-	private final Supplier<ClientConfig> loggingConfigSupplier;
+	private final Supplier<ClientConfig> clientConfigSupplier;
+	// The mounted option tree and its callbacks are bound to this identity.
+	private ClientConfig config;
 	private final ServerSettingsModel serverSettings = new ServerSettingsModel(false);
 	private final SettingsNavigationModel navigation = new SettingsNavigationModel();
 	private final Map<String, AbstractWidget> keyedWidgets = new HashMap<>();
@@ -98,7 +102,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	private final TabManager tabManager;
 	private final DeferredActionCoordinator inputActions = new DeferredActionCoordinator();
 
-	private @Nullable Screen parent;
+	private final @Nullable Screen parent;
 	private @Nullable SettingsOptionsList settingsList;
 	private @Nullable TabNavigationBar scopeTabBar;
 	private @Nullable Button primaryButton;
@@ -109,12 +113,11 @@ public class SettingsScreen extends OptionsSubScreen {
 	private @Nullable EditBox serverSyncDurationField;
 	private @Nullable SettingsTitleWidget pageTitle;
 	private @Nullable StringWidget serverStatusWidget;
-	private @Nullable ClientConfig monitorPageConfig;
+	private @Nullable SettingsConfirmation confirmation;
 	private boolean serverRequestDeferred;
 	private boolean tabBarRegistered;
 	private boolean syncingScopeTab;
-	private boolean resetConfirmationHandled;
-	private boolean suppressSaveOnClose;
+	private boolean escapeAwaitingRelease;
 	private boolean dispatchingInput;
 	private boolean sizeSliderEditPending;
 	private final InventorySizeOption.AdjustmentState sizeSliderAdjustment = new InventorySizeOption.AdjustmentState();
@@ -188,42 +191,35 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	public SettingsScreen() {
-		this(ClientConfig.HANDLER.getConfig(), null, ClientConfig.HANDLER::getConfig);
+		this(null);
 	}
 
 	/** Builds the same option factories without loading a persisted client session. */
 	SettingsScreen(ClientConfig config, @Nullable Screen parent) {
-		this(config, parent, () -> config);
+		this(() -> config, parent);
 	}
 
-	/**
-	 * The logging row reads and writes the handler's current object rather than
-	 * the construction-time reference, because a guarded migration save can
-	 * reload the handler while this screen remains open. Focused tests supply
-	 * their own fixture explicitly.
-	 */
-	SettingsScreen(
-		ClientConfig config,
-		@Nullable Screen parent,
-		Supplier<ClientConfig> loggingConfigSupplier
-	) {
+	SettingsScreen(Supplier<ClientConfig> clientConfigSupplier, @Nullable Screen parent) {
 		super(null, null, LanguageUtils.settings("title").get());
-		this.config = config;
-		this.loggingConfigSupplier = java.util.Objects.requireNonNull(loggingConfigSupplier, "loggingConfigSupplier");
+		this.clientConfigSupplier = clientConfigSupplier;
+		this.config = clientConfigSupplier.get();
 		this.parent = parent;
 		this.tabManager = new NavigationTabManager(this::addRenderableWidget, this::removeWidget);
 	}
 
 	public SettingsScreen(@Nullable Screen parent) {
-		this();
-		this.parent = parent;
+		this(ClientConfig.HANDLER::getConfig, parent);
+	}
+
+	@Override
+	public void added() {
+		registerCurrent(this);
+		this.presentationPolicyState = CommonClient.INSTANCE.getServerPresentationPolicyState();
+		this.presentationPolicyState.addListener(this.presentationPolicyListener);
 	}
 
 	@Override
 	protected void init() {
-		registerCurrent(this);
-		this.presentationPolicyState = CommonClient.INSTANCE.getServerPresentationPolicyState();
-		this.presentationPolicyState.addListener(this.presentationPolicyListener);
 		this.presentationCatalogStamp = this.presentationCatalogStamp();
 		this.updatePermissionState(false);
 		this.createScopeTabs();
@@ -273,6 +269,7 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	@Override
 	public void tick() {
+		this.refreshClientConfig();
 		this.updatePermissionState(true);
 		this.refreshMonitorSection();
 		// An offer may arrive while a presentation page is open; rebuild only
@@ -293,7 +290,19 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	@Override
 	public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+		if (keyCode == GLFW_KEY_ESCAPE && this.escapeAwaitingRelease) return true;
 		return this.dispatchInput(() -> this.dispatchKeyPressed(keyCode, scanCode, modifiers));
+	}
+
+	@Override
+	public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
+		if (keyCode == GLFW_KEY_ESCAPE) this.escapeAwaitingRelease = false;
+		return this.dispatchInput(() -> super.keyReleased(keyCode, scanCode, modifiers));
+	}
+
+	@Override
+	public boolean charTyped(char character, int modifiers) {
+		return this.dispatchInput(() -> super.charTyped(character, modifiers));
 	}
 
 	@Override
@@ -302,9 +311,12 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private boolean dispatchKeyPressed(int keyCode, int scanCode, int modifiers) {
-		if (keyCode == 256 && navigation.isLeaf()) {
-			this.navigateBack();
-			return true;
+		if (keyCode == GLFW_KEY_ESCAPE) {
+			this.escapeAwaitingRelease = true;
+			if (navigation.isLeaf()) {
+				this.navigateBack();
+				return true;
+			}
 		}
 		if (navigation.isOverview() && this.scopeTabBar != null && this.scopeTabBar.keyPressed(keyCode)) {
 			return true;
@@ -318,6 +330,11 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	@Override
+	public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+		return this.dispatchInput(() -> super.mouseDragged(mouseX, mouseY, button, dragX, dragY));
+	}
+
+	@Override
 	public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
 		return this.dispatchInput(() -> super.mouseScrolled(mouseX, mouseY, scrollX, scrollY));
 	}
@@ -325,14 +342,23 @@ public class SettingsScreen extends OptionsSubScreen {
 	/** Complete native focus/callback dispatch before changing row membership, and never move a live drag. */
 	private boolean dispatchInput(Supplier<Boolean> callback) {
 		final boolean outermost = !this.dispatchingInput;
+		if (outermost) {
+			this.refreshClientConfig();
+		} else if (this.config != this.clientConfigSupplier.get()) {
+			// Let the outer input finish unwinding before replacing its widgets.
+			return false;
+		}
 		this.dispatchingInput = true;
 		try {
 			final boolean handled = this.inputActions.dispatch(callback);
 			// Keep the coordinator's queued navigation/rebuild separate from this
 			// geometry-only completion; neither may replace the other's action.
-			if (outermost && !this.isDragging() && this.minecraft != null && this.minecraft.screen == this) {
-				this.rebuildAfterSizeSliderEdit();
-				if (this.settingsList != null) this.settingsList.reflowRowsIfNeeded();
+			if (outermost && this.minecraft != null && this.minecraft.screen == this) {
+				this.refreshClientConfig();
+				if (!this.isDragging()) {
+					this.rebuildAfterSizeSliderEdit();
+					if (this.settingsList != null) this.settingsList.reflowRowsIfNeeded();
+				}
 			}
 			return handled;
 		} finally {
@@ -369,14 +395,11 @@ public class SettingsScreen extends OptionsSubScreen {
 			return;
 		}
 
-		if (this.suppressSaveOnClose) {
+		if (!this.saveClientSettings()) {
+			this.openSaveFailureConfirmation();
+		} else if (this.commitServerSettings()) {
 			this.leaveSettingsScreen();
-			return;
 		}
-		if (!this.persistSettings()) {
-			return;
-		}
-		this.leaveSettingsScreen();
 	}
 
 	@Override
@@ -385,11 +408,17 @@ public class SettingsScreen extends OptionsSubScreen {
 		// every retained gesture owner, but keep focus and draft/widget state.
 		this.setDragging(false);
 		if (this.settingsList != null) this.settingsList.cancelMouseGesture();
+		this.escapeAwaitingRelease = false;
+		// Our confirmations keep the session live while covering the page.
+		if (this.confirmation == null) this.stopListening();
+		// ClientConfig owns persistence, not the vanilla OptionsSubScreen.
+	}
+
+	private void stopListening() {
+		clearCurrent(this);
 		if (this.presentationPolicyState != null) {
 			this.presentationPolicyState.removeListener(this.presentationPolicyListener);
 		}
-		// ClientConfig owns persistence.  Do not invoke OptionsSubScreen's vanilla
-		// options save for this custom screen.
 	}
 
 	@Override
@@ -564,6 +593,11 @@ public class SettingsScreen extends OptionsSubScreen {
 			this.sizeSliderAdjustment.clear();
 		}
 		this.flushOptionWidgets();
+		final ClientConfig currentConfig = this.clientConfigSupplier.get();
+		if (this.config != currentConfig) {
+			this.setDragging(false);
+			this.config = currentConfig;
+		}
 		// Capture the live caret/selection before the widgets are cleared; the
 		// pure draft model owns the values until the fields are recreated.
 		this.savePresentationSelectorSelections();
@@ -577,7 +611,6 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.serverRateLimitField = null;
 		this.serverSyncDurationField = null;
 		this.serverStatusWidget = null;
-		this.monitorPageConfig = null;
 		this.presentationGeneralFeedbackWidget = null;
 		this.presentationSlotFeedbackWidgets.clear();
 		this.presentationSelectorFields.clear();
@@ -596,6 +629,17 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.updateChrome();
 		this.repositionElements();
 		this.restoreCurrentViewState();
+	}
+
+	private void refreshClientConfig() {
+		final ClientConfig currentConfig = this.clientConfigSupplier.get();
+		if (this.config == currentConfig) return;
+		if (this.settingsList != null && navigation.scope() == Scope.CLIENT && navigation.isLeaf()) {
+			this.rebuildPage(true);
+		} else {
+			// There are no mounted client options to replace on an overview or server page.
+			this.config = currentConfig;
+		}
 	}
 
 	/**
@@ -689,7 +733,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			return true;
 		}
 		return category.scope() == Scope.CLIENT
-			? this.loggingConfigSupplier.get().getLoggingProfile() == LoggingProfile.DEBUG
+			? this.config.getLoggingProfile() == LoggingProfile.DEBUG
 			: this.serverSettings.loggingProfile() == LoggingProfile.DEBUG;
 	}
 
@@ -700,12 +744,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		final boolean visible;
 		if (category == Category.CLIENT_DEBUG) {
 			toggle = Setting.MONITOR_HUD_ENABLED;
-			final ClientConfig current = this.loggingConfigSupplier.get();
-			visible = current.getLoggingProfile() == LoggingProfile.DEBUG;
-			if (visible && this.monitorPageConfig != current) {
-				this.rebuildPage(true);
-				return;
-			}
+			visible = this.config.getLoggingProfile() == LoggingProfile.DEBUG;
 		} else if (category == Category.SERVER_DEBUG) {
 			toggle = Setting.PREVIEW_MONITOR_ENABLED;
 			visible = this.serverSettings.canView() && this.serverSettings.loggingProfile() == LoggingProfile.DEBUG;
@@ -716,7 +755,6 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void addClientMonitorMetricRows() {
-		this.monitorPageConfig = this.loggingConfigSupplier.get();
 		final @Unmodifiable List<Metric> displayMetrics = Metric.displayMetrics();
 		for (MonitorGroup group : MONITOR_GROUPS) {
 			final @Unmodifiable List<Metric> metrics = displayMetrics.stream().filter(group::contains).toList();
@@ -733,12 +771,13 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private AbstractWidget createMonitorMetricWidget(Metric metric) {
+		final ClientConfig pageConfig = this.config;
 		final MutableComponent label = MonitorLabels.metric(metric);
 		final MutableComponent tooltip = MonitorLabels.tooltip(metric).append("\n")
 			.append(LanguageUtils.settings("monitor").path("metric", "tooltip").get());
 		final AbstractWidget widget = this.monitorBooleanWidget(label, tooltip,
-			() -> this.loggingConfigSupplier.get().getMonitorMetrics().isSelected(metric.id()),
-			selected -> this.loggingConfigSupplier.get().getMonitorMetrics().setSelected(metric.id(), selected));
+			() -> pageConfig.getMonitorMetrics().isSelected(metric.id()),
+			selected -> pageConfig.getMonitorMetrics().setSelected(metric.id(), selected));
 		// Metric choice remains editable while the HUD is off; it never gates
 		// server collection and is retained independently of HUD state.
 		widget.active = true;
@@ -1796,7 +1835,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			SettingsScreenLayout.ROW_HEIGHT,
 			LanguageUtils.settings("channel").get());
 		this.channelTextField.setMaxLength(MAX_CHANNEL_LENGTH);
-		this.channelTextField.setValue(config.getChannel());
+		this.channelTextField.setValue(Objects.requireNonNullElse(config.getChannel(), ""));
 		this.channelTextField.setHint(this.getChannelPlaceholder());
 		this.channelTextField.setTooltip(Tooltip.create(LanguageUtils.settings("channel.tooltip").get()));
 		this.channelTextField.setResponder(config::setChannel);
@@ -1816,14 +1855,14 @@ public class SettingsScreen extends OptionsSubScreen {
 	private LoggingProfileButton createLoggingProfileButton(boolean server) {
 		final Setting setting = server ? Setting.SERVER_LOGGING_PROFILE : Setting.LOGGING_PROFILE;
 		final MutableComponent label = LanguageUtils.settings(setting.id()).get();
-		final Supplier<LoggingProfile> current = () -> server
-			? this.serverSettings.loggingProfile()
-			: this.loggingConfigSupplier.get().getLoggingProfile();
+		final ClientConfig pageConfig = this.config;
+		final Supplier<LoggingProfile> current = server ? this.serverSettings::loggingProfile : pageConfig::getLoggingProfile;
 		final Consumer<LoggingProfile> select = profile -> {
 			if (server) {
 				this.serverSettings.setLoggingProfile(profile);
 			} else {
-				this.applyClientLoggingProfile(profile);
+				pageConfig.setLoggingProfile(profile);
+				Diagnostics.setProfile(DiagnosticSide.CLIENT, profile);
 			}
 			// Entering or leaving DEBUG adds or removes the monitor subgroup. Keep
 			// the structural change outside the native button callback so the
@@ -1838,11 +1877,6 @@ public class SettingsScreen extends OptionsSubScreen {
 		button.active = !server || this.serverSettings.canEdit();
 		button.setTooltip(Tooltip.create(this.loggingProfileTooltip(server)));
 		return button;
-	}
-
-	private void applyClientLoggingProfile(LoggingProfile profile) {
-		this.loggingConfigSupplier.get().setLoggingProfile(profile);
-		Diagnostics.setProfile(DiagnosticSide.CLIENT, profile);
 	}
 
 	private MutableComponent loggingProfileRowText(Component label, LoggingProfile profile) {
@@ -1886,11 +1920,8 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	private AbstractWidget createClientMonitorHudButton() {
 		final Setting setting = Setting.MONITOR_HUD_ENABLED;
-		final Supplier<ClientConfig> current = this.loggingConfigSupplier;
-		final AbstractWidget widget = this.monitorBooleanOption(
-			setting,
-			() -> current.get().isMonitorHudEnabled(),
-			enabled -> current.get().setMonitorHudEnabled(enabled));
+		final AbstractWidget widget = this.monitorBooleanOption(setting,
+			config::isMonitorHudEnabled, config::setMonitorHudEnabled);
 		// The metric preferences stay editable with the HUD off; no extra lock
 		// is introduced beyond the ordinary checkbox behavior.
 		widget.active = true;
@@ -1931,8 +1962,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			.displayOnlyValue()
 			.create(0, 0, SettingsScreenLayout.LARGE_WIDGET_WIDTH, SettingsScreenLayout.ROW_HEIGHT, label,
 				(button, ignored) -> {
-					// The handler may have replaced its config since this control was
-					// mounted. Toggle the current value, not the widget's stale copy.
+					// Toggle the model's value rather than the widget's cached caption.
 					setter.accept(!getter.get());
 					button.setValue(getter.get());
 				});
@@ -2229,26 +2259,36 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void flushOptionWidgets() {
-		if (this.settingsList != null) {
+		// Vanilla sliders can still have a delayed value to apply. Do not flush
+		// a tree that belongs to the config the handler has already replaced.
+		if (this.settingsList != null && this.config == this.clientConfigSupplier.get()) {
 			this.settingsList.applyUnsavedChanges();
 		}
 	}
 
-	boolean persistSettings() {
+	private boolean saveClientSettings() {
 		this.flushOptionWidgets();
-		// Client options are local and must be persisted even when an invalid
-		// server draft keeps this screen open.
-		return ClientConfig.HANDLER.saveSafely() && this.commitServerSettings();
+		final boolean saved = this.saveClientConfig();
+		// A guarded save can reload changed disk state yet still fail this attempt.
+		this.refreshClientConfig();
+		return saved;
+	}
+
+	boolean saveClientConfig() {
+		return ClientConfig.HANDLER.saveSafely();
 	}
 
 	private void leaveSettingsScreen() {
-		if (parent != null && this.minecraft != null) {
-			clearCurrent(this);
-			this.minecraft.setScreen(parent);
-		} else {
-			clearCurrent(this);
-			super.onClose();
-		}
+		// OptionsSubScreen.onClose would flush the list again even after a
+		// failed save. Switching directly also handles a null parent.
+		if (this.minecraft != null) this.minecraft.setScreen(this.parent);
+	}
+
+	private void openSaveFailureConfirmation() {
+		final var text = LanguageUtils.settings("save_failed");
+		this.showConfirmation(new ConfirmationDecision(() -> this.parent, this.serverSettings::resetForDisconnect),
+			text.path("title").get(), text.path("message").get(),
+			text.path("exit").get(), text.path("continue").get(), true);
 	}
 
 	private void openClientConfig() {
@@ -2260,12 +2300,15 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void performOpenClientConfig() {
-		if (this.minecraft == null || !this.persistSettings()) {
+		if (this.minecraft == null || !this.saveClientSettings() || !this.commitServerSettings()) {
 			return;
 		}
 
-		this.suppressSaveOnClose = true;
 		this.leaveSettingsScreen();
+		this.openClientConfigFile();
+	}
+
+	void openClientConfigFile() {
 		try {
 			Util.getPlatform().openFile(ClientConfig.HANDLER.getConfigPath().toFile());
 		} catch (Exception | LinkageError failure) {
@@ -2378,11 +2421,15 @@ public class SettingsScreen extends OptionsSubScreen {
 
 		final var values = update.orElseThrow();
 		this.serverSettings.markClean();
-		IPlatformNetworkService.INSTANCE.sendToServer(new ServerConfigUpdateC2SPacket(values));
+		this.sendServerConfigUpdate(new ServerConfigUpdateC2SPacket(values));
 		return true;
 	}
 
-	private boolean hasLiveServerConnection() {
+	void sendServerConfigUpdate(ServerConfigUpdateC2SPacket packet) {
+		IPlatformNetworkService.INSTANCE.sendToServer(packet);
+	}
+
+	boolean hasLiveServerConnection() {
 		return this.minecraft != null
 			&& this.minecraft.level != null
 			&& this.minecraft.player != null
@@ -2402,37 +2449,156 @@ public class SettingsScreen extends OptionsSubScreen {
 			return;
 		}
 
-		this.resetConfirmationHandled = false;
 		final MutableComponent message = LanguageUtils.settings("reset_all").path("message").get();
 		if (this.serverSettings.dirty()) {
 			message.append(" ").append(
 				LanguageUtils.settings("reset_all").path("server_draft_warning").get().withStyle(ChatFormatting.YELLOW));
 		}
-		this.minecraft.setScreen(new ConfirmScreen(
-			this::handleResetConfirmation,
+		this.showConfirmation(
+			new ConfirmationDecision(this::prepareResetScreen, null),
 			LanguageUtils.settings("reset_all").path("title").get(),
-			message));
+			message, CommonComponents.GUI_YES, CommonComponents.GUI_NO, false);
 	}
 
-	void handleResetConfirmation(boolean confirmed) {
-		if (this.resetConfirmationHandled || this.minecraft == null) {
-			return;
+	private void showConfirmation(ConfirmationDecision decision, Component title, Component message,
+		Component confirm, Component cancel, boolean preferCancel) {
+		if (this.minecraft == null || this.minecraft.screen != this) return;
+		final var dialog = new SettingsConfirmation(decision,
+			title, message, confirm, cancel, preferCancel, this.escapeAwaitingRelease);
+		this.confirmation = dialog;
+		this.minecraft.setScreen(dialog);
+		if (this.confirmation == dialog && this.minecraft.screen != dialog) {
+			// Loaders can veto or substitute the screen before invoking removed().
+			dialog.decision.dialog = null;
+			this.confirmation = null;
+			if (this.minecraft.screen != this) this.stopListening();
+		}
+	}
+
+	private void resumeAfterConfirmation(boolean escapeStillHeld) {
+		// A mouse selection can return while the opening Escape is still held,
+		// just as a new Escape in the dialog can return before its own release.
+		this.escapeAwaitingRelease = escapeStillHeld;
+		this.minecraft.setScreen(this);
+		if (this.minecraft.screen != this) this.escapeAwaitingRelease = false;
+	}
+
+	@NotNullByDefault
+	private final class ConfirmationDecision implements BooleanConsumer {
+		private final Supplier<@Nullable Screen> prepareDestination;
+		private final @Nullable Runnable afterConfirmedLeave;
+		private @Nullable SettingsConfirmation dialog;
+		private @Nullable Screen destination;
+		private boolean destinationPrepared;
+
+		private ConfirmationDecision(Supplier<@Nullable Screen> prepareDestination, @Nullable Runnable afterConfirmedLeave) {
+			this.prepareDestination = prepareDestination;
+			this.afterConfirmedLeave = afterConfirmedLeave;
 		}
 
-		this.resetConfirmationHandled = true;
-		if (confirmed) {
-			this.suppressSaveOnClose = true;
-			clearCurrent(this);
-			this.recreateAfterClientReset();
-		} else {
-			this.minecraft.setScreen(this);
+		@Override
+		public void accept(boolean confirmed) {
+			final @Nullable SettingsConfirmation owner = this.dialog;
+			if (owner == null || !this.isCurrent(owner)) return;
+			// Consume the exact dialog's decision before any screen-change hook can reenter.
+			this.dialog = null;
+			try {
+				if (confirmed) this.navigateConfirmed(owner);
+				else SettingsScreen.this.resumeAfterConfirmation(owner.escapeAwaitingRelease);
+			} finally {
+				// A loader may veto navigation without removing the active dialog. Only
+				// that same dialog can take another decision, after this attempt unwinds.
+				if (this.isCurrent(owner)) this.dialog = owner;
+			}
+		}
+
+		private void navigateConfirmed(SettingsConfirmation owner) {
+			if (!this.destinationPrepared) {
+				// Reset can change the config while preparing a new screen. A vetoed
+				// transition may retry navigation, never that side effect.
+				this.destination = this.prepareDestination.get();
+				this.destinationPrepared = true;
+			}
+			if (!this.isCurrent(owner)) return;
+			SettingsScreen.this.minecraft.setScreen(this.destination);
+			final @Nullable Screen active = SettingsScreen.this.minecraft.screen;
+			if (this.afterConfirmedLeave != null && SettingsScreen.this.confirmation == null
+				&& active != owner && active != SettingsScreen.this) {
+				this.afterConfirmedLeave.run();
+			}
+		}
+
+		private boolean isCurrent(SettingsConfirmation owner) {
+			return SettingsScreen.this.confirmation == owner && SettingsScreen.this.minecraft.screen == owner;
+		}
+	}
+
+	@NotNullByDefault
+	private final class SettingsConfirmation extends ConfirmScreen {
+		private final ConfirmationDecision decision;
+		private final boolean preferCancel;
+		private boolean escapeAwaitingRelease;
+
+		private SettingsConfirmation(ConfirmationDecision decision, Component title, Component message,
+			Component confirm, Component cancel, boolean preferCancel, boolean escapeStillHeld) {
+			super(decision, title, message, confirm, cancel);
+			this.decision = decision;
+			this.decision.dialog = this;
+			this.preferCancel = preferCancel;
+			this.escapeAwaitingRelease = escapeStillHeld;
+		}
+
+		@Override
+		public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+			if (keyCode == GLFW_KEY_ESCAPE) {
+				// Native keyPressed is also delivered for GLFW repeat events.
+				if (this.escapeAwaitingRelease) return true;
+				this.escapeAwaitingRelease = true;
+			}
+			return super.keyPressed(keyCode, scanCode, modifiers);
+		}
+
+		@Override
+		public boolean keyReleased(int keyCode, int scanCode, int modifiers) {
+			if (keyCode == GLFW_KEY_ESCAPE) this.escapeAwaitingRelease = false;
+			return super.keyReleased(keyCode, scanCode, modifiers);
+		}
+
+		@Override
+		protected void setInitialFocus() {
+			if (!this.preferCancel || !this.minecraft.getLastInputType().isKeyboard()) {
+				super.setInitialFocus();
+				return;
+			}
+			// Do not let a repeated activation key immediately select Exit Without Saving.
+			for (GuiEventListener child : this.children()) {
+				if (child instanceof Button button && button.getMessage() == this.noButton) {
+					this.setInitialFocus(button);
+					return;
+				}
+			}
+		}
+
+		@Override
+		public void removed() {
+			this.decision.dialog = null;
+			this.escapeAwaitingRelease = false;
+			if (SettingsScreen.this.confirmation == this) {
+				// End the session on external replacement too; added() reattaches on return.
+				SettingsScreen.this.confirmation = null;
+				SettingsScreen.this.stopListening();
+			}
 		}
 	}
 
 	/** Confirmed reset recreates the screen session and discards the old server draft. */
-	void recreateAfterClientReset() {
+	private SettingsScreen prepareResetScreen() {
+		this.resetClientConfig();
+		return new SettingsScreen(this.parent);
+	}
+
+	void resetClientConfig() {
 		ClientConfig.HANDLER.resetToDefaults();
-		this.minecraft.setScreen(new SettingsScreen(this.parent));
 	}
 
 	private SettingsScreenLayout getScreenLayout() {
@@ -2584,10 +2750,11 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	private OptionInstance<Boolean> getLongPressCompatibilityModeOption() {
 		final var text = LanguageUtils.settings("long_press_compatibility_mode");
+		final ClientConfig pageConfig = this.config;
 		return OptionUtils.ofBool(text.getKey(),
-			config::isLongPressCompatibilityMode,
+			pageConfig::isLongPressCompatibilityMode,
 			enabled -> {
-				config.setLongPressCompatibilityMode(enabled);
+				pageConfig.setLongPressCompatibilityMode(enabled);
 				this.inputActions.runAfterDispatch(() -> this.rebuildPage(true));
 			},
 			() -> text.path("tooltip").get());
@@ -2818,6 +2985,7 @@ public class SettingsScreen extends OptionsSubScreen {
 
 	private OptionInstance<BigDecimal> getDoubleClickDangerAngleDegreesOption() {
 		final var text = LanguageUtils.settings("double_click_danger_angle_degrees");
+		final ClientConfig pageConfig = this.config;
 		return OptionUtils.ofDecimal(text.getKey(),
 			BigDecimal.valueOf(MIN_DOUBLE_CLICK_DANGER_ANGLE_DEGREES),
 			BigDecimal.valueOf(MAX_DOUBLE_CLICK_DANGER_ANGLE_DEGREES),
@@ -2825,10 +2993,10 @@ public class SettingsScreen extends OptionsSubScreen {
 			value -> OptionUtils.decimalSettingLabel(text.getKey(), value,
 				LanguageUtils.VALUE_OFF, LanguageUtils.UNIT_DEGREES.getKey()),
 			() -> text.path("tooltip").get(),
-			() -> BigDecimal.valueOf(config.isLongPressCompatibilityMode()
+			() -> BigDecimal.valueOf(pageConfig.isLongPressCompatibilityMode()
 				? 0.0
-				: config.getDoubleClickDangerAngleDegrees()),
-			value -> config.setDoubleClickDangerAngleDegrees(value.doubleValue()));
+				: pageConfig.getDoubleClickDangerAngleDegrees()),
+			value -> pageConfig.setDoubleClickDangerAngleDegrees(value.doubleValue()));
 	}
 
 	private OptionInstance<Boolean> getSpatialInventorySelectionStayOpenEnabledOption() {
