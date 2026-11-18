@@ -191,18 +191,13 @@ public class InputUtils {
 	}
 
 	/**
-	 * Disarms the ping hold without touching the raw key state.
+	 * Disarms the ping interaction without touching the raw key state.
 	 *
-	 * <p>Called when leaving a server or when Minecraft releases all mappings
-	 * (for example on focus loss), so a held key cannot leak into the next
-	 * connection or screen. The raw Minecraft mapping state is owned by
-	 * {@link KeyMapping}; only this custom claim is cleared here.
+	 * <p>Called at a screen boundary, when leaving a server, or when Minecraft
+	 * releases all mappings (for example on focus loss), so a held key cannot
+	 * leak into the next connection or screen. The raw Minecraft mapping state is
+	 * owned by {@link KeyMapping}; only this custom claim is cleared here.
 	 */
-	public static void resetPingHold() {
-		PING_INPUT_STATE.reset();
-	}
-
-	/** Disarms the ping interaction at a screen boundary. */
 	public static void resetPingInteraction() {
 		PING_INPUT_STATE.reset();
 	}

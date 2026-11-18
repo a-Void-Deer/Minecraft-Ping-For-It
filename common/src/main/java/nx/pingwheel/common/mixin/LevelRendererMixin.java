@@ -68,8 +68,7 @@ public abstract class LevelRendererMixin {
 			RenderSystem.getModelViewMatrix(),
 			RenderSystem.getProjectionMatrix(),
 			RenderSystem.getVertexSorting(),
-			camera.getPosition(),
-			deltaTracker.getGameTimeDeltaPartialTick(true));
+			camera.getPosition());
 		CommonClient.INSTANCE.onRenderWorld(WorldRenderContext.of(modelViewMatrix, projectionMatrix, deltaTracker.getGameTimeDeltaPartialTick(true), camera));
 	}
 

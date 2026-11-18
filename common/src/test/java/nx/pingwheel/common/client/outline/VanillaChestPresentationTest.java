@@ -95,12 +95,12 @@ class VanillaChestPresentationTest {
 		var presentation = new BlockPresentationResolverRegistry().resolve(f.client, source(f, f.right));
 		var visited = new ArrayList<String>(); var state = BlockModelOutlineState.INSTANCE; state.beginFrame();
 		try {
-			state.setPresentations(List.of(presentation));
+			BlockModelOutlineTestSupport.prepare(state, presentation);
 			BlockPresentationSubjectDispatcher.dispatch(presentation, subject -> true,
 				subject -> state.addSuccess(subject.successKey(presentation.sourceSpec())), (subject, observer) -> {
 					visited.add(subject.subjectId()); return subject.subjectId().equals("left");
 				});
-			assertEquals(List.of("left", "right"), visited); assertFalse(state.allPresentationsCovered());
+			assertEquals(List.of("left", "right"), visited); assertFalse(state.allCoveredByModels());
 			assertEquals(List.of("right"), state.presentations().getFirst().renderSubjects().stream()
 				.filter(subject -> !state.successKeys().contains(subject.successKey(presentation.sourceSpec()))).map(BlockRenderSubject::subjectId).toList());
 			state.clearSuccesses();

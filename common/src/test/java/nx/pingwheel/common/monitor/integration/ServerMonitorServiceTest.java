@@ -184,13 +184,13 @@ class ServerMonitorServiceTest {
 		try (var f = new Fixture()) {
 			var tasks = new ArrayList<Runnable>();
 			MonitorPacketDispatch.server(tasks::add, f.server, f.player, f.player.connection, watch(1),
-				() -> assertTrue(f.service.subscribe(f.player, watch(1))));
+				current -> assertTrue(f.service.subscribe(current, watch(1))));
 			var respawned = player(); respawned.connection = f.player.connection;
 			f.server.players.entries.put(ID, respawned); tasks.removeFirst().run();
 			assertEquals(1, f.service.watchingConnections());
 			MonitorPacketDispatch.server(tasks::add, f.server, f.player, f.player.connection,
 				InventoryMonitorSubscribeC2SPacket.stop(2),
-				() -> assertTrue(f.service.subscribe(f.player, InventoryMonitorSubscribeC2SPacket.stop(2))));
+				current -> assertTrue(f.service.subscribe(current, InventoryMonitorSubscribeC2SPacket.stop(2))));
 			tasks.removeFirst().run(); assertEquals(0, f.service.watchingConnections());
 			assertTrue(f.service.subscribe(respawned, watch(3)));
 			f.service.disconnect(f.player);
@@ -305,21 +305,21 @@ class ServerMonitorServiceTest {
 		try (var f = new Fixture()) {
 			var tasks = new ArrayList<Runnable>();
 			MonitorPacketDispatch.server(tasks::add, f.server, f.player, f.player.connection, watch(1),
-				() -> assertTrue(f.service.subscribe(f.player, watch(1))));
+				current -> assertTrue(f.service.subscribe(current, watch(1))));
 			assertEquals(0, f.service.watchingConnections());
 			assertEquals(1, tasks.size()); tasks.removeFirst().run();
 			assertEquals(1, f.service.watchingConnections());
 
 			MonitorPacketDispatch.server(tasks::add, f.server, f.player, f.player.connection, watch(2),
-				() -> fail("old listener must not dispatch"));
+				current -> fail("old listener must not dispatch"));
 			f.player.connection = allocate(Listener.class);
 			tasks.removeFirst().run();
 			MonitorPacketDispatch.server(tasks::add, f.server, f.player, f.player.connection, watch(2),
-				() -> fail("replaced player must not dispatch"));
+				current -> fail("replaced player must not dispatch"));
 			f.server.players.entries.put(ID, player());
 			tasks.removeFirst().run();
 			MonitorPacketDispatch.server(tasks::add, f.server, f.player, f.player.connection,
-				new InventoryMonitorSubscribeC2SPacket(), () -> fail("corrupt body must not queue"));
+				new InventoryMonitorSubscribeC2SPacket(), current -> fail("corrupt body must not queue"));
 			assertTrue(tasks.isEmpty());
 		}
 	}

@@ -27,14 +27,12 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
 import org.joml.Matrix4d;
-import org.joml.Vector3d;
 
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.client.outline.EntityBlockGeometryTransform;
 import nx.pingwheel.common.client.outline.ExternalBlockFramePresentation;
 import nx.pingwheel.common.client.outline.ExternalBlockOutlineSpec;
-import nx.pingwheel.common.client.outline.ExternalBlockOutlineTransform;
 import nx.pingwheel.common.client.outline.ExternalBlockReadView;
 import nx.pingwheel.common.integration.sable.server.SableExternalBlockLocator;
 import nx.pingwheel.common.integration.sable.SableDiagnostics;
@@ -536,54 +534,6 @@ final class SableClientCompanionAccess {
 		return projected;
 	}
 
-	Optional<SableClientProvider.ExternalBlockPresentation> resolve(
-		ClientLevel parent,
-		Target.ExternalBlockTarget target,
-		float partialTick,
-		CollisionContext collisionContext
-	) throws ReflectiveOperationException {
-		if (internal == null) {
-			return Optional.empty();
-		}
-
-		SableExternalBlockLocator locator = SableExternalBlockLocator.parse(target.providerLocator())
-			.orElseThrow(() -> new IllegalArgumentException("invalid external locator"));
-		SableClientInternalAccess.Resolution resolution =
-			internal.resolve(parent, locator.subLevelId(), locator.blockPos());
-
-		if (resolution.value().isEmpty()) {
-			return Optional.empty();
-		}
-
-		SableClientInternalAccess.ResolvedSubLevel stateData = resolution.value().orElseThrow();
-		BlockState state = stateData.state();
-		ResourceLocation actualId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
-		ResourceLocation expectedId = ResourceLocation.tryParse(target.expectedBlockRegistryId());
-
-		if (actualId == null || expectedId == null || !actualId.equals(expectedId)
-			|| state.isAir() || state.getBlock() == Blocks.AIR) {
-			return Optional.empty();
-		}
-
-		if (!(stateData.subLevel() instanceof ClientSubLevelAccess clientAccess)) {
-			return Optional.empty();
-		}
-
-		Pose3dc renderPose = clientAccess.renderPose(partialTick);
-		Vec3 localCenter = new Vec3(
-			locator.x() + 0.5D, locator.y() + 0.5D, locator.z() + 0.5D);
-		Vec3 worldCenter = renderPose.transformPosition(localCenter);
-		VoxelShape shape = state.getShape(stateData.level(), locator.blockPos(), collisionContext);
-		Matrix4d poseMatrix = renderPose.bakeIntoMatrix(new Matrix4d());
-
-		if (!finite(worldCenter)) {
-			return Optional.empty();
-		}
-
-		return Optional.of(new SableClientProvider.ExternalBlockPresentation(
-			worldCenter, locator.blockPos(), state, stateData.level(), shape, poseMatrix));
-	}
-
 	/** The outline path needs the plot-owned loaded data, not a state or shape from the shared parent cache. */
 	Optional<ExternalBlockFramePresentation> resolveFramePresentation(ClientLevel parent, ExternalBlockOutlineSpec spec,
 		SableExternalBlockLocator locator, float partialTick) throws ReflectiveOperationException {
@@ -593,14 +543,15 @@ final class SableClientCompanionAccess {
 		@Nullable Pose3dc renderPose = plot.subLevel().renderPose(partialTick);
 		if (renderPose == null) return Optional.empty();
 		Matrix4d matrix = renderPose.bakeIntoMatrix(new Matrix4d());
-		if (!matrix.isFinite() || !finite(ExternalBlockOutlineTransform.worldBlockOrigin(matrix, locator.blockPos()))) {
+		BlockPos rootPos = locator.blockPos();
+		if (!matrix.isFinite() || !EntityBlockGeometryTransform.hasFiniteBlockOrigin(matrix, rootPos)) {
 			return Optional.empty();
 		}
 
 		var view = new ExternalBlockReadView(parent,
 			pos -> readPresentationMember(plot, spec, pos, chunk -> chunk.getBlockState(pos)),
 			pos -> readPresentationMember(plot, spec, pos, chunk -> presentationBlockEntity(chunk, parent, pos)));
-		return ExternalBlockFramePresentation.resolve(spec, locator.blockPos(), view, matrix);
+		return ExternalBlockFramePresentation.resolve(spec, rootPos, view, matrix);
 	}
 
 	private static @Nullable BlockEntity presentationBlockEntity(LevelChunk chunk, ClientLevel parent, BlockPos pos) {

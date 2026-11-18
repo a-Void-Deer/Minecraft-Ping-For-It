@@ -1630,8 +1630,7 @@ public final class ClientPingRuntime {
 			return SpatialOverlayRenderer.itemMenuClearance(guiWidth, guiHeight, Game.font.lineHeight, backLabelWidth, style);
 		}
 		public void resetInput() {
-			if (abortingScreenTransition) InputUtils.resetPingInteraction();
-			else InputUtils.resetPingHold();
+			InputUtils.resetPingInteraction();
 		}
 		public void applyToggle(SelectorIntent.CaptureToggle toggle, long timeMillis) { InputUtils.applySelectorToggle(toggle, timeMillis); }
 	}

@@ -44,7 +44,7 @@ class SettingsEnumOptionTest {
 			config.setTeamColorMode(TeamColorMode.FULL);
 			config.setEntityBlockRenderMode(EntityBlockRenderMode.ALL);
 			config.setCooldownFeedback(CooldownFeedbackMode.CHAT);
-			var screen = new SettingsScreen(config, null);
+			var screen = new SettingsScreen(() -> config, null);
 			assertEnum(screen.getPlayerInfoModeOption(), "settings.pingforit.player_info_mode", "Author label",
 				PlayerInfoMode.DISABLED, PlayerInfoMode.ALWAYS, PlayerInfoMode.COMPACT);
 			assertEnum(screen.getTeamColorModeOption(), "settings.pingforit.team_color_mode", "Team formatting",

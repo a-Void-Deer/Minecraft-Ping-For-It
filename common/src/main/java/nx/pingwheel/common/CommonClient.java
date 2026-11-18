@@ -184,7 +184,7 @@ public class CommonClient {
 
 		// A disconnect while the ping key is still held must not leak the
 		// armed hold into the next connection.
-		InputUtils.resetPingHold();
+		InputUtils.resetPingInteraction();
 
 		SettingsScreen.notifyServerDisconnected();
 	}
@@ -206,7 +206,7 @@ public class CommonClient {
 		}
 
 		if (Game.screen != null) {
-			abortInteractionIfActive(false);
+			abortInteractionIfActive();
 			return;
 		}
 
@@ -220,12 +220,12 @@ public class CommonClient {
 				// The runtime may have become invalid between arbitration and the
 				// client-thread capture. Do not carry the claimed raw key into a
 				// later world.
-				InputUtils.resetPingHold();
+				InputUtils.resetPingInteraction();
 			}
 		} else {
 			// A click in a menu must never arm an interaction that can leak into
 			// a later world.
-			InputUtils.resetPingHold();
+			InputUtils.resetPingInteraction();
 		}
 	}
 
@@ -247,7 +247,7 @@ public class CommonClient {
 	 * such as on focus loss. No default ping is produced.
 	 */
 	public void onInputReset() {
-		abortInteractionIfActive(true);
+		abortInteractionIfActive();
 	}
 
 	/**
@@ -266,12 +266,8 @@ public class CommonClient {
 		InputUtils.resetPingInteraction();
 	}
 
-	private void abortInteractionIfActive(boolean resetAllInputState) {
-		if (resetAllInputState) {
-			InputUtils.resetPingHold();
-		} else {
-			InputUtils.resetPingInteraction();
-		}
+	private void abortInteractionIfActive() {
+		InputUtils.resetPingInteraction();
 		// Hard lifecycle disposal also ends an idle paint tail and compatibility seed.
 		if (pingRuntime != null) pingRuntime.abort();
 	}
@@ -305,7 +301,7 @@ public class CommonClient {
 		if (Game.level == null || Game.player == null) {
 			// onTick() aborts the runtime interaction when the world disappears;
 			// this also clears the raw claim so a later join cannot inherit it.
-			InputUtils.resetPingHold();
+			InputUtils.resetPingInteraction();
 		}
 
 		if (KEY_BINDING_SETTINGS.consumeClick()) {
@@ -682,7 +678,7 @@ public class CommonClient {
 		}
 
 		if (Game.level == null || Game.player == null) {
-			InputUtils.resetPingHold();
+			InputUtils.resetPingInteraction();
 		}
 	}
 

@@ -6,6 +6,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.world.phys.Vec3;
+import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix3f;
 import org.joml.Matrix4d;
 import org.joml.Matrix4dc;
@@ -14,17 +15,13 @@ import org.joml.Vector3dc;
 import org.joml.Vector3f;
 
 /**
- * Precision-safe local-to-world transform for geometry owned by an external
- * entity/block environment.
+ * Frozen local-to-world transform for provider-scoped block outlines and
+ * embedded geometry such as Flywheel instances.
  *
  * <p>The world-space translation is evaluated in double precision and is
  * reduced by the camera before it is placed in a {@link PoseStack}. Only the
  * linear part of the transform is converted to float matrices, which keeps
  * large environment coordinates out of Minecraft's float pose matrix.</p>
- *
- * <p>This class intentionally has no dependency on an external geometry
- * provider or rendering backend. It is an inert compatibility seam for
- * callers that already have a local-to-world matrix.</p>
  */
 public final class EntityBlockGeometryTransform {
 	private final Matrix4d localToWorld;
@@ -37,12 +34,11 @@ public final class EntityBlockGeometryTransform {
 		this.normalMatrix = createNormalMatrix(this.localToWorld);
 	}
 
-	/**
-	 * Returns a copy of the captured transform. Mutating the returned matrix
-	 * cannot change this transform.
-	 */
-	public Matrix4d localToWorld() {
-		return new Matrix4d(localToWorld);
+	/** Checks the projected integer corner; even a finite matrix can overflow at this point. */
+	public static boolean hasFiniteBlockOrigin(Matrix4dc localToWorld, BlockPos blockPos) {
+		Vector3d origin = new Vector3d(blockPos.getX(), blockPos.getY(), blockPos.getZ());
+		transformPosition(localToWorld, origin);
+		return origin.isFinite();
 	}
 
 	/** Creates a fresh camera-relative pose for a block at the plot position. */
@@ -57,7 +53,7 @@ public final class EntityBlockGeometryTransform {
 	public PoseStack createPoseStack(
 		BlockPos plotBlockPos,
 		Vec3 cameraPosition,
-		Vec3 localModelOffset
+		@Nullable Vec3 localModelOffset
 	) {
 		Objects.requireNonNull(plotBlockPos, "plotBlockPos");
 		Objects.requireNonNull(cameraPosition, "cameraPosition");
@@ -67,7 +63,7 @@ public final class EntityBlockGeometryTransform {
 			plotBlockPos.getX() + effectiveOffset.x,
 			plotBlockPos.getY() + effectiveOffset.y,
 			plotBlockPos.getZ() + effectiveOffset.z);
-		transformPosition(localOrigin);
+		transformPosition(localToWorld, localOrigin);
 		localOrigin.sub(cameraPosition.x, cameraPosition.y, cameraPosition.z);
 
 		PoseStack poseStack = new PoseStack();
@@ -77,62 +73,6 @@ public final class EntityBlockGeometryTransform {
 		poseStack.last().pose().mul(linearMatrix);
 		poseStack.last().normal().mul(normalMatrix);
 		return poseStack;
-	}
-
-	/** Alias emphasizing that the returned pose is camera-relative. */
-	public PoseStack createCameraRelativePoseStack(BlockPos plotBlockPos, Vec3 cameraPosition) {
-		return createPoseStack(plotBlockPos, cameraPosition);
-	}
-
-	/** Alias for callers that use the explicit local-offset form. */
-	public PoseStack createCameraRelativePoseStack(
-		BlockPos plotBlockPos,
-		Vec3 cameraPosition,
-		Vec3 localModelOffset
-	) {
-		return createPoseStack(plotBlockPos, cameraPosition, localModelOffset);
-	}
-
-	/**
-	 * Converts a local vertex and its integer environment origin to a
-	 * camera-relative vertex. All arithmetic before the final render vertex is
-	 * performed in double precision.
-	 */
-	public Vector3f cameraRelativeVertex(
-		Vec3 localVertex,
-		BlockPos environmentOrigin,
-		Vec3 cameraPosition
-	) {
-		Objects.requireNonNull(localVertex, "localVertex");
-		Objects.requireNonNull(cameraPosition, "cameraPosition");
-		return cameraRelativeVertex(
-			new Vector3d(localVertex.x, localVertex.y, localVertex.z),
-			environmentOrigin,
-			new Vector3d(cameraPosition.x, cameraPosition.y, cameraPosition.z));
-	}
-
-	/**
-	 * JOML form of {@link #cameraRelativeVertex(Vec3, BlockPos, Vec3)} for
-	 * geometry pipelines that already use double vectors.
-	 */
-	public Vector3f cameraRelativeVertex(
-		Vector3dc localVertex,
-		BlockPos environmentOrigin,
-		Vector3dc cameraPosition
-	) {
-		return cameraRelativeVertex(localVertex, (Vec3i) environmentOrigin, cameraPosition);
-	}
-
-	/**
-	 * Integer-vector form for environment origins that are not represented by a
-	 * block position (for example, a renderer's chunk/plot origin).
-	 */
-	public Vector3f cameraRelativeVertex(
-		Vector3dc localVertex,
-		Vec3i environmentOrigin,
-		Vector3dc cameraPosition
-	) {
-		return cameraRelativeEnvironmentVertex(localVertex, environmentOrigin, cameraPosition);
 	}
 
 	/**
@@ -145,137 +85,25 @@ public final class EntityBlockGeometryTransform {
 	public Vector3f cameraRelativeEnvironmentVertex(
 		Vector3dc localVertex,
 		Vec3i environmentOrigin,
-		Vector3dc cameraPosition
+		Vec3 cameraPosition
 	) {
+		Objects.requireNonNull(cameraPosition, "cameraPosition");
 		Objects.requireNonNull(localVertex, "localVertex");
 		Objects.requireNonNull(environmentOrigin, "environmentOrigin");
-		Objects.requireNonNull(cameraPosition, "cameraPosition");
 
 		Vector3d worldPosition = new Vector3d(
 			environmentOrigin.getX() + localVertex.x(),
 			environmentOrigin.getY() + localVertex.y(),
 			environmentOrigin.getZ() + localVertex.z());
-		transformPosition(worldPosition);
-		worldPosition.sub(cameraPosition.x(), cameraPosition.y(), cameraPosition.z());
+		transformPosition(localToWorld, worldPosition);
+		worldPosition.sub(cameraPosition.x, cameraPosition.y, cameraPosition.z);
 		return new Vector3f(
 			(float) worldPosition.x,
 			(float) worldPosition.y,
 			(float) worldPosition.z);
 	}
 
-	/** Minecraft camera-position convenience form of the embedded route. */
-	public Vector3f cameraRelativeEnvironmentVertex(
-		Vector3dc localVertex,
-		Vec3i environmentOrigin,
-		Vec3 cameraPosition
-	) {
-		Objects.requireNonNull(cameraPosition, "cameraPosition");
-		return cameraRelativeEnvironmentVertex(
-			localVertex,
-			environmentOrigin,
-			new Vector3d(cameraPosition.x, cameraPosition.y, cameraPosition.z));
-	}
-
-	/** Minecraft-vector convenience form of the embedded route. */
-	public Vector3f cameraRelativeEnvironmentVertex(
-		Vec3 localVertex,
-		Vec3i environmentOrigin,
-		Vec3 cameraPosition
-	) {
-		Objects.requireNonNull(localVertex, "localVertex");
-		Objects.requireNonNull(cameraPosition, "cameraPosition");
-		return cameraRelativeEnvironmentVertex(
-			new Vector3d(localVertex.x, localVertex.y, localVertex.z),
-			environmentOrigin,
-			new Vector3d(cameraPosition.x, cameraPosition.y, cameraPosition.z));
-	}
-
-	/** Convenience JOML-vector form with a Minecraft camera position. */
-	public Vector3f cameraRelativeVertex(
-		Vector3dc localVertex,
-		BlockPos environmentOrigin,
-		Vec3 cameraPosition
-	) {
-		Objects.requireNonNull(cameraPosition, "cameraPosition");
-		return cameraRelativeEnvironmentVertex(
-			localVertex,
-			(Vec3i) environmentOrigin,
-			new Vector3d(cameraPosition.x, cameraPosition.y, cameraPosition.z));
-	}
-
-	/** JOML-vector form with a Minecraft camera position and integer origin. */
-	public Vector3f cameraRelativeVertex(
-		Vector3dc localVertex,
-		Vec3i environmentOrigin,
-		Vec3 cameraPosition
-	) {
-		Objects.requireNonNull(cameraPosition, "cameraPosition");
-		return cameraRelativeEnvironmentVertex(
-			localVertex,
-			environmentOrigin,
-			new Vector3d(cameraPosition.x, cameraPosition.y, cameraPosition.z));
-	}
-
-	/** Minecraft-vector convenience overload for a general integer origin. */
-	public Vector3f cameraRelativeVertex(
-		Vec3 localVertex,
-		Vec3i environmentOrigin,
-		Vec3 cameraPosition
-	) {
-		Objects.requireNonNull(localVertex, "localVertex");
-		Objects.requireNonNull(cameraPosition, "cameraPosition");
-		return cameraRelativeEnvironmentVertex(
-			new Vector3d(localVertex.x, localVertex.y, localVertex.z),
-			environmentOrigin,
-			new Vector3d(cameraPosition.x, cameraPosition.y, cameraPosition.z));
-	}
-
-	/** Returns the converted vertex using a name common to geometry adapters. */
-	public Vector3f transformVertex(
-		Vector3dc localVertex,
-		BlockPos environmentOrigin,
-		Vector3dc cameraPosition
-	) {
-		return cameraRelativeVertex(localVertex, environmentOrigin, cameraPosition);
-	}
-
-	/** Minecraft-vector convenience overload of {@link #transformVertex}. */
-	public Vector3f transformVertex(
-		Vec3 localVertex,
-		BlockPos environmentOrigin,
-		Vec3 cameraPosition
-	) {
-		return cameraRelativeVertex(localVertex, environmentOrigin, cameraPosition);
-	}
-
-	/** Integer-vector convenience overload of {@link #transformVertex}. */
-	public Vector3f transformVertex(
-		Vector3dc localVertex,
-		Vec3i environmentOrigin,
-		Vector3dc cameraPosition
-	) {
-		return cameraRelativeVertex(localVertex, environmentOrigin, cameraPosition);
-	}
-
-	/** Integer-vector convenience overload with a Minecraft camera position. */
-	public Vector3f transformVertex(
-		Vector3dc localVertex,
-		Vec3i environmentOrigin,
-		Vec3 cameraPosition
-	) {
-		return cameraRelativeVertex(localVertex, environmentOrigin, cameraPosition);
-	}
-
-	/** Minecraft-vector convenience overload for an integer environment origin. */
-	public Vector3f transformVertex(
-		Vec3 localVertex,
-		Vec3i environmentOrigin,
-		Vec3 cameraPosition
-	) {
-		return cameraRelativeVertex(localVertex, environmentOrigin, cameraPosition);
-	}
-
-	private void transformPosition(Vector3d position) {
+	private static void transformPosition(Matrix4dc localToWorld, Vector3d position) {
 		double x = position.x;
 		double y = position.y;
 		double z = position.z;

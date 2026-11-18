@@ -194,11 +194,6 @@ public class SettingsScreen extends OptionsSubScreen {
 		this(null);
 	}
 
-	/** Builds the same option factories without loading a persisted client session. */
-	SettingsScreen(ClientConfig config, @Nullable Screen parent) {
-		this(() -> config, parent);
-	}
-
 	SettingsScreen(Supplier<ClientConfig> clientConfigSupplier, @Nullable Screen parent) {
 		super(null, null, LanguageUtils.settings("title").get());
 		this.clientConfigSupplier = clientConfigSupplier;

@@ -107,8 +107,11 @@ class BlockOutlineRenderTypeTest {
 			invocationIndex(
 				methodInvocations("nx.pingwheel.common.mixin.LevelRendererMixin", "onStartRenderLevel"),
 				"nx/pingwheel/common/client/outline/BlockOutlineFrameState",
-				"capture") >= 0,
-				"world start hook must capture the applied frame transform");
+				"capture",
+				"(Lorg/joml/Matrix4f;Lorg/joml/Matrix4f;"
+					+ "Lcom/mojang/blaze3d/vertex/VertexSorting;"
+					+ "Lnet/minecraft/world/phys/Vec3;)V") >= 0,
+			"world start hook must capture the applied world transform without a tick-derived argument");
 		assertEquals(
 			-1,
 			invocationIndex(

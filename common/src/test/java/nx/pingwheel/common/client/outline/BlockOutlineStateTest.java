@@ -116,10 +116,9 @@ class BlockOutlineStateTest {
 
 		state.prepare(storeWithWinner(5L, target, "go_to"), OVERWORLD);
 
-		assertEquals(new MarkerId(5L), state.specFor(keyAt(1, 2, 3)).markerId());
-		assertEquals(0xFF4DB8FF, state.colorFor(keyAt(1, 2, 3)));
-		assertNull(state.specFor(keyAt(4, 5, 6)));
-		assertEquals(0, state.colorFor(keyAt(4, 5, 6)));
+		assertEquals(new MarkerId(5L), state.snapshot().get(keyAt(1, 2, 3)).markerId());
+		assertEquals(0xFF4DB8FF, state.snapshot().get(keyAt(1, 2, 3)).argbColor());
+		assertNull(state.snapshot().get(keyAt(4, 5, 6)));
 	}
 
 	@Test
@@ -164,12 +163,12 @@ class BlockOutlineStateTest {
 		store.onWinnerChanged(key, Optional.of(new MarkerId(1L)));
 
 		state.prepare(store, OVERWORLD);
-		assertEquals(0xFFFFC247, state.colorFor(keyAt(1, 2, 3)));
+		assertEquals(0xFFFFC247, state.snapshot().get(keyAt(1, 2, 3)).argbColor());
 
 		store.onWinnerChanged(key, Optional.of(new MarkerId(2L)));
 
 		state.prepare(store, OVERWORLD);
-		assertEquals(0xFF52D273, state.colorFor(keyAt(1, 2, 3)));
+		assertEquals(0xFF52D273, state.snapshot().get(keyAt(1, 2, 3)).argbColor());
 		assertEquals(new Transition(0, 0, 1, 1), transitions.get(1));
 	}
 
@@ -182,8 +181,8 @@ class BlockOutlineStateTest {
 		state.prepare(storeWithWinner(5L, blockTarget(1, 2, 3), "attention"), OVERWORLD);
 		state.clear();
 
-		assertNull(state.specFor(keyAt(1, 2, 3)));
-		assertEquals(0, state.colorFor(keyAt(1, 2, 3)));
+		assertNull(state.snapshot().get(keyAt(1, 2, 3)));
+		assertTrue(state.snapshot().isEmpty());
 		assertEquals(List.of(
 			new Transition(1, 0, 0, 1),
 			new Transition(0, 1, 0, 0)
@@ -203,7 +202,7 @@ class BlockOutlineStateTest {
 		state.prepare(null, OVERWORLD);
 		state.prepare(storeWithWinner(5L, blockTarget(1, 2, 3), "attention"), null);
 
-		assertNull(state.specFor(keyAt(1, 2, 3)));
+		assertNull(state.snapshot().get(keyAt(1, 2, 3)));
 		assertTrue(state.snapshot().isEmpty());
 		assertEquals(List.of(
 			new Transition(1, 0, 0, 1),

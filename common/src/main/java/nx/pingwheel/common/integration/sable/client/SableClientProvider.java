@@ -9,17 +9,12 @@ import nx.pingwheel.common.diagnostics.DiagnosticSide;
 import nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Stage;
 
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
-import org.joml.Matrix4d;
-import org.joml.Matrix4f;
 
 import nx.pingwheel.common.domain.Target;
-import nx.pingwheel.common.client.outline.ExternalBlockOutlineTransform;
 import nx.pingwheel.common.client.outline.ExternalBlockFramePresentation;
 import nx.pingwheel.common.client.outline.ExternalBlockOutlineSpec;
 import nx.pingwheel.common.integration.IntegrationLinkGuard;
@@ -236,17 +231,6 @@ public final class SableClientProvider {
 		}
 	}
 
-	/**
-	 * Resolves a committed external block using an empty collision context. The
-	 * result is used by marker icon/label presentation, where only the current
-	 * smooth world center is needed.
-	 */
-	public static Optional<ExternalBlockPresentation> resolvePresentation(
-		ClientLevel level, Target.ExternalBlockTarget target, float partialTick
-	) {
-		return resolvePresentation(level, target, partialTick, CollisionContext.empty());
-	}
-
 	/** Binds one external winner's outline subjects before the model and shape passes. */
 	public static Optional<ExternalBlockFramePresentation> resolveFramePresentation(
 		ClientLevel level, ExternalBlockOutlineSpec spec, float partialTick
@@ -307,52 +291,6 @@ public final class SableClientProvider {
 			return Optional.empty();
 		} catch (LinkageError failure) {
 			logPresentationException("resolve-position", failure, "target", target);
-			LINK_GUARD.disableSilently();
-			return Optional.empty();
-		}
-	}
-
-	/**
-	 * Resolves a committed external block and its current native shape in the
-	 * actual sub-level context. The render path supplies the live camera
-	 * collision context; no main-level state is consulted.
-	 */
-	public static Optional<ExternalBlockPresentation> resolvePresentation(
-		ClientLevel level,
-		Target.ExternalBlockTarget target,
-		float partialTick,
-		CollisionContext collisionContext
-	) {
-		if (!enabled()) {
-			return Optional.empty();
-		}
-
-		if (level == null || target == null || collisionContext == null
-			|| !PROVIDER_ID.equals(target.providerId()) || !target.isCommitted()) {
-			logPresentationFailure("resolve-presentation", "invalid-target", "target", target);
-			return Optional.empty();
-		}
-
-		if (SableExternalBlockLocator.parse(target.providerLocator()).isEmpty()) {
-			logPresentationFailure(
-				"resolve-presentation", "provider-locator-parse-failure",
-				"target", target,
-				"provider_locator", target.providerLocator());
-			return Optional.empty();
-		}
-
-		try {
-			Optional<ExternalBlockPresentation> result =
-				getAccess().resolve(level, target, partialTick, collisionContext);
-			if (result.isEmpty()) {
-				logPresentationFailure("resolve-presentation", "provider-unavailable", "target", target);
-			}
-			return result;
-		} catch (ReflectiveOperationException | RuntimeException failure) {
-			logPresentationException("resolve-presentation", failure, "target", target);
-			return Optional.empty();
-		} catch (LinkageError failure) {
-			logPresentationException("resolve-presentation", failure, "target", target);
 			LINK_GUARD.disableSilently();
 			return Optional.empty();
 		}
@@ -582,42 +520,5 @@ public final class SableClientProvider {
 		System.arraycopy(first, 0, result, 0, first.length);
 		System.arraycopy(second, 0, result, first.length, second.length);
 		return result;
-	}
-
-	/** Immutable render data resolved from the live Sable sub-level. */
-	public record ExternalBlockPresentation(
-		Vec3 worldCenter,
-		BlockPos localBlockPos,
-		net.minecraft.world.level.block.state.BlockState blockState,
-		ClientLevel localLevel,
-		VoxelShape shape,
-		Matrix4d renderPose
-	) {
-		public ExternalBlockPresentation {
-			Objects.requireNonNull(worldCenter, "worldCenter");
-			Objects.requireNonNull(localBlockPos, "localBlockPos");
-			Objects.requireNonNull(blockState, "blockState");
-			Objects.requireNonNull(localLevel, "localLevel");
-			Objects.requireNonNull(shape, "shape");
-			Objects.requireNonNull(renderPose, "renderPose");
-			renderPose = new Matrix4d(renderPose);
-		}
-
-		/** The transformed integer-corner origin, kept in double precision. */
-		public Vec3 worldBlockOrigin() {
-			return ExternalBlockOutlineTransform.worldBlockOrigin(
-				renderPose, localBlockPos);
-		}
-
-		/** The transformed model origin, including the live local-state offset. */
-		public Vec3 worldBlockOrigin(Vec3 modelOffset) {
-			return ExternalBlockOutlineTransform.worldBlockOrigin(
-				renderPose, localBlockPos, modelOffset);
-		}
-
-		/** The pose's orientation and non-uniform scale, without translation. */
-		public Matrix4f orientationScale() {
-			return ExternalBlockOutlineTransform.orientationScale(renderPose);
-		}
 	}
 }

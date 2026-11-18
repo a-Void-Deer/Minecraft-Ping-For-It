@@ -32,11 +32,20 @@ class BlockPresentationContextTest {
 			resolvers.register(BlockPresentationResolver.of("test:never-unloaded", ignored -> {
 				calls.incrementAndGet(); return BlockPresentationResolution.UNHANDLED;
 			}));
+			var fallback = resolvers.resolve(context);
+			if (context.sourceBlockMatches()) {
+				assertEquals(1, fallback.renderSubjects().size());
+				assertEquals(BlockPresentationRelation.DIRECT, fallback.renderSubjects().getFirst().relation());
+			} else {
+				assertTrue(fallback.renderSubjects().isEmpty());
+			}
+			int callsBeforeUnavailable = calls.get();
 			f.unavailable.add(f.left);
 			assertSame(Blocks.AIR.defaultBlockState(), context.sourceState());
+			assertTrue(context.directResolution().subjects().isEmpty());
 			assertTrue(resolvers.resolve(context).renderSubjects().isEmpty());
-			assertTrue(resolvers.resolveDirect(context).renderSubjects().isEmpty());
-			assertEquals(0, calls.get()); assertEquals(0, f.ordinaryClientReads); assertEquals(0, f.blockEntities);
+			assertEquals(callsBeforeUnavailable, calls.get());
+			assertEquals(0, f.ordinaryClientReads); assertEquals(0, f.blockEntities);
 		}
 	}
 
@@ -45,11 +54,14 @@ class BlockPresentationContextTest {
 		var source = new BlockOutlineSpec(new MarkerId(1), new TargetKey.BlockKey("minecraft:overworld",
 			f.left.getX(), f.left.getY(), f.left.getZ(), "create:fluid_tank"), "entity_block", "attention", 0xFF123456);
 		var resolvers = new BlockPresentationResolverRegistry(false);
+		var calls = new AtomicInteger();
 		resolvers.register(BlockPresentationResolver.of("test:metadata", ignored -> {
-			fail("registry mismatch must precede optional metadata"); return BlockPresentationResolution.UNHANDLED;
+			calls.incrementAndGet(); return BlockPresentationResolution.UNHANDLED;
 		}));
-		assertTrue(resolvers.resolve(f.client, source).renderSubjects().isEmpty());
-		assertTrue(resolvers.resolveDirect(f.client, source).renderSubjects().isEmpty());
+		var context = new BlockPresentationContext(f.client, source);
+		assertTrue(context.directResolution().subjects().isEmpty());
+		assertTrue(resolvers.resolve(context).renderSubjects().isEmpty());
+		assertEquals(0, calls.get(), "registry mismatch must precede optional metadata");
 		assertEquals(0, f.ordinaryClientReads); assertEquals(0, f.blockEntities);
 	}
 }

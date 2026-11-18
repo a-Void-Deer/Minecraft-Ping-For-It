@@ -58,7 +58,7 @@ public final class ExternalBlockFramePresentation {
 		var localKey = new TargetKey.BlockKey(spec.blockKey().dimensionId(), rootPos.getX(), rootPos.getY(),
 			rootPos.getZ(), spec.target().expectedBlockRegistryId());
 		var resolverSpec = new BlockOutlineSpec(spec.markerId(), localKey, spec.targetTypeId(), spec.pingTypeId(), spec.argbColor());
-		var presentation = registry.resolveExternal(new BlockPresentationContext(view, resolverSpec));
+		var presentation = registry.resolve(new BlockPresentationContext(view, resolverSpec));
 		return Optional.of(new ExternalBlockFramePresentation(spec, view, transform, presentation));
 	}
 

@@ -145,6 +145,11 @@ public final class BlockModelOutlineState {
 			spec -> SableClientProvider.resolveFramePresentation(level, spec, renderPartialTick));
 	}
 
+	/**
+	 * Resolves and publishes both snapshots in one place, then marks the frame
+	 * prepared. A later prepare in the same frame is a no-op, so the ordinary
+	 * and external render passes cannot observe different resolutions.
+	 */
 	void preparePresentations(Collection<BlockOutlineSpec> ordinarySpecs, Collection<ExternalBlockOutlineSpec> externalSpecs,
 		Function<BlockOutlineSpec, BlockPresentation> ordinaryResolver,
 		Function<ExternalBlockOutlineSpec, Optional<ExternalBlockFramePresentation>> externalResolver) {
@@ -152,17 +157,18 @@ public final class BlockModelOutlineState {
 			return;
 		}
 
-		List<BlockPresentation> next = new ArrayList<>(ordinarySpecs.size());
+		List<BlockPresentation> nextOrdinary = new ArrayList<>(ordinarySpecs.size());
 		for (BlockOutlineSpec sourceSpec : ordinarySpecs) {
-			next.add(ordinaryResolver.apply(sourceSpec));
+			nextOrdinary.add(ordinaryResolver.apply(sourceSpec));
 		}
 		List<ExternalBlockFramePresentation> nextExternal = new ArrayList<>(externalSpecs.size());
 		for (ExternalBlockOutlineSpec spec : externalSpecs) {
 			externalResolver.apply(spec).ifPresent(nextExternal::add);
 		}
-		externalPresentations = List.copyOf(nextExternal);
 
-		setPresentations(next);
+		presentations = List.copyOf(nextOrdinary);
+		externalPresentations = List.copyOf(nextExternal);
+		presentationsPrepared = true;
 	}
 
 	private static BlockPresentation resolveOrdinary(ClientLevel level, BlockOutlineSpec sourceSpec) {
@@ -181,22 +187,11 @@ public final class BlockModelOutlineState {
 	}
 
 	/**
-	 * Installs the immutable ordinary presentation snapshot for the current
-	 * frame. This is also a focused-test seam; production uses
-	 * {@link #preparePresentations(ClientLevel, BlockOutlineState, float)}.
-	 */
-	public void setPresentations(List<BlockPresentation> nextPresentations) {
-		Objects.requireNonNull(nextPresentations, "nextPresentations");
-		presentations = List.copyOf(nextPresentations);
-		presentationsPrepared = true;
-	}
-
-	/**
 	 * Returns whether every subject in the current ordinary snapshot emitted
 	 * model geometry this frame. Empty presentations and empty subject lists are
 	 * intentionally vacuously covered.
 	 */
-	public boolean allPresentationsCovered() {
+	private boolean allOrdinaryCovered() {
 		Set<BlockPresentationSuccessKey> succeeded = successKeys();
 		for (BlockPresentation presentation : presentations) {
 			for (BlockRenderSubject subject : presentation.renderSubjects()) {
@@ -211,10 +206,11 @@ public final class BlockModelOutlineState {
 
 	/**
 	 * Checks ordinary subject coverage and the external snapshot together. This
-	 * is the early-out seam used by the late fallback caller.
+	 * is the only whole-frame coverage query and the early-out seam used by the
+	 * late fallback caller.
 	 */
 	public boolean allCoveredByModels() {
-		if (!allPresentationsCovered()) return false;
+		if (!allOrdinaryCovered()) return false;
 		for (ExternalBlockFramePresentation external : externalPresentations) {
 			if (!external.allCoveredBy(externalSuccessAccumulator)) return false;
 		}
@@ -249,8 +245,8 @@ public final class BlockModelOutlineState {
 	}
 
 	/**
-	 * Drops the per-frame success record (used when leaving a server); the
-	 * next frame starts fresh via {@link #beginFrame()}.
+	 * Drops the per-frame presentation and success record (used when leaving a
+	 * server); the next frame starts fresh via {@link #beginFrame()}.
 	 */
 	public void clear() {
 		beginFrame();

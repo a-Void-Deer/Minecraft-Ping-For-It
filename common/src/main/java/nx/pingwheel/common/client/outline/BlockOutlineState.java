@@ -133,30 +133,13 @@ public final class BlockOutlineState {
 	}
 
 	/**
-	 * The outline spec for {@code blockKey}, or {@code null} when the block
-	 * currently has no outline.
-	 */
-	public BlockOutlineSpec specFor(TargetKey.BlockKey blockKey) {
-		return specs.get(blockKey);
-	}
-
-	/**
-	 * The fully opaque ARGB outline color for {@code blockKey}, or {@code 0}
-	 * when the block currently has no outline.
-	 */
-	public int colorFor(TargetKey.BlockKey blockKey) {
-		BlockOutlineSpec spec = specs.get(blockKey);
-
-		return spec == null ? 0 : spec.argbColor();
-	}
-
-	/**
 	 * The current snapshot as an unmodifiable map whose iteration order is the
 	 * ascending {@link nx.pingwheel.common.domain.MarkerId} order produced by
-	 * {@link BlockOutlineSelection#select}.
+	 * {@link BlockOutlineSelection#select}. Each spec retains its winner's
+	 * fully opaque ARGB outline color.
 	 *
-	 * <p>Mainly a test and presentation-resolution seam: production callers
-	 * query per block via {@link #specFor} and {@link #colorFor}.
+	 * <p>This immutable snapshot is the presentation-resolution and test seam;
+	 * the render passes consume it through the prepared frame snapshot.
 	 */
 	public Map<TargetKey.BlockKey, BlockOutlineSpec> snapshot() {
 		return specs;

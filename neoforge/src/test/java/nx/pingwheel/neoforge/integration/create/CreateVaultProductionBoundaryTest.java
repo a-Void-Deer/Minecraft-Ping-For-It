@@ -211,7 +211,7 @@ class CreateVaultProductionBoundaryTest {
 					var batch = models.presentations(); assertEquals(12, batch.getFirst().renderSubjects().size()); assertTrue(batch.getFirst().coverageRelations().isEmpty());
 					var presentation = batch.getFirst(); var controller = presentation.renderSubjects().getFirst();
 					models.addSuccess(controller.successKey(presentation.sourceSpec()));
-					assertFalse(models.allPresentationsCovered()); assertEquals(1, models.successKeys().size());
+					assertFalse(models.allCoveredByModels()); assertEquals(1, models.successKeys().size());
 					for (var sibling : presentation.renderSubjects().subList(1, 12)) assertFalse(models.successKeys().contains(sibling.successKey(presentation.sourceSpec())));
 					f.entities.remove(BlockPos.ZERO); models.preparePresentations(f.client, outline, 0); assertSame(batch, models.presentations());
 					models.beginFrame(); models.preparePresentations(f.client, outline, 0); assertEquals(1, models.presentations().getFirst().renderSubjects().size());

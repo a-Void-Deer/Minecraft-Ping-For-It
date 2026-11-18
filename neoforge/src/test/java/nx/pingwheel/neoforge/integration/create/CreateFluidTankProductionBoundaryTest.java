@@ -271,7 +271,7 @@ class CreateFluidTankProductionBoundaryTest {
 							visited.add(subject.blockPos()); return !subject.blockPos().equals(missingModel);
 						});
 					assertEquals(presentation.renderSubjects().stream().map(BlockRenderSubject::blockPos).toList(), visited);
-					assertFalse(models.allPresentationsCovered());
+					assertFalse(models.allCoveredByModels());
 					assertEquals(List.of(missingModel), presentation.renderSubjects().stream().filter(s -> !models.successKeys().contains(s.successKey(presentation.sourceSpec()))).map(BlockRenderSubject::blockPos).toList());
 					fixture.renderReads = true; var vertices = new Vertices();
 					BlockOutlineRenderer.render(fixture.client, allocate(net.minecraft.client.Camera.class), net.minecraft.world.phys.Vec3.ZERO,

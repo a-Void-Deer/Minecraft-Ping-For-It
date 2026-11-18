@@ -26,11 +26,10 @@ public final class BlockOutlineFrameState {
 		Matrix4f modelViewMatrix,
 		Matrix4f projectionMatrix,
 		VertexSorting vertexSorting,
-		Vec3 cameraPosition,
-		float partialTick
+		Vec3 cameraPosition
 	) {
 		this.frame = new FrameTransform(
-			modelViewMatrix, projectionMatrix, vertexSorting, cameraPosition, partialTick);
+			modelViewMatrix, projectionMatrix, vertexSorting, cameraPosition);
 	}
 
 	/**
@@ -151,21 +150,18 @@ public final class BlockOutlineFrameState {
 		private final Matrix4f projectionMatrix;
 		private final VertexSorting vertexSorting;
 		private final Vec3 cameraPosition;
-		private final float partialTick;
 
 		private FrameTransform(
 			Matrix4f modelViewMatrix,
 			Matrix4f projectionMatrix,
 			VertexSorting vertexSorting,
-			Vec3 cameraPosition,
-			float partialTick
+			Vec3 cameraPosition
 		) {
 			this.modelViewMatrix = new Matrix4f(Objects.requireNonNull(modelViewMatrix, "modelViewMatrix"));
 			this.projectionMatrix = new Matrix4f(Objects.requireNonNull(projectionMatrix, "projectionMatrix"));
 			this.vertexSorting = Objects.requireNonNull(vertexSorting, "vertexSorting");
 			Vec3 position = Objects.requireNonNull(cameraPosition, "cameraPosition");
 			this.cameraPosition = new Vec3(position.x, position.y, position.z);
-			this.partialTick = partialTick;
 		}
 
 		public Matrix4f modelViewMatrix() {
@@ -182,10 +178,6 @@ public final class BlockOutlineFrameState {
 
 		public Vec3 cameraPosition() {
 			return new Vec3(this.cameraPosition.x, this.cameraPosition.y, this.cameraPosition.z);
-		}
-
-		public float partialTick() {
-			return this.partialTick;
 		}
 	}
 }

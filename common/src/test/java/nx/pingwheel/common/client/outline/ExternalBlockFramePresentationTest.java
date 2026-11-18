@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 import com.mojang.blaze3d.vertex.VertexConsumer;
@@ -41,6 +42,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.joml.Matrix4d;
+import org.joml.Vector3d;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -125,7 +127,7 @@ class ExternalBlockFramePresentationTest {
 			var secondPresentation = snapshots.getLast();
 			var firstModelOrigins = new ArrayList<Vec3>();
 			firstPresentation.dispatchModels(frame, (subject, observer) -> {
-				var origin = firstPresentation.transform().cameraRelativeVertex(Vec3.ZERO, subject.blockPos(), camera);
+				var origin = firstPresentation.transform().cameraRelativeEnvironmentVertex(new Vector3d(), subject.blockPos(), camera);
 				firstModelOrigins.add(new Vec3(origin.x, origin.y, origin.z));
 				return subject.blockPos().equals(pos);
 			});
@@ -175,8 +177,12 @@ class ExternalBlockFramePresentationTest {
 		Pair pair = door();
 		var plot = new Plot(pair.states());
 		var registry = new BlockPresentationResolverRegistry();
+		var ordinaryOnlyCalls = new AtomicInteger();
 		assertTrue(registry.registerBefore(VanillaDoorBlockPresentationResolver.ID,
-			BlockPresentationResolver.of("test:ordinary_only", context -> fail("ordinary-only lookup must not run"))).accepted());
+			BlockPresentationResolver.of("test:ordinary_only", context -> {
+				ordinaryOnlyCalls.incrementAndGet();
+				return BlockPresentationResolution.UNHANDLED;
+			})).accepted());
 		assertTrue(registry.registerBefore(VanillaDoorBlockPresentationResolver.ID,
 			new ScopedResolver("test:door_ber", context -> {
 				var pairResolution = new VanillaDoorBlockPresentationResolver().resolve(context);
@@ -188,6 +194,7 @@ class ExternalBlockFramePresentationTest {
 		try {
 			frame.beginFrame();
 			var presentation = ExternalBlockFramePresentation.resolve(spec, pair.secondPos(), plot.view, new Matrix4d(), registry).orElseThrow();
+			assertEquals(0, ordinaryOnlyCalls.get(), "ordinary-only resolver must not run for an external read view");
 			for (String source : List.of(BAKED, BER)) {
 				frame.clearSuccesses();
 				List<String> attempted = new ArrayList<>();
