@@ -38,6 +38,7 @@
 		"ClientLevelPreviewAccessor",
 		"BlockStatePredictionPreviewAccessor",
 		"KeyMappingMixin",
+		"KeyboardHandlerMixin",
 		"MouseHandlerMixin",
 		"MinecraftMixin",
 		"GameRendererMixin",

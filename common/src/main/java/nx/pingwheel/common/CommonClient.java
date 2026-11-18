@@ -200,7 +200,6 @@ public class CommonClient {
 		// physical event timestamp, not the later tick/frame time.
 		long eventTimeMillis = INTERACTION_TIME_SOURCE.nowMillis();
 		Game = Minecraft.getInstance();
-		InputUtils.handleToggleClick(rawKey, eventTimeMillis);
 
 		if (!InputUtils.claimPingClick(rawKey)) {
 			return;

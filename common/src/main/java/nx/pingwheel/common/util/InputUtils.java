@@ -6,6 +6,7 @@ import net.minecraft.world.phys.HitResult;
 import nx.pingwheel.common.client.SelectionToggleNoticeState;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.resource.LanguageUtils;
+import org.jetbrains.annotations.Nullable;
 import org.lwjgl.glfw.GLFW;
 
 import static nx.pingwheel.common.CommonClient.Game;
@@ -34,7 +35,6 @@ public class InputUtils {
 
 	/** The physical key and armed state of the current claimed hold. */
 	private static final ClaimedInputState<ClaimedKey> PING_INPUT_STATE = new ClaimedInputState<>();
-	private static final ToggleInputState<ClaimedKey> TOGGLE_INPUT_STATE = new ToggleInputState<>();
 
 	/**
 	 * Claims one raw {@link KeyMapping#click(InputConstants.Key)} edge.
@@ -45,7 +45,7 @@ public class InputUtils {
 	 * claim if either mapping received the raw event; in all other cases the
 	 * vanilla click remains queued.
 	 */
-	public static boolean claimPingClick(InputConstants.Key rawKey) {
+	public static boolean claimPingClick(@Nullable InputConstants.Key rawKey) {
 		if (rawKey == null || !matchesPingBinding(rawKey)) {
 			return false;
 		}
@@ -77,22 +77,8 @@ public class InputUtils {
 		return false;
 	}
 
-	/**
-	 * Handles one mapping click for the persistent target-selection toggles.
-	 * Mapping clicks can be repeated by GLFW while a key is held, so the raw
-	 * physical key is remembered until its matching release edge is observed.
-	 */
-	public static void handleToggleClick(InputConstants.Key rawKey) {
-		handleToggleClick(rawKey, monotonicMillis());
-	}
-
-	/** Handles a toggle edge using the same client-monotonic timestamp as the input event. */
-	public static void handleToggleClick(InputConstants.Key rawKey, long eventTimeMillis) {
-		if (rawKey == null) {
-			return;
-		}
-
-		final ClaimedKey key = ClaimedKey.from(rawKey);
+	/** Applies the persistent toggles matching a claimed physical press. */
+	public static void handleTogglePress(InputConstants.Key rawKey) {
 		boolean transparentBinding = matches(KEY_BINDING_TOGGLE_MARK_TRANSPARENT_BLOCKS, rawKey);
 		boolean blacklistedBinding = matches(KEY_BINDING_TOGGLE_MARK_BLACKLISTED_TARGETS, rawKey);
 		boolean fluidsBinding = matches(KEY_BINDING_TOGGLE_MARK_FLUIDS, rawKey);
@@ -100,18 +86,7 @@ public class InputUtils {
 			return;
 		}
 
-		// A press received by a screen is still claimed through its physical
-		// release. This prevents a GLFW repeat after the screen closes from
-		// becoming a fresh toggle edge.
-		if (Game != null && Game.screen != null) {
-			TOGGLE_INPUT_STATE.suppressPress(key);
-			return;
-		}
-
-		if (!TOGGLE_INPUT_STATE.claimPress(key)) {
-			return;
-		}
-
+		long eventTimeMillis = monotonicMillis();
 		if (transparentBinding) {
 			toggleMarkTransparentBlocks(eventTimeMillis);
 		}
@@ -197,10 +172,7 @@ public class InputUtils {
 	}
 
 	/** Observes a raw mapping state transition and claims only the matching release. */
-	public static boolean observeKeyState(InputConstants.Key rawKey, boolean isDown) {
-		if (!isDown && rawKey != null) {
-			TOGGLE_INPUT_STATE.release(ClaimedKey.from(rawKey));
-		}
+	public static boolean observeKeyState(@Nullable InputConstants.Key rawKey, boolean isDown) {
 		return PING_INPUT_STATE.observe(
 			rawKey == null ? null : ClaimedKey.from(rawKey),
 			isDown);
@@ -228,10 +200,9 @@ public class InputUtils {
 	 */
 	public static void resetPingHold() {
 		PING_INPUT_STATE.reset();
-		TOGGLE_INPUT_STATE.reset();
 	}
 
-	/** Disarms only the ping interaction, preserving toggle claims across screens. */
+	/** Disarms the ping interaction at a screen boundary. */
 	public static void resetPingInteraction() {
 		PING_INPUT_STATE.reset();
 	}

@@ -1,29 +1,23 @@
 package nx.pingwheel.common.util;
 
-import java.util.HashSet;
-import java.util.Set;
+import org.lwjgl.glfw.GLFW;
 
-/** Tracks physical toggle presses until their matching release edge. */
-public final class ToggleInputState<K> {
-	private final Set<K> pressed = new HashSet<>();
+/** Carries the native callback's press eligibility to its mapping click, if any. */
+public final class ToggleInputState {
+	private boolean pendingPress;
 
-	/** Returns true only for the first click before the key is released. */
-	public boolean claimPress(K key) {
-		return pressed.add(key);
+	public void beginCallback(int action, boolean activeWindow, boolean screenOpen) {
+		// Use the physical action, not a KeyMapping click (which keyboard repeat
+		// can also produce). A screen, focus, or mapping reset cannot turn a
+		// repeat into a press, even if the original edge never reached KeyMapping.
+		pendingPress = action == GLFW.GLFW_PRESS && activeWindow && !screenOpen;
 	}
 
-	/** Claims a press without toggling anything, such as while a screen is open. */
-	public boolean suppressPress(K key) {
-		return pressed.add(key);
-	}
-
-	/** Rearms a key without changing the associated setting. */
-	public void release(K key) {
-		pressed.remove(key);
-	}
-
-	/** Clears all held physical keys, such as after focus loss or disconnect. */
-	public void reset() {
-		pressed.clear();
+	public boolean claimMappingClick(boolean screenOpen) {
+		// Vanilla may open a screen during the press, so check the destination
+		// as well as the origin. An edge may authorize at most one click.
+		boolean claimed = pendingPress && !screenOpen;
+		pendingPress = false;
+		return claimed;
 	}
 }
