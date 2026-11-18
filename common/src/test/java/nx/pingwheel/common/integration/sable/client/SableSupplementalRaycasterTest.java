@@ -48,7 +48,7 @@ class SableSupplementalRaycasterTest {
 	void translatedPlotFindsExternalChestBehindWorldBlockerWithoutWorldCoordinatesAsLocalIdentity() {
 		var plot = plot(new Pose3d(new Vector3d(8, 0, 0), new Quaterniond(), new Vector3d(100, 0, 100), new Vector3d(1)), UUID.randomUUID());
 		CandidateCollector collector = new CandidateCollector();
-		assertTrue(scan(List.of(plot), START, END, POLICY, limits(), collector));
+		assertTrue(scan(List.of(plot), START, END, POLICY, collector));
 		CandidateEvidence chest = collector.evidence().getFirst();
 		assertEquals(8.0625, chest.hit().worldHit().x(), 1.0E-10);
 		assertEquals(.5, chest.hit().worldHit().z(), 1.0E-10);
@@ -76,7 +76,7 @@ class SableSupplementalRaycasterTest {
 			new Vector3d(100, 0, 100), new Vector3d(1));
 		var plot = plot(pose, UUID.randomUUID());
 		CandidateCollector collector = new CandidateCollector();
-		assertTrue(scan(List.of(plot), START, END, POLICY, limits(), collector));
+		assertTrue(scan(List.of(plot), START, END, POLICY, collector));
 		CandidateEvidence hit = collector.evidence().getFirst();
 		assertEquals(8.0625, hit.hit().worldHit().x(), 1.0E-10);
 		assertEquals(.5, hit.hit().worldHit().z(), 1.0E-10);
@@ -101,7 +101,7 @@ class SableSupplementalRaycasterTest {
 		var first = plot(new Pose3d(new Vector3d(4, 0, 0), new Quaterniond(), new Vector3d(100, 0, 100), new Vector3d(1)), UUID.randomUUID());
 		var second = plot(new Pose3d(new Vector3d(7, 0, 0), new Quaterniond(), new Vector3d(100, 0, 100), new Vector3d(1)), UUID.randomUUID());
 		CandidateCollector collector = new CandidateCollector();
-		assertTrue(scan(List.of(first, second), START, END, POLICY, limits(), collector));
+		assertTrue(scan(List.of(first, second), START, END, POLICY, collector));
 		assertEquals(2, collector.evidence().size());
 		assertEquals(collector.evidence().get(0).snapshot().target(), collector.evidence().get(1).snapshot().target());
 		assertNotEquals(collector.evidence().get(0).hit().equivalenceKey(), collector.evidence().get(1).hit().equivalenceKey());
@@ -116,37 +116,111 @@ class SableSupplementalRaycasterTest {
 		assertEquals(collector.evidence().get(1).hit().equivalenceKey(),
 			set.candidate(set.slot(PreciseTargetType.BLOCK).candidateId().orElseThrow()).orElseThrow().equivalenceKey());
 		CandidateCollector outOfRange = new CandidateCollector();
-		assertTrue(scan(List.of(second), START, new Vec3(6, .5, .5), POLICY, limits(), outOfRange));
+		assertTrue(scan(List.of(second), START, new Vec3(6, .5, .5), POLICY, outOfRange));
 		assertTrue(outOfRange.evidence().isEmpty());
 	}
 
 	@Test
-	void rawNonintersectingEntryVisitsAreChargedBeforeAnyBoundsWorkAndNoCopyOccurs() {
-		AtomicInteger reads = new AtomicInteger();
+	void uncappedRawProviderScanReachesLateSelectableEntryBeyondFormerProviderBoundary() {
+		AtomicInteger reads = new AtomicInteger(), sizes = new AtomicInteger();
 		var far = plot(new Pose3d(new Vector3d(50, 0, 0), new Quaterniond(), new Vector3d(100, 0, 100), new Vector3d(1)), UUID.randomUUID());
+		var late = plot(new Pose3d(new Vector3d(8, 0, 0), new Quaterniond(), new Vector3d(100, 0, 100), new Vector3d(1)), UUID.randomUUID());
+		List<SableSupplementalRaycaster.SubLevel> plots = new java.util.ArrayList<>();
+		for (int index = 0; index < 300; index++) plots.add(far);
+		plots.add(late);
 		SableSupplementalRaycaster.Source raw = new SableSupplementalRaycaster.Source() {
-			@Override public int size() { return 4096; }
-			@Override public SableSupplementalRaycaster.SubLevel at(int index, CandidateWorkBudget budget) { reads.incrementAndGet(); return far; }
+			@Override public int size() { sizes.incrementAndGet(); return plots.size(); }
+			@Override public SableSupplementalRaycaster.SubLevel at(int index) { reads.incrementAndGet(); return plots.get(index); }
 		};
 		CandidateCollector collector = new CandidateCollector();
-		assertFalse(SableSupplementalRaycaster.scan(raw, DIMENSION, START, END, POLICY, CollisionContext.empty(), Vec3.ZERO,
-			new CandidateWorkBudget(new CandidateWorkLimits(1000, 0, 4)), collector));
-		assertEquals(4, reads.get());
+		assertTrue(SableSupplementalRaycaster.scan(raw, DIMENSION, START, END, POLICY,
+			CollisionContext.empty(), Vec3.ZERO, collector));
+		assertEquals(301, reads.get(), "every raw entry is visited");
+		assertEquals(2, sizes.get(), "size is read only for the initial extent and the stability recheck");
+		assertEquals(1, collector.evidence().size());
+		assertEquals(8.0625, collector.evidence().getFirst().hit().worldHit().x(), 1.0E-10,
+			"the late selectable entry is reached beyond the former provider-call boundary");
+	}
+
+	@Test
+	void sourceSizeChangeDuringTheRawScanMakesTheAttemptIncomplete() {
+		var plot = plot(new Pose3d(new Vector3d(8, 0, 0), new Quaterniond(), new Vector3d(100, 0, 100), new Vector3d(1)), UUID.randomUUID());
+		AtomicInteger sizes = new AtomicInteger();
+		SableSupplementalRaycaster.Source unstable = new SableSupplementalRaycaster.Source() {
+			@Override public int size() { return sizes.getAndIncrement() == 0 ? 1 : 2; }
+			@Override public SableSupplementalRaycaster.SubLevel at(int index) { return plot; }
+		};
+		assertFalse(SableSupplementalRaycaster.scan(unstable, DIMENSION, START, END, POLICY,
+			CollisionContext.empty(), Vec3.ZERO, new CandidateCollector()));
+	}
+
+	@Test
+	void unrepresentableSubnormalTraversalFailsIncompleteBeforeGridOrWorldReads() {
+		// Exact 29,999,990 plot transform: the rotated subnormal axis makes vanilla's
+		// padded DDA step overflow, so the core must reject it before any cell read.
+		Vec3 worldStart = new Vec3(0, .5, 0), worldEnd = new Vec3(-4, .5, 0);
+		Pose3d pose = new Pose3d(new Vector3d(0, .5, 0),
+			new Quaterniond(0, 0, -Double.MIN_VALUE, 1),
+			new Vector3d(29_999_990, 0, 29_999_990.5), new Vector3d(1, 1, 1));
+		AtomicInteger reads = new AtomicInteger();
+		BlockGetter hostile = new BlockGetter() {
+			@Override public BlockState getBlockState(BlockPos pos) {
+				reads.incrementAndGet(); throw new AssertionError("world state read before the padded-grid guard");
+			}
+			@Override public FluidState getFluidState(BlockPos pos) {
+				reads.incrementAndGet(); throw new AssertionError("world fluid read before the padded-grid guard");
+			}
+			@Override public BlockEntity getBlockEntity(BlockPos pos) {
+				reads.incrementAndGet(); throw new AssertionError("world block-entity read before the padded-grid guard");
+			}
+			@Override public int getHeight() { throw new AssertionError("world height read before the padded-grid guard"); }
+			@Override public int getMinBuildHeight() { throw new AssertionError("world minimum height read before the padded-grid guard"); }
+		};
+		var plot = new SableSupplementalRaycaster.SubLevel(UUID.randomUUID(), pose,
+			new AABB(29_999_985, 0, 29_999_990, 29_999_992, 1, 29_999_991), hostile,
+			pos -> { throw new AssertionError("grid membership callback ran before the padded-grid guard"); },
+			pos -> { throw new AssertionError("grid cell load callback ran before the padded-grid guard"); });
+		CandidateCollector collector = new CandidateCollector();
+		assertFalse(SableSupplementalRaycaster.scan(new SableSupplementalRaycaster.Source() {
+			@Override public int size() { return 1; }
+			@Override public SableSupplementalRaycaster.SubLevel at(int index) { return plot; }
+		}, DIMENSION, worldStart, worldEnd, RaycastPolicy.from(false, false, false),
+			CollisionContext.empty(), worldStart, collector));
+		assertEquals(0, reads.get());
 		assertTrue(collector.evidence().isEmpty());
 	}
 
 	@Test
-	void loadedPlotAndShapeBudgetBoundariesFailClosedWithoutWorldReadsWhenUnavailable() {
+	void finiteLargeFlatWorldRayStillReachesSelectableNativeEntry() {
+		Vec3 localStart = new Vec3(29_999_990, .5, 29_999_990.5);
+		Vec3 localEnd = new Vec3(29_999_986, .5, 29_999_990.5);
+		BlockPos pos = new BlockPos(29_999_988, 0, 29_999_990);
+		MemoryWorld world = new MemoryWorld();
+		world.blocks.put(pos, Blocks.CHEST.defaultBlockState());
+		var plot = new SableSupplementalRaycaster.SubLevel(UUID.randomUUID(), new Pose3d(),
+			new AABB(29_999_985, -1, 29_999_990, 29_999_991, 1, 29_999_991.5), world,
+			cell -> cell.getZ() >= 29_999_990 && cell.getZ() < 29_999_991, cell -> true);
+		CandidateCollector collector = new CandidateCollector();
+		assertTrue(scan(List.of(plot), localStart, localEnd, POLICY, collector));
+		assertEquals(1, collector.evidence().size());
+		assertEquals(29_999_988 + 15 / 16.0, collector.evidence().getFirst().hit().worldHit().x(), 1.0E-10);
+	}
+
+	@Test
+	void unloadedPlotFailsWithoutWorldReadsAndNonfinitePlotBoundsFailIncomplete() {
 		var pose = new Pose3d(new Vector3d(8, 0, 0), new Quaterniond(), new Vector3d(100, 0, 100), new Vector3d(1));
 		var original = plot(pose, UUID.randomUUID());
 		MemoryWorld world = (MemoryWorld) original.world();
 		var unloaded = new SableSupplementalRaycaster.SubLevel(original.id(), pose, original.localBounds(), world, original.contains(), ignored -> false);
 		CandidateCollector collector = new CandidateCollector();
-		assertFalse(scan(List.of(unloaded), START, END, POLICY, limits(), collector));
+		assertFalse(scan(List.of(unloaded), START, END, POLICY, collector));
 		assertEquals(0, world.reads.get());
 		assertTrue(collector.evidence().isEmpty());
-		assertFalse(scan(List.of(original), START, END, POLICY, new CandidateWorkLimits(0, 0, 10), collector));
-		assertFalse(scan(List.of(original), START, END, POLICY, new CandidateWorkLimits(1000, 0, 10, 0), collector));
+		var nonFiniteBounds = new SableSupplementalRaycaster.SubLevel(original.id(), pose,
+			new AABB(Double.NaN, 0, 100, 101, 1, 101), world, original.contains(), ignored -> true);
+		assertThrows(ExactNativeShapeClip.Incomplete.class,
+			() -> scan(List.of(nonFiniteBounds), START, END, POLICY, collector));
+		assertEquals(0, world.reads.get());
 		assertTrue(collector.evidence().isEmpty());
 	}
 
@@ -158,7 +232,7 @@ class SableSupplementalRaycasterTest {
 			assertTrue(SableClientProvider.resolvePreviewReadSource(null, Target.ExternalBlockTarget.candidate(
 				DIMENSION, "sable", "minecraft:chest", "opaque", true)).isEmpty());
 			assertTrue(SableClientProvider.candidateBlocks().collectSupplemental(null, START, END, POLICY,
-				CollisionContext.empty(), Vec3.ZERO, new CandidateWorkBudget(new CandidateWorkLimits(0, 0, 0)), new CandidateCollector()));
+				CollisionContext.empty(), Vec3.ZERO, new CandidateCollector()));
 		} finally { ModContext.HasSable = previous; }
 	}
 
@@ -170,14 +244,14 @@ class SableSupplementalRaycasterTest {
 		world.blocks.put(new BlockPos(100, 0, 100), Blocks.TORCH.defaultBlockState());
 		CandidateCollector outline = new CandidateCollector(), visual = new CandidateCollector();
 		Vec3 start = new Vec3(0, .25, .5), end = new Vec3(20, .25, .5);
-		assertTrue(scan(List.of(plot), start, end, POLICY, limits(), outline));
-		assertTrue(scan(List.of(plot), start, end, RaycastPolicy.from(false, false, false), limits(), visual));
+		assertTrue(scan(List.of(plot), start, end, POLICY, outline));
+		assertTrue(scan(List.of(plot), start, end, RaycastPolicy.from(false, false, false), visual));
 		assertFalse(outline.evidence().isEmpty());
 		assertTrue(visual.evidence().isEmpty());
 		world.blocks.put(new BlockPos(100, 0, 100), Blocks.WATER.defaultBlockState());
 		CandidateCollector none = new CandidateCollector(), any = new CandidateCollector();
-		assertTrue(scan(List.of(plot), start, end, POLICY, limits(), none));
-		assertTrue(scan(List.of(plot), start, end, RaycastPolicy.from(false, false, true), limits(), any));
+		assertTrue(scan(List.of(plot), start, end, POLICY, none));
+		assertTrue(scan(List.of(plot), start, end, RaycastPolicy.from(false, false, true), any));
 		assertTrue(none.evidence().isEmpty());
 		assertFalse(any.evidence().isEmpty());
 	}
@@ -189,33 +263,32 @@ class SableSupplementalRaycasterTest {
 		MemoryWorld world = (MemoryWorld) plot.world();
 		world.beforeRead = () -> pose.position().set(40, 0, 0);
 		CandidateCollector collector = new CandidateCollector();
-		assertTrue(scan(List.of(plot), START, END, POLICY, limits(), collector));
+		assertTrue(scan(List.of(plot), START, END, POLICY, collector));
 		assertEquals(8.0625, collector.evidence().getFirst().hit().worldHit().x(), 1.0E-10);
 		pose.scale().x = 0;
-		assertFalse(scan(List.of(plot), START, END, POLICY, limits(), new CandidateCollector()));
+		assertFalse(scan(List.of(plot), START, END, POLICY, new CandidateCollector()));
 	}
 
 	@Test
 	void nonuniformScaleUsesWorldSegmentRangeNotLocalLengthAndRemovedEntriesAreEmpty() {
 		Pose3d pose = new Pose3d(new Vector3d(8, 0, 0), new Quaterniond(), new Vector3d(100, 0, 100), new Vector3d(2, 1, 1));
 		CandidateCollector collector = new CandidateCollector();
-		assertTrue(scan(List.of(plot(pose, UUID.randomUUID())), START, END, POLICY, limits(), collector));
+		assertTrue(scan(List.of(plot(pose, UUID.randomUUID())), START, END, POLICY, collector));
 		assertEquals(8.125, collector.evidence().getFirst().distance(), 1.0E-10);
 		CandidateCollector shorter = new CandidateCollector();
-		assertTrue(scan(List.of(plot(pose, UUID.randomUUID())), START, new Vec3(8.1, .5, .5), POLICY, limits(), shorter));
+		assertTrue(scan(List.of(plot(pose, UUID.randomUUID())), START, new Vec3(8.1, .5, .5), POLICY, shorter));
 		assertTrue(shorter.evidence().isEmpty());
 		assertTrue(SableSupplementalRaycaster.scan(new SableSupplementalRaycaster.Source() {
 			@Override public int size() { return 1; }
-			@Override public SableSupplementalRaycaster.SubLevel at(int index, CandidateWorkBudget budget) { return null; }
-		}, DIMENSION, START, END, POLICY, CollisionContext.empty(), Vec3.ZERO,
-			new CandidateWorkBudget(new CandidateWorkLimits(0, 0, 1)), new CandidateCollector()));
+			@Override public SableSupplementalRaycaster.SubLevel at(int index) { return null; }
+		}, DIMENSION, START, END, POLICY, CollisionContext.empty(), Vec3.ZERO, new CandidateCollector()));
 	}
 
 	@Test
 	void originContainmentKeepsExternalTargetWithoutInventingFace() {
 		var plot = plot(new Pose3d(new Vector3d(8, 0, 0), new Quaterniond(), new Vector3d(100, 0, 100), new Vector3d(1)), UUID.randomUUID());
 		CandidateCollector collector = new CandidateCollector();
-		assertTrue(scan(List.of(plot), new Vec3(8.5, .5, .5), END, POLICY, limits(), collector));
+		assertTrue(scan(List.of(plot), new Vec3(8.5, .5, .5), END, POLICY, collector));
 		assertFalse(collector.evidence().isEmpty());
 		assertTrue(collector.evidence().getFirst().snapshot().target() instanceof Target.ExternalBlockTarget);
 		assertTrue(collector.evidence().getFirst().snapshot().blockHitFace().isEmpty());
@@ -288,13 +361,12 @@ class SableSupplementalRaycasterTest {
 	}
 
 	private static boolean scan(List<SableSupplementalRaycaster.SubLevel> plots, Vec3 start, Vec3 end,
-		RaycastPolicy policy, CandidateWorkLimits limits, CandidateCollector collector) {
+		RaycastPolicy policy, CandidateCollector collector) {
 		return SableSupplementalRaycaster.scan(new SableSupplementalRaycaster.Source() {
 			@Override public int size() { return plots.size(); }
-			@Override public SableSupplementalRaycaster.SubLevel at(int index, CandidateWorkBudget budget) { return plots.get(index); }
-		}, DIMENSION, start, end, policy, CollisionContext.empty(), Vec3.ZERO, new CandidateWorkBudget(limits), collector);
+			@Override public SableSupplementalRaycaster.SubLevel at(int index) { return plots.get(index); }
+		}, DIMENSION, start, end, policy, CollisionContext.empty(), Vec3.ZERO, collector);
 	}
-	private static CandidateWorkLimits limits() { return new CandidateWorkLimits(1000, 0, 100); }
 	private static SableSupplementalRaycaster.SubLevel plot(Pose3d pose, UUID id) {
 		MemoryWorld world = new MemoryWorld(); world.blocks.put(new BlockPos(100, 0, 100), Blocks.CHEST.defaultBlockState());
 		return new SableSupplementalRaycaster.SubLevel(id, pose, new AABB(100, 0, 100, 101, 1, 101), world,

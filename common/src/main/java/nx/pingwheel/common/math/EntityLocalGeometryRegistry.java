@@ -227,7 +227,6 @@ public final class EntityLocalGeometryRegistry {
 		EntityLocalGeometryResult trace(Entity candidate, EntityLocalRaycastRequest request) {
 			try {
 				@Nullable EntityLocalGeometryResult result = entry.resolver().trace(candidate, request);
-				if (!request.work().complete()) return EntityLocalGeometryResult.failed();
 				if (result == null) {
 					registry.warnOnce("null-result:" + entry.sourceId(),
 						"null-result-candidate-rejected", null,
@@ -236,10 +235,7 @@ public final class EntityLocalGeometryRegistry {
 					return EntityLocalGeometryResult.failed();
 				}
 				return result;
-			} catch (EntityRaycastWork.Exhausted exhausted) {
-				return EntityLocalGeometryResult.failed();
 			} catch (RuntimeException | LinkageError | AssertionError recoverableFailure) {
-				if (!request.work().complete()) return EntityLocalGeometryResult.failed();
 				registry.warnCallbackFailure(entry.sourceId(), entry.priority(), recoverableFailure);
 				return EntityLocalGeometryResult.failed();
 			}

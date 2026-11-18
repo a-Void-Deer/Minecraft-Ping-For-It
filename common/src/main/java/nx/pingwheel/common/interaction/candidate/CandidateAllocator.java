@@ -8,7 +8,7 @@ import java.util.Set;
 import java.util.Objects;
 
 /**
- * Pure allocation. A scanned class is unavailable unless its bounded traversal
+ * Pure allocation. A scanned class is unavailable unless its traversal
  * completed, even when the ordinary candidate belongs to that class. Every
  * completed class installs the nearest eligible identity by the real world-hit
  * distance to the frozen ray origin; a more specific class consumes its

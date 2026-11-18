@@ -6,18 +6,17 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import org.jetbrains.annotations.Nullable;
 
 /** Finite native-box intersection: no segment-length-scaled containment probe. */
 public final class ExactNativeShapeClip {
 	private ExactNativeShapeClip() {}
 
-	public static BlockHitResult clip(VoxelShape shape, Vec3 start, Vec3 end, BlockPos pos,
-		CandidateWorkBudget budget) {
+	public static @Nullable BlockHitResult clip(VoxelShape shape, Vec3 start, Vec3 end, BlockPos pos) {
 		if (shape.isEmpty() || start.equals(end)) return null;
 		Best best = new Best();
 		shape.forAllBoxes((minX, minY, minZ, maxX, maxY, maxZ) -> {
-			if (!budget.visitShapeBox()) throw new Incomplete();
-			BoxHit hit = intersect(start, end, new AABB(minX + pos.getX(), minY + pos.getY(), minZ + pos.getZ(),
+			@Nullable BoxHit hit = intersect(start, end, new AABB(minX + pos.getX(), minY + pos.getY(), minZ + pos.getZ(),
 				maxX + pos.getX(), maxY + pos.getY(), maxZ + pos.getZ()));
 			if (hit != null && (best.hit == null || hit.t < best.hit.t
 				|| hit.t == best.hit.t && hit.inside && !best.hit.inside)) best.hit = hit;
@@ -32,7 +31,7 @@ public final class ExactNativeShapeClip {
 		return new BlockHitResult(start.add(end.subtract(start).scale(best.hit.t)), best.hit.face, pos, best.hit.inside);
 	}
 
-	private static BoxHit intersect(Vec3 start, Vec3 end, AABB box) {
+	private static @Nullable BoxHit intersect(Vec3 start, Vec3 end, AABB box) {
 		double[] origins = {start.x, start.y, start.z};
 		double[] deltas = {end.x - start.x, end.y - start.y, end.z - start.z};
 		double[] minima = {box.minX, box.minY, box.minZ};
@@ -41,7 +40,7 @@ public final class ExactNativeShapeClip {
 		Direction[] positiveFaces = {Direction.EAST, Direction.UP, Direction.SOUTH};
 		double entry = Double.NEGATIVE_INFINITY;
 		double exit = Double.POSITIVE_INFINITY;
-		Direction face = null;
+		@Nullable Direction face = null;
 		boolean inside = true;
 		for (int axis = 0; axis < 3; axis++) {
 			double origin = origins[axis], delta = deltas[axis];
@@ -78,5 +77,5 @@ public final class ExactNativeShapeClip {
 		private static final long serialVersionUID = 1L;
 	}
 	private record BoxHit(double t, Direction face, boolean inside, boolean containment) {}
-	private static final class Best { private BoxHit hit; }
+	private static final class Best { private @Nullable BoxHit hit; }
 }

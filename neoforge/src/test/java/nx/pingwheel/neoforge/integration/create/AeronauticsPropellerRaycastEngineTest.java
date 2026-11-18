@@ -29,15 +29,11 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
-import nx.pingwheel.common.interaction.candidate.CandidateWorkBudget;
-import nx.pingwheel.common.interaction.candidate.CandidateWorkLimits;
-import nx.pingwheel.common.math.EntityFrameResolution;
 import nx.pingwheel.common.math.EntityLocalGeometryRegistry;
 import nx.pingwheel.common.math.EntityLocalGeometryResolver;
 import nx.pingwheel.common.math.EntityLocalGeometryResult;
 import nx.pingwheel.common.math.EntityLocalRaycastRequest;
 import nx.pingwheel.common.math.EntityParentFrame;
-import nx.pingwheel.common.math.EntityRaycastWork;
 import nx.pingwheel.common.math.LocalGeometryKind;
 import nx.pingwheel.common.math.RaycastPolicy;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -68,7 +64,7 @@ class AeronauticsPropellerRaycastEngineTest {
 			var localRay = CreateContraptionRaycastEngine.transform(request, transform).orElseThrow();
 			assertVector(new Vec3(-1, .5, .5), localRay.start(), 1.0E-6);
 			assertVector(new Vec3(0, 2, 0), localRay.cameraFeet(), 1.0E-6);
-			var result = CreateContraptionRaycastEngine.trace(request, snapshot(localRay, core()), EntityRaycastWork.unlimited());
+			var result = CreateContraptionRaycastEngine.trace(request, snapshot(localRay, core()));
 			assertEquals(BlockPos.ZERO, result.localHit().orElseThrow().localPos());
 			assertEquals(.25, result.localHit().orElseThrow().t(), 1.0E-6);
 			assertVector(expectedWorld(new Vec3(0, .5, .5), anchor, gyro),
@@ -88,7 +84,7 @@ class AeronauticsPropellerRaycastEngineTest {
 			Vec3 start = retainedWorld(new Vec3(-1, .5, .5), gyro), end = retainedWorld(new Vec3(3, .5, .5), gyro);
 			EntityLocalRaycastRequest request = request(start, end, retainedWorld(new Vec3(0, 2, 0), gyro));
 			var localRay = CreateContraptionRaycastEngine.transform(request, transform).orElseThrow();
-			var hit = CreateContraptionRaycastEngine.trace(request, snapshot(localRay, core()), EntityRaycastWork.unlimited()).localHit().orElseThrow();
+			var hit = CreateContraptionRaycastEngine.trace(request, snapshot(localRay, core())).localHit().orElseThrow();
 			assertEquals(.25, hit.t(), 1.0E-6);
 			assertVector(retainedWorld(new Vec3(0, .5, .5), gyro), request.pointAt(hit.t()), 1.0E-6);
 			assertVector(new Vec3(0, 2, 0), localRay.cameraFeet(), 1.0E-6);
@@ -137,7 +133,7 @@ class AeronauticsPropellerRaycastEngineTest {
 		for (double x : List.of(.5, 3.5, -2.5, 1.5, 2.5, 4.5)) {
 			var request = request(new Vec3(x, .5, -2), new Vec3(x, .5, 2), Vec3.ZERO);
 			var snapshot = snapshot(new CreateContraptionRaycastEngine.LocalRay(request.start(), request.end(), Vec3.ZERO), blocks);
-			var result = CreateContraptionRaycastEngine.trace(request, snapshot, EntityRaycastWork.unlimited());
+			var result = CreateContraptionRaycastEngine.trace(request, snapshot);
 			boolean hit = x == .5 || x == 3.5 || x == -2.5;
 			assertEquals(hit ? EntityLocalGeometryResult.Outcome.HIT : EntityLocalGeometryResult.Outcome.MISS, result.outcome(), "x=" + x);
 			if (hit) assertEquals(.5, result.localHit().orElseThrow().t());
@@ -157,7 +153,7 @@ class AeronauticsPropellerRaycastEngineTest {
 		assertEquals(EntityLocalGeometryResult.Outcome.MISS, CreateContraptionRaycastEngine.trace(request, snapshot).outcome());
 		var fluids = new EntityLocalRaycastRequest(request.start(), request.end(),
 			new RaycastPolicy(RaycastPolicy.BlockMode.VISUAL, RaycastPolicy.FluidMode.ANY, false), 1, CollisionContext.empty(), Vec3.ZERO);
-		var fluidHit = CreateContraptionRaycastEngine.trace(fluids, snapshot, bounded(20, 0, 20)).localHit().orElseThrow();
+		var fluidHit = CreateContraptionRaycastEngine.trace(fluids, snapshot).localHit().orElseThrow();
 		assertEquals(LocalGeometryKind.FLUID, fluidHit.kind()); assertEquals(water, fluidHit.localPos());
 		assertEquals("minecraft:water", fluidHit.blockRegistryId()); assertEquals(Optional.of("minecraft:water"), fluidHit.fluidRegistryId());
 		assertEquals(.4, fluidHit.t(), 1.0E-6);
@@ -179,44 +175,47 @@ class AeronauticsPropellerRaycastEngineTest {
 			.isAbove(Shapes.block(), BlockPos.ZERO, true));
 	}
 
-	@Test void captureChargesEveryEntryBeforeNextAndNeverAllocatesAnUnadmittedPrefix() {
-		AtomicInteger reads = new AtomicInteger();
-		Iterable<CreateContraptionRaycastEngine.CaptureEntry> entries = () -> new Iterator<>() {
-			private int index;
-			@Override public boolean hasNext() { return index < 100; }
-			@Override public CreateContraptionRaycastEngine.CaptureEntry next() {
-				reads.incrementAndGet(); return new CreateContraptionRaycastEngine.CaptureEntry(new BlockPos(index++, 0, 0), Blocks.STONE.defaultBlockState(), null, false);
-			}
-		};
-		var ray = new CreateContraptionRaycastEngine.LocalRay(new Vec3(-1, .5, .5), new Vec3(3, .5, .5), Vec3.ZERO);
-		var zero = bounded(0, 10, 10);
-		assertThrows(EntityRaycastWork.Exhausted.class, () -> CreateContraptionRaycastEngine.snapshotCaptured(ray, entries, -64, 384, false, zero));
-		assertEquals(0, reads.get()); assertFalse(zero.complete());
-		var two = bounded(2, 10, 10);
-		assertThrows(EntityRaycastWork.Exhausted.class, () -> CreateContraptionRaycastEngine.snapshotCaptured(ray, entries, -64, 384, false, two));
-		assertEquals(2, reads.get()); assertFalse(two.complete());
-		assertThrows(EntityRaycastWork.Exhausted.class, two::readLocalBlock);
+	@Test void captureAndScanAreNotTruncatedByFormerDefaultCeilingsAndFindALateSoleSurface() {
+		// Exceeds the former 16_384 block-read and 256 provider-call defaults; no
+		// count ceiling may truncate a large contraption.
+		int paddedEntries = 20_000;
+		List<BlockPos> ordered = new ArrayList<>(paddedEntries + 1);
+		List<CreateContraptionRaycastEngine.CaptureEntry> entries = new ArrayList<>(paddedEntries + 1);
+		BlockPos winner = new BlockPos(1, 0, 0);
+		for (int index = 0; index < paddedEntries; index++) {
+			BlockPos position = new BlockPos(index, -2, -2);
+			ordered.add(position);
+			entries.add(new CreateContraptionRaycastEngine.CaptureEntry(
+				position, Blocks.AIR.defaultBlockState(), null, false));
+		}
+		ordered.add(winner);
+		entries.add(new CreateContraptionRaycastEngine.CaptureEntry(
+			winner, Blocks.STONE.defaultBlockState(), null, false));
+		var ray = new CreateContraptionRaycastEngine.LocalRay(
+			new Vec3(-1, .5, .5), new Vec3(3, .5, .5), Vec3.ZERO);
+		var captured = CreateContraptionRaycastEngine.snapshotCaptured(ray, entries, -64, 384, false);
+		assertEquals(paddedEntries + 1, captured.positions().size());
+		assertTrue(captured.positions().contains(winner));
+
+		var request = request(ray.start(), ray.end(), Vec3.ZERO);
+		var snapshot = new CreateContraptionRaycastEngine.Snapshot(ray.start(), ray.end(), ray.cameraFeet(),
+			captured.view(), ordered, Set.of(), false);
+		var hit = CreateContraptionRaycastEngine.trace(request, snapshot).localHit().orElseThrow();
+		assertEquals(winner, hit.localPos());
+		assertEquals(.5, hit.t(), 1.0E-6);
+		assertEquals(EntityLocalGeometryResult.Outcome.MISS, CreateContraptionRaycastEngine.trace(
+			request, new CreateContraptionRaycastEngine.Snapshot(ray.start(), ray.end(), ray.cameraFeet(),
+				captured.view(), ordered.subList(0, paddedEntries), Set.of(), false)).outcome());
 	}
 
-	@Test void captureFailureAndShapeExhaustionRejectTheWholeRegistryAttemptAfterAProvisionalHit() throws Exception {
+	@Test void captureFailureAfterAnEarlierEntryRejectsTheWholeRegistryAttempt() throws Exception {
 		var request = request(new Vec3(-1, .5, .5), new Vec3(4, .5, .5), Vec3.ZERO);
-		var first = new BlockPos(0, 0, 0); var second = new BlockPos(2, 0, 0);
-		var snapshot = new CreateContraptionRaycastEngine.Snapshot(request.start(), request.end(), Vec3.ZERO,
-			snapshot(new CreateContraptionRaycastEngine.LocalRay(request.start(), request.end(), Vec3.ZERO), Map.of(first, block(), second, block())).view(),
-			List.of(first, second), Set.of(), false);
-		var work = bounded(20, 20, 1);
-		assertEquals(EntityLocalGeometryResult.Outcome.FAILED, throughRegistry((entity, ray) ->
-			CreateContraptionRaycastEngine.trace(ray, snapshot, ray.work()), withWork(request, work)).outcome());
-		assertFalse(work.complete(), "first box hit cannot escape when a later box exhausts");
-
-		var captureWork = bounded(1, 20, 20);
-		assertEquals(EntityLocalGeometryResult.Outcome.FAILED, throughRegistry((entity, ray) -> {
-			var captured = CreateContraptionRaycastEngine.snapshotCaptured(new CreateContraptionRaycastEngine.LocalRay(
-				ray.start(), ray.end(), Vec3.ZERO), List.of(new CreateContraptionRaycastEngine.CaptureEntry(first, Blocks.STONE.defaultBlockState(), null, false),
-				new CreateContraptionRaycastEngine.CaptureEntry(second, Blocks.STONE.defaultBlockState(), null, false)), -64, 384, false, ray.work());
-			return CreateContraptionRaycastEngine.trace(ray, captured, ray.work());
-		}, withWork(request, captureWork)).outcome());
-		assertFalse(captureWork.complete());
+		var first = new BlockPos(0, 0, 0);
+		var provisional = snapshot(new CreateContraptionRaycastEngine.LocalRay(
+			request.start(), request.end(), Vec3.ZERO), Map.of(first, block()));
+		assertEquals(EntityLocalGeometryResult.Outcome.HIT,
+			CreateContraptionRaycastEngine.trace(request, provisional).outcome(),
+			"the earlier entry alone is a real provisional hit");
 
 		AtomicInteger consumed = new AtomicInteger();
 		assertEquals(EntityLocalGeometryResult.Outcome.FAILED, throughRegistry((entity, ray) -> {
@@ -228,28 +227,10 @@ class AeronauticsPropellerRaycastEngineTest {
 				}
 			};
 			var captured = CreateContraptionRaycastEngine.snapshotCaptured(new CreateContraptionRaycastEngine.LocalRay(
-				ray.start(), ray.end(), Vec3.ZERO), changed, -64, 384, false, ray.work());
-			return CreateContraptionRaycastEngine.trace(ray, captured, ray.work());
+				ray.start(), ray.end(), Vec3.ZERO), changed, -64, 384, false);
+			return CreateContraptionRaycastEngine.trace(ray, captured);
 		}, request).outcome());
 		assertEquals(2, consumed.get(), "a valid captured core cannot escape a subsequent failed live entry");
-	}
-
-	@Test void boundedScannerChargesStateReadsAndShapeBoxesWithoutDuplicatingCaptureCharges() {
-		var request = request(new Vec3(-1, .5, .5), new Vec3(3, .5, .5), Vec3.ZERO);
-		var ray = new CreateContraptionRaycastEngine.LocalRay(request.start(), request.end(), Vec3.ZERO);
-		var work = bounded(2, 0, 1); // one live entry plus one frozen state read, exactly one native box
-		var snapshot = CreateContraptionRaycastEngine.snapshotCaptured(ray,
-			List.of(new CreateContraptionRaycastEngine.CaptureEntry(BlockPos.ZERO, Blocks.STONE.defaultBlockState(), null, false)), -64, 384, false, work);
-		assertEquals(EntityLocalGeometryResult.Outcome.HIT, CreateContraptionRaycastEngine.trace(request, snapshot, work).outcome());
-		assertTrue(work.complete());
-		assertThrows(EntityRaycastWork.Exhausted.class, work::readLocalBlock);
-	}
-
-	@Test void legacyCreateTraceKeepsItsUnlimitedCostAndExistingLocalTransformSemantics() {
-		var request = withWork(request(new Vec3(-1, .5, .5), new Vec3(3, .5, .5), Vec3.ZERO), bounded(0, 0, 0));
-		var ray = CreateContraptionRaycastEngine.transform(request, point -> point).orElseThrow();
-		assertEquals(EntityLocalGeometryResult.Outcome.HIT, CreateContraptionRaycastEngine.trace(request, snapshot(ray, core())).outcome());
-		assertTrue(request.work().complete(), "legacy overload must not consume the newer bounded capability");
 	}
 
 	@Test void invalidOrSingularVirtualMatricesDoNotAcquireAWorldIdentityFallback() {
@@ -270,13 +251,6 @@ class AeronauticsPropellerRaycastEngineTest {
 		Object owner = ownerMethod.invoke(snapshot, entity);
 		var trace = owner.getClass().getDeclaredMethod("trace", Entity.class, EntityLocalRaycastRequest.class); trace.setAccessible(true);
 		return (EntityLocalGeometryResult) trace.invoke(owner, entity, request);
-	}
-	private static EntityLocalRaycastRequest withWork(EntityLocalRaycastRequest request, EntityRaycastWork work) {
-		return new EntityLocalRaycastRequest(request.start(), request.end(), request.policy(), 1, request.collisionContext(), request.cameraFeetPosition(),
-			work, (entity, queryWork) -> EntityFrameResolution.world());
-	}
-	private static EntityRaycastWork bounded(int blocks, int providers, int boxes) {
-		return EntityRaycastWork.bounded(new CandidateWorkBudget(new CandidateWorkLimits(blocks, 0, providers, boxes)));
 	}
 	private static CreateContraptionRaycastEngine.CapturedBlock block() { return new CreateContraptionRaycastEngine.CapturedBlock(Blocks.STONE.defaultBlockState(), null); }
 	private static @Unmodifiable Map<BlockPos, CreateContraptionRaycastEngine.CapturedBlock> core() {

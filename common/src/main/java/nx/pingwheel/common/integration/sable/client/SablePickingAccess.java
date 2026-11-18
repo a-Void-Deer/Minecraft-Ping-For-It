@@ -73,10 +73,8 @@ public final class SablePickingAccess implements PickingFrameContext.Access {
 			Function<Object, Pose3dc> supplier = value -> {
 				try {
 					if (!(value instanceof SubLevelAccess subLevel)) throw new IllegalStateException("unsupported Sable sublevel");
-					EntityRaycastWork work = EntityRaycastWork.unlimited();
-					work.callProvider();
 					UUID id = Objects.requireNonNull(subLevel.getUniqueId());
-					FrozenPose frozen = freeze(subLevel, id, work);
+					FrozenPose frozen = freeze(subLevel, id);
 					clipPoses.add(id);
 					return frozen.pose();
 				} catch (RuntimeException | LinkageError unavailable) {
@@ -110,50 +108,45 @@ public final class SablePickingAccess implements PickingFrameContext.Access {
 		} catch (RuntimeException | LinkageError unavailable) { return unknown(hit); }
 	}
 
-	@Override public EntityFrameResolution entityFrame(Entity entity, EntityRaycastWork work) {
+	@Override public EntityFrameResolution entityFrame(Entity entity) {
 		if (!AeroRotorScope.matches(entity)) return EntityFrameResolution.world();
 		try {
-			work.callProvider();
 			@Nullable SubLevelAccess owner = containing.apply(entity.position());
 			if (owner == null) return EntityFrameResolution.world();
-			work.callProvider();
 			@Nullable UUID id = owner.getUniqueId();
 			if (id == null) return EntityFrameResolution.unavailable();
-			return EntityFrameResolution.contained(freeze(owner, id, work).frame(), id);
-		} catch (EntityRaycastWork.Exhausted exhausted) { throw exhausted; }
-		catch (RuntimeException | LinkageError unavailable) { return EntityFrameResolution.unavailable(); }
+			return EntityFrameResolution.contained(freeze(owner, id).frame(), id);
+		} catch (RuntimeException | LinkageError unavailable) { return EntityFrameResolution.unavailable(); }
 	}
 
-	private FrozenPose freeze(SubLevelAccess access, UUID id, EntityRaycastWork work) {
+	private FrozenPose freeze(SubLevelAccess access, UUID id) {
 		@Nullable FrozenPose existing = poses.get(id);
 		if (existing != null) return existing;
-		work.callProvider();
-		Pose3dc pose = access.logicalPose();
-		Pose3d copy = copyPose(pose, work);
+		@Nullable Pose3dc pose = access.logicalPose();
+		if (pose == null) throw new IllegalStateException("Sable logical pose unavailable");
+		Pose3d copy = copyPose(pose);
 		FrozenPose result = new FrozenPose(copy, EntityParentFrame.copyOf(copy.bakeIntoMatrix(new Matrix4d()), copy.orientation()));
 		poses.put(id, result);
 		return result;
 	}
 
-	static EntityFrameResolution render(Entity entity, float partialTick, EntityRaycastWork work) {
-		work.callProvider();
+	static EntityFrameResolution render(Entity entity, float partialTick) {
 		@Nullable SubLevelAccess containing = SableCompanion.INSTANCE.getContaining(entity.level(), (Position) entity.position());
 		if (containing == null) return EntityFrameResolution.world();
 		if (!(containing instanceof ClientSubLevelAccess client)) return EntityFrameResolution.unavailable();
-		work.callProvider();
 		@Nullable UUID id = client.getUniqueId();
-		work.callProvider();
-		Pose3d copy = copyPose(client.renderPose(partialTick), work);
-		return id == null ? EntityFrameResolution.unavailable()
-			: EntityFrameResolution.contained(EntityParentFrame.copyOf(copy.bakeIntoMatrix(new Matrix4d()), copy.orientation()), id);
+		@Nullable Pose3dc pose = client.renderPose(partialTick);
+		if (id == null || pose == null) return EntityFrameResolution.unavailable();
+		Pose3d copy = copyPose(pose);
+		return EntityFrameResolution.contained(EntityParentFrame.copyOf(copy.bakeIntoMatrix(new Matrix4d()), copy.orientation()), id);
 	}
 
-	private static Pose3d copyPose(Pose3dc pose, EntityRaycastWork work) {
+	private static Pose3d copyPose(Pose3dc pose) {
 		Pose3d copy = new Pose3d();
-		work.callProvider(); copy.position().set(pose.position());
-		work.callProvider(); copy.orientation().set(pose.orientation());
-		work.callProvider(); copy.rotationPoint().set(pose.rotationPoint());
-		work.callProvider(); copy.scale().set(pose.scale());
+		copy.position().set(pose.position());
+		copy.orientation().set(pose.orientation());
+		copy.rotationPoint().set(pose.rotationPoint());
+		copy.scale().set(pose.scale());
 		return copy;
 	}
 	private static RaycastSelection unknown(BlockHitResult hit) {

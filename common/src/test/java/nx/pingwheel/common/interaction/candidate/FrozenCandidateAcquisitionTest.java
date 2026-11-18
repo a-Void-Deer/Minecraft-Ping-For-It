@@ -192,17 +192,6 @@ class FrozenCandidateAcquisitionTest {
 	}
 
 	@Test
-	void injectedWorkBudgetsBoundEachWorkClassIndependently() {
-		var budget = new CandidateWorkBudget(new CandidateWorkLimits(1, 2, 0));
-		assertTrue(budget.visitBlock());
-		assertFalse(budget.visitBlock());
-		assertTrue(budget.visitEntity());
-		assertTrue(budget.visitEntity());
-		assertFalse(budget.visitEntity());
-		assertFalse(budget.callProvider());
-	}
-
-	@Test
 	void nearerSupplementBeatsFartherOrdinaryInTheSameCategory() {
 		TargetSnapshot ordinary = entity(5, "minecraft:item", 1);
 		TargetSnapshot nearerItem = entity(2, "minecraft:item", 2);

@@ -9,7 +9,6 @@ import net.minecraft.core.Position;
 import net.minecraft.world.entity.Entity;
 import nx.pingwheel.common.math.EntityFrameResolution;
 import nx.pingwheel.common.math.EntityParentFrame;
-import nx.pingwheel.common.math.EntityRaycastWork;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4d;
@@ -18,28 +17,25 @@ import org.joml.Matrix4d;
 @NotNullByDefault
 final class SableEntityFrameAccess {
 	private SableEntityFrameAccess() {}
-	static EntityFrameResolution logical(Entity entity, EntityRaycastWork work) {
-		return logical(entity, work, value -> SableCompanion.INSTANCE.getContaining(value.level(), (Position) value.position()));
+	static EntityFrameResolution logical(Entity entity) {
+		return logical(entity, value -> SableCompanion.INSTANCE.getContaining(value.level(), (Position) value.position()));
 	}
 
 	@FunctionalInterface
 	@NotNullByDefault
 	interface Lookup { @Nullable SubLevelAccess containing(Entity entity); }
 
-	static EntityFrameResolution logical(Entity entity, EntityRaycastWork work, Lookup lookup) {
-		work.callProvider();
+	static EntityFrameResolution logical(Entity entity, Lookup lookup) {
 		@Nullable SubLevelAccess containing = lookup.containing(entity);
 		if (containing == null) return EntityFrameResolution.world();
-		work.callProvider();
 		@Nullable UUID id = containing.getUniqueId();
-		work.callProvider();
 		@Nullable Pose3dc pose = containing.logicalPose();
 		if (id == null || pose == null) return EntityFrameResolution.unavailable();
 		Pose3d copy = new Pose3d();
-		work.callProvider(); copy.position().set(pose.position());
-		work.callProvider(); copy.orientation().set(pose.orientation());
-		work.callProvider(); copy.rotationPoint().set(pose.rotationPoint());
-		work.callProvider(); copy.scale().set(pose.scale());
+		copy.position().set(pose.position());
+		copy.orientation().set(pose.orientation());
+		copy.rotationPoint().set(pose.rotationPoint());
+		copy.scale().set(pose.scale());
 		Matrix4d matrix = copy.bakeIntoMatrix(new Matrix4d());
 		return EntityFrameResolution.contained(EntityParentFrame.copyOf(matrix, copy.orientation()), id);
 	}

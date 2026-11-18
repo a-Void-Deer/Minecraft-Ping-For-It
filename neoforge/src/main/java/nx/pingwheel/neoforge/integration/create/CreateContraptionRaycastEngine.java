@@ -24,7 +24,6 @@ import net.minecraft.world.phys.shapes.VoxelShape;
 import nx.pingwheel.common.math.EntityLocalGeometryResult;
 import nx.pingwheel.common.math.EntityLocalRaycastRequest;
 import nx.pingwheel.common.math.EntityParentFrame;
-import nx.pingwheel.common.math.EntityRaycastWork;
 import nx.pingwheel.common.math.LocalGeometryHit;
 import nx.pingwheel.common.math.NativeLocalShapeRaycaster;
 import org.jetbrains.annotations.NotNullByDefault;
@@ -62,15 +61,8 @@ final class CreateContraptionRaycastEngine {
 	}
 
 	static EntityLocalGeometryResult trace(EntityLocalRaycastRequest request, Snapshot snapshot) {
-		return trace(request, snapshot, EntityRaycastWork.unlimited());
-	}
-
-	static EntityLocalGeometryResult trace(
-		EntityLocalRaycastRequest request, Snapshot snapshot, EntityRaycastWork work
-	) {
 		Objects.requireNonNull(request, "request");
 		Objects.requireNonNull(snapshot, "snapshot");
-		if (!work.complete()) throw new EntityRaycastWork.Exhausted();
 
 		if (!request.hasNonDegenerateSegment()
 			|| snapshot.localStart().distanceToSqr(snapshot.localEnd()) == 0.0) {
@@ -85,7 +77,7 @@ final class CreateContraptionRaycastEngine {
 			snapshot.positions(),
 			snapshot.hiddenPositions()::contains,
 			new LocalCollisionContext(
-				request.collisionContext(), snapshot.localCameraFeet(), snapshot.preserveCollisionFallback()), work);
+				request.collisionContext(), snapshot.localCameraFeet(), snapshot.preserveCollisionFallback()));
 		return hit.map(EntityLocalGeometryResult::hit).orElseGet(EntityLocalGeometryResult::miss);
 	}
 
@@ -160,26 +152,12 @@ final class CreateContraptionRaycastEngine {
 		int height,
 		boolean preserveCollisionFallback
 	) {
-		return snapshotCaptured(localRay, capturedEntries, minBuildHeight, height,
-			preserveCollisionFallback, EntityRaycastWork.unlimited());
-	}
-
-	static Snapshot snapshotCaptured(
-		LocalRay localRay,
-		Iterable<@Nullable CaptureEntry> capturedEntries,
-		int minBuildHeight,
-		int height,
-		boolean preserveCollisionFallback,
-		EntityRaycastWork work
-	) {
 		Objects.requireNonNull(capturedEntries, "capturedEntries");
 		Map<BlockPos, CapturedBlock> blocks = new HashMap<>();
 		Set<BlockPos> hiddenPositions = new HashSet<>();
 		int index = 0;
 		Iterator<@Nullable CaptureEntry> entries = capturedEntries.iterator();
 		while (entries.hasNext()) {
-			// The live iterable maps its next native entry only after admission.
-			work.readLocalBlock();
 			@Nullable CaptureEntry entry = entries.next();
 			if (entry == null) {
 				throw new IllegalStateException(
@@ -192,7 +170,6 @@ final class CreateContraptionRaycastEngine {
 			}
 			index++;
 		}
-		if (!work.complete()) throw new EntityRaycastWork.Exhausted();
 		return snapshot(localRay, blocks, hiddenPositions, minBuildHeight, height, preserveCollisionFallback);
 	}
 

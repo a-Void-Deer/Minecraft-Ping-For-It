@@ -6,5 +6,5 @@ import org.jetbrains.annotations.NotNullByDefault;
 @NotNullByDefault
 @FunctionalInterface
 public interface EntityParentFrameLookup {
-	EntityFrameResolution resolve(Entity entity, EntityRaycastWork work);
+	EntityFrameResolution resolve(Entity entity);
 }

@@ -1,6 +1,5 @@
 package nx.pingwheel.common.math;
 
-import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -17,8 +16,8 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
-import nx.pingwheel.common.interaction.candidate.*;
-import nx.pingwheel.common.testing.DiagnosticLogCapture;
+import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.interaction.candidate.CandidateCollector;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.BeforeAll;
@@ -42,7 +41,7 @@ class LoadedExactCandidateTest {
 		Entity excluded = entity(EntityType.COW, 0, 0);
 		var candidates = Raycast.ordinaryCandidates(List.of(nativeFirst), List.of(nativeFirst, protruding, unrelated),
 			excluded, registry.snapshot(), POLICY);
-		var selected = Raycast.traceEntityCandidates(candidates, START, END, POLICY, registry.snapshot(), request(EntityRaycastWork.unlimited())).orElseThrow();
+		var selected = Raycast.traceEntityCandidates(candidates, START, END, POLICY, registry.snapshot(), request()).orElseThrow();
 		assertSame(nativeFirst, ((EntityHitResult) selected.hitResult()).getEntity(), "native first wins equal exact distance");
 		assertEquals(2, calls.get(), "native/loaded duplicate is only traced once; unowned loaded supplement is not admitted");
 		assertEquals(new Vec3(3, .5, 0), selected.worldPoint().orElseThrow());
@@ -57,47 +56,27 @@ class LoadedExactCandidateTest {
 		Entity near = entity(EntityType.PIG, 2, 0), far = entity(EntityType.PIG, 30_000_000, 0);
 		try (var ignored = EntitySelectionBlacklist.INSTANCE.register(value -> value == far)) {
 			assertTrue(Raycast.traceEntityCandidates(List.of(near, far), START, END, POLICY, snapshot,
-				request(EntityRaycastWork.unlimited())).isEmpty());
+				request()).isEmpty());
 			assertEquals(1, calls.get());
 		}
 		assertEquals(EntityLocalGeometryRegistry.CandidateAdmission.LOADED_EXACT, snapshot.firstOwner(far).admission());
 	}
 
-	@Test void preciseBypassesRawBoundsOnlyForDeclaredOwnersAndCountsEveryVisitBeforeDedup() {
-		var registry = new EntityLocalGeometryRegistry(); AtomicInteger calls = new AtomicInteger(), visits = new AtomicInteger();
+	@Test void preciseBypassesRawBoundsOnlyForDeclaredExactOwnersAndDeduplicatesByIdentity() {
+		var registry = new EntityLocalGeometryRegistry(); AtomicInteger calls = new AtomicInteger();
 		registry.register(id("rotor"), 0, List.of(ResourceLocation.withDefaultNamespace("pig")),
 			EntityLocalGeometryRegistry.CandidateAdmission.LOADED_EXACT,
 			(entity, request) -> { calls.incrementAndGet(); return EntityLocalGeometryResult.hit(hit(.4)); });
 		Entity rotor = entity(EntityType.PIG, 30_000_000, 30_000_000), offRay = entity(EntityType.COW, 4, 10);
 		@Unmodifiable List<Entity> raw = List.of(offRay, rotor, rotor);
 		CandidateCollector collector = new CandidateCollector();
-		assertTrue(collect(counted(raw, visits), registry, 3, request(EntityRaycastWork.unlimited()), collector));
-		assertEquals(3, visits.get()); assertEquals(1, calls.get()); assertEquals(1, collector.evidence().size());
-		assertEquals(4, collector.evidence().getFirst().distance());
-		visits.set(0);
-		assertFalse(collect(counted(raw, visits), registry, 0, request(EntityRaycastWork.unlimited()), new CandidateCollector()));
-		assertEquals(0, visits.get(), "zero budget must not consume the raw iterator");
-		visits.set(0);
-		assertFalse(collect(counted(raw, visits), registry, 2, request(EntityRaycastWork.unlimited()), new CandidateCollector()));
-		assertEquals(2, visits.get(), "a duplicate still costs its actual raw visit");
-	}
-
-	@Test void caughtWorkExhaustionCannotCertifyPrefixOrEmitMisleadingProviderFailure() {
-		var registry = new EntityLocalGeometryRegistry();
-		registry.register(id("rotor"), 0, List.of(ResourceLocation.withDefaultNamespace("pig")),
-			EntityLocalGeometryRegistry.CandidateAdmission.LOADED_EXACT, (entity, request) -> {
-				try { request.work().callProvider(); } catch (EntityRaycastWork.Exhausted ignored) { /* a broken provider hides it */ }
-				return EntityLocalGeometryResult.hit(hit(.2));
-			});
-		CandidateCollector collector = new CandidateCollector();
-		EntityRaycastWork work = EntityRaycastWork.bounded(new CandidateWorkBudget(new CandidateWorkLimits(0, 0, 0)));
-		try (var logs = new DiagnosticLogCapture()) {
-			assertFalse(collect(List.of(entity(EntityType.COW, 3, 0), entity(EntityType.PIG, 30_000_000, 0)), registry, 2,
-				request(work), collector));
-			assertFalse(work.complete());
-			assertEquals(1, collector.evidence().size(), "independent prefix may exist but cannot be certified");
-			assertTrue(logs.operation("entity-local-geometry").isEmpty());
-		}
+		Raycast.collectVisibleEntityCandidates(raw, new AABB(START, END).inflate(1), START, END, POLICY,
+			registry.snapshot(), request(), collector, "minecraft:overworld", null);
+		assertEquals(1, calls.get(), "the duplicate object must not invoke the exact owner twice");
+		assertEquals(1, collector.evidence().size());
+		var contact = collector.evidence().getFirst();
+		assertEquals(new Target.EntityTarget("minecraft:overworld", rotor.getUUID()), contact.snapshot().target());
+		assertEquals(4, contact.distance());
 	}
 
 	@Test void legacyOwnersDoNotStartLoadedSupplementAndExactEndpointIsStillExcluded() {
@@ -109,24 +88,11 @@ class LoadedExactCandidateTest {
 		registry.register(id("rotor"), 0, List.of(ResourceLocation.withDefaultNamespace("pig")),
 			EntityLocalGeometryRegistry.CandidateAdmission.LOADED_EXACT, (entity, request) -> EntityLocalGeometryResult.hit(hit(1)));
 		assertTrue(Raycast.traceEntityCandidates(List.of(entity(EntityType.PIG, 30_000_000, 0)), START, END, POLICY,
-			registry.snapshot(), request(EntityRaycastWork.unlimited())).isEmpty());
+			registry.snapshot(), request()).isEmpty());
 	}
 
-	private static boolean collect(Iterable<Entity> raw, EntityLocalGeometryRegistry registry, int visits,
-		EntityLocalRaycastRequest request, CandidateCollector collector) {
-		return Raycast.collectVisibleEntityCandidates(raw, new AABB(START, END).inflate(1), START, END, POLICY,
-			registry.snapshot(), request, new CandidateWorkBudget(new CandidateWorkLimits(0, visits, 0)), collector, "minecraft:overworld", null);
-	}
-	private static EntityLocalRaycastRequest request(EntityRaycastWork work) {
-		return new EntityLocalRaycastRequest(START, END, POLICY, 1, CollisionContext.empty(), Vec3.ZERO,
-			work, (entity, queryWork) -> EntityFrameResolution.world());
-	}
-	private static Iterable<Entity> counted(List<Entity> values, AtomicInteger visits) {
-		return () -> new Iterator<>() {
-			private final Iterator<Entity> source = values.iterator();
-			@Override public boolean hasNext() { return source.hasNext(); }
-			@Override public Entity next() { visits.incrementAndGet(); return source.next(); }
-		};
+	private static EntityLocalRaycastRequest request() {
+		return new EntityLocalRaycastRequest(START, END, POLICY, 1, CollisionContext.empty(), Vec3.ZERO);
 	}
 	private static LocalGeometryHit hit(double t) {
 		return new LocalGeometryHit(t, BlockPos.ZERO, LocalGeometryKind.BLOCK, Blocks.STONE.defaultBlockState(),

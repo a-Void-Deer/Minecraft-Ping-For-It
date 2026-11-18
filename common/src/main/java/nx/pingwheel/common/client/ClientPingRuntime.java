@@ -80,7 +80,6 @@ import nx.pingwheel.common.client.spatial.PreciseCaptureRefresh;
 import nx.pingwheel.common.client.input.LookInputTracker;
 import nx.pingwheel.common.config.SpatialSelectorSettings;
 import nx.pingwheel.common.interaction.candidate.FrozenCandidateAcquisition;
-import nx.pingwheel.common.interaction.candidate.CandidateWorkLimits;
 import nx.pingwheel.common.interaction.candidate.Candidate;
 import nx.pingwheel.common.interaction.candidate.CaptureEquivalenceKey;
 import nx.pingwheel.common.interaction.candidate.PreciseSlot;
@@ -1702,7 +1701,7 @@ public final class ClientPingRuntime {
 			|| !activeInteraction.isCurrent(inputs.token())) return PreciseCaptureRefresh.Scan.incomplete();
 		ClientLevel level = game.level;
 		var trace = Raycast.traceDirectionalCandidates(inputs.token(), inputs.ray(), inputs.nativeDistance(),
-			inputs.pingDistance(), inputs.policy(), CandidateWorkLimits.defaults());
+			inputs.pingDistance(), inputs.policy());
 		if (trace.isEmpty()) return PreciseCaptureRefresh.Scan.incomplete();
 		if (trace.orElseThrow().candidates().isEmpty()) return PreciseCaptureRefresh.Scan.incomplete();
 		var selection = trace.orElseThrow().ordinarySelection();
@@ -1788,8 +1787,7 @@ public final class ClientPingRuntime {
 
 		pendingRay = pressRay;
 		var distance = selectorNativeDistance;
-		var trace = Raycast.traceDirectionalCandidates(token, pressRay, distance, selectorPingDistance, selectorPolicy,
-			CandidateWorkLimits.defaults());
+		var trace = Raycast.traceDirectionalCandidates(token, pressRay, distance, selectorPingDistance, selectorPolicy);
 		var raycastSelection = trace.map(Raycast.SelectorTrace::ordinarySelection);
 		Optional<FrozenCandidateAcquisition> acquisition = trace.flatMap(Raycast.SelectorTrace::candidates);
 		@Nullable HitResult hitResult = raycastSelection.map(nx.pingwheel.common.math.RaycastSelection::hitResult).orElse(null);

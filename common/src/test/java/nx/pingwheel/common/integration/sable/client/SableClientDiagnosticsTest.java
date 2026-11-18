@@ -9,8 +9,6 @@ import nx.pingwheel.common.integration.ModContext;
 import nx.pingwheel.common.integration.sable.SableDiagnostics;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.interaction.candidate.CandidateCollector;
-import nx.pingwheel.common.interaction.candidate.CandidateWorkBudget;
-import nx.pingwheel.common.interaction.candidate.CandidateWorkLimits;
 import nx.pingwheel.common.math.RaycastPolicy;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
@@ -38,7 +36,7 @@ class SableClientDiagnosticsTest {
 	}
 
 	@Test
-	void supplementalIncompleteUsesItsFiniteHandlingAndKeepsTheGuardUsable() throws ReflectiveOperationException {
+	void supplementalSourceFailureUsesItsFiniteHandlingAndKeepsTheGuardUsable() throws ReflectiveOperationException {
 		SableDiagnostics.Recording diagnostics = SableDiagnostics.recording();
 		SableClientProvider.setDiagnosticsForTests(diagnostics);
 		ModContext.HasSable = true;
@@ -52,8 +50,7 @@ class SableClientDiagnosticsTest {
 		boolean complete = SableClientProvider.candidateBlocks().collectSupplemental(
 			allocate(ClientLevel.class), Vec3.ZERO, new Vec3(1, 0, 0),
 			new RaycastPolicy(RaycastPolicy.BlockMode.OUTLINE, RaycastPolicy.FluidMode.NONE, false),
-			CollisionContext.empty(), Vec3.ZERO,
-			new CandidateWorkBudget(new CandidateWorkLimits(64, 64, 4)), new CandidateCollector());
+			CollisionContext.empty(), Vec3.ZERO, new CandidateCollector());
 
 		assertFalse(complete);
 		assertTrue(diagnostics.events().stream().anyMatch(event ->

@@ -20,7 +20,7 @@ public final class PickingFrameContext implements AutoCloseable {
 	public interface Access {
 		Scope openScope();
 		RaycastSelection normalize(BlockHitResult hit);
-		EntityFrameResolution entityFrame(Entity entity, EntityRaycastWork work);
+		EntityFrameResolution entityFrame(Entity entity);
 	}
 	@NotNullByDefault
 	public static final class Unavailable extends RuntimeException {
@@ -55,9 +55,9 @@ public final class PickingFrameContext implements AutoCloseable {
 					unknownBlockFrame && hit.getType() == HitResult.Type.BLOCK
 						? Optional.empty() : Optional.of(hit.getLocation()), Optional.empty());
 			}
-			@Override public EntityFrameResolution entityFrame(Entity entity, EntityRaycastWork work) {
+			@Override public EntityFrameResolution entityFrame(Entity entity) {
 				return unknownBlockFrame && nx.pingwheel.common.integration.aeronautics.AeroRotorScope.matches(entity)
-					? EntityFrameResolution.unavailable() : SableEntityFrames.logical(entity, work);
+					? EntityFrameResolution.unavailable() : SableEntityFrames.logical(entity);
 			}
 		};
 	}
@@ -71,9 +71,9 @@ public final class PickingFrameContext implements AutoCloseable {
 		}
 		return access.normalize(hit);
 	}
-	public EntityFrameResolution entityFrame(Entity entity, EntityRaycastWork work) {
+	public EntityFrameResolution entityFrame(Entity entity) {
 		if (closed) throw new IllegalStateException("picking frame is closed");
-		return access.entityFrame(entity, work);
+		return access.entityFrame(entity);
 	}
 	@Override public void close() { closed = true; }
 }

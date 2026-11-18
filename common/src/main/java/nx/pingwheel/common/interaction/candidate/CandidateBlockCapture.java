@@ -12,20 +12,20 @@ import nx.pingwheel.common.interaction.MinecraftTargetSnapshotFactory;
 import nx.pingwheel.common.interaction.TargetSnapshot;
 import nx.pingwheel.common.math.RaycastSelection;
 
-/** Press-only mapping port for optional block providers. Must use the supplied endpoints and budget. */
+/** Synchronous candidate mapping port for optional block providers. Must use the supplied endpoints. */
 @FunctionalInterface
 public interface CandidateBlockCapture {
-	Result capture(Level level, BlockHitResult hit, Vec3 start, Vec3 end, CandidateWorkBudget budget);
+	Result capture(Level level, BlockHitResult hit, Vec3 start, Vec3 end);
 
 	/** Independent provider acquisition: may find a surface behind a blocker or after native MISS. */
 	default boolean collectSupplemental(Level level, Vec3 start, Vec3 end, RaycastPolicy policy,
-		CollisionContext collisionContext, Vec3 cameraFeet, CandidateWorkBudget budget, CandidateCollector collector) {
+		CollisionContext collisionContext, Vec3 cameraFeet, CandidateCollector collector) {
 		return true;
 	}
 
 	static CandidateBlockCapture nativeBlocks() {
 		return new CandidateBlockCapture() {
-			@Override public Result capture(Level level, BlockHitResult hit, Vec3 start, Vec3 end, CandidateWorkBudget budget) {
+			@Override public Result capture(Level level, BlockHitResult hit, Vec3 start, Vec3 end) {
 				return new Result(Optional.of(MinecraftTargetSnapshotFactory.fromCandidateSelection(level,
 					RaycastSelection.withoutLocalGeometry(hit))), true);
 			}

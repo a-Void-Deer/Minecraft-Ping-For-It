@@ -135,7 +135,7 @@ public class Raycast {
 			policy,
 			1.0f,
 			collisionContext,
-			cameraEntity.position(), EntityRaycastWork.unlimited(), frames == null
+			cameraEntity.position(), frames == null
 				? nx.pingwheel.common.integration.sable.SableEntityFrames::logical : frames::entityFrame);
 		@Nullable EntitySelection entitySelection = traceEntity(
 			cameraEntity,
@@ -155,39 +155,39 @@ public class Raycast {
 	}
 
 	/**
-	 * Additive press-start API. Use {@code ordinarySelection()} in the existing native/Sable/DH
+	 * Captures the native reference and supplemental candidates on the game thread. Use
+	 * {@code ordinarySelection()} in the existing native/Sable/DH
 	 * pipeline, then carry the optional {@code candidates()} to coordinator.complete(token,
 	 * finalSnapshot, pressRay, candidates). Do not call this API from release or a DH callback.
-	 * Ordinary tracing retains its native distance and is not charged to supplemental budgets.
+	 * The native reference and supplemental scans retain their separate frozen ranges.
 	 */
 	public static Optional<SelectorTrace> traceDirectionalCandidates(
 		InteractionToken token, CapturedRay ray, double nativeDistance, double pingDistance,
-		RaycastPolicy policy, CandidateWorkLimits limits, CandidateBlockCapture blockCapture
+		RaycastPolicy policy, CandidateBlockCapture blockCapture
 	) {
 		@Nullable Entity camera = Game == null ? null : Game.cameraEntity;
 		if (camera == null || camera.level() == null) return Optional.empty();
-		return traceDirectionalCandidates(camera, token, ray, nativeDistance, pingDistance, policy, limits, blockCapture);
+		return traceDirectionalCandidates(camera, token, ray, nativeDistance, pingDistance, policy, blockCapture);
 	}
 
 	/** Production native mapping plus independent transformed Sable supplementation. */
 	public static Optional<SelectorTrace> traceDirectionalCandidates(
 		InteractionToken token, CapturedRay ray, double nativeDistance, double pingDistance,
-		RaycastPolicy policy, CandidateWorkLimits limits
+		RaycastPolicy policy
 	) {
-		return traceDirectionalCandidates(token, ray, nativeDistance, pingDistance, policy, limits,
+		return traceDirectionalCandidates(token, ray, nativeDistance, pingDistance, policy,
 			nx.pingwheel.common.integration.sable.client.SableClientProvider.candidateBlocks());
 	}
 
 	/** Explicit game-thread camera adapter, useful to integrations without a second client-state owner. */
 	public static Optional<SelectorTrace> traceDirectionalCandidates(
 		Entity camera, InteractionToken token, CapturedRay ray, double nativeDistance, double pingDistance,
-		RaycastPolicy policy, CandidateWorkLimits limits, CandidateBlockCapture blockCapture
+		RaycastPolicy policy, CandidateBlockCapture blockCapture
 	) {
 		Objects.requireNonNull(camera, "camera");
 		Objects.requireNonNull(token, "token");
 		Objects.requireNonNull(ray, "ray");
 		Objects.requireNonNull(policy, "policy");
-		Objects.requireNonNull(limits, "limits");
 		Objects.requireNonNull(blockCapture, "blockCapture");
 		if (camera.level() == null) return Optional.empty();
 		if (!Double.isFinite(nativeDistance) || !Double.isFinite(pingDistance)
@@ -205,33 +205,29 @@ public class Raycast {
 		try (@Nullable PickingFrameContext frames = camera.level() instanceof ClientLevel client
 			? PickingFrameContext.open(client) : null) {
 			return traceDirectionalCandidates(camera, token, ray, nativeDistance, pingDistance, policy,
-				limits, blockCapture, owners, frames, start, direction, end);
+				blockCapture, owners, frames, start, direction, end);
 		}
 	}
 
 	private static Optional<SelectorTrace> traceDirectionalCandidates(Entity camera, InteractionToken token,
 		CapturedRay ray, double nativeDistance, double pingDistance, RaycastPolicy policy,
-		CandidateWorkLimits limits, CandidateBlockCapture blockCapture, EntityLocalGeometryRegistry.Snapshot owners,
+		CandidateBlockCapture blockCapture, EntityLocalGeometryRegistry.Snapshot owners,
 		@Nullable PickingFrameContext frames, Vec3 start, Vec3 direction, Vec3 end) {
 		RaycastSelection ordinary = traceDirectionalDetailed(camera, start, direction, nativeDistance, policy, owners, frames)
 			.orElseThrow();
 		CandidateCollector collector = new CandidateCollector();
-		CandidateWorkBudget budget = new CandidateWorkBudget(limits);
-		EntityRaycastWork entityWork = EntityRaycastWork.bounded(budget);
 		EnumSet<PreciseTargetType> certified = EnumSet.noneOf(PreciseTargetType.class);
 		Level level = camera.level();
 		CollisionContext collisionContext = CollisionContext.of(camera);
 		EntityLocalRaycastRequest request = new EntityLocalRaycastRequest(start, end, policy,
-			1.0f, collisionContext, camera.position(), entityWork, frames == null
+			1.0f, collisionContext, camera.position(), frames == null
 				? nx.pingwheel.common.integration.sable.SableEntityFrames::logical : frames::entityFrame);
 		AABB bounds = new AABB(start, end).inflate(1);
 		try {
-			// ClientLevel's public native view is a lazy EntityLookup.byId.values view.
-			// There is no filtered getEntities or section walk before our visit counter.
-			boolean complete = level instanceof ClientLevel clientLevel
-				&& collectVisibleEntityCandidates(clientLevel.entitiesForRendering(), bounds, start, end,
-					policy, owners, request, budget, collector, level.dimension().location().toString(), camera);
-			if (complete && entityWork.complete()) {
+			if (level instanceof ClientLevel clientLevel) {
+				// Use the lazy native lookup, not a filtered getEntities query or section walk.
+				collectVisibleEntityCandidates(clientLevel.entitiesForRendering(), bounds, start, end,
+					policy, owners, request, collector, level.dimension().location().toString(), camera);
 				certified.add(PreciseTargetType.DROPPED_ITEM);
 				certified.add(PreciseTargetType.ENTITY);
 			}
@@ -243,10 +239,10 @@ public class Raycast {
 		try {
 			boolean[] providerComplete = {true};
 			ClipContext context = PingClipContext.create(start, end, policy, collisionContext);
-			LoadedCandidateBlockView view = new LoadedCandidateBlockView(level, budget);
+			LoadedCandidateBlockView view = new LoadedCandidateBlockView(level);
 			boolean complete = NativeBlockCandidateScan.scan(view, level::isLoaded,
-				context, budget, hit -> {
-					CandidateBlockCapture.Result result = blockCapture.capture(level, hit, start, end, budget);
+				context, hit -> {
+					CandidateBlockCapture.Result result = blockCapture.capture(level, hit, start, end);
 					providerComplete[0] &= result.complete();
 					result.snapshot().filter(snapshot -> !(snapshot.target() instanceof nx.pingwheel.common.domain.Target.LocationTarget))
 						.ifPresent(snapshot -> {
@@ -259,7 +255,7 @@ public class Raycast {
 						});
 				});
 			boolean externalComplete = blockCapture.collectSupplemental(level, start, end, policy,
-				collisionContext, camera.position(), budget, collector);
+				collisionContext, camera.position(), collector);
 			if (complete && providerComplete[0] && view.complete() && externalComplete) {
 				certified.add(PreciseTargetType.ENTITY_BLOCK);
 				certified.add(PreciseTargetType.BLOCK);
@@ -299,35 +295,33 @@ public class Raycast {
 				+ " policy=" + policy, failure);
 	}
 
-	static boolean collectEntityCandidates(Iterable<Entity> entities, Vec3 start, Vec3 end,
+	static void collectEntityCandidates(Iterable<@Nullable Entity> entities, Vec3 start, Vec3 end,
 		RaycastPolicy policy, EntityLocalGeometryRegistry.Snapshot owners, EntityLocalRaycastRequest request,
-		CandidateWorkBudget budget, CandidateCollector collector, String dimensionId, @Nullable Entity excluded
+		CandidateCollector collector, String dimensionId, @Nullable Entity excluded
 	) {
-		var iterator = entities.iterator();
-		while (iterator.hasNext()) {
-			if (!budget.visitEntity()) return false;
-			@Nullable Entity entity = iterator.next();
+		for (@Nullable Entity entity : entities) {
 			if (entity == null || entity == excluded) continue;
-			// Reuses exactly the ordinary ownership/non-hit/filter/endpoint path, no coarse revival.
-			Optional<RaycastSelection> selection = traceEntityCandidates(List.of(entity), start, end, policy, owners, request);
-			selection.ifPresent(hit -> {
-				var snapshot = MinecraftTargetSnapshotFactory.fromEntityCandidateSelection(dimensionId, hit);
-				collector.add(new CandidateEvidence(snapshot, start.distanceTo(hit.hitResult().getLocation())));
-			});
+			collectEntityCandidate(entity, start, end, policy, owners, request, collector, dimensionId);
 		}
-		return request.work().complete();
 	}
 
 	/** Same native lookup enumeration as production, before bounding-box or selection filters. */
-	static boolean collectVisibleEntityCandidates(Iterable<Entity> entities, AABB bounds, Vec3 start, Vec3 end,
+	static void collectVisibleEntityCandidates(Iterable<@Nullable Entity> entities, AABB bounds, Vec3 start, Vec3 end,
 		RaycastPolicy policy, EntityLocalGeometryRegistry.Snapshot owners, EntityLocalRaycastRequest request,
-		CandidateWorkBudget budget, CandidateCollector collector, String dimensionId, @Nullable Entity excluded
+		CandidateCollector collector, String dimensionId, @Nullable Entity excluded
 	) {
-		return NativeEntityCandidateScan.scan(entities, bounds, excluded, budget, entity -> loadedExact(owners, entity), entity ->
-			traceEntityCandidates(List.of(entity), start, end, policy, owners, request).ifPresent(hit -> {
-				var snapshot = MinecraftTargetSnapshotFactory.fromEntityCandidateSelection(dimensionId, hit);
-				collector.add(new CandidateEvidence(snapshot, start.distanceTo(hit.hitResult().getLocation())));
-			})) && request.work().complete();
+		NativeEntityCandidateScan.scan(entities, bounds, excluded, entity -> loadedExact(owners, entity), entity ->
+			collectEntityCandidate(entity, start, end, policy, owners, request, collector, dimensionId));
+	}
+
+	private static void collectEntityCandidate(Entity entity, Vec3 start, Vec3 end, RaycastPolicy policy,
+		EntityLocalGeometryRegistry.Snapshot owners, EntityLocalRaycastRequest request,
+		CandidateCollector collector, String dimensionId) {
+		// Reuses the ordinary ownership/non-hit/filter/endpoint path, without coarse revival.
+		traceEntityCandidates(List.of(entity), start, end, policy, owners, request).ifPresent(hit -> {
+			var snapshot = MinecraftTargetSnapshotFactory.fromEntityCandidateSelection(dimensionId, hit);
+			collector.add(new CandidateEvidence(snapshot, start.distanceTo(hit.hitResult().getLocation())));
+		});
 	}
 
 	private static Vec3 vec(WorldVector value) { return new Vec3(value.x(), value.y(), value.z()); }
@@ -443,7 +437,6 @@ public class Raycast {
 				}
 
 				EntityLocalGeometryResult localResult = owner.trace(ent, request);
-				if (!request.work().complete()) return Optional.empty();
 
 				if (localResult.outcome() != EntityLocalGeometryResult.Outcome.HIT) {
 					continue;

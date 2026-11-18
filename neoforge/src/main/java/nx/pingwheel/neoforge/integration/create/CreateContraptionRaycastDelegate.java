@@ -17,7 +17,6 @@ import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.math.EntityLocalGeometryResult;
 import nx.pingwheel.common.math.EntityLocalGeometryResolver;
 import nx.pingwheel.common.math.EntityLocalRaycastRequest;
-import nx.pingwheel.common.math.EntityRaycastWork;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -44,23 +43,19 @@ public final class CreateContraptionRaycastDelegate implements EntityLocalGeomet
 		}
 
 		return traceCaptured(contraptionEntity, request,
-			worldPosition -> contraptionEntity.toLocalVector(worldPosition, request.partialTick()),
-			EntityRaycastWork.unlimited());
+			worldPosition -> contraptionEntity.toLocalVector(worldPosition, request.partialTick()));
 	}
 
-	/** Shared transient capture; legacy Create deliberately supplies unlimited work. */
+	/** Shared transient capture for the legacy Create and exact Aeronautics routes. */
 	static EntityLocalGeometryResult traceCaptured(
 		AbstractContraptionEntity contraptionEntity,
 		EntityLocalRaycastRequest request,
-		CreateContraptionRaycastEngine.LocalTransform transform,
-		EntityRaycastWork work
+		CreateContraptionRaycastEngine.LocalTransform transform
 	) {
-		work.callProvider();
 		@Nullable Contraption contraption = contraptionEntity.getContraption();
 		if (contraption == null || contraption.bounds == null) {
 			return EntityLocalGeometryResult.unavailable();
 		}
-		work.callProvider();
 		@Nullable Map<BlockPos, StructureBlockInfo> liveBlocks = contraption.getBlocks();
 		if (liveBlocks == null || liveBlocks.isEmpty()) {
 			return EntityLocalGeometryResult.unavailable();
@@ -72,17 +67,14 @@ public final class CreateContraptionRaycastDelegate implements EntityLocalGeomet
 			return EntityLocalGeometryResult.unavailable();
 		}
 
-		work.callProvider();
 		@Nullable BlockGetter nativeBoundsView = nativeBoundsView(contraption);
 		if (nativeBoundsView == null) {
 			return EntityLocalGeometryResult.unavailable();
 		}
-		work.callProvider();
 		int minBuildHeight = nativeBoundsView.getMinBuildHeight();
-		work.callProvider();
 		int height = nativeBoundsView.getHeight();
-		// Do not size or copy the live map before admission. snapshotCaptured
-		// charges each visit before next() consumes and copies the native entry.
+		// Iterate the live map lazily: a malformed or concurrently changed later
+		// entry invalidates the whole attempt instead of escaping from a copied prefix.
 		Iterable<CreateContraptionRaycastEngine.CaptureEntry> capturedEntries = () -> new Iterator<>() {
 			private final Iterator<Map.Entry<BlockPos, StructureBlockInfo>> entries = liveBlocks.entrySet().iterator();
 			@Override public boolean hasNext() { return entries.hasNext(); }
@@ -92,10 +84,8 @@ public final class CreateContraptionRaycastDelegate implements EntityLocalGeomet
 				@Nullable StructureBlockInfo blockInfo = entry.getValue();
 				@Nullable BlockState state = blockInfo == null ? null : blockInfo.state();
 				BlockPos position = CreateContraptionRaycastEngine.requireCaptureEntry(localPosition, state);
-				work.callProvider();
 				boolean hiddenInPortal = contraption.isHiddenInPortal(position);
 				// Existing client state only; never hydrate NBT or query the world.
-				work.callProvider();
 				@Nullable BlockEntity blockEntity = contraption.getBlockEntityClientSide(position);
 				return new CreateContraptionRaycastEngine.CaptureEntry(position, state, blockEntity, hiddenInPortal);
 			}
@@ -107,9 +97,9 @@ public final class CreateContraptionRaycastDelegate implements EntityLocalGeomet
 			capturedEntries,
 			minBuildHeight,
 			height,
-			preserveCollisionFallback, work);
+			preserveCollisionFallback);
 		if (snapshot.positions().isEmpty()) return EntityLocalGeometryResult.unavailable();
-		return CreateContraptionRaycastEngine.trace(request, snapshot, work);
+		return CreateContraptionRaycastEngine.trace(request, snapshot);
 	}
 
 	/**

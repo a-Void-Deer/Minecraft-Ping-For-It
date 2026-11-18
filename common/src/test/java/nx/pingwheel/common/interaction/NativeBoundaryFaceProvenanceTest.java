@@ -31,8 +31,6 @@ import nx.pingwheel.common.domain.TargetResolver;
 import nx.pingwheel.common.interaction.cancel.WorldVector;
 import nx.pingwheel.common.interaction.candidate.Candidate;
 import nx.pingwheel.common.interaction.candidate.CandidateEvidence;
-import nx.pingwheel.common.interaction.candidate.CandidateWorkBudget;
-import nx.pingwheel.common.interaction.candidate.CandidateWorkLimits;
 import nx.pingwheel.common.interaction.candidate.FrozenCandidateAcquisition;
 import nx.pingwheel.common.interaction.candidate.FrozenCandidateSet;
 import nx.pingwheel.common.interaction.candidate.NativeBlockCandidateScan;
@@ -155,7 +153,7 @@ class NativeBoundaryFaceProvenanceTest {
 		List<BlockHitResult> hits = new ArrayList<>();
 		boolean complete = NativeBlockCandidateScan.scan(new ChestWorld(), ignored -> true,
 			new ClipContext(start, end, ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, CollisionContext.empty()),
-			new CandidateWorkBudget(CandidateWorkLimits.defaults()), hits::add);
+			hits::add);
 		assertTrue(complete, "production native scan must complete");
 		return hits.stream().filter(hit -> hit.getBlockPos().equals(CHEST_POS)).toList();
 	}

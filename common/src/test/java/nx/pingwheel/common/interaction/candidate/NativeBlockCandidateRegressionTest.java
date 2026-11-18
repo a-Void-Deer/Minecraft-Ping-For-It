@@ -5,7 +5,6 @@ import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import net.minecraft.SharedConstants;
@@ -26,6 +25,8 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -129,7 +130,9 @@ class NativeBlockCandidateRegressionTest {
 		world.entities.clear();
 		LoadedCandidateBlockView missing = new LoadedCandidateBlockView(world, ignored -> true);
 		List<BlockHitResult> hits = new ArrayList<>();
-		scan(missing, new Vec3(.5, .5, .5), new Vec3(8, .5, .5), ClipContext.Block.VISUAL, ClipContext.Fluid.NONE, hits);
+		assertTrue(scan(missing, new Vec3(.5, .5, .5), new Vec3(8, .5, .5), ClipContext.Block.VISUAL, ClipContext.Fluid.NONE, hits));
+		assertEquals(List.of(new BlockPos(6, 0, 0)), hits.stream().map(BlockHitResult::getBlockPos).toList(),
+			"the farther chest was observed but cannot be certified");
 		assertFalse(missing.complete(), "empty moving geometry cannot certify farther chest when required BE is absent");
 		world.beReads.set(0);
 		LoadedCandidateBlockView unloaded = new LoadedCandidateBlockView(world, pos -> !pos.equals(new BlockPos(3, 0, 0)));
@@ -139,48 +142,36 @@ class NativeBlockCandidateRegressionTest {
 	}
 
 	@Test
-	void shapeNeighborAndBeReadsConsumeTheSameProductionReadBudgetBeforeAccess() throws Exception {
-		MemoryWorld world = pistonWorld();
-		var budget = new CandidateWorkBudget(new CandidateWorkLimits(1, 0, 0));
-		var view = new LoadedCandidateBlockView(world, ignored -> true, budget);
-		assertSame(world.blocks.get(new BlockPos(3, 0, 0)), view.getBlockState(new BlockPos(3, 0, 0)));
-		assertThrows(ExactNativeShapeClip.Incomplete.class, () -> view.getBlockEntity(new BlockPos(3, 0, 0)));
-		assertEquals(0, world.beReads.get(), "exhaustion is checked before native BE access");
-		assertFalse(view.complete());
-	}
-
-	@Test
-	void exactBoxBudgetFailsClosedRatherThanCertifyPrefix() {
-		var budget = new CandidateWorkBudget(new CandidateWorkLimits(10, 0, 0, 0));
-		assertThrows(ExactNativeShapeClip.Incomplete.class, () -> ExactNativeShapeClip.clip(Shapes.block(),
-			new Vec3(-1, .5, .5), new Vec3(2, .5, .5), BlockPos.ZERO, budget));
-	}
-
-	@Test
-	void productionScanReportsIncompleteWhenNativeShapeBoxWorkIsExhausted() {
+	void malformedLaterNativeShapeMarksAHitBearingPrefixIncomplete() {
 		MemoryWorld world = new MemoryWorld();
-		world.blocks.put(new BlockPos(1, 0, 0), Blocks.STONE.defaultBlockState());
-		world.blocks.put(new BlockPos(3, 0, 0), Blocks.CHEST.defaultBlockState());
+		BlockPos first = new BlockPos(1, 0, 0), malformed = new BlockPos(3, 0, 0);
+		world.blocks.put(first, Blocks.STONE.defaultBlockState());
+		var context = new ClipContext(new Vec3(.5, .5, .5), new Vec3(8, .5, .5), ClipContext.Block.OUTLINE,
+			ClipContext.Fluid.NONE, CollisionContext.empty()) {
+			@Override public VoxelShape getBlockShape(BlockState state, BlockGetter view, BlockPos pos) {
+				return malformed.equals(pos) ? Shapes.INFINITY : super.getBlockShape(state, view, pos);
+			}
+		};
 		List<BlockHitResult> hits = new ArrayList<>();
-		assertFalse(NativeBlockCandidateScan.scan(world, ignored -> true,
-			new ClipContext(new Vec3(.5, .5, .5), new Vec3(8, .5, .5), ClipContext.Block.OUTLINE,
-				ClipContext.Fluid.NONE, CollisionContext.empty()),
-			new CandidateWorkBudget(new CandidateWorkLimits(1000, 0, 0, 0)), hits::add));
-		assertTrue(hits.isEmpty());
+		assertFalse(NativeBlockCandidateScan.scan(world, ignored -> true, context, hits::add));
+		assertEquals(List.of(first), hits.stream().map(BlockHitResult::getBlockPos).toList(),
+			"the first hit is provisional, not a certified result of a complete scan");
 	}
 
 	@Test
 	void trueOriginContainmentAndOutwardFaceContactsDoNotUseALengthScaledProbe() {
-		BlockHitResult contained = ExactNativeShapeClip.clip(Shapes.block(), new Vec3(.5, .5, .5), new Vec3(2048, .5, .5),
-			BlockPos.ZERO, new CandidateWorkBudget(CandidateWorkLimits.defaults()));
+		@Nullable BlockHitResult contained = ExactNativeShapeClip.clip(Shapes.block(), new Vec3(.5, .5, .5),
+			new Vec3(2048, .5, .5), BlockPos.ZERO);
+		assertNotNull(contained);
 		assertEquals(new Vec3(.5, .5, .5), contained.getLocation());
 		assertTrue(contained.isInside());
 		assertInstanceOf(UnobservedFaceBlockHitResult.class, contained);
 		assertEquals(Direction.WEST, contained.getDirection());
 		assertNull(ExactNativeShapeClip.clip(Shapes.block(), new Vec3(0, .5, .5), new Vec3(-2048, .5, .5),
-			BlockPos.ZERO, new CandidateWorkBudget(CandidateWorkLimits.defaults())));
-		BlockHitResult inward = ExactNativeShapeClip.clip(Shapes.block(), new Vec3(0, .5, .5), new Vec3(2048, .5, .5),
-			BlockPos.ZERO, new CandidateWorkBudget(CandidateWorkLimits.defaults()));
+			BlockPos.ZERO));
+		@Nullable BlockHitResult inward = ExactNativeShapeClip.clip(Shapes.block(), new Vec3(0, .5, .5),
+			new Vec3(2048, .5, .5), BlockPos.ZERO);
+		assertNotNull(inward);
 		assertEquals(Direction.WEST, inward.getDirection());
 		assertFalse(inward.isInside());
 	}
@@ -200,8 +191,7 @@ class NativeBlockCandidateRegressionTest {
 		return world;
 	}
 	private static boolean scan(BlockGetter world, Vec3 start, Vec3 end, ClipContext.Block block, ClipContext.Fluid fluid, List<BlockHitResult> hits) {
-		return NativeBlockCandidateScan.scan(world, ignored -> true, new ClipContext(start, end, block, fluid, CollisionContext.empty()),
-			new CandidateWorkBudget(CandidateWorkLimits.defaults()), hits::add);
+		return NativeBlockCandidateScan.scan(world, ignored -> true, new ClipContext(start, end, block, fluid, CollisionContext.empty()), hits::add);
 	}
 	private static TargetSnapshot snapshot(MemoryWorld world, BlockHitResult hit) {
 		BlockPos pos = hit.getBlockPos(); BlockState state = world.getBlockState(pos);
@@ -217,7 +207,7 @@ class NativeBlockCandidateRegressionTest {
 		final AtomicInteger beReads = new AtomicInteger();
 		@Override public BlockState getBlockState(BlockPos pos) { return blocks.getOrDefault(pos, Blocks.AIR.defaultBlockState()); }
 		@Override public FluidState getFluidState(BlockPos pos) { return fluids.getOrDefault(pos, Fluids.EMPTY.defaultFluidState()); }
-		@Override public BlockEntity getBlockEntity(BlockPos pos) { beReads.incrementAndGet(); return entities.get(pos); }
+		@Override public @Nullable BlockEntity getBlockEntity(BlockPos pos) { beReads.incrementAndGet(); return entities.get(pos); }
 		@Override public int getHeight() { return 384; }
 		@Override public int getMinBuildHeight() { return -64; }
 	}

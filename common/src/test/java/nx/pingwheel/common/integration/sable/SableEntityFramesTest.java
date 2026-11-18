@@ -20,8 +20,6 @@ import dev.ryanhcode.sable.companion.SubLevelAccess;
 import dev.ryanhcode.sable.companion.math.Pose3d;
 import dev.ryanhcode.sable.companion.math.Pose3dc;
 import dev.ryanhcode.sable.companion.math.BoundingBox3dc;
-import nx.pingwheel.common.interaction.candidate.CandidateWorkBudget;
-import nx.pingwheel.common.interaction.candidate.CandidateWorkLimits;
 import org.jetbrains.annotations.Nullable;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -30,10 +28,10 @@ class SableEntityFramesTest {
 	@BeforeAll static void bootstrap() { SharedConstants.tryDetectVersion(); Bootstrap.bootStrap(); }
 	@Test void absentAndUnrelatedEntitiesNeverCallOptionalApi() {
 		AtomicInteger calls = new AtomicInteger();
-		SableEntityFrames.Access provider = (entity, work) -> { calls.incrementAndGet(); throw new AssertionError(); };
+		SableEntityFrames.Access provider = entity -> { calls.incrementAndGet(); throw new AssertionError(); };
 		Entity entity = new TestEntity();
-		assertEquals(EntityFrameResolution.Status.WORLD, SableEntityFrames.resolve(entity, EntityRaycastWork.unlimited(), false, true, provider).status());
-		assertEquals(EntityFrameResolution.Status.WORLD, SableEntityFrames.resolve(entity, EntityRaycastWork.unlimited(), true, false, provider).status());
+		assertEquals(EntityFrameResolution.Status.WORLD, SableEntityFrames.resolve(entity, false, true, provider).status());
+		assertEquals(EntityFrameResolution.Status.WORLD, SableEntityFrames.resolve(entity, true, false, provider).status());
 		assertEquals(0, calls.get());
 		boolean previous = ModContext.HasSable;
 		try {
@@ -44,13 +42,13 @@ class SableEntityFramesTest {
 	@Test void positiveContainingFramePreservesIdentityWhileFailuresNeverBecomeWorld() {
 		Entity entity = new TestEntity(); UUID id = UUID.randomUUID();
 		EntityParentFrame frame = EntityParentFrame.copyOf(new Matrix4d().translation(-30_000_000, 2, 3), new Quaterniond());
-		EntityFrameResolution resolution = SableEntityFrames.resolve(entity, EntityRaycastWork.unlimited(), true, true,
-			(value, work) -> EntityFrameResolution.contained(frame, id));
+		EntityFrameResolution resolution = SableEntityFrames.resolve(entity, true, true,
+			value -> EntityFrameResolution.contained(frame, id));
 		assertEquals(id, resolution.subLevelId().orElseThrow());
 		assertEquals(new Vec3(0, 2, 3), resolution.frame().orElseThrow().toWorld(new Vec3(30_000_000, 0, 0)));
 		for (Throwable failure : java.util.List.of(new IllegalStateException(), new NoClassDefFoundError())) {
-			EntityFrameResolution rejected = SableEntityFrames.resolve(entity, EntityRaycastWork.unlimited(), true, true,
-				(value, work) -> { if (failure instanceof RuntimeException runtime) throw runtime; throw (LinkageError) failure; });
+			EntityFrameResolution rejected = SableEntityFrames.resolve(entity, true, true,
+				value -> { if (failure instanceof RuntimeException runtime) throw runtime; throw (LinkageError) failure; });
 			assertEquals(EntityFrameResolution.Status.UNAVAILABLE, rejected.status());
 			assertTrue(rejected.frame().isEmpty()); assertTrue(rejected.subLevelId().isEmpty());
 		}
@@ -78,7 +76,7 @@ class SableEntityFramesTest {
 			((EntityFrameResolution) facade.getMethod("logical", Entity.class).invoke(null, new TestEntity())).status());
 	}
 
-	@Test void actualLogicalAdapterUsesCurrentNativeContainmentCopiesPoseAndChargesEachRead() {
+	@Test void actualLogicalAdapterUsesCurrentNativeContainmentAndCopiesPose() {
 		Entity entity = new TestEntity(); entity.setPos(30_000_000.25, 1, 30_000_000.5);
 		UUID id = UUID.randomUUID(); Pose3d pose = new Pose3d();
 		pose.rotationPoint().set(30_000_000, 0, 30_000_000); pose.position().set(4, 5, 6);
@@ -89,19 +87,13 @@ class SableEntityFramesTest {
 			@Override public UUID getUniqueId() { return id; }
 			@Override public @Nullable String getName() { return null; }
 		};
-		EntityRaycastWork work = EntityRaycastWork.bounded(new CandidateWorkBudget(new CandidateWorkLimits(0, 0, 7)));
-		var resolution = SableEntityFrameAccess.logical(entity, work, candidate -> {
+		var resolution = SableEntityFrameAccess.logical(entity, candidate -> {
 			assertSame(entity, candidate); assertEquals(30_000_000.25, candidate.position().x); return owner;
 		});
-		assertTrue(work.complete());
 		pose.position().set(100, 100, 100);
 		assertEquals(new Vec3(4.25, 6, 6.5), resolution.frame().orElseThrow().toWorld(entity.position()));
-		assertThrows(EntityRaycastWork.Exhausted.class, work::callProvider);
-		var tooSmall = EntityRaycastWork.bounded(new CandidateWorkBudget(new CandidateWorkLimits(0, 0, 6)));
-		assertThrows(EntityRaycastWork.Exhausted.class, () -> SableEntityFrameAccess.logical(entity, tooSmall, candidate -> owner));
-		assertFalse(tooSmall.complete());
-		assertEquals(EntityFrameResolution.Status.WORLD, SableEntityFrameAccess.logical(entity,
-			EntityRaycastWork.unlimited(), candidate -> null).status());
+		assertEquals(EntityFrameResolution.Status.WORLD,
+			SableEntityFrameAccess.logical(entity, candidate -> null).status());
 	}
 	@NotNullByDefault
 	private static final class TestEntity extends Entity {

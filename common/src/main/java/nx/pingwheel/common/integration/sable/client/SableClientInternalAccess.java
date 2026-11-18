@@ -10,6 +10,7 @@ import java.util.List;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.state.BlockState;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * The deliberately tiny reflective part of the Sable client adapter.
@@ -73,15 +74,8 @@ final class SableClientInternalAccess {
 
 	/** O(1) raw loaded list access, not Companion's filtered iterator with hidden scans in hasNext. */
 	List<?> loadedSubLevels(ClientLevel parent) throws ReflectiveOperationException {
-		return loadedSubLevels(parent, null);
-	}
-
-	List<?> loadedSubLevels(ClientLevel parent, nx.pingwheel.common.interaction.candidate.CandidateWorkBudget budget)
-		throws ReflectiveOperationException {
-		charge(budget);
 		Object container = invoke(getContainer, null, parent);
 		if (container == null) throw new IllegalStateException("Sable client container unavailable");
-		charge(budget);
 		Object values = invoke(supplementalMethods().getAllSubLevels(), container);
 		if (!(values instanceof List<?> list) || !(list instanceof java.util.RandomAccess)) {
 			throw new IllegalStateException("unsupported Sable loaded-sublevel list structure");
@@ -89,38 +83,27 @@ final class SableClientInternalAccess {
 		return list;
 	}
 
-	Object existingPlot(ClientLevel parent, Object subLevel,
-		nx.pingwheel.common.interaction.candidate.CandidateWorkBudget budget) throws ReflectiveOperationException {
+	@Nullable Object existingPlot(ClientLevel parent, Object subLevel) throws ReflectiveOperationException {
 		var methods = supplementalMethods();
-		charge(budget);
 		if (Boolean.TRUE.equals(invoke(methods.isRemoved(), subLevel))) return null;
-		charge(budget);
 		if (invoke(getLevel, subLevel) != parent) throw new IllegalStateException("Sable sublevel level mismatch");
-		charge(budget);
 		Object plot = invoke(methods.getPlot(), subLevel);
 		if (plot == null) throw new IllegalStateException("Sable local plot unavailable");
 		return plot;
 	}
 
-	boolean contains(Object plot, BlockPos pos,
-		nx.pingwheel.common.interaction.candidate.CandidateWorkBudget budget) throws ReflectiveOperationException {
-		charge(budget);
+	boolean contains(Object plot, BlockPos pos) throws ReflectiveOperationException {
 		return Boolean.TRUE.equals(invoke(supplementalMethods().plotContains(), plot, (double) pos.getX(), (double) pos.getZ()));
 	}
 
-	dev.ryanhcode.sable.companion.math.BoundingBox3ic bounds(Object plot,
-		nx.pingwheel.common.interaction.candidate.CandidateWorkBudget budget) throws ReflectiveOperationException {
-		charge(budget);
+	@Nullable dev.ryanhcode.sable.companion.math.BoundingBox3ic bounds(Object plot)
+		throws ReflectiveOperationException {
 		Object bounds = invoke(supplementalMethods().plotBounds(), plot);
 		if (bounds == null) return null;
 		if (!(bounds instanceof dev.ryanhcode.sable.companion.math.BoundingBox3ic value)) {
 			throw new IllegalStateException("unsupported Sable plot bounds");
 		}
 		return value;
-	}
-
-	private static void charge(nx.pingwheel.common.interaction.candidate.CandidateWorkBudget budget) {
-		if (budget != null && !budget.callProvider()) throw new nx.pingwheel.common.interaction.candidate.ExactNativeShapeClip.Incomplete();
 	}
 
 	private record SupplementalMethods(Method getAllSubLevels, Method isRemoved, Method getPlot,

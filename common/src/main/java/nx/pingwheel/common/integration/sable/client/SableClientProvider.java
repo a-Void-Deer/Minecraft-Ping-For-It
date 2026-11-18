@@ -159,17 +159,16 @@ public final class SableClientProvider {
 		var nativeBlocks = nx.pingwheel.common.interaction.candidate.CandidateBlockCapture.nativeBlocks();
 		return new nx.pingwheel.common.interaction.candidate.CandidateBlockCapture() {
 			@Override public Result capture(net.minecraft.world.level.Level level, BlockHitResult hit,
-				Vec3 start, Vec3 end, nx.pingwheel.common.interaction.candidate.CandidateWorkBudget budget) {
-				return nativeBlocks.capture(level, hit, start, end, budget);
+				Vec3 start, Vec3 end) {
+				return nativeBlocks.capture(level, hit, start, end);
 			}
 			@Override public boolean collectSupplemental(net.minecraft.world.level.Level level, Vec3 start, Vec3 end,
 				nx.pingwheel.common.math.RaycastPolicy policy, CollisionContext context, Vec3 cameraFeet,
-				nx.pingwheel.common.interaction.candidate.CandidateWorkBudget budget,
 				nx.pingwheel.common.interaction.candidate.CandidateCollector collector) {
 				if (!ModContext.HasSable) return true;
 				if (!enabled() || !(level instanceof ClientLevel clientLevel)) return false;
 				try {
-					return getAccess().collectSupplemental(clientLevel, start, end, policy, context, cameraFeet, budget, collector);
+					return getAccess().collectSupplemental(clientLevel, start, end, policy, context, cameraFeet, collector);
 				} catch (nx.pingwheel.common.interaction.candidate.ExactNativeShapeClip.Incomplete incomplete) {
 					diagnostics.capture("supplemental-ray", "incomplete");
 					return false;

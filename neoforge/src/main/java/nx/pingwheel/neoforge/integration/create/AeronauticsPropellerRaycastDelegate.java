@@ -11,7 +11,6 @@ import nx.pingwheel.common.math.EntityFrameResolution;
 import nx.pingwheel.common.math.EntityLocalGeometryResolver;
 import nx.pingwheel.common.math.EntityLocalGeometryResult;
 import nx.pingwheel.common.math.EntityLocalRaycastRequest;
-import nx.pingwheel.common.math.EntityRaycastWork;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 
@@ -23,8 +22,6 @@ public final class AeronauticsPropellerRaycastDelegate implements EntityLocalGeo
 
 	@Override
 	public EntityLocalGeometryResult trace(@Nullable Entity candidate, EntityLocalRaycastRequest request) {
-		EntityRaycastWork work = request.work();
-		work.callProvider();
 		if (!(candidate instanceof ControlledContraptionEntity rotor)
 			|| !AeroRotorScope.matches(rotor)
 			|| !rotor.isAlive() || rotor.isRemoved()
@@ -37,13 +34,11 @@ public final class AeronauticsPropellerRaycastDelegate implements EntityLocalGeo
 			return EntityLocalGeometryResult.unavailable();
 		}
 		// Current raw entity anchor, not interpolated/rendered or parent-local floats.
-		work.callProvider();
 		Vec3 nativeAnchor = rotor.position();
-		work.callProvider();
 		Optional<CreateContraptionRaycastEngine.LocalTransform> transform =
 			CreateContraptionRaycastEngine.modelTransform(resolution.frame().orElseThrow(),
 				nativeAnchor, rotor::applyLocalTransforms);
 		if (transform.isEmpty()) return EntityLocalGeometryResult.unavailable();
-		return CreateContraptionRaycastDelegate.traceCaptured(rotor, request, transform.orElseThrow(), work);
+		return CreateContraptionRaycastDelegate.traceCaptured(rotor, request, transform.orElseThrow());
 	}
 }

@@ -182,7 +182,7 @@ class PickingFrameContextTest {
 	private record TestAccess(AtomicInteger depth) implements PickingFrameContext.Access {
 		@Override public PickingFrameContext.Scope openScope() { depth.incrementAndGet(); return depth::decrementAndGet; }
 		@Override public RaycastSelection normalize(BlockHitResult hit) { return RaycastSelection.withoutLocalGeometry(hit); }
-		@Override public EntityFrameResolution entityFrame(Entity entity, EntityRaycastWork work) { return EntityFrameResolution.world(); }
+		@Override public EntityFrameResolution entityFrame(Entity entity) { return EntityFrameResolution.world(); }
 	}
 	@NotNullByDefault
 	private static final class FakeSubLevel implements SubLevelAccess {

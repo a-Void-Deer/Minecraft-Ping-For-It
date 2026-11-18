@@ -414,31 +414,29 @@ final class SableClientCompanionAccess {
 
 	/** Independent bounded local-plot trace, never derived from a parent-world block hit. */
 	boolean collectSupplemental(ClientLevel level, Vec3 start, Vec3 end, RaycastPolicy policy,
-		CollisionContext context, Vec3 cameraFeet, CandidateWorkBudget budget, CandidateCollector collector)
+		CollisionContext context, Vec3 cameraFeet, CandidateCollector collector)
 		throws ReflectiveOperationException {
 		if (internal == null) return false;
-		List<?> raw = internal.loadedSubLevels(level, budget);
+		List<?> raw = internal.loadedSubLevels(level);
 		return SableSupplementalRaycaster.scan(new SableSupplementalRaycaster.Source() {
 			@Override public int size() { return raw.size(); }
-			@Override public SableSupplementalRaycaster.SubLevel at(int index, CandidateWorkBudget work) {
+			@Override public @Nullable SableSupplementalRaycaster.SubLevel at(int index) {
 				Object value = raw.get(index);
 				if (!(value instanceof ClientSubLevelAccess access)) throw new ExactNativeShapeClip.Incomplete();
 				try {
-					Object plot = internal.existingPlot(level, value, work);
+					@Nullable Object plot = internal.existingPlot(level, value);
 					if (plot == null) return null;
-					if (!work.callProvider()) throw new ExactNativeShapeClip.Incomplete();
-					UUID id = access.getUniqueId();
-					if (!work.callProvider()) throw new ExactNativeShapeClip.Incomplete();
-					Pose3dc pose = access.logicalPose();
+					@Nullable UUID id = access.getUniqueId();
+					@Nullable Pose3dc pose = access.logicalPose();
 					if (id == null || pose == null) throw new ExactNativeShapeClip.Incomplete();
-					var bounds = internal.bounds(plot, work);
+					@Nullable dev.ryanhcode.sable.companion.math.BoundingBox3ic bounds = internal.bounds(plot);
 					if (bounds == null) throw new ExactNativeShapeClip.Incomplete();
 					if (bounds.minX() > bounds.maxX() || bounds.minY() > bounds.maxY() || bounds.minZ() > bounds.maxZ()) return null;
 					return new SableSupplementalRaycaster.SubLevel(id, pose,
 						new net.minecraft.world.phys.AABB(bounds.minX(), bounds.minY(), bounds.minZ(),
 							bounds.maxX() + 1.0, bounds.maxY() + 1.0, bounds.maxZ() + 1.0), level,
 						pos -> {
-							try { return internal.contains(plot, pos, work); }
+							try { return internal.contains(plot, pos); }
 							catch (ReflectiveOperationException failure) {
 								diagnostics.captureException("supplemental-member-scan",
 									SableDiagnostics.SUPPLEMENTAL_INCOMPLETE, "reflection-failure", failure,
@@ -453,7 +451,7 @@ final class SableClientCompanionAccess {
 					throw new ExactNativeShapeClip.Incomplete();
 				}
 			}
-		}, level.dimension().location().toString(), start, end, policy, context, cameraFeet, budget, collector);
+		}, level.dimension().location().toString(), start, end, policy, context, cameraFeet, collector);
 	}
 
 	/** No render-pose/shape lookup, no content/BE getters, and no provider tracking state. */
