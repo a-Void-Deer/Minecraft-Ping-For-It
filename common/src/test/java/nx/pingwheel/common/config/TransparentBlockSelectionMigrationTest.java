@@ -186,6 +186,8 @@ class TransparentBlockSelectionMigrationTest {
 		assertFalse(persisted.has(OLD_KEY));
 
 		byte[] migratedBytes = Files.readAllBytes(path);
+		assertTrue(handler.saveSafely());
+		assertArrayEquals(migratedBytes, Files.readAllBytes(path), "the completed writeback becomes a model no-op");
 		var reloaded = client(path);
 		reloaded.load();
 		assertFalse(reloaded.getConfig().isMarkTransparentBlocks());

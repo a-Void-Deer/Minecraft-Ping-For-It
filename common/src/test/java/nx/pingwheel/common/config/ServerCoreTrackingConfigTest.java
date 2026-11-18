@@ -42,13 +42,13 @@ class ServerCoreTrackingConfigTest {
 	void packetFacingCoreRetainsUnselectedFlagsAndRejectsDeniedOrMaliciousUpdates() throws Exception {
 		var handler = ServerConfig.HANDLER;
 		var configField = ConfigHandler.class.getDeclaredField("config");
-		var hashField = ConfigHandler.class.getDeclaredField("configHash");
+		var savedModelField = ConfigHandler.class.getDeclaredField("savedModel");
 		var activeField = ServerCore.class.getDeclaredField("ACTIVE_SERVER");
 		configField.setAccessible(true);
-		hashField.setAccessible(true);
+		savedModelField.setAccessible(true);
 		activeField.setAccessible(true);
 		Object previousConfig = Objects.requireNonNull(configField.get(handler));
-		int previousHash = hashField.getInt(handler);
+		@Nullable Object previousSavedModel = savedModelField.get(handler);
 		@Nullable Object previousServer = activeField.get(null);
 		var path = handler.getConfigPath();
 		LoggingProfile previousProfile = Diagnostics.profile(DiagnosticSide.SERVER);
@@ -64,6 +64,7 @@ class ServerCoreTrackingConfigTest {
 		try {
 			activeField.set(null, null);
 			configField.set(handler, config);
+			savedModelField.set(handler, null);
 			var stale = InventoryConfigValues.defaults().with(Field.TRACKING_PERIOD_TICKS, Value.scalar(7));
 			var numeric = wire(new ServerConfigUpdateC2SPacket(Field.TRACKING_PERIOD_TICKS.mask(),
 				ChannelMode.AUTO, true, 1000, 5, 23, stale));
@@ -160,7 +161,7 @@ class ServerCoreTrackingConfigTest {
 			assertFalse(config.isTrackingMonitorEnabled());
 		} finally {
 			configField.set(handler, previousConfig);
-			hashField.setInt(handler, previousHash);
+			savedModelField.set(handler, previousSavedModel);
 			activeField.set(null, previousServer);
 			Diagnostics.setProfile(DiagnosticSide.SERVER, previousProfile);
 			ServerCore.init();
@@ -173,13 +174,13 @@ class ServerCoreTrackingConfigTest {
 	void packetFacingUpdateReportsLazyStageFactsOnlyAtDeepDisclosure() throws Exception {
 		var handler = ServerConfig.HANDLER;
 		var configField = ConfigHandler.class.getDeclaredField("config");
-		var hashField = ConfigHandler.class.getDeclaredField("configHash");
+		var savedModelField = ConfigHandler.class.getDeclaredField("savedModel");
 		var activeField = ServerCore.class.getDeclaredField("ACTIVE_SERVER");
 		configField.setAccessible(true);
-		hashField.setAccessible(true);
+		savedModelField.setAccessible(true);
 		activeField.setAccessible(true);
 		Object previousConfig = Objects.requireNonNull(configField.get(handler));
-		int previousHash = hashField.getInt(handler);
+		@Nullable Object previousSavedModel = savedModelField.get(handler);
 		@Nullable Object previousServer = activeField.get(null);
 		var path = handler.getConfigPath();
 		LoggingProfile previousProfile = Diagnostics.profile(DiagnosticSide.SERVER);
@@ -191,6 +192,7 @@ class ServerCoreTrackingConfigTest {
 		try {
 			activeField.set(null, null);
 			configField.set(handler, config);
+			savedModelField.set(handler, null);
 			var rateOnly = wire(new ServerConfigUpdateC2SPacket(ServerConfigUpdate.RATE_LIMIT,
 				ChannelMode.AUTO, true, 1000, 5, 7, InventoryConfigValues.defaults()));
 			var conflicting = InventoryConfigValues.defaults().with(Field.DISPLAY_BYTE_MULTIPLIER,
@@ -271,7 +273,7 @@ class ServerCoreTrackingConfigTest {
 			}
 		} finally {
 			configField.set(handler, previousConfig);
-			hashField.setInt(handler, previousHash);
+			savedModelField.set(handler, previousSavedModel);
 			activeField.set(null, previousServer);
 			Diagnostics.setProfile(DiagnosticSide.SERVER, previousProfile);
 			ServerCore.init();

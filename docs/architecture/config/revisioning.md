@@ -19,6 +19,16 @@ save, a reset/recovery write, or a migration write—it stamps
 `pingforit-version` with the running mod version. An unchanged current file is
 loaded and validated; it is not rewritten merely because it was loaded.
 
+When neither save protection nor pending migration writeback applies, an
+ordinary save leaves an existing file untouched if the in-memory field values
+match the baseline from the most recent successful load or write. The load
+baseline is the validated model, not the raw file contents. A same-version load
+that only clamps a value or supplies a default therefore leaves the original
+bytes in place until changed values are saved. A successful write sets the next
+baseline, so restoring earlier loaded values after a later write counts as
+another change. If the file is missing, an ordinary save attempts to recreate it
+even if the field values match the baseline.
+
 ## Version-string grammar and comparison
 
 The shared [version-marker grammar](../../config/client.md#version-marker)

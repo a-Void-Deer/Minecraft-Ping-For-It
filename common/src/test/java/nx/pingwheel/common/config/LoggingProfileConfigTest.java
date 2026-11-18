@@ -63,7 +63,7 @@ class LoggingProfileConfigTest {
 
 	@ParameterizedTest
 	@MethodSource("configTypes")
-	void profileOnlyEditsParticipateInEqualityHashSaveReloadAndReset(
+	void profileOnlyEditsParticipateInEqualitySaveReloadAndReset(
 		Class<? extends IConfig> type, @TempDir Path directory) throws Exception {
 		Path path = directory.resolve("config.json");
 		var handler = new ConfigHandler<>(type, path, VERSION);
@@ -74,7 +74,6 @@ class LoggingProfileConfigTest {
 			setProfile(handler.getConfig(), selected);
 			handler.getConfig().validate();
 			assertNotEquals(normal, handler.getConfig());
-			assertNotEquals(normal.hashCode(), handler.getConfig().hashCode());
 			assertTrue(handler.saveSafely(), "a logging-only change must not be mistaken for a no-op");
 			assertEquals(selected.name(), JsonParser.parseString(Files.readString(path)).getAsJsonObject()
 				.get("loggingProfile").getAsString());

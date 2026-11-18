@@ -106,3 +106,11 @@ still `0.5.1-pfi-beta1` and does not run this migration.
   sending the server update. Client changes already applied in memory are not
   undone. See
   [client configuration loading, edits, and close](docs/UI/settings-screen.md#client-configuration-loading-edits-and-close).
+
+### Saving configuration changes
+
+- Saving changed settings no longer skips an update as if nothing changed. For
+  example, when a server administrator changes the ping rate limit and
+  regeneration interval in one update, both new values are saved and take
+  effect. See
+  [configuration save behavior](docs/architecture/config/revisioning.md#marker-and-serialization).

@@ -28,18 +28,33 @@ establish game startup, loader-specific dedicated-server initialization or
 multiplayer behavior.
 
 `ConfigHandlerDiagnosticsTest` covers filesystem-backed load-validation, backup,
-save and recovery-reset failures with actual recovery-result reporting: server
-invalid input distinguishes a written default file from defaults retained in
-memory, and a hash-equal recovery save remains a no-op preserving the invalid
-original bytes without invoking `onUpdate`. Warning reports retain long message
-tails and root causes within the diagnostic bound at higher disclosure, without
-an attached throwable; `NORMAL` hides path, value and failure-class detail. The
-generated recovery reason remains a separate safe one-line comment. Failed
-backup preserves the original bytes and blocks save and reset writes while
-leaving defaults in memory; failed initial save creates no file, and failed
-recovery-reset preserves the original source and blocks subsequent saves. These
-are handler and injected-failure seams, not a live settings screen or
-client/server persistence session.
+save and recovery-reset failures with actual recovery-result reporting: for
+invalid server input, it distinguishes a written default file from defaults
+retained in memory. When the recovery defaults match the model from an earlier
+successful write, the recovery save preserves the invalid original bytes without
+invoking `onUpdate`. Warning reports retain long message tails and root causes
+within the diagnostic bound at higher disclosure, without an attached throwable;
+`NORMAL` hides path, value and failure-class detail. The generated recovery
+reason remains a separate safe one-line comment. Failed backup preserves the
+original bytes and blocks save and reset writes while leaving defaults in
+memory; failed initial save creates no file, and failed recovery-reset
+preserves the original source and blocks subsequent saves. These are handler
+and injected-failure seams, not a live settings screen or client/server
+persistence session.
+
+`ConfigHandlerPersistenceTest` covers the ordinary no-op baseline: an unchanged
+model after load-time normalization: saving it neither rewrites the file nor
+invokes `onUpdate`. A later save retries a failed write. After a successful
+write, the model as it stands after `onUpdate` is the next baseline. Server rate
+edits whose before and after models share a `hashCode` still write through
+`saveSafely` and `saveWithoutUpdate`. A failed write preserves the original
+bytes, and saving the same edited values becomes a no-op only after those values
+are on disk. Distinct exact decimal values for
+`spatialSelector.submenuRadiusScale` that convert to the same `double` survive
+sequential save and reload. Non-client invalid-file recovery writes defaults both
+without a successful baseline and when a distinct saved model shares the
+defaults' hash. These are filesystem and callback seams, not a live settings
+screen or client/server session.
 
 `ConfigHandlerVersionTest` checks a successful older-config migration remaining
 WARN-free at `NORMAL` and a failed migration write deferring version and path
@@ -57,7 +72,8 @@ precedence, malformed authoritative values follow parser recovery and backup
 protection, and unrelated root and nested data survive. A guarded writeback
 fixture retains explicit unknown nulls at the root, inside objects and arrays,
 and under spatial-selector preferences through failure, retry and reload,
-without materializing an omitted nullable model field. Pre-boundary handler cases
+without materializing an omitted nullable model field. After writeback succeeds,
+saving the unchanged model leaves the file untouched. Pre-boundary handler cases
 check legacy-schema projection for fresh files, ordinary saves, resets and
 guarded writeback, preservation of an already-present unknown future key, and a
 later upgrade retaining the selected effect. Same-version fixtures keep the
@@ -325,8 +341,8 @@ send seams, not live connection or multiplayer transport evidence.
 fresh, missing, explicit-null and unknown profiles resolve to `NORMAL` before
 and after validation; explicit `NORMAL`, `DEEP` and `DEBUG` are retained; an
 untouched same-version file preserves its bytes across load and no-op save for
-absent and explicit values; a profile-only edit participates in equality, hash,
-save and reload; reset returns to `NORMAL` without a stale model reference
+absent and explicit values; a profile-only edit participates in equality, save
+and reload; reset returns to `NORMAL` without a stale model reference
 affecting a later save; older-version migration materializes a missing default
 and preserves explicit profiles and unknown data; and future-version save/reset
 protection preserves the original bytes.
