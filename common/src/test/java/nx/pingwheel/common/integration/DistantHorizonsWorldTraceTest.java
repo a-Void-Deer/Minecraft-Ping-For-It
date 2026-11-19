@@ -25,6 +25,8 @@ import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Proxy;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -45,6 +47,9 @@ class DistantHorizonsWorldTraceTest {
 
 	private static final Vec3 ORIGIN = new Vec3(2.5, 70, 4.5);
 	private static final Vec3 DIRECTION = new Vec3(0, 0, 1);
+	// Probe the first whole-second age beyond the production limit.
+	private static final Duration FIRST_EXPIRED_AGE =
+		Duration.ofSeconds(DistantHorizonsIntegration.CACHE_MAX_AGE_SECONDS).plusSeconds(1);
 	private static final IDhApiDimensionTypeWrapper OVERWORLD_TYPE = stub(IDhApiDimensionTypeWrapper.class,
 		(ignored, method, args) -> { throw new AssertionError(method); });
 
@@ -143,6 +148,90 @@ class DistantHorizonsWorldTraceTest {
 		assertEquals(new Vec3(300, 70, 4), trace(firstLevel).orElseThrow().getLocation());
 		DhApi.Delayed.worldProxy = world(true, () -> List.of(next), null);
 		assertEquals(new Vec3(400, 70, 4), trace(nextLevel).orElseThrow().getLocation());
+	}
+
+	@Test
+	void sameBindingReusesCacheUntilExpirationThenReplacesIt() throws Exception {
+		var terrainX = new AtomicInteger(1100);
+		var trace = new TimedTrace((selected, cache) -> cache.readAtSharedCoordinates(hit(terrainX.get())));
+		assertEquals(new Vec3(1100, 70, 4), trace.trace().orElseThrow().getLocation());
+
+		terrainX.set(1200);
+		trace.setAge(FIRST_EXPIRED_AGE.minusNanos(1));
+		assertEquals(new Vec3(1100, 70, 4), trace.trace().orElseThrow().getLocation(), "the cached hit still applies");
+		assertEquals(1, trace.createAttempts.get());
+		assertEquals(0, trace.original.clearCalls.get());
+
+		trace.setAge(FIRST_EXPIRED_AGE);
+		assertEquals(new Vec3(1200, 70, 4), trace.trace().orElseThrow().getLocation(), "the expired hit is not reused");
+		assertEquals(2, trace.createAttempts.get());
+		assertEquals(1, trace.original.clearCalls.get());
+	}
+
+	@Test
+	void failedAllocationClearsIdleExpiredCacheAndLeavesTraceRetryable() throws Exception {
+		var terrainX = new AtomicInteger(1100);
+		var trace = new TimedTrace((selected, cache) -> cache.readAtSharedCoordinates(hit(terrainX.get())));
+		assertEquals(new Vec3(1100, 70, 4), trace.trace().orElseThrow().getLocation());
+
+		trace.setAge(FIRST_EXPIRED_AGE);
+		trace.failAllocation = true;
+		assertTrue(trace.trace().isEmpty(), "ordinary async fallback on cache allocation failure");
+		assertEquals(2, trace.createAttempts.get());
+		assertEquals(1, trace.original.clearCalls.get(), "the failed attempt must still clear the idle cache");
+		assertNull(trace.original.stored.get());
+
+		trace.failAllocation = false;
+		terrainX.set(1200);
+		assertEquals(new Vec3(1200, 70, 4), trace.trace().orElseThrow().getLocation());
+		assertEquals(3, trace.createAttempts.get());
+		assertEquals(1, trace.original.clearCalls.get(), "retry must not retire the old cache again");
+	}
+
+	@Test
+	void failedAllocationClearsExpiredCacheOnlyWhenItsLastReaderFinishes() throws Exception {
+		var firstEntered = new CountDownLatch(1);
+		var lastEntered = new CountDownLatch(1);
+		var releaseFirst = new CompletableFuture<@Nullable Void>();
+		var releaseLast = new CompletableFuture<@Nullable Void>();
+		var readers = new AtomicInteger();
+		var trace = new TimedTrace((selected, cache) -> {
+			assertEquals(1300, cache.readAtSharedCoordinates(hit(1300)).pos.x);
+			if (readers.getAndIncrement() == 0) {
+				firstEntered.countDown();
+				releaseFirst.join();
+			} else {
+				lastEntered.countDown();
+				releaseLast.join();
+			}
+			return cache.readAtSharedCoordinates(hit(1400));
+		});
+
+		var first = trace.start();
+		try {
+			assertTrue(firstEntered.await(10, TimeUnit.SECONDS));
+			var last = trace.start();
+			assertTrue(lastEntered.await(10, TimeUnit.SECONDS));
+			assertEquals(1, trace.createAttempts.get(), "both readers use the same cache");
+
+			trace.setAge(FIRST_EXPIRED_AGE);
+			trace.failAllocation = true;
+			assertTrue(trace.trace().isEmpty());
+			assertEquals(2, trace.createAttempts.get());
+			assertEquals(0, trace.original.clearCalls.get(), "the retired cache still has readers");
+
+			releaseFirst.complete(null);
+			assertEquals(new Vec3(1300, 70, 4), first.get(10, TimeUnit.SECONDS).orElseThrow().getLocation());
+			assertEquals(0, trace.original.clearCalls.get(), "the last reader still needs the cache");
+
+			releaseLast.complete(null);
+			assertEquals(new Vec3(1300, 70, 4), last.get(10, TimeUnit.SECONDS).orElseThrow().getLocation());
+			assertEquals(1, trace.original.clearCalls.get(), "release must clear the cache without a successful replacement");
+			assertNull(trace.original.stored.get());
+		} finally {
+			releaseFirst.complete(null);
+			releaseLast.complete(null);
+		}
 	}
 
 	@Test
@@ -320,8 +409,12 @@ class DistantHorizonsWorldTraceTest {
 	}
 
 	private static IDhApiTerrainDataRepo repo(Terrain terrain) {
+		return repo(PositionOnlyCache::new, terrain);
+	}
+
+	private static IDhApiTerrainDataRepo repo(Supplier<PositionOnlyCache> cacheFactory, Terrain terrain) {
 		return stub(IDhApiTerrainDataRepo.class, (ignored, method, args) -> switch (method.getName()) {
-			case "createSoftCache" -> new PositionOnlyCache();
+			case "createSoftCache" -> cacheFactory.get();
 			case "raycast" -> {
 				Object[] parameters = Objects.requireNonNull(args);
 				assertEquals(ORIGIN.x, parameters[1]);
@@ -356,15 +449,55 @@ class DistantHorizonsWorldTraceTest {
 		DhApiRaycastResult raycast(IDhApiLevelWrapper wrapper, PositionOnlyCache cache) throws InterruptedException;
 	}
 
+	@NotNullByDefault
+	private static final class TimedTrace {
+		private final AtomicReference<Instant> clock = new AtomicReference<>(Instant.EPOCH);
+		private final DistantHorizonsIntegration adapter = new DistantHorizonsIntegration(clock::get);
+		private final ClientLevel level;
+		private final PositionOnlyCache original = new PositionOnlyCache();
+		private final AtomicInteger createAttempts = new AtomicInteger();
+		private volatile boolean failAllocation;
+
+		private TimedTrace(Terrain terrain) throws ReflectiveOperationException {
+			level = allocateLevel();
+			var selected = wrapper(level);
+			DhApi.Delayed.worldProxy = world(true, () -> List.of(selected), null);
+			DhApi.Delayed.terrainRepo = repo(() -> {
+				int attempt = createAttempts.incrementAndGet();
+				if (failAllocation) throw new IllegalStateException("terrain cache allocation failed");
+				return attempt == 1 ? original : new PositionOnlyCache();
+			}, (actual, cache) -> {
+				assertSame(selected, actual);
+				return terrain.raycast(actual, cache);
+			});
+		}
+
+		private void setAge(Duration age) {
+			clock.set(Instant.EPOCH.plus(age));
+		}
+
+		private Optional<BlockHitResult> trace() throws Exception {
+			return start().get(10, TimeUnit.SECONDS);
+		}
+
+		private CompletableFuture<Optional<BlockHitResult>> start() {
+			var completion = new CompletableFuture<Optional<BlockHitResult>>();
+			assertTrue(adapter.traceAsync(level, false, ORIGIN, DIRECTION, Runnable::run, completion::complete));
+			return completion;
+		}
+	}
+
 	/** Models a coordinate cache with no implicit world partition. */
 	@NotNullByDefault
 	private static final class PositionOnlyCache implements IDhApiTerrainDataCache {
 		private final AtomicReference<@Nullable DhApiRaycastResult> stored = new AtomicReference<>();
+		private final AtomicInteger clearCalls = new AtomicInteger();
 		private volatile Runnable beforeClear = () -> {};
 		DhApiRaycastResult readAtSharedCoordinates(DhApiRaycastResult fresh) {
 			return stored.updateAndGet(previous -> previous != null ? previous : fresh);
 		}
 		@Override public void clear() {
+			clearCalls.incrementAndGet();
 			beforeClear.run();
 			stored.set(null);
 		}

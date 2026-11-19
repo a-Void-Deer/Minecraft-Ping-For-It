@@ -14,6 +14,7 @@ import net.minecraft.world.phys.Vec3;
 import java.lang.ref.WeakReference;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.InstantSource;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
@@ -35,15 +36,19 @@ import org.jetbrains.annotations.Nullable;
  */
 @NotNullByDefault
 public class DistantHorizonsIntegration {
-	private DistantHorizonsIntegration() {}
-
-	private static final Object CACHE_LOCK = new Object();
-	private static final long CACHE_MAX_AGE_SECONDS = 10L;
+	static final long CACHE_MAX_AGE_SECONDS = 10L;
 	private static final int RAYCAST_RANGE = 4096;
 
 	private static final IntegrationLinkGuard LINK_GUARD = new IntegrationLinkGuard("distanthorizons", Diagnostics.client());
+	private static final DistantHorizonsIntegration INSTANCE = new DistantHorizonsIntegration(InstantSource.system());
 
-	private static @Nullable CachedTerrain cachedTerrain;
+	private final InstantSource clock;
+	private final Object cacheLock = new Object();
+	private @Nullable CachedTerrain cachedTerrain;
+
+	DistantHorizonsIntegration(InstantSource clock) {
+		this.clock = clock;
+	}
 
 	private record TraceWorld(IDhApiLevelWrapper wrapper, IDhApiTerrainDataRepo repo) {}
 
@@ -54,16 +59,19 @@ public class DistantHorizonsIntegration {
 		private final Instant loadedAt;
 		private int users;
 
-		private CachedTerrain(TraceWorld world) {
+		private CachedTerrain(TraceWorld world, InstantSource clock) {
 			wrapper = new WeakReference<>(world.wrapper());
 			repo = new WeakReference<>(world.repo());
 			cache = world.repo().createSoftCache();
-			loadedAt = Instant.now();
+			loadedAt = clock.instant();
 		}
 
-		private boolean reusableFor(TraceWorld world) {
-			return wrapper.get() == world.wrapper() && repo.get() == world.repo()
-				&& Duration.between(loadedAt, Instant.now()).getSeconds() <= CACHE_MAX_AGE_SECONDS;
+		private boolean expired(InstantSource clock) {
+			return Duration.between(loadedAt, clock.instant()).getSeconds() > CACHE_MAX_AGE_SECONDS;
+		}
+
+		private boolean matches(TraceWorld world) {
+			return wrapper.get() == world.wrapper() && repo.get() == world.repo();
 		}
 	}
 
@@ -81,6 +89,11 @@ public class DistantHorizonsIntegration {
 	 *         the integration; a controlled WARN preserves the failure details.
 	 */
 	public static boolean traceDistantAsync(ClientLevel level, boolean integratedServer, Vec3 rayStart, Vec3 direction,
+		Executor clientExecutor, Consumer<Optional<BlockHitResult>> completion) {
+		return INSTANCE.traceAsync(level, integratedServer, rayStart, direction, clientExecutor, completion);
+	}
+
+	boolean traceAsync(ClientLevel level, boolean integratedServer, Vec3 rayStart, Vec3 direction,
 		Executor clientExecutor, Consumer<Optional<BlockHitResult>> completion) {
 		if (!ModContext.HasDistantHorizons || LINK_GUARD.disabled()) {
 			return false;
@@ -200,26 +213,35 @@ public class DistantHorizonsIntegration {
 		return null;
 	}
 
-	private static Optional<BlockHitResult> traceDistant(TraceWorld world, Vec3 rayStart, Vec3 direction) {
+	private Optional<BlockHitResult> traceDistant(TraceWorld world, Vec3 rayStart, Vec3 direction) {
 		if (LINK_GUARD.disabled()) return Optional.empty();
 
-		final CachedTerrain acquired;
+		@Nullable CachedTerrain acquired = null;
 		@Nullable CachedTerrain idleRetired = null;
-		// DH keys cached data by position alone. Keep one reusable cache, scoped by wrapper identity.
-		synchronized (CACHE_LOCK) {
-			@Nullable CachedTerrain previous = cachedTerrain;
-			if (previous != null && previous.reusableFor(world)) {
-				acquired = previous;
-			} else {
-				acquired = new CachedTerrain(world);
-				cachedTerrain = acquired;
-				if (previous != null && previous.users == 0) idleRetired = previous;
-			}
-			acquired.users++;
-		}
-
 		try {
-			if (idleRetired != null) clearRetiredCache(idleRetired);
+			try {
+				// DH keys cached data by position alone. Keep one reusable cache per active binding.
+				synchronized (cacheLock) {
+					@Nullable CachedTerrain previous = cachedTerrain;
+					if (previous != null && previous.expired(clock)) {
+						// The expired slot is retired even if allocating its replacement fails.
+						cachedTerrain = null;
+						if (previous.users == 0) idleRetired = previous;
+						previous = null;
+					}
+					if (previous != null && previous.matches(world)) {
+						acquired = previous;
+					} else {
+						acquired = new CachedTerrain(world, clock);
+						cachedTerrain = acquired;
+						if (previous != null && previous.users == 0) idleRetired = previous;
+					}
+					acquired.users++;
+				}
+			} finally {
+				if (idleRetired != null) clearRetiredCache(idleRetired);
+			}
+
 			final var rayCastResult = world.repo().raycast(
 				world.wrapper(),
 				rayStart.x, rayStart.y, rayStart.z,
@@ -236,12 +258,16 @@ public class DistantHorizonsIntegration {
 
 			return Optional.of(terrainHit(pos));
 		} finally {
-			final boolean clear;
-			synchronized (CACHE_LOCK) {
-				clear = --acquired.users == 0 && cachedTerrain != acquired;
-			}
-			if (clear) clearRetiredCache(acquired);
+			if (acquired != null) releaseTerrain(acquired);
 		}
+	}
+
+	private void releaseTerrain(CachedTerrain acquired) {
+		final boolean clear;
+		synchronized (cacheLock) {
+			clear = --acquired.users == 0 && cachedTerrain != acquired;
+		}
+		if (clear) clearRetiredCache(acquired);
 	}
 
 	/** Runs outside the lock after retirement and the final reader. A discarded cache cannot affect picking. */
