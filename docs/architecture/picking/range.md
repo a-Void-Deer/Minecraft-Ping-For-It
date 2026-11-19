@@ -13,7 +13,7 @@ client's trace.
 | Client `raycastDistance` | Read once at hold start; native vanilla/Create trace cap. Its persisted-file catalogue is [client configuration](../../config/client.md). |
 | Effective native trace distance | `min(raycastDistance, pingDistance)`: one finite frozen segment for the ordinary vanilla world/entity selection and its Create candidate refinement. |
 | Precise live cast segment | Current camera ray, re-cast on the configured capture period while the Precise branch is active; bounded by the hold's frozen client range snapshot. Ownership is [Precise live candidate capture](capture.md#precise-live-candidate-capture). |
-| Distant Horizons trace range | Fixed integration range, independent of either client field; started only after the native trace misses using the press origin/direction. |
+| Distant Horizons trace range | Fixed integration range after a native miss, independent of both client distance fields. |
 | Server `pingDistance` | Constructed into each authoritative validator; separate from the client field and not sent to clients as a capture setting. |
 
 The client field and the server field share a name but are separate
@@ -50,14 +50,10 @@ It uses the frozen press ray for ordinary capture and the live camera ray of tha
 cast for Precise Location. Both use a fixed integration range independent of the
 client `pingDistance` and the hidden `raycastDistance` cap.
 
-Single-player and multiplayer use different API lookups, but both trace only the
-one loaded Distant Horizons level that matches the exact client world captured
-for the cast. A distant hit replaces the native miss result only if that match,
-including the Distant Horizons data source, still holds at callback time. A
-missing, ambiguous or replaced match, a trace miss, an unavailable integration,
-or a scheduling or trace failure leaves the native fallback for that
-[capture path](capture.md) in place. The eventual target still faces the
-independent server acceptance check below.
+If the [Distant Horizons integration](../../integrations/distant-horizons.md)
+returns no hit for the captured world, that [capture path](capture.md) keeps
+its native miss result. A distant hit still faces the independent server
+acceptance check below.
 
 The deferred and rapid-click compatibility captures described in
 [long-press compatibility](../input/long-press-compatibility.md)

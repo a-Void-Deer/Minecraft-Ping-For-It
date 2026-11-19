@@ -241,13 +241,21 @@ single-player integrated-server and client-alias binding, no trace start when
 the match is not unique, and an unrelated, absent or disappearing world.
 Per-world terrain-cache isolation after replacement is also covered.
 
+`DistantHorizonsWorldTraceTest` also drives an injected clock over one client
+level and Distant Horizons data source: the same binding reuses a cached hit
+until the cache expires, then replaces the cache and reads fresh terrain on a
+later trace. If allocation fails, that trace returns no hit. The idle expired
+cache is cleared once, and the next trace can read fresh terrain. With two
+readers still using the expired cache, both return their original hits and the
+cache is cleared once, after the last reader finishes.
+
 On the same client level, a binding change before the client-thread callback
 does not publish the old result. A failed retired-cache cleanup does not block
 the replacement trace or overwrite a valid in-flight result, and the stale hit
-is still discarded by that binding fence. The [range
-contract](../../architecture/picking/range.md#capture-pipeline-application)
-owns world matching; the ordinary and Precise captures retain the generation and
-level fences described by
+is still discarded by that binding fence. The [Distant Horizons
+integration](../../integrations/distant-horizons.md) owns world
+matching and terrain-cache lifetime; the ordinary and Precise captures retain
+the generation and level fences described by
 [capture](../../architecture/picking/capture.md). These are headless API
 fixtures, not an installed Distant Horizons runtime or a live single-player or
 multiplayer session.

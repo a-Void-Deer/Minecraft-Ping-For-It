@@ -50,6 +50,13 @@ Changes since the `1.21.1` baseline (`a51a850b`).
   Horizons hit comes only from the world you were in when aiming, and the
   server's own range check still applies. See
   [Distant Horizons capture range](docs/architecture/picking/range.md#capture-pipeline-application).
+- When a trace finds an expired Distant Horizons terrain cache, the old cache
+  is cleared as soon as no trace is using it, even if a replacement cannot be
+  created.
+
+### Client selection
+
+Raised per-connection marker history limit to 2^20.
 
 ### Server performance limits
 
@@ -70,6 +77,12 @@ server clamps values above the new limits, including the finite value kept in
 unlimited mode. Clamping alone does not rewrite the file. A client running
 this build rejects a settings snapshot that exceeds a limit; a server running
 this build rejects an update containing such a value.
+
+### Presentation policy rule reuse
+
+- The server reuses each target type's compiled field rules across players and
+  ticks, even when no markers are active. Preview requests still check the
+  player's current permissions.
 
 ### Double-click Danger window migration
 
@@ -130,3 +143,7 @@ still `0.5.1-pfi-beta1` and does not run this migration.
   regeneration interval in one update, both new values are saved and take
   effect. See
   [configuration save behavior](docs/architecture/config/revisioning.md#marker-and-serialization).
+
+### Unix build wrapper
+
+- On macOS and Linux, `./gradlew` now runs directly after a fresh checkout.

@@ -95,12 +95,22 @@ and reset semantics are owned by the [client configuration](docs/config/client.m
 Install the jar for your loader and Minecraft `1.21.1`; Fabric also requires
 Fabric API. Optional mods and registry content are soft dependencies.
 
-From the repository root with JDK 21, build and verify the three loader jars:
+From the repository root with JDK 21, build and verify the three loader jars.
+
+On Windows, in PowerShell:
 
 ```powershell
 $env:GRADLE_OPTS = '-Dfile.encoding=UTF-8'
 .\gradlew.bat --no-daemon build
 .\gradlew.bat --no-daemon verifyModIdentity
+```
+
+On macOS or Linux, in a shell:
+
+```sh
+export GRADLE_OPTS='-Dfile.encoding=UTF-8'
+./gradlew --no-daemon build
+./gradlew --no-daemon verifyModIdentity
 ```
 
 ## Beta status and attribution
