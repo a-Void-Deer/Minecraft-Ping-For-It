@@ -30,55 +30,55 @@ class PresentationDiagnosticsTest {
 		}
 	}
 
-	@Test void normalHistoryWarningClosesAdmissionUntilRealStoreReset() {
+	@Test void distinctMarkerHistoryStopsAdmissionAtTheCommittedBoundAndOnlyRealResetReopensIt() {
 		try (var capture = new PresentationDiagnosticCapture()) {
-			var store = new PresentationStore(); store.reset(1);
-			for (long id = 0; id < 8192; id++) store.clear(1, id, 1, false);
+			var store = new PresentationStore();
+			store.reset(1);
+			// The committed per-connection bound counts live markers plus whole-marker
+			// tombstones; fill every remaining slot with the lighter tombstone form.
+			long limit = 1 << 20;
+			store.initial(1, 0, 0, "block", NAME, BASIC);
+			for (long id = 1; id < limit; id++) store.clear(1, id, 1, false);
+			assertTrue(capture.events().isEmpty(), "filling the final slot still accepts all history");
+			assertTrue(store.isKnown(limit - 1), "the last admissible distinct marker is retained");
 			var profile = nx.pingwheel.common.diagnostics.Diagnostics.profile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT);
 			try {
 				// NORMAL still receives this selected warning. Its state is gameplay history,
 				// so generation changes may never rearm acceptance or emission.
 				nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT,
 					nx.pingwheel.common.diagnostics.LoggingProfile.NORMAL);
-				store.initial(1, 0, 9000, "block", NAME, BASIC);
-				store.generation(1, 1); store.initial(1, 1, 9001, "block", NAME, BASIC);
-				assertFalse(store.isKnown(9000)); assertFalse(store.isKnown(9001));
-				assertEquals(1, capture.events().size());
+				store.initial(1, 0, limit, "block", NAME, BASIC);
+				store.generation(1, 1);
+				store.initial(1, 1, limit + 1, "block", NAME, BASIC);
+				assertFalse(store.isKnown(limit), "the next distinct marker is refused at the bound");
+				assertFalse(store.isKnown(limit + 1), "a generation cannot free marker history");
+				assertEquals(BASIC, store.sections(0).get(PresentationBasic.ID).section(),
+					"an existing marker stays usable after history exhaustion");
+				store.initial(1, 1, 1, "block", NAME, BASIC);
+				assertTrue(store.isKnown(1), "a retained tombstone survives exhaustion");
+				assertTrue(store.sections(1).isEmpty(), "a retained tombstone still rejects a late initial");
+				assertEquals(1, capture.events().size(), "exhaustion warns once until a real reset");
+				assertEquals(Level.WARN, capture.events().getFirst().getLevel());
+				assertNull(capture.events().getFirst().getThrown());
+				assertFalse(capture.messages().getFirst().contains("Exception"));
 				assertFalse(capture.messages().getFirst().contains("epoch="));
 			} finally { nx.pingwheel.common.diagnostics.Diagnostics.setProfile(nx.pingwheel.common.diagnostics.DiagnosticSide.CLIENT, profile); }
+			store.evict(0);
+			store.initial(1, 1, limit + 2, "block", NAME, BASIC);
+			assertFalse(store.isKnown(limit + 2), "eviction cannot restore admission");
+			store.reset(2);
+			store.initial(2, 0, limit + 2, "block", NAME, BASIC);
+			assertEquals(BASIC, store.sections(limit + 2).get(PresentationBasic.ID).section(),
+				"a true new session reopens admission");
+			for (long id = 0; id < limit - 1; id++) store.clear(2, id, 1, false);
+			store.clear(2, limit + 3, 1, false);
+			assertFalse(store.isKnown(limit + 3), "history exhaustion fails closed again after a reset");
+			assertEquals(2, capture.events().size(), "a true reset rearms the warning gate");
 		}
 	}
 	private static final PresentationSection BASIC = new PresentationSection(PresentationBasic.ID, 1,
 		Map.of(PresentationBasic.NAME, new PresentationValue.Text("name")), false);
 	private static final PresentationPropertyRef NAME = PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.NAME);
-
-	@Test void historyTransitionWarnsOnceAndOnlyResetRearmsAdmissionAndWarning() {
-		try (var capture = new PresentationDiagnosticCapture()) {
-			var store = new PresentationStore();
-			store.reset(1);
-			store.initial(1, 0, 0, "block", NAME, BASIC);
-			for (long id = 1; id < 8192; id++) store.clear(1, id, 1, false);
-			assertTrue(capture.events().isEmpty(), "filling the final slot still accepts all history");
-			store.initial(1, 0, 8192, "block", NAME, BASIC);
-			for (long id = 8193; id < 8300; id++) store.initial(1, 0, id, "block", NAME, BASIC);
-			assertFalse(store.isKnown(8192));
-			assertEquals(BASIC, store.sections(0).get(PresentationBasic.ID).section());
-			store.evict(0);
-			store.generation(1, 1);
-			store.initial(1, 1, 8400, "block", NAME, BASIC);
-			assertFalse(store.isKnown(8400), "a generation cannot free marker history");
-			assertEquals(1, capture.events().size());
-			assertEquals(Level.WARN, capture.events().getFirst().getLevel());
-			assertNull(capture.events().getFirst().getThrown());
-			assertFalse(capture.messages().getFirst().contains("Exception"));
-			store.reset(2);
-			store.initial(2, 0, 8400, "block", NAME, BASIC);
-			assertEquals(BASIC, store.sections(8400).get(PresentationBasic.ID).section());
-			for (long id = 0; id < 8191; id++) store.clear(2, id, 1, false);
-			store.clear(2, 9000, 1, false);
-			assertEquals(2, capture.events().size(), "real recovery rearms the domain gate within ten seconds");
-		}
-	}
 
 	@Test void sectionHistoryGateStaysDefensiveAndDoesNotWarnOrDisableExistingSections() {
 		try (var capture = new PresentationDiagnosticCapture()) {

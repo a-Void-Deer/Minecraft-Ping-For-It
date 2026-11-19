@@ -13,7 +13,7 @@ import java.util.Set;
 /** Session-scoped ordered whole-section store, including marker and section tombstones. */
 public final class PresentationStore {
 	// Fail closed on history exhaustion: discarding a tombstone would allow a late packet to resurrect data.
-	private static final int MAX_MARKER_HISTORY = 8192;
+	private static final int MAX_MARKER_HISTORY = 1 << 20;
 	private static final int MAX_SECTION_HISTORY = 128;
 	private final Map<Long, MarkerState> markers = new HashMap<>();
 	private final Map<Long, Long> tombstones = new HashMap<>();
