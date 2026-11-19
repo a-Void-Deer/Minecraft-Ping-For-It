@@ -60,6 +60,10 @@ public final class PresentationSettings {
 	private static final int MAX_SCAN_BUDGET = 4096;
 	private static final int MAX_INTERVAL_TICKS = 72000;
 
+	/** Immutable deny-all value shared by every failed, invalid or missing policy lookup. */
+	private static final PresentationPolicy DENY_ALL_POLICY =
+		new PresentationPolicy(List.of(), List.of("*:*"), true);
+
 	private Map<String, RuleSet> targetTypes = new LinkedHashMap<>();
 	private int minUpdateIntervalTicks = ConfigDefaults.Presentation.MIN_UPDATE_INTERVAL_TICKS;
 	private int scanBudget = ConfigDefaults.Presentation.SCAN_BUDGET;
@@ -75,15 +79,6 @@ public final class PresentationSettings {
 		PresentationSettings settings = new PresentationSettings();
 		for (String id : TARGET_TYPE_IDS) settings.targetTypes.put(id, RuleSet.allowByDefault());
 		return settings;
-	}
-
-	/**
-	 * Interim alias used only until the client retains no local field policy;
-	 * the server controls every compatible value, so a client instance carries
-	 * the same per-type defaults.
-	 */
-	public static PresentationSettings clientDefaults() {
-		return serverDefaults();
 	}
 
 	public static boolean isKnownTargetType(String targetTypeId) {
@@ -303,7 +298,7 @@ public final class PresentationSettings {
 	}
 
 	private static PresentationPolicy denyAllPolicy() {
-		return new PresentationPolicy(List.of(), List.of("*:*"), true);
+		return DENY_ALL_POLICY;
 	}
 
 	private static boolean validId(String id) {
@@ -338,6 +333,11 @@ public final class PresentationSettings {
 		private @Nullable @Unmodifiable List<@Nullable PresentationPropertyRef> childBlack = DEFAULT_CHILD_BLACK;
 
 		private transient boolean invalid;
+		/**
+		 * The last successfully compiled immutable policy. Every rule mutation
+		 * invalidates it; failed compilations are reported and never cached.
+		 */
+		private transient volatile @Nullable PresentationPolicy compiledPolicy;
 
 		public RuleSet() {}
 
@@ -372,11 +372,20 @@ public final class PresentationSettings {
 			}
 		}
 
+		private void invalidateCompiledPolicy() {
+			synchronized (this) {
+				compiledPolicy = null;
+			}
+		}
+
 		public void validate() {
 			validate(Diagnostics.server());
 		}
 
 		public void validate(nx.pingwheel.common.diagnostics.DiagnosticLogger consumer) {
+			// A concurrent lookup must not keep serving the previous rule view while
+			// validation is replacing the mutable lists.
+			invalidateCompiledPolicy();
 			boolean denyAll = false;
 			List<String> validWhite = new ArrayList<>();
 			List<String> validBlack = new ArrayList<>();
@@ -426,20 +435,32 @@ public final class PresentationSettings {
 				whitelistOnly = true;
 				childBlack = DEFAULT_CHILD_BLACK;
 			}
+			invalidateCompiledPolicy();
 		}
 
+		/** The compiled policy; the same immutable instance is reused until a rule mutation or validation. */
 		public PresentationPolicy policy() {
 			return policy(Diagnostics.server());
 		}
 
 		public PresentationPolicy policy(nx.pingwheel.common.diagnostics.DiagnosticLogger consumer) {
 			if (invalid) return denyAllPolicy();
-			try {
-				return new PresentationPolicy(white, black, whitelistOnly, childBlack);
-			} catch (RuntimeException ex) {
-				consumer.atDetailed().rateLimited(DiagnosticEvent.COMPILE_RULES.channel).failure(Level.WARN, "presentation/policy-compile", "deny-fields", () -> "white=" + white + " black=" + black + " childBlack=" + childBlack, ex);
-				return denyAllPolicy();
+			@Nullable PresentationPolicy compiled = compiledPolicy;
+			if (compiled != null) return compiled;
+			final RuntimeException failure;
+			synchronized (this) {
+				compiled = compiledPolicy;
+				if (compiled != null) return compiled;
+				try {
+					compiled = new PresentationPolicy(white, black, whitelistOnly, childBlack);
+					compiledPolicy = compiled;
+					return compiled;
+				} catch (RuntimeException ex) {
+					failure = ex;
+				}
 			}
+			consumer.atDetailed().rateLimited(DiagnosticEvent.COMPILE_RULES.channel).failure(Level.WARN, "presentation/policy-compile", "deny-fields", () -> "white=" + white + " black=" + black + " childBlack=" + childBlack, failure);
+			return denyAllPolicy();
 		}
 
 		public RuleSet copy() {
@@ -475,7 +496,10 @@ public final class PresentationSettings {
 
 		public void setWhite(List<String> entries) { white = entries; invalid = false; validate(); }
 		public void setBlack(List<String> entries) { black = entries; invalid = false; validate(); }
-		public void setWhitelistOnly(boolean value) { whitelistOnly = value; }
+		public void setWhitelistOnly(boolean value) {
+			whitelistOnly = value;
+			invalidateCompiledPolicy();
+		}
 		public void setChildBlack(List<PresentationPropertyRef> entries) {
 			childBlack = entries;
 			invalid = false;

@@ -87,6 +87,34 @@ class InventoryProductionPolicyTest {
 	private static final Target.BlockTarget TARGET = new Target.BlockTarget("minecraft:overworld", 1, 64, 3, "minecraft:chest");
 	@BeforeAll static void bootstrap() { net.minecraft.SharedConstants.tryDetectVersion(); net.minecraft.server.Bootstrap.bootStrap(); }
 
+	@Test
+	void emptyMarkerLibraryTickReusesCompiledPolicyButStillResetsOnAnActualRuleChange() throws Exception {
+		try (var f = new Fixture(Map.of())) {
+			assertEquals(0, f.store.size(), "the fixture starts with no markers");
+			f.deliveries.clear();
+			long view = f.session().view;
+			var compiled = f.policy.policyFor("entity_block");
+
+			f.tick(1);
+			f.tick(2);
+
+			assertEquals(view, f.session().view, "an unchanged rule set with no markers does not advance the view");
+			assertSame(compiled, f.policy.policyFor("entity_block"),
+				"both ticks reuse the successful compiled policy");
+			assertTrue(f.deliveries.stream().noneMatch(delivery ->
+				delivery.packet().kind() == PresentationS2CPacket.Kind.RESET));
+
+			f.policy.setRules("entity_block", new PresentationSettings.RuleSet(
+				List.of(), List.of("minecraft:*"), false));
+			f.tick(3);
+
+			assertEquals(view + 1, f.session().view,
+				"an actual rule change still advances the view without any marker");
+			assertEquals(1, f.deliveries.stream().filter(delivery ->
+				delivery.packet().kind() == PresentationS2CPacket.Kind.RESET).count());
+		}
+	}
+
 	@Test void actualSelectedCreationWireContainsThePreviewResourceBeforeTracking() throws Exception {
 		try (var f = new Fixture(Map.of())) {
 			f.states.get(InventoryResourceKind.ITEM).amount = 5;
