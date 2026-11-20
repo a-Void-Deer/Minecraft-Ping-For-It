@@ -414,6 +414,16 @@ The Marker Display Duration option displays the complete localized label
 Its value semantics are owned by
 [client configuration](../config/client.md); this page owns its displayed label.
 
+## Channel preference option
+
+The Ping Channel field edits the [local channel preference](../config/client.md#channel-preferences).
+When empty, it shows **Global** if the current server snapshot specifies `GLOBAL`.
+It shows **Synced to Vanilla Team** only if the snapshot specifies `AUTO` and the
+player is on a vanilla team. The hint follows team membership while the page is
+open. Other modes, an unknown mode, or a disconnect leave the hint blank. An
+unsaved server draft does not change it, and a new snapshot does not replace a
+channel name the player is typing.
+
 ## Client configuration loading, edits, and close
 
 The client configuration loads at client initialization. Client option widgets
@@ -449,12 +459,12 @@ per-category or per-visit section. This session covers the Channel & Players,
 Send Rate, Marker Duration, Performance, and Debug categories, including the
 monitoring toggle, the performance-monitor Preview and Tracking collection
 switches, the server logging-profile control, and the twenty-three inventory
-administration leaves. Entering the server
-scope shows its overview and requests the current server configuration when the
-client holds a live connection and the session holds no loaded or in-flight
-snapshot. The loaded snapshot, the draft, and any in-flight request are retained
-across scope-tab switches and category navigation; entering an ordinary server
-category does not request another snapshot. The separate Server
+administration leaves. Entering the server scope or opening **Channel, Sound &
+Notices** in the client scope requests the current server configuration when the
+client is connected and the session has no loaded or in-flight snapshot. The
+loaded snapshot, the draft, and any in-flight request are retained across scope
+and category changes; entering an ordinary server category does not request
+another snapshot. The separate Server
 Presentation category is not part of this session; its policy snapshot and
 status follow the independent workflow described in
 [Server presentation category](#server-presentation-category).

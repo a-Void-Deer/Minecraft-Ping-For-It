@@ -37,6 +37,13 @@ unowned candidate keeps the existing broad-bound relevance.
 
 An owned non-hit never falls back to its coarse AABB.
 
+For an unowned entity, ordinary and Precise picking use the same inflated pick
+box. If a nonzero ray starts strictly inside the box, compare the direction
+from the ray origin to the box center with the view direction. An angle of 60°
+or less qualifies, as does a box center exactly at the origin. The contact is
+at the ray origin and competes at zero distance under the usual tie rules. On
+or outside a box face, the ordinary box intersection rule applies.
+
 ## Traversal completion and incomplete attempts
 
 An exact owner's failed attempt rejects that candidate, including a provisional

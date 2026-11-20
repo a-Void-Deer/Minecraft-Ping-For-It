@@ -56,6 +56,18 @@ without a successful baseline and when a distinct saved model shares the
 defaults' hash. These are filesystem and callback seams, not a live settings
 screen or client/server session.
 
+`ClientConfigValidationTest` and `ClientConfigRangePersistenceTest` cover the
+client `pingDistance` and `raycastDistance` fields. Validation restores each
+negative field to its own default, reports each change with its supplied and
+effective values, and leaves unrelated preferences unchanged; the model setters
+apply the same per-field restoration without resetting the other distance.
+The fixtures accept zero and retain the large positive test value without
+clamping. A filesystem-backed load of a negative distance restores its default
+without rewriting the source bytes; an untouched save remains a no-op, a real
+edit writes the restored value, and a reload retains it. These are headless
+model and filesystem-handler fixtures, not a live settings screen, capture
+session or game startup; no passing run is recorded here.
+
 `ConfigHandlerVersionTest` checks a successful older-config migration remaining
 WARN-free at `NORMAL` and a failed migration write deferring version and path
 detail until admitted higher disclosure while the original bytes and loaded
@@ -83,6 +95,18 @@ changed-source and future-version guards. These are source-reviewed model and
 persistence fixtures, not a recorded test run, native key-binding load or
 gameplay evidence. The transformation and recovery contracts remain owned by
 [configuration revisioning](../../architecture/config/revisioning.md#ordered-migration-and-writeback).
+
+`ClientChannelCommandTest` runs `pingforit channel` through Brigadier with real
+temporary configuration files. It covers default and null reads, named-channel
+save and reload, empty-string reset, overlong rejection, and a same-value set
+without a rewrite. Future-version and invalid-file protection preserve the live
+preference and file bytes. A guarded migration uses the external replacement
+without restoring the old channel. With a simulated server address, the test
+checks the per-server entry separately from the disconnected default. A
+recording update callback sees the applied channel even when a later write
+fails; the command reports failure and the original file bytes remain intact.
+All eight bundled locales provide the failure message without format arguments.
+These cases do not exercise packet delivery or server acknowledgement.
 
 ## Inventory and spatial-selector configuration
 
@@ -253,8 +277,9 @@ promotion to editor, an authoritative denial keeping the snapshot viewable but
 not editable, the per-field invalid numeric draft mask and its repair, clearing
 on permission revocation and disconnect, an explicit clean mark preserving draft
 text, the shared once-per-session request not replacing a loaded or in-flight
-snapshot, denial lock with the false-to-true permission retry transition, and
-connection-scoped disconnect reset. `ServerConfigUpdateTest`,
+snapshot, denial lock with the false-to-true permission retry transition,
+connection-scoped disconnect reset, and an authoritative default channel mode
+that does not follow an edited draft. `ServerConfigUpdateTest`,
 `ServerConfigUpdateServiceTest` and the focused server-config packet tests cover
 field-masked partial merge and codec/handler seams; monitoring-switch cases cover
 selected true/false, preservation of unselected false, immutable snapshots,
@@ -267,6 +292,21 @@ bytes and unknown mask bits. The
 owners retain exact field selection and grammar. These are model and packet
 seams, not the live settings UI, permission changes over a connection, actual
 packet exchange or running persistence.
+
+`ChannelPlaceholderTest` covers the hint decision: `GLOBAL` names the global
+audience with or without a vanilla team, `AUTO` names team synchronization only
+for a team member, and `TEAM_ONLY`, `DISABLED`, an unknown mode or no live
+connection yields no hint. `ChannelPlaceholderScreenTest` assembles the
+production screen headlessly and opens the client channel page: opening the root
+requests nothing, opening the page sends one request and a later tick does not
+duplicate it, and no hint appears before a snapshot; a received `GLOBAL`
+snapshot updates the existing field's hint while preserving its draft text and
+caret, a read-only snapshot still supplies it, team membership does not change
+it, and a disconnect clears it; an `AUTO` snapshot shows the team hint for a
+team member and, while open, follows team join and leave without another
+request, and ignores an edited server draft. These are headless widget, model
+and screen seams, not a live client/server session, native glyph rendering,
+packet exchange or server acknowledgement; no passing run is recorded here.
 
 `InventoryConfigValuesTest` covers the twenty-three-leaf admin inventory value
 model: each leaf's merge and unselected-value preservation, the two finite size

@@ -67,6 +67,9 @@ Numbers use JSON numeric form. Units are stated where meaningful.
 | `markerDisplayDuration` | integer, seconds | Local marker-display-duration preference. A nonzero value is the local display duration in seconds; serialized `0` means each marker follows its frozen server-side duration, rather than a literal zero-duration display. [Client marker state](../architecture/markers/client-state.md) owns the resulting state behavior. |
 | `raycastDistance` | number | Native local raycast cap; [range](../architecture/picking/range.md) owns capture-range composition. Its current screen exposure is owned by the [configuration UI](../UI/settings-screen.md). |
 
+Both distance fields accept zero. A negative value restores only that field's
+default.
+
 ### Press, wheel, and cancellation interaction
 
 | Key | JSON form | Local meaning |
@@ -345,6 +348,13 @@ lifetime; those behaviors are owned by [wheel](../architecture/picking/wheel.md)
 | --- | --- | --- |
 | `channel` | string | Current local preference and fallback while disconnected. It is not server configuration. |
 | `serverChannels` | object mapping raw server-address strings to strings | Remembered preference keyed by the current server's raw address string. It is a managed client record, not server configuration. |
+
+`/pingforit channel <channel_name>` reports whether the client saved the
+preference. A protected client file makes the command fail before it changes
+the preference or notifies the server. If a disk write fails instead, the
+command reports the save failure, but a channel update may already have been
+sent. A successful local save is not a server acknowledgement; see
+[audience at marker creation](../architecture/authority/target_validation.md#audience-snapshot-at-create).
 
 ### Direction-indicator safe area
 

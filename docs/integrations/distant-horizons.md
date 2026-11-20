@@ -24,8 +24,8 @@ with the same level wrapper and terrain data source, so the same coordinates
 in another world cannot return the previous world's terrain.
 
 When a trace finds an expired cache, it retires it before requesting a
-replacement. If the retired cache has no readers, that trace clears it;
-otherwise the last reader clears it when it finishes. This cleanup applies
+replacement. If the retired cache has no readers, that trace attempts cleanup;
+otherwise the last reader attempt clearing it when it finishes. This cleanup applies
 even if the replacement cannot be created.
 
 See [automated trace and cache coverage](../testing/verification/interaction.md#capture-and-acceptance-range)

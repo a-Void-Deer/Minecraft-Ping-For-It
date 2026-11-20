@@ -27,7 +27,10 @@ owned elsewhere; this document records only the range used for acceptance.
 At ordinary capture start, the client captures one ray and reads the current
 client fields once. It builds the native finite segment with
 `min(hidden raycastDistance, client pingDistance)` and gives that exact segment
-to the native raycast. The native trace selects Minecraft world
+to the native raycast. The represented endpoint stays within that frozen
+distance in final world coordinates, including when ordinary or Precise capture
+uses it as a fallback location. Neither a non-unit view vector nor coordinate
+rounding may extend the native reach. The native trace selects Minecraft world
 blocks/fluids and entity candidates, while a claimed Create candidate receives
 the same segment through the common raycast request. Create transforms that
 already-bounded segment into its local space and scans its frozen local shapes;

@@ -121,7 +121,15 @@ Headless tests cover
   off-ray entity, the fixture registers no exact owner, and the only eligible
   entity lies beyond the ordinary native segment. The ordinary result stays a
   `MISS`, the certified supplemental hit carries that entity's identity, and the
-  duplicates add no candidate.
+  duplicates add no candidate. A further case places the target's inflated pick
+  box around the ray origin: the ordinary trace selects that entity at the
+  origin, a zero-length ordinary segment still reports `MISS`, and the Precise
+  scan certifies the same entity at distance zero with one evidence entry, so
+  the camera is excluded. Real `Minecraft` view-vector cases at a yaw of -45
+  degrees accept a center exactly 60° from the look direction and reject
+  adjacent representable centers one double-precision step outside in both
+  ordinary and Precise results; one rejected case would still tie under rounded
+  squared-distance comparison.
 - `PreciseCaptureRefreshTest` covers the production refresh controller:
   immediate entry then the frozen period, re-entry not duplicating the first
   scan, pause, restart and stop, native slots before the location request,
@@ -215,7 +223,18 @@ ordinary-world block retaining its point under optional pose-scope failure, an
 unproven contained block retaining its native result without a world point or
 arbitrary entity replacement, and detached block proof.
 `RaycastCandidateFlowTest` covers projected native-block world competition
-while preserving the native face/proof and owned non-hit rejection.
+while preserving the native face/proof and owned non-hit rejection. Its
+origin-contact cases cover an inflated pick box containing the press origin: a
+45-degree diagonal center competes at the origin and the first origin contact
+in iteration order wins the equal-distance tie, while a center at the cone's
+apex is eligible; the inclusive 60-degree edge is accepted but a center just
+beyond it, a center behind the ray, an exterior box the ray misses, a start or
+end on the inflated face and a zero-length segment still miss. An origin inside
+the pick box does not revive an owned `MISS`, `UNAVAILABLE` or `FAILED` outcome,
+and every traced candidate still reaches its owner; an owned exact surface can
+win when the origin is inside and the box center is behind. These are headless
+entity fixtures, not live entity selection, loader input or a rendered frame;
+no passing run is recorded here.
 
 These tests preserve whole-entity identity and exercise the non-optional engine
 boundaries. They do not constitute in-game Create or Aeronautics validation.
@@ -260,13 +279,37 @@ the generation and level fences described by
 fixtures, not an installed Distant Horizons runtime or a live single-player or
 multiplayer session.
 
+`ClientPingRuntimeNativeRangeTest` drives the production capture and native
+trace against a headless client level. An ordinary miss where Minecraft's
+lookup-table view vector would place the scaled endpoint outside the squared
+limit keeps its captured location inside that limit and on the captured ray
+while still reaching the boundary to world-coordinate precision; the synthetic
+miss path used when the trace yields no result produces the same location.
+At large absolute world coordinates, where an exactly normalized direction
+still overshoots after coordinate rounding, the native segment and the
+separately bounded supplemental scan each end within their own limit, the
+block-capture provider receives the bounded supplemental endpoint, and the
+ordinary result remains a `MISS`. An exactly representable boundary miss is not
+shortened, and a native block hit keeps its contact and face instead of
+becoming a range endpoint. The same fixture drives the real Precise Distant
+Horizons adapter: the native scan requests the distant completion, the adapter
+receives the raw captured ray and the integration's own longer range, and a
+camera turn before the callback does not change the request's bounded no-hit
+endpoint, which matches the ordinary location.
+`MinecraftAuthoritativeTargetValidatorTest` carries the represented-boundary
+concern into acceptance: at a large-coordinate edge the production validator
+accepts a Location target on the boundary and rejects the next representable
+outside point as `OUT_OF_RANGE`. These are headless level, runtime-port and
+recording-API fixtures, not an installed Distant Horizons runtime, packet
+exchange, live world or multiplayer session; no passing run is recorded here.
+
 Source and focused seam evidence establish the native
-`min(raycastDistance, pingDistance)` limit, the independent Distant Horizons
-trace, the server acceptance range, Create and Sable reuse of the finite native
-segment in the ordinary trace, and the hold-frozen client `pingDistance` bound
-of the Precise live casts. No automated end-to-end test exercises the entire
-client capture, optional-provider, packet and authoritative server-acceptance
-pipeline.
+`min(raycastDistance, pingDistance)` limit and its represented-endpoint cap, the
+independent Distant Horizons trace, the server acceptance range, Create and
+Sable reuse of the finite native segment in the ordinary trace, and the
+hold-frozen client `pingDistance` bound of the Precise live casts. No automated
+end-to-end test exercises the entire client capture, optional-provider, packet
+and authoritative server-acceptance pipeline.
 
 ## Back-hover return state
 
