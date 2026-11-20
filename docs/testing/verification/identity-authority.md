@@ -105,6 +105,13 @@ update. These are headless runtime/store seams.
 
 ## Client marker runtime coverage
 
+`ClientMarkerStoreTest` covers the retained per-key outline winner: both the
+empty-assignment-first and expiry-first packet orders, replacement by a newer
+assignment before its snapshot arrives, a hidden or locally recomputed HUD
+winner not entering outlines, hard-removal and store-clear history deletion,
+the local display deadline, and the ownership, dimension and authoritative-expiry
+checks for local dismissal.
+
 `ClientPingRuntimeTest` drives the public runtime factory with its real
 presentation session: `HELLO`, packet-dispatched `OFFER`/`RESET` and ordinary
 location `CREATE` share the negotiated epoch. Before readiness and after `OFFER`
@@ -120,7 +127,7 @@ arrival, expiry, visual deadline, target/Ping Type and winner slot; older or equ
 revisions cannot roll back; feedback fires once for a newly seen marker; an
 elapsed visual is not re-shown; an authoritatively expired or hard-removed marker
 is not resurrected; a refreshed active winner keeps its slot and deadline. A
-create after local record deletion remains the separate same-ID
+late create after natural-expiry eviction remains a separate same-ID replay
 [gap](#known-automated-gaps). These are headless store/port assertions: no live
 world, network transport, Sable locator, sound playback, GUI chat delivery,
 connection ordering or rendering is exercised; game-entry wiring is
@@ -131,6 +138,35 @@ transport callbacks through the dispatcher: warnings retain message and cause
 without an attached throwable, the prior receipt stays current, the next attempt
 remains throttled instead of refunding the courtesy token, and create performs
 one transport attempt. These are headless dispatcher and recording-log seams.
+
+## Follow-server display and recovery time base
+
+`ObservedServerClockTest` covers progress from received samples only: irregular
+slow, equal and faster samples; a receipt made between samples skipping the
+containing interval without deferring an older receipt; world identity
+replacement, game-time rewind and detach rebaselining without consuming a gap
+or losing prior progress; connection reset invalidating old origins; and
+saturation at the long boundary.
+
+`ClientMarkerFollowServerTest` covers the display-domain split at marker level:
+the follow-server sentinel versus an equal numeric custom duration, observed
+progress consuming only the follow-server visual span, a same-ID refresh
+restarting the synchronization fallback while preserving the first visual span,
+grace starting only after the server span and not restarting on another
+observation, and the saturated long boundary.
+`ClientMarkerDisplayDurationTest` covers zero-sentinel and custom numeric
+resolution with clamping, the duration frozen at first receipt, and a longer
+custom display surviving the server lifetime. `ClientPingRuntimeTest` covers
+the production runtime factory's sentinel mapping and immediate
+follow-server `EXPIRED` deletion. Runtime interaction coverage of the
+follow-server cases is inventoried under
+[interaction](interaction.md#native-client-interaction-runtime).
+
+These are headless timing, store and runtime seams. The listed cases do not
+establish the loader mixin path or a live `ClientboundSetTimePacket`, a real
+connection clock, a live `/tick rate` change, a genuinely paused world, network
+timing, a dedicated server, rendering/GPU output or multiplayer. No live or
+integration result is recorded for those boundaries.
 
 ## Entity logical-frame validation
 
@@ -222,11 +258,9 @@ the fluid provider validation boundary by
   chat-display, template-lookup and selector exception-log catch paths in
   `ClientPingRuntime`; admission, dispatcher and headless pending-composition
   evidence does not establish those branches;
-- same-ID marker creation after local record deletion in the full client
-  runtime: production final deletion evicts retained presentation values under a
-  session tombstone and drops the late create, while the isolated marker-record
-  seam alone would reinsert it with a new visual deadline; no automated test
-  drives that orchestration end to end;
+- the full runtime path from natural expiry through local housekeeping's final
+  eviction of a marker and its presentation values to rejection of a late
+  same-ID create under the session eviction tombstone;
 - application of synchronized rate policy on reconnect and on effective live
   configuration change;
 - server-side sanitization of negative rate-policy values.

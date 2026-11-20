@@ -7,10 +7,13 @@ Native shape acquisition and edge enumeration are specified separately in
 ## Common entity outlines
 
 Every pingable entity, including ordinary entities and dropped items, can
-receive a local ping outline. The active
-[same-target winner](../authority/ping_winner.md) supplies its outline color,
-and movement within the same dimension keeps the outline attached to the same
-entity identity.
+receive a local ping outline. The outline target exposed by
+[client marker state](../markers/client-state.md#outline-target-and-retained-last-winner)
+supplies its Ping Type color, and movement within the same dimension keeps the
+outline attached to the same entity identity. Selecting that target does not
+create geometry: the current frame still resolves presentation subjects and
+sources under the ordinary outcome rules, so a target whose geometry cannot be
+resolved contributes no outline.
 
 Use a scoped local render pass or equivalent. Do not persistently mutate
 vanilla glowing, visibility, or scoreboard-team state, and do not clobber
@@ -29,9 +32,10 @@ Beginning it does not scan entities. A live positive result requested in the
 immediately preceding pass can be reused in the next pass, and a positive
 remains reusable only while it continues to be requested across adjacent
 passes; the cache does not acquire a positive merely because an entity appeared
-in a scan. A change in the client world object by identity (`!=`), rather than a
-dimension identifier or string, clears this state. A null world and world leave
-clear it as well.
+in a scan. A change in the client world object by identity (`!=`) clears this
+state; the
+[world-bound render state lifetime](#world-bound-render-state-lifetime) owns
+the replacement and unload release boundary.
 
 Every returned entity, whether reached through a positive or an index, must be
 live for this request: it must not be removed, its current UUID must equal the
@@ -66,6 +70,17 @@ wait until the next frame; a later pass remains able to search again.
 When the optional entity-outline registry is empty, skip that entity's resolve
 and runner fragment. This does not change vanilla outline processing,
 block-model routes, frame flags, or post-processing.
+
+## World-bound render state lifetime
+
+The render entity lookup and the presentation caches used by entity outlines,
+the synthetic display and external frames are bound to the exact client-world
+object. A real client-world replacement or unload releases them even when the
+connection remains open, the replacement keeps the same dimension, and no later
+world render frame occurs, such as entering configuration or rebinding the
+renderer without another world frame. A dimension change is not a server leave:
+it does not discard the session or marker state. Release follows the client-world
+object identity, not the dimension identifier.
 
 ## Live block state and native-glow attempt eligibility
 

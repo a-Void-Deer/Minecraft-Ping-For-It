@@ -34,8 +34,10 @@ and its rejected-request consequences are owned by
 After an ordinary first interaction reaches that qualifying outcome, a second
 physical press within the compatibility slice can seed a rapid-click candidate.
 It retains the first press timestamp for virtual duration and freezes the second
-press ray for a new capture. Further adjacent press edges within the slice extend
-the candidate window. Releases while it exists are swallowed, while render frames
+press ray for a new capture. That second edge also locks the
+[Cancel Marker selection](../picking/wheel.md#cancel-marker-selection) from the
+same ray. Further adjacent press edges within the slice extend the candidate
+window. Releases while it exists are swallowed, while render frames
 advance the baseline as virtually held. This applies to both a synchronous first
 interaction and an asynchronous first interaction after its first create reaches
 the dispatch boundary.
@@ -47,15 +49,20 @@ the slice ends adjacency; equality remains eligible. At termination, a wheel
 that actually opened and remains open follows ordinary
 [wheel release](../picking/wheel.md#radial-release-result). If it never
 opened, the still-pressed baseline aborts; if it already closed, the candidate
-is discarded. Neither outcome emits another default tap. Lifecycle abort or
-observed disabling can end the sequence sooner.
+is discarded. Neither outcome emits another default tap. A press that both ends
+an expired candidate and starts a new baseline freezes the new baseline's aim
+and Cancel Marker lock from that press before the ending candidate's release
+resolves, so a marker dismissed by that release cannot change the new lock.
+Lifecycle abort or observed disabling can end the sequence sooner.
 
 ## Pending-first-capture deferred fresh press
 
 While the original interaction remains pending, a later press outside its
-rapid-click slice can become a deferred fresh press. It stores only the
-immutable ray and whether it was released; it does not raycast a target or freeze
-range and selection policy at that raw edge.
+rapid-click slice can become a deferred fresh press. It stores the immutable
+ray, whether it was released, and the
+[Cancel Marker selection](../picking/wheel.md#cancel-marker-selection) locked
+from that ray; it does not raycast a target or freeze range and selection policy
+at that raw edge.
 
 Only after the preceding default `CreatePing` reaches the qualifying local
 dispatch outcome can a new ordinary capture start from the stored ray. Its

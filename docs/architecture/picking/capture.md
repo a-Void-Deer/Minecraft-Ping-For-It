@@ -17,6 +17,14 @@ interaction ownership. Only the narrow
 [long-press compatibility](../input/long-press-compatibility.md) path may defer
 a press without starting its capture.
 
+The physical press edge that supplies the interaction's aiming ray also locks
+its Cancel Marker selection: the client applies
+[wheel](wheel.md#cancel-marker-selection)'s candidate rules once to that edge's
+ray and retains the chosen Marker ID or an empty result. The lock commits
+nothing by itself; it samples no ordinary target-selection range or policy and
+does not move that sampling from capture start. Each compatibility path's edge
+is owned by [long-press compatibility](../input/long-press-compatibility.md).
+
 When the snapshot is ready, resolve its Target Type under the
 [catalog matching rules](../identity/catalogs.md). Freeze the resolved Target
 and Target Type for the rest of the interaction. Camera motion, target motion,

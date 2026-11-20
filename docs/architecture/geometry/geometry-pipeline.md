@@ -23,7 +23,7 @@ winning marker and canonical target
 
 | Stage | Responsibility summary | Primary owners |
 | --- | --- | --- |
-| Marker selection | Select visible marker state; do not resolve geometry | [Ping winner](../authority/ping_winner.md), [target model](../identity/target_model.md) |
+| Marker selection | Select visible marker state; do not resolve geometry | [Client marker state](../markers/client-state.md), [Ping winner](../authority/ping_winner.md), [target model](../identity/target_model.md) |
 | Presentation resolution | Choose subject positions, states, registry identity, relations, and render-target types | [Presentation subjects](../rendering/presentation_subjects.md), [D0003](../../decisions/D0003-multipart-presentation-types.md) |
 | Route and source selection | Decide permitted sources; do not claim successful rendering | [Geometry sources](geometry_sources.md), [outline rendering](../rendering/outline.md) |
 | Source execution | Attempt geometry without short-circuiting and classify committed output | [Geometry sources](geometry_sources.md), [D0001](../../decisions/D0001-separate-model-from-renderable.md) |

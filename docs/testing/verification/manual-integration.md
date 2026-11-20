@@ -19,6 +19,38 @@ Additional requirements for this file:
 - The [inventory-list input and presentation
   contract](../../architecture/picking/wheel.md#inventory-list) under live input
   on Forge. (NeoForge & Fabric done)
+- Pending on a live client for the [Cancel Marker press-edge
+  lock](../../architecture/picking/wheel.md#cancel-marker-selection). Ping two
+  distinguishable movable targets (for example, two named animals, boats or
+  minecarts, or targets on a moving sub-level) so both markers are yours. With
+  A under the aim at the physical press and B outside the press cone, move the
+  targets so A leaves that cone and B enters it while the wheel stays open.
+  1. Release on the down (180) cancel entry. Confirm only A is removed and B
+     stays; opening or focusing the entry alone removes nothing.
+  2. Press with no own marker inside the cone, move B into it while holding, and
+     release on the cancel entry. Confirm nothing is removed.
+  3. Repeat with an Aeronautics rotor on a moving or rotating sub-level: press
+     while it is inside the cone, let it leave before the release, and confirm
+     the press-time marker is the one removed. The rotor setup is under
+     [Aeronautics rotors](#aeronautics-rotors).
+  4. Rapid virtual long-press, with long-press compatibility enabled: first
+     short-tap successfully to send one ordinary ping, preferably aiming outside
+     the test cone. Within the compatibility window, make the second press at A
+     or at an empty cone, then keep clicking inside the window until the wheel
+     actually opens. Move A and B, focus Unping, and stop clicking so the window
+     expires and frames settle it; physical releases do not commit. Confirm any
+     unpinged ID is the one locked by the second press.
+  5. Deferred fresh press: start one ordinary capture, release it, and confirm
+     it is still awaiting completion. After the compatibility window elapses but
+     before that capture completes, press again at A or at an empty cone and
+     hold. Let the deferred gesture open the wheel only after the first capture
+     dispatches, then change the candidates, select Unping and release normally.
+     Confirm any unpinged ID is the one locked by the deferred press. If the
+     first capture is not genuinely pending, the deferred path is not tested.
+  6. Disable long-press compatibility, enable the double-click Danger gesture
+     with a non-zero angle tolerance, make one ordinary short ping, then hold
+     the next adjacent tap long enough to open the wheel. Confirm the unpinged
+     ID is the one locked by that held tap's physical press.
 
 ### Distant Horizons
 
@@ -59,11 +91,11 @@ has not been validated.
    replaced by an arbitrary farther entity. Check native block, represented
    fluid and existing block-entity presentation.
 4. Verify the marker sits at the projected base plus the native world-up height,
-   the cancellation candidate uses the matching current-tick position, and the
-   outline follows the actual normal or gyro local model without a second parent
-   translation. Move and rotate the rotor and its parent, change parent
-   translation and nonuniform scale, and confirm the anchor moves while the local
-   model does not inherit parent scale.
+   the cancel lock samples the matching current-tick position at the physical
+   press edge, and the outline follows the actual normal or gyro local model
+   without a second parent translation. Move and rotate the rotor and its
+   parent, change parent translation and nonuniform scale, and confirm the
+   anchor moves while the local model does not inherit parent scale.
 5. Check ordinary-world and sub-level unload/rejoin, absent Aeronautics and
    disconnect/reconnect lifecycle, and a multiplayer client/server session with
    bystander viewers.

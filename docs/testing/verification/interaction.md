@@ -39,14 +39,7 @@ lifecycle, loader gameplay and genuinely asynchronous completion remain
 unverified. The abort-plus-late-completion seam is covered by
 `PingSelectorReleaseTest` and `ClientPingRuntimeInteractionTest`.
 
-`CancelCandidatePickerTest` covers press-ray cone filtering and nearest-candidate
-selection, while `ClientMarkerStoreTest` covers owner and dimension retrieval.
-Those seams do not runtime-cover a retained stale or display-hidden marker
-reaching cancellation and then being rejected by the server without a local
-fallback. The runtime branch falling through from an unavailable live entity
-point to presentation/anchor cancellation positions is source-inspected, not
-covered by a dedicated case. `ClientBusinessDiagnosticsTest` covers failed
-ordinary resolution and
+`ClientBusinessDiagnosticsTest` covers failed ordinary resolution and
 optional candidate finalization warnings, restricted-capture context,
 incomplete or missing precise slots, selector preview and close failures, chat
 template lookup and marker-display consumption. A separate
@@ -54,6 +47,77 @@ template lookup and marker-display consumption. A separate
 authorized property release with a pending reset preview. These are headless
 coordinator, refresh-controller and logging seams, not live input, native world
 scanning or a Distant Horizons trace.
+
+### Cancellation and retained-winner interleaving
+
+`CancelCandidatePickerTest` covers press-ray cone filtering and nearest-candidate
+selection. Store-level owner, dimension and authoritative-expiry checks for
+local dismissal are inventoried under
+[identity and authority](identity-authority.md#client-marker-runtime-coverage).
+The live candidate collection behind the runtime port — real Minecraft entity
+lookup by UUID or runtime id and the runtime choice between that live point and
+the presentation/anchor fallback — is source-inspected, not covered by a
+dedicated runtime case.
+
+`ClientPingRuntimeInteractionTest` covers the cancellation path through real
+wheel release, runtime dispatch and store, with candidate positions, time, mouse
+ownership, asynchronous completion and transport as test ports. The physical
+press that supplies the aiming ray locks the nearest own stored marker or the
+empty result; opening and focusing send nothing, and confirmation sends at most
+one request for the locked ID. Its cases show that:
+
+- `unpingKeepsTheMarkerThatWasInTheConeAtPhysicalPress` covers a ready selector,
+  a pending asynchronous capture and an invalid-viewport-delayed open: each
+  keeps the press-time marker after later candidate and ray changes make another
+  own marker eligible;
+- an empty lock does not acquire a marker that appears before release, and an
+  aborted or abandoned interaction cannot lend its lock to a new press;
+- a locked marker already recorded by the client as authoritatively removed
+  sends no request and does not fall back to another own marker;
+- an owner's local dismissal of an authoritatively expired, still-visible
+  marker, whether the expiry precedes the press or arrives before confirmation,
+  sends no `REMOVE`, removes the local record, and a delayed creation cannot
+  revive it;
+- the two parameterized arrival orders of the expiry and `NOT_FOUND` response
+  for one active Unping are handled;
+- a remove denial or stored-owner mismatch leaves the expired record in place;
+- `ClientPingRuntimeInteractionTest#fallbackStaleOwnUnpingSendsOneRemoveWithoutDismissingTheVisual`
+  covers an own candidate that is `STALE` only through local packet-loss
+  fallback: one `REMOVE` is sent and the visual remains until an authoritative
+  `CANCELLED`, rather than being dismissed without expiry evidence.
+
+Compatibility and Danger entry points keep a separate locking edge: the rapid
+second physical press supplies the cancel ID while its virtual hold keeps the
+first press's timing, and later clicks only extend that hold; a deferred fresh
+press locks from its own raw edge. A press that terminates a virtual wheel locks
+the new interaction before the closing wheel dismisses its already-expired
+choice, including the case where that marker is still nearest; the new lock
+therefore reflects the pre-dismissal candidate positions.
+`overdueVirtualInventoryWheelGivesThePhysicalPressToTheStayingSession` covers an
+overdue virtual inventory wheel settled by the press or the frame first: both
+retain the original selector token and preview, start no ordinary capture or
+Unping snapshot, and the same tap commits the original inventory `SELECT` once.
+The held adjacent Danger tap uses its own physical press for wheel timing and
+the lock. An ordinary press keeps its lock across Precise branch entry and exit.
+
+At the state seam, `PingSelectorReleaseTest` covers a locked cancellation
+emitted only for the confirming release and only once, with duplicate and wrong,
+stale or superseded tokens unable to consume it or fall back;
+`PingInteractionStateMachineTest` covers center confirmation with and without a
+locked candidate.
+
+`ClientPingRuntimeInteractionTest` covers retained-winner interleaving across a
+same-connection view reset: old assignments are retired while a stored record's
+last winner survives either the expiry-first or empty-winner-first order;
+old-view winner and removal packets are rejected; a new-view non-empty
+assignment replaces the tail; a reset drops an assignment with no matching local
+record; and session close or a new epoch discards history and removal evidence.
+
+The fallback-only case receives `CANCELLED`; it does not exercise a rejection
+of that `REMOVE`. These port tests do not exercise real input delivery,
+transport, server adjudication or multiplayer, or the separate natural-expiry
+eviction and same-ID replay path. The live press-edge and moving-target scenario
+remains pending in the [manual matrix](manual-integration.md#wheel).
 
 ### Gesture shortcut opening
 
@@ -387,9 +451,20 @@ cancellation readiness before negotiation and after `OFFER` alone without
 `REMOVE`, a later ready cancellation sending once while the following create
 retains the sole allowance, a nearer same-identity precise contact preserving the
 inventory face, and an external-block press carrying its provider-local face. It
-also covers native-only
-ownership handoff, resize before an immediate release, saturated raw baselines,
-frozen trail and style preferences, and the inventory-fraction press path.
+also covers native-only ownership handoff, resize before an immediate release,
+saturated raw baselines, frozen trail and style preferences, and the
+inventory-fraction press path. The press-edge Unping lock and its compatibility,
+Danger and overdue inventory-wheel cases are inventoried under
+[cancellation and retained-winner interleaving](#cancellation-and-retained-winner-interleaving).
+
+The same suite covers follow-server marker timing across the two parameterized
+sample/winner orderings, observed progress versus an extended local pause and
+client ticks, fallback from the latest upsert with local grace, a delayed
+same-ID upsert, and the eviction boundary. Its
+`clientLevelChangeEntryUpdatesTheObservedWorldBeforeTheNextFrame` case covers
+immediate old-world interaction abort and no repeated abort on the next tick; it
+drives the runtime entry directly, not the shared `LevelRenderer.setLevel`
+injection or a live game/heap unload.
 
 `ClientPingDispatchReceiptTest` covers actual-send receipt and transport-failure
 rollback. `WheelMouseCaptureLifecycleTest` covers native `DISABLED` ownership,
@@ -530,8 +605,10 @@ remain in the
 
 - the shared client/server `entity_block` classification path end to end,
   including synthetic-face provenance from every optional producer;
-- stale or display-hidden cancellation followed by authoritative rejection with
-  no local fallback;
+- cancellation of a display-hidden or fallback-only `STALE` record without
+  authoritative expiry: the path from rejection of its `REMOVE` to keeping the
+  local record without retrying another candidate; real transport and server
+  adjudication also remain unverified;
 - real input-callback and render-frame behavior for rapid and deferred long-press
   compatibility;
 - the content-intent toggle lacks a dedicated asynchronous press-edit-to-next-hold

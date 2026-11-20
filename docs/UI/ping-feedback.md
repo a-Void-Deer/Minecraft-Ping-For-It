@@ -37,8 +37,9 @@ cannot produce that server-response line; its separate local notice is
 are owned by [rate policy](../architecture/config/rate-limit.md).
 
 Cancel with no eligible own marker, stale removal, invalid removal, and
-unauthorized removal are silent no-ops or rejections. Their
-selection and authorization rules are owned by
+unauthorized removal are silent no-ops or rejections. A local dismissal of the
+owner's own authoritatively expired display is also silent. Their selection and
+authorization rules are owned by
 [wheel](../architecture/picking/wheel.md) and
 [target validation](../architecture/authority/target_validation.md).
 

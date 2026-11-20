@@ -97,23 +97,29 @@ assertions are inventoried under
 ## External block frame presentation
 
 `ExternalBlockFramePresentationTest` exercises the production external frame
-path with a synthetic bound plot and frozen render pose. Its four cases cover
+path with a synthetic bound plot and frozen render pose. Its cases cover
 vanilla door, bed, normal chest and trapped chest pairs from either end while
 preserving their render type; changed, foreign-plot or unloaded neighbors
 falling back to the direct subject; one shared ordered subject/coverage snapshot
 for the model and late native-shape passes; per-source and per-subject success
 without cross-winner coverage; frozen placement and late native edges only for
 uncovered subjects; shared resolver priority and declared BER coverage; and an
-unlike-registry proxy owner with owner identity, plus a handled-empty unavailable
+unlike-registry proxy owner with owner identity or a handled-empty unavailable
 owner. `BlockModelOutlineStateTest` covers the per-subject external success set
-and ordinary state transitions; `BlockOutlineStateTest` retains marker/store
-preparation and separate external-spec snapshot tracking;
-`VanillaChestPresentationTest` keeps the ordinary chest resolver on one prepared
-snapshot. `CreateVaultProductionBoundaryTest` and
+and ordinary state transitions. `BlockOutlineStateTest` covers marker/store
+preparation and separate external-spec snapshot tracking. `VanillaChestPresentationTest`
+keeps the ordinary chest resolver on one prepared snapshot. `CreateVaultProductionBoundaryTest` and
 `CreateFluidTankProductionBoundaryTest` drive their ordinary-only specialized
-topology through the same frame entry. These are headless resolution, state and
-native-edge seams, not installed Sable, a live plot or render pose, actual BER or
-baked-model submission, or GPU output.
+topology through the same frame entry. These are headless resolution, selection,
+state and native-edge seams; they do not establish external drawing, installed
+Sable, a live plot or render pose, actual BER or baked-model submission or GPU
+output.
+
+`clientLevelReplacementDropsPreparedExternalSnapshotsBoundToTheOldWorld`
+drives the client-level-change entry and checks that it clears prepared external
+snapshots bound to the old world. It does not separately assert the render-entity
+lookup or synthetic-display clears, apply the loader's `LevelRenderer.setLevel`
+injection, or demonstrate heap release in a running game.
 
 `EntityBlockGeometryTransformTest` checks large-coordinate placement and a single
 application of the local model offset in `createPoseStack`. It also checks that
@@ -433,6 +439,11 @@ These are CPU pose-construction and recording-sink seams. They do not establish
 live marker rendering, entity outline submission, loaded Sable/Aeronautics
 frames, GPU output or in-game visibility.
 
+`BlockOutlineStateTest` checks the retained, authoritatively expired winner's
+block spec through its local display deadline. `EntityOutlineStateTest` checks
+entity-outline eligibility when the empty winner update arrives before the
+authoritative expiry. Both assert headless state, not a rendered outline.
+
 The marker helper's rejection of a non-finite live point is source-inspected;
 no dedicated specific test covers that branch.
 
@@ -466,7 +477,7 @@ visibility through occluders or from arbitrary camera angles.
   selection and independent visual lifetimes, but no test checks whether several
   display-active same-target records change the displayed HUD alpha; the
   invariant is owned by
-  [client marker state](../../architecture/markers/client-state.md#winner-slots-are-not-the-render-marker-collection);
+  [client marker state](../../architecture/markers/client-state.md#hud-winner-slot-and-presentation-selection);
 - the local `ModelBlockRendererMixin` position-seed guard:
   `@ModifyConstant(method = "*", require = 2)` counts the minimum number of
   matching class-wide `42L` constants, including an unused local, so it does not
