@@ -20,6 +20,7 @@ import nx.pingwheel.common.interaction.CapturedRay;
 import nx.pingwheel.common.interaction.InteractionToken;
 import nx.pingwheel.common.interaction.TargetSnapshotFactory;
 import nx.pingwheel.common.interaction.cancel.CancellationContext;
+import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.interaction.state.TargetValidation;
 import nx.pingwheel.common.monitor.MonitorSchema.*;
@@ -38,6 +39,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localSnapshotSpanStore;
 import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
@@ -74,7 +76,8 @@ class ClientPingRuntimeMonitorTest {
 			var access = new Access(); var sent = new ArrayList<IPacket>();
 			var presentation = new ClientPresentation(sent::add); var inventory = new ClientInventory(sent::add);
 			var runtime = ClientPingRuntime.createForInteraction((key, color) -> fail(key), sent::add, ClientRateLimitPolicy.DEFAULT,
-				interactionClock::get, target -> TargetValidation.valid(), access, presentation, inventory, null);
+				interactionClock::get, target -> TargetValidation.valid(), access, presentation, inventory, null,
+				localSnapshotSpanStore(ClientPingRuntime.FALLBACK_EXPIRY_GRACE_TICKS), PingInteractionLogger.noop());
 			var collector = new ClientMonitorCollector(new MonitorTuning(1, 2), () -> measurementClock.getAndAdd(1));
 			var monitor = new ClientMonitorState(collector, measurementClock::get); runtime.monitor(monitor);
 			presentation.tick(true);

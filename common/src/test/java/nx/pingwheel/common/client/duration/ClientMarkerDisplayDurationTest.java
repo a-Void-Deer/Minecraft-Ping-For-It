@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
+import nx.pingwheel.common.client.marker.ObservedServerClock;
 import nx.pingwheel.common.config.ClientConfigBounds;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
@@ -14,6 +15,7 @@ import nx.pingwheel.common.marker.MarkerSnapshot;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ClientMarkerDisplayDurationTest {
@@ -21,21 +23,22 @@ class ClientMarkerDisplayDurationTest {
 	private static final UUID OWNER = UUID.fromString("00000000-0000-0000-0000-000000000001");
 
 	@Test
-	void followServerUsesTheSnapshotLifetimeInsteadOfASeparateCurrentPolicy() {
-		MarkerSnapshot snapshot = snapshot(10L, 170L, 1L);
-
-		assertEquals(160L, ClientMarkerDisplayDuration.durationTicks(0, snapshot));
+	void configuredZeroFollowsServerButExplicitZeroTicksIsLocal() {
+		assertTrue(ClientMarkerDisplayDuration.fromConfig(0).followsServer());
+		assertFalse(ClientMarkerDisplayDuration.customTicks(0L).followsServer());
+		assertThrows(IllegalArgumentException.class, () -> ClientMarkerDisplayDuration.customTicks(-1L));
 	}
 
 	@Test
 	void customDurationUsesSecondsAndClampsInvalidValuesSafely() {
-		MarkerSnapshot snapshot = snapshot(10L, 170L, 2L);
-
-		assertEquals(20L, ClientMarkerDisplayDuration.durationTicks(1, snapshot));
-		assertEquals(1200L, ClientMarkerDisplayDuration.durationTicks(60, snapshot));
-		assertEquals(160L, ClientMarkerDisplayDuration.durationTicks(-1, snapshot));
-		assertEquals((long) ClientConfigBounds.MAX_MARKER_DISPLAY_DURATION * 20,
-			ClientMarkerDisplayDuration.durationTicks(ClientConfigBounds.MAX_MARKER_DISPLAY_DURATION + 1, snapshot));
+		var custom = ClientMarkerDisplayDuration.fromConfig(1);
+		assertFalse(custom.followsServer());
+		assertEquals(20L, custom.localTicks());
+		assertTrue(ClientMarkerDisplayDuration.fromConfig(-1).followsServer());
+		int maxSeconds = ClientConfigBounds.MAX_MARKER_DISPLAY_DURATION;
+		var clamped = ClientMarkerDisplayDuration.fromConfig(maxSeconds + 1);
+		assertFalse(clamped.followsServer());
+		assertEquals(maxSeconds * 20L, clamped.localTicks());
 	}
 
 	@Test
@@ -43,8 +46,8 @@ class ClientMarkerDisplayDurationTest {
 		MarkerSnapshot shorter = snapshot(0L, 140L, 3L);
 		int[] selectedSeconds = {1};
 		ClientMarkerStore store = new ClientMarkerStore(
-			40L,
-			snapshot -> ClientMarkerDisplayDuration.durationTicks(selectedSeconds[0], snapshot));
+			40L, new ObservedServerClock(),
+			ignored -> ClientMarkerDisplayDuration.fromConfig(selectedSeconds[0]));
 
 		store.onCreated(shorter, 10L);
 		selectedSeconds[0] = 60;
@@ -64,8 +67,7 @@ class ClientMarkerDisplayDurationTest {
 	void customLongerDurationRemainsVisibleAfterFrozenServerLifetimeExpires() {
 		MarkerSnapshot snapshot = snapshot(20L, 40L, 4L);
 		ClientMarkerStore store = new ClientMarkerStore(
-			0L,
-			ignored -> ClientMarkerDisplayDuration.durationTicks(60, snapshot));
+			0L, new ObservedServerClock(), ignored -> ClientMarkerDisplayDuration.fromConfig(60));
 
 		store.onCreated(snapshot, 5L);
 		store.expireFallback(45L);

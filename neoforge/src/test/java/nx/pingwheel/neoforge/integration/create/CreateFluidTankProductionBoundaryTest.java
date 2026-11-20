@@ -254,7 +254,7 @@ class CreateFluidTankProductionBoundaryTest {
 		try (var mods = new Mods("6.0.10"); var fixture = new TankNativeFixture(2, 3, BlockPos.ZERO)) {
 			fixture.clientEntities();
 			try (var registration = BlockPresentationResolverRegistry.INSTANCE.register(resolver(fixture.loader))) {
-				var store = new ClientMarkerStore(0); var key = new TargetKey.CreateTankKey("minecraft:overworld", 0, 0, 0, "create:fluid_tank");
+				var store = VaultNativeFixture.localSnapshotSpanStore(); var key = new TargetKey.CreateTankKey("minecraft:overworld", 0, 0, 0, "create:fluid_tank");
 				var hit = new BlockPos(1, 2, 1); var anchor = new MarkerAnchor(1.5, 2.5, 1.5);
 				store.onCreated(new MarkerSnapshot(new MarkerId(1), VaultNativeFixture.OWNER, fixture.target(hit), key, "entity_block", "attention", anchor, 1, 30), 0);
 				store.onWinnerChanged(key, Optional.of(new MarkerId(1)));
@@ -304,7 +304,7 @@ class CreateFluidTankProductionBoundaryTest {
 		try (var mods = new Mods("6.0.10"); var fixture = new TankNativeFixture(3, 3, BlockPos.ZERO)) {
 			fixture.clientEntities();
 			try (var registration = BlockPresentationResolverRegistry.INSTANCE.register(resolver(fixture.loader))) {
-				var store = new ClientMarkerStore(0); var key = new TargetKey.CreateTankKey("minecraft:overworld", 0, 0, 0, "create:fluid_tank");
+				var store = VaultNativeFixture.localSnapshotSpanStore(); var key = new TargetKey.CreateTankKey("minecraft:overworld", 0, 0, 0, "create:fluid_tank");
 				var hit = new BlockPos(1, 1, 1);
 				store.onCreated(new MarkerSnapshot(new MarkerId(1), VaultNativeFixture.OWNER, fixture.target(hit), key, "entity_block", "attention", new MarkerAnchor(1.5, 1.5, 1.5), 1, 30), 0);
 				store.onWinnerChanged(key, Optional.of(new MarkerId(1)));
@@ -422,9 +422,13 @@ class CreateFluidTankProductionBoundaryTest {
 				assertInstanceOf(TargetKey.CreateTankKey.class, first.targetKey()); assertEquals(first.targetKey(), second.targetKey());
 				assertEquals(fixture.target(end), second.target()); assertEquals(new MarkerAnchor(end.getX() + .5, end.getY() + .5, end.getZ() + .5), second.anchor());
 				assertEquals(second.id(), store.winnerFor(first.targetKey(), VaultNativeFixture.OWNER).orElseThrow().id()); assertEquals(first.id(), store.winnerFor(first.targetKey(), outsider).orElseThrow().id());
-				var client = new ClientMarkerStore(0); receive(client, first); receive(client, second);
+				var client = VaultNativeFixture.localSnapshotSpanStore(); receive(client, first); receive(client, second);
 				var winner = wire(PresentationS2CPacket.winner(1, 1, first.targetKey(), Optional.of(second.id()))); client.onWinnerChanged(winner.targetKey(), winner.winnerId());
-				assertEquals(second.id(), client.winnerId(first.targetKey()).orElseThrow()); client.expireFallback(20); assertEquals(first.id(), client.winnerId(first.targetKey()).orElseThrow());
+				var key = first.targetKey();
+				assertEquals(second.id(), client.outlineWinnersInDimension(key.dimensionId()).get(key).id());
+				client.expireFallback(20);
+				assertEquals(first.id(), client.winnerMarker(key).orElseThrow().id());
+				assertFalse(client.outlineWinnersInDimension(key.dimensionId()).containsKey(key), "only the HUD can recover a lost winner locally");
 				var removed = fixture.entities.remove(fixture.root.offset(1, 1, 1));
 				var fallback = service.create(VaultNativeFixture.OWNER, fixture.target(end), "attention", 3, 40, List.of(VaultNativeFixture.OWNER)).creation().orElseThrow().marker();
 				assertEquals(TargetKey.from(fixture.target(end)), fallback.targetKey()); assertEquals(first.targetKey(), store.find(second.id()).orElseThrow().targetKey());

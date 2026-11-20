@@ -40,8 +40,8 @@ import org.jetbrains.annotations.Unmodifiable;
  *
  * <p>{@link #onCreated} is an upsert keyed by {@link MarkerId}: a retransmission
  * refreshes the synchronization fallback if the id has not been authoritatively
- * removed. The latest received payload wins but the first visual deadline is
- * retained.
+ * removed. The latest received payload wins, but the display time domain and
+ * visual deadline selected on first insertion are retained.
  * Authoritative removals are tombstoned for this connection, so a delayed
  * create cannot resurrect a removed marker. The replacement does not move the
  * marker within the internal insertion order.
@@ -50,7 +50,7 @@ import org.jetbrains.annotations.Unmodifiable;
  *
  * <p>Outlines consume the current server assignment, or after an empty
  * assignment the last server-assigned id with a retained authoritative expiry.
- * The HUD's existing winner projection, including its local loss recovery, is
+ * The HUD winner slot, including its local loss recovery, is
  * separate and cannot modify this outline history. Neither projection exposes
  * an unknown, mismatched, or visually elapsed record.
  *
@@ -58,7 +58,7 @@ import org.jetbrains.annotations.Unmodifiable;
  *
  * <p>{@link #hudRenderMarkers} collapses the visually active records to at
  * most one record per canonical {@link TargetKey} for the world overlay. It
- * prefers the exposed authoritative winner and otherwise falls back to the
+ * prefers the exposed HUD winner slot and otherwise falls back to the
  * same-target record with the latest arrival and then the larger marker id.
  * The selection is a read-only projection: {@link #renderMarkers()} still
  * returns every visually active record, and no record or winner slot is
@@ -66,10 +66,10 @@ import org.jetbrains.annotations.Unmodifiable;
  *
  * <h2>Loss recovery</h2>
  *
- * <p>{@link #expireFallback} transitions synchronized markers whose client-side
- * fallback expiry has passed to stale, retaining the visual until its separate
- * display deadline. Final removals clear winner slots and can locally recompute
- * the HUD winner as loss recovery; a server winner update overwrites that value.
+ * <p>{@link #expireFallback} removes a synchronized record whose fallback is
+ * due if its visual has elapsed or a synchronized sibling supersedes it;
+ * otherwise it retains the visual as stale until its display deadline. Loss
+ * recovery may recompute the HUD winner but never assigns a new outline winner.
  *
  * <h2>Determinism</h2>
  *
@@ -79,16 +79,6 @@ import org.jetbrains.annotations.Unmodifiable;
  * {@link MarkerId}.
  */
 public final class ClientMarkerStore {
-
-	/**
-	 * Supplies the visual lifetime for a newly received marker. The server
-	 * synchronization lifetime is always derived from the snapshot itself; this
-	 * hook only controls the independent client display deadline.
-	 */
-	@FunctionalInterface
-	public interface DisplayDurationPolicy {
-		long durationTicks(MarkerSnapshot snapshot);
-	}
 
 	/** Selects the display time domain and any custom duration for a first insertion. */
 	@FunctionalInterface
@@ -116,24 +106,11 @@ public final class ClientMarkerStore {
 	private long currentLocalTick;
 
 	/**
-	 * Creates a local-tick store whose display length equals the snapshot's tick span.
+	 * Creates a store with the clock used for follow-server records and a policy
+	 * that selects each new record's time domain.
 	 *
-	 * @param graceTicks extra client ticks a marker may outlive its server
-	 *                   expiry before {@link #expireFallback} drops it; must be
-	 *                   non-negative
+	 * @param graceTicks non-negative synchronization fallback grace in client ticks
 	 */
-	public ClientMarkerStore(long graceTicks) {
-		this(graceTicks, ClientMarker::serverDurationTicks);
-	}
-
-	/**
-	 * Creates a store with a caller-supplied local visual duration in client ticks.
-	 */
-	public ClientMarkerStore(long graceTicks, DisplayDurationPolicy displayDurationPolicy) {
-		this(graceTicks, new ObservedServerClock(), localDisplayMode(displayDurationPolicy));
-	}
-
-	/** Creates a store that can follow game-time samples from the owned connection clock. */
 	public ClientMarkerStore(long graceTicks, ObservedServerClock serverClock, DisplayModePolicy displayModePolicy) {
 		if (graceTicks < 0L) {
 			throw new IllegalArgumentException("graceTicks must be non-negative: " + graceTicks);
@@ -144,21 +121,6 @@ public final class ClientMarkerStore {
 		this.graceTicks = graceTicks;
 	}
 
-	private static DisplayModePolicy localDisplayMode(DisplayDurationPolicy displayDurationPolicy) {
-		Objects.requireNonNull(displayDurationPolicy, "displayDurationPolicy");
-		return snapshot -> ClientMarkerDisplayDuration.customTicks(displayDurationPolicy.durationTicks(snapshot));
-	}
-
-	/** Convenience constructor for a fixed visual duration. */
-	public ClientMarkerStore(long graceTicks, long displayDurationTicks) {
-		this(graceTicks, snapshot -> displayDurationTicks);
-
-		if (displayDurationTicks < 0L) {
-			throw new IllegalArgumentException(
-				"displayDurationTicks must be non-negative: " + displayDurationTicks);
-		}
-	}
-
 	/**
 	 * Applies an authoritative created-marker snapshot as of client tick
 	 * {@code localTick}.
@@ -166,10 +128,10 @@ public final class ClientMarkerStore {
 	 * <p>Upserts the newest payload and refreshes the synchronization fallback;
 	 * a same-id refresh does not change the visual deadline. A marker id
 	 * already observed in an authoritative removal is ignored, preventing a
-	 * delayed create from resurrecting it. Winner slots are not touched here —
-	 * a winner already announced for this id only becomes visible through the
-	 * winner queries once the key matches, and a missing winner announcement is
-	 * filled in by the server.
+	 * delayed create from resurrecting it. Inserting a synchronized record
+	 * removes stale same-target siblings, but does not assign a winner. An
+	 * earlier assignment for this id becomes visible only when the matching
+	 * record is known and visually active.
 	 */
 	public List<ClientMarker> onCreated(MarkerSnapshot snapshot, long localTick) {
 		Objects.requireNonNull(snapshot, "snapshot");
@@ -205,7 +167,7 @@ public final class ClientMarkerStore {
 		ClientMarkerDisplayDuration duration = displayModePolicy.duration(snapshot);
 		return duration.followsServer()
 			? ClientMarker.followingServer(snapshot, currentLocalTick, serverClock.receiptOrigin())
-			: ClientMarker.from(snapshot, currentLocalTick, graceTicks, duration.localTicks());
+			: ClientMarker.withLocalDuration(snapshot, currentLocalTick, graceTicks, duration.localTicks());
 	}
 
 	/** Arms local grace at the time of the packet that establishes sufficient server progress. */
@@ -225,28 +187,13 @@ public final class ClientMarkerStore {
 	}
 
 	/**
-	 * Removes the marker with {@code id}, if known, and remembers the
-	 * authoritative removal for this connection.
-	 *
-	 * <p>Removing an unknown id is otherwise a safe no-op. Every winner slot
-	 * whose stored id equals {@code id} is cleared, so a stale authoritative
-	 * winner can never outlive its marker.
-	 */
-	public void onRemoved(MarkerId id) {
-		Objects.requireNonNull(id, "id");
-
-		authoritativeRemovedIds.add(id);
-		removeMarker(id);
-	}
-
-	/**
 	 * Applies an authoritative removal at the current client tick.
 	 *
-	 * <p>{@link MarkerRemovalReason#EXPIRED} can retain an active custom-duration
-	 * visual as stale. Follow-server visuals end immediately, as do all visuals
-	 * removed for another reason. The returned records are the client records
-	 * actually deleted; callers use that distinction to keep target-name cleanup
-	 * in lockstep with final record removal.
+	 * <p>Every removal tombstones the id, even when the record is unknown.
+	 * {@link MarkerRemovalReason#EXPIRED} can retain a visually active custom
+	 * record as stale unless a synchronized same-target sibling supersedes it.
+	 * Follow-server records, and records removed for other reasons, are deleted
+	 * immediately. The result contains only the records actually deleted.
 	 */
 	public @Unmodifiable List<ClientMarker> onRemoved(
 		MarkerId id,
@@ -304,11 +251,6 @@ public final class ClientMarkerStore {
 			.toList();
 	}
 
-	/** Applies a removal using the store's latest observed client tick. */
-	public @Unmodifiable List<ClientMarker> onRemoved(MarkerId id, MarkerRemovalReason reason) {
-		return onRemoved(id, reason, currentLocalTick);
-	}
-
 	/**
 	 * Whether an authoritative removal for {@code id} has already been
 	 * observed. This is used by the runtime to suppress sound/chat effects for
@@ -337,10 +279,10 @@ public final class ClientMarkerStore {
 	 *
 	 * <p>The id is stored even when the marker itself is not known yet, so a
 	 * winner update arriving before the created snapshot still converges once
-	 * the marker arrives. An empty {@code winnerId} clears the slot. The slot
-	 * is only exposed by {@link #winnerId}, {@link #winnerMarker}, and
-	 * {@link #visibleWinnersInDimension} while a marker with the stored id
-	 * exists and matches the key.
+	 * the matching marker arrives. An empty {@code winnerId} clears the HUD
+	 * slot and retires the outline assignment without forgetting its last id.
+	 * See {@link #winnerMarker} and {@link #outlineWinnersInDimension} for the
+	 * distinct projections.
 	 */
 	public @Unmodifiable List<ClientMarker> onWinnerChanged(TargetKey key, Optional<MarkerId> winnerId) {
 		Objects.requireNonNull(key, "key");
@@ -377,14 +319,10 @@ public final class ClientMarkerStore {
 	 * whose independent display deadline has elapsed. Returns the records
 	 * actually removed.
 	 *
-	 * <p>For every dropped marker, every winner slot whose stored id equals the
-	 * dropped marker's id is cleared, even when the slot's key differs from the
-	 * marker's target. If the slot for the marker's own target key referenced
-	 * the dropped marker, that slot is recomputed as a local fallback among
-	 * the remaining markers of that target (latest {@code arrivalTick}, then
-	 * larger {@link MarkerId}) or cleared when none remain; slots whose key
-	 * mismatched the marker's target are simply cleared. Winner slots that did
-	 * not reference a dropped marker are left untouched.
+	 * <p>A dropped marker is cleared from both winner projections. Only a HUD
+	 * slot for that marker's own target may be recomputed locally, using the
+	 * remaining visually active same-target records. Outline assignments are
+	 * never recomputed by housekeeping.
 	 *
 	 * @param localTick the current client tick; must be non-negative
 	 * @return an immutable list of the removed markers, sorted by ascending
@@ -487,10 +425,8 @@ public final class ClientMarkerStore {
 	}
 
 	/**
-	 * All records that are still within their independent visual lifetime at
-	 * the latest observed client tick. Synchronization state is intentionally
-	 * not part of this filter: stale markers render exactly like synchronized
-	 * markers for now.
+	 * All records whose visual deadline has not elapsed in the applicable time
+	 * domain, regardless of synchronization state.
 	 */
 	public List<ClientMarker> renderMarkers() {
 		return markers.values().stream()
@@ -503,10 +439,8 @@ public final class ClientMarkerStore {
 	 * The world-HUD render selection: at most one visually active record per
 	 * canonical {@link TargetKey}.
 	 *
-	 * <p>The exposed authoritative winner is preferred while its record is
-	 * known, has the matching key, and is still inside its independent visual
-	 * deadline. When the winner has not been received yet or its visual
-	 * deadline has elapsed, the same-target record with the latest
+	 * <p>The exposed {@linkplain #winnerMarker HUD winner slot} is preferred.
+	 * When no slot is exposed, the visually active same-target record with the latest
 	 * {@code arrivalTick} and then the larger {@link MarkerId} is selected
 	 * instead, matching the loss-recovery ordering. The selection is a
 	 * read-only projection: it does not alter {@link #renderMarkers()}, the
@@ -562,20 +496,10 @@ public final class ClientMarkerStore {
 	}
 
 	/**
-	 * The id of the marker currently preferred by the HUD winner projection.
+	 * The HUD winner slot for this target, including any temporary local winner
+	 * set by loss recovery. This is not the final {@link #hudRenderMarkers} selection.
 	 *
-	 * <p>Empty is returned while the stored winner marker is not known yet or
-	 * belongs to a different target key, so a mismatched slot is never exposed.
-	 */
-	public Optional<MarkerId> winnerId(TargetKey key) {
-		return winnerMarker(key).map(ClientMarker::id);
-	}
-
-	/**
-	 * The marker currently preferred by the HUD winner projection, if visible.
-	 *
-	 * <p>Empty is returned while the stored winner marker is not known yet or
-	 * belongs to a different target key, so a mismatched slot is never exposed.
+	 * <p>Exposes only a known, matching record whose visual is still active.
 	 */
 	public Optional<ClientMarker> winnerMarker(TargetKey key) {
 		Objects.requireNonNull(key, "key");
@@ -584,32 +508,11 @@ public final class ClientMarkerStore {
 	}
 
 	/**
-	 * Every visible winner in the HUD projection whose key lives in
-	 * {@code dimensionId}, as an unmodifiable map ordered by ascending
-	 * {@link MarkerId}.
-	 *
-	 * <p>Winner slots that reference an unknown marker or a marker with a
-	 * different target key are skipped, so mismatched slots are never exposed.
+	 * The per-dimension outline projection, ordered by marker id. Exposes a
+	 * known, matching and visually active server assignment or, after that
+	 * assignment is retired, its authoritatively expired record while retained.
+	 * Never substitutes a locally chosen HUD winner.
 	 */
-	public @Unmodifiable Map<TargetKey, ClientMarker> visibleWinnersInDimension(String dimensionId) {
-		Objects.requireNonNull(dimensionId, "dimensionId");
-
-		@Unmodifiable List<Map.Entry<TargetKey, MarkerId>> entries = displayWinnerByKey.entrySet().stream()
-			.filter(entry -> entry.getKey().dimensionId().equals(dimensionId))
-			.sorted(Map.Entry.comparingByValue())
-			.toList();
-
-		Map<TargetKey, ClientMarker> visible = new LinkedHashMap<>();
-
-		for (Map.Entry<TargetKey, MarkerId> entry : entries) {
-			@Nullable ClientMarker marker = visibleRecord(entry.getKey(), entry.getValue());
-			if (marker != null) visible.put(entry.getKey(), marker);
-		}
-
-		return Collections.unmodifiableMap(visible);
-	}
-
-	/** The per-dimension outline projection, ordered by marker id and independent of HUD selection. */
 	public @Unmodifiable Map<TargetKey, ClientMarker> outlineWinnersInDimension(String dimensionId) {
 		Objects.requireNonNull(dimensionId, "dimensionId");
 		Map<TargetKey, ClientMarker> visible = new LinkedHashMap<>();

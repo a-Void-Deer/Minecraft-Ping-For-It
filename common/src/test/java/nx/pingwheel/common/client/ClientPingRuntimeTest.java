@@ -39,6 +39,8 @@ import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localSnapshotSpanStore;
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localStore;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -111,7 +113,7 @@ class ClientPingRuntimeTest {
 	void isNewMarkerReceiptReflectsStoreAbsenceBeforeUpsert() {
 		// The predicate reports only whether the marker id is currently absent
 		// from the store; it does not exercise sound or chat side effects.
-		ClientMarkerStore store = new ClientMarkerStore(10L);
+		ClientMarkerStore store = localSnapshotSpanStore(10L);
 		MarkerId markerId = new MarkerId(7L);
 		Target.ExternalBlockTarget first = Target.ExternalBlockTarget.committed(
 			"minecraft:overworld", "sable", "tracking-id", "minecraft:chest", "locator-a", true);
@@ -153,7 +155,7 @@ class ClientPingRuntimeTest {
 		assertEquals(before.targetTypeId(), after.targetTypeId());
 		assertEquals(before.pingTypeId(), after.pingTypeId());
 		assertTrue(runtime.store().renderMarkers().isEmpty(), "refresh must not re-show an elapsed visual");
-		assertTrue(runtime.store().winnerId(key).isEmpty(), "the preserved slot cannot expose an expired visual");
+		assertTrue(runtime.store().winnerMarker(key).isEmpty(), "the preserved slot cannot expose an expired visual");
 		runtime.onPresentationPacket(created(1, first));
 		runtime.onPresentationPacket(created(2, first));
 		assertEquals("locator-b", ((Target.ExternalBlockTarget) runtime.store().marker(id).orElseThrow().target()).providerLocator(),
@@ -185,7 +187,7 @@ class ClientPingRuntimeTest {
 	@Test
 	void runtimeFactoryUsesFollowServerSemanticsForTheConfigSentinel() {
 		var config = ClientConfig.HANDLER.getConfig();
-		int original = config.getMarkerDisplayDuration();
+		int original = config.getEffectiveMarkerDisplayDuration();
 		try {
 			config.setMarkerDisplayDuration(0);
 			var runtime = ClientPingRuntime.create((key, color) -> {}, packet -> {});
@@ -211,7 +213,7 @@ class ClientPingRuntimeTest {
 		var deadline = runtime.store().marker(id).orElseThrow().displayExpiresAtLocalTick();
 		var moved = snapshot(id, external("after"));
 		runtime.onPresentationPacket(created(2, moved));
-		assertEquals(Optional.of(id), runtime.store().winnerId(key));
+		assertEquals(id, runtime.store().winnerMarker(key).orElseThrow().id());
 		assertEquals(deadline, runtime.store().marker(id).orElseThrow().displayExpiresAtLocalTick());
 		assertEquals("after", ((Target.ExternalBlockTarget) runtime.store().winnerMarker(key).orElseThrow()
 			.target()).providerLocator());
@@ -221,7 +223,7 @@ class ClientPingRuntimeTest {
 
 	private static ClientPingRuntime negotiated(RecordingFeedback feedback, long displayDuration) {
 		var runtime = ClientPingRuntime.create((key, color) -> {}, packet -> {}, ClientRateLimitPolicy.DEFAULT,
-			InteractionTimeSource.system(), snapshot -> displayDuration, feedback);
+			InteractionTimeSource.system(), localStore(ClientPingRuntime.FALLBACK_EXPIRY_GRACE_TICKS, displayDuration), feedback);
 		runtime.presentation().tick(true);
 		var fields = List.of(new PresentationField(PresentationBasic.NAME, PresentationField.Kind.TEXT,
 			true, 0, "Name"));

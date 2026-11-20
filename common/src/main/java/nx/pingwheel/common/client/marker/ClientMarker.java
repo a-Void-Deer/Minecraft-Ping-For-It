@@ -27,8 +27,9 @@ import org.jetbrains.annotations.Nullable;
  *       current or stale.</li>
  * </ul>
  *
- * <p>Only JDK types are used here; there are no {@code net.minecraft}
- * references, so this value can be constructed and validated in tests.
+ * <p>A custom visual and its synchronization fallback use client ticks. A
+ * follow-server visual uses observed server progress; its fallback uses
+ * observed progress followed by local grace.
  */
 @NotNullByDefault
 public record ClientMarker(
@@ -64,54 +65,6 @@ public record ClientMarker(
 				throw new IllegalArgumentException("invalid follow-server timing");
 			}
 		}
-	}
-
-	/** Compatibility constructor for a marker with local-domain deadlines. */
-	public ClientMarker(MarkerId id, UUID owner, Target target, TargetKey targetKey, String targetTypeId,
-		String pingTypeId, MarkerAnchor anchor, long arrivalTick, long expiresAtTick, long receivedAtLocalTick,
-		long fallbackExpiresAtLocalTick, long displayExpiresAtLocalTick, ClientMarkerState state) {
-		this(id, owner, target, targetKey, targetTypeId, pingTypeId, anchor, arrivalTick, expiresAtTick,
-			receivedAtLocalTick, fallbackExpiresAtLocalTick, displayExpiresAtLocalTick, state, null);
-	}
-
-	/** Trusted local/fixture compatibility; received snapshots always carry their key. */
-	public ClientMarker(MarkerId id, UUID owner, Target target, String targetTypeId, String pingTypeId,
-		MarkerAnchor anchor, long arrivalTick, long expiresAtTick, long receivedAtLocalTick,
-		long fallbackExpiresAtLocalTick, long displayExpiresAtLocalTick, ClientMarkerState state) {
-		this(id, owner, target, TargetKey.from(target), targetTypeId, pingTypeId, anchor, arrivalTick, expiresAtTick,
-			receivedAtLocalTick, fallbackExpiresAtLocalTick, displayExpiresAtLocalTick, state);
-	}
-
-	/**
-	 * Compatibility constructor for callers that only supplied the original
-	 * synchronization fields.  Such records use the synchronization fallback
-	 * as their visual deadline, which is the least surprising legacy behavior.
-	 */
-	public ClientMarker(
-		MarkerId id,
-		UUID owner,
-		Target target,
-		String targetTypeId,
-		String pingTypeId,
-		MarkerAnchor anchor,
-		long arrivalTick,
-		long expiresAtTick,
-		long receivedAtLocalTick,
-		long fallbackExpiresAtLocalTick
-	) {
-		this(
-			id,
-			owner,
-			target,
-			targetTypeId,
-			pingTypeId,
-			anchor,
-			arrivalTick,
-			expiresAtTick,
-			receivedAtLocalTick,
-			fallbackExpiresAtLocalTick,
-			fallbackExpiresAtLocalTick,
-			ClientMarkerState.SYNCHRONIZED);
 	}
 
 	public ClientMarker {
@@ -150,36 +103,17 @@ public record ClientMarker(
 	}
 
 	/**
-	 * Derives the client marker for a wire {@link MarkerSnapshot} applied on
-	 * client tick {@code receivedAtLocalTick}.
+	 * Creates a marker with an independent visual deadline in client ticks.
 	 *
-	 * <p>The fallback expiry is {@code receivedAtLocalTick + fallbackDuration}
-	 * where {@code fallbackDuration = max(1, expiresAtTick - arrivalTick) +
-	 * graceTicks}. Both additions saturate at {@link Long#MAX_VALUE} instead
-	 * of overflowing, so a huge server lifetime or grace can never produce a
-	 * negative expiry that would instantly drop the marker.
+	 * <p>The synchronization fallback counts the snapshot's server tick span
+	 * plus grace as client ticks from receipt. Both deadlines saturate at
+	 * {@link Long#MAX_VALUE} rather than overflowing.
 	 *
-	 * @param receivedAtLocalTick the client tick on which the snapshot is
-	 *                            applied; must be non-negative
-	 * @param graceTicks          extra client ticks the marker may outlive its
-	 *                            server expiry before the fallback drops it;
-	 *                            must be non-negative
+	 * @param receivedAtLocalTick client tick on which the snapshot is applied
+	 * @param graceTicks synchronization fallback grace in client ticks
+	 * @param displayDurationTicks visual lifetime from receipt in client ticks
 	 */
-	public static ClientMarker from(MarkerSnapshot snapshot, long receivedAtLocalTick, long graceTicks) {
-		Objects.requireNonNull(snapshot, "snapshot");
-
-		return from(snapshot, receivedAtLocalTick, graceTicks, serverDurationTicks(snapshot));
-	}
-
-	/**
-	 * Derives a client marker with an explicitly supplied visual duration.  The
-	 * synchronization fallback remains tied to the frozen server duration; only
-	 * the independent visual deadline is customized.
-	 *
-	 * @param displayDurationTicks visual lifetime from receipt, in client ticks;
-	 *                             must be non-negative
-	 */
-	public static ClientMarker from(
+	public static ClientMarker withLocalDuration(
 		MarkerSnapshot snapshot,
 		long receivedAtLocalTick,
 		long graceTicks,
@@ -248,19 +182,14 @@ public record ClientMarker(
 	 * The frozen server-side lifetime represented by a marker snapshot.  The
 	 * minimum is defensive for callers handling a corrupt-but-constructed value.
 	 */
-	public static long serverDurationTicks(MarkerSnapshot snapshot) {
+	private static long serverDurationTicks(MarkerSnapshot snapshot) {
 		Objects.requireNonNull(snapshot, "snapshot");
 		return Math.max(1L, snapshot.expiresAtTick() - snapshot.arrivalTick());
 	}
 
-	/** Returns whether authoritative synchronization has ended for this record. */
+	/** Returns whether expiry or local loss recovery marked this record stale. */
 	public boolean isStale() {
 		return state == ClientMarkerState.STALE;
-	}
-
-	/** Short alias useful to lifecycle callers and tests. */
-	public boolean stale() {
-		return isStale();
 	}
 
 	/** Returns whether the record still represents synchronized server state. */
@@ -269,10 +198,10 @@ public record ClientMarker(
 	}
 
 	/**
-	 * Returns whether this marker is still allowed to contribute a visual at the
-	 * supplied client tick.  The marker record itself may remain synchronized
-	 * after this returns false so late authoritative packets can be processed
-	 * without resurrecting the visual.
+	 * Tests the visual deadline using the supplied client tick for custom
+	 * durations or observed server progress in follow-server mode. The record
+	 * can remain synchronized after the visual deadline so late packets can be
+	 * processed without resurrecting the visual.
 	 */
 	public boolean isVisuallyActiveAt(long localTick) {
 		if (localTick < 0L) {

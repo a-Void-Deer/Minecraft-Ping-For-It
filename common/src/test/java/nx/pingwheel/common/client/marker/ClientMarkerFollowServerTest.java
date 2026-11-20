@@ -22,12 +22,11 @@ class ClientMarkerFollowServerTest {
 		var localChoice = ClientMarkerDisplayDuration.fromConfig(1);
 		assertTrue(serverChoice.followsServer());
 		assertFalse(localChoice.followsServer());
-		assertFalse(ClientMarkerDisplayDuration.customTicks(0L).followsServer());
 		var clock = new ObservedServerClock();
 		Object world = new Object();
 		var snapshot = snapshot(20L, new MarkerAnchor(0.0, 64.0, 0.0));
 		var following = ClientMarker.followingServer(snapshot, 10L, clock.receiptOrigin());
-		var custom = ClientMarker.from(snapshot, 10L, 2L, localChoice.localTicks());
+		var custom = ClientMarker.withLocalDuration(snapshot, 10L, 2L, localChoice.localTicks());
 		clock.observeSample(world, 100L);
 
 		assertTrue(custom.isVisuallyActiveAt(29L));

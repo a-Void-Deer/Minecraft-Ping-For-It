@@ -30,6 +30,7 @@ import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localSnapshotSpanStore;
 import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
@@ -63,10 +64,10 @@ class DoubleChestCreationTest {
 				assertEquals(f.target(f.right), second.target()); assertEquals(new MarkerAnchor(f.right.getX() + .5, f.right.getY() + .5, f.right.getZ() + .5), second.anchor());
 				assertEquals("entity_block", second.targetType().id()); assertEquals(2, store.size());
 				assertEquals(second.id(), store.winnerFor(key, a).orElseThrow().id()); assertEquals(first.id(), store.winnerFor(key, outsider).orElseThrow().id());
-				var client = new ClientMarkerStore(0); receive(client, first); receive(client, second);
+				var client = localSnapshotSpanStore(0L); receive(client, first); receive(client, second);
 				var winner = wire(PresentationS2CPacket.winner(1, 1, key, Optional.of(second.id()))); client.onWinnerChanged(winner.targetKey(), winner.winnerId());
 				@Unmodifiable Map<TargetKey.BlockKey, nx.pingwheel.common.client.outline.BlockOutlineSpec> specs =
-					BlockOutlineSelection.select(client.visibleWinnersInDimension("minecraft:overworld"), PingTypeCatalog.builtIn());
+					BlockOutlineSelection.select(client.outlineWinnersInDimension("minecraft:overworld"), PingTypeCatalog.builtIn());
 				assertEquals(List.of(TargetKey.from(second.target())), List.copyOf(specs.keySet()));
 				var spec = specs.values().iterator().next();
 				assertEquals(2, new BlockPresentationResolverRegistry().resolve(f.client, spec).renderSubjects().size());
@@ -78,11 +79,15 @@ class DoubleChestCreationTest {
 				f.states.put(f.left, f.states.get(f.left).setValue(ChestBlock.TYPE, ChestType.LEFT));
 				assertEquals(key, new MinecraftTargetGroupingResolver(f.server).resolve(a, f.target(f.left)));
 				assertEquals(2, new BlockPresentationResolverRegistry().resolve(f.client, spec).renderSubjects().size());
-				client.expireFallback(20); assertEquals(first.id(), client.winnerId(key).orElseThrow(), "missing removal falls back across opposite hits");
+				client.expireFallback(20);
+				assertEquals(first.id(), client.winnerMarker(key).orElseThrow().id(), "missing removal falls back across opposite hits in the HUD");
+				assertFalse(client.outlineWinnersInDimension(key.dimensionId()).containsKey(key), "local loss recovery cannot assign an outline");
 				assertEquals(MarkerRemovalResult.Status.NOT_OWNER, store.removeOwned(a, second.id()).status());
 				var removal = store.removeOwned(b, second.id()); assertEquals(first.id(), store.winnerFor(key, a).orElseThrow().id());
 				for (var change : removal.winnerChanges()) { var p = wire(PresentationS2CPacket.winner(1, 1, change.targetKey(), change.currentWinner())); client.onWinnerChanged(p.targetKey(), p.winnerId()); }
-				assertEquals(first.id(), client.winnerId(key).orElseThrow()); assertEquals(2, store.size());
+				assertEquals(first.id(), client.winnerMarker(key).orElseThrow().id());
+				assertEquals(first.id(), client.outlineWinnersInDimension(key.dimensionId()).get(key).id());
+				assertEquals(2, store.size());
 				store.expire(30); assertTrue(store.find(first.id()).isEmpty()); assertTrue(store.find(single.id()).isPresent());
 				f.unavailable.add(f.right);
 				var unavailablePair = service.create(a, f.target(f.left), "attention", 31, 50, List.of(a)).creation().orElseThrow().marker();

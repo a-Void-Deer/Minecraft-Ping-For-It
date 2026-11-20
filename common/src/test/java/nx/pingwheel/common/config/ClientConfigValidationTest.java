@@ -126,8 +126,7 @@ class ClientConfigValidationTest {
 
 		config.validate((key, suppliedValue, effectiveValue) -> {});
 
-		assertEquals(ClientConfigBounds.FOLLOW_SERVER_MARKER_DISPLAY_DURATION, config.getMarkerDisplayDuration());
-		assertTrue(config.isFollowServerMarkerDisplayDuration());
+		assertEquals(ClientConfigBounds.FOLLOW_SERVER_MARKER_DISPLAY_DURATION, config.getEffectiveMarkerDisplayDuration());
 		assertTrue(new Gson().toJson(config).contains("\"markerDisplayDuration\":0"));
 	}
 
@@ -136,17 +135,28 @@ class ClientConfigValidationTest {
 		ClientConfig config = new ClientConfig();
 
 		config.setMarkerDisplayDuration(-1);
-		assertEquals(0, config.getMarkerDisplayDuration());
+		assertEquals(0, config.getEffectiveMarkerDisplayDuration());
 		config.setMarkerDisplayDuration(ClientConfigBounds.MAX_MARKER_DISPLAY_DURATION + 1);
-		assertEquals(ClientConfigBounds.MAX_MARKER_DISPLAY_DURATION, config.getMarkerDisplayDuration());
+		assertEquals(ClientConfigBounds.MAX_MARKER_DISPLAY_DURATION, config.getEffectiveMarkerDisplayDuration());
 
 		config.markerDisplayDuration = Integer.MIN_VALUE;
 		List<ClampWarning> warnings = new ArrayList<>();
 		config.validate((key, suppliedValue, effectiveValue) ->
 			warnings.add(new ClampWarning(key, suppliedValue, effectiveValue)));
 
-		assertEquals(0, config.getMarkerDisplayDuration());
+		assertEquals(0, config.getEffectiveMarkerDisplayDuration());
 		assertEquals(List.of(new ClampWarning("markerDisplayDuration", Integer.MIN_VALUE, 0)), warnings);
+	}
+
+	@Test
+	void unvalidatedMarkerDurationUsesTheEffectiveValueInConfigComparisons() {
+		ClientConfig unvalidated = new Gson().fromJson("{\"markerDisplayDuration\":-1}", ClientConfig.class);
+		ClientConfig following = new ClientConfig();
+		following.setMarkerDisplayDuration(0);
+
+		assertEquals(following.getEffectiveMarkerDisplayDuration(), unvalidated.getEffectiveMarkerDisplayDuration());
+		assertEquals(following, unvalidated);
+		assertEquals(following.hashCode(), unvalidated.hashCode());
 	}
 
 	@Test
@@ -157,8 +167,7 @@ class ClientConfigValidationTest {
 		ClientConfig restored = new Gson().fromJson(new Gson().toJson(original), ClientConfig.class);
 		restored.validate((key, suppliedValue, effectiveValue) -> {});
 
-		assertEquals(23, restored.getMarkerDisplayDuration());
-		assertFalse(restored.isFollowServerMarkerDisplayDuration());
+		assertEquals(23, restored.getEffectiveMarkerDisplayDuration());
 	}
 
 	@Test

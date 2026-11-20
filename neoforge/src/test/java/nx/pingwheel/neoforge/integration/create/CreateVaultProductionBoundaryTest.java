@@ -201,7 +201,7 @@ class CreateVaultProductionBoundaryTest {
 		try (var mods = new Mods("6.0.10"); var f = new VaultNativeFixture(Axis.X, 2, 3, BlockPos.ZERO)) {
 			f.clientEntities(); var registry = BlockPresentationResolverRegistry.INSTANCE;
 			try (var registration = registry.register(resolver(f))) {
-				var store = new ClientMarkerStore(0); var key = new TargetKey.VaultKey("minecraft:overworld", 0, 0, 0, "create:item_vault");
+				var store = VaultNativeFixture.localSnapshotSpanStore(); var key = new TargetKey.VaultKey("minecraft:overworld", 0, 0, 0, "create:item_vault");
 				var hit = new BlockPos(2, 1, 1); var target = f.target(hit);
 				store.onCreated(new MarkerSnapshot(new MarkerId(1), VaultNativeFixture.OWNER, target, key, "entity_block", "attention", new MarkerAnchor(2.5, 1.5, 1.5), 1, 30), 0);
 				store.onWinnerChanged(key, Optional.of(new MarkerId(1)));
@@ -256,9 +256,13 @@ class CreateVaultProductionBoundaryTest {
 				assertInstanceOf(TargetKey.VaultKey.class, first.targetKey()); assertEquals(first.targetKey(), second.targetKey());
 				assertEquals(f.target(end), second.target()); assertEquals(new MarkerAnchor(end.getX() + .5, end.getY() + .5, end.getZ() + .5), second.anchor());
 				assertEquals(second.id(), store.winnerFor(first.targetKey(), VaultNativeFixture.OWNER).orElseThrow().id()); assertEquals(first.id(), store.winnerFor(first.targetKey(), outsider).orElseThrow().id());
-				var client = new ClientMarkerStore(0); receive(client, first); receive(client, second);
+				var client = VaultNativeFixture.localSnapshotSpanStore(); receive(client, first); receive(client, second);
 				var winner = wire(PresentationS2CPacket.winner(1, 1, first.targetKey(), Optional.of(second.id()))); client.onWinnerChanged(winner.targetKey(), winner.winnerId());
-				assertEquals(second.id(), client.winnerId(first.targetKey()).orElseThrow()); client.expireFallback(20); assertEquals(first.id(), client.winnerId(first.targetKey()).orElseThrow());
+				var key = first.targetKey();
+				assertEquals(second.id(), client.outlineWinnersInDimension(key.dimensionId()).get(key).id());
+				client.expireFallback(20);
+				assertEquals(first.id(), client.winnerMarker(key).orElseThrow().id());
+				assertFalse(client.outlineWinnersInDimension(key.dimensionId()).containsKey(key), "only the HUD can recover a lost winner locally");
 				f.entities.remove(f.root.offset(1, 1, 1));
 				var fallback = service.create(VaultNativeFixture.OWNER, f.target(end), "attention", 3, 40, List.of(VaultNativeFixture.OWNER)).creation().orElseThrow().marker();
 				assertEquals(TargetKey.from(f.target(end)), fallback.targetKey()); assertEquals(first.targetKey(), store.find(second.id()).orElseThrow().targetKey());

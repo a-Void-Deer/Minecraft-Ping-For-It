@@ -16,6 +16,7 @@ import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
 import org.junit.jupiter.api.Test;
 
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localSnapshotSpanStore;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -34,17 +35,9 @@ class BlockOutlineSelectionTest {
 	}
 
 	private static ClientMarker marker(long id, Target target, String targetTypeId, String pingTypeId) {
-		return new ClientMarker(
-			new MarkerId(id),
-			OWNER,
-			target,
-			targetTypeId,
-			pingTypeId,
-			new MarkerAnchor(0, 0, 0),
-			1L,
-			100L,
-			0L,
-			100L);
+		var snapshot = new MarkerSnapshot(new MarkerId(id), OWNER, target, targetTypeId, pingTypeId,
+			new MarkerAnchor(0, 0, 0), 1L, 100L);
+		return ClientMarker.withLocalDuration(snapshot, 0L, 1L, 100L);
 	}
 
 	private static Target blockTarget(String dimension, int x, int y, int z, String registryId) {
@@ -230,7 +223,7 @@ class BlockOutlineSelectionTest {
 
 	@Test
 	void winnerChangeUpdatesSpecAndNonWinnersAreNotSelected() {
-		ClientMarkerStore store = new ClientMarkerStore(10L);
+		ClientMarkerStore store = localSnapshotSpanStore(10L);
 		Target target = blockTarget(OVERWORLD, 1, 2, 3, "minecraft:stone");
 		Target otherTarget = blockTarget(OVERWORLD, 4, 5, 6, "minecraft:stone");
 		TargetKey key = TargetKey.from(target);
@@ -252,7 +245,7 @@ class BlockOutlineSelectionTest {
 		store.onWinnerChanged(key, Optional.of(attentionId));
 
 		Map<TargetKey.BlockKey, BlockOutlineSpec> first = BlockOutlineSelection.select(
-			store.visibleWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn());
+			store.outlineWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn());
 
 		assertEquals(1, first.size());
 		assertEquals(attentionId, first.get(keyOf(OVERWORLD, 1, 2, 3, "minecraft:stone")).markerId());
@@ -261,7 +254,7 @@ class BlockOutlineSelectionTest {
 		store.onWinnerChanged(key, Optional.of(dangerId));
 
 		Map<TargetKey.BlockKey, BlockOutlineSpec> second = BlockOutlineSelection.select(
-			store.visibleWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn());
+			store.outlineWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn());
 
 		assertEquals(1, second.size());
 		assertEquals(dangerId, second.get(keyOf(OVERWORLD, 1, 2, 3, "minecraft:stone")).markerId());
@@ -270,7 +263,7 @@ class BlockOutlineSelectionTest {
 
 	@Test
 	void blockStateChangeKeepsBlockIdentityWhileRegistryChangeDoesNot() {
-		ClientMarkerStore store = new ClientMarkerStore(10L);
+		ClientMarkerStore store = localSnapshotSpanStore(10L);
 		Target stone = blockTarget(OVERWORLD, 1, 2, 3, "minecraft:stone");
 		// Same block type, different anchor (e.g. a waterlogged or oriented
 		// BlockState change): the frozen identity is unchanged.
@@ -296,7 +289,7 @@ class BlockOutlineSelectionTest {
 		store.onWinnerChanged(TargetKey.from(dirtReplaced), Optional.of(replacedId));
 
 		Map<TargetKey.BlockKey, BlockOutlineSpec> selected = BlockOutlineSelection.select(
-			store.visibleWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn());
+			store.outlineWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn());
 
 		// One spec for the stone identity and one for the replaced dirt
 		// identity: the keys differ only by block registry id.
@@ -307,7 +300,7 @@ class BlockOutlineSelectionTest {
 
 	@Test
 	void differentDimensionIsExcludedViaStoreQuery() {
-		ClientMarkerStore store = new ClientMarkerStore(10L);
+		ClientMarkerStore store = localSnapshotSpanStore(10L);
 		Target netherTarget = blockTarget(NETHER, 1, 2, 3, "minecraft:stone");
 		MarkerId netherId = new MarkerId(1L);
 
@@ -317,9 +310,9 @@ class BlockOutlineSelectionTest {
 		store.onWinnerChanged(TargetKey.from(netherTarget), Optional.of(netherId));
 
 		assertTrue(BlockOutlineSelection.select(
-			store.visibleWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn()).isEmpty());
+			store.outlineWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn()).isEmpty());
 		assertEquals(1, BlockOutlineSelection.select(
-			store.visibleWinnersInDimension(NETHER), PingTypeCatalog.builtIn()).size());
+			store.outlineWinnersInDimension(NETHER), PingTypeCatalog.builtIn()).size());
 	}
 
 	// --- validation ---

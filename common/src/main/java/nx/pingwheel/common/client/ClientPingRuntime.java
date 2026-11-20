@@ -460,32 +460,7 @@ public final class ClientPingRuntime {
 			? source.pingforit$observedServerClock() : new ObservedServerClock();
 	}
 
-	/**
-	 * Creates a runtime with a caller-supplied display duration in local ticks.
-	 */
-	public static ClientPingRuntime create(
-		ClientPingActionDispatcher.LocalErrorSink errorSink,
-		ClientPingActionDispatcher.PacketSender packetSender,
-		ClientRateLimitPolicy rateLimitPolicy,
-		InteractionTimeSource timeSource,
-		ClientMarkerStore.DisplayDurationPolicy displayDurationPolicy
-	) {
-		return create(errorSink, packetSender, rateLimitPolicy, timeSource, displayDurationPolicy, null);
-	}
-
 	static ClientPingRuntime create(
-		ClientPingActionDispatcher.LocalErrorSink errorSink,
-		ClientPingActionDispatcher.PacketSender packetSender,
-		ClientRateLimitPolicy rateLimitPolicy,
-		InteractionTimeSource timeSource,
-		ClientMarkerStore.DisplayDurationPolicy displayDurationPolicy,
-		@Nullable PresentationReceiptFeedback feedback
-	) {
-		return create(errorSink, packetSender, rateLimitPolicy, timeSource,
-			new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS, displayDurationPolicy), feedback);
-	}
-
-	private static ClientPingRuntime create(
 		ClientPingActionDispatcher.LocalErrorSink errorSink,
 		ClientPingActionDispatcher.PacketSender packetSender,
 		ClientRateLimitPolicy rateLimitPolicy,
@@ -547,23 +522,6 @@ public final class ClientPingRuntime {
 	static ClientPingRuntime createForInteraction(ClientPingActionDispatcher.LocalErrorSink errors,
 		ClientPingActionDispatcher.PacketSender sender, ClientRateLimitPolicy policy, InteractionTimeSource clock,
 		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
-		ClientPresentation presentation, @Nullable ClientInventory inventory, @Nullable ClientPresentationPreview preview) {
-		return createForInteraction(errors, sender, policy, clock, validator, access, presentation, inventory, preview,
-			PingInteractionLogger.noop());
-	}
-
-	static ClientPingRuntime createForInteraction(ClientPingActionDispatcher.LocalErrorSink errors,
-		ClientPingActionDispatcher.PacketSender sender, ClientRateLimitPolicy policy, InteractionTimeSource clock,
-		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
-		ClientPresentation presentation, @Nullable ClientInventory inventory, @Nullable ClientPresentationPreview preview,
-		PingInteractionLogger logger) {
-		return createForInteraction(errors, sender, policy, clock, validator, access, presentation, inventory, preview,
-			new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS), logger);
-	}
-
-	static ClientPingRuntime createForInteraction(ClientPingActionDispatcher.LocalErrorSink errors,
-		ClientPingActionDispatcher.PacketSender sender, ClientRateLimitPolicy policy, InteractionTimeSource clock,
-		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
 		ClientPresentation presentation, @Nullable ClientInventory inventory, @Nullable ClientPresentationPreview preview,
 		ClientMarkerStore markerStore, PingInteractionLogger logger) {
 		return createForInteraction(errors, sender, policy, clock, validator, access, presentation, inventory, preview,
@@ -574,25 +532,6 @@ public final class ClientPingRuntime {
 	}
 
 	static ClientPingRuntime createForInteraction(ClientPingActionDispatcher.LocalErrorSink errors,
-		ClientPingActionDispatcher.PacketSender sender, ClientRateLimitPolicy policy, InteractionTimeSource clock,
-		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
-		ClientPresentation presentation, @Nullable ClientInventory inventory, @Nullable ClientPresentationPreview preview,
-		ClientMarkerStore.DisplayDurationPolicy displayDuration, PresentationReceiptFeedback feedback) {
-		return createForInteraction(errors, sender, policy, clock, validator, access, presentation, inventory, preview,
-			displayDuration, feedback, PingInteractionLogger.noop());
-	}
-
-	static ClientPingRuntime createForInteraction(ClientPingActionDispatcher.LocalErrorSink errors,
-		ClientPingActionDispatcher.PacketSender sender, ClientRateLimitPolicy policy, InteractionTimeSource clock,
-		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
-		ClientPresentation presentation, @Nullable ClientInventory inventory, @Nullable ClientPresentationPreview preview,
-		ClientMarkerStore.DisplayDurationPolicy displayDuration, PresentationReceiptFeedback feedback,
-		PingInteractionLogger logger) {
-		return createForInteraction(errors, sender, policy, clock, validator, access, presentation, inventory, preview,
-			new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS, displayDuration), feedback, logger);
-	}
-
-	private static ClientPingRuntime createForInteraction(ClientPingActionDispatcher.LocalErrorSink errors,
 		ClientPingActionDispatcher.PacketSender sender, ClientRateLimitPolicy policy, InteractionTimeSource clock,
 		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
 		ClientPresentation presentation, @Nullable ClientInventory inventory, @Nullable ClientPresentationPreview preview,
@@ -2535,7 +2474,10 @@ public final class ClientPingRuntime {
 	 * <p>A {@code TARGET_GONE} create rejection surfaces the exact local
 	 * target-gone error only when its request id is the latest dispatched
 	 * create request; a rejection for an older (superseded) request is stale
-	 * and only debug logged. Every other reason is debug logged only.
+	 * and only debug logged. A remove rejection clears its pending Unping intent
+	 * unless the reason is {@code NOT_FOUND}: that alone is not expiry evidence,
+	 * so the intent can still be resolved by a later authoritative removal or
+	 * local eviction. Other rejection reasons do not show create feedback.
 	 */
 	public void handleRejected(long requestId, MarkerRequestKind requestKind, MarkerRejectReason reason) {
 		Objects.requireNonNull(requestKind, "requestKind");

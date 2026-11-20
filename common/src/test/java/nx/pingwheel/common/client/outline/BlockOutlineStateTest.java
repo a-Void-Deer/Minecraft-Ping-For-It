@@ -17,6 +17,7 @@ import nx.pingwheel.common.marker.TargetKey;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localSnapshotSpanStore;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -79,7 +80,7 @@ class BlockOutlineStateTest {
 	}
 
 	private static ClientMarkerStore storeWithWinner(long id, Target target, String pingTypeId) {
-		ClientMarkerStore store = new ClientMarkerStore(10L);
+		ClientMarkerStore store = localSnapshotSpanStore(10L);
 		store.onCreated(snapshot(id, target, pingTypeId), 0L);
 		store.onWinnerChanged(TargetKey.from(target), Optional.of(new MarkerId(id)));
 		return store;
@@ -90,7 +91,7 @@ class BlockOutlineStateTest {
 	@Test
 	void snapshotPreservesAscendingMarkerIdIterationOrder() {
 		BlockOutlineState state = installRecordingLogger();
-		ClientMarkerStore store = new ClientMarkerStore(10L);
+		ClientMarkerStore store = localSnapshotSpanStore(10L);
 		Target targetA = blockTarget(1, 2, 3);
 		Target targetB = blockTarget(4, 5, 6);
 
@@ -156,7 +157,7 @@ class BlockOutlineStateTest {
 	@Test
 	void winnerChangeUpdatesColorAndSpec() {
 		BlockOutlineState state = installRecordingLogger();
-		ClientMarkerStore store = new ClientMarkerStore(10L);
+		ClientMarkerStore store = localSnapshotSpanStore(10L);
 		Target target = blockTarget(1, 2, 3);
 		TargetKey key = TargetKey.from(target);
 
@@ -237,7 +238,7 @@ class BlockOutlineStateTest {
 		BlockOutlineState state = installRecordingLogger();
 		Target.ExternalBlockTarget target = externalTarget();
 		TargetKey key = TargetKey.from(target);
-		ClientMarkerStore store = new ClientMarkerStore(10L);
+		ClientMarkerStore store = localSnapshotSpanStore(10L);
 		MarkerId markerId = new MarkerId(6L);
 
 		store.onCreated(

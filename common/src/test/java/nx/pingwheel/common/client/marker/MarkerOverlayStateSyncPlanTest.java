@@ -6,6 +6,7 @@ import java.util.UUID;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.MarkerAnchor;
+import nx.pingwheel.common.marker.MarkerSnapshot;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -67,16 +68,9 @@ class MarkerOverlayStateSyncPlanTest {
 	}
 
 	private static ClientMarker marker(long id) {
-		return new ClientMarker(
-			new MarkerId(id),
-			OWNER,
-			new Target.LocationTarget("minecraft:overworld", 0, 0, 0),
-			"block",
-			"attention",
-			new MarkerAnchor(0, 0, 0),
-			1L,
-			100L,
-			0L,
-			100L);
+		var target = new Target.LocationTarget("minecraft:overworld", 0, 0, 0);
+		var snapshot = new MarkerSnapshot(new MarkerId(id), OWNER, target, "block", "attention",
+			new MarkerAnchor(0, 0, 0), 1L, 100L);
+		return ClientMarker.withLocalDuration(snapshot, 0L, 1L, 100L);
 	}
 }

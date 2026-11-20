@@ -58,7 +58,9 @@ public class ClientConfig implements IConfig {
 	/** Kept as wheelFontSize in JSON: this is the radial option-label value. */
 	int wheelFontSize = ConfigDefaults.Client.WHEEL_FONT_SIZE;
 	int wheelTargetFontSize = ConfigDefaults.Client.WHEEL_TARGET_FONT_SIZE;
-	/** Zero means that each marker uses its frozen server-side duration. */
+	/** Zero follows each marker's frozen server tick span on the observed server clock. */
+	@Getter(AccessLevel.NONE)
+	@ToString.Exclude
 	int markerDisplayDuration = ConfigDefaults.Client.MARKER_DISPLAY_DURATION;
 	/** Local placement of the courtesy-cooldown notice; never changes limiter behavior. */
 	@Nullable CooldownFeedbackMode cooldownFeedback = ConfigDefaults.Client.COOLDOWN_FEEDBACK;
@@ -156,18 +158,10 @@ public class ClientConfig implements IConfig {
 	 * Returns the local marker display setting with its safe fallback even when
 	 * a caller supplied a value without invoking the setter or validation.
 	 */
+	@EqualsAndHashCode.Include(replaces = "markerDisplayDuration")
+	@ToString.Include(name = "markerDisplayDuration")
 	public int getEffectiveMarkerDisplayDuration() {
 		return ClientConfigBounds.clampMarkerDisplayDuration(markerDisplayDuration);
-	}
-
-	/** Returns the runtime-safe persisted value, including its follow-server sentinel. */
-	public int getMarkerDisplayDuration() {
-		return getEffectiveMarkerDisplayDuration();
-	}
-
-	public boolean isFollowServerMarkerDisplayDuration() {
-		return getEffectiveMarkerDisplayDuration()
-			== ClientConfigBounds.FOLLOW_SERVER_MARKER_DISPLAY_DURATION;
 	}
 
 	public void setMarkerDisplayDuration(int markerDisplayDuration) {

@@ -9,7 +9,6 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.FriendlyByteBuf;
-import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.domain.TargetTypeCatalog;
@@ -34,6 +33,7 @@ import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.TestContentGrants;
 import org.junit.jupiter.api.Test;
 
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localStore;
 import static org.junit.jupiter.api.Assertions.*;
 
 class PresentationServerRefreshTest {
@@ -472,7 +472,7 @@ class PresentationServerRefreshTest {
 			PresentationServer.sendInitial(session, l, new BasicAdapter(), Set.of(NAME), deliveries::add));
 		PresentationServer.sendWinnerBaseline(session, VIEWER, 100, store, deliveries::add);
 
-		var client = new ClientMarkerStore(0L, 100L);
+		var client = localStore(0L, 100L);
 		for (var packet : deliveries) {
 			if (packet.kind() == PresentationS2CPacket.Kind.CREATED) client.onCreated(packet.snapshot(), 0L);
 			else if (packet.kind() == PresentationS2CPacket.Kind.WINNER)
@@ -480,8 +480,8 @@ class PresentationServerRefreshTest {
 		}
 
 		var key = TargetKey.from(target);
-		assertEquals(Optional.of(created.marker().id()), client.winnerId(key));
-		assertTrue(client.visibleWinnersInDimension("minecraft:overworld").containsKey(key),
+		assertEquals(created.marker().id(), client.winnerMarker(key).orElseThrow().id());
+		assertTrue(client.outlineWinnersInDimension("minecraft:overworld").containsKey(key),
 			"the baseline winner is exposed to outline consumers once its record is known");
 	}
 

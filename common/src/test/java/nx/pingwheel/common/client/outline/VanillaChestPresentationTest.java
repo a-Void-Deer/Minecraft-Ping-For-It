@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localSnapshotSpanStore;
 import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
@@ -115,7 +116,7 @@ class VanillaChestPresentationTest {
 				throw new AssertionError("metadata-only resolver called " + method.getName());
 			});
 		assertEquals(new BlockPresentationResolverRegistry().resolve(f.client, spec), new BlockPresentationResolverRegistry().resolve(getter, spec));
-		var clientStore = new nx.pingwheel.common.client.marker.ClientMarkerStore(0);
+		var clientStore = localSnapshotSpanStore(0L);
 		var key = new MinecraftTargetGroupingResolver(f.server).resolve(DoubleChestFixture.OWNER, f.target(f.right));
 		clientStore.onCreated(new nx.pingwheel.common.marker.MarkerSnapshot(new MarkerId(1), DoubleChestFixture.OWNER, f.target(f.right), key,
 			"entity_block", "attention", new nx.pingwheel.common.marker.MarkerAnchor(16.5, 64.5, 15.5), 1, 30), 0);

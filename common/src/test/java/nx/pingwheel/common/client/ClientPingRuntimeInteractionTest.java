@@ -65,6 +65,7 @@ import nx.pingwheel.common.presentation.preview.PreviewObservation;
 import nx.pingwheel.common.render.SpatialOverlayRenderer;
 import org.jetbrains.annotations.Unmodifiable;
 
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localStore;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** End-to-end runtime interaction, with only the live world, native cursor and clock recorded. */
@@ -227,7 +228,7 @@ class ClientPingRuntimeInteractionTest {
 		Fixture() { this(new ClientRateLimitPolicy(20, 1000), true); }
 		Fixture(ClientRateLimitPolicy policy, boolean ready) {
 			// The interaction/Unping cases intentionally allow post-server-expiry visuals.
-			this(policy, ready, new ClientMarkerStore(ClientPingRuntime.FALLBACK_EXPIRY_GRACE_TICKS, 200L));
+			this(policy, ready, localStore(ClientPingRuntime.FALLBACK_EXPIRY_GRACE_TICKS, 200L));
 		}
 		Fixture(ClientRateLimitPolicy policy, boolean ready, ClientMarkerStore markerStore) {
 			PreviewFieldAccess reader = new PreviewFieldAccess() {
@@ -667,6 +668,25 @@ class ClientPingRuntimeInteractionTest {
 		assertTrue(f.runtime.store().marker(id).isEmpty());
 		assertTrue(f.presentation.markerGrant(id).isEmpty());
 		assertTrue(f.errors.isEmpty());
+	}
+
+	@Test
+	void fallbackStaleOwnUnpingSendsOneRemoveWithoutDismissingTheVisual() {
+		Fixture f = new Fixture(ClientRateLimitPolicy.DEFAULT, true, localStore(0L, 100L));
+		MarkerId id = new MarkerId(42);
+		f.runtime.onPresentationPacket(markerCreated(100, 1, 1L, id, OWNER, CHEST, "entity_block", 1L));
+		f.tick(0L);
+		var stale = f.runtime.store().marker(id).orElseThrow();
+		assertTrue(stale.isStale());
+		assertFalse(f.runtime.store().isAuthoritativelyRemoved(id));
+
+		unping(f);
+		assertEquals(List.of(id), removals(f));
+		assertEquals(List.of(stale), f.runtime.store().renderMarkers(), "the local visual waits for authoritative removal");
+
+		f.runtime.onPresentationPacket(PresentationS2CPacket.removed(100, 1, id, MarkerRemovalReason.CANCELLED));
+		assertTrue(f.runtime.store().marker(id).isEmpty());
+		assertEquals(List.of(id), removals(f));
 	}
 
 	@Test

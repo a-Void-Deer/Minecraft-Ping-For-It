@@ -30,6 +30,7 @@ import nx.pingwheel.common.resolve.DefaultTargetResolver;
 import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import org.junit.jupiter.api.Test;
 import org.jetbrains.annotations.NotNullByDefault;
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localStore;
 import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
@@ -50,10 +51,11 @@ class InventoryDispatchIntegrationTest {
 				selectionHandoff.accept(selection);
 				if (failAfterSelection) throw new IllegalStateException("after synchronous terminal response");
 			}
-		}, new ClientRateLimitPolicy(1, 1000), () -> 0, marker -> 100, new ClientPingRuntime.PresentationReceiptFeedback() {
-			@Override public void play(MarkerSnapshot snapshot) {}
-			@Override public void chat(String owner, MarkerSnapshot snapshot, net.minecraft.network.chat.Component name) {}
-		});
+		}, new ClientRateLimitPolicy(1, 1000), () -> 0, localStore(ClientPingRuntime.FALLBACK_EXPIRY_GRACE_TICKS, 100L),
+			new ClientPingRuntime.PresentationReceiptFeedback() {
+				@Override public void play(MarkerSnapshot snapshot) {}
+				@Override public void chat(String owner, MarkerSnapshot snapshot, net.minecraft.network.chat.Component name) {}
+			});
 		Fixture() {
 			runtime.presentation().tick(true);
 			runtime.onPresentationPacket(PresentationS2CPacket.offer(100, Map.of(PresentationBasic.ID,

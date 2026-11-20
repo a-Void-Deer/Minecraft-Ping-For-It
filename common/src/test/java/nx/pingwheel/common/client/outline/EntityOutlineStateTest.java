@@ -16,6 +16,7 @@ import nx.pingwheel.common.marker.TargetKey;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localSnapshotSpanStore;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -70,7 +71,7 @@ class EntityOutlineStateTest {
 	}
 
 	private static ClientMarkerStore storeWithWinner(long id, Target target, String pingTypeId) {
-		ClientMarkerStore store = new ClientMarkerStore(10L);
+		ClientMarkerStore store = localSnapshotSpanStore(10L);
 		store.onCreated(snapshot(id, target, pingTypeId), 0L);
 		store.onWinnerChanged(TargetKey.from(target), Optional.of(new MarkerId(id)));
 		return store;
@@ -81,7 +82,7 @@ class EntityOutlineStateTest {
 	@Test
 	void snapshotPreservesAscendingMarkerIdIterationOrder() {
 		EntityOutlineState state = installRecordingLogger();
-		ClientMarkerStore store = new ClientMarkerStore(10L);
+		ClientMarkerStore store = localSnapshotSpanStore(10L);
 		Target targetA = entityTarget(ENTITY_A);
 		Target targetB = entityTarget(ENTITY_B);
 
@@ -149,7 +150,7 @@ class EntityOutlineStateTest {
 	@Test
 	void winnerChangeUpdatesColorAndSpec() {
 		EntityOutlineState state = installRecordingLogger();
-		ClientMarkerStore store = new ClientMarkerStore(10L);
+		ClientMarkerStore store = localSnapshotSpanStore(10L);
 		Target target = entityTarget(ENTITY_A);
 		TargetKey key = TargetKey.from(target);
 
