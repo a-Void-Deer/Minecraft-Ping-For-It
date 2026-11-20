@@ -194,4 +194,18 @@ public final class ClientConfigBounds {
 			FOLLOW_SERVER_MARKER_DISPLAY_DURATION,
 			MAX_MARKER_DISPLAY_DURATION);
 	}
+
+	/**
+	 * A negative client capture distance cannot form a finite trace segment, so
+	 * it restores the field's default. Zero and every non-negative value remain
+	 * valid; this deliberately does not apply the server or settings-screen range.
+	 */
+	public static int clampPingDistance(int value) {
+		return value < 0 ? ConfigDefaults.Client.PING_DISTANCE : value;
+	}
+
+	/** See {@link #clampPingDistance(int)}; the raycast cap has its own default. */
+	public static int clampRaycastDistance(int value) {
+		return value < 0 ? ConfigDefaults.Client.RAYCAST_DISTANCE : value;
+	}
 }

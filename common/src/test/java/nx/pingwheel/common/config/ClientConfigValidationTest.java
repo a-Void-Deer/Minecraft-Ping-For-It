@@ -331,5 +331,63 @@ class ClientConfigValidationTest {
 			config.getEffectiveLongPressCompatibilitySliceMillis());
 	}
 
+	@Test
+	void negativeRangeDistancesRecoverToTheirOwnDefaultsDuringValidation() {
+		ClientConfig defaults = new ClientConfig();
+		ClientConfig config = new Gson().fromJson(
+			"{\"pingDistance\":-1,\"raycastDistance\":-2,\"pingVolume\":42,\"wheelHoldMillis\":210}",
+			ClientConfig.class);
+		List<ClampWarning> warnings = new ArrayList<>();
+
+		config.validate((key, suppliedValue, effectiveValue) ->
+			warnings.add(new ClampWarning(key, suppliedValue, effectiveValue)));
+
+		assertEquals(defaults.getPingDistance(), config.getPingDistance());
+		assertEquals(defaults.getRaycastDistance(), config.getRaycastDistance());
+		assertEquals(42, config.getPingVolume());
+		assertEquals(210, config.getWheelHoldMillis());
+		assertEquals(
+			List.of(
+				new ClampWarning("pingDistance", -1, defaults.getPingDistance()),
+				new ClampWarning("raycastDistance", -2, defaults.getRaycastDistance())),
+			warnings);
+	}
+
+	@Test
+	void zeroAndUncappedRangeDistancesRemainValidDuringValidation() {
+		ClientConfig config = new Gson().fromJson(
+			"{\"pingDistance\":" + Integer.MAX_VALUE + ",\"raycastDistance\":0}",
+			ClientConfig.class);
+		List<ClampWarning> warnings = new ArrayList<>();
+
+		config.validate((key, suppliedValue, effectiveValue) ->
+			warnings.add(new ClampWarning(key, suppliedValue, effectiveValue)));
+
+		assertEquals(Integer.MAX_VALUE, config.getPingDistance());
+		assertEquals(0, config.getRaycastDistance());
+		assertEquals(List.of(), warnings);
+	}
+
+	@Test
+	void rangeDistanceSettersRestoreOnlyTheInvalidFieldToItsDefault() {
+		ClientConfig defaults = new ClientConfig();
+		ClientConfig config = new ClientConfig();
+
+		config.setPingDistance(-1);
+		assertEquals(defaults.getPingDistance(), config.getPingDistance());
+		config.setRaycastDistance(-2);
+		assertEquals(defaults.getRaycastDistance(), config.getRaycastDistance());
+
+		config.setPingDistance(0);
+		config.setRaycastDistance(Integer.MAX_VALUE);
+		assertEquals(0, config.getPingDistance());
+		assertEquals(Integer.MAX_VALUE, config.getRaycastDistance());
+
+		config.setPingDistance(-3);
+		assertEquals(defaults.getPingDistance(), config.getPingDistance());
+		assertEquals(Integer.MAX_VALUE, config.getRaycastDistance(),
+			"one invalid field must not reset the other");
+	}
+
 	private record ClampWarning(String key, int suppliedValue, int effectiveValue) {}
 }

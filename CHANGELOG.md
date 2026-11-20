@@ -4,6 +4,12 @@
 
 Changes since the `1.21.1` baseline (`a51a850b`).
 
+### Ping range and target selection
+
+- A negative `pingDistance` or `raycastDistance` in the client configuration
+  now falls back to that setting's default instead of crashing the next ping.
+  Zero remains valid.
+
 ### Aeronautics rotors and Sable sub-levels
 
 - On NeoForge, ordinary and Precise selection can now hit the actual block

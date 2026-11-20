@@ -119,6 +119,16 @@ public class ClientConfig implements IConfig {
 		return ClientConfigBounds.DEFAULT_WHEEL_OUTER_RADIUS;
 	}
 
+	/** Negative local distances restore this field's default; zero and any non-negative value are retained. */
+	public void setPingDistance(int pingDistance) {
+		this.pingDistance = ClientConfigBounds.clampPingDistance(pingDistance);
+	}
+
+	/** Negative local distances restore this field's default; zero and any non-negative value are retained. */
+	public void setRaycastDistance(int raycastDistance) {
+		this.raycastDistance = ClientConfigBounds.clampRaycastDistance(raycastDistance);
+	}
+
 	public void setWheelHoldMillis(int wheelHoldMillis) {
 		this.wheelHoldMillis = ClientConfigBounds.clampWheelHoldMillis(wheelHoldMillis);
 		this.longPressCompatibilitySliceMillis = ClientConfigBounds.clampLongPressCompatibilitySliceMillis(
@@ -305,6 +315,8 @@ public class ClientConfig implements IConfig {
 		spatialSelector.validate();
 		if (longPressCompatibilityMode) spatialSelector.setGestureSkipHoldEnabled(false);
 
+		final int suppliedPingDistance = pingDistance;
+		final int suppliedRaycastDistance = raycastDistance;
 		final int suppliedWheelHoldMillis = wheelHoldMillis;
 		final int suppliedLongPressCompatibilitySliceMillis = longPressCompatibilitySliceMillis;
 		final int suppliedCancelHalfConeAngleDegrees = cancelHalfConeAngleDegrees;
@@ -315,6 +327,12 @@ public class ClientConfig implements IConfig {
 		final int suppliedWheelTargetFontSize = wheelTargetFontSize;
 		final int suppliedConfigurationNoticeSize = configurationNoticeSize;
 		final int suppliedMarkerDisplayDuration = markerDisplayDuration;
+
+		pingDistance = ClientConfigBounds.clampPingDistance(pingDistance);
+		warnIfChanged(warningSink, "pingDistance", suppliedPingDistance, pingDistance);
+
+		raycastDistance = ClientConfigBounds.clampRaycastDistance(raycastDistance);
+		warnIfChanged(warningSink, "raycastDistance", suppliedRaycastDistance, raycastDistance);
 
 		wheelHoldMillis = ClientConfigBounds.clampWheelHoldMillis(wheelHoldMillis);
 		warnIfChanged(
