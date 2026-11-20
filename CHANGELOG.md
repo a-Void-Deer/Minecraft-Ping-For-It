@@ -4,6 +4,15 @@
 
 Changes since the `1.21.1` baseline (`a51a850b`).
 
+### Marker display and cancellation
+
+- When your display duration outlasts a ping on the server, the last winning
+  ping on that target keeps its outline while the target can still be drawn.
+  A new server winner takes precedence.
+- **Unping** now dismisses your own ping from your screen after it expires on
+  the server. Other players keep their own display; using Unping before the
+  server expires the ping still removes it for its recipients.
+
 ### Ping channels
 
 - On a `GLOBAL` server, the empty Ping Channel field shows **Global** even

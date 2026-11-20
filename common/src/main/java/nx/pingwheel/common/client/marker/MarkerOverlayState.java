@@ -265,6 +265,13 @@ public final class MarkerOverlayState {
 		renderViews = List.of();
 	}
 
+	/** Drops only this id, including its cached name and presentation point. */
+	public void forgetMarker(MarkerId id) {
+		@Nullable MarkerView removed = views.remove(id);
+		appliedNames.remove(id);
+		if (removed != null) renderViews = renderViews.stream().filter(view -> view != removed).toList();
+	}
+
 	/**
 	 * Computes the pure id-level synchronization plan between the cached view
 	 * ids and the markers currently present in the store:

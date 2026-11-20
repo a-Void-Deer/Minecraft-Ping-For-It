@@ -1,6 +1,8 @@
 package nx.pingwheel.common.client.marker;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
 import java.util.Map;
@@ -16,6 +18,7 @@ import nx.pingwheel.common.marker.TargetKey;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -402,6 +405,133 @@ class ClientMarkerStoreTest {
 	}
 
 	// --- independent synchronization and display lifetimes ---
+
+	@ParameterizedTest
+	@ValueSource(booleans = {false, true})
+	void onlyAuthoritativeExpiryKeepsTheLastAssignedOutlineAfterTheSlotEmpties(boolean emptyFirst) {
+		ClientMarkerStore store = new ClientMarkerStore(10L, 30L);
+		MarkerId id = new MarkerId(11);
+		Target target = entityTarget(OVERWORLD, OWNER);
+		TargetKey key = TargetKey.from(target);
+		store.onCreated(snapshot(id, target, 0L, 5L), 0L);
+		store.onWinnerChanged(key, Optional.of(id));
+		assertEquals(id, store.outlineWinnersInDimension(OVERWORLD).get(key).id());
+
+		if (emptyFirst) {
+			store.onWinnerChanged(key, Optional.empty());
+			store.expireFallback(15L);
+			assertTrue(store.marker(id).orElseThrow().isStale());
+			assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty(), "local STALE alone is not expiry proof");
+			store.onRemoved(id, MarkerRemovalReason.EXPIRED, 15L);
+		} else {
+			store.onRemoved(id, MarkerRemovalReason.EXPIRED, 5L);
+			assertEquals(id, store.outlineWinnersInDimension(OVERWORLD).get(key).id(), "the assigned winner is still visible");
+			store.onWinnerChanged(key, Optional.empty());
+		}
+
+		assertTrue(store.winnerId(key).isEmpty(), "outline fallback does not write into the HUD winner projection");
+		assertEquals(List.of(id), hudIds(store));
+		assertEquals(id, store.outlineWinnersInDimension(OVERWORLD).get(key).id());
+		store.expireFallback(29L);
+		assertEquals(id, store.outlineWinnersInDimension(OVERWORLD).get(key).id());
+		store.expireFallback(30L);
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty());
+	}
+
+	@Test
+	void newerAssignmentDiscardsExpiredOutlineHistoryEvenBeforeTheSnapshotArrives() {
+		ClientMarkerStore store = new ClientMarkerStore(10L, 30L);
+		MarkerId expired = new MarkerId(11);
+		MarkerId replacement = new MarkerId(12);
+		Target target = entityTarget(OVERWORLD, OWNER);
+		TargetKey key = TargetKey.from(target);
+		store.onCreated(snapshot(expired, target, 0L, 5L), 0L);
+		store.onWinnerChanged(key, Optional.of(expired));
+		store.onWinnerChanged(key, Optional.empty());
+		store.onRemoved(expired, MarkerRemovalReason.EXPIRED, 5L);
+		assertEquals(expired, store.outlineWinnersInDimension(OVERWORLD).get(key).id());
+
+		store.onWinnerChanged(key, Optional.of(replacement));
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty());
+		assertEquals(List.of(expired), hudIds(store));
+		store.onWinnerChanged(key, Optional.empty());
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty(), "empty after a replacement must not resurrect its predecessor");
+		store.onWinnerChanged(key, Optional.of(replacement));
+		store.onCreated(snapshot(replacement, target, 5L, 15L), 5L);
+		assertEquals(replacement, store.outlineWinnersInDimension(OVERWORLD).get(key).id());
+	}
+
+	@Test
+	void hiddenAssignedWinnerAndLocalRecomputationDoNotAdmitTheVisibleLoserToOutlines() {
+		MarkerId winner = new MarkerId(11);
+		MarkerId loser = new MarkerId(12);
+		ClientMarkerStore store = new ClientMarkerStore(10L, snapshot -> snapshot.id().equals(winner) ? 4L : 30L);
+		Target target = entityTarget(OVERWORLD, OWNER);
+		TargetKey key = TargetKey.from(target);
+		store.onCreated(snapshot(winner, target, 0L, 5L), 0L);
+		store.onCreated(snapshot(loser, target, 2L, 20L), 2L);
+		store.onWinnerChanged(key, Optional.of(winner));
+
+		store.expireFallback(4L);
+		assertTrue(store.marker(winner).isPresent());
+		assertEquals(List.of(loser), hudIds(store));
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty());
+
+		store.expireFallback(15L);
+		assertEquals(loser, store.winnerId(key).orElseThrow(), "loss recovery remains available to the HUD");
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty());
+		store.onWinnerChanged(key, Optional.empty());
+		store.onRemoved(loser, MarkerRemovalReason.EXPIRED, 20L);
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty(), "a locally recomputed winner was never server-assigned");
+	}
+
+	@Test
+	void hardRemovalAndStoreClearDiscardOutlineHistoryWithoutResurrectingAnId() {
+		ClientMarkerStore store = new ClientMarkerStore(10L, 30L);
+		MarkerId id = new MarkerId(11);
+		Target target = entityTarget(OVERWORLD, OWNER);
+		TargetKey key = TargetKey.from(target);
+		MarkerSnapshot snapshot = snapshot(id, target, 0L, 5L);
+		store.onCreated(snapshot, 0L);
+		store.onWinnerChanged(key, Optional.of(id));
+		store.onWinnerChanged(key, Optional.empty());
+		store.onRemoved(id, MarkerRemovalReason.EXPIRED, 5L);
+		store.onRemoved(id, MarkerRemovalReason.TARGET_INVALID, 6L);
+		store.onWinnerChanged(key, Optional.of(id));
+		store.onCreated(snapshot, 6L);
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty());
+		assertTrue(store.marker(id).isEmpty());
+
+		MarkerId next = new MarkerId(12);
+		MarkerSnapshot nextSnapshot = snapshot(next, target, 6L, 8L);
+		store.onCreated(nextSnapshot, 6L);
+		store.onWinnerChanged(key, Optional.of(next));
+		store.onWinnerChanged(key, Optional.empty());
+		store.onRemoved(next, MarkerRemovalReason.EXPIRED, 8L);
+		assertEquals(next, store.outlineWinnersInDimension(OVERWORLD).get(key).id());
+		store.clear();
+		store.onCreated(nextSnapshot, 8L);
+		store.onRemoved(next, MarkerRemovalReason.EXPIRED, 10L);
+		assertTrue(store.marker(next).isPresent());
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty());
+	}
+
+	@Test
+	void dismissalRequiresOwnershipDimensionAndAuthoritativeExpiryRatherThanFallbackStaleness() {
+		ClientMarkerStore store = new ClientMarkerStore(10L, 30L);
+		MarkerId id = new MarkerId(11);
+		Target target = entityTarget(OVERWORLD, OWNER);
+		store.onCreated(snapshot(id, target, 0L, 5L), 0L);
+		store.expireFallback(15L);
+		assertTrue(store.marker(id).orElseThrow().isStale());
+		assertFalse(store.dismissExpiredOwned(id, OWNER, OVERWORLD));
+		store.onRemoved(id, MarkerRemovalReason.EXPIRED, 15L);
+		assertFalse(store.dismissExpiredOwned(id, STRANGER, OVERWORLD));
+		assertFalse(store.dismissExpiredOwned(id, OWNER, NETHER));
+		assertTrue(store.dismissExpiredOwned(id, OWNER, OVERWORLD));
+		assertTrue(store.marker(id).isEmpty());
+		assertTrue(store.isAuthoritativelyRemoved(id));
+	}
 
 	@Test
 	void expiredMarksMarkerStaleButRetainsAVisualUntilDisplayDeadline() {

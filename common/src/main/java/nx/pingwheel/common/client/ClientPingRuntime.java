@@ -121,6 +121,7 @@ import nx.pingwheel.common.util.DirectionalSoundInstance;
 import nx.pingwheel.common.util.InputUtils;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import nx.pingwheel.common.math.RaycastPolicy;
 
 import static nx.pingwheel.common.CommonClient.Game;
@@ -207,6 +208,7 @@ public final class ClientPingRuntime {
 	private final ClientPresentation presentation;
 	private final PresentationReceiptFeedback presentationReceiptFeedback;
 	private final PendingContentChatController contentChat;
+	private final Map<MarkerId, PingInteractionAction.CancelMarker> pendingUnpings = new LinkedHashMap<>();
 
 	/** Receipt effects and detached decoding only; a metadata upsert never repeats sound or ordinary chat. */
 	interface PresentationReceiptFeedback {
@@ -728,6 +730,7 @@ public final class ClientPingRuntime {
 	public void close() {
 		abort();
 		contentChat.clear();
+		pendingUnpings.clear();
 		markerStore.clear();
 		presentation.close();
 		nameStore.clear();
@@ -883,15 +886,15 @@ public final class ClientPingRuntime {
 							rejectSelectorRelease(SelectorReleaseRejection.PRESENTATION_NOT_READY, releasing, content);
 						else if (!admittedType)
 							rejectSelectorRelease(SelectorReleaseRejection.RAY_TYPE_LOCATOR_MISMATCH, releasing, content);
-					} else if (action.isPresent()) sent = dispatcher.dispatchOutcome(action.get());
-				} else if (action.isPresent()) sent = dispatcher.dispatchOutcome(action.get());
+					} else if (action.isPresent()) sent = dispatchInteractionRelease(action.get());
+				} else if (action.isPresent()) sent = dispatchInteractionRelease(action.get());
 			} else {
 				action = machine.updateAt(false, WheelSelection.NONE, emptyCancellationContext(), now);
 				if (baselineToken != releasing || !activeInteraction.isCurrent(releasing)) {
 					if (action.isPresent()) rejectSelectorRelease(SelectorReleaseRejection.WRONG_TOKEN, releasing, null);
 					action = Optional.empty();
 				}
-				if (action.isPresent()) sent = dispatcher.dispatchOutcome(action.get());
+				if (action.isPresent()) sent = dispatchInteractionRelease(action.get());
 			}
 			return baselineOutcome(action, sent);
 		} finally {
@@ -899,6 +902,38 @@ public final class ClientPingRuntime {
 			interactionAccess.syncMouse(machine.phase());
 			synchronizeNativeInput();
 		}
+	}
+
+	private ClientPingActionDispatcher.DispatchOutcome dispatchInteractionRelease(PingInteractionAction action) {
+		if (!(action instanceof PingInteractionAction.CancelMarker cancel)) return dispatcher.dispatchOutcome(action);
+		MarkerId id = cancel.markerId();
+		@Nullable ClientMarker marker = markerStore.marker(id).orElse(null);
+		if (marker != null && (!marker.owner().equals(cancel.owner())
+			|| !marker.target().dimensionId().equals(cancel.dimensionId()))) {
+			return ClientPingActionDispatcher.DispatchOutcome.OTHER;
+		}
+		if (dismissExpiredUnping(cancel) || markerStore.isAuthoritativelyRemoved(id)) {
+			return ClientPingActionDispatcher.DispatchOutcome.OTHER;
+		}
+		if (marker == null || !presentation.ready()) return dispatcher.dispatchOutcome(action);
+
+		// Correlate before transport; a synchronous expiry can arrive during send.
+		@Nullable PingInteractionAction.CancelMarker previous = pendingUnpings.put(id, cancel);
+		try {
+			return dispatcher.dispatchOutcome(action);
+		} catch (RuntimeException | LinkageError failed) {
+			if (pendingUnpings.get(id) == cancel) {
+				if (previous == null) pendingUnpings.remove(id);
+				else pendingUnpings.put(id, previous);
+			}
+			throw failed;
+		}
+	}
+
+	private boolean dismissExpiredUnping(PingInteractionAction.CancelMarker cancel) {
+		if (!markerStore.dismissExpiredOwned(cancel.markerId(), cancel.owner(), cancel.dimensionId())) return false;
+		forgetMarkerDisplay(cancel.markerId());
+		return true;
 	}
 
 	private void rejectSelectorRelease(SelectorReleaseRejection rejection, InteractionToken token,
@@ -2034,7 +2069,7 @@ public final class ClientPingRuntime {
 	}
 
 	private void expireFallbackMarkers() {
-		List<ClientMarker> expired = markerStore.expireFallback(localTick);
+		@Unmodifiable List<ClientMarker> expired = markerStore.expireFallback(localTick);
 
 		if (expired.isEmpty()) {
 			return;
@@ -2044,10 +2079,7 @@ public final class ClientPingRuntime {
 		// the independent display deadline causes the client record to be
 		// removed, so cleanup follows final record removal rather than sync loss.
 		for (ClientMarker marker : expired) {
-			contentChat.cancel(marker.id());
-			nameStore.onRemoved(marker.id());
-			if (inventory != null) inventory.markerRemoved(marker.id());
-			presentation.evict(marker.id());
+			forgetMarkerDisplay(marker.id());
 		}
 
 		logger.debug(() -> "marker client lifetime ended: count=" + expired.size()
@@ -2066,6 +2098,7 @@ public final class ClientPingRuntime {
 			case RESET -> {
 				long previousEpoch = presentation.epoch();
 				if (presentation.reset(packet)) {
+					markerStore.beginOutlineWinnerView();
 					// Only a true epoch change clears pending receipt chat. A
 					// same-epoch reset re-fences the packet view but not the
 					// marker's frozen content or an in-flight receipt.
@@ -2108,8 +2141,6 @@ public final class ClientPingRuntime {
 				presentation.removed(packet.markerId(), packet.revision(),
 					packet.removalReason() == MarkerRemovalReason.EXPIRED);
 				applyRemoved(packet.markerId(), packet.removalReason());
-				if (inventory != null) inventory.markerRemoved(packet.markerId());
-				if (markerStore.marker(packet.markerId()).isEmpty()) presentation.evict(packet.markerId());
 			}
 			case WINNER -> {
 				if (presentation.current(packet)) applyWinnerChanged(packet.targetKey(), packet.winnerId());
@@ -2190,12 +2221,9 @@ public final class ClientPingRuntime {
 		String ownerName = packet.ownerName();
 		if (snapshot == null || ownerName == null || markerStore.isAuthoritativelyRemoved(snapshot.id())) return;
 		boolean newlySeen = isNewMarkerReceipt(markerStore, snapshot.id());
-		List<ClientMarker> superseded = markerStore.onCreated(snapshot, localTick);
+		@Unmodifiable List<ClientMarker> superseded = markerStore.onCreated(snapshot, localTick);
 		for (ClientMarker marker : superseded) {
-			contentChat.cancel(marker.id());
-			nameStore.onRemoved(marker.id());
-			presentation.evict(marker.id());
-			if (inventory != null) inventory.markerRemoved(marker.id());
+			forgetMarkerDisplay(marker.id());
 		}
 		boolean inventoryKnown = inventory != null && inventory.trackingKind(snapshot.id()).isPresent();
 		if (inventory != null) inventory.markerCreated(snapshot, packet.markerGrant());
@@ -2403,24 +2431,34 @@ public final class ClientPingRuntime {
 	public void applyRemoved(MarkerId markerId, MarkerRemovalReason reason) {
 		Objects.requireNonNull(markerId, "markerId");
 		Objects.requireNonNull(reason, "reason");
+		@Nullable PingInteractionAction.CancelMarker unping = pendingUnpings.remove(markerId);
 		contentChat.cancel(markerId);
 		if (inventory != null) inventory.markerRemoved(markerId);
 
 		boolean knownBeforeRemoval = markerStore.marker(markerId).isPresent();
-		List<ClientMarker> removed = markerStore.onRemoved(markerId, reason, localTick);
-		boolean markerWasRemoved = removed.stream().anyMatch(marker -> marker.id().equals(markerId));
+		@Unmodifiable List<ClientMarker> removed = markerStore.onRemoved(markerId, reason, localTick);
 
-		if (!knownBeforeRemoval && !markerWasRemoved) {
-			nameStore.onRemoved(markerId);
+		if (!knownBeforeRemoval) {
+			forgetMarkerDisplay(markerId);
 		}
 
 		for (ClientMarker removedMarker : removed) {
-			contentChat.cancel(removedMarker.id());
-			nameStore.onRemoved(removedMarker.id());
-			presentation.evict(removedMarker.id());
+			forgetMarkerDisplay(removedMarker.id());
+		}
+		if (reason == MarkerRemovalReason.EXPIRED && unping != null) {
+			dismissExpiredUnping(unping);
 		}
 
 		logger.debug("marker removed applied: markerId={} reason={}", markerId.value(), reason);
+	}
+
+	private void forgetMarkerDisplay(MarkerId id) {
+		pendingUnpings.remove(id);
+		contentChat.cancel(id);
+		nameStore.onRemoved(id);
+		presentation.evict(id);
+		if (inventory != null) inventory.markerRemoved(id);
+		MarkerOverlayState.INSTANCE.forgetMarker(id);
 	}
 
 	/**
@@ -2430,12 +2468,9 @@ public final class ClientPingRuntime {
 		Objects.requireNonNull(targetKey, "targetKey");
 		Objects.requireNonNull(winnerId, "winnerId");
 
-		List<ClientMarker> superseded = markerStore.onWinnerChanged(targetKey, winnerId);
+		@Unmodifiable List<ClientMarker> superseded = markerStore.onWinnerChanged(targetKey, winnerId);
 		for (ClientMarker marker : superseded) {
-			contentChat.cancel(marker.id());
-			nameStore.onRemoved(marker.id());
-			presentation.evict(marker.id());
-			if (inventory != null) inventory.markerRemoved(marker.id());
+			forgetMarkerDisplay(marker.id());
 		}
 
 		logger.debug(() -> "marker winner applied: kind=" + targetKindOf(targetKey)
@@ -2453,6 +2488,12 @@ public final class ClientPingRuntime {
 	public void handleRejected(long requestId, MarkerRequestKind requestKind, MarkerRejectReason reason) {
 		Objects.requireNonNull(requestKind, "requestKind");
 		Objects.requireNonNull(reason, "reason");
+		if (requestKind == MarkerRequestKind.REMOVE && requestId >= 0) {
+			// NOT_FOUND alone does not establish expiry. Keep an already-dispatched
+			// intent for this id until authoritative removal/record eviction, so
+			// either ordering of NOT_FOUND and EXPIRED has the same outcome.
+			if (reason != MarkerRejectReason.NOT_FOUND) pendingUnpings.remove(new MarkerId(requestId));
+		}
 
 		if (reason == MarkerRejectReason.TARGET_GONE) {
 			if (createRequestTracker.isLatest(requestId)) {

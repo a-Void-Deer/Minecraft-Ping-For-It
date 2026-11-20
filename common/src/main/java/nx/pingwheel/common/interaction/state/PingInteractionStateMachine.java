@@ -749,7 +749,8 @@ public final class PingInteractionStateMachine {
 		if (candidate.isPresent()) {
 			logger.debug("cancel selected: token={} candidateCount={} markerId={}",
 				releasedToken.sequence(), cancellationContext.candidates().size(), candidate.get().markerId().value());
-			return Optional.of(new PingInteractionAction.CancelMarker(candidate.get().markerId()));
+			return Optional.of(new PingInteractionAction.CancelMarker(candidate.get().markerId(),
+				cancellationContext.localOwnerId(), cancellationContext.currentDimensionId()));
 		}
 		logger.debug("cancel empty: token={} candidateCount={}",
 			releasedToken.sequence(), cancellationContext.candidates().size());

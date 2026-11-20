@@ -17,6 +17,7 @@ import nx.pingwheel.common.marker.MarkerRemovalReason;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
 import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Client-side, main-thread-confined bookkeeping for active markers.
@@ -49,14 +50,11 @@ import org.jetbrains.annotations.Nullable;
  *
  * <h2>Winner slots</h2>
  *
- * <p>{@code authoritativeWinnerByKey} stores the authoritative winner
- * {@link MarkerId} per {@link TargetKey} exactly as announced by the server
- * via {@link #onWinnerChanged}. The slot may reference a marker id that has
- * not been received yet, so winner-then-created packet order converges once
- * the marker arrives. A stored winner id is only exposed by the winner queries
- * when a marker with that id actually exists <em>and</em> its target key
- * matches the slot key, so a slot that briefly references a marker of a
- * different target is never observable.
+ * <p>Outlines consume the current server assignment, or after an empty
+ * assignment the last server-assigned id with a retained authoritative expiry.
+ * The HUD's existing winner projection, including its local loss recovery, is
+ * separate and cannot modify this outline history. Neither projection exposes
+ * an unknown, mismatched, or visually elapsed record.
  *
  * <h2>HUD selection</h2>
  *
@@ -72,9 +70,8 @@ import org.jetbrains.annotations.Nullable;
  *
  * <p>{@link #expireFallback} transitions synchronized markers whose client-side
  * fallback expiry has passed to stale, retaining the visual until its separate
- * display deadline. Final removals clear winner slots and locally recompute a
- * fallback winner only as loss recovery; a subsequent authoritative S2C
- * winner update simply overwrites that value.
+ * display deadline. Final removals clear winner slots and can locally recompute
+ * the HUD winner as loss recovery; a server winner update overwrites that value.
  *
  * <h2>Determinism</h2>
  *
@@ -102,10 +99,14 @@ public final class ClientMarkerStore {
 	private static final Comparator<ClientMarker> ARRIVAL_THEN_ID =
 		Comparator.comparingLong(ClientMarker::arrivalTick).thenComparing(ClientMarker::id);
 
+	/** One server-assigned id per key; the current assignment belongs to its packet view. */
+	private record OutlineWinner(MarkerId lastWinner, boolean assigned) {}
+
 	private final long graceTicks;
 	private final DisplayDurationPolicy displayDurationPolicy;
 	private final Map<MarkerId, ClientMarker> markers = new LinkedHashMap<>();
-	private final Map<TargetKey, MarkerId> authoritativeWinnerByKey = new LinkedHashMap<>();
+	private final Map<TargetKey, MarkerId> displayWinnerByKey = new LinkedHashMap<>();
+	private final Map<TargetKey, OutlineWinner> outlineWinnerByKey = new LinkedHashMap<>();
 	private final Set<MarkerId> authoritativeRemovedIds = new HashSet<>();
 	private long currentLocalTick;
 
@@ -228,7 +229,7 @@ public final class ClientMarkerStore {
 	 * actually deleted; callers use that distinction to keep target-name cleanup
 	 * in lockstep with final record removal.
 	 */
-	public List<ClientMarker> onRemoved(
+	public @Unmodifiable List<ClientMarker> onRemoved(
 		MarkerId id,
 		MarkerRemovalReason reason,
 		long localTick
@@ -241,7 +242,7 @@ public final class ClientMarkerStore {
 		}
 
 		observeLocalTick(localTick);
-		ClientMarker marker = markers.get(id);
+		@Nullable ClientMarker marker = markers.get(id);
 		Set<TargetKey> removedWinnerKeys = new HashSet<>();
 		authoritativeRemovedIds.add(id);
 
@@ -253,13 +254,13 @@ public final class ClientMarkerStore {
 			// A winner announcement can precede both the create and removal
 			// packets. Once removal is authoritative, discard such an unknown
 			// slot so a later delayed create cannot make it observable.
-			authoritativeWinnerByKey.values().removeIf(id::equals);
+			removeMarker(id);
 			return List.of();
 		}
 
 		if (!marker.isVisuallyActiveAt(currentLocalTick)) {
 			rememberWinner(marker, removedWinnerKeys);
-			List<ClientMarker> removed = removeMarker(id).stream().toList();
+			@Unmodifiable List<ClientMarker> removed = removeMarker(id).stream().toList();
 			recomputeWinners(removedWinnerKeys);
 			return removed;
 		}
@@ -285,7 +286,7 @@ public final class ClientMarkerStore {
 	}
 
 	/** Applies a removal using the store's latest observed client tick. */
-	public List<ClientMarker> onRemoved(MarkerId id, MarkerRemovalReason reason) {
+	public @Unmodifiable List<ClientMarker> onRemoved(MarkerId id, MarkerRemovalReason reason) {
 		return onRemoved(id, reason, currentLocalTick);
 	}
 
@@ -298,6 +299,20 @@ public final class ClientMarkerStore {
 		return authoritativeRemovedIds.contains(Objects.requireNonNull(id, "id"));
 	}
 
+	/** Dismisses only the selected, already expired own record; its tombstone survives. */
+	public boolean dismissExpiredOwned(MarkerId id, UUID owner, String dimensionId) {
+		@Nullable ClientMarker marker = markers.get(id);
+		if (marker == null || !marker.owner().equals(owner) || !marker.target().dimensionId().equals(dimensionId)
+			|| !retainedAuthoritativeExpiry(marker)) return false;
+		removeMarker(id);
+		return true;
+	}
+
+	private boolean retainedAuthoritativeExpiry(ClientMarker marker) {
+		// Only EXPIRED can leave both a stored stale record and a removal tombstone.
+		return marker.isStale() && authoritativeRemovedIds.contains(marker.id());
+	}
+
 	/**
 	 * Records the authoritative visible winner for {@code key}.
 	 *
@@ -308,19 +323,23 @@ public final class ClientMarkerStore {
 	 * {@link #visibleWinnersInDimension} while a marker with the stored id
 	 * exists and matches the key.
 	 */
-	public List<ClientMarker> onWinnerChanged(TargetKey key, Optional<MarkerId> winnerId) {
+	public @Unmodifiable List<ClientMarker> onWinnerChanged(TargetKey key, Optional<MarkerId> winnerId) {
 		Objects.requireNonNull(key, "key");
 		Objects.requireNonNull(winnerId, "winnerId");
 
 		if (winnerId.isEmpty()) {
-			authoritativeWinnerByKey.remove(key);
+			displayWinnerByKey.remove(key);
+			outlineWinnerByKey.computeIfPresent(key, (ignored, winner) ->
+				winner.assigned() ? new OutlineWinner(winner.lastWinner(), false) : winner);
 			return List.of();
 		}
 
 		MarkerId id = winnerId.get();
-		ClientMarker marker = markers.get(id);
+		@Nullable ClientMarker marker = markers.get(id);
 		if (marker == null && authoritativeRemovedIds.contains(id)) {
-			authoritativeWinnerByKey.remove(key);
+			displayWinnerByKey.remove(key);
+			// This is still a replacement, so an earlier winner cannot reappear.
+			outlineWinnerByKey.remove(key);
 			return List.of();
 		}
 		List<ClientMarker> removed = marker != null
@@ -329,8 +348,9 @@ public final class ClientMarkerStore {
 			? removeStaleForKey(key, id)
 			: List.of();
 
-		authoritativeWinnerByKey.put(key, id);
-		return removed;
+		displayWinnerByKey.put(key, id);
+		outlineWinnerByKey.put(key, new OutlineWinner(id, true));
+		return List.copyOf(removed);
 	}
 
 	/**
@@ -407,8 +427,26 @@ public final class ClientMarkerStore {
 	 */
 	public void clear() {
 		markers.clear();
-		authoritativeWinnerByKey.clear();
+		displayWinnerByKey.clear();
+		outlineWinnerByKey.clear();
 		authoritativeRemovedIds.clear();
+	}
+
+	/** Retires the preceding view's assignments without losing this connection's known last winners. */
+	public void beginOutlineWinnerView() {
+		var entries = outlineWinnerByKey.entrySet().iterator();
+		while (entries.hasNext()) {
+			var entry = entries.next();
+			OutlineWinner winner = entry.getValue();
+			@Nullable ClientMarker marker = markers.get(winner.lastWinner());
+			if (marker == null || !entry.getKey().equals(marker.targetKey())) {
+				entries.remove();
+			} else if (winner.assigned()) {
+				// The new view re-announces only active winners. The old assignment
+				// can survive solely as evidence for a retained authoritative expiry.
+				entry.setValue(new OutlineWinner(winner.lastWinner(), false));
+			}
+		}
 	}
 
 	/**
@@ -506,37 +544,17 @@ public final class ClientMarkerStore {
 	}
 
 	/**
-	 * The id of the marker currently controlling the visible outline for
-	 * {@code key}, or empty if none is visible.
+	 * The id of the marker currently preferred by the HUD winner projection.
 	 *
 	 * <p>Empty is returned while the stored winner marker is not known yet or
 	 * belongs to a different target key, so a mismatched slot is never exposed.
 	 */
 	public Optional<MarkerId> winnerId(TargetKey key) {
-		Objects.requireNonNull(key, "key");
-
-		MarkerId id = authoritativeWinnerByKey.get(key);
-
-		if (id == null) {
-			return Optional.empty();
-		}
-
-		ClientMarker marker = markers.get(id);
-
-		if (marker == null || !key.equals(marker.targetKey())) {
-			return Optional.empty();
-		}
-
-		if (!marker.isVisuallyActiveAt(currentLocalTick)) {
-			return Optional.empty();
-		}
-
-		return Optional.of(id);
+		return winnerMarker(key).map(ClientMarker::id);
 	}
 
 	/**
-	 * The marker currently controlling the visible outline for {@code key}, or
-	 * empty if none is visible.
+	 * The marker currently preferred by the HUD winner projection, if visible.
 	 *
 	 * <p>Empty is returned while the stored winner marker is not known yet or
 	 * belongs to a different target key, so a mismatched slot is never exposed.
@@ -544,37 +562,21 @@ public final class ClientMarkerStore {
 	public Optional<ClientMarker> winnerMarker(TargetKey key) {
 		Objects.requireNonNull(key, "key");
 
-		MarkerId id = authoritativeWinnerByKey.get(key);
-
-		if (id == null) {
-			return Optional.empty();
-		}
-
-		ClientMarker marker = markers.get(id);
-
-		if (marker == null || !key.equals(marker.targetKey())) {
-			return Optional.empty();
-		}
-
-		if (!marker.isVisuallyActiveAt(currentLocalTick)) {
-			return Optional.empty();
-		}
-
-		return Optional.of(marker);
+		return Optional.ofNullable(visibleRecord(key, displayWinnerByKey.get(key)));
 	}
 
 	/**
-	 * Every {@code (targetKey, visible winner marker)} pair whose key lives in
+	 * Every visible winner in the HUD projection whose key lives in
 	 * {@code dimensionId}, as an unmodifiable map ordered by ascending
 	 * {@link MarkerId}.
 	 *
 	 * <p>Winner slots that reference an unknown marker or a marker with a
 	 * different target key are skipped, so mismatched slots are never exposed.
 	 */
-	public Map<TargetKey, ClientMarker> visibleWinnersInDimension(String dimensionId) {
+	public @Unmodifiable Map<TargetKey, ClientMarker> visibleWinnersInDimension(String dimensionId) {
 		Objects.requireNonNull(dimensionId, "dimensionId");
 
-		List<Map.Entry<TargetKey, MarkerId>> entries = authoritativeWinnerByKey.entrySet().stream()
+		@Unmodifiable List<Map.Entry<TargetKey, MarkerId>> entries = displayWinnerByKey.entrySet().stream()
 			.filter(entry -> entry.getKey().dimensionId().equals(dimensionId))
 			.sorted(Map.Entry.comparingByValue())
 			.toList();
@@ -582,18 +584,34 @@ public final class ClientMarkerStore {
 		Map<TargetKey, ClientMarker> visible = new LinkedHashMap<>();
 
 		for (Map.Entry<TargetKey, MarkerId> entry : entries) {
-			ClientMarker marker = markers.get(entry.getValue());
-
-			if (marker == null
-				|| !entry.getKey().equals(marker.targetKey())
-				|| !marker.isVisuallyActiveAt(currentLocalTick)) {
-				continue;
-			}
-
-			visible.put(entry.getKey(), marker);
+			@Nullable ClientMarker marker = visibleRecord(entry.getKey(), entry.getValue());
+			if (marker != null) visible.put(entry.getKey(), marker);
 		}
 
 		return Collections.unmodifiableMap(visible);
+	}
+
+	/** The per-dimension outline projection, ordered by marker id and independent of HUD selection. */
+	public @Unmodifiable Map<TargetKey, ClientMarker> outlineWinnersInDimension(String dimensionId) {
+		Objects.requireNonNull(dimensionId, "dimensionId");
+		Map<TargetKey, ClientMarker> visible = new LinkedHashMap<>();
+		outlineWinnerByKey.entrySet().stream()
+			.filter(entry -> entry.getKey().dimensionId().equals(dimensionId))
+			.sorted(Comparator.comparing(entry -> entry.getValue().lastWinner()))
+			.forEachOrdered(entry -> {
+				OutlineWinner winner = entry.getValue();
+				@Nullable ClientMarker marker = visibleRecord(entry.getKey(), winner.lastWinner());
+				if (marker != null && (winner.assigned() || retainedAuthoritativeExpiry(marker))) {
+					visible.put(entry.getKey(), marker);
+				}
+			});
+		return Collections.unmodifiableMap(visible);
+	}
+
+	private @Nullable ClientMarker visibleRecord(TargetKey key, @Nullable MarkerId id) {
+		@Nullable ClientMarker marker = id == null ? null : markers.get(id);
+		return marker != null && key.equals(marker.targetKey()) && marker.isVisuallyActiveAt(currentLocalTick)
+			? marker : null;
 	}
 
 	/**
@@ -601,8 +619,8 @@ public final class ClientMarkerStore {
 	 * {@code key}: latest {@code arrivalTick}, then larger {@link MarkerId}.
 	 * Returns {@code null} when no matching marker remains.
 	 */
-	private MarkerId fallbackWinnerId(TargetKey key) {
-		ClientMarker winner = null;
+	private @Nullable MarkerId fallbackWinnerId(TargetKey key) {
+		@Nullable ClientMarker winner = null;
 
 		for (ClientMarker marker : markers.values()) {
 			if (!key.equals(marker.targetKey()) || !marker.isVisuallyActiveAt(currentLocalTick)) {
@@ -653,7 +671,7 @@ public final class ClientMarkerStore {
 		for (ClientMarker marker : markers.values().stream().toList()) {
 			if (isStaleSibling(marker, key, exceptId)) {
 				if (removedWinnerKeys != null
-					&& marker.id().equals(authoritativeWinnerByKey.get(marker.targetKey()))) {
+					&& marker.id().equals(displayWinnerByKey.get(marker.targetKey()))) {
 					removedWinnerKeys.add(marker.targetKey());
 				}
 				removeMarker(marker.id()).ifPresent(removed::add);
@@ -664,26 +682,27 @@ public final class ClientMarkerStore {
 	}
 
 	private Optional<ClientMarker> removeMarker(MarkerId id) {
-		ClientMarker removed = markers.remove(id);
-		authoritativeWinnerByKey.values().removeIf(id::equals);
+		@Nullable ClientMarker removed = markers.remove(id);
+		displayWinnerByKey.values().removeIf(id::equals);
+		outlineWinnerByKey.values().removeIf(winner -> id.equals(winner.lastWinner()));
 
 		return Optional.ofNullable(removed);
 	}
 
 	private void rememberWinner(ClientMarker marker, Set<TargetKey> winnerKeys) {
-		if (marker.id().equals(authoritativeWinnerByKey.get(marker.targetKey()))) {
+		if (marker.id().equals(displayWinnerByKey.get(marker.targetKey()))) {
 			winnerKeys.add(marker.targetKey());
 		}
 	}
 
 	private void recomputeWinners(Set<TargetKey> keys) {
 		for (TargetKey key : keys) {
-			MarkerId fallback = fallbackWinnerId(key);
+			@Nullable MarkerId fallback = fallbackWinnerId(key);
 
 			if (fallback == null) {
-				authoritativeWinnerByKey.remove(key);
+				displayWinnerByKey.remove(key);
 			} else {
-				authoritativeWinnerByKey.put(key, fallback);
+				displayWinnerByKey.put(key, fallback);
 			}
 		}
 	}

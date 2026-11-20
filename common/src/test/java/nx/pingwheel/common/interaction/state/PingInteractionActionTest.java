@@ -36,7 +36,8 @@ class PingInteractionActionTest {
 
 	@Test
 	void cancelMarkerRejectsNullMarkerId() {
-		assertThrows(NullPointerException.class, () -> new PingInteractionAction.CancelMarker(null));
+		assertThrows(NullPointerException.class, () -> new PingInteractionAction.CancelMarker(null,
+			new java.util.UUID(0, 1), "minecraft:overworld"));
 	}
 
 	@Test

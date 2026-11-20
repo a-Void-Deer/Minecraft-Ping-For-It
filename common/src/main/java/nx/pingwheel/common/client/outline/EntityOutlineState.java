@@ -9,6 +9,8 @@ import java.util.UUID;
 import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.domain.PingTypeCatalog;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Main-thread-confined snapshot of the entities that currently control a
@@ -16,7 +18,7 @@ import nx.pingwheel.common.domain.PingTypeCatalog;
  * entity pass.
  *
  * <p>Every frame {@link #prepare} re-selects the entity outline specs from the
- * authoritative {@link ClientMarkerStore} visible-winner map of the current
+ * {@link ClientMarkerStore} outline projection of the current
  * dimension and swaps the immutable UUID→spec snapshot, preserving
  * {@link EntityOutlineSelection#select}'s deterministic ascending marker-id
  * iteration order. The snapshot carries no live position, so movement and
@@ -56,14 +58,14 @@ public final class EntityOutlineState {
 	 * <p>With a {@code null} store or dimension (no live runtime/level, or
 	 * after leaving the server) the state is cleared instead.
 	 */
-	public void prepare(ClientMarkerStore store, String dimensionId) {
+	public void prepare(@Nullable ClientMarkerStore store, @Nullable String dimensionId) {
 		if (store == null || dimensionId == null) {
 			clear();
 			return;
 		}
 
-		Map<EntityLocator, EntityOutlineSpec> next = EntityOutlineSelection.select(
-			store.visibleWinnersInDimension(dimensionId), BUILT_IN_CATALOG);
+		@Unmodifiable Map<EntityLocator, EntityOutlineSpec> next = EntityOutlineSelection.select(
+			store.outlineWinnersInDimension(dimensionId), BUILT_IN_CATALOG);
 
 		if (next.equals(specs)) {
 			return;
@@ -73,7 +75,7 @@ public final class EntityOutlineState {
 		int changed = 0;
 
 		for (Map.Entry<EntityLocator, EntityOutlineSpec> entry : next.entrySet()) {
-			EntityOutlineSpec previous = specs.get(entry.getKey());
+			@Nullable EntityOutlineSpec previous = specs.get(entry.getKey());
 
 			if (previous == null) {
 				added++;

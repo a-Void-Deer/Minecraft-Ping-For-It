@@ -10,6 +10,7 @@ import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.MarkerAnchor;
+import nx.pingwheel.common.marker.MarkerRemovalReason;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
 import org.junit.jupiter.api.AfterEach;
@@ -167,6 +168,26 @@ class EntityOutlineStateTest {
 	}
 
 	// --- clear / absent runtime ---
+
+	@Test
+	void entityOutlineBecomesEligibleOnExpiryWhenEmptyWinnerArrivedFirst() {
+		EntityOutlineState state = installRecordingLogger();
+		Target target = entityTarget(ENTITY_A);
+		TargetKey key = TargetKey.from(target);
+		MarkerId id = new MarkerId(5);
+		ClientMarkerStore store = storeWithWinner(id.value(), target, "go_to");
+		state.prepare(store, OVERWORLD);
+		assertTrue(state.shouldOutline(ENTITY_A));
+		int color = state.colorFor(ENTITY_A);
+
+		store.onWinnerChanged(key, Optional.empty());
+		state.prepare(store, OVERWORLD);
+		assertFalse(state.shouldOutline(ENTITY_A));
+		store.onRemoved(id, MarkerRemovalReason.EXPIRED, 10L);
+		state.prepare(store, OVERWORLD);
+		assertTrue(state.shouldOutline(ENTITY_A));
+		assertEquals(color, state.colorFor(ENTITY_A));
+	}
 
 	@Test
 	void clearEmitsTransitionAndEmptiesState() {

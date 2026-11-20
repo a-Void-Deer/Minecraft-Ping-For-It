@@ -369,7 +369,8 @@ class LongPressCompatibilityControllerTest {
 		assertThrows(IllegalArgumentException.class,
 			() -> new BaselineOutcome(Optional.empty(), DispatchOutcome.CREATE_SENT, false));
 		assertThrows(IllegalArgumentException.class, () -> new BaselineOutcome(
-			Optional.of(new PingInteractionAction.CancelMarker(new nx.pingwheel.common.domain.MarkerId(1))),
+			Optional.of(new PingInteractionAction.CancelMarker(new nx.pingwheel.common.domain.MarkerId(1),
+				new java.util.UUID(0, 1), "minecraft:overworld")),
 			DispatchOutcome.CREATE_SENT, false));
 	}
 

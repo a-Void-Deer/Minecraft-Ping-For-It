@@ -2,6 +2,7 @@ package nx.pingwheel.common.client.outline;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -10,6 +11,7 @@ import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.MarkerAnchor;
+import nx.pingwheel.common.marker.MarkerRemovalReason;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
 import org.junit.jupiter.api.AfterEach;
@@ -173,6 +175,26 @@ class BlockOutlineStateTest {
 	}
 
 	// --- clear / absent runtime ---
+
+	@Test
+	void expiredLastBlockWinnerKeepsItsSpecUntilTheLocalDeadline() {
+		BlockOutlineState state = installRecordingLogger();
+		Target target = blockTarget(1, 2, 3);
+		TargetKey key = TargetKey.from(target);
+		MarkerId id = new MarkerId(5);
+		ClientMarkerStore store = storeWithWinner(id.value(), target, "go_to");
+		state.prepare(store, OVERWORLD);
+		BlockOutlineSpec original = Objects.requireNonNull(state.snapshot().get(key));
+		assertEquals(id, original.markerId());
+
+		store.onRemoved(id, MarkerRemovalReason.EXPIRED, 10L);
+		store.onWinnerChanged(key, Optional.empty());
+		state.prepare(store, OVERWORLD);
+		assertEquals(original, state.snapshot().get(key));
+		store.expireFallback(99L);
+		state.prepare(store, OVERWORLD);
+		assertTrue(state.snapshot().isEmpty());
+	}
 
 	@Test
 	void clearEmitsTransitionAndEmptiesState() {

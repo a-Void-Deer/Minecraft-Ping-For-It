@@ -45,6 +45,12 @@ import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.interaction.state.TargetGoneReason;
 import nx.pingwheel.common.interaction.state.TargetValidation;
+import nx.pingwheel.common.marker.MarkerAnchor;
+import nx.pingwheel.common.marker.MarkerRejectReason;
+import nx.pingwheel.common.marker.MarkerRemovalReason;
+import nx.pingwheel.common.marker.MarkerRequestKind;
+import nx.pingwheel.common.marker.MarkerSnapshot;
+import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.network.*;
 import nx.pingwheel.common.presentation.*;
 import nx.pingwheel.common.presentation.client.ClientPresentation;
@@ -53,6 +59,7 @@ import nx.pingwheel.common.presentation.preview.ClientPresentationPreview;
 import nx.pingwheel.common.presentation.preview.PreviewFieldAccess;
 import nx.pingwheel.common.presentation.preview.PreviewObservation;
 import nx.pingwheel.common.render.SpatialOverlayRenderer;
+import org.jetbrains.annotations.Unmodifiable;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -200,6 +207,7 @@ class ClientPingRuntimeInteractionTest {
 		long now;
 		boolean fail, gone;
 		Runnable validationHook = () -> {};
+		Runnable removeSendHook = () -> {};
 		final ManualClock clock = new ManualClock();
 		final Access access = new Access();
 		final List<IPacket> sent = new ArrayList<>();
@@ -238,6 +246,7 @@ class ClientPingRuntimeInteractionTest {
 		void send(IPacket packet) {
 			if (fail && packet instanceof PresentationC2SPacket p && p.kind() == PresentationC2SPacket.Kind.CREATE) throw new IllegalStateException("transport");
 			sent.add(packet);
+			if (packet instanceof PresentationC2SPacket p && p.kind() == PresentationC2SPacket.Kind.REMOVE) removeSendHook.run();
 		}
 		void negotiate(Set<String> fields) {
 			presentation.tick(true);
@@ -576,6 +585,188 @@ class ClientPingRuntimeInteractionTest {
 		f.press(600); f.release(610);
 		assertEquals(1, f.creates().size(), "neither an unready nor a ready cancellation consumes the sole create allowance");
 	}
+
+	@Test
+	void expiredOwnUnpingClearsOnlyTheSelectedMarkerAndKeepsItsTombstone() {
+		Fixture f = new Fixture();
+		MarkerId own = new MarkerId(42);
+		MarkerId other = new MarkerId(43);
+		TargetKey key = TargetKey.from(CHEST.target());
+		TargetKey otherKey = TargetKey.from(STONE.target());
+		PresentationS2CPacket ownCreate = markerCreated(own, OWNER, CHEST, "entity_block");
+		f.runtime.onPresentationPacket(ownCreate);
+		f.runtime.onPresentationPacket(markerCreated(other, new UUID(3, 4), STONE, "block"));
+		f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 1, key, Optional.of(own)));
+		f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 1, otherKey, Optional.of(other)));
+		f.runtime.onPresentationPacket(expired(own));
+		f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 1, key, Optional.empty()));
+		assertEquals(own, f.runtime.store().outlineWinnersInDimension(DIMENSION).get(key).id());
+		assertTrue(f.runtime.nameStore().find(own).isPresent());
+
+		unping(f);
+		assertTrue(removals(f).isEmpty());
+		assertTrue(f.creates().isEmpty());
+		assertTrue(f.runtime.store().marker(own).isEmpty());
+		assertTrue(f.runtime.store().isAuthoritativelyRemoved(own));
+		assertTrue(f.runtime.nameStore().find(own).isEmpty());
+		assertTrue(f.presentation.markerGrant(own).isEmpty());
+		assertEquals(Set.of(otherKey), f.runtime.store().outlineWinnersInDimension(DIMENSION).keySet());
+		assertTrue(f.runtime.nameStore().find(other).isPresent());
+		f.runtime.onPresentationPacket(ownCreate);
+		assertTrue(f.runtime.store().marker(own).isEmpty(), "delayed creation must not undo local dismissal");
+	}
+
+	@ParameterizedTest
+	@ValueSource(booleans = {false, true})
+	void oneActiveUnpingHandlesEitherOrderOfExpiryAndNotFound(boolean rejectionFirst) {
+		Fixture f = new Fixture();
+		MarkerId id = new MarkerId(42);
+		f.runtime.onPresentationPacket(markerCreated(id, OWNER, CHEST, "entity_block"));
+		PresentationS2CPacket notFound = PresentationS2CPacket.rejected(100, 1, id.value(), MarkerRequestKind.REMOVE, MarkerRejectReason.NOT_FOUND);
+		// Deliver during transport to verify that correlation is registered before
+		// the sender runs, not after it returns.
+		f.removeSendHook = () -> {
+			if (rejectionFirst) {
+				f.runtime.onPresentationPacket(notFound);
+				assertTrue(f.runtime.store().marker(id).orElseThrow().isSynchronized(), "NOT_FOUND alone is not an expiry receipt");
+				f.runtime.onPresentationPacket(expired(id));
+			} else {
+				f.runtime.onPresentationPacket(expired(id));
+				f.runtime.onPresentationPacket(notFound);
+			}
+		};
+		unping(f);
+		assertEquals(List.of(id), removals(f));
+		assertTrue(f.runtime.store().marker(id).isEmpty());
+		assertTrue(f.presentation.markerGrant(id).isEmpty());
+		assertTrue(f.errors.isEmpty());
+	}
+
+	@Test
+	void removeDenialOrDifferentStoredOwnerDoesNotDismissAnExpiredRecord() {
+		MarkerId id = new MarkerId(42);
+		Fixture denied = new Fixture();
+		denied.runtime.onPresentationPacket(markerCreated(id, OWNER, CHEST, "entity_block"));
+		unping(denied);
+		denied.runtime.onPresentationPacket(PresentationS2CPacket.rejected(100, 1, id.value(), MarkerRequestKind.REMOVE, MarkerRejectReason.NOT_OWNER));
+		denied.runtime.onPresentationPacket(expired(id));
+		assertEquals(List.of(id), removals(denied));
+		assertTrue(denied.runtime.store().marker(id).orElseThrow().isStale());
+
+		Fixture mismatch = new Fixture();
+		mismatch.runtime.onPresentationPacket(markerCreated(id, new UUID(3, 4), CHEST, "entity_block"));
+		mismatch.runtime.onPresentationPacket(expired(id));
+		// The fake candidate port still names 42 as own; the applied record must
+		// independently agree before any destructive local action.
+		unping(mismatch);
+		assertTrue(removals(mismatch).isEmpty());
+		assertTrue(mismatch.runtime.store().marker(id).orElseThrow().isStale());
+	}
+
+	@ParameterizedTest
+	@ValueSource(booleans = {false, true})
+	void acceptedPolicyResetRetiresAssignmentsButKeepsLastWinnerAcrossEitherExpiryOrder(boolean expiryBeforeReset) {
+		Fixture f = new Fixture();
+		MarkerId id = new MarkerId(42);
+		MarkerId replacement = new MarkerId(43);
+		TargetKey key = TargetKey.from(CHEST.target());
+		f.runtime.onPresentationPacket(markerCreated(id, OWNER, CHEST, "entity_block"));
+		f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 1, key, Optional.of(id)));
+		if (expiryBeforeReset) {
+			f.runtime.onPresentationPacket(expired(id));
+			f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 1, key, Optional.empty()));
+		}
+		assertEquals(id, f.runtime.store().outlineWinnersInDimension(DIMENSION).get(key).id());
+
+		f.reset(2, Set.of(PresentationBasic.NAME));
+		// Old-view assignment and hard removal can neither replace the history nor mutate the record.
+		f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 1, key, Optional.of(replacement)));
+		f.runtime.onPresentationPacket(PresentationS2CPacket.removed(100, 1, id, MarkerRemovalReason.CANCELLED));
+		if (!expiryBeforeReset) {
+			assertTrue(f.runtime.store().outlineWinnersInDimension(DIMENSION).isEmpty(),
+				"an old current assignment is retired even without an empty winner packet");
+			assertTrue(f.runtime.store().marker(id).orElseThrow().isSynchronized());
+			f.runtime.onPresentationPacket(PresentationS2CPacket.removed(100, 2, id, MarkerRemovalReason.EXPIRED));
+			assertEquals(id, f.runtime.store().outlineWinnersInDimension(DIMENSION).get(key).id());
+			f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 2, key, Optional.empty()));
+		}
+		assertEquals(id, f.runtime.store().outlineWinnersInDimension(DIMENSION).get(key).id());
+		assertEquals(id, f.runtime.store().hudRenderMarkers().getFirst().id());
+		assertTrue(f.runtime.nameStore().find(id).isPresent());
+
+		f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 2, key, Optional.of(replacement)));
+		assertTrue(f.runtime.store().outlineWinnersInDimension(DIMENSION).isEmpty(), "a new assignment suppresses the old tail while its snapshot is pending");
+		f.runtime.onPresentationPacket(markerCreated(100, 2, replacement, OWNER, CHEST, "entity_block"));
+		assertEquals(replacement, f.runtime.store().outlineWinnersInDimension(DIMENSION).get(key).id());
+	}
+
+	@Test
+	void policyResetDropsAnOldAssignmentWithoutAMatchingLocalRecord() {
+		Fixture f = new Fixture();
+		MarkerId pending = new MarkerId(42);
+		TargetKey key = TargetKey.from(CHEST.target());
+		f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 1, key, Optional.of(pending)));
+		f.reset(2, Set.of(PresentationBasic.NAME));
+		f.runtime.onPresentationPacket(markerCreated(100, 2, pending, OWNER, CHEST, "entity_block"));
+		f.runtime.onPresentationPacket(PresentationS2CPacket.removed(100, 2, pending, MarkerRemovalReason.EXPIRED));
+		assertTrue(f.runtime.store().marker(pending).orElseThrow().isStale());
+		assertTrue(f.runtime.store().outlineWinnersInDimension(DIMENSION).isEmpty());
+	}
+
+	@Test
+	void sessionCloseAndNewEpochDiscardOutlineHistoryAndRemovalEvidence() {
+		Fixture f = new Fixture();
+		MarkerId id = new MarkerId(42);
+		TargetKey key = TargetKey.from(CHEST.target());
+		f.runtime.onPresentationPacket(markerCreated(id, OWNER, CHEST, "entity_block"));
+		f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 1, key, Optional.of(id)));
+		f.runtime.onPresentationPacket(expired(id));
+		f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 1, key, Optional.empty()));
+		assertEquals(id, f.runtime.store().outlineWinnersInDimension(DIMENSION).get(key).id());
+
+		f.runtime.close();
+		assertTrue(f.runtime.store().marker(id).isEmpty());
+		assertFalse(f.runtime.store().isAuthoritativelyRemoved(id));
+		assertTrue(f.runtime.store().outlineWinnersInDimension(DIMENSION).isEmpty());
+		f.presentation.tick(true);
+		f.runtime.onPresentationPacket(PresentationS2CPacket.offer(101,
+			Map.of(PresentationBasic.ID, PresentationBasic.fields()), Map.of(PresentationBasic.ID, 1)));
+		f.runtime.onPresentationPacket(PresentationS2CPacket.reset(101, 1, Map.of()));
+		assertTrue(f.presentation.ready());
+		f.runtime.onPresentationPacket(markerCreated(101, 1, id, OWNER, CHEST, "entity_block"));
+		assertTrue(f.runtime.store().marker(id).orElseThrow().isSynchronized());
+		f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 1, key, Optional.of(id)));
+		f.runtime.onPresentationPacket(PresentationS2CPacket.removed(101, 1, id, MarkerRemovalReason.EXPIRED));
+		assertTrue(f.runtime.store().marker(id).orElseThrow().isStale());
+		assertTrue(f.runtime.store().outlineWinnersInDimension(DIMENSION).isEmpty(), "old session evidence cannot attach to a reused ID");
+	}
+
+	private static void unping(Fixture fixture) {
+		fixture.press(0); fixture.frame(250, true); fixture.prime(); fixture.focus("cancel-marker", 260); fixture.release(270);
+	}
+
+	private static @Unmodifiable List<MarkerId> removals(Fixture fixture) {
+		return fixture.sent.stream().filter(PresentationC2SPacket.class::isInstance).map(PresentationC2SPacket.class::cast)
+			.filter(packet -> packet.kind() == PresentationC2SPacket.Kind.REMOVE).map(PresentationC2SPacket::markerId).toList();
+	}
+
+	private static PresentationS2CPacket markerCreated(MarkerId id, UUID owner, TargetSnapshot target, String targetType) {
+		return markerCreated(100, 1, id, owner, target, targetType);
+	}
+
+	private static PresentationS2CPacket markerCreated(long epoch, long view, MarkerId id, UUID owner, TargetSnapshot target, String targetType) {
+		MarkerSnapshot snapshot = new MarkerSnapshot(id, owner, target.target(), targetType, "attention", new MarkerAnchor(0, 0, 2), 1, 100);
+		PresentationSection basic = new PresentationSection(PresentationBasic.ID, 1,
+			Map.of(PresentationBasic.NAME, new PresentationValue.Text("{\"text\":\"Target\"}")), false);
+		return PresentationS2CPacket.created(epoch, view, 1, snapshot, "Owner",
+			PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.NAME),
+			TestContentGrants.content(TestContentGrants.basic(basic)), PresentationReceiptContent.whole(), basic);
+	}
+
+	private static PresentationS2CPacket expired(MarkerId id) {
+		return PresentationS2CPacket.removed(100, 1, id, MarkerRemovalReason.EXPIRED);
+	}
+
 	@Test void listReleaseSendsSelectBeforeExactCloseAndNeverOrdinaryCreate() {
 		Fixture f = new Fixture(); f.openList(); long request = f.request(); f.release(700); f.release(701); f.frame(800, false);
 		assertEquals(1, f.selects().size()); assertEquals("opaque", f.selects().getFirst().entryKey()); assertEquals(request, f.selects().getFirst().requestId());
