@@ -729,6 +729,16 @@ public final class ClientPingRuntime {
 	}
 
 	/**
+	 * Observes the client lifecycle immediately at the shared client-world
+	 * replacement/unload boundary. This updates the recorded world identity so
+	 * a replaced level is not retained until a later tick or render frame, and
+	 * it applies the existing discontinuity abort without closing the session.
+	 */
+	public void onClientLevelChanged() {
+		observeInteractionLifecycle();
+	}
+
+	/**
 	 * Explicitly abandons the active interaction without creating a default
 	 * ping. The token is invalidated first so a late asynchronous capture cannot
 	 * resurrect the interaction.

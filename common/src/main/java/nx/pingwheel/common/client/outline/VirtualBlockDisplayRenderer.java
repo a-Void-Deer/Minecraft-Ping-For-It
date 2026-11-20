@@ -151,7 +151,6 @@ public final class VirtualBlockDisplayRenderer {
 	private final Map<String, Integer> frameFailures = new LinkedHashMap<>();
 
 	private boolean displayCreationWarned;
-	private @Nullable ClientLevel cachedLevel;
 	private @Nullable Display.BlockDisplay cachedDisplay;
 	private final EntityBlockGeometryRunner entityBlockGeometryRunner;
 
@@ -787,7 +786,6 @@ public final class VirtualBlockDisplayRenderer {
 			// virtual display must never be reused: drop the cache so the next
 			// attempt rebuilds it from scratch.
 			cachedDisplay = null;
-			cachedLevel = null;
 			recordFailure(
 				failureRegistryId, pos, blockState, targetKey, Display.BlockDisplay.class,
 				FailureRoute.BLOCK_DISPLAY, stage, throwable);
@@ -805,17 +803,16 @@ public final class VirtualBlockDisplayRenderer {
 
 	/**
 	 * Returns the single cached virtual block display for {@code level},
-	 * recreating it when the level identity changed or after
-	 * {@link #clear()}. The display is never added to the level.
+	 * recreating it when the display no longer belongs to the same level object
+	 * or after {@link #clear()}. The display is never added to the level.
 	 */
 	private @Nullable Display.BlockDisplay displayFor(ClientLevel level) {
-		if (cachedDisplay != null && cachedLevel == level) {
+		if (cachedDisplay != null && cachedDisplay.level() == level) {
 			return cachedDisplay;
 		}
 
 		try {
 			cachedDisplay = new Display.BlockDisplay(EntityType.BLOCK_DISPLAY, level);
-			cachedLevel = level;
 			return cachedDisplay;
 		} catch (Exception | LinkageError | AssertionError throwable) {
 			if (!displayCreationWarned && Diagnostics.client().atNormal().isEnabled(Level.ERROR)) {
@@ -827,18 +824,17 @@ public final class VirtualBlockDisplayRenderer {
 			}
 
 			cachedDisplay = null;
-			cachedLevel = null;
 			return null;
 		}
 	}
 
 	/**
-	 * Drops the cached virtual display; called when leaving a server so a
-	 * stale level identity can never be reused.
+	 * Drops the cached virtual display; called at the shared client-world
+	 * replacement/unload boundary so the previous level cannot stay reachable,
+	 * and when leaving a server so a stale level identity can never be reused.
 	 */
 	public void clear() {
 		cachedDisplay = null;
-		cachedLevel = null;
 	}
 
 	/**

@@ -133,6 +133,12 @@ still `0.5.1-pfi-beta1` and does not run this migration.
   no longer leaves pings unavailable when the same player reconnects.
   Respawning on the same connection still works.
 
+### Client world cleanup
+
+- Returning to the main menu no longer retains the last client world in an
+  unused dimension tracker. Leaving or switching worlds also releases cached
+  outline objects from the old world, without waiting for another world frame.
+
 ### Server shutdown cleanup
 
 - Leaving a single-player world now releases Ping For It's reference to that

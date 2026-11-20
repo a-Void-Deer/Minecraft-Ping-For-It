@@ -516,6 +516,21 @@ class ClientPingRuntimeInteractionTest {
 		assertEquals(new SpatialController.Point(0, -30), f.snapshot().radial().pointer());
 	}
 
+	@Test void clientLevelChangeEntryUpdatesTheObservedWorldBeforeTheNextFrame() {
+		Fixture f = new Fixture();
+		f.tick(0);
+		f.access.world = new Object();
+		int beforeObservation = f.access.resets;
+		f.runtime.onClientLevelChanged();
+		assertTrue(f.access.resets > beforeObservation, "the replacement aborts through the existing lifecycle observation");
+		int afterObservation = f.access.resets;
+		f.tick(10);
+		assertEquals(afterObservation, f.access.resets, "the same replacement is not re-observed");
+		f.access.world = new Object();
+		f.tick(20);
+		assertTrue(f.access.resets > afterObservation, "ordinary tick observation still detects the next replacement");
+	}
+
 	@Test void resizeWithoutCallbackRecomputesFocusBeforeImmediateRelease() {
 		Fixture f = new Fixture();
 		f.access.snapshot = TargetSnapshotFactory.entity(DIMENSION, new UUID(9, 10), "minecraft:zombie");

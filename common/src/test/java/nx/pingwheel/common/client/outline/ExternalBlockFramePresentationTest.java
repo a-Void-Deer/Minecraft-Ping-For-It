@@ -34,6 +34,7 @@ import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.TargetKey;
@@ -167,6 +168,28 @@ class ExternalBlockFramePresentationTest {
 			frame.beginFrame();
 			frame.preparePresentations(List.of(), specs, unused -> fail("no ordinary winners"), provider);
 			assertEquals(Map.of(first.blockKey(), 2, second.blockKey(), 2, missing.blockKey(), 2), calls);
+		} finally {
+			frame.clear();
+		}
+	}
+
+	@Test
+	void clientLevelReplacementDropsPreparedExternalSnapshotsBoundToTheOldWorld() {
+		Pair pair = door();
+		var plot = new Plot(pair.states());
+		var spec = spec(1, pair.first(), pair.targetType());
+		BlockModelOutlineState frame = BlockModelOutlineState.INSTANCE;
+		try {
+			frame.beginFrame();
+			frame.preparePresentations(List.of(), List.of(spec), unused -> fail("no ordinary winners"),
+				unused -> ExternalBlockFramePresentation.resolve(spec, pair.firstPos(), plot.view, new Matrix4d()));
+			assertFalse(frame.externalPresentations().isEmpty());
+
+			CommonClient.INSTANCE.onClientLevelChanged();
+
+			assertTrue(frame.externalPresentations().isEmpty());
+			assertTrue(frame.presentations().isEmpty());
+			assertFalse(frame.emitted());
 		} finally {
 			frame.clear();
 		}

@@ -190,6 +190,22 @@ public class CommonClient {
 	}
 
 	/**
+	 * Releases shared client state bound to the previous client world at the
+	 * native replacement or unload boundary. The runtime observes the same
+	 * lifecycle immediately so its recorded world identity and interaction
+	 * abort semantics never wait for a later world render frame.
+	 */
+	public void onClientLevelChanged() {
+		BlockModelOutlineState.INSTANCE.clear();
+		GameContext.clearRenderEntityLookupCache();
+		VirtualBlockDisplayRenderer.INSTANCE.clear();
+
+		if (pingRuntime != null) {
+			pingRuntime.onClientLevelChanged();
+		}
+	}
+
+	/**
 	 * Receives the post-{@code KeyMapping.click} raw press edge. Arbitration is
 	 * resolved here while the mapping counters still represent this physical
 	 * event; a claimed edge is captured and minted immediately on the client
@@ -274,7 +290,6 @@ public class CommonClient {
 
 	public void onTickStart() {
 		Game = Minecraft.getInstance();
-		GameContext.updateDimension();
 		if (pingRuntime == null) pingRuntime = createPingRuntimeIfInWorld();
 		if (monitorService != null) monitorService.configure(ClientConfig.HANDLER.getConfig());
 
@@ -668,10 +683,6 @@ public class CommonClient {
 	public void onRenderFrame() {
 		Game = Minecraft.getInstance();
 		prepareMonitorView();
-
-		if (Game.level == null) {
-			GameContext.clearRenderEntityLookupCache();
-		}
 
 		if (pingRuntime != null) {
 			pingRuntime.onRenderFrame(InputUtils.isPingHotkeyDown());
