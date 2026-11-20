@@ -1,5 +1,6 @@
 package nx.pingwheel.common.math;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.Objects;
 import java.util.EnumSet;
@@ -130,23 +131,23 @@ public class Raycast {
 			return java.util.Optional.empty();
 		}
 
-		return traceDirectionalDetailed(cameraEntity, rayStartVec, rayEndVec, policy,
+		return traceDirectionalDetailed(cameraEntity, rayStartVec, rayEndVec, direction, policy,
 			EntityLocalGeometryRegistry.INSTANCE.snapshot());
 	}
 
 	private static Optional<RaycastSelection> traceDirectionalDetailed(
-		Entity cameraEntity, Vec3 rayStartVec, Vec3 rayEndVec,
+		Entity cameraEntity, Vec3 rayStartVec, Vec3 rayEndVec, Vec3 direction,
 		RaycastPolicy policy, EntityLocalGeometryRegistry.Snapshot localGeometrySnapshot
 	) {
 		try (@Nullable PickingFrameContext frames = cameraEntity.level() instanceof ClientLevel client
 			? PickingFrameContext.open(client) : null) {
-			return traceDirectionalDetailed(cameraEntity, rayStartVec, rayEndVec, policy,
+			return traceDirectionalDetailed(cameraEntity, rayStartVec, rayEndVec, direction, policy,
 				localGeometrySnapshot, frames);
 		}
 	}
 
 	private static Optional<RaycastSelection> traceDirectionalDetailed(Entity cameraEntity, Vec3 rayStartVec,
-		Vec3 rayEndVec, RaycastPolicy policy,
+		Vec3 rayEndVec, Vec3 direction, RaycastPolicy policy,
 		EntityLocalGeometryRegistry.Snapshot localGeometrySnapshot, @Nullable PickingFrameContext frames) {
 		var boundingBox = cameraEntity
 			.getBoundingBox()
@@ -169,6 +170,7 @@ public class Raycast {
 			cameraEntity,
 			rayStartVec,
 			rayEndVec,
+			direction,
 			boundingBox,
 			policy,
 			localGeometrySnapshot,
@@ -233,15 +235,15 @@ public class Raycast {
 		try (@Nullable PickingFrameContext frames = camera.level() instanceof ClientLevel client
 			? PickingFrameContext.open(client) : null) {
 			return traceDirectionalCandidates(camera, token, ray, nativeDistance, pingDistance, policy,
-				blockCapture, owners, frames, start, nativeEnd, end);
+				blockCapture, owners, frames, start, direction, nativeEnd, end);
 		}
 	}
 
 	private static Optional<SelectorTrace> traceDirectionalCandidates(Entity camera, InteractionToken token,
 		CapturedRay ray, double nativeDistance, double pingDistance, RaycastPolicy policy,
 		CandidateBlockCapture blockCapture, EntityLocalGeometryRegistry.Snapshot owners,
-		@Nullable PickingFrameContext frames, Vec3 start, Vec3 nativeEnd, Vec3 end) {
-		RaycastSelection ordinary = traceDirectionalDetailed(camera, start, nativeEnd, policy, owners, frames)
+		@Nullable PickingFrameContext frames, Vec3 start, Vec3 direction, Vec3 nativeEnd, Vec3 end) {
+		RaycastSelection ordinary = traceDirectionalDetailed(camera, start, nativeEnd, direction, policy, owners, frames)
 			.orElseThrow();
 		CandidateCollector collector = new CandidateCollector();
 		EnumSet<PreciseTargetType> certified = EnumSet.noneOf(PreciseTargetType.class);
@@ -255,7 +257,7 @@ public class Raycast {
 			if (level instanceof ClientLevel clientLevel) {
 				// Use the lazy native lookup, not a filtered getEntities query or section walk.
 				collectVisibleEntityCandidates(clientLevel.entitiesForRendering(), bounds, start, end,
-					policy, owners, request, collector, level.dimension().location().toString(), camera);
+					policy, owners, request, collector, level.dimension().location().toString(), camera, direction);
 				certified.add(PreciseTargetType.DROPPED_ITEM);
 				certified.add(PreciseTargetType.ENTITY);
 			}
@@ -327,9 +329,10 @@ public class Raycast {
 		RaycastPolicy policy, EntityLocalGeometryRegistry.Snapshot owners, EntityLocalRaycastRequest request,
 		CandidateCollector collector, String dimensionId, @Nullable Entity excluded
 	) {
+		Vec3 direction = end.subtract(start);
 		for (@Nullable Entity entity : entities) {
 			if (entity == null || entity == excluded) continue;
-			collectEntityCandidate(entity, start, end, policy, owners, request, collector, dimensionId);
+			collectEntityCandidate(entity, start, end, direction, policy, owners, request, collector, dimensionId);
 		}
 	}
 
@@ -338,15 +341,24 @@ public class Raycast {
 		RaycastPolicy policy, EntityLocalGeometryRegistry.Snapshot owners, EntityLocalRaycastRequest request,
 		CandidateCollector collector, String dimensionId, @Nullable Entity excluded
 	) {
-		NativeEntityCandidateScan.scan(entities, bounds, excluded, entity -> loadedExact(owners, entity), entity ->
-			collectEntityCandidate(entity, start, end, policy, owners, request, collector, dimensionId));
+		collectVisibleEntityCandidates(entities, bounds, start, end, policy, owners, request, collector, dimensionId,
+			excluded, end.subtract(start));
 	}
 
-	private static void collectEntityCandidate(Entity entity, Vec3 start, Vec3 end, RaycastPolicy policy,
+	private static void collectVisibleEntityCandidates(Iterable<@Nullable Entity> entities, AABB bounds,
+		Vec3 start, Vec3 end, RaycastPolicy policy, EntityLocalGeometryRegistry.Snapshot owners,
+		EntityLocalRaycastRequest request, CandidateCollector collector, String dimensionId,
+		@Nullable Entity excluded, Vec3 direction
+	) {
+		NativeEntityCandidateScan.scan(entities, bounds, excluded, entity -> loadedExact(owners, entity), entity ->
+			collectEntityCandidate(entity, start, end, direction, policy, owners, request, collector, dimensionId));
+	}
+
+	private static void collectEntityCandidate(Entity entity, Vec3 start, Vec3 end, Vec3 direction, RaycastPolicy policy,
 		EntityLocalGeometryRegistry.Snapshot owners, EntityLocalRaycastRequest request,
 		CandidateCollector collector, String dimensionId) {
 		// Reuses the ordinary ownership/non-hit/filter/endpoint path, without coarse revival.
-		traceEntityCandidates(List.of(entity), start, end, policy, owners, request).ifPresent(hit -> {
+		traceEntityCandidates(List.of(entity), start, end, direction, policy, owners, request).ifPresent(hit -> {
 			var snapshot = MinecraftTargetSnapshotFactory.fromEntityCandidateSelection(dimensionId, hit);
 			collector.add(new CandidateEvidence(snapshot, start.distanceTo(hit.hitResult().getLocation())));
 		});
@@ -384,6 +396,7 @@ public class Raycast {
 	private static @Nullable EntitySelection traceEntity(Entity entity,
 										   Vec3 min,
 										   Vec3 max,
+										   Vec3 direction,
 										   AABB box,
 										   RaycastPolicy policy,
 									   EntityLocalGeometryRegistry.Snapshot localGeometrySnapshot,
@@ -397,6 +410,7 @@ public class Raycast {
 			ordinaryCandidates(nativeCandidates, loaded, entity, localGeometrySnapshot, policy),
 			min,
 			max,
+			direction,
 			policy,
 			localGeometrySnapshot,
 			request).map(selection -> new EntitySelection(
@@ -431,6 +445,18 @@ public class Raycast {
 		Iterable<Entity> candidates,
 		Vec3 min,
 		Vec3 max,
+		RaycastPolicy policy,
+		EntityLocalGeometryRegistry.Snapshot localGeometrySnapshot,
+		EntityLocalRaycastRequest request
+	) {
+		return traceEntityCandidates(candidates, min, max, max.subtract(min), policy, localGeometrySnapshot, request);
+	}
+
+	private static Optional<RaycastSelection> traceEntityCandidates(
+		Iterable<Entity> candidates,
+		Vec3 min,
+		Vec3 max,
+		Vec3 direction,
 		RaycastPolicy policy,
 		EntityLocalGeometryRegistry.Snapshot localGeometrySnapshot,
 		EntityLocalRaycastRequest request
@@ -502,7 +528,8 @@ public class Raycast {
 			var hitPos = targetBoundingBox.clip(min, max);
 
 			if (hitPos.isEmpty()) {
-				continue;
+				if (minDist <= 0.0 || !acceptsInsideEntityContact(targetBoundingBox, min, direction)) continue;
+				hitPos = Optional.of(min);
 			}
 
 			var hitResult = new EntityHitResult(ent, hitPos.get());
@@ -517,6 +544,51 @@ public class Raycast {
 		return minHitResult == null
 			? java.util.Optional.empty()
 			: java.util.Optional.of(new RaycastSelection(minHitResult.hitResult(), minHitResult.localHit()));
+	}
+
+	private static boolean acceptsInsideEntityContact(AABB box, Vec3 start, Vec3 direction) {
+		// Faces still use the native clip rule; AABB.contains includes the min faces only.
+		if (!(box.minX < start.x && start.x < box.maxX
+			&& box.minY < start.y && start.y < box.maxY
+			&& box.minZ < start.z && start.z < box.maxZ)) return false;
+
+		Vec3 toCenter = box.getCenter().subtract(start);
+		if (toCenter.x == 0.0 && toCenter.y == 0.0 && toCenter.z == 0.0) return true; // Cone apex.
+		if (!isFinite(direction) || !isFinite(toCenter)) return false;
+
+		// cos(60°) = 1/2: require a positive projection and compare (2 * dot)^2 with |d|²|c|².
+		double twiceProjection = 2.0 * direction.dot(toCenter);
+		double projectionSquared = twiceProjection * twiceProjection;
+		double directionSquared = direction.lengthSqr();
+		double centerSquared = toCenter.lengthSqr();
+		double lengthProduct = directionSquared * centerSquared;
+		if (directionSquared >= Double.MIN_NORMAL && centerSquared >= Double.MIN_NORMAL
+			&& lengthProduct >= Double.MIN_NORMAL && Double.isFinite(lengthProduct) && Double.isFinite(projectionSquared)) {
+			// With normal norm sums/product, the three-term dot has absolute error < 4u*|d||c|
+			// and the norm product relative error < 22u (u = 2^-53). Including squaring and
+			// subtraction, 64 ulps of the larger squared term conservatively cover both sides.
+			double difference = projectionSquared - lengthProduct;
+			double roundoff = 64 * Math.ulp(Math.max(projectionSquared, lengthProduct));
+			if (Math.abs(difference) > roundoff) return twiceProjection > 0.0 && difference > 0.0;
+		}
+		return exactInsideEntityCone(direction, toCenter);
+	}
+
+	private static boolean exactInsideEntityCone(Vec3 direction, Vec3 toCenter) {
+		// Preserve the exact binary inputs, including a center one representable step off the edge.
+		var dx = new BigDecimal(direction.x);
+		var dy = new BigDecimal(direction.y);
+		var dz = new BigDecimal(direction.z);
+		var cx = new BigDecimal(toCenter.x);
+		var cy = new BigDecimal(toCenter.y);
+		var cz = new BigDecimal(toCenter.z);
+		var projection = dx.multiply(cx).add(dy.multiply(cy)).add(dz.multiply(cz));
+		return projection.signum() > 0 && projection.pow(2).multiply(BigDecimal.valueOf(4)).compareTo(
+			exactLengthSquared(dx, dy, dz).multiply(exactLengthSquared(cx, cy, cz))) >= 0;
+	}
+
+	private static BigDecimal exactLengthSquared(BigDecimal x, BigDecimal y, BigDecimal z) {
+		return x.pow(2).add(y.pow(2)).add(z.pow(2));
 	}
 
 	private static boolean isValidNormalizedParameter(double t) {

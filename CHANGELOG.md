@@ -6,6 +6,9 @@ Changes since the `1.21.1` baseline (`a51a850b`).
 
 ### Ping range and target selection
 
+- When your eye is inside an entity's selection box, ordinary Ping and Precise
+  can select it if the box's center is within 60° of your aim. Entities with
+  exact picking geometry still use their actual shapes.
 - Ordinary Ping and Precise **Location** keep an empty-space ping within the
   native range at any viewing angle. Previously, looking level at −5° yaw
   could put a 1,024-block ping just past a matching server limit.
