@@ -1709,7 +1709,7 @@ public final class ClientPingRuntime {
 		Vec3 origin = vector(inputs.ray().origin()), direction = vector(inputs.ray().direction());
 		if (hit.getType() == HitResult.Type.BLOCK && ModContext.HasSable) {
 			var external = captureSableSelection(level, selection, origin,
-				origin.add(direction.scale(inputs.nativeDistance())));
+				Raycast.boundedEndpoint(origin, direction, inputs.nativeDistance()));
 			var projected = external.isPresent() ? Optional.<Vec3>empty() : selection.blockFrame().isPresent()
 				? selection.worldPoint() : SableIntegration.projectOutOfSubLevel(level, hit.getLocation());
 			reference = external.orElseGet(() -> projected.map(point -> TargetSnapshotFactory.location(
@@ -1750,8 +1750,8 @@ public final class ClientPingRuntime {
 				distant -> {
 					if (game.level != level || baselineToken != inputs.token() || !activeInteraction.isCurrent(inputs.token())) return;
 					// A no-hit/failure uses this request's native miss, not the latest camera.
-					Vec3 point = distant.map(HitResult::getLocation).orElseGet(() -> vector(inputs.ray().origin())
-						.add(vector(inputs.ray().direction()).scale(inputs.nativeDistance())));
+					Vec3 point = distant.map(HitResult::getLocation).orElseGet(() -> Raycast.boundedEndpoint(
+						vector(inputs.ray().origin()), vector(inputs.ray().direction()), inputs.nativeDistance()));
 					var snapshot = TargetSnapshotFactory.location(level.dimension().location().toString(), point.x, point.y, point.z);
 					var resolved = DefaultTargetResolver.builtIn(TargetResolutionLogger.global(Diagnostics.client())).resolve(snapshot.target(), snapshot.matchContext());
 					WorldVector worldPoint = new WorldVector(point.x, point.y, point.z);
@@ -1796,7 +1796,7 @@ public final class ClientPingRuntime {
 			@Nullable HitResult missHit = hitResult;
 
 			if (missHit == null) {
-				var missPoint = rayOrigin.add(cameraDirection.scale(distance));
+				var missPoint = Raycast.boundedEndpoint(rayOrigin, cameraDirection, distance);
 				missHit = BlockHitResult.miss(missPoint, Direction.UP, BlockPos.containing(missPoint));
 			}
 
@@ -1839,7 +1839,7 @@ public final class ClientPingRuntime {
 		if (sableCaptureAttempted) {
 			Optional<TargetSnapshot> sableCandidate = captureSableSelection(
 				level, raycastSelection.orElseThrow(), rayOrigin,
-				rayOrigin.add(cameraDirection.scale(distance)));
+				Raycast.boundedEndpoint(rayOrigin, cameraDirection, distance));
 
 			if (sableCandidate.isPresent()) {
 				completion.complete(sableCandidate.get(), acquisition);

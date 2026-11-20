@@ -36,6 +36,36 @@ public class Raycast {
 
 	private Raycast() {}
 
+	/** Caps the represented segment without extending an already in-range ray. */
+	public static Vec3 boundedEndpoint(Vec3 origin, Vec3 direction, double maxDistance) {
+		Vec3 end = origin.add(direction.scale(maxDistance));
+		double rangeSquared = maxDistance * maxDistance;
+		if (!(origin.distanceToSqr(end) > rangeSquared) || !isFinite(end) || maxDistance < 0.0) return end;
+
+		// Correct an overlong look vector first. Even a unit vector can still
+		// overshoot after its displacement is rounded into world coordinates.
+		double length = Math.hypot(Math.hypot(direction.x, direction.y), direction.z);
+		double high = Math.min(maxDistance, maxDistance / length);
+		end = origin.add(direction.scale(high));
+		if (origin.distanceToSqr(end) <= rangeSquared) return end;
+
+		// Find the last in-range represented point along this ray. For positive
+		// parameters, each rounded coordinate's distance from the eye is monotone.
+		double low = 0.0;
+		Vec3 inside = origin;
+		while (true) {
+			double middle = low + (high - low) * 0.5;
+			if (middle <= low || middle >= high) return inside;
+			Vec3 point = origin.add(direction.scale(middle));
+			if (origin.distanceToSqr(point) <= rangeSquared) {
+				low = middle;
+				inside = point;
+			} else {
+				high = middle;
+			}
+		}
+	}
+
 	/**
 	 * Traces using an explicitly supplied origin and direction. This method is
 	 * used by ping capture so the exact press-time ray is shared by the vanilla
@@ -94,35 +124,33 @@ public class Raycast {
 			return java.util.Optional.empty();
 		}
 
-		var rayEndVec = rayStartVec.add(direction.scale(maxDistance));
+		var rayEndVec = boundedEndpoint(rayStartVec, direction, maxDistance);
 
 		if (!isFinite(rayStartVec) || !isFinite(rayEndVec)) {
 			return java.util.Optional.empty();
 		}
 
-		return traceDirectionalDetailed(cameraEntity, rayStartVec, direction, maxDistance, policy,
+		return traceDirectionalDetailed(cameraEntity, rayStartVec, rayEndVec, policy,
 			EntityLocalGeometryRegistry.INSTANCE.snapshot());
 	}
 
 	private static Optional<RaycastSelection> traceDirectionalDetailed(
-		Entity cameraEntity, Vec3 rayStartVec, Vec3 direction, double maxDistance,
+		Entity cameraEntity, Vec3 rayStartVec, Vec3 rayEndVec,
 		RaycastPolicy policy, EntityLocalGeometryRegistry.Snapshot localGeometrySnapshot
 	) {
 		try (@Nullable PickingFrameContext frames = cameraEntity.level() instanceof ClientLevel client
 			? PickingFrameContext.open(client) : null) {
-			return traceDirectionalDetailed(cameraEntity, rayStartVec, direction, maxDistance, policy,
+			return traceDirectionalDetailed(cameraEntity, rayStartVec, rayEndVec, policy,
 				localGeometrySnapshot, frames);
 		}
 	}
 
 	private static Optional<RaycastSelection> traceDirectionalDetailed(Entity cameraEntity, Vec3 rayStartVec,
-		Vec3 direction, double maxDistance, RaycastPolicy policy,
+		Vec3 rayEndVec, RaycastPolicy policy,
 		EntityLocalGeometryRegistry.Snapshot localGeometrySnapshot, @Nullable PickingFrameContext frames) {
-		var rayEndVec = rayStartVec.add(direction.scale(maxDistance));
-
 		var boundingBox = cameraEntity
 			.getBoundingBox()
-			.expandTowards(direction.scale(maxDistance))
+			.expandTowards(rayEndVec.subtract(rayStartVec))
 			.inflate(1.0, 1.0, 1.0);
 		var clip = PingClipContext.create(rayStartVec, rayEndVec, policy, cameraEntity);
 		RaycastSelection worldSelection = frames == null
@@ -196,24 +224,24 @@ public class Raycast {
 		}
 		Vec3 start = vec(ray.origin());
 		Vec3 direction = vec(ray.direction());
-		// CapturedRay deliberately preserves raw direction. Only this supplemental
-		// extent is normalized so a non-unit input cannot extend the Ping-distance cap.
+		Vec3 nativeEnd = boundedEndpoint(start, direction, nativeDistance);
+		// The supplemental scan keeps its separate full Ping-distance extent.
 		Vec3 supplementalDirection = direction.scale(1.0 / Math.hypot(Math.hypot(direction.x, direction.y), direction.z));
-		Vec3 end = start.add(supplementalDirection.scale(pingDistance));
-		if (!isFinite(end)) return Optional.empty();
+		Vec3 end = boundedEndpoint(start, supplementalDirection, pingDistance);
+		if (!isFinite(nativeEnd) || !isFinite(end)) return Optional.empty();
 		var owners = EntityLocalGeometryRegistry.INSTANCE.snapshot();
 		try (@Nullable PickingFrameContext frames = camera.level() instanceof ClientLevel client
 			? PickingFrameContext.open(client) : null) {
 			return traceDirectionalCandidates(camera, token, ray, nativeDistance, pingDistance, policy,
-				blockCapture, owners, frames, start, direction, end);
+				blockCapture, owners, frames, start, nativeEnd, end);
 		}
 	}
 
 	private static Optional<SelectorTrace> traceDirectionalCandidates(Entity camera, InteractionToken token,
 		CapturedRay ray, double nativeDistance, double pingDistance, RaycastPolicy policy,
 		CandidateBlockCapture blockCapture, EntityLocalGeometryRegistry.Snapshot owners,
-		@Nullable PickingFrameContext frames, Vec3 start, Vec3 direction, Vec3 end) {
-		RaycastSelection ordinary = traceDirectionalDetailed(camera, start, direction, nativeDistance, policy, owners, frames)
+		@Nullable PickingFrameContext frames, Vec3 start, Vec3 nativeEnd, Vec3 end) {
+		RaycastSelection ordinary = traceDirectionalDetailed(camera, start, nativeEnd, policy, owners, frames)
 			.orElseThrow();
 		CandidateCollector collector = new CandidateCollector();
 		EnumSet<PreciseTargetType> certified = EnumSet.noneOf(PreciseTargetType.class);

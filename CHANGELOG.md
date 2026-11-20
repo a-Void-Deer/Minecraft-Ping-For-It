@@ -6,6 +6,9 @@ Changes since the `1.21.1` baseline (`a51a850b`).
 
 ### Ping range and target selection
 
+- Ordinary Ping and Precise **Location** keep an empty-space ping within the
+  native range at any viewing angle. Previously, looking level at −5° yaw
+  could put a 1,024-block ping just past a matching server limit.
 - A negative `pingDistance` or `raycastDistance` in the client configuration
   now falls back to that setting's default instead of crashing the next ping.
   Zero remains valid.

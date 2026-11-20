@@ -95,6 +95,20 @@ class MinecraftAuthoritativeTargetValidatorTest {
 	}
 
 	@Test
+	void locationRangeAcceptsEqualityButRejectsTheNextRepresentableOutsidePoint() {
+		Fixture fixture = new Fixture();
+		Vec3 eye = new Vec3(29_990_000.25, 72.5, -29_990_000.5);
+		fixture.player.setEye(eye);
+		int range = 1024;
+		var validator = fixture.productionValidator(range);
+		double edge = eye.x + range;
+
+		assertTrue(validator.validate(OWNER, new Target.LocationTarget("minecraft:overworld", edge, eye.y, eye.z)).isAccepted());
+		assertEquals(MarkerRejectReason.OUT_OF_RANGE, validator.validate(OWNER,
+			new Target.LocationTarget("minecraft:overworld", Math.nextUp(edge), eye.y, eye.z)).rejectReason().orElseThrow());
+	}
+
+	@Test
 	void entityAnchorRemainsTheBasePositionNotATopCenterOrContactDerivedPoint() {
 		Fixture fixture = new Fixture();
 		fixture.entity.setPos(0.0, 0.0, 0.0);
