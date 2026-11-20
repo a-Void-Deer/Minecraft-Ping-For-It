@@ -15,6 +15,12 @@ Changes since the `1.21.1` baseline (`a51a850b`).
 - **Unping** now dismisses your own still-visible ping from your screen after
   it expires on the server. Other players keep their own display. For an active
   ping, Unping still requests removal for its recipients.
+- **Unping** now picks its ping when you press the Ping key, not when you
+  release on the Unping entry. A ping that appears, moves, or expires while the
+  wheel is open cannot change the choice, and Unping never falls back to a
+  farther ping. If you weren't aiming at one of your own pings when you pressed,
+  confirming Unping does nothing. See
+  [Cancel Marker selection](docs/architecture/picking/wheel.md#cancel-marker-selection).
 - Internal marker helpers now distinguish server game time from custom display
   ticks, and HUD winner selection from outline selection. The old numeric-only
   duration and shared winner helpers have been removed.

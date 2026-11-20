@@ -3,7 +3,6 @@ package nx.pingwheel.common.client;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 
@@ -18,8 +17,8 @@ import nx.pingwheel.common.interaction.PingCaptureCoordinator;
 import nx.pingwheel.common.interaction.PingCaptureLogger;
 import nx.pingwheel.common.interaction.TargetSnapshotFactory;
 import nx.pingwheel.common.interaction.cancel.CancelCandidatePicker;
-import nx.pingwheel.common.interaction.cancel.CancellationContext;
 import nx.pingwheel.common.interaction.cancel.WorldVector;
+import nx.pingwheel.common.interaction.state.FrozenCancellation;
 import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
 import nx.pingwheel.common.interaction.state.PingInteractionLogger;
@@ -175,18 +174,18 @@ class LongPressCompatibilityDispatchTest {
 			limiter = new ClientCreateRateLimiter(clock, new ClientRateLimitPolicy(exhaustLimiter ? 1 : 3, 1000));
 			if (exhaustLimiter) assertTrue(limiter.tryAcquire(), "explicitly consume fixture allowance before first action");
 		}
-		public Optional<CapturedRay> capturePressRay() {
-			return Optional.of(raySamples++ == 0 ? FIRST_RAY : SECOND_RAY);
+		public Optional<FrozenPingPress> captureWheelPress() {
+			return Optional.of(new FrozenPingPress(raySamples++ == 0 ? FIRST_RAY : SECOND_RAY, FrozenCancellation.NONE));
 		}
-		public Optional<PingInteractionAction> pressAt(long now) { return start(now, capturePressRay().orElseThrow()); }
-		public Optional<PingInteractionAction> pressAt(long now, CapturedRay ray) {
+		public Optional<PingInteractionAction> pressAt(long now) { return start(now, captureWheelPress().orElseThrow()); }
+		public Optional<PingInteractionAction> pressAt(long now, FrozenPingPress press) {
 			frozenRayStarts++;
-			return start(now, ray);
+			return start(now, press);
 		}
-		Optional<PingInteractionAction> start(long now, CapturedRay ray) {
+		Optional<PingInteractionAction> start(long now, FrozenPingPress press) {
 			menuOpened = false;
 			selection = WheelSelection.NONE;
-			CaptureStart start = new CaptureStart(machine.pressAt(now), now, ray);
+			CaptureStart start = new CaptureStart(machine.pressAt(now, press.cancellation()), now, press.ray());
 			captureStarts.add(start);
 			events.add("capture");
 			if (!delayedFirst || captureStarts.size() > 1) complete(start);
@@ -207,9 +206,7 @@ class LongPressCompatibilityDispatchTest {
 			return advance(held || machine.phase() == PingInteractionPhase.WHEEL_OPEN, now);
 		}
 		BaselineOutcome advance(boolean held, long now) {
-			var context = new CancellationContext(new UUID(0, 1), "minecraft:overworld", new WorldVector(0, 0, 0),
-				new WorldVector(0, 0, 1), List.of());
-			Optional<PingInteractionAction> action = machine.updateAt(held, selection, context, now);
+			Optional<PingInteractionAction> action = machine.updateAt(held, selection, now);
 			DispatchOutcome outcome = DispatchOutcome.NOT_SENT;
 			if (action.orElse(null) instanceof PingInteractionAction.CreatePing create && ready && limiter.tryAcquire()) {
 				recorded.add(create.context().token().sequence()); events.add("record");

@@ -3,6 +3,8 @@ package nx.pingwheel.common.client;
 import java.util.Objects;
 import java.util.Optional;
 
+import org.jetbrains.annotations.Nullable;
+
 import nx.pingwheel.common.client.input.LookInputTracker;
 import nx.pingwheel.common.domain.PingType;
 import nx.pingwheel.common.interaction.CapturedPingContext;
@@ -24,8 +26,8 @@ import nx.pingwheel.common.interaction.state.PingInteractionPhase;
  * frozen first capture through the state machine's narrow frozen-target tap
  * seam, which mints a fresh token and request id and still validates locally.
  * A candidate that stays held starts an ordinary baseline anchored to its own
- * press time and its own press ray, so it can open the wheel normally rather
- * than being backdated to the first press.
+ * press time and its own press ray and cancellation selection, so it can open
+ * the wheel normally rather than being backdated to the first press.
  *
  * <p>All state is bounded one-slot state. While the first capture is pending,
  * released candidates contribute only to a bounded pending count; they are
@@ -54,11 +56,9 @@ public final class RapidDangerController {
 	 * treated as proof of a successful create.
 	 */
 	public interface Port {
-		Optional<PingInteractionAction> press(long rawPressTimestamp);
+		Optional<PingInteractionAction> press(long rawPressTimestamp, Optional<FrozenPingPress> press);
 
-		Optional<PingInteractionAction> press(long rawPressTimestamp, CapturedRay pressRay);
-
-		Optional<CapturedRay> capturePressRay();
+		Optional<FrozenPingPress> captureWheelPress();
 
 		LongPressCompatibilityController.BaselineOutcome releaseOutcome();
 
@@ -85,7 +85,7 @@ public final class RapidDangerController {
 
 		long nowMillis();
 
-		LookSample lookSample();
+		@Nullable LookSample lookSample();
 
 		boolean compatibilityEnabled();
 
@@ -95,8 +95,8 @@ public final class RapidDangerController {
 	}
 
 	private final Port port;
-	private Sequence sequence;
-	private Candidate candidate;
+	private @Nullable Sequence sequence;
+	private @Nullable Candidate candidate;
 
 	public RapidDangerController(Port port) {
 		this.port = Objects.requireNonNull(port, "port");
@@ -130,10 +130,10 @@ public final class RapidDangerController {
 			}
 			if (matches(sequence, rawPressTimestamp)) {
 				sequence.lastDownTimestamp = rawPressTimestamp;
-				candidate = new Candidate(rawPressTimestamp, port.capturePressRay().orElse(null));
+				candidate = new Candidate(rawPressTimestamp, port.captureWheelPress());
 				// A short candidate deliberately starts no capture. Its ordinary
 				// held baseline starts on the first frame that still has the key
-				// down, so a tap release needs neither a second ray nor its result.
+				// down; a tap release instead reuses the first target capture.
 				return true;
 			}
 			sequence = null;
@@ -222,41 +222,46 @@ public final class RapidDangerController {
 		// The first press records the current accumulator as its baseline. The
 		// tracker itself is reset only by an actual grab/focus/cursor lifecycle
 		// boundary, never merely because a new ordinary press began.
-		LookSample look = port.lookSample();
-		CapturedRay ray = port.capturePressRay().orElse(null);
+		@Nullable LookSample look = port.lookSample();
+		Optional<FrozenPingPress> press = port.captureWheelPress();
+		@Nullable CapturedRay ray = press.map(FrozenPingPress::ray).orElse(null);
 		Sequence started = new Sequence(rawPressTimestamp, ray, look);
 		sequence = started;
-		port.press(rawPressTimestamp);
+		port.press(rawPressTimestamp, press);
 	}
 
 	private void startCandidate() {
-		if (candidate == null || candidate.started) return;
+		@Nullable Candidate starting = candidate;
+		if (starting == null || starting.started) return;
 		if (sequence == null || sequence.firstContext == null) return;
-		if (candidate.pressRay == null) {
+		Optional<FrozenPingPress> press = starting.press;
+		if (press.isEmpty()) {
 			// This down has no immutable ray of its own, so it cannot become an
 			// ordinary long press; it can still produce the frozen short release.
 			return;
 		}
-		candidate.started = true;
-		port.press(candidate.pressTimestamp, candidate.pressRay);
+		starting.started = true;
+		starting.press = Optional.empty();
+		port.press(starting.pressTimestamp, press);
 	}
 
 	private Optional<PingInteractionAction> presentCandidate(boolean keyDown, long frameTimeMillis) {
 		startCandidate();
-		if (!candidate.started) return Optional.empty();
+		@Nullable Candidate presented = candidate;
+		if (presented == null || !presented.started) return Optional.empty();
 		// Starting the candidate baseline or flushing pending taps crosses the
 		// port and may observe a later machine clock. The frame timestamp stays
 		// the presentation time; the machine gets a fresh monotonic observation.
 		long observedTimeMillis = Math.max(frameTimeMillis, port.nowMillis());
 		var outcome = port.presentFrameOutcome(keyDown, frameTimeMillis, observedTimeMillis);
-		if (outcome.menuOpened() || port.phase() == PingInteractionPhase.WHEEL_OPEN) {
-			candidate.wheelOpened = true;
+		if (candidate == presented && (outcome.menuOpened() || port.phase() == PingInteractionPhase.WHEEL_OPEN)) {
+			presented.wheelOpened = true;
 		}
 		return outcome.action();
 	}
 
 	private Optional<PingInteractionAction> releaseCandidate(long now) {
-		Candidate ending = candidate;
+		Candidate ending = Objects.requireNonNull(candidate, "candidate");
 		candidate = null;
 
 		if (ending.started && (ending.wheelOpened || port.phase() == PingInteractionPhase.WHEEL_OPEN)) {
@@ -362,8 +367,8 @@ public final class RapidDangerController {
 
 	private static final class Sequence {
 		private final long firstDownTimestamp;
-		private final CapturedRay firstRay;
-		private final LookSample firstLook;
+		private final @Nullable CapturedRay firstRay;
+		private final @Nullable LookSample firstLook;
 		private long lastDownTimestamp;
 		private boolean firstReleased;
 		private boolean firstResolved;
@@ -371,7 +376,7 @@ public final class RapidDangerController {
 		private PingType dangerType;
 		private int pendingDangers;
 
-		private Sequence(long firstDownTimestamp, CapturedRay firstRay, LookSample firstLook) {
+		private Sequence(long firstDownTimestamp, @Nullable CapturedRay firstRay, @Nullable LookSample firstLook) {
 			this.firstDownTimestamp = firstDownTimestamp;
 			this.lastDownTimestamp = firstDownTimestamp;
 			this.firstRay = firstRay;
@@ -381,13 +386,13 @@ public final class RapidDangerController {
 
 	private static final class Candidate {
 		private final long pressTimestamp;
-		private final CapturedRay pressRay;
+		private Optional<FrozenPingPress> press;
 		private boolean started;
 		private boolean wheelOpened;
 
-		private Candidate(long pressTimestamp, CapturedRay pressRay) {
+		private Candidate(long pressTimestamp, Optional<FrozenPingPress> press) {
 			this.pressTimestamp = pressTimestamp;
-			this.pressRay = pressRay;
+			this.press = press;
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package nx.pingwheel.common.client;
 
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
@@ -13,6 +14,7 @@ import java.util.function.Predicate;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -65,6 +67,7 @@ import nx.pingwheel.common.interaction.cancel.CancelMarkerCandidate;
 import nx.pingwheel.common.interaction.cancel.CancellationContext;
 import nx.pingwheel.common.interaction.cancel.MarkerCandidatePosition;
 import nx.pingwheel.common.interaction.cancel.WorldVector;
+import nx.pingwheel.common.interaction.state.FrozenCancellation;
 import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
 import nx.pingwheel.common.interaction.state.PingInteractionLogger;
@@ -252,7 +255,6 @@ public final class ClientPingRuntime {
 	private boolean committingInventoryStay;
 	private final SelectedLocaleTranslationKeyCache selectedLocaleTranslationKeys =
 		new SelectedLocaleTranslationKeyCache();
-	private static final CancellationContext EMPTY_CANCELLATION_CONTEXT = createEmptyCancellationContext();
 	private String observedDimension;
 
 	/**
@@ -264,12 +266,6 @@ public final class ClientPingRuntime {
 
 	private long localTick;
 	private WheelSelection wheelSelection = WheelSelection.NONE;
-	/**
-	 * The ray captured at the current press edge. It remains available while an
-	 * asynchronous target resolution is pending and is cleared when that
-	 * resolution fails or the interaction ends.
-	 */
-	private CapturedRay pendingRay;
 	private InteractionAccess interactionAccess;
 	private @Nullable ClientPresentationPreview contentPreview;
 	private NativeSelectorContent selectorContent;
@@ -290,7 +286,7 @@ public final class ClientPingRuntime {
 	 * sampled from the frozen target only. The resolver itself is stateless.
 	 */
 	private final ClientTargetNameResolver selectorTargetNames = new ClientTargetNameResolver();
-	private InteractionToken baselineToken;
+	private @Nullable InteractionToken baselineToken;
 	/**
 	 * The fresh frozen-tap token is runtime-owned during validation so a
 	 * reentrant validator abort can invalidate it before any dispatch.
@@ -322,7 +318,8 @@ public final class ClientPingRuntime {
 		}
 		default boolean capturePreciseDistant(PreciseCaptureRefresh.Request request,
 			java.util.function.Consumer<PreciseCaptureRefresh.Outcome> completion) { return false; }
-		CancellationContext cancellation(CapturedRay ray);
+		/** Samples candidate positions at the physical edge, not during a capture or release. */
+		@Nullable CancellationContext cancellation(CapturedRay ray);
 		void syncMouse(PingInteractionPhase phase);
 		void disposeMouse(boolean screenTransition);
 		Optional<NativeSelectorInput.Frame> inputFrame();
@@ -584,11 +581,7 @@ public final class ClientPingRuntime {
 	/** Handles a claimed physical press immediately on the client thread. */
 	public void onPress(long eventTimeMillis) {
 		if (!observeInteractionLifecycle()) return;
-		if (checkInventoryStayPath()) return;
-		if (inventorySelectionStay.consuming()) {
-			inventorySelectionStay.press(eventTimeMillis);
-			return;
-		}
+		if (handleInventoryStayOpenPress(eventTimeMillis)) return;
 		switch (compatibilityController.observeModeTransition()) {
 			case ENABLED -> {
 				rapidDangerController.disableForCompatibility();
@@ -760,17 +753,27 @@ public final class ClientPingRuntime {
 			&& lifecycle.screen() == null && !lifecycle.overlay();
 	}
 
-	/** The baseline press path used by the compatibility controller. */
-	private Optional<PingInteractionAction> baselinePress(long rawPressTimestamp) {
-		return baselinePress(rawPressTimestamp, interactionAccess.capturePressRay().orElse(null));
+	/** No target raycast or removal side effect occurs while freezing this edge. */
+	private Optional<FrozenPingPress> captureWheelPress() {
+		return interactionAccess.capturePressRay().map(ray -> {
+			@Nullable CancellationContext context = interactionAccess.cancellation(ray);
+			return new FrozenPingPress(ray,
+				context == null ? FrozenCancellation.NONE : machine.freezeCancellation(context));
+		});
 	}
 
-	/** Baseline press path with a ray captured by a rapid second physical press. */
+	/** The immediate baseline press path used by the compatibility controller. */
+	private Optional<PingInteractionAction> baselinePress(long rawPressTimestamp) {
+		return baselinePress(rawPressTimestamp, captureWheelPress().orElse(null));
+	}
+
+	/** Starts capture with the same immutable aim and cancellation result, even for a deferred edge. */
 	private Optional<PingInteractionAction> baselinePress(
 		long rawPressTimestamp,
-		CapturedRay pressRay
+		@Nullable FrozenPingPress press
 	) {
-		InteractionToken token = machine.pressAt(rawPressTimestamp);
+		InteractionToken token = machine.pressAt(rawPressTimestamp,
+			press == null ? FrozenCancellation.NONE : press.cancellation());
 		finishSelector(false);
 		selectorPaint.reset(); // A new hold never inherits the departing hold's visual history or clock.
 		if (!activeInteraction.isCurrent(token)) return Optional.empty();
@@ -789,10 +792,9 @@ public final class ClientPingRuntime {
 			config.getWheelTargetFontSize(), selectorSettings.rootDistance(), selectorSettings.submenuRadiusScale().doubleValue(),
 			selectorSettings.showTrail(), selectorSettings.reduceMotion(), selectorSettings.trailLength(), selectorSettings.trailOpacity(),
 			selectorSettings.inventoryMaxWidthFraction().doubleValue(), selectorSettings.inventoryMaxHeightFraction().doubleValue());
-		pendingRay = null;
-		if (pressRay == null) machine.abort();
+		if (press == null) machine.abort();
 		else {
-			pendingRay = pressRay;
+			CapturedRay pressRay = press.ray();
 			try { interactionAccess.capture(token, pressRay, (snapshot, candidates) -> completeCapture(token, snapshot, pressRay, candidates)); }
 			catch (RuntimeException | LinkageError failure) { if (baselineToken == token) baselineAbort(); throw failure; }
 		}
@@ -814,8 +816,15 @@ public final class ClientPingRuntime {
 		return RaycastPolicy.from(config.isMarkTransparentBlocks(), config.isMarkBlacklistedTargets(), config.isMarkFluids());
 	}
 
+	private boolean willReleaseKeepInventoryOpen() {
+		return !committingInventoryStay && !inventorySelectionStay.active()
+			&& machine.phase() == PingInteractionPhase.WHEEL_OPEN && selector != null
+			&& baselineToken != null && selectorSettings != null
+			&& selectorSettings.inventorySelectionStayOpenEnabled() && selector.inventoryPathActive();
+	}
+
 	private LongPressCompatibilityController.BaselineOutcome baselineRelease() {
-		InteractionToken releasing = baselineToken;
+		@Nullable InteractionToken releasing = baselineToken;
 		baselineHeld = false;
 		gestureSkipHold.reset();
 		if (preciseRefresh != null) preciseRefresh.leave();
@@ -823,10 +832,7 @@ public final class ClientPingRuntime {
 		Optional<PingInteractionAction> action;
 		ClientPingActionDispatcher.DispatchOutcome sent = ClientPingActionDispatcher.DispatchOutcome.OTHER;
 		try {
-			if (!committingInventoryStay && !inventorySelectionStay.active()
-				&& machine.phase() == PingInteractionPhase.WHEEL_OPEN && selector != null
-				&& baselineToken != null && selectorSettings != null
-				&& selectorSettings.inventorySelectionStayOpenEnabled() && selector.inventoryPathActive()) {
+			if (willReleaseKeepInventoryOpen()) {
 				// First release on the inventory list or an item submenu only
 				// stays. The terminal selector release API is deliberately not
 				// called, so token, session, preview and native ownership remain.
@@ -835,16 +841,15 @@ public final class ClientPingRuntime {
 				return new LongPressCompatibilityController.BaselineOutcome(Optional.empty(),
 					LongPressCompatibilityController.DispatchOutcome.NOT_SENT, true);
 			}
-			if (machine.phase() == PingInteractionPhase.WHEEL_OPEN && selector != null && baselineToken != null) {
+			if (machine.phase() == PingInteractionPhase.WHEEL_OPEN && selector != null && releasing != null) {
 				var opened = selector;
 				interactionAccess.inputFrame().ifPresent(frame -> constrainSelector(frame, now));
 				var releaseContexts = new LinkedHashMap<>(selectorContexts);
 				opened.presentedPrecise().ifPresent(painted -> releaseContexts.putAll(painted.contexts()));
-				var candidates = Map.copyOf(releaseContexts);
-				var ray = pendingRay;
-				var content = selectorContent;
+				@Unmodifiable Map<String, CapturedPingContext> candidates = Map.copyOf(releaseContexts);
+				@Nullable NativeSelectorContent content = selectorContent;
 				var result = machine.releaseSelectorAt(releasing, now, () -> proposal(opened.releaseIntent(now)),
-					id -> Optional.ofNullable(candidates.get(id)), () -> interactionAccess.cancellation(ray));
+					id -> Optional.ofNullable(candidates.get(id)));
 				action = result.action();
 				if (baselineToken != releasing || !activeInteraction.isCurrent(releasing)) {
 					if (action.isPresent()) rejectSelectorRelease(SelectorReleaseRejection.WRONG_TOKEN, releasing, content);
@@ -880,7 +885,7 @@ public final class ClientPingRuntime {
 					} else if (action.isPresent()) sent = dispatchInteractionRelease(action.get());
 				} else if (action.isPresent()) sent = dispatchInteractionRelease(action.get());
 			} else {
-				action = machine.updateAt(false, WheelSelection.NONE, emptyCancellationContext(), now);
+				action = machine.updateAt(false, WheelSelection.NONE, now);
 				if (baselineToken != releasing || !activeInteraction.isCurrent(releasing)) {
 					if (action.isPresent()) rejectSelectorRelease(SelectorReleaseRejection.WRONG_TOKEN, releasing, null);
 					action = Optional.empty();
@@ -933,6 +938,10 @@ public final class ClientPingRuntime {
 		logger.debug(() -> "selector release rejected: reason=" + rejection.code()
 			+ " token=" + token.sequence() + " revision=" + revision
 			+ " route=selector action=false admitted=false");
+	}
+
+	private boolean handleInventoryStayOpenPress(long now) {
+		return checkInventoryStayPath() || inventorySelectionStay.press(now);
 	}
 
 	private void releaseInventoryStay(long now) {
@@ -1058,14 +1067,12 @@ public final class ClientPingRuntime {
 			synchronizePreciseBranch();
 		}
 		// Raw release edges own wheel commit/cancellation.  A stale false key
-		// state on a later frame must not make the frame path walk every owned
-		// marker; keep an already-open wheel logically held until its release
-		// event arrives.  A pressed interaction still uses false here so an
+		// state on a later frame must not commit the wheel; keep it logically
+		// held until release. A pressed interaction still uses false here so an
 		// asynchronous capture that completes after release can commit its one
 		// short action on this frame.
 		boolean actionKeyDown = keyDown || machine.phase() == PingInteractionPhase.WHEEL_OPEN;
-		Optional<PingInteractionAction> action = machine.updateAt(actionKeyDown, WheelSelection.NONE,
-			emptyCancellationContext(), observedTimeMillis);
+		Optional<PingInteractionAction> action = machine.updateAt(actionKeyDown, WheelSelection.NONE, observedTimeMillis);
 		if (baselineToken != presented || !activeInteraction.isCurrent(presented)) action = Optional.empty();
 		var sent = action.isPresent() ? dispatcher.dispatchOutcome(action.get()) : ClientPingActionDispatcher.DispatchOutcome.OTHER;
 		var outcome = baselineOutcome(action, sent);
@@ -1285,7 +1292,7 @@ public final class ClientPingRuntime {
 		selector = null; selectorInput = null;
 		NativeSelectorContent old = selectorContent;
 		selectorContent = null;
-		selectorContexts.clear(); pendingRay = null; wheelSelection = WheelSelection.NONE;
+		selectorContexts.clear(); wheelSelection = WheelSelection.NONE;
 		if (hard) selectorPaint.reset();
 		try { if (old != null) old.close(); }
 		catch (RuntimeException | LinkageError unavailable) {
@@ -1383,7 +1390,7 @@ public final class ClientPingRuntime {
 			var entries = nx.pingwheel.common.render.InventoryTrackingRenderer.lines(inventory.tracking(marker.id()));
 			if (entries.isEmpty()) continue;
 			WorldVector point = MarkerOverlayState.INSTANCE.lookupPresentationPosition(marker.id(), marker.target(), dimension)
-				.orElseGet(() -> candidatePosition(marker, dimension));
+				.orElseGet(() -> candidatePosition(marker, dimension, ClientPingRuntime::liveMarkerEntityPosition));
 			Vec3 position = new Vec3(point.x(), point.y(), point.z());
 			var screen = nx.pingwheel.common.math.MathUtils.worldToScreen(position, frame.modelViewMatrix, frame.projectionMatrix);
 			if (screen == null || screen.isBehindCamera()) continue;
@@ -1467,13 +1474,21 @@ public final class ClientPingRuntime {
 		}
 
 		@Override
-		public Optional<PingInteractionAction> pressAt(long rawPressTimestamp, CapturedRay pressRay) {
-			return baselinePress(rawPressTimestamp, pressRay);
+		public Optional<PingInteractionAction> pressAt(long rawPressTimestamp, FrozenPingPress press) {
+			return baselinePress(rawPressTimestamp, press);
 		}
 
 		@Override
-		public Optional<CapturedRay> capturePressRay() {
-			return interactionAccess.capturePressRay();
+		public Optional<FrozenPingPress> captureWheelPress() {
+			return ClientPingRuntime.this.captureWheelPress();
+		}
+
+		@Override public boolean willReleaseKeepInventoryOpen() {
+			return ClientPingRuntime.this.willReleaseKeepInventoryOpen();
+		}
+
+		@Override public boolean handleInventoryStayOpenPress(long rawPressTimestamp) {
+			return ClientPingRuntime.this.handleInventoryStayOpenPress(rawPressTimestamp);
 		}
 
 		@Override
@@ -1515,14 +1530,11 @@ public final class ClientPingRuntime {
 	}
 
 	private final class RuntimeRapidDangerPort implements RapidDangerController.Port {
-		@Override public Optional<PingInteractionAction> press(long rawPressTimestamp) {
-			return baselinePress(rawPressTimestamp);
+		@Override public Optional<PingInteractionAction> press(long rawPressTimestamp, Optional<FrozenPingPress> press) {
+			return baselinePress(rawPressTimestamp, press.orElse(null));
 		}
-		@Override public Optional<PingInteractionAction> press(long rawPressTimestamp, CapturedRay pressRay) {
-			return baselinePress(rawPressTimestamp, pressRay);
-		}
-		@Override public Optional<CapturedRay> capturePressRay() {
-			return interactionAccess.capturePressRay();
+		@Override public Optional<FrozenPingPress> captureWheelPress() {
+			return ClientPingRuntime.this.captureWheelPress();
 		}
 		@Override public LongPressCompatibilityController.BaselineOutcome releaseOutcome() {
 			return baselineRelease();
@@ -1547,8 +1559,7 @@ public final class ClientPingRuntime {
 			if (!activeInteraction.isCurrent(token)) return Optional.empty();
 			validatingFrozenTapToken = token;
 			try {
-				Optional<PingInteractionAction> action = machine.updateAt(false, WheelSelection.NONE,
-					emptyCancellationContext(), observed);
+				Optional<PingInteractionAction> action = machine.updateAt(false, WheelSelection.NONE, observed);
 				// Validation may have reentrantly aborted the runtime. The abort
 				// invalidates this exact token through baselineAbort, so a valid
 				// validator result can never dispatch after it.
@@ -1568,7 +1579,7 @@ public final class ClientPingRuntime {
 		@Override public long nowMillis() {
 			return timeSource.nowMillis();
 		}
-		@Override public RapidDangerController.LookSample lookSample() {
+		@Override public @Nullable RapidDangerController.LookSample lookSample() {
 			return RapidDangerController.LookSample.of(lookInputTracker.snapshot());
 		}
 		@Override public boolean compatibilityEnabled() {
@@ -1595,7 +1606,7 @@ public final class ClientPingRuntime {
 		public PreciseCaptureRefresh.Scan capturePrecise(PreciseCaptureRefresh.Request request) { return capturePreciseNative(request); }
 		public boolean capturePreciseDistant(PreciseCaptureRefresh.Request request,
 			java.util.function.Consumer<PreciseCaptureRefresh.Outcome> completion) { return startPreciseDistant(request, completion); }
-		public CancellationContext cancellation(CapturedRay ray) { return buildCancellationContext(); }
+		public @Nullable CancellationContext cancellation(CapturedRay ray) { return buildCancellationContext(ray); }
 		public void syncMouse(PingInteractionPhase phase) {
 			if (Game == null) return;
 			wheelMouseCapture.sync(phase, Game, mouseInputTransition);
@@ -1662,25 +1673,6 @@ public final class ClientPingRuntime {
 	}
 
 	/**
-	 * Supplies a valid, allocation-free context for machine paths that cannot
-	 * cancel. The real context (and its owned-marker scan) is built only for an
-	 * explicitly committed native Cancel.
-	 */
-	private static CancellationContext emptyCancellationContext() {
-		return EMPTY_CANCELLATION_CONTEXT;
-	}
-
-	private static CancellationContext createEmptyCancellationContext() {
-		CapturedRay ray = CapturedRay.defaultRay();
-		return new CancellationContext(
-			new UUID(0L, 0L),
-			"minecraft:overworld",
-			ray.origin(),
-			ray.direction(),
-			List.of());
-	}
-
-	/**
 	 * Captures the target for {@code token} on the game thread using the
 	 * current camera. Never re-rays on release or wheel movement: the
 	 * interaction freezes whatever this capture produced.
@@ -1718,7 +1710,7 @@ public final class ClientPingRuntime {
 		}
 	}
 
-	/** Live scan never completes the ordinary coordinator or writes its pending ray. */
+	/** Live scan neither completes the ordinary coordinator nor samples cancellation candidates. */
 	private PreciseCaptureRefresh.Scan capturePreciseNative(PreciseCaptureRefresh.Request request) {
 		var inputs = request.inputs();
 		Minecraft game = Game;
@@ -1811,7 +1803,6 @@ public final class ClientPingRuntime {
 			pressRay.direction().y(),
 			pressRay.direction().z());
 
-		pendingRay = pressRay;
 		var distance = selectorNativeDistance;
 		var trace = Raycast.traceDirectionalCandidates(token, pressRay, distance, selectorPingDistance, selectorPolicy);
 		var raycastSelection = trace.map(Raycast.SelectorTrace::ordinarySelection);
@@ -1904,7 +1895,6 @@ public final class ClientPingRuntime {
 		if (captured.target() instanceof Target.LocationTarget && raycastSelection.isPresent()
 			&& raycastSelection.orElseThrow().worldPoint().isEmpty()) {
 			activeInteraction.invalidate(token);
-			pendingRay = null;
 			return;
 		}
 		completion.complete(captured, acquisition);
@@ -1939,7 +1929,6 @@ public final class ClientPingRuntime {
 
 		if (game.level != levelAtPress) {
 			activeInteraction.invalidate(token);
-			pendingRay = null;
 			logger.debug(DISTANT_HIT_ABANDONED_LEVEL_CHANGE);
 			return;
 		}
@@ -1950,93 +1939,67 @@ public final class ClientPingRuntime {
 	}
 
 	/**
-	 * Completes a capture with its immutable press-time ray. A failed current
-	 * completion clears only this interaction's pending ray; a stale callback or
-	 * a duplicate completion can never clear a newer/accepted capture.
+	 * Completes a capture with its immutable press-time ray. A stale callback
+	 * or duplicate completion cannot replace another capture or its cancellation lock.
 	 */
 	private void completeCapture(InteractionToken token, TargetSnapshot snapshot, CapturedRay pressRay,
 		Optional<FrozenCandidateAcquisition> candidates) {
 		if (baselineToken != token || !activeInteraction.isCurrent(token)) return;
 		if (!observeInteractionLifecycle() || baselineToken != token || !activeInteraction.isCurrent(token)) return;
-		Optional<CapturedPingContext> completed = captureCoordinator.complete(token, snapshot, pressRay, candidates);
-		completed.ifPresent(this::startHeldPreview);
-
-		if (completed.isEmpty()
-			&& activeInteraction.isCurrent(token)
-			&& activeInteraction.currentContext().isEmpty()) {
-			pendingRay = null;
-		}
+		captureCoordinator.complete(token, snapshot, pressRay, candidates).ifPresent(this::startHeldPreview);
 	}
 
 	/**
-	 * Builds the cancellation context from live local state: the local owner
-	 * UUID, the current dimension, and live marker candidate positions. The
-	 * origin and direction come from the immutable press-time ray, never from
-	 * the current/release camera, while candidates still include every marker
-	 * owned by the local player in the current dimension.
+	 * Samples the stored local player's markers in the current dimension for
+	 * the same physical edge as the supplied ray.
 	 *
 	 * <p>A candidate's position is the live entity position when the marker's
 	 * entity target is still resolvable in the same dimension. If it is absent,
 	 * the last matching rendered overlay position is used; the authoritative
 	 * marker anchor is the fallback for an absent or never-rendered view.
 	 */
-	private CancellationContext buildCancellationContext() {
-		Minecraft game = Game;
-		var player = game.player;
-		var level = game.level;
+	private @Nullable CancellationContext buildCancellationContext(CapturedRay ray) {
+		@Nullable Minecraft game = Game;
+		if (game == null) return null;
+		@Nullable LocalPlayer player = game.player;
+		@Nullable ClientLevel level = game.level;
+		if (player == null || level == null) return null;
 
 		UUID ownerId = player.getUUID();
 		String dimensionId = level.dimension().location().toString();
-		CapturedRay frozenRay = pendingRay;
-
-		if (frozenRay == null && machine.phase() == PingInteractionPhase.WHEEL_OPEN) {
-			frozenRay = activeInteraction.currentContext()
-				.map(CapturedPingContext::ray)
-				.orElse(null);
-		}
-
-		// A wheel cannot open without a completed capture. This compatibility value
-		// is used only while a capture is pending/invalid and can never drive a
-		// cancellation action; importantly, it does not read the later camera.
-		if (frozenRay == null) {
-			frozenRay = CapturedRay.defaultRay();
-		}
-
-		List<CancelMarkerCandidate> candidates = markerStore
+		// UUID lookup scans the current level's rendering entities. Share only
+		// the live result (including unavailability), never a marker's fallback.
+		Map<EntityLocator.UUID, Optional<WorldVector>> liveUuidSamples = new HashMap<>();
+		Function<EntityLocator, Optional<WorldVector>> livePositions = locator -> locator instanceof EntityLocator.UUID uuid
+			? liveUuidSamples.computeIfAbsent(uuid, ClientPingRuntime::liveMarkerEntityPosition)
+			: liveMarkerEntityPosition(locator);
+		@Unmodifiable List<CancelMarkerCandidate> candidates = markerStore
 			.markersOwnedInDimension(dimensionId, ownerId)
 			.stream()
 			.map(marker -> new CancelMarkerCandidate(
 				marker.id(),
 				ownerId,
 				dimensionId,
-				candidatePosition(marker, dimensionId)))
+				candidatePosition(marker, dimensionId, livePositions)))
 			.toList();
 
 		return new CancellationContext(
 			ownerId,
 			dimensionId,
-			frozenRay.origin(),
-			frozenRay.direction(),
+			ray.origin(),
+			ray.direction(),
 			candidates);
 	}
 
-	private WorldVector candidatePosition(ClientMarker marker, String currentDimension) {
+	private WorldVector candidatePosition(ClientMarker marker, String currentDimension,
+		Function<EntityLocator, Optional<WorldVector>> liveEntityPosition) {
 		Target target = marker.target();
 		var anchor = marker.anchor();
 		WorldVector anchorPosition = new WorldVector(anchor.x(), anchor.y(), anchor.z());
 
 		if (target instanceof Target.EntityTarget entityTarget) {
-			Entity entity = GameContext.getEntity(entityTarget.locator());
-
-			// GameContext only searches the current level, so a found entity is
-			// already in the marker's dimension.
-			if (entity != null && !entity.isRemoved()) {
-				// Same top-center geometry the marker outline renders, using the
-				// current-tick position (partialTick 1.0F); the renderer may
-				// additionally sub-tick interpolate between positions.
-				@Nullable Vec3 topCenter = EntityMarkerPoint.forLiveEntity(entity, 1.0F);
-				if (topCenter != null) return new WorldVector(topCenter.x, topCenter.y, topCenter.z);
-			}
+			Optional<WorldVector> live = liveEntityPosition.apply(entityTarget.locator());
+			if (live.isPresent()) return live.get();
 		} else if (target instanceof Target.ExternalBlockTarget external
 			&& Game != null && Game.level != null
 			&& currentDimension.equals(Game.level.dimension().location().toString())) {
@@ -2057,6 +2020,17 @@ public final class ClientPingRuntime {
 			anchorPosition,
 			MarkerOverlayState.INSTANCE.lookupPresentationPosition(
 				marker.id(), target, currentDimension));
+	}
+
+	private static Optional<WorldVector> liveMarkerEntityPosition(EntityLocator locator) {
+		// GameContext searches only the current level and preserves the distinct
+		// UUID and experience-orb runtime-id lookup rules.
+		@Nullable Entity entity = GameContext.getEntity(locator);
+		if (entity == null || entity.isRemoved()) return Optional.empty();
+
+		// Use the outline's trusted top-center geometry at the current tick.
+		@Nullable Vec3 topCenter = EntityMarkerPoint.forLiveEntity(entity, 1.0F);
+		return topCenter == null ? Optional.empty() : Optional.of(new WorldVector(topCenter.x, topCenter.y, topCenter.z));
 	}
 
 	private void expireFallbackMarkers() {

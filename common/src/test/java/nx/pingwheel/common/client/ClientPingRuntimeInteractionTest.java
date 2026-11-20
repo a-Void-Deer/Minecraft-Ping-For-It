@@ -8,6 +8,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
@@ -63,15 +64,20 @@ import nx.pingwheel.common.presentation.preview.ClientPresentationPreview;
 import nx.pingwheel.common.presentation.preview.PreviewFieldAccess;
 import nx.pingwheel.common.presentation.preview.PreviewObservation;
 import nx.pingwheel.common.render.SpatialOverlayRenderer;
+import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.Unmodifiable;
 
 import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localStore;
 import static org.junit.jupiter.api.Assertions.*;
 
-/** End-to-end runtime interaction, with only the live world, native cursor and clock recorded. */
+/** Production interaction runtime with headless world, native input, clock and network ports. */
 class ClientPingRuntimeInteractionTest {
 	private static final String DIMENSION = "minecraft:overworld";
 	private static final UUID OWNER = new UUID(1, 2);
+	private static final MarkerId MARKER_A = new MarkerId(42);
+	private static final MarkerId MARKER_B = new MarkerId(43);
+	private static final MarkerId MARKER_C = new MarkerId(44);
+	private static final CapturedRay SIDE_RAY = new CapturedRay(new WorldVector(20, 0, 0), new WorldVector(1, 0, 0));
 	private static final TargetSnapshot CHEST = TargetSnapshotFactory.block(DIMENSION, 1, 2, 3, "minecraft:chest", true, BlockFace.WEST);
 	private static final TargetSnapshot STONE = TargetSnapshotFactory.block(DIMENSION, 4, 5, 6, "minecraft:stone", false, BlockFace.NORTH);
 	private static final TargetSnapshot BEHIND_CHEST = TargetSnapshotFactory.block(DIMENSION, 7, 2, 3, "minecraft:chest", true, BlockFace.EAST);
@@ -118,14 +124,16 @@ class ClientPingRuntimeInteractionTest {
 		Object world = new Object(), screen;
 		boolean player = true, focus = true, overlay, grabbed = true, pending, validFrame = true, distantPending, preciseIncomplete, nativeOwned = true;
 		String dimension = DIMENSION;
-		int captures, cancellations, resets, disposals;
+		int captures, cancellationSamples, resets, disposals;
 		boolean screenDisposal;
 		CapturedRay ray = CapturedRay.defaultRay();
 		TargetSnapshot snapshot = CHEST;
 		List<TargetSnapshot> supplements = List.of();
+		@Unmodifiable List<CancelMarkerCandidate> candidates = List.of(forwardMarker(MARKER_A));
+		Predicate<MarkerId> candidateAvailable = id -> true;
 		WorldVector supplementHit = new WorldVector(5, 5, 5);
 		final List<Runnable> completions = new ArrayList<>();
-		CapturedRay capturedRay, cancellationRay;
+		@Nullable CapturedRay capturedRay;
 		InteractionToken capturedToken;
 		final List<PreciseCaptureRefresh.Request> liveRequests = new ArrayList<>();
 		final List<java.util.function.Consumer<PreciseCaptureRefresh.Outcome>> distantCompletions = new ArrayList<>();
@@ -169,11 +177,9 @@ class ClientPingRuntimeInteractionTest {
 			distantCompletions.add(completion); return true;
 		}
 		public CancellationContext cancellation(CapturedRay frozen) {
-			cancellations++; cancellationRay = frozen;
-			return new CancellationContext(OWNER, DIMENSION, frozen.origin(), frozen.direction(), List.of(
-				new CancelMarkerCandidate(new MarkerId(42), OWNER, DIMENSION, new WorldVector(
-					frozen.origin().x() + frozen.direction().x() * 2, frozen.origin().y() + frozen.direction().y() * 2,
-					frozen.origin().z() + frozen.direction().z() * 2))));
+			cancellationSamples++;
+			return new CancellationContext(OWNER, dimension, frozen.origin(), frozen.direction(),
+				candidates.stream().filter(candidate -> candidateAvailable.test(candidate.markerId())).toList());
 		}
 		public void syncMouse(PingInteractionPhase phase) { grabbed = phase != PingInteractionPhase.WHEEL_OPEN; }
 		public void disposeMouse(boolean screenTransition) { disposals++; screenDisposal = screenTransition; grabbed = !screenTransition; }
@@ -333,7 +339,7 @@ class ClientPingRuntimeInteractionTest {
 		f.access.ray = new CapturedRay(new WorldVector(30, 30, 30), new WorldVector(1, 0, 0)); f.access.snapshot = STONE;
 		f.release(10); f.release(11); f.frame(500, false);
 		assertEquals(CHEST.target(), f.creates().getFirst().target()); assertEquals(1, f.creates().size());
-		assertEquals(pressRay, f.access.capturedRay); assertEquals(1, f.access.captures); assertEquals(0, f.access.cancellations);
+		assertEquals(pressRay, f.access.capturedRay); assertEquals(1, f.access.captures); assertTrue(removals(f).isEmpty());
 		assertEquals(0, f.inventory.stats().previewChannels()); assertFalse(f.runtime.hasCompatibilityState());
 	}
 
@@ -584,14 +590,89 @@ class ClientPingRuntimeInteractionTest {
 		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase()); assertEquals(0, f.inventory.stats().previewChannels());
 		assertTrue(f.access.resets > 0);
 	}
-	@Test void centerAbandonsAndOnlyDownCancelLazilyBuildsFrozenCone() {
-		Fixture center = new Fixture(); center.press(0); center.frame(250, true); center.release(260);
-		assertTrue(center.creates().isEmpty()); assertEquals(0, center.access.cancellations);
-		Fixture cancel = new Fixture(); cancel.press(0); cancel.frame(250, true); cancel.prime(); cancel.focus("cancel-marker", 260);
-		cancel.access.ray = new CapturedRay(new WorldVector(10, 10, 10), new WorldVector(1, 0, 0)); cancel.release(270);
-		assertEquals(1, cancel.access.cancellations); assertEquals(cancel.access.capturedRay, cancel.access.cancellationRay);
-		assertEquals(1, cancel.sent.stream().filter(p -> p instanceof PresentationC2SPacket c && c.kind() == PresentationC2SPacket.Kind.REMOVE).count());
-		assertTrue(cancel.creates().isEmpty()); assertEquals(0, cancel.inventory.stats().previewChannels());
+	@Test void centerAbandonsEvenWithAnEligibleUnpingCandidate() {
+		Fixture f = new Fixture();
+		f.press(0); f.frame(250, true); f.release(260);
+		assertTrue(f.creates().isEmpty()); assertTrue(removals(f).isEmpty());
+		assertEquals(0, f.inventory.stats().previewChannels());
+	}
+
+	@ParameterizedTest @ValueSource(strings = {"ready", "pending-capture", "invalid-viewport"})
+	void unpingKeepsTheMarkerThatWasInTheConeAtPhysicalPress(String openingGate) {
+		Fixture f = new Fixture();
+		f.access.pending = openingGate.equals("pending-capture");
+		f.access.validFrame = !openingGate.equals("invalid-viewport");
+		f.access.candidates = List.of(ownCandidate(MARKER_B, 0, 0, -2), forwardMarker(MARKER_A));
+		f.runtime.onPresentationPacket(markerCreated(MARKER_A, OWNER, CHEST, "entity_block"));
+		f.runtime.onPresentationPacket(markerCreated(MARKER_B, OWNER, STONE, "block"));
+		f.press(0);
+		assertTrue(removals(f).isEmpty(), "the down edge only locks the candidate");
+		assertTrue(f.runtime.store().marker(MARKER_A).isPresent());
+
+		f.access.candidates = List.of(ownCandidate(MARKER_A, 0, 0, -2), forwardMarker(MARKER_B));
+		f.access.ray = SIDE_RAY;
+		f.frame(250, true);
+		if (!openingGate.equals("ready")) {
+			assertTrue(f.runtime.selectorSnapshot().isEmpty(), "the held frame cannot open before " + openingGate + " clears");
+			if (f.access.pending) f.access.completions.getFirst().run();
+			f.access.validFrame = true;
+			f.frame(260, true);
+		}
+		f.prime(); f.focus("cancel-marker", 270);
+		assertTrue(removals(f).isEmpty(), "neither opening nor focusing Unping commits it");
+		assertTrue(f.runtime.store().marker(MARKER_A).isPresent());
+		f.release(280); f.release(281);
+		assertEquals(List.of(MARKER_A), removals(f));
+		assertTrue(f.runtime.store().marker(MARKER_A).orElseThrow().isSynchronized(), "a REMOVE is not authoritative removal");
+		assertTrue(f.runtime.store().marker(MARKER_B).isPresent());
+		assertTrue(f.creates().isEmpty()); assertEquals(0, f.inventory.stats().previewChannels());
+	}
+
+	@Test void anEmptyUnpingLockDoesNotAcquireAMarkerThatAppearsBeforeRelease() {
+		Fixture f = new Fixture();
+		f.access.candidates = List.of();
+		f.press(0);
+		f.runtime.onPresentationPacket(markerCreated(MARKER_B, OWNER, STONE, "block"));
+		f.access.candidates = List.of(forwardMarker(MARKER_B));
+		f.frame(250, true); f.prime(); f.focus("cancel-marker", 260); f.release(270);
+		assertTrue(removals(f).isEmpty()); assertTrue(f.creates().isEmpty());
+		assertTrue(f.runtime.store().marker(MARKER_B).isPresent());
+		assertTrue(f.runtime.selectorSnapshot().isEmpty());
+	}
+
+	@Test void anAuthoritativelyRemovedLockDoesNotFallBackToAnotherOwnMarker() {
+		Fixture f = new Fixture();
+		f.runtime.onPresentationPacket(markerCreated(MARKER_A, OWNER, CHEST, "entity_block"));
+		f.runtime.onPresentationPacket(markerCreated(MARKER_B, OWNER, STONE, "block"));
+		f.press(0); f.frame(250, true); f.prime(); f.focus("cancel-marker", 260);
+		f.runtime.onPresentationPacket(PresentationS2CPacket.removed(100, 1, MARKER_A, MarkerRemovalReason.CANCELLED));
+		assertTrue(f.runtime.store().marker(MARKER_A).isEmpty());
+		f.access.candidates = List.of(forwardMarker(MARKER_B));
+		f.release(270);
+		assertTrue(removals(f).isEmpty(), "a tombstoned A cannot be requested again or treated as permission to remove B");
+		assertTrue(f.runtime.store().marker(MARKER_B).isPresent());
+		assertTrue(f.creates().isEmpty());
+	}
+
+	@ParameterizedTest @ValueSource(booleans = {false, true})
+	void abandonedGestureCannotLendItsUnpingLockToTheNextPress(boolean explicitAbort) {
+		Fixture f = new Fixture();
+		f.access.pending = true;
+		f.press(0);
+		Runnable oldCapture = f.access.completions.getFirst();
+		if (explicitAbort) f.runtime.abort();
+		f.release(10);
+
+		// This fresh press is outside the Danger window and owns an empty lock.
+		f.access.candidates = List.of();
+		f.access.pending = false;
+		f.press(300); f.frame(550, true);
+		oldCapture.run();
+		f.access.candidates = List.of(forwardMarker(MARKER_B));
+		f.prime(); f.focus("cancel-marker", 560); f.release(570);
+		assertTrue(removals(f).isEmpty(), "neither the old lock nor a newly eligible candidate can be consumed");
+		assertTrue(f.creates().isEmpty());
+		assertTrue(f.runtime.selectorSnapshot().isEmpty());
 	}
 	@ParameterizedTest @ValueSource(booleans = {false, true})
 	void cancellationBeforeResetIsDroppedAndNeverReplayedWhenReady(boolean offered) {
@@ -602,36 +683,46 @@ class ClientPingRuntimeInteractionTest {
 				Map.of(PresentationBasic.ID, PresentationBasic.fields()), Map.of(PresentationBasic.ID, 1)));
 		}
 		f.press(0); f.frame(250, true); f.prime(); f.focus("cancel-marker", 260); f.release(270);
-		assertEquals(1, f.access.cancellations, "the frozen cancellation action reaches the runtime dispatch boundary");
-		assertEquals(0, f.sent.stream().filter(p -> p instanceof PresentationC2SPacket c && c.kind() == PresentationC2SPacket.Kind.REMOVE).count());
+		assertTrue(removals(f).isEmpty());
 		f.negotiate(Set.of(PresentationBasic.NAME));
 		assertTrue(f.presentation.ready());
-		assertEquals(0, f.sent.stream().filter(p -> p instanceof PresentationC2SPacket c && c.kind() == PresentationC2SPacket.Kind.REMOVE).count(),
-			"RESET must not replay a discarded cancellation");
+		assertTrue(removals(f).isEmpty(), "RESET must not replay a discarded cancellation");
+		f.runtime.onPresentationPacket(markerCreated(MARKER_A, OWNER, CHEST, "entity_block"));
 		f.press(300); f.frame(550, true); f.prime(); f.focus("cancel-marker", 560); f.release(570);
-		assertEquals(1, f.sent.stream().filter(p -> p instanceof PresentationC2SPacket c && c.kind() == PresentationC2SPacket.Kind.REMOVE).count());
+		assertEquals(List.of(MARKER_A), removals(f));
 		f.press(600); f.release(610);
 		assertEquals(1, f.creates().size(), "neither an unready nor a ready cancellation consumes the sole create allowance");
 	}
 
-	@Test
-	void expiredOwnUnpingClearsOnlyTheSelectedMarkerAndKeepsItsTombstone() {
+	@ParameterizedTest @ValueSource(booleans = {false, true})
+	void expiredOwnUnpingClearsOnlyTheLockedMarkerAndKeepsItsTombstone(boolean expiredAtPress) {
 		Fixture f = new Fixture();
-		MarkerId own = new MarkerId(42);
-		MarkerId other = new MarkerId(43);
+		MarkerId own = MARKER_A;
+		MarkerId other = MARKER_B;
 		TargetKey key = TargetKey.from(CHEST.target());
 		TargetKey otherKey = TargetKey.from(STONE.target());
 		PresentationS2CPacket ownCreate = markerCreated(own, OWNER, CHEST, "entity_block");
 		f.runtime.onPresentationPacket(ownCreate);
-		f.runtime.onPresentationPacket(markerCreated(other, new UUID(3, 4), STONE, "block"));
+		f.runtime.onPresentationPacket(markerCreated(other, OWNER, STONE, "block"));
 		f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 1, key, Optional.of(own)));
 		f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 1, otherKey, Optional.of(other)));
-		f.runtime.onPresentationPacket(expired(own));
-		f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 1, key, Optional.empty()));
+		Runnable expireOwn = () -> {
+			f.runtime.onPresentationPacket(expired(own));
+			f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 1, key, Optional.empty()));
+		};
+		if (expiredAtPress) expireOwn.run();
+		f.access.candidates = List.of(forwardMarker(own), ownCandidate(other, 0, 0, -2));
+		f.press(0);
+		assertTrue(f.runtime.store().marker(own).isPresent(), "press must not dismiss even an already expired visual");
+		assertTrue(removals(f).isEmpty());
+		f.access.candidates = List.of(ownCandidate(own, 0, 0, -2), forwardMarker(other));
+		f.frame(250, true); f.prime(); f.focus("cancel-marker", 260);
+		if (!expiredAtPress) expireOwn.run();
+		assertTrue(f.runtime.store().marker(own).orElseThrow().isStale());
 		assertEquals(own, f.runtime.store().outlineWinnersInDimension(DIMENSION).get(key).id());
 		assertTrue(f.runtime.nameStore().find(own).isPresent());
 
-		unping(f);
+		f.release(270);
 		assertTrue(removals(f).isEmpty());
 		assertTrue(f.creates().isEmpty());
 		assertTrue(f.runtime.store().marker(own).isEmpty());
@@ -639,6 +730,7 @@ class ClientPingRuntimeInteractionTest {
 		assertTrue(f.runtime.nameStore().find(own).isEmpty());
 		assertTrue(f.presentation.markerGrant(own).isEmpty());
 		assertEquals(Set.of(otherKey), f.runtime.store().outlineWinnersInDimension(DIMENSION).keySet());
+		assertTrue(f.runtime.store().marker(other).orElseThrow().isSynchronized());
 		assertTrue(f.runtime.nameStore().find(other).isPresent());
 		f.runtime.onPresentationPacket(ownCreate);
 		assertTrue(f.runtime.store().marker(own).isEmpty(), "delayed creation must not undo local dismissal");
@@ -648,7 +740,7 @@ class ClientPingRuntimeInteractionTest {
 	@ValueSource(booleans = {false, true})
 	void oneActiveUnpingHandlesEitherOrderOfExpiryAndNotFound(boolean rejectionFirst) {
 		Fixture f = new Fixture();
-		MarkerId id = new MarkerId(42);
+		MarkerId id = MARKER_A;
 		f.runtime.onPresentationPacket(markerCreated(id, OWNER, CHEST, "entity_block"));
 		PresentationS2CPacket notFound = PresentationS2CPacket.rejected(100, 1, id.value(), MarkerRequestKind.REMOVE, MarkerRejectReason.NOT_FOUND);
 		// Deliver during transport to verify that correlation is registered before
@@ -673,7 +765,7 @@ class ClientPingRuntimeInteractionTest {
 	@Test
 	void fallbackStaleOwnUnpingSendsOneRemoveWithoutDismissingTheVisual() {
 		Fixture f = new Fixture(ClientRateLimitPolicy.DEFAULT, true, localStore(0L, 100L));
-		MarkerId id = new MarkerId(42);
+		MarkerId id = MARKER_A;
 		f.runtime.onPresentationPacket(markerCreated(100, 1, 1L, id, OWNER, CHEST, "entity_block", 1L));
 		f.tick(0L);
 		var stale = f.runtime.store().marker(id).orElseThrow();
@@ -691,7 +783,7 @@ class ClientPingRuntimeInteractionTest {
 
 	@Test
 	void removeDenialOrDifferentStoredOwnerDoesNotDismissAnExpiredRecord() {
-		MarkerId id = new MarkerId(42);
+		MarkerId id = MARKER_A;
 		Fixture denied = new Fixture();
 		denied.runtime.onPresentationPacket(markerCreated(id, OWNER, CHEST, "entity_block"));
 		unping(denied);
@@ -703,7 +795,7 @@ class ClientPingRuntimeInteractionTest {
 		Fixture mismatch = new Fixture();
 		mismatch.runtime.onPresentationPacket(markerCreated(id, new UUID(3, 4), CHEST, "entity_block"));
 		mismatch.runtime.onPresentationPacket(expired(id));
-		// The fake candidate port still names 42 as own; the applied record must
+		// The fake candidate port names the marker as own; the applied record must
 		// independently agree before any destructive local action.
 		unping(mismatch);
 		assertTrue(removals(mismatch).isEmpty());
@@ -881,6 +973,14 @@ class ClientPingRuntimeInteractionTest {
 		fixture.press(0); fixture.frame(250, true); fixture.prime(); fixture.focus("cancel-marker", 260); fixture.release(270);
 	}
 
+	private static CancelMarkerCandidate forwardMarker(MarkerId id) {
+		return ownCandidate(id, 0, 0, 2);
+	}
+
+	private static CancelMarkerCandidate ownCandidate(MarkerId id, double x, double y, double z) {
+		return new CancelMarkerCandidate(id, OWNER, DIMENSION, new WorldVector(x, y, z));
+	}
+
 	private static @Unmodifiable List<MarkerId> removals(Fixture fixture) {
 		return fixture.sent.stream().filter(PresentationC2SPacket.class::isInstance).map(PresentationC2SPacket.class::cast)
 			.filter(packet -> packet.kind() == PresentationC2SPacket.Kind.REMOVE).map(PresentationC2SPacket::markerId).toList();
@@ -916,7 +1016,7 @@ class ClientPingRuntimeInteractionTest {
 		int selected = f.sent.indexOf(f.selects().getFirst());
 		int closed = java.util.stream.IntStream.range(0, f.sent.size()).filter(i -> f.sent.get(i) instanceof InventoryC2SPacket c
 			&& c.kind() == InventoryC2SPacket.Kind.CLOSE && c.requestId() == request).findFirst().orElseThrow();
-		assertTrue(selected < closed); assertEquals(1, f.validations.size()); assertEquals(0, f.access.cancellations);
+		assertTrue(selected < closed); assertEquals(1, f.validations.size()); assertTrue(removals(f).isEmpty());
 	}
 	@Test void enabledInventoryStayKeepsFirstReleaseThenOneTapSelectsBeforeClosingOnce() {
 		ClientConfig.HANDLER.getConfig().getSpatialSelector().setInventorySelectionStayOpenEnabled(true);
@@ -948,6 +1048,50 @@ class ClientPingRuntimeInteractionTest {
 		assertTrue(selected < closed);
 	}
 
+	@ParameterizedTest @ValueSource(booleans = {false, true})
+	void overdueVirtualInventoryWheelGivesThePhysicalPressToTheStayingSession(boolean expiryFrameFirst) {
+		var config = ClientConfig.HANDLER.getConfig();
+		int holdMillis = 1000, sliceMillis = 500;
+		config.setWheelHoldMillis(holdMillis);
+		config.setLongPressCompatibilitySliceMillis(sliceMillis);
+		config.setLongPressCompatibilityMode(true);
+		config.getSpatialSelector().setInventorySelectionStayOpenEnabled(true);
+		Fixture f = new Fixture();
+		f.press(0); f.release(10);
+		assertEquals(1, f.creates().size());
+		f.press(450); f.release(451); f.inventoryRows();
+		f.press(900); f.release(901); f.frame(holdMillis, false); f.prime();
+		long dwell = f.snapshot().settings().dwellMillis();
+		f.focus("content", holdMillis + 10); f.frame(f.now + dwell, false);
+		String list = f.menu().choices().stream().filter(choice -> choice.id().endsWith(":inventory")).findFirst().orElseThrow().id();
+		long extension = f.now + 1;
+		f.press(extension); f.release(extension + 1);
+		f.focus(list, extension + 10); f.frame(f.now + dwell, false);
+		assertEquals("ITEM:opaque", f.snapshot().inventory().selectedKey());
+		long request = f.request();
+		var fence = f.snapshot().contentFence();
+		int captures = f.access.captures;
+		int cancellationSamples = f.access.cancellationSamples;
+
+		long overdue = extension + sliceMillis + 1;
+		if (expiryFrameFirst) f.frame(overdue, false);
+		f.press(overdue);
+		assertEquals(captures, f.access.captures, "the staying tap must not start a new ordinary capture");
+		assertEquals(cancellationSamples, f.access.cancellationSamples, "the staying tap never owns a new Unping snapshot");
+		assertEquals(fence, f.snapshot().contentFence(), "both event orders keep the old selector token and preview");
+		assertEquals(1, f.inventory.stats().previewChannels());
+		assertTrue(f.selects().isEmpty());
+
+		f.release(overdue + 10); f.release(overdue + 11);
+		assertEquals(1, f.selects().size(), "the same tap must commit the old inventory selection, not be dropped");
+		assertEquals(request, f.selects().getFirst().requestId());
+		assertEquals("opaque", f.selects().getFirst().entryKey());
+		assertTrue(f.runtime.selectorSnapshot().isEmpty());
+		assertEquals(0, f.inventory.stats().previewChannels());
+		assertEquals(1, f.creates().size(), "only the first compatibility tap creates a plain ping");
+		assertTrue(removals(f).isEmpty());
+	}
+
 	@Test void stayingHoldReachingTheFrozenThresholdCancelsWithoutSelectOrCancelMarker() {
 		ClientConfig.HANDLER.getConfig().getSpatialSelector().setInventorySelectionStayOpenEnabled(true);
 		Fixture f = new Fixture(); f.openList(); long request = f.request();
@@ -955,7 +1099,7 @@ class ClientPingRuntimeInteractionTest {
 
 		f.press(1000); f.release(1250);
 		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
-		assertEquals(0, f.access.cancellations);
+		assertTrue(removals(f).isEmpty());
 		assertTrue(f.runtime.selectorSnapshot().isEmpty());
 		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
 		assertEquals(0, f.inventory.stats().previewChannels());
@@ -1012,7 +1156,7 @@ class ClientPingRuntimeInteractionTest {
 		f.move(-1000, 0, 800);
 		assertTrue(f.runtime.selectorSnapshot().isEmpty());
 		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
-		assertEquals(0, f.access.cancellations);
+		assertTrue(removals(f).isEmpty());
 		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
 	}
 
@@ -1045,7 +1189,7 @@ class ClientPingRuntimeInteractionTest {
 		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
 		assertTrue(f.access.grabbed);
 		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
-		assertEquals(0, f.access.cancellations);
+		assertTrue(removals(f).isEmpty());
 	}
 
 	@Test void policyPurgeKeepsTheFrozenStayAndReleaseUsesItsGrant() {
@@ -1104,7 +1248,7 @@ class ClientPingRuntimeInteractionTest {
 		assertTrue(f.selects().isEmpty()); assertTrue(f.creates().isEmpty());
 		assertTrue(f.runtime.selectorSnapshot().isEmpty(), "the swallowed release closes without submitting");
 		assertEquals(PingInteractionPhase.IDLE, f.runtime.phase());
-		assertEquals(0, f.access.cancellations);
+		assertTrue(removals(f).isEmpty());
 	}
 
 	@Test void legitimateUpdatingPreviewWithoutRowsKeepsTheStayingListOpen() {
@@ -1223,6 +1367,31 @@ class ClientPingRuntimeInteractionTest {
 		assertEquals(2, f.access.captures); assertEquals(secondRay, f.access.capturedRay); assertEquals(1, f.creates().size());
 		f.access.completions.getLast().run(); f.frame(330, false); assertEquals(2, f.creates().size());
 	}
+	@Test void deferredHoldUnpingsTheMarkerFromItsOwnPhysicalEdgeNotTheDispatchFrame() {
+		ClientConfig.HANDLER.getConfig().setLongPressCompatibilityMode(true);
+		Fixture f = new Fixture();
+		f.runtime.onPresentationPacket(markerCreated(MARKER_B, OWNER, STONE, "block"));
+		f.access.pending = true;
+		f.press(0); f.release(10);
+
+		// This press is outside the compatibility slice; the first create has not dispatched yet.
+		f.access.ray = SIDE_RAY;
+		f.access.candidates = List.of(forwardMarker(MARKER_A), ownCandidate(MARKER_B, 22, 0, 0));
+		f.press(300);
+		assertEquals(1, f.access.captures);
+		assertTrue(f.creates().isEmpty()); assertTrue(removals(f).isEmpty());
+
+		f.access.candidates = List.of(forwardMarker(MARKER_A), ownCandidate(MARKER_C, 22, 0, 0));
+		f.access.ray = CapturedRay.defaultRay();
+		f.access.pending = false; f.access.completions.getFirst().run(); f.frame(340, true);
+		assertEquals(1, f.creates().size());
+		assertEquals(2, f.access.captures); assertEquals(SIDE_RAY, f.access.capturedRay);
+		f.frame(550, true); f.prime(); f.focus("cancel-marker", 560);
+		assertTrue(removals(f).isEmpty());
+		f.release(570);
+		assertEquals(List.of(MARKER_B), removals(f));
+		assertEquals(1, f.creates().size());
+	}
 	@Test void resizeCaptureAndInvalidDimensionsReprimeWithoutSyntheticTravelAndScrollIsOwned() {
 		Fixture f = new Fixture(); assertFalse(f.runtime.onMouseScroll(1, 0, 1)); f.press(0); f.frame(250, true); f.prime();
 		f.move(10, 0, 260); var before = f.snapshot().radial().pointer();
@@ -1287,7 +1456,7 @@ class ClientPingRuntimeInteractionTest {
 		Fixture f = new Fixture(); f.press(0); f.frame(250, true); f.prime(); f.enter("settings", 260);
 		f.focus("settings:FLUIDS", 460); f.release(470); f.release(480);
 		assertEquals(List.of(SelectorIntent.CaptureToggle.FLUIDS), f.access.toggles); assertTrue(f.creates().isEmpty());
-		assertTrue(f.validations.isEmpty()); assertEquals(0, f.access.cancellations); assertEquals(0, f.inventory.stats().previewChannels());
+		assertTrue(f.validations.isEmpty()); assertTrue(removals(f).isEmpty()); assertEquals(0, f.inventory.stats().previewChannels());
 	}
 	@Test void actuallyOpenedMenuDoesNotSeedCompatibilityAfterClose() {
 		ClientConfig.HANDLER.getConfig().setLongPressCompatibilityMode(true);
@@ -1336,6 +1505,77 @@ class ClientPingRuntimeInteractionTest {
 		f.prime(); f.focus("intent", 260); f.press(350); f.release(351); f.frame(440, false);
 		f.focus("intent:attention", 460);
 		f.frame(480, false); assertEquals(2, f.creates().size()); assertFalse(f.runtime.hasCompatibilityState());
+	}
+	@ParameterizedTest @ValueSource(booleans = {false, true})
+	void virtualWheelUnpingsFromSecondPhysicalPressAndLaterClicksOnlyExtendIt(boolean pendingFirstCapture) {
+		ClientConfig.HANDLER.getConfig().setLongPressCompatibilityMode(true);
+		Fixture f = new Fixture();
+		f.runtime.onPresentationPacket(markerCreated(MARKER_B, OWNER, STONE, "block"));
+		f.access.pending = pendingFirstCapture;
+		f.press(0); f.release(10);
+		f.access.ray = SIDE_RAY;
+		f.access.candidates = List.of(forwardMarker(MARKER_A), ownCandidate(MARKER_B, 22, 0, 0));
+		f.press(115); f.release(116);
+		if (pendingFirstCapture) assertEquals(1, f.access.captures);
+		assertTrue(removals(f).isEmpty());
+
+		f.access.candidates = List.of(forwardMarker(MARKER_A), ownCandidate(MARKER_C, 22, 0, 0));
+		if (pendingFirstCapture) {
+			f.access.pending = false; f.access.completions.getFirst().run(); f.frame(200, false);
+		}
+		f.press(230); f.release(231); f.frame(250, false);
+		assertEquals(PingInteractionPhase.WHEEL_OPEN, f.runtime.phase(), "only timing is backdated to the first click");
+		assertEquals(2, f.access.captures);
+		f.prime(); f.focus("cancel-marker", 260);
+		f.press(340); f.release(341); f.frame(400, false);
+		assertTrue(f.runtime.selectorSnapshot().isPresent(), "the later click extended the virtual hold");
+		assertTrue(removals(f).isEmpty(), "physical releases do not commit during the virtual hold");
+
+		f.frame(466, false); f.frame(467, false);
+		assertEquals(List.of(MARKER_B), removals(f));
+		assertEquals(1, f.creates().size(), "only the first ordinary tap creates a ping");
+		assertFalse(f.runtime.hasCompatibilityState());
+	}
+
+	@ParameterizedTest @ValueSource(booleans = {false, true})
+	void pressThatTerminatesAVirtualUnpingLocksBeforeItsLocalDismissal(boolean expiredMarkerStillNearest) {
+		var config = ClientConfig.HANDLER.getConfig();
+		config.setWheelHoldMillis(300);
+		config.setLongPressCompatibilitySliceMillis(150);
+		config.setLongPressCompatibilityMode(true);
+		Fixture f = new Fixture();
+		f.runtime.onPresentationPacket(markerCreated(MARKER_A, OWNER, CHEST, "entity_block"));
+		f.runtime.onPresentationPacket(markerCreated(MARKER_B, OWNER, STONE, "block"));
+		f.runtime.onPresentationPacket(expired(MARKER_A));
+		var expiredA = f.runtime.store().marker(MARKER_A).orElseThrow();
+		assertTrue(expiredA.isStale());
+		assertTrue(f.runtime.store().renderMarkers().contains(expiredA));
+		f.access.candidateAvailable = id -> f.runtime.store().marker(id).isPresent();
+		f.access.candidates = List.of(ownCandidate(MARKER_B, 0, 0, 4), forwardMarker(MARKER_A));
+
+		f.press(0); f.release(10);
+		assertEquals(1, f.creates().size());
+		f.press(100); f.release(101); f.press(225); f.release(226);
+		f.frame(300, false); f.prime(); f.focus("cancel-marker", 310);
+		assertTrue(f.runtime.store().marker(MARKER_A).isPresent());
+		assertTrue(removals(f).isEmpty());
+		if (!expiredMarkerStillNearest) {
+			// The new press may legitimately pick B when A moved out before the edge.
+			f.access.candidates = List.of(ownCandidate(MARKER_B, 0, 0, 4), ownCandidate(MARKER_A, 0, 0, -2));
+		}
+
+		// No frame after the final slice. The same edge ends the old wheel and starts a new hold.
+		f.press(376);
+		assertTrue(f.runtime.store().marker(MARKER_A).isEmpty(), "the previous wheel confirmed its own expired marker");
+		assertTrue(f.runtime.store().marker(MARKER_B).orElseThrow().isSynchronized());
+		assertTrue(removals(f).isEmpty(), "ending the old wheel is local and starting the new one sends nothing");
+		assertEquals(PingInteractionPhase.PRESSED, f.runtime.phase());
+
+		f.frame(676, true); f.prime(); f.focus("cancel-marker", 685); f.release(690);
+		assertEquals(expiredMarkerStillNearest ? List.of() : List.of(MARKER_B), removals(f),
+			"the fresh wheel consumes the pre-dismissal choice, not the post-dismissal candidate list");
+		assertTrue(f.runtime.store().marker(MARKER_B).orElseThrow().isSynchronized());
+		assertEquals(1, f.creates().size());
 	}
 	@Test void spatialSettingsAreFrozenAtPressAndOpenWheelIgnoresElapsedTime() {
 		var settings = ClientConfig.HANDLER.getConfig().getSpatialSelector(); int oldStroke = settings.getStroke();
@@ -1427,7 +1667,7 @@ class ClientPingRuntimeInteractionTest {
 		assertEquals(1, f.inventory.stats().previewChannels()); assertEquals(request, f.request());
 		f.release(470); assertEquals(STONE.target(), f.creates().getFirst().target());
 		assertEquals(2, f.access.liveRequests.size(), "release does not cast"); assertEquals(1, f.access.captures);
-		assertEquals(0, f.access.cancellations); assertEquals(0, f.inventory.stats().previewChannels());
+		assertTrue(removals(f).isEmpty()); assertEquals(0, f.inventory.stats().previewChannels());
 
 		Fixture ordinary = new Fixture(); ordinary.press(0); ordinary.access.snapshot = STONE; ordinary.frame(250, true);
 		ordinary.prime(); ordinary.enter("intent", 260); ordinary.focus("intent:attention", 460); ordinary.release(470);
@@ -1437,7 +1677,7 @@ class ClientPingRuntimeInteractionTest {
 	@Test void frameIsNotPaintAndUnpaintedLiveCandidateNeverCommits() {
 		Fixture f = new Fixture(); f.press(0); f.frame(250, true); f.prime(); f.enter("precise", 260);
 		f.focus("precise:entity_block", 460); f.frame(465, true); f.release(470);
-		assertTrue(f.creates().isEmpty()); assertTrue(f.validations.isEmpty()); assertEquals(0, f.access.cancellations);
+		assertTrue(f.creates().isEmpty()); assertTrue(f.validations.isEmpty()); assertTrue(removals(f).isEmpty());
 	}
 
 	@Test void incompleteNativeAcquisitionDisablesEveryPreciseLeafWithoutUnfreezingOrdinaryCapture() {
@@ -1472,18 +1712,20 @@ class ClientPingRuntimeInteractionTest {
 		assertEquals(f.access.ray, live.contexts().get(live.choices().get("precise:block").candidateId()).ray());
 		f.focus("precise:location", 460); f.paint(); f.release(470);
 		assertEquals(locationSnapshot.target(), f.creates().getFirst().target()); assertEquals(1, f.validations.size());
-		assertEquals(1, f.access.captures); assertEquals(0, f.access.cancellations);
+		assertEquals(1, f.access.captures); assertTrue(removals(f).isEmpty());
 	}
 
 	@Test void liveRefreshLeavesCancelAndContentBoundToOrdinaryPressAndPausesOnBranchExit() {
-		Fixture f = new Fixture(); f.press(0); CapturedRay pressRay = f.access.capturedRay; long request = f.request();
-		f.frame(250, true); f.prime(); f.access.ray = new CapturedRay(new WorldVector(10, 20, 30), new WorldVector(1, 0, 0));
+		Fixture f = new Fixture(); f.press(0); long request = f.request();
+		f.frame(250, true); f.prime(); f.access.ray = SIDE_RAY;
+		f.access.candidates = List.of(forwardMarker(MARKER_B), ownCandidate(MARKER_C, 22, 0, 0));
 		f.access.snapshot = STONE; f.enter("precise", 260); f.tick(450);
 		String back = f.menu().choices().stream().filter(SpatialController.ChoiceView::back).findFirst().orElseThrow().id();
 		f.enterBack(back, 460); int scans = f.access.liveRequests.size(); f.tick(700);
 		assertEquals(scans, f.access.liveRequests.size()); assertEquals(request, f.request()); assertEquals(1, f.inventory.stats().previewChannels());
-		f.focus("cancel-marker", 710); f.release(720); assertEquals(pressRay, f.access.cancellationRay);
-		assertTrue(f.creates().isEmpty()); assertEquals(1, f.access.cancellations); assertEquals(1, f.access.captures);
+		f.focus("cancel-marker", 710); f.release(720);
+		assertEquals(List.of(MARKER_A), removals(f));
+		assertTrue(f.creates().isEmpty()); assertEquals(1, f.access.captures);
 	}
 
 	@Test void precisePeriodAndRangePolicyFreezeAtPressAndChangesApplyNextHoldOnly() {
@@ -1715,18 +1957,36 @@ class ClientPingRuntimeInteractionTest {
 		assertTrue(f.creates().isEmpty()); assertEquals(2, f.access.captures);
 	}
 
-	@Test void candidateHoldUsesItsOwnPressTimeAndRayThenReleasesOnlyTheWheel() {
-		Fixture f = new Fixture(); f.press(0); f.release(10);
-		CapturedRay secondRay = new CapturedRay(new WorldVector(5, 5, 5), new WorldVector(1, 0, 0));
-		f.access.ray = secondRay; f.access.snapshot = STONE;
+	@ParameterizedTest @ValueSource(booleans = {false, true})
+	void dangerCandidateHoldUsesItsOwnPhysicalPressForWheelTimingAndUnping(boolean pendingFirstCapture) {
+		Fixture f = new Fixture();
+		f.access.pending = pendingFirstCapture;
+		f.press(0); f.release(10);
+		f.runtime.onPresentationPacket(markerCreated(MARKER_B, OWNER, STONE, "block"));
+		f.access.ray = SIDE_RAY; f.access.snapshot = STONE;
+		f.access.candidates = List.of(forwardMarker(MARKER_A), ownCandidate(MARKER_B, 22, 0, 0));
 
-		f.press(60); f.frame(300, true);
+		f.press(60);
+		assertEquals(1, f.access.captures, "the potential Danger tap has not started ordinary capture yet");
+		assertTrue(removals(f).isEmpty());
+		f.access.candidates = List.of(forwardMarker(MARKER_A), ownCandidate(MARKER_C, 22, 0, 0));
+		f.access.ray = CapturedRay.defaultRay();
+		if (pendingFirstCapture) {
+			f.frame(150, true);
+			assertEquals(1, f.access.captures, "the held candidate cannot start before the first create dispatches");
+			assertTrue(f.creates().isEmpty());
+			f.access.pending = false; f.access.completions.getFirst().run();
+		}
+		f.frame(300, true);
 		assertEquals(PingInteractionPhase.PRESSED, f.runtime.phase(),
-			"240 ms from this down and 300 ms from the first press are both below the frozen 250 ms threshold");
+			"only the first press would have reached the wheel threshold by this frame");
 		f.frame(311, true);
 		assertEquals(PingInteractionPhase.WHEEL_OPEN, f.runtime.phase());
-		assertEquals(secondRay, f.access.capturedRay);
+		assertEquals(SIDE_RAY, f.access.capturedRay);
+		f.prime(); f.focus("cancel-marker", 315);
+		assertTrue(removals(f).isEmpty());
 		f.release(320);
+		assertEquals(List.of(MARKER_B), removals(f));
 		assertEquals(1, f.creates().size(), "an actually opened wheel owns its release and adds no Danger");
 		assertEquals(2, f.access.captures);
 	}
@@ -1824,7 +2084,7 @@ class ClientPingRuntimeInteractionTest {
 		assertEquals(1, previewReadsBefore, "the fixture has exactly one genuinely pending preview read");
 		int validationsBefore = f.validations.size();
 		int liveRequestsBefore = f.access.liveRequests.size();
-		int cancellationsBefore = f.access.cancellations;
+		int removalsBefore = removals(f).size();
 
 		f.release(470);
 
@@ -1832,7 +2092,7 @@ class ClientPingRuntimeInteractionTest {
 		assertTrue(f.errors.isEmpty());
 		assertEquals(validationsBefore + 1, f.validations.size(), "the release validator runs once, as before");
 		assertEquals(liveRequestsBefore, f.access.liveRequests.size(), "diagnostic classification adds no precise scan");
-		assertEquals(cancellationsBefore, f.access.cancellations, "no cancellation was requested");
+		assertEquals(removalsBefore, removals(f).size(), "no cancellation was requested");
 		assertEquals(previewReadsBefore, f.sent.stream().filter(packet -> packet instanceof PresentationPreviewC2SPacket preview
 			&& preview.kind() == PresentationPreviewC2SPacket.Kind.READ).count(),
 			"the pending preview is not polled again at release");
@@ -1868,6 +2128,6 @@ class ClientPingRuntimeInteractionTest {
 		f.access.distantPending = false; f.press(500); long request = f.request(); f.frame(750, true);
 		late.accept(PreciseCaptureRefresh.Outcome.missing()); assertEquals(request, f.request()); assertEquals(1, f.inventory.stats().previewChannels());
 		f.prime(); f.enter("intent", 760); f.focus("intent:attention", 960); f.release(970);
-		assertEquals(CHEST.target(), f.creates().getFirst().target()); assertEquals(0, f.access.cancellations);
+		assertEquals(CHEST.target(), f.creates().getFirst().target()); assertTrue(removals(f).isEmpty());
 	}
 }

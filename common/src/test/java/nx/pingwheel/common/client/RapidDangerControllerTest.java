@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.domain.BlockFace;
@@ -15,6 +16,7 @@ import nx.pingwheel.common.interaction.CapturedRay;
 import nx.pingwheel.common.interaction.InteractionToken;
 import nx.pingwheel.common.interaction.TargetSnapshotFactory;
 import nx.pingwheel.common.interaction.cancel.WorldVector;
+import nx.pingwheel.common.interaction.state.FrozenCancellation;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.resolve.DefaultTargetResolver;
@@ -39,7 +41,7 @@ class RapidDangerControllerTest {
 		h.controller.onRelease();
 
 		assertEquals(1, h.port.normalCreates);
-		assertEquals(1, h.port.normalStarts);
+		assertEquals(1, h.port.baselineStarts);
 		assertEquals(0, h.port.dangerCreates, "nothing is held back or sent waiting for a potential double click");
 	}
 
@@ -109,7 +111,7 @@ class RapidDangerControllerTest {
 
 		assertEquals(0, h.port.dangerCreates);
 		assertFalse(h.controller.hasPendingState());
-		assertEquals(1, h.port.normalStarts, "no retry or fallback interaction is fabricated");
+		assertEquals(1, h.port.baselineStarts, "no retry or fallback interaction is fabricated");
 	}
 
 	@Test void aLongCandidateUsesItsOwnFrozenPressTimeAndRayForTheWheel() {
@@ -122,8 +124,9 @@ class RapidDangerControllerTest {
 		assertEquals(PingInteractionPhase.PRESSED, h.port.phase, "the first press time is never the hold baseline");
 		h.controller.onRenderFrame(true, 350);
 		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.port.phase);
-		assertEquals(100, h.port.candidatePressTimestamp);
-		assertEquals(RAY_B, h.port.candidatePressRay);
+		assertEquals(2, h.port.baselineStarts);
+		assertEquals(100, h.port.baselinePressTimestamp);
+		assertEquals(RAY_B, h.port.baselinePressRay);
 
 		h.controller.onRelease();
 		assertEquals(0, h.port.dangerCreates, "an actually opened wheel owns the release");
@@ -140,6 +143,7 @@ class RapidDangerControllerTest {
 
 		assertEquals(1, h.port.dangerCreates);
 		assertEquals(RAY_B, h.port.capturedCandidateRay);
+		assertEquals(1, h.port.baselineStarts, "a short candidate does not start a new baseline");
 		assertEquals(1, h.port.normalCreates);
 	}
 
@@ -153,7 +157,7 @@ class RapidDangerControllerTest {
 		h.controller.onRelease();
 
 		assertEquals(0, h.port.dangerCreates);
-		assertEquals(2, h.port.normalStarts, "a stale generation starts a fresh ordinary press");
+		assertEquals(2, h.port.baselineStarts, "a stale generation starts a fresh ordinary press");
 	}
 
 	@Test void liveCompatibilityDisablesRecognitionWithoutAbortingAnOrdinaryBaseline() {
@@ -162,7 +166,7 @@ class RapidDangerControllerTest {
 		boolean handled = h.controller.onPress(0);
 
 		assertFalse(handled);
-		assertEquals(0, h.port.normalStarts);
+		assertEquals(0, h.port.baselineStarts);
 		assertEquals(0, h.port.aborts);
 	}
 
@@ -176,7 +180,7 @@ class RapidDangerControllerTest {
 			h.controller.onRelease();
 		}
 
-		assertEquals(3, h.port.normalStarts, "every same-direction short press starts an ordinary press");
+		assertEquals(3, h.port.baselineStarts, "every same-direction short press starts an ordinary press");
 		assertEquals(3, h.port.normalCreates, "every short release keeps the ordinary default create");
 		assertEquals(0, h.port.dangerCreates,
 			"zero disables the gesture entirely even when the pointer never moved");
@@ -188,7 +192,7 @@ class RapidDangerControllerTest {
 		Harness atBoundary = secondTapWithAngle(boundary, 12.5);
 		assertEquals(0, atBoundary.port.dangerCreates,
 			"a pointer turn exactly equal to the tolerance is not strictly inside");
-		assertEquals(2, atBoundary.port.normalStarts, "the rejected tap starts a fresh ordinary press");
+		assertEquals(2, atBoundary.port.baselineStarts, "the rejected tap starts a fresh ordinary press");
 		assertEquals(2, atBoundary.port.normalCreates);
 
 		Harness inside = secondTapWithAngle(boundary + 0.01, 12.5);
@@ -197,7 +201,7 @@ class RapidDangerControllerTest {
 
 		Harness outside = secondTapWithAngle(boundary - 0.01, 12.5);
 		assertEquals(0, outside.port.dangerCreates, "a strictly larger turn is rejected");
-		assertEquals(2, outside.port.normalStarts);
+		assertEquals(2, outside.port.baselineStarts);
 		assertEquals(2, outside.port.normalCreates);
 	}
 
@@ -220,7 +224,7 @@ class RapidDangerControllerTest {
 
 		assertEquals(1, h.port.dangerCreates,
 			"the third press is inside the adjacent window but 5 degrees from the first baseline");
-		assertEquals(2, h.port.normalStarts, "the rejected third press starts a fresh ordinary press");
+		assertEquals(2, h.port.baselineStarts, "the rejected third press starts a fresh ordinary press");
 		assertEquals(2, h.port.normalCreates);
 	}
 
@@ -234,7 +238,7 @@ class RapidDangerControllerTest {
 		h.controller.onRelease();
 
 		assertEquals(0, h.port.dangerCreates);
-		assertEquals(2, h.port.normalStarts);
+		assertEquals(2, h.port.baselineStarts);
 		assertEquals(2, h.port.normalCreates);
 	}
 
@@ -264,7 +268,7 @@ class RapidDangerControllerTest {
 		h.controller.onRelease();
 
 		assertEquals(0, h.port.dangerCreates);
-		assertEquals(2, h.port.normalStarts, "the rejected tap starts a fresh ordinary press");
+		assertEquals(2, h.port.baselineStarts, "the rejected tap starts a fresh ordinary press");
 		assertEquals(2, h.port.normalCreates);
 		assertEquals(RAY_A, h.port.capturedCandidateRay,
 			"the live camera ray never moved; active look input alone rejected the tap");
@@ -324,12 +328,12 @@ class RapidDangerControllerTest {
 		private LongPressCompatibilityController.DispatchOutcome firstSendOutcome =
 			LongPressCompatibilityController.DispatchOutcome.CREATE_SENT;
 		private boolean compatibility;
-		private int normalStarts;
+		private int baselineStarts;
 		private int normalCreates;
 		private int dangerCreates;
 		private int aborts;
-		private long candidatePressTimestamp;
-		private CapturedRay candidatePressRay;
+		private long baselinePressTimestamp;
+		private @Nullable CapturedRay baselinePressRay;
 		private CapturedRay nextCaptureRay = RAY_A;
 		private CapturedRay capturedCandidateRay;
 		private double yaw;
@@ -348,22 +352,17 @@ class RapidDangerControllerTest {
 			this.clock = clock;
 		}
 
-		@Override public Optional<PingInteractionAction> press(long rawPressTimestamp) {
-			normalStarts++;
+		@Override public Optional<PingInteractionAction> press(long rawPressTimestamp, Optional<FrozenPingPress> press) {
+			baselineStarts++;
+			baselinePressTimestamp = rawPressTimestamp;
+			baselinePressRay = press.orElseThrow().ray();
 			phase = PingInteractionPhase.PRESSED;
 			return Optional.empty();
 		}
 
-		@Override public Optional<PingInteractionAction> press(long rawPressTimestamp, CapturedRay pressRay) {
-			candidatePressTimestamp = rawPressTimestamp;
-			candidatePressRay = pressRay;
-			phase = PingInteractionPhase.PRESSED;
-			return Optional.empty();
-		}
-
-		@Override public Optional<CapturedRay> capturePressRay() {
+		@Override public Optional<FrozenPingPress> captureWheelPress() {
 			capturedCandidateRay = nextCaptureRay;
-			return Optional.of(nextCaptureRay);
+			return Optional.of(new FrozenPingPress(nextCaptureRay, FrozenCancellation.NONE));
 		}
 
 		@Override public LongPressCompatibilityController.BaselineOutcome releaseOutcome() {
@@ -412,8 +411,7 @@ class RapidDangerControllerTest {
 					return new LongPressCompatibilityController.BaselineOutcome(
 						Optional.of(firstCreate()), firstSendOutcome, false);
 				}
-				if (candidatePressRay != null && keyDown
-					&& frameTimeMillis - candidatePressTimestamp >= 250L) {
+				if (keyDown && frameTimeMillis - baselinePressTimestamp >= 250L) {
 					phase = PingInteractionPhase.WHEEL_OPEN;
 					return new LongPressCompatibilityController.BaselineOutcome(Optional.empty(),
 						LongPressCompatibilityController.DispatchOutcome.NOT_SENT, true);

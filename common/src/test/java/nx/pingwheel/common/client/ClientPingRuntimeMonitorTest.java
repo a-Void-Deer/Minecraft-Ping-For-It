@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.gui.GuiGraphics;
@@ -56,7 +57,9 @@ class ClientPingRuntimeMonitorTest {
 		public void capture(InteractionToken token, CapturedRay ray, ClientPingRuntime.CaptureCompletion completion) {
 			completion.complete(TargetSnapshotFactory.block("minecraft:overworld", 1, 2, 3, "minecraft:chest", true, BlockFace.NORTH), Optional.empty());
 		}
-		public CancellationContext cancellation(CapturedRay ray) { throw new AssertionError("no cancellation expected"); }
+		public CancellationContext cancellation(CapturedRay ray) {
+			return new CancellationContext(new UUID(0, 1), "minecraft:overworld", ray.origin(), ray.direction(), List.of());
+		}
 		public void syncMouse(PingInteractionPhase phase) {}
 		public void disposeMouse(boolean screenTransition) {}
 		public Optional<NativeSelectorInput.Frame> inputFrame() { return Optional.of(new NativeSelectorInput.Frame(1, 800, 600, 400, 300, true, true)); }

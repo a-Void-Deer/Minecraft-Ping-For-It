@@ -22,6 +22,7 @@ import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.interaction.CapturedRay;
 import nx.pingwheel.common.interaction.TargetSnapshotFactory;
+import nx.pingwheel.common.interaction.cancel.CancellationContext;
 import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.interaction.state.TargetValidation;
 import nx.pingwheel.common.interaction.state.TargetValidator;
@@ -146,6 +147,10 @@ class PresentationPreviewDiagnosticsTest {
 			(Object proxy, Method method, @Nullable Object @Nullable [] arguments) -> switch (method.getName()) {
 			case "lifecycle" -> lifecycle;
 			case "capturePressRay" -> Optional.of(CapturedRay.defaultRay());
+			case "cancellation" -> {
+				CapturedRay ray = (CapturedRay) java.util.Objects.requireNonNull(java.util.Objects.requireNonNull(arguments)[0]);
+				yield new CancellationContext(PLAYER, TARGET.dimensionId(), ray.origin(), ray.direction(), List.of());
+			}
 			case "capture" -> {
 				Object completion = java.util.Objects.requireNonNull(java.util.Objects.requireNonNull(arguments)[2]);
 				Method complete = Class.forName("nx.pingwheel.common.client.ClientPingRuntime$CaptureCompletion")
