@@ -108,6 +108,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	private @Nullable Button primaryButton;
 	private @Nullable Button resetAllButton;
 	private @Nullable EditBox channelTextField;
+	private @Nullable ChannelPlaceholder.Kind lastChannelPlaceholderKind;
 	private @Nullable EditBox serverMsToRegenerateField;
 	private @Nullable EditBox serverRateLimitField;
 	private @Nullable EditBox serverSyncDurationField;
@@ -266,6 +267,9 @@ public class SettingsScreen extends OptionsSubScreen {
 	public void tick() {
 		this.refreshClientConfig();
 		this.updatePermissionState(true);
+		// Team membership can change while the channel page is open; resolve the
+		// hint kind every tick but rebuild its text only when the kind changes.
+		this.refreshChannelPlaceholder();
 		this.refreshMonitorSection();
 		// An offer may arrive while a presentation page is open; rebuild only
 		// when the accepted-catalog metadata actually changed.
@@ -602,6 +606,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		this.settingsList.resetEntries();
 		this.keyedWidgets.clear();
 		this.channelTextField = null;
+		this.lastChannelPlaceholderKind = null;
 		this.serverMsToRegenerateField = null;
 		this.serverRateLimitField = null;
 		this.serverSyncDurationField = null;
@@ -1811,6 +1816,10 @@ public class SettingsScreen extends OptionsSubScreen {
 	}
 
 	private void addChannelRow() {
+		// Only this leaf consumes the authoritative default mode for its empty
+		// hint, so the shared server settings session starts here rather than
+		// for every player who opens the root screen.
+		this.requestServerSettingsIfNeeded();
 		final var label = new StringWidget(
 			0,
 			0,
@@ -1831,7 +1840,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			LanguageUtils.settings("channel").get());
 		this.channelTextField.setMaxLength(MAX_CHANNEL_LENGTH);
 		this.channelTextField.setValue(Objects.requireNonNullElse(config.getChannel(), ""));
-		this.channelTextField.setHint(this.getChannelPlaceholder());
+		this.refreshChannelPlaceholder();
 		this.channelTextField.setTooltip(Tooltip.create(LanguageUtils.settings("channel.tooltip").get()));
 		this.channelTextField.setResponder(config::setChannel);
 		this.addFullWidth(Setting.CHANNEL.id(), this.channelTextField);
@@ -2324,8 +2333,12 @@ public class SettingsScreen extends OptionsSubScreen {
 		final long requestId = this.serverSettings.beginSessionIfNeeded();
 		if (requestId != NO_REQUEST) {
 			this.serverValidationMessage = null;
-			IPlatformNetworkService.INSTANCE.sendToServer(new ServerConfigRequestC2SPacket(requestId));
+			this.sendServerConfigRequest(new ServerConfigRequestC2SPacket(requestId));
 		}
+	}
+
+	void sendServerConfigRequest(ServerConfigRequestC2SPacket packet) {
+		IPlatformNetworkService.INSTANCE.sendToServer(packet);
 	}
 
 	private void updatePermissionState(boolean rebuild) {
@@ -2338,6 +2351,7 @@ public class SettingsScreen extends OptionsSubScreen {
 		final boolean wasDenied = this.serverSettings.accessDenied();
 		this.serverSettings.setClientPermission(permission);
 		this.serverValidationMessage = null;
+		this.refreshChannelPlaceholder();
 		// A retained safe snapshot keeps the current server leaf open as a
 		// read-only page with disabled values; only a lost view forces the
 		// server scope overview.
@@ -2363,6 +2377,7 @@ public class SettingsScreen extends OptionsSubScreen {
 			return;
 		}
 		this.serverValidationMessage = null;
+		this.refreshChannelPlaceholder();
 		// A read-only or denied snapshot keeps the leaf page open and renders
 		// its retained values without editable widgets.
 		if (navigation.scope() == Scope.SERVER && navigation.current() != Page.SERVER_PRESENTATION) {
@@ -2373,6 +2388,7 @@ public class SettingsScreen extends OptionsSubScreen {
 	public void onServerDisconnected() {
 		this.serverSettings.resetForDisconnect();
 		this.serverValidationMessage = null;
+		this.refreshChannelPlaceholder();
 		this.presentationPendingQuickAction = null;
 		this.presentationPendingOperation = null;
 		this.presentationQuickFeedback.clear();
@@ -2604,16 +2620,38 @@ public class SettingsScreen extends OptionsSubScreen {
 			this.layout.getFooterHeight());
 	}
 
-	private MutableComponent getChannelPlaceholder() {
-		if (Game.player == null) {
-			return Component.empty();
-		}
-		final var teamContext = TeamContextHandler.getSelfContext();
-		final MutableComponent placeholder = teamContext == TeamContext.NONE
-			? LanguageUtils.of("value", "global").get()
-			: LanguageUtils.settings("channel").path("placeholder")
-				.get(LanguageUtils.of("value", teamContext.toString()).get());
+	private ChannelPlaceholder.Kind resolveChannelPlaceholderKind() {
+		final boolean hasTeam = Game != null && TeamContextHandler.getSelfContext() != TeamContext.NONE;
+		return ChannelPlaceholder.resolve(
+			this.serverSettings.authoritativeDefaultChannelMode(),
+			this.hasLiveServerConnection(),
+			hasTeam);
+	}
+
+	private static MutableComponent channelPlaceholderText(ChannelPlaceholder.Kind kind) {
+		final MutableComponent placeholder = switch (kind) {
+			case GLOBAL -> LanguageUtils.of("value", "global").get();
+			case TEAM_SYNCED -> LanguageUtils.settings("channel").path("placeholder")
+				.get(LanguageUtils.of("value", TeamContext.VANILLA_TEAM.toString()).get());
+			case NONE -> Component.empty();
+		};
 		return placeholder.withStyle(ChatFormatting.ITALIC).withStyle(ChatFormatting.DARK_GRAY);
+	}
+
+	/**
+	 * Refreshes the existing hint only when the resolved audience kind changes.
+	 * The field identity, draft text and caret are never replaced here.
+	 */
+	private void refreshChannelPlaceholder() {
+		if (this.channelTextField == null) {
+			return;
+		}
+		final ChannelPlaceholder.Kind kind = this.resolveChannelPlaceholderKind();
+		if (kind == this.lastChannelPlaceholderKind) {
+			return;
+		}
+		this.lastChannelPlaceholderKind = kind;
+		this.channelTextField.setHint(channelPlaceholderText(kind));
 	}
 
 	private OptionInstance<Integer> getPingVolumeOption() {

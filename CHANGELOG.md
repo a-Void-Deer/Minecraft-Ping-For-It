@@ -4,6 +4,12 @@
 
 Changes since the `1.21.1` baseline (`a51a850b`).
 
+### Ping channels
+
+- On a `GLOBAL` server, the empty Ping Channel field shows **Global** even
+  when you are on a team. It shows **Synced to Vanilla Team** only when the
+  server reports `AUTO` and you are on a vanilla team.
+
 ### Ping range and target selection
 
 - When your eye is inside an entity's selection box, ordinary Ping and Precise

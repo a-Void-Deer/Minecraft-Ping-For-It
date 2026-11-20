@@ -110,6 +110,15 @@ public final class ServerSettingsModel {
 		return defaultChannelMode;
 	}
 
+	/**
+	 * The received authoritative default channel mode, never the editable draft.
+	 * A placeholder that describes server audience must not follow an uncommitted
+	 * local selection.
+	 */
+	public @Nullable ChannelMode authoritativeDefaultChannelMode() {
+		return authoritative == null ? null : authoritative.defaultChannelMode();
+	}
+
 	public boolean playerTrackingEnabled() {
 		return playerTrackingEnabled;
 	}
