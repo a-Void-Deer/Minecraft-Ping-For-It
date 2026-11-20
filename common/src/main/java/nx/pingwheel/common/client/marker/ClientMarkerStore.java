@@ -12,6 +12,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
+import nx.pingwheel.common.client.duration.ClientMarkerDisplayDuration;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
 import nx.pingwheel.common.marker.MarkerSnapshot;
@@ -37,13 +38,10 @@ import org.jetbrains.annotations.Unmodifiable;
  *
  * <h2>Upsert semantics</h2>
  *
- * <p>{@link #onCreated} is an idempotent upsert keyed by {@link MarkerId}:
- * re-applying an identical snapshot at the same client tick is a no-op, and a
- * retransmission of an identical snapshot at a later client tick keeps the
- * payload but refreshes the local fallback expiry while the id has not been
- * authoritatively removed; re-applying the same id with a different snapshot
- * deterministically replaces the stored marker with the latest payload (the
- * server is authoritative, so the newest received snapshot for an id wins).
+ * <p>{@link #onCreated} is an upsert keyed by {@link MarkerId}: a retransmission
+ * refreshes the synchronization fallback if the id has not been authoritatively
+ * removed. The latest received payload wins but the first visual deadline is
+ * retained.
  * Authoritative removals are tombstoned for this connection, so a delayed
  * create cannot resurrect a removed marker. The replacement does not move the
  * marker within the internal insertion order.
@@ -92,6 +90,12 @@ public final class ClientMarkerStore {
 		long durationTicks(MarkerSnapshot snapshot);
 	}
 
+	/** Selects the display time domain and any custom duration for a first insertion. */
+	@FunctionalInterface
+	public interface DisplayModePolicy {
+		ClientMarkerDisplayDuration duration(MarkerSnapshot snapshot);
+	}
+
 	/**
 	 * Orders markers by ascending arrival tick, then ascending marker id, so
 	 * the largest element is the same-target winner the server rule selects.
@@ -103,7 +107,8 @@ public final class ClientMarkerStore {
 	private record OutlineWinner(MarkerId lastWinner, boolean assigned) {}
 
 	private final long graceTicks;
-	private final DisplayDurationPolicy displayDurationPolicy;
+	private final DisplayModePolicy displayModePolicy;
+	private final ObservedServerClock serverClock;
 	private final Map<MarkerId, ClientMarker> markers = new LinkedHashMap<>();
 	private final Map<TargetKey, MarkerId> displayWinnerByKey = new LinkedHashMap<>();
 	private final Map<TargetKey, OutlineWinner> outlineWinnerByKey = new LinkedHashMap<>();
@@ -111,6 +116,8 @@ public final class ClientMarkerStore {
 	private long currentLocalTick;
 
 	/**
+	 * Creates a local-tick store whose display length equals the snapshot's tick span.
+	 *
 	 * @param graceTicks extra client ticks a marker may outlive its server
 	 *                   expiry before {@link #expireFallback} drops it; must be
 	 *                   non-negative
@@ -120,17 +127,26 @@ public final class ClientMarkerStore {
 	}
 
 	/**
-	 * Creates a store with a caller-supplied visual duration policy. The runtime
-	 * supplies the local setting through this seam while the store keeps each
-	 * marker's selected deadline independent from later setting changes.
+	 * Creates a store with a caller-supplied local visual duration in client ticks.
 	 */
 	public ClientMarkerStore(long graceTicks, DisplayDurationPolicy displayDurationPolicy) {
+		this(graceTicks, new ObservedServerClock(), localDisplayMode(displayDurationPolicy));
+	}
+
+	/** Creates a store that can follow game-time samples from the owned connection clock. */
+	public ClientMarkerStore(long graceTicks, ObservedServerClock serverClock, DisplayModePolicy displayModePolicy) {
 		if (graceTicks < 0L) {
 			throw new IllegalArgumentException("graceTicks must be non-negative: " + graceTicks);
 		}
 
-		this.displayDurationPolicy = Objects.requireNonNull(displayDurationPolicy, "displayDurationPolicy");
+		this.displayModePolicy = Objects.requireNonNull(displayModePolicy, "displayModePolicy");
+		this.serverClock = Objects.requireNonNull(serverClock, "serverClock");
 		this.graceTicks = graceTicks;
+	}
+
+	private static DisplayModePolicy localDisplayMode(DisplayDurationPolicy displayDurationPolicy) {
+		Objects.requireNonNull(displayDurationPolicy, "displayDurationPolicy");
+		return snapshot -> ClientMarkerDisplayDuration.customTicks(displayDurationPolicy.durationTicks(snapshot));
 	}
 
 	/** Convenience constructor for a fixed visual duration. */
@@ -147,10 +163,8 @@ public final class ClientMarkerStore {
 	 * Applies an authoritative created-marker snapshot as of client tick
 	 * {@code localTick}.
 	 *
-	 * <p>Idempotent upsert: an identical snapshot at the same local tick
-	 * changes nothing; a retransmission of the same snapshot at a later local
-	 * tick refreshes the local fallback expiry; a different snapshot for the
-	 * same id replaces the stored marker with the latest payload. A marker id
+	 * <p>Upserts the newest payload and refreshes the synchronization fallback;
+	 * a same-id refresh does not change the visual deadline. A marker id
 	 * already observed in an authoritative removal is ignored, preventing a
 	 * delayed create from resurrecting it. Winner slots are not touched here —
 	 * a winner already announced for this id only becomes visible through the
@@ -172,27 +186,9 @@ public final class ClientMarkerStore {
 			return List.of();
 		}
 
-		long appliedTick = currentLocalTick;
-		long displayDurationTicks = displayDurationPolicy.durationTicks(snapshot);
-
-		if (displayDurationTicks < 0L) {
-			throw new IllegalArgumentException(
-				"displayDurationPolicy returned a negative duration: " + displayDurationTicks);
-		}
-
-		ClientMarker incoming = ClientMarker.from(
-			snapshot, appliedTick, graceTicks, displayDurationTicks);
-		ClientMarker existing = markers.get(snapshot.id());
-
-		if (existing != null) {
-			// A marker id identifies one server marker. Replays and payload
-			// refreshes must never extend its visual deadline or resurrect a
-			// visual that has already elapsed.
-			incoming = copyWith(
-				incoming,
-				existing.displayExpiresAtLocalTick(),
-				ClientMarkerState.SYNCHRONIZED);
-		}
+		@Nullable ClientMarker existing = markers.get(snapshot.id());
+		ClientMarker incoming = existing == null ? firstReceipt(snapshot)
+			: existing.refreshed(snapshot, currentLocalTick, graceTicks, serverClock);
 
 		List<ClientMarker> removed = new ArrayList<>();
 		// A fresh synchronized marker for a stable target supersedes every
@@ -203,6 +199,29 @@ public final class ClientMarkerStore {
 		return removed.stream()
 			.sorted(Comparator.comparing(ClientMarker::id))
 			.toList();
+	}
+
+	private ClientMarker firstReceipt(MarkerSnapshot snapshot) {
+		ClientMarkerDisplayDuration duration = displayModePolicy.duration(snapshot);
+		return duration.followsServer()
+			? ClientMarker.followingServer(snapshot, currentLocalTick, serverClock.receiptOrigin())
+			: ClientMarker.from(snapshot, currentLocalTick, graceTicks, duration.localTicks());
+	}
+
+	/** Arms local grace at the time of the packet that establishes sufficient server progress. */
+	public void onObservedServerTime(ObservedServerClock source, long localTick) {
+		if (source != serverClock) return;
+		observeLocalTick(localTick);
+		for (var entry : markers.entrySet()) {
+			ClientMarker marker = entry.getValue();
+			ClientMarker observed = marker.observeFallbackGrace(currentLocalTick, graceTicks);
+			if (observed != marker) entry.setValue(observed);
+		}
+	}
+
+	/** Drops only the vanilla time baseline on a client world detach, not the marker records. */
+	public void breakServerTimeBaseline() {
+		serverClock.breakWorldBaseline();
 	}
 
 	/**
@@ -223,9 +242,9 @@ public final class ClientMarkerStore {
 	/**
 	 * Applies an authoritative removal at the current client tick.
 	 *
-	 * <p>{@link MarkerRemovalReason#EXPIRED} ends synchronization but retains a
-	 * stale visual until its independent display deadline. Every other reason
-	 * is an immediate hard removal. The returned records are the client records
+	 * <p>{@link MarkerRemovalReason#EXPIRED} can retain an active custom-duration
+	 * visual as stale. Follow-server visuals end immediately, as do all visuals
+	 * removed for another reason. The returned records are the client records
 	 * actually deleted; callers use that distinction to keep target-name cleanup
 	 * in lockstep with final record removal.
 	 */
@@ -258,7 +277,7 @@ public final class ClientMarkerStore {
 			return List.of();
 		}
 
-		if (!marker.isVisuallyActiveAt(currentLocalTick)) {
+		if (marker.followsServer() || !marker.isVisuallyActiveAt(currentLocalTick)) {
 			rememberWinner(marker, removedWinnerKeys);
 			@Unmodifiable List<ClientMarker> removed = removeMarker(id).stream().toList();
 			recomputeWinners(removedWinnerKeys);
@@ -354,10 +373,9 @@ public final class ClientMarkerStore {
 	}
 
 	/**
-	 * Transitions synchronized markers whose
-	 * {@link ClientMarker#fallbackExpiresAtLocalTick()} is less than or equal to
-	 * {@code localTick} to stale, or removes records whose independent display
-	 * deadline has elapsed, and returns the records actually removed.
+	 * Processes synchronized markers whose fallback is due and stale markers
+	 * whose independent display deadline has elapsed. Returns the records
+	 * actually removed.
 	 *
 	 * <p>For every dropped marker, every winner slot whose stored id equals the
 	 * dropped marker's id is cleared, even when the slot's key differs from the
@@ -388,8 +406,7 @@ public final class ClientMarkerStore {
 				continue;
 			}
 
-			if (current.isSynchronized()
-				&& current.fallbackExpiresAtLocalTick() <= currentLocalTick) {
+			if (current.isSynchronized() && current.isFallbackDueAt(currentLocalTick)) {
 				boolean hasSynchronizedSibling = hasSynchronizedSibling(current.targetKey(), current.id());
 				List<ClientMarker> staleSiblings = removeStaleForKey(
 					current.targetKey(), current.id(), removedWinnerKeys);
@@ -430,6 +447,7 @@ public final class ClientMarkerStore {
 		displayWinnerByKey.clear();
 		outlineWinnerByKey.clear();
 		authoritativeRemovedIds.clear();
+		serverClock.reset();
 	}
 
 	/** Retires the preceding view's assignments without losing this connection's known last winners. */
@@ -705,26 +723,5 @@ public final class ClientMarkerStore {
 				displayWinnerByKey.put(key, fallback);
 			}
 		}
-	}
-
-	private static ClientMarker copyWith(
-		ClientMarker marker,
-		long displayExpiresAtLocalTick,
-		ClientMarkerState state
-	) {
-		return new ClientMarker(
-			marker.id(),
-			marker.owner(),
-			marker.target(),
-			marker.targetKey(),
-			marker.targetTypeId(),
-			marker.pingTypeId(),
-			marker.anchor(),
-			marker.arrivalTick(),
-			marker.expiresAtTick(),
-			marker.receivedAtLocalTick(),
-			marker.fallbackExpiresAtLocalTick(),
-			displayExpiresAtLocalTick,
-			state);
 	}
 }

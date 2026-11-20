@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
+import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.interaction.ActiveInteraction;
@@ -179,6 +180,23 @@ class ClientPingRuntimeTest {
 			MarkerRemovalReason.CANCELLED));
 		runtime.onPresentationPacket(created(3, moved));
 		assertTrue(runtime.store().marker(id).isEmpty());
+	}
+
+	@Test
+	void runtimeFactoryUsesFollowServerSemanticsForTheConfigSentinel() {
+		var config = ClientConfig.HANDLER.getConfig();
+		int original = config.getMarkerDisplayDuration();
+		try {
+			config.setMarkerDisplayDuration(0);
+			var runtime = ClientPingRuntime.create((key, color) -> {}, packet -> {});
+			var id = new MarkerId(12);
+			runtime.store().onCreated(snapshot(id, external("locator")), 0L);
+			assertTrue(runtime.store().marker(id).orElseThrow().followsServer());
+			runtime.applyRemoved(id, MarkerRemovalReason.EXPIRED);
+			assertTrue(runtime.store().marker(id).isEmpty());
+		} finally {
+			config.setMarkerDisplayDuration(original);
+		}
 	}
 
 	@Test

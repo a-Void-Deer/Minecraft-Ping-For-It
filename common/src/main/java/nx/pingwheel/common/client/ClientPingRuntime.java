@@ -30,6 +30,7 @@ import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.client.marker.EntityMarkerPoint;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
+import nx.pingwheel.common.client.marker.ObservedServerClock;
 import nx.pingwheel.common.presentation.client.ClientPresentation;
 import nx.pingwheel.common.presentation.PresentationValue;
 import nx.pingwheel.common.presentation.PresentationPropertyIntent;
@@ -447,15 +448,20 @@ public final class ClientPingRuntime {
 			packetSender,
 			rateLimitPolicy,
 			timeSource,
-			snapshot -> ClientMarkerDisplayDuration.durationTicks(
-				ClientConfig.HANDLER.getConfig().getEffectiveMarkerDisplayDuration(),
-				snapshot));
+			new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS, connectionServerClock(),
+				ignored -> ClientMarkerDisplayDuration.fromConfig(
+					ClientConfig.HANDLER.getConfig().getEffectiveMarkerDisplayDuration())),
+			null);
+	}
+
+	private static ObservedServerClock connectionServerClock() {
+		@Nullable Minecraft game = Game;
+		return game != null && game.getConnection() instanceof ObservedServerClock.Source source
+			? source.pingforit$observedServerClock() : new ObservedServerClock();
 	}
 
 	/**
-	 * Creates a runtime with a caller-supplied client display-duration policy.
-	 * The normal runtime path resolves the local setting per received marker;
-	 * this overload remains a narrow seam for tests and alternate clients.
+	 * Creates a runtime with a caller-supplied display duration in local ticks.
 	 */
 	public static ClientPingRuntime create(
 		ClientPingActionDispatcher.LocalErrorSink errorSink,
@@ -475,11 +481,22 @@ public final class ClientPingRuntime {
 		ClientMarkerStore.DisplayDurationPolicy displayDurationPolicy,
 		@Nullable PresentationReceiptFeedback feedback
 	) {
+		return create(errorSink, packetSender, rateLimitPolicy, timeSource,
+			new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS, displayDurationPolicy), feedback);
+	}
+
+	private static ClientPingRuntime create(
+		ClientPingActionDispatcher.LocalErrorSink errorSink,
+		ClientPingActionDispatcher.PacketSender packetSender,
+		ClientRateLimitPolicy rateLimitPolicy,
+		InteractionTimeSource timeSource,
+		ClientMarkerStore markerStore,
+		@Nullable PresentationReceiptFeedback feedback
+	) {
 		Objects.requireNonNull(errorSink, "errorSink");
 		Objects.requireNonNull(packetSender, "packetSender");
 		Objects.requireNonNull(timeSource, "timeSource");
 		Objects.requireNonNull(rateLimitPolicy, "rateLimitPolicy");
-		Objects.requireNonNull(displayDurationPolicy, "displayDurationPolicy");
 
 		ActiveInteraction activeInteraction = new ActiveInteraction();
 		PingInteractionLogger logger = PingInteractionLogger.global();
@@ -501,7 +518,7 @@ public final class ClientPingRuntime {
 		ClientPresentation presentation = new ClientPresentation(packetSender::sendToServer);
 
 		ClientPingRuntime runtime = new ClientPingRuntime(
-			new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS, displayDurationPolicy),
+			markerStore,
 			activeInteraction,
 			coordinator,
 			machine,
@@ -541,7 +558,16 @@ public final class ClientPingRuntime {
 		ClientPresentation presentation, @Nullable ClientInventory inventory, @Nullable ClientPresentationPreview preview,
 		PingInteractionLogger logger) {
 		return createForInteraction(errors, sender, policy, clock, validator, access, presentation, inventory, preview,
-			ClientMarker::serverDurationTicks, new PresentationReceiptFeedback() {
+			new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS), logger);
+	}
+
+	static ClientPingRuntime createForInteraction(ClientPingActionDispatcher.LocalErrorSink errors,
+		ClientPingActionDispatcher.PacketSender sender, ClientRateLimitPolicy policy, InteractionTimeSource clock,
+		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
+		ClientPresentation presentation, @Nullable ClientInventory inventory, @Nullable ClientPresentationPreview preview,
+		ClientMarkerStore markerStore, PingInteractionLogger logger) {
+		return createForInteraction(errors, sender, policy, clock, validator, access, presentation, inventory, preview,
+			markerStore, new PresentationReceiptFeedback() {
 				public void play(MarkerSnapshot snapshot) {}
 				public void chat(String owner, MarkerSnapshot snapshot, Component name) {}
 			}, logger);
@@ -562,6 +588,16 @@ public final class ClientPingRuntime {
 		ClientPresentation presentation, @Nullable ClientInventory inventory, @Nullable ClientPresentationPreview preview,
 		ClientMarkerStore.DisplayDurationPolicy displayDuration, PresentationReceiptFeedback feedback,
 		PingInteractionLogger logger) {
+		return createForInteraction(errors, sender, policy, clock, validator, access, presentation, inventory, preview,
+			new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS, displayDuration), feedback, logger);
+	}
+
+	private static ClientPingRuntime createForInteraction(ClientPingActionDispatcher.LocalErrorSink errors,
+		ClientPingActionDispatcher.PacketSender sender, ClientRateLimitPolicy policy, InteractionTimeSource clock,
+		nx.pingwheel.common.interaction.state.TargetValidator validator, InteractionAccess access,
+		ClientPresentation presentation, @Nullable ClientInventory inventory, @Nullable ClientPresentationPreview preview,
+		ClientMarkerStore markerStore, PresentationReceiptFeedback feedback,
+		PingInteractionLogger logger) {
 		var active = new ActiveInteraction();
 		// Headless test seam only. The production create(...) path below
 		// explicitly wires TargetResolutionLogger.global(Diagnostics.client()).
@@ -572,13 +608,18 @@ public final class ClientPingRuntime {
 		var tracker = new CreateRequestTracker();
 		var machine = new PingInteractionStateMachine(coordinator, active, clock, validator, new CancelCandidatePicker(),
 			interactionLogger, () -> ClientConfig.HANDLER.getConfig().getWheelHoldMillis());
-		var runtime = new ClientPingRuntime(new ClientMarkerStore(FALLBACK_EXPIRY_GRACE_TICKS, displayDuration), active, coordinator, machine,
+		var runtime = new ClientPingRuntime(markerStore, active, coordinator, machine,
 			new ClientPingActionDispatcher(sender, errors, interactionLogger, tracker, limiter, presentation), errors, interactionLogger,
 			new WheelMouseCapture(interactionLogger), tracker, limiter, clock, presentation, feedback);
 		runtime.interactionAccess = Objects.requireNonNull(access);
 		runtime.contentPreview = preview;
 		runtime.inventory(inventory);
 		return runtime;
+	}
+
+	/** Pairs the active listener's latest progress sample with this runtime's local tick for grace. */
+	public void onObservedServerTime(ObservedServerClock source) {
+		markerStore.onObservedServerTime(source, localTick);
 	}
 
 	/** Marker expiry plus periodic Precise capture; ordinary interaction remains event/frame driven. */
@@ -753,6 +794,7 @@ public final class ClientPingRuntime {
 
 	private boolean observeInteractionLifecycle() {
 		var lifecycle = interactionAccess.lifecycle();
+		if (observedWorldIdentity != null && lifecycle.level() == null) markerStore.breakServerTimeBaseline();
 		boolean screenChanged = observedScreenIdentity != lifecycle.screen();
 		boolean discontinuity = observedWorldIdentity != null && (observedWorldIdentity != lifecycle.level()
 			|| !Objects.equals(observedDimension, lifecycle.dimension()) || screenChanged);

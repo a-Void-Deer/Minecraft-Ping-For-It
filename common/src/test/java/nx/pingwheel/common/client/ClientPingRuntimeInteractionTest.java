@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
@@ -17,6 +18,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import nx.pingwheel.common.client.duration.ClientMarkerDisplayDuration;
+import nx.pingwheel.common.client.marker.ClientMarkerStore;
+import nx.pingwheel.common.client.marker.ObservedServerClock;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.client.spatial.NativeSelectorInput;
 import nx.pingwheel.common.client.spatial.GestureSkipHold;
@@ -222,6 +226,10 @@ class ClientPingRuntimeInteractionTest {
 		double propertyValue = 7;
 		Fixture() { this(new ClientRateLimitPolicy(20, 1000), true); }
 		Fixture(ClientRateLimitPolicy policy, boolean ready) {
+			// The interaction/Unping cases intentionally allow post-server-expiry visuals.
+			this(policy, ready, new ClientMarkerStore(ClientPingRuntime.FALLBACK_EXPIRY_GRACE_TICKS, 200L));
+		}
+		Fixture(ClientRateLimitPolicy policy, boolean ready, ClientMarkerStore markerStore) {
 			PreviewFieldAccess reader = new PreviewFieldAccess() {
 				public String adapterId() { return PresentationBasic.ID; }
 				public Map<String, Outcome> observe(nx.pingwheel.common.domain.Target target, Set<String> fields, ReadContext context) {
@@ -240,7 +248,7 @@ class ClientPingRuntimeInteractionTest {
 			}, List.of(reader), (target, type) -> Optional.empty(), this::send);
 			runtime = ClientPingRuntime.createForInteraction((key, color) -> errors.add(key), this::send, policy, clock,
 				target -> { validations.add(target); validationHook.run(); return gone ? TargetValidation.gone(TargetGoneReason.BLOCK_REPLACED) : TargetValidation.valid(); },
-				access, presentation, inventory, preview, pingLogger);
+				access, presentation, inventory, preview, markerStore, pingLogger);
 			if (ready) negotiate(Set.of(PresentationBasic.NAME));
 		}
 		void send(IPacket packet) {
@@ -269,6 +277,10 @@ class ClientPingRuntimeInteractionTest {
 		void release(long time) { now = time; clock.value = time; runtime.onRelease(); }
 		void frame(long time, boolean held) { now = time; clock.value = time; runtime.onRenderFrame(held); }
 		void tick(long time) { now = time; clock.value = time; runtime.onTick(); }
+		void serverTime(ObservedServerClock serverClock, long gameTime) {
+			serverClock.observeSample(access.world, gameTime);
+			runtime.onObservedServerTime(serverClock);
+		}
 		/** Recording the paint handoff only, not exercising GuiGraphics/GPU. */
 		void paint() {
 			var snapshot = snapshot(); runtime.acknowledgeSelectorPaint(snapshot, snapshot.radial().menus().getLast().choices().stream()
@@ -741,6 +753,95 @@ class ClientPingRuntimeInteractionTest {
 		assertTrue(f.runtime.store().outlineWinnersInDimension(DIMENSION).isEmpty(), "old session evidence cannot attach to a reused ID");
 	}
 
+	@ParameterizedTest
+	@ValueSource(booleans = {false, true})
+	void followServerExpiryDeletesAndCleansRegardlessOfBoundarySampleOrWinnerOrder(boolean sampleFirst) {
+		var clock = new ObservedServerClock();
+		var f = new Fixture(ClientRateLimitPolicy.DEFAULT, true,
+			new ClientMarkerStore(5L, clock, ignored -> ClientMarkerDisplayDuration.fromConfig(0)));
+		var id = new MarkerId(42);
+		var key = TargetKey.from(CHEST.target());
+		f.serverTime(clock, 100L);
+		f.runtime.onPresentationPacket(markerCreated(100, 1, 1, id, OWNER, CHEST, "entity_block", 20L));
+		f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 1, key, Optional.of(id)));
+		f.serverTime(clock, 150L);
+		assertEquals(id, f.runtime.store().outlineWinnersInDimension(DIMENSION).get(key).id(),
+			"the interval containing receipt is not charged even when longer than the duration");
+		assertTrue(f.runtime.nameStore().find(id).isPresent());
+		assertTrue(f.presentation.markerGrant(id).isPresent());
+		var emptyWinner = PresentationS2CPacket.winner(100, 1, key, Optional.empty());
+		if (sampleFirst) {
+			f.runtime.onPresentationPacket(emptyWinner);
+			f.serverTime(clock, 170L);
+			assertTrue(f.runtime.store().marker(id).orElseThrow().isSynchronized());
+		}
+		f.runtime.onPresentationPacket(expired(id));
+		assertTrue(f.runtime.store().marker(id).isEmpty());
+		assertTrue(f.runtime.store().isAuthoritativelyRemoved(id));
+		assertTrue(f.runtime.store().hudRenderMarkers().isEmpty());
+		assertTrue(f.runtime.store().outlineWinnersInDimension(DIMENSION).isEmpty());
+		assertTrue(f.runtime.nameStore().find(id).isEmpty());
+		assertTrue(f.presentation.markerGrant(id).isEmpty());
+		if (!sampleFirst) {
+			f.serverTime(clock, 170L);
+			f.runtime.onPresentationPacket(emptyWinner);
+		}
+		f.runtime.onPresentationPacket(markerCreated(100, 1, 2, id, OWNER, CHEST, "entity_block", 20L));
+		assertTrue(f.runtime.store().marker(id).isEmpty(), "a delayed same-ID upsert cannot undo the removal");
+	}
+
+	@Test
+	void followServerUsesObservedProgressAndLatestUpsertForLossRecoveryWhileCustomStaysLocal() {
+		var seconds = new AtomicInteger(0);
+		var clock = new ObservedServerClock();
+		var f = new Fixture(ClientRateLimitPolicy.DEFAULT, true,
+			new ClientMarkerStore(3L, clock, ignored -> ClientMarkerDisplayDuration.fromConfig(seconds.get())));
+		var follow = new MarkerId(42);
+		var custom = new MarkerId(43);
+		var key = TargetKey.from(CHEST.target());
+		f.serverTime(clock, 10L);
+		f.runtime.onPresentationPacket(markerCreated(100, 1, 1, follow, OWNER, CHEST, "entity_block", 20L));
+		f.runtime.onPresentationPacket(PresentationS2CPacket.winner(100, 1, key, Optional.of(follow)));
+		seconds.set(1);
+		f.runtime.onPresentationPacket(markerCreated(100, 1, 1, custom, OWNER, STONE, "block", 20L));
+		seconds.set(0);
+		f.runtime.onPresentationPacket(markerCreated(100, 1, 2, custom, OWNER, STONE, "block", 20L));
+		assertFalse(f.runtime.store().marker(custom).orElseThrow().followsServer());
+		f.serverTime(clock, 1000L);
+		for (int tick = 0; tick < 200; tick++) f.tick(3_600_000L + tick * 50L);
+		assertTrue(f.runtime.store().marker(custom).isEmpty());
+		assertEquals(follow, f.runtime.store().hudRenderMarkers().getFirst().id(),
+			"an extended local pause and client ticks cannot spend server time");
+
+		f.serverTime(clock, 1001L);
+		seconds.set(1);
+		f.runtime.onPresentationPacket(markerCreated(100, 1, 2, follow, OWNER, CHEST, "entity_block", 20L));
+		assertTrue(f.runtime.store().marker(follow).orElseThrow().followsServer());
+		f.serverTime(clock, 1018L);
+		f.serverTime(clock, 1019L);
+		assertEquals(follow, f.runtime.store().outlineWinnersInDimension(DIMENSION).get(key).id());
+		f.serverTime(clock, 1020L);
+		assertTrue(f.runtime.store().hudRenderMarkers().isEmpty(), "same-ID upsert did not refresh the visual span");
+		assertTrue(f.runtime.store().outlineWinnersInDimension(DIMENSION).isEmpty());
+
+		f.serverTime(clock, 1037L);
+		for (int tick = 0; tick < 20; tick++) f.tick(3_610_000L + tick * 50L);
+		assertTrue(f.runtime.store().marker(follow).orElseThrow().isSynchronized(),
+			"the latest fallback origin still lacks one observed tick");
+		assertTrue(f.runtime.nameStore().find(follow).isPresent());
+
+		f.serverTime(clock, 1038L);
+		f.tick(3_611_000L);
+		f.tick(3_611_050L);
+		assertTrue(f.runtime.store().marker(follow).isPresent(), "local grace allows late authority even once visually hidden");
+		f.tick(3_611_100L);
+		assertTrue(f.runtime.store().marker(follow).isEmpty());
+		assertTrue(f.runtime.nameStore().find(follow).isEmpty());
+		assertTrue(f.presentation.markerGrant(follow).isEmpty());
+		f.runtime.onPresentationPacket(markerCreated(100, 1, 3, follow, OWNER, CHEST, "entity_block", 20L));
+		assertTrue(f.runtime.store().marker(follow).isEmpty(), "the existing presentation eviction tombstone rejects old receipts");
+	}
+
 	private static void unping(Fixture fixture) {
 		fixture.press(0); fixture.frame(250, true); fixture.prime(); fixture.focus("cancel-marker", 260); fixture.release(270);
 	}
@@ -755,10 +856,16 @@ class ClientPingRuntimeInteractionTest {
 	}
 
 	private static PresentationS2CPacket markerCreated(long epoch, long view, MarkerId id, UUID owner, TargetSnapshot target, String targetType) {
-		MarkerSnapshot snapshot = new MarkerSnapshot(id, owner, target.target(), targetType, "attention", new MarkerAnchor(0, 0, 2), 1, 100);
+		return markerCreated(epoch, view, 1L, id, owner, target, targetType, 99L);
+	}
+
+	private static PresentationS2CPacket markerCreated(long epoch, long view, long revision, MarkerId id, UUID owner,
+		TargetSnapshot target, String targetType, long duration) {
+		MarkerSnapshot snapshot = new MarkerSnapshot(id, owner, target.target(), targetType, "attention", new MarkerAnchor(0, 0, 2),
+			1L, 1L + duration);
 		PresentationSection basic = new PresentationSection(PresentationBasic.ID, 1,
 			Map.of(PresentationBasic.NAME, new PresentationValue.Text("{\"text\":\"Target\"}")), false);
-		return PresentationS2CPacket.created(epoch, view, 1, snapshot, "Owner",
+		return PresentationS2CPacket.created(epoch, view, revision, snapshot, "Owner",
 			PresentationPropertyRef.root(PresentationBasic.ID, PresentationBasic.NAME),
 			TestContentGrants.content(TestContentGrants.basic(basic)), PresentationReceiptContent.whole(), basic);
 	}

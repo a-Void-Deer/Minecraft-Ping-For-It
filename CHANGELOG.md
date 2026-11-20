@@ -6,6 +6,9 @@ Changes since the `1.21.1` baseline (`a51a850b`).
 
 ### Marker display and cancellation
 
+- **Follow Server** now uses server game time. Pausing a single-player game
+  preserves the ping's remaining lifetime, and changing `/tick rate` while a
+  ping is active no longer makes its display count down at the client tick rate.
 - When your display duration outlasts a ping on the server, the last winning
   ping on that target keeps its outline while the target can still be drawn.
   A new server winner takes precedence.

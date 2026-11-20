@@ -41,6 +41,7 @@
 		"KeyMappingMixin",
 		"KeyboardHandlerMixin",
 		"MouseHandlerMixin",
+		"ClientGameTimeMixin",
 		"MinecraftMixin",
 		"GameRendererMixin",
 		"GuiMixin",

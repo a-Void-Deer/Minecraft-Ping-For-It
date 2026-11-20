@@ -8,21 +8,21 @@ import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 /**
- * An immutable, client-side view of an active marker.
+ * An immutable client record whose lifetime predicates read the applicable clocks.
  *
  * <p>Derives every field of an authoritative {@link MarkerSnapshot} and adds
  * client-local synchronization/display bookkeeping:
  * <ul>
  *   <li>{@link #receivedAtLocalTick()} — the client tick on which the snapshot
  *       was applied to the local store;</li>
- *   <li>{@link #fallbackExpiresAtLocalTick()} — the client tick at which the
- *       synchronized state ends as a loss-recovery fallback when no
- *       authoritative removal has arrived (see
- *       {@link ClientMarkerStore#expireFallback});</li>
- *   <li>{@link #displayExpiresAtLocalTick()} — the independent visual
- *       deadline; and</li>
+ *   <li>{@link #fallbackExpiresAtLocalTick()} and {@link #displayExpiresAtLocalTick()}
+ *       — the deadlines for a custom local duration (unused in follow-server mode);</li>
+ *   <li>{@link #followServerTiming()} — the follow-server timing instead of
+ *       local deadlines, or {@code null} for a custom local duration; and</li>
  *   <li>{@link #state()} — whether authoritative synchronization is still
  *       current or stale.</li>
  * </ul>
@@ -30,6 +30,7 @@ import nx.pingwheel.common.marker.TargetKey;
  * <p>Only JDK types are used here; there are no {@code net.minecraft}
  * references, so this value can be constructed and validated in tests.
  */
+@NotNullByDefault
 public record ClientMarker(
 	MarkerId id,
 	UUID owner,
@@ -43,8 +44,36 @@ public record ClientMarker(
 	long receivedAtLocalTick,
 	long fallbackExpiresAtLocalTick,
 	long displayExpiresAtLocalTick,
-	ClientMarkerState state
+	ClientMarkerState state,
+	@Nullable FollowServerTiming followServerTiming
 ) {
+	/** The visual origin and span are frozen; each upsert starts a new synchronization fallback. */
+	@NotNullByDefault
+	public record FollowServerTiming(
+		long durationTicks,
+		ObservedServerClock.Origin visualOrigin,
+		ObservedServerClock.Origin fallbackOrigin,
+		long graceEndsAtLocalTick
+	) {
+		private static final long GRACE_NOT_STARTED = -1L;
+
+		public FollowServerTiming {
+			Objects.requireNonNull(visualOrigin, "visualOrigin");
+			Objects.requireNonNull(fallbackOrigin, "fallbackOrigin");
+			if (durationTicks <= 0L || graceEndsAtLocalTick < GRACE_NOT_STARTED) {
+				throw new IllegalArgumentException("invalid follow-server timing");
+			}
+		}
+	}
+
+	/** Compatibility constructor for a marker with local-domain deadlines. */
+	public ClientMarker(MarkerId id, UUID owner, Target target, TargetKey targetKey, String targetTypeId,
+		String pingTypeId, MarkerAnchor anchor, long arrivalTick, long expiresAtTick, long receivedAtLocalTick,
+		long fallbackExpiresAtLocalTick, long displayExpiresAtLocalTick, ClientMarkerState state) {
+		this(id, owner, target, targetKey, targetTypeId, pingTypeId, anchor, arrivalTick, expiresAtTick,
+			receivedAtLocalTick, fallbackExpiresAtLocalTick, displayExpiresAtLocalTick, state, null);
+	}
+
 	/** Trusted local/fixture compatibility; received snapshots always carry their key. */
 	public ClientMarker(MarkerId id, UUID owner, Target target, String targetTypeId, String pingTypeId,
 		MarkerAnchor anchor, long arrivalTick, long expiresAtTick, long receivedAtLocalTick,
@@ -171,9 +200,29 @@ public record ClientMarker(
 				"displayDurationTicks must be non-negative: " + displayDurationTicks);
 		}
 
-		long fallbackDuration = saturatedAdd(
-			serverDurationTicks(snapshot), graceTicks);
+		return from(snapshot, receivedAtLocalTick, localFallbackDeadline(snapshot, receivedAtLocalTick, graceTicks),
+			saturatedAdd(receivedAtLocalTick, displayDurationTicks), null);
+	}
 
+	/** Uses the same receipt origin for both lifetimes on the first insertion. */
+	static ClientMarker followingServer(MarkerSnapshot snapshot, long localTick, ObservedServerClock.Origin receipt) {
+		return from(snapshot, localTick, Long.MAX_VALUE, Long.MAX_VALUE, new FollowServerTiming(
+			serverDurationTicks(snapshot), receipt, receipt, FollowServerTiming.GRACE_NOT_STARTED));
+	}
+
+	/** Refreshes payload and fallback, never the first insertion's visual deadline or time domain. */
+	ClientMarker refreshed(MarkerSnapshot snapshot, long localTick, long graceTicks, ObservedServerClock clock) {
+		if (followServerTiming == null) {
+			return from(snapshot, localTick, localFallbackDeadline(snapshot, localTick, graceTicks),
+				displayExpiresAtLocalTick, null);
+		}
+		return from(snapshot, localTick, Long.MAX_VALUE, Long.MAX_VALUE, new FollowServerTiming(
+			followServerTiming.durationTicks(), followServerTiming.visualOrigin(), clock.receiptOrigin(),
+			FollowServerTiming.GRACE_NOT_STARTED));
+	}
+
+	private static ClientMarker from(MarkerSnapshot snapshot, long localTick, long fallbackDeadline,
+		long visualDeadline, @Nullable FollowServerTiming followServerTiming) {
 		return new ClientMarker(
 			snapshot.id(),
 			snapshot.owner(),
@@ -184,10 +233,15 @@ public record ClientMarker(
 			snapshot.anchor(),
 			snapshot.arrivalTick(),
 			snapshot.expiresAtTick(),
-			receivedAtLocalTick,
-			saturatedAdd(receivedAtLocalTick, fallbackDuration),
-			saturatedAdd(receivedAtLocalTick, displayDurationTicks),
-			ClientMarkerState.SYNCHRONIZED);
+			localTick,
+			fallbackDeadline,
+			visualDeadline,
+			ClientMarkerState.SYNCHRONIZED,
+			followServerTiming);
+	}
+
+	private static long localFallbackDeadline(MarkerSnapshot snapshot, long localTick, long graceTicks) {
+		return saturatedAdd(localTick, saturatedAdd(serverDurationTicks(snapshot), graceTicks));
 	}
 
 	/**
@@ -225,15 +279,36 @@ public record ClientMarker(
 			throw new IllegalArgumentException("localTick must be non-negative: " + localTick);
 		}
 
-		return localTick < displayExpiresAtLocalTick;
+		return followServerTiming == null ? localTick < displayExpiresAtLocalTick
+			: followServerTiming.visualOrigin().elapsedTicks() < followServerTiming.durationTicks();
+	}
+
+	public boolean followsServer() {
+		return followServerTiming != null;
+	}
+
+	/** Starts local grace when packet evidence first reaches the synchronization span. */
+	ClientMarker observeFallbackGrace(long localTick, long graceTicks) {
+		if (followServerTiming == null || !isSynchronized()
+			|| followServerTiming.graceEndsAtLocalTick() != FollowServerTiming.GRACE_NOT_STARTED
+			|| followServerTiming.fallbackOrigin().elapsedTicks() < followServerTiming.durationTicks()) return this;
+
+		return copyWith(state, new FollowServerTiming(followServerTiming.durationTicks(),
+			followServerTiming.visualOrigin(), followServerTiming.fallbackOrigin(), saturatedAdd(localTick, graceTicks)));
+	}
+
+	boolean isFallbackDueAt(long localTick) {
+		if (followServerTiming == null) return fallbackExpiresAtLocalTick <= localTick;
+		long graceEnd = followServerTiming.graceEndsAtLocalTick();
+		return graceEnd != FollowServerTiming.GRACE_NOT_STARTED && graceEnd <= localTick;
 	}
 
 	/** Returns a copy whose synchronization state is stale. */
 	public ClientMarker asStale() {
-		if (isStale()) {
-			return this;
-		}
+		return isStale() ? this : copyWith(ClientMarkerState.STALE, followServerTiming);
+	}
 
+	private ClientMarker copyWith(ClientMarkerState nextState, @Nullable FollowServerTiming nextTiming) {
 		return new ClientMarker(
 			id,
 			owner,
@@ -248,7 +323,8 @@ public record ClientMarker(
 			receivedAtLocalTick,
 			fallbackExpiresAtLocalTick,
 			displayExpiresAtLocalTick,
-			ClientMarkerState.STALE);
+			nextState,
+			nextTiming);
 	}
 
 	/**
