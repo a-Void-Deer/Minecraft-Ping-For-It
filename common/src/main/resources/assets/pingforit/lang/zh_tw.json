@@ -164,6 +164,7 @@
 	"command.pingforit.channel.set.response": "設定頻道為 \"%s\"",
 	"command.pingforit.channel.set.response.default": "設定頻道為預設",
 	"command.pingforit.channel.set.reject": "頻道名稱限制為 %s 個字元",
+	"command.pingforit.channel.set.failure": "頻道變更未儲存",
 	"pingforit.chat.pingmsg": "%s 請求 %s %s",
 	"pingforit.chat.pingmsg.template": "{playerName}：請求 {pingType} {targetName}",
 	"pingforit.chat.danger.template.override": "{playerName}：{pingType} {targetName}！",

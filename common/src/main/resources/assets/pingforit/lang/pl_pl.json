@@ -164,6 +164,7 @@
 	"command.pingforit.channel.set.response": "Ustaw kanał na \"%s\"",
 	"command.pingforit.channel.set.response.default": "Ustawiono kanał na domyślny",
 	"command.pingforit.channel.set.reject": "Nazwy kanałów są ograniczone do %s znaków",
+	"command.pingforit.channel.set.failure": "Zmiana kanału nie została zapisana",
 	"pingforit.chat.pingmsg": "%s: %s: %s",
 	"pingforit.chat.pingmsg.template": "{playerName}: {pingType}: {targetName}",
 	"pingforit.chat.local_error.prefix": "[ping for it] ",

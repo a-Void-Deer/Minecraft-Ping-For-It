@@ -9,6 +9,9 @@ Changes since the `1.21.1` baseline (`a51a850b`).
 - On a `GLOBAL` server, the empty Ping Channel field shows **Global** even
   when you are on a team. It shows **Synced to Vanilla Team** only when the
   server reports `AUTO` and you are on a vanilla team.
+- If the client configuration is protected, `/pingforit channel <name>` now
+  reports failure and keeps your previous channel preference. A disk write
+  failure is also reported instead of confirming that the change was saved.
 
 ### Ping range and target selection
 

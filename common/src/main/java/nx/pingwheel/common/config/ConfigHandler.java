@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import static nx.pingwheel.common.Global.MOD_ID;
@@ -152,6 +153,25 @@ public class ConfigHandler <T extends IConfig> {
 	public synchronized boolean saveSafely() {
 		publishProfile();
 		return saveInternal();
+	}
+
+	/**
+	 * Applies one edit and performs the ordinary save under the same lock, so
+	 * save protection cannot change between the eligibility check and the
+	 * write. A protected file rejects the edit before the callback runs. An
+	 * ordinary write failure keeps the already-applied value because the
+	 * normal save may already have run update notifications.
+	 *
+	 * @return whether the file was written or was already up to date
+	 */
+	public synchronized boolean editAndSaveIfWritable(Consumer<T> edit) {
+		Objects.requireNonNull(edit, "edit");
+		if (saveProtection != SaveProtection.NONE) {
+			return false;
+		}
+
+		edit.accept(config);
+		return saveSafely();
 	}
 
 	/** Persists already-applied configuration without invoking domain update callbacks. */

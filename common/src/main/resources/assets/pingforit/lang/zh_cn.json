@@ -199,6 +199,7 @@
 	"command.pingforit.channel.set.response": "设置频道为\"%s\"",
 	"command.pingforit.channel.set.response.default": "将频道设置为默认频道",
 	"command.pingforit.channel.set.reject": "频道名称长度限制为 %s 个字符",
+	"command.pingforit.channel.set.failure": "频道更改未保存",
 	"pingforit.chat.pingmsg": "%s 请求 %s %s",
 	"pingforit.chat.pingmsg.template": "{playerName}: 请求 {pingType} {targetName}",
 	"pingforit.chat.danger.template.override": "{playerName}: {pingType} {targetName} !",

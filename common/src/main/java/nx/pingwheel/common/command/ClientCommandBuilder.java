@@ -9,9 +9,12 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import nx.pingwheel.common.config.ClientConfig;
+import nx.pingwheel.common.config.ConfigHandler;
 import nx.pingwheel.common.resource.LanguageUtils;
 import nx.pingwheel.common.screen.SettingsScreen;
 import org.apache.logging.log4j.util.TriConsumer;
+
+import java.util.Objects;
 
 import static nx.pingwheel.common.CommonClient.Game;
 import static nx.pingwheel.common.Global.CLIENT_COMMAND_ROOT;
@@ -21,12 +24,20 @@ public class ClientCommandBuilder {
 	private ClientCommandBuilder() {}
 
 	public static <S> LiteralArgumentBuilder<S> build(TriConsumer<CommandContext<S>, Boolean, MutableComponent> responseHandler) {
+		return build(responseHandler, ClientConfig.HANDLER);
+	}
+
+	/** Builds the client command tree against the supplied client configuration handler. */
+	public static <S> LiteralArgumentBuilder<S> build(
+		TriConsumer<CommandContext<S>, Boolean, MutableComponent> responseHandler,
+		ConfigHandler<ClientConfig> configHandler
+	) {
 		var langConfig = LanguageUtils.command("config");
 		var langChannel = LanguageUtils.command("channel");
 
 		var cmdChannel = LiteralArgumentBuilder.<S>literal("channel")
 			.executes((context) -> {
-				var currentChannel = ClientConfig.HANDLER.getConfig().getChannel();
+				var currentChannel = Objects.requireNonNullElse(configHandler.getConfig().getChannel(), "");
 
 				if (currentChannel.isEmpty()) {
 					responseHandler.accept(context, true, langChannel.path("get", "response", "default").get());
@@ -46,8 +57,12 @@ public class ClientCommandBuilder {
 					return 0;
 				}
 
-				ClientConfig.HANDLER.getConfig().setChannel(newChannel);
-				ClientConfig.HANDLER.save();
+				// The handler rejects the edit before it runs when the file is
+				// protected, and keeps the normal save result for write failures.
+				if (!configHandler.editAndSaveIfWritable(config -> config.setChannel(newChannel))) {
+					responseHandler.accept(context, false, langChannel.path("set", "failure").get());
+					return 0;
+				}
 
 				if (newChannel.isEmpty()) {
 					responseHandler.accept(context, true, langChannel.path("set", "response", "default").get());

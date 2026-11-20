@@ -164,6 +164,7 @@
 	"command.pingforit.channel.set.response": "\"%s\" kanalına ayarlandı",
 	"command.pingforit.channel.set.response.default": "Kanal varsayılana ayarlandı",
 	"command.pingforit.channel.set.reject": "Kanal adı uzunlukları %s ile sınırlı",
+	"command.pingforit.channel.set.failure": "Kanal değişikliği kaydedilemedi",
 	"pingforit.chat.pingmsg": "%s: %s: %s",
 	"pingforit.chat.pingmsg.template": "{playerName}: {pingType}: {targetName}",
 	"pingforit.chat.local_error.prefix": "[ping for it] ",

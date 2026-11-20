@@ -199,6 +199,7 @@
 	"command.pingforit.channel.set.response": "Set channel to \"%s\"",
 	"command.pingforit.channel.set.response.default": "Set channel to default",
 	"command.pingforit.channel.set.reject": "Channel names are limited to a length of %s characters",
+	"command.pingforit.channel.set.failure": "Channel change was not saved",
 	"pingforit.chat.pingmsg": "%s requests %s on %s",
 	"pingforit.chat.pingmsg.template": "{playerName} requests {pingType} {targetName}",
 	"pingforit.chat.danger.template.override": "{playerName} {pingType} {targetName}",

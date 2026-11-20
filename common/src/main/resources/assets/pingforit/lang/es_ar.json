@@ -195,6 +195,7 @@
 	"command.pingforit.channel.set.response": "Canal cambiado a \"%s\"",
 	"command.pingforit.channel.set.response.default": "Canal cambiado al canal predeterminado",
 	"command.pingforit.channel.set.reject": "El nombre del canal no puede tener más de %s caracteres",
+	"command.pingforit.channel.set.failure": "El cambio de canal no se guardó",
 	"pingforit.chat.pingmsg": "%s: %s - %s",
 	"pingforit.chat.pingmsg.template": "{playerName} señala {targetName}: {pingType}",
 	"pingforit.chat.go_to.template.override": "{playerName} marca {targetName} como destino: {pingType}",
