@@ -125,7 +125,8 @@ public final class SablePickingAccess implements PickingFrameContext.Access {
 		@Nullable Pose3dc pose = access.logicalPose();
 		if (pose == null) throw new IllegalStateException("Sable logical pose unavailable");
 		Pose3d copy = copyPose(pose);
-		FrozenPose result = new FrozenPose(copy, EntityParentFrame.copyOf(copy.bakeIntoMatrix(new Matrix4d()), copy.orientation()));
+		FrozenPose result = new FrozenPose(copy,
+			EntityParentFrame.copyOfPivoted(copy.rotationPoint(), copy.position(), copy.orientation(), copy.scale()));
 		poses.put(id, result);
 		return result;
 	}

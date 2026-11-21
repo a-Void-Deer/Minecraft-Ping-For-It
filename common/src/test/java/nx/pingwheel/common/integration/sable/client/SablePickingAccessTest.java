@@ -58,24 +58,28 @@ class SablePickingAccessTest {
 	}
 	@Test void localHitFaceAndFrozenLogicalProofSurviveLivePoseChange() {
 		FakeSubLevel subLevel = new FakeSubLevel();
-		subLevel.pose.rotationPoint().set(30_000_000, 0, 0);
-		subLevel.pose.position().set(4, 0, 0);
+		Vec3 nativePivot = new Vec3(10_000_000, 1, 30_000_000);
+		Vec3 worldPivot = new Vec3(1152.1, 64, .5);
+		subLevel.pose.rotationPoint().set(nativePivot.x, nativePivot.y, nativePivot.z);
+		subLevel.pose.position().set(worldPivot.x, worldPivot.y, worldPivot.z);
+		subLevel.pose.orientation().set(.5, .5, .5, .5);
 		Deque<Function<Object, Pose3dc>> stack = new ArrayDeque<>();
 		stack.push(value -> new Pose3d());
 		var access = new SablePickingAccess(position -> subLevel, stack::push, stack::pop);
-		BlockHitResult nativeHit = new BlockHitResult(new Vec3(30_000_000.5, .5, .5), Direction.WEST,
-			new BlockPos(30_000_000, 0, 0), false);
+		BlockHitResult nativeHit = new BlockHitResult(nativePivot, Direction.WEST, BlockPos.containing(nativePivot), false);
 		try (var scope = access.openScope()) {
 			Pose3dc used = stack.peek().apply(subLevel);
 			subLevel.pose.position().set(100, 0, 0);
 			var selection = access.normalize(nativeHit);
 			assertSame(nativeHit, selection.hitResult());
 			assertEquals(Direction.WEST, ((BlockHitResult) selection.hitResult()).getDirection());
-			assertEquals(new Vec3(4.5, .5, .5), selection.worldPoint().orElseThrow());
-			assertEquals(subLevel.id, selection.blockFrame().orElseThrow().subLevelId());
-			assertEquals(4, used.position().x());
-			assertTrue(selection.blockFrame().orElseThrow().binds(nativeHit));
-			assertFalse(selection.blockFrame().orElseThrow().binds(new BlockHitResult(new Vec3(30_000_000.75, .5, .5),
+			assertEquals(worldPivot, selection.worldPoint().orElseThrow());
+			SableBlockHitFrame proof = selection.blockFrame().orElseThrow();
+			assertEquals(subLevel.id, proof.subLevelId());
+			assertEquals(worldPivot, used.transformPosition(nativePivot));
+			assertEquals(nativePivot, proof.frame().toNative(worldPivot));
+			assertTrue(proof.binds(nativeHit));
+			assertFalse(proof.binds(new BlockHitResult(nativePivot.add(0, .25, 0),
 				Direction.WEST, nativeHit.getBlockPos(), false)));
 		}
 		assertEquals(1, stack.size());

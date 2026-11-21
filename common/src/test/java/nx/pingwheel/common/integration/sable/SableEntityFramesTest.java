@@ -77,9 +77,14 @@ class SableEntityFramesTest {
 	}
 
 	@Test void actualLogicalAdapterUsesCurrentNativeContainmentAndCopiesPose() {
-		Entity entity = new TestEntity(); entity.setPos(30_000_000.25, 1, 30_000_000.5);
+		Vec3 nativePivot = new Vec3(10_000_000, 1, 30_000_000);
+		Vec3 worldPivot = new Vec3(1152.1, 64, .5);
+		Entity entity = new TestEntity(); entity.setPos(nativePivot.add(.25, .5, .5));
 		UUID id = UUID.randomUUID(); Pose3d pose = new Pose3d();
-		pose.rotationPoint().set(30_000_000, 0, 30_000_000); pose.position().set(4, 5, 6);
+		pose.rotationPoint().set(nativePivot.x, nativePivot.y, nativePivot.z);
+		pose.position().set(worldPivot.x, worldPivot.y, worldPivot.z);
+		pose.orientation().set(1, 1, 1, 1); // Companion transforms with the rotation of the quaternion, not its magnitude.
+		pose.scale().set(2, -3, .5);
 		SubLevelAccess owner = new SubLevelAccess() {
 			@Override public Pose3dc logicalPose() { return pose; }
 			@Override public Pose3dc lastPose() { throw new AssertionError("logical frame cannot use old pose"); }
@@ -88,10 +93,16 @@ class SableEntityFramesTest {
 			@Override public @Nullable String getName() { return null; }
 		};
 		var resolution = SableEntityFrameAccess.logical(entity, candidate -> {
-			assertSame(entity, candidate); assertEquals(30_000_000.25, candidate.position().x); return owner;
+			assertSame(entity, candidate); assertEquals(nativePivot.add(.25, .5, .5), candidate.position()); return owner;
 		});
-		pose.position().set(100, 100, 100);
-		assertEquals(new Vec3(4.25, 6, 6.5), resolution.frame().orElseThrow().toWorld(entity.position()));
+		EntityParentFrame frame = resolution.frame().orElseThrow();
+		pose.position().zero(); pose.rotationPoint().zero(); pose.orientation().identity(); pose.scale().set(1);
+		assertEquals(worldPivot, frame.toWorld(nativePivot));
+		assertEquals(nativePivot, frame.toNative(worldPivot));
+		// Scale the native offset to (.5, -1.5, .25), then permute it to (.25, .5, -1.5).
+		Vec3 worldPoint = new Vec3(1152.35, 64.5, -1);
+		assertEquals(worldPoint, frame.toWorld(entity.position()));
+		assertEquals(entity.position(), frame.toNative(worldPoint));
 		assertEquals(EntityFrameResolution.Status.WORLD,
 			SableEntityFrameAccess.logical(entity, candidate -> null).status());
 	}

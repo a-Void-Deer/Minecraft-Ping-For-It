@@ -28,6 +28,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4d;
 import org.joml.Quaterniond;
+import org.joml.Vector3d;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -76,22 +77,22 @@ class MinecraftAuthoritativeTargetValidatorTest {
 	}
 
 	@Test
-	void logicalWorldAnchorAcceptsEqualityAndRejectsStrictlyGreaterDistance() {
+	void remoteRotatedPivotAcceptsEqualityAndRejectsTheNextRepresentableOutsideDistance() {
 		Fixture fixture = new Fixture();
-		fixture.entity.setPos(10.0, 20.0, 30.0);
-		fixture.player.setEye(Vec3.ZERO);
-		EntityParentFrame frame = translation(-7.0, -16.0, -30.0);
+		Vector3d nativePivot = new Vector3d(10_000_000, 1, 30_000_000);
+		fixture.entity.setPos(nativePivot.x, nativePivot.y, nativePivot.z);
+		fixture.player.setEye(new Vec3(1024.1, 64, .5));
+		// The native base is at the pivot, so rotating it cannot move it off this exact world point.
+		EntityParentFrame frame = EntityParentFrame.copyOfPivoted(nativePivot, new Vector3d(1152.1, 64, .5),
+			new Quaterniond(.5, .5, .5, .5), new Vector3d(1));
+		var validator = fixture.validator(128, entity -> EntityFrameResolution.contained(frame, UUID.randomUUID()));
 
-		AuthoritativeTargetValidation equality = fixture.validator(5,
-			entity -> EntityFrameResolution.contained(frame, UUID.randomUUID()))
-			.validate(OWNER, entityTarget());
-		AuthoritativeTargetValidation outside = fixture.validator(4,
-			entity -> EntityFrameResolution.contained(frame, UUID.randomUUID()))
-			.validate(OWNER, entityTarget());
-
+		AuthoritativeTargetValidation equality = validator.validate(OWNER, entityTarget());
 		assertTrue(equality.isAccepted());
-		assertEquals(new MarkerAnchor(3.0, 4.0, 0.0), equality.validatedTarget().orElseThrow().anchor());
-		assertEquals(MarkerRejectReason.OUT_OF_RANGE, outside.rejectReason().orElseThrow());
+		assertEquals(new MarkerAnchor(1152.1, 64, .5), equality.validatedTarget().orElseThrow().anchor());
+
+		fixture.player.setEye(new Vec3(Math.nextDown(1024.1), 64, .5));
+		assertEquals(MarkerRejectReason.OUT_OF_RANGE, validator.validate(OWNER, entityTarget()).rejectReason().orElseThrow());
 	}
 
 	@Test

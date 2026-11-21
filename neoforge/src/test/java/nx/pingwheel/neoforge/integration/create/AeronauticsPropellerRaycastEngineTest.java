@@ -42,6 +42,7 @@ import org.joml.Matrix4d;
 import org.joml.Matrix4f;
 import org.joml.Quaterniond;
 import org.joml.Quaternionf;
+import org.joml.Vector3d;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -105,6 +106,29 @@ class AeronauticsPropellerRaycastEngineTest {
 
 		var world = CreateContraptionRaycastEngine.modelTransform(EntityParentFrame.identity(), anchor, (stack, partialTick) -> {}).orElseThrow();
 		assertVector(new Vec3(.03125, .0625, .125), world.toLocal(anchor.add(.03125, .0625, .125)), 0);
+	}
+
+	@Test void remoteRotatedPivotKeepsTheFarEndpointExclusiveWithoutLosingInteriorContacts() {
+		Vec3 anchor = new Vec3(10_000_000, 1, 30_000_000);
+		double surfaceX = 1152.1;
+		EntityParentFrame parent = EntityParentFrame.copyOfPivoted(new Vector3d(anchor.x, anchor.y, anchor.z),
+			new Vector3d(surfaceX, 64, .5), new Quaterniond(.5, .5, .5, .5), new Vector3d(1));
+		var transform = CreateContraptionRaycastEngine.modelTransform(parent, anchor, (stack, partialTick) -> {}).orElseThrow();
+		// This rotation maps local z to world x, so the positive-z face is at surfaceX.
+		BlockPos blade = new BlockPos(0, 0, -1);
+		for (double endX : List.of(surfaceX, Math.nextDown(surfaceX), Math.nextUp(surfaceX))) {
+			Vec3 start = new Vec3(endX + 128, 64.5, 1);
+			var request = request(start, new Vec3(endX, 64.5, 1), start);
+			var ray = CreateContraptionRaycastEngine.transform(request, transform).orElseThrow();
+			var result = CreateContraptionRaycastEngine.trace(request, snapshot(ray, Map.of(blade, block())));
+			if (endX < surfaceX) {
+				var hit = result.localHit().orElseThrow();
+				assertEquals(blade, hit.localPos());
+				assertEquals(new Vec3(surfaceX, 64.5, 1), request.pointAt(hit.t()));
+			} else {
+				assertEquals(EntityLocalGeometryResult.Outcome.MISS, result.outcome(), "end x=" + endX);
+			}
+		}
 	}
 
 	@Test void copiedVirtualPoseAndCopiedSnapshotCannotFollowLaterMutableInputs() {

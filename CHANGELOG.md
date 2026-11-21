@@ -57,6 +57,9 @@ Changes since the `1.21.1` baseline (`a51a850b`).
   The server checks range to the rotor's base in world coordinates and rejects
   a new ping if it cannot locate that base. If the client temporarily loses
   the rotor's position, the marker stays at its last known point.
+- A rotor whose base is exactly at the server's range limit can now be marked
+  even when it rotates about a distant Sable plot. Rounding the transformed
+  position could previously put that base just outside the limit.
 - A [Sable block hit](docs/integrations/sable.md#transformed-entity-frames-and-frozen-block-proof)
   keeps the local block and face you aimed at. To compare distances, the game
   projects the point you hit into world coordinates using the sub-level's pose
