@@ -110,7 +110,12 @@ empty-assignment-first and expiry-first packet orders, replacement by a newer
 assignment before its snapshot arrives, a hidden or locally recomputed HUD
 winner not entering outlines, hard-removal and store-clear history deletion,
 the local display deadline, and the ownership, dimension and authoritative-expiry
-checks for local dismissal.
+checks for local dismissal. `MarkerOverlayStateForgetTest` covers the overlay's
+marker removal state: a batch forget yields one replacement render-view list
+with no observable intermediate snapshot, drops the named cached views,
+preserves the remaining view objects and their order, and leaves the prior
+snapshot unchanged and immutable; single-id removal does the same. It is a
+headless collection check, not a rendered frame or a frame-rate measurement.
 
 `ClientPingRuntimeTest` drives the public runtime factory with its real
 presentation session: `HELLO`, packet-dispatched `OFFER`/`RESET` and ordinary
@@ -174,11 +179,12 @@ integration result is recorded for those boundaries.
 with a deterministic logical-frame seam and allocated server/player/level
 tokens. It covers a distant native plot position accepted through a nearby
 logical world frame, a near raw position not masking a distant logical anchor,
-equality accepted and strictly greater distance rejected across the range
-boundary, the base anchor rather than a top-center point, an unavailable frame
-rejected as `TARGET_GONE` without raw-position fallback, and the production frame
-facade retaining an ordinary entity's raw anchor. This is not a live server,
-Sable runtime, installed Aeronautics rotor or multiplayer validation.
+the base anchor rather than a top-center point, an unavailable frame rejected as
+`TARGET_GONE` without raw-position fallback, and the production frame facade
+retaining an ordinary entity's raw anchor. For a target projected through a
+remote rotated pivot, the distance exactly equal to the limit is accepted, while
+the next representable over-limit distance is rejected. This is not a live
+server, Sable runtime, installed Aeronautics rotor or multiplayer validation.
 
 The validator's non-finite-point and throwing frame-resolver branches, and the
 player-tracking-disabled ordering relative to frame resolution, have source

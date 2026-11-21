@@ -349,10 +349,12 @@ quarter-turn oracle, parent translation/rotation/nonuniform scale with
 anchor-only scaling, remote fractional native anchors, detached model and
 snapshot inputs, core/blade hits versus gaps and bounds misses, frozen hidden,
 block-entity and fluid state, transformed camera collision, and invalid or
-singular local matrices. The test puts the only hittable surface last in a
-20,001-entry scan and asserts that the trace hits it. A separate case confirms
-that a later capture failure rejects the rotor even though the first entry alone
-is hittable.
+singular local matrices. It also covers a far-origin rotated pivot with a fixed
+transformed ray endpoint: the ray hits a blade face one representable step
+before the endpoint and misses a face at or beyond it. The test puts the only
+hittable surface last in a 20,001-entry scan and asserts that the trace hits it.
+A separate case confirms that a later capture failure rejects the rotor even
+though the first entry alone is hittable.
 
 `NeoClientAeronauticsLifecycleTest` covers absent or unrelated mods not
 resolving the owner, initialization/join registration, leave teardown, failed
@@ -445,16 +447,19 @@ observation and diagnostic evidence:
 - shared affine-frame and candidate-comparison coverage is inventoried under
   [exact entity-local picking](interaction.md#exact-entity-local-picking-and-create-raycast-seams);
 - `SableEntityFramesTest` covers the server-safe logical facade without optional
-  API access for ordinary entities, copied logical pose,
-  exact `WORLD`/`UNAVAILABLE` boundaries, failure never becoming identity, and
-  class loading with Minecraft client and Companion classes hidden;
+  API access for ordinary entities, a far-origin pose copied into a detached
+  frame, world/native round trips through that copied frame under rotation and
+  nonuniform scale, exact `WORLD`/`UNAVAILABLE` boundaries, failure never
+  becoming identity, and class loading with Minecraft client and Companion
+  classes hidden;
 - `SableClientEntityFramesTest` covers render interpolation forwarding, no
   cross-tick caching, non-finite partial ticks, and linkage failure becoming
   `UNAVAILABLE`;
 - `SablePickingAccessTest` covers detached frozen proof bound to its native hit,
   face preservation, local-hit projection separate from the native result,
-  nested scope restoration, and unobserved or unusable poses yielding no trusted
-  point; `PickingFrameContextTest`'s acquisition and optional-scope fallback
+  a far-origin rotated frame with native/world proof round trips, nested scope
+  restoration, and unobserved or unusable poses yielding no trusted point;
+  `PickingFrameContextTest`'s acquisition and optional-scope fallback
   coverage is inventoried in the linked interaction section;
 - `SableObservationFailureDiagnosticsTest` drives the production observation
   catch with an injected throwing reflective tracking-point stand-in: runtime

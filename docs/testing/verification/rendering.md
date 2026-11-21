@@ -110,10 +110,16 @@ and ordinary state transitions. `BlockOutlineStateTest` covers marker/store
 preparation and separate external-spec snapshot tracking. `VanillaChestPresentationTest`
 keeps the ordinary chest resolver on one prepared snapshot. `CreateVaultProductionBoundaryTest` and
 `CreateFluidTankProductionBoundaryTest` drive their ordinary-only specialized
-topology through the same frame entry. These are headless resolution, selection,
-state and native-edge seams; they do not establish external drawing, installed
-Sable, a live plot or render pose, actual BER or baked-model submission or GPU
-output.
+topology through the same frame entry. `NeoForgeExternalBakedModelReadTest`
+drives the NeoForge world-aware adapter's render entry with a synthetic loaded
+plot and upper-door model: the model-data callback reads the lower half
+and a resident block entity through the restricted view, the native AO face
+renderer queries an out-of-plot neighbor position through that view without
+reading the parent level's block, parent lighting is requested only for verified
+plot positions, and the upper face submits one quad. These are headless
+resolution, selection, state, native-AO and native-edge seams; they do not
+establish external drawing, installed Sable or Create, a live plot or render
+pose, actual BER or installed model submission, or GPU output.
 
 `clientLevelReplacementDropsPreparedExternalSnapshotsBoundToTheOldWorld`
 drives the client-level-change entry and checks that it clears prepared external

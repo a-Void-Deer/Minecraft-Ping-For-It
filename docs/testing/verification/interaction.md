@@ -54,10 +54,17 @@ scanning or a Distant Horizons trace.
 selection. Store-level owner, dimension and authoritative-expiry checks for
 local dismissal are inventoried under
 [identity and authority](identity-authority.md#client-marker-runtime-coverage).
-The live candidate collection behind the runtime port — real Minecraft entity
-lookup by UUID or runtime id and the runtime choice between that live point and
-the presentation/anchor fallback — is source-inspected, not covered by a
-dedicated runtime case.
+`ClientPingRuntimeCancellationSamplingTest` drives the production cancellation
+sampling against a synthetic client level. A single capture-local
+rendering-entity traversal attempts the requested UUID lookups and exits early
+once every requested UUID has a raw match. When no UUID is requested, no
+traversal occurs. A UUID absent from the collection is not searched for again.
+If the first matching entity has been removed, each marker uses its own fallback
+anchor; a later duplicate is not used. The suite also covers direct lookups and
+type checks for each runtime-id candidate, an experience orb's live point, and successive
+presses in one tick observing spawn, movement and removal with one traversal
+per press. These are headless runtime-port fixtures, not live entity lookup,
+input delivery, a complete client frame or multiplayer.
 
 `ClientPingRuntimeInteractionTest` covers the cancellation path through real
 wheel release, runtime dispatch and store, with candidate positions, time, mouse
@@ -356,13 +363,18 @@ becoming a range endpoint. The same fixture drives the real Precise Distant
 Horizons adapter: the native scan requests the distant completion, the adapter
 receives the raw captured ray and the integration's own longer range, and a
 camera turn before the callback does not change the request's bounded no-hit
-endpoint, which matches the ordinary location.
+endpoint, which matches the ordinary location. With a test block beyond native
+range but inside Ping range, an ordinary short press captures the native miss
+endpoint without probing farther cells or making a supplemental entity pass.
+The live Precise scan reaches that same block. An ordinary press on a block
+inside native range preserves its identity and hit face.
 `MinecraftAuthoritativeTargetValidatorTest` carries the represented-boundary
 concern into acceptance: at a large-coordinate edge the production validator
 accepts a Location target on the boundary and rejects the next representable
 outside point as `OUT_OF_RANGE`. These are headless level, runtime-port and
-recording-API fixtures, not an installed Distant Horizons runtime, packet
-exchange, live world or multiplayer session; no passing run is recorded here.
+recording-API fixtures, not live input, a complete client frame, an installed
+Distant Horizons runtime, packet exchange or a multiplayer session; no passing
+run is recorded here.
 
 Source and focused seam evidence establish the native
 `min(raycastDistance, pingDistance)` limit and its represented-endpoint cap, the
