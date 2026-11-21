@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-Changes since the `1.21.1` baseline (`a51a850b`).
+Changes since 0.5.1 beta1 (`a51a850b`).
 
 ### Marker display and cancellation
 
@@ -145,8 +145,7 @@ this build rejects an update containing such a value.
 Added a [client config migration](docs/architecture/config/revisioning.md#ordered-migration-and-writeback)
 for `0.5.1-pfi-beta2` or later. In a config from `0.5.1-pfi-beta1` or earlier,
 it changes `doubleClickDangerWindowMs` from exactly `100` to `160` ms; other
-values are preserved. The 160 ms default is unchanged. The current build is
-still `0.5.1-pfi-beta1` and does not run this migration.
+values are preserved. The 160 ms default is unchanged.
 
 ### Connection handling
 
