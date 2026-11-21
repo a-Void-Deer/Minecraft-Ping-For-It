@@ -19,6 +19,16 @@ save, a reset/recovery write, or a migration write—it stamps
 `pingforit-version` with the running mod version. An unchanged current file is
 loaded and validated; it is not rewritten merely because it was loaded.
 
+When neither save protection nor pending migration writeback applies, an
+ordinary save leaves an existing file untouched if the in-memory field values
+match the baseline from the most recent successful load or write. The load
+baseline is the validated model, not the raw file contents. A same-version load
+that only clamps a value or supplies a default therefore leaves the original
+bytes in place until changed values are saved. A successful write sets the next
+baseline, so restoring earlier loaded values after a later write counts as
+another change. If the file is missing, an ordinary save attempts to recreate it
+even if the field values match the baseline.
+
 ## Version-string grammar and comparison
 
 The shared [version-marker grammar](../../config/client.md#version-marker)
@@ -85,6 +95,20 @@ timeout keys and translates the transparent-block selection toggle:
   step; the config model initializes missing selector members;
 - retain unrelated entries, the persisted wheel appearance keys, and unknown
   data.
+
+The client step at `0.5.1-pfi-beta2` revises the legacy double-click Danger
+window value only for a source document at or before `0.5.1-pfi-beta1`:
+
+- a root `doubleClickDangerWindowMs` JSON number whose exact mathematical value
+  is the legacy value `100` (including forms such as `100.0` and `1e2`)
+  becomes `160`;
+- any other value is retained; missing, `null`, non-number and malformed numeric
+  input are not repaired by this step and remain available to the normal typed
+  load or invalid-file recovery path;
+- a source version that compares after `0.5.1-pfi-beta1`, including an
+  intermediate qualifier such as `0.5.1-pfi-beta1a` as well as
+  `0.5.1-pfi-beta2` or later, keeps its value; an intentional `100` outside the
+  legacy boundary is therefore retained.
 
 After the ordered steps, the migration stamps the current marker. Before the
 handler writes it, it compares the current on-disk bytes with the bytes read for

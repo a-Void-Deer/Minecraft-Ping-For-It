@@ -20,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
 import java.util.function.Function;
 import java.util.function.ToLongFunction;
 import java.util.stream.Stream;
@@ -44,19 +45,19 @@ class InventorySettingsPersistenceTest {
 	private static final String CURRENT_VERSION = "0.4.0-pfi-beta1";
 
 	@Test
-	void expandedFiniteRangesLoadAtCurrentVersionWithoutMigrationOrWriteback(@TempDir Path directory) throws IOException {
+	void legalFiniteEndpointsLoadAtCurrentVersionWithoutMigrationOrWriteback(@TempDir Path directory) throws IOException {
 		Path path = directory.resolve("server.json");
 		byte[] original = ("{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"rateLimit\":17,\"inventory\":{"
-			+ "\"physicalSlotsPerTick\":{\"unlimited\":false,\"value\":4096},\"pendingMemoryMiB\":{\"unlimited\":false,\"value\":2048},"
+			+ "\"physicalSlotsPerTick\":{\"unlimited\":false,\"value\":2048},\"pendingMemoryMiB\":{\"unlimited\":false,\"value\":2048},"
 			+ "\"preview\":{\"maxVariantsPerClientPeriod\":{\"unlimited\":false,\"value\":1024},"
-			+ "\"maxSlotsPerClient\":{\"unlimited\":false,\"value\":16384},\"maxSlotsServer\":{\"unlimited\":false,\"value\":65536},"
+			+ "\"maxSlotsPerClient\":{\"unlimited\":false,\"value\":2048},\"maxSlotsServer\":{\"unlimited\":false,\"value\":8192},"
 			+ "\"maxTargetsPerClient\":{\"unlimited\":false,\"value\":16}},\"tracking\":{"
-			+ "\"maxVariantsPerTarget\":{\"unlimited\":false,\"value\":128},\"maxSlotsPerTarget\":{\"unlimited\":false,\"value\":16384},"
-			+ "\"maxSlotsServer\":{\"unlimited\":false,\"value\":262144}}}}\n").getBytes(StandardCharsets.UTF_8);
+			+ "\"maxVariantsPerTarget\":{\"unlimited\":false,\"value\":128},\"maxSlotsPerTarget\":{\"unlimited\":false,\"value\":4096},"
+			+ "\"maxSlotsServer\":{\"unlimited\":false,\"value\":8192}}}}\n").getBytes(StandardCharsets.UTF_8);
 		Files.write(path, original);
 		var handler = new ConfigHandler<>(ServerConfig.class, path, CURRENT_VERSION); handler.load();
-		var values = InventoryConfigValues.from(handler.getConfig().getInventory());
-		assertNotNull(values); assertTrue(values.isSafe());
+		var values = Objects.requireNonNull(InventoryConfigValues.from(handler.getConfig().getInventory()));
+		assertTrue(values.isSafe());
 		for (var field : InventoryConfigValues.Field.values()) {
 			if (field.kind() == InventoryConfigValues.Kind.LIMIT)
 				assertEquals(InventoryConfigValues.Value.limit(false, field.maximum()), values.value(field));
@@ -64,6 +65,56 @@ class InventorySettingsPersistenceTest {
 		assertEquals(17, handler.getConfig().getRateLimit());
 		assertArrayEquals(original, Files.readAllBytes(path)); assertTrue(handler.saveSafely());
 		assertArrayEquals(original, Files.readAllBytes(path));
+	}
+
+	@ParameterizedTest
+	@ValueSource(booleans = {false, true})
+	void oldHighSlotValuesClampInEitherModeWithoutWritingUntilARealEdit(
+		boolean unlimited, @TempDir Path directory) throws IOException {
+		Path path = directory.resolve("server.json");
+		byte[] original = ("{\"pingforit-version\":\"" + CURRENT_VERSION + "\",\"rateLimit\":17,\"syncDuration\":23,\"inventory\":{"
+			+ "\"physicalSlotsPerTick\":{\"unlimited\":" + unlimited + ",\"value\":4096},"
+			+ "\"pendingMemoryMiB\":{\"unlimited\":true,\"value\":65},"
+			+ "\"preview\":{\"periodTicks\":7,\"maxVariantsPerClientPeriod\":{\"unlimited\":false,\"value\":17},"
+			+ "\"maxSlotsPerClient\":{\"unlimited\":" + unlimited + ",\"value\":16384},"
+			+ "\"maxSlotsServer\":{\"unlimited\":" + unlimited + ",\"value\":65536}},"
+			+ "\"tracking\":{\"distinguishFaces\":true,\"heartbeatPeriods\":0,"
+			+ "\"maxSlotsPerTarget\":{\"unlimited\":" + unlimited + ",\"value\":16384},"
+			+ "\"maxSlotsServer\":{\"unlimited\":" + unlimited + ",\"value\":262144}}}}\n")
+			.getBytes(StandardCharsets.UTF_8);
+		var expected = InventoryConfigValues.defaults()
+			.with(InventoryConfigValues.Field.PHYSICAL_SLOTS_PER_TICK, InventoryConfigValues.Value.limit(unlimited, 2048))
+			.with(InventoryConfigValues.Field.PREVIEW_MAX_SLOTS_PER_CLIENT, InventoryConfigValues.Value.limit(unlimited, 2048))
+			.with(InventoryConfigValues.Field.PREVIEW_MAX_SLOTS_SERVER, InventoryConfigValues.Value.limit(unlimited, 8192))
+			.with(InventoryConfigValues.Field.TRACKING_MAX_SLOTS_PER_TARGET, InventoryConfigValues.Value.limit(unlimited, 4096))
+			.with(InventoryConfigValues.Field.TRACKING_MAX_SLOTS_SERVER, InventoryConfigValues.Value.limit(unlimited, 8192))
+			.with(InventoryConfigValues.Field.PENDING_MEMORY_MIB, InventoryConfigValues.Value.limit(true, 65))
+			.with(InventoryConfigValues.Field.PREVIEW_PERIOD_TICKS, InventoryConfigValues.Value.scalar(7))
+			.with(InventoryConfigValues.Field.PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD, InventoryConfigValues.Value.limit(false, 17))
+			.with(InventoryConfigValues.Field.TRACKING_DISTINGUISH_FACES, InventoryConfigValues.Value.bool(true))
+			.with(InventoryConfigValues.Field.TRACKING_HEARTBEAT_PERIODS, InventoryConfigValues.Value.scalar(0));
+		var handler = loadServer(path, original);
+		assertEquals(expected, InventoryConfigValues.from(handler.getConfig().getInventory()));
+		assertEquals(17, handler.getConfig().getRateLimit());
+		assertEquals(23, handler.getConfig().getSyncDuration());
+		assertArrayEquals(original, Files.readAllBytes(path));
+		assertTrue(handler.saveSafely());
+		assertArrayEquals(original, Files.readAllBytes(path), "validation alone must not write repaired values");
+
+		handler.getConfig().setRateLimit(19);
+		assertTrue(handler.saveSafely());
+		var persisted = readRoot(path).getAsJsonObject("inventory");
+		assertEquals(2048, persisted.getAsJsonObject("physicalSlotsPerTick").get("value").getAsInt());
+		assertEquals(2048, persisted.getAsJsonObject("preview").getAsJsonObject("maxSlotsPerClient").get("value").getAsInt());
+		assertEquals(8192, persisted.getAsJsonObject("preview").getAsJsonObject("maxSlotsServer").get("value").getAsInt());
+		assertEquals(4096, persisted.getAsJsonObject("tracking").getAsJsonObject("maxSlotsPerTarget").get("value").getAsInt());
+		assertEquals(8192, persisted.getAsJsonObject("tracking").getAsJsonObject("maxSlotsServer").get("value").getAsInt());
+		var reloaded = new ConfigHandler<>(ServerConfig.class, path, CURRENT_VERSION);
+		reloaded.load();
+		assertEquals(expected, InventoryConfigValues.from(reloaded.getConfig().getInventory()));
+		assertEquals(19, reloaded.getConfig().getRateLimit());
+		assertEquals(23, reloaded.getConfig().getSyncDuration());
+		assertFalse(hasBrokenBackup(directory));
 	}
 
 	@ParameterizedTest

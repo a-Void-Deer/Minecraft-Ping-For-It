@@ -68,6 +68,11 @@ public final class CreateLargeWaterWheelPresentationResolver implements BlockPre
 	}
 
 	@Override
+	public boolean supportsExternalScope() {
+		return true;
+	}
+
+	@Override
 	public BlockPresentationResolution resolve(BlockPresentationContext context) {
 		BlockState sourceState = context.sourceState();
 		if (sourceState == null || !(sourceState.getBlock() instanceof WaterWheelStructuralBlock)) {

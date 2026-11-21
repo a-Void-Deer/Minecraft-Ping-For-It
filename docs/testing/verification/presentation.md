@@ -14,9 +14,11 @@ The suite groups are:
   `PresentationCodecAnnotationTest`, `PresentationPacketsV2Test`,
   `PresentationReceiptContentTest` and `PresentationReceiptProjectorTest` cover
   selector precedence and fail-closed construction, epoch/view store tombstones
-  and bounded history, version-two packet and annotation shape, bounded property
-  references, and receipt descriptor codec and pure projection. The server
-  `sendInitial` bound is source/compile-covered rather than directly exercised.
+  and bounded history admitting a new ID while capacity remains after many
+  distinct removals, with a late initial for a removed ID still refused,
+  version-two packet and annotation shape, bounded property references, and
+  receipt descriptor codec and pure projection. The server `sendInitial` bound
+  is source/compile-covered rather than directly exercised.
 - `PresentationServerBasicEntityTest`, `PresentationServerExternalBlockTest`,
   `ServerPropertyAdmissionTest`, `PresentationServerRefreshTest`,
   `PresentationServerFairRotationTest`, `PresentationServerBaselinePagingTest`
@@ -52,13 +54,39 @@ The suite groups are:
   `ClientPingRuntimeInteractionTest` and `ModIdentityTest` cover real
   test-appender diagnostic events and disclosure alongside fallbacks, dispatcher
   and receipt paths, a property create through the native selector's content
-  release, and route and identity pins. `InventoryProductionPolicyTest` keeps the
-  initial baseline pending after a thrown creation handoff with baseline-retry
+  release, and route and identity pins. The `PresentationDiagnosticsTest`
+  history case fills a mixed marker and tombstone history to the bound, refuses
+  new IDs at that bound and after a same-epoch view change while the existing
+  marker's Basic section remains readable, and emits one `WARN`. Resetting the
+  store for a new epoch admits a new ID; the next overflow emits a new
+  warning. `InventoryProductionPolicyTest` keeps the initial
+  baseline pending after a thrown creation handoff with baseline-retry
   handling. These are headless production-call-site and recording-delivery
   seams.
 
+`PresentationSettingsPolicyTest` covers reuse of an unchanged rule set, a
+shared deny-all policy for unknown target types, and invalidation after a rule
+edit. A malformed rule denies access; correcting it admits the matching field.
+Settings copies and replacements keep their own policies. Compiling and reusing
+a policy changes neither the serialized settings nor their fingerprint.
+`InventoryProductionPolicyTest` drives the production tick with an
+empty marker library: unchanged rules keep the view and send no `RESET`, while
+a real rule, child-blacklist or permission-level change still advances the
+view and sends `RESET`. These are headless settings, in-memory server/session
+and recording-transport fixtures, not a live policy or permission change or a
+running game server.
+
 Related optional-adapter evidence is recorded under
 [Create presentation adapters](integrations.md#create-presentation-adapters).
+
+`registeredPresentationHello*` cases in the Fabric and NeoForge
+`InventoryMonitorDispatchTest` suites and Forge's
+`InventoryMonitorPayloadRegistrationTest` exercise the actual registered
+presentation `HELLO` entry. Fabric checks owner-thread and live-listener
+delivery; NeoForge resolves the current player across a same-listener respawn
+and drops delivery after logout; Forge rejects a same-UUID connection
+replacement and keeps the replaced connection's queued work inert. These are
+registration-entry fixtures, not a real socket or launched loader.
 
 The refresh tests invoke production delivery, refresh and sampling methods
 through in-memory sessions and recording observation ports. The set does not
@@ -334,8 +362,7 @@ require the accepted `RESET` mask and advertised/fresh child union; and content
 updates under current source, session, schema, expiry and resource gates with
 source-read revocation still rejecting. The
 [immediate creation snapshot coverage](#immediate-inventory-creation-snapshot-coverage)
-records that path's historical scope. The live scenarios remain pending in the
-[manual matrix](manual-integration.md#frozen-recipient-authorization-and-provider-trust).
+records that path's historical scope.
 
 ## Names and chat
 

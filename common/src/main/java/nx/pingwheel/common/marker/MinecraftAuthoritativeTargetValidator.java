@@ -20,10 +20,14 @@ import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProviderRegistry;
+import nx.pingwheel.common.integration.sable.SableEntityFrames;
+import nx.pingwheel.common.math.EntityFrameResolution;
 import nx.pingwheel.common.name.AuthoritativeTargetNameResolver;
 import nx.pingwheel.common.name.TargetNameJson;
 import nx.pingwheel.common.name.TargetNameJsonCodec;
 import nx.pingwheel.common.resolve.BlockEntityClassification;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 
 /**
@@ -38,11 +42,14 @@ import nx.pingwheel.common.resolve.BlockEntityClassification;
  *   <li>an entity target must exist, be alive, and not be removed in the
  *       requester's level; its entity type id is derived from
  *       {@code BuiltInRegistries.ENTITY_TYPE} and its anchor is the server-side
- *       entity position. When the target is a player and player tracking is
- *       disabled, the target is normalized to a {@link Target.LocationTarget}
- *       at the authoritative current position with
- *       {@link TargetMatchContext#none()}; otherwise the entity target is
- *       preserved with its entity type context;</li>
+ *       entity base position projected through the optional logical parent
+ *       frame (the identity frame for an ordinary entity). An unavailable
+ *       logical frame is treated as {@link MarkerRejectReason#TARGET_GONE};
+ *       validation never falls back to the raw native plot position. When the
+ *       target is a player and player tracking is disabled, the target is
+ *       normalized to a {@link Target.LocationTarget} at the authoritative
+ *       current position with {@link TargetMatchContext#none()}; otherwise the
+ *       entity target is preserved with its entity type context;</li>
  *   <li>a block target requires the chunk to be loaded and the current block
  *       registry id to exactly equal the captured id; {@code BlockState}-only
  *       changes remain valid and the anchor is the block center. The match
@@ -90,6 +97,17 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 	private final boolean playerTrackingEnabled;
 	private final AuthoritativeTargetNameResolver nameResolver;
 	private final ExternalBlockServerProviderRegistry externalProviders;
+	private final EntityFrameResolver entityFrames;
+
+	/**
+	 * Server-safe logical-frame seam. Production uses the exact-scope Sable
+	 * facade; tests inject a deterministic frame without bypassing validation.
+	 */
+	@FunctionalInterface
+	@NotNullByDefault
+	interface EntityFrameResolver {
+		EntityFrameResolution resolve(Entity entity);
+	}
 
 	public MinecraftAuthoritativeTargetValidator(
 		MinecraftServer server,
@@ -108,9 +126,22 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 		AuthoritativeTargetNameResolver nameResolver,
 		ExternalBlockServerProviderRegistry externalProviders
 	) {
+		this(server, maxRange, playerTrackingEnabled, nameResolver, externalProviders,
+			SableEntityFrames::logical);
+	}
+
+	MinecraftAuthoritativeTargetValidator(
+		MinecraftServer server,
+		int maxRange,
+		boolean playerTrackingEnabled,
+		AuthoritativeTargetNameResolver nameResolver,
+		ExternalBlockServerProviderRegistry externalProviders,
+		EntityFrameResolver entityFrames
+	) {
 		this.server = Objects.requireNonNull(server, "server");
 		this.nameResolver = Objects.requireNonNull(nameResolver, "nameResolver");
 		this.externalProviders = Objects.requireNonNull(externalProviders, "externalProviders");
+		this.entityFrames = Objects.requireNonNull(entityFrames, "entityFrames");
 
 		if (maxRange < 0) {
 			throw new IllegalArgumentException("maxRange must be non-negative: " + maxRange);
@@ -199,7 +230,11 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 
 		Entity entity = lookup.entity();
 
-		Vec3 position = entity.position();
+		@Nullable Vec3 position = logicalWorldPosition(entity);
+
+		if (position == null) {
+			return AuthoritativeTargetValidation.rejected(MarkerRejectReason.TARGET_GONE);
+		}
 
 		if (entity instanceof Player && !playerTrackingEnabled) {
 			// Never trust the client's classification: with player tracking
@@ -318,6 +353,42 @@ public final class MinecraftAuthoritativeTargetValidator implements Authoritativ
 				() -> "targetKind=" + normalized.kind() + " target=" + normalized);
 			return FAIL_SAFE_NAME;
 		}
+	}
+
+	/**
+	 * The entity base position in the requester's world. An ordinary entity
+	 * uses its raw authoritative position; an exact retained rotor uses the
+	 * copied logical parent frame. An unavailable or non-finite projection is
+	 * unknown, never the raw native plot position.
+	 */
+	private @Nullable Vec3 logicalWorldPosition(Entity entity) {
+		Vec3 nativePosition = entity.position();
+		EntityFrameResolution resolution;
+
+		try {
+			resolution = Objects.requireNonNull(entityFrames.resolve(entity), "entityFrameResolution");
+		} catch (RuntimeException unavailable) {
+			return null;
+		}
+
+		if (resolution.status() == EntityFrameResolution.Status.UNAVAILABLE) {
+			return null;
+		}
+
+		if (resolution.status() == EntityFrameResolution.Status.WORLD) {
+			return finite(nativePosition) ? nativePosition : null;
+		}
+
+		try {
+			Vec3 worldPosition = resolution.frame().orElseThrow().toWorld(nativePosition);
+			return finite(worldPosition) ? worldPosition : null;
+		} catch (RuntimeException unavailable) {
+			return null;
+		}
+	}
+
+	private static boolean finite(Vec3 position) {
+		return Double.isFinite(position.x) && Double.isFinite(position.y) && Double.isFinite(position.z);
 	}
 
 	/**

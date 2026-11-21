@@ -39,11 +39,7 @@ lifecycle, loader gameplay and genuinely asynchronous completion remain
 unverified. The abort-plus-late-completion seam is covered by
 `PingSelectorReleaseTest` and `ClientPingRuntimeInteractionTest`.
 
-`CancelCandidatePickerTest` covers press-ray cone filtering and nearest-candidate
-selection, while `ClientMarkerStoreTest` covers owner and dimension retrieval.
-Those seams do not runtime-cover a retained stale or display-hidden marker
-reaching cancellation and then being rejected by the server without a local
-fallback. `ClientBusinessDiagnosticsTest` covers failed ordinary resolution and
+`ClientBusinessDiagnosticsTest` covers failed ordinary resolution and
 optional candidate finalization warnings, restricted-capture context,
 incomplete or missing precise slots, selector preview and close failures, chat
 template lookup and marker-display consumption. A separate
@@ -51,6 +47,84 @@ template lookup and marker-display consumption. A separate
 authorized property release with a pending reset preview. These are headless
 coordinator, refresh-controller and logging seams, not live input, native world
 scanning or a Distant Horizons trace.
+
+### Cancellation and retained-winner interleaving
+
+`CancelCandidatePickerTest` covers press-ray cone filtering and nearest-candidate
+selection. Store-level owner, dimension and authoritative-expiry checks for
+local dismissal are inventoried under
+[identity and authority](identity-authority.md#client-marker-runtime-coverage).
+`ClientPingRuntimeCancellationSamplingTest` drives the production cancellation
+sampling against a synthetic client level. A single capture-local
+rendering-entity traversal attempts the requested UUID lookups and exits early
+once every requested UUID has a raw match. When no UUID is requested, no
+traversal occurs. A UUID absent from the collection is not searched for again.
+If the first matching entity has been removed, each marker uses its own fallback
+anchor; a later duplicate is not used. The suite also covers direct lookups and
+type checks for each runtime-id candidate, an experience orb's live point, and successive
+presses in one tick observing spawn, movement and removal with one traversal
+per press. These are headless runtime-port fixtures, not live entity lookup,
+input delivery, a complete client frame or multiplayer.
+
+`ClientPingRuntimeInteractionTest` covers the cancellation path through real
+wheel release, runtime dispatch and store, with candidate positions, time, mouse
+ownership, asynchronous completion and transport as test ports. The physical
+press that supplies the aiming ray locks the nearest own stored marker or the
+empty result; opening and focusing send nothing, and confirmation sends at most
+one request for the locked ID. Its cases show that:
+
+- `unpingKeepsTheMarkerThatWasInTheConeAtPhysicalPress` covers a ready selector,
+  a pending asynchronous capture and an invalid-viewport-delayed open: each
+  keeps the press-time marker after later candidate and ray changes make another
+  own marker eligible;
+- an empty lock does not acquire a marker that appears before release, and an
+  aborted or abandoned interaction cannot lend its lock to a new press;
+- a locked marker already recorded by the client as authoritatively removed
+  sends no request and does not fall back to another own marker;
+- an owner's local dismissal of an authoritatively expired, still-visible
+  marker, whether the expiry precedes the press or arrives before confirmation,
+  sends no `REMOVE`, removes the local record, and a delayed creation cannot
+  revive it;
+- the two parameterized arrival orders of the expiry and `NOT_FOUND` response
+  for one active Unping are handled;
+- a remove denial or stored-owner mismatch leaves the expired record in place;
+- `ClientPingRuntimeInteractionTest#fallbackStaleOwnUnpingSendsOneRemoveWithoutDismissingTheVisual`
+  covers an own candidate that is `STALE` only through local packet-loss
+  fallback: one `REMOVE` is sent and the visual remains until an authoritative
+  `CANCELLED`, rather than being dismissed without expiry evidence.
+
+Compatibility and Danger entry points keep a separate locking edge: the rapid
+second physical press supplies the cancel ID while its virtual hold keeps the
+first press's timing, and later clicks only extend that hold; a deferred fresh
+press locks from its own raw edge. A press that terminates a virtual wheel locks
+the new interaction before the closing wheel dismisses its already-expired
+choice, including the case where that marker is still nearest; the new lock
+therefore reflects the pre-dismissal candidate positions.
+`overdueVirtualInventoryWheelGivesThePhysicalPressToTheStayingSession` covers an
+overdue virtual inventory wheel settled by the press or the frame first: both
+retain the original selector token and preview, start no ordinary capture or
+Unping snapshot, and the same tap commits the original inventory `SELECT` once.
+The held adjacent Danger tap uses its own physical press for wheel timing and
+the lock. An ordinary press keeps its lock across Precise branch entry and exit.
+
+At the state seam, `PingSelectorReleaseTest` covers a locked cancellation
+emitted only for the confirming release and only once, with duplicate and wrong,
+stale or superseded tokens unable to consume it or fall back;
+`PingInteractionStateMachineTest` covers center confirmation with and without a
+locked candidate.
+
+`ClientPingRuntimeInteractionTest` covers retained-winner interleaving across a
+same-connection view reset: old assignments are retired while a stored record's
+last winner survives either the expiry-first or empty-winner-first order;
+old-view winner and removal packets are rejected; a new-view non-empty
+assignment replaces the tail; a reset drops an assignment with no matching local
+record; and session close or a new epoch discards history and removal evidence.
+
+The fallback-only case receives `CANCELLED`; it does not exercise a rejection
+of that `REMOVE`. These port tests do not exercise real input delivery,
+transport, server adjudication or multiplayer, or the separate natural-expiry
+eviction and same-ID replay path. The live press-edge and moving-target scenario
+is outside these port tests' evidence.
 
 ### Gesture shortcut opening
 
@@ -72,37 +146,59 @@ enabling during a pending gesture. The alternative-eligibility cases in
 `PingInteractionStateMachineTest` cover capture readiness, held present, token
 ownership, release precedence and abort. This is headless input-model,
 runtime-port and state-machine evidence, not live camera, rebound-key delivery,
-GLFW ownership or loader gameplay; the
-[manual gesture scenarios](manual-integration.md#pending-manual-and-integration-matrix)
-remain pending. Configuration persistence is under
+GLFW ownership or loader gameplay. Configuration persistence is under
 [configuration verification](configuration-ui.md#inventory-and-spatial-selector-configuration).
 
 ## Precise live candidate capture
 
-The [live-capture owner](../../architecture/picking/capture.md#precise-live-candidate-capture)
-has focused headless evidence across allocation, refresh-controller, session,
-release-admission and paint-admission seams:
+Headless tests cover
+[Precise live candidate capture](../../architecture/picking/capture.md#precise-live-candidate-capture):
 
 - `FrozenCandidateAcquisitionTest` and `CandidateCaptureLifecycleTest` cover
-  bounded allocation and de-duplication, retained class and face, nearest
+  allocation and de-duplication, retained class and face, nearest
   same-category competition and tie order, missing versus incomplete evidence,
-  specific and generic class consumption, provider-local equivalence, immutable
-  evidence and work guards, exhaustive-oracle agreement, near-contact
-  same-identity results, and same-token, duplicate, superseded, aborted and
-  reentrant completion fences with ordinary readiness when finalization fails.
+  an incomplete scanned class staying unavailable even when the ordinary result
+  matches it, specific and generic class consumption, provider-local equivalence,
+  immutable evidence, near-contact same-identity results, and same-token,
+  duplicate, superseded, aborted and reentrant completion fences with ordinary
+  readiness when finalization fails.
 - `NativeBlockCandidateScanTest`, `NativeBlockCandidateRegressionTest` and
   `NativeBoundaryFaceProvenanceTest` cover native block and fluid shapes behind
   blockers, finite-segment and loaded access gates, actual surface coordinates
-  and faces on long oblique rays, moving-piston access, bounded work, incomplete
-  rather than certified prefixes, origin containment, no adjacent owner
-  expansion, and boundary contact provenance through the production scan,
-  snapshot factory and frozen allocation.
-- `RaycastSupplementalCandidateTest` and `NativeEntityEnumerationBudgetTest`
-  cover farther entity candidates, exact-owned non-hit rejection without coarse
-  fallback, frozen geometry ownership, selection filters, canonical multipart
-  and XP locators, and bounded lazy enumeration charging nonmatches before
-  filtering; the exported report seams remain finite and failure-bounded. The
-  multipart case is a factory fixture, not a dragon-world or rendering test.
+  and faces on long oblique rays, moving-piston access, origin containment, no
+  adjacent owner expansion, and boundary contact provenance through the
+  production scan, snapshot factory and frozen allocation. The traversal cases
+  also reach late supported stone after many loaded neighbor reads and keep a
+  later hit on another axis reachable when one delta component is subnormal
+  within a cell. An endpoint outside the integer grid leaves the tested scan
+  incomplete before its first cell read. A malformed shape after a provisional
+  hit also leaves the scan incomplete.
+- `NativeEntityEnumerationTest` drives the raw visible entity lookup at fixture
+  level: the lazy `getAll` view returns off-ray entries without an
+  entity-section walk, and a real iterator fault after a usable provisional
+  entry propagates so the partial iteration is not treated as completion.
+- `RaycastSupplementalCandidateTest` covers farther entity candidates,
+  exact-owned non-hit rejection without coarse fallback, frozen geometry
+  ownership, selection filters, and canonical multipart and XP locators; the
+  exported report seams remain finite and failure-bounded. A later native read
+  failure leaves both scanned block categories incomplete. The ordinary trace
+  retains its original hit; the derived Location uses the nearer contact already
+  observed on the same block. The multipart case is a factory fixture, not a
+  dragon-world or rendering test.
+- `PreciseCandidateTraversalTest` drives the public `traceDirectionalCandidates`
+  path against a constructed headless client level: 2,048 raw entries repeat one
+  off-ray entity, the fixture registers no exact owner, and the only eligible
+  entity lies beyond the ordinary native segment. The ordinary result stays a
+  `MISS`, the certified supplemental hit carries that entity's identity, and the
+  duplicates add no candidate. A further case places the target's inflated pick
+  box around the ray origin: the ordinary trace selects that entity at the
+  origin, a zero-length ordinary segment still reports `MISS`, and the Precise
+  scan certifies the same entity at distance zero with one evidence entry, so
+  the camera is excluded. Real `Minecraft` view-vector cases at a yaw of -45
+  degrees accept a center exactly 60° from the look direction and reject
+  adjacent representable centers one double-precision step outside in both
+  ordinary and Precise results; one rejected case would still tie under rounded
+  squared-distance comparison.
 - `PreciseCaptureRefreshTest` covers the production refresh controller:
   immediate entry then the frozen period, re-entry not duplicating the first
   scan, pause, restart and stop, native slots before the location request,
@@ -126,23 +222,28 @@ release-admission and paint-admission seams:
   choice. These are recording-port frame and helper checks, not `GuiGraphics` or
   GPU submission.
 
-These are allocation, capture, native-shape, enumeration, refresh-controller,
-session, paint-admission, production-frame recording-painter and runtime-port
-seams. The period key's config and persistence coverage is under
+The period key's config and persistence coverage is under
 [configuration verification](configuration-ui.md#inventory-and-spatial-selector-configuration),
 and the transformed Sable scanner has its own
-[integration evidence](integrations.md#sable-integration-coverage). Real
-GPU/render submission, game-world and chunk lifecycle, provider behavior,
-multiplayer, loader input callbacks and unbounded-geometry wall-clock behavior
-remain unexercised; the manual Precise scenarios remain pending.
+[integration evidence](integrations.md#sable-integration-coverage). Game-world
+and chunk lifecycle, full client ticks, installed-provider behavior,
+multiplayer, loader input callbacks and GPU/render submission remain
+unexercised; unbounded-geometry wall-clock behavior remains unmeasured, and the
+manual Precise scenarios remain pending.
 
 ## Selection-policy and input-state seams
 
 The [selection policy](../../architecture/picking/selection_policy.md) has
 focused unit and state-seam evidence:
-`ToggleInputStateTest` covers physical-press de-duplication until release,
-including repeated presses before the next release; GUI/screen eligibility is
-exercised at that seam; `ClientConfigTargetSelectionTest` covers
+`ToggleInputStateTest` covers the native callback `GLFW_PRESS` origin and the
+non-repeat gate: one press authorizes one vanilla mapping click; a screen at
+either the callback origin or the mapping destination prevents a toggle;
+`GLFW_REPEAT` and focus loss cannot become a new press; and a release permits a
+fresh focused press.
+`NativeSelectorMixinContractTest` adds the keyboard and mouse toggle hooks: the
+HEAD origin observes GLFW's action parameter before UI or loader consumption,
+the argument modification preserves the native key, and only the vanilla
+mapping click is gated. `ClientConfigTargetSelectionTest` covers
 model-initialized target-selection choices, block mode, JSON round trip and
 missing or null transparent-block choices. `EntitySelectionBlacklistTest` covers
 registration aggregation, idempotent removal and the optional Create boundary;
@@ -157,8 +258,7 @@ scanner pass-through and selection of a target behind the matching block.
 These fixtures supply IDs through a resolver seam; no unit test uses actual
 loaded Cyclic blocks through the registry resolver. The ordinary world-clip
 route has source and bytecode review, not end-to-end test coverage. No live
-Cyclic or TIAB validation is recorded; the scenarios remain in the
-[manual matrix](manual-integration.md#cyclic-and-tiab-selection).
+Cyclic or TIAB validation is recorded.
 
 The blacklist is distinct from block whitelist, block-shape and display-blacklist
 behavior, and is not raycast-filter coverage: spectator exclusion is implemented
@@ -178,23 +278,111 @@ source ID and priority visible only at higher disclosure, a disabled backend
 collecting nothing, and registration or snapshot progress while a warning sink
 is blocked.
 
+`EntityParentFrameTest` covers detached affine frame validation, remote
+fractional point projection and anchor-only parent scaling.
+`NativeLocalShapeTraversalTest` covers the native local-shape traversal: the
+nearest surface can come from the last of many disjoint native boxes on a long
+shape, and a later real neighbor-read failure rejects the earlier provisional
+local hit instead of returning it.
+`LoadedExactCandidateTest` covers native-first ordinary discovery, loaded
+supplement only for a first-owner `LOADED_EXACT` owner, identity deduplication,
+and exact endpoint exclusion. `PickingFrameContextTest` covers an
+ordinary-world block retaining its point under optional pose-scope failure, an
+unproven contained block retaining its native result without a world point or
+arbitrary entity replacement, and detached block proof.
+`RaycastCandidateFlowTest` covers projected native-block world competition
+while preserving the native face/proof and owned non-hit rejection. Its
+origin-contact cases cover an inflated pick box containing the press origin: a
+45-degree diagonal center competes at the origin and the first origin contact
+in iteration order wins the equal-distance tie, while a center at the cone's
+apex is eligible; the inclusive 60-degree edge is accepted but a center just
+beyond it, a center behind the ray, an exterior box the ray misses, a start or
+end on the inflated face and a zero-length segment still miss. An origin inside
+the pick box does not revive an owned `MISS`, `UNAVAILABLE` or `FAILED` outcome,
+and every traced candidate still reaches its owner; an owned exact surface can
+win when the origin is inside and the box center is behind. These are headless
+entity fixtures, not live entity selection, loader input or a rendered frame;
+no passing run is recorded here.
+
 These tests preserve whole-entity identity and exercise the non-optional engine
-boundaries. They do not constitute an in-game Create validation. Create-specific
-coverage is under
-[Create raycast seams](integrations.md#create-raycast-seams).
+boundaries. They do not constitute in-game Create or Aeronautics validation.
+Create-specific coverage is under
+[Create raycast seams](integrations.md#create-raycast-seams); Aeronautics
+provider-specific coverage is under
+[Aeronautics rotor coverage](integrations.md#aeronautics-rotor-coverage).
 
 ## Capture and acceptance range
 
 `ServerConfigBoundsTest` covers server range clamps,
 `RaycastCandidateFlowTest` covers native candidate and raycast seams, and
-`OptionalDependencySafetyTest` covers absent optional-integration safety. Source
-and focused seam evidence establish the native
-`min(raycastDistance, pingDistance)` limit, the independent Distant Horizons
-trace, the server acceptance range, Create and Sable reuse of the finite native
-segment in the ordinary trace, and the hold-frozen client `pingDistance` bound
-of the Precise live casts. No automated end-to-end test exercises the entire
-client capture, optional-provider, packet and authoritative server-acceptance
-pipeline.
+`OptionalDependencySafetyTest` covers absent optional-integration safety. Its
+isolated class loader proves the disabled Distant Horizons boundary resolves
+and returns no completion with the Distant Horizons API absent; the Common test
+runtime also carries the pinned Distant Horizons 5.1.0 test-scope API, so
+absence is not established by the whole test runtime.
+
+`DistantHorizonsWorldTraceTest` drives the production asynchronous adapter with
+recording API proxies for the pinned Distant Horizons API. It covers choosing the
+captured client world when another world of the same dimension type is loaded,
+single-player integrated-server and client-alias binding, no trace start when
+the match is not unique, and an unrelated, absent or disappearing world.
+Per-world terrain-cache isolation after replacement is also covered.
+
+`DistantHorizonsWorldTraceTest` also drives an injected clock over one client
+level and Distant Horizons data source: the same binding reuses a cached hit
+until the cache expires, then replaces the cache and reads fresh terrain on a
+later trace. If allocation fails, that trace returns no hit. The idle expired
+cache is cleared once, and the next trace can read fresh terrain. With two
+readers still using the expired cache, both return their original hits and the
+cache is cleared once, after the last reader finishes.
+
+On the same client level, a binding change before the client-thread callback
+does not publish the old result. A failed retired-cache cleanup does not block
+the replacement trace or overwrite a valid in-flight result, and the stale hit
+is still discarded by that binding fence. The [Distant Horizons
+integration](../../integrations/distant-horizons.md) owns world
+matching and terrain-cache lifetime; the ordinary and Precise captures retain
+the generation and level fences described by
+[capture](../../architecture/picking/capture.md). These are headless API
+fixtures, not an installed Distant Horizons runtime or a live single-player or
+multiplayer session.
+
+`ClientPingRuntimeNativeRangeTest` drives the production capture and native
+trace against a headless client level. An ordinary miss where Minecraft's
+lookup-table view vector would place the scaled endpoint outside the squared
+limit keeps its captured location inside that limit and on the captured ray
+while still reaching the boundary to world-coordinate precision; the synthetic
+miss path used when the trace yields no result produces the same location.
+At large absolute world coordinates, where an exactly normalized direction
+still overshoots after coordinate rounding, the native segment and the
+separately bounded supplemental scan each end within their own limit, the
+block-capture provider receives the bounded supplemental endpoint, and the
+ordinary result remains a `MISS`. An exactly representable boundary miss is not
+shortened, and a native block hit keeps its contact and face instead of
+becoming a range endpoint. The same fixture drives the real Precise Distant
+Horizons adapter: the native scan requests the distant completion, the adapter
+receives the raw captured ray and the integration's own longer range, and a
+camera turn before the callback does not change the request's bounded no-hit
+endpoint, which matches the ordinary location. With a test block beyond native
+range but inside Ping range, an ordinary short press captures the native miss
+endpoint without probing farther cells or making a supplemental entity pass.
+The live Precise scan reaches that same block. An ordinary press on a block
+inside native range preserves its identity and hit face.
+`MinecraftAuthoritativeTargetValidatorTest` carries the represented-boundary
+concern into acceptance: at a large-coordinate edge the production validator
+accepts a Location target on the boundary and rejects the next representable
+outside point as `OUT_OF_RANGE`. These are headless level, runtime-port and
+recording-API fixtures, not live input, a complete client frame, an installed
+Distant Horizons runtime, packet exchange or a multiplayer session; no passing
+run is recorded here.
+
+Source and focused seam evidence establish the native
+`min(raycastDistance, pingDistance)` limit and its represented-endpoint cap, the
+independent Distant Horizons trace, the server acceptance range, Create and
+Sable reuse of the finite native segment in the ordinary trace, and the
+hold-frozen client `pingDistance` bound of the Precise live casts. No automated
+end-to-end test exercises the entire client capture, optional-provider, packet
+and authoritative server-acceptance pipeline.
 
 ## Back-hover return state
 
@@ -272,9 +460,20 @@ cancellation readiness before negotiation and after `OFFER` alone without
 `REMOVE`, a later ready cancellation sending once while the following create
 retains the sole allowance, a nearer same-identity precise contact preserving the
 inventory face, and an external-block press carrying its provider-local face. It
-also covers native-only
-ownership handoff, resize before an immediate release, saturated raw baselines,
-frozen trail and style preferences, and the inventory-fraction press path.
+also covers native-only ownership handoff, resize before an immediate release,
+saturated raw baselines, frozen trail and style preferences, and the
+inventory-fraction press path. The press-edge Unping lock and its compatibility,
+Danger and overdue inventory-wheel cases are inventoried under
+[cancellation and retained-winner interleaving](#cancellation-and-retained-winner-interleaving).
+
+The same suite covers follow-server marker timing across the two parameterized
+sample/winner orderings, observed progress versus an extended local pause and
+client ticks, fallback from the latest upsert with local grace, a delayed
+same-ID upsert, and the eviction boundary. Its
+`clientLevelChangeEntryUpdatesTheObservedWorldBeforeTheNextFrame` case covers
+immediate old-world interaction abort and no repeated abort on the next tick; it
+drives the runtime entry directly, not the shared `LevelRenderer.setLevel`
+injection or a live game/heap unload.
 
 `ClientPingDispatchReceiptTest` covers actual-send receipt and transport-failure
 rollback. `WheelMouseCaptureLifecycleTest` covers native `DISABLED` ownership,
@@ -407,16 +606,16 @@ option-codec and locale coverage is under
 These are headless model, controller, runtime-port, session and mixin-contract
 seams. They do not establish native callback delivery, Mixin application,
 constructed or rendered settings screens, assembled locale labels, GPU
-submission, loader gameplay or multiplayer behavior; the pending live scenarios
-remain in the
-[manual matrix](manual-integration.md#pending-manual-and-integration-matrix).
+submission, loader gameplay or multiplayer behavior.
 
 ## Known automated gaps
 
 - the shared client/server `entity_block` classification path end to end,
   including synthetic-face provenance from every optional producer;
-- stale or display-hidden cancellation followed by authoritative rejection with
-  no local fallback;
+- cancellation of a display-hidden or fallback-only `STALE` record without
+  authoritative expiry: the path from rejection of its `REMOVE` to keeping the
+  local record without retrying another candidate; real transport and server
+  adjudication also remain unverified;
 - real input-callback and render-frame behavior for rapid and deferred long-press
   compatibility;
 - the content-intent toggle lacks a dedicated asynchronous press-edit-to-next-hold
@@ -428,7 +627,8 @@ remain in the
   context, including the token invalidation and ownership-clear boundary; the
   headless abort-plus-late-completion seams are inventoried above;
 - live GUI and screen input callbacks and physical key-repeat behavior across
-  Fabric, Forge and NeoForge, beyond the input-state seams;
+  Fabric, Forge and NeoForge, beyond the raw callback and mapping-contract
+  seams, including GLFW/loader delivery and Mixin application;
 - the complete range pipeline across native, Distant Horizons, Create and Sable,
   packet transport and authoritative acceptance;
 - deterministic local-position ordering of equal-distance, same-kind local child

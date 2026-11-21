@@ -95,7 +95,9 @@ root, ordinary and approved Sable reports remain independent, and the
 asynchronous case unwraps its cause, completes once with no hit, and lets a
 throwing completion callback propagate. These are direct guard and completion
 seams, not an installed Sable or Distant Horizons runtime, an actual
-asynchronous trace, loader startup or game-session evidence.
+asynchronous trace, loader startup or game-session evidence. Separate headless
+trace coverage is inventoried under
+[capture and acceptance range](interaction.md#capture-and-acceptance-range).
 
 `ExternalBlockRegistryDiagnosticsTest` covers throwing and null-result providers
 at validation, materialization, refresh, name, observation and candidate/committed
@@ -275,11 +277,10 @@ Common identity, wire and source-gate coverage is inventoried under
 [identity authority](identity-authority.md#logical-container-identity-and-authority),
 [presentation transport](presentation.md#logical-target-wire-coverage) and
 [container rendering](rendering.md#container-presentation-subjects). Installed
-Create synchronization, GPU shell appearance, multiplayer and tank topology
-split/merge remain in the [logical container pending
-matrix](manual-integration.md#logical-container-targets-and-whole-presentation);
-performance remains in the [fluid inventory pending
-matrix](manual-integration.md#fluid-inventory).
+Create synchronization, GPU shell appearance, multiplayer, tank topology
+split/merge and the live tank performance comparison are not established by
+these headless seams; the fluid inventory performance boundary is recorded in
+[fluid inventory coverage](inventory.md#fluid-inventory-coverage).
 
 ## Native fluid presentation
 
@@ -333,6 +334,42 @@ propagate unchanged. The shell-loading failure case in
 attached throwable. Neither seam exercises an installed Create contraption or
 live native bounds.
 
+## Aeronautics rotor coverage
+
+The [Aeronautics contract](../../integrations/aeronautics.md) owns behavior.
+`AeronauticsPropellerRaycastAdapterTest` covers the exact singleton rotor ID and
+`LOADED_EXACT` metadata, registration without optional-type resolution, lazy
+delegate failure retained as ownership, idempotent session lifecycle and
+re-registration, isolated class loading with Create, Flywheel, Sable and Aero
+packages hidden, owned non-hit rear-candidate selection, bounded diagnostics,
+and `NORMAL`/disabled accessor isolation.
+
+`AeronauticsPropellerRaycastEngineTest` covers an independent normal/gyro
+quarter-turn oracle, parent translation/rotation/nonuniform scale with
+anchor-only scaling, remote fractional native anchors, detached model and
+snapshot inputs, core/blade hits versus gaps and bounds misses, frozen hidden,
+block-entity and fluid state, transformed camera collision, and invalid or
+singular local matrices. It also covers a far-origin rotated pivot with a fixed
+transformed ray endpoint: the ray hits a blade face one representable step
+before the endpoint and misses a face at or beyond it. The test puts the only
+hittable surface last in a 20,001-entry scan and asserts that the trace hits it.
+A separate case confirms that a later capture failure rejects the rotor even
+though the first entry alone is hittable.
+
+`NeoClientAeronauticsLifecycleTest` covers absent or unrelated mods not
+resolving the owner, initialization/join registration, leave teardown, failed
+registration retry, and lifecycle state reporting. The
+[frame-aware marker and outline placement](rendering.md#frame-aware-marker-and-outline-placement)
+evidence covers the shared marker projection and direct dispatcher placement.
+Existing Create tests remain the regression guard for the four Create IDs.
+
+These are headless or virtual seams. They do not load Aeronautics, Create, Sable
+or Flywheel in a launched game, apply an actual Aeronautics virtual transform,
+or establish live normal/gyro, sublevel, marker, outline, content, multiplayer,
+unload or performance behavior. Source/API review covered Sable `2.0.5`/`2.0.6`,
+Sable Companion `1.6.0`, Aeronautics `1.3.2` and Create `6.0.10`; the installed
+runtime combination is unknown, not certified by these seams.
+
 ## Sable integration coverage
 
 The linked [Sable integration](../../integrations/sable.md) topic remains the
@@ -340,8 +377,8 @@ behavior owner for [client capture and presentation](../../integrations/sable.md
 [server validation and materialization](../../integrations/sable.md#server-validation-and-materialization),
 [server information sampling](../../integrations/sable.md#server-information-sampling),
 and [refresh lifecycle](../../integrations/sable.md#refresh-lifecycle). Focused
-seams provide limited structural, locator-codec, provider-observation and
-diagnostic evidence:
+seams provide limited structural, locator-codec, provider-operation,
+observation and diagnostic evidence:
 
 - `SableClientCompanionAccessContractTest` statically parses the compiled
   access-class constant pool, requires the exact
@@ -356,6 +393,27 @@ diagnostic evidence:
   resolution select only their own provider method; unknown or legacy providers
   and a new-API `LinkageError` fail soft without materialization, observation or
   reference allocation, and a candidate read never materializes a reference;
+- `SableExternalBlockAuthorityTest` drives the production provider's validation,
+  materialization, refresh, observation and release operations:
+  - a loaded block in its own plot is accepted; a position in another plot or
+    the ordinary world is rejected during validation, materialization and name
+    resolution before reading either plot's chunk, block state, pose, block
+    entity or saved tracking data; and materialization repeats the plot proof
+    after validation;
+  - an unresolved sub-level or plot, or an unloaded plot chunk, is temporarily
+    unavailable; a loaded native chunk that does not match the requested plot
+    chunk is invalid without a content read; a containment-probe failure yields
+    an invalid result and a cause-bearing diagnostic, and a later validation
+    recovers;
+  - with the optional content-read discovery unavailable, validation,
+    materialization, refresh and Basic observation still work while the preview
+    read source stays empty;
+  - refresh follows a tracking point that has moved into another sub-level,
+    keeps the committed stable identity and updates the locator and anchor
+    without allocating a replacement tracking point; observation of a point in
+    another sub-level's plot stays
+    temporarily unavailable without a state or pose read; and release removes
+    the tracking point.
 - `SableExternalBlockObservationTest` covers the stable-entry helper selecting
   the committed tracking ID's current sublevel and local position without
   changing entry or reference maps, and failing closed for non-live references,
@@ -366,15 +424,43 @@ diagnostic evidence:
   live identity and loaded state before content reads, member rejection outside
   the resolved sub-level, and a committed read that follows the current tracking
   point, leaves maps unchanged and cannot resolve after release;
+- `ExternalBlockFramePresentationTest` covers the production external frame path
+  with a synthetic bound plot: one shared ordered subject/coverage snapshot for
+  the model and late native passes, per-source/per-subject success, vanilla door,
+  bed and both chest pairs from either end, direct fallback for changed, foreign
+  or unloaded neighbors, and an unlike-registry proxy owner with handled-empty
+  unavailable state. Details are under
+  [external block frame presentation](rendering.md#external-block-frame-presentation);
 - `SableSupplementalRaycasterTest` covers the transformed scanner with real
   Companion poses and native shapes but recording sublevel ports: translated and
   rotated hits behind a blocker or after a miss, world-segment range under
   nonuniform scale, detached pose evidence, provider-local equivalence,
-  entry/shape-work admission, loaded/invalid-pose gates, selection-policy reuse,
-  removed entries and absent-Sable safety. It also covers provider-local native
-  face copying, origin containment and faceless synthetic/inside/unobserved
+  loaded/invalid-pose gates, selection-policy reuse, removed entries,
+  empty provider results when Sable is disabled, provider-local native
+  face copying, origin containment, faceless synthetic/inside/unobserved
   contacts, and nearer same- or different-locator contacts installing only their
-  own face without changing the frozen ordinary face;
+  own face without changing the frozen ordinary face. The scan finds the last
+  selectable entry in a 301-entry source. A size change during the scan leaves
+  the result incomplete. In one subnormal transform the grid traversal cannot
+  advance and reports an incomplete result before any grid or world read. A
+  four-block horizontal ray at large local coordinates still hits the chest.
+- shared affine-frame and candidate-comparison coverage is inventoried under
+  [exact entity-local picking](interaction.md#exact-entity-local-picking-and-create-raycast-seams);
+- `SableEntityFramesTest` covers the server-safe logical facade without optional
+  API access for ordinary entities, a far-origin pose copied into a detached
+  frame, world/native round trips through that copied frame under rotation and
+  nonuniform scale, exact `WORLD`/`UNAVAILABLE` boundaries, failure never
+  becoming identity, and class loading with Minecraft client and Companion
+  classes hidden;
+- `SableClientEntityFramesTest` covers render interpolation forwarding, no
+  cross-tick caching, non-finite partial ticks, and linkage failure becoming
+  `UNAVAILABLE`;
+- `SablePickingAccessTest` covers detached frozen proof bound to its native hit,
+  face preservation, local-hit projection separate from the native result,
+  a far-origin rotated frame with native/world proof round trips, nested scope
+  restoration, and unobserved or unusable poses yielding no trusted point;
+  `PickingFrameContextTest`'s acquisition and optional-scope fallback
+  coverage is inventoried in the linked interaction section;
 - `SableObservationFailureDiagnosticsTest` drives the production observation
   catch with an injected throwing reflective tracking-point stand-in: runtime
   and linkage failures return temporary unavailability with one cause-bearing
@@ -391,27 +477,38 @@ diagnostic evidence:
   `SableClientDiagnosticsTest` and `SablePresentationLogGateTest` cover recorded
   capture, server and refresh events, same-throwable identity, finite failure
   handling, provider fields lazy at `NORMAL`, under a disabled backend or under
-  suppression, a throwing descriptor supplier, the discovered
-  twelve-descriptor API list and a constructed linkage failure, absent-Sable
+  suppression, a throwing descriptor supplier, the complete discovered
+  descriptor list and a constructed linkage failure, absent-Sable
   empty capture with attempt-start and projected/vanilla fallback stages, a
   supplemental failure leaving the guard usable, and presentation cadence,
   capacity, repeated failure-class de-duplication, throwable identity and a
   disabled-debug status followed by one warning without an attached throwable.
 
-These seams do not load a Sable runtime or establish live provider reflection
-(including the additive content membership discovery), materialization,
-tracking-point reference lifecycle, live-sublevel membership and observation,
-the client chunk and prediction gates of a provider-resolved physical block, a
-live multi-member content capability, or refresh, multiplayer, GUI, network or
-in-game behavior described by those topic sections. The registry, content
-resolver and stable-entry tests are narrow production-used seams with fake
-access and in-memory state; the observation-failure fixture installs reflective
-stand-ins into uninitialized provider, server and level tokens. The external
-model and fallback routes resolve provider presentation independently, so they
-cannot guarantee that provider-local multipart or subject-type decisions came
-from one immutable shared snapshot. That is an implementation-conformance and
-automated-coverage gap, not an external exception to the shared-subject contract
-in [presentation subjects](../../architecture/rendering/presentation_subjects.md).
+These seams do not load a Sable runtime. They do not establish live provider
+reflection (including the additive content membership discovery), live
+materialization or tracking-point reference lifecycle, live-sublevel membership
+and observation, the client chunk and prediction gates of a provider-resolved
+physical block, a live multi-member content capability, live refresh,
+multiplayer, GUI, network or in-game behavior described by those topic sections.
+Wall-clock performance over a large live sublevel set remains unmeasured. The
+transformed-frame and frozen-proof seams are also headless: they do not exercise
+installed Sable or Aeronautics containment, actual render/logical poses, or a
+Create-contraption native view.
+The registry, content resolver and stable-entry tests are narrow production-used
+seams with fake access and in-memory state; the authority fixture substitutes a
+native plot index and tracking data, and the authority and observation-failure
+fixtures install reflective stand-ins into uninitialized provider, server and
+level tokens. The external frame path resolves one bound plot/read scope, frozen render
+transform and ordered subject/coverage snapshot per frame; model and late
+fallback consume the shared snapshot, and success is tracked per external source
+and subject. The synthetic-plot fixture does not establish an installed Sable
+plot, a live render pose, parent-level chunk state, actual BER/baked-model
+submission or GPU output. It uses vanilla pairs and a synthetic scoped resolver;
+installed external presentations of the optional scoped Create door,
+large-water-wheel and Simulated docking-connector resolutions remain
+unexercised.
+The Vault and fluid-tank production boundary tests remain ordinary-topology
+coverage and add no external-target evidence.
 
 ## Simulated integration coverage
 
@@ -515,8 +612,7 @@ Sable-specific gaps remain for:
   provider against a real `ServerLevel` and loaded sublevel, including current
   tracking-point relocation, sublevel rotation/translation, state or registry
   identity change, unload/reload, no-force-load behavior, and marker/session
-  lifetime; the observation tests use fake world-access tokens, in-memory
-  entry/reference maps or an injected throwing reflective stand-in;
+  lifetime;
 - the additive content read source against a live Sable runtime: companion
   containment and unique-id membership reflection, live sub-level identity and
   loaded-member checks, a live multi-member content capability, and the
@@ -524,8 +620,9 @@ Sable-specific gaps remain for:
   gates on a provider-resolved physical block and content preview through the
   wheel's Details branch in a live client/server session, including the bounded
   server fallback and its GUI and network delivery, remain unexercised;
-- provider materialization, tracking-point reference counting, rollback and
-  release, including the existing empty-audience cleanup path documented under
+- live provider materialization, tracking-point reference counting, rollback
+  and release, including the existing empty-audience cleanup path documented
+  under
   [server validation and materialization](../../integrations/sable.md#server-validation-and-materialization);
 - live-sublevel refresh through the documented available, temporarily
   unavailable, and invalid outcomes in the

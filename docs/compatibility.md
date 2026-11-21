@@ -28,7 +28,8 @@ of hard optional-mod dependencies and respect deterministic teardown handles.
 - [Create](integrations/create.md) describes the three separate NeoForge routes
   and their different Create/Flywheel gates.
 - [Sable](integrations/sable.md) describes the existing external-block provider.
-- [Capture](architecture/picking/capture.md) preserves asynchronous Distant Horizons behavior.
+- [Distant Horizons](integrations/distant-horizons.md) describes the optional
+  asynchronous terrain trace and its fail-soft boundary.
 
 Optional integration support is version- and API-shape-specific. Reflective or
 lazy discovery may fail soft when the detected implementation does not provide

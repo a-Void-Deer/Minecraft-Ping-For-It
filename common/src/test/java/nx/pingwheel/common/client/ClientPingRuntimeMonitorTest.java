@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 import net.minecraft.SharedConstants;
 import net.minecraft.client.gui.GuiGraphics;
@@ -20,6 +21,7 @@ import nx.pingwheel.common.interaction.CapturedRay;
 import nx.pingwheel.common.interaction.InteractionToken;
 import nx.pingwheel.common.interaction.TargetSnapshotFactory;
 import nx.pingwheel.common.interaction.cancel.CancellationContext;
+import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.interaction.state.TargetValidation;
 import nx.pingwheel.common.monitor.MonitorSchema.*;
@@ -38,6 +40,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localSnapshotSpanStore;
 import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
@@ -54,7 +57,9 @@ class ClientPingRuntimeMonitorTest {
 		public void capture(InteractionToken token, CapturedRay ray, ClientPingRuntime.CaptureCompletion completion) {
 			completion.complete(TargetSnapshotFactory.block("minecraft:overworld", 1, 2, 3, "minecraft:chest", true, BlockFace.NORTH), Optional.empty());
 		}
-		public CancellationContext cancellation(CapturedRay ray) { throw new AssertionError("no cancellation expected"); }
+		public CancellationContext cancellation(CapturedRay ray) {
+			return new CancellationContext(new UUID(0, 1), "minecraft:overworld", ray.origin(), ray.direction(), List.of());
+		}
 		public void syncMouse(PingInteractionPhase phase) {}
 		public void disposeMouse(boolean screenTransition) {}
 		public Optional<NativeSelectorInput.Frame> inputFrame() { return Optional.of(new NativeSelectorInput.Frame(1, 800, 600, 400, 300, true, true)); }
@@ -74,7 +79,8 @@ class ClientPingRuntimeMonitorTest {
 			var access = new Access(); var sent = new ArrayList<IPacket>();
 			var presentation = new ClientPresentation(sent::add); var inventory = new ClientInventory(sent::add);
 			var runtime = ClientPingRuntime.createForInteraction((key, color) -> fail(key), sent::add, ClientRateLimitPolicy.DEFAULT,
-				interactionClock::get, target -> TargetValidation.valid(), access, presentation, inventory, null);
+				interactionClock::get, target -> TargetValidation.valid(), access, presentation, inventory, null,
+				localSnapshotSpanStore(ClientPingRuntime.FALLBACK_EXPIRY_GRACE_TICKS), PingInteractionLogger.noop());
 			var collector = new ClientMonitorCollector(new MonitorTuning(1, 2), () -> measurementClock.getAndAdd(1));
 			var monitor = new ClientMonitorState(collector, measurementClock::get); runtime.monitor(monitor);
 			presentation.tick(true);

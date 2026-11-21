@@ -294,9 +294,7 @@ Their display states, including local-row continuity on lost authority, are
 owned by [HUD projection and
 presentation](../architecture/presentation/inventory.md#hud-projection-and-presentation).
 
-Manual scenarios remain pending in the
-[manual performance-monitor matrix](../testing/verification/manual-integration.md#performance-monitor);
-automated coverage and final combined-tree acceptance are recorded in
+Automated coverage and final combined-tree acceptance are recorded in
 [configuration verification](../testing/verification/configuration-ui.md#performance-monitor-coverage).
 
 ## Server performance category
@@ -414,23 +412,41 @@ The Marker Display Duration option displays the complete localized label
 Its value semantics are owned by
 [client configuration](../config/client.md); this page owns its displayed label.
 
+## Channel preference option
+
+The Ping Channel field edits the [local channel preference](../config/client.md#channel-preferences).
+When empty, it shows **Global** if the current server snapshot specifies `GLOBAL`.
+It shows **Synced to Vanilla Team** only if the snapshot specifies `AUTO` and the
+player is on a vanilla team. The hint follows team membership while the page is
+open. Other modes, an unknown mode, or a disconnect leave the hint blank. An
+unsaved server draft does not change it, and a new snapshot does not replace a
+channel name the player is typing.
+
 ## Client configuration loading, edits, and close
 
-The client configuration loads at client initialization. Opening or reopening
-the screen edits the already-loaded in-memory configuration and does not reload
-an externally edited file. Client modifications are live in memory while the
-screen is open; client persistence happens on the final root leave, apart from
-the file action and reset behaviors below.
+The client configuration loads at client initialization. Client option widgets
+read and edit the configuration object the handler currently holds; opening or
+reopening the screen uses that already-loaded object and does not reload an
+externally edited file. If the handler reloads and replaces that object during a
+save attempt, the screen refreshes the displayed values and subsequent edits use
+the replacement. Client modifications are live in memory while the screen is
+open; client persistence happens on the final root leave, apart from the file
+action and reset behaviors below.
 
 On final root close, the screen first attempts local `saveSafely`; only if that
-succeeds does it commit any dirty server-settings draft. It remains open if
-either attempted step fails, and an invalid server-settings draft also blocks
-the close and routes to the owning category and first invalid field, checking
-Send Rate before Marker Duration before Performance so a draft with several
-invalid leaves lands deterministically. Because
-local persistence is attempted first, it can succeed before a later
-server-draft commit fails. The snapshot-request, correlation, field-mask, and
-no-acknowledgement transaction is owned by
+succeeds does it commit any dirty server-settings draft. On a failed local save,
+the screen reports the local save failure without claiming that the
+configuration file was written and offers the player a choice: continue
+editing, retaining the server-settings draft so the next explicit root close
+retries both steps, or leave without saving, which returns to the parent screen
+without sending the ordinary server-settings update and does not guarantee that
+already-applied in-memory client changes are rolled back. After a successful
+local save, an invalid server-settings draft blocks the close and routes to the
+owning category and first invalid field, checking Send Rate before Marker
+Duration before Performance so a draft with several invalid leaves lands
+deterministically. Because local persistence is attempted first, it can succeed
+before a later server-draft commit fails. The snapshot-request, correlation,
+field-mask, and no-acknowledgement transaction is owned by
 [changing server configuration](../architecture/config/changing-server-config.md),
 so the screen does not promise that the server applied or persisted an update.
 
@@ -441,12 +457,12 @@ per-category or per-visit section. This session covers the Channel & Players,
 Send Rate, Marker Duration, Performance, and Debug categories, including the
 monitoring toggle, the performance-monitor Preview and Tracking collection
 switches, the server logging-profile control, and the twenty-three inventory
-administration leaves. Entering the server
-scope shows its overview and requests the current server configuration when the
-client holds a live connection and the session holds no loaded or in-flight
-snapshot. The loaded snapshot, the draft, and any in-flight request are retained
-across scope-tab switches and category navigation; entering an ordinary server
-category does not request another snapshot. The separate Server
+administration leaves. Entering the server scope or opening **Channel, Sound &
+Notices** in the client scope requests the current server configuration when the
+client is connected and the session has no loaded or in-flight snapshot. The
+loaded snapshot, the draft, and any in-flight request are retained across scope
+and category changes; entering an ordinary server category does not request
+another snapshot. The separate Server
 Presentation category is not part of this session; its policy snapshot and
 status follow the independent workflow described in
 [Server presentation category](#server-presentation-category).
@@ -523,8 +539,10 @@ determines the reset result;
 [configuration revisioning](../architecture/config/revisioning.md) owns handler
 protection and persistence policy.
 
-Pending manual external-edit and UI checks are in the
-[verification matrix](../testing/verification/manual-integration.md#pending-manual-and-integration-matrix).
+Headless settings-screen input, close, external-replacement and reset coverage is
+under
+[assembled settings-screen input and close coverage](../testing/verification/configuration-ui.md#assembled-settings-screen-input-and-close-coverage);
+live external-edit and UI behavior is outside that evidence.
 
 ## Evidence boundary
 

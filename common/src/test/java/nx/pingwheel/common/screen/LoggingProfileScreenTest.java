@@ -59,6 +59,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -228,13 +229,13 @@ class LoggingProfileScreenTest {
 	void loggingRowFollowsTheHandlersReplacementConfigAfterAStaleMigrationSave(@TempDir Path directory) throws Exception {
 		Path path = directory.resolve("client.json");
 		Files.writeString(path, "{\"pingforit-version\":\"0.4.0-pfi-beta1\",\"loggingProfile\":\"NORMAL\"}\n");
-		ConfigHandler<ClientConfig> handler = newClientHandler(path);
+		ConfigHandler<ClientConfig> handler = newClientHandler(path, new AtomicBoolean(true));
 		handler.load();
 		ClientConfig constructionTimeConfig = handler.getConfig();
 		assertEquals(LoggingProfile.NORMAL, constructionTimeConfig.getLoggingProfile());
 		LoggingProfile previousRuntime = Diagnostics.profile(DiagnosticSide.CLIENT);
 		try {
-			withScreen(constructionTimeConfig, handler::getConfig, (screen, client) -> {
+			withScreen(handler::getConfig, (screen, client) -> {
 				openCategory(screen, Category.CLIENT_DEBUG);
 				LoggingProfileButton button = loggingProfileButton(screen);
 				assertEquals("Logging Detail: Normal", button.getMessage().getString());
@@ -249,33 +250,35 @@ class LoggingProfileScreenTest {
 				assertEquals(LoggingProfile.NORMAL, constructionTimeConfig.getLoggingProfile(),
 					"the construction-time fixture is not the handler's current object");
 				assertSame(screen, client.screen, "the screen remains open after the guarded save failure");
-				assertSame(button, loggingProfileButton(screen),
-					"the same mounted logging button is exercised across the replacement");
-				assertEquals("Logging Detail: Normal", button.getMessage().getString(),
-					"the same mounted button is exercised across the replacement");
+				focus(screen, button);
+				assertFalse(screen.keyPressed(0, 0, 0));
+				LoggingProfileButton refreshed = loggingProfileButton(screen);
+				assertNotSame(button, refreshed);
+				assertEquals("Logging Detail: Detailed", refreshed.getMessage().getString());
+				assertLoggingFocused(screen);
 
-				button.onPress();
+				assertTrue(screen.keyPressed(32, 0, 0));
 				assertEquals(LoggingProfile.NORMAL, replacement.getLoggingProfile(),
 					"the getter read the replacement handler config");
 				assertEquals(LoggingProfile.NORMAL, constructionTimeConfig.getLoggingProfile(),
 					"the stale construction-time config was not edited");
 				assertEquals(LoggingProfile.NORMAL, Diagnostics.profile(DiagnosticSide.CLIENT));
 
-				button.onPress();
+				assertTrue(screen.keyPressed(32, 0, 0));
 				assertEquals(LoggingProfile.DEEP, replacement.getLoggingProfile(),
 					"the setter wrote the replacement handler config");
 				assertEquals(LoggingProfile.NORMAL, constructionTimeConfig.getLoggingProfile(),
 					"the stale construction-time config still has no edit");
-				assertEquals("Logging Detail: Detailed", button.getMessage().getString());
+				assertEquals("Logging Detail: Detailed", refreshed.getMessage().getString());
 				assertEquals(LoggingProfile.DEEP, Diagnostics.profile(DiagnosticSide.CLIENT),
 					"the replacement config's selected profile is published immediately");
 
 				PhysicalAltKeys.hold(true);
-				button.onPress();
+				assertTrue(screen.keyPressed(32, 0, 0));
 				assertEquals(LoggingProfile.DEBUG, replacement.getLoggingProfile(),
 					"the temporarily available Debug candidate also writes the replacement handler config");
 				assertEquals(LoggingProfile.NORMAL, constructionTimeConfig.getLoggingProfile());
-				assertEquals("Logging Detail: Debug", button.getMessage().getString());
+				assertEquals("Logging Detail: Debug", loggingProfileButton(screen).getMessage().getString());
 				assertEquals(LoggingProfile.DEBUG, Diagnostics.profile(DiagnosticSide.CLIENT));
 			});
 		} finally {
@@ -342,7 +345,7 @@ class LoggingProfileScreenTest {
 		initial.setLoggingProfile(LoggingProfile.DEBUG);
 		var handlerConfig = new AtomicReference<>(initial);
 		try {
-			withScreen(initial, handlerConfig::get, (screen, client) -> {
+			withScreen(handlerConfig::get, (screen, client) -> {
 				openCategory(screen, Category.CLIENT_DEBUG);
 				assertTrue(monitorHeading(screen), "the client DEBUG subgroup is visible");
 				assertAllClientMetricRows(screen);
@@ -372,11 +375,13 @@ class LoggingProfileScreenTest {
 				replacement.setMonitorHudEnabled(true);
 				replacement.getMonitorMetrics().setSelected("summary.processing", false);
 				handlerConfig.set(replacement);
-				hud.onPress();
+				focus(screen, hud);
+				assertTrue(screen.keyPressed(32, 0, 0));
 				assertFalse(replacement.isMonitorHudEnabled(),
-					"the same mounted HUD checkbox toggles the current handler value, not its cached false value");
-				hud.onPress();
+					"the HUD checkbox toggles the current handler value, not the old page's false value");
+				assertTrue(screen.keyPressed(32, 0, 0));
 				assertTrue(replacement.isMonitorHudEnabled());
+				processing = metricToggle(screen, "summary.processing");
 				processing.onPress();
 				assertTrue(replacement.getMonitorMetrics().isSelected("summary.processing"));
 				assertFalse(initial.getMonitorMetrics().isSelected("summary.processing"),
@@ -572,7 +577,7 @@ class LoggingProfileScreenTest {
 		var initial = new ClientConfig();
 		initial.setLoggingProfile(LoggingProfile.DEBUG);
 		var current = new AtomicReference<>(initial);
-		withScreen(initial, current::get, (screen, client) -> {
+		withScreen(current::get, (screen, client) -> {
 			openCategory(screen, Category.CLIENT_DEBUG);
 			assertTrue(monitorHeading(screen));
 			var replacement = new ClientConfig();
@@ -702,22 +707,25 @@ class LoggingProfileScreenTest {
 	}
 
 	@SuppressWarnings("unchecked")
-	private static ConfigHandler<ClientConfig> newClientHandler(Path path) throws Exception {
+	static ConfigHandler<ClientConfig> newClientHandler(Path path, AtomicBoolean failWrites) throws Exception {
 		Class<?> backupWriterType = Class.forName("nx.pingwheel.common.config.BackupWriter");
 		Class<?> atomicWriterType = Class.forName("nx.pingwheel.common.config.AtomicConfigWriter");
 		Object backupWriter = java.lang.reflect.Proxy.newProxyInstance(
 			ConfigHandler.class.getClassLoader(), new Class<?>[] {backupWriterType},
 			(proxy, method, arguments) -> null);
-		Object failingWriter = java.lang.reflect.Proxy.newProxyInstance(
+		Object writer = java.lang.reflect.Proxy.newProxyInstance(
 			ConfigHandler.class.getClassLoader(), new Class<?>[] {atomicWriterType},
 			(proxy, method, arguments) -> {
-				throw new IOException("injected migration write failure");
+				if (failWrites.get()) throw new IOException("injected config write failure");
+				Objects.requireNonNull(arguments);
+				Files.writeString((Path) arguments[0], (String) arguments[1]);
+				return null;
 			});
 		var constructor = ConfigHandler.class.getDeclaredConstructor(
 			Class.class, Path.class, backupWriterType, String.class, atomicWriterType);
 		constructor.setAccessible(true);
 		return (ConfigHandler<ClientConfig>) constructor.newInstance(
-			ClientConfig.class, path, backupWriter, "0.5.0-pfi-beta1", failingWriter);
+			ClientConfig.class, path, backupWriter, "0.5.0-pfi-beta1", writer);
 	}
 
 	private static LoggingProfileButton loggingProfileButton(SettingsScreen screen) {
@@ -766,12 +774,11 @@ class LoggingProfileScreenTest {
 	}
 
 	private static void withScreen(ClientConfig config, ScreenCheck check) throws Exception {
-		withScreen(config, () -> config, check);
+		withScreen(() -> config, check);
 	}
 
 	private static void withScreen(
-		ClientConfig config,
-		Supplier<ClientConfig> loggingConfig,
+		Supplier<ClientConfig> clientConfig,
 		ScreenCheck check
 	) throws Exception {
 		var client = allocate(HeadlessMinecraft.class);
@@ -792,7 +799,7 @@ class LoggingProfileScreenTest {
 		@Nullable Object previousScreen = currentScreenField.get(null);
 		LoggingProfile previousClientProfile = Diagnostics.profile(DiagnosticSide.CLIENT);
 		LoggingProfile previousServerProfile = Diagnostics.profile(DiagnosticSide.SERVER);
-		var screen = new TestSettingsScreen(config, loggingConfig);
+		var screen = new TestSettingsScreen(clientConfig);
 		try (var ignored = new PhysicalAltKeys()) {
 			instanceField.set(null, client);
 			CommonClient.Game = client;
@@ -832,8 +839,8 @@ class LoggingProfileScreenTest {
 
 	@NotNullByDefault
 	private static final class TestSettingsScreen extends SettingsScreen {
-		private TestSettingsScreen(ClientConfig config, Supplier<ClientConfig> loggingConfig) {
-			super(config, null, loggingConfig);
+		private TestSettingsScreen(Supplier<ClientConfig> clientConfig) {
+			super(clientConfig, null);
 		}
 
 		private void initialize(Minecraft client) {
@@ -842,6 +849,7 @@ class LoggingProfileScreenTest {
 			this.font = new MeasuredFont();
 			this.width = 426;
 			this.height = 240;
+			this.added();
 			super.init();
 		}
 

@@ -1,7 +1,5 @@
 package nx.pingwheel.common.client.outline;
 
-import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -10,14 +8,14 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Camera;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import nx.pingwheel.common.marker.TargetKey;
-import nx.pingwheel.common.integration.sable.client.SableClientProvider;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Main-thread block outline render pass.
@@ -52,42 +50,29 @@ public final class BlockOutlineRenderer {
 	/**
 	 * Renders ordinary and provider-owned block outlines for one render frame.
 	 * Each success set is keyed in the same domain as its corresponding outline
-	 * snapshot, so a provider-owned geometry success suppresses only that
-	 * external key's VoxelShape fallback.
-	 *
-	 * @param presentations             the immutable ordinary presentation
-	 *                                 snapshot resolved for this frame
-	 * @param externalModelOutlineKeys the per-frame external keys whose model or
-	 *                                 entity geometry pass succeeded; fallbacks
-	 *                                 for those keys are skipped
+	 * snapshot, so an external subject's success does not suppress a sibling.
 	 */
 	public static void render(
 		ClientLevel level,
 		Camera camera,
 		Vec3 cameraPosition,
 		VertexConsumer lines,
-		BlockOutlineState state,
-		List<BlockPresentation> presentations,
-		Set<BlockPresentationSuccessKey> modelOutlineKeys,
-		Set<TargetKey.ExternalBlockKey> externalModelOutlineKeys,
-		float partialTick
+		BlockModelOutlineState frameState
 	) {
 		Objects.requireNonNull(level, "level");
 		Objects.requireNonNull(camera, "camera");
 		Objects.requireNonNull(cameraPosition, "cameraPosition");
 		Objects.requireNonNull(lines, "lines");
-		Objects.requireNonNull(state, "state");
-		Objects.requireNonNull(presentations, "presentations");
-		Objects.requireNonNull(modelOutlineKeys, "modelOutlineKeys");
-		Objects.requireNonNull(externalModelOutlineKeys, "externalModelOutlineKeys");
+		Objects.requireNonNull(frameState, "frameState");
 
 		String dimensionId = level.dimension().location().toString();
-		Entity cameraEntity = camera.getEntity();
+		@Nullable Entity cameraEntity = camera.getEntity();
 		CollisionContext collisionContext =
 			cameraEntity == null ? CollisionContext.empty() : CollisionContext.of(cameraEntity);
 		PoseStack poseStack = new PoseStack();
+		@Unmodifiable Set<BlockPresentationSuccessKey> modelOutlineKeys = frameState.successKeys();
 
-		for (BlockPresentation presentation : presentations) {
+		for (BlockPresentation presentation : frameState.presentations()) {
 			BlockOutlineSpec spec = presentation.sourceSpec();
 			TargetKey.BlockKey blockKey = spec.blockKey();
 
@@ -111,7 +96,7 @@ public final class BlockOutlineRenderer {
 					continue;
 				}
 
-				VoxelShape shape = blockState.getShape(level, pos, collisionContext);
+				@Nullable VoxelShape shape = blockState.getShape(level, pos, collisionContext);
 
 				if (shape == null || shape.isEmpty()) {
 					continue;
@@ -130,43 +115,19 @@ public final class BlockOutlineRenderer {
 			}
 		}
 
-		for (Map.Entry<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> entry
-			: state.externalSnapshot().entrySet()) {
-			ExternalBlockOutlineSpec spec = entry.getValue();
-			TargetKey.ExternalBlockKey blockKey = entry.getKey();
-
-			if (!blockKey.dimensionId().equals(dimensionId)) {
-				continue;
+		@Unmodifiable Set<ExternalBlockFramePresentation.SuccessKey> externalSuccesses = frameState.externalSuccessKeys();
+		for (ExternalBlockFramePresentation presentation : frameState.externalPresentations()) {
+			if (presentation.isFor(level, dimensionId)) {
+				renderExternal(presentation, externalSuccesses, collisionContext, cameraPosition, lines);
 			}
-
-			if (externalModelOutlineKeys.contains(blockKey)) {
-				continue;
-			}
-
-			var presentation = SableClientProvider.resolvePresentation(
-				level,
-				spec.target(),
-				partialTick,
-				collisionContext);
-
-			if (presentation.isEmpty()) {
-				continue;
-			}
-
-			var resolved = presentation.get();
-			poseStack.pushPose();
-			// Resolve the integer corner in double precision before entering the
-			// PoseStack. Only the camera-relative origin and the small linear pose
-			// are allowed into float-backed render state; this avoids losing whole
-			// blocks when Sable plots are around twenty million coordinates.
-			ExternalBlockOutlineTransform.apply(
-				poseStack,
-				resolved.worldBlockOrigin(),
-				resolved.orientationScale(),
-				cameraPosition);
-			VoxelShapeRenderUtil.renderEdges(
-				poseStack, lines, resolved.shape(), 0.0, 0.0, 0.0, spec.argbColor());
-			poseStack.popPose();
 		}
+	}
+
+	static void renderExternal(ExternalBlockFramePresentation presentation,
+		Set<ExternalBlockFramePresentation.SuccessKey> succeeded, CollisionContext context,
+		Vec3 cameraPosition, VertexConsumer lines) {
+		presentation.visitFallbackShapes(succeeded, context, (subject, shape) ->
+			VoxelShapeRenderUtil.renderEdges(presentation.subjectPose(subject, cameraPosition), lines, shape,
+				0.0, 0.0, 0.0, presentation.spec().argbColor()));
 	}
 }

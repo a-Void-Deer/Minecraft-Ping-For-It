@@ -5,6 +5,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
 import org.jetbrains.annotations.Nullable;
 
 import dev.ryanhcode.sable.companion.ClientSubLevelAccess;
@@ -22,14 +23,17 @@ import net.minecraft.world.Nameable;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
 import org.joml.Matrix4d;
-import org.joml.Vector3d;
 
 import nx.pingwheel.common.domain.Target;
+import nx.pingwheel.common.client.outline.EntityBlockGeometryTransform;
+import nx.pingwheel.common.client.outline.ExternalBlockFramePresentation;
+import nx.pingwheel.common.client.outline.ExternalBlockOutlineSpec;
+import nx.pingwheel.common.client.outline.ExternalBlockReadView;
 import nx.pingwheel.common.integration.sable.server.SableExternalBlockLocator;
 import nx.pingwheel.common.integration.sable.SableDiagnostics;
 import nx.pingwheel.common.interaction.TargetSnapshot;
@@ -41,6 +45,7 @@ import nx.pingwheel.common.integration.externalblock.ResolvedBlockReadSource;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.interaction.candidate.*;
 import nx.pingwheel.common.math.RaycastPolicy;
+import nx.pingwheel.common.math.SableBlockHitFrame;
 
 /** Direct Companion 1.6.0 calls, isolated from the common client runtime. */
 final class SableClientCompanionAccess {
@@ -88,6 +93,37 @@ final class SableClientCompanionAccess {
 
 	boolean hasInternalAccess() {
 		return internal != null;
+	}
+
+	Optional<TargetSnapshot> capture(ClientLevel level, BlockHitResult hit, Vec3 start, Vec3 end,
+		SableBlockHitFrame proof) throws ReflectiveOperationException {
+		if (internal == null || !proof.binds(hit)) return Optional.empty();
+		@Nullable SubLevelAccess containing = companion.getContaining(level, (Position) Vec3.atCenterOf(hit.getBlockPos()));
+		if (containing == null || !proof.subLevelId().equals(containing.getUniqueId())) return Optional.empty();
+		@Nullable Object current = internal.contentSubLevel(level, proof.subLevelId());
+		if (current == null || !level.isLoaded(proof.localPos())) return Optional.empty();
+		BlockState state = level.getBlockState(proof.localPos());
+		return captureFrozenBlock(level.dimension().location().toString(), hit, start, end, proof,
+			containing.getUniqueId(), state);
+	}
+
+	static Optional<TargetSnapshot> captureFrozenBlock(String dimensionId, BlockHitResult hit, Vec3 start, Vec3 end,
+		SableBlockHitFrame proof, @Nullable UUID containingId, BlockState state) {
+		if (!proof.binds(hit) || !proof.subLevelId().equals(containingId)) return Optional.empty();
+		@Nullable ResourceLocation blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+		if (state.isAir() || blockId == null) return Optional.empty();
+		Vec3 worldHit = proof.frame().toWorld(proof.localHit());
+		Vec3 ray = end.subtract(start);
+		if (!finite(start) || !finite(end) || ray.lengthSqr() <= 0
+			|| !rayPoint(start, ray, ray.lengthSqr(), worldHit).accepted()) return Optional.empty();
+		BlockPos pos = proof.localPos();
+		return Optional.of(TargetSnapshotFactory.externalBlockCandidate(dimensionId,
+			SableClientProvider.PROVIDER_ID, blockId.toString(),
+			new SableExternalBlockLocator(proof.subLevelId(), pos).encode(),
+			BlockEntityClassification.hasBlockEntity(state), observedLocalFace(hit))
+			.withCandidateHit(new CandidateHit(new nx.pingwheel.common.interaction.cancel.WorldVector(
+				worldHit.x, worldHit.y, worldHit.z), SableCaptureEquivalence.fromResolved(
+					dimensionId, proof.subLevelId(), pos.getX(), pos.getY(), pos.getZ(), blockId.toString()))));
 	}
 
 	Optional<TargetSnapshot> capture(
@@ -382,31 +418,29 @@ final class SableClientCompanionAccess {
 
 	/** Independent bounded local-plot trace, never derived from a parent-world block hit. */
 	boolean collectSupplemental(ClientLevel level, Vec3 start, Vec3 end, RaycastPolicy policy,
-		CollisionContext context, Vec3 cameraFeet, CandidateWorkBudget budget, CandidateCollector collector)
+		CollisionContext context, Vec3 cameraFeet, CandidateCollector collector)
 		throws ReflectiveOperationException {
 		if (internal == null) return false;
-		List<?> raw = internal.loadedSubLevels(level, budget);
+		List<?> raw = internal.loadedSubLevels(level);
 		return SableSupplementalRaycaster.scan(new SableSupplementalRaycaster.Source() {
 			@Override public int size() { return raw.size(); }
-			@Override public SableSupplementalRaycaster.SubLevel at(int index, CandidateWorkBudget work) {
+			@Override public @Nullable SableSupplementalRaycaster.SubLevel at(int index) {
 				Object value = raw.get(index);
 				if (!(value instanceof ClientSubLevelAccess access)) throw new ExactNativeShapeClip.Incomplete();
 				try {
-					Object plot = internal.existingPlot(level, value, work);
+					@Nullable Object plot = internal.existingPlot(level, value);
 					if (plot == null) return null;
-					if (!work.callProvider()) throw new ExactNativeShapeClip.Incomplete();
-					UUID id = access.getUniqueId();
-					if (!work.callProvider()) throw new ExactNativeShapeClip.Incomplete();
-					Pose3dc pose = access.logicalPose();
+					@Nullable UUID id = access.getUniqueId();
+					@Nullable Pose3dc pose = access.logicalPose();
 					if (id == null || pose == null) throw new ExactNativeShapeClip.Incomplete();
-					var bounds = internal.bounds(plot, work);
+					@Nullable dev.ryanhcode.sable.companion.math.BoundingBox3ic bounds = internal.bounds(plot);
 					if (bounds == null) throw new ExactNativeShapeClip.Incomplete();
 					if (bounds.minX() > bounds.maxX() || bounds.minY() > bounds.maxY() || bounds.minZ() > bounds.maxZ()) return null;
 					return new SableSupplementalRaycaster.SubLevel(id, pose,
 						new net.minecraft.world.phys.AABB(bounds.minX(), bounds.minY(), bounds.minZ(),
 							bounds.maxX() + 1.0, bounds.maxY() + 1.0, bounds.maxZ() + 1.0), level,
 						pos -> {
-							try { return internal.contains(plot, pos, work); }
+							try { return internal.contains(plot, pos); }
 							catch (ReflectiveOperationException failure) {
 								diagnostics.captureException("supplemental-member-scan",
 									SableDiagnostics.SUPPLEMENTAL_INCOMPLETE, "reflection-failure", failure,
@@ -421,7 +455,7 @@ final class SableClientCompanionAccess {
 					throw new ExactNativeShapeClip.Incomplete();
 				}
 			}
-		}, level.dimension().location().toString(), start, end, policy, context, cameraFeet, budget, collector);
+		}, level.dimension().location().toString(), start, end, policy, context, cameraFeet, collector);
 	}
 
 	/** No render-pose/shape lookup, no content/BE getters, and no provider tracking state. */
@@ -500,52 +534,44 @@ final class SableClientCompanionAccess {
 		return projected;
 	}
 
-	Optional<SableClientProvider.ExternalBlockPresentation> resolve(
-		ClientLevel parent,
-		Target.ExternalBlockTarget target,
-		float partialTick,
-		CollisionContext collisionContext
-	) throws ReflectiveOperationException {
-		if (internal == null) {
+	/** The outline path needs the plot-owned loaded data, not a state or shape from the shared parent cache. */
+	Optional<ExternalBlockFramePresentation> resolveFramePresentation(ClientLevel parent, ExternalBlockOutlineSpec spec,
+		SableExternalBlockLocator locator, float partialTick) throws ReflectiveOperationException {
+		if (internal == null) return Optional.empty();
+		@Nullable SableClientInternalAccess.BoundPlot plot = internal.bindPresentationPlot(parent, locator.subLevelId());
+		if (plot == null) return Optional.empty();
+		@Nullable Pose3dc renderPose = plot.subLevel().renderPose(partialTick);
+		if (renderPose == null) return Optional.empty();
+		Matrix4d matrix = renderPose.bakeIntoMatrix(new Matrix4d());
+		BlockPos rootPos = locator.blockPos();
+		if (!matrix.isFinite() || !EntityBlockGeometryTransform.hasFiniteBlockOrigin(matrix, rootPos)) {
 			return Optional.empty();
 		}
 
-		SableExternalBlockLocator locator = SableExternalBlockLocator.parse(target.providerLocator())
-			.orElseThrow(() -> new IllegalArgumentException("invalid external locator"));
-		SableClientInternalAccess.Resolution resolution =
-			internal.resolve(parent, locator.subLevelId(), locator.blockPos());
+		var view = new ExternalBlockReadView(parent,
+			pos -> readPresentationMember(plot, spec, pos, chunk -> chunk.getBlockState(pos)),
+			pos -> readPresentationMember(plot, spec, pos, chunk -> presentationBlockEntity(chunk, parent, pos)));
+		return ExternalBlockFramePresentation.resolve(spec, rootPos, view, matrix);
+	}
 
-		if (resolution.value().isEmpty()) {
-			return Optional.empty();
+	private static @Nullable BlockEntity presentationBlockEntity(LevelChunk chunk, ClientLevel parent, BlockPos pos) {
+		// Do not promote pending NBT or create a replacement BE through either
+		// ClientLevel.getBlockEntity or LevelChunk.getBlockEntity(CHECK).
+		@Nullable BlockEntity entity = chunk.getBlockEntities().get(pos);
+		return entity != null && !entity.isRemoved() && entity.getLevel() == parent
+			&& pos.equals(entity.getBlockPos()) && entity.getType().isValid(chunk.getBlockState(pos)) ? entity : null;
+	}
+
+	private static <T> @Nullable T readPresentationMember(SableClientInternalAccess.BoundPlot plot,
+		ExternalBlockOutlineSpec spec, BlockPos pos, Function<LevelChunk, @Nullable T> read) {
+		try {
+			@Nullable LevelChunk chunk = plot.loadedChunk(pos);
+			return chunk == null ? null : read.apply(chunk);
+		} catch (ReflectiveOperationException | RuntimeException | LinkageError | AssertionError unavailable) {
+			SableClientProvider.logPresentationException("outline-member-read", unavailable,
+				"target", spec.target(), "position", pos);
+			return null;
 		}
-
-		SableClientInternalAccess.ResolvedSubLevel stateData = resolution.value().orElseThrow();
-		BlockState state = stateData.state();
-		ResourceLocation actualId = BuiltInRegistries.BLOCK.getKey(state.getBlock());
-		ResourceLocation expectedId = ResourceLocation.tryParse(target.expectedBlockRegistryId());
-
-		if (actualId == null || expectedId == null || !actualId.equals(expectedId)
-			|| state.isAir() || state.getBlock() == Blocks.AIR) {
-			return Optional.empty();
-		}
-
-		if (!(stateData.subLevel() instanceof ClientSubLevelAccess clientAccess)) {
-			return Optional.empty();
-		}
-
-		Pose3dc renderPose = clientAccess.renderPose(partialTick);
-		Vec3 localCenter = new Vec3(
-			locator.x() + 0.5D, locator.y() + 0.5D, locator.z() + 0.5D);
-		Vec3 worldCenter = renderPose.transformPosition(localCenter);
-		VoxelShape shape = state.getShape(stateData.level(), locator.blockPos(), collisionContext);
-		Matrix4d poseMatrix = renderPose.bakeIntoMatrix(new Matrix4d());
-
-		if (!finite(worldCenter)) {
-			return Optional.empty();
-		}
-
-		return Optional.of(new SableClientProvider.ExternalBlockPresentation(
-			worldCenter, locator.blockPos(), state, stateData.level(), shape, poseMatrix));
 	}
 
 	Optional<Vec3> resolvePosition(

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.MarkerAnchor;
+import nx.pingwheel.common.marker.MarkerSnapshot;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -25,17 +26,14 @@ class MarkerViewNameTest {
 	private static final UUID OWNER = UUID.fromString("11111111-2222-3333-4444-555555555555");
 
 	private static MarkerView view(long id) {
-		return new MarkerView(new ClientMarker(
-			new MarkerId(id),
-			OWNER,
-			new Target.LocationTarget("minecraft:overworld", 0, 0, 0),
-			"block",
-			"attention",
-			new MarkerAnchor(0, 0, 0),
-			1L,
-			100L,
-			0L,
-			100L));
+		return new MarkerView(marker(id, 1L));
+	}
+
+	private static ClientMarker marker(long id, long arrivalTick) {
+		var target = new Target.LocationTarget("minecraft:overworld", 0, 0, 0);
+		var snapshot = new MarkerSnapshot(new MarkerId(id), OWNER, target, "block", "attention",
+			new MarkerAnchor(0, 0, 0), arrivalTick, 100L);
+		return ClientMarker.withLocalDuration(snapshot, 0L, arrivalTick, 100L);
 	}
 
 	private static String translatableKey(Component component) {
@@ -70,17 +68,7 @@ class MarkerViewNameTest {
 		Component custom = Component.literal("Chest (Large Chest)");
 
 		view.replaceTargetName(custom);
-		view.replacePayload(new ClientMarker(
-			new MarkerId(1L),
-			OWNER,
-			new Target.LocationTarget("minecraft:overworld", 0, 0, 0),
-			"block",
-			"attention",
-			new MarkerAnchor(0, 0, 0),
-			2L,
-			100L,
-			0L,
-			100L));
+		view.replacePayload(marker(1L, 2L));
 
 		assertSame(custom, view.getTargetName());
 		assertEquals("Chest (Large Chest)", view.getTargetName().getString());

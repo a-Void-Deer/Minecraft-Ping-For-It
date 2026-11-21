@@ -4,6 +4,7 @@ import java.util.Objects;
 
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.entity.Entity;
 
 /**
  * Immutable live-game context supplied once to an owned-entity narrowphase.
@@ -19,14 +20,23 @@ public record EntityLocalRaycastRequest(
 	RaycastPolicy policy,
 	float partialTick,
 	CollisionContext collisionContext,
-	Vec3 cameraFeetPosition
+	Vec3 cameraFeetPosition,
+	EntityParentFrameLookup parentFrames
 ) {
+	public EntityLocalRaycastRequest(Vec3 start, Vec3 end, RaycastPolicy policy, float partialTick,
+		CollisionContext collisionContext, Vec3 cameraFeetPosition) {
+		this(start, end, policy, partialTick, collisionContext, cameraFeetPosition,
+			entity -> EntityFrameResolution.world());
+	}
+
+	public EntityFrameResolution parentFrame(Entity entity) { return parentFrames.resolve(entity); }
 
 	public EntityLocalRaycastRequest {
 		requireFinite(start, "start");
 		requireFinite(end, "end");
 		Objects.requireNonNull(policy, "policy");
 		Objects.requireNonNull(collisionContext, "collisionContext");
+		Objects.requireNonNull(parentFrames, "parentFrames");
 		requireFinite(cameraFeetPosition, "cameraFeetPosition");
 
 		if (!Float.isFinite(partialTick)) {

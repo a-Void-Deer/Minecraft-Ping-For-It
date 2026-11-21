@@ -34,6 +34,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 import static nx.pingwheel.common.Global.MOD_ID;
@@ -50,11 +51,12 @@ public class ConfigHandler <T extends IConfig> {
 	private final AtomicConfigWriter atomicConfigWriter;
 	private final ConfigRuntime<T> runtime;
 	private SaveProtection saveProtection;
-	private PendingMigration pendingMigration;
+	private @Nullable PendingMigration pendingMigration;
 
 	@Getter
 	private T config;
-	private int configHash;
+	// Detached model values, never the raw file or the migration preservation base.
+	private @Nullable JsonObject savedModel;
 
 	public static <T extends IConfig> ConfigHandler<T> of(Class<T> configType, String configExtension) {
 		return new ConfigHandler<>(configType, IPlatformContextService.INSTANCE.resolveConfigDir(MOD_ID + configExtension));
@@ -127,7 +129,6 @@ public class ConfigHandler <T extends IConfig> {
 		this.atomicConfigWriter = Objects.requireNonNull(atomicConfigWriter, "atomicConfigWriter");
 		this.runtime = Objects.requireNonNull(runtime, "runtime");
 
-		this.configHash = 0;
 		this.config = createDefaultConfig();
 		publishProfile();
 		this.recoverInvalidConfig = this.config.recoverInvalidOnLoad();
@@ -154,6 +155,25 @@ public class ConfigHandler <T extends IConfig> {
 		return saveInternal();
 	}
 
+	/**
+	 * Applies one edit and performs the ordinary save under the same lock, so
+	 * save protection cannot change between the eligibility check and the
+	 * write. A protected file rejects the edit before the callback runs. An
+	 * ordinary write failure keeps the already-applied value because the
+	 * normal save may already have run update notifications.
+	 *
+	 * @return whether the file was written or was already up to date
+	 */
+	public synchronized boolean editAndSaveIfWritable(Consumer<T> edit) {
+		Objects.requireNonNull(edit, "edit");
+		if (saveProtection != SaveProtection.NONE) {
+			return false;
+		}
+
+		edit.accept(config);
+		return saveSafely();
+	}
+
 	/** Persists already-applied configuration without invoking domain update callbacks. */
 	public synchronized boolean saveWithoutUpdate() {
 		publishProfile();
@@ -165,7 +185,8 @@ public class ConfigHandler <T extends IConfig> {
 	 * instance and persists it immediately.
 	 */
 	public synchronized void resetToDefaults() {
-		if (pendingMigration != null && !ensurePendingMigrationSourceCurrent()) {
+		@Nullable PendingMigration migration = pendingMigration;
+		if (migration != null && !ensurePendingMigrationSourceCurrent(migration)) {
 			config = createDefaultConfig();
 			publishProfile();
 			if (saveProtection != SaveProtection.NONE) {
@@ -199,23 +220,21 @@ public class ConfigHandler <T extends IConfig> {
 			return SaveResult.PROTECTED;
 		}
 
-		if (pendingMigration != null) {
-			return savePendingMigration(invokeUpdate) ? SaveResult.WRITTEN : SaveResult.FAILED;
-		}
-
-		if (!force && configHash == config.hashCode() && Files.exists(configPath)) {
-			return SaveResult.UNCHANGED;
+		@Nullable PendingMigration migration = pendingMigration;
+		if (migration != null) {
+			return savePendingMigration(migration, invokeUpdate) ? SaveResult.WRITTEN : SaveResult.FAILED;
 		}
 
 		try {
-			if (invokeUpdate) config.onUpdate();
-			writeSerializedConfig(serializeConfig());
+			if (!force && matchesSavedModel() && Files.exists(configPath)) {
+				return SaveResult.UNCHANGED;
+			}
+			writeConfig(invokeUpdate, "", null);
 		} catch (Exception e) {
 			logFailure("save", () -> "config save failed", e);
 			return SaveResult.FAILED;
 		}
 
-		configHash = config.hashCode();
 		runtime.logger().atDetailed().info("config-save", "saved", null,
 			() -> "type=" + configType.getSimpleName() + " path=" + configPath);
 		return SaveResult.WRITTEN;
@@ -226,6 +245,7 @@ public class ConfigHandler <T extends IConfig> {
 		runtime.beginLoad();
 		pendingMigration = null;
 		if (!Files.exists(configPath)) {
+			savedModel = null;
 			config = createDefaultConfig();
 			publishProfile();
 			saveProtection = SaveProtection.NONE;
@@ -242,11 +262,11 @@ public class ConfigHandler <T extends IConfig> {
 	}
 
 	private void loadWithLegacyRecovery() {
-		@Nullable Exception loadFailure = null;
+		VersionedConfig versionedConfig;
 
 		try {
 			byte[] sourceBytes = Files.readAllBytes(configPath);
-			VersionedConfig versionedConfig = readVersionedConfig(
+			versionedConfig = readVersionedConfig(
 				new String(sourceBytes, StandardCharsets.UTF_8),
 				sourceBytes);
 			if (versionedConfig.future()) {
@@ -258,35 +278,23 @@ public class ConfigHandler <T extends IConfig> {
 			config.validate();
 			publishProfile();
 			saveProtection = SaveProtection.NONE;
-			configHash = config.hashCode();
 			if (versionedConfig.migrated()) {
-				pendingMigration = new PendingMigration(
-					versionedConfig.root(),
-					versionedConfig.configVersion(),
-					versionedConfig.migrationUpdates(),
-					versionedConfig.sourceBytes());
-				savePendingMigration();
+				beginMigration(versionedConfig);
 			}
 		} catch (Exception failure) {
-			config = null;
-			loadFailure = failure;
-		}
-
-		if (config == null) {
 			config = createDefaultConfig();
 			publishProfile();
 			saveProtection = SaveProtection.NONE;
 
+			// Legacy recovery is a normal save; already-saved defaults may be unchanged.
 			SaveResult result = saveResult(false, true);
-			logRecoveryFailure(
-				Objects.requireNonNull(loadFailure, "load failure"),
-				result == SaveResult.WRITTEN ? "defaults-written" : "defaults-in-memory");
+			logRecoveryFailure(failure, result == SaveResult.WRITTEN ? "defaults-written" : "defaults-in-memory");
 			return;
 		}
 
 		config.validate();
 		publishProfile();
-		configHash = config.hashCode();
+		if (!versionedConfig.migrated()) savedModel = snapshotModel();
 		logLoadedConfig();
 	}
 
@@ -306,14 +314,10 @@ public class ConfigHandler <T extends IConfig> {
 			config.validate();
 			publishProfile();
 			saveProtection = SaveProtection.NONE;
-			configHash = config.hashCode();
 			if (versionedConfig.migrated()) {
-				pendingMigration = new PendingMigration(
-					versionedConfig.root(),
-					versionedConfig.configVersion(),
-					versionedConfig.migrationUpdates(),
-					versionedConfig.sourceBytes());
-				savePendingMigration();
+				beginMigration(versionedConfig);
+			} else {
+				savedModel = snapshotModel();
 			}
 			logLoadedConfig();
 		} catch (Exception failure) {
@@ -323,6 +327,7 @@ public class ConfigHandler <T extends IConfig> {
 
 	private void recoverClientConfig(byte @Nullable [] originalBytes, Exception failure) {
 		pendingMigration = null;
+		savedModel = null;
 		String reason = safeReason(failure);
 
 		BackupResult backup = backupOriginal(originalBytes);
@@ -331,7 +336,6 @@ public class ConfigHandler <T extends IConfig> {
 
 		if (backup.failure() != null) {
 			saveProtection = SaveProtection.INVALID_FILE;
-			configHash = config.hashCode();
 			logRecoveryFailure(failure, "defaults-in-memory");
 			logFailure(Level.WARN, "config-io", "backup-failed-original-protected",
 				() -> "type=" + configType.getSimpleName() + " path=" + configPath
@@ -342,16 +346,13 @@ public class ConfigHandler <T extends IConfig> {
 
 		String header = recoveryHeader(reason, backup.path());
 		try {
-			config.onUpdate();
-			writeSerializedConfig(header + serializeConfig());
-			configHash = config.hashCode();
+			writeConfig(true, header, null);
 			saveProtection = SaveProtection.NONE;
 			logRecoveryFailure(failure, "defaults-written");
 			runtime.logger().atDetailed().info("config-recovery", "recovered", null,
 				() -> "type=" + configType.getSimpleName() + " path=" + configPath + " backup=" + backup.path());
 		} catch (Exception writeFailure) {
 			saveProtection = SaveProtection.INVALID_FILE;
-			configHash = config.hashCode();
 			logRecoveryFailure(failure, "defaults-in-memory");
 			logFailure(Level.WARN, "config-io", "reset-write-failed-backup-retained",
 				() -> "type=" + configType.getSimpleName() + " path=" + configPath
@@ -384,21 +385,66 @@ public class ConfigHandler <T extends IConfig> {
 		return loaded;
 	}
 
-	private String serializeConfig() {
-		return serializeConfig(null);
-	}
-
-	private String serializeConfig(@Nullable JsonElement rootToPreserve) {
-		JsonElement serialized = JsonParser.parseString(gson.toJson(config));
+	private JsonObject snapshotModel() {
+		// Model equality includes nullable fields and map entries even when the file
+		// serializer omits those null members.
+		JsonElement serialized = documentGson.toJsonTree(config);
 		if (!serialized.isJsonObject()) {
 			throw new IllegalStateException("serialized config root is not an object");
 		}
+		return serialized.getAsJsonObject();
+	}
+
+	private boolean matchesSavedModel() {
+		@Nullable JsonObject baseline = savedModel;
+		if (baseline == null) return false;
+		JsonObject model;
+		try {
+			model = snapshotModel();
+		} catch (RuntimeException failure) {
+			// Let onUpdate run before the actual serialization reports a failure:
+			// it may also repair the value that prevented the comparison.
+			return false;
+		}
+		return sameModel(baseline, model);
+	}
+
+	private static boolean sameModel(JsonElement previous, JsonElement current) {
+		if (previous.isJsonObject() && current.isJsonObject()) {
+			JsonObject before = previous.getAsJsonObject();
+			JsonObject after = current.getAsJsonObject();
+			if (before.size() != after.size()) return false;
+			for (var entry : before.entrySet()) {
+				@Nullable JsonElement value = after.get(entry.getKey());
+				if (value == null || !sameModel(entry.getValue(), value)) return false;
+			}
+			return true;
+		}
+		if (previous.isJsonArray() && current.isJsonArray()) {
+			JsonArray before = previous.getAsJsonArray();
+			JsonArray after = current.getAsJsonArray();
+			if (before.size() != after.size()) return false;
+			for (int index = 0; index < before.size(); index++) {
+				if (!sameModel(before.get(index), after.get(index))) return false;
+			}
+			return true;
+		}
+		if (previous.isJsonPrimitive() && previous.getAsJsonPrimitive().isNumber()) {
+			// Gson's numeric equality can lose precision through double rounding.
+			return current.isJsonPrimitive() && current.getAsJsonPrimitive().isNumber()
+				&& previous.getAsString().equals(current.getAsString());
+		}
+		return previous.equals(current);
+	}
+
+	private String serializeConfig(JsonObject model, @Nullable JsonElement rootToPreserve) {
+		JsonObject serialized = gson.toJsonTree(model).getAsJsonObject();
 
 		if (configType == ClientConfig.class) {
-			removeKeys(serialized.getAsJsonObject(), REMOVED_CLIENT_PRESENTATION_KEYS);
+			removeKeys(serialized, REMOVED_CLIENT_PRESENTATION_KEYS);
 		}
 		if (usesLegacyTransparentBlockToggle()) {
-			projectLegacyTransparentBlockToggle(serialized.getAsJsonObject(), rootToPreserve);
+			projectLegacyTransparentBlockToggle(serialized, rootToPreserve);
 		}
 
 		if (rootToPreserve != null) {
@@ -407,7 +453,7 @@ public class ConfigHandler <T extends IConfig> {
 			}
 
 			var merged = rootToPreserve.getAsJsonObject().deepCopy();
-			for (var entry : serialized.getAsJsonObject().entrySet()) {
+			for (var entry : serialized.entrySet()) {
 				if (configType == ClientConfig.class && entry.getKey().equals("monitorMetrics")
 					&& merged.has("monitorMetrics") && merged.get("monitorMetrics").isJsonObject()
 					&& entry.getValue().isJsonObject()) {
@@ -439,19 +485,19 @@ public class ConfigHandler <T extends IConfig> {
 		if (configType == ClientConfig.class
 			&& modVersion.compareTo(ConfigVersionUpdater.SPATIAL_SELECTOR_INTRODUCED_VERSION) >= 0) {
 			// Even a preservation-base merge must not resurrect retired radius keys.
-			ConfigVersionUpdater.removeLegacyWheelRadii(serialized.getAsJsonObject());
+			ConfigVersionUpdater.removeLegacyWheelRadii(serialized);
 		}
 		if (configType == ClientConfig.class
 			&& modVersion.compareTo(ConfigVersionUpdater.WHEEL_TIMEOUT_REMOVED_VERSION) >= 0) {
-			ConfigVersionUpdater.removeLegacyWheelTimeout(serialized.getAsJsonObject());
+			ConfigVersionUpdater.removeLegacyWheelTimeout(serialized);
 		}
 		if (configType == ClientConfig.class
 			&& modVersion.compareTo(ConfigVersionUpdater.MARK_TRANSPARENT_BLOCKS_INTRODUCED_VERSION) >= 0) {
-			ConfigVersionUpdater.removeLegacyTransparentBlockToggle(serialized.getAsJsonObject());
+			ConfigVersionUpdater.removeLegacyTransparentBlockToggle(serialized);
 		}
 
 		JsonElement marker = new com.google.gson.JsonPrimitive(modVersion.originalVersion());
-		serialized.getAsJsonObject().add(ConfigVersionUpdater.VERSION_KEY, marker);
+		serialized.add(ConfigVersionUpdater.VERSION_KEY, marker);
 		return documentGson.toJson(serialized);
 	}
 
@@ -493,8 +539,8 @@ public class ConfigHandler <T extends IConfig> {
 		return Boolean.TRUE.equals(gson.fromJson(root.get("passThroughTransparentBlocks"), Boolean.class));
 	}
 
-	private void projectLegacyTransparentBlockToggle(JsonObject serialized, JsonElement rootToPreserve) {
-		boolean passThrough = !((ClientConfig) config).isMarkTransparentBlocks();
+	private void projectLegacyTransparentBlockToggle(JsonObject serialized, @Nullable JsonElement rootToPreserve) {
+		boolean passThrough = !serialized.get("markTransparentBlocks").getAsBoolean();
 		serialized.remove("markTransparentBlocks");
 		if (rootToPreserve != null && rootToPreserve.isJsonObject()) {
 			JsonObject preserved = rootToPreserve.getAsJsonObject();
@@ -954,36 +1000,29 @@ public class ConfigHandler <T extends IConfig> {
 	}
 
 	private void rejectFutureConfig(PingForItVersion configVersion) {
+		savedModel = null;
 		config = createDefaultConfig();
 		publishProfile();
-		configHash = config.hashCode();
 		saveProtection = SaveProtection.FUTURE_VERSION;
 		runtime.logger().atNormal().site("config-future-version")
 			.event(Level.WARN, "future config protected; defaults in memory; original preserved");
 	}
 
-	private boolean savePendingMigration() {
-		return savePendingMigration(true);
+	private void beginMigration(VersionedConfig versionedConfig) {
+		savedModel = null;
+		PendingMigration migration = new PendingMigration(versionedConfig.root(), versionedConfig.configVersion(),
+			versionedConfig.migrationUpdates(), versionedConfig.sourceBytes());
+		pendingMigration = migration;
+		savePendingMigration(migration, true);
 	}
 
-	private boolean savePendingMigration(boolean invokeUpdate) {
-		PendingMigration migration = pendingMigration;
-		if (migration == null) {
-			return true;
-		}
-
-		if (!ensurePendingMigrationSourceCurrent()) {
+	private boolean savePendingMigration(PendingMigration confirmedMigration, boolean invokeUpdate) {
+		if (!ensurePendingMigrationSourceCurrent(confirmedMigration)) {
 			return false;
 		}
 
-		final PendingMigration confirmedMigration = pendingMigration;
-		if (confirmedMigration == null) {
-			return true;
-		}
-
 		try {
-			if (invokeUpdate) config.onUpdate();
-			writeSerializedConfig(serializeConfig(confirmedMigration.root()));
+			writeConfig(invokeUpdate, "", confirmedMigration.root());
 		} catch (Exception failure) {
 			logFailure("migration-write",
 				() -> "configVersion=" + confirmedMigration.configVersion()
@@ -994,7 +1033,6 @@ public class ConfigHandler <T extends IConfig> {
 		}
 
 		pendingMigration = null;
-		configHash = config.hashCode();
 		publishProfile();
 		runtime.logger().atDetailed().info("config-migration", "applied", null,
 			() -> "type=" + configType.getSimpleName() + " path=" + configPath
@@ -1003,12 +1041,7 @@ public class ConfigHandler <T extends IConfig> {
 		return true;
 	}
 
-	private boolean ensurePendingMigrationSourceCurrent() {
-		PendingMigration migration = pendingMigration;
-		if (migration == null) {
-			return true;
-		}
-
+	private boolean ensurePendingMigrationSourceCurrent(PendingMigration migration) {
 		byte[] currentBytes;
 		try {
 			currentBytes = Files.readAllBytes(configPath);
@@ -1043,8 +1076,11 @@ public class ConfigHandler <T extends IConfig> {
 			() -> "path=" + configPath + "; loaded config in memory; migration writeback pending");
 	}
 
-	private void writeSerializedConfig(String serialized) throws Exception {
-		atomicConfigWriter.write(configPath, serialized);
+	private void writeConfig(boolean invokeUpdate, String header, @Nullable JsonElement rootToPreserve) throws Exception {
+		if (invokeUpdate) config.onUpdate();
+		JsonObject model = snapshotModel();
+		atomicConfigWriter.write(configPath, header + serializeConfig(model, rootToPreserve));
+		savedModel = model;
 	}
 
 	private static void writeAtomically(Path configPath, String serialized) throws IOException {

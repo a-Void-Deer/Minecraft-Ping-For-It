@@ -164,6 +164,7 @@
 	"command.pingforit.channel.set.response": "\"%s\" kanalına ayarlandı",
 	"command.pingforit.channel.set.response.default": "Kanal varsayılana ayarlandı",
 	"command.pingforit.channel.set.reject": "Kanal adı uzunlukları %s ile sınırlı",
+	"command.pingforit.channel.set.failure": "Kanal değişikliği kaydedilemedi",
 	"pingforit.chat.pingmsg": "%s: %s: %s",
 	"pingforit.chat.pingmsg.template": "{playerName}: {pingType}: {targetName}",
 	"pingforit.chat.local_error.prefix": "[ping for it] ",
@@ -541,6 +542,10 @@
   ,"settings.pingforit.scope.server.tooltip": "Sunucu ayarlarını görüntüleyin; düzenleme için 3. izin düzeyi gerekir."
   ,"settings.pingforit.navigation.back.tooltip": "Bu kapsamın genel görünümüne dönün."
   ,"settings.pingforit.navigation.done.tooltip": "İstemci ayarlarını kaydeder, sunucu değişikliklerini gönderir ve kapatır."
+  ,"settings.pingforit.save_failed.title": "İstemci ayarları kaydedilemedi"
+  ,"settings.pingforit.save_failed.message": "Çıkarsanız kaydetme yeniden denenmez ve bekleyen değişiklikler sunucuya gönderilmez. İstemcide zaten uygulanmış değişiklikler geri alınmaz."
+  ,"settings.pingforit.save_failed.continue": "Düzenlemeye devam et"
+  ,"settings.pingforit.save_failed.exit": "Kaydetmeden çık"
   ,"settings.pingforit.presentation.server.tooltip": "Seçili hedef türünün alan kuralları; düzenleme için 3. izin düzeyi gerekir."
   ,"settings.pingforit.presentation.target_type.tooltip": "Kurallarını görüntüleyip düzenleyeceğiniz hedef türünü seçin."
   ,"settings.pingforit.presentation.selector.tooltip": "minecraft:entity.health veya create:kinetic.* gibi bir alan kimliği seçicisi.\n* yalnızca tek bir ad alanı veya yol parçası içinde eşleşir, : üzerinden geçmez.\nSeçiciyi uygulamak için Ekle'yi kullanın."

@@ -12,14 +12,17 @@ import net.minecraft.SharedConstants;
 import net.minecraft.server.Bootstrap;
 import nx.pingwheel.common.client.ClientPingActionDispatcher;
 import nx.pingwheel.common.client.ClientPingRuntime;
+import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.diagnostics.DiagnosticSide;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.diagnostics.LoggingProfile;
 import nx.pingwheel.common.client.rate.ClientRateLimitPolicy;
 import nx.pingwheel.common.config.ClientConfig;
+import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.interaction.CapturedRay;
 import nx.pingwheel.common.interaction.TargetSnapshotFactory;
+import nx.pingwheel.common.interaction.cancel.CancellationContext;
 import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.interaction.state.TargetValidation;
 import nx.pingwheel.common.interaction.state.TargetValidator;
@@ -38,6 +41,7 @@ import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
 
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localSnapshotSpanStore;
 import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
@@ -143,6 +147,10 @@ class PresentationPreviewDiagnosticsTest {
 			(Object proxy, Method method, @Nullable Object @Nullable [] arguments) -> switch (method.getName()) {
 			case "lifecycle" -> lifecycle;
 			case "capturePressRay" -> Optional.of(CapturedRay.defaultRay());
+			case "cancellation" -> {
+				CapturedRay ray = (CapturedRay) java.util.Objects.requireNonNull(java.util.Objects.requireNonNull(arguments)[0]);
+				yield new CancellationContext(PLAYER, TARGET.dimensionId(), ray.origin(), ray.direction(), List.of());
+			}
 			case "capture" -> {
 				Object completion = java.util.Objects.requireNonNull(java.util.Objects.requireNonNull(arguments)[2]);
 				Method complete = Class.forName("nx.pingwheel.common.client.ClientPingRuntime$CaptureCompletion")
@@ -158,12 +166,14 @@ class PresentationPreviewDiagnosticsTest {
 		Method create = ClientPingRuntime.class.getDeclaredMethod("createForInteraction", ClientPingActionDispatcher.LocalErrorSink.class,
 			ClientPingActionDispatcher.PacketSender.class, ClientRateLimitPolicy.class, InteractionTimeSource.class, TargetValidator.class,
 			accessType, nx.pingwheel.common.presentation.client.ClientPresentation.class,
-			nx.pingwheel.common.presentation.inventory.client.ClientInventory.class, ClientPresentationPreview.class);
+			nx.pingwheel.common.presentation.inventory.client.ClientInventory.class, ClientPresentationPreview.class,
+			ClientMarkerStore.class, PingInteractionLogger.class);
 		create.setAccessible(true);
 		var presentation = new ClientPresentation(packet -> fail("no presentation request"));
 		return (ClientPingRuntime) create.invoke(null, (ClientPingActionDispatcher.LocalErrorSink) (key, color) -> fail("no local error"),
 			(ClientPingActionDispatcher.PacketSender) packet -> fail("no marker request"), ClientRateLimitPolicy.DEFAULT,
-			(InteractionTimeSource) () -> 0, (TargetValidator) target -> TargetValidation.valid(), access, presentation, null, preview);
+			(InteractionTimeSource) () -> 0, (TargetValidator) target -> TargetValidation.valid(), access, presentation, null, preview,
+			localSnapshotSpanStore(ClientPingRuntime.FALLBACK_EXPIRY_GRACE_TICKS), PingInteractionLogger.noop());
 	}
 	@Test void clientAccessAndContextFailuresStillPropagateWithoutInventedAbortOrLocalReport() {
 		try (var capture = new PresentationDiagnosticCapture()) {

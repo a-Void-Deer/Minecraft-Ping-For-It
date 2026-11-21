@@ -40,15 +40,15 @@ public final class InventoryLimits {
 
 	/** Shared lower bound; each configurable count has its own finite ceiling. */
 	public static final int MIN_ORDINARY_COUNT = 16;
-	public static final int MAX_PHYSICAL_SLOTS_PER_TICK = 4096;
+	public static final int MAX_PHYSICAL_SLOTS_PER_TICK = 2048;
 	public static final int MAX_PREVIEW_VARIANTS_PER_CLIENT_PERIOD = 1024;
-	public static final int MAX_PREVIEW_SLOTS_PER_CLIENT = 16384;
-	public static final int MAX_PREVIEW_SLOTS_SERVER = 65536;
+	public static final int MAX_PREVIEW_SLOTS_PER_CLIENT = 2048;
+	public static final int MAX_PREVIEW_SLOTS_SERVER = 8192;
 	public static final int MAX_PREVIEW_TARGETS_PER_CLIENT = 16;
 	public static final int MAX_TRACKING_VARIANTS_PER_TARGET = 128;
-	public static final int MAX_TRACKING_SLOTS_PER_TARGET = 16384;
+	public static final int MAX_TRACKING_SLOTS_PER_TARGET = 4096;
 	public static final int MIN_TRACKING_SLOTS_SERVER = 128;
-	public static final int MAX_TRACKING_SLOTS_SERVER = 262144;
+	public static final int MAX_TRACKING_SLOTS_SERVER = 8192;
 
 	/** Default server-wide pending-memory bound in MiB; explicit unlimited stays finite. */
 	public static final int DEFAULT_PENDING_MEMORY_MIB = ConfigDefaults.Inventory.PENDING_MEMORY_MIB;

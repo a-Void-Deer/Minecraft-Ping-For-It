@@ -25,6 +25,7 @@ import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.interaction.CapturedRay;
 import nx.pingwheel.common.interaction.InteractionToken;
 import nx.pingwheel.common.interaction.cancel.CancellationContext;
+import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.interaction.state.TargetValidation;
 import nx.pingwheel.common.marker.MarkerAnchor;
@@ -53,6 +54,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localStore;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Wire-decoded CREATED admission through the real runtime; no world or source reads. */
@@ -264,7 +266,8 @@ class ClientInventoryCreationCapacityTest {
 		final ClientInventory inventory = new ClientInventory(sent::add);
 		final ClientPingRuntime runtime = ClientPingRuntime.createForInteraction((key, color) -> fail("unexpected local error"),
 			sent::add, ClientRateLimitPolicy.DEFAULT, () -> 0, target -> TargetValidation.valid(), new Access(), presentation,
-			inventory, null, snapshot -> 1000, feedback);
+			inventory, null, localStore(ClientPingRuntime.FALLBACK_EXPIRY_GRACE_TICKS, 1000L), feedback,
+			PingInteractionLogger.noop());
 
 		Fixture() {
 			presentation.tick(true);

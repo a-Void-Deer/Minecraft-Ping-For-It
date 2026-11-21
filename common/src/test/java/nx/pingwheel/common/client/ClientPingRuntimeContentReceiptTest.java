@@ -34,6 +34,7 @@ import nx.pingwheel.common.interaction.CapturedRay;
 import nx.pingwheel.common.interaction.InteractionToken;
 import nx.pingwheel.common.interaction.cancel.CancellationContext;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
+import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.interaction.state.TargetValidation;
 import nx.pingwheel.common.marker.MarkerAnchor;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
@@ -70,6 +71,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localStore;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Real packet-dispatched runtime/stores/composer; only game effects and world/input access are ports. */
@@ -593,7 +595,7 @@ class ClientPingRuntimeContentReceiptTest {
    new MarkerAnchor(2.5, 3.5, 3.5), 2, 10);
   f.runtime.onPresentationPacket(wire(PresentationS2CPacket.winner(81, 1, first.targetKey(), Optional.of(second.id()))));
   assertTrue(f.runtime.store().allMarkers().isEmpty());
-  assertTrue(f.runtime.store().visibleWinnersInDimension(TARGET.dimensionId()).isEmpty());
+  assertTrue(f.runtime.store().outlineWinnersInDimension(TARGET.dimensionId()).isEmpty());
   f.created(1, first, "First owner", PresentationReceiptContent.whole(), basic(false));
   assertTrue(f.runtime.store().winnerMarker(first.targetKey()).isEmpty(), "an unknown winner does not expose a losing record");
   f.created(1, second, "Second owner", PresentationReceiptContent.whole(), basic(false));
@@ -1072,7 +1074,7 @@ class ClientPingRuntimeContentReceiptTest {
    feedback.templates = templates;
    runtime = ClientPingRuntime.createForInteraction((key, color) -> fail("unexpected local error"), sent::add,
     ClientRateLimitPolicy.DEFAULT, () -> 0, target -> TargetValidation.valid(), access, presentation, inventory, null,
-    snapshot -> visualDuration, feedback);
+    localStore(ClientPingRuntime.FALLBACK_EXPIRY_GRACE_TICKS, visualDuration), feedback, PingInteractionLogger.noop());
    presentation.tick(true);
     runtime.onPresentationPacket(PresentationS2CPacket.offer(81, Map.of(BASIC, PresentationBasic.fields(),
      EXTRA, new ExtraAdapter().fields(), nx.pingwheel.common.presentation.inventory.InventoryPresentation.ADAPTER_ID,

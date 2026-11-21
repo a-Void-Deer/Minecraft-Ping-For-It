@@ -195,6 +195,7 @@
 	"command.pingforit.channel.set.response": "Canal défini sur \"%s\"",
 	"command.pingforit.channel.set.response.default": "Canal défini sur par défaut",
 	"command.pingforit.channel.set.reject": "Les noms de canal sont limités à une longueur de %s caractères",
+	"command.pingforit.channel.set.failure": "La modification du canal n'a pas été enregistrée",
 	"pingforit.chat.pingmsg": "%s : %s - %s",
 	"pingforit.chat.pingmsg.template": "{playerName} signale {targetName} : {pingType}",
 	"pingforit.chat.go_to.template.override": "{playerName} désigne {targetName} comme destination : {pingType}",
@@ -551,6 +552,10 @@
   ,"settings.pingforit.scope.server.tooltip": "Consulter les paramètres du serveur ; leur modification exige le niveau de permission 3."
   ,"settings.pingforit.navigation.back.tooltip": "Revenir à la vue d'ensemble de cette section."
   ,"settings.pingforit.navigation.done.tooltip": "Enregistrer les paramètres client, envoyer les changements serveur et fermer."
+  ,"settings.pingforit.save_failed.title": "Impossible d’enregistrer les paramètres du client"
+  ,"settings.pingforit.save_failed.message": "Si vous quittez, l’enregistrement ne sera pas retenté et les modifications en attente ne seront pas envoyées au serveur. Les changements déjà appliqués au client restent actifs."
+  ,"settings.pingforit.save_failed.continue": "Continuer l’édition"
+  ,"settings.pingforit.save_failed.exit": "Quitter sans enregistrer"
   ,"settings.pingforit.presentation.server.tooltip": "Règles de champs du type de cible sélectionné ; la modification exige le niveau de permission 3."
   ,"settings.pingforit.presentation.target_type.tooltip": "Choisir le type de cible à consulter et modifier."
   ,"settings.pingforit.presentation.selector.tooltip": "Sélecteur d'ID de champ, par exemple minecraft:entity.health ou create:kinetic.*.\n* correspond uniquement dans un même espace de noms ou segment de chemin et ne traverse jamais le caractère :.\nUtiliser Ajouter pour appliquer le sélecteur."

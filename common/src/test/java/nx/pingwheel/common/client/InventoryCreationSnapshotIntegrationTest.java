@@ -44,6 +44,7 @@ import nx.pingwheel.common.domain.TargetTypeCatalog;
 import nx.pingwheel.common.interaction.CapturedRay;
 import nx.pingwheel.common.interaction.InteractionToken;
 import nx.pingwheel.common.interaction.cancel.CancellationContext;
+import nx.pingwheel.common.interaction.state.PingInteractionLogger;
 import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 import nx.pingwheel.common.interaction.state.TargetValidation;
 import nx.pingwheel.common.marker.MarkerRemovalReason;
@@ -84,6 +85,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localStore;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Headless real backend SELECT -> server initial -> encoded body -> runtime/composer/HUD projection.
@@ -550,7 +552,8 @@ class InventoryCreationSnapshotIntegrationTest {
 		final ClientPresentation presentation = new ClientPresentation(sent::add, List.of());
 		final ClientInventory inventory = new ClientInventory(sent::add);
 		final ClientPingRuntime runtime = ClientPingRuntime.createForInteraction((key, color) -> fail("unexpected local error"), sent::add,
-			ClientRateLimitPolicy.DEFAULT, () -> 0, target -> TargetValidation.valid(), new Access(), presentation, inventory, null, marker -> 200, feedback);
+			ClientRateLimitPolicy.DEFAULT, () -> 0, target -> TargetValidation.valid(), new Access(), presentation, inventory, null,
+			localStore(ClientPingRuntime.FALLBACK_EXPIRY_GRACE_TICKS, 200L), feedback, PingInteractionLogger.noop());
 		Client() { presentation.tick(true); }
 		void inventoryPacket(InventoryS2CPacket packet) { runtime.onInventoryPacket(packet); }
 		Optional<Boolean> authorization(InventoryResourceKind lane) { return inventory.authorization(lane, presentation.epoch(), presentation.sessionView(), TYPE); }

@@ -50,6 +50,7 @@ import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localStore;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Real accepted stores and composer; this fixture is not production runtime wiring. */
@@ -285,7 +286,7 @@ class PendingContentChatAcceptedStoresTest {
 		final PendingContentChatController controller;
 		Fixture() { this(0); }
 		Fixture(long displayDuration) {
-			markers = new ClientMarkerStore(0, displayDuration);
+			markers = localStore(0L, displayDuration);
 			presentation.tick(true);
 			assertTrue(presentation.offer(PresentationS2CPacket.offer(81, Map.of(BASIC, List.of(
 				new PresentationField(PresentationBasic.NAME, PresentationField.Kind.TEXT, true, 0, "Name"),

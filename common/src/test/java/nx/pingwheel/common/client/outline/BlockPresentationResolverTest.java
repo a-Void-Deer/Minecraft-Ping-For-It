@@ -10,6 +10,7 @@ import java.lang.reflect.Proxy;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Function;
 import java.util.stream.Stream;
@@ -510,6 +511,53 @@ class BlockPresentationResolverTest {
 	}
 
 	@Test
+	void externalReadViewRunsOnlyResolversThatSupportProviderScopedReads() {
+		BlockPos pos = new BlockPos(50, 70, 51);
+		BlockState state = Blocks.STONE.defaultBlockState();
+		BlockGetter world = world(Map.of(pos, state));
+		var view = new ExternalBlockReadView(world, candidate -> pos.equals(candidate) ? state : null, candidate -> null);
+		BlockOutlineSpec source = sourceSpec(pos, state, "block");
+		var ordinaryCalls = new AtomicInteger();
+		var scopedCalls = new AtomicInteger();
+		BlockPresentationResolverRegistry registry = new BlockPresentationResolverRegistry(false);
+		registry.register(resolver("test:ordinary", context -> {
+			ordinaryCalls.incrementAndGet();
+			return BlockPresentationResolution.UNHANDLED;
+		}));
+		registry.register(scopedResolver("test:scoped", context -> {
+			scopedCalls.incrementAndGet();
+			return BlockPresentationResolution.handled(subject("scoped", pos, state));
+		}));
+
+		BlockPresentation external = registry.resolve(new BlockPresentationContext(view, source));
+
+		assertEquals(List.of("scoped"), external.renderSubjects().stream()
+			.map(BlockRenderSubject::subjectId).toList());
+		assertEquals(0, ordinaryCalls.get());
+		assertEquals(1, scopedCalls.get());
+
+		BlockPresentation ordinary = registry.resolve(world, source);
+
+		assertEquals(List.of("scoped"), ordinary.renderSubjects().stream()
+			.map(BlockRenderSubject::subjectId).toList());
+		assertEquals(1, ordinaryCalls.get());
+		assertEquals(2, scopedCalls.get());
+
+		BlockPresentationResolverRegistry fallbackRegistry = new BlockPresentationResolverRegistry(false);
+		var skippedCalls = new AtomicInteger();
+		fallbackRegistry.register(resolver("test:ordinary-only-fallback", context -> {
+			skippedCalls.incrementAndGet();
+			return BlockPresentationResolution.handled(subject("ordinary", pos, state));
+		}));
+
+		BlockPresentation fallback = fallbackRegistry.resolve(view, source);
+
+		assertEquals(List.of("direct"), fallback.renderSubjects().stream()
+			.map(BlockRenderSubject::subjectId).toList());
+		assertEquals(0, skippedCalls.get());
+	}
+
+	@Test
 	void compositeSubjectsHaveDistinctStableSuccessKeys() {
 		BlockPos lowerPos = new BlockPos(40, 70, 41);
 		BlockPos upperPos = lowerPos.above();
@@ -683,6 +731,17 @@ class BlockPresentationResolverTest {
 			id, pos, state, registryId(state), "block", BlockPresentationRelation.DIRECT);
 	}
 
+	private static BlockPresentationResolver scopedResolver(
+		String id,
+		Function<BlockPresentationContext, BlockPresentationResolution> resolve
+	) {
+		return new BlockPresentationResolver() {
+			@Override public String id() { return id; }
+			@Override public boolean supportsExternalScope() { return true; }
+			@Override public BlockPresentationResolution resolve(BlockPresentationContext context) { return resolve.apply(context); }
+		};
+	}
+
 	private static BlockPresentationResolver resolver(
 		String id,
 		Function<BlockPresentationContext, BlockPresentationResolution> resolve
@@ -701,6 +760,10 @@ class BlockPresentationResolverTest {
 						return copy.getOrDefault((BlockPos) arguments[0], Blocks.AIR.defaultBlockState());
 					case "getBlockEntity":
 						return null;
+					case "getHeight":
+						return 384;
+					case "getMinBuildHeight":
+						return -64;
 					case "hashCode":
 						return System.identityHashCode(proxy);
 					case "equals":

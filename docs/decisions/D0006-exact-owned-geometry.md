@@ -23,6 +23,18 @@ positives through holes, sparse structures, or empty portions of a contraption's
 broad bounds. `UNAVAILABLE` and `FAILED` cannot safely mean a hit, and treating
 them as one would make optional failure alter target semantics.
 
+A transformed entity's native bounds are also not a sufficient discovery or
+exactness boundary. Those bounds can remain at remote native plot coordinates
+far from the rendered parent-contained position, or be far larger than the
+owned local geometry. Gating exact candidates only through such bounds would
+miss valid contained targets and would still expose regions the exact source
+did not hit. An explicit loaded-exact admission therefore separates discovery
+from the native AABB without making that AABB authoritative.
+
+An incomplete exact traversal cannot establish the nearest hit: an unvisited
+shape may be closer than the provisional hit. Returning that partial result
+would break the same exactness boundary as coarse-AABB recovery.
+
 The finite-segment box kernel preserves actual native block/fluid surfaces,
 supports origin containment and boundary cases, and avoids assumptions about a
 unit cube or a GPU-rendered mesh. Whole-entity marker identity remains intact;
@@ -32,6 +44,9 @@ local hit detail is capture metadata, not a constituent target.
 
 - **Fall back to AABB after an owned non-hit.** Rejected because it selects
   hollow or sparse entities that the exact source explicitly did not hit.
+- **Use the native entity AABB as the exact discovery and intersection gate.**
+  Rejected because transformed parents can separate the native plot bounds from
+  the placed rotor or make them much broader than the owned local shapes.
 - **Use Create's interaction picker.** Rejected because it fixes outline-shape
   behavior and has a fixed traversal limit unsuitable for this
   captured-ray contract.
@@ -49,12 +64,16 @@ local hit detail is capture metadata, not a constituent target.
 Geometry ownership survives temporary delegate unavailability so an owned
 candidate cannot regress to coarse selection. Each ray uses one immutable owner
 snapshot. Exact local metadata may be retained only while it matches the
-resolved entity identity. The server validates the whole entity and does not
-replay the client-local ray.
+resolved entity identity. Query-local parent frames are detached copies;
+later provider pose changes do not move retained placement, and a parent failure
+does not become world identity. A traversal that cannot complete
+invalidates the candidate rather than certifying a prefix. The server validates
+the whole entity and does not replay the client-local ray.
 
 ## Related docs
 
 [Entity-local picking](../architecture/picking/local_geometry.md),
 [native VoxelShape distinction](../architecture/geometry/voxel_shape.md),
-[Create integration](../integrations/create.md), and
-[Create contraption ray targeting](../integrations/create-contraption-raycast.md).
+[Create integration](../integrations/create.md),
+[Create contraption ray targeting](../integrations/create-contraption-raycast.md), and
+[Aeronautics rotor targeting](../integrations/aeronautics.md).

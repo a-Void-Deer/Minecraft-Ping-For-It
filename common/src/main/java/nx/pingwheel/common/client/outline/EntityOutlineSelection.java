@@ -15,11 +15,11 @@ import nx.pingwheel.common.marker.TargetKey;
 
 /**
  * Pure, deterministic selection of entity outline specs from the store's
- * authoritative visible-winner map.
+ * outline winner projection.
  *
  * <p>This is deliberately a pure JDK function: it consumes only the
  * {@link Map} produced by
- * {@link nx.pingwheel.common.client.marker.ClientMarkerStore#visibleWinnersInDimension}
+ * {@link nx.pingwheel.common.client.marker.ClientMarkerStore#outlineWinnersInDimension}
  * (never the store directly) and the {@link PingTypeCatalog}, so it can be
  * unit tested without any game client.
  *
@@ -44,7 +44,7 @@ public final class EntityOutlineSelection {
 	 * Selects one {@link EntityOutlineSpec} per entity from {@code
 	 * visibleWinners}.
 	 *
-	 * @param visibleWinners the store's authoritative visible-winner map for
+	 * @param visibleWinners the store's outline winner projection for
 	 *                       the current dimension
 	 * @param catalog        the catalog used to resolve ping type outline
 	 *                       colors

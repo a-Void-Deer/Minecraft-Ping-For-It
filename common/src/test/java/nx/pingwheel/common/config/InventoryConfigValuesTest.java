@@ -15,15 +15,15 @@ class InventoryConfigValuesTest {
 	@Test
 	void fieldSpecificFiniteCeilingsRoundTripAndRefuseOneOverWithoutWideningVariantQuota() {
 		var ceilings = new EnumMap<Field, Integer>(Field.class);
-		ceilings.put(Field.PHYSICAL_SLOTS_PER_TICK, 4096);
+		ceilings.put(Field.PHYSICAL_SLOTS_PER_TICK, 2048);
 		ceilings.put(Field.PENDING_MEMORY_MIB, 2048);
 		ceilings.put(Field.PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD, 1024);
-		ceilings.put(Field.PREVIEW_MAX_SLOTS_PER_CLIENT, 16384);
-		ceilings.put(Field.PREVIEW_MAX_SLOTS_SERVER, 65536);
+		ceilings.put(Field.PREVIEW_MAX_SLOTS_PER_CLIENT, 2048);
+		ceilings.put(Field.PREVIEW_MAX_SLOTS_SERVER, 8192);
 		ceilings.put(Field.PREVIEW_MAX_TARGETS_PER_CLIENT, 16);
 		ceilings.put(Field.TRACKING_MAX_VARIANTS_PER_TARGET, 128);
-		ceilings.put(Field.TRACKING_MAX_SLOTS_PER_TARGET, 16384);
-		ceilings.put(Field.TRACKING_MAX_SLOTS_SERVER, 262144);
+		ceilings.put(Field.TRACKING_MAX_SLOTS_PER_TARGET, 4096);
+		ceilings.put(Field.TRACKING_MAX_SLOTS_SERVER, 8192);
 		for (var entry : ceilings.entrySet()) {
 			Field field = entry.getKey(); int maximum = entry.getValue();
 			assertEquals(maximum, field.maximum());

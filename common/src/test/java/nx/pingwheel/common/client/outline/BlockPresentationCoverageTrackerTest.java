@@ -21,6 +21,7 @@ import nx.pingwheel.common.config.EntityBlockRenderMode;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.marker.TargetKey;
 
+import static nx.pingwheel.common.client.outline.BlockModelOutlineTestSupport.prepare;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -334,7 +335,7 @@ class BlockPresentationCoverageTrackerTest {
 		BlockModelOutlineState state = BlockModelOutlineState.INSTANCE;
 		RunnerHarness runner = new RunnerHarness();
 		state.beginFrame();
-		state.setPresentations(List.of(presentation));
+		prepare(state, presentation);
 		SubjectAttempt animatedLower = attempt("lower", EntityBlockRenderMode.ALL,
 			Behavior.RENDERED, Behavior.EMPTY, Behavior.EMPTY);
 		SubjectAttempt animatedUpper = attempt("upper", EntityBlockRenderMode.ALL,
@@ -348,7 +349,7 @@ class BlockPresentationCoverageTrackerTest {
 		long animatedFrame = state.frameId();
 
 		state.beginFrame();
-		state.setPresentations(List.of(presentation));
+		prepare(state, presentation);
 		SubjectAttempt settledLower = attempt("lower", EntityBlockRenderMode.COMPATIBLE,
 			Behavior.FAILED, Behavior.EMPTY, Behavior.EMPTY);
 		SubjectAttempt settledUpper = attempt("upper", EntityBlockRenderMode.COMPATIBLE,
@@ -362,7 +363,7 @@ class BlockPresentationCoverageTrackerTest {
 		assertTrue(state.frameId() > animatedFrame);
 		assertEquals(List.of("lower", "upper", "third"), settled.renderedSubjects());
 		assertTrue(state.successKeys().isEmpty(), "beginFrame must discard stale coverage and success");
-		assertFalse(state.allPresentationsCovered());
+		assertFalse(state.allCoveredByModels());
 	}
 
 	@Test
@@ -408,7 +409,7 @@ class BlockPresentationCoverageTrackerTest {
 		BlockPresentation second = coveredPresentation(10);
 		BlockModelOutlineState state = BlockModelOutlineState.INSTANCE;
 		state.beginFrame();
-		state.setPresentations(List.of(first, second));
+		prepare(state, first, second);
 		RunnerHarness runner = new RunnerHarness();
 		SubjectAttempt firstLower = attempt("lower", EntityBlockRenderMode.ALL,
 			Behavior.RENDERED, Behavior.EMPTY, Behavior.EMPTY);
@@ -451,7 +452,7 @@ class BlockPresentationCoverageTrackerTest {
 	private static BlockModelOutlineState beginFrame(BlockPresentation presentation) {
 		BlockModelOutlineState state = BlockModelOutlineState.INSTANCE;
 		state.beginFrame();
-		state.setPresentations(List.of(presentation));
+		prepare(state, presentation);
 		return state;
 	}
 

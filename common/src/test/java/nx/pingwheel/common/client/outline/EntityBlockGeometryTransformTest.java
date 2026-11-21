@@ -13,8 +13,10 @@ import org.junit.jupiter.api.Test;
 import nx.pingwheel.common.marker.TargetKey;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class EntityBlockGeometryTransformTest {
 	private static final float EPSILON = 0.00001F;
@@ -49,15 +51,15 @@ class EntityBlockGeometryTransformTest {
 
 		assertEquals(0.125F, pose.last().pose().m30(), EPSILON);
 
-		Vector3f vertex = transform.cameraRelativeVertex(
-			new Vec3(0.25D, 0.0D, 0.0D),
+		Vector3f vertex = transform.cameraRelativeEnvironmentVertex(
+			new Vector3d(0.25D, 0.0D, 0.0D),
 			new BlockPos(20_000_000, 0, 0),
 			new Vec3(40_000_000.0D, 0.0D, 0.0D));
 		assertEquals(0.375F, vertex.x(), EPSILON);
 	}
 
 	@Test
-	void pivotRotationScaleAndOffsetUseTheDoubleWorldOriginAndFloatLinearPart() {
+	void rotatedAndScaledPoseAppliesLocalOffsetOnceAtHugePlotCoordinates() {
 		// x' = -2y + 100, y' = 3x + 200, z' = 4z + 300.
 		Matrix4d localToWorld = new Matrix4d()
 			.m00(0.0D).m10(-2.0D).m20(0.0D).m30(100.0D)
@@ -65,8 +67,8 @@ class EntityBlockGeometryTransformTest {
 			.m02(0.0D).m12(0.0D).m22(4.0D).m32(300.0D);
 		EntityBlockGeometryTransform transform = new EntityBlockGeometryTransform(localToWorld);
 		PoseStack pose = transform.createPoseStack(
-			new BlockPos(2, 3, 4),
-			new Vec3(90.0D, 200.0D, 315.0D),
+			new BlockPos(20_000_002, 20_000_003, 20_000_004),
+			new Vec3(-39_999_910.0D, 60_000_200.0D, 80_000_315.0D),
 			new Vec3(0.25D, 0.5D, 0.75D));
 
 		Matrix4f matrix = pose.last().pose();
@@ -78,10 +80,28 @@ class EntityBlockGeometryTransformTest {
 		assertEquals(3.0F, matrix.m01(), EPSILON);
 		assertEquals(4.0F, matrix.m22(), EPSILON);
 
+		// The unit-block vertex adds (-1, 0.75, 3) to the already offset origin.
+		Vector3f vertex = matrix.transformPosition(new Vector3f(0.25F, 0.5F, 0.75F));
+		assertEquals(2.0F, vertex.x(), EPSILON);
+		assertEquals(7.5F, vertex.y(), EPSILON);
+		assertEquals(7.0F, vertex.z(), EPSILON);
+
 		Matrix3f normal = pose.last().normal();
 		assertEquals(-0.5F, normal.m10(), EPSILON);
 		assertEquals(1.0F / 3.0F, normal.m01(), EPSILON);
 		assertEquals(0.25F, normal.m22(), EPSILON);
+	}
+
+	@Test
+	void finiteMatrixDoesNotGuaranteeFiniteProjectedBlockOrigin() {
+		Matrix4d scale = new Matrix4d().scaling(Double.MAX_VALUE, 1.0D, 1.0D);
+		assertTrue(scale.isFinite());
+		assertTrue(EntityBlockGeometryTransform.hasFiniteBlockOrigin(scale, new BlockPos(1, 0, 0)));
+		assertFalse(EntityBlockGeometryTransform.hasFiniteBlockOrigin(scale, new BlockPos(2, 0, 0)));
+
+		Matrix4d translatedScale = scale.m30(Double.MAX_VALUE);
+		assertTrue(translatedScale.isFinite());
+		assertFalse(EntityBlockGeometryTransform.hasFiniteBlockOrigin(translatedScale, new BlockPos(1, 0, 0)));
 	}
 
 	@Test
@@ -91,8 +111,8 @@ class EntityBlockGeometryTransformTest {
 			.m30(10.0D).m31(-20.0D).m32(30.0D);
 		EntityBlockGeometryTransform transform = new EntityBlockGeometryTransform(localToWorld);
 
-		Vector3f result = transform.cameraRelativeVertex(
-			new Vec3(0.25D, 0.5D, 0.75D),
+		Vector3f result = transform.cameraRelativeEnvironmentVertex(
+			new Vector3d(0.25D, 0.5D, 0.75D),
 			new BlockPos(4, 5, 6),
 			new Vec3(1.0D, 2.0D, 3.0D));
 
@@ -151,23 +171,33 @@ class EntityBlockGeometryTransformTest {
 		Vector3f actual = transform.cameraRelativeEnvironmentVertex(
 			new Vector3d(0.375D, 0.0D, 0.0D),
 			new BlockPos(20_480_000, 0, 0),
-			new Vector3d(20_480_000.125D, 0.0D, 0.0D));
+			new Vec3(20_480_000.125D, 0.0D, 0.0D));
 
 		assertEquals(0.25F, actual.x(), EPSILON);
 	}
 
 	@Test
-	void sourceMatrixAndReturnedMatrixAreDefensivelyCopied() {
+	void capturedTransformIsIndependentOfSourceMatrixAndReturnedPose() {
 		Matrix4d source = new Matrix4d().translation(5.0D, 6.0D, 7.0D);
 		EntityBlockGeometryTransform transform = new EntityBlockGeometryTransform(source);
-		source.m30(500.0D);
-		Matrix4d returned = transform.localToWorld();
-		returned.m31(600.0D);
+		source.m30(500.0D).m00(2.0D);
+		BlockPos origin = new BlockPos(1, 2, 3);
+		PoseStack firstPose = transform.createPoseStack(origin, Vec3.ZERO);
+		firstPose.last().pose().m31(600.0F).m00(3.0F);
+		firstPose.last().normal().m00(4.0F);
 
-		PoseStack pose = transform.createPoseStack(new BlockPos(1, 2, 3), Vec3.ZERO);
+		PoseStack pose = transform.createPoseStack(origin, Vec3.ZERO);
 		assertEquals(6.0F, pose.last().pose().m30(), EPSILON);
 		assertEquals(8.0F, pose.last().pose().m31(), EPSILON);
 		assertEquals(10.0F, pose.last().pose().m32(), EPSILON);
+		assertEquals(1.0F, pose.last().pose().m00(), EPSILON);
+		assertEquals(1.0F, pose.last().normal().m00(), EPSILON);
+
+		Vector3f projected = transform.cameraRelativeEnvironmentVertex(
+			new Vector3d(0.25D, 0.5D, 0.75D), origin, Vec3.ZERO);
+		assertEquals(6.25F, projected.x(), EPSILON);
+		assertEquals(8.5F, projected.y(), EPSILON);
+		assertEquals(10.75F, projected.z(), EPSILON);
 	}
 
 	private static Vector3d transform(Matrix4d matrix, double x, double y, double z) {

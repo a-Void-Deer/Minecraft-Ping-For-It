@@ -7,6 +7,8 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.domain.BlockFace;
@@ -39,6 +41,8 @@ class PingSelectorReleaseTest {
 	private static final long HOLD = 20;
 	private static final long LONG_AFTER_OPEN = 600_000L;
 	private static final CapturedRay RAY = new CapturedRay(new WorldVector(1, 2, 3), new WorldVector(0, 0, 1));
+	private static final UUID OWNER = new UUID(0, 1);
+	private static final MarkerId LOCKED_MARKER = new MarkerId(9);
 
 	@Test
 	void wrongTokenDoesNotEvaluatePortsAdvanceClockOrEndNewerOpenInteraction() {
@@ -47,7 +51,7 @@ class PingSelectorReleaseTest {
 		h.machine.abort();
 		h.open();
 		assertEquals(SelectorReleaseResult.empty(), h.machine.releaseSelectorAt(old, Long.MAX_VALUE,
-			unexpectedProposal(), id -> fail("old release consulted candidate lookup"), unexpectedCancellation()));
+			unexpectedProposal(), id -> fail("old release consulted candidate lookup")));
 		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
 		assertSame(h.token, h.machine.currentToken().orElseThrow());
 		assertTrue(h.releaseNone(HOLD + 1).action().isEmpty(), "old timestamp must not poison the newer clock");
@@ -61,10 +65,10 @@ class PingSelectorReleaseTest {
 		h.ready();
 		h.clock.now = HOLD + 1;
 		assertEquals(SelectorReleaseResult.empty(), h.machine.releaseSelectorAt(h.token, h.clock.now,
-			unexpectedProposal(), id -> fail("pre-open lookup"), unexpectedCancellation()));
+			unexpectedProposal(), id -> fail("pre-open lookup")));
 		assertEquals(PingInteractionPhase.PRESSED, h.machine.phase());
 		var create = assertInstanceOf(PingInteractionAction.CreatePing.class,
-			h.machine.update(false, WheelSelection.NONE, h.cancellation()).orElseThrow());
+			h.machine.update(false, WheelSelection.NONE).orElseThrow());
 		assertSame(h.ordinary, create.context());
 		assertEquals(h.ordinary.resolvedTarget().targetType().defaultPingType(), create.pingType());
 	}
@@ -74,13 +78,13 @@ class PingSelectorReleaseTest {
 		Harness h = new Harness();
 		h.token = h.machine.press();
 		h.clock.now = HOLD + 1;
-		assertTrue(h.machine.update(false, WheelSelection.NONE, h.cancellation()).isEmpty());
+		assertTrue(h.machine.update(false, WheelSelection.NONE).isEmpty());
 		h.complete();
 		h.machine.presentFrame(false);
 		assertEquals(SelectorReleaseResult.empty(), h.machine.releaseSelectorAt(h.token, h.clock.now,
-			unexpectedProposal(), id -> fail("pending/default lookup"), unexpectedCancellation()));
+			unexpectedProposal(), id -> fail("pending/default lookup")));
 		assertInstanceOf(PingInteractionAction.CreatePing.class,
-			h.machine.update(false, WheelSelection.NONE, h.cancellation()).orElseThrow());
+			h.machine.update(false, WheelSelection.NONE).orElseThrow());
 	}
 
 	@Test
@@ -89,7 +93,7 @@ class PingSelectorReleaseTest {
 		h.open();
 
 		h.clock.now = LONG_AFTER_OPEN;
-		assertTrue(h.machine.update(true, WheelSelection.NONE, h.cancellation()).isEmpty());
+		assertTrue(h.machine.update(true, WheelSelection.NONE).isEmpty());
 		h.machine.presentFrame(true);
 		assertEquals(PingInteractionPhase.WHEEL_OPEN, h.machine.phase());
 		assertSame(h.token, h.machine.currentToken().orElseThrow());
@@ -97,16 +101,16 @@ class PingSelectorReleaseTest {
 		var result = h.machine.releaseSelectorAt(h.token, LONG_AFTER_OPEN,
 			() -> new SelectorReleaseProposal.Create<>("ordinary", h.ordinary.resolvedTarget(),
 				h.ordinary.resolvedTarget().targetType().defaultPingType(), "create"),
-			id -> Optional.of(h.ordinary), unexpectedCancellation());
+			id -> Optional.of(h.ordinary));
 		assertInstanceOf(PingInteractionAction.CreatePing.class, result.action().orElseThrow());
 		assertSame(h.ordinary.resolvedTarget(), h.validated, "release validates the frozen target exactly once");
 		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
 	}
 
 	@Test
-	void noneTerminatesOnceAndNeverCollectsCancellationCandidates() {
+	void noneTerminatesOnceWithoutEmittingTheLockedCancellation() {
 		Harness h = new Harness();
-		h.open();
+		h.openWithCancellation();
 		AtomicInteger proposals = new AtomicInteger();
 		Supplier<SelectorReleaseProposal<String>> none = () -> {
 			assertEquals(PingInteractionPhase.IDLE, h.machine.phase(), "terminal before caller ports");
@@ -114,29 +118,27 @@ class PingSelectorReleaseTest {
 			return new SelectorReleaseProposal.None<>();
 		};
 		assertEquals(SelectorReleaseResult.empty(), h.machine.releaseSelectorAt(h.token, HOLD + 1,
-			none, id -> fail("None lookup"), unexpectedCancellation()));
+			none, id -> fail("None lookup")));
 		assertEquals(SelectorReleaseResult.empty(), h.machine.releaseSelectorAt(h.token, HOLD + 2,
-			none, id -> fail("duplicate lookup"), unexpectedCancellation()));
+			none, id -> fail("duplicate lookup")));
 		assertEquals(1, proposals.get());
 	}
 
 	@Test
-	void explicitCancellationAloneCollectsCandidatesWithoutValidatingCapturedTarget() {
+	void cancellationAdmitsTheLockedIdOnceWithoutValidatingTheCapturedTarget() {
 		Harness h = new Harness();
-		h.open();
+		h.openWithCancellation();
 		h.verdict = TargetValidation.gone(TargetGoneReason.BLOCK_REPLACED);
 		Object intent = new Object();
 		var result = h.machine.releaseSelectorAt(h.token, HOLD + 1,
-			() -> new SelectorReleaseProposal.Cancel<>(intent), id -> fail("Cancel lookup"), () -> {
+			() -> {
 				assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
-				var base = h.cancellation();
-				return new CancellationContext(base.localOwnerId(), base.currentDimensionId(), base.eyePosition(), base.lookDirection(),
-					List.of(new CancelMarkerCandidate(new MarkerId(9), base.localOwnerId(), base.currentDimensionId(),
-						new WorldVector(1, 2, 8))));
-			});
+				return new SelectorReleaseProposal.Cancel<>(intent);
+			}, id -> fail("Cancel looked up a create candidate"));
 		assertSame(intent, result.admittedIntent().orElseThrow());
-		assertEquals(new MarkerId(9), assertInstanceOf(PingInteractionAction.CancelMarker.class,
-			result.action().orElseThrow()).markerId());
+		assertEquals(new PingInteractionAction.CancelMarker(LOCKED_MARKER, OWNER, DIMENSION), result.action().orElseThrow());
+		assertEquals(SelectorReleaseResult.empty(), h.machine.releaseSelectorAt(h.token, HOLD + 2,
+			unexpectedProposal(), id -> fail("duplicate cancel lookup")));
 		assertNull(h.validated);
 	}
 
@@ -203,7 +205,7 @@ class PingSelectorReleaseTest {
 			var lookup = Map.of("candidate", candidate);
 			var result = h.machine.releaseSelectorAt(h.token, HOLD + 1,
 				() -> new SelectorReleaseProposal.Create<>(mismatch.equals("missing") ? "absent" : "candidate", claim, ping, mismatch),
-				id -> Optional.ofNullable(lookup.get(id)), unexpectedCancellation());
+				id -> Optional.ofNullable(lookup.get(id)));
 			assertEquals(SelectorReleaseResult.empty(), result, mismatch);
 			assertNull(h.validated, mismatch);
 			assertEquals(PingInteractionPhase.IDLE, h.machine.phase(), mismatch);
@@ -234,7 +236,7 @@ class PingSelectorReleaseTest {
 		Harness h = new Harness();
 		h.open();
 		var result = h.machine.releaseSelectorAt(h.token, HOLD + 1,
-			() -> new SelectorReleaseProposal.Local<>("next-capture-toggle"), id -> fail("local lookup"), unexpectedCancellation());
+			() -> new SelectorReleaseProposal.Local<>("next-capture-toggle"), id -> fail("local lookup"));
 		assertEquals(Optional.of("next-capture-toggle"), result.admittedIntent());
 		assertTrue(result.action().isEmpty());
 		assertNull(h.validated);
@@ -250,7 +252,7 @@ class PingSelectorReleaseTest {
 		assertTrue(h.active.currentContext().isEmpty());
 		assertTrue(h.coordinator.complete(h.token, TargetSnapshotFactory.location(DIMENSION, 4, 5, 6), RAY).isEmpty());
 		assertEquals(SelectorReleaseResult.empty(), h.machine.releaseSelectorAt(h.token, HOLD + 1,
-			unexpectedProposal(), id -> fail("aborted lookup"), unexpectedCancellation()));
+			unexpectedProposal(), id -> fail("aborted lookup")));
 		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
 	}
 
@@ -260,7 +262,7 @@ class PingSelectorReleaseTest {
 		h.open();
 		InteractionToken newer = h.active.begin();
 		assertEquals(SelectorReleaseResult.empty(), h.machine.releaseSelectorAt(h.token, HOLD + 1,
-			unexpectedProposal(), id -> fail("superseded lookup"), unexpectedCancellation()));
+			unexpectedProposal(), id -> fail("superseded lookup")));
 		assertTrue(h.active.isCurrent(newer));
 		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
 	}
@@ -270,10 +272,10 @@ class PingSelectorReleaseTest {
 		Harness h = new Harness();
 		h.open();
 		assertThrows(IllegalStateException.class, () -> h.machine.releaseSelectorAt(h.token, HOLD + 1,
-			() -> { throw new IllegalStateException("port failure"); }, id -> fail("failing lookup"), unexpectedCancellation()));
+			() -> { throw new IllegalStateException("port failure"); }, id -> fail("failing lookup")));
 		assertEquals(PingInteractionPhase.IDLE, h.machine.phase());
 		assertEquals(SelectorReleaseResult.empty(), h.machine.releaseSelectorAt(h.token, HOLD + 2,
-			unexpectedProposal(), id -> fail("replayed lookup"), unexpectedCancellation()));
+			unexpectedProposal(), id -> fail("replayed lookup")));
 	}
 
 	@Test
@@ -282,53 +284,47 @@ class PingSelectorReleaseTest {
 		h.open();
 		var result = h.machine.releaseSelectorAt(h.token, HOLD + 1, () -> {
 			assertEquals(SelectorReleaseResult.empty(), h.machine.releaseSelectorAt(h.token, HOLD + 1,
-				unexpectedProposal(), id -> fail("reentrant lookup"), unexpectedCancellation()));
+				unexpectedProposal(), id -> fail("reentrant lookup")));
 			return new SelectorReleaseProposal.Local<>("once");
-		}, id -> fail("local lookup"), unexpectedCancellation());
+		}, id -> fail("local lookup"));
 		assertEquals(Optional.of("once"), result.admittedIntent());
 	}
 
 	@Test
 	void callerPortsCannotReturnOldIntentAfterSupersedingItsOwnership() {
-		for (String port : List.of("proposal", "lookup", "cancellation", "validator")) {
+		for (String port : List.of("create-proposal", "cancel-proposal", "lookup", "validator")) {
 			Harness h = new Harness();
-			h.open();
-			InteractionToken[] newer = { null };
+			h.openWithCancellation();
+			@Nullable InteractionToken[] newer = { null };
 			if (port.equals("validator")) h.validationHook = () -> newer[0] = h.active.begin();
 			var result = h.machine.releaseSelectorAt(h.token, HOLD + 1, () -> {
-				if (port.equals("proposal")) newer[0] = h.active.begin();
-				return port.equals("cancellation") ? new SelectorReleaseProposal.Cancel<>("cancel")
+				if (port.endsWith("-proposal")) newer[0] = h.active.begin();
+				return port.equals("cancel-proposal") ? new SelectorReleaseProposal.Cancel<>("cancel")
 					: new SelectorReleaseProposal.Create<>("candidate", h.ordinary.resolvedTarget(),
 						h.ordinary.resolvedTarget().targetType().defaultPingType(), "create");
 			}, id -> {
 				if (port.equals("lookup")) newer[0] = h.active.begin();
 				return Optional.of(h.ordinary);
-			}, () -> {
-				newer[0] = h.active.begin();
-				return h.cancellation();
 			});
 			assertEquals(SelectorReleaseResult.empty(), result, port);
-			assertTrue(h.active.isCurrent(newer[0]), port);
+			assertTrue(h.active.isCurrent(java.util.Objects.requireNonNull(newer[0])), port);
 		}
 	}
 
 	@Test
 	void abortReenteredFromTerminalReleasePortsStillInvalidatesBeforeAdmittingAnything() {
-		for (String port : List.of("proposal", "lookup", "cancellation", "validator")) {
+		for (String port : List.of("create-proposal", "cancel-proposal", "lookup", "validator")) {
 			Harness h = new Harness();
-			h.open();
+			h.openWithCancellation();
 			if (port.equals("validator")) h.validationHook = h.machine::abort;
 			var result = h.machine.releaseSelectorAt(h.token, HOLD + 1, () -> {
-				if (port.equals("proposal")) h.machine.abort();
-				return port.equals("cancellation") ? new SelectorReleaseProposal.Cancel<>("cancel")
+				if (port.endsWith("-proposal")) h.machine.abort();
+				return port.equals("cancel-proposal") ? new SelectorReleaseProposal.Cancel<>("cancel")
 					: new SelectorReleaseProposal.Create<>("candidate", h.ordinary.resolvedTarget(),
 						h.ordinary.resolvedTarget().targetType().defaultPingType(), "create");
 			}, id -> {
 				if (port.equals("lookup")) h.machine.abort();
 				return Optional.of(h.ordinary);
-			}, () -> {
-				h.machine.abort();
-				return h.cancellation();
 			});
 			assertEquals(SelectorReleaseResult.empty(), result, port);
 			assertFalse(h.active.isCurrent(h.token), port);
@@ -348,7 +344,7 @@ class PingSelectorReleaseTest {
 			var admission = scenario.equals("press-ray") ? SelectorReleaseProposal.Admission.PRESS_RAY : SelectorReleaseProposal.Admission.PRECISE_PRESENTED;
 			var result = h.machine.releaseSelectorAt(h.token, HOLD + 1, () -> new SelectorReleaseProposal.Create<>("live", resolved,
 				resolved.targetType().defaultPingType(), "opaque", admission, scenario.equals("wrong-revision") ? 6 : 7),
-				id -> Optional.of(lookup), unexpectedCancellation());
+				id -> Optional.of(lookup));
 			if (scenario.equals("valid")) {
 				assertSame(live, assertInstanceOf(PingInteractionAction.CreatePing.class, result.action().orElseThrow()).context());
 				assertEquals(Optional.of("opaque"), result.admittedIntent());
@@ -376,14 +372,11 @@ class PingSelectorReleaseTest {
 		assertFalse(h.machine.markSelectorPresented(h.token, 1, Map.of("ordinary", h.ordinary)));
 		h.machine.abort(); assertFalse(h.machine.markSelectorPresented(h.token, 3, Map.of("ordinary", h.ordinary)));
 		assertEquals(SelectorReleaseResult.empty(), h.machine.releaseSelectorAt(h.token, HOLD + 1,
-			unexpectedProposal(), id -> fail("aborted paint lookup"), unexpectedCancellation()));
+			unexpectedProposal(), id -> fail("aborted paint lookup")));
 	}
 
 	private static <P> Supplier<SelectorReleaseProposal<P>> unexpectedProposal() {
 		return () -> fail("proposal must not be evaluated");
-	}
-	private static Supplier<CancellationContext> unexpectedCancellation() {
-		return () -> fail("cancellation must not be collected");
 	}
 
 	private static final class Harness {
@@ -411,17 +404,21 @@ class PingSelectorReleaseTest {
 		void ready() { token = machine.press(); complete(); }
 		void complete() { ordinary = coordinator.complete(token, TargetSnapshotFactory.location(DIMENSION, 4, 5, 6), RAY).orElseThrow(); }
 		void open() { ready(); clock.now = HOLD; machine.presentFrame(true); }
+		void openWithCancellation() {
+			@Unmodifiable List<CancelMarkerCandidate> candidates = List.of(
+				new CancelMarkerCandidate(LOCKED_MARKER, OWNER, DIMENSION, new WorldVector(1, 2, 8)));
+			token = machine.press(machine.freezeCancellation(
+				new CancellationContext(OWNER, DIMENSION, RAY.origin(), RAY.direction(), candidates)));
+			complete(); clock.now = HOLD; machine.presentFrame(true);
+		}
 		SelectorReleaseResult<String> releaseNone(long now) {
 			return machine.releaseSelectorAt(token, now, SelectorReleaseProposal.None::new,
-				id -> fail("None lookup"), unexpectedCancellation());
+				id -> fail("None lookup"));
 		}
 		<P> SelectorReleaseResult<P> create(CapturedPingContext context, ResolvedTarget claimedTarget, P payload) {
 			return machine.releaseSelectorAt(token, HOLD + 1,
 				() -> new SelectorReleaseProposal.Create<>("candidate", claimedTarget, claimedTarget.targetType().defaultPingType(), payload),
-				id -> Optional.of(context), unexpectedCancellation());
-		}
-		CancellationContext cancellation() {
-			return new CancellationContext(new UUID(0, 1), DIMENSION, RAY.origin(), RAY.direction(), List.of());
+				id -> Optional.of(context));
 		}
 	}
 	private static final class Clock implements InteractionTimeSource {

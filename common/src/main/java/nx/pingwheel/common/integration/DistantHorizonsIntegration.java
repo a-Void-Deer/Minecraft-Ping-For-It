@@ -2,15 +2,22 @@ package nx.pingwheel.common.integration;
 
 import com.seibel.distanthorizons.api.DhApi;
 import com.seibel.distanthorizons.api.interfaces.data.IDhApiTerrainDataCache;
+import com.seibel.distanthorizons.api.interfaces.data.IDhApiTerrainDataRepo;
+import com.seibel.distanthorizons.api.interfaces.world.IDhApiLevelWrapper;
+import com.seibel.distanthorizons.api.interfaces.world.IDhApiWorldProxy;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
+import java.lang.ref.WeakReference;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.InstantSource;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.function.Consumer;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.diagnostics.DiagnosticLogger;
@@ -25,42 +32,86 @@ import org.jetbrains.annotations.Nullable;
  * Distant Horizons class reference, the terrain cache, the asynchronous ray
  * trace, and the API version diagnostics live here. Core classes never
  * reference the optional packages and only use the JDK/Minecraft signature
- * {@link #traceDistantAsync(Vec3, Vec3, Consumer)}.
+ * {@link #traceDistantAsync(ClientLevel, boolean, Vec3, Vec3, Executor, Consumer)}.
  */
 @NotNullByDefault
 public class DistantHorizonsIntegration {
-	private DistantHorizonsIntegration() {}
-
-	private static final Object CACHE_LOCK = new Object();
-	private static final long CACHE_MAX_AGE_SECONDS = 10L;
+	static final long CACHE_MAX_AGE_SECONDS = 10L;
 	private static final int RAYCAST_RANGE = 4096;
 
 	private static final IntegrationLinkGuard LINK_GUARD = new IntegrationLinkGuard("distanthorizons", Diagnostics.client());
+	private static final DistantHorizonsIntegration INSTANCE = new DistantHorizonsIntegration(InstantSource.system());
 
-	private static @Nullable IDhApiTerrainDataCache terrainCache = null;
-	private static Instant lastCacheLoad = Instant.EPOCH;
+	private final InstantSource clock;
+	private final Object cacheLock = new Object();
+	private @Nullable CachedTerrain cachedTerrain;
+
+	DistantHorizonsIntegration(InstantSource clock) {
+		this.clock = clock;
+	}
+
+	private record TraceWorld(IDhApiLevelWrapper wrapper, IDhApiTerrainDataRepo repo) {}
+
+	private static final class CachedTerrain {
+		private final WeakReference<IDhApiLevelWrapper> wrapper;
+		private final WeakReference<IDhApiTerrainDataRepo> repo;
+		private final IDhApiTerrainDataCache cache;
+		private final Instant loadedAt;
+		private int users;
+
+		private CachedTerrain(TraceWorld world, InstantSource clock) {
+			wrapper = new WeakReference<>(world.wrapper());
+			repo = new WeakReference<>(world.repo());
+			cache = world.repo().createSoftCache();
+			loadedAt = clock.instant();
+		}
+
+		private boolean expired(InstantSource clock) {
+			return Duration.between(loadedAt, clock.instant()).getSeconds() > CACHE_MAX_AGE_SECONDS;
+		}
+
+		private boolean matches(TraceWorld world) {
+			return wrapper.get() == world.wrapper() && repo.get() == world.repo();
+		}
+	}
 
 	/**
-	 * Starts the asynchronous distant-terrain ray trace from {@code rayStart}
-	 * along {@code direction}.
+	 * Binds the captured level to its DH wrapper on the client thread and traces
+	 * terrain off-thread. The completion executor returns to the client thread
+	 * to recheck the binding before delivering a hit.
 	 *
 	 * @return {@code true} only when exactly one completion will be invoked
 	 *         (with a distant hit, or empty on no hit/error); {@code false}
-	 *         when the integration is gated off, disabled, or failed to
+	 *         when the integration or captured DH level is unavailable, or failed to
 	 *         schedule, in which case no completion is ever invoked and the
 	 *         caller must fall back itself. A scheduling rejection (for
 	 *         example a {@code RejectedExecutionException}) does not disable
 	 *         the integration; a controlled WARN preserves the failure details.
 	 */
-	public static boolean traceDistantAsync(Vec3 rayStart, Vec3 direction, Consumer<Optional<BlockHitResult>> completion) {
+	public static boolean traceDistantAsync(ClientLevel level, boolean integratedServer, Vec3 rayStart, Vec3 direction,
+		Executor clientExecutor, Consumer<Optional<BlockHitResult>> completion) {
+		return INSTANCE.traceAsync(level, integratedServer, rayStart, direction, clientExecutor, completion);
+	}
+
+	boolean traceAsync(ClientLevel level, boolean integratedServer, Vec3 rayStart, Vec3 direction,
+		Executor clientExecutor, Consumer<Optional<BlockHitResult>> completion) {
 		if (!ModContext.HasDistantHorizons || LINK_GUARD.disabled()) {
 			return false;
 		}
 
-		final CompletableFuture<Optional<BlockHitResult>> future;
+		@Nullable TraceWorld world = findTraceWorld(level, integratedServer);
+		if (world == null) return false;
 
+		final CompletableFuture<Optional<BlockHitResult>> future;
 		try {
-			future = CompletableFuture.supplyAsync(() -> traceDistant(rayStart, direction));
+			future = CompletableFuture.supplyAsync(() -> {
+				try {
+					return traceDistant(world, rayStart, direction);
+				} catch (LinkageError error) {
+					LINK_GUARD.disable(error);
+					return Optional.empty();
+				}
+			});
 		} catch (LinkageError error) {
 			LINK_GUARD.disable(error);
 			return false;
@@ -71,7 +122,17 @@ public class DistantHorizonsIntegration {
 			return false;
 		}
 
-		future.whenComplete((result, throwable) -> completeTrace(rayStart, direction, result, throwable, completion));
+		future.whenComplete((result, throwable) -> completeTrace(rayStart, direction, result, throwable,
+			hit -> clientExecutor.execute(() -> {
+				if (hit.isEmpty()) {
+					completion.accept(hit);
+					return;
+				}
+				@Nullable TraceWorld current = findTraceWorld(level, integratedServer);
+				// DH can replace a keyed wrapper without replacing Minecraft's ClientLevel.
+				completion.accept(current != null && current.wrapper() == world.wrapper() && current.repo() == world.repo()
+					? hit : Optional.empty());
+			})));
 
 		return true;
 	}
@@ -116,40 +177,77 @@ public class DistantHorizonsIntegration {
 		return root;
 	}
 
-	private static Optional<BlockHitResult> traceDistant(Vec3 rayStart, Vec3 direction) {
-		if (LINK_GUARD.disabled()) {
-			return Optional.empty();
-		}
-
+	private static @Nullable TraceWorld findTraceWorld(ClientLevel level, boolean integratedServer) {
+		if (LINK_GUARD.disabled()) return null;
 		try {
-			if (DhApi.Delayed.worldProxy == null) {
-				return Optional.empty();
+			@Nullable IDhApiWorldProxy worldProxy = DhApi.Delayed.worldProxy;
+			@Nullable IDhApiTerrainDataRepo terrainRepo = DhApi.Delayed.terrainRepo;
+			if (worldProxy == null || terrainRepo == null || !worldProxy.worldLoaded()) return null;
+
+			final @Nullable IDhApiLevelWrapper integratedAlias;
+			final Iterable<@Nullable IDhApiLevelWrapper> loaded;
+			try {
+				loaded = worldProxy.getAllLoadedLevelWrappers();
+				// An integrated DH level is enumerated by its server wrapper; this supplies its client alias.
+				integratedAlias = integratedServer ? worldProxy.getSinglePlayerLevel() : null;
+			} catch (IllegalStateException unloaded) {
+				// The world can unload between the probe and enumeration.
+				return null;
 			}
 
-			final var levelWrapper = DhApi.Delayed.worldProxy.getSinglePlayerLevel();
-
-			if (levelWrapper == null) {
-				return Optional.empty();
+			// The same dimension type or name can describe multiple DH worlds.
+			@Nullable IDhApiLevelWrapper levelWrapper = integratedAlias != null && integratedAlias.getWrappedMcObject() == level
+				? integratedAlias : null;
+			for (@Nullable IDhApiLevelWrapper wrapper : loaded) {
+				if (wrapper == null || wrapper.getWrappedMcObject() != level) continue;
+				if (levelWrapper != null && levelWrapper != wrapper) return null;
+				levelWrapper = wrapper;
 			}
+			return levelWrapper != null ? new TraceWorld(levelWrapper, terrainRepo) : null;
+		} catch (LinkageError error) {
+			LINK_GUARD.disable(error);
+		} catch (RuntimeException error) {
+			Diagnostics.client().atNormal().rateLimited(DistantHorizonsDiagnosticChannels.TRACE_FAILURES).failure(Level.WARN,
+				"distanthorizons/world-selection", "distant-world-unavailable", null, error);
+		}
+		return null;
+	}
 
-			final @Nullable IDhApiTerrainDataCache cache;
+	private Optional<BlockHitResult> traceDistant(TraceWorld world, Vec3 rayStart, Vec3 direction) {
+		if (LINK_GUARD.disabled()) return Optional.empty();
 
-			// Refresh the cache under the lock, then ray cast outside it.
-			synchronized (CACHE_LOCK) {
-				if (terrainCache == null || Duration.between(lastCacheLoad, Instant.now()).getSeconds() > CACHE_MAX_AGE_SECONDS) {
-					terrainCache = DhApi.Delayed.terrainRepo.createSoftCache();
-					lastCacheLoad = Instant.now();
+		@Nullable CachedTerrain acquired = null;
+		@Nullable CachedTerrain idleRetired = null;
+		try {
+			try {
+				// DH keys cached data by position alone. Keep one reusable cache per active binding.
+				synchronized (cacheLock) {
+					@Nullable CachedTerrain previous = cachedTerrain;
+					if (previous != null && previous.expired(clock)) {
+						// The expired slot is retired even if allocating its replacement fails.
+						cachedTerrain = null;
+						if (previous.users == 0) idleRetired = previous;
+						previous = null;
+					}
+					if (previous != null && previous.matches(world)) {
+						acquired = previous;
+					} else {
+						acquired = new CachedTerrain(world, clock);
+						cachedTerrain = acquired;
+						if (previous != null && previous.users == 0) idleRetired = previous;
+					}
+					acquired.users++;
 				}
-
-				cache = terrainCache;
+			} finally {
+				if (idleRetired != null) clearRetiredCache(idleRetired);
 			}
 
-			final var rayCastResult = DhApi.Delayed.terrainRepo.raycast(
-				levelWrapper,
+			final var rayCastResult = world.repo().raycast(
+				world.wrapper(),
 				rayStart.x, rayStart.y, rayStart.z,
 				(float) direction.x, (float) direction.y, (float) direction.z,
 				RAYCAST_RANGE,
-				cache
+				acquired.cache
 			);
 
 			if (!rayCastResult.success || rayCastResult.payload == null) {
@@ -159,9 +257,26 @@ public class DistantHorizonsIntegration {
 			final var pos = new Vec3(rayCastResult.payload.pos.x, rayCastResult.payload.pos.y, rayCastResult.payload.pos.z);
 
 			return Optional.of(terrainHit(pos));
-		} catch (LinkageError error) {
-			LINK_GUARD.disable(error);
-			return Optional.empty();
+		} finally {
+			if (acquired != null) releaseTerrain(acquired);
+		}
+	}
+
+	private void releaseTerrain(CachedTerrain acquired) {
+		final boolean clear;
+		synchronized (cacheLock) {
+			clear = --acquired.users == 0 && cachedTerrain != acquired;
+		}
+		if (clear) clearRetiredCache(acquired);
+	}
+
+	/** Runs outside the lock after retirement and the final reader. A discarded cache cannot affect picking. */
+	private static void clearRetiredCache(CachedTerrain retired) {
+		try {
+			retired.cache.clear();
+		} catch (RuntimeException | LinkageError failure) {
+			Diagnostics.client().atNormal().rateLimited(DistantHorizonsDiagnosticChannels.CACHE_RETIREMENT_FAILURES)
+				.warn("distanthorizons/cache-retirement", "retired-cache-discarded", failure);
 		}
 	}
 

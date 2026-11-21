@@ -8,6 +8,7 @@ import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.PostChain;
 import net.minecraft.client.renderer.RenderBuffers;
+import net.minecraft.client.multiplayer.ClientLevel;
 import com.mojang.blaze3d.systems.RenderSystem;
 import net.minecraft.world.entity.Entity;
 import nx.pingwheel.common.CommonClient;
@@ -18,6 +19,7 @@ import nx.pingwheel.common.client.outline.EntityOutlineSourceRegistry;
 import nx.pingwheel.common.client.outline.EntityOutlineState;
 import nx.pingwheel.common.interaction.MinecraftEntityTargetAdapter;
 import nx.pingwheel.common.render.WorldRenderContext;
+import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -38,6 +40,10 @@ public abstract class LevelRendererMixin {
 	@Final
 	private Minecraft minecraft;
 
+	/** The level this renderer is currently bound to; replaced by {@code setLevel}. */
+	@Shadow
+	private @Nullable ClientLevel level;
+
 	// The target field is lazily (re)assigned during renderLevel, not final.
 	@Shadow
 	private PostChain entityEffect;
@@ -51,6 +57,22 @@ public abstract class LevelRendererMixin {
 
 	@Shadow
 	protected abstract boolean shouldShowEntityOutlines();
+
+	/**
+	 * Releases shared client caches bound to the previous world at the native
+	 * client-world replacement/unload boundary used by every loader. At HEAD
+	 * the renderer still holds the previous level while {@code Minecraft.level}
+	 * is already the replacement, or {@code null} after
+	 * {@code Minecraft#clearClientLevel}. Identical re-binds keep their state.
+	 */
+	@Inject(method = "setLevel", at = @At("HEAD"), require = 1)
+	private void pingforit$onClientLevelChanged(@Nullable ClientLevel nextLevel, CallbackInfo callbackInfo) {
+		if (this.level == nextLevel) {
+			return;
+		}
+
+		CommonClient.INSTANCE.onClientLevelChanged();
+	}
 
 	@Inject(method = "renderLevel", at = @At(value = "INVOKE", target = "Lcom/mojang/blaze3d/systems/RenderSystem;applyModelViewMatrix()V", ordinal = 0, shift = At.Shift.AFTER))
 	private void onStartRenderLevel(DeltaTracker deltaTracker, boolean bl, Camera camera, GameRenderer gameRenderer, LightTexture lightTexture, Matrix4f modelViewMatrix, Matrix4f projectionMatrix, CallbackInfo ci) {
@@ -68,8 +90,7 @@ public abstract class LevelRendererMixin {
 			RenderSystem.getModelViewMatrix(),
 			RenderSystem.getProjectionMatrix(),
 			RenderSystem.getVertexSorting(),
-			camera.getPosition(),
-			deltaTracker.getGameTimeDeltaPartialTick(true));
+			camera.getPosition());
 		CommonClient.INSTANCE.onRenderWorld(WorldRenderContext.of(modelViewMatrix, projectionMatrix, deltaTracker.getGameTimeDeltaPartialTick(true), camera));
 	}
 

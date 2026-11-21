@@ -18,8 +18,9 @@ import org.jetbrains.annotations.Unmodifiable;
  *
  * <p>Registrations are published as an immutable volatile snapshot. The first
  * registration for an id wins, and the first resolver that returns a handled
- * result wins. Resolver failures from optional code are ignored so the normal
- * direct presentation remains available.</p>
+ * result wins. A context bound to an external read view only runs resolvers
+ * that support provider-scoped reads. Resolver failures from optional code are
+ * ignored so the normal direct presentation remains available.</p>
  */
 public final class BlockPresentationResolverRegistry {
 	private static final DiagnosticChannel RESOLUTION_FAILURES = DiagnosticChannel.interval(
@@ -115,12 +116,11 @@ public final class BlockPresentationResolverRegistry {
 		return resolve(new BlockPresentationContext(world, sourceSpec));
 	}
 
-	/** Convenience overload for source-first call sites. */
-	public BlockPresentation resolve(BlockOutlineSpec sourceSpec, BlockGetter world) {
-		return resolve(world, sourceSpec);
-	}
-
-	/** Resolves one already-constructed context against this registry. */
+	/**
+	 * Resolves one already-constructed context against this registry. The world
+	 * bound to the context selects the scope: an external read view allows only
+	 * resolvers that explicitly support provider-scoped reads.
+	 */
 	public BlockPresentation resolve(BlockPresentationContext context) {
 		Objects.requireNonNull(context, "context");
 
@@ -128,9 +128,13 @@ public final class BlockPresentationResolverRegistry {
 			return new BlockPresentation(context.sourceSpec(), List.of());
 		}
 
+		boolean externalScope = context.world() instanceof ExternalBlockReadView;
 		for (BlockPresentationResolver resolver : snapshot) {
 			@Nullable BlockPresentationResolution result;
 			try {
+				if (externalScope && !resolver.supportsExternalScope()) {
+					continue;
+				}
 				result = resolver.resolve(context);
 			} catch (Exception | LinkageError | AssertionError failure) {
 				Diagnostics.client().atNormal().rateLimited(RESOLUTION_FAILURES).failure(Level.WARN, "block-presentation-resolve",
@@ -150,22 +154,6 @@ public final class BlockPresentationResolverRegistry {
 
 		return new BlockPresentation(context.sourceSpec(),
 			context.directResolution().subjects());
-	}
-
-	/** Resolves only the validated direct source presentation. */
-	public BlockPresentation resolveDirect(BlockGetter world, BlockOutlineSpec sourceSpec) {
-		return resolveDirect(new BlockPresentationContext(world, sourceSpec));
-	}
-
-	/** Convenience overload for source-first call sites. */
-	public BlockPresentation resolveDirect(BlockOutlineSpec sourceSpec, BlockGetter world) {
-		return resolveDirect(world, sourceSpec);
-	}
-
-	/** Resolves only the validated direct source presentation. */
-	public BlockPresentation resolveDirect(BlockPresentationContext context) {
-		Objects.requireNonNull(context, "context");
-		return new BlockPresentation(context.sourceSpec(), context.directResolution().subjects());
 	}
 
 	private void close(Registration registration) {

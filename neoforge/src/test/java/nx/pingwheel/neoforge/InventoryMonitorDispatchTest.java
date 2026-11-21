@@ -38,6 +38,7 @@ import nx.pingwheel.common.network.InventoryMonitorSampleS2CPacket;
 import nx.pingwheel.common.network.InventoryMonitorStatusS2CPacket;
 import nx.pingwheel.common.network.InventoryMonitorStatusS2CPacket.SampleCapability;
 import nx.pingwheel.common.network.InventoryMonitorSubscribeC2SPacket;
+import nx.pingwheel.common.network.PresentationC2SPacket;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeAll;
@@ -82,19 +83,45 @@ class InventoryMonitorDispatchTest {
 		}
 	}
 
+	@Test void registeredPresentationHelloResolvesSameListenerRespawnAndDropsWorkAfterLogout() throws Exception {
+		PresentationPayloadRegistrationTest.registeredCodec();
+		var registry = registrations();
+		var id = PresentationC2SPacket.PACKET_ID;
+		var saved = Objects.requireNonNull(registry.remove(id));
+		try {
+			var server = allocate(Server.class); server.players = allocate(Players.class);
+			var original = allocate(ServerUser.class); original.owner = server;
+			var listener = allocate(ServerListener.class); original.connection = listener; server.players.player = original;
+			var hello = PresentationC2SPacket.hello(Map.of("minecraft:basic", 1));
+			var accepted = new ArrayList<ServerPlayer>();
+			NeoMain.registerPresentationReceiver(new PayloadRegistrar("pingforit").optional(), (owner, current, packet) -> {
+				assertSame(server, owner); assertEquals(hello, packet); accepted.add(current);
+			});
+			var registration = Objects.requireNonNull(registry.get(id));
+			var tasks = new ArrayList<Runnable>();
+			var context = serverContext(original, listener, tasks);
+
+			handle(registration, hello, context);
+			tasks.removeFirst().run(); // Run the registrar's wrapper, but hold the owner callback.
+			assertTrue(accepted.isEmpty());
+			var respawned = allocate(ServerUser.class); respawned.owner = server;
+			respawned.connection = listener; server.players.player = respawned;
+			drain(tasks);
+			assertEquals(List.of(respawned), accepted, "same listener resolves the current respawned player");
+
+			handle(registration, hello, context);
+			server.players.player = null;
+			drain(tasks);
+			assertEquals(List.of(respawned), accepted, "logout before the wrapper runs leaves no current player");
+		} finally { registry.put(id, saved); }
+	}
+
 	private static void serverRoute() {
 		var server = allocate(Server.class); server.players = allocate(Players.class);
 		var player = allocate(ServerUser.class); player.owner = server;
 		var listener = allocate(ServerListener.class); player.connection = listener; server.players.player = player;
 		var tasks = new ArrayList<Runnable>();
-		IPayloadContext context = (IPayloadContext) Proxy.newProxyInstance(IPayloadContext.class.getClassLoader(),
-			new Class<?>[] {IPayloadContext.class}, (proxy, method, arguments) -> switch (method.getName()) {
-				case "player" -> player;
-				case "listener" -> listener;
-				case "enqueueWork" -> { tasks.add((Runnable) Objects.requireNonNull(arguments)[0]); yield CompletableFuture.completedFuture(null); }
-				case "flow" -> PacketFlow.SERVERBOUND;
-				default -> throw new AssertionError("unexpected server context access " + method.getName());
-			});
+		var context = serverContext(player, listener, tasks);
 		// The installed test subscriber rejects client delivery; invoke the actual
 		// production receiver using a callback that records the authenticated player.
 		var calls = new AtomicInteger();
@@ -126,6 +153,17 @@ class InventoryMonitorDispatchTest {
 			registry.put(InventoryMonitorStatusS2CPacket.PACKET_ID, Objects.requireNonNull(savedStatus));
 			registry.put(InventoryMonitorSampleS2CPacket.PACKET_ID, Objects.requireNonNull(savedSample));
 		}
+	}
+
+	private static IPayloadContext serverContext(ServerUser player, ServerListener listener, List<Runnable> tasks) {
+		return (IPayloadContext) Proxy.newProxyInstance(IPayloadContext.class.getClassLoader(),
+			new Class<?>[] {IPayloadContext.class}, (var proxy, var method, @Nullable var arguments) -> switch (method.getName()) {
+				case "player" -> player;
+				case "listener" -> listener;
+				case "enqueueWork" -> { tasks.add((Runnable) Objects.requireNonNull(arguments)[0]); yield CompletableFuture.completedFuture(null); }
+				case "flow" -> PacketFlow.SERVERBOUND;
+				default -> throw new AssertionError("unexpected server context access " + method.getName());
+			});
 	}
 
 	@SuppressWarnings("unchecked")

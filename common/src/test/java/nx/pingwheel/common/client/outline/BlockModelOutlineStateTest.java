@@ -1,6 +1,5 @@
 package nx.pingwheel.common.client.outline;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -16,7 +15,10 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.marker.TargetKey;
+import nx.pingwheel.common.client.outline.ExternalBlockFramePresentation.SuccessKey;
+import org.jetbrains.annotations.Unmodifiable;
 
+import static nx.pingwheel.common.client.outline.BlockModelOutlineTestSupport.prepare;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -43,15 +45,14 @@ class BlockModelOutlineStateTest {
 		BlockModelOutlineState state = BlockModelOutlineState.INSTANCE;
 		BlockPresentation direct = directPresentation(1, 2, 3, "direct");
 		BlockPresentation second = directPresentation(4, 5, 6, "other");
-		TargetKey.ExternalBlockKey sable = new TargetKey.ExternalBlockKey(
-			DIMENSION, "sable", "plot-block", "minecraft:stone");
+		SuccessKey sable = externalSuccess("plot-block", "direct");
 
 		state.beginFrame();
 		assertFalse(state.emitted());
 		assertTrue(state.presentations().isEmpty());
 		assertTrue(state.successKeys().isEmpty());
 
-		state.setPresentations(List.of(direct, second));
+		prepare(state, direct, second);
 		BlockPresentationSuccessKey directKey = direct.renderSubjects().get(0).successKey(direct.sourceSpec());
 		BlockPresentationSuccessKey secondKey = second.renderSubjects().get(0).successKey(second.sourceSpec());
 		state.addSuccess(directKey);
@@ -76,12 +77,9 @@ class BlockModelOutlineStateTest {
 	@Test
 	void presentationSnapshotIsImmutable() {
 		BlockModelOutlineState state = BlockModelOutlineState.INSTANCE;
-		List<BlockPresentation> mutable = new ArrayList<>();
 		BlockPresentation presentation = directPresentation(1, 2, 3, "direct");
-		mutable.add(presentation);
 
-		state.setPresentations(mutable);
-		mutable.clear();
+		prepare(state, presentation);
 
 		assertEquals(List.of(presentation), state.presentations());
 		assertThrows(UnsupportedOperationException.class,
@@ -97,18 +95,16 @@ class BlockModelOutlineStateTest {
 			first.renderSubjects().get(0).successKey(first.sourceSpec());
 		BlockPresentationSuccessKey secondKey =
 			second.renderSubjects().get(0).successKey(second.sourceSpec());
-		TargetKey.ExternalBlockKey firstExternal = new TargetKey.ExternalBlockKey(
-			DIMENSION, "sable", "first", "minecraft:stone");
-		TargetKey.ExternalBlockKey secondExternal = new TargetKey.ExternalBlockKey(
-			DIMENSION, "sable", "second", "minecraft:stone");
+		SuccessKey firstExternal = externalSuccess("first", "direct");
+		SuccessKey secondExternal = externalSuccess("second", "direct");
 
-		state.setPresentations(List.of(first, second));
+		prepare(state, first, second);
 		state.addSuccess(firstKey);
 		Set<BlockPresentationSuccessKey> publishedSuccesses = state.successKeys();
 		state.addExternalSuccess(firstExternal);
-		Set<TargetKey.ExternalBlockKey> publishedExternalSuccesses = state.externalSuccessKeys();
+		@Unmodifiable Set<SuccessKey> publishedExternalSuccesses = state.externalSuccessKeys();
 
-		assertFalse(state.allPresentationsCovered());
+		assertFalse(state.allCoveredByModels());
 		state.addSuccess(secondKey);
 		state.addExternalSuccess(secondExternal);
 
@@ -116,7 +112,7 @@ class BlockModelOutlineStateTest {
 		assertEquals(Set.of(firstExternal), publishedExternalSuccesses);
 		assertEquals(Set.of(firstKey, secondKey), state.successKeys());
 		assertEquals(Set.of(firstExternal, secondExternal), state.externalSuccessKeys());
-		assertTrue(state.allPresentationsCovered());
+		assertTrue(state.allCoveredByModels());
 
 		state.beginFrame();
 
@@ -125,7 +121,7 @@ class BlockModelOutlineStateTest {
 		assertTrue(state.successKeys().isEmpty());
 		assertTrue(state.externalSuccessKeys().isEmpty());
 		assertTrue(state.presentations().isEmpty());
-		assertTrue(state.allPresentationsCovered());
+		assertTrue(state.allCoveredByModels());
 	}
 
 	@Test
@@ -134,10 +130,9 @@ class BlockModelOutlineStateTest {
 		BlockPresentation presentation = directPresentation(1, 2, 3, "direct");
 		BlockPresentationSuccessKey success =
 			presentation.renderSubjects().get(0).successKey(presentation.sourceSpec());
-		state.setPresentations(List.of(presentation));
+		prepare(state, presentation);
 		state.addSuccess(success);
-		state.addExternalSuccess(new TargetKey.ExternalBlockKey(
-			DIMENSION, "sable", "plot-block", "minecraft:stone"));
+		state.addExternalSuccess(externalSuccess("plot-block", "direct"));
 
 		state.beginFrame();
 
@@ -151,7 +146,7 @@ class BlockModelOutlineStateTest {
 	void clearResetsPresentationsAndSuccesses() {
 		BlockModelOutlineState state = BlockModelOutlineState.INSTANCE;
 		BlockPresentation presentation = directPresentation(1, 2, 3, "direct");
-		state.setPresentations(List.of(presentation));
+		prepare(state, presentation);
 		state.addSuccess(presentation.renderSubjects().get(0).successKey(presentation.sourceSpec()));
 
 		state.clear();
@@ -167,16 +162,16 @@ class BlockModelOutlineStateTest {
 		BlockPresentation presentation = compositePresentation();
 		BlockRenderSubject first = presentation.renderSubjects().get(0);
 		BlockRenderSubject second = presentation.renderSubjects().get(1);
-		state.setPresentations(List.of(presentation));
+		prepare(state, presentation);
 
 		state.addSuccess(first.successKey(presentation.sourceSpec()));
 
 		assertTrue(state.successKeys().contains(first.successKey(presentation.sourceSpec())));
 		assertFalse(state.successKeys().contains(second.successKey(presentation.sourceSpec())));
-		assertFalse(state.allPresentationsCovered());
+		assertFalse(state.allCoveredByModels());
 
 		state.addSuccess(second.successKey(presentation.sourceSpec()));
-		assertTrue(state.allPresentationsCovered());
+		assertTrue(state.allCoveredByModels());
 	}
 
 	@Test
@@ -185,14 +180,14 @@ class BlockModelOutlineStateTest {
 		BlockPresentation presentation = directPresentation(1, 2, 3, "direct");
 		BlockPresentationSuccessKey success =
 			presentation.renderSubjects().get(0).successKey(presentation.sourceSpec());
-		state.setPresentations(List.of(presentation));
+		prepare(state, presentation);
 		state.addSuccess(success);
 
 		state.clearSuccesses();
 
 		assertEquals(List.of(presentation), state.presentations());
 		assertTrue(state.successKeys().isEmpty());
-		assertFalse(state.allPresentationsCovered());
+		assertFalse(state.allCoveredByModels());
 
 		state.beginFrame();
 
@@ -206,28 +201,15 @@ class BlockModelOutlineStateTest {
 		BlockPresentation direct = directPresentation(1, 2, 3, "direct");
 		BlockPresentation empty = new BlockPresentation(
 			sourceSpec(4, 5, 6, "block"), List.of());
-		state.setPresentations(List.of(direct, empty));
+		prepare(state, direct, empty);
 
-		assertFalse(state.allPresentationsCovered());
+		assertFalse(state.allCoveredByModels());
 		state.addSuccess(direct.renderSubjects().get(0).successKey(direct.sourceSpec()));
-		assertTrue(state.allPresentationsCovered());
+		assertTrue(state.allCoveredByModels());
 	}
 
-	@Test
-	void externalCoverageIsPreservedAlongsideOrdinarySubjects() {
-		BlockModelOutlineState state = BlockModelOutlineState.INSTANCE;
-		BlockOutlineState outlines = BlockOutlineState.INSTANCE;
-		outlines.clear();
-		TargetKey.ExternalBlockKey externalKey = new TargetKey.ExternalBlockKey(
-			DIMENSION, "sable", "plot-block", "minecraft:stone");
-		state.setPresentations(List.of());
-		state.addExternalSuccess(externalKey);
-
-		// This state seam is intentionally limited to its own ordinary snapshot;
-		// the external assertion is covered by the combined state method in the
-		// production caller.
-		assertTrue(state.allPresentationsCovered());
-		assertTrue(state.allCoveredBy(outlines));
+	private static SuccessKey externalSuccess(String stableTargetId, String subjectId) {
+		return new SuccessKey(new TargetKey.ExternalBlockKey(DIMENSION, "sable", stableTargetId, "minecraft:stone"), subjectId);
 	}
 
 	private static BlockPresentation directPresentation(int x, int y, int z, String subjectId) {

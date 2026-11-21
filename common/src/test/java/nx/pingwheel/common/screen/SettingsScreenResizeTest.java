@@ -225,7 +225,7 @@ class SettingsScreenResizeTest {
 		currentScreenField.setAccessible(true);
 		@Nullable Object previousScreen = currentScreenField.get(null);
 		var language = new EnglishLanguage(previousLanguage);
-		var screen = new HeadlessSettingsScreen();
+		var screen = new HeadlessSettingsScreen(new ClientConfig());
 		try {
 			instanceField.set(null, client);
 			CommonClient.Game = client;
@@ -249,8 +249,8 @@ class SettingsScreenResizeTest {
 
 	@NotNullByDefault
 	private static final class HeadlessSettingsScreen extends SettingsScreen {
-		private HeadlessSettingsScreen() {
-			super(new ClientConfig(), null);
+		private HeadlessSettingsScreen(ClientConfig config) {
+			super(() -> config, null);
 		}
 
 		private void initialize(Minecraft client, int width, int height) {

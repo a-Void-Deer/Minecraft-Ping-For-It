@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.MarkerAnchor;
+import nx.pingwheel.common.marker.MarkerSnapshot;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -42,16 +43,8 @@ class MarkerOverlayStatePresentationLookupTest {
 	}
 
 	private static ClientMarker marker(Target target) {
-		return new ClientMarker(
-			new MarkerId(1L),
-			OWNER,
-			target,
-			"entity",
-			"attention",
-			new MarkerAnchor(1.0, 2.0, 3.0),
-			1L,
-			100L,
-			0L,
-			100L);
+		var snapshot = new MarkerSnapshot(new MarkerId(1L), OWNER, target, "entity", "attention",
+			new MarkerAnchor(1.0, 2.0, 3.0), 1L, 100L);
+		return ClientMarker.withLocalDuration(snapshot, 0L, 1L, 100L);
 	}
 }

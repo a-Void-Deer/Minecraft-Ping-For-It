@@ -120,6 +120,18 @@ class ServerSettingsModelTest {
 	}
 
 	@Test
+	void authoritativeChannelModeDoesNotFollowTheEditableDraft() {
+		var model = new ServerSettingsModel(true);
+		long requestId = model.beginExpansion();
+		assertTrue(model.applySnapshot(requestId, EDITABLE));
+
+		model.cycleDefaultChannelMode();
+
+		assertEquals(ChannelMode.DISABLED, model.defaultChannelMode());
+		assertEquals(ChannelMode.AUTO, model.authoritativeDefaultChannelMode());
+	}
+
+	@Test
 	void invalidNumericDraftDoesNotProduceAnUpdate() {
 		var model = new ServerSettingsModel(true);
 		long requestId = model.beginExpansion();

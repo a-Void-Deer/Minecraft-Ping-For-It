@@ -6,15 +6,22 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.client.KeyboardHandler;
 import net.minecraft.client.MouseHandler;
+import nx.pingwheel.common.mixin.KeyboardHandlerMixin;
 import nx.pingwheel.common.mixin.MouseHandlerMixin;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
 import org.objectweb.asm.ClassReader;
+import org.objectweb.asm.Opcodes;
+import org.objectweb.asm.tree.AbstractInsnNode;
 import org.objectweb.asm.tree.AnnotationNode;
 import org.objectweb.asm.tree.ClassNode;
 import org.objectweb.asm.tree.FieldInsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.MethodNode;
+import org.objectweb.asm.tree.VarInsnNode;
 import static org.junit.jupiter.api.Assertions.*;
 
 /** Checks real mapped callback ABI and effective registration, not a live Mixin transformation. */
@@ -124,10 +131,60 @@ class NativeSelectorMixinContractTest {
 				|| call.owner.equals("net/minecraft/client/KeyMapping") && call.name.equals("set"))) pressCalls.add(call.name);
 		assertEquals(List.of("grabMouse", "set"), pressCalls, "a vanilla auto-grab precedes raw key delivery");
 		assertFalse(bridge.methods.stream().flatMap(method -> annotations(method.visibleAnnotations, method.invisibleAnnotations).stream())
-			.filter(annotation -> annotation.desc.equals("Lorg/spongepowered/asm/mixin/injection/Inject;"))
+			.filter(annotation -> annotation.desc.equals("Lorg/spongepowered/asm/mixin/injection/Inject;")
+				&& Boolean.TRUE.equals(value(annotation, "cancellable")))
 			.anyMatch(annotation -> ((List<?>) value(annotation, "method")).stream()
 				.anyMatch(method -> method.toString().startsWith("onPress"))),
 			"raw presses/releases must still reach KeyMapping, including a mouse-bound ping release");
+	}
+
+	@Test void selectionTogglesObserveThePhysicalActionAndPreserveTheNativeClickArgument() throws Exception {
+		assertNativeToggleHooks(KeyboardHandler.class, KeyboardHandlerMixin.class, "keyPress", "(JIIII)V", 5);
+		assertNativeToggleHooks(MouseHandler.class, MouseHandlerMixin.class, "onPress", "(JIII)V", 4);
+	}
+
+	private static void assertNativeToggleHooks(Class<?> handler, Class<?> mixin, String callbackName,
+		String callbackSignature, int physicalActionSlot) throws Exception {
+		String keyType = "Lcom/mojang/blaze3d/platform/InputConstants$Key;";
+		String clickSignature = "(" + keyType + ")V";
+		String keyMapping = "net/minecraft/client/KeyMapping";
+		var callback = readClass(handler, handler.getSimpleName() + ".class").methods.stream()
+			.filter(method -> method.name.equals(callbackName) && method.desc.equals(callbackSignature))
+			.findFirst().orElseThrow();
+		assertEquals(1, calls(callback).stream().filter(call -> call.owner.equals(keyMapping)
+			&& call.name.equals("click") && call.desc.equals(clickSignature)).count());
+
+		var bridge = readClass(mixin, mixin.getSimpleName() + ".class");
+		var begin = method(bridge, "pingforit$beginToggleInput");
+		assertEquals(List.of(callbackName + callbackSignature), value(inject(begin), "method"));
+		assertEquals("HEAD", atValue(begin), "the origin must be observed before any UI or loader consumes the event");
+		assertNull(value(inject(begin), "cancellable"));
+		assertEquals(callbackSignature.replace(")V", "Lorg/spongepowered/asm/mixin/injection/callback/CallbackInfo;)V"), begin.desc);
+	assertTrue(java.util.stream.StreamSupport.stream(begin.instructions.spliterator(), false)
+			.anyMatch(insn -> insn instanceof VarInsnNode load && load.getOpcode() == Opcodes.ILOAD && load.var == physicalActionSlot),
+			"observation must read GLFW's action parameter, not the button, key code, or modifiers");
+		assertTrue(calls(begin).stream().anyMatch(call -> call.owner.equals("nx/pingwheel/common/util/ToggleInputState")
+			&& call.name.equals("beginCallback") && call.desc.equals("(IZZ)V")));
+
+		var claim = method(bridge, "pingforit$claimToggleInput");
+		var modify = annotations(claim.visibleAnnotations, claim.invisibleAnnotations).stream()
+			.filter(annotation -> annotation.desc.equals("Lorg/spongepowered/asm/mixin/injection/ModifyArg;"))
+			.findFirst().orElseThrow();
+		assertEquals(List.of(callbackName + callbackSignature), value(modify, "method"));
+		assertEquals("(" + keyType + ")" + keyType, claim.desc);
+		var click = (AnnotationNode) value(modify, "at");
+		assertEquals("INVOKE", value(click, "value"));
+		assertEquals("L" + keyMapping + ";click" + clickSignature, value(click, "target"));
+		assertTrue(calls(claim).stream().anyMatch(call -> call.owner.equals("nx/pingwheel/common/util/ToggleInputState")
+			&& call.name.equals("claimMappingClick") && call.desc.equals("(Z)Z")));
+		assertTrue(calls(claim).stream().anyMatch(call -> call.owner.equals("nx/pingwheel/common/util/InputUtils")
+			&& call.name.equals("handleTogglePress") && call.desc.equals(clickSignature)));
+		// Pass through the native key, including scancodes and macOS mouse normalization.
+		@Unmodifiable List<@Nullable AbstractInsnNode> returnSources = java.util.stream.StreamSupport.stream(claim.instructions.spliterator(), false)
+			.filter(insn -> insn.getOpcode() == Opcodes.ARETURN).map(insn -> insn.getPrevious()).toList();
+		assertFalse(returnSources.isEmpty());
+		assertTrue(returnSources.stream().allMatch(insn -> insn instanceof VarInsnNode load
+			&& load.getOpcode() == Opcodes.ALOAD && load.var == 1));
 	}
 	@Test void lookInputHooksReadPreUpdateCoordinatesAndBridgeOnlyAfterVanillaMove() throws Exception {
 		ClassNode bridge = readClass(MouseHandlerMixin.class, "MouseHandlerMixin.class");
@@ -217,7 +274,7 @@ class NativeSelectorMixinContractTest {
 			var client = json.getAsJsonArray("client").asList().stream().map(value -> value.getAsString()).toList();
 			assertEquals(1, common.stream().filter("BaseContainerLockAccessor"::equals).count());
 			assertFalse(client.contains("BaseContainerLockAccessor"));
-			for (String entry : List.of("MouseHandlerMixin", "ClientLevelPreviewAccessor", "BlockStatePredictionPreviewAccessor")) {
+			for (String entry : List.of("MouseHandlerMixin", "KeyboardHandlerMixin", "ClientLevelPreviewAccessor", "BlockStatePredictionPreviewAccessor")) {
 				assertEquals(1, client.stream().filter(entry::equals).count(), module + " " + entry);
 				assertFalse(common.contains(entry));
 			}
@@ -226,7 +283,7 @@ class NativeSelectorMixinContractTest {
 	private static List<AnnotationNode> annotations(List<AnnotationNode> visible, List<AnnotationNode> invisible) {
 		List<AnnotationNode> all = new ArrayList<>(); if (visible != null) all.addAll(visible); if (invisible != null) all.addAll(invisible); return all;
 	}
-	private static Object value(AnnotationNode annotation, String key) {
+	private static @Nullable Object value(AnnotationNode annotation, String key) {
 		if (annotation.values == null) return null;
 		for (int i = 0; i < annotation.values.size(); i += 2) if (annotation.values.get(i).equals(key)) return annotation.values.get(i + 1);
 		return null;

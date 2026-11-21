@@ -38,7 +38,7 @@ class BlockOutlineFrameStateTest {
 		Matrix4f firstProjection = new Matrix4f().scaling(0.25F, 0.5F, 0.75F);
 
 		BlockOutlineFrameState.FrameTransform first = frame(
-			firstView, firstProjection, sorting, firstCamera, 0.25F);
+			firstView, firstProjection, sorting, firstCamera);
 		FakeRenderState renderState = new FakeRenderState(
 			new Matrix4f().translation(-500.0F, 100.0F, 20.0F),
 			new Matrix4f().scaling(4.0F),
@@ -81,7 +81,7 @@ class BlockOutlineFrameStateTest {
 		Matrix4f secondView = new Matrix4f().rotateY(-1.15F).rotateX(0.55F);
 		Matrix4f secondProjection = new Matrix4f().scaling(0.8F, 0.6F, 0.4F);
 		BlockOutlineFrameState.FrameTransform second = frame(
-			secondView, secondProjection, sorting, secondCamera, 0.75F);
+			secondView, secondProjection, sorting, secondCamera);
 
 		int secondFrameStart = emitted.size();
 		BlockOutlineFrameState.renderWithFrame(second, renderState, () ->
@@ -107,7 +107,7 @@ class BlockOutlineFrameStateTest {
 		VertexSorting sorting = VertexSorting.byDistance(1.0F, 2.0F, 3.0F);
 		BlockOutlineFrameState state = BlockOutlineFrameState.INSTANCE;
 		state.clear();
-		state.capture(modelView, projection, sorting, new Vec3(10.0D, 20.0D, 30.0D), 0.5F);
+		state.capture(modelView, projection, sorting, new Vec3(10.0D, 20.0D, 30.0D));
 		modelView.identity();
 		projection.identity();
 
@@ -144,8 +144,7 @@ class BlockOutlineFrameStateTest {
 			new Matrix4f().rotateY(0.25F),
 			new Matrix4f().scaling(0.5F),
 			VertexSorting.byDistance(0.0F, 0.0F, 0.0F),
-			new Vec3(2.0D, 3.0D, 4.0D),
-			0.25F);
+			new Vec3(2.0D, 3.0D, 4.0D));
 
 		state.clear();
 
@@ -157,12 +156,11 @@ class BlockOutlineFrameStateTest {
 		Matrix4f modelView,
 		Matrix4f projection,
 		VertexSorting sorting,
-		Vec3 camera,
-		float partialTick
+		Vec3 camera
 	) {
 		BlockOutlineFrameState state = BlockOutlineFrameState.INSTANCE;
 		state.clear();
-		state.capture(modelView, projection, sorting, camera, partialTick);
+		state.capture(modelView, projection, sorting, camera);
 		return state.consume();
 	}
 

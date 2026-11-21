@@ -6,7 +6,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 import nx.pingwheel.common.client.marker.ClientMarker;
-import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.domain.*;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProvider;
 import nx.pingwheel.common.integration.externalblock.ExternalBlockServerProviderRegistry;
@@ -15,6 +14,7 @@ import nx.pingwheel.common.presentation.*;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localStore;
 import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
@@ -121,7 +121,7 @@ class CompositeTargetIdentityTest {
 		var key = new TargetKey.CreateTankKey(DIM, -5, 2, 3, "create:fluid_tank");
 		var hit = new Target.BlockTarget(DIM, -4, 2, 3, "create:fluid_tank");
 		var snapshot = new MarkerSnapshot(new MarkerId(1), A, hit, key, TYPE.id(), "attention", ANCHOR, 1, 20);
-		var client = new ClientMarkerStore(0, 100); client.onCreated(snapshot, 0);
+		var client = localStore(0L, 100L); client.onCreated(snapshot, 0);
 		client.onWinnerChanged(key, java.util.Optional.of(snapshot.id()));
 		client.onCreated(snapshot, 10);
 		assertSame(key, client.winnerMarker(key).orElseThrow().targetKey());
@@ -158,7 +158,7 @@ class CompositeTargetIdentityTest {
 	}
 
 	@Test void clientCopyReloadStaleFallbackAndIndependentDisplayKeepFrozenGroup() {
-		var store = new ClientMarkerStore(0, 100);
+		var store = localStore(0L, 100L);
 		var first = new MarkerSnapshot(new MarkerId(1), A, LEFT, GROUP, TYPE.id(), "attention", ANCHOR, 1, 20);
 		var second = new MarkerSnapshot(new MarkerId(2), B, RIGHT, GROUP, TYPE.id(), "danger", ANCHOR, 2, 10);
 		store.onCreated(first, 0); store.onCreated(second, 1);
@@ -167,7 +167,7 @@ class CompositeTargetIdentityTest {
 		assertSame(GROUP, store.marker(second.id()).orElseThrow().targetKey());
 		assertEquals(101, store.marker(second.id()).orElseThrow().displayExpiresAtLocalTick());
 		store.expireFallback(10);
-		assertEquals(first.id(), store.winnerId(GROUP).orElseThrow(), "lost removal temporarily falls back across physical halves");
+		assertEquals(first.id(), store.winnerMarker(GROUP).orElseThrow().id(), "lost removal temporarily falls back across physical halves in the HUD");
 		assertEquals(1, store.allMarkers().size());
 		store.onRemoved(first.id(), MarkerRemovalReason.EXPIRED, 19);
 		ClientMarker stale = store.marker(first.id()).orElseThrow();

@@ -15,6 +15,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
 import java.math.BigDecimal;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -23,11 +24,11 @@ import static org.junit.jupiter.api.Assertions.*;
 @NotNullByDefault
 class InventoryPerformanceOptionTest {
 	@ParameterizedTest
-	@CsvSource({"PHYSICAL_SLOTS_PER_TICK,16,4096", "PENDING_MEMORY_MIB,16,2048",
-		"PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD,16,1024", "PREVIEW_MAX_SLOTS_PER_CLIENT,16,16384",
-		"PREVIEW_MAX_SLOTS_SERVER,16,65536", "PREVIEW_MAX_TARGETS_PER_CLIENT,1,16",
-		"TRACKING_MAX_VARIANTS_PER_TARGET,1,128", "TRACKING_MAX_SLOTS_PER_TARGET,16,16384",
-		"TRACKING_MAX_SLOTS_SERVER,128,262144"})
+	@CsvSource({"PHYSICAL_SLOTS_PER_TICK,16,2048", "PENDING_MEMORY_MIB,16,2048",
+		"PREVIEW_MAX_VARIANTS_PER_CLIENT_PERIOD,16,1024", "PREVIEW_MAX_SLOTS_PER_CLIENT,16,2048",
+		"PREVIEW_MAX_SLOTS_SERVER,16,8192", "PREVIEW_MAX_TARGETS_PER_CLIENT,1,16",
+		"TRACKING_MAX_VARIANTS_PER_TARGET,1,128", "TRACKING_MAX_SLOTS_PER_TARGET,16,4096",
+		"TRACKING_MAX_SLOTS_SERVER,128,8192"})
 	void countSlidersReachIndependentFiniteEndpointsAndRetainTheMaximumInUnlimitedMode(Field field, int minimum, int maximum) {
 		var model = loaded(field, Value.limit(false, minimum), true);
 		var slider = slider(field, model, new AtomicInteger());
@@ -45,6 +46,77 @@ class InventoryPerformanceOptionTest {
 		slider.onDrag(slider.getX(), 0, -slider.getWidth(), 0);
 		assertEquals(Integer.toString(minimum), model.inventoryText(field));
 		assertFalse(model.dirty());
+	}
+
+	@ParameterizedTest
+	@CsvSource({
+		"PHYSICAL_SLOTS_PER_TICK,320", "PHYSICAL_SLOTS_PER_TICK,240",
+		"PREVIEW_MAX_SLOTS_PER_CLIENT,320", "PREVIEW_MAX_SLOTS_PER_CLIENT,240",
+		"PREVIEW_MAX_SLOTS_SERVER,320", "PREVIEW_MAX_SLOTS_SERVER,240",
+		"TRACKING_MAX_SLOTS_PER_TARGET,320", "TRACKING_MAX_SLOTS_PER_TARGET,240",
+		"TRACKING_MAX_SLOTS_SERVER,320", "TRACKING_MAX_SLOTS_SERVER,240"})
+	void nativeMouseClicksReachEveryFiniteAndUnlimitedStopInOrder(Field field, int screenWidth) {
+		var model = loaded(field, Value.limit(false, field.minimum()), true);
+		var scale = model.inventoryScale(field);
+		var slider = positionedSlider(field, model, screenWidth, new AtomicInteger());
+		var reached = new boolean[scale.size()];
+		int first = -1;
+		int previous = -1;
+		for (int x = trackStart(slider); x <= trackEnd(slider); x++) {
+			slider.onClick(x, 0);
+			int position = selectedPosition(field, model, scale);
+			assertTrue(position >= previous, "a forward mouse scan must not move backwards");
+			if (first < 0) first = position;
+			reached[position] = true;
+			previous = position;
+		}
+		assertEquals(0, first);
+		assertEquals(scale.size() - 1, previous);
+		for (int position = 0; position < reached.length; position++) {
+			assertTrue(reached[position], "unreachable stop " + position + " at width " + screenWidth);
+		}
+	}
+
+	@Test
+	void nativeDragReachesEveryServerPreviewStopInBothDirections() {
+		Field field = Field.PREVIEW_MAX_SLOTS_SERVER;
+		var model = loaded(field, Value.limit(false, field.minimum()), true);
+		var scale = model.inventoryScale(field);
+		var slider = positionedSlider(field, model, 240, new AtomicInteger());
+		var reached = new boolean[scale.size()];
+		int left = trackStart(slider);
+		int right = trackEnd(slider);
+
+		slider.onClick(right, 0);
+		int previous = selectedPosition(field, model, scale);
+		assertEquals(scale.size() - 1, previous);
+		reached[previous] = true;
+		for (int x = right - 1; x >= left; x--) {
+			slider.onDrag(x, 0, -1, 0);
+			int position = selectedPosition(field, model, scale);
+			assertTrue(position <= previous, "a reverse drag must not move forwards");
+			reached[position] = true;
+			previous = position;
+		}
+		assertEquals(0, previous);
+		for (int x = left + 1; x <= right; x++) {
+			slider.onDrag(x, 0, 1, 0);
+			int position = selectedPosition(field, model, scale);
+			assertTrue(position >= previous, "a forward drag must not move backwards");
+			reached[position] = true;
+			previous = position;
+		}
+		assertEquals(scale.size() - 1, previous);
+		for (int position = 0; position < reached.length; position++) {
+			assertTrue(reached[position], "unreachable stop " + position);
+		}
+	}
+
+	@Test
+	void offGridSlotValuesSurviveConstructionRebuildNavigationAndMouseReturn() {
+		assertOffGridSlotValueSurvives(Field.PHYSICAL_SLOTS_PER_TICK, 264);
+		assertOffGridSlotValueSurvives(Field.TRACKING_MAX_SLOTS_SERVER, 4608);
+		assertOffGridSlotValueSurvives(Field.PREVIEW_MAX_SLOTS_SERVER, Field.PREVIEW_MAX_SLOTS_SERVER.maximum() - 1);
 	}
 
 	@ParameterizedTest
@@ -283,6 +355,63 @@ class InventoryPerformanceOptionTest {
 			InventoryPerformanceOption.valueLabel(Field.TRACKING_HEARTBEAT_PERIODS, heartbeat, 0).getContents()).getKey());
 		assertEquals("0.25", InventoryPerformanceOption.valueLabel(Field.PREVIEW_CLIENT_BYTE_MULTIPLIER,
 			InventoryPerformanceScale.forField(Field.PREVIEW_CLIENT_BYTE_MULTIPLIER), 0).getString());
+	}
+
+	private static InventoryPerformanceOption.PerformanceSlider positionedSlider(Field field, ServerSettingsModel model,
+		int screenWidth, AtomicInteger edits) {
+		var slider = slider(field, model, edits);
+		SettingsRowWidgets.position(SettingsScreenLayout.contentFor(screenWidth), 0, List.of(slider));
+		return slider;
+	}
+
+	/** Independent track geometry: AbstractSliderButton maps x+4 through width-8. */
+	private static int trackStart(InventoryPerformanceOption.PerformanceSlider slider) {
+		return slider.getX() + 4;
+	}
+
+	private static int trackEnd(InventoryPerformanceOption.PerformanceSlider slider) {
+		return slider.getX() + slider.getWidth() - 4;
+	}
+
+	private static int selectedPosition(Field field, ServerSettingsModel model, InventoryPerformanceScale scale) {
+		return scale.positionOf(new Value(model.inventoryUnlimited(field),
+			new BigDecimal(model.inventoryText(field))));
+	}
+
+	private static void assertOffGridSlotValueSurvives(Field field, int value) {
+		var model = loaded(field, Value.limit(false, value), true);
+		var edits = new AtomicInteger();
+		var slider = positionedSlider(field, model, 320, edits);
+		var scale = model.inventoryScale(field);
+		int extraPosition = scale.positionOf(Value.limit(false, value));
+		assertTrue(extraPosition < scale.size() - 1);
+		assertEquals(BigDecimal.valueOf(value), scale.finiteValueAt(extraPosition));
+		assertEquals(extraPosition, slider.currentPosition());
+		assertFalse(model.dirty());
+		assertTrue(model.updatePlan().isEmpty());
+		assertEquals(0, edits.get());
+
+		var rebuilt = positionedSlider(field, model, 320, edits);
+		assertEquals(extraPosition, rebuilt.currentPosition());
+		assertEquals(0, edits.get());
+		assertFalse(model.dirty());
+
+		rebuilt.onClick(trackStart(rebuilt), 0);
+		assertTrue(model.dirty());
+		assertEquals(field.mask(), model.dirtyFields());
+		boolean restored = false;
+		for (int x = trackStart(rebuilt); x <= trackEnd(rebuilt); x++) {
+			rebuilt.onClick(x, 0);
+			if (!model.inventoryUnlimited(field)
+				&& new BigDecimal(model.inventoryText(field)).compareTo(BigDecimal.valueOf(value)) == 0) {
+				restored = true;
+				break;
+			}
+		}
+		assertTrue(restored);
+		assertTrue(model.inventoryScale(field).finiteValues().contains(BigDecimal.valueOf(value)));
+		assertFalse(model.dirty());
+		assertTrue(model.updatePlan().isEmpty());
 	}
 
 	private static InventoryPerformanceOption.PerformanceSlider slider(Field field, ServerSettingsModel model, AtomicInteger edits) {

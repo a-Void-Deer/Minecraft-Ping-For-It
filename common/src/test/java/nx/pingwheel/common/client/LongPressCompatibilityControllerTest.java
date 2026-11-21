@@ -14,6 +14,7 @@ import nx.pingwheel.common.domain.TargetResolver;
 import nx.pingwheel.common.interaction.ActiveInteraction;
 import nx.pingwheel.common.interaction.CapturedPingContext;
 import nx.pingwheel.common.interaction.CapturedRay;
+import nx.pingwheel.common.interaction.state.FrozenCancellation;
 import nx.pingwheel.common.interaction.InteractionToken;
 import nx.pingwheel.common.interaction.TargetSnapshotFactory;
 import nx.pingwheel.common.interaction.state.InteractionTimeSource;
@@ -39,7 +40,7 @@ class LongPressCompatibilityControllerTest {
 
 		h.click(0L);
 		assertEquals(1, h.port.defaultCreates);
-		assertEquals(0, h.port.virtualStarts);
+		assertEquals(0, h.port.frozenStarts);
 
 		h.frame(21L);
 		assertFalse(h.controller.hasPendingState());
@@ -57,7 +58,7 @@ class LongPressCompatibilityControllerTest {
 		h.frame(36L);
 
 		assertEquals(1, h.port.defaultCreates);
-		assertEquals(1, h.port.virtualStarts);
+		assertEquals(1, h.port.frozenStarts);
 		assertEquals(1, h.port.aborts);
 		assertTrue(h.logger.messages().stream().anyMatch(message -> message.contains("abandoned")));
 	}
@@ -74,7 +75,7 @@ class LongPressCompatibilityControllerTest {
 		}
 
 		assertEquals(1, h.port.defaultCreates, "suppressed clicks must not become default creates");
-		assertEquals(1, h.port.virtualStarts);
+		assertEquals(1, h.port.frozenStarts);
 
 		h.port.commitVirtualWheel = true;
 		h.frame(200L);
@@ -112,8 +113,8 @@ class LongPressCompatibilityControllerTest {
 		}
 
 		assertEquals(3, h.port.defaultCreates);
-		assertEquals(3, h.port.normalStarts);
-		assertEquals(0, h.port.virtualStarts);
+		assertEquals(3, h.port.directStarts);
+		assertEquals(0, h.port.frozenStarts);
 		assertFalse(h.controller.hasPendingState());
 	}
 
@@ -141,13 +142,13 @@ class LongPressCompatibilityControllerTest {
 		h.controller.onPress(15L);
 		h.controller.onRelease();
 		assertEquals(0, h.port.defaultCreates);
-		assertEquals(0, h.port.virtualStarts);
+		assertEquals(0, h.port.frozenStarts);
 
 		h.port.firstCaptureReady = true;
 		h.frame(20L);
 		assertEquals(1, h.port.defaultCreates);
-		assertEquals(1, h.port.virtualStarts);
-		assertEquals(0L, h.port.virtualPressTimestamps.get(0));
+		assertEquals(1, h.port.frozenStarts);
+		assertEquals(0L, h.port.frozenPressTimestamps.get(0));
 
 		h.frame(36L);
 		assertEquals(1, h.port.aborts);
@@ -168,8 +169,8 @@ class LongPressCompatibilityControllerTest {
 		h.frame(31L);
 
 		assertEquals(1, h.port.defaultCreates, "the first normal ping must still dispatch");
-		assertEquals(0, h.port.virtualStarts);
-		assertEquals(1, h.port.normalStarts, "the deferred click must not start a late raycast");
+		assertEquals(0, h.port.frozenStarts);
+		assertEquals(1, h.port.directStarts, "the deferred click must not start a late raycast");
 		assertFalse(h.controller.hasPendingState());
 	}
 
@@ -183,7 +184,7 @@ class LongPressCompatibilityControllerTest {
 		h.controller.onPress(31L);
 		h.controller.onRelease();
 
-		assertEquals(1, h.port.virtualStarts);
+		assertEquals(1, h.port.frozenStarts);
 		assertEquals(1, h.port.defaultCreates);
 		assertEquals(0, h.port.aborts);
 	}
@@ -198,7 +199,7 @@ class LongPressCompatibilityControllerTest {
 
 		h.mode.set(true);
 		h.controller.onPress(15L);
-		assertEquals(1, h.port.normalStarts, "the pre-enable baseline is never superseded by a fresh press");
+		assertEquals(1, h.port.directStarts, "the pre-enable baseline is never superseded by a fresh press");
 		assertEquals(0, h.port.aborts, "enabling never aborts an existing ordinary baseline");
 
 		h.port.firstCaptureReady = true;
@@ -208,8 +209,8 @@ class LongPressCompatibilityControllerTest {
 		assertEquals(PingInteractionPhase.IDLE, h.port.phase);
 
 		h.controller.onPress(30L);
-		assertEquals(2, h.port.normalStarts, "only after idle does compatibility own a new press");
-		assertEquals(0, h.port.virtualStarts, "the drained baseline is not adopted or replayed as a seed");
+		assertEquals(2, h.port.directStarts, "only after idle does compatibility own a new press");
+		assertEquals(0, h.port.frozenStarts, "the drained baseline is not adopted or replayed as a seed");
 	}
 
 	@Test
@@ -222,7 +223,7 @@ class LongPressCompatibilityControllerTest {
 
 		h.mode.set(true);
 		h.controller.onPress(15L);
-		assertEquals(1, h.port.normalStarts);
+		assertEquals(1, h.port.directStarts);
 
 		h.port.firstCaptureReady = true;
 		h.clock.now = 20L;
@@ -232,7 +233,7 @@ class LongPressCompatibilityControllerTest {
 		assertEquals(PingInteractionPhase.IDLE, h.port.phase);
 
 		h.controller.onPress(30L);
-		assertEquals(2, h.port.normalStarts, "compatibility owns only the next press");
+		assertEquals(2, h.port.directStarts, "compatibility owns only the next press");
 	}
 
 	@Test
@@ -276,8 +277,8 @@ class LongPressCompatibilityControllerTest {
 		h.click(0L);
 		assertFalse(h.controller.hasPendingState(), "courtesy-rejected/unready create is not dispatch proof");
 		h.controller.onPress(15L);
-		assertEquals(0, h.port.virtualStarts);
-		assertEquals(2, h.port.normalStarts, "the next independent press remains ordinary, not a replay");
+		assertEquals(0, h.port.frozenStarts);
+		assertEquals(2, h.port.directStarts, "the next independent press remains ordinary, not a replay");
 	}
 
 	@Test
@@ -292,8 +293,8 @@ class LongPressCompatibilityControllerTest {
 		h.port.firstCaptureReady = true;
 		h.frame(20L);
 		assertEquals(1, h.port.defaultCreates, "one action emitted, not qualifying dispatch");
-		assertEquals(0, h.port.virtualStarts);
-		assertEquals(1, h.port.normalStarts);
+		assertEquals(0, h.port.frozenStarts);
+		assertEquals(1, h.port.directStarts);
 		assertFalse(h.controller.hasPendingState());
 	}
 
@@ -303,8 +304,8 @@ class LongPressCompatibilityControllerTest {
 		h.port.dispatchOutcome = DispatchOutcome.NOT_SENT;
 		h.port.firstCaptureReady = true;
 		h.frame(31L);
-		assertEquals(1, h.port.normalStarts);
-		assertEquals(0, h.port.virtualStarts);
+		assertEquals(1, h.port.directStarts);
+		assertEquals(0, h.port.frozenStarts);
 		assertFalse(h.controller.hasPendingState());
 		h.frame(100L);
 		assertEquals(1, h.port.defaultCreates, "dropped action must not be queued or retried");
@@ -317,8 +318,8 @@ class LongPressCompatibilityControllerTest {
 		h.port.firstCaptureReady = true;
 		h.clock.now = 31L;
 		assertTrue(h.controller.onRenderFrame(false).orElseThrow() instanceof PingInteractionAction.TargetGone);
-		assertEquals(1, h.port.normalStarts);
-		assertEquals(0, h.port.virtualStarts);
+		assertEquals(1, h.port.directStarts);
+		assertEquals(0, h.port.frozenStarts);
 		assertFalse(h.controller.hasPendingState());
 	}
 
@@ -331,15 +332,15 @@ class LongPressCompatibilityControllerTest {
 			rapid.click(0L);
 			assertFalse(rapid.controller.hasPendingState());
 			rapid.controller.onPress(15L);
-			assertEquals(0, rapid.port.virtualStarts);
+			assertEquals(0, rapid.port.frozenStarts);
 
 			Harness deferred = pendingDeferred();
 			deferred.port.nonDefaultType = !menuOpened;
 			deferred.port.reportedMenuOpened = menuOpened;
 			deferred.port.firstCaptureReady = true;
 			deferred.frame(31L);
-			assertEquals(0, deferred.port.virtualStarts);
-			assertEquals(1, deferred.port.normalStarts);
+			assertEquals(0, deferred.port.frozenStarts);
+			assertEquals(1, deferred.port.directStarts);
 			assertFalse(deferred.controller.hasPendingState());
 		}
 	}
@@ -349,6 +350,8 @@ class LongPressCompatibilityControllerTest {
 		Harness h = enabledHarness(200L, 20L);
 		var legacy = new LongPressCompatibilityController.InteractionPort() {
 			public Optional<PingInteractionAction> pressAt(long now) { return h.port.pressAt(now); }
+			public Optional<PingInteractionAction> pressAt(long now, FrozenPingPress press) { return h.port.pressAt(now, press); }
+			public Optional<FrozenPingPress> captureWheelPress() { return h.port.captureWheelPress(); }
 			public Optional<PingInteractionAction> release() { return h.port.release(); }
 			public Optional<PingInteractionAction> presentFrame(boolean held) { return h.port.presentFrame(held); }
 			public void abort() { h.port.abort(); }
@@ -360,8 +363,8 @@ class LongPressCompatibilityControllerTest {
 		assertInstanceOf(PingInteractionAction.CreatePing.class, controller.onRelease().orElseThrow());
 		assertFalse(controller.hasPendingState(), "no invented successful dispatch from the default bridge");
 		controller.onPress(15L);
-		assertEquals(2, h.port.normalStarts);
-		assertEquals(0, h.port.virtualStarts);
+		assertEquals(2, h.port.directStarts);
+		assertEquals(0, h.port.frozenStarts);
 	}
 
 	@Test
@@ -369,7 +372,8 @@ class LongPressCompatibilityControllerTest {
 		assertThrows(IllegalArgumentException.class,
 			() -> new BaselineOutcome(Optional.empty(), DispatchOutcome.CREATE_SENT, false));
 		assertThrows(IllegalArgumentException.class, () -> new BaselineOutcome(
-			Optional.of(new PingInteractionAction.CancelMarker(new nx.pingwheel.common.domain.MarkerId(1))),
+			Optional.of(new PingInteractionAction.CancelMarker(new nx.pingwheel.common.domain.MarkerId(1),
+				new java.util.UUID(0, 1), "minecraft:overworld")),
 			DispatchOutcome.CREATE_SENT, false));
 	}
 
@@ -440,10 +444,9 @@ class LongPressCompatibilityControllerTest {
 
 		private final ManualClock clock;
 		private final ActiveInteraction interaction = new ActiveInteraction();
-		private final List<Long> virtualPressTimestamps = new ArrayList<>();
+		private final List<Long> frozenPressTimestamps = new ArrayList<>();
 		private PingInteractionPhase phase = PingInteractionPhase.IDLE;
 		private long currentPressTimestamp;
-		private boolean currentVirtual;
 		private long nextToken;
 		private boolean firstPending;
 		private boolean currentReleaseObserved;
@@ -456,8 +459,8 @@ class LongPressCompatibilityControllerTest {
 		private boolean reportedMenuOpened;
 		private boolean firstTargetGone;
 		private boolean nonDefaultType;
-		private int normalStarts;
-		private int virtualStarts;
+		private int directStarts;
+		private int frozenStarts;
 		private int defaultCreates;
 		private int virtualWheelCreates;
 		private int aborts;
@@ -468,10 +471,20 @@ class LongPressCompatibilityControllerTest {
 
 		@Override
 		public Optional<PingInteractionAction> pressAt(long rawPressTimestamp) {
-			normalStarts++;
+			directStarts++;
+			return start(rawPressTimestamp);
+		}
+
+		@Override
+		public Optional<PingInteractionAction> pressAt(long rawPressTimestamp, FrozenPingPress press) {
+			frozenStarts++;
+			frozenPressTimestamps.add(rawPressTimestamp);
+			return start(rawPressTimestamp);
+		}
+
+		private Optional<PingInteractionAction> start(long rawPressTimestamp) {
 			logicalHeld = true;
 			currentPressTimestamp = rawPressTimestamp;
-			currentVirtual = false;
 			currentReleaseObserved = false;
 			firstPending = asyncFirstCapture && defaultCreates == 0;
 			phase = PingInteractionPhase.PRESSED;
@@ -479,21 +492,9 @@ class LongPressCompatibilityControllerTest {
 		}
 
 		@Override
-		public Optional<PingInteractionAction> pressAt(long rawPressTimestamp, CapturedRay pressRay) {
-			virtualStarts++;
-			virtualPressTimestamps.add(rawPressTimestamp);
-			currentPressTimestamp = rawPressTimestamp;
-			currentVirtual = true;
-			currentReleaseObserved = false;
-			firstPending = false;
-			phase = PingInteractionPhase.PRESSED;
-			return Optional.empty();
-		}
-
-		@Override
-		public Optional<CapturedRay> capturePressRay() {
+		public Optional<FrozenPingPress> captureWheelPress() {
 			return captureRayAvailable
-				? Optional.of(CapturedRay.defaultRay())
+				? Optional.of(new FrozenPingPress(CapturedRay.defaultRay(), FrozenCancellation.NONE))
 				: Optional.empty();
 		}
 
@@ -503,7 +504,7 @@ class LongPressCompatibilityControllerTest {
 			currentReleaseObserved = true;
 			if (phase == PingInteractionPhase.WHEEL_OPEN) {
 				phase = PingInteractionPhase.IDLE;
-				if (currentVirtual && commitVirtualWheel) {
+				if (commitVirtualWheel) {
 					virtualWheelCreates++;
 					return Optional.of(createAction());
 				}
@@ -511,11 +512,6 @@ class LongPressCompatibilityControllerTest {
 			}
 
 			if (phase != PingInteractionPhase.PRESSED) {
-				return Optional.empty();
-			}
-
-			if (currentVirtual) {
-				phase = PingInteractionPhase.IDLE;
 				return Optional.empty();
 			}
 
@@ -561,18 +557,14 @@ class LongPressCompatibilityControllerTest {
 				return Optional.empty();
 			}
 
-			if (currentVirtual) {
-				if (clock.now - currentPressTimestamp >= 200L) {
-					phase = PingInteractionPhase.WHEEL_OPEN;
-				}
-				return Optional.empty();
-			}
-
 			if (firstPending && firstCaptureReady && !keyDown) {
 				phase = PingInteractionPhase.IDLE;
 				firstPending = false;
 				defaultCreates++;
 				return Optional.of(createAction());
+			}
+			if (!firstPending && keyDown && !currentReleaseObserved && clock.now - currentPressTimestamp >= 200L) {
+				phase = PingInteractionPhase.WHEEL_OPEN;
 			}
 
 			return Optional.empty();

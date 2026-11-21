@@ -1,5 +1,7 @@
 package nx.pingwheel.forge.integration;
 
+import java.util.Objects;
+
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Minecraft;
@@ -9,15 +11,19 @@ import net.minecraft.client.renderer.block.BlockRenderDispatcher;
 import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.BlockAndTintGetter;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.client.model.data.ModelData;
 import nx.pingwheel.common.client.outline.EntityBlockGeometryContext;
 import nx.pingwheel.common.client.outline.EntityBlockGeometryTransform;
+import nx.pingwheel.common.client.outline.ExternalBlockReadView;
+import nx.pingwheel.common.client.outline.ExternalBlockRenderView;
 import nx.pingwheel.common.client.outline.OutlineOnlyBufferSource;
 import nx.pingwheel.common.client.outline.WorldAwareBlockModelOutlineAdapter;
 import nx.pingwheel.common.client.outline.WorldAwareBlockModelOutlineAdapterRegistry;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Forge's generic world-aware baked-model backend for entity-block outlines.
@@ -60,45 +66,45 @@ public final class ForgeWorldAwareBlockModelOutlineAdapter
 	}
 
 	@Override
-	public boolean handles(EntityBlockGeometryContext context) {
-		if (context == null) {
-			return false;
-		}
-
-		ClientLevel level = context.level();
-		BlockPos pos = context.blockPos();
-		BlockState state = context.blockState();
-		if (level == null || pos == null || state == null
-			|| state.getRenderShape() != RenderShape.MODEL
-			|| !level.hasChunkAt(pos)) {
-			return false;
-		}
-
-		// Only dispatch a state whose block type is still live at the target.
-		BlockState liveState = level.getBlockState(pos);
-		return liveState != null && liveState.getBlock() == state.getBlock();
+	public boolean handles(@Nullable EntityBlockGeometryContext context) {
+		return context != null && context.hasLiveBakedModelState();
 	}
 
 	@Override
 	public void render(EntityBlockGeometryContext context, OutlineOnlyBufferSource buffer) {
-		ClientLevel level = context.level();
-		BlockPos pos = context.blockPos();
-		BlockState state = context.blockState();
+		ClientLevel level = Objects.requireNonNull(context.level());
+		@Nullable ExternalBlockReadView plot = context.externalReadView();
+		BlockAndTintGetter modelView = plot == null ? level : new ExternalBlockRenderView(plot, level) {
+			@Override
+			public float getShade(float x, float y, float z, boolean shade) {
+				// Forge's quad lighter supplies the full normal, not just the nearest face.
+				return level.getShade(x, y, z, shade);
+			}
+		};
+		BlockPos pos = Objects.requireNonNull(context.blockPos());
+		BlockState state = Objects.requireNonNull(context.blockState());
 		Vec3 cameraPosition = context.cameraPosition();
 		PoseStack poseStack = createPoseStack(context, pos, cameraPosition);
 		BlockRenderDispatcher dispatcher = Minecraft.getInstance().getBlockRenderer();
 		BakedModel model = dispatcher.getBlockModel(state);
 		long seed = state.getSeed(pos);
 
-		ModelData modelData = ModelData.EMPTY;
-		var modelDataManager = level.getModelDataManager();
-		if (modelDataManager != null) {
-			modelData = modelDataManager.getAt(pos);
+		@Nullable ModelData modelData = ModelData.EMPTY;
+		if (plot == null) {
+			@Nullable var modelDataManager = level.getModelDataManager();
+			if (modelDataManager != null) {
+				modelData = modelDataManager.getAt(pos);
+			}
+		} else {
+			@Nullable BlockEntity resident = modelView.getBlockEntity(pos);
+			if (resident != null) {
+				modelData = resident.getModelData();
+			}
 		}
 		if (modelData == null) {
 			modelData = ModelData.EMPTY;
 		}
-		modelData = model.getModelData(level, pos, state, modelData);
+		modelData = model.getModelData(modelView, pos, state, modelData);
 		if (modelData == null) {
 			modelData = ModelData.EMPTY;
 		}
@@ -111,7 +117,7 @@ public final class ForgeWorldAwareBlockModelOutlineAdapter
 				dispatcher.renderBatched(
 					state,
 					pos,
-					level,
+					modelView,
 					poseStack,
 					consumer,
 					false,

@@ -1,36 +1,33 @@
 package nx.pingwheel.common.client.duration;
 
-import java.util.Objects;
-
-import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.config.ClientConfigBounds;
-import nx.pingwheel.common.marker.MarkerSnapshot;
+import org.jetbrains.annotations.NotNullByDefault;
 
 /**
- * Resolves the local visual lifetime for one received marker.
- *
- * <p>The follow-server sentinel is resolved from the marker snapshot itself,
- * rather than from the latest connection policy. This keeps a marker's
- * already-frozen server lifetime correct across policy updates and packet
- * arrival races.
+ * Selects the display time domain without conflating a custom duration with an
+ * equal-length server lifetime.
  */
-public final class ClientMarkerDisplayDuration {
+@NotNullByDefault
+public record ClientMarkerDisplayDuration(boolean followsServer, long localTicks) {
 
-	private ClientMarkerDisplayDuration() {}
+	private static final ClientMarkerDisplayDuration FOLLOW_SERVER = new ClientMarkerDisplayDuration(true, 0L);
 
-	/**
-	 * Returns the display lifetime in client ticks for a received marker.
-	 * Invalid persisted values are clamped defensively before being used.
-	 */
-	public static long durationTicks(int configuredSeconds, MarkerSnapshot snapshot) {
-		Objects.requireNonNull(snapshot, "snapshot");
-
-		int effectiveSeconds = ClientConfigBounds.clampMarkerDisplayDuration(configuredSeconds);
-		if (effectiveSeconds == ClientConfigBounds.FOLLOW_SERVER_MARKER_DISPLAY_DURATION) {
-			return ClientMarker.serverDurationTicks(snapshot);
+	public ClientMarkerDisplayDuration {
+		if (localTicks < 0L || (followsServer && localTicks != 0L)) {
+			throw new IllegalArgumentException("invalid marker display duration");
 		}
+	}
 
-		return (long) effectiveSeconds * ClientConfig.TPS;
+	/** Resolves the configured sentinel or a custom duration once, on first insertion. */
+	public static ClientMarkerDisplayDuration fromConfig(int configuredSeconds) {
+		int effectiveSeconds = ClientConfigBounds.clampMarkerDisplayDuration(configuredSeconds);
+		return effectiveSeconds == ClientConfigBounds.FOLLOW_SERVER_MARKER_DISPLAY_DURATION
+			? FOLLOW_SERVER : customTicks((long) effectiveSeconds * ClientConfig.TPS);
+	}
+
+	/** An explicitly local duration; a zero-tick test or integration duration is not the config sentinel. */
+	public static ClientMarkerDisplayDuration customTicks(long ticks) {
+		return new ClientMarkerDisplayDuration(false, ticks);
 	}
 }

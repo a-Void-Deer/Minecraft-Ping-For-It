@@ -1,12 +1,16 @@
 package nx.pingwheel.common.client.marker;
 
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+import nx.pingwheel.common.client.duration.ClientMarkerDisplayDuration;
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.marker.MarkerAnchor;
@@ -14,8 +18,11 @@ import nx.pingwheel.common.marker.MarkerRemovalReason;
 import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
 
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localSnapshotSpanStore;
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localStore;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -27,7 +34,7 @@ class ClientMarkerStoreTest {
 	private static final UUID STRANGER = new UUID(0L, 200L);
 
 	private static ClientMarkerStore newStore() {
-		return new ClientMarkerStore(10L);
+		return localSnapshotSpanStore(10L);
 	}
 
 	private static MarkerSnapshot snapshot(MarkerId id, Target target, long arrival, long expires) {
@@ -80,10 +87,11 @@ class ClientMarkerStoreTest {
 		MarkerSnapshot first = snapshot(id, locationTarget(OVERWORLD, 1), 10L, 110L);
 
 		store.onCreated(first, 50L);
+		ClientMarker original = store.marker(id).orElseThrow();
 		store.onCreated(first, 50L);
 
 		assertEquals(1, store.allMarkers().size());
-		assertEquals(ClientMarker.from(first, 50L, 10L), store.marker(id).orElseThrow());
+		assertEquals(original, store.marker(id).orElseThrow());
 	}
 
 	@Test
@@ -135,7 +143,7 @@ class ClientMarkerStoreTest {
 		MarkerId id = new MarkerId(7L);
 
 		store.onCreated(snapshot(id, locationTarget(OVERWORLD, 1), 1L, 10L), 0L);
-		store.onRemoved(id);
+		store.onRemoved(id, MarkerRemovalReason.CANCELLED, 1L);
 
 		assertTrue(store.marker(id).isEmpty());
 		assertTrue(store.allMarkers().isEmpty());
@@ -145,7 +153,7 @@ class ClientMarkerStoreTest {
 	void removedUnknownIdIsSafe() {
 		ClientMarkerStore store = newStore();
 
-		assertDoesNotThrow(() -> store.onRemoved(new MarkerId(99L)));
+		assertDoesNotThrow(() -> store.onRemoved(new MarkerId(99L), MarkerRemovalReason.CANCELLED, 0L));
 	}
 
 	@Test
@@ -157,7 +165,7 @@ class ClientMarkerStoreTest {
 
 		store.onWinnerChanged(key, Optional.of(id));
 		assertTrue(store.onRemoved(id, MarkerRemovalReason.EXPIRED, 10L).isEmpty());
-		assertTrue(store.winnerId(key).isEmpty());
+		assertTrue(store.winnerMarker(key).isEmpty());
 
 		store.onCreated(snapshot(id, target, 1L, 20L), 11L);
 
@@ -176,13 +184,13 @@ class ClientMarkerStoreTest {
 		store.onWinnerChanged(key, Optional.of(id));
 		assertTrue(store.onRemoved(id, MarkerRemovalReason.TARGET_INVALID, 10L).isEmpty());
 
-		assertTrue(store.winnerId(key).isEmpty());
+		assertTrue(store.winnerMarker(key).isEmpty());
 		assertTrue(store.isAuthoritativelyRemoved(id));
 	}
 
 	@Test
 	void expiredMarkerCannotBeResynchronizedByALateCreatePacket() {
-		ClientMarkerStore store = new ClientMarkerStore(10L, 100L);
+		ClientMarkerStore store = localStore(10L, 100L);
 		Target target = locationTarget(OVERWORLD, 1);
 		MarkerId id = new MarkerId(8L);
 
@@ -205,10 +213,10 @@ class ClientMarkerStoreTest {
 
 		store.onCreated(snapshot(id, target, 1L, 10L), 0L);
 		store.onWinnerChanged(key, Optional.of(id));
-		store.onRemoved(id);
+		store.onRemoved(id, MarkerRemovalReason.CANCELLED, 1L);
 
-		assertTrue(store.winnerId(key).isEmpty());
 		assertTrue(store.winnerMarker(key).isEmpty());
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty());
 	}
 
 	@Test
@@ -222,16 +230,16 @@ class ClientMarkerStoreTest {
 		store.onCreated(snapshot(removed, target, 1L, 10L), 0L);
 		store.onCreated(snapshot(kept, target, 2L, 20L), 0L);
 		store.onWinnerChanged(key, Optional.of(kept));
-		store.onRemoved(removed);
+		store.onRemoved(removed, MarkerRemovalReason.CANCELLED, 1L);
 
-		assertEquals(kept, store.winnerId(key).orElseThrow());
+		assertEquals(kept, store.winnerMarker(key).orElseThrow().id());
 	}
 
 	@Test
 	void removedRejectsNull() {
 		ClientMarkerStore store = newStore();
 
-		assertThrows(NullPointerException.class, () -> store.onRemoved(null));
+		assertThrows(NullPointerException.class, () -> store.onRemoved(null, MarkerRemovalReason.CANCELLED, 0L));
 	}
 
 	// --- winner: order of arrival / out-of-order / empty / wrong key ---
@@ -245,13 +253,13 @@ class ClientMarkerStoreTest {
 
 		store.onWinnerChanged(key, Optional.of(id));
 
-		assertTrue(store.winnerId(key).isEmpty());
 		assertTrue(store.winnerMarker(key).isEmpty());
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty());
 
 		store.onCreated(snapshot(id, target, 1L, 10L), 0L);
 
-		assertEquals(id, store.winnerId(key).orElseThrow());
 		assertEquals(id, store.winnerMarker(key).orElseThrow().id());
+		assertEquals(id, store.outlineWinnersInDimension(OVERWORLD).get(key).id());
 	}
 
 	@Test
@@ -263,11 +271,11 @@ class ClientMarkerStoreTest {
 
 		store.onCreated(snapshot(id, target, 1L, 10L), 0L);
 
-		assertTrue(store.winnerId(key).isEmpty());
+		assertTrue(store.winnerMarker(key).isEmpty());
 
 		store.onWinnerChanged(key, Optional.of(id));
 
-		assertEquals(id, store.winnerId(key).orElseThrow());
+		assertEquals(id, store.winnerMarker(key).orElseThrow().id());
 	}
 
 	@Test
@@ -281,7 +289,7 @@ class ClientMarkerStoreTest {
 		store.onWinnerChanged(key, Optional.of(id));
 		store.onWinnerChanged(key, Optional.empty());
 
-		assertTrue(store.winnerId(key).isEmpty());
+		assertTrue(store.winnerMarker(key).isEmpty());
 	}
 
 	@Test
@@ -303,9 +311,8 @@ class ClientMarkerStoreTest {
 		store.onWinnerChanged(announcedKey, Optional.of(id));
 		store.onCreated(snapshot(id, actual, 1L, 10L), 0L);
 
-		assertTrue(store.winnerId(announcedKey).isEmpty());
 		assertTrue(store.winnerMarker(announcedKey).isEmpty());
-		assertTrue(store.winnerId(TargetKey.from(actual)).isEmpty());
+		assertTrue(store.winnerMarker(TargetKey.from(actual)).isEmpty());
 	}
 
 	@Test
@@ -368,7 +375,7 @@ class ClientMarkerStoreTest {
 	}
 
 	@Test
-	void visibleWinnersInDimensionFiltersByDimensionAndKeyMatch() {
+	void outlineWinnersInDimensionFiltersByDimensionAndKeyMatch() {
 		ClientMarkerStore store = newStore();
 		Target overworldTarget = locationTarget(OVERWORLD, 1);
 		Target netherTarget = locationTarget(NETHER, 1);
@@ -385,27 +392,155 @@ class ClientMarkerStoreTest {
 		// Slot announced for a key that mismatches the marker's own key.
 		store.onWinnerChanged(TargetKey.from(locationTarget(OVERWORLD, 3)), Optional.of(mismatchedId));
 
-		Map<TargetKey, ClientMarker> overworld = store.visibleWinnersInDimension(OVERWORLD);
+		@Unmodifiable Map<TargetKey, ClientMarker> overworld = store.outlineWinnersInDimension(OVERWORLD);
 		assertEquals(1, overworld.size());
 		assertEquals(overworldId, overworld.get(TargetKey.from(overworldTarget)).id());
 
-		Map<TargetKey, ClientMarker> nether = store.visibleWinnersInDimension(NETHER);
+		@Unmodifiable Map<TargetKey, ClientMarker> nether = store.outlineWinnersInDimension(NETHER);
 		assertEquals(1, nether.size());
 		assertEquals(netherId, nether.get(TargetKey.from(netherTarget)).id());
 	}
 
 	@Test
-	void visibleWinnersInDimensionRejectsNull() {
+	void outlineWinnersInDimensionRejectsNull() {
 		ClientMarkerStore store = newStore();
 
-		assertThrows(NullPointerException.class, () -> store.visibleWinnersInDimension(null));
+		assertThrows(NullPointerException.class, () -> store.outlineWinnersInDimension(null));
 	}
 
 	// --- independent synchronization and display lifetimes ---
 
+	@ParameterizedTest
+	@ValueSource(booleans = {false, true})
+	void onlyAuthoritativeExpiryKeepsTheLastAssignedOutlineAfterTheSlotEmpties(boolean emptyFirst) {
+		ClientMarkerStore store = localStore(10L, 30L);
+		MarkerId id = new MarkerId(11);
+		Target target = entityTarget(OVERWORLD, OWNER);
+		TargetKey key = TargetKey.from(target);
+		store.onCreated(snapshot(id, target, 0L, 5L), 0L);
+		store.onWinnerChanged(key, Optional.of(id));
+		assertEquals(id, store.outlineWinnersInDimension(OVERWORLD).get(key).id());
+
+		if (emptyFirst) {
+			store.onWinnerChanged(key, Optional.empty());
+			store.expireFallback(15L);
+			assertTrue(store.marker(id).orElseThrow().isStale());
+			assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty(), "local STALE alone is not expiry proof");
+			store.onRemoved(id, MarkerRemovalReason.EXPIRED, 15L);
+		} else {
+			store.onRemoved(id, MarkerRemovalReason.EXPIRED, 5L);
+			assertEquals(id, store.outlineWinnersInDimension(OVERWORLD).get(key).id(), "the assigned winner is still visible");
+			store.onWinnerChanged(key, Optional.empty());
+		}
+
+		assertTrue(store.winnerMarker(key).isEmpty(), "outline fallback does not write into the HUD winner projection");
+		assertEquals(List.of(id), hudIds(store));
+		assertEquals(id, store.outlineWinnersInDimension(OVERWORLD).get(key).id());
+		store.expireFallback(29L);
+		assertEquals(id, store.outlineWinnersInDimension(OVERWORLD).get(key).id());
+		store.expireFallback(30L);
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty());
+	}
+
+	@Test
+	void newerAssignmentDiscardsExpiredOutlineHistoryEvenBeforeTheSnapshotArrives() {
+		ClientMarkerStore store = localStore(10L, 30L);
+		MarkerId expired = new MarkerId(11);
+		MarkerId replacement = new MarkerId(12);
+		Target target = entityTarget(OVERWORLD, OWNER);
+		TargetKey key = TargetKey.from(target);
+		store.onCreated(snapshot(expired, target, 0L, 5L), 0L);
+		store.onWinnerChanged(key, Optional.of(expired));
+		store.onWinnerChanged(key, Optional.empty());
+		store.onRemoved(expired, MarkerRemovalReason.EXPIRED, 5L);
+		assertEquals(expired, store.outlineWinnersInDimension(OVERWORLD).get(key).id());
+
+		store.onWinnerChanged(key, Optional.of(replacement));
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty());
+		assertEquals(List.of(expired), hudIds(store));
+		store.onWinnerChanged(key, Optional.empty());
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty(), "empty after a replacement must not resurrect its predecessor");
+		store.onWinnerChanged(key, Optional.of(replacement));
+		store.onCreated(snapshot(replacement, target, 5L, 15L), 5L);
+		assertEquals(replacement, store.outlineWinnersInDimension(OVERWORLD).get(key).id());
+	}
+
+	@Test
+	void hiddenAssignedWinnerAndLocalRecomputationDoNotAdmitTheVisibleLoserToOutlines() {
+		MarkerId winner = new MarkerId(11);
+		MarkerId loser = new MarkerId(12);
+		ClientMarkerStore store = new ClientMarkerStore(10L, new ObservedServerClock(),
+			snapshot -> ClientMarkerDisplayDuration.customTicks(snapshot.id().equals(winner) ? 4L : 30L));
+		Target target = entityTarget(OVERWORLD, OWNER);
+		TargetKey key = TargetKey.from(target);
+		store.onCreated(snapshot(winner, target, 0L, 5L), 0L);
+		store.onCreated(snapshot(loser, target, 2L, 20L), 2L);
+		store.onWinnerChanged(key, Optional.of(winner));
+
+		store.expireFallback(4L);
+		assertTrue(store.marker(winner).isPresent());
+		assertEquals(List.of(loser), hudIds(store));
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty());
+
+		store.expireFallback(15L);
+		assertEquals(loser, store.winnerMarker(key).orElseThrow().id(), "loss recovery remains available to the HUD");
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty());
+		store.onWinnerChanged(key, Optional.empty());
+		store.onRemoved(loser, MarkerRemovalReason.EXPIRED, 20L);
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty(), "a locally recomputed winner was never server-assigned");
+	}
+
+	@Test
+	void hardRemovalAndStoreClearDiscardOutlineHistoryWithoutResurrectingAnId() {
+		ClientMarkerStore store = localStore(10L, 30L);
+		MarkerId id = new MarkerId(11);
+		Target target = entityTarget(OVERWORLD, OWNER);
+		TargetKey key = TargetKey.from(target);
+		MarkerSnapshot snapshot = snapshot(id, target, 0L, 5L);
+		store.onCreated(snapshot, 0L);
+		store.onWinnerChanged(key, Optional.of(id));
+		store.onWinnerChanged(key, Optional.empty());
+		store.onRemoved(id, MarkerRemovalReason.EXPIRED, 5L);
+		store.onRemoved(id, MarkerRemovalReason.TARGET_INVALID, 6L);
+		store.onWinnerChanged(key, Optional.of(id));
+		store.onCreated(snapshot, 6L);
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty());
+		assertTrue(store.marker(id).isEmpty());
+
+		MarkerId next = new MarkerId(12);
+		MarkerSnapshot nextSnapshot = snapshot(next, target, 6L, 8L);
+		store.onCreated(nextSnapshot, 6L);
+		store.onWinnerChanged(key, Optional.of(next));
+		store.onWinnerChanged(key, Optional.empty());
+		store.onRemoved(next, MarkerRemovalReason.EXPIRED, 8L);
+		assertEquals(next, store.outlineWinnersInDimension(OVERWORLD).get(key).id());
+		store.clear();
+		store.onCreated(nextSnapshot, 8L);
+		store.onRemoved(next, MarkerRemovalReason.EXPIRED, 10L);
+		assertTrue(store.marker(next).isPresent());
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty());
+	}
+
+	@Test
+	void dismissalRequiresOwnershipDimensionAndAuthoritativeExpiryRatherThanFallbackStaleness() {
+		ClientMarkerStore store = localStore(10L, 30L);
+		MarkerId id = new MarkerId(11);
+		Target target = entityTarget(OVERWORLD, OWNER);
+		store.onCreated(snapshot(id, target, 0L, 5L), 0L);
+		store.expireFallback(15L);
+		assertTrue(store.marker(id).orElseThrow().isStale());
+		assertFalse(store.dismissExpiredOwned(id, OWNER, OVERWORLD));
+		store.onRemoved(id, MarkerRemovalReason.EXPIRED, 15L);
+		assertFalse(store.dismissExpiredOwned(id, STRANGER, OVERWORLD));
+		assertFalse(store.dismissExpiredOwned(id, OWNER, NETHER));
+		assertTrue(store.dismissExpiredOwned(id, OWNER, OVERWORLD));
+		assertTrue(store.marker(id).isEmpty());
+		assertTrue(store.isAuthoritativelyRemoved(id));
+	}
+
 	@Test
 	void expiredMarksMarkerStaleButRetainsAVisualUntilDisplayDeadline() {
-		ClientMarkerStore store = new ClientMarkerStore(10L, 200L);
+		ClientMarkerStore store = localStore(10L, 200L);
 		Target target = locationTarget(OVERWORLD, 1);
 		TargetKey key = TargetKey.from(target);
 		MarkerId id = new MarkerId(1L);
@@ -416,12 +551,12 @@ class ClientMarkerStoreTest {
 		assertTrue(store.onRemoved(id, MarkerRemovalReason.EXPIRED, 10L).isEmpty());
 		assertTrue(store.marker(id).orElseThrow().isStale());
 		assertEquals(List.of(id), store.renderMarkers().stream().map(ClientMarker::id).toList());
-		assertEquals(id, store.winnerId(key).orElseThrow());
+		assertEquals(id, store.winnerMarker(key).orElseThrow().id());
 	}
 
 	@Test
 	void expiredHardRemovesWhenTheDisplayDeadlineHasElapsed() {
-		ClientMarkerStore store = new ClientMarkerStore(10L, 5L);
+		ClientMarkerStore store = localStore(10L, 5L);
 		Target target = locationTarget(OVERWORLD, 1);
 		MarkerId id = new MarkerId(1L);
 
@@ -444,7 +579,7 @@ class ClientMarkerStoreTest {
 				continue;
 			}
 
-			ClientMarkerStore store = new ClientMarkerStore(10L, 200L);
+			ClientMarkerStore store = localStore(10L, 200L);
 			MarkerId id = new MarkerId(idValue++);
 			store.onCreated(snapshot(id, locationTarget(OVERWORLD, idValue), 0L, 100L), 0L);
 
@@ -458,7 +593,7 @@ class ClientMarkerStoreTest {
 
 	@Test
 	void displayExpiryHidesWithoutDroppingSyncStateOrAllowingResurrection() {
-		ClientMarkerStore store = new ClientMarkerStore(10L, 5L);
+		ClientMarkerStore store = localStore(10L, 5L);
 		Target target = locationTarget(OVERWORLD, 1);
 		TargetKey key = TargetKey.from(target);
 		MarkerId id = new MarkerId(1L);
@@ -470,7 +605,7 @@ class ClientMarkerStoreTest {
 
 		assertTrue(store.marker(id).orElseThrow().isSynchronized());
 		assertTrue(store.renderMarkers().isEmpty());
-		assertTrue(store.winnerId(key).isEmpty());
+		assertTrue(store.winnerMarker(key).isEmpty());
 
 		// A late/replayed create refreshes synchronization only. The frozen
 		// visual deadline remains elapsed, so the marker cannot resurrect.
@@ -482,7 +617,7 @@ class ClientMarkerStoreTest {
 
 	@Test
 	void fallbackLossTransitionsToStaleAndEventuallyRemovesTheRecord() {
-		ClientMarkerStore store = new ClientMarkerStore(2L, 20L);
+		ClientMarkerStore store = localStore(2L, 20L);
 		Target target = locationTarget(OVERWORLD, 1);
 		MarkerId id = new MarkerId(1L);
 
@@ -498,7 +633,7 @@ class ClientMarkerStoreTest {
 
 	@Test
 	void synchronizedSameTargetCreateSupersedesStaleRecord() {
-		ClientMarkerStore store = new ClientMarkerStore(2L, 20L);
+		ClientMarkerStore store = localStore(2L, 20L);
 		Target target = locationTarget(OVERWORLD, 1);
 		MarkerId staleId = new MarkerId(1L);
 		MarkerId currentId = new MarkerId(2L);
@@ -585,7 +720,7 @@ class ClientMarkerStoreTest {
 		store.expireFallback(65L);
 
 		assertTrue(store.marker(newer).isEmpty());
-		assertEquals(older, store.winnerId(key).orElseThrow());
+		assertEquals(older, store.winnerMarker(key).orElseThrow().id());
 	}
 
 	@Test
@@ -606,7 +741,7 @@ class ClientMarkerStoreTest {
 		// removedWinner fallback-expires at 50 + (20 - 10) + 10 = 70.
 		store.expireFallback(70L);
 
-		assertEquals(larger, store.winnerId(key).orElseThrow());
+		assertEquals(larger, store.winnerMarker(key).orElseThrow().id());
 	}
 
 	@Test
@@ -622,7 +757,7 @@ class ClientMarkerStoreTest {
 		// id fallback-expires at 50 + (20 - 10) + 10 = 70.
 		store.expireFallback(70L);
 
-		assertTrue(store.winnerId(key).isEmpty());
+		assertTrue(store.winnerMarker(key).isEmpty());
 	}
 
 	@Test
@@ -640,7 +775,7 @@ class ClientMarkerStoreTest {
 		// winner fallback-expires at 50 + (20 - 10) + 10 = 70.
 		store.expireFallback(70L);
 
-		assertTrue(store.winnerId(TargetKey.from(target)).isEmpty());
+		assertTrue(store.winnerMarker(TargetKey.from(target)).isEmpty());
 		assertTrue(store.marker(otherMarker).isPresent());
 	}
 
@@ -660,7 +795,7 @@ class ClientMarkerStoreTest {
 		store.expireFallback(70L);
 
 		assertTrue(store.marker(loser).isEmpty());
-		assertEquals(winner, store.winnerId(key).orElseThrow());
+		assertEquals(winner, store.winnerMarker(key).orElseThrow().id());
 	}
 
 	@Test
@@ -687,9 +822,9 @@ class ClientMarkerStoreTest {
 		store.expireFallback(70L);
 
 		// The own-key slot is recomputed to the remaining same-target marker.
-		assertEquals(fallback, store.winnerId(ownKey).orElseThrow());
+		assertEquals(fallback, store.winnerMarker(ownKey).orElseThrow().id());
 		// The mismatched slot is cleared, not recomputed: otherMarker stays hidden.
-		assertTrue(store.winnerId(otherKey).isEmpty());
+		assertTrue(store.winnerMarker(otherKey).isEmpty());
 		assertTrue(store.marker(otherMarker).isPresent());
 	}
 
@@ -707,11 +842,11 @@ class ClientMarkerStoreTest {
 
 		store.expireFallback(65L);
 
-		assertEquals(older, store.winnerId(key).orElseThrow());
+		assertEquals(older, store.winnerMarker(key).orElseThrow().id());
 
 		// The authoritative update after the fallback recompute simply wins.
 		store.onWinnerChanged(key, Optional.empty());
-		assertTrue(store.winnerId(key).isEmpty());
+		assertTrue(store.winnerMarker(key).isEmpty());
 	}
 
 	@Test
@@ -791,7 +926,8 @@ class ClientMarkerStoreTest {
 
 	@Test
 	void hudRenderMarkersFallsBackAfterTheWinnerVisualDeadlineWithoutResettingIt() {
-		ClientMarkerStore store = new ClientMarkerStore(100L, snapshot -> snapshot.id().value() == 1L ? 5L : 200L);
+		ClientMarkerStore store = new ClientMarkerStore(100L, new ObservedServerClock(),
+			snapshot -> ClientMarkerDisplayDuration.customTicks(snapshot.id().value() == 1L ? 5L : 200L));
 		Target target = locationTarget(OVERWORLD, 1);
 		TargetKey key = TargetKey.from(target);
 		MarkerId expiredWinner = new MarkerId(1L);
@@ -868,7 +1004,7 @@ class ClientMarkerStoreTest {
 
 	@Test
 	void hudRenderMarkersKeepsAStaleWinnerWhileItsVisualIsActive() {
-		ClientMarkerStore store = new ClientMarkerStore(10L, 200L);
+		ClientMarkerStore store = localStore(10L, 200L);
 		Target target = locationTarget(OVERWORLD, 1);
 		TargetKey key = TargetKey.from(target);
 		MarkerId winner = new MarkerId(1L);
@@ -894,7 +1030,7 @@ class ClientMarkerStoreTest {
 		store.onWinnerChanged(key, Optional.of(winner));
 		store.onRemoved(winner, MarkerRemovalReason.TARGET_INVALID, 51L);
 
-		assertTrue(store.winnerId(key).isEmpty());
+		assertTrue(store.winnerMarker(key).isEmpty());
 		assertEquals(List.of(remaining), hudIds(store));
 	}
 
@@ -913,8 +1049,8 @@ class ClientMarkerStoreTest {
 		store.clear();
 
 		assertTrue(store.allMarkers().isEmpty());
-		assertTrue(store.winnerId(key).isEmpty());
-		assertTrue(store.visibleWinnersInDimension(OVERWORLD).isEmpty());
+		assertTrue(store.winnerMarker(key).isEmpty());
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty());
 	}
 
 	@Test
@@ -935,13 +1071,12 @@ class ClientMarkerStoreTest {
 		ClientMarkerStore store = newStore();
 
 		assertThrows(NullPointerException.class, () -> store.marker(null));
-		assertThrows(NullPointerException.class, () -> store.winnerId(null));
 		assertThrows(NullPointerException.class, () -> store.winnerMarker(null));
 	}
 
 	@Test
 	void constructorRejectsNegativeGraceTicks() {
-		assertThrows(IllegalArgumentException.class, () -> new ClientMarkerStore(-1L));
+		assertThrows(IllegalArgumentException.class, () -> localStore(-1L, 1L));
 	}
 
 	@Test
@@ -959,7 +1094,7 @@ class ClientMarkerStoreTest {
 	}
 
 	@Test
-	void winnerMapsAreUnmodifiableAndOrderedByMarkerId() {
+	void outlineWinnerMapIsUnmodifiableAndOrderedByMarkerId() {
 		ClientMarkerStore store = newStore();
 		Target firstTarget = locationTarget(OVERWORLD, 1);
 		Target secondTarget = locationTarget(OVERWORLD, 2);
@@ -971,7 +1106,7 @@ class ClientMarkerStoreTest {
 		store.onWinnerChanged(TargetKey.from(firstTarget), Optional.of(first));
 		store.onWinnerChanged(TargetKey.from(secondTarget), Optional.of(second));
 
-		Map<TargetKey, ClientMarker> winners = store.visibleWinnersInDimension(OVERWORLD);
+		@Unmodifiable Map<TargetKey, ClientMarker> winners = store.outlineWinnersInDimension(OVERWORLD);
 
 		assertEquals(List.of(second, first), winners.values().stream().map(ClientMarker::id).toList());
 		assertThrows(UnsupportedOperationException.class,
@@ -989,15 +1124,14 @@ class ClientMarkerStoreTest {
 
 		store.onWinnerChanged(announcedKey, Optional.of(id));
 
-		assertTrue(store.winnerId(announcedKey).isEmpty());
+		assertTrue(store.winnerMarker(announcedKey).isEmpty());
 
 		store.onCreated(snapshot(id, actual, 1L, 10L), 0L);
 
-		assertTrue(store.winnerId(announcedKey).isEmpty());
 		assertTrue(store.winnerMarker(announcedKey).isEmpty());
-		assertTrue(store.visibleWinnersInDimension(OVERWORLD).isEmpty());
+		assertTrue(store.outlineWinnersInDimension(OVERWORLD).isEmpty());
 
 		// The actual key was never announced, so it stays hidden as well.
-		assertTrue(store.winnerId(actualKey).isEmpty());
+		assertTrue(store.winnerMarker(actualKey).isEmpty());
 	}
 }

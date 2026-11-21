@@ -17,11 +17,6 @@ import org.jetbrains.annotations.Nullable;
 public final class MonitorPacketDispatch {
 	private MonitorPacketDispatch() {}
 
-	public static void server(Executor owner, MinecraftServer server, ServerPlayer player,
-		ServerGamePacketListenerImpl listener, IPacket packet, Runnable receive) {
-		server(owner, server, player, listener, packet, current -> receive.run());
-	}
-
 	/** Resolves a respawned player through the original listener, never UUID alone. */
 	public static void server(Executor owner, MinecraftServer server, ServerPlayer player,
 		ServerGamePacketListenerImpl listener, IPacket packet, Consumer<ServerPlayer> receive) {

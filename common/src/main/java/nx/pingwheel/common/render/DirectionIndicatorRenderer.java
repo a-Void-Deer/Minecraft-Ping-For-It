@@ -13,7 +13,6 @@ public class DirectionIndicatorRenderer {
 	private static Vec2 screenSize;
 	private static Vec2 safeZoneTopLeft;
 	private static Vec2 safeZoneBottomRight;
-	private static Vec2 safeScreenCenter;
 
 	public static void prepareSafeZone() {
 		final var wnd = Game.getWindow();
@@ -22,7 +21,6 @@ public class DirectionIndicatorRenderer {
 		screenSize = new Vec2(wnd.getGuiScaledWidth(), wnd.getGuiScaledHeight());
 		safeZoneTopLeft = new Vec2(config.getSafeZoneLeft(), config.getSafeZoneTop());
 		safeZoneBottomRight = new Vec2(screenSize.x - config.getSafeZoneRight(), screenSize.y - config.getSafeZoneBottom());
-		safeScreenCenter = new Vec2((safeZoneBottomRight.x - safeZoneTopLeft.x) * 0.5f, (safeZoneBottomRight.y - safeZoneTopLeft.y) * 0.5f);
 	}
 
 	public static void draw(DrawContext ctx, MarkerView ping) {
@@ -40,17 +38,12 @@ public class DirectionIndicatorRenderer {
 			return;
 		}
 
-		var pingDirectionVec = new Vec2(screenPos.x - safeZoneTopLeft.x - safeScreenCenter.x, screenPos.y - safeZoneTopLeft.y - safeScreenCenter.y);
-
-		if (behindCamera) {
-			pingDirectionVec = pingDirectionVec.scale(-1);
-		}
-
+		final var placement = DirectionIndicatorGeometry.place(screenPos, screenSize, safeZoneTopLeft, safeZoneBottomRight);
 		final var m = ctx.getMatrices();
 		final var pingScale = ping.getScale();
 		final var pingSize = config.getPingSize() / 100f;
-		final var pingAngle = (float)Math.atan2(pingDirectionVec.y, pingDirectionVec.x);
-		final var edgePosition = MathUtils.calculateAngleRectIntersection(pingAngle, safeZoneTopLeft, safeZoneBottomRight);
+		final var pingAngle = placement.angle();
+		final var edgePosition = placement.edgePosition();
 		final var indicatorOffsetX = Math.cos(pingAngle + Math.PI) * 12;
 		final var indicatorOffsetY = Math.sin(pingAngle + Math.PI) * 12;
 

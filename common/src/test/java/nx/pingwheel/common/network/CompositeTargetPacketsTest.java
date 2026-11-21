@@ -8,7 +8,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 import net.minecraft.network.FriendlyByteBuf;
-import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.client.outline.BlockOutlineSelection;
 import nx.pingwheel.common.domain.*;
 import nx.pingwheel.common.marker.*;
@@ -17,6 +16,7 @@ import nx.pingwheel.common.presentation.client.ClientPresentation;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.Test;
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localSnapshotSpanStore;
 import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
@@ -55,14 +55,14 @@ class CompositeTargetPacketsTest {
 			var expected = snapshot(key);
 			var created = wire(PresentationS2CPacket.created(41, 2, 1, expected, "Owner", REF, SECTION));
 			assertEquals(expected, created.snapshot()); assertTrue(session.initial(created));
-			var store = new ClientMarkerStore(0);
+			var store = localSnapshotSpanStore(0L);
 			var winner = wire(PresentationS2CPacket.winner(41, 2, key, Optional.of(expected.id())));
 			store.onWinnerChanged(winner.targetKey(), winner.winnerId());
-			assertTrue(store.visibleWinnersInDimension(DIM).isEmpty(), "WINNER before CREATED cannot invent the record");
+			assertTrue(store.outlineWinnersInDimension(DIM).isEmpty(), "WINNER before CREATED cannot invent the record");
 			store.onCreated(created.snapshot(), 0);
 			assertEquals(key, store.winnerMarker(key).orElseThrow().targetKey());
 			var physical = (TargetKey.BlockKey) TargetKey.from(expected.target());
-			var outlines = BlockOutlineSelection.select(store.visibleWinnersInDimension(DIM), PingTypeCatalog.builtIn());
+			var outlines = BlockOutlineSelection.select(store.outlineWinnersInDimension(DIM), PingTypeCatalog.builtIn());
 			assertEquals(Set.of(physical), outlines.keySet()); assertEquals(expected.id(), outlines.get(physical).markerId());
 			assertEquals(expected.anchor(), store.winnerMarker(key).orElseThrow().anchor());
 			assertTrue(BlockOutlineSelection.select(Map.of(physical, store.winnerMarker(key).orElseThrow()), PingTypeCatalog.builtIn()).isEmpty(), "only the explicit logical winner slot is valid");

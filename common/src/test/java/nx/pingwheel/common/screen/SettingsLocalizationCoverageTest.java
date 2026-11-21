@@ -214,6 +214,16 @@ class SettingsLocalizationCoverageTest {
 	}
 
 	@Test
+	void localSaveFailureDialogIsLocalizedInEveryBundledLocale() throws IOException {
+		for (String locale : LOCALES) {
+			var root = read(locale);
+			for (String id : List.of("title", "message", "continue", "exit")) {
+				assertLocalizedFormat(root, locale, LanguageUtils.settings("save_failed").path(id).getKey(), List.of());
+			}
+		}
+	}
+
+	@Test
 	void everyEnumDefaultAndDynamicModeTooltipHasTheRequiredLocalizedFormat() throws IOException {
 		for (String locale : LOCALES) {
 			JsonObject root = read(locale);

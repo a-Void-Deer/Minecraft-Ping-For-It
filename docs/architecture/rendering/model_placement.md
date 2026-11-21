@@ -14,7 +14,9 @@ not also add it through PoseStack translation or the display position.
 
 This route is for ordinary block model glow. It does not substitute for an
 `entity_block` world-aware baked source and does not define placement for BER or
-VoxelShape geometry.
+VoxelShape geometry. The synthetic display follows the
+[world-bound render state lifetime](outline.md#world-bound-render-state-lifetime);
+it is never reused across a client-world replacement or unload.
 
 ## Provider-owned ordinary block
 

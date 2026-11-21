@@ -52,6 +52,22 @@ logging seams, not render-frame or GPU execution. Optional Flywheel and Create
 diagnostic seams are inventoried under
 [optional rendering coverage](integrations.md#optional-rendering-structural-coverage).
 
+## Direction-indicator placement
+
+`DirectionIndicatorGeometryTest` feeds the production placement seam from a real
+perspective projection, including points behind the camera with negative depth,
+and checks six CPU cases: arrows for targets that sit slightly above or below
+and behind the camera land on the default asymmetric safe rectangle's top and
+bottom edges at the expected bearing; arrows for horizontal targets behind the
+camera point outward from the projection center under asymmetric side insets; an
+arrow for a diagonal target behind the camera keeps its bearing on the top edge;
+forward off-screen arrows keep the established safe-zone-center bearing; and
+symmetric insets preserve the bearing of arrows for targets behind the camera.
+These are CPU geometry seams, not GPU submission, a live HUD frame, a game
+window or in-game visibility. The
+[direction-indicator safe area](../../config/client.md#direction-indicator-safe-area)
+owns the behavior.
+
 ## Container presentation subjects
 
 `VanillaChestPresentationTest` exercises production loaded-state adapters and the
@@ -77,6 +93,46 @@ tank source stopping before optional resolution or direct replacement rendering.
 Tank shell-subject dispatch, shared frame snapshot and exact native-edge fallback
 assertions are inventoried under
 [tank topology verification](integrations.md#fluid-tank-topology-grouping-and-presentation).
+
+## External block frame presentation
+
+`ExternalBlockFramePresentationTest` exercises the production external frame
+path with a synthetic bound plot and frozen render pose. Its cases cover
+vanilla door, bed, normal chest and trapped chest pairs from either end while
+preserving their render type; changed, foreign-plot or unloaded neighbors
+falling back to the direct subject; one shared ordered subject/coverage snapshot
+for the model and late native-shape passes; per-source and per-subject success
+without cross-winner coverage; frozen placement and late native edges only for
+uncovered subjects; shared resolver priority and declared BER coverage; and an
+unlike-registry proxy owner with owner identity or a handled-empty unavailable
+owner. `BlockModelOutlineStateTest` covers the per-subject external success set
+and ordinary state transitions. `BlockOutlineStateTest` covers marker/store
+preparation and separate external-spec snapshot tracking. `VanillaChestPresentationTest`
+keeps the ordinary chest resolver on one prepared snapshot. `CreateVaultProductionBoundaryTest` and
+`CreateFluidTankProductionBoundaryTest` drive their ordinary-only specialized
+topology through the same frame entry. `NeoForgeExternalBakedModelReadTest`
+drives the NeoForge world-aware adapter's render entry with a synthetic loaded
+plot and upper-door model: the model-data callback reads the lower half
+and a resident block entity through the restricted view, the native AO face
+renderer queries an out-of-plot neighbor position through that view without
+reading the parent level's block, parent lighting is requested only for verified
+plot positions, and the upper face submits one quad. These are headless
+resolution, selection, state, native-AO and native-edge seams; they do not
+establish external drawing, installed Sable or Create, a live plot or render
+pose, actual BER or installed model submission, or GPU output.
+
+`clientLevelReplacementDropsPreparedExternalSnapshotsBoundToTheOldWorld`
+drives the client-level-change entry and checks that it clears prepared external
+snapshots bound to the old world. It does not separately assert the render-entity
+lookup or synthetic-display clears, apply the loader's `LevelRenderer.setLevel`
+injection, or demonstrate heap release in a running game.
+
+`EntityBlockGeometryTransformTest` checks large-coordinate placement and a single
+application of the local model offset in `createPoseStack`. It also checks that
+the origin guard rejects a non-finite projected point even when the transform
+matrix is finite. `BlockPresentationResolverTest` checks both public `resolve`
+entry points: ordinary-only resolvers run for ordinary views and are skipped for
+external read views.
 
 ## Base-fluid icon presentation
 
@@ -370,6 +426,33 @@ not actual frame hooks, HUD callers or renderers, and do not automatically cover
 the fresh non-render lookup bypass; source inspection remains useful but is not
 automated runtime coverage.
 
+## Frame-aware marker and outline placement
+
+`EntityMarkerPointTest` covers world-frame interpolated base top-center,
+contained-frame base projection with a world-up unscaled native bounding-box
+height, an unavailable or throwing render frame yielding no trusted point, and
+the existing anchor/last-live recovery after a later successful point.
+`EntityMarkerPositionTrackerTest` separately covers the fallback state sequence.
+`CreateEntityOutlineDispatchTest` covers the direct dispatcher's contained-rotor
+placement (projected and scaled anchor translation, parent rotation, zero
+dispatcher coordinates), world-entity identity placement, an unavailable frame
+skipping dispatch, and nesting-safe mask-scope restoration after success and
+failure. The [Aeronautics rotor contract](../../integrations/aeronautics.md#geometry-and-native-shapes)
+owns the frame and model formula; the [Create outline contract](../../integrations/create.md#contraption-and-package-dispatch)
+owns the single direct-dispatch requirement.
+
+These are CPU pose-construction and recording-sink seams. They do not establish
+live marker rendering, entity outline submission, loaded Sable/Aeronautics
+frames, GPU output or in-game visibility.
+
+`BlockOutlineStateTest` checks the retained, authoritatively expired winner's
+block spec through its local display deadline. `EntityOutlineStateTest` checks
+entity-outline eligibility when the empty winner update arrives before the
+authoritative expiry. Both assert headless state, not a rendered outline.
+
+The marker helper's rejection of a non-finite live point is source-inspected;
+no dedicated specific test covers that branch.
+
 ## Focused native block-outline regression coverage
 
 The native VoxelShape route requires complementary checks:
@@ -400,7 +483,7 @@ visibility through occluders or from arbitrary camera angles.
   selection and independent visual lifetimes, but no test checks whether several
   display-active same-target records change the displayed HUD alpha; the
   invariant is owned by
-  [client marker state](../../architecture/markers/client-state.md#winner-slots-are-not-the-render-marker-collection);
+  [client marker state](../../architecture/markers/client-state.md#hud-winner-slot-and-presentation-selection);
 - the local `ModelBlockRendererMixin` position-seed guard:
   `@ModifyConstant(method = "*", require = 2)` counts the minimum number of
   matching class-wide `42L` constants, including an unused local, so it does not

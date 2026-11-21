@@ -23,6 +23,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localSnapshotSpanStore;
 import static org.junit.jupiter.api.Assertions.*;
 
 @NotNullByDefault
@@ -95,12 +96,12 @@ class VanillaChestPresentationTest {
 		var presentation = new BlockPresentationResolverRegistry().resolve(f.client, source(f, f.right));
 		var visited = new ArrayList<String>(); var state = BlockModelOutlineState.INSTANCE; state.beginFrame();
 		try {
-			state.setPresentations(List.of(presentation));
+			BlockModelOutlineTestSupport.prepare(state, presentation);
 			BlockPresentationSubjectDispatcher.dispatch(presentation, subject -> true,
 				subject -> state.addSuccess(subject.successKey(presentation.sourceSpec())), (subject, observer) -> {
 					visited.add(subject.subjectId()); return subject.subjectId().equals("left");
 				});
-			assertEquals(List.of("left", "right"), visited); assertFalse(state.allPresentationsCovered());
+			assertEquals(List.of("left", "right"), visited); assertFalse(state.allCoveredByModels());
 			assertEquals(List.of("right"), state.presentations().getFirst().renderSubjects().stream()
 				.filter(subject -> !state.successKeys().contains(subject.successKey(presentation.sourceSpec()))).map(BlockRenderSubject::subjectId).toList());
 			state.clearSuccesses();
@@ -115,18 +116,18 @@ class VanillaChestPresentationTest {
 				throw new AssertionError("metadata-only resolver called " + method.getName());
 			});
 		assertEquals(new BlockPresentationResolverRegistry().resolve(f.client, spec), new BlockPresentationResolverRegistry().resolve(getter, spec));
-		var clientStore = new nx.pingwheel.common.client.marker.ClientMarkerStore(0);
+		var clientStore = localSnapshotSpanStore(0L);
 		var key = new MinecraftTargetGroupingResolver(f.server).resolve(DoubleChestFixture.OWNER, f.target(f.right));
 		clientStore.onCreated(new nx.pingwheel.common.marker.MarkerSnapshot(new MarkerId(1), DoubleChestFixture.OWNER, f.target(f.right), key,
 			"entity_block", "attention", new nx.pingwheel.common.marker.MarkerAnchor(16.5, 64.5, 15.5), 1, 30), 0);
 		clientStore.onWinnerChanged(key, java.util.Optional.of(new MarkerId(1)));
 		var outline = BlockOutlineState.INSTANCE; var models = BlockModelOutlineState.INSTANCE;
 		try {
-			outline.prepare(clientStore, "minecraft:overworld"); models.beginFrame(); models.preparePresentations(f.client, outline);
+			outline.prepare(clientStore, "minecraft:overworld"); models.beginFrame(); models.preparePresentations(f.client, outline, 0);
 			assertEquals(List.of(f.left, f.right), models.presentations().getFirst().renderSubjects().stream().map(BlockRenderSubject::blockPos).toList());
 			@Unmodifiable List<BlockPresentation> frozen = models.presentations(); f.unavailable.add(f.right);
-			models.preparePresentations(f.client, outline); assertSame(frozen, models.presentations(), "normal/fallback passes cannot resolve different topology in one frame");
-			models.beginFrame(); f.reads.clear(); models.preparePresentations(f.client, outline);
+			models.preparePresentations(f.client, outline, 0); assertSame(frozen, models.presentations(), "normal/fallback passes cannot resolve different topology in one frame");
+			models.beginFrame(); f.reads.clear(); models.preparePresentations(f.client, outline, 0);
 			assertTrue(models.presentations().getFirst().isEmpty()); assertTrue(f.reads.isEmpty());
 		} finally { outline.clear(); models.clear(); }
 	}

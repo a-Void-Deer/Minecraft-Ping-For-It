@@ -25,6 +25,7 @@ import nx.pingwheel.common.interaction.candidate.*;
 import nx.pingwheel.common.math.PingClipContext;
 import nx.pingwheel.common.math.RaycastPolicy;
 import nx.pingwheel.common.resolve.BlockEntityClassification;
+import org.jetbrains.annotations.Nullable;
 
 /** Provider-specific synchronous transform/scan core. No provider objects survive capture. */
 final class SableSupplementalRaycaster {
@@ -33,7 +34,7 @@ final class SableSupplementalRaycaster {
 	/** Raw random-access loaded list, never a filtered iterator whose hasNext scans hidden entries. */
 	interface Source {
 		int size();
-		SubLevel at(int index, CandidateWorkBudget budget);
+		@Nullable SubLevel at(int index);
 	}
 
 	/** Press-only positively resolved plot view. Bounds are local block/shape bounds, not render bounds. */
@@ -46,21 +47,20 @@ final class SableSupplementalRaycaster {
 	}
 
 	static boolean scan(Source source, String dimensionId, Vec3 start, Vec3 end, RaycastPolicy policy,
-		CollisionContext context, Vec3 cameraFeet, CandidateWorkBudget budget, CandidateCollector collector) {
+		CollisionContext context, Vec3 cameraFeet, CandidateCollector collector) {
 		int size = source.size();
 		if (size < 0) return false;
 		if (start.equals(end)) return true;
 		for (int index = 0; index < size; index++) {
-			if (!budget.callProvider()) return false;
-			SubLevel subLevel = source.at(index, budget);
+			@Nullable SubLevel subLevel = source.at(index);
 			if (subLevel == null) continue; // positively removed/empty, not an unresolved provider
-			if (!scanSubLevel(subLevel, dimensionId, start, end, policy, context, cameraFeet, budget, collector)) return false;
+			if (!scanSubLevel(subLevel, dimensionId, start, end, policy, context, cameraFeet, collector)) return false;
 		}
 		return source.size() == size;
 	}
 
 	private static boolean scanSubLevel(SubLevel subLevel, String dimensionId, Vec3 start, Vec3 end,
-		RaycastPolicy policy, CollisionContext context, Vec3 cameraFeet, CandidateWorkBudget budget,
+		RaycastPolicy policy, CollisionContext context, Vec3 cameraFeet,
 		CandidateCollector collector) {
 		CandidateCollector provisional = new CandidateCollector();
 		Pose3d pose = new Pose3d(subLevel.logicalPose());
@@ -78,7 +78,7 @@ final class SableSupplementalRaycaster {
 		Vec3 localFeet = pose.transformPositionInverse(cameraFeet);
 		if (!finite(localFeet)) return false;
 		CollisionContext localContext = localContext(context, localFeet);
-		var loadedView = new LoadedCandidateBlockView(subLevel.world(), subLevel.loaded(), budget);
+		var loadedView = new LoadedCandidateBlockView(subLevel.world(), subLevel.loaded());
 		BlockGetter view = new BlockGetter() {
 			@Override public net.minecraft.world.level.block.state.BlockState getBlockState(BlockPos pos) {
 				return subLevel.contains().test(pos) ? loadedView.getBlockState(pos)
@@ -102,7 +102,7 @@ final class SableSupplementalRaycaster {
 			unloaded[0] |= !available;
 			return available;
 		},
-			ray, traversalStart, traversalEnd, budget, hit -> {
+			ray, traversalStart, traversalEnd, hit -> {
 			BlockPos pos = hit.getBlockPos();
 			var state = view.getBlockState(pos);
 			if (state.isAir()) return;

@@ -2,15 +2,15 @@ package nx.pingwheel.common.client.outline;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 
 import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
 import nx.pingwheel.common.domain.PingTypeCatalog;
 import nx.pingwheel.common.marker.TargetKey;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 
 /**
  * Main-thread-confined snapshot of the blocks that currently control a
@@ -18,8 +18,8 @@ import nx.pingwheel.common.marker.TargetKey;
  * outline pass.
  *
  * <p>Every frame {@link #prepare} re-selects ordinary and provider-owned block
- * outline specs from the authoritative {@link ClientMarkerStore}
- * visible-winner map of the current dimension and swaps immutable snapshots,
+ * outline specs from the {@link ClientMarkerStore} outline projection of the
+ * current dimension and swaps immutable snapshots,
  * preserving deterministic ascending marker-id iteration order. The
  * snapshots carry no live shape: a {@code BlockState} change with the same
  * block type keeps the same ordinary block identity, while an external
@@ -57,17 +57,16 @@ public final class BlockOutlineState {
 	 * <p>With a {@code null} store or dimension (no live runtime/level, or
 	 * after leaving the server) the state is cleared instead.
 	 */
-	public void prepare(ClientMarkerStore store, String dimensionId) {
+	public void prepare(@Nullable ClientMarkerStore store, @Nullable String dimensionId) {
 		if (store == null || dimensionId == null) {
 			clear();
 			return;
 		}
 
-		Map<TargetKey, ClientMarker> winners =
-			store.visibleWinnersInDimension(dimensionId);
-		Map<TargetKey.BlockKey, BlockOutlineSpec> next = BlockOutlineSelection.select(
+		@Unmodifiable Map<TargetKey, ClientMarker> winners = store.outlineWinnersInDimension(dimensionId);
+		@Unmodifiable Map<TargetKey.BlockKey, BlockOutlineSpec> next = BlockOutlineSelection.select(
 			winners, BUILT_IN_CATALOG);
-		Map<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> nextExternal =
+		@Unmodifiable Map<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> nextExternal =
 			BlockOutlineSelection.selectExternal(winners, BUILT_IN_CATALOG);
 
 		if (next.equals(specs) && nextExternal.equals(externalSpecs)) {
@@ -78,7 +77,7 @@ public final class BlockOutlineState {
 		int changed = 0;
 
 		for (Map.Entry<TargetKey.BlockKey, BlockOutlineSpec> entry : next.entrySet()) {
-			BlockOutlineSpec previous = specs.get(entry.getKey());
+			@Nullable BlockOutlineSpec previous = specs.get(entry.getKey());
 
 			if (previous == null) {
 				added++;
@@ -100,7 +99,7 @@ public final class BlockOutlineState {
 		int externalRemoved = 0;
 
 		for (Map.Entry<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> entry : nextExternal.entrySet()) {
-			ExternalBlockOutlineSpec previous = externalSpecs.get(entry.getKey());
+			@Nullable ExternalBlockOutlineSpec previous = externalSpecs.get(entry.getKey());
 
 			if (previous == null) {
 				externalAdded++;
@@ -135,61 +134,13 @@ public final class BlockOutlineState {
 	}
 
 	/**
-	 * Whether every ordinary presentation subject and provider-owned key is
-	 * covered by the corresponding model-pass success sets. Empty subject lists
-	 * are intentionally vacuously covered.
-	 */
-	public boolean allCoveredBy(
-		List<BlockPresentation> presentations,
-		Set<BlockPresentationSuccessKey> succeeded,
-		Set<TargetKey.ExternalBlockKey> externalSucceeded
-	) {
-		Objects.requireNonNull(presentations, "presentations");
-		Objects.requireNonNull(succeeded, "succeeded");
-		Objects.requireNonNull(externalSucceeded, "externalSucceeded");
-
-		for (BlockPresentation presentation : presentations) {
-			for (BlockRenderSubject subject : presentation.renderSubjects()) {
-				if (!succeeded.contains(subject.successKey(presentation.sourceSpec()))) {
-					return false;
-				}
-			}
-		}
-
-		for (TargetKey.ExternalBlockKey blockKey : externalSpecs.keySet()) {
-			if (!externalSucceeded.contains(blockKey)) {
-				return false;
-			}
-		}
-
-		return true;
-	}
-
-	/**
-	 * The outline spec for {@code blockKey}, or {@code null} when the block
-	 * currently has no outline.
-	 */
-	public BlockOutlineSpec specFor(TargetKey.BlockKey blockKey) {
-		return specs.get(blockKey);
-	}
-
-	/**
-	 * The fully opaque ARGB outline color for {@code blockKey}, or {@code 0}
-	 * when the block currently has no outline.
-	 */
-	public int colorFor(TargetKey.BlockKey blockKey) {
-		BlockOutlineSpec spec = specs.get(blockKey);
-
-		return spec == null ? 0 : spec.argbColor();
-	}
-
-	/**
 	 * The current snapshot as an unmodifiable map whose iteration order is the
 	 * ascending {@link nx.pingwheel.common.domain.MarkerId} order produced by
-	 * {@link BlockOutlineSelection#select}.
+	 * {@link BlockOutlineSelection#select}. Each spec retains its winner's
+	 * fully opaque ARGB outline color.
 	 *
-	 * <p>Mainly a test and presentation-resolution seam: production callers
-	 * query per block via {@link #specFor} and {@link #colorFor}.
+	 * <p>This immutable snapshot is the presentation-resolution and test seam;
+	 * the render passes consume it through the prepared frame snapshot.
 	 */
 	public Map<TargetKey.BlockKey, BlockOutlineSpec> snapshot() {
 		return specs;

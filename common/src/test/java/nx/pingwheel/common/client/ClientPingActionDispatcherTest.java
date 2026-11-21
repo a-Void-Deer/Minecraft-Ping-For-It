@@ -47,6 +47,11 @@ class ClientPingActionDispatcherTest {
 
 	private static final String OVERWORLD = "minecraft:overworld";
 	private static final UUID ENTITY_ID = UUID.fromString("123e4567-e89b-12d3-a456-426614174000");
+	private static final UUID OWNER = new UUID(0, 1);
+
+	private static PingInteractionAction.CancelMarker cancel(MarkerId markerId) {
+		return new PingInteractionAction.CancelMarker(markerId, OWNER, OVERWORLD);
+	}
 
 	private static final class RecordingPacketSender implements ClientPingActionDispatcher.PacketSender {
 
@@ -220,7 +225,7 @@ class ClientPingActionDispatcherTest {
 
 		assertEquals(ClientPingActionDispatcher.DispatchOutcome.CREATE_SENT,
 			h.dispatcher.dispatchOutcome(createAction(interaction.begin())));
-		h.dispatcher.dispatch(new PingInteractionAction.CancelMarker(new MarkerId(8L)));
+		h.dispatcher.dispatch(cancel(new MarkerId(8L)));
 
 		assertEquals(2, h.sender.sent.size());
 		assertTrue(h.sink.cooldowns.isEmpty());
@@ -279,7 +284,7 @@ class ClientPingActionDispatcherTest {
 
 		dispatcher.dispatch(first);
 		dispatcher.dispatch(createAction(interaction.begin()));
-		dispatcher.dispatch(new PingInteractionAction.CancelMarker(new MarkerId(8L)));
+		dispatcher.dispatch(cancel(new MarkerId(8L)));
 
 		assertEquals(2, h.sender.sent.size());
 		assertEquals(PresentationC2SPacket.Kind.REMOVE,
@@ -314,7 +319,7 @@ class ClientPingActionDispatcherTest {
 		Harness h = harness();
 		MarkerId markerId = new MarkerId(7L);
 
-		h.dispatcher.dispatch(new PingInteractionAction.CancelMarker(markerId));
+		h.dispatcher.dispatch(cancel(markerId));
 
 		assertEquals(1, h.sender.sent.size());
 		assertTrue(h.sink.messages.isEmpty());
@@ -351,7 +356,7 @@ class ClientPingActionDispatcherTest {
 		PingType selected = context.resolvedTarget().targetType().pingTypes().get(0);
 
 		h.dispatcher.dispatch(new PingInteractionAction.CreatePing(context, selected));
-		h.dispatcher.dispatch(new PingInteractionAction.CancelMarker(new MarkerId(42L)));
+		h.dispatcher.dispatch(cancel(new MarkerId(42L)));
 		h.dispatcher.dispatch(new PingInteractionAction.TargetGone(context, TargetGoneReason.DIMENSION_CHANGED));
 
 		assertFalse(h.logger.rendered.isEmpty());
@@ -415,7 +420,7 @@ class ClientPingActionDispatcherTest {
 		var active = new ActiveInteraction();
 		assertEquals(ClientPingActionDispatcher.DispatchOutcome.NOT_READY,
 			dispatcher.dispatchOutcome(createAction(active.begin())));
-		dispatcher.dispatch(new PingInteractionAction.CancelMarker(new MarkerId(8)));
+		dispatcher.dispatch(cancel(new MarkerId(8)));
 		assertTrue(sender.sent.isEmpty());
 		assertTrue(tracker.isLatest(CreateRequestTracker.Route.INVENTORY, 91));
 
@@ -424,7 +429,7 @@ class ClientPingActionDispatcherTest {
 			Map.of(PresentationBasic.ID, PresentationBasic.fields()), Map.of(PresentationBasic.ID, 1))));
 		assertEquals(ClientPingActionDispatcher.DispatchOutcome.NOT_READY,
 			dispatcher.dispatchOutcome(createAction(active.begin())));
-		dispatcher.dispatch(new PingInteractionAction.CancelMarker(new MarkerId(8)));
+		dispatcher.dispatch(cancel(new MarkerId(8)));
 		assertTrue(sender.sent.isEmpty());
 		assertTrue(tracker.isLatest(CreateRequestTracker.Route.INVENTORY, 91));
 

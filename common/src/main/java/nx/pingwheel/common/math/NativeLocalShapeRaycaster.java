@@ -12,6 +12,7 @@ import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.material.FluidState;
+import org.jetbrains.annotations.Nullable;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
@@ -92,7 +93,7 @@ public final class NativeLocalShapeRaycaster {
 			return Optional.empty();
 		}
 
-		Candidate best = null;
+		@Nullable Candidate best = null;
 
 		for (BlockPos suppliedPos : localPositions) {
 			Objects.requireNonNull(suppliedPos, "localPositions contains null");
@@ -142,14 +143,14 @@ public final class NativeLocalShapeRaycaster {
 	 * not expose.</p>
 	 */
 	static Optional<LocalGeometryHit> traceNativeShape(
-		VoxelShape shape,
+		@Nullable VoxelShape shape,
 		Vec3 start,
 		Vec3 end,
 		BlockPos localPos,
 		LocalGeometryKind kind,
 		BlockState state,
-		String blockRegistryId,
-		Optional<String> fluidRegistryId
+		@Nullable String blockRegistryId,
+		@Nullable Optional<String> fluidRegistryId
 	) {
 		if (shape == null || shape.isEmpty() || blockRegistryId == null || fluidRegistryId == null
 			|| !isFinite(start) || !isFinite(end) || start.distanceToSqr(end) == 0.0) {
@@ -187,7 +188,7 @@ public final class NativeLocalShapeRaycaster {
 			t, localPos, kind, state, blockRegistryId, fluidRegistryId, localPoint));
 	}
 
-	private static Candidate chooseBetter(Candidate current, Optional<LocalGeometryHit> proposed) {
+	private static @Nullable Candidate chooseBetter(@Nullable Candidate current, Optional<LocalGeometryHit> proposed) {
 		if (proposed.isEmpty()) {
 			return current;
 		}
@@ -313,8 +314,8 @@ public final class NativeLocalShapeRaycaster {
 		return start.add(end.subtract(start).scale(t));
 	}
 
-	private static String blockRegistryId(BlockState state) {
-		ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
+	private static @Nullable String blockRegistryId(BlockState state) {
+		@Nullable ResourceLocation id = BuiltInRegistries.BLOCK.getKey(state.getBlock());
 		return id == null ? null : id.toString();
 	}
 

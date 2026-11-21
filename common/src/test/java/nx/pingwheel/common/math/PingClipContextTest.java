@@ -19,8 +19,6 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
-import nx.pingwheel.common.interaction.candidate.CandidateWorkBudget;
-import nx.pingwheel.common.interaction.candidate.CandidateWorkLimits;
 import nx.pingwheel.common.interaction.candidate.NativeBlockCandidateScan;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -161,7 +159,6 @@ class PingClipContextTest {
 			world,
 			ignored -> true,
 			context(policy, resolver),
-			new CandidateWorkBudget(new CandidateWorkLimits(1000, 0, 0)),
 			hits::add);
 	}
 

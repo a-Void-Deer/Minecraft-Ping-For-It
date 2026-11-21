@@ -1,18 +1,23 @@
 package nx.pingwheel.common.math;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 
 import nx.pingwheel.common.diagnostics.DiagnosticBackend;
 import nx.pingwheel.common.diagnostics.DiagnosticSide;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.diagnostics.LoggingProfile;
 import net.minecraft.SharedConstants;
+import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.syncher.SynchedEntityData;
+import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.Bootstrap;
 import net.minecraft.world.entity.Entity;
@@ -20,19 +25,33 @@ import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.ExperienceOrb;
 import net.minecraft.world.entity.boss.EnderDragonPart;
 import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
+import org.jetbrains.annotations.Unmodifiable;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import nx.pingwheel.common.domain.EntityLocator;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.interaction.ActiveInteraction;
+import nx.pingwheel.common.interaction.CapturedRay;
 import nx.pingwheel.common.interaction.MinecraftTargetSnapshotFactory;
+import nx.pingwheel.common.interaction.cancel.WorldVector;
 import nx.pingwheel.common.interaction.candidate.*;
+import nx.pingwheel.common.resolve.DefaultTargetResolver;
+import nx.pingwheel.common.resolve.TargetResolutionLogger;
 import nx.pingwheel.common.testing.DiagnosticLogCapture;
+import nx.pingwheel.common.topology.DoubleChestFixture;
 import org.apache.logging.log4j.Level;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -49,7 +68,7 @@ class RaycastSupplementalCandidateTest {
 		var registry = new EntityLocalGeometryRegistry();
 		TestEntity near = entity(EntityType.COW, 2);
 		TestEntity behind = entity(EntityType.COW, 8);
-		assertTrue(collect(List.of(near, behind), registry.snapshot(), 20, 20, collector));
+		collect(List.of(near, behind), registry.snapshot(), 20, collector);
 		assertEquals(2, collector.evidence().size());
 		assertEquals(new Target.EntityTarget("minecraft:overworld", behind.getUUID()), collector.evidence().get(1).snapshot().target());
 		assertTrue(collector.evidence().get(1).distance() > 7);
@@ -63,7 +82,7 @@ class RaycastSupplementalCandidateTest {
 			registry.register(id("owned"), 1, List.of(vanilla("pig")), (entity, request) -> result);
 			var collector = new CandidateCollector();
 			TestEntity cow = entity(EntityType.COW, 6);
-			assertTrue(collect(List.of(entity(EntityType.PIG, 2), cow), registry.snapshot(), 20, 20, collector));
+			collect(List.of(entity(EntityType.PIG, 2), cow), registry.snapshot(), 20, collector);
 			assertEquals(1, collector.evidence().size());
 			assertEquals(new Target.EntityTarget("minecraft:overworld", cow.getUUID()), collector.evidence().getFirst().snapshot().target());
 		}
@@ -81,7 +100,7 @@ class RaycastSupplementalCandidateTest {
 		var snapshot = registry.snapshot();
 		registry.register(id("later"), 0, List.of(vanilla("pig")), (entity, request) -> EntityLocalGeometryResult.miss());
 		var collector = new CandidateCollector();
-		assertTrue(collect(List.of(entity(EntityType.PIG, 2)), snapshot, 20, 20, collector));
+		collect(List.of(entity(EntityType.PIG, 2)), snapshot, 20, collector);
 		assertEquals(1, exactCalls.get());
 		var hit = collector.evidence().getFirst();
 		assertEquals(6, hit.distance());
@@ -90,13 +109,63 @@ class RaycastSupplementalCandidateTest {
 	}
 
 	@Test
-	void finiteDistanceAndExhaustedEntityEnumerationDoNotCertifyArbitraryPrefix() {
+	void supplementalScanDoesNotAdmitAnEntityBeyondTheFiniteSegment() {
 		var registry = new EntityLocalGeometryRegistry();
 		var collector = new CandidateCollector();
-		assertTrue(collect(List.of(entity(EntityType.COW, 12)), registry.snapshot(), 10, 10, collector));
+		collect(List.of(entity(EntityType.COW, 12)), registry.snapshot(), 10, collector);
 		assertTrue(collector.evidence().isEmpty());
-		assertFalse(collect(List.of(entity(EntityType.COW, 8), entity(EntityType.COW, 2)), registry.snapshot(), 1, 20, collector));
-		assertEquals(1, collector.evidence().size(), "caller must not certify this incomplete prefix");
+	}
+
+	@Test
+	void laterNativeReadFailureLeavesBlockTypesUncertifiedAndPreservesTheOrdinarySelection() {
+		var world = DoubleChestFixture.allocate(PartialBlockWorld.class);
+		var camera = entity(EntityType.COW, .5);
+		camera.attach(world);
+		double range = 2048;
+		var start = new Vec3(.5, .5, .5);
+		var ray = new CapturedRay(new WorldVector(.5, .5, .5), new WorldVector(1, 0, 0));
+		BlockHitResult expectedNative = world.clip(PingClipContext.create(start, start.add(range, 0, 0),
+			POLICY, CollisionContext.of(camera)));
+		var nativeCapture = CandidateBlockCapture.nativeBlocks();
+		List<BlockHitResult> provisional = new ArrayList<>();
+		var trace = Raycast.traceDirectionalCandidates(camera, new ActiveInteraction().begin(), ray,
+			range, range, POLICY, (level, hit, from, to) -> {
+				provisional.add(hit);
+				return nativeCapture.capture(level, hit, from, to);
+			}).orElseThrow();
+
+		assertTrue(world.failedRead, "the real state read must fail after the first block");
+		assertEquals(1, provisional.size());
+		BlockHitResult exactContact = provisional.getFirst();
+		Vec3 surface = exactContact.getLocation();
+		assertEquals(expectedNative.getBlockPos(), exactContact.getBlockPos());
+		assertEquals(new Vec3(2, .5, .5), surface, "Precise found the same stone's front face");
+		assertTrue(surface.x < expectedNative.getLocation().x, "the recontact is nearer than the native hit");
+		var ordinary = trace.ordinarySelection();
+		var ordinaryHit = assertInstanceOf(BlockHitResult.class, ordinary.hitResult());
+		assertEquals(expectedNative.getType(), ordinaryHit.getType());
+		assertEquals(expectedNative.getBlockPos(), ordinaryHit.getBlockPos());
+		assertEquals(expectedNative.getDirection(), ordinaryHit.getDirection());
+		assertEquals(expectedNative.isInside(), ordinaryHit.isInside());
+		assertEquals(expectedNative.getLocation(), ordinaryHit.getLocation());
+		assertEquals(expectedNative.getLocation(), ordinary.worldPoint().orElseThrow());
+		var reference = MinecraftTargetSnapshotFactory.fromCandidateSelection(world, ordinary);
+		var resolver = DefaultTargetResolver.builtIn(TargetResolutionLogger.noop());
+		var set = trace.candidates().orElseThrow().finish(reference, resolver.resolve(reference.target(), reference.matchContext()), resolver);
+		for (var type : List.of(PreciseTargetType.BLOCK, PreciseTargetType.ENTITY_BLOCK)) {
+			assertEquals(PreciseSlot.Availability.INCOMPLETE, set.slot(type).availability(), type.name());
+			assertTrue(set.slot(type).candidateId().isEmpty(), type.name());
+		}
+		assertEquals(PreciseSlot.Availability.MISSING, set.slot(PreciseTargetType.ENTITY).availability(),
+			"the independent entity view completed with no candidates");
+		var locationSlot = set.slot(PreciseTargetType.LOCATION);
+		assertEquals(PreciseSlot.Availability.AVAILABLE, locationSlot.availability());
+		var location = set.candidate(locationSlot.candidateId().orElseThrow()).orElseThrow();
+		// The earlier exact contact can refine the audit and derived location for this
+		// same identity without certifying either scanned block type.
+		var expectedRecontact = new WorldVector(surface.x, surface.y, surface.z);
+		assertEquals(expectedRecontact, set.ordinary().worldHit());
+		assertEquals(expectedRecontact, location.worldHit());
 	}
 
 	@Test
@@ -105,15 +174,15 @@ class RaycastSupplementalCandidateTest {
 		TestEntity spectator = new TestEntity(EntityType.PIG, true);
 		spectator.setPos(2, 0, 0);
 		var collector = new CandidateCollector();
-		assertTrue(collect(List.of(spectator), registry.snapshot(), 10, 20, collector));
+		collect(List.of(spectator), registry.snapshot(), 20, collector);
 		assertTrue(collector.evidence().isEmpty());
 		TestEntity ignored = entity(EntityType.COW, 4);
 		try (var registration = EntitySelectionBlacklist.INSTANCE.register(entity -> entity == ignored)) {
-			assertTrue(collect(List.of(ignored), registry.snapshot(), 10, 20, collector));
+			collect(List.of(ignored), registry.snapshot(), 20, collector);
 			assertTrue(collector.evidence().isEmpty());
 			RaycastPolicy include = RaycastPolicy.from(false, true, false);
-			assertTrue(Raycast.collectEntityCandidates(List.of(ignored, spectator), START, END, include, registry.snapshot(),
-				request(END, include), new CandidateWorkBudget(new CandidateWorkLimits(0, 10, 0)), collector, "minecraft:overworld", null));
+			Raycast.collectEntityCandidates(List.of(ignored, spectator), START, END, include, registry.snapshot(),
+				request(END, include), collector, "minecraft:overworld", null);
 			assertEquals(1, collector.evidence().size());
 		}
 	}
@@ -269,11 +338,11 @@ class RaycastSupplementalCandidateTest {
 		}
 	}
 
-	private static boolean collect(List<Entity> entities, EntityLocalGeometryRegistry.Snapshot owners,
-		int visits, double distance, CandidateCollector collector) {
+	private static void collect(List<Entity> entities, EntityLocalGeometryRegistry.Snapshot owners,
+		double distance, CandidateCollector collector) {
 		Vec3 end = new Vec3(distance, 0.5, 0);
-		return Raycast.collectEntityCandidates(entities, START, end, POLICY, owners, request(end, POLICY),
-			new CandidateWorkBudget(new CandidateWorkLimits(0, visits, 0)), collector, "minecraft:overworld", null);
+		Raycast.collectEntityCandidates(entities, START, end, POLICY, owners, request(end, POLICY),
+			collector, "minecraft:overworld", null);
 	}
 	private static EntityLocalRaycastRequest request(Vec3 end, RaycastPolicy policy) {
 		return new EntityLocalRaycastRequest(START, end, policy, 1, CollisionContext.empty(), Vec3.ZERO);
@@ -283,9 +352,34 @@ class RaycastSupplementalCandidateTest {
 	}
 	private static ResourceLocation id(String name) { return ResourceLocation.fromNamespaceAndPath("test", name); }
 	private static ResourceLocation vanilla(String name) { return ResourceLocation.withDefaultNamespace(name); }
+
+	@NotNullByDefault
+	private static final class PartialBlockWorld extends ClientLevel {
+		private static final BlockPos FIRST = new BlockPos(2, 0, 0);
+		private boolean failedRead;
+		private PartialBlockWorld() { super(null, null, null, null, 0, 0, null, null, false, 0); }
+		@Override public ResourceKey<net.minecraft.world.level.Level> dimension() { return OVERWORLD; }
+		@Override public @Unmodifiable List<Entity> getEntities(@Nullable Entity except, AABB area, Predicate<? super Entity> filter) { return List.of(); }
+		@Override public @Unmodifiable Iterable<Entity> entitiesForRendering() { return List.of(); }
+		@Override public boolean isLoaded(BlockPos pos) { return true; }
+		@Override public BlockState getBlockState(BlockPos pos) {
+			if (pos.getX() == 4) {
+				failedRead = true;
+				throw new IllegalStateException("later loaded block state is unavailable");
+			}
+			return (pos.equals(FIRST) ? Blocks.STONE : Blocks.AIR).defaultBlockState();
+		}
+		@Override public FluidState getFluidState(BlockPos pos) { return Fluids.EMPTY.defaultFluidState(); }
+		@Override public BlockHitResult clip(ClipContext context) {
+			return Objects.requireNonNull(context.getBlockShape(getBlockState(FIRST), this, FIRST)
+				.clip(context.getFrom(), context.getTo(), FIRST));
+		}
+	}
+
 	private static final class TestEntity extends Entity {
 		private final boolean spectator;
 		TestEntity(EntityType<?> type, boolean spectator) { super(type, null); this.spectator = spectator; }
+		void attach(net.minecraft.world.level.Level level) { setLevel(level); }
 		@Override public boolean isSpectator() { return spectator; }
 		@Override protected void defineSynchedData(SynchedEntityData.Builder builder) {}
 		@Override protected void readAdditionalSaveData(CompoundTag tag) {}

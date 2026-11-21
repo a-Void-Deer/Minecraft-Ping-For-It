@@ -184,9 +184,25 @@ public class CommonClient {
 
 		// A disconnect while the ping key is still held must not leak the
 		// armed hold into the next connection.
-		InputUtils.resetPingHold();
+		InputUtils.resetPingInteraction();
 
 		SettingsScreen.notifyServerDisconnected();
+	}
+
+	/**
+	 * Releases shared client state bound to the previous client world at the
+	 * native replacement or unload boundary. The runtime observes the same
+	 * lifecycle immediately so its recorded world identity and interaction
+	 * abort semantics never wait for a later world render frame.
+	 */
+	public void onClientLevelChanged() {
+		BlockModelOutlineState.INSTANCE.clear();
+		GameContext.clearRenderEntityLookupCache();
+		VirtualBlockDisplayRenderer.INSTANCE.clear();
+
+		if (pingRuntime != null) {
+			pingRuntime.onClientLevelChanged();
+		}
 	}
 
 	/**
@@ -200,14 +216,13 @@ public class CommonClient {
 		// physical event timestamp, not the later tick/frame time.
 		long eventTimeMillis = INTERACTION_TIME_SOURCE.nowMillis();
 		Game = Minecraft.getInstance();
-		InputUtils.handleToggleClick(rawKey, eventTimeMillis);
 
 		if (!InputUtils.claimPingClick(rawKey)) {
 			return;
 		}
 
 		if (Game.screen != null) {
-			abortInteractionIfActive(false);
+			abortInteractionIfActive();
 			return;
 		}
 
@@ -221,12 +236,12 @@ public class CommonClient {
 				// The runtime may have become invalid between arbitration and the
 				// client-thread capture. Do not carry the claimed raw key into a
 				// later world.
-				InputUtils.resetPingHold();
+				InputUtils.resetPingInteraction();
 			}
 		} else {
 			// A click in a menu must never arm an interaction that can leak into
 			// a later world.
-			InputUtils.resetPingHold();
+			InputUtils.resetPingInteraction();
 		}
 	}
 
@@ -248,7 +263,7 @@ public class CommonClient {
 	 * such as on focus loss. No default ping is produced.
 	 */
 	public void onInputReset() {
-		abortInteractionIfActive(true);
+		abortInteractionIfActive();
 	}
 
 	/**
@@ -267,19 +282,14 @@ public class CommonClient {
 		InputUtils.resetPingInteraction();
 	}
 
-	private void abortInteractionIfActive(boolean resetAllInputState) {
-		if (resetAllInputState) {
-			InputUtils.resetPingHold();
-		} else {
-			InputUtils.resetPingInteraction();
-		}
+	private void abortInteractionIfActive() {
+		InputUtils.resetPingInteraction();
 		// Hard lifecycle disposal also ends an idle paint tail and compatibility seed.
 		if (pingRuntime != null) pingRuntime.abort();
 	}
 
 	public void onTickStart() {
 		Game = Minecraft.getInstance();
-		GameContext.updateDimension();
 		if (pingRuntime == null) pingRuntime = createPingRuntimeIfInWorld();
 		if (monitorService != null) monitorService.configure(ClientConfig.HANDLER.getConfig());
 
@@ -306,7 +316,7 @@ public class CommonClient {
 		if (Game.level == null || Game.player == null) {
 			// onTick() aborts the runtime interaction when the world disappears;
 			// this also clears the raw claim so a later join cannot inherit it.
-			InputUtils.resetPingHold();
+			InputUtils.resetPingInteraction();
 		}
 
 		if (KEY_BINDING_SETTINGS.consumeClick()) {
@@ -331,7 +341,7 @@ public class CommonClient {
 		// block-only frame can establish the shared outline pipeline too.
 		EntityOutlineFrameState.INSTANCE.beginFrame();
 		BlockModelOutlineState.INSTANCE.beginFrame();
-		prepareBlockPresentations();
+		prepareBlockPresentations(ctx.tickDelta);
 		requestEntityOutlineEffect();
 	}
 
@@ -374,19 +384,19 @@ public class CommonClient {
 	}
 
 	/**
-	 * Resolves ordinary block subjects once for this frame, after the source
+	 * Resolves ordinary and provider-owned block subjects once for this frame, after the source
 	 * outline snapshot and model-frame state have both been reset. The resulting
 	 * immutable list is shared by the model and late VoxelShape passes.
 	 */
-	private static void prepareBlockPresentations() {
-		Minecraft game = Game;
+	private static void prepareBlockPresentations(float renderPartialTick) {
+		@Nullable Minecraft game = Game;
 
 		if (pingRuntime == null || game == null || game.level == null) {
 			return;
 		}
 
 		BlockModelOutlineState.INSTANCE.preparePresentations(
-			game.level, BlockOutlineState.INSTANCE);
+			game.level, BlockOutlineState.INSTANCE, renderPartialTick);
 	}
 
 	/**
@@ -446,7 +456,7 @@ public class CommonClient {
 
 		VirtualBlockDisplayRenderer.INSTANCE.render(
 			game.level, camera, builtInPartialTick, flywheelPartialTick,
-			BlockOutlineState.INSTANCE, BlockModelOutlineState.INSTANCE);
+			BlockModelOutlineState.INSTANCE);
 	}
 
 	/**
@@ -572,10 +582,7 @@ public class CommonClient {
 			return;
 		}
 
-		if (BlockOutlineState.INSTANCE.allCoveredBy(
-			BlockModelOutlineState.INSTANCE.presentations(),
-			BlockModelOutlineState.INSTANCE.successKeys(),
-			BlockModelOutlineState.INSTANCE.externalSuccessKeys())) {
+		if (BlockModelOutlineState.INSTANCE.allCoveredByModels()) {
 			return;
 		}
 
@@ -583,11 +590,7 @@ public class CommonClient {
 			VertexConsumer lines = bufferSource.getBuffer(BlockOutlineRenderType.BLOCK_OUTLINE);
 			BlockOutlineRenderer.render(
 				game.level, camera, frame.cameraPosition(), lines,
-				BlockOutlineState.INSTANCE,
-				BlockModelOutlineState.INSTANCE.presentations(),
-				BlockModelOutlineState.INSTANCE.successKeys(),
-				BlockModelOutlineState.INSTANCE.externalSuccessKeys(),
-				frame.partialTick());
+				BlockModelOutlineState.INSTANCE);
 			bufferSource.endBatch(BlockOutlineRenderType.BLOCK_OUTLINE);
 		});
 	}
@@ -681,16 +684,12 @@ public class CommonClient {
 		Game = Minecraft.getInstance();
 		prepareMonitorView();
 
-		if (Game.level == null) {
-			GameContext.clearRenderEntityLookupCache();
-		}
-
 		if (pingRuntime != null) {
 			pingRuntime.onRenderFrame(InputUtils.isPingHotkeyDown());
 		}
 
 		if (Game.level == null || Game.player == null) {
-			InputUtils.resetPingHold();
+			InputUtils.resetPingInteraction();
 		}
 	}
 

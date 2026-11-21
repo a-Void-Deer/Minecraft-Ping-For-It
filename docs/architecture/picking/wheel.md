@@ -320,8 +320,8 @@ candidate capture; a reserved, disabled,
 navigation or actionless-branch entry reports its reason and never commits. A
 release outside every sector without crossing the deadzone is a silent no-action
 that sends neither a create nor a cancellation request.
-The down (180) cancel entry activates
-[Cancel Marker selection](#cancel-marker-selection).
+The down (180) cancel entry confirms the
+[Cancel Marker selection](#cancel-marker-selection) locked at the press edge.
 
 ## Headless spatial menu model
 
@@ -484,11 +484,9 @@ selection, submenu and dispatch identity; equal opaque keys in different groups
 cannot select each other. Each group's authorization and status come from its
 own inventory lane, so an unavailable or updating group does not complete or
 erase the other. Resource lifecycle, ordering and quantities remain owned by
-[inventory](../presentation/inventory.md#resource-lanes-and-scope). When
-terminal failure leaves no resource lane available or pending, the Details
-inventory entry is disabled, and an active inventory path exits under the
-existing inventory-path exit rules for a revoked or unavailable path. Terminal
-classification and retry behavior are owned by
+[inventory](../presentation/inventory.md#resource-lanes-and-scope). The effect
+of terminal failure on the Details inventory entry and on an active inventory
+path, together with terminal classification and retry behavior, is owned by
 [inventory preview and tracking](../presentation/inventory.md#preview-attempts-retry-and-no-progress-watchdog).
 The existing item-menu gestures below apply to a fluid row's resource menu as
 well; the lane's annotation policy still decides its allowed choices.
@@ -771,34 +769,51 @@ screen-transition abort rule remains owned by
 ## Cancel Marker selection
 
 The client-side candidate collection and the server's active cancellable set
-are deliberately different. On a cancel activation, the client collects every
-**stored** marker whose owner is the local player and whose target dimension is
-the current dimension. This query does not filter for visual activity or for
+are deliberately different. The interaction locks its cancellation candidate at
+the physical press edge that supplies its aiming ray;
+[capture](capture.md#ordinary-and-asynchronous-capture) and
+[long-press compatibility](../input/long-press-compatibility.md) own which edge
+that is for each path. At that edge the client collects every **stored** marker
+whose owner is the local player and whose target dimension is the current
+dimension. This query does not filter for visual activity or for
 `SYNCHRONIZED` versus `STALE` under the
 [client-state contract](../markers/client-state.md); a stored candidate can
 therefore be stale or past its local display deadline. This local collection is
 only a selection aid and is not an assertion that the marker is still
-server-active or removable.
+server-active or removable. Confirmation uses the lock as it stands and never
+re-collects candidates, re-applies the cone or re-resolves positions.
 
-1. Keep the cone origin and direction from the press-time ray. Candidates must
-   be within the configured half-angle, including the boundary; a zero-distance
+1. Take the cone origin and direction from that edge's ray. Candidates must be
+   within the configured half-angle, including the boundary; a zero-distance
    candidate is eligible.
-2. Resolve each candidate's current position without starting a new target ray:
-   a live entity uses its current rendered top-center; an external block uses a
-   currently resolved provider position or its authoritative anchor; other
-   markers use a matching presentation position when one exists and otherwise
-   their authoritative anchor.
+2. Resolve each candidate's position at that edge without starting a new target
+   ray: a live entity uses its then-current trusted displayed top-center when
+   that point is available, otherwise the same matching presentation position
+   or authoritative-anchor fallback as other markers; an external block uses a
+   then-current resolved provider position or its authoritative anchor. The
+   live point availability boundary is owned by
+   [client marker state](../markers/client-state.md#live-entity-display-position).
 3. Choose the nearest candidate by world-space distance. An exact distance tie
-   chooses the larger Marker ID. If no candidate is eligible, cancellation is a
+   chooses the larger Marker ID. Lock that Marker ID, or lock the empty result,
+   for the rest of the interaction, so camera or marker movement and store
+   changes cannot pick another member. An empty lock makes confirmation a
    silent no-op.
-4. Dispatch one removal request for that selected Marker ID. The server alone
-   checks active status and ownership; on success it synchronizes the removal
-   and resulting winner changes. Another player's marker can never be
-   cancelled.
+4. At confirmation, if the locked marker is the local player's own locally
+   stored and still locally visible record whose authoritative removal reason
+   is `EXPIRED`, end only that local display: remove the local record and send
+   no removal request. This local dismissal changes no server state and cannot
+   affect another player's display.
+5. Otherwise the locked Marker ID goes through the existing removal path, which
+   dispatches at most one removal request for it. The server alone checks
+   active status and ownership; it may reject the request, so dispatch does not
+   guarantee removal. Another player's marker can never be cancelled.
 
-The selected stored candidate does not authorize a new target-selection ray or
-make it server-cancellable. A stale, expired, missing, or unauthorized nearest
-candidate can be rejected by the server; that rejection does not make the
+The locked stored candidate does not authorize a new target-selection ray or
+make it server-cancellable. A locked candidate that is stale, missing, or
+unauthorized at confirmation can be rejected by the server; one whose
+authoritative removal the client has already recorded by confirmation produces
+no request. A server-side removal the client has not yet observed can still
+follow the existing request path and be rejected. Neither outcome makes the
 client retry the action with a farther candidate. Such removals are silent
 no-ops/rejections under [target validation](../authority/target_validation.md).
 Removing a valid winner triggers

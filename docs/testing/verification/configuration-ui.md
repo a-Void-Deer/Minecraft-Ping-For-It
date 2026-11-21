@@ -28,18 +28,45 @@ establish game startup, loader-specific dedicated-server initialization or
 multiplayer behavior.
 
 `ConfigHandlerDiagnosticsTest` covers filesystem-backed load-validation, backup,
-save and recovery-reset failures with actual recovery-result reporting: server
-invalid input distinguishes a written default file from defaults retained in
-memory, and a hash-equal recovery save remains a no-op preserving the invalid
-original bytes without invoking `onUpdate`. Warning reports retain long message
-tails and root causes within the diagnostic bound at higher disclosure, without
-an attached throwable; `NORMAL` hides path, value and failure-class detail. The
-generated recovery reason remains a separate safe one-line comment. Failed
-backup preserves the original bytes and blocks save and reset writes while
-leaving defaults in memory; failed initial save creates no file, and failed
-recovery-reset preserves the original source and blocks subsequent saves. These
-are handler and injected-failure seams, not a live settings screen or
-client/server persistence session.
+save and recovery-reset failures with actual recovery-result reporting: for
+invalid server input, it distinguishes a written default file from defaults
+retained in memory. When the recovery defaults match the model from an earlier
+successful write, the recovery save preserves the invalid original bytes without
+invoking `onUpdate`. Warning reports retain long message tails and root causes
+within the diagnostic bound at higher disclosure, without an attached throwable;
+`NORMAL` hides path, value and failure-class detail. The generated recovery
+reason remains a separate safe one-line comment. Failed backup preserves the
+original bytes and blocks save and reset writes while leaving defaults in
+memory; failed initial save creates no file, and failed recovery-reset
+preserves the original source and blocks subsequent saves. These are handler
+and injected-failure seams, not a live settings screen or client/server
+persistence session.
+
+`ConfigHandlerPersistenceTest` covers the ordinary no-op baseline: an unchanged
+model after load-time normalization: saving it neither rewrites the file nor
+invokes `onUpdate`. A later save retries a failed write. After a successful
+write, the model as it stands after `onUpdate` is the next baseline. Server rate
+edits whose before and after models share a `hashCode` still write through
+`saveSafely` and `saveWithoutUpdate`. A failed write preserves the original
+bytes, and saving the same edited values becomes a no-op only after those values
+are on disk. Distinct exact decimal values for
+`spatialSelector.submenuRadiusScale` that convert to the same `double` survive
+sequential save and reload. Non-client invalid-file recovery writes defaults both
+without a successful baseline and when a distinct saved model shares the
+defaults' hash. These are filesystem and callback seams, not a live settings
+screen or client/server session.
+
+`ClientConfigValidationTest` and `ClientConfigRangePersistenceTest` cover the
+client `pingDistance` and `raycastDistance` fields. Validation restores each
+negative field to its own default, reports each change with its supplied and
+effective values, and leaves unrelated preferences unchanged; the model setters
+apply the same per-field restoration without resetting the other distance.
+The fixtures accept zero and retain the large positive test value without
+clamping. A filesystem-backed load of a negative distance restores its default
+without rewriting the source bytes; an untouched save remains a no-op, a real
+edit writes the restored value, and a reload retains it. These are headless
+model and filesystem-handler fixtures, not a live settings screen, capture
+session or game startup; no passing run is recorded here.
 
 `ConfigHandlerVersionTest` checks a successful older-config migration remaining
 WARN-free at `NORMAL` and a failed migration write deferring version and path
@@ -57,7 +84,8 @@ precedence, malformed authoritative values follow parser recovery and backup
 protection, and unrelated root and nested data survive. A guarded writeback
 fixture retains explicit unknown nulls at the root, inside objects and arrays,
 and under spatial-selector preferences through failure, retry and reload,
-without materializing an omitted nullable model field. Pre-boundary handler cases
+without materializing an omitted nullable model field. After writeback succeeds,
+saving the unchanged model leaves the file untouched. Pre-boundary handler cases
 check legacy-schema projection for fresh files, ordinary saves, resets and
 guarded writeback, preservation of an already-present unknown future key, and a
 later upgrade retaining the selected effect. Same-version fixtures keep the
@@ -67,6 +95,18 @@ changed-source and future-version guards. These are source-reviewed model and
 persistence fixtures, not a recorded test run, native key-binding load or
 gameplay evidence. The transformation and recovery contracts remain owned by
 [configuration revisioning](../../architecture/config/revisioning.md#ordered-migration-and-writeback).
+
+`ClientChannelCommandTest` runs `pingforit channel` through Brigadier with real
+temporary configuration files. It covers default and null reads, named-channel
+save and reload, empty-string reset, overlong rejection, and a same-value set
+without a rewrite. Future-version and invalid-file protection preserve the live
+preference and file bytes. A guarded migration uses the external replacement
+without restoring the old channel. With a simulated server address, the test
+checks the per-server entry separately from the disconnected default. A
+recording update callback sees the applied channel even when a later write
+fails; the command reports failure and the original file bytes remain intact.
+All eight bundled locales provide the failure message without format arguments.
+These cases do not exercise packet delivery or server acknowledgement.
 
 ## Inventory and spatial-selector configuration
 
@@ -176,7 +216,9 @@ eligibility is under
 ## Double-click Danger and inventory stay-open configuration
 
 The two press preferences and the stay-open choice have source-reviewed model,
-handler, codec, catalog and resource coverage. None of it is a recorded run.
+handler, codec, catalog and resource coverage. The beta2 window migration
+fixtures also have a recorded focused configuration run; the other listed cases
+remain source-reviewed.
 
 `DoubleClickDangerConfigTest` covers explicit window and angle values independent
 of the cancel half-cone in both mutation directions; missing and null JSON values
@@ -191,6 +233,23 @@ trip; failed-write retry; changed-source reload; and typed invalid-file recovery
 with a broken-file backup, whose failed backup installs protection that declines
 angle writes. `ClientConfigBoundsTest` exercises direct window and angle clamps,
 including NaN and positive infinity.
+
+`DoubleClickDangerWindowMigrationTest` contains 13 focused model and
+filesystem-handler fixtures for the beta2 revision: client sources from earlier
+schemas through the beta1 boundary, the earlier client beta1 step retaining
+unknown data, exact legacy-value spellings and other numeric values retaining
+their source form, an intermediate beta1a qualifier outside the legacy boundary,
+a same-version beta2 intentional value retained under beta2 and a later running
+version, running versions before beta2 and server configuration staying
+unchanged, missing/null/non-number input left to typed load or recovery, handler
+persistence of the window and marker with unknown root and nested data, an older
+explicit non-legacy value surviving writeback, same-version beta2 save/reload,
+failed-write retry from the original bytes, and pending-migration reloads for
+changed same-version and future-version replacements. All 13 methods passed the
+focused configuration run (552 tests, 0 failures, 0 skips). These are headless
+model and handler fixtures, not live settings-screen or gameplay evidence. The
+transformation and exact values remain owned by
+[configuration revisioning](../../architecture/config/revisioning.md#ordered-migration-and-writeback).
 
 `SpatialSelectorSettingsTest` covers the inventory stay-open choice defaulting
 closed, missing and null members staying closed, the live setter affecting the
@@ -218,8 +277,9 @@ promotion to editor, an authoritative denial keeping the snapshot viewable but
 not editable, the per-field invalid numeric draft mask and its repair, clearing
 on permission revocation and disconnect, an explicit clean mark preserving draft
 text, the shared once-per-session request not replacing a loaded or in-flight
-snapshot, denial lock with the false-to-true permission retry transition, and
-connection-scoped disconnect reset. `ServerConfigUpdateTest`,
+snapshot, denial lock with the false-to-true permission retry transition,
+connection-scoped disconnect reset, and an authoritative default channel mode
+that does not follow an edited draft. `ServerConfigUpdateTest`,
 `ServerConfigUpdateServiceTest` and the focused server-config packet tests cover
 field-masked partial merge and codec/handler seams; monitoring-switch cases cover
 selected true/false, preservation of unselected false, immutable snapshots,
@@ -232,6 +292,21 @@ bytes and unknown mask bits. The
 owners retain exact field selection and grammar. These are model and packet
 seams, not the live settings UI, permission changes over a connection, actual
 packet exchange or running persistence.
+
+`ChannelPlaceholderTest` covers the hint decision: `GLOBAL` names the global
+audience with or without a vanilla team, `AUTO` names team synchronization only
+for a team member, and `TEAM_ONLY`, `DISABLED`, an unknown mode or no live
+connection yields no hint. `ChannelPlaceholderScreenTest` assembles the
+production screen headlessly and opens the client channel page: opening the root
+requests nothing, opening the page sends one request and a later tick does not
+duplicate it, and no hint appears before a snapshot; a received `GLOBAL`
+snapshot updates the existing field's hint while preserving its draft text and
+caret, a read-only snapshot still supplies it, team membership does not change
+it, and a disconnect clears it; an `AUTO` snapshot shows the team hint for a
+team member and, while open, follows team join and leave without another
+request, and ignores an edited server draft. These are headless widget, model
+and screen seams, not a live client/server session, native glyph rendering,
+packet exchange or server acknowledgement; no passing run is recorded here.
 
 `InventoryConfigValuesTest` covers the twenty-three-leaf admin inventory value
 model: each leaf's merge and unselected-value preservation, the two finite size
@@ -306,8 +381,8 @@ send seams, not live connection or multiplayer transport evidence.
 fresh, missing, explicit-null and unknown profiles resolve to `NORMAL` before
 and after validation; explicit `NORMAL`, `DEEP` and `DEBUG` are retained; an
 untouched same-version file preserves its bytes across load and no-op save for
-absent and explicit values; a profile-only edit participates in equality, hash,
-save and reload; reset returns to `NORMAL` without a stale model reference
+absent and explicit values; a profile-only edit participates in equality, save
+and reload; reset returns to `NORMAL` without a stale model reference
 affecting a later save; older-version migration materializes a missing default
 and preserves explicit profiles and unknown data; and future-version save/reset
 protection preserves the original bytes.
@@ -333,13 +408,14 @@ read-only server row refusing activation, and a server draft selection not
 publishing the runtime profile.
 
 `LoggingProfileScreenTest` covers the per-activation Alt read and current client
-handler, including a replaced handler read and written through the same mounted
-row; dropping Alt after a `DEBUG` selection; the client row publishing
-immediately while the server row edits only the draft; navigation and resize not
-carrying the temporary Alt candidate; nonblank native help on both mounted rows
-with their labels and no `DEBUG`, Alt, Shift or unlock hint; and a read-only
-server viewer seeing `DEBUG` without editing. `SettingsCategoryCatalogTest`
-verifies the controls' Debug-category placement and approved catalogue totals.
+handler, including a real guarded replacement that refreshes the mounted row and
+directs later activation to the replacement; dropping Alt after a `DEBUG`
+selection; the client row publishing immediately while the server row edits only
+the draft; navigation and resize not carrying the temporary Alt candidate;
+nonblank native help on both mounted rows with their labels and no `DEBUG`, Alt,
+Shift or unlock hint; and a read-only server viewer seeing `DEBUG` without
+editing. `SettingsCategoryCatalogTest` verifies the controls' Debug-category
+placement and approved catalogue totals.
 `SettingsLocalizationCoverageTest` requires localized labels and tooltips for
 both logging rows in all eight bundled locales. `ServerConfigVarNumbersTest`
 covers profile tags `0`, `1` and `2`, mask bit 29, preservation when unselected,
@@ -360,9 +436,7 @@ The
 have catalog, navigation, model, mounted-screen and localization coverage, not a
 live-screen or multiplayer acceptance record. Production sampling and client
 runtime evidence are owned by
-[inventory verification](inventory.md#performance-monitoring-coverage-and-production-evidence);
-live scenarios remain in the
-[manual performance-monitor matrix](manual-integration.md#performance-monitor).
+[inventory verification](inventory.md#performance-monitoring-coverage-and-production-evidence).
 
 `SettingsCategoryCatalogTest` fixes the production catalog totals and places one
 conditional Performance monitor subgroup at the end of each Debug category,
@@ -371,11 +445,12 @@ order and visibility. `SettingsNavigationModelTest` keeps the eight client and
 six server category identities and independent page routing without adding a
 monitor navigation level. `LoggingProfileScreenTest` mounts the production
 screen's rows, finds one native selector for every closed display metric, and
-covers current-handler DEBUG reads, HUD switch behavior, metric editability,
-DEBUG exit/entry visibility, read-only server drafts, native Space and
-mouse activation through the deferred-action coordinator, focus survival and
-resize/back preservation. `ServerSettingsMonitorTest` covers the server rows'
-independent Preview/Tracking dirty bits, all four enable combinations, draft-only
+covers current-handler DEBUG reads, HUD switch behavior, metric editability and
+selection after a handler replacement, DEBUG exit/entry visibility, read-only
+server drafts, native Space and mouse activation through the deferred-action
+coordinator, focus survival and resize/back preservation.
+`ServerSettingsMonitorTest` covers the server rows' independent Preview/Tracking
+dirty bits, all four enable combinations, draft-only
 plans, final-profile gating, read-only, revocation, stale-response and disconnect
 fences, isolation from the numeric invalid mask, and refusal of partial plans.
 `SettingsLocalizationCoverageTest` checks the monitor display group headings and
@@ -410,10 +485,8 @@ replace settings full names or selector text. The full
 Common task is part of the
 [HUD UX whole-tree run](build-checks.md#hud-ux-final-whole-tree-verification);
 the disabled-path allocation boundary is owned by
-[inventory HUD UX redesign coverage](inventory.md#hud-ux-redesign-coverage). Live
-screen, native font and locale checks remain in the
-[manual matrix](manual-integration.md#performance-monitor). The projection
-contract is
+[inventory HUD UX redesign coverage](inventory.md#hud-ux-redesign-coverage). The
+projection contract is
 [HUD projection and presentation](../../architecture/presentation/inventory.md#hud-projection-and-presentation).
 
 ## Server performance contract verification
@@ -443,7 +516,56 @@ zero and unlimited stops, and immutable extra integer stops. `InventoryConfigRan
 bounds for every integer leaf: files clamp without a shape rewrite, strict
 administration rejects a mixed invalid update atomically, and endpoints and
 in-range non-step integers survive parsing, persisted load and detached
-conversion exactly. `PendingMemoryMigrationTest` covers supported same-version
+conversion exactly.
+
+The five slot-count sliders additionally have native track coverage at compact
+and standard content widths: integer mouse clicks across the laid-out track
+reach every finite and unlimited stop in order, and the densest full-server
+preview slider is dragged to every stop in both directions. A legal non-grid
+authoritative slot value, including previously gridded values and a legal
+value adjacent to the finite maximum, remains an exact additional stop through
+slider construction and rebuild without an edit callback, dirty mark or update
+plan; after a real selection and a mouse scan back to that value, the draft is
+clean again. For the slot sliders that share the piecewise shape, scale
+fixtures check that the low range matches the preview-variants leaf's fine
+stops, every full high-range doubling region has one uniform spacing and the
+same stop count, spacing increases between regions, and both endpoints and the
+unlimited tail remain. The full-server tracking slider keeps its own low
+segmentation with the same doubling consistency, and the preview-variants leaf
+keeps its separate fine grid.
+
+The targeted two-class execution for the implementation committed as b486c932
+passed 56/56 with no failures, errors or skips (`InventoryPerformanceOptionTest`
+50/50 and `InventoryPerformanceScaleTest` 6/6). The same selection against the
+pre-fix implementation recorded 14 failures across its 56 tests. The slot
+extra-stop case reconstructs the slider rather than exercising live page
+navigation. The completed two-stage Common and loader matrix is owned by the
+[slot-budget final full-tree verification](build-checks.md#slot-budget-final-full-tree-verification-2026-11-17).
+
+The 12-file implementation commit `a3b7f763` tightens the five finite slot
+caps without changing their defaults, minima, unlimited guards, source capacity
+or protocol version. Focused headless coverage records the actual repaired
+behavior: an earlier file carrying finite or unlimited retained values above the
+new bounds clamps on load while preserving the mode and unrelated fields; a
+same-version/current-shape load and no-op save retain the original bytes, and a
+real edit writes the clamped values and survives reload. New endpoints
+round-trip in both modes; raw SNAPSHOT and unselected UPDATE values one above
+each bound are rejected across all five fields; the selected UPDATE boundary
+test remains. The high extra slider stop now uses the maximum minus one, and the
+existing native mouse/drag, rebuild and exact-revert regressions remain green.
+The runtime-scale fixture retains its 16,384-address source, 64 physical slots
+and 512-tick window with legal finite quotas and unchanged correctness
+assertions.
+
+The focused Common selection passed 555 tests with no failures, errors or skips
+across the range, values, persistence, settings, packet, draft, slider-option,
+scale, runtime-scale and pooled-backend classes; the NeoForge Vault selection
+passed 15/15. The persistence fixture is red on the old implementation (2/2
+failures), confirming the old over-limit behavior is detected. These are
+headless focused results: live navigation and a mixed-version client/server pair
+are not covered here.
+
+`PendingMemoryMigrationTest` covers supported same-version
 and older scalar normalization, clamped finite persistence, missing or null
 defaulting, explicit unlimited round trips, refusal to extend scalar acceptance,
 guarded normalization and failed-write retry preserving root and nested unknown
@@ -541,9 +663,10 @@ and target opacity labels, and the spatial-selector resource set.
 `SettingsLocalizationCoverageTest` derives required labels and help from the
 production catalog for all value
 controls, checks category descriptions, section headings, navigation and action
-help, enum/state labels, units and format resources across all eight bundled
-locales, validates argument-bearing templates with a formatter, rejects duplicate
-JSON keys, and distinguishes literal percent signs from strict templates.
+help, the local save-failure dialog's title, message, continue and exit text,
+enum/state labels, units and format resources across all eight bundled locales,
+validates argument-bearing templates with a formatter, rejects duplicate JSON
+keys, and distinguishes literal percent signs from strict templates.
 `ConfigEnumLocalizationTest` covers resource-key generation under ROOT, US and
 `tr-TR` JVM defaults for Player Info, Team Color and Channel Mode values and
 dynamic tooltip keys; it is source-reviewed with no passing execution recorded
@@ -570,11 +693,12 @@ The production screen routes native widget input through the deferred-action
 coordinator. None of these seams establishes a live game render/input lifecycle
 or focus traversal.
 
-## Assembled settings-screen caption reflow
+## Assembled settings-screen input and close coverage
 
 `SettingsScreenInputLayoutTest` assembles the production screen's widgets and
 dispatches native mouse, keyboard, wheel and slider-drag input headlessly. Its
-seven cases use bundled Turkish captions with deterministic text measurements.
+seven caption cases use bundled Turkish captions with deterministic text
+measurements.
 
 - **Reflow timing:** A Team Color caption crossing the half-width threshold stays
   paired through its native callback and held mouse gesture, then stacks in
@@ -596,15 +720,37 @@ seven cases use bundled Turkish captions with deterministic text measurements.
   without another edit, stale dragging cannot resume, and draft text and dirty
   fields remain unchanged.
 
+Additional headless cases cover the client binding and final-root close paths. A
+guarded file-action save that declines a replaced source refreshes the mounted
+page from the handler's replacement without opening the file, leaving the screen
+or showing the root failure dialog. A drag or channel edit in progress rebinds
+to a replacement before its next edit, cancelling the stale drag and retaining
+focus on the rebuilt control. An ordinary root save failure opens the failure
+dialog without a server update; continuing keeps the draft, mounted list and
+presentation-policy listener, and a later successful close sends once and
+leaves. Escape on a future-version or invalid protected source can exit to a
+null parent without another save or server update, discarding the draft while
+the in-memory client change remains. A successful local save followed by an
+invalid server draft routes to Rate Limit without showing the local failure
+dialog. Press-then-release dispatch also ensures a held Escape cannot continue
+or retry a close after a guarded reload until released, and a confirmation
+decision is spent before reentry, so late or reentrant buttons from one dialog
+cannot commit or abandon another dialog's draft. One-shot vetoed screen changes
+can be retried as pure navigation: the save-failure confirmation retries either
+choice without another save or update, and the reset confirmation retries only
+the screen change after its side effects already applied; these are headless
+simulations, not installed NeoForge event tests.
+
 The fixture preserves native screen removal, addition and retained-instance
-initialization while bypassing GPU, mouse/window and title work. Server-size
-cases inject accepted snapshot and permission state, not a connection or remote
-transaction. The seven cases passed the focused screen suite and subsequent full
-Java 21 verification recorded in the
+initialization while bypassing GPU, mouse/window and title work. Server-size and
+close cases inject accepted snapshot, permission, parent-screen, file-writer and
+failure state, not a real connection, remote transaction, disk fault or live
+GUI. The seven caption cases' execution is recorded in the
 [combined Java run](build-checks.md#recipientless-tracking-diagnostics-and-caption-reflow-verification),
-which also built all three loaders. These headless assertions do not exercise
-native glyph rendering, real GLFW input, hover or focus tooltip delivery,
-screen-close persistence or live translation readability.
+which also built all three loaders; the additional binding and close cases have
+no execution record here. These headless assertions do not exercise native glyph
+rendering, real GLFW input, hover or focus tooltip delivery, a real file dialog
+or opener, or live translation readability.
 
 ## Assembled settings-screen resize
 
@@ -637,13 +783,12 @@ delivery, or wrapping.
   stacking, rendered heading clipping and help, hover or keyboard-focus tooltip
   delivery, wrapping, color styling, text-entry dispatch, footer traversal,
   GUI-scale and window resizing, live permission transitions, and multiplayer
-  read-only behavior. The server Performance factory, model, handler, codec and
-  localization seams passed the combined-tree run but do not establish that
-  screen's mouse dispatch, assembled localized tooltip layout, translation
-  quality without native-speaker review or remote persistence session; native
-  widget callbacks are exercised headlessly, not by gameplay. Execution evidence
-  is scoped separately, and live scenarios remain in the
-  [manual matrix](manual-integration.md#settings-and-server-performance);
+  read-only behavior. The earlier server Performance factory, model, handler,
+  codec and localization seams passed the combined-tree run but do not establish
+  that screen's mouse dispatch, assembled localized tooltip layout, translation
+  quality without native-speaker review, rendered legibility or feel of closely
+  spaced slider stops, or a remote persistence session; native widget callbacks
+  are exercised headlessly without a real window, GLFW delivery or gameplay;
 - the assembled live screen coverage for the client inventory-cap sliders, the
   gesture controls' OFF/disabled presentation and live compatibility refresh, a
   constructed screen's disabled state and complete zero-angle off label, the
@@ -653,8 +798,6 @@ delivery, or wrapping.
   or screen-close persistence, or assemble the complete localized Follow or
   explicit-duration label, whose form is owned by
   [configuration UI](../../UI/settings-screen.md#marker-display-duration-option);
-  pending native screen checks remain in the
-  [manual matrix](manual-integration.md#pending-manual-and-integration-matrix);
 - inventory administration and spatial-selector configuration have model,
   persistence, strict wire, draft, catalog and focus-helper seams; live
   administration, screen-level input and focus, permission changes, persistence,
@@ -668,5 +811,5 @@ delivery, or wrapping.
   multiplayer persistence remain unexercised. Production sampling and HUD
   evidence is under
   [inventory verification](inventory.md#performance-monitoring-coverage-and-production-evidence),
-  and live scenarios remain in the
-  [manual matrix](manual-integration.md#performance-monitor).
+  which also owns the
+  [pending production test matrix](inventory.md#pending-production-test-matrix).

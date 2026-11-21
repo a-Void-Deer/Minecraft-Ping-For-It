@@ -164,6 +164,7 @@
 	"command.pingforit.channel.set.response": "設定頻道為 \"%s\"",
 	"command.pingforit.channel.set.response.default": "設定頻道為預設",
 	"command.pingforit.channel.set.reject": "頻道名稱限制為 %s 個字元",
+	"command.pingforit.channel.set.failure": "頻道變更未儲存",
 	"pingforit.chat.pingmsg": "%s 請求 %s %s",
 	"pingforit.chat.pingmsg.template": "{playerName}：請求 {pingType} {targetName}",
 	"pingforit.chat.danger.template.override": "{playerName}：{pingType} {targetName}！",
@@ -543,6 +544,10 @@
   ,"settings.pingforit.scope.server.tooltip": "檢視伺服器設定；編輯需要權限等級 3。"
   ,"settings.pingforit.navigation.back.tooltip": "返回此範圍的總覽。"
   ,"settings.pingforit.navigation.done.tooltip": "儲存用戶端設定，傳送伺服器變更並關閉。"
+  ,"settings.pingforit.save_failed.title": "無法儲存用戶端設定"
+  ,"settings.pingforit.save_failed.message": "離開時不會再次嘗試儲存，也不會傳送待提交的伺服器變更。已生效的用戶端變更不會復原。"
+  ,"settings.pingforit.save_failed.continue": "繼續編輯"
+  ,"settings.pingforit.save_failed.exit": "不儲存並離開"
   ,"settings.pingforit.presentation.server.tooltip": "所選目標類型的欄位規則；編輯需要權限等級 3。"
   ,"settings.pingforit.presentation.target_type.tooltip": "選擇要檢視和編輯規則的目標類型。"
   ,"settings.pingforit.presentation.selector.tooltip": "欄位 ID 選擇器，例如 minecraft:entity.health 或 create:kinetic.*。\n* 只符合同一命名空間或路徑段內的內容，不能跨過 :。\n使用「新增」套用選擇器。"

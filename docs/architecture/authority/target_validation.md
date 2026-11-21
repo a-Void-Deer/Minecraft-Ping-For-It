@@ -93,13 +93,15 @@ After the admission gates above have passed, the server validates or derives:
 Authoritative names follow [names and chat](../rendering/names_chat.md). Color
 is derived from the accepted server Ping Type definition. Whole-entity
 local-geometry captures remain whole-entity requests; the server validates the
-entity and its authoritative anchor, not a replay of the client's ray or a
-local constituent. Packet-supplied fields are limited by the request boundary in
+entity and its authoritative whole-entity anchor, not a replay of the client's
+ray or a local constituent. Authoritative anchor definitions are owned by
+[range](../picking/range.md#server-acceptance). Packet-supplied fields are limited
+by the request boundary in
 [network protocol](../network/protocol.md).
 
 | Target | Creation-time validity |
 | --- | --- |
-| Entity | Stable identity in the requester's current dimension, present and alive, and authoritative entity anchor within range; movement/same-dimension teleport keeps identity |
+| Entity | Stable identity in the requester's current dimension, present and alive, and a usable finite authoritative whole-entity anchor within range; movement/same-dimension teleport keeps identity |
 | Block | Loaded position in the requester's current dimension, same block type, and block-center anchor within range; same-type state/property changes are valid |
 | Location | Finite captured coordinates in the requester's current dimension and exact location anchor within range |
 | Explicit external target | Provider validates a normalized candidate and provider-derived validation anchor, then range checks that anchor; see [Sable's two-phase materialization](../../integrations/sable.md#server-validation-and-materialization) for the later committed target/anchor transaction |
@@ -115,11 +117,13 @@ including the Experience Orb runtime-ID exception, are defined by
 [target identity](../identity/target_model.md).
 
 A malformed block registry ID or invalid provider request is an invalid request
-(`INVALID_REQUEST`). A gone/dead/cross-dimension entity, a missing or
-differently typed block, or a temporarily unavailable external target is
-rejected as target-gone (`TARGET_GONE`). An authoritative anchor outside the
-configured range is rejected as out-of-range. Pure location validation does not
-replay the client ray or add an obstruction test.
+(`INVALID_REQUEST`). A gone/dead/cross-dimension entity, an unavailable exact
+rotor logical frame or unusable projection, a missing or differently typed
+block, or a temporarily unavailable external target is rejected as target-gone
+(`TARGET_GONE`). An authoritative anchor outside the configured range is rejected
+as out-of-range.
+Pure location validation does not replay the client ray or add an obstruction
+test.
 
 For an explicit external target, nonallocating provider validation establishes a
 provider-derived validation anchor for that range check. Initial classification

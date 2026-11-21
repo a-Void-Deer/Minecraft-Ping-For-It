@@ -199,6 +199,7 @@
 	"command.pingforit.channel.set.response": "Set channel to \"%s\"",
 	"command.pingforit.channel.set.response.default": "Set channel to default",
 	"command.pingforit.channel.set.reject": "Channel names are limited to a length of %s characters",
+	"command.pingforit.channel.set.failure": "Channel change was not saved",
 	"pingforit.chat.pingmsg": "%s requests %s on %s",
 	"pingforit.chat.pingmsg.template": "{playerName} requests {pingType} {targetName}",
 	"pingforit.chat.danger.template.override": "{playerName} {pingType} {targetName}",
@@ -552,6 +553,10 @@
   ,"settings.pingforit.scope.server.tooltip": "View server settings; editing requires permission level 3."
   ,"settings.pingforit.navigation.back.tooltip": "Return to this scope's overview."
   ,"settings.pingforit.navigation.done.tooltip": "Save client settings, send server changes, and close."
+  ,"settings.pingforit.save_failed.title": "Couldn’t save client settings"
+  ,"settings.pingforit.save_failed.message": "If you exit, saving won’t be retried and pending server changes won’t be sent. Client changes already in effect aren’t undone."
+  ,"settings.pingforit.save_failed.continue": "Keep Editing"
+  ,"settings.pingforit.save_failed.exit": "Exit Without Saving"
   ,"settings.pingforit.presentation.server.tooltip": "Field rules for the selected target type; editing requires permission level 3."
   ,"settings.pingforit.presentation.target_type.tooltip": "Choose which target type's rules to view and edit."
   ,"settings.pingforit.presentation.selector.tooltip": "Field-ID selector, such as minecraft:entity.health or create:kinetic.*.\n* matches only within one namespace or path part and never crosses :.\nUse Add to apply the selector."

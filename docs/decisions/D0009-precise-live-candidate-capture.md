@@ -17,7 +17,7 @@ live ray origin. A scan that cannot complete disables that type's leaf even when
 an ordinary result exists. Entering the Precise branch starts capture and
 leaving it pauses capture. A refresh in progress keeps the last certified
 candidate selectable while the replacement capture is pending; a completed
-result owns availability. Every capture is bounded and generation-fenced, so a
+result owns availability. Every capture is generation-fenced, so a
 late or stale asynchronous completion never changes the live set, the ordinary
 capture, or another interaction, and release consumes the last actually painted
 selectable candidate version without initiating a new cast.

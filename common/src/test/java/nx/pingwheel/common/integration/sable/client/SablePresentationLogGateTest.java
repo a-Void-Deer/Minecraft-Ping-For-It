@@ -30,14 +30,15 @@ class SablePresentationLogGateTest {
 		SablePresentationLogGate gate = new SablePresentationLogGate(
 			() -> now[0], 100L, 8);
 
-		assertTrue(gate.shouldLog("resolve-presentation|provider-unavailable|none|target"));
-		assertFalse(gate.shouldLog("resolve-presentation|provider-unavailable|none|target"));
+		String key = "resolve-position|provider-unavailable|none|target";
+		assertTrue(gate.shouldLog(key));
+		assertFalse(gate.shouldLog(key));
 
 		// A successful frame no longer clears the failure baseline.
 		now[0] = 99L;
-		assertFalse(gate.shouldLog("resolve-presentation|provider-unavailable|none|target"));
+		assertFalse(gate.shouldLog(key));
 		now[0] = 100L;
-		assertTrue(gate.shouldLog("resolve-presentation|provider-unavailable|none|target"));
+		assertTrue(gate.shouldLog(key));
 	}
 
 	@Test

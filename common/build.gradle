@@ -59,6 +59,9 @@ dependencies {
     // set only; this adds no loader metadata or production runtime dependency.
     testImplementation "dev.ryanhcode.sable-companion:sable-companion-common-${minecraft_version}:${sable_version}"
 
+    // Exercise the DH adapter against its existing public API; production stays compile-only.
+    testImplementation "maven.modrinth:DistantHorizonsApi:${distanthorizons_api_version}"
+
     // Minecraft's full runtime library set (netty, datafixerupper, guava,
     // ...) with versions aligned to 1.21.1. Declaring this as a test
     // implementation dependency lets Netty and the other libraries that

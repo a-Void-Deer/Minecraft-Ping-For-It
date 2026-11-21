@@ -34,8 +34,8 @@ have passing headless coverage in code input `628c033b`, including the approved
 The 2026-11-02
 [final combined-tree record](build-checks.md#fluid-inventory-final-combined-tree-verification)
 owns the exact input, command, task results, counts and expected Common-only
-skips. Pending live checks are in the
-[fluid inventory manual scenarios](manual-integration.md#fluid-inventory).
+skips. Coverage limits beyond that record are listed in the
+[known automated gaps](#known-automated-gaps).
 
 The following matrix records established coverage, not a current-round run.
 
@@ -107,8 +107,7 @@ Consume and observe retain one content getter; valid, consume and cleanup rows
 remain in the integration counters. The provider-only fixture excludes the common
 guarded source and live Create. These deterministic counts are not an end-to-end
 Preview, TPS, latency or allocation measurement; the live 288-member 3-5 Hz/20 s
-comparison remains pending in the
-[manual matrix](manual-integration.md#fluid-inventory). Mixed-lane selection is
+comparison was not part of this measurement. Mixed-lane selection is
 inventoried under [interaction](interaction.md#inventory-list-gestures-and-navigation),
 quantity/sprite dispatch under [rendering](rendering.md#base-fluid-icon-presentation),
 and loader APIs/Create tea archive under
@@ -555,10 +554,8 @@ provider. Caller-trusted custom counters/decoders, external-trusted provider
 internals, wall-clock/live-world provider safety, installed optional-provider
 wiring, [native HUD integration](interaction.md#native-client-interaction-runtime),
 live transport,
-[rendering](rendering.md#selector-overlay-layout-and-frame-rendering), GPU
-submission and the
-[manual inventory matrix](manual-integration.md#pending-manual-and-integration-matrix)
-remain pending.
+[rendering](rendering.md#selector-overlay-layout-and-frame-rendering) and GPU
+submission remain outside this foundation's coverage.
 
 ## Logical container quotas and scan sharing
 
@@ -713,7 +710,7 @@ pool execution is in
 the [publication-stage run](build-checks.md#tracking-pool-publication-stage-run)
 and [active-join run](build-checks.md#certified-active-join-and-validation-run);
 live UI/config/provider/multiplayer/performance gaps are in the
-[manual matrix](manual-integration.md#inventory).
+[known gaps](#known-automated-gaps).
 
 ### Terminal Preview evidence and active demand
 
@@ -768,8 +765,9 @@ fresh updates without widening audiences, source invalidation or lifetime change
 expiry stops tracking and teardown releases memory. The authorized cadence-wait
 control delays B until A's successor completes, then B adopts it without a second
 physical sweep. Execution is in the
-[combined Java run](build-checks.md#recipientless-tracking-diagnostics-and-caption-reflow-verification);
-live permission changes remain in the [manual matrix](manual-integration.md#inventory).
+[combined Java run](build-checks.md#recipientless-tracking-diagnostics-and-caption-reflow-verification).
+Those historical fixtures and the combined run do not cover real permission
+changes.
 
 ## Native incremental sweep coverage
 
@@ -847,9 +845,9 @@ eventual empty/absence-zero uncertain while explicit atomic snapshots stay ready
 no generic `CaptureResult` or wire schema upgrade.
 
 Execution and artifact limits are in
-[build checks](build-checks.md#automated-verification-results). Installed Create,
-live-world updates, multiplayer transport, TPS, GC and heap/elapsed performance
-remain in the [manual matrix](manual-integration.md#inventory).
+[build checks](build-checks.md#automated-verification-results). The headless cases
+above do not cover installed Create, live-world updates, multiplayer transport,
+TPS, GC or heap/elapsed performance.
 
 ## Vault tracking performance evidence
 
@@ -959,9 +957,8 @@ The benchmark does not exercise real Create `MinecraftMember` reflection,
 selection, marker creation, publisher, network or a fully populated installed-mod
 registry/provider workload. The reported live 1100 MB/s allocation and 30% CPU
 case was not independently reproduced; these results neither convert to those
-units nor prove the incident solved. Installed Create/Refined Storage import/
-export, paired profiling and remaining
-[manual scenarios](manual-integration.md#inventory) remain pending.
+units nor prove the incident solved. This recorded comparison does not cover
+installed Create/Refined Storage import/export or paired profiling.
 
 ### Certified 1620-slot baseline and measurement boundary
 
@@ -1072,9 +1069,8 @@ External evidence directories `certified-vault-1620-baseline`,
 `active-join-preview-lifetime-fix` and `certified-vault-coordinated-read` retain
 `HANDOFF.txt`, commands, logs, XML, hashes and raw measurements; the last adds
 `before-after.csv`, `derived-counters.csv`, `measurement-hash-comparison.txt` and
-raw JSONL/distributions. No live Create/Refined Storage import/export, CPU,
-allocation-rate, TPS, GC, heap or update-latency result is established; those
-remain [pending](manual-integration.md#inventory).
+raw JSONL/distributions. This record establishes no live Create/Refined Storage
+import/export, CPU, allocation-rate, TPS, GC, heap or update-latency result.
 
 ## Preview-seeded tracking coverage
 
@@ -1176,7 +1172,7 @@ Cross-boundary client chat/transport is in
 [presentation verification](presentation.md#immediate-inventory-creation-snapshot-coverage).
 These headless tests/builds do not establish live Create/Refined Storage behavior,
 the reported Vault import/export failure cause, live multiplayer, GPU rendering or
-performance; those remain [manual](manual-integration.md#inventory).
+performance.
 
 ### Client creation admission capacity
 
@@ -1233,8 +1229,7 @@ construction scope.
 
 **Pending live evidence.** Automatic Mixins, live installed-mod behavior, loader
 lifecycle, default drift across real installations, delayed transport, GUI rows,
-tracking HUD and GPU behavior remain outside that source evidence. Live scenarios
-remain in the [manual matrix](manual-integration.md#inventory).
+tracking HUD and GPU behavior remain outside that source evidence.
 
 ## Resynchronization and budget policy verification
 
@@ -1263,8 +1258,8 @@ ledger without deleting live charges; preview/tracking defer before resolver,
 validation or read; releasing the ticket shares one physical read without raising
 the cap; cleanup releases costs. The large tickets model accounting only.
 `InventorySettingsTest` checks the tracking-slot unlimited guard not widening other
-count guards and memory-mode conversion retaining its finite value. Live timing and
-multiplayer repair remain in the [manual matrix](manual-integration.md#inventory).
+count guards and memory-mode conversion retaining its finite value. These
+deterministic fixtures do not cover live timing or multiplayer repair.
 
 ## Frozen recipient authorization and fluid provider trust coverage and live gaps
 
@@ -1292,9 +1287,7 @@ and fluid validation through the target provider, whose boundary/stricter
 exceptions remain owned by the
 [inventory provider contract](../../architecture/presentation/inventory.md#fluid-provider-trust-and-validation-exceptions).
 No dedicated-provider implementation or measured live performance benefit is
-recorded. The
-[manual matrix](manual-integration.md#frozen-recipient-authorization-and-provider-trust)
-owns these checks.
+recorded.
 
 ## Idle source health scheduling coverage and live gaps
 
@@ -1486,7 +1479,7 @@ empty views; it does not cover the later upper-left projection, whose per-group
 reserved-height behavior is in [stable HUD reservoir
 coverage](#stable-hud-reservoir-ux-coverage). Headless runtime/state/painter seams,
 not live GPU/font/window/socket/loader/multiplayer; live scenarios are in the
-[manual performance-monitor matrix](manual-integration.md#performance-monitor).
+[pending production test matrix](#pending-production-test-matrix).
 
 ### Timing attribution evidence
 
@@ -1634,8 +1627,7 @@ Real server/client sampling has headless production-seam evidence; the scoped
 external check covers listed disabled APIs plus enabled primitive/duplicate/
 publication shapes. Route interoperability, native provider behavior, runtime
 handshake, loader lifecycle, actual subscribers, live HUD and whole-production/
-live performance remain pending. Complete scenarios are in the
-[manual performance-monitor matrix](manual-integration.md#performance-monitor).
+live performance remain pending.
 P1-P6 combined-tree acceptance is in
 [build checks](build-checks.md#performance-monitor-implementation-and-final-acceptance).
 
@@ -1690,7 +1682,7 @@ Full Common execution is part of the
 Disabled hot-allocation covers only sampled APIs, not zero allocation/GL-query/
 whole-frame CPU for the new HUD; mirroring painter state is not GL/pixel evidence.
 Live scale/window/font/locale/reload/layering/multiplayer/performance remain in
-the [manual performance-monitor matrix](manual-integration.md#performance-monitor).
+the [pending production test matrix](#pending-production-test-matrix).
 The projected contract is [HUD projection and
 presentation](../../architecture/presentation/inventory.md#hud-projection-and-presentation).
 
@@ -1731,7 +1723,7 @@ Eight wrapping cases account for the whole-tree increase.
 Headless source-connected/painter-seam evidence for the preceding stage; does not
 cover newer `N/A`/backing/reserved-height or live GPU/font/window/layer/loader/
 multiplayer/performance; 427x240 is a computed reference. Pending live scenarios
-are in the [manual performance monitor matrix](manual-integration.md#performance-monitor).
+are in the [pending production test matrix](#pending-production-test-matrix).
 
 ### Stable HUD reservoir UX coverage
 
@@ -1776,7 +1768,7 @@ GL context, pixels, native font/resource reload, window/GUI-scale layout,
 totem/F3/chat/inventory/pause layering, running loader/Mixin, multiplayer or
 performance/allocation behavior. The existing 16 native-classpath skips remain
 gaps, not passes. Live scenarios remain in the
-[manual performance-monitor matrix](manual-integration.md#performance-monitor).
+[pending production test matrix](#pending-production-test-matrix).
 
 ## Current preview retry, typed outcome and tracking feedback coverage
 
@@ -1861,15 +1853,14 @@ relaxed.
 
 ## Known automated gaps
 
-- Live loader/Mixin application, GPU/font/UI and narrow-window rendering,
-  multiplayer/mixed-version handshakes, installed Create/Sable/Refined Storage,
-  manual gameplay and CPU/TPS/GC/allocation measurements remain pending in the
-  [fluid inventory manual scenarios](manual-integration.md#fluid-inventory).
-- Certified pool/successor/final-handoff fixtures are headless. Live two-owner/
-  chunk/lock/topology changes, installed tested-version Create and mixed config
-  protocols require the [manual inventory scenarios](manual-integration.md#inventory);
-  tuned getter matrices do not establish default-budget throughput or CPU/
-  allocation-rate/heap/TPS/GC gains.
+- The automated coverage recorded above does not include live loader/Mixin
+  application, GPU/font/UI and narrow-window rendering, multiplayer/mixed-version
+  handshakes, installed Create/Sable/Refined Storage, manual gameplay or
+  live CPU/TPS/GC/allocation measurements.
+- Certified pool/successor/final-handoff fixtures are headless and do not cover
+  live two-owner/chunk/lock/topology changes, installed tested-version Create or
+  mixed config protocols; tuned getter matrices do not establish default-budget
+  throughput or CPU/allocation-rate/heap/TPS/GC gains.
 - Certified active joins and supplied/default 1,620-slot schedules have native-
   source/encoded-client evidence, not every admission/overlap schedule or live
   completion guarantees. The scoped P1/P2 evidence did not include a full Gradle

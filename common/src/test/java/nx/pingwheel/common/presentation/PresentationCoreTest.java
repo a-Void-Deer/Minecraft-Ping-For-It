@@ -185,16 +185,20 @@ class PresentationCoreTest {
 	}
 
 	@Test
-	void boundedStoreFailsClosedInsteadOfDroppingOldRemovalHistory() {
+	void cumulativeDistinctMarkerHistoryPastTheFormerBoundStillAdmitsANewMarker() {
 		var store = new PresentationStore();
 		store.reset(1);
-		initial(store, 1, 0, 1, section(BASIC, "pingforit:saved"));
-		for (long i = 2; i < 8200; i++) store.clear(1, i, 1, false);
-		initial(store, 1, 0, 8200, section(BASIC, "pingforit:new"));
-		assertTrue(store.sections(8200).isEmpty());
-		initial(store, 1, 0, 2, section(BASIC, "pingforit:late"));
-		assertTrue(store.sections(2).isEmpty());
-		assertEquals(1, store.sections(1).size());
+		// These 8192 distinct removed markers each keep a whole-marker tombstone, the
+		// former per-connection history bound that used to close admission here.
+		for (long id = 0; id < 8192; id++) store.clear(1, id, 1, false);
+		initial(store, 1, 0, 8192, section(BASIC, "pingforit:new"));
+		var sections = store.sections(8192);
+		assertEquals(1, sections.size(), "a new marker is admitted past the former 8192-ID bound");
+		assertEquals(section(BASIC, "pingforit:new"), sections.get(BASIC).section());
+		assertTrue(store.isKnown(0), "crossing the former bound keeps the earliest tombstone");
+		initial(store, 1, 0, 0, section(BASIC, "pingforit:late"));
+		assertTrue(store.sections(0).isEmpty(), "the retained tombstone still rejects a late initial");
+		assertEquals(1, store.sections(8192).size());
 	}
 
 	@Test

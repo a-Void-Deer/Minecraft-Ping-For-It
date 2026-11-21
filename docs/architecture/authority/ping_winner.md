@@ -29,8 +29,9 @@ can shrink the snapshot and is owned by [marker lifecycle](marker_lifecycle.md).
 
 ## Presentation and lifecycle
 
-The winner's Ping Type supplies the shared visible outline and its related
-color; [outline rendering](../rendering/outline.md) owns that consumption.
+[Client marker state](../markers/client-state.md#outline-target-and-retained-last-winner)
+selects the outline target from the server's assignments;
+[outline rendering](../rendering/outline.md#common-entity-outlines) draws it.
 Non-winning markers remain active: choosing a winner does not implicitly delete
 the others. Each loser keeps its own owner, audience, selected content, tracking
 association and removal/expiry boundary. A later winner removal can therefore
@@ -38,8 +39,7 @@ reveal a surviving marker created through a different member of the group.
 
 On cancellation, expiry, authoritative invalidation, or owner disconnect, the
 server recomputes each affected recipient's winner among the remaining active
-candidates and synchronizes the resulting state. If a previous non-winner
-becomes the winner, its selected Ping Type supplies the visible color. Removal
+candidates and synchronizes the resulting state. Removal
 requires the active-status and ownership checks owned by
 [target validation](target_validation.md); the reasons and audience shrink are
 owned by [marker lifecycle](marker_lifecycle.md).
@@ -47,10 +47,7 @@ owned by [marker lifecycle](marker_lifecycle.md).
 An external locator/anchor refresh preserves the committed identity and does not
 manufacture a new arrival or winner event; see
 [target identity](../identity/target_model.md) and
-[Sable](../../integrations/sable.md). On the client, an authoritative winner
-slot is distinct from the collection of locally display-active records, and
-loss-recovery fallback is overwritten by a later authoritative update; see
-[client marker state and display](../markers/client-state.md).
+[Sable](../../integrations/sable.md).
 
 Multiplayer winner and equal-arrival tie scenarios remain pending verification
 work; the coverage inventory and gaps are owned by

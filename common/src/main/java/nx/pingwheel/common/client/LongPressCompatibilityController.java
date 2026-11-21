@@ -4,9 +4,11 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
+
+import org.jetbrains.annotations.Nullable;
 
 import nx.pingwheel.common.config.ClientConfigBounds;
-import nx.pingwheel.common.interaction.CapturedRay;
 import nx.pingwheel.common.interaction.state.InteractionTimeSource;
 import nx.pingwheel.common.interaction.state.PingInteractionAction;
 import nx.pingwheel.common.interaction.state.PingInteractionLogger;
@@ -29,8 +31,8 @@ import nx.pingwheel.common.interaction.state.PingInteractionPhase;
 public final class LongPressCompatibilityController {
 
 	/**
-	 * The high-precision baseline interaction port. Legacy action methods remain
-	 * source-compatible but are not dispatch proof. Implementations must override
+	 * The high-precision baseline interaction port. Bare actions are not dispatch
+	 * proof. Implementations must override
 	 * the outcome methods to report a create handed to the sender after courtesy
 	 * admission and dispatch recording. The controller never performs dispatch.
 	 */
@@ -39,23 +41,30 @@ public final class LongPressCompatibilityController {
 		Optional<PingInteractionAction> pressAt(long rawPressTimestamp);
 
 		/**
-		 * Starts a baseline interaction with a ray frozen at the physical press
-		 * edge.  Implementations that do not need the extra capture seam may use
-		 * the default overload; production uses it for an async-first-click
-		 * compatibility candidate.
+		 * Starts a baseline with the aim and cancellation selection frozen at the
+		 * owning physical edge. Its timer may be backdated to a different edge.
 		 */
-		default Optional<PingInteractionAction> pressAt(long rawPressTimestamp, CapturedRay pressRay) {
-			return pressAt(rawPressTimestamp);
-		}
+		Optional<PingInteractionAction> pressAt(long rawPressTimestamp, FrozenPingPress press);
 
 		/**
-		 * Captures the current physical press ray without beginning an interaction.
-		 * An empty result means the caller cannot safely freeze a candidate and
-		 * must drop it rather than re-raycast later.
+		 * Freezes a physical edge without beginning its baseline capture. An
+		 * empty result means the edge cannot safely seed a wheel and must not be
+		 * re-sampled later.
 		 */
-		default Optional<CapturedRay> capturePressRay() {
-			return Optional.of(CapturedRay.defaultRay());
-		}
+		Optional<FrozenPingPress> captureWheelPress();
+
+		/**
+		 * Checks first-release admission without changing the selector.
+		 * @return whether releasing the current wheel will retain its inventory session
+		 */
+		default boolean willReleaseKeepInventoryOpen() { return false; }
+
+		/**
+		 * Routes a physical down edge after the previous wheel's release.
+		 * @param rawPressTimestamp the original monotonic time of the down edge
+		 * @return whether the inventory input path consumed the edge
+		 */
+		default boolean handleInventoryStayOpenPress(long rawPressTimestamp) { return false; }
 
 		Optional<PingInteractionAction> release();
 
@@ -144,10 +153,10 @@ public final class LongPressCompatibilityController {
 	private boolean hasLastFrameTimestamp;
 	private long lastFrameTimestamp;
 
-	private NormalInteraction normalInteraction;
-	private Seed seed;
-	private Candidate candidate;
-	private DeferredPress deferredPress;
+	private @Nullable NormalInteraction normalInteraction;
+	private @Nullable Seed seed;
+	private @Nullable Candidate candidate;
+	private @Nullable DeferredPress deferredPress;
 
 	public LongPressCompatibilityController(
 		InteractionPort port,
@@ -241,17 +250,25 @@ public final class LongPressCompatibilityController {
 			} else return Optional.empty();
 		}
 
-		if (candidate != null) {
+		@Nullable Candidate activeCandidate = candidate;
+		if (activeCandidate != null) {
 			long threshold = effectiveSliceMillis();
 
-			if (withinGap(rawPressTimestamp, candidate.lastPressTimestamp, threshold)) {
-				candidate.lastPressTimestamp = rawPressTimestamp;
-				candidate.count = incrementCount(candidate.count);
+			if (withinGap(rawPressTimestamp, activeCandidate.lastPressTimestamp, threshold)) {
+				activeCandidate.lastPressTimestamp = rawPressTimestamp;
+				activeCandidate.count = incrementCount(activeCandidate.count);
 				return Optional.empty();
 			}
 
-			Optional<PingInteractionAction> formed = terminateCandidate(rawPressTimestamp, threshold);
-			return appendAction(formed, startFreshPress(rawPressTimestamp, null));
+			// Only an edge that can start a fresh hold needs a snapshot. Take it
+			// before the old release can change the marker store.
+			boolean willStayOpen = activeCandidate.wheelOpened && port.willReleaseKeepInventoryOpen();
+			Optional<FrozenPingPress> freshPress = willStayOpen ? Optional.empty() : port.captureWheelPress();
+			if (candidate != activeCandidate) return Optional.empty();
+			return terminateCandidate(activeCandidate, rawPressTimestamp, threshold, () -> {
+				if (port.handleInventoryStayOpenPress(rawPressTimestamp) || freshPress.isEmpty()) return Optional.empty();
+				return startFreshPress(rawPressTimestamp, freshPress.get());
+			});
 		}
 
 		if (normalInteraction != null) {
@@ -276,7 +293,7 @@ public final class LongPressCompatibilityController {
 			logAbandoned(normal, threshold);
 			deferredPress = new DeferredPress(
 				rawPressTimestamp,
-				Optional.ofNullable(capturePressRay()),
+				port.captureWheelPress(),
 				false);
 			return Optional.empty();
 		}
@@ -285,13 +302,13 @@ public final class LongPressCompatibilityController {
 			long threshold = effectiveSliceMillis();
 
 			if (withinGap(rawPressTimestamp, seed.lastPressTimestamp, threshold)) {
-				CapturedRay secondPressRay = capturePressRay();
+				@Nullable FrozenPingPress secondPress = port.captureWheelPress().orElse(null);
 				logCandidateEntry(rawPressTimestamp - seed.lastPressTimestamp, threshold);
 				Optional<PingInteractionAction> started = startCandidate(
 					seed.firstPressTimestamp,
 					rawPressTimestamp,
 					2,
-					secondPressRay,
+					secondPress,
 					threshold);
 				seed = null;
 				return started;
@@ -370,16 +387,18 @@ public final class LongPressCompatibilityController {
 			return outcome.action();
 		}
 
-		if (candidate != null) {
+		@Nullable Candidate activeCandidate = candidate;
+		if (activeCandidate != null) {
 			long threshold = effectiveSliceMillis();
 
-			if (strictlyBeyondGap(now, candidate.lastPressTimestamp, threshold)) {
-				return terminateCandidate(now, threshold);
+			if (strictlyBeyondGap(now, activeCandidate.lastPressTimestamp, threshold)) {
+				return terminateCandidate(activeCandidate, now, threshold, Optional::empty);
 			}
 
 			BaselineOutcome outcome = port.presentFrameOutcome(true, now);
+			if (candidate != activeCandidate) return outcome.action();
 			if (port.phase() == PingInteractionPhase.WHEEL_OPEN) {
-				candidate.wheelOpened = true;
+				activeCandidate.wheelOpened = true;
 			} else if (port.phase() == PingInteractionPhase.IDLE) {
 				// The baseline can end a virtual interaction itself, for example
 				// when it is aborted or superseded.  Never retain a compatibility
@@ -437,12 +456,12 @@ public final class LongPressCompatibilityController {
 			|| drainingPreEnableBaseline;
 	}
 
-	private Optional<PingInteractionAction> startFreshPress(long rawPressTimestamp, CapturedRay frozenRay) {
+	private Optional<PingInteractionAction> startFreshPress(long rawPressTimestamp, @Nullable FrozenPingPress frozenPress) {
 		NormalInteraction fresh = new NormalInteraction(rawPressTimestamp);
 		normalInteraction = fresh;
-		Optional<PingInteractionAction> action = frozenRay == null
+		Optional<PingInteractionAction> action = frozenPress == null
 			? port.pressAt(rawPressTimestamp)
-			: port.pressAt(rawPressTimestamp, frozenRay);
+			: port.pressAt(rawPressTimestamp, frozenPress);
 
 		// A failed/inapplicable press cannot produce a short-click seed.  A
 		// successful press remains owned by normalInteraction until release or
@@ -458,10 +477,10 @@ public final class LongPressCompatibilityController {
 		long firstPressTimestamp,
 		long secondPressTimestamp,
 		int count,
-		CapturedRay secondPressRay,
+		@Nullable FrozenPingPress secondPress,
 		long threshold
 	) {
-		if (secondPressRay == null || port.phase() != PingInteractionPhase.IDLE) {
+		if (secondPress == null || port.phase() != PingInteractionPhase.IDLE) {
 			// The second click is intentionally dropped.  In particular it is not
 			// replayed as a normal CreatePing when a ray or an idle baseline is not
 			// safely available.
@@ -471,8 +490,7 @@ public final class LongPressCompatibilityController {
 		Candidate started = new Candidate(
 			firstPressTimestamp,
 			secondPressTimestamp,
-			count,
-			secondPressRay);
+			count);
 		candidate = started;
 		seed = null;
 		normalInteraction = null;
@@ -480,8 +498,8 @@ public final class LongPressCompatibilityController {
 		Optional<PingInteractionAction> action;
 		try {
 			// The timestamp is deliberately the first click's timestamp.  The
-			// supplied ray is deliberately the second click's frozen ray.
-			action = port.pressAt(firstPressTimestamp, secondPressRay);
+			// supplied aim and cancellation lock both belong to the second click.
+			action = port.pressAt(firstPressTimestamp, secondPress);
 		} catch (RuntimeException failure) {
 			candidate = null;
 			port.abort();
@@ -508,7 +526,7 @@ public final class LongPressCompatibilityController {
 	) {
 		if (!normal.hasRapidPress) {
 			logCandidateEntry(rawPressTimestamp - normal.lastPressTimestamp, threshold);
-				normal.secondPressRay = Optional.ofNullable(capturePressRay());
+			normal.secondPress = port.captureWheelPress();
 			normal.hasRapidPress = true;
 		}
 
@@ -538,7 +556,7 @@ public final class LongPressCompatibilityController {
 			return action;
 		}
 
-		NormalInteraction completed = normalInteraction;
+		@Nullable NormalInteraction completed = normalInteraction;
 		if (completed == null) {
 			return action;
 		}
@@ -552,16 +570,16 @@ public final class LongPressCompatibilityController {
 		long firstPressTimestamp = completed.firstPressTimestamp;
 		long lastPressTimestamp = completed.lastPressTimestamp;
 		int count = completed.count;
-		CapturedRay secondPressRay = completed.secondPressRay.orElse(null);
+		@Nullable FrozenPingPress secondPress = completed.secondPress.orElse(null);
 		boolean pendingCandidate = completed.hasRapidPress
 			&& !completed.sequenceExpired
-			&& secondPressRay != null
+			&& secondPress != null
 			&& !strictlyBeyondGap(now, lastPressTimestamp, effectiveSliceMillis());
 
 		normalInteraction = null;
 
 		if (canSeed && pendingCandidate) {
-			startCandidate(firstPressTimestamp, lastPressTimestamp, count, secondPressRay, effectiveSliceMillis());
+			startCandidate(firstPressTimestamp, lastPressTimestamp, count, secondPress, effectiveSliceMillis());
 			return action;
 		}
 
@@ -572,19 +590,18 @@ public final class LongPressCompatibilityController {
 			seed = new Seed(firstPressTimestamp, firstPressTimestamp);
 		}
 
-		DeferredPress deferred = deferredPress;
+		@Nullable DeferredPress deferred = deferredPress;
 		deferredPress = null;
 		if (deferred != null && canSeed) {
-			// A deferred press was captured at its raw edge. If that immutable ray
-			// could not be obtained, dropping the click is safer than calling the
-			// ordinary no-ray overload, which would raycast again later.
-			if (deferred.pressRay.isEmpty()) {
+			// If the edge could not be frozen, do not fall back to the immediate
+			// overload, which would sample aim and candidates again now.
+			if (deferred.press.isEmpty()) {
 				return action;
 			}
 
 			Optional<PingInteractionAction> deferredAction = startFreshPress(
 				deferred.rawPressTimestamp,
-				deferred.pressRay.get());
+				deferred.press.get());
 			if (deferred.released) {
 				if (normalInteraction != null) {
 					normalInteraction.releaseObserved = true;
@@ -601,12 +618,8 @@ public final class LongPressCompatibilityController {
 		return action;
 	}
 
-	private Optional<PingInteractionAction> terminateCandidate(long endTimestamp, long threshold) {
-		Candidate ending = candidate;
-		if (ending == null) {
-			return Optional.empty();
-		}
-
+	private Optional<PingInteractionAction> terminateCandidate(Candidate ending, long endTimestamp, long threshold,
+		Supplier<Optional<PingInteractionAction>> afterTermination) {
 		Optional<PingInteractionAction> action = Optional.empty();
 		if (ending.wheelOpened && port.phase() == PingInteractionPhase.WHEEL_OPEN) {
 			// This is the exact baseline release path, including the latest wheel
@@ -628,8 +641,11 @@ public final class LongPressCompatibilityController {
 				ending.count);
 		}
 
+		// Release can re-enter a lifecycle abort or replace the sequence. Do not
+		// replay the saved edge (or clear a newer candidate) after either event.
+		if (candidate != ending) return action;
 		candidate = null;
-		return action;
+		return appendAction(action, afterTermination.get());
 	}
 
 	private void logCandidateEntry(long delta, long threshold) {
@@ -645,10 +661,6 @@ public final class LongPressCompatibilityController {
 			elapsedMillis(abandoned.firstPressTimestamp, abandoned.lastPressTimestamp),
 			threshold,
 			abandoned.count);
-	}
-
-	private CapturedRay capturePressRay() {
-		return port.capturePressRay().orElse(null);
 	}
 
 	private boolean syncMode() {
@@ -785,7 +797,7 @@ public final class LongPressCompatibilityController {
 		private boolean hasRapidPress;
 		private boolean sequenceExpired;
 		private boolean hasNormalWheel;
-		private Optional<CapturedRay> secondPressRay = Optional.empty();
+		private Optional<FrozenPingPress> secondPress = Optional.empty();
 
 		private NormalInteraction(long firstPressTimestamp) {
 			this.firstPressTimestamp = firstPressTimestamp;
@@ -807,30 +819,27 @@ public final class LongPressCompatibilityController {
 		private final long firstPressTimestamp;
 		private long lastPressTimestamp;
 		private int count;
-		private final CapturedRay secondPressRay;
 		private boolean wheelOpened;
 
 		private Candidate(
 			long firstPressTimestamp,
 			long lastPressTimestamp,
-			int count,
-			CapturedRay secondPressRay
+			int count
 		) {
 			this.firstPressTimestamp = firstPressTimestamp;
 			this.lastPressTimestamp = lastPressTimestamp;
 			this.count = count;
-			this.secondPressRay = secondPressRay;
 		}
 	}
 
 	private static final class DeferredPress {
 		private final long rawPressTimestamp;
-		private final Optional<CapturedRay> pressRay;
+		private final Optional<FrozenPingPress> press;
 		private boolean released;
 
-		private DeferredPress(long rawPressTimestamp, Optional<CapturedRay> pressRay, boolean released) {
+		private DeferredPress(long rawPressTimestamp, Optional<FrozenPingPress> press, boolean released) {
 			this.rawPressTimestamp = rawPressTimestamp;
-			this.pressRay = pressRay;
+			this.press = press;
 			this.released = released;
 		}
 	}

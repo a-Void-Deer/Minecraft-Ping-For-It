@@ -58,7 +58,9 @@ public class ClientConfig implements IConfig {
 	/** Kept as wheelFontSize in JSON: this is the radial option-label value. */
 	int wheelFontSize = ConfigDefaults.Client.WHEEL_FONT_SIZE;
 	int wheelTargetFontSize = ConfigDefaults.Client.WHEEL_TARGET_FONT_SIZE;
-	/** Zero means that each marker uses its frozen server-side duration. */
+	/** Zero follows each marker's frozen server tick span on the observed server clock. */
+	@Getter(AccessLevel.NONE)
+	@ToString.Exclude
 	int markerDisplayDuration = ConfigDefaults.Client.MARKER_DISPLAY_DURATION;
 	/** Local placement of the courtesy-cooldown notice; never changes limiter behavior. */
 	@Nullable CooldownFeedbackMode cooldownFeedback = ConfigDefaults.Client.COOLDOWN_FEEDBACK;
@@ -119,6 +121,16 @@ public class ClientConfig implements IConfig {
 		return ClientConfigBounds.DEFAULT_WHEEL_OUTER_RADIUS;
 	}
 
+	/** Negative local distances restore this field's default; zero and any non-negative value are retained. */
+	public void setPingDistance(int pingDistance) {
+		this.pingDistance = ClientConfigBounds.clampPingDistance(pingDistance);
+	}
+
+	/** Negative local distances restore this field's default; zero and any non-negative value are retained. */
+	public void setRaycastDistance(int raycastDistance) {
+		this.raycastDistance = ClientConfigBounds.clampRaycastDistance(raycastDistance);
+	}
+
 	public void setWheelHoldMillis(int wheelHoldMillis) {
 		this.wheelHoldMillis = ClientConfigBounds.clampWheelHoldMillis(wheelHoldMillis);
 		this.longPressCompatibilitySliceMillis = ClientConfigBounds.clampLongPressCompatibilitySliceMillis(
@@ -146,18 +158,10 @@ public class ClientConfig implements IConfig {
 	 * Returns the local marker display setting with its safe fallback even when
 	 * a caller supplied a value without invoking the setter or validation.
 	 */
+	@EqualsAndHashCode.Include(replaces = "markerDisplayDuration")
+	@ToString.Include(name = "markerDisplayDuration")
 	public int getEffectiveMarkerDisplayDuration() {
 		return ClientConfigBounds.clampMarkerDisplayDuration(markerDisplayDuration);
-	}
-
-	/** Returns the runtime-safe persisted value, including its follow-server sentinel. */
-	public int getMarkerDisplayDuration() {
-		return getEffectiveMarkerDisplayDuration();
-	}
-
-	public boolean isFollowServerMarkerDisplayDuration() {
-		return getEffectiveMarkerDisplayDuration()
-			== ClientConfigBounds.FOLLOW_SERVER_MARKER_DISPLAY_DURATION;
 	}
 
 	public void setMarkerDisplayDuration(int markerDisplayDuration) {
@@ -305,6 +309,8 @@ public class ClientConfig implements IConfig {
 		spatialSelector.validate();
 		if (longPressCompatibilityMode) spatialSelector.setGestureSkipHoldEnabled(false);
 
+		final int suppliedPingDistance = pingDistance;
+		final int suppliedRaycastDistance = raycastDistance;
 		final int suppliedWheelHoldMillis = wheelHoldMillis;
 		final int suppliedLongPressCompatibilitySliceMillis = longPressCompatibilitySliceMillis;
 		final int suppliedCancelHalfConeAngleDegrees = cancelHalfConeAngleDegrees;
@@ -315,6 +321,12 @@ public class ClientConfig implements IConfig {
 		final int suppliedWheelTargetFontSize = wheelTargetFontSize;
 		final int suppliedConfigurationNoticeSize = configurationNoticeSize;
 		final int suppliedMarkerDisplayDuration = markerDisplayDuration;
+
+		pingDistance = ClientConfigBounds.clampPingDistance(pingDistance);
+		warnIfChanged(warningSink, "pingDistance", suppliedPingDistance, pingDistance);
+
+		raycastDistance = ClientConfigBounds.clampRaycastDistance(raycastDistance);
+		warnIfChanged(warningSink, "raycastDistance", suppliedRaycastDistance, raycastDistance);
 
 		wheelHoldMillis = ClientConfigBounds.clampWheelHoldMillis(wheelHoldMillis);
 		warnIfChanged(

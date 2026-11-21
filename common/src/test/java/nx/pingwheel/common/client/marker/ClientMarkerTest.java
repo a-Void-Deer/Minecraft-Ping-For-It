@@ -33,7 +33,7 @@ class ClientMarkerTest {
 		MarkerSnapshot source = new MarkerSnapshot(
 			id, OWNER, target, "entity", "attention", anchor, 100L, 300L);
 
-		ClientMarker marker = ClientMarker.from(source, 250L, 10L);
+		ClientMarker marker = ClientMarker.withLocalDuration(source, 250L, 10L, 200L);
 
 		assertEquals(id, marker.id());
 		assertEquals(OWNER, marker.owner());
@@ -53,7 +53,7 @@ class ClientMarkerTest {
 		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
 		MarkerSnapshot source = snapshot(new MarkerId(1L), target, 10L, 110L);
 
-		ClientMarker marker = ClientMarker.from(source, 50L, 10L);
+		ClientMarker marker = ClientMarker.withLocalDuration(source, 50L, 10L, 100L);
 
 		// 50 + (110 - 10) + 10 = 160
 		assertEquals(160L, marker.fallbackExpiresAtLocalTick());
@@ -65,7 +65,7 @@ class ClientMarkerTest {
 		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
 		MarkerSnapshot source = snapshot(new MarkerId(1L), target, 10L, 110L);
 
-		ClientMarker marker = ClientMarker.from(source, 50L, 10L, 5L);
+		ClientMarker marker = ClientMarker.withLocalDuration(source, 50L, 10L, 5L);
 
 		assertEquals(160L, marker.fallbackExpiresAtLocalTick());
 		assertEquals(55L, marker.displayExpiresAtLocalTick());
@@ -77,7 +77,7 @@ class ClientMarkerTest {
 	void staleStatePreservesBothDeadlinesAndPayload() {
 		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
 		MarkerSnapshot source = snapshot(new MarkerId(1L), target, 10L, 110L);
-		ClientMarker marker = ClientMarker.from(source, 50L, 10L, 200L);
+		ClientMarker marker = ClientMarker.withLocalDuration(source, 50L, 10L, 200L);
 
 		ClientMarker stale = marker.asStale();
 
@@ -93,7 +93,7 @@ class ClientMarkerTest {
 		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
 		MarkerSnapshot source = snapshot(new MarkerId(1L), target, 10L, 11L);
 
-		ClientMarker marker = ClientMarker.from(source, 50L, 0L);
+		ClientMarker marker = ClientMarker.withLocalDuration(source, 50L, 0L, 1L);
 
 		// 50 + max(1, 11 - 10) + 0 = 51
 		assertEquals(51L, marker.fallbackExpiresAtLocalTick());
@@ -104,9 +104,10 @@ class ClientMarkerTest {
 		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
 		MarkerSnapshot source = snapshot(new MarkerId(1L), target, 0L, Long.MAX_VALUE);
 
-		ClientMarker marker = ClientMarker.from(source, 5L, 10L);
+		ClientMarker marker = ClientMarker.withLocalDuration(source, 5L, 10L, Long.MAX_VALUE);
 
 		assertEquals(Long.MAX_VALUE, marker.fallbackExpiresAtLocalTick());
+		assertEquals(Long.MAX_VALUE, marker.displayExpiresAtLocalTick());
 	}
 
 	@Test
@@ -114,7 +115,7 @@ class ClientMarkerTest {
 		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
 		MarkerSnapshot source = snapshot(new MarkerId(1L), target, 0L, 5L);
 
-		ClientMarker marker = ClientMarker.from(source, 100L, Long.MAX_VALUE);
+		ClientMarker marker = ClientMarker.withLocalDuration(source, 100L, Long.MAX_VALUE, 5L);
 
 		assertEquals(Long.MAX_VALUE, marker.fallbackExpiresAtLocalTick());
 	}
@@ -124,14 +125,14 @@ class ClientMarkerTest {
 		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
 		MarkerSnapshot source = snapshot(new MarkerId(1L), target, 0L, 1000L);
 
-		ClientMarker marker = ClientMarker.from(source, Long.MAX_VALUE - 5L, 0L);
+		ClientMarker marker = ClientMarker.withLocalDuration(source, Long.MAX_VALUE - 5L, 0L, 1000L);
 
 		assertEquals(Long.MAX_VALUE, marker.fallbackExpiresAtLocalTick());
 	}
 
 	@Test
 	void fromRejectsNullSnapshot() {
-		assertThrows(NullPointerException.class, () -> ClientMarker.from(null, 0L, 0L));
+		assertThrows(NullPointerException.class, () -> ClientMarker.withLocalDuration(null, 0L, 0L, 1L));
 	}
 
 	@Test
@@ -139,7 +140,7 @@ class ClientMarkerTest {
 		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
 		MarkerSnapshot source = snapshot(new MarkerId(1L), target, 1L, 10L);
 
-		assertThrows(IllegalArgumentException.class, () -> ClientMarker.from(source, -1L, 0L));
+		assertThrows(IllegalArgumentException.class, () -> ClientMarker.withLocalDuration(source, -1L, 0L, 1L));
 	}
 
 	@Test
@@ -147,35 +148,46 @@ class ClientMarkerTest {
 		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
 		MarkerSnapshot source = snapshot(new MarkerId(1L), target, 1L, 10L);
 
-		assertThrows(IllegalArgumentException.class, () -> ClientMarker.from(source, 0L, -1L));
+		assertThrows(IllegalArgumentException.class, () -> ClientMarker.withLocalDuration(source, 0L, -1L, 1L));
 	}
 
 	@Test
-	void targetKeyDerivesFromEntityTarget() {
+	void zeroLocalDurationExpiresAtReceiptAndNegativeDurationIsRejected() {
+		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
+		MarkerSnapshot source = snapshot(new MarkerId(1L), target, 1L, 10L);
+
+		ClientMarker marker = ClientMarker.withLocalDuration(source, 5L, 0L, 0L);
+		assertFalse(marker.followsServer());
+		assertFalse(marker.isVisuallyActiveAt(5L));
+		assertThrows(IllegalArgumentException.class, () -> ClientMarker.withLocalDuration(source, 5L, 0L, -1L));
+	}
+
+	@Test
+	void preservesSnapshotEntityKey() {
 		Target target = new Target.EntityTarget(OVERWORLD, ENTITY);
 		MarkerSnapshot source = snapshot(new MarkerId(1L), target, 1L, 10L);
 
-		ClientMarker marker = ClientMarker.from(source, 0L, 0L);
+		ClientMarker marker = ClientMarker.withLocalDuration(source, 0L, 0L, 1L);
 
 		assertEquals(new TargetKey.EntityKey(OVERWORLD, ENTITY), marker.targetKey());
 	}
 
 	@Test
-	void targetKeyDerivesFromBlockTarget() {
+	void preservesSnapshotBlockKey() {
 		Target target = new Target.BlockTarget(OVERWORLD, 1, 2, 3, "minecraft:stone");
 		MarkerSnapshot source = snapshot(new MarkerId(1L), target, 1L, 10L);
 
-		ClientMarker marker = ClientMarker.from(source, 0L, 0L);
+		ClientMarker marker = ClientMarker.withLocalDuration(source, 0L, 0L, 1L);
 
 		assertEquals(new TargetKey.BlockKey(OVERWORLD, 1, 2, 3, "minecraft:stone"), marker.targetKey());
 	}
 
 	@Test
-	void targetKeyDerivesFromLocationTarget() {
+	void preservesSnapshotLocationKey() {
 		Target target = new Target.LocationTarget(OVERWORLD, 1.5, 2.5, 3.5);
 		MarkerSnapshot source = snapshot(new MarkerId(1L), target, 1L, 10L);
 
-		ClientMarker marker = ClientMarker.from(source, 0L, 0L);
+		ClientMarker marker = ClientMarker.withLocalDuration(source, 0L, 0L, 1L);
 
 		assertEquals(new TargetKey.LocationKey(OVERWORLD, 1.5, 2.5, 3.5), marker.targetKey());
 	}
@@ -183,20 +195,23 @@ class ClientMarkerTest {
 	@Test
 	void rejectsNullComponents() {
 		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
+		TargetKey key = TargetKey.from(target);
 		MarkerAnchor anchor = new MarkerAnchor(0, 0, 0);
+		MarkerId id = new MarkerId(1L);
+		var state = ClientMarkerState.SYNCHRONIZED;
 
 		assertThrows(NullPointerException.class,
-			() -> new ClientMarker(null, OWNER, target, "location", "go_to", anchor, 1L, 100L, 0L, 100L));
+			() -> new ClientMarker(null, OWNER, target, key, "location", "go_to", anchor, 1L, 100L, 0L, 100L, 100L, state, null));
 		assertThrows(NullPointerException.class,
-			() -> new ClientMarker(new MarkerId(1L), null, target, "location", "go_to", anchor, 1L, 100L, 0L, 100L));
+			() -> new ClientMarker(id, null, target, key, "location", "go_to", anchor, 1L, 100L, 0L, 100L, 100L, state, null));
 		assertThrows(NullPointerException.class,
-			() -> new ClientMarker(new MarkerId(1L), OWNER, null, "location", "go_to", anchor, 1L, 100L, 0L, 100L));
+			() -> new ClientMarker(id, OWNER, null, key, "location", "go_to", anchor, 1L, 100L, 0L, 100L, 100L, state, null));
 		assertThrows(NullPointerException.class,
-			() -> new ClientMarker(new MarkerId(1L), OWNER, target, null, "go_to", anchor, 1L, 100L, 0L, 100L));
+			() -> new ClientMarker(id, OWNER, target, key, null, "go_to", anchor, 1L, 100L, 0L, 100L, 100L, state, null));
 		assertThrows(NullPointerException.class,
-			() -> new ClientMarker(new MarkerId(1L), OWNER, target, "location", null, anchor, 1L, 100L, 0L, 100L));
+			() -> new ClientMarker(id, OWNER, target, key, "location", null, anchor, 1L, 100L, 0L, 100L, 100L, state, null));
 		assertThrows(NullPointerException.class,
-			() -> new ClientMarker(new MarkerId(1L), OWNER, target, "location", "go_to", null, 1L, 100L, 0L, 100L));
+			() -> new ClientMarker(id, OWNER, target, key, "location", "go_to", null, 1L, 100L, 0L, 100L, 100L, state, null));
 	}
 
 	@Test
@@ -204,18 +219,20 @@ class ClientMarkerTest {
 		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
 
 		assertThrows(IllegalArgumentException.class,
-			() -> new ClientMarker(new MarkerId(1L), OWNER, target, " ", "go_to", new MarkerAnchor(0, 0, 0),
-				1L, 100L, 0L, 100L));
+			() -> new ClientMarker(new MarkerId(1L), OWNER, target, TargetKey.from(target), " ", "go_to",
+				new MarkerAnchor(0, 0, 0), 1L, 100L, 0L, 100L, 100L, ClientMarkerState.SYNCHRONIZED, null));
 		assertThrows(IllegalArgumentException.class,
-			() -> new ClientMarker(new MarkerId(1L), OWNER, target, "location", "", new MarkerAnchor(0, 0, 0),
-				1L, 100L, 0L, 100L));
+			() -> new ClientMarker(new MarkerId(1L), OWNER, target, TargetKey.from(target), "location", "",
+				new MarkerAnchor(0, 0, 0), 1L, 100L, 0L, 100L, 100L, ClientMarkerState.SYNCHRONIZED, null));
 	}
 
 	@Test
 	void rejectsNegativeArrivalTick() {
+		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
+
 		assertThrows(IllegalArgumentException.class,
-			() -> new ClientMarker(new MarkerId(1L), OWNER, new Target.LocationTarget(OVERWORLD, 0, 0, 0),
-				"location", "go_to", new MarkerAnchor(0, 0, 0), -1L, 100L, 0L, 100L));
+			() -> new ClientMarker(new MarkerId(1L), OWNER, target, TargetKey.from(target), "location", "go_to",
+				new MarkerAnchor(0, 0, 0), -1L, 100L, 0L, 100L, 100L, ClientMarkerState.SYNCHRONIZED, null));
 	}
 
 	@Test
@@ -223,11 +240,11 @@ class ClientMarkerTest {
 		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
 
 		assertThrows(IllegalArgumentException.class,
-			() -> new ClientMarker(new MarkerId(1L), OWNER, target, "location", "go_to",
-				new MarkerAnchor(0, 0, 0), 10L, 10L, 0L, 100L));
+			() -> new ClientMarker(new MarkerId(1L), OWNER, target, TargetKey.from(target), "location", "go_to",
+				new MarkerAnchor(0, 0, 0), 10L, 10L, 0L, 100L, 100L, ClientMarkerState.SYNCHRONIZED, null));
 		assertThrows(IllegalArgumentException.class,
-			() -> new ClientMarker(new MarkerId(1L), OWNER, target, "location", "go_to",
-				new MarkerAnchor(0, 0, 0), 10L, 5L, 0L, 100L));
+			() -> new ClientMarker(new MarkerId(1L), OWNER, target, TargetKey.from(target), "location", "go_to",
+				new MarkerAnchor(0, 0, 0), 10L, 5L, 0L, 100L, 100L, ClientMarkerState.SYNCHRONIZED, null));
 	}
 
 	@Test
@@ -235,8 +252,8 @@ class ClientMarkerTest {
 		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
 
 		assertThrows(IllegalArgumentException.class,
-			() -> new ClientMarker(new MarkerId(1L), OWNER, target, "location", "go_to",
-				new MarkerAnchor(0, 0, 0), 1L, 100L, -1L, 100L));
+			() -> new ClientMarker(new MarkerId(1L), OWNER, target, TargetKey.from(target), "location", "go_to",
+				new MarkerAnchor(0, 0, 0), 1L, 100L, -1L, 100L, 100L, ClientMarkerState.SYNCHRONIZED, null));
 	}
 
 	@Test
@@ -244,8 +261,8 @@ class ClientMarkerTest {
 		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
 
 		assertThrows(IllegalArgumentException.class,
-			() -> new ClientMarker(new MarkerId(1L), OWNER, target, "location", "go_to",
-				new MarkerAnchor(0, 0, 0), 1L, 100L, 50L, 49L));
+			() -> new ClientMarker(new MarkerId(1L), OWNER, target, TargetKey.from(target), "location", "go_to",
+				new MarkerAnchor(0, 0, 0), 1L, 100L, 50L, 49L, 100L, ClientMarkerState.SYNCHRONIZED, null));
 	}
 
 	@Test
@@ -253,6 +270,7 @@ class ClientMarkerTest {
 		Target target = new Target.LocationTarget(OVERWORLD, 0, 0, 0);
 		MarkerSnapshot source = snapshot(new MarkerId(1L), target, 1L, 10L);
 
-		assertEquals(ClientMarker.from(source, 5L, 3L), ClientMarker.from(source, 5L, 3L));
+		assertEquals(ClientMarker.withLocalDuration(source, 5L, 3L, 9L),
+			ClientMarker.withLocalDuration(source, 5L, 3L, 9L));
 	}
 }

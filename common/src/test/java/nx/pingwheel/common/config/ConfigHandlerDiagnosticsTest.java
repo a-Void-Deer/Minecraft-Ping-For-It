@@ -93,9 +93,9 @@ class ConfigHandlerDiagnosticsTest {
 		}
 	}
 
-	@Test void recoveryHashNoopPreservesInvalidBytesAndOnUpdateContract(@TempDir Path directory)
+	@Test void recoveryWithUnchangedDefaultsPreservesInvalidBytesWithoutOnUpdate(@TempDir Path directory)
 		throws IOException {
-		Path path = directory.resolve("hash-noop.json");
+		Path path = directory.resolve("unchanged-defaults.json");
 		byte[] broken = "{broken".getBytes(StandardCharsets.UTF_8);
 		CountingConfig.ON_UPDATE.set(0);
 		java.util.concurrent.atomic.AtomicInteger writes = new java.util.concurrent.atomic.AtomicInteger();
@@ -114,7 +114,7 @@ class ConfigHandlerDiagnosticsTest {
 		try (var logs = new Capture()) {
 			Diagnostics.setProfile(DiagnosticSide.BOOTSTRAP, LoggingProfile.NORMAL);
 			handler.load();
-			assertEquals(1, writes.get(), "the non-force save must keep its hash-equal no-write behavior");
+			assertEquals(1, writes.get(), "unchanged defaults must not trigger a non-force recovery write");
 			assertArrayEquals(broken, Files.readAllBytes(path));
 			assertEquals(1, CountingConfig.ON_UPDATE.get(), "a no-op save must not invoke onUpdate");
 			var recovery = logs.operation("site=config-load handling=defaults-in-memory").stream()
@@ -155,7 +155,7 @@ class ConfigHandlerDiagnosticsTest {
 		}
 	}
 
-	@Test void saveEntryPublishesInMemoryProfileBeforeHashAndWriteOutcomes(@TempDir Path directory) throws IOException {
+	@Test void saveEntryPublishesInMemoryProfileBeforeNoopAndWriteOutcomes(@TempDir Path directory) throws IOException {
 		var runtime = ConfigRuntime.of(DiagnosticSide.CLIENT, ClientConfig::getLoggingProfile,
 			profile -> Diagnostics.setProfile(DiagnosticSide.CLIENT, profile));
 		LoggingProfile previousClient = Diagnostics.profile(DiagnosticSide.CLIENT);
@@ -373,8 +373,6 @@ class ConfigHandlerDiagnosticsTest {
 		public CountingConfig() {}
 		@Override public void validate() {}
 		@Override public void onUpdate() { ON_UPDATE.incrementAndGet(); }
-		@Override public int hashCode() { return 1; }
-		@Override public boolean equals(@Nullable Object other) { return other instanceof CountingConfig; }
 	}
 
 	@NotNullByDefault

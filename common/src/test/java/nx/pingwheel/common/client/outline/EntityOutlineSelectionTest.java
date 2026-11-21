@@ -17,6 +17,7 @@ import nx.pingwheel.common.marker.MarkerSnapshot;
 import nx.pingwheel.common.marker.TargetKey;
 import org.junit.jupiter.api.Test;
 
+import static nx.pingwheel.common.client.marker.ClientMarkerFixtures.localSnapshotSpanStore;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -33,17 +34,9 @@ class EntityOutlineSelectionTest {
 	private static final UUID ENTITY_B = UUID.fromString("bbbbbbbb-1111-2222-3333-444444444444");
 
 	private static ClientMarker marker(long id, Target target, String pingTypeId) {
-		return new ClientMarker(
-			new MarkerId(id),
-			OWNER,
-			target,
-			"entity",
-			pingTypeId,
-			new MarkerAnchor(0, 0, 0),
-			1L,
-			100L,
-			0L,
-			100L);
+		var snapshot = new MarkerSnapshot(new MarkerId(id), OWNER, target, "entity", pingTypeId,
+			new MarkerAnchor(0, 0, 0), 1L, 100L);
+		return ClientMarker.withLocalDuration(snapshot, 0L, 1L, 100L);
 	}
 
 	private static Target entityTarget(String dimension, UUID entityId) {
@@ -200,7 +193,7 @@ class EntityOutlineSelectionTest {
 
 	@Test
 	void winnerChangeUpdatesSpecAndNonWinnersAreNotSelected() {
-		ClientMarkerStore store = new ClientMarkerStore(10L);
+		ClientMarkerStore store = localSnapshotSpanStore(10L);
 		Target target = entityTarget(OVERWORLD, ENTITY_A);
 		Target otherTarget = entityTarget(OVERWORLD, ENTITY_B);
 		TargetKey key = TargetKey.from(target);
@@ -222,7 +215,7 @@ class EntityOutlineSelectionTest {
 		store.onWinnerChanged(key, Optional.of(attentionId));
 
 		Map<EntityLocator, EntityOutlineSpec> first = EntityOutlineSelection.select(
-			store.visibleWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn());
+			store.outlineWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn());
 
 		assertEquals(1, first.size());
 		assertEquals(attentionId, first.get(EntityLocator.uuid(ENTITY_A)).markerId());
@@ -231,7 +224,7 @@ class EntityOutlineSelectionTest {
 		store.onWinnerChanged(key, Optional.of(dangerId));
 
 		Map<EntityLocator, EntityOutlineSpec> second = EntityOutlineSelection.select(
-			store.visibleWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn());
+			store.outlineWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn());
 
 		assertEquals(1, second.size());
 		assertEquals(dangerId, second.get(EntityLocator.uuid(ENTITY_A)).markerId());
@@ -240,7 +233,7 @@ class EntityOutlineSelectionTest {
 
 	@Test
 	void movementAndAnchorChangesRetainEntityIdentity() {
-		ClientMarkerStore store = new ClientMarkerStore(10L);
+		ClientMarkerStore store = localSnapshotSpanStore(10L);
 		Target target = entityTarget(OVERWORLD, ENTITY_A);
 		TargetKey key = TargetKey.from(target);
 		MarkerId movedId = new MarkerId(2L);
@@ -257,7 +250,7 @@ class EntityOutlineSelectionTest {
 		store.onWinnerChanged(key, Optional.of(movedId));
 
 		Map<EntityLocator, EntityOutlineSpec> selected = EntityOutlineSelection.select(
-			store.visibleWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn());
+			store.outlineWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn());
 
 		assertEquals(1, selected.size());
 		assertEquals(movedId, selected.get(EntityLocator.uuid(ENTITY_A)).markerId());
@@ -265,7 +258,7 @@ class EntityOutlineSelectionTest {
 
 	@Test
 	void differentDimensionIsExcludedViaStoreQuery() {
-		ClientMarkerStore store = new ClientMarkerStore(10L);
+		ClientMarkerStore store = localSnapshotSpanStore(10L);
 		Target netherTarget = entityTarget(NETHER, ENTITY_A);
 		MarkerId netherId = new MarkerId(1L);
 
@@ -275,9 +268,9 @@ class EntityOutlineSelectionTest {
 		store.onWinnerChanged(TargetKey.from(netherTarget), Optional.of(netherId));
 
 		assertTrue(EntityOutlineSelection.select(
-			store.visibleWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn()).isEmpty());
+			store.outlineWinnersInDimension(OVERWORLD), PingTypeCatalog.builtIn()).isEmpty());
 		assertEquals(1, EntityOutlineSelection.select(
-			store.visibleWinnersInDimension(NETHER), PingTypeCatalog.builtIn()).size());
+			store.outlineWinnersInDimension(NETHER), PingTypeCatalog.builtIn()).size());
 	}
 
 	// --- validation ---

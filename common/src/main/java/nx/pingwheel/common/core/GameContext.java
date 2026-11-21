@@ -1,6 +1,5 @@
 package nx.pingwheel.common.core;
 
-import lombok.Getter;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ExperienceOrb;
@@ -15,9 +14,6 @@ import static nx.pingwheel.common.CommonClient.Game;
 public class GameContext {
 	private GameContext() {}
 
-	@Getter
-	private static int dimension = 0;
-	private static ClientLevel lastWorld = null;
 	private static final RenderEntityLookupCache<ClientLevel, Entity> RENDER_ENTITY_LOOKUP_CACHE =
 		new RenderEntityLookupCache<>(new RenderEntityLookupCache.Access<>() {
 			@Override
@@ -45,15 +41,6 @@ public class GameContext {
 				return entity.isRemoved();
 			}
 		});
-
-	public static void updateDimension() {
-		if (Game.level == null || lastWorld == Game.level) {
-			return;
-		}
-
-		lastWorld = Game.level;
-		dimension = lastWorld.dimension().location().hashCode();
-	}
 
 	/**
 	 * Performs a fresh UUID scan of the current client render collection.

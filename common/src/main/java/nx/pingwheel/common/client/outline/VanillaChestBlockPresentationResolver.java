@@ -13,6 +13,9 @@ public final class VanillaChestBlockPresentationResolver implements BlockPresent
 	public String id() { return ID; }
 
 	@Override
+	public boolean supportsExternalScope() { return true; }
+
+	@Override
 	public BlockPresentationResolution resolve(BlockPresentationContext context) {
 		String registry = context.sourceSpec().blockKey().blockRegistryId();
 		if (!VanillaDoubleChestTopology.supports(registry)) return BlockPresentationResolution.UNHANDLED;

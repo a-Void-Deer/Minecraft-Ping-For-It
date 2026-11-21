@@ -104,6 +104,11 @@ public final class SimulatedDockingConnectorPresentationResolver implements Bloc
 	}
 
 	@Override
+	public boolean supportsExternalScope() {
+		return true;
+	}
+
+	@Override
 	public BlockPresentationResolution resolve(BlockPresentationContext context) {
 		@Nullable RegistryEntries entries = injectedEntries == null ? lookupEntries() : injectedEntries;
 		@Nullable BlockState pairedState = context.sourceState();

@@ -35,6 +35,9 @@ import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.status.ChunkStatus;
 import net.minecraft.world.phys.Vec3;
+import nx.pingwheel.common.client.duration.ClientMarkerDisplayDuration;
+import nx.pingwheel.common.client.marker.ClientMarkerStore;
+import nx.pingwheel.common.client.marker.ObservedServerClock;
 import nx.pingwheel.common.domain.Target;
 import org.jetbrains.annotations.NotNullByDefault;
 import org.jetbrains.annotations.Nullable;
@@ -57,6 +60,12 @@ public final class VaultNativeFixture implements AutoCloseable {
 	final Alias<BlockEntityType<?>> entityAlias;
 	final BlockPos root;
 	int stateReads, mapReads, chunkReads, inventoryLoaded, inventoryStates, inventoryEntities;
+
+	static ClientMarkerStore localSnapshotSpanStore() {
+		return new ClientMarkerStore(0L, new ObservedServerClock(),
+			snapshot -> ClientMarkerDisplayDuration.customTicks(snapshot.expiresAtTick() - snapshot.arrivalTick()));
+	}
+
 	VaultNativeFixture(Axis axis, int width, int length, BlockPos root) throws Exception {
 		this.root = root;
 		// Construct one synthetic optional block without changing the registry's frozen lifetime.

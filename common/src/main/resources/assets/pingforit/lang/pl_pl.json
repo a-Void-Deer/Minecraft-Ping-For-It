@@ -164,6 +164,7 @@
 	"command.pingforit.channel.set.response": "Ustaw kanał na \"%s\"",
 	"command.pingforit.channel.set.response.default": "Ustawiono kanał na domyślny",
 	"command.pingforit.channel.set.reject": "Nazwy kanałów są ograniczone do %s znaków",
+	"command.pingforit.channel.set.failure": "Zmiana kanału nie została zapisana",
 	"pingforit.chat.pingmsg": "%s: %s: %s",
 	"pingforit.chat.pingmsg.template": "{playerName}: {pingType}: {targetName}",
 	"pingforit.chat.local_error.prefix": "[ping for it] ",
@@ -541,6 +542,10 @@
   ,"settings.pingforit.scope.server.tooltip": "Przeglądaj ustawienia serwera; edycja wymaga poziomu uprawnień 3."
   ,"settings.pingforit.navigation.back.tooltip": "Wróć do przeglądu tego zakresu."
   ,"settings.pingforit.navigation.done.tooltip": "Zapisz ustawienia klienta, wyślij zmiany serwera i zamknij."
+  ,"settings.pingforit.save_failed.title": "Nie udało się zapisać ustawień klienta"
+  ,"settings.pingforit.save_failed.message": "Jeśli wyjdziesz, gra nie ponowi zapisu ani nie wyśle oczekujących zmian do serwera. Zmiany już zastosowane w kliencie nie zostaną cofnięte."
+  ,"settings.pingforit.save_failed.continue": "Edytuj dalej"
+  ,"settings.pingforit.save_failed.exit": "Wyjdź bez zapisu"
   ,"settings.pingforit.presentation.server.tooltip": "Reguły pól wybranego typu celu; edycja wymaga poziomu uprawnień 3."
   ,"settings.pingforit.presentation.target_type.tooltip": "Wybierz typ celu, którego reguły chcesz przeglądać i edytować."
   ,"settings.pingforit.presentation.selector.tooltip": "Selektor identyfikatora pola, np. minecraft:entity.health lub create:kinetic.*.\n* pasuje tylko w obrębie jednej przestrzeni nazw lub części ścieżki i nigdy nie przekracza znaku :.\nUżyj przycisku Dodaj, aby zastosować selektor."

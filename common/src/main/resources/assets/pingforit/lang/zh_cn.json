@@ -199,6 +199,7 @@
 	"command.pingforit.channel.set.response": "设置频道为\"%s\"",
 	"command.pingforit.channel.set.response.default": "将频道设置为默认频道",
 	"command.pingforit.channel.set.reject": "频道名称长度限制为 %s 个字符",
+	"command.pingforit.channel.set.failure": "频道更改未保存",
 	"pingforit.chat.pingmsg": "%s 请求 %s %s",
 	"pingforit.chat.pingmsg.template": "{playerName}: 请求 {pingType} {targetName}",
 	"pingforit.chat.danger.template.override": "{playerName}: {pingType} {targetName} !",
@@ -550,6 +551,10 @@
   ,"settings.pingforit.scope.server.tooltip": "查看服务端设置；编辑需要权限等级 3。"
   ,"settings.pingforit.navigation.back.tooltip": "返回此范围的概览。"
   ,"settings.pingforit.navigation.done.tooltip": "保存客户端设置，发送服务端更改并关闭。"
+  ,"settings.pingforit.save_failed.title": "无法保存客户端设置"
+  ,"settings.pingforit.save_failed.message": "退出时不会再次尝试保存，也不会发送待提交的服务端更改。已生效的客户端更改不会撤销。"
+  ,"settings.pingforit.save_failed.continue": "继续编辑"
+  ,"settings.pingforit.save_failed.exit": "不保存退出"
   ,"settings.pingforit.presentation.server.tooltip": "所选目标类型的字段规则；编辑需要权限等级 3。"
   ,"settings.pingforit.presentation.target_type.tooltip": "选择要查看和编辑规则的目标类型。"
   ,"settings.pingforit.presentation.selector.tooltip": "字段 ID 选择器，例如 minecraft:entity.health 或 create:kinetic.*。\n* 只匹配同一命名空间或路径段内的内容，不能跨过 :。\n用“添加”应用选择器。"

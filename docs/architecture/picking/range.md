@@ -13,7 +13,7 @@ client's trace.
 | Client `raycastDistance` | Read once at hold start; native vanilla/Create trace cap. Its persisted-file catalogue is [client configuration](../../config/client.md). |
 | Effective native trace distance | `min(raycastDistance, pingDistance)`: one finite frozen segment for the ordinary vanilla world/entity selection and its Create candidate refinement. |
 | Precise live cast segment | Current camera ray, re-cast on the configured capture period while the Precise branch is active; bounded by the hold's frozen client range snapshot. Ownership is [Precise live candidate capture](capture.md#precise-live-candidate-capture). |
-| Distant Horizons trace range | Fixed integration range, independent of either client field; started only after the native trace misses using the press origin/direction. |
+| Distant Horizons trace range | Fixed integration range after a native miss, independent of both client distance fields. |
 | Server `pingDistance` | Constructed into each authoritative validator; separate from the client field and not sent to clients as a capture setting. |
 
 The client field and the server field share a name but are separate
@@ -27,7 +27,10 @@ owned elsewhere; this document records only the range used for acceptance.
 At ordinary capture start, the client captures one ray and reads the current
 client fields once. It builds the native finite segment with
 `min(hidden raycastDistance, client pingDistance)` and gives that exact segment
-to the native raycast. The native trace selects Minecraft world
+to the native raycast. The represented endpoint stays within that frozen
+distance in final world coordinates, including when ordinary or Precise capture
+uses it as a fallback location. Neither a non-unit view vector nor coordinate
+rounding may extend the native reach. The native trace selects Minecraft world
 blocks/fluids and entity candidates, while a claimed Create candidate receives
 the same segment through the common raycast request. Create transforms that
 already-bounded segment into its local space and scans its frozen local shapes;
@@ -45,14 +48,15 @@ epsilon. It therefore has no independent range expansion. Sable's separate
 transformed-behind discovery is the additive provider supplement bounded in
 [Selector candidate supplements](#selector-candidate-supplements).
 
-After a native miss, Distant Horizons is a separate optional asynchronous route.
-It receives the frozen press origin and direction but calls its API with an
-integration-specific fixed range. This route is not clipped by client
-`pingDistance` or the current hidden `raycastDistance` value/effective native
-segment. A distant hit replaces the native location-miss
-snapshot; a no-hit, failure, unavailable integration, or scheduling failure
-uses the original native miss/location fallback. The eventual target still faces
-the independent server acceptance check below.
+After a native miss, Distant Horizons can supply a distant hit asynchronously.
+It uses the frozen press ray for ordinary capture and the live camera ray of that
+cast for Precise Location. Both use a fixed integration range independent of the
+client `pingDistance` and the hidden `raycastDistance` cap.
+
+If the [Distant Horizons integration](../../integrations/distant-horizons.md)
+returns no hit for the captured world, that [capture path](capture.md) keeps
+its native miss result. A distant hit still faces the independent server
+acceptance check below.
 
 The deferred and rapid-click compatibility captures described in
 [long-press compatibility](../input/long-press-compatibility.md)
@@ -77,8 +81,8 @@ completion is owned by
 [Precise live candidate capture](capture.md#precise-live-candidate-capture).
 The same hold-frozen bound applies to provider supplements: Sable's
 transformed-behind discovery shares the live ray and the hold-frozen client
-`pingDistance`, and its bounded local traversal, completion and candidate rules
-are owned by the
+`pingDistance`, and its local traversal, completion and candidate rules are
+owned by the
 [Sable integration](../../integrations/sable.md#supplemental-transformed-behind-discovery).
 Leaf enablement, refresh retention and fallback for a missing, incomplete or
 failed result are owned by
@@ -88,13 +92,19 @@ Supplemental candidates still face the independent server acceptance check.
 ## Server acceptance
 
 For every create request, the server uses its own `pingDistance` to validate
-range. It measures the requesting player's current eye
-against the authoritative anchor and rejects a squared distance strictly greater
-than range squared as `OUT_OF_RANGE`; equality is accepted. The relevant anchor
-is the live entity position, block center, exact location, or provider-derived
-external anchor. The server validates identity/current dimension/live state and
-classification separately; it does not replay the client ray or infer validity
-from a client capture distance.
+range. It measures the requesting player's current eye against the authoritative
+world anchor and rejects a squared distance strictly greater than range squared
+as `OUT_OF_RANGE`; equality is accepted. For an ordinary entity the anchor is
+its live base position in the requester's world. For an exact retained rotor it
+is the native base position projected through the copied logical parent frame;
+the projection must be finite and is never replaced by the raw native plot
+position. Projection-failure adjudication is owned by
+[target validation](../authority/target_validation.md#creation-time-validation-and-outcomes).
+Block center, exact location and provider-derived external anchors
+keep their existing definitions. The server validates identity/current
+dimension/live state and classification separately; it does not replay the
+client ray, infer validity from a client capture distance, or substitute a
+client-side local hit point for the whole-entity anchor.
 
 For a large Create contraption this means a client may select a nearby exact
 surface but still be rejected if the whole entity's authoritative anchor is too
@@ -113,11 +123,12 @@ ordinary lifecycle contract.
 | --- | --- | --- | --- |
 | Vanilla blocks, fluids, entities | Frozen finite press segment | `min(client raycastDistance, client pingDistance)` | Native hit or location miss |
 | Selector candidate supplements | Live current camera ray while the Precise branch is active; occluders allowed within the hold-frozen client ping distance | Hold-frozen client `pingDistance` | Nearest certified candidate per type, or incomplete/unavailable; leaf enablement follows [Precise live candidate capture](capture.md#precise-live-candidate-capture) |
-| Sable transformed-behind supplement | Live current camera ray; provider-local sublevel traversal | Hold-frozen client `pingDistance` | Provider candidate only when the bounded local trace completes; otherwise incomplete/unavailable |
+| Sable transformed-behind supplement | Live current camera ray; provider-local sublevel traversal | Hold-frozen client `pingDistance` | Provider candidate only when the local trace completes; otherwise incomplete/unavailable |
 | Create contraption local shapes | Ordinary trace passes the finite segment through the common entity-candidate request and transforms it locally; Precise live casts use the current ray | Ordinary trace reuses the native effective segment; Precise live casts use the hold-frozen range; no Create interaction-picker range | Exact whole-entity hit, or owned miss/unavailable/failure with no coarse-AABB revival |
+| Aeronautics normal/gyro rotor local shapes | Ordinary trace reuses the native effective segment; Precise live casts use the current ray; local native shapes come from the captured rotor view | No separate rotor capture range; the authoritative check uses the projected logical-world base anchor | Exact whole-entity hit, or owned miss/unavailable/failure with no coarse-AABB revival |
 | Sable external candidate (ordinary projection) | Native block hit plus that same segment's frozen origin/end | Reuses native effective segment; point must project onto the segment | External candidate only after provider checks; otherwise existing projected/location or vanilla fallback |
 | Distant Horizons | Frozen press origin/direction after the ordinary native miss; the live cast ray for the Precise location candidate | Integration-specific fixed API trace, independent of both client fields | Distant block hit, or the ordinary native location miss |
-| Server validator | Current server player eye and authoritative validation anchor | Server `pingDistance` | Accept or `OUT_OF_RANGE`, independently of client capture; an external candidate's provider validation anchor is checked before later materialization |
+| Server validator | Current server player eye and authoritative world anchor | Server `pingDistance` | Accept or `OUT_OF_RANGE`, independently of client capture; an exact rotor uses its logical-frame projection and an external candidate's provider validation anchor is checked before later materialization |
 
 ## Evidence and remaining verification
 

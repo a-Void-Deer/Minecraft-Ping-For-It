@@ -126,8 +126,7 @@ class ClientConfigValidationTest {
 
 		config.validate((key, suppliedValue, effectiveValue) -> {});
 
-		assertEquals(ClientConfigBounds.FOLLOW_SERVER_MARKER_DISPLAY_DURATION, config.getMarkerDisplayDuration());
-		assertTrue(config.isFollowServerMarkerDisplayDuration());
+		assertEquals(ClientConfigBounds.FOLLOW_SERVER_MARKER_DISPLAY_DURATION, config.getEffectiveMarkerDisplayDuration());
 		assertTrue(new Gson().toJson(config).contains("\"markerDisplayDuration\":0"));
 	}
 
@@ -136,17 +135,28 @@ class ClientConfigValidationTest {
 		ClientConfig config = new ClientConfig();
 
 		config.setMarkerDisplayDuration(-1);
-		assertEquals(0, config.getMarkerDisplayDuration());
+		assertEquals(0, config.getEffectiveMarkerDisplayDuration());
 		config.setMarkerDisplayDuration(ClientConfigBounds.MAX_MARKER_DISPLAY_DURATION + 1);
-		assertEquals(ClientConfigBounds.MAX_MARKER_DISPLAY_DURATION, config.getMarkerDisplayDuration());
+		assertEquals(ClientConfigBounds.MAX_MARKER_DISPLAY_DURATION, config.getEffectiveMarkerDisplayDuration());
 
 		config.markerDisplayDuration = Integer.MIN_VALUE;
 		List<ClampWarning> warnings = new ArrayList<>();
 		config.validate((key, suppliedValue, effectiveValue) ->
 			warnings.add(new ClampWarning(key, suppliedValue, effectiveValue)));
 
-		assertEquals(0, config.getMarkerDisplayDuration());
+		assertEquals(0, config.getEffectiveMarkerDisplayDuration());
 		assertEquals(List.of(new ClampWarning("markerDisplayDuration", Integer.MIN_VALUE, 0)), warnings);
+	}
+
+	@Test
+	void unvalidatedMarkerDurationUsesTheEffectiveValueInConfigComparisons() {
+		ClientConfig unvalidated = new Gson().fromJson("{\"markerDisplayDuration\":-1}", ClientConfig.class);
+		ClientConfig following = new ClientConfig();
+		following.setMarkerDisplayDuration(0);
+
+		assertEquals(following.getEffectiveMarkerDisplayDuration(), unvalidated.getEffectiveMarkerDisplayDuration());
+		assertEquals(following, unvalidated);
+		assertEquals(following.hashCode(), unvalidated.hashCode());
 	}
 
 	@Test
@@ -157,8 +167,7 @@ class ClientConfigValidationTest {
 		ClientConfig restored = new Gson().fromJson(new Gson().toJson(original), ClientConfig.class);
 		restored.validate((key, suppliedValue, effectiveValue) -> {});
 
-		assertEquals(23, restored.getMarkerDisplayDuration());
-		assertFalse(restored.isFollowServerMarkerDisplayDuration());
+		assertEquals(23, restored.getEffectiveMarkerDisplayDuration());
 	}
 
 	@Test
@@ -329,6 +338,64 @@ class ClientConfigValidationTest {
 		config.longPressCompatibilitySliceMillis = Integer.MAX_VALUE;
 		assertEquals(ClientConfigBounds.MAX_LONG_PRESS_COMPATIBILITY_SLICE_MILLIS,
 			config.getEffectiveLongPressCompatibilitySliceMillis());
+	}
+
+	@Test
+	void negativeRangeDistancesRecoverToTheirOwnDefaultsDuringValidation() {
+		ClientConfig defaults = new ClientConfig();
+		ClientConfig config = new Gson().fromJson(
+			"{\"pingDistance\":-1,\"raycastDistance\":-2,\"pingVolume\":42,\"wheelHoldMillis\":210}",
+			ClientConfig.class);
+		List<ClampWarning> warnings = new ArrayList<>();
+
+		config.validate((key, suppliedValue, effectiveValue) ->
+			warnings.add(new ClampWarning(key, suppliedValue, effectiveValue)));
+
+		assertEquals(defaults.getPingDistance(), config.getPingDistance());
+		assertEquals(defaults.getRaycastDistance(), config.getRaycastDistance());
+		assertEquals(42, config.getPingVolume());
+		assertEquals(210, config.getWheelHoldMillis());
+		assertEquals(
+			List.of(
+				new ClampWarning("pingDistance", -1, defaults.getPingDistance()),
+				new ClampWarning("raycastDistance", -2, defaults.getRaycastDistance())),
+			warnings);
+	}
+
+	@Test
+	void zeroAndUncappedRangeDistancesRemainValidDuringValidation() {
+		ClientConfig config = new Gson().fromJson(
+			"{\"pingDistance\":" + Integer.MAX_VALUE + ",\"raycastDistance\":0}",
+			ClientConfig.class);
+		List<ClampWarning> warnings = new ArrayList<>();
+
+		config.validate((key, suppliedValue, effectiveValue) ->
+			warnings.add(new ClampWarning(key, suppliedValue, effectiveValue)));
+
+		assertEquals(Integer.MAX_VALUE, config.getPingDistance());
+		assertEquals(0, config.getRaycastDistance());
+		assertEquals(List.of(), warnings);
+	}
+
+	@Test
+	void rangeDistanceSettersRestoreOnlyTheInvalidFieldToItsDefault() {
+		ClientConfig defaults = new ClientConfig();
+		ClientConfig config = new ClientConfig();
+
+		config.setPingDistance(-1);
+		assertEquals(defaults.getPingDistance(), config.getPingDistance());
+		config.setRaycastDistance(-2);
+		assertEquals(defaults.getRaycastDistance(), config.getRaycastDistance());
+
+		config.setPingDistance(0);
+		config.setRaycastDistance(Integer.MAX_VALUE);
+		assertEquals(0, config.getPingDistance());
+		assertEquals(Integer.MAX_VALUE, config.getRaycastDistance());
+
+		config.setPingDistance(-3);
+		assertEquals(defaults.getPingDistance(), config.getPingDistance());
+		assertEquals(Integer.MAX_VALUE, config.getRaycastDistance(),
+			"one invalid field must not reset the other");
 	}
 
 	private record ClampWarning(String key, int suppliedValue, int effectiveValue) {}

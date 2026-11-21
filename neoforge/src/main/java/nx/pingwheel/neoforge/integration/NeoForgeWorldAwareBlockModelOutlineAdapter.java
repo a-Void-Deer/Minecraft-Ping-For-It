@@ -1,23 +1,30 @@
 package nx.pingwheel.neoforge.integration;
 
+import java.util.Objects;
+import java.util.function.Function;
+
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.block.BlockRenderDispatcher;
 import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.BlockAndTintGetter;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import net.neoforged.neoforge.client.model.data.ModelData;
 import nx.pingwheel.common.client.outline.EntityBlockGeometryContext;
 import nx.pingwheel.common.client.outline.EntityBlockGeometryTransform;
+import nx.pingwheel.common.client.outline.ExternalBlockReadView;
+import nx.pingwheel.common.client.outline.ExternalBlockRenderView;
 import nx.pingwheel.common.client.outline.OutlineOnlyBufferSource;
 import nx.pingwheel.common.client.outline.WorldAwareBlockModelOutlineAdapter;
 import nx.pingwheel.common.client.outline.WorldAwareBlockModelOutlineAdapterRegistry;
+import org.jetbrains.annotations.NotNullByDefault;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * NeoForge's generic world-aware baked-model backend for entity-block outlines.
@@ -61,41 +68,31 @@ public final class NeoForgeWorldAwareBlockModelOutlineAdapter
 	}
 
 	@Override
-	public boolean handles(EntityBlockGeometryContext context) {
-		if (context == null) {
-			return false;
-		}
-
-		ClientLevel level = context.level();
-		BlockPos pos = context.blockPos();
-		BlockState state = context.blockState();
-		if (level == null || pos == null || state == null
-			|| state.getRenderShape() != RenderShape.MODEL
-			|| !level.hasChunkAt(pos)) {
-			return false;
-		}
-
-		// Only dispatch a state whose block type is still live at the target.
-		BlockState liveState = level.getBlockState(pos);
-		return liveState != null && liveState.getBlock() == state.getBlock();
+	public boolean handles(@Nullable EntityBlockGeometryContext context) {
+		return context != null && context.hasLiveBakedModelState();
 	}
 
 	@Override
 	public void render(EntityBlockGeometryContext context, OutlineOnlyBufferSource buffer) {
-		ClientLevel level = context.level();
-		BlockPos pos = context.blockPos();
-		BlockState state = context.blockState();
-		Vec3 cameraPosition = context.cameraPosition();
-		PoseStack poseStack = createPoseStack(context, pos, cameraPosition);
-		BlockRenderDispatcher dispatcher = Minecraft.getInstance().getBlockRenderer();
+		BlockPos pos = Objects.requireNonNull(context.blockPos());
+		renderModel(Objects.requireNonNull(context.level()), context.externalReadView(), pos,
+			Objects.requireNonNull(context.blockState()), createPoseStack(context, pos, context.cameraPosition()),
+			Minecraft.getInstance().getBlockRenderer(), renderType -> buffer.getBuffer(renderType));
+	}
+
+	static void renderModel(
+		BlockAndTintGetter level, @Nullable ExternalBlockReadView plot, BlockPos pos, BlockState state, PoseStack poseStack,
+		BlockRenderDispatcher dispatcher, Function<RenderType, VertexConsumer> outlineBuffer
+	) {
+		BlockAndTintGetter modelView = plot == null ? level : new ScopedModelView(plot, level);
 		BakedModel model = dispatcher.getBlockModel(state);
 		long seed = state.getSeed(pos);
 
-		ModelData modelData = level.getModelData(pos);
+		@Nullable ModelData modelData = plot == null ? level.getModelData(pos) : modelView.getModelData(pos);
 		if (modelData == null) {
 			modelData = ModelData.EMPTY;
 		}
-		modelData = model.getModelData(level, pos, state, modelData);
+		modelData = model.getModelData(modelView, pos, state, modelData);
 		if (modelData == null) {
 			modelData = ModelData.EMPTY;
 		}
@@ -104,11 +101,11 @@ public final class NeoForgeWorldAwareBlockModelOutlineAdapter
 		for (RenderType originalRenderType : model.getRenderTypes(state, renderTypesRandom, modelData)) {
 			poseStack.pushPose();
 			try {
-				VertexConsumer consumer = buffer.getBuffer(originalRenderType);
+				VertexConsumer consumer = outlineBuffer.apply(originalRenderType);
 				dispatcher.renderBatched(
 					state,
 					pos,
-					level,
+					modelView,
 					poseStack,
 					consumer,
 					false,
@@ -121,12 +118,36 @@ public final class NeoForgeWorldAwareBlockModelOutlineAdapter
 		}
 	}
 
+	@NotNullByDefault
+	private static final class ScopedModelView extends ExternalBlockRenderView {
+		private final BlockAndTintGetter shading;
+
+		private ScopedModelView(ExternalBlockReadView plot, BlockAndTintGetter shading) {
+			super(plot, shading);
+			this.shading = shading;
+		}
+
+		@Override
+		public ModelData getModelData(BlockPos pos) {
+			// The level manager can refresh an entire section of BEs. Only the
+			// plot's positively scoped resident entity may seed external model data.
+			@Nullable BlockEntity resident = getBlockEntity(pos);
+			@Nullable ModelData data = resident == null ? null : resident.getModelData();
+			return data == null ? ModelData.EMPTY : data;
+		}
+
+		@Override
+		public float getShade(float x, float y, float z, boolean shade) {
+			return shading.getShade(x, y, z, shade);
+		}
+	}
+
 	private static PoseStack createPoseStack(
 		EntityBlockGeometryContext context,
 		BlockPos pos,
 		Vec3 cameraPosition
 	) {
-		EntityBlockGeometryTransform transform = context.transform();
+		@Nullable EntityBlockGeometryTransform transform = context.transform();
 		if (transform != null) {
 			return transform.createPoseStack(pos, cameraPosition, null);
 		}

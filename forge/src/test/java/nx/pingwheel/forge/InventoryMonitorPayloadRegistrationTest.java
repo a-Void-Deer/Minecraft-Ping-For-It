@@ -3,6 +3,7 @@ package nx.pingwheel.forge;
 import io.netty.buffer.Unpooled;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -28,6 +29,7 @@ import nx.pingwheel.common.network.InventoryMonitorStatusS2CPacket;
 import nx.pingwheel.common.network.InventoryMonitorSampleS2CPacket;
 import nx.pingwheel.common.network.InventoryMonitorStatusS2CPacket.SampleCapability;
 import nx.pingwheel.common.network.IPacket;
+import nx.pingwheel.common.network.PresentationC2SPacket;
 import nx.pingwheel.common.monitor.MonitorAccumulator;
 import nx.pingwheel.common.monitor.MonitorSchema.Source;
 import nx.pingwheel.common.monitor.MonitorTuning;
@@ -96,6 +98,41 @@ class InventoryMonitorPayloadRegistrationTest {
 		}
 	}
 
+	@Test void registeredPresentationHelloDoesNotCrossASameUuidConnectionReplacement() {
+		var channel = HeadlessEventChannel.wrap(ForgeMain.PRESENTATION_CHANNEL_C2S);
+		var server = allocate(Server.class); server.players = allocate(Players.class);
+		var original = allocate(Player.class); original.owner = server;
+		var origin = new ServerConnection();
+		var originalListener = allocate(Listener.class); originalListener.transport = origin;
+		originalListener.player = original;
+		origin.listener = originalListener; original.connection = originalListener; server.players.player = original;
+		var hello = PresentationC2SPacket.hello(Map.of("minecraft:basic", 1));
+		var accepted = new ArrayList<ServerPlayer>();
+		ForgeMain.registerPresentationReceiver(channel, (owner, current, packet) -> {
+			assertSame(server, owner); assertEquals(hello, packet); accepted.add(current);
+		});
+
+		var oldContext = new HeldContext(origin, original);
+		receivePacket(channel, oldContext, hello, false);
+		receivePacket(channel, oldContext, hello, false);
+		assertTrue(accepted.isEmpty());
+		var replacement = allocate(Player.class); replacement.owner = server;
+		var newConnection = new ServerConnection();
+		var newListener = allocate(Listener.class); newListener.transport = newConnection;
+		newListener.player = replacement;
+		newConnection.listener = newListener; replacement.connection = newListener;
+		server.players.player = replacement;
+		oldContext.tasks.removeFirst().run();
+		assertTrue(accepted.isEmpty(), "UUID match alone cannot let the old listener reach negotiation");
+
+		var newContext = new HeldContext(newConnection, replacement);
+		receivePacket(channel, newContext, hello, false);
+		newContext.tasks.removeFirst().run();
+		assertEquals(List.of(replacement), accepted);
+		oldContext.tasks.removeFirst().run();
+		assertEquals(List.of(replacement), accepted, "old work also stays inert after the replacement HELLO");
+	}
+
 	@Test void registeredStatusAndSampleReadersFenceBothQueuedAndAlreadyObsoleteClientCallbacks() throws ReflectiveOperationException {
 		var instance = Minecraft.class.getDeclaredField("instance"); instance.setAccessible(true);
 		@Nullable Object previous = instance.get(null);
@@ -121,17 +158,17 @@ class InventoryMonitorPayloadRegistrationTest {
 		var calls = new AtomicInteger();
 		ForgeClient.registerMonitorReceiver(channel, reader, (token, received) -> { assertEquals(packet, received); calls.incrementAndGet(); });
 		var context = new HeldContext(connection, null);
-		clientReceive(channel, context, packet, false);
+		receivePacket(channel, context, packet, false);
 		assertEquals(0, calls.get()); context.tasks.removeFirst().run(); assertEquals(1, calls.get());
-		clientReceive(channel, context, packet, false);
+		receivePacket(channel, context, packet, false);
 		client.player = allocate(LocalPlayer.class);
 		context.tasks.removeFirst().run(); assertEquals(1, calls.get());
-		clientReceive(channel, context, packet, false);
+		receivePacket(channel, context, packet, false);
 		context.tasks.removeFirst().run(); assertEquals(1, calls.get(), "callback from old transport must not capture replacement");
-		clientReceive(channel, context, packet, true); assertTrue(context.tasks.isEmpty());
+		receivePacket(channel, context, packet, true); assertTrue(context.tasks.isEmpty());
 	}
 
-	private static void clientReceive(HeadlessEventChannel channel, HeldContext context, IPacket packet, boolean trailing) {
+	private static void receivePacket(HeadlessEventChannel channel, HeldContext context, IPacket packet, boolean trailing) {
 		var body = new FriendlyByteBuf(Unpooled.buffer());
 		try {
 			packet.write(body); if (trailing) body.writeByte(0);

@@ -500,9 +500,9 @@ class ConfigHandlerVersionTest {
     }
 
     @Test
-    void explicitResetRewritesClientAndServerEvenWhenDefaultHashIsUnchanged(@TempDir Path tempDir)
+    void explicitResetRewritesClientAndServerEvenWhenModelMatchesDefaults(@TempDir Path tempDir)
         throws IOException {
-        Path clientPath = tempDir.resolve("client-same-hash.json");
+        Path clientPath = tempDir.resolve("client-unchanged-model.json");
         ConfigHandler<ClientConfig> client = client(clientPath);
         assertTrue(client.saveSafely());
         Files.writeString(
@@ -512,7 +512,7 @@ class ConfigHandlerVersionTest {
         client.resetToDefaults();
         assertFalse(readRoot(clientPath).has("resetSentinel"));
 
-        Path serverPath = tempDir.resolve("server-same-hash.json");
+        Path serverPath = tempDir.resolve("server-unchanged-model.json");
         ConfigHandler<ServerConfig> server = new ConfigHandler<>(ServerConfig.class, serverPath, CURRENT_VERSION);
         assertTrue(server.saveSafely());
         Files.writeString(

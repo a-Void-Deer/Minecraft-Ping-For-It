@@ -424,7 +424,11 @@ Rationale and alternatives are owned by
 ## Per-target-type field policy
 
 The persisted field policy is server-owned and compiles allow and deny
-selectors plus an exact child deny list for each of the five target types. The
+selectors plus an exact child deny list for each of the five target types.
+Lookups of the same target type share the compiled effective rules but not a
+permission decision. The
+[target content preview](#target-content-preview) still uses the current
+permission. The
 persisted shape, the field-selector syntax, the child reference form, and the
 semantic child-deny defaults are catalogued in
 [server configuration](../../config/server.md#presentation-policy-object); this

@@ -1,6 +1,7 @@
 package nx.pingwheel.common.interaction.state;
 
 import java.util.Objects;
+import java.util.UUID;
 
 import nx.pingwheel.common.domain.MarkerId;
 import nx.pingwheel.common.domain.PingType;
@@ -29,12 +30,15 @@ public sealed interface PingInteractionAction {
 	}
 
 	/**
-	 * Request cancellation of the marker identified by {@code markerId}.
+	 * Unping the selected marker. Owner and dimension bind local dismissal to
+	 * the same cancellation context; only the id is sent to server authority.
 	 */
-	record CancelMarker(MarkerId markerId) implements PingInteractionAction {
+	record CancelMarker(MarkerId markerId, UUID owner, String dimensionId) implements PingInteractionAction {
 
 		public CancelMarker {
 			Objects.requireNonNull(markerId, "markerId");
+			Objects.requireNonNull(owner, "owner");
+			Objects.requireNonNull(dimensionId, "dimensionId");
 		}
 	}
 

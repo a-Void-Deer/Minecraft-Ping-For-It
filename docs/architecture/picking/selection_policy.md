@@ -61,8 +61,7 @@ same immutable policy is consumed by the ordinary trace, by the Precise
 branch's live casts while the hold is open, and by provider supplements; the
 live-capture boundary is owned by
 [capture](capture.md#precise-live-candidate-capture). A deferred compatibility
-press stores only its ray and reads this policy when its later capture starts;
-that sequence is owned by
+press reads this policy when its later capture starts; that sequence is owned by
 [long-press compatibility](../input/long-press-compatibility.md).
 
 Spectator entities are always excluded, including when

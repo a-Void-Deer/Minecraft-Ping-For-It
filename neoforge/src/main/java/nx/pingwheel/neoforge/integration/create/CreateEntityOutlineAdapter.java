@@ -2,7 +2,6 @@ package nx.pingwheel.neoforge.integration.create;
 
 import java.util.Objects;
 
-import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import com.simibubi.create.content.contraptions.AbstractContraptionEntity;
 import com.simibubi.create.content.contraptions.glue.SuperGlueEntity;
@@ -19,6 +18,8 @@ import net.minecraft.world.phys.Vec3;
 
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.diagnostics.DiagnosticLogger;
+import nx.pingwheel.common.integration.sable.client.SableClientEntityFrames;
+import nx.pingwheel.common.math.EntityFrameResolution;
 import org.apache.logging.log4j.Level;
 import org.jetbrains.annotations.Nullable;
 import nx.pingwheel.common.client.outline.AabbOutlineMask;
@@ -231,40 +232,56 @@ public final class CreateEntityOutlineAdapter {
 			}
 
 			@Nullable OutlineOnlyBufferSource outlineOnly = null;
-			boolean dispatchStarted = false;
+			DispatchStart dispatchStarted = new DispatchStart();
 			try {
-				int color = opaqueColor(context);
-				shared.setColor(red(color), green(color), blue(color), 255);
-				outlineOnly = new OutlineOnlyBufferSource(
-					shared, color, TextureAtlas.LOCATION_BLOCKS, MAX_RENDER_VERTICES);
-
 				Minecraft minecraft = Objects.requireNonNull(Minecraft.getInstance(), "minecraft");
 				EntityRenderDispatcher dispatcher = Objects.requireNonNull(
 					minecraft.getEntityRenderDispatcher(), "entityRenderDispatcher");
 				Vec3 camera = context.cameraPosition();
-				double x = Mth.lerp(context.partialTick(), entity.xo, entity.getX()) - camera.x;
-				double y = Mth.lerp(context.partialTick(), entity.yo, entity.getY()) - camera.y;
-				double z = Mth.lerp(context.partialTick(), entity.zo, entity.getZ()) - camera.z;
+				Vec3 nativeAnchor = new Vec3(
+					Mth.lerp(context.partialTick(), entity.xo, entity.getX()),
+					Mth.lerp(context.partialTick(), entity.yo, entity.getY()),
+					Mth.lerp(context.partialTick(), entity.zo, entity.getZ()));
 				float yaw = Mth.lerp(context.partialTick(), entity.yRotO, entity.getYRot());
-				if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z) || !Float.isFinite(yaw)) {
+				if (!finite(nativeAnchor) || !Float.isFinite(yaw)) {
 					diagnostics.report(entity, "nonfinite-interpolated-position", "on", true,
-						outlineOnly.vertexCount(), null, EntityBlockGeometryOutcome.FAILED);
+						0, null, EntityBlockGeometryOutcome.FAILED);
 					return EntityBlockGeometryOutcome.FAILED;
 				}
 
+				EntityFrameResolution frame = SableClientEntityFrames.render(entity, context.partialTick());
+
+				int color = opaqueColor(context);
+				shared.setColor(red(color), green(color), blue(color), 255);
+				OutlineOnlyBufferSource destination = new OutlineOnlyBufferSource(
+					shared, color, TextureAtlas.LOCATION_BLOCKS, MAX_RENDER_VERTICES);
+				outlineOnly = destination;
+
 				try (CreateEntityOutlineMaskScope.Scope ignored = CreateEntityOutlineMaskScope.enter()) {
-					PoseStack poseStack = new PoseStack();
-					dispatchStarted = true;
-					dispatcher.render(
-						entity,
-						x,
-						y,
-						z,
+					CreateEntityOutlineDispatch.Result result = CreateEntityOutlineDispatch.dispatch(
+						nativeAnchor,
+						camera,
 						yaw,
 						context.partialTick(),
-						poseStack,
-						outlineOnly,
-						dispatcher.getPackedLightCoords(entity, context.partialTick()));
+						frame,
+						(dispatchX, dispatchY, dispatchZ, dispatchYaw, dispatchPartialTick, poseStack) -> {
+							dispatchStarted.started = true;
+							dispatcher.render(
+								entity,
+								dispatchX,
+								dispatchY,
+								dispatchZ,
+								dispatchYaw,
+								dispatchPartialTick,
+								poseStack,
+								destination,
+								dispatcher.getPackedLightCoords(entity, dispatchPartialTick));
+						});
+					if (result == CreateEntityOutlineDispatch.Result.FRAME_UNAVAILABLE) {
+						diagnostics.report(entity, "entity-frame-unavailable", "on", true, 0, null,
+							EntityBlockGeometryOutcome.EMPTY);
+						return EntityBlockGeometryOutcome.EMPTY;
+					}
 				}
 
 				int vertices = outlineOnly.vertexCount();
@@ -285,7 +302,7 @@ public final class CreateEntityOutlineAdapter {
 					return EntityBlockGeometryOutcome.RENDERED;
 				}
 
-				diagnostics.report(entity, dispatchStarted ? "renderer-failed-before-vertices" : "render-setup-failed", "on", true, 0, failure,
+				diagnostics.report(entity, dispatchStarted.started ? "renderer-failed-before-vertices" : "render-setup-failed", "on", true, 0, failure,
 					EntityBlockGeometryOutcome.FAILED);
 				return EntityBlockGeometryOutcome.FAILED;
 			}
@@ -435,6 +452,10 @@ public final class CreateEntityOutlineAdapter {
 
 	private static final class VertexCounter {
 		private int count;
+	}
+
+	private static final class DispatchStart {
+		private boolean started;
 	}
 
 }

@@ -32,12 +32,10 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
-import net.minecraft.world.phys.shapes.CollisionContext;
 import nx.pingwheel.common.marker.TargetKey;
 import nx.pingwheel.common.mixin.DisplayBlockDisplayAccessor;
 import nx.pingwheel.common.config.ClientConfig;
 import nx.pingwheel.common.config.EntityBlockRenderMode;
-import nx.pingwheel.common.integration.sable.client.SableClientProvider;
 import nx.pingwheel.common.diagnostics.Diagnostics;
 import nx.pingwheel.common.diagnostics.DiagnosticChannel;
 import org.apache.logging.log4j.Level;
@@ -153,7 +151,6 @@ public final class VirtualBlockDisplayRenderer {
 	private final Map<String, Integer> frameFailures = new LinkedHashMap<>();
 
 	private boolean displayCreationWarned;
-	private @Nullable ClientLevel cachedLevel;
 	private @Nullable Display.BlockDisplay cachedDisplay;
 	private final EntityBlockGeometryRunner entityBlockGeometryRunner;
 
@@ -186,21 +183,16 @@ public final class VirtualBlockDisplayRenderer {
 		Camera camera,
 		float builtInPartialTick,
 		float flywheelPartialTick,
-		BlockOutlineState state,
 		BlockModelOutlineState frameState
 	) {
 		Objects.requireNonNull(level, "level");
 		Objects.requireNonNull(camera, "camera");
-		Objects.requireNonNull(state, "state");
 		Objects.requireNonNull(frameState, "frameState");
 
 		frameFailures.clear();
 
 		String dimensionId = level.dimension().location().toString();
 		Vec3 cameraPosition = camera.getPosition();
-		Entity cameraEntity = camera.getEntity();
-		CollisionContext collisionContext = cameraEntity == null
-			? CollisionContext.empty() : CollisionContext.of(cameraEntity);
 		Minecraft minecraft = Minecraft.getInstance();
 		EntityRenderDispatcher entityDispatcher = minecraft.getEntityRenderDispatcher();
 		BlockEntityRenderDispatcher blockEntityDispatcher = minecraft.getBlockEntityRenderDispatcher();
@@ -226,20 +218,11 @@ public final class VirtualBlockDisplayRenderer {
 				frameState);
 		}
 
-		for (Map.Entry<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> entry
-			: state.externalSnapshot().entrySet()) {
-			TargetKey.ExternalBlockKey blockKey = entry.getKey();
-			ExternalBlockOutlineSpec spec = entry.getValue();
-
-			if (!blockKey.dimensionId().equals(dimensionId)) {
-				continue;
-			}
-
-			if (renderExternalBlockModel(
-				level, cameraPosition, collisionContext, builtInPartialTick, flywheelPartialTick,
-				entityDispatcher, blockEntityDispatcher, blockKey, spec) == EntityBlockGeometryOutcome.RENDERED) {
-				frameState.addExternalSuccess(blockKey);
-			}
+		for (ExternalBlockFramePresentation presentation : frameState.externalPresentations()) {
+			if (!presentation.isFor(level, dimensionId)) continue;
+			presentation.dispatchModels(frameState, (subject, outcomeObserver) -> renderExternalSubject(
+				presentation, subject, level, cameraPosition, builtInPartialTick, flywheelPartialTick,
+				entityDispatcher, blockEntityDispatcher, frameState.frameId(), outcomeObserver));
 		}
 
 		if (!frameFailures.isEmpty()) {
@@ -297,7 +280,7 @@ public final class VirtualBlockDisplayRenderer {
 		float flywheelPartialTick,
 		String renderTargetTypeId,
 		TargetKey.BlockKey targetKey,
-		BiConsumer<String, EntityBlockGeometryOutcome> outcomeObserver
+		@Nullable BiConsumer<String, EntityBlockGeometryOutcome> outcomeObserver
 	) {
 		// Read the live local mode for every entity-block render attempt. It is
 		// intentionally absent from the ordinary `block` route above and is not
@@ -336,7 +319,7 @@ public final class VirtualBlockDisplayRenderer {
 		float builtInPartialTick,
 		float flywheelPartialTick,
 		TargetKey.BlockKey blockKey,
-		BiConsumer<String, EntityBlockGeometryOutcome> outcomeObserver
+		@Nullable BiConsumer<String, EntityBlockGeometryOutcome> outcomeObserver
 	) {
 		BlockPos pos = subject.blockPos();
 		BlockState blockState = subject.blockState();
@@ -365,97 +348,70 @@ public final class VirtualBlockDisplayRenderer {
 	}
 
 	/**
-	 * Attempts the configured geometry route for a provider-owned block outline.
-	 * The provider resolves a fresh local state and pose for this frame; no
-	 * BlockEntity instance is retained or looked up in the parent level.
-	 * Ordinary {@code block} targets use the existing cached virtual-display
-	 * route, while {@code entity_block} targets use the shared runner for direct
-	 * BER, baked-model, and (when enabled) optional geometry sources.
+	 * Attempts the configured geometry route for one already-resolved external subject.
+	 * The external marker key remains the geometry source identity even for a proxy owner.
 	 */
-	private EntityBlockGeometryOutcome renderExternalBlockModel(
+	private boolean renderExternalSubject(
+		ExternalBlockFramePresentation presentation,
+		BlockRenderSubject subject,
 		ClientLevel level,
 		Vec3 cameraPosition,
-		CollisionContext collisionContext,
 		float builtInPartialTick,
 		float flywheelPartialTick,
 		EntityRenderDispatcher entityDispatcher,
 		BlockEntityRenderDispatcher blockEntityDispatcher,
-		TargetKey.ExternalBlockKey targetKey,
-		ExternalBlockOutlineSpec spec
+		long frameId,
+		@Nullable BiConsumer<String, EntityBlockGeometryOutcome> outcomeObserver
 	) {
+		ExternalBlockOutlineSpec spec = presentation.spec();
+		BlockPos pos = subject.blockPos();
+		BlockState blockState = subject.blockState();
+		String renderType = subject.renderTargetTypeId();
 		FailureRoute failureRoute = FailureRoute.BLOCK_DISPLAY;
 		FailureStage failureStage = FailureStage.RENDER;
 		try {
-			var presentationResult = SableClientProvider.resolvePresentation(
-				level, spec.target(), builtInPartialTick, collisionContext);
-
-			if (presentationResult.isEmpty()) {
-				return EntityBlockGeometryOutcome.EMPTY;
-			}
-
-			var presentation = presentationResult.orElseThrow();
-			BlockState blockState = presentation.blockState();
-			var actualRegistryKey = BuiltInRegistries.BLOCK.getKey(blockState.getBlock());
-
-			// The provider performs the same check at its boundary. Keep the
-			// renderer-side comparison explicit so a changed/invalid presentation
-			// can never turn into a model success.
-			if (actualRegistryKey == null
-				|| !targetKey.expectedBlockRegistryId().equals(actualRegistryKey.toString())) {
-				return EntityBlockGeometryOutcome.EMPTY;
-			}
-
 			boolean nativeGlowMatches = ClientConfig.HANDLER.getConfig()
 				.getBlockDisplayPolicy()
-				.shouldUseNativeGlow(spec.targetTypeId(), blockState);
+				.shouldUseNativeGlow(renderType, blockState);
 			BlockModelOutlineRoute route = BlockModelOutlineRoute.routeExternal(
-				spec.targetTypeId(), nativeGlowMatches,
+				renderType, nativeGlowMatches,
 				blockState.getRenderShape() == RenderShape.MODEL);
-
-			BlockPos localBlockPos = presentation.localBlockPos();
 
 			if (route == BlockModelOutlineRoute.ENTITY_BLOCK) {
 				failureRoute = FailureRoute.ENTITY_BLOCK;
 				failureStage = FailureStage.GEOMETRY_RUNNER;
 				EntityBlockRenderMode mode =
 					ClientConfig.HANDLER.getConfig().getEntityBlockRenderMode();
-				if (presentation.localLevel().getBlockEntity(localBlockPos) == null) {
-					// A provider state can outlive or temporarily lose its live
-					// BlockEntity. Do not let the static baked source turn that
-					// incomplete entity_block back into a model success.
-					return EntityBlockGeometryOutcome.EMPTY;
-				}
-				EntityBlockGeometryTransform transform =
-					new EntityBlockGeometryTransform(presentation.renderPose());
-
-				boolean rendered = entityBlockGeometryRunner.run(
-					mode,
-					() -> new EntityBlockGeometryContext(
-						presentation.localLevel(),
-						localBlockPos,
+				// The runner never evaluates this factory in shape-only mode. A
+				// missing resident BE affects BER, not an eligible baked model.
+				Supplier<EntityBlockGeometryContext> contextFactory = () -> {
+					ExternalBlockReadView view = presentation.view();
+					return new EntityBlockGeometryContext(
+						level,
+						pos,
 						blockState,
-						// The runner asks for a new context for every source. Resolve the
-						// local BlockEntity at that point rather than retaining an instance
-						// identity across frames or source attempts.
-						presentation.localLevel().getBlockEntity(localBlockPos),
+						view.getBlockEntity(pos),
 						spec.argbColor(),
 						cameraPosition,
 						builtInPartialTick,
 						flywheelPartialTick,
-						LevelRenderer.getLightColor(presentation.localLevel(), localBlockPos),
+						LevelRenderer.getLightColor(new ExternalBlockRenderView(view, level), blockState, pos),
 						entityDispatcher,
 						blockEntityDispatcher,
 						Minecraft.getInstance().levelRenderer,
-						targetKey,
-						spec.targetTypeId(),
-						BlockModelOutlineState.INSTANCE.frameId(),
-						transform));
-				return rendered
-					? EntityBlockGeometryOutcome.RENDERED : EntityBlockGeometryOutcome.EMPTY;
+						spec.blockKey(),
+						renderType,
+						frameId,
+						presentation.transform(),
+						view);
+				};
+				return outcomeObserver == null
+					? entityBlockGeometryRunner.run(mode, contextFactory)
+					: entityBlockGeometryRunner.run(mode, contextFactory, outcomeObserver);
 			}
 
 			if (route != BlockModelOutlineRoute.BLOCK_DISPLAY) {
-				return EntityBlockGeometryOutcome.EMPTY;
+				return false;
 			}
 
 			// Ordinary provider-owned blocks retain the existing virtual display
@@ -463,37 +419,31 @@ public final class VirtualBlockDisplayRenderer {
 			// attempt, so entity_block never reaches this branch.
 			return renderBlockDisplay(
 				level,
-				localBlockPos,
+				pos,
 				blockState,
 				entityDispatcher,
 				builtInPartialTick,
-				() -> LevelRenderer.getLightColor(presentation.localLevel(), localBlockPos),
+				() -> LevelRenderer.getLightColor(level, pos),
 				spec.argbColor(),
-				actualRegistryKey.toString(),
-				targetKey,
+				subject.expectedBlockRegistryId(),
+				spec.blockKey(),
 				() -> {
-					Vec3 modelOffset = blockState.getOffset(presentation.localLevel(), localBlockPos);
-					Vec3 worldBlockOrigin = presentation.worldBlockOrigin(modelOffset);
-					PoseStack poseStack = new PoseStack();
-					ExternalBlockOutlineTransform.apply(
-						poseStack,
-						worldBlockOrigin,
-						presentation.orientationScale(),
-						cameraPosition);
+					Vec3 modelOffset = blockState.getOffset(presentation.view(), pos);
+					PoseStack poseStack = presentation.transform().createPoseStack(pos, cameraPosition, modelOffset);
 					return new BlockDisplayRenderArguments(
-						poseStack, 0.0D, 0.0D, 0.0D, blockState.getSeed(localBlockPos));
-				});
+						poseStack, 0.0D, 0.0D, 0.0D, blockState.getSeed(pos));
+				}) == EntityBlockGeometryOutcome.RENDERED;
 		} catch (Exception | LinkageError | AssertionError failure) {
 			recordFailure(
-				targetKey.expectedBlockRegistryId(),
-				null,
-				null,
-				targetKey,
+				subject.expectedBlockRegistryId(),
+				pos,
+				blockState,
+				spec.blockKey(),
 				Display.BlockDisplay.class,
 				failureRoute,
 				failureStage,
 				failure);
-			return EntityBlockGeometryOutcome.FAILED;
+			return false;
 		}
 	}
 
@@ -840,7 +790,6 @@ public final class VirtualBlockDisplayRenderer {
 			// virtual display must never be reused: drop the cache so the next
 			// attempt rebuilds it from scratch.
 			cachedDisplay = null;
-			cachedLevel = null;
 			recordFailure(
 				failureRegistryId, pos, blockState, targetKey, Display.BlockDisplay.class,
 				FailureRoute.BLOCK_DISPLAY, stage, throwable);
@@ -858,17 +807,16 @@ public final class VirtualBlockDisplayRenderer {
 
 	/**
 	 * Returns the single cached virtual block display for {@code level},
-	 * recreating it when the level identity changed or after
-	 * {@link #clear()}. The display is never added to the level.
+	 * recreating it when the display no longer belongs to the same level object
+	 * or after {@link #clear()}. The display is never added to the level.
 	 */
 	private @Nullable Display.BlockDisplay displayFor(ClientLevel level) {
-		if (cachedDisplay != null && cachedLevel == level) {
+		if (cachedDisplay != null && cachedDisplay.level() == level) {
 			return cachedDisplay;
 		}
 
 		try {
 			cachedDisplay = new Display.BlockDisplay(EntityType.BLOCK_DISPLAY, level);
-			cachedLevel = level;
 			return cachedDisplay;
 		} catch (Exception | LinkageError | AssertionError throwable) {
 			if (!displayCreationWarned && Diagnostics.client().atNormal().isEnabled(Level.ERROR)) {
@@ -880,18 +828,17 @@ public final class VirtualBlockDisplayRenderer {
 			}
 
 			cachedDisplay = null;
-			cachedLevel = null;
 			return null;
 		}
 	}
 
 	/**
-	 * Drops the cached virtual display; called when leaving a server so a
-	 * stale level identity can never be reused.
+	 * Drops the cached virtual display; called at the shared client-world
+	 * replacement/unload boundary so the previous level cannot stay reachable,
+	 * and when leaving a server so a stale level identity can never be reused.
 	 */
 	public void clear() {
 		cachedDisplay = null;
-		cachedLevel = null;
 	}
 
 	/**

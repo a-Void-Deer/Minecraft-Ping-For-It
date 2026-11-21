@@ -4,9 +4,10 @@ import java.util.Objects;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import org.jetbrains.annotations.Nullable;
 
 /**
- * Dispatches the ordinary subjects of one resolved presentation for one frame.
+ * Dispatches the subjects of one resolved presentation for one frame.
  *
  * <p>This small render-loop seam owns the source-conditioned coverage decision
  * so it can be exercised without a client world. The caller owns live-state
@@ -18,7 +19,7 @@ final class BlockPresentationSubjectDispatcher {
 	interface SubjectGeometryRenderer {
 		boolean render(
 			BlockRenderSubject subject,
-			BiConsumer<String, EntityBlockGeometryOutcome> outcomeObserver
+			@Nullable BiConsumer<String, EntityBlockGeometryOutcome> outcomeObserver
 		);
 	}
 
@@ -35,7 +36,7 @@ final class BlockPresentationSubjectDispatcher {
 		Objects.requireNonNull(recordSuccess, "recordSuccess");
 		Objects.requireNonNull(geometryRenderer, "geometryRenderer");
 
-		BlockPresentationCoverageTracker coverageTracker =
+		@Nullable BlockPresentationCoverageTracker coverageTracker =
 			BlockPresentationCoverageTracker.forPresentation(presentation);
 		for (BlockRenderSubject subject : presentation.renderSubjects()) {
 			if (!isLiveAndCurrent.test(subject)) {
@@ -47,7 +48,7 @@ final class BlockPresentationSubjectDispatcher {
 				continue;
 			}
 
-			BiConsumer<String, EntityBlockGeometryOutcome> outcomeObserver = coverageTracker == null
+			@Nullable BiConsumer<String, EntityBlockGeometryOutcome> outcomeObserver = coverageTracker == null
 				? null
 				: coverageTracker.outcomeObserverIfRequired(subject.subjectId());
 			if (geometryRenderer.render(subject, outcomeObserver)) {

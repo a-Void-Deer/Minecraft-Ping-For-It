@@ -254,13 +254,13 @@ class CreateFluidTankProductionBoundaryTest {
 		try (var mods = new Mods("6.0.10"); var fixture = new TankNativeFixture(2, 3, BlockPos.ZERO)) {
 			fixture.clientEntities();
 			try (var registration = BlockPresentationResolverRegistry.INSTANCE.register(resolver(fixture.loader))) {
-				var store = new ClientMarkerStore(0); var key = new TargetKey.CreateTankKey("minecraft:overworld", 0, 0, 0, "create:fluid_tank");
+				var store = VaultNativeFixture.localSnapshotSpanStore(); var key = new TargetKey.CreateTankKey("minecraft:overworld", 0, 0, 0, "create:fluid_tank");
 				var hit = new BlockPos(1, 2, 1); var anchor = new MarkerAnchor(1.5, 2.5, 1.5);
 				store.onCreated(new MarkerSnapshot(new MarkerId(1), VaultNativeFixture.OWNER, fixture.target(hit), key, "entity_block", "attention", anchor, 1, 30), 0);
 				store.onWinnerChanged(key, Optional.of(new MarkerId(1)));
 				var outline = BlockOutlineState.INSTANCE; var models = BlockModelOutlineState.INSTANCE;
 				try {
-					outline.prepare(store, "minecraft:overworld"); models.beginFrame(); models.preparePresentations(fixture.client, outline);
+					outline.prepare(store, "minecraft:overworld"); models.beginFrame(); models.preparePresentations(fixture.client, outline, 0);
 					var batch = models.presentations(); var presentation = batch.getFirst(); assertEquals(12, presentation.renderSubjects().size());
 					var visited = new ArrayList<BlockPos>(); var missingModel = new BlockPos(1, 1, 1);
 					TankPresentationTestPort.dispatch(presentation,
@@ -271,11 +271,11 @@ class CreateFluidTankProductionBoundaryTest {
 							visited.add(subject.blockPos()); return !subject.blockPos().equals(missingModel);
 						});
 					assertEquals(presentation.renderSubjects().stream().map(BlockRenderSubject::blockPos).toList(), visited);
-					assertFalse(models.allPresentationsCovered());
+					assertFalse(models.allCoveredByModels());
 					assertEquals(List.of(missingModel), presentation.renderSubjects().stream().filter(s -> !models.successKeys().contains(s.successKey(presentation.sourceSpec()))).map(BlockRenderSubject::blockPos).toList());
 					fixture.renderReads = true; var vertices = new Vertices();
 					BlockOutlineRenderer.render(fixture.client, allocate(net.minecraft.client.Camera.class), net.minecraft.world.phys.Vec3.ZERO,
-						vertices, outline, batch, models.successKeys(), java.util.Set.of(), 0);
+						vertices, models);
 					assertEquals(24, vertices.positions.size(), "one missing cell model emits its own twelve native edges");
 					assertTrue(vertices.positions.stream().allMatch(v -> v.x >= 1 && v.x <= 2 && v.y >= 1 && v.y <= 2 && v.z >= 1 && v.z <= 2));
 					fixture.renderReads = false;
@@ -283,13 +283,13 @@ class CreateFluidTankProductionBoundaryTest {
 					models.addSuccess(presentation.renderSubjects().getFirst().successKey(presentation.sourceSpec()));
 					assertEquals(11, presentation.renderSubjects().stream().filter(s -> !models.successKeys().contains(s.successKey(presentation.sourceSpec()))).count());
 					fixture.entities.remove(fixture.root); int reads = fixture.mapReads;
-					models.preparePresentations(fixture.client, outline); assertSame(batch, models.presentations()); assertEquals(reads, fixture.mapReads);
-					models.beginFrame(); models.preparePresentations(fixture.client, outline);
+					models.preparePresentations(fixture.client, outline, 0); assertSame(batch, models.presentations()); assertEquals(reads, fixture.mapReads);
+					models.beginFrame(); models.preparePresentations(fixture.client, outline, 0);
 					var direct = models.presentations().getFirst().renderSubjects().getFirst();
 					assertEquals(hit, direct.blockPos()); assertEquals(BlockPresentationRelation.DIRECT, direct.relation());
 					fixture.renderReads = true; vertices.positions.clear();
 					BlockOutlineRenderer.render(fixture.client, allocate(net.minecraft.client.Camera.class), net.minecraft.world.phys.Vec3.ZERO,
-						vertices, outline, models.presentations(), java.util.Set.of(), java.util.Set.of(), 0);
+						vertices, models);
 					assertEquals(24, vertices.positions.size());
 					assertTrue(vertices.positions.stream().allMatch(v -> v.x >= hit.getX() && v.x <= hit.getX() + 1 && v.y >= hit.getY()
 						&& v.y <= hit.getY() + 1 && v.z >= hit.getZ() && v.z <= hit.getZ() + 1));
@@ -304,13 +304,13 @@ class CreateFluidTankProductionBoundaryTest {
 		try (var mods = new Mods("6.0.10"); var fixture = new TankNativeFixture(3, 3, BlockPos.ZERO)) {
 			fixture.clientEntities();
 			try (var registration = BlockPresentationResolverRegistry.INSTANCE.register(resolver(fixture.loader))) {
-				var store = new ClientMarkerStore(0); var key = new TargetKey.CreateTankKey("minecraft:overworld", 0, 0, 0, "create:fluid_tank");
+				var store = VaultNativeFixture.localSnapshotSpanStore(); var key = new TargetKey.CreateTankKey("minecraft:overworld", 0, 0, 0, "create:fluid_tank");
 				var hit = new BlockPos(1, 1, 1);
 				store.onCreated(new MarkerSnapshot(new MarkerId(1), VaultNativeFixture.OWNER, fixture.target(hit), key, "entity_block", "attention", new MarkerAnchor(1.5, 1.5, 1.5), 1, 30), 0);
 				store.onWinnerChanged(key, Optional.of(new MarkerId(1)));
 				var outline = BlockOutlineState.INSTANCE; var models = BlockModelOutlineState.INSTANCE;
 				try {
-					outline.prepare(store, "minecraft:overworld"); models.beginFrame(); models.preparePresentations(fixture.client, outline);
+					outline.prepare(store, "minecraft:overworld"); models.beginFrame(); models.preparePresentations(fixture.client, outline, 0);
 					var presentation = models.presentations().getFirst();
 					assertTrue(presentation.coverageRelations().isEmpty(), "tank presentations declare no coverage relation");
 					var shell = presentation.renderSubjects().stream().map(BlockRenderSubject::blockPos).toList();
@@ -326,14 +326,14 @@ class CreateFluidTankProductionBoundaryTest {
 					assertEquals(shell, visited); assertFalse(visited.contains(hit)); assertTrue(models.successKeys().isEmpty());
 					fixture.renderReads = true; var vertices = new Vertices();
 					BlockOutlineRenderer.render(fixture.client, allocate(net.minecraft.client.Camera.class), net.minecraft.world.phys.Vec3.ZERO,
-						vertices, outline, models.presentations(), models.successKeys(), java.util.Set.of(), 0);
+						vertices, models);
 					assertEquals(26 * 24, vertices.positions.size(), "each published shell subject whose model route declined keeps its own native edges");
 					for (var subject : presentation.renderSubjects()) models.addSuccess(subject.successKey(presentation.sourceSpec()));
 					assertEquals(26, models.successKeys().size()); models.clearSuccesses();
 					assertEquals(26, models.presentations().getFirst().renderSubjects().size());
 					vertices.positions.clear();
 					BlockOutlineRenderer.render(fixture.client, allocate(net.minecraft.client.Camera.class), net.minecraft.world.phys.Vec3.ZERO,
-						vertices, outline, models.presentations(), models.successKeys(), java.util.Set.of(), 0);
+						vertices, models);
 					assertEquals(26 * 24, vertices.positions.size(), "cleared successes and the shape-only route cannot restore the interior");
 				} finally { fixture.renderReads = false; models.clear(); outline.clear(); }
 			}
@@ -422,9 +422,13 @@ class CreateFluidTankProductionBoundaryTest {
 				assertInstanceOf(TargetKey.CreateTankKey.class, first.targetKey()); assertEquals(first.targetKey(), second.targetKey());
 				assertEquals(fixture.target(end), second.target()); assertEquals(new MarkerAnchor(end.getX() + .5, end.getY() + .5, end.getZ() + .5), second.anchor());
 				assertEquals(second.id(), store.winnerFor(first.targetKey(), VaultNativeFixture.OWNER).orElseThrow().id()); assertEquals(first.id(), store.winnerFor(first.targetKey(), outsider).orElseThrow().id());
-				var client = new ClientMarkerStore(0); receive(client, first); receive(client, second);
+				var client = VaultNativeFixture.localSnapshotSpanStore(); receive(client, first); receive(client, second);
 				var winner = wire(PresentationS2CPacket.winner(1, 1, first.targetKey(), Optional.of(second.id()))); client.onWinnerChanged(winner.targetKey(), winner.winnerId());
-				assertEquals(second.id(), client.winnerId(first.targetKey()).orElseThrow()); client.expireFallback(20); assertEquals(first.id(), client.winnerId(first.targetKey()).orElseThrow());
+				var key = first.targetKey();
+				assertEquals(second.id(), client.outlineWinnersInDimension(key.dimensionId()).get(key).id());
+				client.expireFallback(20);
+				assertEquals(first.id(), client.winnerMarker(key).orElseThrow().id());
+				assertFalse(client.outlineWinnersInDimension(key.dimensionId()).containsKey(key), "only the HUD can recover a lost winner locally");
 				var removed = fixture.entities.remove(fixture.root.offset(1, 1, 1));
 				var fallback = service.create(VaultNativeFixture.OWNER, fixture.target(end), "attention", 3, 40, List.of(VaultNativeFixture.OWNER)).creation().orElseThrow().marker();
 				assertEquals(TargetKey.from(fixture.target(end)), fallback.targetKey()); assertEquals(first.targetKey(), store.find(second.id()).orElseThrow().targetKey());

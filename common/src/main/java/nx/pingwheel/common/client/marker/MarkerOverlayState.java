@@ -2,7 +2,9 @@ package nx.pingwheel.common.client.marker;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -263,6 +265,46 @@ public final class MarkerOverlayState {
 		views.clear();
 		appliedNames.clear();
 		renderViews = List.of();
+	}
+
+	/**
+	 * Drops only this id, including its cached name and presentation point.
+	 * A null id is a silent no-op, preserving the established public contract.
+	 */
+	public void forgetMarker(@Nullable MarkerId id) {
+		@Nullable MarkerView removed = views.remove(id);
+		appliedNames.remove(id);
+		if (removed == null || renderViews.isEmpty()) return;
+
+		renderViews = renderViews.stream().filter(view -> view != removed).toList();
+	}
+
+	/**
+	 * Drops every named id, including its cached name and presentation point.
+	 * The immutable render snapshot is rebuilt at most once, so a batch removal
+	 * does not copy the whole list once per id; surviving views keep their
+	 * existing order.
+	 */
+	public void forgetMarkers(Collection<MarkerId> ids) {
+		Objects.requireNonNull(ids, "ids");
+		if (ids.isEmpty()) return;
+
+		if (ids.size() == 1) {
+			forgetMarker(ids.iterator().next());
+			return;
+		}
+
+		Set<MarkerView> removedViews = Collections.newSetFromMap(new IdentityHashMap<>());
+
+		for (MarkerId id : ids) {
+			@Nullable MarkerView removed = views.remove(id);
+			appliedNames.remove(id);
+			if (removed != null) removedViews.add(removed);
+		}
+
+		if (removedViews.isEmpty() || renderViews.isEmpty()) return;
+
+		renderViews = renderViews.stream().filter(view -> !removedViews.contains(view)).toList();
 	}
 
 	/**

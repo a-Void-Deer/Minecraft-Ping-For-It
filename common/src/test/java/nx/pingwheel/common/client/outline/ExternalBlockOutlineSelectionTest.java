@@ -22,18 +22,7 @@ class ExternalBlockOutlineSelectionTest {
 		Target.ExternalBlockTarget target = Target.ExternalBlockTarget.committed(
 			"minecraft:overworld", "sable", "tracking-id", "minecraft:chest", "sublevel/1,2,3", true);
 		MarkerId markerId = new MarkerId(4L);
-		ClientMarker marker = ClientMarker.from(
-			new MarkerSnapshot(
-				markerId,
-				new UUID(0L, 1L),
-				target,
-				"entity_block",
-				"attention",
-				new MarkerAnchor(1.0, 2.0, 3.0),
-				1L,
-				20L),
-			0L,
-			0L);
+		ClientMarker marker = marker(markerId, target);
 		TargetKey key = TargetKey.from(target);
 
 		Map<TargetKey.ExternalBlockKey, ExternalBlockOutlineSpec> selected =
@@ -66,7 +55,7 @@ class ExternalBlockOutlineSelectionTest {
 	}
 
 	private static ClientMarker marker(MarkerId id, Target.ExternalBlockTarget target) {
-		return ClientMarker.from(
+		return ClientMarker.withLocalDuration(
 			new MarkerSnapshot(
 				id,
 				new UUID(0L, 1L),
@@ -77,6 +66,7 @@ class ExternalBlockOutlineSelectionTest {
 				1L,
 				20L),
 			0L,
-			0L);
+			0L,
+			19L);
 	}
 }

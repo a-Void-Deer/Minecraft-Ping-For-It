@@ -195,6 +195,7 @@
 	"command.pingforit.channel.set.response": "Kanal auf „%s“ gesetzt",
 	"command.pingforit.channel.set.response.default": "Kanal auf Standard gesetzt",
 	"command.pingforit.channel.set.reject": "Kanalnamen sind auf eine Länge von %s Zeichen beschränkt",
+	"command.pingforit.channel.set.failure": "Kanaländerung wurde nicht gespeichert",
 	"pingforit.chat.pingmsg": "%s: %s - %s",
 	"pingforit.chat.pingmsg.template": "{playerName} meldet bei {targetName}: {pingType}",
 	"pingforit.chat.go_to.template.override": "{playerName} will zu {targetName} {pingType}",
@@ -551,6 +552,10 @@
   ,"settings.pingforit.scope.server.tooltip": "Servereinstellungen ansehen; Bearbeiten erfordert Berechtigungsstufe 3."
   ,"settings.pingforit.navigation.back.tooltip": "Zur Übersicht dieses Bereichs zurückkehren."
   ,"settings.pingforit.navigation.done.tooltip": "Client-Einstellungen speichern, Serveränderungen senden und schließen."
+  ,"settings.pingforit.save_failed.title": "Client-Einstellungen konnten nicht gespeichert werden"
+  ,"settings.pingforit.save_failed.message": "Beim Verlassen wird nicht erneut gespeichert, und ausstehende Serveränderungen werden nicht gesendet. Bereits wirksame Client-Änderungen bleiben bestehen."
+  ,"settings.pingforit.save_failed.continue": "Weiter bearbeiten"
+  ,"settings.pingforit.save_failed.exit": "Ohne Speichern schließen"
   ,"settings.pingforit.presentation.server.tooltip": "Feldregeln für den gewählten Zieltyp; Bearbeiten erfordert Berechtigungsstufe 3."
   ,"settings.pingforit.presentation.target_type.tooltip": "Wählen, für welchen Zieltyp Regeln angezeigt und bearbeitet werden."
   ,"settings.pingforit.presentation.selector.tooltip": "Feld-ID-Selektor, z. B. minecraft:entity.health oder create:kinetic.*.\n* passt nur innerhalb eines Namensraum- oder Pfadteils und nie über ':' hinweg.\nZum Anwenden Hinzufügen verwenden."

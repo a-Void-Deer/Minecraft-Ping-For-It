@@ -9,22 +9,20 @@ import nx.pingwheel.common.diagnostics.DiagnosticSide;
 import nx.pingwheel.common.diagnostics.DiagnosticFaultReporter.Stage;
 
 import net.minecraft.client.multiplayer.ClientLevel;
-import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
-import net.minecraft.world.phys.shapes.VoxelShape;
-import org.joml.Matrix4d;
-import org.joml.Matrix4f;
 
 import nx.pingwheel.common.domain.Target;
-import nx.pingwheel.common.client.outline.ExternalBlockOutlineTransform;
+import nx.pingwheel.common.client.outline.ExternalBlockFramePresentation;
+import nx.pingwheel.common.client.outline.ExternalBlockOutlineSpec;
 import nx.pingwheel.common.integration.IntegrationLinkGuard;
 import nx.pingwheel.common.integration.ModContext;
 import nx.pingwheel.common.integration.sable.SableDiagnostics;
 import nx.pingwheel.common.interaction.TargetSnapshot;
 import nx.pingwheel.common.integration.sable.server.SableExternalBlockLocator;
+import nx.pingwheel.common.math.SableBlockHitFrame;
 
 /**
  * Lazy, fail-soft client boundary for Sable external blocks.
@@ -43,11 +41,30 @@ public final class SableClientProvider {
 	private static volatile @Nullable SableClientCompanionAccess access;
 	private static volatile @Nullable SableClientCompanionAccess contentAccess;
 	private static volatile boolean contentUnavailable;
+	private static volatile @Nullable SableClientCompanionAccess framedCaptureAccess;
 	private static volatile SableDiagnostics diagnostics = SableDiagnostics.global(nx.pingwheel.common.diagnostics.Diagnostics.client());
 	private static final SablePresentationLogGate PRESENTATION_FAILURES =
 		new SablePresentationLogGate();
 
 	private SableClientProvider() {
+	}
+
+	/** Frozen-proof capture is an additive capability and cannot trip the established block/content guard. */
+	public static Optional<TargetSnapshot> capture(ClientLevel level, BlockHitResult hit,
+		Vec3 rayStart, Vec3 rayEnd, SableBlockHitFrame proof) {
+		if (!ModContext.HasSable || !proof.binds(hit)) return Optional.empty();
+		try {
+			@Nullable SableClientCompanionAccess current = framedCaptureAccess;
+			if (current == null) {
+				current = SableClientCompanionAccess.create(diagnostics);
+				framedCaptureAccess = current;
+			}
+			return current.capture(level, hit, rayStart, rayEnd, proof);
+		} catch (ReflectiveOperationException | RuntimeException | LinkageError unavailable) {
+			diagnostics.captureException("frozen-frame-capture", SableDiagnostics.OPERATION_UNAVAILABLE,
+				"proof-capture-unavailable", unavailable, "hit", hit);
+			return Optional.empty();
+		}
 	}
 
 	/**
@@ -139,17 +156,16 @@ public final class SableClientProvider {
 		var nativeBlocks = nx.pingwheel.common.interaction.candidate.CandidateBlockCapture.nativeBlocks();
 		return new nx.pingwheel.common.interaction.candidate.CandidateBlockCapture() {
 			@Override public Result capture(net.minecraft.world.level.Level level, BlockHitResult hit,
-				Vec3 start, Vec3 end, nx.pingwheel.common.interaction.candidate.CandidateWorkBudget budget) {
-				return nativeBlocks.capture(level, hit, start, end, budget);
+				Vec3 start, Vec3 end) {
+				return nativeBlocks.capture(level, hit, start, end);
 			}
 			@Override public boolean collectSupplemental(net.minecraft.world.level.Level level, Vec3 start, Vec3 end,
 				nx.pingwheel.common.math.RaycastPolicy policy, CollisionContext context, Vec3 cameraFeet,
-				nx.pingwheel.common.interaction.candidate.CandidateWorkBudget budget,
 				nx.pingwheel.common.interaction.candidate.CandidateCollector collector) {
 				if (!ModContext.HasSable) return true;
 				if (!enabled() || !(level instanceof ClientLevel clientLevel)) return false;
 				try {
-					return getAccess().collectSupplemental(clientLevel, start, end, policy, context, cameraFeet, budget, collector);
+					return getAccess().collectSupplemental(clientLevel, start, end, policy, context, cameraFeet, collector);
 				} catch (nx.pingwheel.common.interaction.candidate.ExactNativeShapeClip.Incomplete incomplete) {
 					diagnostics.capture("supplemental-ray", "incomplete");
 					return false;
@@ -215,15 +231,27 @@ public final class SableClientProvider {
 		}
 	}
 
-	/**
-	 * Resolves a committed external block using an empty collision context. The
-	 * result is used by marker icon/label presentation, where only the current
-	 * smooth world center is needed.
-	 */
-	public static Optional<ExternalBlockPresentation> resolvePresentation(
-		ClientLevel level, Target.ExternalBlockTarget target, float partialTick
+	/** Binds one external winner's outline subjects before the model and shape passes. */
+	public static Optional<ExternalBlockFramePresentation> resolveFramePresentation(
+		ClientLevel level, ExternalBlockOutlineSpec spec, float partialTick
 	) {
-		return resolvePresentation(level, target, partialTick, CollisionContext.empty());
+		Target.ExternalBlockTarget target = spec.target();
+		if (!enabled() || !PROVIDER_ID.equals(target.providerId())
+			|| !target.dimensionId().equals(level.dimension().location().toString())) return Optional.empty();
+		var locator = SableExternalBlockLocator.parse(target.providerLocator());
+		if (locator.isEmpty()) {
+			logPresentationFailure("outline-frame", "provider-locator-parse-failure", "target", target);
+			return Optional.empty();
+		}
+		try {
+			var result = getAccess().resolveFramePresentation(level, spec, locator.get(), partialTick);
+			if (result.isEmpty()) logPresentationFailure("outline-frame", "provider-unavailable", "target", target);
+			return result;
+		} catch (ReflectiveOperationException | RuntimeException | LinkageError | AssertionError unavailable) {
+			// Additive plot membership discovery must not trip the established block/content link guard.
+			logPresentationException("outline-frame", unavailable, "target", target);
+			return Optional.empty();
+		}
 	}
 
 	/**
@@ -263,52 +291,6 @@ public final class SableClientProvider {
 			return Optional.empty();
 		} catch (LinkageError failure) {
 			logPresentationException("resolve-position", failure, "target", target);
-			LINK_GUARD.disableSilently();
-			return Optional.empty();
-		}
-	}
-
-	/**
-	 * Resolves a committed external block and its current native shape in the
-	 * actual sub-level context. The render path supplies the live camera
-	 * collision context; no main-level state is consulted.
-	 */
-	public static Optional<ExternalBlockPresentation> resolvePresentation(
-		ClientLevel level,
-		Target.ExternalBlockTarget target,
-		float partialTick,
-		CollisionContext collisionContext
-	) {
-		if (!enabled()) {
-			return Optional.empty();
-		}
-
-		if (level == null || target == null || collisionContext == null
-			|| !PROVIDER_ID.equals(target.providerId()) || !target.isCommitted()) {
-			logPresentationFailure("resolve-presentation", "invalid-target", "target", target);
-			return Optional.empty();
-		}
-
-		if (SableExternalBlockLocator.parse(target.providerLocator()).isEmpty()) {
-			logPresentationFailure(
-				"resolve-presentation", "provider-locator-parse-failure",
-				"target", target,
-				"provider_locator", target.providerLocator());
-			return Optional.empty();
-		}
-
-		try {
-			Optional<ExternalBlockPresentation> result =
-				getAccess().resolve(level, target, partialTick, collisionContext);
-			if (result.isEmpty()) {
-				logPresentationFailure("resolve-presentation", "provider-unavailable", "target", target);
-			}
-			return result;
-		} catch (ReflectiveOperationException | RuntimeException failure) {
-			logPresentationException("resolve-presentation", failure, "target", target);
-			return Optional.empty();
-		} catch (LinkageError failure) {
-			logPresentationException("resolve-presentation", failure, "target", target);
 			LINK_GUARD.disableSilently();
 			return Optional.empty();
 		}
@@ -538,42 +520,5 @@ public final class SableClientProvider {
 		System.arraycopy(first, 0, result, 0, first.length);
 		System.arraycopy(second, 0, result, first.length, second.length);
 		return result;
-	}
-
-	/** Immutable render data resolved from the live Sable sub-level. */
-	public record ExternalBlockPresentation(
-		Vec3 worldCenter,
-		BlockPos localBlockPos,
-		net.minecraft.world.level.block.state.BlockState blockState,
-		ClientLevel localLevel,
-		VoxelShape shape,
-		Matrix4d renderPose
-	) {
-		public ExternalBlockPresentation {
-			Objects.requireNonNull(worldCenter, "worldCenter");
-			Objects.requireNonNull(localBlockPos, "localBlockPos");
-			Objects.requireNonNull(blockState, "blockState");
-			Objects.requireNonNull(localLevel, "localLevel");
-			Objects.requireNonNull(shape, "shape");
-			Objects.requireNonNull(renderPose, "renderPose");
-			renderPose = new Matrix4d(renderPose);
-		}
-
-		/** The transformed integer-corner origin, kept in double precision. */
-		public Vec3 worldBlockOrigin() {
-			return ExternalBlockOutlineTransform.worldBlockOrigin(
-				renderPose, localBlockPos);
-		}
-
-		/** The transformed model origin, including the live local-state offset. */
-		public Vec3 worldBlockOrigin(Vec3 modelOffset) {
-			return ExternalBlockOutlineTransform.worldBlockOrigin(
-				renderPose, localBlockPos, modelOffset);
-		}
-
-		/** The pose's orientation and non-uniform scale, without translation. */
-		public Matrix4f orientationScale() {
-			return ExternalBlockOutlineTransform.orientationScale(renderPose);
-		}
 	}
 }

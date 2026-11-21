@@ -948,12 +948,6 @@ public final class PresentationServer {
 		return Set.copyOf(result);
 	}
 
-	/** True when the exact reference is denied by the advertised or fresh child deny list. */
-	static boolean childBlackDenied(Session session, PresentationSettings settings, String targetTypeId,
-		PresentationPropertyRef ref) {
-		return ref != null && effectiveChildBlack(session, settings, targetTypeId).contains(ref);
-	}
-
 	private static Set<String> allowed(ServerPlayer player, Session session, PresentationAdapter adapter,
 		String targetTypeId) {
 		if (!Objects.equals(session.schemas.get(adapter.adapterId()), adapter.schema())) return Set.of();

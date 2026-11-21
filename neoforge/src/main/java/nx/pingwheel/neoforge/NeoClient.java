@@ -31,6 +31,8 @@ public class NeoClient {
 		"nx.pingwheel.neoforge.integration.create.CreateEntityOutlineAdapter";
 	private static final String CREATE_CONTRAPTION_RAYCAST_ADAPTER =
 		"nx.pingwheel.neoforge.integration.create.CreateContraptionRaycastAdapter";
+	private static final String AERONAUTICS_PROPELLER_RAYCAST_ADAPTER =
+		"nx.pingwheel.neoforge.integration.create.AeronauticsPropellerRaycastAdapter";
 	private static final String CREATE_FLYWHEEL_ADAPTER =
 		"nx.pingwheel.neoforge.integration.create.CreateFlywheelGeometryAdapter";
 	private static final String CREATE_WATER_WHEEL_RESOLVER =
@@ -47,6 +49,7 @@ public class NeoClient {
 	private static @Nullable Boolean lastFlywheelDetected;
 	private static @Nullable String lastEntityAdapterState;
 	private static @Nullable String lastContraptionRaycastAdapterState;
+	private static @Nullable String lastAeronauticsPropellerRaycastAdapterState;
 	private static @Nullable String lastFlywheelAdapterState;
 	private static @Nullable String lastWaterWheelResolverState;
 	private static @Nullable String lastCreateDoorResolverState;
@@ -55,6 +58,7 @@ public class NeoClient {
 	private static @Nullable String lastSimulatedResolverState;
 	private static boolean entityAdapterResolved;
 	private static boolean contraptionRaycastAdapterResolved;
+	private static boolean aeronauticsPropellerRaycastAdapterResolved;
 	private static boolean flywheelAdapterResolved;
 
 	public NeoClient(IEventBus modBus) {
@@ -62,11 +66,13 @@ public class NeoClient {
 		NeoForgeWorldAwareBlockModelOutlineAdapter.register();
 		loadCreateAdapters();
 		loadSimulatedResolver();
+		loadAeronauticsPropellerRaycastAdapter();
 		IPlatformClientEventService.INSTANCE.registerJoinServerEvent(() -> {
 			loadCreateAdapters();
 			loadSimulatedResolver();
+			loadAeronauticsPropellerRaycastAdapter();
 		});
-		IPlatformClientEventService.INSTANCE.registerLeaveServerEvent(NeoClient::closeCreateAdapters);
+		IPlatformClientEventService.INSTANCE.registerLeaveServerEvent(NeoClient::closeOptionalAdapters);
 
 		NeoForge.EVENT_BUS.register(this);
 
@@ -154,6 +160,37 @@ public class NeoClient {
 			() -> "reflection-success; sourceHandleState=" + registrationState(adapter));
 	}
 
+	/**
+	 * The Aero owner is resolved only after the Aeronautics mod-id check. It is
+	 * independent of the Create contraption route and does not require Flywheel.
+	 */
+	private static void loadAeronauticsPropellerRaycastAdapter() {
+		if (ModList.get().isLoaded("aeronautics")) {
+			registerOptionalAeronauticsPropellerRaycastAdapter();
+		} else {
+			logAeronauticsPropellerRaycastAdapterState("not-detected");
+		}
+	}
+
+	private static void registerOptionalAeronauticsPropellerRaycastAdapter() {
+		Class<?> adapter;
+		try {
+			LOG.atDebug().debug(() -> "optional adapter reflection attempt: adapter=aeronautics-propeller-raycast class="
+				+ AERONAUTICS_PROPELLER_RAYCAST_ADAPTER);
+			adapter = Class.forName(
+				AERONAUTICS_PROPELLER_RAYCAST_ADAPTER, true, NeoClient.class.getClassLoader());
+			aeronauticsPropellerRaycastAdapterResolved = true;
+			adapter.getMethod("register").invoke(null);
+		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
+			logAeronauticsPropellerRaycastAdapterState("reflection-failure; sourceHandleState=failed");
+			LOG.atNormal().rateLimited(ADAPTER_REGISTRATION).warn("optional-adapter-register", "adapter-registration-failed",
+				failure, () -> "adapter=aeronautics-propeller-raycast; class=" + AERONAUTICS_PROPELLER_RAYCAST_ADAPTER);
+			return;
+		}
+		logAeronauticsPropellerRaycastAdapterState("reflection-success",
+			() -> "reflection-success; sourceHandleState=" + registrationState(adapter));
+	}
+
 	private static void registerOptionalAdapter(String className, String adapterName, boolean entityAdapter) {
 		Class<?> adapter;
 		try {
@@ -213,6 +250,11 @@ public class NeoClient {
 		}
 	}
 
+	private static void closeOptionalAdapters() {
+		closeCreateAdapters();
+		closeAeronauticsPropellerRaycastAdapter();
+	}
+
 	private static void closeCreateAdapters() {
 		boolean createDetected = ModList.get().isLoaded("create");
 		boolean flywheelDetected = ModList.get().isLoaded("flywheel");
@@ -233,6 +275,31 @@ public class NeoClient {
 			closeOptionalAdapter(CREATE_FLYWHEEL_ADAPTER, "create-flywheel", false);
 		} else {
 			logAdapterState("create-flywheel", "not-detected");
+		}
+	}
+
+	private static void closeAeronauticsPropellerRaycastAdapter() {
+		if (ModList.get().isLoaded("aeronautics") || aeronauticsPropellerRaycastAdapterResolved) {
+			closeOptionalAeronauticsPropellerRaycastAdapter();
+		} else {
+			logAeronauticsPropellerRaycastAdapterState("not-detected");
+		}
+	}
+
+	private static void closeOptionalAeronauticsPropellerRaycastAdapter() {
+		try {
+			Class<?> adapter = Class.forName(
+				AERONAUTICS_PROPELLER_RAYCAST_ADAPTER, false, NeoClient.class.getClassLoader());
+			adapter.getMethod("close").invoke(null);
+			logAeronauticsPropellerRaycastAdapterState("closed; sourceHandleState=closed");
+		} catch (ClassNotFoundException ignored) {
+			logAeronauticsPropellerRaycastAdapterState("not-loaded");
+		} catch (ReflectiveOperationException | LinkageError | AssertionError failure) {
+			logAeronauticsPropellerRaycastAdapterState("close-failure; sourceHandleState=close-failure");
+			LOG.atNormal().rateLimited(ADAPTER_CLOSE).warn("optional-adapter-close", "adapter-teardown-failed",
+				failure, () -> "adapter=aeronautics-propeller-raycast; class=" + AERONAUTICS_PROPELLER_RAYCAST_ADAPTER);
+		} finally {
+			aeronauticsPropellerRaycastAdapterResolved = false;
 		}
 	}
 
@@ -271,6 +338,20 @@ public class NeoClient {
 				flywheelAdapterResolved = false;
 			}
 		}
+	}
+
+	private static void logAeronauticsPropellerRaycastAdapterState(String state) {
+		logAeronauticsPropellerRaycastAdapterState(state, () -> state);
+	}
+
+	private static void logAeronauticsPropellerRaycastAdapterState(String state, Supplier<String> description) {
+		if (state.equals(lastAeronauticsPropellerRaycastAdapterState)) {
+			return;
+		}
+		lastAeronauticsPropellerRaycastAdapterState = state;
+		LOG.atDetailed().site("optional-adapter-state").info(() ->
+			"optional source handle state transition: adapter=aeronautics-propeller-raycast state=" + description.get()
+				+ " aeronauticsDetected=" + ModList.get().isLoaded("aeronautics"));
 	}
 
 	private static void logAdapterState(String adapterName, String state) {
