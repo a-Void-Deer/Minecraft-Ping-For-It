@@ -6,6 +6,8 @@ Changes since the `1.21.1` baseline (`a51a850b`).
 
 ### Marker display and cancellation
 
+- When several markers expire or are replaced together, the HUD updates its
+  list once for the batch and keeps the remaining markers in display order.
 - **Follow Server** now uses server game time. Pausing a single-player game
   preserves the ping's remaining display time, and changing `/tick rate` while a
   ping is active no longer makes its display count down at the client tick rate.

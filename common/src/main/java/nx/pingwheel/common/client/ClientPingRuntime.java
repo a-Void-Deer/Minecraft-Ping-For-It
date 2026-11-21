@@ -2045,9 +2045,7 @@ public final class ClientPingRuntime {
 		// A fallback transition may only make a marker stale. Names remain until
 		// the independent display deadline causes the client record to be
 		// removed, so cleanup follows final record removal rather than sync loss.
-		for (ClientMarker marker : expired) {
-			forgetMarkerDisplay(marker.id());
-		}
+		forgetRemovedMarkers(expired);
 
 		logger.debug(() -> "marker client lifetime ended: count=" + expired.size()
 			+ " ids=" + expired.stream().map(marker -> Long.toString(marker.id().value())).toList()
@@ -2189,9 +2187,7 @@ public final class ClientPingRuntime {
 		if (snapshot == null || ownerName == null || markerStore.isAuthoritativelyRemoved(snapshot.id())) return;
 		boolean newlySeen = isNewMarkerReceipt(markerStore, snapshot.id());
 		@Unmodifiable List<ClientMarker> superseded = markerStore.onCreated(snapshot, localTick);
-		for (ClientMarker marker : superseded) {
-			forgetMarkerDisplay(marker.id());
-		}
+		forgetRemovedMarkers(superseded);
 		boolean inventoryKnown = inventory != null && inventory.trackingKind(snapshot.id()).isPresent();
 		if (inventory != null) inventory.markerCreated(snapshot, packet.markerGrant());
 		if (newlySeen) {
@@ -2407,10 +2403,11 @@ public final class ClientPingRuntime {
 
 		if (!knownBeforeRemoval) {
 			forgetMarkerDisplay(markerId);
-		}
-
-		for (ClientMarker removedMarker : removed) {
-			forgetMarkerDisplay(removedMarker.id());
+		} else {
+			// The store returns no removed records for an unknown id, so the
+			// unknown-id and removed-record paths are mutually exclusive: one
+			// logical removal event publishes at most one HUD snapshot.
+			forgetRemovedMarkers(removed);
 		}
 		if (reason == MarkerRemovalReason.EXPIRED && unping != null) {
 			dismissExpiredUnping(unping);
@@ -2420,12 +2417,40 @@ public final class ClientPingRuntime {
 	}
 
 	private void forgetMarkerDisplay(MarkerId id) {
+		notifyMarkerForgotten(id);
+		MarkerOverlayState.INSTANCE.forgetMarker(id);
+	}
+
+	/** Routes one removed record through the single path, otherwise publishes one batch snapshot. */
+	private void forgetRemovedMarkers(@Unmodifiable List<ClientMarker> markers) {
+		if (markers.isEmpty()) return;
+
+		if (markers.size() == 1) {
+			forgetMarkerDisplay(markers.get(0).id());
+			return;
+		}
+
+		forgetMarkerDisplays(markers.stream().map(ClientMarker::id).toList());
+	}
+
+	/** Applies the per-id notification cleanup, then removes every id from the overlay snapshot once. */
+	private void forgetMarkerDisplays(@Unmodifiable List<MarkerId> ids) {
+		Objects.requireNonNull(ids, "ids");
+		if (ids.isEmpty()) return;
+
+		for (MarkerId id : ids) {
+			notifyMarkerForgotten(id);
+		}
+
+		MarkerOverlayState.INSTANCE.forgetMarkers(ids);
+	}
+
+	private void notifyMarkerForgotten(MarkerId id) {
 		pendingUnpings.remove(id);
 		contentChat.cancel(id);
 		nameStore.onRemoved(id);
 		presentation.evict(id);
 		if (inventory != null) inventory.markerRemoved(id);
-		MarkerOverlayState.INSTANCE.forgetMarker(id);
 	}
 
 	/**
@@ -2436,9 +2461,7 @@ public final class ClientPingRuntime {
 		Objects.requireNonNull(winnerId, "winnerId");
 
 		@Unmodifiable List<ClientMarker> superseded = markerStore.onWinnerChanged(targetKey, winnerId);
-		for (ClientMarker marker : superseded) {
-			forgetMarkerDisplay(marker.id());
-		}
+		forgetRemovedMarkers(superseded);
 
 		logger.debug(() -> "marker winner applied: kind=" + targetKindOf(targetKey)
 			+ " winner=" + winnerId.map(id -> Long.toString(id.value())).orElse("none"));
