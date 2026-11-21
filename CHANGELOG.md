@@ -21,6 +21,9 @@ Changes since the `1.21.1` baseline (`a51a850b`).
   farther ping. If you weren't aiming at one of your own pings when you pressed,
   confirming Unping does nothing. See
   [Cancel Marker selection](docs/architecture/picking/wheel.md#cancel-marker-selection).
+- When Unping locks its target, it looks up all your UUID-marked entities in
+  at most one pass over the loaded entities. A new press still uses their
+  current positions, even within the same tick.
 - Internal marker helpers now distinguish server game time from custom display
   ticks, and HUD winner selection from outline selection. The old numeric-only
   duration and shared winner helpers have been removed.

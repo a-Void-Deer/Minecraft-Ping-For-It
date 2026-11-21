@@ -1,7 +1,6 @@
 package nx.pingwheel.common.client;
 
 import java.time.Duration;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.LinkedHashMap;
@@ -30,7 +29,6 @@ import net.minecraft.world.phys.Vec3;
 
 import nx.pingwheel.common.client.marker.ClientMarker;
 import nx.pingwheel.common.client.marker.ClientMarkerStore;
-import nx.pingwheel.common.client.marker.EntityMarkerPoint;
 import nx.pingwheel.common.client.marker.MarkerOverlayState;
 import nx.pingwheel.common.client.marker.ObservedServerClock;
 import nx.pingwheel.common.presentation.client.ClientPresentation;
@@ -1967,15 +1965,24 @@ public final class ClientPingRuntime {
 
 		UUID ownerId = player.getUUID();
 		String dimensionId = level.dimension().location().toString();
-		// UUID lookup scans the current level's rendering entities. Share only
-		// the live result (including unavailability), never a marker's fallback.
-		Map<EntityLocator.UUID, Optional<WorldVector>> liveUuidSamples = new HashMap<>();
-		Function<EntityLocator, Optional<WorldVector>> livePositions = locator -> locator instanceof EntityLocator.UUID uuid
-			? liveUuidSamples.computeIfAbsent(uuid, ClientPingRuntime::liveMarkerEntityPosition)
-			: liveMarkerEntityPosition(locator);
-		@Unmodifiable List<CancelMarkerCandidate> candidates = markerStore
-			.markersOwnedInDimension(dimensionId, ownerId)
-			.stream()
+		@Unmodifiable List<ClientMarker> markers = markerStore.markersOwnedInDimension(dimensionId, ownerId);
+
+		if (markers.isEmpty()) {
+			return new CancellationContext(ownerId, dimensionId, ray.origin(), ray.direction(), List.of());
+		}
+
+		// One capture-local pass resolves each distinct UUID target to its first
+		// raw rendering-entity match. Only available live points are kept; a
+		// missing key falls back per marker and never re-enters GameContext.
+		@Unmodifiable Map<UUID, WorldVector> liveUuidSamples =
+			LiveMarkerEntitySamples.sampleUuids(level, markers);
+		// UUID locators reuse that capture-local map. Runtime-id experience orbs
+		// retain their per-candidate direct integer lookup and sampling.
+		Function<EntityLocator, Optional<WorldVector>> livePositions = locator ->
+			locator instanceof EntityLocator.UUID uuid
+				? Optional.ofNullable(liveUuidSamples.get(uuid.value()))
+				: liveMarkerEntityPosition(locator);
+		@Unmodifiable List<CancelMarkerCandidate> candidates = markers.stream()
 			.map(marker -> new CancelMarkerCandidate(
 				marker.id(),
 				ownerId,
@@ -2025,12 +2032,7 @@ public final class ClientPingRuntime {
 	private static Optional<WorldVector> liveMarkerEntityPosition(EntityLocator locator) {
 		// GameContext searches only the current level and preserves the distinct
 		// UUID and experience-orb runtime-id lookup rules.
-		@Nullable Entity entity = GameContext.getEntity(locator);
-		if (entity == null || entity.isRemoved()) return Optional.empty();
-
-		// Use the outline's trusted top-center geometry at the current tick.
-		@Nullable Vec3 topCenter = EntityMarkerPoint.forLiveEntity(entity, 1.0F);
-		return topCenter == null ? Optional.empty() : Optional.of(new WorldVector(topCenter.x, topCenter.y, topCenter.z));
+		return LiveMarkerEntitySamples.sample(GameContext.getEntity(locator));
 	}
 
 	private void expireFallbackMarkers() {
