@@ -64,7 +64,5 @@ The optional Create entity-outline dispatcher applies the parent placement once
 around the renderer's own local model; its placement and failure outcome are
 owned by [Create](create.md#contraption-and-package-dispatch).
 
-Automated coverage is inventoried in
-[integration verification](../testing/verification/integrations.md#aeronautics-rotor-coverage);
-the [pending manual matrix](../testing/verification/manual-integration.md#aeronautics-rotors)
-owns live normal/gyro, world/sublevel, multiplayer and performance scenarios.
+See [Aeronautics rotor coverage](../testing/verification/integrations.md#aeronautics-rotor-coverage)
+for the automated checks and their limits.

@@ -136,5 +136,3 @@ Source-reviewed coverage and known gaps are inventoried in
 [interaction verification](../../testing/verification/interaction.md#double-click-danger-and-inventory-stay-open);
 that inventory is not exhaustive. Configuration evidence is inventoried under
 [configuration verification](../../testing/verification/configuration-ui.md#double-click-danger-and-inventory-stay-open-configuration).
-Live scenarios remain pending in the
-[manual and integration matrix](../../testing/verification/manual-integration.md#pending-manual-and-integration-matrix).

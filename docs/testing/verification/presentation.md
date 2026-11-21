@@ -362,8 +362,7 @@ require the accepted `RESET` mask and advertised/fresh child union; and content
 updates under current source, session, schema, expiry and resource gates with
 source-read revocation still rejecting. The
 [immediate creation snapshot coverage](#immediate-inventory-creation-snapshot-coverage)
-records that path's historical scope. The live scenarios remain pending in the
-[manual matrix](manual-integration.md#frozen-recipient-authorization-and-provider-trust).
+records that path's historical scope.
 
 ## Names and chat
 

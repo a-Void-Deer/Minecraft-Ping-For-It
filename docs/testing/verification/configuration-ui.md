@@ -436,9 +436,7 @@ The
 have catalog, navigation, model, mounted-screen and localization coverage, not a
 live-screen or multiplayer acceptance record. Production sampling and client
 runtime evidence are owned by
-[inventory verification](inventory.md#performance-monitoring-coverage-and-production-evidence);
-live scenarios remain in the
-[manual performance-monitor matrix](manual-integration.md#performance-monitor).
+[inventory verification](inventory.md#performance-monitoring-coverage-and-production-evidence).
 
 `SettingsCategoryCatalogTest` fixes the production catalog totals and places one
 conditional Performance monitor subgroup at the end of each Debug category,
@@ -487,10 +485,8 @@ replace settings full names or selector text. The full
 Common task is part of the
 [HUD UX whole-tree run](build-checks.md#hud-ux-final-whole-tree-verification);
 the disabled-path allocation boundary is owned by
-[inventory HUD UX redesign coverage](inventory.md#hud-ux-redesign-coverage). Live
-screen, native font and locale checks remain in the
-[manual matrix](manual-integration.md#performance-monitor). The projection
-contract is
+[inventory HUD UX redesign coverage](inventory.md#hud-ux-redesign-coverage). The
+projection contract is
 [HUD projection and presentation](../../architecture/presentation/inventory.md#hud-projection-and-presentation).
 
 ## Server performance contract verification
@@ -792,9 +788,7 @@ delivery, or wrapping.
   that screen's mouse dispatch, assembled localized tooltip layout, translation
   quality without native-speaker review, rendered legibility or feel of closely
   spaced slider stops, or a remote persistence session; native widget callbacks
-  are exercised headlessly without a real window, GLFW delivery or gameplay.
-  Execution evidence is scoped separately, and live scenarios remain in the
-  [manual matrix](manual-integration.md#settings-and-server-performance);
+  are exercised headlessly without a real window, GLFW delivery or gameplay;
 - the assembled live screen coverage for the client inventory-cap sliders, the
   gesture controls' OFF/disabled presentation and live compatibility refresh, a
   constructed screen's disabled state and complete zero-angle off label, the
@@ -804,8 +798,6 @@ delivery, or wrapping.
   or screen-close persistence, or assemble the complete localized Follow or
   explicit-duration label, whose form is owned by
   [configuration UI](../../UI/settings-screen.md#marker-display-duration-option);
-  pending native screen checks remain in the
-  [manual matrix](manual-integration.md#pending-manual-and-integration-matrix);
 - inventory administration and spatial-selector configuration have model,
   persistence, strict wire, draft, catalog and focus-helper seams; live
   administration, screen-level input and focus, permission changes, persistence,
@@ -819,5 +811,5 @@ delivery, or wrapping.
   multiplayer persistence remain unexercised. Production sampling and HUD
   evidence is under
   [inventory verification](inventory.md#performance-monitoring-coverage-and-production-evidence),
-  and live scenarios remain in the
-  [manual matrix](manual-integration.md#performance-monitor).
+  which also owns the
+  [pending production test matrix](inventory.md#pending-production-test-matrix).

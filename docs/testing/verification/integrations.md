@@ -277,11 +277,10 @@ Common identity, wire and source-gate coverage is inventoried under
 [identity authority](identity-authority.md#logical-container-identity-and-authority),
 [presentation transport](presentation.md#logical-target-wire-coverage) and
 [container rendering](rendering.md#container-presentation-subjects). Installed
-Create synchronization, GPU shell appearance, multiplayer and tank topology
-split/merge remain in the [logical container pending
-matrix](manual-integration.md#logical-container-targets-and-whole-presentation);
-performance remains in the [fluid inventory pending
-matrix](manual-integration.md#fluid-inventory).
+Create synchronization, GPU shell appearance, multiplayer, tank topology
+split/merge and the live tank performance comparison are not established by
+these headless seams; the fluid inventory performance boundary is recorded in
+[fluid inventory coverage](inventory.md#fluid-inventory-coverage).
 
 ## Native fluid presentation
 
@@ -367,9 +366,7 @@ or Flywheel in a launched game, apply an actual Aeronautics virtual transform,
 or establish live normal/gyro, sublevel, marker, outline, content, multiplayer,
 unload or performance behavior. Source/API review covered Sable `2.0.5`/`2.0.6`,
 Sable Companion `1.6.0`, Aeronautics `1.3.2` and Create `6.0.10`; the installed
-runtime combination is unknown, not certified by these seams. The
-[manual matrix](manual-integration.md#aeronautics-rotors) requires the installed
-versions to be recorded.
+runtime combination is unknown, not certified by these seams.
 
 ## Sable integration coverage
 

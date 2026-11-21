@@ -294,9 +294,7 @@ Their display states, including local-row continuity on lost authority, are
 owned by [HUD projection and
 presentation](../architecture/presentation/inventory.md#hud-projection-and-presentation).
 
-Manual scenarios remain pending in the
-[manual performance-monitor matrix](../testing/verification/manual-integration.md#performance-monitor);
-automated coverage and final combined-tree acceptance are recorded in
+Automated coverage and final combined-tree acceptance are recorded in
 [configuration verification](../testing/verification/configuration-ui.md#performance-monitor-coverage).
 
 ## Server performance category
@@ -541,8 +539,10 @@ determines the reset result;
 [configuration revisioning](../architecture/config/revisioning.md) owns handler
 protection and persistence policy.
 
-Pending manual external-edit and UI checks are in the
-[verification matrix](../testing/verification/manual-integration.md#pending-manual-and-integration-matrix).
+Headless settings-screen input, close, external-replacement and reset coverage is
+under
+[assembled settings-screen input and close coverage](../testing/verification/configuration-ui.md#assembled-settings-screen-input-and-close-coverage);
+live external-edit and UI behavior is outside that evidence.
 
 ## Evidence boundary
 

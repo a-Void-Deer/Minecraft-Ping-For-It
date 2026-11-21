@@ -511,10 +511,13 @@ commit or current-tree input, and its passing result is not a whole-tree rerun.
 The frozen-authorization Create path still discovers the full initial target
 structure; its automated operation-count assertions are current-check counts, not
 a live FPS or allocation improvement. The optional dedicated-provider SPI remains
-future work and is not claimed. Live delivery/repair, a member not
-`HELLO`-ready at create, true disconnect, source-read revocation and reconnect
-remain pending in the
-[manual matrix](manual-integration.md#frozen-recipient-authorization-and-provider-trust).
+future work and is not claimed. The 2026-11-07 acceptance run provides no
+live-session evidence for delivery or repair (including later delivery to a
+member not `HELLO`-ready at create), true disconnect, source-read revocation or
+reconnect. See
+[identity and authority](identity-authority.md#frozen-recipient-authorization-coverage-and-live-gaps)
+and [presentation](presentation.md#frozen-recipient-content-authorization-coverage-and-live-gaps)
+for the frozen-authorization live gaps.
 
 #### ITEM redundant-work final verification
 

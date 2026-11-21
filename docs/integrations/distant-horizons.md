@@ -28,5 +28,4 @@ replacement. If the retired cache has no readers, that trace attempts cleanup;
 otherwise the last reader attempt clearing it when it finishes. This cleanup applies
 even if the replacement cannot be created.
 
-See [automated trace and cache coverage](../testing/verification/interaction.md#capture-and-acceptance-range)
-and [pending in-game checks](../testing/verification/manual-integration.md#distant-horizons).
+See [automated trace and cache coverage](../testing/verification/interaction.md#capture-and-acceptance-range).

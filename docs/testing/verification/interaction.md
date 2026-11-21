@@ -117,7 +117,7 @@ The fallback-only case receives `CANCELLED`; it does not exercise a rejection
 of that `REMOVE`. These port tests do not exercise real input delivery,
 transport, server adjudication or multiplayer, or the separate natural-expiry
 eviction and same-ID replay path. The live press-edge and moving-target scenario
-remains pending in the [manual matrix](manual-integration.md#wheel).
+is outside these port tests' evidence.
 
 ### Gesture shortcut opening
 
@@ -139,9 +139,7 @@ enabling during a pending gesture. The alternative-eligibility cases in
 `PingInteractionStateMachineTest` cover capture readiness, held present, token
 ownership, release precedence and abort. This is headless input-model,
 runtime-port and state-machine evidence, not live camera, rebound-key delivery,
-GLFW ownership or loader gameplay; the
-[manual gesture scenarios](manual-integration.md#pending-manual-and-integration-matrix)
-remain pending. Configuration persistence is under
+GLFW ownership or loader gameplay. Configuration persistence is under
 [configuration verification](configuration-ui.md#inventory-and-spatial-selector-configuration).
 
 ## Precise live candidate capture
@@ -253,8 +251,7 @@ scanner pass-through and selection of a target behind the matching block.
 These fixtures supply IDs through a resolver seam; no unit test uses actual
 loaded Cyclic blocks through the registry resolver. The ordinary world-clip
 route has source and bytecode review, not end-to-end test coverage. No live
-Cyclic or TIAB validation is recorded; the scenarios remain in the
-[manual matrix](manual-integration.md#cyclic-and-tiab-selection).
+Cyclic or TIAB validation is recorded.
 
 The blacklist is distinct from block whitelist, block-shape and display-blacklist
 behavior, and is not raycast-filter coverage: spectator exclusion is implemented
@@ -597,9 +594,7 @@ option-codec and locale coverage is under
 These are headless model, controller, runtime-port, session and mixin-contract
 seams. They do not establish native callback delivery, Mixin application,
 constructed or rendered settings screens, assembled locale labels, GPU
-submission, loader gameplay or multiplayer behavior; the pending live scenarios
-remain in the
-[manual matrix](manual-integration.md#pending-manual-and-integration-matrix).
+submission, loader gameplay or multiplayer behavior.
 
 ## Known automated gaps
 

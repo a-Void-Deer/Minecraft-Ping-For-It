@@ -520,5 +520,4 @@ target; only presentation selects the master rendering form.
 ## Verification boundary
 
 Build and automated-coverage evidence is owned by
-[verification](../testing/verification/integrations.md#create-presentation-adapters), including the
-[pending Create gameplay and performance scenarios](../testing/verification/manual-integration.md#pending-manual-and-integration-matrix).
+[verification](../testing/verification/integrations.md#create-presentation-adapters).
