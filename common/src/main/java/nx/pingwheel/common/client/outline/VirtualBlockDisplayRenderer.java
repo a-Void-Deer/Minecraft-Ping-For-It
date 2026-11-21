@@ -384,23 +384,27 @@ public final class VirtualBlockDisplayRenderer {
 					ClientConfig.HANDLER.getConfig().getEntityBlockRenderMode();
 				// The runner never evaluates this factory in shape-only mode. A
 				// missing resident BE affects BER, not an eligible baked model.
-				Supplier<EntityBlockGeometryContext> contextFactory = () -> new EntityBlockGeometryContext(
+				Supplier<EntityBlockGeometryContext> contextFactory = () -> {
+					ExternalBlockReadView view = presentation.view();
+					return new EntityBlockGeometryContext(
 						level,
 						pos,
 						blockState,
-						presentation.view().getBlockEntity(pos),
+						view.getBlockEntity(pos),
 						spec.argbColor(),
 						cameraPosition,
 						builtInPartialTick,
 						flywheelPartialTick,
-						LevelRenderer.getLightColor(level, pos),
+						LevelRenderer.getLightColor(new ExternalBlockRenderView(view, level), blockState, pos),
 						entityDispatcher,
 						blockEntityDispatcher,
 						Minecraft.getInstance().levelRenderer,
 						spec.blockKey(),
 						renderType,
 						frameId,
-						presentation.transform());
+						presentation.transform(),
+						view);
+				};
 				return outcomeObserver == null
 					? entityBlockGeometryRunner.run(mode, contextFactory)
 					: entityBlockGeometryRunner.run(mode, contextFactory, outcomeObserver);

@@ -73,6 +73,9 @@ Changes since the `1.21.1` baseline (`a51a850b`).
 - When you ping a Sable block, the server checks range and updates the marker
   using the block's own sub-level, not a position in another sub-level. See
   [Sable server validation](docs/integrations/sable.md#server-validation-and-materialization).
+- Baked outlines on a Sable sub-level now read the model and its neighbors
+  through the same loaded plot. On NeoForge, lighting the upper half of a Create
+  andesite door at the top of the plot no longer samples the block above it.
 
 ### Precise target selection
 

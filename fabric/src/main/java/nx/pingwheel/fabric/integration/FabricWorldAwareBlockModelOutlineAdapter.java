@@ -1,15 +1,15 @@
 package nx.pingwheel.fabric.integration;
 
+import java.util.Objects;
+
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.block.BlockRenderDispatcher;
 import net.minecraft.client.renderer.texture.TextureAtlas;
 import net.minecraft.core.BlockPos;
 import net.minecraft.util.RandomSource;
-import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import nx.pingwheel.common.client.outline.EntityBlockGeometryContext;
@@ -17,6 +17,7 @@ import nx.pingwheel.common.client.outline.EntityBlockGeometryTransform;
 import nx.pingwheel.common.client.outline.OutlineOnlyBufferSource;
 import nx.pingwheel.common.client.outline.WorldAwareBlockModelOutlineAdapter;
 import nx.pingwheel.common.client.outline.WorldAwareBlockModelOutlineAdapterRegistry;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Fabric's generic world-aware baked-model backend for entity-block outlines.
@@ -64,31 +65,14 @@ public final class FabricWorldAwareBlockModelOutlineAdapter
 	}
 
 	@Override
-	public boolean handles(EntityBlockGeometryContext context) {
-		if (context == null) {
-			return false;
-		}
-
-		ClientLevel level = context.level();
-		BlockPos pos = context.blockPos();
-		BlockState state = context.blockState();
-		if (level == null || pos == null || state == null
-			|| state.getRenderShape() != RenderShape.MODEL
-			|| !level.hasChunkAt(pos)) {
-			return false;
-		}
-
-		// A provider context may use a local level, but the state still has to be
-		// the live block type at the supplied position before world rendering.
-		BlockState liveState = level.getBlockState(pos);
-		return liveState != null && liveState.getBlock() == state.getBlock();
+	public boolean handles(@Nullable EntityBlockGeometryContext context) {
+		return context != null && context.hasLiveBakedModelState();
 	}
 
 	@Override
 	public void render(EntityBlockGeometryContext context, OutlineOnlyBufferSource buffer) {
-		ClientLevel level = context.level();
-		BlockPos pos = context.blockPos();
-		BlockState state = context.blockState();
+		BlockPos pos = Objects.requireNonNull(context.blockPos());
+		BlockState state = Objects.requireNonNull(context.blockState());
 		Vec3 cameraPosition = context.cameraPosition();
 		PoseStack poseStack = createPoseStack(context, pos, cameraPosition);
 		BlockRenderDispatcher dispatcher = Minecraft.getInstance().getBlockRenderer();
@@ -97,7 +81,7 @@ public final class FabricWorldAwareBlockModelOutlineAdapter
 		dispatcher.renderBatched(
 			state,
 			pos,
-			level,
+			context.bakedModelView(),
 			poseStack,
 			consumer,
 			false,
