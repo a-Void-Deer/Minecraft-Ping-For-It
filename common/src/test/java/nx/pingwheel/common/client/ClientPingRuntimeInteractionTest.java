@@ -123,6 +123,7 @@ class ClientPingRuntimeInteractionTest {
 	private static final class Access implements ClientPingRuntime.InteractionAccess {
 		Object world = new Object(), screen;
 		boolean player = true, focus = true, overlay, grabbed = true, pending, validFrame = true, distantPending, preciseIncomplete, nativeOwned = true;
+		boolean attachAcquisition = true;
 		String dimension = DIMENSION;
 		int captures, cancellationSamples, resets, disposals;
 		boolean screenDisposal;
@@ -151,7 +152,9 @@ class ClientPingRuntimeInteractionTest {
 				.map(value -> new CandidateEvidence(value, FrozenCandidateAcquisition.distance(pressRay.origin(), value.candidateHit().orElseThrow().worldHit()))).toList();
 			var acquisition = new FrozenCandidateAcquisition(token, pressRay, 100, new WorldVector(1, 2, 3), evidence,
 				Set.of(PreciseTargetType.values()));
-			Runnable apply = () -> completion.complete(frozen, Optional.of(acquisition));
+			Optional<FrozenCandidateAcquisition> candidates = attachAcquisition
+				? Optional.of(acquisition) : Optional.empty();
+			Runnable apply = () -> completion.complete(frozen, candidates);
 			completions.add(apply);
 			if (!pending) apply.run();
 		}
@@ -1331,6 +1334,18 @@ class ClientPingRuntimeInteractionTest {
 		assertEquals("attention", f.creates().getFirst().pingType());
 		assertEquals(1, f.validations.size());
 	}
+
+	@Test void selectorsOpenAndReleaseTheFrozenTargetWithoutPressTimeCandidateEvidence() {
+		Fixture f = new Fixture();
+		f.access.attachAcquisition = false;
+		f.press(0); f.frame(250, true);
+		assertTrue(f.runtime.selectorSnapshot().isPresent(), "an ordinary capture without supplements still opens the selector");
+		f.prime(); f.enter("intent", 260); f.focus("intent:attention", 460); f.release(470);
+		assertEquals(1, f.creates().size());
+		assertEquals(CHEST.target(), f.creates().getFirst().target());
+		assertEquals("attention", f.creates().getFirst().pingType());
+	}
+
 	@Test void broadEntitySlotKeepsBehindDroppedItemSeparateFromOrdinaryDroppedItem() {
 		Fixture front = new Fixture(); front.access.snapshot = ITEM; front.access.supplements = List.of(BEHIND_ITEM);
 		front.press(0); front.frame(250, true); front.prime(); front.enter("precise", 260);

@@ -1804,9 +1804,9 @@ public final class ClientPingRuntime {
 			pressRay.direction().z());
 
 		var distance = selectorNativeDistance;
-		var trace = Raycast.traceDirectionalCandidates(token, pressRay, distance, selectorPingDistance, selectorPolicy);
-		var raycastSelection = trace.map(Raycast.SelectorTrace::ordinarySelection);
-		Optional<FrozenCandidateAcquisition> acquisition = trace.flatMap(Raycast.SelectorTrace::candidates);
+		// Ordinary capture uses only its frozen native segment; Precise supplements are live-only.
+		var raycastSelection = Raycast.traceDirectionalDetailed(rayOrigin, cameraDirection, distance, selectorPolicy);
+		Optional<FrozenCandidateAcquisition> acquisition = Optional.empty();
 		@Nullable HitResult hitResult = raycastSelection.map(nx.pingwheel.common.math.RaycastSelection::hitResult).orElse(null);
 
 		if (hitResult == null || hitResult.getType() == HitResult.Type.MISS) {

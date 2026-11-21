@@ -36,6 +36,9 @@ Changes since the `1.21.1` baseline (`a51a850b`).
 
 ### Ping range and target selection
 
+- An ordinary Ping no longer scans the full `pingDistance` for Precise targets.
+  It uses the native trace capped at `min(raycastDistance, pingDistance)`;
+  entering Precise still searches the full configured Ping range.
 - When your eye is inside an entity's selection box, ordinary Ping and Precise
   can select it if the box's center is within 60° of your aim. Entities with
   exact picking geometry still use their actual shapes.

@@ -39,14 +39,17 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import nx.pingwheel.common.CommonClient;
 import nx.pingwheel.common.client.spatial.PreciseCaptureRefresh;
+import nx.pingwheel.common.domain.BlockFace;
 import nx.pingwheel.common.domain.Target;
 import nx.pingwheel.common.integration.ModContext;
 import nx.pingwheel.common.interaction.ActiveInteraction;
 import nx.pingwheel.common.interaction.CapturedRay;
 import nx.pingwheel.common.interaction.InteractionToken;
+import nx.pingwheel.common.interaction.TargetSnapshot;
 import nx.pingwheel.common.interaction.cancel.WorldVector;
 import nx.pingwheel.common.interaction.candidate.CandidateBlockCapture;
 import nx.pingwheel.common.interaction.candidate.CandidateCollector;
+import nx.pingwheel.common.interaction.candidate.PreciseTargetType;
 import nx.pingwheel.common.math.Raycast;
 import nx.pingwheel.common.math.RaycastPolicy;
 import nx.pingwheel.common.topology.DoubleChestFixture;
@@ -241,6 +244,80 @@ class ClientPingRuntimeNativeRangeTest {
 		assertEquals(hit.getLocation(), trace.ordinarySelection().worldPoint().orElseThrow());
 	}
 
+	@Test
+	void ordinaryShortPressStaysAtTheNativeSegmentWhilePreciseStillReachesThePingRange() throws Exception {
+		var level = DoubleChestFixture.allocate(TestLevel.class);
+		level.stone = new BlockPos(0, 64, 20);
+		Vec3 eye = new Vec3(0.25, 64.5, 0.25);
+		var ray = new CapturedRay(world(eye), new WorldVector(0.0, 0.0, 1.0));
+		var runtime = pressRuntime(level, 8, 1024);
+		var token = freshToken(runtime);
+
+		TargetSnapshot ordinary = ordinaryCapture(runtime, token, ray);
+		Target.LocationTarget location = assertInstanceOf(Target.LocationTarget.class, ordinary.target());
+		assertEquals(eye.z + 8.0, location.z(), "the ordinary capture stops at the frozen native segment");
+		assertTrue(level.farthestBlockReadZ <= eye.z + 8.0 + 1.0,
+			"ordinary capture must not read block cells across the full Ping range");
+		assertTrue(level.farthestLoadedZ <= eye.z + 8.0 + 1.0,
+			"ordinary capture must not run the supplemental loaded-cell scan");
+		assertTrue(level.loadedViews <= 1, "ordinary capture must not add the supplemental loaded-entity walk");
+
+		var scan = preciseScan(runtime, token, level, ray, 8, 1024);
+		var block = scan.nativeSlots().get(PreciseTargetType.BLOCK).candidate().orElseThrow();
+		assertEquals(new Target.BlockTarget("minecraft:overworld", 0, 64, 20, "minecraft:stone"),
+			block.resolvedTarget().target(), "the live Precise scan still uses the hold-frozen Ping range");
+	}
+
+	@Test
+	void ordinaryShortPressKeepsTheNativeBlockFaceInsideTheEffectiveSegment() throws Exception {
+		var level = DoubleChestFixture.allocate(TestLevel.class);
+		var stone = new BlockPos(0, 64, 4);
+		level.stone = stone;
+		Vec3 eye = new Vec3(0.25, 64.5, 0.25);
+		var ray = new CapturedRay(world(eye), new WorldVector(0.0, 0.0, 1.0));
+		var runtime = pressRuntime(level, 8, 1024);
+		var token = freshToken(runtime);
+
+		TargetSnapshot ordinary = ordinaryCapture(runtime, token, ray);
+		assertEquals(new Target.BlockTarget("minecraft:overworld", 0, 64, 4, "minecraft:stone"), ordinary.target());
+		assertEquals(BlockFace.NORTH, ordinary.blockHitFace().orElseThrow());
+		assertTrue(level.farthestBlockReadZ <= stone.getZ() + 1.0,
+			"no block read may reach into the supplemental Ping range");
+		assertTrue(level.farthestLoadedZ <= stone.getZ() + 1.0,
+			"no loaded-cell check may reach into the supplemental Ping range");
+	}
+
+	private static ClientPingRuntime pressRuntime(TestLevel level, int nativeDistance, int pingDistance)
+		throws ReflectiveOperationException {
+		var game = DoubleChestFixture.allocate(TestGame.class);
+		game.level = level;
+		game.cameraEntity = new Camera(level);
+		CommonClient.Game = game;
+		var runtime = ClientPingRuntime.create((key, color) -> fail(key), packet -> fail("unexpected packet"));
+		set(runtime, "selectorNativeDistance", (double) nativeDistance);
+		set(runtime, "selectorPingDistance", (double) pingDistance);
+		set(runtime, "selectorPolicy", POLICY);
+		return runtime;
+	}
+
+	private static InteractionToken freshToken(ClientPingRuntime runtime) throws ReflectiveOperationException {
+		var activeField = ClientPingRuntime.class.getDeclaredField("activeInteraction");
+		activeField.setAccessible(true);
+		var active = (ActiveInteraction) Objects.requireNonNull(activeField.get(runtime));
+		var token = active.begin();
+		set(runtime, "baselineToken", token);
+		return token;
+	}
+
+	private static PreciseCaptureRefresh.Scan preciseScan(ClientPingRuntime runtime, InteractionToken token,
+		TestLevel level, CapturedRay ray, int nativeDistance, int pingDistance) throws ReflectiveOperationException {
+		var capture = ClientPingRuntime.class.getDeclaredMethod("capturePreciseNative", PreciseCaptureRefresh.Request.class);
+		capture.setAccessible(true);
+		var request = new PreciseCaptureRefresh.Request(1,
+			new PreciseCaptureRefresh.Inputs(token, level, ray, POLICY, nativeDistance, pingDistance));
+		return (PreciseCaptureRefresh.Scan) Objects.requireNonNull(capture.invoke(runtime, request));
+	}
+
 	private static void assertBounded(Vec3 eye, Vec3 direction, Vec3 endpoint, int range) {
 		assertTrue(eye.distanceToSqr(endpoint) <= (double) range * range, "the strict squared limit accepts the represented point");
 		assertTrue(eye.distanceTo(endpoint) >= range - 1e-6, "capture should still reach the boundary to world-coordinate precision");
@@ -249,12 +326,20 @@ class ClientPingRuntimeNativeRangeTest {
 
 	private static Target.LocationTarget ordinaryMiss(ClientPingRuntime runtime, InteractionToken token, CapturedRay ray)
 		throws ReflectiveOperationException {
+		return assertInstanceOf(Target.LocationTarget.class, ordinaryCapture(runtime, token, ray).target());
+	}
+
+	private static TargetSnapshot ordinaryCapture(ClientPingRuntime runtime, InteractionToken token, CapturedRay ray)
+		throws ReflectiveOperationException {
 		var capture = ClientPingRuntime.class.getDeclaredMethod("captureImmediately", InteractionToken.class, CapturedRay.class,
 			ClientPingRuntime.CaptureCompletion.class);
 		capture.setAccessible(true);
-		var result = new AtomicReference<Target>();
-		capture.invoke(runtime, token, ray, (ClientPingRuntime.CaptureCompletion) (snapshot, candidates) -> result.set(snapshot.target()));
-		return assertInstanceOf(Target.LocationTarget.class, result.get());
+		var result = new AtomicReference<TargetSnapshot>();
+		capture.invoke(runtime, token, ray, (ClientPingRuntime.CaptureCompletion) (snapshot, candidates) -> {
+			assertTrue(candidates.isEmpty(), "an ordinary press must not freeze selector supplements");
+			result.set(snapshot);
+		});
+		return Objects.requireNonNull(result.get());
 	}
 
 	private static void set(ClientPingRuntime runtime, String name, Object value) throws ReflectiveOperationException {
@@ -280,14 +365,24 @@ class ClientPingRuntimeNativeRangeTest {
 	@NotNullByDefault
 	private static final class TestLevel extends ClientLevel {
 		private @Nullable BlockPos stone;
+		private int loadedViews;
+		private double farthestBlockReadZ;
+		private double farthestLoadedZ;
 
 		private TestLevel() { super(null, null, null, null, 0, 0, null, null, false, 0); }
 		@Override public ResourceKey<Level> dimension() { return OVERWORLD; }
 		@Override public @Unmodifiable List<Entity> getEntities(@Nullable Entity except, AABB bounds,
 			Predicate<? super Entity> filter) { return List.of(); }
-		@Override public @Unmodifiable Iterable<Entity> entitiesForRendering() { return List.of(); }
-		@Override public boolean isLoaded(BlockPos pos) { return true; }
+		@Override public @Unmodifiable Iterable<Entity> entitiesForRendering() {
+			loadedViews++;
+			return List.of();
+		}
+		@Override public boolean isLoaded(BlockPos pos) {
+			farthestLoadedZ = Math.max(farthestLoadedZ, pos.getZ());
+			return true;
+		}
 		@Override public BlockState getBlockState(BlockPos pos) {
+			farthestBlockReadZ = Math.max(farthestBlockReadZ, pos.getZ());
 			return (pos.equals(stone) ? Blocks.STONE : Blocks.AIR).defaultBlockState();
 		}
 		@Override public FluidState getFluidState(BlockPos pos) { return Fluids.EMPTY.defaultFluidState(); }
